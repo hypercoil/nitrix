@@ -18,13 +18,14 @@ def tests(session):
         'tests/',
     )
     session.run('ruff', 'check', 'src/nitrix')
+    session.run('ruff', 'format', '--check', 'src/nitrix')
 
 @nox.session()
 def report(session):
     session.install('coverage[toml]')
     session.run(
         'coverage',
-        'report', '--fail-under=90',
+        'report', '--fail-under=99',
         "--omit='*test*,*__init__*'",
     )
     session.run(

@@ -4,7 +4,9 @@
 """
 Residualise tensor block via least squares.
 """
+
 from __future__ import annotations
+
 from typing import Callable, Literal
 
 import jax.numpy as jnp
@@ -46,8 +48,8 @@ def document_linreg(f: Callable) -> Callable:
     regress_param_spec = """
     rowvar : bool (default True)
         Indicates that the last axis of the input tensor is the observation
-        axis and the penultimate axis is the variable axis. If False, then this
-        relationship is transposed.
+        axis and the penultimate axis is the variable axis. If False, then
+        this relationship is transposed.
     l2 : float (default 0.0)
         L2 regularisation parameter. If non-zero, the least-squares solution
         will be regularised by adding a penalty term to the cost function.
@@ -120,4 +122,4 @@ def residualise(
     elif return_mode == 'projection':
         return proj
     else:
-        raise ValueError(f"Invalid return_mode: {return_mode}")
+        raise ValueError(f'Invalid return_mode: {return_mode}')

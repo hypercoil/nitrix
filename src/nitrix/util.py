@@ -4,7 +4,9 @@
 """
 Miscellaneous utility functions for tensor manipulation.
 """
+
 from __future__ import annotations
+
 from functools import partial, reduce
 from typing import (
     Any,
@@ -180,7 +182,10 @@ def unfold_axes(tensor: Tensor, axes: Union[int, Tuple[int, ...]]) -> Tensor:
 
     This function will fail if the specified axes are not consecutive.
     """
-    def _prod(x, y): return x * y
+
+    def _prod(x, y):
+        return x * y
+
     if isinstance(axes, int):
         return tensor
     shape = tensor.shape
@@ -283,7 +288,7 @@ def apply_vmap_over_outer(
     f: Callable,
     f_dim: int,
     align_outer: bool = False,
-    #structuring_arg: Optional[Union[Callable, int]] = None,
+    # structuring_arg: Optional[Union[Callable, int]] = None,
 ) -> Tensor:
     """
     Apply a function across the outer dimensions of a tensor.
@@ -344,7 +349,7 @@ def vmap_over_outer(
     f: Callable,
     f_dim: int,
     align_outer: bool = False,
-    #structuring_arg: Optional[Union[Callable, int]] = None,
+    # structuring_arg: Optional[Union[Callable, int]] = None,
 ) -> Callable:
     """
     Transform a function to apply to the outer dimensions of a tensor.
@@ -354,7 +359,7 @@ def vmap_over_outer(
         f=f,
         f_dim=f_dim,
         align_outer=align_outer,
-        #structuring_arg=structuring_arg,
+        # structuring_arg=structuring_arg,
     )
 
 
