@@ -10,6 +10,16 @@ from __future__ import annotations
 from collections import UserDict
 
 
+def tensor_dimensions(dims: str):
+    return f"""
+    Tensor Dimensions
+    -----------------
+
+    {dims}
+
+    """ + ': {.striped .hover}'
+
+
 class NestedDocParse(UserDict):
     """
     Enable multiple documentation decorators to be applied to a single

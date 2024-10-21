@@ -13,6 +13,7 @@ import jax.numpy as jnp
 
 from .docutil import (
     NestedDocParse,
+    tensor_dimensions,
 )
 from .util import (
     Tensor,
@@ -23,37 +24,61 @@ from .util import (
 
 def document_linreg(f: Callable) -> Callable:
     regress_warning = """
-    .. warning::
-        When using ``torch``, we have found in some cases that the
-        least-squares fit returned was incorrect for reasons that are not
-        clear. (Incorrect results are returned by
-        ``torch.linalg.lstsq``, although correct results are returned if
-        ``torch.linalg.pinv`` is used instead.) Verify that results are
-        reasonable when using this operation.
+    :::{.callout-warning}
+    When testing an old ``torch``-based implementation of this operation,
+    we have found in some cases that the least-squares fit returned was
+    incorrect for reasons that are not  clear. (Incorrect results were
+    returned by
+    ``torch.linalg.lstsq``, although correct results were returned if
+    ``torch.linalg.pinv`` was used instead.) Verify that results are
+    reasonable when using this operation.
 
-        It is not clear whether the same is true for ``jax``. Caution is
-        advised."""
+    It is not clear whether the same is true for ``jax``. Caution is
+    advised.
+    :::
 
-    regress_dim = """
-    :Dimension: **Input Y :** :math:`(N, *, C_Y, obs)` or :math:`(N, *, obs, C_Y)`
-                    N denotes batch size, `*` denotes any number of
-                    intervening dimensions, :math:`C_Y` denotes number of data
-                    channels or variables, obs denotes number of observations
-                    per channel
-                **Input X :** :math:`(N, *, C_X, obs)` or :math:`(N, *, obs, C_X)`
-                    :math:`C_X` denotes number of data channels or variables
-                **Output :**  :math:`(N, *, C_Y, obs)` or :math:`(N, *, obs, C_Y)`
-                    As above."""
+    :::{.callout-note}
+    The [conditional covariance](conditionalcov)
+    or [conditional correlation](conditionalcorr)
+    may be used instead where appropriate.
+    :::"""
+
+    tensor_dim_spec = """
+    | Dim | Description | Notes |
+    |-----|-------------|-------|
+    | $N$ | Batch size  | Optional |
+    |$C_X$| {desc_C_X} ||
+    |$C_Y$| {desc_C_Y} ||
+    |$obs$| {desc_obs} | Order controlled by `rowvar` |
+    |$*$  | Any number of intervening dimensions ||
+    """.format(
+        desc_C_X=(
+            'Number of explanatory variables or data channels. For example, '
+            'if `X` is a confound time series tensor, then $C_X$ is the '
+            'number of confound time series.'
+        ),
+        desc_C_Y=(
+            'Number of data channels or variables. For example, if `Y` is a '
+            'BOLD time series tensor, then $C_Y$ is the number of spatial '
+            'loci.'
+        ),
+        desc_obs=(
+            'Number of observations per data channel. For example, if `X` '
+            'and `Y` are time series tensors, then $obs$ is the number of '
+            'time points.'
+        ),
+    )
+    regress_dim = tensor_dimensions(tensor_dim_spec)
 
     regress_param_spec = """
-    rowvar : bool (default True)
+    rowvar : bool
         Indicates that the last axis of the input tensor is the observation
         axis and the penultimate axis is the variable axis. If False, then
         this relationship is transposed.
-    l2 : float (default 0.0)
+    l2 : float
         L2 regularisation parameter. If non-zero, the least-squares solution
         will be regularised by adding a penalty term to the cost function.
-    return_mode : Literal['residual', 'projection'] (default 'residual')
+    return_mode : Literal[`residual`, `projection`]
         Indicates whether the residual or projection tensor should be
         returned. The `projection` tensor is the projection of `Y` onto the
         span of `X` (i.e., the least-squares solution)."""
@@ -78,24 +103,25 @@ def residualise(
     Residualise a tensor block via ordinary linear least squares.
     \
     {regress_warning}
-
-    .. note::
-        The :doc:`conditional covariance <hypercoil.functional.cov.conditionalcov>`
-        or :doc:`conditional correlation <hypercoil.functional.cov.conditionalcorr>`
-        may be used instead where appropriate.
     \
     {regress_dim}
 
     Parameters
     ----------
-    Y : Tensor
+    Y : ($N$, $*$, $C_Y$, $obs$) or ($N$, $*$, $obs$, $C_Y$) tensor
         Tensor to be residualised or orthogonalised with respect to `X`. The
         vector of observations in each channel is projected into a subspace
         orthogonal to the span of `X`.
-    X : Tensor
+    X : ($N$, $*$, $C_X$, $obs$) or ($N$, $*$, $obs$, $C_X$) tensor
         Tensor containing explanatory variables. Any variance in `Y` that can
-        be explained by variables in `X` will be removed from `Y`.\
+        be explained by variables in `X` will be removed from `Y`.
     {regress_param_spec}
+
+    Returns
+    -------
+    ($N$, $*$, $C_Y$, $obs$) or ($N$, $*$, $obs$, $C_Y$) tensor
+        The residual or projection tensor, depending on the `return_mode`
+        parameter.
     """
     if rowvar:
         X_in = X.swapaxes(-1, -2)
