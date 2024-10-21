@@ -11,13 +11,16 @@ from collections import UserDict
 
 
 def tensor_dimensions(dims: str):
-    return f"""
+    return (
+        f"""
     Tensor Dimensions
     -----------------
 
     {dims}
 
-    """ + ': {.striped .hover}'
+    """
+        + ': {.striped .hover}'
+    )
 
 
 class NestedDocParse(UserDict):
