@@ -11,13 +11,11 @@ from typing import Callable, Literal
 
 import jax.numpy as jnp
 
-from .docutil import (
+from .._internal import (
     NestedDocParse,
-    tensor_dimensions,
-)
-from .util import (
     Tensor,
     broadcast_ignoring,
+    tensor_dimensions,
     vmap_over_outer,
 )
 

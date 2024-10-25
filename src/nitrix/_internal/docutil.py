@@ -14,8 +14,7 @@ def tensor_dimensions(dims: str):
     return (
         f"""
     Tensor Dimensions
-    -----------------
-
+    -----------------\
     {dims}
 
     """

@@ -5,7 +5,7 @@
 Unit tests for documentation utility functions.
 """
 import pytest
-from nitrix.docutil import NestedDocParse
+from nitrix._internal import NestedDocParse
 
 
 def test_nested_doc_parse():

@@ -7,7 +7,7 @@ Unit tests for residualisation
 import pytest
 import jax
 import jax.numpy as jnp
-from nitrix.resid import residualise
+from nitrix.functional import residualise
 
 
 def test_residualisation():

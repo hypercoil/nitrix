@@ -8,7 +8,7 @@ import pytest
 import jax
 import jax.numpy as jnp
 import numpy as np
-from nitrix.util import (
+from nitrix._internal import (
     _dim_or_none, _compose, _seq_pad, atleast_4d, apply_vmap_over_outer,
     vmap_over_outer, broadcast_ignoring, orient_and_conform,
     promote_axis, demote_axis, fold_axis, unfold_axes,

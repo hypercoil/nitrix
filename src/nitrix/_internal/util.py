@@ -28,6 +28,14 @@ Tensor = Union[jax.Array, ndarray]
 PyTree = Any
 
 
+def _conform_bform_weight(weight: Tensor) -> Tensor:
+    if weight.ndim == 1:
+        return weight
+    if weight.shape[-2] != 1:
+        return weight[..., None, :]
+    return weight
+
+
 def _dim_or_none(x, align, i, ndmax):
     if not align:
         i = i - ndmax
