@@ -11,7 +11,8 @@ from functools import partial, reduce
 from typing import (
     Any,
     Callable,
-    Generator,
+    Iterator,
+    List,
     Optional,
     Sequence,
     Tuple,
@@ -22,16 +23,16 @@ import jax
 import jax.numpy as jnp
 from jax import vmap
 from jax.tree_util import tree_map, tree_reduce
-from numpy import ndarray
+from numpy.typing import NDArray
 
-Tensor = Union[jax.Array, ndarray]
+Tensor = Union[jax.Array, NDArray[Any]]
 PyTree = Any
 
 
 def _conform_bform_weight(weight: Tensor) -> Tensor:
     if weight.ndim == 1:
         return weight
-    if weight.shape[-2] != 1:
+    elif weight.shape[-2] != 1:
         return weight[..., None, :]
     return weight
 
@@ -51,7 +52,7 @@ def _dim_or_none(x, align, i, ndmax):
 
 def _compose(
     f: Any,
-    g: Callable,
+    g: Callable[[Any], Any],
 ) -> Any:
     return g(f)
 
@@ -70,7 +71,7 @@ def _seq_pad(
     raise ValueError(f'Invalid padding: {pad}')
 
 
-def atleast_4d(*pparams) -> Tensor:
+def atleast_4d(*pparams: Tensor) -> Tensor | Sequence[Tensor]:
     res = []
     for p in pparams:
         if p.ndim == 0:
@@ -91,7 +92,7 @@ def atleast_4d(*pparams) -> Tensor:
 
 def axis_complement(
     ndim: int,
-    axis: Union[int, Tuple[int, ...]],
+    axis: Union[int, Sequence[int]],
 ) -> Tuple[int, ...]:
     """
     Return the complement of the axis or axes for a tensor of dimension ndim.
@@ -105,7 +106,21 @@ def axis_complement(
     return tuple(ax)
 
 
-def standard_axis_number(axis: int, ndim: int) -> int:
+#TODO:
+# We're repeating a lot of code below so we can guarantee the return type.
+# We should figure out if there's a better way to do this with mypy.
+def standard_axis_number_strict(axis: int, ndim: int) -> int:
+    """
+    Convert an axis number to a standard axis number.
+    """
+    if axis < 0 and axis >= -ndim:
+        axis += ndim
+    elif axis < -ndim or axis >= ndim:
+        raise ValueError(f'Invalid axis: {axis}')
+    return axis
+
+
+def standard_axis_number(axis: int, ndim: int) -> Optional[int]:
     """
     Convert an axis number to a standard axis number.
     """
@@ -116,7 +131,18 @@ def standard_axis_number(axis: int, ndim: int) -> int:
     return axis
 
 
-def negative_axis_number(axis: int, ndim: int) -> int:
+def negative_axis_number_strict(axis: int, ndim: int) -> int:
+    """
+    Convert a standard axis number to a negative axis number.
+    """
+    if axis >= 0:
+        axis -= ndim
+    if axis >= 0 or axis < -ndim:
+        raise ValueError(f'Invalid axis: {axis}')
+    return axis
+
+
+def negative_axis_number(axis: int, ndim: int) -> Optional[int]:
     """
     Convert a standard axis number to a negative axis number.
     """
@@ -137,14 +163,14 @@ def promote_axis(
     """
     if isinstance(axis, int):
         axis = (axis,)
-    axis = [standard_axis_number(ax, ndim) for ax in axis]
+    axis: List[int] = [standard_axis_number_strict(ax, ndim) for ax in axis]
     return (*axis, *axis_complement(ndim, axis))
 
 
 def _demote_axis(
     ndim: int,
-    axis: Union[int, Tuple[int, ...]],
-) -> Generator:
+    axis: Sequence[int],
+) -> Iterator[int]:
     """Helper function for axis demotion."""
     compl = range(len(axis), ndim).__iter__()
     src = range(len(axis)).__iter__()
@@ -161,7 +187,7 @@ def demote_axis(
 ) -> Tuple[int, ...]:
     if isinstance(axis, int):
         axis = (axis,)
-    axis = [standard_axis_number(ax, ndim) for ax in axis]
+    axis: List[int] = [standard_axis_number_strict(ax, ndim) for ax in axis]
     return tuple(_demote_axis(ndim=ndim, axis=axis))
 
 
@@ -170,7 +196,7 @@ def fold_axis(tensor: Tensor, axis: int, n_folds: int) -> Tensor:
     """
     Fold the specified axis into the specified number of folds.
     """
-    axis = standard_axis_number(axis, tensor.ndim)
+    axis = standard_axis_number_strict(axis, tensor.ndim)
     shape = tensor.shape
     current = shape[axis]
     # fmt: off
@@ -197,7 +223,9 @@ def unfold_axes(tensor: Tensor, axes: Union[int, Tuple[int, ...]]) -> Tensor:
     if isinstance(axes, int):
         return tensor
     shape = tensor.shape
-    axes = [standard_axis_number(ax, tensor.ndim) for ax in axes]
+    axes: List[int] = [ # type: ignore
+        standard_axis_number_strict(ax, tensor.ndim) for ax in axes
+    ]
     current = [shape[ax] for ax in axes]
     prod = reduce(_prod, current)
     # fmt: off
@@ -216,7 +244,7 @@ def fold_and_promote(tensor: Tensor, axis: int, n_folds: int) -> Tensor:
     Fold the specified axis into the specified number of folds, and promote
     the new axis across the number of folds to the outermost dimension.
     """
-    axis = standard_axis_number(axis, tensor.ndim)
+    axis = standard_axis_number_strict(axis, tensor.ndim)
     folded = fold_axis(tensor, axis, n_folds)
     return jnp.transpose(folded, promote_axis(folded.ndim, axis + 1))
 
@@ -235,7 +263,7 @@ def broadcast_ignoring(
     x: Tensor,
     y: Tensor,
     axis: Union[int, Tuple[int, ...]],
-) -> Tensor:
+) -> Tuple[Tensor, Tensor]:
     """
     Broadcast two tensors, ignoring the axis or axes specified.
 
@@ -293,11 +321,11 @@ def broadcast_ignoring(
 #      jit + vmap_over_outer
 def apply_vmap_over_outer(
     x: PyTree,
-    f: Callable,
+    f: Callable[[Any], Any],
     f_dim: int,
     align_outer: bool = False,
     # structuring_arg: Optional[Union[Callable, int]] = None,
-) -> Tensor:
+) -> PyTree:
     """
     Apply a function across the outer dimensions of a tensor.
     """
@@ -354,11 +382,11 @@ def apply_vmap_over_outer(
 
 
 def vmap_over_outer(
-    f: Callable,
+    f: Callable[[Any], Any],
     f_dim: int,
     align_outer: bool = False,
     # structuring_arg: Optional[Union[Callable, int]] = None,
-) -> Callable:
+) -> Callable[[Any], Any]:
     """
     Transform a function to apply to the outer dimensions of a tensor.
     """
@@ -423,7 +451,7 @@ def orient_and_conform(
     if dim is None and reference is None:
         raise ValueError('Must specify either `reference` or `dim`')
     elif dim is None:
-        dim = reference.ndim
+        dim = reference.ndim # type: ignore
     # can't rely on this when we compile with jit
     assert (
         len(axis) == input.ndim
@@ -468,7 +496,7 @@ def extend_to_size(
 def extend_to_max_size(
     tensors: Sequence[Tensor],
     fill: float = float('nan'),
-) -> Tensor:
+) -> Tuple[Tensor, ...]:
     """
     Extend all tensors in a sequence until their sizes are equal to the size
     of the largest tensor along each axis. Any new entries created via

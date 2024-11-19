@@ -9,20 +9,52 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from nitrix._internal import (
-    _dim_or_none, _compose, _seq_pad, atleast_4d, apply_vmap_over_outer,
-    vmap_over_outer, broadcast_ignoring, orient_and_conform,
-    promote_axis, demote_axis, fold_axis, unfold_axes,
-    axis_complement, standard_axis_number, negative_axis_number,
-    fold_and_promote, demote_and_unfold, promote_to_rank,
-    extend_to_size, extend_to_max_size, argsort,
+    _conform_bform_weight,
+    _dim_or_none,
+    _compose,
+    _seq_pad,
+    atleast_4d,
+    apply_vmap_over_outer,
+    vmap_over_outer,
+    broadcast_ignoring,
+    orient_and_conform,
+    promote_axis,
+    demote_axis,
+    fold_axis,
+    unfold_axes,
+    axis_complement,
+    standard_axis_number,
+    standard_axis_number_strict,
+    negative_axis_number,
+    negative_axis_number_strict,
+    fold_and_promote,
+    demote_and_unfold,
+    promote_to_rank,
+    extend_to_size,
+    extend_to_max_size,
+    argsort,
 )
 
 
-def test_dim_or_none():
-    assert _dim_or_none(3, True, 1, 4) == 1
-    assert _dim_or_none(3, True, 0, 4) == 0
-    assert _dim_or_none(3, False, 1, 4) == 0
-    assert _dim_or_none(3, False, 0, 4) is None
+@pytest.mark.parametrize("weight, expected_shape, expected_values", [
+    (jnp.array([1, 2, 3]), (3,), [1, 2, 3]),
+    (jnp.array([[1, 2, 3], [4, 5, 6]]), (2, 1, 3), [1, 2, 3, 4, 5, 6]),
+    (jnp.array([[1, 2, 3], [4, 5, 6]])[:, None, :], (2, 1, 3), [1, 2, 3, 4, 5, 6])
+])
+def test_conform_bform_weight(weight, expected_shape, expected_values):
+    result = _conform_bform_weight(weight)
+    assert result.shape == expected_shape
+    assert jnp.all(result.ravel() == jnp.asarray(expected_values))
+
+
+@pytest.mark.parametrize("x, align, i, ndmax, expected", [
+    (3, True, 1, 4, 1),
+    (3, True, 0, 4, 0),
+    (3, False, 1, 4, 0),
+    (3, False, 0, 4, None)
+])
+def test_dim_or_none(x, align, i, ndmax, expected):
+    assert _dim_or_none(x, align, i, ndmax) == expected
 
 
 def test_compose():
@@ -34,31 +66,42 @@ def test_compose():
     assert h(0) == 1
 
 
-def test_seq_pad():
-    assert _seq_pad((1, 2, 3), 5) == (1, 2, 3, None, None)
-    assert _seq_pad((1, 2, 3), 3) == (1, 2, 3)
-    assert _seq_pad((1, 2, 3), 5, pad_value=0) == (1, 2, 3, 0, 0)
-    assert _seq_pad((1, 2, 3), 5, pad='first') == (None, None, 1, 2, 3)
-    assert _seq_pad((1, 2, 3), 2) == (1, 2, 3)
+@pytest.mark.parametrize("seq, length, pad_value, pad, expected", [
+    ((1, 2, 3), 5, None, 'last', (1, 2, 3, None, None)),
+    ((1, 2, 3), 3, None, 'last', (1, 2, 3)),
+    ((1, 2, 3), 5, 0, 'last', (1, 2, 3, 0, 0)),
+    ((1, 2, 3), 5, None, 'first', (None, None, 1, 2, 3)),
+    ((1, 2, 3), 2, None, 'last', (1, 2, 3)),
+])
+def test_seq_pad(seq, length, pad_value, pad, expected):
+    assert _seq_pad(seq, length, pad_value=pad_value, pad=pad) == expected
+
+
+@pytest.mark.parametrize("seq, length, pad", [
+    ((1, 2, 3), 2, 'invalid'),
+])
+def test_seq_pad_raises(seq, length, pad):
     with pytest.raises(ValueError):
-        _seq_pad((1, 2, 3), 2, pad='invalid')
+        _seq_pad(seq, length, pad=pad)
 
 
-def test_atleast_4d():
-    x = jnp.asarray(0)
-    assert atleast_4d(x).shape == (1, 1, 1, 1)
-    x = jnp.zeros(3)
-    assert atleast_4d(x).shape == (1, 1, 1, 3)
-    x = jnp.zeros((2, 3))
-    assert atleast_4d(x).shape == (1, 1, 2, 3)
-    x = jnp.zeros((2, 3, 4))
-    assert atleast_4d(x).shape == (1, 2, 3, 4)
-    x = jnp.zeros((2, 3, 4, 5))
-    assert atleast_4d(x).shape == (2, 3, 4, 5)
+@pytest.mark.parametrize("x, expected_shape", [
+    (jnp.asarray(0), (1, 1, 1, 1)),
+    (jnp.zeros(3), (1, 1, 1, 3)),
+    (jnp.zeros((2, 3)), (1, 1, 2, 3)),
+    (jnp.zeros((2, 3, 4)), (1, 2, 3, 4)),
+    (jnp.zeros((2, 3, 4, 5)), (2, 3, 4, 5)),
+])
+def test_atleast_4d(x, expected_shape):
+    assert atleast_4d(x).shape == expected_shape
+
+
+def test_atleast_4d_multiple():
     assert (
         atleast_4d(jnp.asarray(0), jnp.asarray(0)) ==
         (jnp.zeros((1, 1, 1, 1)), jnp.zeros((1, 1, 1, 1)))
     )
+
 
 def test_axis_ops():
     shape = (2, 3, 5, 7, 11)
@@ -72,9 +115,19 @@ def test_axis_ops():
     assert standard_axis_number(1, ndim) == 1
     assert standard_axis_number(7, ndim) is None
 
+    assert standard_axis_number_strict(-2, ndim) == 3
+    assert standard_axis_number_strict(1, ndim) == 1
+    with pytest.raises(ValueError):
+        standard_axis_number_strict(7, ndim)
+
     assert negative_axis_number(-2, ndim) == -2
     assert negative_axis_number(0, ndim) == -5
     assert negative_axis_number(6, ndim) is None
+
+    assert negative_axis_number_strict(-2, ndim) == -2
+    assert negative_axis_number_strict(0, ndim) == -5
+    with pytest.raises(ValueError):
+        negative_axis_number_strict(6, ndim)
 
     assert promote_axis(ndim, -2) == (3, 0, 1, 2, 4)
     assert promote_axis(ndim, 1) == (1, 0, 2, 3, 4)
@@ -199,6 +252,7 @@ def test_argsort():
         [1, 3, 6, 0, 9, 2, 4, 8, 10, 7, 5]
     )
 
+
 def test_orient_and_conform():
     X = np.random.rand(3, 7)
     R = np.random.rand(2, 7, 11, 1, 3)
@@ -224,6 +278,7 @@ def test_orient_and_conform():
     with pytest.raises(ValueError):
         orient_and_conform(X, 1, reference=None, dim=None)
 
+
 def test_promote():
     key = jax.random.PRNGKey(0)
     X = jax.random.normal(key, (2, 3))
@@ -232,6 +287,7 @@ def test_promote():
 
     out = promote_to_rank(X, 2)
     assert out.shape == (2, 3)
+
 
 def test_extend():
     key = jax.random.PRNGKey(0)

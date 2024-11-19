@@ -7,7 +7,7 @@ Residualise tensor block via least squares.
 
 from __future__ import annotations
 
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 import jax.numpy as jnp
 
@@ -20,7 +20,7 @@ from .._internal import (
 )
 
 
-def document_linreg(f: Callable) -> Callable:
+def document_linreg(f: Callable[[Any], Any]) -> Callable[[Any], Any]:
     regress_warning = """
     :::{.callout-warning}
     When testing an old ``torch``-based implementation of this operation,
@@ -36,8 +36,8 @@ def document_linreg(f: Callable) -> Callable:
     :::
 
     :::{.callout-note}
-    The [conditional covariance](conditionalcov)
-    or [conditional correlation](conditionalcorr)
+    The [conditional covariance](nitrix.functional.covariance.conditionalcov.html)
+    or [conditional correlation](nitrix.functional.covariance.conditionalcorr.html)
     may be used instead where appropriate.
     :::"""
 
@@ -85,7 +85,7 @@ def document_linreg(f: Callable) -> Callable:
         regress_dim=regress_dim,
         regress_param_spec=regress_param_spec,
     )
-    f.__doc__ = f.__doc__.format_map(fmt)
+    f.__doc__ = (f.__doc__ or '').format_map(fmt)
     return f
 
 
@@ -97,7 +97,7 @@ def residualise(
     l2: float = 0.0,
     return_mode: Literal['residual', 'projection'] = 'residual',
 ) -> Tensor:
-    r"""
+    """
     Residualise a tensor block via ordinary linear least squares.
     \
     {regress_warning}

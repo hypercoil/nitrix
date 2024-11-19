@@ -22,7 +22,7 @@ def tensor_dimensions(dims: str):
     )
 
 
-class NestedDocParse(UserDict):
+class NestedDocParse(UserDict[str, str]):
     """
     Enable multiple documentation decorators to be applied to a single
     function, with each pass leaving intact any cells that are not specified

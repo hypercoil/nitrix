@@ -15,7 +15,6 @@ def tests(session):
         'pytest',
         '--cov', 'nitrix',
         '--cov-append',
-        'tests/',
     )
     session.run('ruff', 'check', 'src/nitrix')
     session.run('ruff', 'format', '--check', 'src/nitrix')
