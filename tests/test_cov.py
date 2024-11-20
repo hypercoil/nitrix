@@ -5,6 +5,7 @@
 Unit tests for covariance, correlation, and derived measures
 """
 import pytest
+import warnings
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -32,14 +33,21 @@ from nitrix.functional.covariance import (
 
 #TODO: Unit tests still needed for:
 # - correctness of off-diagonal weighted covariance
+# - correctness of complex-valued partial correlation
+#   (reference implementation is not available)
+# - generally correctness of computations that involve complex numbers
+#   and weights beyond the most basic operations
 
 @pytest.fixture(scope='module')
 def x():
     return np.random.rand(100)
 
-@pytest.fixture(scope='module')
-def X():
-    return np.random.rand(7, 100)
+@pytest.fixture(scope='module', params=['real', 'complex'])
+def X(request):
+    if request.param == 'real':
+        return np.random.rand(7, 100)
+    else:
+        return np.random.rand(7, 100) + 1j * np.random.rand(7, 100)
 
 @pytest.fixture(scope='module')
 def XM():
@@ -234,7 +242,9 @@ def test_precision(X):
 
 
 def test_pcorr(X):
-    out = partialcorr(X)
+    # TODO: reference pcorr is not implemented for complex data, so we don't
+    #       know what the expected output should be
+    out = partialcorr(X.real)
     ref = pd.DataFrame(X.T).pcorr().values
     assert approx(out, ref)
 
@@ -244,6 +254,9 @@ def test_ccov(X, Y):
     Verify equivalence of the Schur complement approach and fit-based
     confound regression.
     """
+    if jnp.iscomplex(X).any() or jnp.iscomplex(Y).any():
+        warnings.warn("Complex-valued data not tested thoroughly")
+        return
     out = conditionalcov(X, Y)
     ref = jnp.linalg.pinv(
         precision(jnp.concatenate((X, Y), -2))[:7, :7])
@@ -260,6 +273,9 @@ def test_ccorr(X, Y):
     Verify equivalence of the Schur complement approach and fit-based
     confound regression.
     """
+    if jnp.iscomplex(X).any() or jnp.iscomplex(Y).any():
+        warnings.warn("Complex-valued data not tested thoroughly")
+        return
     Y_intercept = np.concatenate([Y, np.ones((1, 100))])
     out = conditionalcorr(X, Y)
     ref = np.corrcoef(

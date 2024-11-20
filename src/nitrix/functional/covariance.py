@@ -9,7 +9,9 @@ Functional connectivity is a measure of the statistical relationship between
 derivative of the covariance between the time series, most often the
 correlation coefficient.
 """
+
 from __future__ import annotations
+
 from typing import Literal, Optional, Sequence, Tuple, Union
 
 import jax
@@ -106,7 +108,7 @@ def document_covariance(func: callable) -> callable:
         'correlated. For example, if `Y` is a BOLD time series tensor, then '
         'this is the number of spatial loci.'
     )
-    desc_cC_Y=(
+    desc_cC_Y = (
         'Number of variables or data channels to be conditioned on. For '
         'example, if `Y` is a confound time series tensor, then $C_Y$ is the '
         'number of confound time series.'
@@ -720,6 +722,7 @@ def _cov_inner(
     w_type: Optional[Literal['vector', 'matrix']],
     fact: Union[float, int, Tensor],
 ) -> Tensor:
+    Y = Y.conj()
     if weight is None:
         sigma = X @ Y.swapaxes(-1, -2) / fact
     elif w_type == 'vector':
@@ -731,8 +734,13 @@ def _cov_inner(
 
 def _is_diagonal(X: Tensor) -> bool:
     batch_dims = X.shape[:-2]
-    return X.reshape(*batch_dims, -1)[..., :-1].reshape(
-        *batch_dims,
-        X.shape[-2] - 1,
-        X.shape[-1] + 1,
-    )[..., 1:].sum() == 0
+    return (
+        X.reshape(*batch_dims, -1)[..., :-1]
+        .reshape(
+            *batch_dims,
+            X.shape[-2] - 1,
+            X.shape[-1] + 1,
+        )[..., 1:]
+        .sum()
+        == 0
+    )

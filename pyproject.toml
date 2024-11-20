@@ -32,6 +32,8 @@ dev = [
     "pytest-cov",
     "coverage[toml]",
     "ruff",
+    "mypy",
+    "pingouin",
 ]
 
 [project.urls]

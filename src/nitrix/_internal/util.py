@@ -106,7 +106,7 @@ def axis_complement(
     return tuple(ax)
 
 
-#TODO:
+# TODO:
 # We're repeating a lot of code below so we can guarantee the return type.
 # We should figure out if there's a better way to do this with mypy.
 def standard_axis_number_strict(axis: int, ndim: int) -> int:
@@ -223,7 +223,7 @@ def unfold_axes(tensor: Tensor, axes: Union[int, Tuple[int, ...]]) -> Tensor:
     if isinstance(axes, int):
         return tensor
     shape = tensor.shape
-    axes: List[int] = [ # type: ignore
+    axes: List[int] = [  # type: ignore
         standard_axis_number_strict(ax, tensor.ndim) for ax in axes
     ]
     current = [shape[ax] for ax in axes]
@@ -451,7 +451,7 @@ def orient_and_conform(
     if dim is None and reference is None:
         raise ValueError('Must specify either `reference` or `dim`')
     elif dim is None:
-        dim = reference.ndim # type: ignore
+        dim = reference.ndim  # type: ignore
     # can't rely on this when we compile with jit
     assert (
         len(axis) == input.ndim
