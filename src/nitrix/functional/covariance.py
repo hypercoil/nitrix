@@ -23,7 +23,7 @@ from .._internal import (
 )
 
 
-def document_covariance(func):
+def document_covariance(func: callable) -> callable:
     param_spec = """
     rowvar : bool (default True)
         Indicates that the last axis of the input tensor is the observation
@@ -222,12 +222,7 @@ def cov(
     fact = _prepare_denomfact(w_sum, w_type, ddof, bias, weight)
 
     X0 = X - avg
-    if weight is None:
-        sigma = X0 @ X0.swapaxes(-1, -2) / fact
-    elif w_type == 'vector':
-        sigma = (X0 * weight) @ X0.swapaxes(-1, -2) / fact
-    else:
-        sigma = X0 @ weight @ X0.swapaxes(-1, -2) / fact
+    sigma = _cov_inner(X0, X0, weight, w_type, fact)
     if l2 > 0:
         sigma = sigma + l2 * jnp.eye(X.shape[-2])
     return sigma
@@ -402,13 +397,7 @@ def pairedcov(
 
     X0 = X - Xavg
     Y0 = Y - Yavg
-    if weight is None:
-        sigma = X0 @ Y0.swapaxes(-1, -2) / fact
-    elif w_type == 'vector':
-        sigma = (X0 * weight) @ Y0.swapaxes(-1, -2) / fact
-    else:
-        sigma = X0 @ weight @ Y0.swapaxes(-1, -2) / fact
-    return sigma
+    return _cov_inner(X0, Y0, weight, w_type, fact)
 
 
 @document_covariance
@@ -550,7 +539,9 @@ def precision(
         non-singular. This is done by setting the ``l2`` parameter to a
         positive value. Alternatively, the ``require_nonsingular`` parameter
         can be set to `False` to use the Moore-Penrose pseudoinverse of the
-        covariance matrix.
+        covariance matrix, but this setting is not recommended for most
+        applications. Unless there is a specific reason to do this, regularise
+        the computation instead.
     \
     {unary_dim_spec}
 
@@ -637,7 +628,7 @@ def _prepare_input(X: Tensor, rowvar: bool = True) -> Tensor:
     covariance function.
     """
     X = jnp.atleast_2d(X)
-    if not rowvar and X.shape[-2] != 1:
+    if (not rowvar) and (X.shape[-2] != 1):
         X = X.swapaxes(-1, -2)
     return X
 
@@ -701,14 +692,47 @@ def _prepare_denomfact(
         # I don't have the intuition here yet: should this be
         # weight * weight or weight @ weight ? Or something else?
         # This affects only the nondiagonal case.
+        if not _is_diagonal(weight):
+            # TODO: Danger! This can be competely bypassed and the function
+            # executed with a non-diagonal weight matrix. This fails silently
+            # and produces incorrect results.
+            # This will happen if the function is JIT compiled with a diagonal
+            # weight matrix and then invoked with a nondiagonal one.
+            raise NotImplementedError(
+                'Nondiagonal weight matrices are not yet supported.'
+            )
         fact = (
             w_sum
             - ddof
             * (
                 # weight.sum(-1, keepdims=True) ** 2
-                weight
-                @ weight.swapaxes(-1, -2)
+                weight @ weight.swapaxes(-1, -2)
             ).sum((-1, -2), keepdims=True)
             / w_sum
         )
     return fact
+
+
+def _cov_inner(
+    X: Tensor,
+    Y: Tensor,
+    weight: Optional[Tensor],
+    w_type: Optional[Literal['vector', 'matrix']],
+    fact: Union[float, int, Tensor],
+) -> Tensor:
+    if weight is None:
+        sigma = X @ Y.swapaxes(-1, -2) / fact
+    elif w_type == 'vector':
+        sigma = (X * weight) @ Y.swapaxes(-1, -2) / fact
+    else:
+        sigma = X @ weight @ Y.swapaxes(-1, -2) / fact
+    return sigma
+
+
+def _is_diagonal(X: Tensor) -> bool:
+    batch_dims = X.shape[:-2]
+    return X.reshape(*batch_dims, -1)[..., :-1].reshape(
+        *batch_dims,
+        X.shape[-2] - 1,
+        X.shape[-1] + 1,
+    )[..., 1:].sum() == 0
