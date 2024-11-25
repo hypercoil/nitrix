@@ -8,9 +8,16 @@ def clean(session):
     session.install('coverage[toml]')
     session.run('coverage', 'erase')
 
-@nox.session(python=["3.10", "3.11"])
+@nox.session(venv_backend='uv', python=["3.11", "3.12", "3.13"])
 def tests(session):
-    session.install('.[dev]')
+    #session.install('.[dev]')
+    session.run_install(
+        "uv",
+        "sync",
+        "--extra=dev",
+        "--frozen",
+        env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
+    )
     session.run(
         'pytest',
         '--cov', 'nitrix',
