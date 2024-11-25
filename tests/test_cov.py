@@ -254,7 +254,7 @@ def test_ccov(X, Y):
     Verify equivalence of the Schur complement approach and fit-based
     confound regression.
     """
-    if jnp.iscomplex(X).any() or jnp.iscomplex(Y).any():
+    if jnp.iscomplexobj(X) or jnp.iscomplexobj(Y):
         warnings.warn("Complex-valued data not tested thoroughly")
         return
     out = conditionalcov(X, Y)
@@ -273,7 +273,7 @@ def test_ccorr(X, Y):
     Verify equivalence of the Schur complement approach and fit-based
     confound regression.
     """
-    if jnp.iscomplex(X).any() or jnp.iscomplex(Y).any():
+    if jnp.iscomplexobj(X) or jnp.iscomplexobj(Y):
         warnings.warn("Complex-valued data not tested thoroughly")
         return
     Y_intercept = np.concatenate([Y, np.ones((1, 100))])

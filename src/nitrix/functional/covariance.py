@@ -6,11 +6,22 @@ Differentiable estimation of covariance and derived measures.
 
 Functional connectivity is a measure of the statistical relationship between
 (localised) time series signals. It is typically operationalised as some
-derivative of the covariance between the time series, most often the
+value derived from the covariance between the time series, most often the
 correlation coefficient.
-"""
 
-from __future__ import annotations
+::: {.callout-warning}
+## Untested use cases
+Several use cases are not yet tested, including:
+
+- Off-diagonal weighted covariance. This use case can occur, for example, in
+  the estimation of lagged covariance (often a Toeplitz matrix weight) in time
+  series analysis.
+- Complex-valued partial correlation. A reference implementation is not yet
+  available for this use case.
+- General correctness of computations involving complex numbers and weights
+  beyond the most basic operations.
+:::
+"""
 
 from typing import Literal, Optional, Sequence, Tuple, Union
 
@@ -534,16 +545,17 @@ def precision(
 
     The precision matrix is the inverse of the covariance matrix.
 
-    ..note::
-        The precision matrix is not defined for singular covariance matrices.
-        If the number of input observations is less than the number of
-        variables, the covariance matrix can be regularised to ensure it is
-        non-singular. This is done by setting the ``l2`` parameter to a
-        positive value. Alternatively, the ``require_nonsingular`` parameter
-        can be set to `False` to use the Moore-Penrose pseudoinverse of the
-        covariance matrix, but this setting is not recommended for most
-        applications. Unless there is a specific reason to do this, regularise
-        the computation instead.
+    ::: {{.callout-note}}
+    The precision matrix is not defined for singular covariance matrices.
+    If the number of input observations is less than the number of
+    variables, the covariance matrix can be regularised to ensure it is
+    non-singular. This is done by setting the ``l2`` parameter to a
+    positive value. Alternatively, the ``require_nonsingular`` parameter
+    can be set to `False` to use the Moore-Penrose pseudoinverse of the
+    covariance matrix, but this setting is not recommended for most
+    applications. Unless there is a specific reason to do this, regularise
+    the computation instead.
+    :::
     \
     {unary_dim_spec}
 
@@ -595,32 +607,40 @@ def corrnorm(A: Tensor) -> Tensor:
 
 
 def covariance(*pparams, **params):
-    """Alias for :func:`cov`."""
+    """Alias for [`cov`](nitrix.functional.covariance.cov.qmd)."""
     return cov(*pparams, **params)
 
 
 def correlation(*pparams, **params):
-    """Alias for :func:`corr`."""
+    """Alias for [`corr`](nitrix.functional.covariance.corr.qmd)."""
     return corr(*pparams, **params)
 
 
 def corrcoef(*pparams, **params):
-    """Alias for :func:`corr`."""
+    """Alias for [`corr`](nitrix.functional.covariance.corr.qmd)."""
     return corr(*pparams, **params)
 
 
 def pcorr(*pparams, **params):
-    """Alias for :func:`partialcorr`."""
+    """
+    Alias for [`partialcorr`](nitrix.functional.covariance.partialcorr.qmd).
+    """
     return partialcorr(*pparams, **params)
 
 
 def ccov(*pparams, **params):
-    """Alias for :func:`conditionalcov`."""
+    """
+    Alias for
+    [`conditionalcov`](nitrix.functional.covariance.conditionalcov.qmd).
+    """
     return conditionalcov(*pparams, **params)
 
 
 def ccorr(*pparams, **params):
-    """Alias for :func:`conditionalcorr`."""
+    """
+    Alias for
+    [`conditionalcorr`](nitrix.functional.covariance.conditionalcorr.qmd).
+    """
     return conditionalcorr(*pparams, **params)
 
 

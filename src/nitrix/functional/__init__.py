@@ -16,4 +16,32 @@ from .covariance import (
     ccov,
     ccorr,
 )
+from .fourier import (
+    product_filter,
+    product_filtfilt,
+    analytic_signal,
+    hilbert_transform,
+    envelope,
+    instantaneous_frequency,
+    instantaneous_phase,
+    env_inst,
+)
 from .resid import residualise
+
+__all__ = [
+    'cov',
+    'corr',
+    'partialcov',
+    'partialcorr',
+    'pairedcov',
+    'pairedcorr',
+    'conditionalcov',
+    'conditionalcorr',
+    'corrcoef',
+    'pcorr',
+    'ccov',
+    'ccorr',
+    'product_filter',
+    'product_filtfilt',
+    'residualise',
+]

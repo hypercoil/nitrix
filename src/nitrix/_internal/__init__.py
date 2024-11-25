@@ -32,6 +32,9 @@ from .util import (
     extend_to_size,
     extend_to_max_size,
     argsort,
+    complex_decompose,
+    complex_recompose,
+    amplitude_apply,
 )
 
 __all__ = [
@@ -60,4 +63,7 @@ __all__ = [
     'extend_to_size',
     'extend_to_max_size',
     'argsort',
+    'complex_decompose',
+    'complex_recompose',
+    'amplitude_apply',
 ]

@@ -33,6 +33,9 @@ from nitrix._internal import (
     extend_to_size,
     extend_to_max_size,
     argsort,
+    complex_decompose,
+    complex_recompose,
+    amplitude_apply,
 )
 
 
@@ -310,3 +313,22 @@ def test_extend():
     for i, o in enumerate(out):
         assert o.shape == (5, 5)
         assert jnp.isnan(o).sum() == targets[i]
+
+
+def test_complex_views():
+    key = jax.random.PRNGKey(0)
+    key_X, key_Y = jax.random.split(key)
+    X = jnp.abs(jax.random.normal(key_X, (2, 3)))
+    Y = jnp.clip(jax.random.normal(key_Y, (2, 3)), -jnp.pi, jnp.pi)
+    Z = X * jnp.exp(Y * 1j)
+    out = complex_decompose(Z)
+    assert out[0].shape == (2, 3)
+    assert out[1].shape == (2, 3)
+    assert np.all(out[0] == X)
+    assert np.all(out[1] == Y)
+
+    out = complex_recompose(out[0], out[1])
+    assert np.all(out == Z)
+
+    out = amplitude_apply(jnp.log)(Z)
+    assert np.all(out == jnp.log(X) * jnp.exp(Y * 1j))

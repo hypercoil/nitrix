@@ -5,8 +5,6 @@
 Residualise tensor block via least squares.
 """
 
-from __future__ import annotations
-
 from typing import Any, Callable, Literal
 
 import jax.numpy as jnp

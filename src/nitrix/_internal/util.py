@@ -5,8 +5,6 @@
 Miscellaneous utility functions for tensor manipulation.
 """
 
-from __future__ import annotations
-
 from functools import partial, reduce
 from typing import (
     Any,
@@ -508,3 +506,82 @@ def extend_to_max_size(
         max(t.shape[i] for t in tensors) for i in range(ndim_max)
     )
     return tuple(extend_to_size(t, shape_max, fill=fill) for t in tensors)
+
+
+def complex_decompose(complex: Tensor) -> Tuple[Tensor, Tensor]:
+    """
+    Decompose a complex-valued tensor into amplitude and phase components.
+
+    Together with
+    [complex_recompose](nitrix._internal.util.complex_recompose.html), this
+    function provides a uniform interface for switching between complex and
+    polar representations of complex numbers. This enables us to change the
+    implementation of these operations in one place when we find the most
+    efficient and stable method.
+
+    Parameters
+    ----------
+    complex : Tensor
+        Complex-valued tensor.
+
+    Returns
+    -------
+    ampl : Tensor
+        Amplitude of each entry in the input tensor.
+    phase : Tensor
+        Phase of each entry in the input tensor, in radians.
+
+    See also
+    --------
+    :func:`complex_recompose`
+    """
+    ampl = jnp.abs(complex)
+    phase = jnp.angle(complex)
+    return ampl, phase
+
+
+def complex_recompose(ampl: Tensor, phase: Tensor) -> Tensor:
+    """
+    Reconstitute a complex-valued tensor from real-valued tensors denoting its
+    amplitude and its phase.
+
+    Together with
+    [complex_decompose](nitrix._internal.util.complex_decompose.html), this
+    function provides a uniform interface for switching between complex and
+    polar representations of complex numbers. This enables us to change the
+    implementation of these operations in one place when we find the most
+    efficient and stable method.
+
+    Parameters
+    ----------
+    ampl : Tensor
+        Real-valued array storing complex number amplitudes.
+    phase : Tensor
+        Real-valued array storing complex number phases in radians.
+
+    Returns
+    -------
+    complex : Tensor
+        Complex numbers formed from the specified amplitudes and phases.
+
+    See also
+    --------
+    :func:`complex_decompose`
+    """
+    # TODO : consider using the complex exponential function,
+    # depending on the gradient properties
+    # return ampl * jnp.exp(phase * 1j)
+    return ampl * (jnp.cos(phase) + 1j * jnp.sin(phase))
+
+
+def amplitude_apply(func: Callable) -> Callable:
+    """
+    Decorator for applying a function to the amplitude component of a complex
+    tensor.
+    """
+
+    def wrapper(complex: Tensor) -> Tensor:
+        ampl, phase = complex_decompose(complex)
+        return complex_recompose(func(ampl), phase)
+
+    return wrapper
