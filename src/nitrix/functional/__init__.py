@@ -26,7 +26,7 @@ from .fourier import (
     instantaneous_phase,
     env_inst,
 )
-from .resid import residualise
+from .residual import residualise
 
 __all__ = [
     'cov',
