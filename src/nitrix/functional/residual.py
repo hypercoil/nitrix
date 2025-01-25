@@ -77,7 +77,13 @@ def document_linreg(f: Callable[[Any], Any]) -> Callable[[Any], Any]:
     return_mode : Literal[`residual`, `projection`]
         Indicates whether the residual or projection tensor should be
         returned. The `projection` tensor is the projection of `Y` onto the
-        span of `X` (i.e., the least-squares solution)."""
+        span of `X` (i.e., the least-squares solution).
+    proj_atol : float
+        Absolute tolerance for determining whether the projection tensor is
+        numerically close to `Y`. See `jax.numpy.isclose` for details.
+    proj_rtol : float
+        Relative tolerance for determining whether the projection tensor is
+        numerically close to `Y`. See `jax.numpy.isclose` for details."""
     fmt = NestedDocParse(
         regress_warning=regress_warning,
         regress_dim=regress_dim,
@@ -94,6 +100,8 @@ def residualise(
     rowvar: bool = True,
     l2: float = 0.0,
     return_mode: Literal['residual', 'projection'] = 'residual',
+    proj_atol: float = 1e-8,
+    proj_rtol: float = 1e-5,
 ) -> Tensor:
     """
     Residualise a tensor block via ordinary linear least squares.
@@ -139,9 +147,11 @@ def residualise(
         proj = betas.swapaxes(-1, -2) @ X
     else:
         proj = X @ betas
+    # Handle numerical error in projection
+    close_params = {'atol': proj_atol, 'rtol': proj_rtol}
     if return_mode == 'residual':
-        return Y - proj
+        return jnp.where(jnp.isclose(proj, Y, **close_params), 0, Y - proj)
     elif return_mode == 'projection':
-        return proj
+        return jnp.where(jnp.isclose(proj, Y, **close_params), Y, proj)
     else:
         raise ValueError(f'Invalid return_mode: {return_mode}')

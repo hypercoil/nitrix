@@ -34,6 +34,7 @@ dev = [
     "coverage[toml]",
     "ruff",
     "mypy",
+    "hypothesis",
     "pingouin",
     "gnureadline",
 ]
@@ -100,6 +101,7 @@ dev-dependencies = [
     "coverage[toml]",
     "ruff",
     "mypy",
+    "hypothesis",
     "pingouin",
     "gnureadline",
 ]

@@ -17,6 +17,15 @@ wheels = [
 ]
 
 [[package]]
+name = "attrs"
+version = "24.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/c8/6260f8ccc11f0917360fc0da435c5c9c7504e3db174d5a12a1494887b045/attrs-24.3.0.tar.gz", hash = "sha256:8f5c07333d543103541ba7be0e2ce16eeee8130cb0b3f9238ab904ce1e85baff", size = 805984 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/aa/ab0f7891a01eeb2d2e338ae8fecbe57fcebea1a24dbb64d45801bfab481d/attrs-24.3.0-py3-none-any.whl", hash = "sha256:ac96cd038792094f438ad1f6ff80837353805ac950cd2aa0e0625ef19850c308", size = 63397 },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -264,6 +273,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3a/41/8821db40f2b0dd9cc935d6838bc63776fb5bfb1df092f8d4698ec29ada6a/gnureadline-8.2.13-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:6c550d08c4d2882a83293a724b14a262ee5078fd4fa7acdc78aa59cab26ae343", size = 162630 },
     { url = "https://files.pythonhosted.org/packages/16/8e/9f716757f875dfea0c9f5a323e103eec8a546e650a37c7f133a9b86c2c8f/gnureadline-8.2.13-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a7d6e3f5d9fd0cf8a84fb382d4e3ad2914331be4d929f17d50da01f1571c4b03", size = 650930 },
     { url = "https://files.pythonhosted.org/packages/ee/2c/29cc2b99b9c7f49041edefe3c051c566e60080631dd4241cae269a2f067b/gnureadline-8.2.13-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f59275168cae1b02ca1ec7586a9804bb04ce427df92f8582a80d16e96c846b78", size = 654619 },
+]
+
+[[package]]
+name = "hypothesis"
+version = "6.124.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "sortedcontainers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4e/a1/2853435ebd5a5850a3d288ce5078e0226532907abf923be187b6791c0325/hypothesis-6.124.3.tar.gz", hash = "sha256:cfb17e98daa572b51a8f26b3e2ea5b0f76cdae750ac746e0f561a426a77828ba", size = 419200 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/f8/785307397987d2623c99376a63150da92c39117aab192d46af7dc9017dbb/hypothesis-6.124.3-py3-none-any.whl", hash = "sha256:8f7a2c995e4d5f110b7a427ddeda323e05277730e2885fafc23da84dcbb0667e", size = 481959 },
 ]
 
 [[package]]
@@ -541,6 +564,7 @@ dependencies = [
 dev = [
     { name = "coverage", extra = ["toml"] },
     { name = "gnureadline" },
+    { name = "hypothesis" },
     { name = "mypy" },
     { name = "nox" },
     { name = "pingouin" },
@@ -553,6 +577,7 @@ dev = [
 dev = [
     { name = "coverage", extra = ["toml"] },
     { name = "gnureadline" },
+    { name = "hypothesis" },
     { name = "mypy" },
     { name = "nox" },
     { name = "pingouin" },
@@ -565,6 +590,7 @@ dev = [
 requires-dist = [
     { name = "coverage", extras = ["toml"], marker = "extra == 'dev'" },
     { name = "gnureadline", marker = "extra == 'dev'" },
+    { name = "hypothesis", marker = "extra == 'dev'" },
     { name = "jax", specifier = ">=0.3.16" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "nox", marker = "extra == 'dev'" },
@@ -579,6 +605,7 @@ requires-dist = [
 dev = [
     { name = "coverage", extras = ["toml"] },
     { name = "gnureadline" },
+    { name = "hypothesis" },
     { name = "mypy" },
     { name = "nox" },
     { name = "pingouin" },
@@ -1044,6 +1071,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/71/39/171f1c67cd00715f190ba0b100d606d440a28c93c7714febeca8b79af85e/six-1.16.0.tar.gz", hash = "sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926", size = 34041 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/5a/e7c31adbe875f2abbb91bd84cf2dc52d792b5a01506781dbcf25c91daf11/six-1.16.0-py2.py3-none-any.whl", hash = "sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254", size = 11053 },
+]
+
+[[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88", size = 30594 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575 },
 ]
 
 [[package]]
