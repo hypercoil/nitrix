@@ -35,6 +35,9 @@ from .util import (
     complex_decompose,
     complex_recompose,
     amplitude_apply,
+    apply_mask,
+    conform_mask,
+    mask_tensor,
 )
 
 __all__ = [
@@ -66,4 +69,7 @@ __all__ = [
     'complex_decompose',
     'complex_recompose',
     'amplitude_apply',
+    'apply_mask',
+    'conform_mask',
+    'mask_tensor',
 ]

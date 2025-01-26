@@ -36,6 +36,9 @@ from nitrix._internal import (
     complex_decompose,
     complex_recompose,
     amplitude_apply,
+    apply_mask,
+    conform_mask,
+    mask_tensor,
 )
 
 
@@ -332,3 +335,53 @@ def test_complex_views():
 
     out = amplitude_apply(jnp.log)(Z)
     assert np.all(out == jnp.log(X) * jnp.exp(Y * 1j))
+
+def test_mask():
+    msk = jnp.array([1, 1, 0, 0, 0], dtype=bool)
+    tsr = np.random.rand(5, 5, 5)
+    tsr = jnp.asarray(tsr)
+    mskd = apply_mask(tsr, msk, axis=0)
+    assert mskd.shape == (2, 5, 5)
+    assert np.all(mskd == tsr[:2])
+    mskd = apply_mask(tsr, msk, axis=1)
+    assert mskd.shape == (5, 2, 5)
+    assert np.all(mskd == tsr[:, :2])
+    mskd = apply_mask(tsr, msk, axis=2)
+    assert np.all(mskd == tsr[:, :, :2])
+    assert mskd.shape == (5, 5, 2)
+    mskd = apply_mask(tsr, msk, axis=-1)
+    assert np.all(mskd == tsr[:, :, :2])
+    assert mskd.shape == (5, 5, 2)
+    mskd = apply_mask(tsr, msk, axis=-2)
+    assert np.all(mskd == tsr[:, :2])
+    assert mskd.shape == (5, 2, 5)
+    mskd = apply_mask(tsr, msk, axis=-3)
+    assert np.all(mskd == tsr[:2])
+    assert mskd.shape == (2, 5, 5)
+
+    mask = conform_mask(tsr[0, 0], msk, axis=-1, batch=True)
+    assert mask.shape == (5,)
+    assert tsr[0, 0][mask].size == 2
+    mask = conform_mask(tsr, msk, axis=-1)
+    assert mask.shape == (5, 5, 5)
+    assert tsr[mask].size == 50
+    mask = conform_mask(tsr, jnp.outer(msk, msk), axis=-1, batch=True)
+    assert mask.shape == (5, 5, 5)
+    assert tsr[mask].size == 20
+
+    jconform = jax.jit(conform_mask, static_argnames=('axis', 'batch'))
+    mask = jconform(tsr[0, 0], msk, axis=-1, batch=True)
+    assert mask.shape == (5,)
+    assert tsr[0, 0][mask].size == 2
+    mask = jconform(tsr, msk, axis=-1)
+    assert mask.shape == (5, 5, 5)
+    assert tsr[mask].size == 50
+    mask = jconform(tsr, jnp.outer(msk, msk), axis=-1, batch=True)
+    assert mask.shape == (5, 5, 5)
+    assert tsr[mask].size == 20
+
+    jtsrmsk = jax.jit(mask_tensor, static_argnames=('axis',))
+    mskd = jtsrmsk(tsr, msk, axis=-1)
+    assert (mskd != 0).sum() == 50
+    mskd = jtsrmsk(tsr, msk, axis=-1, fill_value=float('nan'))
+    assert np.isnan(mskd).sum() == 75
