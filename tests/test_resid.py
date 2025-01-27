@@ -5,11 +5,11 @@
 Unit tests for residualisation
 """
 import pytest
-import jax
-import jax.numpy as jnp
 import hypothesis
 from hypothesis import given, note, strategies as st
 from hypothesis.extra import numpy as npst
+import jax
+import jax.numpy as jnp
 from nitrix.functional import residualise
 from nitrix._internal.testutil import cfg_variants_test
 

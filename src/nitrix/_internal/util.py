@@ -251,8 +251,10 @@ def fold_and_promote(tensor: Tensor, axis: int, n_folds: int) -> Tensor:
 def demote_and_unfold(
     tensor: Tensor,
     target_address: int,
-    axes: Union[int, Tuple[int, ...]],
+    axes: Union[int, Tuple[int, ...]] | None = None,
 ):
+    if axes is None:
+        axes = (target_address - 1, target_address)
     demoted = jnp.transpose(tensor, demote_axis(tensor.ndim, target_address))
     return unfold_axes(demoted, axes)
 
@@ -471,7 +473,7 @@ def promote_to_rank(tensor: Tensor, rank: int) -> Tensor:
     dimensions. If the tensor is already rank-``rank``, this is a no-op.
     """
     ndim = tensor.ndim
-    if ndim == rank:
+    if ndim >= rank:
         return tensor
     return tensor.reshape((1,) * (rank - ndim) + tensor.shape)
 
@@ -591,7 +593,7 @@ def conform_mask(
     tensor: Tensor,
     mask: Tensor,
     axis: Sequence[int],
-    batch=False,
+    batch: bool = False,
 ) -> Tensor:
     """
     Conform a mask or weight for elementwise applying to a tensor.
@@ -610,11 +612,12 @@ def conform_mask(
     if batch and tensor.ndim == 1:
         batch = False
     if isinstance(axis, int):
-        if not batch:
+        if batch:
+            axis = (axis,)
+        else:
             shape_pfx = tensor.shape[:axis]
             mask = jnp.tile(mask, (*shape_pfx, 1))
             return mask
-        axis = (axis,)
     if batch:
         axis = (0, *axis)
     # TODO: this feels like it will produce unexpected behaviour.

@@ -5,6 +5,9 @@
 Unit tests for tensor utility functions.
 """
 import pytest
+from hypothesis import given
+import hypothesis.strategies as st
+import hypothesis.extra.numpy as npst
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -109,6 +112,54 @@ def test_atleast_4d_multiple():
     )
 
 
+@st.composite
+def generate_array_for_folding(
+    draw,
+    max_ndim: int = 5,
+):
+    rank = draw(st.integers(min_value=2, max_value=max_ndim))
+    axis_to_fold = draw(st.integers(
+        min_value=-rank,
+        max_value=rank - 1
+    ))
+    ax_std = standard_axis_number(axis_to_fold, rank)
+    folded_shape = draw(npst.array_shapes(
+        min_dims=rank + 1,
+        max_dims=rank + 1,
+    ))
+    folded_size = folded_shape[ax_std]
+    num_folds = folded_shape[ax_std + 1]
+    shape = (
+        *folded_shape[:ax_std],
+        folded_size * num_folds,
+        *folded_shape[ax_std + 2:],
+    )
+    arr = jnp.arange(np.prod(shape)).reshape(shape)
+    return arr, axis_to_fold, folded_size, num_folds
+
+
+@given(array=generate_array_for_folding())
+def test_fold_and_unfold(array):
+    X, axis, folded_size, num_folds = array
+    Y = fold_axis(X, axis, num_folds)
+    ax_std = standard_axis_number(axis, X.ndim)
+    assert Y.shape[ax_std] == folded_size
+    assert Y.shape[ax_std + 1] == num_folds
+    Z = unfold_axes(Y, (ax_std, ax_std + 1))
+    assert np.all(Z == X)
+
+
+@given(array=generate_array_for_folding())
+def test_fold_and_promote(array):
+    X, axis, folded_size, num_folds = array
+    Y = fold_and_promote(X, axis, num_folds)
+    ax_std = standard_axis_number(axis, X.ndim)
+    assert Y.shape[0] == num_folds
+    assert Y.shape[ax_std + 1] == folded_size
+    Z = demote_and_unfold(Y, ax_std + 1)
+    assert np.all(Z == X)
+
+
 def test_axis_ops():
     shape = (2, 3, 5, 7, 11)
     X = np.empty(shape)
@@ -165,6 +216,7 @@ def test_axis_ops():
     assert Y.shape == (3, 400, 7)
     X2_hat = fold_and_promote(Y, -2, 4)
     assert np.all(X2 == X2_hat)
+
 
 def test_broadcast_ignoring():
     shapes = (
@@ -336,6 +388,7 @@ def test_complex_views():
     out = amplitude_apply(jnp.log)(Z)
     assert np.all(out == jnp.log(X) * jnp.exp(Y * 1j))
 
+
 def test_mask():
     msk = jnp.array([1, 1, 0, 0, 0], dtype=bool)
     tsr = np.random.rand(5, 5, 5)
@@ -362,10 +415,13 @@ def test_mask():
     mask = conform_mask(tsr[0, 0], msk, axis=-1, batch=True)
     assert mask.shape == (5,)
     assert tsr[0, 0][mask].size == 2
-    mask = conform_mask(tsr, msk, axis=-1)
-    assert mask.shape == (5, 5, 5)
-    assert tsr[mask].size == 50
-    mask = conform_mask(tsr, jnp.outer(msk, msk), axis=-1, batch=True)
+    mask0 = conform_mask(tsr, msk, axis=-1)
+    mask1 = conform_mask(tsr, msk, axis=(-1,), batch=False)
+    assert mask0.shape == (5, 5, 5)
+    assert tsr[mask0].size == 50
+    assert mask0.shape == mask1.shape
+    assert jnp.all(mask0 == mask1)
+    mask = conform_mask(tsr, jnp.outer(msk, msk), axis=(-1,), batch=True)
     assert mask.shape == (5, 5, 5)
     assert tsr[mask].size == 20
 
@@ -376,7 +432,7 @@ def test_mask():
     mask = jconform(tsr, msk, axis=-1)
     assert mask.shape == (5, 5, 5)
     assert tsr[mask].size == 50
-    mask = jconform(tsr, jnp.outer(msk, msk), axis=-1, batch=True)
+    mask = jconform(tsr, jnp.outer(msk, msk), axis=(-1,), batch=True)
     assert mask.shape == (5, 5, 5)
     assert tsr[mask].size == 20
 
