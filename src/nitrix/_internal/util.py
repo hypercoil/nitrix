@@ -293,6 +293,7 @@ def broadcast_ignoring(
 
     if isinstance(axis, int):
         axis = (axis,)
+    axis = sorted(axis)
     shape_x, shape_y = x.shape, y.shape
     shape_x_reduced, axes_x = _form_reduced_shape(axis, shape_x, x.ndim)
     shape_y_reduced, axes_y = _form_reduced_shape(axis, shape_y, y.ndim)

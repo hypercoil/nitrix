@@ -5,6 +5,7 @@
 Unit tests for tensor utility functions.
 """
 import pytest
+import hypothesis
 from hypothesis import given
 import hypothesis.strategies as st
 import hypothesis.extra.numpy as npst
@@ -43,6 +44,103 @@ from nitrix._internal import (
     conform_mask,
     mask_tensor,
 )
+from nitrix._internal.testutil import cfg_variants_test
+
+
+@st.composite
+def generate_array_for_folding(
+    draw,
+    max_ndim: int = 5,
+):
+    rank = draw(st.integers(min_value=2, max_value=max_ndim))
+    axis_to_fold = draw(st.integers(
+        min_value=-rank,
+        max_value=rank - 1,
+    ))
+    ax_std = standard_axis_number(axis_to_fold, rank)
+    folded_shape = draw(npst.array_shapes(
+        min_dims=rank + 1,
+        max_dims=rank + 1,
+    ))
+    folded_size = folded_shape[ax_std]
+    num_folds = folded_shape[ax_std + 1]
+    shape = (
+        *folded_shape[:ax_std],
+        folded_size * num_folds,
+        *folded_shape[ax_std + 2:],
+    )
+    arr = jnp.arange(np.prod(shape)).reshape(shape)
+    return arr, axis_to_fold, folded_size, num_folds
+
+
+@st.composite
+def generate_arrays_for_broadcast_ignoring(
+    draw,
+    max_ndim: int = 5,
+):
+    rank = draw(st.integers(min_value=2, max_value=max_ndim))
+    shape_1 = draw(npst.array_shapes(min_dims=rank, max_dims=rank))
+    shape_2_bc = draw(npst.broadcastable_shapes(shape_1))
+    rank_min = min(rank, len(shape_2_bc))
+    rank_max = max(rank, len(shape_2_bc))
+    shape_2_src = draw(npst.array_shapes(min_dims=rank_min, max_dims=rank_min))
+    num_ignore = draw(st.integers(min_value=0, max_value=rank_min))
+    if num_ignore > 0:
+        ignore = set(draw(st.lists(
+            st.integers(min_value=-rank_min, max_value=-1),
+            min_size=num_ignore,
+            max_size=num_ignore,
+            unique=True,
+        )))
+    else:
+        ignore = set()
+    shape_2_rev = tuple(
+        shape_2_src[-(i + 1)]
+        if -(i + 1) in ignore
+        else shape
+        for i, shape in enumerate(shape_2_bc[::-1])
+    )
+    shape_2 = shape_2_rev[::-1]
+    switch = draw(st.booleans())
+    if switch:
+        shape_1, shape_2 = shape_2, shape_1
+    arr_1 = jnp.arange(np.prod(shape_1)).reshape(shape_1)
+    arr_2 = jnp.arange(np.prod(shape_2)).reshape(shape_2)
+    shape_1_padded_rev = _seq_pad(shape_1, rank_max, pad='first', pad_value=1)[::-1]
+    shape_2_padded_rev = _seq_pad(shape_2, rank_max, pad='first', pad_value=1)[::-1]
+    shape_1_out = tuple(
+        shape
+        if -(i + 1) in ignore
+        else max(shape, shape_2_padded_rev[i])
+        for i, shape in enumerate(shape_1_padded_rev)
+    )[::-1]
+    shape_2_out = tuple(
+        shape
+        if -(i + 1) in ignore
+        else max(shape, shape_1_padded_rev[i])
+        for i, shape in enumerate(shape_2_padded_rev)
+    )[::-1]
+    return arr_1, arr_2, tuple(ignore), shape_1_out, shape_2_out
+
+
+@st.composite
+def generate_array_for_vmoo(
+    draw,
+    max_batch_ndim: int = 5,
+):
+    vmoo_fn_idx = draw(
+        st.integers(min_value=0, max_value=len(VMOO_TEST_FUNCTIONS) - 1)
+    )
+    vmoo_name, vmoo_fn, vmoo_rank = VMOO_TEST_FUNCTIONS[vmoo_fn_idx]
+    batch_rank = draw(st.integers(min_value=0, max_value=max_batch_ndim))
+    batch_shape = draw(npst.array_shapes(min_dims=batch_rank, max_dims=batch_rank))
+    obs_dim = draw(st.integers(min_value=2, max_value=20))
+    if vmoo_name == 'sum':
+        shape = (*batch_shape, obs_dim)
+    else:
+        shape = (*batch_shape, obs_dim, obs_dim)
+    arr = jnp.arange(np.prod(shape)).reshape(shape)
+    return arr, vmoo_fn, vmoo_rank, batch_rank
 
 
 @pytest.mark.parametrize("weight, expected_shape, expected_values", [
@@ -110,32 +208,6 @@ def test_atleast_4d_multiple():
         atleast_4d(jnp.asarray(0), jnp.asarray(0)) ==
         (jnp.zeros((1, 1, 1, 1)), jnp.zeros((1, 1, 1, 1)))
     )
-
-
-@st.composite
-def generate_array_for_folding(
-    draw,
-    max_ndim: int = 5,
-):
-    rank = draw(st.integers(min_value=2, max_value=max_ndim))
-    axis_to_fold = draw(st.integers(
-        min_value=-rank,
-        max_value=rank - 1
-    ))
-    ax_std = standard_axis_number(axis_to_fold, rank)
-    folded_shape = draw(npst.array_shapes(
-        min_dims=rank + 1,
-        max_dims=rank + 1,
-    ))
-    folded_size = folded_shape[ax_std]
-    num_folds = folded_shape[ax_std + 1]
-    shape = (
-        *folded_shape[:ax_std],
-        folded_size * num_folds,
-        *folded_shape[ax_std + 2:],
-    )
-    arr = jnp.arange(np.prod(shape)).reshape(shape)
-    return arr, axis_to_fold, folded_size, num_folds
 
 
 @given(array=generate_array_for_folding())
@@ -257,6 +329,26 @@ def test_broadcast_ignoring():
         assert Y.shape == y_out
 
 
+@cfg_variants_test(
+    broadcast_ignoring,
+    jit_params={'static_argnames': ('axis',)},
+)
+@given(arrays=generate_arrays_for_broadcast_ignoring())
+def test_broadcast_ignoring_pbt(arrays, fn):
+    arr_1, arr_2, ignore, shape_1_out, shape_2_out = arrays
+    X, Y = fn(arr_1, arr_2, ignore)
+    assert X.shape == shape_1_out
+    assert Y.shape == shape_2_out
+
+
+VMOO_TEST_FUNCTIONS = {
+    0: ('sum', jnp.sum, 1),
+    1: ('corr', jnp.corrcoef, 2),
+    2: ('diag', jnp.diagonal, 2),
+    3: ('trace', jnp.trace, 2),
+}
+
+
 def vmap_over_outer_test_arg():
     test_obs = 100
     offset = 10
@@ -303,6 +395,28 @@ def test_vmap_over_outer():
     ref = jax.vmap(jax.vmap(jnp.outer, (None, 0), 0), (0, 1), 1)(L, R)
     assert out.shape == (2, 5, 13, 4)
     assert np.allclose(out, ref)
+
+
+@hypothesis.settings(deadline=500)
+@given(array=generate_array_for_vmoo())
+def test_vmap_over_outer_pbt(array):
+    arr, vmoo_fn, vmoo_rank, batch_rank = array
+    ref_fn = vmoo_fn
+    for i in range(0, -batch_rank, -1):
+        ref_fn = jax.vmap(ref_fn, -i, -i)
+
+    jaxpr_test = jax.make_jaxpr(vmap_over_outer(vmoo_fn, vmoo_rank))((arr,))
+    jaxpr_ref = jax.make_jaxpr(ref_fn)(arr)
+    assert jaxpr_test.jaxpr.pretty_print() == jaxpr_ref.jaxpr.pretty_print()
+
+    out = vmap_over_outer(vmoo_fn, vmoo_rank)((arr,))
+    ref = ref_fn(arr)
+    assert np.allclose(out, ref)
+
+    out = jax.jit(vmap_over_outer(vmoo_fn, vmoo_rank))((arr,))
+    ref = jax.jit(ref_fn)(arr)
+    assert np.allclose(out, ref)
+
 
 def test_argsort():
     assert (
