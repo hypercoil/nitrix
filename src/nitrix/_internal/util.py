@@ -431,9 +431,8 @@ def orient_and_conform(
     axis : tuple
         Output axes along which the tensor's input dimensions should be
         reoriented. This should be an n-tuple, where n is the number of axes
-        in the input tensor. These axes must be in the same order in the input
-        tensor; if they are not, the input must be transposed before being
-        oriented.
+        in the input tensor. If these axes are not in the same order in the
+        input tensor, the input is transposed before being oriented.
     reference : tensor or None
         Reference tensor. The output is unsqueezed so that its total
         dimension equals that of the reference. Either a reference or an
@@ -454,17 +453,18 @@ def orient_and_conform(
     elif dim is None:
         dim = reference.ndim  # type: ignore
     # can't rely on this when we compile with jit
+    #TODO: Would there be any benefit to checkify this?
     assert (
         len(axis) == input.ndim
     ), 'Output orientation axis required for each input dimension'
+    standard_axes = [standard_axis_number(ax, dim) for ax in axis]
+    axis_order = argsort(standard_axes)
+    # I think XLA will be smart enough to know when this is a no-op
+    input = input.transpose(axis_order)
+    standard_axes = set(standard_axes)
     shape = [1] * dim
-    asgn = [0] * dim
-    for size, ax in zip(input.shape, axis):
+    for size, ax in zip(input.shape, standard_axes):
         shape[ax] = size
-        assert (
-            sum(asgn[ax:]) == 0
-        ), 'All axes must be in order. Transpose the input if necessary.'
-        asgn[ax] = 1
     return input.reshape(*shape)
 
 

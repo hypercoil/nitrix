@@ -6,7 +6,7 @@ Unit tests for tensor utility functions.
 """
 import pytest
 import hypothesis
-from hypothesis import given
+from hypothesis import assume, given
 import hypothesis.strategies as st
 import hypothesis.extra.numpy as npst
 import jax
@@ -45,6 +45,14 @@ from nitrix._internal import (
     mask_tensor,
 )
 from nitrix._internal.testutil import cfg_variants_test
+
+
+VMOO_TEST_FUNCTIONS = {
+    0: ('sum', jnp.sum, 1),
+    1: ('corr', jnp.corrcoef, 2),
+    2: ('diag', jnp.diagonal, 2),
+    3: ('trace', jnp.trace, 2),
+}
 
 
 @st.composite
@@ -141,6 +149,27 @@ def generate_array_for_vmoo(
         shape = (*batch_shape, obs_dim, obs_dim)
     arr = jnp.arange(np.prod(shape)).reshape(shape)
     return arr, vmoo_fn, vmoo_rank, batch_rank
+
+
+@st.composite
+def generate_arrays_for_orient_conform(
+    draw,
+    max_ndim: int = 5,
+):
+    ref_ndim = draw(st.integers(min_value=2, max_value=max_ndim))
+    src_ndim = draw(st.integers(min_value=2, max_value=ref_ndim))
+    src_axes = draw(st.lists(
+        st.integers(min_value=-ref_ndim, max_value=ref_ndim - 1),
+        min_size=src_ndim,
+        max_size=src_ndim,
+        unique=True,
+    ))
+    src_axes_std = set(standard_axis_number(ax, ref_ndim) for ax in src_axes)
+    assume(len(src_axes_std) == src_ndim)
+    ref_shape = draw(npst.array_shapes(min_dims=ref_ndim, max_dims=ref_ndim))
+    src_shape = tuple(ref_shape[ax] for ax in src_axes)
+    src_arr = jnp.arange(np.prod(src_shape)).reshape(src_shape)
+    return src_arr, tuple(src_axes), ref_shape
 
 
 @pytest.mark.parametrize("weight, expected_shape, expected_values", [
@@ -341,14 +370,6 @@ def test_broadcast_ignoring_pbt(arrays, fn):
     assert Y.shape == shape_2_out
 
 
-VMOO_TEST_FUNCTIONS = {
-    0: ('sum', jnp.sum, 1),
-    1: ('corr', jnp.corrcoef, 2),
-    2: ('diag', jnp.diagonal, 2),
-    3: ('trace', jnp.trace, 2),
-}
-
-
 def vmap_over_outer_test_arg():
     test_obs = 100
     offset = 10
@@ -449,6 +470,20 @@ def test_orient_and_conform():
 
     with pytest.raises(ValueError):
         orient_and_conform(X, 1, reference=None, dim=None)
+
+
+@cfg_variants_test(
+    orient_and_conform,
+    jit_params={'static_argnames': ('axis', 'dim')},
+)
+@given(array=generate_arrays_for_orient_conform())
+def test_orient_and_conform_pbt(array, fn):
+    X, axes, ref_shape = array
+    out0 = fn(X, axes, reference=jnp.empty(ref_shape))
+    out1 = fn(X, axes, dim=len(ref_shape))
+    out0 + jnp.empty(ref_shape) # implicit check for shape compatibility
+    out1 + jnp.empty(ref_shape) # implicit check for shape compatibility
+    assert out0.shape == out1.shape
 
 
 def test_promote():
