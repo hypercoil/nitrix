@@ -172,6 +172,36 @@ def generate_arrays_for_orient_conform(
     return src_arr, tuple(src_axes), ref_shape
 
 
+@st.composite
+def generate_arrays_for_max_size_extend(
+    draw,
+    max_ndim: int = 5,
+    num_arrays: int = 5,
+):
+    ref_ndim = draw(st.integers(min_value=2, max_value=max_ndim))
+    ref_shape = draw(npst.array_shapes(min_dims=ref_ndim, max_dims=ref_ndim))
+    other_ranks = draw(st.lists(
+        st.integers(min_value=2, max_value=ref_ndim),
+        min_size=num_arrays - 1,
+        max_size=num_arrays - 1,
+    ))
+    other_shapes = [
+        tuple(
+            draw(st.integers(min_value=1, max_value=ax))
+            for i, ax in enumerate(ref_shape)
+            if i >= ref_ndim - rank
+        )
+        for rank in other_ranks
+    ]
+    ref_arr = jnp.arange(np.prod(ref_shape)).reshape(ref_shape)
+    other_arrs = [
+        jnp.arange(np.prod(shape)).reshape(shape) for shape in other_shapes
+    ]
+    ref_idx = draw(st.integers(min_value=0, max_value=num_arrays - 1))
+    arr_list = other_arrs[:ref_idx] + [ref_arr] + other_arrs[ref_idx:]
+    return arr_list, ref_shape
+
+
 @pytest.mark.parametrize("weight, expected_shape, expected_values", [
     (jnp.array([1, 2, 3]), (3,), [1, 2, 3]),
     (jnp.array([[1, 2, 3], [4, 5, 6]]), (2, 1, 3), [1, 2, 3, 4, 5, 6]),
@@ -517,6 +547,19 @@ def test_extend():
     for i, o in enumerate(out):
         assert o.shape == (5, 5)
         assert jnp.isnan(o).sum() == targets[i]
+
+
+@cfg_variants_test(
+    extend_to_max_size,
+    jit_params={'static_argnames': ('fill',)},
+)
+@hypothesis.settings(deadline=500)
+@given(arrays=generate_arrays_for_max_size_extend())
+def test_extend_pbt(arrays, fn):
+    arr_list, ref_shape = arrays
+    out = fn(arr_list, fill=-1)
+    for o in out:
+        assert o.shape == ref_shape
 
 
 def test_complex_views():
