@@ -604,29 +604,17 @@ def test_mask():
     assert np.all(mskd == tsr[:2])
     assert mskd.shape == (2, 5, 5)
 
-    mask = conform_mask(tsr[0, 0], msk, axis=-1, batch=True)
-    assert mask.shape == (5,)
-    assert tsr[0, 0][mask].size == 2
     mask0 = conform_mask(tsr, msk, axis=-1)
-    mask1 = conform_mask(tsr, msk, axis=(-1,), batch=False)
+    mask1 = conform_mask(tsr, msk, axis=(-1,))
     assert mask0.shape == (5, 5, 5)
     assert tsr[mask0].size == 50
     assert mask0.shape == mask1.shape
     assert jnp.all(mask0 == mask1)
-    mask = conform_mask(tsr, jnp.outer(msk, msk), axis=(-1,), batch=True)
-    assert mask.shape == (5, 5, 5)
-    assert tsr[mask].size == 20
 
-    jconform = jax.jit(conform_mask, static_argnames=('axis', 'batch'))
-    mask = jconform(tsr[0, 0], msk, axis=-1, batch=True)
-    assert mask.shape == (5,)
-    assert tsr[0, 0][mask].size == 2
+    jconform = jax.jit(conform_mask, static_argnames=('axis',))
     mask = jconform(tsr, msk, axis=-1)
     assert mask.shape == (5, 5, 5)
     assert tsr[mask].size == 50
-    mask = jconform(tsr, jnp.outer(msk, msk), axis=(-1,), batch=True)
-    assert mask.shape == (5, 5, 5)
-    assert tsr[mask].size == 20
 
     jtsrmsk = jax.jit(mask_tensor, static_argnames=('axis',))
     mskd = jtsrmsk(tsr, msk, axis=-1)

@@ -594,7 +594,6 @@ def conform_mask(
     tensor: Tensor,
     mask: Tensor,
     axis: Sequence[int],
-    batch: bool = False,
 ) -> Tensor:
     """
     Conform a mask or weight for elementwise applying to a tensor.
@@ -605,31 +604,17 @@ def conform_mask(
     --------
     :func:`apply_mask`
     """
-    # TODO: require axis to be ordered as in `orient_and_conform`.
-    # Ideally, we should create a common underlying function for
-    # the shared parts of both operations (i.e., identifying
-    # aligning vs. expanding axes).
-    tensor = jnp.asarray(tensor)
-    if batch and tensor.ndim == 1:
-        batch = False
     if isinstance(axis, int):
-        if batch:
-            axis = (axis,)
-        else:
-            shape_pfx = tensor.shape[:axis]
-            mask = jnp.tile(mask, (*shape_pfx, 1))
-            return mask
-    if batch:
-        axis = (0, *axis)
-    # TODO: this feels like it will produce unexpected behaviour.
-    mask = mask.squeeze()
-    tile = list(tensor.shape)
-    shape = [1 for _ in range(tensor.ndim)]
-    for i, ax in enumerate(axis):
-        tile[ax] = 1
-        shape[ax] = mask.shape[i]
-    mask = jnp.tile(mask.reshape(*shape), tile)
-    return mask
+        axis = (axis,)
+    axis = sorted(standard_axis_number(ax, tensor.ndim) for ax in axis)
+    mask = orient_and_conform(mask, axis, reference=tensor)
+    axis = set(axis)
+    tile = [
+        1 if i in axis else e for i, e in enumerate(tensor.shape)
+    ]
+    if mask.ndim != tensor.ndim:
+        breakpoint()
+    return jnp.tile(mask, tile)
 
 
 def apply_mask(
