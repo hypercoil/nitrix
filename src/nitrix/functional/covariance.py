@@ -445,9 +445,10 @@ def pairedcorr(
     inddof = ddof
     if inddof is None:
         inddof = 1 - bias
-    varX = X.var(-1, keepdims=True, ddof=inddof)
-    varY = Y.var(-1, keepdims=True, ddof=inddof)
-    fact = jax.lax.sqrt(varX @ varY.swapaxes(-2, -1))
+    ax = -1 if rowvar else -2
+    varX = X.var(ax, ddof=inddof)[..., None]
+    varY = Y.var(ax, ddof=inddof)[..., None, :]
+    fact = jax.lax.sqrt(varX @ varY)
     return (
         pairedcov(X, Y, rowvar=rowvar, bias=bias, ddof=ddof, **params) / fact
     )
