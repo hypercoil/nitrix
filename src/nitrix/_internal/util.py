@@ -329,6 +329,10 @@ def apply_vmap_over_outer(
 ) -> PyTree:
     """
     Apply a function across the outer dimensions of a tensor.
+
+    This is intended to be a QoL feature for handling the common case of
+    applying a function across the outer dimensions of a tensor. The goal is
+    to eliminate the need for nested calls to ``jax.vmap``.
     """
     if isinstance(f_dim, int):
         f_dim = tree_map(lambda _: f_dim, x)
@@ -658,3 +662,44 @@ def mask_tensor(
 ):
     mask = conform_mask(tensor=tensor, mask=mask, axis=axis)
     return jnp.where(mask, tensor, fill_value)
+
+
+def masker(
+    mask: Tensor,
+    axis: int | Sequence[int],
+    output_axis: int | None = None,
+) -> Callable[[Tensor], Tensor]:
+    """
+    Create a JIT-compatible function that applies a mask to a tensor.
+
+    .. warning::
+
+        This function comes with some memory overhead. Specifically, it
+        closes over an integer array of the same size as the number of
+        ``True`` elements in the mask. When applying a very large mask to
+        a tensor, it is important to consider the trade-off between memory
+        and potential performance gains of JIT compilation.
+
+    .. warning::
+
+        Just like any JIT-compiled function, the resulting function must be
+        recompiled when the shape of the input tensor changes.
+    """
+    if isinstance(axis, int):
+        axis = (axis,)
+    mask_loc = jnp.where(mask)
+    if mask_loc[0].size == 0:
+        raise ValueError('Mask is empty')
+    assert len(mask_loc) == len(axis)
+    if output_axis is None:
+        output_axis = -1
+
+    @jax.jit
+    def apply_mask(tensor: Tensor) -> Tensor:
+        _axis = tuple(standard_axis_number(ax, tensor.ndim) for ax in axis)
+        indexer = [slice(None)] * tensor.ndim
+        for ax, loc in zip(_axis, mask_loc):
+            indexer[ax] = loc
+        return tensor[tuple(indexer)].swapaxes(0, output_axis)
+
+    return apply_mask
