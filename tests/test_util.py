@@ -638,13 +638,32 @@ def test_mask():
     assert np.isnan(mskd).sum() == 75
 
 
+def test_masker():
+    msk = jnp.array([1, 1, 0, 0, 0], dtype=bool)
+    tsr = np.random.rand(5, 5, 5)
+    tsr = jnp.asarray(tsr)
+    mskd = apply_mask(tsr, msk, axis=0)
+    assert mskd.shape == (2, 5, 5)
+    assert np.all(mskd == tsr[:2])
+
+    with pytest.raises(ValueError):
+        masker(jnp.asarray((0, 0, 0, 0, 0)), axis=0)
+
+
 # Note: no need to test with cfg_variants_test because masker isn't jitted:
 #       instead, it returns a jitted function.
 @hypothesis.settings(deadline=500)
-@given(array=draw_subcompatible_array(draw_method='runif', min_size=6))
-def test_masker_pbt(array):
+@given(
+    array=draw_subcompatible_array(draw_method='runif', min_size=6),
+    explicit_output_axis=st.booleans(),
+)
+def test_masker_pbt(array, explicit_output_axis):
     mask_arr, mask_axes, orig_shape = array
     mask_arr = (mask_arr > 0.5)
+    if len(mask_axes) == 1:
+        mask_axes = mask_axes[0]
+    else:
+        explicit_output_axis = True
     sign = tuple(ax < 0 for ax in mask_axes)
     if (
         (any(sign) and not all(sign)) or
@@ -654,14 +673,22 @@ def test_masker_pbt(array):
             masker(mask_arr, axis=mask_axes)
         return
     orig_arr = jnp.arange(np.prod(orig_shape)).reshape(orig_shape)
-    out = masker(mask_arr, axis=mask_axes, output_axis=-1)(orig_arr)
+    output_axis = -1 if explicit_output_axis else None
+    out = masker(mask_arr, axis=mask_axes, output_axis=output_axis)(orig_arr)
     standard_mask_axes = tuple(
         standard_axis_number(ax, orig_arr.ndim)
         for ax in mask_axes
     )
-    expected_shape = tuple(
-        orig_shape[i]
-        for i in range(len(orig_shape))
-        if i not in standard_mask_axes
-    ) + (mask_arr.sum().item(),)
+    if output_axis is not None:
+        expected_shape = tuple(
+            orig_shape[i]
+            for i in range(len(orig_shape))
+            if i not in standard_mask_axes
+        ) + (mask_arr.sum().item(),)
+    else:
+        expected_shape = apply_mask(
+            orig_arr,
+            mask_arr,
+            axis=mask_axes,
+        ).shape
     assert out.shape == expected_shape

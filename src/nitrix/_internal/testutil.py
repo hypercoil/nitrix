@@ -4,15 +4,18 @@
 """
 Utility functions for tests.
 """
-import pytest
+
 import jax
+import pytest
 
 
-def cfg_variants_test(base_fn: callable, jit_params = None):
+def cfg_variants_test(base_fn: callable, jit_params=None):
     if jit_params is None:
         jit_params = {}
+
     def test_variants(test: callable):
         return pytest.mark.parametrize(
             'fn', [base_fn, jax.jit(base_fn, **jit_params)]
         )(test)
+
     return test_variants

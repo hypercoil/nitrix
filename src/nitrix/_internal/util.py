@@ -457,10 +457,10 @@ def orient_and_conform(
     elif dim is None:
         dim = reference.ndim  # type: ignore
     # can't rely on this when we compile with jit
-    #TODO: Would there be any benefit to checkify this?
-    assert (
-        len(axis) == input.ndim
-    ), 'Output orientation axis required for each input dimension'
+    # TODO: Would there be any benefit to checkify this?
+    assert len(axis) == input.ndim, (
+        'Output orientation axis required for each input dimension'
+    )
     standard_axes = [standard_axis_number(ax, dim) for ax in axis]
     axis_order = argsort(standard_axes)
     # I think XLA will be smart enough to know when this is a no-op
@@ -613,11 +613,9 @@ def conform_mask(
     axis = sorted(standard_axis_number(ax, tensor.ndim) for ax in axis)
     mask = orient_and_conform(mask, axis, reference=tensor)
     axis = set(axis)
-    tile = [
-        1 if i in axis else e for i, e in enumerate(tensor.shape)
-    ]
-    if mask.ndim != tensor.ndim:
-        breakpoint()
+    tile = [1 if i in axis else e for i, e in enumerate(tensor.shape)]
+    # if mask.ndim != tensor.ndim:
+    #     breakpoint()
     return jnp.tile(mask, tile)
 
 
