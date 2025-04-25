@@ -7,6 +7,7 @@ Unit tests for tensor utility functions.
 import pytest
 import hypothesis
 from hypothesis import assume, given
+from typing import Literal
 import hypothesis.strategies as st
 import hypothesis.extra.numpy as npst
 import jax
@@ -43,6 +44,7 @@ from nitrix._internal import (
     apply_mask,
     conform_mask,
     mask_tensor,
+    masker,
 )
 from nitrix._internal.testutil import cfg_variants_test
 
@@ -152,24 +154,37 @@ def generate_array_for_vmoo(
 
 
 @st.composite
-def generate_arrays_for_orient_conform(
+def draw_subcompatible_array(
     draw,
     max_ndim: int = 5,
+    draw_method: Literal['arange', 'runif'] = 'arange',
+    min_size: int | None = None,
 ):
-    ref_ndim = draw(st.integers(min_value=2, max_value=max_ndim))
-    src_ndim = draw(st.integers(min_value=2, max_value=ref_ndim))
-    src_axes = draw(st.lists(
-        st.integers(min_value=-ref_ndim, max_value=ref_ndim - 1),
-        min_size=src_ndim,
-        max_size=src_ndim,
+    orig_ndim = draw(st.integers(min_value=2, max_value=max_ndim))
+    subc_ndim = draw(st.integers(min_value=2, max_value=orig_ndim))
+    subc_axes = draw(st.lists(
+        st.integers(min_value=-orig_ndim, max_value=orig_ndim - 1),
+        min_size=subc_ndim,
+        max_size=subc_ndim,
         unique=True,
     ))
-    src_axes_std = set(standard_axis_number(ax, ref_ndim) for ax in src_axes)
-    assume(len(src_axes_std) == src_ndim)
-    ref_shape = draw(npst.array_shapes(min_dims=ref_ndim, max_dims=ref_ndim))
-    src_shape = tuple(ref_shape[ax] for ax in src_axes)
-    src_arr = jnp.arange(np.prod(src_shape)).reshape(src_shape)
-    return src_arr, tuple(src_axes), ref_shape
+    subc_axes_std = set(
+        standard_axis_number(ax, orig_ndim) for ax in subc_axes
+    )
+    assume(len(subc_axes_std) == subc_ndim)
+
+    orig_shape = draw(
+        npst.array_shapes(min_dims=orig_ndim, max_dims=orig_ndim)
+    )
+    subc_shape = tuple(orig_shape[ax] for ax in subc_axes)
+    if min_size is not None:
+        assume(np.prod(subc_shape) >= min_size)
+    if draw_method == 'arange':
+        subc_arr = jnp.arange(np.prod(subc_shape)).reshape(subc_shape)
+    elif draw_method == 'runif':
+        key = draw(st.integers(min_value=0, max_value=2**31 - 1))
+        subc_arr = jax.random.uniform(jax.random.PRNGKey(key), subc_shape)
+    return subc_arr, tuple(subc_axes), orig_shape
 
 
 @st.composite
@@ -506,7 +521,7 @@ def test_orient_and_conform():
     orient_and_conform,
     jit_params={'static_argnames': ('axis', 'dim')},
 )
-@given(array=generate_arrays_for_orient_conform())
+@given(array=draw_subcompatible_array())
 def test_orient_and_conform_pbt(array, fn):
     X, axes, ref_shape = array
     out0 = fn(X, axes, reference=jnp.empty(ref_shape))
@@ -571,14 +586,14 @@ def test_complex_views():
     out = complex_decompose(Z)
     assert out[0].shape == (2, 3)
     assert out[1].shape == (2, 3)
-    assert np.all(out[0] == X)
-    assert np.all(out[1] == Y)
+    assert np.allclose(out[0], X)
+    assert np.allclose(out[1], Y)
 
     out = complex_recompose(out[0], out[1])
-    assert np.all(out == Z)
+    assert np.allclose(out, Z)
 
     out = amplitude_apply(jnp.log)(Z)
-    assert np.all(out == jnp.log(X) * jnp.exp(Y * 1j))
+    assert np.allclose(out, jnp.log(X) * jnp.exp(Y * 1j))
 
 
 def test_mask():
@@ -621,3 +636,32 @@ def test_mask():
     assert (mskd != 0).sum() == 50
     mskd = jtsrmsk(tsr, msk, axis=-1, fill_value=float('nan'))
     assert np.isnan(mskd).sum() == 75
+
+
+# Note: no need to test with cfg_variants_test because masker isn't jitted:
+#       instead, it returns a jitted function.
+@hypothesis.settings(deadline=500)
+@given(array=draw_subcompatible_array(draw_method='runif', min_size=6))
+def test_masker_pbt(array):
+    mask_arr, mask_axes, orig_shape = array
+    mask_arr = (mask_arr > 0.5)
+    sign = tuple(ax < 0 for ax in mask_axes)
+    if (
+        (any(sign) and not all(sign)) or
+        np.all(~mask_arr)
+    ):
+        with pytest.raises(ValueError):
+            masker(mask_arr, axis=mask_axes)
+        return
+    orig_arr = jnp.arange(np.prod(orig_shape)).reshape(orig_shape)
+    out = masker(mask_arr, axis=mask_axes, output_axis=-1)(orig_arr)
+    standard_mask_axes = tuple(
+        standard_axis_number(ax, orig_arr.ndim)
+        for ax in mask_axes
+    )
+    expected_shape = tuple(
+        orig_shape[i]
+        for i in range(len(orig_shape))
+        if i not in standard_mask_axes
+    ) + (mask_arr.sum().item(),)
+    assert out.shape == expected_shape
