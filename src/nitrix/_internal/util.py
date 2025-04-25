@@ -404,13 +404,13 @@ def vmap_over_outer(
     )
 
 
-def argsort(seq):
+def argsort(seq, reverse: bool = False):
     # Sources:
     # (1) https://stackoverflow.com/questions/3382352/ ...
     #     equivalent-of-numpy-argsort-in-basic-python
     # (2) http://stackoverflow.com/questions/3071415/ ...
     #     efficient-method-to-calculate-the-rank-vector-of-a-list-in-python
-    return sorted(range(len(seq)), key=seq.__getitem__)
+    return sorted(range(len(seq)), key=seq.__getitem__, reverse=reverse)
 
 
 def orient_and_conform(
@@ -687,12 +687,23 @@ def masker(
     """
     if isinstance(axis, int):
         axis = (axis,)
+    # The axis sequence must be either all negative or all nonnegative
+    sign = tuple(ax < 0 for ax in axis)
+    if any(sign) and not all(sign):
+        raise ValueError(
+            'Mixed signs in the axis selector can result in undefined '
+            'behaviour. Ensure that all axis entries are either negative '
+            '(i.e., the tensor is being indexed from the end) or nonnegative '
+            '(i.e., the tensor is being indexed from the beginning).'
+        )
+    axis_order = argsort(axis)
+    mask = mask.transpose(axis_order)
+    axis = tuple(axis[i] for i in axis_order)
+
     mask_loc = jnp.where(mask)
     if mask_loc[0].size == 0:
         raise ValueError('Mask is empty')
     assert len(mask_loc) == len(axis)
-    if output_axis is None:
-        output_axis = -1
 
     @jax.jit
     def apply_mask(tensor: Tensor) -> Tensor:
@@ -700,6 +711,31 @@ def masker(
         indexer = [slice(None)] * tensor.ndim
         for ax, loc in zip(_axis, mask_loc):
             indexer[ax] = loc
-        return tensor[tuple(indexer)].swapaxes(0, output_axis)
+        result = tensor[tuple(indexer)]
+
+        # Check if masked axes are consecutive. Numpy's mixed indexing logic
+        # follows a different path depending on whether the axes are consecutive
+        # or not. See:
+        # https://numpy.org/doc/stable/user/basics.indexing.html# ...
+        # ... combining-advanced-and-basic-indexing
+        # and find the section that contains the phrase:
+        # "Two cases of index combination need to be distinguished..."
+        masked_axes_are_consecutive = all(
+            _axis[i] + 1 == _axis[i + 1] for i in range(len(_axis) - 1)
+        )
+
+        if masked_axes_are_consecutive:
+            # When advanced indices are consecutive, they appear in the same
+            # position as in the original array
+            masked_axis = _axis[0]
+            result = jnp.moveaxis(result, masked_axis, 0)
+        else:
+            # When advanced indices are separated by slices, they come first
+            # in the result array
+            pass  # masked axis is already at index 0
+
+        if output_axis is not None:
+            return jnp.moveaxis(result, 0, output_axis)
+        return result
 
     return apply_mask

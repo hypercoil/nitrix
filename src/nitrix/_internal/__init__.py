@@ -38,6 +38,7 @@ from .util import (
     apply_mask,
     conform_mask,
     mask_tensor,
+    masker,
 )
 
 __all__ = [
