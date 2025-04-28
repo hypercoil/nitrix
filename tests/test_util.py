@@ -642,9 +642,18 @@ def test_masker():
     msk = jnp.array([1, 1, 0, 0, 0], dtype=bool)
     tsr = np.random.rand(5, 5, 5)
     tsr = jnp.asarray(tsr)
-    mskd = apply_mask(tsr, msk, axis=0)
+    mskd_ref = apply_mask(tsr, msk, axis=0)
+    mskd = masker(msk, axis=0)(tsr)
+    assert jnp.all(mskd == mskd_ref)
     assert mskd.shape == (2, 5, 5)
     assert np.all(mskd == tsr[:2])
+
+    mskd = masker(msk, axis=1, output_axis=0)(tsr)
+    assert mskd.shape == (2, 5, 5)
+    assert np.all(mskd == tsr[:, :2].swapaxes(0, 1))
+    mskd = masker(msk, axis=1)(tsr)
+    assert mskd.shape == (5, 2, 5)
+    assert np.all(mskd == tsr[:, :2])
 
     with pytest.raises(ValueError):
         masker(jnp.asarray((0, 0, 0, 0, 0)), axis=0)

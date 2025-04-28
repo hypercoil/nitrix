@@ -356,7 +356,11 @@ def apply_vmap_over_outer(
     #     if criterion:
     #         output_structure = _seq_pad(output_structure, ndmax + 1, 'last')
     #     else:
-    #         output_structure = _seq_pad(output_structure, ndmax + 1, 'first')
+    #         output_structure = _seq_pad(
+    #             output_structure,
+    #             ndmax + 1,
+    #             'first',
+    #         )
     # print(ndim, tuple(range(ndmax + 1)))
     output_structure = range(0, ndmax + 1)
     # print([(
@@ -458,9 +462,9 @@ def orient_and_conform(
         dim = reference.ndim  # type: ignore
     # can't rely on this when we compile with jit
     # TODO: Would there be any benefit to checkify this?
-    assert len(axis) == input.ndim, (
-        'Output orientation axis required for each input dimension'
-    )
+    assert (
+        len(axis) == input.ndim
+    ), 'Output orientation axis required for each input dimension'
     standard_axes = [standard_axis_number(ax, dim) for ax in axis]
     axis_order = argsort(standard_axes)
     # I think XLA will be smart enough to know when this is a no-op
@@ -712,8 +716,8 @@ def masker(
         result = tensor[tuple(indexer)]
 
         # Check if masked axes are consecutive. Numpy's mixed indexing logic
-        # follows a different path depending on whether the axes are consecutive
-        # or not. See:
+        # follows a different path depending on whether the axes are
+        # consecutive or not. See:
         # https://numpy.org/doc/stable/user/basics.indexing.html# ...
         # ... combining-advanced-and-basic-indexing
         # and find the section that contains the phrase:
@@ -726,14 +730,14 @@ def masker(
             # When advanced indices are consecutive, they appear in the same
             # position as in the original array
             masked_axis = _axis[0]
-            result = jnp.moveaxis(result, masked_axis, 0)
+            # result = jnp.moveaxis(result, masked_axis, 0)
         else:
             # When advanced indices are separated by slices, they come first
             # in the result array
-            pass  # masked axis is already at index 0
+            masked_axis = 0
 
         if output_axis is not None:
-            return jnp.moveaxis(result, 0, output_axis)
+            return jnp.moveaxis(result, masked_axis, output_axis)
         return result
 
     return apply_mask
