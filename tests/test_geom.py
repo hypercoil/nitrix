@@ -12,7 +12,7 @@ from numpyro.distributions import Normal
 from scipy.ndimage import gaussian_filter1d
 from sklearn.metrics.pairwise import haversine_distances
 from nitrix.functional.geom import (
-    cmass,
+    cmass_regular_grid,
     cmass_coor,
     spherical_geodesic,
     spherical_conv,
@@ -129,56 +129,62 @@ def coor_sph_rand():
     return coor_sph_rand
 
 
+def test_alias_cmass(X, Y):
+    from nitrix.functional.geom import cmass
+    assert np.allclose(cmass_regular_grid(X), cmass(X))
+    assert np.allclose(cmass_regular_grid(Y), cmass(Y))
+
+
 def test_cmass_negatives(X, Y):
-    out = cmass(X, [0])
-    ref = cmass(X, [-2])
+    out = cmass_regular_grid(X, [0])
+    ref = cmass_regular_grid(X, [-2])
     assert np.all(out == ref)
-    out = cmass(Y, [-1, -3])
-    ref = cmass(Y, [3, 1])
+    out = cmass_regular_grid(Y, [-1, -3])
+    ref = cmass_regular_grid(Y, [3, 1])
     assert np.allclose(out, ref)
-    out = cmass(Y, [0, -1])
-    ref = cmass(Y, [0, 3])
+    out = cmass_regular_grid(Y, [0, -1])
+    ref = cmass_regular_grid(Y, [0, 3])
     assert np.allclose(out, ref)
 
 
 def test_cmass_values(X, X_all, X_0, X_1):
-    out = cmass(X)
+    out = cmass_regular_grid(X)
     ref = X_all
     assert np.allclose(out, ref)
-    out = cmass(X, [0]).squeeze()
+    out = cmass_regular_grid(X, [0]).squeeze()
     ref = X_0
     assert np.allclose(out, ref)
-    out = cmass(X, [1]).squeeze()
+    out = cmass_regular_grid(X, [1]).squeeze()
     ref = X_1
     assert np.allclose(out, ref)
 
 
 def test_cmass_dim(Y):
-    out = cmass(Y, [-1, -3])
+    out = cmass_regular_grid(Y, [-1, -3])
     assert out.shape == (5, 4, 2)
-    out = cmass(Y, [-2])
+    out = cmass_regular_grid(Y, [-2])
     assert out.shape == (5, 3, 4, 1)
-    out = cmass(Y, [0, -3, -2])
+    out = cmass_regular_grid(Y, [0, -3, -2])
     assert out.shape == (4, 3)
 
 
 def test_cmass_coor(X, Y, Xcoor, Ycoor):
     out = cmass_coor(X.reshape(1, -1), Xcoor.reshape(2, -1))
-    ref = cmass(X)
+    ref = cmass_regular_grid(X)
     assert np.allclose(out, ref)
 
     out = cmass_coor(Y.reshape(1, -1), Ycoor.reshape(4, -1))
-    ref = cmass(Y)
+    ref = cmass_regular_grid(Y)
     assert np.allclose(out.squeeze(), ref.squeeze())
 
 
 def test_cmass_equivalence(X, Xcoor, Y, Ycoor):
     out = cmass_coor(X.reshape(1, -1), Xcoor.reshape(2, -1))
-    ref = cmass(X)
+    ref = cmass_regular_grid(X)
     assert np.allclose(out, ref)
 
     out = cmass_coor(Y.reshape(1, -1), Ycoor.reshape(4, -1))
-    ref = cmass(Y)
+    ref = cmass_regular_grid(Y)
     assert np.allclose(out.squeeze(), ref.squeeze())
 
 

@@ -37,6 +37,7 @@ dev = [
     "hypothesis",
     "pingouin",
     "gnureadline",
+    "numpyro",
 ]
 
 [project.urls]

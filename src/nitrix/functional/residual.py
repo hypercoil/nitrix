@@ -46,7 +46,7 @@ def document_linreg(f: Callable[[Any], Any]) -> Callable[[Any], Any]:
     |$C_X$| {desc_C_X} ||
     |$C_Y$| {desc_C_Y} ||
     |$obs$| {desc_obs} | Order controlled by `rowvar` |
-    |$*$  | Any number of intervening dimensions ||
+    | $*$ | Any number of intervening dimensions ||
     """.format(
         desc_C_X=(
             'Number of explanatory variables or data channels. For example, '

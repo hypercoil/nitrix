@@ -7,22 +7,14 @@ graph geometries.
 
 These computations include utilities for computing centres of mass, geodesics,
 convolutions, and derived quantities.
-
-Differentiably compute a weight's centre of mass.
-
-Functionality is available that operates on the "intrinsic" mesh grid
-coordinates of a tensor
-(:func:`cmass`, :func:`cmass_reference_displacement_grid`)
-or that takes the last axis of a tensor to correspond
-to different locations and accepts a second argument that indicates explicitly
-the coordinates of each location
-(:func:`cmass_coor`, :func:`diffuse`, :func:`cmass_reference_displacement`).
 """
 import warnings
-from functools import partial
-from typing import Any, Optional, Sequence
+from functools import partial, singledispatch
+from typing import Any, Literal, Optional, Sequence
 
+import jax
 import jax.numpy as jnp
+from jax.nn import relu
 
 from .._internal import Tensor
 from .._internal.docutil import (

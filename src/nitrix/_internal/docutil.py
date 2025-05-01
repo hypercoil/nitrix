@@ -20,6 +20,14 @@ def tensor_dimensions(dims: str):
     )
 
 
+def form_docstring(formatter: callable):
+    def decorator(func: callable):
+        fmt = formatter()
+        func.__doc__ = func.__doc__.format_map(fmt)
+        return func
+    return decorator
+
+
 class NestedDocParse(UserDict[str, str]):
     """
     Enable multiple documentation decorators to be applied to a single

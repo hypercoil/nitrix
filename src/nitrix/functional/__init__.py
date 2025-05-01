@@ -26,6 +26,25 @@ from .fourier import (
     instantaneous_phase,
     env_inst,
 )
+from .geom import (
+    cmass_regular_grid,
+    cmass_coor,
+    spherical_geodesic,
+    spherical_conv,
+    sphere_to_normals,
+    sphere_to_latlong,
+)
+from .matrix import (
+    symmetric,
+    recondition_eigenspaces,
+    delete_diagonal,
+    fill_diagonal,
+    sym2vec,
+    vec2sym,
+    squareform,
+    toeplitz,
+    toeplitz_2d,
+)
 from .residual import residualise
 
 __all__ = [
@@ -44,4 +63,13 @@ __all__ = [
     'product_filter',
     'product_filtfilt',
     'residualise',
+    'symmetric',
+    'recondition_eigenspaces',
+    'delete_diagonal',
+    'fill_diagonal',
+    'sym2vec',
+    'vec2sym',
+    'squareform',
+    'toeplitz',
+    'toeplitz_2d',
 ]

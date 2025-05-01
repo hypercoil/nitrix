@@ -19,7 +19,6 @@ from nitrix.functional import (
     vec2sym,
     squareform
 )
-from hypercoil.engine import vmap_over_outer
 
 
 TOL = 5e-3
