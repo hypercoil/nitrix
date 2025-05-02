@@ -161,3 +161,6 @@ cython_debug/
 
 # MACOS garbage
 .DS_Store
+
+# Test artefacts
+tests/artefacts/
