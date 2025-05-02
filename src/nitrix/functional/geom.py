@@ -8,13 +8,12 @@ graph geometries.
 These computations include utilities for computing centres of mass, geodesics,
 convolutions, and derived quantities.
 """
-import warnings
-from functools import partial, singledispatch
-from typing import Any, Literal, Optional, Sequence
 
-import jax
+import warnings
+from functools import partial
+from typing import Any, Optional, Sequence
+
 import jax.numpy as jnp
-from jax.nn import relu
 
 from .._internal import Tensor
 from .._internal.docutil import (
@@ -57,16 +56,12 @@ def document_cmass_coor() -> NestedDocParse:
     | $L$ | {desc_L} | {desc_L_notes} |
     | $D$ | {desc_D} | {desc_D_notes} |
     """.format(
-        desc_W=(
-            'Number of weight distributions over the coordinates.'
-        ),
+        desc_W=('Number of weight distributions over the coordinates.'),
         desc_W_notes=(
             'For example, if the input tensor represents a set of weights '
             'over regions of an atlas, then $W$ is the number of regions.'
         ),
-        desc_L=(
-            'Number of coordinates.'
-        ),
+        desc_L=('Number of coordinates.'),
         desc_L_notes=(
             'For example, if the input tensor represents a set of weights '
             'over regions of an atlas, then $L$ is the number of voxels or '
@@ -95,12 +90,8 @@ def document_sphere_coordinate_change() -> NestedDocParse:
     | $2$ | {desc_latlong} ||
     | $3$ | {desc_normal} ||
     """.format(
-        desc_latlong=(
-            'Latitude and longitude coordinates.'
-        ),
-        desc_normal=(
-            'Normal vector coordinates.'
-        ),
+        desc_latlong=('Latitude and longitude coordinates.'),
+        desc_normal=('Normal vector coordinates.'),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
     normal_coor_spec = """
@@ -131,18 +122,10 @@ def document_spherical_geodesic() -> NestedDocParse:
     | $N_Y$ | {desc_N_Y} ||
     | $3$ | {desc_D} | {desc_D_notes} |
     """.format(
-        desc_N_X=(
-            'Number of coordinates in X.'
-        ),
-        desc_N_Y=(
-            'Number of coordinates in Y.'
-        ),
-        desc_D=(
-            'Dimension of the embedding space.'
-        ),
-        desc_D_notes=(
-            'This must be 3.'
-        ),
+        desc_N_X=('Number of coordinates in X.'),
+        desc_N_Y=('Number of coordinates in Y.'),
+        desc_D=('Dimension of the embedding space.'),
+        desc_D_notes=('This must be 3.'),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
     fmt = NestedDocParse(
@@ -162,15 +145,9 @@ def document_spatial_conv() -> NestedDocParse:
     | $C$ | {desc_C} ||
     | $D$ | {desc_D} ||
     """.format(
-        desc_N=(
-            'Number of coordinates.'
-        ),
-        desc_C=(
-            'Number of data channels.'
-        ),
-        desc_D=(
-            'Dimension of the embedding space.'
-        ),
+        desc_N=('Number of coordinates.'),
+        desc_C=('Number of data channels.'),
+        desc_D=('Dimension of the embedding space.'),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
     fmt = NestedDocParse(
@@ -261,37 +238,6 @@ def cmass(
     return cmass_regular_grid(X, axes=axes, na_rm=na_rm)
 
 
-def cmass_reference_displacement_grid(
-    weight: Tensor,
-    refs: Tensor,
-    axes: Optional[Sequence[int]] = None,
-    na_rm: bool = False,
-) -> Tensor:
-    """
-    Displacement of centres of mass from reference points -- grid version.
-
-    See :func:`cmass_regular_grid` for parameter specifications.
-    """
-    cm = cmass_regular_grid(weight, axes=axes, na_rm=na_rm)
-    return cm - refs
-
-
-def cmass_reference_displacement_coor(
-    weight: Tensor,
-    refs: Tensor,
-    coor: Tensor,
-    radius: Optional[float] = None,
-) -> Tensor:
-    """
-    Displacement of centres of mass from reference points -- explicit
-    coordinate version.
-
-    See :func:`cmass_coor` for parameter specifications.
-    """
-    cm = cmass_coor(weight, coor, radius=radius)
-    return cm - refs
-
-
 @document_cmass_coor
 def cmass_coor(
     X: Tensor,
@@ -330,12 +276,47 @@ def cmass_coor(
     denom = X.sum(-1)
     if radius is not None:
         cmass_euc = num / denom
-        return radius * cmass_euc / jnp.linalg.norm(
-            cmass_euc,
-            ord=2,
-            axis=-2,
+        return (
+            radius
+            * cmass_euc
+            / jnp.linalg.norm(
+                cmass_euc,
+                ord=2,
+                axis=-2,
+            )
         )
     return num / denom
+
+
+def cmass_reference_displacement_grid(
+    weight: Tensor,
+    refs: Tensor,
+    axes: Optional[Sequence[int]] = None,
+    na_rm: bool = False,
+) -> Tensor:
+    """
+    Displacement of centres of mass from reference points -- grid version.
+
+    See :func:`cmass_regular_grid` for parameter specifications.
+    """
+    cm = cmass_regular_grid(weight, axes=axes, na_rm=na_rm)
+    return cm - refs
+
+
+def cmass_reference_displacement_coor(
+    weight: Tensor,
+    refs: Tensor,
+    coor: Tensor,
+    radius: Optional[float] = None,
+) -> Tensor:
+    """
+    Displacement of centres of mass from reference points -- explicit
+    coordinate version.
+
+    See :func:`cmass_coor` for parameter specifications.
+    """
+    cm = cmass_coor(weight, coor, radius=radius)
+    return cm - refs
 
 
 # TODO: Switch to using kernel.gaussian_kernel instead of this everywhere
@@ -588,8 +569,6 @@ def _euc_dist(X, Y=None):
     """
     Euclidean L2 norm metric.
     """
-    if Y is None:
-        Y = X
     X = X[..., None, :]
     Y = Y[..., None, :, :]
     X, Y = jnp.broadcast_arrays(X, Y)

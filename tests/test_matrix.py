@@ -60,11 +60,17 @@ def test_symmetric(B):
     out = symmetric(B)
     ref = out.swapaxes(-1, -2)
     assert approx(out, ref)
+    out = symmetric(B, skew=True)
+    ref = -out.swapaxes(-1, -2)
+    assert approx(out, ref)
 
 
 def test_toeplitz(c, r):
     out = toeplitz(c, r)
     ref = toeplitz_ref(c, r)
+    assert approx(out, ref)
+    out = toeplitz(c)
+    ref = toeplitz_ref(c)
     assert approx(out, ref)
 
 
@@ -126,6 +132,10 @@ def test_recondition():
     assert np.all(np.isnan(d(V @ V.T)))
 
     arg = recondition_eigenspaces(V @ V.T, key=key, psi=1e-3, xi=1e-3)
+    assert np.logical_not(np.any(np.isnan(d(arg))))
+
+    W = jnp.arange(49).reshape(7, 7)
+    arg = recondition_eigenspaces(W @ W.T, key=key, psi=1e-3)
     assert np.logical_not(np.any(np.isnan(d(arg))))
 
 

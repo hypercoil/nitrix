@@ -4,9 +4,10 @@
 """
 Special matrix functions.
 """
+
 import math
 from functools import partial
-from typing import Literal, Optional, Tuple
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -28,6 +29,7 @@ from nitrix._internal.util import conform_mask, vmap_over_outer
 #   implementation of this family of transformations to the user.
 # - `expand_outer`: Just use `jnp.einsum` for this. It's nealry always more
 #   readable than the implementation downstream.
+
 
 @form_docstring
 def document_symmetric() -> NestedDocParse:
@@ -89,8 +91,8 @@ def symmetric(
 def recondition_eigenspaces(
     A: Tensor,
     psi: float,
-    xi: float,
-    key: 'jax.random.PRNGKey',
+    xi: float = 0,
+    key: Optional['jax.random.PRNGKey'] = None,
 ) -> Tensor:
     r"""
     Recondition a positive semidefinite matrix such that it has no zero
@@ -188,7 +190,7 @@ def toeplitz_2d(
 
         Use the :func:`toeplitz` function for an API that supports any number
         of leading dimensions.
-    
+
     .. note::
 
         The input vectors ``c`` and ``r`` must contain the same first element

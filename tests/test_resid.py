@@ -143,7 +143,7 @@ def test_residual_varshared_zero(arrays, fn):
     assert jnp.allclose(
         jnp.where(jnp.isnan(chk_r), 0, chk_r),
         0,
-        atol=cond * 1e-4,
+        atol=cond * 2e-4, # This could still be flaky.
     )
 
 

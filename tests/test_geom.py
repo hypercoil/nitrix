@@ -14,12 +14,15 @@ from sklearn.metrics.pairwise import haversine_distances
 from nitrix.functional.geom import (
     cmass_regular_grid,
     cmass_coor,
+    cmass_reference_displacement_coor,
+    cmass_reference_displacement_grid,
     spherical_geodesic,
     spherical_conv,
     euclidean_conv,
     sphere_to_normals,
     sphere_to_latlong,
     kernel_gaussian,
+    diffuse,
 )
 
 
@@ -177,6 +180,17 @@ def test_cmass_coor(X, Y, Xcoor, Ycoor):
     ref = cmass_regular_grid(Y)
     assert np.allclose(out.squeeze(), ref.squeeze())
 
+    out = cmass_coor(Y.reshape(1, -1), Ycoor.reshape(4, -1), radius=1)
+    assert np.allclose(jnp.linalg.norm(out, axis=-2), 1)
+
+
+def test_cmass_empty():
+    X = np.zeros((30, 10))
+    out = cmass_regular_grid(X)
+    assert jnp.all(jnp.isnan(out))
+    out = cmass_regular_grid(X, na_rm=0.)
+    assert jnp.allclose(out, 0.)
+
 
 def test_cmass_equivalence(X, Xcoor, Y, Ycoor):
     out = cmass_coor(X.reshape(1, -1), Xcoor.reshape(2, -1))
@@ -186,6 +200,24 @@ def test_cmass_equivalence(X, Xcoor, Y, Ycoor):
     out = cmass_coor(Y.reshape(1, -1), Ycoor.reshape(4, -1))
     ref = cmass_regular_grid(Y)
     assert np.allclose(out.squeeze(), ref.squeeze())
+
+
+def test_cmass_displacements(X, Xcoor, Y, Ycoor):
+    reference = cmass_regular_grid(X)
+    out = cmass_reference_displacement_grid(X, reference)
+    assert np.allclose(out, 0)
+    X, Xcoor = X.reshape(1, -1), Xcoor.reshape(2, -1)
+    reference = cmass_coor(X, Xcoor)
+    out = cmass_reference_displacement_coor(X, reference, Xcoor)
+    assert np.allclose(out, 0)
+
+    reference = cmass_regular_grid(Y)
+    out = cmass_reference_displacement_grid(Y, reference)
+    assert np.allclose(out, 0)
+    Y, Ycoor = Y.reshape(1, -1), Ycoor.reshape(4, -1)
+    reference = cmass_coor(Y, Ycoor)
+    out = cmass_reference_displacement_coor(Y, reference, Ycoor)
+    assert np.allclose(out, 0)
 
 
 def test_gauss_kernel(dist_euc):
@@ -226,6 +258,12 @@ def test_spherical_geodesic(coor_sph, coor_sph_rand):
     out = spherical_geodesic(coor_sph_rand)
     ref = haversine_distances(latlong)
     assert np.allclose(out, ref, atol=1e-6)
+
+    invalid_input = np.eye(2)
+    with pytest.raises(ValueError):
+        spherical_geodesic(invalid_input)
+    with pytest.raises(ValueError):
+        spherical_geodesic(X=normals, Y=invalid_input)
 
 
 def test_spatial_convolution(data, coor_euc):
@@ -276,3 +314,27 @@ def test_spherical_convolution(data, coor_sph, coor_sph_rand, truncated):
         out + truncated,
         np.ones((n, n))
     )
+
+
+def test_compactness():
+    coor = jnp.stack(
+        jnp.meshgrid(jnp.arange(100), jnp.arange(100))
+    )
+    centroid = jnp.asarray((50, 50))[:, None, None]
+    small = jnp.linalg.norm(coor - centroid, axis=0) < 10
+    large = jnp.linalg.norm(coor - centroid, axis=0) < 50
+    diff_small = diffuse(small.reshape(1, -1), coor.reshape(2, -1))
+    diff_large = diffuse(large.reshape(1, -1), coor.reshape(2, -1))
+    assert diff_small < diff_large
+
+    # This is totally invalid (not on a sphere), but is here for
+    # testing that the radius argument is properly handled.
+    coor = jnp.stack(
+        jnp.meshgrid(jnp.arange(100), jnp.arange(100), jnp.arange(100))
+    )
+    centroid = jnp.asarray((30, 30, 30))[:, None, None, None]
+    small = jnp.linalg.norm(coor - centroid, axis=0) < 10
+    large = jnp.linalg.norm(coor - centroid, axis=0) < 50
+    diff_small = diffuse(small.reshape(1, -1), coor.reshape(3, -1), radius=1)
+    diff_large = diffuse(large.reshape(1, -1), coor.reshape(3, -1), radius=1)
+    assert diff_small < diff_large

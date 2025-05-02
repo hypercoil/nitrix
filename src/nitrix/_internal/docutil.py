@@ -25,6 +25,7 @@ def form_docstring(formatter: callable):
         fmt = formatter()
         func.__doc__ = func.__doc__.format_map(fmt)
         return func
+
     return decorator
 
 

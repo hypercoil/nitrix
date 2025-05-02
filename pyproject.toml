@@ -60,13 +60,13 @@ lint.ignore = [
     "E501", # line too long: add it back when this is resolved:
     # https://github.com/astral-sh/ruff/issues/3711
 ]
-line-length = 79
 lint.select = [
     "E",
     "F",
     "W",
     "I001",
 ]
+line-length = 79
 
 [tool.ruff.format]
 quote-style = "single"
@@ -105,4 +105,5 @@ dev-dependencies = [
     "hypothesis",
     "pingouin",
     "gnureadline",
+    "numpyro>=0.18.0",
 ]
