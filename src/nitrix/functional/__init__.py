@@ -46,6 +46,7 @@ from .matrix import (
     toeplitz_2d,
 )
 from .residual import residualise
+from .window import sample_windows
 
 __all__ = [
     'cov',
@@ -62,7 +63,6 @@ __all__ = [
     'ccorr',
     'product_filter',
     'product_filtfilt',
-    'residualise',
     'symmetric',
     'recondition_eigenspaces',
     'delete_diagonal',
@@ -72,4 +72,6 @@ __all__ = [
     'squareform',
     'toeplitz',
     'toeplitz_2d',
+    'residualise',
+    'sample_windows',
 ]
