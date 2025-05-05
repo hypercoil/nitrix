@@ -14,7 +14,7 @@ import jax.numpy as jnp
 
 from nitrix._internal import Tensor
 from nitrix._internal.docutil import (
-    NestedDocParse,
+    DocTemplateFormat,
     form_docstring,
     tensor_dimensions,
 )
@@ -32,7 +32,7 @@ from nitrix._internal.util import conform_mask, vmap_over_outer
 
 
 @form_docstring
-def document_symmetric() -> NestedDocParse:
+def document_symmetric() -> DocTemplateFormat:
     tensor_dim_spec = """
 
     | Dim | Description | Notes |
@@ -46,7 +46,105 @@ def document_symmetric() -> NestedDocParse:
         ),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
-    fmt = NestedDocParse(
+    fmt = DocTemplateFormat(
+        tensor_dim_spec=tensor_dim_spec,
+    )
+    return fmt
+
+
+@form_docstring
+def document_spd() -> DocTemplateFormat:
+    tensor_dim_spec = """
+
+    | Dim | Description | Notes |
+    |-----|-------------|-------|
+    | $*$ | Any number of prefix dimensions ||
+    | $i$ | {desc_i} ||
+    """.format(
+        desc_i=(
+            'Dimensions of the input tensor corresponding to the axes '
+            'that together form the square positive semidefinite matrix.'
+        ),
+    )
+    reconditioning_expr = r"""
+    $A := A + \left(\psi - \frac{\xi}{2}\right) I + I\mathbf{x}$
+
+    $x_i \sim \mathrm{Uniform}(0, \xi) \forall x_i$
+
+    $\psi > \xi$"""
+    tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
+    fmt = DocTemplateFormat(
+        tensor_dim_spec=tensor_dim_spec,
+        reconditioning_expr=reconditioning_expr,
+    )
+    return fmt
+
+
+@form_docstring
+def document_diagonal() -> DocTemplateFormat:
+    tensor_dim_spec = """
+
+    | Dim | Description | Notes |
+    |-----|-------------|-------|
+    | $*$ | Any number of prefix dimensions ||
+    | $i$ | {desc_i} ||
+    """.format(
+        desc_i=('Size of the diagonal.'),
+    )
+    tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
+    size_plus_offset = r'i + |\mathrm{offset}|'
+    fmt = DocTemplateFormat(
+        tensor_dim_spec=tensor_dim_spec,
+        size_plus_offset=size_plus_offset,
+    )
+    return fmt
+
+
+@form_docstring
+def document_toeplitz() -> DocTemplateFormat:
+    tensor_dim_spec = """
+
+    | Dim | Description | Notes |
+    |-----|-------------|-------|
+    | $*$ | Any number of prefix dimensions ||
+    | $r$ | {desc_r} ||
+    | $c$ | {desc_c} ||
+    | $m$ | {desc_m} ||
+    | $n$ | {desc_n} ||
+    """.format(
+        desc_r=('Size of the generating row vector.'),
+        desc_c=('Size of the generating column vector.'),
+        desc_m=('Size of the rows of the returned Toeplitz matrix.'),
+        desc_n=('Size of the columns of the returned Toeplitz matrix.'),
+    )
+    tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
+    fmt = DocTemplateFormat(
+        tensor_dim_spec=tensor_dim_spec,
+    )
+    return fmt
+
+
+@form_docstring
+def document_symform() -> DocTemplateFormat:
+    tensor_dim_spec = """
+
+    | Dim | Description | Notes |
+    |-----|-------------|-------|
+    | $*$ | Any number of prefix dimensions ||
+    | $i$ | {desc_i} ||
+    | $n$ | {desc_n} | {desc_n_note} |
+    """.format(
+        desc_i=('Size of the square matrix.'),
+        desc_n=('Size of the vectorised form of the matrix.'),
+        desc_n_note=(
+            'This is equal to the number of elements in the specified '
+            'upper triangle of the matrix, plus one. For the default '
+            'offset of 1, this is equal to $\binom{i}{2}$ '
+            'or equivalently $\frac{i(i - 1)}{2}$.'
+        ),
+    )
+    tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
+    fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
     )
     return fmt
@@ -88,6 +186,7 @@ def symmetric(
         return (X - X.swapaxes(*axes)) / 2
 
 
+@document_spd
 def recondition_eigenspaces(
     A: Tensor,
     psi: float,
@@ -103,15 +202,13 @@ def recondition_eigenspaces(
 
     This operation modifies the input matrix A following
 
-    :math:`A := A + \left(\psi - \frac{\xi}{2}\right) I + I\mathbf{x}`
-
-    :math:`x_i \sim \mathrm{Uniform}(0, \xi) \forall x_i`
-
-    :math:`\psi > \xi`
+    {reconditioning_expr}
+    \
+    {tensor_dim_spec}
 
     Parameters
     ----------
-    A : tensor
+    A : ($*$, $i$, $i$) tensor
         Matrix or matrix block to be reconditioned.
     psi : float
         Reconditioning parameter for ensuring nonzero eigenvalues.
@@ -122,7 +219,7 @@ def recondition_eigenspaces(
 
     Returns
     -------
-    tensor
+    ($*$, $i$, $i$) tensor
         Reconditioned matrix or matrix block.
     """
     assert psi >= xi, (
@@ -137,26 +234,71 @@ def recondition_eigenspaces(
     return A + (psi - xi + x) * mask
 
 
+@document_diagonal
 def delete_diagonal(A: Tensor) -> Tensor:
     """
     Delete the diagonal from a block of square matrices. Dimension is inferred
     from the final axis.
+    \
+    {tensor_dim_spec}
+
+    Parameters
+    ----------
+    A : ($*$, $i$, $i$) tensor
+        Block of square matrices.
+
+    Returns
+    -------
+    ($*$, $i$, $i$) tensor
+        Block of square matrices with the diagonal deleted.
     """
     mask = ~jnp.eye(A.shape[-1], dtype=bool)
     return A * mask
 
 
+@document_diagonal
 def diag_embed(v: Tensor, offset: int = 0) -> Tensor:
     """
     Embed a vector into a diagonal matrix.
+    \
+    {tensor_dim_spec}
+
+    Parameters
+    ----------
+    v : ($*$, $i$) tensor
+        Vector to embed.
+    offset : int (default 0)
+        Offset from the main diagonal where the vector should be placed.
+
+    Returns
+    -------
+    ($*$, {size_plus_offset}, {size_plus_offset}) tensor
+        Diagonal matrix with the vector embedded.
     """
     return vmap_over_outer(partial(jnp.diagflat, k=offset), 1)((v,))
 
 
+@document_diagonal
 def fill_diagonal(A: Tensor, fill: float = 0, offset: int = 0) -> Tensor:
     """
     Fill a selected diagonal in a block of square matrices. Dimension is
     inferred from the final axes.
+    \
+    {tensor_dim_spec}
+
+    Parameters
+    ----------
+    A : ($*$, $i$, $i$) tensor
+        Block of square matrices.
+    fill : float (default 0)
+        Value to fill the diagonal with.
+    offset : int (default 0)
+        Offset from the main diagonal where the diagonal should be filled.
+
+    Returns
+    -------
+    ($*$, $i$, $i$) tensor
+        Block of square matrices with the diagonal filled.
     """
     dim = A.shape[-2:]
     mask = jnp.ones(max(dim) - abs(offset), dtype=bool)
@@ -166,6 +308,7 @@ def fill_diagonal(A: Tensor, fill: float = 0, offset: int = 0) -> Tensor:
     return jnp.where(mask, fill, A)
 
 
+@document_toeplitz
 def toeplitz_2d(
     c: Tensor,
     r: Optional[Tensor] = None,
@@ -197,6 +340,24 @@ def toeplitz_2d(
         for functionality to match ``scipy.toeplitz``. This is not checked.
         In the event that this is not the case, ``c[0]`` is ignored.
         Note that this is the opposite of ``scipy.toeplitz``.
+    \
+    {tensor_dim_spec}
+
+    Parameters
+    ----------
+    c : ($c$,) tensor
+        Column vector of the Toeplitz matrix.
+    r : ($r$,) tensor
+        Row vector of the Toeplitz matrix.
+    shape : tuple(int, int) or None (default)
+        Shape of the Toeplitz matrix. Sets dimensions of the output tensor.
+    fill_value : float (default 0)
+        Value to fill the Toeplitz matrix with.
+
+    Returns
+    -------
+    ($m$, $n$) tensor
+        Toeplitz matrix of shape specified by `shape`.
     """
     if r is None:
         r = c
@@ -225,6 +386,7 @@ def toeplitz_2d(
     return f(c_arg, r_arg, iota[..., None], mask)[..., :m, :n]
 
 
+@document_toeplitz
 def toeplitz(
     c: Tensor,
     r: Optional[Tensor] = None,
@@ -240,35 +402,24 @@ def toeplitz(
         functionality to match ``scipy.toeplitz``. This is not checked.
         In the event that this is not the case, ``c[0]`` is ignored.
         Note that this is the opposite of ``scipy.toeplitz``.
-
-    :Dimension: **c :** :math:`(C, *)`
-                    C denotes the number of elements in the first column whose
-                    values are propagated along the matrix diagonals. ``*``
-                    denotes any number of additional dimensions.
-                **r :** :math:`(R, *)`
-                    R denotes the number of elements in the first row whose
-                    values are propagated along the matrix diagonals.
-                **fill_value :** :math:`(*)`
-                    As above.
-                **Output :** :math:`(*, C^{*}, R^{*})`
-                    :math:`C^{*}` and :math:`{*}` default to C and R unless
-                    specified otherwise in the `dim` argument.
+    \
+    {tensor_dim_spec}
 
     Parameters
     ----------
-    c: Tensor
+    c : ($*$, $c$) tensor
         Tensor of entries in the first column of each Toeplitz matrix. The
         first axis corresponds to a single matrix column; additional
         dimensions correspond to concatenation of Toeplitz matrices into a
         stack or block tensor.
-    r: Tensor
+    r : ($*$, $r$) tensor
         Tensor of entries in the first row of each Toeplitz matrix. The first
         axis corresponds to a single matrix row; additional dimensions
         correspond to concatenation of Toeplitz matrices into a stack or block
         tensor. The first entry in each column should be the same as the first
         entry in the corresponding column of `c`; otherwise, it will be
         ignored.
-    dim: 2-tuple of (int, int) or None (default)
+    shape : tuple(int, int) or None (default)
         Dimension of each Toeplitz banded matrix in the output block. If this
         is None or unspecified, it defaults to the sizes of the first axes of
         inputs `c` and `r`. Otherwise, the row and column inputs are extended
@@ -284,7 +435,7 @@ def toeplitz(
 
     Returns
     -------
-    out: Tensor
+    out : ($*$, $m$, $n$) tensor
         Block of Toeplitz matrices populated from the specified row and column
         elements.
     """
@@ -293,6 +444,7 @@ def toeplitz(
     )((c, r))
 
 
+@document_symform
 @partial(jax.custom_vjp, nondiff_argnums=(1,))
 def sym2vec(sym: Tensor, offset: int = 1) -> Tensor:
     """
@@ -300,10 +452,12 @@ def sym2vec(sym: Tensor, offset: int = 1) -> Tensor:
 
     Ordering in the ravelled form follows row-major order of the upper
     triangle of the matrix block.
+    \
+    {tensor_dim_spec}
 
     Parameters
     ----------
-    sym : tensor
+    sym : ($*$, $i$, $i$) tensor
         Block of tensors to convert. The last two dimensions should be equal,
         with each slice along the final 2 axes being a square, symmetric
         matrix.
@@ -314,7 +468,7 @@ def sym2vec(sym: Tensor, offset: int = 1) -> Tensor:
 
     Returns
     -------
-    vec : tensor
+    vec : ($*$, $n$) tensor
         Block of ravelled vectors formed from the upper triangles of the input
         `sym`, beginning with the diagonal offset from the main by the input
         `offset`.
@@ -326,6 +480,7 @@ def sym2vec(sym: Tensor, offset: int = 1) -> Tensor:
     return vec.reshape(*shape, -1)
 
 
+@document_symform
 @partial(jax.custom_vjp, nondiff_argnums=(1,))
 def vec2sym(vec: Tensor, offset: int = 1) -> Tensor:
     """
@@ -333,10 +488,12 @@ def vec2sym(vec: Tensor, offset: int = 1) -> Tensor:
 
     The ordering of the input vectors should follow the upper triangle of the
     matrices to be formed.
+    \
+    {tensor_dim_spec}
 
     Parameters
     ----------
-    vec : tensor
+    vec : ($*$, $n$) tensor
         Block of vectors to convert. Input vectors should be of length
         (n choose 2), where n is the number of elements on the offset
         diagonal, plus 1.
@@ -347,7 +504,7 @@ def vec2sym(vec: Tensor, offset: int = 1) -> Tensor:
 
     Returns
     -------
-    sym : tensor
+    sym : ($*$, $i$, $i$) tensor
         Block of symmetric matrices formed by first populating the offset
         upper triangle with the elements from the input `vec`, then
         symmetrising.
@@ -363,6 +520,7 @@ def vec2sym(vec: Tensor, offset: int = 1) -> Tensor:
     return sym
 
 
+@document_symform
 def squareform(X: Tensor) -> Tensor:
     """
     Convert between symmetric matrix and vector forms.
@@ -370,20 +528,22 @@ def squareform(X: Tensor) -> Tensor:
     .. warning::
         Unlike numpy or matlab implementations, this does not verify a
         conformant input.
+    \
+    {tensor_dim_spec}
 
     Parameters
     ----------
-    X : tensor
+    X : ($*$, $i$, $i$) tensor or ($*$, $n$) tensor
         Block of symmetric matrices, in either square matrix or vectorised
         form.
 
     Returns
     -------
-    tensor
+    ($*$, $i$, $i$) tensor or ($*$, $n$) tensor
         If the input block is in square matrix form, returns it
-        :doc:`in vector form <hypercoil.functional.matrix.sym2vec>`.
+        :doc:`in vector form <nitrix.functional.matrix.sym2vec>`.
         If the input block is in vector form, returns it
-        :doc:`in square matrix form <hypercoil.functional.matrix.vec2sym>`.
+        :doc:`in square matrix form <nitrix.functional.matrix.vec2sym>`.
     """
     if X.shape[-2] == X.shape[-1] and jnp.allclose(X, X.swapaxes(-1, -2)):
         return sym2vec(X, offset=1)

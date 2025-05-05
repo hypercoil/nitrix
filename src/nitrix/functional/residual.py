@@ -5,20 +5,22 @@
 Residualise tensor block via least squares.
 """
 
-from typing import Any, Callable, Literal
+from typing import Literal
 
 import jax.numpy as jnp
 
 from .._internal import (
-    NestedDocParse,
+    DocTemplateFormat,
     Tensor,
     broadcast_ignoring,
+    form_docstring,
     tensor_dimensions,
     vmap_over_outer,
 )
 
 
-def document_linreg(f: Callable[[Any], Any]) -> Callable[[Any], Any]:
+@form_docstring
+def document_linreg() -> DocTemplateFormat:
     regress_warning = """
     :::{.callout-warning}
     When testing an old ``torch``-based implementation of this operation,
@@ -84,13 +86,11 @@ def document_linreg(f: Callable[[Any], Any]) -> Callable[[Any], Any]:
     proj_rtol : float
         Relative tolerance for determining whether the projection tensor is
         numerically close to `Y`. See `jax.numpy.isclose` for details."""
-    fmt = NestedDocParse(
+    return DocTemplateFormat(
         regress_warning=regress_warning,
         regress_dim=regress_dim,
         regress_param_spec=regress_param_spec,
     )
-    f.__doc__ = (f.__doc__ or '').format_map(fmt)
-    return f
 
 
 @document_linreg

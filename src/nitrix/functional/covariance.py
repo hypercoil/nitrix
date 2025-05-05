@@ -29,14 +29,16 @@ import jax
 import jax.numpy as jnp
 
 from .._internal import (
-    NestedDocParse,
+    DocTemplateFormat,
     Tensor,
     _conform_bform_weight,
+    form_docstring,
     tensor_dimensions,
 )
 
 
-def document_covariance(func: callable) -> callable:
+@form_docstring
+def document_covariance() -> DocTemplateFormat:
     param_spec = """
     rowvar : bool (default True)
         Indicates that the last axis of the input tensor is the observation
@@ -178,7 +180,7 @@ def document_covariance(func: callable) -> callable:
     covariance of variables of interest (the first set) after controlling for
     the effects of confounds or nuisance variables (the second set)."""
 
-    fmt = NestedDocParse(
+    return DocTemplateFormat(
         param_spec=param_spec,
         unary_param_spec=unary_param_spec,
         binary_param_spec=binary_param_spec,
@@ -191,8 +193,6 @@ def document_covariance(func: callable) -> callable:
         corr_long_description=corr_long_description,
         conditional_cov_long_description=conditional_cov_long_description,
     )
-    func.__doc__ = func.__doc__.format_map(fmt)
-    return func
 
 
 @document_covariance

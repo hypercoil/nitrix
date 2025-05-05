@@ -6,19 +6,21 @@ Signal transformations in the frequency domain.
 """
 
 import math
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
 
 import jax.numpy as jnp
 
 from .._internal import (
-    NestedDocParse,
+    DocTemplateFormat,
     Tensor,
+    form_docstring,
     orient_and_conform,
     tensor_dimensions,
 )
 
 
-def document_frequency_filter(f: Callable) -> Callable:
+@form_docstring
+def document_frequency_filter() -> DocTemplateFormat:
     freqfilter_param_spec = r"""
     Parameters
     ----------
@@ -53,16 +55,15 @@ def document_frequency_filter(f: Callable) -> Callable:
     |$*$  | Any number of intervening dimensions ||
     """.format(desc_obs=desc_obs)
     freqfilter_dim_spec = tensor_dimensions(freqfilter_dim_spec)
-    fmt = NestedDocParse(
+    return DocTemplateFormat(
         freqfilter_dim_spec=freqfilter_dim_spec,
         freqfilter_param_spec=freqfilter_param_spec,
         freqfilter_return_spec=freqfilter_return_spec,
     )
-    f.__doc__ = f.__doc__.format_map(fmt)
-    return f
 
 
-def document_analytic_signal(f: Callable) -> Callable:
+@form_docstring
+def document_analytic_signal() -> DocTemplateFormat:
     analytic_signal_base_spec = """
     X : ($*$, $obs$, $?$) tensor
         Input tensor; the original real-valued signal.
@@ -138,7 +139,7 @@ def document_analytic_signal(f: Callable) -> Callable:
         Instantaneous frequency of a signal
     [env_inst](nitrix.functional.fourier.env_inst.html)
         Envelope, instantaneous phase, and instantaneous frequency of a signal"""
-    fmt = NestedDocParse(
+    return DocTemplateFormat(
         analytic_signal_dim_spec=analytic_signal_dim_spec,
         analytic_signal_base_spec=analytic_signal_base_spec,
         analytic_signal_sampling_freq=analytic_signal_sampling_freq,
@@ -150,8 +151,6 @@ def document_analytic_signal(f: Callable) -> Callable:
         envelope_return_spec=envelope_return_spec,
         analytic_signal_see_also=analytic_signal_see_also,
     )
-    f.__doc__ = f.__doc__.format_map(fmt)
-    return f
 
 
 @document_frequency_filter

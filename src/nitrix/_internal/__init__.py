@@ -3,7 +3,8 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 from .docutil import (
-    NestedDocParse,
+    DocTemplateFormat,
+    form_docstring,
     tensor_dimensions,
 )
 from .util import (
@@ -42,7 +43,7 @@ from .util import (
 )
 
 __all__ = [
-    'NestedDocParse',
+    'DocTemplateFormat',
     'tensor_dimensions',
     'Tensor',
     '_conform_bform_weight',

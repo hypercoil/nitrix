@@ -6,6 +6,7 @@ Documentation utilities.
 """
 
 from collections import UserDict
+from typing import Callable
 
 
 def tensor_dimensions(dims: str):
@@ -21,15 +22,15 @@ def tensor_dimensions(dims: str):
 
 
 def form_docstring(formatter: callable):
-    def decorator(func: callable):
+    def decorator(func: Callable[[], DocTemplateFormat]):
         fmt = formatter()
-        func.__doc__ = func.__doc__.format_map(fmt)
+        func.__doc__ = (func.__doc__ or '').format_map(fmt)
         return func
 
     return decorator
 
 
-class NestedDocParse(UserDict[str, str]):
+class DocTemplateFormat(UserDict[str, str]):
     """
     Enable multiple documentation decorators to be applied to a single
     function, with each pass leaving intact any cells that are not specified

@@ -17,14 +17,14 @@ import jax.numpy as jnp
 
 from .._internal import Tensor
 from .._internal.docutil import (
-    NestedDocParse,
+    DocTemplateFormat,
     form_docstring,
     tensor_dimensions,
 )
 
 
 @form_docstring
-def document_cmass_regular_grid() -> NestedDocParse:
+def document_cmass_regular_grid() -> DocTemplateFormat:
     tensor_dim_spec = """
 
     | Dim | Description | Notes |
@@ -39,14 +39,14 @@ def document_cmass_regular_grid() -> NestedDocParse:
         ),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
-    fmt = NestedDocParse(
+    fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
     )
     return fmt
 
 
 @form_docstring
-def document_cmass_coor() -> NestedDocParse:
+def document_cmass_coor() -> DocTemplateFormat:
     tensor_dim_spec = """
 
     | Dim | Description | Notes |
@@ -74,14 +74,14 @@ def document_cmass_coor() -> NestedDocParse:
         ),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
-    fmt = NestedDocParse(
+    fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
     )
     return fmt
 
 
 @form_docstring
-def document_sphere_coordinate_change() -> NestedDocParse:
+def document_sphere_coordinate_change() -> DocTemplateFormat:
     tensor_dim_spec = """
 
     | Dim | Description | Notes |
@@ -103,7 +103,7 @@ def document_sphere_coordinate_change() -> NestedDocParse:
         Tensor containing 2-tuple coordinates indicating the latitude and
         longitude of each point.
     """
-    fmt = NestedDocParse(
+    fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
         normal_coor_spec=normal_coor_spec,
         latlong_coor_spec=latlong_coor_spec,
@@ -112,7 +112,7 @@ def document_sphere_coordinate_change() -> NestedDocParse:
 
 
 @form_docstring
-def document_spherical_geodesic() -> NestedDocParse:
+def document_spherical_geodesic() -> DocTemplateFormat:
     tensor_dim_spec = """
 
     | Dim | Description | Notes |
@@ -128,14 +128,14 @@ def document_spherical_geodesic() -> NestedDocParse:
         desc_D_notes=('This must be 3.'),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
-    fmt = NestedDocParse(
+    fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
     )
     return fmt
 
 
 @form_docstring
-def document_spatial_conv() -> NestedDocParse:
+def document_spatial_conv() -> DocTemplateFormat:
     tensor_dim_spec = """
 
     | Dim | Description | Notes |
@@ -150,7 +150,7 @@ def document_spatial_conv() -> NestedDocParse:
         desc_D=('Dimension of the embedding space.'),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
-    fmt = NestedDocParse(
+    fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
     )
     return fmt
@@ -513,9 +513,9 @@ def spherical_conv(
     r"""
     Convolve data on a 2-sphere with an isotropic Gaussian kernel.
 
-    This is implemented in pretty much the dumbest possible way, but it works.
-    Here is a likely more efficient method that requires Lie groups or some
-    such thing:
+    This is implemented in the least clever of all possible ways, but it
+    works. Here is a likely more efficient method that requires Lie groups or
+    some such thing:
     https://openreview.net/pdf?id=Hkbd5xZRb
 
     See :func:`spatial_conv` for implementation details.
