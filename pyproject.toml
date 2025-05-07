@@ -106,4 +106,5 @@ dev-dependencies = [
     "pingouin",
     "gnureadline",
     "numpyro>=0.18.0",
+    "communities>=3.0.0",
 ]

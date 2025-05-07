@@ -11,10 +11,12 @@ convolutions, and derived quantities.
 
 import warnings
 from functools import partial
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Literal, Optional, Sequence
 
 import jax.numpy as jnp
+from jax.nn import relu
 
+from .matrix import delete_diagonal
 from .._internal import Tensor
 from .._internal.docutil import (
     DocTemplateFormat,
@@ -26,7 +28,6 @@ from .._internal.docutil import (
 @form_docstring
 def document_cmass_regular_grid() -> DocTemplateFormat:
     tensor_dim_spec = """
-
     | Dim | Description | Notes |
     |-----|-------------|-------|
     |$k_i$| {desc_k_i} ||
@@ -48,7 +49,6 @@ def document_cmass_regular_grid() -> DocTemplateFormat:
 @form_docstring
 def document_cmass_coor() -> DocTemplateFormat:
     tensor_dim_spec = """
-
     | Dim | Description | Notes |
     |-----|-------------|-------|
     | $*$ | Any number of prefix, intervening, and suffix dimensions ||
@@ -74,8 +74,10 @@ def document_cmass_coor() -> DocTemplateFormat:
         ),
     )
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
+    diffuse_penalty = """$\mathbf{1}^\intercal\left(A \circ \left\|C - \frac{AC}{A\mathbf{1}} \right\|_{cols} \right)\mathbf{1}$"""
     fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
+        diffuse_penalty=diffuse_penalty,
     )
     return fmt
 
@@ -83,7 +85,6 @@ def document_cmass_coor() -> DocTemplateFormat:
 @form_docstring
 def document_sphere_coordinate_change() -> DocTemplateFormat:
     tensor_dim_spec = """
-
     | Dim | Description | Notes |
     |-----|-------------|-------|
     | $*$ | Any number of prefix dimensions ||
@@ -114,7 +115,6 @@ def document_sphere_coordinate_change() -> DocTemplateFormat:
 @form_docstring
 def document_spherical_geodesic() -> DocTemplateFormat:
     tensor_dim_spec = """
-
     | Dim | Description | Notes |
     |-----|-------------|-------|
     | $*$ | Any number of prefix dimensions ||
@@ -137,7 +137,6 @@ def document_spherical_geodesic() -> DocTemplateFormat:
 @form_docstring
 def document_spatial_conv() -> DocTemplateFormat:
     tensor_dim_spec = """
-
     | Dim | Description | Notes |
     |-----|-------------|-------|
     | $*$ | Any number of prefix dimensions ||
@@ -152,6 +151,145 @@ def document_spatial_conv() -> DocTemplateFormat:
     tensor_dim_spec = tensor_dimensions(tensor_dim_spec)
     fmt = DocTemplateFormat(
         tensor_dim_spec=tensor_dim_spec,
+    )
+    return fmt
+
+
+@form_docstring
+def document_modularity() -> DocTemplateFormat:
+    girvan_newman_long_desc = r"""
+    The Girvan-Newman null model is defined as the expected connection weight
+    between each pair of vertices if all edges are cut and the resulting stubs
+    then randomly rewired. For the vector of node in-degrees
+    :math:`k_i \in \mathbb{R}^I`, vector of node out-degrees
+    :math:`k_o \in \mathbb{R}^O`, and total edge weight
+    :math:`2m \in \mathbb{R}`, this yields the null model
+
+    :math:`P_{GN} = \frac{1}{2m} k_i k_o^\intercal`
+
+    or, in terms of the adjacency matrix :math:`A \in \mathbb{R}^{I \times O}`
+
+    :math:`P_{GN} = \frac{1}{\mathbf{1}^\intercal A \mathbf{1}} A \mathbf{1} \mathbf{1}^\intercal A`"""
+    modularity_matrix_long_desc = r"""
+    The modularity matrix is defined as a normalised, weighted difference
+    between the adjacency matrix and a suitable null model. For a weight
+    :math:`\gamma`, an adjacency matrix :math:`A`, a null model :math:`P`, and
+    total edge weight :math:`2m`, the modularity matrix is computed as
+
+    :math:`B = \frac{1}{2m} \left( A - \gamma P \right)`"""
+    coaffiliation_long_desc = r"""
+    Given community affiliation matrices
+    :math:`C^{(i)} \in \mathbb{R}^{I \times C}` for source nodes and
+    :math:`C^{(o)} \in \mathbb{R}^{O \times C}` for sink nodes, and given a
+    matrix of inter-community coupling coefficients
+    :math:`\Omega \in \mathbb{R}^{C \times C}`, the coaffiliation
+    :math:`H \in \mathbb{R}^{I \times O}` is computed as
+
+    :math:`H = C^{(i)} \Omega C^{(o)\intercal}`"""
+    relaxed_modularity_long_desc = r"""
+    This relaxation supports non-deterministic assignments of vertices to
+    communities and non-assortative linkages between communities. It reverts
+    to standard behaviour when the inputs it is provided are standard.
+
+    The relaxed modularity is defined as the sum of all entries in the
+    Hadamard (elementwise) product between the modularity matrix and the
+    coaffiliation matrix.
+
+    :math:`Q = \mathbf{1}^\intercal \left( B \circ H \right) \mathbf{1}`"""
+    adjacency_dim_spec = """
+    | Dim | Description | Notes |
+    |-----|-------------|-------|
+    | $*$ | Any number of prefix dimensions ||
+    | $I$ | {desc_I} | {note_I} |
+    | $O$ | {desc_O} ||
+    """.format(
+        desc_I=('Number of vertices in the source set.'),
+        desc_O=('Number of vertices in the sink set.'),
+        note_I=(
+            'If the same set of vertices emits and receives edges, then '
+            '$I = O$. This is the case for any non-bipartite graph.'
+        ),
+    )
+    coaffiliation_dim_spec = """
+    | Dim | Description | Notes |
+    |-----|-------------|-------|
+    | $*$ | Any number of prefix dimensions ||
+    | $I$ | {desc_I} | {note_I} |
+    | $O$ | {desc_O} ||
+    | $C_i$ | {desc_C_i} ||
+    | $C_o$ | {desc_C_o} ||
+    """.format(
+        desc_I=('Number of vertices in the source set.'),
+        desc_O=('Number of vertices in the sink set.'),
+        desc_C_i=('Number of communities in the proposed partition for the '
+                  'source set.'),
+        desc_C_o=('Number of communities in the proposed partition for the '
+                  'sink set.'),
+        note_I=(
+            'If the same set of vertices emits and receives edges, then '
+            '$I = O$. This is the case for any non-bipartite graph.'
+        ),
+    )
+    adjacency_dim_spec = tensor_dimensions(adjacency_dim_spec)
+    coaffiliation_dim_spec = tensor_dimensions(coaffiliation_dim_spec)
+    adjacency_param_spec = """
+    A : ($*$, $I$, $O$) tensor
+        Block of adjacency matrices for which the quantity of interest is to
+        be computed."""
+    modularity_matrix_param_spec = """
+    gamma : nonnegative float (default 1)
+        Resolution parameter for the modularity matrix. A smaller value assigns
+        maximum modularity to partitions with large communities, while a larger
+        value assigns maximum modularity to partitions with many small
+        communities.
+    null : callable(A) (default ``girvan_newman_null``)
+        Function of ``A`` that returns, for each adjacency matrix in the input
+        tensor block, a suitable null model. By default, the
+        :doc:`Girvan-Newman null model <hypercoil.functional.graph.girvan_newman_null>`
+        is used.
+    normalise_modularity : bool (default False)
+        Indicates that the resulting matrix should be normalised by the total
+        matrix degree. This may not be necessary for many use cases -- for
+        instance, where the arg max of a function of the modularity matrix is
+        desired.
+    sign : ``'+'``, ``'-'``, or None (default ``'+'``)
+        Sign of connections to be considered in the modularity.
+    **params
+        Any additional parameters are passed to the null model."""
+    coaffiliation_param_spec = r"""
+    C : ($*$, $I$, $C_i$) tensor
+        Community affiliation of vertices in the source set. Each slice is a
+        matrix $C^{(i)} \in \mathbb{R}^{I \times C_i}$ that encodes the
+        uncertainty in each vertex's community assignment. $C^{(i)}_{jk}$
+        denotes the probability that vertex j is assigned to community k. If
+        this is binary-valued, then it reflects a deterministic assignment.
+    C_o : ($*$, $O$, $C_o$) tensor or None (default None)
+        Community affiliation of vertices in the sink set. If None, then it is
+        assumed that the source and sink sets are the same, and ``C_o`` is set
+        equal to ``C_i``.
+    L : Tensor or None (default None)
+        The inter-community coupling matrix $\Omega$, mapping the
+        probability of affiliation between communities. Each entry
+        $L_{ij}$ encodes the probability of a vertex in community $i$
+        connecting with a vertex in community $j$. If None, then a strictly
+        assortative structure is assumed (equivalent to $L$ equals identity),
+        under which nodes in the same community preferentially coaffiliate
+        while nodes in different communities remain disaffiliated.
+    exclude_diag : bool (default True)
+        Indicates that self-links are not factored into the coaffiliation.
+    normalise_coaffiliation : bool (default False)
+        Normalise all community assignment weights to max out at 1."""
+
+    fmt = DocTemplateFormat(
+        girvan_newman_long_desc=girvan_newman_long_desc,
+        modularity_matrix_long_desc=modularity_matrix_long_desc,
+        coaffiliation_long_desc=coaffiliation_long_desc,
+        relaxed_modularity_long_desc=relaxed_modularity_long_desc,
+        adjacency_dim_spec=adjacency_dim_spec,
+        coaffiliation_dim_spec=coaffiliation_dim_spec,
+        adjacency_param_spec=adjacency_param_spec,
+        modularity_matrix_param_spec=modularity_matrix_param_spec,
+        coaffiliation_param_spec=coaffiliation_param_spec,
     )
     return fmt
 
@@ -455,7 +593,8 @@ def spatial_conv(
        to operationalise the loading weight of every coordinate on every other
        coordinate.
     3. Use the loading weights to perform a matrix product and obtain the
-       kernel-convolved dataset.\
+       kernel-convolved dataset.
+    \
     {tensor_dim_spec}
 
     Parameters
@@ -502,6 +641,7 @@ def spatial_conv(
     return data_conv
 
 
+@document_spatial_conv
 def spherical_conv(
     data: Tensor,
     coor: Tensor,
@@ -519,22 +659,15 @@ def spherical_conv(
     https://openreview.net/pdf?id=Hkbd5xZRb
 
     See :func:`spatial_conv` for implementation details.
-
-    :Dimension: **data :** :math:`(*, C, N)`
-                    `*` denotes any number of intervening dimensions, `C`
-                    denotes the number of data channels, and `N` denotes the
-                    number of data observations per channel.
-                **coor :** :math:`(*, N, D)`
-                    `D` denotes the dimension of the space in which the data
-                    are embedded.
-                **Output :** :math:`(*, C, N)`
+    \
+    {tensor_dim_spec}
 
     Parameters
     ----------
-    data : Tensor
+    data : ($*$, $N$, $C$) tensor
         Tensor containing data observations, which might be arrayed into
         channels.
-    coor : Tensor
+    coor : ($*$, $N$, $D$) tensor
         Tensor containing the spatial coordinates associated with each
         observation in `data`.
     scale : float (default 1)
@@ -549,7 +682,7 @@ def spherical_conv(
 
     Returns
     -------
-    data_conv : Tensor
+    data_conv : ($*$, $C$, $N$) tensor
         The input data convolved with the kernel. Each channel is convolved
         completely separately as of now.
     """
@@ -598,6 +731,7 @@ def euclidean_conv(
     )
 
 
+@document_cmass_coor
 def diffuse(
     X: Tensor,
     coor: Tensor,
@@ -609,16 +743,9 @@ def diffuse(
     Compute a compactness score for a weight.
 
     The compactness is defined as
-
-    :math:`\mathbf{1}^\intercal\left(A \circ \left\|C - \frac{AC}{A\mathbf{1}} \right\|_{cols} \right)\mathbf{1}`
-
-    :Dimension: **Input :** :math:`(*, W, L)`
-                    ``*`` denotes any number of preceding dimensions, W
-                    denotes number of weights (e.g., regions of an atlas),
-                    and L denotes number of locations (e.g., voxels).
-                **coor :** :math:`(*, D, L)`
-                    D denotes the dimension of the embedding space of the
-                    locations.
+    {diffuse_penalty}
+    \
+    {cmass_coor_dim_spec}
 
     Parameters
     ----------
@@ -650,3 +777,168 @@ def diffuse(
         ).swapaxes(-1, -2)
     dist = jnp.maximum(dist - floor, 0)
     return (X * dist).mean(-1)
+
+
+@document_modularity
+def girvan_newman_null(A: Tensor) -> Tensor:
+    """
+    Girvan-Newman null model for a tensor block.
+    \
+    {girvan_newman_long_desc}
+    \
+    {adjacency_dim_spec}
+
+    Parameters
+    ----------\
+    {adjacency_param_spec}
+
+    Returns
+    -------
+    P : ($*$, $I$, $O$) tensor
+        Block comprising Girvan-Newman null matrices corresponding to each
+        input adjacency matrix.
+    """
+    k_i = A.sum(-1, keepdims=True)
+    k_o = A.sum(-2, keepdims=True)
+    two_m = k_i.sum(-2, keepdims=True)
+    return k_i @ k_o / two_m
+
+
+@document_modularity
+def modularity_matrix(
+    A: Tensor,
+    gamma: float = 1,
+    null: Callable = girvan_newman_null,
+    normalise_modularity: bool = True,
+    sign: Optional[Literal['+', '-']] = '+',
+    **params,
+) -> Tensor:
+    """
+    Modularity matrices for a tensor block.
+    \
+    {modularity_matrix_long_desc}
+    \
+    {adjacency_dim_spec}
+
+    Parameters
+    ----------\
+    {adjacency_param_spec}\
+    {modularity_matrix_param_spec}
+
+    Returns
+    -------
+    B : ($*$, $I$, $O$) tensor
+        Block comprising modularity matrices corresponding to each input
+        adjacency matrix.
+
+    See also
+    --------
+    relaxed_modularity: Compute the modularity given a community structure.
+    """
+    if sign == '+':
+        A = relu(A)
+    elif sign == '-':
+        A = -relu(-A)
+    mod = A - gamma * null(A, **params)
+    if normalise_modularity:
+        two_m = A.sum((-2, -1), keepdims=True)
+        return mod / two_m
+    return mod
+
+
+@document_modularity
+def coaffiliation(
+    C: Tensor,
+    C_o: Optional[Tensor] = None,
+    L: Optional[Tensor] = None,
+    exclude_diag: bool = True,
+    normalise_coaffiliation: bool = False,
+) -> Tensor:
+    """
+    Coaffiliation of vertices under a community structure.
+    \
+    {coaffiliation_long_desc}
+    \
+    {coaffiliation_dim_spec}
+
+    Parameters
+    ----------\
+    {coaffiliation_param_spec}
+
+    Returns
+    -------
+    C : ($*$, $I$, $O$) tensor
+        Coaffiliation matrix for each input community structure.
+    """
+    C_i = C
+    if C_o is None:
+        C_o = C_i
+    if normalise_coaffiliation:
+        norm_fac_i = jnp.maximum(1, C_i.max((-1, -2), keepdims=True))
+        norm_fac_o = jnp.maximum(1, C_o.max((-1, -2), keepdims=True))
+        C_i = C_i / norm_fac_i
+        C_o = C_o / norm_fac_o
+    if L is None:
+        C = C_i @ C_o.swapaxes(-1, -2)
+    else:
+        C = C_i @ L @ C_o.swapaxes(-1, -2)
+    if exclude_diag:
+        C = delete_diagonal(C)
+    return C
+
+
+@document_modularity
+def relaxed_modularity(
+    A: Tensor,
+    C: Tensor,
+    C_o: Optional[Tensor] = None,
+    L: Optional[Tensor] = None,
+    exclude_diag: bool = True,
+    gamma: float = 1,
+    null: Callable = girvan_newman_null,
+    normalise_modularity: bool = True,
+    normalise_coaffiliation: bool = True,
+    directed: bool = False,
+    sign: Optional[Literal['+', '-']] = '+',
+    **params,
+) -> Tensor:
+    """
+    A relaxation of the modularity of a network given a community partition.
+    \
+    {relaxed_modularity_long_desc}
+    \
+    {coaffiliation_dim_spec}
+
+    Parameters
+    ----------
+    {adjacency_param_spec}\
+    {coaffiliation_param_spec}
+    directed : bool (default False)
+        Indicates that the input adjacency matrices should be considered as a
+        directed graph.\
+    {modularity_matrix_param_spec}
+
+    Returns
+    -------
+    Q : Tensor
+        Modularity of each input adjacency matrix.
+    """
+    B = modularity_matrix(
+        A,
+        gamma=gamma,
+        null=null,
+        normalise_modularity=normalise_modularity,
+        sign=sign,
+        **params,
+    )
+    C = coaffiliation(
+        C,
+        C_o=C_o,
+        L=L,
+        exclude_diag=exclude_diag,
+        normalise_coaffiliation=normalise_coaffiliation,
+    )
+    Q = (B * C).sum((-2, -1))
+    if not directed:
+        return Q / 2
+    return Q

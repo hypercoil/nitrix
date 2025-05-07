@@ -11,6 +11,10 @@ from functools import partial
 from numpyro.distributions import Normal
 from scipy.ndimage import gaussian_filter1d
 from sklearn.metrics.pairwise import haversine_distances
+from communities.utilities import (
+    modularity_matrix as modularity_matrix_ref,
+    modularity as modularity_ref
+)
 from nitrix.functional.geom import (
     cmass_regular_grid,
     cmass_coor,
@@ -23,12 +27,18 @@ from nitrix.functional.geom import (
     sphere_to_latlong,
     kernel_gaussian,
     diffuse,
+    modularity_matrix,
+    relaxed_modularity,
 )
 
 
 #TODO: Unit tests still needed for
 # - "centres of mass" in spherical coordinates
 # - regularisers: `cmass_reference_displacement` and `diffuse`
+# - case with positive and negative weights in the adjacency matrix
+# - correctness of nonassociative block modularity
+# - correctness of non-normalised modularity and coaffiliation
+# - correctness of graph measures on directed or bipartite graphs
 
 
 @pytest.fixture(scope='module')
@@ -130,6 +140,29 @@ def coor_sph_rand():
     coor_sph_rand = np.random.rand(5, 3)
     coor_sph_rand /= np.linalg.norm(coor_sph_rand, axis=0, ord=2)
     return coor_sph_rand
+
+@pytest.fixture(scope='module')
+def A():
+    A = np.random.rand(3, 20, 20)
+    A += A.swapaxes(-1, -2)
+    return A
+
+@pytest.fixture(scope='module')
+def aff():
+    aff = np.random.randint(0, 4, 20)
+    return aff
+
+@pytest.fixture(scope='module')
+def comms(aff):
+    return [np.where(aff==c)[0] for c in np.unique(aff)]
+
+@pytest.fixture(scope='module')
+def C(aff):
+    return np.eye(4)[aff]
+
+@pytest.fixture(scope='module')
+def L():
+    return np.random.rand(4, 4)
 
 
 def test_alias_cmass(X, Y):
@@ -338,3 +371,52 @@ def test_compactness():
     diff_small = diffuse(small.reshape(1, -1), coor.reshape(3, -1), radius=1)
     diff_large = diffuse(large.reshape(1, -1), coor.reshape(3, -1), radius=1)
     assert diff_small < diff_large
+
+
+def test_modularity_matrix(A):
+    out = modularity_matrix(A, normalise_modularity=True)
+    ref = np.stack([modularity_matrix_ref(x) for x in A])
+    assert np.allclose(out, ref)
+
+
+def test_modularity(A, C, comms):
+    out = relaxed_modularity(
+        A,
+        C,
+        exclude_diag=True,
+        directed=False,
+    )
+    ref = np.stack([
+        modularity_ref(modularity_matrix_ref(x), comms)
+        for x in A
+    ])
+    assert np.allclose(out, ref)
+    ref = relaxed_modularity(
+        A,
+        C,
+        C,
+        exclude_diag=True,
+        directed=False,
+    )
+    assert np.allclose(out, ref)
+    ref = relaxed_modularity(
+        -A,
+        C,
+        exclude_diag=True,
+        directed=False,
+        sign='-',
+    )
+    assert np.allclose(out, ref)
+
+
+def test_nonassociative_block(A, C, L):
+    #TODO: this test only checks that the call does not crash
+    out = relaxed_modularity(
+        A,
+        C,
+        L=L,
+        exclude_diag=False,
+        normalise_modularity=False,
+        normalise_coaffiliation=False,
+        directed=True,
+    ) / 2
