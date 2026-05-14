@@ -68,7 +68,6 @@ Differentiability
 """
 from __future__ import annotations
 
-import functools
 from typing import Literal, Optional, Tuple, Union
 
 import jax
@@ -76,6 +75,13 @@ import jax.numpy as jnp
 from jax.experimental.sparse.linalg import lobpcg_standard
 from jaxtyping import Array, Float, Num
 
+from ..linalg._solver import (
+    device_of_concrete as _device_of_concrete,
+    eigh_device as _eigh_device,
+    safe_eigh as _safe_eigh,
+    solver_device as _solver_device,
+    source_device as _source_device,
+)
 from ..semiring import REAL, semiring_ell_matmul
 from ..sparse import ELL, SectionedELL, sectioned_semiring_ell_matmul
 from ._lobpcg_diff import lobpcg_top_k_dense, lobpcg_top_k_ell
@@ -85,110 +91,10 @@ from .laplacian import _ell_matvec, _is_sparse, degree_vector
 __all__ = ['laplacian_eigenmap', 'diffusion_embedding']
 
 
-# ---------------------------------------------------------------------------
-# Robust ``eigh`` device selection
-#
-# Certain CUDA / JAX combinations have a broken cuSolver handle (an
-# ABI mismatch between the cuSolver library and the GPU driver
-# manifests as ``gpusolverDnCreate(&handle) failed``).  We probe once
-# at first use; if GPU eigh fails we route eigh to CPU.  For the eigh
-# use case (small dense matrices, ``n ≲ 5000``) the GPU vs CPU
-# difference is small enough not to matter.
-# ---------------------------------------------------------------------------
-
-
-@functools.lru_cache(maxsize=1)
-def _eigh_device():
-    '''Pick a device for dense ``eigh`` that's known to work.
-
-    Returns ``jax.devices()[0]`` if GPU eigh succeeds on a probe;
-    otherwise ``jax.devices('cpu')[0]``.  Cached so the probe runs
-    at most once per process.
-    '''
-    try:
-        probe = jnp.eye(2, dtype=jnp.float32)
-        out = jnp.linalg.eigh(probe)
-        jax.block_until_ready(out)
-        return jax.devices()[0]
-    except Exception:
-        cpu_devs = jax.devices('cpu')
-        return cpu_devs[0] if cpu_devs else jax.devices()[0]
-
-
-def _device_of_concrete(arr):
-    '''Return the device of a concrete array, or ``None`` for tracers.
-
-    ``arr.devices()`` raises ``ConcretizationTypeError`` inside a
-    JAX trace; we treat tracers as "no fixed device" and let JAX's
-    abstract evaluation handle dispatch.
-    '''
-    if not hasattr(arr, 'devices'):
-        return None
-    try:
-        devs = arr.devices()
-    except jax.errors.ConcretizationTypeError:
-        return None
-    return next(iter(devs), None)
-
-
-def _safe_eigh(A: Float[Array, '... n n']):
-    '''``jnp.linalg.eigh`` with the cuSolver-robust device pick.
-
-    Results are moved back to the input's original device so the
-    caller doesn't see a surprise CPU array when ``A`` was on GPU.
-    Inside ``jax.grad`` the input is a tracer with no concrete
-    device; we then skip the move-back and rely on JAX dispatch.
-    '''
-    target = _eigh_device()
-    source = _device_of_concrete(A)
-    A_dev = jax.device_put(A, target) if source is not None else A
-    eigvals, eigvecs = jnp.linalg.eigh(A_dev)
-    if source is not None and source != target:
-        eigvals = jax.device_put(eigvals, source)
-        eigvecs = jax.device_put(eigvecs, source)
-    return eigvals, eigvecs
-
-
-def _solver_device():
-    '''Pick the device for matrix-free iterative solvers (LOBPCG, etc.).
-
-    LOBPCG internally calls cuSolver-backed QR / Cholesky, so it
-    inherits the same broken-cuSolver failure mode as ``eigh``.  We
-    reuse the eigh probe's verdict: if eigh works on GPU, lobpcg
-    likely does too; if eigh fell back to CPU, route lobpcg there
-    as well.
-    '''
-    return _eigh_device()
-
-
-def _devices_of(tree) -> set:
-    '''Unique devices of every concrete-array leaf in a pytree.
-
-    Skips tracers (they have no concrete device) and non-array
-    leaves.
-    '''
-    leaves = jax.tree_util.tree_leaves(tree)
-    devs = set()
-    for leaf in leaves:
-        if not hasattr(leaf, 'devices'):
-            continue
-        try:
-            devs.update(leaf.devices())
-        except jax.errors.ConcretizationTypeError:
-            continue
-        except Exception:
-            continue
-    return devs
-
-
-def _source_device(tree):
-    '''The "originating" device for a tree of arrays.
-
-    If all leaves share a device, return it.  If multiple, return
-    the first found.  ``None`` if no array leaves.
-    '''
-    devs = _devices_of(tree)
-    return next(iter(devs), None) if devs else None
+# The cuSolver-fallback ``eigh`` lives in ``nitrix.linalg._solver``
+# now (it's used here, in ``linalg.spd``, and in ``_lobpcg_diff``);
+# import names are aliased above with a leading underscore to keep
+# the in-module call sites unchanged.
 
 
 def _device_put_graph(A: _GraphInput, target) -> _GraphInput:
