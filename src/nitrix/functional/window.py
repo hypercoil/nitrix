@@ -9,7 +9,6 @@ from typing import Callable, Generator, Sequence
 
 import jax
 import jax.numpy as jnp
-from numpyro.distributions import Multinomial
 
 from .._internal import (
     DocTemplateFormat, Tensor, form_docstring, tensor_dimensions
@@ -115,10 +114,8 @@ def _select_fn_no_overlap(
     key: 'jax.random.PRNGKey',
 ) -> Tensor:
     unused_size = input_size - window_size * num_windows
-    intervals = Multinomial(
-        total_count=unused_size,
-        probs=jnp.ones(num_windows + 1) / (num_windows + 1),
-    ).sample(key=key)
+    probs = jnp.ones(num_windows + 1) / (num_windows + 1)
+    intervals = jax.random.multinomial(key, unused_size, probs).astype(jnp.int32)
     start = jnp.arange(num_windows + 1) * window_size + jnp.cumsum(intervals)
     return start[:-1]
 
