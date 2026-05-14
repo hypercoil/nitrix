@@ -41,6 +41,7 @@ from ._mm import (
     erode,
     open,
 )
+from ._median import median_filter
 
 __all__ = [
     'dilate',
@@ -48,19 +49,12 @@ __all__ = [
     'open',
     'close',
     'distance_transform',
+    'median_filter',
 ]
 
-# ``_median`` and ``_susan`` are wired in by their own modules below as
-# they land; keeping the imports staged avoids partial-module import
-# errors when we work in increments.
-try:
-    from ._median import median_filter
-    __all__.append('median_filter')
-except ImportError:
-    pass
-
-try:
-    from ._susan import susan_emulator
-    __all__.append('susan_emulator')
-except ImportError:
-    pass
+# ``susan_emulator`` lives in ``nitrix.smoothing`` per SPEC_UPDATE §3.3
+# (it composes ``bilateral_gaussian`` + ``median_filter`` and is a
+# smoothing op that *uses* ``median_filter`` as a sub-step).  We do
+# *not* re-export it here -- doing so creates a circular import via
+# ``smoothing.susan`` which imports ``morphology.median_filter``.
+# Users import it from ``nitrix.smoothing`` directly.

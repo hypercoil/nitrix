@@ -17,10 +17,18 @@ from .ell import (
     ell_to_dense,
     ell_pad,
 )
+from .ell_sectioned import (
+    SectionedELL,
+    sectioned_ell_from_ragged,
+    sectioned_semiring_ell_matmul,
+)
 
 __all__ = [
     'ELL',
     'ell_from_dense',
     'ell_to_dense',
     'ell_pad',
+    'SectionedELL',
+    'sectioned_ell_from_ragged',
+    'sectioned_semiring_ell_matmul',
 ]
