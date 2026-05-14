@@ -1,0 +1,288 @@
+# -*- coding: utf-8 -*-
+# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+# vi: set ft=python sts=4 ts=4 sw=4 et:
+"""
+Differentiable LOBPCG via implicit-VJP through the eigenvalue equation.
+
+The underlying ``jax.experimental.sparse.linalg.lobpcg_standard`` is not
+natively differentiable (its iterative ``lax.while_loop`` has a data-
+dependent termination criterion).  We wrap the forward call in
+``jax.custom_vjp`` and supply a hand-derived backward built from the
+returned eigenpairs alone -- no replay of the iteration.
+
+The math follows ``docs/design/lobpcg-implicit-vjp.md``.  The shipped
+backward is "option 1" from that document: Hellmann-Feynman for the
+eigenvalue gradient plus an F-matrix correction restricted to the
+top-``k`` subspace for the eigenvector gradient.  Contributions from
+the (unknown) orthogonal complement are dropped; the approximation is
+**exact** for losses that depend only on the eigenvalues or only on
+in-subspace functionals of the eigenvectors (the typical analysis
+use cases: Laplacian-eigenmap embeddings, diffusion embeddings,
+spectral clustering objectives).  For losses that depend on the
+discarded part of the spectrum it is biased; option 2 (an iterative
+Krylov correction) is the follow-up.
+
+Two entry points:
+
+- ``lobpcg_top_k_dense`` -- ``M: (n, n)`` symmetric, diff w.r.t. ``M``.
+- ``lobpcg_top_k_ell`` -- ``M`` stored as ELL ``(values, indices)``;
+  diff w.r.t. ``values`` only.  The gradient is **projected onto the
+  existing sparsity pattern** so the backward cost is
+  ``O(nnz * k + n * k^2)`` -- consistent with the forward.  Off-pattern
+  derivatives are not returned (the user typically wouldn't be able to
+  use them anyway, since the sparse forward never touched those
+  entries).
+
+Both wrappers symmetrize the resulting gradient so the cotangent lives
+in the symmetric matrix subspace; this matches ``jnp.linalg.eigh``'s
+VJP convention.  Near-degenerate denominators in the F-matrix are
+clamped (``|lambda_j - lambda_i| < eps_clamp`` -> ``F[i, j] = 0``);
+callers exercising near-degenerate spectra should pass a small
+positive ``eps_clamp`` and treat individual eigenvectors as not
+meaningful within the cluster.
+
+The wrappers carry ``X0`` as a non-differentiated companion -- the
+initial search subspace is not a function of the loss, and its
+gradient is undefined under the iteration anyway.
+
+Cross-reference: SPEC_UPDATE §3.x (no specific spec entry; this
+ships ahead of formal spec as a stretch beyond the Phase 3 graph
+exit checklist).
+"""
+from __future__ import annotations
+
+from functools import partial
+from typing import Any, Optional, Tuple
+
+import jax
+import jax.numpy as jnp
+from jax.experimental.sparse.linalg import lobpcg_standard
+from jaxtyping import Array, Float, Int
+
+
+__all__ = [
+    'lobpcg_top_k_dense',
+    'lobpcg_top_k_ell',
+]
+
+
+# ---------------------------------------------------------------------------
+# Shared backward machinery
+# ---------------------------------------------------------------------------
+
+
+def _subspace_vjp_kernel(
+    eigvals: Float[Array, 'k'],
+    eigvecs: Float[Array, 'n k'],
+    g_eigvals: Float[Array, 'k'],
+    g_eigvecs: Float[Array, 'n k'],
+    eps_clamp: float,
+) -> Float[Array, 'k k']:
+    '''Build the ``k x k`` core matrix ``K`` of the implicit VJP.
+
+    The full eigendecomposition VJP for symmetric ``M`` is::
+
+        dM = V (diag(g_lambda) + S \\odot F) V^T
+
+    where ``V`` is the eigenvector matrix, ``g_lambda`` the eigenvalue
+    cotangent, ``S = (V^T g_V - g_V^T V) / 2`` the antisymmetric part
+    of the projected eigenvector cotangent, and
+    ``F[i, j] = 1 / (lambda_j - lambda_i)`` (zero on the diagonal).
+    Returning ``K = diag(g_lambda) + S \\odot F`` lets dense and sparse
+    backwards share this expensive piece and apply ``V K V^T`` (dense)
+    or its sparsity-pattern projection (ELL) on top.
+
+    The clamp converts ``|lambda_j - lambda_i| < eps_clamp`` into a
+    zero entry of ``F`` rather than a blow-up; the entire pair-(i, j)
+    correction is dropped in that case.  Documented in the public
+    docstrings.
+    '''
+    k = eigvals.shape[0]
+    # F[i, j] = 1 / (lambda_j - lambda_i), with diagonal handled separately.
+    diff = eigvals[None, :] - eigvals[:, None]
+    safe = jnp.where(jnp.abs(diff) < eps_clamp, 1.0, diff)
+    F = jnp.where(jnp.abs(diff) < eps_clamp, 0.0, 1.0 / safe)
+    F = F * (1.0 - jnp.eye(k, dtype=F.dtype))
+    G = eigvecs.T @ g_eigvecs
+    S = 0.5 * (G - G.T)
+    K = jnp.diag(g_eigvals) + S * F
+    return K
+
+
+# ---------------------------------------------------------------------------
+# Dense path
+# ---------------------------------------------------------------------------
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(2, 3, 4))
+def lobpcg_top_k_dense(
+    M: Float[Array, 'n n'],
+    X0: Float[Array, 'n k'],
+    n_iters: int = 200,
+    tol: Optional[float] = None,
+    eps_clamp: float = 1e-8,
+) -> Tuple[Float[Array, 'k'], Float[Array, 'n k']]:
+    '''Differentiable LOBPCG for a concrete dense symmetric ``M``.
+
+    Parameters
+    ----------
+    M
+        Symmetric ``(n, n)`` operand.  Caller is responsible for
+        symmetry; we do not symmetrize ``M`` because doing so would
+        materialise a copy.
+    X0
+        ``(n, k)`` initial search subspace.  Not differentiated --
+        the gradient of an iterative solver's output w.r.t. its
+        initial guess is undefined when the iteration converges, and
+        zero otherwise.
+    n_iters
+        Maximum LOBPCG iterations; passed to ``lobpcg_standard.m``.
+    tol
+        Convergence tolerance; passed to ``lobpcg_standard.tol``.
+    eps_clamp
+        Denominator floor for the F-matrix in the eigenvector
+        gradient.  Pairs with ``|lambda_i - lambda_j| < eps_clamp``
+        contribute zero to the gradient instead of a blow-up.
+
+    Returns
+    -------
+    ``(eigvals, eigvecs)`` of shapes ``(k,)`` and ``(n, k)``.
+    Eigenvalues are largest-first (the ``lobpcg_standard``
+    convention).
+
+    Notes
+    -----
+    The backward implements the subspace-projector approximation: it
+    drops the contribution of the orthogonal complement of the top-
+    ``k`` subspace to the eigenvector gradient.  Exact for purely
+    in-subspace losses; biased otherwise.  See
+    ``docs/design/lobpcg-implicit-vjp.md``.
+    '''
+    return _dense_forward(M, X0, n_iters, tol)
+
+
+def _dense_forward(M, X0, n_iters, tol):
+    eigvals, eigvecs, _ = lobpcg_standard(M, X0, m=n_iters, tol=tol)
+    return eigvals, eigvecs
+
+
+def _dense_fwd(M, X0, n_iters, tol, eps_clamp):
+    eigvals, eigvecs = _dense_forward(M, X0, n_iters, tol)
+    return (eigvals, eigvecs), (eigvals, eigvecs)
+
+
+def _dense_bwd(n_iters, tol, eps_clamp, residuals, cotangents):
+    eigvals, eigvecs = residuals
+    g_eigvals, g_eigvecs = cotangents
+    K = _subspace_vjp_kernel(
+        eigvals, eigvecs, g_eigvals, g_eigvecs, eps_clamp,
+    )
+    # dM = V K V^T.  K = diag(g_lambda) + S \\odot F is symmetric
+    # because both terms are symmetric (diag is symmetric; S antisym
+    # times F antisym is symmetric elementwise).  So V K V^T is
+    # symmetric without further symmetrization.
+    dM = eigvecs @ K @ eigvecs.T
+    return (dM, None)
+
+
+lobpcg_top_k_dense.defvjp(_dense_fwd, _dense_bwd)
+
+
+# ---------------------------------------------------------------------------
+# ELL path
+# ---------------------------------------------------------------------------
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(3, 4, 5, 6))
+def lobpcg_top_k_ell(
+    values: Float[Array, 'n k_max'],
+    indices: Int[Array, 'n k_max'],
+    X0: Float[Array, 'n k'],
+    n_cols: int,
+    n_iters: int = 200,
+    tol: Optional[float] = None,
+    eps_clamp: float = 1e-8,
+) -> Tuple[Float[Array, 'k'], Float[Array, 'n k']]:
+    '''Differentiable LOBPCG for an ELL-stored symmetric operator.
+
+    The ELL operator is interpreted as ``M[i, indices[i, p]] +=
+    values[i, p]`` (with pad rows pointing to a valid in-range index,
+    contributing the semiring identity; for REAL that's zero).  The
+    forward uses ELL matvec; the backward returns the projection of
+    the dense gradient onto the existing ``(i, indices[i, p])``
+    pattern.  Off-pattern derivatives are not returned -- in a sparse
+    optimisation, the user typically can't write them anyway.
+
+    Parameters
+    ----------
+    values
+        ELL value array ``(n, k_max)``.  This is the differentiated
+        operand.
+    indices
+        ELL index array ``(n, k_max)``.  Not differentiated.
+    X0
+        Initial search subspace ``(n, k)``.  Not differentiated.
+    n_cols
+        The number of dense columns the ELL implicitly represents.
+    n_iters, tol, eps_clamp
+        See ``lobpcg_top_k_dense``.
+
+    Returns
+    -------
+    ``(eigvals, eigvecs)`` of shapes ``(k,)`` and ``(n, k)``.
+
+    Notes
+    -----
+    For *symmetric* operators, the sparsity pattern must itself be
+    symmetric (every off-diagonal entry has a matching transpose
+    entry in the ELL).  If the pattern is not symmetric the forward
+    is ill-defined regardless of differentiability.  The backward
+    does not enforce symmetry of the gradient -- doing so would
+    require reading the transpose entry, which costs an additional
+    gather per nnz.  Callers that need a symmetric gradient should
+    compute ``(g + g^T) / 2`` after the backward.
+    '''
+    return _ell_forward(values, indices, X0, n_cols, n_iters, tol)
+
+
+def _ell_forward(values, indices, X0, n_cols, n_iters, tol):
+    # Local import to avoid a cycle (this module is imported from
+    # ``connectopy`` which is itself imported from ``graph/__init__``).
+    from ..semiring import REAL, semiring_ell_matmul
+
+    def matvec(X):
+        return semiring_ell_matmul(
+            values, indices, X,
+            semiring=REAL, n_cols=n_cols, backend='jax',
+        )
+
+    eigvals, eigvecs, _ = lobpcg_standard(matvec, X0, m=n_iters, tol=tol)
+    return eigvals, eigvecs
+
+
+def _ell_fwd(values, indices, X0, n_cols, n_iters, tol, eps_clamp):
+    eigvals, eigvecs = _ell_forward(
+        values, indices, X0, n_cols, n_iters, tol,
+    )
+    return (eigvals, eigvecs), (indices, eigvals, eigvecs)
+
+
+def _ell_bwd(n_cols, n_iters, tol, eps_clamp, residuals, cotangents):
+    indices, eigvals, eigvecs = residuals
+    g_eigvals, g_eigvecs = cotangents
+    K = _subspace_vjp_kernel(
+        eigvals, eigvecs, g_eigvals, g_eigvecs, eps_clamp,
+    )
+    # The dense gradient is V K V^T = V_row K V_col^T.  We project
+    # onto sparsity: g_values[i, p] = (V K V^T)[i, indices[i, p]]
+    # = (V K)[i, :] @ V[indices[i, p], :].
+    VK = eigvecs @ K  # (n, k)
+    V_at_idx = eigvecs[indices]  # (n, k_max, k)  via fancy indexing
+    g_values = jnp.einsum('ij,ipj->ip', VK, V_at_idx)
+    # g_indices is undefined (integer index); return zeros of matching
+    # shape and dtype as required by JAX's custom_vjp contract.
+    g_indices = jnp.zeros_like(indices)
+    return (g_values, g_indices, None)
+
+
+lobpcg_top_k_ell.defvjp(_ell_fwd, _ell_bwd)

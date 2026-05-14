@@ -49,21 +49,22 @@ Differentiability
 - ``solver="eigh"``: **differentiable**.  ``jnp.linalg.eigh``
   ships with a registered VJP that JAX wires up automatically.
   Works for ``jax.grad`` over both eigenvalues and eigenvectors.
-- ``solver="lobpcg"``: **forward-only at first GA**.  The
-  ``lobpcg_standard`` implementation uses ``lax.while_loop`` with
-  a data-dependent termination criterion, which JAX cannot
-  differentiate in reverse mode.  Calling
-  ``jax.grad(...)`` on a function that goes through ``lobpcg``
-  raises a (slightly cryptic) JAX error; we wrap it in a
-  ``custom_vjp`` to surface a clear "use eigh for grad" message.
-
-The fix is implicit differentiation through the eigenvalue
-equation (``∂λ/∂A = v v^T``; eigenvector gradient via the
-``F``-matrix formula with a subspace projector for the partial
-top-``k`` case).  Math sketch in
-``docs/design/lobpcg-implicit-vjp.md``; tracked as a stretch
-TODO -- the use case (analysis primitives, not training
-operators) is typically forward-only anyway.
+- ``solver="lobpcg"`` with **dense or flat ELL** input:
+  **differentiable** via the implicit-VJP wrapper in
+  ``_lobpcg_diff``.  Hellmann-Feynman for the eigenvalue gradient;
+  the F-matrix subspace projector for the eigenvector gradient.
+  Exact for losses that depend only on eigenvalues or on
+  in-subspace functionals of eigenvectors (the typical use cases);
+  biased for losses that depend on the orthogonal complement of
+  the returned top-``k`` subspace.  Near-degenerate denominators
+  are clamped (``eps_clamp`` knob, default ``1e-8``); pairs with
+  ``|lambda_i - lambda_j| < eps_clamp`` contribute zero rather
+  than a blow-up.
+- ``solver="lobpcg"`` with **SectionedELL** input: forward-only.
+  ``jax.grad`` raises the native JAX while-loop AD error; convert
+  to flat ELL first if you need gradients.  Math sketch for an
+  eventual SectionedELL-aware backward in
+  ``docs/design/lobpcg-implicit-vjp.md``.
 """
 from __future__ import annotations
 
@@ -77,6 +78,7 @@ from jaxtyping import Array, Float, Num
 
 from ..semiring import REAL, semiring_ell_matmul
 from ..sparse import ELL, SectionedELL, sectioned_semiring_ell_matmul
+from ._lobpcg_diff import lobpcg_top_k_dense, lobpcg_top_k_ell
 from .laplacian import _ell_matvec, _is_sparse, degree_vector
 
 
@@ -231,16 +233,54 @@ _GraphInput = Union[Num[Array, '... n n'], ELL, SectionedELL]
 # ---------------------------------------------------------------------------
 
 
-def _build_affinity_matvec(
+def _scale_by_outer(
+    A: _GraphInput,
+    left: Float[Array, '... n'],
+    right: Float[Array, '... n'],
+) -> _GraphInput:
+    '''Scale ``A_{ij}`` by ``left[i] * right[j]`` over dense / ELL /
+    SectionedELL.
+
+    The sparsity pattern is preserved (diagonal scaling on both sides
+    is structure-preserving).  Returns a new operand of the same
+    type; values are scaled.
+    '''
+    if isinstance(A, ELL):
+        right_at_idx = right[A.indices]
+        return ELL(
+            values=A.values * (left[:, None] * right_at_idx),
+            indices=A.indices,
+            n_cols=A.n_cols,
+            identity=A.identity,
+        )
+    if isinstance(A, SectionedELL):
+        new_sections = []
+        for ell, row_idx in zip(A.sections, A.row_groups):
+            left_rows = left[jnp.asarray(row_idx)]
+            right_at = right[ell.indices]
+            new_sections.append(ELL(
+                values=ell.values * (left_rows[:, None] * right_at),
+                indices=ell.indices,
+                n_cols=ell.n_cols,
+                identity=ell.identity,
+            ))
+        return SectionedELL(
+            sections=tuple(new_sections),
+            row_groups=A.row_groups,
+            n_rows=A.n_rows,
+            n_cols=A.n_cols,
+            identity=A.identity,
+        )
+    return A * left[..., :, None] * right[..., None, :]
+
+
+def _build_affinity_operator(
     A: _GraphInput,
     *,
     alpha: float = 0.0,
     eps: float = 1e-12,
-) -> Tuple[
-    'jax.tree_util.Partial',
-    Float[Array, '... n'],
-]:
-    '''Return ``(matvec, inv_sqrt_d2)`` for the normalised affinity operator.
+) -> Tuple[_GraphInput, Float[Array, '... n']]:
+    '''Return ``(M, inv_sqrt_d2)`` for the normalised affinity operator.
 
     For ``alpha == 0`` the operator is
     ``M = D^(-1/2) A D^(-1/2)`` (the affinity matrix of the
@@ -250,72 +290,48 @@ def _build_affinity_matvec(
     ``K_alpha = A / (d^alpha d^alpha.T)`` is the density-normalised
     affinity and ``d_2`` is its row sums.
 
-    The returned ``inv_sqrt_d2`` is what one multiplies the
-    eigenvectors of ``M_alpha`` by to recover the right
-    eigenvectors of the random-walk diffusion operator ``P``.  For
-    the Laplacian-eigenmap path (``alpha = 0``) the caller ignores
-    it.
+    Returns the *concrete* operator (dense or ELL / SectionedELL,
+    matching the input format), not a closure.  The returned
+    operator can be passed directly to ``lobpcg_top_k_dense /
+    lobpcg_top_k_ell`` for differentiable use, or wrapped in a
+    closure for forward-only use (SectionedELL).
+
+    ``inv_sqrt_d2`` is what one multiplies the eigenvectors of
+    ``M_alpha`` by to recover the right eigenvectors of the
+    random-walk diffusion operator ``P``.  For the Laplacian-
+    eigenmap path (``alpha = 0``) the caller ignores it.
     '''
     deg = degree_vector(A)
     safe_deg = jnp.maximum(deg, eps)
 
     if alpha != 0.0:
         d_alpha = safe_deg ** alpha
-        # K_alpha is A scaled by 1 / (d_a[i] * d_a[j]).  In ELL
-        # form, we gather d_a at indices to do the elementwise
-        # scaling.  For dense, it's outer-product scaling.
-        if isinstance(A, ELL):
-            d_alpha_at_idx = d_alpha[A.indices]
-            new_values = A.values / (d_alpha[:, None] * d_alpha_at_idx)
-            A_normalised: _GraphInput = ELL(
-                values=new_values,
-                indices=A.indices,
-                n_cols=A.n_cols,
-                identity=A.identity,
-            )
-        elif isinstance(A, SectionedELL):
-            new_sections = []
-            for ell, row_idx in zip(A.sections, A.row_groups):
-                d_a_rows = d_alpha[jnp.asarray(row_idx)]
-                d_a_at = d_alpha[ell.indices]
-                nv = ell.values / (d_a_rows[:, None] * d_a_at)
-                new_sections.append(ELL(
-                    values=nv,
-                    indices=ell.indices,
-                    n_cols=ell.n_cols,
-                    identity=ell.identity,
-                ))
-            A_normalised = SectionedELL(
-                sections=tuple(new_sections),
-                row_groups=A.row_groups,
-                n_rows=A.n_rows,
-                n_cols=A.n_cols,
-                identity=A.identity,
-            )
-        else:  # dense
-            inv = 1.0 / (d_alpha[:, None] * d_alpha[None, :])
-            A_normalised = A * inv
-        new_deg = degree_vector(A_normalised)
-        safe_d2 = jnp.maximum(new_deg, eps)
+        inv_d_alpha = 1.0 / d_alpha
+        K = _scale_by_outer(A, inv_d_alpha, inv_d_alpha)
+        safe_d2 = jnp.maximum(degree_vector(K), eps)
     else:
-        A_normalised = A
+        K = A
         safe_d2 = safe_deg
 
     inv_sqrt_d2 = 1.0 / jnp.sqrt(safe_d2)
+    M = _scale_by_outer(K, inv_sqrt_d2, inv_sqrt_d2)
+    # Symmetrize dense M against floating-point drift; the sparse
+    # paths inherit symmetry from the (symmetric by assumption)
+    # input sparsity pattern.
+    if not _is_sparse(M):
+        M = 0.5 * (M + M.swapaxes(-1, -2))
+    return M, inv_sqrt_d2
 
-    def matvec(X):
-        # Want M @ X = D^(-1/2) A D^(-1/2) X.
-        # Step 1: scale by D^(-1/2)
-        scaled = inv_sqrt_d2[:, None] * X
-        # Step 2: A @ scaled
-        if _is_sparse(A_normalised):
-            Ax = _ell_matvec(A_normalised, scaled)
-        else:
-            Ax = jnp.matmul(A_normalised, scaled)
-        # Step 3: scale again
-        return inv_sqrt_d2[:, None] * Ax
 
-    return matvec, inv_sqrt_d2
+def _operator_matvec(M: _GraphInput):
+    '''Build a matvec closure for a concrete operator.
+
+    Used for the SectionedELL forward-only LOBPCG path, where there
+    is no differentiable wrapper for the format.
+    '''
+    if _is_sparse(M):
+        return lambda X: _ell_matvec(M, X)
+    return lambda X: jnp.matmul(M, X)
 
 
 def _auto_solver(A: _GraphInput) -> _Solver:
@@ -343,16 +359,7 @@ def _eigh_normalised_affinity(
     Returns ``(eigenvalues_asc, eigenvectors, inv_sqrt_d2)``.
     Eigenvalues are ascending; the *largest* are at the end.
     '''
-    deg = jnp.maximum(degree_vector(A), eps)
-    if alpha != 0.0:
-        d_alpha = deg ** alpha
-        K = A / (d_alpha[..., :, None] * d_alpha[..., None, :])
-    else:
-        K = A
-    d2 = jnp.maximum(degree_vector(K), eps)
-    inv_sqrt_d2 = 1.0 / jnp.sqrt(d2)
-    M = K * inv_sqrt_d2[..., :, None] * inv_sqrt_d2[..., None, :]
-    M = (M + M.swapaxes(-1, -2)) / 2
+    M, inv_sqrt_d2 = _build_affinity_operator(A, alpha=alpha, eps=eps)
     eigvals, eigvecs = _safe_eigh(M)
     return eigvals, eigvecs, inv_sqrt_d2
 
@@ -460,9 +467,9 @@ def laplacian_eigenmap(
         source = _source_device(A)
         target = _solver_device()
         A_solver = _device_put_graph(A, target)
-        matvec, _ = _build_affinity_matvec(A_solver, alpha=0.0, eps=eps)
+        M, _ = _build_affinity_operator(A_solver, alpha=0.0, eps=eps)
         vecs, vals = _lobpcg_top_k(
-            matvec,
+            M,
             n=_n_from(A_solver),
             n_components=n_components,
             skip_trivial=skip_trivial,
@@ -557,11 +564,11 @@ def diffusion_embedding(
         source = _source_device(A)
         target = _solver_device()
         A_solver = _device_put_graph(A, target)
-        matvec, inv_sqrt_d2 = _build_affinity_matvec(
+        M, inv_sqrt_d2 = _build_affinity_operator(
             A_solver, alpha=alpha, eps=eps,
         )
         vecs, vals = _lobpcg_top_k(
-            matvec,
+            M,
             n=_n_from(A_solver),
             n_components=n_components,
             skip_trivial=skip_trivial,
@@ -595,8 +602,57 @@ def _n_from(A: _GraphInput) -> int:
     return int(A.shape[-1])
 
 
+def _lobpcg_initial_subspace(
+    n: int, k_total: int, seed: int, device,
+) -> Float[Array, 'n k_total']:
+    '''Random initial subspace for LOBPCG, on the requested device.
+
+    ``seed`` controls reproducibility across runs.  ``device`` is the
+    solver device (chosen by ``_solver_device()``); LOBPCG's internal
+    QR / Cholesky use cuSolver, which we route to CPU when the
+    GPU-side build has a broken handle.
+    '''
+    key = jax.random.key(seed)
+    return jax.device_put(jax.random.normal(key, (n, k_total)), device)
+
+
+def _run_lobpcg_on_operator(
+    M: _GraphInput,
+    X0: Float[Array, 'n k_total'],
+    *,
+    iters: int,
+    tol: Optional[float],
+    eps_clamp: float = 1e-8,
+) -> Tuple[Float[Array, 'k_total'], Float[Array, 'n k_total']]:
+    '''Dispatch LOBPCG to the differentiable variant when possible.
+
+    Dispatch table:
+
+    - dense ``M``: ``lobpcg_top_k_dense`` (implicit-VJP).
+    - ``ELL`` ``M``: ``lobpcg_top_k_ell`` (sparsity-projected VJP).
+    - ``SectionedELL`` ``M``: closure-based ``lobpcg_standard`` call;
+      forward-only, raises under ``jax.grad`` with a native JAX
+      while-loop AD error.  Convert to flat ELL first if you need
+      differentiability through SectionedELL.
+
+    The skip-trivial / transform / sort post-processing is handled
+    by the caller in plain JAX so the chain rule flows naturally.
+    '''
+    if isinstance(M, ELL):
+        return lobpcg_top_k_ell(
+            M.values, M.indices, X0, M.n_cols, iters, tol, eps_clamp,
+        )
+    if isinstance(M, SectionedELL):
+        # Forward-only.  No diff-capable wrapper for SectionedELL.
+        matvec = _operator_matvec(M)
+        eigvals, eigvecs, _ = lobpcg_standard(matvec, X0, m=iters, tol=tol)
+        return eigvals, eigvecs
+    # Dense
+    return lobpcg_top_k_dense(M, X0, iters, tol, eps_clamp)
+
+
 def _lobpcg_top_k(
-    matvec,
+    M: _GraphInput,
     *,
     n: int,
     n_components: int,
@@ -606,33 +662,24 @@ def _lobpcg_top_k(
     seed: int,
     transform_eigvals,
 ):
-    '''Run ``lobpcg_standard`` for the top ``n_components`` (+ trivial) eigenpairs.
+    '''Run LOBPCG on a concrete operator and post-process.
 
     Returns ``(eigenvectors, eigenvalues)`` after optionally
     skipping the trivial top eigenvector and applying
-    ``transform_eigvals`` (e.g. ``mu -> 1 - mu`` for Laplacian).
+    ``transform_eigvals`` (e.g. ``mu -> 1 - mu`` for the Laplacian
+    convention).
 
-    Wrapped in ``_LOBPCGNotDifferentiable`` so reverse-mode AD
-    through this function raises a friendly error pointing at the
-    eigh solver path; see module docstring on differentiability.
+    The post-processing (skip / transform / sort) is in plain JAX
+    and is therefore differentiable end-to-end when ``M`` is dense
+    or flat ELL.  SectionedELL is forward-only; see
+    ``_run_lobpcg_on_operator``.
     '''
-    # ``lobpcg_standard`` uses ``lax.while_loop`` with a data-
-    # dependent termination criterion; reverse-mode AD through it
-    # raises a "while_loop with dynamic start/stop" error from JAX.
-    # We do *not* wrap with ``custom_vjp`` to provide a friendlier
-    # message because ``matvec`` is a closure and not hashable for
-    # ``custom_vjp``'s nondiff machinery.  The native JAX error is
-    # informative enough; the module docstring documents the
-    # work-around (``solver="eigh"``) and ``docs/design/
-    # lobpcg-implicit-vjp.md`` carries the math for the eventual
-    # implicit-VJP implementation.
     k_total = n_components + (1 if skip_trivial else 0)
-    key = jax.random.key(seed)
     target = _solver_device()
-    X0 = jax.device_put(
-        jax.random.normal(key, (n, k_total)), target,
+    X0 = _lobpcg_initial_subspace(n, k_total, seed, target)
+    eigvals, eigvecs = _run_lobpcg_on_operator(
+        M, X0, iters=iters, tol=tol,
     )
-    eigvals, eigvecs, _ = lobpcg_standard(matvec, X0, m=iters, tol=tol)
     # ``lobpcg_standard`` returns largest-first.  Drop the trivial
     # *first* column if requested.
     if skip_trivial:
