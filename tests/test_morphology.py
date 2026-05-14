@@ -36,8 +36,8 @@ from nitrix.morphology import (
     erode,
     median_filter,
     open as morph_open,
-    susan_emulator,
 )
+from nitrix.smoothing import susan_emulator
 
 
 jax.config.update('jax_enable_x64', True)
@@ -279,7 +279,12 @@ def test_erode_gradient_routes_to_argmin():
 # ---------------------------------------------------------------------------
 
 
-def test_susan_emulator_raises_until_bilateral_lands():
-    x = jnp.zeros((8, 8))
-    with pytest.raises(NotImplementedError, match='bilateral_gaussian'):
-        susan_emulator(x, sigma_space=1.0, sigma_intensity=0.1)
+def test_susan_emulator_implemented_via_bilateral():
+    '''Once ``smoothing.bilateral_gaussian`` shipped (this sprint),
+    ``susan_emulator`` became a real op rather than a raise.  This
+    test pins the transition from "stub" to "implemented".
+    '''
+    x = jax.random.normal(jax.random.key(99), (8, 8))
+    out = susan_emulator(x, sigma_space=1.0, sigma_intensity=0.5)
+    assert out.shape == x.shape
+    assert bool(jnp.all(jnp.isfinite(out)))
