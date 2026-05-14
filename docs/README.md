@@ -40,6 +40,18 @@ benchmark reports, and survive being plucked into the eventual
   ``semiring_matmul`` as the JAX-path strategy, the NaN-safe patch
   extractor, comparison to cuDNN, and the path to a future Pallas
   implicit-GEMM kernel.
+- [`design/morphology.md`](design/morphology.md) -- ``dilate`` /
+  ``erode`` / ``open`` / ``close`` / ``distance_transform`` as
+  TROPICAL_* specialisations of ``semiring_conv``; ``median_filter``
+  as the prototype "almost a semiring" gather-based op;
+  n-D coverage including 4D fMRI shape (which cuDNN doesn't
+  support).
+- [`design/smoothing.md`](design/smoothing.md) -- ``gaussian``
+  (separable, scipy-parity), ``bilateral_gaussian`` (marquee edge-
+  preserving capability via ``semiring_ell_matmul`` over a feature-
+  distance-weighted adjacency), ``susan_emulator`` (composition with
+  documented deltas from FSL SUSAN), plus the sectioned-ELL story
+  for variable-degree adjacencies.
 - [`design/testing-strategy.md`](design/testing-strategy.md) -- how
   backend parity, identity propagation, numerical stability, finite-
   difference grad, and fallback observability are organised in the
