@@ -22,13 +22,35 @@ from .ell_sectioned import (
     sectioned_ell_from_ragged,
     sectioned_semiring_ell_matmul,
 )
+from .grid import (
+    grid_identity,
+    grid_laplacian,
+    regular_grid_stencil,
+)
+from .mesh import (
+    Mesh,
+    icosphere,
+    mesh_cotangent_laplacian,
+    mesh_k_ring_adjacency,
+)
 
 __all__ = [
+    # ell
     'ELL',
     'ell_from_dense',
     'ell_to_dense',
     'ell_pad',
+    # sectioned ell
     'SectionedELL',
     'sectioned_ell_from_ragged',
     'sectioned_semiring_ell_matmul',
+    # grid stencils
+    'grid_identity',
+    'grid_laplacian',
+    'regular_grid_stencil',
+    # mesh
+    'Mesh',
+    'icosphere',
+    'mesh_cotangent_laplacian',
+    'mesh_k_ring_adjacency',
 ]

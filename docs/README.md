@@ -59,6 +59,13 @@ benchmark reports, and survive being plucked into the eventual
 - [`design/ell-on-triton.md`](design/ell-on-triton.md) -- why
   ``semiring_ell_matmul`` runs on JAX unconditionally at first GA, what
   the Triton lowering gap is, and what would change the policy.
+- [`design/sparse-specialisations.md`](design/sparse-specialisations.md)
+  -- ``nitrix.sparse.grid`` (regular-grid stencils with scipy-parity
+  boundary modes; ``grid_laplacian`` / ``grid_identity`` /
+  ``regular_grid_stencil``) and ``nitrix.sparse.mesh`` (icosphere
+  via recursive subdivision; ``mesh_k_ring_adjacency`` via BFS;
+  ``mesh_cotangent_laplacian`` for surface processing).  All return
+  ``ELL`` for direct composition with the substrate.
 - [`design/backward-kernels.md`](design/backward-kernels.md) -- the
   per-algebra ``jax.custom_vjp`` story, the per-algebra differentiability
   vocabulary, and the G1 finite-difference gate.
