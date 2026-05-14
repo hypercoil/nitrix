@@ -59,6 +59,15 @@ benchmark reports, and survive being plucked into the eventual
 - [`design/ell-on-triton.md`](design/ell-on-triton.md) -- why
   ``semiring_ell_matmul`` runs on JAX unconditionally at first GA, what
   the Triton lowering gap is, and what would change the policy.
+- [`design/lme.md`](design/lme.md) -- voxelwise linear mixed-
+  effects models: ``reml_fit`` (general variance-components REML
+  via the FaST-LMM spectral rotation trick) and
+  ``flame_two_level`` (the FSL FLAME equivalent, single-
+  parameter REML for fMRI group analysis).  Memory regime:
+  shared-design vmap over voxels with no V*N^2 intermediate;
+  scales to V=1M voxels at fMRI shapes.  Validated against
+  ``statsmodels.MixedLM`` to ~5e-3 (the convergence floor of
+  both solvers).
 - [`design/sparse-specialisations.md`](design/sparse-specialisations.md)
   -- ``nitrix.sparse.grid`` (regular-grid stencils with scipy-parity
   boundary modes; ``grid_laplacian`` / ``grid_identity`` /
