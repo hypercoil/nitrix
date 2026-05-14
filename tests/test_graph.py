@@ -540,25 +540,276 @@ def test_diffusion_embedding_t_scaling():
     np.testing.assert_allclose(embed_t, expected, atol=1e-10)
 
 
-def test_lobpcg_not_differentiable():
-    '''Reverse-mode AD through lobpcg raises a JAX while-loop error.'''
-    n = 32
-    A = jnp.asarray(_ring_adjacency(n))
-    def loss(A):
-        _, vals = laplacian_eigenmap(
-            A, n_components=2, solver='lobpcg', lobpcg_iters=100,
-        )
-        return vals.sum()
-    with pytest.raises(Exception):  # JAX-native while-loop AD error
-        jax.grad(loss)(A)
-
-
 def test_eigh_differentiable():
     '''Reverse-mode AD through eigh works (jnp.linalg.eigh ships with a VJP).'''
     n = 16
     A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=8))
     def loss(A):
         _, vals = laplacian_eigenmap(A, n_components=2, solver='eigh')
+        return vals.sum()
+    g = jax.grad(loss)(A)
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# LOBPCG implicit VJP (subspace-projector approximation)
+# ---------------------------------------------------------------------------
+
+
+def _build_psd(n: int, seed: int = 0):
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((n, n))
+    M = A @ A.T + 0.1 * np.eye(n)
+    return jnp.asarray(M)
+
+
+def _ell_from_dense_symmetric(A_dense: np.ndarray):
+    '''Build a flat ELL from a dense symmetric matrix.'''
+    n = A_dense.shape[0]
+    k_max = int(np.max((A_dense != 0).sum(axis=1)))
+    values = np.zeros((n, k_max))
+    indices = np.zeros((n, k_max), dtype=np.int32)
+    for i in range(n):
+        nz = np.nonzero(A_dense[i])[0]
+        values[i, :len(nz)] = A_dense[i, nz]
+        indices[i, :len(nz)] = nz
+        if len(nz) < k_max:
+            indices[i, len(nz):] = nz[0] if len(nz) > 0 else 0
+    return ELL(
+        values=jnp.asarray(values),
+        indices=jnp.asarray(indices),
+        n_cols=n,
+        identity=0.0,
+    )
+
+
+def test_lobpcg_dense_eigenvalue_grad_matches_eigh():
+    '''Eigenvalue gradient via LOBPCG implicit-VJP matches eigh exactly.
+
+    Hellmann-Feynman is exact; the only error source is LOBPCG's
+    eigenvalue residual against eigh's machine-precision answer.
+    '''
+    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+
+    n, k = 40, 3
+    M = _build_psd(n, seed=0)
+    X0 = jax.random.normal(jax.random.key(0), (n, k))
+
+    def loss_lob(M):
+        ev, _ = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+        return ev.sum()
+
+    def loss_eigh(M):
+        ev_all, _ = jnp.linalg.eigh(M)
+        return ev_all[-k:].sum()  # top-k
+
+    g_lob = jax.grad(loss_lob)(M)
+    g_eigh = jax.grad(loss_eigh)(M)
+    np.testing.assert_allclose(
+        np.asarray(g_lob), np.asarray(g_eigh), atol=1e-12,
+    )
+
+
+def test_lobpcg_dense_in_subspace_loss_matches_analytical():
+    '''In-subspace loss ``trace(U^T M U @ T)`` has analytical gradient
+    ``U @ diag(diag(T)) @ U^T``, the F-matrix correction cancels the
+    off-diagonal of ``T``.  The implicit-VJP should hit this exactly.
+    '''
+    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+
+    n, k = 40, 3
+    M = _build_psd(n, seed=1)
+    X0 = jax.random.normal(jax.random.key(0), (n, k))
+    target = jax.random.normal(jax.random.key(2), (k, k))
+    target = (target + target.T) / 2
+
+    _, U = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+    expected = U @ jnp.diag(jnp.diag(target)) @ U.T
+
+    def loss(M):
+        _, U = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+        return jnp.trace(U.T @ M @ U @ target)
+
+    g = jax.grad(loss)(M)
+    np.testing.assert_allclose(np.asarray(g), np.asarray(expected), atol=1e-12)
+
+
+def test_lobpcg_dense_gradient_is_symmetric():
+    '''The gradient of any scalar loss through LOBPCG implicit-VJP lives
+    in the symmetric subspace -- ``V K V^T`` with ``K`` symmetric.
+    '''
+    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+
+    n, k = 30, 2
+    M = _build_psd(n, seed=3)
+    X0 = jax.random.normal(jax.random.key(0), (n, k))
+    target = jax.random.normal(jax.random.key(4), (n, k))
+
+    def loss(M):
+        _, U = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+        return jnp.sum(U * target)
+
+    g = jax.grad(loss)(M)
+    np.testing.assert_allclose(
+        np.asarray(g), np.asarray(g.T), atol=1e-12,
+    )
+
+
+def test_lobpcg_dense_degenerate_eigenvalues_clamp():
+    '''Identity matrix has fully-degenerate spectrum; the eps_clamp
+    short-circuits F-matrix blow-up.  Gradient must be finite.
+    '''
+    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+
+    n, k = 30, 2
+    # Perturb identity slightly so LOBPCG converges
+    M = jnp.eye(n) + 1e-6 * jax.random.normal(jax.random.key(0), (n, n))
+    M = 0.5 * (M + M.T)
+    X0 = jax.random.normal(jax.random.key(1), (n, k))
+
+    def loss(M):
+        _, U = lobpcg_top_k_dense(M, X0, 500, None, eps_clamp=1e-3)
+        return jnp.sum(U ** 2)  # invariant; gradient should be ~zero
+
+    g = jax.grad(loss)(M)
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+def test_lobpcg_ell_grad_matches_dense_projected():
+    '''ELL backward returns the gradient projected onto the sparsity
+    pattern, agreeing with the dense backward gathered at the same
+    indices.
+    '''
+    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense, lobpcg_top_k_ell
+    from nitrix.semiring import REAL, semiring_ell_matmul
+
+    rng = np.random.default_rng(7)
+    n, k = 60, 3
+    A_dense = _ring_adjacency(n)
+    for _ in range(40):
+        i, j = rng.integers(0, n, 2)
+        if i != j:
+            A_dense[i, j] = A_dense[j, i] = 1.0
+    A_dense += 0.5 * np.eye(n)
+    A_jnp = jnp.asarray(A_dense)
+    ell = _ell_from_dense_symmetric(A_dense)
+    X0 = jax.random.normal(jax.random.key(0), (n, k))
+
+    target = jax.random.normal(jax.random.key(2), (k, k))
+    target = (target + target.T) / 2
+
+    def loss_dense(A):
+        _, U = lobpcg_top_k_dense(A, X0, 500, None, 1e-8)
+        return jnp.trace(U.T @ A @ U @ target)
+
+    def loss_ell(values):
+        _, U = lobpcg_top_k_ell(
+            values, ell.indices, X0, n, 500, None, 1e-8,
+        )
+        AU = semiring_ell_matmul(
+            values, ell.indices, U, semiring=REAL, n_cols=n, backend='jax',
+        )
+        return jnp.trace(U.T @ AU @ target)
+
+    g_dense = jax.grad(loss_dense)(A_jnp)
+    g_ell_values = jax.grad(loss_ell)(ell.values)
+    g_dense_at_pattern = g_dense[jnp.arange(n)[:, None], ell.indices]
+    np.testing.assert_allclose(
+        np.asarray(g_ell_values),
+        np.asarray(g_dense_at_pattern),
+        atol=1e-12,
+    )
+
+
+def test_laplacian_eigenmap_lobpcg_dense_differentiable():
+    '''Public surface: ``jax.grad`` through ``laplacian_eigenmap`` with
+    ``solver="lobpcg"`` on a dense input now produces finite gradients
+    (was raising at first GA).
+    '''
+    n = 32
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=16))
+    def loss(A):
+        _, vals = laplacian_eigenmap(
+            A, n_components=2, solver='lobpcg', lobpcg_iters=200,
+        )
+        return vals.sum()
+    g = jax.grad(loss)(A)
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+def test_laplacian_eigenmap_lobpcg_ell_differentiable():
+    '''Public surface: ELL input through ``laplacian_eigenmap`` with
+    ``solver="auto"`` (-> lobpcg) is differentiable in ``A.values``.
+    '''
+    n = 60
+    A_np = _ring_adjacency(n)
+    rng = np.random.default_rng(0)
+    for _ in range(40):
+        i, j = rng.integers(0, n, 2)
+        if i != j:
+            A_np[i, j] = A_np[j, i] = 1.0
+    A_np += 0.5 * np.eye(n)
+    ell = _ell_from_dense_symmetric(A_np)
+
+    def loss(values):
+        ell_in = ELL(
+            values=values,
+            indices=ell.indices,
+            n_cols=ell.n_cols,
+            identity=ell.identity,
+        )
+        _, vals = laplacian_eigenmap(
+            ell_in, n_components=3, solver='lobpcg', lobpcg_iters=300,
+        )
+        return vals.sum()
+
+    g = jax.grad(loss)(ell.values)
+    assert bool(jnp.all(jnp.isfinite(g)))
+    assert g.shape == ell.values.shape
+
+
+def test_lobpcg_sectioned_ell_not_differentiable():
+    '''SectionedELL is forward-only for LOBPCG; ``jax.grad`` raises.
+
+    The diff-capable path is dense / flat ELL only; SectionedELL is
+    documented as "convert to flat ELL for gradients".
+    '''
+    n = 60
+    A_np = _ring_adjacency(n)
+    A_np += 0.5 * np.eye(n)
+    sec = _sectioned_from_dense(A_np)
+
+    def loss(values_list):
+        # SectionedELL stores values per section; rebuild and feed in.
+        new_sections = tuple(
+            type(s)(
+                values=v, indices=s.indices,
+                n_cols=s.n_cols, identity=s.identity,
+            )
+            for s, v in zip(sec.sections, values_list)
+        )
+        new_sec = type(sec)(
+            sections=new_sections, row_groups=sec.row_groups,
+            n_rows=sec.n_rows, n_cols=sec.n_cols, identity=sec.identity,
+        )
+        _, evals = laplacian_eigenmap(
+            new_sec, n_components=3, solver='lobpcg', lobpcg_iters=200,
+        )
+        return evals.sum()
+
+    values_list = [s.values for s in sec.sections]
+    with pytest.raises(Exception):
+        jax.grad(loss)(values_list)
+
+
+def test_diffusion_embedding_lobpcg_dense_differentiable():
+    '''Diffusion-embedding LOBPCG path is differentiable on dense input.'''
+    n = 32
+    A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=16))
+    def loss(A):
+        _, vals = diffusion_embedding(
+            A, n_components=2, alpha=0.5, solver='lobpcg', lobpcg_iters=200,
+        )
         return vals.sum()
     g = jax.grad(loss)(A)
     assert bool(jnp.all(jnp.isfinite(g)))
