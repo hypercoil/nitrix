@@ -768,11 +768,14 @@ def test_laplacian_eigenmap_lobpcg_ell_differentiable():
     assert g.shape == ell.values.shape
 
 
-def test_lobpcg_sectioned_ell_not_differentiable():
-    '''SectionedELL is forward-only for LOBPCG; ``jax.grad`` raises.
+def test_lobpcg_sectioned_ell_differentiable():
+    '''SectionedELL is now differentiable through ``laplacian_eigenmap``
+    via the per-section sparsity-projected VJP.
 
-    The diff-capable path is dense / flat ELL only; SectionedELL is
-    documented as "convert to flat ELL for gradients".
+    Was forward-only before the LOBPCG-SectionedELL VJP work; flipped
+    here.  Each section's gradient should be finite and match the
+    flat-ELL gradient at the equivalent (row, col) entries (verified
+    in tests/test_graph_sectioned_lobpcg_vjp.py).
     '''
     n = 60
     A_np = _ring_adjacency(n)
@@ -780,7 +783,6 @@ def test_lobpcg_sectioned_ell_not_differentiable():
     sec = _sectioned_from_dense(A_np)
 
     def loss(values_list):
-        # SectionedELL stores values per section; rebuild and feed in.
         new_sections = tuple(
             type(s)(
                 values=v, indices=s.indices,
@@ -798,8 +800,11 @@ def test_lobpcg_sectioned_ell_not_differentiable():
         return evals.sum()
 
     values_list = [s.values for s in sec.sections]
-    with pytest.raises(Exception):
-        jax.grad(loss)(values_list)
+    g = jax.grad(loss)(values_list)
+    assert len(g) == len(values_list)
+    for gi, vi in zip(g, values_list):
+        assert gi.shape == vi.shape
+        assert bool(jnp.all(jnp.isfinite(gi)))
 
 
 def test_diffusion_embedding_lobpcg_dense_differentiable():

@@ -286,3 +286,195 @@ def _ell_bwd(n_cols, n_iters, tol, eps_clamp, residuals, cotangents):
 
 
 lobpcg_top_k_ell.defvjp(_ell_fwd, _ell_bwd)
+
+
+# ---------------------------------------------------------------------------
+# SectionedELL path
+# ---------------------------------------------------------------------------
+
+
+__all__.append('lobpcg_top_k_sectioned_ell')
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(4, 5, 6))
+def _lobpcg_top_k_sectioned_impl(
+    values_tuple,
+    indices_tuple,
+    row_groups_tuple,
+    X0,
+    n_cols: int,
+    n_iters: int,
+    tol_eps_clamp,
+):
+    '''Internal entry point.  All "static" args are at the end:
+
+    - ``n_cols`` -- int, ELL n_cols.
+    - ``n_iters`` -- int, LOBPCG iteration cap.
+    - ``tol_eps_clamp`` -- ``(tol, eps_clamp)`` tuple; packed so the
+      whole tuple is a single nondiff arg (hashable).
+    '''
+    tol, _eps_clamp = tol_eps_clamp
+    return _sectioned_forward(
+        values_tuple, indices_tuple, row_groups_tuple,
+        X0, n_cols, n_iters, tol,
+    )
+
+
+def _sectioned_matvec(
+    values_tuple,
+    indices_tuple,
+    row_groups_tuple,
+    X,
+    n_cols: int,
+    n_rows: int,
+):
+    '''SectionedELL matvec: per-bucket matmul + scatter-back.'''
+    from ..semiring import REAL, semiring_ell_matmul
+
+    out = jnp.zeros((n_rows,) + X.shape[1:], dtype=X.dtype)
+    for vals, idx, row_idx in zip(values_tuple, indices_tuple, row_groups_tuple):
+        bucket_out = semiring_ell_matmul(
+            vals, idx, X, semiring=REAL, n_cols=n_cols, backend='jax',
+        )
+        out = out.at[row_idx].set(bucket_out)
+    return out
+
+
+def _sectioned_forward(
+    values_tuple,
+    indices_tuple,
+    row_groups_tuple,
+    X0,
+    n_cols,
+    n_iters,
+    tol,
+):
+    n_rows = X0.shape[0]
+
+    def matvec(X):
+        return _sectioned_matvec(
+            values_tuple, indices_tuple, row_groups_tuple, X,
+            n_cols=n_cols, n_rows=n_rows,
+        )
+
+    eigvals, eigvecs, _ = lobpcg_standard(matvec, X0, m=n_iters, tol=tol)
+    return eigvals, eigvecs
+
+
+def _sectioned_fwd(
+    values_tuple, indices_tuple, row_groups_tuple, X0,
+    n_cols, n_iters, tol_eps_clamp,
+):
+    tol, _ = tol_eps_clamp
+    eigvals, eigvecs = _sectioned_forward(
+        values_tuple, indices_tuple, row_groups_tuple,
+        X0, n_cols, n_iters, tol,
+    )
+    return (eigvals, eigvecs), (
+        indices_tuple, row_groups_tuple, eigvals, eigvecs,
+    )
+
+
+def _sectioned_bwd(
+    n_cols, n_iters, tol_eps_clamp, residuals, cotangents,
+):
+    indices_tuple, row_groups_tuple, eigvals, eigvecs = residuals
+    _, eps_clamp = tol_eps_clamp
+    g_eigvals, g_eigvecs = cotangents
+
+    # Shared subspace-projector kernel.
+    K = _subspace_vjp_kernel(
+        eigvals, eigvecs, g_eigvals, g_eigvecs, eps_clamp,
+    )
+    VK = eigvecs @ K  # (n_rows, k)
+
+    # Per-section sparsity-projected gradient.  For section ``s``:
+    #   g_s_values[i, p] = (V K V^T)[row_groups[s][i], indices[s][i, p]]
+    # Expand the per-section gather:
+    #   V_at_rows = V[row_groups[s]]   # (n_rows_s, k)
+    #   V_at_cols = V[indices[s]]      # (n_rows_s, k_max_s, k)
+    #   VK_at_rows = V_at_rows @ K  # but we use VK directly indexed.
+    g_values_list = []
+    g_indices_list = []
+    g_row_groups_list = []
+    for idx, row_idx in zip(indices_tuple, row_groups_tuple):
+        VK_at_rows = VK[row_idx]                   # (n_rows_s, k)
+        V_at_cols = eigvecs[idx]                   # (n_rows_s, k_max_s, k)
+        g_vals_s = jnp.einsum(
+            'ij,ipj->ip', VK_at_rows, V_at_cols,
+        )                                          # (n_rows_s, k_max_s)
+        g_values_list.append(g_vals_s)
+        g_indices_list.append(jnp.zeros_like(idx))
+        g_row_groups_list.append(jnp.zeros_like(row_idx))
+
+    return (
+        tuple(g_values_list),
+        tuple(g_indices_list),
+        tuple(g_row_groups_list),
+        None,  # X0
+    )
+
+
+_lobpcg_top_k_sectioned_impl.defvjp(_sectioned_fwd, _sectioned_bwd)
+
+
+def lobpcg_top_k_sectioned_ell(
+    values_tuple,
+    indices_tuple,
+    row_groups_tuple,
+    X0,
+    *,
+    n_cols: int,
+    n_iters: int = 200,
+    tol: Optional[float] = None,
+    eps_clamp: float = 1e-8,
+):
+    '''Differentiable LOBPCG for a ``SectionedELL`` operator.
+
+    Closes the last non-differentiable graph path in
+    ``nitrix.graph.connectopy``: previously SectionedELL inputs were
+    forward-only because the natural ``vmap``-over-sections backward
+    didn't fit the JAX custom_vjp shape contract for variable-length
+    sections.  This wrapper accepts the section components as
+    parallel tuples (values, indices, row_groups), each a pytree of
+    JAX arrays, so the custom_vjp can return per-section gradient
+    tuples of matching structure.
+
+    Parameters
+    ----------
+    values_tuple
+        Per-section ``values`` arrays, one per bucket.  Each is
+        ``(n_rows_section, k_max_section)``.
+    indices_tuple
+        Per-section ``indices`` arrays.  Same per-section shapes as
+        ``values_tuple``.
+    row_groups_tuple
+        Per-section original-row index arrays.  Each entry maps the
+        section's local row index ``i`` back to the global row
+        index ``row_groups[s][i]``.
+    X0
+        Initial search subspace, ``(n_rows, k)``.  Not differentiated.
+    n_cols
+        SectionedELL ``n_cols`` -- the implicit ``n`` of the sparse
+        matrix.
+    n_iters, tol, eps_clamp
+        See ``lobpcg_top_k_dense``.
+
+    Returns
+    -------
+    ``(eigvals, eigvecs)`` of shapes ``(k,)`` and ``(n_rows, k)``.
+
+    Notes
+    -----
+    Each section's gradient is computed in isolation via the same
+    sparsity projection used for flat ELL -- the only difference is
+    that the row indices index *through* ``row_groups`` (each
+    section's local row ``i`` corresponds to global row
+    ``row_groups[s][i]``).  Cost per backward:
+    ``sum_s O(n_rows_s * k_max_s * k)`` where ``k`` is the
+    eigenpair count -- consistent with the forward.
+    '''
+    return _lobpcg_top_k_sectioned_impl(
+        values_tuple, indices_tuple, row_groups_tuple, X0,
+        n_cols, n_iters, (tol, eps_clamp),
+    )

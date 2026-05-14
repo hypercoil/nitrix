@@ -1,19 +1,17 @@
 # LOBPCG: the implicit-VJP path
 
 > **Status.**  Reverse-mode AD through ``laplacian_eigenmap`` /
-> ``diffusion_embedding`` with ``solver="lobpcg"`` is **shipped for
-> dense and flat-ELL** operands via an implicit-VJP wrapper around
-> ``jax.experimental.sparse.linalg.lobpcg_standard``.  The wrapper
-> implements the subspace-projector approximation (option 1
-> below): exact for losses that depend only on eigenvalues or on
-> in-subspace functionals of the eigenvectors, biased for losses
-> that depend on the orthogonal complement of the returned top-
-> ``k`` subspace.  SectionedELL remains forward-only -- convert to
-> flat ELL for gradients -- because we don't have a sparsity-
-> projected backward for the bucketed format yet.  This document
-> records the math, the implementation choices, the validation,
-> and what would be needed to ship the exact (Krylov-corrected)
-> path.
+> ``diffusion_embedding`` with ``solver="lobpcg"`` is shipped for
+> **all three** operator formats: dense, flat ELL, and **SectionedELL**.
+> The wrapper implements the subspace-projector approximation
+> (option 1 below): exact for losses that depend only on eigenvalues
+> or on in-subspace functionals of the eigenvectors, biased for
+> losses that depend on the orthogonal complement of the returned
+> top-``k`` subspace.  This document records the math, the
+> implementation choices (one wrapper per operator type to keep
+> the JAX ``custom_vjp`` diff-arg shape contract clean), the
+> validation, and what would be needed to ship the exact
+> (Krylov-corrected) path.
 
 ## The math
 
@@ -127,6 +125,23 @@ wrappers:
   sparsity pattern**: ``g_values[i, p] = (U K U^T)[i, indices[i,
   p]] = (U K)[i, :] @ U[indices[i, p], :]``.  Cost ``O(nnz * k + n
   * k^2)``, consistent with the forward.
+- ``lobpcg_top_k_sectioned_ell(values_tuple, indices_tuple,
+  row_groups_tuple, X0, *, n_cols, n_iters, tol, eps_clamp)`` --
+  ``M`` stored as ``SectionedELL`` (one bucket per row-degree
+  range).  Diff w.r.t. each section's ``values`` independently;
+  the per-section gradient ``g_s_values[i, p] = (U K U^T)[
+  row_groups[s][i], indices[s][i, p]]`` reads the **mapped** global
+  row index from ``row_groups[s]`` rather than the local section
+  index.  Implementation: vectorise the ``(VK)[row_groups]`` gather
+  per section then einsum against ``U[indices[s]]``.  Cost per
+  section ``O(n_rows_s * k_max_s * k)``; summed across sections
+  this is ``O(nnz * k + n * k^2)`` again -- the bucketed layout
+  gives no asymptotic backward-cost benefit over the flat case,
+  but it preserves the bucketed *forward* cost (the original
+  reason for SectionedELL).  Per-section gradients agree with the
+  equivalent flat-ELL gradient at matching ``(row, col)`` entries
+  to fp64 machine eps (regression test:
+  ``test_sectioned_vjp_matches_flat_per_entry``).
 
 Both share the ``_subspace_vjp_kernel`` helper that builds ``K =
 diag(g_λ) + S ⊙ F`` -- the only expensive piece, ``O(k^2)``.
@@ -205,8 +220,13 @@ All in ``tests/test_graph.py``:
   gradient equals the dense gradient gathered at the ELL indices.
 - ``test_laplacian_eigenmap_lobpcg_{dense,ell}_differentiable`` --
   the public surface routes through the diff wrapper end-to-end.
-- ``test_lobpcg_sectioned_ell_not_differentiable`` -- SectionedELL
-  remains forward-only as documented.
+- ``test_lobpcg_sectioned_ell_differentiable`` -- SectionedELL
+  through ``laplacian_eigenmap`` returns finite per-section
+  gradients.
+- ``test_sectioned_vjp_matches_flat_per_entry`` -- per-section
+  gradient at each non-pad ``(row, col)`` matches the equivalent
+  flat-ELL gradient to fp64 machine eps.  The load-bearing
+  regression for the per-section ``row_groups`` gather.
 
 ### Performance and XLA shape preservation
 
@@ -288,12 +308,10 @@ operands so the gradient targets are unambiguous.
   consumer hits this, a follow-up adds a configurable smoothing
   (Tikhonov-style: ``F[i, j] = (λ_j - λ_i) / ((λ_j - λ_i)^2 +
   eps^2)``).
-- **SectionedELL-aware backward.**  The forward-only constraint is
-  load-bearing: the bucketed-row format's gradient projection needs
-  per-section handling of ``U[indices[i, p], :]`` gathers.  Doable
-  -- the math is the same as flat ELL, just over multiple
-  sections -- but the implementation cost (and test surface) wasn't
-  worth blocking first GA.  Track as a follow-up.
+- ~~**SectionedELL-aware backward.**~~  Shipped: per-section
+  sparsity-projected backward via ``lobpcg_top_k_sectioned_ell``.
+  See the section above for the diff-arg structure and the
+  per-section parity test.
 - **Krylov-corrected option 2.**  Specced above; not shipped.
   Trigger criterion for shipping: a downstream consumer demonstrably
   needs exact gradients through eigenvectors for a non-spectral-

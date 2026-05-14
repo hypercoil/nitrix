@@ -84,7 +84,11 @@ from ..linalg._solver import (
 )
 from ..semiring import REAL, semiring_ell_matmul
 from ..sparse import ELL, SectionedELL, sectioned_semiring_ell_matmul
-from ._lobpcg_diff import lobpcg_top_k_dense, lobpcg_top_k_ell
+from ._lobpcg_diff import (
+    lobpcg_top_k_dense,
+    lobpcg_top_k_ell,
+    lobpcg_top_k_sectioned_ell,
+)
 from .laplacian import _ell_matvec, _is_sparse, degree_vector
 
 
@@ -536,10 +540,9 @@ def _run_lobpcg_on_operator(
 
     - dense ``M``: ``lobpcg_top_k_dense`` (implicit-VJP).
     - ``ELL`` ``M``: ``lobpcg_top_k_ell`` (sparsity-projected VJP).
-    - ``SectionedELL`` ``M``: closure-based ``lobpcg_standard`` call;
-      forward-only, raises under ``jax.grad`` with a native JAX
-      while-loop AD error.  Convert to flat ELL first if you need
-      differentiability through SectionedELL.
+    - ``SectionedELL`` ``M``: ``lobpcg_top_k_sectioned_ell``
+      (per-section sparsity-projected VJP; differentiable through
+      each section's ``values``).
 
     The skip-trivial / transform / sort post-processing is handled
     by the caller in plain JAX so the chain rule flows naturally.
@@ -549,10 +552,16 @@ def _run_lobpcg_on_operator(
             M.values, M.indices, X0, M.n_cols, iters, tol, eps_clamp,
         )
     if isinstance(M, SectionedELL):
-        # Forward-only.  No diff-capable wrapper for SectionedELL.
-        matvec = _operator_matvec(M)
-        eigvals, eigvecs, _ = lobpcg_standard(matvec, X0, m=iters, tol=tol)
-        return eigvals, eigvecs
+        # Sectioned: pull out per-section values / indices / row_groups
+        # and route to the diff wrapper.  Row groups are np.ndarray
+        # in the SectionedELL; convert to jnp once at the boundary.
+        values_tuple = tuple(s.values for s in M.sections)
+        indices_tuple = tuple(s.indices for s in M.sections)
+        row_groups_tuple = tuple(jnp.asarray(rg) for rg in M.row_groups)
+        return lobpcg_top_k_sectioned_ell(
+            values_tuple, indices_tuple, row_groups_tuple, X0,
+            n_cols=M.n_cols, n_iters=iters, tol=tol, eps_clamp=eps_clamp,
+        )
     # Dense
     return lobpcg_top_k_dense(M, X0, iters, tol, eps_clamp)
 
