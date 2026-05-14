@@ -2,6 +2,19 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
+from .backend import (
+    Backend,
+    NitrixBackendError,
+    NitrixBackendFallback,
+    ResolvedBackend,
+    auto_backend,
+    env_backend,
+    fallback,
+    resolve_backend,
+    reset_fallback_state,
+    silence_fallback,
+    strict_backend,
+)
 from .docutil import (
     DocTemplateFormat,
     form_docstring,
@@ -43,6 +56,17 @@ from .util import (
 )
 
 __all__ = [
+    'Backend',
+    'NitrixBackendError',
+    'NitrixBackendFallback',
+    'ResolvedBackend',
+    'auto_backend',
+    'env_backend',
+    'fallback',
+    'resolve_backend',
+    'reset_fallback_state',
+    'silence_fallback',
+    'strict_backend',
     'DocTemplateFormat',
     'tensor_dimensions',
     'Tensor',
