@@ -16,6 +16,32 @@ benchmark reports, and survive being plucked into the eventual
 
 ## Index
 
+### Phase 1: namespace consolidation
+
+- [`design/linalg.md`](design/linalg.md) -- the four ``linalg``
+  subpackages: ``matrix`` (sym↔vec bijection with hand-rolled
+  custom-VJPs, Toeplitz, eigenspace reconditioning),
+  ``residual`` (Cholesky-default OLS / WLS / ridge,
+  ~9× faster than the legacy SVD path), ``kernel`` (squared-L2
+  via the identity formula to eliminate the legacy ``O(n m d)``
+  memory blowup), ``spd`` (SPEC §4.1 stability rewrite with
+  eigenvalue-threshold clipping), plus the shared
+  ``_solver.safe_eigh`` helper.
+- [`design/stats.md`](design/stats.md) -- ``covariance`` (real and
+  **complex** -- the "silently wrong on complex inputs" failure
+  mode from the legacy is fixed and regression-tested; the
+  JIT-trap in the weighted-cov dispatch is eliminated),
+  ``fourier`` (analytic signal / Hilbert / envelope / inst freq
+  / phase; vectorised mask construction).
+- [`design/signal-and-numerics.md`](design/signal-and-numerics.md) --
+  ``signal.linear_interpolate`` via parallel ``associative_scan``
+  (replaces sequential ``lax.scan``), ``signal.lomb_scargle_*``
+  via joint-GLM regression (fixes the visible-boundary-
+  discontinuity failure mode of the legacy independent-per-
+  frequency LS), the shared-Gram memory-safety pattern at fMRI
+  scale, ``signal.polynomial_detrend``, ``signal.tsconv``,
+  plus ``numerics.tensor_ops`` and ``numerics.normalize``.
+
 ### Design rationale
 
 - [`design/backend-selection.md`](design/backend-selection.md) -- the
