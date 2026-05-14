@@ -10,9 +10,15 @@ Submodules:
 - ``grid``   -- regular-grid deformable-registration primitives:
   ``identity_grid``, ``spatial_transform``, ``integrate_velocity_field``,
   ``resample``, ``center_of_mass_grid``.
-- ``sphere`` -- 2-sphere primitives: coordinate conversions,
-  geodesic distance, and ``spherical_conv`` re-backed on
-  ``semiring_ell_matmul`` for ``O(n · k)`` instead of ``O(n²)``.
+- ``sphere`` -- 2-sphere **mesh** primitives: coordinate
+  conversions, geodesic distance, and ``spherical_conv`` re-backed
+  on ``semiring_ell_matmul`` for ``O(n · k)`` instead of ``O(n²)``.
+- ``sphere_grid`` -- 2-sphere **regular-grid** topology helpers
+  (parameterised equirectangular sphere): ``sphere_grid_pad_2d``
+  / ``sphere_grid_unpad_2d`` with pole-flip + longitudinal-wrap
+  padding.  Distinct from ``sphere`` because the parameterised-
+  grid case and the mesh case have different storage and adjacency
+  models.
 - ``coords`` -- coordinate utilities: ``center_of_mass_points``,
   ``displacement_from_reference_*``, ``compactness_penalty``.
 
@@ -22,6 +28,8 @@ from .grid import (
     center_of_mass_grid,
     identity_grid,
     integrate_velocity_field,
+    jacobian_det_displacement,
+    jacobian_displacement,
     resample,
     spatial_transform,
     # legacy aliases (removed at v0.1)
@@ -34,6 +42,10 @@ from .sphere import (
     latlong_to_cartesian,
     spherical_conv,
     spherical_geodesic_distance,
+)
+from .sphere_grid import (
+    sphere_grid_pad_2d,
+    sphere_grid_unpad_2d,
 )
 from .coords import (
     center_of_mass_points,
@@ -52,13 +64,18 @@ __all__ = [
     'identity_grid',
     'spatial_transform',
     'integrate_velocity_field',
+    'jacobian_displacement',
+    'jacobian_det_displacement',
     'resample',
     'center_of_mass_grid',
-    # sphere
+    # sphere (mesh)
     'cartesian_to_latlong',
     'latlong_to_cartesian',
     'spherical_conv',
     'spherical_geodesic_distance',
+    # sphere_grid (parameterised regular grid)
+    'sphere_grid_pad_2d',
+    'sphere_grid_unpad_2d',
     # coords
     'center_of_mass_points',
     'compactness_penalty',

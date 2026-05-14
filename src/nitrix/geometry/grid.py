@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from functools import reduce
 from operator import mul
-from typing import Optional, Sequence, Union
+from typing import Literal, Optional, Sequence, Union
 
 import jax
 import jax.numpy as jnp
@@ -45,6 +45,8 @@ __all__ = [
     'identity_grid',
     'spatial_transform',
     'integrate_velocity_field',
+    'jacobian_displacement',
+    'jacobian_det_displacement',
     'resample',
     'center_of_mass_grid',
     # legacy alias kept for now -- remove at v0.1 cleanup
@@ -52,6 +54,11 @@ __all__ = [
     'vec_int',
     'rescale',
 ]
+
+
+# Boundary modes accepted by ``spatial_transform``, ``resample``, and the
+# central-difference paths.  Names match ``jax.scipy.ndimage.map_coordinates``.
+BoundaryMode = Literal['constant', 'nearest', 'wrap', 'mirror', 'reflect']
 
 
 # ---------------------------------------------------------------------------
@@ -101,34 +108,41 @@ def identity_grid(
 
 
 def _gather_coords_linear(
-    image: Float[Array, '... *spatial c'],
-    coords: Float[Array, '... *spatial ndim'],
+    image: Float[Array, '*spatial c'],
+    coords: Float[Array, '*out_spatial ndim'],
     *,
+    mode: BoundaryMode,
     cval: float,
-) -> Float[Array, '... *spatial c']:
+) -> Float[Array, '*out_spatial c']:
     '''Sample ``image`` at the given coordinates using linear interpolation.
 
+    Operates on the *unbatched* core shapes -- batch dims are
+    composed by callers via ``jax.vmap``.
+
     ``coords[..., d]`` is the floating-point coordinate along axis
-    ``d`` to sample.  Out-of-bounds positions are filled with
-    ``cval``.  Channel dim ``c`` is gathered identically across all
-    channels.
+    ``d`` to sample.  Out-of-bounds positions are handled according
+    to ``mode``:
+
+    - ``"constant"``: fill with ``cval``.
+    - ``"nearest"``: clamp to the input extent (edge replication --
+      the voxelmorph default for SVF integration).
+    - ``"wrap"`` / ``"mirror"`` / ``"reflect"``: periodic / mirror
+      / mirror-with-edge per ``jax.scipy.ndimage.map_coordinates``.
     '''
     ndim = coords.shape[-1]
     # ``map_coordinates`` wants coords in shape ``(ndim, n_samples)``,
     # one row per spatial axis of the input.  We have ``coords:
-    # (..., *spatial, ndim)`` -- move the ndim axis to the front,
-    # flatten the spatial dims.
+    # (*out_spatial, ndim)`` -- move the ndim axis to the front,
+    # flatten the out_spatial dims.
     # For multi-channel images, we vmap over the trailing channel axis.
-    coords_t = jnp.moveaxis(coords, -1, 0)          # (ndim, ..., *spatial)
+    coords_t = jnp.moveaxis(coords, -1, 0)          # (ndim, *out_spatial)
     coords_flat = coords_t.reshape(ndim, -1)        # (ndim, N)
 
     def sample_one_channel(img_ch):
-        '''Sample one channel: img_ch.shape == (*spatial,)'''
         return jsp_ndi.map_coordinates(
-            img_ch, coords_flat, order=1, mode='constant', cval=cval,
+            img_ch, coords_flat, order=1, mode=mode, cval=cval,
         )
 
-    # Iterate channels via vmap on the trailing channel axis.
     sample_v = jax.vmap(sample_one_channel, in_axes=-1, out_axes=-1)
     flat_out = sample_v(image)                       # (N, c)
     out_spatial = coords.shape[:-1]
@@ -136,11 +150,12 @@ def _gather_coords_linear(
 
 
 def spatial_transform(
-    image: Float[Array, '*spatial c'],
-    deformation: Float[Array, '*spatial ndim'],
+    image: Float[Array, '*leading *spatial c'],
+    deformation: Float[Array, '*leading *spatial ndim'],
     *,
+    mode: BoundaryMode = 'constant',
     cval: float = 0.0,
-) -> Float[Array, '*spatial c']:
+) -> Float[Array, '*leading *spatial c']:
     '''Warp an image by a per-pixel deformation field.
 
     For each output pixel at coordinate ``p``, the result is
@@ -154,34 +169,72 @@ def spatial_transform(
     Parameters
     ----------
     image
-        Channel-last image, ``(*spatial, c)``.  Currently single-
-        batch (no leading dims); ``vmap`` for batched warping.
+        Channel-last image, ``(*leading, *spatial, c)``.  Leading
+        batch dims are broadcast-compatible with ``deformation``.
     deformation
-        Absolute sample coordinates, ``(*spatial, ndim)`` with
-        ``ndim`` matching the spatial rank of ``image``.
+        Absolute sample coordinates, ``(*leading, *spatial, ndim)``
+        with ``ndim`` matching the spatial rank of ``image``.  The
+        spatial shape need not match ``image``'s spatial shape --
+        for resampling-like ops, ``deformation`` indexes anywhere
+        in ``image``.
+    mode
+        Out-of-bounds handling.  Default ``"constant"`` (preserves
+        the prior contract for image-sampling).  Set
+        ``mode="nearest"`` for edge-replicate (voxelmorph
+        convention for flow-warp); see ``integrate_velocity_field``
+        which defaults to ``"nearest"`` for the same reason.  Other
+        valid values: ``"wrap"``, ``"mirror"``, ``"reflect"``.
     cval
-        Constant fill value for coordinates outside the input
-        bounds.  Default ``0``.
+        Constant fill value when ``mode="constant"``.  Ignored
+        otherwise.  Default ``0``.
 
     Returns
     -------
-    Warped image of the same shape as ``image``.
+    Warped image of the same shape as ``deformation`` with the
+    trailing channel axis from ``image``.
+
+    Notes
+    -----
+    Leading batch dims are composed via ``jax.vmap`` internally;
+    the per-sample core takes ``(*spatial, c)`` / ``(*spatial,
+    ndim)`` and returns ``(*spatial, c)``.  All leading axes that
+    appear in both inputs must match exactly -- broadcast of
+    leading axes is *not* attempted (the asymmetry between image
+    and deformation shape semantics makes silent broadcast
+    error-prone).
     '''
-    spatial_rank = deformation.shape[-1]
-    if image.ndim != spatial_rank + 1:
+    ndim = deformation.shape[-1]
+    # The image has one trailing channel dim plus ``ndim`` spatial
+    # dims; the deformation has one trailing ``ndim`` axis plus
+    # ``ndim`` spatial dims.  Everything before that is batch.
+    n_image_core = ndim + 1
+    n_deform_core = ndim + 1
+    if image.ndim < n_image_core or deformation.ndim < n_deform_core:
         raise ValueError(
-            f'image.ndim={image.ndim} must equal '
-            f'deformation.shape[-1] + 1 = {spatial_rank + 1} '
-            '(channel-last layout: trailing dim of image is the '
-            'channel; trailing dim of deformation indexes spatial '
-            'axes).'
+            f'spatial_transform: image.ndim={image.ndim} or '
+            f'deformation.ndim={deformation.ndim} too small for '
+            f'ndim={ndim} spatial axes plus '
+            '(image: channel, deformation: ndim) trailing axis.'
         )
-    if deformation.shape[:-1] != image.shape[:-1]:
+    image_batch = image.shape[:-(n_image_core)]
+    deform_batch = deformation.shape[:-(n_deform_core)]
+    if image_batch != deform_batch:
         raise ValueError(
-            f'deformation.shape[:-1]={deformation.shape[:-1]} must '
-            f'equal image.shape[:-1]={image.shape[:-1]}.'
+            f'spatial_transform: leading batch dims must match; got '
+            f'image batch {image_batch} vs deformation batch '
+            f'{deform_batch}.  Broadcast is not attempted -- vmap '
+            'manually if you need it.'
         )
-    return _gather_coords_linear(image, deformation, cval=cval)
+
+    def core(image_, deformation_):
+        return _gather_coords_linear(
+            image_, deformation_, mode=mode, cval=cval,
+        )
+
+    fn = core
+    for _ in range(len(image_batch)):
+        fn = jax.vmap(fn, in_axes=(0, 0))
+    return fn(image, deformation)
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +246,8 @@ def integrate_velocity_field(
     velocity: Float[Array, '*spatial ndim'],
     *,
     n_steps: int = 7,
+    mode: BoundaryMode = 'nearest',
+    cval: float = 0.0,
 ) -> Float[Array, '*spatial ndim']:
     '''Diffeomorphic exponential map via scaling-and-squaring.
 
@@ -207,9 +262,10 @@ def integrate_velocity_field(
     2. Repeatedly compose the field with itself ``n_steps`` times::
 
            phi_0 = v / 2**n_steps
-           phi_{i+1} = phi_i o (id + phi_i)
+           phi_{i+1} = phi_i + phi_i o (id + phi_i)
 
-       (where ``o`` denotes function composition via spatial_transform).
+       (where ``o`` denotes function composition via
+       ``spatial_transform``).
 
     Parameters
     ----------
@@ -219,12 +275,35 @@ def integrate_velocity_field(
     n_steps
         Number of doublings.  Default ``7`` (i.e., 128× scaling).
         Larger ``n_steps`` -> more accurate but more compute.
+    mode
+        Boundary behaviour for the per-step
+        ``spatial_transform(phi, id + phi)`` call.  Default
+        ``"nearest"`` (edge-replicate) -- this is the
+        voxelmorph convention and the *only* mode that yields
+        a numerically sensible integrated flow at the boundary.
+        ``"constant"`` (with ``cval=0``) silently miscomputes the
+        flow within ~`n_steps` voxels of every edge; do not use
+        unless you understand exactly what your boundary should
+        be.
+    cval
+        Constant fill value when ``mode="constant"``.  Ignored
+        otherwise.
 
     Returns
     -------
     Displacement field of the same shape as ``velocity``; adding
     ``identity_grid`` yields the absolute deformation suitable for
     ``spatial_transform``.
+
+    Notes
+    -----
+    The default ``mode`` was flipped from ``"constant"`` (the
+    naive choice) to ``"nearest"`` to match voxelmorph's
+    ``VecInt(method='ss', int_steps=...)``.  This is the *only*
+    semantics-changing behaviour change in the JOSA-feedback
+    sprint; downstream code that relied on the old default needs
+    to pass ``mode="constant"`` explicitly.  See
+    ``docs/design/geometry.md`` for the rationale.
     '''
     spatial_rank = velocity.shape[-1]
     spatial_shape = velocity.shape[:-1]
@@ -240,7 +319,9 @@ def integrate_velocity_field(
     # ``phi`` is treated as a displacement (relative); we compose
     # by warping it through the deformation ``id + phi`` each step.
     for _ in range(n_steps):
-        phi = phi + spatial_transform(phi, id_grid + phi)
+        phi = phi + spatial_transform(
+            phi, id_grid + phi, mode=mode, cval=cval,
+        )
     return phi
 
 
@@ -253,6 +334,7 @@ def resample(
     image: Float[Array, '*spatial c'],
     target_shape: Sequence[int],
     *,
+    mode: BoundaryMode = 'constant',
     cval: float = 0.0,
 ) -> Float[Array, '*target c']:
     '''Resize a channel-last image to ``target_shape`` via linear interpolation.
@@ -270,9 +352,15 @@ def resample(
     target_shape
         Per-axis target sizes; must match the spatial rank of
         ``image``.
+    mode
+        Out-of-bounds handling.  Sample positions are nominally
+        within the input extent (rounded up to the endpoint), but
+        floating-point drift can push them out by an ULP; ``mode``
+        selects the fill.  Default ``"constant"``; ``"nearest"`` is
+        the safer default for general downsampling but ``"constant"``
+        + ``cval=0`` matches the prior contract.
     cval
-        Constant fill value for the very rare out-of-bounds sample
-        induced by floating-point rounding; default ``0``.
+        Constant fill value when ``mode="constant"``.  Default ``0``.
 
     Returns
     -------
@@ -296,7 +384,7 @@ def resample(
         axes.append(ax)
     grids = jnp.meshgrid(*axes, indexing='ij')
     coords = jnp.stack(grids, axis=-1)  # (*target_shape, ndim)
-    return _gather_coords_linear(image, coords, cval=cval)
+    return _gather_coords_linear(image, coords, mode=mode, cval=cval)
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +450,218 @@ def center_of_mass_grid(
 
 # ---------------------------------------------------------------------------
 # Legacy-name aliases (will be removed at v0.1 cleanup)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Jacobian field of a displacement / deformation
+# ---------------------------------------------------------------------------
+
+
+def _central_diff_along_axis(
+    field: Float[Array, '... s c'],
+    spatial_axis: int,
+    *,
+    mode: BoundaryMode,
+    spacing: float,
+) -> Float[Array, '... s c']:
+    '''Per-axis central difference of a channel-last field.
+
+    ``spatial_axis`` indexes the axis to differentiate along
+    (negative-indexable).  Boundary handling: ``mode='nearest'``
+    duplicates the edge (forward / backward diff at the very edge),
+    ``'wrap'`` is periodic, ``'mirror'`` is mirror without edge
+    repetition.
+
+    The denominator is ``2 * spacing`` (the standard central
+    difference) for interior points.  At ``'nearest'`` boundary
+    cells the formula degenerates to a forward / backward
+    difference; the denominator is still ``2 * spacing`` (matching
+    scipy / voxelmorph convention which treats the boundary cell
+    as if neighbouring itself).
+    '''
+    n = field.ndim
+    ax = spatial_axis % n
+    # Build the "next" and "prev" along ax by rolling, then patch
+    # the boundary rows according to ``mode``.
+    nxt = jnp.roll(field, -1, axis=ax)
+    prv = jnp.roll(field, +1, axis=ax)
+    if mode == 'nearest':
+        # Replace the wrapped boundary values with the edge cell.
+        L = field.shape[ax]
+        sl_last = [slice(None)] * n
+        sl_last[ax] = L - 1
+        sl_first = [slice(None)] * n
+        sl_first[ax] = 0
+        # nxt at index L-1 should be field[L-1] (no neighbour beyond).
+        nxt = nxt.at[tuple(sl_last)].set(field[tuple(sl_last)])
+        # prv at index 0 should be field[0].
+        prv = prv.at[tuple(sl_first)].set(field[tuple(sl_first)])
+    elif mode == 'wrap':
+        pass  # roll already gives periodic behaviour
+    elif mode == 'mirror':
+        # Mirror without repeating the edge cell: field[L-1] reflects
+        # to field[L-2], field[0] reflects to field[1].
+        L = field.shape[ax]
+        sl_last = [slice(None)] * n
+        sl_last[ax] = L - 1
+        sl_first = [slice(None)] * n
+        sl_first[ax] = 0
+        # nxt at L-1 -> field[L-2]
+        sl_lm1 = [slice(None)] * n
+        sl_lm1[ax] = L - 2
+        nxt = nxt.at[tuple(sl_last)].set(field[tuple(sl_lm1)])
+        # prv at 0 -> field[1]
+        sl_one = [slice(None)] * n
+        sl_one[ax] = 1
+        prv = prv.at[tuple(sl_first)].set(field[tuple(sl_one)])
+    else:
+        raise ValueError(
+            f'boundary_mode={mode!r}; expected "nearest", "wrap", or '
+            '"mirror".'
+        )
+    return (nxt - prv) / (2.0 * spacing)
+
+
+def _negate_at_index(x: Array, axis: int, index: int) -> Array:
+    '''Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged.'''
+    n = x.ndim
+    axis_norm = axis % n
+    sl = [slice(None)] * n
+    sl[axis_norm] = slice(index, index + 1)
+    return x.at[tuple(sl)].set(-x[tuple(sl)])
+
+
+def jacobian_displacement(
+    u: Float[Array, '... *spatial d'],
+    *,
+    boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest',
+    spacing: Union[float, Sequence[float]] = 1.0,
+) -> Float[Array, '... *spatial d d']:
+    '''Per-point Jacobian of the deformation φ = id + u.
+
+    For a channel-last displacement field ``u`` with ``d`` spatial
+    axes, returns ``J[..., i, j] = δ_{i,j} + ∂ u_i / ∂ x_j``,
+    computed via central differences along each spatial axis.
+
+    Parameters
+    ----------
+    u
+        Displacement field, channel-last,
+        ``(*leading, *spatial, d)`` with ``len(spatial) == d``.
+    boundary_mode
+        Boundary handling for the central difference.  ``"nearest"``
+        (default) clamps to the edge cell -- this is what
+        voxelmorph uses for QA on learned warps.  ``"wrap"`` is
+        periodic.  ``"mirror"`` is non-repeating mirror.
+    spacing
+        Voxel spacing along each spatial axis.  ``float`` ->
+        isotropic; sequence -> per-axis (length ``d``).  For
+        non-isotropic fMRI / MRI grids the spacing should be in
+        the same physical units as ``u``; the central-difference
+        denominator is ``2 * spacing[axis]``.
+
+    Returns
+    -------
+    Jacobian field, ``(*leading, *spatial, d, d)``.  The trailing
+    two axes index ``(component, partial-direction)`` of the
+    Jacobian matrix at each spatial location.
+
+    Notes
+    -----
+    For folding detection use ``jacobian_det_displacement`` which
+    avoids materialising the full Jacobian when only the
+    determinant is needed.
+    '''
+    d = u.shape[-1]
+    spatial_shape = u.shape[-(d + 1):-1]
+    if len(spatial_shape) != d:
+        raise ValueError(
+            f'jacobian_displacement: trailing displacement-channel '
+            f'axis has length {d}, but only {len(spatial_shape)} '
+            'preceding spatial axes were detected.'
+        )
+    if isinstance(spacing, (int, float)):
+        spacing_per_axis = (float(spacing),) * d
+    else:
+        spacing_per_axis = tuple(float(s) for s in spacing)
+        if len(spacing_per_axis) != d:
+            raise ValueError(
+                f'spacing length {len(spacing_per_axis)} != d={d}.'
+            )
+
+    # Differentiate u (which is (..., *spatial, d)) along each spatial
+    # axis.  Spatial axes are positions [-(d+1), -d).  axis -1 is the
+    # displacement-component axis (not differentiated).
+    cols = []
+    for j in range(d):
+        spatial_axis_j = -(d + 1) + j  # 0 <= j < d
+        cols.append(_central_diff_along_axis(
+            u, spatial_axis_j,
+            mode=boundary_mode, spacing=spacing_per_axis[j],
+        ))
+    # Stack columns into the Jacobian: each cols[j] has shape
+    # (..., *spatial, d) representing ∂u/∂x_j (one displacement
+    # component per index along the trailing axis).  J[..., i, j] is
+    # the i-th displacement's j-th partial.  Stack along a new axis
+    # at position -1: cols[j][..., i] -> J[..., i, j].
+    J_off = jnp.stack(cols, axis=-1)  # (..., *spatial, d, d)
+    # Add the identity (δ_{ij}) for J = I + ∇u.
+    eye = jnp.eye(d, dtype=u.dtype)
+    return J_off + eye
+
+
+def jacobian_det_displacement(
+    u: Float[Array, '... *spatial d'],
+    *,
+    boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest',
+    spacing: Union[float, Sequence[float]] = 1.0,
+) -> Float[Array, '... *spatial']:
+    '''Per-point determinant of the deformation Jacobian.
+
+    Computes ``det(I + ∇u)`` at each spatial location.  For
+    ``d <= 3`` uses the explicit closed-form determinant (avoiding
+    LU factorisation noise and ``O(d^3)`` cost); for ``d > 3``
+    falls back to ``jnp.linalg.det``.
+
+    Parameters and ``boundary_mode`` / ``spacing`` semantics match
+    ``jacobian_displacement``.
+
+    Folding interpretation: ``det(J) > 0`` means the deformation
+    is locally orientation-preserving; ``det(J) <= 0`` indicates
+    the warp folds at this voxel (and is not a diffeomorphism
+    there).  The standard QA threshold is "no voxels with
+    ``det <= 0``"; the soft regulariser is
+    ``mean(max(0, ε - det)^2)`` for some ``ε > 0``.
+    '''
+    J = jacobian_displacement(
+        u, boundary_mode=boundary_mode, spacing=spacing,
+    )
+    d = u.shape[-1]
+    if d == 1:
+        return J[..., 0, 0]
+    if d == 2:
+        # J = [[a, b], [c, d]]; det = a*d - b*c
+        a = J[..., 0, 0]
+        b = J[..., 0, 1]
+        c = J[..., 1, 0]
+        d_ = J[..., 1, 1]
+        return a * d_ - b * c
+    if d == 3:
+        # Rule of Sarrus.
+        a = J[..., 0, 0]; b = J[..., 0, 1]; c = J[..., 0, 2]
+        d_ = J[..., 1, 0]; e = J[..., 1, 1]; f = J[..., 1, 2]
+        g = J[..., 2, 0]; h = J[..., 2, 1]; i = J[..., 2, 2]
+        return (
+            a * (e * i - f * h)
+            - b * (d_ * i - f * g)
+            + c * (d_ * h - e * g)
+        )
+    return jnp.linalg.det(J)
+
+
+# ---------------------------------------------------------------------------
+# Legacy aliases (kept for migration; removed at v0.1)
 # ---------------------------------------------------------------------------
 
 

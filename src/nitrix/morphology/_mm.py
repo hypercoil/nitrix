@@ -148,6 +148,36 @@ def dilate(
         ``"SAME"`` (default) or ``"VALID"``.  ``"SAME"`` pads with
         the algebra identity (``-inf`` for max-plus), preserving the
         spatial shape.
+
+        **For non-Euclidean boundaries** (periodic / spherical-grid /
+        custom), do not pass a new ``padding`` mode here -- instead
+        pre-pad the input via the appropriate topology helper and
+        call ``dilate(..., padding="VALID")``.  The VALID dilation
+        consumes exactly the pad you added when ``pad == se_radius``;
+        the result has the original spatial shape, no explicit
+        unpad needed::
+
+            # Spherical-grid topology (parameterised sphere):
+            from nitrix.geometry import sphere_grid_pad_2d
+            se_radius = (size - 1) // 2
+            padded = sphere_grid_pad_2d(mask, pad=se_radius)
+            result = dilate(padded, size=size, padding='VALID')
+
+            # Generic periodic (toroidal):
+            p = (size - 1) // 2
+            padded = jnp.pad(mask, ((p, p), (p, p)), mode='wrap')
+            result = dilate(padded, size=size, padding='VALID')
+
+        If you padded by more than the SE radius (e.g. to chain
+        multiple kernel passes), strip the surplus via
+        ``sphere_grid_unpad_2d`` (for the spherical case) or a plain
+        slice (for the toroidal case).
+
+        Threading ``padding='periodic'`` into ``dilate`` itself was
+        considered and rejected: it would only solve the toroidal
+        case, not the pole-flip case that the spherical-grid
+        primitive handles.  Composition is more general and only
+        costs 2 lines.
     backend
         ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.
 

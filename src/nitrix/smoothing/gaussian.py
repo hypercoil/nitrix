@@ -28,20 +28,54 @@ from jaxtyping import Array, Float
 __all__ = ['gaussian']
 
 
-def _gaussian_1d_kernel(sigma: float, truncate: float, dtype) -> Array:
-    '''Build a 1D Gaussian kernel of standard width.
+def _gaussian_1d_kernel(
+    sigma: float,
+    truncate: float,
+    dtype,
+    *,
+    kernel_size: Optional[int] = None,
+) -> Array:
+    '''Build a 1D Gaussian kernel.
 
-    Kernel half-width is ``ceil(truncate * sigma)``; total width is
-    ``2 * half + 1``.  Values are normalised so they sum to 1, so a
-    constant input is preserved.
+    If ``kernel_size`` is ``None`` (default), the kernel half-width
+    is ``int(truncate * sigma + 0.5)`` (scipy convention) and the
+    total width is ``2 * half + 1`` (always odd).
+
+    If ``kernel_size`` is an integer, the kernel has exactly that
+    many taps -- overriding the ``truncate`` heuristic.  Odd
+    ``kernel_size`` gives a symmetric kernel centred on the
+    middle tap (taps at ``-half ... 0 ... +half``).  Even
+    ``kernel_size`` gives an off-centre kernel with taps at
+    half-integer offsets relative to the original pixel grid
+    (e.g. ``kernel_size=2`` -> taps at ``-0.5, 0.5``), which
+    shifts the output by half a pixel.
+
+    Values are normalised so the kernel sums to 1 -- a constant
+    input is preserved.
     '''
     if sigma <= 0:
         raise ValueError(f'sigma must be positive; got {sigma!r}.')
-    # Match ``scipy.ndimage.gaussian_filter1d``: half-width is
-    # ``int(truncate * sigma + 0.5)``, not ``ceil(truncate * sigma)``.
-    # This rounds 4 * 0.8 = 3.2 down to 3, where ceil would give 4.
-    half = int(truncate * sigma + 0.5)
-    x = jnp.arange(-half, half + 1, dtype=dtype)
+    if kernel_size is None:
+        # Scipy convention.
+        half = int(truncate * sigma + 0.5)
+        x = jnp.arange(-half, half + 1, dtype=dtype)
+    else:
+        if kernel_size < 1:
+            raise ValueError(
+                f'kernel_size must be >= 1; got {kernel_size!r}.'
+            )
+        # For odd kernel_size N=2h+1, taps are at -h..+h.
+        # For even kernel_size N=2h, taps are at -h+0.5..+h-0.5
+        # (so the kernel is offset by half a pixel; the output is
+        # half-pixel-shifted).
+        if kernel_size % 2 == 1:
+            half = (kernel_size - 1) // 2
+            x = jnp.arange(-half, half + 1, dtype=dtype)
+        else:
+            half = kernel_size // 2
+            x = jnp.arange(-half + 0.5, half, dtype=dtype)
+            # length should equal kernel_size
+            assert x.shape[0] == kernel_size
     kernel = jnp.exp(-0.5 * (x / sigma) ** 2)
     kernel = kernel / kernel.sum()
     return kernel
@@ -55,10 +89,25 @@ def _conv_1d_along_axis(
     Boundary handling: ``mode`` controls how the input is padded
     before the (otherwise VALID) convolution.  Supports
     ``"reflect"``, ``"constant"`` (cval = 0), and ``"edge"``.
+
+    For an **odd** ``kernel.size``, the pad is symmetric and the
+    output is centred on the same pixel grid as the input.
+
+    For an **even** ``kernel.size``, the pad is asymmetric
+    (``half_left = K // 2 - 1``, ``half_right = K // 2``) -- the
+    minimum same-size pad.  The output is half-pixel-shifted
+    relative to a centred-kernel convolution; this is the price
+    of an even-tap Gaussian and is documented at the public API.
     '''
-    half = (kernel.size - 1) // 2
+    K = kernel.size
+    if K % 2 == 1:
+        half = (K - 1) // 2
+        half_l = half_r = half
+    else:
+        half_l = K // 2 - 1
+        half_r = K // 2
     pad_widths = [(0, 0)] * x.ndim
-    pad_widths[axis] = (half, half)
+    pad_widths[axis] = (half_l, half_r)
     # ``scipy.ndimage`` and numpy disagree on what "reflect" means:
     #   scipy: include the boundary in the mirror -- (b, a, | a, b, c, ...)
     #   numpy: exclude it                          -- (c, b, | a, b, c, ...)
@@ -108,11 +157,29 @@ def _normalise_sigma(
     return out
 
 
+def _normalise_kernel_size(
+    kernel_size: Union[None, int, Sequence[int]],
+    spatial_rank: int,
+) -> tuple[Optional[int], ...]:
+    if kernel_size is None:
+        return (None,) * spatial_rank
+    if isinstance(kernel_size, int):
+        return (int(kernel_size),) * spatial_rank
+    out = tuple(int(k) if k is not None else None for k in kernel_size)
+    if len(out) != spatial_rank:
+        raise ValueError(
+            f'kernel_size must be int, None, or a length-'
+            f'{spatial_rank} sequence; got {kernel_size!r}.'
+        )
+    return out
+
+
 def gaussian(
     x: Float[Array, '... *spatial'],
     *,
     sigma: Union[float, Sequence[float]],
     truncate: float = 4.0,
+    kernel_size: Union[None, int, Sequence[Optional[int]]] = None,
     mode: str = 'reflect',
     spatial_rank: Optional[int] = None,
 ) -> Float[Array, '... *spatial']:
@@ -130,9 +197,26 @@ def gaussian(
         sigma, for anisotropic Gaussians (e.g. fMRI with
         anisotropic voxel spacing).
     truncate
-        Kernel half-width factor: kernel is ``2 * ceil(truncate *
-        sigma) + 1`` taps.  Default ``4`` (matches
-        ``scipy.ndimage.gaussian_filter``).
+        Kernel half-width factor when ``kernel_size`` is ``None``:
+        kernel is ``2 * int(truncate * sigma + 0.5) + 1`` taps
+        (scipy convention).  Default ``4``.  Ignored if
+        ``kernel_size`` is given.
+    kernel_size
+        Explicit per-axis kernel size override.  ``None`` (default)
+        uses the ``truncate * sigma`` heuristic.  ``int`` --
+        same size on every spatial axis.  Sequence -- per-axis;
+        ``None`` entries fall back to the heuristic.
+
+        **Odd** kernel size: symmetric, centred on the pixel grid.
+        Output is on the same pixel grid as the input.
+
+        **Even** kernel size: off-centre Gaussian with taps at
+        half-integer offsets (e.g. ``kernel_size=2`` -> taps at
+        ``-0.5, 0.5``); **output is half-pixel-shifted along that
+        axis**.  Use this only when you specifically want an
+        even-tap Gaussian-weighted average (e.g. the
+        spheremorph / JOSA NegativeJacobianFiltering 2×2 kernel
+        at ``sigma=0.7``); otherwise prefer the default heuristic.
     mode
         Boundary handling: ``"reflect"`` (default), ``"constant"``
         (zero-pad), or ``"edge"`` (replicate boundary).
@@ -177,10 +261,13 @@ def gaussian(
         )
 
     sigmas = _normalise_sigma(sigma, spatial_rank)
+    kernel_sizes = _normalise_kernel_size(kernel_size, spatial_rank)
     spatial_axes = tuple(range(x.ndim - spatial_rank, x.ndim))
 
     out = x
-    for axis, s in zip(spatial_axes, sigmas):
-        kernel = _gaussian_1d_kernel(s, truncate, dtype=out.dtype)
+    for axis, s, ks in zip(spatial_axes, sigmas, kernel_sizes):
+        kernel = _gaussian_1d_kernel(
+            s, truncate, dtype=out.dtype, kernel_size=ks,
+        )
         out = _conv_1d_along_axis(out, kernel, axis=axis, mode=mode)
     return out
