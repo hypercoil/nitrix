@@ -93,6 +93,284 @@ def test_spatial_transform_out_of_bounds_uses_cval():
     np.testing.assert_array_equal(out, jnp.full((4, 4, 1), -1.0))
 
 
+def test_spatial_transform_mode_nearest_edge_replicates():
+    '''mode="nearest" clamps OOB coords to the input extent.
+
+    Sampling at coordinate (-100, -100) on a 4x4 image with mode='nearest'
+    must return image[0, 0]; sampling at (1e6, 1e6) returns image[-1, -1].
+    Matches scipy.ndimage.map_coordinates(mode='nearest').
+    '''
+    img = jnp.arange(16, dtype=jnp.float32).reshape(4, 4, 1)
+    # Sample at (negative-far, negative-far) -> should clamp to (0, 0)
+    coords_neg = jnp.full((4, 4, 2), -1e6)
+    out_neg = spatial_transform(img, coords_neg, mode='nearest')
+    np.testing.assert_array_equal(
+        out_neg, jnp.full((4, 4, 1), img[0, 0, 0]),
+    )
+    # Sample at (positive-far, positive-far) -> should clamp to (-1, -1)
+    coords_pos = jnp.full((4, 4, 2), 1e6)
+    out_pos = spatial_transform(img, coords_pos, mode='nearest')
+    np.testing.assert_array_equal(
+        out_pos, jnp.full((4, 4, 1), img[-1, -1, 0]),
+    )
+
+
+def test_spatial_transform_mode_wrap_is_periodic():
+    '''mode="wrap" treats the image as toroidally periodic.'''
+    img = jnp.arange(16, dtype=jnp.float32).reshape(4, 4, 1)
+    # Coords at (4, 0) wrap to (0, 0).
+    coords = jnp.zeros((1, 1, 2)).at[0, 0].set(jnp.array([4.0, 0.0]))
+    out = spatial_transform(img, coords, mode='wrap')
+    np.testing.assert_allclose(
+        out[0, 0, 0], img[0, 0, 0], atol=1e-6,
+    )
+
+
+def test_spatial_transform_accepts_leading_batch_dims():
+    '''spatial_transform now vmaps over leading batch dims natively.'''
+    B = 3
+    img = jnp.broadcast_to(
+        jnp.arange(16, dtype=jnp.float32).reshape(1, 4, 4, 1),
+        (B, 4, 4, 1),
+    )
+    # Each batch element gets the same identity deformation.
+    grid_ = identity_grid((4, 4), dtype=jnp.float32)  # (4, 4, 2)
+    deform = jnp.broadcast_to(grid_[None], (B, 4, 4, 2))
+    out = spatial_transform(img, deform)
+    assert out.shape == (B, 4, 4, 1)
+    np.testing.assert_allclose(out, img, atol=1e-6)
+
+
+def test_spatial_transform_batch_dim_mismatch_raises():
+    img = jnp.zeros((3, 4, 4, 1))
+    deform = jnp.zeros((4, 4, 4, 2))  # batch size differs
+    with pytest.raises(ValueError, match='leading batch dims must match'):
+        spatial_transform(img, deform)
+
+
+# ---------------------------------------------------------------------------
+# sphere_grid: parameterised-sphere topology padding (JOSA J.1a)
+# ---------------------------------------------------------------------------
+
+
+def test_sphere_grid_pad_2d_longitudinal_wrap():
+    '''The longitudinal axis pads as a circular wrap.'''
+    from nitrix.geometry import sphere_grid_pad_2d
+    img = jnp.arange(16, dtype=jnp.float32).reshape(4, 4)
+    padded = sphere_grid_pad_2d(
+        img, pad=(0, 1), height_axis=-2, width_axis=-1,
+    )
+    assert padded.shape == (4, 6)
+    # First column = last column of input; last column = first.
+    np.testing.assert_array_equal(padded[:, 0], img[:, -1])
+    np.testing.assert_array_equal(padded[:, -1], img[:, 0])
+    np.testing.assert_array_equal(padded[:, 1:-1], img)
+
+
+def test_sphere_grid_pad_2d_pole_flip_skips_pole_row():
+    '''The pole pad uses row[1] (not row[0]) flipped + rolled by W//2.
+
+    This is the load-bearing detail of the topology: row[0] is the
+    compressed pole point and reflecting it would duplicate the pole.
+    '''
+    from nitrix.geometry import sphere_grid_pad_2d
+    H, W = 4, 4
+    img = jnp.arange(H * W, dtype=jnp.float32).reshape(H, W)
+    padded = sphere_grid_pad_2d(
+        img, pad=(1, 0), height_axis=-2, width_axis=-1,
+    )
+    assert padded.shape == (H + 2, W)
+    # Top pad row = row[1] rolled by W // 2 = 2 (no longitudinal pad).
+    np.testing.assert_array_equal(
+        padded[0], jnp.roll(img[1], W // 2),
+    )
+    # Bottom pad row = row[H-2] rolled.
+    np.testing.assert_array_equal(
+        padded[-1], jnp.roll(img[H - 2], W // 2),
+    )
+    # Body unchanged.
+    np.testing.assert_array_equal(padded[1:-1], img)
+
+
+def test_sphere_grid_pad_2d_full_topology_roundtrip():
+    '''pad + unpad recovers the original.'''
+    from nitrix.geometry import sphere_grid_pad_2d, sphere_grid_unpad_2d
+    img = jax.random.normal(jax.random.key(0), (8, 8))
+    padded = sphere_grid_pad_2d(img, pad=2)
+    assert padded.shape == (12, 12)
+    out = sphere_grid_unpad_2d(padded, pad=2)
+    np.testing.assert_array_equal(out, img)
+
+
+def test_sphere_grid_pad_2d_pole_negate_channel():
+    '''Negate the longitudinal-flow channel in pole-pad regions.
+
+    A constant longitudinal flow flips sign across each pole;
+    a constant latitudinal flow does not.  Verify the negate flag
+    operates on the named index alone.
+    '''
+    from nitrix.geometry import sphere_grid_pad_2d
+    # 2D flow field: (H, W, 2) with channel 0 = longitudinal, 1 = lat.
+    flow = jnp.zeros((4, 4, 2))
+    flow = flow.at[..., 0].set(1.0)   # longitudinal: 1
+    flow = flow.at[..., 1].set(0.5)   # latitudinal: 0.5
+    padded = sphere_grid_pad_2d(
+        flow, pad=(1, 0),
+        height_axis=-3, width_axis=-2,
+        pole_negate_channel=0, pole_negate_axis=-1,
+    )
+    assert padded.shape == (6, 4, 2)
+    # Top pad row: longitudinal channel should be -1; latitudinal still 0.5.
+    np.testing.assert_array_equal(padded[0, :, 0], jnp.full((4,), -1.0))
+    np.testing.assert_array_equal(padded[0, :, 1], jnp.full((4,), 0.5))
+    # Body unchanged.
+    np.testing.assert_array_equal(padded[1:-1, :, 0], jnp.full((4, 4), 1.0))
+
+
+def test_sphere_grid_pad_2d_channel_last_axes():
+    '''Works on channel-last (B, H, W, C) layout.'''
+    from nitrix.geometry import sphere_grid_pad_2d
+    img = jax.random.normal(jax.random.key(0), (2, 4, 6, 3))
+    padded = sphere_grid_pad_2d(
+        img, pad=1, height_axis=-3, width_axis=-2,
+    )
+    assert padded.shape == (2, 6, 8, 3)
+
+
+def test_sphere_grid_pad_2d_odd_width_raises():
+    '''Odd width is rejected (pole roll is by W // 2; odd W would shift).'''
+    from nitrix.geometry import sphere_grid_pad_2d
+    img = jnp.zeros((4, 5))
+    with pytest.raises(ValueError, match='width must be even'):
+        sphere_grid_pad_2d(img, pad=1)
+
+
+def test_sphere_grid_pad_2d_differentiable():
+    '''Pad is pure indexing/flip/roll -- gradient is identity-like.'''
+    from nitrix.geometry import sphere_grid_pad_2d
+    img = jax.random.normal(jax.random.key(0), (4, 4))
+    def loss(img):
+        return jnp.sum(sphere_grid_pad_2d(img, pad=1) ** 2)
+    g = jax.grad(loss)(img)
+    assert g.shape == img.shape
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# Jacobian primitives (JOSA J.1b)
+# ---------------------------------------------------------------------------
+
+
+def test_jacobian_displacement_zero_is_identity():
+    '''Zero displacement -> J = I everywhere.'''
+    from nitrix.geometry import jacobian_displacement
+    u = jnp.zeros((6, 8, 2))
+    J = jacobian_displacement(u)
+    assert J.shape == (6, 8, 2, 2)
+    np.testing.assert_array_equal(J, jnp.broadcast_to(jnp.eye(2), (6, 8, 2, 2)))
+
+
+def test_jacobian_det_displacement_zero_is_one():
+    '''Zero displacement -> det(J) = 1 everywhere.'''
+    from nitrix.geometry import jacobian_det_displacement
+    u = jnp.zeros((6, 8, 2))
+    det = jacobian_det_displacement(u)
+    np.testing.assert_allclose(det, jnp.ones((6, 8)), atol=1e-12)
+
+
+def test_jacobian_det_displacement_bulk_compression():
+    '''u(x) = -0.1 x -> J = 0.9 I -> det = 0.81 (2D), 0.729 (3D).'''
+    from nitrix.geometry import (
+        identity_grid, jacobian_det_displacement,
+    )
+    # 2D
+    grid_2d = identity_grid((8, 8), dtype=jnp.float64)
+    u_2d = -0.1 * grid_2d
+    det_2d = jacobian_det_displacement(u_2d)
+    np.testing.assert_allclose(det_2d[4, 4], 0.81, atol=1e-12)
+    # 3D
+    grid_3d = identity_grid((6, 6, 6), dtype=jnp.float64)
+    u_3d = -0.1 * grid_3d
+    det_3d = jacobian_det_displacement(u_3d)
+    np.testing.assert_allclose(det_3d[3, 3, 3], 0.729, atol=1e-12)
+
+
+def test_jacobian_det_displacement_folding():
+    '''A folding deformation has det <= 0 where it folds.
+
+    Construct u with ∂u_0/∂x_0 = -2 (i.e. u_0 = -2*x_0), which
+    gives J = [[1 + (-2), 0], [0, 1]] = [[-1, 0], [0, 1]]; det = -1.
+    '''
+    from nitrix.geometry import jacobian_det_displacement
+    H, W = 10, 10
+    # u_0(i, j) = -2 * i; u_1 = 0.
+    rows = jnp.arange(H, dtype=jnp.float64)[:, None]
+    u = jnp.zeros((H, W, 2), dtype=jnp.float64)
+    u = u.at[..., 0].set(jnp.broadcast_to(rows * -2.0, (H, W)))
+    det = jacobian_det_displacement(u)
+    # Interior should have det ~= -1.
+    np.testing.assert_allclose(det[H // 2, W // 2], -1.0, atol=1e-12)
+
+
+def test_jacobian_displacement_boundary_mode_nearest():
+    '''Boundary mode "nearest" replicates the edge cell.
+
+    For a linear ramp ``u_0 = i``, central diff in the interior is
+    ``(u_0[i+1] - u_0[i-1]) / 2 = 1`` (exact).  At ``i = 0`` the
+    "nearest" mode treats the previous neighbour as ``u_0[0]``
+    itself, giving ``(u_0[1] - u_0[0]) / 2 = 0.5`` -- half the
+    true gradient.  This matches scipy / voxelmorph convention.
+    '''
+    from nitrix.geometry import jacobian_displacement
+    H, W = 6, 6
+    rows = jnp.arange(H, dtype=jnp.float64)[:, None]
+    u = jnp.zeros((H, W, 2), dtype=jnp.float64)
+    u = u.at[..., 0].set(jnp.broadcast_to(rows, (H, W)))
+    J = jacobian_displacement(u, boundary_mode='nearest')
+    # Interior: ∂u_0/∂x_0 = 1 -> J[..., 0, 0] = 2.
+    np.testing.assert_allclose(J[1:-1, :, 0, 0], 2.0, atol=1e-12)
+    # Boundary (i=0 and i=H-1): the edge-replicated central diff
+    # gives ∂u_0/∂x_0 = 0.5 -> J = 1.5.
+    np.testing.assert_allclose(J[0, :, 0, 0], 1.5, atol=1e-12)
+    np.testing.assert_allclose(J[-1, :, 0, 0], 1.5, atol=1e-12)
+    # ∂u_1/∂x_1 = 0 everywhere -> J[..., 1, 1] = 1.
+    np.testing.assert_allclose(J[..., 1, 1], 1.0, atol=1e-12)
+
+
+def test_jacobian_displacement_anisotropic_spacing():
+    '''Per-axis spacing scales the central difference correctly.'''
+    from nitrix.geometry import jacobian_displacement
+    # u_0(i, j) = i (ramp in x_0).  With spacing=(2, 1):
+    #   ∂u_0/∂x_0 = 1/2 (we measure physical units, voxel spacing 2)
+    # So J[..., 0, 0] = 1 + 0.5 = 1.5.
+    H, W = 6, 6
+    rows = jnp.arange(H, dtype=jnp.float64)[:, None]
+    u = jnp.zeros((H, W, 2), dtype=jnp.float64)
+    u = u.at[..., 0].set(jnp.broadcast_to(rows, (H, W)))
+    J = jacobian_displacement(u, spacing=(2.0, 1.0))
+    np.testing.assert_allclose(J[1:-1, 1:-1, 0, 0], 1.5, atol=1e-12)
+
+
+def test_jacobian_det_displacement_differentiable():
+    '''det is smooth in u; jax.grad must produce finite gradients.'''
+    from nitrix.geometry import jacobian_det_displacement
+    u = jax.random.normal(jax.random.key(0), (6, 8, 2)) * 0.1
+    def loss(u):
+        return jnp.sum(jacobian_det_displacement(u) ** 2)
+    g = jax.grad(loss)(u)
+    assert g.shape == u.shape
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+def test_jacobian_det_displacement_4d_falls_back_to_linalg_det():
+    '''d > 3 routes through jnp.linalg.det.  Sanity check shape only.'''
+    from nitrix.geometry import jacobian_det_displacement
+    u = jax.random.normal(jax.random.key(0), (4, 4, 4, 4, 4)) * 0.01
+    det = jacobian_det_displacement(u)
+    assert det.shape == (4, 4, 4, 4)
+    assert bool(jnp.all(jnp.isfinite(det)))
+
+
 def test_resample_preserves_constant():
     const = jnp.full((5, 5, 2), 3.0)
     out = resample(const, (8, 8))
@@ -122,8 +400,9 @@ def test_integrate_velocity_field_zero_is_zero():
 
 def test_integrate_velocity_field_uniform_translation():
     '''A spatially-uniform velocity should integrate to roughly the
-    same uniform displacement (with mild interior loss from
-    repeated interpolation).
+    same uniform displacement -- *including at the boundary* under
+    the default mode='nearest'.  Under the old mode='constant'
+    default the boundary cells diverged by O(n_steps) voxels.
     '''
     v = jnp.zeros((8, 8, 2)).at[..., 0].set(0.5)
     phi = integrate_velocity_field(v, n_steps=5)
@@ -131,6 +410,37 @@ def test_integrate_velocity_field_uniform_translation():
     np.testing.assert_allclose(
         phi[4, 4, 0], 0.5, atol=1e-3,
     )
+    # Boundary values should also be close to 0.5 under edge-replicate.
+    # This is the regression test for the JOSA-feedback fix: under the
+    # prior mode='constant' default these would have been ~0.
+    np.testing.assert_allclose(
+        phi[0, 0, 0], 0.5, atol=1e-2,
+    )
+    np.testing.assert_allclose(
+        phi[-1, -1, 0], 0.5, atol=1e-2,
+    )
+
+
+def test_integrate_velocity_field_mode_constant_vs_nearest_differs_at_boundary():
+    '''Documenting the behaviour the consumer flagged: the two modes
+    disagree at the boundary whenever the integrated flow samples
+    OOB.  Construct a velocity with a negative x-component that
+    pulls the i=0 boundary OOB during SS integration.
+    '''
+    H, W = 8, 8
+    # v_x = -1 uniformly -> each SS step samples at i - phi_x, which
+    # is negative for i=0.  mode='constant' fills with cval=0,
+    # mode='nearest' replicates phi_x at i=0.
+    v = jnp.zeros((H, W, 2)).at[..., 0].set(-1.0)
+    phi_const = integrate_velocity_field(v, n_steps=4, mode='constant')
+    phi_nearest = integrate_velocity_field(v, n_steps=4, mode='nearest')
+    # Interior values agree.
+    np.testing.assert_allclose(
+        phi_const[H // 2, W // 2], phi_nearest[H // 2, W // 2], atol=1e-3,
+    )
+    # Boundary values diverge -- this is the JOSA-feedback bug surface.
+    diff = float(jnp.abs(phi_const[0, 0] - phi_nearest[0, 0]).max())
+    assert diff > 0.1, f'expected boundary divergence between modes; got {diff}'
 
 
 def test_center_of_mass_grid_1d():

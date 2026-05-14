@@ -34,6 +34,37 @@ than ``semiring_conv`` -- gaussian is REAL-only and benefits from
 tensor cores on Ampere+ (TF32 by default).  The separability makes
 n-D efficient: ``ndim`` passes of 1D conv, each ~``O(n)``.
 
+### `kernel_size` override (JOSA J.2b)
+
+The ``truncate * sigma`` heuristic produces *odd-only* kernel
+sizes (always ``2 * half + 1``).  The JOSA consumer's
+``NegativeJacobianFiltering`` needs an explicit **2×2**
+Gaussian-weighted average at ``sigma = 0.7``, which the heuristic
+cannot reach for any value of ``truncate``.  We exposed an
+explicit ``kernel_size`` parameter that overrides the heuristic:
+
+- **Odd** ``kernel_size`` (e.g. ``3, 5, 7``): symmetric kernel,
+  output on the same pixel grid as input.
+- **Even** ``kernel_size`` (e.g. ``2, 4``): kernel taps at
+  half-integer offsets (e.g. ``-0.5, +0.5`` for
+  ``kernel_size=2``); **the output is half-pixel-shifted along
+  that axis**.  Documented at the public API.  Used for
+  Gaussian-weighted local averages where the half-pixel shift is
+  intentional (or doesn't matter because the subsequent step
+  consumes the smoothed value, not its alignment).
+
+The default ``kernel_size=None`` falls back to the
+``truncate * sigma`` heuristic exactly -- regression-tested
+against the prior behaviour, so existing consumers see no
+change.
+
+The implementation: ``_gaussian_1d_kernel`` builds taps at
+half-integer offsets for even sizes via ``arange(-half+0.5, half,
+1)`` rather than the standard ``arange(-half, half+1)``.  The
+companion ``_conv_1d_along_axis`` switches to asymmetric padding
+``(K//2 - 1, K//2)`` for even kernels to keep the output the
+same shape as the input.
+
 ## Bilateral: the marquee Phase 4 capability
 
 Per SPEC_UPDATE §3.3 the marquee edge-preserving smoother, delivered

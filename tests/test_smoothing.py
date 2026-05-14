@@ -123,6 +123,75 @@ def test_gaussian_rejects_unknown_mode():
 
 
 # ---------------------------------------------------------------------------
+# kernel_size override (JOSA J.2b)
+# ---------------------------------------------------------------------------
+
+
+def test_gaussian_kernel_size_odd_centered():
+    '''Odd kernel_size produces a symmetric, on-grid kernel.'''
+    x = jax.random.normal(jax.random.key(0), (8, 8))
+    out = gaussian(x, sigma=1.0, kernel_size=5)
+    assert out.shape == x.shape
+    # 5-tap with sigma=1 is similar to default (truncate=4 -> half=4 -> 9-tap)
+    # but truncated.  Constant preservation should still hold.
+    const = jnp.ones((8, 8))
+    out_const = gaussian(const, sigma=1.0, kernel_size=5)
+    np.testing.assert_allclose(out_const, 1.0, atol=1e-6)
+
+
+def test_gaussian_kernel_size_even_half_pixel_shift():
+    '''Even kernel_size produces a half-pixel-shifted output.
+
+    For input [0, 1, 2, 3, 4] with kernel_size=2 and a near-flat
+    Gaussian (large sigma -> weights ~ [0.5, 0.5]), the output at
+    index i is approximately (x[i] + x[i+1]) / 2 -- shifted by
+    half a pixel.  At the right boundary, edge replication kicks
+    in: result[-1] ~= (x[-1] + x[-1]) / 2 = x[-1].
+    '''
+    x = jnp.arange(5, dtype=jnp.float64)
+    out = gaussian(x, sigma=1000.0, kernel_size=2)  # uniform weights
+    expected = jnp.array([0.5, 1.5, 2.5, 3.5, 4.0])  # last is replicated
+    np.testing.assert_allclose(out, expected, atol=1e-6)
+
+
+def test_gaussian_kernel_size_2_sigma_0p7_josa_kernel():
+    '''Specific JOSA NJF case: kernel_size=2, sigma=0.7.
+
+    With taps at -0.5 / +0.5, the Gaussian weights at sigma=0.7
+    are equal: exp(-0.5 * (0.5 / 0.7)**2) for both taps.  After
+    normalisation, kernel = [0.5, 0.5].
+    '''
+    from nitrix.smoothing.gaussian import _gaussian_1d_kernel
+    k = _gaussian_1d_kernel(0.7, 4.0, jnp.float64, kernel_size=2)
+    np.testing.assert_allclose(np.asarray(k), [0.5, 0.5], atol=1e-12)
+
+
+def test_gaussian_per_axis_kernel_size():
+    '''Per-axis kernel_size sequence; None entries use the heuristic.'''
+    x = jax.random.normal(jax.random.key(0), (8, 8, 8))
+    out = gaussian(x, sigma=(1.0, 0.7, 1.5), kernel_size=(3, 2, None))
+    assert out.shape == x.shape
+
+
+def test_gaussian_kernel_size_default_matches_truncate():
+    '''kernel_size=None reproduces the prior truncate-based behaviour
+    exactly -- regression check that we didn't change the default.
+    '''
+    x = jax.random.normal(jax.random.key(0), (16,))
+    out_default = gaussian(x, sigma=1.5, truncate=4.0)
+    out_explicit_none = gaussian(
+        x, sigma=1.5, truncate=4.0, kernel_size=None,
+    )
+    np.testing.assert_array_equal(out_default, out_explicit_none)
+
+
+def test_gaussian_kernel_size_rejects_zero():
+    x = jnp.ones((4,))
+    with pytest.raises(ValueError, match='kernel_size must be >= 1'):
+        gaussian(x, sigma=1.0, kernel_size=0)
+
+
+# ---------------------------------------------------------------------------
 # bilateral_gaussian
 # ---------------------------------------------------------------------------
 

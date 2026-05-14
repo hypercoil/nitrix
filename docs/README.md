@@ -59,6 +59,15 @@ benchmark reports, and survive being plucked into the eventual
   ``coords`` (centre-of-mass, displacement, compactness penalty),
   plus the "rename for clarity" pass that retired the legacy
   ``cmass_*`` / ``diffuse`` / ``vec_int`` / ``rescale`` names.
+  Updated for the JOSA-feedback sprint with ``mode`` pass-through
+  to ``spatial_transform`` / ``integrate_velocity_field``, batched
+  warp via shape relaxation, and ``jacobian_(det_)displacement``
+  with explicit-formula determinants for ``d <= 3``.
+- [`design/sphere-grid.md`](design/sphere-grid.md) --
+  parameterised-sphere topology: pole-flip + longitudinal-wrap
+  padding via ``sphere_grid_pad_2d``, and why composition with
+  ``padding='VALID'`` kernels is the right design over threading
+  another boundary mode through every kernel.
 - [`design/graph.md`](design/graph.md) -- ``laplacian``,
   ``community`` (with sparse-factored ``relaxed_modularity``),
   ``connectopy`` (``eigh`` + ``lobpcg`` paths, multi-format

@@ -236,6 +236,64 @@ def test_median_filter_structuring_element_mask():
 # ---------------------------------------------------------------------------
 
 
+def test_dilate_spherical_grid_composition():
+    '''Documented JOSA composition: pad with sphere-grid topology,
+    then dilate(VALID).  The VALID dilation consumes exactly the
+    pad we added, so the output has the original shape -- no
+    explicit unpad needed when the SE radius equals the pad.
+
+    Without spherical-grid pad, a feature near the longitudinal seam
+    fails to spread across the seam.  With the composition, it does.
+    '''
+    from nitrix.geometry import sphere_grid_pad_2d
+
+    H, W = 8, 8
+    # Place a single hot pixel at (4, 0) -- on the longitudinal seam.
+    mask = jnp.zeros((H, W), dtype=jnp.float32)
+    mask = mask.at[4, 0].set(1.0)
+
+    # Plain dilate(SAME) with -inf padding: the hot pixel spreads to
+    # (3..5, 0..1) but NOT to (3..5, W-1) -- the seam doesn't wrap.
+    plain = dilate(mask, size=3, backend='jax')
+    assert plain[4, 0] == 1.0
+    assert plain[4, 1] == 1.0
+    assert plain[4, W - 1] == 0.0  # seam not crossed
+
+    # Spherical-grid composition: pad by SE radius = (3-1)/2 = 1,
+    # then dilate VALID.  The VALID dilation consumes the pad and
+    # restores the original spatial shape; no unpad needed.
+    se_radius = 1
+    padded = sphere_grid_pad_2d(mask, pad=se_radius)
+    out = dilate(padded, size=3, padding='VALID', backend='jax')
+    assert out.shape == mask.shape
+    assert out[4, 0] == 1.0
+    assert out[4, 1] == 1.0
+    assert out[4, W - 1] == 1.0  # seam crossed
+
+
+def test_dilate_spherical_grid_composition_with_explicit_unpad():
+    '''When SE radius is smaller than the pad (or you want to chain
+    multiple ops), use the explicit sphere_grid_unpad_2d to crop
+    back.
+    '''
+    from nitrix.geometry import sphere_grid_pad_2d, sphere_grid_unpad_2d
+
+    H, W = 8, 8
+    mask = jnp.zeros((H, W), dtype=jnp.float32)
+    mask = mask.at[4, 0].set(1.0)
+
+    # Pad by 3 but dilate with SE radius 1.  Padded shape (14, 14),
+    # dilated VALID (12, 12), unpad with pad=2 to get (8, 8).
+    padded = sphere_grid_pad_2d(mask, pad=3)
+    dilated = dilate(padded, size=3, padding='VALID', backend='jax')
+    # Dilated shape is (14 - 2, 14 - 2) = (12, 12); to recover (8, 8)
+    # we strip the leftover (12 - 8) / 2 = 2 on each side.
+    out = sphere_grid_unpad_2d(dilated, pad=2)
+    assert out.shape == mask.shape
+    # Same wrap behaviour as the size-matched case.
+    assert out[4, W - 1] == 1.0
+
+
 def test_dilate_gradient_routes_to_argmax():
     # In 1D, dilate at position i routes its upstream gradient to the
     # j ∈ {i-1, i, i+1} (with VALID/SAME padding) attaining the max.
