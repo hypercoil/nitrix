@@ -68,8 +68,11 @@ benchmark reports, and survive being plucked into the eventual
   pure.  LOBPCG differentiability story in
   [`design/lobpcg-implicit-vjp.md`](design/lobpcg-implicit-vjp.md).
 - [`design/lobpcg-implicit-vjp.md`](design/lobpcg-implicit-vjp.md)
-  -- math for the implicit-VJP TODO so reverse-mode AD through
-  ``lobpcg_standard`` can eventually work.
+  -- implicit-VJP wrapper around ``lobpcg_standard`` for dense
+  and flat-ELL operands: Hellmann-Feynman + F-matrix subspace-
+  projector approximation, near-degeneracy clamp, sparsity-
+  pattern-projected backward for ELL.  SectionedELL remains
+  forward-only.
 - [`design/permutohedral-g2.md`](design/permutohedral-g2.md) --
   the G2 tripwire outcome for ``permutohedral_lattice``: stub
   raising ``NotImplementedError`` at first GA per the SPEC's
