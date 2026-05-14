@@ -1,0 +1,243 @@
+# -*- coding: utf-8 -*-
+# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+# vi: set ft=python sts=4 ts=4 sw=4 et:
+"""
+Graph Laplacian variants and the shared sparse-matvec machinery.
+
+This module is intentionally pure "graph Laplacians": the
+modularity-related operators live in ``community.py`` because their
+*role* is community detection even though their algebraic shape
+overlaps with Laplacians.  The split keeps the ``laplacian`` import
+graph free of community-detection concerns.
+
+Three Laplacian variants exposed via ``laplacian(A, normalisation=...)``:
+
+- ``"combinatorial"``  -- ``L = D - A``.  Eigenvalues unbounded.
+- ``"symmetric"``      -- ``L = I - D^(-1/2) A D^(-1/2)``.  Symmetric,
+  PSD, eigenvalues in ``[0, 2]``; the canonical "normalised
+  Laplacian" used in Laplacian-eigenmap embeddings.
+- ``"random_walk"``    -- ``L = I - D^(-1) A``.  Not symmetric in
+  general but shares the spectrum of ``"symmetric"`` and is the
+  generator of the random walk on the graph.
+
+Multi-format support: ``degree_vector`` and ``laplacian_matvec``
+accept dense ``(..., n, n)``, ``ELL``, or ``SectionedELL`` inputs.
+The explicit ``laplacian(A)`` returns dense -- by definition,
+since the symmetric Laplacian's diagonal is generally non-zero and
+doesn't fit the ELL pattern of the input.  For *operator* use
+(eigenvalue solvers, etc.) call ``laplacian_matvec`` which never
+materialises the dense matrix.
+"""
+from __future__ import annotations
+
+from typing import Callable, Literal, Optional, Union
+
+import jax.numpy as jnp
+from jaxtyping import Array, Num
+
+from ..semiring import REAL, semiring_ell_matmul
+from ..sparse import ELL, SectionedELL, sectioned_semiring_ell_matmul
+
+
+__all__ = [
+    'laplacian',
+    'laplacian_matvec',
+    'degree_vector',
+]
+
+
+_Normalisation = Literal['combinatorial', 'symmetric', 'random_walk']
+_GraphInput = Union[Num[Array, '... n n'], ELL, SectionedELL]
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers (also used by community.py)
+# ---------------------------------------------------------------------------
+
+
+def _delete_diagonal(A: Num[Array, '... n n']) -> Num[Array, '... n n']:
+    n = A.shape[-1]
+    mask = ~jnp.eye(n, dtype=bool)
+    return A * mask
+
+
+def _safe_max(x: Num[Array, '...']) -> Num[Array, '...']:
+    '''``max`` clipped to at least 1, used to normalise unbounded logits.'''
+    return jnp.maximum(1.0, x.max(axis=(-1, -2), keepdims=True))
+
+
+def _is_sparse(A) -> bool:
+    return isinstance(A, (ELL, SectionedELL))
+
+
+def _ell_matvec(
+    A: Union[ELL, SectionedELL],
+    x: Num[Array, '... n k'],
+) -> Num[Array, '... n k']:
+    '''``A @ x`` for ELL / SectionedELL.
+
+    Dispatched once to keep callers simple.  Always uses the REAL
+    semiring; for other algebras the caller should use
+    ``semiring_ell_matmul`` / ``sectioned_semiring_ell_matmul``
+    directly.
+    '''
+    if isinstance(A, ELL):
+        return semiring_ell_matmul(
+            A.values, A.indices, x,
+            semiring=REAL, n_cols=A.n_cols, backend='jax',
+        )
+    return sectioned_semiring_ell_matmul(
+        A, x, semiring=REAL, backend='jax',
+    )
+
+
+# ---------------------------------------------------------------------------
+# Degree
+# ---------------------------------------------------------------------------
+
+
+def degree_vector(A: _GraphInput) -> Num[Array, '... n']:
+    '''Per-node degree (row sum).
+
+    For an ELL adjacency, this is ``A.values.sum(-1)`` (pad
+    positions contribute the identity ``0``).  For SectionedELL,
+    we sum each bucket and scatter back to the original row order.
+
+    For directed graphs (asymmetric ``A``) this returns the
+    out-degree; the in-degree is ``A.sum(-2)`` for dense ``A`` and
+    requires building a transpose ELL for sparse inputs.
+    '''
+    if isinstance(A, ELL):
+        return A.values.sum(axis=-1)
+    if isinstance(A, SectionedELL):
+        # Sum values within each section, scatter back to original rows.
+        out = jnp.zeros((A.n_rows,), dtype=A.sections[0].dtype)
+        for ell, row_idx in zip(A.sections, A.row_groups):
+            row_idx_jax = jnp.asarray(row_idx)
+            out = out.at[row_idx_jax].set(ell.values.sum(axis=-1))
+        return out
+    return A.sum(axis=-1)
+
+
+# ---------------------------------------------------------------------------
+# Dense Laplacian
+# ---------------------------------------------------------------------------
+
+
+def laplacian(
+    A: Num[Array, '... n n'],
+    *,
+    normalisation: _Normalisation = 'combinatorial',
+    eps: float = 1e-12,
+) -> Num[Array, '... n n']:
+    '''Graph Laplacian in one of three standard normalisations.
+
+    *Dense only*: the symmetric Laplacian has a non-zero diagonal
+    that doesn't fit the sparse pattern of the input ``A``.  For
+    sparse inputs use ``laplacian_matvec`` to apply the Laplacian
+    to a vector without materialising the matrix.
+
+    Parameters
+    ----------
+    A
+        Adjacency matrix block, ``(..., n, n)``.  Non-negative;
+        self-loops in ``A`` flow through (we don't subtract them).
+    normalisation
+        ``"combinatorial"`` / ``"symmetric"`` / ``"random_walk"``.
+    eps
+        Floor on degree before division (avoids ``0/0`` for
+        isolated nodes; those end up with a zero row in the
+        normalised variants).
+    '''
+    if normalisation not in ('combinatorial', 'symmetric', 'random_walk'):
+        raise ValueError(
+            f'normalisation={normalisation!r}; expected one of '
+            '"combinatorial", "symmetric", "random_walk".'
+        )
+
+    n = A.shape[-1]
+    deg = degree_vector(A)
+    eye = jnp.eye(n, dtype=A.dtype)
+    while eye.ndim < A.ndim:
+        eye = eye[None, ...]
+
+    if normalisation == 'combinatorial':
+        D = jnp.zeros_like(A).at[..., jnp.arange(n), jnp.arange(n)].set(deg)
+        return D - A
+
+    safe_deg = jnp.maximum(deg, eps)
+    if normalisation == 'symmetric':
+        inv_sqrt_d = (1.0 / jnp.sqrt(safe_deg))[..., :, None]
+        norm_A = A * inv_sqrt_d * inv_sqrt_d.swapaxes(-1, -2)
+        return eye - norm_A
+    # random_walk
+    inv_d = (1.0 / safe_deg)[..., :, None]
+    return eye - inv_d * A
+
+
+# ---------------------------------------------------------------------------
+# Sparse-friendly matvec (the path the eigenvalue solvers use)
+# ---------------------------------------------------------------------------
+
+
+def laplacian_matvec(
+    A: _GraphInput,
+    x: Num[Array, '... n k'],
+    *,
+    normalisation: _Normalisation = 'symmetric',
+    eps: float = 1e-12,
+) -> Num[Array, '... n k']:
+    '''Apply the Laplacian to a block of vectors, sparse-friendly.
+
+    Computes ``L @ x`` without ever materialising ``L``.  Accepts
+    dense, ELL, or SectionedELL ``A``; works for the three Laplacian
+    variants.  This is the operator passed to
+    ``jax.experimental.sparse.linalg.lobpcg_standard`` for top-k
+    eigenvalue decomposition on graphs too large for dense ``eigh``.
+
+    Parameters
+    ----------
+    A
+        Adjacency, ``(..., n, n)`` dense or ``ELL`` / ``SectionedELL``.
+    x
+        Block of vectors, ``(..., n, k)``.  For a single vector
+        pass ``x[..., None]`` and squeeze the result.
+    normalisation
+        Which Laplacian variant to apply.
+    eps
+        Floor on degree.
+
+    Returns
+    -------
+    ``L @ x``, shape ``(..., n, k)``.
+    '''
+    deg = degree_vector(A)
+    safe_deg = jnp.maximum(deg, eps)
+
+    if normalisation == 'combinatorial':
+        # L x = D x - A x = deg * x - A x.
+        if _is_sparse(A):
+            Ax = _ell_matvec(A, x)
+        else:
+            Ax = jnp.matmul(A, x)
+        return deg[..., None] * x - Ax
+    if normalisation == 'symmetric':
+        # L_sym x = x - D^(-1/2) A D^(-1/2) x
+        inv_sqrt_d = (1.0 / jnp.sqrt(safe_deg))[..., None]
+        scaled = inv_sqrt_d * x
+        if _is_sparse(A):
+            Ax = _ell_matvec(A, scaled)
+        else:
+            Ax = jnp.matmul(A, scaled)
+        return x - inv_sqrt_d * Ax
+    if normalisation == 'random_walk':
+        # L_rw x = x - D^(-1) A x
+        if _is_sparse(A):
+            Ax = _ell_matvec(A, x)
+        else:
+            Ax = jnp.matmul(A, x)
+        return x - Ax / safe_deg[..., None]
+    raise ValueError(
+        f'normalisation={normalisation!r}; expected one of '
+        '"combinatorial", "symmetric", "random_walk".'
+    )
