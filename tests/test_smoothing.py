@@ -313,6 +313,20 @@ def test_susan_emulator_with_median_prepass():
     assert abs(float(out_med[5, 5])) < abs(float(out_no_med[5, 5]))
 
 
+def test_permutohedral_lattice_raises_with_pointer():
+    '''Per SPEC_UPDATE §3.3 the symbol raises NotImplementedError
+    at first GA, with a clear pointer at ``bilateral_gaussian``
+    and the tripwire rationale.  See docs/design/permutohedral-g2.md.
+    '''
+    from nitrix.smoothing import permutohedral_lattice
+    with pytest.raises(NotImplementedError, match='bilateral_gaussian'):
+        permutohedral_lattice(
+            jnp.zeros((4, 1)),
+            jnp.zeros((4, 2)),
+            sigma_features=jnp.array([1.0, 1.0]),
+        )
+
+
 def test_susan_emulator_canonical_home_is_smoothing():
     '''SUSAN lives in ``nitrix.smoothing`` per SPEC_UPDATE §3.3.
 

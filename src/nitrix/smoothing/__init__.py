@@ -21,6 +21,7 @@ Three tiers per SPEC_UPDATE §3.3:
 from .gaussian import gaussian
 from .bilateral import bilateral_gaussian, brute_force_knn
 from .susan import susan_emulator, spatial_cube_neighbourhood
+from .permutohedral import permutohedral_lattice
 
 __all__ = [
     'gaussian',
@@ -28,4 +29,5 @@ __all__ = [
     'brute_force_knn',
     'susan_emulator',
     'spatial_cube_neighbourhood',
+    'permutohedral_lattice',
 ]
