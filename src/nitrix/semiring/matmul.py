@@ -124,6 +124,91 @@ def _semiring_matmul_pallas(
         return None
 
 
+def _forward_only_2d(
+    A: Array, B: Array, *, semiring: Semiring, backend: Backend,
+) -> Array:
+    '''Backend-dispatching 2-D forward pass without custom_vjp wrapping.
+
+    Called both from the user-facing ``semiring_matmul`` (when the
+    algebra is forward-only) and from the ``custom_vjp`` forward
+    function.  Operates on 2-D ``A: (m, k)`` and ``B: (k, n)``;
+    batching is handled upstream via ``jax.vmap``.
+    '''
+    resolved: ResolvedBackend = resolve_backend(backend)
+    if resolved == 'pallas-cuda':
+        try:
+            from .._kernels.cuda.semiring_matmul import (
+                PallasNotTileable,
+                semiring_matmul_pallas,
+            )
+        except Exception:
+            out = None
+        else:
+            try:
+                out = semiring_matmul_pallas(A, B, semiring=semiring)
+            except PallasNotTileable:
+                out = None
+        if out is None:
+            resolved = fallback(
+                function='semiring_matmul',
+                requested='pallas-cuda',
+                resolved='jax',
+                reason=(
+                    f'algebra={semiring.name!r}: Pallas Triton cannot '
+                    'tile the requested (M, K, N) for the chosen block '
+                    'sizes, or the kernel is unavailable on this host'
+                ),
+                shapes=(tuple(A.shape), tuple(B.shape)),
+                dtype=A.dtype,
+            )
+        else:
+            return out
+    return reference_semiring_matmul(A, B, semiring=semiring)
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(2, 3))
+def _diff_matmul_2d(
+    A: Array, B: Array, semiring: Semiring, backend: Backend,
+) -> Array:
+    '''Differentiable 2-D core of ``semiring_matmul``.
+
+    Routes the backward to the per-algebra ``semiring.matmul_vjp``.
+    ``semiring`` and ``backend`` are non-diff (carried through but
+    not differentiated); their hashable identity is part of JAX's
+    trace cache key.
+
+    Batching is composed via ``jax.vmap`` upstream; ``custom_vjp``
+    is vmap-compatible.
+    '''
+    return _forward_only_2d(A, B, semiring=semiring, backend=backend)
+
+
+def _diff_matmul_2d_fwd(A, B, semiring, backend):
+    # NB: ``custom_vjp`` ``fwd`` mirrors the primal's full signature.
+    # The nondiff args are *not* prepended here -- only ``bwd`` sees
+    # them at the front of its argument list.
+    out = _forward_only_2d(A, B, semiring=semiring, backend=backend)
+    # Stash all of (A, B, out) so per-algebra backwards (LOG, TROPICAL_*,
+    # EUCLIDEAN) that need the forward output have it.  REAL's backward
+    # ignores ``out``; the residual cost is one (m, n) array we already
+    # had to compute.
+    return out, (A, B, out)
+
+
+def _diff_matmul_2d_bwd(semiring, backend, residuals, g_out):
+    rule = semiring.matmul_vjp
+    if rule is None:
+        raise TypeError(
+            f'semiring={semiring.name!r} is forward-only; supply '
+            '``matmul_vjp`` to enable gradients (or wrap the call in '
+            'your own ``jax.custom_vjp``).'
+        )
+    return rule(residuals, g_out)
+
+
+_diff_matmul_2d.defvjp(_diff_matmul_2d_fwd, _diff_matmul_2d_bwd)
+
+
 def semiring_matmul(
     A: Num[Array, '... m k'],
     B: Num[Array, '... k n'],
@@ -162,27 +247,32 @@ def semiring_matmul(
     the real semiring should call ``jnp.matmul`` directly.  ``nitrix``'s
     advantage is the *other* algebras and the streaming kernel for
     log / tropical / euclidean.
+
+    Differentiability
+    -----------------
+    Built-in algebras carry a hand-derived ``jax.custom_vjp`` rule
+    (see ``nitrix.semiring._backward`` and SPEC_UPDATE §3.1).  When
+    ``semiring.matmul_vjp`` is non-``None`` the call routes through
+    that wrapper; ``jax.grad`` / ``jax.vjp`` / ``jax.jacrev`` therefore
+    return finite-difference-checked gradients without further
+    setup.  Algebras whose ``matmul_vjp`` is ``None`` (user-defined
+    forward-only) raise on backward with a clear message.
     '''
     _check_2d_compat(A.shape, B.shape, name='semiring_matmul')
 
-    resolved: ResolvedBackend = resolve_backend(backend)
-
-    if resolved == 'pallas-cuda':
-        out = _semiring_matmul_pallas(A, B, semiring=semiring)
-        if out is None:
-            resolved = fallback(
-                function='semiring_matmul',
-                requested='pallas-cuda',
-                resolved='jax',
-                reason=(
-                    f'algebra={semiring.name!r}: Pallas Triton cannot '
-                    'tile the requested (M, K, N) for the chosen block '
-                    'sizes, or the kernel is unavailable on this host'
-                ),
-                shapes=(tuple(A.shape), tuple(B.shape)),
-                dtype=A.dtype,
+    Ab, Bb, batch = _broadcast_batch(A, B)
+    if semiring.matmul_vjp is None:
+        def core(A_, B_):
+            return _forward_only_2d(
+                A_, B_, semiring=semiring, backend=backend,
             )
-        else:
-            return out
-
-    return _semiring_matmul_jax(A, B, semiring=semiring)
+    else:
+        # custom_vjp wrapper; vmap below composes with the registered
+        # forward / backward.  semiring / backend are passed positionally
+        # because ``nondiff_argnums`` is positional-only.
+        def core(A_, B_):
+            return _diff_matmul_2d(A_, B_, semiring, backend)
+    fn = core
+    for _ in range(len(batch)):
+        fn = jax.vmap(fn, in_axes=(0, 0))
+    return fn(Ab, Bb)

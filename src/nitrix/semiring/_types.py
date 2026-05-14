@@ -28,7 +28,9 @@ from typing import (
     Any,
     Callable,
     Generic,
+    Optional,
     Protocol,
+    Tuple,
     TypeVar,
     runtime_checkable,
 )
@@ -105,6 +107,17 @@ class Semigroup(Protocol):
     ) -> Num[Array, '*shape']: ...
 
 
+SemiringMatmulVJP = Callable[
+    [Tuple[Any, ...], Any],  # residuals, g_out
+    Tuple[Any, Any],         # grad_A, grad_B
+]
+
+SemiringELLMatmulVJP = Callable[
+    [Tuple[Any, ...], Any],  # residuals, g_out
+    Tuple[Any, Any],         # grad_values, grad_B  (indices is non-diff)
+]
+
+
 @dataclass(frozen=True)
 class Semiring(Generic[S]):
     '''The relaxed semiring: a frozen ``(monoid, binary_op, identity, name)`` tuple.
@@ -126,9 +139,19 @@ class Semiring(Generic[S]):
         caller is responsible for sentinel handling).
     name
         Short string used in fallback warnings and debug output.
-    strict
-        If ``True``, returns a ``StrictSemiring`` instead.  See
-        ``Semiring.create``.
+    matmul_vjp
+        Optional callable implementing the backward rule for
+        ``semiring_matmul`` under this algebra.  Receives a
+        ``(residuals, g_out)`` pair and returns ``(grad_A, grad_B)``.
+        Built-in algebras supply this; user-defined algebras default
+        to ``None``, in which case ``jax.grad`` over
+        ``semiring_matmul`` raises with a clear message.  Per
+        SPEC_UPDATE §3.1 differentiability vocabulary, the per-algebra
+        backwards live in ``nitrix.semiring._backward``.
+    ell_matmul_vjp
+        Same shape, for ``semiring_ell_matmul``.  ``indices`` is
+        non-differentiable; the rule returns gradients for the
+        ``values`` and ``B`` arguments only.
 
     Notes
     -----
@@ -147,6 +170,8 @@ class Semiring(Generic[S]):
     binary_op: Semigroup
     identity: Any = None
     name: str = 'semiring'
+    matmul_vjp: Optional[SemiringMatmulVJP] = None
+    ell_matmul_vjp: Optional[SemiringELLMatmulVJP] = None
 
     def as_strict(self) -> 'StrictSemiring[S]':
         '''Re-tag this semiring as a ``StrictSemiring``.
@@ -160,6 +185,8 @@ class Semiring(Generic[S]):
             binary_op=self.binary_op,
             identity=self.identity,
             name=self.name,
+            matmul_vjp=self.matmul_vjp,
+            ell_matmul_vjp=self.ell_matmul_vjp,
         )
 
     def __post_init__(self):
@@ -200,6 +227,8 @@ class StrictSemiring(Semiring[S]):
             binary_op=self.binary_op,
             identity=self.identity,
             name=self.name,
+            matmul_vjp=self.matmul_vjp,
+            ell_matmul_vjp=self.ell_matmul_vjp,
         )
 
 

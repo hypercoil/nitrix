@@ -31,6 +31,7 @@ from functools import partial
 from typing import Optional
 
 import jax
+import jax.numpy as jnp
 from jaxtyping import Array, Int, Num
 
 from .._internal.backend import (
@@ -42,6 +43,76 @@ from .._internal.backend import (
 from ._reference import reference_semiring_ell_matmul
 from ._types import Semiring
 from .algebras import REAL
+
+
+# ---------------------------------------------------------------------------
+# Differentiable 2-D core via jax.custom_vjp.  The wrapper mirrors the
+# matmul pattern: `indices`, `semiring`, `n_cols`, `backend` are non-diff
+# (we never want a gradient w.r.t. integer indices or static config).
+# Batching composes via ``jax.vmap`` upstream.
+# ---------------------------------------------------------------------------
+
+
+def _forward_only_ell_2d(values, indices, B, *, semiring, n_cols, backend):
+    resolved: ResolvedBackend = resolve_backend(backend)
+    if resolved == 'pallas-cuda':
+        out = _semiring_ell_matmul_pallas(
+            values, indices, B, semiring=semiring,
+        )
+        if out is None:
+            resolved = fallback(
+                function='semiring_ell_matmul',
+                requested='pallas-cuda',
+                resolved='jax',
+                reason=(
+                    f'algebra={semiring.name!r}: Pallas Triton kernel '
+                    'unavailable or cannot tile the requested shape'
+                ),
+                shapes=(tuple(values.shape), tuple(B.shape)),
+                dtype=B.dtype,
+            )
+        else:
+            return out
+    return reference_semiring_ell_matmul(
+        values, indices, B, semiring=semiring, n_cols=n_cols,
+    )
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(3, 4, 5))
+def _diff_ell_matmul_2d(values, indices, B, semiring, n_cols, backend):
+    # ``indices`` cannot live in ``nondiff_argnums`` -- JAX (>= 0.10)
+    # refuses to accept Tracers there.  It is carried as a regular
+    # array argument; the backward returns a zero gradient for it,
+    # which is consistent with the "indices are integer-valued and
+    # therefore non-differentiable" semantics.
+    return _forward_only_ell_2d(
+        values, indices, B,
+        semiring=semiring, n_cols=n_cols, backend=backend,
+    )
+
+
+def _diff_ell_matmul_2d_fwd(values, indices, B, semiring, n_cols, backend):
+    out = _forward_only_ell_2d(
+        values, indices, B,
+        semiring=semiring, n_cols=n_cols, backend=backend,
+    )
+    # Stash (values, indices, B, out) -- backward rules pick what they need.
+    return out, (values, indices, B, out)
+
+
+def _diff_ell_matmul_2d_bwd(semiring, n_cols, backend, residuals, g_out):
+    rule = semiring.ell_matmul_vjp
+    if rule is None:
+        raise TypeError(
+            f'semiring={semiring.name!r} is forward-only for ELL; '
+            'supply ``ell_matmul_vjp`` to enable gradients (or wrap the '
+            'call in your own ``jax.custom_vjp``).'
+        )
+    _values, indices, _B, _out = residuals
+    g_values, g_B = rule(residuals, g_out)
+    # Diff-arg order: (values, indices, B).  Indices is integer-valued;
+    # by convention we return a zero gradient of matching shape/dtype.
+    return g_values, jnp.zeros_like(indices), g_B
 
 
 __all__ = [
@@ -132,38 +203,23 @@ def semiring_ell_matmul(
     if n_cols is None:
         n_cols = int(B.shape[-2])
 
-    resolved: ResolvedBackend = resolve_backend(backend)
-
-    if resolved == 'pallas-cuda':
-        out = _semiring_ell_matmul_pallas(
-            values, indices, B, semiring=semiring,
-        )
-        if out is None:
-            resolved = fallback(
-                function='semiring_ell_matmul',
-                requested='pallas-cuda',
-                resolved='jax',
-                reason=(
-                    f'algebra={semiring.name!r}: Pallas Triton kernel '
-                    'unavailable or cannot tile the requested shape'
-                ),
-                shapes=(
-                    tuple(values.shape),
-                    tuple(indices.shape),
-                    tuple(B.shape),
-                ),
-                dtype=B.dtype,
-            )
-        else:
-            return out
-
-    # JAX path (batched over leading dims via vmap).
     batch_dims = len(values.shape) - 2
-    core = partial(
-        reference_semiring_ell_matmul,
-        semiring=semiring,
-        n_cols=n_cols,
-    )
+    if semiring.ell_matmul_vjp is None:
+        def core(v_, i_, B_):
+            return _forward_only_ell_2d(
+                v_, i_, B_,
+                semiring=semiring, n_cols=n_cols, backend=backend,
+            )
+    else:
+        def core(v_, i_, B_):
+            return _diff_ell_matmul_2d(
+                v_, i_, B_, semiring, n_cols, backend,
+            )
+    fn = core
     for _ in range(batch_dims):
-        core = jax.vmap(core, in_axes=(0, 0, 0))
-    return core(values, indices, B)
+        fn = jax.vmap(fn, in_axes=(0, 0, 0))
+    return fn(values, indices, B)
+
+
+# Bind the VJP definitions now that the forward helper is in scope.
+_diff_ell_matmul_2d.defvjp(_diff_ell_matmul_2d_fwd, _diff_ell_matmul_2d_bwd)

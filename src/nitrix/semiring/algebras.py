@@ -35,6 +35,20 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from ._backward import (
+    boolean_ell_matmul_vjp,
+    boolean_matmul_vjp,
+    euclidean_ell_matmul_vjp,
+    euclidean_matmul_vjp,
+    log_ell_matmul_vjp,
+    log_matmul_vjp,
+    real_ell_matmul_vjp,
+    real_matmul_vjp,
+    tropical_max_plus_ell_matmul_vjp,
+    tropical_max_plus_matmul_vjp,
+    tropical_min_plus_ell_matmul_vjp,
+    tropical_min_plus_matmul_vjp,
+)
 from ._types import Monoid, Semigroup, Semiring, StrictSemiring
 
 
@@ -241,6 +255,8 @@ REAL: StrictSemiring = StrictSemiring(
     binary_op=_ProductSemigroup(),
     identity=0.0,
     name='real',
+    matmul_vjp=real_matmul_vjp,
+    ell_matmul_vjp=real_ell_matmul_vjp,
 )
 
 LOG: StrictSemiring = StrictSemiring(
@@ -248,6 +264,8 @@ LOG: StrictSemiring = StrictSemiring(
     binary_op=_SumSemigroup(),
     identity=-jnp.inf,
     name='log',
+    matmul_vjp=log_matmul_vjp,
+    ell_matmul_vjp=log_ell_matmul_vjp,
 )
 
 TROPICAL_MAX_PLUS: StrictSemiring = StrictSemiring(
@@ -255,6 +273,8 @@ TROPICAL_MAX_PLUS: StrictSemiring = StrictSemiring(
     binary_op=_SumSemigroup(),
     identity=-jnp.inf,
     name='tropical_max_plus',
+    matmul_vjp=tropical_max_plus_matmul_vjp,
+    ell_matmul_vjp=tropical_max_plus_ell_matmul_vjp,
 )
 
 TROPICAL_MIN_PLUS: StrictSemiring = StrictSemiring(
@@ -262,6 +282,8 @@ TROPICAL_MIN_PLUS: StrictSemiring = StrictSemiring(
     binary_op=_SumSemigroup(),
     identity=jnp.inf,
     name='tropical_min_plus',
+    matmul_vjp=tropical_min_plus_matmul_vjp,
+    ell_matmul_vjp=tropical_min_plus_ell_matmul_vjp,
 )
 
 BOOLEAN: StrictSemiring = StrictSemiring(
@@ -269,6 +291,8 @@ BOOLEAN: StrictSemiring = StrictSemiring(
     binary_op=_AndSemigroup(),
     identity=False,
     name='boolean',
+    matmul_vjp=boolean_matmul_vjp,
+    ell_matmul_vjp=boolean_ell_matmul_vjp,
 )
 
 # EUCLIDEAN is the relaxed-Semiring test case: its `binary_op` is non-
@@ -282,6 +306,8 @@ EUCLIDEAN: Semiring = Semiring(
     binary_op=_SquaredDiffSemigroup(),
     identity=0.0,
     name='euclidean',
+    matmul_vjp=euclidean_matmul_vjp,
+    ell_matmul_vjp=euclidean_ell_matmul_vjp,
 )
 
 
