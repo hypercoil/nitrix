@@ -52,6 +52,30 @@ benchmark reports, and survive being plucked into the eventual
   distance-weighted adjacency), ``susan_emulator`` (composition with
   documented deltas from FSL SUSAN), plus the sectioned-ELL story
   for variable-degree adjacencies.
+- [`design/geometry.md`](design/geometry.md) -- ``grid``
+  (voxelmorph-style deformable-registration primitives written from
+  scratch), ``sphere`` with ``spherical_conv`` re-backed on
+  ``semiring_ell_matmul`` (third validation of the substrate bet),
+  ``coords`` (centre-of-mass, displacement, compactness penalty),
+  plus the "rename for clarity" pass that retired the legacy
+  ``cmass_*`` / ``diffuse`` / ``vec_int`` / ``rescale`` names.
+- [`design/graph.md`](design/graph.md) -- ``laplacian``,
+  ``community`` (with sparse-factored ``relaxed_modularity``),
+  ``connectopy`` (``eigh`` + ``lobpcg`` paths, multi-format
+  support, source-device preservation under the cuSolver
+  workaround).  Modularity primitives moved from ``laplacian`` to
+  ``community`` against the spec's letter to keep ``laplacian``
+  pure.  LOBPCG differentiability story in
+  [`design/lobpcg-implicit-vjp.md`](design/lobpcg-implicit-vjp.md).
+- [`design/lobpcg-implicit-vjp.md`](design/lobpcg-implicit-vjp.md)
+  -- math for the implicit-VJP TODO so reverse-mode AD through
+  ``lobpcg_standard`` can eventually work.
+- [`design/permutohedral-g2.md`](design/permutohedral-g2.md) --
+  the G2 tripwire outcome for ``permutohedral_lattice``: stub
+  raising ``NotImplementedError`` at first GA per the SPEC's
+  "no interim partial shipping" rule.  Documents the structural
+  obstacles (hash-table representation, neighbour lookups during
+  blur) and the path to a future implementation.
 - [`design/testing-strategy.md`](design/testing-strategy.md) -- how
   backend parity, identity propagation, numerical stability, finite-
   difference grad, and fallback observability are organised in the
