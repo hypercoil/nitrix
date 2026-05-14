@@ -110,6 +110,31 @@ def test_real_conv3d_matches_lax():
     np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
 
 
+def test_real_conv4d_matches_scipy():
+    '''4D conv -- the natural fMRI / 4D volume shape (D, H, W, T).
+
+    cuDNN does *not* support 4D conv (it caps at 3D), so the reference
+    here is ``scipy.ndimage.correlate``, which is generic over rank.
+    Single-channel for simplicity (multi-channel n-D coverage is the
+    business of the lower-rank tests + the matmul-reduction layer
+    which is rank-agnostic).
+    '''
+    import scipy.ndimage as ndi
+    x_sc = jax.random.normal(jax.random.key(50), (4, 4, 4, 4))
+    k_sc = jax.random.normal(jax.random.key(51), (3, 3, 3, 3))
+    # Promote to the channel-last layout semiring_conv expects.
+    x = x_sc[..., None]                 # (D, H, W, T, 1)
+    k = k_sc[..., None, None]           # (3, 3, 3, 3, 1, 1)
+    got = semiring_conv(
+        x, k, semiring=REAL, padding='SAME', backend='jax',
+    )[..., 0]
+    ref = ndi.correlate(
+        np.asarray(x_sc), np.asarray(k_sc),
+        mode='constant', cval=0.0,
+    )
+    np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
+
+
 def test_real_conv2d_strided():
     x = jax.random.normal(jax.random.key(6), (1, 10, 10, 2))
     k = jax.random.normal(jax.random.key(7), (3, 3, 2, 4))
