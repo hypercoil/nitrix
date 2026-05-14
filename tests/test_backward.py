@@ -63,17 +63,19 @@ def _ell_loss(values, B, indices, semiring, n_cols, backend='jax'):
 def _finite_diff(fn, x, eps=1e-5):
     '''Symmetric finite-difference gradient.
 
-    Returns the same-shape gradient of ``fn`` w.r.t. ``x``, evaluated
-    numerically.  Loops over flat indices; only used in tests, so the
-    O(N) eval cost is fine.
+    ``fn`` is jit-compiled once before the per-element loop so the
+    2*N forward calls hit the JIT cache instead of retracing.  This
+    is the difference between ~5 s and ~0.3 s on the typical (4, 4)
+    test arrays we use.
     '''
+    jit_fn = jax.jit(fn)
     x_flat = x.reshape(-1)
     out = np.zeros_like(np.asarray(x_flat, dtype=np.float64))
     for i in range(x_flat.size):
         e = jnp.zeros_like(x_flat).at[i].set(eps)
         e = e.reshape(x.shape)
-        f_plus = float(fn(x + e))
-        f_minus = float(fn(x - e))
+        f_plus = float(jit_fn(x + e))
+        f_minus = float(jit_fn(x - e))
         out[i] = (f_plus - f_minus) / (2 * eps)
     return out.reshape(x.shape)
 
