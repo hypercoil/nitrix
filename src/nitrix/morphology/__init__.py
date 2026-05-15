@@ -42,6 +42,7 @@ from ._mm import (
     open,
 )
 from ._median import median_filter
+from .pooling import max_pool_with_indices_nd, max_unpool_nd
 
 __all__ = [
     'dilate',
@@ -50,6 +51,8 @@ __all__ = [
     'close',
     'distance_transform',
     'median_filter',
+    'max_pool_with_indices_nd',
+    'max_unpool_nd',
 ]
 
 # ``susan_emulator`` lives in ``nitrix.smoothing`` per SPEC_UPDATE §3.3

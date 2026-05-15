@@ -53,6 +53,9 @@ __all__ = [
     'icosphere',
     'mesh_k_ring_adjacency',
     'mesh_cotangent_laplacian',
+    'mesh_pool_max',
+    'mesh_unpool_max',
+    'mesh_bary_upsample',
 ]
 
 
@@ -447,4 +450,127 @@ def mesh_cotangent_laplacian(
         indices=jnp.asarray(indices_np),
         n_cols=n,
         identity=jnp.asarray(0.0, dtype=out_dtype).item(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cross-level convenience wrappers (compose existing primitives)
+# ---------------------------------------------------------------------------
+#
+# These are documented sugar over ``semiring_ell_matmul``: the math
+# is already in the substrate; these wrappers exist for
+# discoverability.  Topofit-style mesh hierarchies expose exactly
+# three cross-level operations (max-pool, max-unpool, barycentric
+# upsample); we ship them as named helpers so the consumer doesn't
+# have to know the substrate idiom by heart.
+
+
+def mesh_pool_max(
+    cross_level_adjacency,
+    fine_features: Float[Array, '... n_fine d'],
+):
+    '''Max-pool fine-level features to a coarse level via an ELL adjacency.
+
+    For each coarse vertex ``i``, returns the max of fine-vertex
+    features at the positions ``cross_level_adjacency.indices[i, :]``.
+    Equivalent to a ``semiring_ell_matmul`` under
+    ``TROPICAL_MAX_PLUS`` with the ELL's ``values`` ignored (the
+    max-plus reduction degenerates to ``max`` when all values are 0).
+
+    Used in mesh hierarchies (e.g. icosphere-cascaded networks) for
+    coarse-to-fine downsampling: ``cross_level_adjacency`` is the
+    ELL whose row ``i`` (coarse vertex) lists the fine vertices
+    that map to it under the subdivision rule.
+
+    Parameters
+    ----------
+    cross_level_adjacency
+        ``ELL`` of shape ``(n_coarse, n_fine)``; row ``i`` indexes
+        the fine vertices belonging to coarse vertex ``i``.  Stored
+        ``values`` are ignored (replaced internally by zeros for
+        the max-plus identity).
+    fine_features
+        ``(..., n_fine, d)`` per-vertex fine-level features.
+
+    Returns
+    -------
+    ``(..., n_coarse, d)`` per-vertex coarse-level features.
+    '''
+    from ..semiring import TROPICAL_MAX_PLUS, semiring_ell_matmul
+
+    zeros = jnp.zeros_like(cross_level_adjacency.values)
+    return semiring_ell_matmul(
+        zeros, cross_level_adjacency.indices, fine_features,
+        semiring=TROPICAL_MAX_PLUS,
+        n_cols=cross_level_adjacency.n_cols,
+        backend='jax',
+    )
+
+
+def mesh_unpool_max(
+    cross_level_adjacency,
+    coarse_features: Float[Array, '... n_coarse d'],
+):
+    '''Max-unpool coarse-level features back to a fine level.
+
+    Symmetric to ``mesh_pool_max``: the cross-level adjacency is
+    interpreted as fine-to-coarse (each row is a fine vertex,
+    listing the coarse vertex / vertices it maps from), and the
+    max-plus reduction produces a per-fine-vertex output.  In
+    practice the cross-level adjacency is usually single-source
+    per fine vertex (each fine vertex has one parent coarse
+    vertex), in which case "max" reduces to the trivial gather.
+
+    Parameters / Returns mirror ``mesh_pool_max`` with the levels
+    swapped.
+    '''
+    from ..semiring import TROPICAL_MAX_PLUS, semiring_ell_matmul
+
+    zeros = jnp.zeros_like(cross_level_adjacency.values)
+    return semiring_ell_matmul(
+        zeros, cross_level_adjacency.indices, coarse_features,
+        semiring=TROPICAL_MAX_PLUS,
+        n_cols=cross_level_adjacency.n_cols,
+        backend='jax',
+    )
+
+
+def mesh_bary_upsample(
+    bary_ell,
+    coarse_coords: Float[Array, '... n_coarse d'],
+):
+    '''Barycentric upsample from coarse to fine.
+
+    For each fine vertex ``i``::
+
+        out[i, :] = sum_k bary_ell.values[i, k]
+                    * coarse_coords[bary_ell.indices[i, k], :]
+
+    Standard ``semiring_ell_matmul`` under ``REAL``; provided as a
+    named wrapper so mesh-hierarchy code reads at the right level
+    of abstraction.
+
+    The ``bary_ell`` is the "barycentric upsampler" structure:
+    row ``i`` (fine vertex) lists the ``k`` coarse vertices that
+    define the barycentric coordinates of ``i``, with
+    ``bary_ell.values[i, :]`` storing the per-source weight.
+
+    Parameters
+    ----------
+    bary_ell
+        ELL whose row ``i`` (fine vertex) carries the barycentric
+        weights and source indices into the coarse level.
+    coarse_coords
+        ``(..., n_coarse, d)`` per-vertex coarse-level coordinates
+        (or any per-vertex feature).
+
+    Returns
+    -------
+    ``(..., n_fine, d)`` upsampled values.
+    '''
+    from ..semiring import REAL, semiring_ell_matmul
+
+    return semiring_ell_matmul(
+        bary_ell.values, bary_ell.indices, coarse_coords,
+        semiring=REAL, n_cols=bary_ell.n_cols, backend='jax',
     )

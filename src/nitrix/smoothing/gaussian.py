@@ -201,6 +201,16 @@ def gaussian(
         kernel is ``2 * int(truncate * sigma + 0.5) + 1`` taps
         (scipy convention).  Default ``4``.  Ignored if
         ``kernel_size`` is given.
+
+        **Framework cross-references**: ``truncate=4`` matches
+        ``scipy.ndimage.gaussian_filter`` (the scientific-computing
+        default).  The **neurite / SynthMorph / SynthSeg /
+        FreeSurfer-augmentation lineage** uses ``windowsize =
+        round(sigma * 3) * 2 + 1`` taps, which corresponds to
+        ``truncate=3``.  Pass ``truncate=3`` when porting any model
+        from that lineage; otherwise the kernel bandwidth differs
+        by 1 tap per axis at typical sigmas and the boundary
+        cells silently disagree.
     kernel_size
         Explicit per-axis kernel size override.  ``None`` (default)
         uses the ``truncate * sigma`` heuristic.  ``int`` --
@@ -220,6 +230,15 @@ def gaussian(
     mode
         Boundary handling: ``"reflect"`` (default), ``"constant"``
         (zero-pad), or ``"edge"`` (replicate boundary).
+
+        **Framework cross-references**: ``mode='reflect'`` matches
+        ``scipy.ndimage.gaussian_filter``.  Use ``mode='constant'``
+        to match **TF Conv2D / Conv3D ``padding='SAME'``** semantics
+        (zero-pad at the boundary).  Without this override,
+        neurite-lineage models silently disagree at the boundary
+        cells -- typically by ~0.7 logit-space units per pixel,
+        which becomes ~6x magnitude differences after a downstream
+        ``exp()`` (e.g., ExVivoNorm's multiplicative bias field).
     spatial_rank
         Explicit number of trailing dims to treat as spatial.  If
         ``None`` (default), inferred from ``sigma`` (if sequence)

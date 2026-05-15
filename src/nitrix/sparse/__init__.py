@@ -30,8 +30,11 @@ from .grid import (
 from .mesh import (
     Mesh,
     icosphere,
+    mesh_bary_upsample,
     mesh_cotangent_laplacian,
     mesh_k_ring_adjacency,
+    mesh_pool_max,
+    mesh_unpool_max,
 )
 
 __all__ = [
@@ -51,6 +54,9 @@ __all__ = [
     # mesh
     'Mesh',
     'icosphere',
+    'mesh_bary_upsample',
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
+    'mesh_pool_max',
+    'mesh_unpool_max',
 ]

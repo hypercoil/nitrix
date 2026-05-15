@@ -36,6 +36,7 @@ from .matmul import (
 )
 from ._reference import reference_semiring_ell_matmul
 from .ell import semiring_ell_matmul
+from .ell_edge import semiring_ell_edge_aggregate
 from .conv import (
     semiring_conv,
     reference_semiring_conv,
@@ -57,6 +58,7 @@ __all__ = [
     'reference_semiring_matmul',
     'semiring_ell_matmul',
     'reference_semiring_ell_matmul',
+    'semiring_ell_edge_aggregate',
     'semiring_conv',
     'reference_semiring_conv',
 ]
