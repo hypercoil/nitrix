@@ -98,6 +98,16 @@ benchmark reports, and survive being plucked into the eventual
   via recursive subdivision; ``mesh_k_ring_adjacency`` via BFS;
   ``mesh_cotangent_laplacian`` for surface processing).  All return
   ``ELL`` for direct composition with the substrate.
+- [`design/mesh-graph-conv.md`](design/mesh-graph-conv.md) --
+  ``semiring_ell_edge_aggregate`` (the edge-functional extension
+  of ``semiring_ell_matmul`` that covers GCN / GAT / EdgeConv /
+  MoNet / ChebNet with one ``edge_fn`` callable + a semiring),
+  ``morphology.pooling`` (``max_pool_with_indices_nd`` /
+  ``max_unpool_nd`` for encoder-decoder pipelines, with the
+  argmax-agreement parity caveat documented), and the
+  ``sparse.mesh`` convenience wrappers (``mesh_pool_max`` /
+  ``mesh_unpool_max`` / ``mesh_bary_upsample``).  Closes
+  FA2–FA5 from ``NITRIX_FEEDBACK_ILEX.md``.
 - [`design/backward-kernels.md`](design/backward-kernels.md) -- the
   per-algebra ``jax.custom_vjp`` story, the per-algebra differentiability
   vocabulary, and the G1 finite-difference gate.

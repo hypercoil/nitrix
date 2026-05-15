@@ -22,11 +22,15 @@ jax.config.update('jax_enable_x64', True)
 
 from nitrix.semiring import REAL, semiring_ell_matmul
 from nitrix.sparse import (
+    ELL,
     grid_identity,
     grid_laplacian,
     icosphere,
+    mesh_bary_upsample,
     mesh_cotangent_laplacian,
     mesh_k_ring_adjacency,
+    mesh_pool_max,
+    mesh_unpool_max,
     regular_grid_stencil,
 )
 
@@ -263,4 +267,106 @@ def test_mesh_cotangent_differentiable():
     x = jax.random.normal(jax.random.key(0), (m.n_vertices,), dtype=L.values.dtype)
     g = jax.grad(loss)(x)
     assert g.shape == x.shape
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# Mesh convenience wrappers (mesh_pool_max / mesh_unpool_max / mesh_bary_upsample)
+# ---------------------------------------------------------------------------
+
+
+def test_mesh_pool_max_takes_window_max():
+    '''mesh_pool_max applied with a cross-level ELL returns the
+    per-coarse-vertex max of the named fine-vertex features.
+    '''
+    rng = np.random.default_rng(0)
+    n_coarse, n_fine, win = 5, 20, 4
+    # Each coarse vertex maps to win consecutive fine vertices.
+    indices = jnp.asarray(np.stack([
+        np.arange(win) + i * win for i in range(n_coarse)
+    ]).astype(np.int32))
+    values = jnp.zeros((n_coarse, win))  # ignored by mesh_pool_max
+    cross_ell = ELL(
+        values=values, indices=indices, n_cols=n_fine, identity=-jnp.inf,
+    )
+
+    fine_features = jnp.asarray(rng.standard_normal((n_fine, 3)))
+    pooled = mesh_pool_max(cross_ell, fine_features)
+    assert pooled.shape == (n_coarse, 3)
+    # Verify each row equals the max of its 4 fine sources.
+    for i in range(n_coarse):
+        ref = jnp.max(fine_features[i * win:(i + 1) * win], axis=0)
+        np.testing.assert_allclose(pooled[i], ref, atol=1e-13)
+
+
+def test_mesh_bary_upsample_is_weighted_sum():
+    '''mesh_bary_upsample computes the weighted sum over coarse
+    sources, matching a hand-roll reference.
+    '''
+    rng = np.random.default_rng(0)
+    n_coarse, n_fine, k = 8, 20, 3
+    indices = jnp.asarray(
+        rng.integers(0, n_coarse, (n_fine, k)).astype(np.int32),
+    )
+    # Random barycentric weights; not strictly normalised but the
+    # primitive is a generic weighted-sum so unnormalised is fine.
+    weights = jnp.asarray(rng.standard_normal((n_fine, k)))
+    bary_ell = ELL(
+        values=weights, indices=indices, n_cols=n_coarse, identity=0.0,
+    )
+
+    coarse_coords = jnp.asarray(rng.standard_normal((n_coarse, 3)))
+    up = mesh_bary_upsample(bary_ell, coarse_coords)
+    assert up.shape == (n_fine, 3)
+
+    # Hand-roll
+    ref = jnp.zeros((n_fine, 3))
+    for i in range(n_fine):
+        for p in range(k):
+            j = int(indices[i, p])
+            w = float(weights[i, p])
+            ref = ref.at[i].add(w * coarse_coords[j])
+    np.testing.assert_allclose(up, ref, atol=1e-13)
+
+
+def test_mesh_unpool_max_inverts_pool_at_single_source():
+    '''When each fine vertex has exactly one coarse source, the
+    "max" reduction trivially gathers; unpool returns the coarse
+    feature at each fine vertex.
+    '''
+    rng = np.random.default_rng(0)
+    n_coarse, n_fine = 5, 15
+    # Each fine vertex gets a single source coarse vertex.
+    source = jnp.asarray(rng.integers(0, n_coarse, (n_fine,)).astype(np.int32))
+    indices = source[:, None]  # (n_fine, 1)
+    values = jnp.zeros((n_fine, 1))
+    bary_ell = ELL(
+        values=values, indices=indices,
+        n_cols=n_coarse, identity=-jnp.inf,
+    )
+
+    coarse_features = jnp.asarray(rng.standard_normal((n_coarse, 4)))
+    unp = mesh_unpool_max(bary_ell, coarse_features)
+    assert unp.shape == (n_fine, 4)
+    # Each fine vertex's output equals its source's coarse feature.
+    for i in range(n_fine):
+        np.testing.assert_allclose(unp[i], coarse_features[source[i]], atol=1e-13)
+
+
+def test_mesh_bary_upsample_differentiable():
+    '''Gradient through the weighted-sum upsampler flows back to coords.'''
+    rng = np.random.default_rng(0)
+    n_coarse, n_fine, k = 5, 12, 3
+    indices = jnp.asarray(
+        rng.integers(0, n_coarse, (n_fine, k)).astype(np.int32),
+    )
+    weights = jnp.asarray(rng.standard_normal((n_fine, k)))
+    bary_ell = ELL(
+        values=weights, indices=indices, n_cols=n_coarse, identity=0.0,
+    )
+    def loss(coords):
+        return jnp.sum(mesh_bary_upsample(bary_ell, coords) ** 2)
+    coords = jnp.asarray(rng.standard_normal((n_coarse, 3)))
+    g = jax.grad(loss)(coords)
+    assert g.shape == coords.shape
     assert bool(jnp.all(jnp.isfinite(g)))
