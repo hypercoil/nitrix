@@ -49,13 +49,17 @@ from .ell import ELL
 
 
 __all__ = [
+    'IcosphereHierarchy',
     'Mesh',
     'icosphere',
-    'mesh_k_ring_adjacency',
+    'icosphere_bary_upsampler',
+    'icosphere_cross_level_adjacency',
+    'icosphere_hierarchy',
+    'mesh_bary_upsample',
     'mesh_cotangent_laplacian',
+    'mesh_k_ring_adjacency',
     'mesh_pool_max',
     'mesh_unpool_max',
-    'mesh_bary_upsample',
 ]
 
 
@@ -115,16 +119,28 @@ def _icosahedron() -> Tuple[np.ndarray, np.ndarray]:
 def _subdivide(
     verts: np.ndarray,
     faces: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     '''One step of icosphere subdivision.
 
     Each triangle is split into 4 smaller triangles by inserting
     midpoints on each edge and projecting back to the unit sphere.
     Vertex / face counts grow by 4x faces and approximately 4x
     vertices (the exact growth is ``new_v = old_v + new_edges``).
+
+    Returns
+    -------
+    ``(new_verts, new_faces, parents)`` where ``parents`` is an
+    ``(n_new_verts, 2)`` ``int64`` array giving the parentage of
+    each new vertex relative to the **coarse** vertex set:
+
+    - For a coarse-original vertex ``v`` (preserved in place at the
+      same index), ``parents[v] = (v, v)``.
+    - For an edge-midpoint vertex with parent coarse edge
+      ``(a, b)`` (sorted ``a < b``), ``parents[v] = (a, b)``.
     '''
     midpoint_cache: dict[Tuple[int, int], int] = {}
     new_verts = verts.tolist()
+    parents: list[Tuple[int, int]] = [(v, v) for v in range(len(verts))]
 
     def get_midpoint(i: int, j: int) -> int:
         key = (min(i, j), max(i, j))
@@ -135,6 +151,7 @@ def _subdivide(
         idx = len(new_verts)
         new_verts.append(mid.tolist())
         midpoint_cache[key] = idx
+        parents.append(key)
         return idx
 
     new_faces = []
@@ -147,7 +164,11 @@ def _subdivide(
         new_faces.append([b, bc, ab])
         new_faces.append([c, ca, bc])
         new_faces.append([ab, bc, ca])
-    return np.asarray(new_verts, dtype=np.float64), np.asarray(new_faces, dtype=np.int64)
+    return (
+        np.asarray(new_verts, dtype=np.float64),
+        np.asarray(new_faces, dtype=np.int64),
+        np.asarray(parents, dtype=np.int64),
+    )
 
 
 def icosphere(n_iterations: int = 0) -> Mesh:
@@ -169,10 +190,254 @@ def icosphere(n_iterations: int = 0) -> Mesh:
         raise ValueError(f'n_iterations must be >= 0; got {n_iterations}.')
     verts, faces = _icosahedron()
     for _ in range(n_iterations):
-        verts, faces = _subdivide(verts, faces)
+        verts, faces, _ = _subdivide(verts, faces)
     return Mesh(
         vertices=jnp.asarray(verts, dtype=jnp.float32),
         faces=jnp.asarray(faces, dtype=jnp.int32),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Icosphere hierarchy (parent-child bookkeeping across subdivision levels)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IcosphereHierarchy:
+    '''Sequence of icosphere meshes at subdivision levels ``0..max_level``.
+
+    Built by ``icosphere_hierarchy(max_level)``.  Holds the per-level
+    meshes plus the parent-child bookkeeping needed by
+    ``icosphere_cross_level_adjacency`` and ``icosphere_bary_upsampler``
+    to construct the cross-level ELLs in O(n_vertices) without
+    re-running subdivision.
+
+    Attributes
+    ----------
+    meshes
+        Tuple of length ``max_level + 1``: ``meshes[L]`` is the
+        icosphere at subdivision level ``L``.  ``meshes[0]`` is the
+        base icosahedron (12 vertices, 20 faces).
+    parents
+        Tuple of length ``max_level + 1``.  ``parents[0] is None``
+        (the base level has no parent).  For ``L >= 1``,
+        ``parents[L]`` is an ``(n_vertices_at_L, 2)`` ``int64`` array
+        giving the parentage of each fine vertex in level ``L``
+        relative to the coarse vertex set at level ``L - 1``:
+
+        - For a fine vertex that is a coarse-original (preserved in
+          place at the same index), ``parents[L][v] == (v, v)``.
+        - For a fine vertex that is a midpoint of the coarse edge
+          ``(a, b)`` (sorted ``a < b``), ``parents[L][v] == (a, b)``.
+
+    Notes
+    -----
+    The hierarchy is host-side (NumPy parent tables + JAX-array
+    meshes).  Cross-level ELLs returned from the constructors are
+    plain JAX, so the downstream matmul / pool / upsample paths
+    stay GPU-native.
+    '''
+
+    meshes: tuple
+    parents: tuple
+
+    @property
+    def max_level(self) -> int:
+        return len(self.meshes) - 1
+
+    def __len__(self) -> int:
+        return len(self.meshes)
+
+
+def icosphere_hierarchy(max_level: int) -> IcosphereHierarchy:
+    '''Construct a sequence of icospheres from level 0 to ``max_level``.
+
+    Parameters
+    ----------
+    max_level
+        Inclusive upper bound on the subdivision level.  The
+        hierarchy contains ``max_level + 1`` meshes,
+        ``[ico_0, ico_1, ..., ico_max_level]``.  ``max_level = 0``
+        returns the base icosahedron alone.
+
+    Returns
+    -------
+    ``IcosphereHierarchy`` with ``meshes`` and ``parents`` tables
+    populated (``parents[0] is None``).
+
+    Notes
+    -----
+    Subdivision is deterministic (the midpoint cache assigns indices
+    by a fixed traversal order over faces), so the cross-level
+    helpers below depend only on the stored parent tables.
+    '''
+    if max_level < 0:
+        raise ValueError(f'max_level must be >= 0; got {max_level}.')
+
+    meshes: list[Mesh] = []
+    parents_per_level: list = [None]
+
+    verts, faces = _icosahedron()
+    meshes.append(Mesh(
+        vertices=jnp.asarray(verts, dtype=jnp.float32),
+        faces=jnp.asarray(faces, dtype=jnp.int32),
+    ))
+    for _ in range(max_level):
+        verts, faces, parents = _subdivide(verts, faces)
+        meshes.append(Mesh(
+            vertices=jnp.asarray(verts, dtype=jnp.float32),
+            faces=jnp.asarray(faces, dtype=jnp.int32),
+        ))
+        parents_per_level.append(parents)
+
+    return IcosphereHierarchy(
+        meshes=tuple(meshes),
+        parents=tuple(parents_per_level),
+    )
+
+
+def _validate_consecutive(hier: IcosphereHierarchy, coarse: int, fine: int) -> None:
+    if fine != coarse + 1:
+        raise ValueError(
+            f'cross-level helpers require consecutive levels; got '
+            f'coarse={coarse}, fine={fine}.  For multi-level pooling, '
+            f'compose mesh_pool_max / mesh_bary_upsample calls.'
+        )
+    if coarse < 0 or fine > hier.max_level:
+        raise ValueError(
+            f'level pair ({coarse}, {fine}) out of range for hierarchy '
+            f'with max_level={hier.max_level}.'
+        )
+
+
+def icosphere_cross_level_adjacency(
+    hierarchy: IcosphereHierarchy,
+    coarse_level: int,
+    fine_level: int,
+) -> ELL:
+    '''Coarse-to-fine adjacency ELL for icosphere pooling.
+
+    Row ``i`` (coarse vertex at level ``coarse_level``) carries the
+    fine vertices at level ``fine_level`` that descend from it under
+    the subdivision rule:
+
+    - The coarse-original fine vertex (same index ``i``), and
+    - Every fine vertex that is a midpoint of an edge ``(i, j)``
+      incident to ``i`` in the coarse mesh.
+
+    The stored ``values`` are zeros (the TROPICAL_MAX_PLUS identity
+    is in ``.identity``), so this ELL feeds directly into
+    ``mesh_pool_max(adj, fine_features)``.
+
+    Parameters
+    ----------
+    hierarchy
+        ``IcosphereHierarchy`` produced by ``icosphere_hierarchy``.
+    coarse_level, fine_level
+        Must be consecutive: ``fine_level == coarse_level + 1``.
+        Multi-level pooling is composed by the consumer.
+
+    Returns
+    -------
+    ``ELL`` of shape ``(n_coarse, n_fine)`` with
+    ``k_max = 1 + max_coarse_degree`` (6 for the base icosahedron,
+    7 for every subdivided level).
+    '''
+    _validate_consecutive(hierarchy, coarse_level, fine_level)
+    n_coarse = hierarchy.meshes[coarse_level].n_vertices
+    n_fine = hierarchy.meshes[fine_level].n_vertices
+    parents = hierarchy.parents[fine_level]  # (n_fine, 2)
+
+    # For each coarse vertex i, accumulate the fine vertices whose
+    # parent pair contains i.
+    rows: list[list[int]] = [[] for _ in range(n_coarse)]
+    for v_fine in range(n_fine):
+        a, b = int(parents[v_fine, 0]), int(parents[v_fine, 1])
+        if a == b:
+            # Coarse-original fine vertex.
+            rows[a].append(v_fine)
+        else:
+            rows[a].append(v_fine)
+            rows[b].append(v_fine)
+
+    k_max = max((len(r) for r in rows), default=1)
+    k_max = max(k_max, 1)
+
+    indices_np = np.zeros((n_coarse, k_max), dtype=np.int32)
+    values_np = np.zeros((n_coarse, k_max), dtype=np.float32)
+    for i, row in enumerate(rows):
+        if not row:
+            indices_np[i, :] = i
+            continue
+        indices_np[i, : len(row)] = row
+        if len(row) < k_max:
+            indices_np[i, len(row):] = row[0]
+
+    return ELL(
+        values=jnp.asarray(values_np),
+        indices=jnp.asarray(indices_np),
+        n_cols=n_fine,
+        identity=-float(jnp.inf),
+    )
+
+
+def icosphere_bary_upsampler(
+    hierarchy: IcosphereHierarchy,
+    coarse_level: int,
+    fine_level: int,
+) -> ELL:
+    '''Fine-from-coarse barycentric upsampler ELL.
+
+    Row ``i`` (fine vertex at level ``fine_level``) carries the
+    coarse-vertex sources at level ``coarse_level`` and the
+    barycentric weights:
+
+    - Coarse-original fine vertex ``i``: one source (``i`` itself)
+      with weight ``1`` (and a padded second slot, weight ``0``).
+    - Midpoint fine vertex of coarse edge ``(a, b)``: two sources
+      (``a``, ``b``) with weights ``(0.5, 0.5)``.
+
+    Feeds ``mesh_bary_upsample(bary_ell, coarse_features)`` to
+    interpolate per-vertex coordinates or features from the coarse
+    level to the fine level.
+
+    Parameters
+    ----------
+    hierarchy
+        ``IcosphereHierarchy`` produced by ``icosphere_hierarchy``.
+    coarse_level, fine_level
+        Must be consecutive: ``fine_level == coarse_level + 1``.
+
+    Returns
+    -------
+    ``ELL`` of shape ``(n_fine, n_coarse)`` with ``k_max = 2``.
+    '''
+    _validate_consecutive(hierarchy, coarse_level, fine_level)
+    n_coarse = hierarchy.meshes[coarse_level].n_vertices
+    n_fine = hierarchy.meshes[fine_level].n_vertices
+    parents = hierarchy.parents[fine_level]  # (n_fine, 2)
+
+    indices_np = np.zeros((n_fine, 2), dtype=np.int32)
+    values_np = np.zeros((n_fine, 2), dtype=np.float32)
+    for v_fine in range(n_fine):
+        a, b = int(parents[v_fine, 0]), int(parents[v_fine, 1])
+        if a == b:
+            # Coincident with coarse vertex; weight 1 on a, pad slot.
+            indices_np[v_fine, 0] = a
+            indices_np[v_fine, 1] = a
+            values_np[v_fine, 0] = 1.0
+            values_np[v_fine, 1] = 0.0
+        else:
+            indices_np[v_fine, 0] = a
+            indices_np[v_fine, 1] = b
+            values_np[v_fine, 0] = 0.5
+            values_np[v_fine, 1] = 0.5
+
+    return ELL(
+        values=jnp.asarray(values_np),
+        indices=jnp.asarray(indices_np),
+        n_cols=n_coarse,
+        identity=0.0,
     )
 
 

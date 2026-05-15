@@ -28,8 +28,12 @@ from .grid import (
     regular_grid_stencil,
 )
 from .mesh import (
+    IcosphereHierarchy,
     Mesh,
     icosphere,
+    icosphere_bary_upsampler,
+    icosphere_cross_level_adjacency,
+    icosphere_hierarchy,
     mesh_bary_upsample,
     mesh_cotangent_laplacian,
     mesh_k_ring_adjacency,
@@ -52,8 +56,12 @@ __all__ = [
     'grid_laplacian',
     'regular_grid_stencil',
     # mesh
+    'IcosphereHierarchy',
     'Mesh',
     'icosphere',
+    'icosphere_bary_upsampler',
+    'icosphere_cross_level_adjacency',
+    'icosphere_hierarchy',
     'mesh_bary_upsample',
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
