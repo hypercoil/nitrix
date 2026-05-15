@@ -3,7 +3,7 @@
     "device": "NVIDIA A10G (gpu)",
     "platform": "Linux-6.1.161-183.298.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.0",
-    "timestamp": "2026-05-15T01:29:49Z"
+    "timestamp": "2026-05-15T03:45:46Z"
   },
   "ops": [
     {
@@ -12,7 +12,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "idempotent on symmetric input"
       ],
@@ -24,7 +27,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "strict upper triangle only",
         "custom_vjp"
@@ -37,7 +43,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "mirrors upper triangle",
         "custom_vjp"
@@ -50,7 +59,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "vmap-over-roll recipe"
       ],
@@ -62,7 +74,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "PSD-preserving"
       ],
@@ -74,7 +89,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "numpy.linalg.lstsq",
+      "perf_cpu_ratio": 0.0,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "Cholesky-normal-equations"
       ],
@@ -86,7 +104,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "sklearn.metrics.pairwise.linear_kernel",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "shared with linear_distance via identity formula"
       ],
@@ -98,7 +119,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "sklearn.metrics.pairwise_distances",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "|x-y|^2 = |x|^2 + |y|^2 - 2 x.y identity (O(nm) memory)"
       ],
@@ -110,7 +134,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "sklearn.metrics.pairwise.rbf_kernel",
+      "perf_cpu_ratio": 0.0,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "exp(-gamma * |x-y|^2)"
       ],
@@ -122,7 +149,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.linalg.logm",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "SPEC 4.1 stability rewrite",
         "eigvalue-clip threshold"
@@ -135,7 +165,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.linalg.sqrtm",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "eigvalue-clip threshold"
       ],
@@ -147,7 +180,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.linalg.fractional_matrix_power",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "arbitrary real power via eigh"
       ],
@@ -159,7 +195,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "closed-form Frechet mean on log-Euclidean metric"
       ],
@@ -171,7 +210,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "numpy.cov",
+      "perf_cpu_ratio": 0.01,
+      "perf_gpu_baseline": "jnp.cov",
+      "perf_gpu_ratio": null,
       "invariants": [
         "complex-Hermitian preserved",
         "np.cov parity at fp64"
@@ -184,7 +226,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "numpy.corrcoef",
+      "perf_cpu_ratio": 0.01,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "diagonal=1",
         "complex-Hermitian preserved"
@@ -197,7 +242,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "precision-matrix-derived"
       ],
@@ -209,7 +257,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "inverse of cov"
       ],
@@ -221,7 +272,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.signal.hilbert",
+      "perf_cpu_ratio": 0.38,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "vectorised Hilbert mask",
         "scipy.signal.hilbert parity"
@@ -234,7 +288,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.signal.hilbert (.imag)",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "imag part of analytic_signal"
       ],
@@ -246,7 +303,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "numpy.abs(scipy.signal.hilbert)",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "|analytic_signal|"
       ],
@@ -258,7 +318,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": "0.31x",
+      "perf_cpu_baseline": "statsmodels.MixedLM",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "FaST-LMM spectral rotation",
         "no V*N^2 intermediate"
@@ -271,7 +334,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": "0.31x",
+      "perf_cpu_baseline": "statsmodels.WLS (voxelwise loop)",
+      "perf_cpu_ratio": 0.0,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "single-parameter REML (identifiability)",
         "shared X_group"
@@ -284,7 +350,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.interpolate.interp1d",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "associative_scan (O(log n) parallel)",
         "no while_loop"
@@ -297,7 +366,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "joint-GLM (passes through observed)",
         "shared-Gram across voxels",
@@ -311,7 +383,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.signal.lombscargle",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "Scargle 1982 normalisation",
         "scipy.lombscargle parity"
@@ -324,7 +399,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.signal.detrend (poly)",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "rescaled Vandermonde (stability)",
         "routes through residualise"
@@ -337,7 +415,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.signal.convolve",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": "lax.conv_general_dilated (raw)",
+      "perf_gpu_ratio": null,
       "invariants": [
         "thin lax.conv_general_dilated wrapper"
       ],
@@ -349,7 +430,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.stats.zscore",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "zero mean, unit std per axis"
       ],
@@ -361,7 +445,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "percentile-clip to [0, 1]"
       ],
@@ -373,7 +460,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "amplitude / phase split"
       ],
@@ -385,7 +475,10 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "shape-static constructor"
       ],
@@ -397,7 +490,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.ndimage.map_coordinates",
+      "perf_cpu_ratio": 0.06,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "mode pass-through to map_coordinates",
         "accepts leading batch"
@@ -410,7 +506,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "scaling-and-squaring",
         "default mode='nearest' (voxelmorph)"
@@ -423,7 +522,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "explicit det for d<=3",
         "no cuSolver call"
@@ -436,7 +538,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "pole-flip + W/2 roll",
         "longitudinal wrap"
@@ -449,7 +554,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.sparse.csgraph.laplacian",
+      "perf_cpu_ratio": 0.41,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "symmetric / random_walk / combinatorial variants"
       ],
@@ -461,7 +569,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "dense / ELL / SectionedELL dispatch"
       ],
@@ -473,7 +584,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "sklearn.manifold.SpectralEmbedding",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "safe_eigh cuSolver fallback",
         "LOBPCG implicit-VJP for sparse paths"
@@ -486,7 +600,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.ndimage.grey_dilation",
+      "perf_cpu_ratio": 0.15,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MAX_PLUS specialisation"
       ],
@@ -498,7 +615,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.ndimage.grey_erosion",
+      "perf_cpu_ratio": 0.14,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MIN_PLUS specialisation"
       ],
@@ -510,7 +630,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": "30.29x",
+      "perf_cpu_baseline": "scipy.ndimage.distance_transform_edt",
+      "perf_cpu_ratio": 1.27,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "iterative TROPICAL_MIN_PLUS",
         "chamfer (not exact EDT)"
@@ -523,7 +646,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.ndimage.median_filter",
+      "perf_cpu_ratio": 0.03,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "gather + nanmedian (not a semiring op)"
       ],
@@ -535,7 +661,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": "torch.nn.MaxPool3d (return_indices)",
+      "perf_gpu_ratio": null,
       "invariants": [
         "global flat C-order argmax indices",
         "window-unfold + argmax composition"
@@ -548,7 +677,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": "torch.nn.MaxUnpool3d",
+      "perf_gpu_ratio": null,
       "invariants": [
         "vmapped per-channel scatter",
         "argmax-agreement parity (not raw-logit allclose)"
@@ -561,7 +693,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.ndimage.gaussian_filter",
+      "perf_cpu_ratio": 0.03,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "separable n-D",
         "scipy.ndimage parity at fp64"
@@ -574,7 +709,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "semiring_ell_matmul over feature adjacency"
       ],
@@ -586,7 +724,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "numpy.matmul",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": "lax.fori_loop (same algebra)",
+      "perf_gpu_ratio": 0.06060606060606061,
       "invariants": [
         "streaming kernel (no O(MKN) materialisation)",
         "Pallas/JAX fallback"
@@ -599,7 +740,10 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.sparse @ dense",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "sparse ELL matmul"
       ],
@@ -611,7 +755,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": "torch_geometric.nn.MessagePassing",
+      "perf_gpu_ratio": null,
       "invariants": [
         "gather + nested vmap + semiring reduction",
         "REAL / TROPICAL_MAX_PLUS / TROPICAL_MIN_PLUS supported",
@@ -625,7 +772,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": "scipy.ndimage.convolve",
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": "cuDNN fp32 (precision=highest)",
+      "perf_gpu_ratio": 1.78,
       "invariants": [
         "NaN-safe patch extraction (jnp.take, not lax.conv_general_dilated_patches)",
         "explicit im2col + semiring_matmul"
@@ -638,7 +788,10 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "host-side ELL construction"
       ],
@@ -650,7 +803,10 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "regular-grid stencil",
         "scipy.ndimage.laplace parity"
@@ -663,7 +819,10 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "BFS k-ring on triangle mesh",
         "host-side construction"
@@ -676,7 +835,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MAX_PLUS with zero values",
         "composes semiring_ell_matmul"
@@ -689,7 +851,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MAX_PLUS symmetric of mesh_pool_max"
       ],
@@ -701,7 +866,10 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "REAL semiring_ell_matmul (weighted sum)"
       ],
@@ -713,7 +881,10 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "recursive subdivision with midpoint cache",
         "parent-child bookkeeping for cross-level helpers"
@@ -726,7 +897,10 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "coarse-to-fine ELL from subdivision parents",
         "k_max = 1 + max_coarse_degree (6 at L=0->1, 7 at L>=1)"
@@ -739,7 +913,10 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_ratio": null,
+      "perf_cpu_baseline": null,
+      "perf_cpu_ratio": null,
+      "perf_gpu_baseline": null,
+      "perf_gpu_ratio": null,
       "invariants": [
         "fine-from-coarse ELL with bary weights (1, 0) or (0.5, 0.5)",
         "k_max = 2"

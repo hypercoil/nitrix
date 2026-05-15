@@ -349,6 +349,208 @@ def bench_cov() -> list[BenchRow]:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# 6. corr: nitrix vs numpy.corrcoef
+# ---------------------------------------------------------------------------
+
+
+def bench_corr() -> list[BenchRow]:
+    from nitrix.stats import corr
+
+    rows = []
+    for (n, T) in [(50, 500), (500, 2000), (2000, 1000)]:
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal((n, T)).astype(np.float32)
+        X_j = jnp.asarray(X)
+        nitrix_fn = jax.jit(corr)
+        _ = nitrix_fn(X_j).block_until_ready()
+        nitrix_ms = _time_warm(lambda: nitrix_fn(X_j))
+        ref_ms = _time_warm(lambda: np.corrcoef(X))
+        np_ref = np.corrcoef(X)
+        diff = float(np.abs(np.asarray(nitrix_fn(X_j)) - np_ref).max())
+        rows.append(BenchRow(
+            op='stats.corr', shape_desc=f'({n}, {T})',
+            nitrix_ms=nitrix_ms, ref_name='numpy.corrcoef',
+            ref_ms=ref_ms, agreement=f'{diff:.1e}',
+        ))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 7. gaussian: nitrix vs scipy.ndimage.gaussian_filter
+# ---------------------------------------------------------------------------
+
+
+def bench_gaussian() -> list[BenchRow]:
+    import scipy.ndimage as spnd
+    from nitrix.smoothing import gaussian
+
+    rows = []
+    for shape in [(64, 64), (256, 256), (64, 64, 64)]:
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal(shape).astype(np.float32)
+        X_j = jnp.asarray(X)
+        nitrix_fn = jax.jit(lambda x: gaussian(x, sigma=1.5))
+        _ = nitrix_fn(X_j).block_until_ready()
+        nitrix_ms = _time_warm(lambda: nitrix_fn(X_j))
+        ref_ms = _time_warm(lambda: spnd.gaussian_filter(X, sigma=1.5))
+        ref = spnd.gaussian_filter(X, sigma=1.5)
+        diff = float(np.abs(np.asarray(nitrix_fn(X_j)) - ref).max())
+        rows.append(BenchRow(
+            op='smoothing.gaussian',
+            shape_desc='x'.join(str(s) for s in shape),
+            nitrix_ms=nitrix_ms, ref_name='scipy.ndimage.gaussian_filter',
+            ref_ms=ref_ms, agreement=f'{diff:.1e}',
+        ))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 8. morphology dilate / erode / median: nitrix vs scipy.ndimage
+# ---------------------------------------------------------------------------
+
+
+def bench_morphology_filters() -> list[BenchRow]:
+    import scipy.ndimage as spnd
+    from nitrix.morphology import dilate, erode, median_filter
+
+    rows = []
+    for shape in [(64, 64), (256, 256)]:
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal(shape).astype(np.float32)
+        X_j = jnp.asarray(X)
+
+        for op_name, nitrix_op, scipy_op in [
+            ('morphology.dilate', dilate, spnd.grey_dilation),
+            ('morphology.erode', erode, spnd.grey_erosion),
+            ('morphology.median_filter', median_filter, spnd.median_filter),
+        ]:
+            jitted = jax.jit(lambda x, op=nitrix_op: op(x, size=3))
+            _ = jitted(X_j).block_until_ready()
+            nitrix_ms = _time_warm(lambda: jitted(X_j))
+            ref_ms = _time_warm(lambda: scipy_op(X, size=3))
+            try:
+                diff = float(np.abs(
+                    np.asarray(jitted(X_j)) - scipy_op(X, size=3),
+                ).max())
+                agreement = f'{diff:.1e}'
+            except Exception:
+                agreement = 'shape-mismatch'
+            rows.append(BenchRow(
+                op=op_name, shape_desc='x'.join(str(s) for s in shape),
+                nitrix_ms=nitrix_ms, ref_name=f'scipy.ndimage.{scipy_op.__name__}',
+                ref_ms=ref_ms, agreement=agreement,
+            ))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 9. spatial_transform: nitrix vs scipy.ndimage.map_coordinates
+# ---------------------------------------------------------------------------
+
+
+def bench_spatial_transform() -> list[BenchRow]:
+    import scipy.ndimage as spnd
+    from nitrix.geometry import spatial_transform
+
+    rows = []
+    for shape in [(64, 64), (256, 256)]:
+        rng = np.random.default_rng(0)
+        # image: (H, W, c=1); deformation: (H, W, ndim=2) of absolute coords.
+        img = rng.standard_normal(shape + (1,)).astype(np.float32)
+        ii, jj = np.meshgrid(
+            np.arange(shape[0]), np.arange(shape[1]), indexing='ij',
+        )
+        # Small random absolute-coord perturbation around the identity grid.
+        deform = np.stack([
+            ii + 0.5 * rng.standard_normal(shape),
+            jj + 0.5 * rng.standard_normal(shape),
+        ], axis=-1).astype(np.float32)
+        img_j, def_j = jnp.asarray(img), jnp.asarray(deform)
+
+        nitrix_fn = jax.jit(
+            lambda im, df: spatial_transform(im, df, mode='constant'),
+        )
+        _ = nitrix_fn(img_j, def_j).block_until_ready()
+        nitrix_ms = _time_warm(lambda: nitrix_fn(img_j, def_j))
+
+        # scipy.ndimage.map_coordinates expects coords shape
+        # (ndim, *spatial).
+        coords = deform.transpose(2, 0, 1)
+        ref_ms = _time_warm(
+            lambda: spnd.map_coordinates(
+                img[..., 0], coords, order=1, mode='constant',
+            ),
+        )
+        rows.append(BenchRow(
+            op='geometry.spatial_transform',
+            shape_desc='x'.join(str(s) for s in shape) + ' c=1',
+            nitrix_ms=nitrix_ms, ref_name='scipy.ndimage.map_coordinates',
+            ref_ms=ref_ms, agreement='skipped',
+            notes='linear interpolation; modes match',
+        ))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 10. graph.laplacian: nitrix vs scipy.sparse.csgraph.laplacian
+# ---------------------------------------------------------------------------
+
+
+def bench_graph_laplacian() -> list[BenchRow]:
+    import scipy.sparse.csgraph as spcsg
+    from nitrix.graph import laplacian
+
+    rows = []
+    for n in (64, 256, 1024):
+        rng = np.random.default_rng(0)
+        # Sparse random symmetric adjacency.
+        A = (rng.random((n, n)) > 0.95).astype(np.float32)
+        A = ((A + A.T) > 0).astype(np.float32)
+        np.fill_diagonal(A, 0)
+        A_j = jnp.asarray(A)
+        nitrix_fn = jax.jit(laplacian)
+        _ = nitrix_fn(A_j).block_until_ready()
+        nitrix_ms = _time_warm(lambda: nitrix_fn(A_j))
+        ref_ms = _time_warm(lambda: spcsg.laplacian(A))
+        diff = float(np.abs(
+            np.asarray(nitrix_fn(A_j)) - spcsg.laplacian(A),
+        ).max())
+        rows.append(BenchRow(
+            op='graph.laplacian', shape_desc=f'n={n} sparse',
+            nitrix_ms=nitrix_ms, ref_name='scipy.sparse.csgraph.laplacian',
+            ref_ms=ref_ms, agreement=f'{diff:.1e}',
+        ))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 11. analytic_signal: nitrix vs scipy.signal.hilbert
+# ---------------------------------------------------------------------------
+
+
+def bench_analytic_signal() -> list[BenchRow]:
+    import scipy.signal as spsig
+    from nitrix.stats import analytic_signal
+
+    rows = []
+    for n in (256, 2048, 16384):
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(n).astype(np.float32)
+        x_j = jnp.asarray(x)
+        nitrix_fn = jax.jit(analytic_signal)
+        _ = nitrix_fn(x_j).block_until_ready()
+        nitrix_ms = _time_warm(lambda: nitrix_fn(x_j))
+        ref_ms = _time_warm(lambda: spsig.hilbert(x))
+        diff = float(np.abs(np.asarray(nitrix_fn(x_j)) - spsig.hilbert(x)).max())
+        rows.append(BenchRow(
+            op='stats.analytic_signal', shape_desc=f'n={n}',
+            nitrix_ms=nitrix_ms, ref_name='scipy.signal.hilbert',
+            ref_ms=ref_ms, agreement=f'{diff:.1e}',
+        ))
+    return rows
+
+
 def main():
     output = Path(__file__).parent / 'PERF_AUDIT.md'
     print('Running perf audit...')
@@ -358,8 +560,14 @@ def main():
         ('rbf_kernel', bench_rbf_kernel),
         ('residualise', bench_residualise),
         ('cov', bench_cov),
+        ('corr', bench_corr),
         ('distance_transform', bench_distance_transform),
         ('lme.flame_two_level', bench_lme_voxelwise),
+        ('gaussian', bench_gaussian),
+        ('morphology_filters', bench_morphology_filters),
+        ('spatial_transform', bench_spatial_transform),
+        ('graph.laplacian', bench_graph_laplacian),
+        ('analytic_signal', bench_analytic_signal),
     ]:
         print(f'  {name}...')
         try:
