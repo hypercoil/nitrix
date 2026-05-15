@@ -10,7 +10,10 @@
 > ``nitrix.morphology.pooling`` (``max_pool_with_indices_nd`` /
 > ``max_unpool_nd``) and convenience wrappers in ``nitrix.sparse.mesh``
 > (``mesh_pool_max`` / ``mesh_unpool_max`` / ``mesh_bary_upsample``).
-> Together they close the consumer ask in
+> The matching icosphere-hierarchy construction trio
+> (``icosphere_hierarchy`` / ``icosphere_cross_level_adjacency`` /
+> ``icosphere_bary_upsampler``) builds the cross-level ELLs the
+> wrappers consume.  Together they close the consumer ask in
 > ``NITRIX_FEEDBACK_ILEX.md`` (FA2–FA4) for a coherent mesh-graph CNN
 > stack on top of the substrate.
 
@@ -262,30 +265,74 @@ We deliberately did **not** ship:
   mesh is a graph operation; conflating it with the morphology
   pool API would have wasted a clear analogy.
 
-## Sprint B preview: icosphere hierarchy
+## Icosphere hierarchy: construction helpers
 
-This sprint shipped the *primitive*; the next sprint (FA2-adjacent,
-deferred) will ship the *construction* helpers:
+The primitives above are agnostic to *where* the cross-level ELLs
+come from — they accept any caller-built ELL.  For the icosphere
+case (Topofit, SphereMorph-family, surface-attention transformers)
+we ship a matching construction trio:
 
-- **``icosphere_hierarchy(n_subdivisions) -> list[Mesh]``** — a
-  sequence ``[ico_0, ico_1, ..., ico_n]`` with the parent-child
-  relationships preserved.  Today's ``icosphere(n)`` builds the
-  finest level directly; the hierarchy variant exposes the
-  intermediate levels.
-- **``icosphere_cross_level_adjacency(parent, child) -> ELL``** —
-  the ``n_child × n_parent`` ELL that records "which fine-vertex
-  derives from which coarse-vertex (or edge midpoint thereof)".
-  Feed this to ``mesh_pool_max`` / ``mesh_unpool_max``.
-- **``icosphere_bary_upsampler(parent, child) -> ELL``** — same
-  shape, but with barycentric weights for *continuous*
-  upsampling of vertex-valued fields.  Feed this to
-  ``mesh_bary_upsample``.
+- **``icosphere_hierarchy(max_level) -> IcosphereHierarchy``** —
+  builds ``[ico_0, ico_1, ..., ico_max_level]`` plus per-level
+  parent tables.  ``IcosphereHierarchy`` is a frozen dataclass
+  with ``meshes: tuple[Mesh, ...]`` and ``parents: tuple[...]``;
+  ``parents[L]`` (for ``L >= 1``) is an
+  ``(n_vertices_at_L, 2)`` int array giving each fine vertex's
+  parentage relative to level ``L - 1``.
+- **``icosphere_cross_level_adjacency(hier, L, L+1) -> ELL``** —
+  coarse-to-fine ELL with row ``i`` listing fine vertices descended
+  from coarse vertex ``i`` (the coincident vertex plus all
+  edge-midpoints incident to ``i``).  ``k_max = 6`` at the
+  ``0 → 1`` step (icosahedron max degree 5 + self),
+  ``k_max = 7`` at subsequent steps.  Stored values are zero with
+  ``identity=-inf`` so it feeds ``mesh_pool_max`` directly.
+- **``icosphere_bary_upsampler(hier, L, L+1) -> ELL``** —
+  fine-from-coarse ELL where coincident fine vertices have weights
+  ``(1, 0)`` and midpoint fine vertices have weights ``(0.5, 0.5)``.
+  ``k_max = 2``; feeds ``mesh_bary_upsample``.
 
-The reason these are deferred: ilex's near-term consumer asks
-required the *primitives* to be in place first.  The construction
-helpers depend on subdivision-level bookkeeping that the current
-``icosphere`` implementation doesn't expose; rewriting that
-internally is a separable change.
+### Why consecutive-only
+
+The constructors require ``fine_level == coarse_level + 1`` and
+raise ``ValueError`` otherwise.  Rationale: the subdivision rule
+is naturally consecutive, and multi-level pooling composes by
+calling ``mesh_pool_max`` repeatedly through the cascade.
+Materialising the composed multi-level ELL (i.e. the
+``ico_0 → ico_7`` adjacency directly) would carry the product of
+per-step ``k_max``-s — at ``ico_7`` that's ``6 · 7^6 ≈ 700k``
+neighbour slots per coarse vertex.  Two single-step matmuls is
+faster than one ``700k``-wide ELL matmul.  If a future consumer
+finds a path where the composed form is strictly necessary, we
+can lift the restriction.
+
+### Why store parent tables instead of recomputing
+
+Subdivision is deterministic — running ``_subdivide`` twice on
+the same input produces the same midpoint indices in the same
+order.  So in principle the cross-level constructors could
+re-run subdivision to recover the parentage.  We store it
+eagerly because the parent tables are ``O(n_vertices)`` (vs the
+``O(n_vertices)`` traversal + dict-keyed midpoint cache that a
+re-run would build), and constructing the cross-level ELLs is
+the hot path in a Topofit-style training loop.
+
+### Hand-off to the runtime primitives
+
+The end-to-end pipeline is then::
+
+    hier = icosphere_hierarchy(max_level=7)
+    kring = [mesh_k_ring_adjacency(m, k=1) for m in hier.meshes]
+    pool = [icosphere_cross_level_adjacency(hier, L, L+1)
+            for L in range(7)]
+    bary = [icosphere_bary_upsampler(hier, L, L+1)
+            for L in range(7)]
+    # Forward:
+    h = encode(x, kring, pool)          # vertex feats + downsample
+    h = decode(h, kring, bary)          # upsample + vertex feats
+
+with ``encode`` / ``decode`` built from
+``semiring_ell_edge_aggregate`` (vertex convs) +
+``mesh_pool_max`` / ``mesh_bary_upsample`` (cross-level).
 
 ## What we considered and didn't pick
 
@@ -331,8 +378,18 @@ surface area.
   round-trip preserves argmax positions; differentiability
   through both directions; the cross-framework parity
   disclaimer.
-- ``tests/test_sparse_specialisations.py`` (4 new tests):
-  ``mesh_pool_max`` takes the window-max; ``mesh_bary_upsample``
+- ``tests/test_sparse_specialisations.py`` (14 new tests):
+  the four ``mesh_*`` wrapper tests
+  (``mesh_pool_max`` takes the window-max; ``mesh_bary_upsample``
   is the weighted sum; ``mesh_unpool_max`` inverts pool at
   single-source mapping; ``mesh_bary_upsample`` is
-  differentiable.
+  differentiable), plus the ten hierarchy tests covering
+  ``icosphere_hierarchy`` length / per-level counts; parent-table
+  invariants (coarse-originals are ``(v, v)``, midpoints are
+  sorted ``(a, b)`` with ``a < b``); cross-level adjacency row
+  contents and ``k_max``; bary upsampler weight patterns;
+  pre-sphere-projection round-trip
+  (``mesh_bary_upsample(bary_ell, coarse) → re-normalise →
+  fine_coords``); non-consecutive rejection;
+  pool-then-upsample composition; differentiability through the
+  bary upsampler.

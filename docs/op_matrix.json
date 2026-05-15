@@ -3,7 +3,7 @@
     "device": "NVIDIA A10G (gpu)",
     "platform": "Linux-6.1.161-183.298.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.0",
-    "timestamp": "2026-05-15T00:15:54Z"
+    "timestamp": "2026-05-15T01:29:49Z"
   },
   "ops": [
     {
@@ -530,6 +530,32 @@
       "notes": ""
     },
     {
+      "qualname": "nitrix.morphology.max_pool_with_indices_nd",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "perf_ratio": null,
+      "invariants": [
+        "global flat C-order argmax indices",
+        "window-unfold + argmax composition"
+      ],
+      "notes": "returns (pooled, indices); paired with max_unpool_nd for encoder-decoder"
+    },
+    {
+      "qualname": "nitrix.morphology.max_unpool_nd",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "perf_ratio": null,
+      "invariants": [
+        "vmapped per-channel scatter",
+        "argmax-agreement parity (not raw-logit allclose)"
+      ],
+      "notes": "inverts max_pool_with_indices_nd; indices are int (non-diff)"
+    },
+    {
       "qualname": "nitrix.smoothing.gaussian",
       "jit": "pass",
       "grad": "pass",
@@ -578,6 +604,20 @@
         "sparse ELL matmul"
       ],
       "notes": ""
+    },
+    {
+      "qualname": "nitrix.semiring.semiring_ell_edge_aggregate",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "perf_ratio": null,
+      "invariants": [
+        "gather + nested vmap + semiring reduction",
+        "REAL / TROPICAL_MAX_PLUS / TROPICAL_MIN_PLUS supported",
+        "edge_fn signature (h_i, h_j, w, ij)"
+      ],
+      "notes": "probed with GCN closure; covers GCN/GAT/EdgeConv/MoNet/ChebNet"
     },
     {
       "qualname": "nitrix.semiring.semiring_conv",
@@ -629,6 +669,82 @@
         "host-side construction"
       ],
       "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.mesh_pool_max",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "perf_ratio": null,
+      "invariants": [
+        "TROPICAL_MAX_PLUS with zero values",
+        "composes semiring_ell_matmul"
+      ],
+      "notes": "probed against icosphere(0->1) cross-level adjacency"
+    },
+    {
+      "qualname": "nitrix.sparse.mesh_unpool_max",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "perf_ratio": null,
+      "invariants": [
+        "TROPICAL_MAX_PLUS symmetric of mesh_pool_max"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.mesh_bary_upsample",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "perf_ratio": null,
+      "invariants": [
+        "REAL semiring_ell_matmul (weighted sum)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.icosphere_hierarchy",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "perf_ratio": null,
+      "invariants": [
+        "recursive subdivision with midpoint cache",
+        "parent-child bookkeeping for cross-level helpers"
+      ],
+      "notes": "returns IcosphereHierarchy(meshes, parents); host-side"
+    },
+    {
+      "qualname": "nitrix.sparse.icosphere_cross_level_adjacency",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "perf_ratio": null,
+      "invariants": [
+        "coarse-to-fine ELL from subdivision parents",
+        "k_max = 1 + max_coarse_degree (6 at L=0->1, 7 at L>=1)"
+      ],
+      "notes": "consecutive-level only; compose for multi-level"
+    },
+    {
+      "qualname": "nitrix.sparse.icosphere_bary_upsampler",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "perf_ratio": null,
+      "invariants": [
+        "fine-from-coarse ELL with bary weights (1, 0) or (0.5, 0.5)",
+        "k_max = 2"
+      ],
+      "notes": "consecutive-level only; feeds mesh_bary_upsample"
     }
   ]
 }

@@ -370,3 +370,176 @@ def test_mesh_bary_upsample_differentiable():
     g = jax.grad(loss)(coords)
     assert g.shape == coords.shape
     assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# Icosphere hierarchy (Sprint B): icosphere_hierarchy /
+# icosphere_cross_level_adjacency / icosphere_bary_upsampler
+# ---------------------------------------------------------------------------
+
+
+from nitrix.sparse import (  # noqa: E402
+    IcosphereHierarchy,
+    icosphere_bary_upsampler,
+    icosphere_cross_level_adjacency,
+    icosphere_hierarchy,
+)
+from nitrix.sparse import mesh_bary_upsample as _mesh_bary_upsample  # noqa: E402
+
+
+def test_icosphere_hierarchy_length_and_counts():
+    '''Hierarchy at max_level=3 has 4 meshes with the expected
+    vertex counts (10 * 4^L + 2) and parent tables.
+    '''
+    h = icosphere_hierarchy(max_level=3)
+    assert isinstance(h, IcosphereHierarchy)
+    assert len(h) == 4
+    assert h.max_level == 3
+    expected = [12, 42, 162, 642]
+    for L, m in enumerate(h.meshes):
+        assert m.n_vertices == expected[L]
+    # parents[0] is None; parents[L] has shape (n_verts_at_L, 2).
+    assert h.parents[0] is None
+    for L in (1, 2, 3):
+        assert h.parents[L].shape == (expected[L], 2)
+
+
+def test_hierarchy_parent_invariants():
+    '''Parent invariants: coarse-original fine verts have parents
+    (v, v); midpoint fine verts have parents (a, b) with a != b
+    and a, b within range of the parent level.  Across the table,
+    the first ``n_coarse`` rows are coarse-originals.
+    '''
+    h = icosphere_hierarchy(max_level=2)
+    for L in (1, 2):
+        n_coarse = h.meshes[L - 1].n_vertices
+        n_fine = h.meshes[L].n_vertices
+        parents = h.parents[L]
+        # First n_coarse verts are coarse-originals
+        for v in range(n_coarse):
+            assert int(parents[v, 0]) == v
+            assert int(parents[v, 1]) == v
+        # Remaining verts are midpoints with a != b
+        for v in range(n_coarse, n_fine):
+            a, b = int(parents[v, 0]), int(parents[v, 1])
+            assert a != b
+            assert 0 <= a < n_coarse and 0 <= b < n_coarse
+            assert a < b  # stored sorted
+
+
+def test_cross_level_adjacency_row_contents():
+    '''Row i of cross_level_adjacency(L, L+1) contains exactly the
+    fine vertices descended from coarse vertex i: i itself plus
+    every edge-midpoint whose parent edge is incident to i.
+    '''
+    h = icosphere_hierarchy(max_level=1)
+    adj = icosphere_cross_level_adjacency(h, 0, 1)
+    parents = np.asarray(h.parents[1])
+    indices = np.asarray(adj.indices)
+    for i in range(h.meshes[0].n_vertices):
+        # Build the reference set
+        ref = {i}  # self
+        for v_fine in range(h.meshes[1].n_vertices):
+            a, b = int(parents[v_fine, 0]), int(parents[v_fine, 1])
+            if a == b:
+                continue  # coarse-original
+            if a == i or b == i:
+                ref.add(v_fine)
+        # Strip padding (which clones row[0])
+        unique = set(indices[i].tolist())
+        assert unique == ref, f'row {i}: got {unique}, expected {ref}'
+
+
+def test_cross_level_adjacency_kmax():
+    '''k_max(0->1) = 6 (icosahedron max degree 5 + 1 for self);
+    k_max(L->L+1) for L >= 1 = 7 (subdivided max degree 6 + 1).
+    '''
+    h = icosphere_hierarchy(max_level=2)
+    adj_01 = icosphere_cross_level_adjacency(h, 0, 1)
+    adj_12 = icosphere_cross_level_adjacency(h, 1, 2)
+    assert adj_01.indices.shape[1] == 6
+    assert adj_12.indices.shape[1] == 7
+
+
+def test_bary_upsampler_weights():
+    '''Coincident-vertex rows have weights (1, 0); midpoint-vertex
+    rows have weights (0.5, 0.5).  Indices in midpoint rows are
+    exactly the parent pair.
+    '''
+    h = icosphere_hierarchy(max_level=1)
+    bary = icosphere_bary_upsampler(h, 0, 1)
+    values = np.asarray(bary.values)
+    indices = np.asarray(bary.indices)
+    parents = np.asarray(h.parents[1])
+    n_coarse = h.meshes[0].n_vertices
+
+    for v_fine in range(h.meshes[1].n_vertices):
+        a, b = int(parents[v_fine, 0]), int(parents[v_fine, 1])
+        if a == b:
+            assert v_fine < n_coarse
+            assert int(indices[v_fine, 0]) == a
+            np.testing.assert_allclose(values[v_fine, 0], 1.0)
+            np.testing.assert_allclose(values[v_fine, 1], 0.0)
+        else:
+            assert {int(indices[v_fine, 0]), int(indices[v_fine, 1])} == {a, b}
+            np.testing.assert_allclose(values[v_fine, 0], 0.5)
+            np.testing.assert_allclose(values[v_fine, 1], 0.5)
+
+
+def test_bary_upsample_round_trip_recovers_pre_sphere_midpoints():
+    '''Applying bary_upsample to the coarse vertex coordinates
+    yields the (pre-sphere-projection) midpoints for the new
+    fine vertices.  After re-normalising to the unit sphere,
+    they equal the fine vertex coordinates exactly.
+    '''
+    h = icosphere_hierarchy(max_level=1)
+    bary = icosphere_bary_upsampler(h, 0, 1)
+    coarse_coords = h.meshes[0].vertices
+    fine_coords = h.meshes[1].vertices
+    up = _mesh_bary_upsample(bary, coarse_coords)
+    # Re-project to unit sphere (the icosphere subdivision step also
+    # does this normalisation after the midpoint average).
+    up_norm = up / jnp.linalg.norm(up, axis=-1, keepdims=True)
+    np.testing.assert_allclose(up_norm, fine_coords, atol=1e-6)
+
+
+def test_cross_level_adjacency_rejects_non_consecutive():
+    h = icosphere_hierarchy(max_level=3)
+    with pytest.raises(ValueError, match='consecutive'):
+        icosphere_cross_level_adjacency(h, 0, 2)
+
+
+def test_bary_upsampler_rejects_non_consecutive():
+    h = icosphere_hierarchy(max_level=3)
+    with pytest.raises(ValueError, match='consecutive'):
+        icosphere_bary_upsampler(h, 0, 2)
+
+
+def test_pool_then_bary_with_hierarchy():
+    '''mesh_pool_max on a cross-level adjacency takes per-coarse-vertex
+    max of fine features; bary upsample lifts coarse features back to
+    fine via barycentric interpolation.  End-to-end pipeline runs.
+    '''
+    from nitrix.sparse import mesh_pool_max
+    h = icosphere_hierarchy(max_level=1)
+    fine = h.meshes[1].vertices  # (42, 3)
+    pool_ell = icosphere_cross_level_adjacency(h, 0, 1)
+    coarse_pooled = mesh_pool_max(pool_ell, fine)
+    assert coarse_pooled.shape == (12, 3)
+    bary_ell = icosphere_bary_upsampler(h, 0, 1)
+    fine_up = _mesh_bary_upsample(bary_ell, coarse_pooled)
+    assert fine_up.shape == (42, 3)
+
+
+def test_bary_upsampler_differentiable():
+    '''Gradient through the icosphere bary upsampler flows back to
+    coarse coordinates.
+    '''
+    h = icosphere_hierarchy(max_level=1)
+    bary = icosphere_bary_upsampler(h, 0, 1)
+    coarse = jnp.asarray(h.meshes[0].vertices)
+    def loss(coords):
+        return jnp.sum(_mesh_bary_upsample(bary, coords) ** 2)
+    g = jax.grad(loss)(coarse)
+    assert g.shape == coarse.shape
+    assert bool(jnp.all(jnp.isfinite(g)))

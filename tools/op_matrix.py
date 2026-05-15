@@ -183,17 +183,27 @@ class OpInfo:
     notes: str = ''
     reducer: Optional[Callable] = None
     skip_jit: bool = False  # construction-time op; JIT doesn't apply
+    # Optional override: when set, the probes invoke this callable
+    # instead of resolving ``qualname``.  Use for ops whose natural
+    # signature carries non-array positional args (callables,
+    # dataclasses) that need to be baked in via a closure to be
+    # tractable under ``jax.jit`` / ``jax.vmap``.
+    fn_override: Optional[Callable] = None
 
     def resolve(self):
-        '''Import the function by walking ``qualname``.
+        '''Return the callable used by the probes.
 
-        Imports the longest *strict prefix* (excluding the
-        symbol itself) via ``importlib``, then ``getattr``s the
-        final part.  This avoids the pathological case where
-        ``nitrix.signal.tsconv`` could resolve to either the
-        ``tsconv`` module or the ``tsconv`` function inside it --
-        we always want the latter (modules aren't callable).
+        If ``fn_override`` is set, returns it directly.  Otherwise
+        imports by walking ``qualname``: imports the longest *strict
+        prefix* (excluding the symbol itself) via ``importlib``,
+        then ``getattr``s the final part.  This avoids the
+        pathological case where ``nitrix.signal.tsconv`` could
+        resolve to either the ``tsconv`` module or the ``tsconv``
+        function inside it -- we always want the latter (modules
+        aren't callable).
         '''
+        if self.fn_override is not None:
+            return self.fn_override
         import importlib
         parts = self.qualname.split('.')
         # Try the longest STRICT prefix first; never the whole
@@ -631,6 +641,53 @@ register(OpInfo(
     invariants=('gather + nanmedian (not a semiring op)',),
 ))
 
+
+def _max_pool_fixture():
+    # (B=1, C=2, H=8, W=8); pool 2x2 -> (1, 2, 4, 4) with indices
+    x = jax.random.normal(_key(), (1, 2, 8, 8))
+    return (x,), {'pool_size': 2, 'spatial_rank': 2}
+
+
+def _max_pool_reducer(out):
+    # max_pool_with_indices_nd returns (pooled, indices).
+    # grad probe takes the first leaf via tree_leaves -- which is
+    # the pooled tensor.  Reduce that to a scalar.
+    return jnp.sum(out ** 2)
+
+
+register(OpInfo(
+    'nitrix.morphology.max_pool_with_indices_nd',
+    fixture=_max_pool_fixture,
+    diff_arg=0,
+    vmap_arg=None,  # batch axis already in fixture; vmap-over-extra-leading is redundant
+    invariants=(
+        'global flat C-order argmax indices',
+        'window-unfold + argmax composition',
+    ),
+    reducer=_max_pool_reducer,
+    notes='returns (pooled, indices); paired with max_unpool_nd for encoder-decoder',
+))
+
+
+def _max_unpool_fixture():
+    rng = np.random.default_rng(0)
+    pooled = jnp.asarray(rng.standard_normal((1, 2, 4, 4)).astype(np.float32))
+    indices = jnp.asarray(rng.integers(0, 64, (1, 2, 4, 4)).astype(np.int32))
+    return (pooled, indices), {'output_shape': (8, 8), 'spatial_rank': 2}
+
+
+register(OpInfo(
+    'nitrix.morphology.max_unpool_nd',
+    fixture=_max_unpool_fixture,
+    diff_arg=0,
+    vmap_arg=None,
+    invariants=(
+        'vmapped per-channel scatter',
+        'argmax-agreement parity (not raw-logit allclose)',
+    ),
+    notes='inverts max_pool_with_indices_nd; indices are int (non-diff)',
+))
+
 # --- smoothing --------------------------------------------------------------
 
 register(OpInfo(
@@ -692,6 +749,50 @@ register(OpInfo(
 ))
 
 
+def _ell_edge_setup():
+    '''Build a GCN-style closure that takes ``x`` as its only
+    positional arg, baking in edge_fn / ell / semiring.  Returns
+    the closure plus a fixture-of-the-closure.
+    '''
+    from nitrix.semiring import REAL, semiring_ell_edge_aggregate
+    from nitrix.sparse import ELL
+    rng = np.random.default_rng(0)
+    n, k_max, d_in = 8, 4, 3
+    values = jnp.asarray(rng.standard_normal((n, k_max)).astype(np.float32))
+    indices = jnp.asarray(rng.integers(0, n, (n, k_max)).astype(np.int32))
+    W = jnp.asarray(rng.standard_normal((4, d_in)).astype(np.float32))
+    ell = ELL(values=values, indices=indices, n_cols=n, identity=0.0)
+
+    def edge_fn(h_i, h_j, w, ij):
+        return w * (W @ h_j)
+
+    def op(x):
+        return semiring_ell_edge_aggregate(edge_fn, ell, x, semiring=REAL)
+
+    def fixture():
+        x = jnp.asarray(rng.standard_normal((n, d_in)).astype(np.float32))
+        return (x,), {}
+
+    return op, fixture
+
+
+_edge_agg_op, _edge_agg_fixture = _ell_edge_setup()
+
+register(OpInfo(
+    'nitrix.semiring.semiring_ell_edge_aggregate',
+    fixture=_edge_agg_fixture,
+    fn_override=_edge_agg_op,
+    diff_arg=0,
+    vmap_arg=0,
+    invariants=(
+        'gather + nested vmap + semiring reduction',
+        'REAL / TROPICAL_MAX_PLUS / TROPICAL_MIN_PLUS supported',
+        'edge_fn signature (h_i, h_j, w, ij)',
+    ),
+    notes='probed with GCN closure; covers GCN/GAT/EdgeConv/MoNet/ChebNet',
+))
+
+
 def _conv_fixture():
     X = jax.random.normal(_key(0), (1, 8, 8, 1))
     K = jax.random.normal(_key(1), (3, 3, 1, 1))
@@ -742,6 +843,160 @@ register(OpInfo(
     vmap_arg=None,
     skip_jit=True,
     invariants=('BFS k-ring on triangle mesh', 'host-side construction'),
+))
+
+
+def _mesh_pool_setup():
+    '''Build a closure-wrapped mesh_pool_max + a fixture that returns
+    only the fine-features ``x`` (ELL is baked in).
+    '''
+    from nitrix.sparse import (
+        icosphere_cross_level_adjacency, icosphere_hierarchy, mesh_pool_max,
+    )
+    rng = np.random.default_rng(0)
+    h = icosphere_hierarchy(max_level=1)
+    pool_ell = icosphere_cross_level_adjacency(h, 0, 1)
+    n_fine = h.meshes[1].n_vertices
+
+    def op(x):
+        return mesh_pool_max(pool_ell, x)
+
+    def fixture():
+        x = jnp.asarray(rng.standard_normal((n_fine, 3)).astype(np.float32))
+        return (x,), {}
+
+    return op, fixture
+
+
+_pool_op, _pool_fixture = _mesh_pool_setup()
+
+register(OpInfo(
+    'nitrix.sparse.mesh_pool_max',
+    fixture=_pool_fixture,
+    fn_override=_pool_op,
+    diff_arg=0,
+    vmap_arg=0,
+    invariants=(
+        'TROPICAL_MAX_PLUS with zero values',
+        'composes semiring_ell_matmul',
+    ),
+    notes='probed against icosphere(0->1) cross-level adjacency',
+))
+
+
+def _mesh_unpool_setup():
+    from nitrix.sparse import (
+        icosphere_bary_upsampler, icosphere_hierarchy, mesh_unpool_max,
+    )
+    rng = np.random.default_rng(0)
+    h = icosphere_hierarchy(max_level=1)
+    bary = icosphere_bary_upsampler(h, 0, 1)
+    n_coarse = h.meshes[0].n_vertices
+
+    def op(x):
+        return mesh_unpool_max(bary, x)
+
+    def fixture():
+        x = jnp.asarray(rng.standard_normal((n_coarse, 3)).astype(np.float32))
+        return (x,), {}
+
+    return op, fixture
+
+
+_unpool_op, _unpool_fixture = _mesh_unpool_setup()
+
+register(OpInfo(
+    'nitrix.sparse.mesh_unpool_max',
+    fixture=_unpool_fixture,
+    fn_override=_unpool_op,
+    diff_arg=0,
+    vmap_arg=0,
+    invariants=(
+        'TROPICAL_MAX_PLUS symmetric of mesh_pool_max',
+    ),
+))
+
+
+def _mesh_bary_setup():
+    from nitrix.sparse import (
+        icosphere_bary_upsampler, icosphere_hierarchy, mesh_bary_upsample,
+    )
+    rng = np.random.default_rng(0)
+    h = icosphere_hierarchy(max_level=1)
+    bary = icosphere_bary_upsampler(h, 0, 1)
+    n_coarse = h.meshes[0].n_vertices
+
+    def op(coarse):
+        return mesh_bary_upsample(bary, coarse)
+
+    def fixture():
+        coarse = jnp.asarray(rng.standard_normal((n_coarse, 3)).astype(np.float32))
+        return (coarse,), {}
+
+    return op, fixture
+
+
+_bary_op, _bary_fixture = _mesh_bary_setup()
+
+register(OpInfo(
+    'nitrix.sparse.mesh_bary_upsample',
+    fixture=_bary_fixture,
+    fn_override=_bary_op,
+    diff_arg=0,
+    vmap_arg=0,
+    invariants=(
+        'REAL semiring_ell_matmul (weighted sum)',
+    ),
+))
+
+
+# Icosphere hierarchy construction (Sprint B) -- host-side, skip_jit.
+
+register(OpInfo(
+    'nitrix.sparse.icosphere_hierarchy',
+    fixture=lambda: ((2,), {}),
+    diff_arg=None,
+    vmap_arg=None,
+    skip_jit=True,
+    invariants=(
+        'recursive subdivision with midpoint cache',
+        'parent-child bookkeeping for cross-level helpers',
+    ),
+    notes='returns IcosphereHierarchy(meshes, parents); host-side',
+))
+
+
+def _hier_pair_fixture():
+    from nitrix.sparse import icosphere_hierarchy
+    h = icosphere_hierarchy(max_level=1)
+    return (h, 0, 1), {}
+
+
+register(OpInfo(
+    'nitrix.sparse.icosphere_cross_level_adjacency',
+    fixture=_hier_pair_fixture,
+    diff_arg=None,
+    vmap_arg=None,
+    skip_jit=True,
+    invariants=(
+        'coarse-to-fine ELL from subdivision parents',
+        'k_max = 1 + max_coarse_degree (6 at L=0->1, 7 at L>=1)',
+    ),
+    notes='consecutive-level only; compose for multi-level',
+))
+
+
+register(OpInfo(
+    'nitrix.sparse.icosphere_bary_upsampler',
+    fixture=_hier_pair_fixture,
+    diff_arg=None,
+    vmap_arg=None,
+    skip_jit=True,
+    invariants=(
+        'fine-from-coarse ELL with bary weights (1, 0) or (0.5, 0.5)',
+        'k_max = 2',
+    ),
+    notes='consecutive-level only; feeds mesh_bary_upsample',
 ))
 
 
