@@ -350,11 +350,23 @@ def distance_transform(
 
     Notes
     -----
-    For an exact Euclidean distance transform on a regular grid the
-    standard reference is Felzenszwalb & Huttenlocher 2012 (the
-    "lower envelope" algorithm, O(N) per pass).  This module's
-    iterative min-plus path is correct for Chebyshev / city-block
-    metrics; Euclidean DT will be a separate function.
+    This is the **chamfer DT** (Chebyshev / Manhattan / arbitrary
+    user-supplied step-cost kernel).  For **exact Euclidean DT**,
+    no nitrix primitive is shipped at first GA; the standard
+    reference is the Felzenszwalb-Huttenlocher 2012 parabolic
+    algorithm, which scipy implements as
+    ``scipy.ndimage.distance_transform_edt``.  Use scipy on host
+    if you need exact EDT and don't need GPU placement /
+    differentiability; a JAX-native EDT primitive
+    (``distance_transform_edt``) is a planned follow-up -- see
+    ``docs/design/perf-audit-2025-05.md``.
+
+    Perf characteristics: per the 2025-05 audit, the iterative
+    chamfer DT here is competitive with scipy's EDT in 3D
+    (1.3-2.0× ratio depending on shape) and lags at small 2D
+    (up to 15× at ``(64, 64)``).  The "lag" reflects an
+    algorithmic mismatch (chamfer vs Euclidean), not a slow
+    implementation; the two functions compute different metrics.
     '''
     spatial_rank = mask.ndim - (mask.ndim - jnp.asarray(mask).ndim)
     # Determine spatial rank from the metric / SE.

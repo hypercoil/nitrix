@@ -14,6 +14,16 @@ be readable on their own, link liberally to the SPEC and to the
 benchmark reports, and survive being plucked into the eventual
 ``docs/explanation/`` tree without major rewriting.
 
+## Quick reference
+
+- [`op_matrix.md`](op_matrix.md) — auto-generated status board for
+  every public op: which JAX transformations (`jit`, `grad`,
+  `vmap`, `jit∘grad`) work, what algorithmic invariants the
+  current implementation declares, and the wall-time ratio
+  against the natural reference where benched.  Regenerate via
+  `python tools/op_matrix.py`; design rationale in
+  [`design/op-matrix.md`](design/op-matrix.md).
+
 ## Index
 
 ### Phase 1: namespace consolidation
@@ -59,6 +69,19 @@ benchmark reports, and survive being plucked into the eventual
 - [`design/ell-on-triton.md`](design/ell-on-triton.md) -- why
   ``semiring_ell_matmul`` runs on JAX unconditionally at first GA, what
   the Triton lowering gap is, and what would change the policy.
+- [`design/op-matrix.md`](design/op-matrix.md) -- the auto-
+  generated op-status board (``docs/op_matrix.md``) and its
+  generator tool (``tools/op_matrix.py``).  Schema, host-
+  snapshot caveat, "what the probes cannot catch."
+- [`design/perf-audit-2025-05.md`](design/perf-audit-2025-05.md)
+  -- audit of un-benched ops vs natural references (numpy /
+  scipy / sklearn / statsmodels).  Headline: nitrix wins 100-800×
+  at fMRI-realistic scales; the single "gap" against
+  ``scipy.ndimage.distance_transform_edt`` is a feature-coverage
+  issue (we ship chamfer DT, scipy ships Euclidean DT) not a
+  speed issue.  Recommendation: doc-only Tier 1 (done); ship
+  ``distance_transform_edt`` as a 1.x follow-up when a consumer
+  asks.
 - [`design/lme.md`](design/lme.md) -- voxelwise linear mixed-
   effects models: ``reml_fit`` (general variance-components REML
   via the FaST-LMM spectral rotation trick) and

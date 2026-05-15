@@ -82,6 +82,20 @@ exact Euclidean DT requires Felzenszwalb-Huttenlocher.  We don't
 ship the approximate version because the API contract of "metric =
 euclidean" should mean exact, not approximate.
 
+### Perf characteristics vs scipy (2025-05 audit)
+
+The 2025-05 perf audit (``docs/design/perf-audit-2025-05.md``)
+measured our iterative chamfer DT against ``scipy.ndimage.distance_transform_edt``.
+At fMRI-realistic 3D shapes, the wall-time ratio (nitrix / scipy)
+is **1.3-2.0×**; at small 2D shapes the ratio rises to **15×**.
+The numbers are misleading because the two functions compute
+**different metrics** (chamfer vs Euclidean) -- they are not
+algorithmically equivalent.  The audit positioned this as a
+"feature coverage gap" (we don't ship exact EDT) rather than an
+"implementation speed gap"; the recommendation is to ship
+``distance_transform_edt`` as a separate primitive when a consumer
+needs exact Euclidean DT.
+
 ## Median filter: deliberately not a semiring op
 
 SPEC_UPDATE §3.4 makes this point sharply: the true median requires

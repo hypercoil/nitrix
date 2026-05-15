@@ -65,6 +65,7 @@ from jaxtyping import Array, Float
 __all__ = ['FLAMEResult', 'flame_two_level']
 
 
+@jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class FLAMEResult:
     '''Per-voxel FLAME fit output.'''
@@ -72,6 +73,13 @@ class FLAMEResult:
     sigma_b_sq: Float[Array, 'V']
     gamma_hat: Float[Array, 'V p']
     log_lik: Float[Array, 'V']
+
+    def tree_flatten(self):
+        return (self.sigma_b_sq, self.gamma_hat, self.log_lik), None
+
+    @classmethod
+    def tree_unflatten(cls, _aux, children):
+        return cls(*children)
 
 
 def _flame_neg_loglik(
