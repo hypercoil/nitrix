@@ -245,6 +245,148 @@ The fix is to rebuild via `tf.keras.Model.from_config(...)` (which preserves the
 
 This isn't a nitrix concern at all (nitrix has no Keras surface), but I'm noting it here so the next port that hits it can find the fix faster.
 
+### 2026-05-18 — SUGAR exercises the implemented topofit primitives + surfaces three deltas (SUGAR)
+
+**Status of the topofit-proposed primitives.** All three primitives the topofit feedback
+entry proposed (`semiring_ell_edge_aggregate`, `icosphere_hierarchy` / `_cross_level_adjacency`
+/ `_bary_upsampler`, `mesh_pool_max` / `mesh_unpool_max` / `mesh_bary_upsample`) **are
+implemented in nitrix today** -- the topofit entry's "Resolved" annotation just hasn't been
+moved to the bottom of this file yet (this entry is the trigger for that bookkeeping).
+
+**Severity.** CONVENIENCE (SUGAR ports without these via port-local vendoring; the deltas
+described below are blast-radius reducers, not blockers). High blast-radius: SUGAR is the
+**second** surface-domain port to need ELL-mesh-graph-conv primitives (topofit was the first),
+which is exactly the second-consumer signal the topofit entry asked for. Both ports' edge-
+functional aggregations and pool / unpool / bary surface land cleanly on the
+**already-implemented** `semiring_ell_edge_aggregate` + `icosphere_*` API; SUGAR adds three
+concrete refinements the topofit entry didn't anticipate.
+
+**What SUGAR is.** Spherical Ultrafast Graph Attention Registration (arXiv 2307.00511; DeepPrep
+pins this for cortical-surface registration via its `pBFSLab/SUGAR` fork). 16 published
+checkpoints: a per-hemisphere rigid net + 4 per-hemisphere non-rigid nets across `fsaverage{3,4,5,6}`.
+All share the same `GatUNet` architecture parameterised on the finest level:
+
+* Encoder: 8 `ResEncodingBlock`s with mean-pool to the next coarser fsaverage level.
+* Bottom: one `ResEncodingBlock` at `fsaverage0` (12 vertices).
+* Decoder: mirror, with mid-edge unpooling (each fine vertex either coincides with a coarse
+  vertex or is the mean of two coarse parents) + skip-cat.
+* Output head: one more `ResEncodingBlock` at the finest level producing per-vertex Euler
+  angles (the rigid variant means-reduces across vertices to a single `(1, 3)` global Euler).
+* Each `ResEncodingBlock` is `(conv1 -> LeakyReLU -> conv2 + residual)` where `conv{1,2}` is
+  literally `torch_geometric.nn.GATv2Conv(share_weights=True, edge_dim=27, num_heads=H)`.
+
+**Confirmation of the topofit proposal.** ~80% of SUGAR's compute is exactly the topofit
+proposal's surface:
+
+* `semiring_ell_edge_aggregate` — the GATv2 forward fits the edge-functional contract.
+* `ell_row_softmax` — required for the GAT attention normalisation (topofit didn't actually
+  consume this; SUGAR is the first real consumer).
+* `icosphere_bary_upsampler` — matches `IcosahedronUnPooling` exactly (mid-edge mean from
+  two parent indices stored in `utils/auxi_data/fsaverage{i}_upsample_neighbors.npz`).
+* `icosphere_hierarchy` — needs to span 7 subdivision levels (fsaverage0..6: 12, 42, 162, 642,
+  2562, 10242, 40962 vertices), matching the topofit proposal's signature.
+
+The ELL row-degree is bounded (`<=7` including self-loop; 6 for non-pole vertices), so the
+ELL layout is friendly: `k_max = 7`, no degenerate padding overhead.
+
+**Delta 1 — `semiring_ell_edge_aggregate` needs an edge-attribute argument.**
+
+The topofit proposal's `edge_fn` signature is
+`Callable[[h_i, h_j, edge_value, (i, j)], message]`. SUGAR's GATv2Conv with `edge_dim=27`
+needs a per-edge tensor: each edge carries a `(F_e,)` Fourier embedding of the midpoint
+coordinate `xyz[i] + xyz[j] / 2`, which gets folded into the attention score and the
+message via a learned `lin_edge: Linear(F_e, H * F_out)`. That's a per-edge tensor distinct
+from the scalar `edge_value` the topofit proposal exposed.
+
+Two ways to fix:
+
+A. **Generalise `edge_fn`'s 3rd argument** to accept either a scalar ELL value or an
+   arbitrary per-edge tensor (`Float[Array, 'k_max F_e]'` per ELL row). The implementation
+   carries an extra `edge_attr: Optional[Float[Array, '*batch n_vertices k_max F_e']]`
+   argument on `semiring_ell_edge_aggregate`. When `edge_attr` is None, the third
+   `edge_fn` arg is `ell.values[i, p]` as before. When set, it's `edge_attr[i, p, :]`.
+
+B. **A separate primitive** like `semiring_ell_edge_aggregate_with_edge_attr` to keep the
+   simpler topofit signature intact.
+
+Option A reads cleaner in practice — the GATv2 case becomes one extra kwarg at the call site,
+and the topofit's edge_value-only case stays an explicit `edge_attr=None`. Existing callers
+need no change.
+
+**Delta 2 — `mesh_coarsen_meanpool` as a sibling of `mesh_bary_upsample`.**
+
+Topofit proposed `mesh_pool_max` (max-monoid over a cross-level ELL). SUGAR's
+`IcosahedronPooling` is **mean over a fine-vertex neighbourhood with self-loops**: for each
+coarse vertex `i`, take the mean of its child fine-vertex features and its own previous-level
+feature. This is `scatter_mean` over a `(parent, child)`-edge ELL with self-loops included
+on each parent row.
+
+The topofit proposal correctly noted that max-pool over an ELL maps to `semiring_ell_matmul`
+under the MAX monoid. The same composition trick works for mean-pool under the
+`SumMonoid / count` semiring -- or more precisely, two `semiring_ell_matmul` calls: one to
+sum over neighbours, another (with a values-only-ones ELL) to count them, then divide. But the
+two-call recipe is awkward to discover; a one-liner helper
+
+```python
+def mesh_coarsen_meanpool(
+    coarsen_ell: ELL,             # rows = coarse vertices, cols = fine + self
+    fine_features: Float[Array, '*batch n_fine F']
+) -> Float[Array, '*batch n_coarse F']:
+    ...
+```
+
+would let SUGAR / topofit / any future surface-coarsening consumer call one function. The
+existing `mesh_pool_max` proposal becomes its sibling.
+
+**Delta 3 — FreeSurfer fsaverage topology source.**
+
+The topofit proposal's `icosphere_hierarchy(n_levels)` returns a math-canonical subdivided
+icosphere (the same one `nitrix.sparse.mesh.icosphere` already builds). SUGAR's pre-trained
+checkpoints were trained against **FreeSurfer's actual `fsaverage{0..6}.sphere` topology**
+(loaded via `nibabel.freesurfer.read_geometry`), which has different vertex ordering and
+slightly different vertex coordinates from the math icosphere. The trained ELL-GAT
+weights only round-trip if the topology at inference time matches the topology at training time.
+
+So `icosphere_hierarchy` needs either:
+
+A. An optional `topology_source: Literal['math', 'freesurfer']` kwarg (with `'freesurfer'`
+   sourcing the per-level vertices / faces from a fsaverage subjects-dir path).
+B. A dedicated `freesurfer_fsaverage_hierarchy(subjects_dir)` parallel to
+   `icosphere_hierarchy`.
+
+The clean separation is (B): FreeSurfer is a specific upstream choice with its own
+distribution mechanism (the `.sphere` binaries under `$SUBJECTS_DIR/fsaverage*/surf/`) and
+its own per-vertex sulc-normalisation training-set statistics. nitrix can stay
+math-canonical; ports that need the FreeSurfer topology pass the right hatch in.
+
+The matching pool / bary primitives for the FreeSurfer hierarchy should also branch on the
+hatch:
+
+* The mid-edge `_upsample_neighbors.npz` (precomputed by SUGAR's authors, dumped from the
+  actual FreeSurfer subdivision) gives the bary upsampler's `(fine_vertex,
+  parent_a, parent_b)` triples directly.
+* The IcosahedronPooling neighborhood is the same triples flipped (`(parent_x, child_set)`),
+  with self-loops added on each parent row.
+
+**Port-local vendoring path (what SUGAR ships today).** Pending the upstream lift, the
+SUGAR port at `ilex/src/ilex/models/sugar/_mesh.py` vendors:
+
+* `FsaverageHierarchy` -- the per-level FreeSurfer mesh + cross-level adjacency tuples,
+  loaded from a bundled `auxi_data/` subdirectory (the `.sphere` + `.npz` files).
+* `GATv2Aggregate` -- the SUGAR-specific GATv2 forward, written directly against
+  `nitrix.sparse.ELL` + `nitrix.semiring.semiring_ell_matmul` for the sum-aggregate path,
+  with port-local attention pre-pass (scores -> row-softmax -> messages).
+* `IcosahedronPooling` / `IcosahedronUnPooling` -- pure-JAX scatter_mean / mid-edge mean,
+  both consuming the cross-level adjacency from `FsaverageHierarchy`.
+
+This vendoring is intentional and tracked alongside the topofit vendoring. When the deltas
+above land in nitrix, both ports' port-local primitives lift to the shared surface and the
+adapters reduce by ~150 LOC each.
+
+**Backend story.** Same as topofit. The SUGAR forward at `fsaverage6` (40962 vertices) is
+the largest mesh-domain workload in ilex; a Pallas-backed `semiring_ell_edge_aggregate` would
+benefit SUGAR most. Fallback JAX is acceptable at inference time.
+
 ## Resolved findings
 
 *(empty — first entry will be transferred here once a `nitrix` PR closes one of the open findings.)*
