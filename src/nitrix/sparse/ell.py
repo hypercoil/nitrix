@@ -16,7 +16,7 @@ SPEC_UPDATE §3.2) will live in ``nitrix.sparse.ell_sectioned``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 import jax.numpy as jnp
@@ -29,6 +29,7 @@ __all__ = [
     'ell_from_dense',
     'ell_to_dense',
     'ell_pad',
+    'ell_mask',
 ]
 
 
@@ -212,6 +213,92 @@ def ell_from_dense(
         n_cols=n,
         identity=identity,
     )
+
+
+def ell_mask(
+    ell: ELL,
+    valid: Num[Array, '...'],
+    *,
+    identity: Any,
+) -> ELL:
+    '''Mask edges out of an ELL by setting their value to a semiring identity.
+
+    Brain geometries are routinely *incomplete*: the cortical-surface
+    medial wall is excluded from analysis, and volumetric work is often
+    restricted to a grey-matter (or otherwise thresholded) mask.  Edges
+    that reach a masked vertex / voxel must contribute the **semiring
+    identity** to every reduction -- so no FLOPs and, crucially, no
+    *signal* leak in from the uninteresting region.
+
+    This helper rewrites the masked positions of ``ell.values`` to
+    ``identity`` and stamps ``identity`` onto the returned ELL's
+    ``identity`` field, so the result is a drop-in operand for
+    ``semiring_ell_matmul`` / ``semiring_ell_edge_aggregate`` under a
+    semiring whose identity is ``identity``.
+
+    **Why this is a true no-op (and the one algebra where it is not).**
+    An edge with value ``z`` is a no-op iff ``z`` is the ``(*)``
+    *annihilator* of the algebra -- the element with ``z (*) b ==
+    monoid_identity`` for every ``b`` -- because the reduction computes
+    ``(+)_p ( values[i, p] (*) B[indices[i, p]] )``.  For the built-in
+    algebras the annihilator equals ``semiring.identity``:
+
+    ===================  ============  ====================
+    Algebra              ``(*)``       annihilator (= id)
+    ===================  ============  ====================
+    ``REAL``             ``a * b``     ``0``
+    ``LOG``              ``a + b``     ``-inf``
+    ``TROPICAL_MAX_PLUS````a + b``     ``-inf``
+    ``TROPICAL_MIN_PLUS````a + b``     ``+inf``
+    ``BOOLEAN``          ``a and b``   ``False``
+    ===================  ============  ====================
+
+    Pass ``identity=semiring.identity`` and the masked edge vanishes
+    regardless of where its (still in-range) index points.
+
+    ``EUCLIDEAN`` is the exception: its ``(*)`` is ``(a - b)**2``, which
+    has **no** annihilator (``(z - b)**2`` cannot be ``0`` for all
+    ``b``), so its ``identity`` of ``0`` does **not** mask -- it injects
+    ``B[idx]**2`` instead.  Mask EUCLIDEAN neighbourhoods by dropping the
+    columns from the index structure (do not include the edge), not via
+    this helper.
+
+    Parameters
+    ----------
+    ell
+        Adjacency / operator in ELL format.
+    valid
+        Boolean keep-mask.  Either:
+
+        - shape ``(n_cols,)`` -- a per-column (target vertex / voxel)
+          mask; an edge is masked when ``valid[ell.indices[i, p]]`` is
+          ``False`` (the medial-wall / grey-matter case); or
+        - shape ``ell.indices.shape`` -- an explicit per-edge mask.
+
+    identity
+        The value written into masked positions.  Use
+        ``semiring.identity`` for the algebra you will reduce under.
+
+    Returns
+    -------
+    A new ``ELL`` with masked values set to ``identity`` and
+    ``.identity = identity``.  ``indices`` is unchanged (masked indices
+    stay in-range, so no gather goes out of bounds).
+    '''
+    valid = jnp.asarray(valid)
+    if valid.shape == (ell.n_cols,):
+        edge_valid = valid[ell.indices]
+    elif valid.shape == tuple(ell.indices.shape):
+        edge_valid = valid
+    else:
+        raise ValueError(
+            f'ell_mask: valid.shape={tuple(valid.shape)} must be '
+            f'(n_cols,)=({ell.n_cols},) for a column mask or '
+            f'{tuple(ell.indices.shape)} for an edge mask.'
+        )
+    id_val = jnp.asarray(identity, dtype=ell.values.dtype)
+    new_values = jnp.where(edge_valid, ell.values, id_val)
+    return replace(ell, values=new_values, identity=identity)
 
 
 def ell_to_dense(ell: ELL) -> Num[Array, 'm n']:

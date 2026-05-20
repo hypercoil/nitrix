@@ -14,6 +14,7 @@ No ``jax.experimental.sparse`` dependency anywhere.
 from .ell import (
     ELL,
     ell_from_dense,
+    ell_mask,
     ell_to_dense,
     ell_pad,
 )
@@ -34,7 +35,9 @@ from .mesh import (
     icosphere_bary_upsampler,
     icosphere_cross_level_adjacency,
     icosphere_hierarchy,
+    icosphere_hierarchy_from_levels,
     mesh_bary_upsample,
+    mesh_coarsen_meanpool,
     mesh_cotangent_laplacian,
     mesh_k_ring_adjacency,
     mesh_pool_max,
@@ -45,6 +48,7 @@ __all__ = [
     # ell
     'ELL',
     'ell_from_dense',
+    'ell_mask',
     'ell_to_dense',
     'ell_pad',
     # sectioned ell
@@ -62,7 +66,9 @@ __all__ = [
     'icosphere_bary_upsampler',
     'icosphere_cross_level_adjacency',
     'icosphere_hierarchy',
+    'icosphere_hierarchy_from_levels',
     'mesh_bary_upsample',
+    'mesh_coarsen_meanpool',
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
     'mesh_pool_max',

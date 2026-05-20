@@ -39,8 +39,9 @@ Use cases:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Tuple
+from typing import Optional, Sequence, Tuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int
@@ -55,7 +56,9 @@ __all__ = [
     'icosphere_bary_upsampler',
     'icosphere_cross_level_adjacency',
     'icosphere_hierarchy',
+    'icosphere_hierarchy_from_levels',
     'mesh_bary_upsample',
+    'mesh_coarsen_meanpool',
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
     'mesh_pool_max',
@@ -296,6 +299,118 @@ def icosphere_hierarchy(max_level: int) -> IcosphereHierarchy:
     )
 
 
+def icosphere_hierarchy_from_levels(
+    meshes: Sequence[Mesh],
+    parents: Sequence[Optional[Int[Array, 'n_fine 2']]],
+) -> IcosphereHierarchy:
+    '''Package caller-supplied per-level meshes + parent tables into a hierarchy.
+
+    Use this when the subdivision hierarchy does **not** come from
+    nitrix's own math-canonical ``icosphere`` -- most importantly when
+    the per-level meshes are an external icosphere-subdivision family
+    with a different vertex ordering and coordinates, e.g. FreeSurfer's
+    ``fsaverage{0..6}.sphere``.  Pre-trained surface models (SUGAR,
+    SphereMorph, ...) are tied to the *exact* topology they were trained
+    on, so inference must run on that topology, not the math icosphere.
+
+    **nitrix does not source the topology.**  Reading FreeSurfer
+    ``.sphere`` binaries (``nibabel.freesurfer.read_geometry``),
+    resolving ``$SUBJECTS_DIR``, or loading any neuroimaging container
+    is outside nitrix's dependency contract (SPEC §5.2: no ``nibabel``,
+    no filesystem / container concerns -- those live in ``thrux`` or the
+    consuming port).  The caller reads the files and hands nitrix plain
+    arrays; this constructor validates them and produces the same
+    ``IcosphereHierarchy`` that ``icosphere_hierarchy`` builds.  Every
+    cross-level operator -- ``icosphere_cross_level_adjacency``,
+    ``icosphere_bary_upsampler``, ``mesh_pool_max``,
+    ``mesh_coarsen_meanpool`` -- then works unchanged and with no
+    topology-source branching, because they depend only on the parent
+    tables and per-level vertex counts, not on the coordinates being
+    math-canonical.
+
+    Parameters
+    ----------
+    meshes
+        Per-level ``Mesh`` objects at consecutive subdivision levels,
+        coarse first.  ``meshes[0]`` is the base level.
+    parents
+        Same length as ``meshes``.  ``parents[0]`` must be ``None`` (the
+        base level has no parent).  For ``L >= 1``, ``parents[L]`` is an
+        ``(n_vertices_at_L, 2)`` integer array giving each fine vertex's
+        parentage relative to level ``L - 1``, following the
+        ``IcosphereHierarchy.parents`` convention:
+
+        - a coarse-original fine vertex (preserved in place at the same
+          index ``v``) has ``parents[L][v] == (v, v)``;
+        - a midpoint of coarse edge ``(a, b)`` has
+          ``parents[L][v] == (a, b)``.
+
+        For a FreeSurfer hierarchy the consumer derives these triples
+        from the precomputed mid-edge tables (e.g. SUGAR's
+        ``fsaverage{i}_upsample_neighbors.npz``).
+
+    Returns
+    -------
+    ``IcosphereHierarchy``.
+
+    Raises
+    ------
+    ValueError
+        If the lengths disagree, ``parents[0]`` is not ``None``, a
+        non-base parent table has the wrong shape, its row count does
+        not match the corresponding mesh, or any parent index is out of
+        range for the coarser level.
+    '''
+    meshes = tuple(meshes)
+    parents = tuple(parents)
+    if len(meshes) == 0:
+        raise ValueError('icosphere_hierarchy_from_levels: meshes is empty.')
+    if len(meshes) != len(parents):
+        raise ValueError(
+            f'icosphere_hierarchy_from_levels: len(meshes)={len(meshes)} '
+            f'!= len(parents)={len(parents)}.'
+        )
+    if parents[0] is not None:
+        raise ValueError(
+            'icosphere_hierarchy_from_levels: parents[0] must be None '
+            '(the base level has no parent).'
+        )
+    parents_norm: list = [None]
+    for L in range(1, len(meshes)):
+        p = parents[L]
+        if p is None:
+            raise ValueError(
+                f'icosphere_hierarchy_from_levels: parents[{L}] must not '
+                'be None for a non-base level.'
+            )
+        p_np = np.asarray(p)
+        if p_np.ndim != 2 or p_np.shape[1] != 2:
+            raise ValueError(
+                f'icosphere_hierarchy_from_levels: parents[{L}].shape='
+                f'{p_np.shape} must be (n_fine, 2).'
+            )
+        n_fine = meshes[L].n_vertices
+        if p_np.shape[0] != n_fine:
+            raise ValueError(
+                f'icosphere_hierarchy_from_levels: parents[{L}] has '
+                f'{p_np.shape[0]} rows but meshes[{L}] has {n_fine} '
+                'vertices.'
+            )
+        n_coarse = meshes[L - 1].n_vertices
+        if p_np.size and (int(p_np.min()) < 0 or int(p_np.max()) >= n_coarse):
+            raise ValueError(
+                f'icosphere_hierarchy_from_levels: parents[{L}] indices '
+                f'must lie in [0, {n_coarse}) (the level-{L - 1} vertex '
+                'range).'
+            )
+        parents_norm.append(p_np.astype(np.int64))
+
+    return IcosphereHierarchy(
+        meshes=meshes,
+        parents=tuple(parents_norm),
+    )
+
+
 def _validate_consecutive(hier: IcosphereHierarchy, coarse: int, fine: int) -> None:
     if fine != coarse + 1:
         raise ValueError(
@@ -325,9 +440,16 @@ def icosphere_cross_level_adjacency(
     - Every fine vertex that is a midpoint of an edge ``(i, j)``
       incident to ``i`` in the coarse mesh.
 
-    The stored ``values`` are zeros (the TROPICAL_MAX_PLUS identity
-    is in ``.identity``), so this ELL feeds directly into
-    ``mesh_pool_max(adj, fine_features)``.
+    The stored ``values`` are a ``1.0 / 0.0`` validity indicator: ``1``
+    at real (vertex, child) entries and ``0`` at padding.  This serves
+    both downstream consumers without a per-consumer rebuild:
+
+    - ``mesh_pool_max(adj, fine_features)`` ignores the values (it
+      substitutes the TROPICAL_MAX_PLUS identity internally), so the
+      indicator is harmless there.
+    - ``mesh_coarsen_meanpool(adj, fine_features)`` reads the indicator
+      directly as the per-edge weight and as the per-row count, so a
+      row-mean over the real children falls out for free.
 
     Parameters
     ----------
@@ -341,7 +463,9 @@ def icosphere_cross_level_adjacency(
     -------
     ``ELL`` of shape ``(n_coarse, n_fine)`` with
     ``k_max = 1 + max_coarse_degree`` (6 for the base icosahedron,
-    7 for every subdivided level).
+    7 for every subdivided level).  ``values`` carry a ``1.0 / 0.0``
+    validity indicator (real entries / padding); ``identity`` is the
+    REAL identity ``0.0``.
     '''
     _validate_consecutive(hierarchy, coarse_level, fine_level)
     n_coarse = hierarchy.meshes[coarse_level].n_vertices
@@ -370,6 +494,7 @@ def icosphere_cross_level_adjacency(
             indices_np[i, :] = i
             continue
         indices_np[i, : len(row)] = row
+        values_np[i, : len(row)] = 1.0  # validity indicator
         if len(row) < k_max:
             indices_np[i, len(row):] = row[0]
 
@@ -377,7 +502,7 @@ def icosphere_cross_level_adjacency(
         values=jnp.asarray(values_np),
         indices=jnp.asarray(indices_np),
         n_cols=n_fine,
-        identity=-float(jnp.inf),
+        identity=0.0,
     )
 
 
@@ -730,6 +855,31 @@ def mesh_cotangent_laplacian(
 # have to know the substrate idiom by heart.
 
 
+def _apply_shared_ell(values, indices, B, *, semiring, n_cols):
+    '''Apply a *shared* (un-batched) ELL to possibly-batched features.
+
+    ``semiring_ell_matmul`` vmaps over leading dims that are present on
+    *all* of ``values`` / ``indices`` / ``B``.  The cross-level wrappers
+    hold a single 2-D ELL (one per (coarse, fine) level pair) and apply
+    it to features ``(..., n, d)`` whose leading axes are batch / channel
+    groupings.  We vmap the 2-D core over those leading axes so the same
+    operator broadcasts across the batch without materialising a batched
+    copy of the ELL.
+    '''
+    from ..semiring import semiring_ell_matmul
+
+    def core(b2d):
+        return semiring_ell_matmul(
+            values, indices, b2d,
+            semiring=semiring, n_cols=n_cols, backend='jax',
+        )
+
+    fn = core
+    for _ in range(B.ndim - 2):
+        fn = jax.vmap(fn)
+    return fn(B)
+
+
 def mesh_pool_max(
     cross_level_adjacency,
     fine_features: Float[Array, '... n_fine d'],
@@ -761,15 +911,69 @@ def mesh_pool_max(
     -------
     ``(..., n_coarse, d)`` per-vertex coarse-level features.
     '''
-    from ..semiring import TROPICAL_MAX_PLUS, semiring_ell_matmul
+    from ..semiring import TROPICAL_MAX_PLUS
 
     zeros = jnp.zeros_like(cross_level_adjacency.values)
-    return semiring_ell_matmul(
+    return _apply_shared_ell(
         zeros, cross_level_adjacency.indices, fine_features,
         semiring=TROPICAL_MAX_PLUS,
         n_cols=cross_level_adjacency.n_cols,
-        backend='jax',
     )
+
+
+def mesh_coarsen_meanpool(
+    coarsen_ell,
+    fine_features: Float[Array, '... n_fine d'],
+):
+    '''Mean-pool fine-level features to a coarse level via an ELL adjacency.
+
+    For each coarse vertex ``i``, returns the ``values``-weighted mean
+    of the fine-vertex features it gathers::
+
+        out[i, :] = (sum_p values[i, p] * fine[indices[i, p], :])
+                    / (sum_p values[i, p])
+
+    With the ``1.0 / 0.0`` validity indicator that
+    ``icosphere_cross_level_adjacency`` stores, this is a plain mean
+    over the real children of coarse vertex ``i`` (the padding columns,
+    weight ``0``, drop out of both sum and count).  A coarse vertex
+    whose row is entirely padding returns zeros rather than ``NaN``.
+
+    This is the mean-pool sibling of ``mesh_pool_max`` (max over the
+    same children).  It matches the "scatter-mean with self-loop"
+    coarsening used by surface-domain encoders (e.g. SUGAR's
+    ``IcosahedronPooling``): the coarse vertex's own previous-level
+    feature is included because the coarse-original fine vertex is one
+    of the children in the cross-level adjacency row.
+
+    The op is documented sugar over ``semiring_ell_matmul`` under
+    ``REAL``: the numerator is one matmul; the denominator is the
+    per-row sum of ``values`` (no second matmul needed).
+
+    Parameters
+    ----------
+    coarsen_ell
+        ``ELL`` of shape ``(n_coarse, n_fine)``; row ``i`` (coarse
+        vertex) lists the fine vertices belonging to coarse vertex
+        ``i``, with ``values`` the per-edge weight (use the ``1.0 /
+        0.0`` indicator from ``icosphere_cross_level_adjacency`` for an
+        unweighted mean).
+    fine_features
+        ``(..., n_fine, d)`` per-vertex fine-level features.
+
+    Returns
+    -------
+    ``(..., n_coarse, d)`` per-vertex coarse-level features.
+    '''
+    from ..semiring import REAL
+
+    num = _apply_shared_ell(
+        coarsen_ell.values, coarsen_ell.indices, fine_features,
+        semiring=REAL, n_cols=coarsen_ell.n_cols,
+    )
+    denom = jnp.sum(coarsen_ell.values, axis=-1)  # (n_coarse,)
+    denom = jnp.where(denom > 0, denom, 1.0)
+    return num / denom[..., None]
 
 
 def mesh_unpool_max(
@@ -789,14 +993,13 @@ def mesh_unpool_max(
     Parameters / Returns mirror ``mesh_pool_max`` with the levels
     swapped.
     '''
-    from ..semiring import TROPICAL_MAX_PLUS, semiring_ell_matmul
+    from ..semiring import TROPICAL_MAX_PLUS
 
     zeros = jnp.zeros_like(cross_level_adjacency.values)
-    return semiring_ell_matmul(
+    return _apply_shared_ell(
         zeros, cross_level_adjacency.indices, coarse_features,
         semiring=TROPICAL_MAX_PLUS,
         n_cols=cross_level_adjacency.n_cols,
-        backend='jax',
     )
 
 
@@ -833,9 +1036,9 @@ def mesh_bary_upsample(
     -------
     ``(..., n_fine, d)`` upsampled values.
     '''
-    from ..semiring import REAL, semiring_ell_matmul
+    from ..semiring import REAL
 
-    return semiring_ell_matmul(
+    return _apply_shared_ell(
         bary_ell.values, bary_ell.indices, coarse_coords,
-        semiring=REAL, n_cols=bary_ell.n_cols, backend='jax',
+        semiring=REAL, n_cols=bary_ell.n_cols,
     )

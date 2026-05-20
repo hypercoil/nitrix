@@ -232,7 +232,12 @@ def toeplitz_2d(
         c_arg = jnp.full(d, fill_value, dtype=c.dtype).at[:m_in].set(c)
     else:
         r_arg, c_arg = r, c
-    c_arg = jnp.flip(c_arg, -1)
+    # Index-based reverse rather than ``jnp.flip``: the ``reverse`` HLO that
+    # ``flip`` emits trips an XLA CPU ``AlgebraicSimplifier::HandleReverse``
+    # CHECK-failure ("Invalid binary instruction opcode map") on this graph
+    # under jax >= 0.10 (a hard compiler abort, not a Python error).  A gather
+    # produces identical output at negligible cost and avoids the bug.
+    c_arg = c_arg[..., jnp.arange(d - 1, -1, -1)]
 
     mask = jnp.zeros(2 * d - 1, dtype=bool).at[: (d - 1)].set(True)
     iota = jnp.arange(d)

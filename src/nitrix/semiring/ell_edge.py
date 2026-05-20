@@ -85,29 +85,32 @@ References
 """
 from __future__ import annotations
 
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Int, Num
+from jaxtyping import Array, Float, Num
 
 from ..sparse.ell import ELL
 from ._types import Semiring
 from .algebras import REAL, TROPICAL_MAX_PLUS, TROPICAL_MIN_PLUS
 
 
-__all__ = ['semiring_ell_edge_aggregate']
+__all__ = ['semiring_ell_edge_aggregate', 'ell_row_softmax']
 
 
-EdgeFn = Callable[
-    [
-        Num[Array, 'd_in'],  # h_i: source vertex feature
-        Num[Array, 'd_in'],  # h_j: neighbour vertex feature
-        Num[Array, ''],       # w:   stored edge value (= ell.values[i, p])
-        Int[Array, '2'],      # ij:  (i, j) index pair
-    ],
-    Num[Array, 'd_out'],
-]
+# ``edge_fn`` has two arities depending on whether ``edge_attr`` is
+# supplied to ``semiring_ell_edge_aggregate``:
+#
+# - ``edge_attr is None`` (default): four positional args
+#   ``(h_i, h_j, w, ij) -> e`` where ``w`` is the stored scalar edge
+#   value ``ell.values[i, p]``.
+# - ``edge_attr`` set: five positional args
+#   ``(h_i, h_j, w, ij, a) -> e`` where ``a`` is the per-edge attribute
+#   vector ``edge_attr[i, p, :]``.  ``w`` is still passed (it remains the
+#   canonical padding signal); ``a`` carries the arbitrary per-edge
+#   tensor (e.g. a GATv2 ``edge_dim`` Fourier embedding of the midpoint).
+EdgeFn = Callable[..., Num[Array, 'd_out']]
 
 
 def _reduce_by_semiring(
@@ -152,31 +155,36 @@ def semiring_ell_edge_aggregate(
     x: Num[Array, '... n d_in'],
     *,
     semiring: Semiring = REAL,
+    edge_attr: Optional[Num[Array, 'n k_max d_e']] = None,
 ) -> Num[Array, '... n d_out']:
     '''Per-edge functional aggregation over an ELL adjacency.
 
     For each ``(i, p)`` in the ELL pattern with ``j = ell.indices[i,
     p]``, build a per-edge message via the user-supplied callable
-    ``edge_fn(x[i], x[j], ell.values[i, p], (i, j))``, then aggregate
-    per row under ``semiring``:
+    ``edge_fn``, then aggregate per row under ``semiring``:
 
     .. code::
 
-        out[i] = (+)_p edge_fn(x[i], x[indices[i, p]], values[i, p], (i, j))
+        out[i] = (+)_p edge_fn(x[i], x[indices[i, p]], values[i, p], (i, j)[, a])
 
-    The ``edge_fn`` signature is fixed: it always receives the
-    source feature, the neighbour feature, the stored edge value,
-    and the ``(i, j)`` index pair.  Use of any subset is up to the
-    callable; e.g., a GCN-style fn ignores the index pair, a MoNet
-    fn uses it to look up coordinates.
+    The ``edge_fn`` signature depends on ``edge_attr``: with the
+    default ``edge_attr=None`` it receives the source feature, the
+    neighbour feature, the stored scalar edge value, and the
+    ``(i, j)`` index pair.  When ``edge_attr`` is supplied it receives
+    a fifth argument: the per-edge attribute vector
+    ``edge_attr[i, p, :]``.  Use of any subset is up to the callable;
+    e.g., a GCN-style fn ignores the index pair, a MoNet fn uses it to
+    look up coordinates, a GATv2 fn folds the edge attribute into the
+    score and the message.
 
     Parameters
     ----------
     edge_fn
-        Callable ``(h_i, h_j, w, ij) -> e``.  Operates on a single
-        edge; vectorised internally via ``jax.vmap`` over the
-        ``(i, p)`` index pair.  See the EdgeFn type alias for the
-        argument shapes.
+        Callable ``(h_i, h_j, w, ij) -> e`` (or
+        ``(h_i, h_j, w, ij, a) -> e`` when ``edge_attr`` is set).
+        Operates on a single edge; vectorised internally via
+        ``jax.vmap`` over the ``(i, p)`` index pair.  See the EdgeFn
+        type alias for the argument shapes.
     ell
         Adjacency in ELL format.  ``ell.indices`` indexes ``x``'s
         ``n`` axis; ``ell.values`` carries the per-edge stored
@@ -188,6 +196,19 @@ def semiring_ell_edge_aggregate(
         Aggregation algebra.  Default ``REAL`` (sum); also supports
         ``TROPICAL_MAX_PLUS`` and ``TROPICAL_MIN_PLUS``.  Other
         semirings raise (see the ``_reduce_by_semiring`` docstring).
+    edge_attr
+        Optional per-edge attribute tensor, ``(n, k_max, d_e)``,
+        aligned with the ELL pattern: ``edge_attr[i, p, :]`` is the
+        attribute of the edge from ``i`` to ``ell.indices[i, p]``.
+        When given, ``edge_fn`` is called with a fifth positional
+        argument ``a = edge_attr[i, p, :]`` in addition to the scalar
+        ``w``.  This carries an arbitrary per-edge vector (e.g. the
+        ``edge_dim`` Fourier embedding GATv2 mixes into the attention
+        score and message) that the scalar ``w`` cannot hold.  The
+        attribute is **shared across the leading batch axes of ``x``**,
+        exactly like ``ell.values`` -- the common case is geometric
+        edge data that does not vary per batch element.  ``None``
+        (default) keeps the four-argument ``edge_fn`` contract.
 
     Returns
     -------
@@ -202,7 +223,8 @@ def semiring_ell_edge_aggregate(
     message by ``w`` (the stored value) -- gives zero contribution
     at REAL padding for free.  Functions that don't multiply by
     ``w`` (e.g., pure-attention readouts) must mask explicitly via
-    ``jnp.where(w == 0, identity, e)``.
+    ``jnp.where(w == 0, identity, e)``.  ``w`` is passed regardless of
+    ``edge_attr`` for exactly this reason.
 
     **Composability examples.**
 
@@ -221,6 +243,19 @@ def semiring_ell_edge_aggregate(
         def edge_fn(h_i, h_j, w, ij):
             i, j = ij[0], ij[1]
             return gaussian_kernel(coord[i] - coord[j]) * (W @ h_j)
+
+    GATv2 with edge features (Brody et al.; the SUGAR case), using
+    ``edge_attr`` and ``ell_row_softmax`` for the attention pre-pass::
+
+        # scores[i, p] = attention logit over (h_i, h_j, a); the per-edge
+        # attribute ``a`` enters both the score and the message.
+        alpha = ell_row_softmax(scores, ell)           # (n, k_max)
+        def edge_fn(h_i, h_j, w, ij, a):
+            return w * (W @ h_j + W_e @ a)              # message
+        out = semiring_ell_edge_aggregate(
+            edge_fn, dataclasses.replace(ell, values=alpha), x,
+            edge_attr=edge_attr,
+        )
     '''
     n = x.shape[-2]
     k_max = ell.k_max
@@ -236,18 +271,91 @@ def semiring_ell_edge_aggregate(
     j_grid = ell.indices
     ij_grid = jnp.stack([i_grid, j_grid], axis=-1)  # (n, k_max, 2)
 
-    # Vectorise edge_fn over (i, p) -- inner vmap over p, outer over n.
-    # The function sees a single edge per call.
-    inner = jax.vmap(edge_fn, in_axes=(0, 0, 0, 0))   # over p
-    outer = jax.vmap(inner, in_axes=(0, 0, 0, 0))     # over n
-
-    # Handle batch dims via additional vmaps.  Only x_src and
-    # x_neigh have a batch axis; values and ij_grid are shared.
-    fn = outer
-    for _ in range(x.ndim - 2):
-        fn = jax.vmap(fn, in_axes=(0, 0, None, None))
-
-    e = fn(x_src, x_neigh, ell.values, ij_grid)
+    if edge_attr is None:
+        # Vectorise edge_fn over (i, p) -- inner vmap over p, outer
+        # over n.  The function sees a single edge per call.
+        inner = jax.vmap(edge_fn, in_axes=(0, 0, 0, 0))   # over p
+        outer = jax.vmap(inner, in_axes=(0, 0, 0, 0))     # over n
+        # Batch dims: x_src / x_neigh carry them; values and ij_grid
+        # are shared.
+        fn = outer
+        for _ in range(x.ndim - 2):
+            fn = jax.vmap(fn, in_axes=(0, 0, None, None))
+        e = fn(x_src, x_neigh, ell.values, ij_grid)
+    else:
+        if edge_attr.shape[:2] != (n, k_max):
+            raise ValueError(
+                f'semiring_ell_edge_aggregate: edge_attr.shape='
+                f'{tuple(edge_attr.shape)} must lead with (n, k_max)='
+                f'{(n, k_max)} matching the ELL pattern.'
+            )
+        # Five-arg edge_fn: extra vmapped axis for the per-edge
+        # attribute.  ``edge_attr`` is shared across batch dims, like
+        # ``ell.values``.
+        inner = jax.vmap(edge_fn, in_axes=(0, 0, 0, 0, 0))  # over p
+        outer = jax.vmap(inner, in_axes=(0, 0, 0, 0, 0))    # over n
+        fn = outer
+        for _ in range(x.ndim - 2):
+            fn = jax.vmap(fn, in_axes=(0, 0, None, None, None))
+        e = fn(x_src, x_neigh, ell.values, ij_grid, edge_attr)
     # e shape: (..., n, k_max, d_out)
 
     return _reduce_by_semiring(e, semiring, axis=-2)
+
+
+def ell_row_softmax(
+    scores: Float[Array, '... n k_max'],
+    ell: ELL,
+) -> Float[Array, '... n k_max']:
+    '''Row-wise softmax over the ELL neighbour slots, masking padding.
+
+    Normalises ``scores`` along the ``k_max`` (neighbour) axis so each
+    row sums to 1, with the ELL's padding positions excluded from both
+    the numerator and the denominator.  This is the attention
+    pre-pass for GAT / GATv2-style aggregation: compute per-edge
+    scores, ``ell_row_softmax`` them into attention weights, then feed
+    the weights as the ELL ``values`` (or multiply them into the
+    message) of a ``semiring_ell_edge_aggregate`` under ``REAL``.
+
+    Padding is identified from the ELL convention: pad slots carry
+    ``ell.values == ell.identity``.  Those positions are forced to
+    ``-inf`` before the softmax (so they contribute ``0`` after the
+    exponential) and contribute ``0`` to the denominator.  A row that
+    is entirely padding (an isolated vertex) returns all-zero weights
+    rather than ``NaN``.
+
+    Unlike the rest of this module, ``ell_row_softmax`` takes the
+    whole ``ELL`` rather than a bare ``indices`` array: it needs
+    ``ell.values`` / ``ell.identity`` to build the padding mask.  When
+    ``ell.identity`` is ``None`` (sentinels handled by the caller) no
+    masking is applied and every slot participates.
+
+    Parameters
+    ----------
+    scores
+        Per-edge attention logits aligned with the ELL pattern,
+        ``(..., n, k_max)``.  ``scores[..., i, p]`` is the score of the
+        edge from ``i`` to ``ell.indices[i, p]``.
+    ell
+        The adjacency whose padding structure defines which slots are
+        real edges.
+
+    Returns
+    -------
+    Row-normalised attention weights, same shape as ``scores``; each
+    real-edge row sums to 1 along the ``k_max`` axis.
+    '''
+    if ell.identity is None:
+        valid = jnp.ones(scores.shape, dtype=bool)
+    else:
+        valid = ell.values != ell.identity
+    neg_inf = jnp.asarray(-jnp.inf, dtype=scores.dtype)
+    masked = jnp.where(valid, scores, neg_inf)
+    row_max = jnp.max(masked, axis=-1, keepdims=True)
+    # Guard the all-pad row: row_max == -inf would make (masked - row_max)
+    # nan; clamp to 0 there (the row's exp is forced to 0 by ``valid``).
+    row_max = jnp.where(jnp.isfinite(row_max), row_max, 0.0)
+    exp = jnp.where(valid, jnp.exp(masked - row_max), 0.0)
+    denom = jnp.sum(exp, axis=-1, keepdims=True)
+    denom = jnp.where(denom > 0, denom, 1.0)
+    return exp / denom
