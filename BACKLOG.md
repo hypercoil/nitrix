@@ -18,22 +18,6 @@ Each entry should name the trigger that would promote it to a sprint.
 
 ## Open items
 
-### B1. Move resolved findings in NITRIX_FEEDBACK_ILEX.md
-
-One-line bookkeeping: the three addressed findings (gaussian
-docstrings, edge-aggregate + mesh-conv stack, max_pool_with_indices)
-should be relocated from "Open findings" to "Resolved findings"
-with commit / PR references each.
-
-**Trigger.** Next time we touch the feedback file (likely when a
-new consumer files something fresh), or before any external
-publication of the feedback document.
-
-**Notes.** The "Resolved" section is currently empty.  The
-existing scaffolding in the doc's "How to use" instructions
-specifies the format: one line per resolved item pointing at the
-resolving commit / PR.
-
 ### B2. Perf-bench the Sprint A / Sprint B surfaces
 
 Add bench scripts under ``bench/`` for
@@ -130,7 +114,67 @@ independently.
 - KeOps paper: Charlier et al. 2021, "Kernel Operations on the
   GPU, with Autodiff, without Memory Overflows", JMLR.
 
+### B6. Pallas kernel for the Gaussian blur primitive
+
+``smoothing.gaussian`` is a separable n-D convolution implemented
+via ``lax.conv_general_dilated`` (one 1-D pass per axis), which
+lowers to **cuDNN** on Ampere+ -- a strong baseline.  A consumer
+flagged a Pallas kernel as a (low-priority) eventual want.
+
+**Trigger.** A consumer with a wall-time wall on large-3-D Gaussian
+blur (e.g. repeated 256³ smoothing inside a training loop), *and* a
+benchmark showing the separable-conv path is the bottleneck.
+
+**Notes.** Unlike the ELL / trilinear gather case, the Gaussian is a
+**stencil**, not a gather, so it is Pallas-friendly (the dense
+``semiring_matmul`` Pallas kernel already works).  But cuDNN is hard
+to beat per-pass; the only real Pallas win is **fusing the 3
+separable axis passes** (and the boundary pad) into one kernel to
+save the inter-pass HBM round-trips on large volumes.  That is
+marginal and bandwidth-bound; do not build speculatively.  Any kernel
+ships behind the existing ``backend=`` dispatch with the
+``conv_general_dilated`` path as the JAX floor (non-negotiable
+§2.2.3) and a golden-corpus parity test.  Bench against
+``lax.conv_general_dilated`` (not against a naive loop) so the
+comparison is honest.
+
+### B7. Pallas kernel for 3-D trilinear resampling
+
+``geometry.spatial_transform`` / ``integrate_velocity_field`` resample
+via ``jax.scipy.ndimage.map_coordinates(order=1)``.  A consumer asked
+for a Pallas kernel; the "benchmark first" baseline lives in
+``bench/trilinear_resample.py`` / ``bench/PERF_TRILINEAR.md``.
+
+**Trigger.** Both of: (a) the baseline shows the resampling path is a
+real bottleneck in a consumer training loop, and (b) a pointer-load
+(``pl.load`` / ``pl.ds``) Pallas prototype clears the gather-lowering
+risk -- i.e. it avoids the HLO ``gather`` primitive that Triton on the
+pinned JAX cannot lower (the same blocker as ELL; see
+``bench/G0_ELL_REPORT.md``).
+
+**Notes.** Trilinear resampling is structurally a gather (8 corner
+voxels at data-dependent positions), so it inherits the ELL gather
+blocker.  The realistic near-term outcome is JAX-default (current
+state) until upstream Pallas grows gather, *unless* the pointer-load
+formulation works.  A kernel must register a ``custom_vjp`` (the
+backward is a scatter-add) and keep the ``map_coordinates`` path as
+the JAX floor.  Cross-reference: ``bench/G0_ELL_REPORT.md`` for the
+gather-lowering precedent.
+
+**Baseline (A10G, jax 0.10.0; ``bench/PERF_TRILINEAR.md``).**  Forward
+``spatial_transform`` is fast in absolute terms: 256³ in ~3.1 ms,
+192³ in ~1.4 ms; fwd+bwd 256³ in ~13 ms.  **Cheap interim win, no
+Pallas:** an explicit pure-JAX 8-corner gather is ~1.5–1.7× faster
+than ``map_coordinates`` (256³: 1.80 ms vs 3.14 ms), because
+``map_coordinates`` carries dispatch / generality overhead this op
+doesn't need.  If a consumer hits a resampling wall before the Pallas
+gate clears, swap ``_gather_coords_linear`` to the explicit 8-corner
+form first (it's the same gather XLA already lowers, just leaner).
+
 ## Resolved items
 
-*(empty — first entry will be transferred here when an item
-above lands as a merged sprint or is explicitly rejected.)*
+- **B1. Move resolved findings in NITRIX_FEEDBACK_ILEX.md** — done
+  2026-05-20. The gaussian-docstring, edge-aggregate/mesh-conv-stack,
+  max_pool_with_indices, and SUGAR-delta findings are now in that
+  doc's "Resolved findings" section; the open entries carry RESOLVED
+  markers. (Commit refs land on merge.)

@@ -811,6 +811,122 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 - **Impact on Phase 2:** (Carry into 2.A.6 task scope.)
 ```
 
+### 10.3 Shipped entries
+
+### 2026-05-20 — SUGAR feedback batch: edge attributes, row-softmax, mean-pool, external topology, masking
+
+- **Type:** Downstream deviation
+- **Triggered by:** ilex/SUGAR port (`NITRIX_FEEDBACK_ILEX.md`, 2026-05-18) — second
+  surface-domain consumer of the ELL mesh-graph-conv substrate after Topofit.
+- **Description:** Five additive, substrate-aligned changes. (1) `edge_attr=`
+  kwarg on `semiring_ell_edge_aggregate`: when set, `edge_fn` receives a 5th arg
+  `a = edge_attr[i,p,:]` while keeping the scalar `w` (the padding signal) — covers
+  GATv2's `edge_dim` Fourier embedding. Refines the feedback's Option A (which would
+  have displaced `w`); backward-compatible. (2) `ell_row_softmax(scores, ell)`: GAT
+  attention pre-pass, masking pads from `ell.values == ell.identity` (the feedback's
+  first real consumer of this proposal). (3) `mesh_coarsen_meanpool`: mean-pool
+  sibling of `mesh_pool_max`; `icosphere_cross_level_adjacency` now stores a 1.0/0.0
+  validity indicator in `values` (identity 0.0) so mean falls out as
+  `sum(v·x)/sum(v)` — `mesh_pool_max` overrides values internally so it is
+  unaffected. (4) `icosphere_hierarchy_from_levels(meshes, parents)`: packages
+  caller-supplied topology into the existing `IcosphereHierarchy`, so FreeSurfer
+  `fsaverage` hierarchies run through every cross-level operator with **no**
+  topology-source branching. (5) `ell_mask(ell, valid, *, identity)`: masks
+  incomplete geometries (medial wall / grey-matter) by setting masked edges to the
+  semiring identity (consumer-raised; see the masking note below).
+- **Capability shipped:** GATv2/edge-attributed mesh convs, GAT attention,
+  surface mean-pooling, external (FreeSurfer) topology hierarchies, and masked
+  reductions — all on the existing semiring/ELL substrate.
+- **Shape:** Pure-JAX (the substrate's current state; ELL Pallas is gated on G0).
+  Full forward/backward, golden + property tests, CPU correctness floor.
+- **Rejected (concern leakage):** the feedback's Delta-3 options A/B that would
+  read FreeSurfer `.sphere` binaries (`nibabel`, `$SUBJECTS_DIR`) inside nitrix.
+  That violates SPEC §5.2 / non-negotiable §2.2.1. nitrix stays array-only; the
+  consumer/`thrux` does the I/O and hands in plain arrays via
+  `icosphere_hierarchy_from_levels`.
+- **Deferred work:** Pallas dispatch for `semiring_ell_edge_aggregate` (BACKLOG B3);
+  LOG/EUCLIDEAN edge-aggregate semirings (B4). Bench at ico_6/ico_7 (B2).
+- **Non-negotiables held:** No new deps; pure-array signatures (NamedTuple/dataclass
+  containers only); JAX floor exercised in CI; golden/property tests added.
+
+### 2026-05-20 — Masking incomplete geometries across semirings (`ell_mask`)
+
+- **Type:** Downstream deviation
+- **Triggered by:** consumer question — medial-wall (surface) and grey-matter
+  (volume) masks must make absent edges no-ops without blurring in masked signal.
+- **Description:** Verified the substrate already supports this: a missing edge is a
+  no-op iff its `values` entry is the algebra's `(*)`-annihilator, which equals
+  `semiring.identity` for REAL (0), LOG/TROPICAL_MAX_PLUS (−∞), TROPICAL_MIN_PLUS
+  (+∞), BOOLEAN (False) — and the no-op holds regardless of where the padded index
+  points. EUCLIDEAN is the documented exception: `(a−b)²` has no annihilator, so
+  EUCLIDEAN neighbourhoods must be masked by dropping columns structurally, not via
+  a value. Shipped `nitrix.sparse.ell_mask(ell, valid, *, identity)` (column- or
+  edge-mask) plus a parametrised verification suite
+  (`tests/test_ell_masking_semirings.py`) covering the no-op property, the EUCLIDEAN
+  limitation, and the "wrong identity under max-plus leaks" footgun. Also made the
+  four cross-level mesh wrappers batch-safe (they claimed `(..., n, d)` but only
+  handled 2-D) via a shared vmap-over-leading-dims helper.
+- **Capability shipped:** correct, semiring-aware masking of incomplete brain
+  geometries; honest batch support on the cross-level wrappers.
+- **Shape:** Pure-JAX; differentiable; full parity tests.
+- **Non-negotiables held:** array-only; no deps; `nitrix.sparse.ell` stays free of
+  a `nitrix.semiring` import (identity passed explicitly).
+
+### 2026-05-20 — JAX pin correction (env was 0.4.35, target is 0.10.0) + Python floor
+
+- **Type:** Plan revision / dependency hygiene
+- **Triggered by:** the uv-managed `.venv` (and `uv.lock`) had drifted to **jax
+  0.4.35** while the Dockerfile / validated baseline is **jax[cuda12]==0.10.0**
+  (the G0 report and kernels were all developed against 0.10.0).  The test suite
+  had therefore been running on the wrong jax: `jax.random.multinomial` (used by
+  `signal/window.py`) is absent before 0.10.0, so `signal`/`window`/`lme` failed,
+  and `numpyro` collection broke.
+- **Root cause:** `pyproject` declared `jax >= 0.4.30` with `requires-python =
+  ">=3.10"`; jax 0.10.x dropped Python 3.10, so uv resolved down to the last
+  3.10-compatible jax (0.4.35).  The nox matrix is already 3.11/3.12/3.13.
+- **Fix:** bumped the floor to `jax >= 0.10.0` and `requires-python = ">=3.11"`,
+  re-locked (jax/jaxlib pinned to **0.10.0** to match the Docker baseline), and
+  bumped the test-only `numpyro` 0.18.0 → 0.21.0 (0.18 imported
+  `jax.experimental.pjit.pjit_p`, removed in jax 0.10).  After the fix,
+  `signal`/`window`/`lme`/`geom` pass.
+- **Non-negotiables held:** `numpyro` remains test-only (absent from the Docker
+  runtime env; SPEC §5.2); no new runtime deps.
+
+### 2026-05-20 — Harden `toeplitz` against an XLA-CPU compiler crash on jax >= 0.10
+
+- **Type:** Robustness hardening
+- **Triggered by:** the pin correction surfaced a hard XLA **CPU compiler abort**
+  (`AlgebraicSimplifier::HandleReverse`: "Invalid binary instruction opcode map")
+  while compiling `toeplitz_2d`, which built its matrix with `jnp.flip` (a
+  `reverse` HLO).  Worked on 0.4.35; crashes on 0.10.x CPU.
+- **Fix:** replaced `jnp.flip(c_arg, -1)` with an index-based reverse
+  (`c_arg[..., jnp.arange(d-1, -1, -1)]`, a gather) in **both** copies
+  (`functional/matrix.py`, `linalg/matrix.py`).  Identical output (parity with
+  `scipy.linalg.toeplitz` on square / rectangular-extend / fill cases),
+  negligible cost, no `reverse` HLO → no crash.  `test_matrix` passes (14).
+- **Note:** the remaining 0.10.x suite failures (`test_util`, `test_resid`) are
+  **hypothesis** test-harness flakiness (`FlakyFailure` from overflow-y generated
+  inputs; `FailedHealthCheck: data generation extremely slow` on a loaded box) in
+  untouched property tests, not core bugs or version-API brittleness.  Tracked as
+  a separate test-quality item (constrain the strategies / add a CI hypothesis
+  profile with `deadline=None` + health-check suppression).
+- **Non-negotiables held:** numerics unchanged within tolerance; no deps.
+
+### 2026-05-20 — Trilinear-resampling Pallas request: benchmark-first (no kernel yet)
+
+- **Type:** Gate outcome / plan revision
+- **Triggered by:** consumer ask for a 3-D trilinear resampling Pallas kernel.
+- **Description:** Trilinear resampling is structurally a gather (8 data-dependent
+  corner loads) — the same primitive G0 found Pallas Triton cannot lower on the
+  pinned JAX. Rather than write a kernel speculatively, shipped a baseline bench
+  (`bench/trilinear_resample.py` → `bench/PERF_TRILINEAR.md`) and parked the kernel
+  in BACKLOG B7 behind a two-part gate: (a) the path is a real training-loop
+  bottleneck, and (b) a pointer-load Pallas prototype clears the gather-lowering
+  risk. The Gaussian-blur Pallas request (low priority) is parked in B6 (stencil,
+  not gather; cuDNN baseline is strong; only a fused-passes win exists).
+- **Decision:** JAX-default (current state) until the gate clears. No kernel shipped.
+- **Non-negotiables held:** `map_coordinates` JAX path remains the contractual floor.
+
 ---
 
 ## 11. Notes on agent / engineer handoff

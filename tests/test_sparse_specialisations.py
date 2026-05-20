@@ -27,6 +27,7 @@ from nitrix.sparse import (
     grid_laplacian,
     icosphere,
     mesh_bary_upsample,
+    mesh_coarsen_meanpool,
     mesh_cotangent_laplacian,
     mesh_k_ring_adjacency,
     mesh_pool_max,
@@ -383,6 +384,7 @@ from nitrix.sparse import (  # noqa: E402
     icosphere_bary_upsampler,
     icosphere_cross_level_adjacency,
     icosphere_hierarchy,
+    icosphere_hierarchy_from_levels,
 )
 from nitrix.sparse import mesh_bary_upsample as _mesh_bary_upsample  # noqa: E402
 
@@ -543,3 +545,170 @@ def test_bary_upsampler_differentiable():
     g = jax.grad(loss)(coarse)
     assert g.shape == coarse.shape
     assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# mesh_coarsen_meanpool (SUGAR delta 2)
+# ---------------------------------------------------------------------------
+
+
+from nitrix.sparse import mesh_coarsen_meanpool  # noqa: E402
+
+
+def test_mesh_coarsen_meanpool_on_cross_level_is_mean_over_children():
+    '''mesh_coarsen_meanpool over an icosphere cross-level adjacency
+    returns, per coarse vertex, the mean of its real fine children
+    (the 1/0 validity indicator drops padding from sum and count).
+    '''
+    h = icosphere_hierarchy(max_level=1)
+    adj = icosphere_cross_level_adjacency(h, 0, 1)
+    rng = np.random.default_rng(0)
+    fine = jnp.asarray(rng.standard_normal((h.meshes[1].n_vertices, 3)))
+
+    out = mesh_coarsen_meanpool(adj, fine)
+    assert out.shape == (h.meshes[0].n_vertices, 3)
+
+    # Reference: mean over the real children of each coarse vertex.
+    parents = np.asarray(h.parents[1])
+    for i in range(h.meshes[0].n_vertices):
+        children = []
+        for v_fine in range(h.meshes[1].n_vertices):
+            a, b = int(parents[v_fine, 0]), int(parents[v_fine, 1])
+            if a == b == i:
+                children.append(v_fine)
+            elif a != b and (a == i or b == i):
+                children.append(v_fine)
+        ref = jnp.mean(fine[jnp.asarray(children)], axis=0)
+        np.testing.assert_allclose(out[i], ref, atol=1e-6)
+
+
+def test_mesh_coarsen_meanpool_is_values_weighted_mean():
+    '''With explicit non-binary values the helper computes a
+    values-weighted mean: sum(w*x)/sum(w).
+    '''
+    rng = np.random.default_rng(1)
+    n_coarse, n_fine, k = 4, 12, 3
+    indices = jnp.asarray(rng.integers(0, n_fine, (n_coarse, k)).astype(np.int32))
+    values = jnp.asarray(np.abs(rng.standard_normal((n_coarse, k))) + 0.1)
+    ell = ELL(values=values, indices=indices, n_cols=n_fine, identity=0.0)
+    fine = jnp.asarray(rng.standard_normal((n_fine, 2)))
+
+    out = mesh_coarsen_meanpool(ell, fine)
+    ref = jnp.zeros((n_coarse, 2))
+    for i in range(n_coarse):
+        num = jnp.zeros(2)
+        den = 0.0
+        for p in range(k):
+            num = num + float(values[i, p]) * fine[int(indices[i, p])]
+            den += float(values[i, p])
+        ref = ref.at[i].set(num / den)
+    np.testing.assert_allclose(out, ref, atol=1e-12)
+
+
+def test_mesh_coarsen_meanpool_all_pad_row_is_zero_not_nan():
+    '''A coarse vertex with no real children (all-pad row) returns
+    zeros rather than NaN.
+    '''
+    n_coarse, n_fine, k = 3, 6, 2
+    indices = jnp.zeros((n_coarse, k), dtype=jnp.int32)
+    values = jnp.asarray(np.array([[1.0, 1.0], [0.0, 0.0], [1.0, 0.0]]))
+    ell = ELL(values=values, indices=indices, n_cols=n_fine, identity=0.0)
+    fine = jnp.asarray(np.random.default_rng(0).standard_normal((n_fine, 3)))
+    out = mesh_coarsen_meanpool(ell, fine)
+    assert bool(jnp.all(jnp.isfinite(out)))
+    np.testing.assert_allclose(out[1], np.zeros(3), atol=1e-13)
+
+
+def test_mesh_coarsen_meanpool_batched():
+    '''Leading batch dims on fine features broadcast through.'''
+    h = icosphere_hierarchy(max_level=1)
+    adj = icosphere_cross_level_adjacency(h, 0, 1)
+    rng = np.random.default_rng(2)
+    fine = jnp.asarray(rng.standard_normal((5, h.meshes[1].n_vertices, 3)))
+    out = mesh_coarsen_meanpool(adj, fine)
+    assert out.shape == (5, h.meshes[0].n_vertices, 3)
+    for b in range(5):
+        single = mesh_coarsen_meanpool(adj, fine[b])
+        np.testing.assert_allclose(out[b], single, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# icosphere_hierarchy_from_levels (SUGAR delta 3: topology-agnostic)
+# ---------------------------------------------------------------------------
+
+
+def test_from_levels_round_trips_icosphere_hierarchy():
+    '''Rebuilding from a hierarchy's own meshes + parents reproduces
+    the exact cross-level adjacency and bary upsampler.
+    '''
+    h = icosphere_hierarchy(max_level=2)
+    h2 = icosphere_hierarchy_from_levels(h.meshes, h.parents)
+    for L in range(1, 3):
+        a0 = icosphere_cross_level_adjacency(h, L - 1, L)
+        a1 = icosphere_cross_level_adjacency(h2, L - 1, L)
+        np.testing.assert_array_equal(np.asarray(a0.indices), np.asarray(a1.indices))
+        np.testing.assert_array_equal(np.asarray(a0.values), np.asarray(a1.values))
+        b0 = icosphere_bary_upsampler(h, L - 1, L)
+        b1 = icosphere_bary_upsampler(h2, L - 1, L)
+        np.testing.assert_array_equal(np.asarray(b0.values), np.asarray(b1.values))
+        np.testing.assert_array_equal(np.asarray(b0.indices), np.asarray(b1.indices))
+
+
+def test_from_levels_works_on_non_canonical_coordinates():
+    '''Cross-level operators depend only on the parent tables and
+    vertex counts, not on coordinates being math-canonical -- so a
+    hierarchy with arbitrary (e.g. FreeSurfer-like) coordinates but the
+    same topology produces identical cross-level ELLs.  This is the
+    mechanism that lets a FreeSurfer fsaverage hierarchy run through the
+    same path without nitrix reading any FreeSurfer files.
+    '''
+    h = icosphere_hierarchy(max_level=1)
+    rng = np.random.default_rng(0)
+    # Replace coordinates with arbitrary ones (same vertex counts).
+    perturbed = tuple(
+        type(m)(
+            vertices=jnp.asarray(m.vertices) + rng.standard_normal(m.vertices.shape),
+            faces=m.faces,
+        )
+        for m in h.meshes
+    )
+    h_fs = icosphere_hierarchy_from_levels(perturbed, h.parents)
+    a0 = icosphere_cross_level_adjacency(h, 0, 1)
+    a1 = icosphere_cross_level_adjacency(h_fs, 0, 1)
+    np.testing.assert_array_equal(np.asarray(a0.indices), np.asarray(a1.indices))
+
+
+def test_from_levels_validation_errors():
+    '''from_levels rejects malformed inputs with clear errors.'''
+    h = icosphere_hierarchy(max_level=1)
+    # parents[0] must be None
+    with pytest.raises(ValueError, match='parents\\[0\\] must be None'):
+        icosphere_hierarchy_from_levels(h.meshes, (h.parents[1], h.parents[1]))
+    # length mismatch
+    with pytest.raises(ValueError, match='len'):
+        icosphere_hierarchy_from_levels(h.meshes, (None,))
+    # wrong parent-table row count
+    bad_parents = (None, np.asarray(h.parents[1])[:-1])
+    with pytest.raises(ValueError, match='rows'):
+        icosphere_hierarchy_from_levels(h.meshes, bad_parents)
+    # out-of-range parent index
+    bad_idx = np.array(h.parents[1])
+    bad_idx[0] = [999, 999]
+    with pytest.raises(ValueError, match='range'):
+        icosphere_hierarchy_from_levels(h.meshes, (None, bad_idx))
+
+
+def test_from_levels_then_pool_and_upsample_pipeline():
+    '''A from_levels hierarchy drives mesh_pool_max / meanpool / bary
+    upsample with no topology-source branching.
+    '''
+    h0 = icosphere_hierarchy(max_level=1)
+    h = icosphere_hierarchy_from_levels(h0.meshes, h0.parents)
+    fine = h.meshes[1].vertices
+    pool_ell = icosphere_cross_level_adjacency(h, 0, 1)
+    pooled_max = mesh_pool_max(pool_ell, fine)
+    pooled_mean = mesh_coarsen_meanpool(pool_ell, fine)
+    assert pooled_max.shape == pooled_mean.shape == (12, 3)
+    bary_ell = icosphere_bary_upsampler(h, 0, 1)
+    up = _mesh_bary_upsample(bary_ell, pooled_mean)
+    assert up.shape == (42, 3)

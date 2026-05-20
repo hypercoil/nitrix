@@ -20,6 +20,8 @@ When a port surfaces a nitrix gap:
 
 ### 2026-05-14 — `gaussian` truncate + boundary-mode defaults (ExVivoNorm)
 
+> **RESOLVED (2026-05-20)** — see "Resolved findings" below.
+
 **Severity.** MISMATCH (port passes parity at atol=1e-3 after a two-keyword override; defaults silently miscompute by ~6 in boundary cells before the override).
 
 **What surfaced this.** Porting `exvivo.norm.lh.h5`, whose wrapper graph applies `neurite.layers.GaussianBlur(sigma=1)` to the inner UNet output before exponentiation to a multiplicative bias field. The first parity run produced max abs diff = 6.21 between JAX bundle and TF reference; the worst voxel was exactly at the grid corner `(0, _, 0, _)`.
@@ -41,6 +43,8 @@ The defaults can stay (scipy-compatible is a defensible choice and easier for no
 A stretch option: a `mode='tf_same'` alias that resolves to `'constant'` would make the intent more discoverable from the consumer side. Low priority.
 
 ### 2026-05-14 — ELL-backed icosphere conv primitives (Topofit)
+
+> **RESOLVED (2026-05-20)** — see "Resolved findings" below.
 
 **Severity.** CONVENIENCE (Topofit ports without these; nitrix already has the foundational sparse-mesh + ELL surface that makes them additive). **High blast-radius**: lifting these primitives would let nitrix host every standard mesh-graph-conv variant (GCN, GAT, EdgeConv / DGCNN, MoNet, ChebNet, ...) on top of a single ELL backend, so any future surface-based learned model lands as a thin ilex / nimox wrapper. Topofit is the first ilex port to exercise mesh-graph-conv; the next surface-domain model (anything from the SphereMorph family, future surface-based segmenters, surface-attention transformers) will rediscover the same primitives.
 
@@ -197,6 +201,8 @@ This collapses topofit's ~400 lines of mesh-domain JAX into ~30 lines on top of 
 
 ### 2026-05-14 — `MaxUnpool3d` and indices-based pooling primitives (PGlandsSeg)
 
+> **RESOLVED (2026-05-20)** — see "Resolved findings" below.
+
 **Severity.** CONVENIENCE (the port itself works; this is a primitive worth lifting for future consumers).
 
 **What surfaced this.** Porting `mri_pglands_seg`. The architecture uses ``torch.nn.MaxPool3d(return_indices=True)`` paired with ``torch.nn.MaxUnpool3d`` for encoder->decoder coupling — the encoder records the per-window argmax positions during pooling, and the matching decoder unpool scatters values back into the pre-pool grid at those same positions. JAX has neither primitive: `lax.reduce_window` supports max but doesn't return indices; `jax.scipy.ndimage` doesn't have an unpool. We vendor `maxpool3d_with_indices` and `maxunpool3d` in `ilex/src/ilex/models/pglands_seg/_unet.py` (~80 lines, tested against torch parity on fresh random inputs at bit-exact agreement).
@@ -233,6 +239,8 @@ def max_unpool_nd(
 
 ### 2026-05-14 — TF `load_weights(by_name=True)` silently fails on nested Functional `.h5` (ExVivoNorm)
 
+> **RESOLVED (2026-05-20)** — N/A for nitrix; see "Resolved findings" below.
+
 **Severity.** N/A for nitrix specifically — this is a TF / Keras footgun, not a nitrix gap. Filed here because **the same trap surfaces during any "load FreeSurfer-Keras-bundled .h5 into a hand-rebuilt skeleton" workflow**, which is the staging pattern several ilex ports use; nitrix consumers staging weights from these formats need to know about it.
 
 **What surfaced this.** Porting `exvivo.norm.lh.h5`. The .h5 was saved from a wrapper Keras model whose top-level structure is `InputLayer → Functional("inorm") → GaussianBlur → Lambda → Multiply`. The "inorm" inner Functional contains the trainable UNet; `model.weights` are stored in the .h5 at `model_weights/inorm/<inner_layer>/kernel:0`.
@@ -246,6 +254,9 @@ The fix is to rebuild via `tf.keras.Model.from_config(...)` (which preserves the
 This isn't a nitrix concern at all (nitrix has no Keras surface), but I'm noting it here so the next port that hits it can find the fix faster.
 
 ### 2026-05-18 — SUGAR exercises the implemented topofit primitives + surfaces three deltas (SUGAR)
+
+> **RESOLVED (2026-05-20)** — all three deltas addressed; FreeSurfer I/O
+> deliberately kept out of nitrix. See "Resolved findings" below.
 
 **Status of the topofit-proposed primitives.** All three primitives the topofit feedback
 entry proposed (`semiring_ell_edge_aggregate`, `icosphere_hierarchy` / `_cross_level_adjacency`
@@ -389,4 +400,46 @@ benefit SUGAR most. Fallback JAX is acceptable at inference time.
 
 ## Resolved findings
 
-*(empty — first entry will be transferred here once a `nitrix` PR closes one of the open findings.)*
+Commit references land on merge; until then each entry points at the resolving
+surface (functions / files) and the deviation-log date in
+`IMPLEMENTATION_PLAN.md §10.3`.
+
+- **2026-05-14 — `gaussian` truncate + boundary-mode defaults (ExVivoNorm).**
+  RESOLVED. `nitrix.smoothing.gaussian`'s `truncate` and `mode` docstrings now
+  carry the neurite/SynthMorph/SynthSeg (`truncate=3`) and TF `padding='SAME'`
+  (`mode='constant'`) cross-references. Defaults unchanged (scipy-compatible).
+
+- **2026-05-14 — ELL-backed icosphere conv primitives (Topofit).** RESOLVED. The
+  full stack shipped: `nitrix.semiring.semiring_ell_edge_aggregate` (edge-functional
+  aggregation), `nitrix.sparse.{icosphere_hierarchy, icosphere_cross_level_adjacency,
+  icosphere_bary_upsampler}`, and the `mesh_pool_max` / `mesh_unpool_max` /
+  `mesh_bary_upsample` wrappers. See SPEC_UPDATE_v0.3 §10.A.1–§10.A.2.
+
+- **2026-05-14 — `MaxUnpool3d` and indices-based pooling (PGlandsSeg).** RESOLVED.
+  `nitrix.morphology.pooling.max_pool_with_indices_nd` / `max_unpool_nd` shipped
+  (N-D, channel-first), with the documented argmax-agreement parity contract. See
+  SPEC_UPDATE_v0.3 §10.A.3.
+
+- **2026-05-14 — TF `load_weights(by_name=True)` footgun (ExVivoNorm).** N/A for
+  nitrix (a TF/Keras staging footgun, not a nitrix gap). Recorded here for
+  downstream porters; no nitrix change.
+
+- **2026-05-18 — SUGAR deltas (SUGAR).** RESOLVED (2026-05-20 sprint;
+  `IMPLEMENTATION_PLAN.md §10.3`):
+  - *Delta 1* — `semiring_ell_edge_aggregate` gained an `edge_attr=` kwarg; when
+    set, `edge_fn` receives a 5th per-edge vector arg `a` **in addition to** the
+    scalar `w` (refines the proposal's Option A, which would have displaced `w`,
+    the padding signal). The first real consumer of `ell_row_softmax` (now shipped)
+    is SUGAR's GATv2 attention.
+  - *Delta 2* — `mesh_coarsen_meanpool` shipped as the mean sibling of
+    `mesh_pool_max`; `icosphere_cross_level_adjacency` now carries a 1.0/0.0
+    validity indicator so the mean is `sum(v·x)/sum(v)`.
+  - *Delta 3* — **FreeSurfer I/O rejected inside nitrix** (SPEC §5.2 / non-negotiable
+    §2.2.1: no `nibabel`, no `$SUBJECTS_DIR` reads). Instead,
+    `icosphere_hierarchy_from_levels(meshes, parents)` lets the consumer (or `thrux`)
+    read the `.sphere` / `.npz` files and hand nitrix plain arrays; every cross-level
+    operator then runs on FreeSurfer topology with no branching. This is cleaner than
+    the proposal's "branch the pool/bary primitives on a hatch."
+  - *Bonus* — `nitrix.sparse.ell_mask` for masking incomplete geometries (medial
+    wall / grey matter) by the correct per-semiring identity (see the masking note
+    in `IMPLEMENTATION_PLAN.md §10.3`).
