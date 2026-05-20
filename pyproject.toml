@@ -20,9 +20,18 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS :: MacOS X",
 ]
-requires-python = ">=3.10"
+# jax >= 0.10.0 requires Python >= 3.11; the nox test matrix is already
+# 3.11/3.12/3.13.  A >=3.10 floor silently caps jax at the last 3.10-compatible
+# release (0.4.35), which lacks jax.random.multinomial and diverges on the
+# Pallas surface -- see the jax pin note below.
+requires-python = ">=3.11"
 dependencies = [
-    "jax >= 0.4.30",
+    # Min pin tracks the validated baseline (Dockerfile: jax[cuda12]==0.10.0;
+    # bench/G0_ELL_REPORT.md, the kernels, and the Pallas-Triton gather-lowering
+    # analysis are all against 0.10.0).  Below 0.10.0, jax.random.multinomial
+    # (used by signal/window.py) is absent and the Pallas surface diverges, so
+    # this is a hard floor per SPEC_UPDATE_v0.2 §7.2 ("pin a minimum jax").
+    "jax >= 0.10.0",
     "jaxtyping >= 0.2.31",
     "numpy >= 2.0",
 ]
@@ -38,7 +47,9 @@ dev = [
     "hypothesis",
     "pingouin",
     "gnureadline",
-    "numpyro",
+    # >= 0.21: earlier numpyro imports jax.experimental.pjit.pjit_p, removed in
+    # jax 0.10.  Test-only reference dep (not a runtime import; SPEC §5.2).
+    "numpyro >= 0.21.0",
 ]
 
 [project.urls]
@@ -106,6 +117,6 @@ dev-dependencies = [
     "hypothesis",
     "pingouin",
     "gnureadline",
-    "numpyro>=0.18.0",
+    "numpyro>=0.21.0",  # < 0.21 imports pjit_p, removed in jax 0.10
     "communities>=3.0.0",
 ]
