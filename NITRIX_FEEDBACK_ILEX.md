@@ -398,6 +398,28 @@ adapters reduce by ~150 LOC each.
 the largest mesh-domain workload in ilex; a Pallas-backed `semiring_ell_edge_aggregate` would
 benefit SUGAR most. Fallback JAX is acceptable at inference time.
 
+### 2026-05-21 — GATv2 `add_self_loops(fill_value='mean')` is not covered by the ELL-edge surface (SUGAR)
+
+**Severity.** MISMATCH (a GAT/GATv2 port built on the ELL-edge surface *passes structurally and runs at plausible magnitude* but silently miscomputes — the canonical `ell_edge.py` GATv2 recipe omits the step, and the SUGAR feedback's "k_max=7 including self-loop" assumption was wrong). This bit the SUGAR JAX port for real: max abs diff was ~0.20 on a ~0.18-magnitude signal until the step was added, after which parity dropped to float32 precision (~1e-6) against the upstream `torch_geometric.nn.GATv2Conv` oracle.
+
+**What surfaced this.** Wiring a genuine torch oracle for the SUGAR parity fixtures (reconstructing the real upstream `GatUNet` and running it forward) instead of the prior NaN placeholder. The oracle disagreed with the ilex port everywhere. Root cause: `torch_geometric.nn.GATv2Conv` defaults to `add_self_loops=True`, and at **forward time** it does `remove_self_loops(edge_index, edge_attr)` then `add_self_loops(edge_index, edge_attr, fill_value='mean')`. So every vertex gets an `(i, i)` self-edge, and — crucially — that self-edge's `edge_attr` is filled with the **per-destination mean of the vertex's incoming edge attributes** (`scatter(edge_attr, edge_index[1], reduce='mean')`), *not* a geometric edge feature. Verified bit-exact: the ilex GATv2 algorithm matches PyG to 0.0 *with* the self-loop + mean-fill and diverges by 1.4 (single layer) *without*.
+
+**What's actually different / why the current surface misses it.**
+
+* `ell_edge.py`'s own worked GATv2 example (the `edge_fn` + `ell_row_softmax` recipe in the module docstring) builds the attention from the bare mesh adjacency and **never adds a self-loop**. A consumer following it verbatim reproduces the bug.
+* The geometric mesh adjacency (`mesh_k_ring_adjacency`, or SUGAR's `get_network_index` built from triangle faces) contains **no self-loops** — they're a GATv2 *forward-time* augmentation, not part of the graph. The 2026-05-18 SUGAR entry's "`k_max=7` including self-loop; 6 for non-pole vertices" was therefore incorrect: the geometric k-ring is 6 (non-pole) with no self slot; PyG manufactures the 7th (self) slot per forward.
+* Even a consumer who knows to add a self slot to the ELL still has to fill its `edge_attr` with the GATv2 `'mean'` semantics. The scalar `ell.values` padding signal doesn't help here — the self-loop is a *real* edge whose vector attribute is a reduction over the row's other attributes.
+
+**Workaround (what SUGAR ships today).** The ilex port is still port-local (it doesn't yet route through `semiring_ell_edge_aggregate` — see the 2026-05-18 Delta 1 entry). The fix lives in `ilex/src/ilex/models/sugar/_gat.py::GATv2Conv._add_self_loops`: append `(i, i)` per vertex and set the loop attribute to `segment_sum(edge_attr, dst) / max(count, 1)`. ~20 lines, jit-safe (SUGAR graphs are self-loop-free so the PyG `remove` step is a documented no-op).
+
+**Proposed fix.** When SUGAR's GATv2 conv migrates onto the ELL-edge surface (Delta 1), it needs a self-loop helper so the next GAT consumer doesn't rediscover this. Either:
+
+A. **A helper** `ell_add_self_loops(ell, edge_attr, *, fill='mean') -> (ell, edge_attr)` that adds the self slot to the ELL pattern and fills the corresponding `edge_attr` slot with the per-row reduction of the other slots' attributes (`'mean'` matches PyG; expose `'zero'` / `'add'` for completeness). This mirrors `torch_geometric.utils.add_self_loops` at the ELL level.
+
+B. **At minimum, document the gotcha** in the `ell_edge.py` GATv2 example: add the self-loop + mean-fill step explicitly, with a one-line note that PyG's `GATv2Conv` does this by default and omitting it silently miscomputes. The gaussian truncate/mode finding set the precedent that a default-semantics cross-reference is worth a docstring even when the API stays put.
+
+Option A is the discoverable fix (GAT is the headline ELL-edge consumer); B is the floor. Both are additive — no change to existing `semiring_ell_edge_aggregate` callers.
+
 ## Resolved findings
 
 Commit references land on merge; until then each entry points at the resolving
