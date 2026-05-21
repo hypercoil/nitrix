@@ -20,12 +20,21 @@ counts are unchanged.
 (``data_too_large`` is suppressed only to silence the cosmetic
 "overly large repr" warning hypothesis emits when it tries to print a
 big generated array on failure; it does not gate inputs either.)
+
+``max_examples`` is capped suite-wide.  Every example of a JAX property
+test is dominated by a fresh JIT compilation for its drawn shape, so the
+default of 100 examples makes the heaviest property files (residualise,
+axis utilities) run for many minutes -- the suite must be quick enough to
+re-run on every change.  25 keeps meaningful per-property coverage while
+bounding wall time; tests that need more set ``@settings(max_examples=N)``
+explicitly, and tests that need less already do.
 """
 from hypothesis import HealthCheck, settings
 
 settings.register_profile(
     'nitrix',
     deadline=None,
+    max_examples=25,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
 )
 settings.load_profile('nitrix')
