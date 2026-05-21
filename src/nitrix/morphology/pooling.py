@@ -56,7 +56,7 @@ indices-based encoder-decoder pattern.
 """
 from __future__ import annotations
 
-from typing import Sequence, Tuple, Union
+from typing import Sequence, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -225,8 +225,12 @@ def max_pool_with_indices_nd(
         suffix_prods_orig.append(cur)
         cur *= d
     suffix_prods_orig.reverse()
-    flat_indices = sum(
-        gc * sp for gc, sp in zip(global_coords, suffix_prods_orig)
+    # ``sum`` over a non-empty generator with the implicit ``0`` start
+    # widens to ``Array | Literal[0]``; the spatial grid is always >=1-D
+    # so the result is an Array.
+    flat_indices = cast(
+        Int[Array, '...'],
+        sum(gc * sp for gc, sp in zip(global_coords, suffix_prods_orig)),
     )
 
     return pooled, flat_indices
@@ -305,8 +309,12 @@ def max_unpool_nd(
     x_2d = x_flat.reshape(n_lead_total, n_per_channel)
     idx_2d = idx_flat.reshape(n_lead_total, n_per_channel)
 
-    def _scatter_one(idx, vals):
-        return jnp.zeros((target_per_channel,), dtype=x.dtype).at[idx].set(vals)
+    def _scatter_one(
+        idx: Int[Array, 'n'], vals: Num[Array, 'n']
+    ) -> Num[Array, 'm']:
+        return jnp.zeros(
+            (target_per_channel,), dtype=x.dtype
+        ).at[idx].set(vals)
 
     out_2d = jax.vmap(_scatter_one)(idx_2d, x_2d)
     return out_2d.reshape(leading_shape + output_shape_t)

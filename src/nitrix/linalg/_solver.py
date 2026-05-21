@@ -39,7 +39,7 @@ move is to add a ``safe_{op}`` helper here -- the per-op probe
 from __future__ import annotations
 
 import functools
-from typing import Optional
+from typing import Any, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -56,7 +56,7 @@ __all__ = [
 
 
 @functools.lru_cache(maxsize=1)
-def eigh_device():
+def eigh_device() -> jax.Device:
     '''Pick a device where dense ``eigh`` works.
 
     Returns ``jax.devices()[0]`` if a 2x2 GPU eigh probe succeeds;
@@ -77,7 +77,7 @@ def eigh_device():
         return cpu_devs[0] if cpu_devs else jax.devices()[0]
 
 
-def solver_device():
+def solver_device() -> jax.Device:
     '''Pick the device for matrix-free iterative solvers (LOBPCG, etc.).
 
     Internally calls cuSolver-backed QR / Cholesky, so it shares
@@ -86,7 +86,7 @@ def solver_device():
     return eigh_device()
 
 
-def device_of_concrete(arr) -> Optional[jax.Device]:
+def device_of_concrete(arr: Any) -> Optional[jax.Device]:
     '''Return the device of a concrete array, or ``None`` for tracers.
 
     ``arr.devices()`` raises ``ConcretizationTypeError`` inside a
@@ -102,7 +102,7 @@ def device_of_concrete(arr) -> Optional[jax.Device]:
     return next(iter(devs), None)
 
 
-def source_device(tree) -> Optional[jax.Device]:
+def source_device(tree: Any) -> Optional[jax.Device]:
     '''The "originating" device for a tree of arrays.
 
     If all leaves share a device, return it.  If multiple, return
@@ -122,7 +122,9 @@ def source_device(tree) -> Optional[jax.Device]:
     return next(iter(devs), None) if devs else None
 
 
-def safe_eigh(A: Float[Array, '... n n']):
+def safe_eigh(
+    A: Float[Array, '... n n'],
+) -> Tuple[Float[Array, '... n'], Float[Array, '... n n']]:
     '''``jnp.linalg.eigh`` with the cuSolver-robust device pick.
 
     Probes once at module-import time; subsequent calls use the

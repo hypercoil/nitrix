@@ -5,11 +5,13 @@
 Documentation utilities.
 """
 
+from __future__ import annotations
+
 from collections import UserDict
-from typing import Callable
+from typing import Any, Callable
 
 
-def tensor_dimensions(dims: str):
+def tensor_dimensions(dims: str) -> str:
     return (
         f"""
     Tensor Dimensions
@@ -21,8 +23,10 @@ def tensor_dimensions(dims: str):
     )
 
 
-def form_docstring(formatter: callable):
-    def decorator(func: Callable[[], DocTemplateFormat]):
+def form_docstring(
+    formatter: Callable[[], 'DocTemplateFormat'],
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         fmt = formatter()
         func.__doc__ = (func.__doc__ or '').format_map(fmt)
         return func
@@ -37,5 +41,5 @@ class DocTemplateFormat(UserDict[str, str]):
     in the current decorator.
     """
 
-    def __missing__(self, key):
+    def __missing__(self, key: str) -> str:
         return f'{{{key}}}'

@@ -46,11 +46,28 @@ Numerical-stability notes per algebra
 """
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Any, Callable, Optional, Tuple, cast
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
+from jaxtyping import Array, Bool, Float, Int, Num
+
+
+# Residual / gradient tuple shapes (shape strings are documentation; the
+# 4th ELL residual is ``C`` for the inexact algebras and ``n_cols`` for
+# REAL -- it is unpacked into an unused slot there, so the alias fits).
+_DenseResiduals = Tuple[
+    Num[Array, 'm k'], Num[Array, 'k n'], Num[Array, 'm n']
+]
+_DenseGrads = Tuple[Num[Array, 'm k'], Num[Array, 'k n']]
+_ELLResiduals = Tuple[
+    Num[Array, 'm kmax'],
+    Int[Array, 'm kmax'],
+    Num[Array, 'n_cols ncol'],
+    Num[Array, 'm ncol'],
+]
+_ELLGrads = Tuple[Num[Array, 'm kmax'], Num[Array, 'n_cols ncol']]
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +75,11 @@ import jax.numpy as jnp
 # ---------------------------------------------------------------------------
 
 
-def _safe_div(num, den, eps=None):
+def _safe_div(
+    num: Num[Array, '*shape'],
+    den: Num[Array, '*shape'],
+    eps: Optional[float] = None,
+) -> Num[Array, '*shape']:
     '''``num / den`` defined to be 0 wherever ``|den| <= eps``.
 
     Uses the "double-where with sentinel" trick to keep both forward
@@ -72,7 +93,9 @@ def _safe_div(num, den, eps=None):
     return jnp.where(safe, num / safe_den, jnp.zeros_like(num))
 
 
-def _safe_exp_diff(x, m):
+def _safe_exp_diff(
+    x: Float[Array, '*shape'], m: Float[Array, '*shape']
+) -> Float[Array, '*shape']:
     '''``exp(x - m)``, with ``-inf`` rows propagating cleanly to 0.
 
     A copy of the ``algebras._safe_exp_diff`` helper, kept local so
@@ -89,7 +112,9 @@ def _safe_exp_diff(x, m):
 # ===========================================================================
 
 
-def real_matmul_vjp(residuals, g_out):
+def real_matmul_vjp(
+    residuals: _DenseResiduals, g_out: Num[Array, 'm n']
+) -> _DenseGrads:
     '''Backward of ``C = A @ B`` under the real semiring (2-D).
 
     Two transpose-matmuls; reuses ``jnp.matmul`` for the heavy lift
@@ -108,7 +133,9 @@ def real_matmul_vjp(residuals, g_out):
 # ===========================================================================
 
 
-def log_matmul_vjp(residuals, g_out):
+def log_matmul_vjp(
+    residuals: _DenseResiduals, g_out: Num[Array, 'm n']
+) -> _DenseGrads:
     '''Backward of ``C[i,j] = lse_k (A[i,k] + B[k,j])`` under the log semiring.
 
     The softmax weight ``w[i, k, j] = exp(A[i, k] + B[k, j] - C[i, j])``
@@ -126,7 +153,7 @@ def log_matmul_vjp(residuals, g_out):
     M, K = A.shape
     _, N = B.shape
 
-    def body(kk, carry):
+    def body(kk: Int[Array, ''], carry: _DenseGrads) -> _DenseGrads:
         gA, gB = carry
         a_col = lax.dynamic_slice_in_dim(A, kk, 1, axis=1)  # (M, 1)
         b_row = lax.dynamic_slice_in_dim(B, kk, 1, axis=0)  # (1, N)
@@ -152,7 +179,15 @@ def log_matmul_vjp(residuals, g_out):
 # ===========================================================================
 
 
-def _tropical_argk(A, B, *, monoid_init, better):
+def _tropical_argk(
+    A: Num[Array, 'm k'],
+    B: Num[Array, 'k n'],
+    *,
+    monoid_init: float,
+    better: Callable[
+        [Num[Array, 'm n'], Num[Array, 'm n']], Bool[Array, 'm n']
+    ],
+) -> Int[Array, 'm n']:
     '''Compute the per-(i, j) optimal k via a streaming K loop.
 
     ``monoid_init`` is the initial ``best_val`` (-inf for max, +inf
@@ -163,7 +198,10 @@ def _tropical_argk(A, B, *, monoid_init, better):
     M, K = A.shape
     _, N = B.shape
 
-    def body(kk, state):
+    def body(
+        kk: Int[Array, ''],
+        state: Tuple[Num[Array, 'm n'], Int[Array, 'm n']],
+    ) -> Tuple[Num[Array, 'm n'], Int[Array, 'm n']]:
         best_val, best_k = state
         a_col = lax.dynamic_slice_in_dim(A, kk, 1, axis=1)  # (M, 1)
         b_row = lax.dynamic_slice_in_dim(B, kk, 1, axis=0)  # (1, N)
@@ -175,11 +213,14 @@ def _tropical_argk(A, B, *, monoid_init, better):
 
     best_val0 = jnp.full((M, N), monoid_init, dtype=A.dtype)
     best_k0 = jnp.zeros((M, N), dtype=jnp.int32)
+    # ``lax.fori_loop`` is typed as returning Any; restore the index array.
     _, best_k = lax.fori_loop(0, K, body, (best_val0, best_k0))
-    return best_k
+    return cast(Int[Array, 'm n'], best_k)
 
 
-def _tropical_route(g_out, best_k, K):
+def _tropical_route(
+    g_out: Num[Array, 'm n'], best_k: Int[Array, 'm n'], K: int
+) -> _DenseGrads:
     '''Route ``g_out`` through the one-hot ``[k == best_k[i, j]]``.
 
     Returns ``(gA, gB)`` of shapes ``(M, K)`` and ``(K, N)``
@@ -188,7 +229,7 @@ def _tropical_route(g_out, best_k, K):
     '''
     M, N = g_out.shape
 
-    def body(kk, carry):
+    def body(kk: Int[Array, ''], carry: _DenseGrads) -> _DenseGrads:
         gA, gB = carry
         mask = (best_k == kk).astype(g_out.dtype)             # (M, N)
         contrib = g_out * mask
@@ -206,7 +247,9 @@ def _tropical_route(g_out, best_k, K):
     return gA, gB
 
 
-def tropical_max_plus_matmul_vjp(residuals, g_out):
+def tropical_max_plus_matmul_vjp(
+    residuals: _DenseResiduals, g_out: Num[Array, 'm n']
+) -> _DenseGrads:
     '''Argmax-gather subgradient for max-plus.
 
     ``∂C[i,j]/∂A[i,k] = 1 iff k = argmax_k (A[i,k] + B[k,j])``;
@@ -222,7 +265,9 @@ def tropical_max_plus_matmul_vjp(residuals, g_out):
     return _tropical_route(g_out, best_k, A.shape[1])
 
 
-def tropical_min_plus_matmul_vjp(residuals, g_out):
+def tropical_min_plus_matmul_vjp(
+    residuals: _DenseResiduals, g_out: Num[Array, 'm n']
+) -> _DenseGrads:
     '''Argmin-gather subgradient for min-plus.'''
     A, B, _C = residuals
     best_k = _tropical_argk(
@@ -238,7 +283,9 @@ def tropical_min_plus_matmul_vjp(residuals, g_out):
 # ===========================================================================
 
 
-def euclidean_matmul_vjp(residuals, g_out):
+def euclidean_matmul_vjp(
+    residuals: _DenseResiduals, g_out: Num[Array, 'm n']
+) -> _DenseGrads:
     '''Backward of ``C[i,j] = sqrt(sum_k (A[i,k] - B[k,j])**2)``.
 
     Closed-form gradient with a ``1 / C`` factor; we guard at
@@ -265,7 +312,9 @@ def euclidean_matmul_vjp(residuals, g_out):
 # ===========================================================================
 
 
-def boolean_matmul_vjp(residuals, g_out):
+def boolean_matmul_vjp(
+    residuals: _DenseResiduals, g_out: Num[Array, 'm n']
+) -> _DenseGrads:
     raise TypeError(
         'semiring=BOOLEAN is not differentiable.  Use REAL (or LOG '
         'with a soft-max relaxation) if you need a gradient.'
@@ -277,7 +326,9 @@ def boolean_matmul_vjp(residuals, g_out):
 # ===========================================================================
 
 
-def real_ell_matmul_vjp(residuals, g_out):
+def real_ell_matmul_vjp(
+    residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
+) -> _ELLGrads:
     '''Backward of ``C[i,j] = sum_p values[i, p] * B[indices[i, p], j]``.
 
     Returns ``(grad_values, grad_B)``; ``indices`` is non-diff (passed
@@ -297,7 +348,7 @@ def real_ell_matmul_vjp(residuals, g_out):
     m, kmax = values.shape
     n_cols, ncol = B.shape
 
-    def body(p, carry):
+    def body(p: Int[Array, ''], carry: _ELLGrads) -> _ELLGrads:
         g_values, g_B = carry
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]  # (M,)
         v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)            # (M, 1)
@@ -318,7 +369,9 @@ def real_ell_matmul_vjp(residuals, g_out):
     return g_values, g_B
 
 
-def log_ell_matmul_vjp(residuals, g_out):
+def log_ell_matmul_vjp(
+    residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
+) -> _ELLGrads:
     '''Backward of ``C[i,j] = lse_p (values[i, p] + B[indices[i, p], j])``.
 
     Softmax weight per ``(i, p, j)``::
@@ -335,7 +388,7 @@ def log_ell_matmul_vjp(residuals, g_out):
     m, kmax = values.shape
     n_cols, ncol = B.shape
 
-    def body(p, carry):
+    def body(p: Int[Array, ''], carry: _ELLGrads) -> _ELLGrads:
         g_values, g_B = carry
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]  # (M,)
         v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)            # (M, 1)
@@ -356,7 +409,9 @@ def log_ell_matmul_vjp(residuals, g_out):
     return g_values, g_B
 
 
-def tropical_max_plus_ell_matmul_vjp(residuals, g_out):
+def tropical_max_plus_ell_matmul_vjp(
+    residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
+) -> _ELLGrads:
     '''Argmax-gather subgradient for ELL max-plus.
 
     Per output ``(i, j)``, the upstream gradient is routed entirely
@@ -368,7 +423,10 @@ def tropical_max_plus_ell_matmul_vjp(residuals, g_out):
     m, kmax = values.shape
     n_cols, ncol = B.shape
 
-    def body(p, state):
+    def body(
+        p: Int[Array, ''],
+        state: Tuple[Num[Array, 'm ncol'], Int[Array, 'm ncol']],
+    ) -> Tuple[Num[Array, 'm ncol'], Int[Array, 'm ncol']]:
         best_val, best_p = state
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]
         v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)
@@ -383,7 +441,7 @@ def tropical_max_plus_ell_matmul_vjp(residuals, g_out):
     best_p0 = jnp.zeros((m, ncol), dtype=jnp.int32)
     _, best_p = lax.fori_loop(0, kmax, body, (best_val0, best_p0))
 
-    def route(p, carry):
+    def route(p: Int[Array, ''], carry: _ELLGrads) -> _ELLGrads:
         g_values, g_B = carry
         mask = (best_p == p).astype(g_out.dtype)                         # (M, N)
         contrib = g_out * mask                                            # (M, N)
@@ -401,12 +459,17 @@ def tropical_max_plus_ell_matmul_vjp(residuals, g_out):
     return g_values, g_B
 
 
-def tropical_min_plus_ell_matmul_vjp(residuals, g_out):
+def tropical_min_plus_ell_matmul_vjp(
+    residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
+) -> _ELLGrads:
     values, indices, B, _C = residuals
     m, kmax = values.shape
     n_cols, ncol = B.shape
 
-    def body(p, state):
+    def body(
+        p: Int[Array, ''],
+        state: Tuple[Num[Array, 'm ncol'], Int[Array, 'm ncol']],
+    ) -> Tuple[Num[Array, 'm ncol'], Int[Array, 'm ncol']]:
         best_val, best_p = state
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]
         v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)
@@ -421,7 +484,7 @@ def tropical_min_plus_ell_matmul_vjp(residuals, g_out):
     best_p0 = jnp.zeros((m, ncol), dtype=jnp.int32)
     _, best_p = lax.fori_loop(0, kmax, body, (best_val0, best_p0))
 
-    def route(p, carry):
+    def route(p: Int[Array, ''], carry: _ELLGrads) -> _ELLGrads:
         g_values, g_B = carry
         mask = (best_p == p).astype(g_out.dtype)
         contrib = g_out * mask
@@ -439,7 +502,9 @@ def tropical_min_plus_ell_matmul_vjp(residuals, g_out):
     return g_values, g_B
 
 
-def euclidean_ell_matmul_vjp(residuals, g_out):
+def euclidean_ell_matmul_vjp(
+    residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
+) -> _ELLGrads:
     '''Backward of ``C[i,j] = sqrt(sum_p (values[i, p] - B[indices[i, p], j])**2)``.
 
     Streamed over p; per-step intermediate is ``(M, N)``.  Same
@@ -451,7 +516,7 @@ def euclidean_ell_matmul_vjp(residuals, g_out):
 
     h = _safe_div(g_out, C)  # (M, N)
 
-    def body(p, carry):
+    def body(p: Int[Array, ''], carry: _ELLGrads) -> _ELLGrads:
         g_values, g_B = carry
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]
         v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)            # (M, 1)
@@ -473,7 +538,9 @@ def euclidean_ell_matmul_vjp(residuals, g_out):
     return g_values, g_B
 
 
-def boolean_ell_matmul_vjp(residuals, g_out):
+def boolean_ell_matmul_vjp(
+    residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
+) -> _ELLGrads:
     raise TypeError(
         'semiring=BOOLEAN is not differentiable.  Use REAL (or LOG) '
         'if you need a gradient through ELL contraction.'

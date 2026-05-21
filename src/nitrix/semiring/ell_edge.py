@@ -85,7 +85,7 @@ References
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -115,9 +115,9 @@ EdgeFn = Callable[..., Num[Array, 'd_out']]
 
 def _reduce_by_semiring(
     e: Num[Array, '... n k_max d_out'],
-    semiring: Semiring,
+    semiring: Semiring[Any],
     axis: int,
-):
+) -> Num[Array, '... n d_out']:
     '''Aggregate an edge-message tensor along the ``k_max`` axis under ``semiring``.
 
     First-cut support is restricted to algebras whose monoid
@@ -154,7 +154,7 @@ def semiring_ell_edge_aggregate(
     ell: ELL,
     x: Num[Array, '... n d_in'],
     *,
-    semiring: Semiring = REAL,
+    semiring: Semiring[Any] = REAL,
     edge_attr: Optional[Num[Array, 'n k_max d_e']] = None,
 ) -> Num[Array, '... n d_out']:
     '''Per-edge functional aggregation over an ELL adjacency.

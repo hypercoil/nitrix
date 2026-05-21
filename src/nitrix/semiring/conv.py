@@ -70,7 +70,7 @@ from __future__ import annotations
 
 from functools import reduce
 from operator import mul
-from typing import Optional, Sequence, Union
+from typing import Any, Optional, Sequence, Union, cast
 
 import jax
 import jax.lax as lax
@@ -99,11 +99,13 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def _prod(xs):
+def _prod(xs: Sequence[int]) -> int:
     return reduce(mul, xs, 1)
 
 
-def _normalise_n_tuple(x, n, name):
+def _normalise_n_tuple(
+    x: Union[int, Sequence[int]], n: int, name: str
+) -> tuple[int, ...]:
     if isinstance(x, int):
         return (x,) * n
     out = tuple(x)
@@ -115,7 +117,9 @@ def _normalise_n_tuple(x, n, name):
     return out
 
 
-def _normalise_padding(padding, spatial_rank):
+def _normalise_padding(
+    padding: Union[str, Sequence[tuple[int, int]]], spatial_rank: int
+) -> Union[str, tuple[tuple[int, int], ...]]:
     '''Accept ``'SAME'``, ``'VALID'``, or an explicit per-dim sequence.'''
     if isinstance(padding, str):
         if padding.upper() not in ('SAME', 'VALID'):
@@ -138,7 +142,13 @@ def _normalise_padding(padding, spatial_rank):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_pad(pad, spatial_in, kspatial, strides, dilations):
+def _resolve_pad(
+    pad: Union[str, tuple[tuple[int, int], ...]],
+    spatial_in: tuple[int, ...],
+    kspatial: tuple[int, ...],
+    strides: tuple[int, ...],
+    dilations: tuple[int, ...],
+) -> tuple[tuple[int, int], ...]:
     '''Resolve string padding to explicit ``(lo, hi)`` per spatial dim.
 
     Mirrors the ``"SAME"`` / ``"VALID"`` semantics of
@@ -160,12 +170,19 @@ def _resolve_pad(pad, spatial_in, kspatial, strides, dilations):
             hi = total_pad - lo
             out.append((lo, hi))
         return tuple(out)
-    return pad  # already an explicit per-dim tuple
+    # Already an explicit per-dim tuple (the str cases returned above).
+    return cast(tuple[tuple[int, int], ...], pad)
 
 
 def _extract_patches_nan_safe(
-    x_nhwc, *, kspatial, strides, dilations, padding_explicit, identity,
-):
+    x_nhwc: Num[Array, '...'],
+    *,
+    kspatial: tuple[int, ...],
+    strides: tuple[int, ...],
+    dilations: tuple[int, ...],
+    padding_explicit: Sequence[tuple[int, int]],
+    identity: Any,
+) -> Num[Array, '...']:
     '''NaN-safe patch extraction.
 
     ``lax.conv_general_dilated_patches`` lowers via a multiply-with-
@@ -247,9 +264,9 @@ def reference_semiring_conv(
     x: Num[Array, '... *spatial c_in'],
     k: Num[Array, '*kspatial c_in c_out'],
     *,
-    semiring: Semiring,
+    semiring: Semiring[Any],
     stride: Union[int, Sequence[int]] = 1,
-    padding: Union[str, Sequence[tuple]] = 'SAME',
+    padding: Union[str, Sequence[tuple[int, int]]] = 'SAME',
     dilation: Union[int, Sequence[int]] = 1,
     backend: Backend = 'jax',
 ) -> Num[Array, '... *spatial_out c_out']:
@@ -328,8 +345,14 @@ def reference_semiring_conv(
 
 
 def _semiring_conv_pallas(
-    x, k, *, semiring, stride, padding, dilation,
-):
+    x: Num[Array, '... *spatial c_in'],
+    k: Num[Array, '*kspatial c_in c_out'],
+    *,
+    semiring: Semiring[Any],
+    stride: Union[int, Sequence[int]],
+    padding: Union[str, Sequence[tuple[int, int]]],
+    dilation: Union[int, Sequence[int]],
+) -> Optional[Array]:
     '''Pallas dispatch; returns ``None`` if the kernel rejects the request.
 
     Currently always rejects: there is no dedicated Pallas conv kernel
@@ -345,9 +368,9 @@ def semiring_conv(
     x: Num[Array, '... *spatial c_in'],
     k: Num[Array, '*kspatial c_in c_out'],
     *,
-    semiring: Semiring = REAL,
+    semiring: Semiring[Any] = REAL,
     stride: Union[int, Sequence[int]] = 1,
-    padding: Union[str, Sequence[tuple]] = 'SAME',
+    padding: Union[str, Sequence[tuple[int, int]]] = 'SAME',
     dilation: Union[int, Sequence[int]] = 1,
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial_out c_out']:

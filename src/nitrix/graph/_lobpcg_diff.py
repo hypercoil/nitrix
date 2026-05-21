@@ -52,12 +52,19 @@ exit checklist).
 from __future__ import annotations
 
 from functools import partial
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
 from jax.experimental.sparse.linalg import lobpcg_standard
 from jaxtyping import Array, Float, Int
+
+# Per-section component tuples for the SectionedELL LOBPCG path.
+_ValuesTuple = Tuple[Float[Array, 'n_s k_max_s'], ...]
+_IndicesTuple = Tuple[Int[Array, 'n_s k_max_s'], ...]
+_RowGroupsTuple = Tuple[Int[Array, 'n_s'], ...]
+# ``(eigvals, eigvecs)`` largest-first, shapes ``(k,)`` and ``(n, k)``.
+_EigPair = Tuple[Float[Array, 'k'], Float[Array, 'n k']]
 
 
 __all__ = [
@@ -161,17 +168,35 @@ def lobpcg_top_k_dense(
     return _dense_forward(M, X0, n_iters, tol)
 
 
-def _dense_forward(M, X0, n_iters, tol):
+def _dense_forward(
+    M: Float[Array, 'n n'],
+    X0: Float[Array, 'n k'],
+    n_iters: int,
+    tol: Optional[float],
+) -> _EigPair:
     eigvals, eigvecs, _ = lobpcg_standard(M, X0, m=n_iters, tol=tol)
-    return eigvals, eigvecs
+    # ``lobpcg_standard`` is untyped (returns Any); restore the eigenpair.
+    return cast(_EigPair, (eigvals, eigvecs))
 
 
-def _dense_fwd(M, X0, n_iters, tol, eps_clamp):
+def _dense_fwd(
+    M: Float[Array, 'n n'],
+    X0: Float[Array, 'n k'],
+    n_iters: int,
+    tol: Optional[float],
+    eps_clamp: float,
+) -> Tuple[_EigPair, _EigPair]:
     eigvals, eigvecs = _dense_forward(M, X0, n_iters, tol)
     return (eigvals, eigvecs), (eigvals, eigvecs)
 
 
-def _dense_bwd(n_iters, tol, eps_clamp, residuals, cotangents):
+def _dense_bwd(
+    n_iters: int,
+    tol: Optional[float],
+    eps_clamp: float,
+    residuals: _EigPair,
+    cotangents: _EigPair,
+) -> Tuple[Float[Array, 'n n'], None]:
     eigvals, eigvecs = residuals
     g_eigvals, g_eigvecs = cotangents
     K = _subspace_vjp_kernel(
@@ -245,29 +270,52 @@ def lobpcg_top_k_ell(
     return _ell_forward(values, indices, X0, n_cols, n_iters, tol)
 
 
-def _ell_forward(values, indices, X0, n_cols, n_iters, tol):
+def _ell_forward(
+    values: Float[Array, 'n k_max'],
+    indices: Int[Array, 'n k_max'],
+    X0: Float[Array, 'n k'],
+    n_cols: int,
+    n_iters: int,
+    tol: Optional[float],
+) -> _EigPair:
     # Local import to avoid a cycle (this module is imported from
     # ``connectopy`` which is itself imported from ``graph/__init__``).
     from ..semiring import REAL, semiring_ell_matmul
 
-    def matvec(X):
+    def matvec(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
         return semiring_ell_matmul(
             values, indices, X,
             semiring=REAL, n_cols=n_cols, backend='jax',
         )
 
     eigvals, eigvecs, _ = lobpcg_standard(matvec, X0, m=n_iters, tol=tol)
-    return eigvals, eigvecs
+    # ``lobpcg_standard`` is untyped (returns Any); restore the eigenpair.
+    return cast(_EigPair, (eigvals, eigvecs))
 
 
-def _ell_fwd(values, indices, X0, n_cols, n_iters, tol, eps_clamp):
+def _ell_fwd(
+    values: Float[Array, 'n k_max'],
+    indices: Int[Array, 'n k_max'],
+    X0: Float[Array, 'n k'],
+    n_cols: int,
+    n_iters: int,
+    tol: Optional[float],
+    eps_clamp: float,
+) -> Tuple[_EigPair, Tuple[Int[Array, 'n k_max'], Float[Array, 'k'], Float[Array, 'n k']]]:
     eigvals, eigvecs = _ell_forward(
         values, indices, X0, n_cols, n_iters, tol,
     )
     return (eigvals, eigvecs), (indices, eigvals, eigvecs)
 
 
-def _ell_bwd(n_cols, n_iters, tol, eps_clamp, residuals, cotangents):
+def _ell_bwd(
+    n_cols: int,
+    n_iters: int,
+    tol: Optional[float],
+    eps_clamp: float,
+    residuals: Tuple[Int[Array, 'n k_max'], Float[Array, 'k'], Float[Array, 'n k']],
+    cotangents: _EigPair,
+) -> Tuple[Float[Array, 'n k_max'], Int[Array, 'n k_max'], None]:
     indices, eigvals, eigvecs = residuals
     g_eigvals, g_eigvecs = cotangents
     K = _subspace_vjp_kernel(
@@ -298,14 +346,14 @@ __all__.append('lobpcg_top_k_sectioned_ell')
 
 @partial(jax.custom_vjp, nondiff_argnums=(4, 5, 6))
 def _lobpcg_top_k_sectioned_impl(
-    values_tuple,
-    indices_tuple,
-    row_groups_tuple,
-    X0,
+    values_tuple: _ValuesTuple,
+    indices_tuple: _IndicesTuple,
+    row_groups_tuple: _RowGroupsTuple,
+    X0: Float[Array, 'n k'],
     n_cols: int,
     n_iters: int,
-    tol_eps_clamp,
-):
+    tol_eps_clamp: Tuple[Optional[float], float],
+) -> _EigPair:
     '''Internal entry point.  All "static" args are at the end:
 
     - ``n_cols`` -- int, ELL n_cols.
@@ -321,13 +369,13 @@ def _lobpcg_top_k_sectioned_impl(
 
 
 def _sectioned_matvec(
-    values_tuple,
-    indices_tuple,
-    row_groups_tuple,
-    X,
+    values_tuple: _ValuesTuple,
+    indices_tuple: _IndicesTuple,
+    row_groups_tuple: _RowGroupsTuple,
+    X: Float[Array, 'n k'],
     n_cols: int,
     n_rows: int,
-):
+) -> Float[Array, 'n_rows k']:
     '''SectionedELL matvec: per-bucket matmul + scatter-back.'''
     from ..semiring import REAL, semiring_ell_matmul
 
@@ -341,30 +389,41 @@ def _sectioned_matvec(
 
 
 def _sectioned_forward(
-    values_tuple,
-    indices_tuple,
-    row_groups_tuple,
-    X0,
-    n_cols,
-    n_iters,
-    tol,
-):
+    values_tuple: _ValuesTuple,
+    indices_tuple: _IndicesTuple,
+    row_groups_tuple: _RowGroupsTuple,
+    X0: Float[Array, 'n k'],
+    n_cols: int,
+    n_iters: int,
+    tol: Optional[float],
+) -> _EigPair:
     n_rows = X0.shape[0]
 
-    def matvec(X):
+    def matvec(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
         return _sectioned_matvec(
             values_tuple, indices_tuple, row_groups_tuple, X,
             n_cols=n_cols, n_rows=n_rows,
         )
 
     eigvals, eigvecs, _ = lobpcg_standard(matvec, X0, m=n_iters, tol=tol)
-    return eigvals, eigvecs
+    # ``lobpcg_standard`` is untyped (returns Any); restore the eigenpair.
+    return cast(_EigPair, (eigvals, eigvecs))
+
+
+_SectionedResiduals = Tuple[
+    _IndicesTuple, _RowGroupsTuple, Float[Array, 'k'], Float[Array, 'n k']
+]
 
 
 def _sectioned_fwd(
-    values_tuple, indices_tuple, row_groups_tuple, X0,
-    n_cols, n_iters, tol_eps_clamp,
-):
+    values_tuple: _ValuesTuple,
+    indices_tuple: _IndicesTuple,
+    row_groups_tuple: _RowGroupsTuple,
+    X0: Float[Array, 'n k'],
+    n_cols: int,
+    n_iters: int,
+    tol_eps_clamp: Tuple[Optional[float], float],
+) -> Tuple[_EigPair, _SectionedResiduals]:
     tol, _ = tol_eps_clamp
     eigvals, eigvecs = _sectioned_forward(
         values_tuple, indices_tuple, row_groups_tuple,
@@ -376,8 +435,12 @@ def _sectioned_fwd(
 
 
 def _sectioned_bwd(
-    n_cols, n_iters, tol_eps_clamp, residuals, cotangents,
-):
+    n_cols: int,
+    n_iters: int,
+    tol_eps_clamp: Tuple[Optional[float], float],
+    residuals: _SectionedResiduals,
+    cotangents: _EigPair,
+) -> Tuple[_ValuesTuple, _IndicesTuple, _RowGroupsTuple, None]:
     indices_tuple, row_groups_tuple, eigvals, eigvecs = residuals
     _, eps_clamp = tol_eps_clamp
     g_eigvals, g_eigvecs = cotangents
@@ -419,16 +482,16 @@ _lobpcg_top_k_sectioned_impl.defvjp(_sectioned_fwd, _sectioned_bwd)
 
 
 def lobpcg_top_k_sectioned_ell(
-    values_tuple,
-    indices_tuple,
-    row_groups_tuple,
-    X0,
+    values_tuple: _ValuesTuple,
+    indices_tuple: _IndicesTuple,
+    row_groups_tuple: _RowGroupsTuple,
+    X0: Float[Array, 'n k'],
     *,
     n_cols: int,
     n_iters: int = 200,
     tol: Optional[float] = None,
     eps_clamp: float = 1e-8,
-):
+) -> _EigPair:
     '''Differentiable LOBPCG for a ``SectionedELL`` operator.
 
     Closes the last non-differentiable graph path in

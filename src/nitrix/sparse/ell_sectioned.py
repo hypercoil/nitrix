@@ -32,6 +32,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Int, Num
+from numpy.typing import NDArray
 
 from .._internal.backend import Backend
 from ..semiring import semiring_ell_matmul
@@ -72,7 +73,7 @@ class SectionedELL:
     '''
 
     sections: Tuple[ELL, ...]
-    row_groups: Tuple[np.ndarray, ...]
+    row_groups: Tuple[NDArray[Any], ...]
     n_rows: int
     n_cols: int
     identity: Any = None
@@ -170,7 +171,9 @@ def sectioned_ell_from_ragged(
         bucket_by = _default_bucket
 
     # Collect (bucket, row, values, indices) tuples.
-    buckets: dict[int, list[tuple[int, np.ndarray, np.ndarray]]] = {}
+    buckets: dict[
+        int, list[tuple[int, NDArray[Any], NDArray[Any]]]
+    ] = {}
     for i in range(n_rows):
         v = np.asarray(values_per_row[i])
         idx = np.asarray(indices_per_row[i])
@@ -190,7 +193,7 @@ def sectioned_ell_from_ragged(
     # Empty buckets: skipped (no section emitted).  Order sections by
     # bucket index for determinism.
     sections: list[ELL] = []
-    row_groups: list[np.ndarray] = []
+    row_groups: list[NDArray[Any]] = []
     # Pick a dtype: float32 if no rows (degenerate); otherwise inherit
     # from the first row's values.
     if n_rows > 0:
@@ -198,10 +201,10 @@ def sectioned_ell_from_ragged(
         v_dtype = sample.dtype
         i_dtype = np.asarray(indices_per_row[0]).dtype
         if not np.issubdtype(i_dtype, np.integer):
-            i_dtype = np.int32
+            i_dtype = np.dtype(np.int32)
     else:
-        v_dtype = np.float32
-        i_dtype = np.int32
+        v_dtype = np.dtype(np.float32)
+        i_dtype = np.dtype(np.int32)
 
     for b in sorted(buckets):
         rows = buckets[b]
@@ -250,7 +253,7 @@ def sectioned_semiring_ell_matmul(
     sectioned: SectionedELL,
     B: Num[Array, 'n_cols ncol'],
     *,
-    semiring: Semiring = REAL,
+    semiring: Semiring[Any] = REAL,
     backend: Backend = 'auto',
 ) -> Num[Array, 'm ncol']:
     '''Sectioned-ELL semiring matrix multiplication.

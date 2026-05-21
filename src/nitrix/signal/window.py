@@ -37,7 +37,7 @@ What changed from ``nitrix.functional.window``:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import jax
 import jax.numpy as jnp
@@ -165,7 +165,7 @@ def sample_windows(
         window_size if i == windowing_axis else s
         for i, s in enumerate(tensor.shape)
     )
-    base_slc = [0] * tensor.ndim
+    base_slc: list[Any] = [0] * tensor.ndim
 
     def slice_one(start_val: jax.Array) -> Array:
         slc = base_slc.copy()

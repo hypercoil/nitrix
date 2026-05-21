@@ -19,7 +19,7 @@ semiring sense).
 """
 from __future__ import annotations
 
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -29,7 +29,9 @@ from jaxtyping import Array, Num
 __all__ = ['median_filter']
 
 
-def _normalise_size(size, spatial_rank):
+def _normalise_size(
+    size: Union[int, Sequence[int]], spatial_rank: int
+) -> Tuple[int, ...]:
     if isinstance(size, int):
         return (size,) * spatial_rank
     out = tuple(size)
@@ -41,7 +43,7 @@ def _normalise_size(size, spatial_rank):
     return out
 
 
-def _pad_lo_hi(kspatial):
+def _pad_lo_hi(kspatial: Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
     '''SAME-style ``(lo, hi)`` per spatial dim for an odd-size kernel.'''
     return tuple(((d - 1) // 2, d - 1 - (d - 1) // 2) for d in kspatial)
 

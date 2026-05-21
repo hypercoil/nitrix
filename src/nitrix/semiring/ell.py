@@ -28,7 +28,7 @@ path opt-in (pending the Ampere benchmark in ``bench/g0_ampere_ell.py``).
 from __future__ import annotations
 
 from functools import partial
-from typing import Optional
+from typing import Any, Callable, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -53,7 +53,15 @@ from .algebras import REAL
 # ---------------------------------------------------------------------------
 
 
-def _forward_only_ell_2d(values, indices, B, *, semiring, n_cols, backend):
+def _forward_only_ell_2d(
+    values: Num[Array, 'm kmax'],
+    indices: Int[Array, 'm kmax'],
+    B: Num[Array, 'n_cols ncol'],
+    *,
+    semiring: Semiring[Any],
+    n_cols: Optional[int],
+    backend: Backend,
+) -> Num[Array, 'm ncol']:
     resolved: ResolvedBackend = resolve_backend(backend)
     if resolved == 'pallas-cuda':
         out = _semiring_ell_matmul_pallas(
@@ -79,7 +87,14 @@ def _forward_only_ell_2d(values, indices, B, *, semiring, n_cols, backend):
 
 
 @partial(jax.custom_vjp, nondiff_argnums=(3, 4, 5))
-def _diff_ell_matmul_2d(values, indices, B, semiring, n_cols, backend):
+def _diff_ell_matmul_2d(
+    values: Array,
+    indices: Array,
+    B: Array,
+    semiring: Semiring[Any],
+    n_cols: Optional[int],
+    backend: Backend,
+) -> Array:
     # ``indices`` cannot live in ``nondiff_argnums`` -- JAX (>= 0.10)
     # refuses to accept Tracers there.  It is carried as a regular
     # array argument; the backward returns a zero gradient for it,
@@ -91,7 +106,14 @@ def _diff_ell_matmul_2d(values, indices, B, semiring, n_cols, backend):
     )
 
 
-def _diff_ell_matmul_2d_fwd(values, indices, B, semiring, n_cols, backend):
+def _diff_ell_matmul_2d_fwd(
+    values: Array,
+    indices: Array,
+    B: Array,
+    semiring: Semiring[Any],
+    n_cols: Optional[int],
+    backend: Backend,
+) -> Tuple[Array, Tuple[Array, Array, Array, Array]]:
     out = _forward_only_ell_2d(
         values, indices, B,
         semiring=semiring, n_cols=n_cols, backend=backend,
@@ -100,7 +122,13 @@ def _diff_ell_matmul_2d_fwd(values, indices, B, semiring, n_cols, backend):
     return out, (values, indices, B, out)
 
 
-def _diff_ell_matmul_2d_bwd(semiring, n_cols, backend, residuals, g_out):
+def _diff_ell_matmul_2d_bwd(
+    semiring: Semiring[Any],
+    n_cols: Optional[int],
+    backend: Backend,
+    residuals: Tuple[Array, Array, Array, Array],
+    g_out: Array,
+) -> Tuple[Array, Array, Array]:
     rule = semiring.ell_matmul_vjp
     if rule is None:
         raise TypeError(
@@ -121,7 +149,12 @@ __all__ = [
 ]
 
 
-def _check_ell_shapes(values_shape, indices_shape, B_shape, name: str):
+def _check_ell_shapes(
+    values_shape: tuple[int, ...],
+    indices_shape: tuple[int, ...],
+    B_shape: tuple[int, ...],
+    name: str,
+) -> None:
     if len(values_shape) < 2:
         raise ValueError(
             f'{name}: values must be at least 2-D '
@@ -138,7 +171,13 @@ def _check_ell_shapes(values_shape, indices_shape, B_shape, name: str):
         )
 
 
-def _semiring_ell_matmul_pallas(values, indices, B, *, semiring):
+def _semiring_ell_matmul_pallas(
+    values: Array,
+    indices: Array,
+    B: Array,
+    *,
+    semiring: Semiring[Any],
+) -> Optional[Array]:
     '''Pallas dispatch; returns ``None`` if the kernel rejects the request.'''
     try:
         from .._kernels.cuda.semiring_ell_matmul import (
@@ -160,7 +199,7 @@ def semiring_ell_matmul(
     indices: Int[Array, '... m kmax'],
     B: Num[Array, '... n_cols ncol'],
     *,
-    semiring: Semiring = REAL,
+    semiring: Semiring[Any] = REAL,
     n_cols: Optional[int] = None,
     backend: Backend = 'auto',
 ) -> Num[Array, '... m ncol']:
@@ -204,18 +243,19 @@ def semiring_ell_matmul(
         n_cols = int(B.shape[-2])
 
     batch_dims = len(values.shape) - 2
+    core: Callable[[Array, Array, Array], Array]
     if semiring.ell_matmul_vjp is None:
-        def core(v_, i_, B_):
+        def core(v_: Array, i_: Array, B_: Array) -> Array:
             return _forward_only_ell_2d(
                 v_, i_, B_,
                 semiring=semiring, n_cols=n_cols, backend=backend,
             )
     else:
-        def core(v_, i_, B_):
+        def core(v_: Array, i_: Array, B_: Array) -> Array:
             return _diff_ell_matmul_2d(
                 v_, i_, B_, semiring, n_cols, backend,
             )
-    fn = core
+    fn: Callable[..., Array] = core
     for _ in range(batch_dims):
         fn = jax.vmap(fn, in_axes=(0, 0, 0))
     return fn(values, indices, B)

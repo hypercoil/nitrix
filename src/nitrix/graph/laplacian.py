@@ -34,6 +34,10 @@ from typing import Callable, Literal, Optional, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array, Num
+# TypeIs (PEP 742) narrows in *both* branches of a guard; sourced from
+# typing_extensions (a guaranteed transitive dependency via jaxtyping) so the
+# 3.11 baseline keeps it -- ``typing.TypeIs`` only lands in 3.13.
+from typing_extensions import TypeIs
 
 from ..semiring import REAL, semiring_ell_matmul
 from ..sparse import ELL, SectionedELL, sectioned_semiring_ell_matmul
@@ -66,7 +70,7 @@ def _safe_max(x: Num[Array, '...']) -> Num[Array, '...']:
     return jnp.maximum(1.0, x.max(axis=(-1, -2), keepdims=True))
 
 
-def _is_sparse(A) -> bool:
+def _is_sparse(A: _GraphInput) -> TypeIs[Union[ELL, SectionedELL]]:
     return isinstance(A, (ELL, SectionedELL))
 
 

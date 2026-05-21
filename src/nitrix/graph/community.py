@@ -47,6 +47,8 @@ __all__ = [
 
 
 _GraphInput = Union[Num[Array, '... n n'], ELL, SectionedELL]
+# A null-model factory: ``A -> null(A)``, both dense ``(..., n, n)``.
+_NullModel = Callable[[Num[Array, '... n n']], Num[Array, '... n n']]
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +86,7 @@ def modularity_matrix(
     A: Num[Array, '... n n'],
     *,
     gamma: float = 1.0,
-    null: Callable = girvan_newman_null,
+    null: _NullModel = girvan_newman_null,
     normalise: bool = True,
     sign: Optional[Literal['+', '-']] = '+',
 ) -> Num[Array, '... n n']:
@@ -230,7 +232,7 @@ def relaxed_modularity(
     C_other: Optional[Num[Array, '... n k']] = None,
     bridge: Optional[Num[Array, '... k k']] = None,
     gamma: float = 1.0,
-    null: Callable = girvan_newman_null,
+    null: _NullModel = girvan_newman_null,
     normalise_modularity: bool = True,
     normalise_coaffiliation: bool = True,
     exclude_diag: bool = True,
@@ -282,11 +284,19 @@ def relaxed_modularity(
 
 
 def _relaxed_modularity_dense(
-    A, C, *,
-    C_other, bridge, gamma, null,
-    normalise_modularity, normalise_coaffiliation,
-    exclude_diag, directed, sign,
-):
+    A: Num[Array, '... n n'],
+    C: Num[Array, '... n k'],
+    *,
+    C_other: Optional[Num[Array, '... n k']],
+    bridge: Optional[Num[Array, '... k k']],
+    gamma: float,
+    null: _NullModel,
+    normalise_modularity: bool,
+    normalise_coaffiliation: bool,
+    exclude_diag: bool,
+    directed: bool,
+    sign: Optional[Literal['+', '-']],
+) -> Num[Array, '...']:
     B = modularity_matrix(
         A, gamma=gamma, null=null,
         normalise=normalise_modularity, sign=sign,
@@ -302,11 +312,17 @@ def _relaxed_modularity_dense(
 
 
 def _relaxed_modularity_sparse(
-    A, C, *,
-    C_other, bridge,
-    gamma, normalise_modularity, normalise_coaffiliation,
-    exclude_diag, directed,
-):
+    A: Union[ELL, SectionedELL],
+    C: Num[Array, '... n k'],
+    *,
+    C_other: Optional[Num[Array, '... n k']],
+    bridge: Optional[Num[Array, '... k k']],
+    gamma: float,
+    normalise_modularity: bool,
+    normalise_coaffiliation: bool,
+    exclude_diag: bool,
+    directed: bool,
+) -> Num[Array, '...']:
     '''Factored relaxed modularity for ELL / SectionedELL adjacency.
 
     ``A @ C`` (using semiring ELL matmul) is ``(n, k_comm)``; then

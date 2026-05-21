@@ -55,7 +55,7 @@ What the legacy did NOT have that we add:
 """
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 import jax
 import jax.numpy as jnp
@@ -241,8 +241,11 @@ def residualise(
     if weights is not None:
         weights = jnp.broadcast_to(weights, batch_shape + (X_in.shape[-2],))
 
+    fn: Callable[..., Any]
     if weights is None:
-        def core(X_, Y_):
+        def core(
+            X_: Float[Array, '...'], Y_: Float[Array, '...']
+        ) -> Float[Array, '...']:
             return _residualise_core(
                 Y_, X_, weights=None, l2=l2,
                 return_mode=return_mode, method=method,
@@ -252,12 +255,16 @@ def residualise(
             fn = jax.vmap(fn, in_axes=(0, 0))
         out = fn(X_in, Y_in)
     else:
-        def core(X_, Y_, w_):
+        def core_w(
+            X_: Float[Array, '...'],
+            Y_: Float[Array, '...'],
+            w_: Float[Array, '...'],
+        ) -> Float[Array, '...']:
             return _residualise_core(
                 Y_, X_, weights=w_, l2=l2,
                 return_mode=return_mode, method=method,
             )
-        fn = core
+        fn = core_w
         for _ in range(len(batch_shape)):
             fn = jax.vmap(fn, in_axes=(0, 0, 0))
         out = fn(X_in, Y_in, weights)

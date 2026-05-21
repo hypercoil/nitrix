@@ -37,9 +37,10 @@ What changed from ``nitrix.functional.fourier``:
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import jax.numpy as jnp
+from jax.typing import DTypeLike
 from jaxtyping import Array, Complex, Float, Num
 
 
@@ -58,7 +59,7 @@ __all__ = [
 def product_filter(
     X: Num[Array, '... obs'],
     weight: Num[Array, '... obs_freq'],
-    **fft_params,
+    **fft_params: Any,
 ) -> Num[Array, '... obs']:
     '''Frequency-domain convolution via ``rfft`` multiplication.
 
@@ -86,7 +87,7 @@ def product_filter(
 def product_filtfilt(
     X: Num[Array, '... obs'],
     weight: Num[Array, '... obs_freq'],
-    **fft_params,
+    **fft_params: Any,
 ) -> Num[Array, '... obs']:
     '''Zero-phase forward-backward frequency-domain filter.
 
@@ -102,7 +103,7 @@ def product_filtfilt(
     )
 
 
-def _hilbert_mask(n: int, dtype) -> Float[Array, 'n']:
+def _hilbert_mask(n: int, dtype: DTypeLike) -> Float[Array, 'n']:
     '''Hilbert mask for the analytic signal at FFT length ``n``.
 
     Standard recipe (Marple 1999):

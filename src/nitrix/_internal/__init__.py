@@ -21,7 +21,6 @@ from .docutil import (
     tensor_dimensions,
 )
 from .util import (
-    Tensor,
     _conform_bform_weight,
     _dim_or_none,
     _compose,
@@ -69,7 +68,6 @@ __all__ = [
     'strict_backend',
     'DocTemplateFormat',
     'tensor_dimensions',
-    'Tensor',
     '_conform_bform_weight',
     '_dim_or_none',
     '_compose',

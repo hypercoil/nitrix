@@ -23,6 +23,8 @@ branch where Triton is ``>= 5× slower or unstable``).
 """
 from __future__ import annotations
 
+from typing import Any
+
 from jaxtyping import Array, Int, Num
 
 from ...semiring._types import Semiring
@@ -50,7 +52,7 @@ def semiring_ell_matmul_pallas(
     indices: Int[Array, 'm kmax'],
     B: Num[Array, 'n_cols ncol'],
     *,
-    semiring: Semiring,
+    semiring: Semiring[Any],
 ) -> Num[Array, 'm ncol']:
     raise PallasELLNotTileable(
         'semiring_ell_matmul: Pallas Triton lacks gather / axis-0 '

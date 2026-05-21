@@ -43,7 +43,7 @@ from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Num
+from jaxtyping import Array, Bool, Float, Int, Num
 
 
 __all__ = [
@@ -242,7 +242,12 @@ def toeplitz_2d(
     mask = jnp.zeros(2 * d - 1, dtype=bool).at[: (d - 1)].set(True)
     iota = jnp.arange(d)
 
-    def roll_one(c, r, i, mask):
+    def roll_one(
+        c: Num[Array, '...'],
+        r: Num[Array, '...'],
+        i: Int[Array, '...'],
+        mask: Bool[Array, '...'],
+    ) -> Num[Array, '...']:
         rs = jnp.roll(r, i, axis=-1)
         cs = jnp.roll(c, i + 1, axis=-1)
         ms = jnp.roll(mask, i, axis=-1)[-d:]
@@ -384,11 +389,15 @@ def squareform(X: Num[Array, '...']) -> Num[Array, '...']:
 # typically intend.
 
 
-def _sym2vec_fwd(sym, offset):
+def _sym2vec_fwd(
+    sym: Num[Array, '...'], offset: int
+) -> Tuple[Num[Array, '...'], None]:
     return sym2vec(sym, offset=offset), None
 
 
-def _sym2vec_bwd(offset, _res, g):
+def _sym2vec_bwd(
+    offset: int, _res: None, g: Num[Array, '...']
+) -> Tuple[Num[Array, '...']]:
     # Backprop: place the cotangents back into the upper triangle.
     # Do *not* mirror; the lower triangle of the input had no
     # information.
@@ -397,11 +406,15 @@ def _sym2vec_bwd(offset, _res, g):
     return (unmirrored * mask,)
 
 
-def _vec2sym_fwd(vec, offset):
+def _vec2sym_fwd(
+    vec: Num[Array, '...'], offset: int
+) -> Tuple[Num[Array, '...'], None]:
     return vec2sym(vec, offset=offset), None
 
 
-def _vec2sym_bwd(offset, _res, g):
+def _vec2sym_bwd(
+    offset: int, _res: None, g: Num[Array, '...']
+) -> Tuple[Num[Array, '...']]:
     # Backprop: scale by 2 for off-(named-)diagonal entries to account
     # for the implicit mirroring in the forward; 1 for on-diagonal.
     scale = jnp.where(jnp.eye(g.shape[-1], dtype=bool), 1.0, 2.0)

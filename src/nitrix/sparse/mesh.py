@@ -39,14 +39,29 @@ Use cases:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    cast,
+)
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Float, Int, Num
+from numpy.typing import NDArray
 
 from .ell import ELL
+
+if TYPE_CHECKING:
+    # Annotation-only; a runtime import would risk a cycle (the matmul
+    # itself is imported lazily inside the functions below).
+    from ..semiring._types import Semiring
 
 
 __all__ = [
@@ -96,7 +111,7 @@ class Mesh:
 # ---------------------------------------------------------------------------
 
 
-def _icosahedron() -> Tuple[np.ndarray, np.ndarray]:
+def _icosahedron() -> Tuple[NDArray[Any], NDArray[Any]]:
     '''Base icosahedron: 12 vertices, 20 faces.
 
     Coordinates from the standard ``(±1, ±φ, 0)``-permutation
@@ -120,9 +135,9 @@ def _icosahedron() -> Tuple[np.ndarray, np.ndarray]:
 
 
 def _subdivide(
-    verts: np.ndarray,
-    faces: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    verts: NDArray[Any],
+    faces: NDArray[Any],
+) -> Tuple[NDArray[Any], NDArray[Any], NDArray[Any]]:
     '''One step of icosphere subdivision.
 
     Each triangle is split into 4 smaller triangles by inserting
@@ -241,8 +256,8 @@ class IcosphereHierarchy:
     stay GPU-native.
     '''
 
-    meshes: tuple
-    parents: tuple
+    meshes: Tuple[Mesh, ...]
+    parents: Tuple[Optional[NDArray[Any]], ...]
 
     @property
     def max_level(self) -> int:
@@ -278,7 +293,7 @@ def icosphere_hierarchy(max_level: int) -> IcosphereHierarchy:
         raise ValueError(f'max_level must be >= 0; got {max_level}.')
 
     meshes: list[Mesh] = []
-    parents_per_level: list = [None]
+    parents_per_level: List[Optional[NDArray[Any]]] = [None]
 
     verts, faces = _icosahedron()
     meshes.append(Mesh(
@@ -375,7 +390,7 @@ def icosphere_hierarchy_from_levels(
             'icosphere_hierarchy_from_levels: parents[0] must be None '
             '(the base level has no parent).'
         )
-    parents_norm: list = [None]
+    parents_norm: List[Optional[NDArray[Any]]] = [None]
     for L in range(1, len(meshes)):
         p = parents[L]
         if p is None:
@@ -471,6 +486,9 @@ def icosphere_cross_level_adjacency(
     n_coarse = hierarchy.meshes[coarse_level].n_vertices
     n_fine = hierarchy.meshes[fine_level].n_vertices
     parents = hierarchy.parents[fine_level]  # (n_fine, 2)
+    # A fine (non-base) level always has a parent table; only parents[0]
+    # is None, and ``_validate_consecutive`` guarantees fine_level >= 1.
+    assert parents is not None
 
     # For each coarse vertex i, accumulate the fine vertices whose
     # parent pair contains i.
@@ -541,6 +559,9 @@ def icosphere_bary_upsampler(
     n_coarse = hierarchy.meshes[coarse_level].n_vertices
     n_fine = hierarchy.meshes[fine_level].n_vertices
     parents = hierarchy.parents[fine_level]  # (n_fine, 2)
+    # A fine (non-base) level always has a parent table; only parents[0]
+    # is None, and ``_validate_consecutive`` guarantees fine_level >= 1.
+    assert parents is not None
 
     indices_np = np.zeros((n_fine, 2), dtype=np.int32)
     values_np = np.zeros((n_fine, 2), dtype=np.float32)
@@ -571,7 +592,7 @@ def icosphere_bary_upsampler(
 # ---------------------------------------------------------------------------
 
 
-def _edges_from_faces(faces_np: np.ndarray) -> np.ndarray:
+def _edges_from_faces(faces_np: NDArray[Any]) -> NDArray[Any]:
     '''Return the unique undirected edge list from a face list.
 
     ``edges[e] = [i, j]`` with ``i < j``; one row per undirected edge.
@@ -582,15 +603,16 @@ def _edges_from_faces(faces_np: np.ndarray) -> np.ndarray:
         faces_np[:, [2, 0]],
     ], axis=0)
     e = np.sort(e, axis=-1)
-    return np.unique(e, axis=0)
+    # ``np.unique`` is overloaded and resolves to Any here; restore.
+    return cast(NDArray[Any], np.unique(e, axis=0))
 
 
 def _onering_adj_list(
-    faces_np: np.ndarray, n_vertices: int,
+    faces_np: NDArray[Any], n_vertices: int,
 ) -> list[list[int]]:
     '''Per-vertex 1-ring neighbour lists (NumPy/host construction).'''
     edges = _edges_from_faces(faces_np)
-    adj = [[] for _ in range(n_vertices)]
+    adj: List[List[int]] = [[] for _ in range(n_vertices)]
     for i, j in edges:
         adj[int(i)].append(int(j))
         adj[int(j)].append(int(i))
@@ -701,8 +723,8 @@ def mesh_k_ring_adjacency(
 
 
 def _cotangent_weights(
-    vertices_np: np.ndarray, faces_np: np.ndarray,
-) -> np.ndarray:
+    vertices_np: NDArray[Any], faces_np: NDArray[Any],
+) -> NDArray[Any]:
     '''Per-(face, edge) cotangent weight for the discrete L-B operator.
 
     For a triangle with vertices ``(a, b, c)`` and the edge opposite
@@ -722,13 +744,14 @@ def _cotangent_weights(
     b = vertices_np[faces_np[:, 1]]
     c = vertices_np[faces_np[:, 2]]
 
-    def cot(u, v):
+    def cot(u: NDArray[Any], v: NDArray[Any]) -> NDArray[Any]:
         '''``cot(angle between u and v) = (u.v) / |u x v|``.'''
         dot = np.sum(u * v, axis=-1)
         cross = np.cross(u, v)
         cross_norm = np.linalg.norm(cross, axis=-1)
         cross_norm = np.where(cross_norm > 1e-30, cross_norm, 1e-30)
-        return dot / cross_norm
+        # NumPy reductions resolve to Any here; restore the array type.
+        return cast(NDArray[Any], dot / cross_norm)
 
     # Angle at vertex a is the angle between (b - a) and (c - a),
     # so the cot weight at the edge opposite a (= edge b - c) is
@@ -855,7 +878,14 @@ def mesh_cotangent_laplacian(
 # have to know the substrate idiom by heart.
 
 
-def _apply_shared_ell(values, indices, B, *, semiring, n_cols):
+def _apply_shared_ell(
+    values: Num[Array, 'm k_max'],
+    indices: Int[Array, 'm k_max'],
+    B: Num[Array, '... n d'],
+    *,
+    semiring: 'Semiring[Any]',
+    n_cols: int,
+) -> Num[Array, '... m d']:
     '''Apply a *shared* (un-batched) ELL to possibly-batched features.
 
     ``semiring_ell_matmul`` vmaps over leading dims that are present on
@@ -868,22 +898,23 @@ def _apply_shared_ell(values, indices, B, *, semiring, n_cols):
     '''
     from ..semiring import semiring_ell_matmul
 
-    def core(b2d):
+    def core(b2d: Num[Array, 'n d']) -> Num[Array, 'm d']:
         return semiring_ell_matmul(
             values, indices, b2d,
             semiring=semiring, n_cols=n_cols, backend='jax',
         )
 
-    fn = core
+    fn: Callable[..., Any] = core
     for _ in range(B.ndim - 2):
         fn = jax.vmap(fn)
-    return fn(B)
+    # ``jax.vmap`` erases the return type to Any; restore it.
+    return cast(Num[Array, '... m d'], fn(B))
 
 
 def mesh_pool_max(
-    cross_level_adjacency,
+    cross_level_adjacency: ELL,
     fine_features: Float[Array, '... n_fine d'],
-):
+) -> Float[Array, '... n_coarse d']:
     '''Max-pool fine-level features to a coarse level via an ELL adjacency.
 
     For each coarse vertex ``i``, returns the max of fine-vertex
@@ -922,9 +953,9 @@ def mesh_pool_max(
 
 
 def mesh_coarsen_meanpool(
-    coarsen_ell,
+    coarsen_ell: ELL,
     fine_features: Float[Array, '... n_fine d'],
-):
+) -> Float[Array, '... n_coarse d']:
     '''Mean-pool fine-level features to a coarse level via an ELL adjacency.
 
     For each coarse vertex ``i``, returns the ``values``-weighted mean
@@ -977,9 +1008,9 @@ def mesh_coarsen_meanpool(
 
 
 def mesh_unpool_max(
-    cross_level_adjacency,
+    cross_level_adjacency: ELL,
     coarse_features: Float[Array, '... n_coarse d'],
-):
+) -> Float[Array, '... n_fine d']:
     '''Max-unpool coarse-level features back to a fine level.
 
     Symmetric to ``mesh_pool_max``: the cross-level adjacency is
@@ -1004,9 +1035,9 @@ def mesh_unpool_max(
 
 
 def mesh_bary_upsample(
-    bary_ell,
+    bary_ell: ELL,
     coarse_coords: Float[Array, '... n_coarse d'],
-):
+) -> Float[Array, '... n_fine d']:
     '''Barycentric upsample from coarse to fine.
 
     For each fine vertex ``i``::

@@ -109,7 +109,11 @@ def cartesian_to_latlong(
 # ---------------------------------------------------------------------------
 
 
-def _geodesic_pair(X, Y, r):
+def _geodesic_pair(
+    X: Float[Array, '... 3'],
+    Y: Float[Array, '... 3'],
+    r: float,
+) -> Float[Array, '...']:
     '''Per-pair geodesic on already-aligned points.
 
     ``X`` and ``Y`` must have matching shapes ``(..., 3)``; output is

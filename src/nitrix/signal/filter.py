@@ -34,6 +34,7 @@ from __future__ import annotations
 from typing import Optional
 
 import jax.numpy as jnp
+from jax.typing import DTypeLike
 from jaxtyping import Array, Float, Num
 
 from ..linalg.residual import residualise
@@ -45,7 +46,7 @@ __all__ = ['polynomial_detrend']
 def _polynomial_basis(
     n_obs: int,
     degree: int,
-    dtype,
+    dtype: DTypeLike,
 ) -> Float[Array, 'degree+1 obs']:
     '''Build a polynomial basis ``[1, t, t^2, ..., t^d]`` along
     rescaled time ``t in [-1, 1]``.

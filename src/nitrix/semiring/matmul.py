@@ -25,11 +25,13 @@ backend)`` per process; see ``_internal.backend`` for the env-var knobs.
 from __future__ import annotations
 
 from functools import partial
-from typing import Optional
+from typing import Any, Callable, Optional, Tuple, TypeVar
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Num
+
+_T = TypeVar('_T')
 
 from .._internal.backend import (
     Backend,
@@ -48,7 +50,9 @@ __all__ = [
 ]
 
 
-def _check_2d_compat(A_shape, B_shape, name: str) -> tuple[int, int, int]:
+def _check_2d_compat(
+    A_shape: tuple[int, ...], B_shape: tuple[int, ...], name: str
+) -> tuple[int, int, int]:
     if len(A_shape) < 2 or len(B_shape) < 2:
         raise ValueError(
             f'{name}: A and B must have at least 2 dimensions; got '
@@ -64,7 +68,9 @@ def _check_2d_compat(A_shape, B_shape, name: str) -> tuple[int, int, int]:
     return int(m), int(k), int(n)
 
 
-def _broadcast_batch(A, B):
+def _broadcast_batch(
+    A: Array, B: Array
+) -> Tuple[Array, Array, Tuple[int, ...]]:
     '''Broadcast leading batch dims of ``A`` and ``B`` together.
 
     Returns the broadcasted operands; the trailing two dims are
@@ -79,12 +85,14 @@ def _broadcast_batch(A, B):
     return A_b, B_b, out_batch
 
 
-def _run_jax_core(A2, B2, *, semiring: Semiring) -> Array:
+def _run_jax_core(A2: Array, B2: Array, *, semiring: Semiring[Any]) -> Array:
     '''2-D JAX-reference core, expected to be ``vmap``-ed over batch dims.'''
     return reference_semiring_matmul(A2, B2, semiring=semiring)
 
 
-def _vmap_over_batch(fn, n_batch_dims: int):
+def _vmap_over_batch(
+    fn: Callable[..., _T], n_batch_dims: int
+) -> Callable[..., _T]:
     out = fn
     for _ in range(n_batch_dims):
         out = jax.vmap(out, in_axes=(0, 0))
@@ -92,7 +100,7 @@ def _vmap_over_batch(fn, n_batch_dims: int):
 
 
 def _semiring_matmul_jax(
-    A: Array, B: Array, *, semiring: Semiring
+    A: Array, B: Array, *, semiring: Semiring[Any]
 ) -> Array:
     Ab, Bb, batch = _broadcast_batch(A, B)
     core = partial(_run_jax_core, semiring=semiring)
@@ -100,7 +108,7 @@ def _semiring_matmul_jax(
 
 
 def _semiring_matmul_pallas(
-    A: Array, B: Array, *, semiring: Semiring
+    A: Array, B: Array, *, semiring: Semiring[Any]
 ) -> Optional[Array]:
     '''Pallas dispatch; returns ``None`` if the kernel rejects the shape.
 
@@ -125,7 +133,7 @@ def _semiring_matmul_pallas(
 
 
 def _forward_only_2d(
-    A: Array, B: Array, *, semiring: Semiring, backend: Backend,
+    A: Array, B: Array, *, semiring: Semiring[Any], backend: Backend,
 ) -> Array:
     '''Backend-dispatching 2-D forward pass without custom_vjp wrapping.
 
@@ -168,7 +176,7 @@ def _forward_only_2d(
 
 @partial(jax.custom_vjp, nondiff_argnums=(2, 3))
 def _diff_matmul_2d(
-    A: Array, B: Array, semiring: Semiring, backend: Backend,
+    A: Array, B: Array, semiring: Semiring[Any], backend: Backend,
 ) -> Array:
     '''Differentiable 2-D core of ``semiring_matmul``.
 
@@ -183,7 +191,9 @@ def _diff_matmul_2d(
     return _forward_only_2d(A, B, semiring=semiring, backend=backend)
 
 
-def _diff_matmul_2d_fwd(A, B, semiring, backend):
+def _diff_matmul_2d_fwd(
+    A: Array, B: Array, semiring: Semiring[Any], backend: Backend
+) -> Tuple[Array, Tuple[Array, Array, Array]]:
     # NB: ``custom_vjp`` ``fwd`` mirrors the primal's full signature.
     # The nondiff args are *not* prepended here -- only ``bwd`` sees
     # them at the front of its argument list.
@@ -195,7 +205,12 @@ def _diff_matmul_2d_fwd(A, B, semiring, backend):
     return out, (A, B, out)
 
 
-def _diff_matmul_2d_bwd(semiring, backend, residuals, g_out):
+def _diff_matmul_2d_bwd(
+    semiring: Semiring[Any],
+    backend: Backend,
+    residuals: Tuple[Array, Array, Array],
+    g_out: Array,
+) -> Tuple[Array, Array]:
     rule = semiring.matmul_vjp
     if rule is None:
         raise TypeError(
@@ -213,7 +228,7 @@ def semiring_matmul(
     A: Num[Array, '... m k'],
     B: Num[Array, '... k n'],
     *,
-    semiring: Semiring = REAL,
+    semiring: Semiring[Any] = REAL,
     backend: Backend = 'auto',
 ) -> Num[Array, '... m n']:
     '''Semiring-generalised matrix multiplication.
@@ -261,8 +276,9 @@ def semiring_matmul(
     _check_2d_compat(A.shape, B.shape, name='semiring_matmul')
 
     Ab, Bb, batch = _broadcast_batch(A, B)
+    core: Callable[[Array, Array], Array]
     if semiring.matmul_vjp is None:
-        def core(A_, B_):
+        def core(A_: Array, B_: Array) -> Array:
             return _forward_only_2d(
                 A_, B_, semiring=semiring, backend=backend,
             )
@@ -270,9 +286,6 @@ def semiring_matmul(
         # custom_vjp wrapper; vmap below composes with the registered
         # forward / backward.  semiring / backend are passed positionally
         # because ``nondiff_argnums`` is positional-only.
-        def core(A_, B_):
+        def core(A_: Array, B_: Array) -> Array:
             return _diff_matmul_2d(A_, B_, semiring, backend)
-    fn = core
-    for _ in range(len(batch)):
-        fn = jax.vmap(fn, in_axes=(0, 0))
-    return fn(Ab, Bb)
+    return _vmap_over_batch(core, len(batch))(Ab, Bb)

@@ -26,7 +26,7 @@ Renamings from legacy code:
 """
 from __future__ import annotations
 
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Union, cast
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float
@@ -183,8 +183,9 @@ def compactness_penalty(
         # cm: (..., n_regions, ndim); coords: (..., n_points, ndim)
         dist = spherical_geodesic_distance(cm, coords, r=radius)
     dist = jnp.maximum(dist - floor, 0.0)
-    # Penalty = mean over points of weight * dist.
-    return (weight * dist).mean(axis=-1)
+    # Penalty = mean over points of weight * dist.  ``dist`` flows from
+    # ``jnp.linalg.norm`` (typed Any) on one branch; restore the type.
+    return cast(Float[Array, '...'], (weight * dist).mean(axis=-1))
 
 
 # ---------------------------------------------------------------------------

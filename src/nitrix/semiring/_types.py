@@ -76,7 +76,7 @@ class Monoid(Protocol[S]):
     '''
 
     def init(
-        self, shape: tuple[int, ...], dtype: jnp.dtype
+        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
     ) -> S: ...
 
     def update(
@@ -189,7 +189,7 @@ class Semiring(Generic[S]):
             ell_matmul_vjp=self.ell_matmul_vjp,
         )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Validate Protocol shape so a misshapen algebra fails at
         # construction rather than deep inside a Pallas trace.
         if not isinstance(self.monoid, Monoid):

@@ -54,7 +54,7 @@ NeuroImage 20, 1052-1063.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -74,11 +74,18 @@ class FLAMEResult:
     gamma_hat: Float[Array, 'V p']
     log_lik: Float[Array, 'V']
 
-    def tree_flatten(self):
+    def tree_flatten(
+        self,
+    ) -> Tuple[
+        Tuple[Float[Array, 'V'], Float[Array, 'V p'], Float[Array, 'V']],
+        None,
+    ]:
         return (self.sigma_b_sq, self.gamma_hat, self.log_lik), None
 
     @classmethod
-    def tree_unflatten(cls, _aux, children):
+    def tree_unflatten(
+        cls, _aux: None, children: Tuple[Any, ...]
+    ) -> 'FLAMEResult':
         return cls(*children)
 
 
@@ -141,7 +148,12 @@ def _flame_newton_step(
     delta = grad / hess_pos
     delta = jnp.clip(delta, -max_step, max_step)
 
-    def body(carry, _):
+    def body(
+        carry: Tuple[Float[Array, ''], Float[Array, ''], Float[Array, '']],
+        _: Any,
+    ) -> Tuple[
+        Tuple[Float[Array, ''], Float[Array, ''], Float[Array, '']], None
+    ]:
         scale, x_best, nll_best = carry
         x_try = log_sigma_b_sq - scale * delta
         nll_try = _flame_neg_loglik(
@@ -167,12 +179,14 @@ def _flame_fit_one_voxel(
     log_sigma_b_sq_init: Float[Array, ''],
     n_iter: int,
     damping: float,
-):
+) -> Tuple[Float[Array, ''], Float[Array, 'p'], Float[Array, '']]:
     '''Single-voxel FLAME fit via 1-D Newton.
 
     Returns ``(log_sigma_b_sq, gamma, log_lik)``.
     '''
-    def step(log_sigma, _):
+    def step(
+        log_sigma: Float[Array, ''], _: Any
+    ) -> Tuple[Float[Array, ''], None]:
         return _flame_newton_step(
             log_sigma, beta, X_group, var_within, damping,
         ), None

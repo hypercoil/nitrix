@@ -22,17 +22,19 @@ reduce to local-max / local-min sliding-window reductions.
 """
 from __future__ import annotations
 
-from typing import Optional, Sequence, Union
+from typing import Any, Optional, Sequence, Union, cast
 
 import jax
 import jax.numpy as jnp
 import jax.lax as lax
-from jaxtyping import Array, Num
+from jax.typing import DTypeLike
+from jaxtyping import Array, Float, Num
 
 from .._internal.backend import Backend
 from ..semiring import (
     TROPICAL_MAX_PLUS,
     TROPICAL_MIN_PLUS,
+    Semiring,
     semiring_conv,
 )
 
@@ -46,11 +48,11 @@ __all__ = ['dilate', 'erode', 'open', 'close', 'distance_transform']
 
 
 def _resolve_structuring_element(
-    structuring_element,
-    size,
+    structuring_element: Optional[Num[Array, '*kspatial']],
+    size: Optional[Union[int, Sequence[int]]],
     spatial_rank: int,
-    dtype,
-):
+    dtype: DTypeLike,
+) -> Num[Array, '*kspatial']:
     '''Return a structuring element of the right rank and dtype.
 
     If ``structuring_element`` is given, it is used directly (after a
@@ -82,13 +84,13 @@ def _resolve_structuring_element(
 
 
 def _conv_wrap(
-    x,
-    se,
+    x: Num[Array, '... *spatial'],
+    se: Num[Array, '*kspatial'],
     *,
-    semiring,
-    padding,
-    backend,
-):
+    semiring: Semiring[Any],
+    padding: str,
+    backend: Backend,
+) -> Num[Array, '... *spatial']:
     '''Run ``semiring_conv`` on a single-channel input.
 
     Adds the trailing ``c_in = 1`` to ``x``, expands the structuring
@@ -292,7 +294,7 @@ def close(
 # ---------------------------------------------------------------------------
 
 
-def _chebyshev_3x3_offsets(spatial_rank: int, dtype) -> Array:
+def _chebyshev_3x3_offsets(spatial_rank: int, dtype: DTypeLike) -> Array:
     '''3x3x... structuring element with Chebyshev (chessboard) distances.
 
     The center is 0, every other position is 1.  Iterated min-plus
@@ -408,7 +410,7 @@ def distance_transform(
     if max_iters is None:
         max_iters = max(mask.shape[-spatial_rank:])
 
-    def body(_i, d):
+    def body(_i: int, d: Float[Array, '...']) -> Float[Array, '...']:
         return _conv_wrap(
             d, se,
             semiring=TROPICAL_MIN_PLUS,
@@ -416,4 +418,5 @@ def distance_transform(
             backend=backend,
         )
 
-    return lax.fori_loop(0, max_iters, body, dist)
+    # ``lax.fori_loop`` is typed as returning Any; restore the array type.
+    return cast(Float[Array, '...'], lax.fori_loop(0, max_iters, body, dist))

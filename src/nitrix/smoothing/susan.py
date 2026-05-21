@@ -32,10 +32,11 @@ diagnostic value materialises.)
 from __future__ import annotations
 
 import itertools
-from typing import Optional
+from typing import Any, Optional, Tuple
 
 import jax.numpy as jnp
 import numpy as np
+from numpy.typing import NDArray
 from jaxtyping import Array, Float
 
 from ..morphology import median_filter
@@ -46,10 +47,10 @@ __all__ = ['susan_emulator', 'spatial_cube_neighbourhood']
 
 
 def spatial_cube_neighbourhood(
-    spatial_shape: tuple,
+    spatial_shape: Tuple[int, ...],
     *,
     half: int = 1,
-):
+) -> NDArray[Any]:
     '''Build a flat-index spatial-cube adjacency.
 
     For an n-D image of shape ``spatial_shape``, returns an array

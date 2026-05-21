@@ -5,15 +5,20 @@
 Utility functions for tests.
 """
 
+from typing import Any, Callable, Dict, Optional
+
 import jax
 import pytest
 
 
-def cfg_variants_test(base_fn: callable, jit_params=None):
+def cfg_variants_test(
+    base_fn: Callable[..., Any],
+    jit_params: Optional[Dict[str, Any]] = None,
+) -> Callable[[Callable[..., Any]], Any]:
     if jit_params is None:
         jit_params = {}
 
-    def test_variants(test: callable):
+    def test_variants(test: Callable[..., Any]) -> Any:
         return pytest.mark.parametrize(
             'fn', [base_fn, jax.jit(base_fn, **jit_params)]
         )(test)

@@ -33,7 +33,7 @@ def reference_semiring_matmul(
     A: Num[Array, 'm k'],
     B: Num[Array, 'k n'],
     *,
-    semiring: Semiring,
+    semiring: Semiring[S],
 ) -> Num[Array, 'm n']:
     '''Pure-JAX reference for ``semiring_matmul``.
 
@@ -79,7 +79,7 @@ def reference_semiring_matmul(
     binary_op = semiring.binary_op
     acc_init = monoid.init((m, n), A.dtype)
 
-    def body(kk: int, acc):
+    def body(kk: int, acc: S) -> S:
         a_col = lax.dynamic_slice_in_dim(A, kk, 1, axis=1)  # (m, 1)
         b_row = lax.dynamic_slice_in_dim(B, kk, 1, axis=0)  # (1, n)
         value = binary_op.combine(a_col, b_row)             # (m, n)
@@ -94,7 +94,7 @@ def reference_semiring_ell_matmul(
     indices: Num[Array, 'm kmax'],
     B: Num[Array, 'n_cols ncol'],
     *,
-    semiring: Semiring,
+    semiring: Semiring[S],
     n_cols: int | None = None,
 ) -> Num[Array, 'm ncol']:
     '''Pure-JAX reference for ``semiring_ell_matmul``.
@@ -149,7 +149,7 @@ def reference_semiring_ell_matmul(
     binary_op = semiring.binary_op
     acc_init = monoid.init((m, ncol), B.dtype)
 
-    def body(p: int, acc):
+    def body(p: int, acc: S) -> S:
         v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)   # (m, 1)
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)
         idx_p = idx_p[:, 0]                                    # (m,)

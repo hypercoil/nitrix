@@ -30,10 +30,10 @@ is built-in or user-defined as long as the Protocol shape is honoured.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import jax.numpy as jnp
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Num
 
 from ._backward import (
     boolean_ell_matmul_vjp,
@@ -61,16 +61,22 @@ from ._types import Monoid, Semigroup, Semiring, StrictSemiring
 class _SumMonoid:
     '''``(R, +, 0)`` monoid; ``finalize`` is identity.'''
 
-    def init(self, shape, dtype):
+    def init(
+        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
+    ) -> Num[Array, '*shape']:
         return jnp.zeros(shape, dtype=dtype)
 
-    def update(self, acc, value):
+    def update(
+        self, acc: Num[Array, '*shape'], value: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return acc + value
 
-    def merge(self, a, b):
+    def merge(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return a + b
 
-    def finalize(self, acc):
+    def finalize(self, acc: Num[Array, '*shape']) -> Num[Array, '*shape']:
         return acc
 
 
@@ -78,16 +84,22 @@ class _SumMonoid:
 class _MaxMonoid:
     '''``(R ∪ {-inf}, max, -inf)`` monoid.'''
 
-    def init(self, shape, dtype):
+    def init(
+        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
+    ) -> Num[Array, '*shape']:
         return jnp.full(shape, -jnp.inf, dtype=dtype)
 
-    def update(self, acc, value):
+    def update(
+        self, acc: Num[Array, '*shape'], value: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return jnp.maximum(acc, value)
 
-    def merge(self, a, b):
+    def merge(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return jnp.maximum(a, b)
 
-    def finalize(self, acc):
+    def finalize(self, acc: Num[Array, '*shape']) -> Num[Array, '*shape']:
         return acc
 
 
@@ -95,16 +107,22 @@ class _MaxMonoid:
 class _MinMonoid:
     '''``(R ∪ {+inf}, min, +inf)`` monoid.'''
 
-    def init(self, shape, dtype):
+    def init(
+        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
+    ) -> Num[Array, '*shape']:
         return jnp.full(shape, jnp.inf, dtype=dtype)
 
-    def update(self, acc, value):
+    def update(
+        self, acc: Num[Array, '*shape'], value: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return jnp.minimum(acc, value)
 
-    def merge(self, a, b):
+    def merge(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return jnp.minimum(a, b)
 
-    def finalize(self, acc):
+    def finalize(self, acc: Num[Array, '*shape']) -> Num[Array, '*shape']:
         return acc
 
 
@@ -112,16 +130,22 @@ class _MinMonoid:
 class _OrMonoid:
     '''Boolean OR monoid; identity is ``False``.'''
 
-    def init(self, shape, dtype):
+    def init(
+        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
+    ) -> Num[Array, '*shape']:
         return jnp.zeros(shape, dtype=dtype)
 
-    def update(self, acc, value):
+    def update(
+        self, acc: Num[Array, '*shape'], value: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return jnp.logical_or(acc, value)
 
-    def merge(self, a, b):
+    def merge(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return jnp.logical_or(a, b)
 
-    def finalize(self, acc):
+    def finalize(self, acc: Num[Array, '*shape']) -> Num[Array, '*shape']:
         return acc
 
 
@@ -134,16 +158,22 @@ class _SumThenSqrtMonoid:
     ``Semiring`` rather than a ``StrictSemiring``.
     '''
 
-    def init(self, shape, dtype):
+    def init(
+        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
+    ) -> Num[Array, '*shape']:
         return jnp.zeros(shape, dtype=dtype)
 
-    def update(self, acc, value):
+    def update(
+        self, acc: Num[Array, '*shape'], value: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return acc + value
 
-    def merge(self, a, b):
+    def merge(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return a + b
 
-    def finalize(self, acc):
+    def finalize(self, acc: Num[Array, '*shape']) -> Num[Array, '*shape']:
         # Clamp tiny rounding-induced negative values to 0 before sqrt
         # so neither the value nor a downstream √' grad sees NaN.
         return jnp.sqrt(jnp.maximum(acc, jnp.zeros_like(acc)))
@@ -161,7 +191,9 @@ class LogSumExpAcc(NamedTuple):
     s: Float[Array, '*shape']
 
 
-def _safe_exp_diff(x, m):
+def _safe_exp_diff(
+    x: Float[Array, '*shape'], m: Float[Array, '*shape']
+) -> Float[Array, '*shape']:
     '''Compute ``exp(x - m)`` defined to be 0 wherever ``x == -inf``.
 
     Uses the "double-where with sentinel" trick to keep both forward
@@ -188,25 +220,29 @@ class _LogSumExpMonoid:
     All operations are NaN-safe even when both operands are ``-inf``.
     '''
 
-    def init(self, shape, dtype):
+    def init(
+        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
+    ) -> LogSumExpAcc:
         return LogSumExpAcc(
             m=jnp.full(shape, -jnp.inf, dtype=dtype),
             s=jnp.zeros(shape, dtype=dtype),
         )
 
-    def update(self, acc, value):
+    def update(
+        self, acc: LogSumExpAcc, value: Float[Array, '*shape']
+    ) -> LogSumExpAcc:
         new_m = jnp.maximum(acc.m, value)
         old_term = acc.s * _safe_exp_diff(acc.m, new_m)
         new_term = _safe_exp_diff(value, new_m)
         return LogSumExpAcc(m=new_m, s=old_term + new_term)
 
-    def merge(self, a, b):
+    def merge(self, a: LogSumExpAcc, b: LogSumExpAcc) -> LogSumExpAcc:
         new_m = jnp.maximum(a.m, b.m)
         sa = a.s * _safe_exp_diff(a.m, new_m)
         sb = b.s * _safe_exp_diff(b.m, new_m)
         return LogSumExpAcc(m=new_m, s=sa + sb)
 
-    def finalize(self, acc):
+    def finalize(self, acc: LogSumExpAcc) -> Float[Array, '*shape']:
         positive = acc.s > 0
         safe_s = jnp.where(positive, acc.s, jnp.ones_like(acc.s))
         return jnp.where(
@@ -223,25 +259,33 @@ class _LogSumExpMonoid:
 
 @dataclass(frozen=True)
 class _ProductSemigroup:
-    def combine(self, a, b):
+    def combine(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return a * b
 
 
 @dataclass(frozen=True)
 class _SumSemigroup:
-    def combine(self, a, b):
+    def combine(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return a + b
 
 
 @dataclass(frozen=True)
 class _AndSemigroup:
-    def combine(self, a, b):
+    def combine(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return jnp.logical_and(a, b)
 
 
 @dataclass(frozen=True)
 class _SquaredDiffSemigroup:
-    def combine(self, a, b):
+    def combine(
+        self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
+    ) -> Num[Array, '*shape']:
         return (a - b) ** 2
 
 
@@ -250,7 +294,7 @@ class _SquaredDiffSemigroup:
 # ---------------------------------------------------------------------------
 
 
-REAL: StrictSemiring = StrictSemiring(
+REAL: StrictSemiring[Any] = StrictSemiring(
     monoid=_SumMonoid(),
     binary_op=_ProductSemigroup(),
     identity=0.0,
@@ -259,7 +303,7 @@ REAL: StrictSemiring = StrictSemiring(
     ell_matmul_vjp=real_ell_matmul_vjp,
 )
 
-LOG: StrictSemiring = StrictSemiring(
+LOG: StrictSemiring[Any] = StrictSemiring(
     monoid=_LogSumExpMonoid(),
     binary_op=_SumSemigroup(),
     identity=-jnp.inf,
@@ -268,7 +312,7 @@ LOG: StrictSemiring = StrictSemiring(
     ell_matmul_vjp=log_ell_matmul_vjp,
 )
 
-TROPICAL_MAX_PLUS: StrictSemiring = StrictSemiring(
+TROPICAL_MAX_PLUS: StrictSemiring[Any] = StrictSemiring(
     monoid=_MaxMonoid(),
     binary_op=_SumSemigroup(),
     identity=-jnp.inf,
@@ -277,7 +321,7 @@ TROPICAL_MAX_PLUS: StrictSemiring = StrictSemiring(
     ell_matmul_vjp=tropical_max_plus_ell_matmul_vjp,
 )
 
-TROPICAL_MIN_PLUS: StrictSemiring = StrictSemiring(
+TROPICAL_MIN_PLUS: StrictSemiring[Any] = StrictSemiring(
     monoid=_MinMonoid(),
     binary_op=_SumSemigroup(),
     identity=jnp.inf,
@@ -286,7 +330,7 @@ TROPICAL_MIN_PLUS: StrictSemiring = StrictSemiring(
     ell_matmul_vjp=tropical_min_plus_ell_matmul_vjp,
 )
 
-BOOLEAN: StrictSemiring = StrictSemiring(
+BOOLEAN: StrictSemiring[Any] = StrictSemiring(
     monoid=_OrMonoid(),
     binary_op=_AndSemigroup(),
     identity=False,
@@ -301,7 +345,7 @@ BOOLEAN: StrictSemiring = StrictSemiring(
 # by the kernel's K-loop order, not by associativity), and `finalize`
 # applies a non-monoidal sqrt projection at the end.  Functions that
 # require a `StrictSemiring` will reject this at the type-check site.
-EUCLIDEAN: Semiring = Semiring(
+EUCLIDEAN: Semiring[Any] = Semiring(
     monoid=_SumThenSqrtMonoid(),
     binary_op=_SquaredDiffSemigroup(),
     identity=0.0,

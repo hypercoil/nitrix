@@ -15,19 +15,21 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 import jax
 import jax.numpy as jnp
 from jax import vmap
 from jax.tree_util import tree_map, tree_reduce
-from numpy.typing import NDArray
+from jaxtyping import Array, Bool, Complex, Float, Shaped
 
-Tensor = Union[jax.Array, NDArray[Any]]
+# A pytree of arbitrary structure; jax operations preserve it but mypy cannot
+# express the recursive shape, so it is the one place we accept ``Any``.
 PyTree = Any
 
 
-def _conform_bform_weight(weight: Tensor) -> Tensor:
+def _conform_bform_weight(weight: Shaped[Array, '...']) -> Shaped[Array, '...']:
     if weight.ndim == 1:
         return weight
     elif weight.shape[-2] != 1:
@@ -35,7 +37,7 @@ def _conform_bform_weight(weight: Tensor) -> Tensor:
     return weight
 
 
-def _dim_or_none(x, align, i, ndmax):
+def _dim_or_none(x: int, align: bool, i: int, ndmax: int) -> Optional[int]:
     if not align:
         i = i - ndmax
     else:
@@ -69,7 +71,9 @@ def _seq_pad(
     raise ValueError(f'Invalid padding: {pad}')
 
 
-def atleast_4d(*pparams: Tensor) -> Tensor | Sequence[Tensor]:
+def atleast_4d(
+    *pparams: Shaped[Array, '...'],
+) -> Union[Shaped[Array, '...'], Sequence[Shaped[Array, '...']]]:
     res = []
     for p in pparams:
         if p.ndim == 0:
@@ -97,11 +101,10 @@ def axis_complement(
     """
     if isinstance(axis, int):
         axis = (axis,)
-    ax = [True for _ in range(ndim)]
+    mask = [True for _ in range(ndim)]
     for a in axis:
-        ax[a] = False
-    ax = [i for i, a in enumerate(ax) if a]
-    return tuple(ax)
+        mask[a] = False
+    return tuple(i for i, a in enumerate(mask) if a)
 
 
 # TODO:
@@ -161,7 +164,7 @@ def promote_axis(
     """
     if isinstance(axis, int):
         axis = (axis,)
-    axis: List[int] = [standard_axis_number_strict(ax, ndim) for ax in axis]
+    axis = [standard_axis_number_strict(ax, ndim) for ax in axis]
     return (*axis, *axis_complement(ndim, axis))
 
 
@@ -185,12 +188,14 @@ def demote_axis(
 ) -> Tuple[int, ...]:
     if isinstance(axis, int):
         axis = (axis,)
-    axis: List[int] = [standard_axis_number_strict(ax, ndim) for ax in axis]
+    axis = [standard_axis_number_strict(ax, ndim) for ax in axis]
     return tuple(_demote_axis(ndim=ndim, axis=axis))
 
 
 @partial(jax.jit, static_argnames=('axis', 'n_folds'))
-def fold_axis(tensor: Tensor, axis: int, n_folds: int) -> Tensor:
+def fold_axis(
+    tensor: Shaped[Array, '...'], axis: int, n_folds: int
+) -> Shaped[Array, '...']:
     """
     Fold the specified axis into the specified number of folds.
     """
@@ -208,36 +213,38 @@ def fold_axis(tensor: Tensor, axis: int, n_folds: int) -> Tensor:
 
 
 @partial(jax.jit, static_argnames=('axes',))
-def unfold_axes(tensor: Tensor, axes: Union[int, Tuple[int, ...]]) -> Tensor:
+def unfold_axes(
+    tensor: Shaped[Array, '...'], axes: Union[int, Tuple[int, ...]]
+) -> Shaped[Array, '...']:
     """
     Unfold the specified consecutive axes into a single new axis.
 
     This function will fail if the specified axes are not consecutive.
     """
 
-    def _prod(x, y):
+    def _prod(x: int, y: int) -> int:
         return x * y
 
     if isinstance(axes, int):
         return tensor
     shape = tensor.shape
-    axes: List[int] = [  # type: ignore
-        standard_axis_number_strict(ax, tensor.ndim) for ax in axes
-    ]
-    current = [shape[ax] for ax in axes]
+    axes_std = [standard_axis_number_strict(ax, tensor.ndim) for ax in axes]
+    current = [shape[ax] for ax in axes_std]
     prod = reduce(_prod, current)
     # fmt: off
     new_shape = (
-        tensor.shape[:axes[0]] +
+        tensor.shape[:axes_std[0]] +
         (prod,) +
-        tensor.shape[axes[-1] + 1:]
+        tensor.shape[axes_std[-1] + 1:]
     )
     # fmt: on
     return tensor.reshape(new_shape)
 
 
 @partial(jax.jit, static_argnames=('axis', 'n_folds'))
-def fold_and_promote(tensor: Tensor, axis: int, n_folds: int) -> Tensor:
+def fold_and_promote(
+    tensor: Shaped[Array, '...'], axis: int, n_folds: int
+) -> Shaped[Array, '...']:
     """
     Fold the specified axis into the specified number of folds, and promote
     the new axis across the number of folds to the outermost dimension.
@@ -249,21 +256,23 @@ def fold_and_promote(tensor: Tensor, axis: int, n_folds: int) -> Tensor:
 
 @partial(jax.jit, static_argnames=('target_address', 'axes'))
 def demote_and_unfold(
-    tensor: Tensor,
+    tensor: Shaped[Array, '...'],
     target_address: int,
     axes: Union[int, Tuple[int, ...]] | None = None,
-):
+) -> Shaped[Array, '...']:
     if axes is None:
         axes = (target_address - 1, target_address)
     demoted = jnp.transpose(tensor, demote_axis(tensor.ndim, target_address))
-    return unfold_axes(demoted, axes)
+    # ``unfold_axes`` is jax.jit-wrapped, so its stub erases the return type
+    # to ``Any``; restore it (no runtime cost).
+    return cast(Shaped[Array, '...'], unfold_axes(demoted, axes))
 
 
 def broadcast_ignoring(
-    x: Tensor,
-    y: Tensor,
+    x: Shaped[Array, '...'],
+    y: Shaped[Array, '...'],
     axis: Union[int, Tuple[int, ...]],
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Shaped[Array, '...'], Shaped[Array, '...']]:
     """
     Broadcast two tensors, ignoring the axis or axes specified.
 
@@ -271,14 +280,23 @@ def broadcast_ignoring(
     the ignored axis.
     """
 
-    def _form_reduced_shape(axes, shape, ndim):
+    def _form_reduced_shape(
+        axes: Sequence[int],
+        shape: Tuple[int, ...],
+        ndim: int,
+    ) -> Tuple[Tuple[int, ...], Tuple[Optional[int], ...]]:
         axes = tuple(standard_axis_number(a, ndim) for a in axes)
         shape_reduced = tuple(
             1 if i in axes else shape[i] for i in range(ndim)
         )
         return shape_reduced, axes
 
-    def _form_final_shape(axes_out, axes_in, shape_in, common_shape):
+    def _form_final_shape(
+        axes_out: Tuple[Optional[int], ...],
+        axes_in: Tuple[Optional[int], ...],
+        shape_in: Tuple[int, ...],
+        common_shape: Tuple[int, ...],
+    ) -> Iterator[int]:
         j = 0
         for i, s in enumerate(common_shape):
             if i not in axes_out:
@@ -293,12 +311,14 @@ def broadcast_ignoring(
 
     if isinstance(axis, int):
         axis = (axis,)
-    axis = sorted(axis)
+    axis_seq = sorted(axis)
     shape_x, shape_y = x.shape, y.shape
-    shape_x_reduced, axes_x = _form_reduced_shape(axis, shape_x, x.ndim)
-    shape_y_reduced, axes_y = _form_reduced_shape(axis, shape_y, y.ndim)
+    shape_x_reduced, axes_x = _form_reduced_shape(axis_seq, shape_x, x.ndim)
+    shape_y_reduced, axes_y = _form_reduced_shape(axis_seq, shape_y, y.ndim)
     common_shape = jnp.broadcast_shapes(shape_x_reduced, shape_y_reduced)
-    axes_out = tuple(standard_axis_number(a, len(common_shape)) for a in axis)
+    axes_out = tuple(
+        standard_axis_number(a, len(common_shape)) for a in axis_seq
+    )
     shape_y = tuple(
         _form_final_shape(
             axes_out=axes_out,
@@ -322,7 +342,7 @@ def broadcast_ignoring(
 #      jit + vmap_over_outer
 def apply_vmap_over_outer(
     x: PyTree,
-    f: Callable[[Any], Any],
+    f: Callable[..., Any],
     f_dim: int,
     align_outer: bool = False,
     # structuring_arg: Optional[Union[Callable, int]] = None,
@@ -391,11 +411,11 @@ def apply_vmap_over_outer(
 
 
 def vmap_over_outer(
-    f: Callable[[Any], Any],
+    f: Callable[..., Any],
     f_dim: int,
     align_outer: bool = False,
     # structuring_arg: Optional[Union[Callable, int]] = None,
-) -> Callable[[Any], Any]:
+) -> Callable[..., Any]:
     """
     Transform a function to apply to the outer dimensions of a tensor.
     """
@@ -408,7 +428,7 @@ def vmap_over_outer(
     )
 
 
-def argsort(seq, reverse: bool = False):
+def argsort(seq: Sequence[Any], reverse: bool = False) -> List[int]:
     # Sources:
     # (1) https://stackoverflow.com/questions/3382352/ ...
     #     equivalent-of-numpy-argsort-in-basic-python
@@ -418,11 +438,11 @@ def argsort(seq, reverse: bool = False):
 
 
 def orient_and_conform(
-    input: Tensor,
+    input: Shaped[Array, '...'],
     axis: Union[int, Sequence[int]],
-    reference: Optional[Tensor] = None,
+    reference: Optional[Shaped[Array, '...']] = None,
     dim: Optional[int] = None,
-) -> Tensor:
+) -> Shaped[Array, '...']:
     """
     Orient an input tensor along a set of axes, and conform its overall
     dimension to equal that of a reference.
@@ -459,24 +479,27 @@ def orient_and_conform(
     if dim is None and reference is None:
         raise ValueError('Must specify either `reference` or `dim`')
     elif dim is None:
-        dim = reference.ndim  # type: ignore
+        assert reference is not None
+        dim = reference.ndim
     # can't rely on this when we compile with jit
     # TODO: Would there be any benefit to checkify this?
     assert (
         len(axis) == input.ndim
     ), 'Output orientation axis required for each input dimension'
-    standard_axes = [standard_axis_number(ax, dim) for ax in axis]
+    standard_axes = [standard_axis_number_strict(ax, dim) for ax in axis]
     axis_order = argsort(standard_axes)
     # I think XLA will be smart enough to know when this is a no-op
     input = input.transpose(axis_order)
-    standard_axes = set(standard_axes)
+    standard_axes_set = set(standard_axes)
     shape = [1] * dim
-    for size, ax in zip(input.shape, standard_axes):
+    for size, ax in zip(input.shape, standard_axes_set):
         shape[ax] = size
     return input.reshape(*shape)
 
 
-def promote_to_rank(tensor: Tensor, rank: int) -> Tensor:
+def promote_to_rank(
+    tensor: Shaped[Array, '...'], rank: int
+) -> Shaped[Array, '...']:
     """
     Promote a tensor to a rank-``rank`` tensor by prepending singleton
     dimensions. If the tensor is already rank-``rank``, this is a no-op.
@@ -488,10 +511,10 @@ def promote_to_rank(tensor: Tensor, rank: int) -> Tensor:
 
 
 def extend_to_size(
-    tensor: Tensor,
+    tensor: Shaped[Array, '...'],
     shape: Sequence[int],
     fill: float = float('nan'),
-) -> Tensor:
+) -> Shaped[Array, '...']:
     """
     Extend a tensor in the positive direction until its size matches the
     specification. Any new entries created via extension are populated with
@@ -503,9 +526,9 @@ def extend_to_size(
 
 
 def extend_to_max_size(
-    tensors: Sequence[Tensor],
+    tensors: Sequence[Shaped[Array, '...']],
     fill: float = float('nan'),
-) -> Tuple[Tensor, ...]:
+) -> Tuple[Shaped[Array, '...'], ...]:
     """
     Extend all tensors in a sequence until their sizes are equal to the size
     of the largest tensor along each axis. Any new entries created via
@@ -519,7 +542,9 @@ def extend_to_max_size(
     return tuple(extend_to_size(t, shape_max, fill=fill) for t in tensors)
 
 
-def complex_decompose(complex: Tensor) -> Tuple[Tensor, Tensor]:
+def complex_decompose(
+    complex: Complex[Array, '...'],
+) -> Tuple[Float[Array, '...'], Float[Array, '...']]:
     """
     Decompose a complex-valued tensor into amplitude and phase components.
 
@@ -551,7 +576,9 @@ def complex_decompose(complex: Tensor) -> Tuple[Tensor, Tensor]:
     return ampl, phase
 
 
-def complex_recompose(ampl: Tensor, phase: Tensor) -> Tensor:
+def complex_recompose(
+    ampl: Float[Array, '...'], phase: Float[Array, '...']
+) -> Complex[Array, '...']:
     """
     Reconstitute a complex-valued tensor from real-valued tensors denoting its
     amplitude and its phase.
@@ -585,13 +612,15 @@ def complex_recompose(ampl: Tensor, phase: Tensor) -> Tensor:
     return ampl * (jnp.cos(phase) + 1j * jnp.sin(phase))
 
 
-def amplitude_apply(func: Callable) -> Callable:
+def amplitude_apply(
+    func: Callable[[Float[Array, '...']], Float[Array, '...']],
+) -> Callable[[Complex[Array, '...']], Complex[Array, '...']]:
     """
     Decorator for applying a function to the amplitude component of a complex
     tensor.
     """
 
-    def wrapper(complex: Tensor) -> Tensor:
+    def wrapper(complex: Complex[Array, '...']) -> Complex[Array, '...']:
         ampl, phase = complex_decompose(complex)
         return complex_recompose(func(ampl), phase)
 
@@ -599,10 +628,10 @@ def amplitude_apply(func: Callable) -> Callable:
 
 
 def conform_mask(
-    tensor: Tensor,
-    mask: Tensor,
+    tensor: Shaped[Array, '...'],
+    mask: Bool[Array, '...'],
     axis: Sequence[int],
-) -> Tensor:
+) -> Shaped[Array, '...']:
     """
     Conform a mask or weight for elementwise applying to a tensor.
 
@@ -614,20 +643,20 @@ def conform_mask(
     """
     if isinstance(axis, int):
         axis = (axis,)
-    axis = sorted(standard_axis_number(ax, tensor.ndim) for ax in axis)
+    axis = sorted(standard_axis_number_strict(ax, tensor.ndim) for ax in axis)
     mask = orient_and_conform(mask, axis, reference=tensor)
-    axis = set(axis)
-    tile = [1 if i in axis else e for i, e in enumerate(tensor.shape)]
+    axis_set = set(axis)
+    tile = [1 if i in axis_set else e for i, e in enumerate(tensor.shape)]
     # if mask.ndim != tensor.ndim:
     #     breakpoint()
     return jnp.tile(mask, tile)
 
 
 def apply_mask(
-    tensor: Tensor,
-    msk: Tensor,
+    tensor: Shaped[Array, '...'],
+    msk: Bool[Array, '...'],
     axis: int,
-) -> Tensor:
+) -> Shaped[Array, '...']:
     """
     Mask a tensor along an axis.
 
@@ -649,7 +678,7 @@ def apply_mask(
     tensor = jnp.asarray(tensor)
     shape_pfx = tensor.shape[:axis]
     if axis == -1:
-        shape_sfx = ()
+        shape_sfx: Tuple[int, ...] = ()
     else:
         shape_sfx = tensor.shape[(axis + 1) :]
     msk = jnp.tile(msk, (*shape_pfx, 1))
@@ -657,20 +686,20 @@ def apply_mask(
 
 
 def mask_tensor(
-    tensor: Tensor,
-    mask: Tensor,
+    tensor: Shaped[Array, '...'],
+    mask: Bool[Array, '...'],
     axis: Sequence[int],
-    fill_value: Union[float, Tensor] = 0,
-):
+    fill_value: Union[float, Shaped[Array, '...']] = 0,
+) -> Shaped[Array, '...']:
     mask = conform_mask(tensor=tensor, mask=mask, axis=axis)
     return jnp.where(mask, tensor, fill_value)
 
 
 def masker(
-    mask: Tensor,
+    mask: Bool[Array, '...'],
     axis: int | Sequence[int],
     output_axis: int | None = None,
-) -> Callable[[Tensor], Tensor]:
+) -> Callable[[Shaped[Array, '...']], Shaped[Array, '...']]:
     """
     Create a JIT-compatible function that applies a mask to a tensor.
 
@@ -708,9 +737,13 @@ def masker(
     assert len(mask_loc) == len(axis)
 
     @jax.jit
-    def apply_mask(tensor: Tensor) -> Tensor:
-        _axis = tuple(standard_axis_number(ax, tensor.ndim) for ax in axis)
-        indexer = [slice(None)] * tensor.ndim
+    def apply_mask(
+        tensor: Shaped[Array, '...'],
+    ) -> Shaped[Array, '...']:
+        _axis = tuple(
+            standard_axis_number_strict(ax, tensor.ndim) for ax in axis
+        )
+        indexer: List[Any] = [slice(None)] * tensor.ndim
         for ax, loc in zip(_axis, mask_loc):
             indexer[ax] = loc
         result = tensor[tuple(indexer)]

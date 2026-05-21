@@ -71,7 +71,7 @@ class ELL:
         return (self.n_rows, self.n_cols)
 
     @property
-    def dtype(self):
+    def dtype(self) -> np.dtype[Any]:
         return self.values.dtype
 
 

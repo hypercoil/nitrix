@@ -66,10 +66,11 @@ Power, J. D. et al. (2014).  NeuroImage 84, 320-341.
 """
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Any, Callable, Tuple
 
 import jax
 import jax.numpy as jnp
+from jax.typing import DTypeLike
 from jaxtyping import Array, Bool, Float, Num
 
 from ..linalg._solver import safe_eigh
@@ -88,7 +89,7 @@ def _trial_frequencies(
     dt: float,
     oversampling: float,
     high_factor: float,
-    dtype,
+    dtype: DTypeLike,
     censoring_budget: float = 0.4,
 ) -> Float[Array, 'n_freq']:
     '''Choose trial angular frequencies (Press-Rybicki convention).
@@ -119,7 +120,7 @@ def _lomb_scargle_basis(
     n_obs: int,
     dt: float,
     omega: Float[Array, 'n_freq'],
-    dtype,
+    dtype: DTypeLike,
 ) -> Float[Array, 'n_obs n_basis']:
     '''Joint regression basis ``[DC | cos | sin]``.
 
@@ -182,7 +183,9 @@ def lomb_scargle_periodogram(
     )
     freqs = omega / (2.0 * jnp.pi)
 
-    def core(d, m):
+    def core(
+        d: Float[Array, 'n_obs'], m: Bool[Array, 'n_obs']
+    ) -> Float[Array, 'n_freq']:
         t = jnp.arange(n_obs, dtype=d.dtype) * dt
         mf = m.astype(d.dtype)
         n_valid = jnp.sum(mf)
@@ -203,7 +206,7 @@ def lomb_scargle_periodogram(
         var_y = jnp.sum(mf * (d - y_mean) ** 2) / n_valid
         return 0.5 * (cy ** 2 / c_norm + sy ** 2 / s_norm) / var_y
 
-    fn = core
+    fn: Callable[..., Any] = core
     for _ in range(data.ndim - 1):
         fn = jax.vmap(fn, in_axes=(0, 0))
     return freqs, fn(data, mask)

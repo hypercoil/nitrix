@@ -91,7 +91,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -130,11 +130,18 @@ class REMLResult:
     def sigma_e_sq(self) -> Float[Array, 'V']:
         return jnp.exp(self.theta_hat[..., 1])
 
-    def tree_flatten(self):
+    def tree_flatten(
+        self,
+    ) -> Tuple[
+        Tuple[Float[Array, 'V 2'], Float[Array, 'V p'], Float[Array, 'V']],
+        None,
+    ]:
         return (self.theta_hat, self.beta_hat, self.log_lik), None
 
     @classmethod
-    def tree_unflatten(cls, _aux, children):
+    def tree_unflatten(
+        cls, _aux: None, children: Tuple[Any, ...]
+    ) -> REMLResult:
         return cls(*children)
 
 
@@ -233,7 +240,12 @@ def _newton_scoring_step(
 
     # Backtracking via scan: halve the step until nll decreases or
     # n_backtrack tries exhausted.
-    def body(carry, _):
+    def body(
+        carry: Tuple[Float[Array, ''], Float[Array, 'K'], Float[Array, '']],
+        _: Any,
+    ) -> Tuple[
+        Tuple[Float[Array, ''], Float[Array, 'K'], Float[Array, '']], None
+    ]:
         scale, theta_best, nll_best = carry
         theta_try = theta - scale * delta
         nll_try = _neg_reml_loglik_diagonal(
@@ -258,12 +270,14 @@ def _reml_fit_diagonal_one_voxel(
     theta_init: Float[Array, 'K'],
     n_iter: int,
     damping: float,
-):
+) -> Tuple[Float[Array, 'K'], Float[Array, 'p'], Float[Array, '']]:
     '''Newton-scoring REML for a single voxel in the diagonal-V basis.
 
     Returns ``(theta_hat, beta_hat, log_lik)``.
     '''
-    def step(theta, _):
+    def step(
+        theta: Float[Array, 'K'], _: Any
+    ) -> Tuple[Float[Array, 'K'], None]:
         return _newton_scoring_step(
             theta, y_rot, X_rot, V_basis_diag, damping,
         ), None

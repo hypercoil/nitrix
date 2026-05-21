@@ -47,11 +47,12 @@ and construct the stencil on the padded grid.
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Sequence, Tuple, Union
+from typing import Any, Literal, Optional, Sequence, Tuple, Union, cast
 
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int, Num
+from numpy.typing import NDArray
 
 from .ell import ELL
 
@@ -73,9 +74,9 @@ BoundaryMode = Literal['replicate', 'periodic', 'reflect']
 
 def _linearise_offsets(
     grid_shape: Tuple[int, ...],
-    offsets: np.ndarray,
+    offsets: NDArray[Any],
     boundary: BoundaryMode,
-) -> np.ndarray:
+) -> NDArray[Any]:
     '''Map per-voxel + per-offset neighbour coordinates to linear indices.
 
     Returns ``indices`` of shape ``(n_voxels, n_offsets)`` where
@@ -133,7 +134,10 @@ def _linearise_offsets(
         dims=grid_shape,
         order='C',
     )
-    return linear.reshape(n_voxels, n_offsets).astype(np.int32)
+    # ``np.ravel_multi_index`` is typed as returning Any here; restore.
+    return cast(
+        NDArray[Any], linear.reshape(n_voxels, n_offsets).astype(np.int32)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +151,7 @@ def regular_grid_stencil(
     weights: Num[Array, 'n_offsets'],
     *,
     boundary: BoundaryMode = 'replicate',
-    n_cols: int = None,
+    n_cols: Optional[int] = None,
     identity: Any = 0.0,
 ) -> ELL:
     '''Build an ELL for an n-D regular-grid stencil.
@@ -217,7 +221,7 @@ def regular_grid_stencil(
     )
 
 
-def _axis_unit_offsets(ndim: int) -> np.ndarray:
+def _axis_unit_offsets(ndim: int) -> NDArray[Any]:
     '''Return the 2*ndim + 1 axis-aligned offsets ``{0, ±e_d}``.
 
     Order: center, then ``(+e_0, -e_0, +e_1, -e_1, ...)``.
@@ -313,7 +317,7 @@ def grid_laplacian(
 def grid_identity(
     grid_shape: Sequence[int],
     *,
-    n_cols: int = None,
+    n_cols: Optional[int] = None,
 ) -> ELL:
     '''The identity operator on a regular grid.
 

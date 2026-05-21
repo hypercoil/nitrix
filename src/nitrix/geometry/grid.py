@@ -33,11 +33,12 @@ from __future__ import annotations
 
 from functools import reduce
 from operator import mul
-from typing import Literal, Optional, Sequence, Union
+from typing import Any, Callable, Literal, Optional, Sequence, Union, cast
 
 import jax
 import jax.numpy as jnp
 import jax.scipy.ndimage as jsp_ndi
+from jax.typing import DTypeLike
 from jaxtyping import Array, Float
 
 
@@ -69,7 +70,7 @@ BoundaryMode = Literal['constant', 'nearest', 'wrap', 'mirror', 'reflect']
 def identity_grid(
     spatial_shape: Sequence[int],
     *,
-    dtype=jnp.float32,
+    dtype: DTypeLike = jnp.float32,
 ) -> Float[Array, '*spatial ndim']:
     '''The identity deformation: per-pixel its own coordinate.
 
@@ -138,9 +139,19 @@ def _gather_coords_linear(
     coords_t = jnp.moveaxis(coords, -1, 0)          # (ndim, *out_spatial)
     coords_flat = coords_t.reshape(ndim, -1)        # (ndim, N)
 
-    def sample_one_channel(img_ch):
-        return jsp_ndi.map_coordinates(
-            img_ch, coords_flat, order=1, mode=mode, cval=cval,
+    def sample_one_channel(
+        img_ch: Float[Array, '*spatial'],
+    ) -> Float[Array, 'n']:
+        # ``map_coordinates`` is typed to want a Sequence of per-axis
+        # coordinate arrays (and to return Any); the stacked ``(ndim, N)``
+        # array is accepted at runtime (jax iterates axis 0).  cast the arg
+        # to satisfy the checker and restore the result type.
+        return cast(
+            Float[Array, 'n'],
+            jsp_ndi.map_coordinates(
+                img_ch, cast(Sequence[Array], coords_flat),
+                order=1, mode=mode, cval=cval,
+            ),
         )
 
     sample_v = jax.vmap(sample_one_channel, in_axes=-1, out_axes=-1)
@@ -226,15 +237,21 @@ def spatial_transform(
             'manually if you need it.'
         )
 
-    def core(image_, deformation_):
+    def core(
+        image_: Float[Array, '*spatial c'],
+        deformation_: Float[Array, '*spatial ndim'],
+    ) -> Float[Array, '*spatial c']:
         return _gather_coords_linear(
             image_, deformation_, mode=mode, cval=cval,
         )
 
-    fn = core
+    fn: Callable[..., Any] = core
     for _ in range(len(image_batch)):
         fn = jax.vmap(fn, in_axes=(0, 0))
-    return fn(image, deformation)
+    # ``jax.vmap`` erases the return type to Any; restore it.  (cast is
+    # runtime-evaluated, so use a single-variadic shape -- jaxtyping
+    # rejects two ``*`` specifiers when the form is constructed.)
+    return cast(Float[Array, '...'], fn(image, deformation))
 
 
 # ---------------------------------------------------------------------------
@@ -489,9 +506,9 @@ def _central_diff_along_axis(
     if mode == 'nearest':
         # Replace the wrapped boundary values with the edge cell.
         L = field.shape[ax]
-        sl_last = [slice(None)] * n
+        sl_last: list[Any] = [slice(None)] * n
         sl_last[ax] = L - 1
-        sl_first = [slice(None)] * n
+        sl_first: list[Any] = [slice(None)] * n
         sl_first[ax] = 0
         # nxt at index L-1 should be field[L-1] (no neighbour beyond).
         nxt = nxt.at[tuple(sl_last)].set(field[tuple(sl_last)])
@@ -508,11 +525,11 @@ def _central_diff_along_axis(
         sl_first = [slice(None)] * n
         sl_first[ax] = 0
         # nxt at L-1 -> field[L-2]
-        sl_lm1 = [slice(None)] * n
+        sl_lm1: list[Any] = [slice(None)] * n
         sl_lm1[ax] = L - 2
         nxt = nxt.at[tuple(sl_last)].set(field[tuple(sl_lm1)])
         # prv at 0 -> field[1]
-        sl_one = [slice(None)] * n
+        sl_one: list[Any] = [slice(None)] * n
         sl_one[ax] = 1
         prv = prv.at[tuple(sl_first)].set(field[tuple(sl_one)])
     else:
@@ -657,7 +674,8 @@ def jacobian_det_displacement(
             - b * (d_ * i - f * g)
             + c * (d_ * h - e * g)
         )
-    return jnp.linalg.det(J)
+    # ``jnp.linalg.det`` is typed as returning Any; restore the array type.
+    return cast(Float[Array, '...'], jnp.linalg.det(J))
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,8 @@ which handles backend dispatch and fallback observability.
 """
 from __future__ import annotations
 
+from typing import Any, Callable, Optional, cast
+
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
@@ -62,7 +64,9 @@ def _pick_blocks(m: int, k: int, n: int) -> tuple[int, int, int]:
     leaves accumulator-flush overhead.  The defaults match the
     refstubs experimental sweet spot on Ampere (sm_80) cards.
     '''
-    def largest_divisor(x, candidates):
+    def largest_divisor(
+        x: int, candidates: tuple[int, ...]
+    ) -> Optional[int]:
         for c in candidates:
             if x % c == 0:
                 return c
@@ -83,15 +87,17 @@ def _pick_blocks(m: int, k: int, n: int) -> tuple[int, int, int]:
 # ---------------------------------------------------------------------------
 
 
-def _build_kernel(semiring: Semiring, bm: int, bk: int, bn: int, k: int):
+def _build_kernel(
+    semiring: Semiring[Any], bm: int, bk: int, bn: int, k: int
+) -> Callable[..., None]:
     monoid = semiring.monoid
     binary_op = semiring.binary_op
 
-    def kernel(a_ref, b_ref, o_ref):
+    def kernel(a_ref: Any, b_ref: Any, o_ref: Any) -> None:
         # a_ref: (bm, k); b_ref: (k, bn); o_ref: (bm, bn)
         acc_init = monoid.init((bm, bn), o_ref.dtype)
 
-        def body(kk: int, acc):
+        def body(kk: int, acc: Any) -> Any:
             # Slice 1-wide stripes off the *refs* (Triton supports pl.ds on
             # refs but not lax.dynamic_slice on intermediate arrays).
             a_col = a_ref[:, pl.ds(kk, 1)]                       # (bm, 1)
@@ -109,7 +115,7 @@ def semiring_matmul_pallas(
     A: Num[Array, 'm k'],
     B: Num[Array, 'k n'],
     *,
-    semiring: Semiring,
+    semiring: Semiring[Any],
 ) -> Num[Array, 'm n']:
     '''Pallas Triton ``semiring_matmul`` for a single 2-D ``(A, B)`` pair.
 
@@ -139,15 +145,19 @@ def semiring_matmul_pallas(
     bm, bk, bn = _pick_blocks(int(m), int(k), int(n))
     kernel = _build_kernel(semiring, bm, bk, bn, int(k))
 
-    return pl.pallas_call(
-        kernel,
-        grid=(m // bm, n // bn),
-        in_specs=[
-            pl.BlockSpec((bm, k), lambda i, j: (i, 0)),
-            pl.BlockSpec((k, bn), lambda i, j: (0, j)),
-        ],
-        out_specs=pl.BlockSpec((bm, bn), lambda i, j: (i, j)),
-        out_shape=jax.ShapeDtypeStruct((m, n), A.dtype),
-        compiler_params=plgpu.CompilerParams(),
-        name=f'semiring_matmul_{semiring.name}',
-    )(A, B)
+    # ``pl.pallas_call`` is untyped (returns Any); restore the array type.
+    return cast(
+        Num[Array, 'm n'],
+        pl.pallas_call(
+            kernel,
+            grid=(m // bm, n // bn),
+            in_specs=[
+                pl.BlockSpec((bm, k), lambda i, j: (i, 0)),
+                pl.BlockSpec((k, bn), lambda i, j: (0, j)),
+            ],
+            out_specs=pl.BlockSpec((bm, bn), lambda i, j: (i, j)),
+            out_shape=jax.ShapeDtypeStruct((m, n), A.dtype),
+            compiler_params=plgpu.CompilerParams(),
+            name=f'semiring_matmul_{semiring.name}',
+        )(A, B),
+    )

@@ -22,6 +22,7 @@ from typing import Optional, Sequence, Union
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
+from jax.typing import DTypeLike
 from jaxtyping import Array, Float
 
 
@@ -31,7 +32,7 @@ __all__ = ['gaussian']
 def _gaussian_1d_kernel(
     sigma: float,
     truncate: float,
-    dtype,
+    dtype: DTypeLike,
     *,
     kernel_size: Optional[int] = None,
 ) -> Array:
@@ -158,7 +159,7 @@ def _normalise_sigma(
 
 
 def _normalise_kernel_size(
-    kernel_size: Union[None, int, Sequence[int]],
+    kernel_size: Union[None, int, Sequence[Optional[int]]],
     spatial_rank: int,
 ) -> tuple[Optional[int], ...]:
     if kernel_size is None:

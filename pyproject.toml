@@ -105,6 +105,14 @@ warn_return_any = true
 warn_unreachable = true
 warn_unused_configs = true
 no_implicit_reexport = true
+# Lift the bar from "bodies are checked" to "everything is annotated": every
+# def carries a complete signature, so static inference flows through the
+# numerics surface instead of decaying to Any at each unannotated boundary.
+# The `typecheck` nox session runs mypy in CI so this is enforced, not
+# aspirational.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_unused_ignores = true
 
 [tool.uv]
 dev-dependencies = [

@@ -68,11 +68,10 @@ Differentiability
 """
 from __future__ import annotations
 
-from typing import Literal, Optional, Tuple, Union
+from typing import Any, Callable, Literal, Optional, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
-from jax.experimental.sparse.linalg import lobpcg_standard
 from jaxtyping import Array, Float, Num
 
 from ..linalg._solver import (
@@ -101,7 +100,7 @@ __all__ = ['laplacian_eigenmap', 'diffusion_embedding']
 # the in-module call sites unchanged.
 
 
-def _device_put_graph(A: _GraphInput, target) -> _GraphInput:
+def _device_put_graph(A: _GraphInput, target: Any) -> _GraphInput:
     '''Move all array fields of a graph operand to ``target``.
 
     Handles dense, ELL, and SectionedELL.  Non-array fields
@@ -131,7 +130,8 @@ def _device_put_graph(A: _GraphInput, target) -> _GraphInput:
             n_cols=A.n_cols,
             identity=A.identity,
         )
-    return jax.device_put(A, target)
+    # ``A`` is dense here; ``jax.device_put`` is untyped (returns Any).
+    return cast(Num[Array, '... n n'], jax.device_put(A, target))
 
 
 _Solver = Literal['auto', 'eigh', 'lobpcg']
@@ -233,7 +233,9 @@ def _build_affinity_operator(
     return M, inv_sqrt_d2
 
 
-def _operator_matvec(M: _GraphInput):
+def _operator_matvec(
+    M: _GraphInput,
+) -> Callable[[Float[Array, 'n k']], Float[Array, 'n k']]:
     '''Build a matvec closure for a concrete operator.
 
     Used for the SectionedELL forward-only LOBPCG path, where there
@@ -270,6 +272,8 @@ def _eigh_normalised_affinity(
     Eigenvalues are ascending; the *largest* are at the end.
     '''
     M, inv_sqrt_d2 = _build_affinity_operator(A, alpha=alpha, eps=eps)
+    # ``A`` is dense, so ``M`` is dense; narrow the operator union for eigh.
+    assert not _is_sparse(M)
     eigvals, eigvecs = _safe_eigh(M)
     return eigvals, eigvecs, inv_sqrt_d2
 
@@ -513,7 +517,7 @@ def _n_from(A: _GraphInput) -> int:
 
 
 def _lobpcg_initial_subspace(
-    n: int, k_total: int, seed: int, device,
+    n: int, k_total: int, seed: int, device: Any,
 ) -> Float[Array, 'n k_total']:
     '''Random initial subspace for LOBPCG, on the requested device.
 
@@ -523,7 +527,11 @@ def _lobpcg_initial_subspace(
     GPU-side build has a broken handle.
     '''
     key = jax.random.key(seed)
-    return jax.device_put(jax.random.normal(key, (n, k_total)), device)
+    # ``jax.device_put`` is untyped (returns Any); restore the subspace type.
+    return cast(
+        Float[Array, 'n k_total'],
+        jax.device_put(jax.random.normal(key, (n, k_total)), device),
+    )
 
 
 def _run_lobpcg_on_operator(
@@ -575,8 +583,10 @@ def _lobpcg_top_k(
     iters: int,
     tol: Optional[float],
     seed: int,
-    transform_eigvals,
-):
+    transform_eigvals: Optional[
+        Callable[[Float[Array, 'k']], Float[Array, 'k']]
+    ],
+) -> Tuple[Float[Array, 'n n_components'], Float[Array, 'n_components']]:
     '''Run LOBPCG on a concrete operator and post-process.
 
     Returns ``(eigenvectors, eigenvalues)`` after optionally
@@ -611,7 +621,11 @@ def _lobpcg_top_k(
     return eigvecs, eigvals
 
 
-def _scale_by_lambda_t(vecs, vals, t):
+def _scale_by_lambda_t(
+    vecs: Float[Array, 'n k'],
+    vals: Float[Array, 'k'],
+    t: float,
+) -> Float[Array, 'n k']:
     '''Scale each eigenvector by ``|lambda|^t * sign(lambda)``.
 
     Used for the diffusion-map ``t > 0`` case.  Negative eigenvalues

@@ -48,7 +48,7 @@ Functions exposed:
 """
 from __future__ import annotations
 
-from typing import Literal, Optional, Tuple
+from typing import Any, Optional, cast
 
 import jax
 import jax.numpy as jnp
@@ -136,7 +136,8 @@ def _denom_factor(
         if ddof == 0:
             return w_sum
         return w_sum - ddof * (weights ** 2).sum(-1, keepdims=True) / w_sum
-    # Matrix weight
+    # Matrix weight: by elimination ``W`` is the non-None argument here.
+    assert W is not None
     w_sum = W.sum(axis=(-1, -2), keepdims=True)
     if ddof == 0:
         return w_sum[..., 0]
@@ -249,12 +250,16 @@ def _corrnorm(A: Num[Array, '... c c']) -> Num[Array, '... c c']:
     '''Normalisation matrix for ``corr``: ``sqrt(diag) outer sqrt(diag)``.'''
     d = jnp.diagonal(A, axis1=-2, axis2=-1)
     fact = jnp.sqrt(d)[..., None]
-    return fact @ fact.swapaxes(-1, -2) + jnp.finfo(fact.dtype).eps
+    # ``jnp.diagonal`` resolves to Any; restore the array type.
+    return cast(
+        Num[Array, '... c c'],
+        fact @ fact.swapaxes(-1, -2) + jnp.finfo(fact.dtype).eps,
+    )
 
 
 def corr(
     X: Num[Array, '... c obs'],
-    **kwargs,
+    **kwargs: Any,
 ) -> Num[Array, '... c c']:
     '''Pearson correlation of variables in a tensor batch.
 
@@ -297,7 +302,7 @@ def pairedcov(
 def pairedcorr(
     X: Num[Array, '... c obs'],
     Y: Num[Array, '... d obs'],
-    **kwargs,
+    **kwargs: Any,
 ) -> Num[Array, '... c d']:
     '''Cross-correlation between two sets of variables.
 
@@ -309,7 +314,11 @@ def pairedcorr(
     sigma_xx_diag = jnp.diagonal(cov(X, **kwargs), axis1=-2, axis2=-1)
     sigma_yy_diag = jnp.diagonal(cov(Y, **kwargs), axis1=-2, axis2=-1)
     norm = jnp.sqrt(sigma_xx_diag[..., :, None] * sigma_yy_diag[..., None, :])
-    return sigma_xy / (norm + jnp.finfo(norm.dtype).eps)
+    # ``jnp.diagonal`` feeds Any into ``norm``; restore the array type.
+    return cast(
+        Num[Array, '... c d'],
+        sigma_xy / (norm + jnp.finfo(norm.dtype).eps),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +330,7 @@ def precision(
     X: Num[Array, '... c obs'],
     *,
     require_nonsingular: bool = True,
-    **kwargs,
+    **kwargs: Any,
 ) -> Num[Array, '... c c']:
     '''Inverse covariance (precision) matrix.
 
@@ -338,7 +347,8 @@ def precision(
     '''
     sigma = cov(X, **kwargs)
     if require_nonsingular:
-        return jnp.linalg.inv(sigma)
+        # ``jnp.linalg.inv`` is typed as returning Any; restore.
+        return cast(Num[Array, '... c c'], jnp.linalg.inv(sigma))
     return jnp.linalg.pinv(sigma)
 
 
@@ -346,7 +356,7 @@ def partialcov(
     X: Num[Array, '... c obs'],
     *,
     require_nonsingular: bool = True,
-    **kwargs,
+    **kwargs: Any,
 ) -> Num[Array, '... c c']:
     '''Partial covariance: conditioning each pair on all others.
 
@@ -364,7 +374,7 @@ def partialcorr(
     X: Num[Array, '... c obs'],
     *,
     require_nonsingular: bool = True,
-    **kwargs,
+    **kwargs: Any,
 ) -> Num[Array, '... c c']:
     '''Partial correlation: normalised partial covariance.'''
     omega = partialcov(X, require_nonsingular=require_nonsingular, **kwargs)
@@ -373,7 +383,8 @@ def partialcorr(
     diag = jnp.abs(jnp.diagonal(omega, axis1=-2, axis2=-1))
     fact = jnp.sqrt(diag)[..., None]
     norm = fact @ fact.swapaxes(-1, -2) + jnp.finfo(fact.dtype).eps
-    return omega / norm
+    # ``jnp.diagonal`` feeds Any into ``omega``/``norm``; restore.
+    return cast(Num[Array, '... c c'], omega / norm)
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +433,7 @@ def conditionalcov(
 def conditionalcorr(
     X: Num[Array, '... c obs'],
     Y: Num[Array, '... d obs'],
-    **kwargs,
+    **kwargs: Any,
 ) -> Num[Array, '... c c']:
     '''Correlation of ``X`` conditioned on the variables in ``Y``.
 
@@ -437,21 +448,21 @@ def conditionalcorr(
 # ---------------------------------------------------------------------------
 
 
-def ccov(*args, **kwargs):
+def ccov(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
     '''Alias for ``conditionalcov``.'''
     return conditionalcov(*args, **kwargs)
 
 
-def ccorr(*args, **kwargs):
+def ccorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
     '''Alias for ``conditionalcorr``.'''
     return conditionalcorr(*args, **kwargs)
 
 
-def pcorr(*args, **kwargs):
+def pcorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
     '''Alias for ``partialcorr``.'''
     return partialcorr(*args, **kwargs)
 
 
-def corrcoef(*args, **kwargs):
+def corrcoef(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
     '''Alias for ``corr`` (numpy convention).'''
     return corr(*args, **kwargs)

@@ -51,7 +51,7 @@ What the legacy had that we drop:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, cast
 
 import jax
 import jax.numpy as jnp
@@ -117,6 +117,8 @@ def linear_kernel(
     kind = _theta_kind(theta)
     if kind == 'none':
         return X0 @ X1.swapaxes(-1, -2)
+    # kind is 'vector' or 'matrix' here, so theta is set.
+    assert theta is not None
     if kind == 'vector':
         # (X0 * theta) treats theta as the diagonal of a weight matrix.
         return (X0 * theta[..., None, :]) @ X1.swapaxes(-1, -2)
@@ -166,11 +168,13 @@ def linear_distance(
         x0_sq = jnp.sum(X0 * X0, axis=-1)[..., :, None]
         x1_sq = jnp.sum(X1 * X1, axis=-1)[..., None, :]
     elif kind == 'vector':
+        assert theta is not None
         x0_sq = jnp.sum(X0 * X0 * theta[..., None, :], axis=-1)[..., :, None]
         x1_sq = jnp.sum(X1 * X1 * theta[..., None, :], axis=-1)[..., None, :]
     else:
         # full matrix: (x^T theta x) = sum_ij theta_ij x_i x_j
         # Compute as einsum to keep memory ~(n, d) not (n, d, d).
+        assert theta is not None
         x0_sq = jnp.einsum('...id,...de,...ie->...i', X0, theta, X0)[..., :, None]
         x1_sq = jnp.einsum('...id,...de,...ie->...i', X1, theta, X1)[..., None, :]
     dist_sq = x0_sq + x1_sq - 2.0 * cross
@@ -208,15 +212,20 @@ def parameterised_norm(
     if kind == 'none':
         n_sq = jnp.sum(X * X, axis=-1, keepdims=True)
     elif kind == 'vector':
+        assert theta is not None
         n_sq = jnp.sum(X * X * theta[..., None, :], axis=-1, keepdims=True)
     else:
         # full matrix Mahalanobis norm-sq
+        assert theta is not None
         n_sq = jnp.einsum(
             '...id,...de,...ie->...i', X, theta, X,
         )[..., None]
+    # ``n_sq`` may flow from ``jnp.einsum`` (typed Any); restore.
     if squared:
-        return X / (n_sq + jnp.finfo(X.dtype).eps)
-    return X / (jnp.sqrt(n_sq) + jnp.finfo(X.dtype).eps)
+        return cast(Float[Array, '...'], X / (n_sq + jnp.finfo(X.dtype).eps))
+    return cast(
+        Float[Array, '...'], X / (jnp.sqrt(n_sq) + jnp.finfo(X.dtype).eps)
+    )
 
 
 # ---------------------------------------------------------------------------
