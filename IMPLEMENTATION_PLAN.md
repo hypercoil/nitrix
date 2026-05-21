@@ -927,6 +927,66 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 - **Decision:** JAX-default (current state) until the gate clears. No kernel shipped.
 - **Non-negotiables held:** `map_coordinates` JAX path remains the contractual floor.
 
+### 2026-05-21 — Remove legacy `nitrix.functional`; reconcile its tests onto migrated modules
+
+- **Type:** Plan revision / cleanup
+- **Triggered by:** `functional/` flagged as leftover legacy (already migrated).
+- **Description:** Removed `src/nitrix/functional/` entirely. It was runtime-dead
+  (no `src` import; only legacy tests referenced it) and every symbol was
+  migrated: `covariance`/`fourier`→`stats`, `matrix`/`residual`→`linalg`,
+  `window`→`signal`, `geom`→`geometry` (renames: `sphere_to_normals`→
+  `latlong_to_cartesian`, `sphere_to_latlong`→`cartesian_to_latlong`,
+  `spherical_geodesic`→`spherical_geodesic_distance`).  Legacy tests handled by
+  coverage comparison (collected case counts):
+  - **Deleted** `test_matrix` (14), `test_window` (2), `test_geom` (17) — the new
+    `test_linalg` (29) / `test_signal` (6) / `test_geometry` (53) are supersets.
+  - **Deleted** `test_cov` — it tested the *old* covariance API (single `weight`
+    param + private `_prepare_*` helpers) which the migration **redesigned** to
+    `weights=` / `weight_matrix=` with new internals; `test_stats` covers the new
+    API.  Added a non-diagonal-`weight_matrix` regression to `test_stats` (the
+    SPEC §8 mandate, now that the behaviour is compute-correctly, not raise).
+  - **Repointed** `test_fourier`→`stats`, `test_resid`→`linalg`.  Verified
+    `residualise` is numerically identical old vs new.  The repoint surfaced two
+    *intended* migration API changes (validating the "run to catch drift"
+    instinct), adapted in the test: `analytic_signal` now raises `TypeError`
+    (not `ValueError`) on complex input and takes `axis` keyword-only.
+- **Non-negotiables held:** no runtime deps added/removed; migrated impls unchanged;
+  new modules + tests are the canonical coverage.
+
+### 2026-05-21 — Deflake hypothesis property tests; surface a residualise limitation
+
+- **Type:** Test-quality / robustness
+- **Triggered by:** the three originally-flaky tests (`test_util`, `test_geom`,
+  `test_resid`).
+- **Description:** Added `tests/conftest.py` with a hypothesis profile
+  (`deadline=None`; suppress `too_slow` / `data_too_large`).  JAX first-call JIT
+  compile makes per-example deadlines unreliable (`DeadlineExceeded` ->
+  `FlakyFailure`); disabling them removes the timing flakiness **suite-wide with
+  zero input-space change** — every example is still drawn and asserted.  Relaxed
+  the explicit `deadline=500` in `test_util`.  `test_geom`'s flakiness (unseeded
+  random + exact `==0` truncation boundary) is moot — it was deleted above
+  (`test_geometry` covers spherical conv).  The deflake's fuller exploration
+  **unmasked** a known, author-documented `residualise` limitation: the exact
+  `residual + projection == Y` decomposition breaks at `1e-5` (float32) for
+  ill-conditioned designs (`p -> obs`).  It is pre-existing (identical on old and
+  new `residualise`) — see BACKLOG **B9**.  Per decision, constrained the
+  exact-decomposition property tests to the well-conditioned domain
+  (`generate_valid_arrays(well_conditioned=True)`, `p <= obs/2`) so they are
+  honest and green, and BACKLOG'd the real numerical fix (SVD/QR projector).
+- **Non-negotiables held:** the deflake loses **no** input coverage (only timing
+  assertions dropped); the ill-conditioned limitation is documented + tracked
+  (B9), not silently skipped.
+
+### 2026-05-21 — Semiring `identity` vs `(*)`-annihilator (recorded learning)
+
+- **Type:** Learning / future-API note
+- **Description:** `Semiring.identity` is the **monoid identity**; padding / masking
+  (`sparse.ell_mask`) needs the **`(*)`-annihilator**, which coincides with
+  `identity` for all built-ins **except** `EUCLIDEAN` (no annihilator; `identity=0`
+  does not mask).  Recorded in `docs/design/semiring-protocols.md` and BACKLOG
+  **B8** (consider an explicit `annihilator` field rather than overloading
+  `identity`).
+
 ---
 
 ## 11. Notes on agent / engineer handoff

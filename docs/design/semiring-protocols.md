@@ -121,6 +121,34 @@ treats it identically to a built-in.  Two things to know:
   per SPEC §3.1 is what the literature uses and the codebase is
   consistent with.
 
+## Learning: `identity` is the monoid identity, not the annihilator
+
+Surfaced while building `sparse.ell_mask` for masking incomplete
+geometries (cortical medial wall, grey-matter volume masks).  A
+masked / padded edge must contribute a no-op to
+``(+)_p values[i, p] (*) B[indices[i, p]]``.  The value that achieves
+this is the **`(*)`-annihilator** ``z`` (with ``z (*) b ==
+monoid_identity`` for all ``b``), *not* the monoid identity.
+
+``Semiring.identity`` holds the **monoid identity** (the
+``monoid.init`` neutral element).  For every built-in *except*
+``EUCLIDEAN`` the annihilator happens to equal it -- REAL ``0``,
+LOG / TROPICAL_MAX_PLUS ``-inf``, TROPICAL_MIN_PLUS ``+inf``,
+BOOLEAN ``False`` -- so ``identity`` doubles as the masking value.
+``EUCLIDEAN``'s ``(a - b)**2`` has **no** annihilator, but its
+``identity`` is ``0.0`` (the sum-monoid neutral); masking with that
+value injects ``B[idx]**2`` rather than vanishing.  EUCLIDEAN
+neighbourhoods must therefore be masked by dropping columns
+structurally, not via a value.
+
+Because overloading one field for two distinct algebraic roles is a
+confusion risk as the algebra set grows, ``ell_mask`` takes an
+explicit ``identity=`` value (caller passes ``semiring.identity``,
+which is correct for the maskable algebras) rather than a
+``semiring=``.  BACKLOG B8 tracks the option of adding an explicit
+``annihilator`` field (``None`` for EUCLIDEAN) so the masking path can
+be machine-checked.
+
 ## Cross-references
 
 - SPEC §3.1 "Algebra representation"; SPEC_UPDATE §3.1 (strict/relaxed

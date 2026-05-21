@@ -171,6 +171,70 @@ doesn't need.  If a consumer hits a resampling wall before the Pallas
 gate clears, swap ``_gather_coords_linear`` to the explicit 8-corner
 form first (it's the same gather XLA already lowers, just leaner).
 
+### B8. Store the `(*)`-annihilator explicitly on `Semiring`
+
+`Semiring.identity` is the **monoid (additive) identity** (the
+`monoid.init` value).  ELL padding and `sparse.ell_mask`
+(medial-wall / grey-matter masking) actually need the
+**`(*)`-annihilator** -- the `z` with `z (*) b = monoid_identity`
+for all `b` -- so a masked edge is a no-op in
+`(+)_p values[i,p] (*) B[...]`.  For every built-in *except*
+`EUCLIDEAN` the two coincide (REAL `0`, LOG/TROPICAL_MAX `-inf`,
+TROPICAL_MIN `+inf`, BOOLEAN `False`), which is why `identity`
+currently doubles as the masking value.  `EUCLIDEAN`'s `(a-b)**2`
+has **no** annihilator yet `identity == 0.0`, so masking by that
+value silently injects `B[idx]**2` instead of vanishing.
+
+**Consideration.** Add an explicit `annihilator: Optional[...]`
+field to `Semiring` (`None` for `EUCLIDEAN`).  Then `ell_mask`
+takes a `semiring=` and pulls `semiring.annihilator`, raising a
+clear error when it is `None`, instead of overloading `identity`
+and relying on the caller to know the distinction.  Overloading
+`identity` for two concepts (monoid neutral vs multiplicative
+absorber) is a confusion risk as the algebra set grows.
+
+**Trigger.** A second masking consumer, a user-defined semiring
+whose monoid identity and annihilator differ, or any confusion
+report.  Until then `ell_mask(ell, valid, *, identity=...)` takes
+an explicit value and the docstring + `tests/test_ell_masking_semirings.py`
+document the distinction (incl. the EUCLIDEAN exception).
+
+**Effort.** S.  One field + a guarded `ell_mask(semiring=...)`
+overload; backward-compatible with the explicit-`identity` form.
+
+### B9. `residualise` robustness on ill-conditioned design matrices
+
+``linalg.residualise`` loses the exact ``residual + projection == Y``
+decomposition (at ``atol=1e-5``, float32) when the design matrix ``X``
+is ill-conditioned -- i.e. as the number of regressors ``p`` approaches
+the observation count ``obs`` and the Gram ``X Xᵀ`` becomes near-
+singular.  This is a **long-standing, documented limitation** (it
+predates the ``functional`` -> ``linalg`` migration; both
+implementations are numerically identical and both fail it), recorded
+in the original ``tests/test_resid.py`` generator comment ("too good at
+coming up with adversarial examples ... will likely need a strong
+background in error analysis and numerical linear algebra").
+
+It was previously *masked* because the hypothesis property tests rarely
+reached the ill-conditioned regime under the default deadline / health
+checks; the 2026-05-21 conftest deflake (``deadline=None``) made
+hypothesis explore fully and surface it deterministically.  The tests
+now constrain ``generate_valid_arrays(well_conditioned=True)`` to
+``p <= obs/2`` (the well-conditioned regime where the property holds),
+so the suite is honest and green, and this entry tracks the real fix.
+
+**Trigger.** A consumer needs residualisation of near-rank-deficient
+designs (``p`` close to ``obs``), or we invest in the numerics.
+
+**Notes / candidate fix.** Replace the Cholesky-of-Gram solve with an
+SVD- / QR-based projector (``Q Qᵀ`` from a thin QR of ``Xᵀ``, or an
+SVD with a singular-value floor), which is stable for rank-deficient /
+ill-conditioned ``X``.  ``residualise`` already exposes ``method=``;
+add ``method='svd'`` (or ``'qr'``) as the robust path and consider
+making it the default.  Pair the fix with re-widening the
+``well_conditioned`` cap (or removing it) in ``test_resid`` so the
+exact-decomposition properties once again exercise ``p -> obs``.
+
 ## Resolved items
 
 - **B1. Move resolved findings in NITRIX_FEEDBACK_ILEX.md** — done
