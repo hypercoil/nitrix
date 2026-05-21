@@ -14,7 +14,7 @@ from pathlib import Path
 from jax.numpy import unwrap
 from scipy.fft import rfft, irfft
 from scipy.signal import hilbert, chirp
-from nitrix.functional import (
+from nitrix.stats import (
     product_filter,
     product_filtfilt,
     analytic_signal,
@@ -83,7 +83,11 @@ def test_attenuation(X):
 
 
 def test_analytic_signal_hilbert(X):
-    with pytest.raises(ValueError):
+    # The migrated nitrix.stats.analytic_signal rejects complex input with
+    # TypeError (legacy functional.analytic_signal raised ValueError); the
+    # intent -- reject complex -- is unchanged.  See test_stats
+    # test_analytic_signal_raises_on_complex.
+    with pytest.raises(TypeError):
         analytic_signal(X * 1j)
 
     out = analytic_signal(X)
@@ -96,7 +100,7 @@ def test_analytic_signal_hilbert(X):
     X = np.random.randn(3, 10, 50, 5)
     ref = hilbert(X, axis=-2)
     gradient = jax.grad(lambda x: jnp.angle(analytic_signal(x)).sum())
-    out = analytic_signal(X, -2)
+    out = analytic_signal(X, axis=-2)  # axis is keyword-only in nitrix.stats
     assert np.allclose(out, ref, atol=1e-6)
     assert np.allclose(X, out.real, atol=1e-6)
     X_grad = gradient(X)

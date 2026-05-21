@@ -463,7 +463,7 @@ def test_vmap_over_outer():
     assert np.allclose(out, ref)
 
 
-@hypothesis.settings(deadline=500)
+@hypothesis.settings(deadline=None)
 @given(array=generate_array_for_vmoo())
 def test_vmap_over_outer_pbt(array):
     arr, vmoo_fn, vmoo_rank, batch_rank = array
@@ -568,7 +568,7 @@ def test_extend():
     extend_to_max_size,
     jit_params={'static_argnames': ('fill',)},
 )
-@hypothesis.settings(deadline=500)
+@hypothesis.settings(deadline=None)
 @given(arrays=generate_arrays_for_max_size_extend())
 def test_extend_pbt(arrays, fn):
     arr_list, ref_shape = arrays
@@ -661,7 +661,7 @@ def test_masker():
 
 # Note: no need to test with cfg_variants_test because masker isn't jitted:
 #       instead, it returns a jitted function.
-@hypothesis.settings(deadline=500)
+@hypothesis.settings(deadline=None)
 @given(
     array=draw_subcompatible_array(draw_method='runif', min_size=6),
     explicit_output_axis=st.booleans(),

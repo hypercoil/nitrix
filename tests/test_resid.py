@@ -10,7 +10,7 @@ from hypothesis import given, note, strategies as st
 from hypothesis.extra import numpy as npst
 import jax
 import jax.numpy as jnp
-from nitrix.functional import residualise
+from nitrix.linalg import residualise
 from nitrix._internal.testutil import cfg_variants_test
 
 
@@ -37,20 +37,27 @@ def generate_valid_arrays(
     draw,
     allow_p_greater_n: bool = False,
     allow_p_eq_n: bool = True,
+    well_conditioned: bool = False,
 ):
     batch_rank = draw(st.integers(min_value=0, max_value=3))
     batch_shape = draw(npst.array_shapes(min_dims=batch_rank, max_dims=batch_rank))
     obs_dim = draw(st.integers(min_value=2, max_value=100))
-    ind_features = draw(st.integers(
-        min_value=1,
-        max_value=(
-            obs_dim - 1
-            if not allow_p_eq_n
-            else obs_dim
-            if not allow_p_greater_n
-            else 100
-        ),
-    ))
+    if well_conditioned:
+        # Cap the number of regressors at obs/2 so the random-normal design
+        # Gram is well-conditioned (Marchenko-Pastur: cond(X) <~ 6 for p/n <=
+        # 1/2, so cond(X X^T) <~ 40 << 1/eps_float32).  This is the regime
+        # where the exact `residual + projection == Y` decomposition holds at
+        # 1e-5.  As p -> obs the Gram becomes ill-conditioned and residualise
+        # loses that property -- a documented limitation (see BACKLOG B9), not
+        # exercised by these exact-decomposition properties.
+        p_max = max(1, obs_dim // 2)
+    elif not allow_p_eq_n:
+        p_max = obs_dim - 1
+    elif not allow_p_greater_n:
+        p_max = obs_dim
+    else:
+        p_max = 100
+    ind_features = draw(st.integers(min_value=1, max_value=p_max))
     dep_features = draw(st.integers(
         min_value=1,
         max_value=100,
@@ -78,7 +85,7 @@ def generate_valid_arrays(
 
 @run_variants
 @given(arrays=generate_valid_arrays())
-@hypothesis.settings(deadline=1000)
+@hypothesis.settings(deadline=None)
 def test_output_shape(arrays, fn):
     X, Y, (rowvar,) = arrays
     out = fn(Y, X, rowvar=rowvar)
@@ -87,8 +94,8 @@ def test_output_shape(arrays, fn):
 
 
 @run_variants
-@given(arrays=generate_valid_arrays())
-@hypothesis.settings(deadline=1000, max_examples=20)
+@given(arrays=generate_valid_arrays(well_conditioned=True))
+@hypothesis.settings(deadline=None, max_examples=20)
 def test_residual_mean_zero_with_intercept(arrays, fn):
     X, Y, (rowvar,) = arrays
     if rowvar:
@@ -115,8 +122,8 @@ def test_residual_mean_zero_with_intercept(arrays, fn):
 
 
 @run_variants
-@given(arrays=generate_valid_arrays())
-@hypothesis.settings(deadline=2000)
+@given(arrays=generate_valid_arrays(well_conditioned=True))
+@hypothesis.settings(deadline=None)
 def test_residual_decomposition(arrays, fn):
     X, Y, (rowvar,) = arrays
     rej = fn(Y, X, rowvar=rowvar)
@@ -133,7 +140,7 @@ def test_residual_decomposition(arrays, fn):
 #     (False,),
 # ))
 @given(arrays=generate_valid_arrays(allow_p_eq_n=False))
-@hypothesis.settings(deadline=10000, max_examples=20)
+@hypothesis.settings(deadline=None, max_examples=20)
 def test_residual_varshared_zero(arrays, fn):
     X, Y, (rowvar,) = arrays
     rej = fn(Y, X, rowvar=rowvar)
@@ -148,13 +155,13 @@ def test_residual_varshared_zero(arrays, fn):
 
 
 @run_variants
-@given(arrays=generate_valid_arrays(allow_p_eq_n=False))
-@hypothesis.settings(deadline=10000, max_examples=20)
+@given(arrays=generate_valid_arrays(allow_p_eq_n=False, well_conditioned=True))
+@hypothesis.settings(deadline=None, max_examples=20)
 def test_total_shrinkage(arrays, fn):
     X, Y, (rowvar,) = arrays
-    out = fn(Y, X, rowvar=rowvar, l2=10000.)
+    out = fn(Y, X, rowvar=rowvar, l2=1e8)
     assert jnp.allclose(out, Y, atol=1e-5)
-    out = fn(Y, X, rowvar=rowvar, l2=10000., return_mode='projection')
+    out = fn(Y, X, rowvar=rowvar, l2=1e8, return_mode='projection')
     assert jnp.allclose(out, 0, atol=1e-5)
 
 

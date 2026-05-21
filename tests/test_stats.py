@@ -121,6 +121,36 @@ def test_cov_pass_both_weight_args_raises():
         cov(X, weights=w, weight_matrix=W)
 
 
+def test_cov_diagonal_weight_matrix_matches_vector_weights():
+    '''The full-``weight_matrix`` path must reduce to the (numpy-validated)
+    vector-weight path when the matrix is ``diag(w)``.  This exercises the
+    matrix branch of ``_cov_core`` and is the regression for SPEC §8's
+    non-diagonal-weight bug (legacy code silently bypassed the matrix path;
+    the new code computes it).
+    '''
+    rng = np.random.default_rng(0)
+    X = jnp.asarray(rng.standard_normal((4, 60)))
+    w = jnp.asarray(np.abs(rng.standard_normal(60)) + 0.5)
+    np.testing.assert_allclose(
+        np.asarray(cov(X, weight_matrix=jnp.diag(w))),
+        np.asarray(cov(X, weights=w)),
+        atol=1e-12,
+    )
+
+
+def test_cov_nondiagonal_weight_matrix_is_symmetric_and_finite():
+    '''A genuinely non-diagonal symmetric coupling matrix produces a finite,
+    symmetric covariance (the path the legacy implementation could not take).
+    '''
+    rng = np.random.default_rng(1)
+    X = jnp.asarray(rng.standard_normal((5, 40)))
+    A = rng.standard_normal((40, 40))
+    W = jnp.asarray(A + A.T)  # symmetric, non-diagonal
+    S = cov(X, weight_matrix=W)
+    assert bool(jnp.all(jnp.isfinite(S)))
+    np.testing.assert_allclose(np.asarray(S), np.asarray(S).T, atol=1e-10)
+
+
 # ---------------------------------------------------------------------------
 # covariance: complex-valued (the silently-wrong concern)
 # ---------------------------------------------------------------------------
