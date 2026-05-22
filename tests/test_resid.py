@@ -4,6 +4,8 @@
 """
 Unit tests for residualisation
 """
+from functools import partial
+
 import pytest
 import hypothesis
 from hypothesis import given, note, strategies as st
@@ -16,6 +18,15 @@ from nitrix._internal.testutil import cfg_variants_test
 
 run_variants = cfg_variants_test(
     residualise,
+    jit_params={'static_argnames': ('l2', 'return_mode', 'rowvar')},
+)
+
+# The SVD path (``method='svd'``) is the robust solver: it stays exact for
+# rank-deficient / ill-conditioned designs (``p -> obs`` and ``p > obs``)
+# where the default Cholesky path returns NaN.  ``method`` is baked into the
+# partial so it is a trace-time constant under the jitted variant.
+run_variants_svd = cfg_variants_test(
+    partial(residualise, method='svd'),
     jit_params={'static_argnames': ('l2', 'return_mode', 'rowvar')},
 )
 
@@ -47,9 +58,12 @@ def generate_valid_arrays(
         # Gram is well-conditioned (Marchenko-Pastur: cond(X) <~ 6 for p/n <=
         # 1/2, so cond(X X^T) <~ 40 << 1/eps_float32).  This is the regime
         # where the exact `residual + projection == Y` decomposition holds at
-        # 1e-5.  As p -> obs the Gram becomes ill-conditioned and residualise
-        # loses that property -- a documented limitation (see BACKLOG B9), not
-        # exercised by these exact-decomposition properties.
+        # 1e-5 for the *Cholesky* path.  As p -> obs the Gram becomes
+        # ill-conditioned and the Cholesky path loses that property (and NaNs
+        # outright for p > obs) -- so these default-method properties stay in
+        # the well-conditioned regime.  The `method='svd'` robust path is
+        # exercised across the full p -> obs (and p > obs) regime by the
+        # `*_svd_robust` tests below.
         p_max = max(1, obs_dim // 2)
     elif not allow_p_eq_n:
         p_max = obs_dim - 1
@@ -129,6 +143,39 @@ def test_residual_decomposition(arrays, fn):
     rej = fn(Y, X, rowvar=rowvar)
     proj = fn(Y, X, rowvar=rowvar, return_mode='projection')
     assert jnp.allclose(rej + proj, Y, atol=1e-5)
+
+
+@run_variants_svd
+@given(arrays=generate_valid_arrays(allow_p_greater_n=True))
+@hypothesis.settings(deadline=None, max_examples=20)
+def test_residual_decomposition_svd_robust(arrays, fn):
+    # B9: the SVD path holds the exact decomposition across the *full*
+    # regime -- including p == obs and p > obs (rank-deficient), where the
+    # default Cholesky path returns NaN.  ``proj = X @ beta`` is the unique
+    # orthogonal projection onto col(X) regardless of how the (non-unique)
+    # min-norm coefficients are chosen, so rej + proj == Y stays exact.
+    X, Y, (rowvar,) = arrays
+    rej = fn(Y, X, rowvar=rowvar)
+    proj = fn(Y, X, rowvar=rowvar, return_mode='projection')
+    assert jnp.allclose(rej + proj, Y, atol=1e-5)
+
+
+def test_svd_robust_where_cholesky_degenerates():
+    # p > obs: the Gram is rank-deficient, so the Cholesky path has no factor
+    # and returns NaN (the documented method='cholesky' limitation); the SVD
+    # path stays finite and exact, and the projection is non-expansive
+    # (orthogonal projection onto col(X), ||proj|| <= ||Y||).
+    key = jax.random.PRNGKey(0)
+    xkey, ykey = jax.random.split(key)
+    X = jax.random.normal(key=xkey, shape=(60, 40))  # p=60 > obs=40
+    Y = jax.random.normal(key=ykey, shape=(8, 40))
+    chol = residualise(Y, X, method='cholesky')
+    assert not jnp.all(jnp.isfinite(chol))
+    rej = residualise(Y, X, method='svd')
+    proj = residualise(Y, X, method='svd', return_mode='projection')
+    assert jnp.all(jnp.isfinite(rej))
+    assert jnp.allclose(rej + proj, Y, atol=1e-5)
+    assert jnp.linalg.norm(proj) <= jnp.linalg.norm(Y) + 1e-4
 
 
 #Note: The commented out example represents a currently known failure mode

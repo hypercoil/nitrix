@@ -202,40 +202,23 @@ document the distinction (incl. the EUCLIDEAN exception).
 **Effort.** S.  One field + a guarded `ell_mask(semiring=...)`
 overload; backward-compatible with the explicit-`identity` form.
 
-### B9. `residualise` robustness on ill-conditioned design matrices
-
-``linalg.residualise`` loses the exact ``residual + projection == Y``
-decomposition (at ``atol=1e-5``, float32) when the design matrix ``X``
-is ill-conditioned -- i.e. as the number of regressors ``p`` approaches
-the observation count ``obs`` and the Gram ``X Xᵀ`` becomes near-
-singular.  This is a **long-standing, documented limitation** (it
-predates the ``functional`` -> ``linalg`` migration; both
-implementations are numerically identical and both fail it), recorded
-in the original ``tests/test_resid.py`` generator comment ("too good at
-coming up with adversarial examples ... will likely need a strong
-background in error analysis and numerical linear algebra").
-
-It was previously *masked* because the hypothesis property tests rarely
-reached the ill-conditioned regime under the default deadline / health
-checks; the 2026-05-21 conftest deflake (``deadline=None``) made
-hypothesis explore fully and surface it deterministically.  The tests
-now constrain ``generate_valid_arrays(well_conditioned=True)`` to
-``p <= obs/2`` (the well-conditioned regime where the property holds),
-so the suite is honest and green, and this entry tracks the real fix.
-
-**Trigger.** A consumer needs residualisation of near-rank-deficient
-designs (``p`` close to ``obs``), or we invest in the numerics.
-
-**Notes / candidate fix.** Replace the Cholesky-of-Gram solve with an
-SVD- / QR-based projector (``Q Qᵀ`` from a thin QR of ``Xᵀ``, or an
-SVD with a singular-value floor), which is stable for rank-deficient /
-ill-conditioned ``X``.  ``residualise`` already exposes ``method=``;
-add ``method='svd'`` (or ``'qr'``) as the robust path and consider
-making it the default.  Pair the fix with re-widening the
-``well_conditioned`` cap (or removing it) in ``test_resid`` so the
-exact-decomposition properties once again exercise ``p -> obs``.
-
 ## Resolved items
+
+- **B9. `residualise` robustness on ill-conditioned designs** — resolved
+  2026-05-22.  Root cause: the default ``method='cholesky'`` (Cholesky of the
+  Gram ``X Xᵀ``) returns NaN for rank-deficient ``X`` (``p > obs`` / collinear
+  columns) because the singular Gram has no factor; the already-shipped
+  ``method='svd'`` path (min-norm least-squares via ``jnp.linalg.lstsq``) is
+  exact there.  Resolution is verification + documentation, not new numerics:
+  ``tests/test_resid.py`` now exercises the SVD path across the full
+  ``p -> obs`` and ``p > obs`` regime (``test_residual_decomposition_svd_robust``)
+  and pins the cholesky-NaN / svd-finite contract
+  (``test_svd_robust_where_cholesky_degenerates``); the ``method`` docstring
+  documents the min-norm semantics, the unique-projection guarantee, the
+  cholesky NaN failure mode, and the ``lstsq`` ``rcond``-cutoff pitfall.
+  Default kept as ``cholesky`` (≈2× faster on the common well-conditioned
+  case); ``svd`` is the documented robust opt-in.  See
+  ``IMPLEMENTATION_PLAN.md §10.3``.
 
 - **B1. Move resolved findings in NITRIX_FEEDBACK_ILEX.md** — done
   2026-05-20. The gaussian-docstring, edge-aggregate/mesh-conv-stack,

@@ -202,11 +202,37 @@ def residualise(
         ``"residual"`` (default) -- ``Y - proj``.
         ``"projection"`` -- the OLS prediction ``X @ betas``.
     method
-        ``"cholesky"`` (default) -- fast normal-equations path
-        via Cholesky of ``X^T X + l2 I``.  Recommended for
-        well-conditioned ``X`` or whenever ``l2 > 0``.
-        ``"svd"`` -- SVD-based path via ``jnp.linalg.lstsq``.
-        Use when ``X`` may be rank-deficient and ``l2 == 0``.
+        ``"cholesky"`` (default) -- fast normal-equations path via
+        Cholesky of ``X^T X + l2 I`` (~2x faster on tall systems).
+        Recommended for well-conditioned ``X`` or whenever
+        ``l2 > 0``.  **Returns NaN for rank-deficient ``X``** -- more
+        regressors than observations (``p > obs``) or exactly
+        collinear columns -- because the Gram ``X^T X`` is then
+        singular and has no Cholesky factor.  Regularise with
+        ``l2 > 0`` or switch to ``"svd"``.
+        ``"svd"`` -- SVD-based least squares (``jnp.linalg.lstsq``),
+        robust for rank-deficient / ill-conditioned ``X``.  When the
+        OLS solution is non-unique (rank-deficient ``X`` with
+        ``l2 == 0``) it returns the **minimum-norm** least-squares
+        solution: the coefficient vector of smallest ``||beta||_2``
+        among all minimisers.  The *coefficients* are thus not
+        uniquely interpretable under rank deficiency, but the
+        **projection** ``X @ beta`` -- and hence the residual -- *is*
+        unique: it is the orthogonal projection of ``Y`` onto
+        ``col(X)``, which is why ``residual + projection == Y`` stays
+        exact as ``p -> obs`` and beyond.  Use when ``X`` may be
+        near-collinear and ``l2 == 0``.
+
+        Pitfall: ``lstsq`` (``rcond=None``) zeros singular values
+        below a relative cutoff (``~ max(obs, p) * eps * sigma_max``),
+        so for *near*-collinear ``X`` (small but non-zero singular
+        values) the effective column space -- exactly which directions
+        get residualised out -- depends on that threshold and can flip
+        for borderline directions.  If you need a deterministic,
+        smoothly-shrinking treatment of weak directions, prefer
+        ``l2 > 0`` (which makes the system full-rank, so the solve is
+        the unique ridge estimate rather than a min-norm truncation)
+        over relying on the SVD cutoff.
 
     Returns
     -------

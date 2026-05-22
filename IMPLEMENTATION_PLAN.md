@@ -1054,6 +1054,35 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   signature or any existing caller); no framework dependency or concern leakage
   (no `torch_geometric`, no PyG-named API); docs grounded in the literature.
 
+### 2026-05-22 — `residualise` rank-deficient robustness verified + documented (BACKLOG B9)
+
+- **Type:** Robustness / test-quality
+- **Triggered by:** BACKLOG **B9** -- the 2026-05-21 deflake surfaced that
+  `linalg.residualise` loses the exact `residual + projection == Y`
+  decomposition for ill-conditioned designs; the property tests were capped to
+  the well-conditioned regime to stay green.
+- **Description:** Root-caused: the default `method='cholesky'` (Cholesky of
+  the Gram `X Xᵀ`) returns **NaN** for rank-deficient `X` (`p > obs` / collinear
+  columns) -- the singular Gram has no Cholesky factor -- while the
+  already-shipped `method='svd'` path (`jnp.linalg.lstsq`) is exact there.  So
+  the fix is verification + documentation, not new numerics.  (1)
+  `tests/test_resid.py` now exercises the SVD path across the *full* `p -> obs`
+  and `p > obs` regime (`test_residual_decomposition_svd_robust`) and pins the
+  cholesky-NaN / svd-finite contract (`test_svd_robust_where_cholesky_degenerates`);
+  `lstsq` was confirmed to vmap over batch dims.  (2) The `method` docstring now
+  documents the **min-norm** least-squares semantics, the unique-projection
+  guarantee (why the decomposition is stable even though the coefficients are
+  not), the cholesky NaN failure mode, and the `lstsq(rcond=None)` cutoff
+  pitfall (prefer `l2 > 0` for deterministic shrinkage of weak directions).
+- **Decision:** default stays `cholesky` -- ≈2× faster on the common,
+  well-conditioned case (fMRI confound regression is `obs >> p`); `svd` is the
+  documented robust opt-in.  Making `svd` the default was **considered and
+  rejected** on the perf-vs-common-case trade-off (a silent 2× regression for
+  every caller to fix a regime with an explicit escape hatch).
+- **Non-negotiables held:** no numerics change to either solve path; default
+  behaviour unchanged; the well-conditioned cholesky property tests stay as the
+  fast-path guard while the new svd tests cover the wide regime.
+
 ---
 
 ## 11. Notes on agent / engineer handoff
