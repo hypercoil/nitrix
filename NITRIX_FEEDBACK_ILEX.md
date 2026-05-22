@@ -400,6 +400,8 @@ benefit SUGAR most. Fallback JAX is acceptable at inference time.
 
 ### 2026-05-21 — GATv2 `add_self_loops(fill_value='mean')` is not covered by the ELL-edge surface (SUGAR)
 
+> **RESOLVED (2026-05-22)** — see "Resolved findings" below.
+
 **Severity.** MISMATCH (a GAT/GATv2 port built on the ELL-edge surface *passes structurally and runs at plausible magnitude* but silently miscomputes — the canonical `ell_edge.py` GATv2 recipe omits the step, and the SUGAR feedback's "k_max=7 including self-loop" assumption was wrong). This bit the SUGAR JAX port for real: max abs diff was ~0.20 on a ~0.18-magnitude signal until the step was added, after which parity dropped to float32 precision (~1e-6) against the upstream `torch_geometric.nn.GATv2Conv` oracle.
 
 **What surfaced this.** Wiring a genuine torch oracle for the SUGAR parity fixtures (reconstructing the real upstream `GatUNet` and running it forward) instead of the prior NaN placeholder. The oracle disagreed with the ilex port everywhere. Root cause: `torch_geometric.nn.GATv2Conv` defaults to `add_self_loops=True`, and at **forward time** it does `remove_self_loops(edge_index, edge_attr)` then `add_self_loops(edge_index, edge_attr, fill_value='mean')`. So every vertex gets an `(i, i)` self-edge, and — crucially — that self-edge's `edge_attr` is filled with the **per-destination mean of the vertex's incoming edge attributes** (`scatter(edge_attr, edge_index[1], reduce='mean')`), *not* a geometric edge feature. Verified bit-exact: the ilex GATv2 algorithm matches PyG to 0.0 *with* the self-loop + mean-fill and diverges by 1.4 (single layer) *without*.
@@ -465,3 +467,17 @@ surface (functions / files) and the deviation-log date in
   - *Bonus* — `nitrix.sparse.ell_mask` for masking incomplete geometries (medial
     wall / grey matter) by the correct per-semiring identity (see the masking note
     in `IMPLEMENTATION_PLAN.md §10.3`).
+
+- **2026-05-21 — GATv2 self-loops not covered by the ELL-edge surface (SUGAR).**
+  RESOLVED (2026-05-22; `IMPLEMENTATION_PLAN.md §10.3`).
+  `nitrix.sparse.ell_add_self_loops(ell, edge_attr=None, *, fill='mean'|'add'|'zero',
+  self_value=1.0)` appends a per-row `(i, i)` slot and, for per-edge attributes,
+  fills the self-edge from the row's valid edges. Justified by the literature —
+  graph attention's neighbourhood includes node `i` (Velickovic et al. 2018), and
+  GCN renormalisation adds `Â = A + I` (Kipf & Welling 2017) — **not** by parity
+  with a particular GNN library. The `ell_edge.py` GATv2 worked example (which had
+  omitted the self-loop) is corrected. An aggregation-side convenience wrapper was
+  deliberately **not** shipped: self-loops are architecture-specific (EdgeConv /
+  MoNet / plain GCN omit them), so a bundled default would re-create the silent-
+  default footgun this finding is about — revisit on demonstrated demand, or host
+  the GAT composition downstream (a `nimox` ELLGAT module).

@@ -17,11 +17,11 @@ SPEC_UPDATE §3.2) will live in ``nitrix.sparse.ell_sectioned``.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Optional
+from typing import Any, Literal, Optional, Tuple
 
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Int, Num
+from jaxtyping import Array, Float, Int, Num
 
 
 __all__ = [
@@ -30,6 +30,7 @@ __all__ = [
     'ell_to_dense',
     'ell_pad',
     'ell_mask',
+    'ell_add_self_loops',
 ]
 
 
@@ -299,6 +300,120 @@ def ell_mask(
     id_val = jnp.asarray(identity, dtype=ell.values.dtype)
     new_values = jnp.where(edge_valid, ell.values, id_val)
     return replace(ell, values=new_values, identity=identity)
+
+
+def ell_add_self_loops(
+    ell: ELL,
+    edge_attr: Optional[Float[Array, 'm k_max f']] = None,
+    *,
+    fill: Literal['mean', 'zero', 'add'] = 'mean',
+    self_value: float = 1.0,
+) -> Tuple[ELL, Optional[Float[Array, 'm k_max_plus_1 f']]]:
+    '''Append a self-loop ``(i, i)`` to every row of an ELL adjacency.
+
+    Returns a new ELL with one extra neighbour slot per row whose index
+    is the row itself (``indices[i, -1] = i``) and whose ``values`` entry
+    is ``self_value`` -- a non-identity marker so the slot reads as a real
+    edge (e.g. it survives ``ell_row_softmax``'s padding mask), not as a
+    pad.  ``k_max`` grows by one.
+
+    Self-loops are a graph-convolution construct, not part of the geometric
+    mesh adjacency: ``mesh_k_ring_adjacency`` and friends are self-loop-free.
+    Graph attention attends each vertex to its own features -- the
+    neighbourhood in Velickovic et al. (2018) explicitly *includes* node
+    ``i`` -- and the GCN renormalisation trick (Kipf & Welling 2017) adds
+    the self-connection ``A_hat = A + I``.  A convolution that wants either
+    adds the self-edge to the bare adjacency before aggregating; without it
+    the row's reduction (and any row-softmax over it) simply omits the
+    self-term, which is a different operator.
+
+    Per-edge attributes
+    -------------------
+    When ``edge_attr`` is supplied (the per-edge vector tensor consumed by
+    ``semiring_ell_edge_aggregate``), the synthesised self-edge needs an
+    attribute.  Lacking an intrinsic self-feature, ``fill`` derives one
+    from the row's existing **valid** (non-pad) edges:
+
+    - ``'mean'`` -- the per-row mean of the vertex's other edge attributes;
+      the natural default when no self-feature is defined.
+    - ``'add'``  -- the per-row sum.
+    - ``'zero'`` -- a zero vector.
+
+    Padding slots are excluded from the reduction via ``ell.values !=
+    ell.identity`` (so a partially-padded row averages only its real
+    edges).  ``fill`` applies only to ``edge_attr``; the scalar ``values``
+    self-slot is always ``self_value`` (the geometric-weight channel,
+    typically overwritten downstream -- e.g. by attention weights).
+
+    Parameters
+    ----------
+    ell
+        Adjacency in ELL format, assumed self-loop-free (the geometric
+        mesh case).  If a row already contains an ``(i, i)`` edge it is
+        not removed; a duplicate self-slot is appended.
+    edge_attr
+        Optional per-edge attributes, shape ``(m, k_max, *f)`` aligned
+        with the ELL pattern.  ``None`` skips attribute handling.
+    fill
+        Self-edge attribute rule; see above.  Ignored when ``edge_attr``
+        is ``None``.
+    self_value
+        Scalar written into the self-slot of ``values``.  Must differ from
+        ``ell.identity`` for the slot to read as a real edge (the default
+        ``1.0`` is correct for every built-in algebra except a degenerate
+        ``identity == 1``).
+
+    Returns
+    -------
+    ``(ell_with_loops, edge_attr_with_loops)``.  The ELL has ``k_max + 1``
+    slots; ``edge_attr_with_loops`` is ``None`` iff ``edge_attr`` was
+    ``None``.
+    '''
+    m, k_max = ell.indices.shape[-2], ell.indices.shape[-1]
+    self_idx = jnp.broadcast_to(
+        jnp.arange(m, dtype=ell.indices.dtype)[:, None], (m, 1)
+    )
+    self_val = jnp.full((m, 1), self_value, dtype=ell.values.dtype)
+    new_ell = replace(
+        ell,
+        values=jnp.concatenate([ell.values, self_val], axis=-1),
+        indices=jnp.concatenate([ell.indices, self_idx], axis=-1),
+    )
+
+    if edge_attr is None:
+        return new_ell, None
+
+    if edge_attr.shape[:2] != (m, k_max):
+        raise ValueError(
+            f'ell_add_self_loops: edge_attr.shape={tuple(edge_attr.shape)} '
+            f'must lead with (m, k_max)={(m, k_max)} matching the ELL '
+            'pattern.'
+        )
+
+    # Reduce the row's existing valid (non-pad) attributes for the self-edge.
+    if ell.identity is None:
+        valid = jnp.ones((m, k_max), dtype=bool)
+    else:
+        valid = ell.values != ell.identity                  # (m, k_max)
+    feat_rank = edge_attr.ndim - 2
+    vmask = valid.reshape((m, k_max) + (1,) * feat_rank)
+    masked = jnp.where(vmask, edge_attr, jnp.zeros_like(edge_attr))
+    summed = jnp.sum(masked, axis=1, keepdims=True)          # (m, 1, *f)
+    if fill == 'mean':
+        count = jnp.maximum(jnp.sum(valid, axis=-1), 1)
+        count = count.reshape((m, 1) + (1,) * feat_rank)
+        loop_attr = summed / count
+    elif fill == 'add':
+        loop_attr = summed
+    elif fill == 'zero':
+        loop_attr = jnp.zeros_like(summed)
+    else:
+        raise ValueError(
+            f"ell_add_self_loops: fill={fill!r}; expected 'mean', 'add', "
+            "or 'zero'."
+        )
+    new_edge_attr = jnp.concatenate([edge_attr, loop_attr], axis=1)
+    return new_ell, new_edge_attr
 
 
 def ell_to_dense(ell: ELL) -> Num[Array, 'm n']:

@@ -71,6 +71,15 @@ omit = [
 lint.ignore = [
     "E501", # line too long: add it back when this is resolved:
     # https://github.com/astral-sh/ruff/issues/3711
+    # jaxtyping shape strings (the 2nd arg of ``Float[Array, 'n m']``) are
+    # read by ruff as forward-reference annotations: multi-axis strings
+    # ('n m', '... n n') are "syntax errors" (F722) and single-axis strings
+    # ('n', 'spatial') are "undefined names" (F821).  Both are pervasive and
+    # not real defects.  Undefined names in actual code/annotations are still
+    # caught by mypy's [name-defined] (enforced via the `typecheck` session),
+    # so this is a documentation-only loss for ruff.
+    "F722", # forward-annotation "syntax error" -- jaxtyping shapes
+    "F821", # forward-annotation "undefined name" -- jaxtyping axis labels
 ]
 lint.select = [
     "E",

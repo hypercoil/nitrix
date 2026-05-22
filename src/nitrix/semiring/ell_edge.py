@@ -244,17 +244,27 @@ def semiring_ell_edge_aggregate(
             i, j = ij[0], ij[1]
             return gaussian_kernel(coord[i] - coord[j]) * (W @ h_j)
 
-    GATv2 with edge features (Brody et al.; the SUGAR case), using
-    ``edge_attr`` and ``ell_row_softmax`` for the attention pre-pass::
+    GATv2 with edge features (Brody et al. 2022), using ``edge_attr`` and
+    ``ell_row_softmax`` for the attention pre-pass.  **Add self-loops
+    first**: graph attention attends each vertex to itself -- the
+    neighbourhood includes node ``i`` (Velickovic et al. 2018) -- so
+    augment the bare mesh adjacency with an ``(i, i)`` edge before the
+    softmax, else every row's attention omits the self-term (a different
+    operator).  ``ell_add_self_loops`` adds the slot and gives the new
+    edge a mean-of-incident-edges attribute::
 
+        from nitrix.sparse import ell_add_self_loops
+        ell_sl, edge_attr_sl = ell_add_self_loops(
+            ell, edge_attr, fill='mean',
+        )                                               # k_max -> k_max + 1
         # scores[i, p] = attention logit over (h_i, h_j, a); the per-edge
         # attribute ``a`` enters both the score and the message.
-        alpha = ell_row_softmax(scores, ell)           # (n, k_max)
+        alpha = ell_row_softmax(scores, ell_sl)        # (n, k_max + 1)
         def edge_fn(h_i, h_j, w, ij, a):
             return w * (W @ h_j + W_e @ a)              # message
         out = semiring_ell_edge_aggregate(
-            edge_fn, dataclasses.replace(ell, values=alpha), x,
-            edge_attr=edge_attr,
+            edge_fn, dataclasses.replace(ell_sl, values=alpha), x,
+            edge_attr=edge_attr_sl,
         )
     '''
     n = x.shape[-2]

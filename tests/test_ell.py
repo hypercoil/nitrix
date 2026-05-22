@@ -29,7 +29,13 @@ from nitrix.semiring import (
     reference_semiring_ell_matmul,
     semiring_ell_matmul,
 )
-from nitrix.sparse import ELL, ell_from_dense, ell_pad, ell_to_dense
+from nitrix.sparse import (
+    ELL,
+    ell_add_self_loops,
+    ell_from_dense,
+    ell_pad,
+    ell_to_dense,
+)
 
 
 pallas_only = pytest.mark.skipif(
@@ -83,6 +89,80 @@ def test_ell_pad_rejects_oversize():
             k_max=3,
             n_cols=10,
         )
+
+
+# ---------------------------------------------------------------------------
+# ell_add_self_loops
+# ---------------------------------------------------------------------------
+
+
+def _self_loop_fixture():
+    # Row 0: two real edges; row 1: one real (3.) + one pad (0. = identity);
+    # row 2: all pad.  identity = 0.0 (REAL).
+    values = jnp.asarray([[1.0, 2.0], [3.0, 0.0], [0.0, 0.0]])
+    indices = jnp.asarray([[1, 2], [0, 0], [0, 0]], dtype=jnp.int32)
+    ell = ELL(values=values, indices=indices, n_cols=3, identity=0.0)
+    edge_attr = jnp.asarray([
+        [[10.0, 11.0], [20.0, 21.0]],   # row 0: both valid
+        [[30.0, 31.0], [99.0, 99.0]],   # row 1: slot 1 is pad
+        [[88.0, 88.0], [77.0, 77.0]],   # row 2: all pad
+    ])
+    return ell, edge_attr
+
+
+def test_ell_add_self_loops_appends_self_edge():
+    ell, _ = _self_loop_fixture()
+    out, attr = ell_add_self_loops(ell)
+    assert attr is None
+    assert out.indices.shape == (3, 3)
+    assert out.values.shape == (3, 3)
+    # Self slot points at the row itself, with a non-identity marker value.
+    np.testing.assert_array_equal(out.indices[:, -1], jnp.arange(3))
+    np.testing.assert_array_equal(out.values[:, -1], 1.0)
+    # Existing slots untouched.
+    np.testing.assert_array_equal(out.values[:, :2], ell.values)
+    np.testing.assert_array_equal(out.indices[:, :2], ell.indices)
+
+
+def test_ell_add_self_loops_mean_fill_excludes_padding():
+    ell, edge_attr = _self_loop_fixture()
+    out, attr = ell_add_self_loops(ell, edge_attr, fill='mean')
+    assert attr.shape == (3, 3, 2)
+    # Original attributes preserved.
+    np.testing.assert_array_equal(attr[:, :2, :], edge_attr)
+    # Self-edge attr = mean over *valid* (non-pad) edges only.
+    np.testing.assert_allclose(attr[0, -1], [15.0, 16.0])   # mean of both
+    np.testing.assert_allclose(attr[1, -1], [30.0, 31.0])   # pad slot dropped
+    np.testing.assert_allclose(attr[2, -1], [0.0, 0.0])     # all-pad -> 0
+
+
+def test_ell_add_self_loops_add_and_zero_fill():
+    ell, edge_attr = _self_loop_fixture()
+    _, attr_add = ell_add_self_loops(ell, edge_attr, fill='add')
+    np.testing.assert_allclose(attr_add[0, -1], [30.0, 32.0])
+    np.testing.assert_allclose(attr_add[1, -1], [30.0, 31.0])
+    _, attr_zero = ell_add_self_loops(ell, edge_attr, fill='zero')
+    np.testing.assert_array_equal(attr_zero[:, -1, :], 0.0)
+
+
+def test_ell_add_self_loops_rejects_misaligned_edge_attr():
+    ell, _ = _self_loop_fixture()
+    with pytest.raises(ValueError, match='edge_attr'):
+        ell_add_self_loops(ell, jnp.zeros((3, 5, 2)))  # k_max mismatch
+
+
+def test_ell_add_self_loops_is_jit_safe():
+    ell, edge_attr = _self_loop_fixture()
+
+    @jax.jit
+    def run(values, indices, attr):
+        e = ELL(values=values, indices=indices, n_cols=3, identity=0.0)
+        out, out_attr = ell_add_self_loops(e, attr, fill='mean')
+        return out.values, out.indices, out_attr
+
+    values, indices, attr = run(ell.values, ell.indices, edge_attr)
+    assert values.shape == (3, 3)
+    np.testing.assert_allclose(attr[0, -1], [15.0, 16.0])
 
 
 # ---------------------------------------------------------------------------

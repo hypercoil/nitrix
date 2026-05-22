@@ -987,6 +987,73 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   **B8** (consider an explicit `annihilator` field rather than overloading
   `identity`).
 
+### 2026-05-22 — Static-typing rigor pass: strict mypy gate + jaxtyping-native, shed `Tensor`
+
+- **Type:** Plan revision (new gate)
+- **Triggered by:** review found many `nitrix` functions un-/under-typed; aligns the
+  surface to the `thrux` static-typing standard.
+- **Description:** Lifted `[tool.mypy]` to the thrux bar (`disallow_untyped_defs`,
+  `disallow_incomplete_defs`, `warn_unused_ignores` on top of the existing strict
+  base) and added a `typecheck` nox session running `mypy src/nitrix` (now in
+  `nox.options.sessions`).  The base config already existed but was never run --
+  136 latent errors under the old settings, 332 under the new.  Drove
+  `mypy src/nitrix` to **0 errors across 65 files**: every def annotated;
+  jaxtyping-native array types throughout
+  (`Float/Num/Int/Bool/Shaped/Complex[Array, '...']`); the legacy
+  `Tensor = Union[jax.Array, NDArray]` alias removed (confined to
+  `_internal/util.py` + one re-export).  Contracts leaned on protocols: a `TypeIs`
+  guard (`graph._is_sparse`) narrows `Array | ELL | SectionedELL` in both branches
+  across laplacian / connectopy; `Monoid` / `Semigroup` / `Semiring[S]` generics
+  threaded through the algebra surface.  No `Any`-silencing and no new
+  `# type: ignore`; type loss across untyped JAX boundaries
+  (`jit` / `vmap` / `custom_vjp` / `fori_loop` / `pallas_call` / `jnp.linalg.*`) is
+  restored with zero-runtime-cost `typing.cast`.  Full per-file test suite green
+  (one regression caught + fixed: `cast()` to a two-variadic jaxtyping shape fails
+  at runtime, since cast targets are runtime-evaluated -- use `'...'`).  Resolved
+  the ruff<->jaxtyping mismatch by ignoring `F722` / `F821` (ruff reads jaxtyping
+  shape strings as forward-ref annotations); mypy's `[name-defined]` remains the
+  real undefined-name backstop.
+- **Deferred work:** pre-existing, non-jaxtyping ruff debt remains (`I001` unsorted
+  imports, `F401` dead imports, `F841`, `E702`, `E402`; ~212, 86 auto-fixable) --
+  a separate cleanup, untouched here.  `typing_extensions` (for `TypeIs`) is relied
+  on as a guaranteed-transitive dep via jaxtyping; declaring it directly is
+  optional.
+- **Non-negotiables held:** typing-only changes (no numerics / control-flow edits);
+  every cluster's tests re-run green; no silent `Any` / ignore escapes.
+
+### 2026-05-22 — ELL self-loops for graph-attention convs (`ell_add_self_loops`)
+
+- **Type:** Downstream deviation
+- **Triggered by:** ilex/SUGAR feedback (`NITRIX_FEEDBACK_ILEX.md`, 2026-05-21) --
+  a GATv2 port built on the ELL-edge surface ran at plausible magnitude but
+  miscomputed because the surface had no self-loop step.
+- **Description:** Graph attention attends each vertex to *itself* -- the
+  neighbourhood in Velickovic et al. (2018) explicitly includes node `i` -- and the
+  GCN renormalisation trick (Kipf & Welling 2017) adds the self-connection
+  `A_hat = A + I`.  The geometric mesh adjacency (`mesh_k_ring_adjacency`) is
+  self-loop-free, so a literature-correct GAT / GCN-renorm conv must add the
+  self-edge before aggregating.  Shipped `nitrix.sparse.ell_add_self_loops(ell,
+  edge_attr=None, *, fill='mean'|'add'|'zero', self_value=1.0)`: appends a per-row
+  `(i, i)` slot (sibling of `ell_pad` / `ell_mask`); for per-edge attributes it
+  fills the self-edge from the row's **valid** (non-pad) edges -- `'mean'` (the
+  natural default when no intrinsic self-feature exists), `'add'`, or `'zero'`.
+  Also corrected the GATv2 worked example in `semiring/ell_edge.py`, which had
+  omitted the self-loop.  Framed throughout via the literature, **not** parity with
+  any particular GNN library.  Pure-JAX, jit-safe, differentiable, additive
+  (mypy-clean under the new gate; 5 new tests in `tests/test_ell.py`).
+- **Capability shipped:** literature-correct self-attention / renormalisation on the
+  ELL-edge surface, so a GAT / GCN consumer adds one explicit call instead of
+  re-vendoring the self-loop + masked-mean-fill (the bit consumers get wrong).
+- **Deferred work:** an aggregation-side convenience wrapper bundling
+  add-self-loops + aggregate was **deliberately not added** -- self-loops are
+  architecture-specific (EdgeConv / DGCNN, MoNet, plain GCN omit them), so bundling
+  would promote a non-universal default and re-create the silent-default footgun
+  this finding is about.  Revisit only on demonstrated demand, or host the GAT
+  composition downstream (a `nimox` ELLGAT module).
+- **Non-negotiables held:** additive (no change to `semiring_ell_edge_aggregate`'s
+  signature or any existing caller); no framework dependency or concern leakage
+  (no `torch_geometric`, no PyG-named API); docs grounded in the literature.
+
 ---
 
 ## 11. Notes on agent / engineer handoff

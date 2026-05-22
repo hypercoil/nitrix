@@ -13,6 +13,7 @@ No ``jax.experimental.sparse`` dependency anywhere.
 """
 from .ell import (
     ELL,
+    ell_add_self_loops,
     ell_from_dense,
     ell_mask,
     ell_to_dense,
@@ -47,6 +48,7 @@ from .mesh import (
 __all__ = [
     # ell
     'ELL',
+    'ell_add_self_loops',
     'ell_from_dense',
     'ell_mask',
     'ell_to_dense',
