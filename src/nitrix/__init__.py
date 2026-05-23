@@ -21,6 +21,9 @@ Top-level subpackages (full surface in each ``__init__.py``):
 - ``morphology`` -- dilate, erode, open, close, distance_transform,
                     median_filter, susan_emulator.
 - ``smoothing`` -- gaussian, bilateral_gaussian.
+- ``bias``     -- N4 (Tustison) bias-field correction, plus the
+                  B-spline scattered-data approximator and N3/N4
+                  histogram-sharpening primitives it is built from.
 - ``semiring`` -- the differentiable streaming-kernel substrate
                   (REAL / LOG / TROPICAL_* / EUCLIDEAN / BOOLEAN).
 - ``sparse``   -- ELL and sectioned-ELL sparse formats.
