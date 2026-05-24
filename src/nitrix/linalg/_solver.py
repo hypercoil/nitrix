@@ -36,19 +36,21 @@ If a future GPU stack breaks one of those instead, the right
 move is to add a ``safe_{op}`` helper here -- the per-op probe
 + cache pattern is the same.
 """
+
 from __future__ import annotations
 
 import functools
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-
 __all__ = [
     'safe_eigh',
+    'safe_inv',
     'eigh_device',
+    'inv_device',
     'solver_device',
     'device_of_concrete',
     'source_device',
@@ -84,6 +86,26 @@ def solver_device() -> jax.Device:
     ``eigh_device()``'s verdict.
     '''
     return eigh_device()
+
+
+@functools.lru_cache(maxsize=1)
+def inv_device() -> jax.Device:
+    '''Pick a device where dense ``inv`` / ``solve`` works.
+
+    Probes a 2x2 GPU ``inv`` (cuSolver ``getrf`` / ``getri``).  On the
+    runners documented above only ``eigh`` / ``qr`` are broken, but some
+    stacks (and this repo's current CI box) also break ``getrf``; the
+    per-op probe routes ``inv`` to CPU exactly when it must.  Cached so the
+    probe runs at most once per process.
+    '''
+    try:
+        probe = jnp.eye(2, dtype=jnp.float32)
+        out = jnp.linalg.inv(probe)
+        jax.block_until_ready(out)
+        return jax.devices()[0]
+    except Exception:
+        cpu_devs = jax.devices('cpu')
+        return cpu_devs[0] if cpu_devs else jax.devices()[0]
 
 
 def device_of_concrete(arr: Any) -> Optional[jax.Device]:
@@ -157,3 +179,24 @@ def safe_eigh(
         eigvals = jax.device_put(eigvals, source)
         eigvecs = jax.device_put(eigvecs, source)
     return eigvals, eigvecs
+
+
+def safe_inv(
+    A: Float[Array, '... n n'],
+) -> Float[Array, '... n n']:
+    '''``jnp.linalg.inv`` with the cuSolver-robust device pick.
+
+    Mirrors ``safe_eigh``: pins the inverse to a device where ``getrf`` /
+    ``getri`` works (CPU on the affected stacks), then moves the result
+    back to the caller's device when the input was concrete and elsewhere.
+    Used for the small, regularised (SPD) control-lattice Gram inverse in
+    ``nitrix.bias`` -- computed once per fitting level, so the CPU round
+    trip (if any) is negligible against the GPU matmuls it feeds.
+    '''
+    target = inv_device()
+    source = device_of_concrete(A)
+    A_dev = jax.device_put(A, target)
+    out = jnp.linalg.inv(A_dev)
+    if source is not None and source != target:
+        out = jax.device_put(out, source)
+    return cast(Float[Array, '... n n'], out)
