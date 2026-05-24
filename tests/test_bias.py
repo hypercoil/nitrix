@@ -36,6 +36,7 @@ import numpy as np
 import pytest
 
 from nitrix.bias import (
+    bias_field_correction,
     bspline_approximate,
     n4_bias_field_correction,
     sharpen_histogram,
@@ -396,6 +397,129 @@ def test_n4_matches_sitk_golden():
     assert corr_b > 0.9999 and corr_c > 0.9999
     assert rmse_b < 2e-3 and rmse_c < 2e-3
     assert maxrel_b < 1e-2 and maxrel_c < 1e-2
+
+
+# ---------------------------------------------------------------------------
+# Least-squares / P-spline fits (the higher-accuracy estimators)
+# ---------------------------------------------------------------------------
+
+
+def test_least_squares_reproduces_smooth_field_exactly():
+    # Unlike single-level MBA (biased), one LS fit recovers a smooth field.
+    n = 200
+    x = np.linspace(0, 1, n)
+    f = (np.sin(2 * np.pi * x) + 0.3 * np.cos(5 * np.pi * x)).astype(np.float32)
+    approx = np.array(
+        bspline_approximate(
+            jnp.asarray(f), control_points=24, spatial_rank=1,
+            method='least_squares', ridge=1e-6,
+        )
+    )
+    assert np.sqrt(np.mean((approx - f) ** 2)) < 0.01
+
+
+def test_least_squares_reproduces_constant():
+    c = np.full(64, 3.7, np.float32)
+    approx = np.array(
+        bspline_approximate(
+            jnp.asarray(c), control_points=8, spatial_rank=1,
+            method='least_squares', ridge=1e-6,
+        )
+    )
+    np.testing.assert_allclose(approx, 3.7, atol=1e-2)
+
+
+def test_psplines_penalty_increases_smoothness():
+    rng = np.random.default_rng(0)
+    x = np.linspace(0, 1, 200)
+    clean = np.sin(2 * np.pi * x).astype(np.float32)
+    noisy = (clean + rng.normal(0, 0.3, 200)).astype(np.float32)
+    roughness = []
+    for pen in (0.0, 1.0, 100.0):
+        f = np.array(
+            bspline_approximate(
+                jnp.asarray(noisy), control_points=60, spatial_rank=1,
+                method='psplines', penalty=pen,
+            )
+        )
+        roughness.append(float(np.sqrt(np.mean(np.diff(f, 2) ** 2))))
+    # Stronger penalty -> smoother (smaller second difference).
+    assert roughness[0] > roughness[1] > roughness[2]
+
+
+def test_masked_least_squares_stable_and_accurate():
+    s = 36
+    ax = np.linspace(0, 1, s)
+    xx, yy, zz = np.meshgrid(ax, ax, ax, indexing='ij')
+    field = (np.sin(2 * np.pi * xx) * np.cos(2 * np.pi * yy)).astype(np.float32)
+    rr = np.sqrt((xx - 0.5) ** 2 + (yy - 0.5) ** 2 + (zz - 0.5) ** 2)
+    mask = (rr < 0.4).astype(np.float32)
+    mm = mask > 0
+    data = field.copy()
+    data[~mm] = 999.0
+    for meth in ('least_squares', 'psplines'):
+        f = np.array(
+            bspline_approximate(
+                jnp.asarray(data), control_points=(12, 12, 12),
+                weight=jnp.asarray(mask), method=meth, penalty=0.01,
+            )
+        )
+        assert np.all(np.isfinite(f))
+        err = np.sqrt(np.mean((f[mm] - field[mm]) ** 2)) / field[mm].std()
+        assert err < 0.1
+
+
+def test_bspline_method_validation():
+    with pytest.raises(ValueError):
+        bspline_approximate(
+            jnp.ones((16,)), control_points=8, spatial_rank=1,
+            method='nope',  # type: ignore[arg-type]
+        )
+
+
+# ---------------------------------------------------------------------------
+# bias_field_correction dispatcher
+# ---------------------------------------------------------------------------
+
+
+def test_dispatcher_n4_equals_n4_function():
+    obs, mask, _, _ = _phantom(32)
+    a = np.array(
+        n4_bias_field_correction(jnp.asarray(obs), mask=jnp.asarray(mask))
+    )
+    b = np.array(
+        bias_field_correction(
+            jnp.asarray(obs), method='n4', mask=jnp.asarray(mask)
+        )
+    )
+    # Same algorithm; not bit-identical because the histogram's GPU
+    # scatter-add is nondeterministic (atomics) and the difference compounds
+    # over the iteration -- agree to a relative tolerance.
+    np.testing.assert_allclose(a, b, rtol=1e-2, atol=1e-2)
+
+
+def test_dispatcher_method_validation():
+    with pytest.raises(ValueError):
+        bias_field_correction(jnp.ones((8, 8, 8)), method='nope')
+
+
+def test_all_methods_recover_phantom_bias():
+    obs, mask, bias_true, r = _phantom(40)
+    mm = mask > 0
+    bt = bias_true[mm]
+    for method in ('n4', 'least_squares', 'psplines'):
+        _, bias = bias_field_correction(
+            jnp.asarray(obs), method=method, mask=jnp.asarray(mask),
+            return_bias_field=True,
+        )
+        be = np.array(bias)[mm]
+        # All three recover the field well.  LS / P-splines are competitive
+        # with N4 (better on some phantoms, slightly worse on others -- see
+        # docs/design/bias-field.md); we assert "good", not a ranking.
+        assert np.corrcoef(be, bt)[0, 1] > 0.95, method
+        s = np.sum(be * bt) / np.sum(bt * bt)
+        rel_rmse = np.sqrt(np.mean((be - s * bt) ** 2)) / bt.mean()
+        assert rel_rmse < 0.05, (method, rel_rmse)
 
 
 def test_n4_live_sitk_parity():

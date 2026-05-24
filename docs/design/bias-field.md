@@ -2,19 +2,20 @@
 
 > **TL;DR.**  ``nitrix.bias.n4_bias_field_correction`` is the Tustison
 > (2010) N4 algorithm, GPU-accelerated in pure JAX and numerically
-> faithful to ITK / ANTs.  Two reusable primitives carry the weight:
-> ``sharpen_histogram`` (the N3 Wiener log-histogram deconvolution -- 1-D
-> FFTs) and ``bspline_approximate`` (the Lee--Wolberg--Shin multilevel
-> B-spline approximation, **specialised to the regular image grid** so the
-> scattered-data fit and reconstruction collapse to separable dense
-> per-axis matrix contractions -- no gather, no scatter).  The iteration is
-> a ``lax.while_loop`` with ITK's coefficient-of-variation convergence
-> test; the multi-resolution hierarchy is a static outer loop doubling the
-> B-spline mesh.  Validated to **correlation 1.000000, ~1e-4 relative
-> RMSE** against SimpleITK's ``N4BiasFieldCorrectionImageFilter`` on a
-> phantom (checked-in golden array + live re-derivation).  No Pallas: the
-> hot ops are dense small-matrix ``dot``s and 1-D FFTs, which XLA already
-> schedules well.
+> faithful to ITK / ANTs (correlation 1.000000, ~1e-4 relative RMSE vs
+> SimpleITK on a phantom; checked-in golden array + live re-derivation).
+> Two reusable primitives carry the weight: ``sharpen_histogram`` (the N3
+> Wiener log-histogram deconvolution -- 1-D FFTs) and
+> ``bspline_approximate`` (B-spline scattered-data approximation
+> **specialised to the regular image grid** so the fit and reconstruction
+> collapse to separable dense per-axis matrix contractions -- no gather, no
+> scatter).  ``bias_field_correction(method=...)`` is a dispatcher over the
+> same N3/N4 iteration with a selectable field estimator: ``'n4'`` (the MBA
+> above; parity), ``'least_squares'`` and ``'psplines'`` -- *unbiased*
+> estimators for internal use where ANTs bit-compatibility is not required.
+> ``n4_bias_field_correction`` stays deliberately pure-N4 (a non-N4
+> estimator would mislabel the output).  No Pallas: the hot ops are dense
+> small-matrix ``dot``s and 1-D FFTs, which XLA already schedules well.
 
 ## Why this lives in nitrix
 
@@ -152,6 +153,157 @@ FFTs on a static power-of-two buffer, so it JITs cleanly and is cheap.
 The bin count, FWHM, Wiener noise, power-of-two zero-pad and Parzen split
 mirror ITK's ``SharpenImage`` for parity.
 
+## Parity vs correctness: the field-fit estimators
+
+### The neuroimaging stakes: smooth shading vs sharp anatomy
+
+A bias field (intensity non-uniformity, INU) is a *smooth, low-frequency*
+multiplicative shading -- receive-coil sensitivity rolloff, dielectric / B1
+effects -- typically a gentle 10--40 % drift across the head over many
+centimetres.  What must survive correction is everything *sharp*: the
+grey/white boundary, the cortical ribbon, deep-grey nuclei against the
+internal capsule, a subtle lesion.  Those anatomical and physiological
+contrasts live at millimetre scales and carry the signal every downstream
+step (tissue classification, surface placement, registration, volumetry)
+relies on.
+
+The failure mode that matters is **contrast washout**: if the estimator
+mistakes a piece of *anatomy* for bias, dividing the estimate out erases
+real contrast.  If, say, the GM/WM intensity step near a control point
+leaks into the field, the "corrected" image flattens grey and white toward
+each other -- destroying exactly the separability a segmentation depends
+on.  N3/N4 are trusted precisely because they are conservative here.  Two
+mechanisms encode the prior "bias is smooth, anatomy is not":
+
+1. *The histogram model.*  Each tissue should form a tight intensity mode;
+   the bias *spreads* those modes.  ``sharpen_histogram`` attributes the
+   spread to the field and the modes to anatomy -- a genuine tissue
+   boundary is a *separate mode*, so it is preserved, while within-tissue
+   shading is what gets removed.
+2. *The B-spline smoothness scale.*  The control-point spacing is the
+   explicit "what counts as smooth" knob: structure coarser than the mesh
+   is treated as bias (removed), structure finer than it as anatomy (kept).
+   A coarse mesh (N4 starts at one span) cannot represent a sharp edge, so
+   anatomy is protected by construction.
+
+The bias-variance tradeoff below is, in these terms, *how readily an
+estimator calls sharp residual structure "bias"*:
+
+- **MBA (N4)** is doubly conservative -- the coarse mesh forbids sharp
+  fields, and the ``w^2`` local averaging smears any residual
+  tissue-boundary structure before it can enter the lattice.  It
+  under-fits, which is the *safe* direction (leave a little shading rather
+  than eat anatomy); the multi-resolution hierarchy then recovers the
+  smooth bias it left behind.  Hence its robustness on brains with many
+  boundaries.
+- **Unregularised least-squares** drops the averaging safety margin: the
+  mesh still forbids *very* sharp fields, but LS spends every control-point
+  degree of freedom fitting the residual -- including coherent
+  tissue-boundary structure -- and the accumulation loop compounds it.
+  This is the corr-0.49, contrast-washing failure quantified below.
+- **Ridge / P-spline least-squares** reinstate the smoothness prior
+  *explicitly* (penalise field magnitude / curvature) instead of as a
+  side effect of averaging: unbiased, yet refusing to absorb sharp anatomy
+  -- MBA's protection recovered as an explicit dial (raise ``ridge`` /
+  ``penalty`` to keep more anatomy, lower it to chase a more wrinkled
+  field).  Mesh spacing and penalty together set the anatomy/bias frequency
+  boundary.
+
+Practical guidance follows directly: when in doubt, *under*-correct.  A
+residual shading is cosmetic; a washed-out GM/WM boundary is lost data.
+That asymmetry is why both the parity default (MBA) and the higher default
+``ridge`` for the LS / P-spline loop lean conservative.
+
+### Estimators and the bias-variance mechanics
+
+N4 is a *specific* algorithm.  Its B-spline fit is the Lee--Wolberg--Shin
+MBA, which is **biased** on dense data (a single-level fit of a constant is
+off by ~14 %; §"single-level MBA is biased").  The bias is harmless for
+*parity* -- it is exactly what ITK/ANTs do, and the multi-resolution
+hierarchy drives it out -- but it raises the question: would an *unbiased*
+fit be better?  We built two and made them selectable, while keeping N4
+itself untouched.
+
+**Two entry points, one iteration.**  ``n4_bias_field_correction`` is N4,
+full stop (MBA fit, ITK parity).  ``bias_field_correction(method=...)``
+dispatches over the *same* N3/N4 iteration (``_core.apply_bias_field_correction``)
+with a pluggable per-level fit: ``'n4'`` -> MBA, ``'least_squares'`` ->
+weighted LS, ``'psplines'`` -> penalised LS.  We deliberately did **not**
+add a ``field_fit=`` switch to ``n4_bias_field_correction``: an LS/P-spline
+estimator is a *different* algorithm, and labelling its output "N4" would
+mislead.
+
+**The estimators.**  All solve, per fitting level, a control lattice
+``phi`` from the residual ``z`` over the mask ``W``:
+
+- **MBA** -- ``phi_k = (sum_c w_{c,k}^3 z_c / sum_j w_{c,j}^2) / sum_c
+  w_{c,k}^2``.  Each control point is a *local* ``w^2``-weighted average of
+  nearby data -- inherently low-variance (a denoiser), at the cost of bias.
+- **least-squares** -- ``(R^T W R + rho I) phi = R^T W z``.  Unbiased; the
+  ridge ``rho`` is the variance control.
+- **psplines** -- ``(R^T W R + rho I + lambda P) phi = R^T W z`` with ``P``
+  a tensor-product difference penalty (Eilers--Marx).  ``lambda`` is a
+  roughness knob independent of grid resolution.
+
+All three assemble the Gram ``R^T W R`` *without* materialising ``R`` (the
+separable multilinear contraction of §"the key idea"), and the lattice is
+tiny, so the dense regularised solve is cheap and is done **once per level**
+(the Gram does not depend on the iteration's data) and reused across the
+sharpening iterations.  The solve routes through ``linalg._solver.safe_inv``
+(CPU fallback on the cuSolver-broken runner, like ``safe_eigh``).
+
+**The load-bearing lesson: regularisation is denoising, not a stabiliser.**
+The per-iteration residual ``z = log_uncorrected - sharpened`` is *noisy*
+and only weakly correlated with the true bias (corr ~0.36 on the phantom).
+The fit has to *extract* the smooth bias from it.  MBA does this for free
+(local averaging).  An **unregularised** LS fit instead *overfits* the
+residual's non-bias structure -- even at a coarse grid -- and the
+field-accumulation loop amplifies it:
+
+| fit of the first residual (corr to true bias) | value |
+|---|---|
+| residual itself | 0.36 |
+| MBA (coarse) | **0.94** |
+| LS, ``ridge = 1e-4`` | 0.49 |
+| LS, ``ridge = 1e-1`` | **0.97** |
+
+So ``ridge`` (a 0th-order Tikhonov term) -- or the P-spline ``penalty``
+(2nd-order) -- is the LS analogue of MBA's ``w^2`` averaging: the
+bias-variance knob.  ``bias_field_correction`` therefore defaults ``ridge``
+*high* (``1e-1``), whereas the standalone ``bspline_approximate`` (for
+*clean* data) defaults it low (``1e-4``).  This was the single biggest
+correctness trap: the "obvious" small ridge makes LS *worse* than N4.
+
+**Multi-resolution is required, not optional.**  A single fine-grid fit
+(the textbook P-spline setup) *fails* in the loop (corr ~0.1): it captures
+non-bias structure from iteration one.  The coarse-to-fine schedule lets
+the smooth bias be captured first and only adds detail to the residual of
+that.  All three methods use it.
+
+**Where each wins.**  On phantoms, LS / P-splines (with sensible ``ridge``)
+are *competitive* with N4 -- better on simple tissue (2-class: LS scaled
+RMSE 7e-4 vs N4 1.3e-3), modestly worse on complex tissue with many
+boundaries (3-class: LS ~2e-2 vs N4 6e-3), where MBA's local averaging is
+more robust to boundary structure in the residual.  They are *alternatives*
+with different bias-variance and a tunable knob, **not** a strict upgrade,
+and -- unlike MBA -- the fit is differentiable w.r.t. the data (the solve is
+linear in the right-hand side).  The optimal ``ridge`` / ``penalty`` is
+data-dependent; principled selection is a noted extension (below).
+
+## Extensions (not built)
+
+- **Tier C -- matrix-free scaling + differentiable fit.**  The dense Gram
+  inverse is ``O(N_ctrl^2)`` memory; fine ``N_ctrl`` should switch to a
+  matrix-free preconditioned conjugate gradient (the matvec is
+  reconstruct -> mask -> adjoint, all separable; the unmasked separable
+  Kronecker inverse is a near-ideal preconditioner).  Pair with a
+  ``custom_vjp`` implicit-diff backward (mirroring ``graph/_lobpcg_diff``)
+  for efficient end-to-end gradients.
+- **Tier D -- automatic regularisation.**  ``ridge`` / ``penalty`` are the
+  P-spline smoothing parameter under different names; GCV or REML selection
+  (the standard P-spline machinery) would remove the manual tuning that the
+  bias-variance finding above makes necessary.
+
 ## Why no Pallas
 
 The two hot operations are (a) dense per-axis matrix contractions on tiny
@@ -202,11 +354,12 @@ Three layers (``tests/test_bias.py``):
   voxels *are* a regular grid).  We kept the general MBA *formula* (the
   ``w^2`` weighting, so we match ITK numerically) but realised it as
   separable matmuls.
-- **Least-squares B-spline fit** (reproduces constants exactly, no MBA
-  bias).  Diverges from ITK's numerics (would fail golden parity) and the
-  masked case is non-separable (needs a CG solve).  The multilevel MBA
-  reaches the same place while matching ANTs; correctness without parity
-  was not the brief.
+- **Least-squares / P-spline fit as the N4 *default*.**  We built them
+  (``method='least_squares'`` / ``'psplines'`` on ``bias_field_correction``)
+  but did *not* make either the default or fold them into
+  ``n4_bias_field_correction``: they diverge from ITK numerics (would fail
+  golden parity) and are competitive-not-dominant (see above).  Shipped as
+  opt-in unbiased alternatives, with N4/MBA the parity default.
 - **Clamped / endpoint-interpolating knots** (the choice a curve-fitting
   library like `splinex` makes).  ITK/ANTs N4 uses *uniform* (non-clamped)
   B-splines with ``n_control = n_spans + order``; matching that is what
@@ -215,8 +368,12 @@ Three layers (``tests/test_bias.py``):
 
 ## Cross-references
 
-- ``src/nitrix/bias/{_bspline,_sharpen,n4}.py`` -- implementation.
-- ``tests/test_bias.py`` -- the three validation layers.
+- ``src/nitrix/bias/{_bspline,_sharpen,n4,_core,correction}.py`` --
+  implementation (``n4`` = pure N4; ``correction`` = the dispatcher;
+  ``_core`` = the shared iteration).
+- ``src/nitrix/linalg/_solver.py`` -- ``safe_inv`` (cuSolver CPU fallback).
+- ``tests/test_bias.py`` -- the validation layers (unit / phantom / golden,
+  plus the LS / P-spline estimator and dispatcher tests).
 - SPEC §1 (charter: "class of ANTs"), §2.1 (pure-numeric contract),
   §3.2 (the no-scatter/BCOO stance the separable form honours).
 - IMPLEMENTATION_PLAN §2 (deviation protocol -- new subsystem).

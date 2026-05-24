@@ -121,6 +121,16 @@ benchmark reports, and survive being plucked into the eventual
   as the prototype "almost a semiring" gather-based op;
   n-D coverage including 4D fMRI shape (which cuDNN doesn't
   support).
+- [`design/bias-field.md`](design/bias-field.md) -- ``nitrix.bias``:
+  N4 (Tustison) bias-field correction validated to SimpleITK/ANTs parity,
+  the separable regular-grid B-spline approximator and N3/N4 Wiener
+  histogram-sharpening primitives it is built from, and the
+  ``bias_field_correction`` dispatcher's unbiased least-squares / P-spline
+  estimators.  Covers the parity-vs-correctness tradeoff, the
+  smooth-shading-vs-sharp-anatomy framing, the bias-variance / ridge
+  ("regularisation is denoising") finding, why multi-resolution is
+  load-bearing, "no Pallas needed", and the Tier C/D extensions.  New
+  subsystem added under the IMPLEMENTATION_PLAN §2 deviation protocol.
 - [`design/smoothing.md`](design/smoothing.md) -- ``gaussian``
   (separable, scipy-parity), ``bilateral_gaussian`` (marquee edge-
   preserving capability via ``semiring_ell_matmul`` over a feature-
