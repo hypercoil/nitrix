@@ -3,8 +3,9 @@
     "device": "NVIDIA A10G (gpu)",
     "platform": "Linux-6.1.161-183.298.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.0",
-    "timestamp": "2026-05-15T03:45:46Z"
+    "timestamp": "2026-05-24T01:50:14Z"
   },
+  "perf_note": "perf is migrating to nitrix-perf-bench (the perf suite + hosted dashboard); migrated ops carry perf_source instead of in-tree ratios",
   "ops": [
     {
       "qualname": "nitrix.linalg.symmetric",
@@ -724,10 +725,11 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "numpy.matmul",
+      "perf_cpu_baseline": "nitrix-perf-bench",
       "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "lax.fori_loop (same algebra)",
-      "perf_gpu_ratio": 0.06060606060606061,
+      "perf_gpu_baseline": "nitrix-perf-bench",
+      "perf_gpu_ratio": null,
+      "perf_source": "nitrix-perf-bench",
       "invariants": [
         "streaming kernel (no O(MKN) materialisation)",
         "Pallas/JAX fallback"
@@ -755,10 +757,11 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
+      "perf_cpu_baseline": "nitrix-perf-bench",
       "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "torch_geometric.nn.MessagePassing",
+      "perf_gpu_baseline": "nitrix-perf-bench",
       "perf_gpu_ratio": null,
+      "perf_source": "nitrix-perf-bench",
       "invariants": [
         "gather + nested vmap + semiring reduction",
         "REAL / TROPICAL_MAX_PLUS / TROPICAL_MIN_PLUS supported",

@@ -8,6 +8,14 @@ The "**turn the matrix green**" goal: every public op should pass
 the standard probes (jit, grad, vmap, jit-of-grad) and have a
 known performance characterisation vs natural references.
 
+Perf is migrating out: the sibling **nitrix-perf-bench** suite (richer --
+cross-framework, multi-platform, history, fidelity gating -- plus a hosted
+dashboard) is becoming the home for performance.  Ops already covered there
+(``MIGRATED_TO_PERFBENCH``) point out instead of carrying an in-tree ratio;
+the rest keep the legacy ``bench/`` numbers until they are ported.  Capability
+(the jit/grad/vmap probes + invariants) stays here -- it is intrinsic to the
+op and lets this matrix regenerate standalone.
+
 Hardware / CUDA / backend caveat
 --------------------------------
 
@@ -1265,6 +1273,18 @@ def _format_ratio(r: float) -> str:
     return f'{r:.1f}x'
 
 
+# Perf is migrating to the sibling nitrix-perf-bench suite + its hosted
+# dashboard.  These ops already live there, so their perf cells point out
+# rather than scrape the in-tree bench; everything else stays on bench/ until
+# ported.  Set PERFBENCH_SITE to the GitHub Pages URL once it is live.
+PERFBENCH_SITE = ''  # e.g. 'https://<owner>.github.io/nitrix-perf-bench/'
+MIGRATED_TO_PERFBENCH = {'semiring_matmul', 'semiring_ell_edge_aggregate'}
+
+
+def _perfbench_cell() -> str:
+    return f'[↗ perf-bench]({PERFBENCH_SITE})' if PERFBENCH_SITE else '↗ perf-bench'
+
+
 def render_markdown(
     cells: list[CellResult],
     host: dict,
@@ -1306,6 +1326,12 @@ def render_markdown(
         'faster than the baseline (a "win"); ``> 1`` means slower.  ``?`` '
         'means a baseline is declared but no benchmark has been run yet.'
     )
+    lines.append(
+        '- **↗ perf-bench**: perf for this op has moved to the sibling '
+        '**nitrix-perf-bench** suite (cross-framework, multi-platform, with '
+        'history + fidelity gating) and its hosted dashboard.  Capability '
+        '(jit/grad/vmap) stays here; perf lives there.'
+    )
     lines.append('')
 
     # Group by package
@@ -1331,24 +1357,30 @@ def render_markdown(
             vmap_g = _status_to_glyph(c.vmap)
             jgrad_g = _status_to_glyph(c.jit_of_grad)
 
-            cpu_name = c.op.perf_cpu_baseline or '—'
-            gpu_name = c.op.perf_gpu_baseline or '—'
-            cpu_ratio_raw = perf_data.get((short, 'cpu'))
-            gpu_ratio_raw = perf_data.get((short, 'gpu'))
-
-            if c.op.perf_cpu_baseline is None:
-                cpu_ratio = '—'
-            elif cpu_ratio_raw is None:
-                cpu_ratio = '?'
+            if short in MIGRATED_TO_PERFBENCH:
+                # Perf for this op lives in nitrix-perf-bench now; link out
+                # rather than carry a (necessarily thinner) in-tree number.
+                cpu_name = gpu_name = 'nitrix-perf-bench'
+                cpu_ratio = gpu_ratio = _perfbench_cell()
             else:
-                cpu_ratio = _format_ratio(cpu_ratio_raw)
+                cpu_name = c.op.perf_cpu_baseline or '—'
+                gpu_name = c.op.perf_gpu_baseline or '—'
+                cpu_ratio_raw = perf_data.get((short, 'cpu'))
+                gpu_ratio_raw = perf_data.get((short, 'gpu'))
 
-            if c.op.perf_gpu_baseline is None:
-                gpu_ratio = '—'
-            elif gpu_ratio_raw is None:
-                gpu_ratio = '?'
-            else:
-                gpu_ratio = _format_ratio(gpu_ratio_raw)
+                if c.op.perf_cpu_baseline is None:
+                    cpu_ratio = '—'
+                elif cpu_ratio_raw is None:
+                    cpu_ratio = '?'
+                else:
+                    cpu_ratio = _format_ratio(cpu_ratio_raw)
+
+                if c.op.perf_gpu_baseline is None:
+                    gpu_ratio = '—'
+                elif gpu_ratio_raw is None:
+                    gpu_ratio = '?'
+                else:
+                    gpu_ratio = _format_ratio(gpu_ratio_raw)
 
             inv = '; '.join(c.op.invariants) if c.op.invariants else ''
             notes = c.op.notes
@@ -1423,20 +1455,31 @@ def render_json(
 ) -> str:
     out = {
         'host': host,
+        # Perf for ops in MIGRATED_TO_PERFBENCH lives in nitrix-perf-bench;
+        # their perf_* fields below are null with a 'perf_source' pointer.
+        'perf_note': 'perf is migrating to nitrix-perf-bench (the perf suite '
+                     '+ hosted dashboard); migrated ops carry perf_source '
+                     'instead of in-tree ratios',
         'ops': [],
     }
     for c in cells:
         short = c.op.qualname.split('.')[-1]
+        migrated = short in MIGRATED_TO_PERFBENCH
         out['ops'].append({
             'qualname': c.op.qualname,
             'jit': c.jit,
             'grad': c.grad,
             'vmap': c.vmap,
             'jit_of_grad': c.jit_of_grad,
-            'perf_cpu_baseline': c.op.perf_cpu_baseline,
-            'perf_cpu_ratio': perf_data.get((short, 'cpu')),
-            'perf_gpu_baseline': c.op.perf_gpu_baseline,
-            'perf_gpu_ratio': perf_data.get((short, 'gpu')),
+            'perf_cpu_baseline':
+                'nitrix-perf-bench' if migrated else c.op.perf_cpu_baseline,
+            'perf_cpu_ratio':
+                None if migrated else perf_data.get((short, 'cpu')),
+            'perf_gpu_baseline':
+                'nitrix-perf-bench' if migrated else c.op.perf_gpu_baseline,
+            'perf_gpu_ratio':
+                None if migrated else perf_data.get((short, 'gpu')),
+            **({'perf_source': 'nitrix-perf-bench'} if migrated else {}),
             'invariants': list(c.op.invariants),
             'notes': c.op.notes,
         })

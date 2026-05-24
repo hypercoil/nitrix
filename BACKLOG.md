@@ -59,6 +59,33 @@ descriptor (works for DGCNN-shaped edge_fns; not generic), or
 (b) the KeOps-style symbolic formula approach in B5.  Decide
 between these only after B2 shows the JAX path matters.
 
+**Measured signal (2026-05-23, nitrix-perf-bench).** The trigger is
+now partially met: the `ell_edge_aggregate` case (a GCN-style *linear*
+`edge_fn`, ``w·(W@h_j)``, so JAX / torch / the fp64 oracle compute
+identical math) shows **torch_geometric's `MessagePassing` is ~2–5×
+faster than the `nitrix-jax` reference on CPU** — ratio 0.21× at
+``n=4096`` rising to 0.53× at ``n=16384`` (degree 16, ``d_in=d_out=64``),
+for both REAL (sum / `aggr='add'`) and TROPICAL_MAX_PLUS (max /
+`aggr='max'`).  The gap is the cost of the gather + nested-vmap +
+axis-reduce generality vs PyG's specialised native `scatter_reduce`; it
+*narrows* with graph size as the per-edge vmap overhead amortises.  This
+is the JAX-path-is-the-bottleneck evidence the trigger asks for (against
+an external reference, not just B2's internal baseline).  See
+`nitrix-perf-bench/reports/PERF_ELL_EDGE_AGGREGATE.md`.
+
+**But the GPU result tempers it — measure before you kernel.**  On the
+A10G (the actual deployment target) the same comparison is a *wash*:
+nitrix-jax is within ~5% of PyG for REAL (pyg 0.94–0.95×) and ~15%
+**faster** for TROPICAL_MAX_PLUS (pyg 1.14–1.15×).  XLA fuses the
+gather + vmap + axis-reduce well on Ampere, so the large CPU gap does
+**not** carry to the GPU.  Net: a Pallas dispatch for `edge_aggregate`
+is **not** motivated by *GPU* performance against PyG — the only standing
+perf case is CPU (likely not the deployment target) or an `edge_fn`
+shape XLA fuses poorly.  Recommend keeping B3 low-priority on perf
+grounds until a GPU shortfall or a concrete consumer appears; the
+benchmark (`ell_edge_aggregate`, both platforms) is now the standing
+watch for that.
+
 ### B4. LOG / EUCLIDEAN / BOOLEAN ``edge_aggregate`` semirings
 
 The current implementation supports REAL, TROPICAL_MAX_PLUS,
@@ -201,6 +228,118 @@ document the distinction (incl. the EUCLIDEAN exception).
 
 **Effort.** S.  One field + a guarded `ell_mask(semiring=...)`
 overload; backward-compatible with the explicit-`identity` form.
+
+### B10. Re-tune the Pallas LOG (logsumexp) `semiring_matmul` kernel
+
+The Pallas / Triton kernel for the **LOG** semiring is markedly
+under-tuned versus both the pure-JAX reference and a naive
+materialise-then-reduce alternative -- uniquely among the built-in
+algebras.
+
+**Trigger.** A consumer running the LOG semiring matmul (the
+logsumexp contraction -- softmax / attention-style aggregation) at
+scale where wall-time matters; or the next `nitrix-perf-bench`
+sweep promoting this to a kernel-tuning sprint.
+
+**Notes (evidence).** `nitrix-perf-bench` `semiring_matmul` case,
+A10G, jax 0.10.0 (`../nitrix-perf-bench/reports/PERF_SEMIRING_MATMUL.md`):
+- LOG Pallas vs the JAX reference: **1.22× at 256³ (slower than the
+  reference)**, **0.59× at 512³ (1.7×)**.
+- REAL / TROPICAL_MAX_PLUS / EUCLIDEAN Pallas hit 0.07–0.20×
+  (5–14×) on the same shapes -- so the tiling is fine in general;
+  LOG is the outlier.
+- A naive materialise-then-`logsumexp` baseline reaches **0.11× at
+  512³ (≈9×)**, so the throughput is achievable -- the kernel is
+  leaving it on the table.
+
+The suspect is the online-logsumexp recurrence (the running
+`(m, s)` max / sum-exp state in `_LogSumExpMonoid`, flash-attention
+style): it likely serialises the K-loop and/or carries register
+pressure the additive (`sum`) and `max` monoids don't, since those
+share the same tiling and are fast.  Direction: a tile / unroll /
+occupancy pass on the LOG kernel specifically, following the
+online-softmax / flash-attention literature for the streaming
+logsumexp recurrence.  Gate it the G0 way (benchmark-first; ship
+only if it beats the JAX path).  Not new functionality, and the
+JAX path stays the floor.
+
+**Don't over-read the naive win.** `naive-dense`'s speed is
+steady-state *only*: it pays a pathological **cold** compile (XLA
+`input_reduce_fusion` over the materialised operand -- ~45–585 s
+per reduction point, ~580 s for 512³ logsumexp; this hits every
+algebra including `max`, once each attempt runs in its own process
+-- the earlier ~70 ms figures were an in-process XLA cross-attempt
+cache artifact) and elevated peak-HBM (~68–85 MB vs the streaming
+kernels' 2.6–23 MB).  Pallas keeps the O(M·N) streaming memory and
+a ~2 s compile, so it stays the default -- the task is narrow:
+close the LOG-kernel throughput gap, not adopt materialisation.
+
+**Arch caveat.** Numbers are A10G; the naive↔Pallas crossover and
+the compile magnitudes may shift on other GPUs (e.g. Lovelace), so
+re-bench on the target before acting.
+
+**Effort.** M.  Single-kernel tuning + re-bench; no API change.
+
+**Cross-references.**
+- `../nitrix-perf-bench/reports/PERF_SEMIRING_MATMUL.md` -- the
+  evidence; supersedes the hand-built `bench/PERF_SEMIRING_MATMUL.md`.
+- `docs/design/streaming-kernel.md` -- the O(M·N) streaming claim
+  and the online logsumexp `(m, s)` state.
+- `bench/G0_ELL_REPORT.md` -- the benchmark-gated kernel-decision
+  precedent.
+- `src/nitrix/semiring/algebras.py` `_LogSumExpMonoid` -- the
+  online recurrence under suspicion.
+
+### B11. Finish migrating perf to nitrix-perf-bench (op_matrix → capability-only)
+
+Performance is moving out of this repo into the sibling
+**nitrix-perf-bench** suite, which is strictly richer than the
+in-tree `bench/` + the op_matrix's two perf columns:
+cross-framework refs (torch / PyG), multi-platform fan-out
+(CPU + A10G), a durable result store with history, fidelity
+gating against an fp64 oracle, a regression gate, decision-input
+bundles, and a hosted HTML dashboard.  The end state: the
+op_matrix is **capability-only** (jit / grad / vmap / jit-of-grad
++ invariants -- intrinsic to the op, regenerates standalone), and
+perf lives entirely in nitrix-perf-bench.
+
+**Status (transitional, non-regressive).** Two ops are migrated --
+`semiring_matmul` and `semiring_ell_edge_aggregate`; their
+op_matrix perf cells now render `↗ perf-bench` (see
+`MIGRATED_TO_PERFBENCH` in `tools/op_matrix.py`).  The other ~30
+ops still carry their in-tree `bench/` numbers, so nothing is lost
+in the interim.
+
+**Plan.** Port each remaining benchmarked op to a nitrix-perf-bench
+*case* (its competing baselines + the external reference it is
+rated against + an fp64 oracle), add it to `MIGRATED_TO_PERFBENCH`,
+and let the op's cell point out.  When the set covers the
+catalogue, delete the op_matrix perf columns, `load_perf_data`, the
+`bench/PERF_*` scrapers, and retire `bench/` itself.  The bulk is
+the `PERF_AUDIT` external-library comparisons (numpy / scipy /
+sklearn), which are mechanical now that the perf harness exists;
+`PERF_SEMIRING_CONV`, `PERF_LOBPCG`, `PERF_TRILINEAR`,
+`MEM_STREAMING_KERNEL`, `G0_ELL_REPORT` are the rest.
+
+**Trigger.** Incremental + opportunistic: port an op when it is
+touched or when its perf becomes decision-relevant; do the final
+column-strip once `MIGRATED_TO_PERFBENCH` covers the catalogue.  Or
+a dedicated migration sprint if a stakeholder wants the whole
+matrix's perf on the hosted dashboard at once.
+
+**Effort.** L overall, but cleanly sliceable (one op = one small
+case); each slice is S and independently shippable.  No nitrix API
+change -- only docs/tooling + the eventual `bench/` retirement.
+
+**Cross-references.**
+- `../nitrix-perf-bench/DESIGN.md` §6 (phase plan; the perf suite
+  executes this) and its `src/nperf/cases/` (the case pattern to
+  copy per op).
+- `tools/op_matrix.py` `MIGRATED_TO_PERFBENCH` -- the per-op switch;
+  `load_perf_data` + `_parse_perf_*` + `bench/` are what retire at
+  the end.
+- `bench/PERF_AUDIT.md` -- the ~30-op external-library reference
+  numbers to reproduce as cases.
 
 ## Resolved items
 
