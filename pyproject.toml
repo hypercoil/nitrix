@@ -34,6 +34,10 @@ dependencies = [
     "jax >= 0.10.0",
     "jaxtyping >= 0.2.31",
     "numpy >= 2.0",
+    # nitrix.graph uses typing_extensions.TypeIs at runtime (not just typing);
+    # it was assumed transitive via jaxtyping but isn't guaranteed, so declare
+    # it explicitly (a clean `import nitrix.graph` otherwise fails).
+    "typing_extensions >= 4.10",
 ]
 
 [project.optional-dependencies]
