@@ -1,20 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 Op-matrix generator: catalogue every public nitrix op + live probe
-its transformation support, perf characteristics, and declared
-invariants.  Output: ``docs/op_matrix.md`` with provenance metadata.
+its transformation support and declared invariants.  Output:
+``docs/op_matrix.md`` with provenance metadata.
 
 The "**turn the matrix green**" goal: every public op should pass
-the standard probes (jit, grad, vmap, jit-of-grad) and have a
-known performance characterisation vs natural references.
+the standard probes (jit, grad, vmap, jit-of-grad).
 
-Perf is migrating out: the sibling **nitrix-perf-bench** suite (richer --
-cross-framework, multi-platform, history, fidelity gating -- plus a hosted
-dashboard) is becoming the home for performance.  Ops already covered there
-(``MIGRATED_TO_PERFBENCH``) point out instead of carrying an in-tree ratio;
-the rest keep the legacy ``bench/`` numbers until they are ported.  Capability
-(the jit/grad/vmap probes + invariants) stays here -- it is intrinsic to the
-op and lets this matrix regenerate standalone.
+This matrix is **capability-only**.  Performance lives in the sibling
+**nitrix-perf-bench** suite (cross-framework, multi-platform, history,
+fidelity-gated) and its hosted dashboard -- richer than any matrix cell, so
+the perf columns + the ``bench/`` scrapers were retired from here.  Capability
+(the jit/grad/vmap probes + invariants) is intrinsic to the op and lets this
+matrix regenerate standalone.
 
 Hardware / CUDA / backend caveat
 --------------------------------
@@ -170,15 +168,6 @@ class OpInfo:
         Free-text tags for the algorithmic invariants the op
         exploits.  Hand-curated; matched against a known vocabulary
         for the rendered legend.
-    perf_cpu_baseline, perf_gpu_baseline
-        Short identifier strings for the CPU and GPU reference
-        implementations the op's wall-time is compared against
-        (e.g. ``"scipy.ndimage.gaussian_filter"`` /
-        ``"cuDNN fp32"``).  Both are independent: an op can declare
-        one, both, or neither.  Ratios get populated from the bench
-        reports via ``load_perf_data``; cells with a declared name
-        but no measured ratio render ``?``, cells with no name
-        render ``—``.
     notes
         Free-text annotation (rendered in the table's "notes"
         column).
@@ -192,14 +181,6 @@ class OpInfo:
     diff_arg: Optional[int] = 0
     vmap_arg: Optional[int] = 0
     invariants: tuple[str, ...] = ()
-    # Perf baselines.  Two reference points: a CPU implementation (e.g.,
-    # scipy / numpy / sklearn) and a GPU implementation (e.g., cuDNN /
-    # torch / jnp built-in).  In both cases the ratio rendered is
-    # ``nitrix-on-GPU / baseline-wall-time``; ``< 1`` means nitrix wins.
-    # The name strings show up verbatim in the rendered table; the
-    # ratios are scraped from ``bench/PERF_*.md`` via ``load_perf_data``.
-    perf_cpu_baseline: Optional[str] = None
-    perf_gpu_baseline: Optional[str] = None
     notes: str = ''
     reducer: Optional[Callable] = None
     skip_jit: bool = False  # construction-time op; JIT doesn't apply
@@ -301,27 +282,23 @@ register(OpInfo(
         {'method': 'cholesky'},
     ),
     invariants=('Cholesky-normal-equations',),
-    perf_cpu_baseline='numpy.linalg.lstsq',
     notes='Cholesky path; ~800x faster than numpy lstsq at V=100k',
 ))
 register(OpInfo(
     'nitrix.linalg.linear_kernel',
     fixture=lambda: ((jax.random.normal(_key(), (50, 16)),), {}),
     invariants=('shared with linear_distance via identity formula',),
-    perf_cpu_baseline='sklearn.metrics.pairwise.linear_kernel',
 ))
 register(OpInfo(
     'nitrix.linalg.linear_distance',
     fixture=lambda: ((jax.random.normal(_key(), (50, 16)),), {}),
     invariants=('|x-y|^2 = |x|^2 + |y|^2 - 2 x.y identity (O(nm) memory)',),
-    perf_cpu_baseline='sklearn.metrics.pairwise_distances',
     notes='1000x memory reduction vs naive at d=1000',
 ))
 register(OpInfo(
     'nitrix.linalg.rbf_kernel',
     fixture=lambda: ((jax.random.normal(_key(), (50, 16)),), {'gamma': 0.5}),
     invariants=('exp(-gamma * |x-y|^2)',),
-    perf_cpu_baseline='sklearn.metrics.pairwise.rbf_kernel',
     notes='~375x faster than sklearn at (5000, 32)',
 ))
 register(OpInfo(
@@ -334,7 +311,6 @@ register(OpInfo(
         {},
     ),
     invariants=('SPEC 4.1 stability rewrite', 'eigvalue-clip threshold'),
-    perf_cpu_baseline='scipy.linalg.logm',
     notes='eigh-based; routes through safe_eigh cuSolver fallback',
 ))
 register(OpInfo(
@@ -347,7 +323,6 @@ register(OpInfo(
         {},
     ),
     invariants=('eigvalue-clip threshold',),
-    perf_cpu_baseline='scipy.linalg.sqrtm',
 ))
 register(OpInfo(
     'nitrix.linalg.sympower',
@@ -359,7 +334,6 @@ register(OpInfo(
         {'power': -0.5},
     ),
     invariants=('arbitrary real power via eigh',),
-    perf_cpu_baseline='scipy.linalg.fractional_matrix_power',
 ))
 register(OpInfo(
     'nitrix.linalg.mean_log_euclidean',
@@ -382,15 +356,12 @@ register(OpInfo(
     'nitrix.stats.cov',
     fixture=lambda: ((jax.random.normal(_key(), (5, 100)),), {}),
     invariants=('complex-Hermitian preserved', 'np.cov parity at fp64'),
-    perf_cpu_baseline='numpy.cov',
-    perf_gpu_baseline='jnp.cov',
     notes='130x faster than numpy at (2000, 1000)',
 ))
 register(OpInfo(
     'nitrix.stats.corr',
     fixture=lambda: ((jax.random.normal(_key(), (5, 100)),), {}),
     invariants=('diagonal=1', 'complex-Hermitian preserved'),
-    perf_cpu_baseline='numpy.corrcoef',
 ))
 register(OpInfo(
     'nitrix.stats.partialcov',
@@ -406,7 +377,6 @@ register(OpInfo(
     'nitrix.stats.analytic_signal',
     fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
     invariants=('vectorised Hilbert mask', 'scipy.signal.hilbert parity'),
-    perf_cpu_baseline='scipy.signal.hilbert',
     # Complex output; reduce via |.|^2 so grad sees a real scalar.
     reducer=lambda x: jnp.sum(jnp.abs(x) ** 2),
 ))
@@ -414,13 +384,11 @@ register(OpInfo(
     'nitrix.stats.hilbert_transform',
     fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
     invariants=('imag part of analytic_signal',),
-    perf_cpu_baseline='scipy.signal.hilbert (.imag)',
 ))
 register(OpInfo(
     'nitrix.stats.envelope',
     fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
     invariants=('|analytic_signal|',),
-    perf_cpu_baseline='numpy.abs(scipy.signal.hilbert)',
 ))
 
 
@@ -442,7 +410,6 @@ register(OpInfo(
     diff_arg=0,
     vmap_arg=None,  # already voxelwise
     invariants=('FaST-LMM spectral rotation', 'no V*N^2 intermediate'),
-    perf_cpu_baseline='statsmodels.MixedLM',
     notes='~5e-3 parity with statsmodels.MixedLM',
 ))
 
@@ -464,7 +431,6 @@ register(OpInfo(
     diff_arg=0,
     vmap_arg=None,
     invariants=('single-parameter REML (identifiability)', 'shared X_group'),
-    perf_cpu_baseline='statsmodels.WLS (voxelwise loop)',
 ))
 
 # --- signal -----------------------------------------------------------------
@@ -483,7 +449,6 @@ register(OpInfo(
     diff_arg=0,
     vmap_arg=None,
     invariants=('associative_scan (O(log n) parallel)', 'no while_loop'),
-    perf_cpu_baseline='scipy.interpolate.interp1d',
 ))
 
 
@@ -511,13 +476,11 @@ register(OpInfo(
     diff_arg=0,
     vmap_arg=None,
     invariants=('Scargle 1982 normalisation', 'scipy.lombscargle parity'),
-    perf_cpu_baseline='scipy.signal.lombscargle',
 ))
 register(OpInfo(
     'nitrix.signal.polynomial_detrend',
     fixture=lambda: ((jax.random.normal(_key(), (5, 100)),), {'degree': 2}),
     invariants=('rescaled Vandermonde (stability)', 'routes through residualise'),
-    perf_cpu_baseline='scipy.signal.detrend (poly)',
 ))
 
 
@@ -533,8 +496,6 @@ register(OpInfo(
     diff_arg=0,
     vmap_arg=None,
     invariants=('thin lax.conv_general_dilated wrapper',),
-    perf_cpu_baseline='scipy.signal.convolve',
-    perf_gpu_baseline='lax.conv_general_dilated (raw)',
 ))
 
 # --- numerics ---------------------------------------------------------------
@@ -543,7 +504,6 @@ register(OpInfo(
     'nitrix.numerics.zscore_normalize',
     fixture=lambda: ((jax.random.normal(_key(), (5, 100)),), {}),
     invariants=('zero mean, unit std per axis',),
-    perf_cpu_baseline='scipy.stats.zscore',
 ))
 register(OpInfo(
     'nitrix.numerics.intensity_normalize',
@@ -582,7 +542,6 @@ register(OpInfo(
     'nitrix.geometry.spatial_transform',
     fixture=_spatial_transform_fixture,
     invariants=('mode pass-through to map_coordinates', 'accepts leading batch'),
-    perf_cpu_baseline='scipy.ndimage.map_coordinates',
 ))
 
 
@@ -622,7 +581,6 @@ register(OpInfo(
     'nitrix.graph.laplacian',
     fixture=_laplacian_fixture,
     invariants=('symmetric / random_walk / combinatorial variants',),
-    perf_cpu_baseline='scipy.sparse.csgraph.laplacian',
 ))
 register(OpInfo(
     'nitrix.graph.degree_vector',
@@ -647,7 +605,6 @@ register(OpInfo(
         'LOBPCG implicit-VJP for sparse paths',
     ),
     vmap_arg=None,
-    perf_cpu_baseline='sklearn.manifold.SpectralEmbedding',
     notes='dense=eigh, sparse=lobpcg; differentiable end-to-end',
 ))
 
@@ -657,13 +614,11 @@ register(OpInfo(
     'nitrix.morphology.dilate',
     fixture=lambda: ((jax.random.normal(_key(), (10, 10)),), {'size': 3}),
     invariants=('TROPICAL_MAX_PLUS specialisation',),
-    perf_cpu_baseline='scipy.ndimage.grey_dilation',
 ))
 register(OpInfo(
     'nitrix.morphology.erode',
     fixture=lambda: ((jax.random.normal(_key(), (10, 10)),), {'size': 3}),
     invariants=('TROPICAL_MIN_PLUS specialisation',),
-    perf_cpu_baseline='scipy.ndimage.grey_erosion',
 ))
 register(OpInfo(
     'nitrix.morphology.distance_transform',
@@ -672,14 +627,12 @@ register(OpInfo(
         {},
     ),
     invariants=('iterative TROPICAL_MIN_PLUS', 'chamfer (not exact EDT)'),
-    perf_cpu_baseline='scipy.ndimage.distance_transform_edt',
     notes='15x slower than scipy EDT at (64,64) -- algorithm mismatch',
 ))
 register(OpInfo(
     'nitrix.morphology.median_filter',
     fixture=lambda: ((jax.random.normal(_key(), (16, 16)),), {'size': 3}),
     invariants=('gather + nanmedian (not a semiring op)',),
-    perf_cpu_baseline='scipy.ndimage.median_filter',
 ))
 
 
@@ -706,7 +659,6 @@ register(OpInfo(
         'window-unfold + argmax composition',
     ),
     reducer=_max_pool_reducer,
-    perf_gpu_baseline='torch.nn.MaxPool3d (return_indices)',
     notes='returns (pooled, indices); paired with max_unpool_nd for encoder-decoder',
 ))
 
@@ -727,7 +679,6 @@ register(OpInfo(
         'vmapped per-channel scatter',
         'argmax-agreement parity (not raw-logit allclose)',
     ),
-    perf_gpu_baseline='torch.nn.MaxUnpool3d',
     notes='inverts max_pool_with_indices_nd; indices are int (non-diff)',
 ))
 
@@ -737,7 +688,6 @@ register(OpInfo(
     'nitrix.smoothing.gaussian',
     fixture=lambda: ((jax.random.normal(_key(), (16, 16)),), {'sigma': 1.5}),
     invariants=('separable n-D', 'scipy.ndimage parity at fp64'),
-    perf_cpu_baseline='scipy.ndimage.gaussian_filter',
 ))
 register(OpInfo(
     'nitrix.smoothing.bilateral_gaussian',
@@ -769,8 +719,6 @@ register(OpInfo(
         'streaming kernel (no O(MKN) materialisation)',
         'Pallas/JAX fallback',
     ),
-    perf_cpu_baseline='numpy.matmul',
-    perf_gpu_baseline='lax.fori_loop (same algebra)',
     notes='6-16x faster than JAX fori_loop on REAL/TROPICAL/EUCLIDEAN',
 ))
 
@@ -791,7 +739,6 @@ register(OpInfo(
     diff_arg=0,
     vmap_arg=None,
     invariants=('sparse ELL matmul',),
-    perf_cpu_baseline='scipy.sparse @ dense',
 ))
 
 
@@ -835,7 +782,6 @@ register(OpInfo(
         'REAL / TROPICAL_MAX_PLUS / TROPICAL_MIN_PLUS supported',
         'edge_fn signature (h_i, h_j, w, ij)',
     ),
-    perf_gpu_baseline='torch_geometric.nn.MessagePassing',
     notes='probed with GCN closure; covers GCN/GAT/EdgeConv/MoNet/ChebNet',
 ))
 
@@ -853,8 +799,6 @@ register(OpInfo(
         'NaN-safe patch extraction (jnp.take, not lax.conv_general_dilated_patches)',
         'explicit im2col + semiring_matmul',
     ),
-    perf_cpu_baseline='scipy.ndimage.convolve',
-    perf_gpu_baseline='cuDNN fp32 (precision=highest)',
     notes='1.7-1.9x slower than cuDNN fp32 (literature expected)',
 ))
 
@@ -1073,149 +1017,6 @@ def host_snapshot() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Perf-data loader: scrape PERF_*.md files
-# ---------------------------------------------------------------------------
-
-
-def _parse_ratio_token(tok: str) -> Optional[float]:
-    '''Parse a ratio cell like ``0.06x`` / ``1.70×`` / ``16.50×``.
-
-    Tolerates lowercase ``x``, unicode ``×``, and trailing whitespace.
-    Returns ``None`` if the token doesn't look like a ratio.
-    '''
-    s = tok.strip().replace('×', '').replace('x', '')
-    try:
-        return float(s)
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_perf_audit(audit_path: Path) -> dict[str, float]:
-    '''Read PERF_AUDIT.md and pull the **best** (smallest) ratio per
-    op across all measured sizes.
-
-    The audit's "op" column embeds the subpackage and function name
-    (``stats.cov``, ``morphology.distance_transform``, etc.); strip
-    any parenthetical suffix (``" (Cholesky)"``, ``" (voxelwise)"``)
-    so the keys match the qualname short-name used elsewhere in the
-    matrix.
-
-    Returns a dict mapping the *normalised* op short-name
-    (last dotted segment) to the best observed ratio (nitrix / CPU
-    baseline; smaller = bigger nitrix win).
-    '''
-    out: dict[str, float] = {}
-    if not audit_path.exists():
-        return out
-    for line in audit_path.read_text().splitlines():
-        if not line.startswith('|'):
-            continue
-        cells = [c.strip() for c in line.split('|')[1:-1]]
-        if len(cells) < 6:
-            continue
-        # Skip header / separator rows.
-        if cells[0].lower() in ('op', '---', ''):
-            continue
-        op_raw = cells[0]
-        ratio = _parse_ratio_token(cells[5])
-        if ratio is None:
-            continue
-        # Strip parenthetical suffix; use the leaf (function name).
-        op_clean = op_raw.split('(')[0].strip()
-        short = op_clean.split('.')[-1]
-        if short not in out or ratio < out[short]:
-            out[short] = ratio
-    return out
-
-
-def _parse_perf_semiring_conv(report_path: Path) -> Optional[float]:
-    '''Pull the ``REAL (Pallas mm) / fp32`` ratio for ``semiring_conv``.
-
-    The PERF_SEMIRING_CONV.md report has 2D and 3D rows; take the
-    smaller (best apples-to-apples) ratio.
-    '''
-    if not report_path.exists():
-        return None
-    best: Optional[float] = None
-    for line in report_path.read_text().splitlines():
-        if not line.startswith('|') or 'cuDNN' in line or 'shape' in line:
-            continue
-        cells = [c.strip() for c in line.split('|')[1:-1]]
-        # 2D table: shape | cuDNN TC | cuDNN fp32 | REAL Pallas | / TC | / fp32 | ...
-        if len(cells) < 6:
-            continue
-        ratio = _parse_ratio_token(cells[5])
-        if ratio is None:
-            continue
-        best = ratio if best is None else min(best, ratio)
-    return best
-
-
-def _parse_perf_semiring_matmul(report_path: Path) -> Optional[float]:
-    '''Pull the best Pallas-vs-JAX ratio for ``semiring_matmul``.
-
-    The bench reports Pallas speed-up (e.g., 16.50×); convert to
-    a nitrix / baseline ratio (1 / speed-up) so it's directionally
-    consistent with the other cells (smaller = bigger nitrix win).
-    Take the best (smallest) ratio across measured shapes.
-
-    Caveat: the "JAX" baseline here is the same-algorithm
-    ``lax.fori_loop`` fallback, not ``jnp.matmul`` with tensor cores.
-    The ratio cell carries this baseline name verbatim from
-    ``OpInfo.perf_gpu_baseline``.
-    '''
-    if not report_path.exists():
-        return None
-    best: Optional[float] = None
-    for line in report_path.read_text().splitlines():
-        if not line.startswith('|') or 'algebra' in line.lower() or 'Pallas speed-up' in line:
-            continue
-        cells = [c.strip() for c in line.split('|')[1:-1]]
-        # Steady-state table: m | k | n | algebra | JAX | Pallas | Pallas speed-up
-        if len(cells) < 7:
-            continue
-        algebra = cells[3].lower()
-        # Only REAL is comparable to the GPU baseline we'd name
-        # ("JAX fori_loop"); other algebras have no third-party GPU
-        # ref so we'd render '?' anyway.
-        if algebra != 'real':
-            continue
-        speedup = _parse_ratio_token(cells[6])
-        if speedup is None or speedup == 0:
-            continue
-        ratio = 1.0 / speedup
-        best = ratio if best is None else min(best, ratio)
-    return best
-
-
-def load_perf_data() -> dict[tuple[str, str], float]:
-    '''Build the unified perf-ratio lookup.
-
-    Returns a dict keyed by ``(op_short_name, 'cpu' | 'gpu')`` whose
-    value is the best observed ratio against the named baseline.
-    Cells with a declared baseline name but no scraped ratio render
-    as ``?``; cells with no baseline name render as ``—``.
-    '''
-    bench_dir = Path(__file__).parent.parent / 'bench'
-    out: dict[tuple[str, str], float] = {}
-
-    # CPU baselines: PERF_AUDIT covers most external-library references.
-    for short, ratio in _parse_perf_audit(bench_dir / 'PERF_AUDIT.md').items():
-        out[(short, 'cpu')] = ratio
-
-    # GPU baselines.
-    conv_ratio = _parse_perf_semiring_conv(bench_dir / 'PERF_SEMIRING_CONV.md')
-    if conv_ratio is not None:
-        out[('semiring_conv', 'gpu')] = conv_ratio
-
-    mm_ratio = _parse_perf_semiring_matmul(bench_dir / 'PERF_SEMIRING_MATMUL.md')
-    if mm_ratio is not None:
-        out[('semiring_matmul', 'gpu')] = mm_ratio
-
-    return out
-
-
-# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -1260,36 +1061,7 @@ def _status_to_glyph(status: str) -> str:
     return '❌'
 
 
-def _format_ratio(r: float) -> str:
-    '''Render a ratio as ``0.06x`` / ``1.70x`` / ``<0.01x``.
-
-    Numbers under 0.01 collapse to ``<0.01x`` to keep cells tight
-    while flagging "much bigger than 100x win" clearly.
-    '''
-    if r < 0.01:
-        return '<0.01x'
-    if r < 1.0:
-        return f'{r:.2f}x'
-    return f'{r:.1f}x'
-
-
-# Perf is migrating to the sibling nitrix-perf-bench suite + its hosted
-# dashboard.  These ops already live there, so their perf cells point out
-# rather than scrape the in-tree bench; everything else stays on bench/ until
-# ported.  Set PERFBENCH_SITE to the GitHub Pages URL once it is live.
-PERFBENCH_SITE = ''  # e.g. 'https://<owner>.github.io/nitrix-perf-bench/'
-MIGRATED_TO_PERFBENCH = {'semiring_matmul', 'semiring_ell_edge_aggregate'}
-
-
-def _perfbench_cell() -> str:
-    return f'[↗ perf-bench]({PERFBENCH_SITE})' if PERFBENCH_SITE else '↗ perf-bench'
-
-
-def render_markdown(
-    cells: list[CellResult],
-    host: dict,
-    perf_data: dict[tuple[str, str], float],
-) -> str:
+def render_markdown(cells: list[CellResult], host: dict) -> str:
     lines = []
     lines.append('# nitrix op matrix')
     lines.append('')
@@ -1298,6 +1070,14 @@ def render_markdown(
         '**observed on the generating host** -- a different hardware / '
         'CUDA / JAX pin may produce different statuses.  See '
         '``docs/design/op-matrix.md`` for the design rationale.'
+    )
+    lines.append('')
+    lines.append(
+        'This matrix is **capability-only** (jit / grad / vmap / jit-of-grad '
+        '+ invariants).  **Performance lives in the sibling '
+        '``nitrix-perf-bench`` suite** + its hosted dashboard -- richer '
+        '(cross-framework, multi-platform, history, fidelity-gated) than a '
+        'matrix cell could be.'
     )
     lines.append('')
     lines.append('## Host snapshot')
@@ -1313,26 +1093,6 @@ def render_markdown(
     lines.append('- ❌ probe fails (cell shows the truncated error message).')
     lines.append('- — not applicable for this op (no natural diff target, etc.).')
     lines.append('')
-    lines.append('### Perf columns')
-    lines.append('')
-    lines.append(
-        '- **CPU baseline / GPU baseline**: short identifier of the '
-        'reference implementation each ratio is computed against.  '
-        '``—`` means no natural baseline of that kind exists for the op.'
-    )
-    lines.append(
-        '- **CPU ratio / GPU ratio**: ``nitrix-on-GPU / baseline-wall-time``, '
-        'best observed across measured sizes.  ``< 1`` means nitrix is '
-        'faster than the baseline (a "win"); ``> 1`` means slower.  ``?`` '
-        'means a baseline is declared but no benchmark has been run yet.'
-    )
-    lines.append(
-        '- **↗ perf-bench**: perf for this op has moved to the sibling '
-        '**nitrix-perf-bench** suite (cross-framework, multi-platform, with '
-        'history + fidelity gating) and its hosted dashboard.  Capability '
-        '(jit/grad/vmap) stays here; perf lives there.'
-    )
-    lines.append('')
 
     # Group by package
     by_package: dict[str, list[CellResult]] = {}
@@ -1344,44 +1104,15 @@ def render_markdown(
         lines.append(f'## {pkg}')
         lines.append('')
         lines.append(
-            '| op | jit | grad | vmap | jit(grad) | CPU baseline | CPU ratio | '
-            'GPU baseline | GPU ratio | invariants | notes |'
+            '| op | jit | grad | vmap | jit(grad) | invariants | notes |'
         )
-        lines.append(
-            '|---|:--:|:--:|:--:|:--:|---|---:|---|---:|---|---|'
-        )
+        lines.append('|---|:--:|:--:|:--:|:--:|---|---|')
         for c in by_package[pkg]:
             short = c.op.qualname.split('.')[-1]
             jit_g = _status_to_glyph(c.jit)
             grad_g = _status_to_glyph(c.grad)
             vmap_g = _status_to_glyph(c.vmap)
             jgrad_g = _status_to_glyph(c.jit_of_grad)
-
-            if short in MIGRATED_TO_PERFBENCH:
-                # Perf for this op lives in nitrix-perf-bench now; link out
-                # rather than carry a (necessarily thinner) in-tree number.
-                cpu_name = gpu_name = 'nitrix-perf-bench'
-                cpu_ratio = gpu_ratio = _perfbench_cell()
-            else:
-                cpu_name = c.op.perf_cpu_baseline or '—'
-                gpu_name = c.op.perf_gpu_baseline or '—'
-                cpu_ratio_raw = perf_data.get((short, 'cpu'))
-                gpu_ratio_raw = perf_data.get((short, 'gpu'))
-
-                if c.op.perf_cpu_baseline is None:
-                    cpu_ratio = '—'
-                elif cpu_ratio_raw is None:
-                    cpu_ratio = '?'
-                else:
-                    cpu_ratio = _format_ratio(cpu_ratio_raw)
-
-                if c.op.perf_gpu_baseline is None:
-                    gpu_ratio = '—'
-                elif gpu_ratio_raw is None:
-                    gpu_ratio = '?'
-                else:
-                    gpu_ratio = _format_ratio(gpu_ratio_raw)
-
             inv = '; '.join(c.op.invariants) if c.op.invariants else ''
             notes = c.op.notes
             # Embed error message if status != pass / n/a
@@ -1396,8 +1127,7 @@ def render_markdown(
                 notes = (notes + ' — errors: ' + '; '.join(err_parts)).lstrip(' —')
             lines.append(
                 f'| `{short}` | {jit_g} | {grad_g} | {vmap_g} | '
-                f'{jgrad_g} | {cpu_name} | {cpu_ratio} | {gpu_name} | '
-                f'{gpu_ratio} | {inv} | {notes} |'
+                f'{jgrad_g} | {inv} | {notes} |'
             )
         lines.append('')
 
@@ -1410,76 +1140,32 @@ def render_markdown(
     n_jgrad = sum(1 for c in cells if c.jit_of_grad == 'pass')
     n_grad_app = sum(1 for c in cells if c.op.diff_arg is not None)
     n_vmap_app = sum(1 for c in cells if c.op.vmap_arg is not None)
-    n_cpu_named = sum(1 for c in cells if c.op.perf_cpu_baseline is not None)
-    n_gpu_named = sum(1 for c in cells if c.op.perf_gpu_baseline is not None)
-    n_cpu_measured = sum(
-        1 for c in cells
-        if (c.op.qualname.split('.')[-1], 'cpu') in perf_data
-    )
-    n_gpu_measured = sum(
-        1 for c in cells
-        if (c.op.qualname.split('.')[-1], 'gpu') in perf_data
-    )
-    n_cpu_wins = sum(
-        1 for c in cells
-        if perf_data.get((c.op.qualname.split('.')[-1], 'cpu'), 2.0) < 1.0
-    )
-    n_gpu_wins = sum(
-        1 for c in cells
-        if perf_data.get((c.op.qualname.split('.')[-1], 'gpu'), 2.0) < 1.0
-    )
     lines.append(f'- **ops catalogued**: {n_total}')
     lines.append(f'- **jit pass**: {n_jit} / {n_total}')
     lines.append(f'- **grad pass**: {n_grad} / {n_grad_app} (applicable)')
     lines.append(f'- **vmap pass**: {n_vmap} / {n_vmap_app} (applicable)')
     lines.append(f'- **jit(grad) pass**: {n_jgrad} / {n_grad_app}')
     lines.append(
-        f'- **CPU baseline declared / measured**: {n_cpu_named} / '
-        f'{n_cpu_measured} (of {n_total})'
-    )
-    lines.append(
-        f'- **GPU baseline declared / measured**: {n_gpu_named} / '
-        f'{n_gpu_measured} (of {n_total})'
-    )
-    lines.append(
-        f'- **wins (ratio < 1) against CPU / GPU baselines**: '
-        f'{n_cpu_wins} / {n_gpu_wins}'
+        '- **performance**: see the nitrix-perf-bench suite + dashboard '
+        '(this matrix is capability-only).'
     )
     return '\n'.join(lines)
 
 
-def render_json(
-    cells: list[CellResult],
-    host: dict,
-    perf_data: dict[tuple[str, str], float],
-) -> str:
+def render_json(cells: list[CellResult], host: dict) -> str:
     out = {
         'host': host,
-        # Perf for ops in MIGRATED_TO_PERFBENCH lives in nitrix-perf-bench;
-        # their perf_* fields below are null with a 'perf_source' pointer.
-        'perf_note': 'perf is migrating to nitrix-perf-bench (the perf suite '
-                     '+ hosted dashboard); migrated ops carry perf_source '
-                     'instead of in-tree ratios',
+        # Capability-only; performance lives in the nitrix-perf-bench suite.
+        'perf_source': 'nitrix-perf-bench',
         'ops': [],
     }
     for c in cells:
-        short = c.op.qualname.split('.')[-1]
-        migrated = short in MIGRATED_TO_PERFBENCH
         out['ops'].append({
             'qualname': c.op.qualname,
             'jit': c.jit,
             'grad': c.grad,
             'vmap': c.vmap,
             'jit_of_grad': c.jit_of_grad,
-            'perf_cpu_baseline':
-                'nitrix-perf-bench' if migrated else c.op.perf_cpu_baseline,
-            'perf_cpu_ratio':
-                None if migrated else perf_data.get((short, 'cpu')),
-            'perf_gpu_baseline':
-                'nitrix-perf-bench' if migrated else c.op.perf_gpu_baseline,
-            'perf_gpu_ratio':
-                None if migrated else perf_data.get((short, 'gpu')),
-            **({'perf_source': 'nitrix-perf-bench'} if migrated else {}),
             'invariants': list(c.op.invariants),
             'notes': c.op.notes,
         })
@@ -1508,14 +1194,12 @@ def main():
                 grad='not-run',
                 vmap='not-run',
                 jit_of_grad='not-run',
-                perf_ratio=None,
             ))
 
     host = host_snapshot()
-    perf_data = load_perf_data()
 
-    md = render_markdown(cells, host, perf_data)
-    js = render_json(cells, host, perf_data)
+    md = render_markdown(cells, host)
+    js = render_json(cells, host)
 
     (docs_dir / 'op_matrix.md').write_text(md)
     (docs_dir / 'op_matrix.json').write_text(js)
