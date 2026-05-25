@@ -321,6 +321,45 @@ sklearn), which are mechanical now that the perf harness exists;
 `PERF_SEMIRING_CONV`, `PERF_LOBPCG`, `PERF_TRILINEAR`,
 `MEM_STREAMING_KERNEL`, `G0_ELL_REPORT` are the rest.
 
+**Migration status (perf-bench).**  PERF_AUDIT: all 13 ops ported.
+`PERF_SEMIRING_CONV`: ported (`semiring_conv` case).
+**`PERF_LOBPCG`: intentionally NOT migrated** -- `lobpcg_top_k_*`
+is a *private* kernel (`nitrix.graph._lobpcg_diff`, no public op /
+no op_matrix cell), and the report is an implicit-VJP perf + HLO
+*scaling-correctness* study (the "no O(n^2) materialisation"
+audit), which does not fit perf-bench's public-op / forward-ratio
+model and has no HLO-shape metric there.  Keep PERF_LOBPCG (esp.
+the no-n^2 HLO audit) as a nitrix-side study/test; it is out of the
+op-matrix migration's scope.  `PERF_TRILINEAR`: folded into the
+existing `spatial_transform` case (it benchmarks the same op) -- 3-D
+points + an explicit 2^ndim-corner gather baseline (the
+shipped-vs-explicit kernel-decision comparison); its fwd+bwd
+timing is a gradient cost outside the forward-case model.
+`G0_ELL_REPORT`: ported (`semiring_ell_matmul` case -- nitrix-jax
+vs scipy.sparse @ dense for REAL + the non-real algebras; the
+"Pallas falls back to JAX on Ampere" policy is a nitrix-side
+fact, not a perf-bench ratio).
+**`MEM_STREAMING_KERNEL`: intentionally NOT migrated.**  It is a
+*memory-scaling / leak* study for `semiring_matmul` (already a
+case), not a forward ratio; its core finding (streaming peak HBM
+<< the naive O(M*K*N) materialisation) is **already captured** by
+that case's `peak_hbm` metric -- measured streaming 5.8/23 MB
+(nitrix-jax/pallas) vs naive-dense 85/73 MB at 256/512 log on the
+A10G.  Its unique parts (the per-call HBM *delta* leak-check and
+the analytical M*K*N floor) are memory-correctness checks that
+don't fit perf-bench's per-attempt-HWM model; keep them as a
+nitrix study/test.
+
+**Bench-report migration COMPLETE.**  Every `bench/PERF_*` /
+`bench/G0_*` / `bench/MEM_*` report is either ported to a
+nitrix-perf-bench case or intentionally kept nitrix-side
+(`PERF_LOBPCG`, `MEM_STREAMING_KERNEL`).  `MIGRATED_TO_PERFBENCH`
+covers every public op that had an in-tree perf number.
+**Final step (this repo):** drop the op_matrix `perf_*` columns +
+`load_perf_data` + the `bench/PERF_*` scrapers, and retire
+`bench/` (its perf now lives in nitrix-perf-bench; the LOBPCG /
+MEM_STREAMING studies move to tests).
+
 **Trigger.** Incremental + opportunistic: port an op when it is
 touched or when its perf becomes decision-relevant; do the final
 column-strip once `MIGRATED_TO_PERFBENCH` covers the catalogue.  Or

@@ -34,8 +34,12 @@ filter every channel independently with the same weight, so they are
 per-unit invariant.  Differentiable through the signal and JIT-friendly
 (the weight is data-independent; ``fs`` / cut-offs / ``order`` are static).
 
-IIR (recursive Butterworth) filtering is a separate primitive
-(``iir_filter``), not yet shipped.
+**Recursive IIR** filtering -- the genuine Butterworth (poles, bilinear
+transform, second-order sections) -- is ``iir_filter`` / ``butterworth_sos``
+/ ``sosfilt`` / ``sosfiltfilt``, re-exported here from ``_iir``.  Unlike the
+``ftype='maxflat'`` magnitude window above, these are real recursive filters
+with the Butterworth phase (or zero-phase via ``filtfilt``), validated to
+machine precision against ``scipy.signal``.
 """
 from __future__ import annotations
 
@@ -47,6 +51,7 @@ from jaxtyping import Array, Float, Num
 
 from ..linalg.residual import residualise
 from ..stats.fourier import product_filter
+from ._iir import butterworth_sos, iir_filter, sosfilt, sosfiltfilt
 
 __all__ = [
     'polynomial_detrend',
@@ -54,6 +59,10 @@ __all__ = [
     'bandstop',
     'lowpass',
     'highpass',
+    'iir_filter',
+    'butterworth_sos',
+    'sosfilt',
+    'sosfiltfilt',
 ]
 
 

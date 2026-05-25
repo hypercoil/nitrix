@@ -4,11 +4,14 @@
 > 1-D temporal convolution, **two interpolation primitives** (linear
 > via associative-scan, Lomb-Scargle via joint-GLM with the
 > boundary-discontinuity bug from the legacy implementation
-> fixed and verified by regression test), and the Lomb-Scargle
-> periodogram for spectral analysis of irregular samples.
-> ``nitrix.numerics`` ships shape / layout utilities (re-exporting
-> the externally-useful subset of ``_internal.util``) plus
-> intensity-normalisation primitives.
+> fixed and verified by regression test), the Lomb-Scargle
+> periodogram for spectral analysis of irregular samples, and
+> **two filter families** (zero-phase frequency-domain band/notch/
+> low/high-pass, and a genuine recursive Butterworth IIR designed
+> from scratch and validated to machine precision against
+> ``scipy.signal``).  ``nitrix.numerics`` ships shape / layout
+> utilities (re-exporting the externally-useful subset of
+> ``_internal.util``) plus intensity-normalisation primitives.
 
 ## `signal.linear_interpolate`: associative-scan reformulation
 
@@ -165,6 +168,123 @@ degrees), then call ``linalg.residualise`` with it.  The rescale
 matters for ``degree > 5``; at the typical fMRI degrees 1-3 it's
 defensive but not load-bearing.
 
+## `signal.filter`: frequency-domain and recursive-IIR filters
+
+Two filtering families requested by `bitsjax` (`bits.signal.bandpass`,
+`bits.signal.iir_filter`); both are SPEC §4.3 primitives.  Neither ports
+the rejected hypercoil `nn/freqfilter.py` / `nn/iirfilter.py`.
+
+**Frequency-domain (`bandpass` / `bandstop` / `lowpass` / `highpass`).**
+A real magnitude weight on the rfft grid, applied via
+`stats.fourier.product_filter` (one rfft + multiply + irfft).  Because a
+real mask is a circular convolution with its inverse DFT, this is a
+**zero-phase, frequency-sampled FIR** -- explicitly *not* a recursive
+filter.  Designs: `'maxflat'` (the Butterworth *magnitude* shape
+`1/sqrt(1+(f/fc)^{2n})`, named so it is not mistaken for a real
+Butterworth), `'ideal'` (brick wall), `'cosine'` (raised-cosine edges).
+`bandstop` is the notch (soft-union of low-/high-pass), whose canonical use
+is removing the respiratory peak from head-motion estimates.  Per-channel,
+differentiable, JIT-friendly.
+
+**Recursive Butterworth (`iir_filter` / `butterworth_sos` / `sosfilt` /
+`sosfiltfilt`).**  A genuine IIR: analog poles → frequency transform →
+bilinear → second-order sections, designed **from scratch in NumPy** (no
+runtime scipy, SPEC §5.2) and validated to machine precision against
+`scipy.signal.butter`/`sosfilt`/`sosfiltfilt`.  The design is a static host
+constant; only the *application* is traced.  Two application engines:
+`backend='scan'` (sequential `lax.scan`, one fused loop, low memory --
+**default**, and benchmarked fastest in the many-channel fMRI regime:
+~18 ms for 50 000 voxels × 300 TR on an A10G) and `backend='associative'`
+(the `lax.associative_scan` parallel-prefix linear-recurrence pattern,
+`O(log T)` depth, for latency-bound long single series -- slower at fMRI
+throughput, so not the default).  `sosfiltfilt` is zero-phase
+forward-backward with scipy-exact steady-state initial conditions
+(`lfilter_zi`-equivalent) and odd padding.  Reverse-mode differentiable
+through the signal.
+
+### Recursive-filter theory, briefly
+
+An IIR (infinite-impulse-response) filter is *recursive*: the output
+depends on past **outputs**, ``y[n] = Σ b_k x[n-k] - Σ a_k y[n-k]``, so its
+transfer function ``H(z) = B(z)/A(z)`` is rational.  The roots of ``A`` are
+the **poles** (the feedback / resonance; they must lie inside the unit
+circle for stability), the roots of ``B`` the **zeros**.  The impulse
+response never fully dies (hence "infinite") -- the opposite of the FIR
+frequency-domain filters above, which have finite support and only touch
+past *inputs*.  The payoff is steep roll-off from very few coefficients;
+the cost is a non-linear, frequency-dependent phase.
+
+**Butterworth** is the all-pole prototype with a *maximally-flat* passband:
+``|H(jω)|² = 1 / (1 + (ω/ω_c)^{2N})``, whose ``N`` analog poles sit equally
+spaced on a circle in the left half ``s``-plane (monotonic magnitude, no
+ripple, ``6N`` dB/octave roll-off).  Design proceeds analog → digital:
+
+1. **Prototype** (`_buttap`): the unit-circle poles of the order-``N``
+   analog low-pass.
+2. **Frequency transform** (`_lp2lp/_lp2hp/_lp2bp/_lp2bs`): move/reshape the
+   prototype to the requested band.  Band-pass / band-stop map each pole to
+   two and add zeros, doubling the order to ``2N``.
+3. **Bilinear transform** (`_bilinear`): the conformal map
+   ``s = 2 f_s (z-1)/(z+1)`` from the analog plane to the unit disk, which
+   preserves stability.  It warps frequency by a ``tan``, so the cut-offs
+   are **pre-warped** (``warped = 2 f_s tan(π W_n / f_s)``) to land exactly
+   where requested after warping.
+4. **Second-order sections** (`_zpk2sos`): factor the order-``2N`` rational
+   into a cascade of biquads.  This is not cosmetic -- a single high-order
+   ``B(z)/A(z)`` has coefficients spanning many orders of magnitude and
+   tightly clustered poles, so direct-form evaluation loses catastrophic
+   precision; cascaded biquads keep every factor well-scaled (the reason
+   scipy defaults to SOS).  The *pairing* of poles and zeros into sections
+   affects only conditioning, not the transfer function; we use a simple
+   conjugate pairing (adequate at these orders) and verify via the
+   pairing-invariant frequency response.
+
+Application is the transposed-Direct-Form-II recurrence (two delay
+registers per biquad, cascaded).  **Zero phase** matters because a causal
+IIR imposes a frequency-dependent group delay that smears event timing;
+`filtfilt` runs the filter forward then on the time-reversed signal, whose
+phase responses are exact negatives and cancel -- leaving zero phase and a
+*squared* magnitude (so attenuation doubles and the effective ``-3`` dB
+point shifts, a documented consequence).  **Initial conditions** matter
+because a filter started from a silent state "rings up" with a startup
+transient; `_sos_zi` sets the delay registers to the steady state for the
+signal's edge value so there is no transient (scipy `lfilter_zi`).
+
+### Matching scipy exactly: the process
+
+`scipy.signal` is the reference but a **test-only** dependency (SPEC §5.2),
+so the runtime is pure NumPy + JAX and scipy is the oracle in `test_iir.py`.
+We aligned by **decomposing the pipeline** and validating each stage on its
+own -- debugging a blind end-to-end `filtfilt` mismatch is otherwise
+hopeless:
+
+1. **Design** -- compare the **frequency response** ``|H(e^{jω})|`` of our
+   SOS to scipy's, *not* the coefficients: valid pairings differ but the
+   transfer function is identical.  Matched to ``~1e-15`` first, before any
+   filtering code existed.
+2. **Forward apply** -- our `sosfilt` (zero state) vs `scipy.sosfilt`: same
+   recurrence, **exact** (``0.0``).
+3. **Zero-phase** -- `sosfiltfilt` vs `scipy.sosfiltfilt`, exact only after
+   three hard-won subtleties surfaced (each with a localising symptom):
+
+   - **`zi` formula.** The first attempt used the DC steady state
+     (``y = dc_gain · x``); fine for low-pass but wrong for band-pass /
+     band-stop, whose DC gain is ``≈ 0`` -> ``zi ≈ 0`` -> transients leak in
+     (symptom: band-pass interior off by ``~1e-2`` while low-pass was fine).
+     Fix: scipy's companion-matrix solve ``(I - Aᵀ) zi = B``, valid at any
+     DC gain.
+   - **Odd padding.** The right-edge odd extension was double-reversed
+     (scipy's slice already reverses via ``step=-1``).  Symptom: ``~0.5``
+     error concentrated at the edges *while forward+zi was exact* -- which
+     is what localised the bug to the pad/flip, not the recurrence.
+   - **`padlen`.** scipy shrinks ``ntaps = 2·n_sections + 1`` by the number
+     of first-order sections (``min`` count of zero ``b2`` / ``a2``), so
+     odd-order filters pad less.  Symptom: *only* odd-order `filtfilt`
+     mismatched; even orders were already exact.
+
+   With all three fixed, `sosfiltfilt` matches `scipy.sosfiltfilt` to
+   machine precision across every band type and order tested.
+
 ## `signal.tsconv`
 
 Thin batched wrapper around ``lax.conv_general_dilated`` for the
@@ -211,13 +331,17 @@ weighted variants.
 
 ## Cross-references
 
-- ``src/nitrix/signal/{window, filter, tsconv, interpolate,
-  lomb_scargle}.py``.
+- ``src/nitrix/signal/{window, filter, _iir, tsconv, interpolate,
+  lomb_scargle}.py`` (``_iir`` re-exported through ``filter``).
 - ``src/nitrix/numerics/{tensor_ops, normalize}.py``.
-- ``tests/test_signal.py``, ``tests/test_signal_interpolate.py``,
-  ``tests/test_numerics.py``.
+- ``tests/test_signal.py``, ``tests/test_signal_filter.py`` (frequency-
+  domain), ``tests/test_iir.py`` (recursive Butterworth, scipy parity),
+  ``tests/test_signal_interpolate.py``, ``tests/test_numerics.py``.
 - [`linalg.md`](linalg.md) -- the ``residualise`` consumer used by
   ``polynomial_detrend``.
+- ``stats.fourier.product_filter`` -- the rfft-multiply engine the
+  frequency-domain filters apply their magnitude weight through.
+- ``bitsjax`` feature requests N1 (band-pass) and N2 (IIR), now satisfied.
 - Power, J. D. et al. (2014). NeuroImage 84, 320-341 -- the
   Lomb-Scargle interpolation protocol.
 - Scargle, J. D. (1982). Astrophys. J. 263, 835-853 -- the
