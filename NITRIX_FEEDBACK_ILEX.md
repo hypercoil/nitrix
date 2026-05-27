@@ -422,6 +422,59 @@ B. **At minimum, document the gotcha** in the `ell_edge.py` GATv2 example: add t
 
 Option A is the discoverable fix (GAT is the headline ELL-edge consumer); B is the floor. Both are additive — no change to existing `semiring_ell_edge_aggregate` callers.
 
+### 2026-05-27 — Nyul-Udupa landmark histogram matching (BME-X)
+
+**Severity.** BLOCKING-for-usability (the BME-X port ships structurally bit-correct against the upstream PyTorch forward, but the published model's recon head produces all-zero output on naively-normalised T1 input for 8 of 15 variants — including both adult-applicable ones, month24-t1 and month24-t2. The upstream's pipeline applies a per-age histogram-matching pre-step that brings the input distribution into the network's trained operating point; without it, the model is a no-op in practice). nitrix has the related N3/N4 histogram **sharpening** primitive but no histogram **matching** primitive — they're different algorithms despite the similar names.
+
+**What surfaced this.** Porting BME-X (Sun et al., NBME 2025, `DBC-Lab/Brain_MRI_Enhancement`). The parity oracle passed: JAX vs upstream PyTorch agree to ~5e-5 max abs on seg and 0.0–5e-5 on recon for the variants tested. But an empirical scan over uniform[0,1], uniform[0,5], "brain-range" gaussian, and a central 32^3 patch of `cvs_avg35_inMNI152/mri/T1.mgz` (real MNI-space adult T1) showed Month24-T1's recon head returning **all zeros** across every input class tried. Diagnosis: the recon head ends in `Conv3d(112→1) → BatchNorm3d(1) → ReLU`, and the BN running mean/var + bias for several variants put the post-BN value below 0 for any input that doesn't match the training intensity distribution. The upstream's `BME_X/BME_X_enhanced.py` performs `sitk.HistogramMatchingImageFilter` against an age-specific reference image (`BME_X/Templates/`) **before** patching — this remapping is what unlocks the recon head.
+
+**What's actually different / why the current surface misses it.**
+
+* `nitrix.bias._sharpen.sharpen_histogram` is the N3 Wiener histogram **sharpener**: it 1-D-FFT-deconvolves an image's *own* histogram against a Gaussian kernel to crispen contrast inside that image. It does not remap to a reference — there is no second image involved.
+* `nitrix.numerics.normalize.{zscore_normalize, robust_zscore_normalize, intensity_normalize, psc_normalize}` are all **single-image statistical normalisations** (mean / std / median / percentile-based linear rescales). None of them carry the reference image's CDF.
+* `nitrix.bias.{n4_bias_field_correction, bias_field_correction}` perform per-image multiplicative-field estimation; the histogram sharpening inside them is the N3 step, not a reference-driven remap.
+* The Nyul-Udupa algorithm (Nyul & Udupa 1999, "On Standardizing the MR Image Intensity Scale", IEEE TMI) picks N landmarks at chosen percentiles on the source CDF and the reference CDF, then applies a **piecewise-linear** mapping from source-landmark intensities to reference-landmark intensities, with linear extrapolation outside the landmark range. ITK's `HistogramMatchingImageFilter` is the canonical reference implementation; BME-X uses it with `NumberOfHistogramLevels=1024`, `NumberOfMatchPoints=7`, `ThresholdAtMeanIntensityOn` (only voxels with intensity above the source mean contribute to the source histogram).
+
+**Workaround (what BME-X ships today).** The BME-X v0 commit (`ilex-import` `4182beb`) is "partial": the network forward is shipped + parity-validated, but the BMEX pipeline is deferred and the recon head is documented as unusable on naively-normalised input for the adult variants. The next move in the BME-X port is to land `ilex.models.bme_x.pipeline` that calls `sitk.HistogramMatchingImageFilter` directly (the per-port `pyproject.toml` already depends on `SimpleITK>=2.3`), with a `TODO(nitrix-graduation)` note pointing at this entry. Once nitrix lands a JAX-native equivalent, the ilex pipeline swaps the sitk call for the nitrix import; the SimpleITK dep can then drop unless the rest of the BMEX pipeline (resample / brain-extraction / sliding-window aggregation) keeps needing it.
+
+**Parity target (for a nitrix implementation).** Match `sitk.HistogramMatchingImageFilter` with the same three knobs at the BME-X call site (`NumberOfHistogramLevels=1024`, `NumberOfMatchPoints=7`, `ThresholdAtMeanIntensityOn=True`). The algorithm itself is documented in the ITK source (`Modules/Filtering/ImageIntensity/include/itkHistogramMatchingImageFilter.hxx`); the only subtlety is that ITK's "match points" are placed at evenly-spaced quantiles of the **above-mean** intensity range on both source and reference, then a piecewise-linear interpolant maps source-intensity at landmark $i$ → reference-intensity at landmark $i$. Below-mean source voxels pass through unchanged (the threshold gate). A reasonable parity test fixture: a small (32^3 or smaller) synthetic image pair where both source and reference have known closed-form CDFs (e.g., uniform vs gaussian), validated against `sitk` to absolute tolerance ~1e-5 on the output intensities.
+
+**Proposed fix.** API surface for a nitrix implementation, sketched:
+
+```python
+def histogram_match(
+    source: Float[Array, '*spatial'],
+    reference: Float[Array, '*spatial'],
+    *,
+    n_match_points: int = 7,
+    n_histogram_levels: int = 1024,
+    threshold_at_mean: bool = True,
+    extrapolate: Literal['clip', 'linear'] = 'linear',
+) -> Float[Array, '*spatial']:
+    """Remap ``source`` intensities so that its CDF matches ``reference``'s.
+
+    Nyul-Udupa landmark matching: pick ``n_match_points`` evenly-
+    spaced-quantile landmarks on both CDFs, then apply a piecewise-
+    linear interpolant. With ``threshold_at_mean=True``, only above-
+    source-mean voxels contribute to the source histogram and the
+    landmark search (the ITK convention). ``extrapolate`` controls
+    voxels outside the source-landmark range: 'linear' continues the
+    end-segment slope (ITK default), 'clip' saturates at the extreme
+    reference landmark.
+    """
+```
+
+**XLA risk that this might run into (flagged by the consumer up front).** Nyul-Udupa is "integer-programming-esque" — landmark identification needs quantile estimation on the source / reference histograms, which is `jnp.quantile` (fine), and a per-voxel piecewise-linear lookup via `jnp.searchsorted` + `jnp.interp` (also fine). The pieces that need care:
+
+* **`threshold_at_mean` masking** is dynamic-shape: the source-mean threshold filters which voxels contribute to the source histogram. The histogram itself can stay static-shape (`n_histogram_levels` bins are fixed at trace time), but the contributing voxels need a `jnp.where`-style mask + a histogram built with weights = mask. That's static-shape and jit-friendly — but the test author has to write it that way rather than via boolean indexing.
+* **Quantile interpolation mode.** ITK uses linear interpolation on the bin-center intensities; reproducing this requires `jnp.quantile(..., method='linear')` semantics and careful handling at the bin boundaries. `jnp.quantile`'s default `method='linear'` already matches.
+* **Per-voxel piecewise-linear apply.** `jnp.interp(source.ravel(), src_landmarks, ref_landmarks)` is the idiom; `jnp.interp` handles extrapolation via the `left=` / `right=` kwargs.
+* **No control flow on values is needed.** The algorithm decomposes into vectorised reductions + a single interp; that's the discoverable XLA-friendly form. The "integer-programming" risk is more about *naive* implementations that scatter to landmark bins via Python loops (would not jit); the vectorised quantile + interp form sidesteps it.
+
+If nitrix concludes the algorithm is fundamentally too XLA-pathological after a build attempt — possible, but the vectorised path above is plausible — the alternative is to **document the gotcha** for ilex consumers: nitrix won't host histogram matching, ilex bme_x (and any future port needing Nyul-Udupa) will continue calling `sitk.HistogramMatchingImageFilter` from its per-port venv. The decision rests with the nitrix maintainers; this entry records the consumer's need and the parity target so the design conversation has both.
+
+A related stretch option: a nitrix-native `histogram_match` would compose naturally with the existing `nitrix.bias.n4_bias_field_correction` pipeline (N4 → histogram_match against a reference template) as a one-call "intensity standardise" recipe for downstream FM consumers. Not a v0 requirement, but worth noting that the lift unlocks composition with the existing bias-correction surface.
+
 ## Resolved findings
 
 Commit references land on merge; until then each entry points at the resolving
