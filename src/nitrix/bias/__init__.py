@@ -17,19 +17,28 @@ Two public entry points:
   estimators for new / internal pipelines where ANTs bit-compatibility is
   not required).
 
-Plus two reusable substrate primitives the above are built from:
+Plus three reusable substrate primitives the above are built from
+(``bspline_approximate`` / ``sharpen_histogram``) or compose with
+naturally (``histogram_match``):
 
 - ``bspline_approximate`` -- separable cubic B-spline scattered-data
   approximation on a regular grid (MBA, least-squares, or P-spline fit),
   a fast differentiable smoother for any "fit a smooth low-DOF surface to
   a noisy grid" task (registration fields, surface fitting).
-- ``sharpen_histogram`` -- N3 / N4 Wiener log-histogram deconvolution.
+- ``sharpen_histogram`` -- N3 / N4 Wiener log-histogram deconvolution
+  (single-image histogram de-blurring).
+- ``histogram_match`` -- Nyul-Udupa landmark histogram matching (Nyul &
+  Udupa 1999): remap a source image's intensities so its CDF matches a
+  reference image's, ITK-faithful to
+  ``HistogramMatchingImageFilter``.  Composes with N4 as an "N4 then
+  match to a reference template" intensity-standardise recipe.
 
 See ``docs/design/bias-field.md`` for the derivation, the parity-vs-
 correctness discussion, and the "no Pallas needed" rationale.
 """
 
 from ._bspline import bspline_approximate
+from ._histogram_match import histogram_match
 from ._sharpen import sharpen_histogram
 from .correction import bias_field_correction
 from .n4 import n4_bias_field_correction
@@ -39,4 +48,5 @@ __all__ = [
     'bias_field_correction',
     'bspline_approximate',
     'sharpen_histogram',
+    'histogram_match',
 ]

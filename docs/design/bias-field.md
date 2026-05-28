@@ -153,6 +153,45 @@ FFTs on a static power-of-two buffer, so it JITs cleanly and is cheap.
 The bin count, FWHM, Wiener noise, power-of-two zero-pad and Parzen split
 mirror ITK's ``SharpenImage`` for parity.
 
+## Histogram matching (Nyul-Udupa, ITK parity)
+
+``histogram_match`` is the cross-image companion to
+``sharpen_histogram`` and is **not** the same algorithm despite the
+similar name.  Sharpening deconvolves one image's histogram against a
+Gaussian PSF; matching remaps one image's intensities so its CDF lines
+up with a *different* image's.  The latter is the Nyul-Udupa landmark
+algorithm (Nyul & Udupa 1999, "On Standardizing the MR Image Intensity
+Scale", IEEE TMI), faithful to ITK's
+``HistogramMatchingImageFilter``: build a fixed-resolution histogram of
+each image, locate ``n_match_points`` landmarks at evenly-spaced
+quantile positions on each CDF via cumulative-sum + ``searchsorted``
+with sub-bin linear interpolation, then apply
+``jnp.interp(source.ravel(), src_landmarks, ref_landmarks)``.
+
+Two design choices are load-bearing for ITK parity:
+
+- **Outer landmarks are the actual image extrema** ``(image.min(),
+  image.max())``.  Any source voxel lies inside that range by
+  construction, so the apply is interpolation-only -- there is no
+  "extrapolation regime" to choose between (the API does not expose
+  one, in deliberate contrast to the consumer's original proposal).
+- ``threshold_at_mean=True`` (the ITK default) does **two** things,
+  not one: it restricts match-point identification to above-mean
+  voxels **and** inserts the image mean as an additional landmark
+  between the lower extremum and the first match point.  Below-mean
+  voxels are then interpolated across the
+  ``(image.min(), image.mean())`` segment rather than lumped into the
+  above-mean ladder.
+
+The composition with N4 -- ``corrected = n4_bias_field_correction(x); 
+standardised = histogram_match(corrected, template)`` -- gives a
+one-call intensity-standardise recipe useful for downstream
+foundation-model consumers (e.g. ilex's BME-X port, which was the
+2026-05-27 driving consumer).  Like ``sharpen_histogram``, the op is
+not differentiable through the bin assignment (piecewise constant in
+source values); the apply is differentiable through reference
+landmarks via ``jnp.interp``'s autograd.
+
 ## Parity vs correctness: the field-fit estimators
 
 ### The neuroimaging stakes: smooth shading vs sharp anatomy

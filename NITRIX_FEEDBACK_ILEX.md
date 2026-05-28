@@ -424,6 +424,8 @@ Option A is the discoverable fix (GAT is the headline ELL-edge consumer); B is t
 
 ### 2026-05-27 — Nyul-Udupa landmark histogram matching (BME-X)
 
+> **RESOLVED (2026-05-27)** — see "Resolved findings" below.
+
 **Severity.** BLOCKING-for-usability (the BME-X port ships structurally bit-correct against the upstream PyTorch forward, but the published model's recon head produces all-zero output on naively-normalised T1 input for 8 of 15 variants — including both adult-applicable ones, month24-t1 and month24-t2. The upstream's pipeline applies a per-age histogram-matching pre-step that brings the input distribution into the network's trained operating point; without it, the model is a no-op in practice). nitrix has the related N3/N4 histogram **sharpening** primitive but no histogram **matching** primitive — they're different algorithms despite the similar names.
 
 **What surfaced this.** Porting BME-X (Sun et al., NBME 2025, `DBC-Lab/Brain_MRI_Enhancement`). The parity oracle passed: JAX vs upstream PyTorch agree to ~5e-5 max abs on seg and 0.0–5e-5 on recon for the variants tested. But an empirical scan over uniform[0,1], uniform[0,5], "brain-range" gaussian, and a central 32^3 patch of `cvs_avg35_inMNI152/mri/T1.mgz` (real MNI-space adult T1) showed Month24-T1's recon head returning **all zeros** across every input class tried. Diagnosis: the recon head ends in `Conv3d(112→1) → BatchNorm3d(1) → ReLU`, and the BN running mean/var + bias for several variants put the post-BN value below 0 for any input that doesn't match the training intensity distribution. The upstream's `BME_X/BME_X_enhanced.py` performs `sitk.HistogramMatchingImageFilter` against an age-specific reference image (`BME_X/Templates/`) **before** patching — this remapping is what unlocks the recon head.
@@ -534,3 +536,23 @@ surface (functions / files) and the deviation-log date in
   MoNet / plain GCN omit them), so a bundled default would re-create the silent-
   default footgun this finding is about — revisit on demonstrated demand, or host
   the GAT composition downstream (a `nimox` ELLGAT module).
+
+- **2026-05-27 — Nyul-Udupa landmark histogram matching (BME-X).**
+  RESOLVED (2026-05-27). `nitrix.bias.histogram_match(source, reference, *,
+  source_weight=None, reference_weight=None, n_match_points=7,
+  n_histogram_levels=1024, threshold_at_mean=True)` shipped in
+  `nitrix/bias/_histogram_match.py`, ITK-faithful to
+  `HistogramMatchingImageFilter` (live SITK parity test passes at well under
+  1e-3 of the reference intensity range, mean diff ~1e-5). Two refinements
+  vs. the consumer's API sketch: (1) **no `extrapolate=` kwarg** — the outer
+  landmarks are the actual `image.min()` / `image.max()` (matching ITK), so
+  the apply is interpolation-only by construction and the "linear vs clip
+  extrapolation outside the source range" distinction never fires for a
+  source-and-reference pair (the consumer's description of ITK's default was
+  off; ITK clips at the actual data extrema, it doesn't slope-continue);
+  (2) **explicit `source_weight` / `reference_weight`** alongside
+  `threshold_at_mean` so consumers can pass a brain mask without losing the
+  ITK-style mean-threshold default. Composes with `n4_bias_field_correction`
+  as a one-call N4-then-standardise recipe (see `docs/design/bias-field.md`
+  "Histogram matching" section). The BME-X port can now drop its SimpleITK
+  dependency from the per-port venv.
