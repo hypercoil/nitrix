@@ -1,11 +1,20 @@
 # Doc-fix: public ops missing from the op_matrix inventory
 
-> **Status (2026-06-02): open — inventory-correctness fix (not a primitive
-> proposal; the ops exist and ship).** Provenance: surfaced shipping
-> `nitrix-perf-bench` cases; ledger context in
-> [`perf-bench-feedback.md`](perf-bench-feedback.md), and it directly touches
-> the op_matrix migration tracked in [`perfbench-migration.md`](perfbench-migration.md)
-> (B11).
+> **Status (2026-06-02): RESOLVED — and the full inventory re-run the request
+> recommended is done.** The 3 named ops plus **75 further uncataloged public
+> functions** (a full `__all__`-vs-catalogue diff found the matrix covered only
+> 59 of ~163 ops) were added to `tools/op_matrix.py`; the matrix regenerated to
+> **137 ops** (jit 122/137, grad 119/121 — the two N4 cells fail `grad` as
+> flagged below). A **completeness guard** (`tests/test_op_matrix_completeness.py`)
+> now fails CI if any public op is neither cataloged nor on an explicit EXCLUDE
+> allowlist (aliases / reference impls / matvec closures / shape helpers / metric
+> constructors), so the inventory cannot silently rot again. Also fixed a
+> pre-existing stale `bilateral_gaussian` fixture (`sigma_features` → v0.4
+> `metric`) and a missing `signal.tsconv` export from `signal.__all__`. See
+> `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02 op-matrix entry). Provenance:
+> surfaced shipping `nitrix-perf-bench` cases; ledger context in
+> [`perf-bench-feedback.md`](perf-bench-feedback.md); part of the op_matrix
+> migration tracked in [`perfbench-migration.md`](perfbench-migration.md) (B11).
 
 The public-surface inventory in `docs/op_matrix.json` (`ops` list, 59 entries)
 is **incomplete**: three shipping public ops have no entry, so perf-bench

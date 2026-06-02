@@ -1,11 +1,11 @@
 {
   "host": {
-    "device": "NVIDIA A10G (gpu)",
-    "platform": "Linux-6.1.161-183.298.amzn2023.x86_64-x86_64-with-glibc2.39",
-    "jax_version": "0.10.0",
-    "timestamp": "2026-05-24T01:50:14Z"
+    "device": "cpu (cpu)",
+    "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
+    "jax_version": "0.10.1",
+    "timestamp": "2026-06-02T23:10:24Z"
   },
-  "perf_note": "perf is migrating to nitrix-perf-bench (the perf suite + hosted dashboard); migrated ops carry perf_source instead of in-tree ratios",
+  "perf_source": "nitrix-perf-bench",
   "ops": [
     {
       "qualname": "nitrix.linalg.symmetric",
@@ -13,10 +13,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "idempotent on symmetric input"
       ],
@@ -28,10 +24,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "strict upper triangle only",
         "custom_vjp"
@@ -44,10 +36,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "mirrors upper triangle",
         "custom_vjp"
@@ -60,10 +48,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "vmap-over-roll recipe"
       ],
@@ -75,10 +59,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "PSD-preserving"
       ],
@@ -90,10 +70,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "numpy.linalg.lstsq",
-      "perf_cpu_ratio": 0.0,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "Cholesky-normal-equations"
       ],
@@ -105,10 +81,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "sklearn.metrics.pairwise.linear_kernel",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "shared with linear_distance via identity formula"
       ],
@@ -120,10 +92,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "sklearn.metrics.pairwise_distances",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "|x-y|^2 = |x|^2 + |y|^2 - 2 x.y identity (O(nm) memory)"
       ],
@@ -135,10 +103,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "sklearn.metrics.pairwise.rbf_kernel",
-      "perf_cpu_ratio": 0.0,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "exp(-gamma * |x-y|^2)"
       ],
@@ -150,10 +114,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.linalg.logm",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "SPEC 4.1 stability rewrite",
         "eigvalue-clip threshold"
@@ -166,10 +126,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.linalg.sqrtm",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "eigvalue-clip threshold"
       ],
@@ -181,10 +137,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.linalg.fractional_matrix_power",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "arbitrary real power via eigh"
       ],
@@ -196,10 +148,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "closed-form Frechet mean on log-Euclidean metric"
       ],
@@ -211,10 +159,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "numpy.cov",
-      "perf_cpu_ratio": 0.01,
-      "perf_gpu_baseline": "jnp.cov",
-      "perf_gpu_ratio": null,
       "invariants": [
         "complex-Hermitian preserved",
         "np.cov parity at fp64"
@@ -227,10 +171,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "numpy.corrcoef",
-      "perf_cpu_ratio": 0.01,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "diagonal=1",
         "complex-Hermitian preserved"
@@ -243,10 +183,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "precision-matrix-derived"
       ],
@@ -258,10 +194,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "inverse of cov"
       ],
@@ -273,10 +205,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.signal.hilbert",
-      "perf_cpu_ratio": 0.38,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "vectorised Hilbert mask",
         "scipy.signal.hilbert parity"
@@ -289,10 +217,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.signal.hilbert (.imag)",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "imag part of analytic_signal"
       ],
@@ -304,10 +228,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "numpy.abs(scipy.signal.hilbert)",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "|analytic_signal|"
       ],
@@ -319,10 +239,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "statsmodels.MixedLM",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "FaST-LMM spectral rotation",
         "no V*N^2 intermediate"
@@ -335,10 +251,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "statsmodels.WLS (voxelwise loop)",
-      "perf_cpu_ratio": 0.0,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "single-parameter REML (identifiability)",
         "shared X_group"
@@ -351,10 +263,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.interpolate.interp1d",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "associative_scan (O(log n) parallel)",
         "no while_loop"
@@ -367,10 +275,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "joint-GLM (passes through observed)",
         "shared-Gram across voxels",
@@ -384,10 +288,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.signal.lombscargle",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "Scargle 1982 normalisation",
         "scipy.lombscargle parity"
@@ -400,10 +300,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.signal.detrend (poly)",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "rescaled Vandermonde (stability)",
         "routes through residualise"
@@ -416,10 +312,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.signal.convolve",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "lax.conv_general_dilated (raw)",
-      "perf_gpu_ratio": null,
       "invariants": [
         "thin lax.conv_general_dilated wrapper"
       ],
@@ -431,10 +323,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.stats.zscore",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "zero mean, unit std per axis"
       ],
@@ -446,10 +334,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "percentile-clip to [0, 1]"
       ],
@@ -461,10 +345,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "amplitude / phase split"
       ],
@@ -476,10 +356,6 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "shape-static constructor"
       ],
@@ -491,10 +367,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.ndimage.map_coordinates",
-      "perf_cpu_ratio": 0.06,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "mode pass-through to map_coordinates",
         "accepts leading batch"
@@ -507,10 +379,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "scaling-and-squaring",
         "default mode='nearest' (voxelmorph)"
@@ -523,10 +391,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "explicit det for d<=3",
         "no cuSolver call"
@@ -539,10 +403,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "pole-flip + W/2 roll",
         "longitudinal wrap"
@@ -555,10 +415,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.sparse.csgraph.laplacian",
-      "perf_cpu_ratio": 0.41,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "symmetric / random_walk / combinatorial variants"
       ],
@@ -570,10 +426,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "dense / ELL / SectionedELL dispatch"
       ],
@@ -585,10 +437,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "sklearn.manifold.SpectralEmbedding",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "safe_eigh cuSolver fallback",
         "LOBPCG implicit-VJP for sparse paths"
@@ -601,10 +449,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.ndimage.grey_dilation",
-      "perf_cpu_ratio": 0.15,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MAX_PLUS specialisation"
       ],
@@ -616,10 +460,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.ndimage.grey_erosion",
-      "perf_cpu_ratio": 0.14,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MIN_PLUS specialisation"
       ],
@@ -631,10 +471,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.ndimage.distance_transform_edt",
-      "perf_cpu_ratio": 1.27,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "iterative TROPICAL_MIN_PLUS",
         "chamfer (not exact EDT)"
@@ -647,10 +483,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.ndimage.median_filter",
-      "perf_cpu_ratio": 0.03,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "gather + nanmedian (not a semiring op)"
       ],
@@ -662,10 +494,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "torch.nn.MaxPool3d (return_indices)",
-      "perf_gpu_ratio": null,
       "invariants": [
         "global flat C-order argmax indices",
         "window-unfold + argmax composition"
@@ -678,10 +506,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "torch.nn.MaxUnpool3d",
-      "perf_gpu_ratio": null,
       "invariants": [
         "vmapped per-channel scatter",
         "argmax-agreement parity (not raw-logit allclose)"
@@ -694,10 +518,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.ndimage.gaussian_filter",
-      "perf_cpu_ratio": 0.03,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "separable n-D",
         "scipy.ndimage parity at fp64"
@@ -710,12 +530,9 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
-        "semiring_ell_matmul over feature adjacency"
+        "semiring_ell_matmul over feature adjacency",
+        "factored FeatureMetric (DiagonalMetric here)"
       ],
       "notes": ""
     },
@@ -725,11 +542,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "nitrix-perf-bench",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "nitrix-perf-bench",
-      "perf_gpu_ratio": null,
-      "perf_source": "nitrix-perf-bench",
       "invariants": [
         "streaming kernel (no O(MKN) materialisation)",
         "Pallas/JAX fallback"
@@ -742,10 +554,6 @@
       "grad": "pass",
       "vmap": "n/a",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.sparse @ dense",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "sparse ELL matmul"
       ],
@@ -757,11 +565,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "nitrix-perf-bench",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "nitrix-perf-bench",
-      "perf_gpu_ratio": null,
-      "perf_source": "nitrix-perf-bench",
       "invariants": [
         "gather + nested vmap + semiring reduction",
         "REAL / TROPICAL_MAX_PLUS / TROPICAL_MIN_PLUS supported",
@@ -775,10 +578,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": "scipy.ndimage.convolve",
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": "cuDNN fp32 (precision=highest)",
-      "perf_gpu_ratio": 1.78,
       "invariants": [
         "NaN-safe patch extraction (jnp.take, not lax.conv_general_dilated_patches)",
         "explicit im2col + semiring_matmul"
@@ -791,10 +590,6 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "host-side ELL construction"
       ],
@@ -806,10 +601,6 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "regular-grid stencil",
         "scipy.ndimage.laplace parity"
@@ -822,10 +613,6 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "BFS k-ring on triangle mesh",
         "host-side construction"
@@ -838,10 +625,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MAX_PLUS with zero values",
         "composes semiring_ell_matmul"
@@ -854,10 +637,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "TROPICAL_MAX_PLUS symmetric of mesh_pool_max"
       ],
@@ -869,10 +648,6 @@
       "grad": "pass",
       "vmap": "pass",
       "jit_of_grad": "pass",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "REAL semiring_ell_matmul (weighted sum)"
       ],
@@ -884,10 +659,6 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "recursive subdivision with midpoint cache",
         "parent-child bookkeeping for cross-level helpers"
@@ -900,10 +671,6 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "coarse-to-fine ELL from subdivision parents",
         "k_max = 1 + max_coarse_degree (6 at L=0->1, 7 at L>=1)"
@@ -916,15 +683,870 @@
       "grad": "n/a",
       "vmap": "n/a",
       "jit_of_grad": "n/a",
-      "perf_cpu_baseline": null,
-      "perf_cpu_ratio": null,
-      "perf_gpu_baseline": null,
-      "perf_gpu_ratio": null,
       "invariants": [
         "fine-from-coarse ELL with bary weights (1, 0) or (0.5, 0.5)",
         "k_max = 2"
       ],
       "notes": "consecutive-level only; feeds mesh_bary_upsample"
+    },
+    {
+      "qualname": "nitrix.linalg.symexp",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "matrix exponential via eigh"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.symmap",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "apply a scalar fn to eigenvalues"
+      ],
+      "notes": "probed with fn=tanh; eigh-based, routes through safe_eigh"
+    },
+    {
+      "qualname": "nitrix.linalg.tangent_project_spd",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "affine-invariant log map at reference (not log-Euclidean)"
+      ],
+      "notes": "log(R^-1/2 X R^-1/2); composes sympower(-1/2)+symlog"
+    },
+    {
+      "qualname": "nitrix.linalg.cone_project_spd",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "projection onto the SPD cone at a reference"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.mean_euclidean",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Euclidean (arithmetic) mean over an SPD batch"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.squareform",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "square <-> condensed conversion"
+      ],
+      "notes": "probed vec->square (jit-safe); the square->vec direction branches on a jnp.allclose symmetry check (not jit-safe -- use sym2vec)"
+    },
+    {
+      "qualname": "nitrix.linalg.toeplitz",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Toeplitz matrix from its first column"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.delete_diagonal",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "zero the diagonal"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.fill_diagonal",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "set the diagonal to a constant"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.gaussian_kernel",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "exp(-|x-y|^2) Gaussian / RBF family"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.polynomial_kernel",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "(gamma <x,y> + r)^order"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.sigmoid_kernel",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "tanh(gamma <x,y> + r)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.cosine_kernel",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "normalised inner-product kernel"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.parameterised_norm",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "theta-weighted row norm"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.partialcorr",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "partial correlation (precision-normalised)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.conditionalcov",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "covariance of X conditioned on Y"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.conditionalcorr",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "correlation of X conditioned on Y"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.pairedcov",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "cross-covariance between X and Y"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.pairedcorr",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "cross-correlation between X and Y"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.product_filter",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "frequency-domain product filter (rfft multiply)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.product_filtfilt",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "zero-phase product_filter (forward + reverse)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.instantaneous_phase",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "phase of the analytic signal"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.instantaneous_frequency",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "time-derivative of instantaneous phase"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.env_inst",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "envelope + instantaneous phase/frequency (Hilbert)"
+      ],
+      "notes": "returns a 3-tuple; grad probe reduces the first leaf"
+    },
+    {
+      "qualname": "nitrix.signal.lowpass",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "maxflat IIR low-pass"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.highpass",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "maxflat IIR high-pass"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.bandpass",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "maxflat IIR band-pass"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.bandstop",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "maxflat IIR band-stop"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.iir_filter",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "generic IIR (design + apply)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.sosfilt",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "second-order-sections IIR (causal)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.sosfiltfilt",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "zero-phase second-order-sections IIR"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.butterworth_sos",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "host-side Butterworth SOS design (returns np.ndarray)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.signal.sample_windows",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "random fixed-size windowed sampling"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.complex_recompose",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "ampl, phase -> complex (inverse of complex_decompose)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.demean",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "subtract the mean along an axis"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.percentile_rescale",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "shift by p_lo, scale by p_hi, clip to [0, 1]"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.psc_normalize",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "percent signal change vs the mean"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.robust_zscore_normalize",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "median / MAD robust z-score"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.resample",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "align-corners linear resize"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.spherical_geodesic_distance",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "great-circle (geodesic) distance on the sphere"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.jacobian_displacement",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "central-difference Jacobian of a displacement field"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.center_of_mass_grid",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "weighted centre of mass on a regular grid"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.cartesian_to_latlong",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Cartesian -> (lat, long)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.latlong_to_cartesian",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "(lat, long) -> Cartesian on the sphere"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.center_of_mass_points",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "weighted centre of mass over a point cloud"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.compactness_penalty",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "spatial dispersion penalty around the CoM"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.displacement_from_reference_grid",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "CoM displacement from a reference (grid)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.displacement_from_reference_points",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "CoM displacement from a reference (points)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.spherical_conv",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "geodesic-neighbourhood conv via semiring_ell_matmul"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.sphere_grid_unpad_2d",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "inverse of sphere_grid_pad_2d"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.graph.girvan_newman_null",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "degree-product (configuration) null model"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.graph.modularity_matrix",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "B = A - gamma * null"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.graph.coaffiliation",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "community co-affiliation C C^T"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.graph.relaxed_modularity",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "relaxed (continuous) modularity objective"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.graph.diffusion_embedding",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "diffusion-map embedding",
+        "safe_eigh fallback"
+      ],
+      "notes": "returns (vectors, values); grad probe reduces the first leaf"
+    },
+    {
+      "qualname": "nitrix.morphology.open",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "erode then dilate (TROPICAL opening)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.morphology.close",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "dilate then erode (TROPICAL closing)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.smoothing.susan_emulator",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "bilateral_gaussian + median composition"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.smoothing.brute_force_knn",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "pass",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "brute-force k-NN indices (integer output)"
+      ],
+      "notes": "returns Int indices -> non-differentiable"
+    },
+    {
+      "qualname": "nitrix.smoothing.spatial_cube_neighbourhood",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "host-side grid-box neighbour index construction"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.semiring.ell_row_softmax",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "row-wise softmax over ELL neighbours; masks pads"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.ell_to_dense",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "ELL -> dense materialisation"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.ell_mask",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "annihilator-masked edges (jnp.where)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.ell_pad",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "pad ragged rows to k_max with identity"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.ell_add_self_loops",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "append (i, i) self-edge per row"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.mesh_coarsen_meanpool",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "mean-pool sibling of mesh_pool_max (validity-weighted)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.sectioned_semiring_ell_matmul",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "bucketed (variable-degree) ELL matmul"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.icosphere",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "host-side icosphere subdivision (returns Mesh)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.grid_identity",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "identity ELL over a regular grid"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.regular_grid_stencil",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "regular-grid stencil -> ELL"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.mesh_cotangent_laplacian",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "cotangent-weight Laplacian -> ELL"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.sectioned_ell_from_ragged",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "ragged rows -> bucketed SectionedELL"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.icosphere_hierarchy_from_levels",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "package caller-supplied meshes + parents into a hierarchy"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.bias.histogram_match",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Nyul-Udupa landmark histogram match"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.bias.sharpen_histogram",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Wiener histogram deconvolution (N4 inner step)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.bias.bspline_approximate",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "separable B-spline least-squares approximation"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.bias.n4_bias_field_correction",
+      "jit": "pass",
+      "grad": "ValueError: Reverse-mode differentiation does not work for lax.while_loop or lax.fori_loop with dynamic start/stop values. Try using",
+      "vmap": "n/a",
+      "jit_of_grad": "ValueError: Reverse-mode differentiation does not work for lax.while_loop or lax.fori_loop with dynamic start/stop values. Try using",
+      "invariants": [
+        "iterative B-spline N4 (lax.while_loop; reverse-grad unsupported)"
+      ],
+      "notes": "grad expected to FAIL: while_loop has no reverse-mode rule"
+    },
+    {
+      "qualname": "nitrix.bias.bias_field_correction",
+      "jit": "pass",
+      "grad": "ValueError: Reverse-mode differentiation does not work for lax.while_loop or lax.fori_loop with dynamic start/stop values. Try using",
+      "vmap": "n/a",
+      "jit_of_grad": "ValueError: Reverse-mode differentiation does not work for lax.while_loop or lax.fori_loop with dynamic start/stop values. Try using",
+      "invariants": [
+        "dispatcher over correction methods (N4 default)"
+      ],
+      "notes": "method=n4 -> grad FAIL (while_loop)"
     }
   ]
 }

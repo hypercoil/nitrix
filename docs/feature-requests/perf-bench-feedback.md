@@ -25,7 +25,8 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `lomb_scargle_interpolate` silently runs eigh on CPU (cuSolver-broken stacks) | [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` | normal |
 | `tsconv` documented as "convolution" but is cross-correlation | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` | low (clarity) |
 | `lomb_scargle_interpolate` intended-use (spectral bridge, not durable imputation) | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` | normal |
-| public ops missing from op_matrix inventory: `tangent_project_spd`, `histogram_match`, `n4_bias_field_correction` (block perf-bench coverage credit) | [doc-op-matrix-inventory-gaps](doc-op-matrix-inventory-gaps.md) | `docs/op_matrix.json` (`ops`) | normal |
+
+_(All open findings above resolved 2026-06-02 — see below.)_
 
 ## Resolved
 
@@ -41,6 +42,4 @@ carries a scipy-parity regression test). See `IMPLEMENTATION_PLAN.md §10.3`
 | `safe_eigh` CPU-routing caveat | [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | "Device placement" Notes added |
 | `lomb_scargle_interpolate` intended use | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | "Intended use" Notes added |
 | `tsconv` cross-correlation | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | Notes clarification added |
-
-(The `doc-op-matrix-inventory-gaps` finding above is a separate op-matrix
-inventory item, still open.)
+| op_matrix inventory gaps | [doc-op-matrix-inventory-gaps](doc-op-matrix-inventory-gaps.md) | full inventory re-run: catalogue 59 → 137 ops; completeness-guard test added; `signal.tsconv` export + stale `bilateral_gaussian` fixture fixed |

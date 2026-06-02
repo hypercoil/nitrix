@@ -53,4 +53,5 @@ __all__ = [
     'sample_windows',
     'sosfilt',
     'sosfiltfilt',
+    'tsconv',
 ]

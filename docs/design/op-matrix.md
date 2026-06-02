@@ -84,6 +84,25 @@ first cut; tracked under ``open questions``.
 3. Rerun ``python tools/op_matrix.py``; the regenerated
    ``docs/op_matrix.md`` should include the new row.
 
+**Completeness is enforced.** ``tests/test_op_matrix_completeness.py``
+diffs every subpackage ``__all__`` against the catalogue and fails if
+any public op is neither cataloged nor on its explicit ``EXCLUDE``
+allowlist (legacy aliases, ``reference_*`` impls, ``*_matvec`` closures,
+shape/layout helpers, metric constructors -- none of which warrant a
+perf-bench baseline).  So a **new public op must either get an
+``OpInfo`` entry or be added to ``EXCLUDE`` with a rationale** -- the
+matrix can no longer silently fall behind the surface (the failure mode
+that produced ``docs/feature-requests/doc-op-matrix-inventory-gaps.md``).
+Membership in the matrix is also the signal to ``nitrix-perf-bench`` to
+add a baseline, which is why the allowlist exclusions are deliberate.
+
+Ops that legitimately fail a transform are recorded **honestly**, not
+forced green: e.g. ``bias.n4_bias_field_correction`` shows ``grad`` ❌
+because its iterative fit uses ``lax.while_loop`` (no reverse-mode rule);
+host-side constructors (``icosphere``, ``regular_grid_stencil``, …) are
+``skip_jit`` (the whole row is —).  Container-in/out ops (ELL → ELL) are
+probed through their differentiable array via an ``fn_override`` closure.
+
 ## What the probes cannot catch
 
 - **Semantic correctness**: a cell can be all-green and still

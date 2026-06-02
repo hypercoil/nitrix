@@ -1149,6 +1149,47 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   pure-functional surfaces; golden/parity/regression tests added; the deprecated
   `identity=` path stays functional (no silent break).
 
+### 2026-06-02 — Op-matrix completeness: catalogue all public ops + anti-rot guard
+
+- **Type:** Tooling / coverage completion.
+- **Triggered by:** `docs/feature-requests/doc-op-matrix-inventory-gaps.md` — the
+  perf-bench coverage join is keyed on the op-matrix inventory, and a full
+  `__all__`-vs-catalogue diff found the matrix covered only **59 of ~163**
+  public functions (the request named 3; the real deficit was ~64%).
+- **Description.** Expanded `tools/op_matrix.py` from 59 to **137 cataloged
+  ops** (78 new `OpInfo` entries, core ops only). Scope agreed with the
+  requester: catalogue membership signals perf-bench to add a baseline, so the
+  **EXCLUDE allowlist** (26 callables) deliberately omits legacy aliases (7
+  geometry + 4 stats `"Alias for X"` wrappers), `reference_*` impls, `*_matvec`
+  closures, shape/layout helpers, metric constructors, and the
+  `spatial_transform_batched` thin wrapper; the 20 type/container/constant
+  symbols are auto-dropped by a "callable & not a class" filter. Container-arg
+  ops (ELL/Mesh — not registered pytrees) are probed through their
+  differentiable array via `fn_override` closures; host-side constructors are
+  `skip_jit`. Added a **completeness-guard test**
+  (`tests/test_op_matrix_completeness.py`) that fails CI if any public op is
+  neither cataloged nor on the EXCLUDE allowlist — the durable fix so the
+  inventory cannot silently rot again. Regenerated `docs/op_matrix.{json,md}`
+  (CPU host snapshot).
+- **Honest red cells (not forced green):** `bias.n4_bias_field_correction` /
+  `bias_field_correction` fail `grad` / `jit(grad)` — the iterative N4 fit uses
+  `lax.while_loop` (no reverse-mode rule), exactly as the request flagged; the
+  *intended* status is forward-only and is now recorded. Final matrix: jit
+  122/137 (15 `skip_jit` constructors are n/a), grad 119/121, vmap 94/94.
+- **Incidental fixes surfaced by the pass:** (a) `signal.tsconv` was imported
+  into `nitrix.signal` but missing from its `__all__` — added. (b) the cataloged
+  `smoothing.bilateral_gaussian` fixture still used the pre-v0.4 `sigma_features`
+  kwarg (removed when the bounded bilateral took a factored `metric`) — updated
+  to `DiagonalMetric`. (c) `linalg.squareform`'s square→vec direction branches
+  on a `jnp.allclose` symmetry check (not jit-safe); the jit-safe vec→square
+  direction is probed with a note (the docstring already steers callers to
+  `sym2vec`/`vec2sym`).
+- **Verification:** completeness guard green (3 tests); generator runs clean (0
+  fixture failures); `signal/__init__.py` ruff-clean. `tools/` and `tests/` are
+  outside the `mypy src/nitrix` gate.
+- **Non-negotiables held:** no new runtime deps; capability-only matrix (perf
+  stays in nitrix-perf-bench); failures recorded honestly, not suppressed.
+
 ---
 
 ## 11. Notes on agent / engineer handoff

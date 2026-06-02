@@ -689,19 +689,27 @@ register(OpInfo(
     fixture=lambda: ((jax.random.normal(_key(), (16, 16)),), {'sigma': 1.5}),
     invariants=('separable n-D', 'scipy.ndimage parity at fp64'),
 ))
-register(OpInfo(
-    'nitrix.smoothing.bilateral_gaussian',
-    fixture=lambda: (
+def _bilateral_fixture():
+    # v0.4 replaced the diagonal ``sigma_features`` kwarg with a factored
+    # ``metric: FeatureMetric`` (DiagonalMetric == the old diagonal case).
+    from nitrix.smoothing import DiagonalMetric
+    return (
         (
             jax.random.normal(_key(0), (32, 1)),
             jax.random.normal(_key(1), (32, 2)),
         ),
         {
-            'sigma_features': jnp.asarray([1.0, 1.0]),
+            'metric': DiagonalMetric(jnp.asarray([1.0, 1.0])),
             'neighbourhood': 8,
         },
-    ),
-    invariants=('semiring_ell_matmul over feature adjacency',),
+    )
+
+
+register(OpInfo(
+    'nitrix.smoothing.bilateral_gaussian',
+    fixture=_bilateral_fixture,
+    invariants=('semiring_ell_matmul over feature adjacency',
+                'factored FeatureMetric (DiagonalMetric here)'),
 ))
 
 # --- semiring ---------------------------------------------------------------
@@ -989,6 +997,634 @@ register(OpInfo(
         'k_max = 2',
     ),
     notes='consecutive-level only; feeds mesh_bary_upsample',
+))
+
+
+# ===========================================================================
+# Inventory-completeness pass (2026-06-02).  Catalogue the remaining public
+# ops so the matrix matches the surface.  Guarded by
+# tests/test_op_matrix_completeness.py (which also holds the EXCLUDE allowlist
+# for the ops deliberately left out -- aliases, reference impls, matvec
+# closures, shape helpers, metric constructors).
+# ===========================================================================
+
+
+def _spd(d: int = 5, seed: int = 0):
+    '''A small SPD matrix fixture input.'''
+    a = jax.random.normal(_key(seed), (d, d))
+    return a @ a.T + 0.5 * jnp.eye(d)
+
+
+def _sym_adj(n: int = 20, seed: int = 0):
+    '''A symmetric binary adjacency (zero diagonal).'''
+    rng = np.random.default_rng(seed)
+    a = (rng.random((n, n)) > 0.6).astype(np.float32)
+    a = np.triu(a, 1)
+    return jnp.asarray(a + a.T)
+
+
+# --- linalg (kernels, sym* family, structural) ------------------------------
+
+register(OpInfo(
+    'nitrix.linalg.symexp', fixture=lambda: ((_spd(5),), {}),
+    invariants=('matrix exponential via eigh',),
+))
+register(OpInfo(
+    'nitrix.linalg.symmap', fixture=lambda: ((_spd(5),), {'fn': jnp.tanh}),
+    invariants=('apply a scalar fn to eigenvalues',),
+    notes='probed with fn=tanh; eigh-based, routes through safe_eigh',
+))
+register(OpInfo(
+    'nitrix.linalg.tangent_project_spd',
+    fixture=lambda: ((_spd(5, 0), _spd(5, 1)), {}),
+    diff_arg=0, vmap_arg=0,
+    invariants=('affine-invariant log map at reference (not log-Euclidean)',),
+    notes='log(R^-1/2 X R^-1/2); composes sympower(-1/2)+symlog',
+))
+register(OpInfo(
+    'nitrix.linalg.cone_project_spd',
+    fixture=lambda: ((_spd(5, 0), _spd(5, 1)), {}),
+    diff_arg=0, vmap_arg=0,
+    invariants=('projection onto the SPD cone at a reference',),
+))
+register(OpInfo(
+    'nitrix.linalg.mean_euclidean',
+    fixture=lambda: ((jnp.stack([_spd(4, i) for i in range(3)]),), {}),
+    vmap_arg=None,
+    invariants=('Euclidean (arithmetic) mean over an SPD batch',),
+))
+register(OpInfo(
+    'nitrix.linalg.squareform', fixture=lambda: ((jnp.arange(1.0, 7.0),), {}),
+    invariants=('square <-> condensed conversion',),
+    notes='probed vec->square (jit-safe); the square->vec direction branches '
+          'on a jnp.allclose symmetry check (not jit-safe -- use sym2vec)',
+))
+register(OpInfo(
+    'nitrix.linalg.toeplitz', fixture=lambda: ((jnp.arange(1.0, 6.0),), {}),
+    invariants=('Toeplitz matrix from its first column',),
+))
+register(OpInfo(
+    'nitrix.linalg.delete_diagonal',
+    fixture=lambda: ((jax.random.normal(_key(), (5, 5)),), {}),
+    invariants=('zero the diagonal',),
+))
+register(OpInfo(
+    'nitrix.linalg.fill_diagonal',
+    fixture=lambda: ((jax.random.normal(_key(), (5, 5)),), {'fill': 1.0}),
+    invariants=('set the diagonal to a constant',),
+))
+register(OpInfo(
+    'nitrix.linalg.gaussian_kernel',
+    fixture=lambda: ((jax.random.normal(_key(), (40, 12)),), {}),
+    invariants=('exp(-|x-y|^2) Gaussian / RBF family',),
+))
+register(OpInfo(
+    'nitrix.linalg.polynomial_kernel',
+    fixture=lambda: ((jax.random.normal(_key(), (40, 12)),), {'order': 3}),
+    invariants=('(gamma <x,y> + r)^order',),
+))
+register(OpInfo(
+    'nitrix.linalg.sigmoid_kernel',
+    fixture=lambda: ((jax.random.normal(_key(), (40, 12)),), {}),
+    invariants=('tanh(gamma <x,y> + r)',),
+))
+register(OpInfo(
+    'nitrix.linalg.cosine_kernel',
+    fixture=lambda: ((jax.random.normal(_key(), (40, 12)),), {}),
+    invariants=('normalised inner-product kernel',),
+))
+register(OpInfo(
+    'nitrix.linalg.parameterised_norm',
+    fixture=lambda: ((jax.random.normal(_key(), (40, 12)),), {}),
+    invariants=('theta-weighted row norm',),
+))
+
+# --- stats (coefficients + DSP) ---------------------------------------------
+
+
+def _xy_fixture():
+    return ((jax.random.normal(_key(0), (5, 100)),
+             jax.random.normal(_key(1), (3, 100))), {})
+
+
+register(OpInfo(
+    'nitrix.stats.partialcorr',
+    fixture=lambda: ((jax.random.normal(_key(), (5, 100)),), {}),
+    invariants=('partial correlation (precision-normalised)',),
+))
+register(OpInfo(
+    'nitrix.stats.conditionalcov', fixture=_xy_fixture,
+    diff_arg=0, vmap_arg=0,
+    invariants=('covariance of X conditioned on Y',),
+))
+register(OpInfo(
+    'nitrix.stats.conditionalcorr', fixture=_xy_fixture,
+    diff_arg=0, vmap_arg=0,
+    invariants=('correlation of X conditioned on Y',),
+))
+register(OpInfo(
+    'nitrix.stats.pairedcov', fixture=_xy_fixture,
+    diff_arg=0, vmap_arg=0,
+    invariants=('cross-covariance between X and Y',),
+))
+register(OpInfo(
+    'nitrix.stats.pairedcorr', fixture=_xy_fixture,
+    diff_arg=0, vmap_arg=0,
+    invariants=('cross-correlation between X and Y',),
+))
+register(OpInfo(
+    'nitrix.stats.product_filter',
+    fixture=lambda: ((jax.random.normal(_key(0), (4, 100)), jnp.ones(51)), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('frequency-domain product filter (rfft multiply)',),
+))
+register(OpInfo(
+    'nitrix.stats.product_filtfilt',
+    fixture=lambda: ((jax.random.normal(_key(0), (4, 100)), jnp.ones(51)), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('zero-phase product_filter (forward + reverse)',),
+))
+register(OpInfo(
+    'nitrix.stats.instantaneous_phase',
+    fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
+    invariants=('phase of the analytic signal',),
+))
+register(OpInfo(
+    'nitrix.stats.instantaneous_frequency',
+    fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
+    invariants=('time-derivative of instantaneous phase',),
+))
+register(OpInfo(
+    'nitrix.stats.env_inst',
+    fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
+    invariants=('envelope + instantaneous phase/frequency (Hilbert)',),
+    notes='returns a 3-tuple; grad probe reduces the first leaf',
+))
+
+# --- signal (IIR family + windowing) ----------------------------------------
+
+
+def _sig_x():
+    return jax.random.normal(_key(), (4, 100))
+
+
+_IDENTITY_SOS = np.array([[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]])
+
+register(OpInfo(
+    'nitrix.signal.lowpass', fixture=lambda: ((_sig_x(),), {'cutoff': 0.2}),
+    diff_arg=0, vmap_arg=0, invariants=('maxflat IIR low-pass',),
+))
+register(OpInfo(
+    'nitrix.signal.highpass', fixture=lambda: ((_sig_x(),), {'cutoff': 0.2}),
+    diff_arg=0, vmap_arg=0, invariants=('maxflat IIR high-pass',),
+))
+register(OpInfo(
+    'nitrix.signal.bandpass',
+    fixture=lambda: ((_sig_x(),), {'lo': 0.1, 'hi': 0.3}),
+    diff_arg=0, vmap_arg=0, invariants=('maxflat IIR band-pass',),
+))
+register(OpInfo(
+    'nitrix.signal.bandstop',
+    fixture=lambda: ((_sig_x(),), {'lo': 0.1, 'hi': 0.3}),
+    diff_arg=0, vmap_arg=0, invariants=('maxflat IIR band-stop',),
+))
+register(OpInfo(
+    'nitrix.signal.iir_filter',
+    fixture=lambda: ((_sig_x(),), {'btype': 'lowpass', 'hi': 0.2}),
+    diff_arg=0, vmap_arg=0, invariants=('generic IIR (design + apply)',),
+))
+register(OpInfo(
+    'nitrix.signal.sosfilt',
+    fixture=lambda: ((_sig_x(),), {'sos': _IDENTITY_SOS}),
+    diff_arg=0, vmap_arg=0,
+    invariants=('second-order-sections IIR (causal)',),
+))
+register(OpInfo(
+    'nitrix.signal.sosfiltfilt',
+    fixture=lambda: ((_sig_x(),), {'sos': _IDENTITY_SOS}),
+    diff_arg=0, vmap_arg=0,
+    invariants=('zero-phase second-order-sections IIR',),
+))
+register(OpInfo(
+    'nitrix.signal.butterworth_sos',
+    fixture=lambda: ((), {'order': 2, 'btype': 'lowpass', 'hi': 0.2}),
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('host-side Butterworth SOS design (returns np.ndarray)',),
+))
+register(OpInfo(
+    'nitrix.signal.sample_windows',
+    fixture=lambda: ((jax.random.normal(_key(), (8, 64)),),
+                     {'window_size': 16, 'key': _key(0)}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('random fixed-size windowed sampling',),
+))
+
+# --- numerics (normalize tail + complex recompose) --------------------------
+
+register(OpInfo(
+    'nitrix.numerics.complex_recompose',
+    fixture=lambda: ((jax.random.normal(_key(0), (20,)),
+                      jax.random.normal(_key(1), (20,))), {}),
+    diff_arg=0, vmap_arg=0,
+    invariants=('ampl, phase -> complex (inverse of complex_decompose)',),
+    reducer=lambda x: jnp.sum(jnp.abs(x) ** 2),
+))
+register(OpInfo(
+    'nitrix.numerics.demean',
+    fixture=lambda: ((jax.random.normal(_key(), (5, 100)),), {}),
+    invariants=('subtract the mean along an axis',),
+))
+register(OpInfo(
+    'nitrix.numerics.percentile_rescale',
+    fixture=lambda: ((jax.random.normal(_key(), (1000,)) * 10 + 50,), {}),
+    invariants=('shift by p_lo, scale by p_hi, clip to [0, 1]',),
+))
+register(OpInfo(
+    'nitrix.numerics.psc_normalize',
+    fixture=lambda: ((jnp.abs(jax.random.normal(_key(), (5, 100))) + 5,), {}),
+    invariants=('percent signal change vs the mean',),
+))
+register(OpInfo(
+    'nitrix.numerics.robust_zscore_normalize',
+    fixture=lambda: ((jax.random.normal(_key(), (5, 100)),), {}),
+    invariants=('median / MAD robust z-score',),
+))
+
+# --- geometry (resample, sphere, coords) ------------------------------------
+
+register(OpInfo(
+    'nitrix.geometry.resample',
+    fixture=lambda: ((jax.random.normal(_key(), (8, 8, 2)),),
+                     {'target_shape': (4, 4)}),
+    diff_arg=0, vmap_arg=None, invariants=('align-corners linear resize',),
+))
+register(OpInfo(
+    'nitrix.geometry.spherical_geodesic_distance',
+    fixture=lambda: ((jax.random.normal(_key(), (8, 3)),), {}),
+    invariants=('great-circle (geodesic) distance on the sphere',),
+))
+register(OpInfo(
+    'nitrix.geometry.jacobian_displacement',
+    fixture=lambda: ((jax.random.normal(_key(), (8, 8, 2)) * 0.1,), {}),
+    invariants=('central-difference Jacobian of a displacement field',),
+))
+register(OpInfo(
+    'nitrix.geometry.center_of_mass_grid',
+    fixture=lambda: ((jnp.abs(jax.random.normal(_key(), (8, 8))),), {}),
+    invariants=('weighted centre of mass on a regular grid',),
+))
+register(OpInfo(
+    'nitrix.geometry.cartesian_to_latlong',
+    fixture=lambda: ((jax.random.normal(_key(), (10, 3)),), {}),
+    invariants=('Cartesian -> (lat, long)',),
+))
+register(OpInfo(
+    'nitrix.geometry.latlong_to_cartesian',
+    fixture=lambda: ((jax.random.normal(_key(), (10, 2)) * 0.5,), {}),
+    invariants=('(lat, long) -> Cartesian on the sphere',),
+))
+register(OpInfo(
+    'nitrix.geometry.center_of_mass_points',
+    fixture=lambda: ((jnp.abs(jax.random.normal(_key(0), (2, 10))),
+                      jax.random.normal(_key(1), (10, 3))), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('weighted centre of mass over a point cloud',),
+))
+register(OpInfo(
+    'nitrix.geometry.compactness_penalty',
+    fixture=lambda: ((jnp.abs(jax.random.normal(_key(0), (2, 10))),
+                      jax.random.normal(_key(1), (10, 3))), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('spatial dispersion penalty around the CoM',),
+))
+register(OpInfo(
+    'nitrix.geometry.displacement_from_reference_grid',
+    fixture=lambda: ((jnp.abs(jax.random.normal(_key(0), (8, 8))),
+                      jnp.asarray([3.5, 3.5])), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('CoM displacement from a reference (grid)',),
+))
+register(OpInfo(
+    'nitrix.geometry.displacement_from_reference_points',
+    fixture=lambda: ((jnp.abs(jax.random.normal(_key(0), (2, 10))),
+                      jax.random.normal(_key(1), (2, 3)),
+                      jax.random.normal(_key(2), (10, 3))), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('CoM displacement from a reference (points)',),
+))
+register(OpInfo(
+    'nitrix.geometry.spherical_conv',
+    fixture=lambda: ((jax.random.normal(_key(0), (12, 2)),
+                      jax.random.normal(_key(1), (12, 3))),
+                     {'sigma': 1.0, 'neighbourhood': 6}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('geodesic-neighbourhood conv via semiring_ell_matmul',),
+))
+register(OpInfo(
+    'nitrix.geometry.sphere_grid_unpad_2d',
+    fixture=lambda: ((jax.random.normal(_key(), (6, 6)),), {'pad': 1}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('inverse of sphere_grid_pad_2d',),
+))
+
+# --- graph (modularity family + diffusion) ----------------------------------
+
+register(OpInfo(
+    'nitrix.graph.girvan_newman_null', fixture=lambda: ((_sym_adj(20),), {}),
+    invariants=('degree-product (configuration) null model',),
+))
+register(OpInfo(
+    'nitrix.graph.modularity_matrix', fixture=lambda: ((_sym_adj(20),), {}),
+    invariants=('B = A - gamma * null',),
+))
+register(OpInfo(
+    'nitrix.graph.coaffiliation',
+    fixture=lambda: ((jax.random.normal(_key(), (20, 4)),), {}),
+    invariants=('community co-affiliation C C^T',),
+))
+register(OpInfo(
+    'nitrix.graph.relaxed_modularity',
+    fixture=lambda: ((_sym_adj(20), jax.random.normal(_key(9), (20, 4))), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('relaxed (continuous) modularity objective',),
+))
+register(OpInfo(
+    'nitrix.graph.diffusion_embedding',
+    fixture=lambda: ((_sym_adj(32),), {'n_components': 3, 'solver': 'eigh'}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('diffusion-map embedding', 'safe_eigh fallback'),
+    notes='returns (vectors, values); grad probe reduces the first leaf',
+))
+
+# --- morphology (opening / closing) -----------------------------------------
+
+register(OpInfo(
+    'nitrix.morphology.open',
+    fixture=lambda: ((jax.random.normal(_key(), (10, 10)),), {'size': 3}),
+    invariants=('erode then dilate (TROPICAL opening)',),
+))
+register(OpInfo(
+    'nitrix.morphology.close',
+    fixture=lambda: ((jax.random.normal(_key(), (10, 10)),), {'size': 3}),
+    invariants=('dilate then erode (TROPICAL closing)',),
+))
+
+# --- smoothing (susan + knn + neighbourhood) --------------------------------
+
+register(OpInfo(
+    'nitrix.smoothing.susan_emulator',
+    fixture=lambda: ((jax.random.normal(_key(), (16, 16)),),
+                     {'sigma_space': 1.5, 'sigma_intensity': 0.5}),
+    invariants=('bilateral_gaussian + median composition',),
+))
+register(OpInfo(
+    'nitrix.smoothing.brute_force_knn',
+    fixture=lambda: ((jax.random.normal(_key(), (32, 3)),), {'k': 8}),
+    diff_arg=None, vmap_arg=0,
+    invariants=('brute-force k-NN indices (integer output)',),
+    notes='returns Int indices -> non-differentiable',
+))
+register(OpInfo(
+    'nitrix.smoothing.spatial_cube_neighbourhood',
+    fixture=lambda: (((8, 8),), {}),
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('host-side grid-box neighbour index construction',),
+))
+
+# --- semiring (ELL row softmax) ---------------------------------------------
+
+
+def _ell_row_softmax_setup():
+    from nitrix.semiring import ell_row_softmax
+    from nitrix.sparse import ELL
+    rng = np.random.default_rng(0)
+    n, k_max = 8, 4
+    idx = jnp.asarray(rng.integers(0, n, (n, k_max)).astype(np.int32))
+    ell = ELL(
+        values=jnp.asarray(rng.standard_normal((n, k_max)).astype(np.float32)),
+        indices=idx, n_cols=n, identity=0.0,
+    )
+
+    def op(scores):
+        return ell_row_softmax(scores, ell)
+
+    def fixture():
+        s = jnp.asarray(rng.standard_normal((n, k_max)).astype(np.float32))
+        return (s,), {}
+
+    return op, fixture
+
+
+_rowsoftmax_op, _rowsoftmax_fixture = _ell_row_softmax_setup()
+
+register(OpInfo(
+    'nitrix.semiring.ell_row_softmax',
+    fixture=_rowsoftmax_fixture, fn_override=_rowsoftmax_op,
+    diff_arg=0, vmap_arg=0,
+    invariants=('row-wise softmax over ELL neighbours; masks pads',),
+))
+
+# --- sparse (ELL transforms via fn_override; host-side constructors) --------
+
+
+def _sparse_array_setups():
+    '''ELL ops threaded through their differentiable array (values),
+    returning arrays so the standard probes apply.'''
+    from nitrix.semiring import REAL
+    from nitrix.sparse import (
+        ELL, ell_add_self_loops, ell_mask, ell_pad, ell_to_dense,
+    )
+    rng = np.random.default_rng(0)
+    n, k = 10, 4
+    idx = jnp.asarray(rng.integers(0, n, (n, k)).astype(np.int32))
+    valid = jnp.asarray(rng.random(n) > 0.3)
+
+    def mk(values):
+        return ELL(values=values, indices=idx, n_cols=n, identity=0.0)
+
+    def fixture():
+        v = jnp.asarray(rng.standard_normal((n, k)).astype(np.float32))
+        return (v,), {}
+
+    ops = {
+        'ell_to_dense': (lambda v: ell_to_dense(mk(v)),
+                         ('ELL -> dense materialisation',)),
+        'ell_mask': (lambda v: ell_mask(mk(v), valid, semiring=REAL).values,
+                     ('annihilator-masked edges (jnp.where)',)),
+        'ell_pad': (lambda v: ell_pad(v, idx, k_max=k + 2, n_cols=n).values,
+                    ('pad ragged rows to k_max with identity',)),
+        'ell_add_self_loops': (
+            lambda v: ell_add_self_loops(mk(v))[0].values,
+            ('append (i, i) self-edge per row',)),
+    }
+    return ops, fixture
+
+
+_sparse_ops, _sparse_fixture = _sparse_array_setups()
+for _sp_name, (_sp_op, _sp_inv) in _sparse_ops.items():
+    register(OpInfo(
+        f'nitrix.sparse.{_sp_name}', fixture=_sparse_fixture,
+        fn_override=_sp_op, diff_arg=0, vmap_arg=0, invariants=_sp_inv,
+    ))
+
+
+def _meanpool_setup():
+    from nitrix.sparse import (
+        icosphere_cross_level_adjacency, icosphere_hierarchy,
+        mesh_coarsen_meanpool,
+    )
+    rng = np.random.default_rng(0)
+    h = icosphere_hierarchy(max_level=1)
+    ell = icosphere_cross_level_adjacency(h, 0, 1)
+    n_fine = h.meshes[1].n_vertices
+
+    def op(x):
+        return mesh_coarsen_meanpool(ell, x)
+
+    def fixture():
+        return (jnp.asarray(
+            rng.standard_normal((n_fine, 3)).astype(np.float32)),), {}
+
+    return op, fixture
+
+
+_meanpool_op, _meanpool_fixture = _meanpool_setup()
+
+register(OpInfo(
+    'nitrix.sparse.mesh_coarsen_meanpool',
+    fixture=_meanpool_fixture, fn_override=_meanpool_op,
+    diff_arg=0, vmap_arg=0,
+    invariants=('mean-pool sibling of mesh_pool_max (validity-weighted)',),
+))
+
+
+def _sectioned_setup():
+    from nitrix.sparse import (
+        sectioned_ell_from_ragged, sectioned_semiring_ell_matmul,
+    )
+    rng = np.random.default_rng(0)
+    n = 12
+    degs = [2, 3, 2, 4, 1, 3, 2, 2, 3, 1, 2, 3]
+    vals = [jnp.asarray(rng.standard_normal(d).astype(np.float32)) for d in degs]
+    idxs = [jnp.asarray(rng.integers(0, n, d).astype(np.int32)) for d in degs]
+    sec = sectioned_ell_from_ragged(vals, idxs, n_cols=n)
+
+    def op(b):
+        return sectioned_semiring_ell_matmul(sec, b)
+
+    def fixture():
+        return (jnp.asarray(rng.standard_normal((n, 4)).astype(np.float32)),), {}
+
+    return op, fixture
+
+
+_sectioned_op, _sectioned_fixture = _sectioned_setup()
+
+register(OpInfo(
+    'nitrix.sparse.sectioned_semiring_ell_matmul',
+    fixture=_sectioned_fixture, fn_override=_sectioned_op,
+    diff_arg=0, vmap_arg=0,
+    invariants=('bucketed (variable-degree) ELL matmul',),
+))
+
+
+def _ico1_mesh():
+    from nitrix.sparse import icosphere
+    return icosphere(1)
+
+
+def _ragged_fixture():
+    rng = np.random.default_rng(0)
+    n = 12
+    degs = [2, 3, 2, 4, 1, 3, 2, 2, 3, 1, 2, 3]
+    vals = [jnp.asarray(rng.standard_normal(d).astype(np.float32)) for d in degs]
+    idxs = [jnp.asarray(rng.integers(0, n, d).astype(np.int32)) for d in degs]
+    return (vals, idxs), {'n_cols': n}
+
+
+def _hier_levels_fixture():
+    from nitrix.sparse import icosphere_hierarchy
+    h = icosphere_hierarchy(max_level=1)
+    return (h.meshes, h.parents), {}
+
+
+register(OpInfo(
+    'nitrix.sparse.icosphere', fixture=lambda: ((1,), {}),
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('host-side icosphere subdivision (returns Mesh)',),
+))
+register(OpInfo(
+    'nitrix.sparse.grid_identity', fixture=lambda: (((8, 8),), {}),
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('identity ELL over a regular grid',),
+))
+register(OpInfo(
+    'nitrix.sparse.regular_grid_stencil',
+    fixture=lambda: (((8, 8), [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]],
+                      jnp.full(5, 0.2)), {}),
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('regular-grid stencil -> ELL',),
+))
+register(OpInfo(
+    'nitrix.sparse.mesh_cotangent_laplacian',
+    fixture=lambda: ((_ico1_mesh(),), {}),
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('cotangent-weight Laplacian -> ELL',),
+))
+register(OpInfo(
+    'nitrix.sparse.sectioned_ell_from_ragged', fixture=_ragged_fixture,
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('ragged rows -> bucketed SectionedELL',),
+))
+register(OpInfo(
+    'nitrix.sparse.icosphere_hierarchy_from_levels',
+    fixture=_hier_levels_fixture,
+    diff_arg=None, vmap_arg=None, skip_jit=True,
+    invariants=('package caller-supplied meshes + parents into a hierarchy',),
+))
+
+# --- bias (N4 + Nyul-Udupa + B-spline) --------------------------------------
+
+
+def _bias_image():
+    return jnp.abs(jax.random.normal(_key(), (16, 16))) + 1.0
+
+
+register(OpInfo(
+    'nitrix.bias.histogram_match',
+    fixture=lambda: ((jax.random.normal(_key(0), (16, 16)),
+                      jax.random.normal(_key(1), (16, 16))), {}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('Nyul-Udupa landmark histogram match',),
+))
+register(OpInfo(
+    'nitrix.bias.sharpen_histogram', fixture=lambda: ((_bias_image(),), {}),
+    invariants=('Wiener histogram deconvolution (N4 inner step)',),
+))
+register(OpInfo(
+    'nitrix.bias.bspline_approximate',
+    fixture=lambda: ((jax.random.normal(_key(), (16, 16)),),
+                     {'control_points': 4}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('separable B-spline least-squares approximation',),
+))
+register(OpInfo(
+    'nitrix.bias.n4_bias_field_correction',
+    fixture=lambda: ((_bias_image(),),
+                     {'max_iterations': 2, 'n_fitting_levels': 1,
+                      'n_control_points': 4}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('iterative B-spline N4 (lax.while_loop; reverse-grad unsupported)',),
+    notes='grad expected to FAIL: while_loop has no reverse-mode rule',
+))
+register(OpInfo(
+    'nitrix.bias.bias_field_correction',
+    fixture=lambda: ((_bias_image(),),
+                     {'method': 'n4', 'max_iterations': 2,
+                      'n_fitting_levels': 1, 'n_control_points': 4}),
+    diff_arg=0, vmap_arg=None,
+    invariants=('dispatcher over correction methods (N4 default)',),
+    notes='method=n4 -> grad FAIL (while_loop)',
 ))
 
 
