@@ -25,6 +25,7 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `lomb_scargle_interpolate` silently runs eigh on CPU (cuSolver-broken stacks) | [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` | normal |
 | `tsconv` documented as "convolution" but is cross-correlation | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` | low (clarity) |
 | `lomb_scargle_interpolate` intended-use (spectral bridge, not durable imputation) | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` | normal |
+| `tangent_project_spd` missing from op_matrix inventory (public op; blocks perf-bench coverage credit) | [doc-op-matrix-missing-tangent](doc-op-matrix-missing-tangent.md) | `docs/op_matrix.json` (`ops`) | normal |
 
 ## Resolved
 

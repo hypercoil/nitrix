@@ -65,6 +65,7 @@ mechanical docstring fixes, not primitive proposals.
 | [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` |
 | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` |
 | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` |
+| [doc-op-matrix-missing-tangent](doc-op-matrix-missing-tangent.md) | `docs/op_matrix.json` (`ops`) |
 
 ## SPEC §12 brainstorm catalogue (candidate primitives)
 

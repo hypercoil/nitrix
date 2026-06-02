@@ -44,6 +44,13 @@ eventual `bench/` retirement.
 **Cross-refs.** `../nitrix-perf-bench/DESIGN.md` §6 + `src/nperf/cases/`;
 `tools/op_matrix.py` `MIGRATED_TO_PERFBENCH`; `bench/PERF_AUDIT.md`.
 
+**Inventory gap (tracked).** The public-surface inventory is not complete:
+`nitrix.linalg.tangent_project_spd` (in `__all__`) has **no `op_matrix.json`
+entry**, so a shipped perf-bench benchmark for it cannot be credited by
+`coverage_report.py` (the join is keyed on the inventory). Mechanical add of
+one entry — see [`doc-op-matrix-missing-tangent`](doc-op-matrix-missing-tangent.md).
+Re-running the public-surface inventory would catch any other omissions.
+
 ## Cross-references
 
 - [`internal-backlog.md`](internal-backlog.md) — the engineering-backlog
