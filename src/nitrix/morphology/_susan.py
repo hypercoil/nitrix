@@ -15,7 +15,7 @@ implemented; until it lands, ``susan_emulator`` raises a clear
 the impulse-noise half on its own) or at ``smoothing.gaussian`` (for
 the simple-Gaussian half on its own).  This matches the SPEC's
 "reserve the namespace; raise with a pointer until the dependency
-lands" pattern (cf. ``permutohedral_lattice``).
+lands" pattern.
 """
 from __future__ import annotations
 

@@ -2,37 +2,67 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Bilateral Gaussian smoothing via the semiring substrate.
+Bounded bilateral smoothing via the semiring substrate.
 
-Per SPEC_UPDATE §3.3 the marquee edge-preserving capability,
-delivered at GA regardless of permutohedral risk.  For each output
-position, gather the feature-space neighbourhood, weight by a
-Gaussian over the per-feature distance, normalise, and reduce via
-``semiring_ell_matmul`` with the REAL semiring.
+The marquee edge-preserving capability (SPEC §3.3): a true
+high-dimensional bilateral filter over a **bounded** neighbourhood.
+For each output position, gather the feature-space neighbourhood,
+weight by a Gaussian over a metric on feature space, normalise, and
+reduce via ``semiring_ell_matmul`` with the REAL semiring::
 
-Practical use case: multi-modal neuroimaging smoothing where
-``features`` contains spatial coordinates concatenated with one or
-two intensity / modality channels.  ``d_f ≤ 5`` and neighbourhoods
-up to ~7³ voxels are well-supported.
+    out[i, :] = (1 / Z[i]) * sum_p w[i, p] * values[neighbours[i, p], :]
+    w[i, p]   = exp(-1/2 * (f_i - f_j)^T M (f_i - f_j))    [j = neighbour p]
+    Z[i]      = sum_p w[i, p]
 
-The relationship to ``gaussian``: in the limit
-``sigma_features[intensity] -> infinity``, the intensity-distance
-contribution to the weight goes to zero and the bilateral reduces
-to a Gaussian over the spatial coordinates.  This is the standard
-"bilateral degrades gracefully to Gaussian when there's no edge to
-preserve" property; we verify it in the test suite.
+The whole filter is one gather plus one weighted reduction: statically
+shaped, ``jit`` / ``vmap`` / ``grad`` clean, and GPU-native.  The
+weight is a smooth ``exp`` of a quadratic form over a *fixed* bounded
+neighbourhood, so the gradient is smooth everywhere (no sort, no
+scatter, no simplex-identity branch).  This is the bounded-support
+filter that supersedes the retired permutohedral lattice for the
+feature dimensionalities we care about (and, via a low-rank metric,
+well beyond).
+
+Three independent choices parameterise a call:
+
+- **Values vs. features are decoupled.** ``values`` (e.g. a BOLD time
+  series, ``d_v`` frames) and ``features`` (the multimodal signature
+  set, ``d_f`` channels) are separate arguments with separate column
+  counts.  The common "filter the features by themselves" case is just
+  ``values is features`` at the call site.
+- **The metric** ``M = L L^T`` is supplied as a ``FeatureMetric``
+  (:mod:`nitrix.smoothing.metric`): diagonal per-channel bandwidths, a
+  low-rank projection of correlated channels, or a full anisotropic
+  factor.  In the limit of a large bandwidth on a channel, that channel
+  drops out and the filter degrades gracefully toward a spatial-only
+  Gaussian.
+- **The neighbourhood** is bounded: an ``int`` ``k`` (brute-force k-NN
+  in feature space), an explicit ``(n, k_max)`` index array, or an
+  :class:`~nitrix.sparse.ell.ELL` adjacency (grid box, mesh k-ring,
+  geodesic ball).  Padded / ragged neighbourhoods carry a validity
+  ``mask`` so padding contributes nothing -- which also removes the
+  double-counting a naive padded gather would incur at boundaries and
+  at low-degree mesh vertices.
+
+``n_iters > 1`` grows the effective support cheaply: the affinity graph
+(features, neighbours, weights) is fixed across iterations and only the
+values diffuse, so the normalised weights are built once and re-applied
+``n_iters`` times -- ``iters`` mean-field updates of a bounded dense CRF
+(Krahenbuhl & Koltun 2011) at ``O(n_iters * n * k_max * d_v)`` for the
+diffusion on top of a single ``O(n * k_max * k)`` weight build.
 """
 from __future__ import annotations
 
 from typing import Optional, Union
 
-import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
 
 from .._internal.backend import Backend
 from ..semiring import REAL, semiring_ell_matmul
+from ..sparse.ell import ELL
+from .metric import FeatureMetric
 
 
 __all__ = ['bilateral_gaussian', 'brute_force_knn']
@@ -42,15 +72,15 @@ def brute_force_knn(
     features: Float[Array, 'n d_f'],
     k: int,
     *,
-    sigma_features: Optional[Float[Array, 'd_f']] = None,
+    metric: Optional[FeatureMetric] = None,
 ) -> Int[Array, 'n k']:
-    '''Brute-force k-nearest-neighbour search in (optionally rescaled) feature space.
+    '''Brute-force k-nearest-neighbour search in (optionally projected) feature space.
 
     Materialises the ``(n, n)`` distance matrix; quadratic in memory.
-    Practical for ``n ≲ 10k``.  For larger ``n``, the caller should
+    Practical for ``n <~ 10k``.  For larger ``n``, the caller should
     pre-compute the adjacency with a spatial-index data structure
-    (KD-tree, grid hashing, etc.) and pass it as
-    ``neighbourhood=indices`` to ``bilateral_gaussian``.
+    (KD-tree, grid hashing, mesh k-ring, etc.) and pass it as
+    ``neighbourhood=`` to ``bilateral_gaussian``.
 
     Parameters
     ----------
@@ -59,24 +89,25 @@ def brute_force_knn(
     k
         Number of neighbours per query point.  The point itself is
         included in its own ``k`` (so ``k=1`` returns self-only).
-    sigma_features
-        Optional per-feature ``sigma`` for rescaling before the
-        distance.  ``None`` means use raw distances.  When supplied,
-        the search ranks by ``sum_d ((diff[d] / sigma[d])**2)``, the
-        same metric ``bilateral_gaussian`` uses for its weights.
+    metric
+        Optional ``FeatureMetric``.  ``None`` ranks by raw Euclidean
+        distance; when supplied, the search ranks by
+        ``sum(metric.project(diff)**2, -1)`` -- the same quadratic form
+        ``bilateral_gaussian`` uses for its weights, so the k-NN
+        adjacency matches the weight metric.
 
     Returns
     -------
     Indices of the ``k`` nearest neighbours for each query point,
     shape ``(n, k)``.  Sorted by ascending distance.
     '''
-    if sigma_features is not None:
-        rescaled = features / sigma_features
+    # Pairwise feature differences: (n, n, d_f).
+    diff = features[:, None, :] - features[None, :, :]
+    if metric is not None:
+        proj = metric.project(diff)
     else:
-        rescaled = features
-    # Pairwise squared distances: (n, n).
-    diff = rescaled[:, None, :] - rescaled[None, :, :]
-    d2 = (diff ** 2).sum(axis=-1)
+        proj = diff
+    d2 = (proj ** 2).sum(axis=-1)
     # Top-k smallest = top-k largest of negated distances.
     _, indices = lax.top_k(-d2, k)
     return indices
@@ -86,45 +117,60 @@ def bilateral_gaussian(
     values: Float[Array, 'n d_v'],
     features: Float[Array, 'n d_f'],
     *,
-    sigma_features: Float[Array, 'd_f'],
-    neighbourhood: Union[int, Int[Array, 'n k_max']],
+    metric: FeatureMetric,
+    neighbourhood: Union[int, Int[Array, 'n k_max'], ELL],
+    mask: Optional[Bool[Array, 'n k_max']] = None,
+    n_iters: int = 1,
     backend: Backend = 'auto',
 ) -> Float[Array, 'n d_v']:
-    '''Direct N-body bilateral Gaussian smoothing.
+    '''Bounded bilateral smoothing over a feature-space metric.
 
     For each output position ``i``, the result is the
-    feature-distance-weighted average of ``values`` over the
-    neighbourhood of ``i``::
-
-        out[i, :] = (1 / Z[i]) * sum_p w[i, p] * values[indices[i, p], :]
-        w[i, p]   = exp(-0.5 * sum_d ((features[i, d] - features[indices[i, p], d]) / sigma_features[d])**2)
-        Z[i]      = sum_p w[i, p]
+    metric-distance-weighted average of ``values`` over the bounded
+    neighbourhood of ``i`` (see the module docstring for the
+    formulation).
 
     Parameters
     ----------
     values
-        Per-point values to smooth, ``(n, d_v)``.  Can be any
-        signal: image intensity, multi-channel features, etc.
+        Per-point values to smooth, ``(n, d_v)``.  Any signal: image
+        intensity, a BOLD time series, multi-channel features,
+        segmentation logits, etc.  Independent of ``features``.
     features
-        Per-point feature vectors, ``(n, d_f)``.  Typically a
-        concatenation of spatial coordinates and intensity (or
-        other modality channels).  The bilateral metric is over
-        these features, not over the values being smoothed.
-    sigma_features
-        Per-feature standard deviation, ``(d_f,)``.  Controls how
-        quickly the weight falls off in each feature dimension --
-        large ``sigma`` means "this feature contributes little to
-        edge detection".
+        Per-point feature vectors, ``(n, d_f)``.  Typically spatial
+        coordinates concatenated with intensity / modality / functional
+        channels.  The bilateral metric is over these, not over the
+        values being smoothed.
+    metric
+        A ``FeatureMetric`` (:mod:`nitrix.smoothing.metric`) defining
+        ``M = L L^T``.  The weight falls off as
+        ``exp(-1/2 * sum(metric.project(f_i - f_j)**2))``.
     neighbourhood
-        Either an ``int`` ``k`` (do brute-force k-NN in feature
-        space; quadratic memory in ``n``) or an explicit
-        ``(n, k_max)`` index array of pre-computed neighbours.
-        Use the latter for ``n > ~10k`` or for non-Euclidean
-        neighbourhood structures.
+        The bounded neighbour source, one of:
+
+        - ``int`` ``k`` -- brute-force k-NN in feature space (quadratic
+          memory in ``n``); the metric is applied to the ranking.
+        - ``(n, k_max)`` index array -- explicit pre-computed neighbours.
+        - :class:`~nitrix.sparse.ell.ELL` -- an adjacency operator (grid
+          box, mesh k-ring, geodesic ball).  Its ``indices`` are used;
+          when ``mask`` is not given, the validity mask is derived from
+          its padding (``values != identity``).
+    mask
+        Optional boolean validity mask ``(n, k_max)``: ``True`` for real
+        neighbours, ``False`` for padding.  Masked positions contribute
+        nothing to the weighted average.  Defaults to "all valid" for
+        the ``int`` and explicit-index paths, and to the ELL's padding
+        validity for the ``ELL`` path.  Supplying it explicitly always
+        overrides the derived mask.
+    n_iters
+        Number of bilateral passes.  The affinity (features, neighbours,
+        weights) is held fixed; only the values diffuse, so the weights
+        are computed once and re-applied.  ``n_iters`` applications of a
+        radius-``r`` filter give ~radius-``(r * n_iters)`` support at
+        ``O(n_iters)`` cost.  Default ``1``.
     backend
-        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Passed to
-        the underlying ``semiring_ell_matmul``; currently routes
-        to JAX (the ELL Pallas kernel is the open G0 item).
+        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Passed to the
+        underlying ``semiring_ell_matmul``.
 
     Returns
     -------
@@ -132,61 +178,76 @@ def bilateral_gaussian(
 
     Notes
     -----
-    The implementation is a direct N-body reduction: the inner sum
-    has ``k_max`` terms, and we explicitly evaluate the Gaussian
-    weight per term.  This is the "no clever algorithmic trick" path
-    and is correct by construction.  Cost is ``O(n * k_max * (d_f +
-    d_v))`` per call.
-
-    For large spatial extents or large ``d_f``, the
-    ``permutohedral_lattice`` (Phase 4 stretch goal) achieves linear
-    time via hashing.  The bilateral path here is the marquee
-    capability promised at first GA regardless of whether
-    permutohedral lands.
+    The implementation is a direct N-body reduction: the inner sum has
+    ``k_max`` terms, each an explicit Gaussian weight over the metric.
+    Correct by construction; cost ``O(n * k_max * (k + d_v))`` per pass,
+    where ``k`` is the metric's projected dimension (``<= d_f``).
     '''
+    if n_iters < 1:
+        raise ValueError(f'n_iters must be >= 1; got {n_iters}.')
+
     n, d_v = values.shape
     n2, d_f = features.shape
     if n != n2:
         raise ValueError(
             f'values has n={n}, features has n={n2}; must match.'
         )
-    sigma_features = jnp.asarray(sigma_features)
-    if sigma_features.shape != (d_f,):
-        raise ValueError(
-            f'sigma_features.shape={sigma_features.shape} must equal '
-            f'(d_f,)=({d_f},).'
-        )
 
-    # Resolve the neighbourhood adjacency.
+    # Resolve the neighbourhood to (indices, mask).  An explicit ``mask``
+    # argument always wins; otherwise an ELL contributes its validity and
+    # the int / array paths default to "all valid".
+    derived_mask: Optional[Bool[Array, 'n k_max']] = None
     if isinstance(neighbourhood, int):
-        indices = brute_force_knn(
-            features, neighbourhood, sigma_features=sigma_features,
-        )
+        indices = brute_force_knn(features, neighbourhood, metric=metric)
+    elif isinstance(neighbourhood, ELL):
+        if neighbourhood.n_cols != n:
+            raise ValueError(
+                f'ELL neighbourhood has n_cols={neighbourhood.n_cols}; '
+                f'must equal n={n} (a self-adjacency over the points).'
+            )
+        indices = jnp.asarray(neighbourhood.indices, dtype=jnp.int32)
+        if neighbourhood.identity is not None:
+            id_val = jnp.asarray(
+                neighbourhood.identity, dtype=neighbourhood.values.dtype,
+            )
+            derived_mask = neighbourhood.values != id_val
     else:
         indices = jnp.asarray(neighbourhood, dtype=jnp.int32)
-        if indices.shape[0] != n:
-            raise ValueError(
-                f'neighbourhood.shape[0]={indices.shape[0]} must '
-                f'equal n={n}.'
-            )
+    if indices.shape[0] != n:
+        raise ValueError(
+            f'neighbourhood has n={indices.shape[0]} rows; must equal '
+            f'n={n}.'
+        )
 
-    # Gather neighbour features and compute Gaussian weights.
-    # features[indices]: (n, k_max, d_f)
-    feat_n = features[indices]
-    # Per-feature normalised distance, then squared distance summed.
-    rescaled_diff = (features[:, None, :] - feat_n) / sigma_features
-    d2 = (rescaled_diff ** 2).sum(axis=-1)              # (n, k_max)
-    weights = jnp.exp(-0.5 * d2)                        # (n, k_max)
+    if mask is None:
+        mask = derived_mask
+    elif tuple(mask.shape) != tuple(indices.shape):
+        raise ValueError(
+            f'mask.shape={tuple(mask.shape)} must equal the neighbour '
+            f'shape {tuple(indices.shape)}.'
+        )
 
-    # Normalise weights so each row sums to 1.  This is the standard
-    # bilateral normalisation; without it the smoothed values would
-    # drift toward zero as the weights generally don't sum to 1.
+    # Gather neighbour features and weight by the metric quadratic form.
+    feat_n = features[indices]                          # (n, k_max, d_f)
+    diff = features[:, None, :] - feat_n                # (n, k_max, d_f)
+    proj = metric.project(diff)                         # (n, k_max, k)
+    q = (proj ** 2).sum(axis=-1)                        # (n, k_max)
+    weights = jnp.exp(-0.5 * q)                         # (n, k_max)
+    if mask is not None:
+        weights = weights * mask.astype(weights.dtype)  # null padding
+
+    # Normalise so each row sums to 1 (standard bilateral normalisation);
+    # a fully-masked / isolated row sums to 0 and yields a 0 output via
+    # the guarded division.
     Z = weights.sum(axis=-1, keepdims=True)
     weights = weights / jnp.maximum(Z, jnp.finfo(weights.dtype).tiny)
 
-    # Reduce via semiring_ell_matmul: out[i, j] = sum_p w[i, p] *
-    # values[indices[i, p], j].
-    return semiring_ell_matmul(
-        weights, indices, values,
-        semiring=REAL, n_cols=n, backend=backend,
-    )
+    # Diffuse the values.  Affinity is fixed across iterations, so the
+    # weights above are reused: out_{t+1} = W out_t.
+    out = values
+    for _ in range(n_iters):
+        out = semiring_ell_matmul(
+            weights, indices, out,
+            semiring=REAL, n_cols=n, backend=backend,
+        )
+    return out

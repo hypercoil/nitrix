@@ -32,7 +32,7 @@ diagnostic value materialises.)
 from __future__ import annotations
 
 import itertools
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Union, cast
 
 import jax.numpy as jnp
 import numpy as np
@@ -41,6 +41,7 @@ from jaxtyping import Array, Float
 
 from ..morphology import median_filter
 from .bilateral import bilateral_gaussian
+from .metric import DiagonalMetric
 
 
 __all__ = ['susan_emulator', 'spatial_cube_neighbourhood']
@@ -50,18 +51,22 @@ def spatial_cube_neighbourhood(
     spatial_shape: Tuple[int, ...],
     *,
     half: int = 1,
-) -> NDArray[Any]:
+    return_validity: bool = False,
+) -> Union[NDArray[Any], Tuple[NDArray[Any], NDArray[Any]]]:
     '''Build a flat-index spatial-cube adjacency.
 
     For an n-D image of shape ``spatial_shape``, returns an array
     of shape ``(n_voxels, (2*half + 1)**ndim)`` whose row ``i``
     lists the flat indices of the ``(2*half + 1)``-cube spatial
     neighbours of voxel ``i``.  Voxels near the boundary clamp to
-    the nearest valid coordinate (edge-replicated, scipy-default
-    boundary behaviour).
+    the nearest valid coordinate (so every index is in range for a
+    gather), and the out-of-bounds taps are reported as invalid via
+    the optional validity mask so a bilateral reduction does not
+    double-count the clamped edge voxel.
 
-    Returned as a NumPy array so that ``bilateral_gaussian`` can
-    take it as a static adjacency without re-tracing per call.
+    Returned as NumPy arrays so that ``bilateral_gaussian`` can take
+    the adjacency as a static neighbourhood without re-tracing per
+    call.
 
     Parameters
     ----------
@@ -70,10 +75,17 @@ def spatial_cube_neighbourhood(
     half
         Half-width of the cube; total side length is ``2 * half + 1``.
         Default ``1`` (a 3-cube: 27 neighbours in 3D, 9 in 2D, etc.).
+    return_validity
+        If ``True``, also return a boolean validity mask ``(n_voxels,
+        k_max)`` that is ``False`` at the out-of-bounds (clamped) taps.
+        Pass it to ``bilateral_gaussian(..., mask=...)`` so boundary
+        voxels average only over their in-bounds neighbours.
 
     Returns
     -------
-    Adjacency ``(n_voxels, k_max)`` as a NumPy array of dtype int32.
+    Adjacency ``(n_voxels, k_max)`` as a NumPy array of dtype int32,
+    or ``(adjacency, validity)`` when ``return_validity`` is ``True``
+    (validity is a NumPy ``bool`` array of the same shape).
     '''
     spatial_rank = len(spatial_shape)
     n_voxels = int(np.prod(spatial_shape))
@@ -84,6 +96,8 @@ def spatial_cube_neighbourhood(
     # Per-voxel coordinates: (n_voxels, spatial_rank).
     coords = np.indices(spatial_shape).reshape(spatial_rank, -1).T
     indices = np.empty((n_voxels, k_max), dtype=np.int32)
+    validity = np.empty((n_voxels, k_max), dtype=bool)
+    shape_arr = np.asarray(spatial_shape, dtype=np.int64)
     # Row-major strides for flat-indexing.
     strides = np.array([
         int(np.prod(spatial_shape[d + 1:]))
@@ -91,12 +105,15 @@ def spatial_cube_neighbourhood(
     ], dtype=np.int64)
     for j, off in enumerate(offsets):
         neighbour = coords + np.asarray(off, dtype=np.int64)
-        for d in range(spatial_rank):
-            neighbour[:, d] = np.clip(
-                neighbour[:, d], 0, spatial_shape[d] - 1,
-            )
-        flat = (neighbour * strides[None, :]).sum(axis=1)
+        in_bounds = np.all(
+            (neighbour >= 0) & (neighbour < shape_arr[None, :]), axis=1,
+        )
+        clamped = np.clip(neighbour, 0, shape_arr[None, :] - 1)
+        flat = (clamped * strides[None, :]).sum(axis=1)
         indices[:, j] = flat.astype(np.int32)
+        validity[:, j] = in_bounds
+    if return_validity:
+        return indices, validity
     return indices
 
 
@@ -162,21 +179,28 @@ def susan_emulator(
     coords_jax = jnp.asarray(coords, dtype=values.dtype)
     features = jnp.concatenate([coords_jax, values], axis=-1)
 
-    # Per-feature sigma.
-    sigma = jnp.array(
+    # Per-feature bandwidths: one per spatial axis plus intensity.
+    metric = DiagonalMetric(jnp.array(
         [sigma_space] * spatial_rank + [sigma_intensity],
         dtype=values.dtype,
-    )
-
-    # Spatial-cube adjacency, static across the call.
-    adjacency = jnp.asarray(spatial_cube_neighbourhood(
-        spatial_shape, half=half,
     ))
+
+    # Spatial-cube adjacency, static across the call, with a validity
+    # mask so boundary voxels do not double-count clamped edge taps.
+    adjacency_np, validity_np = cast(
+        Tuple[NDArray[Any], NDArray[Any]],
+        spatial_cube_neighbourhood(
+            spatial_shape, half=half, return_validity=True,
+        ),
+    )
+    adjacency = jnp.asarray(adjacency_np)
+    validity = jnp.asarray(validity_np)
 
     out_flat = bilateral_gaussian(
         values, features,
-        sigma_features=sigma,
+        metric=metric,
         neighbourhood=adjacency,
+        mask=validity,
         backend='jax',
     )
     return out_flat.reshape(spatial_shape).astype(image.dtype)
