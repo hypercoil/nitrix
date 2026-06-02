@@ -1,0 +1,32 @@
+# Normalised-cut spectral clustering — `nitrix.graph.ncut`
+
+> **Status (2026-06-02): not started — blocked on `kmeans` (§12.18); the
+> eigenvector half is shipped.** Brainstorm candidate; promotion gated by
+> the §13 acceptance protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.19`.
+
+**What.** Shi–Malik 1997 / Craddock 2012-style normalised-cut spectral
+clustering — a thin composition wrapper.
+
+**Composition.** A ~5-line composition:
+
+1. `laplacian_eigenmap` (shipped, with implicit-VJP through both `eigh` and
+   `lobpcg`) gives the top-`k` eigenvectors of the normalised Laplacian.
+2. `kmeans(eigvecs, k)` ([`clustering-primitives.md`](clustering-primitives.md),
+   §12.18) discretises into parcels.
+
+**Likely consumer.** Craddock 2012 functional parcellation, NCut-based ROI
+generation for connectome edges.
+
+**Effort.** XS — depends on §12.18.
+
+**Live-code status.** No `graph.ncut`. The eigenvector half is shipped
+(`graph.laplacian_eigenmap`); the only missing ingredient is `kmeans`,
+tracked in [`clustering-primitives.md`](clustering-primitives.md).
+
+## Cross-references
+
+- `SPEC_UPDATE_v0.3.md §12.19` — origin entry; `§13` — acceptance protocol;
+  `§12.20` — strategy survey (Craddock NCut row).
+- [`clustering-primitives.md`](clustering-primitives.md) — the `kmeans`
+  dependency.
+- `src/nitrix/graph/connectopy.py` — `laplacian_eigenmap`.

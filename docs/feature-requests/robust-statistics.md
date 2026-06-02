@@ -1,0 +1,36 @@
+# Robust statistics — `nitrix.stats.robust`
+
+> **Status (2026-06-02): not started.** Brainstorm candidate; promotion
+> gated by the §13 acceptance protocol. Provenance:
+> `SPEC_UPDATE_v0.3.md §12.7`.
+
+**What.** M-estimator regression and the scale estimator that pairs with it.
+
+**Proposed surface.**
+
+```python
+def huber_regress(X, y, *, delta): ...          # Huber-loss regression
+def tukey_bisquare_regress(X, y, *, c): ...      # full redescender
+def mad(x, axis): ...                             # median absolute deviation
+```
+
+**Composition.** M-estimators are iteratively reweighted least squares
+(IRLS) on top of `linalg.residualise` (shipped):
+`Xᵀ W(r) X β = Xᵀ W(r) y`, where `W` is the per-sample weight from the
+influence function evaluated at the current residuals. Pure composition —
+the IRLS loop is a `lax.while_loop` over the existing least-squares solve.
+
+**Likely consumer.** Motion-corrupted fMRI regression, outlier-resistant
+group analysis, robust mixed-effects via joint LME + IRLS.
+
+**Effort.** S.
+
+**Live-code status.** No `huber_regress` / `tukey_bisquare_regress` / `mad`.
+`linalg.residualise` (the inner LS solve) and the `stats.lme` machinery
+(`reml_fit`, `flame_two_level`) are shipped — the natural IRLS host.
+
+## Cross-references
+
+- `SPEC_UPDATE_v0.3.md §12.7` — origin entry; `§13` — acceptance protocol.
+- `src/nitrix/linalg/residual.py` — the LS solve IRLS reweights.
+- [`docs/design/lme.md`](../design/lme.md) — the joint LME + IRLS consumer.

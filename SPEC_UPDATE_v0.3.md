@@ -204,6 +204,16 @@ pressure arrived.  Each entry names the substrate composition
 surface it), and the rough effort.  The acceptance protocol
 in ``§13`` governs promotion to sprint scope.
 
+> **Live tracking (2026-06-02).**  Each candidate below (§12.1–§12.19)
+> now has an individual tracking doc under
+> ``docs/feature-requests/`` (one doc per item, indexed by
+> ``docs/feature-requests/README.md``), carrying its current status
+> against the live ``src/nitrix`` surface — several items already have
+> partial substrate shipped.  This §12 catalogue remains the canonical
+> origin record (the §13 protocol references these by number); the
+> feature-request docs are the live, per-item tracking surface.  §12.20
+> is informational and stays here.
+
 ### §12.1 Iterative Krylov solvers — `nitrix.linalg.krylov`
 
 **Composition.**  Implicit-operator pattern already proven via
