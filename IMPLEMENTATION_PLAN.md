@@ -1085,6 +1085,70 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   behaviour unchanged; the well-conditioned cholesky property tests stay as the
   fast-path guard while the new svd tests cover the wide regime.
 
+### 2026-06-02 — Non-primitive sprint: doc-drift fixes, intensity-normalize variants, `spatial_transform_batched`, B8 annihilator
+
+- **Type:** Plan revision / consolidation (no new primitives) — work picked
+  while the perf-bench suite (B11) catches up to the existing primitive bank,
+  scoped deliberately to *fix / enhance / refactor existing functionality*.
+- **Triggered by:** feature-request triage across `docs/feature-requests/`;
+  the doc-drift findings (`perf-bench-feedback.md`) and consumer-convenience
+  enhancements (`ilex-pipeline-substrate.md`) that touch shipped surfaces
+  rather than adding primitives.
+- **Description.** Three tiers landed:
+  - **Tier 1 (doc-correctness fixes, shipped functions, no behaviour change):**
+    (a) `lomb_scargle_periodogram` normalisation docstring corrected — it
+    returns the classic Scargle `P_raw/var` (≡ `scipy.signal.lombscargle(
+    normalize=False)/var`), **not** scipy `normalize=True` (which differs by a
+    factor `N/2`); a scipy-parity regression test pins both relations.
+    (b) lomb-scargle module "Memory regime" prose corrected from
+    Cholesky/triangular-solve to the eigh + truncated-pseudo-inverse path the
+    code ships. (c) `lomb_scargle_interpolate` gained an intended-use note
+    (spectral bridge for AR/IIR filtering, **not** durable per-frame
+    imputation; censored-frame values not bit-reproducible across precisions)
+    and the `safe_eigh` CPU-routing caveat. (d) `tsconv` documented as
+    cross-correlation (kernel not flipped). (e) `resample` / `spatial_transform`
+    flagged as linear-only (order 0/1; no cubic B-spline) — the nnUNet/`hd_bet`
+    parity deviation (`cubic-resample.md`).
+  - **Tier 2 (enhancements to existing surfaces, no new primitive):**
+    `numerics.normalize` gained `percentile_rescale` (the Synth* min–p99–clip
+    recipe; distinct from `intensity_normalize` in denominator and clip-order)
+    and a `nonzero_mask=` option on `zscore_normalize` (BraTS/nnUNet per-channel
+    foreground z-score, background left at 0). `geometry.grid` gained
+    `spatial_transform_batched` (single-leading-axis `vmap` that broadcasts a
+    shared image or deformation — the case `spatial_transform` deliberately
+    refuses). Closes `intensity-normalize-variants.md` and
+    `spatial-transform-batched.md` (JOSA §3).
+  - **Tier 3 (API refinement — B8):** `Semiring` gained an explicit
+    `annihilator` field (`None` for EUCLIDEAN; `= identity` for the other
+    built-ins), and `ell_mask` gained a `semiring=` path that reads
+    `semiring.annihilator` and raises clearly when `None` (EUCLIDEAN), instead
+    of overloading `identity`. The legacy `ell_mask(identity=...)` form is
+    retained but emits a `DeprecationWarning` (user-requested migration nudge).
+    `sparse.ell` stays free of a *runtime* `nitrix.semiring` import (the
+    `Semiring` annotation is `TYPE_CHECKING`-only; the field is read
+    duck-typed). Resolves internal-backlog **B8**; the masking footgun in
+    `docs/design/semiring-protocols.md` is now machine-checked. Tier-3 items
+    **B4** (LOG/EUCLIDEAN `edge_aggregate`) and **G1**
+    (`spatial_transform(mode='linear_extrap')`) were **considered and held**
+    per their own §13/Trigger discipline (no concrete consumer yet).
+- **Capability shipped:** correct docs on the lomb-scargle / tsconv / resample
+  surfaces; the two missing intensity-normalisation recipes; a batched-warp
+  convenience; and a machine-checked, annihilator-aware masking path.
+- **Shape:** Pure-JAX; differentiable where applicable; CPU correctness floor
+  exercised (`JAX_PLATFORMS=cpu`). New/updated tests in `test_signal_interpolate`,
+  `test_numerics`, `test_geometry`, `test_ell_masking_semirings`.
+- **Verification:** full suite **627 passed / 26 skipped / 1 pre-existing
+  failure** (`test_lme.py::test_reml_voxelwise_per_voxel_match_unbatched`, a
+  float32 batched-vs-unbatched tolerance miss confirmed identical on a clean
+  checkout — environment drift, not this work). `mypy src/nitrix` adds **zero**
+  net-new errors over the pre-existing 8-error drift baseline (newer mypy/jax
+  resolved without a `uv.lock`; `redundant-cast`/`unused-ignore` in untouched
+  files). `ruff check` adds zero net-new per-file errors.
+- **Non-negotiables held:** no new runtime deps (the `Semiring` annotation in
+  `sparse.ell` is `TYPE_CHECKING`-only, preserving the array-only sparse layer);
+  pure-functional surfaces; golden/parity/regression tests added; the deprecated
+  `identity=` path stays functional (no silent break).
+
 ---
 
 ## 11. Notes on agent / engineer handoff

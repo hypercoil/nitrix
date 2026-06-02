@@ -25,8 +25,22 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `lomb_scargle_interpolate` silently runs eigh on CPU (cuSolver-broken stacks) | [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` | normal |
 | `tsconv` documented as "convolution" but is cross-correlation | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` | low (clarity) |
 | `lomb_scargle_interpolate` intended-use (spectral bridge, not durable imputation) | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` | normal |
-| `tangent_project_spd` missing from op_matrix inventory (public op; blocks perf-bench coverage credit) | [doc-op-matrix-missing-tangent](doc-op-matrix-missing-tangent.md) | `docs/op_matrix.json` (`ops`) | normal |
+| public ops missing from op_matrix inventory: `tangent_project_spd`, `histogram_match`, `n4_bias_field_correction` (block perf-bench coverage credit) | [doc-op-matrix-inventory-gaps](doc-op-matrix-inventory-gaps.md) | `docs/op_matrix.json` (`ops`) | normal |
 
 ## Resolved
 
-_(none yet; reference the resolving nitrix commit on fix.)_
+The five lomb-scargle / tsconv doc-drift findings were fixed on 2026-06-02
+(docstring-only, no behaviour change; the normalisation fix additionally
+carries a scipy-parity regression test). See `IMPLEMENTATION_PLAN.md §10.3`
+(2026-06-02 entry) and each item's own doc for the per-fix record.
+
+| Finding | Doc | Resolution |
+|---|---|---|
+| `lomb_scargle_periodogram` normalisation | [doc-lomb-scargle-normalisation](doc-lomb-scargle-normalisation.md) | docstring rewritten to the math + `N/2` note; regression test added |
+| eigh-vs-Cholesky module docstring | [doc-lomb-scargle-eigh-factorisation](doc-lomb-scargle-eigh-factorisation.md) | prose rewritten to the eigh / pseudo-inverse path |
+| `safe_eigh` CPU-routing caveat | [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | "Device placement" Notes added |
+| `lomb_scargle_interpolate` intended use | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | "Intended use" Notes added |
+| `tsconv` cross-correlation | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | Notes clarification added |
+
+(The `doc-op-matrix-inventory-gaps` finding above is a separate op-matrix
+inventory item, still open.)

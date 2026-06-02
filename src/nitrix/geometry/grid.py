@@ -45,6 +45,7 @@ from jaxtyping import Array, Float
 __all__ = [
     'identity_grid',
     'spatial_transform',
+    'spatial_transform_batched',
     'integrate_velocity_field',
     'jacobian_displacement',
     'jacobian_det_displacement',
@@ -212,7 +213,13 @@ def spatial_transform(
     appear in both inputs must match exactly -- broadcast of
     leading axes is *not* attempted (the asymmetry between image
     and deformation shape semantics makes silent broadcast
-    error-prone).
+    error-prone).  For a leading-batch convenience that broadcasts
+    a shared image or deformation, see ``spatial_transform_batched``.
+
+    Sampling is **(multi-)linear only** (``order=1``, via
+    ``jax.scipy.ndimage.map_coordinates``); no cubic (``order=3``)
+    B-spline path exists.  See ``resample`` Notes for the parity
+    implication.
     '''
     ndim = deformation.shape[-1]
     # The image has one trailing channel dim plus ``ndim`` spatial
@@ -252,6 +259,88 @@ def spatial_transform(
     # runtime-evaluated, so use a single-variadic shape -- jaxtyping
     # rejects two ``*`` specifiers when the form is constructed.)
     return cast(Float[Array, '...'], fn(image, deformation))
+
+
+def spatial_transform_batched(
+    image: Float[Array, '...'],
+    deformation: Float[Array, '...'],
+    *,
+    mode: BoundaryMode = 'constant',
+    cval: float = 0.0,
+) -> Float[Array, '...']:
+    '''Map ``spatial_transform`` over a single leading batch axis.
+
+    Convenience wrapper for the common case where the batch axis is
+    carried by only one operand: a batch of images warped by a
+    single shared deformation (or a single image under a batch of
+    deformations).  ``spatial_transform`` itself requires the
+    leading batch dims of ``image`` and ``deformation`` to match
+    exactly -- it deliberately does not broadcast -- so this case
+    otherwise needs an explicit ``jax.vmap`` with the right
+    ``in_axes``.  This picks ``in_axes`` from whichever operand
+    carries the leading axis and saves the per-model wrapper line.
+
+    The batch axis is identified as a leading axis beyond the
+    ``ndim + 1`` "core" rank (``*spatial`` plus the trailing
+    channel / ``ndim`` axis).  If both operands carry it, this maps
+    one axis and ``spatial_transform`` composes any further leading
+    dims natively.
+
+    Parameters
+    ----------
+    image
+        ``(*spatial, c)`` or ``(B, *spatial, c)``.
+    deformation
+        ``(*spatial, ndim)`` or ``(B, *spatial, ndim)``.  At least
+        one of ``image`` / ``deformation`` must carry the leading
+        batch axis.
+    mode, cval
+        Forwarded to ``spatial_transform``.
+
+    Returns
+    -------
+    ``(B, *spatial, c)`` warped batch.
+
+    Raises
+    ------
+    ValueError
+        If neither operand carries a leading batch axis (call
+        ``spatial_transform`` directly for the unbatched case).
+
+    Notes
+    -----
+    Maps over exactly **one** leading axis.  To broadcast a shared
+    operand across *several* leading batch dims, broadcast it to the
+    full batch shape and call ``spatial_transform`` directly (which
+    handles multiple matching leading dims natively).
+    '''
+    ndim = deformation.shape[-1]
+    core_rank = ndim + 1
+    image_batched = image.ndim > core_rank
+    deform_batched = deformation.ndim > core_rank
+    if not image_batched and not deform_batched:
+        raise ValueError(
+            'spatial_transform_batched: neither image '
+            f'(ndim={image.ndim}) nor deformation '
+            f'(ndim={deformation.ndim}) carries a leading batch axis '
+            f'beyond the core rank {core_rank}.  Call '
+            'spatial_transform directly for the unbatched case.'
+        )
+    in_axes: tuple[Optional[int], Optional[int]] = (
+        0 if image_batched else None,
+        0 if deform_batched else None,
+    )
+
+    def core(
+        image_: Float[Array, '*spatial c'],
+        deformation_: Float[Array, '*spatial ndim'],
+    ) -> Float[Array, '*spatial c']:
+        return spatial_transform(image_, deformation_, mode=mode, cval=cval)
+
+    # ``jax.vmap`` erases the return type to Any (matching the
+    # ``spatial_transform`` pattern above); restore it via cast.
+    vfn: Callable[..., Any] = jax.vmap(core, in_axes=in_axes)
+    return cast(Float[Array, '...'], vfn(image, deformation))
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +471,19 @@ def resample(
     Returns
     -------
     Resampled image, ``(*target_shape, c)``.
+
+    Notes
+    -----
+    Interpolation is **(multi-)linear only** (``order=1``).  This
+    wraps ``jax.scipy.ndimage.map_coordinates``, which supports only
+    ``order`` 0 (nearest) and 1 (linear); there is no cubic
+    (``order=3``) B-spline path.  This is a documented deviation
+    from resamplers that default to order-3 splines (e.g. nnUNet /
+    ``hd_bet`` preprocessing, ``scipy.ndimage.zoom(order=3)``): bit-
+    parity with those pipelines is **not** achieved here.  Linear is
+    adequate for most consumers; a separable B-spline prefilter +
+    cubic sampling is tracked as a future enhancement
+    (``docs/feature-requests/cubic-resample.md``).
     '''
     spatial_shape = image.shape[:-1]
     if len(target_shape) != len(spatial_shape):

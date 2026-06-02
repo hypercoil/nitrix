@@ -1,10 +1,14 @@
 # Doc-fix: `lomb_scargle_interpolate` — document the *intended use* (spectral bridge, not durable imputation)
 
-> **Status (2026-06-02): open — documentation-correctness fix (not a
-> primitive proposal). Not a bug; a use-case-implication doc.** Provenance:
-> surfaced building the perf-bench `lomb_scargle_interpolate` case; ledger
-> context in [`perf-bench-feedback.md`](perf-bench-feedback.md). Measured
-> from-scratch fp64 joint-GLM vs nitrix on this checkout.
+> **Status (2026-06-02): RESOLVED.** Added an "Intended use" Notes paragraph
+> to `lomb_scargle_interpolate` (spectral bridge for AR/IIR filtering, not
+> durable per-frame imputation; observed-frame splice-through and
+> band-limited content are the only well-defined outputs; censored-frame
+> values not bit-reproducible across precisions). See `IMPLEMENTATION_PLAN.md
+> §10.3` (2026-06-02 entry). Provenance: surfaced building the perf-bench
+> `lomb_scargle_interpolate` case; ledger context in
+> [`perf-bench-feedback.md`](perf-bench-feedback.md). Measured from-scratch
+> fp64 joint-GLM vs nitrix on this checkout.
 
 The masked Gram `Bᵀ diag(mask) B` is **hugely ill-conditioned (cond ~1e32)**.
 nitrix correctly regularises it with the rcond-truncated pseudo-inverse, but

@@ -298,6 +298,7 @@ REAL: StrictSemiring[Any] = StrictSemiring(
     monoid=_SumMonoid(),
     binary_op=_ProductSemigroup(),
     identity=0.0,
+    annihilator=0.0,  # 0 * b == 0
     name='real',
     matmul_vjp=real_matmul_vjp,
     ell_matmul_vjp=real_ell_matmul_vjp,
@@ -307,6 +308,7 @@ LOG: StrictSemiring[Any] = StrictSemiring(
     monoid=_LogSumExpMonoid(),
     binary_op=_SumSemigroup(),
     identity=-jnp.inf,
+    annihilator=-jnp.inf,  # -inf + b == -inf
     name='log',
     matmul_vjp=log_matmul_vjp,
     ell_matmul_vjp=log_ell_matmul_vjp,
@@ -316,6 +318,7 @@ TROPICAL_MAX_PLUS: StrictSemiring[Any] = StrictSemiring(
     monoid=_MaxMonoid(),
     binary_op=_SumSemigroup(),
     identity=-jnp.inf,
+    annihilator=-jnp.inf,  # -inf + b == -inf, annihilates under max
     name='tropical_max_plus',
     matmul_vjp=tropical_max_plus_matmul_vjp,
     ell_matmul_vjp=tropical_max_plus_ell_matmul_vjp,
@@ -325,6 +328,7 @@ TROPICAL_MIN_PLUS: StrictSemiring[Any] = StrictSemiring(
     monoid=_MinMonoid(),
     binary_op=_SumSemigroup(),
     identity=jnp.inf,
+    annihilator=jnp.inf,  # +inf + b == +inf, annihilates under min
     name='tropical_min_plus',
     matmul_vjp=tropical_min_plus_matmul_vjp,
     ell_matmul_vjp=tropical_min_plus_ell_matmul_vjp,
@@ -334,6 +338,7 @@ BOOLEAN: StrictSemiring[Any] = StrictSemiring(
     monoid=_OrMonoid(),
     binary_op=_AndSemigroup(),
     identity=False,
+    annihilator=False,  # False and b == False
     name='boolean',
     matmul_vjp=boolean_matmul_vjp,
     ell_matmul_vjp=boolean_ell_matmul_vjp,
@@ -349,6 +354,7 @@ EUCLIDEAN: Semiring[Any] = Semiring(
     monoid=_SumThenSqrtMonoid(),
     binary_op=_SquaredDiffSemigroup(),
     identity=0.0,
+    annihilator=None,  # (a - b)**2 has no annihilator: cannot value-mask
     name='euclidean',
     matmul_vjp=euclidean_matmul_vjp,
     ell_matmul_vjp=euclidean_ell_matmul_vjp,

@@ -41,6 +41,7 @@ from nitrix.geometry import (
     latlong_to_cartesian,
     resample,
     spatial_transform,
+    spatial_transform_batched,
     spherical_conv,
     spherical_geodesic_distance,
 )
@@ -146,6 +147,54 @@ def test_spatial_transform_batch_dim_mismatch_raises():
     deform = jnp.zeros((4, 4, 4, 2))  # batch size differs
     with pytest.raises(ValueError, match='leading batch dims must match'):
         spatial_transform(img, deform)
+
+
+def test_spatial_transform_batched_shared_deformation():
+    '''A batch of images under one shared deformation equals a
+    manual vmap with in_axes=(0, None).'''
+    B = 3
+    rng = np.random.default_rng(0)
+    img = jnp.asarray(rng.standard_normal((B, 5, 5, 2)), dtype=jnp.float32)
+    deform = identity_grid((5, 5), dtype=jnp.float32) + 0.3  # (5, 5, 2)
+    out = spatial_transform_batched(img, deform)
+    ref = jax.vmap(lambda im: spatial_transform(im, deform))(img)
+    assert out.shape == (B, 5, 5, 2)
+    np.testing.assert_allclose(out, ref, atol=1e-6)
+
+
+def test_spatial_transform_batched_shared_image():
+    '''One image under a batch of deformations equals a manual vmap
+    with in_axes=(None, 0).'''
+    B = 4
+    rng = np.random.default_rng(1)
+    img = jnp.asarray(rng.standard_normal((6, 6, 1)), dtype=jnp.float32)
+    base = identity_grid((6, 6), dtype=jnp.float32)
+    deforms = jnp.stack([base + float(s) * 0.1 for s in range(B)])  # (B,6,6,2)
+    out = spatial_transform_batched(img, deforms)
+    ref = jax.vmap(lambda df: spatial_transform(img, df))(deforms)
+    assert out.shape == (B, 6, 6, 1)
+    np.testing.assert_allclose(out, ref, atol=1e-6)
+
+
+def test_spatial_transform_batched_both_batched_matches_native():
+    '''When both operands are batched it agrees with the native
+    multi-leading-dim spatial_transform.'''
+    B = 3
+    rng = np.random.default_rng(2)
+    img = jnp.asarray(rng.standard_normal((B, 5, 5, 1)), dtype=jnp.float32)
+    deform = jnp.broadcast_to(
+        identity_grid((5, 5), dtype=jnp.float32)[None], (B, 5, 5, 2),
+    )
+    out = spatial_transform_batched(img, deform)
+    ref = spatial_transform(img, deform)
+    np.testing.assert_allclose(out, ref, atol=1e-6)
+
+
+def test_spatial_transform_batched_unbatched_raises():
+    img = jnp.zeros((5, 5, 1))
+    deform = identity_grid((5, 5))
+    with pytest.raises(ValueError, match='leading batch axis'):
+        spatial_transform_batched(img, deform)
 
 
 # ---------------------------------------------------------------------------

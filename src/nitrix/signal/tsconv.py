@@ -69,6 +69,13 @@ def tsconv(
     axes by reshaping into a single batch dim and unwrapping.
     For multi-channel or multi-subject fMRI ``(B, C, T)`` is the
     natural input shape.
+
+    This is the **cross-correlation** convention (the kernel is
+    **not** flipped), as in deep-learning conv layers
+    (``torch.nn.Conv1d`` is likewise cross-correlation).  A DSP
+    "convolution" flips the kernel about its centre; reverse
+    ``weight`` along its last (``K``) axis -- ``weight[..., ::-1]``
+    -- if you need a true (flipped) convolution.
     '''
     if X.ndim < 2:
         raise ValueError(

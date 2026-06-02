@@ -90,7 +90,14 @@ Small primitives the surface and neurite-UNet ports still vendor; all flagged
 
 ## Resolved
 
-_(none yet — reference the resolving `nitrix` commit on fix.)_
+Shipped 2026-06-02 (see `IMPLEMENTATION_PLAN.md §10.3`, 2026-06-02 entry):
+
+- **Intensity-normalize variants** ([intensity-normalize-variants](intensity-normalize-variants.md))
+  — `percentile_rescale` (min–p99–clip) + `zscore_normalize(nonzero_mask=)`.
+- **`spatial_transform_batched`** ([spatial-transform-batched](spatial-transform-batched.md))
+  — leading-batch `vmap` with shared-operand broadcast.
+- **Cubic resample — docstring deviation flagged** ([cubic-resample](cubic-resample.md));
+  the full order-3 B-spline path stays deferred (a new sampling path, not a fix).
 
 The large mesh/surface/warp tier these ports needed is already shipped; its
 resolution history lives in `IMPLEMENTATION_PLAN.md §10.3` and

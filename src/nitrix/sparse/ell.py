@@ -16,12 +16,24 @@ SPEC_UPDATE §3.2) will live in ``nitrix.sparse.ell_sectioned``.
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, replace
-from typing import Any, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Literal, Optional, Tuple
 
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int, Num
+
+if TYPE_CHECKING:
+    # Type-only import: keeps ``nitrix.sparse.ell`` free of a *runtime*
+    # ``nitrix.semiring`` dependency (which would cycle, since semiring
+    # imports sparse).  The annihilator is read duck-typed at runtime.
+    from ..semiring._types import Semiring
+
+
+# Sentinel distinguishing "identity not passed" from an explicit
+# ``identity=None`` (which legitimately disables pad-fill).
+_UNSET: Any = object()
 
 
 __all__ = [
@@ -220,9 +232,10 @@ def ell_mask(
     ell: ELL,
     valid: Num[Array, '...'],
     *,
-    identity: Any,
+    identity: Any = _UNSET,
+    semiring: Optional['Semiring[Any]'] = None,
 ) -> ELL:
-    '''Mask edges out of an ELL by setting their value to a semiring identity.
+    '''Mask edges out of an ELL by setting their value to a semiring annihilator.
 
     Brain geometries are routinely *incomplete*: the cortical-surface
     medial wall is excluded from analysis, and volumetric work is often
@@ -231,38 +244,45 @@ def ell_mask(
     identity** to every reduction -- so no FLOPs and, crucially, no
     *signal* leak in from the uninteresting region.
 
-    This helper rewrites the masked positions of ``ell.values`` to
-    ``identity`` and stamps ``identity`` onto the returned ELL's
-    ``identity`` field, so the result is a drop-in operand for
-    ``semiring_ell_matmul`` / ``semiring_ell_edge_aggregate`` under a
-    semiring whose identity is ``identity``.
+    This helper rewrites the masked positions of ``ell.values`` to the
+    algebra's ``(*)``-annihilator and stamps that value onto the
+    returned ELL's ``identity`` field, so the result is a drop-in
+    operand for ``semiring_ell_matmul`` / ``semiring_ell_edge_aggregate``.
 
     **Why this is a true no-op (and the one algebra where it is not).**
     An edge with value ``z`` is a no-op iff ``z`` is the ``(*)``
     *annihilator* of the algebra -- the element with ``z (*) b ==
     monoid_identity`` for every ``b`` -- because the reduction computes
-    ``(+)_p ( values[i, p] (*) B[indices[i, p]] )``.  For the built-in
-    algebras the annihilator equals ``semiring.identity``:
+    ``(+)_p ( values[i, p] (*) B[indices[i, p]] )``.  For most built-in
+    algebras the annihilator coincides with ``semiring.identity`` (the
+    *additive* / monoid identity), which is why a bare ``identity=``
+    historically doubled as the mask value:
 
-    ===================  ============  ====================
-    Algebra              ``(*)``       annihilator (= id)
-    ===================  ============  ====================
-    ``REAL``             ``a * b``     ``0``
-    ``LOG``              ``a + b``     ``-inf``
-    ``TROPICAL_MAX_PLUS````a + b``     ``-inf``
-    ``TROPICAL_MIN_PLUS````a + b``     ``+inf``
-    ``BOOLEAN``          ``a and b``   ``False``
-    ===================  ============  ====================
+    ===================  ============  ============  ============
+    Algebra              ``(*)``       identity      annihilator
+    ===================  ============  ============  ============
+    ``REAL``             ``a * b``     ``0``         ``0``
+    ``LOG``              ``a + b``     ``-inf``      ``-inf``
+    ``TROPICAL_MAX_PLUS````a + b``     ``-inf``      ``-inf``
+    ``TROPICAL_MIN_PLUS````a + b``     ``+inf``      ``+inf``
+    ``BOOLEAN``          ``a and b``   ``False``     ``False``
+    ``EUCLIDEAN``        ``(a-b)**2``  ``0``         **none**
+    ===================  ============  ============  ============
 
-    Pass ``identity=semiring.identity`` and the masked edge vanishes
-    regardless of where its (still in-range) index points.
+    **Prefer the ``semiring=`` form.**  Pass ``semiring=`` and the
+    annihilator is read from ``semiring.annihilator`` -- the correct
+    masking value by construction, with no chance of the
+    identity-vs-annihilator confusion below.  The explicit
+    ``identity=`` form remains for callers that already hold the scalar.
+    Pass exactly one of the two.
 
     ``EUCLIDEAN`` is the exception: its ``(*)`` is ``(a - b)**2``, which
     has **no** annihilator (``(z - b)**2`` cannot be ``0`` for all
-    ``b``), so its ``identity`` of ``0`` does **not** mask -- it injects
-    ``B[idx]**2`` instead.  Mask EUCLIDEAN neighbourhoods by dropping the
-    columns from the index structure (do not include the edge), not via
-    this helper.
+    ``b``), so ``EUCLIDEAN.annihilator is None`` and ``semiring=EUCLIDEAN``
+    raises here.  Its ``identity`` of ``0`` does **not** mask -- it would
+    inject ``B[idx]**2`` instead.  Mask EUCLIDEAN neighbourhoods by
+    dropping the columns from the index structure (do not include the
+    edge), not via this helper.
 
     Parameters
     ----------
@@ -277,15 +297,61 @@ def ell_mask(
         - shape ``ell.indices.shape`` -- an explicit per-edge mask.
 
     identity
-        The value written into masked positions.  Use
+        The scalar written into masked positions.  Use
         ``semiring.identity`` for the algebra you will reduce under.
+        Mutually exclusive with ``semiring=``; pass exactly one.
+    semiring
+        The algebra the masked ELL will be reduced under.  Its
+        ``annihilator`` field supplies the mask value; raises if the
+        algebra has no annihilator (``EUCLIDEAN``).  Mutually exclusive
+        with ``identity=``; pass exactly one.
 
     Returns
     -------
-    A new ``ELL`` with masked values set to ``identity`` and
-    ``.identity = identity``.  ``indices`` is unchanged (masked indices
-    stay in-range, so no gather goes out of bounds).
+    A new ``ELL`` with masked values set to the annihilator and
+    ``.identity`` set to that value.  ``indices`` is unchanged (masked
+    indices stay in-range, so no gather goes out of bounds).
+
+    Raises
+    ------
+    ValueError
+        If neither or both of ``identity`` / ``semiring`` are given; if
+        ``semiring`` has no annihilator (``EUCLIDEAN``); or if ``valid``
+        has an unrecognised shape.
     '''
+    if semiring is not None:
+        if identity is not _UNSET:
+            raise ValueError(
+                'ell_mask: pass exactly one of identity= or semiring=, '
+                'not both.'
+            )
+        mask_value = semiring.annihilator
+        if mask_value is None:
+            raise ValueError(
+                f'ell_mask: semiring {semiring.name!r} has no '
+                '(*)-annihilator, so masking by a value cannot be a '
+                'no-op (e.g. EUCLIDEAN: (a - b)**2 never annihilates).  '
+                'Drop the masked columns from the index structure '
+                'instead of calling ell_mask.'
+            )
+    elif identity is not _UNSET:
+        warnings.warn(
+            'ell_mask(identity=...) is deprecated; pass semiring= '
+            'instead.  The masking value is the algebra\'s '
+            '(*)-annihilator, read for you from semiring.annihilator -- '
+            'which is *not* always the monoid identity (EUCLIDEAN has '
+            'no annihilator, so identity=0 silently injects B[idx]**2 '
+            'rather than masking).  The identity= form will be removed '
+            'in a future release.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        mask_value = identity
+    else:
+        raise ValueError(
+            'ell_mask: pass exactly one of identity= (the annihilator '
+            'scalar) or semiring= (whose annihilator is read for you).'
+        )
     valid = jnp.asarray(valid)
     if valid.shape == (ell.n_cols,):
         edge_valid = valid[ell.indices]
@@ -297,9 +363,9 @@ def ell_mask(
             f'(n_cols,)=({ell.n_cols},) for a column mask or '
             f'{tuple(ell.indices.shape)} for an edge mask.'
         )
-    id_val = jnp.asarray(identity, dtype=ell.values.dtype)
+    id_val = jnp.asarray(mask_value, dtype=ell.values.dtype)
     new_values = jnp.where(edge_valid, ell.values, id_val)
-    return replace(ell, values=new_values, identity=identity)
+    return replace(ell, values=new_values, identity=mask_value)
 
 
 def ell_add_self_loops(

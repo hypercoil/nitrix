@@ -1,9 +1,11 @@
 # Doc-fix: `lomb_scargle_periodogram` normalisation docstring is wrong
 
-> **Status (2026-06-02): open — documentation-correctness fix (not a
-> primitive proposal). The high-value one.** Mechanical (file:line +
-> verified measurement below). Provenance: surfaced building a
-> `nitrix-perf-bench` case; ledger context in
+> **Status (2026-06-02): RESOLVED.** Docstring rewritten to describe the
+> math (`P_raw/var` ≡ `scipy.signal.lombscargle(normalize=False)/var`) with
+> an explicit note on the `N/2` offset from scipy `normalize=True`; a
+> scipy-parity regression test (`test_signal_interpolate.py`) pins both
+> relations. See `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02 entry).
+> Provenance: surfaced building a `nitrix-perf-bench` case; ledger context in
 > [`perf-bench-feedback.md`](perf-bench-feedback.md). Verified against
 > `scipy 1.17.1` + a from-scratch fp64 Scargle-1982 reference.
 

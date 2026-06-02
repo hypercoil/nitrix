@@ -32,6 +32,7 @@ from .grid import (
     jacobian_displacement,
     resample,
     spatial_transform,
+    spatial_transform_batched,
     # legacy aliases (removed at v0.1)
     cmass_regular_grid,
     rescale,
@@ -63,6 +64,7 @@ __all__ = [
     # grid
     'identity_grid',
     'spatial_transform',
+    'spatial_transform_batched',
     'integrate_velocity_field',
     'jacobian_displacement',
     'jacobian_det_displacement',

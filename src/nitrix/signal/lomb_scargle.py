@@ -40,13 +40,19 @@ across channels.
 For **shared-mask** input (mask is broadcast-compatible with data
 along the leading dims; the typical fMRI case where one
 motion-censor mask applies to all voxels), we compute the Gram
-matrix ``G = B^T diag(mask) B`` of shape ``(K, K)`` and its
-Cholesky ``L`` **once**, then solve the right-hand sides for all
-channels as a single batched triangular solve.  Total memory at
-V=1M voxels, T=500, K=499:
+matrix ``G = B^T diag(mask) B`` of shape ``(K, K)`` and factor it
+**once** via a symmetric eigendecomposition (``safe_eigh``), then
+apply a threshold-truncated pseudo-inverse (eigenvalues below
+``rcond * max`` are dropped) to solve the right-hand sides for all
+channels at once.  The eigh-plus-pseudo-inverse path -- rather than
+a Cholesky factor + triangular solve -- is deliberate: the masked
+Gram is rank-deficient whenever ``2 * n_freq + 1 > n_valid``, and a
+singular Gram has no Cholesky factor; the truncated pseudo-inverse
+absorbs the rank deficiency without an arbitrary ridge.  Total
+memory at V=1M voxels, T=500, K=499:
 
 - Shared basis: ``T * K * 4 = 1 MB``.
-- Shared Gram / Cholesky: ``2 * K^2 * 4 = 2 MB``.
+- Shared Gram / eigenvectors: ``2 * K^2 * 4 = 2 MB``.
 - Per-channel rhs / beta / recon: ``3 * V * K * 4 = 6 GB``.
 - Output / data: ``2 * V * T * 4 = 4 GB``.
 
@@ -151,8 +157,20 @@ def lomb_scargle_periodogram(
     '''Scargle 1982 normalised Lomb-Scargle periodogram.
 
     Per-frequency power computed from the observed (non-masked)
-    samples.  Normalisation matches
-    ``scipy.signal.lombscargle(normalize=True)``.
+    samples, normalised by the observed-sample variance -- the
+    classic Scargle 1982 convention ``P = P_raw / var``.  Equals
+    ``scipy.signal.lombscargle(..., normalize=False)`` divided by
+    the observed-sample variance (population ``var``, ``ddof=0``).
+
+    .. note::
+
+       This is **not** ``scipy.signal.lombscargle(normalize=True)``.
+       scipy's ``normalize=True`` (as of 1.17.1) returns
+       ``2 * P_raw / (N * var)``, so it differs from this output by
+       a constant factor of ``N / 2`` (``N`` = number of observed
+       samples).  scipy's ``normalize`` convention has drifted
+       across versions, so the math above -- not a scipy flag name
+       -- is the stable definition to compare against.
 
     For **interpolation** use ``lomb_scargle_interpolate`` -- the
     implied reconstruction from per-frequency LS coefficients
@@ -292,7 +310,7 @@ def lomb_scargle_interpolate(
        censored runs.
     2. The reconstruction is smooth at observed boundaries.
 
-    Memory: shared-mask path uses ``(K, K)`` Gram / Cholesky
+    Memory: shared-mask path uses ``(K, K)`` Gram / eigenvector
     intermediates regardless of leading-dim count, so V = 1M
     voxels fits in ~10 GB at fMRI shapes.  See the module
     docstring for the breakdown.
@@ -352,6 +370,42 @@ def lomb_scargle_interpolate(
     Notes
     -----
     Differentiable through ``data``; ``mask`` is static.
+
+    **Intended use: a spectral bridge, not durable imputation.**
+    The Power 2014 procedure exists to produce a
+    *spectrally-consistent* fill so that downstream autoregressive /
+    IIR temporal filters (band-pass, high-pass) run across the gaps
+    without ringing or spectral leakage; the censored frames are
+    typically dropped again after filtering.  Treat the filled
+    values as a transient means to that end, **not** as durable
+    per-frame imputations for direct analysis.  Only two things are
+    well-defined: the observed-frame splice-through
+    (``recon[obs] == data[obs]`` exactly) and the band-limited
+    spectral content.  The reconstruction *at censored frames* is
+    the regularised solution of an ill-conditioned masked Gram
+    (cond ~1e32); which near-null-space modes survive the
+    ``rcond``-truncated pseudo-inverse differs between fp32 and
+    fp64, so the censored-frame values are **not bit-reproducible
+    across precisions** (two valid regularised solutions can differ
+    by O(1) on O(1) signals at the worst frame).  This sensitivity
+    lives in high-frequency directions the irregular observed grid
+    cannot pin down -- benign for the intended low/band-pass use,
+    but a correctness trap if the fills are used durably.  If you
+    need durable per-frame values, compute in fp64 and treat the
+    high-frequency content as undetermined.
+
+    **Device placement.**  The shared-Gram factorisation uses
+    ``safe_eigh`` (``nitrix.linalg._solver``), which routes the
+    eigendecomposition to a device where dense cuSolver ``eigh``
+    works.  On stacks where GPU ``eigh`` is broken (some
+    CUDA/driver combinations -- ``gpusolverDnCreate failed``), the
+    Gram solve is placed on the **host (CPU)** with GPU->CPU->GPU
+    transfers: results are correct but the solve is not
+    GPU-resident, and the K x K Gram (K up to ``2*n_freq+1`` ~ 499
+    at fMRI ``n_obs``) is exactly in the affected size range.
+    Contrast the matrix-function ops (``symlog`` / ``symsqrt`` /
+    ``sympower``), which consume a raw ``eigh`` that XLA lowers off
+    cuSolver and so stay GPU-resident.
 
     References
     ----------

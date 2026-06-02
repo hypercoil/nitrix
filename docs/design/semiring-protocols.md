@@ -142,12 +142,15 @@ neighbourhoods must therefore be masked by dropping columns
 structurally, not via a value.
 
 Because overloading one field for two distinct algebraic roles is a
-confusion risk as the algebra set grows, ``ell_mask`` takes an
-explicit ``identity=`` value (caller passes ``semiring.identity``,
-which is correct for the maskable algebras) rather than a
-``semiring=``.  ``feature-requests/internal-backlog.md`` B8 tracks the option of adding an explicit
-``annihilator`` field (``None`` for EUCLIDEAN) so the masking path can
-be machine-checked.
+confusion risk as the algebra set grows, ``Semiring`` now carries an
+explicit ``annihilator`` field (B8, shipped): ``0`` for REAL, ``-inf``
+for LOG / TROPICAL_MAX_PLUS, ``+inf`` for TROPICAL_MIN_PLUS, ``False``
+for BOOLEAN, and ``None`` for ``EUCLIDEAN`` (which has no annihilator).
+``ell_mask`` accepts ``semiring=`` and reads ``semiring.annihilator``,
+raising a clear error when it is ``None`` (EUCLIDEAN) instead of
+silently injecting ``B[idx]**2``.  The legacy ``ell_mask(identity=...)``
+form still works but emits a ``DeprecationWarning``.  See
+``IMPLEMENTATION_PLAN.md §10.3`` (2026-06-02 entry).
 
 ## Cross-references
 

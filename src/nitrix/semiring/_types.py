@@ -137,6 +137,20 @@ class Semiring(Generic[S]):
         through ``binary_op`` and reduced, leaves the accumulator
         unchanged.  Setting this to ``None`` disables ELL pad-fill (the
         caller is responsible for sentinel handling).
+    annihilator
+        The ``(*)``-annihilator: the scalar ``z`` with ``binary_op(z, b)
+        == monoid_identity`` for every ``b``, i.e. the value an ELL edge
+        must carry to be a true no-op under masking
+        (``nitrix.sparse.ell_mask``).  This is **not** the same concept
+        as ``identity`` (the *additive* / monoid identity), though for
+        most algebras the two coincide: ``REAL`` ``0``, ``LOG`` /
+        ``TROPICAL_MAX_PLUS`` ``-inf``, ``TROPICAL_MIN_PLUS`` ``+inf``,
+        ``BOOLEAN`` ``False``.  ``EUCLIDEAN`` is the exception: ``(a -
+        b)**2`` has **no** annihilator, so ``annihilator=None`` -- and
+        masking an ``EUCLIDEAN`` neighbourhood by a value is impossible
+        (drop the columns structurally instead).  Defaults to ``None``;
+        a user-defined algebra whose monoid identity and annihilator
+        differ should set this explicitly so value-masking is correct.
     name
         Short string used in fallback warnings and debug output.
     matmul_vjp
@@ -169,6 +183,7 @@ class Semiring(Generic[S]):
     monoid: Monoid[S]
     binary_op: Semigroup
     identity: Any = None
+    annihilator: Any = None
     name: str = 'semiring'
     matmul_vjp: Optional[SemiringMatmulVJP] = None
     ell_matmul_vjp: Optional[SemiringELLMatmulVJP] = None
@@ -184,6 +199,7 @@ class Semiring(Generic[S]):
             monoid=self.monoid,
             binary_op=self.binary_op,
             identity=self.identity,
+            annihilator=self.annihilator,
             name=self.name,
             matmul_vjp=self.matmul_vjp,
             ell_matmul_vjp=self.ell_matmul_vjp,
@@ -226,6 +242,7 @@ class StrictSemiring(Semiring[S]):
             monoid=self.monoid,
             binary_op=self.binary_op,
             identity=self.identity,
+            annihilator=self.annihilator,
             name=self.name,
             matmul_vjp=self.matmul_vjp,
             ell_matmul_vjp=self.ell_matmul_vjp,

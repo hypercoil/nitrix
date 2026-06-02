@@ -1,9 +1,13 @@
 # Cubic (order-3) resample — `nitrix.geometry.grid`
 
-> **Status (2026-06-02): not started — MISMATCH (a documented parity-
-> relevant gap, lower priority than the ENABLING items).** Consumer-pipeline
-> substrate for the ilex → thrux migration. Provenance: 2026-06-02 ilex
-> vendored-model survey
+> **Status (2026-06-02): docstring deviation flagged; full cubic path still
+> deferred.** The "at minimum, flag the deviation" ask is done — `resample`
+> and `spatial_transform` now document that they are linear-only (order 0/1,
+> via `map_coordinates`) and that order-3 bit-parity with nnUNet / `hd_bet`
+> is **not** achieved (see `IMPLEMENTATION_PLAN.md §10.3`, 2026-06-02 entry).
+> The separable B-spline prefilter + cubic sampler itself remains **not
+> started** (a genuinely new sampling path; deferred pending a consumer that
+> requires bit-parity). Provenance: 2026-06-02 ilex vendored-model survey
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
 > item D); ilex SKILL FM #17.
 

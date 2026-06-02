@@ -1,8 +1,11 @@
 # Doc-fix: `lomb_scargle_interpolate` silently runs its eigh on CPU on cuSolver-broken stacks
 
-> **Status (2026-06-02): open — documentation-correctness fix (not a
-> primitive proposal). Correct behaviour, undocumented caveat.** Provenance:
-> surfaced building a `nitrix-perf-bench` case; ledger context in
+> **Status (2026-06-02): RESOLVED.** Added a "Device placement" Notes
+> paragraph to `lomb_scargle_interpolate` describing the `safe_eigh`
+> CPU-routing on cuSolver-broken stacks (correct results, host round-trip;
+> GPU-residency not guaranteed) and the contrast with the GPU-resident
+> matrix-function ops. See `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02 entry).
+> Provenance: surfaced building a `nitrix-perf-bench` case; ledger context in
 > [`perf-bench-feedback.md`](perf-bench-feedback.md).
 
 `_lomb_scargle_solve_shared_mask` calls `safe_eigh`

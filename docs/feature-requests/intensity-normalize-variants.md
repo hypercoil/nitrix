@@ -1,9 +1,11 @@
 # Intensity-normalize variants — `nitrix.numerics.normalize`
 
-> **Status (2026-06-02): not started — CONVENIENCE (close, but the two
-> recipes below are not exactly reachable today).** Consumer-pipeline
-> substrate for the ilex → thrux migration. Provenance: 2026-06-02 ilex
-> vendored-model survey
+> **Status (2026-06-02): SHIPPED.** Added `percentile_rescale(x, *, lo=0.0,
+> hi=99.0, clip=True, axis=None)` (the min–p99–clip recipe) and a
+> `nonzero_mask=` option on `zscore_normalize` (per-channel foreground
+> z-score, background left at 0) on the existing `numerics.normalize`
+> surface — no new top-level concept. See `IMPLEMENTATION_PLAN.md §10.3`
+> (2026-06-02 entry). Provenance: 2026-06-02 ilex vendored-model survey
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
 > item E).
 

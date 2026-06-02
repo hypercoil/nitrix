@@ -30,14 +30,13 @@ in *Resolved* below.
 | B5 | [keops-genred-research](keops-genred-research.md) | research note | — |
 | B6 | [pallas-gaussian-blur](pallas-gaussian-blur.md) | Pallas kernel | — |
 | B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (cheap JAX interim win) | — |
-| B8 | [semiring-annihilator-field](semiring-annihilator-field.md) | API refinement | S |
 | B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning | M |
 | B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) | L (sliceable) |
 | G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension | S |
 
-(B1 and B9 are resolved — see below. `spatial_transform_batched`, JOSA §3, is
-genuinely open but lives in the consumer-convenience home,
-[`spatial-transform-batched.md`](spatial-transform-batched.md).)
+(B1, B8, and B9 are resolved — see below. `spatial_transform_batched`, JOSA §3,
+shipped 2026-06-02 — see `IMPLEMENTATION_PLAN.md §10.3`;
+[`spatial-transform-batched.md`](spatial-transform-batched.md) is its home doc.)
 
 ## Closed by design (recorded so the decision isn't lost on file deletion)
 
@@ -67,6 +66,12 @@ in **`IMPLEMENTATION_PLAN.md §10.3`** (shipped-deviation log) and
 / `NITRIX_FEEDBACK_JOSA.md` ledgers. Backlog items closed here:
 
 - **B1. Move resolved findings in `NITRIX_FEEDBACK_ILEX.md`** — done 2026-05-20.
+- **B8. Explicit `(*)`-annihilator on `Semiring`** — resolved 2026-06-02. Added an
+  `annihilator` field to `Semiring` (`None` for EUCLIDEAN; equal to `identity` for the
+  other built-ins) and an `ell_mask(semiring=)` path that reads it and raises clearly when
+  `None`. The legacy `ell_mask(identity=...)` form is retained but now emits a
+  `DeprecationWarning`. The masking-vs-identity footgun (`docs/design/semiring-protocols.md`)
+  is now machine-checked. See `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02 entry).
 - **B9. `residualise` robustness on ill-conditioned designs** — resolved 2026-05-22.
   Root cause: default `method='cholesky'` returns NaN for rank-deficient `X` (the
   singular Gram has no factor); the shipped `method='svd'` path (min-norm LSQ via

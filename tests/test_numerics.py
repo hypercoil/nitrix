@@ -19,6 +19,7 @@ from nitrix.numerics import (
     fold_axis,
     intensity_normalize,
     orient_and_conform,
+    percentile_rescale,
     promote_to_rank,
     psc_normalize,
     robust_zscore_normalize,
@@ -84,6 +85,79 @@ def test_intensity_normalize_compresses_to_unit_interval():
     n = intensity_normalize(x, low_percentile=1, high_percentile=99)
     assert float(n.min()) >= 0.0
     assert float(n.max()) <= 1.0
+
+
+def test_percentile_rescale_min_p99_clip_matches_reference():
+    '''Defaults are the Synth* min--p99--clip recipe.'''
+    x_np = np.random.default_rng(0).standard_normal(1000) * 10 + 50
+    out = percentile_rescale(jnp.asarray(x_np), lo=0.0, hi=99.0, clip=True)
+    p_lo = np.percentile(x_np, 0.0)   # = min
+    p_hi = np.percentile(x_np, 99.0)
+    ref = np.clip((x_np - p_lo) / p_hi, 0.0, 1.0)
+    np.testing.assert_allclose(np.asarray(out), ref, atol=1e-7)
+    assert float(out.min()) >= 0.0
+    assert float(out.max()) <= 1.0
+
+
+def test_percentile_rescale_clip_flag_saturates_top():
+    x = jnp.asarray([0.0, 1.0, 2.0, 100.0])
+    out_clip = percentile_rescale(x, clip=True)
+    out_noclip = percentile_rescale(x, clip=False)
+    # With clip the top saturates at 1; without, it exceeds 1.
+    assert float(out_clip.max()) <= 1.0 + 1e-6
+    assert float(out_noclip.max()) > 1.0
+    # Below the ceiling the two paths agree.
+    np.testing.assert_allclose(
+        np.asarray(out_clip)[:3], np.asarray(out_noclip)[:3], atol=1e-7,
+    )
+
+
+def test_percentile_rescale_differs_from_intensity_normalize():
+    '''The two recipes diverge when the minimum is far from zero:
+    percentile_rescale divides by p_hi, intensity_normalize by the
+    inter-percentile width.
+    '''
+    x = jnp.asarray(np.random.default_rng(0).standard_normal(500) * 5 + 100)
+    a = percentile_rescale(x, lo=1.0, hi=99.0, clip=True)
+    b = intensity_normalize(x, low_percentile=1.0, high_percentile=99.0)
+    assert float(jnp.abs(a - b).max()) > 1e-2
+
+
+def test_zscore_nonzero_mask_leaves_background_zero():
+    rng = np.random.default_rng(0)
+    fg = rng.standard_normal(800) * 3 + 10
+    x_np = np.concatenate([fg, np.zeros(200)])
+    rng.shuffle(x_np)
+    z = np.asarray(zscore_normalize(jnp.asarray(x_np), nonzero_mask=True))
+    bg = x_np == 0
+    # Background stays exactly zero (not -mean/std).
+    np.testing.assert_array_equal(z[bg], 0.0)
+    # Foreground standardised against foreground-only statistics.
+    mean = x_np[~bg].mean()
+    std = x_np[~bg].std()  # population (ddof=0)
+    np.testing.assert_allclose(z[~bg], (x_np[~bg] - mean) / std, atol=1e-6)
+    assert abs(float(z[~bg].mean())) < 1e-6
+    np.testing.assert_allclose(z[~bg].std(), 1.0, atol=1e-6)
+
+
+def test_zscore_nonzero_mask_per_channel():
+    rng = np.random.default_rng(1)
+    x_np = np.stack([
+        np.where(rng.random(1000) > 0.3, rng.standard_normal(1000) * 2 + 5, 0.0),
+        np.where(rng.random(1000) > 0.5, rng.standard_normal(1000) * 4 - 3, 0.0),
+    ])
+    z = np.asarray(zscore_normalize(jnp.asarray(x_np), axis=-1, nonzero_mask=True))
+    for c in range(2):
+        fg = x_np[c] != 0
+        np.testing.assert_array_equal(z[c][~fg], 0.0)
+        assert abs(float(z[c][fg].mean())) < 1e-6
+        np.testing.assert_allclose(z[c][fg].std(), 1.0, atol=1e-6)
+
+
+def test_zscore_nonzero_mask_rejects_explicit_weights():
+    x = jnp.asarray(np.random.default_rng(0).standard_normal(100))
+    with pytest.raises(ValueError, match='not both'):
+        zscore_normalize(x, weights=jnp.ones(100), nonzero_mask=True)
 
 
 def test_demean_preserves_unit_variance():

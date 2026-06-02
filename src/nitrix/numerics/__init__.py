@@ -24,6 +24,7 @@ from . import normalize, tensor_ops
 from .normalize import (
     demean,
     intensity_normalize,
+    percentile_rescale,
     psc_normalize,
     robust_zscore_normalize,
     zscore_normalize,
@@ -44,6 +45,7 @@ __all__ = [
     # normalize
     'demean',
     'intensity_normalize',
+    'percentile_rescale',
     'psc_normalize',
     'robust_zscore_normalize',
     'zscore_normalize',

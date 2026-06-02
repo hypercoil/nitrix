@@ -9,12 +9,17 @@ leaks in from the uninteresting region.
 
 These tests verify the contract behind ``nitrix.sparse.ell_mask``: for
 every built-in algebra with a ``(*)``-annihilator (all but EUCLIDEAN),
-setting a masked edge's value to ``semiring.identity`` makes it a true
-no-op, *independent of where its index points*.  EUCLIDEAN is the
-documented exception -- its squared-difference has no annihilator -- and
-a test pins that limitation so it is not silently relied upon.
+masking a reaching edge makes it a true no-op, *independent of where its
+index points*.  The preferred call is ``ell_mask(..., semiring=sr)``,
+which reads ``sr.annihilator`` (B8); the legacy ``identity=`` form is
+deprecated and emits a ``DeprecationWarning``.  EUCLIDEAN is the
+documented exception -- its squared-difference has no annihilator, so
+``semiring=EUCLIDEAN`` raises -- and tests pin both the guard and the
+old leak-via-identity limitation.
 """
 from __future__ import annotations
+
+import warnings
 
 import jax
 import jax.numpy as jnp
@@ -70,7 +75,7 @@ def test_masked_neighbour_is_noop_independent_of_target(semiring):
 
     col_valid = np.ones(n, dtype=bool)
     col_valid[np.asarray(masked_vertices)] = False
-    ell = ell_mask(ell, jnp.asarray(col_valid), identity=semiring.identity)
+    ell = ell_mask(ell, jnp.asarray(col_valid), semiring=semiring)
 
     rng = np.random.default_rng(1)
     B = jnp.asarray(rng.standard_normal((n, ncol)))
@@ -96,7 +101,7 @@ def test_masking_equals_reducing_over_unmasked_edges(semiring):
     # Edge mask: drop the last column everywhere.
     edge_valid = np.ones((n, k_max), dtype=bool)
     edge_valid[:, -1] = False
-    masked = ell_mask(ell, jnp.asarray(edge_valid), identity=semiring.identity)
+    masked = ell_mask(ell, jnp.asarray(edge_valid), semiring=semiring)
 
     # Reference: an ELL with only the first k_max-1 columns.
     ref = ELL(
@@ -124,7 +129,7 @@ def test_boolean_masking_is_noop():
     masked_vertices = jnp.asarray([1, 5])
     col_valid = np.ones(n, dtype=bool)
     col_valid[np.asarray(masked_vertices)] = False
-    ell = ell_mask(ell, jnp.asarray(col_valid), identity=False)
+    ell = ell_mask(ell, jnp.asarray(col_valid), semiring=BOOLEAN)
 
     B = jnp.asarray(rng.integers(0, 2, (n, ncol)).astype(bool))
     B_pert = B.at[masked_vertices].set(jnp.logical_not(B[masked_vertices]))
@@ -133,18 +138,34 @@ def test_boolean_masking_is_noop():
     np.testing.assert_array_equal(np.asarray(out), np.asarray(out_pert))
 
 
+def test_euclidean_semiring_mask_raises_no_annihilator():
+    '''EUCLIDEAN has no (*)-annihilator, so the safe ``semiring=`` path
+    refuses to mask it (rather than silently leaking).  This is the B8
+    guard: ``EUCLIDEAN.annihilator is None`` -> a clear error.
+    '''
+    n, k_max = 8, 4
+    ell = _random_float_ell(n, k_max, EUCLIDEAN.identity, seed=0)
+    col_valid = np.ones(n, dtype=bool)
+    col_valid[[2, 6]] = False
+    with pytest.raises(ValueError, match='annihilator'):
+        ell_mask(ell, jnp.asarray(col_valid), semiring=EUCLIDEAN)
+
+
 def test_euclidean_has_no_annihilator_limitation():
     '''EUCLIDEAN's (a-b)^2 has no annihilator: masking via its identity
     (0) does NOT zero the edge -- it injects B[idx]^2.  This test pins
     the documented limitation (masking EUCLIDEAN must drop columns
-    structurally, not set a value).
+    structurally, not set a value).  The deprecated ``identity=`` form
+    is the only way to even attempt it; ``semiring=EUCLIDEAN`` raises
+    (see the test above).
     '''
     n, k_max, ncol = 8, 4, 3
     ell = _random_float_ell(n, k_max, EUCLIDEAN.identity, seed=0)
     masked_vertices = jnp.asarray([2, 6])
     col_valid = np.ones(n, dtype=bool)
     col_valid[np.asarray(masked_vertices)] = False
-    ell = ell_mask(ell, jnp.asarray(col_valid), identity=EUCLIDEAN.identity)
+    with pytest.warns(DeprecationWarning):
+        ell = ell_mask(ell, jnp.asarray(col_valid), identity=EUCLIDEAN.identity)
 
     rng = np.random.default_rng(1)
     B = jnp.asarray(rng.standard_normal((n, ncol)))
@@ -172,8 +193,12 @@ def test_wrong_identity_leaks_under_max_plus_footgun():
     col_valid = np.ones(n, dtype=bool)
     col_valid[np.asarray(masked_vertices)] = False
 
-    wrong = ell_mask(base, jnp.asarray(col_valid), identity=0.0)         # WRONG
-    right = ell_mask(base, jnp.asarray(col_valid), identity=-jnp.inf)    # RIGHT
+    # The deprecated identity= form is exactly the footgun B8's semiring=
+    # path closes: an explicit (mismatched) scalar with no annihilator
+    # check.  Both calls warn.
+    with pytest.warns(DeprecationWarning):
+        wrong = ell_mask(base, jnp.asarray(col_valid), identity=0.0)      # WRONG
+        right = ell_mask(base, jnp.asarray(col_valid), identity=-jnp.inf)  # RIGHT
 
     rng = np.random.default_rng(1)
     B = jnp.asarray(rng.standard_normal((n, ncol)))
@@ -202,7 +227,7 @@ def test_medial_wall_mask_on_icosphere_smoothing():
     medial = rng.choice(n, size=20, replace=False)
     col_valid = np.ones(n, dtype=bool)
     col_valid[medial] = False
-    adj_m = ell_mask(adj, jnp.asarray(col_valid), identity=REAL.identity)
+    adj_m = ell_mask(adj, jnp.asarray(col_valid), semiring=REAL)
 
     signal = jnp.asarray(rng.standard_normal((n, 1)))
     # Put pathological values on the medial wall.
@@ -229,7 +254,7 @@ def test_grey_matter_mask_on_grid():
     gm = np.ones(n, dtype=bool)
     out_of_gm = rng.choice(n, size=8, replace=False)
     gm[out_of_gm] = False
-    op_m = ell_mask(op, jnp.asarray(gm), identity=REAL.identity)
+    op_m = ell_mask(op, jnp.asarray(gm), semiring=REAL)
 
     x = jnp.asarray(rng.standard_normal((n, 1)))
     x_bad = x.at[jnp.asarray(out_of_gm)].set(1e6)
@@ -241,7 +266,7 @@ def test_grey_matter_mask_on_grid():
 def test_ell_mask_rejects_bad_mask_shape():
     ell = _random_float_ell(6, 3, REAL.identity, seed=0)
     with pytest.raises(ValueError, match='valid.shape'):
-        ell_mask(ell, jnp.ones((7,), dtype=bool), identity=0.0)
+        ell_mask(ell, jnp.ones((7,), dtype=bool), semiring=REAL)
 
 
 def test_ell_mask_differentiable_through_values():
@@ -254,9 +279,77 @@ def test_ell_mask_differentiable_through_values():
 
     def loss(values):
         e = ELL(values=values, indices=ell.indices, n_cols=6, identity=0.0)
-        e = ell_mask(e, col_valid, identity=0.0)
+        e = ell_mask(e, col_valid, semiring=REAL)
         return jnp.sum(_apply(e, B, REAL) ** 2)
 
     g = jax.grad(loss)(ell.values)
     assert g.shape == ell.values.shape
     assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# B8: annihilator field + semiring= masking path
+# ---------------------------------------------------------------------------
+
+
+def test_builtin_annihilator_fields():
+    '''The annihilator coincides with identity for the maskable
+    algebras and is None for EUCLIDEAN (no annihilator).
+    '''
+    assert REAL.annihilator == 0.0
+    assert LOG.annihilator == -jnp.inf
+    assert TROPICAL_MAX_PLUS.annihilator == -jnp.inf
+    assert TROPICAL_MIN_PLUS.annihilator == jnp.inf
+    assert BOOLEAN.annihilator is False
+    assert EUCLIDEAN.annihilator is None
+
+
+@pytest.mark.parametrize(
+    'semiring', MASKABLE, ids=[s.name for s in MASKABLE],
+)
+def test_semiring_path_matches_deprecated_identity_path(semiring):
+    '''``semiring=`` and the deprecated ``identity=semiring.identity``
+    produce identical masked ELLs for the maskable algebras.
+    '''
+    n, k_max = 10, 4
+    ell = _random_float_ell(n, k_max, semiring.identity, seed=7)
+    col_valid = np.ones(n, dtype=bool)
+    col_valid[[1, 4, 9]] = False
+    cv = jnp.asarray(col_valid)
+
+    via_semiring = ell_mask(ell, cv, semiring=semiring)
+    with pytest.warns(DeprecationWarning):
+        via_identity = ell_mask(ell, cv, identity=semiring.identity)
+    np.testing.assert_array_equal(
+        np.asarray(via_semiring.values), np.asarray(via_identity.values),
+    )
+    assert via_semiring.identity == via_identity.identity
+
+
+def test_identity_kwarg_emits_deprecation_warning():
+    ell = _random_float_ell(6, 3, REAL.identity, seed=0)
+    col_valid = jnp.ones(6, dtype=bool)
+    with pytest.warns(DeprecationWarning, match='deprecated'):
+        ell_mask(ell, col_valid, identity=0.0)
+
+
+def test_semiring_path_emits_no_warning():
+    ell = _random_float_ell(6, 3, REAL.identity, seed=0)
+    col_valid = jnp.ones(6, dtype=bool)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', DeprecationWarning)
+        ell_mask(ell, col_valid, semiring=REAL)  # must not warn
+
+
+def test_ell_mask_both_identity_and_semiring_raises():
+    ell = _random_float_ell(6, 3, REAL.identity, seed=0)
+    col_valid = jnp.ones(6, dtype=bool)
+    with pytest.raises(ValueError, match='not both'):
+        ell_mask(ell, col_valid, identity=0.0, semiring=REAL)
+
+
+def test_ell_mask_neither_identity_nor_semiring_raises():
+    ell = _random_float_ell(6, 3, REAL.identity, seed=0)
+    col_valid = jnp.ones(6, dtype=bool)
+    with pytest.raises(ValueError, match='exactly one'):
+        ell_mask(ell, col_valid)

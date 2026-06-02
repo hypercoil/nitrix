@@ -48,7 +48,6 @@ Ledger (framing, closed-by-design, resolved):
 | B5 | [keops-genred-research](keops-genred-research.md) | research note |
 | B6 | [pallas-gaussian-blur](pallas-gaussian-blur.md) | Pallas kernel |
 | B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (cheap JAX interim win) |
-| B8 | [semiring-annihilator-field](semiring-annihilator-field.md) | API refinement (S) |
 | B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning (M) |
 | B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) |
 | G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension (S) |
@@ -65,7 +64,7 @@ mechanical docstring fixes, not primitive proposals.
 | [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` |
 | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` |
 | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` |
-| [doc-op-matrix-missing-tangent](doc-op-matrix-missing-tangent.md) | `docs/op_matrix.json` (`ops`) |
+| [doc-op-matrix-inventory-gaps](doc-op-matrix-inventory-gaps.md) | `docs/op_matrix.json` (`ops`) |
 
 ## SPEC §12 brainstorm catalogue (candidate primitives)
 

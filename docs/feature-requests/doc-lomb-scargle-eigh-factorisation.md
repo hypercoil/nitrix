@@ -1,7 +1,9 @@
 # Doc-fix: lomb-scargle module docstring says "Cholesky"; code uses `eigh` + pseudo-inverse
 
-> **Status (2026-06-02): open — documentation-correctness fix (not a
-> primitive proposal).** Mechanical (file:line). Provenance: surfaced
+> **Status (2026-06-02): RESOLVED.** Module "Memory regime" prose (and the
+> stale "Cholesky" reference in `lomb_scargle_interpolate`) rewritten to
+> describe the eigh + truncated-pseudo-inverse path the code ships. See
+> `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02 entry). Provenance: surfaced
 > building a `nitrix-perf-bench` case; ledger context in
 > [`perf-bench-feedback.md`](perf-bench-feedback.md).
 

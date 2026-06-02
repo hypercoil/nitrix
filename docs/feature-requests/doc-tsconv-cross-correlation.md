@@ -1,7 +1,9 @@
 # Doc-fix: `tsconv` is documented as "convolution" but implements cross-correlation
 
-> **Status (2026-06-02): open — documentation-correctness fix (not a
-> primitive proposal). Low priority, clarity only.** Provenance: surfaced
+> **Status (2026-06-02): RESOLVED.** Added a Notes clarification to `tsconv`:
+> cross-correlation convention (kernel not flipped), as in conv layers;
+> reverse the kernel along its last axis for a true convolution. See
+> `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02 entry). Provenance: surfaced
 > building a `nitrix-perf-bench` case; ledger context in
 > [`perf-bench-feedback.md`](perf-bench-feedback.md).
 

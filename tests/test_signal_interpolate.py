@@ -307,3 +307,47 @@ def test_lomb_scargle_periodogram_peaks_at_signal_frequency():
     peak_idx = int(jnp.argmax(power))
     peak_freq = float(freqs[peak_idx])
     np.testing.assert_allclose(peak_freq, f0, atol=0.01)
+
+
+def test_lomb_scargle_periodogram_matches_scipy_scargle_normalisation():
+    '''Regression pinning the *corrected* normalisation docstring.
+
+    nitrix returns the classic Scargle 1982 ``P_raw / var`` -- i.e.
+    ``scipy.signal.lombscargle(..., normalize=False)`` divided by
+    the observed-sample (population) variance.  It is **not**
+    scipy's ``normalize=True``, which (1.17.x) returns
+    ``2 * P_raw / (N * var)`` and so is off by a constant ``N / 2``.
+    Both relations are asserted so the docstring's specific factor
+    cannot drift silently.
+    '''
+    sps = pytest.importorskip('scipy.signal')
+    T, dt = 256, 2.0
+    rng = np.random.default_rng(0)
+    t = np.arange(T) * dt
+    y = (
+        np.sin(2 * np.pi * 0.03 * t)
+        + 0.5 * np.sin(2 * np.pi * 0.11 * t)
+        + 0.1 * rng.standard_normal(T)
+    )
+    data = jnp.asarray(y, dtype=jnp.float64)
+    mask = jnp.ones(T, dtype=bool)
+
+    freqs, power = lomb_scargle_periodogram(data, mask, dt=dt)
+    # Reuse exactly the angular grid nitrix chose so the comparison
+    # is element-wise, not interpolated.
+    omega = np.asarray(freqs, dtype=np.float64) * 2.0 * np.pi
+    var = float(np.var(y))  # population (ddof=0), matches nitrix var_y
+    # Centre manually rather than via the deprecated `precenter`
+    # kwarg (scipy >= 1.17 deprecates it; this is the substitution
+    # scipy itself recommends), so the test is stable across versions.
+    yc = y - y.mean()
+
+    p_raw = sps.lombscargle(t, yc, omega, normalize=False)
+    np.testing.assert_allclose(
+        np.asarray(power), p_raw / var, rtol=1e-6, atol=1e-9,
+    )
+
+    p_norm = sps.lombscargle(t, yc, omega, normalize=True)
+    np.testing.assert_allclose(
+        np.asarray(power), (T / 2.0) * p_norm, rtol=1e-6, atol=1e-9,
+    )

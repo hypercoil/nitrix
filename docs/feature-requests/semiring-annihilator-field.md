@@ -1,8 +1,13 @@
 # B8. Store the `(*)`-annihilator explicitly on `Semiring`
 
-> **Status (2026-06-02): parked (API refinement) — genuinely open (verified:
-> `Semiring` carries `identity`, no `annihilator` field).** Not a commitment
-> — gated on the **Trigger** below. Effort **S**, backward-compatible.
+> **Status (2026-06-02): SHIPPED.** `Semiring` now carries an
+> `annihilator` field (`None` for EUCLIDEAN; `= identity` for the other
+> built-ins) and `ell_mask` accepts `semiring=`, reading
+> `semiring.annihilator` and raising when it is `None`. The legacy
+> `ell_mask(identity=...)` form is retained but emits a
+> `DeprecationWarning`. See `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02
+> entry) for the shipped-deviation record. Effort was **S**,
+> backward-compatible as planned.
 > Provenance: migrated from the retired top-level `BACKLOG.md` (B-numbering
 > preserved); ledger context in [`internal-backlog.md`](internal-backlog.md).
 
