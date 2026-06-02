@@ -47,7 +47,7 @@ from downstream consumers needing capabilities, not files.
 | **1. Foundation** | `linalg`, `stats`, `signal` consolidated; downstream can swap nitrix imports for hypercoil imports | weeks | none — pure consolidation |
 | **2. Substrate** | `semiring` + `sparse.ell` shipped; downstream can build distance ops, graph algebra, attention-like reductions | months | Triton stability; backward-kernel correctness |
 | **3. Geometry & graph** | `geometry`, `graph` shipped, spherical conv re-backed | weeks | depends on Phase 2 |
-| **4. Marquee** | `smoothing`, `morphology` shipped; permutohedral resolved per tripwire | weeks–months | permutohedral risk |
+| **4. Marquee** | `smoothing`, `morphology` shipped; permutohedral retired (SPEC_UPDATE_v0.4), bounded bilateral supersedes it | weeks–months | — (permutohedral risk eliminated) |
 | **5. Polish** | LME namespace reserved; docs; benchmark suite; first GA | weeks | none — pure cleanup |
 
 The phases are not equal-sized. Phase 2 is the long pole. Phases 1 and 3 can compress
@@ -86,7 +86,7 @@ without resolving it would invalidate downstream assumptions.
 |---|---|---|---|
 | **G0. Ampere-ELL benchmark** | Triton-default vs JAX-default for ELL kernels | end of Phase 0 | SPEC_UPDATE_v0.2 §4 |
 | **G1. Backward-kernel correctness** | Whether each `StrictSemiring` backward passes finite-difference checks at pinned tolerance | mid Phase 2 | SPEC_UPDATE §3.1 |
-| **G2. Permutohedral tripwire** | Whether `permutohedral_lattice` ships or raises `NotImplementedError` | mid Phase 4 | SPEC_UPDATE §3.3 |
+| **G2. Permutohedral tripwire** | RESOLVED → **retired**. Bounded support dissolves the lattice's obstacles; the bounded bilateral (`bilateral_gaussian` + factored metric / mask / `n_iters`) supersedes it | closed | SPEC_UPDATE_v0.4 §3.3; `docs/design/bounded-bilateral.md` |
 | **G3. Backend-fallback observability** | Whether the warning infrastructure works under real fallback conditions | end of Phase 2 | SPEC_UPDATE_v0.2 §7.2 |
 
 Gate outcomes are recorded in §10 deviation log even when they pass cleanly. A failed
@@ -598,8 +598,9 @@ Port hypercoil community / relaxed-modularity numerics.
 
 **Entry criteria.** Phase 2 exit clear. (Phase 3 is independent.)
 
-**Exit criteria.** `nitrix.smoothing` (gaussian, bilateral_gaussian,
-permutohedral_lattice per tripwire), `nitrix.morphology` shipped.
+**Exit criteria.** `nitrix.smoothing` (gaussian, bilateral_gaussian —
+the bounded bilateral), `nitrix.morphology` shipped. Permutohedral
+retired (SPEC_UPDATE_v0.4); no symbol ships.
 
 ### 7.1 Phase 4 tasks
 
@@ -607,15 +608,22 @@ permutohedral_lattice per tripwire), `nitrix.morphology` shipped.
 
 Separable Gaussian. Pure JAX. The unconditional baseline. Cheap.
 
-#### 4.2 `nitrix.smoothing.bilateral_gaussian`
+#### 4.2 `nitrix.smoothing.bilateral_gaussian` — the bounded bilateral
 
 Direct N-body bilateral over arbitrary `d_f`, implemented as a `semiring_ell_matmul`
-over distance-thresholded sectioned-ELL adjacency. This is the **marquee capability
-delivered regardless of permutohedral risk**.
+over a bounded feature-space adjacency. This is the **marquee capability**, and (per
+SPEC_UPDATE_v0.4) the bounded bilateral that supersedes permutohedral. It takes a
+factored feature metric (`FeatureMetric`: `DiagonalMetric` / `FactorMetric`, with
+`block_diagonal_metric` / `metric_from_spd` constructors), a validity `mask` for
+ragged / padded neighbourhoods (grid box, mesh k-ring, geodesic ball), and
+fixed-affinity iteration (`n_iters`).
 
 Specific tests: agreement with a reference NumPy direct-N-body implementation;
-agreement with `gaussian` in the limit of large `sigma_intensity` (where the
-intensity-similarity weighting becomes uninformative).
+`DiagonalMetric` ≡ `FactorMetric(diag(1/σ))`; low-rank `FactorMetric` matches the
+dense quadratic form; the mask zeroes padding (removing the double-count at mesh
+pentagons / grid boundaries); `n_iters` matches a manual re-apply; finite-diff
+gradient w.r.t. the metric factor; agreement with `gaussian` in the large-bandwidth
+limit (where the intensity-similarity weighting becomes uninformative).
 
 #### 4.3 `nitrix.morphology.{erode, dilate, open, close, distance_transform}`
 
@@ -635,36 +643,28 @@ Convenience wrapper composing `bilateral_gaussian` + `median_filter`. Docstring
 explicitly documents the behavioural deltas from FSL SUSAN (no auto-flat-kernel at
 small extents).
 
-#### 4.6 `nitrix.smoothing.permutohedral_lattice` — G2 gate
+#### 4.6 ~~`nitrix.smoothing.permutohedral_lattice` — G2 gate~~ — RETIRED
 
-The high-risk item. Attempt the implementation in this order:
-
-1. **Pure JAX reference.** Working implementation of splat / blur / slice in JAX.
-   Slow but correct. Reference for the optimised path.
-2. **Optimisation pass.** JAX with hand-rolled gather patterns, or JAX+Pallas hybrid
-   for the splat/slice hash table operations. Pallas-pure is explicitly not required
-   (SPEC_UPDATE §3.3).
-3. **G2 tripwire evaluation.** Per SPEC_UPDATE_v0.2 §3.3, evaluate against the four
-   criteria (PSNR > 40 dB, < 10× Gaussian wall time, < 30 s first compile, gradient
-   passes finite-diff). Pin the actual numbers from benchmark before evaluation.
-
-**G2 outcomes:**
-
-- **All four criteria met:** ship `permutohedral_lattice`. Done.
-- **Criteria 1 (parity) or 4 (gradient) fail:** correctness problem; fix or revisit.
-  Do not ship a permutohedral with wrong outputs or wrong gradients.
-- **Criteria 2 (perf) or 3 (compile) fail:** the implementation is correct but
-  doesn't clear the perf bar. The symbol raises `NotImplementedError` pointing to
-  `bilateral_gaussian` for d_f ≤ 5. The implementation is checked in under
-  `_experimental/` for future work. Revisit at 1.x.
+**Resolved (SPEC_UPDATE_v0.4): retired, not shipped.** The G2 assessment
+(`docs/design/permutohedral-g2.md`) found the lattice's pure-JAX obstacles —
+dynamic-membership hash table, blur-time neighbour materialisation, simplex-identity
+gradient discontinuity — to be consequences of targeting *unbounded* support in high
+`d_f`. Our use cases accept bounded-hop neighbourhoods, which dissolves all three.
+The bounded bilateral (§4.2: `bilateral_gaussian` with a factored metric, validity
+mask, and `n_iters`) fills the role permutohedral was reserved for — for the feature
+dimensionalities we target, and via a low-rank `FactorMetric` beyond — at one gather
+plus one smooth weighted reduction. The symbol and its stub are removed; the
+namespace is not reserved (no consumers to redirect). See
+`docs/design/bounded-bilateral.md`.
 
 ### 7.2 Phase 4 exit checklist
 
-- [ ] `gaussian`, `bilateral_gaussian` shipped unconditionally.
+- [ ] `gaussian`, `bilateral_gaussian` (the bounded bilateral) shipped
+      unconditionally.
 - [ ] Morphology shipped: erode, dilate, open, close, distance_transform via tropical
       semiring; median_filter via gather; susan_emulator composing both.
-- [ ] G2 evaluated; `permutohedral_lattice` either shipped or raises with clear
-      pointer.
+- [x] G2 resolved → permutohedral retired (SPEC_UPDATE_v0.4); bounded bilateral
+      supersedes it.
 
 ---
 
@@ -737,8 +737,10 @@ in the subpackage's own `_PLAN.md` (to be created in Phase 0 scaffolding).
 ### 9.3 `nitrix.smoothing`
 
 - [ ] `gaussian` unconditional.
-- [ ] `bilateral_gaussian` unconditional.
-- [ ] `permutohedral_lattice` evaluated at G2; ships or raises with pointer.
+- [ ] `bilateral_gaussian` (the bounded bilateral) unconditional: factored
+      `FeatureMetric`, validity mask, `n_iters`.
+- [x] `permutohedral_lattice` retired (SPEC_UPDATE_v0.4); bounded bilateral
+      supersedes it.
 
 ### 9.4 `nitrix.morphology`
 

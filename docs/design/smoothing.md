@@ -1,13 +1,18 @@
 # Smoothing: gaussian, bilateral, susan
 
-> **TL;DR.**  Three smoothers ship at first GA: ``gaussian`` (separable
-> n-D, pure JAX, unconditional baseline), ``bilateral_gaussian`` (the
-> marquee edge-preserving capability, direct N-body via
-> ``semiring_ell_matmul``), and ``susan_emulator`` (convenience
-> wrapper composing bilateral + median).  Sectioned ELL ships as a
+> **TL;DR.**  Two smoothers plus a convenience wrapper: ``gaussian``
+> (separable n-D, pure JAX, unconditional baseline),
+> ``bilateral_gaussian`` (the marquee edge-preserving capability — a
+> **bounded bilateral**, direct N-body via ``semiring_ell_matmul``),
+> and ``susan_emulator`` (composing bilateral + median).  The bilateral
+> takes a factored feature metric (the ``FeatureMetric`` ADT), a
+> validity ``mask`` for ragged / padded neighbourhoods, and
+> fixed-affinity iteration (``n_iters``).  Sectioned ELL ships as a
 > sibling in ``nitrix.sparse`` for variable-degree adjacencies.  All
 > are pure-JAX; bilateral and susan re-use the existing semiring
-> substrate with no new kernel code.
+> substrate with no new kernel code.  The permutohedral lattice is
+> **retired** (SPEC_UPDATE_v0.4); see
+> [`bounded-bilateral.md`](bounded-bilateral.md).
 
 ## Gaussian: separable, n-D, scipy-parity
 
@@ -65,21 +70,24 @@ companion ``_conv_1d_along_axis`` switches to asymmetric padding
 ``(K//2 - 1, K//2)`` for even kernels to keep the output the
 same shape as the input.
 
-## Bilateral: the marquee Phase 4 capability
+## Bilateral: the marquee capability (a bounded bilateral)
 
-Per SPEC_UPDATE §3.3 the marquee edge-preserving smoother, delivered
-at first GA regardless of permutohedral risk.  Mathematically::
+Per SPEC §3.3 (as amended by SPEC_UPDATE_v0.4) the marquee
+edge-preserving smoother: a true high-dimensional bilateral over a
+**bounded** neighbourhood and a factored feature metric.
+Mathematically::
 
     out[i, :] = (1 / Z[i]) * sum_p w[i, p] * values[idx[i, p], :]
-    w[i, p]   = exp(-0.5 * sum_d ((feat[i, d] - feat[idx[i, p], d]) / sigma[d])**2)
+    w[i, p]   = exp(-0.5 * q[i, p]) * mask[i, p]
+    q[i, p]   = || L^T (feat[i] - feat[idx[i, p]]) ||^2   [ = d^T M d, M = L L^T ]
     Z[i]      = sum_p w[i, p]
 
 The implementation in
 [`smoothing/bilateral.py`](../../src/nitrix/smoothing/bilateral.py)
-gathers neighbour features, computes Gaussian weights, normalises
-per row, and reduces via ``semiring_ell_matmul`` with the REAL
-semiring.  All of the heavy lifting is in the existing kernel; the
-bilateral file is ~50 lines plus ``brute_force_knn``.
+gathers neighbour features, projects the difference through the metric
+factor ``L``, computes Gaussian weights, nulls padding via ``mask``,
+normalises per row, and reduces via ``semiring_ell_matmul`` with the
+REAL semiring.  All of the heavy lifting is in the existing kernel.
 
 The reduction *is* an ELL matmul: ``weights`` are the per-row values,
 ``indices`` are the per-row neighbour-list, ``values`` are the dense
@@ -88,6 +96,30 @@ operand.  Normalising the weights to sum to 1 (rather than carrying
 choice; for further-optimised variants where ``Z`` and the numerator
 share a streaming pass, we'd need a custom Monoid -- not worth it for
 the first cut.
+
+### The metric (``FeatureMetric`` ADT)
+
+The weight metric ``M`` is supplied factored as ``M = L Lᵀ`` via a tiny
+ADT in [`smoothing/metric.py`](../../src/nitrix/smoothing/metric.py); the
+kernel only needs ``project(d) = Lᵀ d``:
+
+- ``DiagonalMetric(sigma)`` -- ``M = diag(1/σ²)``; the classic
+  per-channel bilateral (and the pre-v0.4 ``sigma_features`` behaviour).
+- ``FactorMetric(L)`` -- general factor ``(d_f, k)``: ``k < d_f`` is a
+  low-rank projection of correlated channels (weight cost ``O(k)``);
+  ``k = d_f`` is a full anisotropic metric.
+
+with ``block_diagonal_metric`` (independent per-modality bandwidths) and
+``metric_from_spd`` (Cholesky) as pure constructors.  Both records are
+registered pytrees, so ``L`` is differentiable end-to-end.  Fitting
+``L`` from data is a consumer concern, not nitrix's.
+
+### Iteration
+
+``n_iters > 1`` re-applies the filter with the affinity (features,
+neighbours, weights) held fixed and only the values diffusing -- a
+bounded dense-CRF mean-field update.  The weights are built once and
+re-applied, so the cost is linear in ``n_iters``.
 
 ### What "feature space" means here
 
@@ -104,22 +136,32 @@ multi-modal smoothing (e.g., T1 + T2 + diffusion-derived scalar) cleanly.
 
 ### The neighbourhood argument
 
-Two cases, per the spec signature:
+Three cases:
 
-- **int ``k``**: brute-force k-NN in the rescaled feature space
-  (rescaling by ``sigma_features`` so the kNN metric matches the
-  weight metric).  Materialises the ``(n, n)`` distance matrix;
-  quadratic memory.  Practical for ``n ≲ 10k``.
+- **int ``k``**: brute-force k-NN in the projected feature space (the
+  metric is applied to the ranking so the kNN metric matches the weight
+  metric).  Materialises the ``(n, n)`` distance matrix; quadratic
+  memory.  Practical for ``n ≲ 10k``.
 - **explicit ``(n, k_max)`` adjacency**: use as-is.  This is the
   path for ``n`` larger than brute-force can handle -- the caller
   pre-computes the adjacency via a spatial index (KD-tree, grid
-  hashing, atlas parcellation, etc.).
+  hashing, atlas parcellation, etc.).  Pass a ``mask`` if the rows are
+  ragged / padded.
+- **``ELL`` adjacency**: a grid box, mesh k-ring, or geodesic ball.  Its
+  ``indices`` are used and the validity ``mask`` is derived from the
+  padding identity, so ragged neighbourhoods are handled correctly with
+  no caller bookkeeping.
+
+The ``mask`` is not just ergonomics: padded / clamped neighbours are
+real in-range indices, so without nulling them a low-degree mesh vertex
+(an icosphere pentagon) or a grid boundary voxel would **double-count**
+the repeated neighbour.
 
 For ``susan_emulator``, we hand-build a spatial-cube adjacency
-(``spatial_cube_neighbourhood``) so the bilateral feature space is
-spatial + intensity but the adjacency is *fixed* to a spatial cube
-around each voxel.  This is the standard SUSAN-style use case and
-avoids the O(n²) k-NN.
+(``spatial_cube_neighbourhood``, which also returns a validity mask) so
+the bilateral feature space is spatial + intensity but the adjacency is
+*fixed* to a spatial cube around each voxel.  This is the standard
+SUSAN-style use case and avoids the O(n²) k-NN.
 
 ## Edge preservation in practice
 
@@ -211,12 +253,13 @@ API would gain a ``sectioned=True`` flag.
   because the uniform-degree case (e.g., a fixed k-NN neighbourhood)
   fits a flat ELL perfectly and adding bucketing overhead is wasteful.
   Both formats live in ``nitrix.sparse``.
-- **Permutohedral lattice for bilateral.**  SPEC_UPDATE §3.3 lists it
-  as a target with a four-criterion tripwire (parity, perf,
-  compile-time, gradient).  We deliberately deferred until the
-  bilateral marquee shipped via direct N-body, because bilateral is
-  the *capability* promise and permutohedral is the *performance*
-  optimisation.  Revisit at 1.x per the tripwire.
+- **Permutohedral lattice for bilateral.**  Originally a
+  tripwire-gated target (SPEC_UPDATE §3.3), now **retired**
+  (SPEC_UPDATE_v0.4): bounded support dissolves the lattice's reason
+  for existing, and the bounded bilateral above fills its role for the
+  feature dimensionalities we target (and, via a low-rank metric,
+  beyond).  See [`bounded-bilateral.md`](bounded-bilateral.md) and
+  [`permutohedral-g2.md`](permutohedral-g2.md).
 - **Streaming Z accumulator in the bilateral matmul.**  We compute
   ``Z`` as a separate ``weights.sum`` pass before normalising.  A
   custom Monoid that carries ``(weighted_sum, Z)`` in its state could

@@ -159,8 +159,8 @@ composing ``smoothing.bilateral_gaussian`` (the brightness-similarity
 half) with ``morphology.median_filter`` (the impulse-noise half).  The
 former is Phase 4 smoothing work not yet landed; until it lands,
 ``susan_emulator`` raises ``NotImplementedError`` with a pointer at
-the alternatives.  This is the same "reserve the namespace; raise
-with a clear pointer" pattern as ``permutohedral_lattice`` (SPEC §3.3).
+the alternatives.  This is the standard "reserve the namespace; raise
+with a clear pointer until the dependency lands" pattern.
 
 ## Differentiability
 

@@ -26,9 +26,13 @@ import pytest
 scipy_ndi = pytest.importorskip('scipy.ndimage')
 
 from nitrix.smoothing import (
+    DiagonalMetric,
+    FactorMetric,
     bilateral_gaussian,
+    block_diagonal_metric,
     brute_force_knn,
     gaussian,
+    metric_from_spd,
     susan_emulator,
 )
 
@@ -225,7 +229,7 @@ def test_bilateral_matches_handwritten_reference():
     sigma = jnp.array([1.0, 1.0, 1.5])
     got = bilateral_gaussian(
         values, features,
-        sigma_features=sigma, neighbourhood=5,
+        metric=DiagonalMetric(sigma), neighbourhood=5,
         backend='jax',
     )
     ref = _bilateral_reference(values, features, sigma, k=5)
@@ -268,7 +272,7 @@ def test_bilateral_approaches_gaussian_at_large_sigma_intensity():
     sigma_huge = jnp.array([1.0, 1e6])
     out_bilateral = bilateral_gaussian(
         values, features,
-        sigma_features=sigma_huge,
+        metric=DiagonalMetric(sigma_huge),
         neighbourhood=7,
         backend='jax',
     )
@@ -303,7 +307,7 @@ def test_bilateral_explicit_adjacency():
     ])
     got = bilateral_gaussian(
         values, features,
-        sigma_features=sigma, neighbourhood=adj,
+        metric=DiagonalMetric(sigma), neighbourhood=adj,
         backend='jax',
     )
     assert got.shape == (n, 1)
@@ -318,7 +322,7 @@ def test_bilateral_differentiable():
     def loss(values):
         return bilateral_gaussian(
             values, features,
-            sigma_features=sigma, neighbourhood=4,
+            metric=DiagonalMetric(sigma), neighbourhood=4,
             backend='jax',
         ).sum()
     g = jax.grad(loss)(values)
@@ -332,7 +336,7 @@ def test_bilateral_rejects_mismatched_n():
     with pytest.raises(ValueError, match='n='):
         bilateral_gaussian(
             values, features,
-            sigma_features=sigma, neighbourhood=2,
+            metric=DiagonalMetric(sigma), neighbourhood=2,
             backend='jax',
         )
 
@@ -344,6 +348,231 @@ def test_brute_force_knn_self_first():
     # Each row's first index (sorted by ascending distance, distance
     # to self = 0) should be the row index itself.
     np.testing.assert_array_equal(idx[:, 0], jnp.arange(10))
+
+
+# ---------------------------------------------------------------------------
+# bounded bilateral: factored metric, mask, iteration
+# ---------------------------------------------------------------------------
+
+
+def test_bilateral_diagonal_equals_factor_diag():
+    '''DiagonalMetric(sigma) == FactorMetric(diag(1/sigma)).'''
+    n = 16
+    values = jax.random.normal(jax.random.key(70), (n, 2))
+    features = jax.random.normal(jax.random.key(71), (n, 3))
+    sigma = jnp.array([1.0, 2.0, 0.5])
+    out_diag = bilateral_gaussian(
+        values, features,
+        metric=DiagonalMetric(sigma), neighbourhood=5, backend='jax',
+    )
+    out_factor = bilateral_gaussian(
+        values, features,
+        metric=FactorMetric(jnp.diag(1.0 / sigma)),
+        neighbourhood=5, backend='jax',
+    )
+    np.testing.assert_allclose(out_diag, out_factor, atol=1e-12)
+
+
+def test_bilateral_full_factor_matches_dense_quadratic():
+    '''A full FactorMetric weights by exp(-1/2 d^T M d), M = L L^T.'''
+    n = 12
+    values = jax.random.normal(jax.random.key(72), (n, 1))
+    features = jax.random.normal(jax.random.key(73), (n, 3))
+    a = jax.random.normal(jax.random.key(74), (3, 3))
+    L = jnp.linalg.cholesky(a @ a.T + 3.0 * jnp.eye(3))
+    M = L @ L.T
+    # Explicit (n, k_max) adjacency so the reference shares it.
+    adj = brute_force_knn(features, 4)
+    got = bilateral_gaussian(
+        values, features,
+        metric=FactorMetric(L), neighbourhood=adj, backend='jax',
+    )
+    # Direct reference using the dense quadratic form.
+    f = np.asarray(features)
+    v = np.asarray(values)
+    idx = np.asarray(adj)
+    Mnp = np.asarray(M)
+    ref = np.zeros_like(v)
+    for i in range(n):
+        d = f[i] - f[idx[i]]
+        q = np.einsum('kd,de,ke->k', d, Mnp, d)
+        w = np.exp(-0.5 * q)
+        w = w / w.sum()
+        ref[i] = (w[:, None] * v[idx[i]]).sum(0)
+    np.testing.assert_allclose(got, ref, atol=1e-10)
+
+
+def test_bilateral_low_rank_factor_projects():
+    '''A low-rank factor (k < d_f) costs like its rank: q uses L only.'''
+    n = 10
+    values = jax.random.normal(jax.random.key(75), (n, 1))
+    features = jax.random.normal(jax.random.key(76), (n, 4))
+    L = jax.random.normal(jax.random.key(77), (4, 2))  # rank-2 metric
+    adj = brute_force_knn(features, 4)
+    got = bilateral_gaussian(
+        values, features,
+        metric=FactorMetric(L), neighbourhood=adj, backend='jax',
+    )
+    f = np.asarray(features)
+    v = np.asarray(values)
+    idx = np.asarray(adj)
+    Lnp = np.asarray(L)
+    ref = np.zeros_like(v)
+    for i in range(n):
+        z = (f[i] - f[idx[i]]) @ Lnp        # (k_max, 2)
+        w = np.exp(-0.5 * (z ** 2).sum(-1))
+        w = w / w.sum()
+        ref[i] = (w[:, None] * v[idx[i]]).sum(0)
+    np.testing.assert_allclose(got, ref, atol=1e-10)
+
+
+def test_bilateral_mask_nulls_padding_no_double_count():
+    '''A validity mask removes the double-count of repeated/padded
+    neighbour indices.  Without the mask, a duplicated index is
+    weighted twice; with it, the duplicate contributes nothing.
+    '''
+    n = 5
+    values = jnp.arange(n, dtype=jnp.float64)[:, None]
+    features = jnp.arange(n, dtype=jnp.float64)[:, None]
+    metric = DiagonalMetric(jnp.array([1.0]))
+    # Row 0 lists neighbour 1 twice (a padded duplicate) and 0 once.
+    adj = jnp.array([[0, 1, 1], [1, 2, 2], [2, 3, 3], [3, 4, 4], [4, 4, 4]])
+    mask = jnp.array([
+        [True, True, False],
+        [True, True, False],
+        [True, True, False],
+        [True, True, False],
+        [True, False, False],
+    ])
+    masked = bilateral_gaussian(
+        values, features, metric=metric, neighbourhood=adj, mask=mask,
+        backend='jax',
+    )
+    unmasked = bilateral_gaussian(
+        values, features, metric=metric, neighbourhood=adj, backend='jax',
+    )
+    # Row 0 masked: neighbours {0, 1}, weights exp(0), exp(-0.5).
+    w0, w1 = np.exp(0.0), np.exp(-0.5)
+    expect0 = (w0 * 0.0 + w1 * 1.0) / (w0 + w1)
+    np.testing.assert_allclose(float(masked[0, 0]), expect0, atol=1e-12)
+    # Unmasked counts neighbour 1 twice -> different (larger) value.
+    assert float(unmasked[0, 0]) > float(masked[0, 0]) + 1e-6
+
+
+def test_bilateral_ell_neighbourhood_derives_mask():
+    '''An ELL neighbourhood derives its validity mask from padding,
+    so a ragged mesh k-ring (pentagons have lower degree) is handled
+    correctly with no caller bookkeeping.
+    '''
+    from nitrix.sparse.mesh import icosphere, mesh_k_ring_adjacency
+
+    mesh = icosphere(1)                       # 42 vertices, 12 pentagons
+    n = mesh.n_vertices
+    ell = mesh_k_ring_adjacency(mesh, k=1, include_self=True)
+    features = mesh.vertices.astype(jnp.float64)
+    values = jax.random.normal(jax.random.key(78), (n, 1))
+    metric = DiagonalMetric(jnp.full((3,), 0.5))
+    got = bilateral_gaussian(
+        values, features, metric=metric, neighbourhood=ell, backend='jax',
+    )
+    # Reference honouring the ELL's validity mask.
+    idx = np.asarray(ell.indices)
+    valid = np.asarray(ell.values) != ell.identity
+    f = np.asarray(features)
+    v = np.asarray(values)
+    ref = np.zeros_like(v)
+    for i in range(n):
+        d2 = (((f[i] - f[idx[i]]) / 0.5) ** 2).sum(-1)
+        w = np.exp(-0.5 * d2) * valid[i]
+        w = w / max(w.sum(), np.finfo(np.float64).tiny)
+        ref[i] = (w[:, None] * v[idx[i]]).sum(0)
+    np.testing.assert_allclose(got, ref, atol=1e-10)
+
+
+def test_bilateral_n_iters_matches_manual_reapply():
+    '''n_iters=t equals t manual single-pass re-applications (fixed
+    affinity: features and weights are held constant).
+    '''
+    n = 20
+    values = jax.random.normal(jax.random.key(79), (n, 2))
+    features = jax.random.normal(jax.random.key(80), (n, 2))
+    metric = DiagonalMetric(jnp.array([1.0, 1.0]))
+    adj = brute_force_knn(features, 5)
+
+    def step(x):
+        return bilateral_gaussian(
+            x, features, metric=metric, neighbourhood=adj, backend='jax',
+        )
+
+    iterated = bilateral_gaussian(
+        values, features, metric=metric, neighbourhood=adj,
+        n_iters=3, backend='jax',
+    )
+    manual = step(step(step(values)))
+    np.testing.assert_allclose(iterated, manual, atol=1e-12)
+
+
+def test_bilateral_n_iters_rejects_zero():
+    values = jnp.zeros((4, 1))
+    features = jnp.zeros((4, 1))
+    with pytest.raises(ValueError, match='n_iters'):
+        bilateral_gaussian(
+            values, features,
+            metric=DiagonalMetric(jnp.array([1.0])),
+            neighbourhood=2, n_iters=0, backend='jax',
+        )
+
+
+def test_bilateral_grad_wrt_metric_factor():
+    '''The smoothed output is differentiable w.r.t. the metric factor
+    L (so the metric is learnable end-to-end).
+    '''
+    n = 12
+    values = jax.random.normal(jax.random.key(81), (n, 1))
+    features = jax.random.normal(jax.random.key(82), (n, 3))
+    adj = brute_force_knn(features, 5)
+
+    def loss(L):
+        out = bilateral_gaussian(
+            values, features,
+            metric=FactorMetric(L), neighbourhood=adj, backend='jax',
+        )
+        return (out ** 2).sum()
+
+    L0 = jnp.eye(3) * 0.8
+    g = jax.grad(loss)(L0)
+    assert g.shape == (3, 3)
+    assert bool(jnp.all(jnp.isfinite(g)))
+    # Finite-difference check on one entry.
+    eps = 1e-4
+    dL = jnp.zeros((3, 3)).at[0, 1].set(eps)
+    num = (loss(L0 + dL) - loss(L0 - dL)) / (2 * eps)
+    np.testing.assert_allclose(float(g[0, 1]), float(num), rtol=1e-3, atol=1e-5)
+
+
+def test_metric_from_spd_and_block_diagonal():
+    '''Constructor helpers: Cholesky factor and block-diagonal assembly.'''
+    a = jax.random.normal(jax.random.key(83), (3, 3))
+    M = a @ a.T + 2.0 * jnp.eye(3)
+    fm = metric_from_spd(M)
+    d = jnp.array([[1.0, -2.0, 0.5]])
+    q = (fm.project(d) ** 2).sum(-1)
+    q_ref = (d @ M * d).sum(-1)
+    np.testing.assert_allclose(q, q_ref, atol=1e-9)
+
+    bd = block_diagonal_metric(
+        [jnp.diag(1.0 / jnp.array([1.0, 2.0])), jnp.array([[0.5]])]
+    )
+    np.testing.assert_allclose(
+        bd.factor,
+        jnp.array([[1.0, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 0.5]]),
+        atol=1e-12,
+    )
+
+    with pytest.raises(ValueError, match='non-empty'):
+        block_diagonal_metric([])
+    with pytest.raises(ValueError, match='square'):
+        metric_from_spd(jnp.zeros((3, 2)))
 
 
 # ---------------------------------------------------------------------------
@@ -382,18 +611,16 @@ def test_susan_emulator_with_median_prepass():
     assert abs(float(out_med[5, 5])) < abs(float(out_no_med[5, 5]))
 
 
-def test_permutohedral_lattice_raises_with_pointer():
-    '''Per SPEC_UPDATE §3.3 the symbol raises NotImplementedError
-    at first GA, with a clear pointer at ``bilateral_gaussian``
-    and the tripwire rationale.  See docs/design/permutohedral-g2.md.
+def test_permutohedral_lattice_symbol_retired():
+    '''Permutohedral was retired in SPEC_UPDATE_v0.4; the bounded
+    bilateral (``bilateral_gaussian`` + factored metric / mask /
+    ``n_iters``) supersedes it.  The symbol no longer exists.
+    See docs/design/bounded-bilateral.md.
     '''
-    from nitrix.smoothing import permutohedral_lattice
-    with pytest.raises(NotImplementedError, match='bilateral_gaussian'):
-        permutohedral_lattice(
-            jnp.zeros((4, 1)),
-            jnp.zeros((4, 2)),
-            sigma_features=jnp.array([1.0, 1.0]),
-        )
+    import nitrix.smoothing as smoothing
+    assert not hasattr(smoothing, 'permutohedral_lattice')
+    with pytest.raises(ImportError):
+        from nitrix.smoothing import permutohedral_lattice  # noqa: F401
 
 
 def test_susan_emulator_canonical_home_is_smoothing():

@@ -1,14 +1,23 @@
 # Permutohedral lattice: the G2 tripwire outcome
 
-> **TL;DR.**  ``permutohedral_lattice`` ships as a stub raising
-> ``NotImplementedError`` at first GA, per the SPEC_UPDATE §3.3
+> **RETIRED (SPEC_UPDATE_v0.4).**  The permutohedral lattice is no longer
+> a target; the symbol and its stub have been removed.  Bounded support
+> dissolves every obstacle this assessment identified, and the **bounded
+> bilateral** (``bilateral_gaussian`` with a factored metric, validity
+> mask, and fixed-affinity iteration) supersedes its intended role.  See
+> [`bounded-bilateral.md`](bounded-bilateral.md).  The G2 tripwire is
+> withdrawn as moot.  This document is retained as the historical record
+> of *why* the lattice was unfit for pure JAX.
+
+> **TL;DR (historical).**  ``permutohedral_lattice`` shipped as a stub
+> raising ``NotImplementedError`` at first GA, per the SPEC_UPDATE §3.3
 > tripwire's "no interim partial shipping" rule.  The technical
 > assessment: a *correctness-first dense* implementation works for
 > ``d_f ≤ 3`` but fails the perf criterion at the target ``d_f``;
 > the *sparse* implementation requires hash-table machinery that
 > doesn't have a clean JAX pattern.  ``bilateral_gaussian`` is the
 > documented fallback (and is itself the marquee Phase 4 capability
-> that ships unconditionally per the spec).  Revisit at 1.x.
+> that ships unconditionally per the spec).
 
 ## The criterion-by-criterion assessment
 

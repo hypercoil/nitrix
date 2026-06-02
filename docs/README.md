@@ -133,10 +133,16 @@ benchmark reports, and survive being plucked into the eventual
   subsystem added under the IMPLEMENTATION_PLAN §2 deviation protocol.
 - [`design/smoothing.md`](design/smoothing.md) -- ``gaussian``
   (separable, scipy-parity), ``bilateral_gaussian`` (marquee edge-
-  preserving capability via ``semiring_ell_matmul`` over a feature-
-  distance-weighted adjacency), ``susan_emulator`` (composition with
-  documented deltas from FSL SUSAN), plus the sectioned-ELL story
-  for variable-degree adjacencies.
+  preserving capability: the **bounded bilateral** via
+  ``semiring_ell_matmul`` over a feature-distance-weighted adjacency,
+  with a factored ``FeatureMetric``, validity mask, and ``n_iters``),
+  ``susan_emulator`` (composition with documented deltas from FSL
+  SUSAN), plus the sectioned-ELL story for variable-degree adjacencies.
+- [`design/bounded-bilateral.md`](design/bounded-bilateral.md) -- the
+  bounded bilateral design and the **permutohedral retirement**: why
+  conceding bounded support dissolves the lattice's obstacles, the
+  ``FeatureMetric`` ADT (diagonal / low-rank / full), validity masking
+  as a correctness fix, and fixed-affinity iteration.
 - [`design/geometry.md`](design/geometry.md) -- ``grid``
   (voxelmorph-style deformable-registration primitives written from
   scratch), ``sphere`` with ``spherical_conv`` re-backed on
@@ -169,11 +175,12 @@ benchmark reports, and survive being plucked into the eventual
   ELL and per-section row_groups-gather-projected backward for
   SectionedELL.  Closes the last non-differentiable graph path.
 - [`design/permutohedral-g2.md`](design/permutohedral-g2.md) --
-  the G2 tripwire outcome for ``permutohedral_lattice``: stub
-  raising ``NotImplementedError`` at first GA per the SPEC's
-  "no interim partial shipping" rule.  Documents the structural
-  obstacles (hash-table representation, neighbour lookups during
-  blur) and the path to a future implementation.
+  the G2 tripwire outcome for ``permutohedral_lattice`` (**retired**
+  in SPEC_UPDATE_v0.4; superseded by the bounded bilateral, see
+  ``bounded-bilateral.md``).  Retained as the historical record of the
+  structural obstacles (hash-table representation, neighbour lookups
+  during blur, simplex-identity gradient discontinuity) that bounded
+  support dissolves.
 - [`design/testing-strategy.md`](design/testing-strategy.md) -- how
   backend parity, identity propagation, numerical stability, finite-
   difference grad, and fallback observability are organised in the
