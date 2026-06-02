@@ -1,0 +1,110 @@
+# nitrix feature requests — index
+
+Active feature requests live here, **one doc per proposal**. **Check this
+index before filing a new one** — it is the duplicate-issue guard: if a
+primitive or fix already has a doc, add to that doc rather than opening a
+parallel one.
+
+Four families of doc live here, each with a *context/ledger* doc that holds
+the shared framing + history and indexes its atomised items:
+
+| Family | Context/ledger doc | What it is |
+|---|---|---|
+| Consumer-pipeline substrate | [`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md) | Kernels a named downstream (ilex → thrux) is blocked or workaround-laden without |
+| Internal engineering backlog | [`internal-backlog.md`](internal-backlog.md) | Parked perf / Pallas / API-refinement items, each gated on a **Trigger** |
+| Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
+| SPEC §12 brainstorm catalogue | `SPEC_UPDATE_v0.3.md §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
+
+Status is verified against the live `src/nitrix` surface as of 2026-06-02.
+
+## Consumer-pipeline substrate (ilex → thrux)
+
+Context, scope boundary, and already-shipped record:
+[`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md).
+
+| Doc | Severity | Home |
+|---|---|---|
+| [connected-components](connected-components.md) | ENABLING (highest recurrence) | `morphology` |
+| [pad-to-multiple](pad-to-multiple.md) | ENABLING | `numerics` |
+| [crop-to-nonzero](crop-to-nonzero.md) | ENABLING | `numerics` |
+| [cubic-resample](cubic-resample.md) | MISMATCH (parity) | `geometry.grid` |
+| [intensity-normalize-variants](intensity-normalize-variants.md) | CONVENIENCE | `numerics.normalize` |
+| [sliding-window-weighting](sliding-window-weighting.md) | CONVENIENCE | `numerics` |
+| [point-sample](point-sample.md) | CONVENIENCE | `geometry.grid` |
+| [compute-vertex-normals](compute-vertex-normals.md) | CONVENIENCE | `sparse.mesh` |
+| [upsample-nearest-nd](upsample-nearest-nd.md) | CONVENIENCE | `numerics` / `geometry` |
+| [spatial-transform-batched](spatial-transform-batched.md) | CONVENIENCE | `geometry.grid` |
+
+## Internal engineering backlog
+
+Ledger (framing, closed-by-design, resolved):
+[`internal-backlog.md`](internal-backlog.md).
+
+| B# | Doc | Kind |
+|---|---|---|
+| B2 | [perf-bench-sprint-surfaces](perf-bench-sprint-surfaces.md) | perf characterisation |
+| B3 | [pallas-dispatch-edge-aggregate](pallas-dispatch-edge-aggregate.md) | Pallas dispatch (measured: not GPU-motivated) |
+| B4 | [edge-aggregate-log-euclidean](edge-aggregate-log-euclidean.md) | semiring coverage (canonical entry) |
+| B5 | [keops-genred-research](keops-genred-research.md) | research note |
+| B6 | [pallas-gaussian-blur](pallas-gaussian-blur.md) | Pallas kernel |
+| B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (cheap JAX interim win) |
+| B8 | [semiring-annihilator-field](semiring-annihilator-field.md) | API refinement (S) |
+| B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning (M) |
+| B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) |
+| G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension (S) |
+
+## Doc-drift / correctness fixes
+
+Ledger: [`perf-bench-feedback.md`](perf-bench-feedback.md). These are
+mechanical docstring fixes, not primitive proposals.
+
+| Doc | Site |
+|---|---|
+| [doc-lomb-scargle-normalisation](doc-lomb-scargle-normalisation.md) | `signal/lomb_scargle.py:154` |
+| [doc-lomb-scargle-eigh-factorisation](doc-lomb-scargle-eigh-factorisation.md) | `signal/lomb_scargle.py:43–49` |
+| [doc-lomb-scargle-cpu-eigh-caveat](doc-lomb-scargle-cpu-eigh-caveat.md) | `linalg/_solver.py:147` |
+| [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` |
+| [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` |
+
+## SPEC §12 brainstorm catalogue (candidate primitives)
+
+`§` = origin entry in `SPEC_UPDATE_v0.3.md` (the canonical origin record; the
+`§13` acceptance protocol references items by number). **Status** is against
+live code: *not started* / *partial* (some substrate shipped).
+
+| § | Doc | Proposed module | Effort | Status |
+|---|---|---|---|---|
+| 12.1 | [krylov-solvers](krylov-solvers.md) | `linalg.krylov` | M | not started |
+| 12.2 | [matrix-functions](matrix-functions.md) | `linalg.matrix_function` | S | partial (`sym*` family shipped) |
+| 12.3 | [heat-kernel-diffusion](heat-kernel-diffusion.md) | `graph.diffusion` | S | partial (`diffusion_embedding` shipped) |
+| 12.4 | [sinkhorn-optimal-transport](sinkhorn-optimal-transport.md) | `transport` | M | not started |
+| 12.5 | [discrete-exterior-calculus](discrete-exterior-calculus.md) | `geometry.dec` | M | partial (cotangent Laplacian shipped) |
+| 12.6 | [mesh-curvature](mesh-curvature.md) | `geometry.curvature` | S | not started |
+| 12.7 | [robust-statistics](robust-statistics.md) | `stats.robust` | S | not started |
+| 12.8 | [fixed-point-combinators](fixed-point-combinators.md) | `numerics.fixed_point` | M | not started (SnS special case exists) |
+| 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.sphere.harmonics` | M | not started |
+| 12.10 | [compensated-summation](compensated-summation.md) | `numerics.precision` | S | not started |
+| 12.11 | [ode-integrators](ode-integrators.md) | `numerics.ode` | L | partial (`integrate_velocity_field` shipped) |
+| 12.12 | [continuous-wavelet-transform](continuous-wavelet-transform.md) | `signal.cwt` | S | not started |
+| 12.13 | [graph-wavelet-transform](graph-wavelet-transform.md) | `graph.wavelet` | S | not started (blocked on 12.2) |
+| 12.14 | [graphical-lasso](graphical-lasso.md) | `stats.glasso` | M | not started |
+| 12.15 | [surface-resample-adap-bary](surface-resample-adap-bary.md) | `geometry.sphere.resample` | M | partial (icosphere `BARYCENTRIC` shipped) |
+| 12.16 | [surface-boundary-map](surface-boundary-map.md) | `graph.parcellation.boundary` | S | not started (composes shipped prims) |
+| 12.17 | [mesh-watershed](mesh-watershed.md) | `graph.parcellation.watershed` | M | not started |
+| 12.18 | [clustering-primitives](clustering-primitives.md) | `numerics.cluster` | S/M | not started |
+| 12.19 | [normalised-cut](normalised-cut.md) | `graph.ncut` | XS | not started (blocked on 12.18) |
+
+**§12.20** (functional-parcellation strategy survey) is informational — a
+strategy→primitive mapping table, not a primitive — and stays in
+`SPEC_UPDATE_v0.3.md §12.20`. The parcellation docs (12.16–12.19) link to it.
+
+### Dependency edges (within the §12 catalogue)
+
+```
+12.1 krylov ──┬─> 12.8 fixed-point ──┬─> 12.18 clustering ──> 12.19 ncut
+              │                       └─> 12.14 glasso (impl-VJP)
+              └─> 12.11 ode (adjoint)
+12.2 matrix-fn ─┬─> 12.3 heat-kernel
+                └─> 12.13 graph-wavelet
+12.16 boundary ──> 12.17 watershed
+```
