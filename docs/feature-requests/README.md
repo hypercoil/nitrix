@@ -98,6 +98,12 @@ live code: *not started* / *partial* (some substrate shipped).
 strategy→primitive mapping table, not a primitive — and stays in
 `SPEC_UPDATE_v0.3.md §12.20`. The parcellation docs (12.16–12.19) link to it.
 
+**Candidate not yet in SPEC §12:**
+[ledoit-wolf-shrinkage](ledoit-wolf-shrinkage.md) (`stats.ledoit_wolf`, effort
+S, **low priority**) — analytic shrinkage covariance; sibling of 12.14 glasso
+and nilearn's *default* connectome estimator. Surfaced by perf-bench
+(nilearn defaults to Ledoit-Wolf; nitrix has no shrinkage estimator).
+
 ### Dependency edges (within the §12 catalogue)
 
 ```

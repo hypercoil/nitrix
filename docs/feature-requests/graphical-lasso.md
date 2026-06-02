@@ -51,6 +51,9 @@ this sparsifies), and `linalg.symlog` (the ADMM `proximal_log_det` piece).
 ## Cross-references
 
 - `SPEC_UPDATE_v0.3.md §12.14` — origin entry; `§13` — acceptance protocol.
+- [`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md) — sibling
+  regularised-covariance estimator (analytic shrinkage; nilearn's *default*
+  connectome estimator, the lighter default-path counterpart to GLASSO).
 - [`krylov-solvers.md`](krylov-solvers.md) — implicit-VJP inner solve.
 - `src/nitrix/stats/covariance.py` — `cov` / `precision` / `partialcorr`.
 - [`docs/design/stats.md`](../design/stats.md).
