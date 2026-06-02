@@ -76,6 +76,50 @@ clarity only):** one line in the docstring — *"cross-correlation convention
 (kernel not flipped), as in conv layers; reverse the kernel for a true
 convolution."*
 
+### 2026-06-02 — `lomb_scargle_interpolate`: ill-conditioning ⇒ document the *intended use* (spectral bridge, not durable imputation)
+
+Surfaced while building the perf-bench `lomb_scargle_interpolate` case. Measured
+(from-scratch fp64 joint-GLM vs nitrix, this checkout): the masked Gram
+`Bᵀ diag(mask) B` is **hugely ill-conditioned (cond ~1e32)**. nitrix correctly
+regularises it with the rcond-truncated pseudo-inverse, but **which** near-zero
+eigenvalues fall below the `rcond·max` threshold differs between fp32 and fp64
+(and between the fp32 trial-freq grid and a fp64 one), so the **reconstruction
+at *censored* frames has no well-defined bit-level value** — two valid
+regularised solutions disagree by **up to ~1.4 on O(1) signals** (worst frame,
+`obs=256`, ~15% censoring). The **observed-frame splice-through is exact**
+(`recon[obs] == data[obs]`, 0.0).
+
+**This is not a bug — but it has a use-case implication worth documenting.** The
+Power-2014 procedure's purpose is *not* to "repair" high-motion frames for
+durable inclusion in analysis; it is to produce a **spectrally-consistent bridge**
+so that downstream **autoregressive / IIR temporal filters** (band-pass,
+high-pass, etc.) can run across the gaps without ringing or spectral leakage —
+i.e. so the filter can effectively *ignore* the censored frames by matching
+their spectral content to the surrounding low-motion frames. The filled values
+are a transient means to that end; the censored frames are typically dropped
+again after filtering. Critically, the fp32/regularisation sensitivity lives in
+the **near-null-space** (high-frequency basis directions the irregular observed
+grid cannot pin down — exactly what the rcond truncation zeros), which a
+downstream low/band-pass filter attenuates anyway. So the sensitivity is
+**benign for the intended use** but would be a real correctness trap if a user
+treated the interpolated values as **durable per-frame imputations** for direct
+analysis.
+
+**Fix (docstring, `lomb_scargle_interpolate` ~264–359).** State the intended
+use explicitly: *"The filled values at censored frames are a spectrally-
+consistent bridge for downstream temporal (AR/IIR) filtering — not durable
+imputations for direct per-frame analysis. The reconstruction at censored
+frames is regularised (rcond-truncated pseudo-inverse of an ill-conditioned
+masked Gram) and is therefore not bit-reproducible across precisions; only the
+observed-sample splice-through and the band-limited spectral content are
+well-defined. If you need the filled values durably, compute in fp64 and treat
+the high-frequency content as undetermined."*
+
+**Perf-bench handling (FYI):** the case scores fidelity on the well-defined
+property — the splice-through (asserted in tests) — and sets
+`fp64_reference=None` (no cross-impl oracle, SCHEMA §C) for the censored-frame
+values rather than gating on an ill-posed target.
+
 ## Resolved
 
 _(none yet; reference the resolving nitrix commit on fix.)_
