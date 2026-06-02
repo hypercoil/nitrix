@@ -30,8 +30,8 @@ not here; conflating them with the N4 name would mislabel non-N4 output.
 
 Why no Pallas: the heavy ops are dense small-matrix contractions and 1-D
 FFTs, which XLA already schedules near-optimally on GPU/TPU.  Per the house
-"benchmark-first, don't build Pallas speculatively" policy (BACKLOG B6/B7),
-N4 ships pure-JAX.
+"benchmark-first, don't build Pallas speculatively" policy
+(docs/feature-requests/internal-backlog.md B6/B7), N4 ships pure-JAX.
 
 Differentiability: the B-spline smoothing is differentiable; the histogram
 sharpening is not (piecewise-constant binning).  Per the consumer ask,

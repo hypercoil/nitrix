@@ -352,7 +352,8 @@ already schedules near-optimally.  There is no materialised
 ``(BM, BK, BN)`` tensor to stream, no gather to fuse: the structure that
 makes the semiring substrate want a custom kernel is simply absent here.
 Per the house "benchmark-first, don't build Pallas speculatively" policy
-(BACKLOG B6 / B7), N4 ships pure-JAX; a kernel would be revisited only if a
+(`feature-requests/internal-backlog.md` B6 / B7), N4 ships pure-JAX; a kernel
+would be revisited only if a
 consumer benchmark showed a wall.  Measured wall time (A10G, jax 0.10.0,
 post-compile): ~72 ms / call at 64³, ~533 ms / call at 128³ -- against
 ANTs N4's seconds-to-tens-of-seconds on CPU.
@@ -416,7 +417,7 @@ Three layers (``tests/test_bias.py``):
 - SPEC §1 (charter: "class of ANTs"), §2.1 (pure-numeric contract),
   §3.2 (the no-scatter/BCOO stance the separable form honours).
 - IMPLEMENTATION_PLAN §2 (deviation protocol -- new subsystem).
-- BACKLOG B6 / B7 (benchmark-first Pallas policy).
+- `feature-requests/internal-backlog.md` B6 / B7 (benchmark-first Pallas policy).
 - Tustison et al. 2010, "N4ITK: Improved N3 Bias Correction", IEEE TMI.
 - Lee, Wolberg, Shin 1997, "Scattered Data Interpolation with Multilevel
   B-Splines", IEEE TVCG.

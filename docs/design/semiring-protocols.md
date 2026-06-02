@@ -145,7 +145,7 @@ Because overloading one field for two distinct algebraic roles is a
 confusion risk as the algebra set grows, ``ell_mask`` takes an
 explicit ``identity=`` value (caller passes ``semiring.identity``,
 which is correct for the maskable algebras) rather than a
-``semiring=``.  BACKLOG B8 tracks the option of adding an explicit
+``semiring=``.  ``feature-requests/internal-backlog.md`` B8 tracks the option of adding an explicit
 ``annihilator`` field (``None`` for EUCLIDEAN) so the masking path can
 be machine-checked.
 

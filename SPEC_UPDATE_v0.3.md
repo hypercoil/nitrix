@@ -68,8 +68,8 @@ substrate.  No new "message-passing" class; the user's closure
 ``edge_fn`` parameters flows naturally via JAX (no custom_vjp
 needed).
 
-**Driving consumer.**  ilex/Topofit (``NITRIX_FEEDBACK_ILEX.md``
-FA2).  Covers GCN, GAT, EdgeConv/DGCNN, MoNet, ChebNet with one
+**Driving consumer.**  ilex/Topofit (FA2).  Covers GCN, GAT,
+EdgeConv/DGCNN, MoNet, ChebNet with one
 primitive + a user callable.
 
 **Sealed-spec status.**  Add to SPEC §3.1 "Public surface
@@ -185,7 +185,7 @@ entries:
    "writing a custom semiring", "using ELL for mesh ops",
    "choosing between gaussian and bilateral_gaussian".  None
    landed yet.  Notebook gestation should track the perf-bench
-   work (B2 in ``BACKLOG.md``).
+   work (B2 in ``docs/feature-requests/internal-backlog.md``).
 3. **G0 / G1 / G2 gate outcomes** in ``§10`` deviation log.
    The plan's gate machinery says outcomes are logged in §10;
    the section is currently empty.  Backfill with the actual
@@ -688,7 +688,7 @@ following hold:
 1. **Concrete consumer.**  A named downstream port (ilex model,
    hypercoil pipeline, nimox vendor) is blocked or
    workaround-laden without it.  "We might want X someday"
-   does not qualify — keep it in BACKLOG.md.
+   does not qualify — keep it in ``docs/feature-requests/internal-backlog.md``.
 2. **Substrate composition is verified.**  Implementor has
    sketched the composition with existing primitives in plain
    English (no new kernel, no parallel API).  If the

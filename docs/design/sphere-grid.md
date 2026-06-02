@@ -143,4 +143,5 @@ source rows.  Tested in ``test_sphere_grid_pad_2d_differentiable``.
 - ``src/nitrix/morphology/_mm.py::dilate`` -- the docstring
   pointer for the composition pattern.
 - [`geometry.md`](geometry.md) -- the parent design doc.
-- ``NITRIX_FEEDBACK_JOSA.md`` §1 -- the consumer's request.
+- the JOSA consumer request (the ``NITRIX_FEEDBACK_JOSA.md`` gap report
+  has been retired; see ``IMPLEMENTATION_PLAN.md §10.3``).

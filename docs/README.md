@@ -106,8 +106,8 @@ benchmark reports, and survive being plucked into the eventual
   ``max_unpool_nd`` for encoder-decoder pipelines, with the
   argmax-agreement parity caveat documented), and the
   ``sparse.mesh`` convenience wrappers (``mesh_pool_max`` /
-  ``mesh_unpool_max`` / ``mesh_bary_upsample``).  Closes
-  FA2–FA5 from ``NITRIX_FEEDBACK_ILEX.md``.
+  ``mesh_unpool_max`` / ``mesh_bary_upsample``).  Closes the
+  ilex mesh-graph consumer asks FA2–FA5 (see ``SPEC_UPDATE_v0.3 §10.A``).
 - [`design/backward-kernels.md`](design/backward-kernels.md) -- the
   per-algebra ``jax.custom_vjp`` story, the per-algebra differentiability
   vocabulary, and the G1 finite-difference gate.

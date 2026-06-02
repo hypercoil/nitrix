@@ -162,8 +162,9 @@ recovers a geometrically-meaningful "centre on the sphere".
 Driven by the ``ilex.models.josa`` port (a FreeSurfer
 ``mris_register_josa`` reimplementation that is the densest
 consumer of ``geometry`` / ``smoothing`` / ``morphology`` to
-date).  See ``NITRIX_FEEDBACK_JOSA.md`` for the original gap
-report.
+date).  The driving JOSA consumer gap report has since been
+retired; the resolved design is recorded here and in
+``IMPLEMENTATION_PLAN.md §10.3``.
 
 ### `spatial_transform(mode=...)` and `integrate_velocity_field(mode=...)`
 
@@ -282,5 +283,6 @@ them would confuse readers.
   the prior validations of the same substrate bet.
 - [`sphere-grid.md`](sphere-grid.md) -- the parameterised-sphere
   topology rationale (J.1a).
-- ``NITRIX_FEEDBACK_JOSA.md`` -- the consumer gap report that
-  drove this sprint.
+- ``IMPLEMENTATION_PLAN.md §10.3`` -- the deviation-log record of this
+  JOSA-driven sprint (the original ``NITRIX_FEEDBACK_JOSA.md`` gap report
+  has been retired).

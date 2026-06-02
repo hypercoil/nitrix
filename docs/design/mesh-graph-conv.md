@@ -13,9 +13,9 @@
 > The matching icosphere-hierarchy construction trio
 > (``icosphere_hierarchy`` / ``icosphere_cross_level_adjacency`` /
 > ``icosphere_bary_upsampler``) builds the cross-level ELLs the
-> wrappers consume.  Together they close the consumer ask in
-> ``NITRIX_FEEDBACK_ILEX.md`` (FA2–FA4) for a coherent mesh-graph CNN
-> stack on top of the substrate.
+> wrappers consume.  Together they close the ilex Topofit/SUGAR consumer
+> ask (FA2–FA4; resolution recorded in ``SPEC_UPDATE_v0.3 §10.A``) for a
+> coherent mesh-graph CNN stack on top of the substrate.
 
 ## Motivation
 

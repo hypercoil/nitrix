@@ -818,7 +818,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 ### 2026-05-20 — SUGAR feedback batch: edge attributes, row-softmax, mean-pool, external topology, masking
 
 - **Type:** Downstream deviation
-- **Triggered by:** ilex/SUGAR port (`NITRIX_FEEDBACK_ILEX.md`, 2026-05-18) — second
+- **Triggered by:** ilex/SUGAR port (2026-05-18) — second
   surface-domain consumer of the ELL mesh-graph-conv substrate after Topofit.
 - **Description:** Five additive, substrate-aligned changes. (1) `edge_attr=`
   kwarg on `semiring_ell_edge_aggregate`: when set, `edge_fn` receives a 5th arg
@@ -846,7 +846,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   That violates SPEC §5.2 / non-negotiable §2.2.1. nitrix stays array-only; the
   consumer/`thrux` does the I/O and hands in plain arrays via
   `icosphere_hierarchy_from_levels`.
-- **Deferred work:** Pallas dispatch for `semiring_ell_edge_aggregate` (BACKLOG B3);
+- **Deferred work:** Pallas dispatch for `semiring_ell_edge_aggregate` (internal-backlog B3);
   LOG/EUCLIDEAN edge-aggregate semirings (B4). Bench at ico_6/ico_7 (B2).
 - **Non-negotiables held:** No new deps; pure-array signatures (NamedTuple/dataclass
   containers only); JAX floor exercised in CI; golden/property tests added.
@@ -922,7 +922,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   corner loads) — the same primitive G0 found Pallas Triton cannot lower on the
   pinned JAX. Rather than write a kernel speculatively, shipped a baseline bench
   (`bench/trilinear_resample.py` → `bench/PERF_TRILINEAR.md`) and parked the kernel
-  in BACKLOG B7 behind a two-part gate: (a) the path is a real training-loop
+  in internal-backlog B7 behind a two-part gate: (a) the path is a real training-loop
   bottleneck, and (b) a pointer-load Pallas prototype clears the gather-lowering
   risk. The Gaussian-blur Pallas request (low priority) is parked in B6 (stencil,
   not gather; cuDNN baseline is strong; only a fused-passes win exists).
@@ -971,10 +971,10 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   **unmasked** a known, author-documented `residualise` limitation: the exact
   `residual + projection == Y` decomposition breaks at `1e-5` (float32) for
   ill-conditioned designs (`p -> obs`).  It is pre-existing (identical on old and
-  new `residualise`) — see BACKLOG **B9**.  Per decision, constrained the
+  new `residualise`) — see internal-backlog **B9**.  Per decision, constrained the
   exact-decomposition property tests to the well-conditioned domain
   (`generate_valid_arrays(well_conditioned=True)`, `p <= obs/2`) so they are
-  honest and green, and BACKLOG'd the real numerical fix (SVD/QR projector).
+  honest and green, and parked the real numerical fix (SVD/QR projector) in the backlog.
 - **Non-negotiables held:** the deflake loses **no** input coverage (only timing
   assertions dropped); the ill-conditioned limitation is documented + tracked
   (B9), not silently skipped.
@@ -985,7 +985,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 - **Description:** `Semiring.identity` is the **monoid identity**; padding / masking
   (`sparse.ell_mask`) needs the **`(*)`-annihilator**, which coincides with
   `identity` for all built-ins **except** `EUCLIDEAN` (no annihilator; `identity=0`
-  does not mask).  Recorded in `docs/design/semiring-protocols.md` and BACKLOG
+  does not mask).  Recorded in `docs/design/semiring-protocols.md` and internal-backlog
   **B8** (consider an explicit `annihilator` field rather than overloading
   `identity`).
 
@@ -1026,7 +1026,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 ### 2026-05-22 — ELL self-loops for graph-attention convs (`ell_add_self_loops`)
 
 - **Type:** Downstream deviation
-- **Triggered by:** ilex/SUGAR feedback (`NITRIX_FEEDBACK_ILEX.md`, 2026-05-21) --
+- **Triggered by:** ilex/SUGAR feedback (2026-05-21) --
   a GATv2 port built on the ELL-edge surface ran at plausible magnitude but
   miscomputed because the surface had no self-loop step.
 - **Description:** Graph attention attends each vertex to *itself* -- the
@@ -1056,10 +1056,10 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   signature or any existing caller); no framework dependency or concern leakage
   (no `torch_geometric`, no PyG-named API); docs grounded in the literature.
 
-### 2026-05-22 — `residualise` rank-deficient robustness verified + documented (BACKLOG B9)
+### 2026-05-22 — `residualise` rank-deficient robustness verified + documented (internal-backlog B9)
 
 - **Type:** Robustness / test-quality
-- **Triggered by:** BACKLOG **B9** -- the 2026-05-21 deflake surfaced that
+- **Triggered by:** internal-backlog **B9** -- the 2026-05-21 deflake surfaced that
   `linalg.residualise` loses the exact `residual + projection == Y`
   decomposition for ill-conditioned designs; the property tests were capped to
   the well-conditioned regime to stay green.
