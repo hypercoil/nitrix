@@ -67,6 +67,7 @@ mechanical docstring fixes, not primitive proposals.
 | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` |
 | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` |
 | [doc-op-matrix-inventory-gaps](doc-op-matrix-inventory-gaps.md) | `docs/op_matrix.json` (`ops`) |
+| [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` |
 
 ## SPEC §12 brainstorm catalogue (candidate primitives)
 
