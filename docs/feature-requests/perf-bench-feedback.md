@@ -26,9 +26,11 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `tsconv` documented as "convolution" but is cross-correlation | [doc-tsconv-cross-correlation](doc-tsconv-cross-correlation.md) | `signal/tsconv.py:45` | low (clarity) |
 | `lomb_scargle_interpolate` intended-use (spectral bridge, not durable imputation) | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` | normal |
 | `gaussian_kernel` sigma->gamma relation wrong (missing ½ factor) | [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` | low (clarity) |
+| `relaxed_modularity` doesn't reduce to Newman modularity — it's `Q_N / 2` (double-corrected undirected count); default `exclude_diag=True` also drops the diagonal | [doc-relaxed-modularity-newman-factor](doc-relaxed-modularity-newman-factor.md) | `graph/community.py:245` | low (clarity) |
 
 _(The five lomb/tsconv findings above resolved 2026-06-02 — see below;
-`doc-gaussian-kernel-gamma` is newly open 2026-06-03.)_
+`doc-gaussian-kernel-gamma` and `doc-relaxed-modularity-newman-factor` are
+newly open 2026-06-03.)_
 
 ## Resolved
 
