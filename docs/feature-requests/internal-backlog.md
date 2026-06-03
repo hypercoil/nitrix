@@ -33,6 +33,7 @@ in *Resolved* below.
 | B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning | M |
 | B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) | L (sliceable) |
 | B12 | [iir-filter-gpu-backend](iir-filter-gpu-backend.md) | perf / API-default (IIR GPU backend) | S + M |
+| B13 | [boundary-mode-parity](boundary-mode-parity.md) | API refinement (scipy/ITK boundary parity) | M |
 | G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension | S |
 
 (B1, B8, and B9 are resolved — see below. `spatial_transform_batched`, JOSA §3,
