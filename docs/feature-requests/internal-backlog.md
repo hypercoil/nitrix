@@ -37,6 +37,7 @@ in *Resolved* below.
 | B14 | [spectral-embedding-gpu-solver](spectral-embedding-gpu-solver.md) | perf + robustness (lobpcg / eigh on GPU) | M |
 | B15 | [interpolation-backend-cpu-gpu-gap](interpolation-backend-cpu-gpu-gap.md) | perf characterisation (map_coordinates CPU/GPU) | S char / M-L fix |
 | B16 | [alternative-interp-backends-xla](alternative-interp-backends-xla.md) | research note (scipy/cupy backends in XLA) | M-L |
+| B17 | [median-percentile-cpu-sort-cliff](median-percentile-cpu-sort-cliff.md) | perf characterisation (jnp.median/percentile CPU sort) | M |
 | G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension | S |
 
 (B1, B8, and B9 are resolved — see below. `spatial_transform_batched`, JOSA §3,
