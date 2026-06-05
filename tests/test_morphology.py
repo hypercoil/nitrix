@@ -33,6 +33,7 @@ from nitrix.morphology import (
     close as morph_close,
     dilate,
     distance_transform,
+    distance_transform_edt,
     erode,
     median_filter,
     open as morph_open,
@@ -180,10 +181,27 @@ def test_distance_transform_3d():
     np.testing.assert_array_equal(got, ref.astype(np.float32))
 
 
+def test_distance_transform_euclidean_is_default_and_exact():
+    # The default metric is exact Euclidean -- scipy distance_transform_edt.
+    rng = np.random.RandomState(0)
+    mask = (rng.random((16, 16)) > 0.5).astype(np.float32)
+    got = distance_transform(jnp.asarray(mask), backend='jax')  # default
+    ref = scipy_ndi.distance_transform_edt(mask > 0.5)
+    np.testing.assert_allclose(got, ref, rtol=1e-4, atol=1e-4)
+
+
+def test_distance_transform_edt_alias_3d_matches_scipy():
+    rng = np.random.RandomState(1)
+    mask = (rng.random((8, 8, 8)) > 0.5).astype(np.float32)
+    got = distance_transform_edt(jnp.asarray(mask), backend='jax')
+    ref = scipy_ndi.distance_transform_edt(mask > 0.5)
+    np.testing.assert_allclose(got, ref, rtol=1e-4, atol=1e-4)
+
+
 def test_distance_transform_rejects_unknown_metric():
     mask = jnp.zeros((4, 4))
-    with pytest.raises(ValueError, match='euclidean|metric'):
-        distance_transform(mask, metric='euclidean', backend='jax')
+    with pytest.raises(ValueError, match='metric'):
+        distance_transform(mask, metric='manhattan', backend='jax')
 
 
 # ---------------------------------------------------------------------------
