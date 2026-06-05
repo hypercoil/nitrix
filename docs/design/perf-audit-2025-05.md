@@ -1,5 +1,16 @@
 # Perf audit, 2025-05: where we lag and what to do about it
 
+> **RESOLVED 2026-06-05 (the distance_transform gap is closed).** The
+> recommendation below -- ship exact EDT, F-H or Saito-Toriwaki -- was
+> superseded by a better fit: exact Euclidean DT is now the **default** of
+> ``distance_transform`` (with a ``distance_transform_edt`` alias), computed as
+> a separable per-axis ``TROPICAL_MIN_PLUS`` *matmul* against the squared-
+> distance matrix, reusing the ``semiring_matmul`` kernel.  F-H was prototyped
+> and dropped (control-flow-bound on GPU, ~80× behind cupy); the matmul reaches
+> **parity with cupy at 64³ on the L4 and beats scipy on CPU**, exact.  See
+> ``docs/design/morphology.md`` ("exact Euclidean (default) vs chamfer") and
+> the perf-bench ``PERF_DISTANCE_TRANSFORM`` report.
+
 > **TL;DR.** Audit of ~6 newer public ops vs natural references
 > (numpy / scipy / sklearn / statsmodels) on the A10G runner.  Headline:
 > nitrix dominates by 100-800× at fMRI-realistic scales (V=100k voxels,
