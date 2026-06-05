@@ -42,10 +42,24 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Num
 
+from .._internal.backend import default_backend_is_gpu
+
 __all__ = ['butterworth_sos', 'sosfilt', 'sosfiltfilt', 'iir_filter']
 
 _BType = str  # 'lowpass' | 'highpass' | 'bandpass' | 'bandstop'
-_Backend = str  # 'scan' | 'associative'
+_Backend = str  # 'auto' | 'scan' | 'associative'
+
+
+def _resolve_iir_backend(backend: _Backend) -> _Backend:
+    '''Resolve ``'auto'`` to the recurrence engine that wins on this platform.
+
+    The sequential ``scan`` wins on CPU; the parallel-prefix ``associative``
+    wins on GPU (measured 8.3x faster on the L4 at ch=1024/obs=4096, while
+    losing ~9x on CPU).  Explicit ``'scan'`` / ``'associative'`` pass through.
+    '''
+    if backend == 'auto':
+        return 'associative' if default_backend_is_gpu() else 'scan'
+    return backend
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +382,7 @@ def sosfilt(
     sos: np.ndarray,
     *,
     axis: int = -1,
-    backend: _Backend = 'scan',
+    backend: _Backend = 'auto',
 ) -> Num[Array, '... obs']:
     '''Apply a causal IIR filter (forward only) given its SOS cascade.
 
@@ -381,18 +395,23 @@ def sosfilt(
         ``butterworth_sos``).  Static host coefficients (NumPy); they are
         baked into the recurrence, not traced.
     backend
-        ``'scan'`` (default; sequential, low-memory) or ``'associative'``
-        (parallel-prefix, ``O(log T)`` depth).
+        ``'auto'`` (default) picks the recurrence engine by platform --
+        ``'scan'`` on CPU, ``'associative'`` on GPU -- because the optimal
+        choice flips with the device (the sequential ``lax.scan`` is
+        low-overhead on CPU; the parallel-prefix ``associative_scan`` is
+        ``O(log T)`` depth and fills the GPU).  Pass ``'scan'`` /
+        ``'associative'`` to force a specific engine.
     '''
     sos_np = np.asarray(sos)
     x = jnp.moveaxis(jnp.asarray(X), axis, 0)
+    backend = _resolve_iir_backend(backend)
     if backend == 'scan':
         y = _sosfilt_scan(sos_np, x, zi=None)
     elif backend == 'associative':
         y = _sosfilt_associative(sos_np, x)
     else:
         raise ValueError(
-            f"backend={backend!r}; expected 'scan' or 'associative'."
+            f"backend={backend!r}; expected 'auto', 'scan' or 'associative'."
         )
     return jnp.moveaxis(y, 0, axis)
 
@@ -457,7 +476,7 @@ def iir_filter(
     hi: Optional[float] = None,
     order: int = 2,
     zero_phase: bool = True,
-    backend: _Backend = 'scan',
+    backend: _Backend = 'auto',
     axis: int = -1,
 ) -> Num[Array, '... obs']:
     '''Recursive Butterworth IIR filter (design + apply).
@@ -485,7 +504,8 @@ def iir_filter(
         Butterworth phase delay.
     backend
         Recurrence engine for the *causal* (``zero_phase=False``) path:
-        ``'scan'`` (default) or ``'associative'``.  The zero-phase path is
+        ``'auto'`` (default; ``scan`` on CPU, ``associative`` on GPU) or a
+        forced ``'scan'`` / ``'associative'``.  The zero-phase path is
         always ``'scan'`` (exact initial conditions).
 
     Returns
