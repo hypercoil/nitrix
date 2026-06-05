@@ -626,8 +626,23 @@ register(OpInfo(
         ((jax.random.normal(_key(), (12, 12)) > 0).astype(jnp.float32),),
         {},
     ),
-    invariants=('iterative TROPICAL_MIN_PLUS', 'chamfer (not exact EDT)'),
-    notes='15x slower than scipy EDT at (64,64) -- algorithm mismatch',
+    invariants=(
+        'separable Felzenszwalb-Huttenlocher exact EDT (default metric)',
+        'opt-in chamfer via metric=/structuring_element (TROPICAL_MIN_PLUS)',
+    ),
+    notes='euclidean default matches scipy EDT to round-off; chamfer opt-in',
+))
+register(OpInfo(
+    'nitrix.morphology.distance_transform_edt',
+    fixture=lambda: (
+        ((jax.random.normal(_key(), (12, 12)) > 0).astype(jnp.float32),),
+        {},
+    ),
+    invariants=(
+        'exact Euclidean DT (separable Felzenszwalb-Huttenlocher)',
+        'alias of distance_transform(metric="euclidean")',
+    ),
+    notes='scipy distance_transform_edt parity; forward-mode diff only',
 ))
 register(OpInfo(
     'nitrix.morphology.median_filter',

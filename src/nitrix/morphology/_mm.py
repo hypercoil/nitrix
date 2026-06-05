@@ -39,7 +39,14 @@ from ..semiring import (
 )
 
 
-__all__ = ['dilate', 'erode', 'open', 'close', 'distance_transform']
+__all__ = [
+    'dilate',
+    'erode',
+    'open',
+    'close',
+    'distance_transform',
+    'distance_transform_edt',
+]
 
 
 # ---------------------------------------------------------------------------
@@ -308,70 +315,187 @@ def _chebyshev_3x3_offsets(spatial_rank: int, dtype: DTypeLike) -> Array:
     return se
 
 
+# ---------------------------------------------------------------------------
+# Exact Euclidean distance transform (Felzenszwalb-Huttenlocher, separable)
+# ---------------------------------------------------------------------------
+
+# Finite sentinel for "no seed here": large enough that no real squared
+# distance approaches it (the max squared EDT of a grid is sum of (extent-1)^2,
+# << this), but small enough that ``BIG + d^2`` and ``BIG - BIG`` stay exact /
+# finite in fp32.  A finite sentinel (vs ``+inf``) keeps the parabola-
+# intersection arithmetic free of ``inf - inf = nan``.
+_EDT_BIG = 1e10
+_EDT_BIG_THRESHOLD = 1e9  # accumulated cost >= this <=> no boundary reachable
+
+
+def _edt_1d_squared(f: Float[Array, 'n']) -> Float[Array, 'n']:
+    '''1D squared distance transform ``D[p] = min_q ((p - q)^2 + f[q])``.
+
+    The lower envelope of the parabolas ``(p - q)^2 + f[q]`` (one rooted at
+    each ``q``, height ``f[q]``), computed in ``O(n)`` by the Felzenszwalb-
+    Huttenlocher two-pass scan: pass 1 builds the envelope as a stack of
+    parabola indices ``v`` and their breakpoints ``z``; pass 2 walks the
+    breakpoints assigning each position to its governing parabola.  The
+    stack pops are data-dependent but amortise to ``O(n)``; the fixed-size
+    ``v`` / ``z`` carries make it ``jit`` / ``vmap``-able.
+
+    ``f`` is the per-position cost: ``0`` at seeds and ``_EDT_BIG`` elsewhere
+    for the first axis, the accumulated squared distance for later axes.
+    '''
+    n = f.shape[0]
+    dtype = f.dtype
+    big = jnp.asarray(_EDT_BIG, dtype)
+    neg = jnp.asarray(-_EDT_BIG, dtype)
+    pos = jnp.arange(n, dtype=dtype)
+
+    def intersect(q: Array, vk: Array) -> Array:
+        # Abscissa where the parabolas rooted at ``q`` and ``vk`` meet
+        # (``q > vk`` always in pass 1, so the denominator is >= 2).
+        return (
+            (f[q] + pos[q] * pos[q]) - (f[vk] + pos[vk] * pos[vk])
+        ) / (2.0 * pos[q] - 2.0 * pos[vk])
+
+    # Pass 1 -- build the lower envelope.
+    v = jnp.zeros(n, jnp.int32)
+    z = jnp.full(n + 1, big, dtype).at[0].set(neg)
+
+    def build(q: Array, carry: tuple) -> tuple:
+        k, v, z = carry
+        s = intersect(q, v[k])
+        # Pop envelope parabolas the new one undercuts.
+        k, s = lax.while_loop(
+            lambda st: st[1] <= z[st[0]],
+            lambda st: (st[0] - 1, intersect(q, v[st[0] - 1])),
+            (k, s),
+        )
+        k = k + 1
+        v = v.at[k].set(q)
+        z = z.at[k].set(s).at[k + 1].set(big)
+        return k, v, z
+
+    k, v, z = lax.fori_loop(1, n, build, (jnp.int32(0), v, z))
+
+    # Pass 2 -- assign each position to the parabola governing it.
+    def assign(q: Array, carry: tuple) -> tuple:
+        k, out = carry
+        k = lax.while_loop(lambda k: z[k + 1] < pos[q], lambda k: k + 1, k)
+        d = (pos[q] - pos[v[k]]) ** 2 + f[v[k]]
+        return k, out.at[q].set(d)
+
+    _, out = lax.fori_loop(
+        0, n, assign, (jnp.int32(0), jnp.zeros(n, dtype))
+    )
+    return out
+
+
+def _edt_along_axis(
+    g: Float[Array, '...'], axis: int,
+) -> Float[Array, '...']:
+    '''Apply the 1D squared-EDT along ``axis``, vmapped over every line.'''
+    g = jnp.moveaxis(g, axis, -1)
+    shape = g.shape
+    flat = g.reshape(-1, shape[-1])
+    out = jax.vmap(_edt_1d_squared)(flat).reshape(shape)
+    return jnp.moveaxis(out, -1, axis)
+
+
+def _distance_transform_edt(
+    mask: Num[Array, '... *spatial'],
+) -> Float[Array, '... *spatial']:
+    '''Exact Euclidean DT via the separable Felzenszwalb-Huttenlocher engine.
+
+    Squared Euclidean distance separates over axes, so the exact transform is
+    the sequential composition of the 1D squared-EDT along each axis; ``sqrt``
+    once at the end.  Seeds are the zero positions of ``mask``; every axis is
+    treated as spatial (scipy ``distance_transform_edt`` convention).
+    '''
+    arr = jnp.asarray(mask)
+    dtype = jnp.promote_types(arr.dtype, jnp.float32)
+    g = jnp.where(
+        arr == 0,
+        jnp.zeros((), dtype),
+        jnp.asarray(_EDT_BIG, dtype),
+    )
+    for axis in range(arr.ndim):
+        g = _edt_along_axis(g, axis)
+    return jnp.where(
+        g >= _EDT_BIG_THRESHOLD,
+        jnp.asarray(jnp.inf, dtype),
+        jnp.sqrt(g),
+    )
+
+
 def distance_transform(
     mask: Num[Array, '... *spatial'],
     *,
-    metric: str = 'chebyshev',
+    metric: str = 'euclidean',
     structuring_element: Optional[Num[Array, '*kspatial']] = None,
     max_iters: Optional[int] = None,
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial']:
-    '''Distance transform via iterative min-plus convolution.
+    '''Distance transform: distance from each interior voxel to the boundary.
 
-    For each output position ``i``, returns the distance to the
-    nearest position where ``mask`` is zero (the "boundary").
-    Non-zero ``mask`` positions are interior; zero positions are
-    distance zero.  Iterative ``TROPICAL_MIN_PLUS`` convolution with
-    a step-cost structuring element converges to the exact distance
-    transform in ``max(spatial_shape)`` iterations.
+    For each output position ``i``, returns the distance to the nearest
+    position where ``mask`` is zero (the "boundary").  Non-zero ``mask``
+    positions are interior; zero positions are distance zero.
+
+    Two engines, selected by ``metric``:
+
+    - ``metric="euclidean"`` (**default**) -- **exact** Euclidean distance
+      transform via the separable Felzenszwalb-Huttenlocher lower-envelope
+      algorithm (``O(N * d)`` for ``N`` voxels, spatial rank ``d``).  This is
+      the metric ``scipy.ndimage.distance_transform_edt`` computes; the result
+      matches it to floating-point round-off.  Forward-mode differentiable;
+      **not** reverse-mode differentiable (the envelope's argmin control flow
+      is piecewise constant) -- use a chamfer metric below when a sub-gradient
+      is needed.
+    - ``metric="chebyshev"`` / ``"city_block"`` / a custom
+      ``structuring_element`` -- approximate **chamfer** DT via iterated
+      ``TROPICAL_MIN_PLUS`` convolution, sharing the tropical-semiring
+      substrate with ``erode`` / ``dilate`` and converging in
+      ``max(spatial_shape)`` iterations.  Reverse-mode differentiable.
 
     Parameters
     ----------
     mask
-        Input, ``(..., *spatial)``.  Non-zero positions are interior.
+        Input, ``(..., *spatial)``.  Non-zero positions are interior.  The
+        Euclidean engine treats every axis as spatial (the
+        ``scipy.ndimage.distance_transform_edt`` convention); ``vmap`` to
+        batch.
     metric
-        Either ``"chebyshev"`` (chessboard distance, default) or
-        ``"city_block"`` (Manhattan distance).  Approximate Euclidean
-        is not currently implemented; the exact Felzenszwalb-Huttenlocher
-        algorithm is a 1.x deferral.
+        ``"euclidean"`` (default, exact EDT), ``"chebyshev"`` (chessboard
+        chamfer), or ``"city_block"`` (Manhattan chamfer).
     structuring_element
-        Explicit per-step cost kernel.  When given, overrides
-        ``metric``.  Center should be 0; neighbours should encode
-        their per-step distance contribution (1 for Chebyshev,
-        per-axis step for city-block).
+        Explicit per-step cost kernel for the chamfer engine.  When given,
+        **selects the chamfer path regardless of** ``metric`` and is used as
+        the step-cost kernel.  Center should be 0; neighbours encode their
+        per-step distance contribution (1 for Chebyshev, per-axis step for
+        city-block).
     max_iters
-        Cap on iterations.  Defaults to the longest spatial extent
-        (sufficient for exact convergence).
+        Chamfer engine only: cap on iterations (defaults to the longest
+        spatial extent, sufficient for exact convergence).  Ignored by the
+        Euclidean engine, which is non-iterative.
     backend
-        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.
+        Chamfer engine only: ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.
 
     Returns
     -------
-    Distance map of the same spatial shape; ``+inf`` where ``mask``
-    is everywhere non-zero (no boundary reachable).
+    Distance map of the same spatial shape; ``+inf`` where ``mask`` is
+    everywhere non-zero (no boundary reachable).
 
     Notes
     -----
-    This is the **chamfer DT** (Chebyshev / Manhattan / arbitrary
-    user-supplied step-cost kernel).  For **exact Euclidean DT**,
-    no nitrix primitive is shipped at first GA; the standard
-    reference is the Felzenszwalb-Huttenlocher 2012 parabolic
-    algorithm, which scipy implements as
-    ``scipy.ndimage.distance_transform_edt``.  Use scipy on host
-    if you need exact EDT and don't need GPU placement /
-    differentiability; a JAX-native EDT primitive
-    (``distance_transform_edt``) is a planned follow-up -- see
-    ``docs/design/perf-audit-2025-05.md``.
-
-    Perf characteristics: per the 2025-05 audit, the iterative
-    chamfer DT here is competitive with scipy's EDT in 3D
-    (1.3-2.0× ratio depending on shape) and lags at small 2D
-    (up to 15× at ``(64, 64)``).  The "lag" reflects an
-    algorithmic mismatch (chamfer vs Euclidean), not a slow
-    implementation; the two functions compute different metrics.
+    The Euclidean default supersedes the historical chamfer default: a
+    function named ``distance_transform`` is expected to compute the Euclidean
+    metric (as scipy / cupy / ITK do), and the separable engine is both exact
+    and ``O(N * d)`` versus the iterative chamfer's ``O(N * D * 3**d)``.  The
+    chamfer engine is retained for differentiable distance and custom
+    step-cost kernels.  See ``docs/design/perf-audit-2025-05.md``.
     '''
-    spatial_rank = mask.ndim - (mask.ndim - jnp.asarray(mask).ndim)
-    # Determine spatial rank from the metric / SE.
+    if structuring_element is None and metric == 'euclidean':
+        return _distance_transform_edt(mask)
+
+    spatial_rank = jnp.asarray(mask).ndim
     if structuring_element is not None:
         se = jnp.asarray(structuring_element, dtype=mask.dtype)
         spatial_rank = se.ndim
@@ -379,8 +503,9 @@ def distance_transform(
         if metric not in ('chebyshev', 'city_block'):
             raise ValueError(
                 f'metric={metric!r} not in '
-                '{"chebyshev", "city_block"}; for Euclidean DT, use '
-                'Felzenszwalb-Huttenlocher (not yet implemented).'
+                '{"euclidean", "chebyshev", "city_block"}; the chamfer '
+                'engine accepts "chebyshev" / "city_block", and "euclidean" '
+                '(the default) computes exact EDT via a separate path.'
             )
         # The structuring element's rank is the input's rank (single-
         # channel API; all dims of x are spatial).
@@ -420,3 +545,16 @@ def distance_transform(
 
     # ``lax.fori_loop`` is typed as returning Any; restore the array type.
     return cast(Float[Array, '...'], lax.fori_loop(0, max_iters, body, dist))
+
+
+def distance_transform_edt(
+    mask: Num[Array, '... *spatial'],
+) -> Float[Array, '... *spatial']:
+    '''Exact Euclidean distance transform (scipy ``distance_transform_edt``).
+
+    Thin alias for ``distance_transform(mask, metric="euclidean")`` -- the
+    separable Felzenszwalb-Huttenlocher engine.  Distance from each non-zero
+    voxel to the nearest zero voxel; ``+inf`` where ``mask`` is everywhere
+    non-zero.  Forward-mode differentiable only (see ``distance_transform``).
+    '''
+    return _distance_transform_edt(mask)

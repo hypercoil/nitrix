@@ -18,9 +18,12 @@ Semiring-backed (specialisations of ``semiring_conv``):
   convention).
 - ``open``   -- erode then dilate.
 - ``close``  -- dilate then erode.
-- ``distance_transform`` -- iterative ``TROPICAL_MIN_PLUS`` conv
-  with a fixed-point Chebyshev / city-block / approximate-Euclidean
-  structuring element.
+- ``distance_transform`` -- **exact Euclidean** DT by default (separable
+  Felzenszwalb-Huttenlocher), with an opt-in chamfer engine
+  (``metric="chebyshev"`` / ``"city_block"`` / custom structuring element)
+  on the iterative ``TROPICAL_MIN_PLUS`` conv substrate.
+- ``distance_transform_edt`` -- the exact-Euclidean path as a scipy-named
+  alias.
 
 Gather-backed:
 
@@ -38,6 +41,7 @@ from ._mm import (
     close,
     dilate,
     distance_transform,
+    distance_transform_edt,
     erode,
     open,
 )
@@ -50,6 +54,7 @@ __all__ = [
     'open',
     'close',
     'distance_transform',
+    'distance_transform_edt',
     'median_filter',
     'max_pool_with_indices_nd',
     'max_unpool_nd',
