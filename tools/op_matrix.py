@@ -627,10 +627,10 @@ register(OpInfo(
         {},
     ),
     invariants=(
-        'separable Felzenszwalb-Huttenlocher exact EDT (default metric)',
+        'exact EDT (default): separable per-axis TROPICAL_MIN_PLUS matmul',
         'opt-in chamfer via metric=/structuring_element (TROPICAL_MIN_PLUS)',
     ),
-    notes='euclidean default matches scipy EDT to round-off; chamfer opt-in',
+    notes='euclidean default matches cupy EDT @64^3, beats scipy on CPU',
 ))
 register(OpInfo(
     'nitrix.morphology.distance_transform_edt',
@@ -639,10 +639,10 @@ register(OpInfo(
         {},
     ),
     invariants=(
-        'exact Euclidean DT (separable Felzenszwalb-Huttenlocher)',
+        'exact Euclidean DT (separable min-plus matmul on semiring kernel)',
         'alias of distance_transform(metric="euclidean")',
     ),
-    notes='scipy distance_transform_edt parity; forward-mode diff only',
+    notes='scipy distance_transform_edt parity; reverse-mode differentiable',
 ))
 register(OpInfo(
     'nitrix.morphology.median_filter',

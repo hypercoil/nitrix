@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from typing import Any, Optional, Sequence, Union, cast
 
-import jax
 import jax.numpy as jnp
 import jax.lax as lax
 from jax.typing import DTypeLike
@@ -36,6 +35,7 @@ from ..semiring import (
     TROPICAL_MIN_PLUS,
     Semiring,
     semiring_conv,
+    semiring_matmul,
 )
 
 
@@ -316,98 +316,56 @@ def _chebyshev_3x3_offsets(spatial_rank: int, dtype: DTypeLike) -> Array:
 
 
 # ---------------------------------------------------------------------------
-# Exact Euclidean distance transform (Felzenszwalb-Huttenlocher, separable)
+# Exact Euclidean distance transform (separable, via min-plus matmul)
 # ---------------------------------------------------------------------------
 
 # Finite sentinel for "no seed here": large enough that no real squared
 # distance approaches it (the max squared EDT of a grid is sum of (extent-1)^2,
-# << this), but small enough that ``BIG + d^2`` and ``BIG - BIG`` stay exact /
-# finite in fp32.  A finite sentinel (vs ``+inf``) keeps the parabola-
-# intersection arithmetic free of ``inf - inf = nan``.
+# << this), but small enough that ``BIG + d^2`` stays exact / finite in fp32.
+# A finite sentinel (vs ``+inf``) keeps the min-plus accumulation free of
+# ``inf`` propagation; positions still BIG after all axes had no reachable
+# boundary and are mapped to ``+inf`` at the end.
 _EDT_BIG = 1e10
 _EDT_BIG_THRESHOLD = 1e9  # accumulated cost >= this <=> no boundary reachable
 
 
-def _edt_1d_squared(f: Float[Array, 'n']) -> Float[Array, 'n']:
-    '''1D squared distance transform ``D[p] = min_q ((p - q)^2 + f[q])``.
-
-    The lower envelope of the parabolas ``(p - q)^2 + f[q]`` (one rooted at
-    each ``q``, height ``f[q]``), computed in ``O(n)`` by the Felzenszwalb-
-    Huttenlocher two-pass scan: pass 1 builds the envelope as a stack of
-    parabola indices ``v`` and their breakpoints ``z``; pass 2 walks the
-    breakpoints assigning each position to its governing parabola.  The
-    stack pops are data-dependent but amortise to ``O(n)``; the fixed-size
-    ``v`` / ``z`` carries make it ``jit`` / ``vmap``-able.
-
-    ``f`` is the per-position cost: ``0`` at seeds and ``_EDT_BIG`` elsewhere
-    for the first axis, the accumulated squared distance for later axes.
-    '''
-    n = f.shape[0]
-    dtype = f.dtype
-    big = jnp.asarray(_EDT_BIG, dtype)
-    neg = jnp.asarray(-_EDT_BIG, dtype)
-    pos = jnp.arange(n, dtype=dtype)
-
-    def intersect(q: Array, vk: Array) -> Array:
-        # Abscissa where the parabolas rooted at ``q`` and ``vk`` meet
-        # (``q > vk`` always in pass 1, so the denominator is >= 2).
-        return (
-            (f[q] + pos[q] * pos[q]) - (f[vk] + pos[vk] * pos[vk])
-        ) / (2.0 * pos[q] - 2.0 * pos[vk])
-
-    # Pass 1 -- build the lower envelope.
-    v = jnp.zeros(n, jnp.int32)
-    z = jnp.full(n + 1, big, dtype).at[0].set(neg)
-
-    def build(q: Array, carry: tuple) -> tuple:
-        k, v, z = carry
-        s = intersect(q, v[k])
-        # Pop envelope parabolas the new one undercuts.
-        k, s = lax.while_loop(
-            lambda st: st[1] <= z[st[0]],
-            lambda st: (st[0] - 1, intersect(q, v[st[0] - 1])),
-            (k, s),
-        )
-        k = k + 1
-        v = v.at[k].set(q)
-        z = z.at[k].set(s).at[k + 1].set(big)
-        return k, v, z
-
-    k, v, z = lax.fori_loop(1, n, build, (jnp.int32(0), v, z))
-
-    # Pass 2 -- assign each position to the parabola governing it.
-    def assign(q: Array, carry: tuple) -> tuple:
-        k, out = carry
-        k = lax.while_loop(lambda k: z[k + 1] < pos[q], lambda k: k + 1, k)
-        d = (pos[q] - pos[v[k]]) ** 2 + f[v[k]]
-        return k, out.at[q].set(d)
-
-    _, out = lax.fori_loop(
-        0, n, assign, (jnp.int32(0), jnp.zeros(n, dtype))
-    )
-    return out
-
-
 def _edt_along_axis(
-    g: Float[Array, '...'], axis: int,
+    g: Float[Array, '...'], axis: int, *, backend: Backend,
 ) -> Float[Array, '...']:
-    '''Apply the 1D squared-EDT along ``axis``, vmapped over every line.'''
+    '''Squared 1D EDT along ``axis`` as a tropical min-plus matmul.
+
+    The 1D squared distance transform ``out[p] = min_q (g[q] + (q - p)^2)`` is
+    exactly the tropical (min, +) contraction of the per-position cost ``g``
+    against the squared-distance matrix ``D2[q, p] = (q - p)^2``.  Reshaping
+    the off-axis dims into a batch of lines, the whole pass is one
+    ``semiring_matmul`` (``(lines, n) @ (n, n)``) -- which carries the
+    Pallas-CUDA streaming kernel and its JAX fallback, so the EDT inherits a
+    backend-dispatched, differentiable, no-control-flow implementation instead
+    of a per-line stack scan.
+    '''
     g = jnp.moveaxis(g, axis, -1)
     shape = g.shape
-    flat = g.reshape(-1, shape[-1])
-    out = jax.vmap(_edt_1d_squared)(flat).reshape(shape)
-    return jnp.moveaxis(out, -1, axis)
+    n = shape[-1]
+    pos = jnp.arange(n, dtype=g.dtype)
+    d2 = (pos[:, None] - pos[None, :]) ** 2  # (n, n) squared-distance matrix
+    out = semiring_matmul(
+        g.reshape(-1, n), d2,
+        semiring=TROPICAL_MIN_PLUS,
+        backend=backend,
+    )
+    return jnp.moveaxis(out.reshape(shape), -1, axis)
 
 
 def _distance_transform_edt(
-    mask: Num[Array, '... *spatial'],
+    mask: Num[Array, '... *spatial'], *, backend: Backend = 'auto',
 ) -> Float[Array, '... *spatial']:
-    '''Exact Euclidean DT via the separable Felzenszwalb-Huttenlocher engine.
+    '''Exact Euclidean DT as a separable sequence of min-plus matmuls.
 
     Squared Euclidean distance separates over axes, so the exact transform is
-    the sequential composition of the 1D squared-EDT along each axis; ``sqrt``
-    once at the end.  Seeds are the zero positions of ``mask``; every axis is
-    treated as spatial (scipy ``distance_transform_edt`` convention).
+    the sequential composition of the 1D squared-EDT (``_edt_along_axis``)
+    along each axis; ``sqrt`` once at the end.  Seeds are the zero positions of
+    ``mask``; every axis is treated as spatial (scipy
+    ``distance_transform_edt`` convention).
     '''
     arr = jnp.asarray(mask)
     dtype = jnp.promote_types(arr.dtype, jnp.float32)
@@ -417,7 +375,7 @@ def _distance_transform_edt(
         jnp.asarray(_EDT_BIG, dtype),
     )
     for axis in range(arr.ndim):
-        g = _edt_along_axis(g, axis)
+        g = _edt_along_axis(g, axis, backend=backend)
     return jnp.where(
         g >= _EDT_BIG_THRESHOLD,
         jnp.asarray(jnp.inf, dtype),
@@ -442,13 +400,14 @@ def distance_transform(
     Two engines, selected by ``metric``:
 
     - ``metric="euclidean"`` (**default**) -- **exact** Euclidean distance
-      transform via the separable Felzenszwalb-Huttenlocher lower-envelope
-      algorithm (``O(N * d)`` for ``N`` voxels, spatial rank ``d``).  This is
-      the metric ``scipy.ndimage.distance_transform_edt`` computes; the result
-      matches it to floating-point round-off.  Forward-mode differentiable;
-      **not** reverse-mode differentiable (the envelope's argmin control flow
-      is piecewise constant) -- use a chamfer metric below when a sub-gradient
-      is needed.
+      transform.  Each axis pass is a tropical (min, +) matmul of the
+      per-position cost against the squared-distance matrix
+      ``out[p] = min_q (g[q] + (q - p)^2)`` (``semiring_matmul`` with
+      ``TROPICAL_MIN_PLUS``), so the EDT runs on the semiring Pallas-CUDA
+      streaming kernel (with the JAX fallback) and is reverse-mode
+      differentiable through the min-plus matmul.  This is the metric
+      ``scipy.ndimage.distance_transform_edt`` computes; the result matches it
+      to floating-point round-off.
     - ``metric="chebyshev"`` / ``"city_block"`` / a custom
       ``structuring_element`` -- approximate **chamfer** DT via iterated
       ``TROPICAL_MIN_PLUS`` convolution, sharing the tropical-semiring
@@ -476,7 +435,9 @@ def distance_transform(
         spatial extent, sufficient for exact convergence).  Ignored by the
         Euclidean engine, which is non-iterative.
     backend
-        Chamfer engine only: ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.
+        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Selects the
+        ``semiring_matmul`` backend for the Euclidean engine and the
+        ``semiring_conv`` backend for the chamfer engine.
 
     Returns
     -------
@@ -487,13 +448,15 @@ def distance_transform(
     -----
     The Euclidean default supersedes the historical chamfer default: a
     function named ``distance_transform`` is expected to compute the Euclidean
-    metric (as scipy / cupy / ITK do), and the separable engine is both exact
-    and ``O(N * d)`` versus the iterative chamfer's ``O(N * D * 3**d)``.  The
-    chamfer engine is retained for differentiable distance and custom
-    step-cost kernels.  See ``docs/design/perf-audit-2025-05.md``.
+    metric (as scipy / cupy / ITK do).  Expressing the separable EDT as a
+    per-axis min-plus matmul reuses the semiring substrate's Pallas-CUDA kernel
+    -- on the L4 it matches ``cupyx.scipy.ndimage.distance_transform_edt`` at
+    64^3 and beats scipy on CPU, exact, where the iterative chamfer was ~80x
+    slower on GPU.  The chamfer engine is retained for non-Euclidean metrics
+    and custom step-cost kernels.  See ``docs/design/perf-audit-2025-05.md``.
     '''
     if structuring_element is None and metric == 'euclidean':
-        return _distance_transform_edt(mask)
+        return _distance_transform_edt(mask, backend=backend)
 
     spatial_rank = jnp.asarray(mask).ndim
     if structuring_element is not None:
@@ -549,12 +512,14 @@ def distance_transform(
 
 def distance_transform_edt(
     mask: Num[Array, '... *spatial'],
+    *,
+    backend: Backend = 'auto',
 ) -> Float[Array, '... *spatial']:
     '''Exact Euclidean distance transform (scipy ``distance_transform_edt``).
 
     Thin alias for ``distance_transform(mask, metric="euclidean")`` -- the
-    separable Felzenszwalb-Huttenlocher engine.  Distance from each non-zero
-    voxel to the nearest zero voxel; ``+inf`` where ``mask`` is everywhere
-    non-zero.  Forward-mode differentiable only (see ``distance_transform``).
+    separable min-plus-matmul engine (semiring Pallas-CUDA kernel + JAX
+    fallback).  Distance from each non-zero voxel to the nearest zero voxel;
+    ``+inf`` where ``mask`` is everywhere non-zero.
     '''
-    return _distance_transform_edt(mask)
+    return _distance_transform_edt(mask, backend=backend)

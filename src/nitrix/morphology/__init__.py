@@ -18,10 +18,11 @@ Semiring-backed (specialisations of ``semiring_conv``):
   convention).
 - ``open``   -- erode then dilate.
 - ``close``  -- dilate then erode.
-- ``distance_transform`` -- **exact Euclidean** DT by default (separable
-  Felzenszwalb-Huttenlocher), with an opt-in chamfer engine
-  (``metric="chebyshev"`` / ``"city_block"`` / custom structuring element)
-  on the iterative ``TROPICAL_MIN_PLUS`` conv substrate.
+- ``distance_transform`` -- **exact Euclidean** DT by default (separable,
+  each axis a ``TROPICAL_MIN_PLUS`` matmul against the squared-distance
+  matrix -- reuses the semiring Pallas-CUDA kernel), with an opt-in chamfer
+  engine (``metric="chebyshev"`` / ``"city_block"`` / custom structuring
+  element) on the iterative ``TROPICAL_MIN_PLUS`` conv substrate.
 - ``distance_transform_edt`` -- the exact-Euclidean path as a scipy-named
   alias.
 
