@@ -24,8 +24,8 @@ the right algebra.
 
 | op | algebra | structuring element semantics |
 |---|---|---|
-| ``dilate`` | ``TROPICAL_MAX_PLUS`` | ``out[i] = max_p (x[i+p] + se[p])`` |
-| ``erode`` | ``TROPICAL_MIN_PLUS`` | ``out[i] = min_p (x[i+p] - se[p])`` (we pass ``-se`` so the algebra's ``+`` produces the conventional ``-``) |
+| ``dilate`` | ``TROPICAL_MAX_PLUS`` (flat: `reduce_window` max) | ``out[i] = max_p (x[i+p] + se[p])`` |
+| ``erode`` | ``TROPICAL_MIN_PLUS`` (flat: `reduce_window` min) | ``out[i] = min_p (x[i+p] - se[p])`` (we pass ``-se`` so the algebra's ``+`` produces the conventional ``-``) |
 | ``open`` | -- | ``dilate ∘ erode`` |
 | ``close`` | -- | ``erode ∘ dilate`` |
 | ``distance_transform`` (euclidean, **default**) | ``TROPICAL_MIN_PLUS`` matmul | per-axis ``out[p] = min_q (g[q] + (q-p)²)`` against the squared-distance matrix; exact EDT |
@@ -37,6 +37,19 @@ separable min-plus-matmul EDT driver.  No new Pallas kernel (the EDT reuses the
 ``semiring_matmul`` kernel; the chamfer path reuses ``semiring_conv``).  No new
 gradient rule (the TROPICAL backwards from
 [`backward-kernels.md`](backward-kernels.md) compose through both paths).
+
+**Flat-structuring-element fast path.** The substrate thesis still holds, but a
+*flat* (all-zero) structuring element -- the common `dilate(size=3)` /
+`erode(size=3)` case -- is just a sliding-window max / min, which
+``lax.reduce_window`` lowers to a single fused pooling-like kernel.  Routing the
+flat case there instead of through ``semiring_conv``'s im2col-patches + matmul
+is bit-exact (``SAME`` padding pads with the algebra identity ``-inf`` / ``+inf``)
+and, on the L4 at 256², flips `erode`/`dilate` from ~1.3× *slower* than cupy to
+~1.3× *faster*, with peak HBM 72 MB → 0.79 MB (no materialised patch tensor).
+The non-flat (explicit per-position offsets) path keeps the semiring engine.
+``median_filter`` stays on the gather path -- profiling shows the sort, not the
+gather, dominates it, so the only lever is a hardcoded sorting network, deferred
+pending a fidelity oracle (see its docstring).
 
 ## API choice: single-channel ``(..., *spatial)``
 
