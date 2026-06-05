@@ -22,7 +22,7 @@ reduce to local-max / local-min sliding-window reductions.
 """
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence, Union, cast
+from typing import Any, Callable, Optional, Sequence, Union, cast
 
 import jax.numpy as jnp
 import jax.lax as lax
@@ -121,6 +121,31 @@ def _conv_wrap(
     return out[..., 0]
 
 
+def _windowed_reduce(
+    x: Num[Array, '... *spatial'],
+    box: Sequence[int],
+    spatial_rank: int,
+    reducer: Callable[[Array, Array], Array],
+    init: float,
+    padding: str,
+) -> Num[Array, '... *spatial']:
+    '''Flat-structuring-element dilation / erosion as a fused reduce-window.
+
+    For a flat (all-zero) structuring element, dilation reduces to a sliding-
+    window max and erosion to a sliding-window min -- which ``lax.reduce_window``
+    computes as a single fused kernel (XLA lowers it like a pooling op), instead
+    of the ``semiring_conv`` im2col-patches + matmul path.  ``"SAME"`` padding
+    pads with ``init`` (``-inf`` for max, ``+inf`` for min), matching the
+    semiring algebra-identity padding bit-for-bit.  The window is ``1`` on the
+    leading batch dims and ``box`` on the trailing ``spatial_rank`` dims.
+    '''
+    window = (1,) * (x.ndim - spatial_rank) + tuple(box)
+    strides = (1,) * x.ndim
+    return lax.reduce_window(
+        x, jnp.asarray(init, x.dtype), reducer, window, strides, padding,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public ops
 # ---------------------------------------------------------------------------
@@ -188,13 +213,14 @@ def dilate(
         primitive handles.  Composition is more general and only
         costs 2 lines.
     backend
-        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.
+        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Consulted only for the
+        non-flat (explicit ``structuring_element``) path; the common flat-box
+        case lowers to a fused ``lax.reduce_window`` regardless.
 
     Returns
     -------
     Array of the same shape as ``x`` (for ``padding="SAME"``).
     '''
-    spatial_rank = len(x.shape) - (x.ndim - x.ndim)  # placeholder
     # The spatial rank is inferred from the structuring element or
     # ``size``; if neither pins it we treat all of x's dims as spatial.
     if structuring_element is not None:
@@ -207,6 +233,11 @@ def dilate(
     se = _resolve_structuring_element(
         structuring_element, size, spatial_rank, x.dtype,
     )
+    if structuring_element is None:
+        # Flat box (the common case): a fused sliding-window max.
+        return _windowed_reduce(
+            x, se.shape, spatial_rank, lax.max, -jnp.inf, padding,
+        )
     return _conv_wrap(
         x, se,
         semiring=TROPICAL_MAX_PLUS,
@@ -240,6 +271,11 @@ def erode(
     se = _resolve_structuring_element(
         structuring_element, size, spatial_rank, x.dtype,
     )
+    if structuring_element is None:
+        # Flat box (the common case): a fused sliding-window min.
+        return _windowed_reduce(
+            x, se.shape, spatial_rank, lax.min, jnp.inf, padding,
+        )
     return _conv_wrap(
         x, -se,
         semiring=TROPICAL_MIN_PLUS,
