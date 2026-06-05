@@ -341,24 +341,40 @@ def _sosfilt_scan(
     return y
 
 
-def _sosfilt_associative(sos: np.ndarray, x: Array) -> Array:
-    '''Cascade of biquads via parallel ``lax.associative_scan`` (zero state).
+def _sosfilt_associative(
+    sos: np.ndarray,
+    x: Array,
+    zi: Optional[np.ndarray] = None,
+) -> Array:
+    '''Cascade of biquads via parallel ``lax.associative_scan``.
 
-    Each biquad's recursive (AR) part is the linear recurrence
-    ``w[n] = u[n] - a1 w[n-1] - a2 w[n-2]``; the state ``[w[n], w[n-1]]``
-    evolves as ``s[n] = A s[n-1] + [u[n], 0]`` with constant ``A``, which
-    composes associatively, so the prefix scan resolves it in ``O(log T)``.
-    The numerator is then a 3-tap FIR on ``w``.
+    The transposed-DF2 state ``s = (z1, z2)`` -- the *same* state
+    ``_sosfilt_scan`` carries -- evolves as a first-order linear recurrence
+    ``s[n+1] = M s[n] + c u[n]`` with constant ``M = [[-a1, 1], [-a2, 0]]`` and
+    ``c = [b1 - a1 b0, b2 - a2 b0]``, and the output is
+    ``y[n] = s[n][0] + b0 u[n]``.  A constant-coefficient linear recurrence
+    composes associatively, so the prefix scan resolves the whole cascade in
+    ``O(log T)`` depth.
+
+    ``zi`` (per-section steady-state delay, scaled by ``x[0]``) sets the
+    initial state ``s[0]``; its homogeneous response ``M^n s[0]`` is read off
+    the same scan's cumulative transition ``a_cum``.  With ``zi=None`` the
+    initial state is zero (the homogeneous term vanishes and ``a_cum`` is not
+    materialised).  This is the engine that makes ``sosfilt`` /
+    ``sosfiltfilt`` competitive on the GPU; it matches ``_sosfilt_scan`` (and
+    ``scipy.signal``) to round-off.
     '''
     y = x
     n_t = x.shape[0]
-    for s in sos:
+    x0 = x[0]
+    for i, s in enumerate(sos):
         b0, b1, b2 = (float(v) / float(s[3]) for v in s[:3])
         a1, a2 = float(s[4]) / float(s[3]), float(s[5]) / float(s[3])
         u = y
-        a_mat = jnp.array([[-a1, -a2], [1.0, 0.0]], dtype=x.dtype)
-        a_seq = jnp.broadcast_to(a_mat, (n_t,) + u.shape[1:] + (2, 2))
-        b_seq = jnp.stack([u, jnp.zeros_like(u)], axis=-1)
+        m_mat = jnp.array([[-a1, 1.0], [-a2, 0.0]], dtype=x.dtype)
+        c_vec = jnp.array([b1 - a1 * b0, b2 - a2 * b0], dtype=x.dtype)
+        a_seq = jnp.broadcast_to(m_mat, (n_t,) + u.shape[1:] + (2, 2))
+        b_seq = c_vec * u[..., None]
 
         def combine(
             left: Tuple[Array, Array], right: Tuple[Array, Array]
@@ -369,12 +385,39 @@ def _sosfilt_associative(sos: np.ndarray, x: Array) -> Array:
             b = jnp.einsum('...ij,...j->...i', a_r, b_l) + b_r
             return a, b
 
-        _, b_cum = lax.associative_scan(combine, (a_seq, b_seq), axis=0)
-        w = b_cum[..., 0]
-        w1 = jnp.concatenate([jnp.zeros((1,) + w.shape[1:]), w[:-1]], axis=0)
-        w2 = jnp.concatenate([jnp.zeros((2,) + w.shape[1:]), w[:-2]], axis=0)
-        y = b0 * w + b1 * w1 + b2 * w2
+        if zi is None:
+            _, b_cum = lax.associative_scan(combine, (a_seq, b_seq), axis=0)
+            s0_row = jnp.zeros((1,) + u.shape[1:] + (2,), x.dtype)
+            s = jnp.concatenate([s0_row, b_cum[:-1]], axis=0)
+        else:
+            a_cum, b_cum = lax.associative_scan(
+                combine, (a_seq, b_seq), axis=0,
+            )
+            s0 = jnp.stack(
+                [float(zi[i, 0]) * x0, float(zi[i, 1]) * x0], axis=-1,
+            )
+            homog = jnp.einsum('n...ij,...j->n...i', a_cum[:-1], s0)
+            s = jnp.concatenate([s0[None], homog + b_cum[:-1]], axis=0)
+        y = s[..., 0] + b0 * u
     return y
+
+
+def _sosfilt_apply(
+    sos: np.ndarray,
+    x: Array,
+    *,
+    zi: Optional[np.ndarray],
+    backend: _Backend,
+) -> Array:
+    '''Apply the cascade with the platform-resolved recurrence engine.'''
+    backend = _resolve_iir_backend(backend)
+    if backend == 'scan':
+        return _sosfilt_scan(sos, x, zi=zi)
+    if backend == 'associative':
+        return _sosfilt_associative(sos, x, zi=zi)
+    raise ValueError(
+        f"backend={backend!r}; expected 'auto', 'scan' or 'associative'."
+    )
 
 
 def sosfilt(
@@ -404,15 +447,7 @@ def sosfilt(
     '''
     sos_np = np.asarray(sos)
     x = jnp.moveaxis(jnp.asarray(X), axis, 0)
-    backend = _resolve_iir_backend(backend)
-    if backend == 'scan':
-        y = _sosfilt_scan(sos_np, x, zi=None)
-    elif backend == 'associative':
-        y = _sosfilt_associative(sos_np, x)
-    else:
-        raise ValueError(
-            f"backend={backend!r}; expected 'auto', 'scan' or 'associative'."
-        )
+    y = _sosfilt_apply(sos_np, x, zi=None, backend=backend)
     return jnp.moveaxis(y, 0, axis)
 
 
@@ -423,14 +458,19 @@ def sosfiltfilt(
     axis: int = -1,
     padtype: str = 'odd',
     padlen: Optional[int] = None,
+    backend: _Backend = 'auto',
 ) -> Num[Array, '... obs']:
     '''Zero-phase forward-backward IIR filter (scipy ``sosfiltfilt``-exact).
 
     Filters forward then backward with steady-state initial conditions and
     odd padding, cancelling phase and squaring the magnitude response.
-    Matches ``scipy.signal.sosfiltfilt`` to machine precision.  Uses the
-    ``'scan'`` recurrence internally (the initial-condition handling that
-    makes it exact is cleanest there).
+    Matches ``scipy.signal.sosfiltfilt`` to machine precision.
+
+    Both passes carry the steady-state ``zi`` initial conditions through the
+    selected recurrence engine: ``backend='auto'`` (default) uses the
+    sequential ``scan`` on CPU and the parallel-prefix ``associative`` on GPU
+    (the associative engine threads ``zi`` via the homogeneous response, so the
+    edges stay scipy-exact -- the zero-phase path is no longer scan-only).
     '''
     sos_np = np.asarray(sos)
     n_sections = sos_np.shape[0]
@@ -459,8 +499,8 @@ def sosfiltfilt(
         raise ValueError(f"padtype={padtype!r}; only 'odd' is supported.")
 
     zi = _sos_zi(sos_np)
-    y = _sosfilt_scan(sos_np, xp, zi=zi)
-    y = _sosfilt_scan(sos_np, jnp.flip(y, axis=0), zi=zi)
+    y = _sosfilt_apply(sos_np, xp, zi=zi, backend=backend)
+    y = _sosfilt_apply(sos_np, jnp.flip(y, axis=0), zi=zi, backend=backend)
     y = jnp.flip(y, axis=0)
     if padlen > 0:
         y = y[padlen:-padlen]
@@ -503,10 +543,10 @@ def iir_filter(
         forward pass (``sosfilt``); preserves causality but imposes the
         Butterworth phase delay.
     backend
-        Recurrence engine for the *causal* (``zero_phase=False``) path:
-        ``'auto'`` (default; ``scan`` on CPU, ``associative`` on GPU) or a
-        forced ``'scan'`` / ``'associative'``.  The zero-phase path is
-        always ``'scan'`` (exact initial conditions).
+        Recurrence engine for both the causal (``zero_phase=False``) and
+        zero-phase (``zero_phase=True``) paths: ``'auto'`` (default; ``scan``
+        on CPU, ``associative`` on GPU) or a forced ``'scan'`` /
+        ``'associative'``.
 
     Returns
     -------
@@ -515,5 +555,5 @@ def iir_filter(
     '''
     sos = butterworth_sos(order=order, fs=fs, btype=btype, lo=lo, hi=hi)
     if zero_phase:
-        return sosfiltfilt(X, sos, axis=axis)
+        return sosfiltfilt(X, sos, axis=axis, backend=backend)
     return sosfilt(X, sos, axis=axis, backend=backend)
