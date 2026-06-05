@@ -35,6 +35,7 @@ Everything is reverse-mode differentiable through the signal.
 """
 from __future__ import annotations
 
+import warnings
 from typing import Optional, Tuple
 
 import jax.lax as lax
@@ -44,21 +45,29 @@ from jaxtyping import Array, Num
 
 from .._internal.backend import default_backend_is_gpu
 
+# Hard cap on the impulse-response length the FFT engine will truncate to.
+# A filter that has not decayed below ``impulse_atol`` within this many taps
+# is too sharp (poles hugging the unit circle) for a cheap FFT convolution;
+# the engine falls back to the recurrence instead.
+_IIR_FFT_MAX_TAPS = 1 << 15
+
 __all__ = ['butterworth_sos', 'sosfilt', 'sosfiltfilt', 'iir_filter']
 
 _BType = str  # 'lowpass' | 'highpass' | 'bandpass' | 'bandstop'
-_Backend = str  # 'auto' | 'scan' | 'associative'
+_Backend = str  # 'auto' | 'fft' | 'scan' | 'associative'
 
 
 def _resolve_iir_backend(backend: _Backend) -> _Backend:
-    '''Resolve ``'auto'`` to the recurrence engine that wins on this platform.
+    '''Resolve ``'auto'`` to the engine that wins on this platform.
 
-    The sequential ``scan`` wins on CPU; the parallel-prefix ``associative``
-    wins on GPU (measured 8.3x faster on the L4 at ch=1024/obs=4096, while
-    losing ~9x on CPU).  Explicit ``'scan'`` / ``'associative'`` pass through.
+    On GPU the recursion is latency-bound, so ``'auto'`` selects the parallel
+    ``'fft'`` convolution engine (which beats cupy on the L4 and falls back to
+    a recurrence for filters too sharp to truncate cheaply).  On CPU the
+    sequential ``'scan'`` recurrence is fast and exact, so ``'auto'`` keeps it.
+    Explicit ``'fft'`` / ``'scan'`` / ``'associative'`` pass through.
     '''
     if backend == 'auto':
-        return 'associative' if default_backend_is_gpu() else 'scan'
+        return 'fft' if default_backend_is_gpu() else 'scan'
     return backend
 
 
@@ -303,6 +312,102 @@ def _sos_zi(sos: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Impulse / zero-input responses (host) -- the FFT-convolution engine
+# ---------------------------------------------------------------------------
+
+
+def _sos_responses(
+    sos: np.ndarray, n: int, zi: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    '''Host (NumPy, fp64) impulse and zero-input responses of the cascade.
+
+    Runs the transposed-DF2 cascade recurrence -- the same one
+    ``_sosfilt_scan`` realises -- for ``n`` samples:
+
+    - ``h`` -- the cascade **impulse response** (unit impulse, zero state).  A
+      fixed-coefficient IIR filter is LTI, so its zero-state output is exactly
+      ``conv(x, h)``; ``h`` decays geometrically (poles inside the unit
+      circle), so an ``n``-tap truncation has a geometrically bounded error.
+    - ``g`` -- the cascade **zero-input response** to the per-section initial
+      state ``zi`` (zero input).  That response is linear in the ``x[0]``
+      scaling applied to ``zi``, so ``sosfilt`` with ``zi`` is
+      ``conv(x, h) + x[0] * g``.
+
+    Both are host constants (``sos`` / ``zi`` are static) and fold into the
+    trace; the device side only runs the FFT convolution.
+    '''
+    b0, b1, b2 = sos[:, 0] / sos[:, 3], sos[:, 1] / sos[:, 3], sos[:, 2] / sos[:, 3]
+    a1, a2 = sos[:, 4] / sos[:, 3], sos[:, 5] / sos[:, 3]
+    ns = sos.shape[0]
+    h = np.empty(n, dtype=np.float64)
+    g = np.empty(n, dtype=np.float64)
+    sh = np.zeros((ns, 2))
+    sg = np.zeros((ns, 2)) if zi is None else np.asarray(zi, dtype=np.float64).copy()
+    for t in range(n):
+        yh = 1.0 if t == 0 else 0.0
+        yg = 0.0
+        for i in range(ns):
+            oh = b0[i] * yh + sh[i, 0]
+            sh[i, 0] = b1[i] * yh - a1[i] * oh + sh[i, 1]
+            sh[i, 1] = b2[i] * yh - a2[i] * oh
+            yh = oh
+            og = b0[i] * yg + sg[i, 0]
+            sg[i, 0] = b1[i] * yg - a1[i] * og + sg[i, 1]
+            sg[i, 1] = b2[i] * yg - a2[i] * og
+            yg = og
+        h[t], g[t] = yh, yg
+    return h, g
+
+
+def _sos_impulse_taps(
+    sos: np.ndarray, atol: float, cap: int = _IIR_FFT_MAX_TAPS,
+) -> Optional[int]:
+    '''Smallest tap count after which ``|h| <= atol`` (or ``None`` if the
+    impulse response has not decayed within ``cap`` -- a too-sharp filter).'''
+    n = min(512, cap)
+    while True:
+        h, _ = _sos_responses(sos, n)
+        nz = np.nonzero(np.abs(h) > atol)[0]
+        length = int(nz[-1]) + 1 if len(nz) else 1
+        if length < n:
+            return length
+        if n >= cap:
+            return None
+        n = min(n * 2, cap)
+
+
+def _expand_freq(arr: Array, ndim: int) -> Array:
+    '''Reshape a length-F frequency vector to broadcast over ``(F, *channels)``.'''
+    return arr.reshape((-1,) + (1,) * (ndim - 1))
+
+
+def _sosfilt_fft(
+    sos: np.ndarray, x: Array, zi: Optional[np.ndarray], n_taps: int,
+) -> Array:
+    '''Apply the cascade as an FFT convolution with its impulse response.
+
+    ``x`` is time-major ``(T, *channels)``.  The zero-state output is
+    ``conv(x, h)`` (linear convolution via the FFT, truncated to ``n_taps``);
+    with ``zi`` the steady-state transient ``x[0] * g`` is added back over the
+    first ``n_taps`` samples so the edges stay scipy-exact.  ``O(T log T)``,
+    no recurrence, fully parallel.
+    '''
+    h, g = _sos_responses(sos, n_taps, zi=zi)
+    n_t = x.shape[0]
+    nfft = 1
+    while nfft < n_t + n_taps - 1:
+        nfft *= 2
+    h_freq = jnp.fft.rfft(jnp.asarray(h, x.dtype), n=nfft)
+    x_freq = jnp.fft.rfft(x, n=nfft, axis=0)
+    y = jnp.fft.irfft(x_freq * _expand_freq(h_freq, x.ndim), n=nfft, axis=0)
+    y = y[:n_t]
+    if zi is not None:
+        g_seq = jnp.asarray(g, x.dtype).reshape((n_taps,) + (1,) * (x.ndim - 1))
+        y = y.at[:n_taps].add(g_seq * x[:1])
+    return y
+
+
+# ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
 
@@ -408,15 +513,34 @@ def _sosfilt_apply(
     *,
     zi: Optional[np.ndarray],
     backend: _Backend,
+    impulse_atol: float,
 ) -> Array:
-    '''Apply the cascade with the platform-resolved recurrence engine.'''
+    '''Apply the cascade with the platform-resolved engine.
+
+    ``'fft'`` truncates the impulse response at ``impulse_atol`` and convolves;
+    if the filter has not decayed within ``_IIR_FFT_MAX_TAPS`` it falls back to
+    a recurrence (``associative`` on GPU, ``scan`` on CPU) with a warning.
+    '''
     backend = _resolve_iir_backend(backend)
+    if backend == 'fft':
+        n_taps = _sos_impulse_taps(sos, impulse_atol)
+        if n_taps is not None:
+            return _sosfilt_fft(sos, x, zi, n_taps)
+        backend = 'associative' if default_backend_is_gpu() else 'scan'
+        warnings.warn(
+            f'sosfilt: impulse response has not decayed below '
+            f'impulse_atol={impulse_atol:g} within {_IIR_FFT_MAX_TAPS} taps '
+            f'(filter too sharp for the FFT engine); falling back to '
+            f'backend={backend!r}.',
+            stacklevel=3,
+        )
     if backend == 'scan':
         return _sosfilt_scan(sos, x, zi=zi)
     if backend == 'associative':
         return _sosfilt_associative(sos, x, zi=zi)
     raise ValueError(
-        f"backend={backend!r}; expected 'auto', 'scan' or 'associative'."
+        f"backend={backend!r}; expected 'auto', 'fft', 'scan' or "
+        "'associative'."
     )
 
 
@@ -426,6 +550,7 @@ def sosfilt(
     *,
     axis: int = -1,
     backend: _Backend = 'auto',
+    impulse_atol: float = 1e-12,
 ) -> Num[Array, '... obs']:
     '''Apply a causal IIR filter (forward only) given its SOS cascade.
 
@@ -436,18 +561,27 @@ def sosfilt(
     sos
         ``(n_sections, 6)`` second-order sections (e.g. from
         ``butterworth_sos``).  Static host coefficients (NumPy); they are
-        baked into the recurrence, not traced.
+        baked into the engine, not traced.
     backend
-        ``'auto'`` (default) picks the recurrence engine by platform --
-        ``'scan'`` on CPU, ``'associative'`` on GPU -- because the optimal
-        choice flips with the device (the sequential ``lax.scan`` is
-        low-overhead on CPU; the parallel-prefix ``associative_scan`` is
-        ``O(log T)`` depth and fills the GPU).  Pass ``'scan'`` /
-        ``'associative'`` to force a specific engine.
+        ``'auto'`` (default) picks the engine by platform: ``'fft'`` on GPU,
+        ``'scan'`` on CPU.  The recursion is latency-bound on the GPU, so the
+        parallel FFT-convolution engine (an IIR filter is LTI, so its output
+        is exactly convolution with the impulse response) wins there -- it
+        beats cupy on the L4; on the CPU the sequential ``lax.scan`` is fast
+        and exact, so it is kept.  Force ``'fft'``, ``'scan'`` or the
+        parallel-prefix ``'associative'`` to override.
+    impulse_atol
+        FFT engine only: truncate the impulse response where it has decayed
+        below this absolute tolerance (default ``1e-12``, effectively exact).
+        Larger values give shorter kernels / smaller FFTs at the cost of a
+        (geometrically bounded) edge error; a filter too sharp to decay within
+        ``2**15`` taps falls back to a recurrence with a warning.
     '''
     sos_np = np.asarray(sos)
     x = jnp.moveaxis(jnp.asarray(X), axis, 0)
-    y = _sosfilt_apply(sos_np, x, zi=None, backend=backend)
+    y = _sosfilt_apply(
+        sos_np, x, zi=None, backend=backend, impulse_atol=impulse_atol,
+    )
     return jnp.moveaxis(y, 0, axis)
 
 
@@ -459,6 +593,7 @@ def sosfiltfilt(
     padtype: str = 'odd',
     padlen: Optional[int] = None,
     backend: _Backend = 'auto',
+    impulse_atol: float = 1e-12,
 ) -> Num[Array, '... obs']:
     '''Zero-phase forward-backward IIR filter (scipy ``sosfiltfilt``-exact).
 
@@ -466,11 +601,12 @@ def sosfiltfilt(
     odd padding, cancelling phase and squaring the magnitude response.
     Matches ``scipy.signal.sosfiltfilt`` to machine precision.
 
-    Both passes carry the steady-state ``zi`` initial conditions through the
-    selected recurrence engine: ``backend='auto'`` (default) uses the
-    sequential ``scan`` on CPU and the parallel-prefix ``associative`` on GPU
-    (the associative engine threads ``zi`` via the homogeneous response, so the
-    edges stay scipy-exact -- the zero-phase path is no longer scan-only).
+    Both passes thread the steady-state ``zi`` initial conditions through the
+    platform-resolved engine (``backend='auto'`` -> ``'fft'`` on GPU, ``'scan'``
+    on CPU; see ``sosfilt``).  The FFT engine adds the ``zi`` transient
+    ``x[0] * g`` (the cascade's zero-input response) over the first ``n_taps``
+    samples, so the edges stay scipy-exact -- the zero-phase path is no longer
+    scan-only.  ``impulse_atol`` controls the FFT truncation (see ``sosfilt``).
     '''
     sos_np = np.asarray(sos)
     n_sections = sos_np.shape[0]
@@ -499,8 +635,13 @@ def sosfiltfilt(
         raise ValueError(f"padtype={padtype!r}; only 'odd' is supported.")
 
     zi = _sos_zi(sos_np)
-    y = _sosfilt_apply(sos_np, xp, zi=zi, backend=backend)
-    y = _sosfilt_apply(sos_np, jnp.flip(y, axis=0), zi=zi, backend=backend)
+    y = _sosfilt_apply(
+        sos_np, xp, zi=zi, backend=backend, impulse_atol=impulse_atol,
+    )
+    y = _sosfilt_apply(
+        sos_np, jnp.flip(y, axis=0), zi=zi, backend=backend,
+        impulse_atol=impulse_atol,
+    )
     y = jnp.flip(y, axis=0)
     if padlen > 0:
         y = y[padlen:-padlen]
@@ -517,6 +658,7 @@ def iir_filter(
     order: int = 2,
     zero_phase: bool = True,
     backend: _Backend = 'auto',
+    impulse_atol: float = 1e-12,
     axis: int = -1,
 ) -> Num[Array, '... obs']:
     '''Recursive Butterworth IIR filter (design + apply).
@@ -543,10 +685,12 @@ def iir_filter(
         forward pass (``sosfilt``); preserves causality but imposes the
         Butterworth phase delay.
     backend
-        Recurrence engine for both the causal (``zero_phase=False``) and
-        zero-phase (``zero_phase=True``) paths: ``'auto'`` (default; ``scan``
-        on CPU, ``associative`` on GPU) or a forced ``'scan'`` /
-        ``'associative'``.
+        Engine for both the causal (``zero_phase=False``) and zero-phase
+        (``zero_phase=True``) paths: ``'auto'`` (default; ``'fft'`` on GPU,
+        ``'scan'`` on CPU -- see ``sosfilt``) or a forced ``'fft'`` /
+        ``'scan'`` / ``'associative'``.
+    impulse_atol
+        FFT-engine impulse-response truncation tolerance (see ``sosfilt``).
 
     Returns
     -------
@@ -555,5 +699,9 @@ def iir_filter(
     '''
     sos = butterworth_sos(order=order, fs=fs, btype=btype, lo=lo, hi=hi)
     if zero_phase:
-        return sosfiltfilt(X, sos, axis=axis, backend=backend)
-    return sosfilt(X, sos, axis=axis, backend=backend)
+        return sosfiltfilt(
+            X, sos, axis=axis, backend=backend, impulse_atol=impulse_atol,
+        )
+    return sosfilt(
+        X, sos, axis=axis, backend=backend, impulse_atol=impulse_atol,
+    )
