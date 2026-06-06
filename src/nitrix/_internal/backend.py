@@ -154,6 +154,24 @@ def auto_backend() -> ResolvedBackend:
     return 'jax'
 
 
+def default_backend_is_gpu() -> bool:
+    """Whether JAX's default backend is a GPU.
+
+    The static (trace-time) signal for *platform-dependent algorithm*
+    selection -- distinct from ``auto_backend``, which picks a *kernel*
+    backend from host capability.  The motivating case is the recursive IIR
+    filters (``signal._iir``): the sequential ``lax.scan`` recurrence wins on
+    the CPU (low overhead, no parallelism to exploit) while the parallel-prefix
+    ``associative_scan`` wins on the GPU (``O(log T)`` depth fills the device),
+    so the optimal engine flips with the deployment target.  ``jax.default_
+    backend()`` is concrete at trace time, so branching on it is ``jit``-safe.
+    """
+    try:
+        return jax.default_backend() == 'gpu'
+    except RuntimeError:
+        return False
+
+
 def resolve_backend(backend: Backend) -> ResolvedBackend:
     """Three-level resolution: keyword > env var > auto.
 
@@ -292,6 +310,7 @@ __all__ = [
     'NitrixBackendFallback',
     'NitrixBackendError',
     'auto_backend',
+    'default_backend_is_gpu',
     'env_backend',
     'fallback',
     'resolve_backend',

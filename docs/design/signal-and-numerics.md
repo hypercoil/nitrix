@@ -191,16 +191,31 @@ differentiable, JIT-friendly.
 bilinear → second-order sections, designed **from scratch in NumPy** (no
 runtime scipy, SPEC §5.2) and validated to machine precision against
 `scipy.signal.butter`/`sosfilt`/`sosfiltfilt`.  The design is a static host
-constant; only the *application* is traced.  Two application engines:
-`backend='scan'` (sequential `lax.scan`, one fused loop, low memory --
-**default**, and benchmarked fastest in the many-channel fMRI regime:
-~18 ms for 50 000 voxels × 300 TR on an A10G) and `backend='associative'`
-(the `lax.associative_scan` parallel-prefix linear-recurrence pattern,
-`O(log T)` depth, for latency-bound long single series -- slower at fMRI
-throughput, so not the default).  `sosfiltfilt` is zero-phase
-forward-backward with scipy-exact steady-state initial conditions
-(`lfilter_zi`-equivalent) and odd padding.  Reverse-mode differentiable
-through the signal.
+constant; only the *application* is traced.  Three application engines,
+selected by `backend='auto'` per platform:
+
+- `backend='fft'` (**GPU default**) -- the FFT-convolution engine.  An IIR
+  filter is LTI, so its zero-state output is *exactly* convolution with the
+  impulse response (a host constant that decays geometrically for a stable
+  filter); `sosfiltfilt`'s scipy-exact `zi` edges are recovered by adding the
+  cascade's zero-input response `x[0] * g` over the first `n_taps` samples.
+  This is `O(T log T)`, fully parallel, and **beats cupy on the L4** (sosfilt
+  0.95 ms vs 1.78 ms, sosfiltfilt 1.77 ms vs 9.4 ms at ch=1024/obs=4096).  The
+  impulse response is truncated at `impulse_atol` (default `1e-12`, ~exact, the
+  truncation error is geometrically bounded -- see the theory note below);
+  a filter too sharp to decay within `2**15` taps falls back to a recurrence.
+- `backend='scan'` (**CPU default**) -- sequential `lax.scan`, one fused loop,
+  low memory; exact and fastest on the CPU, where the recursion is not
+  latency-bound.
+- `backend='associative'` -- the `lax.associative_scan` parallel-prefix
+  linear-recurrence (transposed-DF2 state, `O(log T)` depth); the GPU
+  recurrence used as the FFT engine's too-sharp-filter fallback and available
+  explicitly.
+
+`sosfiltfilt` is zero-phase forward-backward with scipy-exact steady-state
+initial conditions (`lfilter_zi`-equivalent) and odd padding.  All engines
+match `scipy.signal` to round-off and are reverse-mode differentiable through
+the signal.
 
 ### Recursive-filter theory, briefly
 
@@ -213,6 +228,21 @@ response never fully dies (hence "infinite") -- the opposite of the FIR
 frequency-domain filters above, which have finite support and only touch
 past *inputs*.  The payoff is steep roll-off from very few coefficients;
 the cost is a non-linear, frequency-dependent phase.
+
+**Why an IIR filter still has a parallel FFT path.** Recursive *application*
+is one algorithm, not the definition: a fixed-coefficient IIR is LTI, so its
+output is *exactly* ``y = h * x`` (convolution with the impulse response ``h``)
+-- the recursion is just the ``O(N)`` way to evaluate that convolution when
+``h`` is infinite.  Because the poles lie inside the unit circle, ``|h[n]| ≤ C
+rⁿ`` with ``r = max|pole| < 1``: ``h`` decays geometrically, so truncating it
+to ``L`` taps incurs an error bounded by ``‖x‖_∞ · C rᴸ/(1-r)`` -- push ``L``
+until that tail is below the rounding floor and the FFT convolution is as exact
+as the recursion (the ``backend='fft'`` engine).  The only knob is ``L``, which
+grows like ``1/(1-r)`` for razor-sharp filters (`impulse_atol` trades it off;
+the engine falls back to the recurrence when it would exceed the tap cap).  The
+*exact* parallel alternative -- block scan with boundary reconciliation -- has
+no truncation but is fp32-ill-conditioned (the ``M^C`` block transition) for
+sharp filters, which is why the (truncation-controlled) FFT path is preferred.
 
 **Butterworth** is the all-pole prototype with a *maximally-flat* passband:
 ``|H(jω)|² = 1 / (1 + (ω/ω_c)^{2N})``, whose ``N`` analog poles sit equally

@@ -1,5 +1,18 @@
 # B12. IIR `sosfilt`/`sosfiltfilt` GPU backend — default + missing associative path
 
+> **Status (2026-06-05): RESOLVED.** Both deficits closed, and then some -- the
+> GPU path now *beats* cupy. Three commits on `perf/iir-gpu-backend`: (1)
+> backend-aware default (`'auto'` -> scan on CPU, parallel on GPU); (2)
+> parallel zero-phase `sosfiltfilt` via a transposed-DF2 associative engine
+> that threads `zi`; (3) the **FFT-convolution engine** (`backend='fft'`, the
+> GPU default) -- an IIR filter is LTI so its output is exactly convolution
+> with the (host, geometrically-decaying) impulse response, made `O(T log T)`
+> and parallel. On the L4: `sosfilt` 147 ms -> **0.95 ms** (cupy 1.78 ms),
+> `sosfiltfilt` 299 ms -> **1.77 ms** (cupy 9.4 ms) at ch=1024/obs=4096, exact,
+> with compile 10.5 s -> 0.29 s and HBM 704 MB -> 201 MB. See
+> `docs/design/signal-and-numerics.md` ("Why an IIR filter still has a parallel
+> FFT path"). The original parked write-up follows for the record.
+>
 > **Status (2026-06-03): parked (perf / API-default) — two measured GPU
 > deficits in the recursive filter ops.** Not a commitment — gated on the
 > **Trigger** below. Effort **S + M**, the first is a default/doc change, the

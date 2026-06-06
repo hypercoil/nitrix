@@ -192,6 +192,52 @@ def test_grad_associative_backend():
     assert bool(np.all(np.isfinite(np.array(g))))
 
 
+@pytest.mark.parametrize('btype, order, lo, hi', _CASES)
+def test_fft_backend_matches_scipy(btype, order, lo, hi):
+    # The FFT-convolution engine (default on GPU): an IIR filter is LTI, so
+    # its output is exactly convolution with the (truncated) impulse response.
+    x = np.random.default_rng(3).normal(size=(4, 400))
+    sos = butterworth_sos(order=order, fs=FS, btype=btype, lo=lo, hi=hi)
+    sf = np.asarray(sosfilt(jnp.asarray(x), sos, backend='fft'))
+    ff = np.asarray(sosfiltfilt(jnp.asarray(x), sos, backend='fft'))
+    np.testing.assert_allclose(sf, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-9)
+    np.testing.assert_allclose(
+        ff, ss.sosfiltfilt(sos.copy(), x, axis=-1), atol=1e-9,
+    )
+
+
+def test_fft_grad_finite():
+    x = jnp.asarray(_tone(0.08))
+    g = jax.grad(
+        lambda z: jnp.sum(sosfiltfilt(z, butterworth_sos(
+            order=4, fs=FS, btype='bandpass', lo=0.05, hi=0.2), backend='fft'))
+    )(x)
+    assert bool(np.all(np.isfinite(np.array(g))))
+
+
+def test_fft_impulse_atol_param():
+    # A looser truncation tolerance shortens the kernel but stays accurate to
+    # roughly that tolerance (geometrically bounded truncation error).
+    x = np.random.default_rng(4).normal(size=(2, 600))
+    sos = butterworth_sos(order=4, fs=FS, btype='bandpass', lo=0.05, hi=0.2)
+    ref = ss.sosfilt(sos.copy(), x, axis=-1)
+    loose = np.asarray(
+        sosfilt(jnp.asarray(x), sos, backend='fft', impulse_atol=1e-6)
+    )
+    np.testing.assert_allclose(loose, ref, atol=1e-4)
+
+
+def test_fft_too_sharp_falls_back():
+    # A razor-thin high-order band-pass whose impulse response does not decay
+    # within the tap cap must fall back to a recurrence (with a warning) and
+    # stay correct.
+    x = np.random.default_rng(5).normal(size=(2, 400))
+    sos = butterworth_sos(order=8, fs=FS, btype='bandpass', lo=0.0004, hi=0.0008)
+    with pytest.warns(UserWarning, match='falling back'):
+        out = np.asarray(sosfilt(jnp.asarray(x), sos, backend='fft'))
+    np.testing.assert_allclose(out, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-8)
+
+
 def test_validation():
     x = jnp.asarray(_tone(0.08))
     with pytest.raises(ValueError):
