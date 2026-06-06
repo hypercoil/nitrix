@@ -1,5 +1,26 @@
 # B14. Spectral-embedding solver on GPU: lobpcg lags eigsh; eigh-path wedges
 
+> **Status (2026-06-06): in progress on `perf/spectral-embedding-solver`.**
+> - **Issue 2 (eigh-wedge) — DONE.** `safe_eigh` now latches to CPU on an
+>   observed call-time cuSolver failure (`linalg/_solver.py`), verified against
+>   the live wedge. Both `solver='eigh'`/`'auto'` are now GPU-safe after the
+>   first failure rather than hard-erroring.
+> - **Issue 1 (lobpcg slow) — partly done + validated plan.** The default
+>   `lobpcg_tol` is now `1e-7` (early-stop): n=1024 547 ms → 200 ms (2.7×),
+>   exact, differentiability-safe (the iteration `while_loop` is inside the
+>   implicit-VJP `custom_vjp` forward, never autodiffed). **Shift-invert
+>   (validated, building):** the Laplacian is SPD, so a small negative shift
+>   keeps `(L−σI)` SPD/CG-solvable; matrix-free shift-invert lobpcg
+>   (`(L−σI)⁻¹` via inner CG) reaches **~94 ms at ~1e-3 accuracy (σ=−0.5,
+>   12 outer × 10 CG)** — ~2× off cupy `eigsh` (45 ms), 6× over the original.
+>   The matrix-free floor: it can't fully match cupy's *factorized* shift-invert
+>   (which needs the broken cuSolver), so ~2× is the realistic matrix-free
+>   target. Build: wrap the shift-invert/CG forward in the existing
+>   implicit-VJP backward (algorithm-independent), generalise across the
+>   affinity (eigenmap) and anisotropic-Markov (diffusion) operators, add a
+>   `solver='shift_invert'` dispatch + a Jacobi/Chebyshev preconditioner bank
+>   for the plain lobpcg path, with tuned defaults + tests.
+>
 > **Status (2026-06-03): parked (perf + robustness) — two measured
 > spectral-embedding solver issues on the cuSOLVER-broken L4.** Not a
 > commitment — gated on the **Trigger** below. Effort **M**. Provenance:
