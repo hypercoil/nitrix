@@ -640,21 +640,36 @@ def _n_from(A: _GraphInput) -> int:
     return int(A.shape[-1])
 
 
+def _operator_dtype(M: _GraphInput) -> Any:
+    '''The element dtype of a (dense / ELL / SectionedELL) operator.'''
+    if isinstance(M, ELL):
+        return M.values.dtype
+    if isinstance(M, SectionedELL):
+        return M.sections[0].values.dtype
+    return M.dtype
+
+
 def _lobpcg_initial_subspace(
-    n: int, k_total: int, seed: int, device: Any,
+    n: int, k_total: int, seed: int, device: Any, dtype: Any,
 ) -> Float[Array, 'n k_total']:
     '''Random initial subspace for LOBPCG, on the requested device.
 
     ``seed`` controls reproducibility across runs.  ``device`` is the
     solver device (chosen by ``_solver_device()``); LOBPCG's internal
     QR / Cholesky use cuSolver, which we route to CPU when the
-    GPU-side build has a broken handle.
+    GPU-side build has a broken handle.  ``dtype`` matches the operator's
+    element type: with ``jax_enable_x64`` a default (fp64) subspace would
+    promote an fp32 operator to fp64 -- which made the *backward* return an
+    fp64 cotangent against an fp32 input (a dtype-mismatch error), and ran the
+    fp32 forward in the slower fp64 path; matching the dtype fixes both.
     '''
     key = jax.random.key(seed)
     # ``jax.device_put`` is untyped (returns Any); restore the subspace type.
     return cast(
         Float[Array, 'n k_total'],
-        jax.device_put(jax.random.normal(key, (n, k_total)), device),
+        jax.device_put(
+            jax.random.normal(key, (n, k_total), dtype=dtype), device,
+        ),
     )
 
 
@@ -725,7 +740,9 @@ def _lobpcg_top_k(
     '''
     k_total = n_components + (1 if skip_trivial else 0)
     target = _solver_device()
-    X0 = _lobpcg_initial_subspace(n, k_total, seed, target)
+    X0 = _lobpcg_initial_subspace(
+        n, k_total, seed, target, _operator_dtype(M),
+    )
     eigvals, eigvecs = _run_lobpcg_on_operator(
         M, X0, iters=iters, tol=tol,
     )
@@ -770,7 +787,9 @@ def _shift_invert_top_k(
         )
     k_total = n_components + (1 if skip_trivial else 0)
     target = _solver_device()
-    X0 = _lobpcg_initial_subspace(n, k_total, seed, target)
+    X0 = _lobpcg_initial_subspace(
+        n, k_total, seed, target, _operator_dtype(M),
+    )
     eigvals, eigvecs = shift_invert_top_k_dense(
         M, X0, _SI_SIGMA, _SI_OUTER_ITERS, _SI_CG_ITERS,
     )
@@ -812,7 +831,9 @@ def _poly_top_k(
         )
     k_total = n_components + (1 if skip_trivial else 0)
     target = _solver_device()
-    X0 = _lobpcg_initial_subspace(n, k_total, seed, target)
+    X0 = _lobpcg_initial_subspace(
+        n, k_total, seed, target, _operator_dtype(M),
+    )
     eigvals, eigvecs = poly_filtered_top_k_dense(
         M, X0, _POLY_DEGREE, _POLY_SHIFT, _POLY_OUTER_ITERS,
     )
