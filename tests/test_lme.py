@@ -133,20 +133,26 @@ def test_reml_voxelwise_per_voxel_match_unbatched():
     for v in range(V):
         Y_v = jnp.asarray(Y_np[v: v + 1])
         result_v = reml_fit(Y_v, X, Z, n_iter=40)
+        # Batched and per-voxel REML are the same math but accumulate the
+        # iterative variance-component updates in different orders, so they
+        # agree only to ~1e-7 relative (the variance components are the
+        # optimisation targets; beta_hat inherits their error through the GLS
+        # solve).  rtol=1e-6 sits ~9x above the observed worst case; the small
+        # atol is the near-zero floor.
         np.testing.assert_allclose(
             float(result_batch.sigma_b_sq[v]),
             float(result_v.sigma_b_sq[0]),
-            atol=1e-10,
+            rtol=1e-6, atol=1e-10,
         )
         np.testing.assert_allclose(
             float(result_batch.sigma_e_sq[v]),
             float(result_v.sigma_e_sq[0]),
-            atol=1e-10,
+            rtol=1e-6, atol=1e-10,
         )
         np.testing.assert_allclose(
             np.asarray(result_batch.beta_hat[v]),
             np.asarray(result_v.beta_hat[0]),
-            atol=1e-9,
+            rtol=1e-6, atol=1e-9,
         )
 
 
