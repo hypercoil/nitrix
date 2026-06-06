@@ -225,6 +225,19 @@ def intensity_normalize(
         normalisation).
     eps
         Stabiliser for the division when ``high == low``.
+
+    Notes
+    -----
+    The two ``jnp.percentile`` calls *look* like two sorts that should
+    be fused into a single length-2 quantile call
+    (``jnp.percentile(x, [low, high])``) to halve the work.  They are
+    not: both calls reduce the *same* ``x`` along the *same* axis, so
+    XLA common-subexpression-eliminates them to a **single** ``lax.sort``
+    -- the batched form compiles to identical HLO and benchmarks
+    perf-neutral (measured on the L4: GPU steady and peak HBM unchanged;
+    see ``docs/feature-requests/median-percentile-cpu-sort-cliff.md``).
+    The cost here is that one unavoidable full sort, not a double sort,
+    so the two-call form is kept for readability.
     '''
     lo = jnp.percentile(x, low_percentile, axis=axis, keepdims=True)
     hi = jnp.percentile(x, high_percentile, axis=axis, keepdims=True)
@@ -286,6 +299,13 @@ def percentile_rescale(
     -------
     Rescaled tensor, same shape as ``x``.  In ``[0, 1]`` when
     ``clip`` is set.
+
+    Notes
+    -----
+    The two ``jnp.percentile`` calls are *not* worth fusing into one
+    length-2 quantile call: XLA already CSEs the two identical sorts
+    into a single ``lax.sort`` (see ``intensity_normalize`` Notes and
+    ``docs/feature-requests/median-percentile-cpu-sort-cliff.md``).
     '''
     p_lo = jnp.percentile(x, lo, axis=axis, keepdims=True)
     p_hi = jnp.percentile(x, hi, axis=axis, keepdims=True)

@@ -22,9 +22,8 @@ reduce to local-max / local-min sliding-window reductions.
 """
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence, Union, cast
+from typing import Any, Callable, Optional, Sequence, Union, cast
 
-import jax
 import jax.numpy as jnp
 import jax.lax as lax
 from jax.typing import DTypeLike
@@ -36,10 +35,18 @@ from ..semiring import (
     TROPICAL_MIN_PLUS,
     Semiring,
     semiring_conv,
+    semiring_matmul,
 )
 
 
-__all__ = ['dilate', 'erode', 'open', 'close', 'distance_transform']
+__all__ = [
+    'dilate',
+    'erode',
+    'open',
+    'close',
+    'distance_transform',
+    'distance_transform_edt',
+]
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +121,31 @@ def _conv_wrap(
     return out[..., 0]
 
 
+def _windowed_reduce(
+    x: Num[Array, '... *spatial'],
+    box: Sequence[int],
+    spatial_rank: int,
+    reducer: Callable[[Array, Array], Array],
+    init: float,
+    padding: str,
+) -> Num[Array, '... *spatial']:
+    '''Flat-structuring-element dilation / erosion as a fused reduce-window.
+
+    For a flat (all-zero) structuring element, dilation reduces to a sliding-
+    window max and erosion to a sliding-window min -- which ``lax.reduce_window``
+    computes as a single fused kernel (XLA lowers it like a pooling op), instead
+    of the ``semiring_conv`` im2col-patches + matmul path.  ``"SAME"`` padding
+    pads with ``init`` (``-inf`` for max, ``+inf`` for min), matching the
+    semiring algebra-identity padding bit-for-bit.  The window is ``1`` on the
+    leading batch dims and ``box`` on the trailing ``spatial_rank`` dims.
+    '''
+    window = (1,) * (x.ndim - spatial_rank) + tuple(box)
+    strides = (1,) * x.ndim
+    return lax.reduce_window(
+        x, jnp.asarray(init, x.dtype), reducer, window, strides, padding,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public ops
 # ---------------------------------------------------------------------------
@@ -181,13 +213,14 @@ def dilate(
         primitive handles.  Composition is more general and only
         costs 2 lines.
     backend
-        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.
+        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Consulted only for the
+        non-flat (explicit ``structuring_element``) path; the common flat-box
+        case lowers to a fused ``lax.reduce_window`` regardless.
 
     Returns
     -------
     Array of the same shape as ``x`` (for ``padding="SAME"``).
     '''
-    spatial_rank = len(x.shape) - (x.ndim - x.ndim)  # placeholder
     # The spatial rank is inferred from the structuring element or
     # ``size``; if neither pins it we treat all of x's dims as spatial.
     if structuring_element is not None:
@@ -200,6 +233,11 @@ def dilate(
     se = _resolve_structuring_element(
         structuring_element, size, spatial_rank, x.dtype,
     )
+    if structuring_element is None:
+        # Flat box (the common case): a fused sliding-window max.
+        return _windowed_reduce(
+            x, se.shape, spatial_rank, lax.max, -jnp.inf, padding,
+        )
     return _conv_wrap(
         x, se,
         semiring=TROPICAL_MAX_PLUS,
@@ -233,6 +271,11 @@ def erode(
     se = _resolve_structuring_element(
         structuring_element, size, spatial_rank, x.dtype,
     )
+    if structuring_element is None:
+        # Flat box (the common case): a fused sliding-window min.
+        return _windowed_reduce(
+            x, se.shape, spatial_rank, lax.min, jnp.inf, padding,
+        )
     return _conv_wrap(
         x, -se,
         semiring=TROPICAL_MIN_PLUS,
@@ -308,70 +351,150 @@ def _chebyshev_3x3_offsets(spatial_rank: int, dtype: DTypeLike) -> Array:
     return se
 
 
+# ---------------------------------------------------------------------------
+# Exact Euclidean distance transform (separable, via min-plus matmul)
+# ---------------------------------------------------------------------------
+
+# Finite sentinel for "no seed here": large enough that no real squared
+# distance approaches it (the max squared EDT of a grid is sum of (extent-1)^2,
+# << this), but small enough that ``BIG + d^2`` stays exact / finite in fp32.
+# A finite sentinel (vs ``+inf``) keeps the min-plus accumulation free of
+# ``inf`` propagation; positions still BIG after all axes had no reachable
+# boundary and are mapped to ``+inf`` at the end.
+_EDT_BIG = 1e10
+_EDT_BIG_THRESHOLD = 1e9  # accumulated cost >= this <=> no boundary reachable
+
+
+def _edt_along_axis(
+    g: Float[Array, '...'], axis: int, *, backend: Backend,
+) -> Float[Array, '...']:
+    '''Squared 1D EDT along ``axis`` as a tropical min-plus matmul.
+
+    The 1D squared distance transform ``out[p] = min_q (g[q] + (q - p)^2)`` is
+    exactly the tropical (min, +) contraction of the per-position cost ``g``
+    against the squared-distance matrix ``D2[q, p] = (q - p)^2``.  Reshaping
+    the off-axis dims into a batch of lines, the whole pass is one
+    ``semiring_matmul`` (``(lines, n) @ (n, n)``) -- which carries the
+    Pallas-CUDA streaming kernel and its JAX fallback, so the EDT inherits a
+    backend-dispatched, differentiable, no-control-flow implementation instead
+    of a per-line stack scan.
+    '''
+    g = jnp.moveaxis(g, axis, -1)
+    shape = g.shape
+    n = shape[-1]
+    pos = jnp.arange(n, dtype=g.dtype)
+    d2 = (pos[:, None] - pos[None, :]) ** 2  # (n, n) squared-distance matrix
+    out = semiring_matmul(
+        g.reshape(-1, n), d2,
+        semiring=TROPICAL_MIN_PLUS,
+        backend=backend,
+    )
+    return jnp.moveaxis(out.reshape(shape), -1, axis)
+
+
+def _distance_transform_edt(
+    mask: Num[Array, '... *spatial'], *, backend: Backend = 'auto',
+) -> Float[Array, '... *spatial']:
+    '''Exact Euclidean DT as a separable sequence of min-plus matmuls.
+
+    Squared Euclidean distance separates over axes, so the exact transform is
+    the sequential composition of the 1D squared-EDT (``_edt_along_axis``)
+    along each axis; ``sqrt`` once at the end.  Seeds are the zero positions of
+    ``mask``; every axis is treated as spatial (scipy
+    ``distance_transform_edt`` convention).
+    '''
+    arr = jnp.asarray(mask)
+    dtype = jnp.promote_types(arr.dtype, jnp.float32)
+    g = jnp.where(
+        arr == 0,
+        jnp.zeros((), dtype),
+        jnp.asarray(_EDT_BIG, dtype),
+    )
+    for axis in range(arr.ndim):
+        g = _edt_along_axis(g, axis, backend=backend)
+    return jnp.where(
+        g >= _EDT_BIG_THRESHOLD,
+        jnp.asarray(jnp.inf, dtype),
+        jnp.sqrt(g),
+    )
+
+
 def distance_transform(
     mask: Num[Array, '... *spatial'],
     *,
-    metric: str = 'chebyshev',
+    metric: str = 'euclidean',
     structuring_element: Optional[Num[Array, '*kspatial']] = None,
     max_iters: Optional[int] = None,
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial']:
-    '''Distance transform via iterative min-plus convolution.
+    '''Distance transform: distance from each interior voxel to the boundary.
 
-    For each output position ``i``, returns the distance to the
-    nearest position where ``mask`` is zero (the "boundary").
-    Non-zero ``mask`` positions are interior; zero positions are
-    distance zero.  Iterative ``TROPICAL_MIN_PLUS`` convolution with
-    a step-cost structuring element converges to the exact distance
-    transform in ``max(spatial_shape)`` iterations.
+    For each output position ``i``, returns the distance to the nearest
+    position where ``mask`` is zero (the "boundary").  Non-zero ``mask``
+    positions are interior; zero positions are distance zero.
+
+    Two engines, selected by ``metric``:
+
+    - ``metric="euclidean"`` (**default**) -- **exact** Euclidean distance
+      transform.  Each axis pass is a tropical (min, +) matmul of the
+      per-position cost against the squared-distance matrix
+      ``out[p] = min_q (g[q] + (q - p)^2)`` (``semiring_matmul`` with
+      ``TROPICAL_MIN_PLUS``), so the EDT runs on the semiring Pallas-CUDA
+      streaming kernel (with the JAX fallback) and is reverse-mode
+      differentiable through the min-plus matmul.  This is the metric
+      ``scipy.ndimage.distance_transform_edt`` computes; the result matches it
+      to floating-point round-off.
+    - ``metric="chebyshev"`` / ``"city_block"`` / a custom
+      ``structuring_element`` -- approximate **chamfer** DT via iterated
+      ``TROPICAL_MIN_PLUS`` convolution, sharing the tropical-semiring
+      substrate with ``erode`` / ``dilate`` and converging in
+      ``max(spatial_shape)`` iterations.  Reverse-mode differentiable.
 
     Parameters
     ----------
     mask
-        Input, ``(..., *spatial)``.  Non-zero positions are interior.
+        Input, ``(..., *spatial)``.  Non-zero positions are interior.  The
+        Euclidean engine treats every axis as spatial (the
+        ``scipy.ndimage.distance_transform_edt`` convention); ``vmap`` to
+        batch.
     metric
-        Either ``"chebyshev"`` (chessboard distance, default) or
-        ``"city_block"`` (Manhattan distance).  Approximate Euclidean
-        is not currently implemented; the exact Felzenszwalb-Huttenlocher
-        algorithm is a 1.x deferral.
+        ``"euclidean"`` (default, exact EDT), ``"chebyshev"`` (chessboard
+        chamfer), or ``"city_block"`` (Manhattan chamfer).
     structuring_element
-        Explicit per-step cost kernel.  When given, overrides
-        ``metric``.  Center should be 0; neighbours should encode
-        their per-step distance contribution (1 for Chebyshev,
-        per-axis step for city-block).
+        Explicit per-step cost kernel for the chamfer engine.  When given,
+        **selects the chamfer path regardless of** ``metric`` and is used as
+        the step-cost kernel.  Center should be 0; neighbours encode their
+        per-step distance contribution (1 for Chebyshev, per-axis step for
+        city-block).
     max_iters
-        Cap on iterations.  Defaults to the longest spatial extent
-        (sufficient for exact convergence).
+        Chamfer engine only: cap on iterations (defaults to the longest
+        spatial extent, sufficient for exact convergence).  Ignored by the
+        Euclidean engine, which is non-iterative.
     backend
-        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.
+        ``"auto"``, ``"pallas-cuda"``, or ``"jax"``.  Selects the
+        ``semiring_matmul`` backend for the Euclidean engine and the
+        ``semiring_conv`` backend for the chamfer engine.
 
     Returns
     -------
-    Distance map of the same spatial shape; ``+inf`` where ``mask``
-    is everywhere non-zero (no boundary reachable).
+    Distance map of the same spatial shape; ``+inf`` where ``mask`` is
+    everywhere non-zero (no boundary reachable).
 
     Notes
     -----
-    This is the **chamfer DT** (Chebyshev / Manhattan / arbitrary
-    user-supplied step-cost kernel).  For **exact Euclidean DT**,
-    no nitrix primitive is shipped at first GA; the standard
-    reference is the Felzenszwalb-Huttenlocher 2012 parabolic
-    algorithm, which scipy implements as
-    ``scipy.ndimage.distance_transform_edt``.  Use scipy on host
-    if you need exact EDT and don't need GPU placement /
-    differentiability; a JAX-native EDT primitive
-    (``distance_transform_edt``) is a planned follow-up -- see
-    ``docs/design/perf-audit-2025-05.md``.
-
-    Perf characteristics: per the 2025-05 audit, the iterative
-    chamfer DT here is competitive with scipy's EDT in 3D
-    (1.3-2.0× ratio depending on shape) and lags at small 2D
-    (up to 15× at ``(64, 64)``).  The "lag" reflects an
-    algorithmic mismatch (chamfer vs Euclidean), not a slow
-    implementation; the two functions compute different metrics.
+    The Euclidean default supersedes the historical chamfer default: a
+    function named ``distance_transform`` is expected to compute the Euclidean
+    metric (as scipy / cupy / ITK do).  Expressing the separable EDT as a
+    per-axis min-plus matmul reuses the semiring substrate's Pallas-CUDA kernel
+    -- on the L4 it matches ``cupyx.scipy.ndimage.distance_transform_edt`` at
+    64^3 and beats scipy on CPU, exact, where the iterative chamfer was ~80x
+    slower on GPU.  The chamfer engine is retained for non-Euclidean metrics
+    and custom step-cost kernels.  See ``docs/design/perf-audit-2025-05.md``.
     '''
-    spatial_rank = mask.ndim - (mask.ndim - jnp.asarray(mask).ndim)
-    # Determine spatial rank from the metric / SE.
+    if structuring_element is None and metric == 'euclidean':
+        return _distance_transform_edt(mask, backend=backend)
+
+    spatial_rank = jnp.asarray(mask).ndim
     if structuring_element is not None:
         se = jnp.asarray(structuring_element, dtype=mask.dtype)
         spatial_rank = se.ndim
@@ -379,8 +502,9 @@ def distance_transform(
         if metric not in ('chebyshev', 'city_block'):
             raise ValueError(
                 f'metric={metric!r} not in '
-                '{"chebyshev", "city_block"}; for Euclidean DT, use '
-                'Felzenszwalb-Huttenlocher (not yet implemented).'
+                '{"euclidean", "chebyshev", "city_block"}; the chamfer '
+                'engine accepts "chebyshev" / "city_block", and "euclidean" '
+                '(the default) computes exact EDT via a separate path.'
             )
         # The structuring element's rank is the input's rank (single-
         # channel API; all dims of x are spatial).
@@ -420,3 +544,18 @@ def distance_transform(
 
     # ``lax.fori_loop`` is typed as returning Any; restore the array type.
     return cast(Float[Array, '...'], lax.fori_loop(0, max_iters, body, dist))
+
+
+def distance_transform_edt(
+    mask: Num[Array, '... *spatial'],
+    *,
+    backend: Backend = 'auto',
+) -> Float[Array, '... *spatial']:
+    '''Exact Euclidean distance transform (scipy ``distance_transform_edt``).
+
+    Thin alias for ``distance_transform(mask, metric="euclidean")`` -- the
+    separable min-plus-matmul engine (semiring Pallas-CUDA kernel + JAX
+    fallback).  Distance from each non-zero voxel to the nearest zero voxel;
+    ``+inf`` where ``mask`` is everywhere non-zero.
+    '''
+    return _distance_transform_edt(mask, backend=backend)

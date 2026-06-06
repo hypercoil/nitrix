@@ -24,6 +24,20 @@ nitrix is fine (robust beats the cupy reimpl 9-13×; intensity ~parity), so this
 is a CPU-only cliff. `zscore_normalize` / `psc_normalize` (mean/std, no sort)
 are clean wins -- the cliff is specifically the order-statistic ops.
 
+**Measured 2026-06-05 (negative result — the "double sort" is a red herring).**
+`intensity_normalize` / `percentile_rescale` call `jnp.percentile` *twice*
+(p_lo and p_hi), which *looks* like two sorts to remove by batching into one
+length-2 quantile call. It is not: **XLA already CSEs the two identical
+`lax.sort` subexpressions into one** (verified by HLO dump — `old` two-call and
+`new` one-call forms compile to the identical sort count; GPU steady **1.41 ms**
+and peak **184.55 MB HBM** are unchanged to the decimal). So the GPU `intensity`
+gap (≈1.6× vs cupy at n=2048, parity-to-faster by n=4096) is the cost of the
+**single** full `lax.sort` (4M elements → ~184 MB, ~11× cupy's 16.8 MB), not a
+double sort. The single-call refactor was measured perf-neutral and reverted.
+The only real levers remain those listed below (pure_callback / accept /
+upstream quickselect) — there is no cheap pure-JAX win here, consistent with the
+`top_k`-doesn't-help-the-tail finding above.
+
 **The obvious fix does NOT work in jax.** The natural idea -- "use a partition
 (O(n) introselect) instead of a full sort" -- fails *inside* jax, because
 `jnp.partition` is itself sort-based on CPU (XLA has no O(n) selection

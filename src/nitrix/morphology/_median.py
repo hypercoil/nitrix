@@ -80,6 +80,21 @@ def median_filter(
     Returns
     -------
     Array of the same spatial shape as ``x`` when ``padding="SAME"``.
+
+    Notes
+    -----
+    Perf (profiled on the L4, 256² / size-3, ~5x behind cupy): the cost splits
+    ~90 µs gather + ~210 µs ``nanmedian``, i.e. **the sort dominates** -- and a
+    manual ``jnp.sort`` + valid-count index is no faster (the sort is the same).
+    The only real lever is a *hardcoded sorting network* for the fixed small
+    window (a median-of-K network is ~K compare-exchanges, far fewer than a
+    general sort), but it is non-trivial here: NaN-padded borders make the
+    median index depend on the per-window valid count, so the network is exact
+    only on the all-valid interior and borders need a separate path.  Deferred
+    -- and gated on first giving this case a fidelity oracle in
+    ``nitrix-perf-bench`` (it is currently perf-only; see
+    ``docs/feature-requests/perf-bench-case-hardening.md``), since there is no
+    bench guard against a sorting-network correctness regression.
     '''
     if structuring_element is not None:
         se = jnp.asarray(structuring_element)
