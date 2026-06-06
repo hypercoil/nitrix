@@ -27,10 +27,11 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `lomb_scargle_interpolate` intended-use (spectral bridge, not durable imputation) | [doc-lomb-scargle-interpolate-intended-use](doc-lomb-scargle-interpolate-intended-use.md) | `signal/lomb_scargle.py:~264–359` | normal |
 | `gaussian_kernel` sigma->gamma relation wrong (missing ½ factor) | [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` | low (clarity) |
 | `relaxed_modularity` doesn't reduce to Newman modularity — it's `Q_N / 2` (double-corrected undirected count); default `exclude_diag=True` also drops the diagonal | [doc-relaxed-modularity-newman-factor](doc-relaxed-modularity-newman-factor.md) | `graph/community.py:245` | low (clarity) |
+| `_iir.py` module docstring says `backend='scan' (default)`; real default is `'auto'` (→ fft on GPU / scan on CPU). Function docstrings are correct; only the module header is stale | [doc-iir-backend-default](doc-iir-backend-default.md) | `signal/_iir.py:~22` | normal |
 
 _(The five lomb/tsconv findings above resolved 2026-06-02 — see below;
 `doc-gaussian-kernel-gamma` and `doc-relaxed-modularity-newman-factor` are
-newly open 2026-06-03.)_
+newly open 2026-06-03; `doc-iir-backend-default` newly open 2026-06-06.)_
 
 ## Resolved
 
