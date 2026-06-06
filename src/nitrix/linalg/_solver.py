@@ -23,10 +23,10 @@ Used by:
 
 - ``nitrix.linalg.spd`` -- ``symmap`` / ``symlog`` / ``symsqrt``
   and friends.
-- ``nitrix.graph.connectopy`` -- ``laplacian_eigenmap`` /
-  ``diffusion_embedding`` dense path.
-- ``nitrix.graph._lobpcg_diff`` -- LOBPCG's internal QR /
-  Cholesky path.
+- ``nitrix.linalg._eigsolve`` -- the extremal-eigensolver
+  dispatcher: ``eigh`` for the dense ``laplacian_eigenmap`` /
+  ``diffusion_embedding`` path (through ``graph.connectopy``), and
+  the iterative solvers' internal QR / Cholesky.
 
 The eigh-vs-other-solvers asymmetry is intentional: on a healthy
 stack we don't pay any overhead for the wrapper; on a broken

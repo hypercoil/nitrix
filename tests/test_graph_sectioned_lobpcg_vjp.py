@@ -17,9 +17,10 @@ import pytest
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.graph._lobpcg_diff import (
-    lobpcg_top_k_ell,
-    lobpcg_top_k_sectioned_ell,
+from nitrix.linalg._eigsolve import (
+    SolverSpec,
+    _eig_top_k_ell,
+    _eig_top_k_sectioned,
 )
 from nitrix.semiring import REAL, semiring_ell_matmul
 from nitrix.sparse import sectioned_ell_from_ragged
@@ -86,8 +87,8 @@ def test_sectioned_vjp_matches_flat_per_entry():
 
     # Flat-ELL loss
     def loss_flat(values):
-        _, U = lobpcg_top_k_ell(
-            values, indices_flat, X0, n, 500, None, 1e-8,
+        _, U = _eig_top_k_ell(
+            values, indices_flat, X0, n, SolverSpec.lobpcg(n_iters=500),
         )
         AU = semiring_ell_matmul(
             values, indices_flat, U,
@@ -98,16 +99,16 @@ def test_sectioned_vjp_matches_flat_per_entry():
     g_flat = jax.grad(loss_flat)(values_flat)
 
     # SectionedELL loss (via the same matvec definition).
-    from nitrix.graph._lobpcg_diff import _sectioned_matvec
+    from nitrix.linalg._eigsolve import _sectioned_matvec
 
     values_tuple = tuple(s.values for s in sec.sections)
     indices_tuple = tuple(s.indices for s in sec.sections)
     row_groups_tuple = tuple(jnp.asarray(rg) for rg in sec.row_groups)
 
     def loss_sec(values_tuple):
-        _, U = lobpcg_top_k_sectioned_ell(
+        _, U = _eig_top_k_sectioned(
             values_tuple, indices_tuple, row_groups_tuple, X0,
-            n_cols=n, n_iters=500, tol=None, eps_clamp=1e-8,
+            n, SolverSpec.lobpcg(n_iters=500),
         )
         AU = _sectioned_matvec(
             values_tuple, indices_tuple, row_groups_tuple, U,
@@ -161,16 +162,16 @@ def test_sectioned_vjp_finite_under_grad():
     target = jax.random.normal(jax.random.key(2), (3, 3))
     target = (target + target.T) / 2
 
-    from nitrix.graph._lobpcg_diff import _sectioned_matvec
+    from nitrix.linalg._eigsolve import _sectioned_matvec
 
     values_tuple = tuple(s.values for s in sec.sections)
     indices_tuple = tuple(s.indices for s in sec.sections)
     row_groups_tuple = tuple(jnp.asarray(rg) for rg in sec.row_groups)
 
     def loss(values_tuple):
-        _, U = lobpcg_top_k_sectioned_ell(
+        _, U = _eig_top_k_sectioned(
             values_tuple, indices_tuple, row_groups_tuple, X0,
-            n_cols=n, n_iters=500, tol=None, eps_clamp=1e-8,
+            n, SolverSpec.lobpcg(n_iters=500),
         )
         return jnp.trace(U.T @ U @ target)
 

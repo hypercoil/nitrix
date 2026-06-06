@@ -174,6 +174,15 @@ benchmark reports, and survive being plucked into the eventual
   near-degeneracy clamp, sparsity-pattern-projected backward for
   ELL and per-section row_groups-gather-projected backward for
   SectionedELL.  Closes the last non-differentiable graph path.
+- [`design/eigsolve-dispatcher.md`](design/eigsolve-dispatcher.md) --
+  **(agreed design, not yet implemented)** lifting the extremal
+  top-k eigensolver dispatch out of ``graph.connectopy`` into a
+  dedicated ``nitrix.linalg.eigsolve`` facility, and extending
+  ELL / SectionedELL coverage to ``shift_invert`` / ``poly``.  Keyed
+  on the insight that the solver *forward* (method) and the gradient
+  *backward* (operand format) are orthogonal, so the missing sparse
+  cells fall out of the refactor.  ``eigh`` is folded in only in its
+  extremal role; ``safe_eigh`` stays the full-spectrum primitive.
 - [`design/permutohedral-g2.md`](design/permutohedral-g2.md) --
   the G2 tripwire outcome for ``permutohedral_lattice`` (**retired**
   in SPEC_UPDATE_v0.4; superseded by the bounded bilateral, see

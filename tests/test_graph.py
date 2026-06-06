@@ -413,10 +413,39 @@ def test_diffusion_embedding_shift_invert_agrees_with_eigh():
     )
 
 
-def test_shift_invert_rejects_sparse_input():
-    ell = _ell_from_dense(_ring_adjacency(32))
-    with pytest.raises(ValueError, match='dense input only'):
-        laplacian_eigenmap(ell, n_components=3, solver='shift_invert')
+def test_shift_invert_ell_agrees_with_eigh():
+    '''Phase-4: shift-invert now serves ELL input; its eigenvalues match
+    the dense eigh reference.'''
+    A = _two_cluster_adjacency(n_per_cluster=16, p_intra=0.9, p_inter=0.02)
+    ell = _ell_from_dense(A)
+    _, vals_eigh = laplacian_eigenmap(
+        jnp.asarray(A), n_components=4, solver='eigh',
+    )
+    _, vals_si = laplacian_eigenmap(
+        ell, n_components=4, solver='shift_invert',
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_si)),
+        np.sort(np.asarray(vals_eigh)),
+        atol=1e-3,
+    )
+
+
+def test_shift_invert_sectioned_agrees_with_eigh():
+    '''Phase-4: shift-invert serves SectionedELL input too.'''
+    A = _two_cluster_adjacency(n_per_cluster=16, p_intra=0.9, p_inter=0.02)
+    sec = _sectioned_from_dense(A)
+    _, vals_eigh = laplacian_eigenmap(
+        jnp.asarray(A), n_components=4, solver='eigh',
+    )
+    _, vals_si = laplacian_eigenmap(
+        sec, n_components=4, solver='shift_invert',
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_si)),
+        np.sort(np.asarray(vals_eigh)),
+        atol=1e-3,
+    )
 
 
 def test_polynomial_preconditioner_agrees_with_eigh():
@@ -436,12 +465,21 @@ def test_polynomial_preconditioner_agrees_with_eigh():
     )
 
 
-def test_polynomial_preconditioner_rejects_sparse_input():
-    ell = _ell_from_dense(_ring_adjacency(32))
-    with pytest.raises(ValueError, match='dense input only'):
-        laplacian_eigenmap(
-            ell, n_components=3, solver='lobpcg', preconditioner='polynomial',
-        )
+def test_polynomial_preconditioner_ell_agrees_with_eigh():
+    '''Phase-4: the polynomial filter now serves ELL input.'''
+    A = _two_cluster_adjacency(n_per_cluster=16, p_intra=0.9, p_inter=0.02)
+    ell = _ell_from_dense(A)
+    _, vals_eigh = laplacian_eigenmap(
+        jnp.asarray(A), n_components=4, solver='eigh',
+    )
+    _, vals_poly = laplacian_eigenmap(
+        ell, n_components=4, solver='lobpcg', preconditioner='polynomial',
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_poly)),
+        np.sort(np.asarray(vals_eigh)),
+        atol=1e-2,
+    )
 
 
 def test_laplacian_eigenmap_sparse_input_uses_lobpcg():
@@ -603,6 +641,34 @@ def test_diffusion_embedding_t_scaling():
     np.testing.assert_allclose(embed_t, expected, atol=1e-10)
 
 
+@pytest.mark.parametrize(
+    'solver,pc',
+    [
+        ('eigh', 'none'),
+        ('lobpcg', 'none'),
+        ('shift_invert', 'none'),
+        ('lobpcg', 'polynomial'),
+    ],
+)
+def test_laplacian_eigenmap_jittable_dense(solver, pc):
+    '''The public dense solver paths trace and run under ``jax.jit`` --
+    forward (matching eager) and through ``jax.jit(jax.grad(...))``.'''
+    A = jnp.asarray(
+        _two_cluster_adjacency(n_per_cluster=12, p_intra=0.9, p_inter=0.02)
+    )
+
+    def f(X):
+        return laplacian_eigenmap(
+            X, n_components=3, solver=solver, preconditioner=pc,
+        )[1]
+
+    np.testing.assert_allclose(
+        np.asarray(jax.jit(f)(A)), np.asarray(f(A)), atol=1e-4,
+    )
+    g = jax.jit(jax.grad(lambda X: f(X).sum()))(A)
+    assert np.all(np.isfinite(np.asarray(g)))
+
+
 def test_eigh_differentiable():
     '''Reverse-mode AD through eigh works (jnp.linalg.eigh ships with a VJP).'''
     n = 16
@@ -652,14 +718,14 @@ def test_lobpcg_dense_eigenvalue_grad_matches_eigh():
     Hellmann-Feynman is exact; the only error source is LOBPCG's
     eigenvalue residual against eigh's machine-precision answer.
     '''
-    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+    from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 40, 3
     M = _build_psd(n, seed=0)
     X0 = jax.random.normal(jax.random.key(0), (n, k))
 
     def loss_lob(M):
-        ev, _ = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+        ev, _ = _eig_top_k_dense(M, X0, SolverSpec.lobpcg(n_iters=500))
         return ev.sum()
 
     def loss_eigh(M):
@@ -678,7 +744,7 @@ def test_lobpcg_dense_in_subspace_loss_matches_analytical():
     ``U @ diag(diag(T)) @ U^T``, the F-matrix correction cancels the
     off-diagonal of ``T``.  The implicit-VJP should hit this exactly.
     '''
-    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+    from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 40, 3
     M = _build_psd(n, seed=1)
@@ -686,11 +752,11 @@ def test_lobpcg_dense_in_subspace_loss_matches_analytical():
     target = jax.random.normal(jax.random.key(2), (k, k))
     target = (target + target.T) / 2
 
-    _, U = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+    _, U = _eig_top_k_dense(M, X0, SolverSpec.lobpcg(n_iters=500))
     expected = U @ jnp.diag(jnp.diag(target)) @ U.T
 
     def loss(M):
-        _, U = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+        _, U = _eig_top_k_dense(M, X0, SolverSpec.lobpcg(n_iters=500))
         return jnp.trace(U.T @ M @ U @ target)
 
     g = jax.grad(loss)(M)
@@ -701,7 +767,7 @@ def test_lobpcg_dense_gradient_is_symmetric():
     '''The gradient of any scalar loss through LOBPCG implicit-VJP lives
     in the symmetric subspace -- ``V K V^T`` with ``K`` symmetric.
     '''
-    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+    from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 30, 2
     M = _build_psd(n, seed=3)
@@ -709,7 +775,7 @@ def test_lobpcg_dense_gradient_is_symmetric():
     target = jax.random.normal(jax.random.key(4), (n, k))
 
     def loss(M):
-        _, U = lobpcg_top_k_dense(M, X0, 500, None, 1e-8)
+        _, U = _eig_top_k_dense(M, X0, SolverSpec.lobpcg(n_iters=500))
         return jnp.sum(U * target)
 
     g = jax.grad(loss)(M)
@@ -722,7 +788,7 @@ def test_lobpcg_dense_degenerate_eigenvalues_clamp():
     '''Identity matrix has fully-degenerate spectrum; the eps_clamp
     short-circuits F-matrix blow-up.  Gradient must be finite.
     '''
-    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense
+    from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 30, 2
     # Perturb identity slightly so LOBPCG converges
@@ -731,7 +797,9 @@ def test_lobpcg_dense_degenerate_eigenvalues_clamp():
     X0 = jax.random.normal(jax.random.key(1), (n, k))
 
     def loss(M):
-        _, U = lobpcg_top_k_dense(M, X0, 500, None, eps_clamp=1e-3)
+        _, U = _eig_top_k_dense(
+            M, X0, SolverSpec.lobpcg(n_iters=500, eps_clamp=1e-3),
+        )
         return jnp.sum(U ** 2)  # invariant; gradient should be ~zero
 
     g = jax.grad(loss)(M)
@@ -743,7 +811,11 @@ def test_lobpcg_ell_grad_matches_dense_projected():
     pattern, agreeing with the dense backward gathered at the same
     indices.
     '''
-    from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense, lobpcg_top_k_ell
+    from nitrix.linalg._eigsolve import (
+        SolverSpec,
+        _eig_top_k_dense,
+        _eig_top_k_ell,
+    )
     from nitrix.semiring import REAL, semiring_ell_matmul
 
     rng = np.random.default_rng(7)
@@ -762,12 +834,12 @@ def test_lobpcg_ell_grad_matches_dense_projected():
     target = (target + target.T) / 2
 
     def loss_dense(A):
-        _, U = lobpcg_top_k_dense(A, X0, 500, None, 1e-8)
+        _, U = _eig_top_k_dense(A, X0, SolverSpec.lobpcg(n_iters=500))
         return jnp.trace(U.T @ A @ U @ target)
 
     def loss_ell(values):
-        _, U = lobpcg_top_k_ell(
-            values, ell.indices, X0, n, 500, None, 1e-8,
+        _, U = _eig_top_k_ell(
+            values, ell.indices, X0, n, SolverSpec.lobpcg(n_iters=500),
         )
         AU = semiring_ell_matmul(
             values, ell.indices, U, semiring=REAL, n_cols=n, backend='jax',
