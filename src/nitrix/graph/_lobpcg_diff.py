@@ -72,6 +72,7 @@ __all__ = [
     'lobpcg_top_k_dense',
     'lobpcg_top_k_ell',
     'shift_invert_top_k_dense',
+    'poly_filtered_top_k_dense',
 ]
 
 
@@ -309,6 +310,95 @@ def _si_dense_bwd(
 
 
 shift_invert_top_k_dense.defvjp(_si_dense_fwd, _si_dense_bwd)
+
+
+# ---------------------------------------------------------------------------
+# Polynomial spectral-filter path (matvec-only preconditioner)
+# ---------------------------------------------------------------------------
+
+
+def _poly_forward(
+    M: Float[Array, 'n n'],
+    X0: Float[Array, 'n k'],
+    degree: int,
+    shift: float,
+    outer_iters: int,
+) -> _EigPair:
+    '''Largest eigenpairs of symmetric ``M`` via a shifted-power spectral filter.
+
+    LOBPCG is run on ``(M + shift I)^degree`` instead of ``M``: the filter is
+    monotone in ``M``'s eigenvalues (``M + shift >= 0`` for the normalized
+    affinity), so it preserves eigenvectors and *amplifies the top of the
+    spectrum* relative to the rest (the wanted subspace separates as
+    ``((lambda_k + shift)/(lambda_{k+1} + shift))^degree``), giving far faster
+    convergence on a clustered spectrum -- using only matvecs (no inner solve,
+    so it also accelerates the sparse path).  ``M``'s eigenvalues are recovered
+    from the converged eigenvectors by the Rayleigh quotient.
+    '''
+    def filt(x: Array) -> Array:
+        y = x
+        for _ in range(degree):
+            y = M @ y + shift * y
+        return y
+
+    _, eigvecs, _ = lobpcg_standard(filt, X0, m=outer_iters)
+    mv = M @ eigvecs
+    eigvals = jnp.sum(eigvecs * mv, axis=0) / jnp.sum(eigvecs * eigvecs, axis=0)
+    return cast(_EigPair, (eigvals, eigvecs))
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(2, 3, 4, 5))
+def poly_filtered_top_k_dense(
+    M: Float[Array, 'n n'],
+    X0: Float[Array, 'n k'],
+    degree: int = 4,
+    shift: float = 1.0,
+    outer_iters: int = 12,
+    eps_clamp: float = 1e-8,
+) -> Tuple[Float[Array, 'k'], Float[Array, 'n k']]:
+    '''Differentiable polynomial-filtered top-k eigensolver for dense ``M``.
+
+    Same contract as ``lobpcg_top_k_dense`` (``M``'s ``k`` largest eigenpairs,
+    largest-first) but LOBPCG runs on the shifted-power filter
+    ``(M + shift I)^degree`` for accelerated convergence on clustered spectra;
+    the eigenvalues are recovered by Rayleigh quotient.  Matvec-only (no inner
+    solve).  The forward's ``while_loop`` is opaque to autodiff (inside this
+    ``custom_vjp``); the backward is the *same* implicit VJP as the plain
+    LOBPCG path -- solver-independent, depending only on the converged pair.
+    '''
+    return _poly_forward(M, X0, degree, shift, outer_iters)
+
+
+def _poly_dense_fwd(
+    M: Float[Array, 'n n'],
+    X0: Float[Array, 'n k'],
+    degree: int,
+    shift: float,
+    outer_iters: int,
+    eps_clamp: float,
+) -> Tuple[_EigPair, _EigPair]:
+    eigvals, eigvecs = _poly_forward(M, X0, degree, shift, outer_iters)
+    return (eigvals, eigvecs), (eigvals, eigvecs)
+
+
+def _poly_dense_bwd(
+    degree: int,
+    shift: float,
+    outer_iters: int,
+    eps_clamp: float,
+    residuals: _EigPair,
+    cotangents: _EigPair,
+) -> Tuple[Float[Array, 'n n'], None]:
+    eigvals, eigvecs = residuals
+    g_eigvals, g_eigvecs = cotangents
+    K = _subspace_vjp_kernel(
+        eigvals, eigvecs, g_eigvals, g_eigvecs, eps_clamp,
+    )
+    dM = eigvecs @ K @ eigvecs.T
+    return (dM, None)
+
+
+poly_filtered_top_k_dense.defvjp(_poly_dense_fwd, _poly_dense_bwd)
 
 
 # ---------------------------------------------------------------------------

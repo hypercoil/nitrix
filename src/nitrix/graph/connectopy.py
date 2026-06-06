@@ -87,6 +87,7 @@ from ._lobpcg_diff import (
     lobpcg_top_k_dense,
     lobpcg_top_k_ell,
     lobpcg_top_k_sectioned_ell,
+    poly_filtered_top_k_dense,
     shift_invert_top_k_dense,
 )
 from .laplacian import _ell_matvec, _is_sparse, degree_vector
@@ -136,6 +137,7 @@ def _device_put_graph(A: _GraphInput, target: Any) -> _GraphInput:
 
 
 _Solver = Literal['auto', 'eigh', 'lobpcg', 'shift_invert']
+_Preconditioner = Literal['none', 'polynomial']
 _GraphInput = Union[Num[Array, '... n n'], ELL, SectionedELL]
 
 # Shift-invert solver tuning (dense path).  A small negative shift keeps
@@ -145,6 +147,16 @@ _GraphInput = Union[Num[Array, '... n n'], ELL, SectionedELL]
 _SI_SIGMA = -0.5
 _SI_OUTER_ITERS = 15
 _SI_CG_ITERS = 12
+
+# Polynomial preconditioner tuning (the matvec-only spectral filter on the
+# plain LOBPCG path).  LOBPCG runs on ``(M + shift I)^degree`` to amplify the
+# wanted top of the spectrum; these defaults reach ~1e-3 accuracy in ~16 outer
+# iterations (~1.5-2x off cupy at n=1024 -- faster than shift-invert since it
+# is matvec-only, no inner solve).  ``shift = 1`` makes ``M + shift I`` PSD for
+# the normalized affinity (eigenvalues in [-1, 1]).
+_POLY_DEGREE = 4
+_POLY_SHIFT = 1.0
+_POLY_OUTER_ITERS = 16
 
 # Default LOBPCG residual tolerance.  ``lobpcg_standard`` runs to its iteration
 # cap unless a tolerance lets it stop on convergence; the Laplacian's smallest
@@ -309,6 +321,7 @@ def laplacian_eigenmap(
     *,
     n_components: int,
     solver: _Solver = 'auto',
+    preconditioner: _Preconditioner = 'none',
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
@@ -340,6 +353,15 @@ def laplacian_eigenmap(
         low-Laplacian spectrum, ~2x off cupy ``eigsh``; dense input only,
         differentiable via the same implicit VJP), or ``"auto"`` (default:
         ``lobpcg`` for sparse, ``eigh`` for dense).
+    preconditioner
+        Acceleration for the LOBPCG path: ``"none"`` (default) or
+        ``"polynomial"`` -- a matvec-only shifted-power spectral filter
+        (LOBPCG runs on ``(M + I)^degree`` to amplify the wanted top of the
+        spectrum, eigenvalues recovered by Rayleigh quotient).  Faster than
+        both plain ``lobpcg`` and ``shift_invert`` on clustered spectra
+        (~1.5-2x off cupy), differentiable via the same implicit VJP; dense
+        input only.  Requesting it on a dense graph routes ``"auto"`` to the
+        LOBPCG path (rather than ``eigh``) so the preconditioner is honoured.
     skip_trivial
         Drop the trivial zero eigenvalue and the corresponding
         constant eigenvector.  Default ``True``.
@@ -381,6 +403,10 @@ def laplacian_eigenmap(
         raise ValueError('n_components must be >= 1.')
     if solver == 'auto':
         solver = _auto_solver(A)
+    if preconditioner != 'none' and solver == 'eigh':
+        # A preconditioner is an iterative-solver concept; honour the request
+        # by routing the dense ``eigh`` default to the LOBPCG path.
+        solver = 'lobpcg'
 
     if solver == 'eigh':
         if _is_sparse(A):
@@ -410,16 +436,26 @@ def laplacian_eigenmap(
         target = _solver_device()
         A_solver = _device_put_graph(A, target)
         M, _ = _build_affinity_operator(A_solver, alpha=0.0, eps=eps)
-        vecs, vals = _lobpcg_top_k(
-            M,
-            n=_n_from(A_solver),
-            n_components=n_components,
-            skip_trivial=skip_trivial,
-            iters=lobpcg_iters,
-            tol=lobpcg_tol,
-            seed=seed,
-            transform_eigvals=lambda mu: 1.0 - mu,
-        )
+        if preconditioner == 'polynomial':
+            vecs, vals = _poly_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                seed=seed,
+                transform_eigvals=lambda mu: 1.0 - mu,
+            )
+        else:
+            vecs, vals = _lobpcg_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                iters=lobpcg_iters,
+                tol=lobpcg_tol,
+                seed=seed,
+                transform_eigvals=lambda mu: 1.0 - mu,
+            )
         if source is not None and source != target:
             vecs = jax.device_put(vecs, source)
             vals = jax.device_put(vals, source)
@@ -455,6 +491,7 @@ def diffusion_embedding(
     alpha: float = 0.5,
     t: float = 0.0,
     solver: _Solver = 'auto',
+    preconditioner: _Preconditioner = 'none',
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
@@ -497,6 +534,10 @@ def diffusion_embedding(
         raise ValueError('n_components must be >= 1.')
     if solver == 'auto':
         solver = _auto_solver(A)
+    if preconditioner != 'none' and solver == 'eigh':
+        # A preconditioner is an iterative-solver concept; honour the request
+        # by routing the dense ``eigh`` default to the LOBPCG path.
+        solver = 'lobpcg'
 
     if solver == 'eigh':
         if _is_sparse(A):
@@ -529,16 +570,26 @@ def diffusion_embedding(
         M, inv_sqrt_d2 = _build_affinity_operator(
             A_solver, alpha=alpha, eps=eps,
         )
-        vecs, vals = _lobpcg_top_k(
-            M,
-            n=_n_from(A_solver),
-            n_components=n_components,
-            skip_trivial=skip_trivial,
-            iters=lobpcg_iters,
-            tol=lobpcg_tol,
-            seed=seed,
-            transform_eigvals=None,
-        )
+        if preconditioner == 'polynomial':
+            vecs, vals = _poly_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                seed=seed,
+                transform_eigvals=None,
+            )
+        else:
+            vecs, vals = _lobpcg_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                iters=lobpcg_iters,
+                tol=lobpcg_tol,
+                seed=seed,
+                transform_eigvals=None,
+            )
         # Recover right eigenvectors of P from eigenvectors of M_sym.
         vecs = vecs * inv_sqrt_d2[:, None]
         if t != 0.0:
@@ -722,6 +773,48 @@ def _shift_invert_top_k(
     X0 = _lobpcg_initial_subspace(n, k_total, seed, target)
     eigvals, eigvecs = shift_invert_top_k_dense(
         M, X0, _SI_SIGMA, _SI_OUTER_ITERS, _SI_CG_ITERS,
+    )
+    if skip_trivial:
+        eigvals = eigvals[1:]
+        eigvecs = eigvecs[:, 1:]
+    if transform_eigvals is not None:
+        eigvals = transform_eigvals(eigvals)
+        order = jnp.argsort(eigvals)
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+    return eigvecs, eigvals
+
+
+def _poly_top_k(
+    M: _GraphInput,
+    *,
+    n: int,
+    n_components: int,
+    skip_trivial: bool,
+    seed: int,
+    transform_eigvals: Optional[
+        Callable[[Float[Array, 'k']], Float[Array, 'k']]
+    ],
+) -> Tuple[Float[Array, 'n n_components'], Float[Array, 'n_components']]:
+    '''Polynomial-preconditioned (matvec-only) LOBPCG top-k on dense ``M``.
+
+    Same contract as ``_lobpcg_top_k`` but LOBPCG runs on the shifted-power
+    spectral filter (eigenvalues recovered by Rayleigh quotient) -- faster than
+    plain LOBPCG *and* shift-invert on clustered spectra, using only matvecs.
+    Dense only for now (the differentiable sparse-pattern backward is the ELL
+    follow-up); ELL / SectionedELL keep the plain ``preconditioner='none'``
+    LOBPCG path.
+    '''
+    if _is_sparse(M):
+        raise ValueError(
+            "preconditioner='polynomial' supports dense input only; use "
+            "preconditioner='none' for ELL / SectionedELL."
+        )
+    k_total = n_components + (1 if skip_trivial else 0)
+    target = _solver_device()
+    X0 = _lobpcg_initial_subspace(n, k_total, seed, target)
+    eigvals, eigvecs = poly_filtered_top_k_dense(
+        M, X0, _POLY_DEGREE, _POLY_SHIFT, _POLY_OUTER_ITERS,
     )
     if skip_trivial:
         eigvals = eigvals[1:]

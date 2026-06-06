@@ -419,6 +419,31 @@ def test_shift_invert_rejects_sparse_input():
         laplacian_eigenmap(ell, n_components=3, solver='shift_invert')
 
 
+def test_polynomial_preconditioner_agrees_with_eigh():
+    '''The matvec-only polynomial-filter preconditioner matches eigh.'''
+    A = jnp.asarray(_two_cluster_adjacency(
+        n_per_cluster=16, p_intra=0.9, p_inter=0.02,
+    ))
+    _, vals_eigh = laplacian_eigenmap(A, n_components=4, solver='eigh')
+    # preconditioner='polynomial' on a dense graph routes auto -> lobpcg.
+    _, vals_poly = laplacian_eigenmap(
+        A, n_components=4, preconditioner='polynomial',
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_poly)),
+        np.sort(np.asarray(vals_eigh)),
+        atol=1e-2,
+    )
+
+
+def test_polynomial_preconditioner_rejects_sparse_input():
+    ell = _ell_from_dense(_ring_adjacency(32))
+    with pytest.raises(ValueError, match='dense input only'):
+        laplacian_eigenmap(
+            ell, n_components=3, solver='lobpcg', preconditioner='polynomial',
+        )
+
+
 def test_laplacian_eigenmap_sparse_input_uses_lobpcg():
     '''ELL input automatically routes to lobpcg via solver="auto".'''
     n = 32
