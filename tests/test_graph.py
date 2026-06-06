@@ -381,6 +381,44 @@ def test_laplacian_eigenmap_eigh_vs_lobpcg_eigenvalues_agree():
     )
 
 
+def test_laplacian_eigenmap_shift_invert_agrees_with_eigh():
+    '''The matrix-free shift-invert solver matches the dense eigh
+    eigenvalues (it is approximate, hence a loose tolerance).'''
+    A = jnp.asarray(_two_cluster_adjacency(
+        n_per_cluster=16, p_intra=0.9, p_inter=0.02,
+    ))
+    _, vals_eigh = laplacian_eigenmap(A, n_components=4, solver='eigh')
+    _, vals_si = laplacian_eigenmap(A, n_components=4, solver='shift_invert')
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_si)),
+        np.sort(np.asarray(vals_eigh)),
+        atol=1e-3,
+    )
+
+
+def test_diffusion_embedding_shift_invert_agrees_with_eigh():
+    A = jnp.asarray(_two_cluster_adjacency(
+        n_per_cluster=16, p_intra=0.9, p_inter=0.02,
+    ))
+    _, vals_eigh = diffusion_embedding(
+        A, n_components=4, alpha=0.5, solver='eigh',
+    )
+    _, vals_si = diffusion_embedding(
+        A, n_components=4, alpha=0.5, solver='shift_invert',
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_si)),
+        np.sort(np.asarray(vals_eigh)),
+        atol=1e-3,
+    )
+
+
+def test_shift_invert_rejects_sparse_input():
+    ell = _ell_from_dense(_ring_adjacency(32))
+    with pytest.raises(ValueError, match='dense input only'):
+        laplacian_eigenmap(ell, n_components=3, solver='shift_invert')
+
+
 def test_laplacian_eigenmap_sparse_input_uses_lobpcg():
     '''ELL input automatically routes to lobpcg via solver="auto".'''
     n = 32
