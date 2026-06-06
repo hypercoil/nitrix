@@ -1,5 +1,18 @@
 # B14. Spectral-embedding solver on GPU: lobpcg lags eigsh; eigh-path wedges
 
+> **Status (2026-06-06): both solver paths shipped + the x64-grad bug fixed on
+> `perf/spectral-embedding-solver`.** The polynomial preconditioner bank
+> (`poly_filtered_top_k_dense`, `preconditioner='polynomial'`) is shipped
+> (~1.5–2× off cupy at n=1024, dense-only, matvec-only spectral filter,
+> differentiable via the shared implicit-VJP backward). The pre-existing
+> fp32→fp64 grad-dtype quirk under `jax_enable_x64` is **fixed**: the lobpcg
+> initial subspace now matches the operator dtype (`_operator_dtype`), so the
+> implicit-VJP backward returns an fp32 cotangent against an fp32 operator
+> (verified finite/float32 for the lobpcg, shift-invert, and polynomial paths);
+> the fp32 forward also no longer runs in the slower fp64 path. Benchmark-
+> integrity follow-ups for the suite are catalogued in
+> [`perf-bench-case-hardening.md`](perf-bench-case-hardening.md) (B18).
+>
 > **Status (2026-06-06): in progress on `perf/spectral-embedding-solver`.**
 > - **Issue 2 (eigh-wedge) — DONE.** `safe_eigh` now latches to CPU on an
 >   observed call-time cuSolver failure (`linalg/_solver.py`), verified against
