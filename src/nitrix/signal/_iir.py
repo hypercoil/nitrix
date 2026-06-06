@@ -402,8 +402,13 @@ def _sosfilt_fft(
     y = jnp.fft.irfft(x_freq * _expand_freq(h_freq, x.ndim), n=nfft, axis=0)
     y = y[:n_t]
     if zi is not None:
-        g_seq = jnp.asarray(g, x.dtype).reshape((n_taps,) + (1,) * (x.ndim - 1))
-        y = y.at[:n_taps].add(g_seq * x[:1])
+        # The zero-input transient spans ``n_taps`` samples, but a short series
+        # (or, in ``sosfiltfilt``, a sharp filter whose impulse outlasts the
+        # padded segment) may be shorter; there are no output samples past
+        # ``n_t`` to carry it, so add it over the first ``min(n_taps, n_t)``.
+        m = min(n_taps, n_t)
+        g_seq = jnp.asarray(g[:m], x.dtype).reshape((m,) + (1,) * (x.ndim - 1))
+        y = y.at[:m].add(g_seq * x[:1])
     return y
 
 
