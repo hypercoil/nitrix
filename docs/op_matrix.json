@@ -2,8 +2,8 @@
   "host": {
     "device": "cpu (cpu)",
     "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
-    "jax_version": "0.10.1",
-    "timestamp": "2026-06-02T23:10:24Z"
+    "jax_version": "0.10.0",
+    "timestamp": "2026-06-06T04:13:53Z"
   },
   "perf_source": "nitrix-perf-bench",
   "ops": [
@@ -448,7 +448,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "pass",
+      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
       "invariants": [
         "TROPICAL_MAX_PLUS specialisation"
       ],
@@ -459,7 +459,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "pass",
+      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
       "invariants": [
         "TROPICAL_MIN_PLUS specialisation"
       ],
@@ -472,10 +472,22 @@
       "vmap": "pass",
       "jit_of_grad": "pass",
       "invariants": [
-        "iterative TROPICAL_MIN_PLUS",
-        "chamfer (not exact EDT)"
+        "exact EDT (default): separable per-axis TROPICAL_MIN_PLUS matmul",
+        "opt-in chamfer via metric=/structuring_element (TROPICAL_MIN_PLUS)"
       ],
-      "notes": "15x slower than scipy EDT at (64,64) -- algorithm mismatch"
+      "notes": "euclidean default matches cupy EDT @64^3, beats scipy on CPU"
+    },
+    {
+      "qualname": "nitrix.morphology.distance_transform_edt",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "exact Euclidean DT (separable min-plus matmul on semiring kernel)",
+        "alias of distance_transform(metric=\"euclidean\")"
+      ],
+      "notes": "scipy distance_transform_edt parity; reverse-mode differentiable"
     },
     {
       "qualname": "nitrix.morphology.median_filter",
@@ -1300,7 +1312,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "pass",
+      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
       "invariants": [
         "erode then dilate (TROPICAL opening)"
       ],
@@ -1311,7 +1323,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "pass",
+      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
       "invariants": [
         "dilate then erode (TROPICAL closing)"
       ],
