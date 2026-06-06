@@ -137,6 +137,18 @@ def _device_put_graph(A: _GraphInput, target: Any) -> _GraphInput:
 _Solver = Literal['auto', 'eigh', 'lobpcg']
 _GraphInput = Union[Num[Array, '... n n'], ELL, SectionedELL]
 
+# Default LOBPCG residual tolerance.  ``lobpcg_standard`` runs to its iteration
+# cap unless a tolerance lets it stop on convergence; the Laplacian's smallest
+# eigenvalues are tightly clustered, so without this it wastes ~half its
+# iterations past convergence.  ``1e-7`` early-stops at ~1e-5 eigenvalue
+# accuracy (~2.5-4x faster than running to the cap on the L4) -- ample for
+# spectral embedding, and differentiability is unaffected (the iteration loop
+# lives inside the implicit-VJP ``custom_vjp`` forward, never autodiffed).
+# In fp32 the achievable residual floor (~1e-6) is above this, so the fp32
+# path simply runs to the cap as before (full accuracy).  Loosen via
+# ``lobpcg_tol=`` to trade accuracy for speed.
+_LOBPCG_DEFAULT_TOL = 1e-7
+
 
 # ---------------------------------------------------------------------------
 # Internal: build matvec for the normalised-affinity operator
@@ -291,7 +303,7 @@ def laplacian_eigenmap(
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
-    lobpcg_tol: Optional[float] = None,
+    lobpcg_tol: Optional[float] = _LOBPCG_DEFAULT_TOL,
     seed: int = 0,
 ) -> Tuple[
     Float[Array, 'n n_components'],
@@ -326,7 +338,11 @@ def laplacian_eigenmap(
         Increase if convergence warnings appear; typical convergence
         is < 50 iterations.
     lobpcg_tol
-        Convergence tolerance; ``None`` uses the JAX default.
+        LOBPCG residual tolerance.  Default ``1e-7`` (early-stops at ~1e-5
+        eigenvalue accuracy, ~2.5-4x faster than running to the iteration cap);
+        loosen to trade accuracy for speed, or pass ``None`` for the JAX
+        default (runs to the cap).  Differentiability is unaffected (the
+        iteration loop is inside the implicit-VJP forward).
     seed
         PRNG seed for the lobpcg initial guess.
 
@@ -410,7 +426,7 @@ def diffusion_embedding(
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
-    lobpcg_tol: Optional[float] = None,
+    lobpcg_tol: Optional[float] = _LOBPCG_DEFAULT_TOL,
     seed: int = 0,
 ) -> Tuple[
     Float[Array, 'n n_components'],
