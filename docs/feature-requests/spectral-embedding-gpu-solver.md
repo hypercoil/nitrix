@@ -15,11 +15,16 @@
 >   12 outer × 10 CG)** — ~2× off cupy `eigsh` (45 ms), 6× over the original.
 >   The matrix-free floor: it can't fully match cupy's *factorized* shift-invert
 >   (which needs the broken cuSolver), so ~2× is the realistic matrix-free
->   target. Build: wrap the shift-invert/CG forward in the existing
->   implicit-VJP backward (algorithm-independent), generalise across the
->   affinity (eigenmap) and anisotropic-Markov (diffusion) operators, add a
->   `solver='shift_invert'` dispatch + a Jacobi/Chebyshev preconditioner bank
->   for the plain lobpcg path, with tuned defaults + tests.
+>   target. **Shift-invert — DONE:** `solver='shift_invert'` shipped for both
+>   `laplacian_eigenmap` and `diffusion_embedding` (`shift_invert_top_k_dense`
+>   in `_lobpcg_diff.py`, reusing the implicit-VJP `_subspace_vjp_kernel`
+>   backward), ~103 ms at ~1e-3 accuracy on the L4 (~2.3× off cupy), dense
+>   input only, differentiable. **Remaining (optional):** a Jacobi/Chebyshev
+>   preconditioner *bank* for the plain lobpcg path (operator-transformation,
+>   since jax `lobpcg_standard` takes no preconditioner) -- marginal over
+>   shift-invert; and the pre-existing fp32→fp64 grad-dtype quirk in
+>   `_build_affinity_operator` under `jax_enable_x64` (affects every solver's
+>   grad under x64, not shift-invert specifically).
 >
 > **Status (2026-06-03): parked (perf + robustness) — two measured
 > spectral-embedding solver issues on the cuSOLVER-broken L4.** Not a
