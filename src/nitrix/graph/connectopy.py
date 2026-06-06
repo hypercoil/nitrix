@@ -87,6 +87,8 @@ from ._lobpcg_diff import (
     lobpcg_top_k_dense,
     lobpcg_top_k_ell,
     lobpcg_top_k_sectioned_ell,
+    poly_filtered_top_k_dense,
+    shift_invert_top_k_dense,
 )
 from .laplacian import _ell_matvec, _is_sparse, degree_vector
 
@@ -134,8 +136,39 @@ def _device_put_graph(A: _GraphInput, target: Any) -> _GraphInput:
     return cast(Num[Array, '... n n'], jax.device_put(A, target))
 
 
-_Solver = Literal['auto', 'eigh', 'lobpcg']
+_Solver = Literal['auto', 'eigh', 'lobpcg', 'shift_invert']
+_Preconditioner = Literal['none', 'polynomial']
 _GraphInput = Union[Num[Array, '... n n'], ELL, SectionedELL]
+
+# Shift-invert solver tuning (dense path).  A small negative shift keeps
+# ``(L - sigma I)`` SPD/CG-solvable; these defaults reach ~1e-4 eigenvalue
+# accuracy in ~15 outer x 12 inner-CG iterations (~2x off cupy eigsh on the
+# clustered Laplacian spectrum at n=1024, vs ~12x for plain lobpcg).
+_SI_SIGMA = -0.5
+_SI_OUTER_ITERS = 15
+_SI_CG_ITERS = 12
+
+# Polynomial preconditioner tuning (the matvec-only spectral filter on the
+# plain LOBPCG path).  LOBPCG runs on ``(M + shift I)^degree`` to amplify the
+# wanted top of the spectrum; these defaults reach ~1e-3 accuracy in ~16 outer
+# iterations (~1.5-2x off cupy at n=1024 -- faster than shift-invert since it
+# is matvec-only, no inner solve).  ``shift = 1`` makes ``M + shift I`` PSD for
+# the normalized affinity (eigenvalues in [-1, 1]).
+_POLY_DEGREE = 4
+_POLY_SHIFT = 1.0
+_POLY_OUTER_ITERS = 16
+
+# Default LOBPCG residual tolerance.  ``lobpcg_standard`` runs to its iteration
+# cap unless a tolerance lets it stop on convergence; the Laplacian's smallest
+# eigenvalues are tightly clustered, so without this it wastes ~half its
+# iterations past convergence.  ``1e-7`` early-stops at ~1e-5 eigenvalue
+# accuracy (~2.5-4x faster than running to the cap on the L4) -- ample for
+# spectral embedding, and differentiability is unaffected (the iteration loop
+# lives inside the implicit-VJP ``custom_vjp`` forward, never autodiffed).
+# In fp32 the achievable residual floor (~1e-6) is above this, so the fp32
+# path simply runs to the cap as before (full accuracy).  Loosen via
+# ``lobpcg_tol=`` to trade accuracy for speed.
+_LOBPCG_DEFAULT_TOL = 1e-7
 
 
 # ---------------------------------------------------------------------------
@@ -288,10 +321,11 @@ def laplacian_eigenmap(
     *,
     n_components: int,
     solver: _Solver = 'auto',
+    preconditioner: _Preconditioner = 'none',
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
-    lobpcg_tol: Optional[float] = None,
+    lobpcg_tol: Optional[float] = _LOBPCG_DEFAULT_TOL,
     seed: int = 0,
 ) -> Tuple[
     Float[Array, 'n n_components'],
@@ -314,8 +348,20 @@ def laplacian_eigenmap(
         Embedding dimensionality.
     solver
         ``"eigh"`` (dense full spectrum), ``"lobpcg"`` (iterative
-        top-k), or ``"auto"`` (default: ``lobpcg`` for sparse,
-        ``eigh`` for dense).
+        top-k), ``"shift_invert"`` (matrix-free shift-invert via inner CG --
+        far fewer outer iterations than ``lobpcg`` on the clustered
+        low-Laplacian spectrum, ~2x off cupy ``eigsh``; dense input only,
+        differentiable via the same implicit VJP), or ``"auto"`` (default:
+        ``lobpcg`` for sparse, ``eigh`` for dense).
+    preconditioner
+        Acceleration for the LOBPCG path: ``"none"`` (default) or
+        ``"polynomial"`` -- a matvec-only shifted-power spectral filter
+        (LOBPCG runs on ``(M + I)^degree`` to amplify the wanted top of the
+        spectrum, eigenvalues recovered by Rayleigh quotient).  Faster than
+        both plain ``lobpcg`` and ``shift_invert`` on clustered spectra
+        (~1.5-2x off cupy), differentiable via the same implicit VJP; dense
+        input only.  Requesting it on a dense graph routes ``"auto"`` to the
+        LOBPCG path (rather than ``eigh``) so the preconditioner is honoured.
     skip_trivial
         Drop the trivial zero eigenvalue and the corresponding
         constant eigenvector.  Default ``True``.
@@ -326,7 +372,11 @@ def laplacian_eigenmap(
         Increase if convergence warnings appear; typical convergence
         is < 50 iterations.
     lobpcg_tol
-        Convergence tolerance; ``None`` uses the JAX default.
+        LOBPCG residual tolerance.  Default ``1e-7`` (early-stops at ~1e-5
+        eigenvalue accuracy, ~2.5-4x faster than running to the iteration cap);
+        loosen to trade accuracy for speed, or pass ``None`` for the JAX
+        default (runs to the cap).  Differentiability is unaffected (the
+        iteration loop is inside the implicit-VJP forward).
     seed
         PRNG seed for the lobpcg initial guess.
 
@@ -353,6 +403,10 @@ def laplacian_eigenmap(
         raise ValueError('n_components must be >= 1.')
     if solver == 'auto':
         solver = _auto_solver(A)
+    if preconditioner != 'none' and solver == 'eigh':
+        # A preconditioner is an iterative-solver concept; honour the request
+        # by routing the dense ``eigh`` default to the LOBPCG path.
+        solver = 'lobpcg'
 
     if solver == 'eigh':
         if _is_sparse(A):
@@ -382,13 +436,41 @@ def laplacian_eigenmap(
         target = _solver_device()
         A_solver = _device_put_graph(A, target)
         M, _ = _build_affinity_operator(A_solver, alpha=0.0, eps=eps)
-        vecs, vals = _lobpcg_top_k(
+        if preconditioner == 'polynomial':
+            vecs, vals = _poly_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                seed=seed,
+                transform_eigvals=lambda mu: 1.0 - mu,
+            )
+        else:
+            vecs, vals = _lobpcg_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                iters=lobpcg_iters,
+                tol=lobpcg_tol,
+                seed=seed,
+                transform_eigvals=lambda mu: 1.0 - mu,
+            )
+        if source is not None and source != target:
+            vecs = jax.device_put(vecs, source)
+            vals = jax.device_put(vals, source)
+        return vecs, vals
+
+    if solver == 'shift_invert':
+        source = _source_device(A)
+        target = _solver_device()
+        A_solver = _device_put_graph(A, target)
+        M, _ = _build_affinity_operator(A_solver, alpha=0.0, eps=eps)
+        vecs, vals = _shift_invert_top_k(
             M,
             n=_n_from(A_solver),
             n_components=n_components,
             skip_trivial=skip_trivial,
-            iters=lobpcg_iters,
-            tol=lobpcg_tol,
             seed=seed,
             transform_eigvals=lambda mu: 1.0 - mu,
         )
@@ -397,7 +479,9 @@ def laplacian_eigenmap(
             vals = jax.device_put(vals, source)
         return vecs, vals
 
-    raise ValueError(f'solver={solver!r}; expected auto/eigh/lobpcg.')
+    raise ValueError(
+        f'solver={solver!r}; expected auto/eigh/lobpcg/shift_invert.'
+    )
 
 
 def diffusion_embedding(
@@ -407,10 +491,11 @@ def diffusion_embedding(
     alpha: float = 0.5,
     t: float = 0.0,
     solver: _Solver = 'auto',
+    preconditioner: _Preconditioner = 'none',
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
-    lobpcg_tol: Optional[float] = None,
+    lobpcg_tol: Optional[float] = _LOBPCG_DEFAULT_TOL,
     seed: int = 0,
 ) -> Tuple[
     Float[Array, 'n n_components'],
@@ -449,6 +534,10 @@ def diffusion_embedding(
         raise ValueError('n_components must be >= 1.')
     if solver == 'auto':
         solver = _auto_solver(A)
+    if preconditioner != 'none' and solver == 'eigh':
+        # A preconditioner is an iterative-solver concept; honour the request
+        # by routing the dense ``eigh`` default to the LOBPCG path.
+        solver = 'lobpcg'
 
     if solver == 'eigh':
         if _is_sparse(A):
@@ -481,16 +570,26 @@ def diffusion_embedding(
         M, inv_sqrt_d2 = _build_affinity_operator(
             A_solver, alpha=alpha, eps=eps,
         )
-        vecs, vals = _lobpcg_top_k(
-            M,
-            n=_n_from(A_solver),
-            n_components=n_components,
-            skip_trivial=skip_trivial,
-            iters=lobpcg_iters,
-            tol=lobpcg_tol,
-            seed=seed,
-            transform_eigvals=None,
-        )
+        if preconditioner == 'polynomial':
+            vecs, vals = _poly_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                seed=seed,
+                transform_eigvals=None,
+            )
+        else:
+            vecs, vals = _lobpcg_top_k(
+                M,
+                n=_n_from(A_solver),
+                n_components=n_components,
+                skip_trivial=skip_trivial,
+                iters=lobpcg_iters,
+                tol=lobpcg_tol,
+                seed=seed,
+                transform_eigvals=None,
+            )
         # Recover right eigenvectors of P from eigenvectors of M_sym.
         vecs = vecs * inv_sqrt_d2[:, None]
         if t != 0.0:
@@ -500,7 +599,32 @@ def diffusion_embedding(
             vals = jax.device_put(vals, source)
         return vecs, vals
 
-    raise ValueError(f'solver={solver!r}; expected auto/eigh/lobpcg.')
+    if solver == 'shift_invert':
+        source = _source_device(A)
+        target = _solver_device()
+        A_solver = _device_put_graph(A, target)
+        M, inv_sqrt_d2 = _build_affinity_operator(
+            A_solver, alpha=alpha, eps=eps,
+        )
+        vecs, vals = _shift_invert_top_k(
+            M,
+            n=_n_from(A_solver),
+            n_components=n_components,
+            skip_trivial=skip_trivial,
+            seed=seed,
+            transform_eigvals=None,
+        )
+        vecs = vecs * inv_sqrt_d2[:, None]
+        if t != 0.0:
+            vecs = _scale_by_lambda_t(vecs, vals, t)
+        if source is not None and source != target:
+            vecs = jax.device_put(vecs, source)
+            vals = jax.device_put(vals, source)
+        return vecs, vals
+
+    raise ValueError(
+        f'solver={solver!r}; expected auto/eigh/lobpcg/shift_invert.'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -516,21 +640,36 @@ def _n_from(A: _GraphInput) -> int:
     return int(A.shape[-1])
 
 
+def _operator_dtype(M: _GraphInput) -> Any:
+    '''The element dtype of a (dense / ELL / SectionedELL) operator.'''
+    if isinstance(M, ELL):
+        return M.values.dtype
+    if isinstance(M, SectionedELL):
+        return M.sections[0].values.dtype
+    return M.dtype
+
+
 def _lobpcg_initial_subspace(
-    n: int, k_total: int, seed: int, device: Any,
+    n: int, k_total: int, seed: int, device: Any, dtype: Any,
 ) -> Float[Array, 'n k_total']:
     '''Random initial subspace for LOBPCG, on the requested device.
 
     ``seed`` controls reproducibility across runs.  ``device`` is the
     solver device (chosen by ``_solver_device()``); LOBPCG's internal
     QR / Cholesky use cuSolver, which we route to CPU when the
-    GPU-side build has a broken handle.
+    GPU-side build has a broken handle.  ``dtype`` matches the operator's
+    element type: with ``jax_enable_x64`` a default (fp64) subspace would
+    promote an fp32 operator to fp64 -- which made the *backward* return an
+    fp64 cotangent against an fp32 input (a dtype-mismatch error), and ran the
+    fp32 forward in the slower fp64 path; matching the dtype fixes both.
     '''
     key = jax.random.key(seed)
     # ``jax.device_put`` is untyped (returns Any); restore the subspace type.
     return cast(
         Float[Array, 'n k_total'],
-        jax.device_put(jax.random.normal(key, (n, k_total)), device),
+        jax.device_put(
+            jax.random.normal(key, (n, k_total), dtype=dtype), device,
+        ),
     )
 
 
@@ -601,7 +740,9 @@ def _lobpcg_top_k(
     '''
     k_total = n_components + (1 if skip_trivial else 0)
     target = _solver_device()
-    X0 = _lobpcg_initial_subspace(n, k_total, seed, target)
+    X0 = _lobpcg_initial_subspace(
+        n, k_total, seed, target, _operator_dtype(M),
+    )
     eigvals, eigvecs = _run_lobpcg_on_operator(
         M, X0, iters=iters, tol=tol,
     )
@@ -615,6 +756,92 @@ def _lobpcg_top_k(
         # When we transform mu -> 1 - mu, largest mu => smallest
         # 1 - mu.  We re-sort smallest-first to match the
         # Laplacian convention.
+        order = jnp.argsort(eigvals)
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+    return eigvecs, eigvals
+
+
+def _shift_invert_top_k(
+    M: _GraphInput,
+    *,
+    n: int,
+    n_components: int,
+    skip_trivial: bool,
+    seed: int,
+    transform_eigvals: Optional[
+        Callable[[Float[Array, 'k']], Float[Array, 'k']]
+    ],
+) -> Tuple[Float[Array, 'n n_components'], Float[Array, 'n_components']]:
+    '''Matrix-free shift-invert top-k on a *dense* operator, post-processed.
+
+    Same contract as ``_lobpcg_top_k`` (skip trivial, transform, sort), but the
+    forward is the shift-invert/CG eigensolver -- far fewer outer iterations on
+    clustered Laplacian spectra.  Dense only; ELL / SectionedELL keep
+    ``solver='lobpcg'``.
+    '''
+    if _is_sparse(M):
+        raise ValueError(
+            "solver='shift_invert' supports dense input only; use "
+            "solver='lobpcg' (or 'auto') for ELL / SectionedELL."
+        )
+    k_total = n_components + (1 if skip_trivial else 0)
+    target = _solver_device()
+    X0 = _lobpcg_initial_subspace(
+        n, k_total, seed, target, _operator_dtype(M),
+    )
+    eigvals, eigvecs = shift_invert_top_k_dense(
+        M, X0, _SI_SIGMA, _SI_OUTER_ITERS, _SI_CG_ITERS,
+    )
+    if skip_trivial:
+        eigvals = eigvals[1:]
+        eigvecs = eigvecs[:, 1:]
+    if transform_eigvals is not None:
+        eigvals = transform_eigvals(eigvals)
+        order = jnp.argsort(eigvals)
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+    return eigvecs, eigvals
+
+
+def _poly_top_k(
+    M: _GraphInput,
+    *,
+    n: int,
+    n_components: int,
+    skip_trivial: bool,
+    seed: int,
+    transform_eigvals: Optional[
+        Callable[[Float[Array, 'k']], Float[Array, 'k']]
+    ],
+) -> Tuple[Float[Array, 'n n_components'], Float[Array, 'n_components']]:
+    '''Polynomial-preconditioned (matvec-only) LOBPCG top-k on dense ``M``.
+
+    Same contract as ``_lobpcg_top_k`` but LOBPCG runs on the shifted-power
+    spectral filter (eigenvalues recovered by Rayleigh quotient) -- faster than
+    plain LOBPCG *and* shift-invert on clustered spectra, using only matvecs.
+    Dense only for now (the differentiable sparse-pattern backward is the ELL
+    follow-up); ELL / SectionedELL keep the plain ``preconditioner='none'``
+    LOBPCG path.
+    '''
+    if _is_sparse(M):
+        raise ValueError(
+            "preconditioner='polynomial' supports dense input only; use "
+            "preconditioner='none' for ELL / SectionedELL."
+        )
+    k_total = n_components + (1 if skip_trivial else 0)
+    target = _solver_device()
+    X0 = _lobpcg_initial_subspace(
+        n, k_total, seed, target, _operator_dtype(M),
+    )
+    eigvals, eigvecs = poly_filtered_top_k_dense(
+        M, X0, _POLY_DEGREE, _POLY_SHIFT, _POLY_OUTER_ITERS,
+    )
+    if skip_trivial:
+        eigvals = eigvals[1:]
+        eigvecs = eigvecs[:, 1:]
+    if transform_eigvals is not None:
+        eigvals = transform_eigvals(eigvals)
         order = jnp.argsort(eigvals)
         eigvals = eigvals[order]
         eigvecs = eigvecs[:, order]
