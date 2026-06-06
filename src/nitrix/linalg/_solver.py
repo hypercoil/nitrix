@@ -14,8 +14,10 @@ work.
 
 This module provides ``safe_eigh`` (and the device-pick helpers
 it uses) for the routines that must fall back to CPU on the
-affected stacks.  We probe once at first use; subsequent calls
-read the cached verdict.
+affected stacks.  We probe once at first use and cache the verdict;
+``safe_eigh`` additionally *latches* to CPU if a real eigh is
+observed to fail on the GPU at call time (B14 #2 -- the import-time
+probe can pass on a stack that wedges later or only at larger sizes).
 
 Used by:
 
@@ -57,26 +59,63 @@ __all__ = [
 ]
 
 
+# Adaptive override: set once a *real* eigh has failed on the GPU at call time
+# (the import-time probe can pass on a stack whose cuSolver handle wedges later
+# or only at larger sizes -- B14 issue 2).  Once latched, every subsequent
+# ``eigh_device()`` verdict is CPU, so both eager and traced callers become
+# GPU-safe after the first observed failure.
+_eigh_cpu_latched = False
+
+
+def _cpu_device() -> jax.Device:
+    cpu_devs = jax.devices('cpu')
+    return cpu_devs[0] if cpu_devs else jax.devices()[0]
+
+
+def _is_cusolver_failure(exc: BaseException) -> bool:
+    '''Whether ``exc`` is the broken-cuSolver-handle failure (vs a real error).'''
+    msg = str(exc).lower()
+    return any(
+        tok in msg
+        for tok in ('cusolver', 'gpusolverdn', 'solver_handle', 'jclapack')
+    )
+
+
+def _latch_eigh_cpu() -> None:
+    '''Latch the eigh device to CPU after an observed cuSolver failure.'''
+    global _eigh_cpu_latched
+    _eigh_cpu_latched = True
+    _probe_eigh_device.cache_clear()
+
+
 @functools.lru_cache(maxsize=1)
-def eigh_device() -> jax.Device:
-    '''Pick a device where dense ``eigh`` works.
-
-    Returns ``jax.devices()[0]`` if a 2x2 GPU eigh probe succeeds;
-    otherwise the first CPU device.  Cached so the probe runs at
-    most once per process.
-
-    Use ``solver_device()`` if you want the same verdict applied
-    to a different solver (e.g. LOBPCG / QR / Cholesky, which
-    share the cuSolver handle pool on broken stacks).
-    '''
+def _probe_eigh_device() -> jax.Device:
+    '''One-shot 2x2 GPU eigh probe (cheap; the happy-path device pick).'''
     try:
         probe = jnp.eye(2, dtype=jnp.float32)
         out = jnp.linalg.eigh(probe)
         jax.block_until_ready(out)
         return jax.devices()[0]
     except Exception:
-        cpu_devs = jax.devices('cpu')
-        return cpu_devs[0] if cpu_devs else jax.devices()[0]
+        return _cpu_device()
+
+
+def eigh_device() -> jax.Device:
+    '''Pick a device where dense ``eigh`` works.
+
+    Returns ``jax.devices()[0]`` if a 2x2 GPU eigh probe succeeds; otherwise
+    (or once a real eigh has been observed to fail on the GPU at call time --
+    see ``safe_eigh``) the first CPU device.  The probe is cached; the
+    call-time latch makes the verdict *adaptive* so a stack whose cuSolver
+    handle is healthy at import but wedges later still ends up on CPU.
+
+    Use ``solver_device()`` if you want the same verdict applied to a
+    different solver (e.g. LOBPCG / QR / Cholesky, which share the cuSolver
+    handle pool on broken stacks).
+    '''
+    if _eigh_cpu_latched:
+        return _cpu_device()
+    return _probe_eigh_device()
 
 
 def solver_device() -> jax.Device:
@@ -147,14 +186,21 @@ def source_device(tree: Any) -> Optional[jax.Device]:
 def safe_eigh(
     A: Float[Array, '... n n'],
 ) -> Tuple[Float[Array, '... n'], Float[Array, '... n n']]:
-    '''``jnp.linalg.eigh`` with the cuSolver-robust device pick.
+    '''``jnp.linalg.eigh`` with the cuSolver-robust, adaptive device pick.
 
-    Probes once at module-import time; subsequent calls use the
-    cached verdict.  Always routes the eigh call itself to the
-    safe device (so it works under ``jax.grad`` where the input
-    is a tracer with no concrete device).  When the input *is*
-    concrete and lives on a different device, results are moved
-    back so the caller doesn't see a surprise CPU array.
+    Pins the eigh to a device where it works (per ``eigh_device()``), routing
+    it there even under trace (so it works under ``jax.grad`` where the input
+    is a tracer with no concrete device).  When the input *is* concrete and on
+    a different device, results are moved back so the caller doesn't see a
+    surprise CPU array.
+
+    **Adaptive fallback (B14 #2).**  The import-time probe can pass on a stack
+    whose cuSolver handle is healthy at 2x2 but wedges later or at larger
+    sizes.  For a concrete (eager) input on the GPU we therefore force
+    execution and, if a cuSolver-handle failure surfaces, latch the device to
+    CPU and retry there -- so ``solver='eigh'`` / ``'auto'`` become GPU-safe
+    after the first observed failure, for both eager and (subsequent) traced
+    callers.  A genuine numerical error is re-raised unchanged.
 
     Parameters
     ----------
@@ -168,13 +214,21 @@ def safe_eigh(
     '''
     target = eigh_device()
     source = device_of_concrete(A)
-    # Always pin the eigh call to the safe device, even under
-    # trace -- the JIT-time dispatcher otherwise picks the GPU
-    # path which is broken on the affected stacks.  device_put is
-    # cheap-or-free at JIT time (it's a placement hint), so the
-    # cost is bounded.
     A_dev = jax.device_put(A, target)
-    eigvals, eigvecs = jnp.linalg.eigh(A_dev)
+    try:
+        eigvals, eigvecs = jnp.linalg.eigh(A_dev)
+        # Concrete input on a GPU: force execution so a cuSolver-handle
+        # failure surfaces here and can be retried on CPU.  Under trace
+        # (source is None) a runtime failure is uncatchable; the latched
+        # verdict from any prior eager failure still routes us to CPU.
+        if source is not None and target.platform != 'cpu':
+            jax.block_until_ready((eigvals, eigvecs))
+    except Exception as exc:
+        if target.platform == 'cpu' or not _is_cusolver_failure(exc):
+            raise
+        _latch_eigh_cpu()
+        target = _cpu_device()
+        eigvals, eigvecs = jnp.linalg.eigh(jax.device_put(A, target))
     if source is not None and source != target:
         eigvals = jax.device_put(eigvals, source)
         eigvecs = jax.device_put(eigvecs, source)
