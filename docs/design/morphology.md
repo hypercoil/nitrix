@@ -47,6 +47,38 @@ is bit-exact (``SAME`` padding pads with the algebra identity ``-inf`` / ``+inf`
 and, on the L4 at 256², flips `erode`/`dilate` from ~1.3× *slower* than cupy to
 ~1.3× *faster*, with peak HBM 72 MB → 0.79 MB (no materialised patch tensor).
 The non-flat (explicit per-position offsets) path keeps the semiring engine.
+
+**The flat path is ``jit(grad(...))``-clean -- but only because the window
+identity is a *concrete* scalar.**  ``lax.reduce_window`` routes a generic
+``lax.max`` / ``lax.min`` reducer to its differentiable specialised primitive
+(``reduce_window_max_p`` / ``reduce_window_min_p``) only when JAX's monoid
+detection sees a *concrete* init equal to the dtype's max / min identity.  A
+*traced* init -- which ``jnp.asarray(identity)`` silently becomes under ``jit``
+-- is not ``core.is_concrete``, so detection falls back to the generic
+``reduce_window_p``, whose missing transpose rule raises *"Linearization failed
+to produce known values for all output primals"* under ``jit(grad)`` (eager
+``grad`` still works, which is what made this a silent regression).  We therefore
+source the identity from the same ``Semiring`` the non-flat path uses and pass it
+through ``np.asarray`` (NumPy -- stays concrete under trace) rather than
+``jnp.asarray`` (a tracer under ``jit``).  This routes to JAX's own *maintained*
+differentiable pooling primitive, so the "no ``custom_vjp`` for morphology"
+property below still holds -- the fix is to stop defeating JAX's monoid
+detection, not to hand-roll a gradient.  (Regression **B19**: the fast path
+previously used a traced init and dropped ``jit(grad)`` for ``dilate`` /
+``erode`` / ``open`` / ``close``; the ``op_matrix`` ``jit_of_grad`` cells for all
+four are now back to ``pass``, gated by
+``test_flat_path_jit_of_grad_is_finite`` and
+``test_flat_path_matches_semiring_forward_and_grad``.)
+
+**Uniform ``float-in → float-out`` contract.**  Both paths lift integer /
+boolean inputs to ``float32`` at the op boundary (``_to_float``): grayscale
+morphology is real-valued, the tropical window identity (``±inf``) is
+representable only in a float dtype, and promoting once -- rather than per-path
+-- keeps the subgradient well-defined and avoids the ``-inf → int`` overflow an
+integer input would otherwise hit on the flat path.  Floating inputs keep their
+dtype (``float16`` / ``float32`` / ``float64``); see
+``test_flat_path_promotes_int_bool_to_float``.
+
 ``median_filter`` stays on the gather path -- profiling shows the sort, not the
 gather, dominates it, so the only lever is a hardcoded sorting network, deferred
 pending a fidelity oracle (see its docstring).
@@ -248,7 +280,8 @@ write a single ``custom_vjp`` for morphology.
 - SPEC §3.4 ``morphology`` surface; SPEC_UPDATE §3.4 (median filter
   carve-out, semiring vs gather split).
 - ``src/nitrix/morphology/`` -- the module.
-- ``tests/test_morphology.py`` -- 19 tests including 4D fMRI shape.
+- ``tests/test_morphology.py`` -- 27 test functions (46 parametrised cases),
+  including the 4D fMRI shape and the B19 flat-path ``jit(grad)`` gate.
 - [`convolution.md`](convolution.md) -- the underlying ``semiring_conv``.
 - [`semiring-protocols.md`](semiring-protocols.md) -- ``TROPICAL_*``
   algebra definitions.

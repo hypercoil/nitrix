@@ -24,8 +24,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional, Sequence, Union, cast
 
-import jax.numpy as jnp
 import jax.lax as lax
+import jax.numpy as jnp
+import numpy as np
 from jax.typing import DTypeLike
 from jaxtyping import Array, Float, Num
 
@@ -37,7 +38,6 @@ from ..semiring import (
     semiring_conv,
     semiring_matmul,
 )
-
 
 __all__ = [
     'dilate',
@@ -121,29 +121,60 @@ def _conv_wrap(
     return out[..., 0]
 
 
+def _to_float(x: Num[Array, '...']) -> Float[Array, '...']:
+    '''Lift integer / boolean inputs to ``float32``; pass floating dtypes through.
+
+    Grayscale morphology is real-valued: the flat-path window identity is the
+    tropical ``-inf`` / ``+inf`` (``TROPICAL_MAX_PLUS`` / ``TROPICAL_MIN_PLUS``),
+    representable only in a floating dtype.  Promoting at the op boundary gives a
+    uniform ``float-in -> float-out`` contract across *both* the flat fast path
+    and the explicit-structuring-element semiring path, keeps the subgradient
+    well-defined, and avoids the ``-inf -> int`` overflow an integer input would
+    otherwise hit.  Floating inputs (``float16`` / ``float32`` / ``float64``)
+    are returned unchanged.
+    '''
+    arr = jnp.asarray(x)
+    if jnp.issubdtype(arr.dtype, jnp.floating):
+        return arr
+    return arr.astype(jnp.float32)
+
+
 def _windowed_reduce(
-    x: Num[Array, '... *spatial'],
+    x: Float[Array, '... *spatial'],
     box: Sequence[int],
     spatial_rank: int,
     reducer: Callable[[Array, Array], Array],
-    init: float,
+    identity: float,
     padding: str,
-) -> Num[Array, '... *spatial']:
+) -> Float[Array, '... *spatial']:
     '''Flat-structuring-element dilation / erosion as a fused reduce-window.
 
     For a flat (all-zero) structuring element, dilation reduces to a sliding-
     window max and erosion to a sliding-window min -- which ``lax.reduce_window``
     computes as a single fused kernel (XLA lowers it like a pooling op), instead
     of the ``semiring_conv`` im2col-patches + matmul path.  ``"SAME"`` padding
-    pads with ``init`` (``-inf`` for max, ``+inf`` for min), matching the
-    semiring algebra-identity padding bit-for-bit.  The window is ``1`` on the
-    leading batch dims and ``box`` on the trailing ``spatial_rank`` dims.
+    pads with ``identity`` (``-inf`` for max, ``+inf`` for min) -- the tropical
+    algebra identity sourced from the same ``Semiring`` the non-flat path uses,
+    so the two paths' boundary handling matches bit-for-bit by construction.  The
+    window is ``1`` on the leading batch dims and ``box`` on the trailing
+    ``spatial_rank`` dims.
+
+    The window init **must be a concrete scalar** (hence ``np.asarray``, not
+    ``jnp.asarray``).  ``lax.reduce_window`` only routes a generic ``reducer``
+    (``lax.max`` / ``lax.min``) to its differentiable specialised primitive
+    (``reduce_window_max_p`` / ``reduce_window_min_p``) when JAX's monoid
+    detection sees a *concrete* identity equal to the dtype's max/min identity.  A
+    traced init -- which ``jnp.asarray(...)`` becomes under ``jit`` -- is not
+    ``core.is_concrete``, so detection falls back to the generic
+    ``reduce_window_p``, whose missing transpose rule breaks ``jit(grad(...))``.
+    (B19.)
     '''
     window = (1,) * (x.ndim - spatial_rank) + tuple(box)
     strides = (1,) * x.ndim
-    return lax.reduce_window(
-        x, jnp.asarray(init, x.dtype), reducer, window, strides, padding,
-    )
+    # ``lax.reduce_window`` is typed as returning Any; restore the array type.
+    return cast(Float[Array, '...'], lax.reduce_window(
+        x, np.asarray(identity, x.dtype), reducer, window, strides, padding,
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +252,10 @@ def dilate(
     -------
     Array of the same shape as ``x`` (for ``padding="SAME"``).
     '''
+    # Grayscale morphology is real-valued; lift int/bool to float so the flat
+    # path's ``-inf`` identity is representable and both paths share one dtype
+    # contract (no-op for floating inputs).
+    x = _to_float(x)
     # The spatial rank is inferred from the structuring element or
     # ``size``; if neither pins it we treat all of x's dims as spatial.
     if structuring_element is not None:
@@ -236,7 +271,8 @@ def dilate(
     if structuring_element is None:
         # Flat box (the common case): a fused sliding-window max.
         return _windowed_reduce(
-            x, se.shape, spatial_rank, lax.max, -jnp.inf, padding,
+            x, se.shape, spatial_rank, lax.max,
+            TROPICAL_MAX_PLUS.identity, padding,
         )
     return _conv_wrap(
         x, se,
@@ -262,6 +298,7 @@ def erode(
 
     Args / Returns: see ``dilate``.
     '''
+    x = _to_float(x)
     if structuring_element is not None:
         spatial_rank = jnp.asarray(structuring_element).ndim
     elif isinstance(size, (tuple, list)):
@@ -274,7 +311,8 @@ def erode(
     if structuring_element is None:
         # Flat box (the common case): a fused sliding-window min.
         return _windowed_reduce(
-            x, se.shape, spatial_rank, lax.min, jnp.inf, padding,
+            x, se.shape, spatial_rank, lax.min,
+            TROPICAL_MIN_PLUS.identity, padding,
         )
     return _conv_wrap(
         x, -se,

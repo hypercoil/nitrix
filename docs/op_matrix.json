@@ -2,8 +2,8 @@
   "host": {
     "device": "cpu (cpu)",
     "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
-    "jax_version": "0.10.0",
-    "timestamp": "2026-06-06T04:13:53Z"
+    "jax_version": "0.10.1",
+    "timestamp": "2026-06-06T08:40:40Z"
   },
   "perf_source": "nitrix-perf-bench",
   "ops": [
@@ -448,7 +448,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
+      "jit_of_grad": "pass",
       "invariants": [
         "TROPICAL_MAX_PLUS specialisation"
       ],
@@ -459,7 +459,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
+      "jit_of_grad": "pass",
       "invariants": [
         "TROPICAL_MIN_PLUS specialisation"
       ],
@@ -1312,7 +1312,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
+      "jit_of_grad": "pass",
       "invariants": [
         "erode then dilate (TROPICAL opening)"
       ],
@@ -1323,7 +1323,7 @@
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
-      "jit_of_grad": "ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different",
+      "jit_of_grad": "pass",
       "invariants": [
         "dilate then erode (TROPICAL closing)"
       ],

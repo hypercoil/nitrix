@@ -351,6 +351,91 @@ def test_erode_gradient_routes_to_argmin():
 
 
 # ---------------------------------------------------------------------------
+# B19 regression gate: the flat-box fast path must survive jit(grad(...))
+#
+# ``jit(grad)`` is the double-transform a ``@jax.jit`` training step runs (inner
+# ``grad`` compiled by an outer ``jit``).  The flat ``lax.reduce_window`` fast
+# path silently dropped it once (a traced window init defeated JAX's monoid
+# detection, routing to the non-differentiable generic ``reduce_window_p``);
+# the eager-grad tests above did not catch it.  These gates assert the capability
+# directly so a future perf tweak to the fast path cannot regress it unnoticed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('op', [dilate, erode, morph_open, morph_close])
+def test_flat_path_jit_of_grad_is_finite(op):
+    x = jax.random.normal(jax.random.key(19), (10, 10))
+    grad_fn = jax.jit(jax.grad(lambda z: jnp.sum(op(z, size=3) ** 2)))
+    g = grad_fn(x)
+    assert g.shape == x.shape
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+@pytest.mark.parametrize('op', [dilate, erode])
+def test_flat_path_matches_semiring_forward_and_grad(op):
+    '''The flat fast path and the explicit all-zero-SE semiring path are the
+    same operator; they must agree on forward, ``grad``, and ``jit(grad)``, so
+    the two implementations cannot silently diverge.  A continuous input makes
+    argmax/argmin ties measure-zero, so the subgradients are unique and equal.
+    '''
+    x = jax.random.normal(jax.random.key(23), (9, 11))
+
+    def flat(z):
+        return op(z, size=3, backend='jax')
+
+    def semi(z):
+        return op(z, structuring_element=jnp.zeros((3, 3)), backend='jax')
+
+    np.testing.assert_array_equal(flat(x), semi(x))
+
+    def flat_loss(z):
+        return jnp.sum(flat(z) ** 2)
+
+    def semi_loss(z):
+        return jnp.sum(semi(z) ** 2)
+
+    g_flat = jax.grad(flat_loss)(x)
+    g_semi = jax.grad(semi_loss)(x)
+    g_flat_jit = jax.jit(jax.grad(flat_loss))(x)
+    np.testing.assert_allclose(g_flat, g_semi, atol=1e-10)
+    np.testing.assert_allclose(g_flat_jit, g_flat, atol=1e-10)
+
+
+@pytest.mark.parametrize('op', [dilate, erode, morph_open, morph_close])
+@pytest.mark.parametrize('dtype', [jnp.int32, jnp.bool_, jnp.float32, jnp.float64])
+def test_flat_path_promotes_int_bool_to_float(op, dtype):
+    '''Grayscale morphology is real-valued: integer / boolean inputs are lifted
+    to ``float`` (so the ``-inf`` / ``+inf`` window identity is representable and
+    the gradient is well-defined), while floating inputs keep their dtype.  The
+    integer path previously raised ``OverflowError`` (``-inf -> int``).
+    '''
+    key = jax.random.key(29)
+    if dtype is jnp.bool_:
+        x = jax.random.normal(key, (8, 8)) > 0
+    elif dtype is jnp.int32:
+        x = jax.random.randint(key, (8, 8), 0, 9).astype(jnp.int32)
+    else:
+        x = jax.random.normal(key, (8, 8)).astype(dtype)
+
+    out = op(x, size=3, backend='jax')
+    assert jnp.issubdtype(out.dtype, jnp.floating)
+    if jnp.issubdtype(dtype, jnp.floating):
+        assert out.dtype == dtype          # floating inputs unchanged
+    assert bool(jnp.all(jnp.isfinite(out)))
+
+    # Interior agrees with scipy on the equivalent float volume.
+    ref_fn = {
+        'dilate': scipy_ndi.grey_dilation,
+        'erode': scipy_ndi.grey_erosion,
+    }.get(op.__name__)
+    if ref_fn is not None:
+        ref = ref_fn(np.asarray(x).astype(np.float64), size=3)
+        np.testing.assert_allclose(
+            np.asarray(out)[1:-1, 1:-1], ref[1:-1, 1:-1], atol=1e-10,
+        )
+
+
+# ---------------------------------------------------------------------------
 # susan_emulator (stub until smoothing.bilateral_gaussian lands)
 # ---------------------------------------------------------------------------
 

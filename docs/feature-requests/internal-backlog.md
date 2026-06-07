@@ -39,11 +39,10 @@ in *Resolved* below.
 | B16 | [alternative-interp-backends-xla](alternative-interp-backends-xla.md) | research note (scipy/cupy backends in XLA) | M-L |
 | B17 | [median-percentile-cpu-sort-cliff](median-percentile-cpu-sort-cliff.md) | perf characterisation (jnp.median/percentile CPU sort) | M |
 | B18 | [perf-bench-case-hardening](perf-bench-case-hardening.md) | benchmark-integrity report (gameable hard-path branches) | S (report) |
-| B19 | [morphology-reduce-window-jitgrad](morphology-reduce-window-jitgrad.md) | capability regression (flat-SE fast path breaks jit(grad)) | S char / M fix |
 | B20 | [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md) | feature gap (euclidean EDT has no sampling=) | S |
 | G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension | S |
 
-(B1, B8, and B9 are resolved — see below. `spatial_transform_batched`, JOSA §3,
+(B1, B8, B9, and B19 are resolved — see below. `spatial_transform_batched`, JOSA §3,
 shipped 2026-06-02 — see `IMPLEMENTATION_PLAN.md §10.3`;
 [`spatial-transform-batched.md`](spatial-transform-batched.md) is its home doc.)
 
@@ -81,6 +80,19 @@ in **`IMPLEMENTATION_PLAN.md §10.3`** (shipped-deviation log) and
   `None`. The legacy `ell_mask(identity=...)` form is retained but now emits a
   `DeprecationWarning`. The masking-vs-identity footgun (`docs/design/semiring-protocols.md`)
   is now machine-checked. See `IMPLEMENTATION_PLAN.md §10.3` (2026-06-02 entry).
+- **B19. `erode`/`dilate` flat-SE fast path breaks `jit(grad(...))`** — resolved
+  2026-06-07. Root cause: the flat-box `lax.reduce_window` fast path passed a
+  *traced* window init (`jnp.asarray`), which fails JAX's monoid-detection
+  concreteness test and falls back to the generic `reduce_window_p` (no transpose
+  rule) — so `jit(grad)` raised "Linearization failed …" while eager `grad`
+  stayed green. Fix: pass a **concrete** init sourced from the algebra identity
+  via `np.asarray`, routing to JAX's own differentiable
+  `reduce_window_max_p`/`min_p` (no `custom_vjp` needed); folded in a uniform
+  int/bool → `float32` promotion (`_to_float`) for a `float-in → float-out`
+  contract across both paths. Gated by three new `test_flat_path_*` tests; the
+  four `jit_of_grad` op-matrix cells flip `ValueError → pass`. See
+  [`morphology-reduce-window-jitgrad.md`](morphology-reduce-window-jitgrad.md)
+  (Resolution) and `docs/design/morphology.md` (flat-path section).
 - **B9. `residualise` robustness on ill-conditioned designs** — resolved 2026-05-22.
   Root cause: default `method='cholesky'` returns NaN for rank-deficient `X` (the
   singular Gram has no factor); the shipped `method='svd'` path (min-norm LSQ via

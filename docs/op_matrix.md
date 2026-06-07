@@ -8,8 +8,8 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 
 - **device**: cpu (cpu)
 - **platform**: Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39
-- **jax_version**: 0.10.0
-- **timestamp**: 2026-06-06T04:13:53Z
+- **jax_version**: 0.10.1
+- **timestamp**: 2026-06-06T08:40:40Z
 
 ## Legend
 
@@ -98,15 +98,15 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 
 | op | jit | grad | vmap | jit(grad) | invariants | notes |
 |---|:--:|:--:|:--:|:--:|---|---|
-| `dilate` | ✅ | ✅ | ✅ | ❌ | TROPICAL_MAX_PLUS specialisation | errors: `jit(grad): ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different` |
-| `erode` | ✅ | ✅ | ✅ | ❌ | TROPICAL_MIN_PLUS specialisation | errors: `jit(grad): ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different` |
+| `dilate` | ✅ | ✅ | ✅ | ✅ | TROPICAL_MAX_PLUS specialisation |  |
+| `erode` | ✅ | ✅ | ✅ | ✅ | TROPICAL_MIN_PLUS specialisation |  |
 | `distance_transform` | ✅ | ✅ | ✅ | ✅ | exact EDT (default): separable per-axis TROPICAL_MIN_PLUS matmul; opt-in chamfer via metric=/structuring_element (TROPICAL_MIN_PLUS) | euclidean default matches cupy EDT @64^3, beats scipy on CPU |
 | `distance_transform_edt` | ✅ | ✅ | ✅ | ✅ | exact Euclidean DT (separable min-plus matmul on semiring kernel); alias of distance_transform(metric="euclidean") | scipy distance_transform_edt parity; reverse-mode differentiable |
 | `median_filter` | ✅ | ✅ | ✅ | ✅ | gather + nanmedian (not a semiring op) |  |
 | `max_pool_with_indices_nd` | ✅ | ✅ | — | ✅ | global flat C-order argmax indices; window-unfold + argmax composition | returns (pooled, indices); paired with max_unpool_nd for encoder-decoder |
 | `max_unpool_nd` | ✅ | ✅ | — | ✅ | vmapped per-channel scatter; argmax-agreement parity (not raw-logit allclose) | inverts max_pool_with_indices_nd; indices are int (non-diff) |
-| `open` | ✅ | ✅ | ✅ | ❌ | erode then dilate (TROPICAL opening) | errors: `jit(grad): ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different` |
-| `close` | ✅ | ✅ | ✅ | ❌ | dilate then erode (TROPICAL closing) | errors: `jit(grad): ValueError: Linearization failed to produce known values for all output primals. This is typically caused by attempting to different` |
+| `open` | ✅ | ✅ | ✅ | ✅ | erode then dilate (TROPICAL opening) |  |
+| `close` | ✅ | ✅ | ✅ | ✅ | dilate then erode (TROPICAL closing) |  |
 
 ## nitrix.numerics
 
@@ -216,5 +216,5 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 - **jit pass**: 123 / 138
 - **grad pass**: 120 / 122 (applicable)
 - **vmap pass**: 95 / 95 (applicable)
-- **jit(grad) pass**: 116 / 122
+- **jit(grad) pass**: 120 / 122
 - **performance**: see the nitrix-perf-bench suite + dashboard (this matrix is capability-only).
