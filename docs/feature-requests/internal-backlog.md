@@ -40,6 +40,7 @@ in *Resolved* below.
 | B17 | [median-percentile-cpu-sort-cliff](median-percentile-cpu-sort-cliff.md) | perf characterisation (jnp.median/percentile CPU sort) | M |
 | B18 | [perf-bench-case-hardening](perf-bench-case-hardening.md) | benchmark-integrity report (gameable hard-path branches) | S (report) |
 | B20 | [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md) | feature gap (euclidean EDT has no sampling=) | S |
+| B21 | [morphology-explicit-se-im2col-cost](morphology-explicit-se-im2col-cost.md) | perf characterisation (explicit-SE/disk-footprint im2col cost, measured) | M |
 | G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension | S |
 
 (B1, B8, B9, and B19 are resolved — see below. `spatial_transform_batched`, JOSA §3,
