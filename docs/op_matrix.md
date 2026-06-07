@@ -9,7 +9,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 - **device**: cpu (cpu)
 - **platform**: Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39
 - **jax_version**: 0.10.1
-- **timestamp**: 2026-06-06T08:40:40Z
+- **timestamp**: 2026-06-07T22:51:40Z
 
 ## Legend
 
@@ -32,11 +32,15 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | op | jit | grad | vmap | jit(grad) | invariants | notes |
 |---|:--:|:--:|:--:|:--:|---|---|
 | `identity_grid` | — | — | — | — | shape-static constructor | shape-tuple input; not a runtime op |
-| `spatial_transform` | ✅ | ✅ | ✅ | ✅ | mode pass-through to map_coordinates; accepts leading batch |  |
+| `spatial_transform` | ✅ | ✅ | ✅ | ✅ | dispatches over method= (Linear default); mode pass-through; accepts leading batch |  |
+| `spatial_transform[lanczos]` | ✅ | ✅ | ✅ | ✅ | scattered windowed-sinc gather; differentiable warp | the high-fidelity differentiable warp kernel |
 | `integrate_velocity_field` | ✅ | ✅ | ✅ | ✅ | scaling-and-squaring; default mode='nearest' (voxelmorph) |  |
 | `jacobian_det_displacement` | ✅ | ✅ | ✅ | ✅ | explicit det for d<=3; no cuSolver call |  |
 | `sphere_grid_pad_2d` | ✅ | ✅ | ✅ | ✅ | pole-flip + W/2 roll; longitudinal wrap |  |
-| `resample` | ✅ | ✅ | — | ✅ | align-corners linear resize |  |
+| `resample` | ✅ | ✅ | — | ✅ | align-corners resize; dispatches over method= (Linear default) |  |
+| `resample[nearest]` | ✅ | ✅ | — | ✅ | order-0 nearest; explicit gather (GPU) / map_coordinates (CPU) | value-differentiable; coordinate-flat (grad wrt coords ~= 0) |
+| `resample[lanczos]` | ✅ | ✅ | — | ✅ | windowed-sinc order 3; separable 1-D passes; partition of unity | differentiable in values and coordinates |
+| `resample[multilabel]` | ✅ | ✅ | — | ✅ | per-label arg-max over a static label set; output in label set | non-differentiable (hard arg-max); grad runs but is zero |
 | `spherical_geodesic_distance` | ✅ | ✅ | ✅ | ✅ | great-circle (geodesic) distance on the sphere |  |
 | `jacobian_displacement` | ✅ | ✅ | ✅ | ✅ | central-difference Jacobian of a displacement field |  |
 | `center_of_mass_grid` | ✅ | ✅ | ✅ | ✅ | weighted centre of mass on a regular grid |  |
@@ -212,9 +216,9 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 
 ## Summary
 
-- **ops catalogued**: 138
-- **jit pass**: 123 / 138
-- **grad pass**: 120 / 122 (applicable)
-- **vmap pass**: 95 / 95 (applicable)
-- **jit(grad) pass**: 120 / 122
+- **ops catalogued**: 142
+- **jit pass**: 127 / 142
+- **grad pass**: 124 / 126 (applicable)
+- **vmap pass**: 96 / 96 (applicable)
+- **jit(grad) pass**: 124 / 126
 - **performance**: see the nitrix-perf-bench suite + dashboard (this matrix is capability-only).

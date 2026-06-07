@@ -1,7 +1,13 @@
 # `upsample_nearest_nd` — `nitrix.numerics` / `geometry`
 
-> **Status (2026-06-02): not started — CONVENIENCE (residual mesh/UNet
-> primitive).** Consumer-pipeline substrate for the ilex → thrux migration.
+> **Status (2026-06-07): ADDRESSED via the resample dispatcher.**
+> Nearest-neighbour spatial resize (up *or* down) ships as
+> `geometry.resample(image, target_shape, method=NearestNeighbour())` —
+> the order-0 path of the interpolation-method dispatcher
+> (`geometry/_interpolate.py`; `IMPLEMENTATION_PLAN.md §10.3`, 2026-06-07).
+> A bare `upsample_nearest_nd(image, factors)` convenience wrapper (integer
+> scale factors rather than a target shape) could still be added if a
+> consumer prefers the factor-based call, but the capability is present.
 > Provenance: 2026-06-02 ilex vendored-model survey
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), residual mesh
 > item C); ilex `UPSTREAM.md` "Pending primitives".

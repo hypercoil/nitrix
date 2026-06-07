@@ -18,8 +18,11 @@ matters (a sampler inside a learned generative model). **Not** required for
 voxelmorph / JOSA parity (those use edge-replicate), so explicitly low
 priority. Originally a JOSA-port request (low priority).
 
-**Effort.** S — one `BoundaryMode` value + the pad/coord-shift inside
-`_gather_coords_linear`.
+**Effort.** S — one `BoundaryMode` value handled in `_boundary_index`
+(`geometry/_interpolate.py`); the explicit separable gather makes a
+`'linear_extrap'` fold straightforward to add there (it would not, however,
+have a `map_coordinates` equivalent, so the affected kernels would always
+take the gather engine for that mode).
 
 ## Cross-references
 
@@ -27,4 +30,6 @@ priority. Originally a JOSA-port request (low priority).
   ledger.
 - [`spatial-transform-batched.md`](spatial-transform-batched.md) — the other
   open `spatial_transform` extension (leading-batch convenience).
-- `src/nitrix/geometry/grid.py` — `spatial_transform` / `_gather_coords_linear`.
+- `src/nitrix/geometry/_interpolate.py` — `_boundary_index` (the five
+  boundary folds a sixth would join); `src/nitrix/geometry/grid.py` —
+  `spatial_transform`.

@@ -11,20 +11,27 @@
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
 > item D); ilex SKILL FM #17.
 
-**What.** A cubic-spline resampler. `geometry.spatial_transform` /
-`resample` are **linear-only** — they wrap `jax.scipy.ndimage.map_coordinates`,
-which supports `order` 0/1 only (the documented FreeSurfer-port deviation).
-`hd_bet`'s nnUNet preprocessing resamples with an order-3 spline; the
-linear-only path is a documented parity deviation, not a match.
+**What.** A cubic-spline resampler. As of 2026-06-07 `geometry.resample` /
+`spatial_transform` dispatch over an `Interpolator` set — `Linear`,
+`NearestNeighbour`, `Lanczos` (windowed sinc), `MultiLabel` — so they are no
+longer "linear-only", **but there is still no order-3 B-spline path.**
+`Lanczos` is the high-fidelity option, yet it is a windowed-sinc kernel, not
+a cubic B-spline: it does **not** give bit-parity with `hd_bet`'s nnUNet
+order-3 preprocessing (or `scipy.ndimage.zoom(order=3)`). A separable
+B-spline prefilter + cubic sampler is still the gap if that specific parity
+is needed.
 
-**What it needs.** A separable B-spline prefilter + cubic sampling, rather
-than living under the `map_coordinates` order cap. If bit-parity with nnUNet
-preprocessing is wanted, this closes the gap.
+**What it needs.** A separable B-spline prefilter + cubic sampling. With the
+dispatcher in place this now slots in cleanly as a **new `Interpolator`
+record** (e.g. `CubicBSpline(order=3)`) in `geometry/_interpolate.py` — the
+prefilter is a per-axis recursive IIR pass, the sampler a 4-tap separable
+gather (the existing `_separable_gather` / `_separable_resample` machinery
+takes any tap rule). No new top-level surface; just another `method=`.
 
 **Priority.** Lower than the ENABLING items A–C (linear is "good enough" for
-most consumers). At minimum, flag the deviation in the `resample` docstring.
+most consumers). The deviation is flagged in the `resample` docstring.
 
-**Home.** `nitrix.geometry.grid`.
+**Home.** `nitrix.geometry._interpolate` (a new `Interpolator` record).
 
 ## Cross-references
 
@@ -33,4 +40,6 @@ most consumers). At minimum, flag the deviation in the `resample` docstring.
 - [`pallas-trilinear-resample.md`](pallas-trilinear-resample.md) (B7) — the
   *linear* resampling perf track; explicitly a **separate** concern from
   this order-3 parity gap.
-- `src/nitrix/geometry/grid.py` — `spatial_transform` / `resample`.
+- `src/nitrix/geometry/_interpolate.py` — the `Interpolator` dispatcher a
+  cubic method would extend; `src/nitrix/geometry/grid.py` —
+  `spatial_transform` / `resample`.

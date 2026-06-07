@@ -1190,6 +1190,56 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 - **Non-negotiables held:** no new runtime deps; capability-only matrix (perf
   stays in nitrix-perf-bench); failures recorded honestly, not suppressed.
 
+### 2026-06-07 — Resampling interpolation-method dispatcher (Lanczos / MultiLabel / NN)
+
+- **Type:** Primitive extension (additive kwarg; SPEC_UPDATE_v0.3 §14
+  "prefer adding a kwarg over forking a function" — not a §12 → §10.A
+  graduation, not a new subpackage).
+- **Triggered by:** standard neuroimaging-workflow interpolation strategies
+  absent from the linear-only default (segmentation warping, high-fidelity
+  resampling); the consumer-side asks tracked in `upsample-nearest-nd.md`,
+  `point-sample.md`, and the ANTs-output / `hd_bet` survey context.
+- **Description:** `geometry.resample` became the **common dispatcher** over an
+  `Interpolator` ADT (new `geometry/_interpolate.py`); `spatial_transform` /
+  `spatial_transform_batched` share the same sampler via a `method=` kwarg
+  (default `Linear()`, behaviour-preserving). Three orthogonal axes —
+  coords(task) ⟂ kernel(method) ⟂ backend(execution) — mirroring the
+  `linalg._eigsolve` factoring. Four methods: `Linear` (default),
+  `NearestNeighbour` (order-0; value-differentiable, coord-flat), `Lanczos`
+  (order-3 default windowed sinc; separable, partition-of-unity-normalised,
+  fully differentiable; ANTs `LanczosWindowedSinc` *class*, not bit-exact
+  ITK), `MultiLabel` (per-label indicator resample + arg-max over a **static**
+  label set; non-differentiable; anti-aliased label resampling). The records
+  are frozen, hashable, **static** config (no array leaves → not pytrees;
+  `SolverSpec`-style), with differentiability exposed as record properties.
+- **Engine / B7:** the gather kernels lower onto one explicit separable gather
+  (the B7 "8-corner gather"), with all five `map_coordinates` boundary modes
+  reproduced at the integer-tap level (parity to ~1e-15). The B7 perf win is
+  **GPU-only** (measured A10G ~1.5–1.7×; *inverts* to ~1.3× slower on CPU,
+  where `map_coordinates` is tighter and CPU interpolation is the B15
+  throughput-sensitive path), so `Linear`/`NearestNeighbour` select the engine
+  **per platform** (`default_backend_is_gpu`, the `signal._iir` precedent);
+  `map_coordinates` is retained as the CPU engine and the parity oracle.
+  `resample` resamples the separable grid axis-by-axis for wide kernels
+  (`Lanczos`: O(N·T·ndim) vs the dense O(N·T**ndim) = 6³ corners), gated by a
+  `prefers_separable_resample` flag so low-tap kernels keep the CPU
+  `map_coordinates` win. A Pallas pointer-load gather stays reserved behind the
+  `backend` axis (gated on the B7 trigger); the external scipy/cupyx backend
+  track (B15/B16) is explicitly out of scope.
+- **Verification:** behaviour-preserving (all prior geometry tests unchanged —
+  no golden re-pin needed, parity ≤ 1e-15); +~30 dispatcher tests
+  (per-mode gather-vs-`map_coordinates` parity, platform-engine agreement,
+  Lanczos fidelity / partition-of-unity / hand-computed-weight oracle,
+  MultiLabel label-set / anti-aliasing / non-differentiability); `mypy
+  src/nitrix/geometry` clean; op-matrix regenerated with the four method
+  variants (all jit/grad/vmap green; differentiability nuance in the notes).
+- **Non-negotiables held:** pure-functional immutable records + protocols;
+  no new runtime deps; differentiability recorded honestly (non-diff paths
+  return zeros, don't error); capability-only matrix (perf stays in
+  nitrix-perf-bench).
+- **Design doc:** `docs/design/geometry.md` ("The resampling-method
+  dispatcher").
+
 ---
 
 ## 11. Notes on agent / engineer handoff

@@ -88,4 +88,7 @@ throughput), or a JAX-version bump makes the FFI path materially easier.
 - [`pallas-trilinear-resample`](pallas-trilinear-resample.md) (B7),
   [`keops-genred-research`](keops-genred-research.md) (B5) — sibling
   in-XLA-kernel research.
-- `src/nitrix/geometry/grid.py` (`_gather_coords_linear`).
+- `src/nitrix/geometry/_interpolate.py` (`_separable_gather` /
+  `_map_coordinates_sample` — the in-XLA gather and its oracle; the seam an
+  external-backend `custom_vjp` would slot behind);
+  `src/nitrix/geometry/grid.py`.

@@ -541,7 +541,34 @@ def _spatial_transform_fixture():
 register(OpInfo(
     'nitrix.geometry.spatial_transform',
     fixture=_spatial_transform_fixture,
-    invariants=('mode pass-through to map_coordinates', 'accepts leading batch'),
+    invariants=(
+        'dispatches over method= (Linear default); mode pass-through',
+        'accepts leading batch',
+    ),
+))
+
+
+def _spatial_transform_lanczos():
+    from nitrix.geometry import Lanczos, spatial_transform
+
+    def fn(image, deformation):
+        return spatial_transform(
+            image, deformation, method=Lanczos(order=3), mode='nearest',
+        )
+
+    return fn
+
+
+register(OpInfo(
+    'nitrix.geometry.spatial_transform[lanczos]',
+    fixture=lambda: (
+        (jax.random.normal(_key(0), (6, 6, 2)),
+         jax.random.normal(_key(1), (6, 6, 2)) * 0.5),
+        {},
+    ),
+    fn_override=_spatial_transform_lanczos(),
+    invariants=('scattered windowed-sinc gather; differentiable warp',),
+    notes='the high-fidelity differentiable warp kernel',
 ))
 
 
@@ -1271,8 +1298,59 @@ register(OpInfo(
     'nitrix.geometry.resample',
     fixture=lambda: ((jax.random.normal(_key(), (8, 8, 2)),),
                      {'target_shape': (4, 4)}),
-    diff_arg=0, vmap_arg=None, invariants=('align-corners linear resize',),
+    diff_arg=0, vmap_arg=None,
+    invariants=('align-corners resize; dispatches over method= (Linear default)',),
 ))
+
+
+# resample interpolation-method variants.  Each bakes a ``method=``
+# record via ``fn_override`` so the probes see an array-only signature.
+def _resampler(method):
+    from nitrix.geometry import resample as _resample
+
+    def fn(image, target_shape):
+        return _resample(image, target_shape, method=method)
+
+    return fn
+
+
+_RESAMPLE_VARIANT_FIXTURE = lambda: (  # noqa: E731
+    (jax.random.normal(_key(), (8, 8, 2)),), {'target_shape': (5, 5)}
+)
+
+
+def _resample_method_variants():
+    from nitrix.geometry import Lanczos, MultiLabel, NearestNeighbour
+    register(OpInfo(
+        'nitrix.geometry.resample[nearest]',
+        fixture=_RESAMPLE_VARIANT_FIXTURE,
+        fn_override=_resampler(NearestNeighbour()),
+        diff_arg=0, vmap_arg=None,
+        invariants=('order-0 nearest; explicit gather (GPU) / map_coordinates (CPU)',),
+        notes='value-differentiable; coordinate-flat (grad wrt coords ~= 0)',
+    ))
+    register(OpInfo(
+        'nitrix.geometry.resample[lanczos]',
+        fixture=_RESAMPLE_VARIANT_FIXTURE,
+        fn_override=_resampler(Lanczos(order=3)),
+        diff_arg=0, vmap_arg=None,
+        invariants=('windowed-sinc order 3; separable 1-D passes; partition of unity',),
+        notes='differentiable in values and coordinates',
+    ))
+    register(OpInfo(
+        'nitrix.geometry.resample[multilabel]',
+        fixture=lambda: (
+            (jax.random.randint(_key(0), (8, 8, 1), 0, 4).astype(jnp.float32),),
+            {'target_shape': (5, 5)},
+        ),
+        fn_override=_resampler(MultiLabel(labels=(0, 1, 2, 3))),
+        diff_arg=0, vmap_arg=None,
+        invariants=('per-label arg-max over a static label set; output in label set',),
+        notes='non-differentiable (hard arg-max); grad runs but is zero',
+    ))
+
+
+_resample_method_variants()
 register(OpInfo(
     'nitrix.geometry.spherical_geodesic_distance',
     fixture=lambda: ((jax.random.normal(_key(), (8, 3)),), {}),

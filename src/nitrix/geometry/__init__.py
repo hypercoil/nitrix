@@ -9,7 +9,10 @@ Submodules:
 
 - ``grid``   -- regular-grid deformable-registration primitives:
   ``identity_grid``, ``spatial_transform``, ``integrate_velocity_field``,
-  ``resample``, ``center_of_mass_grid``.
+  ``resample``, ``center_of_mass_grid``.  ``resample`` /
+  ``spatial_transform`` dispatch over an ``Interpolator`` kernel
+  (``Linear`` default, ``NearestNeighbour``, ``Lanczos``, ``MultiLabel``)
+  -- see ``geometry._interpolate``.
 - ``sphere`` -- 2-sphere **mesh** primitives: coordinate
   conversions, geodesic distance, and ``spherical_conv`` re-backed
   on ``semiring_ell_matmul`` for ``O(n · k)`` instead of ``O(n²)``.
@@ -24,6 +27,13 @@ Submodules:
 
 See SPEC §4.4, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
 """
+from ._interpolate import (
+    Interpolator,
+    Lanczos,
+    Linear,
+    MultiLabel,
+    NearestNeighbour,
+)
 from .grid import (
     center_of_mass_grid,
     identity_grid,
@@ -70,6 +80,12 @@ __all__ = [
     'jacobian_det_displacement',
     'resample',
     'center_of_mass_grid',
+    # interpolation-method ADT
+    'Interpolator',
+    'Linear',
+    'NearestNeighbour',
+    'Lanczos',
+    'MultiLabel',
     # sphere (mesh)
     'cartesian_to_latlong',
     'latlong_to_cartesian',

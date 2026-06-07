@@ -265,17 +265,151 @@ them would confuse readers.
   we mitigated with a strict assertion on leading-axes shape
   agreement.
 
+## The resampling-method dispatcher
+
+``resample`` and ``spatial_transform`` started linear-only (a wrap of
+``map_coordinates(order=1)``).  Standard neuroimaging workflows need a
+few more interpolation strategies -- ``Lanczos`` windowed sinc (high-
+fidelity, differentiable), ANTs-style ``MultiLabel`` (anti-aliased
+segmentation resampling), and plain ``NearestNeighbour`` -- so ``resample``
+became the **common dispatcher** over them, with ``spatial_transform``
+sharing the same sampler.  See ``docs/design/`` history and
+``IMPLEMENTATION_PLAN.md §10.3`` for the as-built record.
+
+### Three orthogonal axes
+
+The design mirrors the ``linalg._eigsolve`` dispatcher's "factor the
+independent axes, don't hand-write the cross product" discipline.  A
+sample decomposes into three orthogonal axes::
+
+    sample = backend(execution) o kernel(method) o coords(task)
+
+- **coords (task)** -- where the sample positions come from:
+  ``resample``'s align-corners resize grid, ``spatial_transform``'s
+  deformation field.  Both delegate to one shared
+  ``_sample_at_coords`` / ``_resample_on_grid`` seam.
+- **kernel (method)** -- how neighbours are weighted: an immutable
+  ``Interpolator`` record passed as ``method=``.  Adding a method is
+  adding one frozen record; the grid functions are untouched.
+- **backend (execution)** -- ``jax`` today; a Pallas pointer-load
+  gather is reserved behind the same seam (the parked B7 kernel).
+
+The ``Interpolator`` ADT follows the ``smoothing.metric.FeatureMetric``
+precedent (a frozen-record ADT exposing one pure method) -- but the
+records carry **static** config (spline order, the label set), so unlike
+``FeatureMetric`` they are *not* pytrees: plain frozen, hashable
+dataclasses that ride ``jit`` static args / ``custom_vjp`` non-diff slots
+(the ``SolverSpec`` pattern).  Boundary handling (``mode`` / ``cval``)
+stays a *call* keyword, not a record field.
+
+### The four methods
+
+| method | engine | differentiable | parity |
+|---|---|---|---|
+| ``Linear`` (default) | gather / ``map_coordinates`` | values + coords | the prior behaviour |
+| ``NearestNeighbour`` | gather / ``map_coordinates`` (order 0) | values only (**coord-flat**) | scipy / ANTs ``NearestNeighbor`` |
+| ``Lanczos(order=3)`` | explicit separable gather | values + coords | ANTs ``LanczosWindowedSinc`` *class* (not bit-exact ITK) |
+| ``MultiLabel(labels=...)`` | per-label inner resample + arg-max | **none** (hard arg-max) | ANTs ``MultiLabel`` |
+
+Differentiability is a *property of the record*
+(``differentiable_in_values`` / ``_in_coords``), so the contract is
+self-describing and the op-matrix probe reports it honestly.  None of
+the paths *error* under ``jax.grad``; the non-differentiable ones return
+zero cotangents.
+
+### The explicit separable gather (and where it runs)
+
+All gather kernels lower onto one engine: each axis contributes a few
+integer taps and per-tap weights, the boundary mode folds the taps to
+in-range indices (the five modes reproduce ``map_coordinates`` exactly
+-- ``constant`` masks out-of-range taps to ``cval``, ``nearest`` clamps,
+``wrap`` is ``i mod n``, ``mirror`` folds with period ``2(n-1)``,
+``reflect`` with period ``2n``), and the ``T**ndim`` corner values are
+contracted against the outer product of the weights.  Linear is the
+2-tap case (the "explicit 8-corner gather" of B7); Lanczos the ``2a``-tap
+case.
+
+This gather is the perf win of B7 -- but **only on GPU**.  The measured
+A10G win (~1.5--1.7x over ``map_coordinates``) *inverts* on CPU
+(~1.3x slower), where the XLA ``map_coordinates`` lowering is tighter and
+CPU interpolation is already the throughput-sensitive path (B15).  So
+``Linear`` / ``NearestNeighbour`` select the engine **per platform** --
+explicit gather on GPU, ``map_coordinates`` on CPU -- a trace-time branch
+(``default_backend_is_gpu``) exactly mirroring ``signal._iir``'s
+scan-vs-associative-scan choice.  The two are parity-equal to a ULP, so
+it is a pure perf selection; ``_map_coordinates_sample`` doubles as the
+CPU engine and the parity **oracle** the tests pin the gather against.
+``Lanczos`` has no ``map_coordinates`` equivalent and always uses the
+gather.
+
+For ``resample`` the grid is separable (an outer product of per-axis 1-D
+coordinate vectors), so wide kernels resample **axis-by-axis** --
+``O(N . T . ndim)`` instead of the dense ``O(N . T**ndim)`` corner gather
+(``Lanczos`` order 3 in 3-D is ``6**3 = 216`` corners; the 1-D passes are
+the only tractable form).  A ``prefers_separable_resample`` flag gates
+this: ``True`` for ``Lanczos``, ``False`` for the low-tap ``Linear`` /
+``NearestNeighbour`` (whose dense path keeps the CPU ``map_coordinates``
+win).  ``spatial_transform``'s coordinates are scattered (non-separable),
+so it always uses the dense gather.
+
+### MultiLabel: substrate composition, two constraints
+
+``MultiLabel`` is pure composition over the existing sampler: resample
+each label's binary indicator with the ``inner`` kernel, then arg-max
+the per-label scores (a memory-bounded running-arg-max fold -- ``O(K)``
+inner resamples, never a ``K``-channel stack).  Two constraints fall out
+and are documented at the API:
+
+- **Static label set.**  ``jnp.unique`` is dynamically shaped and breaks
+  ``jit``; the label tuple is a constructor argument.  Out-of-support
+  samples (and ties) resolve to ``labels[0]`` -- list the background
+  first.
+- **Non-differentiable.**  The arg-max is a hard selection; grad is
+  zero.  The inner kernel's *support width* sets the anti-aliasing:
+  ``Linear`` (2-tap) refines ``NN`` at junctions but coincides with it on
+  a 2x decimation and drops sub-pixel structures; a wider ``Lanczos``
+  inner area-weights over a larger neighbourhood and preserves thin
+  labels (the role the ANTs Gaussian inner plays -- which we do not ship
+  as a separate kernel).
+
+### Governance and what we didn't pick
+
+This is an **extension of an existing primitive** (``resample`` gains a
+kwarg), which SPEC_UPDATE_v0.3 §14 explicitly blesses ("prefer adding a
+kwarg over forking a function") -- not a new subpackage, not a §12 -> §10.A
+graduation.  It is deviation-logged in ``IMPLEMENTATION_PLAN.md §10.3``.
+
+- **A flat ``method: Literal`` + per-method kwargs** (the
+  ``bias_field_correction`` idiom): rejected because the methods carry
+  divergent config (Lanczos ``order``, MultiLabel ``labels`` / ``inner``)
+  and the differentiability contract rides better on the type than on a
+  string.
+- **A Gaussian inner / a separate cubic B-spline method**: out of scope
+  (the ask was Lanczos / MultiLabel / NN).  ``Lanczos`` covers the wide-
+  inner role; the order-3 B-spline parity gap stays open
+  (``cubic-resample.md``).
+- **The external scipy / cupyx backend track (B15/B16)**: a separate,
+  heavier, parked research effort; the in-XLA gather (B7) is the one that
+  belongs here.  The Pallas pointer-load kernel is reserved behind the
+  ``backend`` axis (gated on the B7 trigger).
+
 ## Cross-references
 
 - SPEC §4.4 (geometry primitives) and §6.1 task 3 (the migration
   plan).
-- ``src/nitrix/geometry/{grid,sphere,sphere_grid,coords}.py``.
-- ``tests/test_geometry.py`` -- 53 tests including:
+- ``src/nitrix/geometry/{grid,sphere,sphere_grid,coords}.py`` and
+  ``src/nitrix/geometry/_interpolate.py`` (the ``Interpolator`` ADT,
+  the explicit separable gather, the per-platform engine selection).
+- ``tests/test_geometry.py`` -- including:
   - all-pairs reference parity check for ``spherical_conv``;
   - ``spatial_transform`` mode + batch tests for the J.0 / J.2a fix;
   - ``sphere_grid_pad_2d`` topology tests for the J.1a primitive;
   - ``jacobian_det_displacement`` zero / compression / folding /
-    anisotropic-spacing tests for J.1b.
+    anisotropic-spacing tests for J.1b;
+  - the interpolation-method dispatcher: per-mode gather-vs-``map_coordinates``
+    parity, platform-engine agreement, Lanczos fidelity / partition-of-unity /
+    hand-computed oracle, and MultiLabel label-set / anti-aliasing /
+    non-differentiability tests.
 - [`semiring-protocols.md`](semiring-protocols.md),
   [`ell-on-triton.md`](ell-on-triton.md) -- the substrate that
   ``spherical_conv`` lowers onto.

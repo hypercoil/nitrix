@@ -30,6 +30,11 @@ import numpy as np
 import pytest
 
 from nitrix.geometry import (
+    Interpolator,
+    Lanczos,
+    Linear,
+    MultiLabel,
+    NearestNeighbour,
     cartesian_to_latlong,
     center_of_mass_grid,
     center_of_mass_points,
@@ -439,6 +444,427 @@ def test_resample_3d():
     vol = jax.random.normal(jax.random.key(1), (4, 4, 4, 1))
     out = resample(vol, (8, 8, 8))
     assert out.shape == (8, 8, 8, 1)
+
+
+# ---------------------------------------------------------------------------
+# interpolation-method dispatcher (Stage 1: Linear / NearestNeighbour)
+# ---------------------------------------------------------------------------
+
+
+def test_interpolator_records_satisfy_protocol():
+    '''The concrete records structurally conform to ``Interpolator``.'''
+    assert isinstance(Linear(), Interpolator)
+    assert isinstance(NearestNeighbour(), Interpolator)
+
+
+def test_interpolator_records_are_frozen_and_hashable():
+    '''Records are static config: frozen, hashable, equality-by-value.'''
+    assert Linear() == Linear()
+    assert hash(Linear()) == hash(Linear())
+    assert {Linear(), NearestNeighbour(), Linear()} == {
+        Linear(), NearestNeighbour(),
+    }
+    with pytest.raises((AttributeError, TypeError)):
+        Linear().differentiable_in_values = False  # type: ignore[misc]
+
+
+def test_differentiability_flags():
+    '''The per-method differentiability contract is self-described.'''
+    assert Linear.differentiable_in_values
+    assert Linear.differentiable_in_coords
+    assert NearestNeighbour.differentiable_in_values
+    assert not NearestNeighbour.differentiable_in_coords
+
+
+def test_resample_default_method_is_linear():
+    '''The default path equals an explicit ``method=Linear()``.'''
+    vol = jax.random.normal(jax.random.key(3), (5, 5, 1))
+    np.testing.assert_array_equal(
+        resample(vol, (8, 8)), resample(vol, (8, 8), method=Linear()),
+    )
+
+
+def test_resample_nearest_preserves_label_values():
+    '''Nearest-neighbour output is a subset of the input label set.'''
+    seg = jnp.array(
+        [[0, 0, 1, 1, 2],
+         [0, 0, 1, 1, 2],
+         [3, 3, 4, 4, 5],
+         [3, 3, 4, 4, 5],
+         [6, 6, 7, 7, 8]],
+        dtype=jnp.float64,
+    )[..., None]
+    out = resample(seg, (9, 9), method=NearestNeighbour())
+    allowed = set(int(v) for v in jnp.unique(seg))
+    present = set(int(v) for v in jnp.unique(out))
+    assert present.issubset(allowed)
+
+
+def test_resample_nearest_matches_map_coordinates_order0():
+    '''NN parity against the ``map_coordinates`` order-0 oracle.'''
+    import jax.scipy.ndimage as jsp_ndi
+
+    img = jax.random.normal(jax.random.key(4), (6, 7))
+    axes = [
+        jnp.linspace(0.0, s - 1, t, dtype=jnp.float64)
+        for s, t in zip((6, 7), (9, 5))
+    ]
+    grids = jnp.meshgrid(*axes, indexing='ij')
+    coords = jnp.stack([g.reshape(-1) for g in grids], axis=0)
+    oracle = jsp_ndi.map_coordinates(
+        img, coords, order=0, mode='constant', cval=0.0,
+    ).reshape(9, 5)
+    out = resample(img[..., None], (9, 5), method=NearestNeighbour())[..., 0]
+    np.testing.assert_array_equal(out, oracle)
+
+
+def test_spatial_transform_nearest_identity_is_identity():
+    '''A nearest-neighbour identity warp is the identity map.'''
+    seg = jax.random.randint(
+        jax.random.key(5), (5, 5, 1), 0, 4,
+    ).astype(jnp.float64)
+    out = spatial_transform(
+        seg, identity_grid((5, 5)), method=NearestNeighbour(),
+    )
+    np.testing.assert_array_equal(out, seg)
+
+
+def test_nearest_coordinate_gradient_is_zero():
+    '''NN is coordinate-flat: ``differentiable_in_coords = False`` in fact.
+
+    The round-to-nearest is piecewise-constant in the coordinates, so the
+    gradient of any output functional w.r.t. the deformation is zero
+    almost everywhere.
+    '''
+    img = jax.random.normal(jax.random.key(6), (5, 5, 1))
+    grid = identity_grid((5, 5))
+    g = jax.grad(
+        lambda d: spatial_transform(
+            img, d, method=NearestNeighbour(),
+        ).sum()
+    )(grid)
+    np.testing.assert_array_equal(g, jnp.zeros_like(grid))
+
+
+def test_resample_nearest_jit_and_vmap():
+    '''The NN path is jit- and vmap-clean.'''
+    batch = jax.random.normal(jax.random.key(7), (3, 5, 5, 1))
+    jitted = jax.jit(
+        lambda x: resample(x, (8, 8), method=NearestNeighbour())
+    )
+    out = jax.vmap(jitted)(batch)
+    assert out.shape == (3, 8, 8, 1)
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: explicit separable-gather engine matches the map_coordinates oracle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'mode', ['constant', 'nearest', 'wrap', 'mirror', 'reflect'],
+)
+@pytest.mark.parametrize('ndim', [1, 2, 3])
+def test_separable_gather_matches_map_coordinates(mode, ndim):
+    '''The explicit gather reproduces ``map_coordinates`` to ~ULP.
+
+    Exercises ``_separable_gather`` **directly** (not via ``.sample``,
+    which on CPU routes to the ``map_coordinates`` engine) so the gather
+    is validated on any platform: across every boundary mode and
+    1-/2-/3-D, the order-1 (linear taps) and order-0 (nearest taps)
+    gathers match the retained oracle, including out-of-bounds
+    coordinates that exercise the boundary folds.  This is the B7
+    engine-swap guard rail.
+    '''
+    from nitrix.geometry._interpolate import (
+        Linear as _Linear,
+        NearestNeighbour as _NN,
+        _map_coordinates_sample,
+        _separable_gather,
+    )
+
+    rng = np.random.default_rng(11 + ndim)
+    spatial = tuple(int(s) for s in rng.integers(4, 7, size=ndim))
+    img = jnp.asarray(rng.standard_normal(spatial + (2,)))
+    hi = max(spatial) + 1.5
+    coords = jnp.asarray(rng.uniform(-2.5, hi, size=(40, ndim)))
+
+    ref_lin = _map_coordinates_sample(img, coords, order=1, mode=mode, cval=-7.0)
+    got_lin = _separable_gather(
+        img, coords, tap_rule=_Linear()._axis_taps_weights,
+        mode=mode, cval=-7.0,
+    )
+    np.testing.assert_allclose(got_lin, ref_lin, atol=1e-12)
+
+    ref_nn = _map_coordinates_sample(img, coords, order=0, mode=mode, cval=-7.0)
+    got_nn = _separable_gather(
+        img, coords, tap_rule=_NN()._axis_taps_weights,
+        mode=mode, cval=-7.0,
+    )
+    np.testing.assert_array_equal(got_nn, ref_nn)
+
+
+def test_separable_gather_constant_fills_cval_per_tap():
+    '''``constant`` blends out-of-range taps as ``cval`` (per scipy).
+
+    A sample at fractional position ``-0.3`` blends the (out-of-range)
+    tap ``-1`` at ``cval`` with the in-range tap ``0`` -- it is *not* a
+    whole-sample ``cval`` fill.
+    '''
+    from nitrix.geometry._interpolate import (
+        Linear as _Linear,
+        _separable_gather,
+    )
+
+    img = jnp.arange(5.0)[..., None]
+    out = _separable_gather(
+        img, jnp.array([[-0.3]]),
+        tap_rule=_Linear()._axis_taps_weights, mode='constant', cval=-9.0,
+    )
+    # 0.3 * cval + 0.7 * img[0] = 0.3 * -9 + 0 = -2.7
+    np.testing.assert_allclose(out[0, 0], -2.7, atol=1e-12)
+
+
+def test_linear_gather_is_differentiable_in_coords():
+    '''Linear keeps a non-trivial coordinate gradient (vs NN's zero).'''
+    img = jax.random.normal(jax.random.key(8), (6, 6, 1))
+    grid = identity_grid((6, 6)) + 0.3
+    g = jax.grad(
+        lambda d: spatial_transform(img, d, method=Linear()).sum()
+    )(grid)
+    assert bool(jnp.any(g != 0.0))
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+@pytest.mark.parametrize('method', [Linear(), NearestNeighbour()])
+def test_platform_engines_agree_through_sample(method, monkeypatch):
+    '''Both platform engines yield the same ``.sample`` result.
+
+    ``Linear`` / ``NearestNeighbour`` pick the explicit gather on GPU and
+    ``map_coordinates`` on CPU; forcing each branch (via the platform
+    probe) and comparing proves the public dispatch path is
+    platform-invariant -- and covers the GPU branch on a CPU host.
+    '''
+    img = jax.random.normal(jax.random.key(9), (6, 7, 2))
+    coords = identity_grid((6, 7)) + 0.4
+
+    monkeypatch.setattr(
+        'nitrix.geometry._interpolate.default_backend_is_gpu', lambda: False,
+    )
+    cpu_engine = method.sample(img, coords, mode='reflect', cval=0.0)
+    monkeypatch.setattr(
+        'nitrix.geometry._interpolate.default_backend_is_gpu', lambda: True,
+    )
+    gpu_engine = method.sample(img, coords, mode='reflect', cval=0.0)
+    np.testing.assert_allclose(gpu_engine, cpu_engine, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: Lanczos windowed sinc
+# ---------------------------------------------------------------------------
+
+
+def test_lanczos_preserves_constant_edge_replicate():
+    '''A renormalised Lanczos kernel is a partition of unity.
+
+    Under edge-replicate (``mode='nearest'``) every tap is a real
+    neighbour, so a constant resamples to the same constant everywhere
+    (the renormalisation makes the per-axis weights sum to 1 exactly).
+    '''
+    const = jnp.full((10, 10, 1), 2.5)
+    out = resample(const, (16, 16), method=Lanczos(), mode='nearest')
+    np.testing.assert_allclose(out, 2.5, atol=1e-10)
+
+
+def test_lanczos_constant_mode_interior_preserved():
+    '''``constant`` mode preserves the interior; only the border fills.'''
+    const = jnp.full((12, 12, 1), 2.5)
+    out = resample(const, (20, 20), method=Lanczos(order=3), mode='constant')
+    # The radius-3 stencil only reaches cval within ~3 voxels of the edge.
+    np.testing.assert_allclose(out[5:-5, 5:-5], 2.5, atol=1e-10)
+
+
+def test_lanczos_reproduces_grid_samples():
+    '''Resampling onto the original grid is the identity (L_a(integer)=0).'''
+    img = jax.random.normal(jax.random.key(20), (7, 7, 2))
+    out = resample(img, (7, 7), method=Lanczos(order=3))
+    np.testing.assert_allclose(out, img, atol=1e-10)
+
+
+def test_lanczos_higher_fidelity_than_linear():
+    '''On a band-limited signal Lanczos beats linear under a roundtrip.'''
+    x = jnp.linspace(0.0, 2.0 * jnp.pi, 64)
+    signal = jnp.sin(3.0 * x)[:, None]
+
+    def roundtrip(method):
+        up = resample(signal, (128,), method=method)
+        return resample(up, (64,), method=method)
+
+    err_linear = float(jnp.mean((roundtrip(Linear()) - signal) ** 2))
+    err_lanczos = float(jnp.mean((roundtrip(Lanczos()) - signal) ** 2))
+    assert err_lanczos < err_linear / 10.0
+
+
+def test_lanczos_weights_match_hand_computed():
+    '''Numerical oracle: a 1-D sample equals the normalised sinc sum.'''
+    img = jnp.arange(10.0)[..., None]
+    p = 4.3  # interior sample, full radius-3 stencil in bounds
+    a = 3
+    taps = np.arange(int(np.floor(p)) - a + 1, int(np.floor(p)) + a + 1)
+    x = p - taps
+
+    def sinc(t):
+        return np.sinc(t)  # numpy sinc is the normalised sinc too
+
+    w = sinc(x) * sinc(x / a)
+    w = w / w.sum()
+    expected = float((w * np.asarray(img)[taps, 0]).sum())
+    got = spatial_transform(
+        img, jnp.array([[p]]), method=Lanczos(order=3), mode='nearest',
+    )
+    np.testing.assert_allclose(float(got[0, 0]), expected, atol=1e-10)
+
+
+def test_lanczos_resample_matches_scattered_gather():
+    '''resample (1-D passes) == spatial_transform (dense gather) for Lanczos.
+
+    Validates the separable resample optimisation against the general
+    scattered-coordinate gather on the same align-corners grid.
+    '''
+    img = jax.random.normal(jax.random.key(21), (6, 7, 2))
+    target = (9, 5)
+    axes = [
+        jnp.linspace(0.0, s - 1, t, dtype=img.dtype)
+        for s, t in zip((6, 7), target)
+    ]
+    coords = jnp.stack(jnp.meshgrid(*axes, indexing='ij'), axis=-1)
+    via_resample = resample(img, target, method=Lanczos(order=3))
+    via_gather = spatial_transform(img, coords, method=Lanczos(order=3))
+    np.testing.assert_allclose(via_resample, via_gather, atol=1e-10)
+
+
+def test_lanczos_differentiable_values_and_coords():
+    '''Lanczos is smooth: non-trivial, finite gradients both ways.'''
+    img = jax.random.normal(jax.random.key(22), (7, 7, 1))
+    gv = jax.grad(
+        lambda im: resample(im, (10, 10), method=Lanczos()).sum()
+    )(img)
+    gc = jax.grad(
+        lambda d: spatial_transform(img, d, method=Lanczos()).sum()
+    )(identity_grid((7, 7)) + 0.3)
+    for g in (gv, gc):
+        assert bool(jnp.all(jnp.isfinite(g)))
+        assert bool(jnp.any(g != 0.0))
+
+
+def test_lanczos_jit_and_vmap():
+    '''The Lanczos path is jit- and vmap-clean (order as a static field).'''
+    batch = jax.random.normal(jax.random.key(23), (3, 6, 6, 1))
+    f = jax.jit(lambda im: resample(im, (9, 9), method=Lanczos(order=4)))
+    assert jax.vmap(f)(batch).shape == (3, 9, 9, 1)
+
+
+def test_lanczos_order_validation():
+    '''A non-positive or non-integer order is rejected at construction.'''
+    with pytest.raises(ValueError):
+        Lanczos(order=0)
+    with pytest.raises(ValueError):
+        Lanczos(order=-2)
+    with pytest.raises(ValueError):
+        Lanczos(order=2.5)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: ANTs MultiLabel
+# ---------------------------------------------------------------------------
+
+
+_SEG = jnp.array(
+    [[0, 0, 1, 1, 2],
+     [0, 0, 1, 1, 2],
+     [3, 3, 4, 4, 2],
+     [3, 3, 4, 4, 2],
+     [3, 3, 0, 0, 0]],
+    dtype=jnp.float64,
+)[..., None]
+_LABELS = (0, 1, 2, 3, 4)
+
+
+def test_multilabel_output_is_subset_of_labels():
+    '''No invented values: every output is one of the input labels.'''
+    out = resample(_SEG, (11, 9), method=MultiLabel(labels=_LABELS))
+    present = set(int(v) for v in jnp.unique(out))
+    assert present.issubset(set(_LABELS))
+
+
+def test_multilabel_identity_warp_is_identity():
+    out = spatial_transform(
+        _SEG, identity_grid((5, 5)), method=MultiLabel(labels=_LABELS),
+    )
+    np.testing.assert_array_equal(out, _SEG)
+
+
+def test_multilabel_is_renumber_invariant():
+    '''Adding a constant offset to the labels offsets the output the same.'''
+    out = resample(_SEG, (9, 9), method=MultiLabel(labels=_LABELS))
+    shifted = resample(
+        _SEG + 10.0, (9, 9),
+        method=MultiLabel(labels=tuple(label + 10 for label in _LABELS)),
+    )
+    np.testing.assert_array_equal(shifted, out + 10.0)
+
+
+def test_multilabel_wide_inner_preserves_thin_structure():
+    '''A wider inner kernel anti-aliases: a thin label survives downsampling.
+
+    A 1-voxel stripe of label 2 is dropped by nearest-neighbour and by a
+    narrow ``Linear`` inner, but a ``Lanczos`` inner area-weights it
+    enough to win the arg-max at some output voxels.
+    '''
+    yy, xx = np.mgrid[0:16, 0:16]
+    seg = np.where(xx + yy < 16, 0, 1).astype(float)
+    seg[7, :] = 2  # thin horizontal stripe
+    seg = jnp.asarray(seg)[..., None]
+    labels = (0, 1, 2)
+
+    nn = resample(seg, (8, 8), method=NearestNeighbour())
+    ml_lanczos = resample(
+        seg, (8, 8), method=MultiLabel(labels=labels, inner=Lanczos(order=3)),
+    )
+    assert 2 not in set(int(v) for v in jnp.unique(nn))      # NN drops it
+    assert 2 in set(int(v) for v in jnp.unique(ml_lanczos))  # MultiLabel keeps it
+
+
+def test_multilabel_is_non_differentiable_without_error():
+    '''The arg-max is a hard selection: gradients are zero, not an error.'''
+    gv = jax.grad(
+        lambda im: resample(im, (8, 8), method=MultiLabel(labels=_LABELS)).sum()
+    )(_SEG)
+    np.testing.assert_array_equal(gv, jnp.zeros_like(_SEG))
+    assert not MultiLabel.differentiable_in_values
+    assert not MultiLabel.differentiable_in_coords
+
+
+def test_multilabel_out_of_bounds_resolves_to_first_label():
+    '''A fully out-of-support sample resolves to ``labels[0]``.'''
+    far = jnp.full((1, 1, 2), 999.0)  # way outside the image
+    out = spatial_transform(
+        _SEG, far, method=MultiLabel(labels=(7, 1, 2, 3, 4)), mode='constant',
+    )
+    np.testing.assert_array_equal(out, jnp.full_like(out, 7.0))
+
+
+def test_multilabel_jit_with_static_labels():
+    '''Static label set makes the op jit-clean.'''
+    f = jax.jit(lambda im: resample(im, (7, 7), method=MultiLabel(labels=_LABELS)))
+    assert f(_SEG).shape == (7, 7, 1)
+
+
+def test_multilabel_validation():
+    with pytest.raises(ValueError):
+        MultiLabel(labels=())
+    with pytest.raises(ValueError):
+        MultiLabel(labels=(1, 1, 2))
 
 
 def test_integrate_velocity_field_zero_is_zero():

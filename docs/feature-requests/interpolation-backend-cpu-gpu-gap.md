@@ -63,6 +63,8 @@ M–L and is the subject of the companion research note.
 - [`spatial-transform-linear-extrap`](spatial-transform-linear-extrap.md),
   [`boundary-mode-parity`](boundary-mode-parity.md) — sibling
   `map_coordinates` items.
-- `src/nitrix/geometry/grid.py` (`_gather_coords_linear`, `spatial_transform`,
+- `src/nitrix/geometry/_interpolate.py` (`_map_coordinates_sample`,
+  `_separable_gather`, `_gather_sample` — the per-platform engine choice that
+  this gap motivated); `src/nitrix/geometry/grid.py` (`spatial_transform`,
   `resample`, `integrate_velocity_field`); nitrix-perf-bench
   `integrate_velocity_field` / `spatial_transform` / `resample` cases.

@@ -29,7 +29,7 @@ in *Resolved* below.
 | B4 | [edge-aggregate-log-euclidean](edge-aggregate-log-euclidean.md) | semiring coverage (canonical) | — |
 | B5 | [keops-genred-research](keops-genred-research.md) | research note | — |
 | B6 | [pallas-gaussian-blur](pallas-gaussian-blur.md) | Pallas kernel | — |
-| B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (cheap JAX interim win) | — |
+| B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (interim JAX gather **shipped** 2026-06-07; kernel parked) | — |
 | B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning | M |
 | B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) | L (sliceable) |
 | B12 | [iir-filter-gpu-backend](iir-filter-gpu-backend.md) | perf / API-default (IIR GPU backend) | S + M |
@@ -95,6 +95,18 @@ in **`IMPLEMENTATION_PLAN.md §10.3`** (shipped-deviation log) and
   four `jit_of_grad` op-matrix cells flip `ValueError → pass`. See
   [`morphology-reduce-window-jitgrad.md`](morphology-reduce-window-jitgrad.md)
   (Resolution) and `docs/design/morphology.md` (flat-path section).
+- **B7 (interim win) + `upsample-nearest-nd` — partially resolved 2026-06-07.**
+  The interpolation-method dispatcher (`geometry/_interpolate.py`) shipped the
+  B7 "explicit 8-corner gather" as `_separable_gather` — now the GPU engine
+  for `Linear` / `NearestNeighbour` and the always-engine for `Lanczos`,
+  **platform-branched** (`map_coordinates` on CPU, where the gather regresses;
+  the `signal._iir` precedent). This also delivers `upsample-nearest-nd`'s
+  capability (`resample(method=NearestNeighbour())`) and `point-sample`'s
+  zero-fill sampling (`spatial_transform(mode='constant', cval=0)`). B7's
+  **Pallas pointer-load kernel stays parked** (the gather-lowering risk is
+  unchanged); B15's CPU throughput gap stands (the branch keeps CPU on
+  `map_coordinates`). See `IMPLEMENTATION_PLAN.md §10.3` (2026-06-07) and
+  `docs/design/geometry.md`.
 - **B9. `residualise` robustness on ill-conditioned designs** — resolved 2026-05-22.
   Root cause: default `method='cholesky'` returns NaN for rank-deficient `X` (the
   singular Gram has no factor); the shipped `method='svd'` path (min-norm LSQ via

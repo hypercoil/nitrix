@@ -3,7 +3,7 @@
     "device": "cpu (cpu)",
     "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.1",
-    "timestamp": "2026-06-06T08:40:40Z"
+    "timestamp": "2026-06-07T22:51:40Z"
   },
   "perf_source": "nitrix-perf-bench",
   "ops": [
@@ -368,10 +368,21 @@
       "vmap": "pass",
       "jit_of_grad": "pass",
       "invariants": [
-        "mode pass-through to map_coordinates",
+        "dispatches over method= (Linear default); mode pass-through",
         "accepts leading batch"
       ],
       "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.spatial_transform[lanczos]",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "scattered windowed-sinc gather; differentiable warp"
+      ],
+      "notes": "the high-fidelity differentiable warp kernel"
     },
     {
       "qualname": "nitrix.geometry.integrate_velocity_field",
@@ -1126,9 +1137,42 @@
       "vmap": "n/a",
       "jit_of_grad": "pass",
       "invariants": [
-        "align-corners linear resize"
+        "align-corners resize; dispatches over method= (Linear default)"
       ],
       "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.resample[nearest]",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "order-0 nearest; explicit gather (GPU) / map_coordinates (CPU)"
+      ],
+      "notes": "value-differentiable; coordinate-flat (grad wrt coords ~= 0)"
+    },
+    {
+      "qualname": "nitrix.geometry.resample[lanczos]",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "windowed-sinc order 3; separable 1-D passes; partition of unity"
+      ],
+      "notes": "differentiable in values and coordinates"
+    },
+    {
+      "qualname": "nitrix.geometry.resample[multilabel]",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "per-label arg-max over a static label set; output in label set"
+      ],
+      "notes": "non-differentiable (hard arg-max); grad runs but is zero"
     },
     {
       "qualname": "nitrix.geometry.spherical_geodesic_distance",

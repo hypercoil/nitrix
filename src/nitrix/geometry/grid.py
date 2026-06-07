@@ -9,12 +9,19 @@ fields and integrate stationary velocity fields:
 
 - ``identity_grid``       -- the "no-op" deformation, useful as a
   starting point for learned displacements.
-- ``spatial_transform``   -- warp an image by a displacement field
-  via (multi-)linear interpolation.
+- ``spatial_transform``   -- warp an image by a displacement field;
+  the sampling kernel is selectable via ``method=``.
 - ``integrate_velocity_field`` -- scaling-and-squaring SVF
   integration (the diffeomorphic exponential map).
-- ``resample``            -- linear-interpolation resize to a target
-  spatial shape.
+- ``resample``            -- resize to a target spatial shape; the
+  common dispatcher over the available interpolation methods.
+
+``spatial_transform`` and ``resample`` share one sampler: they differ
+only in *where* the sample coordinates come from (a deformation field
+vs an align-corners resize grid).  The interpolation *kernel* is an
+orthogonal axis selected by ``method=`` -- an immutable
+``Interpolator`` record (``Linear`` (default), ``NearestNeighbour``,
+``Lanczos``, ``MultiLabel``).  See ``geometry._interpolate``.
 
 Plus ``center_of_mass_grid`` for weighted centre-of-mass on a
 regular grid (replaces the legacy ``cmass_regular_grid``).
@@ -31,15 +38,23 @@ Renamings from legacy code, for clarity:
 """
 from __future__ import annotations
 
-from functools import reduce
-from operator import mul
 from typing import Any, Callable, Literal, Optional, Sequence, Union, cast
 
 import jax
 import jax.numpy as jnp
-import jax.scipy.ndimage as jsp_ndi
 from jax.typing import DTypeLike
 from jaxtyping import Array, Float
+
+from ._interpolate import (
+    BoundaryMode,
+    Interpolator,
+    Lanczos,
+    Linear,
+    MultiLabel,
+    NearestNeighbour,
+    _resample_on_grid,
+    _sample_at_coords,
+)
 
 
 __all__ = [
@@ -51,6 +66,12 @@ __all__ = [
     'jacobian_det_displacement',
     'resample',
     'center_of_mass_grid',
+    # interpolation-method ADT (re-exported from ``._interpolate``)
+    'Interpolator',
+    'Linear',
+    'NearestNeighbour',
+    'Lanczos',
+    'MultiLabel',
     # legacy alias kept for now -- remove at v0.1 cleanup
     'cmass_regular_grid',
     'vec_int',
@@ -58,9 +79,9 @@ __all__ = [
 ]
 
 
-# Boundary modes accepted by ``spatial_transform``, ``resample``, and the
-# central-difference paths.  Names match ``jax.scipy.ndimage.map_coordinates``.
-BoundaryMode = Literal['constant', 'nearest', 'wrap', 'mirror', 'reflect']
+# ``BoundaryMode`` (the ``map_coordinates`` boundary-mode Literal) and the
+# ``Interpolator`` records are defined in ``._interpolate`` and imported
+# above; ``grid`` re-exports the records as part of its public surface.
 
 
 # ---------------------------------------------------------------------------
@@ -109,72 +130,22 @@ def identity_grid(
 # ---------------------------------------------------------------------------
 
 
-def _gather_coords_linear(
-    image: Float[Array, '*spatial c'],
-    coords: Float[Array, '*out_spatial ndim'],
-    *,
-    mode: BoundaryMode,
-    cval: float,
-) -> Float[Array, '*out_spatial c']:
-    '''Sample ``image`` at the given coordinates using linear interpolation.
-
-    Operates on the *unbatched* core shapes -- batch dims are
-    composed by callers via ``jax.vmap``.
-
-    ``coords[..., d]`` is the floating-point coordinate along axis
-    ``d`` to sample.  Out-of-bounds positions are handled according
-    to ``mode``:
-
-    - ``"constant"``: fill with ``cval``.
-    - ``"nearest"``: clamp to the input extent (edge replication --
-      the voxelmorph default for SVF integration).
-    - ``"wrap"`` / ``"mirror"`` / ``"reflect"``: periodic / mirror
-      / mirror-with-edge per ``jax.scipy.ndimage.map_coordinates``.
-    '''
-    ndim = coords.shape[-1]
-    # ``map_coordinates`` wants coords in shape ``(ndim, n_samples)``,
-    # one row per spatial axis of the input.  We have ``coords:
-    # (*out_spatial, ndim)`` -- move the ndim axis to the front,
-    # flatten the out_spatial dims.
-    # For multi-channel images, we vmap over the trailing channel axis.
-    coords_t = jnp.moveaxis(coords, -1, 0)          # (ndim, *out_spatial)
-    coords_flat = coords_t.reshape(ndim, -1)        # (ndim, N)
-
-    def sample_one_channel(
-        img_ch: Float[Array, '*spatial'],
-    ) -> Float[Array, 'n']:
-        # ``map_coordinates`` is typed to want a Sequence of per-axis
-        # coordinate arrays (and to return Any); the stacked ``(ndim, N)``
-        # array is accepted at runtime (jax iterates axis 0).  cast the arg
-        # to satisfy the checker and restore the result type.
-        return cast(
-            Float[Array, 'n'],
-            jsp_ndi.map_coordinates(
-                img_ch, cast(Sequence[Array], coords_flat),
-                order=1, mode=mode, cval=cval,
-            ),
-        )
-
-    sample_v = jax.vmap(sample_one_channel, in_axes=-1, out_axes=-1)
-    flat_out = sample_v(image)                       # (N, c)
-    out_spatial = coords.shape[:-1]
-    return flat_out.reshape(out_spatial + (image.shape[-1],))
-
-
 def spatial_transform(
     image: Float[Array, '*leading *spatial c'],
     deformation: Float[Array, '*leading *spatial ndim'],
     *,
     mode: BoundaryMode = 'constant',
     cval: float = 0.0,
+    method: Interpolator = Linear(),
 ) -> Float[Array, '*leading *spatial c']:
     '''Warp an image by a per-pixel deformation field.
 
     For each output pixel at coordinate ``p``, the result is
-    ``image`` sampled at ``deformation[p]`` via (multi-)linear
-    interpolation.  ``deformation`` is therefore an *absolute*
-    coordinate map, not a relative displacement.  To use a
-    displacement field ``delta``, add ``identity_grid`` first::
+    ``image`` sampled at ``deformation[p]`` via the interpolation
+    ``method`` ((multi-)linear by default).  ``deformation`` is
+    therefore an *absolute* coordinate map, not a relative
+    displacement.  To use a displacement field ``delta``, add
+    ``identity_grid`` first::
 
         warped = spatial_transform(image, identity_grid(spatial) + delta)
 
@@ -199,6 +170,13 @@ def spatial_transform(
     cval
         Constant fill value when ``mode="constant"``.  Ignored
         otherwise.  Default ``0``.
+    method
+        Interpolation kernel -- an ``Interpolator`` record.  Default
+        ``Linear()`` ((multi-)linear, the prior behaviour).
+        ``NearestNeighbour()`` is the label-preserving choice but is
+        not differentiable w.r.t. the deformation (so it cannot drive
+        a registration loss); see ``geometry._interpolate`` for the
+        full method set and their differentiability contracts.
 
     Returns
     -------
@@ -216,10 +194,9 @@ def spatial_transform(
     error-prone).  For a leading-batch convenience that broadcasts
     a shared image or deformation, see ``spatial_transform_batched``.
 
-    Sampling is **(multi-)linear only** (``order=1``, via
-    ``jax.scipy.ndimage.map_coordinates``); no cubic (``order=3``)
-    B-spline path exists.  See ``resample`` Notes for the parity
-    implication.
+    No cubic (``order=3``) B-spline path exists yet (tracked in
+    ``docs/feature-requests/cubic-resample.md``).  See ``resample``
+    Notes for the parity implication.
     '''
     ndim = deformation.shape[-1]
     # The image has one trailing channel dim plus ``ndim`` spatial
@@ -248,8 +225,8 @@ def spatial_transform(
         image_: Float[Array, '*spatial c'],
         deformation_: Float[Array, '*spatial ndim'],
     ) -> Float[Array, '*spatial c']:
-        return _gather_coords_linear(
-            image_, deformation_, mode=mode, cval=cval,
+        return _sample_at_coords(
+            image_, deformation_, method=method, mode=mode, cval=cval,
         )
 
     fn: Callable[..., Any] = core
@@ -267,6 +244,7 @@ def spatial_transform_batched(
     *,
     mode: BoundaryMode = 'constant',
     cval: float = 0.0,
+    method: Interpolator = Linear(),
 ) -> Float[Array, '...']:
     '''Map ``spatial_transform`` over a single leading batch axis.
 
@@ -294,7 +272,7 @@ def spatial_transform_batched(
         ``(*spatial, ndim)`` or ``(B, *spatial, ndim)``.  At least
         one of ``image`` / ``deformation`` must carry the leading
         batch axis.
-    mode, cval
+    mode, cval, method
         Forwarded to ``spatial_transform``.
 
     Returns
@@ -335,7 +313,9 @@ def spatial_transform_batched(
         image_: Float[Array, '*spatial c'],
         deformation_: Float[Array, '*spatial ndim'],
     ) -> Float[Array, '*spatial c']:
-        return spatial_transform(image_, deformation_, mode=mode, cval=cval)
+        return spatial_transform(
+            image_, deformation_, mode=mode, cval=cval, method=method,
+        )
 
     # ``jax.vmap`` erases the return type to Any (matching the
     # ``spatial_transform`` pattern above); restore it via cast.
@@ -442,14 +422,17 @@ def resample(
     *,
     mode: BoundaryMode = 'constant',
     cval: float = 0.0,
+    method: Interpolator = Linear(),
 ) -> Float[Array, '*target c']:
-    '''Resize a channel-last image to ``target_shape`` via linear interpolation.
+    '''Resize a channel-last image to ``target_shape``.
 
+    The common dispatcher over the available interpolation methods.
     Sample positions are evenly distributed: output pixel ``i`` along
     each axis samples the input at coordinate
     ``i * (in_size - 1) / (out_size - 1)``.  This matches scipy's
     ``align_corners=True`` convention and preserves the boundary
-    pixels exactly.
+    pixels exactly.  The interpolation *kernel* is selected by
+    ``method``; the align-corners grid above is the same regardless.
 
     Parameters
     ----------
@@ -467,6 +450,13 @@ def resample(
         + ``cval=0`` matches the prior contract.
     cval
         Constant fill value when ``mode="constant"``.  Default ``0``.
+    method
+        Interpolation kernel -- an ``Interpolator`` record.  Default
+        ``Linear()`` ((multi-)linear, the prior behaviour).
+        ``NearestNeighbour()`` preserves label values exactly (the
+        choice for integer segmentations when anti-aliasing is *not*
+        wanted).  See ``geometry._interpolate`` for the method set and
+        their differentiability contracts.
 
     Returns
     -------
@@ -474,16 +464,12 @@ def resample(
 
     Notes
     -----
-    Interpolation is **(multi-)linear only** (``order=1``).  This
-    wraps ``jax.scipy.ndimage.map_coordinates``, which supports only
-    ``order`` 0 (nearest) and 1 (linear); there is no cubic
-    (``order=3``) B-spline path.  This is a documented deviation
-    from resamplers that default to order-3 splines (e.g. nnUNet /
-    ``hd_bet`` preprocessing, ``scipy.ndimage.zoom(order=3)``): bit-
-    parity with those pipelines is **not** achieved here.  Linear is
-    adequate for most consumers; a separable B-spline prefilter +
-    cubic sampling is tracked as a future enhancement
-    (``docs/feature-requests/cubic-resample.md``).
+    No cubic (``order=3``) B-spline path exists yet, so bit-parity
+    with resamplers that default to order-3 splines (e.g. nnUNet /
+    ``hd_bet`` preprocessing, ``scipy.ndimage.zoom(order=3)``) is
+    **not** achieved; ``Linear`` is adequate for most consumers.  A
+    separable B-spline prefilter + cubic sampling is tracked as a
+    future enhancement (``docs/feature-requests/cubic-resample.md``).
     '''
     spatial_shape = image.shape[:-1]
     if len(target_shape) != len(spatial_shape):
@@ -491,7 +477,10 @@ def resample(
             f'target_shape={target_shape} must match spatial rank '
             f'of image (got image spatial shape {spatial_shape}).'
         )
-    # Build a coordinate grid for the target.
+    # Build the per-axis 1-D sample-coordinate vectors of the resize
+    # grid.  The grid is their outer product, so a separable kernel
+    # resamples it axis-by-axis (cheap 1-D passes) rather than over the
+    # dense meshgrid -- ``_resample_on_grid`` makes that choice.
     axes = []
     for in_size, out_size in zip(spatial_shape, target_shape):
         if out_size < 2:
@@ -501,9 +490,9 @@ def resample(
                 0.0, float(in_size - 1), int(out_size), dtype=image.dtype,
             )
         axes.append(ax)
-    grids = jnp.meshgrid(*axes, indexing='ij')
-    coords = jnp.stack(grids, axis=-1)  # (*target_shape, ndim)
-    return _gather_coords_linear(image, coords, mode=mode, cval=cval)
+    return _resample_on_grid(
+        image, axes, method=method, mode=mode, cval=cval,
+    )
 
 
 # ---------------------------------------------------------------------------

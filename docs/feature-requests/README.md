@@ -15,7 +15,10 @@ the shared framing + history and indexes its atomised items:
 | Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
 | SPEC §12 brainstorm catalogue | `SPEC_UPDATE_v0.3.md §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
 
-Status is verified against the live `src/nitrix` surface as of 2026-06-02.
+Status is verified against the live `src/nitrix` surface as of 2026-06-02
+(interpolation-method dispatcher — `Lanczos` / `MultiLabel` /
+`NearestNeighbour` on `resample` / `spatial_transform` — shipped 2026-06-07;
+see `IMPLEMENTATION_PLAN.md §10.3`).
 
 ## Consumer-pipeline substrate (ilex → thrux)
 
@@ -27,12 +30,12 @@ Context, scope boundary, and already-shipped record:
 | [connected-components](connected-components.md) | ENABLING (highest recurrence) | `morphology` |
 | [pad-to-multiple](pad-to-multiple.md) | ENABLING | `numerics` |
 | [crop-to-nonzero](crop-to-nonzero.md) | ENABLING | `numerics` |
-| [cubic-resample](cubic-resample.md) | MISMATCH (parity) | `geometry.grid` |
+| [cubic-resample](cubic-resample.md) | MISMATCH (parity) — **open**: dispatcher landed but no order-3 B-spline (2026-06-07) | `geometry._interpolate` |
 | [intensity-normalize-variants](intensity-normalize-variants.md) | CONVENIENCE | `numerics.normalize` |
 | [sliding-window-weighting](sliding-window-weighting.md) | CONVENIENCE | `numerics` |
-| [point-sample](point-sample.md) | CONVENIENCE | `geometry.grid` |
+| [point-sample](point-sample.md) | CONVENIENCE — **partial**: capability via `spatial_transform(method=Linear(), mode='constant')`; flat-point-list wrapper unshipped (2026-06-07) | `geometry.grid` |
 | [compute-vertex-normals](compute-vertex-normals.md) | CONVENIENCE | `sparse.mesh` |
-| [upsample-nearest-nd](upsample-nearest-nd.md) | CONVENIENCE | `numerics` / `geometry` |
+| [upsample-nearest-nd](upsample-nearest-nd.md) | CONVENIENCE — ✅ **addressed**: `resample(method=NearestNeighbour())` (2026-06-07) | `geometry` |
 | [spatial-transform-batched](spatial-transform-batched.md) | CONVENIENCE | `geometry.grid` |
 
 ## Internal engineering backlog
@@ -47,7 +50,7 @@ Ledger (framing, closed-by-design, resolved):
 | B4 | [edge-aggregate-log-euclidean](edge-aggregate-log-euclidean.md) | semiring coverage (canonical entry) |
 | B5 | [keops-genred-research](keops-genred-research.md) | research note |
 | B6 | [pallas-gaussian-blur](pallas-gaussian-blur.md) | Pallas kernel |
-| B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (cheap JAX interim win) |
+| B7 | [pallas-trilinear-resample](pallas-trilinear-resample.md) | Pallas kernel (interim JAX gather **shipped** 2026-06-07; kernel parked) |
 | B10 | [retune-pallas-log-matmul](retune-pallas-log-matmul.md) | kernel tuning (M) |
 | B11 | [perfbench-migration](perfbench-migration.md) | tooling migration (in progress) |
 | B12 | [iir-filter-gpu-backend](iir-filter-gpu-backend.md) | perf / API-default (IIR GPU backend, S+M) |
