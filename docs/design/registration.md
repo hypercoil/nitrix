@@ -169,11 +169,16 @@ stability/efficiency needs it).
   0.965→0.999, 3-D) with min ``det J > 0`` (no folding); identity +
   validation.  Still TODO: LNCC-driven / symmetric-forces variants;
   parity vs ANTs SyN / demons on real data.
-- **R3 — differentiable layer + polish.**  Implicit-diff (fixed-point)
-  wrapper making both registrators differentiable layers, with an
-  unrolled fallback; Ampere benchmarks; docs/tutorials; record the
-  §12.1 / §12.2 / §12.8 graduations in ``IMPLEMENTATION_PLAN §10.A`` and
-  flip the feature-request docs to *shipped*.
+- **R3 — differentiable layer + polish.** ✅ SHIPPED.
+  ``linalg.implicit_least_squares`` (IFT differentiation of an argmin
+  through the optimum -- GN-Hessian adjoint via ``cg``, O(1) memory),
+  the differentiable-layer entry point; the unrolled path is the
+  always-available alternative (both verified w.r.t. images).  §12.1 /
+  §12.2 / §12.8 graduations recorded in ``IMPLEMENTATION_PLAN §10.3`` and
+  the feature-request docs flipped to shipped.  ``bench/perf_registration.py``
+  (GPU-native rigid-SSD + Demons, fwd + grad); usage in §6.1.  *Deferred
+  upgrades:* ``matrix_log``; LNCC-driven / symmetric Demons; real-data
+  parity vs AFNI ``3dvolreg`` / FSL ``mcflirt`` / ANTs SyN.
 
 ## 5. Decisions on record (2026-06-08)
 
