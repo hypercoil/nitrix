@@ -47,7 +47,16 @@ from .matrix import (
     toeplitz_2d,
     vec2sym,
 )
+from .krylov import cg
+from .matrix_function import matrix_exp
+from .optimize import (
+    OptimizeResult,
+    gauss_newton,
+    implicit_least_squares,
+    levenberg_marquardt,
+)
 from .residual import residualise
+from .solve import cho_solve, solve
 from .spd import (
     cone_project_spd,
     mean_euclidean,
@@ -73,6 +82,17 @@ __all__ = [
     'vec2sym',
     # residual
     'residualise',
+    # solve
+    'solve',
+    'cho_solve',
+    'cg',
+    # matrix functions
+    'matrix_exp',
+    # optimisation (nonlinear least squares)
+    'gauss_newton',
+    'levenberg_marquardt',
+    'implicit_least_squares',
+    'OptimizeResult',
     # kernel
     'cosine_kernel',
     'gaussian_kernel',

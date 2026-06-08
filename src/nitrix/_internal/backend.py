@@ -148,7 +148,7 @@ def env_backend() -> Optional[Backend]:
         raise NitrixBackendError(
             f'NITRIX_BACKEND={value!r} not in {_VALID_BACKENDS!r}'
         )
-    return value  # type: ignore[return-value]
+    return value
 
 
 # ---------------------------------------------------------------------------

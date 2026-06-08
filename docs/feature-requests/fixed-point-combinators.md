@@ -1,9 +1,12 @@
 # Fixed-point combinators — `nitrix.numerics.fixed_point`
 
-> **Status (2026-06-02): not started — the scaling-and-squaring special
-> case exists (`integrate_velocity_field`); the general combinator does
-> not.** Brainstorm candidate; promotion gated by the §13 acceptance
-> protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.8`.
+> **Status (2026-06-08): SHIPPED** — `numerics.fixed_point_solve` (Picard
+> iteration with an implicit-VJP backward, the IFT adjoint solved as its own
+> fixed point; O(1) memory in the iteration count). Graduated by the
+> registration suite — backs `geometry.invert_displacement`
+> (`s_inv = -s∘(id + s_inv)`) — per the §13 protocol; see
+> `docs/design/registration.md` and `IMPLEMENTATION_PLAN.md §10.3`.
+> Provenance: `SPEC_UPDATE_v0.3.md §12.8`.
 
 **What.** A deep-equilibrium-style fixed-point solver with an implicit-VJP
 backward.

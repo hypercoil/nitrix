@@ -1,9 +1,12 @@
 # Iterative Krylov solvers — `nitrix.linalg.krylov`
 
-> **Status (2026-06-02): not started.** Brainstorm candidate, not a
-> commitment. Promotion is gated by the §13 acceptance protocol (a named,
-> blocked consumer + a verified substrate-composition sketch). Provenance:
-> `SPEC_UPDATE_v0.3.md §12.1`.
+> **Status (2026-06-08): partial — `cg` SHIPPED** (`linalg.cg` /
+> `linalg.krylov.cg`, matrix-free conjugate gradients for SPD systems, dense
+> or matvec, differentiable), graduated by the registration suite as the
+> wedge-resilient on-device solver for the GN/LM normal equations (see
+> `docs/design/registration.md` and `IMPLEMENTATION_PLAN.md §10.3`). Still
+> open: `minres` / `lsqr` / `bicgstab` (same template), gated by §13.
+> Provenance: `SPEC_UPDATE_v0.3.md §12.1`.
 
 **What.** Matrix-free iterative linear solvers, generalising the
 implicit-operator pattern already proven by the `laplacian_eigenmap`

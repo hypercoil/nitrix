@@ -46,13 +46,17 @@ from typing import Any, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
+from jax import lax
 from jaxtyping import Array, Float
 
 __all__ = [
     'safe_eigh',
     'safe_inv',
+    'safe_cho_solve',
+    'safe_solve',
     'eigh_device',
     'inv_device',
+    'cholesky_device',
     'solver_device',
     'device_of_concrete',
     'source_device',
@@ -254,3 +258,124 @@ def safe_inv(
     if source is not None and source != target:
         out = jax.device_put(out, source)
     return cast(Float[Array, '... n n'], out)
+
+
+# --- Cholesky / general solve (cuSolver ``potrf`` / ``getrf``) ---------
+#
+# On the affected stacks (this dev box's L4: the *entire* cuSolver handle
+# pool is dead -- ``eigh`` / ``cholesky`` / ``solve`` / ``inv`` / ``svd``
+# all fail; only ``triangular_solve`` (cuBLAS ``trsm``) and the
+# conv / elementwise surface work), the SPD and general dense solves used
+# by the registration Gauss-Newton / Levenberg-Marquardt step must route
+# to CPU exactly like ``eigh``.  Same probe + adaptive-latch pattern.
+
+_cholesky_cpu_latched = False
+
+
+def _latch_cholesky_cpu() -> None:
+    """Latch the Cholesky device to CPU after an observed cuSolver failure."""
+    global _cholesky_cpu_latched
+    _cholesky_cpu_latched = True
+    _probe_cholesky_device.cache_clear()
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_cholesky_device() -> jax.Device:
+    """One-shot 2x2 GPU Cholesky probe (cuSolver ``potrf``)."""
+    try:
+        probe = jnp.eye(2, dtype=jnp.float32)
+        out = jnp.linalg.cholesky(probe)
+        jax.block_until_ready(out)
+        return jax.devices()[0]
+    except Exception:
+        return _cpu_device()
+
+
+def cholesky_device() -> jax.Device:
+    """Pick a device where dense ``cholesky`` works (cuSolver ``potrf``).
+
+    Shares the broken-handle failure mode with ``eigh`` / ``inv``
+    (``solver_handle_pool``), so on an affected stack this routes to CPU --
+    adaptively, via the same call-time latch as ``safe_eigh``.
+    """
+    if _cholesky_cpu_latched:
+        return _cpu_device()
+    return _probe_cholesky_device()
+
+
+def _cho_solve_on(a: Array, b: Array, l2: float) -> Array:
+    """SPD solve ``(a + l2 I) x = b`` via Cholesky, co-located on a/b's device.
+
+    Only the factorisation hits cuSolver; ``triangular_solve`` (cuBLAS
+    ``trsm``) is unaffected, so we run the whole solve on one device to
+    avoid a cross-device factor / RHS.
+    """
+    n = a.shape[-1]
+    mat = a if l2 == 0.0 else a + l2 * jnp.eye(n, dtype=a.dtype)
+    chol = jnp.linalg.cholesky(mat)
+    is_vector = b.ndim == a.ndim - 1
+    rhs = b[..., None] if is_vector else b
+    z = lax.linalg.triangular_solve(
+        chol, rhs, left_side=True, lower=True, transpose_a=False
+    )
+    x = lax.linalg.triangular_solve(
+        chol, z, left_side=True, lower=True, transpose_a=True
+    )
+    return x[..., 0] if is_vector else x
+
+
+def safe_cho_solve(
+    a: Float[Array, '... n n'],
+    b: Float[Array, '...'],
+    *,
+    l2: float = 0.0,
+) -> Float[Array, '...']:
+    """SPD Cholesky solve ``(a + l2 I) x = b`` with the cuSolver-robust,
+    adaptive device pick.
+
+    Mirrors ``safe_eigh``: pins the factorisation to a device where
+    ``cholesky`` works (CPU on the affected stacks), forces a concrete GPU
+    call so a late cuSolver-handle failure latches to CPU and retries, then
+    moves the result back to the caller's device.  Grad / JIT-safe (under
+    trace the latched verdict routes the ``device_put`` without eager
+    forcing).
+    """
+    target = cholesky_device()
+    source = source_device((a, b))
+    try:
+        out = _cho_solve_on(
+            jax.device_put(a, target), jax.device_put(b, target), l2
+        )
+        if source is not None and target.platform != 'cpu':
+            jax.block_until_ready(out)
+    except Exception as exc:
+        if target.platform == 'cpu' or not _is_cusolver_failure(exc):
+            raise
+        _latch_cholesky_cpu()
+        target = _cpu_device()
+        out = _cho_solve_on(
+            jax.device_put(a, target), jax.device_put(b, target), l2
+        )
+    if source is not None and source != target:
+        out = jax.device_put(out, source)
+    return cast(Float[Array, '...'], out)
+
+
+def safe_solve(
+    a: Float[Array, '... n n'],
+    b: Float[Array, '...'],
+) -> Float[Array, '...']:
+    """``jnp.linalg.solve`` with the cuSolver-robust device pick.
+
+    Shares ``inv_device()``'s ``getrf`` probe (the general LU solve and
+    ``inv`` share the cuSolver handle pool).  Pins to a working device and
+    moves the result back when the input was concrete and elsewhere.
+    """
+    target = inv_device()
+    source = source_device((a, b))
+    out = jnp.linalg.solve(
+        jax.device_put(a, target), jax.device_put(b, target)
+    )
+    if source is not None and source != target:
+        out = jax.device_put(out, source)
+    return cast(Float[Array, '...'], out)

@@ -1,10 +1,13 @@
 # Matrix functions — `nitrix.linalg.matrix_function`
 
-> **Status (2026-06-02): partial — the eigendecomposition-reassembly
-> pattern is shipped (the `sym*` family); the general entry point and the
-> named specialisations below are not.** Brainstorm candidate; promotion
-> gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.2`.
+> **Status (2026-06-08): partial — `matrix_exp` SHIPPED** (`linalg.matrix_exp`,
+> general non-symmetric matrix exponential via pure-matmul Taylor
+> scaling-and-squaring — GPU-native, no cuSolver), graduated by the
+> registration suite (the affine generator; see `docs/design/registration.md`
+> and `IMPLEMENTATION_PLAN.md §10.3`). The `sym*` family was already shipped.
+> Still open: a general `matrix_function(A, fn)` entry point, `matrix_log`,
+> `matrix_polynomial`, `frechet_derivative`. Remaining items gated by the §13
+> acceptance protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.2`.
 
 **What.** A general `matrix_function(A, fn)` — apply `fn` to the
 eigenvalues of a symmetric `A`, reassemble — plus three named

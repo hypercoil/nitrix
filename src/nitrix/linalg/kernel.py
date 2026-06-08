@@ -52,7 +52,7 @@ What the legacy had that we drop:
 
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -227,12 +227,9 @@ def parameterised_norm(
             theta,
             X,
         )[..., None]
-    # ``n_sq`` may flow from ``jnp.einsum`` (typed Any); restore.
     if squared:
-        return cast(Float[Array, '...'], X / (n_sq + jnp.finfo(X.dtype).eps))
-    return cast(
-        Float[Array, '...'], X / (jnp.sqrt(n_sq) + jnp.finfo(X.dtype).eps)
-    )
+        return X / (n_sq + jnp.finfo(X.dtype).eps)
+    return X / (jnp.sqrt(n_sq) + jnp.finfo(X.dtype).eps)
 
 
 # ---------------------------------------------------------------------------

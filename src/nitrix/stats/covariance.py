@@ -260,11 +260,7 @@ def _corrnorm(A: Num[Array, '... c c']) -> Num[Array, '... c c']:
     """Normalisation matrix for ``corr``: ``sqrt(diag) outer sqrt(diag)``."""
     d = jnp.diagonal(A, axis1=-2, axis2=-1)
     fact = jnp.sqrt(d)[..., None]
-    # ``jnp.diagonal`` resolves to Any; restore the array type.
-    return cast(
-        Num[Array, '... c c'],
-        fact @ fact.swapaxes(-1, -2) + jnp.finfo(fact.dtype).eps,
-    )
+    return fact @ fact.swapaxes(-1, -2) + jnp.finfo(fact.dtype).eps
 
 
 def corr(
@@ -329,11 +325,7 @@ def pairedcorr(
     sigma_xx_diag = jnp.diagonal(cov(X, **kwargs), axis1=-2, axis2=-1)
     sigma_yy_diag = jnp.diagonal(cov(Y, **kwargs), axis1=-2, axis2=-1)
     norm = jnp.sqrt(sigma_xx_diag[..., :, None] * sigma_yy_diag[..., None, :])
-    # ``jnp.diagonal`` feeds Any into ``norm``; restore the array type.
-    return cast(
-        Num[Array, '... c d'],
-        sigma_xy / (norm + jnp.finfo(norm.dtype).eps),
-    )
+    return sigma_xy / (norm + jnp.finfo(norm.dtype).eps)
 
 
 # ---------------------------------------------------------------------------
@@ -398,8 +390,7 @@ def partialcorr(
     diag = jnp.abs(jnp.diagonal(omega, axis1=-2, axis2=-1))
     fact = jnp.sqrt(diag)[..., None]
     norm = fact @ fact.swapaxes(-1, -2) + jnp.finfo(fact.dtype).eps
-    # ``jnp.diagonal`` feeds Any into ``omega``/``norm``; restore.
-    return cast(Num[Array, '... c c'], omega / norm)
+    return omega / norm
 
 
 # ---------------------------------------------------------------------------
