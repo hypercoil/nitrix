@@ -37,9 +37,11 @@ from nitrix.stats import (
     cov,
     env_inst,
     envelope,
+    gaussian_nll,
     hilbert_transform,
     instantaneous_frequency,
     instantaneous_phase,
+    kl_diagonal_gaussian,
     pairedcov,
     partialcorr,
     pcorr,
@@ -372,3 +374,64 @@ def test_product_filtfilt_zero_phase():
     # Specifically, the imaginary part should be ~0 since the filter
     # itself is zero-phase.
     assert float(jnp.abs(out.imag).max()) < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# gaussian: KL divergence + negative log-likelihood
+# ---------------------------------------------------------------------------
+
+
+def test_kl_diagonal_gaussian_zero_at_standard_normal():
+    mean = jnp.zeros((4, 8))
+    log_var = jnp.zeros((4, 8))
+    kl = kl_diagonal_gaussian(mean, log_var, axis=-1, reduction='sum')
+    np.testing.assert_allclose(np.asarray(kl), 0.0, atol=1e-12)
+
+
+def test_kl_diagonal_gaussian_matches_closed_form():
+    rng = np.random.default_rng(0)
+    mean = rng.standard_normal((3, 5))
+    log_var = rng.standard_normal((3, 5)) * 0.5
+    ref = 0.5 * (mean**2 + np.exp(log_var) - 1.0 - log_var)
+    out = kl_diagonal_gaussian(
+        jnp.asarray(mean), jnp.asarray(log_var), reduction='none'
+    )
+    np.testing.assert_allclose(np.asarray(out), ref, atol=1e-10)
+
+
+def test_kl_diagonal_gaussian_nonnegative():
+    rng = np.random.default_rng(1)
+    mean = jnp.asarray(rng.standard_normal((10, 16)))
+    log_var = jnp.asarray(rng.standard_normal((10, 16)))
+    kl = kl_diagonal_gaussian(mean, log_var, axis=-1, reduction='sum')
+    assert float(kl.min()) >= -1e-9
+
+
+def test_kl_sum_axis_shape():
+    mean = jnp.zeros((6, 12))
+    log_var = jnp.zeros((6, 12))
+    per_sample = kl_diagonal_gaussian(mean, log_var, axis=-1, reduction='sum')
+    assert per_sample.shape == (6,)
+
+
+def test_gaussian_nll_matches_jax_norm_logpdf():
+    rng = np.random.default_rng(2)
+    x = jnp.asarray(rng.standard_normal((4, 7)))
+    mean = jnp.asarray(rng.standard_normal((4, 7)))
+    log_var = jnp.asarray(rng.standard_normal((4, 7)) * 0.3)
+    sigma = jnp.exp(0.5 * log_var)
+    ref = -jax.scipy.stats.norm.logpdf(x, loc=mean, scale=sigma)
+    out = gaussian_nll(x, mean, log_var, reduction='none')
+    np.testing.assert_allclose(np.asarray(out), np.asarray(ref), atol=1e-10)
+
+
+def test_gaussian_nll_differentiable():
+    rng = np.random.default_rng(3)
+    x = jnp.asarray(rng.standard_normal((5, 9)))
+    mean = jnp.asarray(rng.standard_normal((5, 9)))
+    log_var = jnp.asarray(rng.standard_normal((5, 9)) * 0.2)
+    g_mean, g_lv = jax.grad(
+        lambda m, lv: gaussian_nll(x, m, lv), argnums=(0, 1)
+    )(mean, log_var)
+    assert bool(jnp.all(jnp.isfinite(g_mean)))
+    assert bool(jnp.all(jnp.isfinite(g_lv)))

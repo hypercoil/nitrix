@@ -1,10 +1,13 @@
 # Diagonal-Gaussian KL / NLL — `nitrix.stats`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Loss-numeric item from
-> the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). Closed-form,
-> log-variance-parameterised Gaussian objectives; the careful
-> `exp(log_var)` form is what makes them worth a shared primitive.
+> **Status (2026-06-08): SHIPPED.** `stats/gaussian.py` adds
+> `kl_diagonal_gaussian` (`0.5·(μ² + e^{lv} − 1 − lv)`, default
+> `reduction='sum'`) and `gaussian_nll` (`0.5·(log2π + lv + (x−μ)²e^{−lv})`,
+> default `reduction='mean'`), both `axis`/`reduction`-parameterised and
+> log-variance-parameterised (positive variance without a clamp).
+> Validated against the closed form and `jax.scipy.stats.norm.logpdf`.
+> Loss-numeric item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** Two analytic diagonal-Gaussian quantities:
 

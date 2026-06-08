@@ -12,6 +12,8 @@ Two submodules:
 - ``fourier``    -- spectral utilities: product-filter,
   analytic-signal, Hilbert transform, instantaneous frequency /
   phase, envelope.
+- ``gaussian``   -- closed-form diagonal-Gaussian KL divergence and
+  negative log-likelihood (log-variance parameterised).
 
 This subpackage replaces ``nitrix.functional.covariance`` and
 ``nitrix.functional.fourier``.
@@ -42,6 +44,7 @@ from .fourier import (
     product_filter,
     product_filtfilt,
 )
+from .gaussian import gaussian_nll, kl_diagonal_gaussian
 
 __all__ = [
     # covariance
@@ -67,4 +70,7 @@ __all__ = [
     'instantaneous_phase',
     'product_filter',
     'product_filtfilt',
+    # gaussian
+    'kl_diagonal_gaussian',
+    'gaussian_nll',
 ]
