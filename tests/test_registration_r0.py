@@ -83,7 +83,9 @@ def test_cho_solve_matrix_rhs_and_ridge():
     b_np = np.array([[1.0, 0.0], [0.0, 1.0]])  # solve for the inverse
     a = jnp.asarray(a_np)
     b = jnp.asarray(b_np)
-    assert np.allclose(np.asarray(cho_solve(a, b)), np.linalg.inv(a_np), atol=1e-10)
+    assert np.allclose(
+        np.asarray(cho_solve(a, b)), np.linalg.inv(a_np), atol=1e-10
+    )
     # Ridge: (A + l2 I) x = b.
     l2 = 0.5
     ref = np.linalg.solve(a_np + l2 * np.eye(2), b_np)
@@ -212,14 +214,18 @@ def test_lncc_identical_and_misregistered():
 def test_joint_histogram_normalised_and_diagonal():
     rng = np.random.RandomState(0)
     x = jnp.asarray(rng.rand(40, 40))
-    p = joint_histogram(x, x, bins=16, range_moving=(0.0, 1.0), range_fixed=(0.0, 1.0))
+    p = joint_histogram(
+        x, x, bins=16, range_moving=(0.0, 1.0), range_fixed=(0.0, 1.0)
+    )
     assert float(p.sum()) == pytest.approx(1.0, abs=1e-6)
     p_np = np.asarray(p)
     # Identical images -> for each voxel lower_m == lower_f and the soft
     # weights coincide, so *all* mass lands in the tridiagonal band
     # |i - j| <= 1.  The exact diagonal carries E[(1-f)^2 + f^2] = 2/3
     # of it under linear (bilinear) Parzen binning.
-    band = np.where(np.abs(np.subtract.outer(np.arange(16), np.arange(16))) <= 1, p_np, 0.0)
+    band = np.where(
+        np.abs(np.subtract.outer(np.arange(16), np.arange(16))) <= 1, p_np, 0.0
+    )
     assert float(band.sum()) == pytest.approx(1.0, abs=1e-6)
     assert np.trace(p_np) == pytest.approx(2.0 / 3.0, abs=0.05)
 
@@ -241,13 +247,9 @@ def test_correlation_ratio_functional_vs_independent():
     x = jnp.asarray(rng.rand(64, 64))
     # y is a deterministic (non-affine) function of x -> high CR.
     y = jnp.sin(3.0 * x)
-    cr_func = float(
-        correlation_ratio(y, x, bins=32, range_fixed=(0.0, 1.0))
-    )
+    cr_func = float(correlation_ratio(y, x, bins=32, range_fixed=(0.0, 1.0)))
     z = jnp.asarray(np.random.RandomState(7).rand(64, 64))
-    cr_indep = float(
-        correlation_ratio(z, x, bins=32, range_fixed=(0.0, 1.0))
-    )
+    cr_indep = float(correlation_ratio(z, x, bins=32, range_fixed=(0.0, 1.0)))
     assert cr_func > 0.9
     assert cr_indep < 0.2
 
@@ -258,14 +260,14 @@ def test_metric_gradients_finite_difference(name):
     rng = np.random.RandomState(0)
     x = jnp.asarray(rng.rand(14, 14))
     y = jnp.asarray(np.random.RandomState(1).rand(14, 14))
-    if name == 'ssd':
-        f = lambda m: ssd(m, y)
-    elif name == 'lncc':
-        f = lambda m: lncc(m, y, radius=2)
-    elif name == 'mi':
-        f = lambda m: mutual_information(
+    metrics = {
+        'ssd': lambda m: ssd(m, y),
+        'lncc': lambda m: lncc(m, y, radius=2),
+        'mi': lambda m: mutual_information(
             m, y, bins=14, range_moving=(0.0, 1.0), range_fixed=(0.0, 1.0)
-        )
-    else:
-        f = lambda m: correlation_ratio(m, y, bins=14, range_fixed=(0.0, 1.0))
-    _fd_grad(f, x, eps=1e-5)
+        ),
+        'cr': lambda m: correlation_ratio(
+            m, y, bins=14, range_fixed=(0.0, 1.0)
+        ),
+    }
+    _fd_grad(metrics[name], x, eps=1e-5)

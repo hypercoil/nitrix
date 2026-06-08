@@ -19,7 +19,11 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 
-from nitrix.geometry import affine_grid, rigid_exp, spatial_transform  # noqa: E402
+from nitrix.geometry import (  # noqa: E402
+    affine_grid,
+    rigid_exp,
+    spatial_transform,
+)
 from nitrix.linalg import (  # noqa: E402
     implicit_least_squares,
     levenberg_marquardt,

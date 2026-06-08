@@ -19,7 +19,6 @@ jax.config.update('jax_enable_x64', True)
 
 import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
-import pytest  # noqa: E402
 import scipy.linalg as sla  # noqa: E402
 
 from nitrix.geometry import (  # noqa: E402
