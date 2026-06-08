@@ -30,6 +30,17 @@ def implicit_midpoint(f, y0, t): ...
 advection-diffusion forward models for deformable registration,
 Hamiltonian-Monte-Carlo posterior samplers for fMRI.
 
+**Concrete consumer (2026-06-08 ilex audit).** `cortex_ode` and `surfnet`
+are **per-vertex neural-ODE** surface models: they integrate
+`dx/dt = f(t, x, args)` over a vertex set. Today they use `diffrax`
+(`ilex/nimox/modules/ode.py:107` `integrate_vertex_flow`) — which **cannot
+follow into nitrix** (off the allowlist; SPEC §5.2). This is the demand
+signal for a pure-`jax.lax.scan` fixed-step `rk4`/`euler` (and adaptive
+`dormand_prince`) under `nitrix.numerics.ode`: the nimox `SurfaceNeuralODE`
+module would then call the nitrix integrator instead of diffrax. Note this is
+distinct from `integrate_velocity_field` (a *stationary voxel-grid* SVF via
+scaling-and-squaring); the surface NODE is a *general per-vertex* flow.
+
 **Effort.** L.
 
 **Live-code status.** `geometry.integrate_velocity_field` (the

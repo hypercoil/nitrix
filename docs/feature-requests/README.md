@@ -11,6 +11,7 @@ the shared framing + history and indexes its atomised items:
 | Family | Context/ledger doc | What it is |
 |---|---|---|
 | Consumer-pipeline substrate | [`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md) | Kernels a named downstream (ilex → thrux) is blocked or workaround-laden without |
+| Consumer training-substrate | [`ilex-training-substrate.md`](ilex-training-substrate.md) | Augmentation / loss / model numerics ilex grew after 2026-06-02 (2026-06-08 audit) |
 | Internal engineering backlog | [`internal-backlog.md`](internal-backlog.md) | Parked perf / Pallas / API-refinement items, each gated on a **Trigger** |
 | Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
 | SPEC §12 brainstorm catalogue | `SPEC_UPDATE_v0.3.md §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
@@ -38,6 +39,36 @@ Context, scope boundary, and already-shipped record:
 | [compute-vertex-normals](compute-vertex-normals.md) | CONVENIENCE | `sparse.mesh` |
 | [upsample-nearest-nd](upsample-nearest-nd.md) | CONVENIENCE — ✅ **addressed**: `resample(method=NearestNeighbour())` (2026-06-07) | `geometry` |
 | [spatial-transform-batched](spatial-transform-batched.md) | CONVENIENCE | `geometry.grid` |
+
+## Consumer training-substrate (ilex → nitrix)
+
+Context, boundary (post bitsjax–thrux–nitrix realignment), negative record,
+and index: [`ilex-training-substrate.md`](ilex-training-substrate.md). From
+the 2026-06-08 audit of the surfaces ilex grew **after** the 2026-06-02
+survey — augmentation pipelines, the nimox loss library, and the numerics of
+the nimox modules + newest models (`krakencoder`, `cortex_ode`, `surfnet`).
+
+| Doc | Severity | Home |
+|---|---|---|
+| [lab2im-gmm-synthesis](lab2im-gmm-synthesis.md) | ENABLING | `augment` |
+| [generative-bias-field](generative-bias-field.md) (simulated INU) | ENABLING | `augment` / `bias` |
+| [intensity-augmentation-ops](intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
+| [geometric-augmentation-ops](geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
+| [dice-loss](dice-loss.md) | ENABLING | `metrics.dice` |
+| [cross-entropy-focal](cross-entropy-focal.md) | CONVENIENCE (dedup ×3) | `metrics` |
+| [contrastive-ssl-losses](contrastive-ssl-losses.md) | CONVENIENCE | `metrics` / `stats` |
+| [field-regularisers](field-regularisers.md) | ENABLING | `register.regulariser` |
+| [gaussian-kl-nll](gaussian-kl-nll.md) | CONVENIENCE | `stats` |
+| [affine-matrix-algebra](affine-matrix-algebra.md) | ENABLING | `geometry.transform` |
+| [pca-svd](pca-svd.md) | CONVENIENCE | `stats.pca` |
+| [lp-normalize](lp-normalize.md) | CONVENIENCE | `numerics.normalize` |
+| [mesh-laplacian-smoothing](mesh-laplacian-smoothing.md) | CONVENIENCE | `geometry.mesh` |
+
+Expansions to existing docs (new drivers / scope from this audit):
+[compute-vertex-normals](compute-vertex-normals.md) (+`cortex_ode`/`surfnet`),
+[point-sample](point-sample.md) (arbitrary-point `grid_sample`; 3 dups; task
+#138), [ode-integrators](ode-integrators.md) (per-vertex NODE; diffrax can't
+follow into nitrix).
 
 ## Internal engineering backlog
 
