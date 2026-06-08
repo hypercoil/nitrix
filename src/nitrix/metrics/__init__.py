@@ -18,6 +18,10 @@ families:
 - ``overlap`` -- ``dice`` and ``jaccard`` (IoU), the soft
   region-overlap coefficients (segmentation similarities / losses on
   probabilistic masks).
+- ``classification`` -- ``bce_with_logits``,
+  ``cross_entropy_with_logits``, ``focal_loss``: the cross-entropy
+  family (numerically stable from-logits forms) for supervised
+  classification / segmentation.
 
 Substrate-composition note (SPEC_UPDATE_v0.3 §0 invariant): ``lncc``'s
 local sums are a separable box filter (the ``_internal.separable``
@@ -34,6 +38,11 @@ from .information import (
     mutual_information,
 )
 from .overlap import dice, jaccard
+from .classification import (
+    bce_with_logits,
+    cross_entropy_with_logits,
+    focal_loss,
+)
 
 __all__ = [
     # intensity
@@ -47,4 +56,8 @@ __all__ = [
     # overlap
     'dice',
     'jaccard',
+    # classification
+    'bce_with_logits',
+    'cross_entropy_with_logits',
+    'focal_loss',
 ]

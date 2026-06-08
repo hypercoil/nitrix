@@ -9,7 +9,13 @@ import numpy as np
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.metrics import dice, jaccard
+from nitrix.metrics import (
+    bce_with_logits,
+    cross_entropy_with_logits,
+    dice,
+    focal_loss,
+    jaccard,
+)
 
 # ---------------------------------------------------------------------------
 # dice / jaccard
@@ -102,4 +108,74 @@ def test_dice_jaccard_differentiable():
 
     g = jax.grad(loss)(logits)
     assert g.shape == logits.shape
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# bce_with_logits / cross_entropy_with_logits / focal_loss
+# ---------------------------------------------------------------------------
+
+
+def test_bce_with_logits_matches_naive_reference():
+    rng = np.random.default_rng(0)
+    x = jnp.asarray(rng.standard_normal((6, 5)))
+    t = jnp.asarray((rng.random((6, 5)) > 0.5).astype(float))
+    sig = jax.nn.sigmoid(x)
+    ref = -(t * jnp.log(sig) + (1 - t) * jnp.log(1 - sig))
+    out = bce_with_logits(x, t, reduction='none')
+    np.testing.assert_allclose(np.asarray(out), np.asarray(ref), atol=1e-9)
+
+
+def test_bce_with_logits_stable_at_large_magnitude():
+    # Naive log(sigmoid) overflows here; the stable form stays finite.
+    x = jnp.asarray([-1e3, 1e3, 1e3, -1e3])
+    t = jnp.asarray([0.0, 1.0, 0.0, 1.0])
+    out = bce_with_logits(x, t, reduction='none')
+    assert bool(jnp.all(jnp.isfinite(out)))
+    # Correct predictions -> ~0 loss; wrong -> ~|x|.
+    np.testing.assert_allclose(np.asarray(out)[:2], 0.0, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(out)[2:], 1e3, rtol=1e-6)
+
+
+def test_cross_entropy_uniform_logits_is_log_C():
+    logits = jnp.zeros((4, 7, 3))  # (batch, class, spatial)
+    target = jnp.zeros((4, 3), dtype=jnp.int32)
+    ce = cross_entropy_with_logits(logits, target, axis=1)
+    np.testing.assert_allclose(float(ce), np.log(7.0), atol=1e-6)
+
+
+def test_cross_entropy_matches_gather_reference():
+    rng = np.random.default_rng(1)
+    logits = jnp.asarray(rng.standard_normal((5, 4)))  # (batch, class)
+    target = jnp.asarray(rng.integers(0, 4, size=(5,)))
+    out = cross_entropy_with_logits(logits, target, axis=1, reduction='none')
+    logp = np.asarray(jax.nn.log_softmax(logits, axis=1))
+    ref = -logp[np.arange(5), np.asarray(target)]
+    np.testing.assert_allclose(np.asarray(out), ref, atol=1e-9)
+
+
+def test_focal_gamma0_no_alpha_equals_bce():
+    rng = np.random.default_rng(2)
+    x = jnp.asarray(rng.standard_normal((4, 6)))
+    t = jnp.asarray((rng.random((4, 6)) > 0.5).astype(float))
+    f = focal_loss(x, t, gamma=0.0, alpha=-1.0, reduction='none')
+    b = bce_with_logits(x, t, reduction='none')
+    np.testing.assert_allclose(np.asarray(f), np.asarray(b), atol=1e-9)
+
+
+def test_focal_downweights_easy_examples():
+    # A confidently-correct example contributes far less under focal.
+    x = jnp.asarray([6.0])
+    t = jnp.asarray([1.0])
+    f = float(focal_loss(x, t, gamma=2.0, alpha=-1.0, reduction='sum'))
+    b = float(bce_with_logits(x, t, reduction='sum'))
+    assert f < 0.05 * b
+
+
+def test_focal_loss_differentiable():
+    rng = np.random.default_rng(3)
+    x = jnp.asarray(rng.standard_normal((3, 8)))
+    t = jnp.asarray((rng.random((3, 8)) > 0.5).astype(float))
+    g = jax.grad(lambda z: focal_loss(z, t))(x)
+    assert g.shape == x.shape
     assert bool(jnp.all(jnp.isfinite(g)))
