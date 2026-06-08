@@ -1,9 +1,15 @@
 # Soft / binary Dice — `nitrix.metrics.dice`
 
-> **Status (2026-06-08): not started — ENABLING.** Loss-numeric item from the
-> 2026-06-08 ilex audit
+> **Status (2026-06-08): SHIPPED.** `nitrix.metrics.dice` (soft
+> Sørensen–Dice coefficient) added in `metrics/overlap.py`, plus
+> `nitrix.metrics.jaccard` (soft Jaccard / IoU) as the complementary
+> overlap metric (`jaccard = dice / (2 - dice)`). Both return the
+> *coefficient* (loss = `1 - metric`), operate on soft masks
+> (activation-free → pure / GPU-safe), and take `axis` (per-region) +
+> Laplace `smooth` (num+denom, so empty-vs-empty = 1) + `reduction`.
+> Loss-numeric item from the 2026-06-08 ilex audit
 > ([`ilex-training-substrate.md`](ilex-training-substrate.md)). The single
-> major segmentation-overlap metric absent from `nitrix.metrics` (which has
+> major segmentation-overlap metric absent from `nitrix.metrics` (which had
 > `ssd`/`ncc`/`lncc` + `mutual_information`/`correlation_ratio`).
 
 **What.** Soft Dice overlap loss `1 − 2·Σ(p·t) / (Σp + Σt + eps)`, reducing

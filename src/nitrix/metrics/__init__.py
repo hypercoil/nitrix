@@ -15,6 +15,9 @@ families:
 - ``information`` -- ``joint_histogram``, ``mutual_information`` (and
   normalised MI), ``correlation_ratio``.  Cross-modal; assume only a
   functional (MI: arbitrary; CR: deterministic) intensity relationship.
+- ``overlap`` -- ``dice`` and ``jaccard`` (IoU), the soft
+  region-overlap coefficients (segmentation similarities / losses on
+  probabilistic masks).
 
 Substrate-composition note (SPEC_UPDATE_v0.3 §0 invariant): ``lncc``'s
 local sums are a separable box filter (the ``_internal.separable``
@@ -30,6 +33,7 @@ from .information import (
     joint_histogram,
     mutual_information,
 )
+from .overlap import dice, jaccard
 
 __all__ = [
     # intensity
@@ -40,4 +44,7 @@ __all__ = [
     'joint_histogram',
     'mutual_information',
     'correlation_ratio',
+    # overlap
+    'dice',
+    'jaccard',
 ]
