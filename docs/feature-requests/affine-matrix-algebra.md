@@ -1,11 +1,16 @@
-# Affine matrix algebra (geometric convention) — `nitrix.geometry.transform`
+# Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 
-> **Status (2026-06-08): not started — ENABLING.** Model-numeric item from
-> the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). The source
-> file (`ilex/nimox/modules/affine.py`) is **already pure numerics** — no
-> equinox, every symbol `(Array,…)->Array` — and its own docstring names
-> "Long-term home: nitrix". A clean, high-value, low-risk lift.
+> **Status (2026-06-08): SHIPPED.** Ported to `geometry/affine.py` (sibling
+> of the Lie-algebra `geometry/transform.py`): `params_to_affine_matrix` /
+> `affine_matrix_to_params` (Euler/scale/shear `T@R@S@E`),
+> `angles_to_rotation_matrix` / `rotation_matrix_to_angles`, `fit_affine`
+> (closed-form weighted LS), `make_square_affine` / `invert_affine` /
+> `compose_affine`. The cuSolver-dead ops are routed for GPU: `inv`→
+> `safe_inv`, normal-equations solve→`safe_cho_solve`, `cholesky`→a new
+> `linalg._solver.safe_cholesky`, and the 3×3 `det` + diagonal inverse are
+> analytic (GPU-native). All batched, differentiable, round-trip tested on
+> GPU. Model-numeric item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** The decompositional affine algebra in the **Euler-angle /
 scale / shear** convention (SynthMorph / VoxelMorph / lab2im), complementary

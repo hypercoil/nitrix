@@ -52,6 +52,7 @@ from jaxtyping import Array, Float
 __all__ = [
     'safe_eigh',
     'safe_inv',
+    'safe_cholesky',
     'safe_cho_solve',
     'safe_solve',
     'eigh_device',
@@ -322,6 +323,36 @@ def _cho_solve_on(a: Array, b: Array, l2: float) -> Array:
         chol, z, left_side=True, lower=True, transpose_a=True
     )
     return x[..., 0] if is_vector else x
+
+
+def safe_cholesky(
+    A: Float[Array, '... n n'],
+) -> Float[Array, '... n n']:
+    """``jnp.linalg.cholesky`` with the cuSolver-robust, adaptive device pick.
+
+    Mirrors ``safe_eigh`` for the Cholesky factor itself (cuSolver
+    ``potrf``): pins the factorisation to a device where it works (CPU on
+    the affected stacks), forces a concrete GPU call so a late
+    cuSolver-handle failure latches to CPU and retries, then moves the
+    lower-triangular factor back to the caller's device.  ``A`` must be
+    symmetric positive-definite; we do not symmetrise or regularise.
+    """
+    target = cholesky_device()
+    source = device_of_concrete(A)
+    A_dev = jax.device_put(A, target)
+    try:
+        lower = jnp.linalg.cholesky(A_dev)
+        if source is not None and target.platform != 'cpu':
+            jax.block_until_ready(lower)
+    except Exception as exc:
+        if target.platform == 'cpu' or not _is_cusolver_failure(exc):
+            raise
+        _latch_cholesky_cpu()
+        target = _cpu_device()
+        lower = jnp.linalg.cholesky(jax.device_put(A, target))
+    if source is not None and source != target:
+        lower = jax.device_put(lower, source)
+    return cast(Float[Array, '... n n'], lower)
 
 
 def safe_cho_solve(
