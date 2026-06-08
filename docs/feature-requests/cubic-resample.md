@@ -21,8 +21,11 @@ prefilter a cubic basis only *approximates* (blurs); with it the result
 passes through the samples (the interpolation property). Differentiable in
 values and coordinates. The prefilter forces the **mirror** boundary (both
 prefilter and gather) so it stays self-consistent; it ignores the `mode` /
-`cval` call args (a mode-aware prefilter for `nearest`/`reflect`/… parity is
-the one remaining follow-up — see `boundary-mode-parity.md`).
+`cval` call args, and **announces** that override with a
+`CubicBSplineBoundaryWarning` when a non-mirror `mode` / non-zero `cval` is
+explicitly supplied (the bare default is silent). A mode-aware prefilter for
+`nearest`/`reflect`/… parity is the one remaining follow-up — see
+`boundary-mode-parity.md`.
 
 **Engine note.** The prefilter is a first-order linear recurrence: sequential
 `lax.scan` on CPU, parallel `lax.associative_scan` (O(log N) depth) on GPU —

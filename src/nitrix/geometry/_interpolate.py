@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import warnings
 from dataclasses import dataclass
 from typing import (
     Callable,
@@ -116,6 +117,7 @@ __all__ = [
     'NearestNeighbour',
     'Lanczos',
     'CubicBSpline',
+    'CubicBSplineBoundaryWarning',
     'MultiLabel',
 ]
 
@@ -766,6 +768,32 @@ class Lanczos:
         )
 
 
+class CubicBSplineBoundaryWarning(UserWarning):
+    '''Emitted when ``CubicBSpline`` is given a boundary it cannot honour.
+
+    ``CubicBSpline`` always uses the mirror boundary (the only one its
+    prefilter implements), so an explicit non-mirror ``mode`` -- or a
+    non-zero ``cval`` -- is ignored.  Per the "loud fallbacks" tenet
+    (SPEC_UPDATE 2.7) that override is announced rather than silent.  Pass
+    ``mode='mirror'`` (or leave ``mode`` at its default) to silence it, or
+    filter this category.  The default ``mode='constant'`` with ``cval=0``
+    is treated as "unspecified" and does *not* warn.
+    '''
+
+
+def _warn_cubic_boundary_ignored(mode: BoundaryMode, cval: float) -> None:
+    '''Announce a CubicBSpline boundary override (deduped by ``warnings``).'''
+    if mode not in ('mirror', 'constant') or cval != 0.0:
+        warnings.warn(
+            f'CubicBSpline always uses the mirror boundary; the supplied '
+            f'mode={mode!r} / cval={cval!r} is ignored.  Pass mode="mirror" '
+            f'to silence this (a mode-aware B-spline prefilter is a planned '
+            f'extension).',
+            category=CubicBSplineBoundaryWarning,
+            stacklevel=3,
+        )
+
+
 @dataclass(frozen=True)
 class CubicBSpline:
     '''Cubic (order-3) B-spline interpolation -- ``scipy.ndimage`` ``order=3``.
@@ -806,6 +834,11 @@ class CubicBSpline:
     mode='mirror')``.  A mode-aware prefilter (matching ``scipy`` for
     ``nearest`` / ``reflect`` / ... ) is a future extension (cf.
     ``docs/feature-requests/boundary-mode-parity.md``).
+
+    Per the "loud fallbacks" tenet, the override is **announced**: an
+    explicit non-mirror ``mode`` (or a non-zero ``cval``) raises a
+    :class:`CubicBSplineBoundaryWarning` (the bare default
+    ``mode='constant', cval=0`` is treated as unspecified and is silent).
     '''
 
     differentiable_in_values: ClassVar[bool] = True
@@ -845,8 +878,9 @@ class CubicBSpline:
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
         # mode / cval are ignored: a B-spline forces the mirror boundary on
-        # both the prefilter and the gather (see the class docstring).
-        del mode, cval
+        # both the prefilter and the gather (see the class docstring).  The
+        # override is announced, not silent.
+        _warn_cubic_boundary_ignored(mode, cval)
         coeffs = self._prepare(image, 'mirror')
         return _separable_gather(
             coeffs, coords,
@@ -1003,6 +1037,8 @@ def _resample_on_grid(
         # forces the mirror boundary on both prefilter and gather (it
         # ignores ``mode`` / ``cval``; see ``CubicBSpline``).
         is_bspline = isinstance(method, CubicBSpline)
+        if is_bspline:
+            _warn_cubic_boundary_ignored(mode, cval)
         prepared = method._prepare(image, 'mirror' if is_bspline else mode)
         return _separable_resample(
             prepared, axes_coords,

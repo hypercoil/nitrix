@@ -1257,7 +1257,10 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   boundary, ~1e-15. To stay self-consistent (the interpolation property
   only holds when prefilter and gather share a boundary, and only the
   mirror init is implemented) it **forces the mirror boundary and ignores
-  `mode` / `cval`** (the `MultiLabel`-ignores-`cval` precedent); a
+  `mode` / `cval`** (the `MultiLabel`-ignores-`cval` precedent) -- but, per
+  the loud-fallbacks tenet, **announces** the override with a
+  `CubicBSplineBoundaryWarning` when an explicit non-mirror `mode` /
+  non-zero `cval` is supplied (the bare default stays silent).  A
   mode-aware prefilter for `nearest`/`reflect` parity is the one remaining
   follow-up (`boundary-mode-parity.md`).
 - **Engine:** the prefilter is a first-order linear recurrence → sequential

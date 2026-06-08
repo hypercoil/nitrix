@@ -347,8 +347,12 @@ To stay self-consistent, ``CubicBSpline`` forces the **mirror** boundary
 on *both* the prefilter and the gather, and ignores the ``mode`` /
 ``cval`` call arguments (the interpolation property only holds when the
 two boundaries match, and only the mirror initialisation is implemented).
-A mode-aware prefilter -- ``scipy`` parity for ``nearest`` / ``reflect`` /
-… -- is the one remaining follow-up (``boundary-mode-parity.md``).
+Per the "loud fallbacks" tenet that override is **announced** -- an
+explicit non-mirror ``mode`` (or non-zero ``cval``) raises a
+``CubicBSplineBoundaryWarning`` (the bare default ``mode='constant',
+cval=0`` is treated as unspecified and stays silent).  A mode-aware
+prefilter -- ``scipy`` parity for ``nearest`` / ``reflect`` / … -- is the
+one remaining follow-up (``boundary-mode-parity.md``).
 
 ### The explicit separable gather (and where it runs)
 

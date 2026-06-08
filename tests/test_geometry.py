@@ -24,6 +24,8 @@ rather than the legacy ``O(N²)`` all-pairs implementation.
 """
 from __future__ import annotations
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -31,6 +33,7 @@ import pytest
 
 from nitrix.geometry import (
     CubicBSpline,
+    CubicBSplineBoundaryWarning,
     Interpolator,
     Lanczos,
     Linear,
@@ -859,8 +862,40 @@ def test_cubic_bspline_ignores_mode():
     img = jax.random.normal(jax.random.key(34), (8, 8, 1))
     base = resample(img, (12, 12), method=CubicBSpline(), mode='mirror')
     for mode in ('constant', 'nearest', 'wrap', 'reflect'):
-        other = resample(img, (12, 12), method=CubicBSpline(), mode=mode)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            other = resample(img, (12, 12), method=CubicBSpline(), mode=mode)
         np.testing.assert_array_equal(other, base)
+
+
+def test_cubic_bspline_warns_loudly_on_overridden_boundary():
+    '''The mirror-force is loud: an explicit non-mirror mode / cval warns.
+
+    The bare default (``mode='constant', cval=0`` -- "unspecified") and an
+    explicit ``mode='mirror'`` are silent; an explicit ``nearest`` / ``wrap``
+    / ``reflect`` or a non-zero ``cval`` raises ``CubicBSplineBoundaryWarning``
+    on both the ``resample`` and ``spatial_transform`` paths.
+    '''
+    img = jax.random.normal(jax.random.key(37), (8, 8, 1))
+    grid = identity_grid((8, 8))
+
+    # Silent cases.
+    for call in (
+        lambda: resample(img, (10, 10), method=CubicBSpline()),
+        lambda: resample(img, (10, 10), method=CubicBSpline(), mode='mirror'),
+        lambda: spatial_transform(img, grid, method=CubicBSpline()),
+    ):
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', CubicBSplineBoundaryWarning)
+            call()  # must not raise
+
+    # Loud cases (resample + spatial_transform; mode and cval).
+    with pytest.warns(CubicBSplineBoundaryWarning):
+        resample(img, (10, 10), method=CubicBSpline(), mode='nearest')
+    with pytest.warns(CubicBSplineBoundaryWarning):
+        resample(img, (10, 10), method=CubicBSpline(), cval=5.0)
+    with pytest.warns(CubicBSplineBoundaryWarning):
+        spatial_transform(img, grid, method=CubicBSpline(), mode='wrap')
 
 
 def test_cubic_bspline_differentiable():
