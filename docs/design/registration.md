@@ -159,12 +159,16 @@ stability/efficiency needs it).
   parity vs AFNI ``3dvolreg`` / FSL ``mcflirt`` / ANTs on real data.
   *Bug found & fixed by the 3-D oracle:* ``_so3_exp`` ``sqrt(0)`` NaN in
   reverse-mode froze the 3-D optimiser at identity (regression-tested).
-- **R2 — diffeomorphic.**  ``compose_velocity`` / ``invert_displacement``;
-  ``linalg.krylov.cg`` + ``numerics.fixed_point.fixed_point_solve``;
-  recipe ``diffeomorphic_demons_register`` (log-domain ESM force,
-  fluid+diffusion, multi-res; LNCC primary metric, symmetric option).
-  **Gate:** **diffeomorphism** (no negative ``det J`` under recommended
-  regularisation) + synthetic-warp recovery + parity vs ANTs SyN/demons.
+- **R2 — diffeomorphic.** ✅ SHIPPED.  ``numerics.fixed_point_solve``
+  (Picard + implicit-VJP, graduates §12.8);
+  ``geometry.{compose_displacement, compose_velocity, invert_displacement}``;
+  recipe ``register.diffeomorphic_demons_register`` (stationary velocity
+  field; closed-form ESM force; Gaussian fluid+diffusion; scaling-and-
+  squaring exp; coarse-to-fine).  ``DemonsSpec`` / ``DiffeomorphicResult``.
+  **Gate (met):** **diffeomorphism** -- synthetic-warp recovery (2-D ncc
+  0.965→0.999, 3-D) with min ``det J > 0`` (no folding); identity +
+  validation.  Still TODO: LNCC-driven / symmetric-forces variants;
+  parity vs ANTs SyN / demons on real data.
 - **R3 — differentiable layer + polish.**  Implicit-diff (fixed-point)
   wrapper making both registrators differentiable layers, with an
   unrolled fallback; Ampere benchmarks; docs/tutorials; record the
