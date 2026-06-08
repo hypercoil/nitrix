@@ -24,6 +24,9 @@ Top-level subpackages (full surface in each ``__init__.py``):
 - ``metrics``  -- differentiable image-similarity metrics (ssd, ncc,
                   lncc, mutual_information, correlation_ratio) for the
                   registration recipes and segmentation / QA losses.
+- ``register`` -- pairwise registration recipes (rigid_register,
+                  affine_register) composing the geometry / metrics /
+                  optimise substrate; NamedTuple outputs.
 - ``bias``     -- N4 (Tustison) bias-field correction, plus the
                   B-spline scattered-data approximator and N3/N4
                   histogram-sharpening primitives it is built from.

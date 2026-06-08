@@ -202,6 +202,24 @@ def test_rigid_exp_differentiable():
     _fd_grad_scalar(f, 0.7)
 
 
+def test_rigid_exp_3d_reverse_grad_finite_at_zero():
+    # Regression: reverse-mode grad of the 3-D rotation at ω = 0 was NaN
+    # (sqrt'(0) = inf poisoning the unselected ``where`` branch), which
+    # silently froze the 3-D optimiser at identity.  Both modes must be
+    # finite, and the rotation gradient must be non-zero.
+    def f(params):
+        return rigid_exp(params, ndim=3).sum()
+
+    g_rev = np.asarray(jax.grad(f)(jnp.zeros(6)))
+    g_fwd = np.asarray(jax.jacfwd(f)(jnp.zeros(6)))
+    assert np.all(np.isfinite(g_rev))
+    assert np.all(np.isfinite(g_fwd))
+    # a generic non-zero direction has non-zero rotation sensitivity
+    p = jnp.asarray([0.1, -0.2, 0.15, 0.0, 0.0, 0.0])
+    g = np.asarray(jax.grad(lambda q: rigid_exp(q, ndim=3).sum())(p))
+    assert np.any(np.abs(g[:3]) > 1e-6)
+
+
 # ---------------------------------------------------------------------------
 # geometry.transform — affine
 # ---------------------------------------------------------------------------

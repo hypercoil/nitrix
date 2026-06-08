@@ -64,16 +64,21 @@ def _skew3(omega: Float[Array, '... 3']) -> Float[Array, '... 3 3']:
 
 
 def _so3_exp(omega: Float[Array, '... 3']) -> Float[Array, '... 3 3']:
-    """Rodrigues' rotation: ``exp([ω]_×)``, small-angle safe."""
+    """Rodrigues' rotation: ``exp([ω]_×)``, small-angle safe.
+
+    The ``sqrt`` is taken on a guarded ``theta2`` (1.0 inside the
+    small-angle region) so its derivative is finite at ``ω = 0``;
+    otherwise ``sqrt'(0) = inf`` in the *unselected* ``where`` branch
+    poisons reverse-mode with ``0·inf = nan`` (forward-mode is unaffected,
+    so the bug only surfaces through ``grad`` / ``linear_transpose``).
+    """
     theta2 = jnp.sum(omega * omega, axis=-1)
-    theta = jnp.sqrt(theta2)
-    small = theta < _SMALL
-    theta_safe = jnp.where(small, 1.0, theta)
-    a = jnp.where(small, 1.0 - theta2 / 6.0, jnp.sin(theta_safe) / theta_safe)
+    small = theta2 < _SMALL * _SMALL
+    theta2_safe = jnp.where(small, 1.0, theta2)
+    theta = jnp.sqrt(theta2_safe)
+    a = jnp.where(small, 1.0 - theta2 / 6.0, jnp.sin(theta) / theta)
     b = jnp.where(
-        small,
-        0.5 - theta2 / 24.0,
-        (1.0 - jnp.cos(theta_safe)) / (theta_safe * theta_safe),
+        small, 0.5 - theta2 / 24.0, (1.0 - jnp.cos(theta)) / theta2_safe
     )
     k = _skew3(omega)
     kk = k @ k
