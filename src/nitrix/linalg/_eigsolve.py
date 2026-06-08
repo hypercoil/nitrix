@@ -32,6 +32,7 @@ then slice top-k).  The full-spectrum uses of ``safe_eigh`` (``spd``,
 ``reml``, ``lomb_scargle``) keep calling it directly; this module is
 built *on* ``safe_eigh``, it does not subsume it.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -82,7 +83,7 @@ _RowGroupsTuple = Tuple[Int[Array, 'n_s'], ...]
 
 
 class EigPair(NamedTuple):
-    '''Top-k eigenpair, eigenvalues largest-first.'''
+    """Top-k eigenpair, eigenvalues largest-first."""
 
     values: Float[Array, 'k']
     vectors: Float[Array, 'n k']
@@ -90,7 +91,7 @@ class EigPair(NamedTuple):
 
 @dataclass(frozen=True)
 class SolverSpec:
-    '''Frozen, hashable static configuration for a single solve.
+    """Frozen, hashable static configuration for a single solve.
 
     Hashability is load-bearing: the whole spec rides the
     ``jax.custom_vjp`` ``nondiff_argnums`` as one argument, so the
@@ -98,7 +99,7 @@ class SolverSpec:
     fields relevant to ``method`` are read; the rest sit at their
     defaults.  Build via the classmethods rather than the raw
     constructor.
-    '''
+    """
 
     method: Method
     # lobpcg
@@ -124,7 +125,9 @@ class SolverSpec:
     ) -> 'SolverSpec':
         # Carry the lobpcg knobs: ``auto`` resolves to ``lobpcg`` on sparse
         # input, and the dispatcher keeps the other fields via ``replace``.
-        return cls(method='auto', n_iters=n_iters, tol=tol, eps_clamp=eps_clamp)
+        return cls(
+            method='auto', n_iters=n_iters, tol=tol, eps_clamp=eps_clamp
+        )
 
     @classmethod
     def eigh(cls, *, eps_clamp: float = 1e-8) -> 'SolverSpec':
@@ -139,7 +142,10 @@ class SolverSpec:
         eps_clamp: float = 1e-8,
     ) -> 'SolverSpec':
         return cls(
-            method='lobpcg', n_iters=n_iters, tol=tol, eps_clamp=eps_clamp,
+            method='lobpcg',
+            n_iters=n_iters,
+            tol=tol,
+            eps_clamp=eps_clamp,
         )
 
     @classmethod
@@ -152,8 +158,11 @@ class SolverSpec:
         eps_clamp: float = 1e-8,
     ) -> 'SolverSpec':
         return cls(
-            method='shift_invert', sigma=sigma, outer_iters=outer_iters,
-            cg_iters=cg_iters, eps_clamp=eps_clamp,
+            method='shift_invert',
+            sigma=sigma,
+            outer_iters=outer_iters,
+            cg_iters=cg_iters,
+            eps_clamp=eps_clamp,
         )
 
     @classmethod
@@ -166,8 +175,11 @@ class SolverSpec:
         eps_clamp: float = 1e-8,
     ) -> 'SolverSpec':
         return cls(
-            method='poly', degree=degree, shift=shift,
-            outer_iters=outer_iters, eps_clamp=eps_clamp,
+            method='poly',
+            degree=degree,
+            shift=shift,
+            outer_iters=outer_iters,
+            eps_clamp=eps_clamp,
         )
 
 
@@ -198,7 +210,7 @@ def _subspace_vjp_kernel(
     g_eigvecs: Float[Array, 'n k'],
     eps_clamp: float,
 ) -> Float[Array, 'k k']:
-    '''The ``K = diag(g_lambda) + S ⊙ F`` core of the implicit VJP.
+    """The ``K = diag(g_lambda) + S ⊙ F`` core of the implicit VJP.
 
     ``F[i, j] = 1 / (lambda_j - lambda_i)`` (zero on the diagonal and
     where ``|lambda_j - lambda_i| < eps_clamp``); ``S`` is the
@@ -207,7 +219,7 @@ def _subspace_vjp_kernel(
     and every format (the format-specific projection applies ``V K Vᵀ``
     or its sparsity restriction on top).  See
     ``docs/design/lobpcg-implicit-vjp.md``.
-    '''
+    """
     k = eigvals.shape[0]
     diff = eigvals[None, :] - eigvals[:, None]
     safe = jnp.where(jnp.abs(diff) < eps_clamp, 1.0, diff)
@@ -219,9 +231,10 @@ def _subspace_vjp_kernel(
 
 
 def _project_dense(
-    K: Float[Array, 'k k'], eigvecs: Float[Array, 'n k'],
+    K: Float[Array, 'k k'],
+    eigvecs: Float[Array, 'n k'],
 ) -> Float[Array, 'n n']:
-    '''``dM = V K Vᵀ`` -- symmetric by construction.'''
+    """``dM = V K Vᵀ`` -- symmetric by construction."""
     return eigvecs @ K @ eigvecs.T
 
 
@@ -230,8 +243,8 @@ def _project_ell(
     eigvecs: Float[Array, 'n k'],
     indices: Int[Array, 'n k_max'],
 ) -> Float[Array, 'n k_max']:
-    '''Project ``V K Vᵀ`` onto the ELL pattern:
-    ``g_values[i, p] = (V K)[i, :] @ V[indices[i, p], :]``.'''
+    """Project ``V K Vᵀ`` onto the ELL pattern:
+    ``g_values[i, p] = (V K)[i, :] @ V[indices[i, p], :]``."""
     VK = eigvecs @ K
     V_at_idx = eigvecs[indices]
     return jnp.einsum('ij,ipj->ip', VK, V_at_idx)
@@ -243,8 +256,8 @@ def _project_sectioned(
     indices_tuple: _IndicesTuple,
     row_groups_tuple: _RowGroupsTuple,
 ) -> _ValuesTuple:
-    '''Per-section ELL projection, reading the mapped global row index
-    from ``row_groups[s]``.'''
+    """Per-section ELL projection, reading the mapped global row index
+    from ``row_groups[s]``."""
     VK = eigvecs @ K
     g_values = []
     for idx, row_idx in zip(indices_tuple, row_groups_tuple):
@@ -265,8 +278,8 @@ def _run_lobpcg_method(
     n_iters: int,
     tol: Optional[float],
 ) -> _EigPair:
-    '''Plain LOBPCG.  ``operator`` is a dense array (passed through for the
-    blocked-matmul fast path) or a matvec callable (ELL / sectioned).'''
+    """Plain LOBPCG.  ``operator`` is a dense array (passed through for the
+    blocked-matmul fast path) or a matvec callable (ELL / sectioned)."""
     eigvals, eigvecs, _ = lobpcg_standard(operator, X0, m=n_iters, tol=tol)
     return cast(_EigPair, (eigvals, eigvecs))
 
@@ -278,10 +291,11 @@ def _run_shift_invert_method(
     outer_iters: int,
     cg_iters: int,
 ) -> _EigPair:
-    '''Shift-invert on ``L = I - M`` via inner CG.  Matvec-only, so it
+    """Shift-invert on ``L = I - M`` via inner CG.  Matvec-only, so it
     serves any operand format.  For ``sigma < 0`` the shifted Laplacian is
     SPD and CG-solvable; LOBPCG on ``(L - sigma I)^{-1}`` recovers ``M``'s
-    largest eigenpairs in few outer iterations on clustered spectra.'''
+    largest eigenpairs in few outer iterations on clustered spectra."""
+
     def shifted(y: Array) -> Array:
         return (1.0 - sigma) * y - apply(y)
 
@@ -302,8 +316,9 @@ def _run_poly_method(
     shift: float,
     outer_iters: int,
 ) -> _EigPair:
-    '''Shifted-power spectral filter ``(M + shift I)^degree``.  Matvec-only;
-    eigenvalues recovered by the Rayleigh quotient.'''
+    """Shifted-power spectral filter ``(M + shift I)^degree``.  Matvec-only;
+    eigenvalues recovered by the Rayleigh quotient."""
+
     def filt(x: Array) -> Array:
         y = x
         for _ in range(degree):
@@ -312,7 +327,9 @@ def _run_poly_method(
 
     _, eigvecs, _ = lobpcg_standard(filt, X0, m=outer_iters)
     mv = apply(eigvecs)
-    eigvals = jnp.sum(eigvecs * mv, axis=0) / jnp.sum(eigvecs * eigvecs, axis=0)
+    eigvals = jnp.sum(eigvecs * mv, axis=0) / jnp.sum(
+        eigvecs * eigvecs, axis=0
+    )
     return cast(_EigPair, (eigvals, eigvecs))
 
 
@@ -322,17 +339,25 @@ def _forward_for_spec(
     lobpcg_operator: Any,
     X0: Float[Array, 'n k'],
 ) -> _EigPair:
-    '''Run the iterative method selected by ``spec.method`` (a static,
-    trace-time branch) against the operand's matvec.'''
+    """Run the iterative method selected by ``spec.method`` (a static,
+    trace-time branch) against the operand's matvec."""
     if spec.method == 'lobpcg':
         return _run_lobpcg_method(lobpcg_operator, X0, spec.n_iters, spec.tol)
     if spec.method == 'shift_invert':
         return _run_shift_invert_method(
-            apply, X0, spec.sigma, spec.outer_iters, spec.cg_iters,
+            apply,
+            X0,
+            spec.sigma,
+            spec.outer_iters,
+            spec.cg_iters,
         )
     if spec.method == 'poly':
         return _run_poly_method(
-            apply, X0, spec.degree, spec.shift, spec.outer_iters,
+            apply,
+            X0,
+            spec.degree,
+            spec.shift,
+            spec.outer_iters,
         )
     raise ValueError(
         f'_forward_for_spec: method={spec.method!r} is not iterative.'
@@ -347,11 +372,18 @@ def _sectioned_matvec(
     n_cols: int,
     n_rows: int,
 ) -> Float[Array, 'n_rows k']:
-    '''SectionedELL matvec: per-bucket matmul + scatter-back.'''
+    """SectionedELL matvec: per-bucket matmul + scatter-back."""
     out = jnp.zeros((n_rows,) + X.shape[1:], dtype=X.dtype)
-    for vals, idx, row_idx in zip(values_tuple, indices_tuple, row_groups_tuple):
+    for vals, idx, row_idx in zip(
+        values_tuple, indices_tuple, row_groups_tuple
+    ):
         bucket_out = semiring_ell_matmul(
-            vals, idx, X, semiring=REAL, n_cols=n_cols, backend='jax',
+            vals,
+            idx,
+            X,
+            semiring=REAL,
+            n_cols=n_cols,
+            backend='jax',
         )
         out = out.at[row_idx].set(bucket_out)
     return out
@@ -368,26 +400,34 @@ def _eig_top_k_dense(
     X0: Float[Array, 'n k'],
     spec: SolverSpec,
 ) -> _EigPair:
-    '''Iterative top-k for a concrete dense symmetric ``M``; diff w.r.t.
+    """Iterative top-k for a concrete dense symmetric ``M``; diff w.r.t.
     ``M``.  Forward branches on ``spec.method``; backward is the shared
-    dense projection.'''
+    dense projection."""
     return _forward_for_spec(spec, lambda X: M @ X, M, X0)
 
 
 def _eig_top_k_dense_fwd(
-    M: Float[Array, 'n n'], X0: Float[Array, 'n k'], spec: SolverSpec,
+    M: Float[Array, 'n n'],
+    X0: Float[Array, 'n k'],
+    spec: SolverSpec,
 ) -> Tuple[_EigPair, _EigPair]:
     eigvals, eigvecs = _forward_for_spec(spec, lambda X: M @ X, M, X0)
     return (eigvals, eigvecs), (eigvals, eigvecs)
 
 
 def _eig_top_k_dense_bwd(
-    spec: SolverSpec, residuals: _EigPair, cotangents: _EigPair,
+    spec: SolverSpec,
+    residuals: _EigPair,
+    cotangents: _EigPair,
 ) -> Tuple[Float[Array, 'n n'], None]:
     eigvals, eigvecs = residuals
     g_eigvals, g_eigvecs = cotangents
     K = _subspace_vjp_kernel(
-        eigvals, eigvecs, g_eigvals, g_eigvecs, spec.eps_clamp,
+        eigvals,
+        eigvecs,
+        g_eigvals,
+        g_eigvecs,
+        spec.eps_clamp,
     )
     return (_project_dense(K, eigvecs), None)
 
@@ -403,8 +443,8 @@ def _eig_top_k_ell(
     n_cols: int,
     spec: SolverSpec,
 ) -> _EigPair:
-    '''Iterative top-k for an ELL-stored operator; diff w.r.t. ``values``
-    (projected onto the sparsity pattern).'''
+    """Iterative top-k for an ELL-stored operator; diff w.r.t. ``values``
+    (projected onto the sparsity pattern)."""
     return _ell_forward(values, indices, X0, n_cols, spec)
 
 
@@ -417,7 +457,12 @@ def _ell_forward(
 ) -> _EigPair:
     def apply(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
         return semiring_ell_matmul(
-            values, indices, X, semiring=REAL, n_cols=n_cols, backend='jax',
+            values,
+            indices,
+            X,
+            semiring=REAL,
+            n_cols=n_cols,
+            backend='jax',
         )
 
     return _forward_for_spec(spec, apply, apply, X0)
@@ -430,7 +475,8 @@ def _eig_top_k_ell_fwd(
     n_cols: int,
     spec: SolverSpec,
 ) -> Tuple[
-    _EigPair, Tuple[Int[Array, 'n k_max'], Float[Array, 'k'], Float[Array, 'n k']]
+    _EigPair,
+    Tuple[Int[Array, 'n k_max'], Float[Array, 'k'], Float[Array, 'n k']],
 ]:
     eigvals, eigvecs = _ell_forward(values, indices, X0, n_cols, spec)
     return (eigvals, eigvecs), (indices, eigvals, eigvecs)
@@ -439,13 +485,19 @@ def _eig_top_k_ell_fwd(
 def _eig_top_k_ell_bwd(
     n_cols: int,
     spec: SolverSpec,
-    residuals: Tuple[Int[Array, 'n k_max'], Float[Array, 'k'], Float[Array, 'n k']],
+    residuals: Tuple[
+        Int[Array, 'n k_max'], Float[Array, 'k'], Float[Array, 'n k']
+    ],
     cotangents: _EigPair,
 ) -> Tuple[Float[Array, 'n k_max'], Int[Array, 'n k_max'], None]:
     indices, eigvals, eigvecs = residuals
     g_eigvals, g_eigvecs = cotangents
     K = _subspace_vjp_kernel(
-        eigvals, eigvecs, g_eigvals, g_eigvecs, spec.eps_clamp,
+        eigvals,
+        eigvecs,
+        g_eigvals,
+        g_eigvecs,
+        spec.eps_clamp,
     )
     g_values = _project_ell(K, eigvecs, indices)
     return (g_values, jnp.zeros_like(indices), None)
@@ -463,10 +515,15 @@ def _eig_top_k_sectioned(
     n_cols: int,
     spec: SolverSpec,
 ) -> _EigPair:
-    '''Iterative top-k for a SectionedELL operator; diff w.r.t. each
-    section's ``values`` independently.'''
+    """Iterative top-k for a SectionedELL operator; diff w.r.t. each
+    section's ``values`` independently."""
     return _sectioned_forward(
-        values_tuple, indices_tuple, row_groups_tuple, X0, n_cols, spec,
+        values_tuple,
+        indices_tuple,
+        row_groups_tuple,
+        X0,
+        n_cols,
+        spec,
     )
 
 
@@ -482,8 +539,12 @@ def _sectioned_forward(
 
     def apply(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
         return _sectioned_matvec(
-            values_tuple, indices_tuple, row_groups_tuple, X,
-            n_cols=n_cols, n_rows=n_rows,
+            values_tuple,
+            indices_tuple,
+            row_groups_tuple,
+            X,
+            n_cols=n_cols,
+            n_rows=n_rows,
         )
 
     return _forward_for_spec(spec, apply, apply, X0)
@@ -503,10 +564,18 @@ def _eig_top_k_sectioned_fwd(
     spec: SolverSpec,
 ) -> Tuple[_EigPair, _SectionedResiduals]:
     eigvals, eigvecs = _sectioned_forward(
-        values_tuple, indices_tuple, row_groups_tuple, X0, n_cols, spec,
+        values_tuple,
+        indices_tuple,
+        row_groups_tuple,
+        X0,
+        n_cols,
+        spec,
     )
     return (eigvals, eigvecs), (
-        indices_tuple, row_groups_tuple, eigvals, eigvecs,
+        indices_tuple,
+        row_groups_tuple,
+        eigvals,
+        eigvecs,
     )
 
 
@@ -519,7 +588,11 @@ def _eig_top_k_sectioned_bwd(
     indices_tuple, row_groups_tuple, eigvals, eigvecs = residuals
     g_eigvals, g_eigvecs = cotangents
     K = _subspace_vjp_kernel(
-        eigvals, eigvecs, g_eigvals, g_eigvecs, spec.eps_clamp,
+        eigvals,
+        eigvecs,
+        g_eigvals,
+        g_eigvecs,
+        spec.eps_clamp,
     )
     g_values = _project_sectioned(K, eigvecs, indices_tuple, row_groups_tuple)
     g_indices = tuple(jnp.zeros_like(i) for i in indices_tuple)
@@ -528,7 +601,8 @@ def _eig_top_k_sectioned_bwd(
 
 
 _eig_top_k_sectioned.defvjp(
-    _eig_top_k_sectioned_fwd, _eig_top_k_sectioned_bwd,
+    _eig_top_k_sectioned_fwd,
+    _eig_top_k_sectioned_bwd,
 )
 
 
@@ -560,16 +634,16 @@ def _dtype_of(operand: EigOperand) -> Any:
 
 
 def _resolve_method(method: Method, fmt: _Format) -> Method:
-    '''``auto`` -> ``eigh`` for dense, ``lobpcg`` for sparse.  Format-based
-    only (static, JIT-stable); no runtime tracer inspection.'''
+    """``auto`` -> ``eigh`` for dense, ``lobpcg`` for sparse.  Format-based
+    only (static, JIT-stable); no runtime tracer inspection."""
     if method != 'auto':
         return method
     return 'eigh' if fmt == 'dense' else 'lobpcg'
 
 
 def _device_put_operand(operand: EigOperand, target: Any) -> EigOperand:
-    '''Move all array fields of an operand to ``target`` (dense / ELL /
-    SectionedELL); non-array fields pass through.'''
+    """Move all array fields of an operand to ``target`` (dense / ELL /
+    SectionedELL); non-array fields pass through."""
     if isinstance(operand, ELL):
         return ELL(
             values=jax.device_put(operand.values, target),
@@ -598,10 +672,14 @@ def _device_put_operand(operand: EigOperand, target: Any) -> EigOperand:
 
 
 def _initial_subspace(
-    n: int, k: int, seed: int, device: Any, dtype: Any,
+    n: int,
+    k: int,
+    seed: int,
+    device: Any,
+    dtype: Any,
 ) -> Float[Array, 'n k']:
-    '''Random initial subspace on the solver device, dtype-matched to the
-    operator (so the x64 backward returns a matching cotangent dtype).'''
+    """Random initial subspace on the solver device, dtype-matched to the
+    operator (so the x64 backward returns a matching cotangent dtype)."""
     key = jax.random.key(seed)
     return cast(
         Float[Array, 'n k'],
@@ -610,9 +688,10 @@ def _initial_subspace(
 
 
 def _eigh_top_k(
-    M: Float[Array, '... n n'], k: int,
+    M: Float[Array, '... n n'],
+    k: int,
 ) -> _EigPair:
-    '''Dense full ``safe_eigh`` sliced to the ``k`` largest, largest-first.'''
+    """Dense full ``safe_eigh`` sliced to the ``k`` largest, largest-first."""
     eigvals, eigvecs = safe_eigh(M)  # ascending
     top_vals = eigvals[..., ::-1][..., :k]
     top_vecs = eigvecs[..., ::-1][..., :k]
@@ -620,19 +699,29 @@ def _eigh_top_k(
 
 
 def _dispatch_iterative(
-    operand: EigOperand, X0: Float[Array, 'n k'], spec: SolverSpec,
+    operand: EigOperand,
+    X0: Float[Array, 'n k'],
+    spec: SolverSpec,
 ) -> _EigPair:
     if isinstance(operand, ELL):
         return _eig_top_k_ell(
-            operand.values, operand.indices, X0, operand.n_cols, spec,
+            operand.values,
+            operand.indices,
+            X0,
+            operand.n_cols,
+            spec,
         )
     if isinstance(operand, SectionedELL):
         values_tuple = tuple(s.values for s in operand.sections)
         indices_tuple = tuple(s.indices for s in operand.sections)
         row_groups_tuple = tuple(jnp.asarray(rg) for rg in operand.row_groups)
         return _eig_top_k_sectioned(
-            values_tuple, indices_tuple, row_groups_tuple, X0,
-            operand.n_cols, spec,
+            values_tuple,
+            indices_tuple,
+            row_groups_tuple,
+            X0,
+            operand.n_cols,
+            spec,
         )
     return _eig_top_k_dense(operand, X0, spec)
 
@@ -644,7 +733,7 @@ def eigsolve_top_k(
     spec: Optional[SolverSpec] = None,
     seed: int = 0,
 ) -> EigPair:
-    '''The ``k`` largest eigenpairs of a symmetric operator, largest-first.
+    """The ``k`` largest eigenpairs of a symmetric operator, largest-first.
 
     Parameters
     ----------
@@ -671,7 +760,7 @@ def eigsolve_top_k(
     iterative methods via the shared implicit VJP.  ``skip_trivial`` /
     spectral-convention post-processing is the *caller's* concern -- this
     returns the raw extremal top-k.
-    '''
+    """
     if spec is None:
         spec = SolverSpec.auto()
     fmt = _format_of(operand)
@@ -684,7 +773,7 @@ def eigsolve_top_k(
             else f'{method!r} supports {supported}'
         )
         raise ValueError(
-            f"eigsolve_top_k: method={method!r} does not support {fmt!r} "
+            f'eigsolve_top_k: method={method!r} does not support {fmt!r} '
             f'input; {detail}.'
         )
     if method != spec.method:
@@ -698,7 +787,8 @@ def eigsolve_top_k(
         # ``eigh`` is dense-only (enforced by the validity table above), so
         # ``operand`` is a dense array here; narrow the operand union.
         eigvals, eigvecs = _eigh_top_k(
-            cast(Float[Array, '... n n'], operand), k,
+            cast(Float[Array, '... n n'], operand),
+            k,
         )
     else:
         n = _n_of(operand)

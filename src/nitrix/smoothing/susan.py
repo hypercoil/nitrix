@@ -29,6 +29,7 @@ clips the per-edge weight at the threshold rather than acting as a
 hard cutoff.  (Hard-cutoff variants are easy to add if the
 diagnostic value materialises.)
 """
+
 from __future__ import annotations
 
 import itertools
@@ -36,13 +37,12 @@ from typing import Any, Optional, Tuple, Union, cast
 
 import jax.numpy as jnp
 import numpy as np
-from numpy.typing import NDArray
 from jaxtyping import Array, Float
+from numpy.typing import NDArray
 
 from ..morphology import median_filter
 from .bilateral import bilateral_gaussian
 from .metric import DiagonalMetric
-
 
 __all__ = ['susan_emulator', 'spatial_cube_neighbourhood']
 
@@ -53,7 +53,7 @@ def spatial_cube_neighbourhood(
     half: int = 1,
     return_validity: bool = False,
 ) -> Union[NDArray[Any], Tuple[NDArray[Any], NDArray[Any]]]:
-    '''Build a flat-index spatial-cube adjacency.
+    """Build a flat-index spatial-cube adjacency.
 
     For an n-D image of shape ``spatial_shape``, returns an array
     of shape ``(n_voxels, (2*half + 1)**ndim)`` whose row ``i``
@@ -86,12 +86,15 @@ def spatial_cube_neighbourhood(
     Adjacency ``(n_voxels, k_max)`` as a NumPy array of dtype int32,
     or ``(adjacency, validity)`` when ``return_validity`` is ``True``
     (validity is a NumPy ``bool`` array of the same shape).
-    '''
+    """
     spatial_rank = len(spatial_shape)
     n_voxels = int(np.prod(spatial_shape))
-    offsets = list(itertools.product(
-        range(-half, half + 1), repeat=spatial_rank,
-    ))
+    offsets = list(
+        itertools.product(
+            range(-half, half + 1),
+            repeat=spatial_rank,
+        )
+    )
     k_max = len(offsets)
     # Per-voxel coordinates: (n_voxels, spatial_rank).
     coords = np.indices(spatial_shape).reshape(spatial_rank, -1).T
@@ -99,14 +102,15 @@ def spatial_cube_neighbourhood(
     validity = np.empty((n_voxels, k_max), dtype=bool)
     shape_arr = np.asarray(spatial_shape, dtype=np.int64)
     # Row-major strides for flat-indexing.
-    strides = np.array([
-        int(np.prod(spatial_shape[d + 1:]))
-        for d in range(spatial_rank)
-    ], dtype=np.int64)
+    strides = np.array(
+        [int(np.prod(spatial_shape[d + 1 :])) for d in range(spatial_rank)],
+        dtype=np.int64,
+    )
     for j, off in enumerate(offsets):
         neighbour = coords + np.asarray(off, dtype=np.int64)
         in_bounds = np.all(
-            (neighbour >= 0) & (neighbour < shape_arr[None, :]), axis=1,
+            (neighbour >= 0) & (neighbour < shape_arr[None, :]),
+            axis=1,
         )
         clamped = np.clip(neighbour, 0, shape_arr[None, :] - 1)
         flat = (clamped * strides[None, :]).sum(axis=1)
@@ -126,7 +130,7 @@ def susan_emulator(
     bthresh: Optional[float] = None,
     half: int = 1,
 ) -> Float[Array, '... *spatial']:
-    '''SUSAN-style edge-preserving smoothing.
+    """SUSAN-style edge-preserving smoothing.
 
     Parameters
     ----------
@@ -157,7 +161,7 @@ def susan_emulator(
     Returns
     -------
     Smoothed image of the same shape as ``image``.
-    '''
+    """
     spatial_shape = image.shape
     spatial_rank = len(spatial_shape)
     if spatial_rank < 1:
@@ -180,24 +184,29 @@ def susan_emulator(
     features = jnp.concatenate([coords_jax, values], axis=-1)
 
     # Per-feature bandwidths: one per spatial axis plus intensity.
-    metric = DiagonalMetric(jnp.array(
-        [sigma_space] * spatial_rank + [sigma_intensity],
-        dtype=values.dtype,
-    ))
+    metric = DiagonalMetric(
+        jnp.array(
+            [sigma_space] * spatial_rank + [sigma_intensity],
+            dtype=values.dtype,
+        )
+    )
 
     # Spatial-cube adjacency, static across the call, with a validity
     # mask so boundary voxels do not double-count clamped edge taps.
     adjacency_np, validity_np = cast(
         Tuple[NDArray[Any], NDArray[Any]],
         spatial_cube_neighbourhood(
-            spatial_shape, half=half, return_validity=True,
+            spatial_shape,
+            half=half,
+            return_validity=True,
         ),
     )
     adjacency = jnp.asarray(adjacency_np)
     validity = jnp.asarray(validity_np)
 
     out_flat = bilateral_gaussian(
-        values, features,
+        values,
+        features,
         metric=metric,
         neighbourhood=adjacency,
         mask=validity,

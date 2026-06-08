@@ -83,6 +83,7 @@ References
 - Kipf & Welling 2017.  *Semi-Supervised Classification with
   Graph Convolutional Networks.*  ICLR.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
@@ -94,7 +95,6 @@ from jaxtyping import Array, Float, Num
 from ..sparse.ell import ELL
 from ._types import Semiring
 from .algebras import REAL, TROPICAL_MAX_PLUS, TROPICAL_MIN_PLUS
-
 
 __all__ = ['semiring_ell_edge_aggregate', 'ell_row_softmax']
 
@@ -118,7 +118,7 @@ def _reduce_by_semiring(
     semiring: Semiring[Any],
     axis: int,
 ) -> Num[Array, '... n d_out']:
-    '''Aggregate an edge-message tensor along the ``k_max`` axis under ``semiring``.
+    """Aggregate an edge-message tensor along the ``k_max`` axis under ``semiring``.
 
     First-cut support is restricted to algebras whose monoid
     reduction is a single JAX axis-reduction primitive:
@@ -133,7 +133,7 @@ def _reduce_by_semiring(
     arbitrary axis, which is feasible but not yet implemented.
     Users wanting those algebras can either reduce manually after
     materialising ``e``, or wait for the follow-up.
-    '''
+    """
     if semiring is REAL:
         return jnp.sum(e, axis=axis)
     if semiring is TROPICAL_MAX_PLUS:
@@ -157,7 +157,7 @@ def semiring_ell_edge_aggregate(
     semiring: Semiring[Any] = REAL,
     edge_attr: Optional[Num[Array, 'n k_max d_e']] = None,
 ) -> Num[Array, '... n d_out']:
-    '''Per-edge functional aggregation over an ELL adjacency.
+    """Per-edge functional aggregation over an ELL adjacency.
 
     For each ``(i, p)`` in the ELL pattern with ``j = ell.indices[i,
     p]``, build a per-edge message via the user-supplied callable
@@ -266,7 +266,7 @@ def semiring_ell_edge_aggregate(
             edge_fn, dataclasses.replace(ell_sl, values=alpha), x,
             edge_attr=edge_attr_sl,
         )
-    '''
+    """
     n = x.shape[-2]
     k_max = ell.k_max
 
@@ -274,7 +274,8 @@ def semiring_ell_edge_aggregate(
     x_neigh = x[..., ell.indices, :]
     # Broadcast source: (..., n, 1, d_in) -> (..., n, k_max, d_in)
     x_src = jnp.broadcast_to(
-        x[..., :, None, :], x_neigh.shape,
+        x[..., :, None, :],
+        x_neigh.shape,
     )
     # Build (i, j) pair grid.
     i_grid = jnp.broadcast_to(jnp.arange(n)[:, None], (n, k_max))
@@ -284,8 +285,8 @@ def semiring_ell_edge_aggregate(
     if edge_attr is None:
         # Vectorise edge_fn over (i, p) -- inner vmap over p, outer
         # over n.  The function sees a single edge per call.
-        inner = jax.vmap(edge_fn, in_axes=(0, 0, 0, 0))   # over p
-        outer = jax.vmap(inner, in_axes=(0, 0, 0, 0))     # over n
+        inner = jax.vmap(edge_fn, in_axes=(0, 0, 0, 0))  # over p
+        outer = jax.vmap(inner, in_axes=(0, 0, 0, 0))  # over n
         # Batch dims: x_src / x_neigh carry them; values and ij_grid
         # are shared.
         fn = outer
@@ -303,7 +304,7 @@ def semiring_ell_edge_aggregate(
         # attribute.  ``edge_attr`` is shared across batch dims, like
         # ``ell.values``.
         inner = jax.vmap(edge_fn, in_axes=(0, 0, 0, 0, 0))  # over p
-        outer = jax.vmap(inner, in_axes=(0, 0, 0, 0, 0))    # over n
+        outer = jax.vmap(inner, in_axes=(0, 0, 0, 0, 0))  # over n
         fn = outer
         for _ in range(x.ndim - 2):
             fn = jax.vmap(fn, in_axes=(0, 0, None, None, None))
@@ -317,7 +318,7 @@ def ell_row_softmax(
     scores: Float[Array, '... n k_max'],
     ell: ELL,
 ) -> Float[Array, '... n k_max']:
-    '''Row-wise softmax over the ELL neighbour slots, masking padding.
+    """Row-wise softmax over the ELL neighbour slots, masking padding.
 
     Normalises ``scores`` along the ``k_max`` (neighbour) axis so each
     row sums to 1, with the ELL's padding positions excluded from both
@@ -354,7 +355,7 @@ def ell_row_softmax(
     -------
     Row-normalised attention weights, same shape as ``scores``; each
     real-edge row sums to 1 along the ``k_max`` axis.
-    '''
+    """
     if ell.identity is None:
         valid = jnp.ones(scores.shape, dtype=bool)
     else:

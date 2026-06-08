@@ -4,25 +4,26 @@
 """
 Unit tests for Fourier-domain filtering
 """
-import pytest
-import numpy as np
+
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from importlib.resources import files
-from pathlib import Path
-from jax.numpy import unwrap
-from scipy.fft import rfft, irfft
-from scipy.signal import hilbert, chirp
+import numpy as np
+import pytest
+from scipy.fft import irfft, rfft
+from scipy.signal import chirp, hilbert
+
 from nitrix.stats import (
-    product_filter,
-    product_filtfilt,
     analytic_signal,
-    hilbert_transform,
+    env_inst,
     envelope,
+    hilbert_transform,
     instantaneous_frequency,
     instantaneous_phase,
-    env_inst,
+    product_filter,
+    product_filtfilt,
 )
 
 
@@ -30,17 +31,21 @@ from nitrix.stats import (
 def X(N: int = 100):
     return np.random.rand(7, N)
 
+
 @pytest.fixture(scope='module')
 def results():
     dir = Path(__file__).parent / 'artefacts' / 'fourier'
     dir.mkdir(parents=True, exist_ok=True)
     return dir
 
+
 def scipy_product_filter(X, weight):
     return irfft(weight * rfft(X))
 
+
 def uniform_attenuator(N: int = 100):
     return 0.5 * np.ones(N // 2 + 1)
+
 
 def approx(out, ref, tol=1e-6):
     return np.allclose(out, ref, atol=tol)
@@ -61,10 +66,7 @@ def test_bandpass(X):
 
 
 def test_zerophase_filter(X, N: int = 100):
-    w = (
-        np.random.rand(N // 2 + 1) +
-        1j * np.random.rand(N // 2 + 1)
-    )
+    w = np.random.rand(N // 2 + 1) + 1j * np.random.rand(N // 2 + 1)
     in_phase = jnp.angle(jnp.fft.rfft(X))
     out = product_filter(X, w)
     out_phase = jnp.angle(jnp.fft.rfft(out))
@@ -115,7 +117,7 @@ def test_hilbert_envelope(results):
     t = np.arange(samples) / fs
 
     signal = chirp(t, 20.0, t[-1], 100.0)
-    signal *= (1.0 + 0.5 * np.sin(2.0*np.pi*3.0*t) )
+    signal *= 1.0 + 0.5 * np.sin(2.0 * np.pi * 3.0 * t)
 
     amplitude_envelope = envelope(signal)
     inst_freq = instantaneous_frequency(signal, fs=400)
@@ -124,11 +126,11 @@ def test_hilbert_envelope(results):
 
     ax0.plot(t, signal, label='signal')
     ax0.plot(t, amplitude_envelope, label='envelope')
-    ax0.set_xlabel("time in seconds")
+    ax0.set_xlabel('time in seconds')
     ax0.legend()
 
     ax1.plot(t[1:], inst_freq)
-    ax1.set_xlabel("time in seconds")
+    ax1.set_xlabel('time in seconds')
     ax1.set_ylim(0.0, 120.0)
     fig.tight_layout()
 
@@ -140,11 +142,11 @@ def test_hilbert_envelope(results):
 
     ax0.plot(t, signal, label='signal')
     ax0.plot(t, amplitude_envelope, label='envelope')
-    ax0.set_xlabel("time in seconds")
+    ax0.set_xlabel('time in seconds')
     ax0.legend()
 
     ax1.plot(t[1:], inst_freq)
-    ax1.set_xlabel("time in seconds")
+    ax1.set_xlabel('time in seconds')
     ax1.set_ylim(0.0, 120.0)
     fig.tight_layout()
 

@@ -28,12 +28,14 @@ doesn't fit the ELL pattern of the input.  For *operator* use
 (eigenvalue solvers, etc.) call ``laplacian_matvec`` which never
 materialises the dense matrix.
 """
+
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional, Union
+from typing import Literal, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array, Num
+
 # TypeIs (PEP 742) narrows in *both* branches of a guard; sourced from
 # typing_extensions (a guaranteed transitive dependency via jaxtyping) so the
 # 3.11 baseline keeps it -- ``typing.TypeIs`` only lands in 3.13.
@@ -41,7 +43,6 @@ from typing_extensions import TypeIs
 
 from ..semiring import REAL, semiring_ell_matmul
 from ..sparse import ELL, SectionedELL, sectioned_semiring_ell_matmul
-
 
 __all__ = [
     'laplacian',
@@ -66,7 +67,7 @@ def _delete_diagonal(A: Num[Array, '... n n']) -> Num[Array, '... n n']:
 
 
 def _safe_max(x: Num[Array, '...']) -> Num[Array, '...']:
-    '''``max`` clipped to at least 1, used to normalise unbounded logits.'''
+    """``max`` clipped to at least 1, used to normalise unbounded logits."""
     return jnp.maximum(1.0, x.max(axis=(-1, -2), keepdims=True))
 
 
@@ -78,20 +79,27 @@ def _ell_matvec(
     A: Union[ELL, SectionedELL],
     x: Num[Array, '... n k'],
 ) -> Num[Array, '... n k']:
-    '''``A @ x`` for ELL / SectionedELL.
+    """``A @ x`` for ELL / SectionedELL.
 
     Dispatched once to keep callers simple.  Always uses the REAL
     semiring; for other algebras the caller should use
     ``semiring_ell_matmul`` / ``sectioned_semiring_ell_matmul``
     directly.
-    '''
+    """
     if isinstance(A, ELL):
         return semiring_ell_matmul(
-            A.values, A.indices, x,
-            semiring=REAL, n_cols=A.n_cols, backend='jax',
+            A.values,
+            A.indices,
+            x,
+            semiring=REAL,
+            n_cols=A.n_cols,
+            backend='jax',
         )
     return sectioned_semiring_ell_matmul(
-        A, x, semiring=REAL, backend='jax',
+        A,
+        x,
+        semiring=REAL,
+        backend='jax',
     )
 
 
@@ -101,7 +109,7 @@ def _ell_matvec(
 
 
 def degree_vector(A: _GraphInput) -> Num[Array, '... n']:
-    '''Per-node degree (row sum).
+    """Per-node degree (row sum).
 
     For an ELL adjacency, this is ``A.values.sum(-1)`` (pad
     positions contribute the identity ``0``).  For SectionedELL,
@@ -110,7 +118,7 @@ def degree_vector(A: _GraphInput) -> Num[Array, '... n']:
     For directed graphs (asymmetric ``A``) this returns the
     out-degree; the in-degree is ``A.sum(-2)`` for dense ``A`` and
     requires building a transpose ELL for sparse inputs.
-    '''
+    """
     if isinstance(A, ELL):
         return A.values.sum(axis=-1)
     if isinstance(A, SectionedELL):
@@ -134,7 +142,7 @@ def laplacian(
     normalisation: _Normalisation = 'combinatorial',
     eps: float = 1e-12,
 ) -> Num[Array, '... n n']:
-    '''Graph Laplacian in one of three standard normalisations.
+    """Graph Laplacian in one of three standard normalisations.
 
     *Dense only*: the symmetric Laplacian has a non-zero diagonal
     that doesn't fit the sparse pattern of the input ``A``.  For
@@ -152,7 +160,7 @@ def laplacian(
         Floor on degree before division (avoids ``0/0`` for
         isolated nodes; those end up with a zero row in the
         normalised variants).
-    '''
+    """
     if normalisation not in ('combinatorial', 'symmetric', 'random_walk'):
         raise ValueError(
             f'normalisation={normalisation!r}; expected one of '
@@ -191,7 +199,7 @@ def laplacian_matvec(
     normalisation: _Normalisation = 'symmetric',
     eps: float = 1e-12,
 ) -> Num[Array, '... n k']:
-    '''Apply the Laplacian to a block of vectors, sparse-friendly.
+    """Apply the Laplacian to a block of vectors, sparse-friendly.
 
     Computes ``L @ x`` without ever materialising ``L``.  Accepts
     dense, ELL, or SectionedELL ``A``; works for the three Laplacian
@@ -214,7 +222,7 @@ def laplacian_matvec(
     Returns
     -------
     ``L @ x``, shape ``(..., n, k)``.
-    '''
+    """
     deg = degree_vector(A)
     safe_deg = jnp.maximum(deg, eps)
 

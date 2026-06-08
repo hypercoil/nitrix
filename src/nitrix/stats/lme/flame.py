@@ -51,6 +51,7 @@ Beckmann, C. F., Jenkinson, M., & Smith, S. M. (2003).  General
 multilevel linear modeling for group analysis in fMRI.
 NeuroImage 20, 1052-1063.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -61,14 +62,13 @@ import jax.numpy as jnp
 import jax.scipy.linalg as jsla
 from jaxtyping import Array, Float
 
-
 __all__ = ['FLAMEResult', 'flame_two_level']
 
 
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class FLAMEResult:
-    '''Per-voxel FLAME fit output.'''
+    """Per-voxel FLAME fit output."""
 
     sigma_b_sq: Float[Array, 'V']
     gamma_hat: Float[Array, 'V p']
@@ -96,12 +96,12 @@ def _flame_neg_loglik(
     var_within: Float[Array, 'N'],
     ridge: float = 1e-8,
 ) -> Float[Array, '']:
-    '''Profile REML negative log-likelihood for the FLAME model.
+    """Profile REML negative log-likelihood for the FLAME model.
 
     Single parameter: ``log(sigma_b^2)``.  Within-variance
     ``var_within`` is treated as known (per FLAME convention);
     ``gamma`` profiled out analytically.
-    '''
+    """
     sigma_b_sq = jnp.exp(log_sigma_b_sq)
     d = sigma_b_sq + var_within
     inv_d = 1.0 / d
@@ -129,20 +129,26 @@ def _flame_newton_step(
     max_step: float = 1.0,
     n_backtrack: int = 4,
 ) -> Float[Array, '']:
-    '''1-D Newton step on the FLAME negative log-likelihood with
+    """1-D Newton step on the FLAME negative log-likelihood with
     step clipping and backtracking.
 
     Since the parameter is scalar, the Hessian is a scalar and
     Newton degenerates to ``new = old - grad / hess``.  Clipped
     to ``[-max_step, max_step]`` to prevent overshoot; backtracked
     if the new nll did not decrease.
-    '''
+    """
     val_and_grad = jax.value_and_grad(_flame_neg_loglik)
     nll_old, grad = val_and_grad(
-        log_sigma_b_sq, beta, X_group, var_within,
+        log_sigma_b_sq,
+        beta,
+        X_group,
+        var_within,
     )
     hess = jax.grad(jax.grad(_flame_neg_loglik))(
-        log_sigma_b_sq, beta, X_group, var_within,
+        log_sigma_b_sq,
+        beta,
+        X_group,
+        var_within,
     )
     hess_pos = jnp.maximum(hess, damping)
     delta = grad / hess_pos
@@ -157,17 +163,25 @@ def _flame_newton_step(
         scale, x_best, nll_best = carry
         x_try = log_sigma_b_sq - scale * delta
         nll_try = _flame_neg_loglik(
-            x_try, beta, X_group, var_within,
+            x_try,
+            beta,
+            X_group,
+            var_within,
         )
         accept = nll_try < nll_best
         x_new = jnp.where(accept, x_try, x_best)
         nll_new = jnp.where(accept, nll_try, nll_best)
         return (scale * 0.5, x_new, nll_new), None
 
-    init = (jnp.asarray(1.0, dtype=log_sigma_b_sq.dtype),
-            log_sigma_b_sq, nll_old)
+    init = (
+        jnp.asarray(1.0, dtype=log_sigma_b_sq.dtype),
+        log_sigma_b_sq,
+        nll_old,
+    )
     (_, x_final, _), _ = jax.lax.scan(
-        body, init, jnp.arange(n_backtrack),
+        body,
+        init,
+        jnp.arange(n_backtrack),
     )
     return x_final
 
@@ -180,19 +194,26 @@ def _flame_fit_one_voxel(
     n_iter: int,
     damping: float,
 ) -> Tuple[Float[Array, ''], Float[Array, 'p'], Float[Array, '']]:
-    '''Single-voxel FLAME fit via 1-D Newton.
+    """Single-voxel FLAME fit via 1-D Newton.
 
     Returns ``(log_sigma_b_sq, gamma, log_lik)``.
-    '''
+    """
+
     def step(
         log_sigma: Float[Array, ''], _: Any
     ) -> Tuple[Float[Array, ''], None]:
         return _flame_newton_step(
-            log_sigma, beta, X_group, var_within, damping,
+            log_sigma,
+            beta,
+            X_group,
+            var_within,
+            damping,
         ), None
 
     log_final, _ = jax.lax.scan(
-        step, log_sigma_b_sq_init, jnp.arange(n_iter),
+        step,
+        log_sigma_b_sq_init,
+        jnp.arange(n_iter),
     )
 
     # Compute final gamma at the converged sigma_b_sq.
@@ -215,12 +236,12 @@ def _flame_default_log_init(
     beta: Float[Array, 'V N'],
     var_within: Float[Array, 'V N'],
 ) -> Float[Array, 'V']:
-    '''Initial guess for ``log(sigma_b^2)`` per voxel.
+    """Initial guess for ``log(sigma_b^2)`` per voxel.
 
     Heuristic: residual variance of ``beta`` after the per-subject
     weighted mean, minus the mean within-variance.  Clamped to
     a small positive floor so the log is finite.
-    '''
+    """
     # Empirical between-subject variance (per voxel, ignoring X)
     beta_mean = jnp.mean(beta, axis=-1, keepdims=True)
     var_total = jnp.mean((beta - beta_mean) ** 2, axis=-1)
@@ -238,7 +259,7 @@ def flame_two_level(
     n_iter: int = 30,
     damping: float = 1e-6,
 ) -> FLAMEResult:
-    '''Voxelwise FLAME-style two-level fixed-effect group model.
+    """Voxelwise FLAME-style two-level fixed-effect group model.
 
     Parameters
     ----------
@@ -272,7 +293,7 @@ def flame_two_level(
     avoids the identifiability problem of the two-parameter
     relaxation (where the model can absorb a free scaling of
     ``var_within`` into ``sigma_b^2``).
-    '''
+    """
     if beta_subject.shape != var_within.shape:
         raise ValueError(
             f'flame_two_level: beta_subject.shape={beta_subject.shape} '
@@ -287,7 +308,8 @@ def flame_two_level(
 
     if log_sigma_b_sq_init is None:
         log_sigma_b_sq_init = _flame_default_log_init(
-            beta_subject, var_within,
+            beta_subject,
+            var_within,
         )
 
     fit = jax.vmap(
@@ -295,8 +317,12 @@ def flame_two_level(
         in_axes=(0, 0, None, 0, None, None),
     )
     log_sigma_b_sq, gamma_hat, log_lik = fit(
-        beta_subject, var_within, X_group, log_sigma_b_sq_init,
-        n_iter, damping,
+        beta_subject,
+        var_within,
+        X_group,
+        log_sigma_b_sq_init,
+        n_iter,
+        damping,
     )
     return FLAMEResult(
         sigma_b_sq=jnp.exp(log_sigma_b_sq),

@@ -41,6 +41,7 @@ transform, second-order sections) -- is ``iir_filter`` / ``butterworth_sos``
 with the Butterworth phase (or zero-phase via ``filtfilt``), validated to
 machine precision against ``scipy.signal``.
 """
+
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -71,18 +72,18 @@ def _polynomial_basis(
     degree: int,
     dtype: DTypeLike,
 ) -> Float[Array, 'degree+1 obs']:
-    '''Build a polynomial basis ``[1, t, t^2, ..., t^d]`` along
+    """Build a polynomial basis ``[1, t, t^2, ..., t^d]`` along
     rescaled time ``t in [-1, 1]``.
 
     Rescaling is essential for numerical stability when ``degree``
     is moderately large; integer powers of ``[0, n_obs)`` blow up
     fast and ill-condition the regression matrix.
-    '''
+    """
     if n_obs < 2:
         # Edge case: too few samples for any polynomial.
         return jnp.ones((degree + 1, n_obs), dtype=dtype)
     t = jnp.linspace(-1.0, 1.0, n_obs, dtype=dtype)
-    return jnp.stack([t ** k for k in range(degree + 1)], axis=0)
+    return jnp.stack([t**k for k in range(degree + 1)], axis=0)
 
 
 def polynomial_detrend(
@@ -91,7 +92,7 @@ def polynomial_detrend(
     degree: int = 1,
     rowvar: bool = True,
 ) -> Num[Array, '... obs']:
-    '''Subtract a polynomial fit of the named ``degree`` from each
+    """Subtract a polynomial fit of the named ``degree`` from each
     observation channel.
 
     Equivalent to ``residualise(X, polynomial_basis)`` where the
@@ -116,7 +117,7 @@ def polynomial_detrend(
     Notes
     -----
     Differentiable through ``X``; ``degree`` is static.
-    '''
+    """
     if degree < 0:
         raise ValueError(f'degree must be >= 0; got {degree}.')
     # Determine n_obs from X (last axis if rowvar, else penultimate).
@@ -140,11 +141,11 @@ _FilterType = str  # 'maxflat' | 'ideal' | 'cosine'
 def _cosine_edge(
     f: Array, cutoff: float, width: float, pass_below: bool
 ) -> Array:
-    '''Raised-cosine edge centred on ``cutoff`` with transition ``width``.
+    """Raised-cosine edge centred on ``cutoff`` with transition ``width``.
 
     ``pass_below`` -- unit gain below the band, rolling to zero above (the
     low-pass edge); ``False`` rolls the other way (the high-pass edge).
-    '''
+    """
     lo_e = cutoff - 0.5 * width
     hi_e = cutoff + 0.5 * width
     taper = 0.5 * (1.0 + jnp.cos(jnp.pi * (f - lo_e) / width))  # 1@lo_e 0@hi_e
@@ -156,7 +157,7 @@ def _cosine_edge(
 def _lowpass_mag(
     f: Array, cutoff: float, ftype: _FilterType, order: int, width: float
 ) -> Array:
-    '''Magnitude response passing frequencies *below* ``cutoff``.'''
+    """Magnitude response passing frequencies *below* ``cutoff``."""
     if ftype == 'maxflat':
         # Butterworth *magnitude* shape (-3 dB at cutoff), applied as a
         # zero-phase weight -- a frequency-sampled FIR, not a recursive IIR.
@@ -173,7 +174,7 @@ def _lowpass_mag(
 def _highpass_mag(
     f: Array, cutoff: float, ftype: _FilterType, order: int, width: float
 ) -> Array:
-    '''Magnitude response passing frequencies *above* ``cutoff``.'''
+    """Magnitude response passing frequencies *above* ``cutoff``."""
     if ftype == 'maxflat':
         # Guard the DC bin (f = 0) before dividing; it is always rejected.
         f_safe = jnp.where(f > 0, f, 1.0)
@@ -195,7 +196,7 @@ def _apply_frequency_filter(
     axis: int,
     padding: int,
 ) -> Num[Array, '... obs']:
-    '''Move ``axis`` to the end, build the rfft weight, filter, restore.'''
+    """Move ``axis`` to the end, build the rfft weight, filter, restore."""
     x = jnp.moveaxis(jnp.asarray(X), axis, -1)
     n = x.shape[-1]
     if padding < 0:
@@ -208,16 +209,17 @@ def _apply_frequency_filter(
     freq = jnp.fft.rfftfreq(n_fft, d=1.0).astype(jnp.float32)
     # rfftfreq with d=1 gives cycles/sample; the caller's weight_fn closes
     # over the physical cut-offs already expressed in cycles/sample (= f/fs).
-    weight = weight_fn(freq).astype(x.real.dtype if jnp.iscomplexobj(x)
-                                   else x.dtype)
+    weight = weight_fn(freq).astype(
+        x.real.dtype if jnp.iscomplexobj(x) else x.dtype
+    )
     y = product_filter(x, weight)
     if padding:
-        y = y[..., padding:padding + n]
+        y = y[..., padding : padding + n]
     return jnp.moveaxis(y, -1, axis)
 
 
 def _normalise_cutoff(cutoff: float, fs: float, name: str) -> float:
-    '''Convert a physical cut-off (Hz) to normalised cycles/sample.'''
+    """Convert a physical cut-off (Hz) to normalised cycles/sample."""
     nyq = 0.5 * fs
     if not 0.0 < cutoff < nyq:
         raise ValueError(
@@ -239,7 +241,7 @@ def bandpass(
     axis: int = -1,
     padding: int = 0,
 ) -> Num[Array, '... obs']:
-    '''Zero-phase frequency-domain band-pass: keep the ``(lo, hi)`` band.
+    """Zero-phase frequency-domain band-pass: keep the ``(lo, hi)`` band.
 
     Parameters
     ----------
@@ -272,7 +274,7 @@ def bandpass(
     -------
     Filtered signal, same shape as ``X``.  Differentiable through ``X``;
     ``fs`` / ``lo`` / ``hi`` / ``order`` are static.
-    '''
+    """
     lo_n = _normalise_cutoff(lo, fs, 'lo')
     hi_n = _normalise_cutoff(hi, fs, 'hi')
     if lo_n >= hi_n:
@@ -299,14 +301,14 @@ def bandstop(
     axis: int = -1,
     padding: int = 0,
 ) -> Num[Array, '... obs']:
-    '''Zero-phase frequency-domain band-stop (notch): reject ``(lo, hi)``.
+    """Zero-phase frequency-domain band-stop (notch): reject ``(lo, hi)``.
 
     The complement of ``bandpass``: passes frequencies below ``lo`` and
     above ``hi``, attenuating the band between.  Canonical use is notching
     a respiratory peak (~0.2-0.4 Hz) out of head-motion estimates before
     they are used as nuisance regressors.  Arguments are as for
     ``bandpass``; ``(lo, hi)`` is the *rejected* band.
-    '''
+    """
     lo_n = _normalise_cutoff(lo, fs, 'lo')
     hi_n = _normalise_cutoff(hi, fs, 'hi')
     if lo_n >= hi_n:
@@ -333,10 +335,10 @@ def lowpass(
     axis: int = -1,
     padding: int = 0,
 ) -> Num[Array, '... obs']:
-    '''Zero-phase frequency-domain low-pass: keep frequencies below ``cutoff``.
+    """Zero-phase frequency-domain low-pass: keep frequencies below ``cutoff``.
 
     Arguments as for ``bandpass``; ``cutoff`` is the pass-band edge in Hz.
-    '''
+    """
     c_n = _normalise_cutoff(cutoff, fs, 'cutoff')
     tw = (transition / fs) if transition is not None else 0.05
 
@@ -357,10 +359,10 @@ def highpass(
     axis: int = -1,
     padding: int = 0,
 ) -> Num[Array, '... obs']:
-    '''Zero-phase frequency-domain high-pass: keep frequencies above ``cutoff``.
+    """Zero-phase frequency-domain high-pass: keep frequencies above ``cutoff``.
 
     Arguments as for ``bandpass``; ``cutoff`` is the pass-band edge in Hz.
-    '''
+    """
     c_n = _normalise_cutoff(cutoff, fs, 'cutoff')
     tw = (transition / fs) if transition is not None else 0.05
 

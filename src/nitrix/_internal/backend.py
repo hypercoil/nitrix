@@ -18,6 +18,7 @@ per ``(function, shape-signature, dtype, backend)`` tuple per process.
 Set ``NITRIX_SILENCE_FALLBACK=1`` to suppress; set
 ``NITRIX_STRICT_BACKEND=1`` to convert fallback to error.
 """
+
 from __future__ import annotations
 
 import os
@@ -26,7 +27,6 @@ import warnings
 from typing import Any, Literal, Optional
 
 import jax
-
 
 # ---------------------------------------------------------------------------
 # Public types
@@ -86,11 +86,20 @@ def _has_ampere_or_newer_nvidia() -> bool:
             kind = (getattr(d, 'device_kind', '') or '').lower()
             # Best-effort match: the names we know to be Ampere+.
             ampere_plus_names = (
-                'a100', 'a10', 'a30', 'a40',          # Ampere data-centre
-                'rtx 30', 'rtx 40', 'rtx 50',         # Ampere/Lovelace/Blackwell consumer
-                'l4', 'l40',                          # Lovelace data-centre
-                'h100', 'h200', 'h800',               # Hopper
-                'b100', 'b200',                       # Blackwell
+                'a100',
+                'a10',
+                'a30',
+                'a40',  # Ampere data-centre
+                'rtx 30',
+                'rtx 40',
+                'rtx 50',  # Ampere/Lovelace/Blackwell consumer
+                'l4',
+                'l40',  # Lovelace data-centre
+                'h100',
+                'h200',
+                'h800',  # Hopper
+                'b100',
+                'b200',  # Blackwell
             )
             if any(n in kind for n in ampere_plus_names):
                 return True

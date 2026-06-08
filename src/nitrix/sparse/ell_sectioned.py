@@ -23,12 +23,12 @@ is *not* JIT-compatible because the per-bucket shapes are data-
 dependent.  Reuse is JIT-friendly (the per-bucket matmuls trace
 once and the dispatch is a static Python loop).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence, Tuple
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Int, Num
@@ -40,7 +40,6 @@ from ..semiring._types import Semiring
 from ..semiring.algebras import REAL
 from .ell import ELL
 
-
 __all__ = [
     'SectionedELL',
     'sectioned_ell_from_ragged',
@@ -50,7 +49,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class SectionedELL:
-    '''Bucketed-row ELL.
+    """Bucketed-row ELL.
 
     Attributes
     ----------
@@ -70,7 +69,7 @@ class SectionedELL:
         Outer dim of the implicit sparse matrix; same as a flat ELL.
     identity
         The semiring identity used for padding within each bucket.
-    '''
+    """
 
     sections: Tuple[ELL, ...]
     row_groups: Tuple[NDArray[Any], ...]
@@ -84,12 +83,12 @@ class SectionedELL:
 
     @property
     def total_storage(self) -> int:
-        '''Total per-row entries summed across all buckets.
+        """Total per-row entries summed across all buckets.
 
         Use this to verify the memory win vs. a flat ELL of the same
         adjacency: a flat ELL would store ``n_rows * max(k_max for
         b in sections)`` entries.
-        '''
+        """
         return sum(s.values.size for s in self.sections)
 
 
@@ -99,22 +98,22 @@ class SectionedELL:
 
 
 def _default_bucket(degree: int) -> int:
-    '''Default bucketing: ``ceil(log2(max(degree, 1)))``.
+    """Default bucketing: ``ceil(log2(max(degree, 1)))``.
 
     - degree 0 -> bucket 0 with k_max = 1 (and an identity-only row).
     - degree 1 -> bucket 0 with k_max = 1.
     - degree 2 -> bucket 1 with k_max = 2.
     - degree 3-4 -> bucket 2 with k_max = 4.
     - degree 5-8 -> bucket 3 with k_max = 8.  etc.
-    '''
+    """
     if degree <= 1:
         return 0
     return (degree - 1).bit_length()
 
 
 def _bucket_kmax(bucket: int) -> int:
-    '''Largest degree placeable in bucket ``b``.'''
-    return 1 if bucket == 0 else 2 ** bucket
+    """Largest degree placeable in bucket ``b``."""
+    return 1 if bucket == 0 else 2**bucket
 
 
 def sectioned_ell_from_ragged(
@@ -126,7 +125,7 @@ def sectioned_ell_from_ragged(
     pad_index: int = 0,
     bucket_by: Optional[Callable[[int], int]] = None,
 ) -> SectionedELL:
-    '''Build a ``SectionedELL`` from ragged per-row neighbour lists.
+    """Build a ``SectionedELL`` from ragged per-row neighbour lists.
 
     Parameters
     ----------
@@ -156,7 +155,7 @@ def sectioned_ell_from_ragged(
     typically done once per adjacency (e.g., once per mesh or once
     per pre-computed k-NN graph); the resulting ``SectionedELL``
     can then be passed through JIT'd code many times.
-    '''
+    """
     n_rows = len(values_per_row)
     if len(indices_per_row) != n_rows:
         raise ValueError(
@@ -164,16 +163,12 @@ def sectioned_ell_from_ragged(
             f'len(indices_per_row)={len(indices_per_row)}.'
         )
     if not (0 <= pad_index < n_cols):
-        raise ValueError(
-            f'pad_index={pad_index} not in [0, n_cols={n_cols}).'
-        )
+        raise ValueError(f'pad_index={pad_index} not in [0, n_cols={n_cols}).')
     if bucket_by is None:
         bucket_by = _default_bucket
 
     # Collect (bucket, row, values, indices) tuples.
-    buckets: dict[
-        int, list[tuple[int, NDArray[Any], NDArray[Any]]]
-    ] = {}
+    buckets: dict[int, list[tuple[int, NDArray[Any], NDArray[Any]]]] = {}
     for i in range(n_rows):
         v = np.asarray(values_per_row[i])
         idx = np.asarray(indices_per_row[i])
@@ -227,12 +222,14 @@ def sectioned_ell_from_ragged(
             if k_i > 0:
                 values[j, :k_i] = v
                 indices[j, :k_i] = idx
-        sections.append(ELL(
-            values=jnp.asarray(values),
-            indices=jnp.asarray(indices),
-            n_cols=n_cols,
-            identity=identity,
-        ))
+        sections.append(
+            ELL(
+                values=jnp.asarray(values),
+                indices=jnp.asarray(indices),
+                n_cols=n_cols,
+                identity=identity,
+            )
+        )
         row_groups.append(row_idx)
 
     return SectionedELL(
@@ -256,7 +253,7 @@ def sectioned_semiring_ell_matmul(
     semiring: Semiring[Any] = REAL,
     backend: Backend = 'auto',
 ) -> Num[Array, 'm ncol']:
-    '''Sectioned-ELL semiring matrix multiplication.
+    """Sectioned-ELL semiring matrix multiplication.
 
     For each bucket, run ``semiring_ell_matmul`` and scatter the
     result back to the original row positions.  The bucket loop is
@@ -289,7 +286,7 @@ def sectioned_semiring_ell_matmul(
     For the ``LOG`` and ``TROPICAL_*`` algebras with ``-inf`` /
     ``+inf`` identities, empty rows produce ``-inf`` / ``+inf``
     outputs respectively, which is the algebra-correct answer.
-    '''
+    """
     if B.shape[-2] != sectioned.n_cols:
         raise ValueError(
             f'B.shape[-2]={B.shape[-2]} must equal '
@@ -303,7 +300,9 @@ def sectioned_semiring_ell_matmul(
     # sensible value).
     if sectioned.identity is not None:
         init = jnp.full(
-            (sectioned.n_rows, ncol), sectioned.identity, dtype=out_dtype,
+            (sectioned.n_rows, ncol),
+            sectioned.identity,
+            dtype=out_dtype,
         )
     else:
         init = jnp.zeros((sectioned.n_rows, ncol), dtype=out_dtype)
@@ -311,7 +310,9 @@ def sectioned_semiring_ell_matmul(
     out = init
     for ell, row_idx in zip(sectioned.sections, sectioned.row_groups):
         bucket_out = semiring_ell_matmul(
-            ell.values, ell.indices, B,
+            ell.values,
+            ell.indices,
+            B,
             semiring=semiring,
             n_cols=sectioned.n_cols,
             backend=backend,

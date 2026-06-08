@@ -34,6 +34,7 @@ What changed from ``nitrix.functional.fourier``:
 - ``analytic_signal`` raises ``TypeError`` (not ``ValueError``)
   for complex input -- matches the type-error intent.
 """
+
 from __future__ import annotations
 
 import math
@@ -42,7 +43,6 @@ from typing import Any, Optional, Tuple
 import jax.numpy as jnp
 from jax.typing import DTypeLike
 from jaxtyping import Array, Complex, Float, Num
-
 
 __all__ = [
     'product_filter',
@@ -61,7 +61,7 @@ def product_filter(
     weight: Num[Array, '... obs_freq'],
     **fft_params: Any,
 ) -> Num[Array, '... obs']:
-    '''Frequency-domain convolution via ``rfft`` multiplication.
+    """Frequency-domain convolution via ``rfft`` multiplication.
 
     Equivalent to a circular convolution along the trailing axis.
 
@@ -78,7 +78,7 @@ def product_filter(
     Returns
     -------
     Filtered signal, same shape as ``X``.
-    '''
+    """
     n = X.shape[-1]
     Xf = jnp.fft.rfft(X, n=n, **fft_params)
     return jnp.fft.irfft(weight * Xf, n=n, **fft_params)
@@ -89,13 +89,13 @@ def product_filtfilt(
     weight: Num[Array, '... obs_freq'],
     **fft_params: Any,
 ) -> Num[Array, '... obs']:
-    '''Zero-phase forward-backward frequency-domain filter.
+    """Zero-phase forward-backward frequency-domain filter.
 
     Filter forward, reverse, filter again, reverse back.  Net
     effect is zero phase delay even when ``weight`` is complex;
     amplitude response is quadratic in the filter weight.  For
     real ``weight``, ``product_filter`` already has zero phase.
-    '''
+    """
     X_filt = product_filter(X, weight, **fft_params)
     return jnp.flip(
         product_filter(jnp.flip(X_filt, axis=-1), weight, **fft_params),
@@ -104,7 +104,7 @@ def product_filtfilt(
 
 
 def _hilbert_mask(n: int, dtype: DTypeLike) -> Float[Array, 'n']:
-    '''Hilbert mask for the analytic signal at FFT length ``n``.
+    """Hilbert mask for the analytic signal at FFT length ``n``.
 
     Standard recipe (Marple 1999):
 
@@ -112,24 +112,27 @@ def _hilbert_mask(n: int, dtype: DTypeLike) -> Float[Array, 'n']:
     - Positive frequencies (``0 < k < n / 2``): 2.
     - Nyquist (``k = n / 2``, even ``n`` only): 1.
     - Negative frequencies (``k > n / 2``): 0.
-    '''
+    """
     k = jnp.arange(n)
     if n % 2 == 0:
         return jnp.where(
-            k == 0, 1.0,
+            k == 0,
+            1.0,
             jnp.where(
-                k < n // 2, 2.0,
+                k < n // 2,
+                2.0,
                 jnp.where(k == n // 2, 1.0, 0.0),
             ),
         ).astype(dtype)
     return jnp.where(
-        k == 0, 1.0,
+        k == 0,
+        1.0,
         jnp.where(k < (n + 1) // 2, 2.0, 0.0),
     ).astype(dtype)
 
 
 def _reshape_for_axis(h: Array, axis: int, reference: Array) -> Array:
-    '''Reshape a 1-D mask so it broadcasts against ``reference`` along ``axis``.'''
+    """Reshape a 1-D mask so it broadcasts against ``reference`` along ``axis``."""
     shape = [1] * reference.ndim
     shape[axis % reference.ndim] = -1
     return h.reshape(shape)
@@ -141,7 +144,7 @@ def analytic_signal(
     axis: int = -1,
     n: Optional[int] = None,
 ) -> Complex[Array, '...']:
-    '''Complex analytic signal of a real time series.
+    """Complex analytic signal of a real time series.
 
     Satisfies ``Re(X_a) = X``, ``Im(X_a) = Hilbert(X)``;
     ``|X_a|`` is the envelope and ``angle(X_a)`` is the
@@ -161,7 +164,7 @@ def analytic_signal(
     -------
     The complex analytic signal with the same shape as ``X``
     (or with the ``axis`` resized to ``n``).
-    '''
+    """
     if jnp.iscomplexobj(X):
         raise TypeError(
             'analytic_signal: input must be strictly real; '
@@ -180,10 +183,10 @@ def hilbert_transform(
     axis: int = -1,
     n: Optional[int] = None,
 ) -> Float[Array, '...']:
-    '''Hilbert transform of a real signal.
+    """Hilbert transform of a real signal.
 
     Equivalent to ``analytic_signal(X).imag``.
-    '''
+    """
     return analytic_signal(X, axis=axis, n=n).imag
 
 
@@ -193,12 +196,12 @@ def envelope(
     axis: int = -1,
     n: Optional[int] = None,
 ) -> Float[Array, '...']:
-    '''Magnitude of the analytic signal: ``|X_a|``.
+    """Magnitude of the analytic signal: ``|X_a|``.
 
     If you also need ``instantaneous_phase`` or
     ``instantaneous_frequency``, use ``env_inst`` to compute all
     three from a single analytic-signal call.
-    '''
+    """
     return jnp.abs(analytic_signal(X, axis=axis, n=n))
 
 
@@ -209,7 +212,7 @@ def instantaneous_phase(
     n: Optional[int] = None,
     period: float = 2 * math.pi,
 ) -> Float[Array, '...']:
-    '''Unwrapped instantaneous phase: ``unwrap(angle(X_a))``.'''
+    """Unwrapped instantaneous phase: ``unwrap(angle(X_a))``."""
     return jnp.unwrap(
         jnp.angle(analytic_signal(X, axis=axis, n=n)),
         axis=axis,
@@ -225,11 +228,11 @@ def instantaneous_frequency(
     fs: float = 1.0,
     period: float = 2 * math.pi,
 ) -> Float[Array, '...']:
-    '''Instantaneous frequency: ``fs * diff(unwrap(angle)) / period``.
+    """Instantaneous frequency: ``fs * diff(unwrap(angle)) / period``.
 
     The output axis is one shorter than the input axis (discrete
     derivative).
-    '''
+    """
     phase = instantaneous_phase(X, axis=axis, n=n, period=period)
     return fs * jnp.diff(phase, axis=axis) / period
 
@@ -242,7 +245,7 @@ def env_inst(
     fs: float = 1.0,
     period: float = 2 * math.pi,
 ) -> Tuple[Float[Array, '...'], Float[Array, '...'], Float[Array, '...']]:
-    '''Envelope + instantaneous frequency + phase from one ``analytic_signal`` call.
+    """Envelope + instantaneous frequency + phase from one ``analytic_signal`` call.
 
     More efficient than three separate calls when you need all
     three quantities -- they share the analytic-signal
@@ -252,7 +255,7 @@ def env_inst(
     -------
     ``(envelope, instantaneous_frequency, instantaneous_phase)``.
     The frequency axis is one shorter than the phase axis.
-    '''
+    """
     Xa = analytic_signal(X, axis=axis, n=n)
     env = jnp.abs(Xa)
     phase = jnp.unwrap(jnp.angle(Xa), axis=axis, period=period)

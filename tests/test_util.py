@@ -4,50 +4,52 @@
 """
 Unit tests for tensor utility functions.
 """
-import pytest
-import hypothesis
-from hypothesis import assume, given
+
 from typing import Literal
-import hypothesis.strategies as st
+
+import hypothesis
 import hypothesis.extra.numpy as npst
+import hypothesis.strategies as st
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
+from hypothesis import assume, given
+
 from nitrix._internal import (
+    _compose,
     _conform_bform_weight,
     _dim_or_none,
-    _compose,
     _seq_pad,
-    atleast_4d,
-    apply_vmap_over_outer,
-    vmap_over_outer,
-    broadcast_ignoring,
-    orient_and_conform,
-    promote_axis,
-    demote_axis,
-    fold_axis,
-    unfold_axes,
-    axis_complement,
-    standard_axis_number,
-    standard_axis_number_strict,
-    negative_axis_number,
-    negative_axis_number_strict,
-    fold_and_promote,
-    demote_and_unfold,
-    promote_to_rank,
-    extend_to_size,
-    extend_to_max_size,
-    argsort,
-    complex_decompose,
-    complex_recompose,
     amplitude_apply,
     apply_mask,
+    apply_vmap_over_outer,
+    argsort,
+    atleast_4d,
+    axis_complement,
+    broadcast_ignoring,
+    complex_decompose,
+    complex_recompose,
     conform_mask,
+    demote_and_unfold,
+    demote_axis,
+    extend_to_max_size,
+    extend_to_size,
+    fold_and_promote,
+    fold_axis,
     mask_tensor,
     masker,
+    negative_axis_number,
+    negative_axis_number_strict,
+    orient_and_conform,
+    promote_axis,
+    promote_to_rank,
+    standard_axis_number,
+    standard_axis_number_strict,
+    unfold_axes,
+    vmap_over_outer,
 )
 from nitrix._internal.testutil import cfg_variants_test
-
 
 VMOO_TEST_FUNCTIONS = {
     0: ('sum', jnp.sum, 1),
@@ -63,21 +65,25 @@ def generate_array_for_folding(
     max_ndim: int = 5,
 ):
     rank = draw(st.integers(min_value=2, max_value=max_ndim))
-    axis_to_fold = draw(st.integers(
-        min_value=-rank,
-        max_value=rank - 1,
-    ))
+    axis_to_fold = draw(
+        st.integers(
+            min_value=-rank,
+            max_value=rank - 1,
+        )
+    )
     ax_std = standard_axis_number(axis_to_fold, rank)
-    folded_shape = draw(npst.array_shapes(
-        min_dims=rank + 1,
-        max_dims=rank + 1,
-    ))
+    folded_shape = draw(
+        npst.array_shapes(
+            min_dims=rank + 1,
+            max_dims=rank + 1,
+        )
+    )
     folded_size = folded_shape[ax_std]
     num_folds = folded_shape[ax_std + 1]
     shape = (
         *folded_shape[:ax_std],
         folded_size * num_folds,
-        *folded_shape[ax_std + 2:],
+        *folded_shape[ax_std + 2 :],
     )
     arr = jnp.arange(np.prod(shape)).reshape(shape)
     return arr, axis_to_fold, folded_size, num_folds
@@ -96,18 +102,20 @@ def generate_arrays_for_broadcast_ignoring(
     shape_2_src = draw(npst.array_shapes(min_dims=rank_min, max_dims=rank_min))
     num_ignore = draw(st.integers(min_value=0, max_value=rank_min))
     if num_ignore > 0:
-        ignore = set(draw(st.lists(
-            st.integers(min_value=-rank_min, max_value=-1),
-            min_size=num_ignore,
-            max_size=num_ignore,
-            unique=True,
-        )))
+        ignore = set(
+            draw(
+                st.lists(
+                    st.integers(min_value=-rank_min, max_value=-1),
+                    min_size=num_ignore,
+                    max_size=num_ignore,
+                    unique=True,
+                )
+            )
+        )
     else:
         ignore = set()
     shape_2_rev = tuple(
-        shape_2_src[-(i + 1)]
-        if -(i + 1) in ignore
-        else shape
+        shape_2_src[-(i + 1)] if -(i + 1) in ignore else shape
         for i, shape in enumerate(shape_2_bc[::-1])
     )
     shape_2 = shape_2_rev[::-1]
@@ -116,18 +124,18 @@ def generate_arrays_for_broadcast_ignoring(
         shape_1, shape_2 = shape_2, shape_1
     arr_1 = jnp.arange(np.prod(shape_1)).reshape(shape_1)
     arr_2 = jnp.arange(np.prod(shape_2)).reshape(shape_2)
-    shape_1_padded_rev = _seq_pad(shape_1, rank_max, pad='first', pad_value=1)[::-1]
-    shape_2_padded_rev = _seq_pad(shape_2, rank_max, pad='first', pad_value=1)[::-1]
+    shape_1_padded_rev = _seq_pad(shape_1, rank_max, pad='first', pad_value=1)[
+        ::-1
+    ]
+    shape_2_padded_rev = _seq_pad(shape_2, rank_max, pad='first', pad_value=1)[
+        ::-1
+    ]
     shape_1_out = tuple(
-        shape
-        if -(i + 1) in ignore
-        else max(shape, shape_2_padded_rev[i])
+        shape if -(i + 1) in ignore else max(shape, shape_2_padded_rev[i])
         for i, shape in enumerate(shape_1_padded_rev)
     )[::-1]
     shape_2_out = tuple(
-        shape
-        if -(i + 1) in ignore
-        else max(shape, shape_1_padded_rev[i])
+        shape if -(i + 1) in ignore else max(shape, shape_1_padded_rev[i])
         for i, shape in enumerate(shape_2_padded_rev)
     )[::-1]
     return arr_1, arr_2, tuple(ignore), shape_1_out, shape_2_out
@@ -143,7 +151,9 @@ def generate_array_for_vmoo(
     )
     vmoo_name, vmoo_fn, vmoo_rank = VMOO_TEST_FUNCTIONS[vmoo_fn_idx]
     batch_rank = draw(st.integers(min_value=0, max_value=max_batch_ndim))
-    batch_shape = draw(npst.array_shapes(min_dims=batch_rank, max_dims=batch_rank))
+    batch_shape = draw(
+        npst.array_shapes(min_dims=batch_rank, max_dims=batch_rank)
+    )
     obs_dim = draw(st.integers(min_value=2, max_value=20))
     if vmoo_name == 'sum':
         shape = (*batch_shape, obs_dim)
@@ -162,12 +172,14 @@ def draw_subcompatible_array(
 ):
     orig_ndim = draw(st.integers(min_value=2, max_value=max_ndim))
     subc_ndim = draw(st.integers(min_value=2, max_value=orig_ndim))
-    subc_axes = draw(st.lists(
-        st.integers(min_value=-orig_ndim, max_value=orig_ndim - 1),
-        min_size=subc_ndim,
-        max_size=subc_ndim,
-        unique=True,
-    ))
+    subc_axes = draw(
+        st.lists(
+            st.integers(min_value=-orig_ndim, max_value=orig_ndim - 1),
+            min_size=subc_ndim,
+            max_size=subc_ndim,
+            unique=True,
+        )
+    )
     subc_axes_std = set(
         standard_axis_number(ax, orig_ndim) for ax in subc_axes
     )
@@ -195,11 +207,13 @@ def generate_arrays_for_max_size_extend(
 ):
     ref_ndim = draw(st.integers(min_value=2, max_value=max_ndim))
     ref_shape = draw(npst.array_shapes(min_dims=ref_ndim, max_dims=ref_ndim))
-    other_ranks = draw(st.lists(
-        st.integers(min_value=2, max_value=ref_ndim),
-        min_size=num_arrays - 1,
-        max_size=num_arrays - 1,
-    ))
+    other_ranks = draw(
+        st.lists(
+            st.integers(min_value=2, max_value=ref_ndim),
+            min_size=num_arrays - 1,
+            max_size=num_arrays - 1,
+        )
+    )
     other_shapes = [
         tuple(
             draw(st.integers(min_value=1, max_value=ax))
@@ -217,23 +231,33 @@ def generate_arrays_for_max_size_extend(
     return arr_list, ref_shape
 
 
-@pytest.mark.parametrize("weight, expected_shape, expected_values", [
-    (jnp.array([1, 2, 3]), (3,), [1, 2, 3]),
-    (jnp.array([[1, 2, 3], [4, 5, 6]]), (2, 1, 3), [1, 2, 3, 4, 5, 6]),
-    (jnp.array([[1, 2, 3], [4, 5, 6]])[:, None, :], (2, 1, 3), [1, 2, 3, 4, 5, 6])
-])
+@pytest.mark.parametrize(
+    'weight, expected_shape, expected_values',
+    [
+        (jnp.array([1, 2, 3]), (3,), [1, 2, 3]),
+        (jnp.array([[1, 2, 3], [4, 5, 6]]), (2, 1, 3), [1, 2, 3, 4, 5, 6]),
+        (
+            jnp.array([[1, 2, 3], [4, 5, 6]])[:, None, :],
+            (2, 1, 3),
+            [1, 2, 3, 4, 5, 6],
+        ),
+    ],
+)
 def test_conform_bform_weight(weight, expected_shape, expected_values):
     result = _conform_bform_weight(weight)
     assert result.shape == expected_shape
     assert jnp.all(result.ravel() == jnp.asarray(expected_values))
 
 
-@pytest.mark.parametrize("x, align, i, ndmax, expected", [
-    (3, True, 1, 4, 1),
-    (3, True, 0, 4, 0),
-    (3, False, 1, 4, 0),
-    (3, False, 0, 4, None)
-])
+@pytest.mark.parametrize(
+    'x, align, i, ndmax, expected',
+    [
+        (3, True, 1, 4, 1),
+        (3, True, 0, 4, 0),
+        (3, False, 1, 4, 0),
+        (3, False, 0, 4, None),
+    ],
+)
 def test_dim_or_none(x, align, i, ndmax, expected):
     assert _dim_or_none(x, align, i, ndmax) == expected
 
@@ -242,45 +266,56 @@ def test_compose():
     def f(g):
         def h(x):
             return g(x) + 1
+
         return h
+
     h = _compose(lambda x: x, f)
     assert h(0) == 1
 
 
-@pytest.mark.parametrize("seq, length, pad_value, pad, expected", [
-    ((1, 2, 3), 5, None, 'last', (1, 2, 3, None, None)),
-    ((1, 2, 3), 3, None, 'last', (1, 2, 3)),
-    ((1, 2, 3), 5, 0, 'last', (1, 2, 3, 0, 0)),
-    ((1, 2, 3), 5, None, 'first', (None, None, 1, 2, 3)),
-    ((1, 2, 3), 2, None, 'last', (1, 2, 3)),
-])
+@pytest.mark.parametrize(
+    'seq, length, pad_value, pad, expected',
+    [
+        ((1, 2, 3), 5, None, 'last', (1, 2, 3, None, None)),
+        ((1, 2, 3), 3, None, 'last', (1, 2, 3)),
+        ((1, 2, 3), 5, 0, 'last', (1, 2, 3, 0, 0)),
+        ((1, 2, 3), 5, None, 'first', (None, None, 1, 2, 3)),
+        ((1, 2, 3), 2, None, 'last', (1, 2, 3)),
+    ],
+)
 def test_seq_pad(seq, length, pad_value, pad, expected):
     assert _seq_pad(seq, length, pad_value=pad_value, pad=pad) == expected
 
 
-@pytest.mark.parametrize("seq, length, pad", [
-    ((1, 2, 3), 2, 'invalid'),
-])
+@pytest.mark.parametrize(
+    'seq, length, pad',
+    [
+        ((1, 2, 3), 2, 'invalid'),
+    ],
+)
 def test_seq_pad_raises(seq, length, pad):
     with pytest.raises(ValueError):
         _seq_pad(seq, length, pad=pad)
 
 
-@pytest.mark.parametrize("x, expected_shape", [
-    (jnp.asarray(0), (1, 1, 1, 1)),
-    (jnp.zeros(3), (1, 1, 1, 3)),
-    (jnp.zeros((2, 3)), (1, 1, 2, 3)),
-    (jnp.zeros((2, 3, 4)), (1, 2, 3, 4)),
-    (jnp.zeros((2, 3, 4, 5)), (2, 3, 4, 5)),
-])
+@pytest.mark.parametrize(
+    'x, expected_shape',
+    [
+        (jnp.asarray(0), (1, 1, 1, 1)),
+        (jnp.zeros(3), (1, 1, 1, 3)),
+        (jnp.zeros((2, 3)), (1, 1, 2, 3)),
+        (jnp.zeros((2, 3, 4)), (1, 2, 3, 4)),
+        (jnp.zeros((2, 3, 4, 5)), (2, 3, 4, 5)),
+    ],
+)
 def test_atleast_4d(x, expected_shape):
     assert atleast_4d(x).shape == expected_shape
 
 
 def test_atleast_4d_multiple():
-    assert (
-        atleast_4d(jnp.asarray(0), jnp.asarray(0)) ==
-        (jnp.zeros((1, 1, 1, 1)), jnp.zeros((1, 1, 1, 1)))
+    assert atleast_4d(jnp.asarray(0), jnp.asarray(0)) == (
+        jnp.zeros((1, 1, 1, 1)),
+        jnp.zeros((1, 1, 1, 1)),
     )
 
 
@@ -366,16 +401,10 @@ def test_axis_ops():
 
 def test_broadcast_ignoring():
     shapes = (
-        (
-            ((2, 3, 2), (4, 2)),
-            ((2, 3, 2), (2, 4, 2))
-        ),
-        (
-            ((2, 3, 2), (2,)),
-            ((2, 3, 2), (2, 1, 2))
-        ),
+        (((2, 3, 2), (4, 2)), ((2, 3, 2), (2, 4, 2))),
+        (((2, 3, 2), (2,)), ((2, 3, 2), (2, 1, 2))),
     )
-    for ((x_in, y_in), (x_out, y_out)) in shapes:
+    for (x_in, y_in), (x_out, y_out) in shapes:
         X, Y = broadcast_ignoring(
             jnp.empty(x_in),
             jnp.empty(y_in),
@@ -384,16 +413,10 @@ def test_broadcast_ignoring():
         assert X.shape == x_out
         assert Y.shape == y_out
     shapes = (
-        (
-            ((2, 3, 2), (4, 2)),
-            ((2, 3, 2), (1, 4, 2))
-        ),
-        (
-            ((2, 3, 2), (2,)),
-            ((2, 3, 2), (1, 1, 2))
-        ),
+        (((2, 3, 2), (4, 2)), ((2, 3, 2), (1, 4, 2))),
+        (((2, 3, 2), (2,)), ((2, 3, 2), (1, 1, 2))),
     )
-    for ((x_in, y_in), (x_out, y_out)) in shapes:
+    for (x_in, y_in), (x_out, y_out) in shapes:
         X, Y = broadcast_ignoring(
             jnp.empty(x_in),
             jnp.empty(y_in),
@@ -422,10 +445,8 @@ def vmap_over_outer_test_arg():
     w = np.zeros((test_obs, test_obs))
     rows, cols = np.diag_indices_from(w)
     w[(rows, cols)] = np.random.rand(test_obs)
-    w[(rows[:-offset], cols[offset:])] = (
-        3 * np.random.rand(test_obs - offset))
-    w[(rows[:-offset2], cols[offset2:])] = (
-        np.random.rand(test_obs - offset2))
+    w[(rows[:-offset], cols[offset:])] = 3 * np.random.rand(test_obs - offset)
+    w[(rows[:-offset2], cols[offset2:])] = np.random.rand(test_obs - offset2)
     w = jnp.stack([w] * 20)
     w = w.reshape(2, 2, 5, test_obs, test_obs)
     return w
@@ -433,7 +454,9 @@ def vmap_over_outer_test_arg():
 
 def test_apply_vmap_over_outer():
     w = vmap_over_outer_test_arg()
-    out = apply_vmap_over_outer((w,), f=jnp.diagonal, f_dim=(2,), align_outer=(False,))
+    out = apply_vmap_over_outer(
+        (w,), f=jnp.diagonal, f_dim=(2,), align_outer=(False,)
+    )
     ref = jax.vmap(jax.vmap(jax.vmap(jnp.diagonal, 0, 0), 1, 1), 2, 2)(w)
     assert np.allclose(out, ref)
 
@@ -443,7 +466,8 @@ def test_vmap_over_outer():
 
     jaxpr_test = jax.make_jaxpr(vmap_over_outer(jnp.diagonal, 2))((w,))
     jaxpr_ref = jax.make_jaxpr(
-        jax.vmap(jax.vmap(jax.vmap(jnp.diagonal, 0, 0), 1, 1), 2, 2))(w)
+        jax.vmap(jax.vmap(jax.vmap(jnp.diagonal, 0, 0), 1, 1), 2, 2)
+    )(w)
     assert jaxpr_test.jaxpr.pretty_print() == jaxpr_ref.jaxpr.pretty_print()
 
     out = vmap_over_outer(jnp.diagonal, 2)((w,))
@@ -451,7 +475,9 @@ def test_vmap_over_outer():
     assert np.allclose(out, ref)
 
     out = jax.jit(vmap_over_outer(jnp.diagonal, 2))((w,))
-    ref = jax.jit(jax.vmap(jax.vmap(jax.vmap(jnp.diagonal, 0, 0), 1, 1), 2, 2))(w)
+    ref = jax.jit(
+        jax.vmap(jax.vmap(jax.vmap(jnp.diagonal, 0, 0), 1, 1), 2, 2)
+    )(w)
     assert np.allclose(out, ref)
 
     L = np.random.rand(5, 13)
@@ -485,10 +511,19 @@ def test_vmap_over_outer_pbt(array):
 
 
 def test_argsort():
-    assert (
-        argsort([3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]) == 
-        [1, 3, 6, 0, 9, 2, 4, 8, 10, 7, 5]
-    )
+    assert argsort([3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]) == [
+        1,
+        3,
+        6,
+        0,
+        9,
+        2,
+        4,
+        8,
+        10,
+        7,
+        5,
+    ]
 
 
 def test_orient_and_conform():
@@ -496,21 +531,21 @@ def test_orient_and_conform():
     R = np.random.rand(2, 7, 11, 1, 3)
     out = orient_and_conform(X.swapaxes(-1, 0), (1, -1), reference=R)
     ref = X.swapaxes(-1, -2)[None, :, None, None, :]
-    assert(out.shape == ref.shape)
+    assert out.shape == ref.shape
     assert np.all(out == ref)
 
     X = np.random.rand(7)
     R = np.random.rand(2, 7, 11, 1, 3)
     out = orient_and_conform(X, 1, reference=R)
     ref = X[None, :, None, None, None]
-    assert(out.shape == ref.shape)
+    assert out.shape == ref.shape
     assert np.all(out == ref)
 
     # test with jit compilation
     jorient = jax.jit(orient_and_conform, static_argnames=('axis', 'dim'))
     out = jorient(X, 1, dim=R.ndim)
     ref = X[None, :, None, None, None]
-    assert(out.shape == ref.shape)
+    assert out.shape == ref.shape
     assert np.all(out == ref)
 
     with pytest.raises(ValueError):
@@ -526,8 +561,8 @@ def test_orient_and_conform_pbt(array, fn):
     X, axes, ref_shape = array
     out0 = fn(X, axes, reference=jnp.empty(ref_shape))
     out1 = fn(X, axes, dim=len(ref_shape))
-    out0 + jnp.empty(ref_shape) # implicit check for shape compatibility
-    out1 + jnp.empty(ref_shape) # implicit check for shape compatibility
+    out0 + jnp.empty(ref_shape)  # implicit check for shape compatibility
+    out1 + jnp.empty(ref_shape)  # implicit check for shape compatibility
     assert out0.shape == out1.shape
 
 
@@ -668,16 +703,13 @@ def test_masker():
 )
 def test_masker_pbt(array, explicit_output_axis):
     mask_arr, mask_axes, orig_shape = array
-    mask_arr = (mask_arr > 0.5)
+    mask_arr = mask_arr > 0.5
     if len(mask_axes) == 1:
         mask_axes = mask_axes[0]
     else:
         explicit_output_axis = True
     sign = tuple(ax < 0 for ax in mask_axes)
-    if (
-        (any(sign) and not all(sign)) or
-        np.all(~mask_arr)
-    ):
+    if (any(sign) and not all(sign)) or np.all(~mask_arr):
         with pytest.raises(ValueError):
             masker(mask_arr, axis=mask_axes)
         return
@@ -685,8 +717,7 @@ def test_masker_pbt(array, explicit_output_axis):
     output_axis = -1 if explicit_output_axis else None
     out = masker(mask_arr, axis=mask_axes, output_axis=output_axis)(orig_arr)
     standard_mask_axes = tuple(
-        standard_axis_number(ax, orig_arr.ndim)
-        for ax in mask_axes
+        standard_axis_number(ax, orig_arr.ndim) for ax in mask_axes
     )
     if output_axis is not None:
         expected_shape = tuple(

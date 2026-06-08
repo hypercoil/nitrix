@@ -68,7 +68,7 @@ def n4_bias_field_correction(
     Float[Array, '... *spatial'],
     Tuple[Float[Array, '... *spatial'], Float[Array, '... *spatial']],
 ]:
-    '''N4 (Tustison) bias-field correction.
+    """N4 (Tustison) bias-field correction.
 
     Estimates the smooth multiplicative bias field corrupting ``image`` and
     returns the corrected image (``image / bias``).  Follows the ITK / ANTs
@@ -137,7 +137,7 @@ def n4_bias_field_correction(
     The B-spline field smoothing is differentiable; the histogram sharpening
     is not (piecewise-constant binning).  The op JITs cleanly (static FFT
     and control-lattice shapes; ``lax.while_loop`` iteration).
-    '''
+    """
     return apply_bias_field_correction(
         image,
         mask=mask,

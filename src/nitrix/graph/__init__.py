@@ -19,6 +19,7 @@ Submodules:
 
 See SPEC §4.5, SPEC §6.1, and IMPLEMENTATION_PLAN §6.1 tasks 3.5-3.7.
 """
+
 from .laplacian import (
     degree_vector,
     laplacian,

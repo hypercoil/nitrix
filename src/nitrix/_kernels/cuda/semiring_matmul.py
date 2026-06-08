@@ -20,19 +20,18 @@ This module is an implementation detail: never import from
 ``nitrix._kernels.cuda`` directly.  Use ``nitrix.semiring.semiring_matmul``
 which handles backend dispatch and fallback observability.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional, cast
 
 import jax
 import jax.lax as lax
-import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import triton as plgpu
 from jaxtyping import Array, Num
 
 from ...semiring._types import Semiring
-
 
 __all__ = [
     'semiring_matmul_pallas',
@@ -41,11 +40,11 @@ __all__ = [
 
 
 class PallasNotTileable(RuntimeError):
-    '''The Pallas Triton kernel rejected the requested shape.
+    """The Pallas Triton kernel rejected the requested shape.
 
     Caught by the public dispatcher in ``nitrix.semiring.matmul`` and
     translated into a ``NitrixBackendFallback`` warning.
-    '''
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +53,7 @@ class PallasNotTileable(RuntimeError):
 
 
 def _pick_blocks(m: int, k: int, n: int) -> tuple[int, int, int]:
-    '''Choose ``(BM, BK, BN)`` tiles that divide ``(m, k, n)``.
+    """Choose ``(BM, BK, BN)`` tiles that divide ``(m, k, n)``.
 
     We prefer the largest of ``{128, 64, 32, 16}`` that divides each
     extent, since the streaming kernel's arithmetic intensity grows
@@ -63,14 +62,14 @@ def _pick_blocks(m: int, k: int, n: int) -> tuple[int, int, int]:
     granularity; choosing it too large compiles slowly, too small
     leaves accumulator-flush overhead.  The defaults match the
     refstubs experimental sweet spot on Ampere (sm_80) cards.
-    '''
-    def largest_divisor(
-        x: int, candidates: tuple[int, ...]
-    ) -> Optional[int]:
+    """
+
+    def largest_divisor(x: int, candidates: tuple[int, ...]) -> Optional[int]:
         for c in candidates:
             if x % c == 0:
                 return c
         return None
+
     bm = largest_divisor(m, (128, 64, 32, 16))
     bn = largest_divisor(n, (128, 64, 32, 16))
     bk = largest_divisor(k, (32, 16, 8))
@@ -100,9 +99,9 @@ def _build_kernel(
         def body(kk: int, acc: Any) -> Any:
             # Slice 1-wide stripes off the *refs* (Triton supports pl.ds on
             # refs but not lax.dynamic_slice on intermediate arrays).
-            a_col = a_ref[:, pl.ds(kk, 1)]                       # (bm, 1)
-            b_row = b_ref[pl.ds(kk, 1), :]                       # (1, bn)
-            value = binary_op.combine(a_col, b_row)              # (bm, bn)
+            a_col = a_ref[:, pl.ds(kk, 1)]  # (bm, 1)
+            b_row = b_ref[pl.ds(kk, 1), :]  # (1, bn)
+            value = binary_op.combine(a_col, b_row)  # (bm, bn)
             return monoid.update(acc, value)
 
         acc = lax.fori_loop(0, k, body, acc_init)
@@ -117,7 +116,7 @@ def semiring_matmul_pallas(
     *,
     semiring: Semiring[Any],
 ) -> Num[Array, 'm n']:
-    '''Pallas Triton ``semiring_matmul`` for a single 2-D ``(A, B)`` pair.
+    """Pallas Triton ``semiring_matmul`` for a single 2-D ``(A, B)`` pair.
 
     Batching is handled by ``vmap`` upstream in
     ``nitrix.semiring.matmul``.
@@ -128,7 +127,7 @@ def semiring_matmul_pallas(
         If a viable ``(BM, BK, BN)`` tile cannot be chosen for the
         requested shape.  The public dispatcher catches this and falls
         back to JAX with a ``NitrixBackendFallback`` warning.
-    '''
+    """
     if A.ndim != 2 or B.ndim != 2:
         raise PallasNotTileable(
             'semiring_matmul_pallas only handles 2-D inputs; '
@@ -138,8 +137,7 @@ def semiring_matmul_pallas(
     k2, n = B.shape
     if k != k2:
         raise PallasNotTileable(
-            f'semiring_matmul_pallas: contraction dim mismatch '
-            f'k={k} != {k2}.'
+            f'semiring_matmul_pallas: contraction dim mismatch k={k} != {k2}.'
         )
 
     bm, bk, bn = _pick_blocks(int(m), int(k), int(n))

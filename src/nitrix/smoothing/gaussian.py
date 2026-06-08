@@ -14,17 +14,15 @@ Padding modes match ``scipy.ndimage.gaussian_filter``: default
 ``"reflect"`` (the medical-imaging convention -- preserves boundary
 intensities), with ``"constant"`` and ``"edge"`` also supported.
 """
+
 from __future__ import annotations
 
-import math
 from typing import Optional, Sequence, Union
 
-import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.typing import DTypeLike
 from jaxtyping import Array, Float
-
 
 __all__ = ['gaussian']
 
@@ -36,7 +34,7 @@ def _gaussian_1d_kernel(
     *,
     kernel_size: Optional[int] = None,
 ) -> Array:
-    '''Build a 1D Gaussian kernel.
+    """Build a 1D Gaussian kernel.
 
     If ``kernel_size`` is ``None`` (default), the kernel half-width
     is ``int(truncate * sigma + 0.5)`` (scipy convention) and the
@@ -53,7 +51,7 @@ def _gaussian_1d_kernel(
 
     Values are normalised so the kernel sums to 1 -- a constant
     input is preserved.
-    '''
+    """
     if sigma <= 0:
         raise ValueError(f'sigma must be positive; got {sigma!r}.')
     if kernel_size is None:
@@ -62,9 +60,7 @@ def _gaussian_1d_kernel(
         x = jnp.arange(-half, half + 1, dtype=dtype)
     else:
         if kernel_size < 1:
-            raise ValueError(
-                f'kernel_size must be >= 1; got {kernel_size!r}.'
-            )
+            raise ValueError(f'kernel_size must be >= 1; got {kernel_size!r}.')
         # For odd kernel_size N=2h+1, taps are at -h..+h.
         # For even kernel_size N=2h, taps are at -h+0.5..+h-0.5
         # (so the kernel is offset by half a pixel; the output is
@@ -83,9 +79,12 @@ def _gaussian_1d_kernel(
 
 
 def _conv_1d_along_axis(
-    x: Array, kernel: Array, axis: int, mode: str,
+    x: Array,
+    kernel: Array,
+    axis: int,
+    mode: str,
 ) -> Array:
-    '''Convolve ``x`` with a 1D ``kernel`` along ``axis``.
+    """Convolve ``x`` with a 1D ``kernel`` along ``axis``.
 
     Boundary handling: ``mode`` controls how the input is padded
     before the (otherwise VALID) convolution.  Supports
@@ -99,7 +98,7 @@ def _conv_1d_along_axis(
     minimum same-size pad.  The output is half-pixel-shifted
     relative to a centred-kernel convolution; this is the price
     of an even-tap Gaussian and is documented at the public API.
-    '''
+    """
     K = kernel.size
     if K % 2 == 1:
         half = (K - 1) // 2
@@ -133,10 +132,11 @@ def _conv_1d_along_axis(
     x_moved = jnp.moveaxis(x_padded, axis, -1)
     batch_shape = x_moved.shape[:-1]
     L = x_moved.shape[-1]
-    x_flat = x_moved.reshape(-1, 1, L)                        # (B*, 1, L)
-    k = kernel.reshape(1, 1, kernel.size)                     # (C_out=1, C_in=1, K)
+    x_flat = x_moved.reshape(-1, 1, L)  # (B*, 1, L)
+    k = kernel.reshape(1, 1, kernel.size)  # (C_out=1, C_in=1, K)
     out = lax.conv_general_dilated(
-        x_flat, k,
+        x_flat,
+        k,
         window_strides=(1,),
         padding='VALID',
     )
@@ -145,7 +145,8 @@ def _conv_1d_along_axis(
 
 
 def _normalise_sigma(
-    sigma: Union[float, Sequence[float]], spatial_rank: int,
+    sigma: Union[float, Sequence[float]],
+    spatial_rank: int,
 ) -> tuple[float, ...]:
     if isinstance(sigma, (int, float)):
         return (float(sigma),) * spatial_rank
@@ -184,7 +185,7 @@ def gaussian(
     mode: str = 'reflect',
     spatial_rank: Optional[int] = None,
 ) -> Float[Array, '... *spatial']:
-    '''Separable n-D Gaussian smoothing.
+    """Separable n-D Gaussian smoothing.
 
     Parameters
     ----------
@@ -261,7 +262,7 @@ def gaussian(
     pass, so on Ampere+ tensor cores accelerate the REAL convolution.
     No tensor-core gap to recover here -- gaussian is not a semiring
     op.
-    '''
+    """
     if isinstance(sigma, (tuple, list)):
         inferred_rank = len(sigma)
     else:
@@ -287,7 +288,10 @@ def gaussian(
     out = x
     for axis, s, ks in zip(spatial_axes, sigmas, kernel_sizes):
         kernel = _gaussian_1d_kernel(
-            s, truncate, dtype=out.dtype, kernel_size=ks,
+            s,
+            truncate,
+            dtype=out.dtype,
+            kernel_size=ks,
         )
         out = _conv_1d_along_axis(out, kernel, axis=axis, mode=mode)
     return out

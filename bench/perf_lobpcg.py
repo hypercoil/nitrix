@@ -27,6 +27,7 @@ Run::
 Writes ``PERF_LOBPCG.md`` alongside this script.  No environment
 overrides are needed; the script picks the default JAX device.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,12 +39,10 @@ from typing import Optional, Tuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 from _util import BenchSample, bench_call, format_us, host_summary, timed_jit
-
 from nitrix.graph._lobpcg_diff import lobpcg_top_k_dense, lobpcg_top_k_ell
-from nitrix.semiring import REAL, semiring_ell_matmul
 
+from nitrix.semiring import REAL, semiring_ell_matmul
 
 # ---------------------------------------------------------------------------
 # Operand construction
@@ -53,14 +52,14 @@ from nitrix.semiring import REAL, semiring_ell_matmul
 def _ring_with_chords(
     n: int, n_chords: int = 0, *, seed: int = 0
 ) -> np.ndarray:
-    '''Build a dense ``(n, n)`` ring-with-chords adjacency.
+    """Build a dense ``(n, n)`` ring-with-chords adjacency.
 
     Used for paths that need the dense operand (the ``dense``
     LOBPCG row and the ``eigh`` reference).  ``n`` must fit in
     host memory at ``n^2 * 4`` bytes.  For ELL-only benches use
     ``_ring_with_chords_ell`` which builds the ELL representation
     directly without the dense intermediate.
-    '''
+    """
     rng = np.random.default_rng(seed)
     A = np.zeros((n, n))
     for i in range(n):
@@ -75,13 +74,16 @@ def _ring_with_chords(
 
 
 def _ring_with_chords_ell(
-    n: int, n_chords: int = 0, *, seed: int = 0,
+    n: int,
+    n_chords: int = 0,
+    *,
+    seed: int = 0,
 ) -> Tuple[jax.Array, jax.Array, int, int]:
-    '''Build a ring-with-chords adjacency directly in ELL form.
+    """Build a ring-with-chords adjacency directly in ELL form.
 
     Avoids the ``O(n^2)`` dense intermediate; scales to ``n = 1M+``
     if needed.  Returns ``(values, indices, n_cols, nnz)``.
-    '''
+    """
     rng = np.random.default_rng(seed)
     # Adjacency list per row.  Start with self-loop, ring neighbours.
     adj: list[list[int]] = [[i, (i - 1) % n, (i + 1) % n] for i in range(n)]
@@ -102,7 +104,7 @@ def _ring_with_chords_ell(
             values[i, p] = 0.5 if i == j else 1.0  # self / off-diag weights
         indices[i, : len(row)] = row
         if len(row) < k_max:
-            indices[i, len(row):] = row[0]
+            indices[i, len(row) :] = row[0]
         nnz += len(row)
     return jnp.asarray(values), jnp.asarray(indices), int(n), nnz
 
@@ -117,7 +119,7 @@ def _to_ell(A_dense: np.ndarray) -> Tuple[jax.Array, jax.Array, int]:
         values[i, : len(nz)] = A_dense[i, nz]
         indices[i, : len(nz)] = nz
         if len(nz) < k_max:
-            indices[i, len(nz):] = nz[0]
+            indices[i, len(nz) :] = nz[0]
     return jnp.asarray(values), jnp.asarray(indices), k_max
 
 
@@ -127,27 +129,45 @@ def _to_ell(A_dense: np.ndarray) -> Tuple[jax.Array, jax.Array, int]:
 
 
 def _make_dense_loss(
-    X0: jax.Array, target: jax.Array, n_iters: int, k: int,
+    X0: jax.Array,
+    target: jax.Array,
+    n_iters: int,
+    k: int,
 ):
     def loss(M):
         _, U = lobpcg_top_k_dense(M, X0, n_iters, None, 1e-8)
         return jnp.trace(U.T @ M @ U @ target)
+
     return loss
 
 
 def _make_ell_loss(
-    indices: jax.Array, X0: jax.Array, target: jax.Array,
-    n_cols: int, n_iters: int,
+    indices: jax.Array,
+    X0: jax.Array,
+    target: jax.Array,
+    n_cols: int,
+    n_iters: int,
 ):
     def loss(values):
         _, U = lobpcg_top_k_ell(
-            values, indices, X0, n_cols, n_iters, None, 1e-8,
+            values,
+            indices,
+            X0,
+            n_cols,
+            n_iters,
+            None,
+            1e-8,
         )
         AU = semiring_ell_matmul(
-            values, indices, U, semiring=REAL,
-            n_cols=n_cols, backend='jax',
+            values,
+            indices,
+            U,
+            semiring=REAL,
+            n_cols=n_cols,
+            backend='jax',
         )
         return jnp.trace(U.T @ AU @ target)
+
     return loss
 
 
@@ -158,12 +178,12 @@ def _make_ell_loss(
 
 @dataclass(frozen=True)
 class HLOReport:
-    '''Summary of the compiled HLO's shape footprint.
+    """Summary of the compiled HLO's shape footprint.
 
     ``max_single_dim`` is the largest single axis appearing on any
     tensor in the compiled program; ``has_n_squared`` is True iff a
     tensor with two axes equal to ``n`` is materialised.
-    '''
+    """
 
     max_single_dim: int
     has_n_squared: bool
@@ -171,13 +191,13 @@ class HLOReport:
 
 
 def _audit_hlo(grad_fn, *args, n: int) -> HLOReport:
-    '''Compile ``grad_fn`` and audit its HLO shape footprint.
+    """Compile ``grad_fn`` and audit its HLO shape footprint.
 
     The audit looks for ``f32[...]`` and ``f64[...]`` shape tokens
     in the textual HLO; XLA fold / fusion passes shouldn't introduce
     higher-rank intermediates than what we'd predict from the
     backward formula.
-    '''
+    """
     hlo = grad_fn.lower(*args).compile().as_text()
     shapes = re.findall(r'f(?:32|64)\[([0-9,]+)\]', hlo)
     counts: dict[tuple[int, ...], int] = {}
@@ -192,10 +212,12 @@ def _audit_hlo(grad_fn, *args, n: int) -> HLOReport:
         n_axes = [d for d in dims if d == n]
         if len(n_axes) >= 2:
             has_n2 = True
-    top10 = tuple(sorted(
-        counts.items(),
-        key=lambda kv: -np.prod(kv[0]) * kv[1],
-    )[:10])
+    top10 = tuple(
+        sorted(
+            counts.items(),
+            key=lambda kv: -np.prod(kv[0]) * kv[1],
+        )[:10]
+    )
     return HLOReport(
         max_single_dim=max_dim,
         has_n_squared=has_n2,
@@ -220,18 +242,22 @@ class LobpcgBenchRow:
 
     @property
     def bwd_only(self) -> float:
-        '''Bwd wall-time = grad time minus forward time.
+        """Bwd wall-time = grad time minus forward time.
 
         Approximate (some kernel-launch overhead double-counts) but
         accurate to first order at fixed n.
-        '''
+        """
         return max(self.grad.warm_s - self.forward.warm_s, 0.0)
 
     def report_line(self) -> str:
         nnz_str = '-' if self.nnz is None else str(self.nnz)
-        hlo_str = '-' if self.hlo is None else (
-            f'max={self.hlo.max_single_dim} '
-            f'n2={"y" if self.hlo.has_n_squared else "n"}'
+        hlo_str = (
+            '-'
+            if self.hlo is None
+            else (
+                f'max={self.hlo.max_single_dim} '
+                f'n2={"y" if self.hlo.has_n_squared else "n"}'
+            )
         )
         return (
             f'| {self.n:>5d} | {self.k:>3d} | {nnz_str:>6s} | '
@@ -243,13 +269,13 @@ class LobpcgBenchRow:
 
 @dataclass
 class PureVjpBenchRow:
-    '''Pure bwd-formula timing, no LOBPCG iteration in the path.
+    """Pure bwd-formula timing, no LOBPCG iteration in the path.
 
     Inputs to the bwd are the already-computed eigenpairs and the
     cotangents; the kernel only does the F-matrix construction plus
     the (gather + einsum / matmul) projection.  This is the cleanest
     measure of "did XLA preserve our O(nnz*k + n*k^2) ELL backward".
-    '''
+    """
 
     n: int
     k: int
@@ -269,8 +295,13 @@ class PureVjpBenchRow:
 
 
 def bench_dense_lobpcg(
-    n: int, k: int, *, n_iters: int = 200, n_chords: int = 0,
-    seed: int = 0, repeats: int = 8,
+    n: int,
+    k: int,
+    *,
+    n_iters: int = 200,
+    n_chords: int = 0,
+    seed: int = 0,
+    repeats: int = 8,
 ) -> LobpcgBenchRow:
     A = _ring_with_chords(n, n_chords=n_chords, seed=seed)
     M = jnp.asarray(A)
@@ -286,17 +317,29 @@ def bench_dense_lobpcg(
     grad_sample = bench_call(grad_jit, M, warmup=2, repeats=repeats)
     hlo = _audit_hlo(grad_jit, M, n=n)
     return LobpcgBenchRow(
-        n=n, k=k, nnz=None, path='dense',
-        forward=fwd_sample, grad=grad_sample, hlo=hlo,
+        n=n,
+        k=k,
+        nnz=None,
+        path='dense',
+        forward=fwd_sample,
+        grad=grad_sample,
+        hlo=hlo,
     )
 
 
 def bench_ell_lobpcg(
-    n: int, k: int, *, n_iters: int = 200, n_chords: int = 0,
-    seed: int = 0, repeats: int = 8,
+    n: int,
+    k: int,
+    *,
+    n_iters: int = 200,
+    n_chords: int = 0,
+    seed: int = 0,
+    repeats: int = 8,
 ) -> LobpcgBenchRow:
     values, indices, _, nnz = _ring_with_chords_ell(
-        n, n_chords=n_chords, seed=seed,
+        n,
+        n_chords=n_chords,
+        seed=seed,
     )
     X0 = jax.random.normal(jax.random.key(seed), (n, k), dtype=jnp.float32)
     target = jax.random.normal(jax.random.key(seed + 1), (k, k))
@@ -310,15 +353,24 @@ def bench_ell_lobpcg(
     grad_sample = bench_call(grad_jit, values, warmup=2, repeats=repeats)
     hlo = _audit_hlo(grad_jit, values, n=n)
     return LobpcgBenchRow(
-        n=n, k=k, nnz=nnz, path='ell',
-        forward=fwd_sample, grad=grad_sample, hlo=hlo,
+        n=n,
+        k=k,
+        nnz=nnz,
+        path='ell',
+        forward=fwd_sample,
+        grad=grad_sample,
+        hlo=hlo,
     )
 
 
 def bench_pure_vjp_dense(
-    n: int, k: int, *, repeats: int = 12, seed: int = 0,
+    n: int,
+    k: int,
+    *,
+    repeats: int = 12,
+    seed: int = 0,
 ) -> PureVjpBenchRow:
-    '''Time the dense bwd formula alone (no LOBPCG iteration).
+    """Time the dense bwd formula alone (no LOBPCG iteration).
 
     We synthesize concrete ``(eigvals, eigvecs)`` from a random
     symmetric ``M`` via ``jnp.linalg.eigh`` (or a synthetic
@@ -326,14 +378,21 @@ def bench_pure_vjp_dense(
     backward map ``(g_eigvals, g_eigvecs) -> dM``.  This isolates
     the per-call overhead of the implicit VJP kernel from the
     LOBPCG iteration body, exposing any XLA pessimisation cleanly.
-    '''
+    """
     from nitrix.graph._lobpcg_diff import _subspace_vjp_kernel
+
     rng = np.random.default_rng(seed)
     Q, _ = np.linalg.qr(rng.standard_normal((n, k)).astype(np.float32))
-    eigvals = jnp.asarray(np.sort(rng.uniform(0.5, 3.0, size=k)).astype(np.float32)[::-1])
+    eigvals = jnp.asarray(
+        np.sort(rng.uniform(0.5, 3.0, size=k)).astype(np.float32)[::-1]
+    )
     eigvecs = jnp.asarray(Q)
-    g_eigvals = jax.random.normal(jax.random.key(seed), (k,), dtype=jnp.float32)
-    g_eigvecs = jax.random.normal(jax.random.key(seed + 1), (n, k), dtype=jnp.float32)
+    g_eigvals = jax.random.normal(
+        jax.random.key(seed), (k,), dtype=jnp.float32
+    )
+    g_eigvecs = jax.random.normal(
+        jax.random.key(seed + 1), (n, k), dtype=jnp.float32
+    )
 
     def bwd_kernel(eigvals, eigvecs, g_eigvals, g_eigvecs):
         K = _subspace_vjp_kernel(eigvals, eigvecs, g_eigvals, g_eigvecs, 1e-8)
@@ -341,20 +400,34 @@ def bench_pure_vjp_dense(
 
     bwd_jit = timed_jit(bwd_kernel)
     sample = bench_call(
-        bwd_jit, eigvals, eigvecs, g_eigvals, g_eigvecs,
-        warmup=3, repeats=repeats,
+        bwd_jit,
+        eigvals,
+        eigvecs,
+        g_eigvals,
+        g_eigvecs,
+        warmup=3,
+        repeats=repeats,
     )
     hlo = _audit_hlo(bwd_jit, eigvals, eigvecs, g_eigvals, g_eigvecs, n=n)
     return PureVjpBenchRow(
-        n=n, k=k, nnz=None, path='dense',
-        bench=sample, hlo=hlo,
+        n=n,
+        k=k,
+        nnz=None,
+        path='dense',
+        bench=sample,
+        hlo=hlo,
     )
 
 
 def bench_pure_vjp_ell(
-    n: int, k: int, *, n_chords: int = 0, repeats: int = 12, seed: int = 0,
+    n: int,
+    k: int,
+    *,
+    n_chords: int = 0,
+    repeats: int = 12,
+    seed: int = 0,
 ) -> PureVjpBenchRow:
-    '''Time the ELL bwd formula alone.
+    """Time the ELL bwd formula alone.
 
     Same construction as ``bench_pure_vjp_dense`` but the projection
     step gathers + einsums onto an ELL sparsity pattern.  The hot
@@ -363,18 +436,27 @@ def bench_pure_vjp_ell(
     ``einsum('ij,ipj->ip', VK, V_at_idx)`` ``-> (n, k_max)``.
     Total ``O(nnz * k + n * k^2)``; nothing should materialise an
     ``(n, n)`` intermediate.
-    '''
+    """
     from nitrix.graph._lobpcg_diff import _subspace_vjp_kernel
+
     _, indices, _, nnz = _ring_with_chords_ell(
-        n, n_chords=n_chords, seed=seed,
+        n,
+        n_chords=n_chords,
+        seed=seed,
     )
 
     rng = np.random.default_rng(seed)
     Q, _ = np.linalg.qr(rng.standard_normal((n, k)).astype(np.float32))
-    eigvals = jnp.asarray(np.sort(rng.uniform(0.5, 3.0, size=k)).astype(np.float32)[::-1])
+    eigvals = jnp.asarray(
+        np.sort(rng.uniform(0.5, 3.0, size=k)).astype(np.float32)[::-1]
+    )
     eigvecs = jnp.asarray(Q)
-    g_eigvals = jax.random.normal(jax.random.key(seed), (k,), dtype=jnp.float32)
-    g_eigvecs = jax.random.normal(jax.random.key(seed + 1), (n, k), dtype=jnp.float32)
+    g_eigvals = jax.random.normal(
+        jax.random.key(seed), (k,), dtype=jnp.float32
+    )
+    g_eigvecs = jax.random.normal(
+        jax.random.key(seed + 1), (n, k), dtype=jnp.float32
+    )
 
     def bwd_kernel(eigvals, eigvecs, g_eigvals, g_eigvecs, indices):
         K = _subspace_vjp_kernel(eigvals, eigvecs, g_eigvals, g_eigvecs, 1e-8)
@@ -384,28 +466,48 @@ def bench_pure_vjp_ell(
 
     bwd_jit = timed_jit(bwd_kernel)
     sample = bench_call(
-        bwd_jit, eigvals, eigvecs, g_eigvals, g_eigvecs, indices,
-        warmup=3, repeats=repeats,
+        bwd_jit,
+        eigvals,
+        eigvecs,
+        g_eigvals,
+        g_eigvecs,
+        indices,
+        warmup=3,
+        repeats=repeats,
     )
     hlo = _audit_hlo(
-        bwd_jit, eigvals, eigvecs, g_eigvals, g_eigvecs, indices, n=n,
+        bwd_jit,
+        eigvals,
+        eigvecs,
+        g_eigvals,
+        g_eigvecs,
+        indices,
+        n=n,
     )
     return PureVjpBenchRow(
-        n=n, k=k, nnz=nnz, path='ell',
-        bench=sample, hlo=hlo,
+        n=n,
+        k=k,
+        nnz=nnz,
+        path='ell',
+        bench=sample,
+        hlo=hlo,
     )
 
 
 def bench_eigh(
-    n: int, k: int, *, repeats: int = 8, seed: int = 0,
+    n: int,
+    k: int,
+    *,
+    repeats: int = 8,
+    seed: int = 0,
 ) -> LobpcgBenchRow:
-    '''Dense ``jnp.linalg.eigh`` reference: full spectrum then slice top-k.
+    """Dense ``jnp.linalg.eigh`` reference: full spectrum then slice top-k.
 
     Backward gradient via JAX's built-in eigh VJP.  This is the
     upper bound on what dense LOBPCG should hope to beat (for n
     where eigh fits in memory) and the only reference for ELL at
     moderate n.
-    '''
+    """
     A = _ring_with_chords(n, seed=seed)
     M = jnp.asarray(A)
     target = jax.random.normal(jax.random.key(seed + 1), (k, k))
@@ -421,8 +523,13 @@ def bench_eigh(
     fwd_sample = bench_call(loss_jit, M, warmup=2, repeats=repeats)
     grad_sample = bench_call(grad_jit, M, warmup=2, repeats=repeats)
     return LobpcgBenchRow(
-        n=n, k=k, nnz=None, path='eigh',
-        forward=fwd_sample, grad=grad_sample, hlo=None,
+        n=n,
+        k=k,
+        nnz=None,
+        path='eigh',
+        forward=fwd_sample,
+        grad=grad_sample,
+        hlo=None,
     )
 
 
@@ -454,8 +561,12 @@ def _write_report(
         'is run the same way in both calls.'
     )
     lines.append('')
-    lines.append('| n     | k   | nnz    |   path | forward    | fwd+bwd    | bwd_only   | HLO audit |')
-    lines.append('|------:|----:|-------:|-------:|-----------:|-----------:|-----------:|:----------|')
+    lines.append(
+        '| n     | k   | nnz    |   path | forward    | fwd+bwd    | bwd_only   | HLO audit |'
+    )
+    lines.append(
+        '|------:|----:|-------:|-------:|-----------:|-----------:|-----------:|:----------|'
+    )
     for row in rows:
         lines.append(row.report_line())
     lines.append('')
@@ -509,11 +620,13 @@ def _write_report(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--output', type=Path,
+        '--output',
+        type=Path,
         default=Path(__file__).parent / 'PERF_LOBPCG.md',
     )
     parser.add_argument(
-        '--skip-eigh-large', action='store_true',
+        '--skip-eigh-large',
+        action='store_true',
         help='Skip eigh reference at n >= 4000 (OOM on small GPUs).',
     )
     args = parser.parse_args()

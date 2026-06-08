@@ -33,6 +33,7 @@ Reproduce::
     python bench/g0_ampere_ell.py
     python bench/g0_ampere_ell.py --quick
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,6 +42,13 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+from _util import (
+    BenchSample,
+    bench_call,
+    format_us,
+    host_summary,
+    timed_jit,
+)
 
 from nitrix._internal.backend import (
     NitrixBackendFallback,
@@ -52,15 +60,6 @@ from nitrix.semiring import (
     TROPICAL_MAX_PLUS,
     semiring_ell_matmul,
 )
-
-from _util import (
-    BenchSample,
-    bench_call,
-    format_us,
-    host_summary,
-    timed_jit,
-)
-
 
 HERE = Path(__file__).parent
 REPORT_PATH = HERE / 'G0_ELL_REPORT.md'
@@ -91,20 +90,24 @@ def make_mesh_ell(m: int, k_max: int, ncol: int, seed: int = 0):
 
 
 def confirm_pallas_falls_back() -> bool:
-    '''Run a tiny Pallas-requested call and check the warning fires.
+    """Run a tiny Pallas-requested call and check the warning fires.
 
     Returns True iff the Pallas path resolved to a JAX fallback.
     A False here means the Pallas ELL kernel is now usable and the
     policy in this report needs revisiting.
-    '''
+    """
     m, k_max, ncol = 64, 8, 32
     v, idx, B = make_mesh_ell(m, k_max, ncol, seed=99)
     reset_fallback_state()
     with warnings.catch_warnings(record=True) as ws:
         warnings.simplefilter('always')
         _ = semiring_ell_matmul(
-            v, idx, B,
-            semiring=REAL, n_cols=m, backend='pallas-cuda',
+            v,
+            idx,
+            B,
+            semiring=REAL,
+            n_cols=m,
+            backend='pallas-cuda',
         )
     return any(w.category is NitrixBackendFallback for w in ws)
 
@@ -116,18 +119,29 @@ def run(shapes, algebras, warmup, repeats):
         v, idx, B = make_mesh_ell(m, k_max, ncol, seed=hash(shape) & 0xFFFF)
         for algebra in algebras:
             row = {
-                'm': m, 'k_max': k_max, 'ncol': ncol,
+                'm': m,
+                'k_max': k_max,
+                'ncol': ncol,
                 'algebra': algebra.name,
             }
             fn = timed_jit(
                 lambda v_, i_, B_, _a=algebra, _m=m: semiring_ell_matmul(
-                    v_, i_, B_,
-                    semiring=_a, n_cols=_m, backend='jax',
+                    v_,
+                    i_,
+                    B_,
+                    semiring=_a,
+                    n_cols=_m,
+                    backend='jax',
                 )
             )
             try:
                 sample: BenchSample = bench_call(
-                    fn, v, idx, B, warmup=warmup, repeats=repeats,
+                    fn,
+                    v,
+                    idx,
+                    B,
+                    warmup=warmup,
+                    repeats=repeats,
                 )
                 row['jax_compile_s'] = sample.compile_s
                 row['jax_warm_s'] = sample.warm_s
@@ -152,10 +166,12 @@ def render_report(rows, host, pallas_falls_back: bool) -> str:
         '',
         '## Policy',
         '',
-        ('`semiring_ell_matmul` runs on the **JAX backend unconditionally** '
-         'on Ampere+; `backend="pallas-cuda"` resolves to JAX and emits '
-         'one `NitrixBackendFallback` warning per `(shape, dtype, '
-         'algebra)` signature.'),
+        (
+            '`semiring_ell_matmul` runs on the **JAX backend unconditionally** '
+            'on Ampere+; `backend="pallas-cuda"` resolves to JAX and emits '
+            'one `NitrixBackendFallback` warning per `(shape, dtype, '
+            'algebra)` signature.'
+        ),
         '',
         f'Pallas-falls-back probe (current JAX pin): {"yes" if pallas_falls_back else "**no -- revisit policy**"}.',
         '',
@@ -176,7 +192,10 @@ def render_report(rows, host, pallas_falls_back: bool) -> str:
         eps = r.get('effective_meps')
         lines.append(
             '| {m} | {k_max} | {ncol} | {a} | {j} | {jc} | {eps} |'.format(
-                m=r['m'], k_max=r['k_max'], ncol=r['ncol'], a=r['algebra'],
+                m=r['m'],
+                k_max=r['k_max'],
+                ncol=r['ncol'],
+                a=r['algebra'],
                 j=format_us(j) if j else 'n/a',
                 jc=format_us(jc) if jc else 'n/a',
                 eps=f'{eps:.1f}' if eps else 'n/a',

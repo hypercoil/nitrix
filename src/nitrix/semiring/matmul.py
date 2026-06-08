@@ -22,6 +22,7 @@ combination, the call falls back to JAX and emits exactly one
 ``NitrixBackendFallback`` warning per ``(function, shape, dtype,
 backend)`` per process; see ``_internal.backend`` for the env-var knobs.
 """
+
 from __future__ import annotations
 
 from functools import partial
@@ -30,8 +31,6 @@ from typing import Any, Callable, Optional, Tuple, TypeVar
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Num
-
-_T = TypeVar('_T')
 
 from .._internal.backend import (
     Backend,
@@ -43,6 +42,7 @@ from ._reference import reference_semiring_matmul
 from ._types import Semiring
 from .algebras import REAL
 
+_T = TypeVar('_T')
 
 __all__ = [
     'semiring_matmul',
@@ -71,12 +71,12 @@ def _check_2d_compat(
 def _broadcast_batch(
     A: Array, B: Array
 ) -> Tuple[Array, Array, Tuple[int, ...]]:
-    '''Broadcast leading batch dims of ``A`` and ``B`` together.
+    """Broadcast leading batch dims of ``A`` and ``B`` together.
 
     Returns the broadcasted operands; the trailing two dims are
     unchanged.  We avoid materialising broadcast copies where possible
     by relying on ``jnp.broadcast_to``.
-    '''
+    """
     A_batch = A.shape[:-2]
     B_batch = B.shape[:-2]
     out_batch = jnp.broadcast_shapes(A_batch, B_batch)
@@ -86,7 +86,7 @@ def _broadcast_batch(
 
 
 def _run_jax_core(A2: Array, B2: Array, *, semiring: Semiring[Any]) -> Array:
-    '''2-D JAX-reference core, expected to be ``vmap``-ed over batch dims.'''
+    """2-D JAX-reference core, expected to be ``vmap``-ed over batch dims."""
     return reference_semiring_matmul(A2, B2, semiring=semiring)
 
 
@@ -110,13 +110,13 @@ def _semiring_matmul_jax(
 def _semiring_matmul_pallas(
     A: Array, B: Array, *, semiring: Semiring[Any]
 ) -> Optional[Array]:
-    '''Pallas dispatch; returns ``None`` if the kernel rejects the shape.
+    """Pallas dispatch; returns ``None`` if the kernel rejects the shape.
 
     Import-on-call so that a Pallas-broken JAX install can still use
     the JAX fallback.  Catches only ``PallasNotTileable`` -- a real
     kernel failure (an unexpected lowering error, a CUDA error) is not
     silently swallowed.
-    '''
+    """
     try:
         from .._kernels.cuda.semiring_matmul import (
             PallasNotTileable,
@@ -133,15 +133,19 @@ def _semiring_matmul_pallas(
 
 
 def _forward_only_2d(
-    A: Array, B: Array, *, semiring: Semiring[Any], backend: Backend,
+    A: Array,
+    B: Array,
+    *,
+    semiring: Semiring[Any],
+    backend: Backend,
 ) -> Array:
-    '''Backend-dispatching 2-D forward pass without custom_vjp wrapping.
+    """Backend-dispatching 2-D forward pass without custom_vjp wrapping.
 
     Called both from the user-facing ``semiring_matmul`` (when the
     algebra is forward-only) and from the ``custom_vjp`` forward
     function.  Operates on 2-D ``A: (m, k)`` and ``B: (k, n)``;
     batching is handled upstream via ``jax.vmap``.
-    '''
+    """
     resolved: ResolvedBackend = resolve_backend(backend)
     if resolved == 'pallas-cuda':
         try:
@@ -176,9 +180,12 @@ def _forward_only_2d(
 
 @partial(jax.custom_vjp, nondiff_argnums=(2, 3))
 def _diff_matmul_2d(
-    A: Array, B: Array, semiring: Semiring[Any], backend: Backend,
+    A: Array,
+    B: Array,
+    semiring: Semiring[Any],
+    backend: Backend,
 ) -> Array:
-    '''Differentiable 2-D core of ``semiring_matmul``.
+    """Differentiable 2-D core of ``semiring_matmul``.
 
     Routes the backward to the per-algebra ``semiring.matmul_vjp``.
     ``semiring`` and ``backend`` are non-diff (carried through but
@@ -187,7 +194,7 @@ def _diff_matmul_2d(
 
     Batching is composed via ``jax.vmap`` upstream; ``custom_vjp``
     is vmap-compatible.
-    '''
+    """
     return _forward_only_2d(A, B, semiring=semiring, backend=backend)
 
 
@@ -231,7 +238,7 @@ def semiring_matmul(
     semiring: Semiring[Any] = REAL,
     backend: Backend = 'auto',
 ) -> Num[Array, '... m n']:
-    '''Semiring-generalised matrix multiplication.
+    """Semiring-generalised matrix multiplication.
 
     Computes ``C[..., i, j] = (+)_k ( A[..., i, k] (*) B[..., k, j] )``
     under the supplied ``semiring``.
@@ -272,15 +279,19 @@ def semiring_matmul(
     return finite-difference-checked gradients without further
     setup.  Algebras whose ``matmul_vjp`` is ``None`` (user-defined
     forward-only) raise on backward with a clear message.
-    '''
+    """
     _check_2d_compat(A.shape, B.shape, name='semiring_matmul')
 
     Ab, Bb, batch = _broadcast_batch(A, B)
     core: Callable[[Array, Array], Array]
     if semiring.matmul_vjp is None:
+
         def core(A_: Array, B_: Array) -> Array:
             return _forward_only_2d(
-                A_, B_, semiring=semiring, backend=backend,
+                A_,
+                B_,
+                semiring=semiring,
+                backend=backend,
             )
     else:
         # custom_vjp wrapper; vmap below composes with the registered
@@ -288,4 +299,5 @@ def semiring_matmul(
         # because ``nondiff_argnums`` is positional-only.
         def core(A_: Array, B_: Array) -> Array:
             return _diff_matmul_2d(A_, B_, semiring, backend)
+
     return _vmap_over_batch(core, len(batch))(Ab, Bb)

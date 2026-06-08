@@ -11,6 +11,7 @@ implementation lives in ``nitrix.sparse.ell_sectioned`` (Phase 2.A.8).
 
 No ``jax.experimental.sparse`` dependency anywhere.
 """
+
 from .ell import (
     ELL,
     ell_add_self_loops,

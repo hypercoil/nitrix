@@ -17,6 +17,7 @@ documented exception -- its squared-difference has no annihilator, so
 ``semiring=EUCLIDEAN`` raises -- and tests pin both the guard and the
 old leak-via-identity limitation.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -37,9 +38,12 @@ from nitrix.semiring import (
     TROPICAL_MIN_PLUS,
     semiring_ell_matmul,
 )
-from nitrix.sparse import ELL, ell_mask, grid_identity, mesh_k_ring_adjacency
-from nitrix.sparse import icosphere
-
+from nitrix.sparse import (
+    ELL,
+    ell_mask,
+    icosphere,
+    mesh_k_ring_adjacency,
+)
 
 # Algebras whose (*)-annihilator equals semiring.identity, so masking via
 # the identity is a guaranteed no-op.
@@ -48,8 +52,12 @@ MASKABLE = [REAL, LOG, TROPICAL_MAX_PLUS, TROPICAL_MIN_PLUS]
 
 def _apply(ell, B, semiring):
     return semiring_ell_matmul(
-        ell.values, ell.indices, B, semiring=semiring,
-        n_cols=ell.n_cols, backend='jax',
+        ell.values,
+        ell.indices,
+        B,
+        semiring=semiring,
+        n_cols=ell.n_cols,
+        backend='jax',
     )
 
 
@@ -61,14 +69,16 @@ def _random_float_ell(n, k_max, identity, seed):
 
 
 @pytest.mark.parametrize(
-    'semiring', MASKABLE, ids=[s.name for s in MASKABLE],
+    'semiring',
+    MASKABLE,
+    ids=[s.name for s in MASKABLE],
 )
 def test_masked_neighbour_is_noop_independent_of_target(semiring):
-    '''Masking every edge that reaches a masked vertex makes the masked
+    """Masking every edge that reaches a masked vertex makes the masked
     vertices' features irrelevant: perturbing them (even hugely) leaves
     every output unchanged.  This is the medial-wall / grey-matter
     "don't blur in masked signal" guarantee.
-    '''
+    """
     n, k_max, ncol = 12, 5, 4
     masked_vertices = jnp.asarray([3, 8])  # the "medial wall"
     ell = _random_float_ell(n, k_max, semiring.identity, seed=0)
@@ -89,12 +99,14 @@ def test_masked_neighbour_is_noop_independent_of_target(semiring):
 
 
 @pytest.mark.parametrize(
-    'semiring', MASKABLE, ids=[s.name for s in MASKABLE],
+    'semiring',
+    MASKABLE,
+    ids=[s.name for s in MASKABLE],
 )
 def test_masking_equals_reducing_over_unmasked_edges(semiring):
-    '''Masking the last ELL column with the identity gives the same
+    """Masking the last ELL column with the identity gives the same
     result as reducing over only the first k_max-1 columns.
-    '''
+    """
     n, k_max, ncol = 9, 4, 3
     ell = _random_float_ell(n, k_max, semiring.identity, seed=2)
 
@@ -105,8 +117,10 @@ def test_masking_equals_reducing_over_unmasked_edges(semiring):
 
     # Reference: an ELL with only the first k_max-1 columns.
     ref = ELL(
-        values=ell.values[:, :-1], indices=ell.indices[:, :-1],
-        n_cols=n, identity=semiring.identity,
+        values=ell.values[:, :-1],
+        indices=ell.indices[:, :-1],
+        n_cols=n,
+        identity=semiring.identity,
     )
 
     rng = np.random.default_rng(3)
@@ -119,7 +133,7 @@ def test_masking_equals_reducing_over_unmasked_edges(semiring):
 
 
 def test_boolean_masking_is_noop():
-    '''BOOLEAN (OR-over-AND) masks via its identity ``False``.'''
+    """BOOLEAN (OR-over-AND) masks via its identity ``False``."""
     n, k_max, ncol = 8, 4, 3
     rng = np.random.default_rng(0)
     indices = jnp.asarray(rng.integers(0, n, (n, k_max)).astype(np.int32))
@@ -139,10 +153,10 @@ def test_boolean_masking_is_noop():
 
 
 def test_euclidean_semiring_mask_raises_no_annihilator():
-    '''EUCLIDEAN has no (*)-annihilator, so the safe ``semiring=`` path
+    """EUCLIDEAN has no (*)-annihilator, so the safe ``semiring=`` path
     refuses to mask it (rather than silently leaking).  This is the B8
     guard: ``EUCLIDEAN.annihilator is None`` -> a clear error.
-    '''
+    """
     n, k_max = 8, 4
     ell = _random_float_ell(n, k_max, EUCLIDEAN.identity, seed=0)
     col_valid = np.ones(n, dtype=bool)
@@ -152,20 +166,22 @@ def test_euclidean_semiring_mask_raises_no_annihilator():
 
 
 def test_euclidean_has_no_annihilator_limitation():
-    '''EUCLIDEAN's (a-b)^2 has no annihilator: masking via its identity
+    """EUCLIDEAN's (a-b)^2 has no annihilator: masking via its identity
     (0) does NOT zero the edge -- it injects B[idx]^2.  This test pins
     the documented limitation (masking EUCLIDEAN must drop columns
     structurally, not set a value).  The deprecated ``identity=`` form
     is the only way to even attempt it; ``semiring=EUCLIDEAN`` raises
     (see the test above).
-    '''
+    """
     n, k_max, ncol = 8, 4, 3
     ell = _random_float_ell(n, k_max, EUCLIDEAN.identity, seed=0)
     masked_vertices = jnp.asarray([2, 6])
     col_valid = np.ones(n, dtype=bool)
     col_valid[np.asarray(masked_vertices)] = False
     with pytest.warns(DeprecationWarning):
-        ell = ell_mask(ell, jnp.asarray(col_valid), identity=EUCLIDEAN.identity)
+        ell = ell_mask(
+            ell, jnp.asarray(col_valid), identity=EUCLIDEAN.identity
+        )
 
     rng = np.random.default_rng(1)
     B = jnp.asarray(rng.standard_normal((n, ncol)))
@@ -177,11 +193,11 @@ def test_euclidean_has_no_annihilator_limitation():
 
 
 def test_wrong_identity_leaks_under_max_plus_footgun():
-    '''Masking with the REAL identity (0) and reducing under max-plus
+    """Masking with the REAL identity (0) and reducing under max-plus
     leaks the masked signal (0 + B = B); masking with the max-plus
     identity (-inf) does not.  Demonstrates why the identity must match
     the semiring you reduce under.
-    '''
+    """
     n, k_max, ncol = 10, 5, 3
     indices = jnp.asarray(
         np.random.default_rng(0).integers(0, n, (n, k_max)).astype(np.int32),
@@ -197,8 +213,10 @@ def test_wrong_identity_leaks_under_max_plus_footgun():
     # path closes: an explicit (mismatched) scalar with no annihilator
     # check.  Both calls warn.
     with pytest.warns(DeprecationWarning):
-        wrong = ell_mask(base, jnp.asarray(col_valid), identity=0.0)      # WRONG
-        right = ell_mask(base, jnp.asarray(col_valid), identity=-jnp.inf)  # RIGHT
+        wrong = ell_mask(base, jnp.asarray(col_valid), identity=0.0)  # WRONG
+        right = ell_mask(
+            base, jnp.asarray(col_valid), identity=-jnp.inf
+        )  # RIGHT
 
     rng = np.random.default_rng(1)
     B = jnp.asarray(rng.standard_normal((n, ncol)))
@@ -216,10 +234,10 @@ def test_wrong_identity_leaks_under_max_plus_footgun():
 
 
 def test_medial_wall_mask_on_icosphere_smoothing():
-    '''Realistic surface case: a k-ring smoother (REAL, row-stochastic)
+    """Realistic surface case: a k-ring smoother (REAL, row-stochastic)
     with a masked medial wall does not blur masked-vertex signal into
     the cortex.
-    '''
+    """
     m = icosphere(2)  # 162 vertices
     adj = mesh_k_ring_adjacency(m, k=1, binary=False)  # row-stochastic, REAL
     n = m.n_vertices
@@ -239,15 +257,17 @@ def test_medial_wall_mask_on_icosphere_smoothing():
 
 
 def test_grey_matter_mask_on_grid():
-    '''Realistic volume case: a grid operator restricted to a grey-matter
+    """Realistic volume case: a grid operator restricted to a grey-matter
     mask does not pull signal from out-of-mask voxels (REAL).
-    '''
+    """
     from nitrix.sparse import regular_grid_stencil
 
     grid_shape = (6, 6)
     offsets = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]
     weights = jnp.array([0.2, 0.2, 0.2, 0.2, 0.2])
-    op = regular_grid_stencil(grid_shape, offsets, weights, boundary='replicate')
+    op = regular_grid_stencil(
+        grid_shape, offsets, weights, boundary='replicate'
+    )
     n = int(np.prod(grid_shape))
 
     rng = np.random.default_rng(0)
@@ -270,9 +290,9 @@ def test_ell_mask_rejects_bad_mask_shape():
 
 
 def test_ell_mask_differentiable_through_values():
-    '''Masking is a jnp.where; gradients flow through the unmasked
+    """Masking is a jnp.where; gradients flow through the unmasked
     values and stop at the masked positions.
-    '''
+    """
     ell = _random_float_ell(6, 3, REAL.identity, seed=0)
     col_valid = jnp.asarray(np.array([1, 1, 0, 1, 0, 1], dtype=bool))
     B = jnp.asarray(np.random.default_rng(1).standard_normal((6, 2)))
@@ -293,9 +313,9 @@ def test_ell_mask_differentiable_through_values():
 
 
 def test_builtin_annihilator_fields():
-    '''The annihilator coincides with identity for the maskable
+    """The annihilator coincides with identity for the maskable
     algebras and is None for EUCLIDEAN (no annihilator).
-    '''
+    """
     assert REAL.annihilator == 0.0
     assert LOG.annihilator == -jnp.inf
     assert TROPICAL_MAX_PLUS.annihilator == -jnp.inf
@@ -305,12 +325,14 @@ def test_builtin_annihilator_fields():
 
 
 @pytest.mark.parametrize(
-    'semiring', MASKABLE, ids=[s.name for s in MASKABLE],
+    'semiring',
+    MASKABLE,
+    ids=[s.name for s in MASKABLE],
 )
 def test_semiring_path_matches_deprecated_identity_path(semiring):
-    '''``semiring=`` and the deprecated ``identity=semiring.identity``
+    """``semiring=`` and the deprecated ``identity=semiring.identity``
     produce identical masked ELLs for the maskable algebras.
-    '''
+    """
     n, k_max = 10, 4
     ell = _random_float_ell(n, k_max, semiring.identity, seed=7)
     col_valid = np.ones(n, dtype=bool)
@@ -321,7 +343,8 @@ def test_semiring_path_matches_deprecated_identity_path(semiring):
     with pytest.warns(DeprecationWarning):
         via_identity = ell_mask(ell, cv, identity=semiring.identity)
     np.testing.assert_array_equal(
-        np.asarray(via_semiring.values), np.asarray(via_identity.values),
+        np.asarray(via_semiring.values),
+        np.asarray(via_identity.values),
     )
     assert via_semiring.identity == via_identity.identity
 

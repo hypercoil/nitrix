@@ -27,6 +27,7 @@ A user can compose their own ``Semiring`` by combining a ``Monoid`` with
 a ``Semigroup``; the kernel substrate does not care whether the algebra
 is built-in or user-defined as long as the Protocol shape is honoured.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -49,8 +50,7 @@ from ._backward import (
     tropical_min_plus_ell_matmul_vjp,
     tropical_min_plus_matmul_vjp,
 )
-from ._types import Monoid, Semigroup, Semiring, StrictSemiring
-
+from ._types import Semiring, StrictSemiring
 
 # ---------------------------------------------------------------------------
 # Monoids
@@ -59,7 +59,7 @@ from ._types import Monoid, Semigroup, Semiring, StrictSemiring
 
 @dataclass(frozen=True)
 class _SumMonoid:
-    '''``(R, +, 0)`` monoid; ``finalize`` is identity.'''
+    """``(R, +, 0)`` monoid; ``finalize`` is identity."""
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -82,7 +82,7 @@ class _SumMonoid:
 
 @dataclass(frozen=True)
 class _MaxMonoid:
-    '''``(R ∪ {-inf}, max, -inf)`` monoid.'''
+    """``(R ∪ {-inf}, max, -inf)`` monoid."""
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -105,7 +105,7 @@ class _MaxMonoid:
 
 @dataclass(frozen=True)
 class _MinMonoid:
-    '''``(R ∪ {+inf}, min, +inf)`` monoid.'''
+    """``(R ∪ {+inf}, min, +inf)`` monoid."""
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -128,7 +128,7 @@ class _MinMonoid:
 
 @dataclass(frozen=True)
 class _OrMonoid:
-    '''Boolean OR monoid; identity is ``False``.'''
+    """Boolean OR monoid; identity is ``False``."""
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -151,12 +151,12 @@ class _OrMonoid:
 
 @dataclass(frozen=True)
 class _SumThenSqrtMonoid:
-    '''Sum monoid with ``finalize = sqrt`` for L2-style aggregations.
+    """Sum monoid with ``finalize = sqrt`` for L2-style aggregations.
 
     The finalize step is a non-monoidal projection applied once at the
     end of the contraction; this is why ``EUCLIDEAN`` is a relaxed
     ``Semiring`` rather than a ``StrictSemiring``.
-    '''
+    """
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
@@ -180,12 +180,12 @@ class _SumThenSqrtMonoid:
 
 
 class LogSumExpAcc(NamedTuple):
-    '''Online state for logsumexp reductions.
+    """Online state for logsumexp reductions.
 
     Invariant: the logsumexp of the values seen so far equals
     ``m + log(s)``, with the convention that ``s == 0`` corresponds to
     ``-inf`` (no values seen, or all ``-inf``).
-    '''
+    """
 
     m: Float[Array, '*shape']
     s: Float[Array, '*shape']
@@ -194,7 +194,7 @@ class LogSumExpAcc(NamedTuple):
 def _safe_exp_diff(
     x: Float[Array, '*shape'], m: Float[Array, '*shape']
 ) -> Float[Array, '*shape']:
-    '''Compute ``exp(x - m)`` defined to be 0 wherever ``x == -inf``.
+    """Compute ``exp(x - m)`` defined to be 0 wherever ``x == -inf``.
 
     Uses the "double-where with sentinel" trick to keep both forward
     and reverse-mode AD NaN-free.  When ``x`` is ``-inf`` (and possibly
@@ -202,7 +202,7 @@ def _safe_exp_diff(
     produce ``NaN``), the inner computation is short-circuited via a
     sentinel zero so no ``NaN`` enters either the forward value or the
     gradient.
-    '''
+    """
     finite = jnp.isfinite(x)
     safe_diff = jnp.where(finite, x - m, jnp.zeros_like(x))
     return jnp.where(finite, jnp.exp(safe_diff), jnp.zeros_like(x))
@@ -210,7 +210,7 @@ def _safe_exp_diff(
 
 @dataclass(frozen=True)
 class _LogSumExpMonoid:
-    '''``(R ∪ {-inf}, logsumexp, -inf)`` with online ``(m, s)`` state.
+    """``(R ∪ {-inf}, logsumexp, -inf)`` with online ``(m, s)`` state.
 
     The auxiliary ``(max, sum_exp)`` representation keeps the running
     normalised sum bounded in ``[0, K]`` -- exactly the trick used in
@@ -218,7 +218,7 @@ class _LogSumExpMonoid:
     ``m + log(s)``.
 
     All operations are NaN-safe even when both operands are ``-inf``.
-    '''
+    """
 
     def init(
         self, shape: tuple[int, ...], dtype: jnp.dtype[Any]

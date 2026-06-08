@@ -41,13 +41,13 @@ This is the canonical pattern; we deliberately do NOT thread
 because the pole-flip topology is not expressible as a single
 boundary mode in ``lax.conv_general_dilated``.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Tuple, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array, Num
-
 
 __all__ = [
     'sphere_grid_pad_2d',
@@ -69,13 +69,14 @@ def _resolve_pad(pad: PadSpec) -> Tuple[int, int]:
 
 
 def _move_axes_to_front(
-    x: Array, axes: Tuple[int, ...],
+    x: Array,
+    axes: Tuple[int, ...],
 ) -> Tuple[Array, Tuple[int, ...]]:
-    '''Move ``axes`` to the front of ``x`` in the given order.
+    """Move ``axes`` to the front of ``x`` in the given order.
 
     Returns ``(reshaped, original_axes_normalised)`` where the
     returned array has those axes as its leading dims.
-    '''
+    """
     n = x.ndim
     axes_norm = tuple(ax % n for ax in axes)
     if len(set(axes_norm)) != len(axes_norm):
@@ -90,13 +91,15 @@ def _move_axes_to_front(
 
 
 def _move_axes_back(
-    x: Array, n_front: int, axes_norm: Tuple[int, ...],
+    x: Array,
+    n_front: int,
+    axes_norm: Tuple[int, ...],
 ) -> Array:
-    '''Inverse of ``_move_axes_to_front``.
+    """Inverse of ``_move_axes_to_front``.
 
     ``x`` has its first ``n_front`` dims corresponding to
     ``axes_norm``; rebuild the original ordering.
-    '''
+    """
     n = x.ndim
     perm_inverse = [0] * n
     perm_front = list(axes_norm)
@@ -116,7 +119,7 @@ def sphere_grid_pad_2d(
     pole_negate_channel: Optional[int] = None,
     pole_negate_axis: int = -1,
 ) -> Num[Array, '... H_padded W_padded ...']:
-    '''Pad a 2D parameterised-sphere image with the sphere topology.
+    """Pad a 2D parameterised-sphere image with the sphere topology.
 
     The padding scheme:
 
@@ -191,7 +194,7 @@ def sphere_grid_pad_2d(
         (the pole roll uses ``W // 2``; an odd ``W`` would
         introduce a half-pixel shift that this primitive doesn't
         try to correct).
-    '''
+    """
     h_pad, w_pad = _resolve_pad(pad)
     if height_axis % image.ndim == width_axis % image.ndim:
         raise ValueError(
@@ -219,7 +222,8 @@ def sphere_grid_pad_2d(
     # Move height and width axes to the front so we can index them
     # uniformly regardless of caller layout.
     moved, axes_norm = _move_axes_to_front(
-        image, (height_axis, width_axis),
+        image,
+        (height_axis, width_axis),
     )
     # Now ``moved`` has shape ``(H, W, *rest)``.
 
@@ -228,7 +232,8 @@ def sphere_grid_pad_2d(
         left_strip = moved[:, -w_pad:, ...]
         right_strip = moved[:, :w_pad, ...]
         moved_w = jnp.concatenate(
-            [left_strip, moved, right_strip], axis=1,
+            [left_strip, moved, right_strip],
+            axis=1,
         )
     else:
         moved_w = moved
@@ -240,10 +245,10 @@ def sphere_grid_pad_2d(
     if h_pad > 0:
         W_padded = moved_w.shape[1]
         roll_amount = W_padded // 2
-        top_block = moved_w[1: h_pad + 1, ...]
+        top_block = moved_w[1 : h_pad + 1, ...]
         top_block = top_block[::-1, ...]  # flip vertically
         top_block = jnp.roll(top_block, roll_amount, axis=1)
-        bottom_block = moved_w[-(h_pad + 1):-1, ...]
+        bottom_block = moved_w[-(h_pad + 1) : -1, ...]
         bottom_block = bottom_block[::-1, ...]
         bottom_block = jnp.roll(bottom_block, roll_amount, axis=1)
 
@@ -268,14 +273,19 @@ def sphere_grid_pad_2d(
             new_neg_axis = 2 + remaining.index(neg_axis_norm)
             # Negate at the specified channel index.
             top_block = _negate_at_index(
-                top_block, new_neg_axis, pole_negate_channel,
+                top_block,
+                new_neg_axis,
+                pole_negate_channel,
             )
             bottom_block = _negate_at_index(
-                bottom_block, new_neg_axis, pole_negate_channel,
+                bottom_block,
+                new_neg_axis,
+                pole_negate_channel,
             )
 
         moved_hw = jnp.concatenate(
-            [top_block, moved_w, bottom_block], axis=0,
+            [top_block, moved_w, bottom_block],
+            axis=0,
         )
     else:
         moved_hw = moved_w
@@ -284,11 +294,11 @@ def sphere_grid_pad_2d(
 
 
 def _negate_at_index(x: Array, axis: int, index: int) -> Array:
-    '''Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged.
+    """Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged.
 
     Equivalent to ``x.at[..., index, ...].set(-x[..., index, ...])``
     along the named axis; written generically.
-    '''
+    """
     n = x.ndim
     axis_norm = axis % n
     sl = [slice(None)] * n
@@ -304,7 +314,7 @@ def sphere_grid_unpad_2d(
     height_axis: int = -2,
     width_axis: int = -1,
 ) -> Num[Array, '... H W ...']:
-    '''Strip the padding added by ``sphere_grid_pad_2d``.
+    """Strip the padding added by ``sphere_grid_pad_2d``.
 
     The inverse operation is a plain slice; provided as a companion
     so the composition pattern reads cleanly::
@@ -323,7 +333,7 @@ def sphere_grid_unpad_2d(
     Returns
     -------
     The un-padded image with the original ``H`` and ``W``.
-    '''
+    """
     h_pad, w_pad = _resolve_pad(pad)
     if h_pad == 0 and w_pad == 0:
         return image

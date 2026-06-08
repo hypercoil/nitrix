@@ -29,6 +29,7 @@ re-run on every change.  25 keeps meaningful per-property coverage while
 bounding wall time; tests that need more set ``@settings(max_examples=N)``
 explicitly, and tests that need less already do.
 """
+
 from hypothesis import HealthCheck, settings
 
 settings.register_profile(

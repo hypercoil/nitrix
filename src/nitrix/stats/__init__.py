@@ -16,6 +16,7 @@ Two submodules:
 This subpackage replaces ``nitrix.functional.covariance`` and
 ``nitrix.functional.fourier``.
 """
+
 from .covariance import (
     ccorr,
     ccov,

@@ -13,6 +13,7 @@ Coverage:
   shape contract for ``env_inst``; analytic-signal raises on
   complex input.
 """
+
 from __future__ import annotations
 
 import math
@@ -39,16 +40,13 @@ from nitrix.stats import (
     hilbert_transform,
     instantaneous_frequency,
     instantaneous_phase,
-    pairedcorr,
     pairedcov,
     partialcorr,
-    partialcov,
     pcorr,
     precision,
     product_filter,
     product_filtfilt,
 )
-
 
 # ---------------------------------------------------------------------------
 # covariance: real-valued
@@ -76,10 +74,14 @@ def test_cov_bias_matches_numpy():
 def test_cov_ddof_overrides_bias():
     X = jnp.asarray(np.random.default_rng(0).standard_normal((4, 100)))
     np.testing.assert_allclose(
-        cov(X, bias=True), cov(X, ddof=0), atol=1e-14,
+        cov(X, bias=True),
+        cov(X, ddof=0),
+        atol=1e-14,
     )
     np.testing.assert_allclose(
-        cov(X, bias=False), cov(X, ddof=1), atol=1e-14,
+        cov(X, bias=False),
+        cov(X, ddof=1),
+        atol=1e-14,
     )
 
 
@@ -122,12 +124,12 @@ def test_cov_pass_both_weight_args_raises():
 
 
 def test_cov_diagonal_weight_matrix_matches_vector_weights():
-    '''The full-``weight_matrix`` path must reduce to the (numpy-validated)
+    """The full-``weight_matrix`` path must reduce to the (numpy-validated)
     vector-weight path when the matrix is ``diag(w)``.  This exercises the
     matrix branch of ``_cov_core`` and is the regression for SPEC §8's
     non-diagonal-weight bug (legacy code silently bypassed the matrix path;
     the new code computes it).
-    '''
+    """
     rng = np.random.default_rng(0)
     X = jnp.asarray(rng.standard_normal((4, 60)))
     w = jnp.asarray(np.abs(rng.standard_normal(60)) + 0.5)
@@ -139,9 +141,9 @@ def test_cov_diagonal_weight_matrix_matches_vector_weights():
 
 
 def test_cov_nondiagonal_weight_matrix_is_symmetric_and_finite():
-    '''A genuinely non-diagonal symmetric coupling matrix produces a finite,
+    """A genuinely non-diagonal symmetric coupling matrix produces a finite,
     symmetric covariance (the path the legacy implementation could not take).
-    '''
+    """
     rng = np.random.default_rng(1)
     X = jnp.asarray(rng.standard_normal((5, 40)))
     A = rng.standard_normal((40, 40))
@@ -157,14 +159,13 @@ def test_cov_nondiagonal_weight_matrix_is_symmetric_and_finite():
 
 
 def test_cov_complex_matches_numpy():
-    '''Complex cov must match np.cov to machine eps; this was the
+    """Complex cov must match np.cov to machine eps; this was the
     "silently wrong" failure mode in the legacy code.
-    '''
+    """
     rng = np.random.default_rng(0)
     n_chan, n_obs = 5, 100
-    X_np = (
-        rng.standard_normal((n_chan, n_obs))
-        + 1j * rng.standard_normal((n_chan, n_obs))
+    X_np = rng.standard_normal((n_chan, n_obs)) + 1j * rng.standard_normal(
+        (n_chan, n_obs)
     )
     X = jnp.asarray(X_np)
     S = cov(X)
@@ -174,10 +175,7 @@ def test_cov_complex_matches_numpy():
 
 def test_cov_complex_is_hermitian():
     rng = np.random.default_rng(0)
-    X_np = (
-        rng.standard_normal((5, 100))
-        + 1j * rng.standard_normal((5, 100))
-    )
+    X_np = rng.standard_normal((5, 100)) + 1j * rng.standard_normal((5, 100))
     X = jnp.asarray(X_np)
     S = cov(X)
     np.testing.assert_allclose(S, S.conj().T, atol=1e-13)
@@ -186,8 +184,7 @@ def test_cov_complex_is_hermitian():
 def test_cov_complex_diagonal_is_real_positive():
     rng = np.random.default_rng(0)
     X = jnp.asarray(
-        rng.standard_normal((5, 100))
-        + 1j * rng.standard_normal((5, 100))
+        rng.standard_normal((5, 100)) + 1j * rng.standard_normal((5, 100))
     )
     d = jnp.diagonal(cov(X))
     np.testing.assert_allclose(d.imag, 0.0, atol=1e-15)
@@ -197,8 +194,7 @@ def test_cov_complex_diagonal_is_real_positive():
 def test_corr_complex_diagonal_is_one():
     rng = np.random.default_rng(0)
     X = jnp.asarray(
-        rng.standard_normal((5, 100))
-        + 1j * rng.standard_normal((5, 100))
+        rng.standard_normal((5, 100)) + 1j * rng.standard_normal((5, 100))
     )
     R = corr(X)
     np.testing.assert_allclose(jnp.diagonal(R), 1.0, atol=1e-12)
@@ -207,11 +203,11 @@ def test_corr_complex_diagonal_is_one():
 def test_pairedcov_complex_matches_numpy_cross_block():
     rng = np.random.default_rng(0)
     n_obs = 100
-    X_np = (
-        rng.standard_normal((5, n_obs)) + 1j * rng.standard_normal((5, n_obs))
+    X_np = rng.standard_normal((5, n_obs)) + 1j * rng.standard_normal(
+        (5, n_obs)
     )
-    Y_np = (
-        rng.standard_normal((3, n_obs)) + 1j * rng.standard_normal((3, n_obs))
+    Y_np = rng.standard_normal((3, n_obs)) + 1j * rng.standard_normal(
+        (3, n_obs)
     )
     P = pairedcov(jnp.asarray(X_np), jnp.asarray(Y_np))
     Z_np = np.concatenate([X_np, Y_np], axis=0)
@@ -239,15 +235,16 @@ def test_partialcorr_diagonal_is_one():
 
 
 def test_conditionalcov_residual_orthogonal_to_y():
-    '''After residualisation, the un-centered inner product
+    """After residualisation, the un-centered inner product
     ``X_residual @ Y.T`` is ~0 (orthogonality in the OLS sense,
     which does NOT include centering -- residualise has no
     implicit intercept term).
-    '''
+    """
     rng = np.random.default_rng(0)
     X = jnp.asarray(rng.standard_normal((5, 200)))
     Y = jnp.asarray(rng.standard_normal((2, 200)))
     from nitrix.linalg import residualise
+
     X_res = residualise(X, Y, rowvar=True)
     # X_res @ Y.T should be ~0 (orthogonal to Y's row span).
     gram = X_res @ Y.T
@@ -255,7 +252,7 @@ def test_conditionalcov_residual_orthogonal_to_y():
 
 
 def test_conditionalcov_shape_and_symmetry():
-    '''Conditional cov returns symmetric ``(c, c)`` for real input.'''
+    """Conditional cov returns symmetric ``(c, c)`` for real input."""
     rng = np.random.default_rng(0)
     X = jnp.asarray(rng.standard_normal((5, 200)))
     Y = jnp.asarray(rng.standard_normal((2, 200)))
@@ -313,14 +310,18 @@ def test_hilbert_transform_of_cosine_is_sine():
     t = np.arange(200) / fs
     x = jnp.asarray(np.cos(2 * np.pi * 5 * t))
     h = hilbert_transform(x)
-    np.testing.assert_allclose(h[20:-20], np.sin(2 * np.pi * 5 * t)[20:-20], atol=1e-2)
+    np.testing.assert_allclose(
+        h[20:-20], np.sin(2 * np.pi * 5 * t)[20:-20], atol=1e-2
+    )
 
 
 def test_envelope_matches_abs_analytic():
     rng = np.random.default_rng(0)
     x = jnp.asarray(rng.standard_normal(200))
     np.testing.assert_allclose(
-        envelope(x), jnp.abs(analytic_signal(x)), atol=1e-15,
+        envelope(x),
+        jnp.abs(analytic_signal(x)),
+        atol=1e-15,
     )
 
 
@@ -339,10 +340,14 @@ def test_env_inst_matches_individual_calls():
     e, f, p = env_inst(x, fs=100.0)
     np.testing.assert_allclose(e, envelope(x), atol=1e-13)
     np.testing.assert_allclose(
-        p, instantaneous_phase(x), atol=1e-13,
+        p,
+        instantaneous_phase(x),
+        atol=1e-13,
     )
     np.testing.assert_allclose(
-        f, instantaneous_frequency(x, fs=100.0), atol=1e-13,
+        f,
+        instantaneous_frequency(x, fs=100.0),
+        atol=1e-13,
     )
 
 
@@ -354,9 +359,9 @@ def test_product_filter_preserves_dc_for_unit_weight():
 
 
 def test_product_filtfilt_zero_phase():
-    '''Forward-backward filter has zero phase delay even with a
+    """Forward-backward filter has zero phase delay even with a
     complex weight.
-    '''
+    """
     n = 128
     x = jnp.asarray(np.sin(2 * np.pi * np.arange(n) * 5 / n))
     # Complex weight with magnitude 1 but nonzero phase

@@ -25,6 +25,7 @@ Reproduce::
     python bench/trilinear_resample.py
     python bench/trilinear_resample.py --quick
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,11 +33,9 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
-
-from nitrix.geometry import identity_grid, spatial_transform
-
 from _util import BenchSample, bench_call, format_us, host_summary, timed_jit
 
+from nitrix.geometry import identity_grid, spatial_transform
 
 HERE = Path(__file__).parent
 REPORT_PATH = HERE / 'PERF_TRILINEAR.md'
@@ -48,7 +47,7 @@ QUICK_SHAPES = [(64, 64, 64), (128, 128, 128)]
 
 
 def make_warp(shape, seed=0):
-    '''A smooth-ish absolute deformation: identity grid + small noise.'''
+    """A smooth-ish absolute deformation: identity grid + small noise."""
     key = jax.random.key(seed)
     ki, kd = jax.random.split(key)
     image = jax.random.normal(ki, (*shape, 1), dtype=jnp.float32)
@@ -61,12 +60,12 @@ def make_warp(shape, seed=0):
 
 
 def _explicit_trilinear(image, deform):
-    '''Pure-JAX 8-corner trilinear gather (channel-last, single volume).
+    """Pure-JAX 8-corner trilinear gather (channel-last, single volume).
 
     The closest pure-XLA analogue of a fused Pallas trilinear kernel:
     compute the 8 corner indices, gather, and blend.  Boundary by edge
     clamp ("nearest").  Used only as a throughput reference here.
-    '''
+    """
     D, H, W, _ = image.shape
     x = deform[..., 0]
     y = deform[..., 1]
@@ -113,8 +112,12 @@ def run(shapes, warmup, repeats):
         row = {'shape': 'x'.join(str(s) for s in shape), 'n_vox': n_vox}
 
         # 1. Forward: map_coordinates path (the shipped op).
-        fwd = timed_jit(lambda im, df: spatial_transform(im, df, mode='nearest'))
-        s_fwd: BenchSample = bench_call(fwd, image, deform, warmup=warmup, repeats=repeats)
+        fwd = timed_jit(
+            lambda im, df: spatial_transform(im, df, mode='nearest')
+        )
+        s_fwd: BenchSample = bench_call(
+            fwd, image, deform, warmup=warmup, repeats=repeats
+        )
         row['fwd_warm_s'] = s_fwd.warm_s
         row['fwd_compile_s'] = s_fwd.compile_s
         row['fwd_mvox_s'] = n_vox / s_fwd.warm_s / 1e6
@@ -126,18 +129,25 @@ def run(shapes, warmup, repeats):
         # would time async dispatch only).
         def loss(df, im=image):
             return jnp.sum(spatial_transform(im, df, mode='nearest') ** 2)
+
         _vg = jax.value_and_grad(loss)
+
         def vg_scalar(df):
             v, g = _vg(df)
             return v + jnp.sum(g)
+
         vg = timed_jit(vg_scalar)
-        s_vg: BenchSample = bench_call(vg, deform, warmup=warmup, repeats=repeats)
+        s_vg: BenchSample = bench_call(
+            vg, deform, warmup=warmup, repeats=repeats
+        )
         row['vg_warm_s'] = s_vg.warm_s
         row['vg_mvox_s'] = n_vox / s_vg.warm_s / 1e6
 
         # 3. Reference: explicit pure-JAX 8-corner gather (forward).
         ref = timed_jit(_explicit_trilinear)
-        s_ref: BenchSample = bench_call(ref, image, deform, warmup=warmup, repeats=repeats)
+        s_ref: BenchSample = bench_call(
+            ref, image, deform, warmup=warmup, repeats=repeats
+        )
         row['explicit_warm_s'] = s_ref.warm_s
         row['explicit_mvox_s'] = n_vox / s_ref.warm_s / 1e6
 
@@ -173,10 +183,14 @@ def render_report(rows, host) -> str:
     for r in rows:
         lines.append(
             '| {shape} | {n} | {fwd} | {fm:.0f} | {vg} | {vm:.0f} | {ex} | {em:.0f} |'.format(
-                shape=r['shape'], n=r['n_vox'],
-                fwd=format_us(r['fwd_warm_s']), fm=r['fwd_mvox_s'],
-                vg=format_us(r['vg_warm_s']), vm=r['vg_mvox_s'],
-                ex=format_us(r['explicit_warm_s']), em=r['explicit_mvox_s'],
+                shape=r['shape'],
+                n=r['n_vox'],
+                fwd=format_us(r['fwd_warm_s']),
+                fm=r['fwd_mvox_s'],
+                vg=format_us(r['vg_warm_s']),
+                vm=r['vg_mvox_s'],
+                ex=format_us(r['explicit_warm_s']),
+                em=r['explicit_mvox_s'],
             )
         )
     lines += [

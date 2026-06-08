@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for ``nitrix.numerics`` -- tensor_ops + normalize."""
+
 from __future__ import annotations
 
 import jax
@@ -10,11 +11,9 @@ import pytest
 jax.config.update('jax_enable_x64', True)
 
 from nitrix.numerics import (
-    apply_mask,
     broadcast_ignoring,
     complex_decompose,
     complex_recompose,
-    conform_mask,
     demean,
     fold_axis,
     intensity_normalize,
@@ -26,7 +25,6 @@ from nitrix.numerics import (
     unfold_axes,
     zscore_normalize,
 )
-
 
 # ---------------------------------------------------------------------------
 # normalize
@@ -88,10 +86,10 @@ def test_intensity_normalize_compresses_to_unit_interval():
 
 
 def test_percentile_rescale_min_p99_clip_matches_reference():
-    '''Defaults are the Synth* min--p99--clip recipe.'''
+    """Defaults are the Synth* min--p99--clip recipe."""
     x_np = np.random.default_rng(0).standard_normal(1000) * 10 + 50
     out = percentile_rescale(jnp.asarray(x_np), lo=0.0, hi=99.0, clip=True)
-    p_lo = np.percentile(x_np, 0.0)   # = min
+    p_lo = np.percentile(x_np, 0.0)  # = min
     p_hi = np.percentile(x_np, 99.0)
     ref = np.clip((x_np - p_lo) / p_hi, 0.0, 1.0)
     np.testing.assert_allclose(np.asarray(out), ref, atol=1e-7)
@@ -108,15 +106,17 @@ def test_percentile_rescale_clip_flag_saturates_top():
     assert float(out_noclip.max()) > 1.0
     # Below the ceiling the two paths agree.
     np.testing.assert_allclose(
-        np.asarray(out_clip)[:3], np.asarray(out_noclip)[:3], atol=1e-7,
+        np.asarray(out_clip)[:3],
+        np.asarray(out_noclip)[:3],
+        atol=1e-7,
     )
 
 
 def test_percentile_rescale_differs_from_intensity_normalize():
-    '''The two recipes diverge when the minimum is far from zero:
+    """The two recipes diverge when the minimum is far from zero:
     percentile_rescale divides by p_hi, intensity_normalize by the
     inter-percentile width.
-    '''
+    """
     x = jnp.asarray(np.random.default_rng(0).standard_normal(500) * 5 + 100)
     a = percentile_rescale(x, lo=1.0, hi=99.0, clip=True)
     b = intensity_normalize(x, low_percentile=1.0, high_percentile=99.0)
@@ -142,11 +142,19 @@ def test_zscore_nonzero_mask_leaves_background_zero():
 
 def test_zscore_nonzero_mask_per_channel():
     rng = np.random.default_rng(1)
-    x_np = np.stack([
-        np.where(rng.random(1000) > 0.3, rng.standard_normal(1000) * 2 + 5, 0.0),
-        np.where(rng.random(1000) > 0.5, rng.standard_normal(1000) * 4 - 3, 0.0),
-    ])
-    z = np.asarray(zscore_normalize(jnp.asarray(x_np), axis=-1, nonzero_mask=True))
+    x_np = np.stack(
+        [
+            np.where(
+                rng.random(1000) > 0.3, rng.standard_normal(1000) * 2 + 5, 0.0
+            ),
+            np.where(
+                rng.random(1000) > 0.5, rng.standard_normal(1000) * 4 - 3, 0.0
+            ),
+        ]
+    )
+    z = np.asarray(
+        zscore_normalize(jnp.asarray(x_np), axis=-1, nonzero_mask=True)
+    )
     for c in range(2):
         fg = x_np[c] != 0
         np.testing.assert_array_equal(z[c][~fg], 0.0)

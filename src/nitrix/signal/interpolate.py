@@ -28,13 +28,13 @@ Use cases:
 Edge handling: leading / trailing missing frames are filled with
 the nearest observed value (edge replication).
 """
+
 from __future__ import annotations
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Num
-
 
 __all__ = ['linear_interpolate']
 
@@ -43,7 +43,7 @@ def _linear_interpolate_1d(
     data: Num[Array, 'n'],
     mask: Bool[Array, 'n'],
 ) -> Num[Array, 'n']:
-    '''Per-channel 1-D linear interpolation via associative scan.
+    """Per-channel 1-D linear interpolation via associative scan.
 
     Two passes:
 
@@ -57,7 +57,7 @@ def _linear_interpolate_1d(
     Both are associative reductions (``max`` / ``min``) so they
     parallelise via ``lax.associative_scan``.  The interpolation
     itself is then per-frame elementwise.
-    '''
+    """
     n = data.shape[0]
     indices = jnp.arange(n, dtype=jnp.int32)
 
@@ -95,7 +95,7 @@ def linear_interpolate(
     data: Num[Array, '... obs'],
     mask: Bool[Array, '... obs'],
 ) -> Num[Array, '... obs']:
-    '''Fill masked-out frames via linear interpolation.
+    """Fill masked-out frames via linear interpolation.
 
     For each observation channel, missing frames (``mask == False``)
     are replaced by a piecewise-linear interpolation between the
@@ -122,7 +122,7 @@ def linear_interpolate(
     boolean dispatcher).  Implementation uses two parallel
     associative scans (``O(log n)`` depth on GPU) rather than the
     sequential ``lax.scan`` of the legacy code.
-    '''
+    """
     if data.shape != mask.shape:
         raise ValueError(
             f'linear_interpolate: data.shape={data.shape} must equal '

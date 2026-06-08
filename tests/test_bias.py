@@ -26,6 +26,7 @@ Coverage:
 Reference parity numbers and the accelerator reformulation are documented
 in ``docs/design/bias-field.md``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,7 +53,7 @@ _GOLDEN = Path(__file__).parent / 'artefacts' / 'bias' / 'n4_sitk_golden.npz'
 
 
 def _phantom(s: int = 48, seed: int = 20260523):
-    '''Concentric-shell tissue phantom with a smooth multiplicative bias.'''
+    """Concentric-shell tissue phantom with a smooth multiplicative bias."""
     rng = np.random.default_rng(seed)
     ax = np.linspace(-1, 1, s)
     xx, yy, zz = np.meshgrid(ax, ax, ax, indexing='ij')
@@ -62,13 +63,15 @@ def _phantom(s: int = 48, seed: int = 20260523):
     tissue = np.where(r < 0.25, 210.0, tissue).astype(np.float32)
     mask = (tissue > 0).astype(np.float32)
     bias = np.clip(
-        1.0 + 0.45 * np.sin(1.6 * xx + 0.4) + 0.3 * np.cos(1.3 * yy - 0.2)
+        1.0
+        + 0.45 * np.sin(1.6 * xx + 0.4)
+        + 0.3 * np.cos(1.3 * yy - 0.2)
         + 0.18 * zz,
         0.5,
         1.8,
     ).astype(np.float32)
     obs = (tissue * bias).astype(np.float32)
-    obs = (obs + rng.normal(0, 0.8, obs.shape).astype(np.float32) * mask)
+    obs = obs + rng.normal(0, 0.8, obs.shape).astype(np.float32) * mask
     return obs.astype(np.float32), mask, bias.astype(np.float32), r
 
 
@@ -109,7 +112,8 @@ def test_constant_lattice_reconstructs_constant():
     # The single-level approximation stays finite and in a sane range.
     approx = np.array(
         bspline_approximate(
-            jnp.full((40,), 2.5, jnp.float32), control_points=8,
+            jnp.full((40,), 2.5, jnp.float32),
+            control_points=8,
             spatial_rank=1,
         )
     )
@@ -129,8 +133,9 @@ def test_multilevel_mba_converges():
         ncp = (2**level) + 3
         resid = jnp.asarray(target - field)
         inc = np.array(
-            bspline_approximate(resid, control_points=ncp, weight=w,
-                                spatial_rank=1)
+            bspline_approximate(
+                resid, control_points=ncp, weight=w, spatial_rank=1
+            )
         )
         field = field + inc
         errs.append(float(np.sqrt(np.mean((field - target) ** 2))))
@@ -149,8 +154,10 @@ def test_bspline_masked_fit_ignores_outside_mask():
     corrupt[120:] = 1e6  # garbage outside the mask
     approx = np.array(
         bspline_approximate(
-            jnp.asarray(corrupt), control_points=24,
-            weight=jnp.asarray(mask), spatial_rank=1,
+            jnp.asarray(corrupt),
+            control_points=24,
+            weight=jnp.asarray(mask),
+            spatial_rank=1,
         )
     )
     # Inside the mask, well away from the boundary, the garbage must not leak.
@@ -161,11 +168,13 @@ def test_bspline_masked_fit_ignores_outside_mask():
 
 def test_bspline_differentiable():
     n = 32
-    data = jnp.asarray(np.random.default_rng(0).normal(size=n).astype(
-        np.float32))
+    data = jnp.asarray(
+        np.random.default_rng(0).normal(size=n).astype(np.float32)
+    )
     g = jax.grad(
-        lambda d: jnp.sum(bspline_approximate(d, control_points=8,
-                                              spatial_rank=1) ** 2)
+        lambda d: jnp.sum(
+            bspline_approximate(d, control_points=8, spatial_rank=1) ** 2
+        )
     )(data)
     assert np.all(np.isfinite(np.array(g)))
     assert float(jnp.linalg.norm(g)) > 0
@@ -177,16 +186,20 @@ def test_bspline_3d_multilevel_recovery():
     s = 40
     ax = np.linspace(0, 1, s)
     xx, yy, zz = np.meshgrid(ax, ax, ax, indexing='ij')
-    field = (np.sin(2 * np.pi * xx) * np.cos(2 * np.pi * yy)
-             * (1 + zz)).astype(np.float32)
+    field = (
+        np.sin(2 * np.pi * xx) * np.cos(2 * np.pi * yy) * (1 + zz)
+    ).astype(np.float32)
     w = jnp.ones((s, s, s), jnp.float32)
     acc = np.zeros_like(field)
     errs = []
     for level in range(5):
         ncp = (2**level) * 2 + 3
         inc = np.array(
-            bspline_approximate(jnp.asarray(field - acc),
-                                control_points=(ncp, ncp, ncp), weight=w)
+            bspline_approximate(
+                jnp.asarray(field - acc),
+                control_points=(ncp, ncp, ncp),
+                weight=w,
+            )
         )
         acc = acc + inc
         errs.append(float(np.sqrt(np.mean((acc - field) ** 2))))
@@ -200,7 +213,7 @@ def test_bspline_3d_multilevel_recovery():
 
 
 def _numpy_wiener_sharpen(image, n_bins=200, fwhm=0.15, noise=0.01):
-    '''Independent NumPy reference for ``sharpen_histogram``.'''
+    """Independent NumPy reference for ``sharpen_histogram``."""
     flat = image.ravel().astype(np.float64)
     bmin, bmax = flat.min(), flat.max()
     slope = (bmax - bmin) / (n_bins - 1)
@@ -217,7 +230,7 @@ def _numpy_wiener_sharpen(image, n_bins=200, fwhm=0.15, noise=0.01):
     padded = 2**exponent
     off = (padded - n_bins) // 2
     V = np.zeros(padded, complex)
-    V[off:off + n_bins] = H
+    V[off : off + n_bins] = H
     Vf = np.fft.fft(V)
 
     sfwhm = fwhm / slope
@@ -262,8 +275,11 @@ def test_sharpen_matches_numpy_reference():
 
 
 def test_sharpen_jit_parity():
-    obs = jnp.asarray(np.random.default_rng(2).normal(
-        1.0, 0.2, (12, 12, 12)).astype(np.float32))
+    obs = jnp.asarray(
+        np.random.default_rng(2)
+        .normal(1.0, 0.2, (12, 12, 12))
+        .astype(np.float32)
+    )
     a = np.array(sharpen_histogram(obs, fwhm=0.15))
     b = np.array(jax.jit(lambda z: sharpen_histogram(z, fwhm=0.15))(obs))
     np.testing.assert_allclose(a, b, atol=1e-4)
@@ -307,8 +323,9 @@ def test_n4_flattens_tissue_variation():
 def test_n4_jit_parity():
     obs, mask, _, _ = _phantom(32)
     fn = jax.jit(lambda o, m: n4_bias_field_correction(o, mask=m))
-    a = np.array(n4_bias_field_correction(jnp.asarray(obs),
-                                          mask=jnp.asarray(mask)))
+    a = np.array(
+        n4_bias_field_correction(jnp.asarray(obs), mask=jnp.asarray(mask))
+    )
     b = np.array(fn(jnp.asarray(obs), jnp.asarray(mask)))
     # jit vs eager differ only by XLA fusion / reassociation in the
     # iterative loop (~1e-4 relative); not a correctness difference.
@@ -351,8 +368,10 @@ def test_n4_control_points_validation():
     obs, mask, _, _ = _phantom(16)
     with pytest.raises(ValueError):
         n4_bias_field_correction(
-            jnp.asarray(obs), mask=jnp.asarray(mask),
-            spline_order=3, n_control_points=3,  # < spline_order + 1
+            jnp.asarray(obs),
+            mask=jnp.asarray(mask),
+            spline_order=3,
+            n_control_points=3,  # < spline_order + 1
         )
 
 
@@ -360,8 +379,10 @@ def test_n4_max_iterations_length_validation():
     obs, mask, _, _ = _phantom(16)
     with pytest.raises(ValueError):
         n4_bias_field_correction(
-            jnp.asarray(obs), mask=jnp.asarray(mask),
-            n_fitting_levels=4, max_iterations=[50, 50],  # wrong length
+            jnp.asarray(obs),
+            mask=jnp.asarray(mask),
+            n_fitting_levels=4,
+            max_iterations=[50, 50],  # wrong length
         )
 
 
@@ -371,7 +392,7 @@ def test_n4_max_iterations_length_validation():
 
 
 def _bias_parity(a, g, mask):
-    '''(correlation, scaled-relRMSE, max-relative-no-scale) over the mask.'''
+    """(correlation, scaled-relRMSE, max-relative-no-scale) over the mask."""
     m = mask > 0
     aa, gg = a[m], g[m]
     corr = np.corrcoef(aa, gg)[0, 1]
@@ -408,11 +429,16 @@ def test_least_squares_reproduces_smooth_field_exactly():
     # Unlike single-level MBA (biased), one LS fit recovers a smooth field.
     n = 200
     x = np.linspace(0, 1, n)
-    f = (np.sin(2 * np.pi * x) + 0.3 * np.cos(5 * np.pi * x)).astype(np.float32)
+    f = (np.sin(2 * np.pi * x) + 0.3 * np.cos(5 * np.pi * x)).astype(
+        np.float32
+    )
     approx = np.array(
         bspline_approximate(
-            jnp.asarray(f), control_points=24, spatial_rank=1,
-            method='least_squares', ridge=1e-6,
+            jnp.asarray(f),
+            control_points=24,
+            spatial_rank=1,
+            method='least_squares',
+            ridge=1e-6,
         )
     )
     assert np.sqrt(np.mean((approx - f) ** 2)) < 0.01
@@ -422,8 +448,11 @@ def test_least_squares_reproduces_constant():
     c = np.full(64, 3.7, np.float32)
     approx = np.array(
         bspline_approximate(
-            jnp.asarray(c), control_points=8, spatial_rank=1,
-            method='least_squares', ridge=1e-6,
+            jnp.asarray(c),
+            control_points=8,
+            spatial_rank=1,
+            method='least_squares',
+            ridge=1e-6,
         )
     )
     np.testing.assert_allclose(approx, 3.7, atol=1e-2)
@@ -438,8 +467,11 @@ def test_psplines_penalty_increases_smoothness():
     for pen in (0.0, 1.0, 100.0):
         f = np.array(
             bspline_approximate(
-                jnp.asarray(noisy), control_points=60, spatial_rank=1,
-                method='psplines', penalty=pen,
+                jnp.asarray(noisy),
+                control_points=60,
+                spatial_rank=1,
+                method='psplines',
+                penalty=pen,
             )
         )
         roughness.append(float(np.sqrt(np.mean(np.diff(f, 2) ** 2))))
@@ -451,7 +483,9 @@ def test_masked_least_squares_stable_and_accurate():
     s = 36
     ax = np.linspace(0, 1, s)
     xx, yy, zz = np.meshgrid(ax, ax, ax, indexing='ij')
-    field = (np.sin(2 * np.pi * xx) * np.cos(2 * np.pi * yy)).astype(np.float32)
+    field = (np.sin(2 * np.pi * xx) * np.cos(2 * np.pi * yy)).astype(
+        np.float32
+    )
     rr = np.sqrt((xx - 0.5) ** 2 + (yy - 0.5) ** 2 + (zz - 0.5) ** 2)
     mask = (rr < 0.4).astype(np.float32)
     mm = mask > 0
@@ -460,8 +494,11 @@ def test_masked_least_squares_stable_and_accurate():
     for meth in ('least_squares', 'psplines'):
         f = np.array(
             bspline_approximate(
-                jnp.asarray(data), control_points=(12, 12, 12),
-                weight=jnp.asarray(mask), method=meth, penalty=0.01,
+                jnp.asarray(data),
+                control_points=(12, 12, 12),
+                weight=jnp.asarray(mask),
+                method=meth,
+                penalty=0.01,
             )
         )
         assert np.all(np.isfinite(f))
@@ -472,7 +509,9 @@ def test_masked_least_squares_stable_and_accurate():
 def test_bspline_method_validation():
     with pytest.raises(ValueError):
         bspline_approximate(
-            jnp.ones((16,)), control_points=8, spatial_rank=1,
+            jnp.ones((16,)),
+            control_points=8,
+            spatial_rank=1,
             method='nope',  # type: ignore[arg-type]
         )
 
@@ -509,7 +548,9 @@ def test_all_methods_recover_phantom_bias():
     bt = bias_true[mm]
     for method in ('n4', 'least_squares', 'psplines'):
         _, bias = bias_field_correction(
-            jnp.asarray(obs), method=method, mask=jnp.asarray(mask),
+            jnp.asarray(obs),
+            method=method,
+            mask=jnp.asarray(mask),
             return_bias_field=True,
         )
         be = np.array(bias)[mm]

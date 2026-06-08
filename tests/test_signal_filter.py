@@ -12,6 +12,7 @@ Coverage:
 - jit parity, differentiability, per-unit independence, ``axis`` handling,
   reflect padding, and argument validation.
 """
+
 from __future__ import annotations
 
 import jax
@@ -64,8 +65,8 @@ def test_lowpass_passes_dc_highpass_removes_it():
     x = jnp.asarray(_tone(0.20) + 5.0)  # tone on a DC pedestal
     lp = np.asarray(lowpass(x, fs=FS, cutoff=0.05))
     hp = np.asarray(highpass(x, fs=FS, cutoff=0.05))
-    assert abs(lp.mean() - 5.0) < 1e-2       # low-pass keeps the pedestal
-    assert abs(hp.mean()) < 1e-2             # high-pass removes it (DC bin 0)
+    assert abs(lp.mean() - 5.0) < 1e-2  # low-pass keeps the pedestal
+    assert abs(hp.mean()) < 1e-2  # high-pass removes it (DC bin 0)
     # ... and high-pass keeps the high tone, low-pass kills it.
     assert _power_at(hp, 0.20) / _power_at(np.asarray(x), 0.20) > 0.9
     assert _power_at(lp, 0.20) / _power_at(np.asarray(x), 0.20) < 0.1
@@ -95,8 +96,9 @@ def test_maxflat_matches_analog_butterworth_magnitude():
 def test_ideal_equals_bruteforce_brickwall():
     x = _tone(0.02) + _tone(0.08) + _tone(0.20)
     n = x.shape[-1]
-    y = np.asarray(bandpass(jnp.asarray(x), fs=FS, lo=0.05, hi=0.12,
-                            ftype='ideal'))
+    y = np.asarray(
+        bandpass(jnp.asarray(x), fs=FS, lo=0.05, hi=0.12, ftype='ideal')
+    )
     fr = np.fft.rfftfreq(n, d=1 / FS)
     mask = ((fr >= 0.05) & (fr <= 0.12)).astype(np.float32)
     ref = np.fft.irfft(np.fft.rfft(x) * mask, n=n)
@@ -147,8 +149,10 @@ def test_differentiable():
 
 def test_per_unit_independence():
     x0 = _tone(0.08)
-    multi = jnp.stack([jnp.asarray(x0), jnp.asarray(_tone(0.20)),
-                       jnp.asarray(_tone(0.02))], axis=0)
+    multi = jnp.stack(
+        [jnp.asarray(x0), jnp.asarray(_tone(0.20)), jnp.asarray(_tone(0.02))],
+        axis=0,
+    )
     ym = np.asarray(bandpass(multi, fs=FS, lo=0.05, hi=0.12))
     y0 = np.asarray(bandpass(jnp.asarray(x0), fs=FS, lo=0.05, hi=0.12))
     np.testing.assert_array_equal(ym[0], y0)
@@ -172,8 +176,8 @@ def test_padding_runs_and_preserves_shape():
 def test_cutoff_validation():
     x = jnp.asarray(_tone(0.08))
     with pytest.raises(ValueError):
-        bandpass(x, fs=FS, lo=0.12, hi=0.05)          # lo >= hi
+        bandpass(x, fs=FS, lo=0.12, hi=0.05)  # lo >= hi
     with pytest.raises(ValueError):
-        lowpass(x, fs=FS, cutoff=0.30)                # beyond Nyquist (0.25)
+        lowpass(x, fs=FS, cutoff=0.30)  # beyond Nyquist (0.25)
     with pytest.raises(ValueError):
         bandpass(x, fs=FS, lo=0.05, hi=0.12, ftype='nope')

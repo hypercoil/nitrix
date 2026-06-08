@@ -46,16 +46,15 @@ Functions exposed:
   Moore-Penrose pseudoinverse).
 - Aliases: ``ccov``, ``ccorr``, ``pcorr``, ``corrcoef``.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional, cast
 
-import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Num
 
 from ..linalg.residual import residualise
-
 
 __all__ = [
     'cov',
@@ -81,7 +80,7 @@ __all__ = [
 
 
 def _orient_obs_last(X: Array, rowvar: bool) -> Array:
-    '''Move the observation axis to the trailing position.'''
+    """Move the observation axis to the trailing position."""
     X = jnp.atleast_2d(X)
     if not rowvar and X.shape[-2] != 1:
         X = X.swapaxes(-1, -2)
@@ -93,14 +92,14 @@ def _weighted_mean(
     weights: Optional[Num[Array, '... obs']] = None,
     W: Optional[Num[Array, '... obs obs']] = None,
 ) -> Num[Array, '... c 1']:
-    '''Per-channel weighted mean along the observation axis.
+    """Per-channel weighted mean along the observation axis.
 
     At most one of ``weights`` / ``W`` is non-``None``.  ``W`` is
     a full matrix weight; the marginal observation weight is
     ``W.sum(-1)`` (right marginal; equals ``W.sum(-2)`` when ``W``
     is symmetric, which it should be for a valid covariance
     weight).
-    '''
+    """
     if W is not None:
         marg = W.sum(axis=-1)
         return (X * marg[..., None, :]).sum(-1, keepdims=True) / marg.sum(
@@ -108,7 +107,9 @@ def _weighted_mean(
         )[..., None, :]
     if weights is not None:
         w_sum = weights.sum(-1, keepdims=True)
-        return (X * weights[..., None, :]).sum(-1, keepdims=True) / w_sum[..., None, :]
+        return (X * weights[..., None, :]).sum(-1, keepdims=True) / w_sum[
+            ..., None, :
+        ]
     return X.mean(-1, keepdims=True)
 
 
@@ -119,7 +120,7 @@ def _denom_factor(
     W: Optional[Array] = None,
     ddof: int,
 ) -> Array:
-    '''Bessel-style denominator for (un)biased covariance.
+    """Bessel-style denominator for (un)biased covariance.
 
     For unweighted: ``n_obs - ddof``.
     For vector weights ``w``: ``sum(w) - ddof * sum(w**2) / sum(w)``
@@ -128,14 +129,14 @@ def _denom_factor(
     For matrix weights: ``sum(W) - ddof * sum(W @ W.T) / sum(W)``
     (the natural generalisation; reduces to the vector case for
     diagonal W).
-    '''
+    """
     if weights is None and W is None:
         return jnp.asarray(n_obs - ddof, dtype=jnp.float32)
     if weights is not None:
         w_sum = weights.sum(-1, keepdims=True)
         if ddof == 0:
             return w_sum
-        return w_sum - ddof * (weights ** 2).sum(-1, keepdims=True) / w_sum
+        return w_sum - ddof * (weights**2).sum(-1, keepdims=True) / w_sum
     # Matrix weight: by elimination ``W`` is the non-None argument here.
     assert W is not None
     w_sum = W.sum(axis=(-1, -2), keepdims=True)
@@ -154,12 +155,12 @@ def _cov_core(
     ddof: int,
     l2: float,
 ) -> Num[Array, '... c d']:
-    '''Unbatched-shape covariance between channel sets X and Y.
+    """Unbatched-shape covariance between channel sets X and Y.
 
     Caller is responsible for centring against the appropriate mean
     (we compute it here).  Handles unweighted, vector-weighted, and
     matrix-weighted cases via three explicit branches.
-    '''
+    """
     mu_X = _weighted_mean(X, weights=weights, W=W)
     if Y is X:
         mu_Y = mu_X
@@ -175,7 +176,11 @@ def _cov_core(
     if W is not None:
         sigma = Xc @ W @ Yc.swapaxes(-1, -2) / fact[..., None, :]
     elif weights is not None:
-        sigma = (Xc * weights[..., None, :]) @ Yc.swapaxes(-1, -2) / fact[..., None, :]
+        sigma = (
+            (Xc * weights[..., None, :])
+            @ Yc.swapaxes(-1, -2)
+            / fact[..., None, :]
+        )
     else:
         sigma = Xc @ Yc.swapaxes(-1, -2) / fact
 
@@ -199,7 +204,7 @@ def cov(
     weight_matrix: Optional[Num[Array, '... obs obs']] = None,
     l2: float = 0.0,
 ) -> Num[Array, '... c c']:
-    '''Empirical covariance of variables in a tensor batch.
+    """Empirical covariance of variables in a tensor batch.
 
     Parameters
     ----------
@@ -232,7 +237,7 @@ def cov(
     Returns
     -------
     Covariance matrix, ``(..., c, c)``.
-    '''
+    """
     if weights is not None and weight_matrix is not None:
         raise ValueError(
             'cov: pass at most one of `weights` (per-observation) '
@@ -242,12 +247,17 @@ def cov(
         ddof = int(not bias)
     X = _orient_obs_last(X, rowvar)
     return _cov_core(
-        X, X, weights=weights, W=weight_matrix, ddof=ddof, l2=l2,
+        X,
+        X,
+        weights=weights,
+        W=weight_matrix,
+        ddof=ddof,
+        l2=l2,
     )
 
 
 def _corrnorm(A: Num[Array, '... c c']) -> Num[Array, '... c c']:
-    '''Normalisation matrix for ``corr``: ``sqrt(diag) outer sqrt(diag)``.'''
+    """Normalisation matrix for ``corr``: ``sqrt(diag) outer sqrt(diag)``."""
     d = jnp.diagonal(A, axis1=-2, axis2=-1)
     fact = jnp.sqrt(d)[..., None]
     # ``jnp.diagonal`` resolves to Any; restore the array type.
@@ -261,11 +271,11 @@ def corr(
     X: Num[Array, '... c obs'],
     **kwargs: Any,
 ) -> Num[Array, '... c c']:
-    '''Pearson correlation of variables in a tensor batch.
+    """Pearson correlation of variables in a tensor batch.
 
     All arguments forwarded to ``cov``; the result is divided by
     the geometric mean of the diagonal entries.
-    '''
+    """
     sigma = cov(X, **kwargs)
     return sigma / _corrnorm(sigma)
 
@@ -281,11 +291,11 @@ def pairedcov(
     weight_matrix: Optional[Num[Array, '... obs obs']] = None,
     l2: float = 0.0,
 ) -> Num[Array, '... c d']:
-    '''Cross-covariance between two sets of variables.
+    """Cross-covariance between two sets of variables.
 
     Same semantics as ``cov`` but with two separate variable
     blocks.  Returns ``(..., c, d)``.
-    '''
+    """
     if weights is not None and weight_matrix is not None:
         raise ValueError(
             'pairedcov: pass at most one of `weights` and `weight_matrix`.'
@@ -295,7 +305,12 @@ def pairedcov(
     X = _orient_obs_last(X, rowvar)
     Y = _orient_obs_last(Y, rowvar)
     return _cov_core(
-        X, Y, weights=weights, W=weight_matrix, ddof=ddof, l2=l2,
+        X,
+        Y,
+        weights=weights,
+        W=weight_matrix,
+        ddof=ddof,
+        l2=l2,
     )
 
 
@@ -304,12 +319,12 @@ def pairedcorr(
     Y: Num[Array, '... d obs'],
     **kwargs: Any,
 ) -> Num[Array, '... c d']:
-    '''Cross-correlation between two sets of variables.
+    """Cross-correlation between two sets of variables.
 
     Normalised version of ``pairedcov``: each entry divided by
     the geometric mean of the corresponding diagonal entries of
     ``cov(X)`` and ``cov(Y)``.
-    '''
+    """
     sigma_xy = pairedcov(X, Y, **kwargs)
     sigma_xx_diag = jnp.diagonal(cov(X, **kwargs), axis1=-2, axis2=-1)
     sigma_yy_diag = jnp.diagonal(cov(Y, **kwargs), axis1=-2, axis2=-1)
@@ -332,7 +347,7 @@ def precision(
     require_nonsingular: bool = True,
     **kwargs: Any,
 ) -> Num[Array, '... c c']:
-    '''Inverse covariance (precision) matrix.
+    """Inverse covariance (precision) matrix.
 
     Parameters
     ----------
@@ -344,7 +359,7 @@ def precision(
         pseudoinverse.  Pass ``l2 > 0`` to ``kwargs`` to
         regularise rather than rely on the pseudoinverse for
         rank-deficient cases.
-    '''
+    """
     sigma = cov(X, **kwargs)
     if require_nonsingular:
         # ``jnp.linalg.inv`` is typed as returning Any; restore.
@@ -358,12 +373,12 @@ def partialcov(
     require_nonsingular: bool = True,
     **kwargs: Any,
 ) -> Num[Array, '... c c']:
-    '''Partial covariance: conditioning each pair on all others.
+    """Partial covariance: conditioning each pair on all others.
 
     Computed from the precision matrix by negating off-diagonal
     entries.  Interpretation: direct (conditional on the rest)
     relationships between variable pairs.
-    '''
+    """
     omega = precision(X, require_nonsingular=require_nonsingular, **kwargs)
     n = omega.shape[-1]
     sign = 2 * jnp.eye(n, dtype=omega.dtype) - 1
@@ -376,7 +391,7 @@ def partialcorr(
     require_nonsingular: bool = True,
     **kwargs: Any,
 ) -> Num[Array, '... c c']:
-    '''Partial correlation: normalised partial covariance.'''
+    """Partial correlation: normalised partial covariance."""
     omega = partialcov(X, require_nonsingular=require_nonsingular, **kwargs)
     # For partial *correlation*, sign(diag) is sign(precision diag) = positive.
     # Normalise by geometric mean of |diag|.
@@ -404,7 +419,7 @@ def conditionalcov(
     l2: float = 0.0,
     residualise_l2: float = 0.0,
 ) -> Num[Array, '... c c']:
-    '''Covariance of ``X`` conditioned on the variables in ``Y``.
+    """Covariance of ``X`` conditioned on the variables in ``Y``.
 
     Operationally: residualise ``X`` against ``Y``, then take the
     covariance of the residuals.  This is the "explained out the
@@ -420,13 +435,18 @@ def conditionalcov(
         Ridge for the residualisation step (passed to
         ``residualise``).  Typically left at ``0``; raise if
         ``Y`` is near-collinear.
-    '''
+    """
     X = _orient_obs_last(X, rowvar)
     Y = _orient_obs_last(Y, rowvar)
     Xr = residualise(X, Y, l2=residualise_l2, rowvar=True)
     return cov(
-        Xr, rowvar=True, bias=bias, ddof=ddof,
-        weights=weights, weight_matrix=weight_matrix, l2=l2,
+        Xr,
+        rowvar=True,
+        bias=bias,
+        ddof=ddof,
+        weights=weights,
+        weight_matrix=weight_matrix,
+        l2=l2,
     )
 
 
@@ -435,10 +455,10 @@ def conditionalcorr(
     Y: Num[Array, '... d obs'],
     **kwargs: Any,
 ) -> Num[Array, '... c c']:
-    '''Correlation of ``X`` conditioned on the variables in ``Y``.
+    """Correlation of ``X`` conditioned on the variables in ``Y``.
 
     Normalised version of ``conditionalcov``.
-    '''
+    """
     sigma = conditionalcov(X, Y, **kwargs)
     return sigma / _corrnorm(sigma)
 
@@ -449,20 +469,20 @@ def conditionalcorr(
 
 
 def ccov(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
-    '''Alias for ``conditionalcov``.'''
+    """Alias for ``conditionalcov``."""
     return conditionalcov(*args, **kwargs)
 
 
 def ccorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
-    '''Alias for ``conditionalcorr``.'''
+    """Alias for ``conditionalcorr``."""
     return conditionalcorr(*args, **kwargs)
 
 
 def pcorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
-    '''Alias for ``partialcorr``.'''
+    """Alias for ``partialcorr``."""
     return partialcorr(*args, **kwargs)
 
 
 def corrcoef(*args: Any, **kwargs: Any) -> Num[Array, '... c c']:
-    '''Alias for ``corr`` (numpy convention).'''
+    """Alias for ``corr`` (numpy convention)."""
     return corr(*args, **kwargs)

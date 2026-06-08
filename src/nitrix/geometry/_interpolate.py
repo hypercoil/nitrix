@@ -85,6 +85,7 @@ fills out-of-range taps with ``cval``, ``nearest`` clamps, ``wrap`` is
 periodic (``i mod n``), ``mirror`` folds with period ``2(n-1)`` (no edge
 repeat), and ``reflect`` folds with period ``2n`` (edge repeat).
 """
+
 from __future__ import annotations
 
 import itertools
@@ -108,7 +109,6 @@ import jax.scipy.ndimage as jsp_ndi
 from jaxtyping import Array, Float, Int
 
 from .._internal.backend import default_backend_is_gpu
-
 
 __all__ = [
     'BoundaryMode',
@@ -140,7 +140,7 @@ BoundaryMode = Literal['constant', 'nearest', 'wrap', 'mirror', 'reflect']
 # matching the ``smoothing.metric.FeatureMetric`` precedent.
 @runtime_checkable
 class Interpolator(Protocol):
-    '''Sample an image at continuous coordinates with a fixed kernel.
+    """Sample an image at continuous coordinates with a fixed kernel.
 
     A method maps an unbatched channel-last image ``(*spatial, c)`` and
     a coordinate field ``(*out_spatial, ndim)`` to the sampled values
@@ -160,7 +160,7 @@ class Interpolator(Protocol):
         registration loss needs.  ``False`` for piecewise-constant
         kernels (nearest neighbour) and hard label selection
         (multi-label).
-    '''
+    """
 
     # ``ClassVar`` (not a plain instance annotation): the flags are
     # fixed per kernel, so implementers expose them as class constants;
@@ -177,8 +177,7 @@ class Interpolator(Protocol):
         *,
         mode: BoundaryMode,
         cval: float,
-    ) -> Float[Array, '*out_spatial c']:
-        ...
+    ) -> Float[Array, '*out_spatial c']: ...
 
 
 def _map_coordinates_sample(
@@ -189,19 +188,19 @@ def _map_coordinates_sample(
     mode: BoundaryMode,
     cval: float,
 ) -> Float[Array, '*out_spatial c']:
-    '''Channel-wise gather via ``jax.scipy.ndimage.map_coordinates``.
+    """Channel-wise gather via ``jax.scipy.ndimage.map_coordinates``.
 
     The shared engine for the spline orders ``map_coordinates`` supports
     natively (``0`` nearest, ``1`` linear).  ``coords`` is reshaped to
     the ``(ndim, n_samples)`` layout the routine wants; the trailing
     channel axis is mapped over with ``jax.vmap``.
-    '''
+    """
     ndim = coords.shape[-1]
     # ``map_coordinates`` wants coords as ``(ndim, n_samples)`` -- one
     # row per input spatial axis.  Move the ndim axis to the front and
     # flatten the output-spatial dims.
-    coords_t = jnp.moveaxis(coords, -1, 0)          # (ndim, *out_spatial)
-    coords_flat = coords_t.reshape(ndim, -1)        # (ndim, N)
+    coords_t = jnp.moveaxis(coords, -1, 0)  # (ndim, *out_spatial)
+    coords_flat = coords_t.reshape(ndim, -1)  # (ndim, N)
 
     def sample_one_channel(
         img_ch: Float[Array, '*spatial'],
@@ -213,13 +212,16 @@ def _map_coordinates_sample(
         return cast(
             Float[Array, 'n'],
             jsp_ndi.map_coordinates(
-                img_ch, cast(Sequence[Array], coords_flat),
-                order=order, mode=mode, cval=cval,
+                img_ch,
+                cast(Sequence[Array], coords_flat),
+                order=order,
+                mode=mode,
+                cval=cval,
             ),
         )
 
     sample_v = jax.vmap(sample_one_channel, in_axes=-1, out_axes=-1)
-    flat_out = sample_v(image)                       # (N, c)
+    flat_out = sample_v(image)  # (N, c)
     out_spatial = coords.shape[:-1]
     return flat_out.reshape(out_spatial + (image.shape[-1],))
 
@@ -244,7 +246,7 @@ def _boundary_index(
     size: int,
     mode: BoundaryMode,
 ) -> Tuple[Int[Array, 'n t'], Float[Array, 'n t']]:
-    '''Fold integer taps to in-range gather indices for ``mode``.
+    """Fold integer taps to in-range gather indices for ``mode``.
 
     Returns ``(idx, valid)`` where ``idx`` is always a legal index into
     an axis of length ``size`` (so the gather never reads out of bounds)
@@ -260,7 +262,7 @@ def _boundary_index(
     - ``wrap``     -- ``tap mod size`` (period ``size``).
     - ``mirror``   -- fold with period ``2(size - 1)``, no edge repeat.
     - ``reflect``  -- fold with period ``2 size``, edge repeat.
-    '''
+    """
     ones = jnp.ones(taps.shape, dtype=bool)
     if mode == 'constant':
         valid = (taps >= 0) & (taps < size)
@@ -293,7 +295,7 @@ def _separable_gather(
     mode: BoundaryMode,
     cval: float,
 ) -> Float[Array, '*out_spatial c']:
-    '''Sample ``image`` at ``coords`` with an explicit separable gather.
+    """Sample ``image`` at ``coords`` with an explicit separable gather.
 
     The runtime engine for the gather-based kernels.  Each of the
     ``ndim`` axes contributes ``T`` integer taps and weights via
@@ -305,12 +307,12 @@ def _separable_gather(
 
     Operates on the *unbatched* core shapes; leading batch axes are
     composed by the caller (``spatial_transform`` vmaps the core).
-    '''
+    """
     ndim = coords.shape[-1]
     out_spatial = coords.shape[:-1]
-    spatial = image.shape[:ndim]                     # (n_0, ..., n_{ndim-1})
+    spatial = image.shape[:ndim]  # (n_0, ..., n_{ndim-1})
     n_channels = image.shape[-1]
-    coords_flat = coords.reshape(-1, ndim)           # (N, ndim)
+    coords_flat = coords.reshape(-1, ndim)  # (N, ndim)
 
     # Per-axis taps / weights / validity.
     idx_axes: list[Int[Array, 'n t']] = []
@@ -331,7 +333,7 @@ def _separable_gather(
         gather_idx = tuple(
             idx_axes[axis][:, corner[axis]] for axis in range(ndim)
         )
-        values = image[gather_idx]                   # (N, c)
+        values = image[gather_idx]  # (N, c)
         weight = weight_axes[0][:, corner[0]]
         for axis in range(1, ndim):
             weight = weight * weight_axes[axis][:, corner[axis]]
@@ -356,26 +358,34 @@ def _gather_sample(
     mode: BoundaryMode,
     cval: float,
 ) -> Float[Array, '*out_spatial c']:
-    '''Sample via the platform-optimal engine for a ``map_coordinates`` order.
+    """Sample via the platform-optimal engine for a ``map_coordinates`` order.
 
     The explicit separable gather and ``map_coordinates`` are parity-equal
     to a ULP for ``order`` 0/1, so this picks whichever is faster on the
     deployment target: the explicit gather on GPU (the B7 win), the
     ``map_coordinates`` lowering on CPU.  ``jax.default_backend()`` is
     concrete at trace time, so the branch is ``jit``-safe.
-    '''
+    """
     if default_backend_is_gpu():
         return _separable_gather(
-            image, coords, tap_rule=tap_rule, mode=mode, cval=cval,
+            image,
+            coords,
+            tap_rule=tap_rule,
+            mode=mode,
+            cval=cval,
         )
     return _map_coordinates_sample(
-        image, coords, order=order, mode=mode, cval=cval,
+        image,
+        coords,
+        order=order,
+        mode=mode,
+        cval=cval,
     )
 
 
 @runtime_checkable
 class _SeparableKernel(Protocol):
-    '''A gather kernel whose weights factor per axis (a tap rule).
+    """A gather kernel whose weights factor per axis (a tap rule).
 
     The internal marker that ``resample`` uses to choose its engine.
     ``Linear`` / ``NearestNeighbour`` / ``Lanczos`` / ``CubicBSpline``
@@ -397,19 +407,20 @@ class _SeparableKernel(Protocol):
     gather: the identity for the direct kernels, the recursive B-spline
     prefilter for ``CubicBSpline`` (which gathers *coefficients*, not the
     raw samples).
-    '''
+    """
 
     prefers_separable_resample: bool
 
     def _axis_taps_weights(
-        self, coord: Float[Array, 'n'],
-    ) -> Tuple[Int[Array, 'n t'], Float[Array, 'n t']]:
-        ...
+        self,
+        coord: Float[Array, 'n'],
+    ) -> Tuple[Int[Array, 'n t'], Float[Array, 'n t']]: ...
 
     def _prepare(
-        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
-    ) -> Float[Array, '*spatial c']:
-        ...
+        self,
+        image: Float[Array, '*spatial c'],
+        mode: BoundaryMode,
+    ) -> Float[Array, '*spatial c']: ...
 
 
 def _separable_resample(
@@ -420,7 +431,7 @@ def _separable_resample(
     mode: BoundaryMode,
     cval: float,
 ) -> Float[Array, '*out_spatial c']:
-    '''Resample a separable resize grid via successive per-axis 1-D passes.
+    """Resample a separable resize grid via successive per-axis 1-D passes.
 
     ``axes_coords[d]`` is the 1-D sample-coordinate vector along input
     axis ``d``.  Because the resize grid is the outer product of these
@@ -430,18 +441,18 @@ def _separable_resample(
     ``O(N_out * T**ndim)`` corner gather of :func:`_separable_gather`.
     The two agree to a ULP; this is the form that keeps high-order
     kernels (``Lanczos``: ``T = 2 * order``) tractable on 3-D volumes.
-    '''
+    """
     out = image
     for axis, coord in enumerate(axes_coords):
         size = out.shape[axis]
-        taps, weights = tap_rule(coord)                  # (out_d, T)
+        taps, weights = tap_rule(coord)  # (out_d, T)
         idx, valid = _boundary_index(taps, size, mode)
         out_d, n_taps = taps.shape
         # Gather the T taps for every output position along ``axis``;
         # ``take`` applies the same index vector across all other dims.
         gathered = jnp.take(out, idx.reshape(-1), axis=axis)
         split_shape = (
-            out.shape[:axis] + (out_d, n_taps) + out.shape[axis + 1:]
+            out.shape[:axis] + (out_d, n_taps) + out.shape[axis + 1 :]
         )
         gathered = gathered.reshape(split_shape)
         broadcast = [1] * gathered.ndim
@@ -449,7 +460,9 @@ def _separable_resample(
         broadcast[axis + 1] = n_taps
         if mode == 'constant':
             gathered = jnp.where(
-                valid.reshape(broadcast), gathered, cval,
+                valid.reshape(broadcast),
+                gathered,
+                cval,
             )
         out = jnp.sum(gathered * weights.reshape(broadcast), axis=axis + 1)
     return out.astype(image.dtype)
@@ -465,16 +478,17 @@ _BSPLINE_POLE = math.sqrt(3.0) - 2.0
 
 
 def _bspline_initial_causal(
-    coeffs: Float[Array, 'n'], pole: float,
+    coeffs: Float[Array, 'n'],
+    pole: float,
 ) -> Float[Array, '']:
-    '''Exact whole-sample-mirror initial causal coefficient.
+    """Exact whole-sample-mirror initial causal coefficient.
 
     The closed-form boundary condition for the causal recursion under a
     mirror (whole-sample-symmetric) extension -- the Thévenaz / ITK
     convention, equal to ``scipy.ndimage`` with ``mode='mirror'``.
     Vectorised (a single dot product), so it is parallel and
     differentiable -- no scan.
-    '''
+    """
     n = coeffs.shape[0]
     k = jnp.arange(n)
     weights = jnp.power(pole, k) + jnp.power(pole, 2 * n - 2 - k)
@@ -489,7 +503,7 @@ def _first_order_causal(
     *,
     associative: bool,
 ) -> Float[Array, 'n']:
-    '''Resolve ``y[k] = pole * y[k-1] + inputs[k]`` with ``y[0] = init``.
+    """Resolve ``y[k] = pole * y[k-1] + inputs[k]`` with ``y[0] = init``.
 
     ``inputs[0]`` is ignored (overridden by ``init``).  Two exact engines
     -- the choice mirrors ``signal._iir`` (a first-order linear recurrence
@@ -500,20 +514,23 @@ def _first_order_causal(
       form that removes the scan's sequential-depth cost).
 
     Both are exact (no truncation); they agree to a ULP.
-    '''
+    """
     n = inputs.shape[0]
     init = jnp.reshape(init, (1,))
     if associative:
         # Element k carries (a_k, v_k); the prefix combine resolves
         # y[k] = a_k * y[k-1] + v_k.  a_0 = 0 so y[0] = v_0 = init.
         a_seq = jnp.concatenate(
-            [jnp.zeros((1,), inputs.dtype),
-             jnp.full((n - 1,), pole, inputs.dtype)],
+            [
+                jnp.zeros((1,), inputs.dtype),
+                jnp.full((n - 1,), pole, inputs.dtype),
+            ],
         )
         v_seq = jnp.concatenate([init, inputs[1:]])
 
         def combine(
-            left: Tuple[Array, Array], right: Tuple[Array, Array],
+            left: Tuple[Array, Array],
+            right: Tuple[Array, Array],
         ) -> Tuple[Array, Array]:
             a_l, v_l = left
             a_r, v_r = right
@@ -531,30 +548,42 @@ def _first_order_causal(
 
 
 def _bspline_prefilter_1d(
-    samples: Float[Array, 'n'], pole: float, *, associative: bool,
+    samples: Float[Array, 'n'],
+    pole: float,
+    *,
+    associative: bool,
 ) -> Float[Array, 'n']:
-    '''B-spline coefficients of a 1-D signal (one causal + one anti-causal).'''
+    """B-spline coefficients of a 1-D signal (one causal + one anti-causal)."""
     n = samples.shape[0]
-    gain = (1.0 - pole) * (1.0 - 1.0 / pole)        # = 6 for cubic
+    gain = (1.0 - pole) * (1.0 - 1.0 / pole)  # = 6 for cubic
     scaled = samples * gain
     causal0 = _bspline_initial_causal(scaled, pole)
     causal = _first_order_causal(
-        scaled, pole, causal0, associative=associative,
+        scaled,
+        pole,
+        causal0,
+        associative=associative,
     )
     # Anti-causal init (mirror) and recursion ``c[k] = pole*(c[k+1] - c[k])``,
     # run as a forward first-order recurrence on the reversed sequence.
-    anti0 = (pole / (pole * pole - 1.0)) * (causal[n - 1] + pole * causal[n - 2])
+    anti0 = (pole / (pole * pole - 1.0)) * (
+        causal[n - 1] + pole * causal[n - 2]
+    )
     reversed_input = -pole * causal[::-1]
     reversed_out = _first_order_causal(
-        reversed_input, pole, anti0, associative=associative,
+        reversed_input,
+        pole,
+        anti0,
+        associative=associative,
     )
     return reversed_out[::-1]
 
 
 def _bspline_prefilter(
-    image: Float[Array, '*spatial c'], mode: BoundaryMode,
+    image: Float[Array, '*spatial c'],
+    mode: BoundaryMode,
 ) -> Float[Array, '*spatial c']:
-    '''Separable cubic B-spline prefilter over the spatial axes.
+    """Separable cubic B-spline prefilter over the spatial axes.
 
     Converts samples to interpolating B-spline coefficients, one
     recursive pass per spatial axis (the trailing channel axis is left
@@ -562,7 +591,7 @@ def _bspline_prefilter(
     standard B-spline convention; ``mode`` then governs only the gather
     extrapolation -- exact ``scipy`` ``order=3`` parity holds for
     ``mode='mirror'``, interior parity otherwise).
-    '''
+    """
     del mode  # prefilter boundary is always mirror (documented)
     ndim = image.ndim - 1
     associative = default_backend_is_gpu()
@@ -570,11 +599,13 @@ def _bspline_prefilter(
     for axis in range(ndim):
         if out.shape[axis] < 2:
             continue  # a length-1 axis has no recursion
-        moved = jnp.moveaxis(out, axis, -1)          # (..., N)
-        flat = moved.reshape(-1, moved.shape[-1])    # (M, N)
+        moved = jnp.moveaxis(out, axis, -1)  # (..., N)
+        flat = moved.reshape(-1, moved.shape[-1])  # (M, N)
         filtered = jax.vmap(
             lambda row: _bspline_prefilter_1d(
-                row, _BSPLINE_POLE, associative=associative,
+                row,
+                _BSPLINE_POLE,
+                associative=associative,
             )
         )(flat)
         out = jnp.moveaxis(filtered.reshape(moved.shape), -1, axis)
@@ -583,21 +614,22 @@ def _bspline_prefilter(
 
 @dataclass(frozen=True)
 class Linear:
-    '''(Multi-)linear interpolation (``order=1``).
+    """(Multi-)linear interpolation (``order=1``).
 
     The default kernel and the prior ``resample`` / ``spatial_transform``
     behaviour: each sampled value is the multilinear blend of its
     ``2**ndim`` surrounding voxels.  Smooth in both the image values and
     the sample coordinates, so it is the kernel for differentiable
     registration losses.
-    '''
+    """
 
     differentiable_in_values: ClassVar[bool] = True
     differentiable_in_coords: ClassVar[bool] = True
     prefers_separable_resample: ClassVar[bool] = False
 
     def _axis_taps_weights(
-        self, coord: Float[Array, 'n'],
+        self,
+        coord: Float[Array, 'n'],
     ) -> Tuple[Int[Array, 'n 2'], Float[Array, 'n 2']]:
         base = jnp.floor(coord)
         frac = coord - base
@@ -607,7 +639,9 @@ class Linear:
         return taps, weights
 
     def _prepare(
-        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+        self,
+        image: Float[Array, '*spatial c'],
+        mode: BoundaryMode,
     ) -> Float[Array, '*spatial c']:
         return image
 
@@ -620,14 +654,18 @@ class Linear:
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
         return _gather_sample(
-            image, coords, order=1,
-            tap_rule=self._axis_taps_weights, mode=mode, cval=cval,
+            image,
+            coords,
+            order=1,
+            tap_rule=self._axis_taps_weights,
+            mode=mode,
+            cval=cval,
         )
 
 
 @dataclass(frozen=True)
 class NearestNeighbour:
-    '''Nearest-neighbour interpolation (``order=0``).
+    """Nearest-neighbour interpolation (``order=0``).
 
     Each sampled value is the single voxel nearest the sample position.
     The output is restricted to values that occur in the input, so this
@@ -641,14 +679,15 @@ class NearestNeighbour:
     The rounding is ``floor(coord + 0.5)`` (round half up), matching
     ``jax.scipy.ndimage.map_coordinates(order=0)`` -- *not* round
     half-to-even.
-    '''
+    """
 
     differentiable_in_values: ClassVar[bool] = True
     differentiable_in_coords: ClassVar[bool] = False
     prefers_separable_resample: ClassVar[bool] = False
 
     def _axis_taps_weights(
-        self, coord: Float[Array, 'n'],
+        self,
+        coord: Float[Array, 'n'],
     ) -> Tuple[Int[Array, 'n 1'], Float[Array, 'n 1']]:
         nearest = jnp.floor(coord + 0.5).astype(jnp.int32)
         taps = nearest[..., None]
@@ -656,7 +695,9 @@ class NearestNeighbour:
         return taps, weights
 
     def _prepare(
-        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+        self,
+        image: Float[Array, '*spatial c'],
+        mode: BoundaryMode,
     ) -> Float[Array, '*spatial c']:
         return image
 
@@ -669,22 +710,27 @@ class NearestNeighbour:
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
         return _gather_sample(
-            image, coords, order=0,
-            tap_rule=self._axis_taps_weights, mode=mode, cval=cval,
+            image,
+            coords,
+            order=0,
+            tap_rule=self._axis_taps_weights,
+            mode=mode,
+            cval=cval,
         )
 
 
 def _lanczos_kernel(
-    x: Float[Array, '...'], order: int,
+    x: Float[Array, '...'],
+    order: int,
 ) -> Float[Array, '...']:
-    '''The Lanczos windowed-sinc kernel ``L_a(x) = sinc(x) sinc(x / a)``.
+    """The Lanczos windowed-sinc kernel ``L_a(x) = sinc(x) sinc(x / a)``.
 
     Zero outside the support ``|x| < a`` (``a = order``).  ``jnp.sinc`` is
     the *normalised* sinc (``sin(pi x) / (pi x)``, unit at 0), so the
     kernel is 1 at ``x = 0`` and 0 at every nonzero integer offset --
     i.e. it reproduces grid samples exactly.  Smooth within the support,
     so differentiable in ``x``.
-    '''
+    """
     a = float(order)
     kernel = jnp.sinc(x) * jnp.sinc(x / a)
     return jnp.where(jnp.abs(x) < a, kernel, 0.0)
@@ -692,7 +738,7 @@ def _lanczos_kernel(
 
 @dataclass(frozen=True)
 class Lanczos:
-    '''Lanczos windowed-sinc interpolation of order ``order`` (radius ``a``).
+    """Lanczos windowed-sinc interpolation of order ``order`` (radius ``a``).
 
     A separable ``2a``-tap kernel
     ``L_a(x) = sinc(x) sinc(x / a)`` (``a = order``), the high-fidelity
@@ -721,7 +767,7 @@ class Lanczos:
     -----
     This is the ANTs *algorithm class*, not bit-exact ITK parity (ITK's
     windowed-sinc radius / normalisation conventions differ in detail).
-    '''
+    """
 
     order: int = 3
 
@@ -737,20 +783,23 @@ class Lanczos:
             )
 
     def _axis_taps_weights(
-        self, coord: Float[Array, 'n'],
+        self,
+        coord: Float[Array, 'n'],
     ) -> Tuple[Int[Array, 'n t'], Float[Array, 'n t']]:
         a = self.order
-        base = jnp.floor(coord).astype(jnp.int32)            # (N,)
+        base = jnp.floor(coord).astype(jnp.int32)  # (N,)
         offsets = jnp.arange(-a + 1, a + 1, dtype=jnp.int32)  # (2a,)
-        taps = base[:, None] + offsets[None, :]              # (N, 2a)
-        dist = coord[:, None] - taps.astype(coord.dtype)     # (N, 2a)
-        weights = _lanczos_kernel(dist, a)                   # (N, 2a)
+        taps = base[:, None] + offsets[None, :]  # (N, 2a)
+        dist = coord[:, None] - taps.astype(coord.dtype)  # (N, 2a)
+        weights = _lanczos_kernel(dist, a)  # (N, 2a)
         # Renormalise to a partition of unity (constant-preserving).
         weights = weights / jnp.sum(weights, axis=-1, keepdims=True)
         return taps, weights
 
     def _prepare(
-        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+        self,
+        image: Float[Array, '*spatial c'],
+        mode: BoundaryMode,
     ) -> Float[Array, '*spatial c']:
         return image
 
@@ -763,13 +812,16 @@ class Lanczos:
         cval: float,
     ) -> Float[Array, '*out_spatial c']:
         return _separable_gather(
-            image, coords,
-            tap_rule=self._axis_taps_weights, mode=mode, cval=cval,
+            image,
+            coords,
+            tap_rule=self._axis_taps_weights,
+            mode=mode,
+            cval=cval,
         )
 
 
 class CubicBSplineBoundaryWarning(UserWarning):
-    '''Emitted when ``CubicBSpline`` is given a boundary it cannot honour.
+    """Emitted when ``CubicBSpline`` is given a boundary it cannot honour.
 
     ``CubicBSpline`` always uses the mirror boundary (the only one its
     prefilter implements), so an explicit non-mirror ``mode`` -- or a
@@ -778,11 +830,11 @@ class CubicBSplineBoundaryWarning(UserWarning):
     ``mode='mirror'`` (or leave ``mode`` at its default) to silence it, or
     filter this category.  The default ``mode='constant'`` with ``cval=0``
     is treated as "unspecified" and does *not* warn.
-    '''
+    """
 
 
 def _warn_cubic_boundary_ignored(mode: BoundaryMode, cval: float) -> None:
-    '''Announce a CubicBSpline boundary override (deduped by ``warnings``).'''
+    """Announce a CubicBSpline boundary override (deduped by ``warnings``)."""
     if mode not in ('mirror', 'constant') or cval != 0.0:
         warnings.warn(
             f'CubicBSpline always uses the mirror boundary; the supplied '
@@ -796,7 +848,7 @@ def _warn_cubic_boundary_ignored(mode: BoundaryMode, cval: float) -> None:
 
 @dataclass(frozen=True)
 class CubicBSpline:
-    '''Cubic (order-3) B-spline interpolation -- ``scipy.ndimage`` ``order=3``.
+    """Cubic (order-3) B-spline interpolation -- ``scipy.ndimage`` ``order=3``.
 
     The order-3 spline path consumers like the nnUNet / ``hd_bet``
     preprocessing in some ilex pipelines use.  Unlike a plain cubic
@@ -839,33 +891,40 @@ class CubicBSpline:
     explicit non-mirror ``mode`` (or a non-zero ``cval``) raises a
     :class:`CubicBSplineBoundaryWarning` (the bare default
     ``mode='constant', cval=0`` is treated as unspecified and is silent).
-    '''
+    """
 
     differentiable_in_values: ClassVar[bool] = True
     differentiable_in_coords: ClassVar[bool] = True
     prefers_separable_resample: ClassVar[bool] = True
 
     def _axis_taps_weights(
-        self, coord: Float[Array, 'n'],
+        self,
+        coord: Float[Array, 'n'],
     ) -> Tuple[Int[Array, 'n 4'], Float[Array, 'n 4']]:
         base = jnp.floor(coord)
         frac = coord - base
         lower = base.astype(jnp.int32)
         taps = jnp.stack(
-            [lower - 1, lower, lower + 1, lower + 2], axis=-1,
+            [lower - 1, lower, lower + 1, lower + 2],
+            axis=-1,
         )
         # Cubic B-spline basis beta^3 at the four tap distances.
         comp = 1.0 - frac
-        weights = jnp.stack([
-            comp ** 3 / 6.0,
-            2.0 / 3.0 - frac ** 2 + frac ** 3 / 2.0,
-            2.0 / 3.0 - comp ** 2 + comp ** 3 / 2.0,
-            frac ** 3 / 6.0,
-        ], axis=-1)
+        weights = jnp.stack(
+            [
+                comp**3 / 6.0,
+                2.0 / 3.0 - frac**2 + frac**3 / 2.0,
+                2.0 / 3.0 - comp**2 + comp**3 / 2.0,
+                frac**3 / 6.0,
+            ],
+            axis=-1,
+        )
         return taps, weights
 
     def _prepare(
-        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+        self,
+        image: Float[Array, '*spatial c'],
+        mode: BoundaryMode,
     ) -> Float[Array, '*spatial c']:
         return _bspline_prefilter(image, mode)
 
@@ -883,14 +942,17 @@ class CubicBSpline:
         _warn_cubic_boundary_ignored(mode, cval)
         coeffs = self._prepare(image, 'mirror')
         return _separable_gather(
-            coeffs, coords,
-            tap_rule=self._axis_taps_weights, mode='mirror', cval=0.0,
+            coeffs,
+            coords,
+            tap_rule=self._axis_taps_weights,
+            mode='mirror',
+            cval=0.0,
         )
 
 
 @dataclass(frozen=True)
 class MultiLabel:
-    '''ANTs-style multi-label interpolation for label / segmentation maps.
+    """ANTs-style multi-label interpolation for label / segmentation maps.
 
     Naive nearest-neighbour resampling of a segmentation aliases label
     boundaries and drops thin structures; plain linear interpolation
@@ -936,7 +998,7 @@ class MultiLabel:
     w.r.t. both the image values and the coordinates is zero (the call
     does not error under ``jax.grad`` -- it returns zeros).  ``cval`` is
     ignored; out-of-support samples resolve to ``labels[0]`` as above.
-    '''
+    """
 
     labels: Tuple[int, ...]
     inner: Interpolator = Linear()
@@ -983,7 +1045,9 @@ class MultiLabel:
             score = self._score(image, coords, label, mode)
             take = score > best_score
             best_label = jnp.where(
-                take, jnp.asarray(label, best_label.dtype), best_label,
+                take,
+                jnp.asarray(label, best_label.dtype),
+                best_label,
             )
             best_score = jnp.where(take, score, best_score)
         return best_label
@@ -1002,14 +1066,14 @@ def _sample_at_coords(
     mode: BoundaryMode,
     cval: float,
 ) -> Float[Array, '*out_spatial c']:
-    '''Sample ``image`` at continuous ``coords`` with the given method.
+    """Sample ``image`` at continuous ``coords`` with the given method.
 
     The seam ``spatial_transform`` calls (and ``resample`` falls back to
     for non-separable methods) -- the one place a ``backend`` axis will
     branch once a Pallas gather kernel lands.  Operates on the
     *unbatched* core shapes; leading batch axes are composed by the
     caller.
-    '''
+    """
     return method.sample(image, coords, mode=mode, cval=cval)
 
 
@@ -1021,7 +1085,7 @@ def _resample_on_grid(
     mode: BoundaryMode,
     cval: float,
 ) -> Float[Array, '*out_spatial c']:
-    '''Sample a separable resize grid with the given method.
+    """Sample a separable resize grid with the given method.
 
     The seam ``resample`` calls.  ``axes_coords`` are the per-axis 1-D
     sample-coordinate vectors of the (outer-product) resize grid.  A
@@ -1029,8 +1093,11 @@ def _resample_on_grid(
     (:func:`_separable_resample`, ``O(N * T * ndim)``); any other method
     (e.g. ``MultiLabel``) falls back to the dense meshgrid gather via
     :func:`_sample_at_coords`.
-    '''
-    if isinstance(method, _SeparableKernel) and method.prefers_separable_resample:
+    """
+    if (
+        isinstance(method, _SeparableKernel)
+        and method.prefers_separable_resample
+    ):
         # ``_prepare`` is the identity for the direct kernels and the
         # B-spline prefilter for ``CubicBSpline`` (applied once, on the
         # full image, before the separable per-axis passes).  The B-spline
@@ -1041,7 +1108,8 @@ def _resample_on_grid(
             _warn_cubic_boundary_ignored(mode, cval)
         prepared = method._prepare(image, 'mirror' if is_bspline else mode)
         return _separable_resample(
-            prepared, axes_coords,
+            prepared,
+            axes_coords,
             tap_rule=method._axis_taps_weights,
             mode='mirror' if is_bspline else mode,
             cval=0.0 if is_bspline else cval,
@@ -1049,5 +1117,9 @@ def _resample_on_grid(
     grids = jnp.meshgrid(*axes_coords, indexing='ij')
     coords = jnp.stack(grids, axis=-1)
     return _sample_at_coords(
-        image, coords, method=method, mode=mode, cval=cval,
+        image,
+        coords,
+        method=method,
+        mode=mode,
+        cval=cval,
     )

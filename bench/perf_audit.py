@@ -38,13 +38,14 @@ Per the rest of nitrix bench convention: report warm-state
 median wall-time (compile cost separately recorded).  All
 nitrix paths are JIT-wrapped + warmed up.
 """
+
 from __future__ import annotations
 
 import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -60,12 +61,12 @@ class BenchRow:
     nitrix_ms: float
     ref_name: str
     ref_ms: float
-    agreement: str   # e.g., "1.2e-5" or "skipped"
+    agreement: str  # e.g., "1.2e-5" or "skipped"
     notes: str = ''
 
     @property
     def ratio(self) -> float:
-        '''Wall-time ratio nitrix / ref.  >1 means nitrix slower.'''
+        """Wall-time ratio nitrix / ref.  >1 means nitrix slower."""
         if self.ref_ms <= 0:
             return float('inf')
         return self.nitrix_ms / self.ref_ms
@@ -81,12 +82,12 @@ class BenchRow:
 
 
 def _time_warm(fn: Callable, warmup: int = 3, repeats: int = 8) -> float:
-    '''Return median wall-time after warm-up, in milliseconds.
+    """Return median wall-time after warm-up, in milliseconds.
 
     ``fn`` should be a 0-arg callable that returns a JAX array
     (or any array we can ``block_until_ready`` on).  CPU-side
     functions returning numpy are fine -- we just don't block.
-    '''
+    """
     out = fn()
     if hasattr(out, 'block_until_ready'):
         out.block_until_ready()
@@ -111,15 +112,18 @@ def _time_warm(fn: Callable, warmup: int = 3, repeats: int = 8) -> float:
 
 def bench_rbf_kernel() -> list[BenchRow]:
     from sklearn.metrics.pairwise import rbf_kernel as sk_rbf
+
     from nitrix.linalg import rbf_kernel
 
     rows = []
-    for (n, d) in [(500, 32), (2000, 32), (5000, 32), (1000, 128)]:
+    for n, d in [(500, 32), (2000, 32), (5000, 32), (1000, 128)]:
         rng = np.random.default_rng(0)
         X0 = rng.standard_normal((n, d)).astype(np.float32)
         X0_j = jnp.asarray(X0)
 
-        ref_fn = lambda: sk_rbf(X0, gamma=0.1)
+        def ref_fn():
+            return sk_rbf(X0, gamma=0.1)
+
         nitrix_fn = jax.jit(lambda x: rbf_kernel(x, gamma=0.1))
         # Warm jit
         _ = nitrix_fn(X0_j).block_until_ready()
@@ -131,14 +135,16 @@ def bench_rbf_kernel() -> list[BenchRow]:
         K_n = np.asarray(nitrix_fn(X0_j))
         K_r = ref_fn()
         max_diff = float(np.abs(K_n - K_r).max())
-        rows.append(BenchRow(
-            op='linalg.rbf_kernel',
-            shape_desc=f'({n}, {d})',
-            nitrix_ms=nitrix_ms,
-            ref_name='sklearn',
-            ref_ms=ref_ms,
-            agreement=f'{max_diff:.1e}',
-        ))
+        rows.append(
+            BenchRow(
+                op='linalg.rbf_kernel',
+                shape_desc=f'({n}, {d})',
+                nitrix_ms=nitrix_ms,
+                ref_name='sklearn',
+                ref_ms=ref_ms,
+                agreement=f'{max_diff:.1e}',
+            )
+        )
     return rows
 
 
@@ -148,8 +154,9 @@ def bench_rbf_kernel() -> list[BenchRow]:
 
 
 def bench_lme_voxelwise() -> list[BenchRow]:
-    import statsmodels.formula.api as smf
     import pandas as pd
+    import statsmodels.formula.api as smf
+
     from nitrix.stats.lme import flame_two_level
 
     rows = []
@@ -161,12 +168,15 @@ def bench_lme_voxelwise() -> list[BenchRow]:
         X_group = jnp.asarray(rng.standard_normal((N, p)).astype(np.float32))
         true_gamma = jnp.asarray([1.0, 0.5])
         var_within = jnp.asarray(
-            (np.abs(rng.standard_normal((V, N))) * 0.5 + 0.1).astype(np.float32),
+            (np.abs(rng.standard_normal((V, N))) * 0.5 + 0.1).astype(
+                np.float32
+            ),
         )
         beta = (
             X_group @ true_gamma
             + 0.5 * jax.random.normal(jax.random.key(1), (V, N))
-            + jnp.sqrt(var_within) * jax.random.normal(jax.random.key(2), (V, N))
+            + jnp.sqrt(var_within)
+            * jax.random.normal(jax.random.key(2), (V, N))
         ).astype(jnp.float32)
 
         # nitrix: JIT'd vmap-batched fit
@@ -189,15 +199,17 @@ def bench_lme_voxelwise() -> list[BenchRow]:
         X_np = np.asarray(X_group)
 
         def fit_one(v):
-            df = pd.DataFrame({
-                'y': beta_np[v],
-                'x0': X_np[:, 0],
-                'x1': X_np[:, 1],
-                # Use var_within^{-1} as a frequency weight to
-                # approximate FLAME within statsmodels.  Not
-                # identical algorithm but the closest reference.
-                'w': 1.0 / var_within_np[v],
-            })
+            df = pd.DataFrame(
+                {
+                    'y': beta_np[v],
+                    'x0': X_np[:, 0],
+                    'x1': X_np[:, 1],
+                    # Use var_within^{-1} as a frequency weight to
+                    # approximate FLAME within statsmodels.  Not
+                    # identical algorithm but the closest reference.
+                    'w': 1.0 / var_within_np[v],
+                }
+            )
             md = smf.wls('y ~ x0 + x1 - 1', df, weights=df['w'])
             return md.fit()
 
@@ -209,15 +221,17 @@ def bench_lme_voxelwise() -> list[BenchRow]:
         ref_per_voxel = ref_total_ms / ref_V
         ref_extrapolated_ms = ref_per_voxel * V
 
-        rows.append(BenchRow(
-            op='lme.flame_two_level (voxelwise)',
-            shape_desc=f'V={V}, N={N}, p={p}',
-            nitrix_ms=nitrix_ms,
-            ref_name='statsmodels.wls (per-voxel loop)',
-            ref_ms=ref_extrapolated_ms,
-            agreement='~5e-3' if V <= 100 else 'skipped',
-            notes=f'ref extrapolated from V={ref_V}',
-        ))
+        rows.append(
+            BenchRow(
+                op='lme.flame_two_level (voxelwise)',
+                shape_desc=f'V={V}, N={N}, p={p}',
+                nitrix_ms=nitrix_ms,
+                ref_name='statsmodels.wls (per-voxel loop)',
+                ref_ms=ref_extrapolated_ms,
+                agreement='~5e-3' if V <= 100 else 'skipped',
+                notes=f'ref extrapolated from V={ref_V}',
+            )
+        )
     return rows
 
 
@@ -262,14 +276,16 @@ def bench_residualise() -> list[BenchRow]:
         r_r = numpy_residualise()
         max_diff = float(np.abs(r_n - r_r).max())
 
-        rows.append(BenchRow(
-            op='linalg.residualise (Cholesky)',
-            shape_desc=f'V={V}, N={N}, K={K}',
-            nitrix_ms=nitrix_ms,
-            ref_name='numpy.linalg.lstsq',
-            ref_ms=ref_ms,
-            agreement=f'{max_diff:.1e}',
-        ))
+        rows.append(
+            BenchRow(
+                op='linalg.residualise (Cholesky)',
+                shape_desc=f'V={V}, N={N}, K={K}',
+                nitrix_ms=nitrix_ms,
+                ref_name='numpy.linalg.lstsq',
+                ref_ms=ref_ms,
+                agreement=f'{max_diff:.1e}',
+            )
+        )
     return rows
 
 
@@ -280,6 +296,7 @@ def bench_residualise() -> list[BenchRow]:
 
 def bench_distance_transform() -> list[BenchRow]:
     import scipy.ndimage as spnd
+
     from nitrix.morphology import distance_transform
 
     rows = []
@@ -293,19 +310,23 @@ def bench_distance_transform() -> list[BenchRow]:
         _ = nitrix_fn(mask).block_until_ready()
         nitrix_ms = _time_warm(lambda: nitrix_fn(mask))
 
-        ref_fn = lambda: spnd.distance_transform_edt(mask_np > 0.5)
+        def ref_fn():
+            return spnd.distance_transform_edt(mask_np > 0.5)
+
         ref_ms = _time_warm(ref_fn)
 
         # Agreement: dist transforms differ in algorithm; skip exact.
-        rows.append(BenchRow(
-            op='morphology.distance_transform',
-            shape_desc=f'{shape}',
-            nitrix_ms=nitrix_ms,
-            ref_name='scipy.ndimage.dt_edt',
-            ref_ms=ref_ms,
-            agreement='algorithm-different',
-            notes='nitrix=iterative tropical, scipy=PMA',
-        ))
+        rows.append(
+            BenchRow(
+                op='morphology.distance_transform',
+                shape_desc=f'{shape}',
+                nitrix_ms=nitrix_ms,
+                ref_name='scipy.ndimage.dt_edt',
+                ref_ms=ref_ms,
+                agreement='algorithm-different',
+                notes='nitrix=iterative tropical, scipy=PMA',
+            )
+        )
     return rows
 
 
@@ -319,7 +340,7 @@ def bench_cov() -> list[BenchRow]:
 
     rows = []
     rng = np.random.default_rng(0)
-    for (c, n_obs) in [(50, 500), (500, 2000), (2000, 1000)]:
+    for c, n_obs in [(50, 500), (500, 2000), (2000, 1000)]:
         X_np = rng.standard_normal((c, n_obs)).astype(np.float32)
         X = jnp.asarray(X_np)
 
@@ -327,20 +348,24 @@ def bench_cov() -> list[BenchRow]:
         _ = nitrix_fn(X).block_until_ready()
         nitrix_ms = _time_warm(lambda: nitrix_fn(X))
 
-        ref_fn = lambda: np.cov(X_np, bias=False)
+        def ref_fn():
+            return np.cov(X_np, bias=False)
+
         ref_ms = _time_warm(ref_fn)
 
         C_n = np.asarray(nitrix_fn(X))
         C_r = ref_fn()
         max_diff = float(np.abs(C_n - C_r).max())
-        rows.append(BenchRow(
-            op='stats.cov',
-            shape_desc=f'({c}, {n_obs})',
-            nitrix_ms=nitrix_ms,
-            ref_name='numpy.cov',
-            ref_ms=ref_ms,
-            agreement=f'{max_diff:.1e}',
-        ))
+        rows.append(
+            BenchRow(
+                op='stats.cov',
+                shape_desc=f'({c}, {n_obs})',
+                nitrix_ms=nitrix_ms,
+                ref_name='numpy.cov',
+                ref_ms=ref_ms,
+                agreement=f'{max_diff:.1e}',
+            )
+        )
     return rows
 
 
@@ -358,7 +383,7 @@ def bench_corr() -> list[BenchRow]:
     from nitrix.stats import corr
 
     rows = []
-    for (n, T) in [(50, 500), (500, 2000), (2000, 1000)]:
+    for n, T in [(50, 500), (500, 2000), (2000, 1000)]:
         rng = np.random.default_rng(0)
         X = rng.standard_normal((n, T)).astype(np.float32)
         X_j = jnp.asarray(X)
@@ -368,11 +393,16 @@ def bench_corr() -> list[BenchRow]:
         ref_ms = _time_warm(lambda: np.corrcoef(X))
         np_ref = np.corrcoef(X)
         diff = float(np.abs(np.asarray(nitrix_fn(X_j)) - np_ref).max())
-        rows.append(BenchRow(
-            op='stats.corr', shape_desc=f'({n}, {T})',
-            nitrix_ms=nitrix_ms, ref_name='numpy.corrcoef',
-            ref_ms=ref_ms, agreement=f'{diff:.1e}',
-        ))
+        rows.append(
+            BenchRow(
+                op='stats.corr',
+                shape_desc=f'({n}, {T})',
+                nitrix_ms=nitrix_ms,
+                ref_name='numpy.corrcoef',
+                ref_ms=ref_ms,
+                agreement=f'{diff:.1e}',
+            )
+        )
     return rows
 
 
@@ -383,6 +413,7 @@ def bench_corr() -> list[BenchRow]:
 
 def bench_gaussian() -> list[BenchRow]:
     import scipy.ndimage as spnd
+
     from nitrix.smoothing import gaussian
 
     rows = []
@@ -396,12 +427,16 @@ def bench_gaussian() -> list[BenchRow]:
         ref_ms = _time_warm(lambda: spnd.gaussian_filter(X, sigma=1.5))
         ref = spnd.gaussian_filter(X, sigma=1.5)
         diff = float(np.abs(np.asarray(nitrix_fn(X_j)) - ref).max())
-        rows.append(BenchRow(
-            op='smoothing.gaussian',
-            shape_desc='x'.join(str(s) for s in shape),
-            nitrix_ms=nitrix_ms, ref_name='scipy.ndimage.gaussian_filter',
-            ref_ms=ref_ms, agreement=f'{diff:.1e}',
-        ))
+        rows.append(
+            BenchRow(
+                op='smoothing.gaussian',
+                shape_desc='x'.join(str(s) for s in shape),
+                nitrix_ms=nitrix_ms,
+                ref_name='scipy.ndimage.gaussian_filter',
+                ref_ms=ref_ms,
+                agreement=f'{diff:.1e}',
+            )
+        )
     return rows
 
 
@@ -412,6 +447,7 @@ def bench_gaussian() -> list[BenchRow]:
 
 def bench_morphology_filters() -> list[BenchRow]:
     import scipy.ndimage as spnd
+
     from nitrix.morphology import dilate, erode, median_filter
 
     rows = []
@@ -430,17 +466,24 @@ def bench_morphology_filters() -> list[BenchRow]:
             nitrix_ms = _time_warm(lambda: jitted(X_j))
             ref_ms = _time_warm(lambda: scipy_op(X, size=3))
             try:
-                diff = float(np.abs(
-                    np.asarray(jitted(X_j)) - scipy_op(X, size=3),
-                ).max())
+                diff = float(
+                    np.abs(
+                        np.asarray(jitted(X_j)) - scipy_op(X, size=3),
+                    ).max()
+                )
                 agreement = f'{diff:.1e}'
             except Exception:
                 agreement = 'shape-mismatch'
-            rows.append(BenchRow(
-                op=op_name, shape_desc='x'.join(str(s) for s in shape),
-                nitrix_ms=nitrix_ms, ref_name=f'scipy.ndimage.{scipy_op.__name__}',
-                ref_ms=ref_ms, agreement=agreement,
-            ))
+            rows.append(
+                BenchRow(
+                    op=op_name,
+                    shape_desc='x'.join(str(s) for s in shape),
+                    nitrix_ms=nitrix_ms,
+                    ref_name=f'scipy.ndimage.{scipy_op.__name__}',
+                    ref_ms=ref_ms,
+                    agreement=agreement,
+                )
+            )
     return rows
 
 
@@ -451,6 +494,7 @@ def bench_morphology_filters() -> list[BenchRow]:
 
 def bench_spatial_transform() -> list[BenchRow]:
     import scipy.ndimage as spnd
+
     from nitrix.geometry import spatial_transform
 
     rows = []
@@ -459,13 +503,18 @@ def bench_spatial_transform() -> list[BenchRow]:
         # image: (H, W, c=1); deformation: (H, W, ndim=2) of absolute coords.
         img = rng.standard_normal(shape + (1,)).astype(np.float32)
         ii, jj = np.meshgrid(
-            np.arange(shape[0]), np.arange(shape[1]), indexing='ij',
+            np.arange(shape[0]),
+            np.arange(shape[1]),
+            indexing='ij',
         )
         # Small random absolute-coord perturbation around the identity grid.
-        deform = np.stack([
-            ii + 0.5 * rng.standard_normal(shape),
-            jj + 0.5 * rng.standard_normal(shape),
-        ], axis=-1).astype(np.float32)
+        deform = np.stack(
+            [
+                ii + 0.5 * rng.standard_normal(shape),
+                jj + 0.5 * rng.standard_normal(shape),
+            ],
+            axis=-1,
+        ).astype(np.float32)
         img_j, def_j = jnp.asarray(img), jnp.asarray(deform)
 
         nitrix_fn = jax.jit(
@@ -479,16 +528,23 @@ def bench_spatial_transform() -> list[BenchRow]:
         coords = deform.transpose(2, 0, 1)
         ref_ms = _time_warm(
             lambda: spnd.map_coordinates(
-                img[..., 0], coords, order=1, mode='constant',
+                img[..., 0],
+                coords,
+                order=1,
+                mode='constant',
             ),
         )
-        rows.append(BenchRow(
-            op='geometry.spatial_transform',
-            shape_desc='x'.join(str(s) for s in shape) + ' c=1',
-            nitrix_ms=nitrix_ms, ref_name='scipy.ndimage.map_coordinates',
-            ref_ms=ref_ms, agreement='skipped',
-            notes='linear interpolation; modes match',
-        ))
+        rows.append(
+            BenchRow(
+                op='geometry.spatial_transform',
+                shape_desc='x'.join(str(s) for s in shape) + ' c=1',
+                nitrix_ms=nitrix_ms,
+                ref_name='scipy.ndimage.map_coordinates',
+                ref_ms=ref_ms,
+                agreement='skipped',
+                notes='linear interpolation; modes match',
+            )
+        )
     return rows
 
 
@@ -499,6 +555,7 @@ def bench_spatial_transform() -> list[BenchRow]:
 
 def bench_graph_laplacian() -> list[BenchRow]:
     import scipy.sparse.csgraph as spcsg
+
     from nitrix.graph import laplacian
 
     rows = []
@@ -513,14 +570,21 @@ def bench_graph_laplacian() -> list[BenchRow]:
         _ = nitrix_fn(A_j).block_until_ready()
         nitrix_ms = _time_warm(lambda: nitrix_fn(A_j))
         ref_ms = _time_warm(lambda: spcsg.laplacian(A))
-        diff = float(np.abs(
-            np.asarray(nitrix_fn(A_j)) - spcsg.laplacian(A),
-        ).max())
-        rows.append(BenchRow(
-            op='graph.laplacian', shape_desc=f'n={n} sparse',
-            nitrix_ms=nitrix_ms, ref_name='scipy.sparse.csgraph.laplacian',
-            ref_ms=ref_ms, agreement=f'{diff:.1e}',
-        ))
+        diff = float(
+            np.abs(
+                np.asarray(nitrix_fn(A_j)) - spcsg.laplacian(A),
+            ).max()
+        )
+        rows.append(
+            BenchRow(
+                op='graph.laplacian',
+                shape_desc=f'n={n} sparse',
+                nitrix_ms=nitrix_ms,
+                ref_name='scipy.sparse.csgraph.laplacian',
+                ref_ms=ref_ms,
+                agreement=f'{diff:.1e}',
+            )
+        )
     return rows
 
 
@@ -531,6 +595,7 @@ def bench_graph_laplacian() -> list[BenchRow]:
 
 def bench_analytic_signal() -> list[BenchRow]:
     import scipy.signal as spsig
+
     from nitrix.stats import analytic_signal
 
     rows = []
@@ -542,12 +607,19 @@ def bench_analytic_signal() -> list[BenchRow]:
         _ = nitrix_fn(x_j).block_until_ready()
         nitrix_ms = _time_warm(lambda: nitrix_fn(x_j))
         ref_ms = _time_warm(lambda: spsig.hilbert(x))
-        diff = float(np.abs(np.asarray(nitrix_fn(x_j)) - spsig.hilbert(x)).max())
-        rows.append(BenchRow(
-            op='stats.analytic_signal', shape_desc=f'n={n}',
-            nitrix_ms=nitrix_ms, ref_name='scipy.signal.hilbert',
-            ref_ms=ref_ms, agreement=f'{diff:.1e}',
-        ))
+        diff = float(
+            np.abs(np.asarray(nitrix_fn(x_j)) - spsig.hilbert(x)).max()
+        )
+        rows.append(
+            BenchRow(
+                op='stats.analytic_signal',
+                shape_desc=f'n={n}',
+                nitrix_ms=nitrix_ms,
+                ref_name='scipy.signal.hilbert',
+                ref_ms=ref_ms,
+                agreement=f'{diff:.1e}',
+            )
+        )
     return rows
 
 
@@ -588,6 +660,7 @@ def main():
     )
     lines.append('')
     import platform
+
     try:
         d = jax.devices()[0]
         device = f'{d.device_kind} ({d.platform})'
@@ -601,9 +674,7 @@ def main():
     lines.append(
         '| op | shape | nitrix | ref | ref time | ratio | agreement | notes |'
     )
-    lines.append(
-        '|---|---|---:|---|---:|---:|---|---|'
-    )
+    lines.append('|---|---|---:|---|---:|---:|---|---|')
     for row in all_rows_sorted:
         lines.append(row.report_line())
     lines.append('')

@@ -39,13 +39,13 @@ The legacy ``hypercoil.functional.linear``'s normalisation
 helpers were tightly coupled to the compartmentalised-linear
 layer; this module pulls them out as standalone primitives.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Tuple, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Num
-
 
 __all__ = [
     'zscore_normalize',
@@ -66,13 +66,13 @@ def _weighted_mean_std(
     axis: _AxisArg,
     weights: Optional[Num[Array, '...']] = None,
 ) -> Tuple[Float[Array, '...'], Float[Array, '...']]:
-    '''Weighted mean and std along ``axis``.
+    """Weighted mean and std along ``axis``.
 
     For ``weights=None``, equivalent to ``mean`` / ``std`` over
     ``axis``.  ``ddof = 0`` (population, not sample), since
     normalisation is per-cell and the Bessel correction is
     inappropriate for centering / scaling.
-    '''
+    """
     if weights is None:
         mean = jnp.mean(x, axis=axis, keepdims=True)
         std = jnp.std(x, axis=axis, keepdims=True)
@@ -89,7 +89,7 @@ def demean(
     axis: _AxisArg = -1,
     weights: Optional[Num[Array, '...']] = None,
 ) -> Num[Array, '...']:
-    '''Subtract the (weighted) mean along ``axis``.'''
+    """Subtract the (weighted) mean along ``axis``."""
     mean, _ = _weighted_mean_std(x, axis=axis, weights=weights)
     return x - mean
 
@@ -102,7 +102,7 @@ def zscore_normalize(
     eps: float = 1e-12,
     nonzero_mask: bool = False,
 ) -> Num[Array, '...']:
-    '''Z-score normalisation: ``(x - mean) / (std + eps)`` along ``axis``.
+    """Z-score normalisation: ``(x - mean) / (std + eps)`` along ``axis``.
 
     Population standard deviation (no Bessel correction).
     Per-cell normalisation; output has zero mean and unit std
@@ -135,7 +135,7 @@ def zscore_normalize(
     Returns
     -------
     Z-scored tensor, same shape as ``x``.
-    '''
+    """
     if nonzero_mask:
         if weights is not None:
             raise ValueError(
@@ -145,7 +145,9 @@ def zscore_normalize(
             )
         mask = x != 0
         mean, std = _weighted_mean_std(
-            x, axis=axis, weights=mask.astype(x.dtype),
+            x,
+            axis=axis,
+            weights=mask.astype(x.dtype),
         )
         z = (x - mean) / (std + eps)
         return jnp.where(mask, z, jnp.zeros_like(z))
@@ -160,20 +162,22 @@ def psc_normalize(
     weights: Optional[Num[Array, '...']] = None,
     eps: float = 1e-12,
 ) -> Num[Array, '...']:
-    '''Percent signal change: ``100 * (x - mean) / (mean + eps)``.
+    """Percent signal change: ``100 * (x - mean) / (mean + eps)``.
 
     The fMRI BOLD convention.  Per-cell normalisation;
     interpretable as "deviation from baseline as a percent of
     baseline".
-    '''
+    """
     mean, _ = _weighted_mean_std(x, axis=axis, weights=weights)
     return 100.0 * (x - mean) / (mean + eps)
 
 
 def _median_mad(
-    x: Num[Array, '...'], *, axis: _AxisArg,
+    x: Num[Array, '...'],
+    *,
+    axis: _AxisArg,
 ) -> Tuple[Float[Array, '...'], Float[Array, '...']]:
-    '''Median and median-absolute-deviation along ``axis``.'''
+    """Median and median-absolute-deviation along ``axis``."""
     median = jnp.median(x, axis=axis, keepdims=True)
     mad = jnp.median(jnp.abs(x - median), axis=axis, keepdims=True)
     return median, mad
@@ -185,12 +189,12 @@ def robust_zscore_normalize(
     axis: _AxisArg = -1,
     eps: float = 1e-12,
 ) -> Num[Array, '...']:
-    '''Median / MAD-based robust z-score normalisation.
+    """Median / MAD-based robust z-score normalisation.
 
     Less sensitive to outliers than the mean / std version.
     The factor 1.4826 makes the MAD a consistent estimator of
     the standard deviation for Gaussian inputs.
-    '''
+    """
     median, mad = _median_mad(x, axis=axis)
     return (x - median) / (1.4826 * mad + eps)
 
@@ -203,7 +207,7 @@ def intensity_normalize(
     axis: Optional[_AxisArg] = None,
     eps: float = 1e-12,
 ) -> Num[Array, '...']:
-    '''Percentile clip then rescale to ``[0, 1]``.
+    """Percentile clip then rescale to ``[0, 1]``.
 
     The synthstrip / SynthSeg pre-training convention: clip the
     intensity histogram to the ``[low_percentile, high_percentile]``
@@ -238,7 +242,7 @@ def intensity_normalize(
     see ``docs/feature-requests/median-percentile-cpu-sort-cliff.md``).
     The cost here is that one unavoidable full sort, not a double sort,
     so the two-call form is kept for readability.
-    '''
+    """
     lo = jnp.percentile(x, low_percentile, axis=axis, keepdims=True)
     hi = jnp.percentile(x, high_percentile, axis=axis, keepdims=True)
     clipped = jnp.clip(x, lo, hi)
@@ -254,7 +258,7 @@ def percentile_rescale(
     axis: Optional[_AxisArg] = None,
     eps: float = 1e-12,
 ) -> Num[Array, '...']:
-    '''Shift by the ``lo``-percentile, scale by the ``hi``-percentile,
+    """Shift by the ``lo``-percentile, scale by the ``hi``-percentile,
     then optionally clip to ``[0, 1]``.
 
     Computes ``(x - p_lo) / p_hi`` where ``p_lo`` / ``p_hi`` are the
@@ -306,7 +310,7 @@ def percentile_rescale(
     length-2 quantile call: XLA already CSEs the two identical sorts
     into a single ``lax.sort`` (see ``intensity_normalize`` Notes and
     ``docs/feature-requests/median-percentile-cpu-sort-cliff.md``).
-    '''
+    """
     p_lo = jnp.percentile(x, lo, axis=axis, keepdims=True)
     p_hi = jnp.percentile(x, hi, axis=axis, keepdims=True)
     out = (x - p_lo) / (p_hi + eps)

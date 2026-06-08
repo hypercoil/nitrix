@@ -14,6 +14,7 @@ The format is intentionally a thin pair of dense arrays: no BCOO, no
 ``jax.experimental.sparse`` import.  Sectioned ELL (variable-degree;
 SPEC_UPDATE §3.2) will live in ``nitrix.sparse.ell_sectioned``.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -48,7 +49,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class ELL:
-    '''ELL-format sparse matrix.
+    """ELL-format sparse matrix.
 
     Attributes
     ----------
@@ -64,7 +65,7 @@ class ELL:
     identity
         The semiring identity that pad entries of ``values`` have been
         filled with.  ``None`` if the caller has handled sentinels.
-    '''
+    """
 
     values: Num[Array, 'm k_max']
     indices: Int[Array, 'm k_max']
@@ -97,7 +98,7 @@ def ell_pad(
     identity: Any = 0.0,
     pad_index: int = 0,
 ) -> ELL:
-    '''Pad ragged neighbour lists to a fixed ``k_max``.
+    """Pad ragged neighbour lists to a fixed ``k_max``.
 
     Use this when constructing an ``ELL`` from per-row lists whose
     lengths vary up to ``k_max``: ``values[i, k_i:]`` is filled with
@@ -126,7 +127,7 @@ def ell_pad(
     Returns
     -------
     The padded ``ELL``.
-    '''
+    """
     if values.shape != indices.shape:
         raise ValueError(
             f'ell_pad: values.shape={values.shape} must equal '
@@ -134,9 +135,7 @@ def ell_pad(
         )
     m, k_actual = values.shape
     if k_actual > k_max:
-        raise ValueError(
-            f'ell_pad: k_actual={k_actual} > k_max={k_max}.'
-        )
+        raise ValueError(f'ell_pad: k_actual={k_actual} > k_max={k_max}.')
     if not (0 <= pad_index < n_cols):
         raise ValueError(
             f'ell_pad: pad_index={pad_index} not in [0, n_cols={n_cols}).'
@@ -166,7 +165,7 @@ def ell_from_dense(
     threshold: float = 0.0,
     identity: Any = 0.0,
 ) -> ELL:
-    '''Convert a dense matrix to ELL by selecting top-``k_max`` non-pad entries
+    """Convert a dense matrix to ELL by selecting top-``k_max`` non-pad entries
     per row.
 
     Entries with absolute value ``<= threshold`` are treated as
@@ -195,7 +194,7 @@ def ell_from_dense(
     Implemented with NumPy on the host: this is a one-shot
     construction helper, not a JIT-traceable op.  Treat it as a
     convenience for tests and small workloads.
-    '''
+    """
     if dense.ndim != 2:
         raise ValueError(
             f'ell_from_dense: dense must be 2-D, got {dense.shape}.'
@@ -235,7 +234,7 @@ def ell_mask(
     identity: Any = _UNSET,
     semiring: Optional['Semiring[Any]'] = None,
 ) -> ELL:
-    '''Mask edges out of an ELL by setting their value to a semiring annihilator.
+    """Mask edges out of an ELL by setting their value to a semiring annihilator.
 
     Brain geometries are routinely *incomplete*: the cortical-surface
     medial wall is excluded from analysis, and volumetric work is often
@@ -318,7 +317,7 @@ def ell_mask(
         If neither or both of ``identity`` / ``semiring`` are given; if
         ``semiring`` has no annihilator (``EUCLIDEAN``); or if ``valid``
         has an unrecognised shape.
-    '''
+    """
     if semiring is not None:
         if identity is not _UNSET:
             raise ValueError(
@@ -337,7 +336,7 @@ def ell_mask(
     elif identity is not _UNSET:
         warnings.warn(
             'ell_mask(identity=...) is deprecated; pass semiring= '
-            'instead.  The masking value is the algebra\'s '
+            "instead.  The masking value is the algebra's "
             '(*)-annihilator, read for you from semiring.annihilator -- '
             'which is *not* always the monoid identity (EUCLIDEAN has '
             'no annihilator, so identity=0 silently injects B[idx]**2 '
@@ -375,7 +374,7 @@ def ell_add_self_loops(
     fill: Literal['mean', 'zero', 'add'] = 'mean',
     self_value: float = 1.0,
 ) -> Tuple[ELL, Optional[Float[Array, 'm k_max_plus_1 f']]]:
-    '''Append a self-loop ``(i, i)`` to every row of an ELL adjacency.
+    """Append a self-loop ``(i, i)`` to every row of an ELL adjacency.
 
     Returns a new ELL with one extra neighbour slot per row whose index
     is the row itself (``indices[i, -1] = i``) and whose ``values`` entry
@@ -434,7 +433,7 @@ def ell_add_self_loops(
     ``(ell_with_loops, edge_attr_with_loops)``.  The ELL has ``k_max + 1``
     slots; ``edge_attr_with_loops`` is ``None`` iff ``edge_attr`` was
     ``None``.
-    '''
+    """
     m, k_max = ell.indices.shape[-2], ell.indices.shape[-1]
     self_idx = jnp.broadcast_to(
         jnp.arange(m, dtype=ell.indices.dtype)[:, None], (m, 1)
@@ -460,11 +459,11 @@ def ell_add_self_loops(
     if ell.identity is None:
         valid = jnp.ones((m, k_max), dtype=bool)
     else:
-        valid = ell.values != ell.identity                  # (m, k_max)
+        valid = ell.values != ell.identity  # (m, k_max)
     feat_rank = edge_attr.ndim - 2
     vmask = valid.reshape((m, k_max) + (1,) * feat_rank)
     masked = jnp.where(vmask, edge_attr, jnp.zeros_like(edge_attr))
-    summed = jnp.sum(masked, axis=1, keepdims=True)          # (m, 1, *f)
+    summed = jnp.sum(masked, axis=1, keepdims=True)  # (m, 1, *f)
     if fill == 'mean':
         count = jnp.maximum(jnp.sum(valid, axis=-1), 1)
         count = count.reshape((m, 1) + (1,) * feat_rank)
@@ -483,19 +482,17 @@ def ell_add_self_loops(
 
 
 def ell_to_dense(ell: ELL) -> Num[Array, 'm n']:
-    '''Scatter an ELL back to a dense ``(m, n_cols)`` matrix.
+    """Scatter an ELL back to a dense ``(m, n_cols)`` matrix.
 
     Useful in tests and in fallback paths.  Pad entries (assumed to
     carry the algebra's identity) are written via ``scatter_add`` with
     the identity, which is a no-op for ``REAL``; callers using
     non-additive semirings should not rely on this for round-trip
     correctness.
-    '''
+    """
     m, k_max = ell.values.shape
     dense = jnp.zeros((m, ell.n_cols), dtype=ell.values.dtype)
-    row_idx = jnp.broadcast_to(
-        jnp.arange(m)[:, None], (m, k_max)
-    ).reshape(-1)
+    row_idx = jnp.broadcast_to(jnp.arange(m)[:, None], (m, k_max)).reshape(-1)
     col_idx = ell.indices.reshape(-1)
     vals = ell.values.reshape(-1)
     return dense.at[row_idx, col_idx].add(vals)

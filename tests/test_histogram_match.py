@@ -23,6 +23,7 @@ Coverage:
 The SimpleITK parity test is gated by ``pytest.importorskip`` so the
 suite still runs in environments without SimpleITK.
 """
+
 from __future__ import annotations
 
 import jax
@@ -62,7 +63,9 @@ def test_identity_when_source_is_reference():
     # noise that this property is not about.
     src, _ = _synth_pair()
     out = histogram_match(
-        jnp.asarray(src), jnp.asarray(src), threshold_at_mean=False,
+        jnp.asarray(src),
+        jnp.asarray(src),
+        threshold_at_mean=False,
     )
     np.testing.assert_allclose(np.asarray(out), src, atol=1e-5)
 
@@ -73,7 +76,9 @@ def test_quantile_profile_matches_reference_within_landmarks():
     src, ref = _synth_pair(seed=1, n=48)
     out = np.asarray(
         histogram_match(
-            jnp.asarray(src), jnp.asarray(ref), threshold_at_mean=False,
+            jnp.asarray(src),
+            jnp.asarray(ref),
+            threshold_at_mean=False,
             n_match_points=7,
         )
     )
@@ -103,7 +108,9 @@ def test_threshold_at_mean_uses_above_mean_only():
     )
     out_all = np.asarray(
         histogram_match(
-            jnp.asarray(src), jnp.asarray(ref), threshold_at_mean=False,
+            jnp.asarray(src),
+            jnp.asarray(ref),
+            threshold_at_mean=False,
         )
     )
     # The two should not be identical (different contributing populations
@@ -122,14 +129,18 @@ def test_explicit_weight_overrides_threshold_at_mean():
 
     out_explicit = np.asarray(
         histogram_match(
-            jnp.asarray(src), jnp.asarray(ref),
-            source_weight=ones, reference_weight=ones,
+            jnp.asarray(src),
+            jnp.asarray(ref),
+            source_weight=ones,
+            reference_weight=ones,
             threshold_at_mean=True,  # ignored on both sides now
         )
     )
     out_flagged_off = np.asarray(
         histogram_match(
-            jnp.asarray(src), jnp.asarray(ref), threshold_at_mean=False,
+            jnp.asarray(src),
+            jnp.asarray(ref),
+            threshold_at_mean=False,
         )
     )
     np.testing.assert_allclose(out_explicit, out_flagged_off, atol=1e-5)
@@ -145,7 +156,8 @@ def test_output_bounded_by_reference_extrema():
     for thresh in (True, False):
         out = np.asarray(
             histogram_match(
-                jnp.asarray(src), jnp.asarray(ref),
+                jnp.asarray(src),
+                jnp.asarray(ref),
                 threshold_at_mean=thresh,
             )
         )
@@ -185,7 +197,10 @@ def test_validation_rejects_bad_kwargs():
     # not) -- the apply would be malformed; we raise early.
     with pytest.raises(ValueError):
         histogram_match(
-            src, ref, source_weight=ones, threshold_at_mean=True,
+            src,
+            ref,
+            source_weight=ones,
+            threshold_at_mean=True,
         )
 
 
@@ -223,8 +238,10 @@ def test_live_sitk_parity():
 
     jax_out = np.asarray(
         histogram_match(
-            jnp.asarray(src), jnp.asarray(ref),
-            n_match_points=7, n_histogram_levels=1024,
+            jnp.asarray(src),
+            jnp.asarray(ref),
+            n_match_points=7,
+            n_histogram_levels=1024,
             threshold_at_mean=True,
         )
     )

@@ -19,12 +19,12 @@ Coverage:
 - Differentiability through ``symlog`` with and without
   ``psi`` reconditioning.
 """
+
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 jax.config.update('jax_enable_x64', True)
 
@@ -49,13 +49,15 @@ def _spd_matrix(n=5, seed=0):
 
 
 def _orthogonal_via_safe_eigh(n=5, seed=0):
-    '''Build an orthogonal n x n matrix via safe_eigh of a random symm.
+    """Build an orthogonal n x n matrix via safe_eigh of a random symm.
 
     Avoids ``jax.random.orthogonal`` which uses GPU QR (broken on
     the test runner's cuSolver).
-    '''
+    """
     rng = np.random.default_rng(seed)
-    S = jnp.asarray((rng.standard_normal((n, n)) + rng.standard_normal((n, n)).T) / 2)
+    S = jnp.asarray(
+        (rng.standard_normal((n, n)) + rng.standard_normal((n, n)).T) / 2
+    )
     _, U = safe_eigh(S)
     return U
 
@@ -86,7 +88,9 @@ def test_sympower_neg_one_is_inverse():
 def test_sympower_half_equals_symsqrt():
     X = _spd_matrix()
     np.testing.assert_allclose(
-        sympower(X, power=0.5), symsqrt(X), atol=1e-13,
+        sympower(X, power=0.5),
+        symsqrt(X),
+        atol=1e-13,
     )
 
 
@@ -101,7 +105,7 @@ def test_sympower_identity_at_power_one():
 
 
 def test_symlog_ill_conditioned_is_finite():
-    '''symlog on a 20-order-of-magnitude eigenvalue spread should
+    """symlog on a 20-order-of-magnitude eigenvalue spread should
     produce finite output via the auto-clipping path.  The legacy
     code's silent NaN -> 0 substitution is gone; if eigvalues drop
     below the clip threshold, log produces the (finite) clipped
@@ -109,7 +113,7 @@ def test_symlog_ill_conditioned_is_finite():
 
     Note: 20 orders of magnitude is at the limit of fp64
     reconstruction; spreads beyond that exceed precision.
-    '''
+    """
     U = _orthogonal_via_safe_eigh()
     ev = jnp.array([1e-12, 1e-8, 1e-4, 1.0, 1e4])
     X_ill = U @ jnp.diag(ev) @ U.T
@@ -118,11 +122,11 @@ def test_symlog_ill_conditioned_is_finite():
 
 
 def test_symlog_clip_floor_uses_eps_threshold():
-    '''With ``eigvalue_clip='auto'``, the floor is
+    """With ``eigvalue_clip='auto'``, the floor is
     ``max(|L|) * d * eps``.  Eigenvalues at or below this threshold
     are clamped, so ``symlog`` returns ``log(threshold)`` for those
     -- much larger than the unclipped ``log(1e-15) ~ -34.5``.
-    '''
+    """
     U = _orthogonal_via_safe_eigh()
     ev = jnp.array([1e-15, 1e-10, 1e-5, 1.0, 1e5])
     X_ill = U @ jnp.diag(ev) @ U.T
@@ -135,19 +139,21 @@ def test_symlog_clip_floor_uses_eps_threshold():
     # both clip to threshold; log(threshold) is the smallest eigenvalue
     # of symlog(X_ill).
     np.testing.assert_allclose(
-        float(out_eigvals.min()), expected_min, atol=1e-8,
+        float(out_eigvals.min()),
+        expected_min,
+        atol=1e-8,
     )
 
 
 def test_symlog_no_clip_produces_very_negative():
-    '''With ``eigvalue_clip='none'``, no protection.  Tiny eigvals
+    """With ``eigvalue_clip='none'``, no protection.  Tiny eigvals
     produce very-negative log entries.
 
     Note: we use ``1e-12`` as the smallest eigenvalue (not ``1e-15``)
     because reconstructing ``U diag(L) U.T`` with eigenvalue spread
     > 20 orders of magnitude exceeds fp64 precision -- the tiny
     eigenvalues are dominated by reconstruction noise.
-    '''
+    """
     U = _orthogonal_via_safe_eigh()
     ev = jnp.array([1e-12, 1e-8, 1e-4, 1.0, 1e4])
     X_ill = U @ jnp.diag(ev) @ U.T
@@ -159,7 +165,7 @@ def test_symlog_no_clip_produces_very_negative():
 
 
 def test_symlog_explicit_float_clip():
-    '''Explicit float threshold overrides the auto-clip heuristic.'''
+    """Explicit float threshold overrides the auto-clip heuristic."""
     U = _orthogonal_via_safe_eigh()
     ev = jnp.array([1e-15, 1.0, 2.0, 3.0, 4.0])
     X_ill = U @ jnp.diag(ev) @ U.T
@@ -167,7 +173,9 @@ def test_symlog_explicit_float_clip():
     out_eigvals, _ = safe_eigh(out)
     # Smallest log eigenvalue should be log(1e-3) ~ -6.9
     np.testing.assert_allclose(
-        float(out_eigvals.min()), float(jnp.log(1e-3)), atol=1e-6,
+        float(out_eigvals.min()),
+        float(jnp.log(1e-3)),
+        atol=1e-6,
     )
 
 
@@ -185,9 +193,9 @@ def test_tangent_cone_roundtrip():
 
 
 def test_tangent_project_at_self_is_log_zero_at_identity():
-    '''``tangent_project_spd(X, X)`` should be the zero matrix (X is
+    """``tangent_project_spd(X, X)`` should be the zero matrix (X is
     the tangent-space "origin" at itself).
-    '''
+    """
     X = _spd_matrix()
     T = tangent_project_spd(X, X)
     assert float(jnp.abs(T).max()) < 1e-10
@@ -199,7 +207,7 @@ def test_tangent_project_at_self_is_log_zero_at_identity():
 
 
 def test_mean_log_euclidean_single_input_is_identity():
-    '''The mean of a singleton batch is the batch element itself.'''
+    """The mean of a singleton batch is the batch element itself."""
     X = _spd_matrix()
     batch = X[None, ...]  # (1, 5, 5)
     mu = mean_log_euclidean(batch, axis=0)
@@ -207,7 +215,7 @@ def test_mean_log_euclidean_single_input_is_identity():
 
 
 def test_mean_log_euclidean_is_spd():
-    '''The log-Euclidean mean of SPD matrices is itself SPD.'''
+    """The log-Euclidean mean of SPD matrices is itself SPD."""
     batch = jnp.stack([_spd_matrix(seed=i) for i in range(3)])
     mu = mean_log_euclidean(batch, axis=0)
     eigvals, _ = safe_eigh(mu)
@@ -215,9 +223,9 @@ def test_mean_log_euclidean_is_spd():
 
 
 def test_mean_log_euclidean_scaling():
-    '''``mean(log(c * X_i)) = mean(log(X_i)) + log(c) I``, so
+    """``mean(log(c * X_i)) = mean(log(X_i)) + log(c) I``, so
     ``exp(...)`` scales by ``c``.
-    '''
+    """
     batch = jnp.stack([_spd_matrix(seed=i) for i in range(3)])
     c = 3.0
     mu = mean_log_euclidean(batch, axis=0)
@@ -238,16 +246,18 @@ def test_mean_euclidean_is_plain_mean():
 
 def test_symlog_differentiable():
     X = _spd_matrix()
+
     def loss(X):
         return jnp.trace(symlog(X) ** 2)
+
     g = jax.grad(loss)(X)
     assert bool(jnp.all(jnp.isfinite(g)))
 
 
 def test_symlog_with_psi_reconditioning_handles_degeneracy():
-    '''Near-degenerate spectrum: without psi, eigh-VJP can blow up;
+    """Near-degenerate spectrum: without psi, eigh-VJP can blow up;
     with psi > 0, the gradient is stable.
-    '''
+    """
     U = _orthogonal_via_safe_eigh()
     ev = jnp.array([1.0 + 1e-12, 1.0, 2.0, 3.0, 4.0])  # near-degenerate
     X_deg = U @ jnp.diag(ev) @ U.T
@@ -260,9 +270,9 @@ def test_symlog_with_psi_reconditioning_handles_degeneracy():
 
 
 def test_symmap_generic_with_custom_fn():
-    '''``symmap`` with a user-supplied function (e.g. exp(- x))
+    """``symmap`` with a user-supplied function (e.g. exp(- x))
     matches the manual eigh-recompose path.
-    '''
+    """
     X = _spd_matrix()
     out = symmap(X, fn=lambda x: jnp.exp(-x))
     # Manual reference

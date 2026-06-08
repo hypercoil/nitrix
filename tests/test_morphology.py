@@ -20,6 +20,7 @@ Coverage:
 - ``susan_emulator``: raises ``NotImplementedError`` until the
   ``bilateral_gaussian`` dependency lands.
 """
+
 from __future__ import annotations
 
 import jax
@@ -31,15 +32,18 @@ scipy_ndi = pytest.importorskip('scipy.ndimage')
 
 from nitrix.morphology import (
     close as morph_close,
+)
+from nitrix.morphology import (
     dilate,
     distance_transform,
     distance_transform_edt,
     erode,
     median_filter,
+)
+from nitrix.morphology import (
     open as morph_open,
 )
 from nitrix.smoothing import susan_emulator
-
 
 jax.config.update('jax_enable_x64', True)
 
@@ -50,7 +54,7 @@ jax.config.update('jax_enable_x64', True)
 
 
 def _interior_match(got, ref, pad):
-    '''Trim ``pad`` from every axis and compare.'''
+    """Trim ``pad`` from every axis and compare."""
     got_i = np.asarray(got)
     ref_i = np.asarray(ref)
     sl = tuple(slice(pad, -pad if pad else None) for _ in range(got_i.ndim))
@@ -61,7 +65,10 @@ def test_dilate_flat_3x3_matches_scipy():
     x = jax.random.normal(jax.random.key(0), (16, 16))
     got = dilate(x, size=3, backend='jax')
     ref = scipy_ndi.grey_dilation(
-        np.asarray(x), size=3, mode='constant', cval=-np.inf,
+        np.asarray(x),
+        size=3,
+        mode='constant',
+        cval=-np.inf,
     )
     np.testing.assert_array_equal(got, ref)
 
@@ -70,7 +77,10 @@ def test_erode_flat_3x3_matches_scipy():
     x = jax.random.normal(jax.random.key(1), (16, 16))
     got = erode(x, size=3, backend='jax')
     ref = scipy_ndi.grey_erosion(
-        np.asarray(x), size=3, mode='constant', cval=np.inf,
+        np.asarray(x),
+        size=3,
+        mode='constant',
+        cval=np.inf,
     )
     np.testing.assert_array_equal(got, ref)
 
@@ -95,17 +105,23 @@ def test_dilate_3d():
     x = jax.random.normal(jax.random.key(4), (8, 8, 8))
     got = dilate(x, size=3, backend='jax')
     ref = scipy_ndi.grey_dilation(
-        np.asarray(x), size=3, mode='constant', cval=-np.inf,
+        np.asarray(x),
+        size=3,
+        mode='constant',
+        cval=-np.inf,
     )
     np.testing.assert_array_equal(got, ref)
 
 
 def test_dilate_4d_fmri_shape():
-    '''4D morphology: volume + time, the natural fMRI layout.'''
+    """4D morphology: volume + time, the natural fMRI layout."""
     x = jax.random.normal(jax.random.key(40), (6, 6, 6, 6))
     got = dilate(x, size=3, backend='jax')
     ref = scipy_ndi.grey_dilation(
-        np.asarray(x), size=3, mode='constant', cval=-np.inf,
+        np.asarray(x),
+        size=3,
+        mode='constant',
+        cval=-np.inf,
     )
     np.testing.assert_array_equal(got, ref)
 
@@ -114,7 +130,10 @@ def test_erode_4d_fmri_shape():
     x = jax.random.normal(jax.random.key(41), (5, 5, 5, 5))
     got = erode(x, size=3, backend='jax')
     ref = scipy_ndi.grey_erosion(
-        np.asarray(x), size=3, mode='constant', cval=np.inf,
+        np.asarray(x),
+        size=3,
+        mode='constant',
+        cval=np.inf,
     )
     np.testing.assert_array_equal(got, ref)
 
@@ -141,7 +160,10 @@ def test_dilate_erode_anisotropic_size():
     x = jax.random.normal(jax.random.key(5), (10, 16))
     got = dilate(x, size=(3, 5), backend='jax')
     ref = scipy_ndi.grey_dilation(
-        np.asarray(x), size=(3, 5), mode='constant', cval=-np.inf,
+        np.asarray(x),
+        size=(3, 5),
+        mode='constant',
+        cval=-np.inf,
     )
     np.testing.assert_array_equal(got, ref)
 
@@ -155,7 +177,9 @@ def test_distance_transform_chebyshev_matches_scipy():
     mask = np.zeros((16, 16), dtype=np.float32)
     mask[4:12, 4:12] = 1.0
     got = distance_transform(
-        jnp.asarray(mask), metric='chebyshev', backend='jax',
+        jnp.asarray(mask),
+        metric='chebyshev',
+        backend='jax',
     )
     ref = scipy_ndi.distance_transform_cdt(mask, metric='chessboard')
     np.testing.assert_array_equal(got, ref.astype(np.float32))
@@ -165,7 +189,9 @@ def test_distance_transform_city_block_matches_scipy():
     mask = np.zeros((16, 16), dtype=np.float32)
     mask[4:12, 4:12] = 1.0
     got = distance_transform(
-        jnp.asarray(mask), metric='city_block', backend='jax',
+        jnp.asarray(mask),
+        metric='city_block',
+        backend='jax',
     )
     ref = scipy_ndi.distance_transform_cdt(mask, metric='taxicab')
     np.testing.assert_array_equal(got, ref.astype(np.float32))
@@ -175,7 +201,9 @@ def test_distance_transform_3d():
     mask = np.zeros((8, 8, 8), dtype=np.float32)
     mask[2:6, 2:6, 2:6] = 1.0
     got = distance_transform(
-        jnp.asarray(mask), metric='chebyshev', backend='jax',
+        jnp.asarray(mask),
+        metric='chebyshev',
+        backend='jax',
     )
     ref = scipy_ndi.distance_transform_cdt(mask, metric='chessboard')
     np.testing.assert_array_equal(got, ref.astype(np.float32))
@@ -213,7 +241,9 @@ def test_median_filter_interior_matches_scipy():
     x = jax.random.normal(jax.random.key(10), (16, 16))
     got = median_filter(x, size=3)
     ref = scipy_ndi.median_filter(
-        np.asarray(x), size=3, mode='reflect',
+        np.asarray(x),
+        size=3,
+        mode='reflect',
     )
     # Boundary modes differ; compare interior.
     _interior_match(got, ref, pad=2)
@@ -236,15 +266,19 @@ def test_median_filter_3d_interior():
 def test_median_filter_structuring_element_mask():
     # Plus-shaped neighbourhood (only axis-aligned positions).
     x = jax.random.normal(jax.random.key(13), (16, 16))
-    se = jnp.array([
-        [False, True, False],
-        [True,  True, True],
-        [False, True, False],
-    ])
+    se = jnp.array(
+        [
+            [False, True, False],
+            [True, True, True],
+            [False, True, False],
+        ]
+    )
     got = median_filter(x, structuring_element=se)
     # Build same with scipy's footprint argument.
     ref = scipy_ndi.median_filter(
-        np.asarray(x), footprint=np.asarray(se), mode='reflect',
+        np.asarray(x),
+        footprint=np.asarray(se),
+        mode='reflect',
     )
     _interior_match(got, ref, pad=2)
 
@@ -255,14 +289,14 @@ def test_median_filter_structuring_element_mask():
 
 
 def test_dilate_spherical_grid_composition():
-    '''Documented JOSA composition: pad with sphere-grid topology,
+    """Documented JOSA composition: pad with sphere-grid topology,
     then dilate(VALID).  The VALID dilation consumes exactly the
     pad we added, so the output has the original shape -- no
     explicit unpad needed when the SE radius equals the pad.
 
     Without spherical-grid pad, a feature near the longitudinal seam
     fails to spread across the seam.  With the composition, it does.
-    '''
+    """
     from nitrix.geometry import sphere_grid_pad_2d
 
     H, W = 8, 8
@@ -290,10 +324,10 @@ def test_dilate_spherical_grid_composition():
 
 
 def test_dilate_spherical_grid_composition_with_explicit_unpad():
-    '''When SE radius is smaller than the pad (or you want to chain
+    """When SE radius is smaller than the pad (or you want to chain
     multiple ops), use the explicit sphere_grid_unpad_2d to crop
     back.
-    '''
+    """
     from nitrix.geometry import sphere_grid_pad_2d, sphere_grid_unpad_2d
 
     H, W = 8, 8
@@ -317,6 +351,7 @@ def test_dilate_gradient_routes_to_argmax():
     # j ∈ {i-1, i, i+1} (with VALID/SAME padding) attaining the max.
     # Construct x so each window has a clear winner.
     x = jnp.array([1.0, 5.0, 2.0, 8.0, 3.0])
+
     # 3-window dilation w/ SAME, VALID-interior:
     #   out[0] = max(x[0], x[1]) = 5    [boundary]
     #   out[1] = max(x[0], x[1], x[2]) = 5   -> argmax = 1
@@ -325,6 +360,7 @@ def test_dilate_gradient_routes_to_argmax():
     #   out[4] = max(x[3], x[4]) = 8    [boundary]
     def loss(x):
         return dilate(x, size=3, backend='jax').sum()
+
     g = jax.grad(loss)(x)
     # Each output cell contributes 1 to its argmax position.
     # Position 1 receives 1 (from out[1]).
@@ -341,8 +377,10 @@ def test_dilate_gradient_routes_to_argmax():
 
 def test_erode_gradient_routes_to_argmin():
     x = jnp.array([5.0, 1.0, 8.0, 2.0, 7.0])
+
     def loss(x):
         return erode(x, size=3, backend='jax').sum()
+
     g = jax.grad(loss)(x)
     assert bool(jnp.all(jnp.isfinite(g)))
     # Each output position contributes 1 to its argmin -- sum is the
@@ -373,11 +411,11 @@ def test_flat_path_jit_of_grad_is_finite(op):
 
 @pytest.mark.parametrize('op', [dilate, erode])
 def test_flat_path_matches_semiring_forward_and_grad(op):
-    '''The flat fast path and the explicit all-zero-SE semiring path are the
+    """The flat fast path and the explicit all-zero-SE semiring path are the
     same operator; they must agree on forward, ``grad``, and ``jit(grad)``, so
     the two implementations cannot silently diverge.  A continuous input makes
     argmax/argmin ties measure-zero, so the subgradients are unique and equal.
-    '''
+    """
     x = jax.random.normal(jax.random.key(23), (9, 11))
 
     def flat(z):
@@ -402,13 +440,15 @@ def test_flat_path_matches_semiring_forward_and_grad(op):
 
 
 @pytest.mark.parametrize('op', [dilate, erode, morph_open, morph_close])
-@pytest.mark.parametrize('dtype', [jnp.int32, jnp.bool_, jnp.float32, jnp.float64])
+@pytest.mark.parametrize(
+    'dtype', [jnp.int32, jnp.bool_, jnp.float32, jnp.float64]
+)
 def test_flat_path_promotes_int_bool_to_float(op, dtype):
-    '''Grayscale morphology is real-valued: integer / boolean inputs are lifted
+    """Grayscale morphology is real-valued: integer / boolean inputs are lifted
     to ``float`` (so the ``-inf`` / ``+inf`` window identity is representable and
     the gradient is well-defined), while floating inputs keep their dtype.  The
     integer path previously raised ``OverflowError`` (``-inf -> int``).
-    '''
+    """
     key = jax.random.key(29)
     if dtype is jnp.bool_:
         x = jax.random.normal(key, (8, 8)) > 0
@@ -420,7 +460,7 @@ def test_flat_path_promotes_int_bool_to_float(op, dtype):
     out = op(x, size=3, backend='jax')
     assert jnp.issubdtype(out.dtype, jnp.floating)
     if jnp.issubdtype(dtype, jnp.floating):
-        assert out.dtype == dtype          # floating inputs unchanged
+        assert out.dtype == dtype  # floating inputs unchanged
     assert bool(jnp.all(jnp.isfinite(out)))
 
     # Interior agrees with scipy on the equivalent float volume.
@@ -431,7 +471,9 @@ def test_flat_path_promotes_int_bool_to_float(op, dtype):
     if ref_fn is not None:
         ref = ref_fn(np.asarray(x).astype(np.float64), size=3)
         np.testing.assert_allclose(
-            np.asarray(out)[1:-1, 1:-1], ref[1:-1, 1:-1], atol=1e-10,
+            np.asarray(out)[1:-1, 1:-1],
+            ref[1:-1, 1:-1],
+            atol=1e-10,
         )
 
 
@@ -441,10 +483,10 @@ def test_flat_path_promotes_int_bool_to_float(op, dtype):
 
 
 def test_susan_emulator_implemented_via_bilateral():
-    '''Once ``smoothing.bilateral_gaussian`` shipped (this sprint),
+    """Once ``smoothing.bilateral_gaussian`` shipped (this sprint),
     ``susan_emulator`` became a real op rather than a raise.  This
     test pins the transition from "stub" to "implemented".
-    '''
+    """
     x = jax.random.normal(jax.random.key(99), (8, 8))
     out = susan_emulator(x, sigma_space=1.0, sigma_intensity=0.5)
     assert out.shape == x.shape

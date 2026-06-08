@@ -18,6 +18,7 @@ Public surface:
 
 See ``nitrix/SPEC.md`` §3.1 and ``SPEC_UPDATE.md`` §3.1.
 """
+
 from ._types import (
     Monoid,
     Semigroup,

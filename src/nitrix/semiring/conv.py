@@ -66,14 +66,13 @@ this and falls back to JAX with one ``NitrixBackendFallback``
 warning per ``(shape, dtype, algebra)`` signature.  A native Pallas
 conv kernel is a future-work item.
 """
+
 from __future__ import annotations
 
 from functools import reduce
 from operator import mul
 from typing import Any, Optional, Sequence, Union, cast
 
-import jax
-import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Num
 
@@ -86,7 +85,6 @@ from .._internal.backend import (
 from ._types import Semiring
 from .algebras import REAL
 from .matmul import semiring_matmul
-
 
 __all__ = [
     'semiring_conv',
@@ -111,8 +109,7 @@ def _normalise_n_tuple(
     out = tuple(x)
     if len(out) != n:
         raise ValueError(
-            f'{name} must be an int or a length-{n} sequence; '
-            f'got {x!r}.'
+            f'{name} must be an int or a length-{n} sequence; got {x!r}.'
         )
     return out
 
@@ -120,7 +117,7 @@ def _normalise_n_tuple(
 def _normalise_padding(
     padding: Union[str, Sequence[tuple[int, int]]], spatial_rank: int
 ) -> Union[str, tuple[tuple[int, int], ...]]:
-    '''Accept ``'SAME'``, ``'VALID'``, or an explicit per-dim sequence.'''
+    """Accept ``'SAME'``, ``'VALID'``, or an explicit per-dim sequence."""
     if isinstance(padding, str):
         if padding.upper() not in ('SAME', 'VALID'):
             raise ValueError(
@@ -149,12 +146,12 @@ def _resolve_pad(
     strides: tuple[int, ...],
     dilations: tuple[int, ...],
 ) -> tuple[tuple[int, int], ...]:
-    '''Resolve string padding to explicit ``(lo, hi)`` per spatial dim.
+    """Resolve string padding to explicit ``(lo, hi)`` per spatial dim.
 
     Mirrors the ``"SAME"`` / ``"VALID"`` semantics of
     ``lax.conv_general_dilated`` exactly (per-dim symmetric or
     near-symmetric padding for SAME; zero for VALID).
-    '''
+    """
     n = len(spatial_in)
     if pad == 'VALID':
         return tuple((0, 0) for _ in range(n))
@@ -164,7 +161,8 @@ def _resolve_pad(
             eff_k = (kspatial[d] - 1) * dilations[d] + 1
             out_size = -(-spatial_in[d] // strides[d])  # ceil div
             total_pad = max(
-                (out_size - 1) * strides[d] + eff_k - spatial_in[d], 0,
+                (out_size - 1) * strides[d] + eff_k - spatial_in[d],
+                0,
             )
             lo = total_pad // 2
             hi = total_pad - lo
@@ -183,7 +181,7 @@ def _extract_patches_nan_safe(
     padding_explicit: Sequence[tuple[int, int]],
     identity: Any,
 ) -> Num[Array, '...']:
-    '''NaN-safe patch extraction.
+    """NaN-safe patch extraction.
 
     ``lax.conv_general_dilated_patches`` lowers via a multiply-with-
     one-hot trick that produces ``NaN`` when ``x`` contains ``-inf``
@@ -210,21 +208,24 @@ def _extract_patches_nan_safe(
     -------
     Patches array of shape
     ``(batch, *spatial_out, *kspatial, c_in)``.
-    '''
+    """
     spatial_rank = len(kspatial)
     if identity is None:
         identity = 0
     # Pad the spatial dims; leave batch and channel untouched.
-    pad_widths = [(0, 0)] + [
-        tuple(padding_explicit[d]) for d in range(spatial_rank)
-    ] + [(0, 0)]
+    pad_widths = (
+        [(0, 0)]
+        + [tuple(padding_explicit[d]) for d in range(spatial_rank)]
+        + [(0, 0)]
+    )
     x_padded = jnp.pad(
-        x_nhwc, pad_widths, mode='constant', constant_values=identity,
+        x_nhwc,
+        pad_widths,
+        mode='constant',
+        constant_values=identity,
     )
 
-    spatial_padded = tuple(
-        x_padded.shape[1 + d] for d in range(spatial_rank)
-    )
+    spatial_padded = tuple(x_padded.shape[1 + d] for d in range(spatial_rank))
     spatial_out = []
     for d in range(spatial_rank):
         eff_k = (kspatial[d] - 1) * dilations[d] + 1
@@ -249,7 +250,6 @@ def _extract_patches_nan_safe(
     #   (batch, out_0, k_0, out_1, k_1, ..., c_in)
     # We want (batch, *spatial_out, *kspatial, c_in).  Permute the
     # interleaved ``(out_d, k_d)`` pairs into two contiguous groups.
-    out_axes = list(range(out.ndim))
     perm = [0]  # batch
     for d in range(spatial_rank):
         perm.append(1 + 2 * d)  # spatial_out[d]
@@ -270,12 +270,12 @@ def reference_semiring_conv(
     dilation: Union[int, Sequence[int]] = 1,
     backend: Backend = 'jax',
 ) -> Num[Array, '... *spatial_out c_out']:
-    '''Pure-JAX reference for ``semiring_conv``.
+    """Pure-JAX reference for ``semiring_conv``.
 
     NaN-safe patches extraction (pads with the algebra's identity,
     gathers via ``jnp.take``) followed by ``semiring_matmul`` for
     the per-output-position reduction.  See module docstring.
-    '''
+    """
     spatial_rank = k.ndim - 2
     if spatial_rank < 1:
         raise ValueError(
@@ -288,8 +288,8 @@ def reference_semiring_conv(
             f'{spatial_rank} (needs at least {spatial_rank + 1}).'
         )
 
-    batch_shape = tuple(x.shape[:-spatial_rank - 1])
-    spatial_in = tuple(x.shape[-spatial_rank - 1:-1])
+    batch_shape = tuple(x.shape[: -spatial_rank - 1])
+    spatial_in = tuple(x.shape[-spatial_rank - 1 : -1])
     c_in = int(x.shape[-1])
     c_out = int(k.shape[-1])
     kspatial = tuple(int(d) for d in k.shape[:-2])
@@ -303,7 +303,11 @@ def reference_semiring_conv(
     dilations = _normalise_n_tuple(dilation, spatial_rank, 'dilation')
     pad_str_or_explicit = _normalise_padding(padding, spatial_rank)
     pad_explicit = _resolve_pad(
-        pad_str_or_explicit, spatial_in, kspatial, strides, dilations,
+        pad_str_or_explicit,
+        spatial_in,
+        kspatial,
+        strides,
+        dilations,
     )
 
     # Flatten leading batch dims into one.
@@ -313,18 +317,21 @@ def reference_semiring_conv(
     # Patches: (batch, *spatial_out, *kspatial, c_in).
     patches = _extract_patches_nan_safe(
         x_flat,
-        kspatial=kspatial, strides=strides, dilations=dilations,
+        kspatial=kspatial,
+        strides=strides,
+        dilations=dilations,
         padding_explicit=pad_explicit,
         identity=semiring.identity,
     )
-    spatial_out = tuple(patches.shape[1:1 + spatial_rank])
+    spatial_out = tuple(patches.shape[1 : 1 + spatial_rank])
     spatial_out_prod = _prod(spatial_out) if spatial_out else 1
 
     # Reshape patches to (batch * prod(out), prod(kspatial) * c_in).
     # The axis ordering after extraction matches the kernel's
     # natural (*kspatial, c_in) layout, so no extra moveaxis needed.
     patches_2d = patches.reshape(
-        bsz * spatial_out_prod, _prod(kspatial) * c_in,
+        bsz * spatial_out_prod,
+        _prod(kspatial) * c_in,
     )
 
     # Kernel: (*kspatial, c_in, c_out) -> (prod(kspatial) * c_in, c_out)
@@ -333,7 +340,10 @@ def reference_semiring_conv(
     # Inner reduction via the existing matmul surface (custom_vjp
     # registered there gives us the backward composition).
     out_2d = semiring_matmul(
-        patches_2d, k_2d, semiring=semiring, backend=backend,
+        patches_2d,
+        k_2d,
+        semiring=semiring,
+        backend=backend,
     )
 
     return out_2d.reshape(*batch_shape, *spatial_out, c_out)
@@ -353,14 +363,14 @@ def _semiring_conv_pallas(
     padding: Union[str, Sequence[tuple[int, int]]],
     dilation: Union[int, Sequence[int]],
 ) -> Optional[Array]:
-    '''Pallas dispatch; returns ``None`` if the kernel rejects the request.
+    """Pallas dispatch; returns ``None`` if the kernel rejects the request.
 
     Currently always rejects: there is no dedicated Pallas conv kernel
     yet (would require a separate ``_kernels/cuda/semiring_conv.py``
     that streams over kspatial × c_in instead of materialising patches).
     The dispatcher catches the ``None`` and falls back to JAX with a
     ``NitrixBackendFallback`` warning.
-    '''
+    """
     return None
 
 
@@ -374,7 +384,7 @@ def semiring_conv(
     dilation: Union[int, Sequence[int]] = 1,
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial_out c_out']:
-    '''Semiring-generalised convolution.
+    """Semiring-generalised convolution.
 
     Channel-last layout: ``x: (..., *spatial, c_in)``,
     ``k: (*kspatial, c_in, c_out)``.  Leading batch dims are
@@ -423,12 +433,15 @@ def semiring_conv(
     For ``REAL``, this produces the same answer as
     ``lax.conv_general_dilated`` modulo TF32 vs strict-fp32 precision
     (see ``semiring_matmul``'s docstring).
-    '''
+    """
     # Try the Pallas-specific kernel first (currently a stub).
     out = _semiring_conv_pallas(
-        x, k,
+        x,
+        k,
         semiring=semiring,
-        stride=stride, padding=padding, dilation=dilation,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
     )
     if out is not None:
         return out
@@ -460,8 +473,11 @@ def semiring_conv(
         inner_backend = 'jax'
 
     return reference_semiring_conv(
-        x, k,
+        x,
+        k,
         semiring=semiring,
-        stride=stride, padding=padding, dilation=dilation,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
         backend=inner_backend,
     )

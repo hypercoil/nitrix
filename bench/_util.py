@@ -15,6 +15,7 @@ For the same reason, every bench script must ``jit``-compile the
 callable it wraps -- otherwise the timed loop re-traces every call
 and the warm-up is moot.  ``timed_jit`` is the convenience helper.
 """
+
 from __future__ import annotations
 
 import time
@@ -27,14 +28,14 @@ import numpy as np
 
 @dataclass(frozen=True)
 class BenchSample:
-    '''A single timed measurement.
+    """A single timed measurement.
 
     ``compile_s`` is the wall-time of the first call (compile +
     execute).  ``warm_s`` is the median of the post-warm-up runs --
     the number we actually report.  ``samples_s`` lists every timed
     sample in the order taken so callers can compute their own
     statistics if they want.
-    '''
+    """
 
     compile_s: float
     warm_s: float
@@ -47,7 +48,7 @@ def bench_call(
     warmup: int = 3,
     repeats: int = 10,
 ) -> BenchSample:
-    '''Time ``fn(*args)`` with warm-up.
+    """Time ``fn(*args)`` with warm-up.
 
     Parameters
     ----------
@@ -69,7 +70,7 @@ def bench_call(
     -------
     A ``BenchSample`` recording both the first-call cost (compile +
     execute) and the steady-state median.
-    '''
+    """
     if warmup < 1:
         raise ValueError('warmup must be >= 1 to exclude compile time')
     # First call -- compile + execute.
@@ -99,19 +100,20 @@ def bench_call(
 
 
 def timed_jit(fn: Callable[..., Any], **jit_kwargs) -> Callable[..., Any]:
-    '''Wrap ``fn`` in ``jax.jit`` to get steady-state timing semantics.
+    """Wrap ``fn`` in ``jax.jit`` to get steady-state timing semantics.
 
     Use::
 
         f = timed_jit(lambda A, B: semiring_matmul(A, B, semiring=LOG, backend='jax'))
         sample = bench_call(f, A, B)
-    '''
+    """
     return jax.jit(fn, **jit_kwargs)
 
 
 def host_summary() -> dict[str, str]:
-    '''Snapshot of the host configuration for the bench report.'''
+    """Snapshot of the host configuration for the bench report."""
     import platform
+
     try:
         d = jax.devices()[0]
         device = f'{d.device_kind} ({d.platform})'
@@ -126,7 +128,7 @@ def host_summary() -> dict[str, str]:
 
 def format_us(seconds: float) -> str:
     if seconds < 1e-3:
-        return f'{seconds*1e6:.1f} µs'
+        return f'{seconds * 1e6:.1f} µs'
     if seconds < 1.0:
-        return f'{seconds*1e3:.2f} ms'
+        return f'{seconds * 1e3:.2f} ms'
     return f'{seconds:.3f} s'

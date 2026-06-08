@@ -25,6 +25,7 @@ rewrite leverages the substrate (``semiring_matmul``,
 ``semiring_ell_matmul``) where applicable and drops the
 backward-compatible naming the legacy code was constrained by.
 """
+
 from .kernel import (
     cosine_kernel,
     gaussian_kernel,

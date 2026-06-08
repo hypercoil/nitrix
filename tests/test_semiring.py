@@ -16,6 +16,7 @@ phase; backward kernels are 2.A.5).  Each test asserts:
 The Pallas path is exercised only when the host has an Ampere+ NVIDIA
 GPU; the JAX path is exercised unconditionally.
 """
+
 from __future__ import annotations
 
 import jax
@@ -35,7 +36,6 @@ from nitrix.semiring import (
     reference_semiring_matmul,
     semiring_matmul,
 )
-
 
 pallas_only = pytest.mark.skipif(
     not _HAS_AMPERE_NVIDIA,
@@ -130,7 +130,9 @@ def test_tropical_min_jax_matches_naive(shape):
 def test_euclidean_jax_matches_naive(shape):
     A, B = _pair(jax.random.key(4), *shape)
     got = reference_semiring_matmul(A, B, semiring=EUCLIDEAN)
-    np.testing.assert_allclose(got, naive_euclidean(A, B), atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(
+        got, naive_euclidean(A, B), atol=1e-4, rtol=1e-4
+    )
 
 
 def test_boolean_jax_matches_naive():
@@ -166,7 +168,9 @@ def test_pallas_matches_jax(shape, algebra):
 def test_pallas_boolean_matches_jax():
     A, B = _pair(jax.random.key(11), 32, 32, 32)
     Ab, Bb = (A > 0).astype(jnp.bool_), (B > 0).astype(jnp.bool_)
-    out_pallas = semiring_matmul(Ab, Bb, semiring=BOOLEAN, backend='pallas-cuda')
+    out_pallas = semiring_matmul(
+        Ab, Bb, semiring=BOOLEAN, backend='pallas-cuda'
+    )
     out_jax = semiring_matmul(Ab, Bb, semiring=BOOLEAN, backend='jax')
     np.testing.assert_array_equal(out_pallas, out_jax)
 
@@ -195,7 +199,10 @@ def test_tropical_max_neg_inf_propagates_pallas():
     A = A.at[3].set(-jnp.inf)
     B = jax.random.normal(jax.random.key(21), (k, n), jnp.float32)
     out = semiring_matmul(
-        A, B, semiring=TROPICAL_MAX_PLUS, backend='pallas-cuda',
+        A,
+        B,
+        semiring=TROPICAL_MAX_PLUS,
+        backend='pallas-cuda',
     )
     assert bool(jnp.all(jnp.isneginf(out[3])))
     assert bool(~jnp.any(jnp.isnan(out)))

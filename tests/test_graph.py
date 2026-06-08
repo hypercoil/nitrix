@@ -21,6 +21,7 @@ Coverage:
 Some tests run on graphs sized for LOBPCG's constraint
 ``5 * (n_components + 1) < n``; smaller graphs use the ``eigh`` path.
 """
+
 from __future__ import annotations
 
 import jax
@@ -41,7 +42,6 @@ from nitrix.graph import (
     relaxed_modularity,
 )
 from nitrix.sparse import ELL, sectioned_ell_from_ragged
-
 
 jax.config.update('jax_enable_x64', True)
 
@@ -73,7 +73,7 @@ def _two_cluster_adjacency(n_per_cluster: int = 8, p_intra=0.9, p_inter=0.05):
 
 
 def _ell_from_dense(A: np.ndarray) -> ELL:
-    '''Construct an ELL adjacency by padding all rows to the max degree.'''
+    """Construct an ELL adjacency by padding all rows to the max degree."""
     n = A.shape[0]
     degs = (A != 0).sum(axis=1)
     k_max = int(degs.max())
@@ -81,8 +81,8 @@ def _ell_from_dense(A: np.ndarray) -> ELL:
     indices = np.zeros((n, k_max), dtype=np.int32)
     for i in range(n):
         nz = np.flatnonzero(A[i])
-        values[i, :len(nz)] = A[i, nz]
-        indices[i, :len(nz)] = nz
+        values[i, : len(nz)] = A[i, nz]
+        indices[i, : len(nz)] = nz
     return ELL(
         values=jnp.asarray(values),
         indices=jnp.asarray(indices),
@@ -100,7 +100,9 @@ def _sectioned_from_dense(A: np.ndarray):
         values_per_row.append(A[i, nz])
         indices_per_row.append(nz)
     return sectioned_ell_from_ragged(
-        values_per_row, indices_per_row, n_cols=n,
+        values_per_row,
+        indices_per_row,
+        n_cols=n,
     )
 
 
@@ -127,10 +129,10 @@ def test_degree_vector_sectioned_ell():
 
 
 def test_degree_vector_sectioned_variable_degree():
-    '''Variable-degree graph: 3 nodes with degrees 1, 3, 2.
+    """Variable-degree graph: 3 nodes with degrees 1, 3, 2.
 
     Mass conservation: total degree = total non-zero edges.
-    '''
+    """
     rng = np.random.default_rng(0)
     n = 8
     A = rng.binomial(1, 0.3, size=(n, n)).astype(np.float64)
@@ -156,14 +158,12 @@ def test_symmetric_laplacian_is_symmetric_psd():
     L = laplacian(A, normalisation='symmetric')
     np.testing.assert_allclose(L, L.swapaxes(-1, -2), atol=1e-12)
     # Spectrum non-negative
-    vals = jnp.linalg.eigvalsh(
-        jax.device_put(L, jax.devices('cpu')[0])
-    )
+    vals = jnp.linalg.eigvalsh(jax.device_put(L, jax.devices('cpu')[0]))
     assert float(vals.min()) >= -1e-10
 
 
 def test_random_walk_laplacian_row_property():
-    '''L_rw = I - D^(-1) A; rows of D^(-1) A sum to 1, so L_rw rows sum to 0.'''
+    """L_rw = I - D^(-1) A; rows of D^(-1) A sum to 1, so L_rw rows sum to 0."""
     A = jnp.asarray(_ring_adjacency(8))
     L = laplacian(A, normalisation='random_walk')
     np.testing.assert_allclose(L.sum(axis=-1), 0.0, atol=1e-12)
@@ -181,7 +181,7 @@ def test_laplacian_invalid_normalisation():
 
 
 def test_laplacian_matvec_constant_eigenvector():
-    '''Combinatorial / symmetric Laplacians annihilate the constant vector.'''
+    """Combinatorial / symmetric Laplacians annihilate the constant vector."""
     A = jnp.asarray(_ring_adjacency(8))
     ones = jnp.ones((8, 1))
     for norm in ('combinatorial', 'symmetric', 'random_walk'):
@@ -231,11 +231,13 @@ def test_girvan_newman_null_is_rank_one():
 
 
 def test_girvan_newman_null_conserves_total_weight():
-    '''Sum of the null model equals total edge weight ``2m``.'''
+    """Sum of the null model equals total edge weight ``2m``."""
     A = jnp.asarray(_two_cluster_adjacency())
     P = girvan_newman_null(A)
     np.testing.assert_allclose(
-        float(P.sum()), float(A.sum()), atol=1e-10,
+        float(P.sum()),
+        float(A.sum()),
+        atol=1e-10,
     )
 
 
@@ -257,9 +259,9 @@ def test_modularity_matrix_matvec_dense_vs_ell_agreement():
 
 
 def test_coaffiliation_one_hot_is_indicator():
-    '''A hard partition into two communities gives the
+    """A hard partition into two communities gives the
     block-indicator co-affiliation matrix (with diagonal zeroed).
-    '''
+    """
     n_per = 4
     n = 2 * n_per
     C = np.zeros((n, 2))
@@ -280,8 +282,10 @@ def test_coaffiliation_one_hot_is_indicator():
 
 
 def test_relaxed_modularity_positive_for_aligned_partition():
-    '''Two-cluster graph + matching partition -> positive modularity.'''
-    A_dense = _two_cluster_adjacency(n_per_cluster=10, p_intra=0.9, p_inter=0.02)
+    """Two-cluster graph + matching partition -> positive modularity."""
+    A_dense = _two_cluster_adjacency(
+        n_per_cluster=10, p_intra=0.9, p_inter=0.02
+    )
     n = A_dense.shape[0]
     n_per = n // 2
     C = np.zeros((n, 2))
@@ -292,7 +296,7 @@ def test_relaxed_modularity_positive_for_aligned_partition():
 
 
 def test_relaxed_modularity_zero_for_random_partition():
-    '''Random partition on a random graph -> modularity ≈ 0.'''
+    """Random partition on a random graph -> modularity ≈ 0."""
     rng = np.random.default_rng(7)
     n = 24
     A = rng.binomial(1, 0.3, size=(n, n)).astype(np.float64)
@@ -304,9 +308,11 @@ def test_relaxed_modularity_zero_for_random_partition():
 
 
 def test_relaxed_modularity_dense_vs_ell_agree():
-    '''The sparse-aware factored path matches the dense path.'''
+    """The sparse-aware factored path matches the dense path."""
     A_dense = _two_cluster_adjacency(
-        n_per_cluster=8, p_intra=0.9, p_inter=0.05,
+        n_per_cluster=8,
+        p_intra=0.9,
+        p_inter=0.05,
     )
     n = A_dense.shape[0]
     rng = np.random.default_rng(11)
@@ -319,7 +325,9 @@ def test_relaxed_modularity_dense_vs_ell_agree():
 
 def test_relaxed_modularity_dense_vs_sectioned_agree():
     A_dense = _two_cluster_adjacency(
-        n_per_cluster=8, p_intra=0.7, p_inter=0.08,
+        n_per_cluster=8,
+        p_intra=0.7,
+        p_inter=0.08,
     )
     n = A_dense.shape[0]
     rng = np.random.default_rng(13)
@@ -333,8 +341,10 @@ def test_relaxed_modularity_dense_vs_sectioned_agree():
 def test_relaxed_modularity_differentiable_dense():
     A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=6, p_intra=0.9))
     C = jax.random.normal(jax.random.key(0), (A.shape[0], 2))
+
     def loss(C):
         return relaxed_modularity(A, C)
+
     g = jax.grad(loss)(C)
     assert bool(jnp.all(jnp.isfinite(g)))
 
@@ -345,15 +355,21 @@ def test_relaxed_modularity_differentiable_dense():
 
 
 def test_laplacian_eigenmap_eigh_recovers_clusters():
-    '''On a two-cluster graph, the first non-trivial eigenvector
+    """On a two-cluster graph, the first non-trivial eigenvector
     separates the clusters (sign changes across the boundary).
-    '''
+    """
     n_per = 10
-    A = jnp.asarray(_two_cluster_adjacency(
-        n_per_cluster=n_per, p_intra=0.95, p_inter=0.01,
-    ))
+    A = jnp.asarray(
+        _two_cluster_adjacency(
+            n_per_cluster=n_per,
+            p_intra=0.95,
+            p_inter=0.01,
+        )
+    )
     embedding, eigvals = laplacian_eigenmap(
-        A, n_components=2, solver='eigh',
+        A,
+        n_components=2,
+        solver='eigh',
     )
     # First non-trivial eigenvector: signs in first half differ
     # from signs in second half (for at least one of the recovered
@@ -366,13 +382,16 @@ def test_laplacian_eigenmap_eigh_recovers_clusters():
 
 
 def test_laplacian_eigenmap_eigh_vs_lobpcg_eigenvalues_agree():
-    '''The two solver paths must produce the same eigenvalues
-    (up to numerical noise) on a graph large enough for lobpcg.'''
+    """The two solver paths must produce the same eigenvalues
+    (up to numerical noise) on a graph large enough for lobpcg."""
     n = 32
     A = jnp.asarray(_ring_adjacency(n))
     _, vals_eigh = laplacian_eigenmap(A, n_components=3, solver='eigh')
     _, vals_lobpcg = laplacian_eigenmap(
-        A, n_components=3, solver='lobpcg', lobpcg_iters=300,
+        A,
+        n_components=3,
+        solver='lobpcg',
+        lobpcg_iters=300,
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_eigh)),
@@ -382,11 +401,15 @@ def test_laplacian_eigenmap_eigh_vs_lobpcg_eigenvalues_agree():
 
 
 def test_laplacian_eigenmap_shift_invert_agrees_with_eigh():
-    '''The matrix-free shift-invert solver matches the dense eigh
-    eigenvalues (it is approximate, hence a loose tolerance).'''
-    A = jnp.asarray(_two_cluster_adjacency(
-        n_per_cluster=16, p_intra=0.9, p_inter=0.02,
-    ))
+    """The matrix-free shift-invert solver matches the dense eigh
+    eigenvalues (it is approximate, hence a loose tolerance)."""
+    A = jnp.asarray(
+        _two_cluster_adjacency(
+            n_per_cluster=16,
+            p_intra=0.9,
+            p_inter=0.02,
+        )
+    )
     _, vals_eigh = laplacian_eigenmap(A, n_components=4, solver='eigh')
     _, vals_si = laplacian_eigenmap(A, n_components=4, solver='shift_invert')
     np.testing.assert_allclose(
@@ -397,14 +420,24 @@ def test_laplacian_eigenmap_shift_invert_agrees_with_eigh():
 
 
 def test_diffusion_embedding_shift_invert_agrees_with_eigh():
-    A = jnp.asarray(_two_cluster_adjacency(
-        n_per_cluster=16, p_intra=0.9, p_inter=0.02,
-    ))
+    A = jnp.asarray(
+        _two_cluster_adjacency(
+            n_per_cluster=16,
+            p_intra=0.9,
+            p_inter=0.02,
+        )
+    )
     _, vals_eigh = diffusion_embedding(
-        A, n_components=4, alpha=0.5, solver='eigh',
+        A,
+        n_components=4,
+        alpha=0.5,
+        solver='eigh',
     )
     _, vals_si = diffusion_embedding(
-        A, n_components=4, alpha=0.5, solver='shift_invert',
+        A,
+        n_components=4,
+        alpha=0.5,
+        solver='shift_invert',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_si)),
@@ -414,15 +447,19 @@ def test_diffusion_embedding_shift_invert_agrees_with_eigh():
 
 
 def test_shift_invert_ell_agrees_with_eigh():
-    '''Phase-4: shift-invert now serves ELL input; its eigenvalues match
-    the dense eigh reference.'''
+    """Phase-4: shift-invert now serves ELL input; its eigenvalues match
+    the dense eigh reference."""
     A = _two_cluster_adjacency(n_per_cluster=16, p_intra=0.9, p_inter=0.02)
     ell = _ell_from_dense(A)
     _, vals_eigh = laplacian_eigenmap(
-        jnp.asarray(A), n_components=4, solver='eigh',
+        jnp.asarray(A),
+        n_components=4,
+        solver='eigh',
     )
     _, vals_si = laplacian_eigenmap(
-        ell, n_components=4, solver='shift_invert',
+        ell,
+        n_components=4,
+        solver='shift_invert',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_si)),
@@ -432,14 +469,18 @@ def test_shift_invert_ell_agrees_with_eigh():
 
 
 def test_shift_invert_sectioned_agrees_with_eigh():
-    '''Phase-4: shift-invert serves SectionedELL input too.'''
+    """Phase-4: shift-invert serves SectionedELL input too."""
     A = _two_cluster_adjacency(n_per_cluster=16, p_intra=0.9, p_inter=0.02)
     sec = _sectioned_from_dense(A)
     _, vals_eigh = laplacian_eigenmap(
-        jnp.asarray(A), n_components=4, solver='eigh',
+        jnp.asarray(A),
+        n_components=4,
+        solver='eigh',
     )
     _, vals_si = laplacian_eigenmap(
-        sec, n_components=4, solver='shift_invert',
+        sec,
+        n_components=4,
+        solver='shift_invert',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_si)),
@@ -449,14 +490,20 @@ def test_shift_invert_sectioned_agrees_with_eigh():
 
 
 def test_polynomial_preconditioner_agrees_with_eigh():
-    '''The matvec-only polynomial-filter preconditioner matches eigh.'''
-    A = jnp.asarray(_two_cluster_adjacency(
-        n_per_cluster=16, p_intra=0.9, p_inter=0.02,
-    ))
+    """The matvec-only polynomial-filter preconditioner matches eigh."""
+    A = jnp.asarray(
+        _two_cluster_adjacency(
+            n_per_cluster=16,
+            p_intra=0.9,
+            p_inter=0.02,
+        )
+    )
     _, vals_eigh = laplacian_eigenmap(A, n_components=4, solver='eigh')
     # preconditioner='polynomial' on a dense graph routes auto -> lobpcg.
     _, vals_poly = laplacian_eigenmap(
-        A, n_components=4, preconditioner='polynomial',
+        A,
+        n_components=4,
+        preconditioner='polynomial',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_poly)),
@@ -466,14 +513,19 @@ def test_polynomial_preconditioner_agrees_with_eigh():
 
 
 def test_polynomial_preconditioner_ell_agrees_with_eigh():
-    '''Phase-4: the polynomial filter now serves ELL input.'''
+    """Phase-4: the polynomial filter now serves ELL input."""
     A = _two_cluster_adjacency(n_per_cluster=16, p_intra=0.9, p_inter=0.02)
     ell = _ell_from_dense(A)
     _, vals_eigh = laplacian_eigenmap(
-        jnp.asarray(A), n_components=4, solver='eigh',
+        jnp.asarray(A),
+        n_components=4,
+        solver='eigh',
     )
     _, vals_poly = laplacian_eigenmap(
-        ell, n_components=4, solver='lobpcg', preconditioner='polynomial',
+        ell,
+        n_components=4,
+        solver='lobpcg',
+        preconditioner='polynomial',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_poly)),
@@ -483,14 +535,16 @@ def test_polynomial_preconditioner_ell_agrees_with_eigh():
 
 
 def test_laplacian_eigenmap_sparse_input_uses_lobpcg():
-    '''ELL input automatically routes to lobpcg via solver="auto".'''
+    """ELL input automatically routes to lobpcg via solver="auto"."""
     n = 32
     A_dense = _ring_adjacency(n)
     ell = _ell_from_dense(A_dense)
     _, vals = laplacian_eigenmap(ell, n_components=3, lobpcg_iters=300)
     # Compare against dense eigh.
     _, vals_dense = laplacian_eigenmap(
-        jnp.asarray(A_dense), n_components=3, solver='eigh',
+        jnp.asarray(A_dense),
+        n_components=3,
+        solver='eigh',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals)),
@@ -507,17 +561,21 @@ def test_laplacian_eigenmap_eigh_rejects_sparse():
 
 
 def test_laplacian_eigenmap_sectioned_ell_matches_dense():
-    '''SectionedELL adjacency must give the same eigenvalues (up to
+    """SectionedELL adjacency must give the same eigenvalues (up to
     LOBPCG numerical noise) as the equivalent dense input.
-    '''
+    """
     n = 32
     A_dense = _ring_adjacency(n)
     sec = _sectioned_from_dense(A_dense)
     _, vals_sec = laplacian_eigenmap(
-        sec, n_components=3, lobpcg_iters=300,
+        sec,
+        n_components=3,
+        lobpcg_iters=300,
     )
     _, vals_dense = laplacian_eigenmap(
-        jnp.asarray(A_dense), n_components=3, solver='eigh',
+        jnp.asarray(A_dense),
+        n_components=3,
+        solver='eigh',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_sec)),
@@ -527,9 +585,9 @@ def test_laplacian_eigenmap_sectioned_ell_matches_dense():
 
 
 def test_laplacian_eigenmap_sectioned_variable_degree():
-    '''SectionedELL with non-uniform degrees: same answer as a
+    """SectionedELL with non-uniform degrees: same answer as a
     densified version of the same graph.
-    '''
+    """
     rng = np.random.default_rng(7)
     n = 40
     # Erdős-Rényi with non-uniform degrees
@@ -543,10 +601,14 @@ def test_laplacian_eigenmap_sectioned_variable_degree():
         A[idx, partner] = A[partner, idx] = 1.0
     sec = _sectioned_from_dense(A)
     _, vals_sec = laplacian_eigenmap(
-        sec, n_components=3, lobpcg_iters=400,
+        sec,
+        n_components=3,
+        lobpcg_iters=400,
     )
     _, vals_dense = laplacian_eigenmap(
-        jnp.asarray(A), n_components=3, solver='eigh',
+        jnp.asarray(A),
+        n_components=3,
+        solver='eigh',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_sec)),
@@ -560,10 +622,16 @@ def test_diffusion_embedding_sectioned_ell_matches_dense():
     A_dense = _ring_adjacency(n)
     sec = _sectioned_from_dense(A_dense)
     _, vals_sec = diffusion_embedding(
-        sec, n_components=3, alpha=0.5, lobpcg_iters=300,
+        sec,
+        n_components=3,
+        alpha=0.5,
+        lobpcg_iters=300,
     )
     _, vals_dense = diffusion_embedding(
-        jnp.asarray(A_dense), n_components=3, alpha=0.5, solver='eigh',
+        jnp.asarray(A_dense),
+        n_components=3,
+        alpha=0.5,
+        solver='eigh',
     )
     np.testing.assert_allclose(
         np.sort(np.asarray(vals_sec)),
@@ -578,16 +646,19 @@ def test_diffusion_embedding_sectioned_ell_matches_dense():
 
 
 def test_connectopy_returns_outputs_on_source_device():
-    '''When ``_eigh_device()`` resolves to CPU (broken cuSolver) but
+    """When ``_eigh_device()`` resolves to CPU (broken cuSolver) but
     the input lives on GPU, the result should still come back on
     GPU so downstream code stays on the same device.
-    '''
+    """
     n = 32
     A = jnp.asarray(_ring_adjacency(n))  # likely on GPU per JAX default
     source = list(A.devices())[0]
     for solver in ('eigh', 'lobpcg'):
         vecs, vals = laplacian_eigenmap(
-            A, n_components=2, solver=solver, lobpcg_iters=200,
+            A,
+            n_components=2,
+            solver=solver,
+            lobpcg_iters=200,
         )
         # Outputs share the input's device.
         assert source in vecs.devices(), (
@@ -597,8 +668,7 @@ def test_connectopy_returns_outputs_on_source_device():
 
 
 def test_diffusion_embedding_eigenvalues_bounded():
-    '''Diffusion-operator eigenvalues lie in (-1, 1].'''
-    n = 24
+    """Diffusion-operator eigenvalues lie in (-1, 1]."""
     A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=12))
     _, vals = diffusion_embedding(A, n_components=3, alpha=0.5, solver='eigh')
     assert float(vals.max()) <= 1.0 + 1e-9
@@ -614,10 +684,16 @@ def test_diffusion_embedding_eigh_vs_lobpcg_agree():
     n = 32
     A = jnp.asarray(_ring_adjacency(n))
     _, v1 = diffusion_embedding(
-        A, n_components=3, alpha=0.5, solver='eigh',
+        A,
+        n_components=3,
+        alpha=0.5,
+        solver='eigh',
     )
     _, v2 = diffusion_embedding(
-        A, n_components=3, alpha=0.5, solver='lobpcg',
+        A,
+        n_components=3,
+        alpha=0.5,
+        solver='lobpcg',
         lobpcg_iters=300,
     )
     np.testing.assert_allclose(
@@ -628,16 +704,23 @@ def test_diffusion_embedding_eigh_vs_lobpcg_agree():
 
 
 def test_diffusion_embedding_t_scaling():
-    '''``t > 0`` multiplies each eigenvector by lambda^t.'''
-    n = 24
+    """``t > 0`` multiplies each eigenvector by lambda^t."""
     A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=12))
     embed0, vals = diffusion_embedding(
-        A, n_components=3, alpha=0.5, t=0.0, solver='eigh',
+        A,
+        n_components=3,
+        alpha=0.5,
+        t=0.0,
+        solver='eigh',
     )
     embed_t, _ = diffusion_embedding(
-        A, n_components=3, alpha=0.5, t=2.0, solver='eigh',
+        A,
+        n_components=3,
+        alpha=0.5,
+        t=2.0,
+        solver='eigh',
     )
-    expected = embed0 * (vals ** 2)[None, :]
+    expected = embed0 * (vals**2)[None, :]
     np.testing.assert_allclose(embed_t, expected, atol=1e-10)
 
 
@@ -651,31 +734,37 @@ def test_diffusion_embedding_t_scaling():
     ],
 )
 def test_laplacian_eigenmap_jittable_dense(solver, pc):
-    '''The public dense solver paths trace and run under ``jax.jit`` --
-    forward (matching eager) and through ``jax.jit(jax.grad(...))``.'''
+    """The public dense solver paths trace and run under ``jax.jit`` --
+    forward (matching eager) and through ``jax.jit(jax.grad(...))``."""
     A = jnp.asarray(
         _two_cluster_adjacency(n_per_cluster=12, p_intra=0.9, p_inter=0.02)
     )
 
     def f(X):
         return laplacian_eigenmap(
-            X, n_components=3, solver=solver, preconditioner=pc,
+            X,
+            n_components=3,
+            solver=solver,
+            preconditioner=pc,
         )[1]
 
     np.testing.assert_allclose(
-        np.asarray(jax.jit(f)(A)), np.asarray(f(A)), atol=1e-4,
+        np.asarray(jax.jit(f)(A)),
+        np.asarray(f(A)),
+        atol=1e-4,
     )
     g = jax.jit(jax.grad(lambda X: f(X).sum()))(A)
     assert np.all(np.isfinite(np.asarray(g)))
 
 
 def test_eigh_differentiable():
-    '''Reverse-mode AD through eigh works (jnp.linalg.eigh ships with a VJP).'''
-    n = 16
+    """Reverse-mode AD through eigh works (jnp.linalg.eigh ships with a VJP)."""
     A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=8))
+
     def loss(A):
         _, vals = laplacian_eigenmap(A, n_components=2, solver='eigh')
         return vals.sum()
+
     g = jax.grad(loss)(A)
     assert bool(jnp.all(jnp.isfinite(g)))
 
@@ -693,17 +782,17 @@ def _build_psd(n: int, seed: int = 0):
 
 
 def _ell_from_dense_symmetric(A_dense: np.ndarray):
-    '''Build a flat ELL from a dense symmetric matrix.'''
+    """Build a flat ELL from a dense symmetric matrix."""
     n = A_dense.shape[0]
     k_max = int(np.max((A_dense != 0).sum(axis=1)))
     values = np.zeros((n, k_max))
     indices = np.zeros((n, k_max), dtype=np.int32)
     for i in range(n):
         nz = np.nonzero(A_dense[i])[0]
-        values[i, :len(nz)] = A_dense[i, nz]
-        indices[i, :len(nz)] = nz
+        values[i, : len(nz)] = A_dense[i, nz]
+        indices[i, : len(nz)] = nz
         if len(nz) < k_max:
-            indices[i, len(nz):] = nz[0] if len(nz) > 0 else 0
+            indices[i, len(nz) :] = nz[0] if len(nz) > 0 else 0
     return ELL(
         values=jnp.asarray(values),
         indices=jnp.asarray(indices),
@@ -713,11 +802,11 @@ def _ell_from_dense_symmetric(A_dense: np.ndarray):
 
 
 def test_lobpcg_dense_eigenvalue_grad_matches_eigh():
-    '''Eigenvalue gradient via LOBPCG implicit-VJP matches eigh exactly.
+    """Eigenvalue gradient via LOBPCG implicit-VJP matches eigh exactly.
 
     Hellmann-Feynman is exact; the only error source is LOBPCG's
     eigenvalue residual against eigh's machine-precision answer.
-    '''
+    """
     from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 40, 3
@@ -735,15 +824,17 @@ def test_lobpcg_dense_eigenvalue_grad_matches_eigh():
     g_lob = jax.grad(loss_lob)(M)
     g_eigh = jax.grad(loss_eigh)(M)
     np.testing.assert_allclose(
-        np.asarray(g_lob), np.asarray(g_eigh), atol=1e-12,
+        np.asarray(g_lob),
+        np.asarray(g_eigh),
+        atol=1e-12,
     )
 
 
 def test_lobpcg_dense_in_subspace_loss_matches_analytical():
-    '''In-subspace loss ``trace(U^T M U @ T)`` has analytical gradient
+    """In-subspace loss ``trace(U^T M U @ T)`` has analytical gradient
     ``U @ diag(diag(T)) @ U^T``, the F-matrix correction cancels the
     off-diagonal of ``T``.  The implicit-VJP should hit this exactly.
-    '''
+    """
     from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 40, 3
@@ -764,9 +855,9 @@ def test_lobpcg_dense_in_subspace_loss_matches_analytical():
 
 
 def test_lobpcg_dense_gradient_is_symmetric():
-    '''The gradient of any scalar loss through LOBPCG implicit-VJP lives
+    """The gradient of any scalar loss through LOBPCG implicit-VJP lives
     in the symmetric subspace -- ``V K V^T`` with ``K`` symmetric.
-    '''
+    """
     from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 30, 2
@@ -780,14 +871,16 @@ def test_lobpcg_dense_gradient_is_symmetric():
 
     g = jax.grad(loss)(M)
     np.testing.assert_allclose(
-        np.asarray(g), np.asarray(g.T), atol=1e-12,
+        np.asarray(g),
+        np.asarray(g.T),
+        atol=1e-12,
     )
 
 
 def test_lobpcg_dense_degenerate_eigenvalues_clamp():
-    '''Identity matrix has fully-degenerate spectrum; the eps_clamp
+    """Identity matrix has fully-degenerate spectrum; the eps_clamp
     short-circuits F-matrix blow-up.  Gradient must be finite.
-    '''
+    """
     from nitrix.linalg._eigsolve import SolverSpec, _eig_top_k_dense
 
     n, k = 30, 2
@@ -798,19 +891,21 @@ def test_lobpcg_dense_degenerate_eigenvalues_clamp():
 
     def loss(M):
         _, U = _eig_top_k_dense(
-            M, X0, SolverSpec.lobpcg(n_iters=500, eps_clamp=1e-3),
+            M,
+            X0,
+            SolverSpec.lobpcg(n_iters=500, eps_clamp=1e-3),
         )
-        return jnp.sum(U ** 2)  # invariant; gradient should be ~zero
+        return jnp.sum(U**2)  # invariant; gradient should be ~zero
 
     g = jax.grad(loss)(M)
     assert bool(jnp.all(jnp.isfinite(g)))
 
 
 def test_lobpcg_ell_grad_matches_dense_projected():
-    '''ELL backward returns the gradient projected onto the sparsity
+    """ELL backward returns the gradient projected onto the sparsity
     pattern, agreeing with the dense backward gathered at the same
     indices.
-    '''
+    """
     from nitrix.linalg._eigsolve import (
         SolverSpec,
         _eig_top_k_dense,
@@ -839,10 +934,19 @@ def test_lobpcg_ell_grad_matches_dense_projected():
 
     def loss_ell(values):
         _, U = _eig_top_k_ell(
-            values, ell.indices, X0, n, SolverSpec.lobpcg(n_iters=500),
+            values,
+            ell.indices,
+            X0,
+            n,
+            SolverSpec.lobpcg(n_iters=500),
         )
         AU = semiring_ell_matmul(
-            values, ell.indices, U, semiring=REAL, n_cols=n, backend='jax',
+            values,
+            ell.indices,
+            U,
+            semiring=REAL,
+            n_cols=n,
+            backend='jax',
         )
         return jnp.trace(U.T @ AU @ target)
 
@@ -857,25 +961,29 @@ def test_lobpcg_ell_grad_matches_dense_projected():
 
 
 def test_laplacian_eigenmap_lobpcg_dense_differentiable():
-    '''Public surface: ``jax.grad`` through ``laplacian_eigenmap`` with
+    """Public surface: ``jax.grad`` through ``laplacian_eigenmap`` with
     ``solver="lobpcg"`` on a dense input now produces finite gradients
     (was raising at first GA).
-    '''
-    n = 32
+    """
     A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=16))
+
     def loss(A):
         _, vals = laplacian_eigenmap(
-            A, n_components=2, solver='lobpcg', lobpcg_iters=200,
+            A,
+            n_components=2,
+            solver='lobpcg',
+            lobpcg_iters=200,
         )
         return vals.sum()
+
     g = jax.grad(loss)(A)
     assert bool(jnp.all(jnp.isfinite(g)))
 
 
 def test_laplacian_eigenmap_lobpcg_ell_differentiable():
-    '''Public surface: ELL input through ``laplacian_eigenmap`` with
+    """Public surface: ELL input through ``laplacian_eigenmap`` with
     ``solver="auto"`` (-> lobpcg) is differentiable in ``A.values``.
-    '''
+    """
     n = 60
     A_np = _ring_adjacency(n)
     rng = np.random.default_rng(0)
@@ -894,7 +1002,10 @@ def test_laplacian_eigenmap_lobpcg_ell_differentiable():
             identity=ell.identity,
         )
         _, vals = laplacian_eigenmap(
-            ell_in, n_components=3, solver='lobpcg', lobpcg_iters=300,
+            ell_in,
+            n_components=3,
+            solver='lobpcg',
+            lobpcg_iters=300,
         )
         return vals.sum()
 
@@ -904,14 +1015,14 @@ def test_laplacian_eigenmap_lobpcg_ell_differentiable():
 
 
 def test_lobpcg_sectioned_ell_differentiable():
-    '''SectionedELL is now differentiable through ``laplacian_eigenmap``
+    """SectionedELL is now differentiable through ``laplacian_eigenmap``
     via the per-section sparsity-projected VJP.
 
     Was forward-only before the LOBPCG-SectionedELL VJP work; flipped
     here.  Each section's gradient should be finite and match the
     flat-ELL gradient at the equivalent (row, col) entries (verified
     in tests/test_graph_sectioned_lobpcg_vjp.py).
-    '''
+    """
     n = 60
     A_np = _ring_adjacency(n)
     A_np += 0.5 * np.eye(n)
@@ -920,17 +1031,25 @@ def test_lobpcg_sectioned_ell_differentiable():
     def loss(values_list):
         new_sections = tuple(
             type(s)(
-                values=v, indices=s.indices,
-                n_cols=s.n_cols, identity=s.identity,
+                values=v,
+                indices=s.indices,
+                n_cols=s.n_cols,
+                identity=s.identity,
             )
             for s, v in zip(sec.sections, values_list)
         )
         new_sec = type(sec)(
-            sections=new_sections, row_groups=sec.row_groups,
-            n_rows=sec.n_rows, n_cols=sec.n_cols, identity=sec.identity,
+            sections=new_sections,
+            row_groups=sec.row_groups,
+            n_rows=sec.n_rows,
+            n_cols=sec.n_cols,
+            identity=sec.identity,
         )
         _, evals = laplacian_eigenmap(
-            new_sec, n_components=3, solver='lobpcg', lobpcg_iters=200,
+            new_sec,
+            n_components=3,
+            solver='lobpcg',
+            lobpcg_iters=200,
         )
         return evals.sum()
 
@@ -943,13 +1062,18 @@ def test_lobpcg_sectioned_ell_differentiable():
 
 
 def test_diffusion_embedding_lobpcg_dense_differentiable():
-    '''Diffusion-embedding LOBPCG path is differentiable on dense input.'''
-    n = 32
+    """Diffusion-embedding LOBPCG path is differentiable on dense input."""
     A = jnp.asarray(_two_cluster_adjacency(n_per_cluster=16))
+
     def loss(A):
         _, vals = diffusion_embedding(
-            A, n_components=2, alpha=0.5, solver='lobpcg', lobpcg_iters=200,
+            A,
+            n_components=2,
+            alpha=0.5,
+            solver='lobpcg',
+            lobpcg_iters=200,
         )
         return vals.sum()
+
     g = jax.grad(loss)(A)
     assert bool(jnp.all(jnp.isfinite(g)))

@@ -14,6 +14,7 @@ Two submodules covered:
   orthogonality of the residual to the regressor span; gradient
   finiteness; the leading-batch broadcast contract.
 """
+
 from __future__ import annotations
 
 import jax
@@ -35,7 +36,6 @@ from nitrix.linalg import (
     toeplitz_2d,
     vec2sym,
 )
-
 
 # ---------------------------------------------------------------------------
 # matrix
@@ -59,7 +59,9 @@ def test_symmetric_supports_arbitrary_axes():
     M = jax.random.normal(jax.random.key(0), (5, 3, 5, 2))
     out = symmetric(M, axes=(0, 2))
     np.testing.assert_allclose(
-        np.asarray(out), np.asarray(out).swapaxes(0, 2), atol=1e-12,
+        np.asarray(out),
+        np.asarray(out).swapaxes(0, 2),
+        atol=1e-12,
     )
 
 
@@ -81,13 +83,15 @@ def test_sym2vec_vec2sym_roundtrip_offset_0():
 
 
 def test_sym2vec_grad_zeros_lower_triangle():
-    '''sym2vec custom_vjp: the backward must place zero in the
+    """sym2vec custom_vjp: the backward must place zero in the
     lower triangle (the forward read nothing from there).
-    '''
+    """
     M = jax.random.normal(jax.random.key(0), (4, 4))
     M = symmetric(M)
+
     def loss(M):
         return (sym2vec(M, offset=1) ** 2).sum()
+
     g = jax.grad(loss)(M)
     np.testing.assert_allclose(jnp.tril(g, -1), 0.0, atol=1e-12)
     # Upper triangle should be 2 * M[upper] (each entry contributes once).
@@ -95,14 +99,16 @@ def test_sym2vec_grad_zeros_lower_triangle():
 
 
 def test_vec2sym_grad_doubles_off_diagonal():
-    '''vec2sym custom_vjp: each vec entry populates two cells
+    """vec2sym custom_vjp: each vec entry populates two cells
     (upper + mirror), so dL/dv_k = 2 * 2 * v_k = 4 v_k for an
     ||M||^2 loss.
-    '''
+    """
     v = jax.random.normal(jax.random.key(0), (6,))
+
     def loss(v):
         M = vec2sym(v, offset=1)
-        return (M ** 2).sum()
+        return (M**2).sum()
+
     g = jax.grad(loss)(v)
     np.testing.assert_allclose(g, 4 * v, atol=1e-12)
 
@@ -171,6 +177,7 @@ def test_fill_diagonal_offset_negative():
 
 def test_toeplitz_2d_matches_scipy():
     import scipy.linalg as spl
+
     c = jnp.array([1.0, 2.0, 3.0, 4.0])
     r = jnp.array([1.0, 5.0, 6.0, 7.0])
     T = toeplitz_2d(c, r)
@@ -216,13 +223,13 @@ def _fmri_like_inputs(seed=0, n_obs=400, n_conf=24, n_vox=1000):
 
 
 def test_residualise_cholesky_vs_svd_parity_at_fp64():
-    '''Verify the docstring's machine-precision-parity claim.
+    """Verify the docstring's machine-precision-parity claim.
 
     Well-conditioned random X, no ridge: Cholesky and SVD must
     agree to ~machine eps in fp64.  We allow a small slack
     (atol=1e-12) for accumulated roundoff over the projection
     matmul.
-    '''
+    """
     X, Y = _fmri_like_inputs(seed=0)
     res_chol = residualise(Y, X, method='cholesky')
     res_svd = residualise(Y, X, method='svd')
@@ -234,7 +241,7 @@ def test_residualise_cholesky_vs_svd_parity_at_fp64():
 
 
 def test_residualise_residual_orthogonal_to_regressors():
-    '''Residual must be orthogonal to the column span of X.'''
+    """Residual must be orthogonal to the column span of X."""
     X, Y = _fmri_like_inputs(seed=1)
     res = residualise(Y, X)
     # res shape: (n_vox, n_obs); X shape: (n_conf, n_obs).
@@ -244,7 +251,7 @@ def test_residualise_residual_orthogonal_to_regressors():
 
 
 def test_residualise_projection_lies_in_regressor_span():
-    '''Projection should equal the OLS prediction X @ betas.'''
+    """Projection should equal the OLS prediction X @ betas."""
     X, Y = _fmri_like_inputs(seed=2, n_vox=100)
     proj = residualise(Y, X, return_mode='projection')
     res = residualise(Y, X, return_mode='residual')
@@ -252,24 +259,31 @@ def test_residualise_projection_lies_in_regressor_span():
 
 
 def test_residualise_ridge_reduces_norm():
-    '''With a heavy ridge, betas shrink and projection -> 0.'''
+    """With a heavy ridge, betas shrink and projection -> 0."""
     X, Y = _fmri_like_inputs(seed=0, n_vox=100)
     proj_no_ridge = residualise(
-        Y, X, l2=0.0, return_mode='projection',
+        Y,
+        X,
+        l2=0.0,
+        return_mode='projection',
     )
     proj_heavy_ridge = residualise(
-        Y, X, l2=1e10, return_mode='projection',
+        Y,
+        X,
+        l2=1e10,
+        return_mode='projection',
     )
-    assert float(jnp.abs(proj_no_ridge).mean()) > float(
-        jnp.abs(proj_heavy_ridge).mean()
-    ) * 100  # heavy ridge crushes the projection
+    assert (
+        float(jnp.abs(proj_no_ridge).mean())
+        > float(jnp.abs(proj_heavy_ridge).mean()) * 100
+    )  # heavy ridge crushes the projection
 
 
 def test_residualise_weights_match_repeated_observations():
-    '''Per-observation weights with integer values must agree with
+    """Per-observation weights with integer values must agree with
     repeating each observation that many times in the unweighted
     fit -- the classic WLS / replicated-OLS equivalence.
-    '''
+    """
     rng = np.random.default_rng(0)
     n_obs, n_conf, n_vox = 50, 3, 5
     X = jnp.asarray(rng.standard_normal((n_conf, n_obs)))
@@ -280,9 +294,9 @@ def test_residualise_weights_match_repeated_observations():
 
     # Equivalent: replicate observations 2 with multiplicity 2.
     rep = jnp.array([1, 2] * (n_obs // 2))
-    rep_idx = jnp.concatenate([
-        jnp.full((int(r),), i) for i, r in enumerate(rep)
-    ])
+    rep_idx = jnp.concatenate(
+        [jnp.full((int(r),), i) for i, r in enumerate(rep)]
+    )
     X_rep = X[:, rep_idx]
     Y_rep = Y[:, rep_idx]
     res_rep = residualise(Y_rep, X_rep)
@@ -292,12 +306,14 @@ def test_residualise_weights_match_repeated_observations():
     # First find the start of each repeated obs in the replicated layout.
     starts = jnp.cumsum(jnp.concatenate([jnp.array([0]), rep[:-1]]))
     np.testing.assert_allclose(
-        res_w, res_rep[:, starts], atol=1e-9,
+        res_w,
+        res_rep[:, starts],
+        atol=1e-9,
     )
 
 
 def test_residualise_leading_batch_dims():
-    '''Leading batch dims broadcast and are vmapped internally.'''
+    """Leading batch dims broadcast and are vmapped internally."""
     rng = np.random.default_rng(0)
     B, n_obs, n_conf, n_vox = 4, 100, 5, 20
     X = jnp.asarray(rng.standard_normal((B, n_conf, n_obs)))
@@ -314,21 +330,27 @@ def test_residualise_leading_batch_dims():
 
 
 def test_residualise_rowvar_false():
-    '''rowvar=False: observation axis is penultimate.'''
+    """rowvar=False: observation axis is penultimate."""
     X, Y = _fmri_like_inputs(seed=0, n_obs=100, n_conf=4, n_vox=10)
     res_rowvar = residualise(Y, X, rowvar=True)
     res_colvar = residualise(
-        Y.swapaxes(-1, -2), X.swapaxes(-1, -2), rowvar=False,
+        Y.swapaxes(-1, -2),
+        X.swapaxes(-1, -2),
+        rowvar=False,
     )
     np.testing.assert_allclose(
-        res_rowvar, res_colvar.swapaxes(-1, -2), atol=1e-12,
+        res_rowvar,
+        res_colvar.swapaxes(-1, -2),
+        atol=1e-12,
     )
 
 
 def test_residualise_differentiable_wrt_X():
     X, Y = _fmri_like_inputs(seed=0, n_obs=50, n_conf=3, n_vox=10)
+
     def loss(X):
         return (residualise(Y, X) ** 2).sum()
+
     g = jax.grad(loss)(X)
     assert g.shape == X.shape
     assert bool(jnp.all(jnp.isfinite(g)))
@@ -336,8 +358,10 @@ def test_residualise_differentiable_wrt_X():
 
 def test_residualise_differentiable_wrt_Y():
     X, Y = _fmri_like_inputs(seed=0, n_obs=50, n_conf=3, n_vox=10)
+
     def loss(Y):
         return (residualise(Y, X) ** 2).sum()
+
     g = jax.grad(loss)(Y)
     assert g.shape == Y.shape
     assert bool(jnp.all(jnp.isfinite(g)))

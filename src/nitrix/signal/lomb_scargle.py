@@ -70,6 +70,7 @@ Scargle, J. D. (1982).  Astrophys. J. 263, 835-853.
 Press, W. H. & Rybicki, G. B. (1989).  Astrophys. J. 338, 277-280.
 Power, J. D. et al. (2014).  NeuroImage 84, 320-341.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Tuple
@@ -80,7 +81,6 @@ from jax.typing import DTypeLike
 from jaxtyping import Array, Bool, Float, Num
 
 from ..linalg._solver import safe_eigh
-
 
 __all__ = ['lomb_scargle_interpolate', 'lomb_scargle_periodogram']
 
@@ -98,7 +98,7 @@ def _trial_frequencies(
     dtype: DTypeLike,
     censoring_budget: float = 0.4,
 ) -> Float[Array, 'n_freq']:
-    '''Choose trial angular frequencies (Press-Rybicki convention).
+    """Choose trial angular frequencies (Press-Rybicki convention).
 
     Min: ``2 pi df`` with ``df = 1 / (T * oversampling)``.
     Max: ``2 pi f_max`` with ``f_max = high_factor * Nyquist``.
@@ -109,7 +109,7 @@ def _trial_frequencies(
     censoring tolerated without rank deficiency); raise the budget
     or pass a smaller ``oversampling`` if you expect heavier
     censoring.
-    '''
+    """
     T = n_obs * dt
     df = 1.0 / (T * oversampling)
     f_max = high_factor / (2.0 * dt)
@@ -128,11 +128,11 @@ def _lomb_scargle_basis(
     omega: Float[Array, 'n_freq'],
     dtype: DTypeLike,
 ) -> Float[Array, 'n_obs n_basis']:
-    '''Joint regression basis ``[DC | cos | sin]``.
+    """Joint regression basis ``[DC | cos | sin]``.
 
     Returns a ``(n_obs, 1 + 2 * n_freq)`` matrix; rows index time,
     columns index basis component.  Shared across channels.
-    '''
+    """
     t = jnp.arange(n_obs, dtype=dtype) * dt
     arg = omega[None, :] * t[:, None]
     return jnp.concatenate(
@@ -154,7 +154,7 @@ def lomb_scargle_periodogram(
     oversampling: float = 4.0,
     high_factor: float = 1.0,
 ) -> Tuple[Float[Array, 'n_freq'], Float[Array, '... n_freq']]:
-    '''Scargle 1982 normalised Lomb-Scargle periodogram.
+    """Scargle 1982 normalised Lomb-Scargle periodogram.
 
     Per-frequency power computed from the observed (non-masked)
     samples, normalised by the observed-sample variance -- the
@@ -190,13 +190,17 @@ def lomb_scargle_periodogram(
     -------
     ``(freqs, power)`` -- cyclic frequencies and per-channel
     normalised power.
-    '''
+    """
     n_obs = data.shape[-1]
     # Periodogram doesn't have a Gram-rank concern (per-frequency
     # univariates), so use a near-zero censoring budget to expose
     # the full Press-Rybicki frequency grid up to Nyquist.
     omega = _trial_frequencies(
-        n_obs, dt, oversampling, high_factor, data.dtype,
+        n_obs,
+        dt,
+        oversampling,
+        high_factor,
+        data.dtype,
         censoring_budget=0.0,
     )
     freqs = omega / (2.0 * jnp.pi)
@@ -222,7 +226,7 @@ def lomb_scargle_periodogram(
         c_norm = jnp.sum(c * c, axis=-1)
         s_norm = jnp.sum(s * s, axis=-1)
         var_y = jnp.sum(mf * (d - y_mean) ** 2) / n_valid
-        return 0.5 * (cy ** 2 / c_norm + sy ** 2 / s_norm) / var_y
+        return 0.5 * (cy**2 / c_norm + sy**2 / s_norm) / var_y
 
     fn: Callable[..., Any] = core
     for _ in range(data.ndim - 1):
@@ -241,7 +245,7 @@ def _lomb_scargle_solve_shared_mask(
     basis: Float[Array, 'n_obs K'],
     rcond: float,
 ) -> Float[Array, 'n_chan n_obs']:
-    '''Joint LS interpolation with a shared (channel-invariant) mask.
+    """Joint LS interpolation with a shared (channel-invariant) mask.
 
     Robust solver: factor the Gram via ``eigh`` (symmetric
     eigendecomposition) and apply a thresholded pseudo-inverse.
@@ -260,21 +264,21 @@ def _lomb_scargle_solve_shared_mask(
     No ``(n_chan, K, K)`` intermediate -- the Gram and its
     eigendecomposition are shared across all channels and
     computed once.
-    '''
+    """
     mf = mask.astype(data.dtype)
-    B_w = basis * mf[:, None]               # (n_obs, K)
-    G = B_w.T @ basis                       # (K, K), symmetric PSD
+    B_w = basis * mf[:, None]  # (n_obs, K)
+    G = B_w.T @ basis  # (K, K), symmetric PSD
     # Threshold-truncated pseudo-inverse via eigh.
-    ev, V = safe_eigh(G)                    # ev ascending
+    ev, V = safe_eigh(G)  # ev ascending
     # Truncate eigenvalues below the relative threshold.  The
     # max eigval is at the end; ``rcond * max`` is the floor.
     thresh = rcond * ev[-1]
     ev_inv = jnp.where(ev > thresh, 1.0 / ev, 0.0)
-    rhs = data @ B_w                        # (n_chan, K)
+    rhs = data @ B_w  # (n_chan, K)
     # betas = V @ diag(ev_inv) @ V.T @ rhs.T
-    z = V.T @ rhs.swapaxes(-1, -2)          # (K, n_chan)
+    z = V.T @ rhs.swapaxes(-1, -2)  # (K, n_chan)
     z = ev_inv[:, None] * z
-    betas = V @ z                           # (K, n_chan)
+    betas = V @ z  # (K, n_chan)
     recon = (basis @ betas).swapaxes(-1, -2)
     return jnp.where(mask, data, recon)
 
@@ -289,7 +293,7 @@ def lomb_scargle_interpolate(
     rcond: float = 1e-6,
     censoring_budget: float = 0.4,
 ) -> Num[Array, '... obs']:
-    '''Fill censored time-series frames via joint Lomb-Scargle GLM
+    """Fill censored time-series frames via joint Lomb-Scargle GLM
     spectral reconstruction.
 
     Solves a masked least-squares regression of the observed
@@ -410,7 +414,7 @@ def lomb_scargle_interpolate(
     References
     ----------
     Power, J. D. et al. (2014).  NeuroImage 84, 320-341.
-    '''
+    """
     n_obs = data.shape[-1]
 
     # Require mask to be either 1-D (n_obs,) or broadcast-compatible
@@ -451,7 +455,11 @@ def lomb_scargle_interpolate(
         )
 
     omega = _trial_frequencies(
-        n_obs, dt, oversampling, high_factor, data.dtype,
+        n_obs,
+        dt,
+        oversampling,
+        high_factor,
+        data.dtype,
         censoring_budget=censoring_budget,
     )
     basis = _lomb_scargle_basis(n_obs, dt, omega, data.dtype)
@@ -460,7 +468,10 @@ def lomb_scargle_interpolate(
     leading_shape = data.shape[:-1]
     data_2d = data.reshape((-1, n_obs)) if leading_shape else data[None, :]
     out_2d = _lomb_scargle_solve_shared_mask(
-        data_2d, mask, basis, rcond,
+        data_2d,
+        mask,
+        basis,
+        rcond,
     )
     if leading_shape:
         return out_2d.reshape(data.shape)

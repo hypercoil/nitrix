@@ -17,14 +17,13 @@ This is the morphological analogue of "ignore boundary positions"
 without needing an algebra identity (median has no identity in the
 semiring sense).
 """
+
 from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple, Union
 
-import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Num
-
 
 __all__ = ['median_filter']
 
@@ -44,7 +43,7 @@ def _normalise_size(
 
 
 def _pad_lo_hi(kspatial: Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
-    '''SAME-style ``(lo, hi)`` per spatial dim for an odd-size kernel.'''
+    """SAME-style ``(lo, hi)`` per spatial dim for an odd-size kernel."""
     return tuple(((d - 1) // 2, d - 1 - (d - 1) // 2) for d in kspatial)
 
 
@@ -55,7 +54,7 @@ def median_filter(
     structuring_element: Optional[Num[Array, '*kspatial']] = None,
     padding: str = 'SAME',
 ) -> Num[Array, '... *spatial']:
-    '''Median filter via NaN-safe gather + ``jnp.nanmedian``.
+    """Median filter via NaN-safe gather + ``jnp.nanmedian``.
 
     Parameters
     ----------
@@ -95,7 +94,7 @@ def median_filter(
     ``nitrix-perf-bench`` (it is currently perf-only; see
     ``docs/feature-requests/perf-bench-case-hardening.md``), since there is no
     bench guard against a sorting-network correctness regression.
-    '''
+    """
     if structuring_element is not None:
         se = jnp.asarray(structuring_element)
         kspatial = tuple(se.shape)
@@ -117,15 +116,17 @@ def median_filter(
         raise ValueError(
             f'x.ndim={x.ndim} too small for spatial_rank={spatial_rank}.'
         )
-    batch_shape = tuple(x.shape[:-spatial_rank]) if spatial_rank else tuple(x.shape)
-    spatial_shape = tuple(x.shape[-spatial_rank:]) if spatial_rank else ()
 
     # Pad spatial dims with NaN for SAME mode.
     if padding == 'SAME':
-        pad_widths = [(0, 0)] * (x.ndim - spatial_rank) + list(_pad_lo_hi(kspatial))
+        pad_widths = [(0, 0)] * (x.ndim - spatial_rank) + list(
+            _pad_lo_hi(kspatial)
+        )
         x_padded = jnp.pad(
             x.astype(jnp.result_type(x.dtype, jnp.float32)),
-            pad_widths, mode='constant', constant_values=jnp.nan,
+            pad_widths,
+            mode='constant',
+            constant_values=jnp.nan,
         )
     elif padding == 'VALID':
         x_padded = x.astype(jnp.result_type(x.dtype, jnp.float32))
@@ -137,7 +138,8 @@ def median_filter(
     # Gather patches: one ``jnp.take`` per spatial dim.
     out_spatial = tuple(
         x_padded.shape[-spatial_rank + d] - kspatial[d] + 1
-        if spatial_rank > 0 else 0
+        if spatial_rank > 0
+        else 0
         for d in range(spatial_rank)
     )
     patches = x_padded
@@ -151,7 +153,6 @@ def median_filter(
     # Layout now: (*batch, out_0, k_0, out_1, k_1, ..., out_r-1, k_r-1).
     # Permute to (*batch, *out, *kspatial), then median over the
     # kspatial axes.
-    out_axes = list(range(patches.ndim))
     perm = list(range(x.ndim - spatial_rank))  # batch
     for d in range(spatial_rank):
         perm.append((x.ndim - spatial_rank) + 2 * d)
@@ -166,7 +167,7 @@ def median_filter(
         # Broadcast mask over batch + out_spatial axes.
         bcast_shape = (1,) * (x.ndim) + tuple(mask.shape)
         mask_b = jnp.broadcast_to(
-            mask.reshape((1,) * (x.ndim) + tuple(mask.shape)),
+            mask.reshape(bcast_shape),
             patches.shape,
         )
         patches = jnp.where(mask_b, patches, jnp.nan)

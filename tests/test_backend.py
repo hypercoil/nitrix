@@ -1,20 +1,18 @@
 # -*- coding: utf-8 -*-
 """Tests for ``nitrix._internal.backend``: resolution and fallback observability."""
-import os
+
 import warnings
 
-import jax
 import jax.numpy as jnp
 import pytest
 
 from nitrix._internal.backend import (
     NitrixBackendError,
     NitrixBackendFallback,
-    auto_backend,
     env_backend,
     fallback,
-    resolve_backend,
     reset_fallback_state,
+    resolve_backend,
 )
 
 
@@ -69,12 +67,20 @@ def test_fallback_dedupes_per_signature():
     with warnings.catch_warnings(record=True) as ws:
         warnings.simplefilter('always')
         fallback(
-            function='op', requested='pallas-cuda', resolved='jax',
-            reason='x', shapes=((8, 8),), dtype=jnp.float32,
+            function='op',
+            requested='pallas-cuda',
+            resolved='jax',
+            reason='x',
+            shapes=((8, 8),),
+            dtype=jnp.float32,
         )
         fallback(
-            function='op', requested='pallas-cuda', resolved='jax',
-            reason='x', shapes=((16, 16),), dtype=jnp.float32,
+            function='op',
+            requested='pallas-cuda',
+            resolved='jax',
+            reason='x',
+            shapes=((16, 16),),
+            dtype=jnp.float32,
         )
         n = sum(1 for w in ws if w.category is NitrixBackendFallback)
     # Different shapes -> two distinct keys -> two warnings.
@@ -87,8 +93,12 @@ def test_fallback_silenced_by_env(monkeypatch):
     with warnings.catch_warnings(record=True) as ws:
         warnings.simplefilter('always')
         fallback(
-            function='op', requested='pallas-cuda', resolved='jax',
-            reason='silenced', shapes=((1,),), dtype=jnp.float32,
+            function='op',
+            requested='pallas-cuda',
+            resolved='jax',
+            reason='silenced',
+            shapes=((1,),),
+            dtype=jnp.float32,
         )
         n = sum(1 for w in ws if w.category is NitrixBackendFallback)
     assert n == 0
@@ -99,8 +109,12 @@ def test_strict_backend_converts_to_error(monkeypatch):
     monkeypatch.setenv('NITRIX_STRICT_BACKEND', '1')
     with pytest.raises(NitrixBackendError):
         fallback(
-            function='op', requested='pallas-cuda', resolved='jax',
-            reason='strict', shapes=((1,),), dtype=jnp.float32,
+            function='op',
+            requested='pallas-cuda',
+            resolved='jax',
+            reason='strict',
+            shapes=((1,),),
+            dtype=jnp.float32,
         )
 
 

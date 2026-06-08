@@ -16,6 +16,7 @@ Coverage:
 
 Sectioned ELL has its own coverage in ``test_ell_sectioned.py``.
 """
+
 from __future__ import annotations
 
 import jax
@@ -36,7 +37,6 @@ from nitrix.smoothing import (
     susan_emulator,
 )
 
-
 jax.config.update('jax_enable_x64', True)
 
 
@@ -49,7 +49,10 @@ def test_gaussian_1d_matches_scipy():
     x = jax.random.normal(jax.random.key(0), (32,))
     got = gaussian(x, sigma=1.5, mode='reflect')
     ref = scipy_ndi.gaussian_filter(
-        np.asarray(x), sigma=1.5, mode='reflect', truncate=4.0,
+        np.asarray(x),
+        sigma=1.5,
+        mode='reflect',
+        truncate=4.0,
     )
     np.testing.assert_allclose(got, ref, atol=1e-12)
 
@@ -58,7 +61,10 @@ def test_gaussian_2d_matches_scipy_isotropic():
     x = jax.random.normal(jax.random.key(1), (32, 32))
     got = gaussian(x, sigma=1.5, mode='reflect')
     ref = scipy_ndi.gaussian_filter(
-        np.asarray(x), sigma=1.5, mode='reflect', truncate=4.0,
+        np.asarray(x),
+        sigma=1.5,
+        mode='reflect',
+        truncate=4.0,
     )
     np.testing.assert_allclose(got, ref, atol=1e-12)
 
@@ -67,7 +73,10 @@ def test_gaussian_2d_matches_scipy_anisotropic():
     x = jax.random.normal(jax.random.key(2), (32, 32))
     got = gaussian(x, sigma=(1.0, 2.0), mode='reflect')
     ref = scipy_ndi.gaussian_filter(
-        np.asarray(x), sigma=(1.0, 2.0), mode='reflect', truncate=4.0,
+        np.asarray(x),
+        sigma=(1.0, 2.0),
+        mode='reflect',
+        truncate=4.0,
     )
     np.testing.assert_allclose(got, ref, atol=1e-12)
 
@@ -76,7 +85,10 @@ def test_gaussian_3d_matches_scipy():
     x = jax.random.normal(jax.random.key(3), (16, 16, 16))
     got = gaussian(x, sigma=1.0)
     ref = scipy_ndi.gaussian_filter(
-        np.asarray(x), sigma=1.0, mode='reflect', truncate=4.0,
+        np.asarray(x),
+        sigma=1.0,
+        mode='reflect',
+        truncate=4.0,
     )
     np.testing.assert_allclose(got, ref, atol=1e-12)
 
@@ -85,7 +97,10 @@ def test_gaussian_4d_fmri_shape_matches_scipy():
     x = jax.random.normal(jax.random.key(4), (8, 8, 8, 8))
     got = gaussian(x, sigma=0.8)
     ref = scipy_ndi.gaussian_filter(
-        np.asarray(x), sigma=0.8, mode='reflect', truncate=4.0,
+        np.asarray(x),
+        sigma=0.8,
+        mode='reflect',
+        truncate=4.0,
     )
     np.testing.assert_allclose(got, ref, atol=1e-12)
 
@@ -94,7 +109,10 @@ def test_gaussian_constant_mode_matches_scipy():
     x = jax.random.normal(jax.random.key(5), (16,))
     got = gaussian(x, sigma=1.0, mode='constant')
     ref = scipy_ndi.gaussian_filter(
-        np.asarray(x), sigma=1.0, mode='constant', truncate=4.0,
+        np.asarray(x),
+        sigma=1.0,
+        mode='constant',
+        truncate=4.0,
     )
     np.testing.assert_allclose(got, ref, atol=1e-12)
 
@@ -107,8 +125,10 @@ def test_gaussian_constant_input_preserved():
 
 def test_gaussian_differentiable():
     x = jax.random.normal(jax.random.key(6), (16, 16))
+
     def loss(x):
         return gaussian(x, sigma=1.5).sum()
+
     g = jax.grad(loss)(x)
     assert bool(jnp.all(jnp.isfinite(g)))
     assert g.shape == x.shape
@@ -132,7 +152,7 @@ def test_gaussian_rejects_unknown_mode():
 
 
 def test_gaussian_kernel_size_odd_centered():
-    '''Odd kernel_size produces a symmetric, on-grid kernel.'''
+    """Odd kernel_size produces a symmetric, on-grid kernel."""
     x = jax.random.normal(jax.random.key(0), (8, 8))
     out = gaussian(x, sigma=1.0, kernel_size=5)
     assert out.shape == x.shape
@@ -144,14 +164,14 @@ def test_gaussian_kernel_size_odd_centered():
 
 
 def test_gaussian_kernel_size_even_half_pixel_shift():
-    '''Even kernel_size produces a half-pixel-shifted output.
+    """Even kernel_size produces a half-pixel-shifted output.
 
     For input [0, 1, 2, 3, 4] with kernel_size=2 and a near-flat
     Gaussian (large sigma -> weights ~ [0.5, 0.5]), the output at
     index i is approximately (x[i] + x[i+1]) / 2 -- shifted by
     half a pixel.  At the right boundary, edge replication kicks
     in: result[-1] ~= (x[-1] + x[-1]) / 2 = x[-1].
-    '''
+    """
     x = jnp.arange(5, dtype=jnp.float64)
     out = gaussian(x, sigma=1000.0, kernel_size=2)  # uniform weights
     expected = jnp.array([0.5, 1.5, 2.5, 3.5, 4.0])  # last is replicated
@@ -159,32 +179,36 @@ def test_gaussian_kernel_size_even_half_pixel_shift():
 
 
 def test_gaussian_kernel_size_2_sigma_0p7_josa_kernel():
-    '''Specific JOSA NJF case: kernel_size=2, sigma=0.7.
+    """Specific JOSA NJF case: kernel_size=2, sigma=0.7.
 
     With taps at -0.5 / +0.5, the Gaussian weights at sigma=0.7
     are equal: exp(-0.5 * (0.5 / 0.7)**2) for both taps.  After
     normalisation, kernel = [0.5, 0.5].
-    '''
+    """
     from nitrix.smoothing.gaussian import _gaussian_1d_kernel
+
     k = _gaussian_1d_kernel(0.7, 4.0, jnp.float64, kernel_size=2)
     np.testing.assert_allclose(np.asarray(k), [0.5, 0.5], atol=1e-12)
 
 
 def test_gaussian_per_axis_kernel_size():
-    '''Per-axis kernel_size sequence; None entries use the heuristic.'''
+    """Per-axis kernel_size sequence; None entries use the heuristic."""
     x = jax.random.normal(jax.random.key(0), (8, 8, 8))
     out = gaussian(x, sigma=(1.0, 0.7, 1.5), kernel_size=(3, 2, None))
     assert out.shape == x.shape
 
 
 def test_gaussian_kernel_size_default_matches_truncate():
-    '''kernel_size=None reproduces the prior truncate-based behaviour
+    """kernel_size=None reproduces the prior truncate-based behaviour
     exactly -- regression check that we didn't change the default.
-    '''
+    """
     x = jax.random.normal(jax.random.key(0), (16,))
     out_default = gaussian(x, sigma=1.5, truncate=4.0)
     out_explicit_none = gaussian(
-        x, sigma=1.5, truncate=4.0, kernel_size=None,
+        x,
+        sigma=1.5,
+        truncate=4.0,
+        kernel_size=None,
     )
     np.testing.assert_array_equal(out_default, out_explicit_none)
 
@@ -201,10 +225,10 @@ def test_gaussian_kernel_size_rejects_zero():
 
 
 def _bilateral_reference(values, features, sigma_features, k):
-    '''Direct hand-coded bilateral over feature-space k-NN.
+    """Direct hand-coded bilateral over feature-space k-NN.
 
     Used as ground truth for the JAX implementation.
-    '''
+    """
     n = values.shape[0]
     out = np.zeros_like(np.asarray(values))
     feats = np.asarray(features)
@@ -213,7 +237,7 @@ def _bilateral_reference(values, features, sigma_features, k):
     for i in range(n):
         # Distances to all other points in rescaled feature space.
         diff = (feats[i] - feats) / sf
-        d2 = (diff ** 2).sum(axis=-1)
+        d2 = (diff**2).sum(axis=-1)
         # k nearest
         idx = np.argpartition(d2, k - 1)[:k]
         w = np.exp(-0.5 * d2[idx])
@@ -228,8 +252,10 @@ def test_bilateral_matches_handwritten_reference():
     features = jax.random.normal(jax.random.key(21), (n, 3))
     sigma = jnp.array([1.0, 1.0, 1.5])
     got = bilateral_gaussian(
-        values, features,
-        metric=DiagonalMetric(sigma), neighbourhood=5,
+        values,
+        features,
+        metric=DiagonalMetric(sigma),
+        neighbourhood=5,
         backend='jax',
     )
     ref = _bilateral_reference(values, features, sigma, k=5)
@@ -237,16 +263,21 @@ def test_bilateral_matches_handwritten_reference():
 
 
 def test_bilateral_preserves_step_edge():
-    '''A step image should retain its contrast under bilateral with
+    """A step image should retain its contrast under bilateral with
     small sigma_intensity; gaussian with the same sigma_space would
     not.
-    '''
+    """
     step = jnp.where(
-        jnp.arange(16)[None, :] < 8, 0.0, 5.0,
+        jnp.arange(16)[None, :] < 8,
+        0.0,
+        5.0,
     ).astype(jnp.float64)
     step_2d = jnp.broadcast_to(step, (16, 16))
     out = susan_emulator(
-        step_2d, sigma_space=2.0, sigma_intensity=0.5, use_median=False,
+        step_2d,
+        sigma_space=2.0,
+        sigma_intensity=0.5,
+        use_median=False,
     )
     out_gauss = gaussian(step_2d, sigma=2.0)
     # At the edge boundary (columns 7-8), bilateral should preserve
@@ -256,22 +287,23 @@ def test_bilateral_preserves_step_edge():
     assert edge_bilat > edge_gauss
     # Bilateral with small sigma_intensity should preserve the step
     # almost exactly.
-    assert edge_bilat > 4.9   # original step was 5.0
+    assert edge_bilat > 4.9  # original step was 5.0
 
 
 def test_bilateral_approaches_gaussian_at_large_sigma_intensity():
-    '''In the limit ``sigma_intensity -> infinity``, the intensity
+    """In the limit ``sigma_intensity -> infinity``, the intensity
     contribution to the weights vanishes and bilateral reduces to
     a spatial Gaussian.
-    '''
+    """
     n = 32
     spatial = jnp.arange(n, dtype=jnp.float64)[:, None]
     intensity = jnp.sin(spatial * 0.5)
     features = jnp.concatenate([spatial, intensity], axis=-1)
-    values = intensity   # smooth intensity itself
+    values = intensity  # smooth intensity itself
     sigma_huge = jnp.array([1.0, 1e6])
     out_bilateral = bilateral_gaussian(
-        values, features,
+        values,
+        features,
         metric=DiagonalMetric(sigma_huge),
         neighbourhood=7,
         backend='jax',
@@ -279,35 +311,49 @@ def test_bilateral_approaches_gaussian_at_large_sigma_intensity():
     # Compare interior to a 7-tap normalised spatial Gaussian.
     half = 3
     xs = jnp.arange(-half, half + 1, dtype=jnp.float64)
-    g_kernel = jnp.exp(-0.5 * xs ** 2)
+    g_kernel = jnp.exp(-0.5 * xs**2)
     g_kernel = g_kernel / g_kernel.sum()
-    ref = jnp.array([
-        sum(
-            g_kernel[k] * values[max(0, min(n - 1, i + k - half))][0]
-            for k in range(2 * half + 1)
-        )
-        for i in range(n)
-    ])
+    ref = jnp.array(
+        [
+            sum(
+                g_kernel[k] * values[max(0, min(n - 1, i + k - half))][0]
+                for k in range(2 * half + 1)
+            )
+            for i in range(n)
+        ]
+    )
     interior = slice(half + 1, -(half + 1))
     np.testing.assert_allclose(
-        out_bilateral[interior, 0], ref[interior], atol=1e-12,
+        out_bilateral[interior, 0],
+        ref[interior],
+        atol=1e-12,
     )
 
 
 def test_bilateral_explicit_adjacency():
-    '''Pre-computed adjacency: the user supplies (n, k_max) indices.'''
+    """Pre-computed adjacency: the user supplies (n, k_max) indices."""
     n = 8
     values = jax.random.normal(jax.random.key(30), (n, 1))
     features = jnp.arange(n, dtype=jnp.float64)[:, None]
     sigma = jnp.array([1.0])
     # Adjacency: each point's two nearest neighbours, hand-built.
-    adj = jnp.array([
-        [0, 1], [0, 1], [1, 2], [2, 3],
-        [3, 4], [4, 5], [5, 6], [6, 7],
-    ])
+    adj = jnp.array(
+        [
+            [0, 1],
+            [0, 1],
+            [1, 2],
+            [2, 3],
+            [3, 4],
+            [4, 5],
+            [5, 6],
+            [6, 7],
+        ]
+    )
     got = bilateral_gaussian(
-        values, features,
-        metric=DiagonalMetric(sigma), neighbourhood=adj,
+        values,
+        features,
+        metric=DiagonalMetric(sigma),
+        neighbourhood=adj,
         backend='jax',
     )
     assert got.shape == (n, 1)
@@ -319,12 +365,16 @@ def test_bilateral_differentiable():
     values = jax.random.normal(jax.random.key(40), (n, 1))
     features = jax.random.normal(jax.random.key(41), (n, 2))
     sigma = jnp.array([1.0, 1.0])
+
     def loss(values):
         return bilateral_gaussian(
-            values, features,
-            metric=DiagonalMetric(sigma), neighbourhood=4,
+            values,
+            features,
+            metric=DiagonalMetric(sigma),
+            neighbourhood=4,
             backend='jax',
         ).sum()
+
     g = jax.grad(loss)(values)
     assert bool(jnp.all(jnp.isfinite(g)))
 
@@ -335,14 +385,16 @@ def test_bilateral_rejects_mismatched_n():
     sigma = jnp.ones(3)
     with pytest.raises(ValueError, match='n='):
         bilateral_gaussian(
-            values, features,
-            metric=DiagonalMetric(sigma), neighbourhood=2,
+            values,
+            features,
+            metric=DiagonalMetric(sigma),
+            neighbourhood=2,
             backend='jax',
         )
 
 
 def test_brute_force_knn_self_first():
-    '''A point should always be its own nearest neighbour.'''
+    """A point should always be its own nearest neighbour."""
     features = jax.random.normal(jax.random.key(50), (10, 3))
     idx = brute_force_knn(features, k=3)
     # Each row's first index (sorted by ascending distance, distance
@@ -356,25 +408,30 @@ def test_brute_force_knn_self_first():
 
 
 def test_bilateral_diagonal_equals_factor_diag():
-    '''DiagonalMetric(sigma) == FactorMetric(diag(1/sigma)).'''
+    """DiagonalMetric(sigma) == FactorMetric(diag(1/sigma))."""
     n = 16
     values = jax.random.normal(jax.random.key(70), (n, 2))
     features = jax.random.normal(jax.random.key(71), (n, 3))
     sigma = jnp.array([1.0, 2.0, 0.5])
     out_diag = bilateral_gaussian(
-        values, features,
-        metric=DiagonalMetric(sigma), neighbourhood=5, backend='jax',
+        values,
+        features,
+        metric=DiagonalMetric(sigma),
+        neighbourhood=5,
+        backend='jax',
     )
     out_factor = bilateral_gaussian(
-        values, features,
+        values,
+        features,
         metric=FactorMetric(jnp.diag(1.0 / sigma)),
-        neighbourhood=5, backend='jax',
+        neighbourhood=5,
+        backend='jax',
     )
     np.testing.assert_allclose(out_diag, out_factor, atol=1e-12)
 
 
 def test_bilateral_full_factor_matches_dense_quadratic():
-    '''A full FactorMetric weights by exp(-1/2 d^T M d), M = L L^T.'''
+    """A full FactorMetric weights by exp(-1/2 d^T M d), M = L L^T."""
     n = 12
     values = jax.random.normal(jax.random.key(72), (n, 1))
     features = jax.random.normal(jax.random.key(73), (n, 3))
@@ -384,8 +441,11 @@ def test_bilateral_full_factor_matches_dense_quadratic():
     # Explicit (n, k_max) adjacency so the reference shares it.
     adj = brute_force_knn(features, 4)
     got = bilateral_gaussian(
-        values, features,
-        metric=FactorMetric(L), neighbourhood=adj, backend='jax',
+        values,
+        features,
+        metric=FactorMetric(L),
+        neighbourhood=adj,
+        backend='jax',
     )
     # Direct reference using the dense quadratic form.
     f = np.asarray(features)
@@ -403,15 +463,18 @@ def test_bilateral_full_factor_matches_dense_quadratic():
 
 
 def test_bilateral_low_rank_factor_projects():
-    '''A low-rank factor (k < d_f) costs like its rank: q uses L only.'''
+    """A low-rank factor (k < d_f) costs like its rank: q uses L only."""
     n = 10
     values = jax.random.normal(jax.random.key(75), (n, 1))
     features = jax.random.normal(jax.random.key(76), (n, 4))
     L = jax.random.normal(jax.random.key(77), (4, 2))  # rank-2 metric
     adj = brute_force_knn(features, 4)
     got = bilateral_gaussian(
-        values, features,
-        metric=FactorMetric(L), neighbourhood=adj, backend='jax',
+        values,
+        features,
+        metric=FactorMetric(L),
+        neighbourhood=adj,
+        backend='jax',
     )
     f = np.asarray(features)
     v = np.asarray(values)
@@ -419,37 +482,47 @@ def test_bilateral_low_rank_factor_projects():
     Lnp = np.asarray(L)
     ref = np.zeros_like(v)
     for i in range(n):
-        z = (f[i] - f[idx[i]]) @ Lnp        # (k_max, 2)
-        w = np.exp(-0.5 * (z ** 2).sum(-1))
+        z = (f[i] - f[idx[i]]) @ Lnp  # (k_max, 2)
+        w = np.exp(-0.5 * (z**2).sum(-1))
         w = w / w.sum()
         ref[i] = (w[:, None] * v[idx[i]]).sum(0)
     np.testing.assert_allclose(got, ref, atol=1e-10)
 
 
 def test_bilateral_mask_nulls_padding_no_double_count():
-    '''A validity mask removes the double-count of repeated/padded
+    """A validity mask removes the double-count of repeated/padded
     neighbour indices.  Without the mask, a duplicated index is
     weighted twice; with it, the duplicate contributes nothing.
-    '''
+    """
     n = 5
     values = jnp.arange(n, dtype=jnp.float64)[:, None]
     features = jnp.arange(n, dtype=jnp.float64)[:, None]
     metric = DiagonalMetric(jnp.array([1.0]))
     # Row 0 lists neighbour 1 twice (a padded duplicate) and 0 once.
     adj = jnp.array([[0, 1, 1], [1, 2, 2], [2, 3, 3], [3, 4, 4], [4, 4, 4]])
-    mask = jnp.array([
-        [True, True, False],
-        [True, True, False],
-        [True, True, False],
-        [True, True, False],
-        [True, False, False],
-    ])
+    mask = jnp.array(
+        [
+            [True, True, False],
+            [True, True, False],
+            [True, True, False],
+            [True, True, False],
+            [True, False, False],
+        ]
+    )
     masked = bilateral_gaussian(
-        values, features, metric=metric, neighbourhood=adj, mask=mask,
+        values,
+        features,
+        metric=metric,
+        neighbourhood=adj,
+        mask=mask,
         backend='jax',
     )
     unmasked = bilateral_gaussian(
-        values, features, metric=metric, neighbourhood=adj, backend='jax',
+        values,
+        features,
+        metric=metric,
+        neighbourhood=adj,
+        backend='jax',
     )
     # Row 0 masked: neighbours {0, 1}, weights exp(0), exp(-0.5).
     w0, w1 = np.exp(0.0), np.exp(-0.5)
@@ -460,20 +533,24 @@ def test_bilateral_mask_nulls_padding_no_double_count():
 
 
 def test_bilateral_ell_neighbourhood_derives_mask():
-    '''An ELL neighbourhood derives its validity mask from padding,
+    """An ELL neighbourhood derives its validity mask from padding,
     so a ragged mesh k-ring (pentagons have lower degree) is handled
     correctly with no caller bookkeeping.
-    '''
+    """
     from nitrix.sparse.mesh import icosphere, mesh_k_ring_adjacency
 
-    mesh = icosphere(1)                       # 42 vertices, 12 pentagons
+    mesh = icosphere(1)  # 42 vertices, 12 pentagons
     n = mesh.n_vertices
     ell = mesh_k_ring_adjacency(mesh, k=1, include_self=True)
     features = mesh.vertices.astype(jnp.float64)
     values = jax.random.normal(jax.random.key(78), (n, 1))
     metric = DiagonalMetric(jnp.full((3,), 0.5))
     got = bilateral_gaussian(
-        values, features, metric=metric, neighbourhood=ell, backend='jax',
+        values,
+        features,
+        metric=metric,
+        neighbourhood=ell,
+        backend='jax',
     )
     # Reference honouring the ELL's validity mask.
     idx = np.asarray(ell.indices)
@@ -490,9 +567,9 @@ def test_bilateral_ell_neighbourhood_derives_mask():
 
 
 def test_bilateral_n_iters_matches_manual_reapply():
-    '''n_iters=t equals t manual single-pass re-applications (fixed
+    """n_iters=t equals t manual single-pass re-applications (fixed
     affinity: features and weights are held constant).
-    '''
+    """
     n = 20
     values = jax.random.normal(jax.random.key(79), (n, 2))
     features = jax.random.normal(jax.random.key(80), (n, 2))
@@ -501,12 +578,20 @@ def test_bilateral_n_iters_matches_manual_reapply():
 
     def step(x):
         return bilateral_gaussian(
-            x, features, metric=metric, neighbourhood=adj, backend='jax',
+            x,
+            features,
+            metric=metric,
+            neighbourhood=adj,
+            backend='jax',
         )
 
     iterated = bilateral_gaussian(
-        values, features, metric=metric, neighbourhood=adj,
-        n_iters=3, backend='jax',
+        values,
+        features,
+        metric=metric,
+        neighbourhood=adj,
+        n_iters=3,
+        backend='jax',
     )
     manual = step(step(step(values)))
     np.testing.assert_allclose(iterated, manual, atol=1e-12)
@@ -517,16 +602,19 @@ def test_bilateral_n_iters_rejects_zero():
     features = jnp.zeros((4, 1))
     with pytest.raises(ValueError, match='n_iters'):
         bilateral_gaussian(
-            values, features,
+            values,
+            features,
             metric=DiagonalMetric(jnp.array([1.0])),
-            neighbourhood=2, n_iters=0, backend='jax',
+            neighbourhood=2,
+            n_iters=0,
+            backend='jax',
         )
 
 
 def test_bilateral_grad_wrt_metric_factor():
-    '''The smoothed output is differentiable w.r.t. the metric factor
+    """The smoothed output is differentiable w.r.t. the metric factor
     L (so the metric is learnable end-to-end).
-    '''
+    """
     n = 12
     values = jax.random.normal(jax.random.key(81), (n, 1))
     features = jax.random.normal(jax.random.key(82), (n, 3))
@@ -534,10 +622,13 @@ def test_bilateral_grad_wrt_metric_factor():
 
     def loss(L):
         out = bilateral_gaussian(
-            values, features,
-            metric=FactorMetric(L), neighbourhood=adj, backend='jax',
+            values,
+            features,
+            metric=FactorMetric(L),
+            neighbourhood=adj,
+            backend='jax',
         )
-        return (out ** 2).sum()
+        return (out**2).sum()
 
     L0 = jnp.eye(3) * 0.8
     g = jax.grad(loss)(L0)
@@ -547,11 +638,13 @@ def test_bilateral_grad_wrt_metric_factor():
     eps = 1e-4
     dL = jnp.zeros((3, 3)).at[0, 1].set(eps)
     num = (loss(L0 + dL) - loss(L0 - dL)) / (2 * eps)
-    np.testing.assert_allclose(float(g[0, 1]), float(num), rtol=1e-3, atol=1e-5)
+    np.testing.assert_allclose(
+        float(g[0, 1]), float(num), rtol=1e-3, atol=1e-5
+    )
 
 
 def test_metric_from_spd_and_block_diagonal():
-    '''Constructor helpers: Cholesky factor and block-diagonal assembly.'''
+    """Constructor helpers: Cholesky factor and block-diagonal assembly."""
     a = jax.random.normal(jax.random.key(83), (3, 3))
     M = a @ a.T + 2.0 * jnp.eye(3)
     fm = metric_from_spd(M)
@@ -600,10 +693,16 @@ def test_susan_emulator_with_median_prepass():
     img = img.at[3, 3].set(100.0)
     img = img.at[5, 5].set(-100.0)
     out_no_med = susan_emulator(
-        img, sigma_space=1.0, sigma_intensity=10.0, use_median=False,
+        img,
+        sigma_space=1.0,
+        sigma_intensity=10.0,
+        use_median=False,
     )
     out_med = susan_emulator(
-        img, sigma_space=1.0, sigma_intensity=10.0, use_median=True,
+        img,
+        sigma_space=1.0,
+        sigma_intensity=10.0,
+        use_median=True,
     )
     # The impulse-noise positions should be more attenuated under
     # use_median than without.
@@ -612,24 +711,26 @@ def test_susan_emulator_with_median_prepass():
 
 
 def test_permutohedral_lattice_symbol_retired():
-    '''Permutohedral was retired in SPEC_UPDATE_v0.4; the bounded
+    """Permutohedral was retired in SPEC_UPDATE_v0.4; the bounded
     bilateral (``bilateral_gaussian`` + factored metric / mask /
     ``n_iters``) supersedes it.  The symbol no longer exists.
     See docs/design/bounded-bilateral.md.
-    '''
+    """
     import nitrix.smoothing as smoothing
+
     assert not hasattr(smoothing, 'permutohedral_lattice')
     with pytest.raises(ImportError):
         from nitrix.smoothing import permutohedral_lattice  # noqa: F401
 
 
 def test_susan_emulator_canonical_home_is_smoothing():
-    '''SUSAN lives in ``nitrix.smoothing`` per SPEC_UPDATE §3.3.
+    """SUSAN lives in ``nitrix.smoothing`` per SPEC_UPDATE §3.3.
 
     It is *not* re-exported from ``nitrix.morphology`` to avoid a
     circular import with ``median_filter``; users should import it
     from ``nitrix.smoothing``.
-    '''
+    """
     from nitrix import morphology, smoothing
+
     assert hasattr(smoothing, 'susan_emulator')
     assert not hasattr(morphology, 'susan_emulator')

@@ -73,7 +73,7 @@ def _cpu_device() -> jax.Device:
 
 
 def _is_cusolver_failure(exc: BaseException) -> bool:
-    '''Whether ``exc`` is the broken-cuSolver-handle failure (vs a real error).'''
+    """Whether ``exc`` is the broken-cuSolver-handle failure (vs a real error)."""
     msg = str(exc).lower()
     return any(
         tok in msg
@@ -82,7 +82,7 @@ def _is_cusolver_failure(exc: BaseException) -> bool:
 
 
 def _latch_eigh_cpu() -> None:
-    '''Latch the eigh device to CPU after an observed cuSolver failure.'''
+    """Latch the eigh device to CPU after an observed cuSolver failure."""
     global _eigh_cpu_latched
     _eigh_cpu_latched = True
     _probe_eigh_device.cache_clear()
@@ -90,7 +90,7 @@ def _latch_eigh_cpu() -> None:
 
 @functools.lru_cache(maxsize=1)
 def _probe_eigh_device() -> jax.Device:
-    '''One-shot 2x2 GPU eigh probe (cheap; the happy-path device pick).'''
+    """One-shot 2x2 GPU eigh probe (cheap; the happy-path device pick)."""
     try:
         probe = jnp.eye(2, dtype=jnp.float32)
         out = jnp.linalg.eigh(probe)
@@ -101,7 +101,7 @@ def _probe_eigh_device() -> jax.Device:
 
 
 def eigh_device() -> jax.Device:
-    '''Pick a device where dense ``eigh`` works.
+    """Pick a device where dense ``eigh`` works.
 
     Returns ``jax.devices()[0]`` if a 2x2 GPU eigh probe succeeds; otherwise
     (or once a real eigh has been observed to fail on the GPU at call time --
@@ -112,31 +112,31 @@ def eigh_device() -> jax.Device:
     Use ``solver_device()`` if you want the same verdict applied to a
     different solver (e.g. LOBPCG / QR / Cholesky, which share the cuSolver
     handle pool on broken stacks).
-    '''
+    """
     if _eigh_cpu_latched:
         return _cpu_device()
     return _probe_eigh_device()
 
 
 def solver_device() -> jax.Device:
-    '''Pick the device for matrix-free iterative solvers (LOBPCG, etc.).
+    """Pick the device for matrix-free iterative solvers (LOBPCG, etc.).
 
     Internally calls cuSolver-backed QR / Cholesky, so it shares
     ``eigh_device()``'s verdict.
-    '''
+    """
     return eigh_device()
 
 
 @functools.lru_cache(maxsize=1)
 def inv_device() -> jax.Device:
-    '''Pick a device where dense ``inv`` / ``solve`` works.
+    """Pick a device where dense ``inv`` / ``solve`` works.
 
     Probes a 2x2 GPU ``inv`` (cuSolver ``getrf`` / ``getri``).  On the
     runners documented above only ``eigh`` / ``qr`` are broken, but some
     stacks (and this repo's current CI box) also break ``getrf``; the
     per-op probe routes ``inv`` to CPU exactly when it must.  Cached so the
     probe runs at most once per process.
-    '''
+    """
     try:
         probe = jnp.eye(2, dtype=jnp.float32)
         out = jnp.linalg.inv(probe)
@@ -148,12 +148,12 @@ def inv_device() -> jax.Device:
 
 
 def device_of_concrete(arr: Any) -> Optional[jax.Device]:
-    '''Return the device of a concrete array, or ``None`` for tracers.
+    """Return the device of a concrete array, or ``None`` for tracers.
 
     ``arr.devices()`` raises ``ConcretizationTypeError`` inside a
     JAX trace; we treat tracers as "no fixed device" so the caller
     can let JAX abstract evaluation handle dispatch.
-    '''
+    """
     if not hasattr(arr, 'devices'):
         return None
     try:
@@ -164,11 +164,11 @@ def device_of_concrete(arr: Any) -> Optional[jax.Device]:
 
 
 def source_device(tree: Any) -> Optional[jax.Device]:
-    '''The "originating" device for a tree of arrays.
+    """The "originating" device for a tree of arrays.
 
     If all leaves share a device, return it.  If multiple, return
     the first found.  ``None`` if no concrete-array leaves.
-    '''
+    """
     leaves = jax.tree_util.tree_leaves(tree)
     devs = set()
     for leaf in leaves:
@@ -186,7 +186,7 @@ def source_device(tree: Any) -> Optional[jax.Device]:
 def safe_eigh(
     A: Float[Array, '... n n'],
 ) -> Tuple[Float[Array, '... n'], Float[Array, '... n n']]:
-    '''``jnp.linalg.eigh`` with the cuSolver-robust, adaptive device pick.
+    """``jnp.linalg.eigh`` with the cuSolver-robust, adaptive device pick.
 
     Pins the eigh to a device where it works (per ``eigh_device()``), routing
     it there even under trace (so it works under ``jax.grad`` where the input
@@ -211,7 +211,7 @@ def safe_eigh(
     Returns
     -------
     ``(eigenvalues, eigenvectors)`` per ``jnp.linalg.eigh``.
-    '''
+    """
     target = eigh_device()
     source = device_of_concrete(A)
     A_dev = jax.device_put(A, target)
@@ -238,7 +238,7 @@ def safe_eigh(
 def safe_inv(
     A: Float[Array, '... n n'],
 ) -> Float[Array, '... n n']:
-    '''``jnp.linalg.inv`` with the cuSolver-robust device pick.
+    """``jnp.linalg.inv`` with the cuSolver-robust device pick.
 
     Mirrors ``safe_eigh``: pins the inverse to a device where ``getrf`` /
     ``getri`` works (CPU on the affected stacks), then moves the result
@@ -246,7 +246,7 @@ def safe_inv(
     Used for the small, regularised (SPD) control-lattice Gram inverse in
     ``nitrix.bias`` -- computed once per fitting level, so the CPU round
     trip (if any) is negligible against the GPU matmuls it feeds.
-    '''
+    """
     target = inv_device()
     source = device_of_concrete(A)
     A_dev = jax.device_put(A, target)

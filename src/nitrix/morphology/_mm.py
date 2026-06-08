@@ -20,6 +20,7 @@ Convention -- matches ``scipy.ndimage.grey_dilation`` /
 For a flat (all-zero) structuring element, dilation and erosion
 reduce to local-max / local-min sliding-window reductions.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional, Sequence, Union, cast
@@ -60,14 +61,14 @@ def _resolve_structuring_element(
     spatial_rank: int,
     dtype: DTypeLike,
 ) -> Num[Array, '*kspatial']:
-    '''Return a structuring element of the right rank and dtype.
+    """Return a structuring element of the right rank and dtype.
 
     If ``structuring_element`` is given, it is used directly (after a
     rank check).  Otherwise ``size`` is interpreted as the side
     length of a flat (all-zero) hyper-rectangular structuring
     element; an ``int`` becomes ``(size,) * spatial_rank``.  If
     neither is given, defaults to a ``3``-cube.
-    '''
+    """
     if structuring_element is not None:
         se = jnp.asarray(structuring_element, dtype=dtype)
         if se.ndim != spatial_rank:
@@ -98,22 +99,23 @@ def _conv_wrap(
     padding: str,
     backend: Backend,
 ) -> Num[Array, '... *spatial']:
-    '''Run ``semiring_conv`` on a single-channel input.
+    """Run ``semiring_conv`` on a single-channel input.
 
     Adds the trailing ``c_in = 1`` to ``x``, expands the structuring
     element ``se: (*kspatial,)`` to ``k: (*kspatial, 1, 1)``, calls
     ``semiring_conv``, and squeezes the trailing dim of the output.
-    '''
+    """
     spatial_rank = se.ndim
     if x.ndim < spatial_rank:
         raise ValueError(
             f'x.ndim={x.ndim} too small for spatial_rank={spatial_rank}; '
             'morphology API expects (..., *spatial) inputs.'
         )
-    x_c = x[..., None]                          # (..., *spatial, 1)
-    k = se.reshape(se.shape + (1, 1))           # (*kspatial, 1, 1)
+    x_c = x[..., None]  # (..., *spatial, 1)
+    k = se.reshape(se.shape + (1, 1))  # (*kspatial, 1, 1)
     out = semiring_conv(
-        x_c, k,
+        x_c,
+        k,
         semiring=semiring,
         padding=padding,
         backend=backend,
@@ -122,7 +124,7 @@ def _conv_wrap(
 
 
 def _to_float(x: Num[Array, '...']) -> Float[Array, '...']:
-    '''Lift integer / boolean inputs to ``float32``; pass floating dtypes through.
+    """Lift integer / boolean inputs to ``float32``; pass floating dtypes through.
 
     Grayscale morphology is real-valued: the flat-path window identity is the
     tropical ``-inf`` / ``+inf`` (``TROPICAL_MAX_PLUS`` / ``TROPICAL_MIN_PLUS``),
@@ -132,7 +134,7 @@ def _to_float(x: Num[Array, '...']) -> Float[Array, '...']:
     well-defined, and avoids the ``-inf -> int`` overflow an integer input would
     otherwise hit.  Floating inputs (``float16`` / ``float32`` / ``float64``)
     are returned unchanged.
-    '''
+    """
     arr = jnp.asarray(x)
     if jnp.issubdtype(arr.dtype, jnp.floating):
         return arr
@@ -147,7 +149,7 @@ def _windowed_reduce(
     identity: float,
     padding: str,
 ) -> Float[Array, '... *spatial']:
-    '''Flat-structuring-element dilation / erosion as a fused reduce-window.
+    """Flat-structuring-element dilation / erosion as a fused reduce-window.
 
     For a flat (all-zero) structuring element, dilation reduces to a sliding-
     window max and erosion to a sliding-window min -- which ``lax.reduce_window``
@@ -168,13 +170,21 @@ def _windowed_reduce(
     ``core.is_concrete``, so detection falls back to the generic
     ``reduce_window_p``, whose missing transpose rule breaks ``jit(grad(...))``.
     (B19.)
-    '''
+    """
     window = (1,) * (x.ndim - spatial_rank) + tuple(box)
     strides = (1,) * x.ndim
     # ``lax.reduce_window`` is typed as returning Any; restore the array type.
-    return cast(Float[Array, '...'], lax.reduce_window(
-        x, np.asarray(identity, x.dtype), reducer, window, strides, padding,
-    ))
+    return cast(
+        Float[Array, '...'],
+        lax.reduce_window(
+            x,
+            np.asarray(identity, x.dtype),
+            reducer,
+            window,
+            strides,
+            padding,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +200,7 @@ def dilate(
     padding: str = 'SAME',
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial']:
-    '''Grayscale dilation: ``out[i] = max_p ( x[i + p] + se[p] )``.
+    """Grayscale dilation: ``out[i] = max_p ( x[i + p] + se[p] )``.
 
     For a flat (all-zero) structuring element this reduces to a
     sliding-window max -- the most common case.  For a non-trivial
@@ -251,7 +261,7 @@ def dilate(
     Returns
     -------
     Array of the same shape as ``x`` (for ``padding="SAME"``).
-    '''
+    """
     # Grayscale morphology is real-valued; lift int/bool to float so the flat
     # path's ``-inf`` identity is representable and both paths share one dtype
     # contract (no-op for floating inputs).
@@ -266,16 +276,24 @@ def dilate(
         # Default: all of x's dims are spatial.
         spatial_rank = x.ndim
     se = _resolve_structuring_element(
-        structuring_element, size, spatial_rank, x.dtype,
+        structuring_element,
+        size,
+        spatial_rank,
+        x.dtype,
     )
     if structuring_element is None:
         # Flat box (the common case): a fused sliding-window max.
         return _windowed_reduce(
-            x, se.shape, spatial_rank, lax.max,
-            TROPICAL_MAX_PLUS.identity, padding,
+            x,
+            se.shape,
+            spatial_rank,
+            lax.max,
+            TROPICAL_MAX_PLUS.identity,
+            padding,
         )
     return _conv_wrap(
-        x, se,
+        x,
+        se,
         semiring=TROPICAL_MAX_PLUS,
         padding=padding,
         backend=backend,
@@ -290,14 +308,14 @@ def erode(
     padding: str = 'SAME',
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial']:
-    '''Grayscale erosion: ``out[i] = min_p ( x[i + p] - se[p] )``.
+    """Grayscale erosion: ``out[i] = min_p ( x[i + p] - se[p] )``.
 
     Implemented as ``semiring_conv`` with ``TROPICAL_MIN_PLUS`` and
     the negated structuring element so the algebra's ``+`` produces
     the conventional ``-``.
 
     Args / Returns: see ``dilate``.
-    '''
+    """
     x = _to_float(x)
     if structuring_element is not None:
         spatial_rank = jnp.asarray(structuring_element).ndim
@@ -306,16 +324,24 @@ def erode(
     else:
         spatial_rank = x.ndim
     se = _resolve_structuring_element(
-        structuring_element, size, spatial_rank, x.dtype,
+        structuring_element,
+        size,
+        spatial_rank,
+        x.dtype,
     )
     if structuring_element is None:
         # Flat box (the common case): a fused sliding-window min.
         return _windowed_reduce(
-            x, se.shape, spatial_rank, lax.min,
-            TROPICAL_MIN_PLUS.identity, padding,
+            x,
+            se.shape,
+            spatial_rank,
+            lax.min,
+            TROPICAL_MIN_PLUS.identity,
+            padding,
         )
     return _conv_wrap(
-        x, -se,
+        x,
+        -se,
         semiring=TROPICAL_MIN_PLUS,
         padding=padding,
         backend=backend,
@@ -330,19 +356,23 @@ def open(
     padding: str = 'SAME',
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial']:
-    '''Morphological opening: ``dilate(erode(x))``.
+    """Morphological opening: ``dilate(erode(x))``.
 
     Removes small bright structures, preserves overall shape.
-    '''
+    """
     eroded = erode(
         x,
         structuring_element=structuring_element,
-        size=size, padding=padding, backend=backend,
+        size=size,
+        padding=padding,
+        backend=backend,
     )
     return dilate(
         eroded,
         structuring_element=structuring_element,
-        size=size, padding=padding, backend=backend,
+        size=size,
+        padding=padding,
+        backend=backend,
     )
 
 
@@ -354,19 +384,23 @@ def close(
     padding: str = 'SAME',
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial']:
-    '''Morphological closing: ``erode(dilate(x))``.
+    """Morphological closing: ``erode(dilate(x))``.
 
     Fills small dark holes, preserves overall shape.
-    '''
+    """
     dilated = dilate(
         x,
         structuring_element=structuring_element,
-        size=size, padding=padding, backend=backend,
+        size=size,
+        padding=padding,
+        backend=backend,
     )
     return erode(
         dilated,
         structuring_element=structuring_element,
-        size=size, padding=padding, backend=backend,
+        size=size,
+        padding=padding,
+        backend=backend,
     )
 
 
@@ -376,12 +410,12 @@ def close(
 
 
 def _chebyshev_3x3_offsets(spatial_rank: int, dtype: DTypeLike) -> Array:
-    '''3x3x... structuring element with Chebyshev (chessboard) distances.
+    """3x3x... structuring element with Chebyshev (chessboard) distances.
 
     The center is 0, every other position is 1.  Iterated min-plus
     convolution with this kernel propagates Chebyshev distances
     one step per iteration.
-    '''
+    """
     shape = (3,) * spatial_rank
     se = jnp.ones(shape, dtype=dtype)
     center = (1,) * spatial_rank
@@ -404,9 +438,12 @@ _EDT_BIG_THRESHOLD = 1e9  # accumulated cost >= this <=> no boundary reachable
 
 
 def _edt_along_axis(
-    g: Float[Array, '...'], axis: int, *, backend: Backend,
+    g: Float[Array, '...'],
+    axis: int,
+    *,
+    backend: Backend,
 ) -> Float[Array, '...']:
-    '''Squared 1D EDT along ``axis`` as a tropical min-plus matmul.
+    """Squared 1D EDT along ``axis`` as a tropical min-plus matmul.
 
     The 1D squared distance transform ``out[p] = min_q (g[q] + (q - p)^2)`` is
     exactly the tropical (min, +) contraction of the per-position cost ``g``
@@ -416,14 +453,15 @@ def _edt_along_axis(
     Pallas-CUDA streaming kernel and its JAX fallback, so the EDT inherits a
     backend-dispatched, differentiable, no-control-flow implementation instead
     of a per-line stack scan.
-    '''
+    """
     g = jnp.moveaxis(g, axis, -1)
     shape = g.shape
     n = shape[-1]
     pos = jnp.arange(n, dtype=g.dtype)
     d2 = (pos[:, None] - pos[None, :]) ** 2  # (n, n) squared-distance matrix
     out = semiring_matmul(
-        g.reshape(-1, n), d2,
+        g.reshape(-1, n),
+        d2,
         semiring=TROPICAL_MIN_PLUS,
         backend=backend,
     )
@@ -431,16 +469,18 @@ def _edt_along_axis(
 
 
 def _distance_transform_edt(
-    mask: Num[Array, '... *spatial'], *, backend: Backend = 'auto',
+    mask: Num[Array, '... *spatial'],
+    *,
+    backend: Backend = 'auto',
 ) -> Float[Array, '... *spatial']:
-    '''Exact Euclidean DT as a separable sequence of min-plus matmuls.
+    """Exact Euclidean DT as a separable sequence of min-plus matmuls.
 
     Squared Euclidean distance separates over axes, so the exact transform is
     the sequential composition of the 1D squared-EDT (``_edt_along_axis``)
     along each axis; ``sqrt`` once at the end.  Seeds are the zero positions of
     ``mask``; every axis is treated as spatial (scipy
     ``distance_transform_edt`` convention).
-    '''
+    """
     arr = jnp.asarray(mask)
     dtype = jnp.promote_types(arr.dtype, jnp.float32)
     g = jnp.where(
@@ -465,7 +505,7 @@ def distance_transform(
     max_iters: Optional[int] = None,
     backend: Backend = 'auto',
 ) -> Num[Array, '... *spatial']:
-    '''Distance transform: distance from each interior voxel to the boundary.
+    """Distance transform: distance from each interior voxel to the boundary.
 
     For each output position ``i``, returns the distance to the nearest
     position where ``mask`` is zero (the "boundary").  Non-zero ``mask``
@@ -528,7 +568,7 @@ def distance_transform(
     64^3 and beats scipy on CPU, exact, where the iterative chamfer was ~80x
     slower on GPU.  The chamfer engine is retained for non-Euclidean metrics
     and custom step-cost kernels.  See ``docs/design/perf-audit-2025-05.md``.
-    '''
+    """
     if structuring_element is None and metric == 'euclidean':
         return _distance_transform_edt(mask, backend=backend)
 
@@ -574,7 +614,8 @@ def distance_transform(
 
     def body(_i: int, d: Float[Array, '...']) -> Float[Array, '...']:
         return _conv_wrap(
-            d, se,
+            d,
+            se,
             semiring=TROPICAL_MIN_PLUS,
             padding='SAME',
             backend=backend,
@@ -589,11 +630,11 @@ def distance_transform_edt(
     *,
     backend: Backend = 'auto',
 ) -> Float[Array, '... *spatial']:
-    '''Exact Euclidean distance transform (scipy ``distance_transform_edt``).
+    """Exact Euclidean distance transform (scipy ``distance_transform_edt``).
 
     Thin alias for ``distance_transform(mask, metric="euclidean")`` -- the
     separable min-plus-matmul engine (semiring Pallas-CUDA kernel + JAX
     fallback).  Distance from each non-zero voxel to the nearest zero voxel;
     ``+inf`` where ``mask`` is everywhere non-zero.
-    '''
+    """
     return _distance_transform_edt(mask, backend=backend)

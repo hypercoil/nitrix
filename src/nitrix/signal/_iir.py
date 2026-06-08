@@ -33,6 +33,7 @@ padding; it matches ``scipy.signal.sosfiltfilt`` to machine precision.
 
 Everything is reverse-mode differentiable through the signal.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -58,14 +59,14 @@ _Backend = str  # 'auto' | 'fft' | 'scan' | 'associative'
 
 
 def _resolve_iir_backend(backend: _Backend) -> _Backend:
-    '''Resolve ``'auto'`` to the engine that wins on this platform.
+    """Resolve ``'auto'`` to the engine that wins on this platform.
 
     On GPU the recursion is latency-bound, so ``'auto'`` selects the parallel
     ``'fft'`` convolution engine (which beats cupy on the L4 and falls back to
     a recurrence for filters too sharp to truncate cheaply).  On CPU the
     sequential ``'scan'`` recurrence is fast and exact, so ``'auto'`` keeps it.
     Explicit ``'fft'`` / ``'scan'`` / ``'associative'`` pass through.
-    '''
+    """
     if backend == 'auto':
         return 'fft' if default_backend_is_gpu() else 'scan'
     return backend
@@ -78,7 +79,7 @@ def _resolve_iir_backend(backend: _Backend) -> _Backend:
 
 
 def _buttap(order: int) -> Tuple[np.ndarray, np.ndarray, float]:
-    '''Analog Butterworth low-pass prototype (zeros, poles, gain).'''
+    """Analog Butterworth low-pass prototype (zeros, poles, gain)."""
     m = np.arange(-order + 1, order, 2)
     poles = -np.exp(1j * np.pi * m / (2 * order))
     return np.array([], dtype=complex), poles, 1.0
@@ -155,7 +156,7 @@ def _bilinear(
 def _group_conjugates(
     roots: np.ndarray, tol: float = 1e-6
 ) -> list[np.ndarray]:
-    '''Group roots into conjugate pairs / real pairs (each <= 2 roots).'''
+    """Group roots into conjugate pairs / real pairs (each <= 2 roots)."""
     roots = list(roots)
     used = [False] * len(roots)
     cpairs, reals = [], []
@@ -171,26 +172,24 @@ def _group_conjugates(
                     used[j] = True
                     break
             cpairs.append(np.array([r, np.conj(r)]))
-    real_pairs = [
-        np.array(reals[i:i + 2]) for i in range(0, len(reals), 2)
-    ]
+    real_pairs = [np.array(reals[i : i + 2]) for i in range(0, len(reals), 2)]
     return cpairs + real_pairs
 
 
 def _section_poly(group: np.ndarray) -> np.ndarray:
-    '''Real length-3 polynomial coefficients from a <=2 root group.'''
+    """Real length-3 polynomial coefficients from a <=2 root group."""
     coeffs = np.real(np.poly(group))
     return np.concatenate([coeffs, np.zeros(3 - len(coeffs))])
 
 
 def _zpk2sos(z: np.ndarray, p: np.ndarray, k: float) -> np.ndarray:
-    '''Group conjugate poles/zeros into biquad second-order sections.
+    """Group conjugate poles/zeros into biquad second-order sections.
 
     Any valid conjugate grouping yields the same overall transfer function;
     for the modest orders here this simple pairing is well-conditioned (and
     parity is checked against scipy via the *frequency response*, which is
     grouping-invariant).
-    '''
+    """
     pg = _group_conjugates(p)
     zg = _group_conjugates(z)
     n = max(len(pg), len(zg))
@@ -207,14 +206,12 @@ def _zpk2sos(z: np.ndarray, p: np.ndarray, k: float) -> np.ndarray:
 def _normalise_band(
     btype: _BType, fs: float, lo: Optional[float], hi: Optional[float]
 ) -> np.ndarray:
-    '''Validate edges and return them normalised to (0, 1) over Nyquist.'''
+    """Validate edges and return them normalised to (0, 1) over Nyquist."""
     nyq = 0.5 * fs
 
     def norm(c: float, name: str) -> float:
         if not 0.0 < c < nyq:
-            raise ValueError(
-                f'{name}={c} must lie in (0, fs/2) = (0, {nyq}).'
-            )
+            raise ValueError(f'{name}={c} must lie in (0, fs/2) = (0, {nyq}).')
         return c / nyq
 
     if btype in ('bandpass', 'bandstop'):
@@ -245,7 +242,7 @@ def butterworth_sos(
     lo: Optional[float] = None,
     hi: Optional[float] = None,
 ) -> np.ndarray:
-    '''Design a digital Butterworth filter as second-order sections.
+    """Design a digital Butterworth filter as second-order sections.
 
     Returns the ``(n_sections, 6)`` SOS array ``[b0, b1, b2, a0, a1, a2]``
     per row -- the same layout as ``scipy.signal.butter(output='sos')`` (and
@@ -267,7 +264,7 @@ def butterworth_sos(
     lo, hi
         Cut-offs in Hz (``0 < f < fs/2``).  ``'lowpass'`` uses ``hi``;
         ``'highpass'`` uses ``lo``; band types use both (``lo < hi``).
-    '''
+    """
     wn = _normalise_band(btype, fs, lo, hi)
     # Bilinear pre-warp at the scipy fs = 2 convention.
     fs_d = 2.0
@@ -292,13 +289,13 @@ def butterworth_sos(
 
 
 def _sos_zi(sos: np.ndarray) -> np.ndarray:
-    '''Per-section steady-state delay state, scaled along the cascade.
+    """Per-section steady-state delay state, scaled along the cascade.
 
     For each biquad, the transposed-DF2 state that makes a step input
     produce no startup transient: ``zi = (I - A^T)^{-1} B`` with
     ``A`` the companion matrix.  Scaled by the running DC gain so the
     cascade is consistent (scipy ``sosfilt_zi``).
-    '''
+    """
     zi = np.empty((sos.shape[0], 2))
     scale = 1.0
     for i, s in enumerate(sos):
@@ -317,9 +314,11 @@ def _sos_zi(sos: np.ndarray) -> np.ndarray:
 
 
 def _sos_responses(
-    sos: np.ndarray, n: int, zi: Optional[np.ndarray] = None,
+    sos: np.ndarray,
+    n: int,
+    zi: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    '''Host (NumPy, fp64) impulse and zero-input responses of the cascade.
+    """Host (NumPy, fp64) impulse and zero-input responses of the cascade.
 
     Runs the transposed-DF2 cascade recurrence -- the same one
     ``_sosfilt_scan`` realises -- for ``n`` samples:
@@ -335,14 +334,22 @@ def _sos_responses(
 
     Both are host constants (``sos`` / ``zi`` are static) and fold into the
     trace; the device side only runs the FFT convolution.
-    '''
-    b0, b1, b2 = sos[:, 0] / sos[:, 3], sos[:, 1] / sos[:, 3], sos[:, 2] / sos[:, 3]
+    """
+    b0, b1, b2 = (
+        sos[:, 0] / sos[:, 3],
+        sos[:, 1] / sos[:, 3],
+        sos[:, 2] / sos[:, 3],
+    )
     a1, a2 = sos[:, 4] / sos[:, 3], sos[:, 5] / sos[:, 3]
     ns = sos.shape[0]
     h = np.empty(n, dtype=np.float64)
     g = np.empty(n, dtype=np.float64)
     sh = np.zeros((ns, 2))
-    sg = np.zeros((ns, 2)) if zi is None else np.asarray(zi, dtype=np.float64).copy()
+    sg = (
+        np.zeros((ns, 2))
+        if zi is None
+        else np.asarray(zi, dtype=np.float64).copy()
+    )
     for t in range(n):
         yh = 1.0 if t == 0 else 0.0
         yg = 0.0
@@ -360,10 +367,12 @@ def _sos_responses(
 
 
 def _sos_impulse_taps(
-    sos: np.ndarray, atol: float, cap: int = _IIR_FFT_MAX_TAPS,
+    sos: np.ndarray,
+    atol: float,
+    cap: int = _IIR_FFT_MAX_TAPS,
 ) -> Optional[int]:
-    '''Smallest tap count after which ``|h| <= atol`` (or ``None`` if the
-    impulse response has not decayed within ``cap`` -- a too-sharp filter).'''
+    """Smallest tap count after which ``|h| <= atol`` (or ``None`` if the
+    impulse response has not decayed within ``cap`` -- a too-sharp filter)."""
     n = min(512, cap)
     while True:
         h, _ = _sos_responses(sos, n)
@@ -377,21 +386,24 @@ def _sos_impulse_taps(
 
 
 def _expand_freq(arr: Array, ndim: int) -> Array:
-    '''Reshape a length-F frequency vector to broadcast over ``(F, *channels)``.'''
+    """Reshape a length-F frequency vector to broadcast over ``(F, *channels)``."""
     return arr.reshape((-1,) + (1,) * (ndim - 1))
 
 
 def _sosfilt_fft(
-    sos: np.ndarray, x: Array, zi: Optional[np.ndarray], n_taps: int,
+    sos: np.ndarray,
+    x: Array,
+    zi: Optional[np.ndarray],
+    n_taps: int,
 ) -> Array:
-    '''Apply the cascade as an FFT convolution with its impulse response.
+    """Apply the cascade as an FFT convolution with its impulse response.
 
     ``x`` is time-major ``(T, *channels)``.  The zero-state output is
     ``conv(x, h)`` (linear convolution via the FFT, truncated to ``n_taps``);
     with ``zi`` the steady-state transient ``x[0] * g`` is added back over the
     first ``n_taps`` samples so the edges stay scipy-exact.  ``O(T log T)``,
     no recurrence, fully parallel.
-    '''
+    """
     h, g = _sos_responses(sos, n_taps, zi=zi)
     n_t = x.shape[0]
     nfft = 1
@@ -422,11 +434,11 @@ def _sosfilt_scan(
     x: Array,
     zi: Optional[np.ndarray],
 ) -> Array:
-    '''Cascade of biquads via sequential ``lax.scan`` over time (axis 0).
+    """Cascade of biquads via sequential ``lax.scan`` over time (axis 0).
 
     ``x`` is time-major ``(T, *channels)``.  ``zi`` (per-section delay
     state for unit input) is scaled by ``x[0]`` when provided.
-    '''
+    """
     y = x
     x0 = x[0]
     for i, s in enumerate(sos):
@@ -440,8 +452,11 @@ def _sosfilt_scan(
         def step(
             state: Tuple[Array, Array],
             xn: Array,
-            b0: float = b0, b1: float = b1, b2: float = b2,
-            a1: float = a1, a2: float = a2,
+            b0: float = b0,
+            b1: float = b1,
+            b2: float = b2,
+            a1: float = a1,
+            a2: float = a2,
         ) -> Tuple[Tuple[Array, Array], Array]:
             z1, z2 = state
             yn = b0 * xn + z1
@@ -456,7 +471,7 @@ def _sosfilt_associative(
     x: Array,
     zi: Optional[np.ndarray] = None,
 ) -> Array:
-    '''Cascade of biquads via parallel ``lax.associative_scan``.
+    """Cascade of biquads via parallel ``lax.associative_scan``.
 
     The transposed-DF2 state ``s = (z1, z2)`` -- the *same* state
     ``_sosfilt_scan`` carries -- evolves as a first-order linear recurrence
@@ -473,7 +488,7 @@ def _sosfilt_associative(
     materialised).  This is the engine that makes ``sosfilt`` /
     ``sosfiltfilt`` competitive on the GPU; it matches ``_sosfilt_scan`` (and
     ``scipy.signal``) to round-off.
-    '''
+    """
     y = x
     n_t = x.shape[0]
     x0 = x[0]
@@ -501,10 +516,13 @@ def _sosfilt_associative(
             s = jnp.concatenate([s0_row, b_cum[:-1]], axis=0)
         else:
             a_cum, b_cum = lax.associative_scan(
-                combine, (a_seq, b_seq), axis=0,
+                combine,
+                (a_seq, b_seq),
+                axis=0,
             )
             s0 = jnp.stack(
-                [float(zi[i, 0]) * x0, float(zi[i, 1]) * x0], axis=-1,
+                [float(zi[i, 0]) * x0, float(zi[i, 1]) * x0],
+                axis=-1,
             )
             homog = jnp.einsum('n...ij,...j->n...i', a_cum[:-1], s0)
             s = jnp.concatenate([s0[None], homog + b_cum[:-1]], axis=0)
@@ -520,12 +538,12 @@ def _sosfilt_apply(
     backend: _Backend,
     impulse_atol: float,
 ) -> Array:
-    '''Apply the cascade with the platform-resolved engine.
+    """Apply the cascade with the platform-resolved engine.
 
     ``'fft'`` truncates the impulse response at ``impulse_atol`` and convolves;
     if the filter has not decayed within ``_IIR_FFT_MAX_TAPS`` it falls back to
     a recurrence (``associative`` on GPU, ``scan`` on CPU) with a warning.
-    '''
+    """
     backend = _resolve_iir_backend(backend)
     if backend == 'fft':
         n_taps = _sos_impulse_taps(sos, impulse_atol)
@@ -557,7 +575,7 @@ def sosfilt(
     backend: _Backend = 'auto',
     impulse_atol: float = 1e-12,
 ) -> Num[Array, '... obs']:
-    '''Apply a causal IIR filter (forward only) given its SOS cascade.
+    """Apply a causal IIR filter (forward only) given its SOS cascade.
 
     Parameters
     ----------
@@ -581,11 +599,15 @@ def sosfilt(
         Larger values give shorter kernels / smaller FFTs at the cost of a
         (geometrically bounded) edge error; a filter too sharp to decay within
         ``2**15`` taps falls back to a recurrence with a warning.
-    '''
+    """
     sos_np = np.asarray(sos)
     x = jnp.moveaxis(jnp.asarray(X), axis, 0)
     y = _sosfilt_apply(
-        sos_np, x, zi=None, backend=backend, impulse_atol=impulse_atol,
+        sos_np,
+        x,
+        zi=None,
+        backend=backend,
+        impulse_atol=impulse_atol,
     )
     return jnp.moveaxis(y, 0, axis)
 
@@ -600,7 +622,7 @@ def sosfiltfilt(
     backend: _Backend = 'auto',
     impulse_atol: float = 1e-12,
 ) -> Num[Array, '... obs']:
-    '''Zero-phase forward-backward IIR filter (scipy ``sosfiltfilt``-exact).
+    """Zero-phase forward-backward IIR filter (scipy ``sosfiltfilt``-exact).
 
     Filters forward then backward with steady-state initial conditions and
     odd padding, cancelling phase and squaring the magnitude response.
@@ -612,7 +634,7 @@ def sosfiltfilt(
     ``x[0] * g`` (the cascade's zero-input response) over the first ``n_taps``
     samples, so the edges stay scipy-exact -- the zero-phase path is no longer
     scan-only.  ``impulse_atol`` controls the FFT truncation (see ``sosfilt``).
-    '''
+    """
     sos_np = np.asarray(sos)
     n_sections = sos_np.shape[0]
     x = jnp.moveaxis(jnp.asarray(X), axis, 0)  # time-major
@@ -621,8 +643,9 @@ def sosfiltfilt(
         # scipy convention: ntaps = 2*n_sections + 1, reduced by the number
         # of first-order sections (those with a zero b2 or a2), so odd-order
         # filters pad less.  Matching it makes the edges scipy-exact.
-        n_trivial = int(min((sos_np[:, 2] == 0).sum(),
-                            (sos_np[:, 5] == 0).sum()))
+        n_trivial = int(
+            min((sos_np[:, 2] == 0).sum(), (sos_np[:, 5] == 0).sum())
+        )
         padlen = 3 * (2 * n_sections + 1 - n_trivial)
     if padlen >= n:
         raise ValueError(
@@ -632,7 +655,7 @@ def sosfiltfilt(
 
     if padtype == 'odd' and padlen > 0:
         left = 2 * x[:1] - x[padlen:0:-1]
-        right = 2 * x[-1:] - x[-2:-padlen - 2:-1]
+        right = 2 * x[-1:] - x[-2 : -padlen - 2 : -1]
         xp = jnp.concatenate([left, x, right], axis=0)
     elif padlen == 0:
         xp = x
@@ -641,10 +664,17 @@ def sosfiltfilt(
 
     zi = _sos_zi(sos_np)
     y = _sosfilt_apply(
-        sos_np, xp, zi=zi, backend=backend, impulse_atol=impulse_atol,
+        sos_np,
+        xp,
+        zi=zi,
+        backend=backend,
+        impulse_atol=impulse_atol,
     )
     y = _sosfilt_apply(
-        sos_np, jnp.flip(y, axis=0), zi=zi, backend=backend,
+        sos_np,
+        jnp.flip(y, axis=0),
+        zi=zi,
+        backend=backend,
         impulse_atol=impulse_atol,
     )
     y = jnp.flip(y, axis=0)
@@ -666,7 +696,7 @@ def iir_filter(
     impulse_atol: float = 1e-12,
     axis: int = -1,
 ) -> Num[Array, '... obs']:
-    '''Recursive Butterworth IIR filter (design + apply).
+    """Recursive Butterworth IIR filter (design + apply).
 
     Convenience wrapper: designs a Butterworth ``sos`` (``butterworth_sos``)
     and applies it.
@@ -701,12 +731,20 @@ def iir_filter(
     -------
     Filtered signal, same shape as ``X``.  Differentiable through ``X``;
     ``fs`` / cut-offs / ``order`` are static.
-    '''
+    """
     sos = butterworth_sos(order=order, fs=fs, btype=btype, lo=lo, hi=hi)
     if zero_phase:
         return sosfiltfilt(
-            X, sos, axis=axis, backend=backend, impulse_atol=impulse_atol,
+            X,
+            sos,
+            axis=axis,
+            backend=backend,
+            impulse_atol=impulse_atol,
         )
     return sosfilt(
-        X, sos, axis=axis, backend=backend, impulse_atol=impulse_atol,
+        X,
+        sos,
+        axis=axis,
+        backend=backend,
+        impulse_atol=impulse_atol,
     )

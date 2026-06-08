@@ -15,6 +15,7 @@ subgradient is well-defined; ties are flagged separately.
 guard at the singularity is asserted by checking that the gradient
 is finite (not NaN) when ``A_row == B_col``.
 """
+
 from __future__ import annotations
 
 import jax
@@ -22,10 +23,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import jax.test_util as jtu
-
 from nitrix.semiring import (
-    BOOLEAN,
     EUCLIDEAN,
     LOG,
     REAL,
@@ -35,7 +33,6 @@ from nitrix.semiring import (
     semiring_matmul,
 )
 from nitrix.sparse import ell_from_dense
-
 
 jax.config.update('jax_enable_x64', True)
 
@@ -54,20 +51,25 @@ def _matmul_loss(A, B, semiring, backend='jax'):
 def _ell_loss(values, B, indices, semiring, n_cols, backend='jax'):
     return jnp.sum(
         semiring_ell_matmul(
-            values, indices, B,
-            semiring=semiring, n_cols=n_cols, backend=backend,
-        ) ** 2,
+            values,
+            indices,
+            B,
+            semiring=semiring,
+            n_cols=n_cols,
+            backend=backend,
+        )
+        ** 2,
     )
 
 
 def _finite_diff(fn, x, eps=1e-5):
-    '''Symmetric finite-difference gradient.
+    """Symmetric finite-difference gradient.
 
     ``fn`` is jit-compiled once before the per-element loop so the
     2*N forward calls hit the JIT cache instead of retracing.  This
     is the difference between ~5 s and ~0.3 s on the typical (4, 4)
     test arrays we use.
-    '''
+    """
     jit_fn = jax.jit(fn)
     x_flat = x.reshape(-1)
     out = np.zeros_like(np.asarray(x_flat, dtype=np.float64))
@@ -122,14 +124,20 @@ def test_tropical_max_plus_matmul_backward_matches_finite_difference():
     # Use inputs with a unique argmax (random normal is fine almost surely).
     A, B = _matmul_pair(2)
     gA, gB = jax.grad(_matmul_loss, argnums=(0, 1))(
-        A, B, TROPICAL_MAX_PLUS,
+        A,
+        B,
+        TROPICAL_MAX_PLUS,
     )
     # FD step must be smaller than the gap to the second-best k.
     gA_fd = _finite_diff(
-        lambda x: _matmul_loss(x, B, TROPICAL_MAX_PLUS), A, eps=1e-4,
+        lambda x: _matmul_loss(x, B, TROPICAL_MAX_PLUS),
+        A,
+        eps=1e-4,
     )
     gB_fd = _finite_diff(
-        lambda x: _matmul_loss(A, x, TROPICAL_MAX_PLUS), B, eps=1e-4,
+        lambda x: _matmul_loss(A, x, TROPICAL_MAX_PLUS),
+        B,
+        eps=1e-4,
     )
     np.testing.assert_allclose(gA, gA_fd, atol=1e-6, rtol=1e-6)
     np.testing.assert_allclose(gB, gB_fd, atol=1e-6, rtol=1e-6)
@@ -138,13 +146,19 @@ def test_tropical_max_plus_matmul_backward_matches_finite_difference():
 def test_tropical_min_plus_matmul_backward_matches_finite_difference():
     A, B = _matmul_pair(3)
     gA, gB = jax.grad(_matmul_loss, argnums=(0, 1))(
-        A, B, TROPICAL_MIN_PLUS,
+        A,
+        B,
+        TROPICAL_MIN_PLUS,
     )
     gA_fd = _finite_diff(
-        lambda x: _matmul_loss(x, B, TROPICAL_MIN_PLUS), A, eps=1e-4,
+        lambda x: _matmul_loss(x, B, TROPICAL_MIN_PLUS),
+        A,
+        eps=1e-4,
     )
     gB_fd = _finite_diff(
-        lambda x: _matmul_loss(A, x, TROPICAL_MIN_PLUS), B, eps=1e-4,
+        lambda x: _matmul_loss(A, x, TROPICAL_MIN_PLUS),
+        B,
+        eps=1e-4,
     )
     np.testing.assert_allclose(gA, gA_fd, atol=1e-6, rtol=1e-6)
     np.testing.assert_allclose(gB, gB_fd, atol=1e-6, rtol=1e-6)
@@ -179,6 +193,7 @@ def test_boolean_matmul_backward_rule_raises():
     # before reaching ``semiring_matmul``, so we exercise the rule
     # directly to confirm the diagnostic.
     from nitrix.semiring._backward import boolean_matmul_vjp
+
     with pytest.raises(TypeError, match='BOOLEAN'):
         boolean_matmul_vjp(
             (jnp.zeros((4, 4)), jnp.zeros((4, 4)), jnp.zeros((4, 4))),
@@ -188,6 +203,7 @@ def test_boolean_matmul_backward_rule_raises():
 
 def test_boolean_ell_matmul_backward_rule_raises():
     from nitrix.semiring._backward import boolean_ell_matmul_vjp
+
     with pytest.raises(TypeError, match='BOOLEAN'):
         boolean_ell_matmul_vjp(
             (
@@ -217,10 +233,12 @@ def test_real_ell_matmul_backward():
     values, indices, B = _ell_pair(10)
     gV, gB = jax.grad(_ell_loss, argnums=(0, 1))(values, B, indices, REAL, 4)
     gV_fd = _finite_diff(
-        lambda v: _ell_loss(v, B, indices, REAL, 4), values,
+        lambda v: _ell_loss(v, B, indices, REAL, 4),
+        values,
     )
     gB_fd = _finite_diff(
-        lambda x: _ell_loss(values, x, indices, REAL, 4), B,
+        lambda x: _ell_loss(values, x, indices, REAL, 4),
+        B,
     )
     np.testing.assert_allclose(gV, gV_fd, atol=1e-8, rtol=1e-8)
     np.testing.assert_allclose(gB, gB_fd, atol=1e-8, rtol=1e-8)
@@ -230,10 +248,12 @@ def test_log_ell_matmul_backward():
     values, indices, B = _ell_pair(11, identity=-jnp.inf)
     gV, gB = jax.grad(_ell_loss, argnums=(0, 1))(values, B, indices, LOG, 4)
     gV_fd = _finite_diff(
-        lambda v: _ell_loss(v, B, indices, LOG, 4), values,
+        lambda v: _ell_loss(v, B, indices, LOG, 4),
+        values,
     )
     gB_fd = _finite_diff(
-        lambda x: _ell_loss(values, x, indices, LOG, 4), B,
+        lambda x: _ell_loss(values, x, indices, LOG, 4),
+        B,
     )
     np.testing.assert_allclose(gV, gV_fd, atol=1e-6, rtol=1e-6)
     np.testing.assert_allclose(gB, gB_fd, atol=1e-6, rtol=1e-6)
@@ -242,15 +262,21 @@ def test_log_ell_matmul_backward():
 def test_tropical_max_plus_ell_matmul_backward():
     values, indices, B = _ell_pair(12, identity=-jnp.inf)
     gV, gB = jax.grad(_ell_loss, argnums=(0, 1))(
-        values, B, indices, TROPICAL_MAX_PLUS, 4,
+        values,
+        B,
+        indices,
+        TROPICAL_MAX_PLUS,
+        4,
     )
     gV_fd = _finite_diff(
         lambda v: _ell_loss(v, B, indices, TROPICAL_MAX_PLUS, 4),
-        values, eps=1e-4,
+        values,
+        eps=1e-4,
     )
     gB_fd = _finite_diff(
         lambda x: _ell_loss(values, x, indices, TROPICAL_MAX_PLUS, 4),
-        B, eps=1e-4,
+        B,
+        eps=1e-4,
     )
     np.testing.assert_allclose(gV, gV_fd, atol=1e-6, rtol=1e-6)
     np.testing.assert_allclose(gB, gB_fd, atol=1e-6, rtol=1e-6)
@@ -259,15 +285,21 @@ def test_tropical_max_plus_ell_matmul_backward():
 def test_tropical_min_plus_ell_matmul_backward():
     values, indices, B = _ell_pair(13, identity=jnp.inf)
     gV, gB = jax.grad(_ell_loss, argnums=(0, 1))(
-        values, B, indices, TROPICAL_MIN_PLUS, 4,
+        values,
+        B,
+        indices,
+        TROPICAL_MIN_PLUS,
+        4,
     )
     gV_fd = _finite_diff(
         lambda v: _ell_loss(v, B, indices, TROPICAL_MIN_PLUS, 4),
-        values, eps=1e-4,
+        values,
+        eps=1e-4,
     )
     gB_fd = _finite_diff(
         lambda x: _ell_loss(values, x, indices, TROPICAL_MIN_PLUS, 4),
-        B, eps=1e-4,
+        B,
+        eps=1e-4,
     )
     np.testing.assert_allclose(gV, gV_fd, atol=1e-6, rtol=1e-6)
     np.testing.assert_allclose(gB, gB_fd, atol=1e-6, rtol=1e-6)
@@ -276,13 +308,19 @@ def test_tropical_min_plus_ell_matmul_backward():
 def test_euclidean_ell_matmul_backward():
     values, indices, B = _ell_pair(14)
     gV, gB = jax.grad(_ell_loss, argnums=(0, 1))(
-        values, B, indices, EUCLIDEAN, 4,
+        values,
+        B,
+        indices,
+        EUCLIDEAN,
+        4,
     )
     gV_fd = _finite_diff(
-        lambda v: _ell_loss(v, B, indices, EUCLIDEAN, 4), values,
+        lambda v: _ell_loss(v, B, indices, EUCLIDEAN, 4),
+        values,
     )
     gB_fd = _finite_diff(
-        lambda x: _ell_loss(values, x, indices, EUCLIDEAN, 4), B,
+        lambda x: _ell_loss(values, x, indices, EUCLIDEAN, 4),
+        B,
     )
     np.testing.assert_allclose(gV, gV_fd, atol=1e-6, rtol=1e-6)
     np.testing.assert_allclose(gB, gB_fd, atol=1e-6, rtol=1e-6)
@@ -300,6 +338,7 @@ def test_forward_value_unchanged_by_custom_vjp_wrapping():
         with_grad = semiring_matmul(A, B, semiring=sr, backend='jax')
         # Build a forward-only Semiring (matmul_vjp=None) by re-tagging.
         import dataclasses
+
         fwd_only = dataclasses.replace(sr, matmul_vjp=None)
         without_grad = semiring_matmul(A, B, semiring=fwd_only, backend='jax')
         np.testing.assert_array_equal(with_grad, without_grad)
@@ -310,8 +349,10 @@ def test_batched_grad_real():
     keyA, keyB = jax.random.split(jax.random.key(30))
     A = jax.random.normal(keyA, (3, 4, 4))
     B = jax.random.normal(keyB, (3, 4, 4))
+
     def loss(A, B):
         return semiring_matmul(A, B, semiring=REAL, backend='jax').sum()
+
     gA, gB = jax.grad(loss, argnums=(0, 1))(A, B)
     # Reference: same as un-batched.
     gA_ref = jnp.stack([jnp.ones((4, 4)) @ B[i].T for i in range(3)])

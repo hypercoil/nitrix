@@ -35,6 +35,7 @@ What the legacy ``hypercoil.functional.matrix`` had that we drop:
   proper (matrix log / exp / sqrt).
 - ``expand_outer`` -- just write the ``jnp.einsum`` you want.
 """
+
 from __future__ import annotations
 
 import math
@@ -44,7 +45,6 @@ from typing import Optional, Tuple
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Int, Num
-
 
 __all__ = [
     'delete_diagonal',
@@ -70,7 +70,7 @@ def symmetric(
     skew: bool = False,
     axes: Tuple[int, int] = (-2, -1),
 ) -> Num[Array, '... i i']:
-    '''Average ``X`` with its transpose across the named axes.
+    """Average ``X`` with its transpose across the named axes.
 
     Parameters
     ----------
@@ -81,7 +81,7 @@ def symmetric(
     axes
         Two axes defining the square block.  Defaults to the
         trailing two axes.
-    '''
+    """
     if skew:
         return (X - X.swapaxes(*axes)) / 2
     return (X + X.swapaxes(*axes)) / 2
@@ -99,7 +99,7 @@ def recondition_eigenspaces(
     xi: float = 0.0,
     key: Optional['jax.Array'] = None,
 ) -> Num[Array, '... i i']:
-    r'''Perturb ``A`` so it has no zero or degenerate eigenvalues.
+    r"""Perturb ``A`` so it has no zero or degenerate eigenvalues.
 
     Stabilises reverse-mode differentiation through
     ``jnp.linalg.eigh`` / SVD on near-singular inputs.  The
@@ -125,7 +125,7 @@ def recondition_eigenspaces(
     Returns
     -------
     Reconditioned matrix.
-    '''
+    """
     if psi < xi:
         raise ValueError(
             f'psi={psi} must satisfy psi >= xi={xi}: the nondegenerate-'
@@ -136,9 +136,14 @@ def recondition_eigenspaces(
     eye = jnp.eye(n, dtype=A.dtype)
     if xi > 0:
         if key is None:
-            raise ValueError('recondition_eigenspaces requires key when xi > 0.')
+            raise ValueError(
+                'recondition_eigenspaces requires key when xi > 0.'
+            )
         x = jax.random.uniform(
-            key=key, shape=A.shape[-1:], maxval=xi, dtype=A.dtype,
+            key=key,
+            shape=A.shape[-1:],
+            maxval=xi,
+            dtype=A.dtype,
         )
         return A + (psi - xi) * eye + jnp.diag(x)
     return A + psi * eye
@@ -150,7 +155,7 @@ def recondition_eigenspaces(
 
 
 def delete_diagonal(A: Num[Array, '... i i']) -> Num[Array, '... i i']:
-    '''Zero out the diagonal of a square matrix block.'''
+    """Zero out the diagonal of a square matrix block."""
     mask = ~jnp.eye(A.shape[-1], dtype=bool)
     return A * mask
 
@@ -161,7 +166,7 @@ def fill_diagonal(
     fill: float = 0.0,
     offset: int = 0,
 ) -> Num[Array, '... i j']:
-    '''Set the named diagonal of ``A`` to ``fill``.
+    """Set the named diagonal of ``A`` to ``fill``.
 
     Parameters
     ----------
@@ -172,7 +177,7 @@ def fill_diagonal(
     offset
         Diagonal offset.  ``0`` is the main diagonal, positive is
         above, negative is below.
-    '''
+    """
     m, n = A.shape[-2], A.shape[-1]
     rows = jnp.arange(m)
     cols = rows + offset
@@ -196,7 +201,7 @@ def toeplitz_2d(
     shape: Optional[Tuple[int, int]] = None,
     fill_value: float = 0.0,
 ) -> Float[Array, 'm n']:
-    '''Construct a 2-D Toeplitz matrix from a first column and first row.
+    """Construct a 2-D Toeplitz matrix from a first column and first row.
 
     Based on the recipe in
     https://github.com/google/jax/issues/1646#issuecomment-1139044324
@@ -221,7 +226,7 @@ def toeplitz_2d(
         Output ``(m, n)``.  Defaults to ``(len(c), len(r))``.
     fill_value
         Fill for cells outside the support of ``c`` / ``r``.
-    '''
+    """
     if r is None:
         r = c
     m_in, n_in = c.shape[-1], r.shape[-1]
@@ -264,13 +269,13 @@ def toeplitz(
     shape: Optional[Tuple[int, int]] = None,
     fill_value: float = 0.0,
 ) -> Float[Array, '... m n']:
-    '''Toeplitz matrix construction with leading batch support.
+    """Toeplitz matrix construction with leading batch support.
 
     Vectorises ``toeplitz_2d`` over any leading axes; both ``c``
     and ``r`` must share the same leading shape.
 
     See ``toeplitz_2d`` for the per-sample semantics.
-    '''
+    """
     if r is None:
         r = c
     if c.shape[:-1] != r.shape[:-1]:
@@ -296,7 +301,7 @@ def sym2vec(
     sym: Num[Array, '... i i'],
     offset: int = 1,
 ) -> Num[Array, '... n']:
-    '''Vec of the upper triangle of a symmetric matrix block.
+    """Vec of the upper triangle of a symmetric matrix block.
 
     Output entries follow the row-major order of the upper triangle
     starting at the diagonal offset by ``offset``.
@@ -320,7 +325,7 @@ def sym2vec(
     the matrix, so the backward (``vec2sym``-like) is masked to the
     upper triangle so the gradient through the dropped half is zero
     (rather than mirrored).
-    '''
+    """
     idx = jnp.triu_indices(m=sym.shape[-2], n=sym.shape[-1], k=offset)
     vec = sym[..., idx[0], idx[1]]
     return vec.reshape(*sym.shape[:-2], -1)
@@ -331,7 +336,7 @@ def vec2sym(
     vec: Num[Array, '... n'],
     offset: int = 1,
 ) -> Num[Array, '... i i']:
-    '''Symmetric matrix from the vec of its upper triangle.
+    """Symmetric matrix from the vec of its upper triangle.
 
     The matrix size ``i`` is recovered from ``n`` by solving
     ``n = binom(i - offset + 1, 2)`` (the closed-form
@@ -343,7 +348,7 @@ def vec2sym(
     Parameters / Returns
     --------------------
     See ``sym2vec``.
-    '''
+    """
     n = vec.shape[-1]
     side = int(0.5 * (math.sqrt(8 * n + 1) + 1)) + (offset - 1)
     idx = jnp.triu_indices(m=side, n=side, k=offset)
@@ -351,11 +356,13 @@ def vec2sym(
     sym = sym.at[..., idx[0], idx[1]].set(vec)
     # Mirror the off-(named-)diagonal entries; the named diagonal
     # is duplicated by the addition so we exclude it via the mask.
-    return jnp.where(jnp.eye(side, dtype=bool), sym, sym + sym.swapaxes(-1, -2))
+    return jnp.where(
+        jnp.eye(side, dtype=bool), sym, sym + sym.swapaxes(-1, -2)
+    )
 
 
 def squareform(X: Num[Array, '...']) -> Num[Array, '...']:
-    '''Toggle between vec and square forms of a symmetric matrix.
+    """Toggle between vec and square forms of a symmetric matrix.
 
     A convenience: if ``X`` looks square and symmetric (with rough
     tolerance), return ``sym2vec(X, offset=1)``; otherwise return
@@ -367,9 +374,14 @@ def squareform(X: Num[Array, '...']) -> Num[Array, '...']:
     that the input is a strictly conforming form.  When in doubt,
     call ``sym2vec`` / ``vec2sym`` directly with the explicit
     ``offset``.
-    '''
-    if X.ndim >= 2 and X.shape[-2] == X.shape[-1] and jnp.allclose(
-        X, X.swapaxes(-1, -2),
+    """
+    if (
+        X.ndim >= 2
+        and X.shape[-2] == X.shape[-1]
+        and jnp.allclose(
+            X,
+            X.swapaxes(-1, -2),
+        )
     ):
         return sym2vec(X, offset=1)
     return vec2sym(X, offset=1)
@@ -402,7 +414,9 @@ def _sym2vec_bwd(
     # Do *not* mirror; the lower triangle of the input had no
     # information.
     unmirrored = vec2sym(g, offset=offset)
-    mask = jnp.triu(jnp.ones(unmirrored.shape[-2:], dtype=unmirrored.dtype), offset)
+    mask = jnp.triu(
+        jnp.ones(unmirrored.shape[-2:], dtype=unmirrored.dtype), offset
+    )
     return (unmirrored * mask,)
 
 

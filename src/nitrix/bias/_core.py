@@ -48,13 +48,13 @@ def _coefficient_of_variation(
     ratio: Float[Array, '...'],
     mask: Float[Array, '...'],
 ) -> Float[Array, '']:
-    '''ITK's convergence measurement: CV of the field ratio over the mask.
+    """ITK's convergence measurement: CV of the field ratio over the mask.
 
     ``ratio = exp(field_new - field_prev)``; the measurement is
     ``std(ratio) / mean(ratio)`` over masked voxels with the sample
     (``ddof = 1``) standard deviation, matching
     ``N4...::CalculateConvergenceMeasurement``.
-    '''
+    """
     n = jnp.sum(mask)
     mu = jnp.sum(mask * ratio) / n
     var = jnp.sum(mask * (ratio - mu) ** 2) / jnp.maximum(n - 1.0, 1.0)
@@ -78,13 +78,13 @@ def _bfc_single(
     penalty_order: int,
     eps: float,
 ) -> Tuple[Float[Array, '*spatial'], Float[Array, '*spatial']]:
-    '''Iterative bias correction on a single volume.
+    """Iterative bias correction on a single volume.
 
     Returns ``(corrected, multiplicative_bias_field)``.  The fitting
     estimator is selected by ``fit_method``; everything else (log domain,
     sharpening, residual, field accumulation, convergence) is the shared
     N3/N4 loop.
-    '''
+    """
     axes = tuple(range(image.ndim))
     spatial_shape = image.shape
     dtype = jnp.result_type(image.dtype, jnp.float32)
@@ -176,12 +176,12 @@ def _level_control_points(
     spline_order: int,
     n_fitting_levels: int,
 ) -> list[Tuple[int, ...]]:
-    '''Per-level control-point counts: the B-spline mesh doubles each level.
+    """Per-level control-point counts: the B-spline mesh doubles each level.
 
     ``mesh_initial = n_control_points - spline_order``; at level ``l`` the
     mesh is ``mesh_initial * 2**l`` and the control-point count is
     ``mesh + spline_order`` (matching ITK's lattice doubling).
-    '''
+    """
     mesh_initial = tuple(c - spline_order for c in n_control_points)
     return [
         tuple(m * (2**level) + spline_order for m in mesh_initial)
@@ -212,9 +212,9 @@ def apply_bias_field_correction(
     Float[Array, '... *spatial'],
     Tuple[Float[Array, '... *spatial'], Float[Array, '... *spatial']],
 ]:
-    '''Shared entry point behind ``n4_bias_field_correction`` and
+    """Shared entry point behind ``n4_bias_field_correction`` and
     ``bias_field_correction``: validate, default the mask, then map the
-    per-volume core over any leading batch dims.'''
+    per-volume core over any leading batch dims."""
     x = jnp.asarray(image)
     dtype = jnp.result_type(x.dtype, jnp.float32)
     x = x.astype(dtype)

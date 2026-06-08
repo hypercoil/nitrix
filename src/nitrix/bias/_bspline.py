@@ -79,7 +79,7 @@ def _uniform_bspline_weights(
     t: Float[Array, ' n'],
     order: int,
 ) -> Float[Array, 'n order_plus_1']:
-    '''Uniform B-spline basis weights for fractional positions ``t``.
+    """Uniform B-spline basis weights for fractional positions ``t``.
 
     Returns the ``order + 1`` non-zero basis values for each fractional
     coordinate ``t`` in ``[0, 1]``.  These are the weights on the
@@ -91,7 +91,7 @@ def _uniform_bspline_weights(
     - order 1 (linear):    hat function, 2 control points.
     - order 2 (quadratic): 3 control points.
     - order 3 (cubic):     4 control points -- the N4 / ANTs default.
-    '''
+    """
     if order == 1:
         return jnp.stack([1.0 - t, t], axis=-1)
     if order == 2:
@@ -133,7 +133,7 @@ def _reconstruction_matrix(
     order: int,
     dtype: jnp.dtype,
 ) -> Float[Array, 'n_vox n_control']:
-    '''Banded control-lattice -> voxel-grid interpolation matrix ``R``.
+    """Banded control-lattice -> voxel-grid interpolation matrix ``R``.
 
     ``R[i, a]`` is the tensor-product-axis B-spline weight of control
     point ``a`` at voxel ``i``.  Each row has ``order + 1`` non-zeros.
@@ -143,7 +143,7 @@ def _reconstruction_matrix(
     ``i / (n_vox - 1)`` in ``[0, 1]``, scaled by the number of B-spline
     spans (``n_control - order``).  The span index is clamped to the last
     valid span at the closed-domain endpoint.
-    '''
+    """
     n_spans = n_control - order
     if n_spans < 1:
         raise ValueError(
@@ -182,12 +182,12 @@ def _contract_axis(
     matrix: Array,
     axis: int,
 ) -> Array:
-    '''Contract ``matrix`` (out, in) against ``x`` along ``axis``.
+    """Contract ``matrix`` (out, in) against ``x`` along ``axis``.
 
     The named ``axis`` of ``x`` (size == ``matrix.shape[1]``) is replaced
     by an axis of size ``matrix.shape[0]``.  All other dims -- including
     arbitrary leading batch dims -- broadcast through unchanged.
-    '''
+    """
     out = jnp.tensordot(x, matrix, axes=([axis], [1]))  # new axis last
     return jnp.moveaxis(out, -1, axis)
 
@@ -197,7 +197,7 @@ def _reconstruct(
     matrices: Sequence[Array],
     spatial_axes: Sequence[int],
 ) -> Array:
-    '''Reconstruct the voxel-grid field from the control lattice ``phi``.'''
+    """Reconstruct the voxel-grid field from the control lattice ``phi``."""
     out = phi
     for axis, R in zip(spatial_axes, matrices):
         out = _contract_axis(out, R, axis)
@@ -211,12 +211,12 @@ def _fit(
     spatial_axes: Sequence[int],
     eps: float,
 ) -> Array:
-    '''Fit the control lattice (Lee--Wolberg--Shin MBA) from grid data.
+    """Fit the control lattice (Lee--Wolberg--Shin MBA) from grid data.
 
     ``matrices`` are the per-axis reconstruction matrices ``R_d``; the fit
     is their adjoint with the ``w^2`` weighting.  ``values`` and ``weight``
     share the (broadcastable) voxel-grid shape.
-    '''
+    """
     # Per-axis sum-of-squared-weights profile: sumsq_d[i] = sum_a R_d[i, a]^2.
     # The per-point normaliser sum_j w_j^2 factorises as the product of these.
     normaliser = jnp.ones_like(values)
@@ -261,12 +261,12 @@ def _adjoint_to_control(
     matrices: Sequence[Array],
     spatial_axes: Sequence[int],
 ) -> Array:
-    '''Plain separable adjoint ``R^T`` of grid data onto the control lattice.
+    """Plain separable adjoint ``R^T`` of grid data onto the control lattice.
 
     Unlike ``_fit`` (which carries the MBA ``w^2`` weighting), this is the
     bare transpose of the reconstruction -- the right-hand side ``R^T(W z)``
     of the least-squares normal equations.
-    '''
+    """
     out = grid
     for axis, R in zip(spatial_axes, matrices):
         out = _contract_axis(out, R.T, axis)
@@ -278,14 +278,14 @@ def _weighted_gram(
     matrices: Sequence[Array],
     spatial_axes: Sequence[int],
 ) -> Array:
-    '''Dense weighted Gram ``R^T diag(weight) R`` over the control lattice.
+    """Dense weighted Gram ``R^T diag(weight) R`` over the control lattice.
 
     Assembled without materialising the (huge) tensor-product ``R``: the
     Gram entry ``G[k, l] = sum_v weight_v R[v, k] R[v, l]`` factorises over
     axes, so it is a per-axis contraction of ``weight`` with the basis
     outer-products ``Q_d[i, k, l] = R_d[i, k] R_d[i, l]``.  ``weight`` must
     be exactly the spatial grid (no batch dims).
-    '''
+    """
     g = weight
     csizes = []
     for axis, R in zip(spatial_axes, matrices):
@@ -307,13 +307,13 @@ def _difference_penalty(
     order: int,
     dtype: jnp.dtype,
 ) -> Array:
-    '''Tensor-product difference (P-spline) penalty over the control grid.
+    """Tensor-product difference (P-spline) penalty over the control grid.
 
     ``P = sum_d (I (x) ... (x) D_d^T D_d (x) ... (x) I)`` where ``D_d`` is
     the ``order``-th finite-difference operator on axis ``d``'s control
     points.  Penalises roughness along each axis independently (the
     Eilers--Marx multidimensional P-spline penalty).
-    '''
+    """
     n = int(np.prod(control_sizes))
     P = jnp.zeros((n, n), dtype=dtype)
     eyes = [jnp.eye(c, dtype=dtype) for c in control_sizes]
@@ -342,13 +342,13 @@ def _control_inverse_gram(
     penalty_order: int,
     dtype: jnp.dtype,
 ) -> Array:
-    '''Regularised inverse Gram ``(R^T W R + reg)^{-1}`` for the lattice.
+    """Regularised inverse Gram ``(R^T W R + reg)^{-1}`` for the lattice.
 
     The Gram depends only on ``weight`` and the level's control grid -- not
     on the data -- so N4 computes this once per fitting level and reuses it
     across every sharpening iteration.  The control lattice is small, so the
     explicit (well-conditioned, regularised) inverse is cheap.
-    '''
+    """
     G = _weighted_gram(weight, matrices, spatial_axes)
     n = G.shape[0]
     mean_diag = jnp.mean(jnp.diagonal(G))
@@ -367,7 +367,7 @@ def _solve_field(
     spatial_axes: Sequence[int],
     control_sizes: Sequence[int],
 ) -> Array:
-    '''Least-squares control lattice (via the precomputed inverse) -> field.'''
+    """Least-squares control lattice (via the precomputed inverse) -> field."""
     rhs = _adjoint_to_control(weight * values, matrices, spatial_axes)
     n = inv_gram.shape[0]
     phi = (inv_gram @ rhs.reshape(n)).reshape(tuple(control_sizes))
@@ -386,7 +386,7 @@ def _fit_regularised(
     penalty_order: int,
     dtype: jnp.dtype,
 ) -> Array:
-    '''One-shot least-squares / P-spline fit-and-reconstruct.'''
+    """One-shot least-squares / P-spline fit-and-reconstruct."""
     inv_gram = _control_inverse_gram(
         weight,
         matrices,
@@ -466,7 +466,7 @@ def bspline_approximate(
     spatial_rank: Optional[int] = None,
     eps: float = 1e-8,
 ) -> Float[Array, '... *spatial']:
-    '''Smooth, separable cubic B-spline approximation of regular-grid data.
+    """Smooth, separable cubic B-spline approximation of regular-grid data.
 
     Fits a uniform tensor-product B-spline control lattice to ``values`` and
     reconstructs the smooth field at every voxel.  This is the field-
@@ -546,7 +546,7 @@ def bspline_approximate(
     ``'psplines'`` solve the normal equations ``(R^T W R + P) phi = R^T W z``
     with the Gram assembled without materialising ``R``.  See
     ``docs/design/bias-field.md`` for the parity-vs-correctness discussion.
-    '''
+    """
     if method not in ('mba', 'least_squares', 'psplines'):
         raise ValueError(
             f"method={method!r}; expected 'mba', 'least_squares', or "

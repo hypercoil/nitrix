@@ -21,6 +21,7 @@ The decision to ship JAX-default for ELL on Ampere is recorded in
 ``bench/G0_ELL_REPORT.md`` (per IMPLEMENTATION_PLAN §3.1, the G0 gate
 branch where Triton is ``>= 5× slower or unstable``).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -29,7 +30,6 @@ from jaxtyping import Array, Int, Num
 
 from ...semiring._types import Semiring
 
-
 __all__ = [
     'semiring_ell_matmul_pallas',
     'PallasELLNotTileable',
@@ -37,14 +37,14 @@ __all__ = [
 
 
 class PallasELLNotTileable(RuntimeError):
-    '''The Pallas Triton ELL kernel cannot tile the request.
+    """The Pallas Triton ELL kernel cannot tile the request.
 
     At present this is raised unconditionally because the underlying
     ``gather`` primitive (and the axis-0 concat we would need as a
     workaround) is not lowered by Pallas Triton in the pinned JAX
     version.  When Pallas grows a workable gather we switch this to a
     proper shape-tileability check.
-    '''
+    """
 
 
 def semiring_ell_matmul_pallas(

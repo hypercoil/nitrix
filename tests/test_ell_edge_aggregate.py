@@ -11,6 +11,7 @@ Covers:
 - **Batched** call gives per-batch results matching unbatched.
 - **Unsupported semiring** raises clearly (LOG / EUCLIDEAN deferred).
 """
+
 from __future__ import annotations
 
 import jax
@@ -43,9 +44,9 @@ def _toy_graph(n=4, k_max=3, d_in=2, seed=0):
 
 
 def test_gcn_matches_brute_force():
-    '''GCN-style edge_fn (linear projection of neighbour) matches
+    """GCN-style edge_fn (linear projection of neighbour) matches
     a Python brute-force reference at machine eps.
-    '''
+    """
     ell, x = _toy_graph()
     n, k_max = ell.values.shape
     d_in = x.shape[-1]
@@ -69,9 +70,9 @@ def test_gcn_matches_brute_force():
 
 
 def test_dgcnn_forward_runs():
-    '''DGCNN/EdgeConv-style edge_fn with concat + MLP runs end-
+    """DGCNN/EdgeConv-style edge_fn with concat + MLP runs end-
     to-end and produces finite output.
-    '''
+    """
     ell, x = _toy_graph(n=8, d_in=4)
     rng = np.random.default_rng(2)
     W1 = jnp.asarray(rng.standard_normal((16, 8)))
@@ -88,13 +89,17 @@ def test_dgcnn_forward_runs():
 
 
 def test_tropical_max_plus_semiring():
-    '''MAX_PLUS reduction returns elementwise max over the neighbours.'''
+    """MAX_PLUS reduction returns elementwise max over the neighbours."""
     ell, x = _toy_graph(d_in=1)
+
     def edge_fn(h_i, h_j, w, ij):
         return w + h_j  # additive in the tropical sense
 
     out = semiring_ell_edge_aggregate(
-        edge_fn, ell, x, semiring=TROPICAL_MAX_PLUS,
+        edge_fn,
+        ell,
+        x,
+        semiring=TROPICAL_MAX_PLUS,
     )
     # Hand-roll: per row, max over the 3 (value + neighbour) sums
     ref = jnp.zeros_like(out)
@@ -110,13 +115,17 @@ def test_tropical_max_plus_semiring():
 
 
 def test_tropical_min_plus_semiring():
-    '''MIN_PLUS reduction returns elementwise min over the neighbours.'''
+    """MIN_PLUS reduction returns elementwise min over the neighbours."""
     ell, x = _toy_graph(d_in=1)
+
     def edge_fn(h_i, h_j, w, ij):
         return w + h_j
 
     out = semiring_ell_edge_aggregate(
-        edge_fn, ell, x, semiring=TROPICAL_MIN_PLUS,
+        edge_fn,
+        ell,
+        x,
+        semiring=TROPICAL_MIN_PLUS,
     )
     n, k_max = ell.values.shape
     ref = jnp.zeros_like(out)
@@ -131,21 +140,26 @@ def test_tropical_min_plus_semiring():
 
 
 def test_padding_absorbed_when_user_multiplies_by_w():
-    '''When edge_fn multiplies by ``w``, ELL pad rows (w=0)
+    """When edge_fn multiplies by ``w``, ELL pad rows (w=0)
     contribute 0 to the REAL aggregate -- matching the documented
     user contract.
-    '''
+    """
     n, k_max, d_in = 5, 4, 2
     # Build an ELL where the LAST column of every row is padding:
     # indices point to row 0, values = 0.
     rng = np.random.default_rng(0)
     values_full = rng.standard_normal((n, k_max - 1))
-    values = jnp.asarray(np.concatenate(
-        [values_full, np.zeros((n, 1))], axis=1,
-    ))
+    values = jnp.asarray(
+        np.concatenate(
+            [values_full, np.zeros((n, 1))],
+            axis=1,
+        )
+    )
     indices_full = rng.integers(0, n, (n, k_max - 1))
     indices = jnp.asarray(
-        np.concatenate([indices_full, np.zeros((n, 1))], axis=1).astype(np.int32),
+        np.concatenate([indices_full, np.zeros((n, 1))], axis=1).astype(
+            np.int32
+        ),
     )
     x = jnp.asarray(rng.standard_normal((n, d_in)))
     ell = ELL(values=values, indices=indices, n_cols=n, identity=0.0)
@@ -168,7 +182,7 @@ def test_padding_absorbed_when_user_multiplies_by_w():
 
 
 def test_differentiable_through_edge_fn_params():
-    '''Gradients flow through parameters captured in the edge_fn closure.'''
+    """Gradients flow through parameters captured in the edge_fn closure."""
     ell, x = _toy_graph()
     d_out = 4
     d_in = x.shape[-1]
@@ -177,8 +191,9 @@ def test_differentiable_through_edge_fn_params():
     def loss(W):
         def edge_fn(h_i, h_j, w, ij):
             return w * (W @ h_j)
+
         out = semiring_ell_edge_aggregate(edge_fn, ell, x, semiring=REAL)
-        return jnp.sum(out ** 2)
+        return jnp.sum(out**2)
 
     g = jax.grad(loss)(W)
     assert g.shape == W.shape
@@ -187,14 +202,17 @@ def test_differentiable_through_edge_fn_params():
 
 
 def test_differentiable_through_x():
-    '''Gradients flow back to the input features.'''
+    """Gradients flow back to the input features."""
     ell, x = _toy_graph()
     d_out = 4
-    W = jnp.asarray(np.random.default_rng(1).standard_normal((d_out, x.shape[-1])))
+    W = jnp.asarray(
+        np.random.default_rng(1).standard_normal((d_out, x.shape[-1]))
+    )
 
     def loss(x):
         def edge_fn(h_i, h_j, w, ij):
             return w * (W @ h_j)
+
         return jnp.sum(
             semiring_ell_edge_aggregate(edge_fn, ell, x, semiring=REAL) ** 2,
         )
@@ -205,9 +223,9 @@ def test_differentiable_through_x():
 
 
 def test_batched_matches_unbatched():
-    '''Leading batch dims on ``x`` produce per-batch results that
+    """Leading batch dims on ``x`` produce per-batch results that
     match the unbatched fit.
-    '''
+    """
     ell, x = _toy_graph(n=4, d_in=3)
     rng = np.random.default_rng(0)
     W = jnp.asarray(rng.standard_normal((5, 3)))
@@ -218,21 +236,30 @@ def test_batched_matches_unbatched():
     B = 4
     x_batched = jnp.stack([x + 0.1 * b for b in range(B)])  # (B, n, d_in)
     out_batched = semiring_ell_edge_aggregate(
-        edge_fn, ell, x_batched, semiring=REAL,
+        edge_fn,
+        ell,
+        x_batched,
+        semiring=REAL,
     )
     assert out_batched.shape == (B, 4, 5)
     for b in range(B):
         out_single = semiring_ell_edge_aggregate(
-            edge_fn, ell, x_batched[b], semiring=REAL,
+            edge_fn,
+            ell,
+            x_batched[b],
+            semiring=REAL,
         )
         np.testing.assert_allclose(
-            out_batched[b], out_single, atol=1e-13,
+            out_batched[b],
+            out_single,
+            atol=1e-13,
         )
 
 
 def test_unsupported_semiring_raises():
-    '''LOG is not yet supported -- should raise NotImplementedError.'''
+    """LOG is not yet supported -- should raise NotImplementedError."""
     ell, x = _toy_graph()
+
     def edge_fn(h_i, h_j, w, ij):
         return w * h_j
 
@@ -256,9 +283,9 @@ def _toy_graph_with_attr(n=5, k_max=3, d_in=2, d_e=4, seed=0):
 
 
 def test_edge_attr_gatv2_shaped_matches_brute_force():
-    '''A GATv2-style edge_fn that folds a per-edge attribute vector
+    """A GATv2-style edge_fn that folds a per-edge attribute vector
     into the message matches a Python brute-force reference.
-    '''
+    """
     ell, x, edge_attr = _toy_graph_with_attr(d_in=3, d_e=4)
     n, k_max = ell.values.shape
     d_out = 6
@@ -270,7 +297,11 @@ def test_edge_attr_gatv2_shaped_matches_brute_force():
         return w * (W @ h_j + W_e @ a)
 
     out = semiring_ell_edge_aggregate(
-        edge_fn, ell, x, semiring=REAL, edge_attr=edge_attr,
+        edge_fn,
+        ell,
+        x,
+        semiring=REAL,
+        edge_attr=edge_attr,
     )
     assert out.shape == (n, d_out)
 
@@ -285,9 +316,9 @@ def test_edge_attr_gatv2_shaped_matches_brute_force():
 
 
 def test_edge_attr_none_keeps_four_arg_contract():
-    '''With edge_attr=None (default) the four-argument edge_fn path is
+    """With edge_attr=None (default) the four-argument edge_fn path is
     unchanged -- the scalar w is the third argument.
-    '''
+    """
     ell, x = _toy_graph(d_in=2)
     n, k_max = ell.values.shape
     W = jnp.asarray(np.random.default_rng(1).standard_normal((3, 2)))
@@ -297,23 +328,31 @@ def test_edge_attr_none_keeps_four_arg_contract():
 
     out_default = semiring_ell_edge_aggregate(edge_fn, ell, x, semiring=REAL)
     out_explicit = semiring_ell_edge_aggregate(
-        edge_fn, ell, x, semiring=REAL, edge_attr=None,
+        edge_fn,
+        ell,
+        x,
+        semiring=REAL,
+        edge_attr=None,
     )
     np.testing.assert_array_equal(out_default, out_explicit)
 
 
 def test_edge_attr_preserves_scalar_w_for_padding():
-    '''edge_attr does not displace the scalar w: pad rows (w=0) are
+    """edge_attr does not displace the scalar w: pad rows (w=0) are
     still absorbed when the message multiplies by w, even though a
     per-edge attribute vector is also supplied.
-    '''
+    """
     n, k_max, d_in, d_e = 5, 4, 2, 3
     rng = np.random.default_rng(0)
     values_full = rng.standard_normal((n, k_max - 1))
-    values = jnp.asarray(np.concatenate([values_full, np.zeros((n, 1))], axis=1))
+    values = jnp.asarray(
+        np.concatenate([values_full, np.zeros((n, 1))], axis=1)
+    )
     indices_full = rng.integers(0, n, (n, k_max - 1))
     indices = jnp.asarray(
-        np.concatenate([indices_full, np.zeros((n, 1))], axis=1).astype(np.int32),
+        np.concatenate([indices_full, np.zeros((n, 1))], axis=1).astype(
+            np.int32
+        ),
     )
     x = jnp.asarray(rng.standard_normal((n, d_in)))
     edge_attr = jnp.asarray(rng.standard_normal((n, k_max, d_e)))
@@ -326,7 +365,11 @@ def test_edge_attr_preserves_scalar_w_for_padding():
         return w * (W @ h_j + W_e @ a)
 
     out = semiring_ell_edge_aggregate(
-        edge_fn, ell, x, semiring=REAL, edge_attr=edge_attr,
+        edge_fn,
+        ell,
+        x,
+        semiring=REAL,
+        edge_attr=edge_attr,
     )
     ref = jnp.zeros((n, 4))
     for i in range(n):
@@ -338,7 +381,7 @@ def test_edge_attr_preserves_scalar_w_for_padding():
 
 
 def test_edge_attr_wrong_shape_raises():
-    '''edge_attr that does not lead with (n, k_max) raises a clear error.'''
+    """edge_attr that does not lead with (n, k_max) raises a clear error."""
     ell, x, edge_attr = _toy_graph_with_attr(n=5, k_max=3, d_e=4)
 
     def edge_fn(h_i, h_j, w, ij, a):
@@ -347,12 +390,16 @@ def test_edge_attr_wrong_shape_raises():
     bad = edge_attr[:, :2]  # wrong k_max
     with pytest.raises(ValueError, match='edge_attr'):
         semiring_ell_edge_aggregate(
-            edge_fn, ell, x, semiring=REAL, edge_attr=bad,
+            edge_fn,
+            ell,
+            x,
+            semiring=REAL,
+            edge_attr=bad,
         )
 
 
 def test_edge_attr_batched_shares_across_batch():
-    '''edge_attr is shared across leading batch axes of x, like values.'''
+    """edge_attr is shared across leading batch axes of x, like values."""
     ell, x, edge_attr = _toy_graph_with_attr(n=4, k_max=3, d_in=3, d_e=2)
     rng = np.random.default_rng(3)
     W = jnp.asarray(rng.standard_normal((5, 3)))
@@ -364,18 +411,26 @@ def test_edge_attr_batched_shares_across_batch():
     B = 3
     x_batched = jnp.stack([x + 0.1 * b for b in range(B)])
     out_batched = semiring_ell_edge_aggregate(
-        edge_fn, ell, x_batched, semiring=REAL, edge_attr=edge_attr,
+        edge_fn,
+        ell,
+        x_batched,
+        semiring=REAL,
+        edge_attr=edge_attr,
     )
     assert out_batched.shape == (B, 4, 5)
     for b in range(B):
         out_single = semiring_ell_edge_aggregate(
-            edge_fn, ell, x_batched[b], semiring=REAL, edge_attr=edge_attr,
+            edge_fn,
+            ell,
+            x_batched[b],
+            semiring=REAL,
+            edge_attr=edge_attr,
         )
         np.testing.assert_allclose(out_batched[b], out_single, atol=1e-13)
 
 
 def test_edge_attr_differentiable_through_edge_params():
-    '''Gradients flow through the edge-attribute projection matrix.'''
+    """Gradients flow through the edge-attribute projection matrix."""
     ell, x, edge_attr = _toy_graph_with_attr(d_in=3, d_e=4)
     d_out = 5
     rng = np.random.default_rng(9)
@@ -384,10 +439,15 @@ def test_edge_attr_differentiable_through_edge_params():
     def loss(W_e):
         def edge_fn(h_i, h_j, w, ij, a):
             return w * (W @ h_j + W_e @ a)
+
         out = semiring_ell_edge_aggregate(
-            edge_fn, ell, x, semiring=REAL, edge_attr=edge_attr,
+            edge_fn,
+            ell,
+            x,
+            semiring=REAL,
+            edge_attr=edge_attr,
         )
-        return jnp.sum(out ** 2)
+        return jnp.sum(out**2)
 
     W_e0 = jnp.asarray(rng.standard_normal((d_out, edge_attr.shape[-1])))
     g = jax.grad(loss)(W_e0)
@@ -402,9 +462,9 @@ def test_edge_attr_differentiable_through_edge_params():
 
 
 def test_ell_row_softmax_matches_masked_dense_softmax():
-    '''Row softmax over the ELL slots equals a masked dense softmax,
+    """Row softmax over the ELL slots equals a masked dense softmax,
     with padding (values == identity) excluded.
-    '''
+    """
     n, k_max = 6, 4
     rng = np.random.default_rng(0)
     # Binary adjacency: 1 at valid edges, 0 at pad (identity 0.0).
@@ -424,17 +484,23 @@ def test_ell_row_softmax_matches_masked_dense_softmax():
     ref = e / e.sum(axis=-1, keepdims=True)
     np.testing.assert_allclose(out, ref, atol=1e-13)
     # Valid rows sum to 1.
-    np.testing.assert_allclose(np.asarray(out).sum(axis=-1), np.ones(n), atol=1e-13)
+    np.testing.assert_allclose(
+        np.asarray(out).sum(axis=-1), np.ones(n), atol=1e-13
+    )
 
 
 def test_ell_row_softmax_all_pad_row_is_zero():
-    '''An isolated vertex (all-pad row) returns zeros, not NaN.'''
+    """An isolated vertex (all-pad row) returns zeros, not NaN."""
     n, k_max = 3, 3
-    values = jnp.asarray(np.array([
-        [1.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0],  # all padding -> isolated
-        [1.0, 0.0, 0.0],
-    ]))
+    values = jnp.asarray(
+        np.array(
+            [
+                [1.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0],  # all padding -> isolated
+                [1.0, 0.0, 0.0],
+            ]
+        )
+    )
     indices = jnp.zeros((n, k_max), dtype=jnp.int32)
     ell = ELL(values=values, indices=indices, n_cols=n, identity=0.0)
     scores = jnp.asarray(np.random.default_rng(0).standard_normal((n, k_max)))
@@ -445,9 +511,9 @@ def test_ell_row_softmax_all_pad_row_is_zero():
 
 
 def test_ell_row_softmax_then_aggregate_is_convex_combination():
-    '''Using ell_row_softmax weights as the message scale yields a
+    """Using ell_row_softmax weights as the message scale yields a
     per-row convex combination of neighbour features (GAT readout).
-    '''
+    """
     n, k_max, d = 5, 4, 3
     rng = np.random.default_rng(1)
     valid = np.ones((n, k_max), dtype=bool)
@@ -467,14 +533,14 @@ def test_ell_row_softmax_then_aggregate_is_convex_combination():
     out = semiring_ell_edge_aggregate(edge_fn, ell_alpha, x, semiring=REAL)
     # Each output row is within the convex hull of its neighbour feats.
     for i in range(n):
-        neigh = np.asarray(x[np.asarray(indices[i])[:k_max - 1]])
+        neigh = np.asarray(x[np.asarray(indices[i])[: k_max - 1]])
         lo, hi = neigh.min(axis=0), neigh.max(axis=0)
         assert bool(np.all(np.asarray(out[i]) >= lo - 1e-9))
         assert bool(np.all(np.asarray(out[i]) <= hi + 1e-9))
 
 
 def test_index_pair_seen_by_edge_fn():
-    '''edge_fn receives the (i, j) pair correctly.'''
+    """edge_fn receives the (i, j) pair correctly."""
     ell, x = _toy_graph(n=4, k_max=3, d_in=1)
 
     # Build an edge_fn that uses ij; the output should reflect

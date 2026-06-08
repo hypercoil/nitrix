@@ -98,6 +98,11 @@ quote-style = "single"
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+# Test modules call ``jax.config.update('jax_enable_x64', True)`` before
+# importing nitrix (x64 must be set at trace time), which forces the
+# library imports below the config call -- a deliberate, suite-wide
+# pattern, not misplaced imports.
+"tests/*" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = [

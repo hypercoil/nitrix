@@ -35,14 +35,14 @@ What changed from ``nitrix.functional.window``:
   of ``jax.random.multinomial`` (already done in the prior
   numpyro-strip pass; this rewrite preserves it).
 """
+
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Num
-
 
 __all__ = ['sample_windows']
 
@@ -53,7 +53,7 @@ def _select_overlapping_starts(
     num_windows: int,
     key: jax.Array,
 ) -> Array:
-    '''Pick ``num_windows`` distinct starts uniformly from the valid range.'''
+    """Pick ``num_windows`` distinct starts uniformly from the valid range."""
     return jax.random.choice(
         key,
         a=(input_size - window_size + 1),
@@ -68,13 +68,13 @@ def _select_nonoverlapping_starts(
     num_windows: int,
     key: jax.Array,
 ) -> Array:
-    '''Choose non-overlapping window starts.
+    """Choose non-overlapping window starts.
 
     Distribute the ``unused = input_size - num_windows * window_size``
     free slots across the ``num_windows + 1`` gaps via a uniform
     multinomial draw; the cumulative gap sizes plus window-offsets
     give the starts.
-    '''
+    """
     unused_size = input_size - window_size * num_windows
     if unused_size < 0:
         raise ValueError(
@@ -84,7 +84,9 @@ def _select_nonoverlapping_starts(
             f'{num_windows * window_size}).'
         )
     probs = jnp.full(num_windows + 1, 1.0 / (num_windows + 1))
-    intervals = jax.random.multinomial(key, unused_size, probs).astype(jnp.int32)
+    intervals = jax.random.multinomial(key, unused_size, probs).astype(
+        jnp.int32
+    )
     starts = jnp.arange(num_windows + 1) * window_size + jnp.cumsum(intervals)
     return starts[:-1]
 
@@ -100,7 +102,7 @@ def sample_windows(
     multiplying_axis: int = 0,
     key: jax.Array,
 ) -> Num[Array, '...']:
-    '''Sample fixed-size windows from a tensor along one axis.
+    """Sample fixed-size windows from a tensor along one axis.
 
     Parameters
     ----------
@@ -147,18 +149,24 @@ def sample_windows(
     deterministic; gradients flow through the sliced values but
     not through the random key.  For reproducibility, pin
     ``key``.
-    '''
+    """
     tensor = jnp.asarray(tensor)
     windowing_axis = windowing_axis % tensor.ndim
     input_size = tensor.shape[windowing_axis]
 
     if allow_overlap:
         starts = _select_overlapping_starts(
-            input_size, window_size, num_windows, key,
+            input_size,
+            window_size,
+            num_windows,
+            key,
         )
     else:
         starts = _select_nonoverlapping_starts(
-            input_size, window_size, num_windows, key,
+            input_size,
+            window_size,
+            num_windows,
+            key,
         )
 
     sizes = tuple(

@@ -37,6 +37,7 @@ Renamings from legacy code, for clarity:
 - ``vec_int`` -> ``integrate_velocity_field``.
 - ``cmass_regular_grid`` -> ``center_of_mass_grid``.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Literal, Optional, Sequence, Union, cast
@@ -57,7 +58,6 @@ from ._interpolate import (
     _resample_on_grid,
     _sample_at_coords,
 )
-
 
 __all__ = [
     'identity_grid',
@@ -97,7 +97,7 @@ def identity_grid(
     *,
     dtype: DTypeLike = jnp.float32,
 ) -> Float[Array, '*spatial ndim']:
-    '''The identity deformation: per-pixel its own coordinate.
+    """The identity deformation: per-pixel its own coordinate.
 
     For a 2D image of shape ``(H, W)`` returns a ``(H, W, 2)`` grid
     where ``grid[i, j] == (i, j)``.  For 3D ``(D, H, W)`` returns
@@ -118,9 +118,8 @@ def identity_grid(
     Returns
     -------
     Coordinate grid, ``(*spatial_shape, ndim)``.
-    '''
+    """
     spatial_shape = tuple(int(s) for s in spatial_shape)
-    ndim = len(spatial_shape)
     grids = jnp.meshgrid(
         *[jnp.arange(s, dtype=dtype) for s in spatial_shape],
         indexing='ij',
@@ -141,7 +140,7 @@ def spatial_transform(
     cval: float = 0.0,
     method: Interpolator = Linear(),
 ) -> Float[Array, '*leading *spatial c']:
-    '''Warp an image by a per-pixel deformation field.
+    """Warp an image by a per-pixel deformation field.
 
     For each output pixel at coordinate ``p``, the result is
     ``image`` sampled at ``deformation[p]`` via the interpolation
@@ -200,7 +199,7 @@ def spatial_transform(
     No cubic (``order=3``) B-spline path exists yet (tracked in
     ``docs/feature-requests/cubic-resample.md``).  See ``resample``
     Notes for the parity implication.
-    '''
+    """
     ndim = deformation.shape[-1]
     # The image has one trailing channel dim plus ``ndim`` spatial
     # dims; the deformation has one trailing ``ndim`` axis plus
@@ -229,7 +228,11 @@ def spatial_transform(
         deformation_: Float[Array, '*spatial ndim'],
     ) -> Float[Array, '*spatial c']:
         return _sample_at_coords(
-            image_, deformation_, method=method, mode=mode, cval=cval,
+            image_,
+            deformation_,
+            method=method,
+            mode=mode,
+            cval=cval,
         )
 
     fn: Callable[..., Any] = core
@@ -249,7 +252,7 @@ def spatial_transform_batched(
     cval: float = 0.0,
     method: Interpolator = Linear(),
 ) -> Float[Array, '...']:
-    '''Map ``spatial_transform`` over a single leading batch axis.
+    """Map ``spatial_transform`` over a single leading batch axis.
 
     Convenience wrapper for the common case where the batch axis is
     carried by only one operand: a batch of images warped by a
@@ -294,7 +297,7 @@ def spatial_transform_batched(
     operand across *several* leading batch dims, broadcast it to the
     full batch shape and call ``spatial_transform`` directly (which
     handles multiple matching leading dims natively).
-    '''
+    """
     ndim = deformation.shape[-1]
     core_rank = ndim + 1
     image_batched = image.ndim > core_rank
@@ -317,7 +320,11 @@ def spatial_transform_batched(
         deformation_: Float[Array, '*spatial ndim'],
     ) -> Float[Array, '*spatial c']:
         return spatial_transform(
-            image_, deformation_, mode=mode, cval=cval, method=method,
+            image_,
+            deformation_,
+            mode=mode,
+            cval=cval,
+            method=method,
         )
 
     # ``jax.vmap`` erases the return type to Any (matching the
@@ -338,7 +345,7 @@ def integrate_velocity_field(
     mode: BoundaryMode = 'nearest',
     cval: float = 0.0,
 ) -> Float[Array, '*spatial ndim']:
-    '''Diffeomorphic exponential map via scaling-and-squaring.
+    """Diffeomorphic exponential map via scaling-and-squaring.
 
     Integrates a *stationary* velocity field ``v`` to obtain a
     displacement field ``phi`` such that ``phi ~= exp(v)`` (in the
@@ -393,7 +400,7 @@ def integrate_velocity_field(
     sprint; downstream code that relied on the old default needs
     to pass ``mode="constant"`` explicitly.  See
     ``docs/design/geometry.md`` for the rationale.
-    '''
+    """
     spatial_rank = velocity.shape[-1]
     spatial_shape = velocity.shape[:-1]
     if len(spatial_shape) != spatial_rank:
@@ -404,12 +411,15 @@ def integrate_velocity_field(
         )
     id_grid = identity_grid(spatial_shape, dtype=velocity.dtype)
     # Initial small step.
-    phi = velocity / float(2 ** n_steps)
+    phi = velocity / float(2**n_steps)
     # ``phi`` is treated as a displacement (relative); we compose
     # by warping it through the deformation ``id + phi`` each step.
     for _ in range(n_steps):
         phi = phi + spatial_transform(
-            phi, id_grid + phi, mode=mode, cval=cval,
+            phi,
+            id_grid + phi,
+            mode=mode,
+            cval=cval,
         )
     return phi
 
@@ -427,7 +437,7 @@ def resample(
     cval: float = 0.0,
     method: Interpolator = Linear(),
 ) -> Float[Array, '*target c']:
-    '''Resize a channel-last image to ``target_shape``.
+    """Resize a channel-last image to ``target_shape``.
 
     The common dispatcher over the available interpolation methods.
     Sample positions are evenly distributed: output pixel ``i`` along
@@ -473,7 +483,7 @@ def resample(
     **not** achieved; ``Linear`` is adequate for most consumers.  A
     separable B-spline prefilter + cubic sampling is tracked as a
     future enhancement (``docs/feature-requests/cubic-resample.md``).
-    '''
+    """
     spatial_shape = image.shape[:-1]
     if len(target_shape) != len(spatial_shape):
         raise ValueError(
@@ -490,11 +500,18 @@ def resample(
             ax = jnp.array([0.0], dtype=image.dtype)
         else:
             ax = jnp.linspace(
-                0.0, float(in_size - 1), int(out_size), dtype=image.dtype,
+                0.0,
+                float(in_size - 1),
+                int(out_size),
+                dtype=image.dtype,
             )
         axes.append(ax)
     return _resample_on_grid(
-        image, axes, method=method, mode=mode, cval=cval,
+        image,
+        axes,
+        method=method,
+        mode=mode,
+        cval=cval,
     )
 
 
@@ -509,7 +526,7 @@ def center_of_mass_grid(
     axes: Optional[Sequence[int]] = None,
     na_value: Optional[float] = None,
 ) -> Float[Array, '... ndim']:
-    '''Centre of mass over a regular grid of unit-spaced coordinates.
+    """Centre of mass over a regular grid of unit-spaced coordinates.
 
     For a tensor ``weight``, computes the centre of mass treating
     each cell's coordinate along axis ``d`` as its index ``i_d``
@@ -536,7 +553,7 @@ def center_of_mass_grid(
     Per-slice centre-of-mass coordinates, with the reduced axes
     replaced by a single trailing axis of length ``len(axes)``
     (in the order they were reduced).
-    '''
+    """
     ndim = weight.ndim
     if axes is None:
         axes = tuple(range(ndim))
@@ -576,7 +593,7 @@ def _central_diff_along_axis(
     mode: BoundaryMode,
     spacing: float,
 ) -> Float[Array, '... s c']:
-    '''Per-axis central difference of a channel-last field.
+    """Per-axis central difference of a channel-last field.
 
     ``spatial_axis`` indexes the axis to differentiate along
     (negative-indexable).  Boundary handling: ``mode='nearest'``
@@ -590,7 +607,7 @@ def _central_diff_along_axis(
     difference; the denominator is still ``2 * spacing`` (matching
     scipy / voxelmorph convention which treats the boundary cell
     as if neighbouring itself).
-    '''
+    """
     n = field.ndim
     ax = spatial_axis % n
     # Build the "next" and "prev" along ax by rolling, then patch
@@ -628,14 +645,13 @@ def _central_diff_along_axis(
         prv = prv.at[tuple(sl_first)].set(field[tuple(sl_one)])
     else:
         raise ValueError(
-            f'boundary_mode={mode!r}; expected "nearest", "wrap", or '
-            '"mirror".'
+            f'boundary_mode={mode!r}; expected "nearest", "wrap", or "mirror".'
         )
     return (nxt - prv) / (2.0 * spacing)
 
 
 def _negate_at_index(x: Array, axis: int, index: int) -> Array:
-    '''Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged.'''
+    """Negate ``x`` at ``index`` along ``axis``, leave the rest unchanged."""
     n = x.ndim
     axis_norm = axis % n
     sl = [slice(None)] * n
@@ -649,7 +665,7 @@ def jacobian_displacement(
     boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest',
     spacing: Union[float, Sequence[float]] = 1.0,
 ) -> Float[Array, '... *spatial d d']:
-    '''Per-point Jacobian of the deformation φ = id + u.
+    """Per-point Jacobian of the deformation φ = id + u.
 
     For a channel-last displacement field ``u`` with ``d`` spatial
     axes, returns ``J[..., i, j] = δ_{i,j} + ∂ u_i / ∂ x_j``,
@@ -683,9 +699,9 @@ def jacobian_displacement(
     For folding detection use ``jacobian_det_displacement`` which
     avoids materialising the full Jacobian when only the
     determinant is needed.
-    '''
+    """
     d = u.shape[-1]
-    spatial_shape = u.shape[-(d + 1):-1]
+    spatial_shape = u.shape[-(d + 1) : -1]
     if len(spatial_shape) != d:
         raise ValueError(
             f'jacobian_displacement: trailing displacement-channel '
@@ -707,10 +723,14 @@ def jacobian_displacement(
     cols = []
     for j in range(d):
         spatial_axis_j = -(d + 1) + j  # 0 <= j < d
-        cols.append(_central_diff_along_axis(
-            u, spatial_axis_j,
-            mode=boundary_mode, spacing=spacing_per_axis[j],
-        ))
+        cols.append(
+            _central_diff_along_axis(
+                u,
+                spatial_axis_j,
+                mode=boundary_mode,
+                spacing=spacing_per_axis[j],
+            )
+        )
     # Stack columns into the Jacobian: each cols[j] has shape
     # (..., *spatial, d) representing ∂u/∂x_j (one displacement
     # component per index along the trailing axis).  J[..., i, j] is
@@ -728,7 +748,7 @@ def jacobian_det_displacement(
     boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest',
     spacing: Union[float, Sequence[float]] = 1.0,
 ) -> Float[Array, '... *spatial']:
-    '''Per-point determinant of the deformation Jacobian.
+    """Per-point determinant of the deformation Jacobian.
 
     Computes ``det(I + ∇u)`` at each spatial location.  For
     ``d <= 3`` uses the explicit closed-form determinant (avoiding
@@ -744,9 +764,11 @@ def jacobian_det_displacement(
     there).  The standard QA threshold is "no voxels with
     ``det <= 0``"; the soft regulariser is
     ``mean(max(0, ε - det)^2)`` for some ``ε > 0``.
-    '''
+    """
     J = jacobian_displacement(
-        u, boundary_mode=boundary_mode, spacing=spacing,
+        u,
+        boundary_mode=boundary_mode,
+        spacing=spacing,
     )
     d = u.shape[-1]
     if d == 1:
@@ -760,13 +782,17 @@ def jacobian_det_displacement(
         return a * d_ - b * c
     if d == 3:
         # Rule of Sarrus.
-        a = J[..., 0, 0]; b = J[..., 0, 1]; c = J[..., 0, 2]
-        d_ = J[..., 1, 0]; e = J[..., 1, 1]; f = J[..., 1, 2]
-        g = J[..., 2, 0]; h = J[..., 2, 1]; i = J[..., 2, 2]
+        a = J[..., 0, 0]
+        b = J[..., 0, 1]
+        c = J[..., 0, 2]
+        d_ = J[..., 1, 0]
+        e = J[..., 1, 1]
+        f = J[..., 1, 2]
+        g = J[..., 2, 0]
+        h = J[..., 2, 1]
+        i = J[..., 2, 2]
         return (
-            a * (e * i - f * h)
-            - b * (d_ * i - f * g)
-            + c * (d_ * h - e * g)
+            a * (e * i - f * h) - b * (d_ * i - f * g) + c * (d_ * h - e * g)
         )
     # ``jnp.linalg.det`` is typed as returning Any; restore the array type.
     return cast(Float[Array, '...'], jnp.linalg.det(J))

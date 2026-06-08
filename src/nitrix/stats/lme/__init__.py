@@ -27,6 +27,7 @@ caller can tune via ``n_iter``.  Differentiable through the
 output statistics via the implicit-function-theorem VJP (see
 ``docs/design/lme.md``).
 """
+
 from .flame import FLAMEResult, flame_two_level
 from .reml import REMLResult, reml_fit
 

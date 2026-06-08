@@ -10,6 +10,7 @@ Coverage:
   unit-sphere invariant; 1-ring degree = 5 on the base icosahedron;
   cotangent Laplacian sends constants to zero (machine eps).
 """
+
 from __future__ import annotations
 
 import jax
@@ -38,8 +39,12 @@ from nitrix.sparse import (
 
 def _apply_ell(op, x):
     return semiring_ell_matmul(
-        op.values, op.indices, x, semiring=REAL,
-        n_cols=op.n_cols, backend='jax',
+        op.values,
+        op.indices,
+        x,
+        semiring=REAL,
+        n_cols=op.n_cols,
+        backend='jax',
     )
 
 
@@ -55,7 +60,7 @@ def test_grid_laplacian_1d_constant_is_zero():
 
 
 def test_grid_laplacian_1d_x_squared_gives_two_interior():
-    '''d²x²/dx² = 2 exactly (interior); boundary uses replicate.'''
+    """d²x²/dx² = 2 exactly (interior); boundary uses replicate."""
     op = grid_laplacian((5,), boundary='replicate')
     x = jnp.asarray([1.0, 4.0, 9.0, 16.0, 25.0])  # i^2 for i=1..5
     y = _apply_ell(op, x[:, None])[:, 0]
@@ -111,7 +116,7 @@ def test_grid_laplacian_2d_matches_scipy_reflect():
 
 
 def test_grid_laplacian_anisotropic_spacing():
-    '''Per-axis spacing scales the per-axis Laplacian weight by 1/h^2.'''
+    """Per-axis spacing scales the per-axis Laplacian weight by 1/h^2."""
     op = grid_laplacian((4, 4), spacing=(1.0, 2.0))
     # Centre weight = -2 * (1/1^2 + 1/2^2) = -2 * 1.25 = -2.5
     np.testing.assert_allclose(float(op.values[5, 0]), -2.5, atol=1e-13)
@@ -137,11 +142,14 @@ def test_grid_identity_acts_as_identity():
 
 
 def test_regular_grid_stencil_general():
-    '''Custom 2-D stencil: average of NN-4 neighbours (mean smoother).'''
+    """Custom 2-D stencil: average of NN-4 neighbours (mean smoother)."""
     offsets = [[1, 0], [-1, 0], [0, 1], [0, -1]]
     weights = jnp.array([0.25, 0.25, 0.25, 0.25])
     op = regular_grid_stencil(
-        (4, 4), offsets, weights, boundary='replicate',
+        (4, 4),
+        offsets,
+        weights,
+        boundary='replicate',
     )
     # Applied to a constant: still constant.
     x = jnp.ones((16, 1))
@@ -160,13 +168,13 @@ def test_icosphere_base_counts():
 
 
 def test_icosphere_subdivision_counts():
-    '''10 * 4^n + 2 vertices, 20 * 4^n faces.'''
+    """10 * 4^n + 2 vertices, 20 * 4^n faces."""
     for n in (0, 1, 2, 3):
         m = icosphere(n)
-        assert m.n_vertices == 10 * (4 ** n) + 2, (
+        assert m.n_vertices == 10 * (4**n) + 2, (
             f'ico{n}: expected {10 * 4**n + 2} verts, got {m.n_vertices}'
         )
-        assert m.n_faces == 20 * (4 ** n)
+        assert m.n_faces == 20 * (4**n)
 
 
 def test_icosphere_vertices_on_unit_sphere():
@@ -181,7 +189,7 @@ def test_icosphere_vertices_on_unit_sphere():
 
 
 def test_icosahedron_one_ring_degree_is_five():
-    '''Every vertex of the base icosahedron has exactly 5 neighbours.'''
+    """Every vertex of the base icosahedron has exactly 5 neighbours."""
     m = icosphere(0)
     adj = mesh_k_ring_adjacency(m, k=1, binary=True)
     degrees = adj.values.sum(axis=-1)
@@ -189,9 +197,9 @@ def test_icosahedron_one_ring_degree_is_five():
 
 
 def test_icosphere_subdivided_one_ring_max_degree():
-    '''After subdivision: original vertices keep degree 5; new
+    """After subdivision: original vertices keep degree 5; new
     (edge-midpoint) vertices have degree 6.  So max degree is 6.
-    '''
+    """
     m = icosphere(2)
     adj = mesh_k_ring_adjacency(m, k=1)
     degrees = adj.values.sum(axis=-1)
@@ -200,14 +208,14 @@ def test_icosphere_subdivided_one_ring_max_degree():
 
 
 def test_mesh_k_ring_row_stochastic():
-    '''binary=False rows sum to 1 (row-stochastic adjacency).'''
+    """binary=False rows sum to 1 (row-stochastic adjacency)."""
     m = icosphere(1)
     adj = mesh_k_ring_adjacency(m, k=1, binary=False)
     np.testing.assert_allclose(adj.values.sum(axis=-1), 1.0, atol=1e-6)
 
 
 def test_mesh_adjacency_matvec_matches_dense():
-    '''ELL adjacency matvec equals the dense brute-force version.'''
+    """ELL adjacency matvec equals the dense brute-force version."""
     m = icosphere(1)
     adj = mesh_k_ring_adjacency(m, k=1, binary=True)
     x = jax.random.normal(jax.random.key(0), (m.n_vertices, 1))
@@ -230,8 +238,8 @@ def test_mesh_adjacency_matvec_matches_dense():
 
 
 def test_mesh_cotangent_laplacian_sends_constants_to_zero():
-    '''Row sums of any discrete Laplacian are zero (constants are
-    in the null space).'''
+    """Row sums of any discrete Laplacian are zero (constants are
+    in the null space)."""
     m = icosphere(2)
     L = mesh_cotangent_laplacian(m)
     ones = jnp.ones((m.n_vertices, 1))
@@ -240,11 +248,11 @@ def test_mesh_cotangent_laplacian_sends_constants_to_zero():
 
 
 def test_mesh_cotangent_laplacian_is_psd_smoke():
-    '''Smoke check: per-row diagonal weight is positive (the assembled
+    """Smoke check: per-row diagonal weight is positive (the assembled
     L is at least diagonally dominant in the PSD form).
 
     By construction the diagonal entry is in column 0.
-    '''
+    """
     m = icosphere(1)
     L = mesh_cotangent_laplacian(m)
     diag_indices = L.indices[:, 0]
@@ -255,17 +263,21 @@ def test_mesh_cotangent_laplacian_is_psd_smoke():
 
 
 def test_mesh_cotangent_differentiable():
-    '''Cotangent Laplacian is constructed once at trace time; the
+    """Cotangent Laplacian is constructed once at trace time; the
     matvec is differentiable through the values.  Verify that a
     trace-and-grad pipeline returns finite gradients w.r.t. the
     input signal.
-    '''
+    """
     m = icosphere(1)
     L = mesh_cotangent_laplacian(m)
+
     def loss(x):
         y = _apply_ell(L, x[:, None])[:, 0]
-        return jnp.sum(y ** 2)
-    x = jax.random.normal(jax.random.key(0), (m.n_vertices,), dtype=L.values.dtype)
+        return jnp.sum(y**2)
+
+    x = jax.random.normal(
+        jax.random.key(0), (m.n_vertices,), dtype=L.values.dtype
+    )
     g = jax.grad(loss)(x)
     assert g.shape == x.shape
     assert bool(jnp.all(jnp.isfinite(g)))
@@ -277,18 +289,23 @@ def test_mesh_cotangent_differentiable():
 
 
 def test_mesh_pool_max_takes_window_max():
-    '''mesh_pool_max applied with a cross-level ELL returns the
+    """mesh_pool_max applied with a cross-level ELL returns the
     per-coarse-vertex max of the named fine-vertex features.
-    '''
+    """
     rng = np.random.default_rng(0)
     n_coarse, n_fine, win = 5, 20, 4
     # Each coarse vertex maps to win consecutive fine vertices.
-    indices = jnp.asarray(np.stack([
-        np.arange(win) + i * win for i in range(n_coarse)
-    ]).astype(np.int32))
+    indices = jnp.asarray(
+        np.stack([np.arange(win) + i * win for i in range(n_coarse)]).astype(
+            np.int32
+        )
+    )
     values = jnp.zeros((n_coarse, win))  # ignored by mesh_pool_max
     cross_ell = ELL(
-        values=values, indices=indices, n_cols=n_fine, identity=-jnp.inf,
+        values=values,
+        indices=indices,
+        n_cols=n_fine,
+        identity=-jnp.inf,
     )
 
     fine_features = jnp.asarray(rng.standard_normal((n_fine, 3)))
@@ -296,14 +313,14 @@ def test_mesh_pool_max_takes_window_max():
     assert pooled.shape == (n_coarse, 3)
     # Verify each row equals the max of its 4 fine sources.
     for i in range(n_coarse):
-        ref = jnp.max(fine_features[i * win:(i + 1) * win], axis=0)
+        ref = jnp.max(fine_features[i * win : (i + 1) * win], axis=0)
         np.testing.assert_allclose(pooled[i], ref, atol=1e-13)
 
 
 def test_mesh_bary_upsample_is_weighted_sum():
-    '''mesh_bary_upsample computes the weighted sum over coarse
+    """mesh_bary_upsample computes the weighted sum over coarse
     sources, matching a hand-roll reference.
-    '''
+    """
     rng = np.random.default_rng(0)
     n_coarse, n_fine, k = 8, 20, 3
     indices = jnp.asarray(
@@ -313,7 +330,10 @@ def test_mesh_bary_upsample_is_weighted_sum():
     # primitive is a generic weighted-sum so unnormalised is fine.
     weights = jnp.asarray(rng.standard_normal((n_fine, k)))
     bary_ell = ELL(
-        values=weights, indices=indices, n_cols=n_coarse, identity=0.0,
+        values=weights,
+        indices=indices,
+        n_cols=n_coarse,
+        identity=0.0,
     )
 
     coarse_coords = jnp.asarray(rng.standard_normal((n_coarse, 3)))
@@ -331,10 +351,10 @@ def test_mesh_bary_upsample_is_weighted_sum():
 
 
 def test_mesh_unpool_max_inverts_pool_at_single_source():
-    '''When each fine vertex has exactly one coarse source, the
+    """When each fine vertex has exactly one coarse source, the
     "max" reduction trivially gathers; unpool returns the coarse
     feature at each fine vertex.
-    '''
+    """
     rng = np.random.default_rng(0)
     n_coarse, n_fine = 5, 15
     # Each fine vertex gets a single source coarse vertex.
@@ -342,8 +362,10 @@ def test_mesh_unpool_max_inverts_pool_at_single_source():
     indices = source[:, None]  # (n_fine, 1)
     values = jnp.zeros((n_fine, 1))
     bary_ell = ELL(
-        values=values, indices=indices,
-        n_cols=n_coarse, identity=-jnp.inf,
+        values=values,
+        indices=indices,
+        n_cols=n_coarse,
+        identity=-jnp.inf,
     )
 
     coarse_features = jnp.asarray(rng.standard_normal((n_coarse, 4)))
@@ -351,11 +373,13 @@ def test_mesh_unpool_max_inverts_pool_at_single_source():
     assert unp.shape == (n_fine, 4)
     # Each fine vertex's output equals its source's coarse feature.
     for i in range(n_fine):
-        np.testing.assert_allclose(unp[i], coarse_features[source[i]], atol=1e-13)
+        np.testing.assert_allclose(
+            unp[i], coarse_features[source[i]], atol=1e-13
+        )
 
 
 def test_mesh_bary_upsample_differentiable():
-    '''Gradient through the weighted-sum upsampler flows back to coords.'''
+    """Gradient through the weighted-sum upsampler flows back to coords."""
     rng = np.random.default_rng(0)
     n_coarse, n_fine, k = 5, 12, 3
     indices = jnp.asarray(
@@ -363,10 +387,15 @@ def test_mesh_bary_upsample_differentiable():
     )
     weights = jnp.asarray(rng.standard_normal((n_fine, k)))
     bary_ell = ELL(
-        values=weights, indices=indices, n_cols=n_coarse, identity=0.0,
+        values=weights,
+        indices=indices,
+        n_cols=n_coarse,
+        identity=0.0,
     )
+
     def loss(coords):
         return jnp.sum(mesh_bary_upsample(bary_ell, coords) ** 2)
+
     coords = jnp.asarray(rng.standard_normal((n_coarse, 3)))
     g = jax.grad(loss)(coords)
     assert g.shape == coords.shape
@@ -386,13 +415,15 @@ from nitrix.sparse import (  # noqa: E402
     icosphere_hierarchy,
     icosphere_hierarchy_from_levels,
 )
-from nitrix.sparse import mesh_bary_upsample as _mesh_bary_upsample  # noqa: E402
+from nitrix.sparse import (
+    mesh_bary_upsample as _mesh_bary_upsample,  # noqa: E402
+)
 
 
 def test_icosphere_hierarchy_length_and_counts():
-    '''Hierarchy at max_level=3 has 4 meshes with the expected
+    """Hierarchy at max_level=3 has 4 meshes with the expected
     vertex counts (10 * 4^L + 2) and parent tables.
-    '''
+    """
     h = icosphere_hierarchy(max_level=3)
     assert isinstance(h, IcosphereHierarchy)
     assert len(h) == 4
@@ -407,11 +438,11 @@ def test_icosphere_hierarchy_length_and_counts():
 
 
 def test_hierarchy_parent_invariants():
-    '''Parent invariants: coarse-original fine verts have parents
+    """Parent invariants: coarse-original fine verts have parents
     (v, v); midpoint fine verts have parents (a, b) with a != b
     and a, b within range of the parent level.  Across the table,
     the first ``n_coarse`` rows are coarse-originals.
-    '''
+    """
     h = icosphere_hierarchy(max_level=2)
     for L in (1, 2):
         n_coarse = h.meshes[L - 1].n_vertices
@@ -430,10 +461,10 @@ def test_hierarchy_parent_invariants():
 
 
 def test_cross_level_adjacency_row_contents():
-    '''Row i of cross_level_adjacency(L, L+1) contains exactly the
+    """Row i of cross_level_adjacency(L, L+1) contains exactly the
     fine vertices descended from coarse vertex i: i itself plus
     every edge-midpoint whose parent edge is incident to i.
-    '''
+    """
     h = icosphere_hierarchy(max_level=1)
     adj = icosphere_cross_level_adjacency(h, 0, 1)
     parents = np.asarray(h.parents[1])
@@ -453,9 +484,9 @@ def test_cross_level_adjacency_row_contents():
 
 
 def test_cross_level_adjacency_kmax():
-    '''k_max(0->1) = 6 (icosahedron max degree 5 + 1 for self);
+    """k_max(0->1) = 6 (icosahedron max degree 5 + 1 for self);
     k_max(L->L+1) for L >= 1 = 7 (subdivided max degree 6 + 1).
-    '''
+    """
     h = icosphere_hierarchy(max_level=2)
     adj_01 = icosphere_cross_level_adjacency(h, 0, 1)
     adj_12 = icosphere_cross_level_adjacency(h, 1, 2)
@@ -464,10 +495,10 @@ def test_cross_level_adjacency_kmax():
 
 
 def test_bary_upsampler_weights():
-    '''Coincident-vertex rows have weights (1, 0); midpoint-vertex
+    """Coincident-vertex rows have weights (1, 0); midpoint-vertex
     rows have weights (0.5, 0.5).  Indices in midpoint rows are
     exactly the parent pair.
-    '''
+    """
     h = icosphere_hierarchy(max_level=1)
     bary = icosphere_bary_upsampler(h, 0, 1)
     values = np.asarray(bary.values)
@@ -489,11 +520,11 @@ def test_bary_upsampler_weights():
 
 
 def test_bary_upsample_round_trip_recovers_pre_sphere_midpoints():
-    '''Applying bary_upsample to the coarse vertex coordinates
+    """Applying bary_upsample to the coarse vertex coordinates
     yields the (pre-sphere-projection) midpoints for the new
     fine vertices.  After re-normalising to the unit sphere,
     they equal the fine vertex coordinates exactly.
-    '''
+    """
     h = icosphere_hierarchy(max_level=1)
     bary = icosphere_bary_upsampler(h, 0, 1)
     coarse_coords = h.meshes[0].vertices
@@ -518,11 +549,12 @@ def test_bary_upsampler_rejects_non_consecutive():
 
 
 def test_pool_then_bary_with_hierarchy():
-    '''mesh_pool_max on a cross-level adjacency takes per-coarse-vertex
+    """mesh_pool_max on a cross-level adjacency takes per-coarse-vertex
     max of fine features; bary upsample lifts coarse features back to
     fine via barycentric interpolation.  End-to-end pipeline runs.
-    '''
+    """
     from nitrix.sparse import mesh_pool_max
+
     h = icosphere_hierarchy(max_level=1)
     fine = h.meshes[1].vertices  # (42, 3)
     pool_ell = icosphere_cross_level_adjacency(h, 0, 1)
@@ -534,14 +566,16 @@ def test_pool_then_bary_with_hierarchy():
 
 
 def test_bary_upsampler_differentiable():
-    '''Gradient through the icosphere bary upsampler flows back to
+    """Gradient through the icosphere bary upsampler flows back to
     coarse coordinates.
-    '''
+    """
     h = icosphere_hierarchy(max_level=1)
     bary = icosphere_bary_upsampler(h, 0, 1)
     coarse = jnp.asarray(h.meshes[0].vertices)
+
     def loss(coords):
         return jnp.sum(_mesh_bary_upsample(bary, coords) ** 2)
+
     g = jax.grad(loss)(coarse)
     assert g.shape == coarse.shape
     assert bool(jnp.all(jnp.isfinite(g)))
@@ -552,14 +586,11 @@ def test_bary_upsampler_differentiable():
 # ---------------------------------------------------------------------------
 
 
-from nitrix.sparse import mesh_coarsen_meanpool  # noqa: E402
-
-
 def test_mesh_coarsen_meanpool_on_cross_level_is_mean_over_children():
-    '''mesh_coarsen_meanpool over an icosphere cross-level adjacency
+    """mesh_coarsen_meanpool over an icosphere cross-level adjacency
     returns, per coarse vertex, the mean of its real fine children
     (the 1/0 validity indicator drops padding from sum and count).
-    '''
+    """
     h = icosphere_hierarchy(max_level=1)
     adj = icosphere_cross_level_adjacency(h, 0, 1)
     rng = np.random.default_rng(0)
@@ -583,12 +614,14 @@ def test_mesh_coarsen_meanpool_on_cross_level_is_mean_over_children():
 
 
 def test_mesh_coarsen_meanpool_is_values_weighted_mean():
-    '''With explicit non-binary values the helper computes a
+    """With explicit non-binary values the helper computes a
     values-weighted mean: sum(w*x)/sum(w).
-    '''
+    """
     rng = np.random.default_rng(1)
     n_coarse, n_fine, k = 4, 12, 3
-    indices = jnp.asarray(rng.integers(0, n_fine, (n_coarse, k)).astype(np.int32))
+    indices = jnp.asarray(
+        rng.integers(0, n_fine, (n_coarse, k)).astype(np.int32)
+    )
     values = jnp.asarray(np.abs(rng.standard_normal((n_coarse, k))) + 0.1)
     ell = ELL(values=values, indices=indices, n_cols=n_fine, identity=0.0)
     fine = jnp.asarray(rng.standard_normal((n_fine, 2)))
@@ -606,9 +639,9 @@ def test_mesh_coarsen_meanpool_is_values_weighted_mean():
 
 
 def test_mesh_coarsen_meanpool_all_pad_row_is_zero_not_nan():
-    '''A coarse vertex with no real children (all-pad row) returns
+    """A coarse vertex with no real children (all-pad row) returns
     zeros rather than NaN.
-    '''
+    """
     n_coarse, n_fine, k = 3, 6, 2
     indices = jnp.zeros((n_coarse, k), dtype=jnp.int32)
     values = jnp.asarray(np.array([[1.0, 1.0], [0.0, 0.0], [1.0, 0.0]]))
@@ -620,7 +653,7 @@ def test_mesh_coarsen_meanpool_all_pad_row_is_zero_not_nan():
 
 
 def test_mesh_coarsen_meanpool_batched():
-    '''Leading batch dims on fine features broadcast through.'''
+    """Leading batch dims on fine features broadcast through."""
     h = icosphere_hierarchy(max_level=1)
     adj = icosphere_cross_level_adjacency(h, 0, 1)
     rng = np.random.default_rng(2)
@@ -638,36 +671,45 @@ def test_mesh_coarsen_meanpool_batched():
 
 
 def test_from_levels_round_trips_icosphere_hierarchy():
-    '''Rebuilding from a hierarchy's own meshes + parents reproduces
+    """Rebuilding from a hierarchy's own meshes + parents reproduces
     the exact cross-level adjacency and bary upsampler.
-    '''
+    """
     h = icosphere_hierarchy(max_level=2)
     h2 = icosphere_hierarchy_from_levels(h.meshes, h.parents)
     for L in range(1, 3):
         a0 = icosphere_cross_level_adjacency(h, L - 1, L)
         a1 = icosphere_cross_level_adjacency(h2, L - 1, L)
-        np.testing.assert_array_equal(np.asarray(a0.indices), np.asarray(a1.indices))
-        np.testing.assert_array_equal(np.asarray(a0.values), np.asarray(a1.values))
+        np.testing.assert_array_equal(
+            np.asarray(a0.indices), np.asarray(a1.indices)
+        )
+        np.testing.assert_array_equal(
+            np.asarray(a0.values), np.asarray(a1.values)
+        )
         b0 = icosphere_bary_upsampler(h, L - 1, L)
         b1 = icosphere_bary_upsampler(h2, L - 1, L)
-        np.testing.assert_array_equal(np.asarray(b0.values), np.asarray(b1.values))
-        np.testing.assert_array_equal(np.asarray(b0.indices), np.asarray(b1.indices))
+        np.testing.assert_array_equal(
+            np.asarray(b0.values), np.asarray(b1.values)
+        )
+        np.testing.assert_array_equal(
+            np.asarray(b0.indices), np.asarray(b1.indices)
+        )
 
 
 def test_from_levels_works_on_non_canonical_coordinates():
-    '''Cross-level operators depend only on the parent tables and
+    """Cross-level operators depend only on the parent tables and
     vertex counts, not on coordinates being math-canonical -- so a
     hierarchy with arbitrary (e.g. FreeSurfer-like) coordinates but the
     same topology produces identical cross-level ELLs.  This is the
     mechanism that lets a FreeSurfer fsaverage hierarchy run through the
     same path without nitrix reading any FreeSurfer files.
-    '''
+    """
     h = icosphere_hierarchy(max_level=1)
     rng = np.random.default_rng(0)
     # Replace coordinates with arbitrary ones (same vertex counts).
     perturbed = tuple(
         type(m)(
-            vertices=jnp.asarray(m.vertices) + rng.standard_normal(m.vertices.shape),
+            vertices=jnp.asarray(m.vertices)
+            + rng.standard_normal(m.vertices.shape),
             faces=m.faces,
         )
         for m in h.meshes
@@ -675,11 +717,13 @@ def test_from_levels_works_on_non_canonical_coordinates():
     h_fs = icosphere_hierarchy_from_levels(perturbed, h.parents)
     a0 = icosphere_cross_level_adjacency(h, 0, 1)
     a1 = icosphere_cross_level_adjacency(h_fs, 0, 1)
-    np.testing.assert_array_equal(np.asarray(a0.indices), np.asarray(a1.indices))
+    np.testing.assert_array_equal(
+        np.asarray(a0.indices), np.asarray(a1.indices)
+    )
 
 
 def test_from_levels_validation_errors():
-    '''from_levels rejects malformed inputs with clear errors.'''
+    """from_levels rejects malformed inputs with clear errors."""
     h = icosphere_hierarchy(max_level=1)
     # parents[0] must be None
     with pytest.raises(ValueError, match='parents\\[0\\] must be None'):
@@ -699,9 +743,9 @@ def test_from_levels_validation_errors():
 
 
 def test_from_levels_then_pool_and_upsample_pipeline():
-    '''A from_levels hierarchy drives mesh_pool_max / meanpool / bary
+    """A from_levels hierarchy drives mesh_pool_max / meanpool / bary
     upsample with no topology-source branching.
-    '''
+    """
     h0 = icosphere_hierarchy(max_level=1)
     h = icosphere_hierarchy_from_levels(h0.meshes, h0.parents)
     fine = h.meshes[1].vertices

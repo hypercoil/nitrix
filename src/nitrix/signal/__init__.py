@@ -20,6 +20,7 @@ Submodules:
 This subpackage replaces ``nitrix.functional.window`` plus the
 ``hypercoil.functional.{tsconv,interpolate}`` ports.
 """
+
 from .filter import (
     bandpass,
     bandstop,

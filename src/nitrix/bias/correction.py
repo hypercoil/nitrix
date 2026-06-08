@@ -80,7 +80,7 @@ def bias_field_correction(
     Float[Array, '... *spatial'],
     Tuple[Float[Array, '... *spatial'], Float[Array, '... *spatial']],
 ]:
-    '''Bias-field correction with a selectable field-fitting algorithm.
+    """Bias-field correction with a selectable field-fitting algorithm.
 
     Estimates the smooth multiplicative bias field corrupting ``image`` and
     returns the corrected image (``image / bias``).  All methods share the
@@ -127,7 +127,7 @@ def bias_field_correction(
     -------
     ``corrected`` (default), or ``(corrected, bias_field)`` if
     ``return_bias_field``.
-    '''
+    """
     if method not in _METHOD_TO_FIT:
         raise ValueError(
             f'method={method!r}; expected one of {tuple(_METHOD_TO_FIT)!r}.'

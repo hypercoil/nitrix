@@ -13,6 +13,7 @@ operator, by ``tests/test_graph.py``; here we use an affinity-spectrum
 fixture (eigenvalues in ``[-1, 1]`` -- the regime shift-invert's ``sigma``
 and poly's ``shift`` assume) and verify routing + mechanics.
 """
+
 from __future__ import annotations
 
 import jax
@@ -26,9 +27,9 @@ from nitrix.sparse.ell import ell_from_dense
 
 
 def _affinity(n: int, seed: int = 0) -> jnp.ndarray:
-    '''Symmetric normalised affinity ``D^-1/2 A D^-1/2`` of a random
+    """Symmetric normalised affinity ``D^-1/2 A D^-1/2`` of a random
     Erdos-Renyi graph: spectrum in ``[-1, 1]`` with the largest eigenvalue
-    ~1, the regime every iterative method here is tuned for.'''
+    ~1, the regime every iterative method here is tuned for."""
     rng = np.random.default_rng(seed)
     A = (rng.random((n, n)) < 0.5).astype(np.float64)
     A = np.triu(A, 1)
@@ -77,7 +78,9 @@ def test_eigh_returns_largest_first_top_k():
     assert out.values.shape == (4,)
     assert out.vectors.shape == (24, 4)
     np.testing.assert_allclose(
-        np.asarray(out.values), _eigh_top_k_reference(M, 4), atol=1e-5,
+        np.asarray(out.values),
+        _eigh_top_k_reference(M, 4),
+        atol=1e-5,
     )
     # Largest-first.
     assert np.all(np.diff(np.asarray(out.values)) <= 1e-6)
@@ -88,7 +91,9 @@ def test_auto_dense_resolves_to_eigh():
     auto = eigsolve_top_k(M, 3, spec=SolverSpec.auto())
     eigh = eigsolve_top_k(M, 3, spec=SolverSpec.eigh())
     np.testing.assert_allclose(
-        np.asarray(auto.values), np.asarray(eigh.values), atol=1e-10,
+        np.asarray(auto.values),
+        np.asarray(eigh.values),
+        atol=1e-10,
     )
 
 
@@ -154,15 +159,17 @@ def test_shift_invert_and_poly_serve_sparse(method):
 
 
 def test_ell_shift_invert_grad_is_finite():
-    '''Differentiability holds for shift-invert on ELL via the shared
-    per-format backward.'''
+    """Differentiability holds for shift-invert on ELL via the shared
+    per-format backward."""
     M = _affinity(40)
     ell = ell_from_dense(M)
 
     def loss(values):
         op = ELL(values, ell.indices, ell.n_cols, ell.identity)
         return eigsolve_top_k(
-            op, 3, spec=SolverSpec.shift_invert(),
+            op,
+            3,
+            spec=SolverSpec.shift_invert(),
         ).values.sum()
 
     g = jax.grad(loss)(ell.values)
@@ -185,7 +192,7 @@ def _spec(method):
 
 
 def _sectioned(M):
-    '''SectionedELL of a dense affinity (ragged per-row neighbour lists).'''
+    """SectionedELL of a dense affinity (ragged per-row neighbour lists)."""
     n = M.shape[0]
     Mnp = np.asarray(M)
     vals, idx = [], []
@@ -197,10 +204,10 @@ def _sectioned(M):
 
 
 def _leaf_and_rebuild(fmt, M):
-    '''``(leaf, rebuild)`` so ``rebuild(leaf)`` is the operand and ``leaf``
+    """``(leaf, rebuild)`` so ``rebuild(leaf)`` is the operand and ``leaf``
     is the differentiable array(s): dense ``M``, ELL ``values``, or the
     SectionedELL per-section ``values`` tuple.  Threading the leaf lets one
-    parametrized body cover ``jit`` / ``grad`` for all three formats.'''
+    parametrized body cover ``jit`` / ``grad`` for all three formats."""
     if fmt == 'dense':
         return M, (lambda x: x)
     if fmt == 'ell':
@@ -217,28 +224,29 @@ def _leaf_and_rebuild(fmt, M):
             for v, s in zip(vt, sec.sections)
         )
         return SectionedELL(
-            sections, sec.row_groups, sec.n_rows, sec.n_cols, sec.identity,
+            sections,
+            sec.row_groups,
+            sec.n_rows,
+            sec.n_cols,
+            sec.identity,
         )
 
     return leaf, rebuild
 
 
 # ``eigh`` is dense-only; the iterative methods cover every format (phase 4).
-_CASES = (
-    [('dense', m) for m in ('eigh', 'lobpcg', 'shift_invert', 'poly')]
-    + [
-        (f, m)
-        for f in ('ell', 'sectioned')
-        for m in ('lobpcg', 'shift_invert', 'poly')
-    ]
-)
+_CASES = [('dense', m) for m in ('eigh', 'lobpcg', 'shift_invert', 'poly')] + [
+    (f, m)
+    for f in ('ell', 'sectioned')
+    for m in ('lobpcg', 'shift_invert', 'poly')
+]
 
 
 @pytest.mark.parametrize('fmt,method', _CASES)
 def test_matrix_forward_jit_parity(fmt, method):
-    '''Every (format, method) cell is ``jit``-able: the jit forward matches
+    """Every (format, method) cell is ``jit``-able: the jit forward matches
     eager (tight) and lands on the dense eigh reference (loose iterative
-    floor).'''
+    floor)."""
     M = _affinity(48)
     leaf, rebuild = _leaf_and_rebuild(fmt, M)
     spec = _spec(method)
@@ -250,16 +258,18 @@ def test_matrix_forward_jit_parity(fmt, method):
     jitted = np.asarray(jax.jit(f)(leaf))
     np.testing.assert_allclose(jitted, eager, atol=1e-5)
     np.testing.assert_allclose(
-        np.sort(eager)[::-1], _eigh_top_k_reference(M, 3), atol=3e-2,
+        np.sort(eager)[::-1],
+        _eigh_top_k_reference(M, 3),
+        atol=3e-2,
     )
 
 
 @pytest.mark.parametrize('fmt,method', _CASES)
 def test_matrix_grad_under_jit(fmt, method):
-    '''Every (format, method) cell is differentiable under ``jit``: the
+    """Every (format, method) cell is differentiable under ``jit``: the
     gradient is finite and ``jit(grad)`` matches eager ``grad``.  For the
     sparse formats the differentiable leaf is the per-section ``values``
-    pytree.'''
+    pytree."""
     M = _affinity(40)
     leaf, rebuild = _leaf_and_rebuild(fmt, M)
     spec = _spec(method)
@@ -286,9 +296,9 @@ def test_matrix_grad_under_jit(fmt, method):
 
 @pytest.mark.parametrize('method', ['lobpcg', 'shift_invert', 'poly'])
 def test_dense_grad_matches_eigh_grad(method):
-    '''The eigenvalue-sum gradient is Hellmann-Feynman (sum_i u_i u_i^T) and
+    """The eigenvalue-sum gradient is Hellmann-Feynman (sum_i u_i u_i^T) and
     the backward is solver-independent, so every iterative method matches
-    eigh's gradient and lives in the symmetric subspace.'''
+    eigh's gradient and lives in the symmetric subspace."""
     M = _affinity(40)
 
     def loss(op, spec):
@@ -307,7 +317,9 @@ def test_ell_lobpcg_grad_is_pattern_projected_and_finite():
     def loss(values):
         op = ELL(values, ell.indices, ell.n_cols, ell.identity)
         return eigsolve_top_k(
-            op, 3, spec=SolverSpec.lobpcg(n_iters=400),
+            op,
+            3,
+            spec=SolverSpec.lobpcg(n_iters=400),
         ).values.sum()
 
     g = jax.grad(loss)(ell.values)

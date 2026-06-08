@@ -14,17 +14,15 @@ The reference walks the contraction dim with ``lax.fori_loop`` and the
 supplied ``Monoid.update``, so the pytree-state pattern is exercised on
 the JAX side identically to the Pallas side.
 """
+
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import TypeVar
 
-import jax
 import jax.lax as lax
-import jax.numpy as jnp
 from jaxtyping import Array, Num
 
 from ._types import Semiring
-
 
 S = TypeVar('S')
 
@@ -35,7 +33,7 @@ def reference_semiring_matmul(
     *,
     semiring: Semiring[S],
 ) -> Num[Array, 'm n']:
-    '''Pure-JAX reference for ``semiring_matmul``.
+    """Pure-JAX reference for ``semiring_matmul``.
 
     Computes ``C[i, j] = (+)_k ( A[i, k] (*) B[k, j] )``
     via ``lax.fori_loop`` over the contraction axis with the supplied
@@ -62,7 +60,7 @@ def reference_semiring_matmul(
     handles broadcast over leading batch dimensions by ``vmap``-ing
     over this reference.  Keeping the reference 2-D simplifies the
     Pallas parity contract.
-    '''
+    """
     if A.ndim != 2 or B.ndim != 2:
         raise ValueError(
             f'reference_semiring_matmul: expected 2-D A and B, '
@@ -82,7 +80,7 @@ def reference_semiring_matmul(
     def body(kk: int, acc: S) -> S:
         a_col = lax.dynamic_slice_in_dim(A, kk, 1, axis=1)  # (m, 1)
         b_row = lax.dynamic_slice_in_dim(B, kk, 1, axis=0)  # (1, n)
-        value = binary_op.combine(a_col, b_row)             # (m, n)
+        value = binary_op.combine(a_col, b_row)  # (m, n)
         return monoid.update(acc, value)
 
     acc = lax.fori_loop(0, k, body, acc_init)
@@ -97,7 +95,7 @@ def reference_semiring_ell_matmul(
     semiring: Semiring[S],
     n_cols: int | None = None,
 ) -> Num[Array, 'm ncol']:
-    '''Pure-JAX reference for ``semiring_ell_matmul``.
+    """Pure-JAX reference for ``semiring_ell_matmul``.
 
     The implicit M×N sparse operand has the per-row neighbour list
     ``indices[i, :]`` with weights ``values[i, :]``.  Output is::
@@ -127,7 +125,7 @@ def reference_semiring_ell_matmul(
     Returns
     -------
     ``C``, shape ``(m, ncol)``.
-    '''
+    """
     if values.shape != indices.shape:
         raise ValueError(
             f'reference_semiring_ell_matmul: values.shape={values.shape}, '
@@ -150,11 +148,11 @@ def reference_semiring_ell_matmul(
     acc_init = monoid.init((m, ncol), B.dtype)
 
     def body(p: int, acc: S) -> S:
-        v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)   # (m, 1)
+        v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)  # (m, 1)
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)
-        idx_p = idx_p[:, 0]                                    # (m,)
-        gathered = B[idx_p]                                    # (m, ncol)
-        value = binary_op.combine(v_p, gathered)               # (m, ncol)
+        idx_p = idx_p[:, 0]  # (m,)
+        gathered = B[idx_p]  # (m, ncol)
+        value = binary_op.combine(v_p, gathered)  # (m, ncol)
         return monoid.update(acc, value)
 
     acc = lax.fori_loop(0, kmax, body, acc_init)

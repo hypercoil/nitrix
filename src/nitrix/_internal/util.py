@@ -29,7 +29,9 @@ from jaxtyping import Array, Bool, Complex, Float, Shaped
 PyTree = Any
 
 
-def _conform_bform_weight(weight: Shaped[Array, '...']) -> Shaped[Array, '...']:
+def _conform_bform_weight(
+    weight: Shaped[Array, '...'],
+) -> Shaped[Array, '...']:
     if weight.ndim == 1:
         return weight
     elif weight.shape[-2] != 1:
@@ -483,9 +485,9 @@ def orient_and_conform(
         dim = reference.ndim
     # can't rely on this when we compile with jit
     # TODO: Would there be any benefit to checkify this?
-    assert (
-        len(axis) == input.ndim
-    ), 'Output orientation axis required for each input dimension'
+    assert len(axis) == input.ndim, (
+        'Output orientation axis required for each input dimension'
+    )
     standard_axes = [standard_axis_number_strict(ax, dim) for ax in axis]
     axis_order = argsort(standard_axes)
     # I think XLA will be smart enough to know when this is a no-op

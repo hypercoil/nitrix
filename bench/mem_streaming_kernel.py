@@ -33,6 +33,7 @@ HBM around the timed run.  Because ``peak_bytes_in_use`` is a
 high-water mark, we read it on the live process and reason in
 deltas to avoid getting confused by cached compilations.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,6 +42,7 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+from _util import host_summary, timed_jit
 
 from nitrix.semiring import (
     LOG,
@@ -50,17 +52,14 @@ from nitrix.semiring import (
     semiring_matmul,
 )
 
-from _util import host_summary, timed_jit
-
-
 HERE = Path(__file__).parent
 REPORT_PATH = HERE / 'MEM_STREAMING_KERNEL.md'
 
 
 SHAPES = [
     # (M, K, N).  Both shapes have M*K*N >> M*N so streaming wins are visible.
-    (256, 256, 256),    # naive-analytical: 64 MB intermediate vs 0.25 MB output
-    (512, 256, 512),    # naive-analytical: 128 MB intermediate vs 1 MB output
+    (256, 256, 256),  # naive-analytical: 64 MB intermediate vs 0.25 MB output
+    (512, 256, 512),  # naive-analytical: 128 MB intermediate vs 1 MB output
     (1024, 256, 1024),  # naive-analytical: 1024 MB intermediate vs 4 MB output
     (2048, 512, 2048),  # naive-analytical: 8 GB intermediate vs 16 MB output
 ]
@@ -141,12 +140,14 @@ def measure_peak_ceiling(fn, *args, warmup: int = 2) -> int:
 def streaming_jax(algebra):
     def f(A, B):
         return reference_semiring_matmul(A, B, semiring=algebra)
+
     return f
 
 
 def pallas(algebra):
     def f(A, B):
         return semiring_matmul(A, B, semiring=algebra, backend='pallas-cuda')
+
     return f
 
 
@@ -159,7 +160,9 @@ def run(shapes, algebras, warmup):
         io_floor = 4 * (m * k + k * n + m * n)
         for algebra in algebras:
             row = {
-                'm': m, 'k': k, 'n': n,
+                'm': m,
+                'k': k,
+                'n': n,
                 'algebra': algebra.name,
                 'mkn_bytes_fp32': 4 * m * k * n,
                 'mn_bytes_fp32': 4 * m * n,
@@ -172,10 +175,16 @@ def run(shapes, algebras, warmup):
                 fn = timed_jit(fn_factory(algebra))
                 try:
                     row[f'{label}_ceiling'] = measure_peak_ceiling(
-                        fn, A, B, warmup=warmup,
+                        fn,
+                        A,
+                        B,
+                        warmup=warmup,
                     )
                     row[f'{label}_delta'] = measure_peak_delta(
-                        fn, A, B, warmup=0,  # already warm
+                        fn,
+                        A,
+                        B,
+                        warmup=0,  # already warm
                     )
                 except Exception as e:
                     row[f'{label}_ceiling'] = None
@@ -203,7 +212,7 @@ def render_report(rows, host) -> str:
         '',
         '- **naive (M·K·N, fp32)**: *analytical* HBM cost of the',
         '  reference formulation `(A[:, :, None] OP B[None, :, :]).reduce(axis=1)`.',
-        '  We do not run this -- XLA\'s compile time on the materialised',
+        "  We do not run this -- XLA's compile time on the materialised",
         '  fusion blows past 60 s for shapes ≥ `(512, 256, 512)` on',
         '  Ampere.  Listed as the failure-mode the streaming kernels',
         '  are supposed to avoid.',
@@ -237,7 +246,10 @@ def render_report(rows, host) -> str:
     for r in rows:
         lines.append(
             '| {m} | {k} | {n} | {a} | {mkn} | {mn} | {sj} | {sjd} | {p} | {pd} |'.format(
-                m=r['m'], k=r['k'], n=r['n'], a=r['algebra'],
+                m=r['m'],
+                k=r['k'],
+                n=r['n'],
+                a=r['algebra'],
                 mkn=_mb(r['mkn_bytes_fp32']),
                 mn=_mb(r['mn_bytes_fp32']),
                 sj=_mb(r.get('stream_jax_ceiling')),

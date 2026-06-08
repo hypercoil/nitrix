@@ -54,15 +54,14 @@ deep convolutional encoder-decoder architecture for image
 segmentation.*  IEEE TPAMI 39(12), 2481-2495.  The original
 indices-based encoder-decoder pattern.
 """
+
 from __future__ import annotations
 
 from typing import Sequence, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
-import jax.lax as lax
-from jaxtyping import Array, Float, Int, Num
-
+from jaxtyping import Array, Int, Num
 
 __all__ = [
     'max_pool_with_indices_nd',
@@ -74,7 +73,8 @@ PoolSize = Union[int, Tuple[int, ...]]
 
 
 def _resolve_pool_size(
-    pool_size: PoolSize, spatial_rank: int,
+    pool_size: PoolSize,
+    spatial_rank: int,
 ) -> Tuple[int, ...]:
     if isinstance(pool_size, int):
         return (int(pool_size),) * spatial_rank
@@ -96,7 +96,7 @@ def max_pool_with_indices_nd(
     Num[Array, '*batch C *pooled'],
     Int[Array, '*batch C *pooled'],
 ]:
-    '''N-D max pool returning ``(values, indices)``.
+    """N-D max pool returning ``(values, indices)``.
 
     For each output position, returns the max value in its
     corresponding window (per-channel) and the flattened index
@@ -142,7 +142,7 @@ def max_pool_with_indices_nd(
     ``jnp.argmax`` behaviour.  Cross-framework consumers should
     expect tie-breaking to differ; see the module docstring on
     parity.
-    '''
+    """
     pool_t = _resolve_pool_size(pool_size, spatial_rank)
     spatial_shape = x.shape[-spatial_rank:]
     for d, p in zip(spatial_shape, pool_t):
@@ -176,7 +176,7 @@ def max_pool_with_indices_nd(
     win_total = 1
     for p in pool_t:
         win_total *= p
-    pooled_shape = x_reordered.shape[: -spatial_rank]
+    pooled_shape = x_reordered.shape[:-spatial_rank]
     x_flat = x_reordered.reshape(pooled_shape + (win_total,))
 
     # Max + argmax within each window.
@@ -187,8 +187,6 @@ def max_pool_with_indices_nd(
     # Convert within-window flat index to within-window n-D coords.
     # The window flat index uses C-order: idx_d = (flat // prod(w_<d+1>)) % w_d.
     coord_within = []
-    rem = arg_within
-    pool_arr = jnp.asarray(pool_t, dtype=jnp.int32)
     # We need: coord_d = (arg // (prod p_{d+1:})) % p_d.
     suffix_prods = []
     cur = 1
@@ -218,7 +216,6 @@ def max_pool_with_indices_nd(
     global_coords = [s + c for s, c in zip(starts, coord_within)]
 
     # Flat index in C-order over the original spatial grid.
-    spatial_arr = jnp.asarray(spatial_shape, dtype=jnp.int32)
     suffix_prods_orig = []
     cur = 1
     for d in reversed(spatial_shape):
@@ -243,7 +240,7 @@ def max_unpool_nd(
     output_shape: Sequence[int],
     spatial_rank: int,
 ) -> Num[Array, '*batch C *spatial']:
-    '''Scatter pooled values back into a higher-resolution grid.
+    """Scatter pooled values back into a higher-resolution grid.
 
     For each ``(batch, channel, output_position)``, write
     ``x[batch, channel, output_position]`` into the source grid
@@ -275,7 +272,7 @@ def max_unpool_nd(
     target buffer via ``.at[..., indices].set(x)``, then reshape.
     Differentiable via the standard scatter VJP; gradient flows
     back to ``x`` but not ``indices`` (a discrete index map).
-    '''
+    """
     output_shape_t = tuple(int(s) for s in output_shape)
     if len(output_shape_t) != spatial_rank:
         raise ValueError(
@@ -288,7 +285,6 @@ def max_unpool_nd(
             f'x.shape={x.shape} must equal indices.shape={indices.shape}.'
         )
 
-    n_lead = x.ndim - spatial_rank   # batch + C axes
     pooled_shape = x.shape[-spatial_rank:]
     n_per_channel = 1
     for s in pooled_shape:
@@ -312,9 +308,9 @@ def max_unpool_nd(
     def _scatter_one(
         idx: Int[Array, 'n'], vals: Num[Array, 'n']
     ) -> Num[Array, 'm']:
-        return jnp.zeros(
-            (target_per_channel,), dtype=x.dtype
-        ).at[idx].set(vals)
+        return (
+            jnp.zeros((target_per_channel,), dtype=x.dtype).at[idx].set(vals)
+        )
 
     out_2d = jax.vmap(_scatter_one)(idx_2d, x_2d)
     return out_2d.reshape(leading_shape + output_shape_t)

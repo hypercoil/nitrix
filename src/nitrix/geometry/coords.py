@@ -24,6 +24,7 @@ Renamings from legacy code:
 - ``cmass_reference_displacement_coor`` -> ``displacement_from_reference_points``
 - ``diffuse``                           -> ``compactness_penalty``
 """
+
 from __future__ import annotations
 
 from typing import Optional, Sequence, Union, cast
@@ -33,7 +34,6 @@ from jaxtyping import Array, Float
 
 from .grid import center_of_mass_grid
 from .sphere import spherical_geodesic_distance
-
 
 __all__ = [
     'center_of_mass_points',
@@ -54,7 +54,7 @@ def center_of_mass_points(
     *,
     radius: Optional[float] = None,
 ) -> Float[Array, '... n_regions ndim']:
-    '''Weighted centre of mass for a set of regions over a point cloud.
+    """Weighted centre of mass for a set of regions over a point cloud.
 
     For each region ``r`` and dim ``d`` the result is::
 
@@ -77,10 +77,10 @@ def center_of_mass_points(
     Returns
     -------
     Per-region centre-of-mass, ``(..., n_regions, ndim)``.
-    '''
+    """
     # Plain matrix multiplication once shapes are batched.
-    num = jnp.matmul(weight, coords)                    # (..., n_regions, ndim)
-    denom = weight.sum(axis=-1, keepdims=True)          # (..., n_regions, 1)
+    num = jnp.matmul(weight, coords)  # (..., n_regions, ndim)
+    denom = weight.sum(axis=-1, keepdims=True)  # (..., n_regions, 1)
     cm = num / denom
     if radius is not None:
         norm = jnp.linalg.norm(cm, ord=2, axis=-1, keepdims=True)
@@ -95,7 +95,7 @@ def displacement_from_reference_grid(
     axes: Optional[Sequence[int]] = None,
     na_value: Optional[float] = None,
 ) -> Float[Array, '... ndim']:
-    '''Displacement of a centre-of-mass (regular grid) from a reference.
+    """Displacement of a centre-of-mass (regular grid) from a reference.
 
     Equivalent to ``center_of_mass_grid(weight, axes=...) - reference``;
     a convenience wrapper for the common regularisation pattern
@@ -113,7 +113,7 @@ def displacement_from_reference_grid(
     Returns
     -------
     Displacement vector ``cm - reference``.
-    '''
+    """
     cm = center_of_mass_grid(weight, axes=axes, na_value=na_value)
     return cm - reference
 
@@ -125,11 +125,11 @@ def displacement_from_reference_points(
     *,
     radius: Optional[float] = None,
 ) -> Float[Array, '... n_regions ndim']:
-    '''Displacement of a centre-of-mass (point cloud) from a reference.
+    """Displacement of a centre-of-mass (point cloud) from a reference.
 
     See ``center_of_mass_points``; subtracts a per-region reference
     coordinate.
-    '''
+    """
     cm = center_of_mass_points(weight, coords, radius=radius)
     return cm - reference
 
@@ -142,7 +142,7 @@ def compactness_penalty(
     floor: float = 0.0,
     radius: Optional[float] = None,
 ) -> Float[Array, '... n_regions']:
-    '''How spread-out is each region's weight from its own centre of mass?
+    """How spread-out is each region's weight from its own centre of mass?
 
     Returns a scalar per region: large values mean the weight is
     dispersed (incoherent region); small values mean it concentrates
@@ -172,7 +172,7 @@ def compactness_penalty(
     Returns
     -------
     Per-region penalty, ``(..., n_regions)``.
-    '''
+    """
     cm = center_of_mass_points(weight, coords, radius=radius)
     if radius is None:
         # ``cm[..., r, :] - coords[..., p, :]`` -> ``(..., n_regions, n_points, ndim)``

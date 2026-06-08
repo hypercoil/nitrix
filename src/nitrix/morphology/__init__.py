@@ -38,6 +38,7 @@ Convenience:
   (raises ``NotImplementedError`` until ``smoothing.bilateral_gaussian``
   lands -- this is the documented deferral).
 """
+
 from ._mm import (
     close,
     dilate,

@@ -42,6 +42,7 @@ supervised metric learning) is deliberately out of scope -- that is a
 modelling concern for a consumer, built from ``nitrix.stats.covariance``
 and ``nitrix.linalg``; this module supplies only the pure mechanism.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -51,7 +52,6 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import block_diag
 from jaxtyping import Array, Float
-
 
 __all__ = [
     'FeatureMetric',
@@ -71,25 +71,25 @@ __all__ = [
 # interaction with ``Protocol``).
 @runtime_checkable
 class FeatureMetric(Protocol):
-    '''Projection of feature differences into a metric subspace.
+    """Projection of feature differences into a metric subspace.
 
     The only operation the bilateral kernel requires of a metric:
     given feature differences ``deltas`` of shape ``(..., d_f)``,
     return ``project(deltas)`` of shape ``(..., k)`` such that
     ``sum(project(deltas)**2, axis=-1)`` equals the quadratic form
     ``deltas^T M deltas`` for the metric ``M``.
-    '''
+    """
 
     def project(
-        self, deltas: Float[Array, '... d_f'],
-    ) -> Float[Array, '... k']:
-        ...
+        self,
+        deltas: Float[Array, '... d_f'],
+    ) -> Float[Array, '... k']: ...
 
 
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class DiagonalMetric:
-    '''Per-feature isotropic-in-each-axis metric ``M = diag(1 / sigma**2)``.
+    """Per-feature isotropic-in-each-axis metric ``M = diag(1 / sigma**2)``.
 
     The classic bilateral metric: each feature channel ``d`` is divided
     by its own bandwidth ``sigma[d]`` before the squared distance is
@@ -101,12 +101,13 @@ class DiagonalMetric:
     ----------
     sigma
         Per-feature bandwidth, shape ``(d_f,)``.  Strictly positive.
-    '''
+    """
 
     sigma: Float[Array, 'd_f']
 
     def project(
-        self, deltas: Float[Array, '... d_f'],
+        self,
+        deltas: Float[Array, '... d_f'],
     ) -> Float[Array, '... d_f']:
         return deltas / self.sigma
 
@@ -117,7 +118,9 @@ class DiagonalMetric:
 
     @classmethod
     def tree_unflatten(
-        cls, _aux: None, children: Tuple[Any, ...],
+        cls,
+        _aux: None,
+        children: Tuple[Any, ...],
     ) -> 'DiagonalMetric':
         return cls(*children)
 
@@ -125,7 +128,7 @@ class DiagonalMetric:
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class FactorMetric:
-    '''Factored metric ``M = L L^T`` with factor ``L`` of shape ``(d_f, k)``.
+    """Factored metric ``M = L L^T`` with factor ``L`` of shape ``(d_f, k)``.
 
     ``project(deltas) = deltas @ L`` maps each ``(..., d_f)`` feature
     difference to a ``(..., k)`` projection, and the bilateral weight
@@ -141,12 +144,13 @@ class FactorMetric:
     ----------
     factor
         The factor ``L``, shape ``(d_f, k)`` with ``k <= d_f``.
-    '''
+    """
 
     factor: Float[Array, 'd_f k']
 
     def project(
-        self, deltas: Float[Array, '... d_f'],
+        self,
+        deltas: Float[Array, '... d_f'],
     ) -> Float[Array, '... k']:
         return deltas @ self.factor
 
@@ -157,7 +161,9 @@ class FactorMetric:
 
     @classmethod
     def tree_unflatten(
-        cls, _aux: None, children: Tuple[Any, ...],
+        cls,
+        _aux: None,
+        children: Tuple[Any, ...],
     ) -> 'FactorMetric':
         return cls(*children)
 
@@ -165,7 +171,7 @@ class FactorMetric:
 def block_diagonal_metric(
     blocks: Sequence[Float[Array, 'd_b k_b']],
 ) -> FactorMetric:
-    '''Assemble a block-diagonal factor from per-modality factor blocks.
+    """Assemble a block-diagonal factor from per-modality factor blocks.
 
     Each modality (e.g. a tissue-intensity channel set, a
     network-correlation channel set) contributes its own factor block
@@ -192,7 +198,7 @@ def block_diagonal_metric(
     ------
     ValueError
         If ``blocks`` is empty or any block is not 2-D.
-    '''
+    """
     if len(blocks) == 0:
         raise ValueError('block_diagonal_metric: blocks must be non-empty.')
     arrays = [jnp.asarray(b) for b in blocks]
@@ -208,7 +214,7 @@ def block_diagonal_metric(
 def metric_from_spd(
     spd: Float[Array, 'd_f d_f'],
 ) -> FactorMetric:
-    '''Factor an explicit SPD metric ``M`` into ``FactorMetric(chol(M))``.
+    """Factor an explicit SPD metric ``M`` into ``FactorMetric(chol(M))``.
 
     Use when the metric is naturally expressed as a full SPD matrix
     (a learned or estimated precision over feature space) rather than
@@ -235,7 +241,7 @@ def metric_from_spd(
     Numerical conditioning of ``M`` is the caller's responsibility;
     ``nitrix.linalg`` provides reconditioning helpers if a near-singular
     metric must be regularised before factoring.
-    '''
+    """
     spd = jnp.asarray(spd)
     if spd.ndim != 2 or spd.shape[0] != spd.shape[1]:
         raise ValueError(

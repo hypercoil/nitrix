@@ -73,7 +73,7 @@ def _match_points(
     n_match_points: int,
     dtype: jnp.dtype,
 ) -> Float[Array, 'n_match_points']:
-    '''Quantile-positioned landmark intensities from a weighted histogram.
+    """Quantile-positioned landmark intensities from a weighted histogram.
 
     Builds an ``n_bins``-resolution histogram of ``image`` weighted by
     ``weight`` over the interval ``[bin_min, bin_max]``, then for each
@@ -83,7 +83,7 @@ def _match_points(
     exactly, via ``searchsorted`` + linear interpolation across the bin
     boundary.  The latter sub-bin step is what makes the landmarks not
     quantised to ``(bin_max - bin_min) / n_bins`` precision.
-    '''
+    """
     flat = image.reshape(-1).astype(dtype)
     w = weight.reshape(-1).astype(dtype)
     span = bin_max - bin_min
@@ -98,9 +98,8 @@ def _match_points(
     safe_total = jnp.where(total > 0, total, 1.0)
     cum_frac = cum / safe_total
 
-    quantiles = (
-        jnp.arange(1, n_match_points + 1, dtype=dtype)
-        / (n_match_points + 1)
+    quantiles = jnp.arange(1, n_match_points + 1, dtype=dtype) / (
+        n_match_points + 1
     )
 
     bin_hi = jnp.searchsorted(cum_frac, quantiles, side='left')
@@ -126,7 +125,7 @@ def _landmarks_for(
     n_match_points: int,
     dtype: jnp.dtype,
 ) -> Tuple[Float[Array, '...'], bool]:
-    '''Build the full landmark array for one image.
+    """Build the full landmark array for one image.
 
     Returns ``(landmarks, has_mean)`` -- the array is one entry longer
     when the mean is inserted as an extra landmark (the ITK
@@ -134,7 +133,7 @@ def _landmarks_for(
     Both source and reference must agree on ``has_mean`` (or the apply
     step would be malformed) -- the caller is responsible for
     consistency.
-    '''
+    """
     image = image.astype(dtype)
     bin_min = jnp.min(image)
     bin_max = jnp.max(image)
@@ -148,8 +147,13 @@ def _landmarks_for(
         # the lowest bin with no contribution, wasting half the
         # resolution.
         m = _match_points(
-            image, w, mean, bin_max,
-            n_bins=n_bins, n_match_points=n_match_points, dtype=dtype,
+            image,
+            w,
+            mean,
+            bin_max,
+            n_bins=n_bins,
+            n_match_points=n_match_points,
+            dtype=dtype,
         )
         return jnp.concatenate(
             [bin_min[None], mean[None], m, bin_max[None]]
@@ -161,8 +165,13 @@ def _landmarks_for(
         w = jnp.broadcast_to(jnp.asarray(weight).astype(dtype), image.shape)
 
     m = _match_points(
-        image, w, bin_min, bin_max,
-        n_bins=n_bins, n_match_points=n_match_points, dtype=dtype,
+        image,
+        w,
+        bin_min,
+        bin_max,
+        n_bins=n_bins,
+        n_match_points=n_match_points,
+        dtype=dtype,
     )
     return jnp.concatenate([bin_min[None], m, bin_max[None]]), False
 
@@ -177,7 +186,7 @@ def histogram_match(
     n_histogram_levels: int = 1024,
     threshold_at_mean: bool = True,
 ) -> Float[Array, '*spatial']:
-    '''Remap ``source`` intensities so its CDF matches ``reference``'s.
+    """Remap ``source`` intensities so its CDF matches ``reference``'s.
 
     Nyul-Udupa landmark histogram matching: pick ``n_match_points``
     landmarks at evenly-spaced quantile positions on the source and
@@ -247,11 +256,9 @@ def histogram_match(
     sharpen_histogram :
         N3 Wiener log-histogram deconvolution -- a different op on a
         single image's histogram (no reference involved).
-    '''
+    """
     if n_match_points < 1:
-        raise ValueError(
-            f'n_match_points must be >= 1, got {n_match_points}'
-        )
+        raise ValueError(f'n_match_points must be >= 1, got {n_match_points}')
     if n_histogram_levels < 2:
         raise ValueError(
             f'n_histogram_levels must be >= 2, got {n_histogram_levels}'
@@ -272,17 +279,25 @@ def histogram_match(
     dtype = jnp.result_type(src.dtype, ref.dtype, jnp.float32)
 
     src_landmarks, _ = _landmarks_for(
-        src, source_weight, threshold_at_mean,
-        n_bins=n_histogram_levels, n_match_points=n_match_points,
+        src,
+        source_weight,
+        threshold_at_mean,
+        n_bins=n_histogram_levels,
+        n_match_points=n_match_points,
         dtype=dtype,
     )
     ref_landmarks, _ = _landmarks_for(
-        ref, reference_weight, threshold_at_mean,
-        n_bins=n_histogram_levels, n_match_points=n_match_points,
+        ref,
+        reference_weight,
+        threshold_at_mean,
+        n_bins=n_histogram_levels,
+        n_match_points=n_match_points,
         dtype=dtype,
     )
 
     mapped = jnp.interp(
-        src.astype(dtype).reshape(-1), src_landmarks, ref_landmarks,
+        src.astype(dtype).reshape(-1),
+        src_landmarks,
+        ref_landmarks,
     )
     return mapped.reshape(src.shape).astype(out_dtype)

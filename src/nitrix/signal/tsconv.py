@@ -20,15 +20,13 @@ What the legacy ``hypercoil.functional.tsconv`` had that we drop:
   again (probably ``hypercoil``-side or a downstream consumer's
   utility module).
 """
+
 from __future__ import annotations
 
 from typing import Literal
 
-import jax
 import jax.lax as lax
-import jax.numpy as jnp
 from jaxtyping import Array, Float, Num
-
 
 __all__ = ['tsconv']
 
@@ -42,7 +40,7 @@ def tsconv(
     *,
     padding: Padding = 'SAME',
 ) -> Num[Array, '... C_out obs_out']:
-    '''1-D convolution along the trailing axis.
+    """1-D convolution along the trailing axis.
 
     Parameters
     ----------
@@ -76,11 +74,10 @@ def tsconv(
     "convolution" flips the kernel about its centre; reverse
     ``weight`` along its last (``K``) axis -- ``weight[..., ::-1]``
     -- if you need a true (flipped) convolution.
-    '''
+    """
     if X.ndim < 2:
         raise ValueError(
-            f'tsconv: X must have at least 2 dims (C, obs); got '
-            f'{X.shape}.'
+            f'tsconv: X must have at least 2 dims (C, obs); got {X.shape}.'
         )
     if weight.ndim != 3:
         raise ValueError(
@@ -97,7 +94,8 @@ def tsconv(
     # Reshape to (batch, C, obs) for conv_general_dilated.
     X_b = X.reshape((-1, C, obs)) if batch_shape else X[None, ...]
     out = lax.conv_general_dilated(
-        X_b, weight,
+        X_b,
+        weight,
         window_strides=(1,),
         padding=padding,
         dimension_numbers=('NCT', 'OIT', 'NCT'),

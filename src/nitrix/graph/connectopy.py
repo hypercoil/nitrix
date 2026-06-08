@@ -56,6 +56,7 @@ Differentiability
 The brainspace dependency from the legacy code is dropped: every
 required step is expressible in plain JAX.
 """
+
 from __future__ import annotations
 
 from typing import Literal, Optional, Tuple, Union
@@ -117,7 +118,7 @@ def _spec_from(
     lobpcg_iters: int,
     lobpcg_tol: Optional[float],
 ) -> SolverSpec:
-    '''Map the connectopy ``(solver, preconditioner)`` vocabulary to a
+    """Map the connectopy ``(solver, preconditioner)`` vocabulary to a
     ``SolverSpec`` for ``eigsolve_top_k``.
 
     ``preconditioner='polynomial'`` selects the matvec-only spectral filter
@@ -127,17 +128,19 @@ def _spec_from(
     is deferred to the dispatcher's format-based policy (dense -> ``eigh``,
     sparse -> ``lobpcg``), carrying the LOBPCG knobs in case it resolves to
     ``lobpcg``.
-    '''
+    """
     if preconditioner == 'polynomial' and solver != 'shift_invert':
         return SolverSpec.poly(
-            degree=_POLY_DEGREE, shift=_POLY_SHIFT,
+            degree=_POLY_DEGREE,
+            shift=_POLY_SHIFT,
             outer_iters=_POLY_OUTER_ITERS,
         )
     if solver == 'eigh':
         return SolverSpec.eigh()
     if solver == 'shift_invert':
         return SolverSpec.shift_invert(
-            sigma=_SI_SIGMA, outer_iters=_SI_OUTER_ITERS,
+            sigma=_SI_SIGMA,
+            outer_iters=_SI_OUTER_ITERS,
             cg_iters=_SI_CG_ITERS,
         )
     if solver == 'lobpcg':
@@ -155,13 +158,13 @@ def _scale_by_outer(
     left: Float[Array, '... n'],
     right: Float[Array, '... n'],
 ) -> _GraphInput:
-    '''Scale ``A_{ij}`` by ``left[i] * right[j]`` over dense / ELL /
+    """Scale ``A_{ij}`` by ``left[i] * right[j]`` over dense / ELL /
     SectionedELL.
 
     The sparsity pattern is preserved (diagonal scaling on both sides
     is structure-preserving).  Returns a new operand of the same
     type; values are scaled.
-    '''
+    """
     if isinstance(A, ELL):
         right_at_idx = right[A.indices]
         return ELL(
@@ -175,12 +178,14 @@ def _scale_by_outer(
         for ell, row_idx in zip(A.sections, A.row_groups):
             left_rows = left[jnp.asarray(row_idx)]
             right_at = right[ell.indices]
-            new_sections.append(ELL(
-                values=ell.values * (left_rows[:, None] * right_at),
-                indices=ell.indices,
-                n_cols=ell.n_cols,
-                identity=ell.identity,
-            ))
+            new_sections.append(
+                ELL(
+                    values=ell.values * (left_rows[:, None] * right_at),
+                    indices=ell.indices,
+                    n_cols=ell.n_cols,
+                    identity=ell.identity,
+                )
+            )
         return SectionedELL(
             sections=tuple(new_sections),
             row_groups=A.row_groups,
@@ -197,7 +202,7 @@ def _build_affinity_operator(
     alpha: float = 0.0,
     eps: float = 1e-12,
 ) -> Tuple[_GraphInput, Float[Array, '... n']]:
-    '''Return ``(M, inv_sqrt_d2)`` for the normalised affinity operator.
+    """Return ``(M, inv_sqrt_d2)`` for the normalised affinity operator.
 
     For ``alpha == 0`` the operator is
     ``M = D^(-1/2) A D^(-1/2)`` (the affinity matrix of the
@@ -215,12 +220,12 @@ def _build_affinity_operator(
     ``M_alpha`` by to recover the right eigenvectors of the
     random-walk diffusion operator ``P``.  For the Laplacian-
     eigenmap path (``alpha = 0``) the caller ignores it.
-    '''
+    """
     deg = degree_vector(A)
     safe_deg = jnp.maximum(deg, eps)
 
     if alpha != 0.0:
-        d_alpha = safe_deg ** alpha
+        d_alpha = safe_deg**alpha
         inv_d_alpha = 1.0 / d_alpha
         K = _scale_by_outer(A, inv_d_alpha, inv_d_alpha)
         safe_d2 = jnp.maximum(degree_vector(K), eps)
@@ -252,14 +257,14 @@ def _affinity_top_k(
     Float[Array, 'n n_components'],
     Float[Array, '... n'],
 ]:
-    '''Build the affinity operator and return its top non-trivial
+    """Build the affinity operator and return its top non-trivial
     eigenpairs (largest-first) plus ``inv_sqrt_d2``.
 
     Drops the trivial leading eigenpair (the constant eigenvector, the
     *largest* affinity eigenvalue) when ``skip_trivial``.  The
     convention-specific transforms (``1 - mu`` / ``lambda^t`` / right-
     eigenvector recovery) are applied by the caller.
-    '''
+    """
     M, inv_sqrt_d2 = _build_affinity_operator(A, alpha=alpha, eps=eps)
     k_total = n_components + (1 if skip_trivial else 0)
     vals, vecs = eigsolve_top_k(M, k_total, spec=spec, seed=seed)
@@ -291,7 +296,7 @@ def laplacian_eigenmap(
     Float[Array, 'n n_components'],
     Float[Array, 'n_components'],
 ]:
-    '''Laplacian-eigenmap embedding of graph nodes.
+    """Laplacian-eigenmap embedding of graph nodes.
 
     Embeds nodes in the bottom-``n_components`` non-trivial
     eigenspace of the symmetric normalised Laplacian
@@ -358,16 +363,23 @@ def laplacian_eigenmap(
     - ``lobpcg`` requires ``5 * (n_components + 1) < n`` (a JAX
       constraint on the search subspace).  For tiny graphs, use
       ``solver="eigh"`` instead.
-    '''
+    """
     if n_components < 1:
         raise ValueError('n_components must be >= 1.')
     spec = _spec_from(
-        solver, preconditioner,
-        lobpcg_iters=lobpcg_iters, lobpcg_tol=lobpcg_tol,
+        solver,
+        preconditioner,
+        lobpcg_iters=lobpcg_iters,
+        lobpcg_tol=lobpcg_tol,
     )
     vals_M, vecs_M, _ = _affinity_top_k(
-        A, alpha=0.0, n_components=n_components, skip_trivial=skip_trivial,
-        eps=eps, spec=spec, seed=seed,
+        A,
+        alpha=0.0,
+        n_components=n_components,
+        skip_trivial=skip_trivial,
+        eps=eps,
+        spec=spec,
+        seed=seed,
     )
     # Laplacian convention: lambda_L = 1 - lambda_M, smallest-first.  The
     # iterative methods may not return perfectly ordered eigenvalues, so we
@@ -394,7 +406,7 @@ def diffusion_embedding(
     Float[Array, 'n n_components'],
     Float[Array, 'n_components'],
 ]:
-    '''Coifman-Lafon diffusion-map embedding.
+    """Coifman-Lafon diffusion-map embedding.
 
     Eigendecomposes the symmetric companion of the diffusion
     operator and scales by ``lambda^t``.  Returns the top
@@ -422,16 +434,23 @@ def diffusion_embedding(
     -------
     ``(embedding, eigenvalues)`` of shapes ``(n, n_components)`` and
     ``(n_components,)``.  Eigenvalues sorted largest-first.
-    '''
+    """
     if n_components < 1:
         raise ValueError('n_components must be >= 1.')
     spec = _spec_from(
-        solver, preconditioner,
-        lobpcg_iters=lobpcg_iters, lobpcg_tol=lobpcg_tol,
+        solver,
+        preconditioner,
+        lobpcg_iters=lobpcg_iters,
+        lobpcg_tol=lobpcg_tol,
     )
     vals_M, vecs_M, inv_sqrt_d2 = _affinity_top_k(
-        A, alpha=alpha, n_components=n_components, skip_trivial=skip_trivial,
-        eps=eps, spec=spec, seed=seed,
+        A,
+        alpha=alpha,
+        n_components=n_components,
+        skip_trivial=skip_trivial,
+        eps=eps,
+        spec=spec,
+        seed=seed,
     )
     # Recover the right eigenvectors of the random-walk operator P from the
     # symmetric-companion eigenvectors: psi = D^(-1/2) phi.  Eigenvalues stay
@@ -447,12 +466,12 @@ def _scale_by_lambda_t(
     vals: Float[Array, 'k'],
     t: float,
 ) -> Float[Array, 'n k']:
-    '''Scale each eigenvector by ``|lambda|^t * sign(lambda)``.
+    """Scale each eigenvector by ``|lambda|^t * sign(lambda)``.
 
     Used for the diffusion-map ``t > 0`` case.  Negative eigenvalues
     are guarded via ``|.|`` to avoid complex powers; sign is
     preserved so the eigenvector retains its parity.
-    '''
+    """
     scale = jnp.where(
         vals >= 0,
         jnp.abs(vals) ** t,

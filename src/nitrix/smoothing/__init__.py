@@ -21,6 +21,7 @@ Two tiers (SPEC §3.3):
 ``susan_emulator`` is a convenience wrapper composing
 ``bilateral_gaussian`` with ``morphology.median_filter``.
 """
+
 from .gaussian import gaussian
 from .metric import (
     DiagonalMetric,

@@ -51,6 +51,7 @@ values diffuse, so the normalised weights are built once and re-applied
 (Krahenbuhl & Koltun 2011) at ``O(n_iters * n * k_max * d_v)`` for the
 diffusion on top of a single ``O(n * k_max * k)`` weight build.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Union
@@ -64,7 +65,6 @@ from ..semiring import REAL, semiring_ell_matmul
 from ..sparse.ell import ELL
 from .metric import FeatureMetric
 
-
 __all__ = ['bilateral_gaussian', 'brute_force_knn']
 
 
@@ -74,7 +74,7 @@ def brute_force_knn(
     *,
     metric: Optional[FeatureMetric] = None,
 ) -> Int[Array, 'n k']:
-    '''Brute-force k-nearest-neighbour search in (optionally projected) feature space.
+    """Brute-force k-nearest-neighbour search in (optionally projected) feature space.
 
     Materialises the ``(n, n)`` distance matrix; quadratic in memory.
     Practical for ``n <~ 10k``.  For larger ``n``, the caller should
@@ -100,14 +100,14 @@ def brute_force_knn(
     -------
     Indices of the ``k`` nearest neighbours for each query point,
     shape ``(n, k)``.  Sorted by ascending distance.
-    '''
+    """
     # Pairwise feature differences: (n, n, d_f).
     diff = features[:, None, :] - features[None, :, :]
     if metric is not None:
         proj = metric.project(diff)
     else:
         proj = diff
-    d2 = (proj ** 2).sum(axis=-1)
+    d2 = (proj**2).sum(axis=-1)
     # Top-k smallest = top-k largest of negated distances.
     _, indices = lax.top_k(-d2, k)
     return indices
@@ -123,7 +123,7 @@ def bilateral_gaussian(
     n_iters: int = 1,
     backend: Backend = 'auto',
 ) -> Float[Array, 'n d_v']:
-    '''Bounded bilateral smoothing over a feature-space metric.
+    """Bounded bilateral smoothing over a feature-space metric.
 
     For each output position ``i``, the result is the
     metric-distance-weighted average of ``values`` over the bounded
@@ -182,16 +182,14 @@ def bilateral_gaussian(
     ``k_max`` terms, each an explicit Gaussian weight over the metric.
     Correct by construction; cost ``O(n * k_max * (k + d_v))`` per pass,
     where ``k`` is the metric's projected dimension (``<= d_f``).
-    '''
+    """
     if n_iters < 1:
         raise ValueError(f'n_iters must be >= 1; got {n_iters}.')
 
     n, d_v = values.shape
     n2, d_f = features.shape
     if n != n2:
-        raise ValueError(
-            f'values has n={n}, features has n={n2}; must match.'
-        )
+        raise ValueError(f'values has n={n}, features has n={n2}; must match.')
 
     # Resolve the neighbourhood to (indices, mask).  An explicit ``mask``
     # argument always wins; otherwise an ELL contributes its validity and
@@ -208,15 +206,15 @@ def bilateral_gaussian(
         indices = jnp.asarray(neighbourhood.indices, dtype=jnp.int32)
         if neighbourhood.identity is not None:
             id_val = jnp.asarray(
-                neighbourhood.identity, dtype=neighbourhood.values.dtype,
+                neighbourhood.identity,
+                dtype=neighbourhood.values.dtype,
             )
             derived_mask = neighbourhood.values != id_val
     else:
         indices = jnp.asarray(neighbourhood, dtype=jnp.int32)
     if indices.shape[0] != n:
         raise ValueError(
-            f'neighbourhood has n={indices.shape[0]} rows; must equal '
-            f'n={n}.'
+            f'neighbourhood has n={indices.shape[0]} rows; must equal n={n}.'
         )
 
     if mask is None:
@@ -228,11 +226,11 @@ def bilateral_gaussian(
         )
 
     # Gather neighbour features and weight by the metric quadratic form.
-    feat_n = features[indices]                          # (n, k_max, d_f)
-    diff = features[:, None, :] - feat_n                # (n, k_max, d_f)
-    proj = metric.project(diff)                         # (n, k_max, k)
-    q = (proj ** 2).sum(axis=-1)                        # (n, k_max)
-    weights = jnp.exp(-0.5 * q)                         # (n, k_max)
+    feat_n = features[indices]  # (n, k_max, d_f)
+    diff = features[:, None, :] - feat_n  # (n, k_max, d_f)
+    proj = metric.project(diff)  # (n, k_max, k)
+    q = (proj**2).sum(axis=-1)  # (n, k_max)
+    weights = jnp.exp(-0.5 * q)  # (n, k_max)
     if mask is not None:
         weights = weights * mask.astype(weights.dtype)  # null padding
 
@@ -247,7 +245,11 @@ def bilateral_gaussian(
     out = values
     for _ in range(n_iters):
         out = semiring_ell_matmul(
-            weights, indices, out,
-            semiring=REAL, n_cols=n, backend=backend,
+            weights,
+            indices,
+            out,
+            semiring=REAL,
+            n_cols=n,
+            backend=backend,
         )
     return out

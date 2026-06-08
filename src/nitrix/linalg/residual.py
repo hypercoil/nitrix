@@ -53,6 +53,7 @@ What the legacy did NOT have that we add:
 - ``weights`` for heteroscedastic / GLS-like regression.
 - ``method`` selection for the speed / stability trade-off.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Literal, Optional
@@ -61,7 +62,6 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsla
 from jaxtyping import Array, Float, Num
-
 
 __all__ = ['residualise']
 
@@ -75,7 +75,7 @@ def _solve_cholesky(
     Y: Float[Array, 'n m'],
     l2: float,
 ) -> Float[Array, 'k m']:
-    '''Normal-equations OLS via Cholesky of ``X^T X + l2 I``.
+    """Normal-equations OLS via Cholesky of ``X^T X + l2 I``.
 
     Heavy step: ``X^T X`` of shape ``(k, k)``.  Cheap when ``n
     >> k``; the Cholesky and two triangular solves are ``O(k^3)``.
@@ -85,7 +85,7 @@ def _solve_cholesky(
     avoids materialising the ``(n + k, k)`` augmented matrix.
     Numerically more stable than the augmented form when ``l2``
     is very small.
-    '''
+    """
     k = X.shape[-1]
     XtX = X.T @ X
     if l2 > 0.0:
@@ -101,12 +101,12 @@ def _solve_svd(
     Y: Float[Array, 'n m'],
     l2: float,
 ) -> Float[Array, 'k m']:
-    '''SVD-based lstsq.  Stable even for rank-deficient ``X``.
+    """SVD-based lstsq.  Stable even for rank-deficient ``X``.
 
     When ``l2 > 0``, we use the augmented-system view (stack
     ``sqrt(l2) I`` below ``X`` and zeros below ``Y``) so the
     same ``lstsq`` call handles the ridge.
-    '''
+    """
     if l2 > 0.0:
         k = X.shape[-1]
         m = Y.shape[-1]
@@ -128,7 +128,7 @@ def _residualise_core(
     return_mode: ReturnMode,
     method: Method,
 ) -> Float[Array, 'n m']:
-    '''Unbatched core; callers compose batch via ``jax.vmap``.'''
+    """Unbatched core; callers compose batch via ``jax.vmap``."""
     if weights is not None:
         sqrt_w = jnp.sqrt(weights)[:, None]
         X_w = X * sqrt_w
@@ -142,9 +142,7 @@ def _residualise_core(
     elif method == 'svd':
         betas = _solve_svd(X_w, Y_w, l2)
     else:
-        raise ValueError(
-            f'method={method!r}; expected "cholesky" or "svd".'
-        )
+        raise ValueError(f'method={method!r}; expected "cholesky" or "svd".')
 
     # Reconstruct projection on the *unweighted* X; weights only
     # affect the betas, not the projection geometry.
@@ -168,7 +166,7 @@ def residualise(
     return_mode: ReturnMode = 'residual',
     method: Method = 'cholesky',
 ) -> Num[Array, '... C_Y obs']:
-    '''Project ``Y`` orthogonally to the span of ``X`` (OLS).
+    """Project ``Y`` orthogonally to the span of ``X`` (OLS).
 
     For each observation channel of ``Y``, regress against the
     columns of ``X`` and return the residual (or projection, per
@@ -246,7 +244,7 @@ def residualise(
     machine-precision when the system is well-conditioned (see
     the ``test_residualise_cholesky_vs_svd_parity_at_fp64`` test
     for the verified bound).
-    '''
+    """
     if rowvar:
         X_in = jnp.swapaxes(X, -1, -2)
         Y_in = jnp.swapaxes(Y, -1, -2)
@@ -269,27 +267,39 @@ def residualise(
 
     fn: Callable[..., Any]
     if weights is None:
+
         def core(
             X_: Float[Array, '...'], Y_: Float[Array, '...']
         ) -> Float[Array, '...']:
             return _residualise_core(
-                Y_, X_, weights=None, l2=l2,
-                return_mode=return_mode, method=method,
+                Y_,
+                X_,
+                weights=None,
+                l2=l2,
+                return_mode=return_mode,
+                method=method,
             )
+
         fn = core
         for _ in range(len(batch_shape)):
             fn = jax.vmap(fn, in_axes=(0, 0))
         out = fn(X_in, Y_in)
     else:
+
         def core_w(
             X_: Float[Array, '...'],
             Y_: Float[Array, '...'],
             w_: Float[Array, '...'],
         ) -> Float[Array, '...']:
             return _residualise_core(
-                Y_, X_, weights=w_, l2=l2,
-                return_mode=return_mode, method=method,
+                Y_,
+                X_,
+                weights=w_,
+                l2=l2,
+                return_mode=return_mode,
+                method=method,
             )
+
         fn = core_w
         for _ in range(len(batch_shape)):
             fn = jax.vmap(fn, in_axes=(0, 0, 0))

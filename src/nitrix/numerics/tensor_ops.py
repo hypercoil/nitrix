@@ -30,23 +30,24 @@ externally-useful subset to a public namespace.  The internal
 (used by other nitrix subpackages); this module re-exports the
 public surface with cleaner docstrings.
 """
+
 from __future__ import annotations
 
 from .._internal.util import (
+    amplitude_apply,
     apply_mask,
     atleast_4d,
     axis_complement,
     broadcast_ignoring,
     complex_decompose,
     complex_recompose,
-    amplitude_apply,
     conform_mask,
-    demote_axis,
     demote_and_unfold,
-    extend_to_size,
+    demote_axis,
     extend_to_max_size,
-    fold_axis,
+    extend_to_size,
     fold_and_promote,
+    fold_axis,
     mask_tensor,
     masker,
     negative_axis_number,
@@ -59,7 +60,6 @@ from .._internal.util import (
     unfold_axes,
     vmap_over_outer,
 )
-
 
 __all__ = [
     # Axis normalisation

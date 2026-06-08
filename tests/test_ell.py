@@ -8,6 +8,7 @@ because Triton does not lower the ``gather`` primitive (see
 falls back to JAX and emits exactly one ``NitrixBackendFallback``
 warning per (shape, dtype) signature.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -18,8 +19,8 @@ import numpy as np
 import pytest
 
 from nitrix._internal.backend import (
-    NitrixBackendFallback,
     _HAS_AMPERE_NVIDIA,
+    NitrixBackendFallback,
     reset_fallback_state,
 )
 from nitrix.semiring import (
@@ -36,7 +37,6 @@ from nitrix.sparse import (
     ell_pad,
     ell_to_dense,
 )
-
 
 pallas_only = pytest.mark.skipif(
     not _HAS_AMPERE_NVIDIA,
@@ -71,8 +71,12 @@ def test_ell_pad_appends_identity():
     values = jnp.arange(m * k_actual, dtype=jnp.float32).reshape(m, k_actual)
     indices = jnp.zeros((m, k_actual), dtype=jnp.int32)
     ell = ell_pad(
-        values, indices,
-        k_max=k_max, n_cols=n_cols, identity=0.0, pad_index=0,
+        values,
+        indices,
+        k_max=k_max,
+        n_cols=n_cols,
+        identity=0.0,
+        pad_index=0,
     )
     assert ell.values.shape == (m, k_max)
     # Tail is padded with identity
@@ -102,11 +106,13 @@ def _self_loop_fixture():
     values = jnp.asarray([[1.0, 2.0], [3.0, 0.0], [0.0, 0.0]])
     indices = jnp.asarray([[1, 2], [0, 0], [0, 0]], dtype=jnp.int32)
     ell = ELL(values=values, indices=indices, n_cols=3, identity=0.0)
-    edge_attr = jnp.asarray([
-        [[10.0, 11.0], [20.0, 21.0]],   # row 0: both valid
-        [[30.0, 31.0], [99.0, 99.0]],   # row 1: slot 1 is pad
-        [[88.0, 88.0], [77.0, 77.0]],   # row 2: all pad
-    ])
+    edge_attr = jnp.asarray(
+        [
+            [[10.0, 11.0], [20.0, 21.0]],  # row 0: both valid
+            [[30.0, 31.0], [99.0, 99.0]],  # row 1: slot 1 is pad
+            [[88.0, 88.0], [77.0, 77.0]],  # row 2: all pad
+        ]
+    )
     return ell, edge_attr
 
 
@@ -131,9 +137,9 @@ def test_ell_add_self_loops_mean_fill_excludes_padding():
     # Original attributes preserved.
     np.testing.assert_array_equal(attr[:, :2, :], edge_attr)
     # Self-edge attr = mean over *valid* (non-pad) edges only.
-    np.testing.assert_allclose(attr[0, -1], [15.0, 16.0])   # mean of both
-    np.testing.assert_allclose(attr[1, -1], [30.0, 31.0])   # pad slot dropped
-    np.testing.assert_allclose(attr[2, -1], [0.0, 0.0])     # all-pad -> 0
+    np.testing.assert_allclose(attr[0, -1], [15.0, 16.0])  # mean of both
+    np.testing.assert_allclose(attr[1, -1], [30.0, 31.0])  # pad slot dropped
+    np.testing.assert_allclose(attr[2, -1], [0.0, 0.0])  # all-pad -> 0
 
 
 def test_ell_add_self_loops_add_and_zero_fill():
@@ -170,25 +176,36 @@ def test_ell_add_self_loops_is_jit_safe():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('algebra,identity,naive_fn', [
-    (REAL, 0.0, lambda A, B: A @ B),
-    (
-        LOG, -jnp.inf,
-        lambda A, B: jax.scipy.special.logsumexp(
-            A[:, :, None] + B[None, :, :], axis=1,
+@pytest.mark.parametrize(
+    'algebra,identity,naive_fn',
+    [
+        (REAL, 0.0, lambda A, B: A @ B),
+        (
+            LOG,
+            -jnp.inf,
+            lambda A, B: jax.scipy.special.logsumexp(
+                A[:, :, None] + B[None, :, :],
+                axis=1,
+            ),
         ),
-    ),
-    (
-        TROPICAL_MAX_PLUS, -jnp.inf,
-        lambda A, B: (A[:, :, None] + B[None, :, :]).max(axis=1),
-    ),
-], ids=lambda a: getattr(a, 'name', str(a)))
+        (
+            TROPICAL_MAX_PLUS,
+            -jnp.inf,
+            lambda A, B: (A[:, :, None] + B[None, :, :]).max(axis=1),
+        ),
+    ],
+    ids=lambda a: getattr(a, 'name', str(a)),
+)
 def test_ell_matches_dense(algebra, identity, naive_fn):
     A, B = _dense_pair(jax.random.key(5), 16, 16)
     # Full ELL == dense A.
     ell = ell_from_dense(A, k_max=16, identity=identity)
     out = reference_semiring_ell_matmul(
-        ell.values, ell.indices, B, semiring=algebra, n_cols=16,
+        ell.values,
+        ell.indices,
+        B,
+        semiring=algebra,
+        n_cols=16,
     )
     if algebra is REAL:
         ref = jnp.matmul(A, B, precision='highest')
@@ -210,18 +227,24 @@ def test_ell_pallas_falls_back_with_warning():
     with warnings.catch_warnings(record=True) as ws:
         warnings.simplefilter('always')
         out = semiring_ell_matmul(
-            ell.values, ell.indices, B,
-            semiring=REAL, n_cols=16, backend='pallas-cuda',
+            ell.values,
+            ell.indices,
+            B,
+            semiring=REAL,
+            n_cols=16,
+            backend='pallas-cuda',
         )
-        n_fallback = sum(
-            1 for w in ws if w.category is NitrixBackendFallback
-        )
+        n_fallback = sum(1 for w in ws if w.category is NitrixBackendFallback)
     # Pallas ELL kernel raises NotTileable on current JAX -> exactly one warning.
     assert n_fallback == 1
     # The output still matches the JAX path.
     out_jax = semiring_ell_matmul(
-        ell.values, ell.indices, B,
-        semiring=REAL, n_cols=16, backend='jax',
+        ell.values,
+        ell.indices,
+        B,
+        semiring=REAL,
+        n_cols=16,
+        backend='jax',
     )
     np.testing.assert_array_equal(out, out_jax)
 
@@ -235,8 +258,12 @@ def test_ell_pallas_fallback_dedupes():
         warnings.simplefilter('always')
         for _ in range(3):
             semiring_ell_matmul(
-                ell.values, ell.indices, B,
-                semiring=REAL, n_cols=16, backend='pallas-cuda',
+                ell.values,
+                ell.indices,
+                B,
+                semiring=REAL,
+                n_cols=16,
+                backend='pallas-cuda',
             )
         n = sum(1 for w in ws if w.category is NitrixBackendFallback)
     assert n == 1
@@ -262,13 +289,22 @@ def test_ell_batched_jax():
     Bs = jnp.stack([B0, B1])
 
     out = semiring_ell_matmul(
-        values, indices, Bs, semiring=REAL, n_cols=n, backend='jax',
+        values,
+        indices,
+        Bs,
+        semiring=REAL,
+        n_cols=n,
+        backend='jax',
     )
     np.testing.assert_allclose(
-        out[0], jnp.matmul(A0, B0, precision='highest'),
-        atol=1e-4, rtol=1e-4,
+        out[0],
+        jnp.matmul(A0, B0, precision='highest'),
+        atol=1e-4,
+        rtol=1e-4,
     )
     np.testing.assert_allclose(
-        out[1], jnp.matmul(A1, B1, precision='highest'),
-        atol=1e-4, rtol=1e-4,
+        out[1],
+        jnp.matmul(A1, B1, precision='highest'),
+        atol=1e-4,
+        rtol=1e-4,
     )

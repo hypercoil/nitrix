@@ -8,12 +8,12 @@ non-pad entries must agree (up to fp64 epsilon).  This guards
 against a per-section indexing or scatter-back bug in the
 implicit-VJP backward.
 """
+
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 jax.config.update('jax_enable_x64', True)
 
@@ -51,7 +51,7 @@ def _to_flat_ell(A_np):
         values[i, : len(nz)] = A_np[i, nz]
         indices[i, : len(nz)] = nz
         if len(nz) < k_max:
-            indices[i, len(nz):] = nz[0]
+            indices[i, len(nz) :] = nz[0]
     return jnp.asarray(values), jnp.asarray(indices), k_max
 
 
@@ -64,18 +64,21 @@ def _to_sectioned(A_np):
         ragged_values.append(A_np[i, nz])
         ragged_indices.append(nz.astype(np.int32))
     return sectioned_ell_from_ragged(
-        ragged_values, ragged_indices, n_cols=n, identity=0.0,
+        ragged_values,
+        ragged_indices,
+        n_cols=n,
+        identity=0.0,
     )
 
 
 def test_sectioned_vjp_matches_flat_per_entry():
-    '''Per-section gradient at each non-pad ``(row, col)`` entry
+    """Per-section gradient at each non-pad ``(row, col)`` entry
     matches the flat-ELL gradient at the same ``(row, col)`` to
     machine-eps fp64.
 
     Verifies the per-section ``row_groups``-gather + einsum is
     correct.
-    '''
+    """
     A_np = _make_varying_degree_graph()
     n = A_np.shape[0]
     values_flat, indices_flat, k_max = _to_flat_ell(A_np)
@@ -88,11 +91,19 @@ def test_sectioned_vjp_matches_flat_per_entry():
     # Flat-ELL loss
     def loss_flat(values):
         _, U = _eig_top_k_ell(
-            values, indices_flat, X0, n, SolverSpec.lobpcg(n_iters=500),
+            values,
+            indices_flat,
+            X0,
+            n,
+            SolverSpec.lobpcg(n_iters=500),
         )
         AU = semiring_ell_matmul(
-            values, indices_flat, U,
-            semiring=REAL, n_cols=n, backend='jax',
+            values,
+            indices_flat,
+            U,
+            semiring=REAL,
+            n_cols=n,
+            backend='jax',
         )
         return jnp.trace(U.T @ AU @ target)
 
@@ -107,12 +118,20 @@ def test_sectioned_vjp_matches_flat_per_entry():
 
     def loss_sec(values_tuple):
         _, U = _eig_top_k_sectioned(
-            values_tuple, indices_tuple, row_groups_tuple, X0,
-            n, SolverSpec.lobpcg(n_iters=500),
+            values_tuple,
+            indices_tuple,
+            row_groups_tuple,
+            X0,
+            n,
+            SolverSpec.lobpcg(n_iters=500),
         )
         AU = _sectioned_matvec(
-            values_tuple, indices_tuple, row_groups_tuple, U,
-            n_cols=n, n_rows=n,
+            values_tuple,
+            indices_tuple,
+            row_groups_tuple,
+            U,
+            n_cols=n,
+            n_rows=n,
         )
         return jnp.trace(U.T @ AU @ target)
 
@@ -152,9 +171,9 @@ def test_sectioned_vjp_matches_flat_per_entry():
 
 
 def test_sectioned_vjp_finite_under_grad():
-    '''Smoke check: ``jax.grad`` through the sectioned LOBPCG returns
+    """Smoke check: ``jax.grad`` through the sectioned LOBPCG returns
     finite per-section gradients.
-    '''
+    """
     A_np = _make_varying_degree_graph()
     n = A_np.shape[0]
     sec = _to_sectioned(A_np)
@@ -162,16 +181,18 @@ def test_sectioned_vjp_finite_under_grad():
     target = jax.random.normal(jax.random.key(2), (3, 3))
     target = (target + target.T) / 2
 
-    from nitrix.linalg._eigsolve import _sectioned_matvec
-
     values_tuple = tuple(s.values for s in sec.sections)
     indices_tuple = tuple(s.indices for s in sec.sections)
     row_groups_tuple = tuple(jnp.asarray(rg) for rg in sec.row_groups)
 
     def loss(values_tuple):
         _, U = _eig_top_k_sectioned(
-            values_tuple, indices_tuple, row_groups_tuple, X0,
-            n, SolverSpec.lobpcg(n_iters=500),
+            values_tuple,
+            indices_tuple,
+            row_groups_tuple,
+            X0,
+            n,
+            SolverSpec.lobpcg(n_iters=500),
         )
         return jnp.trace(U.T @ U @ target)
 

@@ -27,6 +27,7 @@ Submodules:
 
 See SPEC §4.4, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
 """
+
 from ._interpolate import (
     CubicBSpline,
     CubicBSplineBoundaryWarning,

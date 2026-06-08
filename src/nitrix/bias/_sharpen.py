@@ -46,11 +46,11 @@ __all__ = ['sharpen_histogram']
 
 
 def _padded_fft_size(n_bins: int) -> tuple[int, int]:
-    '''Power-of-two FFT length and the centring offset (ITK convention).
+    """Power-of-two FFT length and the centring offset (ITK convention).
 
     ``exponent = ceil(log2(n_bins)) + 1``; the histogram is centred in the
     padded buffer with ``offset = floor((padded - n_bins) / 2)``.
-    '''
+    """
     exponent = math.ceil(math.log2(n_bins)) + 1
     padded = int(2**exponent)
     offset = (padded - n_bins) // 2
@@ -65,7 +65,7 @@ def sharpen_histogram(
     fwhm: float = 0.15,
     wiener_noise: float = 0.01,
 ) -> Float[Array, '... *spatial']:
-    '''Sharpen an intensity image by Wiener deconvolution of its histogram.
+    """Sharpen an intensity image by Wiener deconvolution of its histogram.
 
     The N3 / N4 histogram-deconvolution step.  In N4 this is applied to the
     *log* of the (partially corrected) image; it is exposed standalone
@@ -105,7 +105,7 @@ def sharpen_histogram(
     -----
     Not differentiable through the histogram binning (piecewise constant).
     The FFT length is a static power of two, so the op JITs cleanly.
-    '''
+    """
     x = jnp.asarray(image)
     dtype = jnp.result_type(x.dtype, jnp.float32)
     x = x.astype(dtype)

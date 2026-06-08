@@ -43,6 +43,7 @@ References for design context (research summary in
 - XLA gather+dot non-fusion: openxla.org/xla/gpu_architecture and
   the JAX issue tracker (no "free" implicit im2col on the JAX path).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,6 +53,12 @@ from pathlib import Path
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
+from _util import (
+    bench_call,
+    format_us,
+    host_summary,
+    timed_jit,
+)
 
 from nitrix.semiring import (
     EUCLIDEAN,
@@ -60,15 +67,6 @@ from nitrix.semiring import (
     TROPICAL_MAX_PLUS,
     semiring_conv,
 )
-
-from _util import (
-    BenchSample,
-    bench_call,
-    format_us,
-    host_summary,
-    timed_jit,
-)
-
 
 HERE = Path(__file__).parent
 REPORT_PATH = HERE / 'PERF_SEMIRING_CONV.md'
@@ -86,8 +84,8 @@ QUICK_SHAPES_2D = [(1, 64, 64, 32, 3, 3, 32)]
 
 # 3D volume shapes.
 SHAPES_3D = [
-    (1, 32, 32, 32, 8, 3, 3, 3, 16),    # smallish 3D conv
-    (1, 64, 64, 64, 8, 3, 3, 3, 8),     # neuroimaging-ish patch
+    (1, 32, 32, 32, 8, 3, 3, 3, 16),  # smallish 3D conv
+    (1, 64, 64, 64, 8, 3, 3, 3, 8),  # neuroimaging-ish patch
 ]
 QUICK_SHAPES_3D = [(1, 32, 32, 32, 8, 3, 3, 3, 16)]
 
@@ -136,8 +134,10 @@ def lax_conv_2d(x, k, padding='SAME', precision=None):
     # k: (kH, kW, c_in, c_out) -> (c_out, c_in, kH, kW)
     k_lax = jnp.moveaxis(jnp.moveaxis(k, -1, 0), -1, 1)
     out_nchw = lax.conv_general_dilated(
-        x_nchw, k_lax,
-        window_strides=(1, 1), padding=padding,
+        x_nchw,
+        k_lax,
+        window_strides=(1, 1),
+        padding=padding,
         precision=precision,
     )
     return jnp.moveaxis(out_nchw, 1, -1)
@@ -148,8 +148,10 @@ def lax_conv_3d(x, k, padding='SAME', precision=None):
     # k: (kD, kH, kW, c_in, c_out) -> (c_out, c_in, kD, kH, kW)
     k_lax = jnp.moveaxis(jnp.moveaxis(k, -1, 0), -1, 1)
     out_nchw = lax.conv_general_dilated(
-        x_nchw, k_lax,
-        window_strides=(1, 1, 1), padding=padding,
+        x_nchw,
+        k_lax,
+        window_strides=(1, 1, 1),
+        padding=padding,
         precision=precision,
     )
     return jnp.moveaxis(out_nchw, 1, -1)
@@ -200,8 +202,11 @@ def run_2d(shapes, algebras, warmup, repeats):
         B, H, W, Cin, kH, kW, Cout = shape
         x, k = _make_2d(shape, seed=hash(shape) & 0xFFFF)
         shape_args = {
-            'B': B, 'spatial': (H, W), 'Cin': Cin,
-            'kspatial': (kH, kW), 'Cout': Cout,
+            'B': B,
+            'spatial': (H, W),
+            'Cin': Cin,
+            'kspatial': (kH, kW),
+            'Cout': Cout,
         }
         row = {
             'shape': f'B{B} {H}x{W}x{Cin} -> {kH}x{kW} {Cout}',
@@ -228,7 +233,10 @@ def run_2d(shapes, algebras, warmup, repeats):
         for algebra in algebras:
             fn = timed_jit(
                 lambda x, k, _a=algebra: semiring_conv(
-                    x, k, semiring=_a, padding='SAME',
+                    x,
+                    k,
+                    semiring=_a,
+                    padding='SAME',
                     backend='pallas-cuda',
                 )
             )
@@ -236,6 +244,7 @@ def run_2d(shapes, algebras, warmup, repeats):
                 # First call also exercises the conv-level fallback
                 # warning; ``bench_call``'s warmup discards it.
                 import warnings
+
                 with warnings.catch_warnings():
                     warnings.simplefilter('ignore')
                     s = bench_call(fn, x, k, warmup=warmup, repeats=repeats)
@@ -249,16 +258,18 @@ def run_2d(shapes, algebras, warmup, repeats):
         # speed-up).
         fn_jax = timed_jit(
             lambda x, k: semiring_conv(
-                x, k, semiring=REAL, padding='SAME', backend='jax',
+                x,
+                k,
+                semiring=REAL,
+                padding='SAME',
+                backend='jax',
             )
         )
         s = bench_call(fn_jax, x, k, warmup=warmup, repeats=repeats)
         row['real_jax_warm_s'] = s.warm_s
 
         if row.get('cudnn_tc_warm_s') and row.get('real_warm_s'):
-            row['slowdown_vs_tc'] = (
-                row['real_warm_s'] / row['cudnn_tc_warm_s']
-            )
+            row['slowdown_vs_tc'] = row['real_warm_s'] / row['cudnn_tc_warm_s']
         if row.get('cudnn_fp32_warm_s') and row.get('real_warm_s'):
             row['slowdown_vs_fp32'] = (
                 row['real_warm_s'] / row['cudnn_fp32_warm_s']
@@ -273,8 +284,11 @@ def run_3d(shapes, algebras, warmup, repeats):
         B, D, H, W, Cin, kD, kH, kW, Cout = shape
         x, k = _make_3d(shape, seed=hash(shape) & 0xFFFF)
         shape_args = {
-            'B': B, 'spatial': (D, H, W), 'Cin': Cin,
-            'kspatial': (kD, kH, kW), 'Cout': Cout,
+            'B': B,
+            'spatial': (D, H, W),
+            'Cin': Cin,
+            'kspatial': (kD, kH, kW),
+            'Cout': Cout,
         }
         row = {
             'shape': f'B{B} {D}x{H}x{W}x{Cin} -> {kD}x{kH}x{kW} {Cout}',
@@ -295,12 +309,16 @@ def run_3d(shapes, algebras, warmup, repeats):
         for algebra in algebras:
             fn = timed_jit(
                 lambda x, k, _a=algebra: semiring_conv(
-                    x, k, semiring=_a, padding='SAME',
+                    x,
+                    k,
+                    semiring=_a,
+                    padding='SAME',
                     backend='pallas-cuda',
                 )
             )
             try:
                 import warnings
+
                 with warnings.catch_warnings():
                     warnings.simplefilter('ignore')
                     s = bench_call(fn, x, k, warmup=warmup, repeats=repeats)
@@ -312,16 +330,18 @@ def run_3d(shapes, algebras, warmup, repeats):
 
         fn_jax = timed_jit(
             lambda x, k: semiring_conv(
-                x, k, semiring=REAL, padding='SAME', backend='jax',
+                x,
+                k,
+                semiring=REAL,
+                padding='SAME',
+                backend='jax',
             )
         )
         s = bench_call(fn_jax, x, k, warmup=warmup, repeats=repeats)
         row['real_jax_warm_s'] = s.warm_s
 
         if row.get('cudnn_tc_warm_s') and row.get('real_warm_s'):
-            row['slowdown_vs_tc'] = (
-                row['real_warm_s'] / row['cudnn_tc_warm_s']
-            )
+            row['slowdown_vs_tc'] = row['real_warm_s'] / row['cudnn_tc_warm_s']
         if row.get('cudnn_fp32_warm_s') and row.get('real_warm_s'):
             row['slowdown_vs_fp32'] = (
                 row['real_warm_s'] / row['cudnn_fp32_warm_s']
@@ -366,10 +386,16 @@ def render_report(rows_2d, rows_3d, host) -> str:
                 tc=format_us(r.get('cudnn_tc_warm_s', 0) or 0),
                 fp=format_us(r.get('cudnn_fp32_warm_s', 0) or 0),
                 re=format_us(r.get('real_warm_s', 0) or 0),
-                stc=(f'{r["slowdown_vs_tc"]:.2f}×'
-                     if r.get('slowdown_vs_tc') else 'n/a'),
-                sfp=(f'{r["slowdown_vs_fp32"]:.2f}×'
-                     if r.get('slowdown_vs_fp32') else 'n/a'),
+                stc=(
+                    f'{r["slowdown_vs_tc"]:.2f}×'
+                    if r.get('slowdown_vs_tc')
+                    else 'n/a'
+                ),
+                sfp=(
+                    f'{r["slowdown_vs_fp32"]:.2f}×'
+                    if r.get('slowdown_vs_fp32')
+                    else 'n/a'
+                ),
                 rj=format_us(r.get('real_jax_warm_s', 0) or 0),
                 lo=format_us(r.get('log_warm_s', 0) or 0),
                 tr=format_us(r.get('tropical_max_plus_warm_s', 0) or 0),
@@ -391,10 +417,16 @@ def render_report(rows_2d, rows_3d, host) -> str:
                 tc=format_us(r.get('cudnn_tc_warm_s', 0) or 0),
                 fp=format_us(r.get('cudnn_fp32_warm_s', 0) or 0),
                 re=format_us(r.get('real_warm_s', 0) or 0),
-                stc=(f'{r["slowdown_vs_tc"]:.2f}×'
-                     if r.get('slowdown_vs_tc') else 'n/a'),
-                sfp=(f'{r["slowdown_vs_fp32"]:.2f}×'
-                     if r.get('slowdown_vs_fp32') else 'n/a'),
+                stc=(
+                    f'{r["slowdown_vs_tc"]:.2f}×'
+                    if r.get('slowdown_vs_tc')
+                    else 'n/a'
+                ),
+                sfp=(
+                    f'{r["slowdown_vs_fp32"]:.2f}×'
+                    if r.get('slowdown_vs_fp32')
+                    else 'n/a'
+                ),
                 rj=format_us(r.get('real_jax_warm_s', 0) or 0),
                 lo=format_us(r.get('log_warm_s', 0) or 0),
                 tr=format_us(r.get('tropical_max_plus_warm_s', 0) or 0),
@@ -411,7 +443,7 @@ def render_report(rows_2d, rows_3d, host) -> str:
         '``M_out * prod(kspatial) * c_in * 4`` bytes (fp32) on top of',
         'the I/O floor.  The HBM stats below are *analytical*',
         '(measured exactly from the shape) rather than from runtime',
-        'sampling -- the JAX allocator pool\'s ``peak_bytes_in_use``',
+        "sampling -- the JAX allocator pool's ``peak_bytes_in_use``",
         'is a process-wide HWM that cannot be reset, so successive',
         'measurements mask each other.',
         '',
@@ -424,8 +456,11 @@ def render_report(rows_2d, rows_3d, host) -> str:
                 s=r['shape'],
                 io=_mb(r.get('io_floor_bytes')),
                 im=_mb(r.get('im2col_bytes')),
-                ratio=(f'{r["im2col_bytes"] / r["io_floor_bytes"]:.2f}×'
-                       if r.get('io_floor_bytes') else 'n/a'),
+                ratio=(
+                    f'{r["im2col_bytes"] / r["io_floor_bytes"]:.2f}×'
+                    if r.get('io_floor_bytes')
+                    else 'n/a'
+                ),
             )
         )
 
@@ -468,7 +503,7 @@ def render_report(rows_2d, rows_3d, host) -> str:
         '  extraction and matmul shape.',
         '- **Memory**: our explicit im2col overhead is ``prod(kspatial)``',
         '  × ``c_in / (c_in + c_out + 1)`` × the I/O floor.  For 3×3',
-        '  conv with c_in ≈ c_out, that\'s roughly 4×.  Memory-bound',
+        "  conv with c_in ≈ c_out, that's roughly 4×.  Memory-bound",
         '  shapes (very large spatial × small channels) trigger this',
         '  first; the workaround is to tile the output spatial dim',
         '  before im2col -- a Pallas implicit-GEMM kernel removes it',
@@ -482,7 +517,7 @@ def render_report(rows_2d, rows_3d, host) -> str:
         '§6.2; reference at github.com/l1351868270/implicit_gemm.triton).',
         'Expected payoff per Chen et al. 2021 is ~1.3–1.7× on',
         'CUDA-core hardware, plus ``9× -> 1×`` HBM capacity reduction',
-        'for ``3×3`` conv.  Unlike the ELL kernel, conv\'s gather',
+        "for ``3×3`` conv.  Unlike the ELL kernel, conv's gather",
         'pattern is *static* (a function of kspatial / strides /',
         'dilation, not of a data-dependent index array), so it may',
         'lower in Triton without depending on a runtime gather',
@@ -503,10 +538,16 @@ def main():
     host = host_summary()
     algebras = [REAL, LOG, TROPICAL_MAX_PLUS, EUCLIDEAN]
     rows_2d = run_2d(
-        shapes_2d, algebras, warmup=args.warmup, repeats=args.repeats,
+        shapes_2d,
+        algebras,
+        warmup=args.warmup,
+        repeats=args.repeats,
     )
     rows_3d = run_3d(
-        shapes_3d, algebras[:3], warmup=args.warmup, repeats=args.repeats,
+        shapes_3d,
+        algebras[:3],
+        warmup=args.warmup,
+        repeats=args.repeats,
     )
     report = render_report(rows_2d, rows_3d, host)
     REPORT_PATH.write_text(report)

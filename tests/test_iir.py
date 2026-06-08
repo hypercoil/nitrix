@@ -13,6 +13,7 @@ Coverage:
 - selectivity (band-pass keeps / band-stop notches); jit + grad; argument
   validation.
 """
+
 from __future__ import annotations
 
 import jax
@@ -67,12 +68,14 @@ def _mag_response(sos, w):
 @pytest.mark.parametrize('btype, order, lo, hi', _CASES)
 def test_design_matches_scipy(btype, order, lo, hi):
     mine = butterworth_sos(order=order, fs=FS, btype=btype, lo=lo, hi=hi)
-    ref = ss.butter(order, _scipy_wn(btype, lo, hi), btype=btype,
-                    output='sos', fs=FS)
+    ref = ss.butter(
+        order, _scipy_wn(btype, lo, hi), btype=btype, output='sos', fs=FS
+    )
     assert mine.shape == ref.shape
     w = np.linspace(1e-3, np.pi - 1e-3, 400)
-    np.testing.assert_allclose(_mag_response(mine, w), _mag_response(ref, w),
-                               atol=1e-10)
+    np.testing.assert_allclose(
+        _mag_response(mine, w), _mag_response(ref, w), atol=1e-10
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,17 +123,27 @@ def test_filtfilt_zero_phase_causal_has_delay():
     # (monotonic) group delay, unlike a band-pass at its centre frequency
     # where the phase passes through ~0.
     tone = _tone(0.05)
-    zp = np.asarray(iir_filter(jnp.asarray(tone), fs=FS, btype='lowpass',
-                               hi=0.12, zero_phase=True))
-    causal = np.asarray(iir_filter(jnp.asarray(tone), fs=FS, btype='lowpass',
-                                   hi=0.12, zero_phase=False))
+    zp = np.asarray(
+        iir_filter(
+            jnp.asarray(tone), fs=FS, btype='lowpass', hi=0.12, zero_phase=True
+        )
+    )
+    causal = np.asarray(
+        iir_filter(
+            jnp.asarray(tone),
+            fs=FS,
+            btype='lowpass',
+            hi=0.12,
+            zero_phase=False,
+        )
+    )
 
     def lag(y):
         a, b = tone[80:-80], y[80:-80]
         return int(np.argmax(np.correlate(b, a, 'full'))) - (len(a) - 1)
 
-    assert lag(zp) == 0           # zero-phase: no delay
-    assert lag(causal) > 0        # causal Butterworth: real group delay
+    assert lag(zp) == 0  # zero-phase: no delay
+    assert lag(causal) > 0  # causal Butterworth: real group delay
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +159,9 @@ def _power_at(sig, freq, fs=FS):
 
 def test_bandpass_selectivity():
     x = _tone(0.02) + _tone(0.08) + _tone(0.20)
-    y = iir_filter(jnp.asarray(x), fs=FS, btype='bandpass', lo=0.05, hi=0.12,
-                   order=4)
+    y = iir_filter(
+        jnp.asarray(x), fs=FS, btype='bandpass', lo=0.05, hi=0.12, order=4
+    )
     assert _power_at(y, 0.08) / _power_at(x, 0.08) > 0.9
     assert _power_at(y, 0.02) / _power_at(x, 0.02) < 0.05
     assert _power_at(y, 0.20) / _power_at(x, 0.20) < 0.05
@@ -155,8 +169,9 @@ def test_bandpass_selectivity():
 
 def test_bandstop_notch():
     x = _tone(0.02) + _tone(0.08) + _tone(0.20)
-    y = iir_filter(jnp.asarray(x), fs=FS, btype='bandstop', lo=0.05, hi=0.12,
-                   order=4)
+    y = iir_filter(
+        jnp.asarray(x), fs=FS, btype='bandstop', lo=0.05, hi=0.12, order=4
+    )
     assert _power_at(y, 0.08) / _power_at(x, 0.08) < 0.1
     assert _power_at(y, 0.02) / _power_at(x, 0.02) > 0.95
     assert _power_at(y, 0.20) / _power_at(x, 0.20) > 0.95
@@ -169,8 +184,9 @@ def test_bandstop_notch():
 
 def test_jit_and_grad():
     x = jnp.asarray(_tone(0.08))
-    fn = jax.jit(lambda z: iir_filter(z, fs=FS, btype='bandpass', lo=0.05,
-                                      hi=0.12))
+    fn = jax.jit(
+        lambda z: iir_filter(z, fs=FS, btype='bandpass', lo=0.05, hi=0.12)
+    )
     a = np.asarray(iir_filter(x, fs=FS, btype='bandpass', lo=0.05, hi=0.12))
     np.testing.assert_allclose(a, np.asarray(fn(x)), atol=1e-9)
     g = jax.grad(
@@ -185,8 +201,15 @@ def test_grad_associative_backend():
     x = jnp.asarray(_tone(0.08))
     g = jax.grad(
         lambda z: jnp.sum(
-            iir_filter(z, fs=FS, btype='lowpass', hi=0.1, zero_phase=False,
-                       backend='associative') ** 2
+            iir_filter(
+                z,
+                fs=FS,
+                btype='lowpass',
+                hi=0.1,
+                zero_phase=False,
+                backend='associative',
+            )
+            ** 2
         )
     )(x)
     assert bool(np.all(np.isfinite(np.array(g))))
@@ -200,17 +223,28 @@ def test_fft_backend_matches_scipy(btype, order, lo, hi):
     sos = butterworth_sos(order=order, fs=FS, btype=btype, lo=lo, hi=hi)
     sf = np.asarray(sosfilt(jnp.asarray(x), sos, backend='fft'))
     ff = np.asarray(sosfiltfilt(jnp.asarray(x), sos, backend='fft'))
-    np.testing.assert_allclose(sf, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-9)
     np.testing.assert_allclose(
-        ff, ss.sosfiltfilt(sos.copy(), x, axis=-1), atol=1e-9,
+        sf, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-9
+    )
+    np.testing.assert_allclose(
+        ff,
+        ss.sosfiltfilt(sos.copy(), x, axis=-1),
+        atol=1e-9,
     )
 
 
 def test_fft_grad_finite():
     x = jnp.asarray(_tone(0.08))
     g = jax.grad(
-        lambda z: jnp.sum(sosfiltfilt(z, butterworth_sos(
-            order=4, fs=FS, btype='bandpass', lo=0.05, hi=0.2), backend='fft'))
+        lambda z: jnp.sum(
+            sosfiltfilt(
+                z,
+                butterworth_sos(
+                    order=4, fs=FS, btype='bandpass', lo=0.05, hi=0.2
+                ),
+                backend='fft',
+            )
+        )
     )(x)
     assert bool(np.all(np.isfinite(np.array(g))))
 
@@ -232,10 +266,14 @@ def test_fft_too_sharp_falls_back():
     # within the tap cap must fall back to a recurrence (with a warning) and
     # stay correct.
     x = np.random.default_rng(5).normal(size=(2, 400))
-    sos = butterworth_sos(order=8, fs=FS, btype='bandpass', lo=0.0004, hi=0.0008)
+    sos = butterworth_sos(
+        order=8, fs=FS, btype='bandpass', lo=0.0004, hi=0.0008
+    )
     with pytest.warns(UserWarning, match='falling back'):
         out = np.asarray(sosfilt(jnp.asarray(x), sos, backend='fft'))
-    np.testing.assert_allclose(out, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-8)
+    np.testing.assert_allclose(
+        out, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-8
+    )
 
 
 def test_validation():
@@ -243,11 +281,14 @@ def test_validation():
     with pytest.raises(ValueError):
         iir_filter(x, fs=FS, btype='bandpass', lo=0.2, hi=0.05)  # lo >= hi
     with pytest.raises(ValueError):
-        iir_filter(x, fs=FS, btype='lowpass', hi=0.3)            # > Nyquist
+        iir_filter(x, fs=FS, btype='lowpass', hi=0.3)  # > Nyquist
     with pytest.raises(ValueError):
-        iir_filter(x, fs=FS, btype='bandpass', lo=0.05)         # hi missing
+        iir_filter(x, fs=FS, btype='bandpass', lo=0.05)  # hi missing
     with pytest.raises(ValueError):
         butterworth_sos(order=4, fs=FS, btype='nope', lo=0.05, hi=0.1)
     with pytest.raises(ValueError):
-        sosfilt(x, butterworth_sos(order=2, fs=FS, btype='lowpass', hi=0.1),
-                backend='nope')
+        sosfilt(
+            x,
+            butterworth_sos(order=2, fs=FS, btype='lowpass', hi=0.1),
+            backend='nope',
+        )

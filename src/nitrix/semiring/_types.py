@@ -21,9 +21,10 @@ Users opt into strict via ``strict=True`` on the ``Semiring`` constructor;
 this returns a ``StrictSemiring``.  No structural property is *checked*
 at runtime -- the flag is the user's signed declaration.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -37,7 +38,6 @@ from typing import (
 
 import jax.numpy as jnp
 from jaxtyping import Array, Num
-
 
 __all__ = [
     'Monoid',
@@ -53,7 +53,7 @@ S = TypeVar('S')
 
 @runtime_checkable
 class Monoid(Protocol[S]):
-    '''Associative reduction with identity, carrying optional pytree state.
+    """Associative reduction with identity, carrying optional pytree state.
 
     Required (informal) properties:
 
@@ -73,15 +73,11 @@ class Monoid(Protocol[S]):
     The state ``S`` may be any pytree; this is what enables online
     numerically-stable reductions such as the ``(running_max, sum_exp)``
     state used by ``LogSumExpMonoid``.
-    '''
+    """
 
-    def init(
-        self, shape: tuple[int, ...], dtype: jnp.dtype[Any]
-    ) -> S: ...
+    def init(self, shape: tuple[int, ...], dtype: jnp.dtype[Any]) -> S: ...
 
-    def update(
-        self, acc: S, value: Num[Array, '*shape']
-    ) -> S: ...
+    def update(self, acc: S, value: Num[Array, '*shape']) -> S: ...
 
     def merge(self, a: S, b: S) -> S: ...
 
@@ -90,7 +86,7 @@ class Monoid(Protocol[S]):
 
 @runtime_checkable
 class Semigroup(Protocol):
-    '''A binary operation supporting NumPy-style broadcasting.
+    """A binary operation supporting NumPy-style broadcasting.
 
     Used as the semiring's ``(*)``: the per-``(i, k, j)`` combine inside
     the contraction.  Need not be commutative.  Need not be associative
@@ -100,7 +96,7 @@ class Semigroup(Protocol):
     The kernel only relies on the broadcast call
     ``combine(a_col, b_row) -> value``, so ``combine`` should be a pure
     JAX function with no captured state.
-    '''
+    """
 
     def combine(
         self, a: Num[Array, '*shape'], b: Num[Array, '*shape']
@@ -109,18 +105,18 @@ class Semigroup(Protocol):
 
 SemiringMatmulVJP = Callable[
     [Tuple[Any, ...], Any],  # residuals, g_out
-    Tuple[Any, Any],         # grad_A, grad_B
+    Tuple[Any, Any],  # grad_A, grad_B
 ]
 
 SemiringELLMatmulVJP = Callable[
     [Tuple[Any, ...], Any],  # residuals, g_out
-    Tuple[Any, Any],         # grad_values, grad_B  (indices is non-diff)
+    Tuple[Any, Any],  # grad_values, grad_B  (indices is non-diff)
 ]
 
 
 @dataclass(frozen=True)
 class Semiring(Generic[S]):
-    '''The relaxed semiring: a frozen ``(monoid, binary_op, identity, name)`` tuple.
+    """The relaxed semiring: a frozen ``(monoid, binary_op, identity, name)`` tuple.
 
     Parameters
     ----------
@@ -178,7 +174,7 @@ class Semiring(Generic[S]):
     extra metadata (e.g., a custom gradient hint); the kernel surface
     relies on the ``monoid`` / ``binary_op`` / ``identity`` / ``name``
     fields.
-    '''
+    """
 
     monoid: Monoid[S]
     binary_op: Semigroup
@@ -189,12 +185,12 @@ class Semiring(Generic[S]):
     ell_matmul_vjp: Optional[SemiringELLMatmulVJP] = None
 
     def as_strict(self) -> 'StrictSemiring[S]':
-        '''Re-tag this semiring as a ``StrictSemiring``.
+        """Re-tag this semiring as a ``StrictSemiring``.
 
         The caller is asserting that ``binary_op`` is associative and
         distributes over ``monoid.merge`` for the dtypes in use.  No
         check is performed; the type system carries the obligation.
-        '''
+        """
         return StrictSemiring(
             monoid=self.monoid,
             binary_op=self.binary_op,
@@ -223,7 +219,7 @@ class Semiring(Generic[S]):
 
 @dataclass(frozen=True)
 class StrictSemiring(Semiring[S]):
-    '''A ``Semiring`` whose ``binary_op`` is associative and distributes
+    """A ``Semiring`` whose ``binary_op`` is associative and distributes
     over ``monoid.merge``.
 
     The strict subtype unlocks reduction reorderings that are unsafe in
@@ -235,7 +231,7 @@ class StrictSemiring(Semiring[S]):
     The Pallas streaming kernels accept either type: they fix the
     reduction order, so they do not rely on associativity.  ``Semiring``
     in their signatures (rather than ``StrictSemiring``) reflects this.
-    '''
+    """
 
     def as_relaxed(self) -> 'Semiring[S]':
         return Semiring(

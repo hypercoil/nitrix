@@ -45,17 +45,17 @@ For more exotic topologies (e.g., parameterised-sphere with pole
 flip), pre-pad the spatial axes via ``nitrix.geometry.sphere_grid``
 and construct the stencil on the padded grid.
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal, Optional, Sequence, Tuple, Union, cast
 
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float, Int, Num
+from jaxtyping import Array, Num
 from numpy.typing import NDArray
 
 from .ell import ELL
-
 
 __all__ = [
     'regular_grid_stencil',
@@ -77,7 +77,7 @@ def _linearise_offsets(
     offsets: NDArray[Any],
     boundary: BoundaryMode,
 ) -> NDArray[Any]:
-    '''Map per-voxel + per-offset neighbour coordinates to linear indices.
+    """Map per-voxel + per-offset neighbour coordinates to linear indices.
 
     Returns ``indices`` of shape ``(n_voxels, n_offsets)`` where
     ``indices[v, k]`` is the linearised index (under C order) of the
@@ -86,7 +86,7 @@ def _linearise_offsets(
     Done in NumPy at construction time -- no JIT path.  The result is
     a fixed integer array passed to ELL; the actual matmul (via
     ``semiring_ell_matmul``) is pure JAX.
-    '''
+    """
     ndim = len(grid_shape)
     if offsets.shape[1] != ndim:
         raise ValueError(
@@ -154,7 +154,7 @@ def regular_grid_stencil(
     n_cols: Optional[int] = None,
     identity: Any = 0.0,
 ) -> ELL:
-    '''Build an ELL for an n-D regular-grid stencil.
+    """Build an ELL for an n-D regular-grid stencil.
 
     The result represents a linear operator ``Op`` such that
     ``(Op @ x)[v] = sum_k weights[k] * x[neighbour(v, offsets[k])]``,
@@ -190,7 +190,7 @@ def regular_grid_stencil(
     -------
     ELL with shape ``(prod(grid_shape), n_cols)`` and ``k_max =
     n_offsets``.
-    '''
+    """
     grid_shape_t = tuple(int(s) for s in grid_shape)
     offsets_arr = np.asarray(offsets, dtype=np.int64)
     if offsets_arr.ndim != 2:
@@ -208,8 +208,7 @@ def regular_grid_stencil(
     weights_arr = jnp.asarray(weights)
     if weights_arr.shape != (n_offsets,):
         raise ValueError(
-            f'weights must have shape ({n_offsets},); got '
-            f'{weights_arr.shape}.'
+            f'weights must have shape ({n_offsets},); got {weights_arr.shape}.'
         )
     values = jnp.broadcast_to(weights_arr[None, :], (n_voxels, n_offsets))
 
@@ -222,10 +221,10 @@ def regular_grid_stencil(
 
 
 def _axis_unit_offsets(ndim: int) -> NDArray[Any]:
-    '''Return the 2*ndim + 1 axis-aligned offsets ``{0, ±e_d}``.
+    """Return the 2*ndim + 1 axis-aligned offsets ``{0, ±e_d}``.
 
     Order: center, then ``(+e_0, -e_0, +e_1, -e_1, ...)``.
-    '''
+    """
     rows = [np.zeros(ndim, dtype=np.int64)]
     for d in range(ndim):
         for sign in (1, -1):
@@ -242,7 +241,7 @@ def grid_laplacian(
     spacing: Union[float, Sequence[float]] = 1.0,
     sign: Literal['positive', 'negative'] = 'negative',
 ) -> ELL:
-    '''The standard (2n+1)-point n-D Laplacian stencil on a regular grid.
+    """The standard (2n+1)-point n-D Laplacian stencil on a regular grid.
 
     The 5-point stencil in 2-D (or 7-point in 3-D, etc.):
 
@@ -277,7 +276,7 @@ def grid_laplacian(
     Returns
     -------
     ELL representing the Laplacian operator.
-    '''
+    """
     grid_shape_t = tuple(int(s) for s in grid_shape)
     ndim = len(grid_shape_t)
 
@@ -291,7 +290,7 @@ def grid_laplacian(
                 f'{spacing_per_axis.shape}.'
             )
 
-    inv_h2 = 1.0 / (spacing_per_axis ** 2)
+    inv_h2 = 1.0 / (spacing_per_axis**2)
     offsets = _axis_unit_offsets(ndim)
     # Weights: centre = -sum(2 * 1/h^2); +e_d and -e_d each get 1/h^2.
     weights_np = np.empty(offsets.shape[0], dtype=np.float64)
@@ -302,9 +301,7 @@ def grid_laplacian(
     if sign == 'positive':
         weights_np = -weights_np
     elif sign != 'negative':
-        raise ValueError(
-            f"sign={sign!r}; expected 'negative' or 'positive'."
-        )
+        raise ValueError(f"sign={sign!r}; expected 'negative' or 'positive'.")
 
     return regular_grid_stencil(
         grid_shape_t,
@@ -319,18 +316,21 @@ def grid_identity(
     *,
     n_cols: Optional[int] = None,
 ) -> ELL:
-    '''The identity operator on a regular grid.
+    """The identity operator on a regular grid.
 
     Returned as an ELL with one tap per row (the centre offset).
     Composable with ``grid_laplacian`` and other stencil operators
     for "shifted Laplacian" preconditioners and "implicit smoothing"
     operators ``I - α L``.
-    '''
+    """
     grid_shape_t = tuple(int(s) for s in grid_shape)
     ndim = len(grid_shape_t)
     offsets = [[0] * ndim]
     weights = jnp.ones(1, dtype=jnp.float32)
     return regular_grid_stencil(
-        grid_shape_t, offsets, weights,
-        boundary='replicate', n_cols=n_cols,
+        grid_shape_t,
+        offsets,
+        weights,
+        boundary='replicate',
+        n_cols=n_cols,
     )

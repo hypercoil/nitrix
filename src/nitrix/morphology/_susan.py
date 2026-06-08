@@ -17,12 +17,12 @@ the simple-Gaussian half on its own).  This matches the SPEC's
 "reserve the namespace; raise with a pointer until the dependency
 lands" pattern.
 """
+
 from __future__ import annotations
 
 from typing import Optional
 
 from jaxtyping import Array, Float
-
 
 __all__ = ['susan_emulator']
 
@@ -35,7 +35,7 @@ def susan_emulator(
     use_median: bool = True,
     bthresh: Optional[float] = None,
 ) -> Float[Array, '... *spatial']:
-    '''SUSAN-style edge-preserving smoothing.
+    """SUSAN-style edge-preserving smoothing.
 
     Composes a bilateral (edge-preserving) Gaussian with an optional
     local-median fallback to reproduce FSL SUSAN's behaviour.
@@ -54,7 +54,7 @@ def susan_emulator(
     - The auto-flat-kernel-at-small-extents behaviour from FSL
       SUSAN is *not* replicated; this is the documented behavioural
       delta.
-    '''
+    """
     raise NotImplementedError(
         'susan_emulator depends on smoothing.bilateral_gaussian, '
         'which has not yet shipped.  For the impulse-noise half, '

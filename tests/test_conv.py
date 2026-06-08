@@ -14,6 +14,7 @@ Coverage:
 - ``backend="pallas-cuda"`` falls back to JAX with one warning per
   shape signature (current GA state: no native Pallas conv kernel).
 """
+
 from __future__ import annotations
 
 import warnings
@@ -25,8 +26,8 @@ import numpy as np
 import pytest
 
 from nitrix._internal.backend import (
-    NitrixBackendFallback,
     _HAS_AMPERE_NVIDIA,
+    NitrixBackendFallback,
     reset_fallback_state,
 )
 from nitrix.semiring import (
@@ -37,7 +38,6 @@ from nitrix.semiring import (
     TROPICAL_MIN_PLUS,
     semiring_conv,
 )
-
 
 jax.config.update('jax_enable_x64', True)
 
@@ -54,23 +54,24 @@ pallas_only = pytest.mark.skipif(
 
 
 def _lax_conv_real(x, k, *, stride, padding, dilation, spatial_rank):
-    '''Reference REAL convolution via ``lax.conv_general_dilated``.
+    """Reference REAL convolution via ``lax.conv_general_dilated``.
 
     Channel-last in / out; internal NCHW transpose to match lax.
-    '''
+    """
     x_nchw = jnp.moveaxis(x, -1, 1)
     # k: (*kspatial, c_in, c_out) -> (c_out, c_in, *kspatial)
     k_lax = jnp.moveaxis(jnp.moveaxis(k, -1, 0), -1, 1)
     strides = (
-        (stride,) * spatial_rank if isinstance(stride, int)
-        else tuple(stride)
+        (stride,) * spatial_rank if isinstance(stride, int) else tuple(stride)
     )
     dilations = (
-        (dilation,) * spatial_rank if isinstance(dilation, int)
+        (dilation,) * spatial_rank
+        if isinstance(dilation, int)
         else tuple(dilation)
     )
     out_nchw = lax.conv_general_dilated(
-        x_nchw, k_lax,
+        x_nchw,
+        k_lax,
         window_strides=strides,
         padding=padding if isinstance(padding, str) else tuple(padding),
         rhs_dilation=dilations,
@@ -84,7 +85,12 @@ def test_real_conv1d_matches_lax():
     for pad in ('SAME', 'VALID'):
         got = semiring_conv(x, k, semiring=REAL, padding=pad, backend='jax')
         ref = _lax_conv_real(
-            x, k, stride=1, padding=pad, dilation=1, spatial_rank=1,
+            x,
+            k,
+            stride=1,
+            padding=pad,
+            dilation=1,
+            spatial_rank=1,
         )
         np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
 
@@ -95,7 +101,12 @@ def test_real_conv2d_matches_lax():
     for pad in ('SAME', 'VALID'):
         got = semiring_conv(x, k, semiring=REAL, padding=pad, backend='jax')
         ref = _lax_conv_real(
-            x, k, stride=1, padding=pad, dilation=1, spatial_rank=2,
+            x,
+            k,
+            stride=1,
+            padding=pad,
+            dilation=1,
+            spatial_rank=2,
         )
         np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
 
@@ -105,32 +116,44 @@ def test_real_conv3d_matches_lax():
     k = jax.random.normal(jax.random.key(5), (3, 3, 3, 2, 3))
     got = semiring_conv(x, k, semiring=REAL, padding='VALID', backend='jax')
     ref = _lax_conv_real(
-        x, k, stride=1, padding='VALID', dilation=1, spatial_rank=3,
+        x,
+        k,
+        stride=1,
+        padding='VALID',
+        dilation=1,
+        spatial_rank=3,
     )
     np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
 
 
 def test_real_conv4d_matches_scipy():
-    '''4D conv -- the natural fMRI / 4D volume shape (D, H, W, T).
+    """4D conv -- the natural fMRI / 4D volume shape (D, H, W, T).
 
     cuDNN does *not* support 4D conv (it caps at 3D), so the reference
     here is ``scipy.ndimage.correlate``, which is generic over rank.
     Single-channel for simplicity (multi-channel n-D coverage is the
     business of the lower-rank tests + the matmul-reduction layer
     which is rank-agnostic).
-    '''
+    """
     import scipy.ndimage as ndi
+
     x_sc = jax.random.normal(jax.random.key(50), (4, 4, 4, 4))
     k_sc = jax.random.normal(jax.random.key(51), (3, 3, 3, 3))
     # Promote to the channel-last layout semiring_conv expects.
-    x = x_sc[..., None]                 # (D, H, W, T, 1)
-    k = k_sc[..., None, None]           # (3, 3, 3, 3, 1, 1)
+    x = x_sc[..., None]  # (D, H, W, T, 1)
+    k = k_sc[..., None, None]  # (3, 3, 3, 3, 1, 1)
     got = semiring_conv(
-        x, k, semiring=REAL, padding='SAME', backend='jax',
+        x,
+        k,
+        semiring=REAL,
+        padding='SAME',
+        backend='jax',
     )[..., 0]
     ref = ndi.correlate(
-        np.asarray(x_sc), np.asarray(k_sc),
-        mode='constant', cval=0.0,
+        np.asarray(x_sc),
+        np.asarray(k_sc),
+        mode='constant',
+        cval=0.0,
     )
     np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
 
@@ -139,10 +162,20 @@ def test_real_conv2d_strided():
     x = jax.random.normal(jax.random.key(6), (1, 10, 10, 2))
     k = jax.random.normal(jax.random.key(7), (3, 3, 2, 4))
     got = semiring_conv(
-        x, k, semiring=REAL, stride=2, padding='SAME', backend='jax',
+        x,
+        k,
+        semiring=REAL,
+        stride=2,
+        padding='SAME',
+        backend='jax',
     )
     ref = _lax_conv_real(
-        x, k, stride=2, padding='SAME', dilation=1, spatial_rank=2,
+        x,
+        k,
+        stride=2,
+        padding='SAME',
+        dilation=1,
+        spatial_rank=2,
     )
     np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
 
@@ -151,10 +184,20 @@ def test_real_conv2d_dilated():
     x = jax.random.normal(jax.random.key(8), (1, 16, 16, 2))
     k = jax.random.normal(jax.random.key(9), (3, 3, 2, 4))
     got = semiring_conv(
-        x, k, semiring=REAL, dilation=2, padding='VALID', backend='jax',
+        x,
+        k,
+        semiring=REAL,
+        dilation=2,
+        padding='VALID',
+        backend='jax',
     )
     ref = _lax_conv_real(
-        x, k, stride=1, padding='VALID', dilation=2, spatial_rank=2,
+        x,
+        k,
+        stride=1,
+        padding='VALID',
+        dilation=2,
+        spatial_rank=2,
     )
     np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
 
@@ -166,24 +209,32 @@ def test_real_conv2d_dilated():
 
 def test_tropical_max_plus_conv1d_zero_kernel_is_max_window():
     # Sliding max with kernel = 0 across width: window-max of x.
-    x = jnp.array([[[1.], [2.], [3.], [2.], [1.], [0.], [4.], [3.]]])
+    x = jnp.array([[[1.0], [2.0], [3.0], [2.0], [1.0], [0.0], [4.0], [3.0]]])
     k = jnp.zeros((3, 1, 1))
     got = semiring_conv(
-        x, k, semiring=TROPICAL_MAX_PLUS, padding='VALID', backend='jax',
+        x,
+        k,
+        semiring=TROPICAL_MAX_PLUS,
+        padding='VALID',
+        backend='jax',
     )
     xnp = np.asarray(x[0, :, 0])
-    expected = np.array([float(max(xnp[i:i + 3])) for i in range(6)])
+    expected = np.array([float(max(xnp[i : i + 3])) for i in range(6)])
     np.testing.assert_allclose(got[0, :, 0], expected)
 
 
 def test_tropical_min_plus_conv1d_zero_kernel_is_min_window():
-    x = jnp.array([[[1.], [2.], [3.], [2.], [1.], [0.], [4.], [3.]]])
+    x = jnp.array([[[1.0], [2.0], [3.0], [2.0], [1.0], [0.0], [4.0], [3.0]]])
     k = jnp.zeros((3, 1, 1))
     got = semiring_conv(
-        x, k, semiring=TROPICAL_MIN_PLUS, padding='VALID', backend='jax',
+        x,
+        k,
+        semiring=TROPICAL_MIN_PLUS,
+        padding='VALID',
+        backend='jax',
     )
     xnp = np.asarray(x[0, :, 0])
-    expected = np.array([float(min(xnp[i:i + 3])) for i in range(6)])
+    expected = np.array([float(min(xnp[i : i + 3])) for i in range(6)])
     np.testing.assert_allclose(got[0, :, 0], expected)
 
 
@@ -192,9 +243,9 @@ def test_log_conv1d_matches_logsumexp_window():
     k = jnp.zeros((3, 1, 1))
     got = semiring_conv(x, k, semiring=LOG, padding='VALID', backend='jax')
     xnp = np.asarray(x[0, :, 0])
-    expected = np.array([
-        float(jax.scipy.special.logsumexp(xnp[i:i + 3])) for i in range(6)
-    ])
+    expected = np.array(
+        [float(jax.scipy.special.logsumexp(xnp[i : i + 3])) for i in range(6)]
+    )
     np.testing.assert_allclose(got[0, :, 0], expected, atol=1e-10, rtol=1e-10)
 
 
@@ -202,12 +253,16 @@ def test_euclidean_conv1d_matches_naive():
     x = jax.random.normal(jax.random.key(11), (1, 6, 1))
     k = jax.random.normal(jax.random.key(12), (3, 1, 1))
     got = semiring_conv(
-        x, k, semiring=EUCLIDEAN, padding='VALID', backend='jax',
+        x,
+        k,
+        semiring=EUCLIDEAN,
+        padding='VALID',
+        backend='jax',
     )
     xnp = np.asarray(x[0, :, 0])
     knp = np.asarray(k[:, 0, 0])
     expected = np.array(
-        [np.sqrt(np.sum((xnp[i:i + 3] - knp) ** 2)) for i in range(4)]
+        [np.sqrt(np.sum((xnp[i : i + 3] - knp) ** 2)) for i in range(4)]
     )
     np.testing.assert_allclose(got[0, :, 0], expected, atol=1e-10, rtol=1e-10)
 
@@ -225,7 +280,11 @@ def test_neg_inf_in_tropical_max_plus_propagates():
     x = x.at[0, 3, 0].set(-jnp.inf)
     k = jnp.zeros((3, 1, 1))
     got = semiring_conv(
-        x, k, semiring=TROPICAL_MAX_PLUS, padding='VALID', backend='jax',
+        x,
+        k,
+        semiring=TROPICAL_MAX_PLUS,
+        padding='VALID',
+        backend='jax',
     )
     # With a 3-window VALID conv, position 3 of x is reached by output
     # positions {1, 2, 3}; all other positions should match max(x[i:i+3]).
@@ -240,7 +299,11 @@ def test_neg_inf_in_log_does_not_nan():
     x = x.at[0, 3, 0].set(-jnp.inf)
     k = jnp.zeros((3, 1, 1))
     got = semiring_conv(
-        x, k, semiring=LOG, padding='VALID', backend='jax',
+        x,
+        k,
+        semiring=LOG,
+        padding='VALID',
+        backend='jax',
     )
     assert bool(~jnp.any(jnp.isnan(got)))
 
@@ -251,7 +314,7 @@ def test_neg_inf_in_log_does_not_nan():
 
 
 def _finite_diff(fn, x, eps=1e-5):
-    '''JIT the loss once so per-element calls hit the trace cache.'''
+    """JIT the loss once so per-element calls hit the trace cache."""
     jit_fn = jax.jit(fn)
     x_flat = x.reshape(-1)
     out = np.zeros_like(np.asarray(x_flat, dtype=np.float64))
@@ -266,8 +329,7 @@ def _finite_diff(fn, x, eps=1e-5):
 
 def _conv_loss(x, k, semiring, pad='SAME'):
     return jnp.sum(
-        semiring_conv(x, k, semiring=semiring, padding=pad, backend='jax')
-        ** 2
+        semiring_conv(x, k, semiring=semiring, padding=pad, backend='jax') ** 2
     )
 
 
@@ -295,7 +357,9 @@ def test_tropical_max_plus_conv_grad_matches_fd():
     k = jax.random.normal(jax.random.key(25), (3, 2, 2))
     gx = jax.grad(_conv_loss, argnums=0)(x, k, TROPICAL_MAX_PLUS)
     gx_fd = _finite_diff(
-        lambda x: _conv_loss(x, k, TROPICAL_MAX_PLUS), x, eps=1e-4,
+        lambda x: _conv_loss(x, k, TROPICAL_MAX_PLUS),
+        x,
+        eps=1e-4,
     )
     np.testing.assert_allclose(gx, gx_fd, atol=1e-6, rtol=1e-6)
 
@@ -325,7 +389,11 @@ def test_pallas_conv_falls_back_with_warning():
     with warnings.catch_warnings(record=True) as ws:
         warnings.simplefilter('always')
         out = semiring_conv(
-            x, k, semiring=REAL, padding='SAME', backend='pallas-cuda',
+            x,
+            k,
+            semiring=REAL,
+            padding='SAME',
+            backend='pallas-cuda',
         )
         n = sum(1 for w in ws if w.category is NitrixBackendFallback)
     # Conv layer warns once; inner matmul tiles cleanly so no second
@@ -333,7 +401,11 @@ def test_pallas_conv_falls_back_with_warning():
     assert n == 1, f'expected 1 fallback warning, got {n}'
     # Output still matches the all-JAX reference.
     ref = semiring_conv(
-        x, k, semiring=REAL, padding='SAME', backend='jax',
+        x,
+        k,
+        semiring=REAL,
+        padding='SAME',
+        backend='jax',
     )
     np.testing.assert_allclose(out, ref, atol=1e-4, rtol=1e-4)
 
@@ -349,8 +421,12 @@ def test_pallas_conv_emits_inner_warning_when_matmul_cant_tile():
     k = jax.random.normal(jax.random.key(41), (3, 3, 2, 4))  # K = 18
     with warnings.catch_warnings(record=True) as ws:
         warnings.simplefilter('always')
-        out = semiring_conv(
-            x, k, semiring=REAL, padding='SAME', backend='pallas-cuda',
+        semiring_conv(
+            x,
+            k,
+            semiring=REAL,
+            padding='SAME',
+            backend='pallas-cuda',
         )
         n = sum(1 for w in ws if w.category is NitrixBackendFallback)
     assert n == 2, f'expected 2 fallback warnings (conv + matmul), got {n}'
@@ -369,9 +445,15 @@ def test_batched_conv2d():
     # Reference: process each batch element independently.
     refs = []
     for i in range(3):
-        refs.append(_lax_conv_real(
-            x[i:i + 1], k, stride=1, padding='SAME',
-            dilation=1, spatial_rank=2,
-        )[0])
+        refs.append(
+            _lax_conv_real(
+                x[i : i + 1],
+                k,
+                stride=1,
+                padding='SAME',
+                dilation=1,
+                spatial_rank=2,
+            )[0]
+        )
     ref = jnp.stack(refs, axis=0)
     np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)

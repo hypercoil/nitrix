@@ -19,6 +19,7 @@ Plus the standard correctness checks: low-freq sinusoid exact
 reconstruction, leading / trailing edge handling for linear, and
 the per-channel-mask rejection for Lomb-Scargle.
 """
+
 from __future__ import annotations
 
 import re
@@ -36,14 +37,13 @@ from nitrix.signal import (
     lomb_scargle_periodogram,
 )
 
-
 # ---------------------------------------------------------------------------
 # linear_interpolate
 # ---------------------------------------------------------------------------
 
 
 def test_linear_interpolate_basic():
-    '''Single-step interpolation on a 5-frame ramp.'''
+    """Single-step interpolation on a 5-frame ramp."""
     data = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0])
     mask = jnp.array([True, False, True, False, True])
     out = linear_interpolate(data, mask)
@@ -73,7 +73,12 @@ def test_linear_interpolate_all_observed_is_identity():
 
 def test_linear_interpolate_batched():
     data = jnp.arange(50, dtype=jnp.float32).reshape(5, 10)
-    mask = jnp.tile(jnp.array([True, False, True, True, False, True, True, True, False, True]), (5, 1))
+    mask = jnp.tile(
+        jnp.array(
+            [True, False, True, True, False, True, True, True, False, True]
+        ),
+        (5, 1),
+    )
     out = linear_interpolate(data, mask)
     assert out.shape == data.shape
     # Observed values preserved.
@@ -81,25 +86,29 @@ def test_linear_interpolate_batched():
 
 
 def test_linear_interpolate_associative_scan_used():
-    '''Smoke check: the compiled HLO uses parallel scan rather
+    """Smoke check: the compiled HLO uses parallel scan rather
     than the sequential while_loop pattern.
 
     associative_scan compiles to a tree-reduction pattern (with
     a ``reduce``/``scatter`` shape); the sequential ``lax.scan``
     has a ``while_loop`` op.  We assert the absence of the latter.
-    '''
+    """
     data = jnp.arange(100, dtype=jnp.float32)
     mask = jnp.asarray(np.random.default_rng(0).random(100) > 0.3)
     f = jax.jit(linear_interpolate)
     hlo = f.lower(data, mask).compile().as_text()
-    assert 'while' not in hlo, 'linear_interpolate compiled to while_loop; expected associative_scan'
+    assert 'while' not in hlo, (
+        'linear_interpolate compiled to while_loop; expected associative_scan'
+    )
 
 
 def test_linear_interpolate_differentiable():
     data = jnp.asarray(np.random.default_rng(0).standard_normal(20))
     mask = jnp.array([True, False, True, True, False] * 4)
+
     def loss(d):
         return jnp.sum(linear_interpolate(d, mask) ** 2)
+
     g = jax.grad(loss)(data)
     assert g.shape == data.shape
     assert bool(jnp.all(jnp.isfinite(g)))
@@ -117,7 +126,7 @@ def _make_sinusoid_test(
     censoring_rate: float = 0.2,
     seed: int = 0,
 ):
-    '''Synthesise a low-frequency sinusoid with random censoring.'''
+    """Synthesise a low-frequency sinusoid with random censoring."""
     t = jnp.arange(T, dtype=jnp.float64) * dt
     clean = jnp.sin(2 * jnp.pi * freq * t)
     rng = np.random.default_rng(seed)
@@ -127,10 +136,10 @@ def _make_sinusoid_test(
 
 
 def test_lomb_scargle_recovers_observed_exactly():
-    '''Joint-GLM Lomb-Scargle: ``recon[obs] == data[obs]`` up to
+    """Joint-GLM Lomb-Scargle: ``recon[obs] == data[obs]`` up to
     pseudoinverse threshold.  This is the property that makes the
     spliced output discontinuity-free.
-    '''
+    """
     clean, mask, corrupt = _make_sinusoid_test()
     recon = lomb_scargle_interpolate(corrupt, mask, dt=2.0)
     obs_err = float(jnp.abs(recon[mask] - clean[mask]).max())
@@ -140,7 +149,7 @@ def test_lomb_scargle_recovers_observed_exactly():
 
 
 def test_lomb_scargle_no_boundary_discontinuity():
-    '''At observed / censored transitions, the reconstruction's
+    """At observed / censored transitions, the reconstruction's
     per-frame difference should match the true signal's per-frame
     difference -- no jump beyond the local signal slope.
 
@@ -149,7 +158,7 @@ def test_lomb_scargle_no_boundary_discontinuity():
     see jumps of order ~ ``signal_amplitude * (1 - LS_fit_ratio)``
     at boundaries.  With the joint-GLM form, jumps should be at
     the pseudoinverse precision floor.
-    '''
+    """
     clean, mask, corrupt = _make_sinusoid_test()
     recon = lomb_scargle_interpolate(corrupt, mask, dt=2.0)
     clean_diff = jnp.diff(clean)
@@ -167,9 +176,9 @@ def test_lomb_scargle_no_boundary_discontinuity():
 
 
 def test_lomb_scargle_recovers_low_freq_sinusoid():
-    '''A pure sinusoid below the trial-grid Nyquist should be
+    """A pure sinusoid below the trial-grid Nyquist should be
     reconstructed to near-zero error at censored positions too.
-    '''
+    """
     clean, mask, corrupt = _make_sinusoid_test(freq=0.01)
     recon = lomb_scargle_interpolate(corrupt, mask, dt=2.0)
     censored_err = float(jnp.abs(recon[~mask] - clean[~mask]).max())
@@ -180,10 +189,10 @@ def test_lomb_scargle_recovers_low_freq_sinusoid():
 
 
 def test_lomb_scargle_random_recon_finite():
-    '''On random data (no spectral structure), the recon should
+    """On random data (no spectral structure), the recon should
     still be finite -- the pseudoinverse handles rank-deficient
     Gram gracefully.
-    '''
+    """
     rng = np.random.default_rng(0)
     T = 500
     data = jnp.asarray(rng.standard_normal((4, T)))
@@ -193,23 +202,26 @@ def test_lomb_scargle_random_recon_finite():
 
 
 def test_lomb_scargle_heavy_censoring_with_budget():
-    '''At 50% censoring, the default budget (40%) would leave
+    """At 50% censoring, the default budget (40%) would leave
     insufficient frames; pass ``censoring_budget=0.6`` to expand
     the budget.  Result should still be finite (pseudoinverse
     handles any rank deficiency).
-    '''
+    """
     clean, mask, corrupt = _make_sinusoid_test(censoring_rate=0.5)
     out = lomb_scargle_interpolate(
-        corrupt, mask, dt=2.0, censoring_budget=0.6,
+        corrupt,
+        mask,
+        dt=2.0,
+        censoring_budget=0.6,
     )
     assert bool(jnp.all(jnp.isfinite(out)))
 
 
 def test_lomb_scargle_rejects_per_channel_mask():
-    '''Per-channel masks would require ``V * K^2`` HBM at fMRI
+    """Per-channel masks would require ``V * K^2`` HBM at fMRI
     scale; we reject them at the API to force the user toward
     the shared-mask path.
-    '''
+    """
     data = jnp.zeros((4, 100))
     mask = jnp.ones((4, 100), dtype=bool)
     with pytest.raises(ValueError, match='per-channel mask'):
@@ -217,13 +229,11 @@ def test_lomb_scargle_rejects_per_channel_mask():
 
 
 def test_lomb_scargle_accepts_broadcast_mask():
-    '''1-D mask of length ``n_obs`` should broadcast across all
+    """1-D mask of length ``n_obs`` should broadcast across all
     channels (the canonical fMRI motion-censoring API).
-    '''
+    """
     data = jnp.asarray(np.random.default_rng(0).standard_normal((4, 100)))
-    mask_1d = jnp.asarray(
-        np.random.default_rng(1).random(100) > 0.2
-    )
+    mask_1d = jnp.asarray(np.random.default_rng(1).random(100) > 0.2)
     out = lomb_scargle_interpolate(data, mask_1d)
     assert out.shape == data.shape
 
@@ -234,17 +244,16 @@ def test_lomb_scargle_accepts_broadcast_mask():
 
 
 def test_lomb_scargle_no_VK2_intermediate_in_hlo():
-    '''Memory regression: the compiled HLO must NOT contain a
+    """Memory regression: the compiled HLO must NOT contain a
     tensor with shape ``(V, K, K)`` -- the per-channel Gram path
     that would OOM at fMRI scale.
 
     We grep the HLO for tensors with the leading-dim of the
     data; if any (V, K, K) shape appears, the shared-Gram path
     has regressed.
-    '''
+    """
     T = 200
     V = 4096
-    K_approx = 1 + 2 * ((int(T * 0.6) - 1) // 2)  # default censoring_budget=0.4
     data = jnp.zeros((V, T), dtype=jnp.float32)
     mask = jnp.asarray(np.random.default_rng(0).random(T) > 0.2)
     f = jax.jit(lambda d, m: lomb_scargle_interpolate(d, m, dt=2.0))
@@ -263,10 +272,10 @@ def test_lomb_scargle_no_VK2_intermediate_in_hlo():
 
 
 def test_lomb_scargle_memory_footprint_bound():
-    '''At V=10k, T=200, fp32, the max single tensor should be
+    """At V=10k, T=200, fp32, the max single tensor should be
     much smaller than ``V * K^2``.  Sanity check that the
     compiled program respects the memory analysis in the docstring.
-    '''
+    """
     T = 200
     V = 10_000
     data = jnp.zeros((V, T), dtype=jnp.float32)
@@ -295,9 +304,9 @@ def test_lomb_scargle_memory_footprint_bound():
 
 
 def test_lomb_scargle_periodogram_peaks_at_signal_frequency():
-    '''Inject a clean sinusoid at f0 = 0.05 Hz; the periodogram
+    """Inject a clean sinusoid at f0 = 0.05 Hz; the periodogram
     should peak near that frequency.
-    '''
+    """
     T, dt = 500, 2.0
     f0 = 0.05
     t = jnp.arange(T) * dt
@@ -310,7 +319,7 @@ def test_lomb_scargle_periodogram_peaks_at_signal_frequency():
 
 
 def test_lomb_scargle_periodogram_matches_scipy_scargle_normalisation():
-    '''Regression pinning the *corrected* normalisation docstring.
+    """Regression pinning the *corrected* normalisation docstring.
 
     nitrix returns the classic Scargle 1982 ``P_raw / var`` -- i.e.
     ``scipy.signal.lombscargle(..., normalize=False)`` divided by
@@ -319,7 +328,7 @@ def test_lomb_scargle_periodogram_matches_scipy_scargle_normalisation():
     ``2 * P_raw / (N * var)`` and so is off by a constant ``N / 2``.
     Both relations are asserted so the docstring's specific factor
     cannot drift silently.
-    '''
+    """
     sps = pytest.importorskip('scipy.signal')
     T, dt = 256, 2.0
     rng = np.random.default_rng(0)
@@ -344,10 +353,16 @@ def test_lomb_scargle_periodogram_matches_scipy_scargle_normalisation():
 
     p_raw = sps.lombscargle(t, yc, omega, normalize=False)
     np.testing.assert_allclose(
-        np.asarray(power), p_raw / var, rtol=1e-6, atol=1e-9,
+        np.asarray(power),
+        p_raw / var,
+        rtol=1e-6,
+        atol=1e-9,
     )
 
     p_norm = sps.lombscargle(t, yc, omega, normalize=True)
     np.testing.assert_allclose(
-        np.asarray(power), (T / 2.0) * p_norm, rtol=1e-6, atol=1e-9,
+        np.asarray(power),
+        (T / 2.0) * p_norm,
+        rtol=1e-6,
+        atol=1e-9,
     )
