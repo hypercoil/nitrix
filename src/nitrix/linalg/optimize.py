@@ -18,13 +18,16 @@ assembled from a cached linearisation (``jax.linearize`` for ``Jv``, its
 cuSolver wedge: no factorisation, no host round-trip.
 
 The unrolled fixed-iteration loop is differentiable, so ``jax.grad``
-through a registration is available today; an implicit-differentiation
-wrapper (exact gradients at the optimum) is the R3 follow-up.
+through a registration works out of the box.  ``implicit_least_squares``
+adds the implicit-function-theorem path: exact gradients at the optimum
+without unrolling (O(1) memory in the iteration count), the
+differentiable-layer entry point for consumers like ``entense``.
 """
 
 from __future__ import annotations
 
-from typing import Callable, NamedTuple, Optional, cast
+from functools import partial
+from typing import Any, Callable, NamedTuple, Optional, cast
 
 import jax
 import jax.numpy as jnp
@@ -32,9 +35,15 @@ from jaxtyping import Array, Float
 
 from .krylov import cg
 
-__all__ = ['OptimizeResult', 'gauss_newton', 'levenberg_marquardt']
+__all__ = [
+    'OptimizeResult',
+    'gauss_newton',
+    'levenberg_marquardt',
+    'implicit_least_squares',
+]
 
 ResidualFn = Callable[[Float[Array, ' p']], Float[Array, ' m']]
+DataResidualFn = Callable[[Any, Float[Array, ' p']], Float[Array, ' m']]
 
 
 class OptimizeResult(NamedTuple):
@@ -179,3 +188,125 @@ def levenberg_marquardt(
         lam = jnp.where(accept, lam * lambda_down, lam * lambda_up)
         costs.append(cost)
     return OptimizeResult(params=x, cost=cost, cost_history=jnp.stack(costs))
+
+
+def implicit_least_squares(
+    residual_fn: DataResidualFn,
+    data: Any,
+    x0: Float[Array, ' p'],
+    *,
+    n_iters: int = 20,
+    init_lambda: float = 1e-3,
+    cg_tol: float = 1e-6,
+    cg_maxiter: Optional[int] = None,
+) -> Float[Array, ' p']:
+    """Argmin of ``½‖r(data, x)‖²`` that is differentiable w.r.t. ``data``
+    by the **implicit-function theorem** (not by unrolling the solver).
+
+    The forward solve is Levenberg-Marquardt; the backward differentiates
+    through the *converged* ``x*`` directly.  At the optimum the
+    stationarity ``g(data, x*) = Jᵀr = 0`` gives, by the IFT,
+    ``∂x*/∂data = -(JᵀJ)⁻¹ ∂_data g`` (Gauss-Newton Hessian -- exact when
+    the residual is small or the model is linear, the standard
+    least-squares implicit-diff approximation).  The backward solves
+    ``(JᵀJ) w = x̄`` with ``cg`` (SPD, matrix-free -- stays on-device) and
+    pushes ``-w`` back through ``∂_data g``.  Memory is O(1) in the
+    iteration count, vs unrolling's O(n_iters).
+
+    This is the differentiable-layer entry point: a registration whose
+    residual is ``r(images, θ) = warp(moving, θ) - fixed`` becomes
+    differentiable w.r.t. the images by calling this with ``data =
+    (moving, fixed)`` (the unrolled recipe is the always-available
+    alternative).
+
+    Parameters
+    ----------
+    residual_fn
+        Map ``(data, x) -> r`` (``data`` is the differentiable argument,
+        an array or pytree; ``x`` is the optimisation variable).
+    data
+        The differentiable parameters / inputs.
+    x0
+        Initial guess for ``x``.
+    n_iters, init_lambda
+        Forward Levenberg-Marquardt controls.
+    cg_tol, cg_maxiter
+        Backward adjoint-solve (``cg``) controls.
+
+    Returns
+    -------
+    The minimiser ``x*``.  ``dx*/dx0 = 0`` (the initial guess does not
+    affect the gradient).
+    """
+    return _implicit_ls(
+        residual_fn, n_iters, init_lambda, cg_tol, cg_maxiter, data, x0
+    )
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(0, 1, 2, 3, 4))
+def _implicit_ls(
+    residual_fn: DataResidualFn,
+    n_iters: int,
+    init_lambda: float,
+    cg_tol: float,
+    cg_maxiter: Optional[int],
+    data: Any,
+    x0: Array,
+) -> Array:
+    res = levenberg_marquardt(
+        lambda x: residual_fn(data, x),
+        x0,
+        n_iters=n_iters,
+        init_lambda=init_lambda,
+        cg_tol=cg_tol,
+    )
+    return res.params
+
+
+def _implicit_ls_fwd(
+    residual_fn: DataResidualFn,
+    n_iters: int,
+    init_lambda: float,
+    cg_tol: float,
+    cg_maxiter: Optional[int],
+    data: Any,
+    x0: Array,
+) -> tuple[Array, tuple[Any, Array]]:
+    x_star = _implicit_ls(
+        residual_fn, n_iters, init_lambda, cg_tol, cg_maxiter, data, x0
+    )
+    return x_star, (data, x_star)
+
+
+def _implicit_ls_bwd(
+    residual_fn: DataResidualFn,
+    n_iters: int,
+    init_lambda: float,
+    cg_tol: float,
+    cg_maxiter: Optional[int],
+    res: tuple[Any, Array],
+    x_bar: Array,
+) -> tuple[Any, Array]:
+    data, x_star = res
+    # Gauss-Newton Hessian operator JᵀJ at x*, then solve (JᵀJ) w = x̄.
+    _, jvp_fn = jax.linearize(lambda x: residual_fn(data, x), x_star)
+    vjp_fn = jax.linear_transpose(jvp_fn, x_star)
+
+    def jtj(v: Array) -> Array:
+        (out,) = vjp_fn(jvp_fn(v))
+        return cast(Array, out)
+
+    w = cg(jtj, x_bar, tol=cg_tol, maxiter=cg_maxiter)
+
+    # Stationarity g(data) = Jᵀr at fixed x*; data_bar = -(∂_data g)ᵀ w.
+    def stationarity(d: Any) -> Array:
+        r, vjp_x = jax.vjp(lambda x: residual_fn(d, x), x_star)
+        return cast(Array, vjp_x(r)[0])
+
+    _, vjp_data = jax.vjp(stationarity, data)
+    (data_bar,) = vjp_data(w)
+    data_bar = jax.tree_util.tree_map(lambda z: -z, data_bar)
+    return data_bar, jnp.zeros_like(x_star)
+
+
+_implicit_ls.defvjp(_implicit_ls_fwd, _implicit_ls_bwd)

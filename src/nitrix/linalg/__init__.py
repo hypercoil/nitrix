@@ -49,7 +49,12 @@ from .matrix import (
 )
 from .krylov import cg
 from .matrix_function import matrix_exp
-from .optimize import OptimizeResult, gauss_newton, levenberg_marquardt
+from .optimize import (
+    OptimizeResult,
+    gauss_newton,
+    implicit_least_squares,
+    levenberg_marquardt,
+)
 from .residual import residualise
 from .solve import cho_solve, solve
 from .spd import (
@@ -86,6 +91,7 @@ __all__ = [
     # optimisation (nonlinear least squares)
     'gauss_newton',
     'levenberg_marquardt',
+    'implicit_least_squares',
     'OptimizeResult',
     # kernel
     'cosine_kernel',
