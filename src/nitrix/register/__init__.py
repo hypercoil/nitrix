@@ -16,11 +16,18 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   ``matrix_exp``.
 - ``RegistrationSpec`` -- static config (pyramid, iterations, metric,
   interpolation); ``RegistrationResult`` -- the output record.
-
-The diffeomorphic (log-Demons) recipe lands in the R2 phase.
+- ``diffeomorphic_demons_register`` -- log-domain diffeomorphic Demons
+  (stationary velocity field; ESM force; fluid+diffusion Gaussian
+  regularisation; scaling-and-squaring exp), with ``DemonsSpec`` /
+  ``DiffeomorphicResult``.
 """
 
 from ._core import RegistrationResult, RegistrationSpec
+from .diffeomorphic import (
+    DemonsSpec,
+    DiffeomorphicResult,
+    diffeomorphic_demons_register,
+)
 from .recipes import affine_register, rigid_register
 
 __all__ = [
@@ -28,4 +35,7 @@ __all__ = [
     'affine_register',
     'RegistrationSpec',
     'RegistrationResult',
+    'diffeomorphic_demons_register',
+    'DemonsSpec',
+    'DiffeomorphicResult',
 ]
