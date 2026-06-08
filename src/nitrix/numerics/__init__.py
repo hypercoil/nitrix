@@ -21,6 +21,7 @@ consolidation.
 """
 
 from . import normalize, tensor_ops
+from .fixed_point import fixed_point_solve
 from .normalize import (
     demean,
     intensity_normalize,
@@ -42,6 +43,8 @@ from .tensor_ops import (
 )
 
 __all__ = [
+    # fixed point
+    'fixed_point_solve',
     # normalize
     'demean',
     'intensity_normalize',

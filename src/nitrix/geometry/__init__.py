@@ -51,6 +51,11 @@ from .grid import (
     rescale,
     vec_int,
 )
+from .deformation import (
+    compose_displacement,
+    compose_velocity,
+    invert_displacement,
+)
 from .differential import spatial_gradient
 from .pyramid import downsample, gaussian_pyramid, upsample
 from .transform import (
@@ -97,6 +102,10 @@ __all__ = [
     'downsample',
     'upsample',
     'gaussian_pyramid',
+    # deformation / velocity-field algebra
+    'compose_displacement',
+    'compose_velocity',
+    'invert_displacement',
     # transform parametrisation (rigid / affine Lie chart)
     'rigid_exp',
     'rigid_log',
