@@ -22,7 +22,20 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 import scipy.linalg as sla  # noqa: E402
 
+from nitrix.geometry import (  # noqa: E402
+    affine_exp,
+    affine_grid,
+    apply_affine,
+    identity_grid,
+    rigid_exp,
+    rigid_log,
+)
 from nitrix.linalg import cg, matrix_exp  # noqa: E402
+
+
+def _skew(omega):
+    ox, oy, oz = omega
+    return np.array([[0, -oz, oy], [oz, 0, -ox], [-oy, ox, 0]])
 
 
 def _fd_grad_scalar(f, x, *, eps=1e-6):
@@ -127,3 +140,114 @@ def test_cg_differentiable():
         return cg(a + d * jnp.eye(2), b, tol=1e-12, maxiter=100).sum()
 
     _fd_grad_scalar(f, 0.3, eps=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# geometry.transform — rigid
+# ---------------------------------------------------------------------------
+
+
+def test_rigid_exp_identity():
+    assert np.allclose(np.asarray(rigid_exp(jnp.zeros(6), ndim=3)), np.eye(4))
+    assert np.allclose(np.asarray(rigid_exp(jnp.zeros(3), ndim=2)), np.eye(3))
+
+
+def test_rigid_exp_rotation_matches_rodrigues():
+    omega = np.array([0.3, -0.5, 0.7])
+    p = jnp.asarray(np.concatenate([omega, np.zeros(3)]))
+    t = np.asarray(rigid_exp(p, ndim=3))
+    r = t[:3, :3]
+    assert np.allclose(r, sla.expm(_skew(omega)), atol=1e-9)
+    assert np.allclose(r @ r.T, np.eye(3), atol=1e-9)
+    assert np.isclose(np.linalg.det(r), 1.0, atol=1e-9)
+    assert np.allclose(t[:3, 3], 0.0)
+
+
+def test_rigid_exp_translation_is_direct():
+    p = jnp.asarray(np.array([0.0, 0.0, 0.0, 1.5, -2.0, 3.0]))
+    t = np.asarray(rigid_exp(p, ndim=3))
+    assert np.allclose(t[:3, :3], np.eye(3), atol=1e-12)
+    assert np.allclose(t[:3, 3], [1.5, -2.0, 3.0])
+
+
+def test_rigid_log_roundtrip_3d():
+    rng = np.random.RandomState(0)
+    p = np.concatenate([0.4 * rng.standard_normal(3), rng.standard_normal(3)])
+    p_rt = np.asarray(rigid_log(rigid_exp(jnp.asarray(p), ndim=3), ndim=3))
+    assert np.allclose(p_rt, p, atol=1e-7)
+
+
+def test_rigid_2d_rotation_and_log():
+    theta = 0.6
+    p = jnp.asarray(np.array([theta, 2.0, -1.0]))
+    t = np.asarray(rigid_exp(p, ndim=2))
+    c, s = np.cos(theta), np.sin(theta)
+    assert np.allclose(t[:2, :2], [[c, -s], [s, c]], atol=1e-9)
+    assert np.allclose(t[:2, 2], [2.0, -1.0])
+    assert np.allclose(np.asarray(rigid_log(jnp.asarray(t), ndim=2)), [theta, 2.0, -1.0], atol=1e-7)
+
+
+def test_rigid_exp_differentiable():
+    rng = np.random.RandomState(1)
+    p = jnp.asarray(0.3 * rng.standard_normal(6))
+
+    def f(s):
+        return rigid_exp(s * p, ndim=3).sum()
+
+    _fd_grad_scalar(f, 0.7)
+
+
+# ---------------------------------------------------------------------------
+# geometry.transform — affine
+# ---------------------------------------------------------------------------
+
+
+def test_affine_exp_identity_and_linear():
+    assert np.allclose(np.asarray(affine_exp(jnp.zeros(12), ndim=3)), np.eye(4))
+    rng = np.random.RandomState(2)
+    a = 0.2 * rng.standard_normal((3, 3))
+    params = np.concatenate([a.reshape(-1), [1.0, 2.0, 3.0]])
+    t = np.asarray(affine_exp(jnp.asarray(params), ndim=3))
+    assert np.allclose(t[:3, :3], sla.expm(a), atol=1e-7)
+    assert np.allclose(t[:3, 3], [1.0, 2.0, 3.0])
+    assert np.linalg.det(t[:3, :3]) > 0.0  # orientation-preserving
+
+
+def test_affine_exp_differentiable():
+    rng = np.random.RandomState(3)
+    p = jnp.asarray(0.1 * rng.standard_normal(12))
+
+    def f(s):
+        return affine_exp(s * p, ndim=3).sum()
+
+    _fd_grad_scalar(f, 0.5)
+
+
+# ---------------------------------------------------------------------------
+# apply_affine / affine_grid
+# ---------------------------------------------------------------------------
+
+
+def test_apply_affine_translation_and_center():
+    # Pure translation shifts every coordinate.
+    m = jnp.asarray(np.block([[np.eye(3), np.array([[1.0], [2.0], [3.0]])], [np.zeros((1, 3)), 1.0]]))
+    coords = jnp.asarray(np.random.RandomState(0).rand(5, 3))
+    out = np.asarray(apply_affine(coords, m))
+    assert np.allclose(out, np.asarray(coords) + [1.0, 2.0, 3.0])
+    # Rotation about a center fixes the center (with zero translation).
+    rot = rigid_exp(jnp.asarray([0.0, 0.0, 0.7, 0.0, 0.0, 0.0]), ndim=3)
+    c = jnp.asarray([4.0, 5.0, 6.0])
+    fixed = np.asarray(apply_affine(c[None], rot, center=c))
+    assert np.allclose(fixed[0], np.asarray(c), atol=1e-9)
+
+
+def test_affine_grid_identity_and_translation():
+    shape = (6, 7, 8)
+    eye = jnp.eye(4)
+    g = affine_grid(eye, shape)
+    assert g.shape == (6, 7, 8, 3)
+    assert np.allclose(np.asarray(g), np.asarray(identity_grid(shape)), atol=1e-9)
+    # Translation: grid shifts by t regardless of center.
+    m = jnp.asarray(np.block([[np.eye(3), np.array([[1.0], [-2.0], [0.5]])], [np.zeros((1, 3)), 1.0]]))
+    gt = affine_grid(m, shape)
+    assert np.allclose(np.asarray(gt), np.asarray(identity_grid(shape)) + [1.0, -2.0, 0.5], atol=1e-6)

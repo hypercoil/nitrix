@@ -53,6 +53,13 @@ from .grid import (
 )
 from .differential import spatial_gradient
 from .pyramid import downsample, gaussian_pyramid, upsample
+from .transform import (
+    affine_exp,
+    affine_grid,
+    apply_affine,
+    rigid_exp,
+    rigid_log,
+)
 from .sphere import (
     cartesian_to_latlong,
     latlong_to_cartesian,
@@ -90,6 +97,12 @@ __all__ = [
     'downsample',
     'upsample',
     'gaussian_pyramid',
+    # transform parametrisation (rigid / affine Lie chart)
+    'rigid_exp',
+    'rigid_log',
+    'affine_exp',
+    'apply_affine',
+    'affine_grid',
     # interpolation-method ADT
     'Interpolator',
     'Linear',
