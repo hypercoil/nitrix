@@ -51,6 +51,8 @@ from .grid import (
     rescale,
     vec_int,
 )
+from .differential import spatial_gradient
+from .pyramid import downsample, gaussian_pyramid, upsample
 from .sphere import (
     cartesian_to_latlong,
     latlong_to_cartesian,
@@ -83,6 +85,11 @@ __all__ = [
     'jacobian_det_displacement',
     'resample',
     'center_of_mass_grid',
+    # differential / multi-resolution
+    'spatial_gradient',
+    'downsample',
+    'upsample',
+    'gaussian_pyramid',
     # interpolation-method ADT
     'Interpolator',
     'Linear',

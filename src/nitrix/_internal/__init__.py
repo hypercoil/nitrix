@@ -20,6 +20,10 @@ from .docutil import (
     form_docstring,
     tensor_dimensions,
 )
+from .separable import (
+    SeparableBoundaryMode,
+    correlate1d,
+)
 from .util import (
     _conform_bform_weight,
     _dim_or_none,
@@ -68,6 +72,8 @@ __all__ = [
     'strict_backend',
     'DocTemplateFormat',
     'tensor_dimensions',
+    'SeparableBoundaryMode',
+    'correlate1d',
     '_conform_bform_weight',
     '_dim_or_none',
     '_compose',

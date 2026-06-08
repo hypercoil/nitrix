@@ -48,6 +48,7 @@ from .matrix import (
     vec2sym,
 )
 from .residual import residualise
+from .solve import cho_solve, solve
 from .spd import (
     cone_project_spd,
     mean_euclidean,
@@ -73,6 +74,9 @@ __all__ = [
     'vec2sym',
     # residual
     'residualise',
+    # solve
+    'solve',
+    'cho_solve',
     # kernel
     'cosine_kernel',
     'gaussian_kernel',
