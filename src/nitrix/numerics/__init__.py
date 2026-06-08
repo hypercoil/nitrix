@@ -24,7 +24,10 @@ from . import normalize, tensor_ops
 from .fixed_point import fixed_point_solve
 from .normalize import (
     demean,
+    instance_norm,
     intensity_normalize,
+    l2_normalize,
+    lp_normalize,
     percentile_rescale,
     psc_normalize,
     robust_zscore_normalize,
@@ -47,7 +50,10 @@ __all__ = [
     'fixed_point_solve',
     # normalize
     'demean',
+    'instance_norm',
     'intensity_normalize',
+    'l2_normalize',
+    'lp_normalize',
     'percentile_rescale',
     'psc_normalize',
     'robust_zscore_normalize',

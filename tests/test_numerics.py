@@ -16,7 +16,10 @@ from nitrix.numerics import (
     complex_recompose,
     demean,
     fold_axis,
+    instance_norm,
     intensity_normalize,
+    l2_normalize,
+    lp_normalize,
     orient_and_conform,
     percentile_rescale,
     promote_to_rank,
@@ -225,3 +228,59 @@ def test_broadcast_ignoring_axes():
     # Broadcast all axes except -1 (which has differing sizes 3 and 5).
     aa, bb = broadcast_ignoring(a, b, axis=-1)
     assert aa.shape[:-1] == bb.shape[:-1]
+
+
+# ---------------------------------------------------------------------------
+# l2_normalize / lp_normalize / instance_norm
+# ---------------------------------------------------------------------------
+
+
+def test_l2_normalize_unit_norm():
+    x = jnp.asarray(np.random.default_rng(0).standard_normal((7, 5)))
+    y = l2_normalize(x, axis=-1)
+    np.testing.assert_allclose(
+        jnp.linalg.norm(y, axis=-1), 1.0, atol=1e-12
+    )
+
+
+def test_l2_normalize_matches_lp_p2():
+    x = jnp.asarray(np.random.default_rng(1).standard_normal((4, 6)))
+    np.testing.assert_allclose(
+        l2_normalize(x, axis=-1), lp_normalize(x, p=2.0, axis=-1), atol=1e-12
+    )
+
+
+def test_l2_normalize_zero_vector_is_finite():
+    # Clamp-denominator (not add-eps): a zero row stays zero, no NaN/Inf.
+    x = jnp.zeros((3, 4))
+    y = l2_normalize(x, axis=-1)
+    assert bool(jnp.all(jnp.isfinite(y)))
+    np.testing.assert_allclose(y, 0.0, atol=0.0)
+
+
+def test_lp_normalize_l1():
+    x = jnp.asarray(
+        np.abs(np.random.default_rng(2).standard_normal((5, 8)))
+    )
+    y = lp_normalize(x, p=1.0, axis=-1)
+    np.testing.assert_allclose(jnp.sum(jnp.abs(y), axis=-1), 1.0, atol=1e-12)
+
+
+def test_instance_norm_zero_mean_unit_var():
+    x = jnp.asarray(
+        np.random.default_rng(3).standard_normal((2, 3, 9, 9, 9))
+    )
+    y = instance_norm(x, axes=(-3, -2, -1))
+    # Per-(sample, channel) zero mean and (population) unit variance.
+    np.testing.assert_allclose(y.mean(axis=(-3, -2, -1)), 0.0, atol=1e-6)
+    np.testing.assert_allclose(y.var(axis=(-3, -2, -1)), 1.0, atol=1e-4)
+
+
+def test_instance_norm_matches_zscore_single_axis():
+    # With one reduction axis instance_norm == zscore (population std).
+    x = jnp.asarray(np.random.default_rng(4).standard_normal((5, 50)))
+    np.testing.assert_allclose(
+        instance_norm(x, axes=-1, eps=1e-12),
+        zscore_normalize(x, axis=-1, eps=0.0),
+        atol=1e-9,
+    )

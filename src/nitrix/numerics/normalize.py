@@ -21,6 +21,14 @@ pipelines:
   high percentile, then clip -- the strict min--p99--clip recipe
   used by the Synth* pipelines (distinct from
   ``intensity_normalize``; see its docstring).
+- ``l2_normalize`` / ``lp_normalize``: project onto the unit
+  ``L2`` / ``Lp`` sphere along an axis, using the
+  clamp-denominator convention ``x / max(||x||, eps)`` (matches
+  ``torch.nn.functional.normalize``).
+- ``instance_norm``: per-sample / per-channel centre-and-scale by
+  the *statistics* over a configurable set of axes (the reduction
+  underneath an instance-normalisation layer, without the
+  trainable affine).
 
 The z-score path additionally supports ``nonzero_mask=True`` for
 the per-channel BraTS / nnUNet convention (statistics over the
@@ -54,6 +62,9 @@ __all__ = [
     'intensity_normalize',
     'percentile_rescale',
     'demean',
+    'l2_normalize',
+    'lp_normalize',
+    'instance_norm',
 ]
 
 
@@ -317,3 +328,94 @@ def percentile_rescale(
     if clip:
         out = jnp.clip(out, 0.0, 1.0)
     return out
+
+
+def lp_normalize(
+    x: Float[Array, '...'],
+    *,
+    p: float = 2.0,
+    axis: _AxisArg = -1,
+    eps: float = 1e-12,
+) -> Float[Array, '...']:
+    """Project ``x`` onto the unit ``Lp`` sphere along ``axis``.
+
+    Divides by the ``Lp`` norm, clamping the denominator at ``eps``
+    (the ``torch.nn.functional.normalize`` convention:
+    ``x / max(||x||_p, eps)``, *not* ``x / (||x||_p + eps)``), so a
+    zero vector maps to zero rather than blowing up.
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    p
+        Order of the norm.  Default ``2`` (Euclidean).
+    axis
+        Axis (or axes) over which the norm is taken.  Default ``-1``
+        (the trailing feature axis).
+    eps
+        Lower clamp on the norm denominator.
+
+    Returns
+    -------
+    Tensor of the same shape as ``x``, unit-``Lp`` along ``axis``
+    (except where the input norm is below ``eps``).
+    """
+    norm = jnp.sum(jnp.abs(x) ** p, axis=axis, keepdims=True) ** (1.0 / p)
+    return x / jnp.maximum(norm, eps)
+
+
+def l2_normalize(
+    x: Float[Array, '...'],
+    *,
+    axis: _AxisArg = -1,
+    eps: float = 1e-12,
+) -> Float[Array, '...']:
+    """Project ``x`` onto the unit ``L2`` sphere along ``axis``.
+
+    The ``p = 2`` specialisation of :func:`lp_normalize`, computed
+    directly from the sum of squares (avoiding the general
+    ``|x| ** p`` power and its root).  Once rows are unit-``L2``
+    their inner product *is* the cosine of the angle between them,
+    so this is the projection that turns a dot product into a
+    cosine similarity / angular distance.
+    """
+    norm = jnp.sqrt(jnp.sum(x * x, axis=axis, keepdims=True))
+    return x / jnp.maximum(norm, eps)
+
+
+def instance_norm(
+    x: Float[Array, '...'],
+    *,
+    axes: _AxisArg,
+    eps: float = 1e-5,
+) -> Float[Array, '...']:
+    """Centre and scale by the statistics over ``axes``.
+
+    ``(x - mean) / sqrt(var + eps)`` with ``mean`` / ``var`` reduced
+    over ``axes`` (population variance, no Bessel correction).  This
+    is the *statistics* underneath an instance-normalisation layer,
+    rank-agnostic (the reduced axes are chosen by the caller rather
+    than fixed to a particular spatial rank) and without the
+    trainable affine (apply ``weight`` / ``bias`` in the calling
+    module).
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    axes
+        Axis (or axes) to reduce the per-instance statistics over.
+        For a channel-first volume ``(N, C, *spatial)`` pass the
+        spatial axes (e.g. ``axes=(-3, -2, -1)``) for the canonical
+        per-(sample, channel) instance norm.
+    eps
+        Variance stabiliser inside the square root.
+
+    Returns
+    -------
+    Normalised tensor, same shape as ``x``.
+    """
+    mean = jnp.mean(x, axis=axes, keepdims=True)
+    var = jnp.mean((x - mean) ** 2, axis=axes, keepdims=True)
+    return (x - mean) / jnp.sqrt(var + eps)
