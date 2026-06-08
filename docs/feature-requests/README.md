@@ -86,14 +86,14 @@ live code: *not started* / *partial* (some substrate shipped).
 
 | § | Doc | Proposed module | Effort | Status |
 |---|---|---|---|---|
-| 12.1 | [krylov-solvers](krylov-solvers.md) | `linalg.krylov` | M | not started |
-| 12.2 | [matrix-functions](matrix-functions.md) | `linalg.matrix_function` | S | partial (`sym*` family shipped) |
+| 12.1 | [krylov-solvers](krylov-solvers.md) | `linalg.krylov` | M | partial (`cg` shipped — registration) |
+| 12.2 | [matrix-functions](matrix-functions.md) | `linalg.matrix_function` | S | partial (`sym*` + `matrix_exp` shipped) |
 | 12.3 | [heat-kernel-diffusion](heat-kernel-diffusion.md) | `graph.diffusion` | S | partial (`diffusion_embedding` shipped) |
 | 12.4 | [sinkhorn-optimal-transport](sinkhorn-optimal-transport.md) | `transport` | M | not started |
 | 12.5 | [discrete-exterior-calculus](discrete-exterior-calculus.md) | `geometry.dec` | M | partial (cotangent Laplacian shipped) |
 | 12.6 | [mesh-curvature](mesh-curvature.md) | `geometry.curvature` | S | not started |
 | 12.7 | [robust-statistics](robust-statistics.md) | `stats.robust` | S | not started |
-| 12.8 | [fixed-point-combinators](fixed-point-combinators.md) | `numerics.fixed_point` | M | not started (SnS special case exists) |
+| 12.8 | [fixed-point-combinators](fixed-point-combinators.md) | `numerics.fixed_point` | M | ✅ shipped (`fixed_point_solve` — registration) |
 | 12.9 | [spherical-harmonic-transform](spherical-harmonic-transform.md) | `geometry.sphere.harmonics` | M | not started |
 | 12.10 | [compensated-summation](compensated-summation.md) | `numerics.precision` | S | not started |
 | 12.11 | [ode-integrators](ode-integrators.md) | `numerics.ode` | L | partial (`integrate_velocity_field` shipped) |

@@ -815,6 +815,55 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 
 ### 10.3 Shipped entries
 
+### 2026-06-08 — Registration suite (rigid/affine + diffeomorphic) + three §12 graduations
+
+- **Type:** Plan revision + §12 → §10.A graduations
+- **Triggered by:** Building a JAX registration suite backed by nitrix
+  ahead of the `entense` backend (one rigid-body / affine registrator in
+  the `3dvolreg`/AIR lineage; one diffeomorphic in the SyN/demons family).
+  Design + phased plan in `docs/design/registration.md`.
+- **Description:** Shipped on branch `registration-suite` in phases
+  R0–R2. **R0** (shared image substrate): `geometry.spatial_gradient`,
+  `geometry.{gaussian_pyramid,downsample,upsample}`, new `nitrix.metrics`
+  (`ssd`/`ncc`/`lncc`/`joint_histogram`/`mutual_information`/
+  `correlation_ratio`, all FD-grad-checked), `linalg.{solve,cho_solve}`,
+  shared `_internal.separable.correlate1d`. **R1** (rigid+affine):
+  `linalg.matrix_exp`, `linalg.cg`, `linalg.optimize.{gauss_newton,
+  levenberg_marquardt}` (matrix-free), `geometry.transform`
+  (`rigid_exp`/`rigid_log`/`affine_exp`/`apply_affine`/`affine_grid`),
+  recipes `register.{rigid_register,affine_register}`. **R2**
+  (diffeomorphic): `numerics.fixed_point_solve`,
+  `geometry.{compose_displacement,compose_velocity,invert_displacement}`,
+  recipe `register.diffeomorphic_demons_register` (log-Demons).
+- **§12 graduations (per the §13 protocol — registration is the named
+  blocked consumer with a verified substrate composition):**
+  - **§12.1 `cg`** → `linalg.krylov.cg` (matrix-free SPD; the
+    wedge-resilient on-device path for the GN/LM normal equations).
+  - **§12.2 `matrix_exp`** → `linalg.matrix_exp` (general matrix
+    exponential for the affine generator; `matrix_log` / `matrix_polynomial`
+    / `frechet_derivative` remain on the §12.2 backlog).
+  - **§12.8 `fixed_point_solve`** → `numerics.fixed_point_solve`
+    (Picard + implicit-VJP; backs `invert_displacement`).
+- **Capability shipped:** End-to-end rigid/affine and diffeomorphic
+  registration as pure functions returning `NamedTuple`s (the `reml_fit`
+  precedent — distinct from the SPEC §1 "no template/atlas registration
+  API" non-goal, which is about atlas *data structures*). Validated by
+  synthetic-transform / synthetic-warp recovery (2-D/3-D), the
+  diffeomorphism gate (no negative `det J`), and FD gradient checks.
+- **Shape:** JAX-only (no Pallas kernels added; the recipes compose
+  existing ops). Dev/test on an L4 whose cuSolver pool is dead, hence the
+  SPD-vs-general split: general dense solves / `matrix_exp` route through
+  the CPU-fallback `_solver.safe_*` wrappers, the SPD optimiser path is
+  matrix-free (`cg`/BFGS) and stays on-device.
+- **Deferred work:** R3 polish (implicit-diff differentiable-layer
+  wrapper, benchmarks, tutorials); `matrix_log`; LNCC-driven / symmetric
+  Demons; real-data parity vs AFNI `3dvolreg` / FSL `mcflirt` / ANTs SyN.
+- **Non-negotiables held:** Pure-functional surface (NamedTuples / frozen
+  records, no PyTree modules); JAX fallback floor; jaxtyping; ruff; mypy;
+  `custom_vjp` where stability/efficiency needs it (`fixed_point_solve`,
+  `matrix_exp` via `safe_expm`). No new runtime deps; no atlas/template
+  structures or I/O.
+
 ### 2026-05-20 — SUGAR feedback batch: edge attributes, row-softmax, mean-pool, external topology, masking
 
 - **Type:** Downstream deviation
