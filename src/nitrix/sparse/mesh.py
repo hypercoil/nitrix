@@ -644,8 +644,7 @@ def _edges_from_faces(faces_np: NDArray[Any]) -> NDArray[Any]:
         axis=0,
     )
     e = np.sort(e, axis=-1)
-    # ``np.unique`` is overloaded and resolves to Any here; restore.
-    return cast(NDArray[Any], np.unique(e, axis=0))
+    return np.unique(e, axis=0)
 
 
 def _onering_adj_list(
