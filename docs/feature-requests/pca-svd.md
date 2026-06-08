@@ -1,10 +1,15 @@
 # PCA fit / transform / inverse (SVD) — `nitrix.stats.pca`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Model-numeric item from
-> the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). nitrix has
-> **no PCA / SVD-fit** primitive; the new `krakencoder` model hand-rolls the
-> projection from pre-fit weights.
+> **Status (2026-06-08): SHIPPED.** `stats/pca.py` adds `pca_fit`
+> (`PCAResult` NamedTuple of `components`/`mean`/`explained_variance`),
+> `pca_transform`, `pca_inverse_transform`. The basis is the **covariance
+> eigendecomposition via `linalg._solver.safe_eigh`** — deliberately *not*
+> `jnp.linalg.svd`, which is dead on the cuSolver-affected GPU here (verified:
+> `pca_fit` runs on GPU via the transparent CPU fallback). Deterministic
+> `svd_flip` sign convention; `transform`/`inverse` take explicit
+> `(components, mean)` so a pre-fit basis (loaded weights) applies without a
+> local fit. Model-numeric item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** Principal-component analysis as a small pure-numeric triple:
 

@@ -44,6 +44,9 @@ from nitrix.stats import (
     kl_diagonal_gaussian,
     pairedcov,
     partialcorr,
+    pca_fit,
+    pca_inverse_transform,
+    pca_transform,
     pcorr,
     precision,
     product_filter,
@@ -435,3 +438,90 @@ def test_gaussian_nll_differentiable():
     )(mean, log_var)
     assert bool(jnp.all(jnp.isfinite(g_mean)))
     assert bool(jnp.all(jnp.isfinite(g_lv)))
+
+
+# ---------------------------------------------------------------------------
+# pca
+# ---------------------------------------------------------------------------
+
+
+def test_pca_full_reconstruction_is_exact():
+    rng = np.random.default_rng(0)
+    X = jnp.asarray(rng.standard_normal((50, 8)))
+    res = pca_fit(X)  # keep all min(n, d) = 8 components
+    z = pca_transform(X, res.components, res.mean)
+    x_rec = pca_inverse_transform(z, res.components, res.mean)
+    np.testing.assert_allclose(np.asarray(x_rec), np.asarray(X), atol=1e-8)
+
+
+def test_pca_components_orthonormal():
+    rng = np.random.default_rng(1)
+    X = jnp.asarray(rng.standard_normal((100, 6)))
+    res = pca_fit(X)
+    gram = res.components @ res.components.T
+    np.testing.assert_allclose(np.asarray(gram), np.eye(6), atol=1e-8)
+
+
+def test_pca_explained_variance_matches_numpy_eigh():
+    rng = np.random.default_rng(2)
+    X_np = rng.standard_normal((200, 5))
+    res = pca_fit(jnp.asarray(X_np))
+    cov_np = np.cov(X_np, rowvar=False, bias=False)
+    eig = np.sort(np.linalg.eigvalsh(cov_np))[::-1]
+    np.testing.assert_allclose(
+        np.asarray(res.explained_variance), eig, atol=1e-8
+    )
+    # Descending.
+    ev = np.asarray(res.explained_variance)
+    assert bool(np.all(np.diff(ev) <= 1e-9))
+
+
+def test_pca_transform_decorrelates():
+    rng = np.random.default_rng(3)
+    # Correlated features.
+    base = rng.standard_normal((300, 3))
+    mix = rng.standard_normal((3, 5))
+    X = jnp.asarray(base @ mix)
+    res = pca_fit(X, n_components=3)
+    z = np.asarray(pca_transform(X, res.components, res.mean))
+    c = np.cov(z, rowvar=False, bias=False)
+    off = c - np.diag(np.diag(c))
+    assert float(np.abs(off).max()) < 1e-6
+
+
+def test_pca_sign_is_deterministic():
+    rng = np.random.default_rng(4)
+    X = jnp.asarray(rng.standard_normal((80, 7)))
+    a = pca_fit(X)
+    b = pca_fit(X)
+    np.testing.assert_array_equal(
+        np.asarray(a.components), np.asarray(b.components)
+    )
+    # Largest-magnitude entry of each component is non-negative.
+    comp = np.asarray(a.components)
+    rows = np.arange(comp.shape[0])
+    lead = comp[rows, np.argmax(np.abs(comp), axis=1)]
+    assert bool(np.all(lead >= 0))
+
+
+def test_pca_n_components_subset_shape():
+    rng = np.random.default_rng(5)
+    X = jnp.asarray(rng.standard_normal((40, 10)))
+    res = pca_fit(X, n_components=3)
+    assert res.components.shape == (3, 10)
+    assert res.explained_variance.shape == (3,)
+    z = pca_transform(X, res.components, res.mean)
+    assert z.shape == (40, 3)
+
+
+def test_pca_runs_on_active_backend():
+    # On the cuSolver-dead GPU, pca_fit must still succeed (safe_eigh
+    # transparently falls back to CPU and returns to the caller).
+    rng = np.random.default_rng(6)
+    X_np = rng.standard_normal((60, 4))
+    res = pca_fit(jnp.asarray(X_np))
+    cov_np = np.cov(X_np, rowvar=False, bias=False)
+    eig = np.sort(np.linalg.eigvalsh(cov_np))[::-1]
+    np.testing.assert_allclose(
+        np.asarray(res.explained_variance), eig, atol=1e-8
+    )
