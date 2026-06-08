@@ -14,30 +14,48 @@ with ``Xc`` the centred data.  The ``i``-th component is the
 eigenvector with the ``i``-th largest eigenvalue, and ``lambda_i`` is
 the variance captured along it.
 
+Solvers (``solver=``):
+
+- ``"full"`` -- exact: ``eigh`` of the ``(d, d)`` covariance.
+- ``"randomized"`` -- approximate: a randomised range finder that
+  recovers the top ``k`` components in ``O(n d (k + p))`` matmuls, for
+  ``k`` much smaller than ``d`` (the regime where forming / factoring
+  the full covariance is wasteful).  Keyed (needs a PRNG key).
+
 Implementation notes:
 
-- The basis is recovered via ``eigh`` of the ``(d, d)`` covariance,
-  *not* an SVD of the data matrix.  This is deliberate: on the
-  cuSolver-affected GPU stacks ``svd`` is broken while the routed
-  ``eigh`` (``nitrix.linalg._solver.safe_eigh``) falls back to a
-  device where it works, so the eigen route is the portable one.  (For
-  ``d >> n`` an SVD / Gram-matrix route would be cheaper; the
-  covariance route is chosen for portability, and the fit is a
-  one-off.)
+- Every factorisation goes through ``eigh`` (``nitrix.linalg._solver.
+  safe_eigh``), *never* ``svd`` or ``qr``.  This is deliberate: on the
+  cuSolver-affected GPU stacks ``svd`` / ``qr`` are broken while the
+  routed ``eigh`` falls back to a device where it works.  The
+  randomised solver in particular uses the eigh-based range finder
+  (orthonormalise via the eigendecomposition of the small Gram matrix)
+  rather than the textbook QR + small-SVD, so it too stays portable;
+  its only solver calls are on tiny ``(k + p) x (k + p)`` matrices, the
+  rest is matmuls.
 - Eigenvector signs are arbitrary; we fix them deterministically
   (largest-magnitude entry of each component made positive, the
   ``svd_flip`` convention) so a fit is reproducible across runs and
   devices.
+
+Roadmap (the family will grow along the ``solver=`` seam, mirroring the
+extremal-eigensolver dispatcher): a ``"gram"`` solver (eigh of the
+*smaller* of ``X Xᵀ`` / ``Xᵀ X`` -- the efficient path when
+``n << d``, e.g. component-correlation / CompCor on voxel time series),
+and a sparse-``X`` path routed to the sparse eig solvers.
 """
 
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from typing import Literal, NamedTuple, Optional
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..linalg._solver import safe_eigh
+
+Solver = Literal['full', 'randomized']
 
 __all__ = [
     'PCAResult',
@@ -75,11 +93,71 @@ def _svd_flip_sign(components: Float[Array, 'k d']) -> Float[Array, 'k d']:
     return components * signs[:, None]
 
 
+def _orthonormalize(g: Float[Array, 'd l']) -> Float[Array, 'd l']:
+    """Orthonormalise the columns of ``g`` via the Gram eigendecomposition.
+
+    ``Q = g V Λ^{-1/2}`` from ``gᵀ g = V Λ Vᵀ`` -- an ``eigh``-based
+    substitute for QR (unavailable on the cuSolver-affected GPU stacks).
+    The eigh is on the small ``(l, l)`` Gram matrix.
+    """
+    w, v = safe_eigh(g.T @ g)
+    w = jnp.maximum(w, 1e-12)
+    return (g @ v) * (1.0 / jnp.sqrt(w))[None, :]
+
+
+def _pca_full(
+    xc: Float[Array, 'n d'], k: int, denom: int
+) -> tuple[Float[Array, 'k d'], Float[Array, 'k']]:
+    """Exact PCA: ``eigh`` of the ``(d, d)`` covariance."""
+    cov = (xc.T @ xc) / denom
+    eigvals, eigvecs = safe_eigh(cov)
+    order = jnp.argsort(eigvals)[::-1]
+    components = eigvecs[:, order][:, :k].T
+    explained_variance = eigvals[order][:k]
+    return components, explained_variance
+
+
+def _pca_randomized(
+    xc: Float[Array, 'n d'],
+    k: int,
+    denom: int,
+    key: Array,
+    n_oversamples: int,
+    n_power_iterations: int,
+) -> tuple[Float[Array, 'k d'], Float[Array, 'k']]:
+    """Randomised PCA via the eigh-based range finder (no QR / SVD).
+
+    Sketches the row space with a random ``(n, l)`` projection
+    (``l = k + n_oversamples``), refines it with power iterations,
+    orthonormalises through the small Gram eigh, then solves the
+    projected ``(l, l)`` eigenproblem.  All large operations are
+    matmuls; the only solver calls are on ``(l, l)`` matrices.
+    """
+    n, d = xc.shape
+    ell = min(k + n_oversamples, min(n, d))
+    omega = jax.random.normal(key, (n, ell), dtype=xc.dtype)
+    g = xc.T @ omega  # (d, l) -- spans (approximately) the top row space
+    for _ in range(n_power_iterations):
+        g = _orthonormalize(xc.T @ (xc @ g))
+    q = _orthonormalize(g)  # (d, l)
+    b = xc @ q  # (n, l)
+    s2, wb = safe_eigh(b.T @ b)  # (l,), (l, l)
+    order = jnp.argsort(s2)[::-1]
+    v = (q @ wb)[:, order]  # (d, l) approx right singular vectors of xc
+    components = v[:, :k].T
+    explained_variance = s2[order][:k] / denom
+    return components, explained_variance
+
+
 def pca_fit(
     X: Float[Array, 'n d'],
     *,
     n_components: Optional[int] = None,
     center: bool = True,
+    solver: Solver = 'full',
+    n_oversamples: int = 10,
+    n_power_iterations: int = 2,
+    key: Optional[Array] = None,
 ) -> PCAResult:
     """Fit a PCA basis to ``X`` (rows = samples, columns = features).
 
@@ -96,6 +174,18 @@ def pca_fit(
         Subtract the feature mean before fitting (default ``True``).
         When ``False`` the returned ``mean`` is zeros and the
         decomposition is of the uncentred second-moment matrix.
+    solver
+        ``"full"`` (default) for the exact covariance eigendecomposition,
+        or ``"randomized"`` for the randomised range finder (top ``k``
+        components only, far cheaper when ``k << d``).
+    n_oversamples, n_power_iterations
+        Randomised-solver controls: the oversampling ``p`` (sketch width
+        ``k + p``) and the number of power iterations ``q`` (more ``q``
+        sharpens the spectral separation, improving accuracy on slowly
+        decaying spectra).  Ignored for ``solver="full"``.
+    key
+        PRNG key.  Required for ``solver="randomized"``; ignored
+        otherwise.
 
     Returns
     -------
@@ -104,20 +194,24 @@ def pca_fit(
         ``explained_variance`` ``(k,)``.
     """
     n, d = X.shape
-    mean = jnp.mean(X, axis=0) if center else jnp.zeros(X.shape[1], X.dtype)
+    mean = jnp.mean(X, axis=0) if center else jnp.zeros(d, X.dtype)
     xc = X - mean
     denom = max(n - 1, 1)
-    cov = (xc.T @ xc) / denom
-    # ``eigh`` returns ascending eigenvalues; reverse for descending.
-    eigvals, eigvecs = safe_eigh(cov)
-    order = jnp.argsort(eigvals)[::-1]
-    eigvals = eigvals[order]
-    eigvecs = eigvecs[:, order]
     k = min(n, d) if n_components is None else n_components
-    components = _svd_flip_sign(eigvecs[:, :k].T)
-    explained_variance = eigvals[:k]
+    if solver == 'full':
+        components, explained_variance = _pca_full(xc, k, denom)
+    elif solver == 'randomized':
+        if key is None:
+            raise ValueError("solver='randomized' requires a PRNG key=.")
+        components, explained_variance = _pca_randomized(
+            xc, k, denom, key, n_oversamples, n_power_iterations
+        )
+    else:
+        raise ValueError(
+            f"solver={solver!r}; expected 'full' or 'randomized'."
+        )
     return PCAResult(
-        components=components,
+        components=_svd_flip_sign(components),
         mean=mean,
         explained_variance=explained_variance,
     )

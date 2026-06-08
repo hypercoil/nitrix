@@ -10,6 +10,28 @@
 > `(components, mean)` so a pre-fit basis (loaded weights) applies without a
 > local fit. Model-numeric item from the 2026-06-08 ilex audit
 > ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
+>
+> **Randomized solver added (2026-06-08).** `pca_fit(..., solver='randomized',
+> key=, n_oversamples=, n_power_iterations=)` — Halko-style randomised PCA via
+> an **eigh-based range finder** (orthonormalise through the small Gram
+> `eigh`; project; solve the `(k+p)×(k+p)` eigenproblem). Deliberately uses
+> **no QR and no SVD** — both dead on this cuSolver stack — so it is portable;
+> the large work is matmuls, only the `(k+p)`-sized factorisations hit the
+> solver. Preferred for top-`k`-with-`k≪d` (the fMRIPrep / nilearn / CompCor
+> regime). Verified on GPU against the exact path for low-rank data.
+
+## Roadmap (PCA family growth)
+
+The `solver=` parameter is the dispatch seam (mirroring the
+extremal-eigensolver dispatcher — `[[eigsolve-dispatcher-plan]]`):
+
+- **`solver='gram'`** — `eigh` of the *smaller* of `X Xᵀ` / `Xᵀ X`; the
+  efficient path when `n ≪ d` (component-correlation / CompCor on voxel ×
+  time matrices). Trivial on the existing `safe_eigh`.
+- **sparse `X`** — route the projection / Gram step to the sparse-ELL eig
+  solvers (same seam).
+- **right-singular-vectors-only** convenience for the CompCor temporal
+  components.
 
 **What.** Principal-component analysis as a small pure-numeric triple:
 

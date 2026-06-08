@@ -525,3 +525,75 @@ def test_pca_runs_on_active_backend():
     np.testing.assert_allclose(
         np.asarray(res.explained_variance), eig, atol=1e-8
     )
+
+
+# ---------------------------------------------------------------------------
+# pca: randomized solver
+# ---------------------------------------------------------------------------
+
+
+def _low_rank(n, d, r, seed):
+    rng = np.random.default_rng(seed)
+    u = rng.standard_normal((n, r))
+    v = rng.standard_normal((r, d))
+    return jnp.asarray(u @ v)
+
+
+def test_pca_randomized_matches_full_on_low_rank():
+    X = _low_rank(200, 30, 5, seed=0)
+    full = pca_fit(X, n_components=5, solver='full')
+    rand = pca_fit(
+        X,
+        n_components=5,
+        solver='randomized',
+        key=jax.random.PRNGKey(0),
+        n_power_iterations=4,
+    )
+    # Exactly rank-5 data: the randomized range finder captures the
+    # whole signal subspace, so the top-5 variances match the exact fit.
+    np.testing.assert_allclose(
+        np.asarray(rand.explained_variance),
+        np.asarray(full.explained_variance),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
+def test_pca_randomized_reconstructs_low_rank():
+    X = _low_rank(150, 40, 6, seed=1)
+    res = pca_fit(
+        X, n_components=6, solver='randomized', key=jax.random.PRNGKey(1)
+    )
+    z = pca_transform(X, res.components, res.mean)
+    x_rec = pca_inverse_transform(z, res.components, res.mean)
+    np.testing.assert_allclose(np.asarray(x_rec), np.asarray(X), atol=1e-6)
+
+
+def test_pca_randomized_components_orthonormal():
+    X = _low_rank(120, 25, 8, seed=2)
+    res = pca_fit(
+        X, n_components=8, solver='randomized', key=jax.random.PRNGKey(2)
+    )
+    gram = res.components @ res.components.T
+    np.testing.assert_allclose(np.asarray(gram), np.eye(8), atol=1e-6)
+
+
+def test_pca_randomized_reproducible():
+    X = _low_rank(100, 20, 4, seed=3)
+    a = pca_fit(X, n_components=4, solver='randomized', key=jax.random.PRNGKey(7))
+    b = pca_fit(X, n_components=4, solver='randomized', key=jax.random.PRNGKey(7))
+    np.testing.assert_array_equal(
+        np.asarray(a.components), np.asarray(b.components)
+    )
+
+
+def test_pca_randomized_requires_key():
+    X = _low_rank(50, 10, 3, seed=4)
+    with pytest.raises(ValueError, match='requires a PRNG key'):
+        pca_fit(X, n_components=3, solver='randomized')
+
+
+def test_pca_invalid_solver_raises():
+    X = _low_rank(50, 10, 3, seed=5)
+    with pytest.raises(ValueError, match='expected'):
+        pca_fit(X, n_components=3, solver='bogus')
