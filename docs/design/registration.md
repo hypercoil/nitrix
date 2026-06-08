@@ -131,18 +131,34 @@ non-negotiables in §2.2 hold throughout: pure-functional surface, JAX
 fallback floor, golden corpus, jaxtyping, ruff, ``custom_vjp`` where
 stability/efficiency needs it).
 
-- **R0 — shared image substrate.**  ``geometry.spatial_gradient``;
+> **Status (2026-06-08): R0 + R1 SHIPPED** on branch
+> ``registration-suite``.  Developed/tested on an L4 GPU whose cuSolver
+> handle pool is dead (``eigh`` / ``cholesky`` / ``solve`` / ``inv`` /
+> ``svd`` all fail; only ``triangular_solve`` + conv/elementwise work) --
+> hence the SPD/general split below: general dense solves and ``matrix_exp``
+> route through the CPU-fallback ``_solver.safe_*`` wrappers, while the
+> SPD optimiser path is matrix-free (``cg`` / BFGS) and stays on-device.
+
+- **R0 — shared image substrate.** ✅ SHIPPED.  ``geometry.spatial_gradient``;
   ``geometry.gaussian_pyramid`` / ``downsample`` / ``upsample``;
   ``nitrix.metrics`` (SSD / NCC / LNCC / MI / CR + gradients);
-  ``linalg.cho_solve`` / ``solve``.
+  ``linalg.cho_solve`` / ``solve``.  Shared separable engine
+  ``_internal.separable.correlate1d`` (de-dups gradient + LNCC box-sum).
   **Gate G-R0:** finite-difference gradient checks on every metric
-  (incl. soft-histogram MI / CR); golden vs numpy/scipy references.
-- **R1 — rigid + affine.**  ``linalg.matrix_exp`` / ``matrix_log`` (+
-  Fréchet VJP); ``geometry.transform``; ``linalg.optimize.{gauss_newton,
-  levenberg_marquardt}``; recipes ``rigid_register`` / ``affine_register``.
-  **Gates:** exp/log round-trip + grad; **synthetic-recovery** (recover a
-  known transform to tolerance) + parity vs AFNI ``3dvolreg`` / FSL
-  ``mcflirt`` / ANTs.
+  (incl. soft-histogram MI / CR) -- passing.
+- **R1 — rigid + affine.** ✅ SHIPPED.  ``linalg.matrix_exp`` (general,
+  via ``safe_expm``; ``matrix_log`` / Fréchet still backlog);
+  ``linalg.cg`` (matrix-free SPD, graduates §12.1);
+  ``linalg.optimize.{gauss_newton, levenberg_marquardt}`` (matrix-free,
+  ``jvp``/``vjp`` + ``cg``); ``geometry.transform`` (closed-form rigid
+  exp/log, ``matrix_exp``-based affine, ``apply_affine`` / ``affine_grid``);
+  recipes ``register.{rigid_register, affine_register}`` (coarse-to-fine;
+  SSD->GN/LM, LNCC/MI/CR->BFGS).
+  **Gate (met):** exp round-trip + grad; **synthetic-recovery** of known
+  2-D/3-D rigid and 2-D affine transforms (ncc > 0.97-0.99).  Still TODO:
+  parity vs AFNI ``3dvolreg`` / FSL ``mcflirt`` / ANTs on real data.
+  *Bug found & fixed by the 3-D oracle:* ``_so3_exp`` ``sqrt(0)`` NaN in
+  reverse-mode froze the 3-D optimiser at identity (regression-tested).
 - **R2 — diffeomorphic.**  ``compose_velocity`` / ``invert_displacement``;
   ``linalg.krylov.cg`` + ``numerics.fixed_point.fixed_point_solve``;
   recipe ``diffeomorphic_demons_register`` (log-domain ESM force,
