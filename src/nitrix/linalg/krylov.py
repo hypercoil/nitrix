@@ -43,7 +43,7 @@ def cg(
     tol: float = 1e-6,
     atol: float = 0.0,
     maxiter: Optional[int] = None,
-    l2: float = 0.0,
+    l2: Union[float, Array] = 0.0,
 ) -> Float[Array, '... n']:
     """Solve the SPD system ``(A + l2 I) x = b`` by conjugate gradients.
 
@@ -66,6 +66,9 @@ def cg(
     l2
         Non-negative Tikhonov / Levenberg-Marquardt ridge added to the
         diagonal (in matrix-free form, ``A v + l2 v``).  Default ``0``.
+        May be a traced scalar (so the LM damping ``λ`` can vary inside
+        a ``jit``); the ``l2 v`` term is added unconditionally, a no-op
+        at ``l2 = 0``.
 
     Returns
     -------
@@ -88,16 +91,8 @@ def cg(
 
         op = _matmul
 
-    matvec: Callable[[Array], Array]
-    if l2 == 0.0:
-        matvec = op
-    else:
-        inner = op
-
-        def _damped(v: Array) -> Array:
-            return inner(v) + l2 * v
-
-        matvec = _damped
+    def matvec(v: Array) -> Array:
+        return op(v) + l2 * v
 
     x, _ = _jax_cg(matvec, b, x0=x0, tol=tol, atol=atol, maxiter=maxiter)
     return cast(Float[Array, '... n'], x)

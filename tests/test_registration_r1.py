@@ -30,7 +30,12 @@ from nitrix.geometry import (  # noqa: E402
     rigid_exp,
     rigid_log,
 )
-from nitrix.linalg import cg, matrix_exp  # noqa: E402
+from nitrix.linalg import (  # noqa: E402
+    cg,
+    gauss_newton,
+    levenberg_marquardt,
+    matrix_exp,
+)
 
 
 def _skew(omega):
@@ -251,3 +256,74 @@ def test_affine_grid_identity_and_translation():
     m = jnp.asarray(np.block([[np.eye(3), np.array([[1.0], [-2.0], [0.5]])], [np.zeros((1, 3)), 1.0]]))
     gt = affine_grid(m, shape)
     assert np.allclose(np.asarray(gt), np.asarray(identity_grid(shape)) + [1.0, -2.0, 0.5], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# linalg.optimize — Gauss-Newton / Levenberg-Marquardt
+# ---------------------------------------------------------------------------
+
+
+def test_gauss_newton_solves_linear_least_squares():
+    rng = np.random.RandomState(0)
+    a = rng.standard_normal((10, 3))
+    b = rng.standard_normal(10)
+    a_j = jnp.asarray(a)
+    b_j = jnp.asarray(b)
+
+    def residual(x):
+        return a_j @ x - b_j
+
+    res = gauss_newton(
+        residual, jnp.zeros(3), n_iters=2, cg_tol=1e-12, cg_maxiter=100
+    )
+    x_star, *_ = np.linalg.lstsq(a, b, rcond=None)
+    assert np.allclose(np.asarray(res.params), x_star, atol=1e-6)
+
+
+def test_levenberg_marquardt_nonlinear_recovers_parameter():
+    t = np.linspace(0.0, 2.0, 60)
+    k_true = 2.3
+    data = jnp.asarray(np.exp(-k_true * t))
+    t_j = jnp.asarray(t)
+
+    def residual(k):
+        return jnp.exp(-k[0] * t_j) - data
+
+    res = levenberg_marquardt(
+        residual, jnp.asarray([0.5]), n_iters=30, cg_tol=1e-10
+    )
+    assert np.isclose(float(res.params[0]), k_true, atol=1e-4)
+    # accept/reject -> monotone non-increasing cost.
+    ch = np.asarray(res.cost_history)
+    assert np.all(np.diff(ch) <= 1e-9)
+    assert float(res.cost) < 1e-8
+
+
+def test_optimize_matrix_free_large_residual():
+    # M >> P: the Jacobian is never materialised (jvp/vjp + cg).
+    rng = np.random.RandomState(1)
+    a = jnp.asarray(rng.standard_normal((2000, 4)))
+    b = jnp.asarray(rng.standard_normal(2000))
+    res = gauss_newton(
+        lambda x: a @ x - b, jnp.zeros(4), n_iters=2, cg_tol=1e-10
+    )
+    x_star, *_ = np.linalg.lstsq(np.asarray(a), np.asarray(b), rcond=None)
+    assert np.allclose(np.asarray(res.params), x_star, atol=1e-5)
+
+
+def test_optimize_differentiable_through_solve():
+    rng = np.random.RandomState(2)
+    a = jnp.asarray(rng.standard_normal((8, 2)))
+
+    def solve_sum(b):
+        res = gauss_newton(
+            lambda x: a @ x - b, jnp.zeros(2), n_iters=1, cg_tol=1e-12
+        )
+        return res.params.sum()
+
+    b0 = jnp.asarray(rng.standard_normal(8))
+    g = np.asarray(jax.grad(solve_sum)(b0))
+    # GN(1 step) from 0 gives x = pinv(a) b, so d(sum x)/db = sum of
+    # pinv(a) columns; compare to the analytic pseudo-inverse.
+    expected = np.asarray(np.linalg.pinv(np.asarray(a))).sum(axis=0)
+    assert np.allclose(g, expected, atol=1e-5)
