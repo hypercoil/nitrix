@@ -3,7 +3,7 @@
     "device": "cpu (cpu)",
     "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.1",
-    "timestamp": "2026-06-07T22:51:40Z"
+    "timestamp": "2026-06-08T00:15:13Z"
   },
   "perf_source": "nitrix-perf-bench",
   "ops": [
@@ -1162,6 +1162,17 @@
         "windowed-sinc order 3; separable 1-D passes; partition of unity"
       ],
       "notes": "differentiable in values and coordinates"
+    },
+    {
+      "qualname": "nitrix.geometry.resample[cubic]",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "order-3 B-spline; recursive prefilter (scan/assoc-scan) + 4-tap gather"
+      ],
+      "notes": "bit-exact scipy order=3 (mode=mirror); differentiable"
     },
     {
       "qualname": "nitrix.geometry.resample[multilabel]",

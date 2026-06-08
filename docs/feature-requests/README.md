@@ -18,7 +18,8 @@ the shared framing + history and indexes its atomised items:
 Status is verified against the live `src/nitrix` surface as of 2026-06-02
 (interpolation-method dispatcher — `Lanczos` / `MultiLabel` /
 `NearestNeighbour` on `resample` / `spatial_transform` — shipped 2026-06-07;
-see `IMPLEMENTATION_PLAN.md §10.3`).
+`CubicBSpline` (scipy `order=3` bit-exact) added 2026-06-08; see
+`IMPLEMENTATION_PLAN.md §10.3`).
 
 ## Consumer-pipeline substrate (ilex → thrux)
 
@@ -30,7 +31,7 @@ Context, scope boundary, and already-shipped record:
 | [connected-components](connected-components.md) | ENABLING (highest recurrence) | `morphology` |
 | [pad-to-multiple](pad-to-multiple.md) | ENABLING | `numerics` |
 | [crop-to-nonzero](crop-to-nonzero.md) | ENABLING | `numerics` |
-| [cubic-resample](cubic-resample.md) | MISMATCH (parity) — **open**: dispatcher landed but no order-3 B-spline (2026-06-07) | `geometry._interpolate` |
+| [cubic-resample](cubic-resample.md) | MISMATCH (parity) — ✅ **resolved**: `CubicBSpline` (scipy `order=3` bit-exact) (2026-06-08) | `geometry._interpolate` |
 | [intensity-normalize-variants](intensity-normalize-variants.md) | CONVENIENCE | `numerics.normalize` |
 | [sliding-window-weighting](sliding-window-weighting.md) | CONVENIENCE | `numerics` |
 | [point-sample](point-sample.md) | CONVENIENCE — **partial**: capability via `spatial_transform(method=Linear(), mode='constant')`; flat-point-list wrapper unshipped (2026-06-07) | `geometry.grid` |

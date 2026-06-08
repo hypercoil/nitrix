@@ -11,8 +11,8 @@ Submodules:
   ``identity_grid``, ``spatial_transform``, ``integrate_velocity_field``,
   ``resample``, ``center_of_mass_grid``.  ``resample`` /
   ``spatial_transform`` dispatch over an ``Interpolator`` kernel
-  (``Linear`` default, ``NearestNeighbour``, ``Lanczos``, ``MultiLabel``)
-  -- see ``geometry._interpolate``.
+  (``Linear`` default, ``NearestNeighbour``, ``Lanczos``, ``CubicBSpline``,
+  ``MultiLabel``) -- see ``geometry._interpolate``.
 - ``sphere`` -- 2-sphere **mesh** primitives: coordinate
   conversions, geodesic distance, and ``spherical_conv`` re-backed
   on ``semiring_ell_matmul`` for ``O(n · k)`` instead of ``O(n²)``.
@@ -28,6 +28,7 @@ Submodules:
 See SPEC §4.4, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
 """
 from ._interpolate import (
+    CubicBSpline,
     Interpolator,
     Lanczos,
     Linear,
@@ -85,6 +86,7 @@ __all__ = [
     'Linear',
     'NearestNeighbour',
     'Lanczos',
+    'CubicBSpline',
     'MultiLabel',
     # sphere (mesh)
     'cartesian_to_latlong',

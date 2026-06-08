@@ -35,6 +35,11 @@ Methods:
   of unity (so constants are preserved exactly).  High-fidelity and
   fully differentiable (smooth weights) in both values and coordinates;
   the ANTs ``LanczosWindowedSinc`` algorithm class (not bit-exact ITK).
+- ``CubicBSpline`` -- order-3 B-spline (``scipy.ndimage`` ``order=3``):
+  a recursive **prefilter** (samples -> interpolating coefficients) plus
+  a 4-tap cubic basis gather.  Differentiable in values and coordinates;
+  bit-exact with ``scipy`` ``order=3, mode='mirror'``.  The path nnUNet /
+  ``hd_bet`` style preprocessing needs.
 - ``MultiLabel`` -- ANTs-style label resampling for segmentations: each
   label's indicator mask is resampled with an ``inner`` kernel (default
   ``Linear``) and the per-voxel arg-max label is returned.  Anti-aliases
@@ -83,6 +88,7 @@ repeat), and ``reflect`` folds with period ``2n`` (edge repeat).
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass
 from typing import (
     Callable,
@@ -109,6 +115,7 @@ __all__ = [
     'Linear',
     'NearestNeighbour',
     'Lanczos',
+    'CubicBSpline',
     'MultiLabel',
 ]
 
@@ -369,9 +376,10 @@ class _SeparableKernel(Protocol):
     '''A gather kernel whose weights factor per axis (a tap rule).
 
     The internal marker that ``resample`` uses to choose its engine.
-    ``Linear`` / ``NearestNeighbour`` / ``Lanczos`` conform; ``MultiLabel``
-    does not (its output is a per-voxel arg-max, not a separable weighted
-    sum), so it falls back to the dense meshgrid gather.
+    ``Linear`` / ``NearestNeighbour`` / ``Lanczos`` / ``CubicBSpline``
+    conform; ``MultiLabel`` does not (its output is a per-voxel arg-max,
+    not a separable weighted sum), so it falls back to the dense meshgrid
+    gather.
 
     ``prefers_separable_resample`` decides the *resample* engine: ``True``
     routes the resize grid through the cheap per-axis 1-D passes
@@ -382,6 +390,11 @@ class _SeparableKernel(Protocol):
     per-coordinate path, whose ``map_coordinates`` engine still wins on
     CPU (the 1-D passes there are a mild regression on the
     throughput-sensitive CPU interpolation path, B15).
+
+    ``_prepare`` is a per-image preprocessing hook applied once before the
+    gather: the identity for the direct kernels, the recursive B-spline
+    prefilter for ``CubicBSpline`` (which gathers *coefficients*, not the
+    raw samples).
     '''
 
     prefers_separable_resample: bool
@@ -389,6 +402,11 @@ class _SeparableKernel(Protocol):
     def _axis_taps_weights(
         self, coord: Float[Array, 'n'],
     ) -> Tuple[Int[Array, 'n t'], Float[Array, 'n t']]:
+        ...
+
+    def _prepare(
+        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+    ) -> Float[Array, '*spatial c']:
         ...
 
 
@@ -435,6 +453,132 @@ def _separable_resample(
     return out.astype(image.dtype)
 
 
+# ---------------------------------------------------------------------------
+# Cubic B-spline prefilter (Unser / Aldroubi / Eden; the order-3 coefficients)
+# ---------------------------------------------------------------------------
+
+
+# The single real pole of the cubic B-spline (z1 = sqrt(3) - 2 ~= -0.2679).
+_BSPLINE_POLE = math.sqrt(3.0) - 2.0
+
+
+def _bspline_initial_causal(
+    coeffs: Float[Array, 'n'], pole: float,
+) -> Float[Array, '']:
+    '''Exact whole-sample-mirror initial causal coefficient.
+
+    The closed-form boundary condition for the causal recursion under a
+    mirror (whole-sample-symmetric) extension -- the Thévenaz / ITK
+    convention, equal to ``scipy.ndimage`` with ``mode='mirror'``.
+    Vectorised (a single dot product), so it is parallel and
+    differentiable -- no scan.
+    '''
+    n = coeffs.shape[0]
+    k = jnp.arange(n)
+    weights = jnp.power(pole, k) + jnp.power(pole, 2 * n - 2 - k)
+    weights = weights.at[0].set(1.0).at[n - 1].set(jnp.power(pole, n - 1))
+    return jnp.dot(weights, coeffs) / (1.0 - jnp.power(pole, 2 * n - 2))
+
+
+def _first_order_causal(
+    inputs: Float[Array, 'n'],
+    pole: float,
+    init: Float[Array, ''],
+    *,
+    associative: bool,
+) -> Float[Array, 'n']:
+    '''Resolve ``y[k] = pole * y[k-1] + inputs[k]`` with ``y[0] = init``.
+
+    ``inputs[0]`` is ignored (overridden by ``init``).  Two exact engines
+    -- the choice mirrors ``signal._iir`` (a first-order linear recurrence
+    composes associatively):
+
+    - sequential ``lax.scan`` (CPU; low overhead), and
+    - ``lax.associative_scan`` (GPU; ``O(log n)`` depth, the parallel
+      form that removes the scan's sequential-depth cost).
+
+    Both are exact (no truncation); they agree to a ULP.
+    '''
+    n = inputs.shape[0]
+    init = jnp.reshape(init, (1,))
+    if associative:
+        # Element k carries (a_k, v_k); the prefix combine resolves
+        # y[k] = a_k * y[k-1] + v_k.  a_0 = 0 so y[0] = v_0 = init.
+        a_seq = jnp.concatenate(
+            [jnp.zeros((1,), inputs.dtype),
+             jnp.full((n - 1,), pole, inputs.dtype)],
+        )
+        v_seq = jnp.concatenate([init, inputs[1:]])
+
+        def combine(
+            left: Tuple[Array, Array], right: Tuple[Array, Array],
+        ) -> Tuple[Array, Array]:
+            a_l, v_l = left
+            a_r, v_r = right
+            return a_r * a_l, a_r * v_l + v_r
+
+        _, values = jax.lax.associative_scan(combine, (a_seq, v_seq))
+        return cast(Float[Array, 'n'], values)
+
+    def step(prev: Array, x: Array) -> Tuple[Array, Array]:
+        cur = x + pole * prev
+        return cur, cur
+
+    _, tail = jax.lax.scan(step, init[0], inputs[1:])
+    return jnp.concatenate([init, tail])
+
+
+def _bspline_prefilter_1d(
+    samples: Float[Array, 'n'], pole: float, *, associative: bool,
+) -> Float[Array, 'n']:
+    '''B-spline coefficients of a 1-D signal (one causal + one anti-causal).'''
+    n = samples.shape[0]
+    gain = (1.0 - pole) * (1.0 - 1.0 / pole)        # = 6 for cubic
+    scaled = samples * gain
+    causal0 = _bspline_initial_causal(scaled, pole)
+    causal = _first_order_causal(
+        scaled, pole, causal0, associative=associative,
+    )
+    # Anti-causal init (mirror) and recursion ``c[k] = pole*(c[k+1] - c[k])``,
+    # run as a forward first-order recurrence on the reversed sequence.
+    anti0 = (pole / (pole * pole - 1.0)) * (causal[n - 1] + pole * causal[n - 2])
+    reversed_input = -pole * causal[::-1]
+    reversed_out = _first_order_causal(
+        reversed_input, pole, anti0, associative=associative,
+    )
+    return reversed_out[::-1]
+
+
+def _bspline_prefilter(
+    image: Float[Array, '*spatial c'], mode: BoundaryMode,
+) -> Float[Array, '*spatial c']:
+    '''Separable cubic B-spline prefilter over the spatial axes.
+
+    Converts samples to interpolating B-spline coefficients, one
+    recursive pass per spatial axis (the trailing channel axis is left
+    alone).  Mirror boundary initialisation regardless of ``mode`` (the
+    standard B-spline convention; ``mode`` then governs only the gather
+    extrapolation -- exact ``scipy`` ``order=3`` parity holds for
+    ``mode='mirror'``, interior parity otherwise).
+    '''
+    del mode  # prefilter boundary is always mirror (documented)
+    ndim = image.ndim - 1
+    associative = default_backend_is_gpu()
+    out = image
+    for axis in range(ndim):
+        if out.shape[axis] < 2:
+            continue  # a length-1 axis has no recursion
+        moved = jnp.moveaxis(out, axis, -1)          # (..., N)
+        flat = moved.reshape(-1, moved.shape[-1])    # (M, N)
+        filtered = jax.vmap(
+            lambda row: _bspline_prefilter_1d(
+                row, _BSPLINE_POLE, associative=associative,
+            )
+        )(flat)
+        out = jnp.moveaxis(filtered.reshape(moved.shape), -1, axis)
+    return out
+
+
 @dataclass(frozen=True)
 class Linear:
     '''(Multi-)linear interpolation (``order=1``).
@@ -459,6 +603,11 @@ class Linear:
         taps = jnp.stack([lower, lower + 1], axis=-1)
         weights = jnp.stack([1.0 - frac, frac], axis=-1)
         return taps, weights
+
+    def _prepare(
+        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+    ) -> Float[Array, '*spatial c']:
+        return image
 
     def sample(
         self,
@@ -503,6 +652,11 @@ class NearestNeighbour:
         taps = nearest[..., None]
         weights = jnp.ones(taps.shape, dtype=coord.dtype)
         return taps, weights
+
+    def _prepare(
+        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+    ) -> Float[Array, '*spatial c']:
+        return image
 
     def sample(
         self,
@@ -593,6 +747,11 @@ class Lanczos:
         weights = weights / jnp.sum(weights, axis=-1, keepdims=True)
         return taps, weights
 
+    def _prepare(
+        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+    ) -> Float[Array, '*spatial c']:
+        return image
+
     def sample(
         self,
         image: Float[Array, '*spatial c'],
@@ -604,6 +763,94 @@ class Lanczos:
         return _separable_gather(
             image, coords,
             tap_rule=self._axis_taps_weights, mode=mode, cval=cval,
+        )
+
+
+@dataclass(frozen=True)
+class CubicBSpline:
+    '''Cubic (order-3) B-spline interpolation -- ``scipy.ndimage`` ``order=3``.
+
+    The order-3 spline path consumers like the nnUNet / ``hd_bet``
+    preprocessing in some ilex pipelines use.  Unlike a plain cubic
+    *convolution*, a B-spline interpolator is a two-step operation:
+
+    1. a **prefilter** converts the image samples to interpolating
+       B-spline coefficients (a separable recursive filter with the cubic
+       pole ``sqrt(3) - 2``; :func:`_bspline_prefilter`), and
+    2. a 4-tap separable **cubic B-spline basis** gathers those
+       coefficients.
+
+    Without the prefilter the cubic basis only *approximates* (blurs) the
+    samples; with it the result passes through the samples exactly -- the
+    interpolation property.  The basis is a partition of unity (weights
+    sum to 1; no renormalisation), ``C^2``-smooth, so the kernel is
+    differentiable in both the values (the prefilter and gather are
+    linear) and the coordinates (the basis is smooth).
+
+    Engine note: the prefilter is a first-order linear recurrence, run
+    sequentially (``lax.scan``) on CPU and in parallel
+    (``lax.associative_scan``, ``O(log n)`` depth) on GPU -- the same
+    platform split as ``signal._iir``.  Both are exact.  (An FFT
+    convolution -- the other ``signal._iir`` engine -- is *not* used: the
+    cubic pole is mild, so the prefilter's impulse response is a ~25-tap
+    short FIR, too short for the transform overhead to amortise.)
+
+    Boundary: this kernel **always uses the mirror (whole-sample-
+    symmetric) boundary** for *both* the prefilter and the gather, and
+    **ignores the ``mode`` / ``cval`` call arguments** (like
+    :class:`MultiLabel` ignores ``cval``).  This is deliberate: a B-spline
+    is only self-consistent -- the interpolation property (reproducing the
+    samples) only holds -- when the prefilter and the gather share a
+    boundary, and only the mirror initialisation is implemented.  The
+    result is bit-exact with ``scipy.ndimage.map_coordinates(order=3,
+    mode='mirror')``.  A mode-aware prefilter (matching ``scipy`` for
+    ``nearest`` / ``reflect`` / ... ) is a future extension (cf.
+    ``docs/feature-requests/boundary-mode-parity.md``).
+    '''
+
+    differentiable_in_values: ClassVar[bool] = True
+    differentiable_in_coords: ClassVar[bool] = True
+    prefers_separable_resample: ClassVar[bool] = True
+
+    def _axis_taps_weights(
+        self, coord: Float[Array, 'n'],
+    ) -> Tuple[Int[Array, 'n 4'], Float[Array, 'n 4']]:
+        base = jnp.floor(coord)
+        frac = coord - base
+        lower = base.astype(jnp.int32)
+        taps = jnp.stack(
+            [lower - 1, lower, lower + 1, lower + 2], axis=-1,
+        )
+        # Cubic B-spline basis beta^3 at the four tap distances.
+        comp = 1.0 - frac
+        weights = jnp.stack([
+            comp ** 3 / 6.0,
+            2.0 / 3.0 - frac ** 2 + frac ** 3 / 2.0,
+            2.0 / 3.0 - comp ** 2 + comp ** 3 / 2.0,
+            frac ** 3 / 6.0,
+        ], axis=-1)
+        return taps, weights
+
+    def _prepare(
+        self, image: Float[Array, '*spatial c'], mode: BoundaryMode,
+    ) -> Float[Array, '*spatial c']:
+        return _bspline_prefilter(image, mode)
+
+    def sample(
+        self,
+        image: Float[Array, '*spatial c'],
+        coords: Float[Array, '*out_spatial ndim'],
+        *,
+        mode: BoundaryMode,
+        cval: float,
+    ) -> Float[Array, '*out_spatial c']:
+        # mode / cval are ignored: a B-spline forces the mirror boundary on
+        # both the prefilter and the gather (see the class docstring).
+        del mode, cval
+        coeffs = self._prepare(image, 'mirror')
+        return _separable_gather(
+            coeffs, coords,
+            tap_rule=self._axis_taps_weights, mode='mirror', cval=0.0,
         )
 
 
@@ -750,9 +997,18 @@ def _resample_on_grid(
     :func:`_sample_at_coords`.
     '''
     if isinstance(method, _SeparableKernel) and method.prefers_separable_resample:
+        # ``_prepare`` is the identity for the direct kernels and the
+        # B-spline prefilter for ``CubicBSpline`` (applied once, on the
+        # full image, before the separable per-axis passes).  The B-spline
+        # forces the mirror boundary on both prefilter and gather (it
+        # ignores ``mode`` / ``cval``; see ``CubicBSpline``).
+        is_bspline = isinstance(method, CubicBSpline)
+        prepared = method._prepare(image, 'mirror' if is_bspline else mode)
         return _separable_resample(
-            image, axes_coords,
-            tap_rule=method._axis_taps_weights, mode=mode, cval=cval,
+            prepared, axes_coords,
+            tap_rule=method._axis_taps_weights,
+            mode='mirror' if is_bspline else mode,
+            cval=0.0 if is_bspline else cval,
         )
     grids = jnp.meshgrid(*axes_coords, indexing='ij')
     coords = jnp.stack(grids, axis=-1)

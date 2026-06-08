@@ -30,6 +30,7 @@ import numpy as np
 import pytest
 
 from nitrix.geometry import (
+    CubicBSpline,
     Interpolator,
     Lanczos,
     Linear,
@@ -772,6 +773,114 @@ def test_lanczos_order_validation():
         Lanczos(order=-2)
     with pytest.raises(ValueError):
         Lanczos(order=2.5)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# CubicBSpline (scipy order-3 parity)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('ndim', [1, 2, 3])
+def test_cubic_bspline_matches_scipy_order3(ndim):
+    '''Bit-exact with ``scipy.ndimage`` ``order=3, mode='mirror'``.
+
+    Full parity (interior *and* boundary): the recursive prefilter
+    reproduces scipy's spline coefficients and the 4-tap cubic basis
+    reproduces its sampling, including out-of-bounds coordinates folded
+    by the mirror boundary.
+    '''
+    ndi = pytest.importorskip('scipy.ndimage')
+    from nitrix.geometry._interpolate import CubicBSpline as _Cubic
+
+    rng = np.random.default_rng(30 + ndim)
+    spatial = tuple(int(s) for s in rng.integers(7, 11, size=ndim))
+    img = jnp.asarray(rng.standard_normal(spatial))
+    hi = max(spatial) + 1.0
+    coords = jnp.asarray(rng.uniform(-1.5, hi, size=(ndim, 50)))
+
+    ref = ndi.map_coordinates(
+        np.asarray(img), [np.asarray(c) for c in coords],
+        order=3, mode='mirror',
+    )
+    # The core sampler takes a flat ``(n_points, ndim)`` coordinate field
+    # (``spatial_transform`` would require the output spatial rank to match
+    # the image's).  mode/cval are ignored by CubicBSpline (forced mirror).
+    coords_field = jnp.moveaxis(coords, 0, -1)  # (50, ndim)
+    got = _Cubic().sample(
+        img[..., None], coords_field, mode='mirror', cval=0.0,
+    )[..., 0]
+    np.testing.assert_allclose(np.asarray(got), ref, atol=1e-11)
+
+
+def test_cubic_bspline_reproduces_grid_samples():
+    '''The interpolation property: resampling onto the grid is identity.'''
+    img = jax.random.normal(jax.random.key(31), (8, 9, 2))
+    out = resample(img, (8, 9), method=CubicBSpline())
+    np.testing.assert_allclose(out, img, atol=1e-10)
+
+
+def test_cubic_bspline_preserves_constant():
+    const = jnp.full((10, 10, 1), 2.5)
+    out = resample(const, (16, 16), method=CubicBSpline())
+    np.testing.assert_allclose(out, 2.5, atol=1e-10)
+
+
+def test_cubic_bspline_resample_matches_scattered_gather():
+    '''resample (separable 1-D passes) == spatial_transform (dense gather).'''
+    img = jax.random.normal(jax.random.key(32), (7, 8, 2))
+    target = (11, 5)
+    axes = [
+        jnp.linspace(0.0, s - 1, t, dtype=img.dtype)
+        for s, t in zip((7, 8), target)
+    ]
+    coords = jnp.stack(jnp.meshgrid(*axes, indexing='ij'), axis=-1)
+    via_resample = resample(img, target, method=CubicBSpline())
+    via_gather = spatial_transform(img, coords, method=CubicBSpline())
+    np.testing.assert_allclose(via_resample, via_gather, atol=1e-11)
+
+
+def test_cubic_bspline_platform_engines_agree(monkeypatch):
+    '''Sequential-scan (CPU) and associative-scan (GPU) prefilters agree.'''
+    img = jax.random.normal(jax.random.key(33), (9, 10, 1))
+
+    monkeypatch.setattr(
+        'nitrix.geometry._interpolate.default_backend_is_gpu', lambda: False,
+    )
+    cpu = resample(img, (14, 7), method=CubicBSpline())
+    monkeypatch.setattr(
+        'nitrix.geometry._interpolate.default_backend_is_gpu', lambda: True,
+    )
+    gpu = resample(img, (14, 7), method=CubicBSpline())
+    np.testing.assert_allclose(cpu, gpu, atol=1e-11)
+
+
+def test_cubic_bspline_ignores_mode():
+    '''CubicBSpline forces mirror, so the ``mode`` argument is inert.'''
+    img = jax.random.normal(jax.random.key(34), (8, 8, 1))
+    base = resample(img, (12, 12), method=CubicBSpline(), mode='mirror')
+    for mode in ('constant', 'nearest', 'wrap', 'reflect'):
+        other = resample(img, (12, 12), method=CubicBSpline(), mode=mode)
+        np.testing.assert_array_equal(other, base)
+
+
+def test_cubic_bspline_differentiable():
+    '''Smooth in values and coordinates (prefilter + basis both smooth).'''
+    img = jax.random.normal(jax.random.key(35), (8, 8, 1))
+    gv = jax.grad(
+        lambda im: resample(im, (12, 12), method=CubicBSpline()).sum()
+    )(img)
+    gc = jax.grad(
+        lambda d: spatial_transform(img, d, method=CubicBSpline()).sum()
+    )(identity_grid((8, 8)) + 0.3)
+    for g in (gv, gc):
+        assert bool(jnp.all(jnp.isfinite(g)))
+        assert bool(jnp.any(g != 0.0))
+
+
+def test_cubic_bspline_jit_and_vmap():
+    batch = jax.random.normal(jax.random.key(36), (3, 8, 8, 1))
+    f = jax.jit(lambda im: resample(im, (11, 11), method=CubicBSpline()))
+    assert jax.vmap(f)(batch).shape == (3, 11, 11, 1)
 
 
 # ---------------------------------------------------------------------------

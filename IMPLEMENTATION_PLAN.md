@@ -1240,6 +1240,44 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 - **Design doc:** `docs/design/geometry.md` ("The resampling-method
   dispatcher").
 
+### 2026-06-08 — `CubicBSpline` interpolator (order-3 spline; closes `cubic-resample`)
+
+- **Type:** Primitive extension (one more `Interpolator` record; the
+  dispatcher's open extension point). Resolves the
+  `cubic-resample.md` parity gap.
+- **Triggered by:** order-3 B-spline preprocessing (nnUNet / `hd_bet`
+  style) used in some ilex pipelines.
+- **Description:** `CubicBSpline` is a two-step B-spline interpolator, not
+  a plain cubic convolution: (1) a recursive **prefilter** (cubic pole
+  `√3 − 2`) converts samples to interpolating coefficients, separably per
+  spatial axis; (2) a 4-tap cubic-basis gather (partition of unity) of the
+  coefficients. Differentiable in values and coordinates (prefilter and
+  gather are both smooth/linear). **Bit-exact** with
+  `scipy.ndimage.map_coordinates(order=3, mode='mirror')` — interior and
+  boundary, ~1e-15. To stay self-consistent (the interpolation property
+  only holds when prefilter and gather share a boundary, and only the
+  mirror init is implemented) it **forces the mirror boundary and ignores
+  `mode` / `cval`** (the `MultiLabel`-ignores-`cval` precedent); a
+  mode-aware prefilter for `nearest`/`reflect` parity is the one remaining
+  follow-up (`boundary-mode-parity.md`).
+- **Engine:** the prefilter is a first-order linear recurrence → sequential
+  `lax.scan` on CPU, parallel `lax.associative_scan` (O(log N) depth) on
+  GPU, the `signal._iir` platform split; both exact, agree to a ULP.
+  `_iir`'s *FFT* engine is deliberately not reused — the mild pole makes
+  the prefilter a ~25-tap short FIR, too short for FFT overhead to amortise
+  (associative_scan is the right parallel form for a recurrence). Reuses
+  the existing `_separable_gather` / `_separable_resample` machinery via a
+  `_prepare` hook on the separable-kernel protocol (identity for the direct
+  kernels, prefilter for the spline).
+- **Verification:** scipy `order=3` parity in 1-/2-/3-D (interior +
+  boundary); grid-point identity (interpolation property); constant
+  preservation; resample-separable == scattered-gather; CPU-scan ==
+  GPU-associative-scan (forced-branch); `mode`-inert; differentiability;
+  jit/vmap. `mypy src/nitrix/geometry` clean; op-matrix `resample[cubic]`
+  variant added.
+- **Design doc:** `docs/design/geometry.md` ("CubicBSpline: the prefilter,
+  and why not FFT").
+
 ---
 
 ## 11. Notes on agent / engineer handoff

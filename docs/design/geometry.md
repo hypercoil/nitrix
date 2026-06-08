@@ -302,13 +302,14 @@ dataclasses that ride ``jit`` static args / ``custom_vjp`` non-diff slots
 (the ``SolverSpec`` pattern).  Boundary handling (``mode`` / ``cval``)
 stays a *call* keyword, not a record field.
 
-### The four methods
+### The five methods
 
 | method | engine | differentiable | parity |
 |---|---|---|---|
 | ``Linear`` (default) | gather / ``map_coordinates`` | values + coords | the prior behaviour |
 | ``NearestNeighbour`` | gather / ``map_coordinates`` (order 0) | values only (**coord-flat**) | scipy / ANTs ``NearestNeighbor`` |
 | ``Lanczos(order=3)`` | explicit separable gather | values + coords | ANTs ``LanczosWindowedSinc`` *class* (not bit-exact ITK) |
+| ``CubicBSpline`` | recursive prefilter + 4-tap cubic gather | values + coords | **bit-exact** ``scipy`` ``order=3, mode='mirror'`` |
 | ``MultiLabel(labels=...)`` | per-label inner resample + arg-max | **none** (hard arg-max) | ANTs ``MultiLabel`` |
 
 Differentiability is a *property of the record*
@@ -316,6 +317,38 @@ Differentiability is a *property of the record*
 self-describing and the op-matrix probe reports it honestly.  None of
 the paths *error* under ``jax.grad``; the non-differentiable ones return
 zero cotangents.
+
+### CubicBSpline: the prefilter, and why not FFT
+
+A B-spline interpolator is *not* a plain cubic-convolution kernel.  It is
+two steps: a **prefilter** that converts the samples to interpolating
+B-spline coefficients (a separable recursive filter with the cubic pole
+``√3 − 2``), then a 4-tap cubic-basis gather of those coefficients.  The
+prefilter is what makes the result pass *through* the samples (the
+interpolation property); a bare cubic basis only approximates / blurs.
+This is exactly what ``scipy.ndimage`` ``order=3`` does, and the
+implementation is bit-exact against it (``mode='mirror'``, interior and
+boundary, to ~1e-15).
+
+The prefilter is a first-order linear recurrence, and -- like the IIR
+filters in ``signal._iir`` -- it gets a per-platform engine: sequential
+``lax.scan`` on CPU, parallel ``lax.associative_scan`` (``O(log N)``
+depth) on GPU (``default_backend_is_gpu``).  Both are exact and agree to
+a ULP.  We deliberately do **not** reuse ``_iir``'s *FFT* engine here:
+that one truncates the filter's impulse response and FFT-convolves, which
+pays off only when the response is *wide* (sharp filters, hundreds of
+taps).  The cubic pole is mild (``|√3 − 2| ≈ 0.27``), so the prefilter's
+impulse response decays to ``< 1e-12`` within ~21 taps -- a short FIR,
+far too short for the transform overhead to amortise.  ``associative_scan``
+is the right parallel form for a recurrence; FFT is the wrong tool for
+this particular (short-response) filter.
+
+To stay self-consistent, ``CubicBSpline`` forces the **mirror** boundary
+on *both* the prefilter and the gather, and ignores the ``mode`` /
+``cval`` call arguments (the interpolation property only holds when the
+two boundaries match, and only the mirror initialisation is implemented).
+A mode-aware prefilter -- ``scipy`` parity for ``nearest`` / ``reflect`` /
+… -- is the one remaining follow-up (``boundary-mode-parity.md``).
 
 ### The explicit separable gather (and where it runs)
 

@@ -1,25 +1,35 @@
-# Cubic (order-3) resample — `nitrix.geometry.grid`
+# Cubic (order-3) resample — `nitrix.geometry`
 
-> **Status (2026-06-02): docstring deviation flagged; full cubic path still
-> deferred.** The "at minimum, flag the deviation" ask is done — `resample`
-> and `spatial_transform` now document that they are linear-only (order 0/1,
-> via `map_coordinates`) and that order-3 bit-parity with nnUNet / `hd_bet`
-> is **not** achieved (see `IMPLEMENTATION_PLAN.md §10.3`, 2026-06-02 entry).
-> The separable B-spline prefilter + cubic sampler itself remains **not
-> started** (a genuinely new sampling path; deferred pending a consumer that
-> requires bit-parity). Provenance: 2026-06-02 ilex vendored-model survey
-> ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
-> item D); ilex SKILL FM #17.
+> **Status (2026-06-08): ✅ RESOLVED — `CubicBSpline` shipped.** The
+> separable B-spline prefilter + cubic sampler is implemented as a
+> `CubicBSpline` `Interpolator` record
+> (`geometry/_interpolate.py`): `resample(img, shape,
+> method=CubicBSpline())` / `spatial_transform(..., method=CubicBSpline())`.
+> **Bit-exact** with `scipy.ndimage.map_coordinates(order=3, mode='mirror')`
+> (interior *and* boundary, ~1e-15) — the nnUNet / `hd_bet` order-3 parity
+> the ilex pipelines need. See `IMPLEMENTATION_PLAN.md §10.3` (2026-06-08)
+> and `docs/design/geometry.md`. Provenance: 2026-06-02 ilex vendored-model
+> survey ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md),
+> volumetric item D); ilex SKILL FM #17.
 
-**What.** A cubic-spline resampler. As of 2026-06-07 `geometry.resample` /
-`spatial_transform` dispatch over an `Interpolator` set — `Linear`,
-`NearestNeighbour`, `Lanczos` (windowed sinc), `MultiLabel` — so they are no
-longer "linear-only", **but there is still no order-3 B-spline path.**
-`Lanczos` is the high-fidelity option, yet it is a windowed-sinc kernel, not
-a cubic B-spline: it does **not** give bit-parity with `hd_bet`'s nnUNet
-order-3 preprocessing (or `scipy.ndimage.zoom(order=3)`). A separable
-B-spline prefilter + cubic sampler is still the gap if that specific parity
-is needed.
+**What (as built).** A `CubicBSpline` interpolation method, the order-3
+spline path consumers like nnUNet / `hd_bet` preprocessing use. Unlike a
+plain cubic *convolution*, it is the two-step B-spline operation: (1) a
+recursive **prefilter** (the cubic pole `√3−2`) converts samples to
+interpolating coefficients, and (2) a 4-tap cubic-basis gather. Without the
+prefilter a cubic basis only *approximates* (blurs); with it the result
+passes through the samples (the interpolation property). Differentiable in
+values and coordinates. The prefilter forces the **mirror** boundary (both
+prefilter and gather) so it stays self-consistent; it ignores the `mode` /
+`cval` call args (a mode-aware prefilter for `nearest`/`reflect`/… parity is
+the one remaining follow-up — see `boundary-mode-parity.md`).
+
+**Engine note.** The prefilter is a first-order linear recurrence: sequential
+`lax.scan` on CPU, parallel `lax.associative_scan` (O(log N) depth) on GPU —
+the same platform split as `signal._iir`, both exact. An FFT convolution (the
+*other* `_iir` engine) is deliberately **not** used: the cubic pole is mild,
+so the prefilter's impulse response is a ~25-tap short FIR, too short for the
+transform overhead to amortise.
 
 **What it needs.** A separable B-spline prefilter + cubic sampling. With the
 dispatcher in place this now slots in cleanly as a **new `Interpolator`

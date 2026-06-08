@@ -1320,7 +1320,9 @@ _RESAMPLE_VARIANT_FIXTURE = lambda: (  # noqa: E731
 
 
 def _resample_method_variants():
-    from nitrix.geometry import Lanczos, MultiLabel, NearestNeighbour
+    from nitrix.geometry import (
+        CubicBSpline, Lanczos, MultiLabel, NearestNeighbour,
+    )
     register(OpInfo(
         'nitrix.geometry.resample[nearest]',
         fixture=_RESAMPLE_VARIANT_FIXTURE,
@@ -1336,6 +1338,14 @@ def _resample_method_variants():
         diff_arg=0, vmap_arg=None,
         invariants=('windowed-sinc order 3; separable 1-D passes; partition of unity',),
         notes='differentiable in values and coordinates',
+    ))
+    register(OpInfo(
+        'nitrix.geometry.resample[cubic]',
+        fixture=_RESAMPLE_VARIANT_FIXTURE,
+        fn_override=_resampler(CubicBSpline()),
+        diff_arg=0, vmap_arg=None,
+        invariants=('order-3 B-spline; recursive prefilter (scan/assoc-scan) + 4-tap gather',),
+        notes='bit-exact scipy order=3 (mode=mirror); differentiable',
     ))
     register(OpInfo(
         'nitrix.geometry.resample[multilabel]',

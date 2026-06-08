@@ -21,7 +21,8 @@ only in *where* the sample coordinates come from (a deformation field
 vs an align-corners resize grid).  The interpolation *kernel* is an
 orthogonal axis selected by ``method=`` -- an immutable
 ``Interpolator`` record (``Linear`` (default), ``NearestNeighbour``,
-``Lanczos``, ``MultiLabel``).  See ``geometry._interpolate``.
+``Lanczos``, ``CubicBSpline``, ``MultiLabel``).  See
+``geometry._interpolate``.
 
 Plus ``center_of_mass_grid`` for weighted centre-of-mass on a
 regular grid (replaces the legacy ``cmass_regular_grid``).
@@ -47,6 +48,7 @@ from jaxtyping import Array, Float
 
 from ._interpolate import (
     BoundaryMode,
+    CubicBSpline,
     Interpolator,
     Lanczos,
     Linear,
@@ -71,6 +73,7 @@ __all__ = [
     'Linear',
     'NearestNeighbour',
     'Lanczos',
+    'CubicBSpline',
     'MultiLabel',
     # legacy alias kept for now -- remove at v0.1 cleanup
     'cmass_regular_grid',

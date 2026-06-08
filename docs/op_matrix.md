@@ -9,7 +9,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 - **device**: cpu (cpu)
 - **platform**: Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39
 - **jax_version**: 0.10.1
-- **timestamp**: 2026-06-07T22:51:40Z
+- **timestamp**: 2026-06-08T00:15:13Z
 
 ## Legend
 
@@ -40,6 +40,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `resample` | ✅ | ✅ | — | ✅ | align-corners resize; dispatches over method= (Linear default) |  |
 | `resample[nearest]` | ✅ | ✅ | — | ✅ | order-0 nearest; explicit gather (GPU) / map_coordinates (CPU) | value-differentiable; coordinate-flat (grad wrt coords ~= 0) |
 | `resample[lanczos]` | ✅ | ✅ | — | ✅ | windowed-sinc order 3; separable 1-D passes; partition of unity | differentiable in values and coordinates |
+| `resample[cubic]` | ✅ | ✅ | — | ✅ | order-3 B-spline; recursive prefilter (scan/assoc-scan) + 4-tap gather | bit-exact scipy order=3 (mode=mirror); differentiable |
 | `resample[multilabel]` | ✅ | ✅ | — | ✅ | per-label arg-max over a static label set; output in label set | non-differentiable (hard arg-max); grad runs but is zero |
 | `spherical_geodesic_distance` | ✅ | ✅ | ✅ | ✅ | great-circle (geodesic) distance on the sphere |  |
 | `jacobian_displacement` | ✅ | ✅ | ✅ | ✅ | central-difference Jacobian of a displacement field |  |
@@ -216,9 +217,9 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 
 ## Summary
 
-- **ops catalogued**: 142
-- **jit pass**: 127 / 142
-- **grad pass**: 124 / 126 (applicable)
+- **ops catalogued**: 143
+- **jit pass**: 128 / 143
+- **grad pass**: 125 / 127 (applicable)
 - **vmap pass**: 96 / 96 (applicable)
-- **jit(grad) pass**: 124 / 126
+- **jit(grad) pass**: 125 / 127
 - **performance**: see the nitrix-perf-bench suite + dashboard (this matrix is capability-only).
