@@ -135,9 +135,12 @@ stability/efficiency needs it).
 > ``registration-suite``.  Developed/tested on an L4 GPU whose cuSolver
 > handle pool is dead (``eigh`` / ``cholesky`` / ``solve`` / ``inv`` /
 > ``svd`` all fail; only ``triangular_solve`` + conv/elementwise work) --
-> hence the SPD/general split below: general dense solves and ``matrix_exp``
-> route through the CPU-fallback ``_solver.safe_*`` wrappers, while the
-> SPD optimiser path is matrix-free (``cg`` / BFGS) and stays on-device.
+> hence the SPD/general split below: the general dense solves
+> (``solve`` / ``cho_solve``) route through the CPU-fallback
+> ``_solver.safe_*`` wrappers, while the SPD optimiser path is matrix-free
+> (``cg`` / BFGS) and stays on-device.  ``matrix_exp`` avoids the wedge
+> entirely -- it uses a pure-matmul Taylor scaling-and-squaring (no
+> cuSolver), so the affine path is fully GPU-native.
 
 - **R0 — shared image substrate.** ✅ SHIPPED.  ``geometry.spatial_gradient``;
   ``geometry.gaussian_pyramid`` / ``downsample`` / ``upsample``;
@@ -147,7 +150,8 @@ stability/efficiency needs it).
   **Gate G-R0:** finite-difference gradient checks on every metric
   (incl. soft-histogram MI / CR) -- passing.
 - **R1 — rigid + affine.** ✅ SHIPPED.  ``linalg.matrix_exp`` (general,
-  via ``safe_expm``; ``matrix_log`` / Fréchet still backlog);
+  pure-matmul Taylor scaling-and-squaring -- GPU-native, no cuSolver;
+  ``matrix_log`` / Fréchet still backlog);
   ``linalg.cg`` (matrix-free SPD, graduates §12.1);
   ``linalg.optimize.{gauss_newton, levenberg_marquardt}`` (matrix-free,
   ``jvp``/``vjp`` + ``cg``); ``geometry.transform`` (closed-form rigid

@@ -1,7 +1,8 @@
 # Matrix functions — `nitrix.linalg.matrix_function`
 
 > **Status (2026-06-08): partial — `matrix_exp` SHIPPED** (`linalg.matrix_exp`,
-> general non-symmetric matrix exponential via `safe_expm`), graduated by the
+> general non-symmetric matrix exponential via pure-matmul Taylor
+> scaling-and-squaring — GPU-native, no cuSolver), graduated by the
 > registration suite (the affine generator; see `docs/design/registration.md`
 > and `IMPLEMENTATION_PLAN.md §10.3`). The `sym*` family was already shipped.
 > Still open: a general `matrix_function(A, fn)` entry point, `matrix_log`,

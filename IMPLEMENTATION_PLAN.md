@@ -860,9 +860,10 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   Demons; real-data parity vs AFNI `3dvolreg` / FSL `mcflirt` / ANTs SyN.
 - **Non-negotiables held:** Pure-functional surface (NamedTuples / frozen
   records, no PyTree modules); JAX fallback floor; jaxtyping; ruff; mypy;
-  `custom_vjp` where stability/efficiency needs it (`fixed_point_solve`,
-  `matrix_exp` via `safe_expm`). No new runtime deps; no atlas/template
-  structures or I/O.
+  `custom_vjp` where stability/efficiency needs it (`fixed_point_solve`'s
+  implicit-VJP; `implicit_least_squares`). `matrix_exp` is pure-matmul
+  Taylor scaling-and-squaring (GPU-native, no cuSolver). No new runtime
+  deps; no atlas/template structures or I/O.
 
 ### 2026-05-20 — SUGAR feedback batch: edge attributes, row-softmax, mean-pool, external topology, masking
 
