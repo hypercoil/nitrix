@@ -47,6 +47,8 @@ from .matrix import (
     toeplitz_2d,
     vec2sym,
 )
+from .krylov import cg
+from .matrix_function import matrix_exp
 from .residual import residualise
 from .solve import cho_solve, solve
 from .spd import (
@@ -77,6 +79,9 @@ __all__ = [
     # solve
     'solve',
     'cho_solve',
+    'cg',
+    # matrix functions
+    'matrix_exp',
     # kernel
     'cosine_kernel',
     'gaussian_kernel',

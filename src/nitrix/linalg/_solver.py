@@ -46,6 +46,7 @@ from typing import Any, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
+import jax.scipy.linalg as jsla
 from jax import lax
 from jaxtyping import Array, Float
 
@@ -54,6 +55,7 @@ __all__ = [
     'safe_inv',
     'safe_cho_solve',
     'safe_solve',
+    'safe_expm',
     'eigh_device',
     'inv_device',
     'cholesky_device',
@@ -379,3 +381,36 @@ def safe_solve(
     if source is not None and source != target:
         out = jax.device_put(out, source)
     return cast(Float[Array, '...'], out)
+
+
+def safe_expm(
+    a: Float[Array, '... n n'],
+    *,
+    max_squarings: int = 16,
+) -> Float[Array, '... n n']:
+    """``jax.scipy.linalg.expm`` with the cuSolver-robust device pick.
+
+    The scaling-and-squaring Padé ``expm`` solves a linear system
+    (cuSolver ``getrf``), so it shares ``inv_device()``'s verdict and
+    routes to CPU on the affected stacks.  ``expm`` itself acts on a
+    single matrix; leading batch dimensions are mapped with ``vmap`` on
+    the target device.  Differentiable (``expm`` ships its own
+    autodiff rule).
+    """
+    target = inv_device()
+    source = source_device(a)
+    a_dev = jax.device_put(a, target)
+
+    def _expm(m: Array) -> Array:
+        return cast(Array, jsla.expm(m, max_squarings=max_squarings))
+
+    if a_dev.ndim == 2:
+        out = _expm(a_dev)
+    else:
+        n = a_dev.shape[-1]
+        batch = a_dev.shape[:-2]
+        flat = a_dev.reshape((-1, n, n))
+        out = jax.vmap(_expm)(flat).reshape(*batch, n, n)
+    if source is not None and source != target:
+        out = jax.device_put(out, source)
+    return cast(Float[Array, '... n n'], out)
