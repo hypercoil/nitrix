@@ -1,10 +1,14 @@
 # Contrastive / self-supervised losses — `nitrix.metrics` / `nitrix.stats`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Loss-numeric item from
-> the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). The
-> self-supervised similarity-loss family driving FM pretraining; all pure,
-> reference-faithful, numerically careful.
+> **Status (2026-06-09): SHIPPED.** `metrics/contrastive.py` adds `nt_xent`
+> (InfoNCE, finite `−2/τ` diagonal self-mask, adjacent-pair positives),
+> `dino_cross_entropy` (teacher centering+sharpening, `stop_gradient`),
+> `ibot_cross_entropy` (per-token, safe masked-mean over masked positions),
+> and `koleo` (NN-via-max-cosine entropy regulariser). All reuse
+> `numerics.l2_normalize`, are `reduction`-aware, and differentiable; the
+> teacher `center` is an argument (its EMA stays upstream). Loss-numeric
+> item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** Four pure-tensor SSL objectives:
 

@@ -22,6 +22,9 @@ families:
   ``cross_entropy_with_logits``, ``focal_loss``: the cross-entropy
   family (numerically stable from-logits forms) for supervised
   classification / segmentation.
+- ``contrastive`` -- ``nt_xent`` (InfoNCE), ``dino_cross_entropy`` /
+  ``ibot_cross_entropy`` (self-distillation), ``koleo`` (feature-spread
+  entropy regulariser): self-supervised representation losses.
 
 Substrate-composition note (SPEC_UPDATE_v0.3 §0 invariant): ``lncc``'s
 local sums are a separable box filter (the ``_internal.separable``
@@ -43,6 +46,12 @@ from .classification import (
     cross_entropy_with_logits,
     focal_loss,
 )
+from .contrastive import (
+    dino_cross_entropy,
+    ibot_cross_entropy,
+    koleo,
+    nt_xent,
+)
 
 __all__ = [
     # intensity
@@ -60,4 +69,9 @@ __all__ = [
     'bce_with_logits',
     'cross_entropy_with_logits',
     'focal_loss',
+    # contrastive / self-supervised
+    'nt_xent',
+    'dino_cross_entropy',
+    'ibot_cross_entropy',
+    'koleo',
 ]

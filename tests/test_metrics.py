@@ -13,8 +13,12 @@ from nitrix.metrics import (
     bce_with_logits,
     cross_entropy_with_logits,
     dice,
+    dino_cross_entropy,
     focal_loss,
+    ibot_cross_entropy,
     jaccard,
+    koleo,
+    nt_xent,
 )
 
 # ---------------------------------------------------------------------------
@@ -178,4 +182,88 @@ def test_focal_loss_differentiable():
     t = jnp.asarray((rng.random((3, 8)) > 0.5).astype(float))
     g = jax.grad(lambda z: focal_loss(z, t))(x)
     assert g.shape == x.shape
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# contrastive / self-supervised
+# ---------------------------------------------------------------------------
+
+
+def test_nt_xent_matches_manual_reference():
+    rng = np.random.default_rng(0)
+    z = jnp.asarray(rng.standard_normal((6, 8)))
+    tau = 0.3
+    out = nt_xent(z, temperature=tau, reduction='none')
+    # Manual reference.
+    zn = np.asarray(z) / np.linalg.norm(np.asarray(z), axis=-1, keepdims=True)
+    sim = zn @ zn.T / tau
+    sim = sim - np.eye(6) * (2.0 / tau)
+    logp = sim - np.log(np.sum(np.exp(sim), axis=-1, keepdims=True))
+    pos = np.arange(6) ^ 1
+    ref = -logp[np.arange(6), pos]
+    np.testing.assert_allclose(np.asarray(out), ref, atol=1e-6)
+
+
+def test_nt_xent_lower_for_aligned_pairs():
+    # Pairs identical and well separated -> near-zero loss.
+    base = np.array([[5.0, 0.0], [-5.0, 0.0]])
+    aligned = jnp.asarray(np.repeat(base, 2, axis=0))  # [a,a,b,b]
+    misaligned = jnp.asarray(np.random.default_rng(1).standard_normal((4, 2)))
+    assert float(nt_xent(aligned, temperature=0.1)) < float(
+        nt_xent(misaligned, temperature=0.1)
+    )
+
+
+def test_dino_cross_entropy_matches_manual_and_stops_teacher_grad():
+    rng = np.random.default_rng(2)
+    s = jnp.asarray(rng.standard_normal((4, 10)))
+    t = jnp.asarray(rng.standard_normal((4, 10)))
+    c = jnp.asarray(rng.standard_normal(10))
+    st, tt = 0.1, 0.04
+    out = dino_cross_entropy(s, t, c, student_temp=st, teacher_temp=tt)
+    tp = jax.nn.softmax((t - c) / tt, axis=-1)
+    slp = jax.nn.log_softmax(s / st, axis=-1)
+    ref = float((-jnp.sum(tp * slp, axis=-1)).mean())
+    np.testing.assert_allclose(float(out), ref, atol=1e-6)
+    # Teacher is detached: no gradient flows into teacher_logits.
+    g = jax.grad(lambda tl: dino_cross_entropy(s, tl, c))(t)
+    np.testing.assert_array_equal(np.asarray(g), 0.0)
+
+
+def test_ibot_masked_mean_and_empty_mask():
+    rng = np.random.default_rng(3)
+    s = jnp.asarray(rng.standard_normal((2, 5, 7)))
+    t = jnp.asarray(rng.standard_normal((2, 5, 7)))
+    c = jnp.zeros(7)
+    mask = jnp.asarray([[True, False, True, False, False],
+                        [False, False, False, False, False]])
+    out = ibot_cross_entropy(s, t, c, mask, reduction='none')
+    # Sample 1: mean CE over its 2 masked tokens; sample 2: all-unmasked -> 0.
+    tp = jax.nn.softmax((t - c) / 0.04, axis=-1)  # default teacher_temp
+    slp = jax.nn.log_softmax(s / 0.1, axis=-1)  # default student_temp
+    ce = -jnp.sum(tp * slp, axis=-1)
+    ref0 = float((ce[0, 0] + ce[0, 2]) / 2)
+    np.testing.assert_allclose(float(out[0]), ref0, atol=1e-5)
+    assert float(out[1]) == 0.0
+
+
+def test_koleo_larger_for_collapsed_features():
+    rng = np.random.default_rng(4)
+    spread = jnp.asarray(rng.standard_normal((16, 8)) * 5.0)
+    collapsed = jnp.asarray(
+        np.ones((16, 8)) + rng.standard_normal((16, 8)) * 1e-3
+    )
+    assert float(koleo(collapsed)) > float(koleo(spread))
+
+
+def test_contrastive_losses_differentiable():
+    rng = np.random.default_rng(5)
+    z = jnp.asarray(rng.standard_normal((6, 8)))
+    assert bool(jnp.all(jnp.isfinite(jax.grad(lambda x: nt_xent(x))(z))))
+    assert bool(jnp.all(jnp.isfinite(jax.grad(lambda x: koleo(x))(z))))
+    s = jnp.asarray(rng.standard_normal((4, 10)))
+    t = jnp.asarray(rng.standard_normal((4, 10)))
+    c = jnp.zeros(10)
+    g = jax.grad(lambda sl: dino_cross_entropy(sl, t, c))(s)
     assert bool(jnp.all(jnp.isfinite(g)))
