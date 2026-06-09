@@ -831,7 +831,32 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 - **Shape:** JAX-only throughout. Dense factorisations (PCA, affine
   decompose) route through `linalg._solver.safe_*` for the cuSolver-dead GPU.
 - **Deferred work:** Pallas kernels; adaptive/symplectic ODE + adjoint;
-  sparse-`X` PCA; 2-D affine-param decomposition (tracked).
+  sparse-`X` PCA. Review §6/§5 P2 follow-ups, deliberately deferred (design
+  recorded; each is behaviour-preserving or additive, none blocks a
+  consumer):
+  - **`linalg._solver._make_safe_op` factory** (review §6.2). Factor the
+    eigh/cholesky/inv `probe → cache → latch → device → safe_op`
+    triplication into `_probed_device_pair(probe_op) -> (device_fn,
+    latch_fn)` + `_run_safe(compute, source, device_fn, latch_fn)`, then
+    express the five `safe_*` as one-liners. Deferred *not* declined: a
+    ~340-line, zero-behaviour-change refactor of the load-bearing solver is
+    not worth doing at the tail of a long sprint; it is a clean standalone
+    task, validated by `test_linalg` / `test_linalg_spd` /
+    `test_register_recipes`.
+  - **2-D affine-param chart** (review §5.5). Generalise
+    `params_to_affine_matrix` / `affine_matrix_to_params` /
+    `random_affine_matrix` to rank 2 (scalar rotation; `(2,3)`); 3-D stays
+    bit-identical. The 3-D-only restriction is now explicit in the
+    docstrings (no longer silent). Low immediate demand (ilex affine
+    consumers are 3-D).
+  - **`sparse.mesh._apply_shared_ell` `backend` kwarg** (review §5.3).
+    Pre-existing code (not this branch), correct today (ELL-Pallas G0 not
+    shipped). Thread `backend='auto'` *when* the Pallas ELL path lands, so
+    the non-default is testable against a real alternative — adding it now
+    is speculative, untested API.
+  - **Shared `_internal` Gaussian-kernel builder** (review §4.5). Unify
+    `numerics.spatial.gaussian_window`, `smoothing.gaussian`'s kernel, and
+    the bias-field path before a fourth appears. Not urgent.
 - **Non-negotiables held:** §2.2 respected — pure functions, NamedTuple /
   frozen containers, no equinox/scipy runtime imports, jaxtyping throughout.
   The boundary (`SPEC_UPDATE_v0.5 §1`), keyed-generator clarification (§2),

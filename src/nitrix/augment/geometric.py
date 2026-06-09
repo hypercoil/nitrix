@@ -183,6 +183,12 @@ def random_affine_matrix(
 ) -> Float[Array, '3 4']:
     """Sample a random 3-D affine ``(3, 4)`` in geometric parameters.
 
+    **3-D only** (returns a ``(3, 4)`` matrix): the Euler-angle / scale /
+    shear parametrisation it draws is 3-D-specific, inheriting the rank of
+    ``geometry.params_to_affine_matrix``.  A 2-D analogue (scalar rotation,
+    a ``(2, 3)`` matrix) is a tracked follow-up, gated on generalising the
+    affine-parameter chart to rank 2.
+
     Rotation ``~ U(-max_rotation, max_rotation)`` degrees, scale ``~
     U(1 - max_scale, 1 + max_scale)``, shear / translation drawn from
     their symmetric ranges, then assembled as ``T @ R @ S @ E`` via

@@ -5,7 +5,7 @@
 """
 nitrix.numerics -- general-purpose tensor utilities.
 
-Two submodules:
+Submodules:
 
 - ``tensor_ops`` -- shape / layout utilities (orient_and_conform,
   fold/unfold, broadcasting helpers).  These are the "low-level
@@ -19,6 +19,8 @@ Two submodules:
   overlap-add normalisation.
 - ``ode``        -- fixed-step ODE integrators (euler / rk4) for
   continuous-time / neural-ODE models.
+- ``fixed_point`` -- ``fixed_point_solve`` (the implicit-VJP fixed-point
+  iteration), re-exported at the package top level.
 
 This subpackage didn't exist in the legacy code (the utilities
 lived in ``functional.linear`` etc.); it's a Phase 1 rename and
