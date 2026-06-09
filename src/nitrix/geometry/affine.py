@@ -22,11 +22,15 @@ Conventions:
   ``(*[0]*N, 1)``) unless made square; everything is batched over leading
   dimensions and differentiable.  A transform maps coordinates as
   ``y = mat[..., :, :-1] @ x + mat[..., :, -1]``.
-- Rotations are right-handed **intrinsic** ``R = X @ Y @ Z`` (rotate about
-  x, then y, then z), angles in degrees by default.
-- 3-D only for the rotation / parameter decomposition (the Euler
-  convention is dimension-specific); the shape helpers and ``fit_affine``
-  are N-D.
+- Rotations: 2-D is a single planar angle; 3-D is right-handed
+  **intrinsic** ``R = X @ Y @ Z`` (rotate about x, then y, then z); angles
+  in degrees by default.
+- The rotation / parameter chart supports ``ndim`` in ``{2, 3}`` (the
+  Euler convention is dimension-specific, but both are covered);
+  ``params_to_affine_matrix`` takes an explicit ``ndim`` because a
+  6-vector is ambiguous (rigid 3-D vs full 2-D), while
+  ``affine_matrix_to_params`` infers it from the matrix shape.  The shape
+  helpers and ``fit_affine`` are N-D.
 
 GPU note: the factorisations (``inv`` / ``cholesky`` / ``det``) are routed
 through ``linalg._solver.safe_*`` (or computed analytically for the 3x3 /
@@ -36,9 +40,11 @@ the dense-solver handle pool is broken.
 
 from __future__ import annotations
 
+import itertools
 from typing import Optional, Sequence
 
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float
 
 from ..linalg._solver import safe_cho_solve, safe_cholesky, safe_inv
@@ -75,6 +81,36 @@ def _det3x3(m: Float[Array, '... 3 3']) -> Float[Array, '...']:
         + m[..., 0, 2]
         * (m[..., 1, 0] * m[..., 2, 1] - m[..., 1, 1] * m[..., 2, 0])
     )
+
+
+def _det2x2(m: Float[Array, '... 2 2']) -> Float[Array, '...']:
+    """Analytic batched determinant of a ``(..., 2, 2)`` matrix."""
+    return m[..., 0, 0] * m[..., 1, 1] - m[..., 0, 1] * m[..., 1, 0]
+
+
+def _small_det(m: Float[Array, '... d d']) -> Float[Array, '...']:
+    """Analytic determinant for the supported ranks (``d`` in ``{2, 3}``)."""
+    d = m.shape[-1]
+    if d == 2:
+        return _det2x2(m)
+    if d == 3:
+        return _det3x3(m)
+    raise ValueError(f'unsupported affine rank d={d}; expected 2 or 3.')
+
+
+def _shear_matrix(
+    shear: Float[Array, '... s'], d: int
+) -> Float[Array, '... d d']:
+    """Unit-diagonal upper-triangular shear matrix from its strict-upper
+    entries (row-major): ``d=2`` -> ``[[1, s0], [0, 1]]``; ``d=3`` ->
+    ``[[1, s0, s1], [0, 1, s2], [0, 0, 1]]``.
+    """
+    batch = shear.shape[:-1]
+    diag = np.arange(d)
+    rows, cols = np.triu_indices(d, 1)
+    mat = jnp.zeros((*batch, d, d), dtype=shear.dtype)
+    mat = mat.at[..., diag, diag].set(1.0)
+    return mat.at[..., rows, cols].set(shear)
 
 
 def _clip11(x: Float[Array, '...']) -> Float[Array, '...']:
@@ -170,19 +206,30 @@ def fit_affine(
 
 
 def angles_to_rotation_matrix(
-    ang: Float[Array, '... 3'], *, deg: bool = True
-) -> Float[Array, '... 3 3']:
-    """3D Euler angles ``(..., 3)`` -> rotation matrix ``(..., 3, 3)``.
+    ang: Float[Array, '... a'], *, deg: bool = True
+) -> Float[Array, '... d d']:
+    """Euler angles -> rotation matrix (2-D or 3-D).
 
-    Right-handed intrinsic rotations ``R = X @ Y @ Z`` (rotate about x,
-    then y, then z).  Angles in degrees by default (``deg=False`` for
-    radians).
+    2-D: a single angle ``(..., 1)`` -> ``(..., 2, 2)`` planar rotation.
+    3-D: three angles ``(..., 3)`` -> ``(..., 3, 3)``, right-handed
+    intrinsic ``R = X @ Y @ Z`` (rotate about x, then y, then z).  Angles
+    in degrees by default (``deg=False`` for radians).
     """
     ang = jnp.asarray(ang)
-    if ang.shape[-1] != 3:
-        raise ValueError(f'expected 3 angles, got shape {ang.shape}')
+    n_ang = ang.shape[-1]
+    if n_ang not in (1, 3):
+        raise ValueError(
+            f'expected 1 (2-D) or 3 (3-D) angles, got shape {ang.shape}'
+        )
     if deg:
         ang = ang * (jnp.pi / 180.0)
+    if n_ang == 1:
+        theta = ang[..., 0]
+        c, s = jnp.cos(theta), jnp.sin(theta)
+        return jnp.stack(
+            [jnp.stack([c, -s], axis=-1), jnp.stack([s, c], axis=-1)],
+            axis=-2,
+        )
     a1, a2, a3 = ang[..., 0], ang[..., 1], ang[..., 2]
     c1, s1 = jnp.cos(a1), jnp.sin(a1)
     c2, s2 = jnp.cos(a2), jnp.sin(a2)
@@ -205,13 +252,20 @@ def angles_to_rotation_matrix(
 
 
 def rotation_matrix_to_angles(
-    mat: Float[Array, '... 3 3'], *, deg: bool = True
-) -> Float[Array, '... 3']:
-    """3D rotation matrix ``(..., 3, 3[+1])`` -> Euler angles ``(..., 3)``.
+    mat: Float[Array, '... d d'], *, deg: bool = True
+) -> Float[Array, '... a']:
+    """Rotation matrix -> Euler angles (2-D or 3-D).
 
-    Inverse of :func:`angles_to_rotation_matrix` (``R = X @ Y @ Z``), with
-    the gimbal-lock convention ``ang[0] = 0`` when ``|ang[1]| = 90 deg``.
+    Inverse of :func:`angles_to_rotation_matrix`.  2-D: a ``(..., 2, 2)``
+    rotation -> a single angle ``(..., 1)`` via ``atan2``.  3-D: a
+    ``(..., 3, 3[+])`` rotation -> three angles ``(..., 3)`` (``R = X @ Y @
+    Z``), with the gimbal-lock convention ``ang[0] = 0`` when
+    ``|ang[1]| = 90 deg``.
     """
+    d = mat.shape[-2]
+    if d == 2:
+        theta = jnp.arctan2(mat[..., 1, 0], mat[..., 0, 0])[..., None]
+        return theta * (180.0 / jnp.pi) if deg else theta
     ang2 = jnp.arcsin(_clip11(mat[..., 0, 2]))
 
     # Gimbal-lock branch (|ang2| == 90 deg): ang1 := 0, solve ang3.
@@ -244,87 +298,89 @@ def rotation_matrix_to_angles(
 def params_to_affine_matrix(
     par: Float[Array, '... p'],
     *,
+    ndim: int = 3,
     deg: bool = True,
     shift_scale: bool = False,
-) -> Float[Array, '... 3 4']:
-    """3D affine params ``(..., M<=12)`` -> matrix ``(..., 3, 4)``.
+) -> Float[Array, '... d d1']:
+    """Geometric affine params ``(..., M)`` -> matrix ``(..., ndim, ndim+1)``.
 
-    Param order along the last axis: translation (3), rotation (3), scale
-    (3), shear (3); missing trailing params default to identity (scale ->
-    1, others -> 0), so a 6-vector gives a rigid transform.  Builds
-    ``T @ R @ S @ E``.  With ``shift_scale=True``, 1 is added to the scale
-    params (so a zero vector is the identity -- useful when the params are
-    a perturbation predicted by a network).
+    Param order along the last axis: translation (``ndim``), rotation
+    (``ndim(ndim-1)/2``: 1 in 2-D, 3 in 3-D), scale (``ndim``), shear
+    (``ndim(ndim-1)/2``).  Missing trailing params default to identity
+    (scale -> 1, others -> 0), so a translation+rotation prefix gives a
+    rigid transform.  Builds ``T @ R @ S @ E``.  With ``shift_scale=True``,
+    1 is added to the scale params (so a zero vector is the identity --
+    useful when the params are a network-predicted perturbation).
+
+    ``ndim`` is 2 or 3.  The full vector length is ``ndim(ndim+1)`` (6 in
+    2-D, 12 in 3-D); an explicit ``ndim`` is required because a 6-vector is
+    ambiguous (rigid 3-D vs full 2-D).
     """
+    if ndim not in (2, 3):
+        raise ValueError(f'ndim must be 2 or 3; got {ndim}.')
     par = jnp.asarray(par)
-    ndims = 3
-    num_par = ndims * (ndims + 1)  # 12
+    rot_count = ndim * (ndim - 1) // 2
+    num_par = ndim * (ndim + 1)
     if par.shape[-1] > num_par:
         raise ValueError(f'too many params: {par.shape[-1]} > {num_par}')
 
-    # Pad to full 12, with scale defaulting to 1 (or 0 if shift_scale).
-    cuts = (3, 6, 9, 12)
+    # Pad to the full vector; the scale segment defaults to 1 (unless
+    # shift_scale), everything else to 0.
+    segments = (ndim, rot_count, ndim, rot_count)  # trans, rot, scale, shear
+    cuts = tuple(itertools.accumulate(segments))
     for i in (1, 2, 3):
         need = max(cuts[i] - par.shape[-1], 0)
         if need:
             default = 1.0 if (i == 2 and not shift_scale) else 0.0
             pad = [(0, 0)] * (par.ndim - 1) + [(0, need)]
             par = jnp.pad(par, pad, constant_values=default)
-    shift = par[..., 0:3]
-    rot = par[..., 3:6]
-    scale = par[..., 6:9]
-    shear = par[..., 9:12]
+    shift = par[..., : cuts[0]]
+    rot = par[..., cuts[0] : cuts[1]]
+    scale = par[..., cuts[1] : cuts[2]]
+    shear = par[..., cuts[2] : cuts[3]]
 
-    one = jnp.ones(shift[..., :1].shape, dtype=par.dtype)
-    zero = jnp.zeros_like(one)
-    s0 = shear[..., 0:1]
-    s1 = shear[..., 1:2]
-    s2 = shear[..., 2:3]
-    mat_shear = jnp.stack(
-        [
-            jnp.concatenate([one, s0, s1], axis=-1),
-            jnp.concatenate([zero, one, s2], axis=-1),
-            jnp.concatenate([zero, zero, one], axis=-1),
-        ],
-        axis=-2,
-    )
-
+    mat_shear = _shear_matrix(shear, ndim)
     mat_scale = _diag(scale + 1.0 if shift_scale else scale)
     mat_rot = angles_to_rotation_matrix(rot, deg=deg)
-    out = mat_rot @ (mat_scale @ mat_shear)  # (..., 3, 3)
-    return jnp.concatenate([out, shift[..., None]], axis=-1)  # (..., 3, 4)
+    out = mat_rot @ (mat_scale @ mat_shear)  # (..., ndim, ndim)
+    return jnp.concatenate([out, shift[..., None]], axis=-1)
 
 
 def affine_matrix_to_params(
-    mat: Float[Array, '... 3 4'], *, deg: bool = True
-) -> Float[Array, '... 12']:
-    """3D affine ``(..., 3, 4[+1])`` -> params ``(..., 12)``.
+    mat: Float[Array, '... d d1'], *, deg: bool = True
+) -> Float[Array, '... p']:
+    """Affine matrix ``(..., ndim, ndim+1[+1])`` -> params ``(..., M)``.
 
-    Inverse of :func:`params_to_affine_matrix`: returns translation (3),
-    rotation (3), scale (3), shear (3).  The linear block is factored as
-    ``R @ S @ E`` via the Cholesky of ``mᵀ m`` (an RQ-style
-    decomposition); the scale sign is fixed up with the determinant so a
-    negative-determinant (reflection) matrix is representable.
+    Inverse of :func:`params_to_affine_matrix` (``ndim`` inferred as
+    ``mat.shape[-1] - 1``, so both the ``(d, d+1)`` and square
+    ``(d+1, d+1)`` forms work): returns translation (``ndim``), rotation
+    (``ndim(ndim-1)/2``), scale (``ndim``), shear (``ndim(ndim-1)/2``).
+    The linear block is factored ``R @ S @ E`` via the Cholesky of
+    ``mᵀ m`` (an RQ-style decomposition); the scale sign is fixed up with
+    the determinant so a negative-determinant (reflection) matrix is
+    representable.
     """
-    shift = mat[..., :3, -1]
-    m = mat[..., :3, :3]
+    d = mat.shape[-1] - 1
+    rot_count = d * (d - 1) // 2
+    shift = mat[..., :d, d]
+    m = mat[..., :d, :d]
     lower = safe_cholesky(jnp.swapaxes(m, -1, -2) @ m)
     scale = jnp.diagonal(lower, axis1=-2, axis2=-1)
-    sign = jnp.sign(_det3x3(m))
+    sign = jnp.sign(_small_det(m))
     scale = jnp.concatenate(
         [(scale[..., 0] * sign)[..., None], scale[..., 1:]], axis=-1
     )
 
     # upper = inv(diag(scale)) @ lowerᵀ; inv of a diagonal is elementwise.
     upper = (1.0 / scale)[..., :, None] * jnp.swapaxes(lower, -1, -2)
-    flat = upper.reshape((*upper.shape[:-2], 9))
-    shear = flat[..., jnp.asarray([1, 2, 5])]  # (0,1), (0,2), (1,2)
+    rows, cols = np.triu_indices(d, 1)
+    shear = upper[..., rows, cols]  # strict-upper, row-major
 
-    # Rotation, after stripping scale + shear.
-    zero = jnp.zeros((*scale.shape[:-1], 6), dtype=mat.dtype)
+    # Rotation, after stripping scale + shear (zero translation + rotation).
+    zero = jnp.zeros((*scale.shape[:-1], d + rot_count), dtype=mat.dtype)
     par = jnp.concatenate([zero, scale, shear], axis=-1)
-    strip3 = params_to_affine_matrix(par, deg=deg)[..., :3]  # (..., 3, 3)
-    rot_mat = m @ safe_inv(strip3)
+    strip = params_to_affine_matrix(par, ndim=d, deg=deg)[..., :d]
+    rot_mat = m @ safe_inv(strip)
     rot = rotation_matrix_to_angles(rot_mat, deg=deg)
 
     return jnp.concatenate([shift, rot, scale, shear], axis=-1)

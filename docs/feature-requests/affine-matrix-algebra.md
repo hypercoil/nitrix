@@ -11,6 +11,18 @@
 > analytic (GPU-native). All batched, differentiable, round-trip tested on
 > GPU. Model-numeric item from the 2026-06-08 ilex audit
 > ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
+>
+> **Generalised to 2-D + 3-D (2026-06-09, review §5.5).** The chart now
+> supports `ndim ∈ {2, 3}`: `params_to_affine_matrix(par, *, ndim)` (2-D = 6
+> params: trans 2, rotation 1, scale 2, shear 1 → `(2,3)`),
+> `affine_matrix_to_params` (infers `ndim = cols − 1`),
+> `angles_to_rotation_matrix` / `rotation_matrix_to_angles` (2-D planar
+> angle), and `augment.random_affine_matrix(*, ndim)`. 3-D paths are
+> value-identical (regression-tested); 2-D round-trips + `fit_affine` 2-D
+> verified. `params_to_affine_matrix` takes an explicit `ndim` because a
+> 6-vector is ambiguous (rigid-3-D vs full-2-D). The shear matrix is built
+> generically from its strict-upper entries; `det` dispatches to analytic
+> `_det2x2`/`_det3x3`.
 
 **What.** The decompositional affine algebra in the **Euler-angle /
 scale / shear** convention (SynthMorph / VoxelMorph / lab2im), complementary

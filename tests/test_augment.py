@@ -308,3 +308,18 @@ def test_generators_dtype_override():
         random_svf_displacement((8, 8), k, dtype=jnp.float32).dtype
         == jnp.float32
     )
+
+
+def test_random_affine_matrix_2d():
+    mat = random_affine_matrix(jax.random.PRNGKey(11), ndim=2)
+    assert mat.shape == (2, 3)
+    ident = random_affine_matrix(
+        jax.random.PRNGKey(12),
+        ndim=2,
+        max_rotation=0.0,
+        max_scale=0.0,
+        max_shear=0.0,
+        max_translation=0.0,
+    )
+    expected = np.concatenate([np.eye(2), np.zeros((2, 1))], axis=-1)
+    np.testing.assert_allclose(np.asarray(ident), expected, atol=1e-6)

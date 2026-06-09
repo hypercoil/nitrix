@@ -197,3 +197,92 @@ def test_fit_affine_uniform_weights_match_unweighted():
         np.asarray(fit_affine(source, target)),
         atol=1e-8,
     )
+
+
+# ---------------------------------------------------------------------------
+# 2-D affine chart (ndim=2)
+# ---------------------------------------------------------------------------
+
+
+def _apply2d(mat, pts):
+    """mat (2,3) applied to points (M,2) -> (M,2)."""
+    return pts @ mat[:, :2].T + mat[:, 2]
+
+
+def test_angles_2d_roundtrip():
+    rng = np.random.default_rng(20)
+    ang = jnp.asarray(rng.uniform(-170, 170, size=(5, 1)))
+    R = angles_to_rotation_matrix(ang)
+    assert R.shape == (5, 2, 2)
+    # Orthonormal, det +1.
+    eye = jnp.einsum('...ij,...kj->...ik', R, R)
+    np.testing.assert_allclose(
+        np.asarray(eye), np.broadcast_to(np.eye(2), (5, 2, 2)), atol=1e-10
+    )
+    np.testing.assert_allclose(
+        np.asarray(rotation_matrix_to_angles(R)), np.asarray(ang), atol=1e-6
+    )
+
+
+def test_params_2d_roundtrip_matrix_to_params():
+    rng = np.random.default_rng(21)
+    par = jnp.asarray(
+        np.concatenate(
+            [
+                rng.uniform(-4, 4, size=2),  # translation
+                rng.uniform(-60, 60, size=1),  # rotation
+                rng.uniform(0.7, 1.3, size=2),  # scale
+                rng.uniform(-0.1, 0.1, size=1),  # shear
+            ]
+        )
+    )
+    mat = params_to_affine_matrix(par, ndim=2)
+    assert mat.shape == (2, 3)
+    np.testing.assert_allclose(
+        np.asarray(affine_matrix_to_params(mat)), np.asarray(par), atol=1e-6
+    )
+
+
+def test_params_2d_roundtrip_params_to_matrix():
+    rng = np.random.default_rng(22)
+    par = jnp.asarray(
+        np.concatenate(
+            [
+                rng.uniform(-4, 4, size=2),
+                rng.uniform(-60, 60, size=1),
+                rng.uniform(0.7, 1.3, size=2),
+                rng.uniform(-0.1, 0.1, size=1),
+            ]
+        )
+    )
+    mat = params_to_affine_matrix(par, ndim=2)
+    mat2 = params_to_affine_matrix(affine_matrix_to_params(mat), ndim=2)
+    np.testing.assert_allclose(np.asarray(mat2), np.asarray(mat), atol=1e-6)
+
+
+def test_params_2d_rigid_is_orthonormal():
+    par = jnp.asarray([1.0, -2.0, 30.0])  # trans(2) + rotation(1); scale->1
+    mat = params_to_affine_matrix(par, ndim=2)
+    R = mat[:2, :2]
+    np.testing.assert_allclose(np.asarray(R @ R.T), np.eye(2), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(mat[:2, 2]), [1.0, -2.0])
+
+
+def test_fit_affine_2d_recovers_known_transform():
+    rng = np.random.default_rng(23)
+    par = jnp.asarray(
+        np.concatenate(
+            [
+                rng.uniform(-3, 3, size=2),
+                rng.uniform(-45, 45, size=1),
+                rng.uniform(0.8, 1.2, size=2),
+                rng.uniform(-0.05, 0.05, size=1),
+            ]
+        )
+    )
+    a = params_to_affine_matrix(par, ndim=2)
+    target = jnp.asarray(rng.standard_normal((20, 2)))
+    source = _apply2d(a, target)
+    np.testing.assert_allclose(
+        np.asarray(fit_affine(source, target)), np.asarray(a), atol=1e-7
+    )

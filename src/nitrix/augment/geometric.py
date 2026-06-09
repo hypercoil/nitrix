@@ -176,38 +176,37 @@ def random_resized_crop(
 def random_affine_matrix(
     key: Array,
     *,
+    ndim: int = 3,
     max_rotation: float = 15.0,
     max_scale: float = 0.15,
     max_shear: float = 0.012,
     max_translation: float = 0.0,
-) -> Float[Array, '3 4']:
-    """Sample a random 3-D affine ``(3, 4)`` in geometric parameters.
+) -> Float[Array, 'd d1']:
+    """Sample a random affine ``(ndim, ndim+1)`` in geometric parameters.
 
-    **3-D only** (returns a ``(3, 4)`` matrix): the Euler-angle / scale /
-    shear parametrisation it draws is 3-D-specific, inheriting the rank of
-    ``geometry.params_to_affine_matrix``.  A 2-D analogue (scalar rotation,
-    a ``(2, 3)`` matrix) is a tracked follow-up, gated on generalising the
-    affine-parameter chart to rank 2.
-
-    Rotation ``~ U(-max_rotation, max_rotation)`` degrees, scale ``~
-    U(1 - max_scale, 1 + max_scale)``, shear / translation drawn from
-    their symmetric ranges, then assembled as ``T @ R @ S @ E`` via
-    ``geometry.params_to_affine_matrix``.  All-zero bounds give the
-    identity.
+    Supports ``ndim`` in ``{2, 3}`` (returns ``(2, 3)`` or ``(3, 4)``).
+    Rotation ``~ U(-max_rotation, max_rotation)`` degrees (a single angle
+    in 2-D, three in 3-D), scale ``~ U(1 - max_scale, 1 + max_scale)``,
+    shear / translation drawn from their symmetric ranges, then assembled
+    as ``T @ R @ S @ E`` via ``geometry.params_to_affine_matrix``.
+    All-zero bounds give the identity.
     """
+    rot_count = ndim * (ndim - 1) // 2
     k_r, k_s, k_sh, k_t = jax.random.split(key, 4)
     rot = jax.random.uniform(
-        k_r, (3,), minval=-max_rotation, maxval=max_rotation
+        k_r, (rot_count,), minval=-max_rotation, maxval=max_rotation
     )
     scale = jax.random.uniform(
-        k_s, (3,), minval=1.0 - max_scale, maxval=1.0 + max_scale
+        k_s, (ndim,), minval=1.0 - max_scale, maxval=1.0 + max_scale
     )
-    shear = jax.random.uniform(k_sh, (3,), minval=-max_shear, maxval=max_shear)
+    shear = jax.random.uniform(
+        k_sh, (rot_count,), minval=-max_shear, maxval=max_shear
+    )
     trans = jax.random.uniform(
-        k_t, (3,), minval=-max_translation, maxval=max_translation
+        k_t, (ndim,), minval=-max_translation, maxval=max_translation
     )
     par = jnp.concatenate([trans, rot, scale, shear])
-    return params_to_affine_matrix(par)
+    return params_to_affine_matrix(par, ndim=ndim)
 
 
 def random_svf_displacement(
