@@ -45,6 +45,7 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, Union, cast
 
 import jax
 import jax.numpy as jnp
+from jax.scipy.optimize import minimize
 from jaxtyping import Array, Float
 
 from .krylov import cg
@@ -54,10 +55,12 @@ __all__ = [
     'gauss_newton',
     'levenberg_marquardt',
     'implicit_least_squares',
+    'implicit_minimize',
 ]
 
 ResidualFn = Callable[[Float[Array, ' p']], Float[Array, ' m']]
 DataResidualFn = Callable[[Any, Float[Array, ' p']], Float[Array, ' m']]
+ScalarObjectiveFn = Callable[[Any, Float[Array, ' p']], Float[Array, '']]
 
 # A Gauss-Newton step needs ``(JᵀJ + λI) δ = -Jᵀr`` solved.  The normal
 # operator ``JᵀJ`` is supplied either as an explicit ``P×P`` matrix
@@ -290,7 +293,10 @@ def implicit_least_squares(
     least-squares implicit-diff approximation).  The backward solves
     ``(JᵀJ) w = x̄`` with ``cg`` (SPD, matrix-free -- stays on-device) and
     pushes ``-w`` back through ``∂_data g``.  Memory is O(1) in the
-    iteration count, vs unrolling's O(n_iters).
+    iteration count (vs unrolling's O(n_iters)) and ``O(M + P)`` per
+    call: neither the ``M×P`` Jacobian nor the ``P×P`` normal matrix is
+    materialised -- ``cg`` holds O(P) iterates and the linearisation
+    caches one residual evaluation (O(M) voxels), independent of ``P²``.
 
     This is the differentiable-layer entry point: a registration whose
     residual is ``r(images, θ) = warp(moving, θ) - fixed`` becomes
@@ -389,3 +395,144 @@ def _implicit_ls_bwd(
 
 
 _implicit_ls.defvjp(_implicit_ls_fwd, _implicit_ls_bwd)
+
+
+def implicit_minimize(
+    objective_fn: ScalarObjectiveFn,
+    data: Any,
+    x0: Float[Array, ' p'],
+    *,
+    maxiter: int = 50,
+    ridge: float = 0.0,
+    cg_tol: float = 1e-6,
+    cg_maxiter: Optional[int] = None,
+) -> Float[Array, ' p']:
+    """Argmin of a scalar objective ``f(data, x)`` that is differentiable
+    w.r.t. ``data`` by the **implicit-function theorem**.
+
+    The general-objective counterpart of ``implicit_least_squares``: where
+    that assumes a least-squares residual and uses the Gauss-Newton
+    Hessian ``JᵀJ``, this differentiates the argmin of an *arbitrary*
+    scalar ``f`` through the **exact** Hessian ``∇²_x f`` -- so a
+    registration whose cost is LNCC / MI / correlation-ratio (not a
+    least-squares residual) becomes a differentiable layer too.
+
+    The forward solve is BFGS (``jax.scipy.optimize.minimize``); the
+    backward uses the stationarity ``g(data, x*) = ∇_x f = 0``, which by
+    the IFT gives ``∂x*/∂data = -(∇²_x f)⁻¹ ∂_data g``.  The adjoint
+    ``(∇²_x f) w = x̄`` is solved matrix-free with ``cg`` (Hessian-vector
+    products via ``jax.linearize`` of the gradient -- stays on-device),
+    then ``-w`` is pushed back through ``∂_data g``.
+
+    **Memory footprint.**  O(1) in the BFGS iteration count -- nothing is
+    unrolled.  The Hessian is never materialised: ``cg`` applies it as a
+    matrix-free Hessian-vector product, so the backward holds only the
+    ``cg`` iterates (a handful of ``x``-shaped vectors, **O(P)** in the
+    parameter count) plus the ``jax.linearize`` cache of a *single*
+    ``∇_x f`` evaluation.  For an image-similarity objective the latter
+    dominates and scales as the cost of one gradient -- **O(M)** in the
+    number of voxels -- **not O(P²)**: the dense ``P×P`` Hessian is never
+    formed.  So peak backward memory is ``O(M + P)``, independent of both
+    the iteration count and ``P²``.
+
+    Parameters
+    ----------
+    objective_fn
+        Map ``(data, x) -> scalar`` (``data`` the differentiable
+        argument, an array or pytree; ``x`` the optimisation variable).
+    data
+        The differentiable parameters / inputs.
+    x0
+        Initial guess for ``x``.
+    maxiter
+        Forward BFGS iteration cap.
+    ridge
+        Non-negative Tikhonov ridge added to the Hessian in the backward
+        adjoint solve (default ``0``); raise it if the Hessian at the
+        optimum is near-singular (a min's Hessian is only PSD).
+    cg_tol, cg_maxiter
+        Backward adjoint-solve (``cg``) controls.
+
+    Returns
+    -------
+    The minimiser ``x*``.  ``dx*/dx0 = 0`` (the initial guess does not
+    affect the gradient).
+
+    Notes
+    -----
+    The implicit gradient is exact only at a true stationary point (the
+    backward assumes ``∇_x f(data, x*) = 0``), so run the forward solve to
+    convergence.  At a minimum ``∇²_x f`` is positive semidefinite, so the
+    SPD ``cg`` applies -- pass ``ridge > 0`` if it is only semidefinite.
+    """
+    return _implicit_min(
+        objective_fn, maxiter, ridge, cg_tol, cg_maxiter, data, x0
+    )
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(0, 1, 2, 3, 4))
+def _implicit_min(
+    objective_fn: ScalarObjectiveFn,
+    maxiter: int,
+    ridge: float,
+    cg_tol: float,
+    cg_maxiter: Optional[int],
+    data: Any,
+    x0: Array,
+) -> Array:
+    res = minimize(
+        lambda x: objective_fn(data, x),
+        x0,
+        method='BFGS',
+        options={'maxiter': maxiter},
+    )
+    return res.x
+
+
+def _implicit_min_fwd(
+    objective_fn: ScalarObjectiveFn,
+    maxiter: int,
+    ridge: float,
+    cg_tol: float,
+    cg_maxiter: Optional[int],
+    data: Any,
+    x0: Array,
+) -> tuple[Array, tuple[Any, Array]]:
+    x_star = _implicit_min(
+        objective_fn, maxiter, ridge, cg_tol, cg_maxiter, data, x0
+    )
+    return x_star, (data, x_star)
+
+
+def _grad_x(objective_fn: ScalarObjectiveFn, d: Any, x: Array) -> Array:
+    """``∇_x f(d, x)`` -- the stationarity map the IFT backward uses."""
+    return cast(Array, jax.grad(lambda y: objective_fn(d, y))(x))
+
+
+def _implicit_min_bwd(
+    objective_fn: ScalarObjectiveFn,
+    maxiter: int,
+    ridge: float,
+    cg_tol: float,
+    cg_maxiter: Optional[int],
+    res: tuple[Any, Array],
+    x_bar: Array,
+) -> tuple[Any, Array]:
+    data, x_star = res
+    # Exact-Hessian operator ∇²_x f at x* (Hvp via linearise of the
+    # gradient), then solve (∇²_x f + ridge·I) w = x̄.
+    _, hvp = jax.linearize(lambda x: _grad_x(objective_fn, data, x), x_star)
+
+    def hessian(v: Array) -> Array:
+        return cast(Array, hvp(v)) + ridge * v
+
+    w = cg(hessian, x_bar, tol=cg_tol, maxiter=cg_maxiter)
+
+    # Stationarity g(data) = ∇_x f at fixed x*; data_bar = -(∂_data g)ᵀ w.
+    _, vjp_data = jax.vjp(lambda d: _grad_x(objective_fn, d, x_star), data)
+    (data_bar,) = vjp_data(w)
+    data_bar = jax.tree_util.tree_map(lambda z: -z, data_bar)
+    return data_bar, jnp.zeros_like(x_star)
+
+
+_implicit_min.defvjp(_implicit_min_fwd, _implicit_min_bwd)

@@ -53,6 +53,7 @@ from .optimize import (
     OptimizeResult,
     gauss_newton,
     implicit_least_squares,
+    implicit_minimize,
     levenberg_marquardt,
 )
 from .residual import residualise
@@ -92,6 +93,7 @@ __all__ = [
     'gauss_newton',
     'levenberg_marquardt',
     'implicit_least_squares',
+    'implicit_minimize',
     'OptimizeResult',
     # kernel
     'cosine_kernel',

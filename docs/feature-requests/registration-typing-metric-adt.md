@@ -1,14 +1,25 @@
 # Register v2: Metric ADT + TransformModel protocol + differentiable non-SSD metrics
 
-> **Status (2026-06-09): SCOPED — agreed, not yet implemented.** The
-> engineering-rigor / extensibility follow-up to the P0 perf round
-> (`registration-recipe-cold-compile.md`, shipped `ddc2e10`). Replaces
+> **Status (2026-06-09): SHIPPED (A+B+D).** The engineering-rigor /
+> extensibility follow-up to the P0 perf round
+> (`registration-recipe-cold-compile.md`, shipped `ddc2e10`). Replaced
 > the stringly-typed metric/transform dispatch in the registration
 > recipes with house-style ADTs (the `Interpolator` Protocol +
-> frozen-dataclass precedent), and makes the cross-modal metrics
+> frozen-dataclass precedent), and made the cross-modal metrics
 > differentiable as a layer. Deliberately structured to *enable* the
 > coming registration suite (BBR, greedy SyN, full SyN / LDDMM), not
 > clash with it.
+>
+> Landed as three commits on branch `perf/registration-roll-loops`:
+> **B** `TransformModel` (`Rigid`/`Affine`) — `01b3b80`; **A** `Metric`
+> ADT (`SSD`/`LNCC`/`MI`/`CorrelationRatio`) — `3e4da91`; **D**
+> `linalg.implicit_minimize` (general scalar-objective IFT, exact Hessian
+> via matrix-free `cg`; `O(M + P)` memory, O(1) in the iteration count)
+> + the non-SSD differentiable-layer tests. All public `nitrix.register`
+> exports; clean-break metric API. 77 registration tests green; mypy
+> (111 files) + ruff clean. C (closed-form steepest-descent) and E
+> (adaptive `matrix_exp`) remain deferred. Bench re-run still pending per
+> the hold.
 
 ## Locked decisions (user, 2026-06-09)
 
