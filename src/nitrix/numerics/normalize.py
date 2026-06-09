@@ -268,6 +268,7 @@ def percentile_rescale(
     clip: bool = True,
     axis: Optional[_AxisArg] = None,
     eps: float = 1e-12,
+    mask: Optional[Num[Array, '...']] = None,
 ) -> Num[Array, '...']:
     """Shift by the ``lo``-percentile, scale by the ``hi``-percentile,
     then optionally clip to ``[0, 1]``.
@@ -309,6 +310,14 @@ def percentile_rescale(
     eps
         Stabiliser added to the ``p_hi`` denominator (guards the
         all-constant / all-zero input).
+    mask
+        Optional foreground mask (same shape as ``x``, or broadcastable):
+        when given, the percentiles are computed over the masked
+        (e.g. non-zero / in-brain) voxels only -- the skull-strip-aware
+        variant -- via ``nanpercentile``, falling back to the global
+        min / max where a slice has no foreground.  Every voxel is still
+        rescaled (and clipped); only the *reference* percentiles change.
+        Pass ``mask = x != 0`` for the non-zero recipe.
 
     Returns
     -------
@@ -322,8 +331,20 @@ def percentile_rescale(
     into a single ``lax.sort`` (see ``intensity_normalize`` Notes and
     ``docs/feature-requests/median-percentile-cpu-sort-cliff.md``).
     """
-    p_lo = jnp.percentile(x, lo, axis=axis, keepdims=True)
-    p_hi = jnp.percentile(x, hi, axis=axis, keepdims=True)
+    if mask is None:
+        p_lo = jnp.percentile(x, lo, axis=axis, keepdims=True)
+        p_hi = jnp.percentile(x, hi, axis=axis, keepdims=True)
+    else:
+        vals = jnp.where(mask != 0, x, jnp.nan)
+        p_lo = jnp.nanpercentile(vals, lo, axis=axis, keepdims=True)
+        p_hi = jnp.nanpercentile(vals, hi, axis=axis, keepdims=True)
+        # Empty-mask slices return NaN; fall back to the global extremes.
+        p_lo = jnp.where(
+            jnp.isnan(p_lo), jnp.min(x, axis=axis, keepdims=True), p_lo
+        )
+        p_hi = jnp.where(
+            jnp.isnan(p_hi), jnp.max(x, axis=axis, keepdims=True), p_hi
+        )
     out = (x - p_lo) / (p_hi + eps)
     if clip:
         out = jnp.clip(out, 0.0, 1.0)

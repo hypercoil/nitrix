@@ -14,14 +14,24 @@ Two submodules:
   ``ilex.core.adapters`` before consolidation here.
 - ``normalize``  -- intensity normalisation routines (synthstrip
   median, robust z-scoring, etc.).
+- ``spatial``    -- volumetric shape / windowing utilities: pad / crop
+  to a multiple, nonzero bounding box, Gaussian patch window +
+  overlap-add normalisation.
 
 This subpackage didn't exist in the legacy code (the utilities
 lived in ``functional.linear`` etc.); it's a Phase 1 rename and
 consolidation.
 """
 
-from . import normalize, tensor_ops
+from . import normalize, spatial, tensor_ops
 from .fixed_point import fixed_point_solve
+from .spatial import (
+    crop_to_multiple,
+    gaussian_window,
+    nonzero_bounding_box,
+    overlap_add,
+    pad_to_multiple,
+)
 from .normalize import (
     demean,
     instance_norm,
@@ -48,6 +58,12 @@ from .tensor_ops import (
 __all__ = [
     # fixed point
     'fixed_point_solve',
+    # spatial shape / windowing
+    'pad_to_multiple',
+    'crop_to_multiple',
+    'nonzero_bounding_box',
+    'gaussian_window',
+    'overlap_add',
     # normalize
     'demean',
     'instance_norm',

@@ -1,8 +1,11 @@
 # `crop_to_nonzero` / bounding-box crop — `nitrix.numerics`
 
-> **Status (2026-06-02): not started — ENABLING (nnUNet / template
-> pre-step).** Consumer-pipeline substrate for the ilex → thrux migration.
-> Provenance: 2026-06-02 ilex vendored-model survey
+> **Status (2026-06-09): SHIPPED.** `numerics/spatial.py` adds
+> `nonzero_bounding_box(x, *, threshold) -> (lo, hi)` index arrays (the
+> half-open box of the above-threshold region; empty → all-zero box). Only
+> the **index math** is in nitrix (jit-clean — the box, not a
+> data-dependent-shape crop); the slice + affine update stay in `thrux`.
+> Verified against `np.argwhere` (2-D / 3-D). Consumer-pipeline substrate
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
 > item C).
 

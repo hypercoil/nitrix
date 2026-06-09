@@ -1,8 +1,11 @@
 # `pad_to_multiple` / `crop_to_multiple` (+ unpad) — `nitrix.numerics`
 
-> **Status (2026-06-02): not started — ENABLING, near-universal volumetric
-> pre-step.** Consumer-pipeline substrate for the ilex → thrux migration.
-> Provenance: 2026-06-02 ilex vendored-model survey
+> **Status (2026-06-09): SHIPPED.** `numerics/spatial.py` adds
+> `pad_to_multiple(x, multiple, *, spatial_rank, mode, cval)` and
+> `crop_to_multiple(...)`, both returning `(array, per-axis (lo,hi)
+> widths)` so the caller can unpad and the container layer can shift the
+> affine origin. Symmetric pad/crop; per-axis `multiple`; leading
+> `spatial_rank` axes (channels-last). Consumer-pipeline substrate
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
 > item B).
 

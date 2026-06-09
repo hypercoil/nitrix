@@ -27,13 +27,13 @@ names.
 
 **Home.** `nitrix.numerics.normalize`.
 
-**Remaining gap (2026-06-08 audit).** FM `percentile_normalize`
-(`ilex/train/augment/intensity.py:166`) computes its clip percentiles over
-**non-zero voxels only** (NaN-mask → `nanpercentile`, fall back to min/max
-when the mask is empty) — the skull-strip-aware variant. The shipped
-`percentile_rescale` has no `nonzero`/`mask` option; add one (mirroring the
-`nonzero_mask=` already on `zscore_normalize`). Small extension, not a new
-symbol. See
+**Remaining gap (2026-06-08 audit) — RESOLVED 2026-06-09.** FM
+`percentile_normalize` (`ilex/train/augment/intensity.py:166`) computes its
+clip percentiles over **non-zero voxels only** (the skull-strip-aware
+variant). `percentile_rescale` now takes a `mask=` argument: percentiles are
+computed over the masked voxels via `nanpercentile` (falling back to the
+global min/max on empty slices), while every voxel is still rescaled. Pass
+`mask = x != 0` for the non-zero recipe. Small extension, not a new symbol. See
 [`intensity-augmentation-ops.md`](intensity-augmentation-ops.md) for the
 training-side intensity perturbations this normaliser pairs with.
 

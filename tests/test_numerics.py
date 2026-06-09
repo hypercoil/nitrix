@@ -14,13 +14,18 @@ from nitrix.numerics import (
     broadcast_ignoring,
     complex_decompose,
     complex_recompose,
+    crop_to_multiple,
     demean,
     fold_axis,
+    gaussian_window,
     instance_norm,
     intensity_normalize,
     l2_normalize,
     lp_normalize,
+    nonzero_bounding_box,
     orient_and_conform,
+    overlap_add,
+    pad_to_multiple,
     percentile_rescale,
     promote_to_rank,
     psc_normalize,
@@ -284,3 +289,94 @@ def test_instance_norm_matches_zscore_single_axis():
         zscore_normalize(x, axis=-1, eps=0.0),
         atol=1e-9,
     )
+
+
+# ---------------------------------------------------------------------------
+# spatial: pad/crop to multiple, bbox, window, overlap-add
+# ---------------------------------------------------------------------------
+
+
+def test_pad_to_multiple_shape_and_unpad():
+    x = jnp.asarray(np.random.default_rng(0).standard_normal((13, 18, 2)))
+    padded, widths = pad_to_multiple(x, 8, spatial_rank=2)
+    assert padded.shape == (16, 24, 2)
+    assert widths == ((1, 2), (3, 3))
+    # Unpad recovers the original.
+    (l0, h0), (l1, h1) = widths
+    back = padded[l0 : padded.shape[0] - h0, l1 : padded.shape[1] - h1, :]
+    np.testing.assert_array_equal(np.asarray(back), np.asarray(x))
+
+
+def test_pad_to_multiple_per_axis_and_cval():
+    x = jnp.ones((5, 6))
+    padded, widths = pad_to_multiple(
+        x, (4, 4), spatial_rank=2, mode='constant', cval=-1.0
+    )
+    assert padded.shape == (8, 8)
+    assert float(padded[0, 0]) == -1.0  # padded region uses cval
+
+
+def test_crop_to_multiple_shape():
+    x = jnp.asarray(np.random.default_rng(1).standard_normal((17, 20, 3)))
+    cropped, widths = crop_to_multiple(x, 8, spatial_rank=2)
+    assert cropped.shape == (16, 16, 3)
+    assert widths == ((0, 1), (2, 2))
+
+
+def test_nonzero_bounding_box_known():
+    mask = np.zeros((10, 12), dtype=bool)
+    mask[2:5, 3:9] = True
+    lo, hi = nonzero_bounding_box(jnp.asarray(mask))
+    np.testing.assert_array_equal(np.asarray(lo), [2, 3])
+    np.testing.assert_array_equal(np.asarray(hi), [5, 9])
+
+
+def test_nonzero_bounding_box_threshold_and_3d():
+    rng = np.random.default_rng(2)
+    x = rng.random((8, 9, 10))
+    x[x < 0.99] = 0.0  # sparse foreground
+    lo, hi = nonzero_bounding_box(jnp.asarray(x), threshold=0.0)
+    idx = np.argwhere(np.asarray(x) > 0)
+    np.testing.assert_array_equal(np.asarray(lo), idx.min(0))
+    np.testing.assert_array_equal(np.asarray(hi), idx.max(0) + 1)
+
+
+def test_nonzero_bounding_box_empty():
+    lo, hi = nonzero_bounding_box(jnp.zeros((4, 4)))
+    np.testing.assert_array_equal(np.asarray(lo), [0, 0])
+    np.testing.assert_array_equal(np.asarray(hi), [0, 0])
+
+
+def test_gaussian_window_peak_centre_and_symmetry():
+    w = np.asarray(gaussian_window((9, 9)))
+    assert w.shape == (9, 9)
+    # Peak 1 at the centre; symmetric.
+    assert abs(w[4, 4] - 1.0) < 1e-6
+    np.testing.assert_allclose(w, w[::-1, :], atol=1e-6)
+    np.testing.assert_allclose(w, w[:, ::-1], atol=1e-6)
+    assert w.min() > 0.0
+
+
+def test_overlap_add_normalises():
+    ws = jnp.asarray([2.0, 6.0, 0.0])
+    w = jnp.asarray([2.0, 3.0, 0.0])
+    out = overlap_add(ws, w)
+    # 2/2=1, 6/3=2, 0/eps=0 (uncovered voxel safe).
+    np.testing.assert_allclose(np.asarray(out)[:2], [1.0, 2.0], atol=1e-6)
+    assert np.isfinite(np.asarray(out)[2])
+
+
+def test_percentile_rescale_mask_ignores_background():
+    rng = np.random.default_rng(3)
+    fg = rng.uniform(10, 20, size=400)
+    x_np = np.concatenate([fg, np.zeros(600)])
+    x = jnp.asarray(x_np)
+    masked = percentile_rescale(x, lo=0.0, hi=100.0, mask=(x != 0))
+    # Reference percentiles over foreground only.
+    p_lo = np.percentile(fg, 0.0)
+    p_hi = np.percentile(fg, 100.0)
+    ref = np.clip((x_np - p_lo) / (p_hi + 1e-12), 0.0, 1.0)
+    np.testing.assert_allclose(np.asarray(masked), ref, atol=1e-6)
+    # Differs from the unmasked version (zeros drag the low percentile).
+    unmasked = percentile_rescale(x, lo=0.0, hi=100.0)
+    assert float(jnp.abs(masked - unmasked).max()) > 1e-3
