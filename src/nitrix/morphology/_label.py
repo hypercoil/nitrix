@@ -8,15 +8,20 @@ Connected-components labelling (N-D, jit-able).
 boolean mask; ``largest_connected_component`` returns the single biggest
 one (the recurring "clean up the mask" post-processing step).
 
-Method -- **label propagation to a fixed point**.  Each foreground voxel
-is seeded with a unique label (its flat index + 1); every iteration each
-voxel takes the maximum label over itself and its neighbours, so a
-component's largest seed floods outward until the labels stop changing
-(a ``lax.while_loop``).  A final pass renumbers the surviving labels to a
-contiguous ``1 .. K``.  The label *image* has a fixed (data-independent)
-shape throughout, so the whole thing is jit-able; only the number of
-``while_loop`` iterations (bounded by the largest component's diameter)
-is data-dependent.
+Method -- **label propagation with pointer jumping**.  Each foreground
+voxel is seeded with a unique label (its flat index + 1).  Every iteration
+does two things: (1) a neighbour-max hop (each voxel takes the maximum
+label over itself and its neighbours), and (2) a **pointer-jumping** step
+-- each voxel adopts the label currently held by the voxel its own label
+points to (label ``ℓ`` → flat index ``ℓ - 1``).  Both the pointed-to voxel
+and the neighbour are in the same component, so step (2) only accelerates
+the flood: the reach **doubles** per pass, so a component of diameter ``d``
+converges in ``O(log d)`` passes (a ``lax.while_loop`` to the fixed point)
+rather than ``O(d)``.  The fixed point is identical to a pure neighbour-max
+flood (every voxel ends at its component's maximum seed); pointer jumping
+never merges distinct components.  A final pass renumbers the surviving
+labels to a contiguous ``1 .. K``.  The label *image* has a fixed
+(data-independent) shape throughout, so the whole thing is jit-able.
 
 ``connectivity`` follows the scipy convention: an offset is a neighbour
 when ``sum(abs(offset)) <= connectivity``, so ``connectivity=1`` is
@@ -93,8 +98,16 @@ def connected_components(
         return state[1]
 
     def body(state: tuple[Array, Array]) -> tuple[Array, Array]:
-        labels = step(state[0])
-        return labels, jnp.any(labels != state[0])
+        previous = state[0]
+        labels = step(previous)
+        # Pointer jumping: a voxel's label ``ℓ`` points to flat index
+        # ``ℓ - 1`` (its seed voxel, in the same component); adopt the label
+        # that voxel currently holds.  This doubles the flood's reach per
+        # pass without ever crossing component boundaries.
+        flat = labels.reshape(-1)
+        pointer = jnp.maximum(labels - 1, 0)
+        jumped = jnp.where(mask_bool, flat[pointer], 0)
+        return jumped, jnp.any(jumped != previous)
 
     labels, _ = jax.lax.while_loop(cond, body, (labels0, jnp.asarray(True)))
 

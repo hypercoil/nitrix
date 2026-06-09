@@ -584,3 +584,20 @@ def test_connected_components_jit():
     a = jitted(mask, connectivity=1)
     b = connected_components(mask, connectivity=1)
     np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_cc_long_diameter_snake_matches_scipy():
+    # A 1-wide boustrophedon snake: a single component with very large
+    # diameter -- the case pointer jumping must converge on (and where a
+    # pure O(diameter) flood would need many passes).
+    h, w = 9, 40
+    mask = np.zeros((h, w), dtype=bool)
+    for r in range(0, h, 2):
+        mask[r, :] = True  # horizontal runs on even rows
+    for r in range(0, h - 1, 2):
+        col = w - 1 if (r // 2) % 2 == 0 else 0
+        mask[r + 1, col] = True  # vertical connectors at alternating ends
+    ref, nref = scipy_ndi.label(mask)
+    ours = connected_components(jnp.asarray(mask), connectivity=1)
+    assert int(ours.max()) == nref == 1
+    assert _same_partition(ours, ref)
