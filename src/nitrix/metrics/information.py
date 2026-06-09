@@ -69,6 +69,16 @@ def joint_histogram(
     -------
     Joint probability table, ``(bins, bins)``, rows indexing ``moving``
     and columns ``fixed``.
+
+    Notes
+    -----
+    The soft weight is **linear** (order-1 B-spline / triangular
+    Parzen, support fixed at two bins): there is no temperature /
+    bandwidth knob, so it does **not** reduce to hard (nearest-bin)
+    binning at a fixed ``bins`` under any parameter limit.  It
+    coincides with hard binning only when every sample lands on a bin
+    centre; as ``bins`` grows both converge to the same continuous
+    distribution.
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)
@@ -103,6 +113,17 @@ def mutual_information(
 
     ``bins`` / ``range_*`` are forwarded to ``joint_histogram``;
     ``eps`` guards the logs.
+
+    Notes
+    -----
+    Built on the linear (order-1 B-spline) Parzen histogram, so it is
+    differentiable and in the **same B-spline-Parzen family** as ITK
+    ``MattesMutualInformation`` (order-3 cubic) -- distinct from the
+    hard (order-0) binning of ``sklearn.mutual_info_score``.  At a
+    fixed ``bins`` the three give different numbers (Parzen smoothing
+    biases MI downward at coarse bins); all converge to the true
+    continuous MI in the fine-bin limit.  The domain tools are
+    *divergent references*, not bit-oracles, here.
     """
     hist = joint_histogram(
         moving,
@@ -144,6 +165,13 @@ def correlation_ratio(
     ``1 − η²``.  Asymmetric by construction (``fixed`` is the
     explanatory variable); ``bins`` / ``range_fixed`` control its
     binning.
+
+    Notes
+    -----
+    FSL / Roche lineage; SimpleITK's registration framework ships no
+    correlation-ratio metric, so there is no domain co-oracle (a numpy
+    fp64 reimplementation is the only reference).  Uses the same linear
+    soft binning as :func:`joint_histogram` (differentiable).
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)

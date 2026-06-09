@@ -69,6 +69,11 @@ def ssd(
     -------
     Scalar cost (``"mean"`` / ``"sum"``) or the per-voxel map
     (``"none"``).
+
+    Notes
+    -----
+    With the default ``reduction='mean'`` this is the ITK
+    ``MeanSquares`` registration metric (verified bit-equal in fp64).
     """
     diff = moving - fixed
     return _reduce(diff * diff, mask, reduction)
@@ -89,6 +94,15 @@ def ncc(
 
     ``mask`` (optional non-negative weights) restricts / weights the
     correlation; ``eps`` guards the zero-variance denominator.
+
+    Notes
+    -----
+    This is the *signed* Pearson correlation.  ITK's ``Correlation``
+    metric (``CorrelationImageToImageMetricv4``) is the same
+    mean-subtracted correlation returned as ``-r**2`` (squared and
+    negated for minimisation), so it is sign-insensitive where this is
+    not.  Recover it as ``-ncc(...)**2``; the sign-agnostic cost is
+    ``1 - ncc(...)**2`` (not ``1 - ncc``).
     """
     xf = x.reshape(-1)
     yf = y.reshape(-1)
@@ -151,6 +165,16 @@ def lncc(
     -------
     Scalar similarity (``"mean"`` / ``"sum"``) or the per-voxel local-CC
     map (``"none"``).
+
+    Notes
+    -----
+    The per-voxel value is interior-identical (fp64) to the ANTs
+    ``ANTSNeighborhoodCorrelation`` local CC (the squared local
+    correlation with window-local means).  ANTs returns it as a cost
+    (the negated voxel mean); this returns the similarity, so its
+    registration cost is ``1 - lncc``.  Only the boundary differs: the
+    box sums use ``mode`` (default ``"reflect"``, a uniform window
+    count) rather than ANTs' valid-neighbourhood trim.
     """
     if isinstance(radius, (tuple, list)):
         inferred_rank: Optional[int] = len(radius)
