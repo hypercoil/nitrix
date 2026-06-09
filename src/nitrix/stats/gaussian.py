@@ -19,31 +19,16 @@ into a numerically benign ``exp(-log_var)`` / ``log_var``.
 from __future__ import annotations
 
 import math
-from typing import Literal, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from .._internal.reductions import Reduction, reduce
+
 __all__ = ['kl_diagonal_gaussian', 'gaussian_nll']
 
 _AxisArg = Union[int, Tuple[int, ...]]
-_Reduction = Literal['mean', 'sum', 'none']
-
-
-def _reduce(
-    values: Float[Array, '...'],
-    axis: Optional[_AxisArg],
-    reduction: _Reduction,
-) -> Float[Array, '...']:
-    if reduction == 'none':
-        return values
-    if reduction == 'sum':
-        return jnp.sum(values, axis=axis)
-    if reduction == 'mean':
-        return jnp.mean(values, axis=axis)
-    raise ValueError(
-        f'reduction={reduction!r}; expected "mean", "sum", or "none".'
-    )
 
 
 def kl_diagonal_gaussian(
@@ -51,7 +36,7 @@ def kl_diagonal_gaussian(
     log_var: Float[Array, '...'],
     *,
     axis: Optional[_AxisArg] = None,
-    reduction: _Reduction = 'sum',
+    reduction: Reduction = 'sum',
 ) -> Float[Array, '...']:
     """KL divergence of ``N(mean, diag exp(log_var))`` from ``N(0, I)``.
 
@@ -81,7 +66,7 @@ def kl_diagonal_gaussian(
     axis), or the per-dimension KL when ``reduction="none"``.
     """
     per_dim = 0.5 * (mean**2 + jnp.exp(log_var) - 1.0 - log_var)
-    return _reduce(per_dim, axis, reduction)
+    return reduce(per_dim, axis=axis, reduction=reduction)
 
 
 def gaussian_nll(
@@ -90,7 +75,7 @@ def gaussian_nll(
     log_var: Float[Array, '...'],
     *,
     axis: Optional[_AxisArg] = None,
-    reduction: _Reduction = 'mean',
+    reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
     """Negative log-likelihood of ``x`` under ``N(mean, exp(log_var))``.
 
@@ -119,4 +104,4 @@ def gaussian_nll(
     """
     log_2pi = math.log(2.0 * math.pi)
     per_elem = 0.5 * (log_2pi + log_var + (x - mean) ** 2 * jnp.exp(-log_var))
-    return _reduce(per_elem, axis, reduction)
+    return reduce(per_elem, axis=axis, reduction=reduction)

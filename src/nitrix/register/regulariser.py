@@ -26,11 +26,10 @@ All take a channels-last field ``(*spatial, ndim)``, build on the shipped
 
 from __future__ import annotations
 
-from typing import Literal
-
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from .._internal.reductions import Reduction, reduce
 from ..geometry import (
     jacobian_det_displacement,
     jacobian_displacement,
@@ -42,20 +41,6 @@ __all__ = [
     'bending_energy',
     'jacobian_folding_penalty',
 ]
-
-_Reduction = Literal['mean', 'sum', 'none']
-
-
-def _reduce(values: Float[Array, '...'], reduction: _Reduction) -> Array:
-    if reduction == 'none':
-        return values
-    if reduction == 'sum':
-        return values.sum()
-    if reduction == 'mean':
-        return values.mean()
-    raise ValueError(
-        f'reduction={reduction!r}; expected "mean", "sum", or "none".'
-    )
 
 
 def _grad_components(
@@ -72,7 +57,7 @@ def _grad_components(
 def gradient_smoothness(
     field: Float[Array, '*spatial ndim'],
     *,
-    reduction: _Reduction = 'mean',
+    reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
     """Diffusion (first-order) smoothness penalty ``‖∇u‖²``.
 
@@ -91,13 +76,13 @@ def gradient_smoothness(
     ndim = field.shape[-1]
     grad_u = jacobian_displacement(field) - jnp.eye(ndim, dtype=field.dtype)
     energy = jnp.sum(grad_u**2, axis=(-2, -1))
-    return _reduce(energy, reduction)
+    return reduce(energy, reduction=reduction)
 
 
 def bending_energy(
     field: Float[Array, '*spatial ndim'],
     *,
-    reduction: _Reduction = 'mean',
+    reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
     """Thin-plate (second-order) bending penalty ``‖∇²u‖²``.
 
@@ -120,13 +105,13 @@ def bending_energy(
     flat = grad_u.reshape(field.shape[:-1] + (ndim * ndim,))
     hessian = _grad_components(flat, ndim)  # (*spatial, ndim*ndim, ndim)
     energy = jnp.sum(hessian**2, axis=(-2, -1))
-    return _reduce(energy, reduction)
+    return reduce(energy, reduction=reduction)
 
 
 def jacobian_folding_penalty(
     field: Float[Array, '*spatial ndim'],
     *,
-    reduction: _Reduction = 'mean',
+    reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
     """Folding penalty ``relu(-det J)`` of the deformation Jacobian.
 
@@ -144,4 +129,4 @@ def jacobian_folding_penalty(
         penalty map).
     """
     det = jacobian_det_displacement(field)
-    return _reduce(jnp.maximum(-det, 0.0), reduction)
+    return reduce(jnp.maximum(-det, 0.0), reduction=reduction)
