@@ -24,6 +24,8 @@ import jax.numpy as jnp
 from jax.typing import DTypeLike
 from jaxtyping import Array, Float
 
+from .._internal.gaussian import gaussian_profile_1d
+
 __all__ = ['gaussian']
 
 
@@ -73,7 +75,7 @@ def _gaussian_1d_kernel(
             x = jnp.arange(-half + 0.5, half, dtype=dtype)
             # length should equal kernel_size
             assert x.shape[0] == kernel_size
-    kernel = jnp.exp(-0.5 * (x / sigma) ** 2)
+    kernel = gaussian_profile_1d(x, sigma)
     kernel = kernel / kernel.sum()
     return kernel
 

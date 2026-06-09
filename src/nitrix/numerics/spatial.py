@@ -32,6 +32,8 @@ from typing import Sequence, Tuple, Union
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Int, Num
 
+from .._internal.gaussian import gaussian_profile_1d
+
 __all__ = [
     'pad_to_multiple',
     'crop_to_multiple',
@@ -170,7 +172,7 @@ def gaussian_window(
         centre = (size - 1) / 2.0
         sigma = max(sigma_scale * size, 1e-8)
         coord = jnp.arange(size, dtype=dtype)
-        line = jnp.exp(-((coord - centre) ** 2) / (2.0 * sigma**2))
+        line = gaussian_profile_1d(coord, sigma, center=centre)
         reshape = [1] * len(shape)
         reshape[axis] = size
         window = window * line.reshape(reshape)
