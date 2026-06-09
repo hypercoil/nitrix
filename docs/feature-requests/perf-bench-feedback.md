@@ -28,10 +28,12 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `gaussian_kernel` sigma->gamma relation wrong (missing ½ factor) | [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` | low (clarity) |
 | `relaxed_modularity` doesn't reduce to Newman modularity — it's `Q_N / 2` (double-corrected undirected count); default `exclude_diag=True` also drops the diagonal | [doc-relaxed-modularity-newman-factor](doc-relaxed-modularity-newman-factor.md) | `graph/community.py:245` | low (clarity) |
 | `_iir.py` module docstring says `backend='scan' (default)`; real default is `'auto'` (→ fft on GPU / scan on CPU). Function docstrings are correct; only the module header is stale | [doc-iir-backend-default](doc-iir-backend-default.md) | `signal/_iir.py:~22` | normal |
+| `metrics` similarity conventions diverge from domain-standard ITK/ANTs (`ssd`=`MeanSquares` ✓, but `ncc`=Pearson ≠ ITK `Correlation`; MI is soft-histogram/differentiable; verify `lncc`=ANTs) — needs a nitrix convention decision before perf-bench measures the metric family / recipes | [metrics-convention-vs-domain-tools](metrics-convention-vs-domain-tools.md) | `metrics/intensity.py`, `metrics/information.py` | needs-decision |
 
 _(The five lomb/tsconv findings above resolved 2026-06-02 — see below;
 `doc-gaussian-kernel-gamma` and `doc-relaxed-modularity-newman-factor` are
-newly open 2026-06-03; `doc-iir-backend-default` newly open 2026-06-06.)_
+newly open 2026-06-03; `doc-iir-backend-default` newly open 2026-06-06;
+`metrics-convention-vs-domain-tools` newly open 2026-06-09.)_
 
 ## Resolved
 
