@@ -3,11 +3,18 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.metrics -- differentiable image-similarity metrics.
+nitrix.metrics -- differentiable comparison kernels.
 
-The similarity reductions that drive the registration recipes
-(``nitrix.register``) and double as segmentation / QA losses.  Two
-families:
+The *score kernels* that compare arrays and return a numeric tensor with
+genuine numerical content: similarity, overlap, classification, and
+contrastive objectives.  Per ``SPEC_UPDATE_v0.5 §1`` these are the nitrix
+half of the score-kernel / scalarisation boundary -- they return the
+unreduced (or flat-reduced) score; turning a score into a *loss* (sign,
+scalarisation, multi-term weighting) is nimox's ``scalarise`` / ``scheme``.
+"Loss" is therefore a nimox concept; ``metrics`` ships the kernels (a
+metric becomes a loss via ``1 - metric`` or its cross-entropy + scalarise).
+
+Five families:
 
 - ``intensity`` -- ``ssd``, ``ncc`` (global), ``lncc`` (local /
   windowed).  Within-modality; ``lncc`` is robust to smooth intensity
@@ -16,22 +23,22 @@ families:
   normalised MI), ``correlation_ratio``.  Cross-modal; assume only a
   functional (MI: arbitrary; CR: deterministic) intensity relationship.
 - ``overlap`` -- ``dice`` and ``jaccard`` (IoU), the soft
-  region-overlap coefficients (segmentation similarities / losses on
-  probabilistic masks).
+  region-overlap coefficients on probabilistic masks.
 - ``classification`` -- ``bce_with_logits``,
   ``cross_entropy_with_logits``, ``focal_loss``: the cross-entropy
   family (numerically stable from-logits forms) for supervised
   classification / segmentation.
-- ``contrastive`` -- ``nt_xent`` (InfoNCE), ``dino_cross_entropy`` /
-  ``ibot_cross_entropy`` (self-distillation), ``koleo`` (feature-spread
-  entropy regulariser): self-supervised representation losses.
+- ``contrastive`` -- ``info_nce`` (InfoNCE / NT-Xent),
+  ``dino_cross_entropy`` / ``ibot_cross_entropy`` (self-distillation),
+  ``koleo`` (feature-spread entropy regulariser): self-supervised
+  representation kernels.
 
 Substrate-composition note (SPEC_UPDATE_v0.3 §0 invariant): ``lncc``'s
 local sums are a separable box filter (the ``_internal.separable``
 engine shared with ``geometry.spatial_gradient``); ``ncc`` is the
-``stats.corr`` shape; MI / CR are soft (Parzen) histogram scatter-adds.
-No new kernel.  All metrics are differentiable w.r.t. their image
-arguments so they sit inside a registration loss.
+``stats.corr`` shape; MI / CR are soft (Parzen) histogram scatter-adds;
+all share the one ``_internal.reductions`` leaf.  No new kernel.  All are
+differentiable w.r.t. their array arguments.
 """
 
 from .intensity import lncc, ncc, ssd
@@ -49,8 +56,8 @@ from .classification import (
 from .contrastive import (
     dino_cross_entropy,
     ibot_cross_entropy,
+    info_nce,
     koleo,
-    nt_xent,
 )
 
 __all__ = [
@@ -70,7 +77,7 @@ __all__ = [
     'cross_entropy_with_logits',
     'focal_loss',
     # contrastive / self-supervised
-    'nt_xent',
+    'info_nce',
     'dino_cross_entropy',
     'ibot_cross_entropy',
     'koleo',

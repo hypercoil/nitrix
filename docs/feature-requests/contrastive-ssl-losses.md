@@ -1,12 +1,22 @@
 # Contrastive / self-supervised losses — `nitrix.metrics` / `nitrix.stats`
 
-> **Status (2026-06-09): SHIPPED.** `metrics/contrastive.py` adds `nt_xent`
-> (InfoNCE, finite `−2/τ` diagonal self-mask, adjacent-pair positives),
-> `dino_cross_entropy` (teacher centering+sharpening, `stop_gradient`),
-> `ibot_cross_entropy` (per-token, safe masked-mean over masked positions),
-> and `koleo` (NN-via-max-cosine entropy regulariser). All reuse
-> `numerics.l2_normalize`, are `reduction`-aware, and differentiable; the
-> teacher `center` is an argument (its EMA stays upstream). Loss-numeric
+> **Status (2026-06-09): SHIPPED (generalised per review §1a /
+> `SPEC_UPDATE_v0.5 §4`).** `metrics/contrastive.py` adds:
+> - `info_nce(za, zb, *, temperature)` — the **layout-agnostic** two-view
+>   InfoNCE/NT-Xent (positive of `za[i]` is `zb[i]`; symmetric cross-view
+>   cross-entropy). This replaces the original `nt_xent(z)`: the cross-view
+>   form takes the pairing as the caller's two batches (no baked
+>   `arange ^ 1` convention) **and** has no self-pairs, so the `−2/τ`
+>   self-mask and its partition-function bias are gone by construction.
+> - `dino_cross_entropy` (centered+sharpened teacher CE, `stop_gradient`) and
+>   `ibot_cross_entropy` (its per-token variant) — now share a private
+>   `_distill_ce` core; iBOT is that core + the **domain-mask** token
+>   reduction (`SPEC_UPDATE_v0.5 §1.2.2`), not a baked averaging.
+> - `koleo` (NN-via-max-cosine feature-spread regulariser).
+>
+> All reuse `numerics.l2_normalize` + the shared `_internal.reductions` leaf,
+> are `reduction`-aware and differentiable; the teacher `center` and the view
+> layout are explicit arguments (EMA / stacking stay upstream). Loss-numeric
 > item from the 2026-06-08 ilex audit
 > ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 

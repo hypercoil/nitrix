@@ -16,9 +16,9 @@ from nitrix.metrics import (
     dino_cross_entropy,
     focal_loss,
     ibot_cross_entropy,
+    info_nce,
     jaccard,
     koleo,
-    nt_xent,
 )
 
 # ---------------------------------------------------------------------------
@@ -190,29 +190,39 @@ def test_focal_loss_differentiable():
 # ---------------------------------------------------------------------------
 
 
-def test_nt_xent_matches_manual_reference():
+def test_info_nce_matches_manual_reference():
     rng = np.random.default_rng(0)
-    z = jnp.asarray(rng.standard_normal((6, 8)))
+    za = jnp.asarray(rng.standard_normal((6, 8)))
+    zb = jnp.asarray(rng.standard_normal((6, 8)))
     tau = 0.3
-    out = nt_xent(z, temperature=tau, reduction='none')
-    # Manual reference.
-    zn = np.asarray(z) / np.linalg.norm(np.asarray(z), axis=-1, keepdims=True)
-    sim = zn @ zn.T / tau
-    sim = sim - np.eye(6) * (2.0 / tau)
-    logp = sim - np.log(np.sum(np.exp(sim), axis=-1, keepdims=True))
-    pos = np.arange(6) ^ 1
-    ref = -logp[np.arange(6), pos]
+    out = info_nce(za, zb, temperature=tau, reduction='none')
+    # Manual reference: symmetric cross-view InfoNCE, diagonal positives.
+    a = np.asarray(za) / np.linalg.norm(np.asarray(za), axis=-1, keepdims=True)
+    b = np.asarray(zb) / np.linalg.norm(np.asarray(zb), axis=-1, keepdims=True)
+    logits = a @ b.T / tau
+    lab = logits - np.log(np.sum(np.exp(logits), axis=-1, keepdims=True))
+    lba = logits.T - np.log(np.sum(np.exp(logits.T), axis=-1, keepdims=True))
+    d = np.arange(6)
+    ref = -0.5 * (lab[d, d] + lba[d, d])
     np.testing.assert_allclose(np.asarray(out), ref, atol=1e-6)
 
 
-def test_nt_xent_lower_for_aligned_pairs():
-    # Pairs identical and well separated -> near-zero loss.
-    base = np.array([[5.0, 0.0], [-5.0, 0.0]])
-    aligned = jnp.asarray(np.repeat(base, 2, axis=0))  # [a,a,b,b]
-    misaligned = jnp.asarray(np.random.default_rng(1).standard_normal((4, 2)))
-    assert float(nt_xent(aligned, temperature=0.1)) < float(
-        nt_xent(misaligned, temperature=0.1)
+def test_info_nce_lower_for_aligned_pairs():
+    # Matched views well separated -> near-zero loss; random pairing -> high.
+    base = jnp.asarray([[5.0, 0.0], [-5.0, 0.0], [0.0, 5.0], [0.0, -5.0]])
+    rng = np.random.default_rng(1)
+    noise = jnp.asarray(rng.standard_normal((4, 2)) * 0.01)
+    assert float(info_nce(base, base + noise, temperature=0.1)) < float(
+        info_nce(base, jnp.asarray(rng.standard_normal((4, 2))), temperature=0.1)
     )
+
+
+def test_info_nce_self_pairs_have_no_self_similarity_bias():
+    # Cross-view formulation has no self-pairs -> identical-view inputs give a
+    # well-defined, finite loss with the diagonal as the (perfect) positive.
+    z = jnp.asarray(np.random.default_rng(7).standard_normal((5, 4)))
+    out = info_nce(z, z, temperature=0.2)
+    assert bool(jnp.isfinite(out))
 
 
 def test_dino_cross_entropy_matches_manual_and_stops_teacher_grad():
@@ -260,7 +270,7 @@ def test_koleo_larger_for_collapsed_features():
 def test_contrastive_losses_differentiable():
     rng = np.random.default_rng(5)
     z = jnp.asarray(rng.standard_normal((6, 8)))
-    assert bool(jnp.all(jnp.isfinite(jax.grad(lambda x: nt_xent(x))(z))))
+    assert bool(jnp.all(jnp.isfinite(jax.grad(lambda x: info_nce(x, x + 0.1))(z))))
     assert bool(jnp.all(jnp.isfinite(jax.grad(lambda x: koleo(x))(z))))
     s = jnp.asarray(rng.standard_normal((4, 10)))
     t = jnp.asarray(rng.standard_normal((4, 10)))

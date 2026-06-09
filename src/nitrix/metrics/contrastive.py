@@ -2,21 +2,24 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Contrastive / self-supervised representation losses.
+Contrastive / self-supervised representation kernels.
 
-- ``nt_xent`` -- the normalised temperature-scaled cross-entropy
-  (InfoNCE / SimCLR): pull paired views together and push all other
-  samples apart on the unit sphere.
+- ``info_nce`` -- the InfoNCE / NT-Xent objective between two aligned view
+  batches: pull the matched pair together and push every other sample apart
+  on the unit sphere.
 - ``dino_cross_entropy`` -- the self-distillation cross-entropy between a
   sharpened, centred teacher distribution (stop-gradient) and a student.
-- ``ibot_cross_entropy`` -- the masked-token variant of the above (a
-  masked-image-modelling objective), averaged over masked positions.
+- ``ibot_cross_entropy`` -- the masked-token variant of the above, averaged
+  over the masked positions of each sample.
 - ``koleo`` -- the Kozachenko--Leonenko differential-entropy regulariser:
   spread features out by penalising small nearest-neighbour distances.
 
-These are *costs* (minimise).  ``dino`` / ``ibot`` take the teacher
-``center`` as an argument -- maintaining it (an EMA over batches) is a
-training-loop concern, not part of the loss numeric.
+Per ``SPEC_UPDATE_v0.5 §1`` these are *score kernels*: they take the
+**objective structure** (the view pairing, the masked-token selection, the
+teacher ``center`` and its EMA) as explicit arguments rather than baking a
+recipe in, and they reduce through the shared leaf reduction. The EMA /
+centre bookkeeping and the view-stacking layout are recipes and stay with
+the nimox / ilex caller.
 """
 
 from __future__ import annotations
@@ -25,54 +28,79 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float
 
+from .._internal.reductions import Reduction, reduce
 from ..numerics import l2_normalize
-from ._common import Reduction, _reduce
 
 __all__ = [
-    'nt_xent',
+    'info_nce',
     'dino_cross_entropy',
     'ibot_cross_entropy',
     'koleo',
 ]
 
 
-def nt_xent(
-    z: Float[Array, 'two_n d'],
+def info_nce(
+    za: Float[Array, 'n d'],
+    zb: Float[Array, 'n d'],
     *,
     temperature: float = 0.5,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Normalised temperature-scaled cross-entropy (InfoNCE / SimCLR).
+    """InfoNCE / NT-Xent loss between two aligned view batches.
 
-    ``z`` stacks the ``2N`` view embeddings with **adjacent pairs**: rows
-    ``2i`` and ``2i+1`` are the two augmented views of sample ``i`` (each
-    other's positive).  Embeddings are L2-normalised; the scaled
-    cosine-similarity matrix ``z zᵀ / τ`` is the logits, the row's
-    positive (index ``i XOR 1``) is the target, and every other row is a
-    negative.
+    ``za[i]`` and ``zb[i]`` are the two views of sample ``i`` (the positive
+    pair); all other samples are negatives.  Both batches are L2-normalised,
+    and the scaled cross-view cosine-similarity ``za zbᵀ / τ`` is the logits:
+    row ``i`` is classified against the ``n`` keys in ``zb`` with the true
+    class ``i`` (and symmetrically for ``zb`` against ``za``).  The loss is
+    the average of the two directional cross-entropies.
 
-    The self-similarity on the diagonal is masked with a **finite**
-    ``-2/τ`` subtraction rather than ``-inf`` -- the diagonal cosine is
-    ``1/τ``, so this drops it below every off-diagonal entry without
-    risking an ``inf - inf`` in the ``log_softmax``.
+    This is the **layout-agnostic** core: the caller supplies the two view
+    batches, so there is no baked pair-index convention.  Because the
+    similarity is *cross-view*, a sample is never compared with itself --
+    there are no self-pairs to mask, so the loss has no self-similarity bias
+    (unlike a single stacked ``2N`` matrix).  A SimCLR-style stacked layout,
+    or one with within-view negatives, is recovered by the caller arranging
+    the views.
 
     Parameters
     ----------
-    z
-        ``(2N, d)`` view embeddings (adjacent-pair layout).
+    za, zb
+        ``(n, d)`` embeddings; ``za[i]``/``zb[i]`` are a positive pair.
     temperature
         Softmax temperature ``τ``.
     reduction
-        ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-view loss).
+        ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-sample loss).
     """
-    n2 = z.shape[0]
-    zn = l2_normalize(z, axis=-1)
-    sim = (zn @ zn.T) / temperature
-    sim = sim - jnp.eye(n2, dtype=sim.dtype) * (2.0 / temperature)
-    log_probs = jax.nn.log_softmax(sim, axis=-1)
-    positive = jnp.arange(n2) ^ 1
-    loss = -log_probs[jnp.arange(n2), positive]
-    return _reduce(loss, None, reduction)
+    za = l2_normalize(za, axis=-1)
+    zb = l2_normalize(zb, axis=-1)
+    logits = (za @ zb.T) / temperature  # (n, n)
+    n = za.shape[0]
+    idx = jnp.arange(n)
+    log_ab = jax.nn.log_softmax(logits, axis=-1)
+    log_ba = jax.nn.log_softmax(logits.T, axis=-1)
+    loss = -0.5 * (log_ab[idx, idx] + log_ba[idx, idx])
+    return reduce(loss, reduction=reduction)
+
+
+def _distill_ce(
+    student_logits: Float[Array, '... k'],
+    teacher_logits: Float[Array, '... k'],
+    center: Float[Array, 'k'],
+    *,
+    student_temp: float,
+    teacher_temp: float,
+) -> Float[Array, '...']:
+    """Centred / sharpened teacher cross-entropy, per sample (unreduced).
+
+    ``H(softmax((teacher - center)/τ_t)  [stop-grad],  log_softmax(student/τ_s))``
+    summed over the ``k`` prototypes.  The shared core of
+    :func:`dino_cross_entropy` and :func:`ibot_cross_entropy`.
+    """
+    teacher = jax.nn.softmax((teacher_logits - center) / teacher_temp, axis=-1)
+    teacher = jax.lax.stop_gradient(teacher)
+    student = jax.nn.log_softmax(student_logits / student_temp, axis=-1)
+    return -jnp.sum(teacher * student, axis=-1)
 
 
 def dino_cross_entropy(
@@ -87,12 +115,11 @@ def dino_cross_entropy(
     """Self-distillation cross-entropy (DINO).
 
     The teacher distribution is centred and sharpened
-    (``softmax((teacher - center) / teacher_temp)``) and detached; the
-    loss is its cross-entropy against the student's
-    ``log_softmax(student / student_temp)``, summed over the ``k``
-    prototypes and reduced over the batch.  Centring (subtracting a
-    running mean) plus a low teacher temperature is what prevents
-    collapse.
+    (``softmax((teacher - center) / teacher_temp)``) and detached; the loss
+    is its cross-entropy against the student's
+    ``log_softmax(student / student_temp)``, summed over the ``k`` prototypes
+    and reduced over the batch.  Centring (subtracting a running mean) plus a
+    low teacher temperature is what prevents collapse.
 
     Parameters
     ----------
@@ -105,11 +132,14 @@ def dino_cross_entropy(
     reduction
         ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-sample CE).
     """
-    teacher = jax.nn.softmax((teacher_logits - center) / teacher_temp, axis=-1)
-    teacher = jax.lax.stop_gradient(teacher)
-    student = jax.nn.log_softmax(student_logits / student_temp, axis=-1)
-    ce = -jnp.sum(teacher * student, axis=-1)
-    return _reduce(ce, None, reduction)
+    ce = _distill_ce(
+        student_logits,
+        teacher_logits,
+        center,
+        student_temp=student_temp,
+        teacher_temp=teacher_temp,
+    )
+    return reduce(ce, reduction=reduction)
 
 
 def ibot_cross_entropy(
@@ -124,11 +154,12 @@ def ibot_cross_entropy(
 ) -> Float[Array, '...']:
     """Masked-token self-distillation cross-entropy (iBOT).
 
-    The same centred / sharpened teacher cross-entropy as
-    :func:`dino_cross_entropy`, but evaluated per patch token and
-    averaged over the **masked** positions of each sample (the denominator
-    is clipped at 1 so an all-unmasked sample contributes 0 rather than
-    ``0/0``).
+    Exactly :func:`dino_cross_entropy`'s centred/sharpened cross-entropy
+    evaluated per patch token, then **domain-mask reduced** over the masked
+    tokens of each sample: the per-sample score is the
+    ``Σ(mask·ce)/Σ(mask)`` weighted mean over the token axis (the masked
+    token is the measurement domain), and the result is reduced over the
+    batch.  An all-unmasked sample contributes 0.
 
     Parameters
     ----------
@@ -144,14 +175,17 @@ def ibot_cross_entropy(
     reduction
         ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-sample CE).
     """
-    teacher = jax.nn.softmax((teacher_logits - center) / teacher_temp, axis=-1)
-    teacher = jax.lax.stop_gradient(teacher)
-    student = jax.nn.log_softmax(student_logits / student_temp, axis=-1)
-    ce = -jnp.sum(teacher * student, axis=-1)  # (batch, tokens)
-    m = mask.astype(ce.dtype)
-    denom = jnp.maximum(jnp.sum(m, axis=-1), 1.0)
-    per_sample = jnp.sum(ce * m, axis=-1) / denom
-    return _reduce(per_sample, None, reduction)
+    ce = _distill_ce(
+        student_logits,
+        teacher_logits,
+        center,
+        student_temp=student_temp,
+        teacher_temp=teacher_temp,
+    )  # (batch, tokens)
+    per_sample = reduce(
+        ce, axis=-1, weight=mask.astype(ce.dtype), reduction='mean'
+    )
+    return reduce(per_sample, reduction=reduction)
 
 
 def koleo(
@@ -162,12 +196,16 @@ def koleo(
 ) -> Float[Array, '...']:
     """Kozachenko--Leonenko entropy (feature-spread) regulariser.
 
-    Penalises features clumping together: for each (L2-normalised) point
-    it finds the nearest neighbour via the maximum cosine similarity
-    (self excluded by a ``-2`` diagonal, below the ``[-1, 1]`` range),
-    converts to the Euclidean distance ``sqrt(2 - 2 cos)``, and returns
+    Penalises features clumping together: for each (L2-normalised) point it
+    finds the nearest neighbour via the maximum cosine similarity (self
+    excluded by a ``-2`` diagonal, below the ``[-1, 1]`` range), converts to
+    the Euclidean distance ``sqrt(2 - 2 cos)``, and returns
     ``-log(distance + eps)`` -- large when points collapse together, small
     when they are well spread.
+
+    The dense self-excluded cosine nearest-neighbour is exact and right at
+    embedding-batch sizes; the EUCLIDEAN-semiring ELL k-NN is the at-scale
+    path if this is ever applied to a large point set.
 
     Parameters
     ----------
@@ -184,4 +222,4 @@ def koleo(
     sim = sim - jnp.eye(n, dtype=sim.dtype) * 2.0
     nn_sim = jnp.max(sim, axis=-1)
     distance = jnp.sqrt(jnp.maximum(2.0 - 2.0 * nn_sim, 0.0))
-    return _reduce(-jnp.log(distance + eps), None, reduction)
+    return reduce(-jnp.log(distance + eps), reduction=reduction)
