@@ -37,11 +37,16 @@ from nitrix.stats import (
     cov,
     env_inst,
     envelope,
+    gaussian_nll,
     hilbert_transform,
     instantaneous_frequency,
     instantaneous_phase,
+    kl_diagonal_gaussian,
     pairedcov,
     partialcorr,
+    pca_fit,
+    pca_inverse_transform,
+    pca_transform,
     pcorr,
     precision,
     product_filter,
@@ -372,3 +377,300 @@ def test_product_filtfilt_zero_phase():
     # Specifically, the imaginary part should be ~0 since the filter
     # itself is zero-phase.
     assert float(jnp.abs(out.imag).max()) < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# gaussian: KL divergence + negative log-likelihood
+# ---------------------------------------------------------------------------
+
+
+def test_kl_diagonal_gaussian_zero_at_standard_normal():
+    mean = jnp.zeros((4, 8))
+    log_var = jnp.zeros((4, 8))
+    kl = kl_diagonal_gaussian(mean, log_var, axis=-1, reduction='sum')
+    np.testing.assert_allclose(np.asarray(kl), 0.0, atol=1e-12)
+
+
+def test_kl_diagonal_gaussian_matches_closed_form():
+    rng = np.random.default_rng(0)
+    mean = rng.standard_normal((3, 5))
+    log_var = rng.standard_normal((3, 5)) * 0.5
+    ref = 0.5 * (mean**2 + np.exp(log_var) - 1.0 - log_var)
+    out = kl_diagonal_gaussian(
+        jnp.asarray(mean), jnp.asarray(log_var), reduction='none'
+    )
+    np.testing.assert_allclose(np.asarray(out), ref, atol=1e-10)
+
+
+def test_kl_diagonal_gaussian_nonnegative():
+    rng = np.random.default_rng(1)
+    mean = jnp.asarray(rng.standard_normal((10, 16)))
+    log_var = jnp.asarray(rng.standard_normal((10, 16)))
+    kl = kl_diagonal_gaussian(mean, log_var, axis=-1, reduction='sum')
+    assert float(kl.min()) >= -1e-9
+
+
+def test_kl_sum_axis_shape():
+    mean = jnp.zeros((6, 12))
+    log_var = jnp.zeros((6, 12))
+    per_sample = kl_diagonal_gaussian(mean, log_var, axis=-1, reduction='sum')
+    assert per_sample.shape == (6,)
+
+
+def test_gaussian_nll_matches_jax_norm_logpdf():
+    rng = np.random.default_rng(2)
+    x = jnp.asarray(rng.standard_normal((4, 7)))
+    mean = jnp.asarray(rng.standard_normal((4, 7)))
+    log_var = jnp.asarray(rng.standard_normal((4, 7)) * 0.3)
+    sigma = jnp.exp(0.5 * log_var)
+    ref = -jax.scipy.stats.norm.logpdf(x, loc=mean, scale=sigma)
+    out = gaussian_nll(x, mean, log_var, reduction='none')
+    np.testing.assert_allclose(np.asarray(out), np.asarray(ref), atol=1e-10)
+
+
+def test_gaussian_nll_differentiable():
+    rng = np.random.default_rng(3)
+    x = jnp.asarray(rng.standard_normal((5, 9)))
+    mean = jnp.asarray(rng.standard_normal((5, 9)))
+    log_var = jnp.asarray(rng.standard_normal((5, 9)) * 0.2)
+    g_mean, g_lv = jax.grad(
+        lambda m, lv: gaussian_nll(x, m, lv), argnums=(0, 1)
+    )(mean, log_var)
+    assert bool(jnp.all(jnp.isfinite(g_mean)))
+    assert bool(jnp.all(jnp.isfinite(g_lv)))
+
+
+# ---------------------------------------------------------------------------
+# pca
+# ---------------------------------------------------------------------------
+
+
+def test_pca_full_reconstruction_is_exact():
+    rng = np.random.default_rng(0)
+    X = jnp.asarray(rng.standard_normal((50, 8)))
+    res = pca_fit(X)  # keep all min(n, d) = 8 components
+    z = pca_transform(X, res.components, res.mean)
+    x_rec = pca_inverse_transform(z, res.components, res.mean)
+    np.testing.assert_allclose(np.asarray(x_rec), np.asarray(X), atol=1e-8)
+
+
+def test_pca_components_orthonormal():
+    rng = np.random.default_rng(1)
+    X = jnp.asarray(rng.standard_normal((100, 6)))
+    res = pca_fit(X)
+    gram = res.components @ res.components.T
+    np.testing.assert_allclose(np.asarray(gram), np.eye(6), atol=1e-8)
+
+
+def test_pca_explained_variance_matches_numpy_eigh():
+    rng = np.random.default_rng(2)
+    X_np = rng.standard_normal((200, 5))
+    res = pca_fit(jnp.asarray(X_np))
+    cov_np = np.cov(X_np, rowvar=False, bias=False)
+    eig = np.sort(np.linalg.eigvalsh(cov_np))[::-1]
+    np.testing.assert_allclose(
+        np.asarray(res.explained_variance), eig, atol=1e-8
+    )
+    # Descending.
+    ev = np.asarray(res.explained_variance)
+    assert bool(np.all(np.diff(ev) <= 1e-9))
+
+
+def test_pca_transform_decorrelates():
+    rng = np.random.default_rng(3)
+    # Correlated features.
+    base = rng.standard_normal((300, 3))
+    mix = rng.standard_normal((3, 5))
+    X = jnp.asarray(base @ mix)
+    res = pca_fit(X, n_components=3)
+    z = np.asarray(pca_transform(X, res.components, res.mean))
+    c = np.cov(z, rowvar=False, bias=False)
+    off = c - np.diag(np.diag(c))
+    assert float(np.abs(off).max()) < 1e-6
+
+
+def test_pca_sign_is_deterministic():
+    rng = np.random.default_rng(4)
+    X = jnp.asarray(rng.standard_normal((80, 7)))
+    a = pca_fit(X)
+    b = pca_fit(X)
+    np.testing.assert_array_equal(
+        np.asarray(a.components), np.asarray(b.components)
+    )
+    # Largest-magnitude entry of each component is non-negative.
+    comp = np.asarray(a.components)
+    rows = np.arange(comp.shape[0])
+    lead = comp[rows, np.argmax(np.abs(comp), axis=1)]
+    assert bool(np.all(lead >= 0))
+
+
+def test_pca_n_components_subset_shape():
+    rng = np.random.default_rng(5)
+    X = jnp.asarray(rng.standard_normal((40, 10)))
+    res = pca_fit(X, n_components=3)
+    assert res.components.shape == (3, 10)
+    assert res.explained_variance.shape == (3,)
+    z = pca_transform(X, res.components, res.mean)
+    assert z.shape == (40, 3)
+
+
+def test_pca_runs_on_active_backend():
+    # On the cuSolver-dead GPU, pca_fit must still succeed (safe_eigh
+    # transparently falls back to CPU and returns to the caller).
+    rng = np.random.default_rng(6)
+    X_np = rng.standard_normal((60, 4))
+    res = pca_fit(jnp.asarray(X_np))
+    cov_np = np.cov(X_np, rowvar=False, bias=False)
+    eig = np.sort(np.linalg.eigvalsh(cov_np))[::-1]
+    np.testing.assert_allclose(
+        np.asarray(res.explained_variance), eig, atol=1e-8
+    )
+
+
+# ---------------------------------------------------------------------------
+# pca: randomized solver
+# ---------------------------------------------------------------------------
+
+
+def _low_rank(n, d, r, seed):
+    rng = np.random.default_rng(seed)
+    u = rng.standard_normal((n, r))
+    v = rng.standard_normal((r, d))
+    return jnp.asarray(u @ v)
+
+
+def test_pca_randomized_matches_full_on_low_rank():
+    X = _low_rank(200, 30, 5, seed=0)
+    full = pca_fit(X, n_components=5, solver='full')
+    rand = pca_fit(
+        X,
+        n_components=5,
+        solver='randomized',
+        key=jax.random.PRNGKey(0),
+        n_power_iterations=4,
+    )
+    # Exactly rank-5 data: the randomized range finder captures the
+    # whole signal subspace, so the top-5 variances match the exact fit.
+    np.testing.assert_allclose(
+        np.asarray(rand.explained_variance),
+        np.asarray(full.explained_variance),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
+def test_pca_randomized_reconstructs_low_rank():
+    X = _low_rank(150, 40, 6, seed=1)
+    res = pca_fit(
+        X, n_components=6, solver='randomized', key=jax.random.PRNGKey(1)
+    )
+    z = pca_transform(X, res.components, res.mean)
+    x_rec = pca_inverse_transform(z, res.components, res.mean)
+    np.testing.assert_allclose(np.asarray(x_rec), np.asarray(X), atol=1e-6)
+
+
+def test_pca_randomized_components_orthonormal():
+    X = _low_rank(120, 25, 8, seed=2)
+    res = pca_fit(
+        X, n_components=8, solver='randomized', key=jax.random.PRNGKey(2)
+    )
+    gram = res.components @ res.components.T
+    np.testing.assert_allclose(np.asarray(gram), np.eye(8), atol=1e-6)
+
+
+def test_pca_randomized_reproducible():
+    X = _low_rank(100, 20, 4, seed=3)
+    a = pca_fit(X, n_components=4, solver='randomized', key=jax.random.PRNGKey(7))
+    b = pca_fit(X, n_components=4, solver='randomized', key=jax.random.PRNGKey(7))
+    np.testing.assert_array_equal(
+        np.asarray(a.components), np.asarray(b.components)
+    )
+
+
+def test_pca_randomized_requires_key():
+    X = _low_rank(50, 10, 3, seed=4)
+    with pytest.raises(ValueError, match='requires a PRNG key'):
+        pca_fit(X, n_components=3, solver='randomized')
+
+
+def test_pca_invalid_solver_raises():
+    X = _low_rank(50, 10, 3, seed=5)
+    with pytest.raises(ValueError, match='expected'):
+        pca_fit(X, n_components=3, solver='bogus')
+
+
+# ---------------------------------------------------------------------------
+# pca: gram + auto solvers
+# ---------------------------------------------------------------------------
+
+
+def test_pca_gram_matches_full_n_lt_d():
+    rng = np.random.default_rng(10)
+    X = jnp.asarray(rng.standard_normal((40, 100)))  # n < d (CompCor regime)
+    full = pca_fit(X, n_components=8, solver='full')
+    gram = pca_fit(X, n_components=8, solver='gram')
+    np.testing.assert_allclose(
+        np.asarray(gram.explained_variance),
+        np.asarray(full.explained_variance),
+        atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        np.abs(np.asarray(gram.components)),
+        np.abs(np.asarray(full.components)),
+        atol=1e-6,
+    )
+    # Scores (the CompCor regressors) reconstruct identically.
+    zf = pca_transform(X, full.components, full.mean)
+    zg = pca_transform(X, gram.components, gram.mean)
+    np.testing.assert_allclose(np.asarray(zg), np.asarray(zf), atol=1e-6)
+
+
+def test_pca_gram_matches_full_n_gt_d():
+    rng = np.random.default_rng(11)
+    X = jnp.asarray(rng.standard_normal((200, 20)))
+    full = pca_fit(X, n_components=5, solver='full')
+    gram = pca_fit(X, n_components=5, solver='gram')
+    np.testing.assert_allclose(
+        np.asarray(gram.explained_variance),
+        np.asarray(full.explained_variance),
+        atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        np.asarray(gram.components), np.asarray(full.components), atol=1e-6
+    )
+
+
+def test_pca_gram_components_orthonormal():
+    rng = np.random.default_rng(12)
+    X = jnp.asarray(rng.standard_normal((25, 90)))
+    res = pca_fit(X, n_components=10, solver='gram')
+    gram = res.components @ res.components.T
+    np.testing.assert_allclose(np.asarray(gram), np.eye(10), atol=1e-6)
+
+
+def test_pca_auto_picks_gram_when_n_lt_d():
+    rng = np.random.default_rng(13)
+    X = jnp.asarray(rng.standard_normal((30, 120)))
+    auto = pca_fit(X, n_components=6, solver='auto')
+    gram = pca_fit(X, n_components=6, solver='gram')
+    np.testing.assert_array_equal(
+        np.asarray(auto.components), np.asarray(gram.components)
+    )
+
+
+def test_pca_auto_picks_full_when_n_ge_d():
+    rng = np.random.default_rng(14)
+    X = jnp.asarray(rng.standard_normal((120, 30)))
+    auto = pca_fit(X, n_components=6, solver='auto')
+    full = pca_fit(X, n_components=6, solver='full')
+    np.testing.assert_array_equal(
+        np.asarray(auto.components), np.asarray(full.components)
+    )
+
+
+def test_pca_gram_topk_shape():
+    rng = np.random.default_rng(15)
+    X = jnp.asarray(rng.standard_normal((50, 200)))
+    res = pca_fit(X, n_components=4, solver='gram')
+    assert res.components.shape == (4, 200)
+    assert res.explained_variance.shape == (4,)

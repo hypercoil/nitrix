@@ -107,6 +107,7 @@ Severity: **ENABLING** = a downstream surface is blocked / hand-rolling it;
 | GMM label→image render | [lab2im-gmm-synthesis](lab2im-gmm-synthesis.md) | ENABLING | `augment` |
 | Generative bias field (simulated INU) | [generative-bias-field](generative-bias-field.md) | ENABLING | `augment` / `bias` |
 | Gamma, histogram-shift, gaussian/rician noise | [intensity-augmentation-ops](intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
+| Gibbs (truncation) ringing artefact | [gibbs-ringing](gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
 | Random flip / crop / resized-crop / affine / SVF gen | [geometric-augmentation-ops](geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
 
 ### Loss / metric numerics (nimox loss library)
@@ -139,15 +140,18 @@ Severity: **ENABLING** = a downstream surface is blocked / hand-rolling it;
   neural-ODE is a concrete consumer for a general pure-jax `odeint`
   (the diffrax dependency cannot follow into nitrix).
 
-## Namespace — resolved (2026-06-08)
+## Namespace — resolved + realized (2026-06-08)
 
-**Decision: a thin `nitrix.augment` that *re-exports*.** The canonical home of
-each atom is its existing module — `numerics` (crop/flip/normalize), `signal`
-(noise), `geometry`/`geometry.transform` (deformation/affine), `metrics` /
-`stats` / `register.regulariser` (losses), `bias` (corrective). `nitrix.augment`
-adds **only** the genuinely-new generative primitives that have no other home
-(GMM label→image render, generative/INU bias field) and re-exports the rest as
-a cohesive augmentation surface. This keeps one discoverable namespace for the
-augmentation story without duplicating primitives or fragmenting the taxonomy.
-The per-atom "Home" lines below name the canonical module; `nitrix.augment` is
-the re-export facade over them.
+**Decision: a cohesive `nitrix.augment` subpackage.** As built, `nitrix.augment`
+houses the augmentation-specific primitives in three submodules — `intensity`
+(gamma, histogram-shift, gaussian/rician noise), `geometric` (flip, crop,
+resized-crop, random affine, random SVF), and `synthesis` (GMM label→image,
+simulated bias/INU) — and **reuses** the lower substrate *internally* rather
+than duplicating it: `geometric.random_resized_crop` calls
+`geometry.spatial_transform`, `random_affine_matrix` calls
+`geometry.params_to_affine_matrix`, and `random_svf_displacement` calls
+`geometry.integrate_velocity_field`. Loss numerics stayed in their canonical
+homes (`metrics` / `stats` / `register`), not under `augment`. This keeps one
+discoverable namespace for the augmentation story while the heavy numerics live
+once in `geometry` / `metrics` / `stats`. Shipped in commits on
+`feat/ilex-backlog-impl`.

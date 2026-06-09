@@ -1,11 +1,28 @@
-# Affine matrix algebra (geometric convention) — `nitrix.geometry.transform`
+# Affine matrix algebra (geometric convention) — `nitrix.geometry.affine`
 
-> **Status (2026-06-08): not started — ENABLING.** Model-numeric item from
-> the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). The source
-> file (`ilex/nimox/modules/affine.py`) is **already pure numerics** — no
-> equinox, every symbol `(Array,…)->Array` — and its own docstring names
-> "Long-term home: nitrix". A clean, high-value, low-risk lift.
+> **Status (2026-06-08): SHIPPED.** Ported to `geometry/affine.py` (sibling
+> of the Lie-algebra `geometry/transform.py`): `params_to_affine_matrix` /
+> `affine_matrix_to_params` (Euler/scale/shear `T@R@S@E`),
+> `angles_to_rotation_matrix` / `rotation_matrix_to_angles`, `fit_affine`
+> (closed-form weighted LS), `make_square_affine` / `invert_affine` /
+> `compose_affine`. The cuSolver-dead ops are routed for GPU: `inv`→
+> `safe_inv`, normal-equations solve→`safe_cho_solve`, `cholesky`→a new
+> `linalg._solver.safe_cholesky`, and the 3×3 `det` + diagonal inverse are
+> analytic (GPU-native). All batched, differentiable, round-trip tested on
+> GPU. Model-numeric item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
+>
+> **Generalised to 2-D + 3-D (2026-06-09, review §5.5).** The chart now
+> supports `ndim ∈ {2, 3}`: `params_to_affine_matrix(par, *, ndim)` (2-D = 6
+> params: trans 2, rotation 1, scale 2, shear 1 → `(2,3)`),
+> `affine_matrix_to_params` (infers `ndim = cols − 1`),
+> `angles_to_rotation_matrix` / `rotation_matrix_to_angles` (2-D planar
+> angle), and `augment.random_affine_matrix(*, ndim)`. 3-D paths are
+> value-identical (regression-tested); 2-D round-trips + `fit_affine` 2-D
+> verified. `params_to_affine_matrix` takes an explicit `ndim` because a
+> 6-vector is ambiguous (rigid-3-D vs full-2-D). The shear matrix is built
+> generically from its strict-upper entries; `det` dispatches to analytic
+> `_det2x2`/`_det3x3`.
 
 **What.** The decompositional affine algebra in the **Euler-angle /
 scale / shear** convention (SynthMorph / VoxelMorph / lab2im), complementary

@@ -1,11 +1,15 @@
-# Uniform 1-ring mesh Laplacian smoothing — `nitrix.geometry.mesh`
+# Uniform 1-ring mesh Laplacian smoothing — `nitrix.sparse.mesh`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Model-numeric item from
-> the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). A mesh-
-> geometry smoothing step, distinct from the *graph*-operator
-> `graph.laplacian` and from the *cotangent* Laplacian already shipped under
-> `geometry.dec`.
+> **Status (2026-06-09): SHIPPED.** `sparse/mesh.py` adds
+> `mesh_laplacian_smooth(vertices, faces, *, lam, iterations)` — the uniform
+> (combinatorial) 1-ring step `v ← (1−λ)v + λ·mean(neighbours)`, neighbours
+> from triangle edges via `segment`-style scatter-add (shared edges cancel
+> in the mean on a closed manifold, so no de-dup needed), iterated with
+> `lax.fori_loop`. `lam=0` is identity; differentiable. Landed in
+> `sparse.mesh` (next to `Mesh` / `compute_vertex_normals`) rather than a new
+> `geometry.mesh`. Model-numeric item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)); distinct from
+> `graph.laplacian` (graph operator) and the cotangent Laplacian.
 
 **What.** One uniform (combinatorial) Laplacian smoothing step on a triangle
 mesh: `v ← (1−λ)·v + λ·mean(1-ring neighbours)`, with the 1-ring incidence

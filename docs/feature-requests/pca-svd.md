@@ -1,10 +1,42 @@
 # PCA fit / transform / inverse (SVD) — `nitrix.stats.pca`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Model-numeric item from
-> the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). nitrix has
-> **no PCA / SVD-fit** primitive; the new `krakencoder` model hand-rolls the
-> projection from pre-fit weights.
+> **Status (2026-06-08): SHIPPED.** `stats/pca.py` adds `pca_fit`
+> (`PCAResult` NamedTuple of `components`/`mean`/`explained_variance`),
+> `pca_transform`, `pca_inverse_transform`. The basis is the **covariance
+> eigendecomposition via `linalg._solver.safe_eigh`** — deliberately *not*
+> `jnp.linalg.svd`, which is dead on the cuSolver-affected GPU here (verified:
+> `pca_fit` runs on GPU via the transparent CPU fallback). Deterministic
+> `svd_flip` sign convention; `transform`/`inverse` take explicit
+> `(components, mean)` so a pre-fit basis (loaded weights) applies without a
+> local fit. Model-numeric item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
+>
+> **Randomized solver added (2026-06-08).** `pca_fit(..., solver='randomized',
+> key=, n_oversamples=, n_power_iterations=)` — Halko-style randomised PCA via
+> an **eigh-based range finder** (orthonormalise through the small Gram
+> `eigh`; project; solve the `(k+p)×(k+p)` eigenproblem). Deliberately uses
+> **no QR and no SVD** — both dead on this cuSolver stack — so it is portable;
+> the large work is matmuls, only the `(k+p)`-sized factorisations hit the
+> solver. Preferred for top-`k`-with-`k≪d` (the fMRIPrep / nilearn / CompCor
+> regime). Verified on GPU against the exact path for low-rank data.
+>
+> **Gram / CompCor solver added (2026-06-09).** `solver='gram'` — exact PCA
+> via the `(n, n)` Gram `Xc Xcᵀ` (instead of the `(d, d)` covariance),
+> recovering components as `V = Xcᵀ U / Σ`. Far cheaper when `n ≪ d` — the
+> **CompCor regime** (`n_timepoints ≪ n_voxels`); top-`k` honoured by
+> `n_components`, and `pca_transform` gives the component time-series
+> regressors. Bit-identical to `'full'`. Added `solver='auto'` (gram when
+> `n<d`, else full). `thrux`'s CompCor step can now call this directly.
+
+## Roadmap (PCA family growth)
+
+The `solver=` parameter is the dispatch seam (mirroring the
+extremal-eigensolver dispatcher — `[[eigsolve-dispatcher-plan]]`):
+
+- **sparse `X`** — route the projection / Gram step to the sparse-ELL eig
+  solvers (same seam).
+- **right-singular-vectors-only** convenience for the CompCor temporal
+  components (the scores are already `pca_transform`).
 
 **What.** Principal-component analysis as a small pure-numeric triple:
 

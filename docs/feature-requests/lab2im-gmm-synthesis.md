@@ -1,10 +1,13 @@
 # GMM label→image synthesis (lab2im) — `nitrix.augment`
 
-> **Status (2026-06-08): not started — ENABLING.** Training-substrate item
-> from the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). The
-> SynthSeg/lab2im domain-randomisation core; nitrix has no
-> label-synthesis primitive of any kind.
+> **Status (2026-06-08): SHIPPED.** `augment/synthesis.py` adds
+> `gmm_label_to_image(label_map, means, stds, key, *, nonneg)` — the
+> per-label Gaussian-mixture render `means[label] + stds[label]·N(0,1)`.
+> Takes **explicit** per-label stats (deterministic render; randomised
+> contrast is a 2-line caller draw of `means`/`stds`, and explicit stats
+> also serve fixed intensities), gathering over a static `n_labels` table.
+> Training-substrate item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** Render an MR-like intensity volume from an integer anatomical
 label map by drawing a per-label Gaussian `(mean, std)` and sampling

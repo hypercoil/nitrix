@@ -29,6 +29,11 @@ from .diffeomorphic import (
     diffeomorphic_demons_register,
 )
 from .recipes import affine_register, rigid_register
+from .regulariser import (
+    bending_energy,
+    gradient_smoothness,
+    jacobian_folding_penalty,
+)
 
 __all__ = [
     'rigid_register',
@@ -38,4 +43,7 @@ __all__ = [
     'diffeomorphic_demons_register',
     'DemonsSpec',
     'DiffeomorphicResult',
+    'gradient_smoothness',
+    'bending_energy',
+    'jacobian_folding_penalty',
 ]

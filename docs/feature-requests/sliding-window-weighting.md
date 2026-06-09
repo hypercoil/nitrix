@@ -1,11 +1,13 @@
 # Sliding-window weighting kernel + overlap-add stitch — `nitrix.numerics`
 
-> **Status (2026-06-02): not started — CONVENIENCE (borderline; the
-> orchestration is out of scope, only the two numeric pieces are
-> `nitrix`-shaped).** Consumer-pipeline substrate for the ilex → thrux
-> migration. Provenance: 2026-06-02 ilex vendored-model survey
-> ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
-> item F).
+> **Status (2026-06-09): SHIPPED.** `numerics/spatial.py` adds the two
+> numeric pieces: `gaussian_window(shape, *, sigma_scale)` (separable
+> Gaussian patch weight, peak 1 at centre) and `overlap_add(weighted_sum,
+> weight, *, eps)` (the `Σ(w·patch)/Σw` normalisation, eps-guarded for
+> uncovered voxels). The tiling / scheduling stays in the orchestration
+> layer (`nimox.inference` / `thrux`), as scoped. Consumer-pipeline
+> substrate ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md),
+> volumetric item F).
 
 **What.** `hd_bet`, `fastcsr`, `wholebrain_unest`, `brats_segresnet`,
 `synthstrip`, `bme_x` all tile a large volume and blend overlapping patch

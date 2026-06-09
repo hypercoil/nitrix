@@ -53,6 +53,7 @@ the nimox modules + newest models (`krakencoder`, `cortex_ode`, `surfnet`).
 | [lab2im-gmm-synthesis](lab2im-gmm-synthesis.md) | ENABLING | `augment` |
 | [generative-bias-field](generative-bias-field.md) (simulated INU) | ENABLING | `augment` / `bias` |
 | [intensity-augmentation-ops](intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
+| [gibbs-ringing](gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
 | [geometric-augmentation-ops](geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
 | [dice-loss](dice-loss.md) | ENABLING | `metrics.dice` |
 | [cross-entropy-focal](cross-entropy-focal.md) | CONVENIENCE (dedup ×3) | `metrics` |

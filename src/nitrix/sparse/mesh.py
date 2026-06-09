@@ -68,6 +68,7 @@ if TYPE_CHECKING:
 __all__ = [
     'IcosphereHierarchy',
     'Mesh',
+    'compute_vertex_normals',
     'icosphere',
     'icosphere_bary_upsampler',
     'icosphere_cross_level_adjacency',
@@ -77,6 +78,7 @@ __all__ = [
     'mesh_coarsen_meanpool',
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
+    'mesh_laplacian_smooth',
     'mesh_pool_max',
     'mesh_unpool_max',
 ]
@@ -1130,3 +1132,89 @@ def mesh_bary_upsample(
         semiring=REAL,
         n_cols=bary_ell.n_cols,
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-vertex differential geometry (normals, uniform smoothing)
+# ---------------------------------------------------------------------------
+
+
+def compute_vertex_normals(
+    vertices: Float[Array, 'n_vertices 3'],
+    faces: Int[Array, 'n_faces 3'],
+) -> Float[Array, 'n_vertices 3']:
+    """Unit per-vertex normals from a triangle mesh.
+
+    Each face contributes its (un-normalised) cross-product normal
+    ``(v1 - v0) x (v2 - v0)`` -- whose magnitude is twice the triangle
+    area, so larger faces weight more -- scattered onto its three
+    vertices; the per-vertex sum is then L2-normalised.
+
+    Parameters
+    ----------
+    vertices
+        ``(n_vertices, 3)`` coordinates.
+    faces
+        ``(n_faces, 3)`` vertex indices.
+
+    Returns
+    -------
+    ``(n_vertices, 3)`` unit normals (a zero-area vertex maps to a zero
+    vector rather than ``NaN``).
+    """
+    v0 = vertices[faces[:, 0]]
+    v1 = vertices[faces[:, 1]]
+    v2 = vertices[faces[:, 2]]
+    face_normals = jnp.cross(v1 - v0, v2 - v0)
+    normals = jnp.zeros_like(vertices)
+    for k in range(3):
+        normals = normals.at[faces[:, k]].add(face_normals)
+    norm = jnp.sqrt(jnp.sum(normals**2, axis=-1, keepdims=True))
+    return normals / jnp.maximum(norm, 1e-12)
+
+
+def mesh_laplacian_smooth(
+    vertices: Float[Array, 'n_vertices 3'],
+    faces: Int[Array, 'n_faces 3'],
+    *,
+    lam: float = 0.5,
+    iterations: int = 1,
+) -> Float[Array, 'n_vertices 3']:
+    """Uniform (combinatorial) Laplacian smoothing of vertex positions.
+
+    Each iteration moves every vertex a fraction ``lam`` toward the
+    average of its 1-ring neighbours:
+    ``v <- (1 - lam) v + lam * mean(neighbours(v))``.  Neighbours come
+    from the triangle edges; on a closed manifold every neighbour is
+    counted by an equal number of incident faces, so the unweighted mean
+    is exact without de-duplicating shared edges.
+
+    Parameters
+    ----------
+    vertices
+        ``(n_vertices, 3)`` coordinates.
+    faces
+        ``(n_faces, 3)`` vertex indices.
+    lam
+        Step size in ``[0, 1]`` (``0`` = no-op).
+    iterations
+        Number of smoothing passes (static).
+
+    Returns
+    -------
+    ``(n_vertices, 3)`` smoothed coordinates.
+    """
+    i0, i1, i2 = faces[:, 0], faces[:, 1], faces[:, 2]
+    src = jnp.concatenate([i0, i1, i2, i1, i2, i0])
+    dst = jnp.concatenate([i1, i2, i0, i0, i1, i2])
+    n = vertices.shape[0]
+    degree = jnp.zeros((n,), dtype=vertices.dtype).at[src].add(1.0)
+    inv_degree = (1.0 / jnp.maximum(degree, 1.0))[:, None]
+
+    def body(_: int, v: Array) -> Array:
+        neighbour_sum = jnp.zeros_like(v).at[src].add(v[dst])
+        mean = neighbour_sum * inv_degree
+        return (1.0 - lam) * v + lam * mean
+
+    out = jax.lax.fori_loop(0, iterations, body, vertices)
+    return cast(Float[Array, 'n_vertices 3'], out)

@@ -815,6 +815,44 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 
 ### 10.3 Shipped entries
 
+### 2026-06-09 — ilex-backlog implementation sprint (Phases 1–5) + review-driven boundary
+
+- **Type:** Downstream deviation (consumer-driven scope) + Plan revision (boundary)
+- **Triggered by:** The 2026-06-02 / 2026-06-08 ilex audits
+  (`docs/feature-requests/ilex-{pipeline,training}-substrate.md`); follow-up
+  code review (`docs/review-ilex-backlog-impl.md`).
+- **Description:** Implemented the full ilex backlog across `numerics`,
+  `metrics`, `stats`, `geometry`, `morphology`, `register`, `sparse`, and a
+  new `augment` subpackage. The review surfaced that the
+  **score-kernel ↔ scalarisation boundary** and the **keyed-generator**
+  symbol category were never specified; both are now drawn.
+- **Capability shipped:** See the per-symbol table in
+  **`SPEC_UPDATE_v0.5.md §10.A`** (the detailed record for this sprint).
+- **Shape:** JAX-only throughout. Dense factorisations (PCA, affine
+  decompose) route through `linalg._solver.safe_*` for the cuSolver-dead GPU.
+- **Deferred work:** Pallas kernels; adaptive/symplectic ODE + adjoint;
+  sparse-`X` PCA. Review §6/§5 P2 follow-ups -- **done 2026-06-09:**
+  - **`linalg._solver` factory** (review §6.2): `_probed_device_pair` +
+    `_run_safe`; the five `safe_*` collapse to one-liners and
+    `safe_inv`/`safe_solve` gained the adaptive latch. Validated on GPU
+    across `test_linalg` / `test_linalg_spd` / `test_affine` / `test_stats`
+    (pca) / `test_register_recipes`.
+  - **2-D affine chart** (review §5.5): `params_to_affine_matrix` /
+    `affine_matrix_to_params` / `angles↔rotation` / `random_affine_matrix`
+    now support `ndim` in `{2, 3}`; the 3-D paths are value-identical.
+  - **Shared Gaussian-kernel builder** (review §4.5): one `_internal`
+    1-D Gaussian profile under `numerics.spatial` / `smoothing`.
+
+  **Still deferred** (none consumer-blocking): the
+  `sparse.mesh._apply_shared_ell` `backend` kwarg (review §5.3) -- pre-existing
+  code, correct today; thread `backend='auto'` *when* the Pallas ELL path
+  lands so the non-default is testable, rather than add speculative API now.
+- **Non-negotiables held:** §2.2 respected — pure functions, NamedTuple /
+  frozen containers, no equinox/scipy runtime imports, jaxtyping throughout.
+  The boundary (`SPEC_UPDATE_v0.5 §1`), keyed-generator clarification (§2),
+  and `augment` ratification (§3) keep the additions inside the substrate's
+  organising principles rather than creating a parallel structure.
+
 ### 2026-06-08 — Registration suite (rigid/affine + diffeomorphic) + three §12 graduations
 
 - **Type:** Plan revision + §12 → §10.A graduations

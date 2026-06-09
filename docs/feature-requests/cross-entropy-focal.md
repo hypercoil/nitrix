@@ -1,10 +1,12 @@
 # Cross-entropy family + focal loss — `nitrix.metrics`
 
-> **Status (2026-06-08): not started — CONVENIENCE (dedup-driven).**
+> **Status (2026-06-08): SHIPPED.** `metrics/classification.py` adds
+> `bce_with_logits`, `cross_entropy_with_logits`, `focal_loss`. The stable
+> BCE core (`max(x,0) − x·t + log1p(exp(−|x|))`) is a shared private helper
+> that `focal_loss` reuses (dedup of the three ilex copies). All are
+> `Reduction`-aware costs, pure (GPU-safe), and differentiable.
 > Loss-numeric item from the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). The
-> numerically-stable BCE is currently **copy-pasted in three places** in
-> ilex — the strongest argument for a single primitive.
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** The cross-entropy primitives, all pure and numerically careful:
 

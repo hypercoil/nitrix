@@ -10,14 +10,17 @@ These are private; the public surface is in ``intensity`` and
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Sequence
+from typing import Optional, Sequence
 
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from .._internal.reductions import Reduction, reduce
 from .._internal.separable import SeparableBoundaryMode, correlate1d
 
-Reduction = Literal['mean', 'sum', 'none']
+# ``Reduction`` is re-exported from the shared reduction surface
+# (``_internal.reductions``) so the metrics modules keep one import site.
+__all__ = ['Reduction']
 # The windowed box sum and ``geometry.spatial_gradient`` share one
 # cross-correlation engine and one boundary-mode vocabulary; both live
 # in ``nitrix._internal.separable``.
@@ -43,20 +46,13 @@ def _reduce(
     mask: Optional[Array],
     reduction: Reduction,
 ) -> Array:
-    """Apply an optional 0/1 (or soft) ``mask`` and reduce."""
-    if mask is not None:
-        values = values * mask
-    if reduction == 'none':
-        return values
-    if reduction == 'sum':
-        return values.sum()
-    if reduction == 'mean':
-        if mask is not None:
-            return values.sum() / jnp.maximum(mask.sum(), 1e-12)
-        return values.mean()
-    raise ValueError(
-        f'reduction={reduction!r}; expected "mean", "sum", or "none".'
-    )
+    """Masked reduce -- a thin adapter over the shared ``reduce`` leaf.
+
+    ``mask`` is the per-element domain mask (``SPEC_UPDATE_v0.5 §1.2``); it
+    maps to the shared helper's ``weight`` so ``reduction='mean'`` is the
+    domain-mask weighted mean ``Σ(w·x)/Σw``.
+    """
+    return reduce(values, weight=mask, reduction=reduction)
 
 
 def _resolve_range(

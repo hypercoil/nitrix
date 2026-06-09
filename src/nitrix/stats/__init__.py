@@ -12,6 +12,10 @@ Two submodules:
 - ``fourier``    -- spectral utilities: product-filter,
   analytic-signal, Hilbert transform, instantaneous frequency /
   phase, envelope.
+- ``gaussian``   -- closed-form diagonal-Gaussian KL divergence and
+  negative log-likelihood (log-variance parameterised).
+- ``pca``        -- principal-component analysis (fit / transform /
+  inverse) via the covariance eigendecomposition.
 
 This subpackage replaces ``nitrix.functional.covariance`` and
 ``nitrix.functional.fourier``.
@@ -42,6 +46,13 @@ from .fourier import (
     product_filter,
     product_filtfilt,
 )
+from .gaussian import gaussian_nll, kl_diagonal_gaussian
+from .pca import (
+    PCAResult,
+    pca_fit,
+    pca_inverse_transform,
+    pca_transform,
+)
 
 __all__ = [
     # covariance
@@ -67,4 +78,12 @@ __all__ = [
     'instantaneous_phase',
     'product_filter',
     'product_filtfilt',
+    # gaussian
+    'kl_diagonal_gaussian',
+    'gaussian_nll',
+    # pca
+    'PCAResult',
+    'pca_fit',
+    'pca_transform',
+    'pca_inverse_transform',
 ]

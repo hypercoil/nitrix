@@ -1,10 +1,14 @@
 # Generative bias field — simulated INU — `nitrix.augment`
 
-> **Status (2026-06-08): not started — ENABLING.** Training-substrate item
-> from the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). The
-> *forward simulation* counterpart to the corrective `nitrix.bias` family —
-> a distinct, complementary primitive.
+> **Status (2026-06-08): SHIPPED.** `augment/synthesis.py` adds
+> `simulate_bias_field(spatial_shape, key, *, max_std, grid_fraction)` — a
+> low-resolution Gaussian field (std `~ U(0, max_std)`), linearly upsampled
+> and exponentiated into a smooth strictly-positive multiplicative INU
+> field (`max_std=0` → all-ones no-op). The *forward simulation*
+> counterpart to the corrective `nitrix.bias` family, kept as a distinct
+> name to avoid colliding with the estimators. Training-substrate item from
+> the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** Generate a smooth low-frequency multiplicative intensity
 non-uniformity (INU / bias) field with mean ≈ 1: draw a small

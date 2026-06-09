@@ -24,6 +24,12 @@ Submodules:
   models.
 - ``coords`` -- coordinate utilities: ``center_of_mass_points``,
   ``displacement_from_reference_*``, ``compactness_penalty``.
+- ``transform`` -- the Lie-group chart (``rigid_exp`` / ``affine_exp``)
+  + ``apply_affine`` / ``affine_grid``.
+- ``affine``  -- the geometric-parameter affine algebra (Euler-angle /
+  scale / shear ``T @ R @ S @ E`` compose / decompose) and the
+  closed-form least-squares ``fit_affine`` between point sets;
+  complementary to the ``transform`` exponential chart.
 
 See SPEC §4.4, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
 """
@@ -44,6 +50,7 @@ from .grid import (
     jacobian_det_displacement,
     jacobian_displacement,
     resample,
+    sample_at_points,
     spatial_transform,
     spatial_transform_batched,
     # legacy aliases (removed at v0.1)
@@ -64,6 +71,16 @@ from .transform import (
     apply_affine,
     rigid_exp,
     rigid_log,
+)
+from .affine import (
+    affine_matrix_to_params,
+    angles_to_rotation_matrix,
+    compose_affine,
+    fit_affine,
+    invert_affine,
+    make_square_affine,
+    params_to_affine_matrix,
+    rotation_matrix_to_angles,
 )
 from .sphere import (
     cartesian_to_latlong,
@@ -92,6 +109,7 @@ __all__ = [
     'identity_grid',
     'spatial_transform',
     'spatial_transform_batched',
+    'sample_at_points',
     'integrate_velocity_field',
     'jacobian_displacement',
     'jacobian_det_displacement',
@@ -112,6 +130,15 @@ __all__ = [
     'affine_exp',
     'apply_affine',
     'affine_grid',
+    # affine algebra (geometric params: T @ R @ S @ E; point-set fit)
+    'make_square_affine',
+    'invert_affine',
+    'compose_affine',
+    'fit_affine',
+    'angles_to_rotation_matrix',
+    'rotation_matrix_to_angles',
+    'params_to_affine_matrix',
+    'affine_matrix_to_params',
     # interpolation-method ADT
     'Interpolator',
     'Linear',

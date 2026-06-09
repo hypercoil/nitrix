@@ -63,6 +63,7 @@ __all__ = [
     'identity_grid',
     'spatial_transform',
     'spatial_transform_batched',
+    'sample_at_points',
     'integrate_velocity_field',
     'jacobian_displacement',
     'jacobian_det_displacement',
@@ -806,3 +807,56 @@ def jacobian_det_displacement(
 cmass_regular_grid = center_of_mass_grid
 vec_int = integrate_velocity_field
 rescale = resample
+
+
+def sample_at_points(
+    volume: Float[Array, '...'],
+    points: Float[Array, '*n ndim'],
+    *,
+    method: Interpolator = Linear(),
+    mode: BoundaryMode = 'constant',
+    cval: float = 0.0,
+) -> Float[Array, '...']:
+    """Sample a volume at an arbitrary list of continuous points.
+
+    The scattered-point complement to ``spatial_transform`` (which samples
+    on a coordinate *grid*): given ``points`` of shape ``(*n, ndim)`` in
+    **index/voxel coordinates** (coordinate ``c`` maps to array index
+    ``c`` -- the ``align_corners`` convention, matching ``identity_grid``),
+    interpolate ``volume`` at each point.
+
+    Parameters
+    ----------
+    volume
+        Either channel-free ``(*spatial)`` or channels-last
+        ``(*spatial, c)``; the spatial rank is ``ndim = points.shape[-1]``.
+    points
+        ``(*n, ndim)`` sample coordinates in index space.
+    method
+        Interpolation kernel (``Linear`` default; ``NearestNeighbour`` for
+        label volumes; any ``geometry`` ``Interpolator``).
+    mode
+        Out-of-bounds boundary mode: ``"constant"`` (zero-/``cval``-fill,
+        the default) or ``"nearest"`` (edge-clamp / border), etc.
+    cval
+        Fill value for ``mode="constant"``.
+
+    Returns
+    -------
+    ``(*n)`` for a channel-free volume, or ``(*n, c)`` for a channels-last
+    volume.
+    """
+    ndim = points.shape[-1]
+    if volume.ndim == ndim:
+        sampled = _sample_at_coords(
+            volume[..., None], points, method=method, mode=mode, cval=cval
+        )
+        return sampled[..., 0]
+    if volume.ndim == ndim + 1:
+        return _sample_at_coords(
+            volume, points, method=method, mode=mode, cval=cval
+        )
+    raise ValueError(
+        f'volume.ndim={volume.ndim} is neither ndim={ndim} (channel-free) '
+        f'nor ndim+1 (channels-last) for points with {ndim} coordinates.'
+    )

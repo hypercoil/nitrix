@@ -32,6 +32,12 @@ Gather-backed:
   semiring op (state size is unbounded in the K loop); see
   SPEC_UPDATE §3.4.
 
+Labelling:
+
+- ``connected_components`` / ``largest_connected_component`` -- N-D
+  connected-components labelling by jit-able fixed-point label
+  propagation (the recurring mask clean-up / largest-region step).
+
 Convenience:
 
 - ``susan_emulator`` -- composes ``bilateral_gaussian`` + ``median_filter``
@@ -48,6 +54,7 @@ from ._mm import (
     open,
 )
 from ._median import median_filter
+from ._label import connected_components, largest_connected_component
 from .pooling import max_pool_with_indices_nd, max_unpool_nd
 
 __all__ = [
@@ -58,6 +65,8 @@ __all__ = [
     'distance_transform',
     'distance_transform_edt',
     'median_filter',
+    'connected_components',
+    'largest_connected_component',
     'max_pool_with_indices_nd',
     'max_unpool_nd',
 ]

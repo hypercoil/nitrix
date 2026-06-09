@@ -34,10 +34,12 @@ from nitrix.morphology import (
     close as morph_close,
 )
 from nitrix.morphology import (
+    connected_components,
     dilate,
     distance_transform,
     distance_transform_edt,
     erode,
+    largest_connected_component,
     median_filter,
 )
 from nitrix.morphology import (
@@ -491,3 +493,111 @@ def test_susan_emulator_implemented_via_bilateral():
     out = susan_emulator(x, sigma_space=1.0, sigma_intensity=0.5)
     assert out.shape == x.shape
     assert bool(jnp.all(jnp.isfinite(out)))
+
+
+# ---------------------------------------------------------------------------
+# connected_components / largest_connected_component
+# ---------------------------------------------------------------------------
+
+
+def _same_partition(a, b) -> bool:
+    """True if label images ``a`` / ``b`` induce the same partition."""
+    a = np.asarray(a).ravel()
+    b = np.asarray(b).ravel()
+    if not np.array_equal(a == 0, b == 0):
+        return False
+    fg = a > 0
+    a2b: dict = {}
+    b2a: dict = {}
+    for x, y in zip(a[fg].tolist(), b[fg].tolist()):
+        if a2b.setdefault(x, y) != y or b2a.setdefault(y, x) != x:
+            return False
+    return True
+
+
+def test_connected_components_two_blobs():
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[1:3, 1:3] = True
+    mask[5:8, 5:8] = True
+    labels = connected_components(jnp.asarray(mask), connectivity=1)
+    assert int(labels.max()) == 2
+    # Labels are contiguous 1..K.
+    uniq = np.unique(np.asarray(labels))
+    np.testing.assert_array_equal(uniq, np.array([0, 1, 2]))
+
+
+def test_connected_components_matches_scipy_2d():
+    rng = np.random.default_rng(0)
+    mask = rng.random((20, 24)) > 0.5
+    for conn in (1, 2):
+        struct = scipy_ndi.generate_binary_structure(2, conn)
+        ref, nref = scipy_ndi.label(mask, structure=struct)
+        ours = connected_components(jnp.asarray(mask), connectivity=conn)
+        assert int(ours.max()) == nref
+        assert _same_partition(ours, ref)
+
+
+def test_connected_components_matches_scipy_3d():
+    rng = np.random.default_rng(1)
+    mask = rng.random((10, 11, 9)) > 0.55
+    for conn in (1, 3):
+        struct = scipy_ndi.generate_binary_structure(3, conn)
+        ref, nref = scipy_ndi.label(mask, structure=struct)
+        ours = connected_components(jnp.asarray(mask), connectivity=conn)
+        assert int(ours.max()) == nref
+        assert _same_partition(ours, ref)
+
+
+def test_connected_components_diagonal_merges_under_full_connectivity():
+    # Two pixels touching only at a corner: separate at conn=1, joined at 2.
+    mask = np.zeros((4, 4), dtype=bool)
+    mask[1, 1] = True
+    mask[2, 2] = True
+    assert int(connected_components(jnp.asarray(mask), connectivity=1).max()) == 2
+    assert int(connected_components(jnp.asarray(mask), connectivity=2).max()) == 1
+
+
+def test_connected_components_empty_mask():
+    labels = connected_components(jnp.zeros((5, 5), dtype=bool))
+    np.testing.assert_array_equal(np.asarray(labels), 0)
+
+
+def test_largest_connected_component_matches_scipy():
+    rng = np.random.default_rng(2)
+    mask = rng.random((24, 24)) > 0.4
+    ref, nref = scipy_ndi.label(mask)
+    sizes = np.bincount(ref.ravel())
+    sizes[0] = 0
+    ref_largest = ref == int(sizes.argmax())
+    ours = largest_connected_component(jnp.asarray(mask), connectivity=1)
+    np.testing.assert_array_equal(np.asarray(ours), ref_largest)
+
+
+def test_largest_connected_component_empty_is_all_false():
+    out = largest_connected_component(jnp.zeros((6, 6), dtype=bool))
+    assert not bool(jnp.any(out))
+
+
+def test_connected_components_jit():
+    mask = jnp.asarray(np.random.default_rng(3).random((12, 12)) > 0.5)
+    jitted = jax.jit(connected_components, static_argnames='connectivity')
+    a = jitted(mask, connectivity=1)
+    b = connected_components(mask, connectivity=1)
+    np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_cc_long_diameter_snake_matches_scipy():
+    # A 1-wide boustrophedon snake: a single component with very large
+    # diameter -- the case pointer jumping must converge on (and where a
+    # pure O(diameter) flood would need many passes).
+    h, w = 9, 40
+    mask = np.zeros((h, w), dtype=bool)
+    for r in range(0, h, 2):
+        mask[r, :] = True  # horizontal runs on even rows
+    for r in range(0, h - 1, 2):
+        col = w - 1 if (r // 2) % 2 == 0 else 0
+        mask[r + 1, col] = True  # vertical connectors at alternating ends
+    ref, nref = scipy_ndi.label(mask)
+    ours = connected_components(jnp.asarray(mask), connectivity=1)
+    assert int(ours.max()) == nref == 1
+    assert _same_partition(ours, ref)

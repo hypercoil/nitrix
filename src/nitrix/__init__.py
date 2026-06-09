@@ -33,4 +33,8 @@ Top-level subpackages (full surface in each ``__init__.py``):
 - ``semiring`` -- the differentiable streaming-kernel substrate
                   (REAL / LOG / TROPICAL_* / EUCLIDEAN / BOOLEAN).
 - ``sparse``   -- ELL and sectioned-ELL sparse formats.
+- ``augment``  -- pure-numeric augmentation kernels: intensity tone
+                  curves + noise, spatial flip / crop / resized-crop,
+                  random affine + diffeomorphic fields, and label-to-
+                  image (GMM) + bias-field synthesis.
 """

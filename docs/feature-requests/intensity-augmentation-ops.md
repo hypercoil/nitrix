@@ -1,9 +1,14 @@
 # Intensity-augmentation ops — `nitrix.augment.intensity`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Training-substrate
-> item from the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). Four
-> image-only intensity perturbations, all pure keyed `(Array,…)->Array`.
+> **Status (2026-06-08): SHIPPED.** New `nitrix/augment/` subpackage;
+> `augment/intensity.py` adds `gamma_contrast(x, gamma, *, value_range)`
+> (deterministic — the γ draw is the caller's one-liner),
+> `random_histogram_shift(x, key, *, n_control_points, shift_range)` (keyed —
+> the monotone control-point construction is the substance), and
+> `gaussian_noise` / `rician_noise` (explicit `sigma` + intrinsic key). All
+> pure, shape-agnostic, GPU-native, differentiable in the image.
+> Training-substrate item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** The image-only ("perturbation"-role) intensity augmentations from
 the FM pretraining recipe (3DINO §5), each a pure deterministic transform

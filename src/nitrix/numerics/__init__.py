@@ -5,7 +5,7 @@
 """
 nitrix.numerics -- general-purpose tensor utilities.
 
-Two submodules:
+Submodules:
 
 - ``tensor_ops`` -- shape / layout utilities (orient_and_conform,
   fold/unfold, broadcasting helpers).  These are the "low-level
@@ -14,17 +14,35 @@ Two submodules:
   ``ilex.core.adapters`` before consolidation here.
 - ``normalize``  -- intensity normalisation routines (synthstrip
   median, robust z-scoring, etc.).
+- ``spatial``    -- volumetric shape / windowing utilities: pad / crop
+  to a multiple, nonzero bounding box, Gaussian patch window +
+  overlap-add normalisation.
+- ``ode``        -- fixed-step ODE integrators (euler / rk4) for
+  continuous-time / neural-ODE models.
+- ``fixed_point`` -- ``fixed_point_solve`` (the implicit-VJP fixed-point
+  iteration), re-exported at the package top level.
 
 This subpackage didn't exist in the legacy code (the utilities
 lived in ``functional.linear`` etc.); it's a Phase 1 rename and
 consolidation.
 """
 
-from . import normalize, tensor_ops
+from . import normalize, ode, spatial, tensor_ops
 from .fixed_point import fixed_point_solve
+from .ode import euler, odeint, rk4
+from .spatial import (
+    crop_to_multiple,
+    gaussian_window,
+    nonzero_bounding_box,
+    overlap_add,
+    pad_to_multiple,
+)
 from .normalize import (
     demean,
+    instance_norm,
     intensity_normalize,
+    l2_normalize,
+    lp_normalize,
     percentile_rescale,
     psc_normalize,
     robust_zscore_normalize,
@@ -45,9 +63,22 @@ from .tensor_ops import (
 __all__ = [
     # fixed point
     'fixed_point_solve',
+    # ode integrators
+    'euler',
+    'rk4',
+    'odeint',
+    # spatial shape / windowing
+    'pad_to_multiple',
+    'crop_to_multiple',
+    'nonzero_bounding_box',
+    'gaussian_window',
+    'overlap_add',
     # normalize
     'demean',
+    'instance_norm',
     'intensity_normalize',
+    'l2_normalize',
+    'lp_normalize',
     'percentile_rescale',
     'psc_normalize',
     'robust_zscore_normalize',
