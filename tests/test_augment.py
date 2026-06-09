@@ -12,7 +12,12 @@ jax.config.update('jax_enable_x64', True)
 from nitrix.augment import (
     gamma_contrast,
     gaussian_noise,
+    random_affine_matrix,
+    random_crop,
+    random_flip,
     random_histogram_shift,
+    random_resized_crop,
+    random_svf_displacement,
     rician_noise,
 )
 
@@ -102,3 +107,87 @@ def test_rician_noise_nonnegative():
     x = jnp.asarray(np.random.default_rng(6).standard_normal((20, 20)))
     out = rician_noise(x, jax.random.PRNGKey(3), sigma=jnp.asarray(0.2))
     assert float(out.min()) >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# geometric: flip / crop / resized-crop / affine / svf
+# ---------------------------------------------------------------------------
+
+
+def test_random_flip_p1_single_axis_flips():
+    x = jnp.asarray(np.random.default_rng(0).standard_normal((5, 6)))
+    out = random_flip(x, jax.random.PRNGKey(0), axes=[0], p=1.0)
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(jnp.flip(x, 0)))
+
+
+def test_random_flip_p0_is_identity():
+    x = jnp.asarray(np.random.default_rng(1).standard_normal((4, 4, 3)))
+    out = random_flip(x, jax.random.PRNGKey(1), p=0.0)
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(x))
+
+
+def test_random_crop_shape_and_membership():
+    x = jnp.arange(10 * 12).reshape(10, 12).astype(jnp.float32)
+    out = random_crop(x, jax.random.PRNGKey(2), size=(4, 5))
+    assert out.shape == (4, 5)
+    # The crop is a contiguous block of x: top-left value determines it.
+    tl = int(out[0, 0])
+    r, c = divmod(tl, 12)
+    np.testing.assert_array_equal(
+        np.asarray(out), np.asarray(x)[r : r + 4, c : c + 5]
+    )
+
+
+def test_random_crop_full_size_is_identity():
+    x = jnp.asarray(np.random.default_rng(3).standard_normal((3, 4)))
+    out = random_crop(x, jax.random.PRNGKey(3), size=(3, 4))
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(x))
+
+
+def test_random_resized_crop_full_scale_is_identity():
+    x = jnp.asarray(np.random.default_rng(4).standard_normal((8, 8, 2)))
+    out = random_resized_crop(
+        x, jax.random.PRNGKey(4), size=(8, 8), scale_range=(1.0, 1.0)
+    )
+    assert out.shape == (8, 8, 2)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(x), atol=1e-4)
+
+
+def test_random_resized_crop_output_shape():
+    x = jnp.asarray(np.random.default_rng(5).standard_normal((16, 16, 3)))
+    out = random_resized_crop(x, jax.random.PRNGKey(5), size=(8, 8))
+    assert out.shape == (8, 8, 3)
+    assert bool(jnp.all(jnp.isfinite(out)))
+
+
+def test_random_affine_matrix_identity_at_zero_bounds():
+    mat = random_affine_matrix(
+        jax.random.PRNGKey(6),
+        max_rotation=0.0,
+        max_scale=0.0,
+        max_shear=0.0,
+        max_translation=0.0,
+    )
+    expected = np.concatenate([np.eye(3), np.zeros((3, 1))], axis=-1)
+    assert mat.shape == (3, 4)
+    np.testing.assert_allclose(np.asarray(mat), expected, atol=1e-6)
+
+
+def test_random_affine_matrix_reproducible():
+    a = random_affine_matrix(jax.random.PRNGKey(7))
+    b = random_affine_matrix(jax.random.PRNGKey(7))
+    np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_random_svf_zero_std_is_zero_field():
+    disp = random_svf_displacement(
+        (16, 16, 16), jax.random.PRNGKey(8), max_std=0.0
+    )
+    assert disp.shape == (16, 16, 16, 3)
+    np.testing.assert_allclose(np.asarray(disp), 0.0, atol=1e-6)
+
+
+def test_random_svf_shape_and_finite():
+    disp = random_svf_displacement((24, 24, 24), jax.random.PRNGKey(9))
+    assert disp.shape == (24, 24, 24, 3)
+    assert bool(jnp.all(jnp.isfinite(disp)))

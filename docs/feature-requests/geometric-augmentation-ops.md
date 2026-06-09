@@ -1,9 +1,14 @@
 # Geometric-augmentation ops — `nitrix.augment.geometric`
 
-> **Status (2026-06-08): not started — CONVENIENCE.** Training-substrate
-> item from the 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). Spatial
-> augmentation index/coordinate math; pure keyed `(Array,…)->Array`.
+> **Status (2026-06-08): SHIPPED.** `augment/geometric.py` adds
+> `random_flip` (N-D per-axis Bernoulli), `random_crop` (per-axis
+> `dynamic_slice`), `random_resized_crop` (built on `geometry.
+> spatial_transform` with the `Interpolator` ADT — no parallel
+> interpolation path), `random_affine_matrix` (reuses
+> `geometry.params_to_affine_matrix`), and `random_svf_displacement`
+> (reuses `geometry.integrate_velocity_field`). All N-D, channels-last,
+> GPU-native. Training-substrate item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)).
 
 **What.** The spatial ("paired" / "image-only") augmentation primitives from
 the FM recipe and the lab2im deformation half:

@@ -16,6 +16,8 @@ Submodules:
 
 - ``intensity`` -- gamma contrast, random histogram shift, Gaussian /
   Rician noise.
+- ``geometric`` -- random flip / crop / resized-crop, random affine
+  matrix, random diffeomorphic (SVF) displacement.
 """
 
 from .intensity import (
@@ -24,6 +26,13 @@ from .intensity import (
     random_histogram_shift,
     rician_noise,
 )
+from .geometric import (
+    random_affine_matrix,
+    random_crop,
+    random_flip,
+    random_resized_crop,
+    random_svf_displacement,
+)
 
 __all__ = [
     # intensity
@@ -31,4 +40,10 @@ __all__ = [
     'random_histogram_shift',
     'gaussian_noise',
     'rician_noise',
+    # geometric
+    'random_flip',
+    'random_crop',
+    'random_resized_crop',
+    'random_affine_matrix',
+    'random_svf_displacement',
 ]
