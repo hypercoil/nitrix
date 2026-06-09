@@ -1,11 +1,15 @@
 # Displacement-field regularisers — `nitrix.register.regulariser`
 
-> **Status (2026-06-08): not started — ENABLING.** Loss-numeric item from the
-> 2026-06-08 ilex audit
-> ([`ilex-training-substrate.md`](ilex-training-substrate.md)). A real gap:
-> `nitrix.register`'s diffeomorphic recipe regularises by **Gaussian
-> smoothing** (the Green's function of the fluid/diffusion operator) — there
-> is **no explicit penalty** on the field for a learned/optimised warp.
+> **Status (2026-06-09): SHIPPED.** `register/regulariser.py` adds
+> `gradient_smoothness` (diffusion `‖∇u‖²` via `jacobian_displacement − I`),
+> `bending_energy` (thin-plate `‖∇²u‖²` via a second gradient pass), and
+> `jacobian_folding_penalty` (`relu(−det J)` on
+> `geometry.jacobian_det_displacement`). All N-D, channels-last,
+> `reduction`-aware, differentiable; built on the shipped `geometry`
+> differential operators. Loss-numeric item from the 2026-06-08 ilex audit
+> ([`ilex-training-substrate.md`](ilex-training-substrate.md)) — fills the
+> explicit-penalty gap (the diffeomorphic recipe only regularised by
+> Gaussian smoothing).
 
 **What.** Explicit smoothness/invertibility penalties on a displacement (or
 velocity) field, the regularisers learned registration (VoxelMorph /
