@@ -13,6 +13,9 @@ blocks of contrast / appearance augmentation:
   lowers it.
 - ``random_histogram_shift`` -- a random, monotone, piecewise-linear
   remap of the intensity range through perturbed control points.
+- ``gibbs_ringing`` -- Gibbs (truncation) ringing from high-frequency
+  k-space truncation, the artefact of a finitely-sampled acquisition.
+  Deterministic in the truncation strength (draw it in the caller).
 - ``gaussian_noise`` / ``rician_noise`` -- additive Gaussian noise and
   the Rician magnitude-noise model.
 
@@ -24,7 +27,7 @@ its inputs (and key), shape-agnostic, and differentiable in the image.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -33,6 +36,7 @@ from jaxtyping import Array, Float
 __all__ = [
     'gamma_contrast',
     'random_histogram_shift',
+    'gibbs_ringing',
     'gaussian_noise',
     'rician_noise',
 ]
@@ -133,6 +137,56 @@ def random_histogram_shift(
     shifts = shifts.at[0].set(0.0).at[-1].set(0.0)
     shifted = jnp.maximum.accumulate(refs + shifts)
     return jnp.interp(x.ravel(), refs, shifted).reshape(x.shape)
+
+
+def gibbs_ringing(
+    x: Float[Array, '...'],
+    alpha: float,
+    *,
+    axes: Optional[Sequence[int]] = None,
+) -> Float[Array, '...']:
+    """Inject Gibbs (truncation) ringing by truncating high-frequency k-space.
+
+    Gibbs ringing is the oscillation that appears near sharp edges when a
+    signal's spectrum is sharply truncated -- the artefact of a
+    finitely-sampled (band-limited) acquisition.  This models it directly:
+    transform to k-space, zero every frequency whose normalised radius
+    exceeds ``1 - alpha`` (a hard spherical truncation -- the sharp cutoff
+    *is* what produces the ringing), and transform back.
+
+    Parameters
+    ----------
+    x
+        Real-valued input.
+    alpha
+        Truncation strength in ``[0, 1]``.  ``0`` keeps the full spectrum
+        (identity); larger values remove more high-frequency content and
+        ring more strongly; ``1`` keeps only the DC component.  Deterministic
+        in ``alpha`` -- draw it from a range in the caller for a random
+        augmentation.
+    axes
+        Axes to transform over.  ``None`` (default) uses all axes; for a
+        channels-last volume pass the spatial axes so the channel axis is
+        not mixed into the transform.
+
+    Returns
+    -------
+    Real array of the same shape as ``x``.
+    """
+    fft_axes = tuple(range(x.ndim)) if axes is None else tuple(axes)
+    r2 = jnp.zeros((1,) * x.ndim, dtype=jnp.float32)
+    for ax in fft_axes:
+        n = x.shape[ax]
+        coord = (jnp.arange(n, dtype=jnp.float32) - n // 2) / max(n / 2.0, 1.0)
+        shape = [1] * x.ndim
+        shape[ax] = n
+        r2 = r2 + coord.reshape(shape) ** 2
+    radius = jnp.sqrt(r2)
+    mask = (radius <= (1.0 - alpha) * jnp.max(radius)).astype(x.dtype)
+    k = jnp.fft.fftshift(jnp.fft.fftn(x, axes=fft_axes), axes=fft_axes)
+    k = k * mask
+    out = jnp.fft.ifftn(jnp.fft.ifftshift(k, axes=fft_axes), axes=fft_axes)
+    return out.real.astype(x.dtype)
 
 
 def gaussian_noise(

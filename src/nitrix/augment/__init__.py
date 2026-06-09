@@ -14,8 +14,8 @@ are pure ``(Array, ...[, key]) -> Array`` functions; the augmentation
 
 Submodules:
 
-- ``intensity`` -- gamma contrast, random histogram shift, Gaussian /
-  Rician noise.
+- ``intensity`` -- gamma contrast, random histogram shift, Gibbs
+  (truncation) ringing, Gaussian / Rician noise.
 - ``geometric`` -- random flip / crop / resized-crop, random affine
   matrix, random diffeomorphic (SVF) displacement.
 - ``synthesis`` -- label-map-to-image Gaussian-mixture render and
@@ -25,6 +25,7 @@ Submodules:
 from .intensity import (
     gamma_contrast,
     gaussian_noise,
+    gibbs_ringing,
     random_histogram_shift,
     rician_noise,
 )
@@ -44,6 +45,7 @@ __all__ = [
     # intensity
     'gamma_contrast',
     'random_histogram_shift',
+    'gibbs_ringing',
     'gaussian_noise',
     'rician_noise',
     # geometric

@@ -107,6 +107,7 @@ Severity: **ENABLING** = a downstream surface is blocked / hand-rolling it;
 | GMM label→image render | [lab2im-gmm-synthesis](lab2im-gmm-synthesis.md) | ENABLING | `augment` |
 | Generative bias field (simulated INU) | [generative-bias-field](generative-bias-field.md) | ENABLING | `augment` / `bias` |
 | Gamma, histogram-shift, gaussian/rician noise | [intensity-augmentation-ops](intensity-augmentation-ops.md) | CONVENIENCE | `augment.intensity` |
+| Gibbs (truncation) ringing artefact | [gibbs-ringing](gibbs-ringing.md) | CONVENIENCE | `augment.intensity` |
 | Random flip / crop / resized-crop / affine / SVF gen | [geometric-augmentation-ops](geometric-augmentation-ops.md) | CONVENIENCE | `augment.geometric` |
 
 ### Loss / metric numerics (nimox loss library)

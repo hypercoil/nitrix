@@ -12,6 +12,7 @@ jax.config.update('jax_enable_x64', True)
 from nitrix.augment import (
     gamma_contrast,
     gaussian_noise,
+    gibbs_ringing,
     gmm_label_to_image,
     random_affine_matrix,
     random_crop,
@@ -242,3 +243,44 @@ def test_simulate_bias_field_positive_and_reproducible():
     assert a.shape == (20, 20)
     assert float(a.min()) > 0.0  # exp is strictly positive
     np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+# ---------------------------------------------------------------------------
+# gibbs_ringing
+# ---------------------------------------------------------------------------
+
+
+def test_gibbs_alpha_zero_is_identity():
+    x = jnp.asarray(np.random.default_rng(0).standard_normal((16, 16)))
+    out = gibbs_ringing(x, 0.0)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(x), atol=1e-6)
+
+
+def test_gibbs_rings_at_a_step_edge():
+    # A sharp step is the canonical Gibbs trigger: truncation overshoots
+    # beyond the original [0, 1] range near the discontinuity.
+    x = jnp.concatenate([jnp.zeros(64), jnp.ones(64)])
+    out = np.asarray(gibbs_ringing(x, 0.5))
+    assert out.min() < -1e-3 or out.max() > 1.0 + 1e-3
+
+
+def test_gibbs_shape_and_finite_3d():
+    x = jnp.asarray(np.random.default_rng(1).standard_normal((12, 12, 12)))
+    out = gibbs_ringing(x, 0.3)
+    assert out.shape == x.shape
+    assert bool(jnp.all(jnp.isfinite(out)))
+
+
+def test_gibbs_axes_subset_channels_last():
+    # Apply over spatial axes only; output keeps shape and is real/finite.
+    x = jnp.asarray(np.random.default_rng(2).standard_normal((16, 16, 3)))
+    out = gibbs_ringing(x, 0.4, axes=(0, 1))
+    assert out.shape == x.shape
+    assert bool(jnp.all(jnp.isfinite(out)))
+
+
+def test_gibbs_differentiable():
+    x = jnp.asarray(np.random.default_rng(3).standard_normal((8, 8)))
+    g = jax.grad(lambda z: jnp.sum(gibbs_ringing(z, 0.5) ** 2))(x)
+    assert g.shape == x.shape
+    assert bool(jnp.all(jnp.isfinite(g)))
