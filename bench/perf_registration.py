@@ -1,21 +1,28 @@
 # -*- coding: utf-8 -*-
 """Performance benchmark for the registration recipes.
 
-Times the two GPU-native recipes -- ``rigid_register`` (SSD, matrix-free
-Gauss-Newton/LM) and ``diffeomorphic_demons_register`` (log-Demons) --
-forward and forward-plus-backward, on representative 2-D and 3-D volumes.
+Times the GPU-native registration paths forward and
+forward-plus-backward, on representative 2-D and 3-D volumes:
+
+- ``rigid_register`` / ``affine_register`` (SSD, matrix-free
+  Gauss-Newton/LM with the assembled small-``P`` normal equations);
+- ``diffeomorphic_demons_register`` (log-Demons);
+- a **non-SSD differentiable layer**: an LNCC rigid registration whose
+  argmin is differentiated through the optimum by ``implicit_minimize``
+  (the general scalar-objective IFT) -- the path the BFGS metrics
+  (LNCC/MI/CR) take to become a differentiable layer.
 
 The forward-plus-backward number is the **differentiable-layer** cost:
 ``jax.grad`` of a scalar loss of the warped image w.r.t. the moving image
-(the unrolled path).  The recipes are ``jax.jit``-compiled with the
-``spec`` captured statically, so the timed loop is steady-state (see
-``bench/_util.py`` -- first calls don't count).
+(the unrolled ``lax.scan`` path for the recipes; the implicit-function
+backward for the ``implicit_minimize`` row).  Everything is
+``jax.jit``-compiled with the static config captured, so the timed loop
+is steady-state (see ``bench/_util.py`` -- first calls don't count).
 
-``affine_register`` and the BFGS metric paths are intentionally excluded:
-on a stack with the cuSolver wedge the affine ``matrix_exp`` falls back to
-CPU (a dev-box artifact, not a production cost) and BFGS is not
-differentiable through the solve.  Rigid-SSD and Demons are pure on-device
-composition, so their numbers transfer to a healthy GPU.
+All paths are pure on-device composition (``matrix_exp`` is pure-matmul,
+the SPD solves are matrix-free ``cg``, no factorisation), so the numbers
+transfer to a healthy GPU even though the dev box has a wedged cuSolver
+pool.
 
 Run::
 
@@ -33,13 +40,16 @@ from typing import Callable
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 from _util import bench_call, timed_jit  # type: ignore[import-not-found]
 
 from nitrix.geometry import affine_grid, rigid_exp, spatial_transform
+from nitrix.linalg import implicit_minimize
 from nitrix.register import (
+    LNCC,
     DemonsSpec,
     RegistrationSpec,
+    Rigid,
+    affine_register,
     diffeomorphic_demons_register,
     rigid_register,
 )
@@ -72,6 +82,45 @@ def _make_pair(shape: tuple[int, ...]) -> tuple[jax.Array, jax.Array]:
     return moving, fixed
 
 
+def _implicit_lncc_warp(
+    moving: jax.Array,
+    fixed: jax.Array,
+    *,
+    maxiter: int,
+) -> jax.Array:
+    """LNCC rigid registration whose argmin is differentiated through the
+    optimum by ``implicit_minimize`` (the non-SSD differentiable layer).
+
+    A single-resolution registration: minimise the LNCC cost over the
+    rigid parameters with BFGS, then return ``moving`` warped by the
+    recovered transform.  ``jax.grad`` w.r.t. ``moving`` exercises the
+    exact-Hessian implicit-function backward.
+    """
+    model = Rigid()
+    metric = LNCC()
+    ndim = moving.ndim
+    center = (jnp.asarray(moving.shape, dtype=moving.dtype) - 1.0) / 2.0
+
+    def warp(img: jax.Array, theta: jax.Array) -> jax.Array:
+        grid = affine_grid(
+            model.exp(theta, ndim=ndim), img.shape, center=center
+        )
+        return spatial_transform(img[..., None], grid, mode='nearest')[..., 0]
+
+    def objective(data: tuple[jax.Array, jax.Array], theta: jax.Array):
+        mov, fix = data
+        return metric.cost(warp(mov, theta), fix)
+
+    theta = implicit_minimize(
+        objective,
+        (moving, fixed),
+        jnp.zeros(model.n_params(ndim), dtype=moving.dtype),
+        maxiter=maxiter,
+        ridge=1e-6,
+    )
+    return warp(moving, theta)
+
+
 def _bench_recipe(
     label: str,
     recipe: Callable[[jax.Array, jax.Array], jax.Array],
@@ -100,6 +149,7 @@ def main() -> None:
     parser.add_argument('--levels', type=int, default=3)
     parser.add_argument('--rigid-iters', type=int, default=20)
     parser.add_argument('--demons-iters', type=int, default=20)
+    parser.add_argument('--lncc-iters', type=int, default=30)
     args = parser.parse_args()
 
     rspec = RegistrationSpec(levels=args.levels, iterations=args.rigid_iters)
@@ -122,12 +172,32 @@ def main() -> None:
             )[1:]
         )
         rows.append(
+            (name, 'affine (SSD/LM)')
+            + _bench_recipe(
+                name,
+                lambda m, f: affine_register(m, f, spec=rspec).warped,
+                moving,
+                fixed,
+            )[1:]
+        )
+        rows.append(
             (name, 'demons')
             + _bench_recipe(
                 name,
-                lambda m, f: diffeomorphic_demons_register(
-                    m, f, spec=dspec
-                ).warped,
+                lambda m, f: (
+                    diffeomorphic_demons_register(m, f, spec=dspec).warped
+                ),
+                moving,
+                fixed,
+            )[1:]
+        )
+        rows.append(
+            (name, 'rigid LNCC (implicit)')
+            + _bench_recipe(
+                name,
+                lambda m, f: _implicit_lncc_warp(
+                    m, f, maxiter=args.lncc_iters
+                ),
                 moving,
                 fixed,
             )[1:]
@@ -139,9 +209,12 @@ def main() -> None:
         '',
         f'- Backend: `{backend}` ({jax.devices()[0].device_kind})',
         f'- Spec: levels={args.levels}, rigid_iters={args.rigid_iters}, '
-        f'demons_iters={args.demons_iters}',
+        f'demons_iters={args.demons_iters}, lncc_iters={args.lncc_iters}',
         '- Warm time is the median post-warmup wall-time; compile is the '
         'first (trace+compile) call.',
+        "- Compile is **cold** (fresh XLA cache); JAX's persistent "
+        'compilation cache amortises it across runs of the same shapes, so '
+        'a deployment pays each shape once, not per process.',
         '',
         '| case | recipe | fwd compile (s) | fwd warm (s) | '
         'grad compile (s) | grad warm (s) |',

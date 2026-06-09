@@ -15,6 +15,17 @@
 > API change (the recipes inherit `auto`; `gauss_newton` /
 > `levenberg_marquardt` gain a back-compatible `jacobian=` keyword).
 >
+> **Affine-CPU-compile follow-up (perf-agent remark): cannot replicate —
+> already fixed.** The perf agent separately noted "affine jit compile on
+> CPU failed altogether." Re-checked against the current tree
+> (`JAX_PLATFORMS=cpu`, x64 + float32): `affine_register` jit-compiles and
+> runs on CPU for fwd, grad, 2-D, 3-D, and the BFGS-metric path — no
+> failure. Root cause was the old `safe_expm` (Padé, needs a linear solve)
+> mixing devices inside the jitted LM `cg`; it was replaced by the
+> pure-matmul GPU-native `matrix_exp` in `962c3a6` (predating this round),
+> which removed the device split. The bench now includes the affine
+> fwd+grad rows on both backends.
+>
 > _Original report below (preserved)._
 
 > **Status (2026-06-09): OPEN — high-impact perf candidate.** Surfaced
