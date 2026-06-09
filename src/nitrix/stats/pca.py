@@ -17,10 +17,18 @@ the variance captured along it.
 Solvers (``solver=``):
 
 - ``"full"`` -- exact: ``eigh`` of the ``(d, d)`` covariance.
+- ``"gram"`` -- exact, but via the ``(n, n)`` Gram matrix
+  ``Xc Xcᵀ`` instead of the ``(d, d)`` covariance; far cheaper when
+  ``n << d`` (many features, few samples -- e.g. component-correlation
+  / CompCor on a voxel-by-time matrix).  The components are recovered
+  from the Gram eigenvectors as ``V = Xcᵀ U / Σ``.  Bit-identical to
+  ``"full"`` (same spectrum, same sign convention).
 - ``"randomized"`` -- approximate: a randomised range finder that
   recovers the top ``k`` components in ``O(n d (k + p))`` matmuls, for
   ``k`` much smaller than ``d`` (the regime where forming / factoring
   the full covariance is wasteful).  Keyed (needs a PRNG key).
+- ``"auto"`` -- pick the cheaper exact solver: ``"gram"`` when
+  ``n < d``, else ``"full"``.
 
 Implementation notes:
 
@@ -39,10 +47,8 @@ Implementation notes:
   devices.
 
 Roadmap (the family will grow along the ``solver=`` seam, mirroring the
-extremal-eigensolver dispatcher): a ``"gram"`` solver (eigh of the
-*smaller* of ``X Xᵀ`` / ``Xᵀ X`` -- the efficient path when
-``n << d``, e.g. component-correlation / CompCor on voxel time series),
-and a sparse-``X`` path routed to the sparse eig solvers.
+extremal-eigensolver dispatcher): a sparse-``X`` path routed to the
+sparse eig solvers.
 """
 
 from __future__ import annotations
@@ -55,7 +61,7 @@ from jaxtyping import Array, Float
 
 from ..linalg._solver import safe_eigh
 
-Solver = Literal['full', 'randomized']
+Solver = Literal['full', 'gram', 'randomized', 'auto']
 
 __all__ = [
     'PCAResult',
@@ -117,6 +123,26 @@ def _pca_full(
     return components, explained_variance
 
 
+def _pca_gram(
+    xc: Float[Array, 'n d'], k: int, denom: int
+) -> tuple[Float[Array, 'k d'], Float[Array, 'k']]:
+    """Exact PCA via the ``(n, n)`` Gram matrix (cheap when ``n << d``).
+
+    ``eigh`` of ``Xc Xcᵀ / (n - 1)`` gives the left singular structure
+    ``(U, λ)`` with ``λ`` the same variances as the covariance
+    eigenvalues; the components (right singular vectors) are recovered
+    as ``V = Xcᵀ U / Σ`` with ``Σ = sqrt(λ (n - 1))``.
+    """
+    gram = (xc @ xc.T) / denom
+    eigvals, u = safe_eigh(gram)
+    order = jnp.argsort(eigvals)[::-1]
+    eigvals = eigvals[order][:k]
+    u = u[:, order][:, :k]  # (n, k)
+    sigma = jnp.sqrt(jnp.maximum(eigvals * denom, 1e-12))
+    components = (xc.T @ u / sigma[None, :]).T  # (k, d)
+    return components, eigvals
+
+
 def _pca_randomized(
     xc: Float[Array, 'n d'],
     k: int,
@@ -175,9 +201,11 @@ def pca_fit(
         When ``False`` the returned ``mean`` is zeros and the
         decomposition is of the uncentred second-moment matrix.
     solver
-        ``"full"`` (default) for the exact covariance eigendecomposition,
-        or ``"randomized"`` for the randomised range finder (top ``k``
-        components only, far cheaper when ``k << d``).
+        ``"full"`` (default) -- exact covariance eigendecomposition;
+        ``"gram"`` -- exact, via the ``(n, n)`` Gram (cheap when
+        ``n < d``); ``"randomized"`` -- randomised range finder (top ``k``
+        only, cheap when ``k << d``); ``"auto"`` -- ``"gram"`` if
+        ``n < d`` else ``"full"``.
     n_oversamples, n_power_iterations
         Randomised-solver controls: the oversampling ``p`` (sketch width
         ``k + p``) and the number of power iterations ``q`` (more ``q``
@@ -198,9 +226,12 @@ def pca_fit(
     xc = X - mean
     denom = max(n - 1, 1)
     k = min(n, d) if n_components is None else n_components
-    if solver == 'full':
+    resolved = ('gram' if n < d else 'full') if solver == 'auto' else solver
+    if resolved == 'full':
         components, explained_variance = _pca_full(xc, k, denom)
-    elif solver == 'randomized':
+    elif resolved == 'gram':
+        components, explained_variance = _pca_gram(xc, k, denom)
+    elif resolved == 'randomized':
         if key is None:
             raise ValueError("solver='randomized' requires a PRNG key=.")
         components, explained_variance = _pca_randomized(
@@ -208,7 +239,8 @@ def pca_fit(
         )
     else:
         raise ValueError(
-            f"solver={solver!r}; expected 'full' or 'randomized'."
+            f"solver={solver!r}; expected 'full', 'gram', "
+            "'randomized', or 'auto'."
         )
     return PCAResult(
         components=_svd_flip_sign(components),

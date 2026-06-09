@@ -597,3 +597,80 @@ def test_pca_invalid_solver_raises():
     X = _low_rank(50, 10, 3, seed=5)
     with pytest.raises(ValueError, match='expected'):
         pca_fit(X, n_components=3, solver='bogus')
+
+
+# ---------------------------------------------------------------------------
+# pca: gram + auto solvers
+# ---------------------------------------------------------------------------
+
+
+def test_pca_gram_matches_full_n_lt_d():
+    rng = np.random.default_rng(10)
+    X = jnp.asarray(rng.standard_normal((40, 100)))  # n < d (CompCor regime)
+    full = pca_fit(X, n_components=8, solver='full')
+    gram = pca_fit(X, n_components=8, solver='gram')
+    np.testing.assert_allclose(
+        np.asarray(gram.explained_variance),
+        np.asarray(full.explained_variance),
+        atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        np.abs(np.asarray(gram.components)),
+        np.abs(np.asarray(full.components)),
+        atol=1e-6,
+    )
+    # Scores (the CompCor regressors) reconstruct identically.
+    zf = pca_transform(X, full.components, full.mean)
+    zg = pca_transform(X, gram.components, gram.mean)
+    np.testing.assert_allclose(np.asarray(zg), np.asarray(zf), atol=1e-6)
+
+
+def test_pca_gram_matches_full_n_gt_d():
+    rng = np.random.default_rng(11)
+    X = jnp.asarray(rng.standard_normal((200, 20)))
+    full = pca_fit(X, n_components=5, solver='full')
+    gram = pca_fit(X, n_components=5, solver='gram')
+    np.testing.assert_allclose(
+        np.asarray(gram.explained_variance),
+        np.asarray(full.explained_variance),
+        atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        np.asarray(gram.components), np.asarray(full.components), atol=1e-6
+    )
+
+
+def test_pca_gram_components_orthonormal():
+    rng = np.random.default_rng(12)
+    X = jnp.asarray(rng.standard_normal((25, 90)))
+    res = pca_fit(X, n_components=10, solver='gram')
+    gram = res.components @ res.components.T
+    np.testing.assert_allclose(np.asarray(gram), np.eye(10), atol=1e-6)
+
+
+def test_pca_auto_picks_gram_when_n_lt_d():
+    rng = np.random.default_rng(13)
+    X = jnp.asarray(rng.standard_normal((30, 120)))
+    auto = pca_fit(X, n_components=6, solver='auto')
+    gram = pca_fit(X, n_components=6, solver='gram')
+    np.testing.assert_array_equal(
+        np.asarray(auto.components), np.asarray(gram.components)
+    )
+
+
+def test_pca_auto_picks_full_when_n_ge_d():
+    rng = np.random.default_rng(14)
+    X = jnp.asarray(rng.standard_normal((120, 30)))
+    auto = pca_fit(X, n_components=6, solver='auto')
+    full = pca_fit(X, n_components=6, solver='full')
+    np.testing.assert_array_equal(
+        np.asarray(auto.components), np.asarray(full.components)
+    )
+
+
+def test_pca_gram_topk_shape():
+    rng = np.random.default_rng(15)
+    X = jnp.asarray(rng.standard_normal((50, 200)))
+    res = pca_fit(X, n_components=4, solver='gram')
+    assert res.components.shape == (4, 200)
+    assert res.explained_variance.shape == (4,)

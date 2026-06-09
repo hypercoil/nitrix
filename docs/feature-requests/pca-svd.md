@@ -19,19 +19,24 @@
 > the large work is matmuls, only the `(k+p)`-sized factorisations hit the
 > solver. Preferred for top-`k`-with-`k≪d` (the fMRIPrep / nilearn / CompCor
 > regime). Verified on GPU against the exact path for low-rank data.
+>
+> **Gram / CompCor solver added (2026-06-09).** `solver='gram'` — exact PCA
+> via the `(n, n)` Gram `Xc Xcᵀ` (instead of the `(d, d)` covariance),
+> recovering components as `V = Xcᵀ U / Σ`. Far cheaper when `n ≪ d` — the
+> **CompCor regime** (`n_timepoints ≪ n_voxels`); top-`k` honoured by
+> `n_components`, and `pca_transform` gives the component time-series
+> regressors. Bit-identical to `'full'`. Added `solver='auto'` (gram when
+> `n<d`, else full). `thrux`'s CompCor step can now call this directly.
 
 ## Roadmap (PCA family growth)
 
 The `solver=` parameter is the dispatch seam (mirroring the
 extremal-eigensolver dispatcher — `[[eigsolve-dispatcher-plan]]`):
 
-- **`solver='gram'`** — `eigh` of the *smaller* of `X Xᵀ` / `Xᵀ X`; the
-  efficient path when `n ≪ d` (component-correlation / CompCor on voxel ×
-  time matrices). Trivial on the existing `safe_eigh`.
 - **sparse `X`** — route the projection / Gram step to the sparse-ELL eig
   solvers (same seam).
 - **right-singular-vectors-only** convenience for the CompCor temporal
-  components.
+  components (the scores are already `pca_transform`).
 
 **What.** Principal-component analysis as a small pure-numeric triple:
 
