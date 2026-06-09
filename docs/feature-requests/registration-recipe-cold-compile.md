@@ -1,5 +1,33 @@
 # Perf: registration recipes have a pathological cold compile (the Python-unrolled optimizer loop)
 
+> **Status (2026-06-09): RESOLVED.** Both levers below landed on branch
+> `perf/registration-roll-loops`. (1) The optimiser, Demons, and
+> scaling-and-squaring loops are rolled with `lax.scan` — compile is now
+> ~constant in the iteration count, not linear. (2) The rigid/affine
+> normal equations are assembled directly for small `P`
+> (`jacobian='assembled'`, the `auto` default), replacing the
+> matrix-free-`cg`-through-the-warp matvec. **Measured on L4 (L3 × 30,
+> 3-D 48³), forward recipe:** rigid cold compile **144.6 s → 9.26 s
+> (~15.6×)**; rigid steady **37.8 ms → 20.1 ms (~1.9×)**; the
+> rigid-vs-demons steady gap closed from 5.4× to 1.5×. A jaxpr
+> equation-count regression guard (`tests/test_registration_perf.py`)
+> locks compile cost to be constant in the iteration count. No public
+> API change (the recipes inherit `auto`; `gauss_newton` /
+> `levenberg_marquardt` gain a back-compatible `jacobian=` keyword).
+>
+> **Affine-CPU-compile follow-up (perf-agent remark): cannot replicate —
+> already fixed.** The perf agent separately noted "affine jit compile on
+> CPU failed altogether." Re-checked against the current tree
+> (`JAX_PLATFORMS=cpu`, x64 + float32): `affine_register` jit-compiles and
+> runs on CPU for fwd, grad, 2-D, 3-D, and the BFGS-metric path — no
+> failure. Root cause was the old `safe_expm` (Padé, needs a linear solve)
+> mixing devices inside the jitted LM `cg`; it was replaced by the
+> pure-matmul GPU-native `matrix_exp` in `962c3a6` (predating this round),
+> which removed the device split. The bench now includes the affine
+> fwd+grad rows on both backends.
+>
+> _Original report below (preserved)._
+
 > **Status (2026-06-09): OPEN — high-impact perf candidate.** Surfaced
 > diagnosing a "registration is slow on GPU" report while building the
 > `nitrix-perf-bench` recipe case (Phase 4). Not a correctness bug: the steady

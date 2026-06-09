@@ -27,6 +27,7 @@ from nitrix.geometry import (  # noqa: E402
 )
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import (  # noqa: E402
+    LNCC,
     RegistrationSpec,
     affine_register,
     rigid_register,
@@ -97,7 +98,9 @@ def test_rigid_3d_ssd_recovery():
     assert float(ncc(res.warped, fixed)) > 0.97
     assert res.matrix.shape == (4, 4)
     # the recovered axis-angle is ~ the negated truth.
-    assert np.allclose(np.asarray(res.params[:3]), -np.asarray(true[:3]), atol=0.03)
+    assert np.allclose(
+        np.asarray(res.params[:3]), -np.asarray(true[:3]), atol=0.03
+    )
 
 
 def test_affine_2d_ssd_recovery():
@@ -120,7 +123,7 @@ def test_rigid_2d_lncc_recovery():
     res = rigid_register(
         moving,
         fixed,
-        spec=RegistrationSpec(levels=3, iterations=40, metric='lncc'),
+        spec=RegistrationSpec(levels=3, iterations=40, metric=LNCC()),
     )
     assert float(ncc(res.warped, fixed)) > 0.97
 
@@ -145,7 +148,9 @@ def test_register_shape_validation():
 
 def test_result_warped_matches_explicit_warp():
     fixed = _blobs_2d(48)
-    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.08, 2.0, 1.0]), ndim=2))
+    moving = _warp_known(
+        fixed, rigid_exp(jnp.asarray([0.08, 2.0, 1.0]), ndim=2)
+    )
     res = rigid_register(
         moving, fixed, spec=RegistrationSpec(levels=2, iterations=20)
     )

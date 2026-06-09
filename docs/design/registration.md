@@ -204,22 +204,31 @@ stability/efficiency needs it).
 Two paths, both shipped: **unrolled** (every primitive is differentiable,
 so ``jax.grad`` through a recipe works out of the box — verified for the
 SSD rigid recipe and the Demons recipe w.r.t. the input images) and
-**implicit** (``linalg.implicit_least_squares`` differentiates an argmin
-through the optimum by the implicit-function theorem — solving the
-Gauss-Newton-Hessian adjoint ``(JᵀJ) w = x̄`` with ``cg`` and pushing
-``-w`` through ``∂_data(Jᵀr)``, O(1) memory in the iteration count;
-``numerics.fixed_point_solve`` is the analogous combinator for the
-velocity/inverse fixed points).  This is what lets ``entense`` use a
-registrator as a differentiable layer or a loss.  (The BFGS metric path
-— LNCC/MI/CR — is not differentiable through the solve; use the SSD/LM
-path or ``implicit_least_squares`` when a backward is needed.)
+**implicit** (the argmin is differentiated through the optimum by the
+implicit-function theorem).  Two implicit combinators:
+
+- ``linalg.implicit_least_squares`` — for a least-squares residual
+  (SSD/LM): solves the Gauss-Newton-Hessian adjoint ``(JᵀJ) w = x̄`` with
+  ``cg`` and pushes ``-w`` through ``∂_data(Jᵀr)``.
+- ``linalg.implicit_minimize`` — for a **general scalar objective**, so
+  the BFGS metric path (LNCC/MI/CR) is a differentiable layer too:
+  solves the **exact-Hessian** adjoint ``(∇²_x f) w = x̄`` (matrix-free
+  Hessian-vector products via ``cg``) and pushes ``-w`` through
+  ``∂_data(∇_x f)``.
+
+Both are O(1) memory in the iteration count and ``O(M + P)`` per call (M
+voxels, P parameters) — neither the Jacobian/Hessian nor the normal
+matrix is materialised.  ``numerics.fixed_point_solve`` is the analogous
+combinator for the velocity/inverse fixed points.  This is what lets
+``entense`` use a registrator — under *any* metric — as a differentiable
+layer or a loss.
 
 ## 6.1 Usage
 
 ```python
 from nitrix.register import (
     rigid_register, affine_register, RegistrationSpec,
-    diffeomorphic_demons_register, DemonsSpec,
+    CorrelationRatio, diffeomorphic_demons_register, DemonsSpec,
 )
 
 # Rigid (motion correction; SSD + Gauss-Newton/LM, coarse-to-fine).
@@ -228,9 +237,12 @@ res = rigid_register(moving, fixed,
 res.matrix      # (ndim+1, ndim+1) homogeneous transform (fixed -> moving)
 res.warped      # moving resampled onto the fixed grid
 
-# Cross-modal rigid (correlation ratio / MI via BFGS).
+# Cross-modal rigid (correlation ratio / MI via BFGS).  The metric is a
+# record carrying its own hyper-parameters (SSD / LNCC / MI /
+# CorrelationRatio); the default is SSD().
 affine_register(moving, fixed,
-                spec=RegistrationSpec(metric='cr', levels=3))
+                spec=RegistrationSpec(metric=CorrelationRatio(bins=32),
+                                      levels=3))
 
 # Diffeomorphic (log-Demons; guaranteed diffeomorphism).
 d = diffeomorphic_demons_register(moving, fixed,
