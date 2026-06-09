@@ -815,6 +815,29 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 
 ### 10.3 Shipped entries
 
+### 2026-06-09 — ilex-backlog implementation sprint (Phases 1–5) + review-driven boundary
+
+- **Type:** Downstream deviation (consumer-driven scope) + Plan revision (boundary)
+- **Triggered by:** The 2026-06-02 / 2026-06-08 ilex audits
+  (`docs/feature-requests/ilex-{pipeline,training}-substrate.md`); follow-up
+  code review (`docs/review-ilex-backlog-impl.md`).
+- **Description:** Implemented the full ilex backlog across `numerics`,
+  `metrics`, `stats`, `geometry`, `morphology`, `register`, `sparse`, and a
+  new `augment` subpackage. The review surfaced that the
+  **score-kernel ↔ scalarisation boundary** and the **keyed-generator**
+  symbol category were never specified; both are now drawn.
+- **Capability shipped:** See the per-symbol table in
+  **`SPEC_UPDATE_v0.5.md §10.A`** (the detailed record for this sprint).
+- **Shape:** JAX-only throughout. Dense factorisations (PCA, affine
+  decompose) route through `linalg._solver.safe_*` for the cuSolver-dead GPU.
+- **Deferred work:** Pallas kernels; adaptive/symplectic ODE + adjoint;
+  sparse-`X` PCA; 2-D affine-param decomposition (tracked).
+- **Non-negotiables held:** §2.2 respected — pure functions, NamedTuple /
+  frozen containers, no equinox/scipy runtime imports, jaxtyping throughout.
+  The boundary (`SPEC_UPDATE_v0.5 §1`), keyed-generator clarification (§2),
+  and `augment` ratification (§3) keep the additions inside the substrate's
+  organising principles rather than creating a parallel structure.
+
 ### 2026-06-08 — Registration suite (rigid/affine + diffeomorphic) + three §12 graduations
 
 - **Type:** Plan revision + §12 → §10.A graduations
