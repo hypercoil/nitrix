@@ -28,6 +28,7 @@ from typing import Optional, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
+from jax.typing import DTypeLike
 from jaxtyping import Array, Float
 
 from ..geometry import (
@@ -37,6 +38,7 @@ from ..geometry import (
     params_to_affine_matrix,
     spatial_transform,
 )
+from ._common import _coarse_random_field, _default_float
 
 __all__ = [
     'random_flip',
@@ -146,7 +148,10 @@ def random_resized_crop(
     """
     ndim = len(size)
     spatial = x.shape[:ndim]
-    in_shape = jnp.asarray(spatial, dtype=jnp.float32)
+    # Coordinate maths in (at least) the input's float precision, so a
+    # float64 volume is not sampled through float32 coordinates.
+    coord_dtype = jnp.result_type(x.dtype, jnp.float32)
+    in_shape = jnp.asarray(spatial, dtype=coord_dtype)
     k_scale, k_offset = jax.random.split(key, 2)
     scales = jax.random.uniform(
         k_scale, (ndim,), minval=scale_range[0], maxval=scale_range[1]
@@ -156,7 +161,7 @@ def random_resized_crop(
     offsets = jax.random.uniform(k_offset, (ndim,)) * max_offsets
     coord_axes = [
         offsets[i]
-        + ((jnp.arange(size[i], dtype=jnp.float32) + 0.5) / size[i])
+        + ((jnp.arange(size[i], dtype=coord_dtype) + 0.5) / size[i])
         * extents[i]
         - 0.5
         for i in range(ndim)
@@ -206,6 +211,7 @@ def random_svf_displacement(
     max_std: float = 3.0,
     grid_fraction: float = 0.0625,
     n_steps: int = 5,
+    dtype: Optional[DTypeLike] = None,
 ) -> Float[Array, '*spatial ndim']:
     """Sample a smooth diffeomorphic displacement field (channels-last).
 
@@ -213,15 +219,20 @@ def random_svf_displacement(
     max_std)``), linearly upsamples it to ``spatial_shape``, and
     integrates it by scaling-and-squaring
     (``geometry.integrate_velocity_field``) into a smooth, invertible
-    displacement.  ``max_std == 0`` gives a zero field.  Returns
+    displacement.  ``max_std == 0`` gives a zero field.  ``dtype`` defaults
+    to the x64-aware float (no silent float32 downcast).  Returns
     ``(*spatial, ndim)``.
     """
     ndim = len(spatial_shape)
+    dt = _default_float() if dtype is None else dtype
     k_std, k_field = jax.random.split(key, 2)
-    std = jax.random.uniform(k_std, (), minval=0.0, maxval=max_std)
-    small = tuple(max(2, int(round(s * grid_fraction))) for s in spatial_shape)
-    vel_small = (
-        jax.random.normal(k_field, (*small, ndim), dtype=jnp.float32) * std
+    std = jax.random.uniform(k_std, (), dtype=dt, minval=0.0, maxval=max_std)
+    vel = _coarse_random_field(
+        spatial_shape,
+        k_field,
+        std=std,
+        grid_fraction=grid_fraction,
+        channels=ndim,
+        dtype=dt,
     )
-    vel = jax.image.resize(vel_small, (*spatial_shape, ndim), method='linear')
     return integrate_velocity_field(vel, n_steps=n_steps)

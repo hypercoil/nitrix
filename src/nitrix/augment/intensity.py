@@ -174,10 +174,12 @@ def gibbs_ringing(
     Real array of the same shape as ``x``.
     """
     fft_axes = tuple(range(x.ndim)) if axes is None else tuple(axes)
-    r2 = jnp.zeros((1,) * x.ndim, dtype=jnp.float32)
+    # k-space coordinate grid in (at least) the input's float precision.
+    grid_dtype = jnp.result_type(x.dtype, jnp.float32)
+    r2 = jnp.zeros((1,) * x.ndim, dtype=grid_dtype)
     for ax in fft_axes:
         n = x.shape[ax]
-        coord = (jnp.arange(n, dtype=jnp.float32) - n // 2) / max(n / 2.0, 1.0)
+        coord = (jnp.arange(n, dtype=grid_dtype) - n // 2) / max(n / 2.0, 1.0)
         shape = [1] * x.ndim
         shape[ax] = n
         r2 = r2 + coord.reshape(shape) ** 2

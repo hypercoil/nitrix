@@ -24,11 +24,14 @@ and randomised contrast (draw the per-label means / stds in the caller);
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 import jax
 import jax.numpy as jnp
+from jax.typing import DTypeLike
 from jaxtyping import Array, Float, Int
+
+from ._common import _coarse_random_field, _default_float
 
 __all__ = ['gmm_label_to_image', 'simulate_bias_field']
 
@@ -79,6 +82,7 @@ def simulate_bias_field(
     *,
     max_std: float = 0.5,
     grid_fraction: float = 0.04,
+    dtype: Optional[DTypeLike] = None,
 ) -> Float[Array, '*spatial']:
     """Simulate a smooth multiplicative intensity non-uniformity field.
 
@@ -94,9 +98,10 @@ def simulate_bias_field(
     -------
     Multiplicative field with shape ``spatial_shape``.
     """
+    dt = _default_float() if dtype is None else dtype
     k_std, k_field = jax.random.split(key, 2)
-    std = jax.random.uniform(k_std, (), minval=0.0, maxval=max_std)
-    small = tuple(max(2, int(round(s * grid_fraction))) for s in spatial_shape)
-    field = jax.random.normal(k_field, small, dtype=jnp.float32) * std
-    full = jax.image.resize(field, tuple(spatial_shape), method='linear')
+    std = jax.random.uniform(k_std, (), dtype=dt, minval=0.0, maxval=max_std)
+    full = _coarse_random_field(
+        spatial_shape, k_field, std=std, grid_fraction=grid_fraction, dtype=dt
+    )
     return jnp.exp(full)

@@ -284,3 +284,27 @@ def test_gibbs_differentiable():
     g = jax.grad(lambda z: jnp.sum(gibbs_ringing(z, 0.5) ** 2))(x)
     assert g.shape == x.shape
     assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# generator dtype (no silent float32 downcast under x64)
+# ---------------------------------------------------------------------------
+
+
+def test_generators_respect_x64_default():
+    # x64 is enabled in this module; the generators must default to float64,
+    # not silently round-trip a float64 pipeline through float32.
+    k = jax.random.PRNGKey(0)
+    assert simulate_bias_field((8, 8, 8), k).dtype == jnp.float64
+    assert random_svf_displacement((8, 8, 8), k).dtype == jnp.float64
+    x64 = jnp.ones((8, 8), dtype=jnp.float64)
+    assert gibbs_ringing(x64, 0.5).dtype == jnp.float64
+
+
+def test_generators_dtype_override():
+    k = jax.random.PRNGKey(1)
+    assert simulate_bias_field((8, 8), k, dtype=jnp.float32).dtype == jnp.float32
+    assert (
+        random_svf_displacement((8, 8), k, dtype=jnp.float32).dtype
+        == jnp.float32
+    )
