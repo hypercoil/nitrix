@@ -50,6 +50,7 @@ from .grid import (
     jacobian_det_displacement,
     jacobian_displacement,
     resample,
+    sample_at_points,
     spatial_transform,
     spatial_transform_batched,
     # legacy aliases (removed at v0.1)
@@ -108,6 +109,7 @@ __all__ = [
     'identity_grid',
     'spatial_transform',
     'spatial_transform_batched',
+    'sample_at_points',
     'integrate_velocity_field',
     'jacobian_displacement',
     'jacobian_det_displacement',
