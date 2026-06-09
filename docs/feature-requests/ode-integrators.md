@@ -1,9 +1,15 @@
 # ODE integrators — `nitrix.numerics.ode`
 
-> **Status (2026-06-02): partial — one integrator (`integrate_velocity_field`,
-> scaling-and-squaring) is shipped; the general RK / symplectic family is
-> not.** Brainstorm candidate; promotion gated by the §13 acceptance
-> protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.11`.
+> **Status (2026-06-09): fixed-step family SHIPPED.** `numerics/ode.py` adds
+> `euler`, `rk4`, and an `odeint(f, y0, t, *, method)` dispatcher for
+> `dy/dt = f(t, y)` over a `lax.scan` (one step per time interval), returning
+> the state at each time point and **differentiable straight through the
+> solver**. Pure JAX — the portable, diffrax-free substrate the per-vertex
+> neural-ODE models (`cortex_ode` / `surfnet`) need. Verified vs the
+> exp-decay closed form, RK4≪Euler accuracy, energy conservation, and grad
+> correctness. Still roadmap: adaptive (Dormand–Prince), symplectic
+> (leapfrog / implicit-midpoint), and the memory-efficient adjoint backward.
+> Provenance: `SPEC_UPDATE_v0.3.md §12.11`.
 
 **What.** General-purpose ODE integration, differentiable via the adjoint
 equation.
