@@ -9,13 +9,30 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 - **device**: cpu (cpu)
 - **platform**: Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39
 - **jax_version**: 0.10.1
-- **timestamp**: 2026-06-08T00:15:13Z
+- **timestamp**: 2026-06-09T04:52:02Z
 
 ## Legend
 
 - ✅ probe passes (transformation works on this host).
 - ❌ probe fails (cell shows the truncated error message).
 - — not applicable for this op (no natural diff target, etc.).
+
+## nitrix.augment
+
+| op | jit | grad | vmap | jit(grad) | invariants | notes |
+|---|:--:|:--:|:--:|:--:|---|---|
+| `gamma_contrast` | ✅ | ✅ | ✅ | ✅ | gamma tone curve within a normalised bracket |  |
+| `random_histogram_shift` | ✅ | ✅ | — | ✅ | random monotone piecewise-linear intensity remap |  |
+| `gibbs_ringing` | ✅ | ✅ | — | ✅ | Gibbs (truncation) ringing via hard k-space cutoff |  |
+| `gaussian_noise` | ✅ | ✅ | — | ✅ | additive i.i.d. Gaussian noise |  |
+| `rician_noise` | ✅ | ✅ | — | ✅ | Rician magnitude-noise sqrt((x+n_r)²+n_i²) |  |
+| `random_flip` | ✅ | ✅ | — | ✅ | per-axis Bernoulli reflection |  |
+| `random_crop` | ✅ | ✅ | — | ✅ | random-offset fixed-size crop (dynamic_slice) |  |
+| `random_resized_crop` | ✅ | ✅ | — | ✅ | zoom crop: random window resampled to a fixed shape |  |
+| `random_affine_matrix` | ✅ | — | — | — | random affine in geometric params (T@R@S@E) |  |
+| `random_svf_displacement` | ✅ | — | — | — | smooth diffeomorphic SVF displacement (integrate exp) |  |
+| `gmm_label_to_image` | ✅ | ✅ | — | ✅ | per-label Gaussian-mixture render (domain randomisation) |  |
+| `simulate_bias_field` | ✅ | — | — | — | forward multiplicative INU/bias field (exp coarse field) |  |
 
 ## nitrix.bias
 
@@ -53,6 +70,27 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `displacement_from_reference_points` | ✅ | ✅ | — | ✅ | CoM displacement from a reference (points) |  |
 | `spherical_conv` | ✅ | ✅ | — | ✅ | geodesic-neighbourhood conv via semiring_ell_matmul |  |
 | `sphere_grid_unpad_2d` | ✅ | ✅ | — | ✅ | inverse of sphere_grid_pad_2d |  |
+| `rigid_exp` | ✅ | ✅ | ✅ | ✅ | SE(n) chart: closed-form Rodrigues + direct translation |  |
+| `rigid_log` | ✅ | ✅ | ✅ | ✅ | inverse of rigid_exp (axis-angle recovery) |  |
+| `affine_exp` | ✅ | ✅ | ✅ | ✅ | GL(n) chart: linear block = matrix_exp(generator) |  |
+| `apply_affine` | ✅ | ✅ | ✅ | ✅ | coordinate map M(p - c) + t + c |  |
+| `affine_grid` | ✅ | ✅ | — | ✅ | absolute sample coords of a homogeneous transform |  |
+| `make_square_affine` | ✅ | ✅ | ✅ | ✅ | (N,N+1) -> (N+1,N+1) homogenisation |  |
+| `invert_affine` | ✅ | ✅ | ✅ | ✅ | affine inverse via safe_inv (cuSolver-routed) |  |
+| `compose_affine` | ✅ | ✅ | ✅ | ✅ | compose homogeneous affines |  |
+| `fit_affine` | ✅ | ✅ | ✅ | ✅ | closed-form (weighted) LS affine via safe_cho_solve |  |
+| `angles_to_rotation_matrix` | ✅ | ✅ | ✅ | ✅ | Euler intrinsic X@Y@Z (2-D / 3-D) |  |
+| `rotation_matrix_to_angles` | ✅ | ✅ | ✅ | ✅ | rotation -> Euler angles (gimbal-lock branch) |  |
+| `params_to_affine_matrix` | ✅ | ✅ | ✅ | ✅ | compose affine T@R@S@E from geometric params |  |
+| `affine_matrix_to_params` | ✅ | ✅ | ✅ | ✅ | decompose affine -> params (Cholesky of MᵀM) |  |
+| `sample_at_points` | ✅ | ✅ | ✅ | ✅ | scattered-point sampling (complement of grid warp) |  |
+| `spatial_gradient` | ✅ | ✅ | ✅ | ✅ | separable central/sobel/scharr gradient (correlate1d) |  |
+| `downsample` | ✅ | ✅ | — | ✅ | anti-alias gaussian + align-corners resample |  |
+| `upsample` | ✅ | ✅ | — | ✅ | align-corners prolongation (resample up) |  |
+| `gaussian_pyramid` | ✅ | ✅ | — | ✅ | levels-deep anti-aliased pyramid (finest first) | returns a tuple; grad reduces the finest leaf |
+| `compose_displacement` | ✅ | ✅ | — | ✅ | (id+outer)∘(id+inner) displacement composition |  |
+| `compose_velocity` | ✅ | ✅ | — | ✅ | BCH velocity composition (order 1 add; 2 adds ½[v,u]) |  |
+| `invert_displacement` | ✅ | ✅ | — | ✅ | inverse displacement via differentiable fixed point |  |
 
 ## nitrix.graph
 
@@ -98,6 +136,33 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `sigmoid_kernel` | ✅ | ✅ | ✅ | ✅ | tanh(gamma <x,y> + r) |  |
 | `cosine_kernel` | ✅ | ✅ | ✅ | ✅ | normalised inner-product kernel |  |
 | `parameterised_norm` | ✅ | ✅ | ✅ | ✅ | theta-weighted row norm |  |
+| `matrix_exp` | ✅ | ✅ | ✅ | ✅ | scaling-and-squaring + Taylor (pure matmul, cuSolver-free); det(exp A) = exp(tr A) |  |
+| `solve` | ✅ | ✅ | ✅ | ✅ | general A x = b via safe_solve (cuSolver-routed) | prefer cho_solve for SPD |
+| `cho_solve` | ✅ | ✅ | ✅ | ✅ | SPD (A + l2 I) x = b via Cholesky (safe_cho_solve) |  |
+| `cg` | ✅ | ✅ | ✅ | ✅ | matrix-free CG for SPD systems (cuSolver-free) |  |
+| `gauss_newton` | ✅ | ✅ | ✅ | ✅ | matrix-free Gauss-Newton normal equations (cg inner) | unrolled loop -> jit/grad-clean; returns OptimizeResult |
+| `levenberg_marquardt` | ✅ | ✅ | ✅ | ✅ | damped normal equations; jnp.where accept/reject | monotone cost_history; returns OptimizeResult |
+| `implicit_least_squares` | ✅ | ✅ | — | ✅ | argmin differentiable by the implicit-function theorem | custom_vjp: exact grad w.r.t data without unrolling |
+
+## nitrix.metrics
+
+| op | jit | grad | vmap | jit(grad) | invariants | notes |
+|---|:--:|:--:|:--:|:--:|---|---|
+| `ssd` | ✅ | ✅ | ✅ | ✅ | (weighted) mean/sum of squared differences |  |
+| `ncc` | ✅ | ✅ | ✅ | ✅ | global Pearson cross-correlation (stats.corr shape) |  |
+| `lncc` | ✅ | ✅ | ✅ | ✅ | windowed local NCC (ANTs form; separable box filter) |  |
+| `joint_histogram` | ✅ | ✅ | ✅ | ✅ | differentiable Parzen soft-binned joint histogram |  |
+| `mutual_information` | ✅ | ✅ | ✅ | ✅ | MI / NMI from the soft joint histogram |  |
+| `correlation_ratio` | ✅ | ✅ | ✅ | ✅ | Roche's η² between-group variance ratio |  |
+| `dice` | ✅ | ✅ | ✅ | ✅ | soft Sørensen-Dice 2|A∩B|/(|A|+|B|) |  |
+| `jaccard` | ✅ | ✅ | ✅ | ✅ | soft Jaccard / IoU |A∩B|/|A∪B| |  |
+| `bce_with_logits` | ✅ | ✅ | ✅ | ✅ | stable BCE-from-logits max(x,0)-xt+log1p(e^{-|x|}) |  |
+| `cross_entropy_with_logits` | ✅ | ✅ | — | ✅ | categorical CE from logits (log_softmax + gather) |  |
+| `focal_loss` | ✅ | ✅ | ✅ | ✅ | binary focal loss (1-p_t)^γ · BCE |  |
+| `info_nce` | ✅ | ✅ | — | ✅ | InfoNCE / NT-Xent cross-view (no self-pair bias) |  |
+| `dino_cross_entropy` | ✅ | ✅ | — | ✅ | centred / sharpened self-distillation CE (DINO) |  |
+| `ibot_cross_entropy` | ✅ | ✅ | — | ✅ | masked-token self-distillation CE (iBOT; mask mean) |  |
+| `koleo` | ✅ | ✅ | — | ✅ | Kozachenko-Leonenko feature-spread regulariser |  |
 
 ## nitrix.morphology
 
@@ -112,6 +177,8 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `max_unpool_nd` | ✅ | ✅ | — | ✅ | vmapped per-channel scatter; argmax-agreement parity (not raw-logit allclose) | inverts max_pool_with_indices_nd; indices are int (non-diff) |
 | `open` | ✅ | ✅ | ✅ | ✅ | erode then dilate (TROPICAL opening) |  |
 | `close` | ✅ | ✅ | ✅ | ✅ | dilate then erode (TROPICAL closing) |  |
+| `connected_components` | ✅ | — | — | — | pointer-jumping label propagation O(log diameter) | returns Int labels -> non-differentiable; lax.while_loop |
+| `largest_connected_component` | ✅ | — | — | — | largest CC mask (bincount over components) | returns Bool mask -> non-differentiable; lax.while_loop |
 
 ## nitrix.numerics
 
@@ -125,6 +192,29 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `percentile_rescale` | ✅ | ✅ | ✅ | ✅ | shift by p_lo, scale by p_hi, clip to [0, 1] |  |
 | `psc_normalize` | ✅ | ✅ | ✅ | ✅ | percent signal change vs the mean |  |
 | `robust_zscore_normalize` | ✅ | ✅ | ✅ | ✅ | median / MAD robust z-score |  |
+| `l2_normalize` | ✅ | ✅ | ✅ | ✅ | unit-L2 projection (clamp denominator, torch convention) |  |
+| `lp_normalize` | ✅ | ✅ | ✅ | ✅ | unit-Lp projection x / max(||x||_p, eps) |  |
+| `instance_norm` | ✅ | ✅ | ✅ | ✅ | per-instance centre-and-scale (no trainable affine) |  |
+| `pad_to_multiple` | ✅ | ✅ | — | ✅ | pad spatial axes to a multiple (returns pad widths) |  |
+| `crop_to_multiple` | ✅ | ✅ | — | ✅ | crop spatial axes to a multiple (returns crop widths) |  |
+| `nonzero_bounding_box` | ✅ | — | — | — | bounding box of x>threshold as (lo,hi) indices | returns Int indices -> non-differentiable |
+| `gaussian_window` | — | — | — | — | host-side separable Gaussian patch window (peak 1) |  |
+| `overlap_add` | ✅ | ✅ | ✅ | ✅ | weighted overlap-add finalisation Σ(w·p)/Σw |  |
+| `euler` | ✅ | ✅ | ✅ | ✅ | explicit Euler via lax.scan (grad through the solver) |  |
+| `rk4` | ✅ | ✅ | ✅ | ✅ | classic 4th-order Runge-Kutta via lax.scan |  |
+| `odeint` | ✅ | ✅ | ✅ | ✅ | fixed-step ODE dispatch (euler / rk4) |  |
+| `fixed_point_solve` | ✅ | ✅ | — | ✅ | implicit-VJP fixed-point iteration (grad by IFT) |  |
+
+## nitrix.register
+
+| op | jit | grad | vmap | jit(grad) | invariants | notes |
+|---|:--:|:--:|:--:|:--:|---|---|
+| `rigid_register` | ✅ | — | — | — | coarse-to-fine GN/LM intensity registration (SE(n)) | end-to-end optimiser; differentiate via implicit_least_squares |
+| `affine_register` | ✅ | — | — | — | coarse-to-fine GN/LM affine registration (exp block) | end-to-end optimiser; differentiate via implicit_least_squares |
+| `diffeomorphic_demons_register` | ✅ | — | — | — | log-domain diffeomorphic Demons (SVF; ESM force) | end-to-end optimiser (benchmark-worthy) |
+| `gradient_smoothness` | ✅ | ✅ | — | ✅ | diffusion (first-order) smoothness ‖∇u‖² |  |
+| `bending_energy` | ✅ | ✅ | — | ✅ | thin-plate (second-order) bending ‖∇²u‖² |  |
+| `jacobian_folding_penalty` | ✅ | ✅ | — | ✅ | folding penalty relu(-det J), J = I + ∇u |  |
 
 ## nitrix.semiring
 
@@ -190,6 +280,8 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `mesh_cotangent_laplacian` | — | — | — | — | cotangent-weight Laplacian -> ELL |  |
 | `sectioned_ell_from_ragged` | — | — | — | — | ragged rows -> bucketed SectionedELL |  |
 | `icosphere_hierarchy_from_levels` | — | — | — | — | package caller-supplied meshes + parents into a hierarchy |  |
+| `compute_vertex_normals` | ✅ | ✅ | — | ✅ | area-weighted face normals scattered + L2-normed |  |
+| `mesh_laplacian_smooth` | ✅ | ✅ | — | ✅ | uniform (combinatorial) Laplacian vertex smoothing |  |
 
 ## nitrix.stats
 
@@ -214,12 +306,17 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `instantaneous_phase` | ✅ | ✅ | ✅ | ✅ | phase of the analytic signal |  |
 | `instantaneous_frequency` | ✅ | ✅ | ✅ | ✅ | time-derivative of instantaneous phase |  |
 | `env_inst` | ✅ | ✅ | ✅ | ✅ | envelope + instantaneous phase/frequency (Hilbert) | returns a 3-tuple; grad probe reduces the first leaf |
+| `kl_diagonal_gaussian` | ✅ | ✅ | ✅ | ✅ | closed-form KL(N(μ, diag e^logvar) || N(0, I)) |  |
+| `gaussian_nll` | ✅ | ✅ | ✅ | ✅ | diagonal-Gaussian NLL (log-variance parameterised) |  |
+| `pca_fit` | ✅ | ✅ | — | ✅ | covariance-eigendecomposition PCA via safe_eigh (no svd) | returns PCAResult; grad reduces the components leaf |
+| `pca_transform` | ✅ | ✅ | ✅ | ✅ | project onto a (pre-fitted) PCA basis |  |
+| `pca_inverse_transform` | ✅ | ✅ | ✅ | ✅ | reconstruct from PCA coordinates |  |
 
 ## Summary
 
-- **ops catalogued**: 143
-- **jit pass**: 128 / 143
-- **grad pass**: 125 / 127 (applicable)
-- **vmap pass**: 96 / 96 (applicable)
-- **jit(grad) pass**: 125 / 127
+- **ops catalogued**: 225
+- **jit pass**: 209 / 225
+- **grad pass**: 197 / 199 (applicable)
+- **vmap pass**: 138 / 138 (applicable)
+- **jit(grad) pass**: 197 / 199
 - **performance**: see the nitrix-perf-bench suite + dashboard (this matrix is capability-only).

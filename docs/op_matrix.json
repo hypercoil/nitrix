@@ -3,7 +3,7 @@
     "device": "cpu (cpu)",
     "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.1",
-    "timestamp": "2026-06-08T00:15:13Z"
+    "timestamp": "2026-06-09T04:52:02Z"
   },
   "perf_source": "nitrix-perf-bench",
   "ops": [
@@ -1614,6 +1614,909 @@
         "dispatcher over correction methods (N4 default)"
       ],
       "notes": "method=n4 -> grad FAIL (while_loop)"
+    },
+    {
+      "qualname": "nitrix.linalg.matrix_exp",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "scaling-and-squaring + Taylor (pure matmul, cuSolver-free)",
+        "det(exp A) = exp(tr A)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.solve",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "general A x = b via safe_solve (cuSolver-routed)"
+      ],
+      "notes": "prefer cho_solve for SPD"
+    },
+    {
+      "qualname": "nitrix.linalg.cho_solve",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "SPD (A + l2 I) x = b via Cholesky (safe_cho_solve)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.cg",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "matrix-free CG for SPD systems (cuSolver-free)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.gauss_newton",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "matrix-free Gauss-Newton normal equations (cg inner)"
+      ],
+      "notes": "unrolled loop -> jit/grad-clean; returns OptimizeResult"
+    },
+    {
+      "qualname": "nitrix.linalg.levenberg_marquardt",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "damped normal equations; jnp.where accept/reject"
+      ],
+      "notes": "monotone cost_history; returns OptimizeResult"
+    },
+    {
+      "qualname": "nitrix.linalg.implicit_least_squares",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "argmin differentiable by the implicit-function theorem"
+      ],
+      "notes": "custom_vjp: exact grad w.r.t data without unrolling"
+    },
+    {
+      "qualname": "nitrix.geometry.rigid_exp",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "SE(n) chart: closed-form Rodrigues + direct translation"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.rigid_log",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "inverse of rigid_exp (axis-angle recovery)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.affine_exp",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "GL(n) chart: linear block = matrix_exp(generator)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.apply_affine",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "coordinate map M(p - c) + t + c"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.affine_grid",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "absolute sample coords of a homogeneous transform"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.make_square_affine",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "(N,N+1) -> (N+1,N+1) homogenisation"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.invert_affine",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "affine inverse via safe_inv (cuSolver-routed)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.compose_affine",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "compose homogeneous affines"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.fit_affine",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "closed-form (weighted) LS affine via safe_cho_solve"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.angles_to_rotation_matrix",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Euler intrinsic X@Y@Z (2-D / 3-D)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.rotation_matrix_to_angles",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "rotation -> Euler angles (gimbal-lock branch)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.params_to_affine_matrix",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "compose affine T@R@S@E from geometric params"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.affine_matrix_to_params",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "decompose affine -> params (Cholesky of M\u1d40M)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.sample_at_points",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "scattered-point sampling (complement of grid warp)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.spatial_gradient",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "separable central/sobel/scharr gradient (correlate1d)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.downsample",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "anti-alias gaussian + align-corners resample"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.upsample",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "align-corners prolongation (resample up)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.gaussian_pyramid",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "levels-deep anti-aliased pyramid (finest first)"
+      ],
+      "notes": "returns a tuple; grad reduces the finest leaf"
+    },
+    {
+      "qualname": "nitrix.geometry.compose_displacement",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "(id+outer)\u2218(id+inner) displacement composition"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.compose_velocity",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "BCH velocity composition (order 1 add; 2 adds \u00bd[v,u])"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.invert_displacement",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "inverse displacement via differentiable fixed point"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.l2_normalize",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "unit-L2 projection (clamp denominator, torch convention)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.lp_normalize",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "unit-Lp projection x / max(||x||_p, eps)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.instance_norm",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "per-instance centre-and-scale (no trainable affine)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.pad_to_multiple",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "pad spatial axes to a multiple (returns pad widths)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.crop_to_multiple",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "crop spatial axes to a multiple (returns crop widths)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.nonzero_bounding_box",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "bounding box of x>threshold as (lo,hi) indices"
+      ],
+      "notes": "returns Int indices -> non-differentiable"
+    },
+    {
+      "qualname": "nitrix.numerics.gaussian_window",
+      "jit": "n/a",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "host-side separable Gaussian patch window (peak 1)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.overlap_add",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "weighted overlap-add finalisation \u03a3(w\u00b7p)/\u03a3w"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.euler",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "explicit Euler via lax.scan (grad through the solver)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.rk4",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "classic 4th-order Runge-Kutta via lax.scan"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.odeint",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "fixed-step ODE dispatch (euler / rk4)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.numerics.fixed_point_solve",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "implicit-VJP fixed-point iteration (grad by IFT)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.morphology.connected_components",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "pointer-jumping label propagation O(log diameter)"
+      ],
+      "notes": "returns Int labels -> non-differentiable; lax.while_loop"
+    },
+    {
+      "qualname": "nitrix.morphology.largest_connected_component",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "largest CC mask (bincount over components)"
+      ],
+      "notes": "returns Bool mask -> non-differentiable; lax.while_loop"
+    },
+    {
+      "qualname": "nitrix.sparse.compute_vertex_normals",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "area-weighted face normals scattered + L2-normed"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.sparse.mesh_laplacian_smooth",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "uniform (combinatorial) Laplacian vertex smoothing"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.kl_diagonal_gaussian",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "closed-form KL(N(\u03bc, diag e^logvar) || N(0, I))"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.gaussian_nll",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "diagonal-Gaussian NLL (log-variance parameterised)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.pca_fit",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "covariance-eigendecomposition PCA via safe_eigh (no svd)"
+      ],
+      "notes": "returns PCAResult; grad reduces the components leaf"
+    },
+    {
+      "qualname": "nitrix.stats.pca_transform",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "project onto a (pre-fitted) PCA basis"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.pca_inverse_transform",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "reconstruct from PCA coordinates"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.ssd",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "(weighted) mean/sum of squared differences"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.ncc",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "global Pearson cross-correlation (stats.corr shape)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.lncc",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "windowed local NCC (ANTs form; separable box filter)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.joint_histogram",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "differentiable Parzen soft-binned joint histogram"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.mutual_information",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "MI / NMI from the soft joint histogram"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.correlation_ratio",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Roche's \u03b7\u00b2 between-group variance ratio"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.dice",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "soft S\u00f8rensen-Dice 2|A\u2229B|/(|A|+|B|)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.jaccard",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "soft Jaccard / IoU |A\u2229B|/|A\u222aB|"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.bce_with_logits",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "stable BCE-from-logits max(x,0)-xt+log1p(e^{-|x|})"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.cross_entropy_with_logits",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "categorical CE from logits (log_softmax + gather)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.focal_loss",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "binary focal loss (1-p_t)^\u03b3 \u00b7 BCE"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.info_nce",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "InfoNCE / NT-Xent cross-view (no self-pair bias)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.dino_cross_entropy",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "centred / sharpened self-distillation CE (DINO)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.ibot_cross_entropy",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "masked-token self-distillation CE (iBOT; mask mean)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.koleo",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Kozachenko-Leonenko feature-spread regulariser"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.register.rigid_register",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "coarse-to-fine GN/LM intensity registration (SE(n))"
+      ],
+      "notes": "end-to-end optimiser; differentiate via implicit_least_squares"
+    },
+    {
+      "qualname": "nitrix.register.affine_register",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "coarse-to-fine GN/LM affine registration (exp block)"
+      ],
+      "notes": "end-to-end optimiser; differentiate via implicit_least_squares"
+    },
+    {
+      "qualname": "nitrix.register.diffeomorphic_demons_register",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "log-domain diffeomorphic Demons (SVF; ESM force)"
+      ],
+      "notes": "end-to-end optimiser (benchmark-worthy)"
+    },
+    {
+      "qualname": "nitrix.register.gradient_smoothness",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "diffusion (first-order) smoothness \u2016\u2207u\u2016\u00b2"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.register.bending_energy",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "thin-plate (second-order) bending \u2016\u2207\u00b2u\u2016\u00b2"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.register.jacobian_folding_penalty",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "folding penalty relu(-det J), J = I + \u2207u"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.gamma_contrast",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "gamma tone curve within a normalised bracket"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.random_histogram_shift",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "random monotone piecewise-linear intensity remap"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.gibbs_ringing",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Gibbs (truncation) ringing via hard k-space cutoff"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.gaussian_noise",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "additive i.i.d. Gaussian noise"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.rician_noise",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Rician magnitude-noise sqrt((x+n_r)\u00b2+n_i\u00b2)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.random_flip",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "per-axis Bernoulli reflection"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.random_crop",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "random-offset fixed-size crop (dynamic_slice)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.random_resized_crop",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "zoom crop: random window resampled to a fixed shape"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.random_affine_matrix",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "random affine in geometric params (T@R@S@E)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.random_svf_displacement",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "smooth diffeomorphic SVF displacement (integrate exp)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.gmm_label_to_image",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "per-label Gaussian-mixture render (domain randomisation)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.augment.simulate_bias_field",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "forward multiplicative INU/bias field (exp coarse field)"
+      ],
+      "notes": ""
     }
   ]
 }

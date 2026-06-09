@@ -42,6 +42,9 @@ SUBPKGS = [
     'semiring',
     'sparse',
     'bias',
+    'metrics',
+    'register',
+    'augment',
 ]
 
 # Callable public functions intentionally kept OUT of the op matrix.  Membership

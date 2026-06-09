@@ -2284,6 +2284,1170 @@ register(
     )
 )
 
+# ===========================================================================
+# Registration suite + this round's backlog: the public ops graduated for the
+# rigid/affine/diffeomorphic recipes (geometry Lie chart, matrix-free
+# optimisers) plus the new score-kernels, normalisers, and augmentation
+# primitives.  Internals are excluded; everything below is public API we want
+# capability-probed and benchmark-flagged.
+# ===========================================================================
+
+# --- linalg (matrix-free optimisers + dense solves + matrix exp) ------------
+
+register(
+    OpInfo(
+        'nitrix.linalg.matrix_exp',
+        fixture=lambda: ((jax.random.normal(_key(), (4, 4)),), {}),
+        invariants=(
+            'scaling-and-squaring + Taylor (pure matmul, cuSolver-free)',
+            'det(exp A) = exp(tr A)',
+        ),
+    )
+)
+
+
+def _spd_matrix():
+    m = jax.random.normal(_key(1), (5, 5))
+    return m @ m.T + 5.0 * jnp.eye(5)
+
+
+register(
+    OpInfo(
+        'nitrix.linalg.solve',
+        fixture=lambda: (
+            (
+                jnp.eye(5) + 0.1 * jax.random.normal(_key(1), (5, 5)),
+                jax.random.normal(_key(2), (5,)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('general A x = b via safe_solve (cuSolver-routed)',),
+        notes='prefer cho_solve for SPD',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.cho_solve',
+        fixture=lambda: (
+            (_spd_matrix(), jax.random.normal(_key(3), (5,))),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('SPD (A + l2 I) x = b via Cholesky (safe_cho_solve)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.cg',
+        fixture=lambda: (
+            (_spd_matrix(), jax.random.normal(_key(2), (5,))),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=1,
+        invariants=('matrix-free CG for SPD systems (cuSolver-free)',),
+    )
+)
+
+
+# Matrix-free nonlinear least squares share a fixed linear residual
+# r(x) = A x - y, so a Gauss-Newton step converges in one iteration.
+_LS_A = jax.random.normal(_key(1), (6, 4))
+_LS_Y = jax.random.normal(_key(2), (6,))
+
+
+def _ls_residual(x):
+    return _LS_A @ x - _LS_Y
+
+
+def _gn_op(x0):
+    from nitrix.linalg import gauss_newton
+
+    return gauss_newton(_ls_residual, x0, n_iters=5)
+
+
+def _lm_op(x0):
+    from nitrix.linalg import levenberg_marquardt
+
+    return levenberg_marquardt(_ls_residual, x0, n_iters=8)
+
+
+def _opt_fixture():
+    return (jax.random.normal(_key(3), (4,)),), {}
+
+
+register(
+    OpInfo(
+        'nitrix.linalg.gauss_newton',
+        fixture=_opt_fixture,
+        fn_override=_gn_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('matrix-free Gauss-Newton normal equations (cg inner)',),
+        notes='unrolled loop -> jit/grad-clean; returns OptimizeResult',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.levenberg_marquardt',
+        fixture=_opt_fixture,
+        fn_override=_lm_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('damped normal equations; jnp.where accept/reject',),
+        notes='monotone cost_history; returns OptimizeResult',
+    )
+)
+
+
+def _ils_residual(data, x):
+    return _LS_A @ x - data
+
+
+def _ils_op(data, x0):
+    from nitrix.linalg import implicit_least_squares
+
+    return implicit_least_squares(_ils_residual, data, x0, n_iters=8)
+
+
+register(
+    OpInfo(
+        'nitrix.linalg.implicit_least_squares',
+        fixture=lambda: (
+            (jax.random.normal(_key(2), (6,)), jnp.zeros((4,))),
+            {},
+        ),
+        fn_override=_ils_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('argmin differentiable by the implicit-function theorem',),
+        notes='custom_vjp: exact grad w.r.t data without unrolling',
+    )
+)
+
+# --- geometry (Lie chart, affine algebra, multi-resolution, deformation) ----
+
+
+def _rigid_matrix_3d():
+    from nitrix.geometry import rigid_exp
+
+    return rigid_exp(jax.random.normal(_key(0), (6,)) * 0.1, ndim=3)
+
+
+def _affine_matrix_3d():
+    from nitrix.geometry import affine_exp
+
+    return affine_exp(jax.random.normal(_key(0), (12,)) * 0.1, ndim=3)
+
+
+def _affine_par_3d():
+    return jnp.asarray(
+        [0.5, -0.3, 0.2, 10.0, 20.0, 30.0, 1.1, 0.9, 1.05, 0.01, 0.0, 0.0]
+    )
+
+
+def _affine_mat_34():
+    from nitrix.geometry import params_to_affine_matrix
+
+    return params_to_affine_matrix(_affine_par_3d(), ndim=3)
+
+
+def _rotation_3d():
+    from nitrix.geometry import angles_to_rotation_matrix
+
+    return angles_to_rotation_matrix(jnp.asarray([10.0, 20.0, 30.0]))
+
+
+register(
+    OpInfo(
+        'nitrix.geometry.rigid_exp',
+        fixture=lambda: ((jax.random.normal(_key(), (6,)),), {'ndim': 3}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=(
+            'SE(n) chart: closed-form Rodrigues + direct translation',
+        ),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.rigid_log',
+        fixture=lambda: ((_rigid_matrix_3d(),), {'ndim': 3}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('inverse of rigid_exp (axis-angle recovery)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.affine_exp',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (12,)) * 0.1,),
+            {'ndim': 3},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('GL(n) chart: linear block = matrix_exp(generator)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.apply_affine',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (10, 3)), _affine_matrix_3d()),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('coordinate map M(p - c) + t + c',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.affine_grid',
+        fixture=lambda: ((_affine_matrix_3d(),), {'spatial_shape': (6, 6, 6)}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('absolute sample coords of a homogeneous transform',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.make_square_affine',
+        fixture=lambda: ((_affine_mat_34(),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('(N,N+1) -> (N+1,N+1) homogenisation',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.invert_affine',
+        fixture=lambda: ((_affine_mat_34(),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('affine inverse via safe_inv (cuSolver-routed)',),
+    )
+)
+
+
+def _compose_affine_op(a, b):
+    from nitrix.geometry import compose_affine
+
+    return compose_affine([a, b])
+
+
+register(
+    OpInfo(
+        'nitrix.geometry.compose_affine',
+        fixture=lambda: ((_affine_mat_34(), _affine_mat_34()), {}),
+        fn_override=_compose_affine_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('compose homogeneous affines',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.fit_affine',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (10, 3)),
+                jax.random.normal(_key(1), (10, 3)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('closed-form (weighted) LS affine via safe_cho_solve',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.angles_to_rotation_matrix',
+        fixture=lambda: ((jnp.asarray([10.0, 20.0, 30.0]),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('Euler intrinsic X@Y@Z (2-D / 3-D)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.rotation_matrix_to_angles',
+        fixture=lambda: ((_rotation_3d(),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('rotation -> Euler angles (gimbal-lock branch)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.params_to_affine_matrix',
+        fixture=lambda: ((_affine_par_3d(),), {'ndim': 3}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('compose affine T@R@S@E from geometric params',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.affine_matrix_to_params',
+        fixture=lambda: ((_affine_mat_34(),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('decompose affine -> params (Cholesky of MᵀM)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.sample_at_points',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (12, 12, 12)),
+                jax.random.uniform(_key(1), (20, 3)) * 11.0,
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=1,
+        invariants=('scattered-point sampling (complement of grid warp)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.spatial_gradient',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (16, 16)),),
+            {'spatial_rank': 2},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('separable central/sobel/scharr gradient (correlate1d)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.downsample',
+        fixture=lambda: ((jax.random.normal(_key(), (16, 16, 1)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('anti-alias gaussian + align-corners resample',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.upsample',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (8, 8, 1)),),
+            {'target_shape': (16, 16)},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('align-corners prolongation (resample up)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.gaussian_pyramid',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (16, 16, 1)),),
+            {'levels': 3},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('levels-deep anti-aliased pyramid (finest first)',),
+        notes='returns a tuple; grad reduces the finest leaf',
+    )
+)
+
+
+def _disp_field():
+    return jax.random.normal(_key(0), (8, 8, 2)) * 0.1
+
+
+register(
+    OpInfo(
+        'nitrix.geometry.compose_displacement',
+        fixture=lambda: ((_disp_field(), _disp_field()), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('(id+outer)∘(id+inner) displacement composition',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.compose_velocity',
+        fixture=lambda: ((_disp_field(), _disp_field()), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('BCH velocity composition (order 1 add; 2 adds ½[v,u])',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.invert_displacement',
+        fixture=lambda: ((_disp_field(),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('inverse displacement via differentiable fixed point',),
+    )
+)
+
+# --- numerics (normalisers, spatial windowing, ODE, fixed point) ------------
+
+register(
+    OpInfo(
+        'nitrix.numerics.l2_normalize',
+        fixture=lambda: ((jax.random.normal(_key(), (8, 16)),), {}),
+        invariants=(
+            'unit-L2 projection (clamp denominator, torch convention)',
+        ),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.lp_normalize',
+        fixture=lambda: ((jax.random.normal(_key(), (8, 16)),), {}),
+        invariants=('unit-Lp projection x / max(||x||_p, eps)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.instance_norm',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (2, 3, 8, 8)),),
+            {'axes': (-2, -1)},
+        ),
+        invariants=('per-instance centre-and-scale (no trainable affine)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.pad_to_multiple',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (15, 15)),),
+            {'multiple': 8, 'spatial_rank': 2},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('pad spatial axes to a multiple (returns pad widths)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.crop_to_multiple',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (20, 20)),),
+            {'multiple': 8, 'spatial_rank': 2},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('crop spatial axes to a multiple (returns crop widths)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.nonzero_bounding_box',
+        fixture=lambda: ((jax.random.normal(_key(), (16, 16)),), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('bounding box of x>threshold as (lo,hi) indices',),
+        notes='returns Int indices -> non-differentiable',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.gaussian_window',
+        fixture=lambda: (((8, 8),), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        skip_jit=True,
+        invariants=('host-side separable Gaussian patch window (peak 1)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.overlap_add',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 8)),
+                jnp.abs(jax.random.normal(_key(1), (8, 8))) + 0.1,
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('weighted overlap-add finalisation Σ(w·p)/Σw',),
+    )
+)
+
+
+def _decay_field(t, y):
+    return -y
+
+
+def _ode_fixture():
+    return (
+        jax.random.normal(_key(0), (4,)),
+        jnp.linspace(0.0, 1.0, 8),
+    ), {}
+
+
+def _euler_op(y0, t):
+    from nitrix.numerics import euler
+
+    return euler(_decay_field, y0, t)
+
+
+def _rk4_op(y0, t):
+    from nitrix.numerics import rk4
+
+    return rk4(_decay_field, y0, t)
+
+
+def _odeint_op(y0, t):
+    from nitrix.numerics import odeint
+
+    return odeint(_decay_field, y0, t, method='rk4')
+
+
+register(
+    OpInfo(
+        'nitrix.numerics.euler',
+        fixture=_ode_fixture,
+        fn_override=_euler_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('explicit Euler via lax.scan (grad through the solver)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.rk4',
+        fixture=_ode_fixture,
+        fn_override=_rk4_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('classic 4th-order Runge-Kutta via lax.scan',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.odeint',
+        fixture=_ode_fixture,
+        fn_override=_odeint_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('fixed-step ODE dispatch (euler / rk4)',),
+    )
+)
+
+
+def _fp_map(p, x):
+    return 0.5 * x + 0.5 * p
+
+
+def _fp_op(params, x0):
+    from nitrix.numerics import fixed_point_solve
+
+    return fixed_point_solve(_fp_map, params, x0)
+
+
+register(
+    OpInfo(
+        'nitrix.numerics.fixed_point_solve',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (8,)), jnp.zeros((8,))),
+            {},
+        ),
+        fn_override=_fp_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('implicit-VJP fixed-point iteration (grad by IFT)',),
+    )
+)
+
+# --- morphology (connected components) --------------------------------------
+
+register(
+    OpInfo(
+        'nitrix.morphology.connected_components',
+        fixture=lambda: (
+            (jax.random.uniform(_key(), (12, 12)) > 0.5,),
+            {},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('pointer-jumping label propagation O(log diameter)',),
+        notes='returns Int labels -> non-differentiable; lax.while_loop',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.morphology.largest_connected_component',
+        fixture=lambda: (
+            (jax.random.uniform(_key(), (12, 12)) > 0.5,),
+            {},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('largest CC mask (bincount over components)',),
+        notes='returns Bool mask -> non-differentiable; lax.while_loop',
+    )
+)
+
+# --- sparse (triangle-mesh vertex ops) --------------------------------------
+
+
+def _tetra_mesh():
+    vertices = jnp.asarray(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    faces = jnp.asarray(
+        [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]], dtype=jnp.int32
+    )
+    return vertices, faces
+
+
+register(
+    OpInfo(
+        'nitrix.sparse.compute_vertex_normals',
+        fixture=lambda: (_tetra_mesh(), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('area-weighted face normals scattered + L2-normed',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.sparse.mesh_laplacian_smooth',
+        fixture=lambda: (_tetra_mesh(), {'iterations': 2}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('uniform (combinatorial) Laplacian vertex smoothing',),
+    )
+)
+
+# --- stats (diagonal Gaussian + PCA) ----------------------------------------
+
+register(
+    OpInfo(
+        'nitrix.stats.kl_diagonal_gaussian',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 16)),
+                jax.random.normal(_key(1), (8, 16)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('closed-form KL(N(μ, diag e^logvar) || N(0, I))',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.gaussian_nll',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 16)),
+                jax.random.normal(_key(1), (8, 16)),
+                jax.random.normal(_key(2), (8, 16)),
+            ),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=0,
+        invariants=('diagonal-Gaussian NLL (log-variance parameterised)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.pca_fit',
+        fixture=lambda: (
+            (jax.random.normal(_key(), (20, 8)),),
+            {'n_components': 3},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'covariance-eigendecomposition PCA via safe_eigh (no svd)',
+        ),
+        notes='returns PCAResult; grad reduces the components leaf',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.pca_transform',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (20, 8)),
+                jax.random.normal(_key(1), (3, 8)),
+                jax.random.normal(_key(2), (8,)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('project onto a (pre-fitted) PCA basis',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.pca_inverse_transform',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (20, 3)),
+                jax.random.normal(_key(1), (3, 8)),
+                jax.random.normal(_key(2), (8,)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('reconstruct from PCA coordinates',),
+    )
+)
+
+# --- metrics (intensity / information / overlap / classification / SSL) -----
+
+
+def _img_pair(shape=(16, 16)):
+    return (
+        jax.random.normal(_key(0), shape),
+        jax.random.normal(_key(1), shape),
+    )
+
+
+register(
+    OpInfo(
+        'nitrix.metrics.ssd',
+        fixture=lambda: (_img_pair(), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('(weighted) mean/sum of squared differences',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.ncc',
+        fixture=lambda: (_img_pair(), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('global Pearson cross-correlation (stats.corr shape)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.lncc',
+        fixture=lambda: (_img_pair(), {'radius': 4, 'spatial_rank': 2}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('windowed local NCC (ANTs form; separable box filter)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.joint_histogram',
+        fixture=lambda: (_img_pair(), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('differentiable Parzen soft-binned joint histogram',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.mutual_information',
+        fixture=lambda: (_img_pair(), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('MI / NMI from the soft joint histogram',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.correlation_ratio',
+        fixture=lambda: (_img_pair(), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=("Roche's η² between-group variance ratio",),
+    )
+)
+
+
+def _soft_mask_pair():
+    return (
+        jax.nn.sigmoid(jax.random.normal(_key(0), (4, 16, 16))),
+        jax.nn.sigmoid(jax.random.normal(_key(1), (4, 16, 16))),
+    )
+
+
+register(
+    OpInfo(
+        'nitrix.metrics.dice',
+        fixture=lambda: (_soft_mask_pair(), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('soft Sørensen-Dice 2|A∩B|/(|A|+|B|)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.jaccard',
+        fixture=lambda: (_soft_mask_pair(), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('soft Jaccard / IoU |A∩B|/|A∪B|',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.bce_with_logits',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 16)),
+                jax.nn.sigmoid(jax.random.normal(_key(1), (8, 16))),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('stable BCE-from-logits max(x,0)-xt+log1p(e^{-|x|})',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.cross_entropy_with_logits',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 5, 4)),
+                jax.random.randint(_key(1), (8, 4), 0, 5),
+            ),
+            {'axis': 1},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('categorical CE from logits (log_softmax + gather)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.focal_loss',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 16)),
+                jax.nn.sigmoid(jax.random.normal(_key(1), (8, 16))),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('binary focal loss (1-p_t)^γ · BCE',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.info_nce',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 16)),
+                jax.random.normal(_key(1), (8, 16)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('InfoNCE / NT-Xent cross-view (no self-pair bias)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.dino_cross_entropy',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (8, 64)),
+                jax.random.normal(_key(1), (8, 64)),
+                jax.random.normal(_key(2), (64,)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('centred / sharpened self-distillation CE (DINO)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.ibot_cross_entropy',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (4, 6, 32)),
+                jax.random.normal(_key(1), (4, 6, 32)),
+                jax.random.normal(_key(2), (32,)),
+                jax.random.uniform(_key(3), (4, 6)) > 0.5,
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('masked-token self-distillation CE (iBOT; mask mean)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.koleo',
+        fixture=lambda: ((jax.random.normal(_key(), (8, 16)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Kozachenko-Leonenko feature-spread regulariser',),
+    )
+)
+
+# --- register (end-to-end recipes + explicit field penalties) ---------------
+
+
+def _reg_images():
+    return (
+        jax.random.normal(_key(0), (16, 16)),
+        jax.random.normal(_key(1), (16, 16)),
+    )
+
+
+def _rigid_reg_fixture():
+    from nitrix.register import RegistrationSpec
+
+    return _reg_images(), {'spec': RegistrationSpec(levels=1, iterations=3)}
+
+
+def _demons_fixture():
+    from nitrix.register import DemonsSpec
+
+    return _reg_images(), {
+        'spec': DemonsSpec(levels=1, iterations=3, n_steps=2)
+    }
+
+
+register(
+    OpInfo(
+        'nitrix.register.rigid_register',
+        fixture=_rigid_reg_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('coarse-to-fine GN/LM intensity registration (SE(n))',),
+        notes='end-to-end optimiser; differentiate via implicit_least_squares',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.affine_register',
+        fixture=_rigid_reg_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('coarse-to-fine GN/LM affine registration (exp block)',),
+        notes='end-to-end optimiser; differentiate via implicit_least_squares',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.diffeomorphic_demons_register',
+        fixture=_demons_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('log-domain diffeomorphic Demons (SVF; ESM force)',),
+        notes='end-to-end optimiser (benchmark-worthy)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.gradient_smoothness',
+        fixture=lambda: ((_disp_field(),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('diffusion (first-order) smoothness ‖∇u‖²',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.bending_energy',
+        fixture=lambda: ((_disp_field(),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('thin-plate (second-order) bending ‖∇²u‖²',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.jacobian_folding_penalty',
+        fixture=lambda: ((_disp_field(),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('folding penalty relu(-det J), J = I + ∇u',),
+    )
+)
+
+# --- augment (intensity / geometric / synthesis generators) -----------------
+
+register(
+    OpInfo(
+        'nitrix.augment.gamma_contrast',
+        fixture=lambda: (
+            (jax.nn.sigmoid(jax.random.normal(_key(0), (8, 8))), 2.0),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('gamma tone curve within a normalised bracket',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.random_histogram_shift',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (8, 8)), _key(1)),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('random monotone piecewise-linear intensity remap',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.gibbs_ringing',
+        fixture=lambda: ((jax.random.normal(_key(0), (8, 8)), 0.3), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Gibbs (truncation) ringing via hard k-space cutoff',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.gaussian_noise',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (8, 8)), _key(1)),
+            {'sigma': 0.1},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('additive i.i.d. Gaussian noise',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.rician_noise',
+        fixture=lambda: (
+            (jnp.abs(jax.random.normal(_key(0), (8, 8))), _key(1)),
+            {'sigma': 0.1},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Rician magnitude-noise sqrt((x+n_r)²+n_i²)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.random_flip',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (8, 8)), _key(1)),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('per-axis Bernoulli reflection',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.random_crop',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (8, 8)), _key(1)),
+            {'size': (4, 4)},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('random-offset fixed-size crop (dynamic_slice)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.random_resized_crop',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (8, 8, 1)), _key(1)),
+            {'size': (8, 8)},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('zoom crop: random window resampled to a fixed shape',),
+    )
+)
+
+
+def _random_svf_op(key):
+    from nitrix.augment import random_svf_displacement
+
+    return random_svf_displacement((8, 8), key)
+
+
+def _simulate_bias_op(key):
+    from nitrix.augment import simulate_bias_field
+
+    return simulate_bias_field((8, 8), key)
+
+
+register(
+    OpInfo(
+        'nitrix.augment.random_affine_matrix',
+        fixture=lambda: ((_key(0),), {'ndim': 3}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('random affine in geometric params (T@R@S@E)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.random_svf_displacement',
+        fixture=lambda: ((_key(0),), {}),
+        fn_override=_random_svf_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('smooth diffeomorphic SVF displacement (integrate exp)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.gmm_label_to_image',
+        fixture=lambda: (
+            (
+                jax.random.randint(_key(0), (8, 8), 0, 4),
+                jnp.asarray([0.0, 0.3, 0.6, 0.9]),
+                jnp.asarray([0.05, 0.05, 0.05, 0.05]),
+                _key(1),
+            ),
+            {},
+        ),
+        diff_arg=1,
+        vmap_arg=None,
+        invariants=(
+            'per-label Gaussian-mixture render (domain randomisation)',
+        ),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.augment.simulate_bias_field',
+        fixture=lambda: ((_key(0),), {}),
+        fn_override=_simulate_bias_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=(
+            'forward multiplicative INU/bias field (exp coarse field)',
+        ),
+    )
+)
+
 
 # ---------------------------------------------------------------------------
 # Host snapshot
