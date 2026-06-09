@@ -1,10 +1,12 @@
 # `compute_vertex_normals` — `nitrix.sparse.mesh`
 
-> **Status (2026-06-02): not started — CONVENIENCE (residual mesh/UNet
-> primitive).** Consumer-pipeline substrate for the ilex → thrux migration.
-> Provenance: 2026-06-02 ilex vendored-model survey
+> **Status (2026-06-09): SHIPPED.** `sparse/mesh.py` adds
+> `compute_vertex_normals(vertices, faces)` — area-weighted face normals
+> (`(v1−v0)×(v2−v0)`) scattered onto the three incident vertices then
+> L2-normalised (zero-area → zero vector, not NaN). Verified radial on the
+> icosphere. Consumer-pipeline substrate
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), residual mesh
-> item B); ilex `UPSTREAM.md` "Pending primitives".
+> item B); drivers `topofit` / `cortex_ode` / `surfnet`.
 
 **What.** Per-vertex unit normals from triangle faces (face cross-products →
 scatter-add to vertices → normalise).

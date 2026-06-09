@@ -33,6 +33,7 @@ from .grid import (
 from .mesh import (
     IcosphereHierarchy,
     Mesh,
+    compute_vertex_normals,
     icosphere,
     icosphere_bary_upsampler,
     icosphere_cross_level_adjacency,
@@ -42,6 +43,7 @@ from .mesh import (
     mesh_coarsen_meanpool,
     mesh_cotangent_laplacian,
     mesh_k_ring_adjacency,
+    mesh_laplacian_smooth,
     mesh_pool_max,
     mesh_unpool_max,
 )
@@ -65,6 +67,7 @@ __all__ = [
     # mesh
     'IcosphereHierarchy',
     'Mesh',
+    'compute_vertex_normals',
     'icosphere',
     'icosphere_bary_upsampler',
     'icosphere_cross_level_adjacency',
@@ -74,6 +77,7 @@ __all__ = [
     'mesh_coarsen_meanpool',
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
+    'mesh_laplacian_smooth',
     'mesh_pool_max',
     'mesh_unpool_max',
 ]
