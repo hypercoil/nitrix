@@ -12,6 +12,7 @@ jax.config.update('jax_enable_x64', True)
 from nitrix.augment import (
     gamma_contrast,
     gaussian_noise,
+    gmm_label_to_image,
     random_affine_matrix,
     random_crop,
     random_flip,
@@ -19,6 +20,7 @@ from nitrix.augment import (
     random_resized_crop,
     random_svf_displacement,
     rician_noise,
+    simulate_bias_field,
 )
 
 # ---------------------------------------------------------------------------
@@ -191,3 +193,52 @@ def test_random_svf_shape_and_finite():
     disp = random_svf_displacement((24, 24, 24), jax.random.PRNGKey(9))
     assert disp.shape == (24, 24, 24, 3)
     assert bool(jnp.all(jnp.isfinite(disp)))
+
+
+# ---------------------------------------------------------------------------
+# synthesis: gmm_label_to_image / simulate_bias_field
+# ---------------------------------------------------------------------------
+
+
+def test_gmm_zero_std_is_mean_gather():
+    labels = jnp.asarray([[0, 1, 2], [2, 1, 0]])
+    means = jnp.asarray([10.0, 20.0, 30.0])
+    stds = jnp.zeros(3)
+    out = gmm_label_to_image(labels, means, stds, jax.random.PRNGKey(0))
+    np.testing.assert_array_equal(
+        np.asarray(out), np.asarray(means)[np.asarray(labels)]
+    )
+
+
+def test_gmm_matches_explicit_formula():
+    rng = np.random.default_rng(0)
+    labels = jnp.asarray(rng.integers(0, 4, size=(8, 8)))
+    means = jnp.asarray([1.0, -3.0, 5.0, 2.0])
+    stds = jnp.asarray([0.5, 1.0, 0.2, 0.8])
+    key = jax.random.PRNGKey(1)
+    out = gmm_label_to_image(labels, means, stds, key, nonneg=False)
+    noise = jax.random.normal(key, labels.shape, dtype=means.dtype)
+    ref = means[labels] + stds[labels] * noise
+    np.testing.assert_allclose(np.asarray(out), np.asarray(ref), atol=1e-6)
+
+
+def test_gmm_nonneg_clamps():
+    labels = jnp.zeros((50,), dtype=jnp.int32)
+    means = jnp.asarray([-5.0])
+    stds = jnp.asarray([1.0])
+    out = gmm_label_to_image(labels, means, stds, jax.random.PRNGKey(2))
+    assert float(out.min()) >= 0.0
+
+
+def test_simulate_bias_field_zero_std_is_ones():
+    field = simulate_bias_field((16, 16, 16), jax.random.PRNGKey(0), max_std=0.0)
+    assert field.shape == (16, 16, 16)
+    np.testing.assert_allclose(np.asarray(field), 1.0, atol=1e-6)
+
+
+def test_simulate_bias_field_positive_and_reproducible():
+    a = simulate_bias_field((20, 20), jax.random.PRNGKey(3), max_std=0.5)
+    b = simulate_bias_field((20, 20), jax.random.PRNGKey(3), max_std=0.5)
+    assert a.shape == (20, 20)
+    assert float(a.min()) > 0.0  # exp is strictly positive
+    np.testing.assert_array_equal(np.asarray(a), np.asarray(b))

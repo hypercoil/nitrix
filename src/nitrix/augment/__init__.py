@@ -18,6 +18,8 @@ Submodules:
   Rician noise.
 - ``geometric`` -- random flip / crop / resized-crop, random affine
   matrix, random diffeomorphic (SVF) displacement.
+- ``synthesis`` -- label-map-to-image Gaussian-mixture render and
+  simulated (forward) multiplicative bias / INU fields.
 """
 
 from .intensity import (
@@ -33,6 +35,10 @@ from .geometric import (
     random_resized_crop,
     random_svf_displacement,
 )
+from .synthesis import (
+    gmm_label_to_image,
+    simulate_bias_field,
+)
 
 __all__ = [
     # intensity
@@ -46,4 +52,7 @@ __all__ = [
     'random_resized_crop',
     'random_affine_matrix',
     'random_svf_displacement',
+    # synthesis
+    'gmm_label_to_image',
+    'simulate_bias_field',
 ]
