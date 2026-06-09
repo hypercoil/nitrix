@@ -1,8 +1,13 @@
 # Connected-components / largest-component labelling — `nitrix.morphology`
 
-> **Status (2026-06-02): not started — ENABLING, highest recurrence across
-> the ilex volumetric ports.** Consumer-pipeline substrate for the
-> ilex → thrux migration. Provenance: 2026-06-02 ilex vendored-model survey
+> **Status (2026-06-09): SHIPPED.** `morphology/_label.py` adds
+> `connected_components(mask, *, connectivity)` (N-D, contiguous `1..K`
+> labels, scipy connectivity convention) and `largest_connected_component`.
+> Implemented as jit-able fixed-point max-label-propagation
+> (`lax.while_loop`) + contiguous renumber; the label image has fixed shape
+> so it jits (only the iteration count is data-dependent). Verified against
+> `scipy.ndimage.label` (2-D / 3-D, face + full connectivity) and for the
+> diagonal-merge / empty / jit cases. Consumer-pipeline substrate
 > ([`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md), volumetric
 > item A).
 
