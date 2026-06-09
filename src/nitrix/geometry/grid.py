@@ -412,16 +412,24 @@ def integrate_velocity_field(
         )
     id_grid = identity_grid(spatial_shape, dtype=velocity.dtype)
     # Initial small step.
-    phi = velocity / float(2**n_steps)
-    # ``phi`` is treated as a displacement (relative); we compose
-    # by warping it through the deformation ``id + phi`` each step.
-    for _ in range(n_steps):
-        phi = phi + spatial_transform(
+    phi0 = velocity / float(2**n_steps)
+
+    # ``phi`` is treated as a displacement (relative); we compose by
+    # warping it through the deformation ``id + phi`` each step.  The
+    # doubling loop is rolled with ``lax.scan`` (static ``n_steps``), so
+    # it compiles once and stays differentiable -- the diffeomorphic
+    # recipe nests this inside its iteration loop, so the unroll would
+    # otherwise multiply the compiled graph.
+    def _double(phi: Array, _: Any) -> tuple[Array, None]:
+        composed = phi + spatial_transform(
             phi,
             id_grid + phi,
             mode=mode,
             cval=cval,
         )
+        return composed, None
+
+    phi, _ = jax.lax.scan(_double, phi0, xs=None, length=n_steps)
     return phi
 
 

@@ -29,8 +29,9 @@ forward+inverse variant are the documented upgrade paths.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
@@ -135,12 +136,18 @@ def _demons_level(
     spec: DemonsSpec,
     ndim: int,
 ) -> tuple[Array, Array]:
-    """Run the Demons iterations on one resolution; return ``(v, costs)``."""
+    """Run the Demons iterations on one resolution; return ``(v, costs)``.
+
+    The iteration is rolled with ``lax.scan`` (carry = the velocity
+    field, per-step output = the SSD), so the level compiles one
+    iteration rather than ``spec.iterations`` unrolled copies; the loop
+    stays differentiable for the unrolled gradient path.
+    """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     grad_fixed = spatial_gradient(fixed)
     alpha2 = spec.alpha * spec.alpha
-    costs = []
-    for _ in range(spec.iterations):
+
+    def step(v: Array, _: Any) -> tuple[Array, Array]:
         s = integrate_velocity_field(
             v, n_steps=spec.n_steps, mode=spec.boundary_mode
         )
@@ -158,8 +165,10 @@ def _demons_level(
             else compose_velocity(v, u, order=spec.bch_order)
         )
         v = _smooth_vector(v, spec.sigma_diffusion, ndim)
-        costs.append(0.5 * jnp.sum(diff * diff))
-    return v, jnp.stack(costs)
+        return v, 0.5 * jnp.sum(diff * diff)
+
+    v, costs = jax.lax.scan(step, v, xs=None, length=spec.iterations)
+    return v, costs
 
 
 def diffeomorphic_demons_register(

@@ -9,25 +9,39 @@ registration recipes are the driving consumer (``r`` = warped-moving
 minus fixed, ``x`` = the transform's Lie parameters), but the optimiser
 is generic.
 
-**Matrix-free and GPU-native.**  Each step solves the Gauss-Newton
-normal equations ``(JᵀJ + λI) δ = -Jᵀr``.  The operator ``v ↦ Jᵀ(Jv)`` is
-assembled from a cached linearisation (``jax.linearize`` for ``Jv``, its
-``jax.linear_transpose`` for ``Jᵀu``) -- so the ``M×P`` Jacobian is
-**never materialised** -- and the SPD system is solved with ``cg``
-(matvecs only).  Both facts keep the hot loop on the GPU through the
-cuSolver wedge: no factorisation, no host round-trip.
+**Two Jacobian strategies, both GPU-native.**  Each step solves the
+Gauss-Newton normal equations ``(JᵀJ + λI) δ = -Jᵀr``.
 
-The unrolled fixed-iteration loop is differentiable, so ``jax.grad``
-through a registration works out of the box.  ``implicit_least_squares``
-adds the implicit-function-theorem path: exact gradients at the optimum
-without unrolling (O(1) memory in the iteration count), the
-differentiable-layer entry point for consumers like ``entense``.
+- ``jacobian='assembled'`` -- the ``auto`` default when the parameter
+  count ``P`` is small (the rigid/affine regime).  The ``M×P`` Jacobian
+  is materialised in ``P`` forward-mode passes (``jax.jacfwd``), the
+  explicit ``P×P`` Gram matrix ``JᵀJ`` is formed, and the tiny SPD
+  system is solved by ``cg`` on that explicit matrix.  Cheaper than the
+  matrix-free matvec for small ``P``: ``cg`` then costs ``P×P`` matmuls,
+  not a full warp tangent + transpose per inner iteration.
+- ``jacobian='matrix_free'`` -- for a large ``P``.  The operator
+  ``v ↦ Jᵀ(Jv)`` is assembled from a cached linearisation
+  (``jax.linearize`` for ``Jv``, its ``jax.linear_transpose`` for
+  ``Jᵀu``) -- so the ``M×P`` Jacobian is **never materialised** -- and
+  the SPD system is solved with ``cg`` (matvecs only).
+
+Both keep the hot loop on the GPU through the cuSolver wedge: no
+factorisation, no host round-trip.
+
+**The fixed-iteration loop is rolled with ``lax.scan``** (not
+Python-unrolled), so cold-compile time is ~constant in ``n_iters``
+rather than linear -- one iteration is compiled, not ``n_iters`` copies.
+It stays differentiable (``scan`` is), so ``jax.grad`` through a
+registration works out of the box.  ``implicit_least_squares`` adds the
+implicit-function-theorem path: exact gradients at the optimum without
+unrolling (O(1) memory in the iteration count), the differentiable-layer
+entry point for consumers like ``entense``.
 """
 
 from __future__ import annotations
 
 from functools import partial
-from typing import Any, Callable, NamedTuple, Optional, cast
+from typing import Any, Callable, Literal, NamedTuple, Optional, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -44,6 +58,18 @@ __all__ = [
 
 ResidualFn = Callable[[Float[Array, ' p']], Float[Array, ' m']]
 DataResidualFn = Callable[[Any, Float[Array, ' p']], Float[Array, ' m']]
+
+# A Gauss-Newton step needs ``(JᵀJ + λI) δ = -Jᵀr`` solved.  The normal
+# operator ``JᵀJ`` is supplied either as an explicit ``P×P`` matrix
+# (``'assembled'``) or as a matvec callable (``'matrix_free'``); ``cg``
+# accepts both.
+NormalOperator = Union[Float[Array, ' p p'], Callable[[Array], Array]]
+JacobianStrategy = Literal['auto', 'matrix_free', 'assembled']
+
+# ``'auto'`` materialises the Jacobian at or below this parameter count
+# (the rigid/affine regime is ``P ≤ 12``); above it the matrix-free
+# matvec wins.
+_ASSEMBLE_MAX_P = 64
 
 
 class OptimizeResult(NamedTuple):
@@ -92,6 +118,43 @@ def _normal_operators(
     return r, jtj, cast(Array, jt_r)
 
 
+def _assembled_operators(
+    residual_fn: ResidualFn,
+    x: Array,
+) -> tuple[Array, Array, Array]:
+    """Materialise the Jacobian at ``x`` and return ``(r, JᵀJ, Jᵀr)``.
+
+    For a small parameter count ``P`` the dense ``M×P`` Jacobian is cheap
+    to form (``P`` forward-mode passes), and the explicit ``P×P`` Gram
+    matrix turns the normal-equation solve into a tiny on-device ``cg``
+    -- far less work than the matrix-free ``Jᵀ(Jv)`` matvec, which runs a
+    full warp tangent + transpose per inner ``cg`` iteration.
+    """
+    r = residual_fn(x)
+    jac = jax.jacfwd(residual_fn)(x)
+    jac_h = jac.conj().T
+    return r, jac_h @ jac, jac_h @ r
+
+
+def _resolve_jacobian(strategy: JacobianStrategy, p: int) -> str:
+    """Resolve ``'auto'`` to ``'assembled'`` / ``'matrix_free'`` by ``P``."""
+    if strategy == 'auto':
+        return 'assembled' if p <= _ASSEMBLE_MAX_P else 'matrix_free'
+    return strategy
+
+
+def _operators(
+    residual_fn: ResidualFn,
+    x: Array,
+    method: str,
+) -> tuple[Array, NormalOperator, Array]:
+    """``(r, JᵀJ, Jᵀr)`` with ``JᵀJ`` explicit (``'assembled'``) or a
+    matvec callable (``'matrix_free'``) -- both accepted by ``cg``."""
+    if method == 'assembled':
+        return _assembled_operators(residual_fn, x)
+    return _normal_operators(residual_fn, x)
+
+
 def gauss_newton(
     residual_fn: ResidualFn,
     x0: Float[Array, ' p'],
@@ -100,6 +163,7 @@ def gauss_newton(
     damping: float = 0.0,
     cg_tol: float = 1e-6,
     cg_maxiter: Optional[int] = None,
+    jacobian: JacobianStrategy = 'auto',
 ) -> OptimizeResult:
     """Gauss-Newton minimisation of ``½ ‖r(x)‖²``.
 
@@ -115,28 +179,32 @@ def gauss_newton(
     x0
         Initial parameters, ``(P,)``.
     n_iters
-        Number of Gauss-Newton steps.
+        Number of Gauss-Newton steps.  The loop is rolled with
+        ``lax.scan``, so compile time is ~constant in ``n_iters``.
     damping
         Fixed diagonal ridge added to ``JᵀJ`` (default ``0``).
     cg_tol, cg_maxiter
         Tolerance / iteration cap for the inner ``cg`` solve.
+    jacobian
+        Normal-operator strategy: ``'assembled'`` (materialise ``JᵀJ``,
+        for a small ``P``), ``'matrix_free'`` (matvec only, for a large
+        ``P``), or ``'auto'`` (default; assembled when ``P`` is small).
 
     Returns
     -------
     ``OptimizeResult``.
     """
-    x = x0
-    costs = []
-    for _ in range(n_iters):
-        r, jtj, jt_r = _normal_operators(residual_fn, x)
-        costs.append(_half_sq(r))
-        delta = cg(jtj, -jt_r, l2=damping, tol=cg_tol, maxiter=cg_maxiter)
-        x = x + delta
-    r_final = residual_fn(x)
-    costs.append(_half_sq(r_final))
-    return OptimizeResult(
-        params=x, cost=costs[-1], cost_history=jnp.stack(costs)
-    )
+    method = _resolve_jacobian(jacobian, x0.shape[-1])
+
+    def step(x: Array, _: Any) -> tuple[Array, Array]:
+        r, a, jt_r = _operators(residual_fn, x, method)
+        delta = cg(a, -jt_r, l2=damping, tol=cg_tol, maxiter=cg_maxiter)
+        return x + delta, _half_sq(r)
+
+    x, costs = jax.lax.scan(step, x0, xs=None, length=n_iters)
+    cost_final = _half_sq(residual_fn(x))
+    cost_history = jnp.concatenate([costs, cost_final[None]])
+    return OptimizeResult(params=x, cost=cost_final, cost_history=cost_history)
 
 
 def levenberg_marquardt(
@@ -149,6 +217,7 @@ def levenberg_marquardt(
     lambda_down: float = 0.1,
     cg_tol: float = 1e-6,
     cg_maxiter: Optional[int] = None,
+    jacobian: JacobianStrategy = 'auto',
 ) -> OptimizeResult:
     """Levenberg-Marquardt minimisation of ``½ ‖r(x)‖²``.
 
@@ -156,11 +225,13 @@ def levenberg_marquardt(
     -Jᵀr`` and accepts ``x + δ`` only if the objective decreases;
     ``λ`` shrinks on accept (toward Gauss-Newton) and grows on reject
     (toward gradient descent).  The accept/reject branch is a
-    ``jnp.where`` so the whole solve stays ``jit`` / ``grad``-friendly.
+    ``jnp.where`` and the iteration is a ``lax.scan``, so the whole solve
+    stays ``jit`` / ``grad``-friendly and compiles in ~constant time in
+    ``n_iters``.
 
     Parameters
     ----------
-    residual_fn, x0, cg_tol, cg_maxiter
+    residual_fn, x0, cg_tol, cg_maxiter, jacobian
         As ``gauss_newton``.
     n_iters
         Number of LM steps (each is one trial step + accept/reject).
@@ -173,21 +244,29 @@ def levenberg_marquardt(
     -------
     ``OptimizeResult`` with a monotone-decreasing ``cost_history``.
     """
-    x = x0
-    lam = jnp.asarray(init_lambda, dtype=x0.dtype)
-    cost = _half_sq(residual_fn(x))
-    costs = [cost]
-    for _ in range(n_iters):
-        r, jtj, jt_r = _normal_operators(residual_fn, x)
-        delta = cg(jtj, -jt_r, l2=lam, tol=cg_tol, maxiter=cg_maxiter)
+    method = _resolve_jacobian(jacobian, x0.shape[-1])
+    lam0 = jnp.asarray(init_lambda, dtype=x0.dtype)
+    cost0 = _half_sq(residual_fn(x0))
+
+    def step(
+        carry: tuple[Array, Array, Array], _: Any
+    ) -> tuple[tuple[Array, Array, Array], Array]:
+        x, lam, cost = carry
+        r, a, jt_r = _operators(residual_fn, x, method)
+        delta = cg(a, -jt_r, l2=lam, tol=cg_tol, maxiter=cg_maxiter)
         x_new = x + delta
         cost_new = _half_sq(residual_fn(x_new))
         accept = cost_new < cost
         x = jnp.where(accept, x_new, x)
         cost = jnp.where(accept, cost_new, cost)
         lam = jnp.where(accept, lam * lambda_down, lam * lambda_up)
-        costs.append(cost)
-    return OptimizeResult(params=x, cost=cost, cost_history=jnp.stack(costs))
+        return (x, lam, cost), cost
+
+    (x, _, cost), costs = jax.lax.scan(
+        step, (x0, lam0, cost0), xs=None, length=n_iters
+    )
+    cost_history = jnp.concatenate([cost0[None], costs])
+    return OptimizeResult(params=x, cost=cost, cost_history=cost_history)
 
 
 def implicit_least_squares(
