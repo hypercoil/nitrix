@@ -21,12 +21,12 @@ from __future__ import annotations
 
 from jaxtyping import Array, Float
 
-from ..geometry import affine_exp, rigid_exp
 from ._core import (
     RegistrationResult,
     RegistrationSpec,
     multi_resolution_register,
 )
+from ._model import Affine, Rigid
 
 __all__ = ['rigid_register', 'affine_register']
 
@@ -68,13 +68,11 @@ def rigid_register(
     grid.
     """
     ndim = _spatial_ndim(moving, fixed)
-    n_params = (1 if ndim == 2 else 3) + ndim
     return multi_resolution_register(
         moving,
         fixed,
-        exp_fn=rigid_exp,
+        model=Rigid(),
         ndim=ndim,
-        n_params=n_params,
         spec=spec,
     )
 
@@ -97,12 +95,10 @@ def affine_register(
     Parameters / returns as ``rigid_register``.
     """
     ndim = _spatial_ndim(moving, fixed)
-    n_params = ndim * ndim + ndim
     return multi_resolution_register(
         moving,
         fixed,
-        exp_fn=affine_exp,
+        model=Affine(),
         ndim=ndim,
-        n_params=n_params,
         spec=spec,
     )

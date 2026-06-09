@@ -31,7 +31,7 @@ Coordinates are index-space (``identity_grid`` convention).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 import jax.numpy as jnp
 from jax.scipy.optimize import minimize
@@ -45,8 +45,7 @@ from ..geometry import (
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg import gauss_newton, levenberg_marquardt
 from ..metrics import correlation_ratio, lncc, mutual_information, ssd
-
-ExpFn = Callable[..., Float[Array, '... d1 d1']]
+from ._model import TransformModel
 
 
 @dataclass(frozen=True)
@@ -127,13 +126,13 @@ def _warp(
     moving: Array,
     params: Array,
     *,
-    exp_fn: ExpFn,
+    model: TransformModel,
     ndim: int,
     center: Array,
     spec: RegistrationSpec,
 ) -> Array:
-    """Warp a single-channel ``moving`` image by ``exp_fn(params)``."""
-    matrix = exp_fn(params, ndim=ndim)
+    """Warp a single-channel ``moving`` image by ``model.exp(params)``."""
+    matrix = model.exp(params, ndim=ndim)
     grid = affine_grid(matrix, moving.shape, center=center)
     warped = spatial_transform(
         moving[..., None],
@@ -165,7 +164,7 @@ def _optimize_level(
     fixed: Array,
     params: Array,
     *,
-    exp_fn: ExpFn,
+    model: TransformModel,
     ndim: int,
     center: Array,
     spec: RegistrationSpec,
@@ -176,7 +175,7 @@ def _optimize_level(
 
         def residual(p: Array) -> Array:
             warped = _warp(
-                moving, p, exp_fn=exp_fn, ndim=ndim, center=center, spec=spec
+                moving, p, model=model, ndim=ndim, center=center, spec=spec
             )
             return (warped - fixed).ravel()
 
@@ -192,7 +191,7 @@ def _optimize_level(
 
     def cost(p: Array) -> Array:
         warped = _warp(
-            moving, p, exp_fn=exp_fn, ndim=ndim, center=center, spec=spec
+            moving, p, model=model, ndim=ndim, center=center, spec=spec
         )
         return _metric_cost(warped, fixed, spec)
 
@@ -208,9 +207,8 @@ def multi_resolution_register(
     moving: Float[Array, '*spatial'],
     fixed: Float[Array, '*spatial'],
     *,
-    exp_fn: ExpFn,
+    model: TransformModel,
     ndim: int,
-    n_params: int,
     spec: RegistrationSpec,
     init_params: Optional[Float[Array, ' p']] = None,
 ) -> RegistrationResult:
@@ -240,7 +238,7 @@ def multi_resolution_register(
     )
 
     params = (
-        jnp.zeros(n_params, dtype=dtype)
+        jnp.zeros(model.n_params(ndim), dtype=dtype)
         if init_params is None
         else init_params
     )
@@ -256,13 +254,13 @@ def multi_resolution_register(
             ratio = jnp.asarray(shape_l, dtype=dtype) / jnp.asarray(
                 prev_shape, dtype=dtype
             )
-            params = jnp.concatenate([params[:-ndim], params[-ndim:] * ratio])
+            params = model.rescale_to_grid(params, ratio)
         center = _center(shape_l, dtype)
         params, hist = _optimize_level(
             m_l,
             f_l,
             params,
-            exp_fn=exp_fn,
+            model=model,
             ndim=ndim,
             center=center,
             spec=spec,
@@ -271,9 +269,9 @@ def multi_resolution_register(
         prev_shape = shape_l
 
     center = _center(moving.shape, dtype)
-    matrix = exp_fn(params, ndim=ndim)
+    matrix = model.exp(params, ndim=ndim)
     warped = _warp(
-        moving, params, exp_fn=exp_fn, ndim=ndim, center=center, spec=spec
+        moving, params, model=model, ndim=ndim, center=center, spec=spec
     )
     return RegistrationResult(
         matrix=matrix,

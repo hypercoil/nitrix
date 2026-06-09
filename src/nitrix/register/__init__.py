@@ -16,6 +16,9 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   ``matrix_exp``.
 - ``RegistrationSpec`` -- static config (pyramid, iterations, metric,
   interpolation); ``RegistrationResult`` -- the output record.
+- ``TransformModel`` -- the chart a matrix-transform recipe optimises
+  over (``Rigid`` / ``Affine``): the ``exp`` map plus the parameter-layout
+  knowledge the coarse-to-fine driver needs.
 - ``diffeomorphic_demons_register`` -- log-domain diffeomorphic Demons
   (stationary velocity field; ESM force; fluid+diffusion Gaussian
   regularisation; scaling-and-squaring exp), with ``DemonsSpec`` /
@@ -23,6 +26,7 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
 """
 
 from ._core import RegistrationResult, RegistrationSpec
+from ._model import Affine, Rigid, TransformModel
 from .diffeomorphic import (
     DemonsSpec,
     DiffeomorphicResult,
@@ -40,6 +44,9 @@ __all__ = [
     'affine_register',
     'RegistrationSpec',
     'RegistrationResult',
+    'TransformModel',
+    'Rigid',
+    'Affine',
     'diffeomorphic_demons_register',
     'DemonsSpec',
     'DiffeomorphicResult',
