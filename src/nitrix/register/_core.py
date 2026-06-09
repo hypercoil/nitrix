@@ -44,7 +44,7 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg import gauss_newton, levenberg_marquardt
-from ..metrics import correlation_ratio, lncc, mutual_information, ssd
+from ._metric import SSD, Metric
 from ._model import TransformModel
 
 
@@ -61,37 +61,33 @@ class RegistrationSpec:
     iterations
         Optimiser iterations per level.
     metric
-        Similarity: ``"ssd"`` (within-modality; the GN/LM least-squares
-        path), ``"lncc"`` (local cross-correlation; intensity-robust),
-        ``"mi"`` / ``"cr"`` (cross-modal).
+        Similarity objective, a ``Metric`` record carrying its own
+        hyper-parameters: ``SSD()`` (within-modality; the GN/LM
+        least-squares path), ``LNCC(radius=...)`` (local cross-correlation;
+        intensity-robust), ``MI(bins=...)`` / ``CorrelationRatio(bins=...)``
+        (cross-modal).
     optimizer
-        ``"auto"`` (SSD -> ``"lm"``, else -> ``"bfgs"``), or force
-        ``"lm"`` / ``"gn"`` (SSD only) / ``"bfgs"``.
+        ``"auto"`` (least-squares metric -> ``"lm"``, else -> ``"bfgs"``),
+        or force ``"lm"`` / ``"gn"`` (least-squares only) / ``"bfgs"``.
     interpolation
         Sampling kernel for the warp (an ``Interpolator``).
     boundary_mode, cval
         Out-of-bounds handling for the warp (default zero-fill).
     pyramid_factor, pyramid_sigma
         Downsample factor and anti-alias sigma for the pyramid.
-    lncc_radius
-        Window radius for the ``"lncc"`` metric.
-    bins
-        Histogram bins for the ``"mi"`` / ``"cr"`` metrics.
     cg_tol
         Inner-CG tolerance for the GN/LM path.
     """
 
     levels: int = 3
     iterations: int = 30
-    metric: str = 'ssd'
+    metric: Metric = field(default_factory=SSD)
     optimizer: str = 'auto'
     interpolation: Interpolator = field(default_factory=Linear)
     boundary_mode: BoundaryMode = 'constant'
     cval: float = 0.0
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
-    lncc_radius: int = 4
-    bins: int = 32
     cg_tol: float = 1e-6
 
 
@@ -144,21 +140,6 @@ def _warp(
     return warped[..., 0]
 
 
-def _metric_cost(warped: Array, fixed: Array, spec: RegistrationSpec) -> Array:
-    """Scalar similarity cost (lower is better)."""
-    if spec.metric == 'ssd':
-        return ssd(warped, fixed)
-    if spec.metric == 'lncc':
-        return 1.0 - lncc(warped, fixed, radius=spec.lncc_radius)
-    if spec.metric == 'mi':
-        return -mutual_information(warped, fixed, bins=spec.bins)
-    if spec.metric == 'cr':
-        return 1.0 - correlation_ratio(warped, fixed, bins=spec.bins)
-    raise ValueError(
-        f'spec.metric={spec.metric!r}; expected "ssd", "lncc", "mi", or "cr".'
-    )
-
-
 def _optimize_level(
     moving: Array,
     fixed: Array,
@@ -170,14 +151,19 @@ def _optimize_level(
     spec: RegistrationSpec,
 ) -> tuple[Array, Array]:
     """Optimise ``params`` on one resolution; return ``(params, history)``."""
-    use_lsq = spec.metric == 'ssd' and spec.optimizer in ('auto', 'lm', 'gn')
+    metric = spec.metric
+    use_lsq = metric.is_least_squares and spec.optimizer in (
+        'auto',
+        'lm',
+        'gn',
+    )
     if use_lsq:
 
         def residual(p: Array) -> Array:
             warped = _warp(
                 moving, p, model=model, ndim=ndim, center=center, spec=spec
             )
-            return (warped - fixed).ravel()
+            return metric.residual(warped, fixed)
 
         if spec.optimizer == 'gn':
             res = gauss_newton(
@@ -193,7 +179,7 @@ def _optimize_level(
         warped = _warp(
             moving, p, model=model, ndim=ndim, center=center, spec=spec
         )
-        return _metric_cost(warped, fixed, spec)
+        return metric.cost(warped, fixed)
 
     init_cost = cost(params)
     out = minimize(

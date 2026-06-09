@@ -219,7 +219,7 @@ path or ``implicit_least_squares`` when a backward is needed.)
 ```python
 from nitrix.register import (
     rigid_register, affine_register, RegistrationSpec,
-    diffeomorphic_demons_register, DemonsSpec,
+    CorrelationRatio, diffeomorphic_demons_register, DemonsSpec,
 )
 
 # Rigid (motion correction; SSD + Gauss-Newton/LM, coarse-to-fine).
@@ -228,9 +228,12 @@ res = rigid_register(moving, fixed,
 res.matrix      # (ndim+1, ndim+1) homogeneous transform (fixed -> moving)
 res.warped      # moving resampled onto the fixed grid
 
-# Cross-modal rigid (correlation ratio / MI via BFGS).
+# Cross-modal rigid (correlation ratio / MI via BFGS).  The metric is a
+# record carrying its own hyper-parameters (SSD / LNCC / MI /
+# CorrelationRatio); the default is SSD().
 affine_register(moving, fixed,
-                spec=RegistrationSpec(metric='cr', levels=3))
+                spec=RegistrationSpec(metric=CorrelationRatio(bins=32),
+                                      levels=3))
 
 # Diffeomorphic (log-Demons; guaranteed diffeomorphism).
 d = diffeomorphic_demons_register(moving, fixed,

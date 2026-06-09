@@ -16,6 +16,8 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   ``matrix_exp``.
 - ``RegistrationSpec`` -- static config (pyramid, iterations, metric,
   interpolation); ``RegistrationResult`` -- the output record.
+- ``Metric`` -- the similarity objective ADT (``SSD`` / ``LNCC`` / ``MI``
+  / ``CorrelationRatio``), each carrying its own hyper-parameters.
 - ``TransformModel`` -- the chart a matrix-transform recipe optimises
   over (``Rigid`` / ``Affine``): the ``exp`` map plus the parameter-layout
   knowledge the coarse-to-fine driver needs.
@@ -26,6 +28,7 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
 """
 
 from ._core import RegistrationResult, RegistrationSpec
+from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from .diffeomorphic import (
     DemonsSpec,
@@ -44,6 +47,11 @@ __all__ = [
     'affine_register',
     'RegistrationSpec',
     'RegistrationResult',
+    'Metric',
+    'SSD',
+    'LNCC',
+    'MI',
+    'CorrelationRatio',
     'TransformModel',
     'Rigid',
     'Affine',
