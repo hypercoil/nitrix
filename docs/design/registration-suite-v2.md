@@ -226,7 +226,10 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
   give a concrete third/fourth instance to factor against.
 - **Introduce the `Objective` protocol** (§3) as the metric-side unifier:
   `Metric` (image pair), `BBRObjective` (boundary points), `DenseFieldForce`
-  (Demons/SyN) become constructors.
+  (Demons/SyN) become constructors.  ✅ *Done (R6):* `Objective` +
+  `MetricObjective` + `BoundaryObjective`, with `optimize_objective` the
+  shared dispatch.  Demons/SyN force is not yet an `Objective` (the SVF
+  driver is a different loop) — folds in at R7 if it earns it.
 - **Spec hierarchy.**  `RegistrationSpec` / `DemonsSpec` (+ incoming
   `VolregSpec` / `BBRSpec` / `SynSpec`) share schedule fields (`levels`,
   `iterations`, `pyramid_factor`, `pyramid_sigma`, `boundary_mode`).  A
@@ -293,9 +296,26 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
   measured **7.3× warm** vs forward on a 16-frame 32³ series.  *Deferred:*
   the matrix+SVF driver unification (§7) — to be factored when BBR/SyN give
   a third concrete instance, not speculatively; single-pair IC fast path.
-- **R6 — BBR.**  `Objective` protocol + `bbr_register` + robust weighting.
-  **Gate:** boundary-recovery on a planted rigid offset; differentiable-
-  layer grad == FD via `implicit_minimize`.
+- **R6 — BBR.** ✅ **SHIPPED** (branch `registration-suite-v2`).  **R6a —
+  `Objective` protocol** (`_objective.py`): the `θ ↦ cost` generalisation
+  the `Metric` ADT foreshadowed.  `MetricObjective` (image pair + warp) and
+  `BoundaryObjective` (BBR) implement it; `_optimize_level` became
+  `optimize_objective(objective, …)` — the LM/BFGS dispatch written once,
+  consumed by both the coarse-to-fine driver and BBR (behaviour-preserving
+  for the image recipes).  This is the second-instance factoring, not
+  speculation.  **R6b — `bbr_register`** (`_bbr.py`): the Greve-Fischl
+  boundary cost (`bbr_cost`: sample `moving` at `±step` along the
+  transformed normal, normalised cross-boundary contrast, `mean(1 +
+  tanh(slope·(Q−q0)))`), optimised over the rigid params via the shared
+  BFGS path.  The transform rotates about the **boundary centroid** (not
+  the origin — the same centring lesson as R4; without it the rotation
+  parameter's origin-distance leverage collapses BFGS).  Surfaces stay
+  out of scope (points + normals as arrays); `moving_affine` makes `step`
+  physical and the normals physical directions (anisotropy-correct).
+  **Gate (met):** planted-offset recovery (smoothed disk), cost strictly
+  lower at the truth, differentiable w.r.t. the moving image via
+  `implicit_minimize` (FD-checked), anisotropic world-circle recovery,
+  validation.
 - **R7 — greedy SyN.**  LNCC analytic force + symmetric SVF driver +
   `greedy_syn_register`.  **Gate:** force == FD-grad of `1 − lncc`;
   symmetric-warp recovery (ncc) with min `det J > 0`; inverse consistency.
