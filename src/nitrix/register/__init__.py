@@ -46,6 +46,7 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
 
 from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
 from ._core import RegistrationResult, RegistrationSpec
+from ._force import DemonsForce, Force, LNCCForce, MetricForce
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from ._objective import MetricObjective, Objective
@@ -76,6 +77,10 @@ __all__ = [
     'BoundaryObjective',
     'Objective',
     'MetricObjective',
+    'Force',
+    'LNCCForce',
+    'DemonsForce',
+    'MetricForce',
     'RegistrationSpec',
     'RegistrationResult',
     'Metric',

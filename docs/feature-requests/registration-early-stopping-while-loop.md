@@ -12,7 +12,7 @@
 >   level reaches 95 % only at step 36/40; cost still descending at budget end) —
 >   the gradual first-order descent under the **non-vanishing LNCC force** has no
 >   early plateau to exploit (the same property that makes the R7 clamp correct;
->   cf. `_syn.py::_normalise_step`). So the clamp-vs-scale revisit this doc
+>   cf. `_svf.py::_normalise_step`). So the clamp-vs-scale revisit this doc
 >   contemplated is **not triggered** — the fixed scan stays for SyN.
 > - **Cohort volreg — contraindicated.** It is a `vmap` over frames; `while_loop`
 >   with heterogeneous per-frame trip counts runs to the max (or needs masking),
@@ -91,7 +91,7 @@ stays — the simplicity and batch-friendliness are worth more than speculative
 easy-case savings.
 
 **Downstream coupling (greedy SyN force normalisation).** If this lands, it
-re-opens a coupled decision in `register/_syn.py::_normalise_step`: the greedy-SyN
+re-opens a coupled decision in `register/_svf.py::_normalise_step`: the greedy-SyN
 LNCC force is normalised by a trust-region **clamp** rather than ANTS-style
 scale-to-step *because* the forward is a fixed-length `scan` with no convergence
 gate (the clamp stops a constant-magnitude step from dithering forever). A

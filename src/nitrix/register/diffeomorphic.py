@@ -29,23 +29,20 @@ forward+inverse variant are the documented upgrade paths.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Union
 
-import jax
-import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..geometry import (
-    compose_velocity,
     gaussian_pyramid,
     identity_grid,
     integrate_velocity_field,
     jacobian_det_displacement,
-    spatial_gradient,
     spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
-from ._svf import _relative_spacing, _smooth_vector, svf_coarse_to_fine
+from ._force import DemonsForce
+from ._svf import _relative_spacing, single_sided_level, svf_coarse_to_fine
 
 __all__ = [
     'DemonsSpec',
@@ -143,64 +140,33 @@ def _demons_level(
 ) -> tuple[Array, Array]:
     """Run the Demons iterations on one resolution; return ``(v, costs)``.
 
-    The iteration is rolled with ``lax.scan`` (carry = the velocity
-    field, per-step output = the SSD), so the level compiles one
-    iteration rather than ``spec.iterations`` unrolled copies; the loop
-    stays differentiable for the unrolled gradient path.
+    Thin wrapper over the metric-generic single-sided SVF driver
+    (``_svf.single_sided_level``) with the closed-form ESM :class:`DemonsForce`
+    -- the recipe's structure (schedule, regularisation) plus its default
+    force.  The driver hoists ``∇fixed`` out of the iteration, rolls it with
+    ``lax.scan`` (so the level compiles one iteration), and stays
+    differentiable for the unrolled gradient path.
 
-    ``rel_spacing`` (anisotropy-only; ``None`` for isotropic) makes the
-    physics axis-correct: the gradient is taken in physical units, the ESM
-    force is converted back to the voxel-native field, and the
-    fluid/diffusion sigmas become per-axis.  All reduce to the voxel
-    behaviour when ``rel_spacing is None``.
+    ``rel_spacing`` (anisotropy-only; ``None`` for isotropic) makes the physics
+    axis-correct: the gradient is taken in physical units, the ESM force is
+    converted back to the voxel-native field, and the fluid/diffusion sigmas
+    become per-axis -- all reducing to the voxel behaviour when ``None``.
     """
-    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
-    grad_spacing: Union[float, tuple[float, ...]] = (
-        1.0 if rel_spacing is None else rel_spacing
+    return single_sided_level(
+        moving,
+        fixed,
+        v,
+        force=DemonsForce(spec.alpha),
+        ndim=ndim,
+        iterations=spec.iterations,
+        n_steps=spec.n_steps,
+        boundary_mode=spec.boundary_mode,
+        sigma_fluid=spec.sigma_fluid,
+        sigma_diffusion=spec.sigma_diffusion,
+        bch_order=spec.bch_order,
+        step=None,
+        rel_spacing=rel_spacing,
     )
-    grad_fixed = spatial_gradient(fixed, spacing=grad_spacing)
-    alpha2 = spec.alpha * spec.alpha
-    rel_arr = (
-        None
-        if rel_spacing is None
-        else jnp.asarray(rel_spacing, dtype=fixed.dtype)
-    )
-    sigma_fluid: Union[float, tuple[float, ...]] = (
-        spec.sigma_fluid
-        if rel_spacing is None
-        else tuple(spec.sigma_fluid / r for r in rel_spacing)
-    )
-    sigma_diffusion: Union[float, tuple[float, ...]] = (
-        spec.sigma_diffusion
-        if rel_spacing is None
-        else tuple(spec.sigma_diffusion / r for r in rel_spacing)
-    )
-
-    def step(v: Array, _: Any) -> tuple[Array, Array]:
-        s = integrate_velocity_field(
-            v, n_steps=spec.n_steps, mode=spec.boundary_mode
-        )
-        warped = spatial_transform(
-            moving[..., None], id_grid + s, mode=spec.boundary_mode
-        )[..., 0]
-        diff = fixed - warped
-        j = 0.5 * (grad_fixed + spatial_gradient(warped, spacing=grad_spacing))
-        denom = jnp.sum(j * j, axis=-1) + alpha2 * diff * diff
-        u = (diff / denom)[..., None] * j
-        if rel_arr is not None:
-            # Physical (mm) force -> voxel-native field.
-            u = u / rel_arr
-        u = _smooth_vector(u, sigma_fluid, ndim)
-        v = (
-            v + u
-            if spec.bch_order == 1
-            else compose_velocity(v, u, order=spec.bch_order)
-        )
-        v = _smooth_vector(v, sigma_diffusion, ndim)
-        return v, 0.5 * jnp.sum(diff * diff)
-
-    v, costs = jax.lax.scan(step, v, xs=None, length=spec.iterations)
-    return v, costs
 
 
 def diffeomorphic_demons_register(

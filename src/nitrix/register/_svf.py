@@ -23,14 +23,25 @@ from __future__ import annotations
 import math
 from typing import Callable, Optional, Sequence, Union
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from ..geometry import upsample
+from ..geometry import (
+    compose_velocity,
+    identity_grid,
+    integrate_velocity_field,
+    spatial_transform,
+    upsample,
+)
+from ..geometry._interpolate import BoundaryMode
 from ..smoothing import gaussian
+from ._force import Force
 
 __all__ = [
     'svf_coarse_to_fine',
+    'single_sided_level',
+    'symmetric_level',
 ]
 
 
@@ -146,3 +157,181 @@ def svf_coarse_to_fine(
 
     assert state is not None
     return state, jnp.concatenate(histories)
+
+
+def _normalise_step(u: Array, step: float) -> Array:
+    """Cap the force field's largest voxel displacement at ``step``.
+
+    A trust-region clamp (``min(1, step/‖u‖_max)``), not a scale-to.  The
+    two coincide when the force exceeds the cap (both divide by ``‖u‖_max``);
+    they differ only *below* it, where the clamp keeps the raw gradient
+    magnitude rather than amplifying it to a full step.  Under a fixed
+    iteration budget (no convergence gate) that is the safer discipline: a
+    shrinking force keeps shrinking, and a small / low-signal update is not
+    inflated -- scale-to-step would force a full ``step`` in whatever
+    direction the (often spurious, flat-region) maximum points.
+
+    **Contingent on the fixed-budget scheme.**  This choice is *because* the
+    forward is a fixed-length ``lax.scan`` (no convergence gate).  If the
+    ``while_loop`` early-exit (``docs/feature-requests/
+    registration-early-stopping-while-loop.md``) is adopted, a convergence
+    gate would bound the constant-step dithering that motivates the clamp,
+    making scale-to-step (the ANTS choice) viable again -- so revisit
+    clamp-vs-scale here if that lands.
+
+    Note an LNCC force does **not** vanish at a perfect match -- the metric's
+    ``eps`` guard leaves ``cc < 1`` in low-variance windows -- so it is the
+    symmetric forward/inverse cancellation, not a vanishing force or this
+    clamp, that zeroes the *net* deformation there.
+    """
+    norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
+    scale = jnp.minimum(1.0, step / (jnp.max(norm) + 1e-12))
+    return u * scale
+
+
+def _per_axis_sigma(
+    sigma: float, rel_spacing: Optional[tuple[float, ...]]
+) -> Union[float, tuple[float, ...]]:
+    """Anisotropy-correct a regularisation sigma (per-axis when anisotropic)."""
+    if rel_spacing is None:
+        return sigma
+    return tuple(sigma / r for r in rel_spacing)
+
+
+def _regularise(
+    v: Array,
+    u: Array,
+    *,
+    step: Optional[float],
+    sigma_fluid: Union[float, tuple[float, ...]],
+    sigma_diffusion: Union[float, tuple[float, ...]],
+    bch_order: int,
+    ndim: int,
+) -> Array:
+    """Apply the shared per-update regularisation to a raw force ``u``.
+
+    The fluid+diffusion operator splitting both SVF drivers share: an optional
+    trust-region step clamp (``step is not None``; the SyN convention), fluid
+    Gaussian smoothing of the update, the log-domain accumulation
+    (``v + u`` additive, or BCH ``compose_velocity`` for ``bch_order > 1``),
+    and diffusion Gaussian smoothing of the accumulated velocity.
+    """
+    if step is not None:
+        u = _normalise_step(u, step)
+    u = _smooth_vector(u, sigma_fluid, ndim)
+    v = v + u if bch_order == 1 else compose_velocity(v, u, order=bch_order)
+    return _smooth_vector(v, sigma_diffusion, ndim)
+
+
+def single_sided_level(
+    moving: Array,
+    fixed: Array,
+    v: Array,
+    *,
+    force: Force,
+    ndim: int,
+    iterations: int,
+    n_steps: int,
+    boundary_mode: BoundaryMode,
+    sigma_fluid: float,
+    sigma_diffusion: float,
+    bch_order: int,
+    step: Optional[float],
+    rel_spacing: Optional[tuple[float, ...]],
+) -> tuple[Array, Array]:
+    """Single-sided SVF iterations on one resolution (the Demons structure).
+
+    Warps ``moving`` by ``exp(v)`` and drives ``v`` up the similarity under
+    ``force`` -- metric-generic: any :class:`Force` plugs in.  The force is
+    bound to ``fixed`` **once** (its fixed-state, e.g. ``∇fixed``, is hoisted
+    out of the iteration).  Rolled with ``lax.scan``; returns ``(v, costs)``.
+    """
+    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
+    bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)
+    sf = _per_axis_sigma(sigma_fluid, rel_spacing)
+    sd = _per_axis_sigma(sigma_diffusion, rel_spacing)
+
+    def step_fn(v: Array, _: object) -> tuple[Array, Array]:
+        s = integrate_velocity_field(v, n_steps=n_steps, mode=boundary_mode)
+        warped = spatial_transform(
+            moving[..., None], id_grid + s, mode=boundary_mode
+        )[..., 0]
+        v = _regularise(
+            v,
+            bound.update(warped),
+            step=step,
+            sigma_fluid=sf,
+            sigma_diffusion=sd,
+            bch_order=bch_order,
+            ndim=ndim,
+        )
+        return v, bound.cost(warped)
+
+    return jax.lax.scan(step_fn, v, xs=None, length=iterations)
+
+
+def symmetric_level(
+    moving: Array,
+    fixed: Array,
+    v_fwd: Array,
+    v_inv: Array,
+    *,
+    force: Force,
+    ndim: int,
+    iterations: int,
+    n_steps: int,
+    boundary_mode: BoundaryMode,
+    sigma_fluid: float,
+    sigma_diffusion: float,
+    step: Optional[float],
+    rel_spacing: Optional[tuple[float, ...]],
+) -> tuple[Array, Array, Array]:
+    """Symmetric-midpoint SVF iterations on one resolution (the SyN structure).
+
+    Warps both images to the shared midpoint and ascends the similarity under
+    ``force`` in each direction -- metric-generic.  The force is bound **per
+    step** (its "fixed" is the other image at the midpoint, which changes every
+    iteration).  Rolled with ``lax.scan``; returns ``(v_fwd, v_inv, costs)``.
+    """
+    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
+    sf = _per_axis_sigma(sigma_fluid, rel_spacing)
+    sd = _per_axis_sigma(sigma_diffusion, rel_spacing)
+
+    def warp_to_mid(image: Array, v: Array) -> Array:
+        s = integrate_velocity_field(v, n_steps=n_steps, mode=boundary_mode)
+        return spatial_transform(
+            image[..., None], id_grid + s, mode=boundary_mode
+        )[..., 0]
+
+    def step_fn(
+        carry: tuple[Array, Array], _: object
+    ) -> tuple[tuple[Array, Array], Array]:
+        v_fwd, v_inv = carry
+        a = warp_to_mid(moving, v_fwd)
+        b = warp_to_mid(fixed, v_inv)
+        bound_fwd = force.bind(b, ndim=ndim, rel_spacing=rel_spacing)
+        bound_inv = force.bind(a, ndim=ndim, rel_spacing=rel_spacing)
+        v_fwd = _regularise(
+            v_fwd,
+            bound_fwd.update(a),
+            step=step,
+            sigma_fluid=sf,
+            sigma_diffusion=sd,
+            bch_order=1,
+            ndim=ndim,
+        )
+        v_inv = _regularise(
+            v_inv,
+            bound_inv.update(b),
+            step=step,
+            sigma_fluid=sf,
+            sigma_diffusion=sd,
+            bch_order=1,
+            ndim=ndim,
+        )
+        return (v_fwd, v_inv), bound_fwd.cost(a)
+
+    (v_fwd, v_inv), costs = jax.lax.scan(
+        step_fn, (v_fwd, v_inv), xs=None, length=iterations
+    )
+    return v_fwd, v_inv, costs

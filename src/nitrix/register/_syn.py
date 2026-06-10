@@ -34,10 +34,8 @@ treatment).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Union
 
-import jax
-import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..geometry import (
@@ -47,12 +45,11 @@ from ..geometry import (
     integrate_velocity_field,
     invert_displacement,
     jacobian_det_displacement,
-    spatial_gradient,
     spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
-from ..metrics import lncc, lncc_grad
-from ._svf import _relative_spacing, _smooth_vector, svf_coarse_to_fine
+from ._force import LNCCForce
+from ._svf import _relative_spacing, svf_coarse_to_fine, symmetric_level
 
 __all__ = [
     'SyNSpec',
@@ -134,36 +131,6 @@ class SyNResult(NamedTuple):
     cost_history: Float[Array, ' h']
 
 
-def _normalise_step(u: Array, step: float) -> Array:
-    """Cap the force field's largest voxel displacement at ``step``.
-
-    A trust-region clamp (``min(1, step/‖u‖_max)``), not a scale-to.  The
-    two coincide when the force exceeds the cap (both divide by ``‖u‖_max``);
-    they differ only *below* it, where the clamp keeps the raw gradient
-    magnitude rather than amplifying it to a full step.  Under a fixed
-    iteration budget (no convergence gate) that is the safer discipline: a
-    shrinking force keeps shrinking, and a small / low-signal update is not
-    inflated -- scale-to-step would force a full ``step`` in whatever
-    direction the (often spurious, flat-region) maximum points.
-
-    **Contingent on the fixed-budget scheme.**  This choice is *because* the
-    forward is a fixed-length ``lax.scan`` (no convergence gate).  If the
-    ``while_loop`` early-exit (``docs/feature-requests/
-    registration-early-stopping-while-loop.md``) is adopted, a convergence
-    gate would bound the constant-step dithering that motivates the clamp,
-    making scale-to-step (the ANTS choice) viable again -- so revisit
-    clamp-vs-scale here if that lands.
-
-    Note the LNCC force does **not** vanish at a perfect match -- the
-    metric's ``eps`` guard leaves ``cc < 1`` in low-variance windows -- so
-    it is the symmetric forward/inverse cancellation, not a vanishing force
-    or this clamp, that zeroes the *net* deformation there.
-    """
-    norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
-    scale = jnp.minimum(1.0, step / (jnp.max(norm) + 1e-12))
-    return u * scale
-
-
 def _syn_level(
     moving: Array,
     fixed: Array,
@@ -176,59 +143,28 @@ def _syn_level(
 ) -> tuple[Array, Array, Array]:
     """Run the symmetric SyN iterations on one resolution.
 
-    Rolled with ``lax.scan`` (carry = the two velocity fields), so the
-    level compiles one iteration; differentiable for the unrolled path.
+    Thin wrapper over the metric-generic symmetric-midpoint SVF driver
+    (``_svf.symmetric_level``) with the analytic :class:`LNCCForce` -- the
+    recipe's symmetric structure (warp both images to the midpoint, ascend the
+    local CC in each direction) plus its default force, trust-region step
+    clamp, and anisotropy-aware regularisation.  Rolled with ``lax.scan``;
+    differentiable for the unrolled path.
     """
-    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
-    grad_spacing: Union[float, tuple[float, ...]] = (
-        1.0 if rel_spacing is None else rel_spacing
+    return symmetric_level(
+        moving,
+        fixed,
+        v_fwd,
+        v_inv,
+        force=LNCCForce(spec.radius),
+        ndim=ndim,
+        iterations=spec.iterations,
+        n_steps=spec.n_steps,
+        boundary_mode=spec.boundary_mode,
+        sigma_fluid=spec.sigma_fluid,
+        sigma_diffusion=spec.sigma_diffusion,
+        step=spec.step,
+        rel_spacing=rel_spacing,
     )
-    rel_arr = (
-        None
-        if rel_spacing is None
-        else jnp.asarray(rel_spacing, dtype=fixed.dtype)
-    )
-    sigma_fluid: Union[float, tuple[float, ...]] = (
-        spec.sigma_fluid
-        if rel_spacing is None
-        else tuple(spec.sigma_fluid / r for r in rel_spacing)
-    )
-    sigma_diffusion: Union[float, tuple[float, ...]] = (
-        spec.sigma_diffusion
-        if rel_spacing is None
-        else tuple(spec.sigma_diffusion / r for r in rel_spacing)
-    )
-
-    def warp_to_mid(image: Array, v: Array) -> Array:
-        s = integrate_velocity_field(
-            v, n_steps=spec.n_steps, mode=spec.boundary_mode
-        )
-        return spatial_transform(
-            image[..., None], id_grid + s, mode=spec.boundary_mode
-        )[..., 0]
-
-    def force(scalar: Array, warped: Array) -> Array:
-        u = scalar[..., None] * spatial_gradient(warped, spacing=grad_spacing)
-        if rel_arr is not None:
-            u = u / rel_arr
-        return _smooth_vector(_normalise_step(u, spec.step), sigma_fluid, ndim)
-
-    def step(carry: tuple[Array, Array], _: Any) -> tuple[Any, Array]:
-        v_fwd, v_inv = carry
-        a = warp_to_mid(moving, v_fwd)
-        b = warp_to_mid(fixed, v_inv)
-        # Symmetric local-CC ascent: each image flows toward the other.
-        v_fwd = v_fwd + force(lncc_grad(a, b, radius=spec.radius), a)
-        v_inv = v_inv + force(lncc_grad(b, a, radius=spec.radius), b)
-        v_fwd = _smooth_vector(v_fwd, sigma_diffusion, ndim)
-        v_inv = _smooth_vector(v_inv, sigma_diffusion, ndim)
-        cost = 1.0 - lncc(a, b, radius=spec.radius)
-        return (v_fwd, v_inv), cost
-
-    (v_fwd, v_inv), costs = jax.lax.scan(
-        step, (v_fwd, v_inv), xs=None, length=spec.iterations
-    )
-    return v_fwd, v_inv, costs
 
 
 def greedy_syn_register(
