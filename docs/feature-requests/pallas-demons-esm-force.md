@@ -1,13 +1,22 @@
 # Pallas kernel for the Demons ESM-force inner step
 
-> **Status (2026-06-09): proposed, profile-gated.** Surfaced by
-> `nitrix-perf-bench` while benching `register.diffeomorphic_demons_register`
-> across scale on an L4 (see that repo's `reports/REGISTRATION_SCALING.md`).
-> A commitment-free follow-up: build it only once a profile confirms the
-> gradient+force kernels dominate HBM traffic (Trigger below). Unlike
+> **Status (2026-06-10): promoted — gate (a) met for the whole SVF family,
+> still awaiting gate (b).** Surfaced by `nitrix-perf-bench` while benching
+> `register.diffeomorphic_demons_register` across scale on an L4 (see that repo's
+> `reports/REGISTRATION_SCALING.md`). **R8 update:** the bandwidth-bound symptom
+> is now confirmed to be a *family* property, not a Demons quirk — `greedy_syn_-
+> register` (the other SVF recipe; `bench/perf_registration_v2.py`) scales with
+> the **identical** super-linear exponent (96³→128³: warm 199→650 ms = 1.37,
+> matching Demons' 8.1×-for-4.6× = 1.37). So this kernel is the lever for *both*
+> diffeomorphic recipes — which are exactly the recipes that win qualitatively on
+> GPU and most justify the work. Still build it only once a profile confirms the
+> gradient+force kernels dominate HBM traffic **and** a downstream consumer is
+> bottlenecked (Trigger below). Unlike
 > [`pallas-trilinear-resample.md`](pallas-trilinear-resample.md), the proposed
 > target is **gather-free**, so it does *not* inherit the ELL
-> gather-lowering blocker that parks that kernel.
+> gather-lowering blocker that parks that kernel. The fused stencil+force kernel
+> is recipe-agnostic across the SVF family: `_demons_level` and `_syn_level`
+> share the `_svf` driver, so one kernel serves both.
 
 **Observation (the symptom).** Post the `lax.scan` loop-roll, the Demons
 recipe's GPU steady time is **memory-bandwidth-bound at scale**: its GPU/CPU

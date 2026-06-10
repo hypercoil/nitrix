@@ -137,13 +137,25 @@ def test_identity_registration_is_near_zero():
     assert float(ncc(res.warped, fixed)) > 0.999
 
 
-def test_register_shape_validation():
-    a = _blobs_2d(32)
-    b = _blobs_2d(48)
-    with pytest.raises(ValueError):
-        rigid_register(a, b)
+def test_register_different_shapes_allowed():
+    # The warp is built on the fixed grid, so moving / fixed need not share
+    # a shape (a shared voxel grid with a different field of view); the
+    # result lives on the fixed grid.
+    moving = _blobs_2d(48)
+    fixed = _blobs_2d(40)
+    res = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=2, iterations=10)
+    )
+    assert res.warped.shape == fixed.shape
+
+
+def test_register_rank_validation():
+    # Unsupported spatial rank (not 2-D / 3-D) still raises.
     with pytest.raises(ValueError):
         rigid_register(jnp.zeros((4, 4, 4, 4)), jnp.zeros((4, 4, 4, 4)))
+    # Mismatched rank (2-D vs 3-D) raises.
+    with pytest.raises(ValueError):
+        rigid_register(_blobs_2d(16), jnp.zeros((16, 16, 16)))
 
 
 def test_result_warped_matches_explicit_warp():

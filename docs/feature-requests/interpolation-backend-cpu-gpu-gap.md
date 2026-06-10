@@ -8,6 +8,18 @@
 > [`perf-bench-feedback.md`](perf-bench-feedback.md). The companion research
 > note on alternative backends is
 > [`alternative-interp-backends-xla`](alternative-interp-backends-xla.md).
+>
+> **R8 narrowing (2026-06-10).** The "CPU-weak everywhere" framing is too broad
+> and was mis-cited as *the* registration CPU lag. Reconciling the dated
+> measurements: **single-shot** `spatial_transform` (4.0–4.9× vs scipy at 256²)
+> and `resample` (5.6× at 128²→256²) on CPU are **faster** than scipy — only the
+> **iterated** `integrate_velocity_field` (the 7× scaling-and-squaring scan, at
+> small grids; table below) is the 5–9× loss, where XLA-CPU per-call/scan
+> overhead dominates and scipy's tight C loop wins. So this is a **narrow** gap:
+> CPU-side SVF-exponential preprocessing at small grids — *not* the warp gather
+> in general, and **not** the rigid/affine recipes (which never call
+> `integrate_velocity_field`; their CPU lag is the optimiser, addressed
+> separately). Demoted from "highest" in the registration perf program.
 
 Every nitrix op that resamples by coordinate gather routes through
 `jax.scipy.ndimage.map_coordinates` (order=1) — `spatial_transform`,

@@ -1,9 +1,29 @@
 # Registration optimisers: try a `while_loop` early-exit forward (implicit backward already supports it)
 
-> **Status (2026-06-10): proposed, acceptance-gated.** Surfaced by
-> `nitrix-perf-bench` while benching the registration recipes across scale on an
-> L4. **Accept only if it is a clean win on hard, brain-realistic cases** — not
-> the easy toy warp (where early-exit trivially helps but is unrepresentative).
+> **Status (2026-06-10): scoped to single-pair matrix recipes by R8 evidence;
+> still acceptance-gated there.** Surfaced by `nitrix-perf-bench` while benching
+> the registration recipes across scale on an L4. **Accept only if it is a clean
+> win on hard, brain-realistic cases** — not the easy toy warp (where early-exit
+> trivially helps but is unrepresentative).
+>
+> **R8 convergence measurement (`bench/conv_trajectory.py`, 96³ f32) resolves
+> *which* recipes this can help:**
+> - **Greedy SyN — no benefit.** It uses its *full* iteration budget (finest
+>   level reaches 95 % only at step 36/40; cost still descending at budget end) —
+>   the gradual first-order descent under the **non-vanishing LNCC force** has no
+>   early plateau to exploit (the same property that makes the R7 clamp correct;
+>   cf. `_syn.py::_normalise_step`). So the clamp-vs-scale revisit this doc
+>   contemplated is **not triggered** — the fixed scan stays for SyN.
+> - **Cohort volreg — contraindicated.** It is a `vmap` over frames; `while_loop`
+>   with heterogeneous per-frame trip counts runs to the max (or needs masking),
+>   so the saving evaporates — and the batched-GPU throughput is itself the
+>   structural win, not to be sacrificed.
+> - **Single-pair rigid/affine — the live target.** Second-order GN/LM converges
+>   in **~5/20 steps even on a hard case** (NCC 0.625→0.996), so ~75 % of the
+>   finest-level budget is spin. This is *also the recipe class nitrix is most
+>   behind on* (single-pair latency = a cost-normalised loss vs ANTs-CPU), so a
+>   `while_loop` early-exit is both viable (no `vmap` to break in the single-pair
+>   path) and economically pointed. **This is the case to prototype.**
 
 ## The finding
 
@@ -69,6 +89,16 @@ Weigh against `while_loop`'s real costs:
 If hard-case + cohort benchmarks don't show a clean net win, the fixed `scan`
 stays — the simplicity and batch-friendliness are worth more than speculative
 easy-case savings.
+
+**Downstream coupling (greedy SyN force normalisation).** If this lands, it
+re-opens a coupled decision in `register/_syn.py::_normalise_step`: the greedy-SyN
+LNCC force is normalised by a trust-region **clamp** rather than ANTS-style
+scale-to-step *because* the forward is a fixed-length `scan` with no convergence
+gate (the clamp stops a constant-magnitude step from dithering forever). A
+convergence-gated `while_loop` bounds that dithering, making scale-to-step viable
+again — so adopting `while_loop` should trigger a clamp-vs-scale revisit there
+(the LNCC force does not vanish at the optimum, so the normalisation genuinely
+shapes the trajectory). Noted in that function's docstring.
 
 ## How perf-bench would measure it
 

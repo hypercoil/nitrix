@@ -29,7 +29,7 @@ forward+inverse variant are the documented upgrade paths.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -43,10 +43,9 @@ from ..geometry import (
     jacobian_det_displacement,
     spatial_gradient,
     spatial_transform,
-    upsample,
 )
 from ..geometry._interpolate import BoundaryMode
-from ..smoothing import gaussian
+from ._svf import _relative_spacing, _smooth_vector, svf_coarse_to_fine
 
 __all__ = [
     'DemonsSpec',
@@ -77,6 +76,17 @@ class DemonsSpec:
         ``α`` damps the step where the intensity difference is large.
     bch_order
         Log-update order: ``1`` additive (default), ``2`` adds ½[v,u].
+    spacing
+        Per-axis voxel spacing (physical units); ``float`` or length-``ndim``
+        tuple.  ``None`` (default) registers in voxel units.  Only the
+        **anisotropy** is used -- the regularisation and the ESM force are
+        made physically isotropic by the *relative* spacing
+        ``spacing / geomean(spacing)`` (level-independent: the
+        coarse-to-fine align-corners scale cancels in the ratio).  So
+        isotropic spacing reduces exactly to ``None``; an anisotropic grid
+        is corrected for the bias where a voxel-isotropic Gaussian / force
+        is physically anisotropic.  The velocity field stays voxel-native
+        (the ESM force is converted mm -> voxel before it updates ``v``).
     pyramid_factor, pyramid_sigma
         Pyramid downsample factor / anti-alias sigma.
     boundary_mode
@@ -90,6 +100,7 @@ class DemonsSpec:
     n_steps: int = 6
     alpha: float = 0.4
     bch_order: int = 1
+    spacing: Optional[Union[float, tuple[float, ...]]] = None
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
@@ -121,13 +132,6 @@ class DiffeomorphicResult(NamedTuple):
     cost_history: Float[Array, ' h']
 
 
-def _smooth_vector(field: Array, sigma: float, ndim: int) -> Array:
-    """Separable Gaussian over the spatial axes of a channel-last field."""
-    moved = jnp.moveaxis(field, -1, 0)
-    smoothed = gaussian(moved, sigma=sigma, spatial_rank=ndim)
-    return jnp.moveaxis(smoothed, 0, -1)
-
-
 def _demons_level(
     moving: Array,
     fixed: Array,
@@ -135,6 +139,7 @@ def _demons_level(
     *,
     spec: DemonsSpec,
     ndim: int,
+    rel_spacing: Optional[tuple[float, ...]],
 ) -> tuple[Array, Array]:
     """Run the Demons iterations on one resolution; return ``(v, costs)``.
 
@@ -142,10 +147,34 @@ def _demons_level(
     field, per-step output = the SSD), so the level compiles one
     iteration rather than ``spec.iterations`` unrolled copies; the loop
     stays differentiable for the unrolled gradient path.
+
+    ``rel_spacing`` (anisotropy-only; ``None`` for isotropic) makes the
+    physics axis-correct: the gradient is taken in physical units, the ESM
+    force is converted back to the voxel-native field, and the
+    fluid/diffusion sigmas become per-axis.  All reduce to the voxel
+    behaviour when ``rel_spacing is None``.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
-    grad_fixed = spatial_gradient(fixed)
+    grad_spacing: Union[float, tuple[float, ...]] = (
+        1.0 if rel_spacing is None else rel_spacing
+    )
+    grad_fixed = spatial_gradient(fixed, spacing=grad_spacing)
     alpha2 = spec.alpha * spec.alpha
+    rel_arr = (
+        None
+        if rel_spacing is None
+        else jnp.asarray(rel_spacing, dtype=fixed.dtype)
+    )
+    sigma_fluid: Union[float, tuple[float, ...]] = (
+        spec.sigma_fluid
+        if rel_spacing is None
+        else tuple(spec.sigma_fluid / r for r in rel_spacing)
+    )
+    sigma_diffusion: Union[float, tuple[float, ...]] = (
+        spec.sigma_diffusion
+        if rel_spacing is None
+        else tuple(spec.sigma_diffusion / r for r in rel_spacing)
+    )
 
     def step(v: Array, _: Any) -> tuple[Array, Array]:
         s = integrate_velocity_field(
@@ -155,16 +184,19 @@ def _demons_level(
             moving[..., None], id_grid + s, mode=spec.boundary_mode
         )[..., 0]
         diff = fixed - warped
-        j = 0.5 * (grad_fixed + spatial_gradient(warped))
+        j = 0.5 * (grad_fixed + spatial_gradient(warped, spacing=grad_spacing))
         denom = jnp.sum(j * j, axis=-1) + alpha2 * diff * diff
         u = (diff / denom)[..., None] * j
-        u = _smooth_vector(u, spec.sigma_fluid, ndim)
+        if rel_arr is not None:
+            # Physical (mm) force -> voxel-native field.
+            u = u / rel_arr
+        u = _smooth_vector(u, sigma_fluid, ndim)
         v = (
             v + u
             if spec.bch_order == 1
             else compose_velocity(v, u, order=spec.bch_order)
         )
-        v = _smooth_vector(v, spec.sigma_diffusion, ndim)
+        v = _smooth_vector(v, sigma_diffusion, ndim)
         return v, 0.5 * jnp.sum(diff * diff)
 
     v, costs = jax.lax.scan(step, v, xs=None, length=spec.iterations)
@@ -221,28 +253,27 @@ def diffeomorphic_demons_register(
         sigma=spec.pyramid_sigma,
     )
 
-    velocity: Optional[Array] = None
-    prev_shape: Optional[tuple[int, ...]] = None
-    histories = []
-    for level in range(spec.levels - 1, -1, -1):
-        m_l = pyr_m[level][..., 0]
-        f_l = pyr_f[level][..., 0]
-        shape_l = f_l.shape
-        if velocity is None:
-            velocity = jnp.zeros(shape_l + (ndim,), dtype=dtype)
-        else:
-            velocity = upsample(velocity, shape_l)
-            ratio = jnp.asarray(shape_l, dtype=dtype) / jnp.asarray(
-                prev_shape, dtype=dtype
-            )
-            velocity = velocity * ratio
-        velocity, hist = _demons_level(
-            m_l, f_l, velocity, spec=spec, ndim=ndim
-        )
-        histories.append(hist)
-        prev_shape = shape_l
+    # Anisotropy-only spacing -- level-independent, so computed once.
+    rel_spacing = _relative_spacing(spec.spacing, ndim)
 
-    assert velocity is not None
+    def level_solve(
+        m_l: Array, f_l: Array, state: tuple[Array, ...]
+    ) -> tuple[tuple[Array, ...], Array]:
+        (v,) = state
+        v, hist = _demons_level(
+            m_l, f_l, v, spec=spec, ndim=ndim, rel_spacing=rel_spacing
+        )
+        return (v,), hist
+
+    (velocity,), cost_history = svf_coarse_to_fine(
+        pyr_m,
+        pyr_f,
+        ndim=ndim,
+        dtype=dtype,
+        n_fields=1,
+        level_solve=level_solve,
+    )
+
     id_grid = identity_grid(moving.shape, dtype=dtype)
     s = integrate_velocity_field(
         velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
@@ -256,5 +287,5 @@ def diffeomorphic_demons_register(
         displacement=s,
         warped=warped,
         jacobian_det=det,
-        cost_history=jnp.concatenate(histories),
+        cost_history=cost_history,
     )

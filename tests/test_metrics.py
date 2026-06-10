@@ -19,7 +19,24 @@ from nitrix.metrics import (
     info_nce,
     jaccard,
     koleo,
+    lncc,
+    lncc_grad,
 )
+
+
+def test_lncc_grad_matches_autodiff():
+    # The analytic LNCC force is the exact gradient of lncc(reduction='sum')
+    # w.r.t. moving -- machine precision vs autodiff, with no autodiff tape.
+    rng = np.random.RandomState(0)
+    for shape, radius in [((40, 44), 4), ((18, 16, 20), 3)]:
+        moving = jnp.asarray(rng.standard_normal(shape))
+        fixed = jnp.asarray(rng.standard_normal(shape) + 0.5 * np.asarray(moving))
+        analytic = lncc_grad(moving, fixed, radius=radius)
+        auto = jax.grad(
+            lambda m: lncc(m, fixed, radius=radius, reduction='sum')
+        )(moving)
+        assert analytic.shape == moving.shape
+        assert np.allclose(np.asarray(analytic), np.asarray(auto), atol=1e-10)
 
 # ---------------------------------------------------------------------------
 # dice / jaccard

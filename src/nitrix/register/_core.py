@@ -10,10 +10,19 @@ The pieces shared by ``rigid_register`` / ``affine_register``: the
 ``jit`` static args), the ``RegistrationResult`` ``NamedTuple`` output,
 and the coarse-to-fine driver.
 
+The driver is written **once** against a ``CoordinateSpace`` (``_space``):
+the only axis that separates an index-space, shared-grid registration from
+a physically correct one is *how* the parameter transform relates the two
+voxel grids, and that axis is the space's responsibility.  ``IndexSpace``
+(default) is the leaner, fully-on-device, voxel-unit path; ``WorldSpace``
+is anisotropy- and different-grid-correct.  Everything else -- the
+pyramid, the level loop, the optimise, the result -- is identical.
+
 Per pyramid level the driver minimises a similarity cost over the
 transform's Lie parameters ``θ`` and warm-starts the next finer level
-from the result (translations rescaled to the finer voxel grid).  Two
-optimisation paths:
+from the result (in ``IndexSpace`` the voxel-unit translations are
+rescaled to the finer grid; in ``WorldSpace`` the physical parameters are
+grid-independent and carry over unchanged).  Two optimisation paths:
 
 - **SSD** -> Gauss-Newton / Levenberg-Marquardt on the *vector* residual
   ``warp(θ) - fixed`` (``linalg.optimize``).  Matrix-free, GPU-native,
@@ -25,13 +34,15 @@ optimisation paths:
 
 Images are single-channel ``(*spatial,)`` (the registration norm); the
 channel axis is added internally for ``spatial_transform`` / pyramids.
-Coordinates are index-space (``identity_grid`` convention).
+``moving`` and ``fixed`` need not share a shape (the warp is always built
+on the ``fixed`` grid); ``IndexSpace`` additionally assumes they share a
+voxel grid.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 import jax.numpy as jnp
 from jax.scipy.optimize import minimize
@@ -46,13 +57,18 @@ from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg import gauss_newton, levenberg_marquardt
 from ._metric import SSD, Metric
 from ._model import TransformModel
+from ._objective import MetricObjective, Objective
+from ._space import CoordinateSpace, IndexSpace, _Sampler
 
 
 @dataclass(frozen=True)
 class RegistrationSpec:
     """Static configuration for a registration recipe.
 
-    Frozen and hashable so it rides ``jit`` static arguments.
+    Frozen and hashable so it rides ``jit`` static arguments.  The
+    per-image voxel->world geometry is **not** here (it is array data, not
+    static config): it travels on the ``space`` argument of the recipes
+    (``IndexSpace`` / ``WorldSpace``).
 
     Attributes
     ----------
@@ -97,13 +113,17 @@ class RegistrationResult(NamedTuple):
     Attributes
     ----------
     matrix
-        The estimated homogeneous transform, ``(ndim + 1, ndim + 1)``
-        (full-resolution, index-space), mapping fixed coordinates to
-        moving coordinates.
+        The estimated homogeneous transform, ``(ndim + 1, ndim + 1)``.  In
+        ``IndexSpace`` this is the full-resolution **index-space** map from
+        fixed-voxel to moving-voxel coordinates (``== model.exp(params)``);
+        in ``WorldSpace`` it is the **world->world** transform (fixed-world
+        to moving-world, mm).
     params
-        The transform's Lie parameters at full resolution.
+        The transform's Lie parameters at full resolution (voxel units in
+        ``IndexSpace``; physical units in ``WorldSpace``).
     warped
-        ``moving`` resampled by ``matrix`` onto the ``fixed`` grid.
+        ``moving`` resampled onto the ``fixed`` grid by the recovered
+        transform.
     cost_history
         Concatenated per-level optimiser cost traces.
     """
@@ -114,22 +134,26 @@ class RegistrationResult(NamedTuple):
     cost_history: Float[Array, ' h']
 
 
-def _center(shape: tuple[int, ...], dtype: Any) -> Array:
-    return (jnp.asarray(shape, dtype=dtype) - 1.0) / 2.0
-
-
 def _warp(
+    sampler: _Sampler,
     moving: Array,
-    params: Array,
+    transform: Array,
     *,
-    model: TransformModel,
-    ndim: int,
-    center: Array,
+    fixed_shape: tuple[int, ...],
+    moving_shape: tuple[int, ...],
     spec: RegistrationSpec,
 ) -> Array:
-    """Warp a single-channel ``moving`` image by ``model.exp(params)``."""
-    matrix = model.exp(params, ndim=ndim)
-    grid = affine_grid(matrix, moving.shape, center=center)
+    """Warp a single-channel ``moving`` onto ``fixed_shape``.
+
+    Shared by both coordinate spaces: the space resolves the parameter
+    ``transform`` into the ``fixed-voxel -> moving-voxel`` sampling matrix
+    and grid centre; the sampling itself (boundary, interpolation) is the
+    same.
+    """
+    matrix, center = sampler.index_sampling(
+        transform, fixed_shape=fixed_shape, moving_shape=moving_shape
+    )
+    grid = affine_grid(matrix, fixed_shape, center=center)
     warped = spatial_transform(
         moving[..., None],
         grid,
@@ -140,75 +164,60 @@ def _warp(
     return warped[..., 0]
 
 
-def _optimize_level(
-    moving: Array,
-    fixed: Array,
+def optimize_objective(
+    objective: Objective,
     params: Array,
     *,
-    model: TransformModel,
-    ndim: int,
-    center: Array,
-    spec: RegistrationSpec,
+    optimizer: str,
+    iterations: int,
+    cg_tol: float,
 ) -> tuple[Array, Array]:
-    """Optimise ``params`` on one resolution; return ``(params, history)``."""
-    metric = spec.metric
-    use_lsq = metric.is_least_squares and spec.optimizer in (
-        'auto',
-        'lm',
-        'gn',
-    )
+    """Minimise an ``Objective`` over ``params``; return ``(params, history)``.
+
+    The optimiser dispatch shared by every recipe and coordinate space: a
+    least-squares objective routes to the matrix-free Gauss-Newton /
+    Levenberg-Marquardt path; any other to BFGS on the scalar cost.  The
+    objective closes over its own data (an image pair + warp, boundary
+    samples, ...), so this function is objective-agnostic.
+    """
+    use_lsq = objective.is_least_squares and optimizer in ('auto', 'lm', 'gn')
     if use_lsq:
-
-        def residual(p: Array) -> Array:
-            warped = _warp(
-                moving, p, model=model, ndim=ndim, center=center, spec=spec
-            )
-            return metric.residual(warped, fixed)
-
-        if spec.optimizer == 'gn':
+        if optimizer == 'gn':
             res = gauss_newton(
-                residual, params, n_iters=spec.iterations, cg_tol=spec.cg_tol
+                objective.residual, params, n_iters=iterations, cg_tol=cg_tol
             )
         else:
             res = levenberg_marquardt(
-                residual, params, n_iters=spec.iterations, cg_tol=spec.cg_tol
+                objective.residual, params, n_iters=iterations, cg_tol=cg_tol
             )
         return res.params, res.cost_history
 
-    def cost(p: Array) -> Array:
-        warped = _warp(
-            moving, p, model=model, ndim=ndim, center=center, spec=spec
-        )
-        return metric.cost(warped, fixed)
-
-    init_cost = cost(params)
+    init_cost = objective.cost(params)
     out = minimize(
-        cost, params, method='BFGS', options={'maxiter': spec.iterations}
+        objective.cost, params, method='BFGS', options={'maxiter': iterations}
     )
-    history = jnp.stack([init_cost, out.fun])
-    return out.x, history
+    return out.x, jnp.stack([init_cost, out.fun])
 
 
-def multi_resolution_register(
-    moving: Float[Array, '*spatial'],
-    fixed: Float[Array, '*spatial'],
+def register_core(
+    moving: Float[Array, '*mspatial'],
+    pyr_f: tuple[Float[Array, '*fspatial 1'], ...],
     *,
     model: TransformModel,
     ndim: int,
     spec: RegistrationSpec,
-    init_params: Optional[Float[Array, ' p']] = None,
+    space: CoordinateSpace,
+    sampler: _Sampler,
+    init_params: Float[Array, ' p'],
 ) -> RegistrationResult:
-    """Coarse-to-fine registration driver shared by the recipes."""
-    if moving.shape != fixed.shape:
-        raise ValueError(
-            f'moving and fixed must share shape; got {moving.shape} '
-            f'vs {fixed.shape}.'
-        )
-    if len(moving.shape) != ndim:
-        raise ValueError(
-            f'expected a {ndim}-D single-channel image; got shape '
-            f'{moving.shape}.'
-        )
+    """Coarse-to-fine register ``moving`` against a precomputed reference.
+
+    The per-image core of the driver: the **reference** pyramid ``pyr_f``
+    and the ``sampler`` are built once by the caller and passed in, so a
+    batched recipe (``volreg``) can compute the shared reference work once
+    and ``vmap`` only this core over a series of moving images.  Builds
+    the moving pyramid, runs the coarse-to-fine optimise, and finalises.
+    """
     dtype = moving.dtype
     pyr_m = gaussian_pyramid(
         moving[..., None],
@@ -216,52 +225,110 @@ def multi_resolution_register(
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
     )
-    pyr_f = gaussian_pyramid(
-        fixed[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
-    )
-
-    params = (
-        jnp.zeros(model.n_params(ndim), dtype=dtype)
-        if init_params is None
-        else init_params
-    )
+    full_fixed_shape = pyr_f[0].shape[:-1]
+    params = init_params
     histories = []
-    prev_shape: Optional[tuple[int, ...]] = None
+    prev_fixed_shape: Optional[tuple[int, ...]] = None
     # Coarsest (highest index) to finest (0).
     for level in range(spec.levels - 1, -1, -1):
         m_l = pyr_m[level][..., 0]
         f_l = pyr_f[level][..., 0]
-        shape_l = m_l.shape
-        if prev_shape is not None:
-            # Translations are in voxel units; rescale to this grid.
-            ratio = jnp.asarray(shape_l, dtype=dtype) / jnp.asarray(
-                prev_shape, dtype=dtype
+        f_shape = f_l.shape
+        m_shape = m_l.shape
+        if space.requires_grid_rescale and prev_fixed_shape is not None:
+            # Voxel-unit translations: rescale to this (finer) grid.
+            ratio = jnp.asarray(f_shape, dtype=dtype) / jnp.asarray(
+                prev_fixed_shape, dtype=dtype
             )
             params = model.rescale_to_grid(params, ratio)
-        center = _center(shape_l, dtype)
-        params, hist = _optimize_level(
-            m_l,
-            f_l,
+
+        def warp_fn(
+            p: Array,
+            m_l: Array = m_l,
+            f_shape: tuple[int, ...] = f_shape,
+            m_shape: tuple[int, ...] = m_shape,
+        ) -> Array:
+            return _warp(
+                sampler,
+                m_l,
+                model.exp(p, ndim=ndim),
+                fixed_shape=f_shape,
+                moving_shape=m_shape,
+                spec=spec,
+            )
+
+        objective = MetricObjective(
+            metric=spec.metric, warp=warp_fn, fixed=f_l
+        )
+        params, hist = optimize_objective(
+            objective,
             params,
-            model=model,
-            ndim=ndim,
-            center=center,
-            spec=spec,
+            optimizer=spec.optimizer,
+            iterations=spec.iterations,
+            cg_tol=spec.cg_tol,
         )
         histories.append(hist)
-        prev_shape = shape_l
+        prev_fixed_shape = f_shape
 
-    center = _center(moving.shape, dtype)
-    matrix = model.exp(params, ndim=ndim)
+    transform = model.exp(params, ndim=ndim)
+    matrix = sampler.result_transform(transform)
     warped = _warp(
-        moving, params, model=model, ndim=ndim, center=center, spec=spec
+        sampler,
+        moving,
+        transform,
+        fixed_shape=full_fixed_shape,
+        moving_shape=moving.shape,
+        spec=spec,
     )
     return RegistrationResult(
         matrix=matrix,
         params=params,
         warped=warped,
         cost_history=jnp.concatenate(histories),
+    )
+
+
+def multi_resolution_register(
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
+    *,
+    model: TransformModel,
+    ndim: int,
+    spec: RegistrationSpec,
+    init_params: Optional[Float[Array, ' p']] = None,
+    space: CoordinateSpace = IndexSpace(),
+) -> RegistrationResult:
+    """Coarse-to-fine registration driver shared by the recipes."""
+    if moving.ndim != ndim or fixed.ndim != ndim:
+        raise ValueError(
+            f'expected {ndim}-D single-channel images; got moving '
+            f'{moving.shape}, fixed {fixed.shape}.'
+        )
+    dtype = moving.dtype
+    pyr_f = gaussian_pyramid(
+        fixed[..., None],
+        levels=spec.levels,
+        factor=spec.pyramid_factor,
+        sigma=spec.pyramid_sigma,
+    )
+    sampler = space.sampler(
+        ndim=ndim,
+        full_fixed_shape=fixed.shape,
+        full_moving_shape=moving.shape,
+        dtype=dtype,
+    )
+    params = (
+        jnp.zeros(model.n_params(ndim), dtype=dtype)
+        if init_params is None
+        else init_params
+    )
+    return register_core(
+        moving,
+        pyr_f,
+        model=model,
+        ndim=ndim,
+        spec=spec,
+        space=space,
+        sampler=sampler,
+        init_params=params,
     )

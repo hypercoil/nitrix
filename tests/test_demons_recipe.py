@@ -28,6 +28,7 @@ from nitrix.register import (  # noqa: E402
     DemonsSpec,
     diffeomorphic_demons_register,
 )
+from nitrix.register.diffeomorphic import _relative_spacing  # noqa: E402
 from nitrix.smoothing import gaussian  # noqa: E402
 
 
@@ -121,3 +122,45 @@ def test_demons_shape_validation():
         diffeomorphic_demons_register(
             jnp.zeros((4, 4, 4, 4)), jnp.zeros((4, 4, 4, 4))
         )
+
+
+def test_relative_spacing_anisotropy_only():
+    # Isotropic spacing collapses to None (the voxel-native path).
+    assert _relative_spacing(None, 3) is None
+    assert _relative_spacing(2.0, 3) is None
+    # Anisotropy is normalised to unit geometric mean (absolute scale drops).
+    rel = _relative_spacing((4.0, 1.0), 2)
+    assert np.allclose(rel, (2.0, 0.5))
+    gm = 4.0 ** (1.0 / 3.0)
+    rel3 = _relative_spacing((1.0, 1.0, 4.0), 3)
+    assert np.allclose(rel3, (1.0 / gm, 1.0 / gm, 4.0 / gm))
+    assert np.isclose(float(np.prod(rel3)) ** (1.0 / 3.0), 1.0)
+
+
+def test_demons_anisotropic_spacing_recovers_and_differs():
+    # On an anisotropic grid the spacing-aware physics still recovers a
+    # planted warp and stays diffeomorphic, and it genuinely changes the
+    # deformation relative to the voxel-isotropic path.
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 40.0, 3)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+
+    res_iso = diffeomorphic_demons_register(
+        moving, fixed, spec=DemonsSpec(levels=3, iterations=60)
+    )
+    res_aniso = diffeomorphic_demons_register(
+        moving,
+        fixed,
+        spec=DemonsSpec(levels=3, iterations=60, spacing=(2.0, 1.0)),
+    )
+
+    assert float(ncc(res_aniso.warped, fixed)) > 0.98
+    assert float(ncc(res_aniso.warped, fixed)) > init + 0.02
+    assert float(res_aniso.jacobian_det.min()) > 0.0
+    # The anisotropy correction actually changes the recovered deformation.
+    assert not np.allclose(
+        np.asarray(res_aniso.velocity),
+        np.asarray(res_iso.velocity),
+        atol=1e-3,
+    )
