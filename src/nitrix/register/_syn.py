@@ -49,11 +49,10 @@ from ..geometry import (
     jacobian_det_displacement,
     spatial_gradient,
     spatial_transform,
-    upsample,
 )
 from ..geometry._interpolate import BoundaryMode
 from ..metrics import lncc, lncc_grad
-from .diffeomorphic import _relative_spacing, _smooth_vector
+from ._svf import _relative_spacing, _smooth_vector, svf_coarse_to_fine
 
 __all__ = [
     'SyNSpec',
@@ -286,24 +285,10 @@ def greedy_syn_register(
     )
     rel_spacing = _relative_spacing(spec.spacing, ndim)
 
-    v_fwd: Optional[Array] = None
-    v_inv: Optional[Array] = None
-    prev_shape: Optional[tuple[int, ...]] = None
-    histories = []
-    for level in range(spec.levels - 1, -1, -1):
-        m_l = pyr_m[level][..., 0]
-        f_l = pyr_f[level][..., 0]
-        shape_l = f_l.shape
-        if v_fwd is None:
-            v_fwd = jnp.zeros(shape_l + (ndim,), dtype=dtype)
-            v_inv = jnp.zeros(shape_l + (ndim,), dtype=dtype)
-        else:
-            assert v_inv is not None
-            ratio = jnp.asarray(shape_l, dtype=dtype) / jnp.asarray(
-                prev_shape, dtype=dtype
-            )
-            v_fwd = upsample(v_fwd, shape_l) * ratio
-            v_inv = upsample(v_inv, shape_l) * ratio
+    def level_solve(
+        m_l: Array, f_l: Array, state: tuple[Array, ...]
+    ) -> tuple[tuple[Array, ...], Array]:
+        v_fwd, v_inv = state
         v_fwd, v_inv, hist = _syn_level(
             m_l,
             f_l,
@@ -313,10 +298,17 @@ def greedy_syn_register(
             ndim=ndim,
             rel_spacing=rel_spacing,
         )
-        histories.append(hist)
-        prev_shape = shape_l
+        return (v_fwd, v_inv), hist
 
-    assert v_fwd is not None and v_inv is not None
+    (v_fwd, v_inv), cost_history = svf_coarse_to_fine(
+        pyr_m,
+        pyr_f,
+        ndim=ndim,
+        dtype=dtype,
+        n_fields=2,
+        level_solve=level_solve,
+    )
+
     s_fwd = integrate_velocity_field(
         v_fwd, n_steps=spec.n_steps, mode=spec.boundary_mode
     )
@@ -339,5 +331,5 @@ def greedy_syn_register(
         displacement=displacement,
         warped=warped,
         jacobian_det=det,
-        cost_history=jnp.concatenate(histories),
+        cost_history=cost_history,
     )

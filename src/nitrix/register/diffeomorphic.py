@@ -28,9 +28,8 @@ forward+inverse variant are the documented upgrade paths.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional, Sequence, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -44,10 +43,9 @@ from ..geometry import (
     jacobian_det_displacement,
     spatial_gradient,
     spatial_transform,
-    upsample,
 )
 from ..geometry._interpolate import BoundaryMode
-from ..smoothing import gaussian
+from ._svf import _relative_spacing, _smooth_vector, svf_coarse_to_fine
 
 __all__ = [
     'DemonsSpec',
@@ -132,53 +130,6 @@ class DiffeomorphicResult(NamedTuple):
     warped: Float[Array, '*spatial']
     jacobian_det: Float[Array, '*spatial']
     cost_history: Float[Array, ' h']
-
-
-def _smooth_vector(
-    field: Array, sigma: Union[float, Sequence[float]], ndim: int
-) -> Array:
-    """Separable Gaussian over the spatial axes of a channel-last field.
-
-    ``sigma`` is a scalar (isotropic) or a length-``ndim`` per-axis
-    sequence (anisotropic regularisation).
-    """
-    moved = jnp.moveaxis(field, -1, 0)
-    smoothed = gaussian(moved, sigma=sigma, spatial_rank=ndim)
-    return jnp.moveaxis(smoothed, 0, -1)
-
-
-def _spacing_tuple(
-    spacing: Union[float, Sequence[float]], ndim: int
-) -> tuple[float, ...]:
-    if isinstance(spacing, (int, float)):
-        return (float(spacing),) * ndim
-    out = tuple(float(s) for s in spacing)
-    if len(out) != ndim:
-        raise ValueError(
-            f'spacing must be a scalar or a length-{ndim} sequence; '
-            f'got {spacing!r}.'
-        )
-    return out
-
-
-def _relative_spacing(
-    spacing: Optional[Union[float, Sequence[float]]], ndim: int
-) -> Optional[tuple[float, ...]]:
-    """Anisotropy-only spacing ``spacing / geomean(spacing)``.
-
-    Level-independent (the coarse-to-fine align-corners scale cancels in
-    the ratio) and ``1`` for isotropic spacing, so the regularisation /
-    force only see the per-axis *anisotropy*, not an absolute scale --
-    isotropic data is unchanged.
-    """
-    if spacing is None:
-        return None
-    sp = _spacing_tuple(spacing, ndim)
-    geomean = math.prod(sp) ** (1.0 / ndim)
-    rel = tuple(s / geomean for s in sp)
-    if all(r == 1.0 for r in rel):
-        return None
-    return rel
 
 
 def _demons_level(
@@ -305,28 +256,24 @@ def diffeomorphic_demons_register(
     # Anisotropy-only spacing -- level-independent, so computed once.
     rel_spacing = _relative_spacing(spec.spacing, ndim)
 
-    velocity: Optional[Array] = None
-    prev_shape: Optional[tuple[int, ...]] = None
-    histories = []
-    for level in range(spec.levels - 1, -1, -1):
-        m_l = pyr_m[level][..., 0]
-        f_l = pyr_f[level][..., 0]
-        shape_l = f_l.shape
-        if velocity is None:
-            velocity = jnp.zeros(shape_l + (ndim,), dtype=dtype)
-        else:
-            velocity = upsample(velocity, shape_l)
-            ratio = jnp.asarray(shape_l, dtype=dtype) / jnp.asarray(
-                prev_shape, dtype=dtype
-            )
-            velocity = velocity * ratio
-        velocity, hist = _demons_level(
-            m_l, f_l, velocity, spec=spec, ndim=ndim, rel_spacing=rel_spacing
+    def level_solve(
+        m_l: Array, f_l: Array, state: tuple[Array, ...]
+    ) -> tuple[tuple[Array, ...], Array]:
+        (v,) = state
+        v, hist = _demons_level(
+            m_l, f_l, v, spec=spec, ndim=ndim, rel_spacing=rel_spacing
         )
-        histories.append(hist)
-        prev_shape = shape_l
+        return (v,), hist
 
-    assert velocity is not None
+    (velocity,), cost_history = svf_coarse_to_fine(
+        pyr_m,
+        pyr_f,
+        ndim=ndim,
+        dtype=dtype,
+        n_fields=1,
+        level_solve=level_solve,
+    )
+
     id_grid = identity_grid(moving.shape, dtype=dtype)
     s = integrate_velocity_field(
         velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
@@ -340,5 +287,5 @@ def diffeomorphic_demons_register(
         displacement=s,
         warped=warped,
         jacobian_det=det,
-        cost_history=jnp.concatenate(histories),
+        cost_history=cost_history,
     )
