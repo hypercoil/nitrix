@@ -38,6 +38,10 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   (stationary velocity field; ESM force; fluid+diffusion Gaussian
   regularisation; scaling-and-squaring exp), with ``DemonsSpec`` /
   ``DiffeomorphicResult``.
+- ``greedy_syn_register`` -- greedy symmetric diffeomorphic registration
+  (SyN-style): symmetric forward/inverse velocity fields driven to a
+  midpoint by the analytic LNCC force (``metrics.lncc_grad``); robust to
+  smooth intensity inhomogeneity.  ``SyNSpec`` / ``SyNResult``.
 """
 
 from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
@@ -46,6 +50,7 @@ from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from ._objective import MetricObjective, Objective
 from ._space import CoordinateSpace, IndexSpace, WorldSpace
+from ._syn import SyNResult, SyNSpec, greedy_syn_register
 from ._volreg import VolregResult, volreg
 from .diffeomorphic import (
     DemonsSpec,
@@ -87,6 +92,9 @@ __all__ = [
     'diffeomorphic_demons_register',
     'DemonsSpec',
     'DiffeomorphicResult',
+    'greedy_syn_register',
+    'SyNSpec',
+    'SyNResult',
     'gradient_smoothness',
     'bending_energy',
     'jacobian_folding_penalty',
