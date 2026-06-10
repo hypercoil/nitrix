@@ -41,8 +41,13 @@ from jaxtyping import Array, Num
 # 3.11 baseline keeps it -- ``typing.TypeIs`` only lands in 3.13.
 from typing_extensions import TypeIs
 
-from ..semiring import REAL, semiring_ell_matmul
-from ..sparse import ELL, SectionedELL, sectioned_semiring_ell_matmul
+from ..semiring import REAL, semiring_ell_matmul, semiring_ell_rmatvec
+from ..sparse import (
+    ELL,
+    SectionedELL,
+    sectioned_semiring_ell_matmul,
+    sectioned_semiring_ell_rmatvec,
+)
 
 __all__ = [
     'laplacian',
@@ -78,6 +83,8 @@ def _is_sparse(A: _GraphInput) -> TypeIs[Union[ELL, SectionedELL]]:
 def _ell_matvec(
     A: Union[ELL, SectionedELL],
     x: Num[Array, '... n k'],
+    *,
+    promise_symmetry: bool = True,
 ) -> Num[Array, '... n k']:
     """``A @ x`` for ELL / SectionedELL.
 
@@ -85,9 +92,14 @@ def _ell_matvec(
     semiring; for other algebras the caller should use
     ``semiring_ell_matmul`` / ``sectioned_semiring_ell_matmul``
     directly.
+
+    When ``promise_symmetry`` is ``False`` the symmetric part
+    ``½(A x + Aᵀ x)`` is applied instead of the bare ``A x`` -- for
+    adjacencies whose stored pattern is not symmetric (e.g. top-k
+    affinity sparsification).  The operator must be square.
     """
     if isinstance(A, ELL):
-        return semiring_ell_matmul(
+        Ax = semiring_ell_matmul(
             A.values,
             A.indices,
             x,
@@ -95,12 +107,22 @@ def _ell_matvec(
             n_cols=A.n_cols,
             backend='jax',
         )
-    return sectioned_semiring_ell_matmul(
+        if promise_symmetry:
+            return Ax
+        Atx = semiring_ell_rmatvec(
+            A.values, A.indices, x, semiring=REAL, n_cols=A.n_cols
+        )
+        return 0.5 * (Ax + Atx)
+    Ax = sectioned_semiring_ell_matmul(
         A,
         x,
         semiring=REAL,
         backend='jax',
     )
+    if promise_symmetry:
+        return Ax
+    Atx = sectioned_semiring_ell_rmatvec(A, x, semiring=REAL)
+    return 0.5 * (Ax + Atx)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +139,8 @@ def degree_vector(A: _GraphInput) -> Num[Array, '... n']:
 
     For directed graphs (asymmetric ``A``) this returns the
     out-degree; the in-degree is ``A.sum(-2)`` for dense ``A`` and
-    requires building a transpose ELL for sparse inputs.
+    ``semiring_ell_rmatvec(values, indices, ones, n_cols=n)`` (the
+    additive ELL adjoint applied to the ones vector) for sparse inputs.
     """
     if isinstance(A, ELL):
         return A.values.sum(axis=-1)
@@ -198,6 +221,7 @@ def laplacian_matvec(
     *,
     normalisation: _Normalisation = 'symmetric',
     eps: float = 1e-12,
+    promise_symmetry: bool = True,
 ) -> Num[Array, '... n k']:
     """Apply the Laplacian to a block of vectors, sparse-friendly.
 
@@ -218,6 +242,20 @@ def laplacian_matvec(
         Which Laplacian variant to apply.
     eps
         Floor on degree.
+    promise_symmetry
+        Sparse (ELL / SectionedELL) only.  When ``True`` (default) the
+        stored ``A`` matvec is applied directly.  When ``False`` the
+        adjacency application is symmetrised to ``½(A x + Aᵀ x)`` -- use
+        this when the stored pattern is not guaranteed symmetric (e.g.
+        top-k affinity sparsification).  The **degree** term still uses the
+        row-sum of the stored ``A`` (matching ``connectopy``'s
+        convention), so for ``'symmetric'`` the result is exactly the
+        normalised Laplacian of ``½(A + Aᵀ)``; for ``'combinatorial'`` /
+        ``'random_walk'`` on a genuinely asymmetric ``A`` the degree and
+        the symmetrised off-diagonal are not mutually consistent (the
+        out-degree ``D`` no longer matches ``sym(A)``) -- symmetrise the
+        adjacency at construction if you need that.  Ignored for dense
+        ``A``.
 
     Returns
     -------
@@ -229,7 +267,7 @@ def laplacian_matvec(
     if normalisation == 'combinatorial':
         # L x = D x - A x = deg * x - A x.
         if _is_sparse(A):
-            Ax = _ell_matvec(A, x)
+            Ax = _ell_matvec(A, x, promise_symmetry=promise_symmetry)
         else:
             Ax = jnp.matmul(A, x)
         return deg[..., None] * x - Ax
@@ -238,14 +276,14 @@ def laplacian_matvec(
         inv_sqrt_d = (1.0 / jnp.sqrt(safe_deg))[..., None]
         scaled = inv_sqrt_d * x
         if _is_sparse(A):
-            Ax = _ell_matvec(A, scaled)
+            Ax = _ell_matvec(A, scaled, promise_symmetry=promise_symmetry)
         else:
             Ax = jnp.matmul(A, scaled)
         return x - inv_sqrt_d * Ax
     if normalisation == 'random_walk':
         # L_rw x = x - D^(-1) A x
         if _is_sparse(A):
-            Ax = _ell_matvec(A, x)
+            Ax = _ell_matvec(A, x, promise_symmetry=promise_symmetry)
         else:
             Ax = jnp.matmul(A, x)
         return x - Ax / safe_deg[..., None]

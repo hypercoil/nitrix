@@ -70,6 +70,7 @@ EXCLUDE: frozenset[str] = frozenset(
         'semiring.reference_semiring_matmul',
         'semiring.reference_semiring_conv',
         'semiring.reference_semiring_ell_matmul',
+        'semiring.reference_semiring_ell_rmatvec',
         # -- Implicit-operator matvec closures: cost is the underlying matmul -----
         #    (already cataloged); used inside solvers, not standalone.
         'graph.laplacian_matvec',

@@ -942,6 +942,29 @@ register(
 )
 
 
+def _ell_rmatvec_fixture():
+    # Adjoint matvec ``Aᵀ X``: X is indexed by the ELL *row* axis (square
+    # operator here, m == n_cols == 20); no ``backend`` arg (JAX-only).
+    rng = np.random.default_rng(0)
+    n = 20
+    k_max = 5
+    values = jnp.asarray(rng.standard_normal((n, k_max)).astype(np.float32))
+    indices = jnp.asarray(rng.integers(0, n, (n, k_max)).astype(np.int32))
+    X = jnp.asarray(rng.standard_normal((n, 4)).astype(np.float32))
+    return (values, indices, X), {'n_cols': n}
+
+
+register(
+    OpInfo(
+        'nitrix.semiring.semiring_ell_rmatvec',
+        fixture=_ell_rmatvec_fixture,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('sparse ELL adjoint (transpose) matmul',),
+    )
+)
+
+
 def _ell_edge_setup():
     """Build a GCN-style closure that takes ``x`` as its only
     positional arg, baking in edge_fn / ell / semiring.  Returns
@@ -2107,6 +2130,47 @@ register(
         diff_arg=0,
         vmap_arg=0,
         invariants=('bucketed (variable-degree) ELL matmul',),
+    )
+)
+
+
+def _sectioned_rmatvec_setup():
+    from nitrix.sparse import (
+        sectioned_ell_from_ragged,
+        sectioned_semiring_ell_rmatvec,
+    )
+
+    rng = np.random.default_rng(0)
+    n = 12
+    degs = [2, 3, 2, 4, 1, 3, 2, 2, 3, 1, 2, 3]
+    vals = [
+        jnp.asarray(rng.standard_normal(d).astype(np.float32)) for d in degs
+    ]
+    idxs = [jnp.asarray(rng.integers(0, n, d).astype(np.int32)) for d in degs]
+    sec = sectioned_ell_from_ragged(vals, idxs, n_cols=n)
+
+    def op(x):
+        return sectioned_semiring_ell_rmatvec(sec, x)
+
+    def fixture():
+        # X indexed by the original row axis (n_rows == n_cols == 12).
+        return (
+            jnp.asarray(rng.standard_normal((n, 4)).astype(np.float32)),
+        ), {}
+
+    return op, fixture
+
+
+_sectioned_rmatvec_op, _sectioned_rmatvec_fixture = _sectioned_rmatvec_setup()
+
+register(
+    OpInfo(
+        'nitrix.sparse.sectioned_semiring_ell_rmatvec',
+        fixture=_sectioned_rmatvec_fixture,
+        fn_override=_sectioned_rmatvec_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('bucketed (variable-degree) ELL adjoint matmul',),
     )
 )
 

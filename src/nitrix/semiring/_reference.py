@@ -17,9 +17,10 @@ the JAX side identically to the Pallas side.
 
 from __future__ import annotations
 
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import jax.lax as lax
+import jax.numpy as jnp
 from jaxtyping import Array, Num
 
 from ._types import Semiring
@@ -159,7 +160,87 @@ def reference_semiring_ell_matmul(
     return monoid.finalize(acc)
 
 
+def reference_semiring_ell_rmatvec(
+    values: Num[Array, 'm kmax'],
+    indices: Num[Array, 'm kmax'],
+    X: Num[Array, 'm ncol'],
+    *,
+    semiring: Semiring[S],
+    n_cols: int,
+) -> Num[Array, 'n_cols ncol']:
+    """REAL adjoint (transpose) of the ELL matvec: ``Y = Aᵀ X``.
+
+    Where ``semiring_ell_matmul`` gathers -- ``(A X)[i] = Σ_p values[i, p]
+    · X[indices[i, p]]`` -- this scatters::
+
+        Y[c, j] = Σ_{(i, p) : indices[i, p] == c} values[i, p] · X[i, j]
+
+    for the same implicit ``m × n_cols`` operand ``A``.  This is the
+    **additive** adjoint: the scatter reduction is ``+`` (not a general
+    monoid), so pad positions -- whose ``values`` carry REAL's additive
+    identity ``0`` -- contribute nothing, exactly as in the gather
+    direction.  It is the single source of truth for both the ``g_B`` term
+    of ``real_ell_matmul_vjp`` and the symmetric matvec ``½(A X + Aᵀ X)``
+    used by the spectral solvers on adjacencies whose top-k construction
+    did not preserve symmetry.
+
+    ``semiring`` mirrors ``reference_semiring_ell_matmul``'s signature, but
+    only **REAL** is implemented: the additive scatter has no meaning for a
+    general monoid (``½(A + Aᵀ)`` averaging needs the linear structure, and
+    a non-zero pad identity would inject spurious mass).  Any other algebra
+    raises ``NotImplementedError`` rather than silently mis-reducing.
+
+    Parameters
+    ----------
+    values
+        ELL values, shape ``(m, k_max)``.  Pad positions must hold ``0``.
+    indices
+        ELL column indices, shape ``(m, k_max)``; the scatter targets.
+    X
+        Dense operand indexed by the ELL *row*, shape ``(m, ncol)``.
+    semiring
+        The algebra to reduce under.  REAL only (see above).
+    n_cols
+        Outer dim of the implicit operand ``A`` -- the length of ``Y``'s
+        leading axis (the scatter range).
+
+    Returns
+    -------
+    ``Y``, shape ``(n_cols, ncol)``.
+    """
+    if semiring.name != 'real':
+        raise NotImplementedError(
+            f'reference_semiring_ell_rmatvec: the additive ELL adjoint is '
+            f'defined for the REAL semiring only; got {semiring.name!r}.  '
+            '(½(A + Aᵀ) symmetrisation needs linear structure, and a '
+            'non-zero pad identity would scatter spurious mass.)'
+        )
+    if values.shape != indices.shape:
+        raise ValueError(
+            f'reference_semiring_ell_rmatvec: values.shape={values.shape}, '
+            f'indices.shape={indices.shape} mismatch.'
+        )
+    if X.ndim != 2:
+        raise ValueError(
+            f'reference_semiring_ell_rmatvec: X must be 2-D, got shape={X.shape}'
+        )
+    _, kmax = values.shape
+    _, ncol = X.shape
+    out_dtype = jnp.result_type(values.dtype, X.dtype)
+    acc_init = jnp.zeros((n_cols, ncol), dtype=out_dtype)
+
+    def body(p: int, acc: Num[Array, 'n_cols ncol']) -> Num[Array, 'n_cols ncol']:
+        idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]  # (m,)
+        v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)  # (m, 1)
+        return acc.at[idx_p].add(v_p * X)
+
+    return cast(
+        Num[Array, 'n_cols ncol'], lax.fori_loop(0, kmax, body, acc_init)
+    )
+
+
 __all__ = [
     'reference_semiring_matmul',
     'reference_semiring_ell_matmul',
+    'reference_semiring_ell_rmatvec',
 ]

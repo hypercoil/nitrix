@@ -23,7 +23,7 @@ import pytest
 
 from nitrix.linalg._eigsolve import EigPair, SolverSpec, eigsolve_top_k
 from nitrix.sparse import ELL, SectionedELL, sectioned_ell_from_ragged
-from nitrix.sparse.ell import ell_from_dense
+from nitrix.sparse.ell import ell_from_dense, ell_to_dense
 
 
 def _affinity(n: int, seed: int = 0) -> jnp.ndarray:
@@ -320,6 +320,99 @@ def test_ell_lobpcg_grad_is_pattern_projected_and_finite():
             op,
             3,
             spec=SolverSpec.lobpcg(n_iters=400),
+        ).values.sum()
+
+    g = jax.grad(loss)(ell.values)
+    assert g.shape == ell.values.shape
+    assert np.all(np.isfinite(np.asarray(g)))
+
+
+# ---------------------------------------------------------------------------
+# promise_symmetry: the symmetric-part matvec for asymmetric (top-k) ELLs
+# ---------------------------------------------------------------------------
+
+
+def _asym_affinity_ell(n: int = 60, k: int = 5, seed: int = 0) -> ELL:
+    """Top-k-per-row sparsification of a symmetric affinity -- an
+    *asymmetric* stored ELL (the silent-failure case)."""
+    return ell_from_dense(_affinity(n, seed), k_max=k)
+
+
+def _sym_top_k_reference(ell: ELL, k: int) -> np.ndarray:
+    """Largest-``k`` eigenvalues of ½(A + Aᵀ) for the stored ELL ``A``."""
+    Ad = np.asarray(ell_to_dense(ell))
+    return np.sort(np.linalg.eigvalsh(0.5 * (Ad + Ad.T)))[::-1][:k]
+
+
+def test_solverspec_promise_symmetry_default_and_hashable():
+    assert SolverSpec.lobpcg().promise_symmetry is True
+    assert SolverSpec.auto().promise_symmetry is True
+    off = SolverSpec.lobpcg(promise_symmetry=False)
+    assert hash(off) == hash(SolverSpec.lobpcg(promise_symmetry=False))
+    assert off != SolverSpec.lobpcg(promise_symmetry=True)
+
+
+def test_promise_symmetry_false_matches_dense_symmetrised():
+    ell = _asym_affinity_ell()
+    Ad = np.asarray(ell_to_dense(ell))
+    assert not np.allclose(Ad, Ad.T)  # the stored pattern is asymmetric
+    ref = _sym_top_k_reference(ell, 3)
+    out = eigsolve_top_k(
+        ell, 3, spec=SolverSpec.lobpcg(n_iters=400, promise_symmetry=False)
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(out.values))[::-1], ref, atol=1e-3
+    )
+
+
+def test_promise_symmetry_true_diverges_on_asymmetric_ell():
+    """The trap: trusting symmetry on an asymmetric operator gives a
+    different (wrong) spectrum than ½(A + Aᵀ)."""
+    ell = _asym_affinity_ell()
+    ref = _sym_top_k_reference(ell, 3)
+    out = eigsolve_top_k(
+        ell, 3, spec=SolverSpec.lobpcg(n_iters=400, promise_symmetry=True)
+    )
+    assert not np.allclose(
+        np.sort(np.asarray(out.values))[::-1], ref, atol=1e-2
+    )
+
+
+def test_sectioned_promise_symmetry_false_matches_dense():
+    ell = _asym_affinity_ell()
+    Ad = np.asarray(ell_to_dense(ell))
+    ref = _sym_top_k_reference(ell, 3)
+    sec = _sectioned(jnp.asarray(Ad))  # ragged from the asymmetric pattern
+    out = eigsolve_top_k(
+        sec, 3, spec=SolverSpec.lobpcg(n_iters=400, promise_symmetry=False)
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(out.values))[::-1], ref, atol=1e-3
+    )
+
+
+def test_promise_symmetry_false_requires_square_operator():
+    rect = ELL(
+        values=jnp.ones((6, 2)),
+        indices=jnp.zeros((6, 2), jnp.int32),
+        n_cols=8,
+        identity=0.0,
+    )
+    with pytest.raises(ValueError, match='square'):
+        eigsolve_top_k(
+            rect, 1, spec=SolverSpec.lobpcg(promise_symmetry=False)
+        )
+
+
+def test_promise_symmetry_false_grad_is_finite():
+    ell = _asym_affinity_ell()
+
+    def loss(values):
+        op = ELL(values, ell.indices, ell.n_cols, ell.identity)
+        return eigsolve_top_k(
+            op,
+            3,
+            spec=SolverSpec.lobpcg(n_iters=400, promise_symmetry=False),
         ).values.sum()
 
     g = jax.grad(loss)(ell.values)

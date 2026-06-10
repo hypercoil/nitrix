@@ -117,6 +117,7 @@ def _spec_from(
     *,
     lobpcg_iters: int,
     lobpcg_tol: Optional[float],
+    promise_symmetry: bool,
 ) -> SolverSpec:
     """Map the connectopy ``(solver, preconditioner)`` vocabulary to a
     ``SolverSpec`` for ``eigsolve_top_k``.
@@ -128,12 +129,16 @@ def _spec_from(
     is deferred to the dispatcher's format-based policy (dense -> ``eigh``,
     sparse -> ``lobpcg``), carrying the LOBPCG knobs in case it resolves to
     ``lobpcg``.
+
+    ``promise_symmetry`` is forwarded to every iterative spec (it is a
+    no-op for dense ``eigh``, whose operator is symmetrised when built).
     """
     if preconditioner == 'polynomial' and solver != 'shift_invert':
         return SolverSpec.poly(
             degree=_POLY_DEGREE,
             shift=_POLY_SHIFT,
             outer_iters=_POLY_OUTER_ITERS,
+            promise_symmetry=promise_symmetry,
         )
     if solver == 'eigh':
         return SolverSpec.eigh()
@@ -142,10 +147,19 @@ def _spec_from(
             sigma=_SI_SIGMA,
             outer_iters=_SI_OUTER_ITERS,
             cg_iters=_SI_CG_ITERS,
+            promise_symmetry=promise_symmetry,
         )
     if solver == 'lobpcg':
-        return SolverSpec.lobpcg(n_iters=lobpcg_iters, tol=lobpcg_tol)
-    return SolverSpec.auto(n_iters=lobpcg_iters, tol=lobpcg_tol)
+        return SolverSpec.lobpcg(
+            n_iters=lobpcg_iters,
+            tol=lobpcg_tol,
+            promise_symmetry=promise_symmetry,
+        )
+    return SolverSpec.auto(
+        n_iters=lobpcg_iters,
+        tol=lobpcg_tol,
+        promise_symmetry=promise_symmetry,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,9 +249,14 @@ def _build_affinity_operator(
 
     inv_sqrt_d2 = 1.0 / jnp.sqrt(safe_d2)
     M = _scale_by_outer(K, inv_sqrt_d2, inv_sqrt_d2)
-    # Symmetrize dense M against floating-point drift; the sparse
-    # paths inherit symmetry from the (symmetric by assumption)
-    # input sparsity pattern.
+    # Dense M is symmetrised here (cheap; also corrects float drift).  A
+    # *sparse* M carries only whatever symmetry its stored pattern has --
+    # which top-k affinity construction (``ell_from_dense``) does NOT
+    # guarantee.  Symmetry of the sparse operator is therefore handled in
+    # the eigensolver via ``promise_symmetry=False`` (the ``½(A x + Aᵀ x)``
+    # matvec), threaded from the public API below.  Because ``inv_sqrt_d2``
+    # is a symmetric diagonal scaling, that matvec yields exactly the
+    # operator this dense branch builds: ``D^{-1/2} sym(A) D^{-1/2}``.
     if not _is_sparse(M):
         M = 0.5 * (M + M.swapaxes(-1, -2))
     return M, inv_sqrt_d2
@@ -287,6 +306,7 @@ def laplacian_eigenmap(
     n_components: int,
     solver: _Solver = 'auto',
     preconditioner: _Preconditioner = 'none',
+    promise_symmetry: bool = False,
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
@@ -308,7 +328,10 @@ def laplacian_eigenmap(
     ----------
     A
         Adjacency matrix: dense ``(n, n)``, ``ELL``, or
-        ``SectionedELL``.  Non-negative and symmetric.
+        ``SectionedELL``.  Non-negative.  Treated as symmetric: dense is
+        symmetrised when the operator is built, and sparse inputs are
+        symmetrised at the matvec by default (``promise_symmetry=False``),
+        so a top-k-sparsified affinity needs no pre-symmetrisation.
     n_components
         Embedding dimensionality.
     solver
@@ -327,6 +350,16 @@ def laplacian_eigenmap(
         (~1.5-2x off cupy), differentiable via the same implicit VJP; dense
         / ELL / SectionedELL.  Requesting it routes the solve to the
         polynomial-filter method so the preconditioner is honoured.
+    promise_symmetry
+        Sparse (ELL / SectionedELL) inputs only.  ``False`` (default)
+        symmetrises the operator at the matvec level -- the solver applies
+        ``½(A x + Aᵀ x) = D^{-1/2} sym(A) D^{-1/2} x``, matching the dense
+        path exactly -- which is the **safe** choice for affinities built by
+        top-k-per-row sparsification (``ell_from_dense``), whose stored
+        pattern is generally **not** symmetric.  Set ``True`` only when the
+        adjacency is known symmetric (regular meshes / grids) to skip the
+        adjoint matvec (~2x cheaper).  Ignored for dense ``A`` (always
+        symmetrised when the operator is built).
     skip_trivial
         Drop the trivial zero eigenvalue and the corresponding
         constant eigenvector.  Default ``True``.
@@ -371,6 +404,7 @@ def laplacian_eigenmap(
         preconditioner,
         lobpcg_iters=lobpcg_iters,
         lobpcg_tol=lobpcg_tol,
+        promise_symmetry=promise_symmetry,
     )
     vals_M, vecs_M, _ = _affinity_top_k(
         A,
@@ -397,6 +431,7 @@ def diffusion_embedding(
     t: float = 0.0,
     solver: _Solver = 'auto',
     preconditioner: _Preconditioner = 'none',
+    promise_symmetry: bool = False,
     skip_trivial: bool = True,
     eps: float = 1e-12,
     lobpcg_iters: int = 200,
@@ -417,7 +452,9 @@ def diffusion_embedding(
     ----------
     A
         Affinity / adjacency matrix: dense, ``ELL``, or
-        ``SectionedELL``.  Non-negative, symmetric.
+        ``SectionedELL``.  Non-negative.  Treated as symmetric (see
+        ``promise_symmetry``); a top-k-sparsified affinity needs no
+        pre-symmetrisation.
     n_components
         Embedding dimensionality.
     alpha
@@ -427,7 +464,7 @@ def diffusion_embedding(
     t
         Diffusion time (real).  ``0`` returns raw eigenvectors;
         ``t > 0`` emphasises low-frequency components.
-    solver, preconditioner, skip_trivial, eps, lobpcg_iters, lobpcg_tol, seed
+    solver, preconditioner, promise_symmetry, skip_trivial, eps, lobpcg_iters, lobpcg_tol, seed
         See ``laplacian_eigenmap``.
 
     Returns
@@ -442,6 +479,7 @@ def diffusion_embedding(
         preconditioner,
         lobpcg_iters=lobpcg_iters,
         lobpcg_tol=lobpcg_tol,
+        promise_symmetry=promise_symmetry,
     )
     vals_M, vecs_M, inv_sqrt_d2 = _affinity_top_k(
         A,

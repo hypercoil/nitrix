@@ -28,7 +28,9 @@ from nitrix.semiring import (
     REAL,
     TROPICAL_MAX_PLUS,
     reference_semiring_ell_matmul,
+    reference_semiring_ell_rmatvec,
     semiring_ell_matmul,
+    semiring_ell_rmatvec,
 )
 from nitrix.sparse import (
     ELL,
@@ -308,3 +310,126 @@ def test_ell_batched_jax():
         atol=1e-4,
         rtol=1e-4,
     )
+
+
+# ---------------------------------------------------------------------------
+# semiring_ell_rmatvec -- the REAL adjoint (transpose) matvec
+# ---------------------------------------------------------------------------
+
+
+def test_rmatvec_equals_dense_transpose_matvec():
+    m, n = 10, 10
+    A = jax.random.normal(jax.random.key(7), (m, n))
+    ell = ell_from_dense(A, k_max=3)  # asymmetric top-3
+    Ad = np.asarray(ell_to_dense(ell))
+    X = np.asarray(jax.random.normal(jax.random.key(8), (m, 4)))
+    Y = semiring_ell_rmatvec(
+        ell.values, ell.indices, jnp.asarray(X), semiring=REAL, n_cols=n
+    )
+    np.testing.assert_allclose(np.asarray(Y), Ad.T @ X, atol=1e-5)
+
+
+def test_rmatvec_reference_matches_primitive():
+    m, n = 12, 12
+    A = jax.random.normal(jax.random.key(9), (m, n))
+    ell = ell_from_dense(A, k_max=4)
+    X = jax.random.normal(jax.random.key(10), (m, 3))
+    ref = reference_semiring_ell_rmatvec(
+        ell.values, ell.indices, X, semiring=REAL, n_cols=n
+    )
+    prim = semiring_ell_rmatvec(
+        ell.values, ell.indices, X, semiring=REAL, n_cols=n
+    )
+    np.testing.assert_allclose(np.asarray(ref), np.asarray(prim), atol=1e-6)
+
+
+def test_matvec_plus_rmatvec_is_symmetric_part():
+    """½(A x + Aᵀ x) == sym(A) x -- the identity the spectral fix relies on."""
+    n = 16
+    A = jax.random.normal(jax.random.key(11), (n, n))
+    ell = ell_from_dense(A, k_max=5)
+    Ad = np.asarray(ell_to_dense(ell))
+    X = np.asarray(jax.random.normal(jax.random.key(12), (n, 3)))
+    Xj = jnp.asarray(X)
+    Ax = semiring_ell_matmul(
+        ell.values, ell.indices, Xj, semiring=REAL, n_cols=n, backend='jax'
+    )
+    Atx = semiring_ell_rmatvec(
+        ell.values, ell.indices, Xj, semiring=REAL, n_cols=n
+    )
+    sym = 0.5 * (np.asarray(Ax) + np.asarray(Atx))
+    np.testing.assert_allclose(sym, 0.5 * (Ad + Ad.T) @ X, atol=1e-5)
+
+
+def test_rmatvec_vjp_is_exact_adjoint():
+    """The VJP of the linear map ``Y = Aᵀ X`` is exact (dtype-robust, so it
+    holds in both the float32-isolated and x64-suite regimes):
+
+        d/dX  ⟨C, Y⟩ = A C                                   (the gather matmul)
+        d/dv  ⟨C, Y⟩[i, p] = ⟨X[i, :], C[indices[i, p], :]⟩
+    """
+    m, n = 9, 9
+    A = jax.random.normal(jax.random.key(13), (m, n))
+    ell = ell_from_dense(A, k_max=3)
+    Ad = np.asarray(ell_to_dense(ell))
+    X = np.asarray(jax.random.normal(jax.random.key(14), (m, 2)))
+    C = np.asarray(jax.random.normal(jax.random.key(15), (n, 2)))
+
+    def fwd(values, Xin):
+        return semiring_ell_rmatvec(
+            values, ell.indices, Xin, semiring=REAL, n_cols=n
+        )
+
+    _, vjp = jax.vjp(fwd, ell.values, jnp.asarray(X))
+    g_v, g_X = vjp(jnp.asarray(C))
+    # grad w.r.t. X is the dense gather A @ C
+    np.testing.assert_allclose(np.asarray(g_X), Ad @ C, atol=1e-4)
+    # grad w.r.t. values: per-edge gather-dot of X with the scattered cotangent
+    idx = np.asarray(ell.indices)
+    gv_ref = np.einsum('ic,ipc->ip', X, C[idx])
+    np.testing.assert_allclose(np.asarray(g_v), gv_ref, atol=1e-4)
+
+
+def test_rmatvec_batched():
+    m, n = 8, 8
+    key = jax.random.key(15)
+    A0 = jax.random.normal(jax.random.fold_in(key, 0), (m, n))
+    A1 = jax.random.normal(jax.random.fold_in(key, 1), (m, n))
+    X0 = np.asarray(jax.random.normal(jax.random.fold_in(key, 2), (m, 3)))
+    X1 = np.asarray(jax.random.normal(jax.random.fold_in(key, 3), (m, 3)))
+    ell0 = ell_from_dense(A0, k_max=n)
+    ell1 = ell_from_dense(A1, k_max=n)
+    values = jnp.stack([ell0.values, ell1.values])
+    indices = jnp.stack([ell0.indices, ell1.indices])
+    Xs = jnp.stack([jnp.asarray(X0), jnp.asarray(X1)])
+    out = semiring_ell_rmatvec(values, indices, Xs, semiring=REAL, n_cols=n)
+    np.testing.assert_allclose(
+        out[0], np.asarray(ell_to_dense(ell0)).T @ X0, atol=1e-4
+    )
+    np.testing.assert_allclose(
+        out[1], np.asarray(ell_to_dense(ell1)).T @ X1, atol=1e-4
+    )
+
+
+@pytest.mark.parametrize('algebra', [LOG, TROPICAL_MAX_PLUS])
+def test_rmatvec_non_real_raises(algebra):
+    ell = ell_from_dense(jax.random.normal(jax.random.key(16), (6, 6)), k_max=3)
+    X = jnp.ones((6, 2))
+    with pytest.raises(NotImplementedError, match='REAL'):
+        semiring_ell_rmatvec(
+            ell.values, ell.indices, X, semiring=algebra, n_cols=6
+        )
+
+
+def test_ell_from_dense_topk_breaks_symmetry_symmetrize_fixes_it():
+    rng = np.random.default_rng(17)
+    n = 20
+    A = np.abs(rng.standard_normal((n, n)))
+    A = A + A.T  # symmetric source
+    np.fill_diagonal(A, 0.0)
+    asym = np.asarray(ell_to_dense(ell_from_dense(jnp.asarray(A), k_max=4)))
+    sym = np.asarray(
+        ell_to_dense(ell_from_dense(jnp.asarray(A), k_max=4, symmetrize=True))
+    )
+    assert not np.allclose(asym, asym.T)  # the trap
+    np.testing.assert_allclose(sym, sym.T, atol=1e-6)  # symmetrize fixes it

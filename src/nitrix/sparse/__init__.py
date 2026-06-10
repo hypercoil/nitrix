@@ -24,6 +24,7 @@ from .ell_sectioned import (
     SectionedELL,
     sectioned_ell_from_ragged,
     sectioned_semiring_ell_matmul,
+    sectioned_semiring_ell_rmatvec,
 )
 from .grid import (
     grid_identity,
@@ -60,6 +61,7 @@ __all__ = [
     'SectionedELL',
     'sectioned_ell_from_ragged',
     'sectioned_semiring_ell_matmul',
+    'sectioned_semiring_ell_rmatvec',
     # grid stencils
     'grid_identity',
     'grid_laplacian',
