@@ -217,10 +217,13 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
 - **Unify the coarse-to-fine driver.**  `multi_resolution_register`
   (matrix) and `diffeomorphic_demons_register` (SVF) duplicate the
   scaffold — pyramid build, coarse→fine loop, warm-start prolong/rescale,
-  history concat.  With volreg + BBR + greedy SyN incoming, factor one
-  shared driver parameterised by `(init, level_solve, prolong, finalize)`.
-  Do this **before** the new recipes so each plugs in instead of
-  re-deriving the loop.
+  history concat.  *Revised plan (R5):* volreg turned out to reuse the
+  matrix driver (via the extracted `register_core`) rather than need a
+  matrix+SVF unification, and the inverse-compositional path is a
+  genuinely distinct loop — so unifying all three speculatively risks the
+  wrong abstraction.  Defer the matrix+SVF unification to **R6/R7**, when
+  BBR (matrix-family, different objective) and greedy SyN (SVF-family)
+  give a concrete third/fourth instance to factor against.
 - **Introduce the `Objective` protocol** (§3) as the metric-side unifier:
   `Metric` (image pair), `BBRObjective` (boundary points), `DenseFieldForce`
   (Demons/SyN) become constructors.
@@ -267,10 +270,29 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
   anisotropic recovery stays diffeomorphic.  84 registration tests green,
   mypy + ruff clean.  *Deferred to R5:* the closed-form steepest-descent /
   inverse-compositional kernel that `IndexSpace` is now the frame for.
-- **R5 — batched volreg.**  Shared-driver refactor (§7) +
-  inverse-compositional rigid step + `volreg` recipe + reference policy.
-  **Gate:** per-frame recovery on a planted motion series; constant-Hessian
-  numerics == per-iteration-Jacobian; scaling case (single + cohort).
+- **R5 — batched volreg.** ✅ **SHIPPED** (branch `registration-suite-v2`).
+  `register.volreg` rigidly realigns a `(T, *spatial)` series to a common
+  reference and returns the per-frame transform stack + realigned series.
+  Rather than `vmap` the whole single-pair driver (which would recompute
+  the shared reference per frame), the reference work is **hoisted out of
+  the batch**: `register_core(moving, pyr_f, sampler, …)` is extracted from
+  the driver (behaviour-preserving), the reference pyramid + sampler are
+  built once, and only the per-frame core is `vmap`-ed (closing over the
+  shared reference — which also sidesteps pytree registration).  Reference
+  policy (`"mean"` / frame index / explicit), two-pass (`passes=2`), and
+  the `CoordinateSpace` arg (so motion rigid in *physical* space is
+  recovered on anisotropic grids).  **R5b — inverse-compositional kernel
+  (`_inverse_compositional.py`):** the constant-template Hessian — the
+  reference steepest-descent + `H⁻¹` are built **once per level for the
+  whole series** (all frames, all iterations); each per-frame iteration is
+  warp → error → `SDᵀe` → `H⁻¹` matvec → compositional matrix update.
+  IndexSpace + SSD (the frame R4 set up for it); `method="auto"` selects it
+  for IndexSpace, forward for WorldSpace.  **Gate (met):** per-frame
+  recovery 2-D/3-D, reference policies, two-pass, batched WorldSpace
+  anisotropy; IC == forward at convergence (realigned ncc > 0.999);
+  measured **7.3× warm** vs forward on a 16-frame 32³ series.  *Deferred:*
+  the matrix+SVF driver unification (§7) — to be factored when BBR/SyN give
+  a third concrete instance, not speculatively; single-pair IC fast path.
 - **R6 — BBR.**  `Objective` protocol + `bbr_register` + robust weighting.
   **Gate:** boundary-recovery on a planted rigid offset; differentiable-
   layer grad == FD via `implicit_minimize`.
