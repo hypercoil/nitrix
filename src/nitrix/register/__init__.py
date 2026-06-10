@@ -18,6 +18,12 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   series to a common reference (the ``3dvolreg`` / ``mcflirt`` task);
   ``vmap``-ed over frames with the reference work hoisted out of the
   batch.  Returns ``VolregResult``.
+- ``bbr_register`` -- volumetric boundary-based registration (Greve-Fischl):
+  rigid alignment to a tissue boundary (points + normals), maximising the
+  cross-boundary contrast.  Returns ``BBRResult``.
+- ``Objective`` -- the objective ADT (``θ ↦ cost``) the optimiser
+  minimises; ``MetricObjective`` (an image pair) and ``BoundaryObjective``
+  (BBR) are its implementers.
 - ``RegistrationSpec`` -- static config (pyramid, iterations, metric,
   interpolation); ``RegistrationResult`` -- the output record.
 - ``Metric`` -- the similarity objective ADT (``SSD`` / ``LNCC`` / ``MI``
@@ -34,9 +40,11 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   ``DiffeomorphicResult``.
 """
 
+from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
 from ._core import RegistrationResult, RegistrationSpec
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
+from ._objective import MetricObjective, Objective
 from ._space import CoordinateSpace, IndexSpace, WorldSpace
 from ._volreg import VolregResult, volreg
 from .diffeomorphic import (
@@ -56,6 +64,13 @@ __all__ = [
     'affine_register',
     'volreg',
     'VolregResult',
+    'bbr_register',
+    'bbr_cost',
+    'BBRSpec',
+    'BBRResult',
+    'BoundaryObjective',
+    'Objective',
+    'MetricObjective',
     'RegistrationSpec',
     'RegistrationResult',
     'Metric',
