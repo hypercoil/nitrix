@@ -115,6 +115,20 @@ def test_syn_per_level_schedule():
     assert float(res.jacobian_det.min()) > 0.0
 
 
+def test_syn_anisotropic_physical_window_recovers():
+    # The physical-window path runs end-to-end and recovers with spacing set
+    # (the LNCC window + sigmas are anisotropy-corrected).
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 30.0, 0))
+    spec = SyNSpec(
+        levels=3, iterations=60, radius=3, step=0.5, spacing=(2.0, 1.0)
+    )
+    res = greedy_syn_register(moving, fixed, spec=spec)
+    assert float(ncc(res.warped, fixed)) > float(ncc(moving, fixed))
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert float(res.jacobian_det.min()) > 0.0
+
+
 def test_force_schedule_length_validation():
     fixed, moving = _blobs(32), _blobs(32, seed=1)
     spec = SyNSpec(levels=3, iterations=5)

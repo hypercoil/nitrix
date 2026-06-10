@@ -153,7 +153,11 @@ class LNCCForce:
     Attributes
     ----------
     radius
-        LNCC box-window radius (size ``2·radius + 1`` per axis).
+        LNCC box-window radius (size ``2·radius + 1`` per axis).  On an
+        anisotropic grid (``rel_spacing`` passed by the recipe) the window is
+        made **physically isotropic**: the per-axis voxel radius is scaled by
+        ``1 / rel_spacing`` so every axis spans the same mm extent (the same
+        convention the regularisation sigmas follow).
     """
 
     radius: int = 2
@@ -177,15 +181,28 @@ class _BoundLNCC:
     ndim: int
     rel_spacing: RelSpacing
 
+    def _radii(self) -> Union[int, tuple[int, ...]]:
+        """Per-axis voxel radii of a *physically isotropic* window.
+
+        On an anisotropic grid a voxel-isotropic window spans different mm per
+        axis; scaling the radius by ``1 / rel_spacing`` (the same physical
+        convention the regularisation sigmas already follow) makes the window
+        the same mm extent on every axis.  Isotropic ``rel_spacing is None``
+        leaves the plain voxel radius unchanged.
+        """
+        if self.rel_spacing is None:
+            return self.radius
+        return tuple(max(1, round(self.radius / r)) for r in self.rel_spacing)
+
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
-        scalar = lncc_grad(warped, self.fixed, radius=self.radius)
+        scalar = lncc_grad(warped, self.fixed, radius=self._radii())
         grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
         return _to_voxel(scalar[..., None] * grad, self.rel_spacing)
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
-        return 1.0 - lncc(warped, self.fixed, radius=self.radius)
+        return 1.0 - lncc(warped, self.fixed, radius=self._radii())
 
 
 @dataclass(frozen=True)

@@ -94,6 +94,21 @@ def test_bound_force_cost_matches_metric():
         )
 
 
+def test_lncc_force_physical_window_is_anisotropic_in_voxels():
+    # On an anisotropic grid the LNCC window is made physically isotropic: the
+    # per-axis voxel radius scales by 1/rel_spacing, so radius*spacing (the mm
+    # extent) is constant across axes.
+    fixed = _blobs(48)
+    rel = (2.0, 0.5)  # axis 0 twice as coarse, axis 1 twice as fine
+    bound = LNCCForce(radius=4).bind(fixed, ndim=2, rel_spacing=rel)
+    radii = bound._radii()
+    assert radii == (2, 8)  # 4/2, 4/0.5
+    # physical extents (radius * rel_spacing) match across axes
+    assert np.allclose([r * s for r, s in zip(radii, rel)], 4.0)
+    # isotropic leaves the plain voxel radius untouched
+    assert LNCCForce(radius=4).bind(fixed, ndim=2)._radii() == 4
+
+
 def test_metricforce_cross_modal_yields_finite_force():
     # The escape-hatch payoff: a cross-modal metric (MI) produces a usable,
     # finite force field with no hand-written gradient.

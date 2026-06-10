@@ -86,7 +86,10 @@ class SyNSpec:
         Scaling-and-squaring steps for ``exp(v)``.
     spacing
         Per-axis voxel spacing; only the anisotropy is used (the relative
-        spacing, ``None`` -> isotropic), identically to ``DemonsSpec``.
+        spacing, ``None`` -> isotropic), identically to ``DemonsSpec``.  It also
+        makes the LNCC window **physically isotropic** (the per-axis radius is
+        scaled by ``1 / rel_spacing``), so the captured mm extent is the same on
+        every axis.
     pyramid_factor, pyramid_sigma
         Pyramid downsample factor / anti-alias sigma.
     boundary_mode
