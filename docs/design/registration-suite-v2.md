@@ -78,10 +78,12 @@ isotropic/per-axis `spacing`.  Then:
 - Dropping the equal-affine assumption removes the **same-shape
   constraint** for free: `fixed` and `moving` may live on different grids.
 
-The cost is mostly plumbing a `spacing`/`affine` through the specs and the
-grid builders.  The gate is an **anisotropic-voxel recovery test** that
-plants a known physical transform on an anisotropic grid and recovers it —
-a test that *currently fails*, which is the point.
+As shipped (§8, R4), this is **not** plumbed through the geometry
+primitives (which are correctly coordinate-agnostic) but factored behind a
+`CoordinateSpace` ADT consulted by the driver — keeping `IndexSpace` as a
+distinct on-device fast path.  The gate is an **anisotropic-voxel recovery
+test** that plants a known physical transform on an anisotropic grid and
+recovers it under `WorldSpace` where `IndexSpace` cannot.
 
 ## 2. Batched volreg (motion realignment)
 
@@ -245,10 +247,26 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
 
 ## 8. Sequencing & gates
 
-- **R4 — physical-space foundation.**  Spacing/world-affine through specs +
-  grid builders + Demons sigmas; drop the same-shape constraint.
-  **Gate:** anisotropic-voxel physical-transform recovery (rigid + affine);
-  isotropic results unchanged (regression).
+- **R4 — physical-space foundation.** ✅ **SHIPPED** (branch
+  `registration-suite-v2`).  Rather than thread world affines through the
+  geometry primitives (which are correctly coordinate-agnostic), the
+  index-vs-physical axis is factored behind a **`CoordinateSpace` ADT**
+  (`register/_space.py`): `IndexSpace` (default; voxel-space, shared-grid,
+  fully on-device, the lean path and the future inverse-compositional
+  frame) and `WorldSpace(fixed_affine, moving_affine)` (physical space via
+  `A_moving⁻¹·T_world·A_fixed`, per-level align-corners scale; one
+  `safe_inv` per registration).  The driver is rewritten **once** over the
+  space (shared `_warp` on `sampler.index_sampling`); the same-shape
+  constraint is dropped (the warp builds on the fixed grid).  The Demons
+  recipe gains a `spacing` knob applied via the **relative** (anisotropy-
+  only, level-independent) spacing, axis-correcting the ESM force and the
+  fluid/diffusion regularisation; isotropic data is byte-unchanged.
+  **Gate (met):** an independent raw-matrix oracle recovers a known *world*
+  rigid transform on an anisotropic grid under `WorldSpace` (ncc > 0.95,
+  rotation tight) where `IndexSpace` cannot; 3-D recovery; Demons
+  anisotropic recovery stays diffeomorphic.  84 registration tests green,
+  mypy + ruff clean.  *Deferred to R5:* the closed-form steepest-descent /
+  inverse-compositional kernel that `IndexSpace` is now the frame for.
 - **R5 — batched volreg.**  Shared-driver refactor (§7) +
   inverse-compositional rigid step + `volreg` recipe + reference policy.
   **Gate:** per-frame recovery on a planted motion series; constant-Hessian
