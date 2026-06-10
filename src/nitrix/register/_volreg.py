@@ -29,14 +29,19 @@ mean of an unaligned series.
 
 from __future__ import annotations
 
-from typing import NamedTuple, Union
+from typing import NamedTuple, Optional, Union
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from ..geometry import gaussian_pyramid
+from ..geometry import gaussian_pyramid, rigid_exp
 from ._core import RegistrationSpec, register_core
+from ._inverse_compositional import (
+    ReferenceLevel,
+    ic_reference,
+    ic_register_core,
+)
 from ._model import Rigid
 from ._space import CoordinateSpace, IndexSpace
 
@@ -99,6 +104,7 @@ def volreg(
     passes: int = 1,
     spec: RegistrationSpec = RegistrationSpec(),
     space: CoordinateSpace = IndexSpace(),
+    method: str = 'auto',
 ) -> VolregResult:
     """Rigid motion realignment of a 4-D (or 3-D) series.
 
@@ -124,6 +130,13 @@ def volreg(
     space
         Coordinate space (``IndexSpace`` default, or ``WorldSpace`` for
         physically-rigid motion on anisotropic grids).
+    method
+        Per-frame solver: ``"auto"`` (default; the inverse-compositional
+        constant-template Hessian in ``IndexSpace`` -- the reference's
+        steepest-descent + Hessian are built **once** for the whole
+        series; the forward Gauss-Newton path otherwise),
+        ``"inverse_compositional"`` (force IC; ``IndexSpace`` only), or
+        ``"forward"``.
 
     Returns
     -------
@@ -141,6 +154,23 @@ def volreg(
         raise ValueError(
             'volreg requires a least-squares metric (e.g. SSD); the scalar '
             'BFGS metrics do not support the batched LM path.'
+        )
+    is_index = isinstance(space, IndexSpace)
+    if method == 'auto':
+        use_ic = is_index
+    elif method == 'inverse_compositional':
+        if not is_index:
+            raise ValueError(
+                'inverse_compositional requires IndexSpace (the template '
+                'linearisation is in voxel coordinates).'
+            )
+        use_ic = True
+    elif method == 'forward':
+        use_ic = False
+    else:
+        raise ValueError(
+            f'method must be "auto", "forward", or '
+            f'"inverse_compositional"; got {method!r}.'
         )
 
     ndim = series.ndim - 1
@@ -166,19 +196,36 @@ def volreg(
             sigma=spec.pyramid_sigma,
         )
 
+        # The inverse-compositional reference steepest-descent + Hessian are
+        # built once for the whole series; only the per-frame update is
+        # vmap-ed.  ``None`` selects the forward Gauss-Newton path.
+        ref_levels = ic_reference(pyr_f, ndim) if use_ic else None
+
         def per_frame(
-            moving: Array, init_p: Array, pyr_f: tuple[Array, ...] = pyr_f
+            moving: Array,
+            init_p: Array,
+            ref_levels: Optional[list[ReferenceLevel]] = ref_levels,
+            pyr_f: tuple[Array, ...] = pyr_f,
         ) -> tuple[Array, Array, Array, Array]:
-            res = register_core(
-                moving,
-                pyr_f,
-                model=model,
-                ndim=ndim,
-                spec=spec,
-                space=space,
-                sampler=sampler,
-                init_params=init_p,
-            )
+            if ref_levels is not None:
+                res = ic_register_core(
+                    moving,
+                    ref_levels,
+                    ndim=ndim,
+                    spec=spec,
+                    init_matrix=rigid_exp(init_p, ndim=ndim),
+                )
+            else:
+                res = register_core(
+                    moving,
+                    pyr_f,
+                    model=model,
+                    ndim=ndim,
+                    spec=spec,
+                    space=space,
+                    sampler=sampler,
+                    init_params=init_p,
+                )
             return res.matrix, res.params, res.warped, res.cost_history
 
         matrix, params, realigned, costs = jax.vmap(per_frame, in_axes=(0, 0))(

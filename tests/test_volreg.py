@@ -182,6 +182,29 @@ def test_volreg_worldspace_anisotropic():
         assert float(ncc(res.realigned[t], base)) > 0.95
 
 
+def test_volreg_inverse_compositional_matches_forward():
+    # The inverse-compositional path (constant-template Hessian, the
+    # default for IndexSpace) converges to the same SSD minimiser as the
+    # forward Gauss-Newton path.
+    base = _blobs_2d(48)
+    series = _series_index(base, _THETAS, 2)
+    spec = RegistrationSpec(levels=3, iterations=30)
+    res_ic = volreg(
+        series, reference=0, spec=spec, method='inverse_compositional'
+    )
+    res_fw = volreg(series, reference=0, spec=spec, method='forward')
+    for t in range(4):
+        # Same alignment (the rigorous equivalence check), genuine recovery.
+        assert float(ncc(res_ic.realigned[t], res_fw.realigned[t])) > 0.999
+        assert float(ncc(res_ic.realigned[t], base)) > 0.98
+    # Parameters agree to within sub-voxel slack (the SSD minimum is flat in
+    # directions the data barely constrains; the alignment above is the
+    # authoritative agreement).
+    assert np.allclose(
+        np.asarray(res_ic.params), np.asarray(res_fw.params), atol=0.2
+    )
+
+
 def test_volreg_validation():
     series = _series_index(_blobs_2d(24), _THETAS, 2)
     # Non-least-squares metric is rejected (the batched LM path is SSD-only).
@@ -192,3 +215,13 @@ def test_volreg_validation():
         volreg(_blobs_2d(24))
     with pytest.raises(ValueError):
         volreg(series, passes=0)
+    with pytest.raises(ValueError):
+        volreg(series, method='nonsense')
+    # Inverse-compositional is index-space only.
+    affine = jnp.asarray(np.diag([2.0, 1.0, 1.0]))
+    with pytest.raises(ValueError):
+        volreg(
+            series,
+            method='inverse_compositional',
+            space=WorldSpace(fixed_affine=affine, moving_affine=affine),
+        )
