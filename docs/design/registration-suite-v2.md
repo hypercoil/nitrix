@@ -201,16 +201,29 @@ GPU" finding:
 
 | Lever | Target | Status / source | Priority |
 |---|---|---|---|
-| **CPU interpolation backend** | the CPU lag is *mostly this*: jax `map_coordinates` is **5–9× slower than scipy-C** for the order-1 gather every warp/resample/SVF-step routes through | `interpolation-backend-cpu-gpu-gap.md`; `geometry/_interpolate.py` | **highest** |
-| **Inverse-compositional / constant-template Hessian** | rigid + volreg per-iteration cost + cross-frame redundancy | item C; `linalg/optimize.py` | high (AFNI-parity lever) |
-| **LNCC analytic force** | SyN/Demons per-iteration cost; enables §4 | new; `metrics`/`register` | high (dual-purpose) |
-| **Pallas ESM-force kernel** | Demons HBM-bound at scale (speedup 43×→28×, 48³→160³) | `pallas-demons-esm-force.md`, profile-gated | medium |
-| **`while_loop` early-exit** | iteration-count deficit vs convergence-gated ANTs/dipy | `registration-early-stopping-while-loop.md`, acceptance-gated; single-volume only (conflicts with batched volreg) | medium |
+| **CPU interpolation backend** | ~~the CPU lag is mostly this~~ — **R8 correction:** single-shot `spatial_transform`/`resample` on CPU are **faster** than scipy (4–5.6×); the 5–9× lag is **narrow** (iterated `integrate_velocity_field`, CPU, small grids) and rigid/affine never hit it | `interpolation-backend-cpu-gpu-gap.md` (R8 status); `geometry/_interpolate.py` | **demoted** |
+| **Inverse-compositional / constant-template Hessian** | rigid + volreg per-iteration cost + cross-frame redundancy | item C; `linalg/optimize.py` | high (AFNI-parity lever) ✅ R5b |
+| **LNCC analytic force** | SyN/Demons per-iteration cost; enables §4 | new; `metrics`/`register` | high (dual-purpose) ✅ R7a |
+| **Pallas ESM-force kernel** | SVF family HBM-bound at scale — **R8: gate (a) confirmed for *both* Demons and SyN** (96³→128³ scaling exponent 1.37, identical) | `pallas-demons-esm-force.md`, **promoted** (gate b: a bottlenecked consumer) | medium |
+| **`while_loop` early-exit** | iteration-count deficit vs convergence-gated ANTs — **R8: SyN uses full budget (no benefit); cohort breaks vmap; but single-pair rigid/affine converge ~5/20 even when hard (the lever for the case we lose on)** | `registration-early-stopping-while-loop.md`, acceptance-gated | medium (single-pair matrix only) |
 | **Adaptive `matrix_exp` squaring / SVF `n_steps`** | trim affine + SVF graph for near-identity generators | item E | low |
 
 Discipline (`perf-wins-must-certify-at-scale.md`): each lever is certified
 **across the size curve to brain scale (single + cohort)** with a stated
 cost law, not at the dev size; the new recipes ship with a scaling case.
+
+**R8 economic verdict (an edge is not a win).** GPUs are scarce/expensive vs
+CPUs (a cluster has 1000s of CPUs / 10s of GPUs; cloud GPU is 10–100× the cost),
+so nitrix-GPU must beat ANTs-CPU by a margin that *clears the hardware premium*
+(≈10×), not merely edge it. Classified by recipe: **single-pair rigid/affine =
+NOT a win** (235 ms GPU vs 274 ms ANTs-CPU at 128³ = 1.16×, a cost-normalised
+loss — the §6 review target); **diffeomorphic demons/SyN = qualitative win**
+(~20× vs fixed-count ITK demons, confound-free; SyN same regime); **cohort
+volreg = structural win** (one GPU runs the whole 4-D series as one batched
+kernel — 4.1 ms/frame, flat in T; serial CPU mcflirt/3dvolreg can't match
+per-dollar); **differentiable layer = capability win** (no ANTs analogue). Lead
+with the qualitative/structural wins. The honest open measurement is an
+**iso-accuracy** point vs early-stopping ANTs-SyN (needs ANTs in-env).
 
 ## 7. Engineering rigour & clean-abstraction vectors (corpus review)
 
@@ -342,10 +355,25 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
   low-variance windows — standard), handled by symmetric cancellation.
   *Deferred:* per-window variance gating of the force (so the velocities
   settle, not just the net map).
-- **R8 — perf round.**  CPU-interp backend; certify all new recipes at
-  scale; revisit Pallas / `while_loop` on profile evidence.  Then the
-  benchmark round, then close the spike (full SyN/LDDMM scoped as the next
-  increment).
+- **R8 — perf round.** ✅ **SHIPPED** (branch `registration-suite-v2`).  A
+  certification + decision round, not a new-kernel round — the gated kernels
+  stayed gated, decided from evidence.  **Certification** (`bench/perf_-
+  registration_v2.py`, L4 f32): greedy SyN single-pair 64³ 53 ms / 96³ 199 ms /
+  128³ 650 ms (warm/Mvox 204→225→310 — super-linear, **same bandwidth-bound
+  regime as Demons**, exponent 1.37); volreg cohort IC 4.1 ms/frame at 64³,
+  **flat as T doubles** (reference-hoisting amortises) — the structural cohort
+  win.  **Convergence/iso-accuracy** (`bench/conv_trajectory.py`): rigid
+  converges ~5/20 steps even when hard; **greedy SyN uses its full budget**
+  (gradual 1st-order descent under the non-vanishing LNCC force).  **Decisions:**
+  (1) *CPU-interp backend dropped* — single-shot interpolation already beats
+  scipy on CPU; the 5–9× is narrow (iterated SVF-exp, small grids) and misses
+  rigid/affine.  (2) *Pallas ESM-force promoted* — gate (a) HBM-bound confirmed
+  for the whole SVF family (Demons + SyN); awaits a bottlenecked consumer (gate
+  b).  (3) *`while_loop` decided* — no benefit for SyN (full budget), breaks the
+  cohort path, but **viable for single-pair rigid/affine** (the recipe class §6
+  targets); the R7 clamp-vs-scale call stands.  The economic verdict (above)
+  is the headline.  *Deferred:* the iso-accuracy point vs ANTs-SyN (needs ANTs
+  in-env); full SyN/LDDMM is the next increment.
 
 Each phase: pure-functional surface, JAX fallback floor, jaxtyping, ruff +
 ruff-format + mypy, `custom_vjp` where stability/efficiency needs it,
