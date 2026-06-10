@@ -27,7 +27,7 @@ from jaxtyping import Array, Float
 
 from ._common import BoundaryMode, Reduction, _box_sum, _reduce
 
-__all__ = ['ssd', 'ncc', 'lncc']
+__all__ = ['ssd', 'ncc', 'lncc', 'lncc_grad']
 
 
 def _normalise_radius(
@@ -207,3 +207,76 @@ def lncc(
     var_f = sum_ff - sum_f * sum_f / n
     cc = (cross * cross) / (var_m * var_f + eps)
     return _reduce(cc, None, reduction)
+
+
+def lncc_grad(
+    moving: Float[Array, '... *spatial'],
+    fixed: Float[Array, '... *spatial'],
+    *,
+    radius: Union[int, Sequence[int]] = 4,
+    spatial_rank: Optional[int] = None,
+    mode: BoundaryMode = 'reflect',
+    eps: float = 1e-5,
+) -> Float[Array, '... *spatial']:
+    """Analytic gradient of the (summed) :func:`lncc` w.r.t. ``moving``.
+
+    The closed-form ``∂(Σ cc)/∂moving`` -- the local cross-correlation
+    *force* that drives a greedy-SyN / Demons velocity update (multiply by
+    ``∇(moving)`` for the deformation gradient).  Derived from the same
+    windowed box sums ``lncc`` already forms, plus a second box-sum pass
+    over the per-window coefficients::
+
+        P = 2·cross / D,   Q = −2·cross²·var_f / D²,   D = var_m·var_f + eps
+        grad = fixed·B(P) − B(P·f̄) + moving·B(Q) − B(Q·m̄)
+
+    with ``B`` the box sum and ``m̄ = Σm/n`` / ``f̄ = Σf/n`` the window
+    means.  Interior-identical (fp64) to ``jax.grad`` of ``lncc(...,
+    reduction="sum")`` -- but without differentiating through the
+    convolutions, so it is cheaper and materialises no autodiff tape.  (The
+    boundary differs by the box filter's non-self-adjoint reflect pad, as
+    ANTs' valid-neighbourhood trim does; the interior is what drives the
+    registration.)
+
+    Parameters as :func:`lncc` (no ``reduction``: this is the gradient of
+    the ``"sum"`` reduction -- the natural per-voxel force magnitude).
+    """
+    if isinstance(radius, (tuple, list)):
+        inferred_rank: Optional[int] = len(radius)
+    else:
+        inferred_rank = None
+    if spatial_rank is None:
+        spatial_rank = (
+            inferred_rank if inferred_rank is not None else moving.ndim
+        )
+    elif inferred_rank is not None and inferred_rank != spatial_rank:
+        raise ValueError(
+            f'radius has {inferred_rank} elements but spatial_rank='
+            f'{spatial_rank}.'
+        )
+    radii = _normalise_radius(radius, spatial_rank)
+    sizes = tuple(2 * r + 1 for r in radii)
+    spatial_axes = tuple(range(moving.ndim - spatial_rank, moving.ndim))
+    n = 1.0
+    for s in sizes:
+        n *= float(s)
+
+    sum_m = _box_sum(moving, sizes, spatial_axes, mode)
+    sum_f = _box_sum(fixed, sizes, spatial_axes, mode)
+    sum_mm = _box_sum(moving * moving, sizes, spatial_axes, mode)
+    sum_ff = _box_sum(fixed * fixed, sizes, spatial_axes, mode)
+    sum_mf = _box_sum(moving * fixed, sizes, spatial_axes, mode)
+
+    cross = sum_mf - sum_m * sum_f / n
+    var_m = sum_mm - sum_m * sum_m / n
+    var_f = sum_ff - sum_f * sum_f / n
+    d = var_m * var_f + eps
+    p = 2.0 * cross / d
+    q = -2.0 * cross * cross * var_f / (d * d)
+    mbar = sum_m / n
+    fbar = sum_f / n
+    return (
+        fixed * _box_sum(p, sizes, spatial_axes, mode)
+        - _box_sum(p * fbar, sizes, spatial_axes, mode)
+        + moving * _box_sum(q, sizes, spatial_axes, mode)
+        - _box_sum(q * mbar, sizes, spatial_axes, mode)
+    )
