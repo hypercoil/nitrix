@@ -28,10 +28,12 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `gaussian_kernel` sigma->gamma relation wrong (missing ½ factor) | [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` | low (clarity) |
 | `relaxed_modularity` doesn't reduce to Newman modularity — it's `Q_N / 2` (double-corrected undirected count); default `exclude_diag=True` also drops the diagonal | [doc-relaxed-modularity-newman-factor](doc-relaxed-modularity-newman-factor.md) | `graph/community.py:245` | low (clarity) |
 | `_iir.py` module docstring says `backend='scan' (default)`; real default is `'auto'` (→ fft on GPU / scan on CPU). Function docstrings are correct; only the module header is stale | [doc-iir-backend-default](doc-iir-backend-default.md) | `signal/_iir.py:~22` | normal |
+| `pairedcorr` forms the full `cov(X)`/`cov(Y)` to read their diagonals — ~3× matmul (the direct-variance ref is ~2× faster from `c≳512` on CPU+GPU; `pairedcov` control is at parity) | [pairedcorr-redundant-full-cov](pairedcorr-redundant-full-cov.md) | `stats/covariance.py:313–328` | perf (micro-opt) |
 
 _(The five lomb/tsconv findings above resolved 2026-06-02 — see below;
 `doc-gaussian-kernel-gamma` and `doc-relaxed-modularity-newman-factor` are
-newly open 2026-06-03; `doc-iir-backend-default` newly open 2026-06-06.)_
+newly open 2026-06-03; `doc-iir-backend-default` newly open 2026-06-06;
+`pairedcorr-redundant-full-cov` newly open 2026-06-10.)_
 
 ## Resolved
 
