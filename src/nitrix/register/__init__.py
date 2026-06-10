@@ -21,6 +21,9 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
 - ``TransformModel`` -- the chart a matrix-transform recipe optimises
   over (``Rigid`` / ``Affine``): the ``exp`` map plus the parameter-layout
   knowledge the coarse-to-fine driver needs.
+- ``CoordinateSpace`` -- the space a recipe optimises in (``IndexSpace``,
+  the default voxel-space shared-grid fast path; ``WorldSpace``, the
+  physical-space path correct under anisotropic voxels / different grids).
 - ``diffeomorphic_demons_register`` -- log-domain diffeomorphic Demons
   (stationary velocity field; ESM force; fluid+diffusion Gaussian
   regularisation; scaling-and-squaring exp), with ``DemonsSpec`` /
@@ -30,6 +33,7 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
 from ._core import RegistrationResult, RegistrationSpec
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
+from ._space import CoordinateSpace, IndexSpace, WorldSpace
 from .diffeomorphic import (
     DemonsSpec,
     DiffeomorphicResult,
@@ -55,6 +59,9 @@ __all__ = [
     'TransformModel',
     'Rigid',
     'Affine',
+    'CoordinateSpace',
+    'IndexSpace',
+    'WorldSpace',
     'diffeomorphic_demons_register',
     'DemonsSpec',
     'DiffeomorphicResult',

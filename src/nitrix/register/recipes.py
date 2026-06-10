@@ -27,6 +27,7 @@ from ._core import (
     multi_resolution_register,
 )
 from ._model import Affine, Rigid
+from ._space import CoordinateSpace, IndexSpace
 
 __all__ = ['rigid_register', 'affine_register']
 
@@ -42,10 +43,11 @@ def _spatial_ndim(moving: Array, fixed: Array) -> int:
 
 
 def rigid_register(
-    moving: Float[Array, '*spatial'],
-    fixed: Float[Array, '*spatial'],
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
     *,
     spec: RegistrationSpec = RegistrationSpec(),
+    space: CoordinateSpace = IndexSpace(),
 ) -> RegistrationResult:
     """Estimate the rigid transform aligning ``moving`` to ``fixed``.
 
@@ -56,16 +58,23 @@ def rigid_register(
     Parameters
     ----------
     moving, fixed
-        Single-channel images of identical shape (2-D or 3-D).
+        Single-channel images (2-D or 3-D).  Shapes need not match (the
+        warp is built on the ``fixed`` grid); the default ``IndexSpace``
+        additionally assumes a shared voxel grid.
     spec
         ``RegistrationSpec`` (pyramid depth, iterations, metric, ...).
+    space
+        Coordinate space to optimise in (``_space``): ``IndexSpace()``
+        (default; voxel-space, shared-grid, on-device) or
+        ``WorldSpace(fixed_affine=..., moving_affine=...)`` (physical
+        space -- correct under anisotropic voxels and different grids).
 
     Returns
     -------
     ``RegistrationResult`` (``matrix``, ``params``, ``warped``,
-    ``cost_history``).  ``matrix`` maps ``fixed`` coordinates to
-    ``moving`` coordinates; ``warped`` is ``moving`` on the ``fixed``
-    grid.
+    ``cost_history``).  ``matrix`` maps ``fixed`` to ``moving`` (index
+    coordinates in ``IndexSpace``, world coordinates in ``WorldSpace``);
+    ``warped`` is ``moving`` on the ``fixed`` grid.
     """
     ndim = _spatial_ndim(moving, fixed)
     return multi_resolution_register(
@@ -74,14 +83,16 @@ def rigid_register(
         model=Rigid(),
         ndim=ndim,
         spec=spec,
+        space=space,
     )
 
 
 def affine_register(
-    moving: Float[Array, '*spatial'],
-    fixed: Float[Array, '*spatial'],
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
     *,
     spec: RegistrationSpec = RegistrationSpec(),
+    space: CoordinateSpace = IndexSpace(),
 ) -> RegistrationResult:
     """Estimate the affine transform aligning ``moving`` to ``fixed``.
 
@@ -92,7 +103,8 @@ def affine_register(
     pass its parameters (extended with a zero linear-generator block) as
     a warm start, or compose the two transforms.
 
-    Parameters / returns as ``rigid_register``.
+    Parameters / returns as ``rigid_register`` (including the ``space``
+    argument for physical-space / anisotropic registration).
     """
     ndim = _spatial_ndim(moving, fixed)
     return multi_resolution_register(
@@ -101,4 +113,5 @@ def affine_register(
         model=Affine(),
         ndim=ndim,
         spec=spec,
+        space=space,
     )
