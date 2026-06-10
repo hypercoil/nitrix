@@ -35,7 +35,7 @@ from jaxtyping import Array, Int, Num
 from numpy.typing import NDArray
 
 from .._internal.backend import Backend
-from ..semiring import semiring_ell_matmul
+from ..semiring import semiring_ell_matmul, semiring_ell_rmatvec
 from ..semiring._types import Semiring
 from ..semiring.algebras import REAL
 from .ell import ELL
@@ -44,6 +44,7 @@ __all__ = [
     'SectionedELL',
     'sectioned_ell_from_ragged',
     'sectioned_semiring_ell_matmul',
+    'sectioned_semiring_ell_rmatvec',
 ]
 
 
@@ -319,4 +320,63 @@ def sectioned_semiring_ell_matmul(
         )
         row_idx_jax = jnp.asarray(row_idx)
         out = out.at[row_idx_jax].set(bucket_out)
+    return out
+
+
+def sectioned_semiring_ell_rmatvec(
+    sectioned: SectionedELL,
+    X: Num[Array, 'n_rows ncol'],
+    *,
+    semiring: Semiring[Any] = REAL,
+) -> Num[Array, 'n_cols ncol']:
+    """Sectioned-ELL adjoint (transpose) matvec: ``Y = Aᵀ X``.
+
+    The transpose companion of ``sectioned_semiring_ell_matmul``.  Where
+    the forward gathers ``B`` (indexed by ``n_cols``) and scatter-*sets*
+    each bucket's rows back to original order, the adjoint gathers ``X``
+    (indexed by the original ``n_rows``) at each bucket's source rows,
+    runs the per-bucket ``semiring_ell_rmatvec`` scatter into the shared
+    ``n_cols`` axis, and *sums* the bucket contributions.
+
+    Composing forward + adjoint gives the symmetric-part matvec
+    ``½(A X + Aᵀ X)`` over a SectionedELL -- used by the spectral solvers
+    on bucketed adjacencies whose construction did not preserve symmetry.
+
+    Parameters
+    ----------
+    sectioned
+        The bucketed adjacency.
+    X
+        Dense operand indexed by the original row axis, ``(n_rows, ncol)``.
+    semiring
+        Algebra to reduce under.  **REAL only** (the additive scatter
+        adjoint; see ``semiring_ell_rmatvec``); other algebras raise.
+
+    Returns
+    -------
+    Array of shape ``(n_cols, ncol)``.
+    """
+    if semiring is not REAL:
+        raise NotImplementedError(
+            f'sectioned_semiring_ell_rmatvec: REAL only; got {semiring.name!r}.'
+        )
+    if X.shape[-2] != sectioned.n_rows:
+        raise ValueError(
+            f'X.shape[-2]={X.shape[-2]} must equal '
+            f'sectioned.n_rows={sectioned.n_rows} (the adjoint is indexed '
+            'by the original row axis).'
+        )
+    ncol = int(X.shape[-1])
+    out_dtype = jnp.result_type(X.dtype, sectioned.sections[0].dtype)
+    out = jnp.zeros((sectioned.n_cols, ncol), dtype=out_dtype)
+    for ell, row_idx in zip(sectioned.sections, sectioned.row_groups):
+        row_idx_jax = jnp.asarray(row_idx)
+        bucket_contrib = semiring_ell_rmatvec(
+            ell.values,
+            ell.indices,
+            X[row_idx_jax],
+            semiring=semiring,
+            n_cols=sectioned.n_cols,
+        )
+        out = out + bucket_contrib
     return out

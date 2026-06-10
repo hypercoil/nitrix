@@ -164,6 +164,7 @@ def ell_from_dense(
     k_max: Optional[int] = None,
     threshold: float = 0.0,
     identity: Any = 0.0,
+    symmetrize: bool = False,
 ) -> ELL:
     """Convert a dense matrix to ELL by selecting top-``k_max`` non-pad entries
     per row.
@@ -173,17 +174,49 @@ def ell_from_dense(
     entries, the largest-by-magnitude ``k_max`` are kept.  If ``k_max``
     is ``None``, it is chosen as the maximum row degree present.
 
+    .. warning::
+
+       Top-``k_max``-per-row selection is **not** symmetry-preserving: row
+       ``i`` may keep edge ``(i, j)`` while row ``j`` drops ``(j, i)``, so
+       the stored pattern is generally **asymmetric** even when ``dense``
+       is symmetric.  This matters for the spectral consumers
+       (``laplacian_eigenmap`` / ``diffusion_embedding`` and
+       ``eigsolve_top_k``), whose iterative solvers assume a symmetric
+       operator.  Two remedies: pass the result with the connectopy
+       default ``promise_symmetry=False`` (the operator is symmetrised at
+       the matvec, storage-free, ``½(A x + Aᵀ x)``); or build a symmetric
+       ELL here with ``symmetrize=True`` (below).
+
     Parameters
     ----------
     dense
         Dense matrix, shape ``(m, n)``.
     k_max
         Target column count of the ELL.  Defaults to the worst-case
-        per-row non-zero count.
+        per-row non-zero count.  With ``symmetrize=True`` the *effective*
+        column count may exceed this (the symmetric closure can add edges).
     threshold
         Absolute-value cutoff for "structurally zero".
     identity
         Pad fill in ``values``.
+    symmetrize
+        When ``True``, return the symmetric kNN graph of the selection:
+        take the top-``k_max`` pattern ``P``, then store ``½(S + Sᵀ)`` over
+        the closure ``P ∪ Pᵀ`` where ``S = dense ⊙ P``.  The result is an
+        exactly-symmetric ELL (``ell_to_dense`` is symmetric); ``m`` must
+        equal ``n``.  Default ``False`` (the historical asymmetric top-k
+        behaviour).
+
+        **Storage is not bounded by a small multiple of** ``k_max``.  The
+        effective column count is ``max_i |row_i(P) ∪ col_i(P)|`` --
+        i.e. ``k_max`` plus the largest top-k *in-degree* (how many rows
+        selected a given column).  In-degree is **not** limited by
+        ``k_max``: a hub/star (one column selected by every row) drives the
+        closure of that row to the full ``n``, so ``symmetrize=True`` can
+        densify hub rows entirely.  For hub-heavy or unknown-degree graphs
+        prefer the storage-free matvec symmetrisation
+        (``promise_symmetry=False`` on the spectral consumers), which never
+        materialises ``P ∪ Pᵀ``.
 
     Returns
     -------
@@ -207,15 +240,47 @@ def ell_from_dense(
     if k_max is None:
         k_max = int(deg.max()) if deg.size else 0
         k_max = max(k_max, 1)
-    values = np.full((m, k_max), identity, dtype=dense_np.dtype)
-    indices = np.zeros((m, k_max), dtype=np.int32)
+
+    # Per-row top-k selection pattern.
+    selection = np.zeros((m, n), dtype=bool)
     for i in range(m):
         row_idx = np.flatnonzero(mask[i])
         if row_idx.size > k_max:
             order = np.argsort(-abs_d[i, row_idx])
             row_idx = row_idx[order[:k_max]]
-        else:
-            row_idx = row_idx[np.argsort(-abs_d[i, row_idx])]
+        selection[i, row_idx] = True
+
+    if symmetrize:
+        if m != n:
+            raise ValueError(
+                f'ell_from_dense(symmetrize=True): requires a square matrix, '
+                f'got {dense_np.shape}.'
+            )
+        # Symmetric kNN graph: ½(S + Sᵀ) over the closure P ∪ Pᵀ.
+        masked = np.where(selection, dense_np, np.zeros_like(dense_np))
+        sym_vals = 0.5 * (masked + masked.T)
+        closure = selection | selection.T
+        eff_k = max(int(closure.sum(axis=1).max()) if closure.size else 0, 1)
+        values = np.full((m, eff_k), identity, dtype=dense_np.dtype)
+        indices = np.zeros((m, eff_k), dtype=np.int32)
+        for i in range(m):
+            cols = np.flatnonzero(closure[i])
+            cols = cols[np.argsort(-np.abs(sym_vals[i, cols]))]
+            k_i = cols.size
+            values[i, :k_i] = sym_vals[i, cols]
+            indices[i, :k_i] = cols
+        return ELL(
+            values=jnp.asarray(values),
+            indices=jnp.asarray(indices),
+            n_cols=n,
+            identity=identity,
+        )
+
+    values = np.full((m, k_max), identity, dtype=dense_np.dtype)
+    indices = np.zeros((m, k_max), dtype=np.int32)
+    for i in range(m):
+        row_idx = np.flatnonzero(selection[i])
+        row_idx = row_idx[np.argsort(-abs_d[i, row_idx])]
         k_i = row_idx.size
         values[i, :k_i] = dense_np[i, row_idx]
         indices[i, :k_i] = row_idx

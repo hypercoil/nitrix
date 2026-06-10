@@ -38,8 +38,11 @@ from .matmul import (
     semiring_matmul,
     reference_semiring_matmul,
 )
-from ._reference import reference_semiring_ell_matmul
-from .ell import semiring_ell_matmul
+from ._reference import (
+    reference_semiring_ell_matmul,
+    reference_semiring_ell_rmatvec,
+)
+from .ell import semiring_ell_matmul, semiring_ell_rmatvec
 from .ell_edge import ell_row_softmax, semiring_ell_edge_aggregate
 from .conv import (
     semiring_conv,
@@ -62,6 +65,8 @@ __all__ = [
     'reference_semiring_matmul',
     'semiring_ell_matmul',
     'reference_semiring_ell_matmul',
+    'semiring_ell_rmatvec',
+    'reference_semiring_ell_rmatvec',
     'semiring_ell_edge_aggregate',
     'ell_row_softmax',
     'semiring_conv',

@@ -53,6 +53,8 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Int, Num
 
+from ._reference import reference_semiring_ell_rmatvec
+
 # Residual / gradient tuple shapes (shape strings are documentation; the
 # 4th ELL residual is ``C`` for the inexact algebras and ``n_cols`` for
 # REAL -- it is unpacked into an unused slot there, so the alias fits).
@@ -357,32 +359,73 @@ def real_ell_matmul_vjp(
     Implemented as a fori over p so the intermediates are ``(M, N)``
     rather than ``(M, k_max, N)``.
     """
-    values, indices, B, _n_cols = residuals
-    m, kmax = values.shape
-    n_cols, ncol = B.shape
+    # REAL needed only as a call-time value (the gather/scatter is plain
+    # arithmetic); the local import sidesteps the algebras -> _backward
+    # load-time cycle, matching the package's deferred-import idiom.
+    from .algebras import REAL
 
-    def body(p: Int[Array, ''], carry: _ELLGrads) -> _ELLGrads:
-        g_values, g_B = carry
+    values, indices, B, _n_cols = residuals
+    _, kmax = values.shape
+    n_cols, _ = B.shape
+
+    def body(p: Int[Array, ''], g_values: Num[Array, 'm kmax']) -> Num[
+        Array, 'm kmax'
+    ]:
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]  # (M,)
-        v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)  # (M, 1)
         gathered = B[idx_p]  # (M, N)
         # g_values[i, p] = (g_out[i, :] * gathered[i, :]).sum()
         gv_p = (g_out * gathered).sum(axis=1, keepdims=True)  # (M, 1)
-        g_values = lax.dynamic_update_slice_in_dim(
-            g_values,
-            gv_p,
-            p,
-            axis=1,
-        )
-        # scatter-add into g_B at rows idx_p
-        contrib = v_p * g_out  # (M, N)
-        g_B = g_B.at[idx_p].add(contrib)
-        return g_values, g_B
+        return lax.dynamic_update_slice_in_dim(g_values, gv_p, p, axis=1)
+
+    g_values = lax.fori_loop(0, kmax, body, jnp.zeros_like(values))
+    # grad_B is exactly the additive ELL adjoint Aᵀ @ g_out -- the single
+    # source of truth shared with the symmetric matvec (see
+    # reference_semiring_ell_rmatvec).  Cast back to B's dtype so the
+    # returned cotangent dtype matches the primal (result_type may promote).
+    g_B = reference_semiring_ell_rmatvec(
+        values, indices, g_out, semiring=REAL, n_cols=n_cols
+    ).astype(B.dtype)
+    return g_values, g_B
+
+
+def real_ell_rmatvec_vjp(
+    residuals: Tuple[
+        Num[Array, 'm kmax'], Int[Array, 'm kmax'], Num[Array, 'm ncol']
+    ],
+    g_out: Num[Array, 'n_cols ncol'],
+) -> Tuple[Num[Array, 'm kmax'], Num[Array, 'm ncol']]:
+    """Backward of ``Y = Aᵀ X`` (``reference_semiring_ell_rmatvec``, REAL).
+
+    Returns ``(grad_values, grad_X)``; ``indices`` is non-diff (the public
+    ``semiring_ell_rmatvec`` returns a zero for it).  The rmatvec is the
+    adjoint of the gather matmul, so its own backward is the *matmul*
+    forward plus the same gather-dot used for ``grad_values`` above:
+
+        grad_X[i, j]      = Σ_p values[i, p] · g_out[indices[i, p], j]   (= A @ g_out)
+        grad_values[i, p] = Σ_j X[i, j] · g_out[indices[i, p], j]
+    """
+    values, indices, X = residuals
+    _, kmax = values.shape
+
+    def body(
+        p: Int[Array, ''],
+        carry: Tuple[Num[Array, 'm kmax'], Num[Array, 'm ncol']],
+    ) -> Tuple[Num[Array, 'm kmax'], Num[Array, 'm ncol']]:
+        g_values, g_X = carry
+        idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]  # (M,)
+        v_p = lax.dynamic_slice_in_dim(values, p, 1, axis=1)  # (M, 1)
+        g_at = g_out[idx_p]  # (M, ncol)
+        # grad_X gathers the gradient back through A; grad_values is the
+        # per-edge gather-dot of X with the scattered cotangent.
+        g_X = g_X + v_p * g_at
+        gv_p = (X * g_at).sum(axis=1, keepdims=True)  # (M, 1)
+        g_values = lax.dynamic_update_slice_in_dim(g_values, gv_p, p, axis=1)
+        return g_values, g_X
 
     g_values0 = jnp.zeros_like(values)
-    g_B0 = jnp.zeros_like(B)
-    g_values, g_B = lax.fori_loop(0, kmax, body, (g_values0, g_B0))
-    return g_values, g_B
+    g_X0 = jnp.zeros_like(X)
+    g_values, g_X = lax.fori_loop(0, kmax, body, (g_values0, g_X0))
+    return g_values, g_X
 
 
 def log_ell_matmul_vjp(
@@ -583,6 +626,7 @@ __all__ = [
     'euclidean_matmul_vjp',
     'boolean_matmul_vjp',
     'real_ell_matmul_vjp',
+    'real_ell_rmatvec_vjp',
     'log_ell_matmul_vjp',
     'tropical_max_plus_ell_matmul_vjp',
     'tropical_min_plus_ell_matmul_vjp',

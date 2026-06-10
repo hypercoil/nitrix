@@ -55,7 +55,7 @@ from jax.experimental.sparse.linalg import lobpcg_standard
 from jax.scipy.sparse.linalg import cg
 from jaxtyping import Array, Float, Int
 
-from ..semiring import REAL, semiring_ell_matmul
+from ..semiring import REAL, semiring_ell_matmul, semiring_ell_rmatvec
 from ..sparse import ELL, SectionedELL
 from ._solver import safe_eigh, solver_device, source_device
 
@@ -114,6 +114,15 @@ class SolverSpec:
     shift: float = 1.0
     # shared backward
     eps_clamp: float = 1e-8
+    # operator symmetry.  When True (the default), the iterative forwards
+    # apply the operand's matvec directly -- the caller *promises* the
+    # operator is symmetric.  When False, ELL / SectionedELL forwards apply
+    # the symmetric part ``½(A X + Aᵀ X) = sym(A) X`` instead, so a stored
+    # operator whose construction did not preserve symmetry (e.g. top-k
+    # affinity sparsification) still presents the symmetric operator the
+    # solvers (and shift-invert's inner CG) require.  Ignored for dense
+    # operands (symmetry is the caller's to enforce on the materialised M).
+    promise_symmetry: bool = True
 
     @classmethod
     def auto(
@@ -122,15 +131,22 @@ class SolverSpec:
         n_iters: int = 200,
         tol: Optional[float] = None,
         eps_clamp: float = 1e-8,
+        promise_symmetry: bool = True,
     ) -> 'SolverSpec':
         # Carry the lobpcg knobs: ``auto`` resolves to ``lobpcg`` on sparse
         # input, and the dispatcher keeps the other fields via ``replace``.
         return cls(
-            method='auto', n_iters=n_iters, tol=tol, eps_clamp=eps_clamp
+            method='auto',
+            n_iters=n_iters,
+            tol=tol,
+            eps_clamp=eps_clamp,
+            promise_symmetry=promise_symmetry,
         )
 
     @classmethod
     def eigh(cls, *, eps_clamp: float = 1e-8) -> 'SolverSpec':
+        # Dense-only; symmetry is enforced on the materialised M upstream,
+        # so ``promise_symmetry`` is left at its (unused) default.
         return cls(method='eigh', eps_clamp=eps_clamp)
 
     @classmethod
@@ -140,12 +156,14 @@ class SolverSpec:
         n_iters: int = 200,
         tol: Optional[float] = None,
         eps_clamp: float = 1e-8,
+        promise_symmetry: bool = True,
     ) -> 'SolverSpec':
         return cls(
             method='lobpcg',
             n_iters=n_iters,
             tol=tol,
             eps_clamp=eps_clamp,
+            promise_symmetry=promise_symmetry,
         )
 
     @classmethod
@@ -156,6 +174,7 @@ class SolverSpec:
         outer_iters: int = 12,
         cg_iters: int = 10,
         eps_clamp: float = 1e-8,
+        promise_symmetry: bool = True,
     ) -> 'SolverSpec':
         return cls(
             method='shift_invert',
@@ -163,6 +182,7 @@ class SolverSpec:
             outer_iters=outer_iters,
             cg_iters=cg_iters,
             eps_clamp=eps_clamp,
+            promise_symmetry=promise_symmetry,
         )
 
     @classmethod
@@ -173,6 +193,7 @@ class SolverSpec:
         shift: float = 1.0,
         outer_iters: int = 12,
         eps_clamp: float = 1e-8,
+        promise_symmetry: bool = True,
     ) -> 'SolverSpec':
         return cls(
             method='poly',
@@ -180,6 +201,7 @@ class SolverSpec:
             shift=shift,
             outer_iters=outer_iters,
             eps_clamp=eps_clamp,
+            promise_symmetry=promise_symmetry,
         )
 
 
@@ -244,7 +266,16 @@ def _project_ell(
     indices: Int[Array, 'n k_max'],
 ) -> Float[Array, 'n k_max']:
     """Project ``V K Vᵀ`` onto the ELL pattern:
-    ``g_values[i, p] = (V K)[i, :] @ V[indices[i, p], :]``."""
+    ``g_values[i, p] = (V K)[i, :] @ V[indices[i, p], :]``.
+
+    This is **unchanged** under the ``promise_symmetry=False`` symmetric
+    forward, and exactly correct for it: the implicit-VJP cotangent
+    ``G = V K Vᵀ`` is symmetric, and a stored ``values[i, p]`` enters
+    ``sym(A)`` at both ``[i, c]`` and ``[c, i]`` (each ∂ = ½, ``c =
+    indices[i, p]``), so ``∂L/∂values[i, p] = ½G[i, c] + ½G[c, i] = G[i, c]``
+    -- precisely the entry this projection returns.  The symmetrisation
+    lives entirely in the *forward* matvec; the backward needs no change.
+    """
     VK = eigvecs @ K
     V_at_idx = eigvecs[indices]
     return jnp.einsum('ij,ipj->ip', VK, V_at_idx)
@@ -389,6 +420,34 @@ def _sectioned_matvec(
     return out
 
 
+def _sectioned_rmatvec(
+    values_tuple: _ValuesTuple,
+    indices_tuple: _IndicesTuple,
+    row_groups_tuple: _RowGroupsTuple,
+    X: Float[Array, 'n k'],
+    n_cols: int,
+    n_rows: int,
+) -> Float[Array, 'n_cols k']:
+    """SectionedELL adjoint matvec ``Aᵀ X``: per-bucket gather of the source
+    rows + scatter into the shared ``n_cols`` axis, summed over buckets.
+
+    The tuple-level companion of ``sparse.sectioned_semiring_ell_rmatvec``
+    (kept here so the ``custom_vjp`` forward runs on the same flat arrays it
+    differentiates, mirroring ``_sectioned_matvec``)."""
+    out = jnp.zeros((n_cols,) + X.shape[1:], dtype=X.dtype)
+    for vals, idx, row_idx in zip(
+        values_tuple, indices_tuple, row_groups_tuple
+    ):
+        out = out + semiring_ell_rmatvec(
+            vals,
+            idx,
+            X[row_idx],
+            semiring=REAL,
+            n_cols=n_cols,
+        )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Per-format custom_vjp entry points (parameterised by the static SolverSpec)
 # ---------------------------------------------------------------------------
@@ -455,7 +514,14 @@ def _ell_forward(
     n_cols: int,
     spec: SolverSpec,
 ) -> _EigPair:
-    def apply(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
+    if not spec.promise_symmetry and values.shape[0] != n_cols:
+        raise ValueError(
+            'eigsolve_top_k(promise_symmetry=False): symmetrising requires a '
+            f'square operator, but the ELL has n_rows={values.shape[0]} != '
+            f'n_cols={n_cols}.'
+        )
+
+    def matvec(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
         return semiring_ell_matmul(
             values,
             indices,
@@ -464,6 +530,18 @@ def _ell_forward(
             n_cols=n_cols,
             backend='jax',
         )
+
+    if spec.promise_symmetry:
+        apply = matvec
+    else:
+        # Apply the symmetric part ½(A X + Aᵀ X); the backward
+        # (_project_ell) is already exact for this -- see its docstring.
+        def apply(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
+            Ax = matvec(X)
+            Atx = semiring_ell_rmatvec(
+                values, indices, X, semiring=REAL, n_cols=n_cols
+            )
+            return 0.5 * (Ax + Atx)
 
     return _forward_for_spec(spec, apply, apply, X0)
 
@@ -536,8 +614,14 @@ def _sectioned_forward(
     spec: SolverSpec,
 ) -> _EigPair:
     n_rows = X0.shape[0]
+    if not spec.promise_symmetry and n_rows != n_cols:
+        raise ValueError(
+            'eigsolve_top_k(promise_symmetry=False): symmetrising requires a '
+            f'square operator, but the SectionedELL has n_rows={n_rows} != '
+            f'n_cols={n_cols}.'
+        )
 
-    def apply(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
+    def matvec(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
         return _sectioned_matvec(
             values_tuple,
             indices_tuple,
@@ -546,6 +630,22 @@ def _sectioned_forward(
             n_cols=n_cols,
             n_rows=n_rows,
         )
+
+    if spec.promise_symmetry:
+        apply = matvec
+    else:
+
+        def apply(X: Float[Array, 'n k']) -> Float[Array, 'n k']:
+            Ax = matvec(X)
+            Atx = _sectioned_rmatvec(
+                values_tuple,
+                indices_tuple,
+                row_groups_tuple,
+                X,
+                n_cols=n_cols,
+                n_rows=n_rows,
+            )
+            return 0.5 * (Ax + Atx)
 
     return _forward_for_spec(spec, apply, apply, X0)
 
@@ -739,12 +839,22 @@ def eigsolve_top_k(
     ----------
     operand
         Symmetric operator: dense ``(..., n, n)``, ``ELL``, or
-        ``SectionedELL``.  Caller is responsible for symmetry.
+        ``SectionedELL``.  The iterative methods (and shift-invert's inner
+        CG) assume a symmetric operator.  For dense input the caller owns
+        symmetry (symmetrise ``M`` first).  For ELL / SectionedELL, set
+        ``spec.promise_symmetry=False`` when the *stored* operator is not
+        guaranteed symmetric -- e.g. an affinity sparsified by top-k-per-row
+        (``ell_from_dense``), whose pattern is generally asymmetric -- and
+        the forward will apply the symmetric part ``½(A X + Aᵀ X)`` instead
+        of trusting the stored pattern.  Leaving it ``True`` (the default)
+        applies the stored matvec directly and is correct only when the
+        operator really is symmetric (regular meshes / grids).
     k
         Number of extremal (largest) eigenpairs to return.
     spec
         Static solver configuration; defaults to ``SolverSpec.auto()``
-        (dense -> ``eigh``, sparse -> ``lobpcg``).
+        (dense -> ``eigh``, sparse -> ``lobpcg``).  Carries
+        ``promise_symmetry`` (see ``operand``).
     seed
         PRNG seed for the iterative-solver initial subspace.
 
