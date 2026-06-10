@@ -34,7 +34,7 @@ treatment).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
 from jaxtyping import Array, Float
 
@@ -48,7 +48,7 @@ from ..geometry import (
     spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
-from ._force import LNCCForce
+from ._force import Force, LNCCForce, resolve_force_schedule
 from ._svf import _relative_spacing, svf_coarse_to_fine, symmetric_level
 
 __all__ = [
@@ -137,6 +137,7 @@ def _syn_level(
     v_fwd: Array,
     v_inv: Array,
     *,
+    force: Force,
     spec: SyNSpec,
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
@@ -144,18 +145,18 @@ def _syn_level(
     """Run the symmetric SyN iterations on one resolution.
 
     Thin wrapper over the metric-generic symmetric-midpoint SVF driver
-    (``_svf.symmetric_level``) with the analytic :class:`LNCCForce` -- the
-    recipe's symmetric structure (warp both images to the midpoint, ascend the
-    local CC in each direction) plus its default force, trust-region step
-    clamp, and anisotropy-aware regularisation.  Rolled with ``lax.scan``;
-    differentiable for the unrolled path.
+    (``_svf.symmetric_level``) with the level's ``force`` (the analytic
+    :class:`LNCCForce` by default) -- the recipe's symmetric structure (warp
+    both images to the midpoint, ascend the similarity in each direction) plus
+    its trust-region step clamp and anisotropy-aware regularisation.  Rolled
+    with ``lax.scan``; differentiable for the unrolled path.
     """
     return symmetric_level(
         moving,
         fixed,
         v_fwd,
         v_inv,
-        force=LNCCForce(spec.radius),
+        force=force,
         ndim=ndim,
         iterations=spec.iterations,
         n_steps=spec.n_steps,
@@ -172,8 +173,9 @@ def greedy_syn_register(
     fixed: Float[Array, '*spatial'],
     *,
     spec: SyNSpec = SyNSpec(),
+    force: Optional[Union[Force, Sequence[Force]]] = None,
 ) -> SyNResult:
-    """Greedy symmetric diffeomorphic registration (LNCC-driven).
+    """Greedy symmetric diffeomorphic registration (LNCC-driven by default).
 
     Estimates symmetric forward / inverse velocity fields (coarse-to-fine)
     whose midpoint composition warps ``moving`` onto ``fixed``.  The result
@@ -189,6 +191,12 @@ def greedy_syn_register(
     spec
         ``SyNSpec`` controlling the schedule, the LNCC window, and the
         regularisation.
+    force
+        The driving :class:`Force` (``_force``).  ``None`` (default) uses the
+        analytic ``LNCCForce(spec.radius)``; a single ``Force`` overrides it at
+        every level (e.g. ``MetricForce(MI())`` for cross-modal / multimodal
+        symmetric registration); a length-``spec.levels`` **coarse-to-fine**
+        sequence sets a per-level schedule.
 
     Returns
     -------
@@ -220,9 +228,12 @@ def greedy_syn_register(
         sigma=spec.pyramid_sigma,
     )
     rel_spacing = _relative_spacing(spec.spacing, ndim)
+    forces = resolve_force_schedule(
+        force, default=LNCCForce(spec.radius), levels=spec.levels
+    )
 
     def level_solve(
-        m_l: Array, f_l: Array, state: tuple[Array, ...]
+        level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
         v_fwd, v_inv = state
         v_fwd, v_inv, hist = _syn_level(
@@ -230,6 +241,7 @@ def greedy_syn_register(
             f_l,
             v_fwd,
             v_inv,
+            force=forces[level],
             spec=spec,
             ndim=ndim,
             rel_spacing=rel_spacing,

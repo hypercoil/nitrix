@@ -44,7 +44,7 @@ as ``ic_reference`` / ``MetricObjective``, paid only where it is recoverable.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, Union, runtime_checkable
+from typing import Optional, Protocol, Sequence, Union, runtime_checkable
 
 import jax
 import jax.numpy as jnp
@@ -60,7 +60,39 @@ __all__ = [
     'LNCCForce',
     'DemonsForce',
     'MetricForce',
+    'resolve_force_schedule',
 ]
+
+# A recipe's ``force`` argument: a single force everywhere, a coarse-to-fine
+# per-level schedule, or ``None`` for the recipe's closed-form default.
+ForceArg = Optional[Union['Force', Sequence['Force']]]
+
+
+def resolve_force_schedule(
+    force: ForceArg,
+    *,
+    default: Force,
+    levels: int,
+) -> list[Force]:
+    """Resolve the recipe ``force`` argument to a per-pyramid-level list.
+
+    ``None`` -> the ``default`` closed-form force at every level; a single
+    :class:`Force` -> that force at every level; a length-``levels`` sequence
+    (**coarse-to-fine**, the natural schedule order -- e.g. a cheap force at
+    the coarse levels, a high-signal one at the finest) -> one force per level,
+    reversed to the finest-first pyramid indexing the driver uses.  The result
+    is indexed by pyramid level (``[0]`` = finest).
+    """
+    if force is None:
+        return [default] * levels
+    if isinstance(force, Force):
+        return [force] * levels
+    seq = list(force)
+    if len(seq) != levels:
+        raise ValueError(
+            f'force schedule must have length levels={levels}; got {len(seq)}.'
+        )
+    return list(reversed(seq))
 
 # Anisotropy-only spacing (``None`` -> isotropic); the per-axis ratio
 # ``spacing / geomean(spacing)`` the SVF substrate threads (see ``_svf``).
@@ -223,6 +255,12 @@ class MetricForce:
     price of generality; ship a closed-form :class:`Force` for a metric that
     earns one.
 
+    The cost gradient is rescaled by the voxel count to match the
+    sum-convention the closed forms use (the metric costs reduce by spatial
+    mean), so ``MetricForce(LNCC(r))`` is numerically identical to
+    ``LNCCForce(r)`` -- the parity oracle holds in magnitude, not only
+    direction.
+
     Attributes
     ----------
     metric
@@ -254,7 +292,14 @@ class _BoundMetric:
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
+        # The metric costs reduce by spatial MEAN; the closed-form forces (and
+        # the driver's step-normalisation) use the SUM-convention gradient
+        # (``lncc_grad = ∂(Σcc)/∂warped``).  Rescale by the voxel count to undo
+        # the mean: for a spatial-mean metric (LNCC, SSD) this makes the escape
+        # hatch *numerically identical* to the closed form; for a histogram
+        # metric (MI, CR) it is a constant the clamped driver absorbs.
         grad_cost = jax.grad(lambda w: self.metric.cost(w, self.fixed))(warped)
+        grad_cost = grad_cost * warped.size
         grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
         return _to_voxel(-grad_cost[..., None] * grad, self.rel_spacing)
 

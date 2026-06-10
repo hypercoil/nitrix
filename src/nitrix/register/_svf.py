@@ -92,10 +92,12 @@ def _relative_spacing(
     return rel
 
 
-# Per-level update: ``(moving_level, fixed_level, state) -> (state, cost)``
-# where ``state`` is a tuple of ``n_fields`` velocity fields.
+# Per-level update: ``(level, moving_level, fixed_level, state) -> (state,
+# cost)`` where ``level`` is the pyramid index (finest = 0; lets a recipe pick
+# a per-level force / metric) and ``state`` is a tuple of ``n_fields`` velocity
+# fields.
 LevelSolve = Callable[
-    [Array, Array, tuple[Array, ...]], tuple[tuple[Array, ...], Array]
+    [int, Array, Array, tuple[Array, ...]], tuple[tuple[Array, ...], Array]
 ]
 
 
@@ -126,8 +128,9 @@ def svf_coarse_to_fine(
         Number of velocity fields carried (1 for Demons, 2 for symmetric
         SyN).
     level_solve
-        ``(moving_level, fixed_level, state) -> (state, cost_trace)`` for
-        one resolution; ``state`` is the ``n_fields``-tuple of velocities.
+        ``(level, moving_level, fixed_level, state) -> (state, cost_trace)``
+        for one resolution (``level`` = pyramid index, finest = 0); ``state``
+        is the ``n_fields``-tuple of velocities.
 
     Returns
     -------
@@ -151,7 +154,7 @@ def svf_coarse_to_fine(
                 prev_shape, dtype=dtype
             )
             state = tuple(upsample(s, shape_l) * ratio for s in state)
-        state, hist = level_solve(m_l, f_l, state)
+        state, hist = level_solve(level, m_l, f_l, state)
         histories.append(hist)
         prev_shape = shape_l
 

@@ -29,7 +29,7 @@ forward+inverse variant are the documented upgrade paths.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
 from jaxtyping import Array, Float
 
@@ -41,7 +41,7 @@ from ..geometry import (
     spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
-from ._force import DemonsForce
+from ._force import DemonsForce, Force, resolve_force_schedule
 from ._svf import _relative_spacing, single_sided_level, svf_coarse_to_fine
 
 __all__ = [
@@ -134,6 +134,7 @@ def _demons_level(
     fixed: Array,
     v: Array,
     *,
+    force: Force,
     spec: DemonsSpec,
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
@@ -141,10 +142,10 @@ def _demons_level(
     """Run the Demons iterations on one resolution; return ``(v, costs)``.
 
     Thin wrapper over the metric-generic single-sided SVF driver
-    (``_svf.single_sided_level``) with the closed-form ESM :class:`DemonsForce`
-    -- the recipe's structure (schedule, regularisation) plus its default
-    force.  The driver hoists ``∇fixed`` out of the iteration, rolls it with
-    ``lax.scan`` (so the level compiles one iteration), and stays
+    (``_svf.single_sided_level``) with the level's ``force`` (the closed-form
+    ESM :class:`DemonsForce` by default, or any :class:`Force` the caller
+    supplies).  The driver hoists ``∇fixed`` out of the iteration, rolls it
+    with ``lax.scan`` (so the level compiles one iteration), and stays
     differentiable for the unrolled gradient path.
 
     ``rel_spacing`` (anisotropy-only; ``None`` for isotropic) makes the physics
@@ -156,7 +157,7 @@ def _demons_level(
         moving,
         fixed,
         v,
-        force=DemonsForce(spec.alpha),
+        force=force,
         ndim=ndim,
         iterations=spec.iterations,
         n_steps=spec.n_steps,
@@ -174,6 +175,7 @@ def diffeomorphic_demons_register(
     fixed: Float[Array, '*spatial'],
     *,
     spec: DemonsSpec = DemonsSpec(),
+    force: Optional[Union[Force, Sequence[Force]]] = None,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -188,6 +190,13 @@ def diffeomorphic_demons_register(
         Single-channel images of identical shape (2-D or 3-D).
     spec
         ``DemonsSpec`` controlling the schedule and regularisation.
+    force
+        The driving :class:`Force` (``_force``).  ``None`` (default) uses the
+        closed-form ESM ``DemonsForce(spec.alpha)``; a single ``Force``
+        overrides it at every level (e.g. ``MetricForce(MI())`` for cross-modal
+        deformable registration); a length-``spec.levels`` **coarse-to-fine**
+        sequence sets a per-level schedule (a cheap force coarse, a high-signal
+        one at the finest level).
 
     Returns
     -------
@@ -221,13 +230,22 @@ def diffeomorphic_demons_register(
 
     # Anisotropy-only spacing -- level-independent, so computed once.
     rel_spacing = _relative_spacing(spec.spacing, ndim)
+    forces = resolve_force_schedule(
+        force, default=DemonsForce(spec.alpha), levels=spec.levels
+    )
 
     def level_solve(
-        m_l: Array, f_l: Array, state: tuple[Array, ...]
+        level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
         (v,) = state
         v, hist = _demons_level(
-            m_l, f_l, v, spec=spec, ndim=ndim, rel_spacing=rel_spacing
+            m_l,
+            f_l,
+            v,
+            force=forces[level],
+            spec=spec,
+            ndim=ndim,
+            rel_spacing=rel_spacing,
         )
         return (v,), hist
 

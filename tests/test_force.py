@@ -56,14 +56,16 @@ def test_force_protocol_membership():
     assert isinstance(MetricForce(MI()), Force)
 
 
-def test_metricforce_lncc_matches_closed_form_direction():
-    # The autodiff escape hatch MetricForce(LNCC) and the closed-form
-    # LNCCForce differ only by a scalar (sum- vs mean-reduction), so their
-    # update fields are exactly parallel -- the parity oracle.
+def test_metricforce_lncc_matches_closed_form():
+    # The parity oracle: with the voxel-count rescale that undoes the metric's
+    # mean reduction, the autodiff escape hatch MetricForce(LNCC) is
+    # *numerically identical* to the closed-form LNCCForce -- magnitude, not
+    # only direction.
     warped, fixed = _blobs(48, 0), _blobs(48, 1)
     u_closed = LNCCForce(radius=3).bind(fixed, ndim=2).update(warped)
     u_generic = MetricForce(LNCC(radius=3)).bind(fixed, ndim=2).update(warped)
-    assert _cosine(u_closed, u_generic) > 1 - 1e-9
+    assert _cosine(u_closed, u_generic) > 1 - 1e-12
+    assert np.allclose(np.asarray(u_closed), np.asarray(u_generic), atol=1e-9)
 
 
 def test_metricforce_ssd_matches_thirion_direction():
