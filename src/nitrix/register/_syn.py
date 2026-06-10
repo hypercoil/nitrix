@@ -147,6 +147,14 @@ def _normalise_step(u: Array, step: float) -> Array:
     inflated -- scale-to-step would force a full ``step`` in whatever
     direction the (often spurious, flat-region) maximum points.
 
+    **Contingent on the fixed-budget scheme.**  This choice is *because* the
+    forward is a fixed-length ``lax.scan`` (no convergence gate).  If the
+    ``while_loop`` early-exit (``docs/feature-requests/
+    registration-early-stopping-while-loop.md``) is adopted, a convergence
+    gate would bound the constant-step dithering that motivates the clamp,
+    making scale-to-step (the ANTS choice) viable again -- so revisit
+    clamp-vs-scale here if that lands.
+
     Note the LNCC force does **not** vanish at a perfect match -- the
     metric's ``eps`` guard leaves ``cc < 1`` in low-variance windows -- so
     it is the symmetric forward/inverse cancellation, not a vanishing force

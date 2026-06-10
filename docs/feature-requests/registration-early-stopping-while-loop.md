@@ -70,6 +70,16 @@ If hard-case + cohort benchmarks don't show a clean net win, the fixed `scan`
 stays — the simplicity and batch-friendliness are worth more than speculative
 easy-case savings.
 
+**Downstream coupling (greedy SyN force normalisation).** If this lands, it
+re-opens a coupled decision in `register/_syn.py::_normalise_step`: the greedy-SyN
+LNCC force is normalised by a trust-region **clamp** rather than ANTS-style
+scale-to-step *because* the forward is a fixed-length `scan` with no convergence
+gate (the clamp stops a constant-magnitude step from dithering forever). A
+convergence-gated `while_loop` bounds that dithering, making scale-to-step viable
+again — so adopting `while_loop` should trigger a clamp-vs-scale revisit there
+(the LNCC force does not vanish at the optimum, so the normalisation genuinely
+shapes the trajectory). Noted in that function's docstring.
+
 ## How perf-bench would measure it
 
 The registration scale tier (`reports/REGISTRATION_SCALING.md`) plus an
