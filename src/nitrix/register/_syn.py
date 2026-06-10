@@ -41,15 +41,19 @@ from jaxtyping import Array, Float
 from ..geometry import (
     compose_displacement,
     gaussian_pyramid,
-    identity_grid,
     integrate_velocity_field,
     invert_displacement,
-    jacobian_det_displacement,
-    spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
 from ._force import Force, LNCCForce, resolve_force_schedule
-from ._svf import _relative_spacing, svf_coarse_to_fine, symmetric_level
+from ._svf import (
+    _relative_spacing,
+    finalize_with_init,
+    prewarp_moving,
+    resolve_init_displacement,
+    svf_coarse_to_fine,
+    symmetric_level,
+)
 
 __all__ = [
     'SyNSpec',
@@ -174,6 +178,8 @@ def greedy_syn_register(
     *,
     spec: SyNSpec = SyNSpec(),
     force: Optional[Union[Force, Sequence[Force]]] = None,
+    init_affine: Optional[Float[Array, ' d1 d1']] = None,
+    init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
 ) -> SyNResult:
     """Greedy symmetric diffeomorphic registration (LNCC-driven by default).
 
@@ -187,7 +193,8 @@ def greedy_syn_register(
     Parameters
     ----------
     moving, fixed
-        Single-channel images of identical shape (2-D or 3-D).
+        Single-channel images (2-D or 3-D).  Identical shape unless an init
+        (below) resamples ``moving`` onto the ``fixed`` grid.
     spec
         ``SyNSpec`` controlling the schedule, the LNCC window, and the
         regularisation.
@@ -197,26 +204,42 @@ def greedy_syn_register(
         every level (e.g. ``MetricForce(MI())`` for cross-modal / multimodal
         symmetric registration); a length-``spec.levels`` **coarse-to-fine**
         sequence sets a per-level schedule.
+    init_affine, init_displacement
+        Optional warm-start / multi-stage init (at most one).  ``init_affine``
+        is a fixed->moving index matrix (as ``rigid_register`` /
+        ``affine_register`` return); ``init_displacement`` is a fixed-grid
+        displacement field (e.g. a SynthMorph network output).  ``moving`` is
+        pre-warped by it onto the ``fixed`` grid and the **residual** is
+        registered; the returned ``displacement`` / ``warped`` /
+        ``jacobian_det`` are the **total** (init then residual) map, while the
+        velocity fields are the residual SVFs.
 
     Returns
     -------
     ``SyNResult`` (``forward_velocity``, ``inverse_velocity``,
     ``displacement``, ``warped``, ``jacobian_det``, ``cost_history``).
     """
-    if moving.shape != fixed.shape:
-        raise ValueError(
-            f'moving and fixed must share shape; got {moving.shape} '
-            f'vs {fixed.shape}.'
-        )
-    ndim = moving.ndim
-    if ndim not in (2, 3):
+    ndim = fixed.ndim
+    if ndim not in (2, 3) or moving.ndim != ndim:
         raise ValueError(
             f'greedy SyN supports 2-D / 3-D single-channel images; got '
-            f'shape {moving.shape}.'
+            f'moving {moving.shape}, fixed {fixed.shape}.'
         )
     dtype = moving.dtype
+    init_disp = resolve_init_displacement(
+        init_affine, init_displacement, fixed.shape, dtype
+    )
+    if init_disp is None and moving.shape != fixed.shape:
+        raise ValueError(
+            f'moving and fixed must share shape ({moving.shape} vs '
+            f'{fixed.shape}); pass init_affine / init_displacement to resample '
+            f'a different grid.'
+        )
+    moving_reg = prewarp_moving(
+        moving, init_disp, fixed.shape, dtype, spec.boundary_mode
+    )
     pyr_m = gaussian_pyramid(
-        moving[..., None],
+        moving_reg[..., None],
         levels=spec.levels,
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
@@ -263,20 +286,23 @@ def greedy_syn_register(
     s_inv = integrate_velocity_field(
         v_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
     )
-    # moving -> fixed: fixed-grid --(id+s_inv)⁻¹--> midpoint --(id+s_fwd)--> moving
+    # moving -> fixed residual: fixed --(id+s_inv)⁻¹--> midpoint --(id+s_fwd)-->
     s_inv_inverse = invert_displacement(s_inv, mode=spec.boundary_mode)
-    displacement = compose_displacement(
+    residual = compose_displacement(
         s_fwd, s_inv_inverse, mode=spec.boundary_mode
     )
-    id_grid = identity_grid(moving.shape, dtype=dtype)
-    warped = spatial_transform(
-        moving[..., None], id_grid + displacement, mode=spec.boundary_mode
-    )[..., 0]
-    det = jacobian_det_displacement(displacement)
+    total, warped, det = finalize_with_init(
+        moving,
+        residual,
+        init_disp,
+        shape=fixed.shape,
+        dtype=dtype,
+        boundary_mode=spec.boundary_mode,
+    )
     return SyNResult(
         forward_velocity=v_fwd,
         inverse_velocity=v_inv,
-        displacement=displacement,
+        displacement=total,
         warped=warped,
         jacobian_det=det,
         cost_history=cost_history,

@@ -28,9 +28,12 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from ..geometry import (
+    affine_grid,
+    compose_displacement,
     compose_velocity,
     identity_grid,
     integrate_velocity_field,
+    jacobian_det_displacement,
     spatial_transform,
     upsample,
 )
@@ -42,6 +45,9 @@ __all__ = [
     'svf_coarse_to_fine',
     'single_sided_level',
     'symmetric_level',
+    'resolve_init_displacement',
+    'prewarp_moving',
+    'finalize_with_init',
 ]
 
 
@@ -338,3 +344,78 @@ def symmetric_level(
         step_fn, (v_fwd, v_inv), xs=None, length=iterations
     )
     return v_fwd, v_inv, costs
+
+
+def resolve_init_displacement(
+    init_affine: Optional[Array],
+    init_displacement: Optional[Array],
+    shape: tuple[int, ...],
+    dtype: jnp.dtype,
+) -> Optional[Array]:
+    """Resolve a recipe's init arguments to a fixed-grid displacement (or None).
+
+    At most one of ``init_affine`` (a fixed-voxel -> moving-voxel homogeneous
+    matrix, as ``rigid_register`` / ``affine_register`` return in ``IndexSpace``)
+    or ``init_displacement`` (a displacement field on the fixed grid, e.g. a
+    SynthMorph network output) may be given; the diffeomorphic recipe pre-warps
+    ``moving`` by the result and registers the residual (warm-start /
+    multi-stage).  An affine is expanded to its displacement field with the
+    registration centring convention (grid centre, via ``affine_grid``).
+    """
+    if init_affine is not None and init_displacement is not None:
+        raise ValueError('pass at most one of init_affine / init_displacement.')
+    if init_affine is not None:
+        return affine_grid(init_affine, shape) - identity_grid(
+            shape, dtype=dtype
+        )
+    return init_displacement
+
+
+def prewarp_moving(
+    moving: Array,
+    init_disp: Optional[Array],
+    shape: tuple[int, ...],
+    dtype: jnp.dtype,
+    boundary_mode: BoundaryMode,
+) -> Array:
+    """Resample ``moving`` onto the fixed grid by the init displacement.
+
+    ``None`` -> ``moving`` unchanged (the no-init path).  Otherwise ``moving`` is
+    sampled at ``id + init_disp`` so it lands on the fixed grid even when its own
+    grid differs -- the residual deformable then registers this pre-warped image
+    (this is what retires the matching-grid constraint for a multi-stage run).
+    """
+    if init_disp is None:
+        return moving
+    id_grid = identity_grid(shape, dtype=dtype)
+    return spatial_transform(
+        moving[..., None], id_grid + init_disp, mode=boundary_mode
+    )[..., 0]
+
+
+def finalize_with_init(
+    moving: Array,
+    residual_disp: Array,
+    init_disp: Optional[Array],
+    *,
+    shape: tuple[int, ...],
+    dtype: jnp.dtype,
+    boundary_mode: BoundaryMode,
+) -> tuple[Array, Array, Array]:
+    """Compose the residual deformable with the init; warp the original moving.
+
+    Returns ``(total_displacement, warped, jacobian_det)`` -- the full
+    ``moving -> fixed`` map (init applied, then the residual), the *original*
+    ``moving`` resampled by it, and the Jacobian determinant of the **total**
+    map (``init_disp is None`` reduces exactly to the residual).
+    """
+    id_grid = identity_grid(shape, dtype=dtype)
+    total = (
+        residual_disp
+        if init_disp is None
+        else compose_displacement(init_disp, residual_disp, mode=boundary_mode)
+    )
+    warped = spatial_transform(
+        moving[..., None], id_grid + total, mode=boundary_mode
+    )[..., 0]
+    return total, warped, jacobian_det_displacement(total)

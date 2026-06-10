@@ -35,14 +35,18 @@ from jaxtyping import Array, Float
 
 from ..geometry import (
     gaussian_pyramid,
-    identity_grid,
     integrate_velocity_field,
-    jacobian_det_displacement,
-    spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
 from ._force import DemonsForce, Force, resolve_force_schedule
-from ._svf import _relative_spacing, single_sided_level, svf_coarse_to_fine
+from ._svf import (
+    _relative_spacing,
+    finalize_with_init,
+    prewarp_moving,
+    resolve_init_displacement,
+    single_sided_level,
+    svf_coarse_to_fine,
+)
 
 __all__ = [
     'DemonsSpec',
@@ -176,6 +180,8 @@ def diffeomorphic_demons_register(
     *,
     spec: DemonsSpec = DemonsSpec(),
     force: Optional[Union[Force, Sequence[Force]]] = None,
+    init_affine: Optional[Float[Array, ' d1 d1']] = None,
+    init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -187,7 +193,8 @@ def diffeomorphic_demons_register(
     Parameters
     ----------
     moving, fixed
-        Single-channel images of identical shape (2-D or 3-D).
+        Single-channel images (2-D or 3-D).  Identical shape unless an init
+        (below) resamples ``moving`` onto the ``fixed`` grid.
     spec
         ``DemonsSpec`` controlling the schedule and regularisation.
     force
@@ -197,26 +204,42 @@ def diffeomorphic_demons_register(
         deformable registration); a length-``spec.levels`` **coarse-to-fine**
         sequence sets a per-level schedule (a cheap force coarse, a high-signal
         one at the finest level).
+    init_affine, init_displacement
+        Optional warm-start / multi-stage init (at most one).  ``init_affine``
+        is a fixed->moving index matrix (as ``rigid_register`` /
+        ``affine_register`` return); ``init_displacement`` is a fixed-grid
+        displacement field (e.g. a SynthMorph network output).  ``moving`` is
+        pre-warped by it onto the ``fixed`` grid and the **residual** is
+        registered; the returned ``displacement`` / ``warped`` /
+        ``jacobian_det`` are the **total** (init then residual) map, while
+        ``velocity`` is the residual SVF.
 
     Returns
     -------
     ``DiffeomorphicResult`` (``velocity``, ``displacement``, ``warped``,
     ``jacobian_det``, ``cost_history``).
     """
-    if moving.shape != fixed.shape:
+    ndim = fixed.ndim
+    if ndim not in (2, 3) or moving.ndim != ndim:
         raise ValueError(
-            f'moving and fixed must share shape; got {moving.shape} '
-            f'vs {fixed.shape}.'
-        )
-    ndim = moving.ndim
-    if ndim not in (2, 3):
-        raise ValueError(
-            f'diffeomorphic registration supports 2-D / 3-D '
-            f'single-channel images; got shape {moving.shape}.'
+            f'diffeomorphic registration supports 2-D / 3-D single-channel '
+            f'images; got moving {moving.shape}, fixed {fixed.shape}.'
         )
     dtype = moving.dtype
+    init_disp = resolve_init_displacement(
+        init_affine, init_displacement, fixed.shape, dtype
+    )
+    if init_disp is None and moving.shape != fixed.shape:
+        raise ValueError(
+            f'moving and fixed must share shape ({moving.shape} vs '
+            f'{fixed.shape}); pass init_affine / init_displacement to resample '
+            f'a different grid.'
+        )
+    moving_reg = prewarp_moving(
+        moving, init_disp, fixed.shape, dtype, spec.boundary_mode
+    )
     pyr_m = gaussian_pyramid(
-        moving[..., None],
+        moving_reg[..., None],
         levels=spec.levels,
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
@@ -258,17 +281,20 @@ def diffeomorphic_demons_register(
         level_solve=level_solve,
     )
 
-    id_grid = identity_grid(moving.shape, dtype=dtype)
-    s = integrate_velocity_field(
+    residual = integrate_velocity_field(
         velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
     )
-    warped = spatial_transform(
-        moving[..., None], id_grid + s, mode=spec.boundary_mode
-    )[..., 0]
-    det = jacobian_det_displacement(s)
+    total, warped, det = finalize_with_init(
+        moving,
+        residual,
+        init_disp,
+        shape=fixed.shape,
+        dtype=dtype,
+        boundary_mode=spec.boundary_mode,
+    )
     return DiffeomorphicResult(
         velocity=velocity,
-        displacement=s,
+        displacement=total,
         warped=warped,
         jacobian_det=det,
         cost_history=cost_history,
