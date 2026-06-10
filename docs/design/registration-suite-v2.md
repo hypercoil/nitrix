@@ -221,9 +221,12 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
   matrix driver (via the extracted `register_core`) rather than need a
   matrix+SVF unification, and the inverse-compositional path is a
   genuinely distinct loop — so unifying all three speculatively risks the
-  wrong abstraction.  Defer the matrix+SVF unification to **R6/R7**, when
-  BBR (matrix-family, different objective) and greedy SyN (SVF-family)
-  give a concrete third/fourth instance to factor against.
+  wrong abstraction.  ✅ *Resolved (R7c):* the warranted factoring was the
+  **SVF×2** one — Demons + greedy SyN share `_svf.svf_coarse_to_fine`.  The
+  matrix driver stays in `_core`: it carries a parameter *vector* + a
+  coordinate-space sampler, a genuinely different state machine, so a
+  matrix+SVF merge was *declined*, not deferred (BBR also turned out to be
+  single-resolution, not a coarse-to-fine instance).
 - **Introduce the `Objective` protocol** (§3) as the metric-side unifier:
   `Metric` (image pair), `BBRObjective` (boundary points), `DenseFieldForce`
   (Demons/SyN) become constructors.  ✅ *Done (R6):* `Objective` +
@@ -316,9 +319,29 @@ cost law, not at the dev size; the new recipes ship with a scaling case.
   lower at the truth, differentiable w.r.t. the moving image via
   `implicit_minimize` (FD-checked), anisotropic world-circle recovery,
   validation.
-- **R7 — greedy SyN.**  LNCC analytic force + symmetric SVF driver +
-  `greedy_syn_register`.  **Gate:** force == FD-grad of `1 − lncc`;
-  symmetric-warp recovery (ncc) with min `det J > 0`; inverse consistency.
+- **R7 — greedy SyN.** ✅ **SHIPPED** (branch `registration-suite-v2`).
+  **R7a — `metrics.lncc_grad`:** the analytic local-CC force, the closed-
+  form `∂(Σ cc)/∂moving` from the same box-sums `lncc` forms plus a second
+  box-sum pass — **machine-precision-identical to autodiff** across the
+  whole field (the reflect box filter is self-adjoint), with no autodiff
+  tape.  **R7b — `greedy_syn_register`** (`_syn.py`): symmetric forward/
+  inverse SVF flowed to a midpoint by `lncc_grad·∇warped`, composed via
+  `invert_displacement` + `compose_displacement`; diffeomorphic by
+  construction.  **R7c — SVF driver unification** (`_svf.py`):
+  `svf_coarse_to_fine` + the spacing/smoothing helpers shared by Demons
+  (n_fields=1) and SyN (n_fields=2) — the §7 factoring, scoped to the SVF
+  family (the matrix driver is a different state machine, left in `_core`).
+  **Gate (met):** `lncc_grad` == autodiff (2-D/3-D); symmetric-warp
+  recovery (ncc > 0.99 / 0.96, min `det J > 0`); **LNCC bias-robustness**
+  (recovers under a smooth multiplicative bias that defeats an SSD force);
+  symmetric identity (net `φ ≈ id` by forward/inverse cancellation).  Two
+  decisions worked through: force normalisation is a trust-region *clamp*
+  (not scale-to-step) under the fixed scan budget — **coupled to the
+  `while_loop` early-exit decision** (recorded at the site + the
+  feature-request); and the LNCC force does not vanish at a match (eps in
+  low-variance windows — standard), handled by symmetric cancellation.
+  *Deferred:* per-window variance gating of the force (so the velocities
+  settle, not just the net map).
 - **R8 — perf round.**  CPU-interp backend; certify all new recipes at
   scale; revisit Pallas / `while_loop` on profile evidence.  Then the
   benchmark round, then close the spike (full SyN/LDDMM scoped as the next
