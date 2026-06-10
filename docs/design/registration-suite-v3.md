@@ -97,7 +97,7 @@ The four axes where this applies:
 | **Iteration count** | fixed `scan` (cohort-safe, reproducible) | `while_loop` early-exit (single-pair) |
 | **Pyramid schedule** | one metric/force everywhere | per-level force/metric (fast coarse, high-signal fine) |
 
-## 3. V1 — the `Force` keystone (the central deliverable)
+## 3. V1 — the `Force` keystone (the central deliverable) ✅ SHIPPED
 
 A **`Force` protocol** in `register` — the dense-field analogue of the existing
 `Objective`. Narrow contract: `(warped, fixed) → raw per-voxel update field`
@@ -131,28 +131,42 @@ byte-for-byte (the welded path == the protocol path); `MetricForce(LNCC)` ≈
 **multimodal** (MI/NCC via `MetricForce`) deformable-recovery test; a per-level
 metric-schedule test.
 
-## 4. V2 — geometry/anisotropy unification + warm-start + multi-stage
+## 4. V2 — geometry/anisotropy + warm-start + multi-stage ✅ SHIPPED
 
 Closes the matching-grid / isotropy assumptions with targeted fixes, no new
 heavy machinery:
 
-- **Physical LNCC windows.** The *recipe* converts a mm radius + spacing into
-  per-axis voxel radii (`lncc` already accepts a per-axis `Sequence[int]`);
-  metrics stay spacing-agnostic.
-- **Warm-start / external-field seeding.** `init_velocity` / `init_displacement`
-  on the SVF driver (`svf_coarse_to_fine` currently inits the field to zeros) +
-  the recipes — the **SynthMorph-seed-then-refine** use case.
-- **Affine-init → deformable composition.** `init_affine` resamples the moving
-  onto the fixed grid and the result composes the affine with the warp — ANTs'
-  `-t Rigid -t Affine -t SyN` multi-stage, and the principled answer to
-  "different grids" for the deformable stage (drops the `shape ==` constraint
-  via composition, not by reworking the field geometry).
-- **A shared `GeometryContext`** (spacing + grid + voxel→world affine) threaded
-  uniformly, replacing today's split (`spacing` for dense, `CoordinateSpace` for
-  matrix). The matrix `CoordinateSpace` becomes a view onto it.
+- **Warm-start / multi-stage init (V2a, `9d5610d`).** One mechanism —
+  **pre-warp + compose** — serves three use cases: `init_displacement`
+  (SynthMorph seed-then-refine), `init_affine` (the ANTs `Rigid→Affine→SyN`
+  multi-stage, from a prior matrix recipe), and **different grids** (the
+  pre-warp resamples moving onto the fixed grid, so the `shape ==` constraint
+  applies only without an init). The recipe registers the *residual* and
+  composes; `displacement`/`warped`/`jacobian_det` are the total map.
+- **Physical LNCC windows (V2b, `e1ce09e`).** `LNCCForce.bind` already receives
+  `rel_spacing`, so `_BoundLNCC` scales its voxel radius by `1/rel_spacing` to a
+  **physically isotropic** window (same mm extent per axis) — the convention the
+  regularisation sigmas already follow. The metric kernels stay spacing-agnostic
+  (the conversion lives in the force, where the geometry context already flows).
 
-**Gate.** Anisotropic deformable recovery; seeded-refinement recovery; multi-
-stage rigid→affine→SyN composition on different grids.
+**`GeometryContext` — declined (not deferred), a reasoned call.** The plan
+floated a shared spacing+grid+affine context unifying the matrix
+`CoordinateSpace` and the dense `spacing`. After V2a/V2b the two families use
+geometry *genuinely differently*: the matrix family composes voxel→world affines
+into the sampling matrix (`A_m⁻¹·T·A_f`), while the dense family needs only the
+fixed-grid **anisotropy ratio** (sigmas/windows/gradients) plus **index-space
+affine-init** (the pre-warp consumes the moving's world affine *before* the
+deformable stage, which then runs on the common fixed grid). A unified context
+would be a thin bag-of-fields the two paths read divergently — a forced
+abstraction with no consumer demanding the unified entry. Declined for the same
+reason the R7c matrix+SVF driver merge was: different state, not shared. A
+`spacing_from_affine` convenience can land later if a pipeline asks for it.
+
+**Gate (met).** Seeded-refinement recovery (no regression, reaches 0.99);
+rigid→SyN multi-stage recovers a large rigid offset + deformation; a
+coarser-grid moving registers via init; anisotropic physical-window SyN
+recovers; physically-isotropic per-axis radii; init mutual-exclusion + no-init
+shape-mismatch raise.
 
 ## 5. V3 — transform algebra + batched application (the Lie-group pillar)
 
@@ -243,9 +257,10 @@ adjoint substrate, if built, lands on the same `f(t, y)` interface
 - **The `Force` protocol + `MetricForce` adapter + closed-form implementers** —
   the keystone; collapses the per-recipe inlined forces into a sum of
   implementers behind one protocol (§3).
-- **A shared `GeometryContext`** (spacing + grid + affine) — ends the half-and-
-  half (`spacing` dense vs `CoordinateSpace` matrix); the matrix space becomes a
-  view onto it (§4).
+- ~~**A shared `GeometryContext`**~~ — **declined in V2** (§4): the matrix and
+  dense families use geometry divergently (world-affine sampling composition vs
+  anisotropy-ratio + index-space affine-init), so a unified context is a forced
+  abstraction; a `spacing_from_affine` convenience can land if a pipeline asks.
 - **The IC SD-projection bandwidth refinement** — the 7.1→3.7× erosion at 128³
   is the per-iteration `sd.T@err` re-reading the M×P steepest-descent array; a
   fusion / compacter layout recovers the small-size ratio at scale.
@@ -259,11 +274,14 @@ adjoint substrate, if built, lands on the same `f(t, y)` interface
 
 ## 10. Sequencing & gates
 
-- **V1 — `Force` keystone.** Metric↔instrument decoupling; per-level force.
-- **V2 — geometry/anisotropy + warm-start + multi-stage.** Physical windows;
-  `init_velocity`/`init_affine`; `GeometryContext`.
-- **V3 — transform algebra + batched application.** compose/invert/fuse/Fréchet
-  mean; batched apply.
+- **V1 — `Force` keystone.** ✅ SHIPPED. Metric↔instrument decoupling; per-level
+  force; `MetricForce` escape hatch (voxel-count rescale → exact closed-form
+  parity).
+- **V2 — geometry/anisotropy + warm-start + multi-stage.** ✅ SHIPPED. Pre-warp +
+  compose init (`init_affine`/`init_displacement`); physical LNCC windows;
+  `GeometryContext` declined.
+- **V3 — transform algebra + batched application.** ← next. compose/invert/fuse/
+  Fréchet mean; batched apply.
 - **V4 — matrix perf levers** (A/A′/B/C/E) inside the config design.
 - **V5 — ANTs-parity SyN + multimodal/groupwise capability.** Then the **LDDMM
   decision** (§8), then the perf round / hand-back to the perf agent.
