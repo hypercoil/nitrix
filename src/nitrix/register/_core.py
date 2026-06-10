@@ -42,7 +42,7 @@ voxel grid.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 import jax.numpy as jnp
 from jax.scipy.optimize import minimize
@@ -57,9 +57,8 @@ from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg import gauss_newton, levenberg_marquardt
 from ._metric import SSD, Metric
 from ._model import TransformModel
+from ._objective import MetricObjective, Objective
 from ._space import CoordinateSpace, IndexSpace, _Sampler
-
-WarpFn = Callable[[Float[Array, ' p']], Float[Array, '*spatial']]
 
 
 @dataclass(frozen=True)
@@ -165,47 +164,39 @@ def _warp(
     return warped[..., 0]
 
 
-def _optimize_level(
-    warp_fn: WarpFn,
-    fixed: Array,
+def optimize_objective(
+    objective: Objective,
     params: Array,
     *,
-    metric: Metric,
     optimizer: str,
     iterations: int,
     cg_tol: float,
 ) -> tuple[Array, Array]:
-    """Optimise ``params`` on one resolution; return ``(params, history)``.
+    """Minimise an ``Objective`` over ``params``; return ``(params, history)``.
 
-    ``warp_fn(params) -> warped`` closes over the level's moving image and
-    coordinate space; this function owns only the metric / optimiser
-    dispatch, so it is identical for every space and recipe.
+    The optimiser dispatch shared by every recipe and coordinate space: a
+    least-squares objective routes to the matrix-free Gauss-Newton /
+    Levenberg-Marquardt path; any other to BFGS on the scalar cost.  The
+    objective closes over its own data (an image pair + warp, boundary
+    samples, ...), so this function is objective-agnostic.
     """
-    use_lsq = metric.is_least_squares and optimizer in ('auto', 'lm', 'gn')
+    use_lsq = objective.is_least_squares and optimizer in ('auto', 'lm', 'gn')
     if use_lsq:
-
-        def residual(p: Array) -> Array:
-            return metric.residual(warp_fn(p), fixed)
-
         if optimizer == 'gn':
             res = gauss_newton(
-                residual, params, n_iters=iterations, cg_tol=cg_tol
+                objective.residual, params, n_iters=iterations, cg_tol=cg_tol
             )
         else:
             res = levenberg_marquardt(
-                residual, params, n_iters=iterations, cg_tol=cg_tol
+                objective.residual, params, n_iters=iterations, cg_tol=cg_tol
             )
         return res.params, res.cost_history
 
-    def cost(p: Array) -> Array:
-        return metric.cost(warp_fn(p), fixed)
-
-    init_cost = cost(params)
+    init_cost = objective.cost(params)
     out = minimize(
-        cost, params, method='BFGS', options={'maxiter': iterations}
+        objective.cost, params, method='BFGS', options={'maxiter': iterations}
     )
-    history = jnp.stack([init_cost, out.fun])
-    return out.x, history
+    return out.x, jnp.stack([init_cost, out.fun])
 
 
 def register_core(
@@ -266,11 +257,12 @@ def register_core(
                 spec=spec,
             )
 
-        params, hist = _optimize_level(
-            warp_fn,
-            f_l,
+        objective = MetricObjective(
+            metric=spec.metric, warp=warp_fn, fixed=f_l
+        )
+        params, hist = optimize_objective(
+            objective,
             params,
-            metric=spec.metric,
             optimizer=spec.optimizer,
             iterations=spec.iterations,
             cg_tol=spec.cg_tol,
