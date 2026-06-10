@@ -208,22 +208,25 @@ def _optimize_level(
     return out.x, history
 
 
-def multi_resolution_register(
+def register_core(
     moving: Float[Array, '*mspatial'],
-    fixed: Float[Array, '*fspatial'],
+    pyr_f: tuple[Float[Array, '*fspatial 1'], ...],
     *,
     model: TransformModel,
     ndim: int,
     spec: RegistrationSpec,
-    init_params: Optional[Float[Array, ' p']] = None,
-    space: CoordinateSpace = IndexSpace(),
+    space: CoordinateSpace,
+    sampler: _Sampler,
+    init_params: Float[Array, ' p'],
 ) -> RegistrationResult:
-    """Coarse-to-fine registration driver shared by the recipes."""
-    if moving.ndim != ndim or fixed.ndim != ndim:
-        raise ValueError(
-            f'expected {ndim}-D single-channel images; got moving '
-            f'{moving.shape}, fixed {fixed.shape}.'
-        )
+    """Coarse-to-fine register ``moving`` against a precomputed reference.
+
+    The per-image core of the driver: the **reference** pyramid ``pyr_f``
+    and the ``sampler`` are built once by the caller and passed in, so a
+    batched recipe (``volreg``) can compute the shared reference work once
+    and ``vmap`` only this core over a series of moving images.  Builds
+    the moving pyramid, runs the coarse-to-fine optimise, and finalises.
+    """
     dtype = moving.dtype
     pyr_m = gaussian_pyramid(
         moving[..., None],
@@ -231,24 +234,8 @@ def multi_resolution_register(
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
     )
-    pyr_f = gaussian_pyramid(
-        fixed[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
-    )
-    sampler = space.sampler(
-        ndim=ndim,
-        full_fixed_shape=fixed.shape,
-        full_moving_shape=moving.shape,
-        dtype=dtype,
-    )
-
-    params = (
-        jnp.zeros(model.n_params(ndim), dtype=dtype)
-        if init_params is None
-        else init_params
-    )
+    full_fixed_shape = pyr_f[0].shape[:-1]
+    params = init_params
     histories = []
     prev_fixed_shape: Optional[tuple[int, ...]] = None
     # Coarsest (highest index) to finest (0).
@@ -297,7 +284,7 @@ def multi_resolution_register(
         sampler,
         moving,
         transform,
-        fixed_shape=fixed.shape,
+        fixed_shape=full_fixed_shape,
         moving_shape=moving.shape,
         spec=spec,
     )
@@ -306,4 +293,50 @@ def multi_resolution_register(
         params=params,
         warped=warped,
         cost_history=jnp.concatenate(histories),
+    )
+
+
+def multi_resolution_register(
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
+    *,
+    model: TransformModel,
+    ndim: int,
+    spec: RegistrationSpec,
+    init_params: Optional[Float[Array, ' p']] = None,
+    space: CoordinateSpace = IndexSpace(),
+) -> RegistrationResult:
+    """Coarse-to-fine registration driver shared by the recipes."""
+    if moving.ndim != ndim or fixed.ndim != ndim:
+        raise ValueError(
+            f'expected {ndim}-D single-channel images; got moving '
+            f'{moving.shape}, fixed {fixed.shape}.'
+        )
+    dtype = moving.dtype
+    pyr_f = gaussian_pyramid(
+        fixed[..., None],
+        levels=spec.levels,
+        factor=spec.pyramid_factor,
+        sigma=spec.pyramid_sigma,
+    )
+    sampler = space.sampler(
+        ndim=ndim,
+        full_fixed_shape=fixed.shape,
+        full_moving_shape=moving.shape,
+        dtype=dtype,
+    )
+    params = (
+        jnp.zeros(model.n_params(ndim), dtype=dtype)
+        if init_params is None
+        else init_params
+    )
+    return register_core(
+        moving,
+        pyr_f,
+        model=model,
+        ndim=ndim,
+        spec=spec,
+        space=space,
+        sampler=sampler,
+        init_params=params,
     )

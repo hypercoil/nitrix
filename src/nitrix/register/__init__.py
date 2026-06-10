@@ -14,6 +14,10 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   intensity registration on SE(2)/SE(3) (the 3dvolreg / AIR lineage).
 - ``affine_register`` -- 12-DOF (3-D) / 6-DOF (2-D), linear block via
   ``matrix_exp``.
+- ``volreg`` -- batched rigid motion realignment of a ``(T, *spatial)``
+  series to a common reference (the ``3dvolreg`` / ``mcflirt`` task);
+  ``vmap``-ed over frames with the reference work hoisted out of the
+  batch.  Returns ``VolregResult``.
 - ``RegistrationSpec`` -- static config (pyramid, iterations, metric,
   interpolation); ``RegistrationResult`` -- the output record.
 - ``Metric`` -- the similarity objective ADT (``SSD`` / ``LNCC`` / ``MI``
@@ -34,6 +38,7 @@ from ._core import RegistrationResult, RegistrationSpec
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from ._space import CoordinateSpace, IndexSpace, WorldSpace
+from ._volreg import VolregResult, volreg
 from .diffeomorphic import (
     DemonsSpec,
     DiffeomorphicResult,
@@ -49,6 +54,8 @@ from .regulariser import (
 __all__ = [
     'rigid_register',
     'affine_register',
+    'volreg',
+    'VolregResult',
     'RegistrationSpec',
     'RegistrationResult',
     'Metric',
