@@ -146,6 +146,38 @@ def test_ic_preconditions_validated():
         rigid_register(moving, fixed, method='nope')
 
 
+def test_per_level_iteration_schedule_ic():
+    # coarse-to-fine schedule (front-load the cheap coarse levels); recovers,
+    # and the per-level counts are honoured (IC cost_history = sum of schedule).
+    moving, fixed = _rigid_pair(64)
+    res = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=3, iterations=(40, 20, 10))
+    )
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert res.cost_history.shape[0] == 70
+
+
+def test_per_level_iteration_schedule_forward():
+    moving, fixed = _rigid_pair(64)
+    res = rigid_register(
+        moving,
+        fixed,
+        spec=RegistrationSpec(levels=3, iterations=(40, 20, 10)),
+        method='forward',
+    )
+    assert float(ncc(res.warped, fixed)) > 0.99
+    # LM records an extra initial cost per level -> sum(schedule) + levels
+    assert res.cost_history.shape[0] == 73
+
+
+def test_iterations_schedule_length_validation():
+    moving, fixed = _rigid_pair(32)
+    with pytest.raises(ValueError):
+        rigid_register(
+            moving, fixed, spec=RegistrationSpec(levels=3, iterations=(40, 20))
+        )
+
+
 def test_auto_falls_back_to_forward_off_preconditions():
     # WorldSpace + auto -> forward path (no IC); still recovers.
     moving, fixed = _rigid_pair(64)

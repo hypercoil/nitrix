@@ -46,7 +46,7 @@ from ..geometry import (
 )
 from ..linalg._solver import safe_inv
 from ..linalg.matrix_function import matrix_exp, matrix_log
-from ._core import RegistrationResult, RegistrationSpec
+from ._core import RegistrationResult, RegistrationSpec, resolve_iterations
 
 # A model's steepest-descent images and its compositional update / params
 # recovery -- the only pieces of the IC kernel that differ by transform group.
@@ -186,6 +186,7 @@ def _ic_level(
     *,
     spec: RegistrationSpec,
     ndim: int,
+    iterations: int,
     compositional_update: CompositionalUpdate,
 ) -> tuple[Array, Array]:
     """Run the inverse-compositional iterations on one resolution."""
@@ -205,7 +206,7 @@ def _ic_level(
         update = compositional_update(delta, ndim)
         return matrix @ update, 0.5 * jnp.sum(err * err)
 
-    return jax.lax.scan(step, matrix, xs=None, length=spec.iterations)
+    return jax.lax.scan(step, matrix, xs=None, length=iterations)
 
 
 def ic_reference(
@@ -258,6 +259,7 @@ def ic_register_core(
     )
     matrix = init_matrix
     histories = []
+    iters_per_level = resolve_iterations(spec.iterations, spec.levels)
     prev_shape = None
     for level in range(spec.levels - 1, -1, -1):
         ref = ref_levels[level]
@@ -275,6 +277,7 @@ def ic_register_core(
             matrix,
             spec=spec,
             ndim=ndim,
+            iterations=iters_per_level[level],
             compositional_update=compositional_update,
         )
         histories.append(costs)

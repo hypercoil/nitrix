@@ -42,7 +42,7 @@ voxel grid.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Sequence, Union
 
 import jax.numpy as jnp
 from jax.scipy.optimize import minimize
@@ -75,7 +75,10 @@ class RegistrationSpec:
     levels
         Number of Gaussian-pyramid resolutions (coarse-to-fine).
     iterations
-        Optimiser iterations per level.
+        Optimiser iterations per level: an ``int`` (the same count at every
+        level) or a length-``levels`` **coarse-to-fine** tuple (front-load the
+        cheap coarse levels, starve the expensive finest one -- a second-order
+        solver converges in a handful of finest-level steps).
     metric
         Similarity objective, a ``Metric`` record carrying its own
         hyper-parameters: ``SSD()`` (within-modality; the GN/LM
@@ -96,7 +99,7 @@ class RegistrationSpec:
     """
 
     levels: int = 3
-    iterations: int = 30
+    iterations: Union[int, tuple[int, ...]] = 30
     metric: Metric = field(default_factory=SSD)
     optimizer: str = 'auto'
     interpolation: Interpolator = field(default_factory=Linear)
@@ -132,6 +135,28 @@ class RegistrationResult(NamedTuple):
     params: Float[Array, ' p']
     warped: Float[Array, '*spatial']
     cost_history: Float[Array, ' h']
+
+
+def resolve_iterations(
+    iterations: Union[int, Sequence[int]], levels: int
+) -> list[int]:
+    """Per-pyramid-level iteration counts (finest first).
+
+    ``int`` -> the same count at every level; a length-``levels`` sequence
+    (**coarse-to-fine**, the natural schedule order) -> one count per level,
+    reversed to the finest-first pyramid indexing the coarse-to-fine drivers
+    use.  Shared by the forward (``register_core``) and inverse-compositional
+    (``ic_register_core``) paths.
+    """
+    if isinstance(iterations, int):
+        return [iterations] * levels
+    seq = list(iterations)
+    if len(seq) != levels:
+        raise ValueError(
+            f'iterations schedule must have length levels={levels}; '
+            f'got {len(seq)}.'
+        )
+    return list(reversed(seq))
 
 
 def _warp(
@@ -228,6 +253,7 @@ def register_core(
     full_fixed_shape = pyr_f[0].shape[:-1]
     params = init_params
     histories = []
+    iters_per_level = resolve_iterations(spec.iterations, spec.levels)
     prev_fixed_shape: Optional[tuple[int, ...]] = None
     # Coarsest (highest index) to finest (0).
     for level in range(spec.levels - 1, -1, -1):
@@ -264,7 +290,7 @@ def register_core(
             objective,
             params,
             optimizer=spec.optimizer,
-            iterations=spec.iterations,
+            iterations=iters_per_level[level],
             cg_tol=spec.cg_tol,
         )
         histories.append(hist)
