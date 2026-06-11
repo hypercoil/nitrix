@@ -18,6 +18,9 @@ summary, and temporal regularisation.
   identity to a transform (``exp(t · log T)``; ``½``-point squares to ``T``).
 - ``velocity_mean`` -- the Fréchet mean of stationary velocity fields, which is
   the (weighted) arithmetic mean (an SVF *is* its own Lie-algebra element).
+- ``fuse_transforms`` -- collapse a multi-stage chain (matrices + displacement
+  fields) into one displacement, so ``moving`` is resampled **once** (no
+  compounded interpolation blur; one gather).
 
 The matrix chart (not the closed-form ``rigid_exp`` / ``rigid_log``) is used so
 the mean / geodesic are the *true* group operations -- no ``so(n)`` log
@@ -26,24 +29,28 @@ singularity at identity (which the Karcher init hits), and a genuine geodesic
 routes through ``safe_inv``, so these are **offline** barycentre / interpolation
 ops (a healthy GPU runs them jit- and grad-clean; the wedged-cuSolver dev box
 runs the forward pass eagerly via the CPU fallback -- hence the Python loop, not
-``lax.scan``).  Transform *fusion* lands alongside these as ``fuse_transforms``
-in V3b.
+``lax.scan``).  ``fuse_transforms`` is pure resampling (no ``safe_inv``), so it
+is GPU-native.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..linalg._solver import safe_inv
 from ..linalg.matrix_function import matrix_exp, matrix_log
+from ._interpolate import BoundaryMode
+from .grid import identity_grid, spatial_transform
+from .transform import apply_affine
 
 __all__ = [
     'transform_mean',
     'transform_geodesic',
     'velocity_mean',
+    'fuse_transforms',
 ]
 
 
@@ -127,3 +134,39 @@ def velocity_mean(
         return velocities.mean(axis=0)
     w = weights / jnp.sum(weights)
     return jnp.tensordot(w, velocities, axes=(0, 0))
+
+
+def fuse_transforms(
+    transforms: Sequence[Union[Float[Array, 'd1 d1'], Float[Array, '*spatial ndim']]],
+    shape: tuple[int, ...],
+    *,
+    mode: BoundaryMode = 'nearest',
+) -> Float[Array, '*spatial ndim']:
+    """Fuse a chain of transforms into ONE displacement field on ``shape``.
+
+    ``transforms`` are the stages applied to ``moving`` **in order**
+    (``transforms[0]`` first, as a ``rigid -> affine -> deformable`` pipeline
+    does); each is a homogeneous matrix ``(ndim+1, ndim+1)`` (applied about the
+    grid centre, the registration convention) or a displacement field on
+    ``shape`` (``(*shape, ndim)``).  Returns the single displacement ``d`` for
+    which ``spatial_transform(moving, identity_grid + d)`` reproduces warping
+    ``moving`` through the **whole** chain -- **one** interpolation instead of
+    ``N`` (a quality win: no compounded resampling blur; and a throughput win:
+    one gather).
+
+    The stages compose on the sampling grid in reverse (the last stage maps the
+    output grid first, the first stage maps into ``moving`` last):
+    ``g = T₁(T₂(… T_N(x)))``.
+    """
+    if not transforms:
+        raise ValueError('fuse_transforms: empty chain')
+    dtype = transforms[-1].dtype
+    id_grid = identity_grid(shape, dtype=dtype)
+    centre = (jnp.asarray(shape, dtype=dtype) - 1.0) / 2.0
+    g = id_grid
+    for t in reversed(transforms):
+        if t.ndim == 2:
+            g = apply_affine(g, t, center=centre)
+        else:
+            g = g + spatial_transform(t, g, mode=mode)
+    return g - id_grid

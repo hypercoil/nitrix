@@ -22,12 +22,27 @@ import numpy as np  # noqa: E402
 
 from nitrix.geometry import (  # noqa: E402
     affine_exp,
+    affine_grid,
+    fuse_transforms,
+    identity_grid,
     rigid_exp,
+    spatial_transform,
     transform_geodesic,
     transform_mean,
     velocity_mean,
 )
 from nitrix.linalg import matrix_exp, matrix_log  # noqa: E402
+from nitrix.metrics import ncc  # noqa: E402
+
+
+def _blobs2d(n=48):
+    yy, xx = np.mgrid[0:n, 0:n].astype('float64')
+    img = np.zeros((n, n), dtype='float64')
+    for cy, cx, s, a in [(0.3, 0.4, 0.13, 1.0), (0.65, 0.6, 0.15, 0.7)]:
+        img += a * np.exp(
+            -((xx - cx * n) ** 2 + (yy - cy * n) ** 2) / (2 * (s * n) ** 2)
+        )
+    return jnp.asarray(img)
 
 
 def _np(x):
@@ -56,7 +71,9 @@ def test_matrix_log_inverts_matrix_exp():
 
 def test_transform_mean_of_identical():
     t = rigid_exp(jnp.asarray([0.1, -0.05, 0.08, 3.0, -2.0, 1.5]), ndim=3)
-    assert np.allclose(_np(transform_mean(jnp.stack([t, t, t]))), _np(t), atol=1e-6)
+    assert np.allclose(
+        _np(transform_mean(jnp.stack([t, t, t]))), _np(t), atol=1e-6
+    )
 
 
 def test_transform_mean_rigid_symmetric_recovers_centre():
@@ -98,6 +115,64 @@ def test_transform_geodesic_endpoints_and_halfway():
     assert np.allclose(_np(transform_geodesic(t, 1.0)), _np(t), atol=1e-8)
     half = transform_geodesic(t, 0.5)
     assert np.allclose(_np(half @ half), _np(t), atol=1e-8)
+
+
+def test_fuse_inverse_chain_is_identity():
+    # A followed by A⁻¹ fuses to ~zero displacement (matrices only -> exact).
+    a = rigid_exp(jnp.asarray([0.2, 5.0, -3.0]), ndim=2)
+    a_inv = jnp.asarray(np.linalg.inv(_np(a)))
+    fused = fuse_transforms([a, a_inv], (48, 48))
+    assert float(jnp.abs(fused).max()) < 1e-6
+
+
+def test_fuse_matches_sequential_warp():
+    # A mixed chain (affine then displacement) fused to one resampling
+    # reproduces the sequential two-resample warp (one interpolation, not two).
+    moving = _blobs2d(48)
+    a = rigid_exp(jnp.asarray([0.12, 3.0, -2.0]), ndim=2)
+    rng = np.random.RandomState(0)
+    from nitrix.smoothing import gaussian
+
+    disp = rng.standard_normal((48, 48, 2))
+    disp = np.stack(
+        [
+            np.asarray(gaussian(jnp.asarray(disp[..., i]), sigma=6.0))
+            for i in range(2)
+        ],
+        axis=-1,
+    )
+    disp = jnp.asarray(2.0 * disp)
+    grid = identity_grid((48, 48), dtype=moving.dtype)
+    # sequential: warp by A, then by the displacement (two interpolations)
+    m1 = spatial_transform(moving[..., None], affine_grid(a, (48, 48)))[..., 0]
+    m2 = spatial_transform(m1[..., None], grid + disp)[..., 0]
+    # fused: one interpolation of the composed grid
+    fused = fuse_transforms([a, disp], (48, 48))
+    m_fused = spatial_transform(moving[..., None], grid + fused)[..., 0]
+    assert float(ncc(m_fused, m2)) > 0.99
+
+
+def test_fuse_batched_application():
+    # Batched application over a cohort: vmap the fused warp across K transforms
+    # (the cohort-throughput path; spatial_transform_batched is the primitive).
+    moving = _blobs2d(48)
+    grid = identity_grid((48, 48), dtype=moving.dtype)
+    angles = jnp.asarray([0.05, 0.1, 0.15, -0.08])
+    fused = jnp.stack(
+        [
+            fuse_transforms(
+                [rigid_exp(jnp.asarray([a, 2.0, -1.0]), ndim=2)], (48, 48)
+            )
+            for a in angles
+        ]
+    )
+
+    def warp(d):
+        return spatial_transform(moving[..., None], grid + d)[..., 0]
+
+    out = jax.vmap(warp)(fused)
+    assert out.shape == (4, 48, 48)
+    assert bool(jnp.all(jnp.isfinite(out)))
 
 
 def test_velocity_mean():
