@@ -42,8 +42,9 @@ voxel grid.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import Callable, NamedTuple, Optional, Sequence, Union, cast
 
+import jax
 import jax.numpy as jnp
 from jax.scipy.optimize import minimize
 from jaxtyping import Array, Float
@@ -189,6 +190,64 @@ def _warp(
     return warped[..., 0]
 
 
+def _warp_jacobian(
+    sampler: _Sampler,
+    moving: Array,
+    *,
+    model: TransformModel,
+    ndim: int,
+    fixed_shape: tuple[int, ...],
+    moving_shape: tuple[int, ...],
+    spec: RegistrationSpec,
+) -> Callable[[Array], Array]:
+    """Closed-form Jacobian of the warp residual w.r.t. the transform params.
+
+    ``J[x, j] = ∂warp(x)/∂grid · ∂grid(x;θ)/∂θ_j`` by the chain rule, factored so
+    the expensive **gather** runs ``ndim`` times (the interpolation derivative
+    ``∂warp/∂grid``, one JVP per grid axis) rather than ``jax.jacfwd``'s ``P``
+    times (one warp-tangent gather per parameter); ``∂grid/∂θ`` is a ``jacfwd``
+    of the grid *construction* (matmul only, no gather).  This is **exact** --
+    equal to ``jax.jacfwd`` of the SSD residual (the interpolation derivative,
+    not a central-difference approximation), so the forward path is byte-
+    unchanged, just faster, with the gather cut from ``O(P)`` to ``O(ndim)``.
+    It speeds the cases the inverse-compositional kernel cannot cover (the
+    WorldSpace / forced-forward forward path).  Returns ``params -> (M, P)``.
+    """
+
+    def grid_of(params: Array) -> Array:
+        matrix, center = sampler.index_sampling(
+            model.exp(params, ndim=ndim),
+            fixed_shape=fixed_shape,
+            moving_shape=moving_shape,
+        )
+        return affine_grid(matrix, fixed_shape, center=center)
+
+    def warp_at(grid: Array) -> Array:
+        return spatial_transform(
+            moving[..., None],
+            grid,
+            mode=spec.boundary_mode,
+            cval=spec.cval,
+            method=spec.interpolation,
+        )[..., 0]
+
+    def jacobian(params: Array) -> Array:
+        grid = grid_of(params)
+        # ∂warp/∂grid: the exact interpolation derivative, one JVP per axis.
+        def dwarp_axis(axis: int) -> Array:
+            tangent = jnp.zeros(grid.shape, dtype=grid.dtype).at[..., axis].set(
+                1.0
+            )
+            return cast(Array, jax.jvp(warp_at, (grid,), (tangent,))[1])
+
+        dwarp = jnp.stack([dwarp_axis(d) for d in range(ndim)], axis=-1)
+        dgrid = jax.jacfwd(grid_of)(params)
+        jac = jnp.einsum('...d,...dp->...p', dwarp, dgrid)
+        return jac.reshape(-1, params.shape[-1])
+
+    return jacobian
+
+
 def optimize_objective(
     objective: Objective,
     params: Array,
@@ -196,6 +255,7 @@ def optimize_objective(
     optimizer: str,
     iterations: int,
     cg_tol: float,
+    jacobian_fn: Optional[Callable[[Array], Array]] = None,
 ) -> tuple[Array, Array]:
     """Minimise an ``Objective`` over ``params``; return ``(params, history)``.
 
@@ -203,17 +263,28 @@ def optimize_objective(
     least-squares objective routes to the matrix-free Gauss-Newton /
     Levenberg-Marquardt path; any other to BFGS on the scalar cost.  The
     objective closes over its own data (an image pair + warp, boundary
-    samples, ...), so this function is objective-agnostic.
+    samples, ...), so this function is objective-agnostic.  ``jacobian_fn``
+    (optional) supplies the residual's ``M×P`` Jacobian in closed form for the
+    least-squares path (the analytic warp Jacobian -- far fewer gathers than
+    ``jax.jacfwd``); ``None`` falls back to ``jacfwd`` (the parity oracle).
     """
     use_lsq = objective.is_least_squares and optimizer in ('auto', 'lm', 'gn')
     if use_lsq:
         if optimizer == 'gn':
             res = gauss_newton(
-                objective.residual, params, n_iters=iterations, cg_tol=cg_tol
+                objective.residual,
+                params,
+                n_iters=iterations,
+                cg_tol=cg_tol,
+                jacobian_fn=jacobian_fn,
             )
         else:
             res = levenberg_marquardt(
-                objective.residual, params, n_iters=iterations, cg_tol=cg_tol
+                objective.residual,
+                params,
+                n_iters=iterations,
+                cg_tol=cg_tol,
+                jacobian_fn=jacobian_fn,
             )
         return res.params, res.cost_history
 
@@ -286,12 +357,28 @@ def register_core(
         objective = MetricObjective(
             metric=spec.metric, warp=warp_fn, fixed=f_l
         )
+        # Closed-form warp Jacobian for the least-squares (SSD) forward path
+        # -- far fewer gathers than jacfwd (the parity oracle).
+        jac_fn = (
+            _warp_jacobian(
+                sampler,
+                m_l,
+                model=model,
+                ndim=ndim,
+                fixed_shape=f_shape,
+                moving_shape=m_shape,
+                spec=spec,
+            )
+            if spec.metric.is_least_squares
+            else None
+        )
         params, hist = optimize_objective(
             objective,
             params,
             optimizer=spec.optimizer,
             iterations=iters_per_level[level],
             cg_tol=spec.cg_tol,
+            jacobian_fn=jac_fn,
         )
         histories.append(hist)
         prev_fixed_shape = f_shape
