@@ -1,10 +1,23 @@
 # Registration optimisers: try a `while_loop` early-exit forward (implicit backward already supports it)
 
-> **Status (2026-06-10): scoped to single-pair matrix recipes by R8 evidence;
-> still acceptance-gated there.** Surfaced by `nitrix-perf-bench` while benching
-> the registration recipes across scale on an L4. **Accept only if it is a clean
-> win on hard, brain-realistic cases** — not the easy toy warp (where early-exit
-> trivially helps but is unrepresentative).
+> **Status (2026-06-11): GATE PASSED → SHIPPED electively for single-pair IC
+> (V4e `a9cc855`).** The gate probe (`bench/early_exit_probe.py`, single-pair
+> rigid IC, 96²) showed a **clean win on the hard case**: 28°/14-vox warp
+> converges in 18 iters vs 90 fixed, **1.69× faster with identical recovery**
+> (ncc 0.9924 == 0.9924); easy 10 iters, 2.09×. Shipped as opt-in
+> `RegistrationSpec.convergence = Convergence(threshold, window)` (ANTs-style
+> windowed slope criterion) on the single-pair inverse-compositional path
+> (rigid + affine); the fixed `lax.scan` stays the default (reproducible +
+> `vmap`-batchable for the cohort/volreg path). Not reverse-differentiable
+> (use the implicit path for a differentiable layer). The clamp-vs-scale
+> revisit below is **not** triggered: `while_loop` landed for the *matrix* IC
+> path, not greedy SyN (which uses its full budget, so early-exit is moot) —
+> the R7 clamp decision stands.
+>
+> *(Original gate, for the record:)* Surfaced by `nitrix-perf-bench` while
+> benching the registration recipes across scale on an L4. **Accept only if it
+> is a clean win on hard, brain-realistic cases** — not the easy toy warp
+> (where early-exit trivially helps but is unrepresentative).
 >
 > **R8 convergence measurement (`bench/conv_trajectory.py`, 96³ f32) resolves
 > *which* recipes this can help:**

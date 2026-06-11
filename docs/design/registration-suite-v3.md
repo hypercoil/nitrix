@@ -230,26 +230,34 @@ mean recovers a known centre + matches a reference Karcher iterate; fused
 single-resample == sequential resamples to interpolation tolerance (and faster);
 batched-apply throughput certified at cohort scale.
 
-## 6. V4 — matrix perf levers, inside the config design
+## 6. V4 — matrix perf levers, inside the config design ✅ SHIPPED
 
-The last-round levers (`registration-matrix-recipe-perf-levers.md`) become the
-**matrix-solver row** of the §2 table — fast implementers auto-selected on
-preconditions, the forward/generic path as the escape hatch:
+All five landed (`fbd2597` A, `9e53019` A′, `d46e956` E, `aaa0f4a` C, `a9cc855`
+B). The last-round levers (`registration-matrix-recipe-perf-levers.md`) became
+the **matrix-solver row** of the §2 table — fast implementers auto-selected on
+preconditions, the forward/generic path as the escape hatch *and* parity oracle:
 
-- **A** single-pair inverse-compositional (rigid) — wire the existing
-  `_inverse_compositional` kernel into `rigid_register` (SSD+IndexSpace
-  dispatch). **Measured 3.7–7.1×, identical recovery** (`bench/ic_vs_forward.py`).
-- **A′** affine inverse-compositional (generalise the steepest-descent to the
-  affine generators + a general compositional inverse).
-- **C** closed-form forward steepest-descent (`∇warped·∂grid/∂θ`) for the cases
-  IC can't cover (WorldSpace, affine-forward).
-- **E** per-level iteration schedule (shared with the dense-field side).
-- **B** single-pair `while_loop` early-exit (the iteration-count fast path;
-  rigid converges ~5/20 even when hard) — and the `_normalise_step`
-  clamp-vs-scale revisit it triggers.
+- **A** ✅ single-pair inverse-compositional (rigid) — `rigid_register(method=
+  "auto")` takes it on SSD+IndexSpace. **Measured 3.7–7.1×, identical recovery**.
+- **A′** ✅ affine inverse-compositional — full `gl(n)` generators; the
+  compositional inverse is GPU-native (`matrix_exp(−A) = matrix_exp(A)⁻¹`, no
+  solve). Affine has the largest P, so the most to save.
+- **C** ✅ closed-form forward warp Jacobian — `∂warp/∂grid · ∂grid/∂θ` with the
+  *exact* interpolation derivative (`ndim` JVPs, not central diff), so it
+  **equals jacfwd** (parity oracle) and the forward path is byte-unchanged, just
+  faster (gather `O(ndim)` not `O(P)`). Covers WorldSpace / forced-forward.
+- **E** ✅ per-level iteration schedule (`RegistrationSpec.iterations` int or
+  coarse-to-fine tuple), threaded through both the IC and forward paths.
+- **B** ✅ single-pair `while_loop` early-exit — **gate passed** (hard case
+  1.69×, identical recovery); shipped electively as `RegistrationSpec.convergence
+  = Convergence(threshold, window)` (ANTs-style) on the single-pair IC path, the
+  fixed `scan` staying the default. The clamp-vs-scale revisit is **not**
+  triggered (`while_loop` landed for matrix IC, not greedy SyN).
 
-**Gate.** IC==forward parity; the measured speedups certified at scale; the
-`while_loop` iso-accuracy on a hard single-pair case.
+**Gate (met).** IC==forward parity (rigid+affine, IndexSpace+WorldSpace); the
+closed-form Jacobian == jacfwd to 1e-9; the per-level schedule honoured in both
+paths; the `while_loop` early-exit a clean win on the hard case with identical
+recovery.
 
 ## 7. V5 — ANTs-parity SyN completion + multimodal/groupwise capability
 
@@ -313,9 +321,11 @@ adjoint substrate, if built, lands on the same `f(t, y)` interface
 - **V3 — transform algebra + batched application.** ✅ SHIPPED. `transform_mean`
   (Fréchet) / `transform_geodesic` / `velocity_mean` / `fuse_transforms` +
   `linalg.matrix_log` (graduated).
-- **V4 — matrix perf levers** (A/A′/B/C/E) inside the config design. ← next.
-- **V5 — ANTs-parity SyN + multimodal/groupwise capability.** Then the **LDDMM
-  decision** (§8), then the perf round / hand-back to the perf agent.
+- **V4 — matrix perf levers** (A/A′/B/C/E) inside the config design. ✅ SHIPPED.
+  rigid+affine IC fast paths; closed-form forward Jacobian (==jacfwd); per-level
+  schedule; elective ANTs-style early-exit.
+- **V5 — ANTs-parity SyN + multimodal/groupwise capability.** ← next. Then the
+  **LDDMM decision** (§8), then the perf round / hand-back to the perf agent.
 
 Each phase: pure-functional surface, JAX fallback floor, rigorous typing
 (Protocols where they earn it), immutable/frozen specs + NamedTuple results,
