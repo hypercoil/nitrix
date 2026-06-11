@@ -259,16 +259,26 @@ closed-form Jacobian == jacfwd to 1e-9; the per-level schedule honoured in both
 paths; the `while_loop` early-exit a clean win on the hard case with identical
 recovery.
 
-## 7. V5 — ANTs-parity SyN completion + multimodal/groupwise capability
+## 7. V5 — ANTs-parity SyN completion + multimodal/groupwise capability ✅ SHIPPED
 
-With V1 (metric-generic force) + V2 (multi-stage, anisotropy) + V3 (algebra)
-landed, greedy SyN reaches ANTs feature parity: multi-metric (incl. multimodal
-via `MetricForce`), affine-init, **masks** (windowed-metric + force masking),
-multi-stage orchestration helpers, and the per-level metric schedule. The
-**multimodal template construction** use case is delivered at the *capability*
-level: `MetricForce(MI)` deformable + the V3 Fréchet mean as the template centre
-+ batched application over the cohort. Template *data structures* / the full
-atlas-build loop remain out of scope (→ `thrux`).
+Greedy SyN reaches ANTs feature parity. The only **new** V5 feature was **masks**
+(V5a `25f517d`): a fixed-grid `mask` gates the driving force to a region (the
+masked area drives, the rest follows by regularisation), pyramided per level on
+both the Demons and SyN recipes (`mask=None` byte-unchanged). Everything else
+was already delivered by V1–V3 and is verified to compose:
+
+- **multi-metric** (incl. multimodal via `MetricForce`) — V1; the MI test drives
+  a cross-modal pair end-to-end.
+- **affine-init multi-stage** (`init_affine` → deformable, the ANTs
+  `Rigid/Affine → SyN` pipeline) — V2a.
+- **per-level metric schedule** — V1b (coarse-to-fine `force` sequence).
+- the **multimodal template construction** use case at the *capability* level:
+  `MetricForce(MI)` deformable + the V3 `velocity_mean` / `transform_mean`
+  (Fréchet) template centre + V3 `fuse_transforms` / `spatial_transform_batched`
+  cohort application.
+
+Template *data structures* / the full groupwise atlas-build loop stay out of
+scope (the capability-only scope choice → `thrux`).
 
 ## 8. LDDMM / geodesic shooting — scoped, decided at end-of-round
 
@@ -324,8 +334,9 @@ adjoint substrate, if built, lands on the same `f(t, y)` interface
 - **V4 — matrix perf levers** (A/A′/B/C/E) inside the config design. ✅ SHIPPED.
   rigid+affine IC fast paths; closed-form forward Jacobian (==jacfwd); per-level
   schedule; elective ANTs-style early-exit.
-- **V5 — ANTs-parity SyN + multimodal/groupwise capability.** ← next. Then the
-  **LDDMM decision** (§8), then the perf round / hand-back to the perf agent.
+- **V5 — ANTs-parity SyN + multimodal/groupwise capability.** ✅ SHIPPED (masks
+  the only new feature; the rest delivered by V1–V3). Then the **LDDMM
+  decision** (§8) ← here, then the perf round / hand-back to the perf agent.
 
 Each phase: pure-functional surface, JAX fallback floor, rigorous typing
 (Protocols where they earn it), immutable/frozen specs + NamedTuple results,
