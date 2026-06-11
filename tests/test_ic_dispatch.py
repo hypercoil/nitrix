@@ -27,6 +27,7 @@ from nitrix.geometry import (  # noqa: E402
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import (  # noqa: E402
     LNCC,
+    Convergence,
     RegistrationSpec,
     WorldSpace,
     affine_register,
@@ -176,6 +177,50 @@ def test_iterations_schedule_length_validation():
         rigid_register(
             moving, fixed, spec=RegistrationSpec(levels=3, iterations=(40, 20))
         )
+
+
+def test_early_exit_recovers_like_fixed_scan():
+    # opt-in early-exit (convergence set) recovers the same as the fixed scan,
+    # with the cost_history shape preserved (the trace is padded to the cap).
+    moving, fixed = _rigid_pair(64)
+    spec_fixed = RegistrationSpec(levels=3, iterations=30)
+    spec_early = RegistrationSpec(
+        levels=3,
+        iterations=30,
+        convergence=Convergence(threshold=1e-6, window=10),
+    )
+    res_fixed = rigid_register(moving, fixed, spec=spec_fixed)
+    res_early = rigid_register(moving, fixed, spec=spec_early)
+    assert float(ncc(res_fixed.warped, fixed)) > 0.99
+    assert float(ncc(res_early.warped, fixed)) > 0.99
+    assert (
+        abs(
+            float(ncc(res_early.warped, fixed))
+            - float(ncc(res_fixed.warped, fixed))
+        )
+        < 1e-3
+    )
+    assert res_early.cost_history.shape == res_fixed.cost_history.shape
+
+
+def test_early_exit_default_is_fixed_scan():
+    # convergence=None (default) is byte-identical to the explicit fixed scan
+    moving, fixed = _rigid_pair(64)
+    spec = RegistrationSpec(levels=3, iterations=20)
+    a = rigid_register(moving, fixed, spec=spec)
+    b = rigid_register(
+        moving,
+        fixed,
+        spec=RegistrationSpec(levels=3, iterations=20, convergence=None),
+    )
+    assert np.allclose(np.asarray(a.warped), np.asarray(b.warped), atol=1e-12)
+
+
+def test_early_exit_affine():
+    moving, fixed = _affine_pair(64)
+    spec = RegistrationSpec(levels=3, iterations=30, convergence=Convergence())
+    res = affine_register(moving, fixed, spec=spec)
+    assert float(ncc(res.warped, fixed)) > 0.99
 
 
 def test_auto_falls_back_to_forward_off_preconditions():

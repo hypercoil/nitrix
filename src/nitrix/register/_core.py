@@ -63,6 +63,40 @@ from ._space import CoordinateSpace, IndexSpace, _Sampler
 
 
 @dataclass(frozen=True)
+class Convergence:
+    """Early-exit convergence criterion (ANTs-style threshold + window).
+
+    Opt-in (``RegistrationSpec.convergence``) early stopping for the
+    **single-pair** inverse-compositional path: per level, a ``lax.while_loop``
+    runs until the cost has plateaued -- a least-squares-line fit over the last
+    ``window`` per-iteration costs whose normalised slope falls below
+    ``threshold`` -- or the level's iteration count (the hard cap) is reached.
+    The fixed ``lax.scan`` stays the default (``convergence=None``): it is
+    reproducible (data-independent trip count) and ``vmap``-batchable (the
+    cohort/volreg path), which early-exit is not -- so early-exit is for the
+    single-pair recipes only.
+
+    Attributes
+    ----------
+    threshold
+        Stop when the windowed normalised cost slope drops below this.
+    window
+        Number of recent costs the slope is fit over (the convergence window).
+
+    Notes
+    -----
+    An early-exit forward is **not** reverse-differentiable (``lax.while_loop``
+    has no reverse rule); for a differentiable registration layer use the
+    implicit-function path (``linalg.implicit_least_squares`` /
+    ``implicit_minimize``), whose adjoint is solved at the optimum and is
+    trajectory-independent.
+    """
+
+    threshold: float = 1e-6
+    window: int = 10
+
+
+@dataclass(frozen=True)
 class RegistrationSpec:
     """Static configuration for a registration recipe.
 
@@ -97,6 +131,11 @@ class RegistrationSpec:
         Downsample factor and anti-alias sigma for the pyramid.
     cg_tol
         Inner-CG tolerance for the GN/LM path.
+    convergence
+        ``None`` (default) -> a fixed ``iterations`` count (reproducible,
+        vmap-batchable).  A :class:`Convergence` -> opt-in early-exit for the
+        single-pair inverse-compositional path (``iterations`` becomes the hard
+        cap).
     """
 
     levels: int = 3
@@ -109,6 +148,7 @@ class RegistrationSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     cg_tol: float = 1e-6
+    convergence: Optional[Convergence] = None
 
 
 class RegistrationResult(NamedTuple):

@@ -46,7 +46,12 @@ from ..geometry import (
 )
 from ..linalg._solver import safe_inv
 from ..linalg.matrix_function import matrix_exp, matrix_log
-from ._core import RegistrationResult, RegistrationSpec, resolve_iterations
+from ._core import (
+    Convergence,
+    RegistrationResult,
+    RegistrationSpec,
+    resolve_iterations,
+)
 
 # A model's steepest-descent images and its compositional update / params
 # recovery -- the only pieces of the IC kernel that differ by transform group.
@@ -209,6 +214,76 @@ def _ic_level(
     return jax.lax.scan(step, matrix, xs=None, length=iterations)
 
 
+def _ic_level_converge(
+    moving: Array,
+    ref: ReferenceLevel,
+    matrix0: Array,
+    *,
+    spec: RegistrationSpec,
+    ndim: int,
+    iterations: int,
+    compositional_update: CompositionalUpdate,
+    convergence: Convergence,
+) -> tuple[Array, Array]:
+    """IC iterations on one resolution with ANTs-style early-exit.
+
+    A ``lax.while_loop`` that stops when the windowed normalised cost slope (a
+    least-squares-line fit over the last ``window`` per-iteration costs) drops
+    below ``threshold``, or ``iterations`` (the hard cap) is reached.  Returns
+    ``(matrix, costs)`` with ``costs`` a fixed ``(iterations,)`` trace (the
+    unrun tail padded with the final cost), so the result's ``cost_history``
+    keeps its shape.
+    """
+    fixed, sd, h_inv, center = ref
+    dtype = moving.dtype
+    window = convergence.window
+    threshold = convergence.threshold
+    t = jnp.arange(window, dtype=dtype)
+    t_centred = t - jnp.mean(t)
+    t_var = jnp.sum(t_centred * t_centred)
+
+    def cost_and_delta(matrix: Array) -> tuple[Array, Array]:
+        grid = affine_grid(matrix, fixed.shape, center=center)
+        warped = spatial_transform(
+            moving[..., None],
+            grid,
+            mode=spec.boundary_mode,
+            cval=spec.cval,
+            method=spec.interpolation,
+        )[..., 0]
+        err = (warped - fixed).reshape(-1)
+        return 0.5 * jnp.sum(err * err), h_inv @ (sd.T @ err)
+
+    def converged(buf: Array) -> Array:
+        slope = jnp.sum(t_centred * (buf - jnp.mean(buf))) / t_var
+        return jnp.abs(slope) / (jnp.abs(jnp.mean(buf)) + 1e-12) < threshold
+
+    def cond(carry: tuple[Array, Array, Array, Array]) -> Array:
+        _, i, buf, _ = carry
+        return (i < iterations) & ((i < window) | ~converged(buf))
+
+    def body(
+        carry: tuple[Array, Array, Array, Array],
+    ) -> tuple[Array, Array, Array, Array]:
+        matrix, i, buf, hist = carry
+        cost, delta = cost_and_delta(matrix)
+        update = compositional_update(delta, ndim)
+        buf = jnp.concatenate([buf[1:], cost[None]])
+        return matrix @ update, i + 1, buf, hist.at[i].set(cost)
+
+    cost0, _ = cost_and_delta(matrix0)
+    init = (
+        matrix0,
+        jnp.asarray(0),
+        jnp.full((window,), cost0, dtype=dtype),
+        jnp.full((iterations,), cost0, dtype=dtype),
+    )
+    matrix, last_i, buf, hist = jax.lax.while_loop(cond, body, init)
+    # Pad the unrun tail of the trace with the final cost.
+    hist = jnp.where(jnp.arange(iterations) < last_i, hist, buf[-1])
+    return matrix, hist
+
+
 def ic_reference(
     pyr_f: tuple[Float[Array, '*spatial 1'], ...],
     ndim: int,
@@ -271,15 +346,27 @@ def ic_register_core(
                 prev_shape, dtype=dtype
             )
             matrix = matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] * ratio)
-        matrix, costs = _ic_level(
-            m_l,
-            ref,
-            matrix,
-            spec=spec,
-            ndim=ndim,
-            iterations=iters_per_level[level],
-            compositional_update=compositional_update,
-        )
+        if spec.convergence is None:
+            matrix, costs = _ic_level(
+                m_l,
+                ref,
+                matrix,
+                spec=spec,
+                ndim=ndim,
+                iterations=iters_per_level[level],
+                compositional_update=compositional_update,
+            )
+        else:
+            matrix, costs = _ic_level_converge(
+                m_l,
+                ref,
+                matrix,
+                spec=spec,
+                ndim=ndim,
+                iterations=iters_per_level[level],
+                compositional_update=compositional_update,
+                convergence=spec.convergence,
+            )
         histories.append(costs)
         prev_shape = f_shape
 
