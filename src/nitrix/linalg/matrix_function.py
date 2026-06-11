@@ -16,7 +16,7 @@ rotation block is skew-symmetric, also non-symmetric).
 This is the first member of the §12.2 ``linalg.matrix_function`` family;
 registration is the named consumer that graduates it.  ``matrix_log`` joins it
 here (its warranting consumer is the affine Fréchet/Karcher mean,
-``geometry.algebra.affine_mean``); the named ``matrix_polynomial`` /
+``geometry.algebra.transform_mean``); the named ``matrix_polynomial`` /
 ``frechet_derivative`` specialisations remain on the §12.2 backlog.
 
 ``matrix_exp`` implementation: **scaling-and-squaring with a truncated Taylor

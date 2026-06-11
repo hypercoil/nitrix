@@ -245,13 +245,18 @@ def _warp_jacobian(
     ``J[x, j] = ∂warp(x)/∂grid · ∂grid(x;θ)/∂θ_j`` by the chain rule, factored so
     the expensive **gather** runs ``ndim`` times (the interpolation derivative
     ``∂warp/∂grid``, one JVP per grid axis) rather than ``jax.jacfwd``'s ``P``
-    times (one warp-tangent gather per parameter); ``∂grid/∂θ`` is a ``jacfwd``
-    of the grid *construction* (matmul only, no gather).  This is **exact** --
-    equal to ``jax.jacfwd`` of the SSD residual (the interpolation derivative,
-    not a central-difference approximation), so the forward path is byte-
-    unchanged, just faster, with the gather cut from ``O(P)`` to ``O(ndim)``.
-    It speeds the cases the inverse-compositional kernel cannot cover (the
-    WorldSpace / forced-forward forward path).  Returns ``params -> (M, P)``.
+    times (one warp-tangent gather per parameter); ``∂grid/∂θ`` is taken one
+    parameter-column at a time (a JVP of the grid *construction* -- matmul only,
+    no gather) and contracted against ``∂warp/∂grid`` immediately, so the dense
+    ``(*spatial, ndim, P)`` grid tangent that ``jax.jacfwd`` would materialise
+    (``ndim×`` the warp's memory) never exists -- peak memory is the ``(M, P)``
+    Jacobian itself plus one ``(*spatial, ndim)`` column at a time.  This is
+    **exact** -- equal to ``jax.jacfwd`` of the SSD residual (the interpolation
+    derivative, not a central-difference approximation), so the forward path is
+    byte-unchanged, just faster, with the gather cut from ``O(P)`` to
+    ``O(ndim)``.  It speeds the cases the inverse-compositional kernel cannot
+    cover (the WorldSpace / forced-forward forward path).  Returns
+    ``params -> (M, P)``.
     """
 
     def grid_of(params: Array) -> Array:
@@ -281,9 +286,16 @@ def _warp_jacobian(
             return cast(Array, jax.jvp(warp_at, (grid,), (tangent,))[1])
 
         dwarp = jnp.stack([dwarp_axis(d) for d in range(ndim)], axis=-1)
-        dgrid = jax.jacfwd(grid_of)(params)
-        jac = jnp.einsum('...d,...dp->...p', dwarp, dgrid)
-        return jac.reshape(-1, params.shape[-1])
+        # ∂grid/∂θ one column at a time, contracted into ∂warp/∂grid on the
+        # spot -- the dense (*spatial, ndim, P) grid tangent never materialises.
+        p = params.shape[-1]
+
+        def jac_column(j: int) -> Array:
+            e_j = jnp.zeros((p,), dtype=params.dtype).at[j].set(1.0)
+            dgrid_j = cast(Array, jax.jvp(grid_of, (params,), (e_j,))[1])
+            return jnp.sum(dwarp * dgrid_j, axis=-1).reshape(-1)
+
+        return jnp.stack([jac_column(j) for j in range(p)], axis=-1)
 
     return jacobian
 

@@ -33,6 +33,7 @@ from nitrix.register import (  # noqa: E402
     affine_register,
     rigid_register,
 )
+from nitrix.register._inverse_compositional import _hessian_inv  # noqa: E402
 
 
 def _blobs(n=64, seed=0):
@@ -100,6 +101,48 @@ def test_affine_ic_matches_forward():
     assert np.allclose(
         np.asarray(ic.warped), np.asarray(fwd.warped), atol=3e-2
     )
+
+
+def test_hessian_inv_jacobi_conditioning():
+    # Unit guard on the Jacobi-preconditioned Hessian inverse: with
+    # steepest-descent columns spanning orders of magnitude (the affine case --
+    # linear-block columns scale with the voxel coordinate, translation columns
+    # are O(1)), the inverse must still recover a step in the small-scale
+    # direction.  A single scalar Levenberg ridge (``λ·mean(diag H)``) swamps it;
+    # the per-diagonal Jacobi ridge (``λ·diag H``) preserves it.
+    sd = jnp.asarray([[1e4, 0.0], [0.0, 1.0]])
+    h = sd.T @ sd
+    x_true = jnp.asarray([1.0, 1.0])
+    x = _hessian_inv(sd) @ (h @ x_true)
+    assert np.allclose(np.asarray(x), np.asarray(x_true), rtol=1e-3)
+
+
+def _hard_affine_pair(n=64):
+    fixed = _blobs(n)
+    center = (jnp.asarray((n, n), dtype=fixed.dtype) - 1.0) / 2.0
+    # a stiff affine: sizeable rotation + anisotropic scale + shear + a large
+    # translation -- the steepest-descent columns span orders of magnitude, so
+    # the constant-template Hessian is badly conditioned (the case the Jacobi
+    # preconditioner makes robust).
+    params = jnp.asarray([0.18, -0.22, 0.20, -0.16, 6.0, -5.0])
+    grid = affine_grid(affine_exp(params, ndim=2), (n, n), center=center)
+    moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
+    return moving, fixed, np.linalg.inv(np.asarray(affine_exp(params, ndim=2)))
+
+
+def test_hard_affine_ic_recovers():
+    # Integration guard: on a stiff affine the IC path must recover the true
+    # transform (the fixed->moving map is the inverse of the resampling affine),
+    # not merely a plausible warp -- a mis-conditioned Hessian would stall short.
+    moving, fixed, t_inv = _hard_affine_pair(64)
+    spec = RegistrationSpec(levels=3, iterations=40)
+    ic = affine_register(
+        moving, fixed, spec=spec, method='inverse_compositional'
+    )
+    assert float(ncc(ic.warped, fixed)) > 0.99
+    # recovered fixed->moving index map ~= inverse of the resampling affine
+    # (interpolation-limited; nearest-neighbour resampling caps the accuracy).
+    assert np.allclose(np.asarray(ic.matrix), t_inv, atol=0.12)
 
 
 def test_affine_auto_uses_ic():

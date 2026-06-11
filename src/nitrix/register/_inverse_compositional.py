@@ -167,11 +167,28 @@ def _affine_params_from_matrix(matrix: Array, ndim: int) -> Array:
 
 
 def _hessian_inv(sd: Float[Array, ' m p']) -> Float[Array, ' p p']:
-    """Inverse Gauss-Newton Hessian ``(SDᵀSD + λI)⁻¹`` (computed once)."""
+    """Inverse Gauss-Newton Hessian (Jacobi-preconditioned, computed once).
+
+    The affine steepest-descent columns span orders of magnitude -- the
+    linear-block columns scale with the voxel coordinate ``x − c`` (``O(n)`` for
+    an ``n``-voxel axis), the translation columns are ``O(1)`` -- so ``H = SDᵀSD``
+    is badly conditioned and a single scalar Levenberg ridge mis-damps the
+    small-diagonal (translation) directions.  Precondition by the diagonal
+    (Jacobi / Marquardt's relative ridge): scale ``H`` to a unit diagonal
+    ``Ĥ = D⁻¹ H D⁻¹`` with ``D = diag(√Hᵢᵢ)``, ridge the *conditioned* matrix,
+    and unscale the inverse, i.e. ``H⁻¹ = D⁻¹ (Ĥ + λI)⁻¹ D⁻¹``.  This is exactly
+    ``(H + λ·diag(Hᵢᵢ))⁻¹`` -- a scale-invariant per-direction ridge -- and the
+    solved system is well-conditioned regardless of the column scaling.  The
+    rigid path (balanced columns) is essentially unchanged; the affine path
+    becomes robust.
+    """
     h = sd.T @ sd
     p = h.shape[0]
-    damp = _RIDGE * jnp.trace(h) / p
-    return safe_inv(h + damp * jnp.eye(p, dtype=sd.dtype))
+    d = jnp.sqrt(jnp.diagonal(h)) + jnp.finfo(sd.dtype).eps
+    scale = d[:, None] * d[None, :]
+    h_hat = h / scale
+    h_hat_inv = safe_inv(h_hat + _RIDGE * jnp.eye(p, dtype=sd.dtype))
+    return h_hat_inv / scale
 
 
 def _rigid_inverse(matrix: Array, ndim: int) -> Array:

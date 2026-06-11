@@ -312,9 +312,13 @@ class _BoundMetric:
         # The metric costs reduce by spatial MEAN; the closed-form forces (and
         # the driver's step-normalisation) use the SUM-convention gradient
         # (``lncc_grad = ∂(Σcc)/∂warped``).  Rescale by the voxel count to undo
-        # the mean: for a spatial-mean metric (LNCC, SSD) this makes the escape
-        # hatch *numerically identical* to the closed form; for a histogram
-        # metric (MI, CR) it is a constant the clamped driver absorbs.
+        # the mean: this makes MetricForce(LNCC) *numerically identical* to the
+        # closed-form ``LNCCForce`` (the same SUM-convention gradient).  It does
+        # **not** reproduce ``DemonsForce``: that is the symmetric ESM update (a
+        # symmetrised gradient carrying its own per-voxel denominator), so
+        # MetricForce(SSD) matches only the Thirion gradient *direction*, not the
+        # ESM step.  For a histogram metric (MI, CR) the rescale is a constant
+        # the clamped / step-normalised driver absorbs.
         grad_cost = jax.grad(lambda w: self.metric.cost(w, self.fixed))(warped)
         grad_cost = grad_cost * warped.size
         grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
