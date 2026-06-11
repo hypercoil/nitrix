@@ -34,25 +34,26 @@ treatment).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
-import jax
-import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..geometry import (
     compose_displacement,
     gaussian_pyramid,
-    identity_grid,
     integrate_velocity_field,
     invert_displacement,
-    jacobian_det_displacement,
-    spatial_gradient,
-    spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
-from ..metrics import lncc, lncc_grad
-from ._svf import _relative_spacing, _smooth_vector, svf_coarse_to_fine
+from ._force import Force, LNCCForce, resolve_force_schedule
+from ._svf import (
+    _relative_spacing,
+    finalize_with_init,
+    prewarp_moving,
+    resolve_init_displacement,
+    svf_coarse_to_fine,
+    symmetric_level,
+)
 
 __all__ = [
     'SyNSpec',
@@ -85,7 +86,10 @@ class SyNSpec:
         Scaling-and-squaring steps for ``exp(v)``.
     spacing
         Per-axis voxel spacing; only the anisotropy is used (the relative
-        spacing, ``None`` -> isotropic), identically to ``DemonsSpec``.
+        spacing, ``None`` -> isotropic), identically to ``DemonsSpec``.  It also
+        makes the LNCC window **physically isotropic** (the per-axis radius is
+        scaled by ``1 / rel_spacing``), so the captured mm extent is the same on
+        every axis.
     pyramid_factor, pyramid_sigma
         Pyramid downsample factor / anti-alias sigma.
     boundary_mode
@@ -134,101 +138,43 @@ class SyNResult(NamedTuple):
     cost_history: Float[Array, ' h']
 
 
-def _normalise_step(u: Array, step: float) -> Array:
-    """Cap the force field's largest voxel displacement at ``step``.
-
-    A trust-region clamp (``min(1, step/‖u‖_max)``), not a scale-to.  The
-    two coincide when the force exceeds the cap (both divide by ``‖u‖_max``);
-    they differ only *below* it, where the clamp keeps the raw gradient
-    magnitude rather than amplifying it to a full step.  Under a fixed
-    iteration budget (no convergence gate) that is the safer discipline: a
-    shrinking force keeps shrinking, and a small / low-signal update is not
-    inflated -- scale-to-step would force a full ``step`` in whatever
-    direction the (often spurious, flat-region) maximum points.
-
-    **Contingent on the fixed-budget scheme.**  This choice is *because* the
-    forward is a fixed-length ``lax.scan`` (no convergence gate).  If the
-    ``while_loop`` early-exit (``docs/feature-requests/
-    registration-early-stopping-while-loop.md``) is adopted, a convergence
-    gate would bound the constant-step dithering that motivates the clamp,
-    making scale-to-step (the ANTS choice) viable again -- so revisit
-    clamp-vs-scale here if that lands.
-
-    Note the LNCC force does **not** vanish at a perfect match -- the
-    metric's ``eps`` guard leaves ``cc < 1`` in low-variance windows -- so
-    it is the symmetric forward/inverse cancellation, not a vanishing force
-    or this clamp, that zeroes the *net* deformation there.
-    """
-    norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
-    scale = jnp.minimum(1.0, step / (jnp.max(norm) + 1e-12))
-    return u * scale
-
-
 def _syn_level(
     moving: Array,
     fixed: Array,
     v_fwd: Array,
     v_inv: Array,
     *,
+    force: Force,
     spec: SyNSpec,
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
 ) -> tuple[Array, Array, Array]:
     """Run the symmetric SyN iterations on one resolution.
 
-    Rolled with ``lax.scan`` (carry = the two velocity fields), so the
-    level compiles one iteration; differentiable for the unrolled path.
+    Thin wrapper over the metric-generic symmetric-midpoint SVF driver
+    (``_svf.symmetric_level``) with the level's ``force`` (the analytic
+    :class:`LNCCForce` by default) -- the recipe's symmetric structure (warp
+    both images to the midpoint, ascend the similarity in each direction) plus
+    its trust-region step clamp and anisotropy-aware regularisation.  Rolled
+    with ``lax.scan``; differentiable for the unrolled path.
     """
-    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
-    grad_spacing: Union[float, tuple[float, ...]] = (
-        1.0 if rel_spacing is None else rel_spacing
+    return symmetric_level(
+        moving,
+        fixed,
+        v_fwd,
+        v_inv,
+        force=force,
+        ndim=ndim,
+        iterations=spec.iterations,
+        n_steps=spec.n_steps,
+        boundary_mode=spec.boundary_mode,
+        sigma_fluid=spec.sigma_fluid,
+        sigma_diffusion=spec.sigma_diffusion,
+        step=spec.step,
+        rel_spacing=rel_spacing,
+        mask=mask,
     )
-    rel_arr = (
-        None
-        if rel_spacing is None
-        else jnp.asarray(rel_spacing, dtype=fixed.dtype)
-    )
-    sigma_fluid: Union[float, tuple[float, ...]] = (
-        spec.sigma_fluid
-        if rel_spacing is None
-        else tuple(spec.sigma_fluid / r for r in rel_spacing)
-    )
-    sigma_diffusion: Union[float, tuple[float, ...]] = (
-        spec.sigma_diffusion
-        if rel_spacing is None
-        else tuple(spec.sigma_diffusion / r for r in rel_spacing)
-    )
-
-    def warp_to_mid(image: Array, v: Array) -> Array:
-        s = integrate_velocity_field(
-            v, n_steps=spec.n_steps, mode=spec.boundary_mode
-        )
-        return spatial_transform(
-            image[..., None], id_grid + s, mode=spec.boundary_mode
-        )[..., 0]
-
-    def force(scalar: Array, warped: Array) -> Array:
-        u = scalar[..., None] * spatial_gradient(warped, spacing=grad_spacing)
-        if rel_arr is not None:
-            u = u / rel_arr
-        return _smooth_vector(_normalise_step(u, spec.step), sigma_fluid, ndim)
-
-    def step(carry: tuple[Array, Array], _: Any) -> tuple[Any, Array]:
-        v_fwd, v_inv = carry
-        a = warp_to_mid(moving, v_fwd)
-        b = warp_to_mid(fixed, v_inv)
-        # Symmetric local-CC ascent: each image flows toward the other.
-        v_fwd = v_fwd + force(lncc_grad(a, b, radius=spec.radius), a)
-        v_inv = v_inv + force(lncc_grad(b, a, radius=spec.radius), b)
-        v_fwd = _smooth_vector(v_fwd, sigma_diffusion, ndim)
-        v_inv = _smooth_vector(v_inv, sigma_diffusion, ndim)
-        cost = 1.0 - lncc(a, b, radius=spec.radius)
-        return (v_fwd, v_inv), cost
-
-    (v_fwd, v_inv), costs = jax.lax.scan(
-        step, (v_fwd, v_inv), xs=None, length=spec.iterations
-    )
-    return v_fwd, v_inv, costs
 
 
 def greedy_syn_register(
@@ -236,8 +182,12 @@ def greedy_syn_register(
     fixed: Float[Array, '*spatial'],
     *,
     spec: SyNSpec = SyNSpec(),
+    force: Optional[Union[Force, Sequence[Force]]] = None,
+    init_affine: Optional[Float[Array, ' d1 d1']] = None,
+    init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
+    mask: Optional[Float[Array, '*spatial']] = None,
 ) -> SyNResult:
-    """Greedy symmetric diffeomorphic registration (LNCC-driven).
+    """Greedy symmetric diffeomorphic registration (LNCC-driven by default).
 
     Estimates symmetric forward / inverse velocity fields (coarse-to-fine)
     whose midpoint composition warps ``moving`` onto ``fixed``.  The result
@@ -249,30 +199,53 @@ def greedy_syn_register(
     Parameters
     ----------
     moving, fixed
-        Single-channel images of identical shape (2-D or 3-D).
+        Single-channel images (2-D or 3-D).  Identical shape unless an init
+        (below) resamples ``moving`` onto the ``fixed`` grid.
     spec
         ``SyNSpec`` controlling the schedule, the LNCC window, and the
         regularisation.
+    force
+        The driving :class:`Force` (``_force``).  ``None`` (default) uses the
+        analytic ``LNCCForce(spec.radius)``; a single ``Force`` overrides it at
+        every level (e.g. ``MetricForce(MI())`` for cross-modal / multimodal
+        symmetric registration); a length-``spec.levels`` **coarse-to-fine**
+        sequence sets a per-level schedule.
+    init_affine, init_displacement
+        Optional warm-start / multi-stage init (at most one).  ``init_affine``
+        is a fixed->moving index matrix (as ``rigid_register`` /
+        ``affine_register`` return); ``init_displacement`` is a fixed-grid
+        displacement field (e.g. a SynthMorph network output).  ``moving`` is
+        pre-warped by it onto the ``fixed`` grid and the **residual** is
+        registered; the returned ``displacement`` / ``warped`` /
+        ``jacobian_det`` are the **total** (init then residual) map, while the
+        velocity fields are the residual SVFs.
 
     Returns
     -------
     ``SyNResult`` (``forward_velocity``, ``inverse_velocity``,
     ``displacement``, ``warped``, ``jacobian_det``, ``cost_history``).
     """
-    if moving.shape != fixed.shape:
-        raise ValueError(
-            f'moving and fixed must share shape; got {moving.shape} '
-            f'vs {fixed.shape}.'
-        )
-    ndim = moving.ndim
-    if ndim not in (2, 3):
+    ndim = fixed.ndim
+    if ndim not in (2, 3) or moving.ndim != ndim:
         raise ValueError(
             f'greedy SyN supports 2-D / 3-D single-channel images; got '
-            f'shape {moving.shape}.'
+            f'moving {moving.shape}, fixed {fixed.shape}.'
         )
     dtype = moving.dtype
+    init_disp = resolve_init_displacement(
+        init_affine, init_displacement, fixed.shape, dtype
+    )
+    if init_disp is None and moving.shape != fixed.shape:
+        raise ValueError(
+            f'moving and fixed must share shape ({moving.shape} vs '
+            f'{fixed.shape}); pass init_affine / init_displacement to resample '
+            f'a different grid.'
+        )
+    moving_reg = prewarp_moving(
+        moving, init_disp, fixed.shape, dtype, spec.boundary_mode
+    )
     pyr_m = gaussian_pyramid(
-        moving[..., None],
+        moving_reg[..., None],
         levels=spec.levels,
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
@@ -284,19 +257,35 @@ def greedy_syn_register(
         sigma=spec.pyramid_sigma,
     )
     rel_spacing = _relative_spacing(spec.spacing, ndim)
+    forces = resolve_force_schedule(
+        force, default=LNCCForce(spec.radius), levels=spec.levels
+    )
+    pyr_mask = (
+        None
+        if mask is None
+        else gaussian_pyramid(
+            mask[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        )
+    )
 
     def level_solve(
-        m_l: Array, f_l: Array, state: tuple[Array, ...]
+        level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
         v_fwd, v_inv = state
+        mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
         v_fwd, v_inv, hist = _syn_level(
             m_l,
             f_l,
             v_fwd,
             v_inv,
+            force=forces[level],
             spec=spec,
             ndim=ndim,
             rel_spacing=rel_spacing,
+            mask=mask_l,
         )
         return (v_fwd, v_inv), hist
 
@@ -315,20 +304,23 @@ def greedy_syn_register(
     s_inv = integrate_velocity_field(
         v_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
     )
-    # moving -> fixed: fixed-grid --(id+s_inv)⁻¹--> midpoint --(id+s_fwd)--> moving
+    # moving -> fixed residual: fixed --(id+s_inv)⁻¹--> midpoint --(id+s_fwd)-->
     s_inv_inverse = invert_displacement(s_inv, mode=spec.boundary_mode)
-    displacement = compose_displacement(
+    residual = compose_displacement(
         s_fwd, s_inv_inverse, mode=spec.boundary_mode
     )
-    id_grid = identity_grid(moving.shape, dtype=dtype)
-    warped = spatial_transform(
-        moving[..., None], id_grid + displacement, mode=spec.boundary_mode
-    )[..., 0]
-    det = jacobian_det_displacement(displacement)
+    total, warped, det = finalize_with_init(
+        moving,
+        residual,
+        init_disp,
+        shape=fixed.shape,
+        dtype=dtype,
+        boundary_mode=spec.boundary_mode,
+    )
     return SyNResult(
         forward_velocity=v_fwd,
         inverse_velocity=v_inv,
-        displacement=displacement,
+        displacement=total,
         warped=warped,
         jacobian_det=det,
         cost_history=cost_history,

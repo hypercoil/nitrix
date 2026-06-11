@@ -48,7 +48,7 @@ from .matrix import (
     vec2sym,
 )
 from .krylov import cg
-from .matrix_function import matrix_exp
+from .matrix_function import matrix_exp, matrix_log
 from .optimize import (
     OptimizeResult,
     gauss_newton,
@@ -89,6 +89,7 @@ __all__ = [
     'cg',
     # matrix functions
     'matrix_exp',
+    'matrix_log',
     # optimisation (nonlinear least squares)
     'gauss_newton',
     'levenberg_marquardt',

@@ -29,23 +29,24 @@ forward+inverse variant are the documented upgrade paths.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
-import jax
-import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..geometry import (
-    compose_velocity,
     gaussian_pyramid,
-    identity_grid,
     integrate_velocity_field,
-    jacobian_det_displacement,
-    spatial_gradient,
-    spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode
-from ._svf import _relative_spacing, _smooth_vector, svf_coarse_to_fine
+from ._force import DemonsForce, Force, resolve_force_schedule
+from ._svf import (
+    _relative_spacing,
+    finalize_with_init,
+    prewarp_moving,
+    resolve_init_displacement,
+    single_sided_level,
+    svf_coarse_to_fine,
+)
 
 __all__ = [
     'DemonsSpec',
@@ -137,70 +138,42 @@ def _demons_level(
     fixed: Array,
     v: Array,
     *,
+    force: Force,
     spec: DemonsSpec,
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
 ) -> tuple[Array, Array]:
     """Run the Demons iterations on one resolution; return ``(v, costs)``.
 
-    The iteration is rolled with ``lax.scan`` (carry = the velocity
-    field, per-step output = the SSD), so the level compiles one
-    iteration rather than ``spec.iterations`` unrolled copies; the loop
-    stays differentiable for the unrolled gradient path.
+    Thin wrapper over the metric-generic single-sided SVF driver
+    (``_svf.single_sided_level``) with the level's ``force`` (the closed-form
+    ESM :class:`DemonsForce` by default, or any :class:`Force` the caller
+    supplies).  The driver hoists ``∇fixed`` out of the iteration, rolls it
+    with ``lax.scan`` (so the level compiles one iteration), and stays
+    differentiable for the unrolled gradient path.
 
-    ``rel_spacing`` (anisotropy-only; ``None`` for isotropic) makes the
-    physics axis-correct: the gradient is taken in physical units, the ESM
-    force is converted back to the voxel-native field, and the
-    fluid/diffusion sigmas become per-axis.  All reduce to the voxel
-    behaviour when ``rel_spacing is None``.
+    ``rel_spacing`` (anisotropy-only; ``None`` for isotropic) makes the physics
+    axis-correct: the gradient is taken in physical units, the ESM force is
+    converted back to the voxel-native field, and the fluid/diffusion sigmas
+    become per-axis -- all reducing to the voxel behaviour when ``None``.
     """
-    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
-    grad_spacing: Union[float, tuple[float, ...]] = (
-        1.0 if rel_spacing is None else rel_spacing
+    return single_sided_level(
+        moving,
+        fixed,
+        v,
+        force=force,
+        ndim=ndim,
+        iterations=spec.iterations,
+        n_steps=spec.n_steps,
+        boundary_mode=spec.boundary_mode,
+        sigma_fluid=spec.sigma_fluid,
+        sigma_diffusion=spec.sigma_diffusion,
+        bch_order=spec.bch_order,
+        step=None,
+        rel_spacing=rel_spacing,
+        mask=mask,
     )
-    grad_fixed = spatial_gradient(fixed, spacing=grad_spacing)
-    alpha2 = spec.alpha * spec.alpha
-    rel_arr = (
-        None
-        if rel_spacing is None
-        else jnp.asarray(rel_spacing, dtype=fixed.dtype)
-    )
-    sigma_fluid: Union[float, tuple[float, ...]] = (
-        spec.sigma_fluid
-        if rel_spacing is None
-        else tuple(spec.sigma_fluid / r for r in rel_spacing)
-    )
-    sigma_diffusion: Union[float, tuple[float, ...]] = (
-        spec.sigma_diffusion
-        if rel_spacing is None
-        else tuple(spec.sigma_diffusion / r for r in rel_spacing)
-    )
-
-    def step(v: Array, _: Any) -> tuple[Array, Array]:
-        s = integrate_velocity_field(
-            v, n_steps=spec.n_steps, mode=spec.boundary_mode
-        )
-        warped = spatial_transform(
-            moving[..., None], id_grid + s, mode=spec.boundary_mode
-        )[..., 0]
-        diff = fixed - warped
-        j = 0.5 * (grad_fixed + spatial_gradient(warped, spacing=grad_spacing))
-        denom = jnp.sum(j * j, axis=-1) + alpha2 * diff * diff
-        u = (diff / denom)[..., None] * j
-        if rel_arr is not None:
-            # Physical (mm) force -> voxel-native field.
-            u = u / rel_arr
-        u = _smooth_vector(u, sigma_fluid, ndim)
-        v = (
-            v + u
-            if spec.bch_order == 1
-            else compose_velocity(v, u, order=spec.bch_order)
-        )
-        v = _smooth_vector(v, sigma_diffusion, ndim)
-        return v, 0.5 * jnp.sum(diff * diff)
-
-    v, costs = jax.lax.scan(step, v, xs=None, length=spec.iterations)
-    return v, costs
 
 
 def diffeomorphic_demons_register(
@@ -208,6 +181,10 @@ def diffeomorphic_demons_register(
     fixed: Float[Array, '*spatial'],
     *,
     spec: DemonsSpec = DemonsSpec(),
+    force: Optional[Union[Force, Sequence[Force]]] = None,
+    init_affine: Optional[Float[Array, ' d1 d1']] = None,
+    init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
+    mask: Optional[Float[Array, '*spatial']] = None,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -219,29 +196,57 @@ def diffeomorphic_demons_register(
     Parameters
     ----------
     moving, fixed
-        Single-channel images of identical shape (2-D or 3-D).
+        Single-channel images (2-D or 3-D).  Identical shape unless an init
+        (below) resamples ``moving`` onto the ``fixed`` grid.
     spec
         ``DemonsSpec`` controlling the schedule and regularisation.
+    force
+        The driving :class:`Force` (``_force``).  ``None`` (default) uses the
+        closed-form ESM ``DemonsForce(spec.alpha)``; a single ``Force``
+        overrides it at every level (e.g. ``MetricForce(MI())`` for cross-modal
+        deformable registration); a length-``spec.levels`` **coarse-to-fine**
+        sequence sets a per-level schedule (a cheap force coarse, a high-signal
+        one at the finest level).
+    init_affine, init_displacement
+        Optional warm-start / multi-stage init (at most one).  ``init_affine``
+        is a fixed->moving index matrix (as ``rigid_register`` /
+        ``affine_register`` return); ``init_displacement`` is a fixed-grid
+        displacement field (e.g. a SynthMorph network output).  ``moving`` is
+        pre-warped by it onto the ``fixed`` grid and the **residual** is
+        registered; the returned ``displacement`` / ``warped`` /
+        ``jacobian_det`` are the **total** (init then residual) map, while
+        ``velocity`` is the residual SVF.
+    mask
+        Optional fixed-grid weight field (``(*spatial,)``, e.g. a brain mask)
+        gating the force to a region: the masked area drives the deformation,
+        the rest follows by regularisation.
 
     Returns
     -------
     ``DiffeomorphicResult`` (``velocity``, ``displacement``, ``warped``,
     ``jacobian_det``, ``cost_history``).
     """
-    if moving.shape != fixed.shape:
+    ndim = fixed.ndim
+    if ndim not in (2, 3) or moving.ndim != ndim:
         raise ValueError(
-            f'moving and fixed must share shape; got {moving.shape} '
-            f'vs {fixed.shape}.'
-        )
-    ndim = moving.ndim
-    if ndim not in (2, 3):
-        raise ValueError(
-            f'diffeomorphic registration supports 2-D / 3-D '
-            f'single-channel images; got shape {moving.shape}.'
+            f'diffeomorphic registration supports 2-D / 3-D single-channel '
+            f'images; got moving {moving.shape}, fixed {fixed.shape}.'
         )
     dtype = moving.dtype
+    init_disp = resolve_init_displacement(
+        init_affine, init_displacement, fixed.shape, dtype
+    )
+    if init_disp is None and moving.shape != fixed.shape:
+        raise ValueError(
+            f'moving and fixed must share shape ({moving.shape} vs '
+            f'{fixed.shape}); pass init_affine / init_displacement to resample '
+            f'a different grid.'
+        )
+    moving_reg = prewarp_moving(
+        moving, init_disp, fixed.shape, dtype, spec.boundary_mode
+    )
     pyr_m = gaussian_pyramid(
-        moving[..., None],
+        moving_reg[..., None],
         levels=spec.levels,
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
@@ -255,13 +260,34 @@ def diffeomorphic_demons_register(
 
     # Anisotropy-only spacing -- level-independent, so computed once.
     rel_spacing = _relative_spacing(spec.spacing, ndim)
+    forces = resolve_force_schedule(
+        force, default=DemonsForce(spec.alpha), levels=spec.levels
+    )
+    pyr_mask = (
+        None
+        if mask is None
+        else gaussian_pyramid(
+            mask[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        )
+    )
 
     def level_solve(
-        m_l: Array, f_l: Array, state: tuple[Array, ...]
+        level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
         (v,) = state
+        mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
         v, hist = _demons_level(
-            m_l, f_l, v, spec=spec, ndim=ndim, rel_spacing=rel_spacing
+            m_l,
+            f_l,
+            v,
+            force=forces[level],
+            spec=spec,
+            ndim=ndim,
+            rel_spacing=rel_spacing,
+            mask=mask_l,
         )
         return (v,), hist
 
@@ -274,17 +300,20 @@ def diffeomorphic_demons_register(
         level_solve=level_solve,
     )
 
-    id_grid = identity_grid(moving.shape, dtype=dtype)
-    s = integrate_velocity_field(
+    residual = integrate_velocity_field(
         velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
     )
-    warped = spatial_transform(
-        moving[..., None], id_grid + s, mode=spec.boundary_mode
-    )[..., 0]
-    det = jacobian_det_displacement(s)
+    total, warped, det = finalize_with_init(
+        moving,
+        residual,
+        init_disp,
+        shape=fixed.shape,
+        dtype=dtype,
+        boundary_mode=spec.boundary_mode,
+    )
     return DiffeomorphicResult(
         velocity=velocity,
-        displacement=s,
+        displacement=total,
         warped=warped,
         jacobian_det=det,
         cost_history=cost_history,

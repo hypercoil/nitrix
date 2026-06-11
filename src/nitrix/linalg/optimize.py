@@ -124,6 +124,7 @@ def _normal_operators(
 def _assembled_operators(
     residual_fn: ResidualFn,
     x: Array,
+    jacobian_fn: Optional[ResidualFn] = None,
 ) -> tuple[Array, Array, Array]:
     """Materialise the Jacobian at ``x`` and return ``(r, JᵀJ, Jᵀr)``.
 
@@ -132,9 +133,15 @@ def _assembled_operators(
     matrix turns the normal-equation solve into a tiny on-device ``cg``
     -- far less work than the matrix-free ``Jᵀ(Jv)`` matvec, which runs a
     full warp tangent + transpose per inner ``cg`` iteration.
+
+    ``jacobian_fn`` (optional) supplies the ``M×P`` Jacobian in **closed form**
+    -- when the residual is a registration warp, the analytic
+    ``∇M(grid) · ∂grid/∂θ`` does the expensive gather a handful of times rather
+    than ``jax.jacfwd``'s ``P`` times (the warp-tangent gather per parameter).
+    Its result must equal ``jax.jacfwd(residual_fn)(x)`` (the parity oracle).
     """
     r = residual_fn(x)
-    jac = jax.jacfwd(residual_fn)(x)
+    jac = jax.jacfwd(residual_fn)(x) if jacobian_fn is None else jacobian_fn(x)
     jac_h = jac.conj().T
     return r, jac_h @ jac, jac_h @ r
 
@@ -150,11 +157,12 @@ def _operators(
     residual_fn: ResidualFn,
     x: Array,
     method: str,
+    jacobian_fn: Optional[ResidualFn] = None,
 ) -> tuple[Array, NormalOperator, Array]:
     """``(r, JᵀJ, Jᵀr)`` with ``JᵀJ`` explicit (``'assembled'``) or a
     matvec callable (``'matrix_free'``) -- both accepted by ``cg``."""
     if method == 'assembled':
-        return _assembled_operators(residual_fn, x)
+        return _assembled_operators(residual_fn, x, jacobian_fn)
     return _normal_operators(residual_fn, x)
 
 
@@ -167,6 +175,7 @@ def gauss_newton(
     cg_tol: float = 1e-6,
     cg_maxiter: Optional[int] = None,
     jacobian: JacobianStrategy = 'auto',
+    jacobian_fn: Optional[ResidualFn] = None,
 ) -> OptimizeResult:
     """Gauss-Newton minimisation of ``½ ‖r(x)‖²``.
 
@@ -200,7 +209,7 @@ def gauss_newton(
     method = _resolve_jacobian(jacobian, x0.shape[-1])
 
     def step(x: Array, _: Any) -> tuple[Array, Array]:
-        r, a, jt_r = _operators(residual_fn, x, method)
+        r, a, jt_r = _operators(residual_fn, x, method, jacobian_fn)
         delta = cg(a, -jt_r, l2=damping, tol=cg_tol, maxiter=cg_maxiter)
         return x + delta, _half_sq(r)
 
@@ -221,6 +230,7 @@ def levenberg_marquardt(
     cg_tol: float = 1e-6,
     cg_maxiter: Optional[int] = None,
     jacobian: JacobianStrategy = 'auto',
+    jacobian_fn: Optional[ResidualFn] = None,
 ) -> OptimizeResult:
     """Levenberg-Marquardt minimisation of ``½ ‖r(x)‖²``.
 
@@ -255,7 +265,7 @@ def levenberg_marquardt(
         carry: tuple[Array, Array, Array], _: Any
     ) -> tuple[tuple[Array, Array, Array], Array]:
         x, lam, cost = carry
-        r, a, jt_r = _operators(residual_fn, x, method)
+        r, a, jt_r = _operators(residual_fn, x, method, jacobian_fn)
         delta = cg(a, -jt_r, l2=lam, tol=cg_tol, maxiter=cg_maxiter)
         x_new = x + delta
         cost_new = _half_sq(residual_fn(x_new))

@@ -63,6 +63,12 @@ from .deformation import (
     compose_velocity,
     invert_displacement,
 )
+from .algebra import (
+    fuse_transforms,
+    transform_geodesic,
+    transform_mean,
+    velocity_mean,
+)
 from .differential import spatial_gradient
 from .pyramid import downsample, gaussian_pyramid, upsample
 from .transform import (
@@ -128,6 +134,10 @@ __all__ = [
     'rigid_exp',
     'rigid_log',
     'affine_exp',
+    'transform_mean',
+    'fuse_transforms',
+    'transform_geodesic',
+    'velocity_mean',
     'apply_affine',
     'affine_grid',
     # affine algebra (geometric params: T @ R @ S @ E; point-set fit)

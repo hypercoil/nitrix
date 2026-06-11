@@ -23,14 +23,31 @@ from __future__ import annotations
 import math
 from typing import Callable, Optional, Sequence, Union
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from ..geometry import upsample
+from ..geometry import (
+    affine_grid,
+    compose_displacement,
+    compose_velocity,
+    identity_grid,
+    integrate_velocity_field,
+    jacobian_det_displacement,
+    spatial_transform,
+    upsample,
+)
+from ..geometry._interpolate import BoundaryMode
 from ..smoothing import gaussian
+from ._force import Force
 
 __all__ = [
     'svf_coarse_to_fine',
+    'single_sided_level',
+    'symmetric_level',
+    'resolve_init_displacement',
+    'prewarp_moving',
+    'finalize_with_init',
 ]
 
 
@@ -81,10 +98,12 @@ def _relative_spacing(
     return rel
 
 
-# Per-level update: ``(moving_level, fixed_level, state) -> (state, cost)``
-# where ``state`` is a tuple of ``n_fields`` velocity fields.
+# Per-level update: ``(level, moving_level, fixed_level, state) -> (state,
+# cost)`` where ``level`` is the pyramid index (finest = 0; lets a recipe pick
+# a per-level force / metric) and ``state`` is a tuple of ``n_fields`` velocity
+# fields.
 LevelSolve = Callable[
-    [Array, Array, tuple[Array, ...]], tuple[tuple[Array, ...], Array]
+    [int, Array, Array, tuple[Array, ...]], tuple[tuple[Array, ...], Array]
 ]
 
 
@@ -115,8 +134,9 @@ def svf_coarse_to_fine(
         Number of velocity fields carried (1 for Demons, 2 for symmetric
         SyN).
     level_solve
-        ``(moving_level, fixed_level, state) -> (state, cost_trace)`` for
-        one resolution; ``state`` is the ``n_fields``-tuple of velocities.
+        ``(level, moving_level, fixed_level, state) -> (state, cost_trace)``
+        for one resolution (``level`` = pyramid index, finest = 0); ``state``
+        is the ``n_fields``-tuple of velocities.
 
     Returns
     -------
@@ -140,9 +160,272 @@ def svf_coarse_to_fine(
                 prev_shape, dtype=dtype
             )
             state = tuple(upsample(s, shape_l) * ratio for s in state)
-        state, hist = level_solve(m_l, f_l, state)
+        state, hist = level_solve(level, m_l, f_l, state)
         histories.append(hist)
         prev_shape = shape_l
 
     assert state is not None
     return state, jnp.concatenate(histories)
+
+
+def _normalise_step(u: Array, step: float) -> Array:
+    """Cap the force field's largest voxel displacement at ``step``.
+
+    A trust-region clamp (``min(1, step/‖u‖_max)``), not a scale-to.  The
+    two coincide when the force exceeds the cap (both divide by ``‖u‖_max``);
+    they differ only *below* it, where the clamp keeps the raw gradient
+    magnitude rather than amplifying it to a full step.  Under a fixed
+    iteration budget (no convergence gate) that is the safer discipline: a
+    shrinking force keeps shrinking, and a small / low-signal update is not
+    inflated -- scale-to-step would force a full ``step`` in whatever
+    direction the (often spurious, flat-region) maximum points.
+
+    **Contingent on the fixed-budget scheme.**  This choice is *because* the
+    forward is a fixed-length ``lax.scan`` (no convergence gate).  If the
+    ``while_loop`` early-exit (``docs/feature-requests/
+    registration-early-stopping-while-loop.md``) is adopted, a convergence
+    gate would bound the constant-step dithering that motivates the clamp,
+    making scale-to-step (the ANTS choice) viable again -- so revisit
+    clamp-vs-scale here if that lands.
+
+    Note an LNCC force does **not** vanish at a perfect match -- the metric's
+    ``eps`` guard leaves ``cc < 1`` in low-variance windows -- so it is the
+    symmetric forward/inverse cancellation, not a vanishing force or this
+    clamp, that zeroes the *net* deformation there.
+    """
+    norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
+    scale = jnp.minimum(1.0, step / (jnp.max(norm) + 1e-12))
+    return u * scale
+
+
+def _per_axis_sigma(
+    sigma: float, rel_spacing: Optional[tuple[float, ...]]
+) -> Union[float, tuple[float, ...]]:
+    """Anisotropy-correct a regularisation sigma (per-axis when anisotropic)."""
+    if rel_spacing is None:
+        return sigma
+    return tuple(sigma / r for r in rel_spacing)
+
+
+def _mask_force(u: Array, mask: Optional[Array]) -> Array:
+    """Gate a force field by a (channel-less) mask; ``None`` -> unchanged."""
+    return u if mask is None else u * mask[..., None]
+
+
+def _regularise(
+    v: Array,
+    u: Array,
+    *,
+    step: Optional[float],
+    sigma_fluid: Union[float, tuple[float, ...]],
+    sigma_diffusion: Union[float, tuple[float, ...]],
+    bch_order: int,
+    ndim: int,
+) -> Array:
+    """Apply the shared per-update regularisation to a raw force ``u``.
+
+    The fluid+diffusion operator splitting both SVF drivers share: an optional
+    trust-region step clamp (``step is not None``; the SyN convention), fluid
+    Gaussian smoothing of the update, the log-domain accumulation
+    (``v + u`` additive, or BCH ``compose_velocity`` for ``bch_order > 1``),
+    and diffusion Gaussian smoothing of the accumulated velocity.
+    """
+    if step is not None:
+        u = _normalise_step(u, step)
+    u = _smooth_vector(u, sigma_fluid, ndim)
+    v = v + u if bch_order == 1 else compose_velocity(v, u, order=bch_order)
+    return _smooth_vector(v, sigma_diffusion, ndim)
+
+
+def single_sided_level(
+    moving: Array,
+    fixed: Array,
+    v: Array,
+    *,
+    force: Force,
+    ndim: int,
+    iterations: int,
+    n_steps: int,
+    boundary_mode: BoundaryMode,
+    sigma_fluid: float,
+    sigma_diffusion: float,
+    bch_order: int,
+    step: Optional[float],
+    rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
+) -> tuple[Array, Array]:
+    """Single-sided SVF iterations on one resolution (the Demons structure).
+
+    Warps ``moving`` by ``exp(v)`` and drives ``v`` up the similarity under
+    ``force`` -- metric-generic: any :class:`Force` plugs in.  The force is
+    bound to ``fixed`` **once** (its fixed-state, e.g. ``∇fixed``, is hoisted
+    out of the iteration).  ``mask`` (this level's, channel-less) gates the
+    force to a region -- the masked area drives the deformation, the rest
+    follows by regularisation.  Rolled with ``lax.scan``; returns ``(v, costs)``.
+    """
+    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
+    bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)
+    sf = _per_axis_sigma(sigma_fluid, rel_spacing)
+    sd = _per_axis_sigma(sigma_diffusion, rel_spacing)
+
+    def step_fn(v: Array, _: object) -> tuple[Array, Array]:
+        s = integrate_velocity_field(v, n_steps=n_steps, mode=boundary_mode)
+        warped = spatial_transform(
+            moving[..., None], id_grid + s, mode=boundary_mode
+        )[..., 0]
+        v = _regularise(
+            v,
+            _mask_force(bound.update(warped), mask),
+            step=step,
+            sigma_fluid=sf,
+            sigma_diffusion=sd,
+            bch_order=bch_order,
+            ndim=ndim,
+        )
+        return v, bound.cost(warped)
+
+    return jax.lax.scan(step_fn, v, xs=None, length=iterations)
+
+
+def symmetric_level(
+    moving: Array,
+    fixed: Array,
+    v_fwd: Array,
+    v_inv: Array,
+    *,
+    force: Force,
+    ndim: int,
+    iterations: int,
+    n_steps: int,
+    boundary_mode: BoundaryMode,
+    sigma_fluid: float,
+    sigma_diffusion: float,
+    step: Optional[float],
+    rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
+) -> tuple[Array, Array, Array]:
+    """Symmetric-midpoint SVF iterations on one resolution (the SyN structure).
+
+    Warps both images to the shared midpoint and ascends the similarity under
+    ``force`` in each direction -- metric-generic.  The force is bound **per
+    step** (its "fixed" is the other image at the midpoint, which changes every
+    iteration).  ``mask`` (this level's) gates both half-forces to a region.
+    Rolled with ``lax.scan``; returns ``(v_fwd, v_inv, costs)``.
+    """
+    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
+    sf = _per_axis_sigma(sigma_fluid, rel_spacing)
+    sd = _per_axis_sigma(sigma_diffusion, rel_spacing)
+
+    def warp_to_mid(image: Array, v: Array) -> Array:
+        s = integrate_velocity_field(v, n_steps=n_steps, mode=boundary_mode)
+        return spatial_transform(
+            image[..., None], id_grid + s, mode=boundary_mode
+        )[..., 0]
+
+    def step_fn(
+        carry: tuple[Array, Array], _: object
+    ) -> tuple[tuple[Array, Array], Array]:
+        v_fwd, v_inv = carry
+        a = warp_to_mid(moving, v_fwd)
+        b = warp_to_mid(fixed, v_inv)
+        bound_fwd = force.bind(b, ndim=ndim, rel_spacing=rel_spacing)
+        bound_inv = force.bind(a, ndim=ndim, rel_spacing=rel_spacing)
+        v_fwd = _regularise(
+            v_fwd,
+            _mask_force(bound_fwd.update(a), mask),
+            step=step,
+            sigma_fluid=sf,
+            sigma_diffusion=sd,
+            bch_order=1,
+            ndim=ndim,
+        )
+        v_inv = _regularise(
+            v_inv,
+            _mask_force(bound_inv.update(b), mask),
+            step=step,
+            sigma_fluid=sf,
+            sigma_diffusion=sd,
+            bch_order=1,
+            ndim=ndim,
+        )
+        return (v_fwd, v_inv), bound_fwd.cost(a)
+
+    (v_fwd, v_inv), costs = jax.lax.scan(
+        step_fn, (v_fwd, v_inv), xs=None, length=iterations
+    )
+    return v_fwd, v_inv, costs
+
+
+def resolve_init_displacement(
+    init_affine: Optional[Array],
+    init_displacement: Optional[Array],
+    shape: tuple[int, ...],
+    dtype: jnp.dtype,
+) -> Optional[Array]:
+    """Resolve a recipe's init arguments to a fixed-grid displacement (or None).
+
+    At most one of ``init_affine`` (a fixed-voxel -> moving-voxel homogeneous
+    matrix, as ``rigid_register`` / ``affine_register`` return in ``IndexSpace``)
+    or ``init_displacement`` (a displacement field on the fixed grid, e.g. a
+    SynthMorph network output) may be given; the diffeomorphic recipe pre-warps
+    ``moving`` by the result and registers the residual (warm-start /
+    multi-stage).  An affine is expanded to its displacement field with the
+    registration centring convention (grid centre, via ``affine_grid``).
+    """
+    if init_affine is not None and init_displacement is not None:
+        raise ValueError('pass at most one of init_affine / init_displacement.')
+    if init_affine is not None:
+        return affine_grid(init_affine, shape) - identity_grid(
+            shape, dtype=dtype
+        )
+    return init_displacement
+
+
+def prewarp_moving(
+    moving: Array,
+    init_disp: Optional[Array],
+    shape: tuple[int, ...],
+    dtype: jnp.dtype,
+    boundary_mode: BoundaryMode,
+) -> Array:
+    """Resample ``moving`` onto the fixed grid by the init displacement.
+
+    ``None`` -> ``moving`` unchanged (the no-init path).  Otherwise ``moving`` is
+    sampled at ``id + init_disp`` so it lands on the fixed grid even when its own
+    grid differs -- the residual deformable then registers this pre-warped image
+    (this is what retires the matching-grid constraint for a multi-stage run).
+    """
+    if init_disp is None:
+        return moving
+    id_grid = identity_grid(shape, dtype=dtype)
+    return spatial_transform(
+        moving[..., None], id_grid + init_disp, mode=boundary_mode
+    )[..., 0]
+
+
+def finalize_with_init(
+    moving: Array,
+    residual_disp: Array,
+    init_disp: Optional[Array],
+    *,
+    shape: tuple[int, ...],
+    dtype: jnp.dtype,
+    boundary_mode: BoundaryMode,
+) -> tuple[Array, Array, Array]:
+    """Compose the residual deformable with the init; warp the original moving.
+
+    Returns ``(total_displacement, warped, jacobian_det)`` -- the full
+    ``moving -> fixed`` map (init applied, then the residual), the *original*
+    ``moving`` resampled by it, and the Jacobian determinant of the **total**
+    map (``init_disp is None`` reduces exactly to the residual).
+    """
+    id_grid = identity_grid(shape, dtype=dtype)
+    total = (
+        residual_disp
+        if init_disp is None
+        else compose_displacement(init_disp, residual_disp, mode=boundary_mode)
+    )
+    warped = spatial_transform(
+        moving[..., None], id_grid + total, mode=boundary_mode
+    )[..., 0]
+    return total, warped, jacobian_det_displacement(total)
