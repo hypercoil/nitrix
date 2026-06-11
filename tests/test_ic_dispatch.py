@@ -19,6 +19,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 from nitrix.geometry import (  # noqa: E402
+    affine_exp,
     affine_grid,
     rigid_exp,
     spatial_transform,
@@ -28,6 +29,7 @@ from nitrix.register import (  # noqa: E402
     LNCC,
     RegistrationSpec,
     WorldSpace,
+    affine_register,
     rigid_register,
 )
 
@@ -72,6 +74,42 @@ def test_ic_matches_forward():
     )
     assert np.allclose(
         np.asarray(ic.matrix), np.asarray(fwd.matrix), atol=5e-2
+    )
+
+
+def _affine_pair(n=64):
+    fixed = _blobs(n)
+    center = (jnp.asarray((n, n), dtype=fixed.dtype) - 1.0) / 2.0
+    # modest rotation + scale + shear + translation (4 linear + 2 translation)
+    params = jnp.asarray([0.04, -0.08, 0.06, -0.05, 3.0, -2.0])
+    grid = affine_grid(affine_exp(params, ndim=2), (n, n), center=center)
+    moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
+    return moving, fixed
+
+
+def test_affine_ic_matches_forward():
+    moving, fixed = _affine_pair(64)
+    spec = RegistrationSpec(levels=3, iterations=25)
+    ic = affine_register(
+        moving, fixed, spec=spec, method='inverse_compositional'
+    )
+    fwd = affine_register(moving, fixed, spec=spec, method='forward')
+    assert float(ncc(ic.warped, fixed)) > 0.99
+    assert float(ncc(fwd.warped, fixed)) > 0.99
+    assert np.allclose(
+        np.asarray(ic.warped), np.asarray(fwd.warped), atol=3e-2
+    )
+
+
+def test_affine_auto_uses_ic():
+    moving, fixed = _affine_pair(64)
+    spec = RegistrationSpec(levels=3, iterations=25)
+    auto = affine_register(moving, fixed, spec=spec, method='auto')
+    ic = affine_register(
+        moving, fixed, spec=spec, method='inverse_compositional'
+    )
+    assert np.allclose(
+        np.asarray(auto.warped), np.asarray(ic.warped), atol=1e-9
     )
 
 

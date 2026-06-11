@@ -26,7 +26,7 @@ from ._core import (
     RegistrationSpec,
     multi_resolution_register,
 )
-from ._inverse_compositional import ic_rigid_register
+from ._inverse_compositional import ic_affine_register, ic_rigid_register
 from ._model import Affine, Rigid, TransformModel
 from ._space import CoordinateSpace, IndexSpace
 
@@ -52,8 +52,8 @@ def _use_inverse_compositional(
     """Resolve the ``method`` argument against the IC fast-path preconditions.
 
     The inverse-compositional kernel (constant-template Hessian, ~4-7x the
-    forward GN/LM throughput) applies only to a **rigid** least-squares (SSD)
-    registration in **IndexSpace** (the template is linearised in voxel
+    forward GN/LM throughput) applies to a **rigid or affine** least-squares
+    (SSD) registration in **IndexSpace** (the template is linearised in voxel
     coordinates).  ``"auto"`` takes it when those hold and falls back to the
     forward path otherwise (the parity oracle); ``"inverse_compositional"``
     forces it (and validates); ``"forward"`` always takes the forward path.
@@ -62,7 +62,7 @@ def _use_inverse_compositional(
         isinstance(space, IndexSpace)
         and spec.metric.is_least_squares
         and spec.optimizer in ('auto', 'lm', 'gn')
-        and isinstance(model, Rigid)
+        and isinstance(model, (Rigid, Affine))
     )
     if method == 'auto':
         return supported
@@ -70,7 +70,7 @@ def _use_inverse_compositional(
         if not supported:
             raise ValueError(
                 'method="inverse_compositional" requires IndexSpace + a '
-                'least-squares (SSD) metric + a Rigid model.'
+                'least-squares (SSD) metric + a Rigid/Affine model.'
             )
         return True
     if method == 'forward':
@@ -143,6 +143,7 @@ def affine_register(
     *,
     spec: RegistrationSpec = RegistrationSpec(),
     space: CoordinateSpace = IndexSpace(),
+    method: str = 'auto',
 ) -> RegistrationResult:
     """Estimate the affine transform aligning ``moving`` to ``fixed``.
 
@@ -153,14 +154,19 @@ def affine_register(
     pass its parameters (extended with a zero linear-generator block) as
     a warm start, or compose the two transforms.
 
-    Parameters / returns as ``rigid_register`` (including the ``space``
-    argument for physical-space / anisotropic registration).
+    Parameters / returns as ``rigid_register`` (including the ``space`` and
+    ``method`` arguments; the inverse-compositional fast path -- where affine's
+    large parameter count makes the forward ``jacfwd`` costliest -- engages
+    under ``method="auto"`` for ``IndexSpace`` + an SSD metric).
     """
     ndim = _spatial_ndim(moving, fixed)
+    model = Affine()
+    if _use_inverse_compositional(method, space, spec, model):
+        return ic_affine_register(moving, fixed, ndim=ndim, spec=spec)
     return multi_resolution_register(
         moving,
         fixed,
-        model=Affine(),
+        model=model,
         ndim=ndim,
         spec=spec,
         space=space,

@@ -29,7 +29,7 @@ linearisation is in voxel coordinates).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -45,7 +45,14 @@ from ..geometry import (
     spatial_transform,
 )
 from ..linalg._solver import safe_inv
+from ..linalg.matrix_function import matrix_exp, matrix_log
 from ._core import RegistrationResult, RegistrationSpec
+
+# A model's steepest-descent images and its compositional update / params
+# recovery -- the only pieces of the IC kernel that differ by transform group.
+SteepestDescent = Callable[[Array, Array, int], Array]
+CompositionalUpdate = Callable[[Array, int], Array]
+ParamsFromMatrix = Callable[[Array, int], Array]
 
 # Per-level precomputed reference data: (fixed, steepest-descent (M, P),
 # inverse Hessian (P, P), grid centre (ndim,)).
@@ -89,6 +96,71 @@ def _steepest_descent(
     return sd.reshape(-1, sd.shape[-1])
 
 
+def _affine_steepest_descent(
+    fixed: Float[Array, '*spatial'],
+    center: Float[Array, ' d'],
+    ndim: int,
+) -> Float[Array, ' m p']:
+    """Steepest-descent images of the centred affine warp at identity.
+
+    The 12-DOF (3-D) / 6-DOF (2-D) affine: the linear-block generators are the
+    full ``gl(n)`` basis ``E_ij`` (``∂ matrix_exp(A)/∂A_ij|₀ = E_ij``), so
+    ``SD[x, (i,j)] = ∇F(x)_i · (x − c)_j`` (``n²`` columns, row-major to match
+    ``affine_exp``); the translation columns are ``∇F`` (``n`` columns).
+    Returns ``(M, P)`` with ``P = n² + n``.
+    """
+    grad = spatial_gradient(fixed)
+    grid_c = identity_grid(fixed.shape, dtype=fixed.dtype) - center
+    # sd_lin[..., i, j] = ∇F[..., i] · (x − c)[..., j], row-major (i, j).
+    sd_lin = (grad[..., :, None] * grid_c[..., None, :]).reshape(
+        fixed.shape + (ndim * ndim,)
+    )
+    sd = jnp.concatenate([sd_lin, grad], axis=-1)
+    return sd.reshape(-1, sd.shape[-1])
+
+
+def _rigid_compositional_update(delta: Array, ndim: int) -> Array:
+    """Inverse-compositional warp update ``W(Δθ)⁻¹`` for a rigid step.
+
+    Closed-form: ``W(Δθ) = rigid_exp(Δθ)``, inverted by the rigid transpose
+    rule (no solve).
+    """
+    return _rigid_inverse(rigid_exp(delta, ndim=ndim), ndim)
+
+
+def _affine_compositional_update(delta: Array, ndim: int) -> Array:
+    """Inverse-compositional warp update ``W(Δθ)⁻¹`` for an affine step.
+
+    ``W(Δθ) = [[matrix_exp(A), t], [0, 1]]`` (``affine_exp``), whose inverse is
+    ``[[matrix_exp(−A), −matrix_exp(−A)·t], [0, 1]]`` -- the linear-block
+    inverse is ``matrix_exp(A)⁻¹ = matrix_exp(−A)``, so it stays **GPU-native**
+    (pure matmul, no solve).
+    """
+    a = delta[: ndim * ndim].reshape(ndim, ndim)
+    t = delta[ndim * ndim :]
+    l_inv = matrix_exp(-a)
+    inv = jnp.eye(ndim + 1, dtype=delta.dtype)
+    inv = inv.at[:ndim, :ndim].set(l_inv)
+    return inv.at[:ndim, ndim].set(-l_inv @ t)
+
+
+def _rigid_params_from_matrix(matrix: Array, ndim: int) -> Array:
+    """Rigid Lie parameters of a recovered rigid homogeneous matrix."""
+    return rigid_log(matrix, ndim=ndim)
+
+
+def _affine_params_from_matrix(matrix: Array, ndim: int) -> Array:
+    """Affine Lie parameters of a recovered affine homogeneous matrix.
+
+    The linear params are ``matrix_log`` of the linear block (the ``gl(n)``
+    generator, row-major); the translation params are the literal translation
+    (``affine_exp`` uses a direct translation) -- matching ``affine_exp``'s
+    layout.  Uses ``matrix_log`` (offline, not in the iteration loop).
+    """
+    linear = matrix_log(matrix[:ndim, :ndim]).reshape(-1)
+    return jnp.concatenate([linear, matrix[:ndim, ndim]])
+
+
 def _hessian_inv(sd: Float[Array, ' m p']) -> Float[Array, ' p p']:
     """Inverse Gauss-Newton Hessian ``(SDᵀSD + λI)⁻¹`` (computed once)."""
     h = sd.T @ sd
@@ -114,6 +186,7 @@ def _ic_level(
     *,
     spec: RegistrationSpec,
     ndim: int,
+    compositional_update: CompositionalUpdate,
 ) -> tuple[Array, Array]:
     """Run the inverse-compositional iterations on one resolution."""
     fixed, sd, h_inv, center = ref
@@ -129,7 +202,7 @@ def _ic_level(
         )[..., 0]
         err = (warped - fixed).reshape(-1)
         delta = h_inv @ (sd.T @ err)
-        update = _rigid_inverse(rigid_exp(delta, ndim=ndim), ndim)
+        update = compositional_update(delta, ndim)
         return matrix @ update, 0.5 * jnp.sum(err * err)
 
     return jax.lax.scan(step, matrix, xs=None, length=spec.iterations)
@@ -138,18 +211,21 @@ def _ic_level(
 def ic_reference(
     pyr_f: tuple[Float[Array, '*spatial 1'], ...],
     ndim: int,
+    *,
+    steepest_descent: SteepestDescent = _steepest_descent,
 ) -> list[ReferenceLevel]:
     """Precompute the per-level reference data (finest first).
 
-    The shared, frame-independent work: the steepest-descent images and
-    the inverse Hessian on every reference pyramid level.  Computed once;
-    reused across all frames and all iterations.
+    The shared, frame-independent work: the steepest-descent images
+    (``steepest_descent``; rigid by default, affine for the affine recipe) and
+    the inverse Hessian on every reference pyramid level.  Computed once; reused
+    across all frames and all iterations.
     """
     levels = []
     for level in pyr_f:
         fixed = level[..., 0]
         center = (jnp.asarray(fixed.shape, dtype=fixed.dtype) - 1.0) / 2.0
-        sd = _steepest_descent(fixed, center, ndim)
+        sd = steepest_descent(fixed, center, ndim)
         levels.append((fixed, sd, _hessian_inv(sd), center))
     return levels
 
@@ -161,13 +237,17 @@ def ic_register_core(
     ndim: int,
     spec: RegistrationSpec,
     init_matrix: Array,
+    compositional_update: CompositionalUpdate = _rigid_compositional_update,
+    params_from_matrix: ParamsFromMatrix = _rigid_params_from_matrix,
 ) -> RegistrationResult:
     """Inverse-compositional register ``moving`` against a precomputed ref.
 
     ``ref_levels`` (from :func:`ic_reference`) is built once by the caller
     and ``vmap``-ed over a series, so the steepest-descent / Hessian work
     is shared.  Builds the moving pyramid, runs the coarse-to-fine IC
-    iterations carrying the warp matrix, and finalises.
+    iterations carrying the warp matrix, and finalises.  The transform group is
+    the ``compositional_update`` (``W(Δθ)⁻¹``) + ``params_from_matrix`` pair
+    (rigid by default; affine for ``affine_register``).
     """
     dtype = moving.dtype
     pyr_m = gaussian_pyramid(
@@ -189,7 +269,14 @@ def ic_register_core(
                 prev_shape, dtype=dtype
             )
             matrix = matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] * ratio)
-        matrix, costs = _ic_level(m_l, ref, matrix, spec=spec, ndim=ndim)
+        matrix, costs = _ic_level(
+            m_l,
+            ref,
+            matrix,
+            spec=spec,
+            ndim=ndim,
+            compositional_update=compositional_update,
+        )
         histories.append(costs)
         prev_shape = f_shape
 
@@ -205,7 +292,7 @@ def ic_register_core(
     )[..., 0]
     return RegistrationResult(
         matrix=matrix,
-        params=rigid_log(matrix, ndim=ndim),
+        params=params_from_matrix(matrix, ndim),
         warped=warped,
         cost_history=jnp.concatenate(histories),
     )
@@ -241,4 +328,44 @@ def ic_rigid_register(
         init_matrix = jnp.eye(ndim + 1, dtype=moving.dtype)
     return ic_register_core(
         moving, ref_levels, ndim=ndim, spec=spec, init_matrix=init_matrix
+    )
+
+
+def ic_affine_register(
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
+    *,
+    ndim: int,
+    spec: RegistrationSpec,
+    init_matrix: Optional[Array] = None,
+) -> RegistrationResult:
+    """Single-pair inverse-compositional **affine** registration.
+
+    The affine analogue of :func:`ic_rigid_register` (lever A′): the reference
+    steepest-descent uses the full ``gl(n)`` generators (12-DOF 3-D / 6-DOF
+    2-D), the compositional update inverts ``affine_exp(Δθ)`` GPU-natively via
+    ``matrix_exp(−A)``, and the params are recovered with ``matrix_log`` of the
+    linear block.  Affine has the largest parameter count, so the forward
+    path's per-iteration ``jacfwd`` (≈ 14 tangent warps) is the costliest --
+    the constant-template Hessian saves the most here.
+    """
+    pyr_f = gaussian_pyramid(
+        fixed[..., None],
+        levels=spec.levels,
+        factor=spec.pyramid_factor,
+        sigma=spec.pyramid_sigma,
+    )
+    ref_levels = ic_reference(
+        pyr_f, ndim, steepest_descent=_affine_steepest_descent
+    )
+    if init_matrix is None:
+        init_matrix = jnp.eye(ndim + 1, dtype=moving.dtype)
+    return ic_register_core(
+        moving,
+        ref_levels,
+        ndim=ndim,
+        spec=spec,
+        init_matrix=init_matrix,
+        compositional_update=_affine_compositional_update,
+        params_from_matrix=_affine_params_from_matrix,
     )
