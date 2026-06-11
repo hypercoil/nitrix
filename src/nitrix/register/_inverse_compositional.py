@@ -29,7 +29,7 @@ linearisation is in voxel coordinates).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import jax
 import jax.numpy as jnp
@@ -208,4 +208,37 @@ def ic_register_core(
         params=rigid_log(matrix, ndim=ndim),
         warped=warped,
         cost_history=jnp.concatenate(histories),
+    )
+
+
+def ic_rigid_register(
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
+    *,
+    ndim: int,
+    spec: RegistrationSpec,
+    init_matrix: Optional[Array] = None,
+) -> RegistrationResult:
+    """Single-pair inverse-compositional rigid registration.
+
+    The fast path ``rigid_register`` dispatches to when its preconditions hold
+    (``IndexSpace`` + a least-squares / SSD metric + a Rigid model): builds the
+    reference steepest-descent / Hessian **once** (:func:`ic_reference`) and
+    runs the constant-template iterations (:func:`ic_register_core`) -- the
+    3dvolreg lineage's per-iteration speed (one warp + one projection per step
+    vs the forward path's ``jacfwd`` over the warp).  Returns the same
+    ``RegistrationResult`` as the forward driver, so the two are interchangeable
+    (the forward path is the parity oracle).
+    """
+    pyr_f = gaussian_pyramid(
+        fixed[..., None],
+        levels=spec.levels,
+        factor=spec.pyramid_factor,
+        sigma=spec.pyramid_sigma,
+    )
+    ref_levels = ic_reference(pyr_f, ndim)
+    if init_matrix is None:
+        init_matrix = jnp.eye(ndim + 1, dtype=moving.dtype)
+    return ic_register_core(
+        moving, ref_levels, ndim=ndim, spec=spec, init_matrix=init_matrix
     )

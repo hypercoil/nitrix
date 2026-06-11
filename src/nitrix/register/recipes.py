@@ -26,7 +26,8 @@ from ._core import (
     RegistrationSpec,
     multi_resolution_register,
 )
-from ._model import Affine, Rigid
+from ._inverse_compositional import ic_rigid_register
+from ._model import Affine, Rigid, TransformModel
 from ._space import CoordinateSpace, IndexSpace
 
 __all__ = ['rigid_register', 'affine_register']
@@ -42,12 +43,51 @@ def _spatial_ndim(moving: Array, fixed: Array) -> int:
     return ndim
 
 
+def _use_inverse_compositional(
+    method: str,
+    space: CoordinateSpace,
+    spec: RegistrationSpec,
+    model: TransformModel,
+) -> bool:
+    """Resolve the ``method`` argument against the IC fast-path preconditions.
+
+    The inverse-compositional kernel (constant-template Hessian, ~4-7x the
+    forward GN/LM throughput) applies only to a **rigid** least-squares (SSD)
+    registration in **IndexSpace** (the template is linearised in voxel
+    coordinates).  ``"auto"`` takes it when those hold and falls back to the
+    forward path otherwise (the parity oracle); ``"inverse_compositional"``
+    forces it (and validates); ``"forward"`` always takes the forward path.
+    """
+    supported = (
+        isinstance(space, IndexSpace)
+        and spec.metric.is_least_squares
+        and spec.optimizer in ('auto', 'lm', 'gn')
+        and isinstance(model, Rigid)
+    )
+    if method == 'auto':
+        return supported
+    if method == 'inverse_compositional':
+        if not supported:
+            raise ValueError(
+                'method="inverse_compositional" requires IndexSpace + a '
+                'least-squares (SSD) metric + a Rigid model.'
+            )
+        return True
+    if method == 'forward':
+        return False
+    raise ValueError(
+        f'method must be "auto", "forward", or "inverse_compositional"; '
+        f'got {method!r}.'
+    )
+
+
 def rigid_register(
     moving: Float[Array, '*mspatial'],
     fixed: Float[Array, '*fspatial'],
     *,
     spec: RegistrationSpec = RegistrationSpec(),
     space: CoordinateSpace = IndexSpace(),
+    method: str = 'auto',
 ) -> RegistrationResult:
     """Estimate the rigid transform aligning ``moving`` to ``fixed``.
 
@@ -68,6 +108,13 @@ def rigid_register(
         (default; voxel-space, shared-grid, on-device) or
         ``WorldSpace(fixed_affine=..., moving_affine=...)`` (physical
         space -- correct under anisotropic voxels and different grids).
+    method
+        Solver: ``"auto"`` (default; the inverse-compositional fast path --
+        ~4-7x the forward throughput -- when its preconditions hold:
+        ``IndexSpace`` + a least-squares / SSD metric; the forward
+        Gauss-Newton / LM path otherwise), ``"inverse_compositional"`` (force
+        it; validates), or ``"forward"``.  The forward path is the parity
+        oracle the fast path is tested against.
 
     Returns
     -------
@@ -77,10 +124,13 @@ def rigid_register(
     ``warped`` is ``moving`` on the ``fixed`` grid.
     """
     ndim = _spatial_ndim(moving, fixed)
+    model = Rigid()
+    if _use_inverse_compositional(method, space, spec, model):
+        return ic_rigid_register(moving, fixed, ndim=ndim, spec=spec)
     return multi_resolution_register(
         moving,
         fixed,
-        model=Rigid(),
+        model=model,
         ndim=ndim,
         spec=spec,
         space=space,
