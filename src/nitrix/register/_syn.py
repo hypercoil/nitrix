@@ -148,6 +148,7 @@ def _syn_level(
     spec: SyNSpec,
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
 ) -> tuple[Array, Array, Array]:
     """Run the symmetric SyN iterations on one resolution.
 
@@ -172,6 +173,7 @@ def _syn_level(
         sigma_diffusion=spec.sigma_diffusion,
         step=spec.step,
         rel_spacing=rel_spacing,
+        mask=mask,
     )
 
 
@@ -183,6 +185,7 @@ def greedy_syn_register(
     force: Optional[Union[Force, Sequence[Force]]] = None,
     init_affine: Optional[Float[Array, ' d1 d1']] = None,
     init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
+    mask: Optional[Float[Array, '*spatial']] = None,
 ) -> SyNResult:
     """Greedy symmetric diffeomorphic registration (LNCC-driven by default).
 
@@ -257,11 +260,22 @@ def greedy_syn_register(
     forces = resolve_force_schedule(
         force, default=LNCCForce(spec.radius), levels=spec.levels
     )
+    pyr_mask = (
+        None
+        if mask is None
+        else gaussian_pyramid(
+            mask[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        )
+    )
 
     def level_solve(
         level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
         v_fwd, v_inv = state
+        mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
         v_fwd, v_inv, hist = _syn_level(
             m_l,
             f_l,
@@ -271,6 +285,7 @@ def greedy_syn_register(
             spec=spec,
             ndim=ndim,
             rel_spacing=rel_spacing,
+            mask=mask_l,
         )
         return (v_fwd, v_inv), hist
 

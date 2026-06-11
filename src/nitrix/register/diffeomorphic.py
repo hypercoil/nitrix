@@ -142,6 +142,7 @@ def _demons_level(
     spec: DemonsSpec,
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
 ) -> tuple[Array, Array]:
     """Run the Demons iterations on one resolution; return ``(v, costs)``.
 
@@ -171,6 +172,7 @@ def _demons_level(
         bch_order=spec.bch_order,
         step=None,
         rel_spacing=rel_spacing,
+        mask=mask,
     )
 
 
@@ -182,6 +184,7 @@ def diffeomorphic_demons_register(
     force: Optional[Union[Force, Sequence[Force]]] = None,
     init_affine: Optional[Float[Array, ' d1 d1']] = None,
     init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
+    mask: Optional[Float[Array, '*spatial']] = None,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -213,6 +216,10 @@ def diffeomorphic_demons_register(
         registered; the returned ``displacement`` / ``warped`` /
         ``jacobian_det`` are the **total** (init then residual) map, while
         ``velocity`` is the residual SVF.
+    mask
+        Optional fixed-grid weight field (``(*spatial,)``, e.g. a brain mask)
+        gating the force to a region: the masked area drives the deformation,
+        the rest follows by regularisation.
 
     Returns
     -------
@@ -256,11 +263,22 @@ def diffeomorphic_demons_register(
     forces = resolve_force_schedule(
         force, default=DemonsForce(spec.alpha), levels=spec.levels
     )
+    pyr_mask = (
+        None
+        if mask is None
+        else gaussian_pyramid(
+            mask[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        )
+    )
 
     def level_solve(
         level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
         (v,) = state
+        mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
         v, hist = _demons_level(
             m_l,
             f_l,
@@ -269,6 +287,7 @@ def diffeomorphic_demons_register(
             spec=spec,
             ndim=ndim,
             rel_spacing=rel_spacing,
+            mask=mask_l,
         )
         return (v,), hist
 

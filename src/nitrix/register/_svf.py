@@ -207,6 +207,11 @@ def _per_axis_sigma(
     return tuple(sigma / r for r in rel_spacing)
 
 
+def _mask_force(u: Array, mask: Optional[Array]) -> Array:
+    """Gate a force field by a (channel-less) mask; ``None`` -> unchanged."""
+    return u if mask is None else u * mask[..., None]
+
+
 def _regularise(
     v: Array,
     u: Array,
@@ -247,13 +252,16 @@ def single_sided_level(
     bch_order: int,
     step: Optional[float],
     rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
 ) -> tuple[Array, Array]:
     """Single-sided SVF iterations on one resolution (the Demons structure).
 
     Warps ``moving`` by ``exp(v)`` and drives ``v`` up the similarity under
     ``force`` -- metric-generic: any :class:`Force` plugs in.  The force is
     bound to ``fixed`` **once** (its fixed-state, e.g. ``∇fixed``, is hoisted
-    out of the iteration).  Rolled with ``lax.scan``; returns ``(v, costs)``.
+    out of the iteration).  ``mask`` (this level's, channel-less) gates the
+    force to a region -- the masked area drives the deformation, the rest
+    follows by regularisation.  Rolled with ``lax.scan``; returns ``(v, costs)``.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)
@@ -267,7 +275,7 @@ def single_sided_level(
         )[..., 0]
         v = _regularise(
             v,
-            bound.update(warped),
+            _mask_force(bound.update(warped), mask),
             step=step,
             sigma_fluid=sf,
             sigma_diffusion=sd,
@@ -294,13 +302,15 @@ def symmetric_level(
     sigma_diffusion: float,
     step: Optional[float],
     rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
 ) -> tuple[Array, Array, Array]:
     """Symmetric-midpoint SVF iterations on one resolution (the SyN structure).
 
     Warps both images to the shared midpoint and ascends the similarity under
     ``force`` in each direction -- metric-generic.  The force is bound **per
     step** (its "fixed" is the other image at the midpoint, which changes every
-    iteration).  Rolled with ``lax.scan``; returns ``(v_fwd, v_inv, costs)``.
+    iteration).  ``mask`` (this level's) gates both half-forces to a region.
+    Rolled with ``lax.scan``; returns ``(v_fwd, v_inv, costs)``.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     sf = _per_axis_sigma(sigma_fluid, rel_spacing)
@@ -322,7 +332,7 @@ def symmetric_level(
         bound_inv = force.bind(a, ndim=ndim, rel_spacing=rel_spacing)
         v_fwd = _regularise(
             v_fwd,
-            bound_fwd.update(a),
+            _mask_force(bound_fwd.update(a), mask),
             step=step,
             sigma_fluid=sf,
             sigma_diffusion=sd,
@@ -331,7 +341,7 @@ def symmetric_level(
         )
         v_inv = _regularise(
             v_inv,
-            bound_inv.update(b),
+            _mask_force(bound_inv.update(b), mask),
             step=step,
             sigma_fluid=sf,
             sigma_diffusion=sd,
