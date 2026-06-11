@@ -168,7 +168,37 @@ coarser-grid moving registers via init; anisotropic physical-window SyN
 recovers; physically-isotropic per-axis radii; init mutual-exclusion + no-init
 shape-mismatch raise.
 
-## 5. V3 — transform algebra + batched application (the Lie-group pillar)
+## 5. V3 — transform algebra + batched application (the Lie-group pillar) ✅ SHIPPED
+
+Landed in `geometry.algebra` (V3a `b7f8079`, V3b `1597775`):
+- **`transform_mean`** — the Fréchet (Karcher) mean of homogeneous transforms
+  (rigid `SE(n)` ⊂ affine) via the log/exp fixed point. Unified on the **true
+  matrix chart** (`linalg.matrix_log`/`matrix_exp`), not the closed-form
+  `rigid_exp`/`rigid_log`, because the latter is split-param (the geodesic
+  ½-point would not square to `T`) and singular at identity (which the Karcher
+  init hits). The mean of rigids is rigid.
+- **`linalg.matrix_log`** (NEW) — the general matrix logarithm its affine mean
+  warranted: inverse scaling-and-squaring with Denman–Beavers square roots via
+  `safe_inv`; round-trips `matrix_exp` to machine precision incl. large
+  translations. Graduates the deferred §12.2 `matrix_log`.
+- **`transform_geodesic`** — `exp(t·log T)`, a true geodesic (½-point squares
+  to `T`); **`velocity_mean`** — the SVF barycentre (weighted arithmetic mean).
+- **`fuse_transforms`** — collapse a multi-stage chain (matrices + displacement
+  fields) into one displacement → **one** resample (quality: no compounded
+  blur; throughput: one gather). Pure resampling, GPU-native.
+- **Batched application** is already a primitive (`geometry.spatial_transform_-
+  batched` / `vmap`), so it was demonstrated, not re-added.
+
+*Design note:* `transform_mean`/`transform_geodesic` use `matrix_log` (hence
+`safe_inv`), so they are offline barycentre / interpolation ops — jit/grad-clean
+on a healthy GPU, forward/eager via the CPU fallback on the wedged-cuSolver dev
+box (hence a Python loop, not `lax.scan`, since `safe_inv`'s fallback can't
+engage inside a traced scan). **Gate (met):** `matrix_log` round-trip; mean of
+identical / symmetric (rigid + affine) / pure-translation; geodesic endpoints +
+halfway; A∘A⁻¹ fuses to ~zero; fused == sequential warp (ncc > 0.99);
+vmap-batched fused warp.
+
+### Original plan (for reference)
 
 The algebraic backbone for groupwise/template work, multi-stage fusion, and
 cohort throughput. A transform is a group element with a log (algebra) and exp
@@ -280,9 +310,10 @@ adjoint substrate, if built, lands on the same `f(t, y)` interface
 - **V2 — geometry/anisotropy + warm-start + multi-stage.** ✅ SHIPPED. Pre-warp +
   compose init (`init_affine`/`init_displacement`); physical LNCC windows;
   `GeometryContext` declined.
-- **V3 — transform algebra + batched application.** ← next. compose/invert/fuse/
-  Fréchet mean; batched apply.
-- **V4 — matrix perf levers** (A/A′/B/C/E) inside the config design.
+- **V3 — transform algebra + batched application.** ✅ SHIPPED. `transform_mean`
+  (Fréchet) / `transform_geodesic` / `velocity_mean` / `fuse_transforms` +
+  `linalg.matrix_log` (graduated).
+- **V4 — matrix perf levers** (A/A′/B/C/E) inside the config design. ← next.
 - **V5 — ANTs-parity SyN + multimodal/groupwise capability.** Then the **LDDMM
   decision** (§8), then the perf round / hand-back to the perf agent.
 
