@@ -30,12 +30,14 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `_iir.py` module docstring says `backend='scan' (default)`; real default is `'auto'` (→ fft on GPU / scan on CPU). Function docstrings are correct; only the module header is stale | [doc-iir-backend-default](doc-iir-backend-default.md) | `signal/_iir.py:~22` | normal |
 | `pairedcorr` forms the full `cov(X)`/`cov(Y)` to read their diagonals — ~3× matmul (the direct-variance ref is ~2× faster from `c≳512` on CPU+GPU; `pairedcov` control is at parity) | [pairedcorr-redundant-full-cov](pairedcorr-redundant-full-cov.md) | `stats/covariance.py:313–328` | perf (micro-opt) |
 | **v3 regression:** `affine_register` multi-level GN/LM **diverges at small grids** (≤28³ → coarse level ≤14³; params explode, warped anti-correlates) — fine ≥32³; rigid (V4a IC) + BFGS + single-level unaffected → isolates to the V4b/V4c affine IC fast path / closed-form Jacobian | [register-affine-small-grid-divergence](register-affine-small-grid-divergence.md) | `register/recipes.py` (`affine_register`) | regression (robustness) |
+| **correctness:** demons ESM force **0/0 → NaN** on uniform regions (unguarded `diff/denom`); fires on *every* real image (uniform background), 1 iteration — synthetic-noise inputs hid it | [register-demons-force-divide-by-zero](register-demons-force-divide-by-zero.md) | `register/_force.py:253–257` | bug (NaN) |
 
 _(The five lomb/tsconv findings above resolved 2026-06-02 — see below;
 `doc-gaussian-kernel-gamma` and `doc-relaxed-modularity-newman-factor` are
 newly open 2026-06-03; `doc-iir-backend-default` newly open 2026-06-06;
 `pairedcorr-redundant-full-cov` newly open 2026-06-10;
-`register-affine-small-grid-divergence` newly open 2026-06-11.)_
+`register-affine-small-grid-divergence` + `register-demons-force-divide-by-zero`
+newly open 2026-06-11.)_
 
 ## Resolved
 
