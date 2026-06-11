@@ -1,10 +1,13 @@
 # Registration suite v3 — metric/instrument decoupling, transform algebra, ANTs-parity SyN
 
-> **Status (2026-06-10): scoped + locked, plan only (no code).** The third
-> registration block, on top of the shipped v2 suite (volreg, BBR, greedy SyN,
-> the physical-space `CoordinateSpace` foundation; merged to `main` `60a0d70`).
-> Branch `registration-suite-v3` off `main`. This document is the durable plan;
-> per-phase landings update it in place (the v2 precedent).
+> **Status (2026-06-11): V1–V5 SHIPPED; round closed (LDDMM deferred, §8).** The
+> third registration block, on top of the shipped v2 suite (volreg, BBR, greedy
+> SyN, the physical-space `CoordinateSpace` foundation; merged to `main`
+> `60a0d70`). Branch `registration-suite-v3` off `main`. This document is the
+> durable plan; per-phase landings updated it in place (the v2 precedent).
+> V1 (Force keystone) → V2 (warm-start/multi-stage + physical windows) → V3
+> (transform algebra + `matrix_log`) → V4 (all 5 matrix perf levers) → V5
+> (ANTs-parity SyN: masks); geodesic LDDMM scoped as the next increment.
 
 Reads on top of [`registration-suite-v2.md`](registration-suite-v2.md) (R4–R8)
 and [`registration.md`](registration.md) (the R0–R3 core).
@@ -289,16 +292,21 @@ geodesic + the ODE-adjoint backward, *or* time-varying relaxation (Beg-style
 `v(t)` over `T` steps, differentiable through the existing scan-AD, memory linear
 in `T`).
 
-**The end-of-round decision (with the value question framed now).** Greedy SyN
-already covers what most ANTs-SyN users run. Geodesic LDDMM earns its substrate
-cost only for the cohort that needs *true geodesics*: momentum-based shape
-statistics, geodesic regression, guaranteed-shortest-path deformations,
-parallel transport for cross-subject statistics. The decision at the end of the
-round weighs that realistic added value against the substrate investment, and
-chooses between (a) defer, (b) time-varying relaxation LDDMM (lighter), or
-(c) full geodesic shooting (the ODE-adjoint is independently valuable). The
-adjoint substrate, if built, lands on the same `f(t, y)` interface
-(`numerics.ode`) and the V1 `Force` protocol.
+**The end-of-round decision (2026-06-11): DEFERRED.** Greedy SyN — now at ANTs
+parity — covers what most ANTs-SyN / fMRIPrep users run; geodesic LDDMM's
+marginal value is concentrated in the narrower shape-statistics cohort
+(momentum-based shape stats, geodesic regression, parallel transport,
+guaranteed-shortest-path deformations), which does not clear the bar against the
+substrate cost for this round. **Scoped as the next increment**, to land when a
+concrete shape-statistics consumer materialises: the §12.11 memory-efficient
+ODE-adjoint (independently valuable — a fixed-point + Krylov backward on the
+`numerics.ode` `f(t, y)` interface) + EPDiff geodesic + initial-momentum
+parameterisation (full shooting), or the lighter time-varying relaxation
+(Beg-style `v(t)` over `T` steps, differentiable through the existing scan-AD).
+It lands on the V1 `Force` protocol (the metric drives it the same way).
+
+**The v3 round closes here** (V1–V5 shipped) → merge to `main` + hand to the
+perf agent.
 
 ## 9. Engineering rigour & clean-abstraction vectors (corpus review)
 
@@ -335,8 +343,10 @@ adjoint substrate, if built, lands on the same `f(t, y)` interface
   rigid+affine IC fast paths; closed-form forward Jacobian (==jacfwd); per-level
   schedule; elective ANTs-style early-exit.
 - **V5 — ANTs-parity SyN + multimodal/groupwise capability.** ✅ SHIPPED (masks
-  the only new feature; the rest delivered by V1–V3). Then the **LDDMM
-  decision** (§8) ← here, then the perf round / hand-back to the perf agent.
+  the only new feature; the rest delivered by V1–V3).
+- **LDDMM decision (§8): DEFERRED** — geodesic shooting scoped as the next
+  increment (narrow shape-stats value vs the substrate cost). **Round closes
+  here** → merge to `main` + perf round.
 
 Each phase: pure-functional surface, JAX fallback floor, rigorous typing
 (Protocols where they earn it), immutable/frozen specs + NamedTuple results,
