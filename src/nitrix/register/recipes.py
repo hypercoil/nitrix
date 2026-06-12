@@ -25,6 +25,7 @@ from dataclasses import replace
 from jaxtyping import Array, Float
 
 from ._core import (
+    Convergence,
     RegistrationResult,
     RegistrationSpec,
     multi_resolution_register,
@@ -32,6 +33,21 @@ from ._core import (
 from ._inverse_compositional import ic_affine_register, ic_rigid_register
 from ._model import Affine, Rigid, TransformModel
 from ._space import CoordinateSpace, IndexSpace
+
+# C3: an explicit Convergence on a path that cannot honour it (the forward
+# GN/LM path -- only the single-pair inverse-compositional path early-exits).
+_CONVERGENCE_FORWARD_MSG = (
+    'spec.convergence (early-exit) is honoured only on the single-pair '
+    'inverse-compositional path (IndexSpace + a least-squares / SSD metric + a '
+    'Rigid / Affine model); this run resolves to the forward GN/LM path.  Use '
+    "convergence='auto' (the default) or None, or meet the IC preconditions."
+)
+
+
+def _check_forward_convergence(spec: RegistrationSpec) -> None:
+    """Raise (C3) if an explicit ``Convergence`` reaches the forward path."""
+    if isinstance(spec.convergence, Convergence):
+        raise ValueError(_CONVERGENCE_FORWARD_MSG)
 
 __all__ = ['rigid_register', 'affine_register']
 
@@ -176,6 +192,7 @@ def rigid_register(
     model = Rigid()
     if _use_inverse_compositional(method, space, spec, model):
         return ic_rigid_register(moving, fixed, ndim=ndim, spec=spec)
+    _check_forward_convergence(spec)
     return multi_resolution_register(
         moving,
         fixed,
@@ -213,6 +230,7 @@ def affine_register(
     spec = _cap_levels(spec, fixed.shape)
     if _use_inverse_compositional(method, space, spec, model):
         return ic_affine_register(moving, fixed, ndim=ndim, spec=spec)
+    _check_forward_convergence(spec)
     return multi_resolution_register(
         moving,
         fixed,

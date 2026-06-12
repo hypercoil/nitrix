@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional, Tuple
 
+import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -30,6 +31,40 @@ from jaxtyping import Array
 from ._core import Convergence
 
 __all__ = ['Convergence', 'run_iterations']
+
+_EARLY_EXIT_NO_REVERSE = (
+    'reverse-mode differentiation through an early-exit (lax.while_loop) '
+    'registration is not supported -- a while_loop has no reverse rule, so the '
+    'data-dependent iteration count cannot be back-propagated.  For gradients, '
+    'use the implicit-function entry points (linalg.implicit_least_squares / '
+    'implicit_minimize), which differentiate at the optimum and are '
+    'trajectory-independent; or pass convergence=None to restore the '
+    'reverse-differentiable fixed-iteration scan.'
+)
+
+
+@jax.custom_vjp
+def _early_exit_barrier(state: Any) -> Any:
+    """Identity on the forward pass; a loud, actionable raise on the reverse.
+
+    Applied to the ``while_loop`` early-exit output so that a ``jax.grad``
+    through the early-exit path raises the registration-specific contract error
+    (above) -- the "loud fallbacks" tenet -- instead of JAX's generic
+    while_loop-no-reverse error.  ``convergence=None`` (the ``lax.scan`` path)
+    never goes through the barrier, so it stays reverse-differentiable.
+    """
+    return state
+
+
+def _barrier_fwd(state: Any) -> tuple[Any, None]:
+    return state, None
+
+
+def _barrier_bwd(_: None, cotangent: Any) -> tuple[Any]:
+    raise RuntimeError(_EARLY_EXIT_NO_REVERSE)
+
+
+_early_exit_barrier.defvjp(_barrier_fwd, _barrier_bwd)
 
 # Scan-style step: ``(state, xs) -> (state, cost)`` with ``cost`` a scalar; the
 # same signature ``lax.scan`` consumes, so a level fn's body is reused verbatim.
@@ -92,4 +127,6 @@ def run_iterations(
     )
     state, last_i, buf, hist = lax.while_loop(cond, body, init)
     hist = jnp.where(jnp.arange(iterations) < last_i, hist, buf[-1])
-    return state, hist
+    # Loud, actionable error on reverse-mode through the early-exit (the state
+    # carries the differentiable result -- matrix / velocity field).
+    return _early_exit_barrier(state), hist

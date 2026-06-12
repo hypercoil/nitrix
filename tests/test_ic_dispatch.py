@@ -287,17 +287,30 @@ def test_early_exit_recovers_like_fixed_scan():
     assert res_early.cost_history.shape == res_fixed.cost_history.shape
 
 
-def test_early_exit_default_is_fixed_scan():
-    # convergence=None (default) is byte-identical to the explicit fixed scan
+def test_default_auto_early_exit_recovers_like_none_scan():
+    # 3b: the default (convergence='auto') early-exits on the single-pair IC
+    # path, recovering to the same optimum as the explicit convergence=None fixed
+    # scan (the reverse-differentiable opt-out) -- the early-exit default does
+    # not change the result, only the iteration count.
     moving, fixed = _rigid_pair(64)
-    spec = RegistrationSpec(levels=3, iterations=20)
-    a = rigid_register(moving, fixed, spec=spec)
-    b = rigid_register(
+    auto = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=3, iterations=20)
+    )
+    scan = rigid_register(
         moving,
         fixed,
         spec=RegistrationSpec(levels=3, iterations=20, convergence=None),
     )
-    assert np.allclose(np.asarray(a.warped), np.asarray(b.warped), atol=1e-12)
+    assert np.allclose(np.asarray(auto.warped), np.asarray(scan.warped), atol=1e-6)
+
+
+def test_convergence_raises_on_forward_path():
+    # C3: an explicit Convergence on a path that cannot honour it (forward GN/LM
+    # -- here forced by method='forward') raises rather than being silently inert.
+    moving, fixed = _rigid_pair(48)
+    spec = RegistrationSpec(levels=2, iterations=10, convergence=Convergence())
+    with pytest.raises(ValueError, match='inverse-compositional'):
+        rigid_register(moving, fixed, spec=spec, method='forward')
 
 
 def test_early_exit_affine():

@@ -21,6 +21,7 @@ jax.config.update('jax_enable_x64', True)
 
 import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
+import pytest  # noqa: E402
 
 from nitrix.geometry import (  # noqa: E402
     affine_grid,
@@ -208,16 +209,30 @@ def _make_pair(n=16, transform=(0.06, 1.0, -0.8)):
     return moving, fixed
 
 
-def test_rigid_recipe_differentiable_wrt_image():
+def test_rigid_recipe_differentiable_via_convergence_none():
+    # 3b: the single-pair IC default is the early-exit (while_loop), which is
+    # NOT reverse-differentiable -- jax.grad through it raises a loud, actionable
+    # error; convergence=None restores the reverse-differentiable fixed scan.
     moving, fixed = _make_pair()
 
-    def loss(m):
+    def loss_default(m):
         res = rigid_register(
             m, fixed, spec=RegistrationSpec(levels=1, iterations=5)
         )
         return jnp.sum(res.warped**2)
 
-    g = np.asarray(jax.grad(loss)(moving))
+    with pytest.raises(RuntimeError, match='implicit_least_squares'):
+        jax.grad(loss_default)(moving)
+
+    def loss_scan(m):
+        res = rigid_register(
+            m,
+            fixed,
+            spec=RegistrationSpec(levels=1, iterations=5, convergence=None),
+        )
+        return jnp.sum(res.warped**2)
+
+    g = np.asarray(jax.grad(loss_scan)(moving))
     assert np.all(np.isfinite(g))
     assert np.abs(g).sum() > 0.0
 

@@ -42,7 +42,15 @@ voxel grid.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Callable, NamedTuple, Optional, Sequence, Union, cast
+from typing import (
+    Callable,
+    Literal,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Union,
+    cast,
+)
 
 import jax
 import jax.numpy as jnp
@@ -96,6 +104,28 @@ class Convergence:
     window: int = 10
 
 
+# The ``convergence`` field's value space: an explicit :class:`Convergence`, an
+# explicit ``None`` (the reverse-differentiable fixed-scan opt-out), or the
+# ``'auto'`` sentinel (the default) -- resolved per path by ``resolve_convergence``.
+ConvergenceSpec = Union[Convergence, None, Literal['auto']]
+
+
+def resolve_convergence(
+    convergence: ConvergenceSpec, *, ic: bool
+) -> Optional[Convergence]:
+    """Resolve the ``convergence`` sentinel for a concrete registration path.
+
+    ``'auto'`` (the default) -> the early-exit ``Convergence()`` on the
+    **single-pair inverse-compositional** path (``ic=True``, the perf default,
+    3b), or ``None`` (the fixed ``scan``) on the ``vmap``-batched / forward paths
+    (``ic=False``) that cannot honour a ``while_loop``.  An explicit ``None``
+    (the opt-out) and an explicit :class:`Convergence` pass through unchanged.
+    """
+    if convergence == 'auto':
+        return Convergence() if ic else None
+    return convergence
+
+
 @dataclass(frozen=True)
 class RegistrationSpec:
     """Static configuration for a registration recipe.
@@ -132,10 +162,19 @@ class RegistrationSpec:
     cg_tol
         Inner-CG tolerance for the GN/LM path.
     convergence
-        ``None`` (default) -> a fixed ``iterations`` count (reproducible,
-        vmap-batchable).  A :class:`Convergence` -> opt-in early-exit for the
-        single-pair inverse-compositional path (``iterations`` becomes the hard
-        cap).
+        Early-exit control.  ``'auto'`` (default) -> the windowed-slope
+        early-exit on the **single-pair inverse-compositional** path (the perf
+        default; ``iterations`` becomes the hard cap), the fixed ``scan``
+        elsewhere (forward / vmap-batched ``volreg``, which cannot honour a
+        while_loop).  ``None`` -> the fixed ``scan`` everywhere (the
+        reverse-differentiable opt-out).  A :class:`Convergence` -> that explicit
+        criterion (raises on a path that cannot honour it).  **Differentiability
+        (3b):** an early-exit forward is not reverse-differentiable; ``jax.grad``
+        through it raises a loud, actionable error -- use the implicit-function
+        path or ``convergence=None``.  **cost_history (C6):** on the early-exit
+        path the per-level trace is padded to the ``iterations`` cap with the
+        final cost (so the shape is path-independent; the value is constant past
+        the stop iteration).
     """
 
     levels: int = 3
@@ -148,7 +187,7 @@ class RegistrationSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     cg_tol: float = 1e-6
-    convergence: Optional[Convergence] = None
+    convergence: ConvergenceSpec = 'auto'
 
 
 class RegistrationResult(NamedTuple):

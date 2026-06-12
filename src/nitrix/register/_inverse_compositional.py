@@ -50,6 +50,7 @@ from ._core import (
     Convergence,
     RegistrationResult,
     RegistrationSpec,
+    resolve_convergence,
     resolve_iterations,
 )
 
@@ -396,6 +397,8 @@ def ic_register_core(
     matrix = init_matrix
     histories = []
     iters_per_level = resolve_iterations(spec.iterations, spec.levels)
+    # Single-pair IC path: 'auto' -> early-exit (the 3b default); None -> scan.
+    convergence = resolve_convergence(spec.convergence, ic=True)
     prev_shape = None
     for level in range(spec.levels - 1, -1, -1):
         ref = ref_levels[level]
@@ -416,7 +419,7 @@ def ic_register_core(
             iterations=iters_per_level[level],
             compositional_update=compositional_update,
             project_moments=project_moments,
-            convergence=spec.convergence,
+            convergence=convergence,
         )
         histories.append(costs)
         prev_shape = f_shape
