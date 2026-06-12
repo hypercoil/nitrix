@@ -28,9 +28,11 @@ from nitrix.register import (  # noqa: E402
     LNCC,
     MI,
     DemonsForce,
+    DemonsSpec,
     LNCCForce,
     MetricForce,
     SyNSpec,
+    diffeomorphic_demons_register,
     greedy_syn_register,
 )
 from nitrix.smoothing import gaussian  # noqa: E402
@@ -101,6 +103,26 @@ def test_syn_multimodal_mi_improves():
     mi1 = float(mutual_information(res.warped, fixed, bins=24))
     assert mi1 > mi0
     assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_demons_metricforce_mi_recovers():
+    # B2: MI drives the *unclamped* Demons driver (step=None) to a real
+    # recovery.  The RMS-controlled MetricForce magnitude replaces the arbitrary
+    # `*size` constant that no one had tuned, so the cross-modal deformable run
+    # both improves its MI substantially and stays diffeomorphic -- the
+    # convergence test the escape hatch lacked.
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)  # "different modality"
+    spec = DemonsSpec(levels=3, iterations=80)
+    res = diffeomorphic_demons_register(
+        moving, fixed, spec=spec, force=MetricForce(MI(bins=24))
+    )
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0 + 0.2  # a substantial improvement, not merely nonzero
+    assert float(res.jacobian_det.min()) > 0.0
+    assert bool(jnp.all(jnp.isfinite(res.warped)))
 
 
 def test_syn_per_level_schedule():

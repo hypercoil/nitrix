@@ -17,6 +17,12 @@ A metric exposes:
   residual whose half-sum-of-squares is the cost.  ``True`` routes the
   driver to the Gauss-Newton / Levenberg-Marquardt least-squares path;
   ``False`` to the scalar BFGS path.
+- ``is_spatial_mean`` (``ClassVar``) -- whether the scalar cost is a
+  per-voxel spatial *mean* (``SSD`` / ``LNCC``) rather than a global
+  histogram statistic (``MI`` / ``CorrelationRatio``).  Consumed by
+  ``register._force.MetricForce``: the voxel-count rescale that makes the
+  autodiff force match the sum-convention closed forms is meaningful only
+  for a spatial mean (see there).
 - ``cost(warped, fixed)`` -- the scalar minimisation objective (lower is
   better; e.g. ``1 - lncc``, ``-mutual_information``).
 - ``residual(warped, fixed)`` -- the least-squares residual vector, for
@@ -62,9 +68,14 @@ class Metric(Protocol):
         Whether the metric admits a residual vector (``residual``) whose
         ``½‖·‖²`` is the cost -- the property that routes the driver to
         the Gauss-Newton / Levenberg-Marquardt path rather than BFGS.
+    is_spatial_mean
+        Whether the cost reduces by a per-voxel spatial mean (so the
+        ``MetricForce`` voxel-count rescale recovers the sum-convention
+        closed-form gradient) rather than being a global histogram scalar.
     """
 
     is_least_squares: ClassVar[bool]
+    is_spatial_mean: ClassVar[bool]
 
     def cost(
         self,
@@ -93,6 +104,7 @@ class SSD:
     """
 
     is_least_squares: ClassVar[bool] = True
+    is_spatial_mean: ClassVar[bool] = True  # mean-squared-difference
 
     def cost(
         self,
@@ -124,6 +136,7 @@ class LNCC:
 
     radius: int = 4
     is_least_squares: ClassVar[bool] = False
+    is_spatial_mean: ClassVar[bool] = True  # mean of the local CC over voxels
 
     def cost(
         self,
@@ -157,6 +170,7 @@ class MI:
     bins: int = 32
     normalized: bool = False
     is_least_squares: ClassVar[bool] = False
+    is_spatial_mean: ClassVar[bool] = False  # global joint-histogram scalar
 
     def cost(
         self,
@@ -189,6 +203,7 @@ class CorrelationRatio:
 
     bins: int = 32
     is_least_squares: ClassVar[bool] = False
+    is_spatial_mean: ClassVar[bool] = False  # global histogram statistic
 
     def cost(
         self,

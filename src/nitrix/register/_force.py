@@ -106,6 +106,12 @@ RelSpacing = Optional[tuple[float, ...]]
 # the intensity scales registration sees.
 _DEMONS_DENOM_EPS = 1e-8
 
+# Below this RMS the force field is treated as no-signal and left at zero rather
+# than amplified to the target magnitude (``_normalise_rms``).  Absolute on the
+# already metric-scale-arbitrary cost gradient: only the genuinely-zero field
+# (a degenerate all-flat / perfectly-matched histogram) falls under it.
+_RMS_EPS = 1e-12
+
 
 def _grad_spacing(
     rel_spacing: RelSpacing,
@@ -119,6 +125,24 @@ def _to_voxel(u: Array, rel_spacing: RelSpacing) -> Array:
     if rel_spacing is None:
         return u
     return u / jnp.asarray(rel_spacing, dtype=u.dtype)
+
+
+def _normalise_rms(u: Float[Array, '*spatial ndim'], target: float) -> Array:
+    """Scale a force field to a target per-voxel RMS magnitude.
+
+    RMS over the spatial voxels of the per-voxel vector norm ``‖u_x‖`` (not the
+    global max -- robust to a single outlier voxel setting the scale, the same
+    discipline ``_svf._normalise_step`` adopts).  Scaling *to* a fixed target
+    makes the step **metric-scale-invariant**: independent of the metric's
+    intrinsic units (MI in nats, CR in ``[0,1]``) and of the voxel count, so an
+    unclamped driver (Demons) gets a controlled magnitude instead of the
+    arbitrary ``·size`` constant.  A genuinely-zero field (no signal) is left at
+    zero, with the double-``where`` keeping the gradient finite there too.
+    """
+    rms = jnp.sqrt(jnp.mean(jnp.sum(u * u, axis=-1)))
+    safe = rms > _RMS_EPS
+    scale = jnp.where(safe, target / jnp.where(safe, rms, 1.0), 0.0)
+    return u * scale
 
 
 @runtime_checkable
@@ -293,20 +317,41 @@ class MetricForce:
     price of generality; ship a closed-form :class:`Force` for a metric that
     earns one.
 
-    The cost gradient is rescaled by the voxel count to match the
-    sum-convention the closed forms use (the metric costs reduce by spatial
-    mean), so ``MetricForce(LNCC(r))`` is numerically identical to
-    ``LNCCForce(r)`` -- the parity oracle holds in magnitude, not only
-    direction.
+    **Two magnitude regimes, keyed on ``metric.is_spatial_mean``:**
+
+    - **Spatial-mean cost** (``SSD`` / ``LNCC``): the cost reduces by a
+      per-voxel mean, so rescaling the gradient by the voxel count undoes the
+      ``1/N`` and recovers the *sum-convention* gradient the closed forms use --
+      ``MetricForce(LNCC(r))`` is then numerically identical to ``LNCCForce(r)``
+      (the parity oracle, in magnitude not only direction), and the magnitude
+      shrinks naturally as the gradient does.
+    - **Global histogram scalar** (``MI`` / ``CorrelationRatio``, or any metric
+      that does not declare ``is_spatial_mean``): there is no ``1/N`` to undo,
+      so ``·N`` would be an arbitrary, metric-scale-dependent constant -- under
+      the **unclamped** Demons driver (``step=None``) that feeds a magnitude no
+      one has tuned straight into the velocity.  Instead the force is normalised
+      to a target per-voxel RMS ``magnitude`` (``_normalise_rms``), a
+      controlled, metric-scale-invariant step.  Under the clamped SyN driver the
+      subsequent trust-region clamp only sharpens this; the direction (the parity
+      that matters for a metric with no closed form) is untouched either way.
 
     Attributes
     ----------
     metric
         The :class:`Metric` whose cost is descended (``MI()``,
         ``CorrelationRatio()``, ``LNCC()``, ``SSD()``, ...).
+    magnitude
+        Target per-voxel RMS magnitude (voxels) for a **non**-spatial-mean
+        metric (ignored for ``SSD`` / ``LNCC``, which take the parity rescale).
+        The controlled step the unclamped driver applies per iteration; the
+        ``0.5`` default is conservative -- larger over-steps the gateless
+        Demons accumulation (weaker recovery, Jacobian toward folding), while
+        the clamped SyN driver is insensitive to it (an active trust-region
+        clamp cancels the pre-scale).
     """
 
     metric: Metric
+    magnitude: float = 0.5
 
     def bind(
         self,
@@ -316,7 +361,11 @@ class MetricForce:
         rel_spacing: RelSpacing = None,
     ) -> _BoundMetric:
         return _BoundMetric(
-            metric=self.metric, fixed=fixed, ndim=ndim, rel_spacing=rel_spacing
+            metric=self.metric,
+            fixed=fixed,
+            ndim=ndim,
+            rel_spacing=rel_spacing,
+            magnitude=self.magnitude,
         )
 
 
@@ -326,26 +375,33 @@ class _BoundMetric:
     fixed: Array
     ndim: int
     rel_spacing: RelSpacing
+    magnitude: float
 
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
-        # The metric costs reduce by spatial MEAN; the closed-form forces (and
-        # the driver's step-normalisation) use the SUM-convention gradient
-        # (``lncc_grad = ∂(Σcc)/∂warped``).  Rescale by the voxel count to undo
-        # the mean: this makes MetricForce(LNCC) *numerically identical* to the
-        # closed-form ``LNCCForce`` (the same SUM-convention gradient).  It does
-        # **not** reproduce ``DemonsForce``: that is the symmetric ESM update (a
-        # symmetrised gradient carrying its own per-voxel denominator), so
-        # MetricForce(SSD) matches only the Thirion gradient *direction*, not the
-        # ESM step.  For a histogram metric (MI, CR) the rescale is a constant
-        # the clamped / step-normalised driver absorbs.
         grad_cost = jax.grad(lambda w: self.metric.cost(w, self.fixed))(warped)
-        grad_cost = grad_cost * warped.size
-        grad = spatial_gradient(
-            warped, spacing=_grad_spacing(self.rel_spacing)
-        )
-        return _to_voxel(-grad_cost[..., None] * grad, self.rel_spacing)
+        grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
+        force = -grad_cost[..., None] * grad
+        if getattr(self.metric, 'is_spatial_mean', False):
+            # Spatial-mean cost (SSD, LNCC): the closed forms (and the driver's
+            # step-normalisation) use the SUM-convention gradient
+            # (``lncc_grad = ∂(Σcc)/∂warped``); rescale by the voxel count to
+            # undo the ``1/N`` mean.  This makes MetricForce(LNCC) *numerically
+            # identical* to the closed-form ``LNCCForce``.  It does **not**
+            # reproduce ``DemonsForce`` (the symmetric ESM update carries its own
+            # per-voxel denominator), so MetricForce(SSD) matches only the
+            # Thirion *direction*, not the ESM step.
+            force = force * warped.size
+        else:
+            # Global histogram scalar (MI, CR) or an undeclared user metric:
+            # there is no ``1/N`` to undo, so ``·N`` would be an arbitrary
+            # metric-scale-dependent constant -- fed straight into the velocity
+            # by the unclamped Demons driver.  Normalise to a controlled,
+            # metric-scale-invariant RMS instead (B2; the clamped SyN driver
+            # then only sharpens it, leaving the direction intact).
+            force = _normalise_rms(force, self.magnitude)
+        return _to_voxel(force, self.rel_spacing)
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
         return self.metric.cost(warped, self.fixed)

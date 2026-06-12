@@ -117,3 +117,47 @@ def test_metricforce_cross_modal_yields_finite_force():
     assert u.shape == (48, 48, 2)
     assert bool(jnp.all(jnp.isfinite(u)))
     assert float(jnp.abs(u).max()) > 0.0
+
+
+class _ScaledMetric:
+    """A user metric that does *not* declare ``is_spatial_mean`` (so it takes
+    the ``getattr`` default) and scales the cost by an arbitrary constant."""
+
+    def __init__(self, scale: float, bins: int):
+        self.scale = scale
+        self.bins = bins
+
+    def cost(self, warped, fixed):
+        return self.scale * MI(bins=self.bins).cost(warped, fixed)
+
+
+def _rms(u: jax.Array) -> float:
+    return float(jnp.sqrt(jnp.mean(jnp.sum(u**2, axis=-1))))
+
+
+def test_metricforce_non_spatial_mean_is_rms_controlled():
+    # B2: a non-spatial-mean metric (MI) is normalised to the target per-voxel
+    # RMS `magnitude` (not the arbitrary *size constant) -- the controlled,
+    # metric-scale-invariant step the unclamped Demons driver needs.  The RMS
+    # hits the target exactly and scales linearly with it.
+    warped, fixed = _blobs(48, 0), _blobs(48, 2)
+    u3 = MetricForce(MI(bins=24), magnitude=0.3).bind(fixed, ndim=2).update(warped)
+    u6 = MetricForce(MI(bins=24), magnitude=0.6).bind(fixed, ndim=2).update(warped)
+    assert np.isclose(_rms(u3), 0.3, rtol=1e-6)
+    assert np.isclose(_rms(u6), 0.6, rtol=1e-6)
+    assert np.allclose(np.asarray(u6), 2.0 * np.asarray(u3), rtol=1e-9, atol=1e-12)
+
+
+def test_metricforce_non_spatial_mean_is_metric_scale_invariant():
+    # The point of the RMS normalisation: an arbitrary constant on the cost
+    # (and an *undeclared* is_spatial_mean -> the safe normalised default) gives
+    # an identical force, where the old `*size` rescale would have differed by
+    # that constant.  Doubles as the "arbitrary user metric" coverage.
+    warped, fixed = _blobs(48, 0), _blobs(48, 2)
+    u = MetricForce(MI(bins=24), magnitude=0.3).bind(fixed, ndim=2).update(warped)
+    u_scaled = (
+        MetricForce(_ScaledMetric(7.0, 24), magnitude=0.3)
+        .bind(fixed, ndim=2)
+        .update(warped)
+    )
+    assert np.allclose(np.asarray(u_scaled), np.asarray(u), rtol=1e-6, atol=1e-9)
