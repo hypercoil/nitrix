@@ -24,16 +24,25 @@ the force.  Pure composition of the substrate (SVF exp, warp, gradient,
 Gaussian, velocity algebra) -- the only metric-specific piece is the
 closed-form force.  An LNCC-driven (SyN-style) force and a symmetric
 forward+inverse variant are the documented upgrade paths.
+
+The above is the **algebra** (log-domain SVF) representation -- the exact
+oracle.  The default ``representation='group'`` (``DemonsSpec``) instead carries
+the *displacement* and uses the greedy compositive update (warp directly,
+compose the regularised increment -- no per-iteration ``exp``, ~2 gathers/iter
+vs ~7), recovering the velocity once at finalisation via ``geometry.field_log``.
+Greedy is not the SVF fixed point, so the two agree on synthetic recovery to
+tolerance, not field-wise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import Literal, NamedTuple, Optional, Sequence, Union
 
 from jaxtyping import Array, Float
 
 from ..geometry import (
+    field_log,
     gaussian_pyramid,
     integrate_velocity_field,
 )
@@ -42,6 +51,7 @@ from ._force import DemonsForce, Force, resolve_force_schedule
 from ._svf import (
     _relative_spacing,
     finalize_with_init,
+    group_single_sided_level,
     pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
@@ -93,6 +103,16 @@ class DemonsSpec:
         Pyramid downsample factor / anti-alias sigma.
     boundary_mode
         Out-of-bounds handling for the warps.
+    representation
+        Dense-deformation domain: ``'group'`` (default) carries the
+        *displacement* and uses the greedy compositive demons update (warp
+        directly, compose the increment -- ~2 gathers/iter, the perf path);
+        ``'algebra'`` carries the *stationary velocity* and uses the log-domain
+        update (``exp`` every iteration -- the exact-SVF path, byte-identical to
+        the pre-v4 recipe, the parity oracle).  Both return the same
+        ``DiffeomorphicResult``; in group mode ``velocity`` is recovered from the
+        final displacement via ``geometry.field_log`` (the best-fit stationary
+        velocity, exact iff the warp is in ``image(exp)``).
     """
 
     levels: int = 3
@@ -106,6 +126,7 @@ class DemonsSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
+    representation: Literal['group', 'algebra'] = 'group'
 
 
 class DiffeomorphicResult(NamedTuple):
@@ -292,22 +313,39 @@ def diffeomorphic_demons_register(
     def level_solve(
         level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
-        (v,) = state
+        (field,) = state
         mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
-        v, hist = _demons_level(
-            m_l,
-            f_l,
-            v,
-            force=forces[level],
-            spec=spec,
-            ndim=ndim,
-            rel_spacing=rel_spacing,
-            mask=mask_l,
-            restrict=restrict,
-        )
-        return (v,), hist
+        if spec.representation == 'algebra':
+            field, hist = _demons_level(
+                m_l,
+                f_l,
+                field,
+                force=forces[level],
+                spec=spec,
+                ndim=ndim,
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+            )
+        else:
+            field, hist = group_single_sided_level(
+                m_l,
+                f_l,
+                field,
+                force=forces[level],
+                ndim=ndim,
+                iterations=spec.iterations,
+                boundary_mode=spec.boundary_mode,
+                sigma_fluid=spec.sigma_fluid,
+                sigma_diffusion=spec.sigma_diffusion,
+                step=None,
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+            )
+        return (field,), hist
 
-    (velocity,), cost_history = svf_coarse_to_fine(
+    (state,), cost_history = svf_coarse_to_fine(
         pyr_m,
         pyr_f,
         ndim=ndim,
@@ -316,9 +354,18 @@ def diffeomorphic_demons_register(
         level_solve=level_solve,
     )
 
-    residual = integrate_velocity_field(
-        velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
-    )
+    # Algebra mode carries the velocity (exp it for the residual); group mode
+    # carries the displacement directly and recovers the velocity via field_log.
+    if spec.representation == 'algebra':
+        velocity = state
+        residual = integrate_velocity_field(
+            velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
+        )
+    else:
+        residual = state
+        velocity = field_log(
+            residual, n_sqrt=spec.n_steps, mode=spec.boundary_mode
+        )
     total, warped, det = finalize_with_init(
         moving,
         residual,

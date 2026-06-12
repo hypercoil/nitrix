@@ -29,17 +29,25 @@ Gaussian, velocity composition) exactly as the Demons recipe -- the only
 new kernel is the LNCC force.  ``spacing`` makes the force / regularisation
 anisotropy-correct, identically to ``DemonsSpec`` (the relative-spacing
 treatment).
+
+The above is the **algebra** (log-domain SVF) representation -- the exact
+oracle.  The default ``representation='group'`` (``SyNSpec``) instead carries the
+two *displacements* and uses the greedy compositive update (warp directly,
+compose the regularised increment -- no per-iteration ``exp``, ~4 gathers/iter
+vs ~12; the single inversion stays at finalisation), recovering the velocities
+via ``geometry.field_log``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import Literal, NamedTuple, Optional, Sequence, Union
 
 from jaxtyping import Array, Float
 
 from ..geometry import (
     compose_displacement,
+    field_log,
     gaussian_pyramid,
     integrate_velocity_field,
     invert_displacement,
@@ -49,6 +57,7 @@ from ._force import Force, LNCCForce, resolve_force_schedule
 from ._svf import (
     _relative_spacing,
     finalize_with_init,
+    group_symmetric_level,
     pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
@@ -95,6 +104,15 @@ class SyNSpec:
         Pyramid downsample factor / anti-alias sigma.
     boundary_mode
         Out-of-bounds handling for the warps.
+    representation
+        Dense-deformation domain: ``'group'`` (default) carries the two
+        *displacements* and uses the greedy compositive update (warp directly,
+        compose the increment -- ~4 gathers/iter, the perf path); ``'algebra'``
+        carries the *stationary velocities* and re-exponentiates every iteration
+        (the exact-SVF path, byte-identical to the pre-v4 recipe, the oracle).
+        Both return the same ``SyNResult`` with one finalisation inversion;
+        ``forward_velocity`` / ``inverse_velocity`` are recovered from the final
+        displacements via ``geometry.field_log`` in group mode.
     """
 
     levels: int = 3
@@ -108,6 +126,7 @@ class SyNSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
+    representation: Literal['group', 'algebra'] = 'group'
 
 
 class SyNResult(NamedTuple):
@@ -289,23 +308,41 @@ def greedy_syn_register(
     def level_solve(
         level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
-        v_fwd, v_inv = state
+        f_fwd, f_inv = state
         mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
-        v_fwd, v_inv, hist = _syn_level(
-            m_l,
-            f_l,
-            v_fwd,
-            v_inv,
-            force=forces[level],
-            spec=spec,
-            ndim=ndim,
-            rel_spacing=rel_spacing,
-            mask=mask_l,
-            restrict=restrict,
-        )
-        return (v_fwd, v_inv), hist
+        if spec.representation == 'algebra':
+            f_fwd, f_inv, hist = _syn_level(
+                m_l,
+                f_l,
+                f_fwd,
+                f_inv,
+                force=forces[level],
+                spec=spec,
+                ndim=ndim,
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+            )
+        else:
+            f_fwd, f_inv, hist = group_symmetric_level(
+                m_l,
+                f_l,
+                f_fwd,
+                f_inv,
+                force=forces[level],
+                ndim=ndim,
+                iterations=spec.iterations,
+                boundary_mode=spec.boundary_mode,
+                sigma_fluid=spec.sigma_fluid,
+                sigma_diffusion=spec.sigma_diffusion,
+                step=spec.step,
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+            )
+        return (f_fwd, f_inv), hist
 
-    (v_fwd, v_inv), cost_history = svf_coarse_to_fine(
+    (state_fwd, state_inv), cost_history = svf_coarse_to_fine(
         pyr_m,
         pyr_f,
         ndim=ndim,
@@ -314,12 +351,21 @@ def greedy_syn_register(
         level_solve=level_solve,
     )
 
-    s_fwd = integrate_velocity_field(
-        v_fwd, n_steps=spec.n_steps, mode=spec.boundary_mode
-    )
-    s_inv = integrate_velocity_field(
-        v_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
-    )
+    # Algebra carries the half-velocities (exp each); group carries the half-
+    # displacements directly (recover the velocities via field_log).  The final
+    # composition + single inversion is identical in both modes.
+    if spec.representation == 'algebra':
+        v_fwd, v_inv = state_fwd, state_inv
+        s_fwd = integrate_velocity_field(
+            v_fwd, n_steps=spec.n_steps, mode=spec.boundary_mode
+        )
+        s_inv = integrate_velocity_field(
+            v_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
+        )
+    else:
+        s_fwd, s_inv = state_fwd, state_inv
+        v_fwd = field_log(s_fwd, n_sqrt=spec.n_steps, mode=spec.boundary_mode)
+        v_inv = field_log(s_inv, n_sqrt=spec.n_steps, mode=spec.boundary_mode)
     # moving -> fixed residual: fixed --(id+s_inv)⁻¹--> midpoint --(id+s_fwd)-->
     s_inv_inverse = invert_displacement(s_inv, mode=spec.boundary_mode)
     residual = compose_displacement(

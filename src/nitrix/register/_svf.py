@@ -46,6 +46,8 @@ __all__ = [
     'svf_coarse_to_fine',
     'single_sided_level',
     'symmetric_level',
+    'group_single_sided_level',
+    'group_symmetric_level',
     'resolve_init_displacement',
     'prewarp_moving',
     'finalize_with_init',
@@ -295,6 +297,47 @@ def _regularise(
     return _smooth_vector(v, sigma_diffusion, ndim)
 
 
+def _step_clamp_diffeo(
+    delta: Array, *, det_floor: float = 0.1, max_halvings: int = 3
+) -> Array:
+    """Per-step diffeomorphism guard for the group (compositive) update.
+
+    Halve the increment ``δ`` until ``det(I + ∇δ) > det_floor`` everywhere -- a
+    clamp on the *Jacobian* (a magnitude clamp can still fold).  ``max_halvings``
+    is a small static bound (the halving rarely fires under a sane
+    ``_normalise_step`` + fluid smoothing); the ``jnp.where`` makes it jit-safe
+    (a satisfied step is a no-op, so the remaining iterations do nothing).
+    Mirrors the 0b inverse-compositional backtracking discipline.  The *total*-
+    field ``det > 0`` QA is necessary but not sufficient -- an intermediate
+    compose can fold while the total stays positive -- so the guard is per step.
+    """
+    for _ in range(max_halvings):
+        det = jacobian_det_displacement(delta)
+        delta = jnp.where(jnp.min(det) <= det_floor, delta * 0.5, delta)
+    return delta
+
+
+def _group_regularise(
+    u: Array,
+    *,
+    step: Optional[float],
+    sigma_fluid: Union[float, tuple[float, ...]],
+    ndim: int,
+) -> Array:
+    """Per-update regularisation for the group (greedy) driver.
+
+    Produces the increment ``δ`` the level fn composes onto the total
+    displacement: an optional trust-region step clamp (``_normalise_step``, 0d),
+    fluid (update) Gaussian smoothing, and the per-step diffeomorphism guard
+    (:func:`_step_clamp_diffeo`).  The *total*-field (diffusion) smoothing is
+    applied to ``s`` **after** the composition, in the level fn -- the same
+    fluid/diffusion split the algebra :func:`_regularise` keeps.
+    """
+    delta = _normalise_step(u, step) if step is not None else u
+    delta = _smooth_vector(delta, sigma_fluid, ndim)
+    return _step_clamp_diffeo(delta)
+
+
 def single_sided_level(
     moving: Array,
     fixed: Array,
@@ -417,6 +460,122 @@ def symmetric_level(
         step_fn, (v_fwd, v_inv), xs=None, length=iterations
     )
     return v_fwd, v_inv, costs
+
+
+def group_single_sided_level(
+    moving: Array,
+    fixed: Array,
+    s: Array,
+    *,
+    force: Force,
+    ndim: int,
+    iterations: int,
+    boundary_mode: BoundaryMode,
+    sigma_fluid: float,
+    sigma_diffusion: float,
+    step: Optional[float],
+    rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
+) -> tuple[Array, Array]:
+    """Single-sided **group (greedy)** iterations on one resolution.
+
+    The group-domain sibling of :func:`single_sided_level`: the state is the
+    *displacement* ``s`` (``φ = id + s``), warped **directly** (one gather, no
+    ``exp``), and the regularised increment is **composed** onto ``s`` (the
+    compositive demons update ``φ ← φ ∘ (id+δ)``) rather than added in the log
+    domain.  ~2 gathers/iter (warp + compose) vs the algebra driver's ~7.  No
+    per-iteration ``exp``; the velocity is recovered once at finalisation via
+    ``field_log`` (the recipe).  Dropping ``n_steps`` / ``bch_order`` (no
+    integration, no log-domain BCH) marks it a different driver, not a
+    re-parametrised one.
+    """
+    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
+    bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)
+    sf = _per_axis_sigma(sigma_fluid, rel_spacing)
+    sd = _per_axis_sigma(sigma_diffusion, rel_spacing)
+
+    def step_fn(s: Array, _: object) -> tuple[Array, Array]:
+        warped = spatial_transform(
+            moving[..., None], id_grid + s, mode=boundary_mode
+        )[..., 0]
+        u = _restrict_force(_mask_force(bound.update(warped), mask), restrict)
+        delta = _group_regularise(u, step=step, sigma_fluid=sf, ndim=ndim)
+        s = compose_displacement(s, delta, mode=boundary_mode)
+        s = _smooth_vector(s, sd, ndim)  # total-field (diffusion) regulariser
+        return s, bound.cost(warped)
+
+    return jax.lax.scan(step_fn, s, xs=None, length=iterations)
+
+
+def group_symmetric_level(
+    moving: Array,
+    fixed: Array,
+    s_fwd: Array,
+    s_inv: Array,
+    *,
+    force: Force,
+    ndim: int,
+    iterations: int,
+    boundary_mode: BoundaryMode,
+    sigma_fluid: float,
+    sigma_diffusion: float,
+    step: Optional[float],
+    rel_spacing: Optional[tuple[float, ...]],
+    mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
+) -> tuple[Array, Array, Array]:
+    """Symmetric-midpoint **group (greedy)** iterations on one resolution.
+
+    The group-domain sibling of :func:`symmetric_level`: carry the two
+    *displacements* ``s_fwd`` / ``s_inv``, warp both images to the midpoint by
+    ``id + s`` directly, and **compose** each regularised half-increment onto its
+    displacement.  ~4 gathers/iter (2 warps + 2 composes) vs the algebra
+    driver's ~12.  **No per-iteration inversion** -- inverse-consistency is
+    realised once at finalisation (``compose(s_fwd, invert(s_inv))``), exactly as
+    the algebra SyN, not per step.
+    """
+    id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
+    sf = _per_axis_sigma(sigma_fluid, rel_spacing)
+    sd = _per_axis_sigma(sigma_diffusion, rel_spacing)
+
+    def warp_to_mid(image: Array, s: Array) -> Array:
+        return spatial_transform(
+            image[..., None], id_grid + s, mode=boundary_mode
+        )[..., 0]
+
+    def step_fn(
+        carry: tuple[Array, Array], _: object
+    ) -> tuple[tuple[Array, Array], Array]:
+        s_fwd, s_inv = carry
+        a = warp_to_mid(moving, s_fwd)
+        b = warp_to_mid(fixed, s_inv)
+        bound_fwd = force.bind(b, ndim=ndim, rel_spacing=rel_spacing)
+        bound_inv = force.bind(a, ndim=ndim, rel_spacing=rel_spacing)
+        d_fwd = _group_regularise(
+            _restrict_force(_mask_force(bound_fwd.update(a), mask), restrict),
+            step=step,
+            sigma_fluid=sf,
+            ndim=ndim,
+        )
+        d_inv = _group_regularise(
+            _restrict_force(_mask_force(bound_inv.update(b), mask), restrict),
+            step=step,
+            sigma_fluid=sf,
+            ndim=ndim,
+        )
+        s_fwd = _smooth_vector(
+            compose_displacement(s_fwd, d_fwd, mode=boundary_mode), sd, ndim
+        )
+        s_inv = _smooth_vector(
+            compose_displacement(s_inv, d_inv, mode=boundary_mode), sd, ndim
+        )
+        return (s_fwd, s_inv), bound_fwd.cost(a)
+
+    (s_fwd, s_inv), costs = jax.lax.scan(
+        step_fn, (s_fwd, s_inv), xs=None, length=iterations
+    )
+    return s_fwd, s_inv, costs
 
 
 def resolve_init_displacement(
