@@ -59,7 +59,8 @@ def transform_mean(
     *,
     weights: Optional[Float[Array, ' k']] = None,
     iters: int = 10,
-) -> Float[Array, 'd1 d1']:
+    return_residual: bool = False,
+) -> Float[Array, 'd1 d1'] | tuple[Float[Array, 'd1 d1'], Float[Array, '']]:
     """Fréchet (Karcher) mean of homogeneous transforms (rigid or affine).
 
     The Riemannian barycentre, found by the standard log/exp fixed point
@@ -68,6 +69,17 @@ def transform_mean(
     is rigid; of affines, affine.  The Lie-algebra mean is a plain weighted sum,
     and the matrix log is smooth at identity (unlike the ``so(n)`` rotation-
     vector log), so the iteration converges from the first-element init.
+
+    **Fixed cap, not an adaptive gate (B3).**  ``iters`` is a *hard cap*, not a
+    tolerance loop: a data-dependent ``float(residual) < tol`` break would
+    forfeit the jit- and grad-cleanliness this op advertises (the Python loop
+    unrolls under trace; a host-synced break does not).  It converges in a few
+    steps for a *clustered* cohort, but a **widely dispersed** one (rotation
+    spread ``≳ π/2``) may not converge within ``iters`` -- raise ``iters`` and
+    use ``return_residual`` to *check* rather than trust convergence.  A
+    near-**antipodal** cohort (a pair ``≈ π`` apart) is on ``matrix_log``'s
+    negative-real-axis boundary: the tangent is NaN there, which propagates to a
+    NaN mean (a loud "the mean is ill-defined", not silent garbage).
 
     Parameters
     ----------
@@ -79,11 +91,19 @@ def transform_mean(
         Optional ``(K,)`` non-negative weights (normalised internally); ``None``
         -> uniform.
     iters
-        Karcher fixed-point iterations (converges fast for clustered inputs).
+        Karcher fixed-point iteration **cap** (converges fast for clustered
+        inputs; a dispersed cohort may need more -- check ``return_residual``).
+    return_residual
+        If ``True``, also return the scalar Karcher residual -- the norm of the
+        final update tangent ``‖Σ_k w_k log(μ⁻¹ T_k)‖`` -- which is ``→ 0`` at a
+        converged barycentre.  A non-small (or NaN) value flags a non-converged
+        / ill-defined mean, so the caller can assert convergence rather than
+        trust it.
 
     Returns
     -------
-    The mean transform, ``(ndim+1, ndim+1)``.
+    The mean transform ``(ndim+1, ndim+1)`` (``return_residual=False``), or
+    ``(mean, residual)``.
 
     Notes
     -----
@@ -97,10 +117,13 @@ def transform_mean(
         w = weights / jnp.sum(weights)
 
     mu = transforms[0]
+    mean_tangent = jnp.zeros_like(mu)
     for _ in range(iters):
         tangents = matrix_log(safe_inv(mu) @ transforms)
         mean_tangent = jnp.tensordot(w, tangents, axes=(0, 0))
         mu = mu @ matrix_exp(mean_tangent)
+    if return_residual:
+        return mu, jnp.linalg.norm(mean_tangent)
     return mu
 
 
