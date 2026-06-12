@@ -42,6 +42,7 @@ from ._force import DemonsForce, Force, resolve_force_schedule
 from ._svf import (
     _relative_spacing,
     finalize_with_init,
+    pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
     single_sided_level,
@@ -263,6 +264,9 @@ def diffeomorphic_demons_register(
     forces = resolve_force_schedule(
         force, default=DemonsForce(spec.alpha), levels=spec.levels
     )
+    # Pin any histogram-force ranges once from the full-res images (stationary
+    # objective; see pin_force_ranges) before the pyramid.
+    forces = [pin_force_ranges(f, moving_reg, fixed) for f in forces]
     pyr_mask = (
         None
         if mask is None

@@ -56,10 +56,11 @@ following ANTs / fMRIPrep features are **not yet implemented** --
   **histogram matching** (``--use-histogram-matching``);
 - **multi-metric summation** within a stage (``-m MI -m CC``; a ``SumForce``);
 - **restrict-deformation** (per-axis deformation masking);
-- the closed-form **(Mattes) MI fast-force** -- MI / correlation-ratio drive
-  the diffeomorphic recipes today only via the generic autodiff
-  ``MetricForce`` escape hatch (correct, RMS-magnitude-controlled, but *no*
-  performance guarantee), not a hand-written gradient;
+- a closed-form **correlation-ratio** fast-force -- CR drives the diffeomorphic
+  recipes only via the generic autodiff ``MetricForce`` escape hatch (the
+  closed-form **(Mattes) MI** force, ``MIForce``, *is* shipped -- the fast
+  cross-modal path; CR's ``cr_grad`` is the same machinery, built when a
+  consumer asks);
 - **early-exit** (windowed cost-slope convergence) on the SVF recipes -- it is
   wired only into the matrix inverse-compositional path.
 
@@ -71,7 +72,7 @@ owns the cross-tool harness; they are not asserted in this repo.
 
 from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
 from ._core import Convergence, RegistrationResult, RegistrationSpec
-from ._force import DemonsForce, Force, LNCCForce, MetricForce
+from ._force import DemonsForce, Force, LNCCForce, MetricForce, MIForce
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from ._objective import MetricObjective, Objective
@@ -105,6 +106,7 @@ __all__ = [
     'Force',
     'LNCCForce',
     'DemonsForce',
+    'MIForce',
     'MetricForce',
     'RegistrationSpec',
     'RegistrationResult',

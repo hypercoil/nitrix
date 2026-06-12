@@ -21,6 +21,7 @@ unification is the warranted one, not a forced matrix+SVF merge.)
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Callable, Optional, Sequence, Union
 
 import jax
@@ -39,7 +40,7 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode
 from ..smoothing import gaussian
-from ._force import Force
+from ._force import Force, MIForce
 
 __all__ = [
     'svf_coarse_to_fine',
@@ -48,7 +49,30 @@ __all__ = [
     'resolve_init_displacement',
     'prewarp_moving',
     'finalize_with_init',
+    'pin_force_ranges',
 ]
+
+
+def pin_force_ranges(force: Force, moving: Array, fixed: Array) -> Force:
+    """Pin a histogram force's intensity ranges eagerly from the full-res images.
+
+    A data ``min/max`` range drifts as the moving image deforms across the
+    optimisation (a non-stationary objective) and truncates the force at the clip
+    boundary, so each SVF recipe resolves any ``None`` range on an
+    :class:`MIForce` **once**, before the pyramid, from the full-resolution
+    images -- eager Python floats, so the range rides the frozen force as
+    jit-static config and is the *correct* (piecewise-constant) gradient.  A
+    no-op for any other force (and for an ``MIForce`` whose ranges are already
+    pinned).  **jit caveat:** under ``jax.jit`` with *traced* images,
+    ``float(tracer)`` cannot run -- pass explicit ranges then.
+    """
+    if isinstance(force, MIForce) and (
+        force.range_moving is None or force.range_fixed is None
+    ):
+        rm = force.range_moving or (float(moving.min()), float(moving.max()))
+        rf = force.range_fixed or (float(fixed.min()), float(fixed.max()))
+        return replace(force, range_moving=rm, range_fixed=rf)
+    return force
 
 
 def _smooth_vector(

@@ -31,6 +31,7 @@ from nitrix.register import (  # noqa: E402
     DemonsSpec,
     LNCCForce,
     MetricForce,
+    MIForce,
     SyNSpec,
     diffeomorphic_demons_register,
     greedy_syn_register,
@@ -102,6 +103,38 @@ def test_syn_multimodal_mi_improves():
     mi0 = float(mutual_information(moving, fixed, bins=24))
     mi1 = float(mutual_information(res.warped, fixed, bins=24))
     assert mi1 > mi0
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_syn_miforce_mi_recovers():
+    # The closed-form Mattes MI fast path (MIForce) drives cross-modal SyN to a
+    # real MI gain and stays diffeomorphic -- the fMRIPrep cross-modal deformable
+    # path with the autodiff histogram tape removed (1a).
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)  # "different modality"
+    spec = SyNSpec(levels=3, iterations=60, radius=3, step=0.5)
+    res = greedy_syn_register(moving, fixed, spec=spec, force=MIForce(bins=24))
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_demons_miforce_mi_recovers():
+    # MIForce on the *unclamped* Demons driver: the RMS magnitude control (the
+    # 0c reconciliation baked into MIForce) gives a tuned step, so the fast
+    # closed-form path recovers like the MetricForce(MI) escape hatch.
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)
+    spec = DemonsSpec(levels=3, iterations=80)
+    res = diffeomorphic_demons_register(
+        moving, fixed, spec=spec, force=MIForce(bins=24)
+    )
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0 + 0.2
     assert float(res.jacobian_det.min()) > 0.0
 
 

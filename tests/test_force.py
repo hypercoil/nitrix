@@ -19,7 +19,10 @@ import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 
 from nitrix.geometry import spatial_gradient  # noqa: E402
-from nitrix.metrics import lncc  # noqa: E402
+from nitrix.metrics import (
+    lncc,  # noqa: E402
+    mi_grad,  # noqa: E402
+)
 from nitrix.register import (  # noqa: E402
     LNCC,
     MI,
@@ -29,7 +32,9 @@ from nitrix.register import (  # noqa: E402
     Force,
     LNCCForce,
     MetricForce,
+    MIForce,
 )
+from nitrix.register._svf import pin_force_ranges  # noqa: E402
 
 
 def _blobs(n=48, seed=0):
@@ -146,6 +151,54 @@ def test_metricforce_non_spatial_mean_is_rms_controlled():
     assert np.isclose(_rms(u3), 0.3, rtol=1e-6)
     assert np.isclose(_rms(u6), 0.6, rtol=1e-6)
     assert np.allclose(np.asarray(u6), 2.0 * np.asarray(u3), rtol=1e-9, atol=1e-12)
+
+
+def test_miforce_is_a_force():
+    assert isinstance(MIForce(), Force)
+
+
+def test_miforce_rms_controlled_and_direction_is_mi_grad():
+    # MIForce is RMS-magnitude-controlled (like MetricForce for a histogram
+    # metric -- the raw (1/N) MI gradient is an arbitrary scale), and its
+    # direction is exactly the closed-form mi_grad·∇warped (RMS normalisation is
+    # direction-preserving).
+    warped, fixed = _blobs(48, 0), _blobs(48, 2)
+    rm = (float(warped.min()), float(warped.max()))
+    rf = (float(fixed.min()), float(fixed.max()))
+    u = (
+        MIForce(bins=24, range_moving=rm, range_fixed=rf, magnitude=0.4)
+        .bind(fixed, ndim=2)
+        .update(warped)
+    )
+    assert np.isclose(_rms(u), 0.4, rtol=1e-6)
+    raw = (
+        mi_grad(warped, fixed, bins=24, range_moving=rm, range_fixed=rf)[..., None]
+        * spatial_gradient(warped)
+    )
+    assert _cosine(u, raw) > 1 - 1e-9
+
+
+def test_miforce_direction_matches_metricforce_mi():
+    # The §3 parity oracle: the closed-form fast path agrees in direction with
+    # the autodiff escape hatch it replaces (cos shy of 1 only by the documented
+    # empty-bin divergence), at the same data-derived range.
+    warped, fixed = _blobs(48, 0), _blobs(48, 2)
+    u_fast = MIForce(bins=24).bind(fixed, ndim=2).update(warped)
+    u_auto = MetricForce(MI(bins=24)).bind(fixed, ndim=2).update(warped)
+    assert _cosine(u_fast, u_auto) > 0.99
+
+
+def test_pin_force_ranges_resolves_only_unpinned_miforce():
+    moving, fixed = _blobs(32, 0), _blobs(32, 1)
+    pinned = pin_force_ranges(MIForce(bins=16), moving, fixed)
+    assert isinstance(pinned, MIForce)
+    assert pinned.range_moving == (float(moving.min()), float(moving.max()))
+    assert pinned.range_fixed == (float(fixed.min()), float(fixed.max()))
+    # already-pinned and non-MIForce forces pass through untouched (same object)
+    already = MIForce(bins=16, range_moving=(0.0, 2.0), range_fixed=(0.0, 3.0))
+    assert pin_force_ranges(already, moving, fixed) is already
+    lncc_force = LNCCForce(2)
+    assert pin_force_ranges(lncc_force, moving, fixed) is lncc_force
 
 
 def test_metricforce_non_spatial_mean_is_metric_scale_invariant():

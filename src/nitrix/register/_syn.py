@@ -49,6 +49,7 @@ from ._force import Force, LNCCForce, resolve_force_schedule
 from ._svf import (
     _relative_spacing,
     finalize_with_init,
+    pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
     svf_coarse_to_fine,
@@ -260,6 +261,9 @@ def greedy_syn_register(
     forces = resolve_force_schedule(
         force, default=LNCCForce(spec.radius), levels=spec.levels
     )
+    # Pin any histogram-force ranges once from the full-res images (stationary
+    # objective; see pin_force_ranges) before the pyramid.
+    forces = [pin_force_ranges(f, moving_reg, fixed) for f in forces]
     pyr_mask = (
         None
         if mask is None

@@ -15,9 +15,11 @@ metric from the matrix driver.
 Two tiers, the suite-wide perf-vs-composability discipline:
 
 - **Tier 1 (performant, the named recipes' defaults):** :class:`LNCCForce`
-  (the analytic local-CC force, ``metrics.lncc_grad``) and :class:`DemonsForce`
-  (the closed-form ESM force) -- the forces we already ship, now behind the
-  protocol.
+  (the analytic local-CC force, ``metrics.lncc_grad``), :class:`DemonsForce`
+  (the closed-form ESM force), and :class:`MIForce` (the closed-form Mattes
+  mutual-information force, ``metrics.mi_grad`` -- the fast cross-modal path
+  replacing the ``MetricForce(MI())`` autodiff tape) -- closed-form forces
+  behind the protocol.
 - **Tier 2 (escape hatch, *no* performance guarantee):** :class:`MetricForce`
   -- ``jax.grad`` of *any* :class:`Metric`'s cost, so MI / correlation-ratio /
   a custom descriptor can drive a diffeomorphic recipe (multimodal deformable
@@ -51,7 +53,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..geometry import spatial_gradient
-from ..metrics import lncc, lncc_grad
+from ..metrics import lncc, lncc_grad, mi_grad, mutual_information
 from ._metric import Metric
 
 __all__ = [
@@ -59,6 +61,7 @@ __all__ = [
     'BoundForce',
     'LNCCForce',
     'DemonsForce',
+    'MIForce',
     'MetricForce',
     'resolve_force_schedule',
 ]
@@ -304,6 +307,106 @@ class _BoundDemons:
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
         diff = self.fixed - warped
         return 0.5 * jnp.sum(diff * diff)
+
+
+@dataclass(frozen=True)
+class MIForce:
+    """Closed-form Mattes mutual-information force (the cross-modal fast path).
+
+    The Tier-1 analogue of ``MetricForce(MI())``: drives a dense-field recipe by
+    ``mi_grad · ∇warped`` (the closed-form ``metrics.mi_grad``, ``∂MI/∂warped``)
+    instead of a full ``jax.grad`` of the soft-histogram cost every iteration --
+    the fast cross-modal deformable path (the fMRIPrep metric), with the
+    histogram-scatter autodiff tape removed.
+
+    Like ``MetricForce`` for a histogram metric (and for the same reason -- MI is
+    not a spatial mean, so its raw ``(1/N)`` gradient is an arbitrary,
+    metric-scale-dependent magnitude), the force is normalised to a controlled
+    per-voxel RMS ``magnitude``: this is what makes it a true *drop-in* fast
+    replacement (same controlled step the clamped SyN / unclamped Demons drivers
+    need), and it agrees with ``MetricForce(MI())`` in **direction** to the
+    empty-bin tolerance and in **magnitude** by construction (the §3 parity
+    oracle).
+
+    Attributes
+    ----------
+    bins
+        Joint-histogram bins per axis (must match the cost).
+    range_moving, range_fixed
+        Pinned ``(lo, hi)`` intensity ranges.  ``None`` is resolved **once** from
+        the full-resolution images by the recipe (``_svf.pin_force_ranges``)
+        before the pyramid -- a data ``min/max`` range drifts as the moving image
+        deforms (a non-stationary objective).  Under ``jax.jit`` with *traced*
+        images the caller must pass explicit ranges (``float(tracer)`` cannot
+        run eagerly).
+    magnitude
+        Target per-voxel RMS magnitude (voxels); ``0.5`` matches
+        ``MetricForce``.  ``normalized`` MI is intentionally absent -- NMI is the
+        deferred quotient-rule form (route it through
+        ``MetricForce(MI(normalized=True))``).
+    """
+
+    bins: int = 32
+    range_moving: Optional[tuple[float, float]] = None
+    range_fixed: Optional[tuple[float, float]] = None
+    magnitude: float = 0.5
+
+    def bind(
+        self,
+        fixed: Float[Array, '*spatial'],
+        *,
+        ndim: int,
+        rel_spacing: RelSpacing = None,
+    ) -> _BoundMI:
+        return _BoundMI(
+            bins=self.bins,
+            range_moving=self.range_moving,
+            range_fixed=self.range_fixed,
+            magnitude=self.magnitude,
+            fixed=fixed,
+            ndim=ndim,
+            rel_spacing=rel_spacing,
+        )
+
+
+@dataclass(frozen=True)
+class _BoundMI:
+    bins: int
+    range_moving: Optional[tuple[float, float]]
+    range_fixed: Optional[tuple[float, float]]
+    magnitude: float
+    fixed: Array
+    ndim: int
+    rel_spacing: RelSpacing
+
+    def update(
+        self, warped: Float[Array, '*spatial']
+    ) -> Float[Array, '*spatial ndim']:
+        # The joint histogram depends on BOTH images at the current warp, so --
+        # unlike DemonsForce's ∇fixed -- there is nothing image-dependent to
+        # hoist in ``bind``; mi_grad recomputes the histogram every iteration.
+        g = mi_grad(
+            warped,
+            self.fixed,
+            bins=self.bins,
+            range_moving=self.range_moving,
+            range_fixed=self.range_fixed,
+        )
+        grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
+        # Force convention u = −∂cost/∂warped·∇warped with cost = −MI gives
+        # u = +mi_grad·∇warped (ascend MI), then the controlled-magnitude RMS
+        # normalisation (a histogram metric is not a spatial mean -- 0c / B2).
+        force = _normalise_rms(g[..., None] * grad, self.magnitude)
+        return _to_voxel(force, self.rel_spacing)
+
+    def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
+        return -mutual_information(
+            warped,
+            self.fixed,
+            bins=self.bins,
+            range_moving=self.range_moving,
+            range_fixed=self.range_fixed,
+        )
 
 
 @dataclass(frozen=True)
