@@ -47,6 +47,7 @@ from ..geometry import (
     integrate_velocity_field,
 )
 from ..geometry._interpolate import BoundaryMode
+from ._converge import Convergence
 from ._force import DemonsForce, Force, resolve_force_schedule
 from ._svf import (
     _relative_spacing,
@@ -113,6 +114,13 @@ class DemonsSpec:
         ``DiffeomorphicResult``; in group mode ``velocity`` is recovered from the
         final displacement via ``geometry.field_log`` (the best-fit stationary
         velocity, exact iff the warp is in ``image(exp)``).
+    convergence
+        Optional ANTs-style early-exit (``Convergence(threshold, window)``): a
+        level stops once the windowed normalised cost slope drops below
+        ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
+        full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
+        ``vmap``-batchable); the SSD log-Demons converges fast (often within a
+        handful of iterations), so this is its biggest single-pair win.
     """
 
     levels: int = 3
@@ -127,6 +135,7 @@ class DemonsSpec:
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
     representation: Literal['group', 'algebra'] = 'group'
+    convergence: Optional[Convergence] = None
 
 
 class DiffeomorphicResult(NamedTuple):
@@ -197,6 +206,7 @@ def _demons_level(
         rel_spacing=rel_spacing,
         mask=mask,
         restrict=restrict,
+        convergence=spec.convergence,
     )
 
 
@@ -342,6 +352,7 @@ def diffeomorphic_demons_register(
                 rel_spacing=rel_spacing,
                 mask=mask_l,
                 restrict=restrict,
+                convergence=spec.convergence,
             )
         return (field,), hist
 

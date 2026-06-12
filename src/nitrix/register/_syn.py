@@ -53,6 +53,7 @@ from ..geometry import (
     invert_displacement,
 )
 from ..geometry._interpolate import BoundaryMode
+from ._converge import Convergence
 from ._force import Force, LNCCForce, resolve_force_schedule
 from ._svf import (
     _relative_spacing,
@@ -113,6 +114,13 @@ class SyNSpec:
         Both return the same ``SyNResult`` with one finalisation inversion;
         ``forward_velocity`` / ``inverse_velocity`` are recovered from the final
         displacements via ``geometry.field_log`` in group mode.
+    convergence
+        Optional ANTs-style early-exit (``Convergence(threshold, window)``): a
+        level stops once the windowed normalised cost slope drops below
+        ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
+        full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
+        ``vmap``-batchable).  Greedy SyN's gradient flow typically uses most of
+        its budget, so the saving here is smaller than for Demons.
     """
 
     levels: int = 3
@@ -127,6 +135,7 @@ class SyNSpec:
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
     representation: Literal['group', 'algebra'] = 'group'
+    convergence: Optional[Convergence] = None
 
 
 class SyNResult(NamedTuple):
@@ -196,6 +205,7 @@ def _syn_level(
         rel_spacing=rel_spacing,
         mask=mask,
         restrict=restrict,
+        convergence=spec.convergence,
     )
 
 
@@ -339,6 +349,7 @@ def greedy_syn_register(
                 rel_spacing=rel_spacing,
                 mask=mask_l,
                 restrict=restrict,
+                convergence=spec.convergence,
             )
         return (f_fwd, f_inv), hist
 

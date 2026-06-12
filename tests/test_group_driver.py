@@ -29,6 +29,7 @@ from nitrix.geometry import (  # noqa: E402
 )
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import (  # noqa: E402
+    Convergence,
     DemonsSpec,
     SyNSpec,
     diffeomorphic_demons_register,
@@ -150,6 +151,61 @@ def test_step_clamp_diffeo_prevents_fold():
     assert float(jacobian_det_displacement(delta).min()) < 0.0  # folds
     clamped = _step_clamp_diffeo(delta)
     assert float(jacobian_det_displacement(clamped).min()) > 0.0  # guard fixes
+
+
+# ---------------------------------------------------------------------------
+# SVF early-exit (A3 / Phase 2.5)
+# ---------------------------------------------------------------------------
+
+
+def test_demons_early_exit_recovers_and_pads_history():
+    # The SSD log-Demons converges fast, so the windowed-slope early-exit stops
+    # well before the cap with the same recovery; the cost_history keeps its
+    # (levels x iterations) shape (the unrun tail padded with the final cost).
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 30.0, 1))
+    spec = DemonsSpec(levels=1, iterations=80)
+    full = diffeomorphic_demons_register(moving, fixed, spec=spec)
+    early = diffeomorphic_demons_register(
+        moving,
+        fixed,
+        spec=replace(spec, convergence=Convergence(threshold=1e-4, window=8)),
+    )
+    assert early.cost_history.shape == full.cost_history.shape  # padded
+    assert abs(
+        float(ncc(early.warped, fixed)) - float(ncc(full.warped, fixed))
+    ) < 0.005
+    # the early-exit fired: a constant padded tail before the 80 cap
+    ch = np.asarray(early.cost_history)
+    changing = int(np.sum(np.abs(np.diff(ch)) > 1e-12)) + 1
+    assert changing < 80
+    assert float(early.jacobian_det.min()) > 0.0
+
+
+def test_convergence_none_matches_default():
+    fixed = _blobs(48)
+    moving = _warp(fixed, _smooth_velocity((48, 48), 6.0, 18.0, 3))
+    spec = DemonsSpec(levels=1, iterations=20)
+    a = diffeomorphic_demons_register(moving, fixed, spec=spec)
+    b = diffeomorphic_demons_register(
+        moving, fixed, spec=replace(spec, convergence=None)
+    )
+    assert np.allclose(np.asarray(a.warped), np.asarray(b.warped))
+
+
+def test_syn_early_exit_recovers_diffeomorphic():
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 45.0, 0))
+    spec = SyNSpec(
+        levels=2,
+        iterations=60,
+        radius=2,
+        step=0.5,
+        convergence=Convergence(threshold=1e-4, window=10),
+    )
+    res = greedy_syn_register(moving, fixed, spec=spec)
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert float(res.jacobian_det.min()) > 0.0
 
 
 def test_step_clamp_diffeo_noop_when_diffeomorphic():

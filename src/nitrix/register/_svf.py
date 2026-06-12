@@ -40,6 +40,7 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode
 from ..smoothing import gaussian
+from ._converge import Convergence, run_iterations
 from ._force import Force, MIForce
 
 __all__ = [
@@ -355,6 +356,7 @@ def single_sided_level(
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
+    convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array]:
     """Single-sided SVF iterations on one resolution (the Demons structure).
 
@@ -388,7 +390,13 @@ def single_sided_level(
         )
         return v, bound.cost(warped)
 
-    return jax.lax.scan(step_fn, v, xs=None, length=iterations)
+    return run_iterations(
+        step_fn,
+        v,
+        iterations=iterations,
+        convergence=convergence,
+        dtype=fixed.dtype,
+    )
 
 
 def symmetric_level(
@@ -408,6 +416,7 @@ def symmetric_level(
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
+    convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array, Array]:
     """Symmetric-midpoint SVF iterations on one resolution (the SyN structure).
 
@@ -456,8 +465,12 @@ def symmetric_level(
         )
         return (v_fwd, v_inv), bound_fwd.cost(a)
 
-    (v_fwd, v_inv), costs = jax.lax.scan(
-        step_fn, (v_fwd, v_inv), xs=None, length=iterations
+    (v_fwd, v_inv), costs = run_iterations(
+        step_fn,
+        (v_fwd, v_inv),
+        iterations=iterations,
+        convergence=convergence,
+        dtype=fixed.dtype,
     )
     return v_fwd, v_inv, costs
 
@@ -477,6 +490,7 @@ def group_single_sided_level(
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
+    convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array]:
     """Single-sided **group (greedy)** iterations on one resolution.
 
@@ -505,7 +519,13 @@ def group_single_sided_level(
         s = _smooth_vector(s, sd, ndim)  # total-field (diffusion) regulariser
         return s, bound.cost(warped)
 
-    return jax.lax.scan(step_fn, s, xs=None, length=iterations)
+    return run_iterations(
+        step_fn,
+        s,
+        iterations=iterations,
+        convergence=convergence,
+        dtype=fixed.dtype,
+    )
 
 
 def group_symmetric_level(
@@ -524,6 +544,7 @@ def group_symmetric_level(
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
+    convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array, Array]:
     """Symmetric-midpoint **group (greedy)** iterations on one resolution.
 
@@ -572,8 +593,12 @@ def group_symmetric_level(
         )
         return (s_fwd, s_inv), bound_fwd.cost(a)
 
-    (s_fwd, s_inv), costs = jax.lax.scan(
-        step_fn, (s_fwd, s_inv), xs=None, length=iterations
+    (s_fwd, s_inv), costs = run_iterations(
+        step_fn,
+        (s_fwd, s_inv),
+        iterations=iterations,
+        convergence=convergence,
+        dtype=fixed.dtype,
     )
     return s_fwd, s_inv, costs
 
