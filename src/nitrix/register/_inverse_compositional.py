@@ -46,6 +46,7 @@ from ..geometry import (
 )
 from ..linalg._solver import safe_inv
 from ..linalg.matrix_function import matrix_exp, matrix_log
+from ._converge import run_iterations
 from ._core import (
     Convergence,
     RegistrationResult,
@@ -311,15 +312,10 @@ def _ic_level_converge(
     """
     fixed, sd, h_inv, center = ref
     dtype = moving.dtype
-    window = convergence.window
-    threshold = convergence.threshold
     corners = _grid_corners(fixed.shape, center, dtype)
     step_max = _TRUST_EXTENT_FACTOR * float(max(fixed.shape))
-    t = jnp.arange(window, dtype=dtype)
-    t_centred = t - jnp.mean(t)
-    t_var = jnp.sum(t_centred * t_centred)
 
-    def cost_and_delta(matrix: Array) -> tuple[Array, Array]:
+    def step_fn(matrix: Array, _: object) -> tuple[Array, Array]:
         grid = affine_grid(matrix, fixed.shape, center=center)
         warped = spatial_transform(
             moving[..., None],
@@ -329,38 +325,23 @@ def _ic_level_converge(
             method=spec.interpolation,
         )[..., 0]
         err = (warped - fixed).reshape(-1)
-        return 0.5 * jnp.sum(err * err), h_inv @ (sd.T @ err)
-
-    def converged(buf: Array) -> Array:
-        slope = jnp.sum(t_centred * (buf - jnp.mean(buf))) / t_var
-        return jnp.abs(slope) / (jnp.abs(jnp.mean(buf)) + 1e-12) < threshold
-
-    def cond(carry: tuple[Array, Array, Array, Array]) -> Array:
-        _, i, buf, _ = carry
-        return (i < iterations) & ((i < window) | ~converged(buf))
-
-    def body(
-        carry: tuple[Array, Array, Array, Array],
-    ) -> tuple[Array, Array, Array, Array]:
-        matrix, i, buf, hist = carry
-        cost, delta = cost_and_delta(matrix)
+        cost = 0.5 * jnp.sum(err * err)
+        delta = h_inv @ (sd.T @ err)
         update = compositional_update(delta, ndim)
         scale = _trust_scale(matrix, update, corners, ndim, step_max)
         update = compositional_update(delta * scale, ndim)
-        buf = jnp.concatenate([buf[1:], cost[None]])
-        return matrix @ update, i + 1, buf, hist.at[i].set(cost)
+        return matrix @ update, cost
 
-    cost0, _ = cost_and_delta(matrix0)
-    init = (
+    # The shared early-exit driver (windowed-slope criterion + padded trace);
+    # _ic_level_converge is reached only with `convergence` set, so this takes
+    # the while_loop path.
+    return run_iterations(
+        step_fn,
         matrix0,
-        jnp.asarray(0),
-        jnp.full((window,), cost0, dtype=dtype),
-        jnp.full((iterations,), cost0, dtype=dtype),
+        iterations=iterations,
+        convergence=convergence,
+        dtype=dtype,
     )
-    matrix, last_i, buf, hist = jax.lax.while_loop(cond, body, init)
-    # Pad the unrun tail of the trace with the final cost.
-    hist = jnp.where(jnp.arange(iterations) < last_i, hist, buf[-1])
-    return matrix, hist
 
 
 def ic_reference(
