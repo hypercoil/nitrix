@@ -21,6 +21,8 @@ from nitrix.metrics import (
     koleo,
     lncc,
     lncc_grad,
+    mi_grad,
+    mutual_information,
 )
 
 
@@ -37,6 +39,81 @@ def test_lncc_grad_matches_autodiff():
         )(moving)
         assert analytic.shape == moving.shape
         assert np.allclose(np.asarray(analytic), np.asarray(auto), atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# mi_grad (closed-form Mattes MI gradient)
+# ---------------------------------------------------------------------------
+
+
+def _mi_autograd(moving, fixed, *, bins, rm, rf):
+    return jax.grad(
+        lambda m: mutual_information(
+            m, fixed, bins=bins, range_moving=rm, range_fixed=rf
+        )
+    )(moving)
+
+
+def test_mi_grad_matches_autodiff_on_populated_bins():
+    # The parity oracle: on a fully-populated joint histogram (no empty bins)
+    # the closed-form Mattes gradient is the exact derivative of the cost --
+    # machine precision vs autodiff, with no histogram-scatter tape.
+    rng = np.random.RandomState(0)
+    for shape, bins in [((64, 64), 16), ((40, 40), 12), ((16, 18, 20), 8)]:
+        moving = jnp.asarray(rng.uniform(0.0, 1.0, shape))  # noise fills bins
+        fixed = jnp.asarray(rng.uniform(0.0, 1.0, shape))
+        rm = rf = (0.0, 1.0)
+        analytic = np.asarray(mi_grad(moving, fixed, bins=bins, range_moving=rm, range_fixed=rf))
+        auto = np.asarray(_mi_autograd(moving, fixed, bins=bins, rm=rm, rf=rf))
+        assert analytic.shape == tuple(shape)
+        rel = np.linalg.norm(analytic - auto) / (np.linalg.norm(auto) + 1e-30)
+        assert rel < 1e-6
+
+
+def test_mi_grad_direction_aligns_cross_modal():
+    # On a SPARSE cross-modal histogram (many empty bins) the magnitude diverges
+    # from autodiff at the empty-bin boundaries (the where(hist>0) mask is
+    # non-smooth there -- the documented analogue of lncc_grad's boundary
+    # divergence), but the *direction* stays tightly aligned, which is what
+    # drives the registration force.
+    rng = np.random.RandomState(1)
+    yy, xx = np.mgrid[0:56, 0:56].astype('float64')
+    fixed = np.zeros((56, 56))
+    for _ in range(6):
+        cy, cx = rng.uniform(0.2, 0.8, 2) * 56
+        fixed += rng.uniform(0.4, 1.0) * np.exp(
+            -((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * (0.12 * 56) ** 2)
+        )
+    fixed = jnp.asarray(fixed)
+    moving = jnp.sqrt(fixed - fixed.min() + 0.05)  # "different modality"
+    rm = (float(moving.min()), float(moving.max()))
+    rf = (float(fixed.min()), float(fixed.max()))
+    a = np.asarray(mi_grad(moving, fixed, bins=32, range_moving=rm, range_fixed=rf)).ravel()
+    b = np.asarray(_mi_autograd(moving, fixed, bins=32, rm=rm, rf=rf)).ravel()
+    cos = a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-30)
+    assert cos > 0.99
+
+
+def test_mi_grad_zero_outside_pinned_range():
+    # A voxel outside the pinned moving range has a clipped soft bin, so its
+    # derivative is exactly zero (the force never pushes an over-range voxel).
+    rng = np.random.RandomState(2)
+    fixed = jnp.asarray(rng.uniform(0.0, 1.0, (40, 40)))
+    moving = jnp.asarray(rng.uniform(0.0, 1.0, (40, 40))).at[0, 0].set(5.0)
+    g = mi_grad(moving, fixed, bins=16, range_moving=(0.0, 1.0), range_fixed=(0.0, 1.0))
+    assert float(g[0, 0]) == 0.0
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+def test_mi_grad_finite_on_degenerate_uniform():
+    # A fully-uniform (zero-range) moving image with an unpinned range: the span
+    # floor keeps s_m bounded so the force is finite, not NaN/inf (robustness).
+    rng = np.random.RandomState(3)
+    fixed = jnp.asarray(rng.uniform(0.0, 1.0, (40, 40)))
+    moving = jnp.ones((40, 40))
+    g = mi_grad(moving, fixed, bins=16)  # range_moving=None -> data range = 0
+    assert bool(jnp.all(jnp.isfinite(g)))
+
 
 # ---------------------------------------------------------------------------
 # dice / jaccard

@@ -20,8 +20,9 @@ Five families:
   windowed).  Within-modality; ``lncc`` is robust to smooth intensity
   inhomogeneity and is the diffeomorphic-recipe default.
 - ``information`` -- ``joint_histogram``, ``mutual_information`` (and
-  normalised MI), ``correlation_ratio``.  Cross-modal; assume only a
-  functional (MI: arbitrary; CR: deterministic) intensity relationship.
+  normalised MI), ``mi_grad`` (the closed-form Mattes ``∂MI/∂moving``),
+  ``correlation_ratio``.  Cross-modal; assume only a functional (MI:
+  arbitrary; CR: deterministic) intensity relationship.
 - ``overlap`` -- ``dice`` and ``jaccard`` (IoU), the soft
   region-overlap coefficients on probabilistic masks.
 - ``classification`` -- ``bce_with_logits``,
@@ -45,6 +46,7 @@ from .intensity import lncc, lncc_grad, ncc, ssd
 from .information import (
     correlation_ratio,
     joint_histogram,
+    mi_grad,
     mutual_information,
 )
 from .overlap import dice, jaccard
@@ -69,6 +71,7 @@ __all__ = [
     # information
     'joint_histogram',
     'mutual_information',
+    'mi_grad',
     'correlation_ratio',
     # overlap
     'dice',
