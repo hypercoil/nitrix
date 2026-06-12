@@ -255,6 +255,21 @@ def _mask_force(u: Array, mask: Optional[Array]) -> Array:
     return u if mask is None else u * mask[..., None]
 
 
+def _restrict_force(u: Array, restrict: Optional[tuple[float, ...]]) -> Array:
+    """Weight the force per spatial axis (ANTs ``--restrict-deformation``).
+
+    ``restrict`` is a length-``ndim`` per-axis weight on the force's vector
+    components, so a ``0`` suppresses deformation along that axis -- e.g.
+    ``(1, 1, 0)`` for in-plane-only registration of 2-D-acquired data.  The
+    suppression *persists*: the zeroed component never enters the additive
+    log-update, and the spatial-only (per-channel) Gaussian smoothing cannot
+    reintroduce it.  ``None`` -> unchanged.
+    """
+    if restrict is None:
+        return u
+    return u * jnp.asarray(restrict, dtype=u.dtype)
+
+
 def _regularise(
     v: Array,
     u: Array,
@@ -296,6 +311,7 @@ def single_sided_level(
     step: Optional[float],
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> tuple[Array, Array]:
     """Single-sided SVF iterations on one resolution (the Demons structure).
 
@@ -304,7 +320,9 @@ def single_sided_level(
     bound to ``fixed`` **once** (its fixed-state, e.g. ``∇fixed``, is hoisted
     out of the iteration).  ``mask`` (this level's, channel-less) gates the
     force to a region -- the masked area drives the deformation, the rest
-    follows by regularisation.  Rolled with ``lax.scan``; returns ``(v, costs)``.
+    follows by regularisation.  ``restrict`` (length-``ndim``) weights the force
+    per axis (deformation-axis masking).  Rolled with ``lax.scan``; returns
+    ``(v, costs)``.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)
@@ -318,7 +336,7 @@ def single_sided_level(
         )[..., 0]
         v = _regularise(
             v,
-            _mask_force(bound.update(warped), mask),
+            _restrict_force(_mask_force(bound.update(warped), mask), restrict),
             step=step,
             sigma_fluid=sf,
             sigma_diffusion=sd,
@@ -346,14 +364,16 @@ def symmetric_level(
     step: Optional[float],
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> tuple[Array, Array, Array]:
     """Symmetric-midpoint SVF iterations on one resolution (the SyN structure).
 
     Warps both images to the shared midpoint and ascends the similarity under
     ``force`` in each direction -- metric-generic.  The force is bound **per
     step** (its "fixed" is the other image at the midpoint, which changes every
-    iteration).  ``mask`` (this level's) gates both half-forces to a region.
-    Rolled with ``lax.scan``; returns ``(v_fwd, v_inv, costs)``.
+    iteration).  ``mask`` (this level's) gates both half-forces to a region;
+    ``restrict`` (length-``ndim``) weights both per axis (deformation-axis
+    masking).  Rolled with ``lax.scan``; returns ``(v_fwd, v_inv, costs)``.
     """
     id_grid = identity_grid(fixed.shape, dtype=fixed.dtype)
     sf = _per_axis_sigma(sigma_fluid, rel_spacing)
@@ -375,7 +395,7 @@ def symmetric_level(
         bound_inv = force.bind(a, ndim=ndim, rel_spacing=rel_spacing)
         v_fwd = _regularise(
             v_fwd,
-            _mask_force(bound_fwd.update(a), mask),
+            _restrict_force(_mask_force(bound_fwd.update(a), mask), restrict),
             step=step,
             sigma_fluid=sf,
             sigma_diffusion=sd,
@@ -384,7 +404,7 @@ def symmetric_level(
         )
         v_inv = _regularise(
             v_inv,
-            _mask_force(bound_inv.update(b), mask),
+            _restrict_force(_mask_force(bound_inv.update(b), mask), restrict),
             step=step,
             sigma_fluid=sf,
             sigma_diffusion=sd,

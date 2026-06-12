@@ -150,6 +150,7 @@ def _syn_level(
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> tuple[Array, Array, Array]:
     """Run the symmetric SyN iterations on one resolution.
 
@@ -175,6 +176,7 @@ def _syn_level(
         step=spec.step,
         rel_spacing=rel_spacing,
         mask=mask,
+        restrict=restrict,
     )
 
 
@@ -187,6 +189,7 @@ def greedy_syn_register(
     init_affine: Optional[Float[Array, ' d1 d1']] = None,
     init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
     mask: Optional[Float[Array, '*spatial']] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> SyNResult:
     """Greedy symmetric diffeomorphic registration (LNCC-driven by default).
 
@@ -220,6 +223,10 @@ def greedy_syn_register(
         registered; the returned ``displacement`` / ``warped`` /
         ``jacobian_det`` are the **total** (init then residual) map, while the
         velocity fields are the residual SVFs.
+    restrict
+        Optional length-``ndim`` per-axis weight on the deformation (ANTs
+        ``--restrict-deformation``): a ``0`` suppresses deformation along that
+        axis (applied to both half-forces, e.g. ``(1, 1, 0)`` for in-plane-only).
 
     Returns
     -------
@@ -231,6 +238,10 @@ def greedy_syn_register(
         raise ValueError(
             f'greedy SyN supports 2-D / 3-D single-channel images; got '
             f'moving {moving.shape}, fixed {fixed.shape}.'
+        )
+    if restrict is not None and len(restrict) != ndim:
+        raise ValueError(
+            f'restrict must have length ndim={ndim}; got {len(restrict)}.'
         )
     dtype = moving.dtype
     init_disp = resolve_init_displacement(
@@ -290,6 +301,7 @@ def greedy_syn_register(
             ndim=ndim,
             rel_spacing=rel_spacing,
             mask=mask_l,
+            restrict=restrict,
         )
         return (v_fwd, v_inv), hist
 

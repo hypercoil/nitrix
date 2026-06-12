@@ -144,6 +144,7 @@ def _demons_level(
     ndim: int,
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> tuple[Array, Array]:
     """Run the Demons iterations on one resolution; return ``(v, costs)``.
 
@@ -174,6 +175,7 @@ def _demons_level(
         step=None,
         rel_spacing=rel_spacing,
         mask=mask,
+        restrict=restrict,
     )
 
 
@@ -186,6 +188,7 @@ def diffeomorphic_demons_register(
     init_affine: Optional[Float[Array, ' d1 d1']] = None,
     init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
     mask: Optional[Float[Array, '*spatial']] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -221,6 +224,10 @@ def diffeomorphic_demons_register(
         Optional fixed-grid weight field (``(*spatial,)``, e.g. a brain mask)
         gating the force to a region: the masked area drives the deformation,
         the rest follows by regularisation.
+    restrict
+        Optional length-``ndim`` per-axis weight on the deformation (ANTs
+        ``--restrict-deformation``): a ``0`` suppresses deformation along that
+        axis (e.g. ``(1, 1, 0)`` for in-plane-only).
 
     Returns
     -------
@@ -232,6 +239,10 @@ def diffeomorphic_demons_register(
         raise ValueError(
             f'diffeomorphic registration supports 2-D / 3-D single-channel '
             f'images; got moving {moving.shape}, fixed {fixed.shape}.'
+        )
+    if restrict is not None and len(restrict) != ndim:
+        raise ValueError(
+            f'restrict must have length ndim={ndim}; got {len(restrict)}.'
         )
     dtype = moving.dtype
     init_disp = resolve_init_displacement(
@@ -292,6 +303,7 @@ def diffeomorphic_demons_register(
             ndim=ndim,
             rel_spacing=rel_spacing,
             mask=mask_l,
+            restrict=restrict,
         )
         return (v,), hist
 
