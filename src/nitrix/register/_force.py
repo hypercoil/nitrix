@@ -25,6 +25,10 @@ Two tiers, the suite-wide perf-vs-composability discipline:
   a custom descriptor can drive a diffeomorphic recipe (multimodal deformable
   registration) without a hand-written force.
 
+:class:`SumForce` is the **combinator** -- a weighted sum of other forces
+(multi-metric within one stage, ANTs ``-m … -m …``), itself a :class:`Force`, so
+it composes any of the above with no driver change.
+
 **The force direction.**  With a minimisation cost ``c(warped, fixed)`` the
 gradient-descent direction on the moving deformation is, by the chain rule
 ``∂c/∂(deformation) = ∂c/∂warped · ∇warped``, the field
@@ -63,6 +67,7 @@ __all__ = [
     'DemonsForce',
     'MIForce',
     'MetricForce',
+    'SumForce',
     'resolve_force_schedule',
 ]
 
@@ -508,3 +513,65 @@ class _BoundMetric:
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
         return self.metric.cost(warped, self.fixed)
+
+
+@dataclass(frozen=True)
+class SumForce:
+    """Weighted sum of forces -- multi-metric within one stage (A5).
+
+    The dense-field analogue of ANTs ``-m MI[...] -m CC[...]`` in a single stage:
+    :meth:`update` is ``Σ wᵢ · forceᵢ.update`` and :meth:`cost` the matching
+    weighted sum, so a *combination* of metrics drives one recipe with **no**
+    driver change -- a ``SumForce`` is itself just another :class:`Force`.  Each
+    term is bound once (its fixed-state hoisted) by :meth:`bind`; the terms may
+    mix tiers freely (e.g. a closed-form :class:`LNCCForce` plus a
+    :class:`MIForce` for a cross-modal-plus-structural drive).
+
+    Attributes
+    ----------
+    terms
+        A non-empty tuple of ``(weight, force)`` pairs.
+    """
+
+    terms: tuple[tuple[float, Force], ...]
+
+    def __post_init__(self) -> None:
+        if not self.terms:
+            raise ValueError(
+                'SumForce requires at least one (weight, force) term.'
+            )
+
+    def bind(
+        self,
+        fixed: Float[Array, '*spatial'],
+        *,
+        ndim: int,
+        rel_spacing: RelSpacing = None,
+    ) -> _BoundSum:
+        return _BoundSum(
+            terms=tuple(
+                (float(w), f.bind(fixed, ndim=ndim, rel_spacing=rel_spacing))
+                for w, f in self.terms
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _BoundSum:
+    terms: tuple[tuple[float, BoundForce], ...]
+
+    def update(
+        self, warped: Float[Array, '*spatial']
+    ) -> Float[Array, '*spatial ndim']:
+        w0, b0 = self.terms[0]
+        total = w0 * b0.update(warped)
+        for w, b in self.terms[1:]:
+            total = total + w * b.update(warped)
+        return total
+
+    def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
+        w0, b0 = self.terms[0]
+        total = w0 * b0.cost(warped)
+        for w, b in self.terms[1:]:
+            total = total + w * b.cost(warped)
+        return total

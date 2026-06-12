@@ -32,6 +32,7 @@ from nitrix.register import (  # noqa: E402
     LNCCForce,
     MetricForce,
     MIForce,
+    SumForce,
     SyNSpec,
     diffeomorphic_demons_register,
     greedy_syn_register,
@@ -156,6 +157,18 @@ def test_demons_metricforce_mi_recovers():
     assert mi1 > mi0 + 0.2  # a substantial improvement, not merely nonzero
     assert float(res.jacobian_det.min()) > 0.0
     assert bool(jnp.all(jnp.isfinite(res.warped)))
+
+
+def test_syn_sumforce_multi_metric_recovers():
+    # A5: a multi-metric SumForce (two LNCC windows summed) drives the recipe end
+    # to end with no driver change -- the composability payoff.
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 45.0, 0))
+    spec = SyNSpec(levels=3, iterations=60, step=0.5)
+    force = SumForce(((0.5, LNCCForce(4)), (0.5, LNCCForce(2))))
+    res = greedy_syn_register(moving, fixed, spec=spec, force=force)
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert float(res.jacobian_det.min()) > 0.0
 
 
 def test_syn_per_level_schedule():

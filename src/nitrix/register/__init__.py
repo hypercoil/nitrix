@@ -72,7 +72,14 @@ owns the cross-tool harness; they are not asserted in this repo.
 
 from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
 from ._core import Convergence, RegistrationResult, RegistrationSpec
-from ._force import DemonsForce, Force, LNCCForce, MetricForce, MIForce
+from ._force import (
+    DemonsForce,
+    Force,
+    LNCCForce,
+    MetricForce,
+    MIForce,
+    SumForce,
+)
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from ._objective import MetricObjective, Objective
@@ -108,6 +115,7 @@ __all__ = [
     'DemonsForce',
     'MIForce',
     'MetricForce',
+    'SumForce',
     'RegistrationSpec',
     'RegistrationResult',
     'Convergence',

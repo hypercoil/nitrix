@@ -17,6 +17,7 @@ jax.config.update('jax_enable_x64', True)
 
 import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
+import pytest  # noqa: E402
 
 from nitrix.geometry import spatial_gradient  # noqa: E402
 from nitrix.metrics import (
@@ -33,6 +34,7 @@ from nitrix.register import (  # noqa: E402
     LNCCForce,
     MetricForce,
     MIForce,
+    SumForce,
 )
 from nitrix.register._svf import pin_force_ranges  # noqa: E402
 
@@ -186,6 +188,30 @@ def test_miforce_direction_matches_metricforce_mi():
     u_fast = MIForce(bins=24).bind(fixed, ndim=2).update(warped)
     u_auto = MetricForce(MI(bins=24)).bind(fixed, ndim=2).update(warped)
     assert _cosine(u_fast, u_auto) > 0.99
+
+
+def test_sumforce_is_weighted_sum_of_terms():
+    # A5: SumForce.update / .cost are the weighted sums of the term forces --
+    # multi-metric in one stage, behind the same protocol (no driver change).
+    warped, fixed = _blobs(48, 0), _blobs(48, 1)
+    a, b = LNCCForce(3), DemonsForce(0.4)
+    ua = a.bind(fixed, ndim=2).update(warped)
+    ub = b.bind(fixed, ndim=2).update(warped)
+    s = SumForce(((0.7, a), (0.3, b))).bind(fixed, ndim=2)
+    assert np.allclose(
+        np.asarray(s.update(warped)),
+        0.7 * np.asarray(ua) + 0.3 * np.asarray(ub),
+        atol=1e-10,
+    )
+    ca = float(a.bind(fixed, ndim=2).cost(warped))
+    cb = float(b.bind(fixed, ndim=2).cost(warped))
+    assert np.isclose(float(s.cost(warped)), 0.7 * ca + 0.3 * cb, rtol=1e-6)
+
+
+def test_sumforce_is_a_force_and_rejects_empty():
+    assert isinstance(SumForce(((1.0, LNCCForce(2)),)), Force)
+    with pytest.raises(ValueError):
+        SumForce(())
 
 
 def test_pin_force_ranges_resolves_only_unpinned_miforce():
