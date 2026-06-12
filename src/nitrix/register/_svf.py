@@ -168,17 +168,35 @@ def svf_coarse_to_fine(
     return state, jnp.concatenate(histories)
 
 
-def _normalise_step(u: Array, step: float) -> Array:
-    """Cap the force field's largest voxel displacement at ``step``.
+# Robust-max percentile for the trust-region clamp: the cap is this percentile
+# of the per-voxel displacement, so the top ~1% (outlier edge / hot voxels) do
+# not single-handedly throttle the step (B4).  On the smallest coarse grids
+# (~16^2) this is still the ~2nd-3rd largest -- robust to a lone outlier.
+_STEP_ROBUST_PCTL = 99.0
 
-    A trust-region clamp (``min(1, step/‖u‖_max)``), not a scale-to.  The
-    two coincide when the force exceeds the cap (both divide by ``‖u‖_max``);
+
+def _normalise_step(u: Array, step: float) -> Array:
+    """Cap the force field's (robust) largest voxel displacement at ``step``.
+
+    A trust-region clamp (``min(1, step/‖u‖_cap)``), not a scale-to.  The
+    two coincide when the force exceeds the cap (both divide by ``‖u‖_cap``);
     they differ only *below* it, where the clamp keeps the raw gradient
     magnitude rather than amplifying it to a full step.  Under a fixed
     iteration budget (no convergence gate) that is the safer discipline: a
     shrinking force keeps shrinking, and a small / low-signal update is not
     inflated -- scale-to-step would force a full ``step`` in whatever
     direction the (often spurious, flat-region) maximum points.
+
+    **Robust cap (B4).**  ``‖u‖_cap`` is the ``_STEP_ROBUST_PCTL``-th
+    *percentile* of the per-voxel displacement, not the global ``max``: a single
+    outlier voxel (edge / boundary / hot voxel) would otherwise set the cap for
+    the whole field and starve the real signal.  A high *percentile* (not the
+    RMS / mean) is the right robustification for a *clamp* -- it preserves the
+    trust-region intent (bound essentially every voxel's step, keeping the warp
+    diffeomorphic), ignoring only the top ~1% tail, whereas an RMS cap would let
+    a large fraction of voxels exceed ``step`` (folding risk).  (Cost: one
+    per-iteration sort; ``lax.top_k`` is the O(``N log k``) alternative if a
+    brain-scale profile flags it.)
 
     **Contingent on the fixed-budget scheme.**  This choice is *because* the
     forward is a fixed-length ``lax.scan`` (no convergence gate).  If the
@@ -194,7 +212,8 @@ def _normalise_step(u: Array, step: float) -> Array:
     clamp, that zeroes the *net* deformation there.
     """
     norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
-    scale = jnp.minimum(1.0, step / (jnp.max(norm) + 1e-12))
+    cap = jnp.percentile(norm, _STEP_ROBUST_PCTL)
+    scale = jnp.minimum(1.0, step / (cap + 1e-12))
     return u * scale
 
 

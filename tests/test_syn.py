@@ -26,6 +26,7 @@ from nitrix.geometry import (  # noqa: E402
 )
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import SyNSpec, greedy_syn_register  # noqa: E402
+from nitrix.register._svf import _normalise_step  # noqa: E402
 from nitrix.smoothing import gaussian  # noqa: E402
 
 
@@ -142,3 +143,24 @@ def test_syn_validation():
         greedy_syn_register(_blobs_2d(32), _blobs_2d(48))
     with pytest.raises(ValueError):
         greedy_syn_register(jnp.zeros((4, 4, 4, 4)), jnp.zeros((4, 4, 4, 4)))
+
+
+def test_normalise_step_robust_to_outlier():
+    # B4: the trust-region clamp caps at a high *percentile* of the per-voxel
+    # displacement, so a single hot/edge voxel cannot throttle the whole field.
+    n = 48
+    step = 1.0
+    # Bulk below `step`: the clamp is a no-op (scale == 1) -- the real signal is
+    # preserved.  A global-max clamp would have scaled it by step/100 = 0.01.
+    u = jnp.full((n, n, 2), 0.3 / np.sqrt(2.0))  # per-voxel norm 0.3 everywhere
+    u = u.at[0, 0].set(jnp.asarray([100.0, 0.0]))  # one outlier voxel
+    out = _normalise_step(u, step)
+    bulk = float(jnp.linalg.norm(out[n // 2, n // 2]))
+    assert np.isclose(bulk, 0.3, rtol=1e-6)  # preserved, not starved to ~0.003
+
+    # Bulk genuinely above `step`: the clamp still bounds it -- but at the robust
+    # cap (p99 = 2.0), so the bulk lands at ~step, not at step*(2/100).
+    u2 = jnp.full((n, n, 2), 2.0 / np.sqrt(2.0))
+    u2 = u2.at[0, 0].set(jnp.asarray([100.0, 0.0]))
+    bulk2 = float(jnp.linalg.norm(_normalise_step(u2, step)[n // 2, n // 2]))
+    assert np.isclose(bulk2, step, rtol=1e-3)
