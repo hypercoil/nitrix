@@ -103,6 +103,34 @@ gamma   = XtVinvy / XtVinvX
 log_det_XtVinvX = jnp.log(XtVinvX)
 ```
 
+### Dispatch on `p`: specialise the hot path, keep a capable fallback
+
+The fix is **not** "delete the Cholesky and assume `p = 1`" — it is a
+**size-dispatch** on the (statically known) fixed-effect width `p`:
+
+- **`p ∈ {1, 2}` — the ~80 % hot path.** The dominant designs (FLAME one-sample
+  group mean ⇒ `p = 1`; a mean + single covariate / two-group contrast ⇒
+  `p = 2`) get specific closed-form dispatches: the scalar form above for
+  `p = 1`, and the explicit symmetric `2×2` for `p = 2`
+  (`det = a·c − b²`; `inv = [[c, −b], [−b, a]] / det`; `log_det = log(det)`).
+  These are pure elementwise algebra — **no cuSOLVER/LAPACK custom-call** — so
+  they are exactly the branch that unblocks the GPU and flattens compile, and
+  they cover the vast majority of real calls (and the entire benchmark).
+- **`p > 2` — the ~20 % branch.** General fixed-effect designs still need a real
+  factorisation, and that path **must fall back to a more capable engine** —
+  *not* the same cuSOLVER `potrf` custom-call that silently fails the handle
+  creation here. Route it to a backend that actually runs and is numerically
+  robust for arbitrary `p`: a CPU-side LAPACK Cholesky/LU fallback, or a more
+  robust symmetric factorisation (`LDLᵀ` / `eigh`) on a path that does not hit
+  the broken `gpusolverDnCreate` handle. The point is that the minority of
+  general-`p` callers keep both **correctness** and **availability**, instead of
+  inheriting today's blanket skip.
+
+Statically dispatching on `p` (it is a compile-time shape, so the branch is a
+Python-level `if`, not a traced `lax.cond`) means the common case never
+constructs the heavy graph at all, and the general case degrades to a working
+engine rather than the failing one.
+
 ### Prototype result (flame, Cholesky → scalar; Newton/autodiff structure unchanged)
 
 Measured on the L4 (`flame_two_level` vs the prototype; accuracy vs the
