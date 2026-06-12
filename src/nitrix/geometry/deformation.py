@@ -32,7 +32,7 @@ Channel-last fields ``(*spatial, ndim)``; coordinates index-space
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, overload
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float
@@ -122,6 +122,30 @@ def compose_velocity(
     if order == 2:
         return v + u + 0.5 * _lie_bracket(v, u)
     raise ValueError(f'order must be 1 or 2; got {order}.')
+
+
+@overload
+def invert_displacement(
+    s: Float[Array, '*spatial ndim'],
+    *,
+    tol: float = ...,
+    max_iter: int = ...,
+    mode: BoundaryMode = ...,
+    acceleration: Literal['picard', 'anderson'] = ...,
+    return_residual: Literal[False] = ...,
+) -> Float[Array, '*spatial ndim']: ...
+
+
+@overload
+def invert_displacement(
+    s: Float[Array, '*spatial ndim'],
+    *,
+    tol: float = ...,
+    max_iter: int = ...,
+    mode: BoundaryMode = ...,
+    acceleration: Literal['picard', 'anderson'] = ...,
+    return_residual: Literal[True],
+) -> tuple[Float[Array, '*spatial ndim'], Float[Array, '']]: ...
 
 
 def invert_displacement(
