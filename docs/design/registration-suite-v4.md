@@ -333,6 +333,34 @@ frozen/`NamedTuple`, Protocols where they earn it, jaxtyping, ruff + mypy,
 0a + 0b are load-bearing: 0a makes Demons usable on real anatomy at all; 0b makes
 affine reliable *and* is the precondition for default early-exit (Phase 3b).
 
+**Status — Phase 0 SHIPPED (2026-06-12), with three deviations from the plan
+above (the implementation taught what the design could not foresee):**
+
+- **0a + 0b** — committed `63d69e7`. **0b did *not* ship as backtracking.**
+  Step-halving needs a monotone quantity to backtrack on, but the
+  constant-template IC step is *not* a guaranteed descent direction (recomputing
+  cost after the trial update and halving on increase simply *stalled*, ncc
+  ≈ 0.15). A per-iteration ridge re-solve was also rejected — it over-damps the
+  well-conditioned path (7 iters vs 1) and would throttle the 3b early-exit. What
+  shipped instead: a **geometric trust clamp** (bound the induced grid
+  displacement) + a **loud, affine-only pyramid-depth cap** (`_MIN_COARSE_AXIS`,
+  keep the coarsest level ≥ 16 vox where the affine Hessian is reliable) —
+  perf-neutral, no capability regression, and holds through Phase 3.
+- **0e** — committed `13778ee`. Shipped **Picard-default + Anderson opt-in +
+  `return_residual`**, *not* Anderson-by-default: Anderson is marginally *worse*
+  on the smoothed (non-stiff) regime registration actually hits (its
+  least-squares over a near-collinear residual history is noisier), and the
+  ½-damped `field_log` square root is already super-linear. Anderson is the
+  validated escape hatch for a genuinely stiff `‖∇s‖→1` field.
+- **0c, 0d, 0f, 0g** — this round. **0d** uses a high **percentile** (robust max),
+  not RMS — RMS is right for a scale-*to* (0c's `MetricForce` magnitude) but a
+  *clamp* wants a robust max so it still bounds essentially every voxel. **0f**
+  ships **no DB balancing**: the round-trip-through-`matrix_exp` residual is the
+  domain signal (Frobenius `‖A−I‖` was shown to *over*-flag valid
+  large-translation affines, which round-trip at ~1e-12 despite a large norm),
+  and the inverse scaling-and-squaring already equilibrates the spectrum — out-
+  of-domain inputs return a **loud NaN**, not finite garbage.
+
 ### Phase 1 — Force layer + O(N) separable operators
 
 - **1a — Closed-form Mattes MI force (headline; B1).** `metrics.mi_grad` +
