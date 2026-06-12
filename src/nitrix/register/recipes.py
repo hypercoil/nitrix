@@ -19,6 +19,9 @@ the schedule are set on the ``RegistrationSpec``.
 
 from __future__ import annotations
 
+import warnings
+from dataclasses import replace
+
 from jaxtyping import Array, Float
 
 from ._core import (
@@ -31,6 +34,52 @@ from ._model import Affine, Rigid, TransformModel
 from ._space import CoordinateSpace, IndexSpace
 
 __all__ = ['rigid_register', 'affine_register']
+
+# Coarsest pyramid axis (voxels) below which the matrix Hessian -- especially the
+# 12-DOF affine one -- is too few-voxel to estimate reliably, so the constant-
+# template step converges to a wrong (anti-correlated) minimum
+# (`register-affine-small-grid-divergence`: a 24³/28³ image at the default 3
+# levels drops its coarsest level to ≤14³ and diverges; single-level recovers).
+# Below this, the affine pyramid is shortened so the coarsest level stays reliable
+# -- a targeted fix that needs no damping, so the well-conditioned path is
+# untouched.  Affine-only: rigid (6-DOF) is robust at small coarse grids.
+_MIN_COARSE_AXIS = 16
+
+
+class AffinePyramidDepthWarning(UserWarning):
+    """The affine pyramid was shortened so its coarsest level stays reliable."""
+
+
+def _cap_levels(
+    spec: RegistrationSpec, shape: tuple[int, ...]
+) -> RegistrationSpec:
+    """Shorten the (affine) pyramid so its coarsest level keeps ``>=
+    _MIN_COARSE_AXIS`` voxels per axis; **loud** (a warning, per the loud-fallback
+    tenet) and a no-op when the requested depth already satisfies it.  Honours an
+    explicit per-level ``iterations`` tuple by keeping its finest entries."""
+    smallest = float(min(shape))
+    effective = 1
+    while (
+        effective < spec.levels
+        and smallest / (spec.pyramid_factor**effective) >= _MIN_COARSE_AXIS
+    ):
+        effective += 1
+    if effective >= spec.levels:
+        return spec
+    warnings.warn(
+        f'affine_register: shortening the pyramid from {spec.levels} to '
+        f'{effective} level(s) -- a {int(smallest)}-voxel image at '
+        f'{spec.levels} levels drops the coarsest grid below '
+        f'{_MIN_COARSE_AXIS} vox/axis, where the affine Hessian is unreliable '
+        f'and the fit diverges (register-affine-small-grid-divergence).  Pass a '
+        f'smaller spec.levels to silence this.',
+        category=AffinePyramidDepthWarning,
+        stacklevel=3,
+    )
+    iterations = spec.iterations
+    if isinstance(iterations, tuple):
+        iterations = iterations[-effective:]  # keep the finest levels' counts
+    return replace(spec, levels=effective, iterations=iterations)
 
 
 def _spatial_ndim(moving: Array, fixed: Array) -> int:
@@ -161,6 +210,7 @@ def affine_register(
     """
     ndim = _spatial_ndim(moving, fixed)
     model = Affine()
+    spec = _cap_levels(spec, fixed.shape)
     if _use_inverse_compositional(method, space, spec, model):
         return ic_affine_register(moving, fixed, ndim=ndim, spec=spec)
     return multi_resolution_register(

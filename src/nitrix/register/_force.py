@@ -94,9 +94,17 @@ def resolve_force_schedule(
         )
     return list(reversed(seq))
 
+
 # Anisotropy-only spacing (``None`` -> isotropic); the per-axis ratio
 # ``spacing / geomean(spacing)`` the SVF substrate threads (see ``_svf``).
 RelSpacing = Optional[tuple[float, ...]]
+
+# Below this the ESM denominator ``|j|² + α²·diff²`` is treated as a matched
+# uniform region (both the gradient and the mismatch vanish): the force is
+# zeroed there rather than dividing 0/0.  Absolute (not relative) -- any real
+# gradient or mismatch puts the denominator orders of magnitude above it across
+# the intensity scales registration sees.
+_DEMONS_DENOM_EPS = 1e-8
 
 
 def _grad_spacing(
@@ -198,7 +206,9 @@ class _BoundLNCC:
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
         scalar = lncc_grad(warped, self.fixed, radius=self._radii())
-        grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
+        grad = spatial_gradient(
+            warped, spacing=_grad_spacing(self.rel_spacing)
+        )
         return _to_voxel(scalar[..., None] * grad, self.rel_spacing)
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
@@ -229,7 +239,9 @@ class DemonsForce:
         ndim: int,
         rel_spacing: RelSpacing = None,
     ) -> _BoundDemons:
-        grad_fixed = spatial_gradient(fixed, spacing=_grad_spacing(rel_spacing))
+        grad_fixed = spatial_gradient(
+            fixed, spacing=_grad_spacing(rel_spacing)
+        )
         return _BoundDemons(
             fixed=fixed,
             grad_fixed=grad_fixed,
@@ -251,10 +263,19 @@ class _BoundDemons:
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
         diff = self.fixed - warped
-        grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
+        grad = spatial_gradient(
+            warped, spacing=_grad_spacing(self.rel_spacing)
+        )
         j = 0.5 * (self.grad_fixed + grad)
         denom = jnp.sum(j * j, axis=-1) + (self.alpha**2) * diff * diff
-        return _to_voxel((diff / denom)[..., None] * j, self.rel_spacing)
+        # Guard the 0/0 on a matched uniform region (denom = |j|² + α²·diff² = 0
+        # iff both ∇ and the mismatch vanish): zero force there -- the correct
+        # demons update (no gradient, no mismatch -> no information).  The
+        # double-``where`` keeps the *gradient* finite too (a bare ``diff/denom``
+        # NaNs the backward even where the forward is masked).
+        safe = denom > _DEMONS_DENOM_EPS
+        scale = jnp.where(safe, diff / jnp.where(safe, denom, 1.0), 0.0)
+        return _to_voxel(scale[..., None] * j, self.rel_spacing)
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
         diff = self.fixed - warped
@@ -321,7 +342,9 @@ class _BoundMetric:
         # the clamped / step-normalised driver absorbs.
         grad_cost = jax.grad(lambda w: self.metric.cost(w, self.fixed))(warped)
         grad_cost = grad_cost * warped.size
-        grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
+        grad = spatial_gradient(
+            warped, spacing=_grad_spacing(self.rel_spacing)
+        )
         return _to_voxel(-grad_cost[..., None] * grad, self.rel_spacing)
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:

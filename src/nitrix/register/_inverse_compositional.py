@@ -65,6 +65,54 @@ ReferenceLevel = tuple[Array, Array, Array, Array]
 
 _RIDGE = 1e-4  # relative Levenberg ridge on the (constant) Hessian.
 
+# Geometric trust region (`register-affine-small-grid-divergence`).  The IC step
+# uses the constant *template* Hessian, which is unreliable on a few-voxel coarse
+# grid or a low-gradient image; the raw Gauss-Newton step can then overshoot and
+# ``matrix_exp`` explode (params -> thousands, the warp anti-correlates).  Rather
+# than damp *every* step (a larger ridge slows the precise, well-conditioned path
+# and throttles early-exit), clamp only the step's **induced grid displacement**:
+# a step that would move the sampling grid by more than the grid's own extent is
+# physically meaningless (you cannot align by moving farther than the image), so
+# it is shortened to that bound.  A normal step (displacement <= extent) is left
+# byte-unchanged -- so the well-conditioned path keeps its single-step Gauss-Newton
+# convergence (and the ridge stays tiny), while an explosive step is bounded.
+_TRUST_EXTENT_FACTOR = (
+    1.0  # cap the per-step grid motion at this * the grid extent
+)
+
+
+def _grid_corners(shape: tuple[int, ...], center: Array, dtype: Any) -> Array:
+    """Homogeneous, centred grid corners ``(2**ndim, ndim+1)`` -- where an affine
+    step's induced displacement is extremal."""
+    axes = [
+        jnp.asarray([0.0, s - 1.0], dtype=dtype) - center[i]
+        for i, s in enumerate(shape)
+    ]
+    mesh = jnp.meshgrid(*axes, indexing='ij')
+    pts = jnp.stack([m.reshape(-1) for m in mesh], axis=-1)
+    ones = jnp.ones((pts.shape[0], 1), dtype=dtype)
+    return jnp.concatenate([pts, ones], axis=-1)
+
+
+def _trust_scale(
+    matrix: Array,
+    update: Array,
+    corners: Array,
+    ndim: int,
+    step_max: float,
+) -> Array:
+    """Scale factor in ``(0, 1]`` capping the step's induced grid displacement.
+
+    The step ``matrix -> matrix @ update`` moves grid corner ``x`` by
+    ``matrix @ (update − I) @ x``; the largest such corner motion is clamped to
+    ``step_max``.  Model-generic (reads the homogeneous ``update`` matrix, so it
+    serves rigid and affine alike).
+    """
+    m_du = matrix @ (update - jnp.eye(ndim + 1, dtype=matrix.dtype))
+    disp = (corners @ m_du.T)[:, :ndim]
+    max_disp = jnp.max(jnp.sqrt(jnp.sum(disp * disp, axis=-1)))
+    return jnp.minimum(1.0, step_max / (max_disp + 1e-12))
+
 
 def _rotation_generators(ndim: int, dtype: Any) -> Array:
     """``so(n)`` generators: ``(n_rot, ndim, ndim)`` skew bases.
@@ -211,8 +259,16 @@ def _ic_level(
     iterations: int,
     compositional_update: CompositionalUpdate,
 ) -> tuple[Array, Array]:
-    """Run the inverse-compositional iterations on one resolution."""
+    """Run the inverse-compositional iterations on one resolution.
+
+    The Gauss-Newton step is **geometric-trust-region-clamped** (``_trust_scale``):
+    a step whose induced grid motion would exceed the grid extent is shortened, so
+    the unreliable few-voxel / low-gradient Hessian cannot drive ``matrix_exp`` to
+    explode; a normal step is left unchanged.
+    """
     fixed, sd, h_inv, center = ref
+    corners = _grid_corners(fixed.shape, center, moving.dtype)
+    step_max = _TRUST_EXTENT_FACTOR * float(max(fixed.shape))
 
     def step(matrix: Array, _: Any) -> tuple[Array, Array]:
         grid = affine_grid(matrix, fixed.shape, center=center)
@@ -226,6 +282,8 @@ def _ic_level(
         err = (warped - fixed).reshape(-1)
         delta = h_inv @ (sd.T @ err)
         update = compositional_update(delta, ndim)
+        scale = _trust_scale(matrix, update, corners, ndim, step_max)
+        update = compositional_update(delta * scale, ndim)
         return matrix @ update, 0.5 * jnp.sum(err * err)
 
     return jax.lax.scan(step, matrix, xs=None, length=iterations)
@@ -255,6 +313,8 @@ def _ic_level_converge(
     dtype = moving.dtype
     window = convergence.window
     threshold = convergence.threshold
+    corners = _grid_corners(fixed.shape, center, dtype)
+    step_max = _TRUST_EXTENT_FACTOR * float(max(fixed.shape))
     t = jnp.arange(window, dtype=dtype)
     t_centred = t - jnp.mean(t)
     t_var = jnp.sum(t_centred * t_centred)
@@ -285,6 +345,8 @@ def _ic_level_converge(
         matrix, i, buf, hist = carry
         cost, delta = cost_and_delta(matrix)
         update = compositional_update(delta, ndim)
+        scale = _trust_scale(matrix, update, corners, ndim, step_max)
+        update = compositional_update(delta * scale, ndim)
         buf = jnp.concatenate([buf[1:], cost[None]])
         return matrix @ update, i + 1, buf, hist.at[i].set(cost)
 
