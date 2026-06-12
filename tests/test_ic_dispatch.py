@@ -21,7 +21,9 @@ import pytest  # noqa: E402
 from nitrix.geometry import (  # noqa: E402
     affine_exp,
     affine_grid,
+    identity_grid,
     rigid_exp,
+    spatial_gradient,
     spatial_transform,
 )
 from nitrix.metrics import ncc  # noqa: E402
@@ -33,7 +35,14 @@ from nitrix.register import (  # noqa: E402
     affine_register,
     rigid_register,
 )
-from nitrix.register._inverse_compositional import _hessian_inv  # noqa: E402
+from nitrix.register._inverse_compositional import (  # noqa: E402
+    _affine_project_moments,
+    _affine_steepest_descent,
+    _hessian_inv,
+    _rigid_project_moments,
+    _steepest_descent,
+    ic_reference,
+)
 
 
 def _blobs(n=64, seed=0):
@@ -59,6 +68,38 @@ def _rigid_pair(n=64):
     )
     moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
     return moving, fixed
+
+
+def test_moment_projection_matches_steepest_descent():
+    # 3a: the per-iteration projection SDᵀe, reconstructed from the moments of
+    # ∇F (m_ij = Σ ∇F_i·(x−c)_j·e, g_i = Σ ∇F_i·e), reproduces the (M,P)
+    # steepest-descent projection sd.T@err exactly -- for both models.
+    rng = np.random.RandomState(0)
+    for ndim, shape in [(2, (40, 44)), (3, (16, 18, 20))]:
+        fixed = jnp.asarray(rng.standard_normal(shape))
+        center = (jnp.asarray(shape, dtype=fixed.dtype) - 1.0) / 2.0
+        err = jnp.asarray(rng.standard_normal(shape).reshape(-1))
+        grad = spatial_gradient(fixed).reshape(-1, ndim)
+        grid_c = (identity_grid(shape, dtype=fixed.dtype) - center).reshape(-1, ndim)
+        m = grad.T @ (grid_c * err[:, None])
+        g = grad.T @ err
+        rigid_ref = _steepest_descent(fixed, center, ndim).T @ err
+        affine_ref = _affine_steepest_descent(fixed, center, ndim).T @ err
+        assert np.allclose(
+            np.asarray(_rigid_project_moments(m, g, ndim)), np.asarray(rigid_ref), atol=1e-9
+        )
+        assert np.allclose(
+            np.asarray(_affine_project_moments(m, g, ndim)), np.asarray(affine_ref), atol=1e-9
+        )
+
+
+def test_ic_reference_stores_gradient_not_sd():
+    # 3a memory: the reference holds ∇F (M, ndim), not the (M, P) SD buffer.
+    fixed = _blobs(48)
+    pyr = (fixed[..., None],)
+    ref = ic_reference(pyr, ndim=2)
+    grad = ref[0][1]
+    assert grad.shape == (48 * 48, 2)  # (M, ndim), not (M, 6) affine SD
 
 
 def test_ic_matches_forward():

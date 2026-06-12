@@ -31,7 +31,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
@@ -59,9 +58,17 @@ from ._core import (
 SteepestDescent = Callable[[Array, Array, int], Array]
 CompositionalUpdate = Callable[[Array, int], Array]
 ParamsFromMatrix = Callable[[Array, int], Array]
+# Project the per-iteration moments to the steepest-descent projection
+# ``SDᵀe (P,)``: ``(m (ndim, ndim), g (ndim,), ndim) -> (P,)`` (3a).  Rigid
+# contracts ``m`` against the ``so(n)`` generators; affine flattens it.
+ProjectMoments = Callable[[Array, Array, int], Array]
 
-# Per-level precomputed reference data: (fixed, steepest-descent (M, P),
-# inverse Hessian (P, P), grid centre (ndim,)).
+# Per-level precomputed reference data: (fixed, **gradient** ``∇F (M, ndim)``,
+# inverse Hessian (P, P), grid centre (ndim,)).  The IC projection ``SDᵀe`` is
+# the moment tensor of ``∇F`` against the centred grid and the error (3a), so
+# only ``∇F`` is stored -- not the ``(M, P)`` steepest-descent buffer (``P``-fold
+# resident memory; ``P = ndim² + ndim`` for affine, so ``∇F`` is a ``P/ndim``
+# = 4× saving at 3-D affine, ~600 MB at 256³).
 ReferenceLevel = tuple[Array, Array, Array, Array]
 
 _RIDGE = 1e-4  # relative Levenberg ridge on the (constant) Hessian.
@@ -173,6 +180,28 @@ def _affine_steepest_descent(
     return sd.reshape(-1, sd.shape[-1])
 
 
+def _rigid_project_moments(m: Array, g: Array, ndim: int) -> Array:
+    """Rigid ``SDᵀe`` from the shared moments (3a).
+
+    The rotation columns of ``SDᵀe`` are a fixed contraction of the moment
+    tensor ``m_ij = Σ_x ∇F_i·(x−c)_j·e`` against the ``so(n)`` generators
+    (``(SDᵀe)_k = Σ_ij G[k,i,j]·m_ij``); the translation columns are ``g_i =
+    Σ_x ∇F_i·e``.  Order (rotation then translation) matches ``_steepest_descent``.
+    """
+    gens = _rotation_generators(ndim, m.dtype)
+    return jnp.concatenate([jnp.einsum('kij,ij->k', gens, m), g])
+
+
+def _affine_project_moments(m: Array, g: Array, ndim: int) -> Array:
+    """Affine ``SDᵀe`` from the shared moments (3a).
+
+    The linear-block columns are the moment tensor itself, row-major
+    (``(SDᵀe)_{(i,j)} = m_ij = Σ_x ∇F_i·(x−c)_j·e``); the translation columns are
+    ``g``.  Order matches ``_affine_steepest_descent``.
+    """
+    return jnp.concatenate([m.reshape(-1), g])
+
+
 def _rigid_compositional_update(delta: Array, ndim: int) -> Array:
     """Inverse-compositional warp update ``W(Δθ)⁻¹`` for a rigid step.
 
@@ -259,15 +288,27 @@ def _ic_level(
     ndim: int,
     iterations: int,
     compositional_update: CompositionalUpdate,
+    project_moments: ProjectMoments,
+    convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array]:
     """Run the inverse-compositional iterations on one resolution.
+
+    The per-iteration projection ``SDᵀe`` is reconstructed from the moments of
+    ``∇F`` (3a) -- ``m_ij = Σ_x ∇F_i·(x−c)_j·e`` and ``g_i = Σ_x ∇F_i·e``, a
+    fused reduction over only ``∇F`` rather than a re-read of the ``(M, P)``
+    steepest-descent buffer -- then ``project_moments`` assembles the model's
+    ``SDᵀe`` (rigid contracts ``m``, affine flattens it) and ``H⁻¹`` solves.
 
     The Gauss-Newton step is **geometric-trust-region-clamped** (``_trust_scale``):
     a step whose induced grid motion would exceed the grid extent is shortened, so
     the unreliable few-voxel / low-gradient Hessian cannot drive ``matrix_exp`` to
-    explode; a normal step is left unchanged.
+    explode; a normal step is left unchanged.  ``convergence`` (default ``None``)
+    selects the fixed ``scan`` or the windowed-slope early-exit (``run_iterations``).
     """
-    fixed, sd, h_inv, center = ref
+    fixed, grad, h_inv, center = ref
+    grid_c = (
+        identity_grid(fixed.shape, dtype=moving.dtype) - center
+    ).reshape(-1, ndim)
     corners = _grid_corners(fixed.shape, center, moving.dtype)
     step_max = _TRUST_EXTENT_FACTOR * float(max(fixed.shape))
 
@@ -281,66 +322,20 @@ def _ic_level(
             method=spec.interpolation,
         )[..., 0]
         err = (warped - fixed).reshape(-1)
-        delta = h_inv @ (sd.T @ err)
+        m = grad.T @ (grid_c * err[:, None])  # (ndim, ndim) moment tensor
+        g = grad.T @ err  # (ndim,) translation moments
+        delta = h_inv @ project_moments(m, g, ndim)
         update = compositional_update(delta, ndim)
         scale = _trust_scale(matrix, update, corners, ndim, step_max)
         update = compositional_update(delta * scale, ndim)
         return matrix @ update, 0.5 * jnp.sum(err * err)
 
-    return jax.lax.scan(step, matrix, xs=None, length=iterations)
-
-
-def _ic_level_converge(
-    moving: Array,
-    ref: ReferenceLevel,
-    matrix0: Array,
-    *,
-    spec: RegistrationSpec,
-    ndim: int,
-    iterations: int,
-    compositional_update: CompositionalUpdate,
-    convergence: Convergence,
-) -> tuple[Array, Array]:
-    """IC iterations on one resolution with ANTs-style early-exit.
-
-    A ``lax.while_loop`` that stops when the windowed normalised cost slope (a
-    least-squares-line fit over the last ``window`` per-iteration costs) drops
-    below ``threshold``, or ``iterations`` (the hard cap) is reached.  Returns
-    ``(matrix, costs)`` with ``costs`` a fixed ``(iterations,)`` trace (the
-    unrun tail padded with the final cost), so the result's ``cost_history``
-    keeps its shape.
-    """
-    fixed, sd, h_inv, center = ref
-    dtype = moving.dtype
-    corners = _grid_corners(fixed.shape, center, dtype)
-    step_max = _TRUST_EXTENT_FACTOR * float(max(fixed.shape))
-
-    def step_fn(matrix: Array, _: object) -> tuple[Array, Array]:
-        grid = affine_grid(matrix, fixed.shape, center=center)
-        warped = spatial_transform(
-            moving[..., None],
-            grid,
-            mode=spec.boundary_mode,
-            cval=spec.cval,
-            method=spec.interpolation,
-        )[..., 0]
-        err = (warped - fixed).reshape(-1)
-        cost = 0.5 * jnp.sum(err * err)
-        delta = h_inv @ (sd.T @ err)
-        update = compositional_update(delta, ndim)
-        scale = _trust_scale(matrix, update, corners, ndim, step_max)
-        update = compositional_update(delta * scale, ndim)
-        return matrix @ update, cost
-
-    # The shared early-exit driver (windowed-slope criterion + padded trace);
-    # _ic_level_converge is reached only with `convergence` set, so this takes
-    # the while_loop path.
     return run_iterations(
-        step_fn,
-        matrix0,
+        step,
+        matrix,
         iterations=iterations,
         convergence=convergence,
-        dtype=dtype,
+        dtype=moving.dtype,
     )
 
 
@@ -361,8 +356,13 @@ def ic_reference(
     for level in pyr_f:
         fixed = level[..., 0]
         center = (jnp.asarray(fixed.shape, dtype=fixed.dtype) - 1.0) / 2.0
+        # The (M, P) steepest-descent images build the Hessian **once** here, but
+        # are not stored: the per-iteration projection is reconstructed from the
+        # moments of ``∇F`` (3a), so only the gradient is kept resident.
         sd = steepest_descent(fixed, center, ndim)
-        levels.append((fixed, sd, _hessian_inv(sd), center))
+        h_inv = _hessian_inv(sd)
+        grad = spatial_gradient(fixed).reshape(-1, ndim)
+        levels.append((fixed, grad, h_inv, center))
     return levels
 
 
@@ -375,6 +375,7 @@ def ic_register_core(
     init_matrix: Array,
     compositional_update: CompositionalUpdate = _rigid_compositional_update,
     params_from_matrix: ParamsFromMatrix = _rigid_params_from_matrix,
+    project_moments: ProjectMoments = _rigid_project_moments,
 ) -> RegistrationResult:
     """Inverse-compositional register ``moving`` against a precomputed ref.
 
@@ -406,27 +407,17 @@ def ic_register_core(
                 prev_shape, dtype=dtype
             )
             matrix = matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] * ratio)
-        if spec.convergence is None:
-            matrix, costs = _ic_level(
-                m_l,
-                ref,
-                matrix,
-                spec=spec,
-                ndim=ndim,
-                iterations=iters_per_level[level],
-                compositional_update=compositional_update,
-            )
-        else:
-            matrix, costs = _ic_level_converge(
-                m_l,
-                ref,
-                matrix,
-                spec=spec,
-                ndim=ndim,
-                iterations=iters_per_level[level],
-                compositional_update=compositional_update,
-                convergence=spec.convergence,
-            )
+        matrix, costs = _ic_level(
+            m_l,
+            ref,
+            matrix,
+            spec=spec,
+            ndim=ndim,
+            iterations=iters_per_level[level],
+            compositional_update=compositional_update,
+            project_moments=project_moments,
+            convergence=spec.convergence,
+        )
         histories.append(costs)
         prev_shape = f_shape
 
@@ -518,4 +509,5 @@ def ic_affine_register(
         init_matrix=init_matrix,
         compositional_update=_affine_compositional_update,
         params_from_matrix=_affine_params_from_matrix,
+        project_moments=_affine_project_moments,
     )
