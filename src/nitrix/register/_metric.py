@@ -43,8 +43,8 @@ through its own recipe.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import ClassVar, Protocol
+from dataclasses import dataclass, replace
+from typing import ClassVar, Optional, Protocol
 
 from jaxtyping import Array, Float
 
@@ -56,6 +56,7 @@ __all__ = [
     'LNCC',
     'MI',
     'CorrelationRatio',
+    'pin_metric_ranges',
 ]
 
 
@@ -165,10 +166,18 @@ class MI:
         Histogram bins per axis.
     normalized
         Use Studholme's normalised MI.
+    range_moving, range_fixed
+        Pinned ``(lo, hi)`` intensity ranges.  ``None`` is resolved **once**
+        from the full-resolution images by the driver (``pin_metric_ranges``):
+        a data ``min/max`` range drifts as the moving image deforms across the
+        optimisation (a non-stationary objective), making the soft-histogram
+        bin assignment -- and the gradient -- piecewise-unstable (A6).
     """
 
     bins: int = 32
     normalized: bool = False
+    range_moving: Optional[tuple[float, float]] = None
+    range_fixed: Optional[tuple[float, float]] = None
     is_least_squares: ClassVar[bool] = False
     is_spatial_mean: ClassVar[bool] = False  # global joint-histogram scalar
 
@@ -178,7 +187,12 @@ class MI:
         fixed: Float[Array, '*spatial'],
     ) -> Float[Array, '']:
         return -mutual_information(
-            warped, fixed, bins=self.bins, normalized=self.normalized
+            warped,
+            fixed,
+            bins=self.bins,
+            normalized=self.normalized,
+            range_moving=self.range_moving,
+            range_fixed=self.range_fixed,
         )
 
     def residual(
@@ -199,9 +213,14 @@ class CorrelationRatio:
     ----------
     bins
         Soft-binning groups for the explanatory (``fixed``) image.
+    range_fixed
+        Pinned ``(lo, hi)`` range for the explanatory (``fixed``) image's
+        binning; ``None`` resolved once by the driver (``pin_metric_ranges``;
+        A6).  (CR bins only ``fixed``, so there is no ``range_moving``.)
     """
 
     bins: int = 32
+    range_fixed: Optional[tuple[float, float]] = None
     is_least_squares: ClassVar[bool] = False
     is_spatial_mean: ClassVar[bool] = False  # global histogram statistic
 
@@ -210,7 +229,9 @@ class CorrelationRatio:
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
     ) -> Float[Array, '']:
-        return 1.0 - correlation_ratio(warped, fixed, bins=self.bins)
+        return 1.0 - correlation_ratio(
+            warped, fixed, bins=self.bins, range_fixed=self.range_fixed
+        )
 
     def residual(
         self,
@@ -220,3 +241,32 @@ class CorrelationRatio:
         raise NotImplementedError(
             'CorrelationRatio is not a least-squares metric.'
         )
+
+
+def pin_metric_ranges(
+    metric: Metric,
+    moving: Float[Array, '*spatial'],
+    fixed: Float[Array, '*spatial'],
+) -> Metric:
+    """Pin a histogram metric's intensity ranges eagerly from the full-res images.
+
+    The matrix-driver analogue of ``register._svf.pin_force_ranges`` (A6, both
+    halves): resolve any ``None`` range on an :class:`MI` / :class:`CorrelationRatio`
+    **once** from the full-resolution ``moving`` / ``fixed`` before the pyramid --
+    eager Python floats, so the range rides the frozen spec as jit-static config
+    and the binning is stationary across the optimisation (a data ``min/max``
+    range otherwise drifts as the moving image deforms).  A no-op for a
+    least-squares / already-pinned metric.  **jit caveat:** under ``jax.jit``
+    with *traced* images, pass explicit ranges (``float(tracer)`` cannot run).
+    """
+    if isinstance(metric, MI) and (
+        metric.range_moving is None or metric.range_fixed is None
+    ):
+        rm = metric.range_moving or (float(moving.min()), float(moving.max()))
+        rf = metric.range_fixed or (float(fixed.min()), float(fixed.max()))
+        return replace(metric, range_moving=rm, range_fixed=rf)
+    if isinstance(metric, CorrelationRatio) and metric.range_fixed is None:
+        return replace(
+            metric, range_fixed=(float(fixed.min()), float(fixed.max()))
+        )
+    return metric

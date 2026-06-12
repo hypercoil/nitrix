@@ -41,7 +41,7 @@ voxel grid.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, NamedTuple, Optional, Sequence, Union, cast
 
 import jax
@@ -56,7 +56,7 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg import gauss_newton, levenberg_marquardt
-from ._metric import SSD, Metric
+from ._metric import SSD, Metric, pin_metric_ranges
 from ._model import TransformModel
 from ._objective import MetricObjective, Objective
 from ._space import CoordinateSpace, IndexSpace, _Sampler
@@ -469,6 +469,11 @@ def multi_resolution_register(
             f'expected {ndim}-D single-channel images; got moving '
             f'{moving.shape}, fixed {fixed.shape}.'
         )
+    # Pin a histogram metric's ranges once from the full-res images (A6;
+    # stationary objective).  Here, not in register_core, because volreg vmaps
+    # register_core -- where an eager float(moving.min()) cannot run -- and that
+    # path is SSD-only (a no-op pin) anyway.
+    spec = replace(spec, metric=pin_metric_ranges(spec.metric, moving, fixed))
     dtype = moving.dtype
     pyr_f = gaussian_pyramid(
         fixed[..., None],
