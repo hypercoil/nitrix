@@ -61,6 +61,7 @@ from .grid import (
 from .deformation import (
     compose_displacement,
     compose_velocity,
+    field_log,
     invert_displacement,
 )
 from .algebra import (
@@ -130,6 +131,7 @@ __all__ = [
     'compose_displacement',
     'compose_velocity',
     'invert_displacement',
+    'field_log',
     # transform parametrisation (rigid / affine Lie chart)
     'rigid_exp',
     'rigid_log',

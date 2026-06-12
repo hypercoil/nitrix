@@ -2759,6 +2759,18 @@ register(
         invariants=('inverse displacement via differentiable fixed point',),
     )
 )
+register(
+    OpInfo(
+        'nitrix.geometry.field_log',
+        fixture=lambda: ((_disp_field(),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'stationary-velocity log via inverse scaling-and-squaring; '
+            'exact round-trip exp(field_log(s))==s on the SVF submanifold',
+        ),
+    )
+)
 
 # --- numerics (normalisers, spatial windowing, ODE, fixed point) ------------
 
