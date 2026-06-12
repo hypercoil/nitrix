@@ -17,7 +17,8 @@ intensities), with ``"constant"`` and ``"edge"`` also supported.
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, Union
+import math
+from typing import Literal, Optional, Sequence, Union
 
 import jax.lax as lax
 import jax.numpy as jnp
@@ -27,6 +28,11 @@ from jaxtyping import Array, Float
 from .._internal.gaussian import gaussian_profile_1d
 
 __all__ = ['gaussian']
+
+# Young-van Vliet recursive-Gaussian is not accurate below this sigma (the
+# `q`-fit's sqrt term and the 3rd-order pole placement degrade) -- use the FIR
+# path there (it is cheap at small sigma anyway).
+_YVV_MIN_SIGMA = 0.5
 
 
 def _gaussian_1d_kernel(
@@ -146,6 +152,62 @@ def _conv_1d_along_axis(
     return jnp.moveaxis(out, -1, axis)
 
 
+def _yvv_coeffs(sigma: float) -> tuple[float, float, float, float]:
+    """Young-van Vliet (2002) 3rd-order recursive-Gaussian coefficients.
+
+    Returns ``(B, a1, a2, a3)`` for the causal recurrence
+    ``w[n] = B·x[n] + a1·w[n-1] + a2·w[n-2] + a3·w[n-3]`` (applied forward then
+    backward for a zero-phase, symmetric Gaussian approximation).  ``B`` is fixed
+    so the DC gain is exactly 1 (``B + a1 + a2 + a3 = 1`` -> a constant input is
+    preserved).  Host (static) floats -- the design is not traced.
+    """
+    if sigma < _YVV_MIN_SIGMA:
+        raise ValueError(
+            f"method='recursive' (Young-van Vliet) needs sigma >= "
+            f'{_YVV_MIN_SIGMA}; got {sigma}.  Use the FIR path (the default) '
+            f'for small sigma -- its kernel is tiny there.'
+        )
+    if sigma >= 2.5:
+        q = 0.98711 * sigma - 0.96330
+    else:
+        q = 3.97156 - 4.14554 * math.sqrt(1.0 - 0.26891 * sigma)
+    b0 = 1.57825 + 2.44413 * q + 1.4281 * q**2 + 0.422205 * q**3
+    b1 = 2.44413 * q + 2.85619 * q**2 + 1.26661 * q**3
+    b2 = -(1.4281 * q**2 + 1.26661 * q**3)
+    b3 = 0.422205 * q**3
+    a1, a2, a3 = b1 / b0, b2 / b0, b3 / b0
+    return 1.0 - (a1 + a2 + a3), a1, a2, a3
+
+
+def _recursive_gaussian_1d(x: Array, axis: int, sigma: float) -> Array:
+    """Young-van Vliet recursive Gaussian along ``axis`` (forward + backward).
+
+    O(N) per axis, **independent of sigma** (no kernel), differentiable through
+    ``x``.  A sequential ``lax.scan`` (O(N) depth) -- ideal for a one-off
+    large-sigma smooth; for the rare case of *many* smooths in a GPU inner loop
+    prefer the FIR path (a parallel conv) at the small sigmas where it is cheap.
+    Edge-extension boundary (the natural recursive condition; the constant
+    extension preserves DC at the boundary) -- so it differs from the FIR
+    ``mode`` only within a few sigma of the edge.
+    """
+    b, a1, a2, a3 = _yvv_coeffs(sigma)
+    xm = jnp.moveaxis(x, axis, 0)
+
+    def causal(
+        carry: tuple[Array, Array, Array], xn: Array
+    ) -> tuple[tuple[Array, Array, Array], Array]:
+        w1, w2, w3 = carry
+        wn = b * xn + a1 * w1 + a2 * w2 + a3 * w3
+        return (wn, w1, w2), wn
+
+    init_f = (xm[0], xm[0], xm[0])  # edge extension: w[-1..-3] = x[0]
+    _, fwd = lax.scan(causal, init_f, xm)
+    fwd_rev = jnp.flip(fwd, axis=0)
+    init_b = (fwd_rev[0], fwd_rev[0], fwd_rev[0])
+    _, bwd = lax.scan(causal, init_b, fwd_rev)
+    return jnp.moveaxis(jnp.flip(bwd, axis=0), 0, axis)
+
+
 def _normalise_sigma(
     sigma: Union[float, Sequence[float]],
     spatial_rank: int,
@@ -185,6 +247,7 @@ def gaussian(
     truncate: float = 4.0,
     kernel_size: Union[None, int, Sequence[Optional[int]]] = None,
     mode: str = 'reflect',
+    method: Literal['fir', 'recursive'] = 'fir',
     spatial_rank: Optional[int] = None,
 ) -> Float[Array, '... *spatial']:
     """Separable n-D Gaussian smoothing.
@@ -231,9 +294,21 @@ def gaussian(
         even-tap Gaussian-weighted average (e.g. the
         spheremorph / JOSA NegativeJacobianFiltering 2×2 kernel
         at ``sigma=0.7``); otherwise prefer the default heuristic.
+    method
+        ``"fir"`` (default) -- the truncated separable convolution above.
+        ``"recursive"`` -- the **Young-van Vliet** 3rd-order recursive Gaussian:
+        O(N) per axis, **independent of sigma** (no kernel growth), so it wins
+        for **large** sigma where the FIR kernel would be many taps.  Approximate
+        (a 3rd-order pole fit; ~1% interior error vs the FIR Gaussian), needs
+        ``sigma >= 0.5``, uses an **edge-extension** boundary (it ignores
+        ``mode`` / ``kernel_size`` / ``truncate``), and runs as a sequential
+        ``lax.scan`` (O(N) depth -- great for a one-off smooth, but at the small
+        sigmas of, e.g., a deformable-registration regulariser the parallel FIR
+        conv is faster on GPU, so it is **not** the registration default).
     mode
         Boundary handling: ``"reflect"`` (default), ``"constant"``
-        (zero-pad), or ``"edge"`` (replicate boundary).
+        (zero-pad), or ``"edge"`` (replicate boundary).  ``method="recursive"``
+        ignores this (it uses edge extension).
 
         **Framework cross-references**: ``mode='reflect'`` matches
         ``scipy.ndimage.gaussian_filter``.  Use ``mode='constant'``
@@ -284,9 +359,21 @@ def gaussian(
         )
 
     sigmas = _normalise_sigma(sigma, spatial_rank)
-    kernel_sizes = _normalise_kernel_size(kernel_size, spatial_rank)
     spatial_axes = tuple(range(x.ndim - spatial_rank, x.ndim))
 
+    if method == 'recursive':
+        if kernel_size is not None:
+            raise ValueError(
+                "method='recursive' has no kernel; do not pass kernel_size."
+            )
+        out = x
+        for axis, s in zip(spatial_axes, sigmas):
+            out = _recursive_gaussian_1d(out, axis, s)
+        return out
+    if method != 'fir':
+        raise ValueError(f"method={method!r}; expected 'fir' or 'recursive'.")
+
+    kernel_sizes = _normalise_kernel_size(kernel_size, spatial_rank)
     out = x
     for axis, s, ks in zip(spatial_axes, sigmas, kernel_sizes):
         kernel = _gaussian_1d_kernel(

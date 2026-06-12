@@ -220,6 +220,82 @@ def test_gaussian_kernel_size_rejects_zero():
 
 
 # ---------------------------------------------------------------------------
+# recursive (Young-van Vliet) Gaussian -- 1d
+# ---------------------------------------------------------------------------
+
+
+def _blobs(n, seed):
+    yy, xx = np.mgrid[0:n, 0:n].astype('float64')
+    rng = np.random.RandomState(seed)
+    img = np.zeros((n, n))
+    for _ in range(8):
+        cy, cx = rng.uniform(0.15, 0.85, 2) * n
+        s = rng.uniform(0.06, 0.14) * n
+        img += rng.uniform(0.4, 1.0) * np.exp(
+            -((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * s * s)
+        )
+    return jnp.asarray(img)
+
+
+def test_recursive_gaussian_preserves_constant():
+    out = gaussian(jnp.full((64, 64), 3.7), sigma=4.0, method='recursive')
+    assert np.allclose(np.asarray(out), 3.7, atol=1e-9)
+
+
+def test_recursive_gaussian_impulse_approximates_true_gaussian():
+    # The YvV recursive filter is a Gaussian *approximation*: its impulse
+    # response integrates to 1 and matches the true Gaussian profile to the
+    # documented ~few-% 3rd-order bound.
+    for sg in (2.0, 4.0):
+        d = np.zeros(201)
+        d[100] = 1.0
+        rec = np.asarray(
+            gaussian(jnp.asarray(d), sigma=sg, method='recursive', spatial_rank=1)
+        )
+        xs = np.arange(201) - 100
+        true = np.exp(-(xs**2) / (2 * sg * sg))
+        true /= true.sum()
+        assert abs(rec.sum() - 1.0) < 1e-6  # normalised (DC gain 1)
+        assert np.linalg.norm(rec - true) / np.linalg.norm(true) < 0.1
+
+
+def test_recursive_gaussian_interior_parity_with_fir():
+    # On a realistic (low-frequency) signal the recursive Gaussian matches the
+    # FIR Gaussian in the interior to ~1-2% -- the parity gate (it is radius-free
+    # and O(N), the win at large sigma; the FIR conv stays the reference).
+    img = _blobs(128, 0)
+    for sg in (2.0, 4.0, 8.0):
+        fir = np.asarray(gaussian(img, sigma=sg, method='fir', truncate=5.0))
+        rec = np.asarray(gaussian(img, sigma=sg, method='recursive'))
+        m = int(np.ceil(4 * sg))
+        fi, ri = fir[m:-m, m:-m], rec[m:-m, m:-m]
+        assert np.linalg.norm(fi - ri) / np.linalg.norm(fi) < 0.02
+
+
+def test_recursive_gaussian_anisotropic_and_differentiable():
+    rng = np.random.RandomState(1)
+    x3 = jnp.asarray(rng.standard_normal((20, 20, 20)))
+    out = gaussian(x3, sigma=(2.0, 3.0, 4.0), method='recursive', spatial_rank=3)
+    assert out.shape == (20, 20, 20)
+    assert bool(jnp.all(jnp.isfinite(out)))
+    img = _blobs(48, 2)
+    g = jax.grad(lambda z: (gaussian(z, sigma=3.0, method='recursive') ** 2).sum())(img)
+    fd_plus = (gaussian(img + 1e-4, sigma=3.0, method='recursive') ** 2).sum()
+    fd_minus = (gaussian(img - 1e-4, sigma=3.0, method='recursive') ** 2).sum()
+    # the directional FD along the all-ones perturbation matches grad.sum()
+    assert np.isclose(
+        float(g.sum()), float((fd_plus - fd_minus) / 2e-4), rtol=1e-4
+    )
+
+
+def test_recursive_gaussian_rejects_small_sigma_and_kernel_size():
+    with pytest.raises(ValueError, match='sigma >='):
+        gaussian(jnp.ones((16,)), sigma=0.3, method='recursive', spatial_rank=1)
+    with pytest.raises(ValueError, match='no kernel'):
+        gaussian(jnp.ones((16,)), sigma=2.0, method='recursive', kernel_size=5, spatial_rank=1)
+
+
+# ---------------------------------------------------------------------------
 # bilateral_gaussian
 # ---------------------------------------------------------------------------
 
