@@ -42,6 +42,60 @@ def test_lncc_grad_matches_autodiff():
 
 
 # ---------------------------------------------------------------------------
+# _box_sum integral image (1c)
+# ---------------------------------------------------------------------------
+
+
+def _ref_box_sum_2d(x, r, np_mode):
+    xp = np.pad(np.asarray(x), r, mode=np_mode)
+    n0, n1 = x.shape
+    out = np.zeros((n0, n1))
+    for i in range(n0):
+        for j in range(n1):
+            out[i, j] = xp[i : i + 2 * r + 1, j : j + 2 * r + 1].sum()
+    return out
+
+
+def test_box_sum_integral_image_matches_windowed_reference():
+    # The integral-image box sum equals the direct padded windowed sum across
+    # boundary modes (only the O(N) computation changed, not the operator).
+    from nitrix.metrics._common import _box_sum
+
+    rng = np.random.RandomState(1)
+    x = jnp.asarray(rng.standard_normal((24, 26)))
+    r = 3
+    for mode, np_mode in [
+        ('reflect', 'symmetric'),
+        ('mirror', 'reflect'),
+        ('nearest', 'edge'),
+        ('constant', 'constant'),
+    ]:
+        got = np.asarray(_box_sum(x, (2 * r + 1, 2 * r + 1), (0, 1), mode))
+        ref = _ref_box_sum_2d(x, r, np_mode)
+        assert np.allclose(got, ref, atol=1e-10)
+
+
+def test_box_sum_fp32_within_tolerance_of_fp64():
+    # 1c gate: the integral image trades a cancellation in fp32 (the prefix-sum
+    # magnitude ~ axis_length·max) for O(N), radius-free cost.  At a realistic
+    # intensity range it stays well within fp32 tolerance of fp64 -- the gate
+    # certifying the cancellation is acceptable (NOT an assertion of fp32 safety
+    # at any scale: a huge grid at a wide range should use fp64 / winsorise).
+    from nitrix.metrics._common import _box_sum
+
+    rng = np.random.RandomState(0)
+    x = rng.uniform(0.0, 500.0, (160, 160))  # scaled-MRI-like range, not [0,1]
+    bs64 = np.asarray(_box_sum(jnp.asarray(x, jnp.float64), (9, 9), (0, 1), 'reflect'))
+    bs32 = np.asarray(_box_sum(jnp.asarray(x, jnp.float32), (9, 9), (0, 1), 'reflect'))
+    assert (np.abs(bs32 - bs64) / (np.abs(bs64) + 1e-6)).max() < 1e-4
+    a = rng.uniform(0.0, 500.0, (160, 160))
+    b = 0.6 * a + rng.uniform(0.0, 200.0, (160, 160))
+    l32 = float(lncc(jnp.asarray(a, jnp.float32), jnp.asarray(b, jnp.float32), radius=4))
+    l64 = float(lncc(jnp.asarray(a, jnp.float64), jnp.asarray(b, jnp.float64), radius=4))
+    assert abs(l32 - l64) < 1e-4
+
+
+# ---------------------------------------------------------------------------
 # mi_grad (closed-form Mattes MI gradient)
 # ---------------------------------------------------------------------------
 

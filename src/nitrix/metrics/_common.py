@@ -13,10 +13,11 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 import jax.numpy as jnp
+from jax import lax
 from jaxtyping import Array
 
 from .._internal.reductions import Reduction, reduce
-from .._internal.separable import SeparableBoundaryMode, correlate1d
+from .._internal.separable import _PAD_MODE, SeparableBoundaryMode
 
 # ``Reduction`` is re-exported from the shared reduction surface
 # (``_internal.reductions``) so the metrics modules keep one import site.
@@ -33,11 +34,44 @@ def _box_sum(
     spatial_axes: Sequence[int],
     mode: BoundaryMode,
 ) -> Array:
-    """Separable windowed sum (uniform box filter, un-normalised)."""
+    """Separable windowed sum (uniform box filter, un-normalised).
+
+    Computed as a per-axis **integral image** (prefix-sum difference): pad the
+    axis by the window's half-widths under ``mode`` (the *same* padding the
+    ones-kernel ``correlate1d`` uses), prefix-sum, and difference the window
+    endpoints ``P[i+size] - P[i]``.  O(N) per axis, **independent of the window
+    size** (the equivalent cross-correlation is O(N·size)).  In exact arithmetic
+    it is identical to that correlation -- the same windowed sum, so the
+    ``lncc`` / ``lncc_grad`` contracts (self-adjoint box filter, interior-exact)
+    are unchanged.  In **fp32** the prefix sum's magnitude (~axis_length·max)
+    introduces a cancellation in the difference: safe at the default LNCC radii /
+    intensity ranges (the fp64-vs-fp32 gate in the tests), but use fp64 -- or
+    winsorise -- for a large grid at a wide intensity range.
+    """
     out = x
+    pad_mode = _PAD_MODE[mode]
     for ax, sz in zip(spatial_axes, sizes):
-        kernel = jnp.ones((int(sz),), dtype=x.dtype)
-        out = correlate1d(out, kernel, ax, mode)
+        sz = int(sz)
+        half_l, half_r = (sz - 1) // 2, sz // 2
+        pad = [(0, 0)] * out.ndim
+        pad[ax] = (half_l, half_r)
+        if pad_mode == 'constant':
+            padded = jnp.pad(out, pad, mode='constant', constant_values=0.0)
+        else:
+            padded = jnp.pad(out, pad, mode=pad_mode)
+        zero_shape = list(padded.shape)
+        zero_shape[ax] = 1
+        prefix = jnp.concatenate(
+            [
+                jnp.zeros(zero_shape, dtype=padded.dtype),
+                jnp.cumsum(padded, axis=ax),
+            ],
+            axis=ax,
+        )
+        n = out.shape[ax]
+        out = lax.slice_in_dim(prefix, sz, sz + n, axis=ax) - lax.slice_in_dim(
+            prefix, 0, n, axis=ax
+        )
     return out
 
 
