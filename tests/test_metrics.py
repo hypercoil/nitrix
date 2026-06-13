@@ -6,6 +6,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 jax.config.update('jax_enable_x64', True)
 
@@ -21,8 +22,10 @@ from nitrix.metrics import (
     koleo,
     lncc,
     lncc_grad,
+    match_histogram,
     mi_grad,
     mutual_information,
+    winsorize,
 )
 
 
@@ -39,6 +42,47 @@ def test_lncc_grad_matches_autodiff():
         )(moving)
         assert analytic.shape == moving.shape
         assert np.allclose(np.asarray(analytic), np.asarray(auto), atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# preprocessing (fMRIPrep front-end, 4a/4b)
+# ---------------------------------------------------------------------------
+
+
+def test_winsorize_clips_outliers_to_percentiles():
+    rng = np.random.RandomState(0)
+    x = rng.standard_normal((64, 64))
+    x[0, 0], x[1, 1] = 100.0, -100.0  # hot / cold outliers
+    xw = np.asarray(winsorize(jnp.asarray(x), lower=0.005, upper=0.995))
+    lo, hi = np.quantile(x, [0.005, 0.995])
+    assert np.isclose(xw.max(), hi, atol=1e-6)  # hot voxel clipped to the pctile
+    assert np.isclose(xw.min(), lo, atol=1e-6)
+    # interior (non-tail) voxels are untouched
+    interior = (x > lo) & (x < hi)
+    assert np.allclose(xw[interior], x[interior])
+
+
+def test_winsorize_validation():
+    with pytest.raises(ValueError):
+        winsorize(jnp.ones((8,)), lower=0.9, upper=0.1)
+
+
+def test_match_histogram_matches_reference_distribution():
+    rng = np.random.RandomState(1)
+    reference = jnp.asarray(rng.standard_normal((80, 80)) * 2.0 + 5.0)
+    moving = reference * 0.4 - 3.0  # a global gain/offset of the same structure
+    matched = match_histogram(moving, reference)
+    qs = np.array([0.1, 0.25, 0.5, 0.75, 0.9])
+    assert np.allclose(
+        np.quantile(np.asarray(matched), qs),
+        np.quantile(np.asarray(reference), qs),
+        atol=1e-2,
+    )
+    # the remap is monotone, so structure (correlation with reference) is kept
+    corr = np.corrcoef(np.asarray(matched).ravel(), np.asarray(reference).ravel())
+    assert corr[0, 1] > 0.999
+    g = jax.grad(lambda z: (match_histogram(z, reference) ** 2).sum())(moving)
+    assert bool(jnp.all(jnp.isfinite(g)))
 
 
 # ---------------------------------------------------------------------------

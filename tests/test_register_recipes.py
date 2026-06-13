@@ -222,6 +222,33 @@ def test_moment_init_validation():
         rigid_register(moving, fixed, init='nonsense')
 
 
+def test_recipe_winsorize_histmatch_improves_cross_gain():
+    # 4a/4b: a moving image with a global gain/offset + a hot outlier registers
+    # poorly under SSD; winsorising the outlier and histogram-matching the gain
+    # onto the fixed distribution recovers it.
+    fixed = _blobs_2d(64)
+    moved = _warp_known(fixed, rigid_exp(jnp.asarray([0.12, 4.0, -3.0]), ndim=2))
+    moving = (moved * 0.5 + 0.3).at[0, 0].set(50.0)
+    spec = RegistrationSpec(levels=3, iterations=30)
+    plain = rigid_register(moving, fixed, spec=spec)
+    conditioned = rigid_register(
+        moving, fixed, spec=spec, winsorize=(0.005, 0.995), histogram_match=True
+    )
+    assert float(ncc(conditioned.warped, fixed)) > float(ncc(plain.warped, fixed))
+    assert float(ncc(conditioned.warped, fixed)) > 0.99
+
+
+def test_recipe_preprocessing_default_off_byte_identical():
+    fixed = _blobs_2d(48)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 3.0, -2.0]), ndim=2))
+    spec = RegistrationSpec(levels=2, iterations=20)
+    a = rigid_register(moving, fixed, spec=spec)
+    b = rigid_register(
+        moving, fixed, spec=spec, winsorize=None, histogram_match=False
+    )
+    assert np.allclose(np.asarray(a.warped), np.asarray(b.warped))
+
+
 def test_rigid_2d_mi_recovery_cross_modal():
     # The matrix MI path (forward BFGS) recovers a known rotation on a CROSS-
     # MODAL pair (intensity-remapped moving), with the histogram range pinned

@@ -49,6 +49,7 @@ from .information import (
     mi_grad,
     mutual_information,
 )
+from .preprocess import match_histogram, winsorize
 from .overlap import dice, jaccard
 from .classification import (
     bce_with_logits,
@@ -73,6 +74,9 @@ __all__ = [
     'mutual_information',
     'mi_grad',
     'correlation_ratio',
+    # preprocessing (fMRIPrep front-end)
+    'winsorize',
+    'match_histogram',
     # overlap
     'dice',
     'jaccard',

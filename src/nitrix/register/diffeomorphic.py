@@ -49,6 +49,7 @@ from ..geometry import (
 from ..geometry._interpolate import BoundaryMode
 from ._converge import Convergence
 from ._force import DemonsForce, Force, resolve_force_schedule
+from ._preprocess import preprocess_images
 from ._svf import (
     _relative_spacing,
     finalize_with_init,
@@ -220,6 +221,8 @@ def diffeomorphic_demons_register(
     init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
     mask: Optional[Float[Array, '*spatial']] = None,
     restrict: Optional[tuple[float, ...]] = None,
+    winsorize: Optional[tuple[float, float]] = None,
+    histogram_match: bool = False,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -259,6 +262,9 @@ def diffeomorphic_demons_register(
         Optional length-``ndim`` per-axis weight on the deformation (ANTs
         ``--restrict-deformation``): a ``0`` suppresses deformation along that
         axis (e.g. ``(1, 1, 0)`` for in-plane-only).
+    winsorize, histogram_match
+        Intensity conditioning before registration (the fMRIPrep front-end; see
+        ``register.rigid_register``).  Both default off.
 
     Returns
     -------
@@ -271,6 +277,12 @@ def diffeomorphic_demons_register(
             f'diffeomorphic registration supports 2-D / 3-D single-channel '
             f'images; got moving {moving.shape}, fixed {fixed.shape}.'
         )
+    moving, fixed = preprocess_images(
+        moving,
+        fixed,
+        winsorize_range=winsorize,
+        histogram_match=histogram_match,
+    )
     if restrict is not None and len(restrict) != ndim:
         raise ValueError(
             f'restrict must have length ndim={ndim}; got {len(restrict)}.'

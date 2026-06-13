@@ -40,6 +40,7 @@ from ._inverse_compositional import (
     ic_rigid_register,
 )
 from ._model import Affine, Rigid, TransformModel
+from ._preprocess import preprocess_images
 from ._space import CoordinateSpace, IndexSpace
 
 # C3: an explicit Convergence on a path that cannot honour it (the forward
@@ -232,6 +233,8 @@ def rigid_register(
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
+    winsorize: Optional[tuple[float, float]] = None,
+    histogram_match: bool = False,
 ) -> RegistrationResult:
     """Estimate the rigid transform aligning ``moving`` to ``fixed``.
 
@@ -264,6 +267,14 @@ def rigid_register(
         centre-of-mass start (intensity-weighted centroids, plus a per-axis
         diagonal scale for affine) that lands inside the optimiser's basin on a
         large misalignment a single zero start would miss.  ``IndexSpace`` only.
+    winsorize, histogram_match
+        Intensity conditioning before registration (the fMRIPrep front-end):
+        ``winsorize=(0.005, 0.995)`` clips each image to those percentiles
+        (outlier-robust); ``histogram_match=True`` remaps ``moving`` onto
+        ``fixed``'s distribution (within-modality).  Both default off
+        (byte-unchanged).  They condition the *estimate*, so ``warped`` is the
+        conditioned moving -- apply ``matrix`` to the original for the original
+        intensities.
 
     Returns
     -------
@@ -272,6 +283,12 @@ def rigid_register(
     coordinates in ``IndexSpace``, world coordinates in ``WorldSpace``);
     ``warped`` is ``moving`` on the ``fixed`` grid.
     """
+    moving, fixed = preprocess_images(
+        moving,
+        fixed,
+        winsorize_range=winsorize,
+        histogram_match=histogram_match,
+    )
     ndim = _spatial_ndim(moving, fixed)
     model = Rigid()
     init_matrix = _resolve_init_matrix(
@@ -306,6 +323,8 @@ def affine_register(
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
+    winsorize: Optional[tuple[float, float]] = None,
+    histogram_match: bool = False,
 ) -> RegistrationResult:
     """Estimate the affine transform aligning ``moving`` to ``fixed``.
 
@@ -322,8 +341,15 @@ def affine_register(
     under ``method="auto"`` for ``IndexSpace`` + an SSD metric).  ``init`` adds
     the **moment** start (centroid + per-axis scale), worth more here than for
     rigid -- the affine basin is narrow and a single zero start fails silently
-    on a large misalignment.
+    on a large misalignment.  ``winsorize`` / ``histogram_match`` condition the
+    intensities before registration (see ``rigid_register``).
     """
+    moving, fixed = preprocess_images(
+        moving,
+        fixed,
+        winsorize_range=winsorize,
+        histogram_match=histogram_match,
+    )
     ndim = _spatial_ndim(moving, fixed)
     model = Affine()
     spec = _cap_levels(spec, fixed.shape)
