@@ -56,6 +56,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from .._internal.backend import Backend, fallback, resolve_backend
 from ..geometry import spatial_gradient
 from ..metrics import lncc, lncc_grad, mi_grad, mutual_information
 from ._metric import Metric
@@ -247,6 +248,80 @@ class _BoundLNCC:
         return 1.0 - lncc(warped, self.fixed, radius=self._radii())
 
 
+def _demons_update_jax(
+    warped: Array,
+    fixed: Array,
+    grad_fixed: Array,
+    alpha: float,
+    rel_spacing: RelSpacing,
+) -> Array:
+    """The pure-JAX ESM force -- the parity oracle and the fallback path."""
+    diff = fixed - warped
+    grad = spatial_gradient(warped, spacing=_grad_spacing(rel_spacing))
+    j = 0.5 * (grad_fixed + grad)
+    denom = jnp.sum(j * j, axis=-1) + (alpha**2) * diff * diff
+    # Guard the 0/0 on a matched uniform region (denom = |j|² + α²·diff² = 0
+    # iff both ∇ and the mismatch vanish): zero force there -- the correct
+    # demons update (no gradient, no mismatch -> no information).  The
+    # double-``where`` keeps the *gradient* finite too (a bare ``diff/denom``
+    # NaNs the backward even where the forward is masked).
+    safe = denom > _DEMONS_DENOM_EPS
+    scale = jnp.where(safe, diff / jnp.where(safe, denom, 1.0), 0.0)
+    return _to_voxel(scale[..., None] * j, rel_spacing)
+
+
+def _demons_force_dispatch(
+    warped: Array,
+    fixed: Array,
+    grad_fixed: Array,
+    *,
+    alpha: float,
+    rel_spacing: RelSpacing,
+    backend: Backend,
+) -> Array:
+    """Pallas-fused ESM force where eligible, else the JAX path (5a).
+
+    The fused kernel (``∇warped`` stencil + the force in one tiled pass) is
+    isotropic single-pair GPU only; an anisotropic spacing or an untileable
+    shape falls back to :func:`_demons_update_jax` with a loud, deduped
+    ``NitrixBackendFallback`` (``backend='jax'``, the default, never warns).
+    """
+    resolved = resolve_backend(backend)
+    if resolved == 'pallas-cuda':
+        if rel_spacing is not None:
+            resolved = fallback(
+                function='DemonsForce',
+                requested='pallas-cuda',
+                resolved='jax',
+                reason='anisotropic spacing is unsupported by the fused '
+                'kernel; the voxel-native path runs instead',
+                shapes=(tuple(warped.shape),),
+                dtype=warped.dtype,
+            )
+        else:
+            # Lazy import: only the pallas-cuda path pulls the Triton kernel.
+            from .._kernels.cuda import demons_force as _k
+
+            try:
+                return _k.demons_esm_force_pallas(
+                    warped,
+                    fixed,
+                    grad_fixed,
+                    alpha=alpha,
+                    eps=_DEMONS_DENOM_EPS,
+                )
+            except _k.PallasNotTileable as exc:
+                resolved = fallback(
+                    function='DemonsForce',
+                    requested='pallas-cuda',
+                    resolved='jax',
+                    reason=str(exc),
+                    shapes=(tuple(warped.shape),),
+                    dtype=warped.dtype,
+                )
+    return _demons_update_jax(warped, fixed, grad_fixed, alpha, rel_spacing)
+
+
 @dataclass(frozen=True)
 class DemonsForce:
     """Closed-form efficient-symmetric (ESM) Demons force (the Demons default).
@@ -260,9 +335,16 @@ class DemonsForce:
     alpha
         Force normalisation: larger ``α`` damps the step where the intensity
         difference is large.
+    backend
+        Compute backend (v4 Phase 5a).  ``'jax'`` (default) is the pure-JAX
+        path; ``'pallas-cuda'`` / ``'auto'`` use the fused ESM Triton kernel on
+        a supported GPU (isotropic single-pair only -- otherwise it falls back
+        to JAX, ULP-equal either way).  The default is ``'jax'`` so recipe
+        output is byte-identical until a profile justifies the kernel.
     """
 
     alpha: float = 0.4
+    backend: Backend = 'jax'
 
     def bind(
         self,
@@ -280,6 +362,7 @@ class DemonsForce:
             alpha=self.alpha,
             ndim=ndim,
             rel_spacing=rel_spacing,
+            backend=self.backend,
         )
 
 
@@ -290,24 +373,19 @@ class _BoundDemons:
     alpha: float
     ndim: int
     rel_spacing: RelSpacing
+    backend: Backend = 'jax'
 
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
-        diff = self.fixed - warped
-        grad = spatial_gradient(
-            warped, spacing=_grad_spacing(self.rel_spacing)
+        return _demons_force_dispatch(
+            warped,
+            self.fixed,
+            self.grad_fixed,
+            alpha=self.alpha,
+            rel_spacing=self.rel_spacing,
+            backend=self.backend,
         )
-        j = 0.5 * (self.grad_fixed + grad)
-        denom = jnp.sum(j * j, axis=-1) + (self.alpha**2) * diff * diff
-        # Guard the 0/0 on a matched uniform region (denom = |j|² + α²·diff² = 0
-        # iff both ∇ and the mismatch vanish): zero force there -- the correct
-        # demons update (no gradient, no mismatch -> no information).  The
-        # double-``where`` keeps the *gradient* finite too (a bare ``diff/denom``
-        # NaNs the backward even where the forward is masked).
-        safe = denom > _DEMONS_DENOM_EPS
-        scale = jnp.where(safe, diff / jnp.where(safe, denom, 1.0), 0.0)
-        return _to_voxel(scale[..., None] * j, self.rel_spacing)
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
         diff = self.fixed - warped
