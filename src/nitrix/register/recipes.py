@@ -21,16 +21,24 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import replace
+from typing import Literal, Optional
 
+import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from ..geometry import identity_grid
 from ._core import (
     Convergence,
     RegistrationResult,
     RegistrationSpec,
     multi_resolution_register,
 )
-from ._inverse_compositional import ic_affine_register, ic_rigid_register
+from ._inverse_compositional import (
+    _affine_params_from_matrix,
+    _rigid_params_from_matrix,
+    ic_affine_register,
+    ic_rigid_register,
+)
 from ._model import Affine, Rigid, TransformModel
 from ._space import CoordinateSpace, IndexSpace
 
@@ -48,6 +56,76 @@ def _check_forward_convergence(spec: RegistrationSpec) -> None:
     """Raise (C3) if an explicit ``Convergence`` reaches the forward path."""
     if isinstance(spec.convergence, Convergence):
         raise ValueError(_CONVERGENCE_FORWARD_MSG)
+
+
+def _image_moments(img: Array, ndim: int) -> tuple[Array, Array]:
+    """Intensity-weighted centroid and per-axis std (voxel coordinates)."""
+    grid = identity_grid(img.shape, dtype=img.dtype)  # (*spatial, ndim)
+    w = jnp.clip(img, 0.0, None)  # non-negative weights (image as a density)
+    total = jnp.sum(w) + 1e-12
+    spatial = tuple(range(ndim))
+    centroid = jnp.sum(w[..., None] * grid, axis=spatial) / total
+    var = jnp.sum(w[..., None] * (grid - centroid) ** 2, axis=spatial) / total
+    return centroid, jnp.sqrt(var + 1e-12)
+
+
+def _moment_init_matrix(
+    moving: Array, fixed: Array, *, ndim: int, scale: bool
+) -> Array:
+    """Centre-of-mass / moment initialisation (A8), an index-space affine.
+
+    Aligns the intensity-weighted centroids (translation) and -- for ``scale``
+    (affine) -- the per-axis spread (a **diagonal** scale, no rotation: a
+    moment match cannot fix the principal-axis sign, so a rotation init risks a
+    *worse* start).  In the ``affine_grid`` centring convention (sample voxel
+    ``i`` at ``M(i − c) + t + c``): ``M = diag(std_m / std_f)`` (or ``I``), and
+    ``t`` maps the fixed centroid onto the moving centroid.  The cheap robust
+    start when a single zero init sits outside the narrow affine basin.
+    """
+    dtype = moving.dtype
+    c = (jnp.asarray(fixed.shape, dtype=dtype) - 1.0) / 2.0
+    cen_m, std_m = _image_moments(moving, ndim)
+    cen_f, std_f = _image_moments(fixed, ndim)
+    lin = (
+        jnp.diag(std_m / (std_f + 1e-6))
+        if scale
+        else jnp.eye(ndim, dtype=dtype)
+    )
+    t = cen_m - c - lin @ (cen_f - c)
+    matrix = jnp.eye(ndim + 1, dtype=dtype).at[:ndim, :ndim].set(lin)
+    return matrix.at[:ndim, ndim].set(t)
+
+
+def _resolve_init_matrix(
+    init: str,
+    moving: Array,
+    fixed: Array,
+    *,
+    ndim: int,
+    scale: bool,
+    space: CoordinateSpace,
+    spec: RegistrationSpec,
+) -> Optional[Array]:
+    """Resolve the ``init`` argument to a **coarsest-level** init matrix (or None).
+
+    The driver starts the coarse-to-fine loop at the coarsest level and upscales
+    the translation column to each finer grid, so the init's translation must be
+    expressed at the coarsest scale -- the full-resolution moment translation
+    divided by the pyramid's coarse-to-fine factor.  The linear (scale) block is
+    resolution-independent and passes through unchanged.
+    """
+    if init == 'identity':
+        return None
+    if init != 'moment':
+        raise ValueError(f"init must be 'identity' or 'moment'; got {init!r}.")
+    if not isinstance(space, IndexSpace):
+        raise ValueError(
+            "init='moment' is an index-space initialisation; it is not defined "
+            'for WorldSpace (pass an explicit world init or use IndexSpace).'
+        )
+    matrix = _moment_init_matrix(moving, fixed, ndim=ndim, scale=scale)
+    coarse_factor = spec.pyramid_factor ** (spec.levels - 1)
+    return matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] / coarse_factor)
 
 __all__ = ['rigid_register', 'affine_register']
 
@@ -153,6 +231,7 @@ def rigid_register(
     spec: RegistrationSpec = RegistrationSpec(),
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
+    init: Literal['identity', 'moment'] = 'identity',
 ) -> RegistrationResult:
     """Estimate the rigid transform aligning ``moving`` to ``fixed``.
 
@@ -180,6 +259,11 @@ def rigid_register(
         Gauss-Newton / LM path otherwise), ``"inverse_compositional"`` (force
         it; validates), or ``"forward"``.  The forward path is the parity
         oracle the fast path is tested against.
+    init
+        Starting transform (A8): ``"identity"`` (default) or ``"moment"`` -- a
+        centre-of-mass start (intensity-weighted centroids, plus a per-axis
+        diagonal scale for affine) that lands inside the optimiser's basin on a
+        large misalignment a single zero start would miss.  ``IndexSpace`` only.
 
     Returns
     -------
@@ -190,9 +274,19 @@ def rigid_register(
     """
     ndim = _spatial_ndim(moving, fixed)
     model = Rigid()
+    init_matrix = _resolve_init_matrix(
+        init, moving, fixed, ndim=ndim, scale=False, space=space, spec=spec
+    )
     if _use_inverse_compositional(method, space, spec, model):
-        return ic_rigid_register(moving, fixed, ndim=ndim, spec=spec)
+        return ic_rigid_register(
+            moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
+        )
     _check_forward_convergence(spec)
+    init_params = (
+        None
+        if init_matrix is None
+        else _rigid_params_from_matrix(init_matrix, ndim)
+    )
     return multi_resolution_register(
         moving,
         fixed,
@@ -200,6 +294,7 @@ def rigid_register(
         ndim=ndim,
         spec=spec,
         space=space,
+        init_params=init_params,
     )
 
 
@@ -210,6 +305,7 @@ def affine_register(
     spec: RegistrationSpec = RegistrationSpec(),
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
+    init: Literal['identity', 'moment'] = 'identity',
 ) -> RegistrationResult:
     """Estimate the affine transform aligning ``moving`` to ``fixed``.
 
@@ -223,14 +319,27 @@ def affine_register(
     Parameters / returns as ``rigid_register`` (including the ``space`` and
     ``method`` arguments; the inverse-compositional fast path -- where affine's
     large parameter count makes the forward ``jacfwd`` costliest -- engages
-    under ``method="auto"`` for ``IndexSpace`` + an SSD metric).
+    under ``method="auto"`` for ``IndexSpace`` + an SSD metric).  ``init`` adds
+    the **moment** start (centroid + per-axis scale), worth more here than for
+    rigid -- the affine basin is narrow and a single zero start fails silently
+    on a large misalignment.
     """
     ndim = _spatial_ndim(moving, fixed)
     model = Affine()
     spec = _cap_levels(spec, fixed.shape)
+    init_matrix = _resolve_init_matrix(
+        init, moving, fixed, ndim=ndim, scale=True, space=space, spec=spec
+    )
     if _use_inverse_compositional(method, space, spec, model):
-        return ic_affine_register(moving, fixed, ndim=ndim, spec=spec)
+        return ic_affine_register(
+            moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
+        )
     _check_forward_convergence(spec)
+    init_params = (
+        None
+        if init_matrix is None
+        else _affine_params_from_matrix(init_matrix, ndim)
+    )
     return multi_resolution_register(
         moving,
         fixed,
@@ -238,4 +347,5 @@ def affine_register(
         ndim=ndim,
         spec=spec,
         space=space,
+        init_params=init_params,
     )
