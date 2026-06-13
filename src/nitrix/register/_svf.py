@@ -24,7 +24,6 @@ import math
 from dataclasses import replace
 from typing import Callable, Optional, Sequence, Union
 
-import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
@@ -53,7 +52,54 @@ __all__ = [
     'prewarp_moving',
     'finalize_with_init',
     'pin_force_ranges',
+    'resolve_smoothing',
+    'smooth_pyramid',
 ]
+
+
+def resolve_smoothing(
+    smoothing_sigma: Optional[Union[float, Sequence[float]]], levels: int
+) -> Optional[tuple[float, ...]]:
+    """Per-level smoothing sigmas in **finest-first** pyramid order (or None).
+
+    A scalar -> the same sigma at every level; a length-``levels``
+    **coarse-to-fine** sequence (the ANTs ``-s`` order, e.g. ``2x1x0``) ->
+    reversed to the finest-first pyramid indexing.  ``None`` -> no extra
+    smoothing.
+    """
+    if smoothing_sigma is None:
+        return None
+    if isinstance(smoothing_sigma, (int, float)):
+        return (float(smoothing_sigma),) * levels
+    seq = [float(s) for s in smoothing_sigma]
+    if len(seq) != levels:
+        raise ValueError(
+            f'smoothing_sigma must be a scalar or a length-{levels} '
+            f'(coarse-to-fine) sequence; got {len(seq)}.'
+        )
+    return tuple(reversed(seq))
+
+
+def smooth_pyramid(
+    pyr: tuple[Array, ...],
+    sigmas: Optional[tuple[float, ...]],
+    ndim: int,
+) -> tuple[Array, ...]:
+    """Independent per-level Gaussian smoothing of a (channel-last) pyramid (A4).
+
+    Decouples the multi-resolution smoothing (ANTs ``-s``) from the shrink (the
+    pyramid's anti-alias): ``sigmas`` (finest-first, from ``resolve_smoothing``)
+    smooths each level on top of the shrink.  ``None`` / a ``0`` sigma leaves the
+    level unchanged.
+    """
+    if sigmas is None:
+        return pyr
+    return tuple(
+        lvl
+        if s <= 0.0
+        else gaussian(lvl[..., 0], sigma=s, spatial_rank=ndim)[..., None]
+        for lvl, s in zip(pyr, sigmas)
+    )
 
 
 def pin_force_ranges(force: Force, moving: Array, fixed: Array) -> Force:

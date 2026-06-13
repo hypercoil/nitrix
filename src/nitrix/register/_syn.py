@@ -63,6 +63,8 @@ from ._svf import (
     pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
+    resolve_smoothing,
+    smooth_pyramid,
     svf_coarse_to_fine,
     symmetric_level,
 )
@@ -222,6 +224,7 @@ def greedy_syn_register(
     restrict: Optional[tuple[float, ...]] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
+    smoothing_sigma: Optional[Union[float, Sequence[float]]] = None,
 ) -> SyNResult:
     """Greedy symmetric diffeomorphic registration (LNCC-driven by default).
 
@@ -262,6 +265,10 @@ def greedy_syn_register(
     winsorize, histogram_match
         Intensity conditioning before registration (the fMRIPrep front-end; see
         ``register.rigid_register``).  Both default off.
+    smoothing_sigma
+        Optional per-level smoothing applied to each pyramid level **independent
+        of the shrink** (ANTs ``-s``): a scalar or a length-``levels``
+        coarse-to-fine sequence.  ``None`` (default) is byte-unchanged.
 
     Returns
     -------
@@ -297,17 +304,26 @@ def greedy_syn_register(
     moving_reg = prewarp_moving(
         moving, init_disp, fixed.shape, dtype, spec.boundary_mode
     )
-    pyr_m = gaussian_pyramid(
-        moving_reg[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    smoothing = resolve_smoothing(smoothing_sigma, spec.levels)
+    pyr_m = smooth_pyramid(
+        gaussian_pyramid(
+            moving_reg[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
-    pyr_f = gaussian_pyramid(
-        fixed[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    pyr_f = smooth_pyramid(
+        gaussian_pyramid(
+            fixed[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
     rel_spacing = _relative_spacing(spec.spacing, ndim)
     forces = resolve_force_schedule(

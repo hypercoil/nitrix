@@ -28,6 +28,7 @@ from nitrix.register import (  # noqa: E402
     DemonsSpec,
     diffeomorphic_demons_register,
 )
+from nitrix.register._svf import resolve_smoothing  # noqa: E402
 from nitrix.register.diffeomorphic import _relative_spacing  # noqa: E402
 from nitrix.smoothing import gaussian  # noqa: E402
 
@@ -135,6 +136,57 @@ def test_relative_spacing_anisotropy_only():
     rel3 = _relative_spacing((1.0, 1.0, 4.0), 3)
     assert np.allclose(rel3, (1.0 / gm, 1.0 / gm, 4.0 / gm))
     assert np.isclose(float(np.prod(rel3)) ** (1.0 / 3.0), 1.0)
+
+
+def test_resolve_smoothing_schedule():
+    # None -> no extra smoothing.
+    assert resolve_smoothing(None, 3) is None
+    # A scalar broadcasts to every level.
+    assert resolve_smoothing(2.0, 3) == (2.0, 2.0, 2.0)
+    # A coarse-to-fine sequence (ANTs ``-s`` order) is reversed to the
+    # finest-first pyramid indexing.
+    assert resolve_smoothing((2.0, 1.0, 0.0), 3) == (0.0, 1.0, 2.0)
+    # A length mismatch is rejected.
+    with pytest.raises(ValueError):
+        resolve_smoothing((2.0, 1.0), 3)
+
+
+def test_demons_smoothing_default_off_byte_identical():
+    # ``smoothing_sigma`` defaults to None; a scalar 0 sigma is a no-op
+    # smooth (s <= 0 leaves each level unchanged), so it must reproduce the
+    # default path bit-for-bit.
+    fixed = _blobs_2d(48)
+    v_true = _smooth_velocity((48, 48), 2, 8.0, 30.0, 5)
+    moving = _warp_by_velocity(fixed, v_true)
+    spec = DemonsSpec(levels=2, iterations=30)
+    res_default = diffeomorphic_demons_register(moving, fixed, spec=spec)
+    res_zero = diffeomorphic_demons_register(
+        moving, fixed, spec=spec, smoothing_sigma=0.0
+    )
+    assert np.array_equal(
+        np.asarray(res_default.velocity), np.asarray(res_zero.velocity)
+    )
+
+
+def test_demons_smoothing_schedule_recovers_and_diffeomorphic():
+    # An explicit coarse-to-fine smoothing schedule (decoupled from the
+    # shrink, ANTs ``-s 2x1x0``) still recovers the planted warp and stays
+    # diffeomorphic.
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 55.0, 6)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    assert init < 0.99  # a genuine misalignment
+
+    res = diffeomorphic_demons_register(
+        moving,
+        fixed,
+        spec=DemonsSpec(levels=3, iterations=60),
+        smoothing_sigma=(2.0, 1.0, 0.0),
+    )
+    assert float(ncc(res.warped, fixed)) > 0.98
+    assert float(ncc(res.warped, fixed)) > init + 0.02
+    assert float(res.jacobian_det.min()) > 0.0
 
 
 def test_demons_anisotropic_spacing_recovers_and_differs():

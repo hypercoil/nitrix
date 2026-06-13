@@ -26,7 +26,10 @@ from nitrix.geometry import (  # noqa: E402
 )
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import SyNSpec, greedy_syn_register  # noqa: E402
-from nitrix.register._svf import _normalise_step  # noqa: E402
+from nitrix.register._svf import (  # noqa: E402
+    _normalise_step,
+    resolve_smoothing,
+)
 from nitrix.smoothing import gaussian  # noqa: E402
 
 
@@ -78,6 +81,44 @@ def test_syn_2d_recovery_and_diffeomorphism():
     assert float(jnp.abs(res.forward_velocity).max()) > 1e-2
     assert float(jnp.abs(res.inverse_velocity).max()) > 1e-2
     assert res.displacement.shape == (64, 64, 2)
+
+
+def test_syn_smoothing_default_off_byte_identical():
+    # A scalar 0 sigma is a no-op smooth and must reproduce the default
+    # (``smoothing_sigma=None``) path bit-for-bit.
+    fixed = _blobs_2d(48)
+    v_true = _smooth_velocity((48, 48), 2, 8.0, 30.0, 7)
+    moving = _warp_by_velocity(fixed, v_true)
+    spec = SyNSpec(levels=2, iterations=30, step=0.5)
+    res_default = greedy_syn_register(moving, fixed, spec=spec)
+    res_zero = greedy_syn_register(
+        moving, fixed, spec=spec, smoothing_sigma=0.0
+    )
+    assert np.array_equal(
+        np.asarray(res_default.forward_velocity),
+        np.asarray(res_zero.forward_velocity),
+    )
+
+
+def test_syn_smoothing_schedule_recovers_and_diffeomorphic():
+    # A coarse-to-fine smoothing schedule (decoupled from the shrink, ANTs
+    # ``-s 2x1x0``) still recovers the planted warp and stays diffeomorphic.
+    assert resolve_smoothing((2.0, 1.0, 0.0), 3) == (0.0, 1.0, 2.0)
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 55.0, 6)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    assert init < 0.99  # a genuine misalignment
+
+    res = greedy_syn_register(
+        moving,
+        fixed,
+        spec=SyNSpec(levels=3, iterations=60, step=0.5),
+        smoothing_sigma=(2.0, 1.0, 0.0),
+    )
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert float(ncc(res.warped, fixed)) > init + 0.02
+    assert float(res.jacobian_det.min()) > 0.0
 
 
 def test_syn_bias_robustness():

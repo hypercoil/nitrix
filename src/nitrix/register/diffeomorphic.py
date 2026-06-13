@@ -57,7 +57,9 @@ from ._svf import (
     pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
+    resolve_smoothing,
     single_sided_level,
+    smooth_pyramid,
     svf_coarse_to_fine,
 )
 
@@ -223,6 +225,7 @@ def diffeomorphic_demons_register(
     restrict: Optional[tuple[float, ...]] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
+    smoothing_sigma: Optional[Union[float, Sequence[float]]] = None,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -265,6 +268,12 @@ def diffeomorphic_demons_register(
     winsorize, histogram_match
         Intensity conditioning before registration (the fMRIPrep front-end; see
         ``register.rigid_register``).  Both default off.
+    smoothing_sigma
+        Optional per-level smoothing applied to each pyramid level **independent
+        of the shrink** (ANTs ``-s``, decoupled from ``-f``): a scalar (all
+        levels) or a length-``levels`` **coarse-to-fine** sequence (e.g.
+        ``2x1x0`` -> ``(2, 1, 0)``).  ``None`` (default) leaves the pyramid's own
+        anti-alias as the only smoothing (byte-unchanged).
 
     Returns
     -------
@@ -300,17 +309,26 @@ def diffeomorphic_demons_register(
     moving_reg = prewarp_moving(
         moving, init_disp, fixed.shape, dtype, spec.boundary_mode
     )
-    pyr_m = gaussian_pyramid(
-        moving_reg[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    smoothing = resolve_smoothing(smoothing_sigma, spec.levels)
+    pyr_m = smooth_pyramid(
+        gaussian_pyramid(
+            moving_reg[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
-    pyr_f = gaussian_pyramid(
-        fixed[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    pyr_f = smooth_pyramid(
+        gaussian_pyramid(
+            fixed[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
 
     # Anisotropy-only spacing -- level-independent, so computed once.
