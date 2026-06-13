@@ -1,5 +1,32 @@
 # v4 Phase 5 — fused force kernels (Pallas) (implementation design)
 
+> **AS-SHIPPED STATUS (2026-06-13) — the profile gate redirected this plan.**
+> Evaluated against the `nitrix-perf-bench` deficit report on the **real-data +
+> scale tier** (not the synthetic rep points the original priorities assumed):
+> - **5a ESM — SHIPPED** (`86907e8`, `_kernels/cuda/demons_force.py` behind
+>   `DemonsForce(backend=...)`). ULP-equal to the JAX oracle; a memory-bandwidth
+>   win that **scales with field size — 1.21× @64³, 2.06× @128³, 2.33× @160³**
+>   (fp32, L4). Gotcha folded in: a 3-D stencil tile holds the whole `(T+1)^ndim`
+>   block in registers, so the tile **volume** (not side) must stay small — a 64³
+>   tile wedges `ptxas`; tiling is now ndim-aware (3-D caps the side at 16).
+> - **5b LNCC — gate REFRAMED speed → memory.** The deficit report shows `lncc`
+>   is already **3.5× *faster*** than cupy on GPU (Phase 1c's integral image won
+>   on *speed*) — but with a **522× HBM multiplier** (8758 MB @128³). So 5b is
+>   still worth building, but as the **memory / OOM-at-256³** kernel its §2 I/O
+>   analysis describes, *not* a speed kernel. Still the biggest lift; unbuilt.
+> - **5c MI — SKIPPED (profile-gated out).** `mutual_information` is already
+>   **3.5× faster** than cupy with a modest 5× HBM; the Phase-1a closed form
+>   removed the tape (the dominant cost). The §3 gate ("only if the 256³ scatter
+>   dominates") is unmet; the §3 subsampling alternative is the cheaper lever if
+>   a need ever appears. Not built.
+> - **5d trilinear gather** remains parked (data-dependent gather lowering on the
+>   pinned JAX). It *is* the single biggest flagged registration-op deficit
+>   (`spatial_transform` 1.8× slower) but is orthogonal to the gather-free 5a/5b.
+>
+> **Original design (2026-06-12) below, retained for the I/O analysis.** The
+> per-kernel bottleneck shapes and the tiling structures still hold; only the
+> *priority ordering* changed once the real-data numbers existed.
+
 > **Status (2026-06-12): implementation-ready design, profile-gated build.** The
 > three custom force kernels of [`registration-suite-v4.md`](registration-suite-v4.md)
 > Phase 5 — fused **ESM** (5a), **LNCC windowed-statistics** (5b), and **MI
