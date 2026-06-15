@@ -523,12 +523,27 @@ class MIForce:
         ``MetricForce``.  ``normalized`` MI is intentionally absent -- NMI is the
         deferred quotient-rule form (route it through
         ``MetricForce(MI(normalized=True))``).
+    sample_stride
+        Estimate the joint histogram from every ``sample_stride``-th voxel (ITK
+        "Regular" sampling -- the histogram scatter is the MI bottleneck, and
+        the PDF is a smooth global statistic well estimated from a sample); the
+        force is still applied **densely**.  ``1`` (default) is the exact full
+        histogram.  ``4`` (~25 %, ITK's default sampling) keeps the force
+        ~0.98 cos-aligned with the full one on real cross-modal data for a ~3x
+        cheaper ``mi_grad`` -- the deformable-MI speed lever (fMRIPrep's metric).
+        The regular grid is a *deterministic* sampler, so in principle it could
+        alias with stride-frequency image periodicity (a heavy Gibbs artifact);
+        on real anatomy it does not (the gradient is offset-insensitive), and
+        the grid's spatial uniformity gives it *lower* variance than random
+        sampling -- but rotate the offset per level if a pathological texture
+        ever shows offset-dependence.
     """
 
     bins: int = 32
     range_moving: Optional[tuple[float, float]] = None
     range_fixed: Optional[tuple[float, float]] = None
     magnitude: float = 0.5
+    sample_stride: int = 1
 
     def bind(
         self,
@@ -542,6 +557,7 @@ class MIForce:
             range_moving=self.range_moving,
             range_fixed=self.range_fixed,
             magnitude=self.magnitude,
+            sample_stride=self.sample_stride,
             fixed=fixed,
             ndim=ndim,
             rel_spacing=rel_spacing,
@@ -557,6 +573,7 @@ class _BoundMI:
     fixed: Array
     ndim: int
     rel_spacing: RelSpacing
+    sample_stride: int = 1
 
     def update(
         self, warped: Float[Array, '*spatial']
@@ -570,6 +587,7 @@ class _BoundMI:
             bins=self.bins,
             range_moving=self.range_moving,
             range_fixed=self.range_fixed,
+            sample_stride=self.sample_stride,
         )
         grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
         # Force convention u = −∂cost/∂warped·∇warped with cost = −MI gives

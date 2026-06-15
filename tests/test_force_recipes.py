@@ -122,6 +122,23 @@ def test_syn_miforce_mi_recovers():
     assert float(res.jacobian_det.min()) > 0.0
 
 
+def test_syn_miforce_subsample_recovers():
+    # MIForce(sample_stride): the joint histogram is built from a ~25% voxel
+    # subset (ITK Regular sampling) -- the deformable-MI speed lever -- and the
+    # cross-modal SyN still drives a real MI gain, diffeomorphic.
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)  # "different modality"
+    spec = SyNSpec(levels=3, iterations=60, radius=3, step=0.5)
+    res = greedy_syn_register(
+        moving, fixed, spec=spec, force=MIForce(bins=24, sample_stride=4)
+    )
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0
+    assert float(res.jacobian_det.min()) > 0.0
+
+
 def test_demons_miforce_mi_recovers():
     # MIForce on the *unclamped* Demons driver: the RMS magnitude control (the
     # 0c reconciliation baked into MIForce) gives a tuned step, so the fast

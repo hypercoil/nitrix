@@ -239,6 +239,43 @@ def test_mi_grad_direction_aligns_cross_modal():
     assert cos > 0.99
 
 
+def test_mi_grad_sample_stride_default_exact_and_subsample_aligns():
+    # sample_stride=1 is byte-identical to the default; a strided subsample (ITK
+    # "Regular" sampling) estimates the joint PDF from a voxel subset and keeps
+    # the dense gradient cos-aligned with the full one on STRUCTURED cross-modal
+    # data (the bottleneck histogram scatter is ~stride x cheaper).
+    rng = np.random.RandomState(2)
+    n = 48
+    yy, xx, zz = np.mgrid[0:n, 0:n, 0:n].astype('float64')
+    base = np.zeros((n, n, n))
+    for _ in range(5):
+        c = rng.uniform(0.2, 0.8, 3) * n
+        base += rng.uniform(0.4, 1.0) * np.exp(
+            -((xx - c[0]) ** 2 + (yy - c[1]) ** 2 + (zz - c[2]) ** 2)
+            / (2 * (0.13 * n) ** 2)
+        )
+    fixed = jnp.asarray(base + 0.02 * rng.standard_normal((n, n, n)))
+    moving = jnp.asarray(  # cross-modal: nonlinear remap
+        np.sqrt(base - base.min() + 0.05) + 0.02 * rng.standard_normal((n, n, n))
+    )
+    rm = (float(moving.min()), float(moving.max()))
+    rf = (float(fixed.min()), float(fixed.max()))
+    full = mi_grad(moving, fixed, bins=32, range_moving=rm, range_fixed=rf)
+    exact = mi_grad(
+        moving, fixed, bins=32, range_moving=rm, range_fixed=rf, sample_stride=1
+    )
+    assert np.array_equal(np.asarray(full), np.asarray(exact))  # stride 1 == full
+    sub = np.asarray(
+        mi_grad(
+            moving, fixed, bins=32, range_moving=rm, range_fixed=rf,
+            sample_stride=4,
+        )
+    ).ravel()
+    fr = np.asarray(full).ravel()
+    cos = sub @ fr / (np.linalg.norm(sub) * np.linalg.norm(fr) + 1e-30)
+    assert cos > 0.95
+
+
 def test_mi_grad_zero_outside_pinned_range():
     # A voxel outside the pinned moving range has a clipped soft bin, so its
     # derivative is exactly zero (the force never pushes an over-range voxel).
