@@ -121,6 +121,30 @@ def test_syn_smoothing_schedule_recovers_and_diffeomorphic():
     assert float(res.jacobian_det.min()) > 0.0
 
 
+def test_syn_center_derivative_force_recovers():
+    # The ANTs/ITK centre-only LNCC force (a different, cheaper force than the
+    # exact lncc_grad) still drives SyN to a high-NCC, diffeomorphic recovery.
+    from nitrix.register._force import LNCCForce
+
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 55.0, 6)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    assert init < 0.99
+    res = greedy_syn_register(
+        moving,
+        fixed,
+        spec=SyNSpec(levels=3, iterations=(60, 40, 20), step=0.5),
+        force=LNCCForce(radius=2, derivative='center'),
+    )
+    # The centre-only force recovers slightly less than the exact gradient on
+    # this synthetic (it is the cheaper ANTs approximation), but still drives a
+    # high-NCC, diffeomorphic recovery well above the initial misalignment.
+    assert float(ncc(res.warped, fixed)) > 0.98
+    assert float(ncc(res.warped, fixed)) > init + 0.015
+    assert float(res.jacobian_det.min()) > 0.0
+
+
 def test_syn_per_level_iteration_schedule():
     # A coarse-to-fine iteration schedule (the ANTs taper -- front-load coarse,
     # cap the expensive finest level) recovers the planted warp and stays

@@ -22,6 +22,7 @@ from nitrix.metrics import (
     koleo,
     lncc,
     lncc_grad,
+    lncc_grad_center,
     match_histogram,
     mi_grad,
     mutual_information,
@@ -42,6 +43,52 @@ def test_lncc_grad_matches_autodiff():
         )(moving)
         assert analytic.shape == moving.shape
         assert np.allclose(np.asarray(analytic), np.asarray(auto), atol=1e-10)
+
+
+def test_lncc_grad_center_matches_itk_formula():
+    # The centre-only force reproduces ITK's ANTSNeighborhoodCorrelation
+    # derivative (a direct windowed reference), to machine precision interior.
+    from scipy.ndimage import uniform_filter
+
+    def ref(m, f, r, eps=1e-5):
+        sz = 2 * r + 1
+        n = sz ** m.ndim
+
+        def bs(x):
+            return uniform_filter(x, size=sz, mode='reflect') * n
+
+        sm, sf = bs(m), bs(f)
+        s_ff = bs(f * f) - sf * sf / n
+        s_mm = bs(m * m) - sm * sm / n
+        s_fm = bs(m * f) - sf * sm / n
+        f_a, m_a = f - sf / n, m - sm / n
+        safe = (s_ff > eps) & (s_mm > eps)
+        return np.where(
+            safe,
+            2 * s_fm / np.where(safe, s_ff * s_mm, 1.0)
+            * (f_a - s_fm / np.where(safe, s_mm, 1.0) * m_a),
+            0.0,
+        )
+
+    rng = np.random.RandomState(0)
+    for shape, r in [((40, 44), 2), ((22, 18, 20), 2)]:
+        m = rng.standard_normal(shape)
+        f = rng.standard_normal(shape) + 0.5 * m
+        got = np.asarray(lncc_grad_center(jnp.asarray(m), jnp.asarray(f), radius=r))
+        want = ref(m, f, r)
+        sl = tuple(slice(r + 1, s - r - 1) for s in shape)  # interior
+        assert np.allclose(got[sl], want[sl], atol=1e-10)
+
+
+def test_lncc_grad_center_zeroes_flat_window():
+    # A constant (flat) image has sFF=sMM=0 -> the ITK guard zeroes the force,
+    # and the gradient stays finite (the double-where).
+    flat = jnp.ones((24, 24, 24))
+    moving = jnp.asarray(np.random.RandomState(1).standard_normal((24, 24, 24)))
+    g = lncc_grad_center(moving, flat, radius=2)
+    assert np.all(np.isfinite(np.asarray(g)))
+    # where fixed is flat (sFF=0) the force is exactly zero
+    assert float(jnp.abs(g).max()) == 0.0
 
 
 # ---------------------------------------------------------------------------

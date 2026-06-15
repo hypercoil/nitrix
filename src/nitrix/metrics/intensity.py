@@ -27,7 +27,7 @@ from jaxtyping import Array, Float
 
 from ._common import BoundaryMode, Reduction, _box_sum, _reduce
 
-__all__ = ['ssd', 'ncc', 'lncc', 'lncc_grad']
+__all__ = ['ssd', 'ncc', 'lncc', 'lncc_grad', 'lncc_grad_center']
 
 
 def _normalise_radius(
@@ -280,3 +280,72 @@ def lncc_grad(
         + moving * _box_sum(q, sizes, spatial_axes, mode)
         - _box_sum(q * mbar, sizes, spatial_axes, mode)
     )
+
+
+def lncc_grad_center(
+    moving: Float[Array, '... *spatial'],
+    fixed: Float[Array, '... *spatial'],
+    *,
+    radius: Union[int, Sequence[int]] = 4,
+    spatial_rank: Optional[int] = None,
+    mode: BoundaryMode = 'reflect',
+    eps: float = 1e-5,
+) -> Float[Array, '... *spatial']:
+    """Center-only local-cross-correlation force (the ANTs / ITK convention).
+
+    The per-voxel ascent direction ITK's ``ANTSNeighborhoodCorrelation`` metric
+    uses: each window's local CC derivative is attributed to its **window centre
+    only**, so -- unlike the exact :func:`lncc_grad` (which back-propagates every
+    window's CC to all of its members, the extra four box sums of its second
+    pass) -- it needs only the **five** windowed sums::
+
+        sFF = Σf² − (Σf)²/n,   sMM = Σm² − (Σm)²/n,   sFM = Σfm − ΣfΣm/n
+        fA  = f − Σf/n,        mA  = m − Σm/n        (centre minus window mean)
+        grad = 2·sFM/(sFF·sMM) · (fA − (sFM/sMM)·mA)
+
+    zeroed where ``sFF`` or ``sMM`` ``≤ eps`` (a flat window -- ITK's guard).
+    Multiply by ``∇(moving)`` for the deformation force (``LNCCForce`` does).
+    This is a *different*, cheaper force than :func:`lncc_grad` (not its
+    gradient): the centre-only approximation ANTs ships, ~5/9 the box-sum work
+    and a single windowed pass (so it admits the sliding-window kernel the exact
+    two-pass form cannot).  The *value* :func:`lncc` is unchanged -- only the
+    derivative convention differs (see ``metrics-itk-convention``).
+    """
+    if isinstance(radius, (tuple, list)):
+        inferred_rank: Optional[int] = len(radius)
+    else:
+        inferred_rank = None
+    if spatial_rank is None:
+        spatial_rank = (
+            inferred_rank if inferred_rank is not None else moving.ndim
+        )
+    elif inferred_rank is not None and inferred_rank != spatial_rank:
+        raise ValueError(
+            f'radius has {inferred_rank} elements but spatial_rank='
+            f'{spatial_rank}.'
+        )
+    radii = _normalise_radius(radius, spatial_rank)
+    sizes = tuple(2 * r + 1 for r in radii)
+    spatial_axes = tuple(range(moving.ndim - spatial_rank, moving.ndim))
+    n = 1.0
+    for s in sizes:
+        n *= float(s)
+
+    sum_m = _box_sum(moving, sizes, spatial_axes, mode)
+    sum_f = _box_sum(fixed, sizes, spatial_axes, mode)
+    sum_mm = _box_sum(moving * moving, sizes, spatial_axes, mode)
+    sum_ff = _box_sum(fixed * fixed, sizes, spatial_axes, mode)
+    sum_mf = _box_sum(moving * fixed, sizes, spatial_axes, mode)
+
+    s_ff = sum_ff - sum_f * sum_f / n
+    s_mm = sum_mm - sum_m * sum_m / n
+    s_fm = sum_mf - sum_f * sum_m / n
+    f_a = fixed - sum_f / n
+    m_a = moving - sum_m / n
+    # ITK guard: zero force on a flat window; the double-``where`` keeps the
+    # gradient finite (a bare divide NaNs the backward even where masked).
+    safe = (s_ff > eps) & (s_mm > eps)
+    denom = jnp.where(safe, s_ff * s_mm, 1.0)
+    s_mm_safe = jnp.where(safe, s_mm, 1.0)
+    grad = 2.0 * s_fm / denom * (f_a - s_fm / s_mm_safe * m_a)
+    return jnp.where(safe, grad, 0.0)

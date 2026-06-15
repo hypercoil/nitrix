@@ -50,7 +50,14 @@ as ``ic_reference`` / ``MetricObjective``, paid only where it is recoverable.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, Sequence, Union, runtime_checkable
+from typing import (
+    Literal,
+    Optional,
+    Protocol,
+    Sequence,
+    Union,
+    runtime_checkable,
+)
 
 import jax
 import jax.numpy as jnp
@@ -58,7 +65,13 @@ from jaxtyping import Array, Float
 
 from .._internal.backend import Backend, fallback, resolve_backend
 from ..geometry import spatial_gradient
-from ..metrics import lncc, lncc_grad, mi_grad, mutual_information
+from ..metrics import (
+    lncc,
+    lncc_grad,
+    lncc_grad_center,
+    mi_grad,
+    mutual_information,
+)
 from ._metric import Metric
 
 __all__ = [
@@ -199,9 +212,17 @@ class LNCCForce:
         made **physically isotropic**: the per-axis voxel radius is scaled by
         ``1 / rel_spacing`` so every axis spans the same mm extent (the same
         convention the regularisation sigmas follow).
+    derivative
+        Which local-CC force to use.  ``'exact'`` (default) is
+        :func:`metrics.lncc_grad` -- the exact gradient of the summed CC (nine
+        box sums).  ``'center'`` is :func:`metrics.lncc_grad_center`, the
+        ANTs / ITK centre-only convention (five box sums, ~1.5-1.75x faster on
+        both GPU and CPU): a *different*, cheaper force, not ``lncc_grad``'s
+        gradient.  Default is ``'exact'`` so recipe output is byte-identical.
     """
 
     radius: int = 2
+    derivative: Literal['exact', 'center'] = 'exact'
 
     def bind(
         self,
@@ -211,7 +232,11 @@ class LNCCForce:
         rel_spacing: RelSpacing = None,
     ) -> _BoundLNCC:
         return _BoundLNCC(
-            fixed=fixed, radius=self.radius, ndim=ndim, rel_spacing=rel_spacing
+            fixed=fixed,
+            radius=self.radius,
+            ndim=ndim,
+            rel_spacing=rel_spacing,
+            derivative=self.derivative,
         )
 
 
@@ -221,6 +246,7 @@ class _BoundLNCC:
     radius: int
     ndim: int
     rel_spacing: RelSpacing
+    derivative: Literal['exact', 'center'] = 'exact'
 
     def _radii(self) -> Union[int, tuple[int, ...]]:
         """Per-axis voxel radii of a *physically isotropic* window.
@@ -238,7 +264,10 @@ class _BoundLNCC:
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
-        scalar = lncc_grad(warped, self.fixed, radius=self._radii())
+        grad_fn = (
+            lncc_grad_center if self.derivative == 'center' else lncc_grad
+        )
+        scalar = grad_fn(warped, self.fixed, radius=self._radii())
         grad = spatial_gradient(
             warped, spacing=_grad_spacing(self.rel_spacing)
         )

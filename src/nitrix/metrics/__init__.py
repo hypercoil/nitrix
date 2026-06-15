@@ -42,7 +42,7 @@ all share the one ``_internal.reductions`` leaf.  No new kernel.  All are
 differentiable w.r.t. their array arguments.
 """
 
-from .intensity import lncc, lncc_grad, ncc, ssd
+from .intensity import lncc, lncc_grad, lncc_grad_center, ncc, ssd
 from .information import (
     correlation_ratio,
     joint_histogram,
@@ -69,6 +69,7 @@ __all__ = [
     'ncc',
     'lncc',
     'lncc_grad',
+    'lncc_grad_center',
     # information
     'joint_histogram',
     'mutual_information',
