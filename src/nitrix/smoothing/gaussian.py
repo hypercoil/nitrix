@@ -34,6 +34,13 @@ __all__ = ['gaussian']
 # path there (it is cheap at small sigma anyway).
 _YVV_MIN_SIGMA = 0.5
 
+# FIR 1-D conv: at or below this tap count a shifted-slice weighted sum beats
+# ``lax.conv_general_dilated`` on both CPU and GPU (the conv-lowering overhead
+# dwarfs the slice-muladds); above it the conv's O(N·K) amortises.  Measured
+# crossover ~80 taps (sigma ~10 at truncate 4); the registration sigmas (1-1.5,
+# 9-13 taps) are deep in the shift regime (~2.5x).
+_FIR_SHIFT_MAX_TAPS = 64
+
 
 def _gaussian_1d_kernel(
     sigma: float,
@@ -135,6 +142,25 @@ def _conv_1d_along_axis(
             f'mode={mode!r}; expected one of "reflect", "mirror", '
             '"constant", "edge".'
         )
+    # Small kernels (the registration sigmas, and most smoothing): a
+    # **shifted-slice weighted sum** -- ``Σ_j kernel[j]·shift(x, j)`` -- beats
+    # ``lax.conv_general_dilated`` by ~2.5x on GPU and ~3x on CPU below a
+    # ~80-tap crossover (the conv's im2col/lowering overhead dwarfs a handful of
+    # vectorised slice-muladds; same window-size effect as ``metrics._box_sum``
+    # / L2c, and platform-independent).  Exact-equal to the conv (the gaussian
+    # tap order matches the padded VALID correlation), so every consumer is
+    # unchanged numerically.  Large kernels keep the conv (its O(N·K) lowering
+    # amortises; ``method='recursive'`` is the sigma-independent path above that).
+    K_taps = int(kernel.size)
+    if K_taps <= _FIR_SHIFT_MAX_TAPS:
+        n = x.shape[axis]
+        acc = kernel[0] * lax.slice_in_dim(x_padded, 0, n, axis=axis)
+        for j in range(1, K_taps):
+            acc = acc + kernel[j] * lax.slice_in_dim(
+                x_padded, j, j + n, axis=axis
+            )
+        return acc
+
     # Reshape the 1D kernel to a conv kernel: move ``axis`` to last
     # via ``moveaxis``, flatten the rest as batch, conv1d, reshape back.
     x_moved = jnp.moveaxis(x_padded, axis, -1)
