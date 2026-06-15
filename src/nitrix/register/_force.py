@@ -197,6 +197,55 @@ class Force(Protocol):
         ...
 
 
+# The lncc_grad / lncc_grad_center flat-window guard epsilon (their default).
+_LNCC_EPS = 1e-5
+
+# Size gate (L2b): the sliding-window kernel only beats the JAX integral image
+# above ~128^3 -- below, its per-program x-scan overhead dominates (measured
+# crossover).  Critically, the ANTs schedule front-loads iterations at the
+# *coarse* (small) levels, so firing the kernel there would slow the recipe; the
+# gate defers those to JAX so the kernel only runs at the large fine levels
+# (where it wins, e.g. the 256^3 full-resolution stage).
+_MIN_KERNEL_VOXELS = 2_000_000  # ~128^3
+
+
+def _lncc_center_dispatch(
+    warped: Array,
+    fixed: Array,
+    *,
+    radius: int,
+    backend: Backend,
+) -> Optional[Array]:
+    """The fused sliding-window centre force where eligible, else ``None``.
+
+    Returns the Pallas-kernel force (3-D isotropic single-pair GPU, large
+    enough to win) or ``None`` to signal the caller to run the JAX path.  A
+    too-small volume / non-3-D input defers to JAX (the size gate is silent;
+    a non-tileable shape is a loud ``NitrixBackendFallback``).  ``backend='jax'``
+    (the default) resolves straight to ``None`` and never warns.
+    """
+    if resolve_backend(backend) != 'pallas-cuda':
+        return None
+    if warped.size < _MIN_KERNEL_VOXELS:
+        return None  # size gate: silent defer to JAX at the coarse levels
+    from .._kernels.cuda import lncc_force as _k
+
+    try:
+        return _k.lncc_center_force_pallas(
+            warped, fixed, radius=int(radius), eps=_LNCC_EPS
+        )
+    except _k.PallasNotTileable as exc:
+        fallback(
+            function='LNCCForce',
+            requested='pallas-cuda',
+            resolved='jax',
+            reason=str(exc),
+            shapes=(tuple(warped.shape),),
+            dtype=warped.dtype,
+        )
+        return None
+
+
 @dataclass(frozen=True)
 class LNCCForce:
     """Analytic local-cross-correlation force (the greedy-SyN default).
@@ -219,10 +268,19 @@ class LNCCForce:
         ANTs / ITK centre-only convention (five box sums, ~1.5-1.75x faster on
         both GPU and CPU): a *different*, cheaper force, not ``lncc_grad``'s
         gradient.  Default is ``'exact'`` so recipe output is byte-identical.
+    backend
+        Compute backend for the ``'center'`` force (v4 L2b).  ``'jax'``
+        (default) is the pure-JAX path; ``'pallas-cuda'`` / ``'auto'`` use the
+        fused **sliding-window** Triton kernel on a supported GPU (3-D isotropic
+        single-pair -- otherwise it falls back to JAX, tolerance-equal).  The
+        kernel beats the JAX integral image and the win grows with volume
+        (~1.2x @128^3, ~4x @256^3).  ``'exact'`` always uses JAX (its two-pass
+        form has no winning kernel).  Default ``'jax'`` keeps output unchanged.
     """
 
     radius: int = 2
     derivative: Literal['exact', 'center'] = 'exact'
+    backend: Backend = 'jax'
 
     def bind(
         self,
@@ -237,6 +295,7 @@ class LNCCForce:
             ndim=ndim,
             rel_spacing=rel_spacing,
             derivative=self.derivative,
+            backend=self.backend,
         )
 
 
@@ -247,6 +306,7 @@ class _BoundLNCC:
     ndim: int
     rel_spacing: RelSpacing
     derivative: Literal['exact', 'center'] = 'exact'
+    backend: Backend = 'jax'
 
     def _radii(self) -> Union[int, tuple[int, ...]]:
         """Per-axis voxel radii of a *physically isotropic* window.
@@ -264,6 +324,13 @@ class _BoundLNCC:
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
+        # L2b: the fused sliding-window kernel computes the whole centre force.
+        if self.derivative == 'center' and self.rel_spacing is None:
+            kernel_u = _lncc_center_dispatch(
+                warped, self.fixed, radius=self.radius, backend=self.backend
+            )
+            if kernel_u is not None:
+                return kernel_u
         grad_fn = (
             lncc_grad_center if self.derivative == 'center' else lncc_grad
         )
