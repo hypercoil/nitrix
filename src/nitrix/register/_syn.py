@@ -134,8 +134,15 @@ class SyNSpec:
         level stops once the windowed normalised cost slope drops below
         ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
         full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
-        ``vmap``-batchable).  Greedy SyN's gradient flow typically uses most of
-        its budget, so the saving here is smaller than for Demons.
+        ``vmap``-batchable).  **When to use (measured):** a *tapered* per-level
+        ``iterations`` schedule (the ANTs ``100x70x50x20`` discipline) already
+        removes the over-iteration early-exit targets, so the strict default
+        ``threshold=1e-6`` then *costs* time (the ``while_loop`` overhead
+        exceeds its saving) -- hence ``None`` is the SVF default.  Early-exit
+        pays off for an *untuned / flat* schedule, or on the CPU path with a
+        looser threshold (``~1e-5`` gave ~10 % there at equal accuracy).
+        (Contrast the matrix inverse-compositional path, which converges in a
+        few of its iterations and so defaults early-exit *on*.)
     """
 
     levels: int = 3

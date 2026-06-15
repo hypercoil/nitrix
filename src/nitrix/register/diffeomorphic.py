@@ -126,8 +126,12 @@ class DemonsSpec:
         level stops once the windowed normalised cost slope drops below
         ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
         full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
-        ``vmap``-batchable); the SSD log-Demons converges fast (often within a
-        handful of iterations), so this is its biggest single-pair win.
+        ``vmap``-batchable).  **When to use (measured):** like SyN, a *tapered*
+        per-level ``iterations`` schedule already removes the over-iteration, so
+        the strict default ``threshold=1e-6`` then *costs* time (the
+        ``while_loop`` overhead exceeds its saving on the fast GPU path) -- hence
+        ``None`` is the default.  Useful for an *untuned / flat* schedule or the
+        CPU path with a looser threshold.
     """
 
     levels: int = 3
