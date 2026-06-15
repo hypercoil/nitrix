@@ -121,6 +121,31 @@ def test_syn_smoothing_schedule_recovers_and_diffeomorphic():
     assert float(res.jacobian_det.min()) > 0.0
 
 
+def test_syn_per_level_iteration_schedule():
+    # A coarse-to-fine iteration schedule (the ANTs taper -- front-load coarse,
+    # cap the expensive finest level) recovers the planted warp and stays
+    # diffeomorphic; the scalar form is its same-count-everywhere special case.
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 45.0, 0)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    assert init < 0.99
+    res = greedy_syn_register(
+        moving, fixed, spec=SyNSpec(levels=3, iterations=(60, 40, 20), step=0.5)
+    )
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert float(ncc(res.warped, fixed)) > init + 0.02
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_syn_iteration_schedule_length_validation():
+    fixed = _blobs_2d(48)
+    with pytest.raises(ValueError):
+        greedy_syn_register(
+            fixed, fixed, spec=SyNSpec(levels=3, iterations=(60, 40))
+        )
+
+
 def test_syn_bias_robustness():
     # LNCC is robust to smooth intensity inhomogeneity: SyN recovers a warp
     # even when the moving image carries a smooth multiplicative bias field

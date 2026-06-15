@@ -54,6 +54,7 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode
 from ._converge import Convergence
+from ._core import resolve_iterations
 from ._force import Force, LNCCForce, resolve_force_schedule
 from ._preprocess import preprocess_images
 from ._svf import (
@@ -85,7 +86,10 @@ class SyNSpec:
     levels
         Gaussian-pyramid resolutions (coarse-to-fine).
     iterations
-        SyN iterations per level.
+        SyN iterations per level: an ``int`` (the same count at every level)
+        or a length-``levels`` **coarse-to-fine** tuple (front-load the cheap
+        coarse levels, cap the expensive finest one -- the ANTs schedule
+        discipline, e.g. ``(100, 70, 50, 20)`` over a 4-level pyramid).
     radius
         LNCC window radius (size ``2·radius + 1`` per axis).
     step
@@ -127,7 +131,7 @@ class SyNSpec:
     """
 
     levels: int = 3
-    iterations: int = 80
+    iterations: Union[int, tuple[int, ...]] = 80
     radius: int = 2
     step: float = 0.25
     sigma_fluid: float = 1.0
@@ -179,6 +183,7 @@ def _syn_level(
     force: Force,
     spec: SyNSpec,
     ndim: int,
+    iterations: int,
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
@@ -199,7 +204,7 @@ def _syn_level(
         v_inv,
         force=force,
         ndim=ndim,
-        iterations=spec.iterations,
+        iterations=iterations,
         n_steps=spec.n_steps,
         boundary_mode=spec.boundary_mode,
         sigma_fluid=spec.sigma_fluid,
@@ -343,6 +348,8 @@ def greedy_syn_register(
         )
     )
 
+    iters_per_level = resolve_iterations(spec.iterations, spec.levels)
+
     def level_solve(
         level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
@@ -357,6 +364,7 @@ def greedy_syn_register(
                 force=forces[level],
                 spec=spec,
                 ndim=ndim,
+                iterations=iters_per_level[level],
                 rel_spacing=rel_spacing,
                 mask=mask_l,
                 restrict=restrict,
@@ -369,7 +377,7 @@ def greedy_syn_register(
                 f_inv,
                 force=forces[level],
                 ndim=ndim,
-                iterations=spec.iterations,
+                iterations=iters_per_level[level],
                 boundary_mode=spec.boundary_mode,
                 sigma_fluid=spec.sigma_fluid,
                 sigma_diffusion=spec.sigma_diffusion,
