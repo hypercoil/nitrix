@@ -66,16 +66,19 @@ pure-JAX gather of ``docs/feature-requests/pallas-trilinear-resample.md``
 Pallas pointer-load kernel ports onto.
 
 For the orders ``map_coordinates`` supports natively (``Linear`` /
-``NearestNeighbour``) the engine is selected **per platform**: the
-explicit gather wins on GPU (B7: ~1.5-1.7x over ``map_coordinates``'s
-dispatch overhead) but loses on CPU, where the XLA ``map_coordinates``
-lowering is tighter and CPU interpolation is already the throughput-
-sensitive path (B15).  The two are parity-equal to a ULP, so the choice
-is pure perf -- the trace-time platform branch of ``signal._iir`` (scan
-vs associative-scan).  ``_map_coordinates_sample`` is therefore both the
-CPU engine *and* the parity **oracle** the tests pin the gather against.
-``Lanczos`` has no ``map_coordinates`` equivalent and always uses the
-explicit gather.
+``NearestNeighbour``) the engine is ``_map_coordinates_sample`` on **both**
+platforms (``_gather_sample``).  The two are parity-equal to a ULP, so the
+choice is pure perf, and (re-measured 2026-06-13 on the pinned JAX
+``cuda12==0.10.1``) the XLA ``map_coordinates`` gather is faster than the
+explicit 8-corner gather on the **GPU** too -- 1.1-1.5x for any image
+``>= 48^3``, across coherent / random coords and 1 / 3 channels; the explicit
+gather only ties it (~0.1 ms, noise) on tiny ``<= 64^3`` single-channel
+volumes.  The earlier GPU-explicit dispatch (the "B7 win") was stale: newer XLA
+tightened the ``map_coordinates`` lowering.  ``_map_coordinates_sample`` is thus
+both the engine *and* the parity **oracle** the tests pin the gather against.
+``Lanczos`` has no ``map_coordinates`` equivalent and always uses the explicit
+gather; ``_separable_gather`` is also the algorithmic shape the parked 5d Pallas
+pointer-load kernel ports onto.
 
 Boundary handling (``mode`` / ``cval``) is a property of the *call*, not
 the kernel, so it stays a keyword on ``sample`` / ``resample`` /
@@ -358,22 +361,23 @@ def _gather_sample(
     mode: BoundaryMode,
     cval: float,
 ) -> Float[Array, '*out_spatial c']:
-    """Sample via the platform-optimal engine for a ``map_coordinates`` order.
+    """Sample via the faster engine for a ``map_coordinates`` order (0/1).
 
-    The explicit separable gather and ``map_coordinates`` are parity-equal
-    to a ULP for ``order`` 0/1, so this picks whichever is faster on the
-    deployment target: the explicit gather on GPU (the B7 win), the
-    ``map_coordinates`` lowering on CPU.  ``jax.default_backend()`` is
-    concrete at trace time, so the branch is ``jit``-safe.
+    The explicit separable gather and ``map_coordinates`` are parity-equal to a
+    ULP for ``order`` 0/1, so this is pure perf.  **It now uses
+    ``map_coordinates`` on both platforms (re-measured 2026-06-13):** on the
+    pinned JAX `cuda12==0.10.1`, the XLA ``map_coordinates`` gather is **faster
+    than the explicit 8-corner gather on the GPU too**, across coords (coherent
+    id+disp and random), channels (1 and 3) and sizes -- 1.1-1.5x for any image
+    ``>= 48^3``; the explicit gather only edges it (~1.04-1.11x, ~0.1 ms, noise)
+    on tiny ``<= 64^3`` single-channel volumes.  The old GPU-explicit branch
+    (the "B7 win") was stale -- newer XLA tightened the ``map_coordinates``
+    lowering.  Switching cuts the warp + compose (the SyN per-iteration gathers):
+    the mni152 LNCC recipe 26.0 -> 27.9x, MI 16.7 -> 17.7x vs ANTs-CPU.
+    ``_separable_gather`` is retained for ``Lanczos`` (no ``map_coordinates``
+    equivalent) and as the algorithmic shape the parked 5d Pallas gather ports
+    onto (``pallas-trilinear-resample.md``).
     """
-    if default_backend_is_gpu():
-        return _separable_gather(
-            image,
-            coords,
-            tap_rule=tap_rule,
-            mode=mode,
-            cval=cval,
-        )
     return _map_coordinates_sample(
         image,
         coords,
