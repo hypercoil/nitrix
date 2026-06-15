@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Literal, Optional, Sequence, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -248,9 +248,14 @@ def svf_coarse_to_fine(
 _STEP_ROBUST_PCTL = 99.0
 
 
-def _normalise_step(u: Array, step: float) -> Array:
-    """Cap the force field's (robust) largest voxel displacement at ``step``.
+def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
+    """Cap (or scale to) the force field's (robust) largest voxel displacement.
 
+    ``scale_to=False`` (default) is the trust-region **clamp**; ``scale_to=
+    True`` is the ANTs **scale-to** (``step/cap``, magnitude-invariant) -- the
+    branch the centre-only LNCC force needs (see the body).
+
+    **The clamp (``scale_to=False``).**
     A trust-region clamp (``min(1, step/‖u‖_cap)``), not a scale-to.  The
     two coincide when the force exceeds the cap (both divide by ``‖u‖_cap``);
     they differ only *below* it, where the clamp keeps the raw gradient
@@ -286,7 +291,22 @@ def _normalise_step(u: Array, step: float) -> Array:
     """
     norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
     cap = jnp.percentile(norm, _STEP_ROBUST_PCTL)
-    scale = jnp.minimum(1.0, step / (cap + 1e-12))
+    if scale_to:
+        # ANTs ``ScaleUpdateField``: scale the *whole* field so the robust-max
+        # displacement is **exactly** ``step`` (``scale = step / max``), not the
+        # ``min(1, ·)`` clamp.  This makes the step **magnitude-invariant** -- it
+        # no longer matters that one force (e.g. the centre-only LNCC) is ~100x
+        # smaller than another (the exact lncc_grad); both take a ``step``-sized
+        # move.  The clamp instead *under-steps* a small-magnitude force (it
+        # never amplifies), which starves the centre force.  Robust ``cap`` (a
+        # high percentile, not the true max) keeps ITK's intent without letting
+        # one hot voxel shrink the whole step.  Safe to scale-up only because a
+        # convergence gate (the SVF early-exit) bounds the constant-step
+        # dithering this would otherwise invite.
+        safe = cap > 1e-12
+        scale = jnp.where(safe, step / jnp.where(safe, cap, 1.0), 0.0)
+    else:
+        scale = jnp.minimum(1.0, step / (cap + 1e-12))
     return u * scale
 
 
@@ -370,18 +390,32 @@ def _group_regularise(
     step: Optional[float],
     sigma_fluid: Union[float, tuple[float, ...]],
     ndim: int,
+    step_mode: Literal['clamp', 'normalize'] = 'clamp',
 ) -> Array:
     """Per-update regularisation for the group (greedy) driver.
 
     Produces the increment ``δ`` the level fn composes onto the total
-    displacement: an optional trust-region step clamp (``_normalise_step``, 0d),
-    fluid (update) Gaussian smoothing, and the per-step diffeomorphism guard
-    (:func:`_step_clamp_diffeo`).  The *total*-field (diffusion) smoothing is
-    applied to ``s`` **after** the composition, in the level fn -- the same
-    fluid/diffusion split the algebra :func:`_regularise` keeps.
+    displacement: the step normalisation (``_normalise_step``), fluid (update)
+    Gaussian smoothing, and -- in ``'clamp'`` mode -- the per-step
+    diffeomorphism guard (:func:`_step_clamp_diffeo`).  The *total*-field
+    (diffusion) smoothing is applied to ``s`` **after** the composition, in the
+    level fn -- the same fluid/diffusion split the algebra :func:`_regularise`
+    keeps.
+
+    ``step_mode`` (L3): ``'clamp'`` (default) is the trust-region clamp + the
+    Jacobian-backtracking guard.  ``'normalize'`` is the ANTs recipe -- a
+    magnitude-invariant **scale-to** step (so a small-magnitude force such as
+    the centre-only LNCC is not under-stepped) and **no** Jacobian backtracking
+    (a bounded ``step``-sized smoothed increment is diffeomorphic by
+    construction, so the per-step det guard is dropped -- the ANTs choice).
     """
-    delta = _normalise_step(u, step) if step is not None else u
+    if step is None:
+        delta = u
+    else:
+        delta = _normalise_step(u, step, scale_to=(step_mode == 'normalize'))
     delta = _smooth_vector(delta, sigma_fluid, ndim)
+    if step_mode == 'normalize':
+        return delta
     return _step_clamp_diffeo(delta)
 
 
@@ -537,6 +571,7 @@ def group_single_sided_level(
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
     convergence: Optional[Convergence] = None,
+    step_mode: Literal['clamp', 'normalize'] = 'clamp',
 ) -> tuple[Array, Array]:
     """Single-sided **group (greedy)** iterations on one resolution.
 
@@ -560,7 +595,9 @@ def group_single_sided_level(
             moving[..., None], id_grid + s, mode=boundary_mode
         )[..., 0]
         u = _restrict_force(_mask_force(bound.update(warped), mask), restrict)
-        delta = _group_regularise(u, step=step, sigma_fluid=sf, ndim=ndim)
+        delta = _group_regularise(
+            u, step=step, sigma_fluid=sf, ndim=ndim, step_mode=step_mode
+        )
         s = compose_displacement(s, delta, mode=boundary_mode)
         s = _smooth_vector(s, sd, ndim)  # total-field (diffusion) regulariser
         return s, bound.cost(warped)
@@ -591,6 +628,7 @@ def group_symmetric_level(
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
     convergence: Optional[Convergence] = None,
+    step_mode: Literal['clamp', 'normalize'] = 'clamp',
 ) -> tuple[Array, Array, Array]:
     """Symmetric-midpoint **group (greedy)** iterations on one resolution.
 
@@ -624,12 +662,14 @@ def group_symmetric_level(
             step=step,
             sigma_fluid=sf,
             ndim=ndim,
+            step_mode=step_mode,
         )
         d_inv = _group_regularise(
             _restrict_force(_mask_force(bound_inv.update(b), mask), restrict),
             step=step,
             sigma_fluid=sf,
             ndim=ndim,
+            step_mode=step_mode,
         )
         s_fwd = _smooth_vector(
             compose_displacement(s_fwd, d_fwd, mode=boundary_mode), sd, ndim

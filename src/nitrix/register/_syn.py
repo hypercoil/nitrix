@@ -95,6 +95,14 @@ class SyNSpec:
     step
         Maximum per-iteration voxel displacement (the force field is
         normalised to this bound, the greedy-SyN gradient-step convention).
+    step_mode
+        How ``step`` bounds the update (group driver).  ``'clamp'`` (default)
+        is the trust-region clamp (``min(1, step/‖u‖)``) + a per-step Jacobian
+        backtracking guard.  ``'normalize'`` is the ANTs recipe: a
+        magnitude-invariant **scale-to** (``step/‖u‖``, so a small-magnitude
+        force such as ``LNCCForce(derivative='center')`` is not under-stepped)
+        and no Jacobian backtracking (the bounded smoothed step is
+        diffeomorphic by construction).  Default ``'clamp'`` is byte-identical.
     sigma_fluid
         Gaussian sigma for the fluid (per-update) regularisation.
     sigma_diffusion
@@ -134,6 +142,7 @@ class SyNSpec:
     iterations: Union[int, tuple[int, ...]] = 80
     radius: int = 2
     step: float = 0.25
+    step_mode: Literal['clamp', 'normalize'] = 'clamp'
     sigma_fluid: float = 1.0
     sigma_diffusion: float = 1.5
     n_steps: int = 5
@@ -382,6 +391,7 @@ def greedy_syn_register(
                 sigma_fluid=spec.sigma_fluid,
                 sigma_diffusion=spec.sigma_diffusion,
                 step=spec.step,
+                step_mode=spec.step_mode,
                 rel_spacing=rel_spacing,
                 mask=mask_l,
                 restrict=restrict,

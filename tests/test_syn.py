@@ -121,6 +121,41 @@ def test_syn_smoothing_schedule_recovers_and_diffeomorphic():
     assert float(res.jacobian_det.min()) > 0.0
 
 
+def test_normalise_step_scale_to_is_magnitude_invariant():
+    # The L3 scale-to lifts a small-magnitude field's robust-max to exactly
+    # `step` (magnitude-invariant), where the clamp (min(1, .)) leaves it small.
+    n = 32
+    u = jnp.full((n, n, 2), 0.001 / np.sqrt(2.0))  # per-voxel norm 0.001 << step
+    clamped = _normalise_step(u, 0.25)  # scale = min(1, 0.25/0.001) = 1 (no-op)
+    scaled = _normalise_step(u, 0.25, scale_to=True)  # robust-max -> 0.25
+    assert np.isclose(float(jnp.linalg.norm(clamped[n // 2, n // 2])), 0.001)
+    cap = float(jnp.percentile(jnp.sqrt(jnp.sum(scaled * scaled, -1)), 99.0))
+    assert np.isclose(cap, 0.25, rtol=1e-3)
+
+
+def test_syn_normalize_step_recovers_and_diffeomorphic():
+    # step_mode='normalize' (ANTs scale-to, no Jacobian backtracking) drives a
+    # high-NCC diffeomorphic recovery -- the mode the small-magnitude centre
+    # force needs not to be under-stepped.
+    from nitrix.register._force import LNCCForce
+
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 55.0, 6)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    res = greedy_syn_register(
+        moving,
+        fixed,
+        spec=SyNSpec(
+            levels=3, iterations=(60, 40, 20), step=0.25, step_mode='normalize'
+        ),
+        force=LNCCForce(radius=2, derivative='center'),
+    )
+    assert float(ncc(res.warped, fixed)) > 0.98
+    assert float(ncc(res.warped, fixed)) > init + 0.015
+    assert float(res.jacobian_det.min()) > 0.0
+
+
 def test_syn_center_derivative_force_recovers():
     # The ANTs/ITK centre-only LNCC force (a different, cheaper force than the
     # exact lncc_grad) still drives SyN to a high-NCC, diffeomorphic recovery.
