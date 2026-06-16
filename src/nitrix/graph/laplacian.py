@@ -53,6 +53,8 @@ __all__ = [
     'laplacian',
     'laplacian_matvec',
     'degree_vector',
+    'in_degree_vector',
+    'symmetric_degree_vector',
 ]
 
 
@@ -152,6 +154,43 @@ def degree_vector(A: _GraphInput) -> Num[Array, '... n']:
             out = out.at[row_idx_jax].set(ell.values.sum(axis=-1))
         return out
     return A.sum(axis=-1)
+
+
+def in_degree_vector(A: _GraphInput) -> Num[Array, '... n']:
+    """Per-node *in*-degree (column sum) -- the adjoint of ``degree_vector``.
+
+    For an asymmetric ``A`` this is the column sum ``Σ_i A_ij``; it equals the
+    (row-sum) out-degree iff ``A`` is symmetric.  Computed without
+    materialising ``Aᵀ``: dense ``A.sum(-2)``; ELL / SectionedELL via the
+    additive adjoint matvec applied to the ones vector (``Aᵀ 1``) -- one
+    ``O(nnz)`` pass over the stored sparsity pattern (the same adjoint the
+    spectral solvers use for the ``½(A x + Aᵀ x)`` symmetric matvec).
+    """
+    if isinstance(A, ELL):
+        ones = jnp.ones(A.values.shape[:-1] + (1,), dtype=A.values.dtype)
+        return semiring_ell_rmatvec(
+            A.values, A.indices, ones, semiring=REAL, n_cols=A.n_cols
+        )[..., 0]
+    if isinstance(A, SectionedELL):
+        ones = jnp.ones((A.n_rows, 1), dtype=A.sections[0].dtype)
+        return sectioned_semiring_ell_rmatvec(A, ones, semiring=REAL)[..., 0]
+    return A.sum(axis=-2)
+
+
+def symmetric_degree_vector(A: _GraphInput) -> Num[Array, '... n']:
+    """Degree of the *symmetrised* adjacency ``W = ½(A + Aᵀ)``.
+
+    ``d_i = ½(Σ_j A_ij + Σ_j A_ji) = ½(out-degree + in-degree)`` -- the degree
+    the symmetric normalised Laplacian / affinity must normalise by when ``A``
+    is **not** symmetric (e.g. a top-k-per-row sparsified affinity).
+    Normalising by the bare row-sum out-degree instead uses the wrong diagonal,
+    so ``½(D^{-1/2} A D^{-1/2} + ·ᵀ)`` is no longer ``D_W^{-1/2} W D_W^{-1/2}``
+    and its trivial (constant) eigenvalue drifts off ``1`` -- the implicit
+    "symmetrise the Laplacian, not the adjacency" error (see
+    ``graph.connectopy``).  Equals ``degree_vector`` exactly for symmetric
+    ``A``.
+    """
+    return 0.5 * (degree_vector(A) + in_degree_vector(A))
 
 
 # ---------------------------------------------------------------------------

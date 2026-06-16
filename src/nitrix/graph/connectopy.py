@@ -66,7 +66,7 @@ from jaxtyping import Array, Float, Num
 
 from ..linalg._eigsolve import SolverSpec, eigsolve_top_k
 from ..sparse import ELL, SectionedELL
-from .laplacian import _is_sparse, degree_vector
+from .laplacian import _is_sparse, degree_vector, symmetric_degree_vector
 
 __all__ = ['laplacian_eigenmap', 'diffusion_embedding']
 
@@ -215,13 +215,20 @@ def _build_affinity_operator(
     *,
     alpha: float = 0.0,
     eps: float = 1e-12,
+    promise_symmetry: bool = False,
 ) -> Tuple[_GraphInput, Float[Array, '... n']]:
     """Return ``(M, inv_sqrt_d2)`` for the normalised affinity operator.
 
+    The graph is treated as the symmetrised adjacency ``W = ½(A + Aᵀ)`` (``A``
+    need not be symmetric), so every degree below is the **symmetric** degree
+    ``½(out + in)`` of ``W`` -- not the row-sum out-degree of ``A`` (which
+    would normalise by the wrong diagonal and shift the trivial eigenvalue off
+    ``1``).
+
     For ``alpha == 0`` the operator is
-    ``M = D^(-1/2) A D^(-1/2)`` (the affinity matrix of the
-    symmetric normalised Laplacian).  For ``alpha > 0`` the operator
-    is the Coifman-Lafon diffusion operator
+    ``M = D^(-1/2) A D^(-1/2)`` symmetrised to ``D_W^(-1/2) W D_W^(-1/2)`` (the
+    affinity matrix of the symmetric normalised Laplacian of ``W``).  For
+    ``alpha > 0`` the operator is the Coifman-Lafon diffusion operator
     ``M_alpha = D_2^(-1/2) K_alpha D_2^(-1/2)`` where
     ``K_alpha = A / (d^alpha d^alpha.T)`` is the density-normalised
     affinity and ``d_2`` is its row sums.
@@ -235,14 +242,29 @@ def _build_affinity_operator(
     random-walk diffusion operator ``P``.  For the Laplacian-
     eigenmap path (``alpha = 0``) the caller ignores it.
     """
-    deg = degree_vector(A)
+    # The normalisation degree MUST match the operator symmetrisation, and both
+    # are governed by the same ``promise_symmetry`` opt-in:
+    #
+    # - symmetrised operator (dense -- always; or sparse with the default
+    #   ``promise_symmetry=False``, where the solver applies ½(A x + Aᵀ x)):
+    #   normalise by the *symmetric* degree d_W = ½(out + in) of W = ½(A + Aᵀ),
+    #   so the operator is the true ``D_W^{-1/2} W D_W^{-1/2}`` (trivial
+    #   eigenvalue exactly 1).  Using the bare out-degree here would symmetrise
+    #   the *Laplacian* while normalising by the wrong diagonal.
+    # - bare operator (sparse, ``promise_symmetry=True``): the caller asserts
+    #   A == Aᵀ, so out == in == d_W; use the plain out-degree and skip the
+    #   in-degree adjoint pass -- the perf opt-in is honoured on the degree too,
+    #   and the result is identical for the (promised) symmetric input.
+    symmetrised = (not _is_sparse(A)) or (not promise_symmetry)
+    degree_fn = symmetric_degree_vector if symmetrised else degree_vector
+    deg = degree_fn(A)
     safe_deg = jnp.maximum(deg, eps)
 
     if alpha != 0.0:
         d_alpha = safe_deg**alpha
         inv_d_alpha = 1.0 / d_alpha
         K = _scale_by_outer(A, inv_d_alpha, inv_d_alpha)
-        safe_d2 = jnp.maximum(degree_vector(K), eps)
+        safe_d2 = jnp.maximum(degree_fn(K), eps)
     else:
         K = A
         safe_d2 = safe_deg
@@ -255,8 +277,10 @@ def _build_affinity_operator(
     # guarantee.  Symmetry of the sparse operator is therefore handled in
     # the eigensolver via ``promise_symmetry=False`` (the ``½(A x + Aᵀ x)``
     # matvec), threaded from the public API below.  Because ``inv_sqrt_d2``
-    # is a symmetric diagonal scaling, that matvec yields exactly the
-    # operator this dense branch builds: ``D^{-1/2} sym(A) D^{-1/2}``.
+    # is a symmetric diagonal scaling (built from the *symmetric* degree
+    # ``d_W``), that matvec yields exactly the operator this dense branch
+    # builds: ``D_W^{-1/2} sym(A) D_W^{-1/2} = D_W^{-1/2} W D_W^{-1/2}`` -- the
+    # genuine symmetric normalised affinity of ``W = ½(A + Aᵀ)``.
     if not _is_sparse(M):
         M = 0.5 * (M + M.swapaxes(-1, -2))
     return M, inv_sqrt_d2
@@ -271,6 +295,7 @@ def _affinity_top_k(
     eps: float,
     spec: SolverSpec,
     seed: int,
+    promise_symmetry: bool,
 ) -> Tuple[
     Float[Array, 'n_components'],
     Float[Array, 'n n_components'],
@@ -282,9 +307,13 @@ def _affinity_top_k(
     Drops the trivial leading eigenpair (the constant eigenvector, the
     *largest* affinity eigenvalue) when ``skip_trivial``.  The
     convention-specific transforms (``1 - mu`` / ``lambda^t`` / right-
-    eigenvector recovery) are applied by the caller.
+    eigenvector recovery) are applied by the caller.  ``promise_symmetry``
+    selects the normalisation degree (symmetric vs out-degree) to match the
+    solver's matvec.
     """
-    M, inv_sqrt_d2 = _build_affinity_operator(A, alpha=alpha, eps=eps)
+    M, inv_sqrt_d2 = _build_affinity_operator(
+        A, alpha=alpha, eps=eps, promise_symmetry=promise_symmetry
+    )
     k_total = n_components + (1 if skip_trivial else 0)
     vals, vecs = eigsolve_top_k(M, k_total, spec=spec, seed=seed)
     # ``eigsolve_top_k`` returns largest-first; the trivial eigenpair is the
@@ -353,13 +382,19 @@ def laplacian_eigenmap(
     promise_symmetry
         Sparse (ELL / SectionedELL) inputs only.  ``False`` (default)
         symmetrises the operator at the matvec level -- the solver applies
-        ``½(A x + Aᵀ x) = D^{-1/2} sym(A) D^{-1/2} x``, matching the dense
-        path exactly -- which is the **safe** choice for affinities built by
-        top-k-per-row sparsification (``ell_from_dense``), whose stored
-        pattern is generally **not** symmetric.  Set ``True`` only when the
-        adjacency is known symmetric (regular meshes / grids) to skip the
-        adjoint matvec (~2x cheaper).  Ignored for dense ``A`` (always
-        symmetrised when the operator is built).
+        ``½(A x + Aᵀ x) = D_W^{-1/2} sym(A) D_W^{-1/2} x``, matching the dense
+        path exactly -- and normalises by the **symmetric degree**
+        ``d_W = ½(out + in)`` of ``W = ½(A + Aᵀ)``.  This is the **safe** choice
+        for affinities built by top-k-per-row sparsification
+        (``ell_from_dense``), whose stored pattern is generally **not**
+        symmetric.  Set ``True`` only when the adjacency is known symmetric
+        (regular meshes / grids): the solver applies the bare ``A x`` and the
+        normalisation uses the plain out-degree -- skipping both adjoint passes
+        (~2x cheaper).  Because ``A == Aᵀ`` is then promised, out-degree ==
+        ``d_W``, so the result is identical to the default path for a genuinely
+        symmetric input; on an asymmetric input it is the caller's contract
+        violation (as before).  Ignored for dense ``A`` (always symmetrised,
+        always the symmetric degree).
     skip_trivial
         Drop the trivial zero eigenvalue and the corresponding
         constant eigenvector.  Default ``True``.
@@ -414,6 +449,7 @@ def laplacian_eigenmap(
         eps=eps,
         spec=spec,
         seed=seed,
+        promise_symmetry=promise_symmetry,
     )
     # Laplacian convention: lambda_L = 1 - lambda_M, smallest-first.  The
     # iterative methods may not return perfectly ordered eigenvalues, so we
@@ -489,6 +525,7 @@ def diffusion_embedding(
         eps=eps,
         spec=spec,
         seed=seed,
+        promise_symmetry=promise_symmetry,
     )
     # Recover the right eigenvectors of the random-walk operator P from the
     # symmetric-companion eigenvectors: psi = D^(-1/2) phi.  Eigenvalues stay

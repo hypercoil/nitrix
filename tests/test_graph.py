@@ -641,6 +641,191 @@ def test_diffusion_embedding_sectioned_ell_matches_dense():
 
 
 # ---------------------------------------------------------------------------
+# Asymmetric-adjacency symmetrisation (connectopy-symmetric-degree-normalisation)
+# ---------------------------------------------------------------------------
+
+
+def _topk_asymmetric_affinity(n=48, k=6, seed=0):
+    """Top-k-per-row sparsification of a symmetric affinity -- the stored
+    pattern is ASYMMETRIC (row ``i`` may keep ``(i, j)`` while row ``j`` drops
+    ``(j, i)``), exactly the connectopy / ``ell_from_dense`` case."""
+    rng = np.random.default_rng(seed)
+    base = np.abs(rng.standard_normal((n, n)))
+    base = 0.5 * (base + base.T)
+    np.fill_diagonal(base, 0.0)
+    A = np.zeros_like(base)
+    for i in range(n):
+        nbr = np.argsort(base[i])[-k:]
+        A[i, nbr] = base[i, nbr]
+    return A
+
+
+def _textbook_sym_laplacian_eigs(A, n_components):
+    """Reference: symmetric normalised Laplacian of ``W = ½(A + Aᵀ)`` using
+    ``W``'s OWN degree ``d_W = ½(out + in)`` -- the correct construction.
+    Returns ``(trivial_mu, lambda_L, vecs)``."""
+    W = 0.5 * (A + A.T)
+    d = W.sum(1)
+    inv = 1.0 / np.sqrt(np.maximum(d, 1e-12))
+    M = inv[:, None] * W * inv[None, :]
+    mu, phi = np.linalg.eigh(M)  # ascending
+    mu, phi = mu[::-1], phi[:, ::-1]  # largest-first; trivial = mu[0]
+    return mu[0], 1.0 - mu[1 : n_components + 1], phi[:, 1 : n_components + 1]
+
+
+def _max_subspace_angle_deg(U, V):
+    s = np.linalg.svd(np.asarray(U).T @ np.asarray(V), compute_uv=False)
+    return float(np.degrees(np.arccos(np.clip(s, -1.0, 1.0))).max())
+
+
+def test_connectopy_normalises_by_symmetric_adjacency_degree():
+    # Regression for connectopy-symmetric-degree-normalisation: on an ASYMMETRIC
+    # affinity the embedding must be the symmetric normalised Laplacian of
+    # W = ½(A + Aᵀ) using W's own degree d_W = ½(out + in) -- NOT the row-sum
+    # out-degree of A (which symmetrises the *Laplacian*, not the adjacency, and
+    # shifts the trivial eigenvalue off 1).  Dense / ELL / SectionedELL must all
+    # match the textbook reference.
+    n, k, kc = 48, 6, 3
+    A = _topk_asymmetric_affinity(n, k)
+    assert not np.allclose(A, A.T)  # genuinely asymmetric
+
+    mu0, lam_ref, vecs_ref = _textbook_sym_laplacian_eigs(A, kc)
+    assert abs(mu0 - 1.0) < 1e-8  # the reference operator's trivial mu is 1
+
+    # dense (eigh): eigenvalues AND the embedding subspace match the textbook.
+    emb_d, vals_d = laplacian_eigenmap(
+        jnp.asarray(A), n_components=kc, solver='eigh'
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_d)), np.sort(lam_ref), atol=1e-9
+    )
+    assert _max_subspace_angle_deg(emb_d, vecs_ref) < 1e-3
+
+    # ELL + SectionedELL (lobpcg) on the SAME asymmetric A: eigenvalues match
+    # the same reference (the symmetric-degree matvec path).
+    _, vals_e = laplacian_eigenmap(
+        _ell_from_dense(A), n_components=kc, lobpcg_iters=400
+    )
+    _, vals_s = laplacian_eigenmap(
+        _sectioned_from_dense(A), n_components=kc, lobpcg_iters=400
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_e)), np.sort(lam_ref), atol=1e-3
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_s)), np.sort(lam_ref), atol=1e-3
+    )
+
+
+def test_connectopy_promise_symmetry_noop_on_symmetric_input():
+    # promise_symmetry=True asserts A == Aᵀ; on a genuinely symmetric adjacency
+    # it must give the SAME answer as the default (safe) path -- out-degree ==
+    # symmetric degree there -- while skipping the in-degree adjoint.
+    n, kc = 40, 3
+    A_sym = _two_cluster_adjacency(n_per_cluster=n // 2)
+    ell = _ell_from_dense(A_sym)
+    _, vals_safe = laplacian_eigenmap(
+        ell, n_components=kc, promise_symmetry=False, lobpcg_iters=400
+    )
+    _, vals_promise = laplacian_eigenmap(
+        ell, n_components=kc, promise_symmetry=True, lobpcg_iters=400
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_safe)),
+        np.sort(np.asarray(vals_promise)),
+        atol=1e-4,
+    )
+
+
+def _symmetric_dense_affinity(n=40, seed=1):
+    """A generic *symmetric* dense affinity (non-degenerate spectrum, so the
+    bottom-k subspace is unambiguous)."""
+    rng = np.random.default_rng(seed)
+    base = np.abs(rng.standard_normal((n, n)))
+    A = 0.5 * (base + base.T)
+    np.fill_diagonal(A, 0.0)
+    return A
+
+
+def test_connectopy_matches_known_symmetric_laplacian():
+    # Equivalence with a KNOWN symmetric dense operator: on a symmetric
+    # adjacency, laplacian_eigenmap must reproduce the textbook symmetric
+    # normalised Laplacian L = I - D^{-1/2} A D^{-1/2} (D = degree) -- eigenvalues
+    # AND embedding subspace -- verified against an independent hand-built
+    # reference (not just dense-vs-sparse self-consistency).  For symmetric A the
+    # symmetric-degree fix is a no-op, so this also pins the no-regression
+    # guarantee.
+    kc = 4
+    A = _symmetric_dense_affinity(40)
+    assert np.allclose(A, A.T)  # symmetric
+
+    mu0, lam_ref, vecs_ref = _textbook_sym_laplacian_eigs(A, kc)
+    assert abs(mu0 - 1.0) < 1e-8
+
+    emb, vals = laplacian_eigenmap(jnp.asarray(A), n_components=kc, solver='eigh')
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals)), np.sort(lam_ref), atol=1e-9
+    )
+    assert _max_subspace_angle_deg(emb, vecs_ref) < 1e-3
+
+    # the sparse paths on the same symmetric A agree with the same reference.
+    _, vals_e = laplacian_eigenmap(
+        _ell_from_dense(A), n_components=kc, lobpcg_iters=400
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_e)), np.sort(lam_ref), atol=1e-3
+    )
+
+
+def _textbook_diffusion_eigs(A, n_components, alpha):
+    """Reference Coifman-Lafon affinity eigenvalues on the symmetrised graph
+    ``W = ½(A + Aᵀ)`` using symmetric degrees throughout.  Returns
+    ``(trivial_mu, top_non_trivial_mu)`` (largest-first)."""
+    W = 0.5 * (A + A.T)
+    d = np.maximum(W.sum(1), 1e-12)
+    da = d**alpha
+    K = W / (da[:, None] * da[None, :])  # symmetric density-normalised kernel
+    d2 = np.maximum(K.sum(1), 1e-12)
+    inv = 1.0 / np.sqrt(d2)
+    M = inv[:, None] * K * inv[None, :]
+    mu = np.linalg.eigvalsh(M)[::-1]  # largest-first; trivial = mu[0]
+    return mu[0], mu[1 : n_components + 1]
+
+
+def test_diffusion_embedding_asymmetric_matches_symmetric_degree():
+    # The alpha>0 Coifman-Lafon path shares the symmetric-degree fix (BOTH
+    # density degrees d^alpha and d2 are symmetric).  On an asymmetric affinity
+    # the diffusion eigenvalues must match the textbook symmetric-degree
+    # operator on W = ½(A + Aᵀ) across dense / ELL / SectionedELL.  (Pre-fix this
+    # used out-degrees and would not match.)
+    n, k, kc, alpha = 48, 6, 3, 0.5
+    A = _topk_asymmetric_affinity(n, k)
+    assert not np.allclose(A, A.T)
+
+    mu0, mu_ref = _textbook_diffusion_eigs(A, kc, alpha)
+    assert abs(mu0 - 1.0) < 1e-8  # proper trivial eigenvalue
+
+    _, vals_d = diffusion_embedding(
+        jnp.asarray(A), n_components=kc, alpha=alpha, solver='eigh'
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_d)), np.sort(mu_ref), atol=1e-9
+    )
+    _, vals_e = diffusion_embedding(
+        _ell_from_dense(A), n_components=kc, alpha=alpha, lobpcg_iters=400
+    )
+    _, vals_s = diffusion_embedding(
+        _sectioned_from_dense(A), n_components=kc, alpha=alpha, lobpcg_iters=400
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_e)), np.sort(mu_ref), atol=1e-3
+    )
+    np.testing.assert_allclose(
+        np.sort(np.asarray(vals_s)), np.sort(mu_ref), atol=1e-3
+    )
+
+
+# ---------------------------------------------------------------------------
 # Device preservation
 # ---------------------------------------------------------------------------
 
