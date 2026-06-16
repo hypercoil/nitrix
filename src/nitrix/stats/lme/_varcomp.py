@@ -332,7 +332,7 @@ def _newton_step(
     - **Damping** on the average-information diagonal (boundary stability).
     - **Step clipping** to ``[-max_step, max_step]`` per axis (overshoot).
     - **Backtracking**: halve the step until the nll decreases, ``n_backtrack``
-      tries, as a fixed-iteration ``scan`` (vmap-clean).
+      tries, as a fixed-iteration ``fori_loop`` (vmap-clean).
     """
     score, info, nll_old = _score_and_info(theta, y, X, B, offset, p, spec.ridge)
     k = theta.shape[0]
