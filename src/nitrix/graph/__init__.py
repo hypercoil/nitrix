@@ -22,8 +22,10 @@ See SPEC §4.5, SPEC §6.1, and IMPLEMENTATION_PLAN §6.1 tasks 3.5-3.7.
 
 from .laplacian import (
     degree_vector,
+    in_degree_vector,
     laplacian,
     laplacian_matvec,
+    symmetric_degree_vector,
 )
 from .community import (
     coaffiliation,
@@ -40,6 +42,8 @@ from .connectopy import (
 __all__ = [
     # laplacian
     'degree_vector',
+    'in_degree_vector',
+    'symmetric_degree_vector',
     'laplacian',
     'laplacian_matvec',
     # community

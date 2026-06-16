@@ -732,6 +732,20 @@ register(
         invariants=('dense / ELL / SectionedELL dispatch',),
     )
 )
+register(
+    OpInfo(
+        'nitrix.graph.in_degree_vector',
+        fixture=_laplacian_fixture,
+        invariants=('column sum (Aᵀ1) via the additive ELL adjoint',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.graph.symmetric_degree_vector',
+        fixture=_laplacian_fixture,
+        invariants=('½(out + in) -- degree of the symmetrised adjacency',),
+    )
+)
 
 
 def _laplacian_eigenmap_fixture():
