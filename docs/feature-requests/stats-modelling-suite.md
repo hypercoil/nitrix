@@ -81,6 +81,22 @@ Per SPEC §1 and v0.5 §1 (normative):
 
 ## §3. Workstream A — LME size-dispatch + cuSOLVER bypass
 
+> **Status (2026-06-16): SHIPPED on `feat/stats-suite-modelarray-tfce`.** The
+> shared `stats/lme/_varcomp.py` core landed and `reml_fit` /
+> `flame_two_level` are re-expressed on it (public surface frozen + a new
+> optional `block=` chunking knob). The per-voxel path is cuSOLVER-free at
+> every `p` (closed-form for `p <= 2`; an unrolled hand-Cholesky +
+> `triangular_solve`/cuBLAS `trsm` for `p > 2`), with analytic AI-REML score +
+> average-information replacing the second-order autodiff. `flame_two_level`
+> now runs on the broken-cuSOLVER L4 (the original skip is gone). Gate met:
+> statsmodels parity held (5e-3); ANOVA closed form to 2e-11; analytic score
+> vs autodiff to 1e-10; per-voxel HLO carries only cuBLAS custom-calls;
+> **50 / 50 fresh-process GPU trials pass** (`bench/validate_lme_gpu.py`),
+> satisfying the cuSOLVER FR's repeated-measurement demand. Deferred within A:
+> the q-rank `Z`-decomposition (the shared `safe_eigh(ZZ^T)` stays, routing to
+> CPU via its latch -- secondary for runtime and GPU-risky to swap; tracked
+> for a follow-up).
+
 **Driver.** [`lme-family-tiny-linalg-gpu-block-and-perf`](lme-family-tiny-linalg-gpu-block-and-perf.md)
 (measured: 3–6× CPU steady, 3–5× flatter compile, ~700× GPU at `V=65536`) +
 [`gpu-cusolver-first-call-handle-failure`](gpu-cusolver-first-call-handle-failure.md)
