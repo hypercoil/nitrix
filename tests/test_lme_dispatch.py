@@ -164,17 +164,23 @@ def test_flame_block_chunking_matches_single_vmap():
 
 
 def test_unrolled_cholesky_matches_reference():
-    """Hand-Cholesky inverse + log-det match ``jnp.linalg`` for SPD ``A``."""
+    """Hand-Cholesky inverse + log-det match a numpy reference for SPD ``A``.
+
+    The reference is numpy (CPU) on purpose: the whole point of the hand
+    Cholesky is to avoid ``jnp.linalg.inv`` / ``slogdet`` (cuSOLVER), which can
+    fail on the broken-stack GPU -- using them as the oracle would couple the
+    test to the very routine the code routes around.
+    """
     rng = np.random.default_rng(1)
     for p in (3, 4, 6, 8):
         M = rng.standard_normal((p, p))
-        A = jnp.asarray(M @ M.T + p * np.eye(p))
-        inv, logdet = _unrolled_spd_inv_logdet(A, p)
+        A_np = M @ M.T + p * np.eye(p)
+        inv, logdet = _unrolled_spd_inv_logdet(jnp.asarray(A_np), p)
         np.testing.assert_allclose(
-            np.asarray(inv), np.asarray(jnp.linalg.inv(A)), atol=1e-10
+            np.asarray(inv), np.linalg.inv(A_np), atol=1e-10
         )
         np.testing.assert_allclose(
-            float(logdet), float(jnp.linalg.slogdet(A)[1]), atol=1e-10
+            float(logdet), float(np.linalg.slogdet(A_np)[1]), atol=1e-10
         )
 
 

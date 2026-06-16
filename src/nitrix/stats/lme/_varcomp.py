@@ -77,7 +77,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -155,7 +155,7 @@ def _unrolled_spd_inv_logdet(
     any point; the whole thing is differentiable (``sqrt`` / division /
     ``trsm`` all have VJPs).
     """
-    cols = []
+    cols: list[list[Array]] = []
     for j in range(n):
         diag = A[j, j]
         for k in range(j):
@@ -338,28 +338,27 @@ def _newton_step(
     k = theta.shape[0]
     info_damped = info + spec.damping * jnp.eye(k, dtype=info.dtype)
     info_inv, _ = _small_inv_logdet(info_damped, k)
-    delta = info_inv @ score
+    delta: Float[Array, 'K'] = info_inv @ score
     delta = jnp.clip(delta, -spec.max_step, spec.max_step)
 
     def body(
-        carry: Tuple[Float[Array, ''], Float[Array, 'K'], Float[Array, '']],
-        _: Any,
-    ) -> Tuple[
-        Tuple[Float[Array, ''], Float[Array, 'K'], Float[Array, '']], None
-    ]:
+        _: Array, carry: Tuple[Array, Array, Array]
+    ) -> Tuple[Array, Array, Array]:
         scale, theta_best, nll_best = carry
         theta_try = theta - scale * delta
         nll_try = _neg_loglik(theta_try, y, X, B, offset, p, spec.ridge)
         accept = nll_try < nll_best
         theta_new = jnp.where(accept, theta_try, theta_best)
         nll_new = jnp.where(accept, nll_try, nll_best)
-        return (scale * 0.5, theta_new, nll_new), None
+        return (scale * 0.5, theta_new, nll_new)
 
-    init = (jnp.asarray(1.0, dtype=theta.dtype), theta, nll_old)
-    (_, theta_final, _), _ = jax.lax.scan(
-        body, init, jnp.arange(spec.n_backtrack)
+    init: Tuple[Array, Array, Array] = (
+        jnp.asarray(1.0, dtype=theta.dtype),
+        theta,
+        nll_old,
     )
-    return theta_final
+    _, theta_final, _ = lax.fori_loop(0, spec.n_backtrack, body, init)
+    return cast(Float[Array, 'K'], theta_final)
 
 
 def _fit_one(
@@ -378,7 +377,9 @@ def _fit_one(
     ) -> Tuple[Float[Array, 'K'], None]:
         return _newton_step(theta, y, X, B, offset, p, spec), None
 
-    theta_final, _ = jax.lax.scan(step, theta_init, jnp.arange(spec.n_iter))
+    theta_final, _ = lax.scan(
+        step, theta_init, xs=None, length=spec.n_iter
+    )
 
     d = _diag_variance(theta_final, B, offset)
     beta, _, _, _ = _profile_beta(d, y, X, p, spec.ridge)
@@ -493,7 +494,10 @@ def fit_varcomp_diagonal(
                 y, X, B, jnp.zeros(X.shape[0], dtype=Y.dtype), th, p, spec
             )
 
-        return _blocked_vmap(per_voxel, (Y, theta_init), block=block)
+        return cast(
+            Tuple[Float[Array, 'V K'], Float[Array, 'V p'], Float[Array, 'V']],
+            _blocked_vmap(per_voxel, (Y, theta_init), block=block),
+        )
 
     def per_voxel_off(
         y: Float[Array, 'N'],
@@ -502,4 +506,7 @@ def fit_varcomp_diagonal(
     ) -> Tuple[Float[Array, 'K'], Float[Array, 'p'], Float[Array, '']]:
         return _fit_one(y, X, B, off, th, p, spec)
 
-    return _blocked_vmap(per_voxel_off, (Y, offset, theta_init), block=block)
+    return cast(
+        Tuple[Float[Array, 'V K'], Float[Array, 'V p'], Float[Array, 'V']],
+        _blocked_vmap(per_voxel_off, (Y, offset, theta_init), block=block),
+    )
