@@ -81,7 +81,8 @@ from typing import Any, Callable, Optional, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Int
+from jax import lax
+from jaxtyping import Array, Float
 
 __all__ = ['VarCompSpec', 'fit_varcomp_diagonal']
 
@@ -138,22 +139,64 @@ class VarCompSpec:
 # ---------------------------------------------------------------------------
 
 
+def _unrolled_spd_inv_logdet(
+    A: Float[Array, 'n n'], n: int
+) -> Tuple[Float[Array, 'n n'], Float[Array, '']]:
+    """SPD inverse + log-det via a hand-written, unrolled Cholesky.
+
+    For ``n > 2`` we deliberately avoid ``jnp.linalg.{inv,cholesky,slogdet}``
+    -- on the broken-cuSOLVER L4 their ``getrf`` / ``potrf`` custom-calls fail
+    to create a handle (cause-unknown; see the GPU-availability FR).  Instead
+    we factor ``A = L L^T`` with the Cholesky-Banachiewicz recurrence written
+    in plain ``jnp`` (the loop is unrolled at trace time -- ``n`` is a
+    compile-time int and tiny), take the inverse through ``triangular_solve``
+    (cuBLAS ``trsm``, which *does* work on these stacks), and read the
+    log-determinant off the factor diagonal.  No cuSOLVER routine is issued at
+    any point; the whole thing is differentiable (``sqrt`` / division /
+    ``trsm`` all have VJPs).
+    """
+    cols = []
+    for j in range(n):
+        diag = A[j, j]
+        for k in range(j):
+            ljk = cols[k][j]
+            diag = diag - ljk * ljk
+        ljj = jnp.sqrt(diag)
+        col_entries = [jnp.zeros((), A.dtype)] * j + [ljj]
+        for i in range(j + 1, n):
+            s = A[i, j]
+            for k in range(j):
+                s = s - cols[k][i] * cols[k][j]
+            col_entries.append(s / ljj)
+        cols.append(col_entries)
+    # L[i, j] = cols[j][i] (lower triangular).
+    L = jnp.stack(
+        [jnp.stack([cols[j][i] for j in range(n)]) for i in range(n)]
+    )
+    log_det = 2.0 * jnp.sum(jnp.log(jnp.stack([cols[j][j] for j in range(n)])))
+    eye = jnp.eye(n, dtype=A.dtype)
+    l_inv = lax.linalg.triangular_solve(
+        L, eye, left_side=True, lower=True, transpose_a=False
+    )
+    inv = l_inv.T @ l_inv  # A^{-1} = L^{-T} L^{-1}
+    return inv, log_det
+
+
 def _small_inv_logdet(
     A: Float[Array, 'n n'], n: int
 ) -> Tuple[Float[Array, 'n n'], Float[Array, '']]:
     """Inverse and log-determinant of a small SPD ``(n, n)`` matrix.
 
     ``n`` is a Python int (a compile-time shape), so the branch is a
-    Python-level ``if`` -- the common cases never construct a cuSOLVER call:
+    Python-level ``if`` and **no branch issues a cuSOLVER custom-call**:
 
     - ``n == 1``  -- a reciprocal and a ``log``.
     - ``n == 2``  -- the explicit symmetric inverse ``[[c,-b],[-b,a]]/det`` and
       ``log(det)`` with ``det = a c - b^2``.
-    - ``n > 2``   -- ``jnp.linalg.inv`` + ``slogdet`` (both ``getrf``/LU, the
-      routine that survives the broken-cuSOLVER stacks; no ``potrf``/``syevd``).
+    - ``n > 2``   -- an unrolled hand-Cholesky + ``triangular_solve`` (cuBLAS
+      ``trsm``), see ``_unrolled_spd_inv_logdet``.
 
-    ``A`` is assumed SPD (the callers add a ridge), so ``slogdet``'s sign is
-    ``+1`` and ``logabsdet`` is the log-determinant.
+    ``A`` is assumed SPD (the callers add a ridge).
     """
     if n == 1:
         a = A[0, 0]
@@ -165,9 +208,7 @@ def _small_inv_logdet(
         det = a * c - b * b
         inv = jnp.array([[c, -b], [-b, a]], dtype=A.dtype) / det
         return inv, jnp.log(det)
-    inv = jnp.linalg.inv(A)
-    _, logabsdet = jnp.linalg.slogdet(A)
-    return inv, logabsdet
+    return _unrolled_spd_inv_logdet(A, n)
 
 
 # ---------------------------------------------------------------------------
