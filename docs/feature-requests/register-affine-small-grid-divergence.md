@@ -1,5 +1,19 @@
 # `affine_register` multi-level GN/LM **diverges at small grids** (v3 regression)
 
+> **RESOLVED 2026-06-12 (v4 `63d69e7`), regression-tested 2026-06-16.** Two
+> perf-neutral fixes: (1) a geometric trust region in the IC loop
+> (``_inverse_compositional._trust_scale``) clamps only a step whose induced
+> grid displacement exceeds the grid extent (a normal step is byte-unchanged, so
+> the well-conditioned path keeps single-step Gauss-Newton convergence); (2) a
+> loud affine-only pyramid-depth cap (``recipes._cap_levels`` +
+> ``AffinePyramidDepthWarning``) shortens the pyramid so the coarsest level stays
+> ``>= 16`` vox/axis, where the 12-DOF affine Hessian is reliable (rigid is
+> untouched).  Recovery restored (24³/28³ +0.88/+0.86, was +0.18/-0.04).
+> Regression guard:
+> ``tests/test_register_recipes.py::test_affine_small_grid_stays_bounded`` (28³,
+> default pyramid -> warns, params bounded, ncc recovers).  **perf-bench can now
+> un-``xfail`` its 28³ affine recovery test.**
+
 > **Status (2026-06-11): v3 regression, perf-bench finding.** Surfaced
 > re-benching the registration suite against `registration-suite-v3`
 > (`356c768`). The same `nitrix-perf-bench` affine recovery test passed against

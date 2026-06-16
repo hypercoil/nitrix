@@ -123,6 +123,31 @@ def test_affine_2d_ssd_recovery():
     assert res.params.shape == (6,)
 
 
+def test_affine_small_grid_stays_bounded():
+    # register-affine-small-grid-divergence: at the default multi-level pyramid a
+    # small grid (28^3 -> coarsest 14^3) drives the 12-DOF affine Hessian below
+    # the reliable few-voxel floor; pre-fix the params *exploded* (~20) and the
+    # warp anti-correlated (ncc -0.03).  The affine pyramid-depth cap (a loud
+    # AffinePyramidDepthWarning) + the IC geometric trust region must keep it
+    # bounded and recovering.  Rigid (6-DOF) is robust here and is uncapped.
+    from nitrix.register.recipes import AffinePyramidDepthWarning
+
+    fixed = _blobs_3d(28)
+    gen = np.array(
+        [[0.05, 0.03, -0.02], [-0.03, 0.04, 0.02], [0.01, -0.02, 0.03]]
+    )
+    true = jnp.asarray(np.concatenate([gen.reshape(-1), [1.5, -1.0, 0.8]]))
+    moving = _warp_known(fixed, affine_exp(true, ndim=3))
+    with pytest.warns(AffinePyramidDepthWarning):
+        res = affine_register(
+            moving, fixed, spec=RegistrationSpec(levels=2, iterations=20)
+        )
+    # bounded params (the divergence signature was |p| ~ 20) ...
+    assert float(jnp.max(jnp.abs(res.params))) < 5.0
+    # ... and an actual recovery (was anti-correlated at -0.03).
+    assert float(ncc(res.warped, fixed)) > 0.8
+
+
 def test_rigid_2d_lncc_recovery():
     fixed = _blobs_2d(64)
     true = jnp.asarray([0.1, 3.0, -2.0])

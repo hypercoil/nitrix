@@ -231,3 +231,27 @@ def test_demons_anisotropic_spacing_recovers_and_differs():
         np.asarray(res_iso.velocity),
         atol=1e-3,
     )
+
+
+def test_demons_finite_on_uniform_background():
+    # register-demons-force-divide-by-zero: the ESM force denominator
+    # ``|j|² + α²·diff²`` is ``0/0`` on a *matched uniform region* (no gradient
+    # AND no intensity mismatch) -- which every real scan has (air /
+    # skull-stripped zero background).  Pre-guard this returned an *all-NaN* warp
+    # at a single iteration; the synthetic smooth-blob inputs hid it (they have
+    # no exactly-uniform region).  The denominator guard must keep the warp (and
+    # the velocity it integrates) finite.
+    n = 32
+    zz, yy, xx = np.mgrid[0:n, 0:n, 0:n].astype('float64')
+    c = n / 2
+    bump = np.exp(
+        -((xx - c) ** 2 + (yy - c) ** 2 + (zz - c) ** 2) / (2 * 3.0**2)
+    )
+    bump[bump < 1e-3] = 0.0  # an *exactly* zero (uniform) background
+    fixed = jnp.asarray(bump)
+    moving = jnp.asarray(np.roll(bump, 2, axis=0))  # background stays exact-0
+    res = diffeomorphic_demons_register(
+        moving, fixed, spec=DemonsSpec(levels=1, iterations=1)
+    )
+    assert bool(jnp.all(jnp.isfinite(res.warped)))
+    assert bool(jnp.all(jnp.isfinite(res.velocity)))

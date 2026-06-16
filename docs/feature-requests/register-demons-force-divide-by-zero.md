@@ -1,5 +1,16 @@
 # Demons ESM force **0/0 → NaN** on uniform regions (real images always NaN)
 
+> **RESOLVED 2026-06-12 (v4 `63d69e7`), regression-tested 2026-06-16.** Guarded
+> the ESM denominator with a gradient-safe double-``where`` (`_DEMONS_DENOM_EPS
+> = 1e-8`): force is zeroed where ``|j|² + α²·diff² ≈ 0`` (no gradient *and* no
+> mismatch -> no information), keeping both the forward warp and its velocity
+> finite on a matched uniform region.  Regression guard:
+> ``tests/test_demons_recipe.py::test_demons_finite_on_uniform_background``
+> (exact-zero background, 1 iteration -> finite warp + velocity).  Sibling
+> paths checked: ``lncc_grad`` (and so ``LNCCForce``) divides by ``var_m·var_f
+> + eps`` so a uniform window yields a finite zero force; ``MetricForce`` relies
+> on each metric's own ``eps`` floor.
+
 > **Status (2026-06-11): correctness bug, perf-bench finding.** Surfaced
 > building real-anatomy registration benchmarks (MNI152 T1): the diffeomorphic
 > demons recipe returns an **all-NaN** warp on *any* image with a uniform
