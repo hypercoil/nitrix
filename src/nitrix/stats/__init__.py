@@ -14,6 +14,9 @@ Two submodules:
   phase, envelope.
 - ``gaussian``   -- closed-form diagonal-Gaussian KL divergence and
   negative log-likelihood (log-variance parameterised).
+- ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
+  exponential-family IRLS) with t / F contrasts and goodness-of-fit.
+- ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
 - ``pca``        -- principal-component analysis (fit / transform /
   inverse) via the covariance eigendecomposition.
 
@@ -47,6 +50,20 @@ from .fourier import (
     product_filtfilt,
 )
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
+from .glm import (
+    BINOMIAL,
+    GAUSSIAN,
+    POISSON,
+    Family,
+    GLMResult,
+    adj_r_squared,
+    deviance_explained,
+    f_contrast,
+    glm_fit,
+    predict,
+    r_squared,
+    t_contrast,
+)
 from .pca import (
     PCAResult,
     pca_fit,
@@ -81,6 +98,19 @@ __all__ = [
     # gaussian
     'kl_diagonal_gaussian',
     'gaussian_nll',
+    # glm
+    'Family',
+    'GAUSSIAN',
+    'BINOMIAL',
+    'POISSON',
+    'GLMResult',
+    'glm_fit',
+    'predict',
+    't_contrast',
+    'f_contrast',
+    'r_squared',
+    'adj_r_squared',
+    'deviance_explained',
     # pca
     'PCAResult',
     'pca_fit',
