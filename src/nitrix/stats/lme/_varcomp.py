@@ -10,17 +10,15 @@ variance-components REML, Wood's mixed-model equivalence).  It factors the
 machinery the two solvers used to duplicate into one diagonalised-REML fit
 with three deliberate design choices:
 
-1. **Static size-dispatch on the fixed-effect width ``p``.**  The profiled
-   fixed-effect normal equations are a tiny ``(p, p)`` system.  For the
-   dominant designs (``p == 1`` intercept; ``p == 2`` mean + covariate) the
-   inverse and log-determinant are *closed form* -- pure elementwise algebra,
-   **no cuSOLVER / LAPACK custom-call**.  For ``p > 2`` we fall back to an
-   ``LU``-based inverse (``getrf``), which is the routine that *works* on the
-   broken-cuSOLVER stacks (a Cholesky ``potrf`` or eigh ``syevd`` does not --
-   see ``docs/feature-requests/gpu-cusolver-first-call-handle-failure.md``).
-   So the per-voxel fit issues no ``potrf`` / ``syevd`` at any ``p``; that is
-   what unblocks ``flame_two_level`` on GPU and flattens the linear-in-``V``
-   XLA:CPU compile.
+1. **Static size-dispatch on the fixed-effect width ``p``** (via
+   ``_smalllinalg.small_inv_logdet``).  The profiled fixed-effect normal
+   equations are a tiny ``(p, p)`` system: closed form for the dominant designs
+   (``p == 1`` intercept; ``p == 2`` mean + covariate) and an unrolled
+   hand-Cholesky + ``triangular_solve`` (cuBLAS ``trsm``) for ``p > 2``.  The
+   per-voxel fit issues **no cuSOLVER custom-call** at any ``p`` -- no ``potrf``
+   / ``syevd`` / ``getrf`` -- which is what unblocks ``flame_two_level`` on the
+   broken-cuSOLVER GPU and flattens the linear-in-``V`` XLA:CPU compile (see
+   ``docs/feature-requests/gpu-cusolver-first-call-handle-failure.md``).
 
 2. **Analytic AI-REML derivatives** replace second-order autodiff through the
    per-voxel Cholesky.  The score is the closed-form REML gradient and the
@@ -84,6 +82,8 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
+from .._smalllinalg import small_inv_logdet as _small_inv_logdet
+
 __all__ = ['VarCompSpec', 'fit_varcomp_diagonal']
 
 
@@ -132,83 +132,6 @@ class VarCompSpec:
     def flame(cls, **kw: Any) -> 'VarCompSpec':
         """Defaults tuned for the single-parameter FLAME REML."""
         return cls(**{'n_iter': 30, **kw})
-
-
-# ---------------------------------------------------------------------------
-# Tiny dense linear algebra -- size-dispatched, cuSOLVER-free for p in {1, 2}
-# ---------------------------------------------------------------------------
-
-
-def _unrolled_spd_inv_logdet(
-    A: Float[Array, 'n n'], n: int
-) -> Tuple[Float[Array, 'n n'], Float[Array, '']]:
-    """SPD inverse + log-det via a hand-written, unrolled Cholesky.
-
-    For ``n > 2`` we deliberately avoid ``jnp.linalg.{inv,cholesky,slogdet}``
-    -- on the broken-cuSOLVER L4 their ``getrf`` / ``potrf`` custom-calls fail
-    to create a handle (cause-unknown; see the GPU-availability FR).  Instead
-    we factor ``A = L L^T`` with the Cholesky-Banachiewicz recurrence written
-    in plain ``jnp`` (the loop is unrolled at trace time -- ``n`` is a
-    compile-time int and tiny), take the inverse through ``triangular_solve``
-    (cuBLAS ``trsm``, which *does* work on these stacks), and read the
-    log-determinant off the factor diagonal.  No cuSOLVER routine is issued at
-    any point; the whole thing is differentiable (``sqrt`` / division /
-    ``trsm`` all have VJPs).
-    """
-    cols: list[list[Array]] = []
-    for j in range(n):
-        diag = A[j, j]
-        for k in range(j):
-            ljk = cols[k][j]
-            diag = diag - ljk * ljk
-        ljj = jnp.sqrt(diag)
-        col_entries = [jnp.zeros((), A.dtype)] * j + [ljj]
-        for i in range(j + 1, n):
-            s = A[i, j]
-            for k in range(j):
-                s = s - cols[k][i] * cols[k][j]
-            col_entries.append(s / ljj)
-        cols.append(col_entries)
-    # L[i, j] = cols[j][i] (lower triangular).
-    L = jnp.stack(
-        [jnp.stack([cols[j][i] for j in range(n)]) for i in range(n)]
-    )
-    log_det = 2.0 * jnp.sum(jnp.log(jnp.stack([cols[j][j] for j in range(n)])))
-    eye = jnp.eye(n, dtype=A.dtype)
-    l_inv = lax.linalg.triangular_solve(
-        L, eye, left_side=True, lower=True, transpose_a=False
-    )
-    inv = l_inv.T @ l_inv  # A^{-1} = L^{-T} L^{-1}
-    return inv, log_det
-
-
-def _small_inv_logdet(
-    A: Float[Array, 'n n'], n: int
-) -> Tuple[Float[Array, 'n n'], Float[Array, '']]:
-    """Inverse and log-determinant of a small SPD ``(n, n)`` matrix.
-
-    ``n`` is a Python int (a compile-time shape), so the branch is a
-    Python-level ``if`` and **no branch issues a cuSOLVER custom-call**:
-
-    - ``n == 1``  -- a reciprocal and a ``log``.
-    - ``n == 2``  -- the explicit symmetric inverse ``[[c,-b],[-b,a]]/det`` and
-      ``log(det)`` with ``det = a c - b^2``.
-    - ``n > 2``   -- an unrolled hand-Cholesky + ``triangular_solve`` (cuBLAS
-      ``trsm``), see ``_unrolled_spd_inv_logdet``.
-
-    ``A`` is assumed SPD (the callers add a ridge).
-    """
-    if n == 1:
-        a = A[0, 0]
-        return (1.0 / a)[None, None], jnp.log(a)
-    if n == 2:
-        a = A[0, 0]
-        b = A[0, 1]
-        c = A[1, 1]
-        det = a * c - b * b
-        inv = jnp.array([[c, -b], [-b, a]], dtype=A.dtype) / det
-        return inv, jnp.log(det)
-    return _unrolled_spd_inv_logdet(A, n)
 
 
 # ---------------------------------------------------------------------------

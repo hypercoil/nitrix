@@ -28,12 +28,9 @@ import numpy as np
 
 jax.config.update('jax_enable_x64', True)
 
+from nitrix.stats._smalllinalg import unrolled_spd_inv_logdet
 from nitrix.stats.lme import flame_two_level, reml_fit
-from nitrix.stats.lme._varcomp import (
-    VarCompSpec,
-    _unrolled_spd_inv_logdet,
-    fit_varcomp_diagonal,
-)
+from nitrix.stats.lme._varcomp import VarCompSpec, fit_varcomp_diagonal
 
 # cuSOLVER-backed routines whose custom-call targets must NOT appear in the
 # per-voxel HLO (cuBLAS matmul / triangularSolve are fine).
@@ -175,7 +172,7 @@ def test_unrolled_cholesky_matches_reference():
     for p in (3, 4, 6, 8):
         M = rng.standard_normal((p, p))
         A_np = M @ M.T + p * np.eye(p)
-        inv, logdet = _unrolled_spd_inv_logdet(jnp.asarray(A_np), p)
+        inv, logdet = unrolled_spd_inv_logdet(jnp.asarray(A_np), p)
         np.testing.assert_allclose(
             np.asarray(inv), np.linalg.inv(A_np), atol=1e-10
         )
