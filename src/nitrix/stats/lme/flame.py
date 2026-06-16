@@ -36,11 +36,15 @@ Computational structure
 -----------------------
 
 Per voxel, the covariance ``V_v = sigma_b^2 I + diag(s_v^2)`` is
-naturally diagonal.  Each Newton step is ``O(N p^2)``.  No
-matrix factorisation of ``V`` is needed (it's diagonal); the
-``(p, p)`` Cholesky for the fixed-effect normal equations is
-the only matrix solve.  The 1-D Newton on log-variance is a
-scalar division.
+naturally diagonal, so FLAME is the shared diagonalised-REML fit
+(``_varcomp``) with a single free component ``B = [ones]`` and a
+fixed per-coordinate ``offset = var_within`` (the known
+within-variance).  The fit makes **no per-voxel cuSOLVER call**:
+the fixed-effect algebra is closed-form for the dominant ``p in
+{1, 2}`` designs (the intercept ``p = 1`` is a scalar) and the REML
+score / curvature are analytic (no second-order autodiff through a
+Cholesky).  That is what unblocks ``flame_two_level`` on the
+broken-cuSOLVER GPU and flattens its linear-in-``V`` compile.
 
 Memory: ``Y`` (V, N) + ``var_within`` (V, N) + per-voxel
 parameters.  No ``(V, N, N)`` intermediate.
@@ -59,8 +63,9 @@ from typing import Any, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-import jax.scipy.linalg as jsla
 from jaxtyping import Array, Float
+
+from ._varcomp import VarCompSpec, fit_varcomp_diagonal
 
 __all__ = ['FLAMEResult', 'flame_two_level']
 
@@ -89,149 +94,6 @@ class FLAMEResult:
         return cls(*children)
 
 
-def _flame_neg_loglik(
-    log_sigma_b_sq: Float[Array, ''],
-    beta: Float[Array, 'N'],
-    X_group: Float[Array, 'N p'],
-    var_within: Float[Array, 'N'],
-    ridge: float = 1e-8,
-) -> Float[Array, '']:
-    """Profile REML negative log-likelihood for the FLAME model.
-
-    Single parameter: ``log(sigma_b^2)``.  Within-variance
-    ``var_within`` is treated as known (per FLAME convention);
-    ``gamma`` profiled out analytically.
-    """
-    sigma_b_sq = jnp.exp(log_sigma_b_sq)
-    d = sigma_b_sq + var_within
-    inv_d = 1.0 / d
-    Xw = X_group * inv_d[:, None]
-    XtVinvX = Xw.T @ X_group
-    p = XtVinvX.shape[-1]
-    XtVinvX = XtVinvX + ridge * jnp.eye(p, dtype=XtVinvX.dtype)
-    XtVinvy = Xw.T @ beta
-    L = jnp.linalg.cholesky(XtVinvX)
-    z = jsla.solve_triangular(L, XtVinvy, lower=True)
-    gamma = jsla.solve_triangular(L.T, z, lower=False)
-    log_det_V = jnp.sum(jnp.log(d))
-    log_det_XtVinvX = 2.0 * jnp.sum(jnp.log(jnp.diagonal(L)))
-    r = beta - X_group @ gamma
-    rwss = jnp.sum(r * r * inv_d)
-    return 0.5 * (log_det_V + log_det_XtVinvX + rwss)
-
-
-def _flame_newton_step(
-    log_sigma_b_sq: Float[Array, ''],
-    beta: Float[Array, 'N'],
-    X_group: Float[Array, 'N p'],
-    var_within: Float[Array, 'N'],
-    damping: float = 1e-6,
-    max_step: float = 1.0,
-    n_backtrack: int = 4,
-) -> Float[Array, '']:
-    """1-D Newton step on the FLAME negative log-likelihood with
-    step clipping and backtracking.
-
-    Since the parameter is scalar, the Hessian is a scalar and
-    Newton degenerates to ``new = old - grad / hess``.  Clipped
-    to ``[-max_step, max_step]`` to prevent overshoot; backtracked
-    if the new nll did not decrease.
-    """
-    val_and_grad = jax.value_and_grad(_flame_neg_loglik)
-    nll_old, grad = val_and_grad(
-        log_sigma_b_sq,
-        beta,
-        X_group,
-        var_within,
-    )
-    hess = jax.grad(jax.grad(_flame_neg_loglik))(
-        log_sigma_b_sq,
-        beta,
-        X_group,
-        var_within,
-    )
-    hess_pos = jnp.maximum(hess, damping)
-    delta = grad / hess_pos
-    delta = jnp.clip(delta, -max_step, max_step)
-
-    def body(
-        carry: Tuple[Float[Array, ''], Float[Array, ''], Float[Array, '']],
-        _: Any,
-    ) -> Tuple[
-        Tuple[Float[Array, ''], Float[Array, ''], Float[Array, '']], None
-    ]:
-        scale, x_best, nll_best = carry
-        x_try = log_sigma_b_sq - scale * delta
-        nll_try = _flame_neg_loglik(
-            x_try,
-            beta,
-            X_group,
-            var_within,
-        )
-        accept = nll_try < nll_best
-        x_new = jnp.where(accept, x_try, x_best)
-        nll_new = jnp.where(accept, nll_try, nll_best)
-        return (scale * 0.5, x_new, nll_new), None
-
-    init = (
-        jnp.asarray(1.0, dtype=log_sigma_b_sq.dtype),
-        log_sigma_b_sq,
-        nll_old,
-    )
-    (_, x_final, _), _ = jax.lax.scan(
-        body,
-        init,
-        jnp.arange(n_backtrack),
-    )
-    return x_final
-
-
-def _flame_fit_one_voxel(
-    beta: Float[Array, 'N'],
-    var_within: Float[Array, 'N'],
-    X_group: Float[Array, 'N p'],
-    log_sigma_b_sq_init: Float[Array, ''],
-    n_iter: int,
-    damping: float,
-) -> Tuple[Float[Array, ''], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel FLAME fit via 1-D Newton.
-
-    Returns ``(log_sigma_b_sq, gamma, log_lik)``.
-    """
-
-    def step(
-        log_sigma: Float[Array, ''], _: Any
-    ) -> Tuple[Float[Array, ''], None]:
-        return _flame_newton_step(
-            log_sigma,
-            beta,
-            X_group,
-            var_within,
-            damping,
-        ), None
-
-    log_final, _ = jax.lax.scan(
-        step,
-        log_sigma_b_sq_init,
-        jnp.arange(n_iter),
-    )
-
-    # Compute final gamma at the converged sigma_b_sq.
-    sigma_b_sq = jnp.exp(log_final)
-    d = sigma_b_sq + var_within
-    inv_d = 1.0 / d
-    Xw = X_group * inv_d[:, None]
-    XtVinvX = Xw.T @ X_group
-    p = XtVinvX.shape[-1]
-    XtVinvX = XtVinvX + 1e-8 * jnp.eye(p, dtype=XtVinvX.dtype)
-    XtVinvy = Xw.T @ beta
-    L = jnp.linalg.cholesky(XtVinvX)
-    z = jsla.solve_triangular(L, XtVinvy, lower=True)
-    gamma = jsla.solve_triangular(L.T, z, lower=False)
-    nll = _flame_neg_loglik(log_final, beta, X_group, var_within)
-    return log_final, gamma, -nll
-
-
 def _flame_default_log_init(
     beta: Float[Array, 'V N'],
     var_within: Float[Array, 'V N'],
@@ -258,6 +120,7 @@ def flame_two_level(
     log_sigma_b_sq_init: Optional[Float[Array, 'V']] = None,
     n_iter: int = 30,
     damping: float = 1e-6,
+    block: Optional[int] = None,
 ) -> FLAMEResult:
     """Voxelwise FLAME-style two-level fixed-effect group model.
 
@@ -280,7 +143,11 @@ def flame_two_level(
     n_iter
         Newton iterations.  Default ``30``.
     damping
-        Hessian positivity guard.
+        Levenberg guard on the (scalar) average-information curvature.
+    block
+        Optional voxel-block size bounding peak memory on brain-scale
+        ``V`` (see ``reml_fit``).  ``None`` (default) is a single
+        ``vmap`` over all voxels.
 
     Returns
     -------
@@ -292,7 +159,10 @@ def flame_two_level(
     ``var_within`` is fixed at the user-supplied values.  This
     avoids the identifiability problem of the two-parameter
     relaxation (where the model can absorb a free scaling of
-    ``var_within`` into ``sigma_b^2``).
+    ``var_within`` into ``sigma_b^2``).  Implemented as the shared
+    ``_varcomp`` diagonalised-REML fit with one free component
+    (``B = [ones]``) and ``offset = var_within`` -- no per-voxel
+    cuSOLVER call, so it runs on the broken-cuSOLVER GPU.
     """
     if beta_subject.shape != var_within.shape:
         raise ValueError(
@@ -312,20 +182,22 @@ def flame_two_level(
             var_within,
         )
 
-    fit = jax.vmap(
-        _flame_fit_one_voxel,
-        in_axes=(0, 0, None, 0, None, None),
-    )
-    log_sigma_b_sq, gamma_hat, log_lik = fit(
+    # Single free variance component (between-subject); the known
+    # within-variance enters as the fixed per-voxel diagonal offset.
+    basis = jnp.ones((1, N), dtype=beta_subject.dtype)
+    theta_init = log_sigma_b_sq_init[:, None]  # (V, 1)
+    spec = VarCompSpec.flame(n_iter=n_iter, damping=damping)
+    theta_hat, gamma_hat, log_lik = fit_varcomp_diagonal(
         beta_subject,
-        var_within,
         X_group,
-        log_sigma_b_sq_init,
-        n_iter,
-        damping,
+        basis,
+        theta_init,
+        offset=var_within,
+        spec=spec,
+        block=block,
     )
     return FLAMEResult(
-        sigma_b_sq=jnp.exp(log_sigma_b_sq),
+        sigma_b_sq=jnp.exp(theta_hat[:, 0]),
         gamma_hat=gamma_hat,
         log_lik=log_lik,
     )
