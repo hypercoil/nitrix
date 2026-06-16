@@ -75,6 +75,10 @@ EXCLUDE: frozenset[str] = frozenset(
         #    (already cataloged); used inside solvers, not standalone.
         'graph.laplacian_matvec',
         'graph.modularity_matrix_matvec',
+        # -- Config-bound inner cost: bbr_cost takes a TransformModel / -----------
+        #    Interpolator and the inverse affine, evaluated *inside*
+        #    register.bbr_register (cataloged) -- the user op is bbr_register.
+        'register.bbr_cost',
         # -- Pure structural / shape-layout helpers: ~free, no cross-framework ----
         #    baseline.
         'numerics.apply_mask',

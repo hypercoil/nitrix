@@ -3526,6 +3526,199 @@ register(
 
 
 # ---------------------------------------------------------------------------
+# v4 registration suite + transform algebra + fMRIPrep front-end (backfill)
+# ---------------------------------------------------------------------------
+
+
+def _near_identity_affine(d: int = 3, scale: float = 0.08, seed: int = 0):
+    """A homogeneous affine near the identity (the real matrix-log domain)."""
+    lin = jnp.eye(d) + scale * jax.random.normal(_key(seed), (d, d))
+    hom = jnp.eye(d + 1).at[:d, :d].set(lin)
+    return hom.at[:d, d].set(scale * jax.random.normal(_key(seed + 1), (d,)))
+
+
+def _affine_stack(k: int = 3, d: int = 3):
+    return jnp.stack([_near_identity_affine(d, seed=i) for i in range(k)])
+
+
+def _imin_objective(data, x):
+    return jnp.sum((x - data) ** 2) + 0.1 * jnp.sum(x**2)
+
+
+def _imin_op(data, x0):
+    from nitrix.linalg import implicit_minimize
+
+    return implicit_minimize(_imin_objective, data, x0, maxiter=8)
+
+
+def _syn_fixture():
+    from nitrix.register import SyNSpec
+
+    return _reg_images(), {'spec': SyNSpec(levels=1, iterations=3, n_steps=2)}
+
+
+def _volreg_fixture():
+    from nitrix.register import RegistrationSpec
+
+    return (jax.random.normal(_key(0), (3, 16, 16)),), {
+        'spec': RegistrationSpec(levels=1, iterations=3)
+    }
+
+
+def _bbr_fixture():
+    img = jax.random.normal(_key(0), (16, 16, 16))
+    pts = jax.random.uniform(_key(1), (16, 3)) * 12.0 + 2.0
+    nrm = jax.random.normal(_key(2), (16, 3))
+    return (img, pts, nrm), {}
+
+
+# metrics: closed-form registration forces + fMRIPrep front-end
+register(
+    OpInfo(
+        'nitrix.metrics.lncc_grad',
+        fixture=lambda: (_img_pair(), {'radius': 4, 'spatial_rank': 2}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('closed-form ∂(Σ lncc)/∂moving (self-adjoint box filter)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.lncc_grad_center',
+        fixture=lambda: (_img_pair(), {'radius': 4, 'spatial_rank': 2}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('ANTs centre-only LNCC force (five box sums)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.mi_grad',
+        fixture=lambda: (_img_pair(), {'bins': 16}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('closed-form Mattes MI gradient (no histogram tape)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.winsorize',
+        fixture=lambda: ((jax.random.normal(_key(0), (16, 16)),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('percentile intensity clip',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.match_histogram',
+        fixture=lambda: (_img_pair(), {'bins': 32}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('CDF / quantile intensity transport',),
+    )
+)
+
+# geometry: transform algebra (group <-> algebra)
+register(
+    OpInfo(
+        'nitrix.geometry.transform_mean',
+        fixture=lambda: ((_affine_stack(),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Fréchet mean on the affine group (matrix log/exp)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.velocity_mean',
+        fixture=lambda: ((jax.random.normal(_key(0), (3, 8, 8, 2)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('weighted mean of SVF velocity fields',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.transform_geodesic',
+        fixture=lambda: ((_near_identity_affine(), 0.5), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('matrix-log geodesic t·log A on the affine group',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.fuse_transforms',
+        fixture=lambda: (
+            ([_near_identity_affine(2), jnp.zeros((16, 16, 2))], (16, 16)),
+            {},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('compose a heterogeneous transform chain to one field',),
+    )
+)
+
+# linalg: matrix log + implicit minimisation
+register(
+    OpInfo(
+        'nitrix.linalg.matrix_log',
+        fixture=lambda: ((_spd(4),), {}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('inverse scaling-and-squaring matrix logarithm',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.linalg.implicit_minimize',
+        fixture=lambda: (
+            (jax.random.normal(_key(3), (4,)), jnp.zeros((4,))),
+            {},
+        ),
+        fn_override=_imin_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('argmin differentiable by the implicit-function theorem',),
+    )
+)
+
+# register: end-to-end recipes (benchmark-worthy)
+register(
+    OpInfo(
+        'nitrix.register.greedy_syn_register',
+        fixture=_syn_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('greedy symmetric diffeomorphic registration (SyN; LNCC)',),
+        notes='end-to-end optimiser (benchmark-worthy)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.volreg',
+        fixture=_volreg_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('fMRI motion correction (per-frame rigid to a reference)',),
+        notes='end-to-end optimiser (vmapped single-pair rigid)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.bbr_register',
+        fixture=_bbr_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('boundary-based registration (intensity gradient at a '
+                    'surface)',),
+        notes='end-to-end optimiser (BBR; differentiate via implicit path)',
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------
 
