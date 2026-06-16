@@ -24,27 +24,43 @@ the force.  Pure composition of the substrate (SVF exp, warp, gradient,
 Gaussian, velocity algebra) -- the only metric-specific piece is the
 closed-form force.  An LNCC-driven (SyN-style) force and a symmetric
 forward+inverse variant are the documented upgrade paths.
+
+The above is the **algebra** (log-domain SVF) representation -- the exact
+oracle.  The default ``representation='group'`` (``DemonsSpec``) instead carries
+the *displacement* and uses the greedy compositive update (warp directly,
+compose the regularised increment -- no per-iteration ``exp``, ~2 gathers/iter
+vs ~7), recovering the velocity once at finalisation via ``geometry.field_log``.
+Greedy is not the SVF fixed point, so the two agree on synthetic recovery to
+tolerance, not field-wise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import Literal, NamedTuple, Optional, Sequence, Union
 
 from jaxtyping import Array, Float
 
 from ..geometry import (
+    field_log,
     gaussian_pyramid,
     integrate_velocity_field,
 )
 from ..geometry._interpolate import BoundaryMode
+from ._converge import Convergence
+from ._core import resolve_iterations
 from ._force import DemonsForce, Force, resolve_force_schedule
+from ._preprocess import preprocess_images
 from ._svf import (
     _relative_spacing,
     finalize_with_init,
+    group_single_sided_level,
+    pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
+    resolve_smoothing,
     single_sided_level,
+    smooth_pyramid,
     svf_coarse_to_fine,
 )
 
@@ -64,7 +80,10 @@ class DemonsSpec:
     levels
         Gaussian-pyramid resolutions (coarse-to-fine).
     iterations
-        Demons iterations per level.
+        Demons iterations per level: an ``int`` (the same count at every
+        level) or a length-``levels`` **coarse-to-fine** tuple (front-load the
+        cheap coarse levels, cap the expensive finest one -- the ANTs schedule
+        discipline, e.g. ``(100, 70, 50, 20)`` over a 4-level pyramid).
     sigma_fluid
         Gaussian sigma for the fluid (per-update) regularisation.
     sigma_diffusion
@@ -92,10 +111,31 @@ class DemonsSpec:
         Pyramid downsample factor / anti-alias sigma.
     boundary_mode
         Out-of-bounds handling for the warps.
+    representation
+        Dense-deformation domain: ``'group'`` (default) carries the
+        *displacement* and uses the greedy compositive demons update (warp
+        directly, compose the increment -- ~2 gathers/iter, the perf path);
+        ``'algebra'`` carries the *stationary velocity* and uses the log-domain
+        update (``exp`` every iteration -- the exact-SVF path, byte-identical to
+        the pre-v4 recipe, the parity oracle).  Both return the same
+        ``DiffeomorphicResult``; in group mode ``velocity`` is recovered from the
+        final displacement via ``geometry.field_log`` (the best-fit stationary
+        velocity, exact iff the warp is in ``image(exp)``).
+    convergence
+        Optional ANTs-style early-exit (``Convergence(threshold, window)``): a
+        level stops once the windowed normalised cost slope drops below
+        ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
+        full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
+        ``vmap``-batchable).  **When to use (measured):** like SyN, a *tapered*
+        per-level ``iterations`` schedule already removes the over-iteration, so
+        the strict default ``threshold=1e-6`` then *costs* time (the
+        ``while_loop`` overhead exceeds its saving on the fast GPU path) -- hence
+        ``None`` is the default.  Useful for an *untuned / flat* schedule or the
+        CPU path with a looser threshold.
     """
 
     levels: int = 3
-    iterations: int = 80
+    iterations: Union[int, tuple[int, ...]] = 80
     sigma_fluid: float = 1.0
     sigma_diffusion: float = 1.5
     n_steps: int = 6
@@ -105,6 +145,8 @@ class DemonsSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
+    representation: Literal['group', 'algebra'] = 'group'
+    convergence: Optional[Convergence] = None
 
 
 class DiffeomorphicResult(NamedTuple):
@@ -141,8 +183,10 @@ def _demons_level(
     force: Force,
     spec: DemonsSpec,
     ndim: int,
+    iterations: int,
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> tuple[Array, Array]:
     """Run the Demons iterations on one resolution; return ``(v, costs)``.
 
@@ -164,7 +208,7 @@ def _demons_level(
         v,
         force=force,
         ndim=ndim,
-        iterations=spec.iterations,
+        iterations=iterations,
         n_steps=spec.n_steps,
         boundary_mode=spec.boundary_mode,
         sigma_fluid=spec.sigma_fluid,
@@ -173,6 +217,8 @@ def _demons_level(
         step=None,
         rel_spacing=rel_spacing,
         mask=mask,
+        restrict=restrict,
+        convergence=spec.convergence,
     )
 
 
@@ -185,6 +231,10 @@ def diffeomorphic_demons_register(
     init_affine: Optional[Float[Array, ' d1 d1']] = None,
     init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
     mask: Optional[Float[Array, '*spatial']] = None,
+    restrict: Optional[tuple[float, ...]] = None,
+    winsorize: Optional[tuple[float, float]] = None,
+    histogram_match: bool = False,
+    smoothing_sigma: Optional[Union[float, Sequence[float]]] = None,
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
@@ -220,6 +270,19 @@ def diffeomorphic_demons_register(
         Optional fixed-grid weight field (``(*spatial,)``, e.g. a brain mask)
         gating the force to a region: the masked area drives the deformation,
         the rest follows by regularisation.
+    restrict
+        Optional length-``ndim`` per-axis weight on the deformation (ANTs
+        ``--restrict-deformation``): a ``0`` suppresses deformation along that
+        axis (e.g. ``(1, 1, 0)`` for in-plane-only).
+    winsorize, histogram_match
+        Intensity conditioning before registration (the fMRIPrep front-end; see
+        ``register.rigid_register``).  Both default off.
+    smoothing_sigma
+        Optional per-level smoothing applied to each pyramid level **independent
+        of the shrink** (ANTs ``-s``, decoupled from ``-f``): a scalar (all
+        levels) or a length-``levels`` **coarse-to-fine** sequence (e.g.
+        ``2x1x0`` -> ``(2, 1, 0)``).  ``None`` (default) leaves the pyramid's own
+        anti-alias as the only smoothing (byte-unchanged).
 
     Returns
     -------
@@ -231,6 +294,16 @@ def diffeomorphic_demons_register(
         raise ValueError(
             f'diffeomorphic registration supports 2-D / 3-D single-channel '
             f'images; got moving {moving.shape}, fixed {fixed.shape}.'
+        )
+    moving, fixed = preprocess_images(
+        moving,
+        fixed,
+        winsorize_range=winsorize,
+        histogram_match=histogram_match,
+    )
+    if restrict is not None and len(restrict) != ndim:
+        raise ValueError(
+            f'restrict must have length ndim={ndim}; got {len(restrict)}.'
         )
     dtype = moving.dtype
     init_disp = resolve_init_displacement(
@@ -245,17 +318,26 @@ def diffeomorphic_demons_register(
     moving_reg = prewarp_moving(
         moving, init_disp, fixed.shape, dtype, spec.boundary_mode
     )
-    pyr_m = gaussian_pyramid(
-        moving_reg[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    smoothing = resolve_smoothing(smoothing_sigma, spec.levels)
+    pyr_m = smooth_pyramid(
+        gaussian_pyramid(
+            moving_reg[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
-    pyr_f = gaussian_pyramid(
-        fixed[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    pyr_f = smooth_pyramid(
+        gaussian_pyramid(
+            fixed[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
 
     # Anisotropy-only spacing -- level-independent, so computed once.
@@ -263,6 +345,9 @@ def diffeomorphic_demons_register(
     forces = resolve_force_schedule(
         force, default=DemonsForce(spec.alpha), levels=spec.levels
     )
+    # Pin any histogram-force ranges once from the full-res images (stationary
+    # objective; see pin_force_ranges) before the pyramid.
+    forces = [pin_force_ranges(f, moving_reg, fixed) for f in forces]
     pyr_mask = (
         None
         if mask is None
@@ -274,24 +359,46 @@ def diffeomorphic_demons_register(
         )
     )
 
+    iters_per_level = resolve_iterations(spec.iterations, spec.levels)
+
     def level_solve(
         level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
-        (v,) = state
+        (field,) = state
         mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
-        v, hist = _demons_level(
-            m_l,
-            f_l,
-            v,
-            force=forces[level],
-            spec=spec,
-            ndim=ndim,
-            rel_spacing=rel_spacing,
-            mask=mask_l,
-        )
-        return (v,), hist
+        if spec.representation == 'algebra':
+            field, hist = _demons_level(
+                m_l,
+                f_l,
+                field,
+                force=forces[level],
+                spec=spec,
+                ndim=ndim,
+                iterations=iters_per_level[level],
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+            )
+        else:
+            field, hist = group_single_sided_level(
+                m_l,
+                f_l,
+                field,
+                force=forces[level],
+                ndim=ndim,
+                iterations=iters_per_level[level],
+                boundary_mode=spec.boundary_mode,
+                sigma_fluid=spec.sigma_fluid,
+                sigma_diffusion=spec.sigma_diffusion,
+                step=None,
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+                convergence=spec.convergence,
+            )
+        return (field,), hist
 
-    (velocity,), cost_history = svf_coarse_to_fine(
+    (state,), cost_history = svf_coarse_to_fine(
         pyr_m,
         pyr_f,
         ndim=ndim,
@@ -300,9 +407,18 @@ def diffeomorphic_demons_register(
         level_solve=level_solve,
     )
 
-    residual = integrate_velocity_field(
-        velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
-    )
+    # Algebra mode carries the velocity (exp it for the residual); group mode
+    # carries the displacement directly and recovers the velocity via field_log.
+    if spec.representation == 'algebra':
+        velocity = state
+        residual = integrate_velocity_field(
+            velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
+        )
+    else:
+        residual = state
+        velocity = field_log(
+            residual, n_sqrt=spec.n_steps, mode=spec.boundary_mode
+        )
     total, warped, det = finalize_with_init(
         moving,
         residual,

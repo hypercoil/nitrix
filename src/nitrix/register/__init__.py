@@ -42,11 +42,44 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
   (SyN-style): symmetric forward/inverse velocity fields driven to a
   midpoint by the analytic LNCC force (``metrics.lncc_grad``); robust to
   smooth intensity inhomogeneity.  ``SyNSpec`` / ``SyNResult``.
+
+Scope & validation
+------------------
+**ANTs-*style*, synthetic-recovery-validated** -- the algorithms are the
+ANTs / FSL / AFNI lineage (3dvolreg / mcflirt rigid, AIR affine, log-Demons,
+greedy SyN, BBR), and the test suite validates *recovery of a known synthetic
+warp* (high NCC / MI, positive Jacobian) plus the closed-form-vs-autodiff
+force parity oracles.  It is **not** a drop-in ``antsRegistration``: the
+following ANTs / fMRIPrep features are **not yet implemented** --
+
+- intensity **winsorization** (``--winsorize-image-intensities``) and
+  **histogram matching** (``--use-histogram-matching``);
+- **multi-metric summation** within a stage (``-m MI -m CC``; a ``SumForce``);
+- **restrict-deformation** (per-axis deformation masking);
+- a closed-form **correlation-ratio** fast-force -- CR drives the diffeomorphic
+  recipes only via the generic autodiff ``MetricForce`` escape hatch (the
+  closed-form **(Mattes) MI** force, ``MIForce``, *is* shipped -- the fast
+  cross-modal path; CR's ``cr_grad`` is the same machinery, built when a
+  consumer asks);
+- **early-exit** (windowed cost-slope convergence) on the SVF recipes -- it is
+  wired only into the matrix inverse-compositional path.
+
+**Real-data and ANTs-reference parity** (comparing nitrix transforms / warps
+to an ``antsRegistration`` reference on real volumes, and the iso-accuracy
+wall-clock comparison) are **delegated to the nitrix-perf-bench agent**, which
+owns the cross-tool harness; they are not asserted in this repo.
 """
 
 from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
 from ._core import Convergence, RegistrationResult, RegistrationSpec
-from ._force import DemonsForce, Force, LNCCForce, MetricForce
+from ._force import (
+    DemonsForce,
+    Force,
+    LNCCForce,
+    MetricForce,
+    MIForce,
+    SumForce,
+)
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from ._objective import MetricObjective, Objective
@@ -80,7 +113,9 @@ __all__ = [
     'Force',
     'LNCCForce',
     'DemonsForce',
+    'MIForce',
     'MetricForce',
+    'SumForce',
     'RegistrationSpec',
     'RegistrationResult',
     'Convergence',

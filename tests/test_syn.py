@@ -26,6 +26,10 @@ from nitrix.geometry import (  # noqa: E402
 )
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import SyNSpec, greedy_syn_register  # noqa: E402
+from nitrix.register._svf import (  # noqa: E402
+    _normalise_step,
+    resolve_smoothing,
+)
 from nitrix.smoothing import gaussian  # noqa: E402
 
 
@@ -77,6 +81,128 @@ def test_syn_2d_recovery_and_diffeomorphism():
     assert float(jnp.abs(res.forward_velocity).max()) > 1e-2
     assert float(jnp.abs(res.inverse_velocity).max()) > 1e-2
     assert res.displacement.shape == (64, 64, 2)
+
+
+def test_syn_smoothing_default_off_byte_identical():
+    # A scalar 0 sigma is a no-op smooth and must reproduce the default
+    # (``smoothing_sigma=None``) path bit-for-bit.
+    fixed = _blobs_2d(48)
+    v_true = _smooth_velocity((48, 48), 2, 8.0, 30.0, 7)
+    moving = _warp_by_velocity(fixed, v_true)
+    spec = SyNSpec(levels=2, iterations=30, step=0.5)
+    res_default = greedy_syn_register(moving, fixed, spec=spec)
+    res_zero = greedy_syn_register(
+        moving, fixed, spec=spec, smoothing_sigma=0.0
+    )
+    assert np.array_equal(
+        np.asarray(res_default.forward_velocity),
+        np.asarray(res_zero.forward_velocity),
+    )
+
+
+def test_syn_smoothing_schedule_recovers_and_diffeomorphic():
+    # A coarse-to-fine smoothing schedule (decoupled from the shrink, ANTs
+    # ``-s 2x1x0``) still recovers the planted warp and stays diffeomorphic.
+    assert resolve_smoothing((2.0, 1.0, 0.0), 3) == (0.0, 1.0, 2.0)
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 55.0, 6)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    assert init < 0.99  # a genuine misalignment
+
+    res = greedy_syn_register(
+        moving,
+        fixed,
+        spec=SyNSpec(levels=3, iterations=60, step=0.5),
+        smoothing_sigma=(2.0, 1.0, 0.0),
+    )
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert float(ncc(res.warped, fixed)) > init + 0.02
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_normalise_step_scale_to_is_magnitude_invariant():
+    # The L3 scale-to lifts a small-magnitude field's robust-max to exactly
+    # `step` (magnitude-invariant), where the clamp (min(1, .)) leaves it small.
+    n = 32
+    u = jnp.full((n, n, 2), 0.001 / np.sqrt(2.0))  # per-voxel norm 0.001 << step
+    clamped = _normalise_step(u, 0.25)  # scale = min(1, 0.25/0.001) = 1 (no-op)
+    scaled = _normalise_step(u, 0.25, scale_to=True)  # robust-max -> 0.25
+    assert np.isclose(float(jnp.linalg.norm(clamped[n // 2, n // 2])), 0.001)
+    cap = float(jnp.percentile(jnp.sqrt(jnp.sum(scaled * scaled, -1)), 99.0))
+    assert np.isclose(cap, 0.25, rtol=1e-3)
+
+
+def test_syn_normalize_step_recovers_and_diffeomorphic():
+    # step_mode='normalize' (ANTs scale-to, no Jacobian backtracking) drives a
+    # high-NCC diffeomorphic recovery -- the mode the small-magnitude centre
+    # force needs not to be under-stepped.
+    from nitrix.register._force import LNCCForce
+
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 55.0, 6)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    res = greedy_syn_register(
+        moving,
+        fixed,
+        spec=SyNSpec(
+            levels=3, iterations=(60, 40, 20), step=0.25, step_mode='normalize'
+        ),
+        force=LNCCForce(radius=2, derivative='center'),
+    )
+    assert float(ncc(res.warped, fixed)) > 0.98
+    assert float(ncc(res.warped, fixed)) > init + 0.015
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_syn_center_derivative_force_recovers():
+    # The ANTs/ITK centre-only LNCC force (a different, cheaper force than the
+    # exact lncc_grad) still drives SyN to a high-NCC, diffeomorphic recovery.
+    from nitrix.register._force import LNCCForce
+
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 55.0, 6)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    assert init < 0.99
+    res = greedy_syn_register(
+        moving,
+        fixed,
+        spec=SyNSpec(levels=3, iterations=(60, 40, 20), step=0.5),
+        force=LNCCForce(radius=2, derivative='center'),
+    )
+    # The centre-only force recovers slightly less than the exact gradient on
+    # this synthetic (it is the cheaper ANTs approximation), but still drives a
+    # high-NCC, diffeomorphic recovery well above the initial misalignment.
+    assert float(ncc(res.warped, fixed)) > 0.98
+    assert float(ncc(res.warped, fixed)) > init + 0.015
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_syn_per_level_iteration_schedule():
+    # A coarse-to-fine iteration schedule (the ANTs taper -- front-load coarse,
+    # cap the expensive finest level) recovers the planted warp and stays
+    # diffeomorphic; the scalar form is its same-count-everywhere special case.
+    fixed = _blobs_2d(64)
+    v_true = _smooth_velocity((64, 64), 2, 8.0, 45.0, 0)
+    moving = _warp_by_velocity(fixed, v_true)
+    init = float(ncc(moving, fixed))
+    assert init < 0.99
+    res = greedy_syn_register(
+        moving, fixed, spec=SyNSpec(levels=3, iterations=(60, 40, 20), step=0.5)
+    )
+    assert float(ncc(res.warped, fixed)) > 0.99
+    assert float(ncc(res.warped, fixed)) > init + 0.02
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_syn_iteration_schedule_length_validation():
+    fixed = _blobs_2d(48)
+    with pytest.raises(ValueError):
+        greedy_syn_register(
+            fixed, fixed, spec=SyNSpec(levels=3, iterations=(60, 40))
+        )
 
 
 def test_syn_bias_robustness():
@@ -142,3 +268,24 @@ def test_syn_validation():
         greedy_syn_register(_blobs_2d(32), _blobs_2d(48))
     with pytest.raises(ValueError):
         greedy_syn_register(jnp.zeros((4, 4, 4, 4)), jnp.zeros((4, 4, 4, 4)))
+
+
+def test_normalise_step_robust_to_outlier():
+    # B4: the trust-region clamp caps at a high *percentile* of the per-voxel
+    # displacement, so a single hot/edge voxel cannot throttle the whole field.
+    n = 48
+    step = 1.0
+    # Bulk below `step`: the clamp is a no-op (scale == 1) -- the real signal is
+    # preserved.  A global-max clamp would have scaled it by step/100 = 0.01.
+    u = jnp.full((n, n, 2), 0.3 / np.sqrt(2.0))  # per-voxel norm 0.3 everywhere
+    u = u.at[0, 0].set(jnp.asarray([100.0, 0.0]))  # one outlier voxel
+    out = _normalise_step(u, step)
+    bulk = float(jnp.linalg.norm(out[n // 2, n // 2]))
+    assert np.isclose(bulk, 0.3, rtol=1e-6)  # preserved, not starved to ~0.003
+
+    # Bulk genuinely above `step`: the clamp still bounds it -- but at the robust
+    # cap (p99 = 2.0), so the bulk lands at ~step, not at step*(2/100).
+    u2 = jnp.full((n, n, 2), 2.0 / np.sqrt(2.0))
+    u2 = u2.at[0, 0].set(jnp.asarray([100.0, 0.0]))
+    bulk2 = float(jnp.linalg.norm(_normalise_step(u2, step)[n // 2, n // 2]))
+    assert np.isclose(bulk2, step, rtol=1e-3)

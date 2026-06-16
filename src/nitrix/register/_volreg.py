@@ -29,6 +29,7 @@ mean of an unaligned series.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import NamedTuple, Optional, Union
 
 import jax
@@ -36,7 +37,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..geometry import gaussian_pyramid, rigid_exp
-from ._core import RegistrationSpec, register_core
+from ._core import Convergence, RegistrationSpec, register_core
 from ._inverse_compositional import (
     ReferenceLevel,
     ic_reference,
@@ -172,6 +173,15 @@ def volreg(
             f'method must be "auto", "forward", or '
             f'"inverse_compositional"; got {method!r}.'
         )
+    # volreg vmaps the per-frame core, which a while_loop early-exit would break
+    # (a data-dependent trip count is not vmap-batchable).  Force the fixed scan;
+    # 'auto' / None already resolve to it, an explicit Convergence is rejected.
+    if isinstance(spec.convergence, Convergence):
+        raise ValueError(
+            'volreg cannot early-exit: the while_loop breaks the per-frame '
+            "vmap.  Use convergence='auto' (the default) or None for the cohort."
+        )
+    spec = replace(spec, convergence=None)
 
     ndim = series.ndim - 1
     n_frames = series.shape[0]

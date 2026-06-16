@@ -29,28 +29,43 @@ Gaussian, velocity composition) exactly as the Demons recipe -- the only
 new kernel is the LNCC force.  ``spacing`` makes the force / regularisation
 anisotropy-correct, identically to ``DemonsSpec`` (the relative-spacing
 treatment).
+
+The above is the **algebra** (log-domain SVF) representation -- the exact
+oracle.  The default ``representation='group'`` (``SyNSpec``) instead carries the
+two *displacements* and uses the greedy compositive update (warp directly,
+compose the regularised increment -- no per-iteration ``exp``, ~4 gathers/iter
+vs ~12; the single inversion stays at finalisation), recovering the velocities
+via ``geometry.field_log``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import Literal, NamedTuple, Optional, Sequence, Union
 
 from jaxtyping import Array, Float
 
 from ..geometry import (
     compose_displacement,
+    field_log,
     gaussian_pyramid,
     integrate_velocity_field,
     invert_displacement,
 )
 from ..geometry._interpolate import BoundaryMode
+from ._converge import Convergence
+from ._core import resolve_iterations
 from ._force import Force, LNCCForce, resolve_force_schedule
+from ._preprocess import preprocess_images
 from ._svf import (
     _relative_spacing,
     finalize_with_init,
+    group_symmetric_level,
+    pin_force_ranges,
     prewarp_moving,
     resolve_init_displacement,
+    resolve_smoothing,
+    smooth_pyramid,
     svf_coarse_to_fine,
     symmetric_level,
 )
@@ -71,12 +86,23 @@ class SyNSpec:
     levels
         Gaussian-pyramid resolutions (coarse-to-fine).
     iterations
-        SyN iterations per level.
+        SyN iterations per level: an ``int`` (the same count at every level)
+        or a length-``levels`` **coarse-to-fine** tuple (front-load the cheap
+        coarse levels, cap the expensive finest one -- the ANTs schedule
+        discipline, e.g. ``(100, 70, 50, 20)`` over a 4-level pyramid).
     radius
         LNCC window radius (size ``2·radius + 1`` per axis).
     step
         Maximum per-iteration voxel displacement (the force field is
         normalised to this bound, the greedy-SyN gradient-step convention).
+    step_mode
+        How ``step`` bounds the update (group driver).  ``'clamp'`` (default)
+        is the trust-region clamp (``min(1, step/‖u‖)``) + a per-step Jacobian
+        backtracking guard.  ``'normalize'`` is the ANTs recipe: a
+        magnitude-invariant **scale-to** (``step/‖u‖``, so a small-magnitude
+        force such as ``LNCCForce(derivative='center')`` is not under-stepped)
+        and no Jacobian backtracking (the bounded smoothed step is
+        diffeomorphic by construction).  Default ``'clamp'`` is byte-identical.
     sigma_fluid
         Gaussian sigma for the fluid (per-update) regularisation.
     sigma_diffusion
@@ -94,12 +120,36 @@ class SyNSpec:
         Pyramid downsample factor / anti-alias sigma.
     boundary_mode
         Out-of-bounds handling for the warps.
+    representation
+        Dense-deformation domain: ``'group'`` (default) carries the two
+        *displacements* and uses the greedy compositive update (warp directly,
+        compose the increment -- ~4 gathers/iter, the perf path); ``'algebra'``
+        carries the *stationary velocities* and re-exponentiates every iteration
+        (the exact-SVF path, byte-identical to the pre-v4 recipe, the oracle).
+        Both return the same ``SyNResult`` with one finalisation inversion;
+        ``forward_velocity`` / ``inverse_velocity`` are recovered from the final
+        displacements via ``geometry.field_log`` in group mode.
+    convergence
+        Optional ANTs-style early-exit (``Convergence(threshold, window)``): a
+        level stops once the windowed normalised cost slope drops below
+        ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
+        full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
+        ``vmap``-batchable).  **When to use (measured):** a *tapered* per-level
+        ``iterations`` schedule (the ANTs ``100x70x50x20`` discipline) already
+        removes the over-iteration early-exit targets, so the strict default
+        ``threshold=1e-6`` then *costs* time (the ``while_loop`` overhead
+        exceeds its saving) -- hence ``None`` is the SVF default.  Early-exit
+        pays off for an *untuned / flat* schedule, or on the CPU path with a
+        looser threshold (``~1e-5`` gave ~10 % there at equal accuracy).
+        (Contrast the matrix inverse-compositional path, which converges in a
+        few of its iterations and so defaults early-exit *on*.)
     """
 
     levels: int = 3
-    iterations: int = 80
+    iterations: Union[int, tuple[int, ...]] = 80
     radius: int = 2
     step: float = 0.25
+    step_mode: Literal['clamp', 'normalize'] = 'clamp'
     sigma_fluid: float = 1.0
     sigma_diffusion: float = 1.5
     n_steps: int = 5
@@ -107,6 +157,8 @@ class SyNSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
+    representation: Literal['group', 'algebra'] = 'group'
+    convergence: Optional[Convergence] = None
 
 
 class SyNResult(NamedTuple):
@@ -147,8 +199,10 @@ def _syn_level(
     force: Force,
     spec: SyNSpec,
     ndim: int,
+    iterations: int,
     rel_spacing: Optional[tuple[float, ...]],
     mask: Optional[Array] = None,
+    restrict: Optional[tuple[float, ...]] = None,
 ) -> tuple[Array, Array, Array]:
     """Run the symmetric SyN iterations on one resolution.
 
@@ -166,7 +220,7 @@ def _syn_level(
         v_inv,
         force=force,
         ndim=ndim,
-        iterations=spec.iterations,
+        iterations=iterations,
         n_steps=spec.n_steps,
         boundary_mode=spec.boundary_mode,
         sigma_fluid=spec.sigma_fluid,
@@ -174,6 +228,8 @@ def _syn_level(
         step=spec.step,
         rel_spacing=rel_spacing,
         mask=mask,
+        restrict=restrict,
+        convergence=spec.convergence,
     )
 
 
@@ -186,6 +242,10 @@ def greedy_syn_register(
     init_affine: Optional[Float[Array, ' d1 d1']] = None,
     init_displacement: Optional[Float[Array, '*spatial ndim']] = None,
     mask: Optional[Float[Array, '*spatial']] = None,
+    restrict: Optional[tuple[float, ...]] = None,
+    winsorize: Optional[tuple[float, float]] = None,
+    histogram_match: bool = False,
+    smoothing_sigma: Optional[Union[float, Sequence[float]]] = None,
 ) -> SyNResult:
     """Greedy symmetric diffeomorphic registration (LNCC-driven by default).
 
@@ -219,6 +279,17 @@ def greedy_syn_register(
         registered; the returned ``displacement`` / ``warped`` /
         ``jacobian_det`` are the **total** (init then residual) map, while the
         velocity fields are the residual SVFs.
+    restrict
+        Optional length-``ndim`` per-axis weight on the deformation (ANTs
+        ``--restrict-deformation``): a ``0`` suppresses deformation along that
+        axis (applied to both half-forces, e.g. ``(1, 1, 0)`` for in-plane-only).
+    winsorize, histogram_match
+        Intensity conditioning before registration (the fMRIPrep front-end; see
+        ``register.rigid_register``).  Both default off.
+    smoothing_sigma
+        Optional per-level smoothing applied to each pyramid level **independent
+        of the shrink** (ANTs ``-s``): a scalar or a length-``levels``
+        coarse-to-fine sequence.  ``None`` (default) is byte-unchanged.
 
     Returns
     -------
@@ -230,6 +301,16 @@ def greedy_syn_register(
         raise ValueError(
             f'greedy SyN supports 2-D / 3-D single-channel images; got '
             f'moving {moving.shape}, fixed {fixed.shape}.'
+        )
+    moving, fixed = preprocess_images(
+        moving,
+        fixed,
+        winsorize_range=winsorize,
+        histogram_match=histogram_match,
+    )
+    if restrict is not None and len(restrict) != ndim:
+        raise ValueError(
+            f'restrict must have length ndim={ndim}; got {len(restrict)}.'
         )
     dtype = moving.dtype
     init_disp = resolve_init_displacement(
@@ -244,22 +325,34 @@ def greedy_syn_register(
     moving_reg = prewarp_moving(
         moving, init_disp, fixed.shape, dtype, spec.boundary_mode
     )
-    pyr_m = gaussian_pyramid(
-        moving_reg[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    smoothing = resolve_smoothing(smoothing_sigma, spec.levels)
+    pyr_m = smooth_pyramid(
+        gaussian_pyramid(
+            moving_reg[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
-    pyr_f = gaussian_pyramid(
-        fixed[..., None],
-        levels=spec.levels,
-        factor=spec.pyramid_factor,
-        sigma=spec.pyramid_sigma,
+    pyr_f = smooth_pyramid(
+        gaussian_pyramid(
+            fixed[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        ),
+        smoothing,
+        ndim,
     )
     rel_spacing = _relative_spacing(spec.spacing, ndim)
     forces = resolve_force_schedule(
         force, default=LNCCForce(spec.radius), levels=spec.levels
     )
+    # Pin any histogram-force ranges once from the full-res images (stationary
+    # objective; see pin_force_ranges) before the pyramid.
+    forces = [pin_force_ranges(f, moving_reg, fixed) for f in forces]
     pyr_mask = (
         None
         if mask is None
@@ -271,25 +364,49 @@ def greedy_syn_register(
         )
     )
 
+    iters_per_level = resolve_iterations(spec.iterations, spec.levels)
+
     def level_solve(
         level: int, m_l: Array, f_l: Array, state: tuple[Array, ...]
     ) -> tuple[tuple[Array, ...], Array]:
-        v_fwd, v_inv = state
+        f_fwd, f_inv = state
         mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
-        v_fwd, v_inv, hist = _syn_level(
-            m_l,
-            f_l,
-            v_fwd,
-            v_inv,
-            force=forces[level],
-            spec=spec,
-            ndim=ndim,
-            rel_spacing=rel_spacing,
-            mask=mask_l,
-        )
-        return (v_fwd, v_inv), hist
+        if spec.representation == 'algebra':
+            f_fwd, f_inv, hist = _syn_level(
+                m_l,
+                f_l,
+                f_fwd,
+                f_inv,
+                force=forces[level],
+                spec=spec,
+                ndim=ndim,
+                iterations=iters_per_level[level],
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+            )
+        else:
+            f_fwd, f_inv, hist = group_symmetric_level(
+                m_l,
+                f_l,
+                f_fwd,
+                f_inv,
+                force=forces[level],
+                ndim=ndim,
+                iterations=iters_per_level[level],
+                boundary_mode=spec.boundary_mode,
+                sigma_fluid=spec.sigma_fluid,
+                sigma_diffusion=spec.sigma_diffusion,
+                step=spec.step,
+                step_mode=spec.step_mode,
+                rel_spacing=rel_spacing,
+                mask=mask_l,
+                restrict=restrict,
+                convergence=spec.convergence,
+            )
+        return (f_fwd, f_inv), hist
 
-    (v_fwd, v_inv), cost_history = svf_coarse_to_fine(
+    (state_fwd, state_inv), cost_history = svf_coarse_to_fine(
         pyr_m,
         pyr_f,
         ndim=ndim,
@@ -298,12 +415,21 @@ def greedy_syn_register(
         level_solve=level_solve,
     )
 
-    s_fwd = integrate_velocity_field(
-        v_fwd, n_steps=spec.n_steps, mode=spec.boundary_mode
-    )
-    s_inv = integrate_velocity_field(
-        v_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
-    )
+    # Algebra carries the half-velocities (exp each); group carries the half-
+    # displacements directly (recover the velocities via field_log).  The final
+    # composition + single inversion is identical in both modes.
+    if spec.representation == 'algebra':
+        v_fwd, v_inv = state_fwd, state_inv
+        s_fwd = integrate_velocity_field(
+            v_fwd, n_steps=spec.n_steps, mode=spec.boundary_mode
+        )
+        s_inv = integrate_velocity_field(
+            v_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
+        )
+    else:
+        s_fwd, s_inv = state_fwd, state_inv
+        v_fwd = field_log(s_fwd, n_sqrt=spec.n_steps, mode=spec.boundary_mode)
+        v_inv = field_log(s_inv, n_sqrt=spec.n_steps, mode=spec.boundary_mode)
     # moving -> fixed residual: fixed --(id+s_inv)⁻¹--> midpoint --(id+s_fwd)-->
     s_inv_inverse = invert_displacement(s_inv, mode=spec.boundary_mode)
     residual = compose_displacement(

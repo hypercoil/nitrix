@@ -69,6 +69,55 @@ def test_matrix_log_inverts_matrix_exp():
     assert np.allclose(_np(matrix_exp(matrix_log(m))), _np(m), atol=1e-10)
 
 
+def test_matrix_log_large_translation_illscaled_in_domain():
+    # B3: a valid large-translation / anisotropic-scale / sheared affine (large
+    # Frobenius ‖A−I‖, but a spectrum the square roots still drive to I) round-
+    # trips to ~machine precision and is NOT spuriously NaN'd by the guard.
+    a = jnp.asarray(
+        [[2.5, 0.8, 180.0], [0.0, 0.4, -150.0], [0.0, 0.0, 1.0]]
+    )
+    log_a = matrix_log(a)
+    assert bool(jnp.all(jnp.isfinite(log_a)))
+    rel = float(jnp.linalg.norm(matrix_exp(log_a) - a) / jnp.linalg.norm(a))
+    assert rel < 1e-8
+
+
+def test_matrix_log_large_rotation_in_domain_not_nan():
+    # A 150-deg rotation is in-domain (its eigenvalues are off the negative real
+    # axis until 180 deg) -- the guard must not be so aggressive as to NaN it.
+    th = np.deg2rad(150.0)
+    rot = jnp.asarray(
+        [
+            [np.cos(th), -np.sin(th), 4.0],
+            [np.sin(th), np.cos(th), -3.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    log_r = matrix_log(rot)
+    assert bool(jnp.all(jnp.isfinite(log_r)))
+    rel = float(jnp.linalg.norm(matrix_exp(log_r) - rot) / jnp.linalg.norm(rot))
+    assert rel < 1e-8
+
+
+def test_matrix_log_out_of_domain_returns_nan():
+    # Outside the domain (an eigenvalue on the closed negative real axis) the
+    # principal log does not exist: matrix_log returns a LOUD NaN, not the
+    # finite garbage the bare series would yield.
+    reflection = jnp.asarray(
+        [[-1.0, 0.0, 5.0], [0.0, 1.0, 3.0], [0.0, 0.0, 1.0]]
+    )
+    assert bool(jnp.all(jnp.isnan(matrix_log(reflection))))
+    th = np.pi  # 180-deg rotation: eigenvalue -1
+    rot180 = jnp.asarray(
+        [
+            [np.cos(th), -np.sin(th), 0.0],
+            [np.sin(th), np.cos(th), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    assert bool(jnp.all(jnp.isnan(matrix_log(rot180))))
+
+
 def test_transform_mean_of_identical():
     t = rigid_exp(jnp.asarray([0.1, -0.05, 0.08, 3.0, -2.0, 1.5]), ndim=3)
     assert np.allclose(
@@ -106,6 +155,65 @@ def test_transform_mean_affine_symmetric_recovers_centre():
     d = jnp.asarray(rng.standard_normal((4, 4)) * 0.1).at[3, :].set(0.0)
     stack = jnp.stack([centre @ matrix_exp(d), centre @ matrix_exp(-d)])
     assert np.allclose(_np(transform_mean(stack)), _np(centre), atol=1e-4)
+
+
+def test_transform_mean_residual_small_on_clustered_cohort():
+    # B3: return_residual surfaces convergence -- a clustered cohort drives the
+    # final Karcher update tangent to ~0 within the default cap.
+    rng = np.random.RandomState(3)
+    centre = rigid_exp(jnp.asarray([0.1, -0.05, 0.08, 3.0, -2.0, 1.5]), ndim=3)
+    stack = jnp.stack(
+        [
+            centre
+            @ matrix_exp(
+                _se3_algebra(rng.standard_normal(3) * 0.05, rng.standard_normal(3) * 0.5)
+            )
+            for _ in range(5)
+        ]
+    )
+    mean, residual = transform_mean(stack, return_residual=True)
+    assert bool(jnp.all(jnp.isfinite(mean)))
+    assert float(residual) < 1e-6  # converged: the final Karcher step ~ 0
+
+
+def test_transform_mean_dispersed_cohort_needs_more_iters():
+    # A widely-dispersed, NON-commuting (multi-axis, ~80-deg) rotation cohort:
+    # the Karcher fixed point converges slowly (a single-axis cohort would
+    # converge in one step).  The residual is honest about non-convergence at a
+    # tight cap and shrinks as iters rises -- the fixed cap does not silently
+    # return a non-converged mean.
+    axes_angles = [
+        ([1.0, 0.0, 0.0], 1.4),
+        ([0.0, 1.0, 0.0], -1.3),
+        ([0.0, 0.0, 1.0], 1.5),
+        ([1.0, 1.0, 0.0], 1.2),
+        ([0.0, 1.0, 1.0], -1.4),
+    ]
+    stack = jnp.stack(
+        [
+            matrix_exp(
+                _se3_algebra(
+                    np.asarray(ax) / np.linalg.norm(ax) * ang, [2.0, -1.0, 1.5]
+                )
+            )
+            for ax, ang in axes_angles
+        ]
+    )
+    _, r_few = transform_mean(stack, iters=2, return_residual=True)
+    mean, r_many = transform_mean(stack, iters=30, return_residual=True)
+    assert float(r_few) > 1e-2  # a tight cap leaves it visibly non-converged
+    assert float(r_many) < float(r_few)
+    assert float(r_many) < 1e-6  # raising the cap drives it to the barycentre
+    assert bool(jnp.all(jnp.isfinite(mean)))
+
+
+def test_transform_mean_antipodal_cohort_is_nan():
+    # An antipodal pair (~π apart) sits on matrix_log's negative-real-axis
+    # boundary: the barycentre is genuinely ill-defined and surfaces as NaN
+    # (loud), not silent garbage.
+    rot180 = matrix_exp(_se3_algebra([np.pi, 0.0, 0.0], [0.0, 0.0, 0.0]))
+    mean = transform_mean(jnp.stack([jnp.eye(4), rot180]))
+    assert bool(jnp.any(jnp.isnan(mean)))
 
 
 def test_transform_geodesic_endpoints_and_halfway():

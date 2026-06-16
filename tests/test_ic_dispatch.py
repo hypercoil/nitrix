@@ -21,7 +21,9 @@ import pytest  # noqa: E402
 from nitrix.geometry import (  # noqa: E402
     affine_exp,
     affine_grid,
+    identity_grid,
     rigid_exp,
+    spatial_gradient,
     spatial_transform,
 )
 from nitrix.metrics import ncc  # noqa: E402
@@ -33,7 +35,14 @@ from nitrix.register import (  # noqa: E402
     affine_register,
     rigid_register,
 )
-from nitrix.register._inverse_compositional import _hessian_inv  # noqa: E402
+from nitrix.register._inverse_compositional import (  # noqa: E402
+    _affine_project_moments,
+    _affine_steepest_descent,
+    _hessian_inv,
+    _rigid_project_moments,
+    _steepest_descent,
+    ic_reference,
+)
 
 
 def _blobs(n=64, seed=0):
@@ -59,6 +68,38 @@ def _rigid_pair(n=64):
     )
     moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
     return moving, fixed
+
+
+def test_moment_projection_matches_steepest_descent():
+    # 3a: the per-iteration projection SDᵀe, reconstructed from the moments of
+    # ∇F (m_ij = Σ ∇F_i·(x−c)_j·e, g_i = Σ ∇F_i·e), reproduces the (M,P)
+    # steepest-descent projection sd.T@err exactly -- for both models.
+    rng = np.random.RandomState(0)
+    for ndim, shape in [(2, (40, 44)), (3, (16, 18, 20))]:
+        fixed = jnp.asarray(rng.standard_normal(shape))
+        center = (jnp.asarray(shape, dtype=fixed.dtype) - 1.0) / 2.0
+        err = jnp.asarray(rng.standard_normal(shape).reshape(-1))
+        grad = spatial_gradient(fixed).reshape(-1, ndim)
+        grid_c = (identity_grid(shape, dtype=fixed.dtype) - center).reshape(-1, ndim)
+        m = grad.T @ (grid_c * err[:, None])
+        g = grad.T @ err
+        rigid_ref = _steepest_descent(fixed, center, ndim).T @ err
+        affine_ref = _affine_steepest_descent(fixed, center, ndim).T @ err
+        assert np.allclose(
+            np.asarray(_rigid_project_moments(m, g, ndim)), np.asarray(rigid_ref), atol=1e-9
+        )
+        assert np.allclose(
+            np.asarray(_affine_project_moments(m, g, ndim)), np.asarray(affine_ref), atol=1e-9
+        )
+
+
+def test_ic_reference_stores_gradient_not_sd():
+    # 3a memory: the reference holds ∇F (M, ndim), not the (M, P) SD buffer.
+    fixed = _blobs(48)
+    pyr = (fixed[..., None],)
+    ref = ic_reference(pyr, ndim=2)
+    grad = ref[0][1]
+    assert grad.shape == (48 * 48, 2)  # (M, ndim), not (M, 6) affine SD
 
 
 def test_ic_matches_forward():
@@ -246,17 +287,30 @@ def test_early_exit_recovers_like_fixed_scan():
     assert res_early.cost_history.shape == res_fixed.cost_history.shape
 
 
-def test_early_exit_default_is_fixed_scan():
-    # convergence=None (default) is byte-identical to the explicit fixed scan
+def test_default_auto_early_exit_recovers_like_none_scan():
+    # 3b: the default (convergence='auto') early-exits on the single-pair IC
+    # path, recovering to the same optimum as the explicit convergence=None fixed
+    # scan (the reverse-differentiable opt-out) -- the early-exit default does
+    # not change the result, only the iteration count.
     moving, fixed = _rigid_pair(64)
-    spec = RegistrationSpec(levels=3, iterations=20)
-    a = rigid_register(moving, fixed, spec=spec)
-    b = rigid_register(
+    auto = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=3, iterations=20)
+    )
+    scan = rigid_register(
         moving,
         fixed,
         spec=RegistrationSpec(levels=3, iterations=20, convergence=None),
     )
-    assert np.allclose(np.asarray(a.warped), np.asarray(b.warped), atol=1e-12)
+    assert np.allclose(np.asarray(auto.warped), np.asarray(scan.warped), atol=1e-6)
+
+
+def test_convergence_raises_on_forward_path():
+    # C3: an explicit Convergence on a path that cannot honour it (forward GN/LM
+    # -- here forced by method='forward') raises rather than being silently inert.
+    moving, fixed = _rigid_pair(48)
+    spec = RegistrationSpec(levels=2, iterations=10, convergence=Convergence())
+    with pytest.raises(ValueError, match='inverse-compositional'):
+        rigid_register(moving, fixed, spec=spec, method='forward')
 
 
 def test_early_exit_affine():

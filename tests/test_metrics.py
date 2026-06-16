@@ -6,6 +6,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 jax.config.update('jax_enable_x64', True)
 
@@ -21,6 +22,11 @@ from nitrix.metrics import (
     koleo,
     lncc,
     lncc_grad,
+    lncc_grad_center,
+    match_histogram,
+    mi_grad,
+    mutual_information,
+    winsorize,
 )
 
 
@@ -37,6 +43,259 @@ def test_lncc_grad_matches_autodiff():
         )(moving)
         assert analytic.shape == moving.shape
         assert np.allclose(np.asarray(analytic), np.asarray(auto), atol=1e-10)
+
+
+def test_lncc_grad_center_matches_itk_formula():
+    # The centre-only force reproduces ITK's ANTSNeighborhoodCorrelation
+    # derivative (a direct windowed reference), to machine precision interior.
+    from scipy.ndimage import uniform_filter
+
+    def ref(m, f, r, eps=1e-5):
+        sz = 2 * r + 1
+        n = sz ** m.ndim
+
+        def bs(x):
+            return uniform_filter(x, size=sz, mode='reflect') * n
+
+        sm, sf = bs(m), bs(f)
+        s_ff = bs(f * f) - sf * sf / n
+        s_mm = bs(m * m) - sm * sm / n
+        s_fm = bs(m * f) - sf * sm / n
+        f_a, m_a = f - sf / n, m - sm / n
+        safe = (s_ff > eps) & (s_mm > eps)
+        return np.where(
+            safe,
+            2 * s_fm / np.where(safe, s_ff * s_mm, 1.0)
+            * (f_a - s_fm / np.where(safe, s_mm, 1.0) * m_a),
+            0.0,
+        )
+
+    rng = np.random.RandomState(0)
+    for shape, r in [((40, 44), 2), ((22, 18, 20), 2)]:
+        m = rng.standard_normal(shape)
+        f = rng.standard_normal(shape) + 0.5 * m
+        got = np.asarray(lncc_grad_center(jnp.asarray(m), jnp.asarray(f), radius=r))
+        want = ref(m, f, r)
+        sl = tuple(slice(r + 1, s - r - 1) for s in shape)  # interior
+        assert np.allclose(got[sl], want[sl], atol=1e-10)
+
+
+def test_lncc_grad_center_zeroes_flat_window():
+    # A constant (flat) image has sFF=sMM=0 -> the ITK guard zeroes the force,
+    # and the gradient stays finite (the double-where).
+    flat = jnp.ones((24, 24, 24))
+    moving = jnp.asarray(np.random.RandomState(1).standard_normal((24, 24, 24)))
+    g = lncc_grad_center(moving, flat, radius=2)
+    assert np.all(np.isfinite(np.asarray(g)))
+    # where fixed is flat (sFF=0) the force is exactly zero
+    assert float(jnp.abs(g).max()) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# preprocessing (fMRIPrep front-end, 4a/4b)
+# ---------------------------------------------------------------------------
+
+
+def test_winsorize_clips_outliers_to_percentiles():
+    rng = np.random.RandomState(0)
+    x = rng.standard_normal((64, 64))
+    x[0, 0], x[1, 1] = 100.0, -100.0  # hot / cold outliers
+    xw = np.asarray(winsorize(jnp.asarray(x), lower=0.005, upper=0.995))
+    lo, hi = np.quantile(x, [0.005, 0.995])
+    assert np.isclose(xw.max(), hi, atol=1e-6)  # hot voxel clipped to the pctile
+    assert np.isclose(xw.min(), lo, atol=1e-6)
+    # interior (non-tail) voxels are untouched
+    interior = (x > lo) & (x < hi)
+    assert np.allclose(xw[interior], x[interior])
+
+
+def test_winsorize_validation():
+    with pytest.raises(ValueError):
+        winsorize(jnp.ones((8,)), lower=0.9, upper=0.1)
+
+
+def test_match_histogram_matches_reference_distribution():
+    rng = np.random.RandomState(1)
+    reference = jnp.asarray(rng.standard_normal((80, 80)) * 2.0 + 5.0)
+    moving = reference * 0.4 - 3.0  # a global gain/offset of the same structure
+    matched = match_histogram(moving, reference)
+    qs = np.array([0.1, 0.25, 0.5, 0.75, 0.9])
+    assert np.allclose(
+        np.quantile(np.asarray(matched), qs),
+        np.quantile(np.asarray(reference), qs),
+        atol=1e-2,
+    )
+    # the remap is monotone, so structure (correlation with reference) is kept
+    corr = np.corrcoef(np.asarray(matched).ravel(), np.asarray(reference).ravel())
+    assert corr[0, 1] > 0.999
+    g = jax.grad(lambda z: (match_histogram(z, reference) ** 2).sum())(moving)
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+# ---------------------------------------------------------------------------
+# _box_sum integral image (1c)
+# ---------------------------------------------------------------------------
+
+
+def _ref_box_sum_2d(x, r, np_mode):
+    xp = np.pad(np.asarray(x), r, mode=np_mode)
+    n0, n1 = x.shape
+    out = np.zeros((n0, n1))
+    for i in range(n0):
+        for j in range(n1):
+            out[i, j] = xp[i : i + 2 * r + 1, j : j + 2 * r + 1].sum()
+    return out
+
+
+def test_box_sum_integral_image_matches_windowed_reference():
+    # The integral-image box sum equals the direct padded windowed sum across
+    # boundary modes (only the O(N) computation changed, not the operator).
+    from nitrix.metrics._common import _box_sum
+
+    rng = np.random.RandomState(1)
+    x = jnp.asarray(rng.standard_normal((24, 26)))
+    r = 3
+    for mode, np_mode in [
+        ('reflect', 'symmetric'),
+        ('mirror', 'reflect'),
+        ('nearest', 'edge'),
+        ('constant', 'constant'),
+    ]:
+        got = np.asarray(_box_sum(x, (2 * r + 1, 2 * r + 1), (0, 1), mode))
+        ref = _ref_box_sum_2d(x, r, np_mode)
+        assert np.allclose(got, ref, atol=1e-10)
+
+
+def test_box_sum_fp32_within_tolerance_of_fp64():
+    # 1c gate: the integral image trades a cancellation in fp32 (the prefix-sum
+    # magnitude ~ axis_length·max) for O(N), radius-free cost.  At a realistic
+    # intensity range it stays well within fp32 tolerance of fp64 -- the gate
+    # certifying the cancellation is acceptable (NOT an assertion of fp32 safety
+    # at any scale: a huge grid at a wide range should use fp64 / winsorise).
+    from nitrix.metrics._common import _box_sum
+
+    rng = np.random.RandomState(0)
+    x = rng.uniform(0.0, 500.0, (160, 160))  # scaled-MRI-like range, not [0,1]
+    bs64 = np.asarray(_box_sum(jnp.asarray(x, jnp.float64), (9, 9), (0, 1), 'reflect'))
+    bs32 = np.asarray(_box_sum(jnp.asarray(x, jnp.float32), (9, 9), (0, 1), 'reflect'))
+    assert (np.abs(bs32 - bs64) / (np.abs(bs64) + 1e-6)).max() < 1e-4
+    a = rng.uniform(0.0, 500.0, (160, 160))
+    b = 0.6 * a + rng.uniform(0.0, 200.0, (160, 160))
+    l32 = float(lncc(jnp.asarray(a, jnp.float32), jnp.asarray(b, jnp.float32), radius=4))
+    l64 = float(lncc(jnp.asarray(a, jnp.float64), jnp.asarray(b, jnp.float64), radius=4))
+    assert abs(l32 - l64) < 1e-4
+
+
+# ---------------------------------------------------------------------------
+# mi_grad (closed-form Mattes MI gradient)
+# ---------------------------------------------------------------------------
+
+
+def _mi_autograd(moving, fixed, *, bins, rm, rf):
+    return jax.grad(
+        lambda m: mutual_information(
+            m, fixed, bins=bins, range_moving=rm, range_fixed=rf
+        )
+    )(moving)
+
+
+def test_mi_grad_matches_autodiff_on_populated_bins():
+    # The parity oracle: on a fully-populated joint histogram (no empty bins)
+    # the closed-form Mattes gradient is the exact derivative of the cost --
+    # machine precision vs autodiff, with no histogram-scatter tape.
+    rng = np.random.RandomState(0)
+    for shape, bins in [((64, 64), 16), ((40, 40), 12), ((16, 18, 20), 8)]:
+        moving = jnp.asarray(rng.uniform(0.0, 1.0, shape))  # noise fills bins
+        fixed = jnp.asarray(rng.uniform(0.0, 1.0, shape))
+        rm = rf = (0.0, 1.0)
+        analytic = np.asarray(mi_grad(moving, fixed, bins=bins, range_moving=rm, range_fixed=rf))
+        auto = np.asarray(_mi_autograd(moving, fixed, bins=bins, rm=rm, rf=rf))
+        assert analytic.shape == tuple(shape)
+        rel = np.linalg.norm(analytic - auto) / (np.linalg.norm(auto) + 1e-30)
+        assert rel < 1e-6
+
+
+def test_mi_grad_direction_aligns_cross_modal():
+    # On a SPARSE cross-modal histogram (many empty bins) the magnitude diverges
+    # from autodiff at the empty-bin boundaries (the where(hist>0) mask is
+    # non-smooth there -- the documented analogue of lncc_grad's boundary
+    # divergence), but the *direction* stays tightly aligned, which is what
+    # drives the registration force.
+    rng = np.random.RandomState(1)
+    yy, xx = np.mgrid[0:56, 0:56].astype('float64')
+    fixed = np.zeros((56, 56))
+    for _ in range(6):
+        cy, cx = rng.uniform(0.2, 0.8, 2) * 56
+        fixed += rng.uniform(0.4, 1.0) * np.exp(
+            -((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * (0.12 * 56) ** 2)
+        )
+    fixed = jnp.asarray(fixed)
+    moving = jnp.sqrt(fixed - fixed.min() + 0.05)  # "different modality"
+    rm = (float(moving.min()), float(moving.max()))
+    rf = (float(fixed.min()), float(fixed.max()))
+    a = np.asarray(mi_grad(moving, fixed, bins=32, range_moving=rm, range_fixed=rf)).ravel()
+    b = np.asarray(_mi_autograd(moving, fixed, bins=32, rm=rm, rf=rf)).ravel()
+    cos = a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-30)
+    assert cos > 0.99
+
+
+def test_mi_grad_sample_stride_default_exact_and_subsample_aligns():
+    # sample_stride=1 is byte-identical to the default; a strided subsample (ITK
+    # "Regular" sampling) estimates the joint PDF from a voxel subset and keeps
+    # the dense gradient cos-aligned with the full one on STRUCTURED cross-modal
+    # data (the bottleneck histogram scatter is ~stride x cheaper).
+    rng = np.random.RandomState(2)
+    n = 48
+    yy, xx, zz = np.mgrid[0:n, 0:n, 0:n].astype('float64')
+    base = np.zeros((n, n, n))
+    for _ in range(5):
+        c = rng.uniform(0.2, 0.8, 3) * n
+        base += rng.uniform(0.4, 1.0) * np.exp(
+            -((xx - c[0]) ** 2 + (yy - c[1]) ** 2 + (zz - c[2]) ** 2)
+            / (2 * (0.13 * n) ** 2)
+        )
+    fixed = jnp.asarray(base + 0.02 * rng.standard_normal((n, n, n)))
+    moving = jnp.asarray(  # cross-modal: nonlinear remap
+        np.sqrt(base - base.min() + 0.05) + 0.02 * rng.standard_normal((n, n, n))
+    )
+    rm = (float(moving.min()), float(moving.max()))
+    rf = (float(fixed.min()), float(fixed.max()))
+    full = mi_grad(moving, fixed, bins=32, range_moving=rm, range_fixed=rf)
+    exact = mi_grad(
+        moving, fixed, bins=32, range_moving=rm, range_fixed=rf, sample_stride=1
+    )
+    assert np.array_equal(np.asarray(full), np.asarray(exact))  # stride 1 == full
+    sub = np.asarray(
+        mi_grad(
+            moving, fixed, bins=32, range_moving=rm, range_fixed=rf,
+            sample_stride=4,
+        )
+    ).ravel()
+    fr = np.asarray(full).ravel()
+    cos = sub @ fr / (np.linalg.norm(sub) * np.linalg.norm(fr) + 1e-30)
+    assert cos > 0.95
+
+
+def test_mi_grad_zero_outside_pinned_range():
+    # A voxel outside the pinned moving range has a clipped soft bin, so its
+    # derivative is exactly zero (the force never pushes an over-range voxel).
+    rng = np.random.RandomState(2)
+    fixed = jnp.asarray(rng.uniform(0.0, 1.0, (40, 40)))
+    moving = jnp.asarray(rng.uniform(0.0, 1.0, (40, 40))).at[0, 0].set(5.0)
+    g = mi_grad(moving, fixed, bins=16, range_moving=(0.0, 1.0), range_fixed=(0.0, 1.0))
+    assert float(g[0, 0]) == 0.0
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+def test_mi_grad_finite_on_degenerate_uniform():
+    # A fully-uniform (zero-range) moving image with an unpinned range: the span
+    # floor keeps s_m bounded so the force is finite, not NaN/inf (robustness).
+    rng = np.random.RandomState(3)
+    fixed = jnp.asarray(rng.uniform(0.0, 1.0, (40, 40)))
+    moving = jnp.ones((40, 40))
+    g = mi_grad(moving, fixed, bins=16)  # range_moving=None -> data range = 0
+    assert bool(jnp.all(jnp.isfinite(g)))
+
 
 # ---------------------------------------------------------------------------
 # dice / jaccard

@@ -22,16 +22,23 @@ import pytest  # noqa: E402
 from nitrix.geometry import (  # noqa: E402
     affine_exp,
     affine_grid,
+    identity_grid,  # noqa: E402
     rigid_exp,
     spatial_transform,
 )
-from nitrix.metrics import ncc  # noqa: E402
+from nitrix.metrics import mutual_information, ncc  # noqa: E402
 from nitrix.register import (  # noqa: E402
     LNCC,
+    MI,
+    SSD,
+    CorrelationRatio,
     RegistrationSpec,
+    WorldSpace,
     affine_register,
     rigid_register,
 )
+from nitrix.register._metric import pin_metric_ranges  # noqa: E402
+from nitrix.register.recipes import _moment_init_matrix  # noqa: E402
 
 
 def _blobs_2d(n=64):
@@ -126,6 +133,140 @@ def test_rigid_2d_lncc_recovery():
         spec=RegistrationSpec(levels=3, iterations=40, metric=LNCC()),
     )
     assert float(ncc(res.warped, fixed)) > 0.97
+
+
+def test_pin_metric_ranges_resolves_histogram_metrics():
+    # 4d (A6, matrix half): the driver pins a histogram metric's ranges once
+    # from the full-res images; a least-squares / already-pinned metric is a
+    # no-op (same object).
+    moving = _blobs_2d(48)
+    fixed = _blobs_2d(48) * 1.4 + 0.2  # different support
+    pinned = pin_metric_ranges(MI(bins=16), moving, fixed)
+    assert isinstance(pinned, MI)
+    assert pinned.range_moving == (float(moving.min()), float(moving.max()))
+    assert pinned.range_fixed == (float(fixed.min()), float(fixed.max()))
+    cr = pin_metric_ranges(CorrelationRatio(bins=16), moving, fixed)
+    assert isinstance(cr, CorrelationRatio)
+    assert cr.range_fixed == (float(fixed.min()), float(fixed.max()))
+    ssd = SSD()
+    assert pin_metric_ranges(ssd, moving, fixed) is ssd
+    already = MI(bins=16, range_moving=(0.0, 1.0), range_fixed=(0.0, 2.0))
+    assert pin_metric_ranges(already, moving, fixed) is already
+
+
+def _small_cluster(n=96):
+    yy, xx = np.mgrid[0:n, 0:n].astype('float64')
+    img = np.zeros((n, n))
+    for cy, cx, s, a in [
+        (0.46, 0.48, 0.07, 1.0),
+        (0.54, 0.55, 0.08, 0.7),
+        (0.50, 0.40, 0.06, 0.6),
+    ]:
+        img += a * np.exp(
+            -((xx - cx * n) ** 2 + (yy - cy * n) ** 2) / (2 * (s * n) ** 2)
+        )
+    return jnp.asarray(img)
+
+
+def test_moment_init_aligns_centroids():
+    # 3c (A8): the moment-init matrix maps the fixed centroid onto the moving
+    # centroid (the affine_grid centring convention) -- the warped moving lands
+    # its intensity centroid on the fixed centroid.
+    fixed = _small_cluster(96)
+    true = affine_exp(jnp.asarray([0.0, 0.0, 0.0, 0.0, 30.0, -22.0]), ndim=2)
+    moving = _warp_known(fixed, true)
+    matrix = _moment_init_matrix(moving, fixed, ndim=2, scale=True)
+    center = (jnp.asarray((96, 96), dtype=fixed.dtype) - 1.0) / 2.0
+    from nitrix.geometry import affine_grid, spatial_transform
+
+    warped = spatial_transform(
+        moving[..., None], affine_grid(matrix, (96, 96), center=center)
+    )[..., 0]
+
+    def centroid(img):
+        grid = identity_grid(img.shape, dtype=img.dtype)
+        w = jnp.clip(img, 0.0, None)
+        return jnp.sum(w[..., None] * grid, axis=(0, 1)) / (jnp.sum(w) + 1e-12)
+
+    assert np.allclose(
+        np.asarray(centroid(warped)), np.asarray(centroid(fixed)), atol=0.5
+    )
+
+
+def test_moment_init_recovers_where_identity_fails():
+    # 3c (A8): a translation large enough that the structure falls out of overlap
+    # -- the optimiser cannot find it from a zero start (ncc ~ 0), but the
+    # centre-of-mass init lands inside the basin and it recovers.
+    fixed = _small_cluster(96)
+    true = affine_exp(jnp.asarray([0.0, 0.0, 0.0, 0.0, 38.0, -38.0]), ndim=2)
+    moving = _warp_known(fixed, true)
+    spec = RegistrationSpec(levels=3, iterations=50)
+    identity = affine_register(moving, fixed, spec=spec, init='identity')
+    moment = affine_register(moving, fixed, spec=spec, init='moment')
+    assert float(ncc(identity.warped, fixed)) < 0.5
+    assert float(ncc(moment.warped, fixed)) > 0.9
+
+
+def test_moment_init_validation():
+    fixed, moving = _small_cluster(64), _small_cluster(64)
+    with pytest.raises(ValueError, match='IndexSpace'):
+        affine_register(
+            moving,
+            fixed,
+            init='moment',
+            space=WorldSpace(
+                fixed_affine=jnp.eye(3), moving_affine=jnp.eye(3)
+            ),
+        )
+    with pytest.raises(ValueError, match='identity'):
+        rigid_register(moving, fixed, init='nonsense')
+
+
+def test_recipe_winsorize_histmatch_improves_cross_gain():
+    # 4a/4b: a moving image with a global gain/offset + a hot outlier registers
+    # poorly under SSD; winsorising the outlier and histogram-matching the gain
+    # onto the fixed distribution recovers it.
+    fixed = _blobs_2d(64)
+    moved = _warp_known(fixed, rigid_exp(jnp.asarray([0.12, 4.0, -3.0]), ndim=2))
+    moving = (moved * 0.5 + 0.3).at[0, 0].set(50.0)
+    spec = RegistrationSpec(levels=3, iterations=30)
+    plain = rigid_register(moving, fixed, spec=spec)
+    conditioned = rigid_register(
+        moving, fixed, spec=spec, winsorize=(0.005, 0.995), histogram_match=True
+    )
+    assert float(ncc(conditioned.warped, fixed)) > float(ncc(plain.warped, fixed))
+    assert float(ncc(conditioned.warped, fixed)) > 0.99
+
+
+def test_recipe_preprocessing_default_off_byte_identical():
+    fixed = _blobs_2d(48)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 3.0, -2.0]), ndim=2))
+    spec = RegistrationSpec(levels=2, iterations=20)
+    a = rigid_register(moving, fixed, spec=spec)
+    b = rigid_register(
+        moving, fixed, spec=spec, winsorize=None, histogram_match=False
+    )
+    assert np.allclose(np.asarray(a.warped), np.asarray(b.warped))
+
+
+def test_rigid_2d_mi_recovery_cross_modal():
+    # The matrix MI path (forward BFGS) recovers a known rotation on a CROSS-
+    # MODAL pair (intensity-remapped moving), with the histogram range pinned
+    # once from the full-res images (A6) -- a stationary objective.
+    fixed = _blobs_2d(64)
+    true = jnp.asarray([0.12, 3.0, -2.5])
+    warped = _warp_known(fixed, rigid_exp(true, ndim=2))
+    moving = jnp.sqrt(warped - warped.min() + 0.05)  # "different modality"
+    res = rigid_register(
+        moving,
+        fixed,
+        spec=RegistrationSpec(levels=3, iterations=40, metric=MI(bins=32)),
+    )
+    mi0 = float(mutual_information(moving, fixed, bins=32))
+    mi1 = float(mutual_information(res.warped, fixed, bins=32))
+    assert mi1 > mi0  # the optimised objective improves
+    # recovered rotation is the inverse rotation (centre-independent).
+    assert np.isclose(float(res.params[0]), -0.12, atol=0.03)
 
 
 def test_identity_registration_is_near_zero():

@@ -26,6 +26,7 @@ from nitrix.geometry import (  # noqa: E402
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import (  # noqa: E402
     LNCC,
+    Convergence,
     RegistrationSpec,
     WorldSpace,
     volreg,
@@ -225,3 +226,7 @@ def test_volreg_validation():
             method='inverse_compositional',
             space=WorldSpace(fixed_affine=affine, moving_affine=affine),
         )
+    # C3: an explicit early-exit Convergence is rejected (the while_loop breaks
+    # the per-frame vmap); 'auto'/None resolve to the fixed scan and are fine.
+    with pytest.raises(ValueError, match='vmap'):
+        volreg(series, spec=RegistrationSpec(convergence=Convergence()))

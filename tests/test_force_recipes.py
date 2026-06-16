@@ -28,9 +28,13 @@ from nitrix.register import (  # noqa: E402
     LNCC,
     MI,
     DemonsForce,
+    DemonsSpec,
     LNCCForce,
     MetricForce,
+    MIForce,
+    SumForce,
     SyNSpec,
+    diffeomorphic_demons_register,
     greedy_syn_register,
 )
 from nitrix.smoothing import gaussian  # noqa: E402
@@ -100,6 +104,87 @@ def test_syn_multimodal_mi_improves():
     mi0 = float(mutual_information(moving, fixed, bins=24))
     mi1 = float(mutual_information(res.warped, fixed, bins=24))
     assert mi1 > mi0
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_syn_miforce_mi_recovers():
+    # The closed-form Mattes MI fast path (MIForce) drives cross-modal SyN to a
+    # real MI gain and stays diffeomorphic -- the fMRIPrep cross-modal deformable
+    # path with the autodiff histogram tape removed (1a).
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)  # "different modality"
+    spec = SyNSpec(levels=3, iterations=60, radius=3, step=0.5)
+    res = greedy_syn_register(moving, fixed, spec=spec, force=MIForce(bins=24))
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_syn_miforce_subsample_recovers():
+    # MIForce(sample_stride): the joint histogram is built from a ~25% voxel
+    # subset (ITK Regular sampling) -- the deformable-MI speed lever -- and the
+    # cross-modal SyN still drives a real MI gain, diffeomorphic.
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)  # "different modality"
+    spec = SyNSpec(levels=3, iterations=60, radius=3, step=0.5)
+    res = greedy_syn_register(
+        moving, fixed, spec=spec, force=MIForce(bins=24, sample_stride=4)
+    )
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_demons_miforce_mi_recovers():
+    # MIForce on the *unclamped* Demons driver: the RMS magnitude control (the
+    # 0c reconciliation baked into MIForce) gives a tuned step, so the fast
+    # closed-form path recovers like the MetricForce(MI) escape hatch.
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)
+    spec = DemonsSpec(levels=3, iterations=80)
+    res = diffeomorphic_demons_register(
+        moving, fixed, spec=spec, force=MIForce(bins=24)
+    )
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0 + 0.2
+    assert float(res.jacobian_det.min()) > 0.0
+
+
+def test_demons_metricforce_mi_recovers():
+    # B2: MI drives the *unclamped* Demons driver (step=None) to a real
+    # recovery.  The RMS-controlled MetricForce magnitude replaces the arbitrary
+    # `*size` constant that no one had tuned, so the cross-modal deformable run
+    # both improves its MI substantially and stays diffeomorphic -- the
+    # convergence test the escape hatch lacked.
+    fixed = _blobs(64)
+    deformed = _warp(fixed, _smooth_velocity((64, 64), 9.0, 22.0, 0))
+    moving = jnp.sqrt(deformed - deformed.min() + 0.05)  # "different modality"
+    spec = DemonsSpec(levels=3, iterations=80)
+    res = diffeomorphic_demons_register(
+        moving, fixed, spec=spec, force=MetricForce(MI(bins=24))
+    )
+    mi0 = float(mutual_information(moving, fixed, bins=24))
+    mi1 = float(mutual_information(res.warped, fixed, bins=24))
+    assert mi1 > mi0 + 0.2  # a substantial improvement, not merely nonzero
+    assert float(res.jacobian_det.min()) > 0.0
+    assert bool(jnp.all(jnp.isfinite(res.warped)))
+
+
+def test_syn_sumforce_multi_metric_recovers():
+    # A5: a multi-metric SumForce (two LNCC windows summed) drives the recipe end
+    # to end with no driver change -- the composability payoff.
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 45.0, 0))
+    spec = SyNSpec(levels=3, iterations=60, step=0.5)
+    force = SumForce(((0.5, LNCCForce(4)), (0.5, LNCCForce(2))))
+    res = greedy_syn_register(moving, fixed, spec=spec, force=force)
+    assert float(ncc(res.warped, fixed)) > 0.99
     assert float(res.jacobian_det.min()) > 0.0
 
 

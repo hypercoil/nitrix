@@ -9,6 +9,19 @@
 > (transform algebra + `matrix_log`) → V4 (all 5 matrix perf levers) → V5
 > (ANTs-parity SyN: masks); geodesic LDDMM scoped as the next increment.
 
+> **Honesty correction (2026-06-12, v4 0g / D3).** Read every "**ANTs-parity**"
+> in this document (incl. the title and the V5 header) as "**ANTs-*style*,
+> synthetic-recovery-validated**". The post-merge review's headline finding was
+> that unqualified "ANTs parity" over-claims: the suite implements the ANTs/FSL
+> lineage *algorithms* and validates synthetic-warp recovery, but several
+> fMRIPrep-run features are not yet implemented (winsorization, histogram
+> matching, multi-metric summation, restrict-deformation, the closed-form Mattes
+> MI fast-force, SVF early-exit), and **real-data + `antsRegistration`-reference
+> parity is delegated to the nitrix-perf-bench agent**, not asserted here. The
+> authoritative, current scope statement is the `nitrix.register` package
+> docstring; the open items are catalogued in
+> [`../feature-requests/registration-suite-v3-followups.md`](../feature-requests/registration-suite-v3-followups.md).
+
 Reads on top of [`registration-suite-v2.md`](registration-suite-v2.md) (R4–R8)
 and [`registration.md`](registration.md) (the R0–R3 core).
 

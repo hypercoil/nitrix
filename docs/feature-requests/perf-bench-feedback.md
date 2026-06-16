@@ -31,13 +31,16 @@ Surfaced 2026-06-02 while building perf-bench cases; verified against
 | `pairedcorr` forms the full `cov(X)`/`cov(Y)` to read their diagonals — ~3× matmul (the direct-variance ref is ~2× faster from `c≳512` on CPU+GPU; `pairedcov` control is at parity) | [pairedcorr-redundant-full-cov](pairedcorr-redundant-full-cov.md) | `stats/covariance.py:313–328` | perf (micro-opt) |
 | **v3 regression:** `affine_register` multi-level GN/LM **diverges at small grids** (≤28³ → coarse level ≤14³; params explode, warped anti-correlates) — fine ≥32³; rigid (V4a IC) + BFGS + single-level unaffected → isolates to the V4b/V4c affine IC fast path / closed-form Jacobian | [register-affine-small-grid-divergence](register-affine-small-grid-divergence.md) | `register/recipes.py` (`affine_register`) | regression (robustness) |
 | **correctness:** demons ESM force **0/0 → NaN** on uniform regions (unguarded `diff/denom`); fires on *every* real image (uniform background), 1 iteration — synthetic-noise inputs hid it | [register-demons-force-divide-by-zero](register-demons-force-divide-by-zero.md) | `register/_force.py:253–257` | bug (NaN) |
+| **perf:** LME family calls `jnp.linalg.cholesky` on the tiny `(p,p)` (p=1 → 1×1) fixed-effect system inside the per-voxel `vmap`, and takes its score/Hessian by 2nd-order autodiff *through* it → CPU compile scales linearly in `V` + OOM at brain-volume `V`. Prototype (Cholesky→scalar, autodiff kept): **3–6× CPU steady, 3–5× + flatter compile**, identical accuracy. `reml_fit` adds `jax.hessian`/`(2,2) solve`/full-`N×N` eigh to clean up. Dispatch on `p` (closed-form 1×1/2×2 hot path, capable fallback for p>2) | [lme-family-tiny-linalg-gpu-block-and-perf](lme-family-tiny-linalg-gpu-block-and-perf.md) | `stats/lme/flame.py:113`, `stats/lme/reml.py:188,231,239,448` | perf |
+| **GPU-availability (observational / cause unknown):** `flame_two_level` **skips** on GPU — `gpusolverDnCreate` fails when `potrf` (or `syevd`) is the *first* cuSOLVER routine a process touches; a prior `getrf`/matmul clears it. `reml_fit` runs **OK** (its `2×2` Newton `getrf` inits the handle first — so reml's `ok` GPU rows are correct, NOT stale). Cause NOT established; provisional cuBLAS-warmup workaround needs robust repeated-trial verification. Closed-form perf fix sidesteps it (no cuSOLVER) | [gpu-cusolver-first-call-handle-failure](gpu-cusolver-first-call-handle-failure.md) | `stats/lme/flame.py:113` (jaxlib `solver_handle_pool.cc`) | GPU-availability (env) |
 
 _(The five lomb/tsconv findings above resolved 2026-06-02 — see below;
 `doc-gaussian-kernel-gamma` and `doc-relaxed-modularity-newman-factor` are
 newly open 2026-06-03; `doc-iir-backend-default` newly open 2026-06-06;
 `pairedcorr-redundant-full-cov` newly open 2026-06-10;
 `register-affine-small-grid-divergence` + `register-demons-force-divide-by-zero`
-newly open 2026-06-11.)_
+newly open 2026-06-11; `lme-family-tiny-linalg-gpu-block-and-perf` +
+`gpu-cusolver-first-call-handle-failure` newly open 2026-06-12.)_
 
 ## Resolved
 

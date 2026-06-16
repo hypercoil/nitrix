@@ -15,6 +15,7 @@ jax.config.update('jax_enable_x64', True)
 
 import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
+import pytest  # noqa: E402
 
 from nitrix.geometry import (  # noqa: E402
     identity_grid,
@@ -105,3 +106,55 @@ def test_partial_mask_recovers_and_diffeomorphic():
     )
     assert float(ncc(res.warped, fixed)) > float(ncc(moving, fixed))
     assert float(res.jacobian_det.min()) > 0.0
+
+
+# ---------------------------------------------------------------------------
+# restrict-deformation (A7) -- per-axis deformation masking
+# ---------------------------------------------------------------------------
+
+
+def test_restrict_ones_equals_no_restrict_syn():
+    # An all-ones restrict reduces exactly to the unrestricted recipe.
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 30.0, 0))
+    spec = SyNSpec(levels=2, iterations=30, radius=2, step=0.5)
+    base = greedy_syn_register(moving, fixed, spec=spec)
+    ones = greedy_syn_register(moving, fixed, spec=spec, restrict=(1.0, 1.0))
+    assert np.allclose(
+        np.asarray(base.warped), np.asarray(ones.warped), atol=1e-5
+    )
+
+
+def test_restrict_suppresses_axis_syn():
+    # restrict=(0, 1) zeroes the force's axis-0 component, so the recovered
+    # deformation has (essentially) no axis-0 displacement -- where the free run
+    # uses it -- and stays diffeomorphic.
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 30.0, 0))
+    spec = SyNSpec(levels=3, iterations=40, radius=2, step=0.5)
+    free = greedy_syn_register(moving, fixed, spec=spec)
+    restricted = greedy_syn_register(
+        moving, fixed, spec=spec, restrict=(0.0, 1.0)
+    )
+    assert float(jnp.abs(restricted.displacement[..., 0]).max()) < 1e-3
+    assert float(jnp.abs(free.displacement[..., 0]).max()) > 0.5
+    assert float(restricted.jacobian_det.min()) > 0.0
+
+
+def test_restrict_suppresses_axis_demons():
+    fixed = _blobs(64)
+    moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 25.0, 1))
+    spec = DemonsSpec(levels=2, iterations=40)
+    restricted = diffeomorphic_demons_register(
+        moving, fixed, spec=spec, restrict=(0.0, 1.0)
+    )
+    assert float(jnp.abs(restricted.displacement[..., 0]).max()) < 1e-3
+    assert float(restricted.jacobian_det.min()) > 0.0
+
+
+def test_restrict_length_validation():
+    fixed, moving = _blobs(32), _blobs(32)
+    with pytest.raises(ValueError):
+        greedy_syn_register(
+            moving, fixed, spec=SyNSpec(levels=2, iterations=5), restrict=(1.0,)
+        )
