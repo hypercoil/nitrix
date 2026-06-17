@@ -54,6 +54,7 @@ import jax.numpy as jnp
 from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float
 
+from ._batching import blocked_vmap
 from ._family import BINOMIAL, GAUSSIAN, POISSON, Family, resolve_family
 from ._irls import fit_penalised_irls, irls_warm_start
 from ._smalllinalg import small_inv_logdet
@@ -221,6 +222,7 @@ def glm_fit(
     weights: Optional[Float[Array, 'N']] = None,
     n_iter: int = 25,
     ridge: float = 0.0,
+    block: Optional[int] = None,
 ) -> GLMResult:
     """Fit a mass-univariate GLM: shared design ``X``, per-element responses.
 
@@ -241,6 +243,10 @@ def glm_fit(
         IRLS iterations for non-Gaussian families (ignored on the OLS path).
     ridge
         Optional L2 stabiliser added to the normal-equation matrix.
+    block
+        Optional element-block size bounding peak memory on the per-element
+        IRLS path (non-Gaussian families).  ``None`` (default) is a single
+        ``vmap``; the OLS fast path is already vectorised and ignores it.
 
     Returns
     -------
@@ -267,10 +273,11 @@ def glm_fit(
         deviance = wrss
     else:
         penalty = jnp.zeros((p, p), dtype=X.dtype)
-        fit = jax.vmap(
-            lambda y: _pirls_one(y, X, w, penalty, family, p, n_iter, ridge)
+        coef, cov_unscaled, deviance = blocked_vmap(
+            lambda y: _pirls_one(y, X, w, penalty, family, p, n_iter, ridge),
+            (Y,),
+            block=block,
         )
-        coef, cov_unscaled, deviance = fit(Y)
         if family.has_fixed_dispersion:
             dispersion = jnp.ones((Y.shape[0],), dtype=Y.dtype)
         else:

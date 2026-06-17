@@ -144,6 +144,26 @@ def test_additive_two_smooths():
     assert float(res.edf[0, 1]) < float(res.edf[0, 0])
 
 
+def test_gam_block_chunking_matches_single_vmap():
+    """The GAM ``block=`` memory knob is numerically transparent, incl. when V
+    is *not* a multiple of the block (the pad/trim path)."""
+    x, _, _ = _smooth_data()
+    sb = bspline_basis(jnp.asarray(x), 12, center=True)
+    rng = np.random.default_rng(7)
+    Y = jnp.asarray(
+        np.sin(2 * np.pi * x)[None, :] + rng.standard_normal((23, len(x))) * 0.3
+    )  # 23 % 8 != 0
+    full = gam_fit(Y, [sb])
+    chunked = gam_fit(Y, [sb], block=8)
+    np.testing.assert_allclose(
+        np.asarray(chunked.coef), np.asarray(full.coef), atol=1e-9
+    )
+    np.testing.assert_allclose(
+        np.asarray(chunked.lam), np.asarray(full.lam), rtol=1e-6
+    )
+    assert chunked.edf.shape == full.edf.shape
+
+
 def test_mass_univariate_batched_matches_looped():
     x, _, _ = _smooth_data()
     sb = bspline_basis(jnp.asarray(x), 12, center=True)

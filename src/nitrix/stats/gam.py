@@ -63,6 +63,7 @@ import numpy as np
 from jax import lax
 from jaxtyping import Array, Float
 
+from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
 from .basis import SplineBasis, spline_design
@@ -327,6 +328,7 @@ def gam_fit(
     ridge: float = 1e-8,
     lam_floor: float = 1e-6,
     lam_ceil: float = 1e8,
+    block: Optional[int] = None,
 ) -> GAMResult:
     """Fit a mass-univariate GAM: shared smooth bases, per-element responses.
 
@@ -350,6 +352,10 @@ def gam_fit(
         Small stabiliser on the penalised normal equations.
     lam_floor, lam_ceil
         Clamp on each smoothing parameter.
+    block
+        Optional element-block size bounding peak memory (the per-element
+        ``(V, p, p)`` covariances) on brain-scale ``V``.  ``None`` (default) is
+        a single ``vmap``.
 
     Returns
     -------
@@ -387,7 +393,7 @@ def gam_fit(
             n_outer, n_inner, ridge, lam_floor, lam_ceil,
         )
 
-    coef, lam, v, xtwx, phi = jax.vmap(per_voxel)(Y)
+    coef, lam, v, xtwx, phi = blocked_vmap(per_voxel, (Y,), block=block)
 
     # Effective degrees of freedom: F = V X^T W X (influence on coefficients).
     influence = jnp.einsum('vij,vjk->vik', v, xtwx)  # (V, p, p)

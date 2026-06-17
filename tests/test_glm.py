@@ -183,6 +183,23 @@ def test_mass_univariate_batched_matches_looped():
         )
 
 
+def test_glm_block_chunking_matches_single_vmap():
+    """The IRLS-path ``block=`` memory knob is numerically transparent, incl.
+    when V is *not* a multiple of the block (the pad/trim path)."""
+    rng = np.random.default_rng(11)
+    X = jnp.asarray(_design(rng, p=3))
+    Yp = jnp.asarray(rng.poisson(2.0, size=(23, 80)).astype(float))  # 23 % 8 != 0
+    full = glm_fit(Yp, X, family=POISSON, n_iter=25)
+    chunked = glm_fit(Yp, X, family=POISSON, n_iter=25, block=8)
+    np.testing.assert_allclose(
+        np.asarray(chunked.coef), np.asarray(full.coef), atol=1e-10
+    )
+    np.testing.assert_allclose(
+        np.asarray(chunked.cov_unscaled), np.asarray(full.cov_unscaled), atol=1e-10
+    )
+    assert chunked.coef.shape == full.coef.shape
+
+
 def test_predict_link_and_response():
     rng = np.random.default_rng(6)
     X = jnp.asarray(_design(rng))
