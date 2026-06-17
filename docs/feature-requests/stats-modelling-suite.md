@@ -145,6 +145,29 @@ signatures and return types frozen** (LME design is sealed). Regression guard
 
 ## §4. Workstream B — mass-univariate GLM + GAM / GAMM (ModelArray parity)
 
+> **Status (2026-06-17): SHIPPED on `feat/stats-suite-modelarray-tfce`.**
+> `stats/glm.py`, `stats/basis.py`, `stats/gam.py` landed, exported from
+> `nitrix.stats`. **GLM** (`glm_fit`): OLS fast path + exponential-family
+> P-IRLS, `Family` (Gaussian/Binomial/Poisson + custom), `t_contrast` /
+> `f_contrast`, `r_squared`/`adj_r_squared`/`deviance_explained`, `aic`/`bic`/
+> `log_likelihood`, `compare_models` (F / LRT). **basis** (`bspline_basis`):
+> P-spline design + difference penalty + Householder sum-to-zero (cuSOLVER-free).
+> **GAM/GAMM** (`gam_fit`): penalised IRLS inner + generalized Fellner-Schall
+> REML outer (per-element `lambda`), per-smooth EDF, Bayesian covariance,
+> `smooth_partial_effect`. Validated: GLM vs statsmodels (OLS coef 2e-16 +
+> se/t/p/R²/F exact; WLS exact; Poisson 1e-11; Binomial 7e-13; llf exact; AIC =
+> R/`lm` convention; F/LRT vs scipy 1e-8); GAM inner fit == penalised normal
+> equations (1e-7), REML recovers smooths, EDF == influence trace (1e-4),
+> noise→smoothing monotone, Poisson GAM, additive 2-smooth, batched==looped;
+> everything cuSOLVER-free on GPU. **Compile perf:** a diagnostic decomposition
+> found GAM compile was ≈cubic in design width `p` (96 s at `p=30`) due to the
+> *unrolled* per-element Cholesky (`O(p^3)` trace-time ops; iteration count was
+> already flat — loops roll); switched to a *rolled* `lax.fori_loop` Cholesky
+> (`O(p^2)` graph) → compile flat in `p` (96→1.8 s at `p=30`, 14–53× across
+> `k`), guarded by a jaxpr-size test. Deferred: cyclic / thin-plate bases;
+> shared-`lambda` fast mode; per-element-`lambda` Newton (FS is the shipped
+> selector).
+
 **`stats/glm.py`** — `glm_fit(Y, X, *, weights, l2, family, method) →
 GLMResult`, shared-design batched over elements (+ a per-element-design
 variant), reusing `residualise`'s Cholesky / SVD solver paths
