@@ -49,6 +49,15 @@ from jaxtyping import Array, Float
 
 __all__ = ['small_inv_logdet', 'spd_inv_logdet_chol']
 
+# Relative pivot floor (modified Cholesky).  A pivot / determinant is clamped
+# to this fraction of the matrix's diagonal scale before a ``sqrt`` / division,
+# so a near-singular or boundary system (where the caller's ridge was too small
+# to keep the pivot positive against roundoff) yields a *regularised, finite*
+# solve instead of a silent ``NaN``.  It sits ~4 orders below fp32 eps and is
+# far below the smallest pivot of any well-conditioned matrix (cond < 1e12), so
+# it never perturbs a healthy solve -- only rescues a degenerate one.
+_PIVOT_REL_FLOOR = 1e-12
+
 
 def spd_inv_logdet_chol(
     A: Float[Array, 'n n'], n: int
@@ -70,11 +79,15 @@ def spd_inv_logdet_chol(
     ``k < j`` terms of the Cholesky-Banachiewicz recurrence.
     """
     idx = jnp.arange(n)
+    # Modified-Cholesky pivot floor, relative to the matrix's diagonal scale so
+    # a well-conditioned solve is unperturbed but a degenerate pivot stays
+    # positive (finite, regularised) rather than producing sqrt(negative)=NaN.
+    floor = _PIVOT_REL_FLOOR * jnp.max(jnp.diagonal(A)) + jnp.finfo(A.dtype).tiny
 
     def body(j: Array, L: Float[Array, 'n n']) -> Float[Array, 'n n']:
         Lj = lax.dynamic_index_in_dim(L, j, axis=0, keepdims=False)  # (n,)
         s = L @ Lj  # s_i = sum_{k<j} L[i,k] L[j,k]
-        diag = jnp.sqrt(A[j, j] - s[j])
+        diag = jnp.sqrt(jnp.maximum(A[j, j] - s[j], floor))
         col = (A[:, j] - s) / diag
         new_col = jnp.where(idx == j, diag, jnp.where(idx > j, col, 0.0))
         return cast(
@@ -111,14 +124,19 @@ def small_inv_logdet(
 
     ``A`` is assumed SPD (the callers add a ridge).
     """
+    tiny = jnp.finfo(A.dtype).tiny
     if n == 1:
-        a = A[0, 0]
+        # Floor a non-positive / zero pivot (roundoff or constant input) so the
+        # reciprocal and log stay finite; never perturbs an SPD scalar.
+        a = jnp.maximum(A[0, 0], _PIVOT_REL_FLOOR * jnp.abs(A[0, 0]) + tiny)
         return (1.0 / a)[None, None], jnp.log(a)
     if n == 2:
         a = A[0, 0]
         b = A[0, 1]
         c = A[1, 1]
-        det = a * c - b * b
+        # Floor the determinant relative to the diagonal product, so a
+        # near-singular / indefinite 2x2 gives a finite regularised inverse.
+        det = jnp.maximum(a * c - b * b, _PIVOT_REL_FLOOR * a * c + tiny)
         inv = jnp.array([[c, -b], [-b, a]], dtype=A.dtype) / det
         return inv, jnp.log(det)
     return spd_inv_logdet_chol(A, n)

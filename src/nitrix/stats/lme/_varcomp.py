@@ -336,8 +336,7 @@ def _blocked_vmap(
     if block is None or block >= v:
         return vfn(*batched)
 
-    n_blocks = -(-v % block) // block + (v // block)  # ceil(v / block)
-    n_blocks = -(-v // block)
+    n_blocks = -(-v // block)  # ceil(v / block)
     pad = n_blocks * block - v
 
     def _pad(a: Array) -> Array:

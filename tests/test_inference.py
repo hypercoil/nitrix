@@ -205,6 +205,48 @@ def test_randomise_fwe_floor_and_identity():
     )
 
 
+@needs_scipy
+def test_randomise_uncorrected_p_uses_raw_statistic():
+    """The uncorrected p-map is built from the raw statistic (FSL convention),
+    not the TFCE-enhanced value -- so it is ~monotone in the parametric
+    voxelwise p, which the enhanced (extent-mixed) map would not be."""
+    from scipy import stats
+
+    rng = np.random.default_rng(7)
+    H, W, N = 14, 14, 24
+    data = rng.standard_normal((H, W, N))
+    data[5:9, 5:9, :] += 1.0
+    res = permutation_test(
+        jnp.asarray(data), jnp.ones((N, 1)), jnp.asarray([1.0]),
+        key=jax.random.PRNGKey(0), n_perm=300, two_sided=True,
+    )
+    p_param = stats.ttest_1samp(data, 0.0, axis=2).pvalue
+    rho = stats.spearmanr(
+        np.asarray(res.p_uncorrected).ravel(), p_param.ravel()
+    ).correlation
+    assert rho > 0.95
+
+
+def test_randomise_excludes_constant_voxel():
+    """A constant (zero-variance) in-mask voxel must not produce an SE-floor
+    spurious statistic: it is folded out of the mask (p=1, stat=0) and does not
+    inflate the max-statistic null."""
+    rng = np.random.default_rng(8)
+    H, W, N = 12, 12, 20
+    data = rng.standard_normal((H, W, N))
+    data[0, 0, :] = 3.0  # constant nonzero voxel
+    res = permutation_test(
+        jnp.asarray(data), jnp.ones((N, 1)), jnp.asarray([1.0]),
+        key=jax.random.PRNGKey(0), n_perm=200,
+    )
+    assert abs(float(res.stat[0, 0])) < 1e-9  # zeroed, not +/-inf
+    assert float(res.p_fwe[0, 0]) == 1.0  # excluded
+    assert bool(jnp.isfinite(res.enhanced).all())
+    # the artifact must not dominate the null: observed max is from real signal,
+    # not the constant voxel.
+    assert float(jnp.max(res.enhanced)) < 1e6
+
+
 def test_randomise_detects_signal_and_controls_null():
     rng = np.random.default_rng(1)
     H, W, N = 14, 14, 24

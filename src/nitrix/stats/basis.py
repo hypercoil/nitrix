@@ -239,6 +239,12 @@ def bspline_basis(
     -------
     ``SplineBasis`` (design, penalty, and re-evaluation parameters).
     """
+    if not 1 <= penalty_order < n_basis:
+        raise ValueError(
+            f'penalty_order={penalty_order} must satisfy 1 <= order < '
+            f'n_basis={n_basis}: an order >= n_basis gives an empty difference '
+            'operator and a silently-zero (unpenalised) penalty.'
+        )
     x = jnp.asarray(x)
     if bounds is None:
         lo = float(jnp.min(x))
