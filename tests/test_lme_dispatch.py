@@ -181,6 +181,48 @@ def test_rolled_cholesky_matches_reference():
         )
 
 
+def test_cholesky_pivot_floor_keeps_singular_input_finite():
+    """The modified-Cholesky pivot floor keeps a degenerate (singular /
+    boundary) system finite instead of producing NaN, while leaving a
+    well-conditioned solve bit-unchanged."""
+    from nitrix.stats._smalllinalg import small_inv_logdet
+
+    rng = np.random.default_rng(0)
+    # Well-conditioned: floor never activates -> matches numpy to machine eps.
+    for p in (1, 2, 4, 8):
+        m = rng.standard_normal((p, p))
+        a = jnp.asarray(m @ m.T + p * np.eye(p))
+        inv, _ = small_inv_logdet(a, p)
+        np.testing.assert_allclose(
+            np.asarray(inv), np.linalg.inv(np.asarray(a)), atol=1e-10
+        )
+    # Exactly singular (rank-1) and a zero scalar: must stay finite.
+    for p in (2, 3, 5):
+        u = rng.standard_normal((p, 1))
+        inv, ld = small_inv_logdet(jnp.asarray(u @ u.T), p)
+        assert bool(jnp.all(jnp.isfinite(inv))) and bool(jnp.isfinite(ld))
+    inv1, ld1 = small_inv_logdet(jnp.zeros((1, 1)), 1)
+    assert bool(jnp.all(jnp.isfinite(inv1))) and bool(jnp.isfinite(ld1))
+
+
+def test_reml_collinear_design_stays_finite():
+    """A rank-deficient fixed-effect design (collinear covariate) fits to a
+    finite result rather than NaN-propagating through the per-voxel solve."""
+    rng = np.random.default_rng(1)
+    g, n_per, V = 5, 20, 4
+    N = g * n_per
+    group = np.repeat(np.arange(g), n_per)
+    x = rng.standard_normal(N)
+    # third column is an exact duplicate of the second -> rank-deficient X.
+    X = jnp.asarray(np.column_stack([np.ones(N), x, x]))
+    Z = np.zeros((N, g))
+    for i in range(g):
+        Z[group == i, i] = 1.0
+    result = reml_fit(jnp.asarray(rng.standard_normal((V, N))), X, jnp.asarray(Z), n_iter=20)
+    assert bool(jnp.all(jnp.isfinite(result.theta_hat)))
+    assert bool(jnp.all(jnp.isfinite(result.beta_hat)))
+
+
 def test_cholesky_graph_size_is_flat_in_p():
     """The rolled Cholesky keeps the graph ``O(p^2)`` -- a single ``while`` over
     columns -- so its top-level equation count is small and ~constant in ``p``.
