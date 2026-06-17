@@ -23,8 +23,12 @@ from nitrix.stats.glm import (
     GAUSSIAN,
     POISSON,
     adj_r_squared,
+    aic,
+    bic,
+    compare_models,
     f_contrast,
     glm_fit,
+    log_likelihood,
     predict,
     r_squared,
     t_contrast,
@@ -188,6 +192,75 @@ def test_predict_link_and_response():
     mu = predict(res, X, type='response')
     np.testing.assert_allclose(np.asarray(mu), np.asarray(jnp.exp(eta)), atol=1e-10)
     assert eta.shape == (4, 80)
+
+
+# ---------------------------------------------------------------------------
+# Information criteria and model comparison
+# ---------------------------------------------------------------------------
+
+
+@needs_sm
+def test_loglik_aic_bic():
+    """log-likelihood matches statsmodels exactly; AIC/BIC follow the R/lm
+    convention (the variance is a counted parameter for Gaussian)."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(8)
+    X = _design(rng)
+    y = X @ np.array([1.0, 0.5, -0.3]) + rng.standard_normal(80) * 0.4
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X))
+    smf = sm.OLS(y, X).fit()
+    np.testing.assert_allclose(float(log_likelihood(res)[0]), smf.llf, atol=1e-8)
+    # R lm convention: k = p + 1 (counts sigma^2).
+    ll = float(log_likelihood(res)[0])
+    np.testing.assert_allclose(float(aic(res)[0]), -2 * ll + 2 * 4, atol=1e-8)
+    np.testing.assert_allclose(
+        float(bic(res)[0]), -2 * ll + 4 * np.log(80), atol=1e-8
+    )
+
+    # Poisson has fixed dispersion (k = p), so AIC matches statsmodels.GLM.
+    mu = np.exp(X @ np.array([0.5, 0.3, -0.2]))
+    yp = rng.poisson(mu).astype(float)
+    rp = glm_fit(jnp.asarray(yp[None, :]), jnp.asarray(X), family=POISSON, n_iter=30)
+    smp = sm.GLM(yp, X, family=sm.families.Poisson()).fit()
+    np.testing.assert_allclose(float(log_likelihood(rp)[0]), smp.llf, atol=1e-6)
+    np.testing.assert_allclose(float(aic(rp)[0]), smp.aic, atol=1e-6)
+
+
+@needs_sm
+def test_compare_models_f_and_lrt():
+    import statsmodels.api as sm
+    from scipy import stats
+
+    rng = np.random.default_rng(9)
+    X = _design(rng)
+    Xr = X[:, :2]
+
+    # Gaussian -> F-test (extra sum of squares).
+    y = X @ np.array([1.0, 0.5, -0.3]) + rng.standard_normal(80) * 0.4
+    full = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X))
+    reduced = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(Xr))
+    F, Fp = compare_models(full, reduced)
+    smf, smr = sm.OLS(y, X).fit(), sm.OLS(y, Xr).fit()
+    F_sm = ((smr.ssr - smf.ssr) / 1) / (smf.ssr / smf.df_resid)
+    np.testing.assert_allclose(float(F[0]), F_sm, atol=1e-8)
+    np.testing.assert_allclose(
+        float(Fp[0]), float(stats.f.sf(F_sm, 1, smf.df_resid)), atol=1e-10
+    )
+
+    # Poisson -> LRT (chi-square on the deviance / loglik difference).
+    mu = np.exp(X @ np.array([0.5, 0.3, -0.2]))
+    yp = rng.poisson(mu).astype(float)
+    pf = glm_fit(jnp.asarray(yp[None, :]), jnp.asarray(X), family=POISSON, n_iter=30)
+    pr = glm_fit(jnp.asarray(yp[None, :]), jnp.asarray(Xr), family=POISSON, n_iter=30)
+    stat, sp = compare_models(pf, pr, test='LRT')
+    smpf = sm.GLM(yp, X, family=sm.families.Poisson()).fit()
+    smpr = sm.GLM(yp, Xr, family=sm.families.Poisson()).fit()
+    lrt_sm = 2 * (smpf.llf - smpr.llf)
+    np.testing.assert_allclose(float(stat[0]), lrt_sm, atol=1e-6)
+    np.testing.assert_allclose(
+        float(sp[0]), float(stats.chi2.sf(lrt_sm, 1)), atol=1e-8
+    )
 
 
 # ---------------------------------------------------------------------------

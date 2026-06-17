@@ -52,7 +52,7 @@ from typing import Any, Callable, Optional, Tuple, cast
 import jax
 import jax.numpy as jnp
 from jax import lax
-from jax.scipy.special import betainc, xlogy
+from jax.scipy.special import betainc, gammaincc, gammaln, xlogy
 from jaxtyping import Array, Float
 
 from ._smalllinalg import small_inv_logdet
@@ -70,6 +70,10 @@ __all__ = [
     'r_squared',
     'adj_r_squared',
     'deviance_explained',
+    'log_likelihood',
+    'aic',
+    'bic',
+    'compare_models',
 ]
 
 _EPS = 1e-10
@@ -92,6 +96,8 @@ class Family:
     - ``variance`` -- the variance function ``V(mu)``.
     - ``unit_deviance`` -- per-observation deviance contribution ``d(y, mu)``.
     - ``init_mu`` -- a fitted-mean initialiser from ``y`` (IRLS start).
+    - ``loglik`` -- per-observation log-likelihood ``l(y, mu, dispersion)``
+      (the dispersion argument is ignored by the fixed-dispersion families).
     - ``has_fixed_dispersion`` -- ``True`` when the dispersion is 1 (binomial /
       Poisson); ``False`` when it is estimated (Gaussian).
     """
@@ -104,6 +110,7 @@ class Family:
     variance: Callable[[Array], Array]
     unit_deviance: Callable[[Array, Array], Array]
     init_mu: Callable[[Array], Array]
+    loglik: Callable[[Array, Array, Array], Array]
 
 
 def _identity(x: Array) -> Array:
@@ -112,6 +119,11 @@ def _identity(x: Array) -> Array:
 
 def _ones_like(x: Array) -> Array:
     return jnp.ones_like(x)
+
+
+def _gaussian_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
+    phi = jnp.clip(dispersion, _EPS, None)
+    return -0.5 * (jnp.log(2.0 * jnp.pi * phi) + (y - mu) ** 2 / phi)
 
 
 GAUSSIAN = Family(
@@ -123,6 +135,7 @@ GAUSSIAN = Family(
     variance=_ones_like,
     unit_deviance=lambda y, mu: (y - mu) ** 2,
     init_mu=_identity,
+    loglik=_gaussian_loglik,
 )
 
 
@@ -145,6 +158,11 @@ def _binomial_deviance(y: Array, mu: Array) -> Array:
     return 2.0 * (xlogy(y, y / m) + xlogy(1.0 - y, (1.0 - y) / (1.0 - m)))
 
 
+def _binomial_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
+    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
+    return xlogy(y, m) + xlogy(1.0 - y, 1.0 - m)
+
+
 BINOMIAL = Family(
     name='binomial',
     has_fixed_dispersion=True,
@@ -154,12 +172,18 @@ BINOMIAL = Family(
     variance=lambda mu: mu * (1.0 - mu),
     unit_deviance=_binomial_deviance,
     init_mu=lambda y: (y + 0.5) / 2.0,
+    loglik=_binomial_loglik,
 )
 
 
 def _poisson_deviance(y: Array, mu: Array) -> Array:
     m = jnp.clip(mu, _EPS, None)
     return 2.0 * (xlogy(y, y / m) - (y - m))
+
+
+def _poisson_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
+    m = jnp.clip(mu, _EPS, None)
+    return xlogy(y, m) - m - gammaln(y + 1.0)
 
 
 POISSON = Family(
@@ -171,6 +195,7 @@ POISSON = Family(
     variance=_identity,
     unit_deviance=_poisson_deviance,
     init_mu=lambda y: y + 0.1,
+    loglik=_poisson_loglik,
 )
 
 
@@ -200,6 +225,8 @@ class GLMResult:
     null_deviance
         ``(V,)`` deviance of the intercept-only model (for ``r_squared`` /
         ``deviance_explained``).
+    log_lik
+        ``(V,)`` maximised log-likelihood (for ``aic`` / ``bic`` / the LRT).
     """
 
     coef: Float[Array, 'V p']
@@ -207,6 +234,7 @@ class GLMResult:
     dispersion: Float[Array, 'V']
     deviance: Float[Array, 'V']
     null_deviance: Float[Array, 'V']
+    log_lik: Float[Array, 'V']
     family: Family
     n_obs: int
     rank: int
@@ -214,6 +242,11 @@ class GLMResult:
     @property
     def dof_resid(self) -> float:
         return float(self.n_obs - self.rank)
+
+    @property
+    def n_params(self) -> int:
+        """Number of estimated parameters (coefficients + a dispersion)."""
+        return self.rank + (0 if self.family.has_fixed_dispersion else 1)
 
     def tree_flatten(
         self,
@@ -224,6 +257,7 @@ class GLMResult:
             self.dispersion,
             self.deviance,
             self.null_deviance,
+            self.log_lik,
         )
         return children, (self.family, self.n_obs, self.rank)
 
@@ -232,13 +266,16 @@ class GLMResult:
         cls, aux: Tuple[Family, int, int], children: Tuple[Any, ...]
     ) -> 'GLMResult':
         family, n_obs, rank = aux
-        coef, cov_unscaled, dispersion, deviance, null_deviance = children
+        coef, cov_unscaled, dispersion, deviance, null_deviance, log_lik = (
+            children
+        )
         return cls(
             coef=coef,
             cov_unscaled=cov_unscaled,
             dispersion=dispersion,
             deviance=deviance,
             null_deviance=null_deviance,
+            log_lik=log_lik,
             family=family,
             n_obs=n_obs,
             rank=rank,
@@ -388,12 +425,19 @@ def glm_fit(
             dof = float(n - p)
             dispersion = deviance / dof if dof > 0 else deviance
 
+    # Maximised log-likelihood.  Gaussian uses the MLE dispersion (RSS / N),
+    # which is what the deviance-free AIC convention expects.
+    fitted = family.linkinv(coef @ X.T)
+    disp_ll = (deviance / n) if not family.has_fixed_dispersion else dispersion
+    log_lik = jnp.sum(family.loglik(Y, fitted, disp_ll[:, None]), axis=-1)
+
     return GLMResult(
         coef=coef,
         cov_unscaled=cov_unscaled,
         dispersion=dispersion,
         deviance=deviance,
         null_deviance=null_dev,
+        log_lik=log_lik,
         family=family,
         n_obs=int(n),
         rank=int(p),
@@ -518,3 +562,68 @@ def adj_r_squared(result: GLMResult) -> Float[Array, 'V']:
     n = float(result.n_obs)
     dof = result.dof_resid
     return 1.0 - (1.0 - r_squared(result)) * (n - 1.0) / jnp.clip(dof, _EPS, None)
+
+
+def log_likelihood(result: GLMResult) -> Float[Array, 'V']:
+    """Per-element maximised log-likelihood."""
+    return result.log_lik
+
+
+def aic(result: GLMResult) -> Float[Array, 'V']:
+    """Per-element Akaike information criterion ``-2 ll + 2 k``."""
+    return -2.0 * result.log_lik + 2.0 * result.n_params
+
+
+def bic(result: GLMResult) -> Float[Array, 'V']:
+    """Per-element Bayesian information criterion ``-2 ll + k log N``."""
+    return -2.0 * result.log_lik + result.n_params * jnp.log(
+        jnp.asarray(float(result.n_obs))
+    )
+
+
+def _chi2_sf(x: Array, df: float) -> Array:
+    """Chi-square survival ``P(X > x)`` via the upper incomplete gamma."""
+    return gammaincc(0.5 * df, 0.5 * jnp.clip(x, 0.0, None))
+
+
+def compare_models(
+    full: GLMResult,
+    reduced: GLMResult,
+    *,
+    test: str = 'auto',
+) -> Tuple[Float[Array, 'V'], Float[Array, 'V']]:
+    """Per-element nested-model comparison (ModelArray ``full vs. reduced``).
+
+    ``reduced`` must be nested in ``full`` (fewer parameters, same data).
+    Returns ``(statistic, p_value)``:
+
+    - ``test='F'`` (or ``'auto'`` for a Gaussian family) -- the extra-sum-of-
+      squares F-test, ``F = ((D_r - D_f) / (k_f - k_r)) / (D_f / dof_f)`` on
+      ``(k_f - k_r, dof_f)`` degrees of freedom.
+    - ``test='LRT'`` (or ``'auto'`` otherwise) -- the likelihood-ratio test,
+      ``2 (ll_f - ll_r) ~ chi^2(k_f - k_r)``.
+    """
+    d_rank = float(full.rank - reduced.rank)
+    if d_rank <= 0:
+        raise ValueError(
+            'compare_models: `full` must have more parameters than `reduced`.'
+        )
+    if full.n_obs != reduced.n_obs:
+        raise ValueError(
+            'compare_models: models must be fit on the same number of '
+            'observations.'
+        )
+    mode = test
+    if mode == 'auto':
+        mode = 'F' if full.family.name == 'gaussian' else 'LRT'
+
+    if mode == 'F':
+        dof_f = full.dof_resid
+        num = (reduced.deviance - full.deviance) / d_rank
+        den = full.deviance / jnp.clip(dof_f, _EPS, None)
+        f = num / jnp.clip(den, _EPS, None)
+        return f, _f_sf(f, d_rank, dof_f)
+    if mode == 'LRT':
+        stat = 2.0 * (full.log_lik - reduced.log_lik)
+        return stat, _chi2_sf(stat, d_rank)
+    raise ValueError(f"compare_models: test={test!r}; expected 'auto'/'F'/'LRT'.")
