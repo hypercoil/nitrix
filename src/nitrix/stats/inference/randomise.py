@@ -54,6 +54,11 @@ __all__ = ['PermResult', 'permutation_test']
 Enhancement = Literal['tfce', 'voxel']
 Exchange = Literal['sign', 'perm']
 
+# A voxel whose observed residual variance is below this fraction of the
+# typical in-mask variance is treated as degenerate (constant / no information)
+# and excluded -- its SE-floored statistic would otherwise be a spurious +inf.
+_VAR_REL_FLOOR = 1e-10
+
 
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
@@ -203,6 +208,17 @@ def permutation_test(
     e0 = Y @ res_z.T  # reduced-model residuals (V, N)
     base = Y @ fit_z.T  # nuisance fit to add back (V, N); 0 if no nuisance
 
+    # Fold zero-variance (constant / degenerate) voxels into the mask: their
+    # statistic is undefined and the SE floor would otherwise inflate it into a
+    # spurious maximum that corrupts the max-statistic null.  Identified once
+    # from the observed data (relative to the typical in-mask variance) and
+    # excluded everywhere -- clustering, the max statistic, and the p-maps.
+    beta_obs = Y @ M.T
+    resid_obs = Y - beta_obs @ design.T
+    sigma2_obs = jnp.sum(resid_obs * resid_obs, axis=-1) / dof
+    var_scale = jnp.max(jnp.where(mask_flat, sigma2_obs, 0.0))
+    mask_flat = mask_flat & (sigma2_obs > _VAR_REL_FLOOR * var_scale)
+
     def statistic(Yp: Float[Array, 'V N']) -> Float[Array, 'V']:
         beta = Yp @ M.T  # (V, p)
         resid = Yp - beta @ design.T
@@ -275,8 +291,13 @@ def permutation_test(
         is_first = i == 0
         stat_obs = jnp.where(is_first, stat_p, stat_obs)
         enhanced_obs = jnp.where(is_first, enhanced_p, enhanced_obs)
+        # FWE: the spatial-max enhanced statistic vs the observed enhanced map.
         fwe_count = fwe_count + (m >= enhanced_obs)
-        unc_count = unc_count + (enhanced_p >= enhanced_obs)
+        # Uncorrected: the *raw* per-voxel statistic vs the observed (FSL
+        # convention) -- two-sided compares magnitudes.  Not the enhanced value.
+        cstat_p = jnp.abs(stat_p) if two_sided else stat_p
+        cstat_obs = jnp.abs(stat_obs) if two_sided else stat_obs
+        unc_count = unc_count + (cstat_p >= cstat_obs)
         return (fwe_count, unc_count, stat_obs, enhanced_obs), m
 
     zeros = jnp.zeros((v,), Y.dtype)
@@ -287,6 +308,9 @@ def permutation_test(
 
     p_fwe = jnp.where(mask_flat, fwe_count / n_perm, 1.0)
     p_unc = jnp.where(mask_flat, unc_count / n_perm, 1.0)
+    # Zero the observed statistic at excluded voxels (out-of-mask or degenerate)
+    # so the returned map carries no SE-floor artifact.
+    stat_obs = jnp.where(mask_flat, stat_obs, 0.0)
 
     return PermResult(
         stat=jnp.reshape(stat_obs, spatial),
