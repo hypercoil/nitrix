@@ -282,9 +282,27 @@ adjacent opposite-sign blobs — needs a sign-aware CC kernel), and lowering the
 `n_steps` default trades accuracy; the cluster-extent mode is the shipped perf
 option. Deeper TFCE perf (hierarchical/Pallas CC) stays a gated Phase-5 item.
 
-**Phase 2 — mgcv-parity bases (M):** §2.1 thin-plate + §2.2 cyclic, then §2.3
-tensor-product (⚠ breaks the disjoint-block `rank_k/λ_k` FS shortcut — needs the
-general summed-penalty inverse; see §8.5).
+**Phase 2 — mgcv-parity bases (M).** *(§2.1 thin-plate + §2.2 cyclic SHIPPED
+2026-06-17 on `feat/stats-suite-v2`; §2.3 tensor-product DEFERRED — see below.)*
+**§2.1 `thinplate_regression_basis`** (`bs='tp'`, mgcv default; radial-penalty
+eigen-truncation to k−M wiggly + M unpenalised polynomial null-space terms,
+knot subsampling, PSD via positive-eigenvalue truncation) and **§2.2
+`cyclic_cubic_basis`** (`bs='cp'`; wrap-around B-spline + circular difference
+penalty) both recover smooths via the GAM Fellner-Schall engine and route
+through a **`kind`-dispatched `SplineBasis`** (`design(x) = raw_features(x) @
+constraint` unifies B-spline / radial+poly / cyclic re-evaluation).
+
+**§2.3 tensor-product (`te`) DEFERRED** — the correctness review's trap is
+load-bearing: te's per-margin penalties **overlap** (both act on the `k1·k2`
+coefficients), so they are *not* disjoint blocks and the FS shortcut
+`tr(S_λ⁻ S_k) = rank_k/λ_k` is invalid. The clean fix is mgcv's **natural
+parameterization** — reparameterise (via the marginal penalty eigendecompositions,
+one-off at construction) so every penalty is *diagonal*; then `S_λ` is diagonal
+and `tr(S_λ⁻ S_k)` is an elementwise sum (cuSOLVER-free, no per-voxel
+pseudo-inverse). This is a correctness-sensitive refactor of the validated FS
+engine (`_gam_fit_one` / `_gam_fit_shared_gaussian` must use the general
+`tr(S_λ⁻ S_k)`, and the single-smooth bases reparameterised to diagonal too), so
+it is split out rather than hacked in by breaking the disjoint-block assumption.
 
 **Phase 3 — GLASSO (M-L):** §4.2 — coordinate descent with the **row loop
 rolled** (`lax.scan`, never Python-unrolled — the trap the rolled Cholesky
