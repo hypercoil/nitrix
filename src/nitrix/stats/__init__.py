@@ -19,8 +19,9 @@ Two submodules:
 - ``basis``      -- penalised spline bases (P-splines) for additive models.
 - ``gam``        -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
-- ``connectivity`` -- analytic-shrinkage covariance (Ledoit-Wolf / OAS) for the
-  small-sample connectome regime.
+- ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
+  covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
+  small-sample regime.
 - ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
 - ``inference``  -- permutation / TFCE cluster inference (the on-device FSL
   ``randomise`` engine) + FDR / Bonferroni.
@@ -63,7 +64,14 @@ from .basis import (
     spline_design,
     thinplate_regression_basis,
 )
-from .connectivity import ledoit_wolf, oas, shrunk_covariance
+from .connectivity import (
+    ebic_score,
+    glasso,
+    glasso_path,
+    ledoit_wolf,
+    oas,
+    shrunk_covariance,
+)
 from .gam import GAMResult, gam_fit, smooth_partial_effect
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
@@ -149,6 +157,9 @@ __all__ = [
     'ledoit_wolf',
     'oas',
     'shrunk_covariance',
+    'glasso',
+    'glasso_path',
+    'ebic_score',
     # pca
     'PCAResult',
     'pca_fit',
