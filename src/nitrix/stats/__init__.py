@@ -16,6 +16,9 @@ Two submodules:
   negative log-likelihood (log-variance parameterised).
 - ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
+- ``basis``      -- penalised spline bases (P-splines) for additive models.
+- ``gam``        -- mass-univariate generalised additive (mixed) models with
+  REML / Fellner-Schall smoothing-parameter selection.
 - ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
 - ``pca``        -- principal-component analysis (fit / transform /
   inverse) via the covariance eigendecomposition.
@@ -49,6 +52,8 @@ from .fourier import (
     product_filter,
     product_filtfilt,
 )
+from .basis import SplineBasis, bspline_basis, spline_design
+from .gam import GAMResult, gam_fit, smooth_partial_effect
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
     BINOMIAL,
@@ -119,6 +124,14 @@ __all__ = [
     'aic',
     'bic',
     'compare_models',
+    # basis
+    'SplineBasis',
+    'bspline_basis',
+    'spline_design',
+    # gam
+    'GAMResult',
+    'gam_fit',
+    'smooth_partial_effect',
     # pca
     'PCAResult',
     'pca_fit',
