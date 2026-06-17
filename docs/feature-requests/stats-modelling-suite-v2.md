@@ -209,46 +209,162 @@ is smooth, cuSOLVER-free on the broken L4.
 ## §6. Proposed module layout (additions)
 
 ```
-nitrix/stats/
-  basis.py          # + thinplate_regression_basis, cyclic_cubic_basis, tensor_smooth
-  gam.py            # + lambda_mode='shared'
-  lme/_varcomp.py   # + q-rank Z low-rank rotation (internal; API unchanged)
-  connectivity.py   # NEW: ledoit_wolf, shrunk_covariance (oas), glasso, glasso_path, ebic_score
-  inference/
-    randomise.py    # + enhancement='cluster_extent'|'cluster_mass', F-contrast, pvalue_method='gpd'
-    _gpd.py         # NEW: generalized-Pareto tail fit for p-values
+nitrix/
+  linalg/_bspline_core.py  # NEW (Phase 0): uniform_bspline_weights + difference_penalty,
+                           #   shared by bias._bspline AND stats.basis (v1 re-implemented these)
+  stats/
+    _batching.py    # NEW (Phase 0): _blocked_vmap moved out of lme/_varcomp; LME/GLM/GAM/randomise all use it
+    _irls.py        # NEW (Phase 0): one penalised-IRLS core (glm._pirls_one + gam._penalised_irls collapse here)
+    _family.py      # NEW (Phase 0): Family (stays frozen) + _FAMILIES registry; str|Family resolution
+    _smalllinalg.py # Phase 0: + modified-Cholesky pivot floor (sqrt-of-negative guard)
+    basis.py        # + thinplate_regression_basis, cyclic_cubic_basis, tensor_smooth (on _bspline_core)
+    gam.py          # + lambda_mode='shared'; block= knob; shared REML scaffold
+    lme/_varcomp.py # + q-rank Z low-rank rotation (internal; API unchanged)
+    connectivity.py # NEW: ledoit_wolf, shrunk_covariance (oas), glasso, glasso_path, ebic_score
+    inference/
+      randomise.py  # + enhancement='cluster_extent'|'cluster_mass', F-contrast, pvalue_method='gpd';
+                    #   block= knob; uncorrected-p on the RAW statistic; constant-voxel masking
+      _gpd.py       # NEW: generalized-Pareto tail fit for p-values
 ```
 
 ---
 
-## §7. Phasing & priority (recommended)
+## §7. Phasing & priority (revised after the §8.5 three-lens review)
 
-Ordered by value/effort, cheapest high-value first:
+**Phase 0 — v1 hardening & shared-core refactor (do FIRST).** Every feature
+below depends on shared cores that v1 did not factor out; adding features first
+would multiply the duplication the review found. Land these before any v2
+feature (details + anchors in §8.5):
 
-1. **Quick wins (S):** §4.1 Ledoit-Wolf/OAS (nilearn-default parity, ~20 lines,
-   a consumer is waiting per perf-bench) + §3.1 cluster-extent/mass enhancement
-   (maps already shipped) + §2.4 shared-λ GAM mode.
-2. **mgcv-parity bases (M):** §2.1 thin-plate (the mgcv default) + §2.2 cyclic;
-   then §2.3 tensor-product.
-3. **GLASSO (M-L):** §4.2 — solver first (unrolled-AD), implicit-VJP follow-up.
-4. **randomise depth (M):** §3.2 F-contrast + §3.3 GPD tail.
-5. **LME asymptotics (M):** §1.1 q-rank (gated on a large-`N` consumer).
+- **H1. Modified-Cholesky pivot floor** in `_smalllinalg` (+ `p≤2` `det`/`a`
+  guards) — a correctness prerequisite for q-rank LME (§1.1) and GLASSO (§4.2).
+- **H2. `linalg/_bspline_core.py`** — extract the B-spline weights + difference
+  penalty, shared by `bias` and `stats.basis`; blocks the three new bases (§2)
+  from re-duplicating yet again.
+- **H3. `stats/_irls.py`** — one penalised-IRLS core (collapses
+  `glm._pirls_one` + `gam._penalised_irls`; removes the redundant post-loop
+  re-inversion); substrate for the new families and F-contrast randomise.
+- **H4. `Family` registry** (`str | Family`); keep the frozen object.
+- **H5. `stats/_batching.py`** — move `_blocked_vmap` out of `lme/_varcomp`;
+  wire `block=` into `glm_fit` / `gam_fit` / `permutation_test` (the OOM gap).
+- **H6. randomise correctness** — uncorrected p on the *raw* statistic (free;
+  `stat_p` already computed), constant-voxel masking before the max statistic.
+- **H7. Cleanups** — delete the dead `_blocked_vmap` line; guard
+  `_difference_penalty` `order≥k`; `predict`/`compare_models` `Literal`; the
+  `NamedTuple`-vs-dataclass result rule; cache penalty `rank` on `SplineBasis`.
+- **H8. Adversarial tests** — near-singular Cholesky, σ²-boundary, constant /
+  empty voxel, non-contiguous / unequal blocks, TFCE-at-zero.
+
+**Phase 1 — quick wins (S), now higher-value per the perf review.** §2.4
+shared-λ GAM (the *single biggest GAM lever*: removes the ~20× per-voxel outer
+loop) + §4.1 Ledoit-Wolf/OAS (consumer waiting) + §3.1 cluster-extent/mass
+enhancement (≈100× cheaper per permutation than TFCE — relieves the
+randomise CRITICAL) + **TFCE perf** (`n_steps` default 100→~50; single-pass
+two-sided).
+
+**Phase 2 — mgcv-parity bases (M):** §2.1 thin-plate + §2.2 cyclic, then §2.3
+tensor-product (⚠ breaks the disjoint-block `rank_k/λ_k` FS shortcut — needs the
+general summed-penalty inverse; see §8.5).
+
+**Phase 3 — GLASSO (M-L):** §4.2 — coordinate descent with the **row loop
+rolled** (`lax.scan`, never Python-unrolled — the trap the rolled Cholesky
+fixed), `log det` via `spd_inv_logdet_chol` only at converged path points;
+unrolled-AD first, implicit-VJP follow-up.
+
+**Phase 4 — randomise depth (M):** §3.2 F-contrast (per-permutation dispersion;
+hoist the constant `C·cov·Cᵀ` out of the perm scan) + §3.3 GPD tail (exclude
+the observed from the exceedances; lets `n_perm` drop, a linear runtime cut).
+
+**Phase 5 — LME asymptotics (M):** §1.1 q-rank (after H1; gated on a large-`N`
+consumer). **Deep perf (gated, high effort):** hierarchical / Pallas
+connected-components for TFCE (exploit threshold-nesting monotonicity).
 
 Each phase validates against its pinned oracle (sklearn, mgcv, FSL/PALM) kept
 in `tests/` only (SPEC §5.2), with the no-large-intermediate HLO audit and the
 cuSOLVER-free guard extended to every new mass-univariate op.
 
-## §8. Open decisions (to ratify before implementing)
+## §8. Open decisions
 
-- **`connectivity.py` vs fold into `covariance.py`** — recommend a new module
-  (covariance.py is the raw-empirical surface; shrinkage/GLASSO are a distinct
-  regularised family).
-- **GLASSO solver** — coordinate descent (recommended; the reference algorithm,
-  no per-iter factorisation) vs ADMM (proximal log-det via `linalg.symlog`, an
-  eigendecomposition each step — cuSOLVER-heavier).
-- **GLASSO differentiability** — unrolled-AD first vs implicit-VJP up front.
+Resolved by the §8.5 review:
+
+- **`connectivity.py` as a new module** — ✅ confirmed (covariance.py is the
+  raw-empirical surface; shrinkage/GLASSO are a distinct regularised family).
+- **GLASSO solver** — ✅ coordinate descent (no per-iter factorisation), row
+  loop rolled; log-det only at converged path points.
+- **GLASSO differentiability** — ✅ unrolled-AD first, implicit-VJP follow-up.
+- **`Family`: dataclass vs Protocol** — ✅ keep the frozen dataclass
+  (hashability is load-bearing for `vmap`/`custom_vjp`); add a registry, not a
+  bare Protocol.
+- **GAM REML unification** — ✅ unify the *driver/scaffold* (outer-loop ∘ inner
+  IRLS ∘ dispersion ∘ chunking), keep FS vs AI-REML as pluggable *update rules*
+  (they are genuinely different, not duplication).
+
+Still open:
+
 - **Scope cut** — whether §2.3 tensor-product and §1.1 q-rank wait for an
   explicit consumer (both are "right but not yet demanded").
+- **Phase-0 breadth** — land *all* of H1–H8 before features, or only the
+  feature-blocking subset (H1–H5) and fold H6–H8 into the relevant phases.
+
+## §8.5 Three-lens review (2026-06-17) — findings & refinements
+
+A fan-out audit of the shipped v1 code through three lenses (engineering
+rigour & mathematical correctness; performance; clean abstraction). The
+load-bearing statistics were **confirmed correct** (REML profile / AI-REML
+score & average-information, t/F/χ² survival functions, Fellner-Schall, EDF =
+influence trace, TFCE integral, Freedman-Lane, the permutation-0 in-scan
+capture) and several pieces **confirmed well-designed and not to be touched**
+(`_smalllinalg` — used consistently, no cuSOLVER leak; the `_varcomp` REML DRY
+win; the `inference` subpackage boundary; the score-kernel/scalarisation
+boundary; jaxtyping coverage). The actionable findings:
+
+**Correctness (→ Phase 0 H1/H6, H8):**
+- `_smalllinalg.py:77` — hand-Cholesky `sqrt(A[j,j]−s[j])` and the `p≤2`
+  `det`/`log(a)` have **no positive floor**; a near-singular or σ²-boundary
+  system (where callers' tiny ridge is insufficient) yields silent `NaN`. Add a
+  modified-Cholesky pivot floor. *Prerequisite for q-rank and GLASSO.*
+- `inference/randomise.py:279` — the **uncorrected** p-map is built on the
+  TFCE-*enhanced* value, not the raw statistic (FSL uses the raw); `stat_p` is
+  already computed and discarded → free fix.
+- `randomise` SE-floor `1e-30` turns a **constant voxel** (σ²=0) into a `+∞`
+  statistic that dominates the max-statistic null and deflates every FWE p →
+  mask sub-floor-variance voxels before the max.
+- `reml.py:188-197` `_default_theta_init` — a false FLAME claim and a `mean(λ)`
+  scaling that underflows to the σ²-boundary for large-rank `Z`.
+- `basis.py:118` `_difference_penalty` returns a silent all-zero penalty when
+  `order ≥ n_basis` → validate and raise.
+
+**Performance (→ Phase 0 H5, Phase 1, deep-perf):**
+- `randomise` re-runs full two-sided TFCE on **every** permutation
+  (`n_perm × n_steps × connected_components` ≈ 100k CC solves) — the suite's
+  dominant cost. Levers: cluster-extent mode (≈100×), `n_steps` default,
+  single-pass two-sided, hierarchical/Pallas CC.
+- `_blocked_vmap` wired only into LME → GLM/GAM/randomise materialize full-`V`
+  `(V,p,p)` (~3.6 GB at `V=1M,p=30`, OOM risk). → H5.
+- GAM re-inverts `(p,p)` after both inner and outer loops (`gam.py:243`,
+  `glm.py:356`) — carry the converged factor out (→ H3); warm-start fewer inner
+  iters on later FS steps.
+
+**Design (→ Phase 0 H2/H3/H4, H7):**
+- B-spline weights/penalty re-implemented in `basis.py` instead of shared with
+  `bias/_bspline.py` (the v1 plan named the lines) → H2.
+- `glm._pirls_one` ≈ `gam._penalised_irls` (drifted: `_EPS` constant vs literal
+  `1e-10`) → one `_irls.py` core (H3).
+- `Family` has no registry; `family.name == 'gaussian'` string-sniffing is
+  scattered → `_FAMILIES` (H4).
+- GAM's Fellner-Schall is a standalone REML engine, not on `_varcomp`'s
+  scaffold → unify the driver (see §8 resolved).
+- Minors: dead `_blocked_vmap` line (`:339`); result-object `NamedTuple`-vs-
+  dataclass inconsistency (`FLAMEResult`/`PermResult` could be `NamedTuple`);
+  `predict(type=...)` shadows the builtin and is stringly-typed; `gam._assemble`
+  host `np.linalg.matrix_rank` is an undocumented eager-construction boundary
+  (cache `rank` on `SplineBasis`).
+
+**Per-item v2 traps surfaced (folded into §7):** tensor-product smooths break
+the disjoint-block `rank_k/λ_k` Fellner-Schall shortcut; the GPD tail must
+exclude the observed from the exceedances; GLASSO's coordinate-descent row loop
+must stay rolled and its log-det computed only at converged path points;
+F-contrast in randomise needs per-permutation dispersion.
 
 ## §9. Cross-references
 
