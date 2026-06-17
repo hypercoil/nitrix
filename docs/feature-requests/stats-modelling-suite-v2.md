@@ -236,15 +236,19 @@ below depends on shared cores that v1 did not factor out; adding features first
 would multiply the duplication the review found. Land these before any v2
 feature (details + anchors in §8.5).
 
-> **Status (2026-06-17): latent-bug subset SHIPPED** on
-> `fix/stats-v2-phase0-hardening` — **H1** (modified-Cholesky pivot floor;
-> well-conditioned solves bit-unchanged, singular/boundary now finite),
-> **H6** (randomise: uncorrected p on the raw statistic; constant-voxel
-> exclusion), and the **H7** latent items (dead `_blocked_vmap` line;
-> `penalty_order < n_basis` guard; corrected `_default_theta_init` docstring),
-> each with adversarial guards. Remaining Phase 0 = the shared-core refactors
-> **H2** (`_bspline_core`), **H3** (`_irls`), **H4** (`Family` registry),
-> **H5** (`_batching` + `block=` into glm/gam/randomise), and the rest of H8.
+> **Status (2026-06-17): Phase 0 SHIPPED** (latent bugs merged to `main`; the
+> shared-core refactors on `feat/stats-suite-v2`). **H1** (modified-Cholesky
+> pivot floor), **H6** (randomise: uncorrected p on the raw statistic;
+> constant-voxel exclusion), **H7** (dead line; `penalty_order` guard; docstring
+> fix) — all with adversarial guards — merged to `main`. **H2** shared
+> `numerics/_spline` (uniform B-spline weights + difference penalty, used by
+> `bias` *and* `stats.basis`); **H3** one `stats/_irls` penalised-IRLS core
+> (glm + gam collapse onto it); **H4** `stats/_family` + `_FAMILIES` registry
+> (`family: str | Family`); **H5** `stats/_batching.blocked_vmap` + `block=` on
+> `glm_fit` / `gam_fit` (randomise intentionally not chunked — TFCE needs the
+> whole field). All behaviour-preserving (bias/glm/gam/lme bit-identical);
+> block-chunking tested incl. ``V`` not a multiple of ``block``. Remaining: the
+> rest of H8 (further adversarial coverage), folded into the feature phases.
 
 - **H1. Modified-Cholesky pivot floor** in `_smalllinalg` (+ `p≤2` `det`/`a`
   guards) — a correctness prerequisite for q-rank LME (§1.1) and GLASSO (§4.2).
