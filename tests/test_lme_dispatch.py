@@ -160,7 +160,7 @@ def test_flame_block_chunking_matches_single_vmap():
 # ---------------------------------------------------------------------------
 
 
-def test_unrolled_cholesky_matches_reference():
+def test_rolled_cholesky_matches_reference():
     """Hand-Cholesky inverse + log-det match a numpy reference for SPD ``A``.
 
     The reference is numpy (CPU) on purpose: the whole point of the hand
@@ -169,7 +169,7 @@ def test_unrolled_cholesky_matches_reference():
     test to the very routine the code routes around.
     """
     rng = np.random.default_rng(1)
-    for p in (3, 4, 6, 8):
+    for p in (3, 4, 6, 8, 20):
         M = rng.standard_normal((p, p))
         A_np = M @ M.T + p * np.eye(p)
         inv, logdet = spd_inv_logdet_chol(jnp.asarray(A_np), p)
@@ -179,6 +179,28 @@ def test_unrolled_cholesky_matches_reference():
         np.testing.assert_allclose(
             float(logdet), float(np.linalg.slogdet(A_np)[1]), atol=1e-10
         )
+
+
+def test_cholesky_graph_size_is_flat_in_p():
+    """The rolled Cholesky keeps the graph ``O(p^2)`` -- a single ``while`` over
+    columns -- so its top-level equation count is small and ~constant in ``p``.
+
+    An unrolled Cholesky would emit ``O(p^3)`` equations and blow compile up
+    cubically (the diagnosed GAM bottleneck); this guards the rolled form.
+    """
+    rng = np.random.default_rng(0)
+
+    def n_eqns(p: int) -> int:
+        m = rng.standard_normal((p, p))
+        A = jnp.asarray(m @ m.T + p * np.eye(p))
+        jaxpr = jax.make_jaxpr(lambda M: spd_inv_logdet_chol(M, p)[0])(A)
+        return len(jaxpr.jaxpr.eqns)
+
+    small, large = n_eqns(10), n_eqns(30)
+    assert large < 40, f'graph too large ({large} eqns) -- Cholesky unrolled?'
+    assert large <= small + 3, (
+        f'graph grows with p ({small} -> {large}) -- Cholesky no longer rolled.'
+    )
 
 
 def test_reml_general_p_runs_and_is_finite():
