@@ -44,6 +44,7 @@ from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
 __all__ = [
     'SplineBasis',
     'bspline_basis',
+    'cyclic_cubic_basis',
     'thinplate_regression_basis',
     'spline_design',
 ]
@@ -121,7 +122,8 @@ class SplineBasis:
     penalty
         ``(k, k)`` roughness penalty ``S`` (post-constraint).
     kind
-        ``'bspline'`` (P-spline) or ``'tprs'`` (thin-plate regression spline).
+        ``'bspline'`` (P-spline), ``'cyclic'`` (cyclic P-spline), or ``'tprs'``
+        (thin-plate regression spline).
     constraint
         ``(k0, k)`` sum-to-zero reparameterisation ``Z`` (``None`` if
         unconstrained); ``k = k0 - 1`` when present.
@@ -271,6 +273,10 @@ def _raw_features(
     x = jnp.asarray(x)
     if basis.kind == 'bspline':
         return _bspline_design(
+            x, basis.n_basis, basis.degree, basis.lo, basis.hi
+        )
+    if basis.kind == 'cyclic':
+        return _cyclic_bspline_design(
             x, basis.n_basis, basis.degree, basis.lo, basis.hi
         )
     if basis.kind == 'tprs':
@@ -428,4 +434,106 @@ def thinplate_regression_basis(
         hi=hi,
         knots=knots,
         radial_transform=radial_transform,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cyclic cubic P-spline (mgcv bs='cc'/'cp', for periodic covariates)
+# ---------------------------------------------------------------------------
+
+
+def _cyclic_bspline_design(
+    x: Float[Array, ' n'],
+    n_basis: int,
+    degree: int,
+    lo: float,
+    hi: float,
+) -> Float[Array, 'n n_basis']:
+    """Uniform *cyclic* B-spline design: the same weights as ``_bspline_design``
+    but with the parametric coordinate taken modulo the period and the column
+    indices wrapped, so the basis is periodic (``f(lo) == f(hi)``)."""
+    s = jnp.mod((x - lo) / (hi - lo) * n_basis, n_basis)
+    span = jnp.floor(s).astype(jnp.int32)
+    frac = s - span.astype(x.dtype)
+    w = uniform_bspline_weights(frac, degree)  # (n, degree + 1)
+    n = x.shape[0]
+    rows = jnp.arange(n)[:, None]
+    cols = jnp.mod(span[:, None] + jnp.arange(degree + 1)[None, :], n_basis)
+    design = jnp.zeros((n, n_basis), dtype=x.dtype)
+    return design.at[rows, cols].add(w)
+
+
+def _circular_difference_penalty(
+    n_basis: int, order: int, dtype: Any
+) -> Float[Array, 'n_basis n_basis']:
+    """Circular ``order``-th difference penalty ``D^T D`` (wrap-around)."""
+    d1 = -np.eye(n_basis) + np.roll(np.eye(n_basis), -1, axis=1)
+    d = np.linalg.matrix_power(d1, order)
+    return jnp.asarray(d.T @ d, dtype=dtype)
+
+
+def cyclic_cubic_basis(
+    x: Float[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    degree: int = 3,
+    penalty_order: int = 2,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Build a cyclic cubic P-spline basis for a periodic covariate ``x``.
+
+    For periodic covariates (cortical angle, phase, time-of-day): a uniform
+    cyclic B-spline design (the basis wraps at the period ends, matching ``f``,
+    ``f'``, ``f''``) with a circular difference penalty (``mgcv``'s ``bs='cp'``).
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate values.
+    n_basis
+        Number of cyclic basis functions ``k``.
+    degree, penalty_order
+        B-spline degree (default ``3``) and circular difference order (``2``).
+    bounds
+        ``(lo, hi)`` = the period; ``hi`` is identified with ``lo``.  Defaults
+        to the data range (pass the true period for a partial-cycle sample).
+    center
+        Sum-to-zero identifiability constraint (default ``True``).
+
+    Returns
+    -------
+    ``SplineBasis`` (``kind='cyclic'``).
+    """
+    if not 1 <= penalty_order < n_basis:
+        raise ValueError(
+            f'penalty_order={penalty_order} must satisfy 1 <= order < '
+            f'n_basis={n_basis}.'
+        )
+    x = jnp.asarray(x)
+    if bounds is None:
+        lo, hi = float(jnp.min(x)), float(jnp.max(x))
+    else:
+        lo, hi = float(bounds[0]), float(bounds[1])
+
+    design = _cyclic_bspline_design(x, n_basis, degree, lo, hi)
+    penalty = _circular_difference_penalty(n_basis, penalty_order, x.dtype)
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return SplineBasis(
+        design=design,
+        penalty=penalty,
+        kind='cyclic',
+        constraint=constraint,
+        n_basis=n_basis,
+        degree=degree,
+        penalty_order=penalty_order,
+        lo=lo,
+        hi=hi,
     )

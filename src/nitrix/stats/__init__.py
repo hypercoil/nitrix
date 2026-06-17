@@ -59,6 +59,7 @@ from .fourier import (
 from .basis import (
     SplineBasis,
     bspline_basis,
+    cyclic_cubic_basis,
     spline_design,
     thinplate_regression_basis,
 )
@@ -137,6 +138,7 @@ __all__ = [
     # basis
     'SplineBasis',
     'bspline_basis',
+    'cyclic_cubic_basis',
     'thinplate_regression_basis',
     'spline_design',
     # gam

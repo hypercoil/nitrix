@@ -147,3 +147,39 @@ def test_tprs_pytree_roundtrip():
     rt = jax.tree_util.tree_unflatten(treedef, leaves)
     assert rt.kind == 'tprs' and rt.dim == tp.dim
     np.testing.assert_array_equal(np.asarray(rt.design), np.asarray(tp.design))
+
+
+# ---------------------------------------------------------------------------
+# Cyclic cubic P-spline (bs='cp')
+# ---------------------------------------------------------------------------
+
+
+def test_cyclic_periodicity_and_penalty_rank():
+    """The cyclic design is periodic (design(lo) == design(hi)); the circular
+    difference penalty has rank n_basis - 1 (null space = constants)."""
+    from nitrix.stats.basis import cyclic_cubic_basis
+
+    cb = cyclic_cubic_basis(_x(), 12, bounds=(0.0, 1.0), center=False)
+    assert cb.kind == 'cyclic'
+    assert np.linalg.matrix_rank(np.asarray(cb.penalty)) == 12 - 1
+    d = spline_design(cb, jnp.asarray([0.0, 1.0]))
+    np.testing.assert_allclose(np.asarray(d[0]), np.asarray(d[1]), atol=1e-12)
+
+
+def test_cyclic_recovers_periodic_smooth_via_gam():
+    from nitrix.stats.basis import cyclic_cubic_basis
+    from nitrix.stats.gam import gam_fit, smooth_partial_effect
+
+    rng = np.random.default_rng(5)
+    x = np.sort(rng.uniform(0.0, 1.0, 300))
+    truth = np.sin(2 * np.pi * x)  # periodic on [0, 1]
+    y = truth + rng.standard_normal(300) * 0.2
+    cb = cyclic_cubic_basis(jnp.asarray(x), 12, bounds=(0.0, 1.0))
+    res = gam_fit(jnp.asarray(y[None, :]), [cb])
+    eff, _ = smooth_partial_effect(res, 0, cb, jnp.asarray([0.0, 1.0]))
+    # fitted smooth wraps continuously
+    np.testing.assert_allclose(float(eff[0, 0]), float(eff[0, 1]), atol=1e-9)
+    effx, _ = smooth_partial_effect(res, 0, cb, jnp.asarray(x))
+    fit = float(res.coef[0, 0]) + np.asarray(effx[0])
+    interior = (x > 0.05) & (x < 0.95)
+    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
