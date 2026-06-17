@@ -69,6 +69,17 @@ Total HBM at ``V = 100k``, ``N = 30``, ``p = 5``:
 Total ~30 MB.  Fits trivially.  At ``V = 1M``, ``N = 100``,
 ``p = 10``: ``~500 MB`` -- still comfortable on a 24 GB GPU.
 
+Solver
+------
+
+The per-voxel inner loop is the shared ``_varcomp`` AI-REML engine:
+size-dispatched fixed-effect algebra (closed-form for ``p <= 2``,
+``LU`` for ``p > 2`` -- no per-voxel cuSOLVER ``potrf`` / ``syevd``)
+and *analytic* REML score + average-information curvature (no
+second-order autodiff through a Cholesky).  See ``_varcomp.py`` for
+the derivation.  The ``ZZ^T`` eigendecomposition that supplies the
+diagonalising basis is the one shared, one-off ``safe_eigh`` call.
+
 Differentiability
 -----------------
 
@@ -96,8 +107,9 @@ from typing import Any, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-import jax.scipy.linalg as jsla
 from jaxtyping import Array, Float
+
+from ._varcomp import VarCompSpec, fit_varcomp_diagonal
 
 __all__ = ['REMLResult', 'reml_fit']
 
@@ -143,190 +155,6 @@ class REMLResult:
         cls, _aux: None, children: Tuple[Any, ...]
     ) -> REMLResult:
         return cls(*children)
-
-
-# ---------------------------------------------------------------------------
-# REML negative log-likelihood + Newton scoring on the spectral form
-# ---------------------------------------------------------------------------
-
-
-def _neg_reml_loglik_diagonal(
-    theta: Float[Array, 'K'],
-    y_rot: Float[Array, 'N'],
-    X_rot: Float[Array, 'N p'],
-    V_basis_diag: Float[Array, 'K N'],
-    ridge: float = 1e-8,
-) -> Float[Array, '']:
-    """Profile REML negative log-likelihood in a diagonalising basis.
-
-    ``V_basis_diag`` rows are the diagonal of each variance-component
-    basis matrix.  The total variance per coordinate is::
-
-        d_i = sum_k exp(theta_k) * V_basis_diag[k, i]
-
-    Profiles out the fixed effects analytically; the score and
-    Fisher information are obtained via ``jax.grad`` / ``jax.hessian``
-    in the outer scoring loop.
-
-    ``ridge`` is a small stabilisation added to ``X^T V^{-1} X``
-    before Cholesky to handle near-singular fixed-effect designs;
-    default ``1e-8`` is well below typical conditioning issues.
-    """
-    sigma2 = jnp.exp(theta)
-    d = sigma2 @ V_basis_diag  # (N,)
-    inv_d = 1.0 / d
-
-    # X^T V^{-1} X and X^T V^{-1} y -- elementwise weighting by inv_d.
-    Xw = X_rot * inv_d[:, None]  # (N, p)
-    XtVinvX = Xw.T @ X_rot  # (p, p)
-    XtVinvy = Xw.T @ y_rot  # (p,)
-
-    p = XtVinvX.shape[-1]
-    XtVinvX = XtVinvX + ridge * jnp.eye(p, dtype=XtVinvX.dtype)
-
-    # Cholesky-solve for beta; reuse L for log-det of (X^T V^{-1} X).
-    L = jnp.linalg.cholesky(XtVinvX)
-    z = jsla.solve_triangular(L, XtVinvy, lower=True)
-    beta = jsla.solve_triangular(L.T, z, lower=False)
-
-    log_det_V = jnp.sum(jnp.log(d))
-    log_det_XtVinvX = 2.0 * jnp.sum(jnp.log(jnp.diagonal(L)))
-
-    r = y_rot - X_rot @ beta
-    rwss = jnp.sum(r * r * inv_d)
-
-    return 0.5 * (log_det_V + log_det_XtVinvX + rwss)
-
-
-def _newton_scoring_step(
-    theta: Float[Array, 'K'],
-    y_rot: Float[Array, 'N'],
-    X_rot: Float[Array, 'N p'],
-    V_basis_diag: Float[Array, 'K N'],
-    damping: float,
-    max_step: float = 1.0,
-    n_backtrack: int = 4,
-) -> Float[Array, 'K']:
-    """One Newton step on the REML negative log-likelihood, with
-    step clipping and simple backtracking line search.
-
-    Robustness:
-
-    - Levenberg-style **damping** on the Hessian diagonal handles
-      ill-conditioned steps near boundaries where one variance
-      component collapses.
-    - **Step clipping** caps the per-axis log-variance update at
-      ``max_step``; prevents Newton overshoot when starting far
-      from the optimum.
-    - **Backtracking**: try the full step; if nll didn't decrease,
-      halve and re-try ``n_backtrack`` times.  vmap-compatible
-      because the iteration count is fixed.
-    """
-    grad = jax.grad(_neg_reml_loglik_diagonal)(
-        theta,
-        y_rot,
-        X_rot,
-        V_basis_diag,
-    )
-    hess = jax.hessian(_neg_reml_loglik_diagonal)(
-        theta,
-        y_rot,
-        X_rot,
-        V_basis_diag,
-    )
-    k = hess.shape[0]
-    hess_damped = hess + damping * jnp.eye(k, dtype=hess.dtype)
-    delta = jnp.linalg.solve(hess_damped, grad)
-    # Clip the per-axis step.
-    delta = jnp.clip(delta, -max_step, max_step)
-
-    nll_old = _neg_reml_loglik_diagonal(
-        theta,
-        y_rot,
-        X_rot,
-        V_basis_diag,
-    )
-
-    # Backtracking via scan: halve the step until nll decreases or
-    # n_backtrack tries exhausted.
-    def body(
-        carry: Tuple[Float[Array, ''], Float[Array, 'K'], Float[Array, '']],
-        _: Any,
-    ) -> Tuple[
-        Tuple[Float[Array, ''], Float[Array, 'K'], Float[Array, '']], None
-    ]:
-        scale, theta_best, nll_best = carry
-        theta_try = theta - scale * delta
-        nll_try = _neg_reml_loglik_diagonal(
-            theta_try,
-            y_rot,
-            X_rot,
-            V_basis_diag,
-        )
-        accept = nll_try < nll_best
-        theta_new = jnp.where(accept, theta_try, theta_best)
-        nll_new = jnp.where(accept, nll_try, nll_best)
-        return (scale * 0.5, theta_new, nll_new), None
-
-    init = (jnp.asarray(1.0, dtype=theta.dtype), theta, nll_old)
-    (_, theta_final, _), _ = jax.lax.scan(
-        body,
-        init,
-        jnp.arange(n_backtrack),
-    )
-    return theta_final
-
-
-def _reml_fit_diagonal_one_voxel(
-    y_rot: Float[Array, 'N'],
-    X_rot: Float[Array, 'N p'],
-    V_basis_diag: Float[Array, 'K N'],
-    theta_init: Float[Array, 'K'],
-    n_iter: int,
-    damping: float,
-) -> Tuple[Float[Array, 'K'], Float[Array, 'p'], Float[Array, '']]:
-    """Newton-scoring REML for a single voxel in the diagonal-V basis.
-
-    Returns ``(theta_hat, beta_hat, log_lik)``.
-    """
-
-    def step(
-        theta: Float[Array, 'K'], _: Any
-    ) -> Tuple[Float[Array, 'K'], None]:
-        return _newton_scoring_step(
-            theta,
-            y_rot,
-            X_rot,
-            V_basis_diag,
-            damping,
-        ), None
-
-    theta_final, _ = jax.lax.scan(
-        step,
-        theta_init,
-        jnp.arange(n_iter),
-    )
-
-    # Compute beta at theta_final
-    sigma2 = jnp.exp(theta_final)
-    d = sigma2 @ V_basis_diag
-    inv_d = 1.0 / d
-    Xw = X_rot * inv_d[:, None]
-    XtVinvX = Xw.T @ X_rot
-    XtVinvy = Xw.T @ y_rot
-    p = XtVinvX.shape[-1]
-    XtVinvX = XtVinvX + 1e-8 * jnp.eye(p, dtype=XtVinvX.dtype)
-    L = jnp.linalg.cholesky(XtVinvX)
-    z = jsla.solve_triangular(L, XtVinvy, lower=True)
-    beta_final = jsla.solve_triangular(L.T, z, lower=False)
-
-    nll = _neg_reml_loglik_diagonal(
-        theta_final,
-        y_rot,
-        X_rot,
-        V_basis_diag,
-    )
-    return theta_final, beta_final, -nll
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +206,7 @@ def reml_fit(
     theta_init: Optional[Float[Array, 'V 2']] = None,
     n_iter: int = 20,
     damping: float = 1e-6,
+    block: Optional[int] = None,
 ) -> REMLResult:
     """Voxelwise variance-components REML fit.
 
@@ -408,8 +237,8 @@ def reml_fit(
         variance component); pass each component's design matrix
         column to ``Z`` to model multiple random effects (currently
         all share ``sigma_b^2``; for separate variance components
-        per random effect, see the lower-level
-        ``_reml_fit_diagonal_one_voxel``).
+        per random effect, the lower-level ``_varcomp`` core accepts a
+        general ``(K, N)`` basis).
     theta_init
         Per-voxel initial log-variances, ``(V, 2)``.  Defaults to a
         heuristic split of empirical variance.
@@ -417,8 +246,14 @@ def reml_fit(
         Fixed Newton-scoring iteration count.  Default ``20`` --
         typically converges in 5-10 for well-conditioned data.
     damping
-        Levenberg-Marquardt-style damping on the Hessian.  Default
-        ``1e-6``; raise if Newton steps are unstable near boundaries.
+        Levenberg-Marquardt-style damping on the average-information
+        matrix.  Default ``1e-6``; raise if Newton steps are unstable
+        near boundaries.
+    block
+        Optional voxel-block size: cap the number of voxels whose
+        per-Newton intermediates are live at once, bounding peak memory
+        on brain-scale ``V``.  ``None`` (default) is a single ``vmap``
+        over all voxels (identical numerics and HLO to before).
 
     Returns
     -------
@@ -428,7 +263,10 @@ def reml_fit(
     Notes
     -----
     Eigendecomposition of ``ZZ^T`` uses ``safe_eigh`` (cuSolver-
-    robust fallback) -- shared across all voxels and computed once.
+    robust fallback) -- the one shared, one-off solver call.  The
+    per-voxel inner loop (``_varcomp``) makes no cuSOLVER call: the
+    fixed-effect algebra is closed-form for ``p <= 2`` and ``LU``-based
+    for ``p > 2``, and the REML derivatives are analytic.
     """
     from ...linalg._solver import safe_eigh
 
@@ -462,19 +300,14 @@ def reml_fit(
     if theta_init is None:
         theta_init = _default_theta_init(Y_rot, V_basis_diag)
 
-    # vmap over voxels.  Shared inputs (X_rot, V_basis_diag, n_iter,
-    # damping) get in_axes=None.
-    fit = jax.vmap(
-        _reml_fit_diagonal_one_voxel,
-        in_axes=(0, None, None, 0, None, None),
-    )
-    theta_hat, beta_hat, log_lik = fit(
+    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    theta_hat, beta_hat, log_lik = fit_varcomp_diagonal(
         Y_rot,
         X_rot,
         V_basis_diag,
         theta_init,
-        n_iter,
-        damping,
+        spec=spec,
+        block=block,
     )
     return REMLResult(
         theta_hat=theta_hat,

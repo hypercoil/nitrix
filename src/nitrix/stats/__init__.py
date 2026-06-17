@@ -14,6 +14,14 @@ Two submodules:
   phase, envelope.
 - ``gaussian``   -- closed-form diagonal-Gaussian KL divergence and
   negative log-likelihood (log-variance parameterised).
+- ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
+  exponential-family IRLS) with t / F contrasts and goodness-of-fit.
+- ``basis``      -- penalised spline bases (P-splines) for additive models.
+- ``gam``        -- mass-univariate generalised additive (mixed) models with
+  REML / Fellner-Schall smoothing-parameter selection.
+- ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
+- ``inference``  -- permutation / TFCE cluster inference (the on-device FSL
+  ``randomise`` engine) + FDR / Bonferroni.
 - ``pca``        -- principal-component analysis (fit / transform /
   inverse) via the covariance eigendecomposition.
 
@@ -46,7 +54,27 @@ from .fourier import (
     product_filter,
     product_filtfilt,
 )
+from .basis import SplineBasis, bspline_basis, spline_design
+from .gam import GAMResult, gam_fit, smooth_partial_effect
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
+from .glm import (
+    BINOMIAL,
+    GAUSSIAN,
+    POISSON,
+    Family,
+    GLMResult,
+    adj_r_squared,
+    aic,
+    bic,
+    compare_models,
+    deviance_explained,
+    f_contrast,
+    glm_fit,
+    log_likelihood,
+    predict,
+    r_squared,
+    t_contrast,
+)
 from .pca import (
     PCAResult,
     pca_fit,
@@ -81,6 +109,31 @@ __all__ = [
     # gaussian
     'kl_diagonal_gaussian',
     'gaussian_nll',
+    # glm
+    'Family',
+    'GAUSSIAN',
+    'BINOMIAL',
+    'POISSON',
+    'GLMResult',
+    'glm_fit',
+    'predict',
+    't_contrast',
+    'f_contrast',
+    'r_squared',
+    'adj_r_squared',
+    'deviance_explained',
+    'log_likelihood',
+    'aic',
+    'bic',
+    'compare_models',
+    # basis
+    'SplineBasis',
+    'bspline_basis',
+    'spline_design',
+    # gam
+    'GAMResult',
+    'gam_fit',
+    'smooth_partial_effect',
     # pca
     'PCAResult',
     'pca_fit',
