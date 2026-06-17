@@ -36,53 +36,11 @@ from typing import Any, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jaxtyping import Array, Float
 
+from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
+
 __all__ = ['SplineBasis', 'bspline_basis', 'spline_design']
-
-
-# ---------------------------------------------------------------------------
-# Uniform B-spline weights (mirrors bias._bspline._uniform_bspline_weights)
-# ---------------------------------------------------------------------------
-
-
-def _bspline_weights(
-    t: Float[Array, ' n'], degree: int
-) -> Float[Array, 'n degree_plus_1']:
-    """The ``degree + 1`` non-zero uniform B-spline weights at fractions ``t``.
-
-    Closed forms for the orders that matter (1 linear, 2 quadratic, 3 cubic --
-    the default).  A partition of unity (rows sum to 1).
-    """
-    if degree == 1:
-        return jnp.stack([1.0 - t, t], axis=-1)
-    if degree == 2:
-        return jnp.stack(
-            [
-                0.5 * (1.0 - t) ** 2,
-                0.5 * (1.0 + 2.0 * t - 2.0 * t**2),
-                0.5 * t**2,
-            ],
-            axis=-1,
-        )
-    if degree == 3:
-        t2 = t**2
-        t3 = t**3
-        return jnp.stack(
-            [
-                (1.0 - t) ** 3 / 6.0,
-                (3.0 * t3 - 6.0 * t2 + 4.0) / 6.0,
-                (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) / 6.0,
-                t3 / 6.0,
-            ],
-            axis=-1,
-        )
-    raise NotImplementedError(
-        f'degree={degree!r}: bspline_basis ships uniform B-splines of degree '
-        '1, 2, 3 (3 = cubic is the default). Higher orders are the Cox--de '
-        'Boor recursion (these are its degree-1/2/3 specialisations).'
-    )
 
 
 def _bspline_design(
@@ -107,20 +65,12 @@ def _bspline_design(
     s = (x - lo) / (hi - lo) * n_spans
     span = jnp.clip(jnp.floor(s).astype(jnp.int32), 0, n_spans - 1)
     frac = s - span.astype(x.dtype)
-    w = _bspline_weights(frac, degree)  # (n, degree + 1)
+    w = uniform_bspline_weights(frac, degree)  # (n, degree + 1)
     n = x.shape[0]
     rows = jnp.arange(n)[:, None]
     cols = span[:, None] + jnp.arange(degree + 1)[None, :]
     design = jnp.zeros((n, n_basis), dtype=x.dtype)
     return design.at[rows, cols].add(w)
-
-
-def _difference_penalty(
-    n_basis: int, order: int, dtype: Any
-) -> Float[Array, 'n_basis n_basis']:
-    """The ``order``-th difference (P-spline) penalty ``D^T D`` (``k, k``)."""
-    diff = np.diff(np.eye(n_basis), n=order, axis=0)
-    return jnp.asarray(diff.T @ diff, dtype=dtype)
 
 
 def _householder_null(
@@ -255,7 +205,7 @@ def bspline_basis(
         lo, hi = float(bounds[0]), float(bounds[1])
 
     design = _bspline_design(x, n_basis, degree, lo, hi)
-    penalty = _difference_penalty(n_basis, penalty_order, x.dtype)
+    penalty = difference_penalty_1d(n_basis, penalty_order, x.dtype)
 
     constraint: Optional[Array] = None
     if center:
