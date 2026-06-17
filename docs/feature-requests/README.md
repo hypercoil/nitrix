@@ -81,9 +81,15 @@ spanning three sibling requests that share one substrate.
 
 | Workstream | Severity | Home | Driver |
 |---|---|---|---|
-| A — LME size-dispatch + cuSOLVER bypass | ENABLING (measured perf + GPU-block) | `stats.lme._varcomp` | [lme-family-tiny-linalg-gpu-block-and-perf](lme-family-tiny-linalg-gpu-block-and-perf.md), [gpu-cusolver-first-call-handle-failure](gpu-cusolver-first-call-handle-failure.md) |
-| B — mass-univariate GLM + GAM / GAMM | ENABLING (ModelArray parity) | `stats.{glm,gam,basis}` | ModelArray-parity request |
-| C — TFCE `randomise` cluster correction | ENABLING (niffi FSL-substitute gap) | `stats.inference` | niffi capability gap |
+| A — LME size-dispatch + cuSOLVER bypass | ✅ SHIPPED (merged to main) | `stats.lme._varcomp` | [lme-family-tiny-linalg-gpu-block-and-perf](lme-family-tiny-linalg-gpu-block-and-perf.md), [gpu-cusolver-first-call-handle-failure](gpu-cusolver-first-call-handle-failure.md) |
+| B — mass-univariate GLM + GAM / GAMM | ✅ SHIPPED (merged to main) | `stats.{glm,gam,basis}` | ModelArray-parity request |
+| C — TFCE `randomise` cluster correction | ✅ SHIPPED (merged to main) | `stats.inference` | niffi capability gap |
+
+**v2 (planned):** [`stats-modelling-suite-v2.md`](stats-modelling-suite-v2.md)
+— deferred completeness (LME q-rank; GAM thin-plate / cyclic / tensor-product
+bases + shared-λ; randomise cluster-extent/mass + F-contrast + GPD tail) and
+the regularised connectivity estimators **Ledoit-Wolf / OAS** and **graphical
+LASSO**.
 
 ## Internal engineering backlog
 
@@ -145,7 +151,7 @@ live code: *not started* / *partial* (some substrate shipped).
 | 12.11 | [ode-integrators](ode-integrators.md) | `numerics.ode` | L | partial (`integrate_velocity_field` shipped) |
 | 12.12 | [continuous-wavelet-transform](continuous-wavelet-transform.md) | `signal.cwt` | S | not started |
 | 12.13 | [graph-wavelet-transform](graph-wavelet-transform.md) | `graph.wavelet` | S | not started (blocked on 12.2) |
-| 12.14 | [graphical-lasso](graphical-lasso.md) | `stats.glasso` | M | not started |
+| 12.14 | [graphical-lasso](graphical-lasso.md) | `stats.glasso` | M | not started — planned in [stats v2](stats-modelling-suite-v2.md) §4.2 |
 | 12.15 | [surface-resample-adap-bary](surface-resample-adap-bary.md) | `geometry.sphere.resample` | M | partial (icosphere `BARYCENTRIC` shipped) |
 | 12.16 | [surface-boundary-map](surface-boundary-map.md) | `graph.parcellation.boundary` | S | not started (composes shipped prims) |
 | 12.17 | [mesh-watershed](mesh-watershed.md) | `graph.parcellation.watershed` | M | not started |
@@ -158,9 +164,10 @@ strategy→primitive mapping table, not a primitive — and stays in
 
 **Candidate not yet in SPEC §12:**
 [ledoit-wolf-shrinkage](ledoit-wolf-shrinkage.md) (`stats.ledoit_wolf`, effort
-S, **low priority**) — analytic shrinkage covariance; sibling of 12.14 glasso
-and nilearn's *default* connectome estimator. Surfaced by perf-bench
-(nilearn defaults to Ledoit-Wolf; nitrix has no shrinkage estimator).
+S) — analytic shrinkage covariance; sibling of 12.14 glasso and nilearn's
+*default* connectome estimator. Surfaced by perf-bench (nilearn defaults to
+Ledoit-Wolf; nitrix has no shrinkage estimator). **Planned in
+[stats v2](stats-modelling-suite-v2.md) §4.1** (a quick-win, consumer waiting).
 
 ### Dependency edges (within the §12 catalogue)
 
