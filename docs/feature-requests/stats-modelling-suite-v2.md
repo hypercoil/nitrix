@@ -1,10 +1,15 @@
 # Statistical modelling suite v2 — completeness + regularised connectivity (ledger)
 
-> **Status (2026-06-17): planned — agreed scope, not started.** Follow-up to the
-> shipped v1 suite ([`stats-modelling-suite.md`](stats-modelling-suite.md):
-> LME size-dispatch, GLM/GAM/GAMM, TFCE `randomise` — merged to `main`). v2
-> collects (a) the items v1 deliberately deferred and (b) the long-deferred
-> **regularised connectivity estimators** Ledoit-Wolf and graphical LASSO
+> **Status (2026-06-17): Phases 0–3 SHIPPED on `feat/stats-suite-v2`** (Phase 0
+> hardening + shared-core refactors; Phase 1 Ledoit-Wolf/OAS + cluster-extent
+> enhancement + shared-λ GAM; Phase 2 thin-plate + cyclic bases, tensor-product
+> deferred; Phase 3 graphical LASSO). Remaining: Phase 4 (randomise F-contrast +
+> GPD tail), Phase 5 (LME q-rank), and the deferred tensor-product `te`. Branch
+> not yet merged to `main`. Follow-up to the shipped v1 suite
+> ([`stats-modelling-suite.md`](stats-modelling-suite.md): LME size-dispatch,
+> GLM/GAM/GAMM, TFCE `randomise` — merged to `main`). v2 collects (a) the items
+> v1 deliberately deferred and (b) the long-deferred **regularised connectivity
+> estimators** Ledoit-Wolf and graphical LASSO
 > ([`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md),
 > [`graphical-lasso.md`](graphical-lasso.md), SPEC §12.14). It reuses the v1
 > substrate wholesale — the cuSOLVER-free tiny-SPD solve (`stats._smalllinalg`,
@@ -304,10 +309,27 @@ engine (`_gam_fit_one` / `_gam_fit_shared_gaussian` must use the general
 `tr(S_λ⁻ S_k)`, and the single-smooth bases reparameterised to diagonal too), so
 it is split out rather than hacked in by breaking the disjoint-block assumption.
 
-**Phase 3 — GLASSO (M-L):** §4.2 — coordinate descent with the **row loop
-rolled** (`lax.scan`, never Python-unrolled — the trap the rolled Cholesky
-fixed), `log det` via `spd_inv_logdet_chol` only at converged path points;
-unrolled-AD first, implicit-VJP follow-up.
+**Phase 3 — GLASSO (M-L).** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`,
+commit `6776f35`.)* §4.2 `stats.connectivity` gains `glasso` (sparse precision),
+`glasso_path` (warm-started λ sweep via `lax.scan`), and `ebic_score`
+(Foygel-Drton 2010 extended BIC). FHT (2008) coordinate descent on the working
+covariance `W = Θ⁻¹` directly (no per-iter factorisation); the precision is
+recovered from the per-column lasso coefficients
+(`θ_jj = 1/(w_jj − w_12ᵀβ)`, `θ_-j = −β·θ_jj`) so sparsity is inherited
+**exactly** from the soft-threshold, not a dense `W⁻¹`. Off-diagonal-only L1
+penalty (the nilearn/standard convention: `W_jj = S_jj` held fixed; seed
+`W = S`). **All loops rolled** (`lax.fori_loop` outer/inner sweeps + `lax.scan`
+path → `O(p²)` graph, compile flat in `p`); differentiable through the fixed
+iteration budget (unrolled-AD; implicit-VJP deferred). cuSOLVER-free — the EBIC
+`log det` goes through `small_inv_logdet` (rolled Cholesky), HLO-audited.
+**Validation = the convex program's definition, NOT sklearn**: its own
+`GraphicalLasso` solution violates the off-diagonal-only KKT (different penalty
+convention / looser tol), so it is an unreliable bit-match oracle. Tests assert
+KKT stationarity `<1e-7` (active `|W−S|=λ`, inactive `≤λ`, diag `W=S`),
+symmetry/PD, the `λ=0` MLE limit (`Θ=S⁻¹`), monotone sparsity in `λ`, exact
+cross-block zeroing (conditional independence), warm-path == cold-solve, and
+EBIC selecting a sparse interior model that recovers a known banded graph.
+21 connectivity tests green.
 
 **Phase 4 — randomise depth (M):** §3.2 F-contrast (per-permutation dispersion;
 hoist the constant `C·cov·Cᵀ` out of the perm scan) + §3.3 GPD tail (exclude
