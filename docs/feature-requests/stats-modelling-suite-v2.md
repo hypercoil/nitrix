@@ -1,11 +1,11 @@
 # Statistical modelling suite v2 — completeness + regularised connectivity (ledger)
 
-> **Status (2026-06-17): Phases 0–3 SHIPPED on `feat/stats-suite-v2`** (Phase 0
+> **Status (2026-06-17): Phases 0–4 SHIPPED on `feat/stats-suite-v2`** (Phase 0
 > hardening + shared-core refactors; Phase 1 Ledoit-Wolf/OAS + cluster-extent
 > enhancement + shared-λ GAM; Phase 2 thin-plate + cyclic bases, tensor-product
-> deferred; Phase 3 graphical LASSO). Remaining: Phase 4 (randomise F-contrast +
-> GPD tail), Phase 5 (LME q-rank), and the deferred tensor-product `te`. Branch
-> not yet merged to `main`. Follow-up to the shipped v1 suite
+> deferred; Phase 3 graphical LASSO; Phase 4 randomise F-contrast + GPD tail).
+> Remaining: Phase 5 (LME q-rank, gated on a large-`N` consumer) and the deferred
+> tensor-product `te`. Branch not yet merged to `main`. Follow-up to the shipped v1 suite
 > ([`stats-modelling-suite.md`](stats-modelling-suite.md): LME size-dispatch,
 > GLM/GAM/GAMM, TFCE `randomise` — merged to `main`). v2 collects (a) the items
 > v1 deliberately deferred and (b) the long-deferred **regularised connectivity
@@ -331,9 +331,26 @@ cross-block zeroing (conditional independence), warm-path == cold-solve, and
 EBIC selecting a sparse interior model that recovers a known banded graph.
 21 connectivity tests green.
 
-**Phase 4 — randomise depth (M):** §3.2 F-contrast (per-permutation dispersion;
-hoist the constant `C·cov·Cᵀ` out of the perm scan) + §3.3 GPD tail (exclude
-the observed from the exceedances; lets `n_perm` drop, a linear runtime cut).
+**Phase 4 — randomise depth (M).** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`,
+commit `c1ec890`.)* **§3.2 F-contrast** — a `(m, p)` `contrast` matrix selects
+the joint F-test `F = (Cβ)ᵀ[C(XᵀX)⁻¹Cᵀ]⁻¹(Cβ)/(m σ²)` (matches `glm.f_contrast`
+exactly) instead of a t. The `(m, m)` middle matrix depends only on the design
+and contrast — **constant across permutations** — so its cuSOLVER-free inverse is
+hoisted out of the per-perm scan (only β is refit per relabelling). An F is
+non-negative and already joint over both directions, so enhancement + the
+uncorrected comparison go one-sided regardless of the (t-only) `two_sided` flag;
+Freedman-Lane nuisance handling is unchanged; the t-path stays bit-identical
+(regression-guarded). **§3.3 GPD tail** — `pvalue_method='gpd'` reads the FWE
+p-value from a method-of-moments generalized-Pareto fit to the upper tail of the
+null-max distribution (Winkler et al. 2016) instead of the discrete exceedance
+count, so corrected p-values resolve **below** the `1/n_perm` floor at fewer
+permutations. Exposed as a standalone `gpd_pvalue(stat, null_dist,
+n_exceedances)` (body via `searchsorted` — no `(V, n_perm)` broadcast — tail via
+the GPD survival); only the FWE map is smoothed, the uncorrected map + null
+distribution are untouched. Tests: observed F == `glm.f_contrast`, F-mode FWE
+floor + signal + null control, GPD recovers the Exp(1) tail + a peak FWE p
+strictly below `1/n_perm` (null/observed unchanged), GPD body == empirical. All
+cuSOLVER-free; 20 inference tests green.
 
 **Phase 5 — LME asymptotics (M):** §1.1 q-rank (after H1; gated on a large-`N`
 consumer). **Deep perf (gated, high effort):** hierarchical / Pallas
