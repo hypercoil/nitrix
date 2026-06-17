@@ -269,12 +269,18 @@ feature (details + anchors in §8.5).
 - **H8. Adversarial tests** — near-singular Cholesky, σ²-boundary, constant /
   empty voxel, non-contiguous / unequal blocks, TFCE-at-zero.
 
-**Phase 1 — quick wins (S), now higher-value per the perf review.** §2.4
-shared-λ GAM (the *single biggest GAM lever*: removes the ~20× per-voxel outer
-loop) + §4.1 Ledoit-Wolf/OAS (consumer waiting) + §3.1 cluster-extent/mass
-enhancement (≈100× cheaper per permutation than TFCE — relieves the
-randomise CRITICAL) + **TFCE perf** (`n_steps` default 100→~50; single-pass
-two-sided).
+**Phase 1 — quick wins.** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`.)*
+**§4.1 Ledoit-Wolf/OAS** (`stats.connectivity`; matches sklearn to ≤4e-16,
+SPD at p>n, differentiable/batched) + **§3.1 cluster-extent/mass enhancement**
+(`enhancement='cluster_extent'|'cluster_mass'` at a required `cluster_thresh`;
+one cluster-forming pass/perm, ≈100× cheaper than TFCE — the randomise-CRITICAL
+relief) + **§2.4 shared-λ GAM** (`lambda_mode='shared'`, Gaussian: pooled
+Fellner-Schall on `(p,p)` sufficient statistics, outer loop `O(n_outer p^3)`
+V-independent). **TFCE micro-perf NOT done** and de-scoped: the single-pass
+two-sided idea is *not* behaviour-preserving (clustering `|s|>h` wrongly merges
+adjacent opposite-sign blobs — needs a sign-aware CC kernel), and lowering the
+`n_steps` default trades accuracy; the cluster-extent mode is the shipped perf
+option. Deeper TFCE perf (hierarchical/Pallas CC) stays a gated Phase-5 item.
 
 **Phase 2 — mgcv-parity bases (M):** §2.1 thin-plate + §2.2 cyclic, then §2.3
 tensor-product (⚠ breaks the disjoint-block `rank_k/λ_k` FS shortcut — needs the
