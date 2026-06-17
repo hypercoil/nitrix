@@ -218,6 +218,22 @@ Assemble `X = [parametric | smooth bases]`, block penalty `S(λ) = Σ_k λ_k S_k
 
 ## §5. Workstream C — TFCE + `randomise` inference (niffi gap)
 
+> **Status (2026-06-17): SHIPPED on `feat/stats-suite-modelarray-tfce`.**
+> `stats/inference/` landed: `permutation.py` (keyed `sign_flips` /
+> `permutations` + exchangeability blocks, identity-first), `tfce.py` (TFCE on
+> `morphology.connected_components`, two-sided, matches scipy.ndimage to 1e-5),
+> `cluster.py` (size / mass maps), `randomise.py` (`permutation_test`:
+> OLS refit + Freedman-Lane nuisance, per-permutation enhancement, FWE +
+> uncorrected p-maps + null-max — observed captured as permutation 0 *inside*
+> the scan so the identity reproduces it bit-exactly and `p_fwe >= 1/n_perm`),
+> `multiple_comparisons.py` (`fdr_bh` / `bonferroni` vs statsmodels 1e-10). All
+> cuSOLVER-free on GPU. Validated: observed t == scipy one/two-sample (1e-10);
+> FWE floor; signal recovery; null FWE control; Freedman-Lane observed == GLM
+> t-contrast. Deferred: cluster-extent/mass *enhancement* modes in the driver
+> (the maps exist in `cluster.py`); F-contrast statistic; tail-acceleration for
+> very large `n_perm`. niffi consumes `permutation_test` (arrays in/out); the
+> `randomise` CLI / `.con`/`.grp` parsing / containers stay in niffi.
+
 **`stats/inference/permutation.py`** — keyed pure generators `sign_flips` /
 `permutations` honouring **exchangeability blocks** (within-block permute /
 whole-block swap), plus a **Freedman–Lane** helper (partition design into
