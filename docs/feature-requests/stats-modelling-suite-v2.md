@@ -352,8 +352,22 @@ floor + signal + null control, GPD recovers the Exp(1) tail + a peak FWE p
 strictly below `1/n_perm` (null/observed unchanged), GPD body == empirical. All
 cuSOLVER-free; 20 inference tests green.
 
-**Phase 5 — LME asymptotics (M):** §1.1 q-rank (after H1; gated on a large-`N`
-consumer). **Deep perf (gated, high effort):** hierarchical / Pallas
+**Phase 5 — LME asymptotics (M).** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`,
+commit `28404ac`.)* §1.1 q-rank: `reml_fit(low_rank=True)` swaps the dense
+`O(N^3)` eig of `ZZ^T` for a `q x q` eig of `Z^T Z` (`O(N q^2 + q^3)`).
+`ZZ^T = U_r diag(s2) U_r^T`, `U_r = Z W / sqrt(s2)` (`N x q`); the `N - q`
+null-space directions all carry `sigma_e^2` and enter only through per-voxel
+Gram aggregates (`Gxx = X^T X - X_r^T X_r` shared; `Gxy`, `Gyy` per voxel) and
+the multiplicity `n0 = N - q` — no per-null-coordinate work. New
+`lme/_lowrank.py` is a **separate** two-component AI-REML engine (analytic score
++ average-information, no `N x N` intermediate, null-space terms added) so the
+50/50-GPU-validated `_varcomp` dense path is bit-for-bit untouched; shares
+`_small_inv_logdet` / `VarCompSpec` / `_blocked_vmap`, per-voxel cuSOLVER-free
+(the `Z^T Z` eig routes through `safe_eigh`). Opt-in (`low_rank=False` default);
+needs `q <= N`, `Z` full column rank. Validated: low-rank == dense to `1e-9` in
+log-likelihood (same optimum) + matches the balanced one-way ANOVA closed form to
+`1e-6`; HLO carries no `(V, N, N)` and no dense `N x N` factor beyond `U_r`.
+24 LME tests green. **Deep perf (gated, high effort):** hierarchical / Pallas
 connected-components for TFCE (exploit threshold-nesting monotonicity).
 
 Each phase validates against its pinned oracle (sklearn, mgcv, FSL/PALM) kept
