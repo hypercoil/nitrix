@@ -56,7 +56,12 @@ from .fourier import (
     product_filter,
     product_filtfilt,
 )
-from .basis import SplineBasis, bspline_basis, spline_design
+from .basis import (
+    SplineBasis,
+    bspline_basis,
+    spline_design,
+    thinplate_regression_basis,
+)
 from .connectivity import ledoit_wolf, oas, shrunk_covariance
 from .gam import GAMResult, gam_fit, smooth_partial_effect
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
@@ -132,6 +137,7 @@ __all__ = [
     # basis
     'SplineBasis',
     'bspline_basis',
+    'thinplate_regression_basis',
     'spline_design',
     # gam
     'GAMResult',

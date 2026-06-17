@@ -32,15 +32,21 @@ Everything is value -> value and cuSOLVER-free.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float
 
 from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
 
-__all__ = ['SplineBasis', 'bspline_basis', 'spline_design']
+__all__ = [
+    'SplineBasis',
+    'bspline_basis',
+    'thinplate_regression_basis',
+    'spline_design',
+]
 
 
 def _bspline_design(
@@ -102,28 +108,41 @@ def _householder_null(
 class SplineBasis:
     """A penalised spline smooth: design, penalty, and re-evaluation params.
 
+    The re-evaluation at new covariate values factors as ``design(x) =
+    raw_features(x) @ constraint`` for every basis ``kind``: only the
+    (nonlinear) ``raw_features`` differs -- B-spline taps for ``'bspline'``, the
+    radial + polynomial features for ``'tprs'`` (thin-plate).  ``constraint`` is
+    the shared sum-to-zero reparameterisation.
+
     Attributes
     ----------
     design
         ``(n, k)`` basis design at the construction covariate (post-constraint).
     penalty
         ``(k, k)`` roughness penalty ``S`` (post-constraint).
-    n_basis, degree, penalty_order, lo, hi
-        The construction parameters, kept so the design can be rebuilt at new
-        covariate values (``spline_design``).
+    kind
+        ``'bspline'`` (P-spline) or ``'tprs'`` (thin-plate regression spline).
     constraint
         ``(k0, k)`` sum-to-zero reparameterisation ``Z`` (``None`` if
         unconstrained); ``k = k0 - 1`` when present.
+    n_basis, degree, penalty_order, lo, hi
+        B-spline construction parameters.
+    knots, radial_transform
+        TPRS re-evaluation parameters: the knot positions and the radial
+        eigen-truncation ``U_k`` (``None`` for B-splines).
     """
 
     design: Float[Array, 'n k']
     penalty: Float[Array, 'k k']
+    kind: str
+    constraint: Optional[Float[Array, 'k0 k']]
     n_basis: int
     degree: int
     penalty_order: int
     lo: float
     hi: float
-    constraint: Optional[Float[Array, 'k0 k']]
+    knots: Optional[Float[Array, ' nk']] = None
+    radial_transform: Optional[Float[Array, 'nk kw']] = None
 
     @property
     def dim(self) -> int:
@@ -132,26 +151,44 @@ class SplineBasis:
 
     def tree_flatten(
         self,
-    ) -> Tuple[Tuple[Any, ...], Tuple[int, int, int, float, float]]:
-        children = (self.design, self.penalty, self.constraint)
-        aux = (self.n_basis, self.degree, self.penalty_order, self.lo, self.hi)
+    ) -> Tuple[Tuple[Any, ...], Tuple[str, int, int, int, float, float]]:
+        children = (
+            self.design,
+            self.penalty,
+            self.constraint,
+            self.knots,
+            self.radial_transform,
+        )
+        aux = (
+            self.kind,
+            self.n_basis,
+            self.degree,
+            self.penalty_order,
+            self.lo,
+            self.hi,
+        )
         return children, aux
 
     @classmethod
     def tree_unflatten(
-        cls, aux: Tuple[int, int, int, float, float], children: Tuple[Any, ...]
+        cls,
+        aux: Tuple[str, int, int, int, float, float],
+        children: Tuple[Any, ...],
     ) -> 'SplineBasis':
-        design, penalty, constraint = children
-        n_basis, degree, penalty_order, lo, hi = aux
+        design, penalty, constraint, knots, radial_transform = children
+        kind, n_basis, degree, penalty_order, lo, hi = aux
         return cls(
             design=design,
             penalty=penalty,
+            kind=kind,
+            constraint=constraint,
             n_basis=n_basis,
             degree=degree,
             penalty_order=penalty_order,
             lo=lo,
             hi=hi,
-            constraint=constraint,
+            knots=knots,
+            radial_transform=radial_transform,
         )
 
 
@@ -217,13 +254,32 @@ def bspline_basis(
     return SplineBasis(
         design=design,
         penalty=penalty,
+        kind='bspline',
+        constraint=constraint,
         n_basis=n_basis,
         degree=degree,
         penalty_order=penalty_order,
         lo=lo,
         hi=hi,
-        constraint=constraint,
     )
+
+
+def _raw_features(
+    basis: SplineBasis, x: Float[Array, ' m']
+) -> Float[Array, 'm k0']:
+    """The (nonlinear, pre-constraint) basis features at ``x`` for the kind."""
+    x = jnp.asarray(x)
+    if basis.kind == 'bspline':
+        return _bspline_design(
+            x, basis.n_basis, basis.degree, basis.lo, basis.hi
+        )
+    if basis.kind == 'tprs':
+        radial = _tps_radial(x, cast(Array, basis.knots))
+        poly = _tps_poly(x, basis.penalty_order, basis.lo, basis.hi)
+        return jnp.concatenate(
+            [radial @ cast(Array, basis.radial_transform), poly], axis=1
+        )
+    raise ValueError(f'unknown spline kind {basis.kind!r}.')
 
 
 def spline_design(
@@ -232,11 +288,144 @@ def spline_design(
     """Re-evaluate a ``SplineBasis`` design at new covariate values ``x``.
 
     Used to render a smooth's partial effect on a fresh grid.  Applies the same
-    knot mapping and sum-to-zero constraint as the original construction.
+    feature map and sum-to-zero constraint as the original construction.
     """
-    design = _bspline_design(
-        jnp.asarray(x), basis.n_basis, basis.degree, basis.lo, basis.hi
-    )
+    design = _raw_features(basis, x)
     if basis.constraint is not None:
         design = design @ basis.constraint
     return design
+
+
+# ---------------------------------------------------------------------------
+# Thin-plate regression spline (mgcv bs='tp', the default smoother)
+# ---------------------------------------------------------------------------
+
+
+def _tps_radial(
+    x: Float[Array, ' m'], knots: Float[Array, ' nk']
+) -> Float[Array, 'm nk']:
+    """Thin-plate radial basis ``eta(|x_i - knot_j|)`` (1-D, ``m = 2``).
+
+    The 1-D order-2 thin-plate Green's function is ``|r|^3`` (the constant is
+    absorbed into the smoothing parameter).
+    """
+    r = jnp.abs(x[:, None] - knots[None, :])
+    return r**3
+
+
+def _tps_poly(
+    x: Float[Array, ' m'], order: int, lo: float, hi: float
+) -> Float[Array, 'm order']:
+    """Polynomial null-space basis of the thin-plate penalty: ``[1, t, ...,
+    t^{order-1}]`` on a rescaled ``t in [0, 1]`` (the unpenalised part)."""
+    t = (x - lo) / (hi - lo)
+    return jnp.stack([t**j for j in range(order)], axis=-1)
+
+
+def thinplate_regression_basis(
+    x: Float[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    penalty_order: int = 2,
+    max_knots: int = 100,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Build a thin-plate regression spline (TPRS) basis for covariate ``x``.
+
+    The ``mgcv`` default smoother (``bs='tp'``): isotropic and knot-free.  The
+    full thin-plate basis (one function per knot) is truncated by an
+    eigendecomposition of the radial penalty matrix ``E`` -- the ``k - M``
+    leading (largest-eigenvalue) wiggly components, plus the ``M = penalty_order``
+    unpenalised polynomial null-space terms (Wood 2003).  The truncation
+    ``eigh`` is a one-off host (CPU/numpy) computation -- it is data-dependent
+    but not per-trace, and avoids the cuSOLVER ``syevd`` on the broken GPU.
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate values.
+    n_basis
+        Total basis dimension ``k`` (wiggly + polynomial; ``mgcv``'s ``k``).
+    penalty_order
+        Thin-plate order ``m`` (default ``2`` -- penalise curvature); the
+        polynomial null space has dimension ``M = m``.
+    max_knots
+        Cap on the number of knots (placed at quantiles of ``x`` when ``n``
+        exceeds it), bounding the ``O(n_knots^3)`` eigendecomposition.
+    bounds
+        ``(lo, hi)`` for the polynomial rescaling (defaults to the data range).
+    center
+        Apply the sum-to-zero identifiability constraint (default ``True``).
+
+    Returns
+    -------
+    ``SplineBasis`` (``kind='tprs'``).
+    """
+    x = jnp.asarray(x)
+    n = x.shape[0]
+    m = penalty_order
+    if not 1 <= m < n_basis:
+        raise ValueError(
+            f'penalty_order={m} must satisfy 1 <= m < n_basis={n_basis}.'
+        )
+    if bounds is None:
+        lo, hi = float(jnp.min(x)), float(jnp.max(x))
+        lo, hi = lo - 1e-6, hi + 1e-6
+    else:
+        lo, hi = float(bounds[0]), float(bounds[1])
+
+    # Knots: the data, or a quantile subsample when n exceeds max_knots.
+    x_np = np.asarray(x)
+    if n > max_knots:
+        qs = np.linspace(0.0, 1.0, max_knots)
+        knots_np = np.quantile(x_np, qs)
+    else:
+        knots_np = x_np
+    n_knots = knots_np.shape[0]
+    k_wiggly = n_basis - m
+    if k_wiggly > n_knots:
+        raise ValueError(
+            f'n_basis - penalty_order = {k_wiggly} exceeds the {n_knots} '
+            'available knots; raise max_knots or lower n_basis.'
+        )
+
+    # Radial penalty matrix on the knots; truncate to the k_wiggly leading
+    # (largest, most positive) eigenpairs -> a PSD wiggly penalty diag(Dk).
+    e_knots = np.abs(knots_np[:, None] - knots_np[None, :]) ** 3
+    evals, evecs = np.linalg.eigh(e_knots)
+    order = np.argsort(evals)[::-1][:k_wiggly]
+    uk = evecs[:, order]  # (n_knots, k_wiggly)
+    dk = evals[order]  # (k_wiggly,)
+    knots = jnp.asarray(knots_np, dtype=x.dtype)
+    radial_transform = jnp.asarray(uk, dtype=x.dtype)
+
+    # Construction design: [E(x, knots) Uk | poly(x)] and the block penalty.
+    wiggly = _tps_radial(x, knots) @ radial_transform  # (n, k_wiggly)
+    poly = _tps_poly(x, m, lo, hi)  # (n, m)
+    design = jnp.concatenate([wiggly, poly], axis=1)  # (n, n_basis)
+    penalty = jnp.zeros((n_basis, n_basis), dtype=x.dtype)
+    penalty = penalty.at[:k_wiggly, :k_wiggly].set(
+        jnp.diag(jnp.asarray(dk, dtype=x.dtype))
+    )
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return SplineBasis(
+        design=design,
+        penalty=penalty,
+        kind='tprs',
+        constraint=constraint,
+        n_basis=n_basis,
+        degree=3,
+        penalty_order=m,
+        lo=lo,
+        hi=hi,
+        knots=knots,
+        radial_transform=radial_transform,
+    )
