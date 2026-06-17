@@ -55,7 +55,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Tuple, Union
+from typing import Any, Literal, Optional, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -66,6 +66,7 @@ from jaxtyping import Array, Float
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
+from ._smalllinalg import small_inv_logdet
 from .basis import SplineBasis, spline_design
 
 __all__ = ['GAMResult', 'gam_fit', 'smooth_partial_effect']
@@ -232,6 +233,84 @@ def _penalised_irls(
 
 
 # ---------------------------------------------------------------------------
+# Shared-lambda fit (Gaussian): pooled Fellner-Schall on sufficient statistics
+# ---------------------------------------------------------------------------
+
+
+def _gam_fit_shared_gaussian(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    penalties: Float[Array, 'm p p'],
+    ranks: Float[Array, 'm'],
+    n_outer: int,
+    ridge: float,
+    lam_floor: float,
+    lam_ceil: float,
+) -> Tuple[
+    Float[Array, 'V p'],
+    Float[Array, 'V m'],
+    Float[Array, 'V p p'],
+    Float[Array, 'V p p'],
+    Float[Array, 'V'],
+]:
+    """One smoothing parameter shared across all ``V`` elements (Gaussian).
+
+    For the Gaussian identity link the influence ``V = (X^T X + S_lambda)^{-1}``
+    is *shared* (no ``y`` dependence), so the **pooled** Fellner-Schall update
+    is a function only of the ``(p, p)`` sufficient statistics ``X^T X`` and
+    ``C = (Y X)^T (Y X) = sum_v (X^T y_v)(X^T y_v)^T`` and the scalar
+    ``tr(sum_v y_v y_v^T)``.  The outer loop is therefore ``O(n_outer p^3)`` --
+    **independent of ``V``** -- removing the per-element outer loop entirely;
+    only the final coefficient fit and the sufficient statistics touch ``V``.
+
+    Returns the same ``(beta, lam, V, xtwx, dispersion)`` per-element tuple as
+    the per-element path (``V`` / ``xtwx`` broadcast from the shared ``(p, p)``),
+    so the result assembly is identical.
+    """
+    v_count, n = Y.shape
+    m = penalties.shape[0]
+    p = X.shape[1]
+    xtx = X.T @ X
+    yx = Y @ X  # (V, p): row v is (X^T y_v)^T
+    c = yx.T @ yx  # (p, p): sum_v (X^T y_v)(X^T y_v)^T
+    g_tr = jnp.sum(Y * Y)  # tr(sum_v y_v y_v^T)
+    ridge_eye = ridge * jnp.eye(p, dtype=Y.dtype)
+
+    def outer(lam: Float[Array, 'm'], _: Array) -> Tuple[Float[Array, 'm'], None]:
+        s_lambda = jnp.tensordot(lam, penalties, axes=(0, 0))
+        vmat, _ = small_inv_logdet(xtx + s_lambda + ridge_eye, p)
+        edf = jnp.trace(vmat @ xtx)
+        pooled_rss = (
+            g_tr - 2.0 * jnp.trace(vmat @ c) + jnp.trace(vmat @ xtx @ vmat @ c)
+        )
+        phi = pooled_rss / jnp.clip(v_count * (n - edf), 1e-3, None)
+
+        def fs(k: Array) -> Float[Array, '']:
+            sk = penalties[k]
+            tr_vsk = jnp.sum(vmat * sk)  # tr(V S_k)
+            energy_sum = jnp.trace(sk @ vmat @ c @ vmat)  # sum_v b_v^T S_k b_v
+            num = jnp.clip(ranks[k] - lam[k] * tr_vsk, 1e-8, None)
+            den = jnp.clip(energy_sum / (v_count * phi), 1e-12, None)
+            return jnp.clip(num / den, lam_floor, lam_ceil)
+
+        return jax.vmap(fs)(jnp.arange(m)), None
+
+    lam, _ = lax.scan(outer, jnp.ones((m,), Y.dtype), xs=None, length=n_outer)
+
+    s_lambda = jnp.tensordot(lam, penalties, axes=(0, 0))
+    vmat, _ = small_inv_logdet(xtx + s_lambda + ridge_eye, p)
+    coef = yx @ vmat  # (V, p): beta_v = V (X^T y_v)
+    resid = Y - coef @ X.T
+    edf = jnp.trace(vmat @ xtx)
+    phi_v = jnp.sum(resid * resid, axis=1) / jnp.clip(n - edf, 1e-3, None)
+
+    v_bc = jnp.broadcast_to(vmat, (v_count, p, p))
+    xtwx_bc = jnp.broadcast_to(xtx, (v_count, p, p))
+    lam_bc = jnp.broadcast_to(lam, (v_count, m))
+    return coef, lam_bc, v_bc, xtwx_bc, phi_v
+
+
+# ---------------------------------------------------------------------------
 # Per-element fit: Fellner-Schall outer loop over the inner penalised IRLS
 # ---------------------------------------------------------------------------
 
@@ -323,6 +402,7 @@ def gam_fit(
     parametric: Optional[Float[Array, 'N q']] = None,
     intercept: bool = True,
     family: Union[str, Family] = GAUSSIAN,
+    lambda_mode: Literal['per_element', 'shared'] = 'per_element',
     n_outer: int = 20,
     n_inner: int = 15,
     ridge: float = 1e-8,
@@ -346,6 +426,12 @@ def gam_fit(
         Prepend an intercept column (default ``True``).
     family
         Exponential family (default ``GAUSSIAN``).
+    lambda_mode
+        ``'per_element'`` (default) selects a smoothing parameter per element
+        (ModelArray parity).  ``'shared'`` selects **one** smoothing parameter
+        across all elements via a pooled Fellner-Schall update on sufficient
+        statistics -- an ``O(n_outer p^3)``, ``V``-independent outer loop (much
+        faster when smoothness is homogeneous across the brain).  Gaussian only.
     n_outer, n_inner
         Fellner-Schall outer iterations and penalised-IRLS inner iterations.
     ridge
@@ -379,21 +465,33 @@ def gam_fit(
     p = X.shape[1]
     ranks_j = jnp.asarray(ranks, dtype=Y.dtype)
 
-    def per_voxel(
-        y: Float[Array, 'N'],
-    ) -> Tuple[
-        Float[Array, 'p'],
-        Float[Array, 'm'],
-        Float[Array, 'p p'],
-        Float[Array, 'p p'],
-        Float[Array, ''],
-    ]:
-        return _gam_fit_one(
-            y, X, penalties, ranks_j, family, p,
-            n_outer, n_inner, ridge, lam_floor, lam_ceil,
+    if lambda_mode == 'shared':
+        if family.name != 'gaussian':
+            raise NotImplementedError(
+                "lambda_mode='shared' is implemented for the Gaussian family "
+                'only (the pooled sufficient statistics require a shared, '
+                "y-independent influence matrix); use 'per_element' otherwise."
+            )
+        coef, lam, v, xtwx, phi = _gam_fit_shared_gaussian(
+            Y, X, penalties, ranks_j, n_outer, ridge, lam_floor, lam_ceil
         )
+    else:
 
-    coef, lam, v, xtwx, phi = blocked_vmap(per_voxel, (Y,), block=block)
+        def per_voxel(
+            y: Float[Array, 'N'],
+        ) -> Tuple[
+            Float[Array, 'p'],
+            Float[Array, 'm'],
+            Float[Array, 'p p'],
+            Float[Array, 'p p'],
+            Float[Array, ''],
+        ]:
+            return _gam_fit_one(
+                y, X, penalties, ranks_j, family, p,
+                n_outer, n_inner, ridge, lam_floor, lam_ceil,
+            )
+
+        coef, lam, v, xtwx, phi = blocked_vmap(per_voxel, (Y,), block=block)
 
     # Effective degrees of freedom: F = V X^T W X (influence on coefficients).
     influence = jnp.einsum('vij,vjk->vik', v, xtwx)  # (V, p, p)

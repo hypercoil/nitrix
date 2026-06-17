@@ -16,6 +16,7 @@ import re
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 jax.config.update('jax_enable_x64', True)
 
@@ -142,6 +143,37 @@ def test_additive_two_smooths():
     assert float(res.edf[0, 0]) > 2.0 and float(res.edf[0, 1]) > 2.0
     # quadratic f2 is smoother than the sine f1
     assert float(res.edf[0, 1]) < float(res.edf[0, 0])
+
+
+def test_shared_lambda_recovers_smooth_and_pools():
+    """Shared-lambda selects ONE smoothing parameter across all elements (the
+    pooled Fellner-Schall), recovers a smooth, and on homogeneous data lands
+    near the per-element median; non-Gaussian shared raises."""
+    rng = np.random.default_rng(0)
+    x = np.sort(rng.uniform(0.0, 1.0, 300))
+    truth = np.sin(2 * np.pi * x)
+    sb = bspline_basis(jnp.asarray(x), 20, center=True)
+    Y = jnp.asarray(truth[None, :] + rng.standard_normal((40, 300)) * 0.2)
+
+    shared = gam_fit(Y, [sb], lambda_mode='shared')
+    per_elt = gam_fit(Y, [sb], lambda_mode='per_element')
+
+    # one lambda for all elements
+    assert bool(jnp.allclose(shared.lam, shared.lam[0]))
+    # recovers the smooth
+    eff, _ = smooth_partial_effect(shared, 0, sb, jnp.asarray(x))
+    fit = float(shared.coef[0, 0]) + np.asarray(eff[0])
+    interior = (x > 0.05) & (x < 0.95)
+    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    # homogeneous data: shared lambda near the per-element median
+    assert 2.0 < float(shared.edf[0, 0]) < float(sb.dim)
+    med = float(jnp.median(per_elt.lam[:, 0]))
+    assert 0.3 < float(shared.lam[0, 0]) / med < 3.0
+
+    from nitrix.stats.glm import POISSON
+
+    with pytest.raises(NotImplementedError):
+        gam_fit(Y, [sb], family=POISSON, lambda_mode='shared')
 
 
 def test_gam_block_chunking_matches_single_vmap():
