@@ -55,7 +55,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Optional, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -64,7 +64,7 @@ from jax import lax
 from jaxtyping import Array, Float
 
 from ._family import GAUSSIAN, Family, resolve_family
-from ._smalllinalg import small_inv_logdet
+from ._irls import fit_penalised_irls
 from .basis import SplineBasis, spline_design
 
 __all__ = ['GAMResult', 'gam_fit', 'smooth_partial_effect']
@@ -220,33 +220,13 @@ def _penalised_irls(
     ridge: float,
     beta0: Float[Array, 'p'],
 ) -> Tuple[Float[Array, 'p'], Float[Array, 'p p'], Float[Array, 'p p']]:
-    """Penalised IRLS from a warm start.  Returns ``(beta, V, xtwx)`` where
-    ``V = (X^T W X + S_lambda + ridge)^{-1}`` and ``xtwx = X^T W X`` at the
-    converged working weights (the unpenalised Gram, for the EDF / FS traces)."""
-    ridge_eye = ridge * jnp.eye(p, dtype=X.dtype)
-
-    def step(_: Array, beta: Float[Array, 'p']) -> Float[Array, 'p']:
-        eta = X @ beta
-        mu = family.linkinv(eta)
-        dmu = family.mu_eta(eta)
-        var = family.variance(mu)
-        wts = dmu * dmu / jnp.clip(var, 1e-10, None)
-        z = eta + (y - mu) / jnp.clip(dmu, 1e-10, None)
-        Xw = X * wts[:, None]
-        a = Xw.T @ X + s_lambda + ridge_eye
-        a_inv, _ = small_inv_logdet(a, p)
-        return a_inv @ (Xw.T @ z)
-
-    beta = cast(
-        Float[Array, 'p'], lax.fori_loop(0, n_iter, step, beta0)
+    """Penalised IRLS from a warm start, via the shared core.  Returns
+    ``(beta, V, xtwx)`` -- the coefficients, ``V = (X^T W X + S_lambda +
+    ridge)^{-1}``, and the unpenalised Gram ``X^T W X`` (for the EDF / FS
+    traces), all at the converged ``beta``."""
+    beta, v, xtwx, _ = fit_penalised_irls(
+        y, X, family, penalty=s_lambda, beta0=beta0, n_iter=n_iter, ridge=ridge
     )
-    eta = X @ beta
-    mu = family.linkinv(eta)
-    dmu = family.mu_eta(eta)
-    var = family.variance(mu)
-    wts = dmu * dmu / jnp.clip(var, 1e-10, None)
-    xtwx = (X * wts[:, None]).T @ X
-    v, _ = small_inv_logdet(xtwx + s_lambda + ridge_eye, p)
     return beta, v, xtwx
 
 

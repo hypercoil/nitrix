@@ -47,15 +47,15 @@ ship, and a custom family is just another ``Family(...)``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, Union, cast
+from typing import Any, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
-from jax import lax
 from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float
 
 from ._family import BINOMIAL, GAUSSIAN, POISSON, Family, resolve_family
+from ._irls import fit_penalised_irls, irls_warm_start
 from ._smalllinalg import small_inv_logdet
 
 __all__ = [
@@ -200,49 +200,17 @@ def _pirls_one(
     n_iter: int,
     ridge: float,
 ) -> Tuple[Float[Array, 'p'], Float[Array, 'p p'], Float[Array, '']]:
-    """Single-element penalised IRLS.  Returns ``(beta, cov_unscaled, deviance)``.
-
-    ``penalty`` is the ``(p, p)`` smoothing penalty ``S`` (zeros for a plain
-    GLM; ``gam.py`` passes ``S(lambda)``).
-    """
-    ridge_eye = ridge * jnp.eye(p, dtype=X.dtype)
-
-    def normal_eqs(
-        wts: Float[Array, 'N'], z: Float[Array, 'N']
-    ) -> Tuple[Float[Array, 'p p'], Float[Array, 'p']]:
-        Xw = X * wts[:, None]
-        a = Xw.T @ X + penalty + ridge_eye
-        b = Xw.T @ z
-        return a, b
-
-    # Initialise beta by an OLS fit of the linked initial mean.
-    eta0 = family.link(family.init_mu(y))
-    a0, b0 = normal_eqs(w, eta0)
-    a0_inv, _ = small_inv_logdet(a0, p)
-    beta0: Float[Array, 'p'] = a0_inv @ b0
-
-    def step(_: Array, beta: Float[Array, 'p']) -> Float[Array, 'p']:
-        eta = X @ beta
-        mu = family.linkinv(eta)
-        dmu = family.mu_eta(eta)
-        var = family.variance(mu)
-        wts = w * dmu * dmu / jnp.clip(var, _EPS, None)
-        z = eta + (y - mu) / jnp.clip(dmu, _EPS, None)
-        a, b = normal_eqs(wts, z)
-        a_inv, _ = small_inv_logdet(a, p)
-        return a_inv @ b
-
-    beta = cast(Float[Array, 'p'], lax.fori_loop(0, n_iter, step, beta0))
-
-    eta = X @ beta
-    mu = family.linkinv(eta)
-    dmu = family.mu_eta(eta)
-    var = family.variance(mu)
-    wts = w * dmu * dmu / jnp.clip(var, _EPS, None)
-    a, _ = normal_eqs(wts, eta)
-    a_inv, _ = small_inv_logdet(a, p)
-    dev = jnp.sum(family.unit_deviance(y, mu))
-    return beta, a_inv, dev
+    """Single-element penalised IRLS via the shared core.  Returns
+    ``(beta, cov_unscaled, deviance)``.  ``penalty`` is the ``(p, p)`` smoothing
+    penalty (zeros for a plain GLM)."""
+    beta0 = irls_warm_start(
+        y, X, family, penalty=penalty, ridge=ridge, prior_weights=w
+    )
+    beta, v, _, dev = fit_penalised_irls(
+        y, X, family, penalty=penalty, beta0=beta0, n_iter=n_iter,
+        ridge=ridge, prior_weights=w,
+    )
+    return beta, v, dev
 
 
 def glm_fit(
