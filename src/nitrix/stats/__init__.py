@@ -20,6 +20,8 @@ Two submodules:
 - ``gam``        -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
 - ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
+- ``inference``  -- permutation / TFCE cluster inference (the on-device FSL
+  ``randomise`` engine) + FDR / Bonferroni.
 - ``pca``        -- principal-component analysis (fit / transform /
   inverse) via the covariance eigendecomposition.
 
