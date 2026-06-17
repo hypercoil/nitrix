@@ -176,11 +176,17 @@ def _default_theta_init(
     when the true ``sigma_b^2`` is small.
 
     Concretely: ``sigma_e^2_init = 0.5 * var(y)``,
-    ``sigma_b^2_init = 0.1 * var(y) / mean(lambda)`` (so the
+    ``sigma_b^2_init = 0.1 * var(y) / mean(basis)`` (so the
     contribution to the diagonal is comparable in magnitude to
-    ``sigma_e^2_init``).  For the FLAME case where the first basis
-    is ``ones`` and the second is ``var_within``, this gives
-    sensible scaling automatically.
+    ``sigma_e^2_init``), floored at ``1e-6`` so the log is finite.
+
+    This is the default for ``reml_fit`` only; ``flame_two_level``
+    supplies its own initialiser (``_flame_default_log_init``).
+    Caveat: for a random-effect design whose basis (``ZZ^T`` spectrum)
+    has a large mean, ``sigma_b^2_init`` can hit the ``1e-6`` floor and
+    start Newton near the ``sigma_b^2 -> 0`` boundary; the
+    damped + backtracked iteration still climbs off it given enough
+    iterations, but raise ``n_iter`` for such designs.
     """
     y_var = jnp.var(y_rot, axis=-1, keepdims=True)  # (..., 1)
     K = V_basis_diag.shape[0]
