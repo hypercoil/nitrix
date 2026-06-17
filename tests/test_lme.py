@@ -464,3 +464,115 @@ def test_reml_matches_statsmodels_reference():
         float(mdf.scale),
         atol=5e-3,
     )
+
+
+# ---------------------------------------------------------------------------
+# REML: low-rank (q-rank) FaST-LMM path
+# ---------------------------------------------------------------------------
+
+
+def _random_lme_data(N=40, q=5, p=3, V=16, seed=0):
+    rng = np.random.default_rng(seed)
+    Z = rng.standard_normal((N, q))  # tall, full column rank
+    X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])
+    b = rng.standard_normal((V, q)) * 0.8
+    eps = rng.standard_normal((V, N)) * 1.2
+    beta = rng.standard_normal((V, p))
+    Y = beta @ X.T + b @ Z.T + eps
+    return jnp.asarray(Y), jnp.asarray(X), jnp.asarray(Z)
+
+
+def test_reml_lowrank_matches_dense():
+    """The q-rank fit reaches the same REML optimum as the dense N x N eig.
+
+    The two paths start from the same heuristic ``theta`` and optimise the
+    identical objective, so the log-likelihood agrees to the convergence floor
+    and the variance components / fixed effects to the iterative tolerance."""
+    Y, X, Z = _random_lme_data()
+    dense = reml_fit(Y, X, Z, n_iter=60, low_rank=False)
+    low = reml_fit(Y, X, Z, n_iter=60, low_rank=True)
+    np.testing.assert_allclose(
+        np.asarray(low.log_lik), np.asarray(dense.log_lik), atol=1e-9
+    )
+    np.testing.assert_allclose(
+        np.asarray(low.beta_hat), np.asarray(dense.beta_hat), atol=1e-6
+    )
+    # theta is looser than the log-likelihood: the REML objective is flat near
+    # the optimum, so the two paths land a few 1e-4 apart in log-variance while
+    # agreeing to ~1e-11 in the actual objective (the assertion above).
+    np.testing.assert_allclose(
+        np.asarray(low.theta_hat), np.asarray(dense.theta_hat), atol=2e-3
+    )
+
+
+def test_reml_lowrank_matches_balanced_closed_form():
+    """Low-rank REML matches the ANOVA closed form on balanced one-way data
+    (the load-bearing correctness oracle, via the q-rank path)."""
+    y, group_id, g, n_per = _balanced_one_way_data()
+    sigma_b_sq_closed, sigma_e_sq_closed = _balanced_one_way_closed_form(
+        y, group_id, g, n_per
+    )
+    N = g * n_per
+    X = jnp.ones((N, 1))
+    Z = jnp.zeros((N, g))
+    for i in range(g):
+        Z = Z.at[group_id == i, i].set(1.0)
+    Y = jnp.asarray(y[None, :])
+    result = reml_fit(Y, X, Z, n_iter=60, low_rank=True)
+    np.testing.assert_allclose(
+        float(result.sigma_b_sq[0]), sigma_b_sq_closed, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        float(result.sigma_e_sq[0]), sigma_e_sq_closed, atol=1e-6
+    )
+
+
+def test_reml_lowrank_block_chunking_matches_single_vmap():
+    """``low_rank`` honours the ``block`` memory knob (identical to one vmap)."""
+    Y, X, Z = _random_lme_data(V=20)
+    full = reml_fit(Y, X, Z, n_iter=40, low_rank=True)
+    chunked = reml_fit(Y, X, Z, n_iter=40, low_rank=True, block=7)
+    # block padding / reshaping reassociates the reductions, so identical up to
+    # float roundoff rather than bit-exact.
+    np.testing.assert_allclose(
+        np.asarray(full.theta_hat), np.asarray(chunked.theta_hat), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        np.asarray(full.beta_hat), np.asarray(chunked.beta_hat), atol=1e-6
+    )
+
+
+def test_reml_lowrank_rejects_wide_z():
+    """The low-rank form needs a tall random-effect design (q <= N)."""
+    rng = np.random.default_rng(1)
+    Y = jnp.asarray(rng.standard_normal((4, 6)))
+    X = jnp.ones((6, 1))
+    Z = jnp.asarray(rng.standard_normal((6, 8)))  # wide: q=8 > N=6
+    with pytest.raises(ValueError):
+        reml_fit(Y, X, Z, low_rank=True)
+
+
+def test_reml_lowrank_no_NxN_intermediate():
+    """The q-rank HLO must carry no per-voxel (V, N, N) tensor and no N x N
+    factor beyond the range basis U_r (N x q) -- the asymptotic win."""
+    V, N, q = 512, 48, 4
+    rng = np.random.default_rng(0)
+    Y = jnp.asarray(rng.standard_normal((V, N)).astype(np.float32))
+    X = jnp.asarray(rng.standard_normal((N, 2)).astype(np.float32))
+    Z = jnp.asarray(rng.standard_normal((N, q)).astype(np.float32))
+
+    f = jax.jit(
+        lambda Y, X, Z: reml_fit(Y, X, Z, n_iter=8, low_rank=True).beta_hat
+    )
+    hlo = f.lower(Y, X, Z).compile().as_text()
+    shapes = re.findall(r'f32\[([0-9,]+)\]', hlo)
+    for s in shapes:
+        dims = tuple(int(x) for x in s.split(',') if x)
+        # no per-voxel (V, N, N)
+        assert not (
+            len(dims) == 3 and dims[0] == V and dims[1] == N and dims[2] == N
+        ), f'unexpected (V, N, N) intermediate {dims}'
+        # no dense N x N factor (the low-rank path only needs U_r = N x q)
+        assert not (len(dims) == 2 and dims[0] == N and dims[1] == N), (
+            f'unexpected dense N x N factor {dims}; low-rank should stay N x q'
+        )
