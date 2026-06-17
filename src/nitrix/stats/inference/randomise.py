@@ -38,20 +38,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import prod
-from typing import Any, Literal, Optional, Tuple
+from typing import Any, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Bool, Float, Int
 
+from ...morphology import connected_components
 from .._smalllinalg import small_inv_logdet
+from .cluster import cluster_mass_map, cluster_size_map
 from .permutation import permutations, sign_flips
 from .tfce import tfce
 
 __all__ = ['PermResult', 'permutation_test']
 
-Enhancement = Literal['tfce', 'voxel']
+Enhancement = Literal['tfce', 'voxel', 'cluster_extent', 'cluster_mass']
 Exchange = Literal['sign', 'perm']
 
 # A voxel whose observed residual variance is below this fraction of the
@@ -144,6 +146,7 @@ def permutation_test(
     two_sided: bool = True,
     var_smooth: Optional[float] = None,
     connectivity: int = 1,
+    cluster_thresh: Optional[float] = None,
     tfce_E: float = 0.5,
     tfce_H: float = 2.0,
     tfce_steps: int = 100,
@@ -163,7 +166,9 @@ def permutation_test(
     n_perm
         Number of permutations incl. the identity (default ``500``).
     enhancement
-        ``'tfce'`` (default) or ``'voxel'`` (raw statistic, voxelwise FWE).
+        ``'tfce'`` (default), ``'voxel'`` (raw statistic, voxelwise FWE), or
+        ``'cluster_extent'`` / ``'cluster_mass'`` (cluster-forming at
+        ``cluster_thresh``).
     exchange
         ``'sign'`` (sign-flipping; symmetric / one-sample) or ``'perm'``
         (row permutation; two-sample / regression).
@@ -179,6 +184,11 @@ def permutation_test(
         Two-sided test (default ``True``).
     var_smooth
         Optional Gaussian sigma for variance smoothing (pseudo-t, FSL ``-v``).
+    cluster_thresh
+        Cluster-forming statistic threshold; **required** for
+        ``enhancement='cluster_extent'`` / ``'cluster_mass'`` (the classic FSL
+        cluster-extent / cluster-mass FWE -- one threshold, ~100x cheaper per
+        permutation than TFCE).
     connectivity, tfce_E, tfce_H, tfce_steps
         Cluster / TFCE parameters.
 
@@ -194,6 +204,11 @@ def permutation_test(
     if design.shape[0] != n:
         raise ValueError(
             f'permutation_test: design has {design.shape[0]} rows; N={n}.'
+        )
+    if enhancement in ('cluster_extent', 'cluster_mass') and cluster_thresh is None:
+        raise ValueError(
+            f'permutation_test: enhancement={enhancement!r} needs a '
+            'cluster_thresh (the cluster-forming statistic threshold).'
         )
     Y = data.reshape(v, n)
     c = jnp.asarray(contrast)
@@ -231,20 +246,33 @@ def permutation_test(
         se = jnp.sqrt(jnp.clip(sigma2 * c_var, 1e-30, None))
         return effect / se
 
+    def _cluster_side(s: Float[Array, '*spatial']) -> Float[Array, '*spatial']:
+        thr = cast(float, cluster_thresh)  # validated non-None above
+        labels = connected_components(s > thr, connectivity=connectivity)
+        if enhancement == 'cluster_extent':
+            return cluster_size_map(labels)
+        return cluster_mass_map(labels, s, thr)
+
     def enhance(stat_v: Float[Array, 'V']) -> Float[Array, 'V']:
         stat_v = jnp.where(mask_flat, stat_v, 0.0)
         if enhancement == 'voxel':
             out = jnp.abs(stat_v) if two_sided else jnp.clip(stat_v, 0.0, None)
             return out
-        enhanced = tfce(
-            jnp.reshape(stat_v, spatial),
-            E=tfce_E,
-            H=tfce_H,
-            n_steps=tfce_steps,
-            connectivity=connectivity,
-            two_sided=two_sided,
-            mask=None if mask is None else mask,
-        )
+        spatial_stat = jnp.reshape(stat_v, spatial)
+        if enhancement == 'tfce':
+            enhanced = tfce(
+                spatial_stat,
+                E=tfce_E,
+                H=tfce_H,
+                n_steps=tfce_steps,
+                connectivity=connectivity,
+                two_sided=two_sided,
+                mask=None if mask is None else mask,
+            )
+        else:  # cluster_extent / cluster_mass at a fixed forming threshold
+            enhanced = _cluster_side(spatial_stat)
+            if two_sided:
+                enhanced = enhanced + _cluster_side(-spatial_stat)
         return jnp.reshape(enhanced, (v,))
 
     # Relabellings (row 0 = identity).

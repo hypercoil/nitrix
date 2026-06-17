@@ -319,6 +319,41 @@ def test_randomise_freedman_lane_observed_matches_glm():
     )
 
 
+@pytest.mark.parametrize('mode', ['cluster_extent', 'cluster_mass'])
+def test_randomise_cluster_enhancement(mode):
+    """Cluster-extent / cluster-mass enhancement: valid FWE (floor + signal +
+    null control), and the cluster-forming threshold is required."""
+    rng = np.random.default_rng(0)
+    H, W, N = 16, 16, 24
+    data = rng.standard_normal((H, W, N))
+    data[5:10, 5:10, :] += 1.0
+    res = permutation_test(
+        jnp.asarray(data), jnp.ones((N, 1)), jnp.asarray([1.0]),
+        key=jax.random.PRNGKey(1), n_perm=300,
+        enhancement=mode, cluster_thresh=2.0,
+    )
+    assert float(res.p_fwe.min()) >= 1.0 / 300 - 1e-9
+    np.testing.assert_allclose(
+        float(res.null_max[0]), float(jnp.max(res.enhanced)), atol=1e-9
+    )
+    assert float((res.p_fwe[5:10, 5:10] < 0.05).mean()) > 0.5
+
+    noise = rng.standard_normal((H, W, N))
+    r0 = permutation_test(
+        jnp.asarray(noise), jnp.ones((N, 1)), jnp.asarray([1.0]),
+        key=jax.random.PRNGKey(2), n_perm=300,
+        enhancement=mode, cluster_thresh=2.0,
+    )
+    assert float((r0.p_fwe < 0.05).mean()) < 0.05
+
+    # the forming threshold is mandatory for cluster modes
+    with pytest.raises(ValueError):
+        permutation_test(
+            jnp.asarray(data), jnp.ones((N, 1)), jnp.asarray([1.0]),
+            key=jax.random.PRNGKey(0), n_perm=10, enhancement=mode,
+        )
+
+
 def test_randomise_voxel_enhancement_and_cusolver_free():
     rng = np.random.default_rng(5)
     H, W, N = 10, 10, 16
