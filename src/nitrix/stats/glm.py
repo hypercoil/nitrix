@@ -47,14 +47,15 @@ ship, and a custom family is just another ``Family(...)``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple, cast
+from typing import Any, Optional, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
 from jax import lax
-from jax.scipy.special import betainc, gammaincc, gammaln, xlogy
+from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float
 
+from ._family import BINOMIAL, GAUSSIAN, POISSON, Family, resolve_family
 from ._smalllinalg import small_inv_logdet
 
 __all__ = [
@@ -77,126 +78,6 @@ __all__ = [
 ]
 
 _EPS = 1e-10
-
-
-# ---------------------------------------------------------------------------
-# Exponential family
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Family:
-    """An exponential-family + link, as a record of pure functions.
-
-    Frozen and hashable so it rides as a static config (and a future
-    ``custom_vjp`` nondiff arg).  The fields are the GLM/IRLS primitives:
-
-    - ``link`` / ``linkinv`` -- ``g(mu)`` and ``g^{-1}(eta)``.
-    - ``mu_eta`` -- ``d mu / d eta`` as a function of ``eta`` (IRLS weight).
-    - ``variance`` -- the variance function ``V(mu)``.
-    - ``unit_deviance`` -- per-observation deviance contribution ``d(y, mu)``.
-    - ``init_mu`` -- a fitted-mean initialiser from ``y`` (IRLS start).
-    - ``loglik`` -- per-observation log-likelihood ``l(y, mu, dispersion)``
-      (the dispersion argument is ignored by the fixed-dispersion families).
-    - ``has_fixed_dispersion`` -- ``True`` when the dispersion is 1 (binomial /
-      Poisson); ``False`` when it is estimated (Gaussian).
-    """
-
-    name: str
-    has_fixed_dispersion: bool
-    link: Callable[[Array], Array]
-    linkinv: Callable[[Array], Array]
-    mu_eta: Callable[[Array], Array]
-    variance: Callable[[Array], Array]
-    unit_deviance: Callable[[Array, Array], Array]
-    init_mu: Callable[[Array], Array]
-    loglik: Callable[[Array, Array, Array], Array]
-
-
-def _identity(x: Array) -> Array:
-    return x
-
-
-def _ones_like(x: Array) -> Array:
-    return jnp.ones_like(x)
-
-
-def _gaussian_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
-    phi = jnp.clip(dispersion, _EPS, None)
-    return -0.5 * (jnp.log(2.0 * jnp.pi * phi) + (y - mu) ** 2 / phi)
-
-
-GAUSSIAN = Family(
-    name='gaussian',
-    has_fixed_dispersion=False,
-    link=_identity,
-    linkinv=_identity,
-    mu_eta=_ones_like,
-    variance=_ones_like,
-    unit_deviance=lambda y, mu: (y - mu) ** 2,
-    init_mu=_identity,
-    loglik=_gaussian_loglik,
-)
-
-
-def _logit(mu: Array) -> Array:
-    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
-    return jnp.log(m / (1.0 - m))
-
-
-def _expit(eta: Array) -> Array:
-    return 0.5 * (1.0 + jnp.tanh(0.5 * eta))
-
-
-def _binomial_mu_eta(eta: Array) -> Array:
-    mu = _expit(eta)
-    return mu * (1.0 - mu)
-
-
-def _binomial_deviance(y: Array, mu: Array) -> Array:
-    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
-    return 2.0 * (xlogy(y, y / m) + xlogy(1.0 - y, (1.0 - y) / (1.0 - m)))
-
-
-def _binomial_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
-    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
-    return xlogy(y, m) + xlogy(1.0 - y, 1.0 - m)
-
-
-BINOMIAL = Family(
-    name='binomial',
-    has_fixed_dispersion=True,
-    link=_logit,
-    linkinv=_expit,
-    mu_eta=_binomial_mu_eta,
-    variance=lambda mu: mu * (1.0 - mu),
-    unit_deviance=_binomial_deviance,
-    init_mu=lambda y: (y + 0.5) / 2.0,
-    loglik=_binomial_loglik,
-)
-
-
-def _poisson_deviance(y: Array, mu: Array) -> Array:
-    m = jnp.clip(mu, _EPS, None)
-    return 2.0 * (xlogy(y, y / m) - (y - m))
-
-
-def _poisson_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
-    m = jnp.clip(mu, _EPS, None)
-    return xlogy(y, m) - m - gammaln(y + 1.0)
-
-
-POISSON = Family(
-    name='poisson',
-    has_fixed_dispersion=True,
-    link=lambda mu: jnp.log(jnp.clip(mu, _EPS, None)),
-    linkinv=jnp.exp,
-    mu_eta=jnp.exp,
-    variance=_identity,
-    unit_deviance=_poisson_deviance,
-    init_mu=lambda y: y + 0.1,
-    loglik=_poisson_loglik,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +249,7 @@ def glm_fit(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
     *,
-    family: Family = GAUSSIAN,
+    family: Union[str, Family] = GAUSSIAN,
     weights: Optional[Float[Array, 'N']] = None,
     n_iter: int = 25,
     ridge: float = 0.0,
@@ -382,7 +263,9 @@ def glm_fit(
     X
         ``(N, p)`` design, shared across elements.
     family
-        Exponential family + link (default ``GAUSSIAN`` identity = OLS).
+        Exponential family + link: a built-in name (``'gaussian'`` /
+        ``'binomial'`` / ``'poisson'``) or a ``Family`` instance.  Default
+        ``GAUSSIAN`` identity = OLS.
     weights
         Optional ``(N,)`` prior observation weights (WLS / known precision).
         ``None`` is unweighted.
@@ -396,6 +279,7 @@ def glm_fit(
     ``GLMResult`` (coefficients, unscaled covariance, dispersion, deviance,
     null deviance).
     """
+    family = resolve_family(family)
     n, p = X.shape
     if Y.shape[-1] != n:
         raise ValueError(

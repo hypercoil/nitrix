@@ -55,7 +55,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Tuple, cast
+from typing import Any, Optional, Sequence, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -63,9 +63,9 @@ import numpy as np
 from jax import lax
 from jaxtyping import Array, Float
 
+from ._family import GAUSSIAN, Family, resolve_family
 from ._smalllinalg import small_inv_logdet
 from .basis import SplineBasis, spline_design
-from .glm import GAUSSIAN, Family
 
 __all__ = ['GAMResult', 'gam_fit', 'smooth_partial_effect']
 
@@ -341,7 +341,7 @@ def gam_fit(
     *,
     parametric: Optional[Float[Array, 'N q']] = None,
     intercept: bool = True,
-    family: Family = GAUSSIAN,
+    family: Union[str, Family] = GAUSSIAN,
     n_outer: int = 20,
     n_inner: int = 15,
     ridge: float = 1e-8,
@@ -376,6 +376,7 @@ def gam_fit(
     ``GAMResult`` (coefficients, selected ``lambda``, per-smooth EDF, dispersion,
     deviance, Bayesian covariance).
     """
+    family = resolve_family(family)
     n = X_n = Y.shape[-1]
     for sm in smooths:
         if sm.design.shape[0] != n:
