@@ -22,7 +22,7 @@ in the consumer):
 from .cluster import cluster_mass_map, cluster_size_map
 from .multiple_comparisons import bonferroni, fdr_bh
 from .permutation import permutations, sign_flips
-from .randomise import PermResult, permutation_test
+from .randomise import PermResult, gpd_pvalue, permutation_test
 from .tfce import tfce
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     'cluster_mass_map',
     'permutation_test',
     'PermResult',
+    'gpd_pvalue',
     'fdr_bh',
     'bonferroni',
 ]

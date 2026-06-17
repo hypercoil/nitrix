@@ -12,9 +12,9 @@ The procedure
 -------------
 
 For data ``Y`` (one response per observation per voxel), design ``X``, and a
-t-contrast ``c``:
+contrast -- a ``(p,)`` t-contrast ``c`` or a ``(m, p)`` F-contrast ``C``:
 
-1. Fit OLS and form the observed statistic image (t, or a variance-smoothed
+1. Fit OLS and form the observed statistic image (t / F, or a variance-smoothed
    pseudo-t, FSL ``-v``), then **enhance** it (TFCE / cluster / raw voxel).
 2. For each of ``n_perm`` relabellings (sign flips or permutations, honouring
    exchangeability blocks), refit and re-enhance.  Nuisance regressors are
@@ -25,7 +25,10 @@ t-contrast ``c``:
    (fraction of permutations whose voxel statistic >= the observed) and the
    **FWE** p-map (fraction whose *spatial maximum* enhanced statistic >= the
    observed enhanced value).  The first permutation is the identity, so the
-   observed is included and ``p >= 1 / n_perm``.
+   observed is included and ``p >= 1 / n_perm``.  Optionally (``pvalue_method=
+   'gpd'``) the FWE p-value is read instead from a generalized-Pareto fit to the
+   null-max tail (Winkler et al. 2016), resolving below the ``1 / n_perm`` floor
+   at fewer permutations (see ``gpd_pvalue``).
 
 Everything is cuSOLVER-free (the only solve is a shared ``(p, p)`` inverse via
 ``stats._smalllinalg``) and runs on the broken-cuSOLVER GPU.  The enhancement
@@ -51,10 +54,11 @@ from .cluster import cluster_mass_map, cluster_size_map
 from .permutation import permutations, sign_flips
 from .tfce import tfce
 
-__all__ = ['PermResult', 'permutation_test']
+__all__ = ['PermResult', 'gpd_pvalue', 'permutation_test']
 
 Enhancement = Literal['tfce', 'voxel', 'cluster_extent', 'cluster_mass']
 Exchange = Literal['sign', 'perm']
+PValueMethod = Literal['empirical', 'gpd']
 
 # A voxel whose observed residual variance is below this fraction of the
 # typical in-mask variance is treated as degenerate (constant / no information)
@@ -134,7 +138,7 @@ def _residual_former(
 def permutation_test(
     data: Float[Array, '*spatial N'],
     design: Float[Array, 'N p'],
-    contrast: Float[Array, 'p'],
+    contrast: Float[Array, 'p'] | Float[Array, 'm p'],
     *,
     key: Array,
     n_perm: int = 500,
@@ -150,8 +154,10 @@ def permutation_test(
     tfce_E: float = 0.5,
     tfce_H: float = 2.0,
     tfce_steps: int = 100,
+    pvalue_method: PValueMethod = 'empirical',
+    gpd_n_exceedances: int = 250,
 ) -> PermResult:
-    """Permutation test of a GLM t-contrast with FWE control.
+    """Permutation test of a GLM t- or F-contrast with FWE control.
 
     Parameters
     ----------
@@ -160,7 +166,11 @@ def permutation_test(
     design
         ``(N, p)`` GLM design (includes the effect and any nuisance columns).
     contrast
-        ``(p,)`` t-contrast vector ``c`` (tests ``c^T beta = 0``).
+        The tested contrast.  A ``(p,)`` vector ``c`` is a **t-contrast**
+        (signed, two-sided by default); a ``(m, p)`` matrix ``C`` (``m > 1``)
+        is an **F-contrast** -- the joint test ``C beta = 0`` reported as the
+        non-negative F-statistic (``two_sided`` is then irrelevant and ignored,
+        the F already captures both directions).
     key
         ``jax.random`` key (RNG policy is the caller's).
     n_perm
@@ -181,7 +191,7 @@ def permutation_test(
         Optional spatial mask; out-of-mask voxels do not contribute to clusters
         or the maximum.
     two_sided
-        Two-sided test (default ``True``).
+        Two-sided test (default ``True``).  Ignored for an F-contrast.
     var_smooth
         Optional Gaussian sigma for variance smoothing (pseudo-t, FSL ``-v``).
     cluster_thresh
@@ -189,6 +199,17 @@ def permutation_test(
         ``enhancement='cluster_extent'`` / ``'cluster_mass'`` (the classic FSL
         cluster-extent / cluster-mass FWE -- one threshold, ~100x cheaper per
         permutation than TFCE).
+    pvalue_method
+        ``'empirical'`` (default) -- the FWE p-map is the discrete fraction of
+        permutations whose null max ``>=`` the observed (floored at
+        ``1/n_perm``).  ``'gpd'`` -- fit a generalized Pareto distribution to
+        the upper tail of the null-max distribution (Winkler et al. 2016) so
+        FWE p-values resolve **below** the ``1/n_perm`` floor, letting
+        ``n_perm`` drop.  Only the FWE map is GPD-smoothed; the uncorrected map
+        stays empirical.
+    gpd_n_exceedances
+        Number of upper-tail null-max exceedances used for the GPD fit when
+        ``pvalue_method='gpd'`` (default ``250``; clamped to ``n_perm - 1``).
     connectivity, tfce_E, tfce_H, tfce_steps
         Cluster / TFCE parameters.
 
@@ -205,20 +226,37 @@ def permutation_test(
         raise ValueError(
             f'permutation_test: design has {design.shape[0]} rows; N={n}.'
         )
-    if enhancement in ('cluster_extent', 'cluster_mass') and cluster_thresh is None:
+    if (
+        enhancement in ('cluster_extent', 'cluster_mass')
+        and cluster_thresh is None
+    ):
         raise ValueError(
             f'permutation_test: enhancement={enhancement!r} needs a '
             'cluster_thresh (the cluster-forming statistic threshold).'
         )
     Y = data.reshape(v, n)
     c = jnp.asarray(contrast)
-    mask_flat = (
-        jnp.ones((v,), dtype=bool) if mask is None else mask.reshape(v)
-    )
+    is_f = c.ndim == 2
+    if is_f and c.shape[-1] != p:
+        raise ValueError(
+            f'permutation_test: F-contrast has {c.shape[-1]} columns; p={p}.'
+        )
+    # An F-statistic is non-negative and already joint over the contrast rows,
+    # so enhancement / the uncorrected comparison are one-sided regardless of
+    # the (t-only) ``two_sided`` flag.
+    enh_two_sided = two_sided and not is_f
+    mask_flat = jnp.ones((v,), dtype=bool) if mask is None else mask.reshape(v)
 
     M, xtx_inv = _ols_pre(design)
-    c_var = c @ (xtx_inv @ c)  # scalar
     dof = float(n - p)
+    if is_f:
+        m_rank = c.shape[0]
+        # The (m, m) middle matrix C (X^T X)^{-1} C^T depends only on the design
+        # and the contrast -- constant across permutations, so its inverse is
+        # hoisted out of the per-permutation statistic.
+        fmat_inv, _ = small_inv_logdet(c @ xtx_inv @ c.T, m_rank)
+    else:
+        c_var = c @ (xtx_inv @ c)  # scalar
     fit_z, res_z = _residual_former(nuisance, n, Y.dtype)
     e0 = Y @ res_z.T  # reduced-model residuals (V, N)
     base = Y @ fit_z.T  # nuisance fit to add back (V, N); 0 if no nuisance
@@ -242,6 +280,10 @@ def permutation_test(
             sigma2 = jnp.reshape(
                 _smooth(jnp.reshape(sigma2, spatial), var_smooth), (v,)
             )
+        if is_f:
+            cb = beta @ c.T  # (V, m)
+            quad = jnp.einsum('vi,ij,vj->v', cb, fmat_inv, cb)
+            return quad / (m_rank * jnp.clip(sigma2, 1e-30, None))
         effect = beta @ c
         se = jnp.sqrt(jnp.clip(sigma2 * c_var, 1e-30, None))
         return effect / se
@@ -256,7 +298,11 @@ def permutation_test(
     def enhance(stat_v: Float[Array, 'V']) -> Float[Array, 'V']:
         stat_v = jnp.where(mask_flat, stat_v, 0.0)
         if enhancement == 'voxel':
-            out = jnp.abs(stat_v) if two_sided else jnp.clip(stat_v, 0.0, None)
+            out = (
+                jnp.abs(stat_v)
+                if enh_two_sided
+                else jnp.clip(stat_v, 0.0, None)
+            )
             return out
         spatial_stat = jnp.reshape(stat_v, spatial)
         if enhancement == 'tfce':
@@ -266,12 +312,12 @@ def permutation_test(
                 H=tfce_H,
                 n_steps=tfce_steps,
                 connectivity=connectivity,
-                two_sided=two_sided,
+                two_sided=enh_two_sided,
                 mask=None if mask is None else mask,
             )
         else:  # cluster_extent / cluster_mass at a fixed forming threshold
             enhanced = _cluster_side(spatial_stat)
-            if two_sided:
+            if enh_two_sided:
                 enhanced = enhanced + _cluster_side(-spatial_stat)
         return jnp.reshape(enhanced, (v,))
 
@@ -323,8 +369,9 @@ def permutation_test(
         fwe_count = fwe_count + (m >= enhanced_obs)
         # Uncorrected: the *raw* per-voxel statistic vs the observed (FSL
         # convention) -- two-sided compares magnitudes.  Not the enhanced value.
-        cstat_p = jnp.abs(stat_p) if two_sided else stat_p
-        cstat_obs = jnp.abs(stat_obs) if two_sided else stat_obs
+        # (An F-statistic is already one-sided, so ``enh_two_sided`` is False.)
+        cstat_p = jnp.abs(stat_p) if enh_two_sided else stat_p
+        cstat_obs = jnp.abs(stat_obs) if enh_two_sided else stat_obs
         unc_count = unc_count + (cstat_p >= cstat_obs)
         return (fwe_count, unc_count, stat_obs, enhanced_obs), m
 
@@ -334,7 +381,15 @@ def permutation_test(
         scan_body, init, (jnp.arange(n_perm), ops)
     )
 
-    p_fwe = jnp.where(mask_flat, fwe_count / n_perm, 1.0)
+    if pvalue_method == 'gpd':
+        # GPD-smooth only the FWE map (the max-statistic tail); the uncorrected
+        # voxelwise map stays empirical.
+        p_fwe_flat = gpd_pvalue(
+            enhanced_obs, null_max, n_exceedances=gpd_n_exceedances
+        )
+    else:
+        p_fwe_flat = fwe_count / n_perm
+    p_fwe = jnp.where(mask_flat, p_fwe_flat, 1.0)
     p_unc = jnp.where(mask_flat, unc_count / n_perm, 1.0)
     # Zero the observed statistic at excluded voxels (out-of-mask or degenerate)
     # so the returned map carries no SE-floor artifact.
@@ -349,7 +404,60 @@ def permutation_test(
     )
 
 
-def _smooth(x: Float[Array, '*spatial'], sigma: float) -> Float[Array, '*spatial']:
+def gpd_pvalue(
+    stat: Float[Array, '...'],
+    null_dist: Float[Array, 'n'],
+    *,
+    n_exceedances: int = 250,
+) -> Float[Array, '...']:
+    """Tail-accelerated exceedance p-value via a generalized Pareto fit.
+
+    The permutation FWE p-value of an observed statistic ``T`` is the survival
+    fraction ``P(max_null >= T)``.  Estimated empirically it is discrete and
+    floored at ``1 / n`` -- so resolving a small p-value needs a large ``n``.
+    Following Winkler et al. (2016, *Faster permutation inference*), the upper
+    tail of ``null_dist`` above a threshold ``u`` (the ``(k+1)``-th largest of
+    ``n``, ``k = n_exceedances``) is modelled by a **generalized Pareto
+    distribution** fitted by the method of moments, giving a smooth p-value that
+    can fall below ``1 / n`` at a fraction of the permutations::
+
+        P(T) = (k / n) * S_GPD(T - u),   T > u   (tail, GPD survival)
+        P(T) = #{null >= T} / n,         T <= u  (body, empirical)
+
+    With GPD shape ``xi`` and scale ``sigma`` from the exceedance mean / variance
+    (``xi = (1 - mean^2 / var) / 2``, ``sigma = mean (1 - xi)``).  ``stat`` is a
+    scalar or an array of observed statistics (e.g. an enhanced FWE map); the
+    return has the same shape.  Pure / differentiable / cuSOLVER-free.
+    """
+    s = jnp.asarray(stat)
+    null = jnp.asarray(null_dist)
+    n = null.shape[0]
+    k = min(int(n_exceedances), n - 1)
+    srt = jnp.sort(null)  # ascending
+    u = srt[n - k - 1]  # threshold: the (k+1)-th largest
+    exc = srt[n - k :] - u  # the top-k exceedances (>= 0)
+    ybar = jnp.mean(exc)
+    s2 = jnp.var(exc)
+    xi = 0.5 * (1.0 - ybar * ybar / jnp.clip(s2, 1e-30, None))
+    sigma = jnp.clip(ybar * (1.0 - xi), 1e-30, None)
+    t = s - u
+    z = 1.0 + xi * t / sigma
+    surv = jnp.where(
+        jnp.abs(xi) < 1e-6,
+        jnp.exp(-t / sigma),
+        jnp.clip(z, 0.0, None) ** (-1.0 / xi),
+    )
+    p_tail = jnp.clip((k / n) * surv, 0.0, 1.0)
+    # Empirical body: #{null >= s} / n via searchsorted (memory-light, no
+    # (V, n) broadcast).  side='left' counts strictly-less, so n - idx = #{>=}.
+    idx = jnp.searchsorted(srt, s, side='left')
+    p_emp = (n - idx) / n
+    return jnp.where(s > u, p_tail, p_emp)
+
+
+def _smooth(
+    x: Float[Array, '*spatial'], sigma: float
+) -> Float[Array, '*spatial']:
     from ...smoothing import gaussian
 
     return gaussian(x, sigma=sigma)
