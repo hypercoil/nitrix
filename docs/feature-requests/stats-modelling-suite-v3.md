@@ -1,6 +1,18 @@
 # Statistical modelling suite v3 — GL(A)MM completeness for the `nwx` DSL (ledger)
 
-> **Status (2026-06-17): proposed, nothing started.** Driver: the **`nwx`**
+> **Status (2026-06-18): Tier-0 shipped.** The blocking tranche is implemented,
+> validated, and on `feat/stats-suite-v3`: **§2** GAMM surface (`REBasis` /
+> `re_smooth`, a third `Smooth` variant); **§5.1** non-aggressive (AROMA)
+> `partial_residualise` + a cuSOLVER-free Cholesky for `residualise`; **§1.3**
+> mixed-model fixed-effect inference (`lme_t_contrast`, Satterthwaite df; SE
+> matches statsmodels to ~6e-4); **§1.1** the `lme_fit` R1/R2 dispatcher + the
+> tier-R2 block-Woodbury REML for a correlated `(1 + x | g)` (matches statsmodels
+> MixedLM random-slope exactly). All cuSOLVER-free, ruff/mypy clean, per-component
+> tests green. *(This tranche was reconstructed on 2026-06-18 after a Code-Ocean
+> host crash rewound the branch; source recovered from the session transcript +
+> file-history and re-validated end-to-end.)* Tier-1/Tier-2 (§1.2 GLMM, §1.4
+> AR1/CAR1, §3.1 by-variable smooths, §4 families, §6.2 sandwich SEs, §1.1 R3/R4,
+> §1.3 Kenward-Roger) remain proposed. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /
