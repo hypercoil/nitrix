@@ -80,6 +80,7 @@ from .connectivity import (
     shrunk_covariance,
 )
 from .gam import GAMResult, gam_fit, smooth_partial_effect
+from .glmm import GLMMResult, glmm_fit
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
     BINOMIAL,
@@ -175,6 +176,9 @@ __all__ = [
     'GAMResult',
     'gam_fit',
     'smooth_partial_effect',
+    # glmm
+    'GLMMResult',
+    'glmm_fit',
     # connectivity
     'ledoit_wolf',
     'oas',

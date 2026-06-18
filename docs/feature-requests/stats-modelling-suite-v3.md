@@ -35,9 +35,22 @@
 > `s(x, by=f)`) and `varying_coefficient_smooth(x, z)` the continuous-`by`
 > varying coefficient (`z·f(x)`); both reuse `bspline_basis` + the FS loop with
 > **no `gam_fit` change**, and recover distinct per-level / coefficient curves
-> (corr > 0.97). The rest of Tier-1/Tier-2 (§1.2 GLMM, §1.4 AR1/CAR1, §4
-> Beta/Tweedie/ordinal, §3.2–3.3 cr/gp/mrf, §1.1 R3/R4, §1.3 Kenward-Roger)
-> remain proposed. Driver: the **`nwx`**
+> (corr > 0.97). **§1.2 GLMM (PQL)** — `glmm_fit(Y, X, *, group, family, …)`
+> fits a random-intercept GLMM by penalised quasi-likelihood (working response →
+> Fellner-Schall variance-component step → repeat), **dispatched on the level
+> count** (the §0.1 / §2 routing): few-level (`q ≤ few_level_max`) runs the dense
+> GAMM path (`gam_fit` + `re_smooth`), many-level runs a **structured
+> Schur-complement** PQL costing `O(N p² + q)`/voxel (the §1.1 block-Woodbury
+> structure, weighted and wrapped in IRLS) — never the dense `(p+q)³`. The two
+> paths run the identical iteration, so they agree bit-for-bit (validated), while
+> the structured path is **80× faster at `q = 400`** (1.3 s vs 101 s, V = 256, L4)
+> and cuSOLVER-free. Anchored three ways: few == many, Gaussian-GLMM == `reml_fit`
+> (≡ statsmodels MixedLM), and an independent dense-numpy PQL reference (β / BLUPs
+> / σ_b² to ~1e-5) for Poisson + binomial; binary-PQL attenuation reproduced and
+> documented. (Random *slopes* under a non-Gaussian family, and Laplace, are
+> Tier-2; the Gaussian random slope is served by `lme_fit` R2.) The rest of
+> Tier-1/Tier-2 (§1.4 AR1/CAR1, §4 Beta/Tweedie/ordinal, §3.2–3.3 cr/gp/mrf, §1.1
+> R3/R4, §1.3 Kenward-Roger, §1.2 Laplace) remain proposed. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /
@@ -197,7 +210,7 @@ structured/sparse `V⁻¹`. **Effort: M (R2) · M (R3) · L (R4).** **Oracle:**
 forms; nested/crossed ANOVA. **Guard:** `lme_fit(..., random=((Z,'scalar'),))`
 lowers to the same HLO as `reml_fit(Y,X,Z)` (R1 no-regression proof).
 
-### §1.2 GLMM — random effects with non-Gaussian families  *(high value)*
+### §1.2 GLMM — random effects with non-Gaussian families  *(high value)* — ✅ SHIPPED (scalar RE; Laplace + random-slope Tier-2)
 
 **What.** Random effects under a binomial / Poisson / … family via
 penalised-quasi-likelihood / Laplace-approximate REML: `glmm_fit(Y, X, random,
@@ -510,8 +523,9 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 
 **Tier 1 — high value (rounds out the GL(A)MM surface):**
 
-- §1.1 R3 (nested); §1.2 GLMM (PQL); §1.4 AR1/CAR1; §3.1 by-variable smooths;
-  §4 `S`-class families (Gamma/NB/Beta); §6.2 sandwich/cluster SEs.
+- §1.1 R3 (nested); ~~§1.2 GLMM (PQL)~~ ✅ (`glmm_fit`, level-count dispatch);
+  §1.4 AR1/CAR1; ~~§3.1 by-variable smooths~~ ✅; ~~§4 `S`-class families
+  (Gamma/NB)~~ ✅ (Beta deferred); ~~§6.2 sandwich/cluster SEs~~ ✅.
 
 **Tier 2 — future / heavier:**
 

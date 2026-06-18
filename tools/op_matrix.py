@@ -3204,6 +3204,50 @@ register(
     )
 )
 
+def _glmm_setup():
+    """Build a Poisson random-intercept GLMM op over a closed-over design."""
+    rng = np.random.default_rng(0)
+    n, q, p = 60, 6, 2
+    group = jnp.asarray(np.repeat(np.arange(q), n // q).astype(np.int32))
+    x = rng.standard_normal((n, p)).astype(np.float32)
+    x[:, 0] = 1.0  # intercept column
+    X = jnp.asarray(x)
+    from nitrix.stats.glmm import glmm_fit
+
+    def op(Y):
+        return glmm_fit(
+            Y, X, group=group, family='poisson', n_outer=4, n_inner=4
+        )
+
+    def fixture():
+        gen = np.random.default_rng(1)
+        b = gen.standard_normal(q) * 0.4
+        eta = 0.3 + 0.5 * np.asarray(x[:, 1]) + b[np.asarray(group)]
+        Y = jnp.asarray(
+            gen.poisson(np.exp(eta), size=(16, n)).astype(np.float32)
+        )
+        return (Y,), {}
+
+    return op, fixture
+
+
+_glmm_op, _glmm_fixture = _glmm_setup()
+
+register(
+    OpInfo(
+        'nitrix.stats.glmm_fit',
+        fixture=_glmm_fixture,
+        fn_override=_glmm_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'PQL: working response -> Fellner-Schall variance-component step',
+            'level-count dispatch: few-level dense gam_fit / many-level Schur',
+        ),
+        notes='scalar random intercept; shared X/group closed over',
+    )
+)
+
 register(
     OpInfo(
         'nitrix.stats.ledoit_wolf',
