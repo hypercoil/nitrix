@@ -85,11 +85,19 @@ spanning three sibling requests that share one substrate.
 | B — mass-univariate GLM + GAM / GAMM | ✅ SHIPPED (merged to main) | `stats.{glm,gam,basis}` | ModelArray-parity request |
 | C — TFCE `randomise` cluster correction | ✅ SHIPPED (merged to main) | `stats.inference` | niffi capability gap |
 
-**v2 (planned):** [`stats-modelling-suite-v2.md`](stats-modelling-suite-v2.md)
-— deferred completeness (LME q-rank; GAM thin-plate / cyclic / tensor-product
-bases + shared-λ; randomise cluster-extent/mass + F-contrast + GPD tail) and
-the regularised connectivity estimators **Ledoit-Wolf / OAS** and **graphical
+**v2 (shipped, `feat/stats-suite-v2`):**
+[`stats-modelling-suite-v2.md`](stats-modelling-suite-v2.md) — deferred
+completeness (LME q-rank; GAM thin-plate / cyclic / tensor-product bases +
+shared-λ; randomise cluster-extent/mass + F-contrast + GPD tail) and the
+regularised connectivity estimators **Ledoit-Wolf / OAS** and **graphical
 LASSO**.
+
+**v3 (proposed):** [`stats-modelling-suite-v3.md`](stats-modelling-suite-v3.md)
+— GL(A)MM completeness driven by the **`nwx`** DSL (`gramform`): general
+multi-/correlated random-effects REML, **GAMM surfacing** (the `re`/`fs` basis
+v1 claimed but never exposed), mixed-model fixed-effect inference
+(Satterthwaite / Kenward-Roger), AR1/CAR1 error structures, non-aggressive
+(AROMA) residualisation, sandwich/cluster SEs, and extra GLM families.
 
 ## Internal engineering backlog
 
