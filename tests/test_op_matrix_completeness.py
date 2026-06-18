@@ -103,6 +103,7 @@ EXCLUDE: frozenset[str] = frozenset(
         #    contrasts on its stored sufficient statistics, benchmarked with it.
         'stats.t_contrast',
         'stats.f_contrast',
+        'stats.sandwich_cov',  # robust vcov from a fitted GLMResult + its data
         'stats.r_squared',
         'stats.adj_r_squared',
         'stats.deviance_explained',

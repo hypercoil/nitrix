@@ -34,6 +34,7 @@ from nitrix.stats.glm import (
     negbinomial,
     predict,
     r_squared,
+    sandwich_cov,
     t_contrast,
 )
 
@@ -226,6 +227,103 @@ def test_family_registry_resolves_gamma_and_negbinomial():
     assert not np.allclose(np.asarray(c.coef), np.asarray(e.coef))
     with pytest.raises(ValueError, match='alpha'):
         negbinomial(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Sandwich / cluster-robust standard errors (§6.2)
+# ---------------------------------------------------------------------------
+
+
+@needs_sm
+def test_sandwich_hc_matches_statsmodels():
+    """HC0-HC3 robust SEs match statsmodels.OLS.get_robustcov_results."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(20)
+    X = _design(rng, N=120)
+    # deliberately heteroscedastic errors
+    y = X @ np.array([1.0, 2.0, -1.0]) + rng.standard_normal(120) * (
+        0.5 + np.abs(X[:, 1])
+    )
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=GAUSSIAN)
+    smf = sm.OLS(y, X).fit()
+    for kind in ('HC0', 'HC1', 'HC2', 'HC3'):
+        v = np.asarray(
+            sandwich_cov(res, jnp.asarray(y[None, :]), jnp.asarray(X), kind=kind)
+        )[0]
+        se = np.sqrt(np.diag(v))
+        np.testing.assert_allclose(se, smf.get_robustcov_results(kind).bse, rtol=1e-10)
+
+
+@needs_sm
+def test_sandwich_cluster_matches_statsmodels():
+    """One-way cluster-robust SEs match statsmodels (G/(G-1)*(N-1)/(N-p))."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(21)
+    X = _design(rng, N=120)
+    groups = np.repeat(np.arange(20), 6)
+    # within-cluster correlated errors
+    u = rng.standard_normal(20)[groups] + rng.standard_normal(120) * 0.5
+    y = X @ np.array([0.5, 1.0, -0.5]) + u
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=GAUSSIAN)
+    v = np.asarray(
+        sandwich_cov(
+            res, jnp.asarray(y[None, :]), jnp.asarray(X), groups=jnp.asarray(groups)
+        )
+    )[0]
+    se = np.sqrt(np.diag(v))
+    smf = sm.OLS(y, X).fit().get_robustcov_results('cluster', groups=groups)
+    np.testing.assert_allclose(se, smf.bse, rtol=1e-10)
+
+
+@needs_sm
+def test_sandwich_glm_poisson_matches_statsmodels():
+    """The GLM (Poisson) sandwich HC0 matches statsmodels GLM cov_type='HC0'."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(22)
+    X = _design(rng, N=150)
+    mu = np.exp(X @ np.array([0.3, 0.5, -0.2]))
+    y = rng.poisson(mu).astype(float)
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=POISSON, n_iter=40)
+    v = np.asarray(
+        sandwich_cov(res, jnp.asarray(y[None, :]), jnp.asarray(X), kind='HC0')
+    )[0]
+    smf = sm.GLM(y, X, family=sm.families.Poisson()).fit(cov_type='HC0')
+    np.testing.assert_allclose(np.sqrt(np.diag(v)), smf.bse, rtol=1e-9)
+
+
+@needs_sm
+def test_t_contrast_cov_override_is_robust_and_default_unchanged():
+    """t_contrast(cov=sandwich) yields the robust SE; cov=None is the unchanged
+    model-based SE."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(23)
+    X = _design(rng, N=100)
+    y = X @ np.array([1.0, 0.5, -0.5]) + rng.standard_normal(100) * (
+        0.3 + np.abs(X[:, 2])
+    )
+    Yj, Xj = jnp.asarray(y[None, :]), jnp.asarray(X)
+    res = glm_fit(Yj, Xj, family=GAUSSIAN)
+    smf = sm.OLS(y, X).fit()
+    hc3 = sandwich_cov(res, Yj, Xj, kind='HC3')
+    _, se_rob, _, _ = t_contrast(res, jnp.eye(3)[1], cov=hc3)
+    np.testing.assert_allclose(
+        float(se_rob[0]), smf.get_robustcov_results('HC3').bse[1], rtol=1e-10
+    )
+    _, se_model, _, _ = t_contrast(res, jnp.eye(3)[1])
+    np.testing.assert_allclose(float(se_model[0]), smf.bse[1], rtol=1e-9)
+
+
+def test_sandwich_rejects_unknown_kind():
+    rng = np.random.default_rng(24)
+    X = jnp.asarray(_design(rng, N=60))
+    y = jnp.asarray(np.zeros(60))[None, :]
+    res = glm_fit(y, X, family=GAUSSIAN)
+    with pytest.raises(ValueError, match='HC'):
+        sandwich_cov(res, y, X, kind='HC9')
 
 
 # ---------------------------------------------------------------------------

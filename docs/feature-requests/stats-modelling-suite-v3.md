@@ -25,9 +25,14 @@
 > `_FAMILIES` registry + IRLS core; coefficients + deviance match
 > `statsmodels.GLM` exactly. (Beta deferred: proper beta regression needs a
 > digamma-based score, not the standard GLM `mu_eta²/V` IRLS weight — a dedicated
-> fitter, not a `Family` record.) The rest of Tier-1/Tier-2 (§1.2 GLMM, §1.4
-> AR1/CAR1, §3.1 by-variable smooths, §4 Beta/Tweedie/ordinal, §6.2 sandwich SEs,
-> §1.1 R3/R4, §1.3 Kenward-Roger) remain proposed. Driver: the **`nwx`**
+> fitter, not a `Family` record.) **§6.2 sandwich / cluster-robust SEs** —
+> `sandwich_cov(result, Y, X, kind='HC0..HC3', groups=…)` returns the robust
+> `(V, p, p)` coefficient covariance (`A⁻¹ B A⁻¹`); `t_contrast` / `f_contrast`
+> take a `cov=` override (default `None` = the unchanged model-based path). SEs
+> match `statsmodels` HC0–HC3 / cluster / GLM-Poisson to machine precision. The
+> rest of Tier-1/Tier-2 (§1.2 GLMM, §1.4 AR1/CAR1, §3.1 by-variable smooths, §4
+> Beta/Tweedie/ordinal, §1.1 R3/R4, §1.3 Kenward-Roger) remain proposed. Driver:
+> the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /

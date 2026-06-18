@@ -98,6 +98,7 @@ from .glm import (
     negbinomial,
     predict,
     r_squared,
+    sandwich_cov,
     t_contrast,
 )
 from .pca import (
@@ -147,6 +148,7 @@ __all__ = [
     'predict',
     't_contrast',
     'f_contrast',
+    'sandwich_cov',
     'r_squared',
     'adj_r_squared',
     'deviance_explained',

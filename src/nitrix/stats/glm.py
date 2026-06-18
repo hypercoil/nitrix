@@ -52,7 +52,7 @@ from typing import Any, Optional, Tuple, Union
 import jax
 import jax.numpy as jnp
 from jax.scipy.special import betainc, gammaincc
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 
 from ._batching import blocked_vmap
 from ._family import (
@@ -81,6 +81,7 @@ __all__ = [
     'predict',
     't_contrast',
     'f_contrast',
+    'sandwich_cov',
     'r_squared',
     'adj_r_squared',
     'deviance_explained',
@@ -359,6 +360,8 @@ def _f_sf(f: Array, df1: float, df2: float) -> Array:
 def t_contrast(
     result: GLMResult,
     contrast: Float[Array, 'p'],
+    *,
+    cov: Optional[Float[Array, '... p p']] = None,
 ) -> Tuple[
     Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']
 ]:
@@ -368,11 +371,21 @@ def t_contrast(
     error, the t statistic, and the two-sided p-value at ``dof_resid`` degrees
     of freedom (ModelArray ``lm`` columns ``estimate`` / ``std.error`` /
     ``statistic`` / ``p.value``).
+
+    ``cov`` overrides the coefficient covariance: pass a ``(V, p, p)`` (or shared
+    ``(p, p)``) matrix -- e.g. the robust ``sandwich_cov`` output -- to use
+    ``c^T cov c`` directly (already on the variance scale).  The default
+    (``None``) is the model-based ``dispersion * (X^T W X)^{-1}`` (unchanged).
     """
     c = jnp.asarray(contrast)
     effect = result.coef @ c  # (V,)
-    var_unscaled = jnp.einsum('...ij,i,j->...', result.cov_unscaled, c, c)
-    se = jnp.sqrt(jnp.clip(result.dispersion * var_unscaled, _EPS, None))
+    if cov is None:
+        var = result.dispersion * jnp.einsum(
+            '...ij,i,j->...', result.cov_unscaled, c, c
+        )
+    else:
+        var = jnp.einsum('...ij,i,j->...', cov, c, c)
+    se = jnp.sqrt(jnp.clip(var, _EPS, None))
     t = effect / se
     p_value = _t_two_sided_sf(t, result.dof_resid)
     return effect, se, t, p_value
@@ -381,31 +394,141 @@ def t_contrast(
 def f_contrast(
     result: GLMResult,
     contrast: Float[Array, 'm p'],
+    *,
+    cov: Optional[Float[Array, '... p p']] = None,
 ) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]:
     """Per-element F-test of a multi-row contrast ``C beta = 0``.
 
     Returns ``(F, p_value, df1, df2)`` with ``df1 = m`` (contrast rank) and
     ``df2 = dof_resid``.
+
+    ``cov`` overrides the coefficient covariance (e.g. the robust
+    ``sandwich_cov`` output): the Wald quadratic form uses ``C cov C^T`` directly
+    and the statistic is ``quad / m`` (no dispersion rescale).  The default
+    (``None``) is the model-based ``dispersion * (X^T W X)^{-1}`` (unchanged).
     """
     C = jnp.asarray(contrast)
     m = C.shape[0]
     cb = result.coef @ C.T  # (V, m)
+    cov_mat = result.cov_unscaled if cov is None else cov
+    scale = (
+        result.dispersion if cov is None else jnp.ones_like(result.dispersion)
+    )
 
-    # M = C (X^T W X)^{-1} C^T -- shared (m, m) on the OLS path, else (V, m, m).
-    if result.cov_unscaled.ndim == 2:
-        mat = C @ result.cov_unscaled @ C.T  # (m, m)
+    # M = C cov C^T -- shared (m, m) on the OLS path, else (V, m, m).
+    if cov_mat.ndim == 2:
+        mat = C @ cov_mat @ C.T  # (m, m)
         mat_inv, _ = small_inv_logdet(mat, m)
         quad = jnp.einsum('vi,ij,vj->v', cb, mat_inv, cb)
     else:
-        mat = jnp.einsum('mi,vij,nj->vmn', C, result.cov_unscaled, C)
+        mat = jnp.einsum('mi,vij,nj->vmn', C, cov_mat, C)
         mat_inv = jax.vmap(lambda a: small_inv_logdet(a, m)[0])(mat)
         quad = jnp.einsum('vi,vij,vj->v', cb, mat_inv, cb)
 
-    f = quad / (m * result.dispersion)
+    f = quad / (m * scale)
     df1 = float(m)
     df2 = result.dof_resid
     p_value = _f_sf(f, df1, df2)
     return f, p_value, df1, df2
+
+
+_HC_KINDS = ('HC0', 'HC1', 'HC2', 'HC3')
+
+
+def sandwich_cov(
+    result: GLMResult,
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    *,
+    kind: str = 'HC3',
+    groups: Optional[Int[Array, 'N']] = None,
+    weights: Optional[Float[Array, 'N']] = None,
+) -> Float[Array, 'V p p']:
+    """Robust (sandwich) coefficient covariance for a fitted GLM.
+
+    Returns the per-element ``(V, p, p)`` covariance
+    ``A^{-1} B A^{-1}`` with bread ``A^{-1} = (X^T W X)^{-1}`` (the fit's
+    ``cov_unscaled``) and a robust meat ``B`` built from the per-observation
+    score contributions ``u_i = x_i g_i``, ``g_i = (y_i - mu_i) (dmu_i/deta_i) /
+    V(mu_i)`` (for OLS, ``g_i`` is the raw residual ``y_i - mu_i`` -- the
+    classic Huber-White form).  cuSOLVER-free, ``vmap`` over elements; the
+    sandwich weights are data-dependent constants (not differentiated through).
+
+    Pass the result as ``cov=`` to ``t_contrast`` / ``f_contrast``.
+
+    Parameters
+    ----------
+    result, Y, X
+        The fitted ``GLMResult`` and the data it was fit on (``X`` shared,
+        ``Y`` the ``(V, N)`` responses).
+    kind
+        Heteroscedasticity-consistent variant when ``groups`` is ``None``:
+        ``'HC0'`` (raw), ``'HC1'`` (``n/(n-p)`` correction), ``'HC2'``
+        (``/(1 - h_i)``), ``'HC3'`` (``/(1 - h_i)^2``); ``h_i`` the GLM hat
+        diagonal.  Ignored when ``groups`` is given.
+    groups
+        ``(N,)`` cluster labels for a **cluster-robust** covariance (one-way):
+        ``B = sum_g s_g s_g^T``, ``s_g = sum_{i in g} x_i g_i``, with the
+        ``G/(G-1) * (N-1)/(N-p)`` small-sample factor.
+    weights
+        Optional ``(N,)`` prior weights matching the fit's ``weights=``.
+
+    Returns
+    -------
+    ``(V, p, p)`` robust covariance (one per element).
+    """
+    if groups is None and kind not in _HC_KINDS:
+        raise ValueError(
+            f'sandwich_cov: kind={kind!r}; expected one of {_HC_KINDS}.'
+        )
+    fam = result.family
+    X = jnp.asarray(X)
+    Y = jnp.asarray(Y)
+    n, p = X.shape
+    coef = result.coef  # (V, p)
+    n_elem = coef.shape[0]
+    w_prior = None if weights is None else jnp.asarray(weights, dtype=X.dtype)
+
+    cl_factor = 0.0
+    n_groups = 0
+    if groups is not None:
+        groups = jnp.asarray(groups)
+        n_groups = int(jnp.max(groups)) + 1
+        cl_factor = (n_groups / (n_groups - 1.0)) * ((n - 1.0) / (n - p))
+
+    def per_elem(
+        y: Float[Array, 'N'], b: Float[Array, 'p'], ainv: Float[Array, 'p p']
+    ) -> Float[Array, 'p p']:
+        eta = X @ b
+        mu = fam.linkinv(eta)
+        dmu = fam.mu_eta(eta)
+        var = jnp.clip(fam.variance(mu), _EPS, None)
+        g = (y - mu) * dmu / var  # (N,) score scalar
+        w = dmu * dmu / var  # (N,) working weight
+        if w_prior is not None:
+            g = w_prior * g
+            w = w_prior * w
+        if groups is None:
+            h = w * jnp.einsum('np,pq,nq->n', X, ainv, X)  # GLM hat diagonal
+            if kind == 'HC0':
+                fac = g * g
+            elif kind == 'HC1':
+                fac = g * g * (n / (n - p))
+            elif kind == 'HC2':
+                fac = g * g / jnp.clip(1.0 - h, _EPS, None)
+            else:  # HC3
+                fac = g * g / jnp.clip(1.0 - h, _EPS, None) ** 2
+            meat = jnp.einsum('n,np,nq->pq', fac, X, X)
+        else:
+            u = X * g[:, None]  # (N, p) per-observation score
+            s = jax.ops.segment_sum(u, groups, num_segments=n_groups)  # (G, p)
+            meat = (s.T @ s) * cl_factor
+        return ainv @ meat @ ainv
+
+    bread = result.cov_unscaled
+    if bread.ndim == 2:
+        bread = jnp.broadcast_to(bread, (n_elem, p, p))
+    return jax.vmap(per_elem)(Y, coef, bread)
 
 
 # ---------------------------------------------------------------------------
