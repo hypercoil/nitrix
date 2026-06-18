@@ -20,7 +20,7 @@ from scipy.optimize import minimize_scalar
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.stats.lme import ar1, car1, cs, gls_fit
+from nitrix.stats.lme import CorrLMEResult, ar1, car1, cs, gls_fit, lme_fit
 from nitrix.stats.lme._corr import resolve_corr
 from nitrix.stats.lme._corrfit import build_group_layout
 
@@ -212,6 +212,51 @@ def test_gls_ragged_groups_and_shapes():
 def test_gls_unknown_corr_raises():
     with pytest.raises(ValueError, match='unknown correlation'):
         resolve_corr('nope')
+
+
+# ---------------------------------------------------------------------------
+# R2 + corr: a random effect *and* a structured residual (lme_fit(corr=))
+# ---------------------------------------------------------------------------
+
+
+def test_r2corr_dispatch_and_shapes():
+    """``lme_fit(corr=)`` routes to the R2 + corr whitened block-Woodbury and
+    returns a ``CorrLMEResult`` with the right shapes/tier."""
+    rng = np.random.default_rng(0)
+    G, n_per = 20, 8
+    N = G * n_per
+    group = np.repeat(np.arange(G), n_per).astype(np.int32)
+    X = np.ones((N, 2))
+    X[:, 1] = rng.standard_normal(N)
+    V = 4
+    Y = rng.standard_normal((V, N))
+    res = lme_fit(
+        jnp.asarray(Y), jnp.asarray(X), group=jnp.asarray(group), corr='ar1'
+    )
+    assert isinstance(res, CorrLMEResult)
+    assert res.tier == 'R2+corr' and res.corr == 'ar1'
+    assert res.beta_hat.shape == (V, 2)
+    assert res.cov_re.shape == (V, 1, 1)  # scalar random intercept
+    assert res.sigma_e_sq.shape == (V,) and res.rho.shape == (V,)
+    assert np.all(np.asarray(res.sigma_e_sq) > 0)
+
+
+def test_r2corr_rejects_nested():
+    rng = np.random.default_rng(0)
+    N = 40
+    X = np.ones((N, 2))
+    X[:, 1] = rng.standard_normal(N)
+    y = rng.standard_normal(N)
+    group = np.repeat(np.arange(4), 10).astype(np.int32)
+    inner = np.tile(np.arange(2).repeat(5), 4).astype(np.int32)
+    with pytest.raises(NotImplementedError, match='nested'):
+        lme_fit(
+            jnp.asarray(y[None, :]),
+            jnp.asarray(X),
+            group=jnp.asarray(group),
+            inner=jnp.asarray(inner),
+            corr='ar1',
+        )
 
 
 def test_corr_constructors():

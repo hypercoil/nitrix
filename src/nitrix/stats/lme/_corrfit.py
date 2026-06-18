@@ -31,15 +31,23 @@ from typing import NamedTuple, Optional, Tuple, Union, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax
 from jaxtyping import Array, Bool, Float, Int
 
 from .._batching import blocked_vmap
 from .._smalllinalg import small_inv_logdet
+from ._blockwoodbury import _build_chol, _nll_and_beta, _param_layout
 from ._corr import CorrSpec, resolve_corr
+from ._optimise import damped_newton
 from ._varcomp import VarCompSpec
 
-__all__ = ['GLSResult', 'build_group_layout', 'fit_corr_gls', 'gls_fit']
+__all__ = [
+    'GLSResult',
+    'CorrLMEResult',
+    'build_group_layout',
+    'fit_corr_gls',
+    'gls_fit',
+    'fit_corr_lme',
+]
 
 
 class GroupLayout(NamedTuple):
@@ -181,7 +189,8 @@ def _fit_one(
     Float[Array, ''],
     Float[Array, 'p p'],
 ]:
-    """Single-voxel GLS-REML fit: damped Newton on the unconstrained ``raw``."""
+    """Single-voxel GLS-REML fit via the shared saddle-free Newton
+    (``_optimise.damped_newton``)."""
     dof = float(n - p)
     ridge = spec.ridge
 
@@ -195,35 +204,7 @@ def _fit_one(
         rss = jnp.clip(yty - beta @ xty, 1e-30, None)
         return dof * jnp.log(rss) + 2.0 * half_logdet + logdet_xtx
 
-    grad_fn = jax.grad(neg2_reml)
-    hess_fn = jax.hessian(neg2_reml)
-    k = raw0.shape[0]
-
-    def newton(raw: Float[Array, 'k'], _: Array) -> Tuple[Array, None]:
-        g = grad_fn(raw)
-        h = hess_fn(raw) + spec.damping * jnp.eye(k, dtype=raw.dtype)
-        h_inv, _ = small_inv_logdet(h, k)
-        delta = jnp.clip(h_inv @ g, -spec.max_step, spec.max_step)
-        f0 = neg2_reml(raw)
-
-        def bt(
-            _: Array, carry: Tuple[Array, Array, Array]
-        ) -> Tuple[Array, Array, Array]:
-            scale, best, best_f = carry
-            trial = raw - scale * delta
-            trial_f = neg2_reml(trial)
-            ok = trial_f < best_f
-            return (
-                scale * 0.5,
-                jnp.where(ok, trial, best),
-                jnp.where(ok, trial_f, best_f),
-            )
-
-        init = (jnp.asarray(1.0, raw.dtype), raw, f0)
-        _, raw_new, _ = lax.fori_loop(0, spec.n_backtrack, bt, init)
-        return raw_new, None
-
-    raw, _ = lax.scan(newton, raw0, xs=None, length=spec.n_iter)
+    raw = damped_newton(neg2_reml, raw0, spec=spec)
 
     xtx, xty, yty, half_logdet = _whitened_grams(
         raw, y_pad, x_pad, layout, corr
@@ -345,4 +326,243 @@ def gls_fit(
         n_iter=n_iter,
         damping=damping,
         block=block,
+    )
+
+
+# ---------------------------------------------------------------------------
+# R2 + corr: a random effect *and* a structured residual (whitened block-Woodbury)
+# ---------------------------------------------------------------------------
+
+
+class CorrLMEResult(NamedTuple):
+    """Per-voxel mixed model with a structured within-group residual (R2 + corr).
+
+    Attributes
+    ----------
+    beta_hat
+        ``(V, p)`` fixed-effect estimates.
+    cov_re
+        ``(V, r, r)`` random-effect covariance ``G``.
+    sigma_e_sq
+        ``(V,)`` residual *scale* ``sigma_e^2`` (the residual is
+        ``sigma_e^2 R(rho)``).
+    rho
+        ``(V,)`` natural correlation parameter of the residual structure.
+    log_lik
+        ``(V,)`` profile REML log-likelihood.
+    corr
+        Correlation-structure name.
+    tier
+        ``'R2+corr'``.
+    """
+
+    beta_hat: Float[Array, 'V p']
+    cov_re: Float[Array, 'V r r']
+    sigma_e_sq: Float[Array, 'V']
+    rho: Float[Array, 'V']
+    log_lik: Float[Array, 'V']
+    corr: str
+    tier: str
+
+
+def _corr_lme_grams(
+    raw: Float[Array, 'k'],
+    x_pad: Float[Array, 'G T p'],
+    z_pad: Float[Array, 'G T r'],
+    y_pad: Float[Array, 'G T'],
+    layout: GroupLayout,
+    corr: CorrSpec,
+    p: int,
+    r: int,
+) -> Tuple[
+    Float[Array, 'G r r'],
+    Float[Array, 'G p r'],
+    Float[Array, 'p p'],
+    Float[Array, 'G r'],
+    Float[Array, 'p'],
+    Float[Array, ''],
+    Float[Array, ''],
+]:
+    """Whiten ``X`` / ``Z`` / ``y`` per group and form the block-Woodbury Grams.
+
+    On whitened data the residual is i.i.d., so ``Sigma_e = sigma_e^2 R`` reduces
+    to ``sigma_e^2 I`` and the per-group ``(Z^T Z, X^T Z, Z^T y)`` / total
+    ``(X^T X, X^T y, y^T y)`` Grams feed ``_blockwoodbury._nll_and_beta``
+    verbatim; the whitening adds ``half_logdet = 0.5 sum_i log|R_i|`` to the
+    REML objective.
+    """
+    stack = jnp.concatenate(
+        [x_pad, z_pad, y_pad[..., None]], axis=-1
+    )  # (G, T, p+r+1)
+    w, half_logdet = corr.whiten(
+        stack, layout.gaps, layout.nsize, layout.mask, raw
+    )
+    wx = w[..., :p]  # (G, T, p)
+    wz = w[..., p : p + r]  # (G, T, r)
+    wy = w[..., -1]  # (G, T)
+    ztz = jnp.einsum('gtr,gts->grs', wz, wz)  # (G, r, r)
+    xtz = jnp.einsum('gtp,gtr->gpr', wx, wz)  # (G, p, r)
+    zty = jnp.einsum('gtr,gt->gr', wz, wy)  # (G, r)
+    xtx = jnp.einsum('gtp,gtq->pq', wx, wx)  # (p, p) total
+    xty = jnp.einsum('gtp,gt->p', wx, wy)  # (p,) total
+    yty = jnp.sum(wy * wy)
+    return ztz, xtz, xtx, zty, xty, yty, half_logdet
+
+
+def _fit_one_corr_lme(
+    y_pad: Float[Array, 'G T'],
+    x_pad: Float[Array, 'G T p'],
+    z_pad: Float[Array, 'G T r'],
+    layout: GroupLayout,
+    corr: CorrSpec,
+    theta_init: Float[Array, 'nt'],
+    n: int,
+    p: int,
+    r: int,
+    nt_g: int,
+    n_minus_mr: int,
+    diagonal: bool,
+    spec: VarCompSpec,
+) -> Tuple[Float[Array, 'nt'], Float[Array, 'p'], Float[Array, '']]:
+    """Single-voxel R2 + corr fit via the shared saddle-free Newton over
+    ``[chol(G), log sigma_e^2, corr_raw]`` (``_optimise.damped_newton``).
+
+    The joint objective is non-convex away from the optimum (an indefinite
+    Hessian at the start), so the saddle-free step rule is load-bearing here --
+    it lives once in ``_optimise``.
+    """
+
+    def split(
+        theta: Float[Array, 'nt'],
+    ) -> Tuple[Float[Array, 'g1'], Float[Array, 'k']]:
+        return theta[: nt_g + 1], theta[nt_g + 1 :]
+
+    def nll(theta: Float[Array, 'nt']) -> Float[Array, '']:
+        gse, raw = split(theta)
+        ztz, xtz, xtx, zty, xty, yty, half_logdet = _corr_lme_grams(
+            raw, x_pad, z_pad, y_pad, layout, corr, p, r
+        )
+        base, _ = _nll_and_beta(
+            gse,
+            ztz,
+            xtz,
+            xtx,
+            zty,
+            xty,
+            yty,
+            n_minus_mr,
+            r,
+            p,
+            spec.ridge,
+            diagonal,
+        )
+        return base + half_logdet
+
+    theta = damped_newton(nll, theta_init, spec=spec)
+    gse, raw = split(theta)
+    ztz, xtz, xtx, zty, xty, yty, half_logdet = _corr_lme_grams(
+        raw, x_pad, z_pad, y_pad, layout, corr, p, r
+    )
+    base, beta = _nll_and_beta(
+        gse,
+        ztz,
+        xtz,
+        xtx,
+        zty,
+        xty,
+        yty,
+        n_minus_mr,
+        r,
+        p,
+        spec.ridge,
+        diagonal,
+    )
+    return theta, beta, -(base + half_logdet)
+
+
+def fit_corr_lme(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    Z: Float[Array, 'N r'],
+    group: Int[Array, 'N'],
+    corr: CorrSpec,
+    *,
+    time: Optional[Float[Array, 'N']] = None,
+    diagonal: bool = False,
+    n_iter: int = 30,
+    damping: float = 1e-6,
+    block: Optional[int] = None,
+) -> CorrLMEResult:
+    """Voxelwise mixed model with a structured within-group residual (R2 + corr).
+
+    Fits ``y_v = X beta_v + Z b_v + eps_v`` with ``b_v ~ N(0, G)`` and
+    ``Cov(eps_v) = sigma_e^2 R(rho)`` block-diagonal across ``group`` -- the
+    ``nlme::lme(random=~Z|g, correlation=corAR1/…)`` model.  Whitening by ``R``
+    reduces each group to a standard block-Woodbury, so the per-group ``r x r``
+    Woodbury algebra is reused verbatim with ``rho`` joining the REML
+    ``theta``-vector; cuSOLVER-free.
+    """
+    n, p = X.shape
+    r = Z.shape[-1]
+    layout = build_group_layout(group, time)
+    n_groups = int(layout.nsize.shape[0])
+    idx = layout.idx
+    mask_f = layout.mask.astype(X.dtype)
+    x_pad = X[idx] * mask_f[..., None]  # (G, T, p) shared
+    z_pad = Z[idx] * mask_f[..., None]  # (G, T, r) shared
+    nt_g = len(_param_layout(r, diagonal))
+    n_minus_mr = n - n_groups * r
+
+    var_y = jnp.var(Y, axis=-1)  # (V,)
+    layout_g = _param_layout(r, diagonal)
+    diag_mask = jnp.asarray([i == j for (i, j) in layout_g], dtype=bool)
+    chol_diag = 0.5 * jnp.log(jnp.maximum(0.1 * var_y, 1e-6))  # (V,)
+    chol = jnp.where(diag_mask[None, :], chol_diag[:, None], 0.0)  # (V, nt_g)
+    log_se2 = jnp.log(jnp.maximum(0.5 * var_y, 1e-6))[:, None]  # (V, 1)
+    raw0 = jnp.broadcast_to(
+        corr.init_raw(X.dtype)[None, :], (Y.shape[0], corr.n_params)
+    )
+    theta_init = jnp.concatenate([chol, log_se2, raw0], axis=1)  # (V, nt)
+    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+
+    def per_voxel(
+        y: Float[Array, 'N'], th: Float[Array, 'nt']
+    ) -> Tuple[Array, Array, Array]:
+        y_pad = y[idx] * mask_f
+        return _fit_one_corr_lme(
+            y_pad,
+            x_pad,
+            z_pad,
+            layout,
+            corr,
+            th,
+            n,
+            p,
+            r,
+            nt_g,
+            n_minus_mr,
+            diagonal,
+            spec,
+        )
+
+    theta_hat, beta_hat, log_lik = cast(
+        Tuple[Array, Array, Array],
+        blocked_vmap(per_voxel, (Y, theta_init), block=block),
+    )
+    cov_re = jax.vmap(
+        lambda th: (
+            _build_chol(th[:nt_g], r, diagonal)
+            @ _build_chol(th[:nt_g], r, diagonal).T
+        )
+    )(theta_hat)  # (V, r, r)
+    sigma_e_sq = jnp.exp(theta_hat[:, nt_g])
+    rho = jax.vmap(lambda th: corr.to_natural(th[nt_g + 1 :]))(theta_hat)
+    return CorrLMEResult(
+        beta_hat=beta_hat,
+        cov_re=cov_re,
+        sigma_e_sq=sigma_e_sq,
+        rho=rho,
+        log_lik=log_lik,
+        corr=corr.name,
+        tier='R2+corr',
     )

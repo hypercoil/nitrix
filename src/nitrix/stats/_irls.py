@@ -110,5 +110,10 @@ def fit_penalised_irls(
     wts, _, mu = _working(beta, y, X, family, prior_weights)
     xtwx = (X * wts[:, None]).T @ X
     v, _ = small_inv_logdet(xtwx + penalty + ridge_eye, p)
-    dev = jnp.sum(family.unit_deviance(y, mu))
+    # Deviance carries the prior weights (sum_i w_i d(y_i, mu_i)), matching the
+    # weighted-RSS convention of the OLS path; a no-op when unweighted.
+    unit_dev = family.unit_deviance(y, mu)
+    dev = jnp.sum(
+        unit_dev if prior_weights is None else prior_weights * unit_dev
+    )
     return beta, v, xtwx, dev

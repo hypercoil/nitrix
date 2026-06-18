@@ -43,11 +43,11 @@ from typing import NamedTuple, Optional, Tuple, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax
 from jaxtyping import Array, Float, Int
 
 from .._batching import blocked_vmap
 from .._smalllinalg import small_inv_logdet
+from ._optimise import damped_newton
 from ._varcomp import VarCompSpec
 
 __all__ = ['NestedStats', 'nested_layout', 'fit_nested_reml']
@@ -202,42 +202,15 @@ def _fit_one(
     n: int,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, '3'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel nested REML fit via damped autodiff-Newton (3 components)."""
+    """Single-voxel nested REML fit via the shared saddle-free Newton
+    (``_optimise.damped_newton``)."""
 
     def nll(theta: Float[Array, '3']) -> Float[Array, '']:
         return _nll_and_beta(
             theta, stats, sy, gxy, gyy, sy1, p, n, spec.ridge
         )[0]
 
-    grad_fn = jax.grad(nll)
-    hess_fn = jax.hessian(nll)
-    nt = 3
-
-    def newton(theta: Float[Array, '3'], _: Array) -> Tuple[Array, None]:
-        g = grad_fn(theta)
-        h = hess_fn(theta) + spec.damping * jnp.eye(nt, dtype=theta.dtype)
-        h_inv, _ = small_inv_logdet(h, nt)
-        delta = jnp.clip(h_inv @ g, -spec.max_step, spec.max_step)
-        nll_old = nll(theta)
-
-        def bt(
-            _: Array, carry: Tuple[Array, Array, Array]
-        ) -> Tuple[Array, Array, Array]:
-            scale, best, best_nll = carry
-            trial = theta - scale * delta
-            trial_nll = nll(trial)
-            ok = trial_nll < best_nll
-            return (
-                scale * 0.5,
-                jnp.where(ok, trial, best),
-                jnp.where(ok, trial_nll, best_nll),
-            )
-
-        init = (jnp.asarray(1.0, theta.dtype), theta, nll_old)
-        _, theta_new, _ = lax.fori_loop(0, spec.n_backtrack, bt, init)
-        return theta_new, None
-
-    theta, _ = lax.scan(newton, theta_init, xs=None, length=spec.n_iter)
+    theta = damped_newton(nll, theta_init, spec=spec)
     final_nll, beta = _nll_and_beta(
         theta, stats, sy, gxy, gyy, sy1, p, n, spec.ridge
     )

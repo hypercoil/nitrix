@@ -221,8 +221,14 @@ def _pirls_one(
         y, X, family, penalty=penalty, ridge=ridge, prior_weights=w
     )
     beta, v, _, dev = fit_penalised_irls(
-        y, X, family, penalty=penalty, beta0=beta0, n_iter=n_iter,
-        ridge=ridge, prior_weights=w,
+        y,
+        X,
+        family,
+        penalty=penalty,
+        beta0=beta0,
+        n_iter=n_iter,
+        ridge=ridge,
+        prior_weights=w,
     )
     return beta, v, dev
 
@@ -274,9 +280,16 @@ def glm_fit(
         )
     w = jnp.ones((n,), dtype=Y.dtype) if weights is None else weights
 
-    # Null-model deviance (intercept-only MLE mu = mean(y) for canonical links).
-    y_bar = jnp.mean(Y, axis=-1, keepdims=True)
-    null_dev = jnp.sum(family.unit_deviance(Y, jnp.broadcast_to(y_bar, Y.shape)), axis=-1)
+    # Null-model deviance: the intercept-only MLE is the **weighted** mean
+    # mu0 = sum(w y)/sum(w) (the ordinary mean when unweighted), and the
+    # deviance carries the same prior weights as the model deviance, so
+    # r_squared / deviance_explained are a consistent ratio under weights=.
+    # (Assumes a canonical link; a non-canonical-link null mean is not mean(y).)
+    y_bar = (Y @ w / jnp.sum(w))[:, None]  # (V, 1) weighted mean
+    null_dev = jnp.sum(
+        w[None, :] * family.unit_deviance(Y, jnp.broadcast_to(y_bar, Y.shape)),
+        axis=-1,
+    )
 
     is_ols = family.name == 'gaussian'
     if is_ols:
@@ -555,7 +568,9 @@ def adj_r_squared(result: GLMResult) -> Float[Array, 'V']:
     """Per-element adjusted ``R^2`` (Gaussian)."""
     n = float(result.n_obs)
     dof = result.dof_resid
-    return 1.0 - (1.0 - r_squared(result)) * (n - 1.0) / jnp.clip(dof, _EPS, None)
+    return 1.0 - (1.0 - r_squared(result)) * (n - 1.0) / jnp.clip(
+        dof, _EPS, None
+    )
 
 
 def log_likelihood(result: GLMResult) -> Float[Array, 'V']:
@@ -620,4 +635,6 @@ def compare_models(
     if mode == 'LRT':
         stat = 2.0 * (full.log_lik - reduced.log_lik)
         return stat, _chi2_sf(stat, d_rank)
-    raise ValueError(f"compare_models: test={test!r}; expected 'auto'/'F'/'LRT'.")
+    raise ValueError(
+        f"compare_models: test={test!r}; expected 'auto'/'F'/'LRT'."
+    )

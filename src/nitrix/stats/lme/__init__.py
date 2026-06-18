@@ -29,7 +29,7 @@ output statistics via the implicit-function-theorem VJP (see
 """
 
 from ._corr import CorrSpec, ar1, car1, cs
-from ._corrfit import GLSResult, gls_fit
+from ._corrfit import CorrLMEResult, GLSResult, gls_fit
 from .flame import FLAMEResult, flame_two_level
 from .reml import (
     LMEContrast,
@@ -52,6 +52,7 @@ __all__ = [
     'LMEFContrast',
     'FLAMEResult',
     'GLSResult',
+    'CorrLMEResult',
     'CorrSpec',
     'reml_fit',
     'lme_fit',

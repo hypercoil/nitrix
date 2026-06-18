@@ -817,11 +817,16 @@ def test_lme_fit_diagonal_is_nested_in_unstructured():
     """The diagonal fit is a constrained sub-model: its REML log-likelihood
     cannot exceed the unstructured fit's (one fewer free parameter)."""
     y, X, gid = _diag_slope_data(seed=3)
-    common = dict(
-        group=jnp.asarray(gid), z=jnp.asarray(X), n_iter=300
+    common = dict(group=jnp.asarray(gid), z=jnp.asarray(X), n_iter=300)
+    diag = lme_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), structure='diagonal', **common
     )
-    diag = lme_fit(jnp.asarray(y[None, :]), jnp.asarray(X), structure='diagonal', **common)
-    unst = lme_fit(jnp.asarray(y[None, :]), jnp.asarray(X), structure='unstructured', **common)
+    unst = lme_fit(
+        jnp.asarray(y[None, :]),
+        jnp.asarray(X),
+        structure='unstructured',
+        **common,
+    )
     assert float(unst.log_lik[0]) >= float(diag.log_lik[0]) - 1e-4
 
 
@@ -928,10 +933,10 @@ def test_lme_f_contrast_null_is_not_significant():
     )
     b = rng.standard_normal(M) * 0.9
     y = 1.0 + b[gid] + rng.standard_normal(N) * 0.6
-    res = reml_fit(jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(Z), n_iter=120)
-    fc = lme_f_contrast(
-        res, jnp.asarray([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    res = reml_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(Z), n_iter=120
     )
+    fc = lme_f_contrast(res, jnp.asarray([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
     assert float(fc.p_value[0]) > 0.05
 
 
@@ -940,3 +945,30 @@ def test_lme_f_contrast_rejects_unknown_dof():
     res = reml_fit(Y, X, Z, n_iter=20)
     with pytest.raises(ValueError, match='satterthwaite'):
         lme_f_contrast(res, jnp.asarray([0.0, 1.0, 0.0]), dof='kr')
+
+
+def test_lme_f_contrast_df_floor_no_nan_in_degenerate_case():
+    """The Fai-Cornelius E-method df2 = 2E/(E-L) is undefined when E <= L
+    (tiny samples / near-boundary variance); the fit must still return a finite,
+    valid p-value (df2 floored to a conservative value), never NaN."""
+    rng = np.random.default_rng(0)
+    # Minimal design: 3 groups, 2 per group -> very few residual df, a 2-row
+    # contrast -> the degenerate-E regime the floor guards.
+    M, n_per = 3, 2
+    N = M * n_per
+    gid = np.repeat(np.arange(M), n_per)
+    Z = np.zeros((N, M))
+    for i in range(M):
+        Z[gid == i, i] = 1.0
+    X = np.column_stack(
+        [np.ones(N), rng.standard_normal(N), rng.standard_normal(N)]
+    )
+    y = 1.0 + rng.standard_normal(N) * 0.5
+    res = reml_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(Z), n_iter=30
+    )
+    fc = lme_f_contrast(res, jnp.asarray([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
+    assert np.isfinite(float(fc.df2[0]))
+    assert float(fc.df2[0]) > 0.0
+    assert np.isfinite(float(fc.p_value[0]))
+    assert 0.0 <= float(fc.p_value[0]) <= 1.0

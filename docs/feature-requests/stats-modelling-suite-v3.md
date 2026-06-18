@@ -56,9 +56,12 @@
 > (`W R Wᵀ = I` — innovations recurrence for ar1/car1, rank-one for cs) so the fit
 > reduces to a profile-REML Newton over one parameter, cuSOLVER-free; β/ρ/σ_e²
 > match an **exact dense GLS-REML** reference to ~1e-7 for all three (and AR(1) β
-> tracks statsmodels `GLSAR`). This is the **R0 + corr** path (structured
-> residual, no random effect); composing `corr=` *with* a random effect (R2 +
-> corr) and the `varIdent`/`varPower` variance functions are the §1.4 follow-up.
+> tracks statsmodels `GLSAR`). This covers both **R0 + corr** (`gls_fit`,
+> structured residual, no random effect) **and R2 + corr** (`lme_fit(corr=…)`, a
+> random effect *plus* a structured residual): whitening by `R` reduces each
+> group to a standard block-Woodbury, so the per-group Woodbury algebra is reused
+> with `ρ` joining the REML `θ`; matches a dense REML reference across seeds. The
+> `varIdent`/`varPower` variance functions remain the §1.4 follow-up.
 > **§1.1 R3 nested random effects** — `lme_fit(..., inner=g2)` fits `(1 | g1/g2)`
 > (random intercept per outer level + per nested sublevel) via the **telescoping
 > Woodbury**: `V` is block-diagonal across the outer factor and within each block
@@ -68,8 +71,30 @@
 > by damped autodiff-Newton. β/σ₁²/σ₂²/σ_e² match an exact dense REML reference
 > (~1e-5) **and** statsmodels `MixedLM` with a nested vc (~1e-4); returns a
 > `NestedLMEResult`. The rest of Tier-1/Tier-2 (§4 Beta/Tweedie/ordinal, §3.2–3.3
-> cr/gp/mrf, §1.1 R4 crossed, §1.3 Kenward-Roger, §1.2 Laplace, §1.4 R2+corr /
-> varFunc) remain proposed. Driver: the **`nwx`**
+> cr/gp/mrf, §1.1 R4 crossed, §1.3 Kenward-Roger, §1.2 Laplace, §1.4 varFunc)
+> remain proposed.
+>
+> **Engineering hardening (2026-06-18, post interim review).** A three-axis
+> review (correctness / performance / design) uncovered a **silent-wrong-answer
+> bug class**: the block-Woodbury R2, nested R3, GLS, and R2+corr fits all
+> Newton on the *raw* (autodiff) Hessian of a **non-convex** profile-REML
+> objective with fixed tiny damping — which is not a descent direction at the
+> indefinite (saddle) Hessian those objectives have away from the optimum, so the
+> line search stalled the iterate and the fit returned wrong variance components
+> on a seed-dependent fraction of voxels (R2 was wrong on ~1/6 of random seeds).
+> Fix: the five duplicated damped-Newton closures are lifted into one shared
+> `lme/_optimise.damped_newton` (`curvature=None` autodiff fork / supplied
+> analytic-AI fork; `step='saddle_free'` replaces the Hessian eigenvalues by
+> `|λ|`, guaranteeing descent — the rule lives in one place) and a **multi-seed
+> recovery guard** (`tests/test_lme_robustness.py`, every solver vs a dense REML
+> reference over a seed sweep) makes a stall fail CI. Two independent correctness
+> fixes landed alongside: the `lme_f_contrast` Satterthwaite `df2` is floored
+> positive (the degenerate `E ≤ L` small-sample case gave a NaN p-value), and the
+> GLM null deviance now uses the **weighted** mean + weighted deviance (every
+> `r_squared`/`deviance_explained` under `weights=` was wrong). Remaining
+> follow-up (perf, deferred): give the autodiff LME solvers an analytic AI
+> curvature (the fork seam now exists), right-size iteration counts, and unify the
+> result types. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /
@@ -281,7 +306,7 @@ scalar normally not differentiated through (document, don't promise a VJP).
 **Effort: M (Satterthwaite) + M-L (Kenward-Roger, Tier-2).** **Oracle:**
 `lmerTest` (Satterthwaite), `pbkrtest` (Kenward-Roger).
 
-### §1.4 Error-correlation & heteroscedasticity structures  *(high value)* — ✅ SHIPPED (ar1/car1/cs GLS; R2+corr & varFunc Tier-2)
+### §1.4 Error-correlation & heteroscedasticity structures  *(high value)* — ✅ SHIPPED (ar1/car1/cs; R0+corr GLS **and** R2+corr; varFunc Tier-2)
 
 **What.** Within-group residual correlation / non-constant variance (nlme
 parity): `ar1(time|g)`, `car1`, `cs` (compound symmetry), and variance functions
@@ -544,7 +569,8 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 
 - ~~§1.1 R3 (nested)~~ ✅ (`lme_fit(inner=)`, telescoping Woodbury);
   ~~§1.2 GLMM (PQL)~~ ✅ (`glmm_fit`, level-count dispatch);
-  ~~§1.4 AR1/CAR1~~ ✅ (`gls_fit` ar1/car1/cs; R2+corr & varFunc Tier-2);
+  ~~§1.4 AR1/CAR1~~ ✅ (`gls_fit` ar1/car1/cs **+ R2+corr** `lme_fit(corr=)`;
+  varFunc Tier-2);
   ~~§3.1 by-variable smooths~~ ✅; ~~§4 `S`-class families (Gamma/NB)~~ ✅ (Beta
   deferred); ~~§6.2 sandwich/cluster SEs~~ ✅.
 

@@ -122,6 +122,11 @@ def test_wls_matches_statsmodels():
     np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-10)
     _, se, _, _ = t_contrast(res, jnp.eye(3)[1])
     np.testing.assert_allclose(float(se[0]), smf.bse[1], atol=1e-9)
+    # Weighted r_squared needs the *weighted* null deviance (weighted-mean
+    # intercept-only MLE); regression guard for the unweighted-null-mean bug.
+    np.testing.assert_allclose(
+        float(r_squared(res)[0]), smf.rsquared, atol=1e-9
+    )
 
 
 # ---------------------------------------------------------------------------

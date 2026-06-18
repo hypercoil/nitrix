@@ -112,6 +112,8 @@ from jaxtyping import Array, Float, Int
 
 from .._batching import blocked_vmap
 from .._smalllinalg import small_inv_logdet, sym_eig_jacobi
+from ._corr import CorrSpec, resolve_corr
+from ._corrfit import CorrLMEResult
 from ._varcomp import VarCompSpec, fit_varcomp_diagonal, varcomp_inference
 
 __all__ = [
@@ -529,7 +531,16 @@ def lme_f_contrast(
         nu = 2.0 * d_safe * d_safe / jnp.clip(denom, tiny, None)  # (L,)
         ratio = jnp.where(nu > 2.0, nu / (nu - 2.0), 0.0)
         e_sum = jnp.sum(ratio)
-        df2 = 2.0 * e_sum / jnp.maximum(e_sum - n_rows, tiny)
+        # E-method df2 = 2E/(E-L) is only valid when E > L; in the degenerate
+        # small-sample / near-boundary case (no eigendirection has nu > 2, so
+        # E <= L) it would give df2 <= 0 and a NaN F p-value.  Fall back to a
+        # conservative df2 = 1 there (wide tails -> larger p), keeping betainc
+        # well-defined.
+        df2 = jnp.where(
+            e_sum > n_rows,
+            2.0 * e_sum / jnp.maximum(e_sum - n_rows, tiny),
+            1.0,
+        )
         return f, df2
 
     f, df2 = jax.vmap(per_voxel)(
@@ -762,12 +773,14 @@ def lme_fit(
     group: Int[Array, 'N'],
     z: Optional[Float[Array, 'N r']] = None,
     inner: Optional[Int[Array, 'N']] = None,
+    corr: Optional[Union[str, CorrSpec]] = None,
+    time: Optional[Float[Array, 'N']] = None,
     structure: Structure = 'unstructured',
     n_iter: int = 20,
     damping: float = 1e-6,
     block: Optional[int] = None,
     low_rank: bool = False,
-) -> Union[REMLResult, LMEResult, NestedLMEResult]:
+) -> Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult]:
     """Voxelwise mixed model, dispatched to the cheapest exact solver.
 
     A single grouping factor ``group`` with per-observation random covariates
@@ -798,6 +811,13 @@ def lme_fit(
       ``[sigma1^2, sigma2^2, sigma_e^2]`` -- block-diagonal across ``g1``,
       Sherman-Morrison at each nested level, no ``N x N`` intermediate,
       cuSOLVER-free.  Returns a :class:`NestedLMEResult`.
+    - **R2 + corr** -- a random effect **and** a structured within-group residual
+      ``Cov(eps) = sigma_e^2 R(rho)`` (pass ``corr=`` and, for ``car1``,
+      ``time=``).  Whitening by ``R`` reduces each group to a standard
+      block-Woodbury, so the per-group Woodbury algebra is reused with ``rho``
+      joining the REML ``theta``; cuSOLVER-free.  Returns a
+      :class:`CorrLMEResult`.  ``z=None`` is the random intercept; ``z`` a random
+      slope (``structure='diagonal'`` for ``(x || g)``).
 
     Crossed / multiple grouping factors (R4) are the general sparse-MME follow-up
     (v3 §1.1, Tier-2).
@@ -817,6 +837,13 @@ def lme_fit(
         a sublevel ``g1:g2``).  When given, routes to the R3 nested solver
         (``z`` must be ``None``); ``None`` (default) keeps the single-factor
         R1/R2 dispatch.
+    corr
+        Within-group residual correlation structure (``'ar1'`` / ``'car1'`` /
+        ``'cs'`` or a :class:`CorrSpec`).  When given, routes to the R2 + corr
+        whitened block-Woodbury (a random effect plus a structured residual);
+        ``None`` (default) is the ``sigma_e^2 I`` residual.
+    time
+        ``(N,)`` observation times for a ``car1`` residual (see ``corr``).
     structure
         ``'unstructured'`` (full ``r x r`` ``G``, ``(1 + x | g)``) or
         ``'diagonal'`` (independent variance components, ``(x || g)`` -- the
@@ -827,11 +854,39 @@ def lme_fit(
 
     Returns
     -------
-    ``REMLResult`` (R1), ``LMEResult`` (R2), or ``NestedLMEResult`` (R3).
+    ``REMLResult`` (R1), ``LMEResult`` (R2), ``NestedLMEResult`` (R3), or
+    ``CorrLMEResult`` (R2 + corr).
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
     r = 1 if z is None else jnp.asarray(z).shape[-1]
+
+    if corr is not None:
+        # R2 + corr: a random effect *and* a structured within-group residual.
+        if inner is not None:
+            raise NotImplementedError(
+                'lme_fit: a structured residual (corr=) on a nested design '
+                '(inner=) is a further composition; not yet supported.'
+            )
+        from ._corrfit import fit_corr_lme
+
+        z_design = (
+            jnp.ones((group.shape[0], 1), dtype=Y.dtype)
+            if z is None
+            else jnp.asarray(z, dtype=Y.dtype)
+        )
+        return fit_corr_lme(
+            Y,
+            X,
+            z_design,
+            group,
+            resolve_corr(corr),
+            time=None if time is None else jnp.asarray(time),
+            diagonal=structure == 'diagonal',
+            n_iter=n_iter,
+            damping=damping,
+            block=block,
+        )
 
     if inner is not None:
         # R3: nested two-level hierarchy (1 | g1/g2).
