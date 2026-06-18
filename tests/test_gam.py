@@ -20,7 +20,10 @@ import pytest
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.stats.basis import bspline_basis
+from nitrix.stats.basis import (
+    bspline_basis,
+    tensor_product_basis,
+)
 from nitrix.stats.gam import gam_fit, smooth_partial_effect
 from nitrix.stats.glm import POISSON
 
@@ -225,6 +228,98 @@ def test_gam_hlo_is_cusolver_free():
     rng = np.random.default_rng(5)
     Y = jnp.asarray(rng.standard_normal((32, len(x))))
     f = jax.jit(lambda Y: gam_fit(Y, [sb], n_outer=4, n_inner=4).coef)
+    hlo = f.lower(Y).compile().as_text()
+    targets = set(re.findall(r'custom_call_target="([^"]+)"', hlo))
+    bad = [
+        c
+        for c in targets
+        if any(
+            t in c.lower()
+            for t in ('cusolver', 'syevd', 'potrf', 'getrf', 'geqrf', 'gesvd', 'cholesky', 'eigh')
+        )
+    ]
+    assert not bad, bad
+
+
+# ---------------------------------------------------------------------------
+# Tensor-product (te / ti) interaction smooths
+# ---------------------------------------------------------------------------
+
+
+def _interaction_data(seed=0, n=1200, noise=0.15):
+    rng = np.random.default_rng(seed)
+    x1 = rng.uniform(0.0, 1.0, n)
+    x2 = rng.uniform(0.0, 1.0, n)
+    truth = np.sin(2 * np.pi * x1) * (x2 - 0.5)  # genuine interaction
+    y = truth + rng.standard_normal(n) * noise
+    return x1, x2, truth, y
+
+
+def test_tensor_recovers_interaction_surface():
+    """A tensor smooth recovers an interaction surface, selecting one smoothing
+    parameter per margin (Bayesian SE positive, EDF interior)."""
+    x1, x2, truth, y = _interaction_data()
+    m1 = bspline_basis(jnp.asarray(x1), 8, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 8, center=True)
+    te = tensor_product_basis((m1, m2))
+    res = gam_fit(jnp.asarray(y[None, :]), [te])
+
+    assert res.lam.shape == (1, 2)  # one smoothing parameter per margin
+    assert res.edf.shape == (1, 1)  # one EDF for the interaction term
+    eff, se = smooth_partial_effect(
+        res, 0, te, (jnp.asarray(x1), jnp.asarray(x2))
+    )
+    fit = float(res.coef[0, 0]) + np.asarray(eff[0])
+    interior = (x1 > 0.1) & (x1 < 0.9) & (x2 > 0.1) & (x2 < 0.9)
+    rmse = float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2)))
+    assert rmse < 0.05
+    assert 2.0 < float(res.edf[0, 0]) < float(te.dim)
+    assert bool((se > 0).all())
+    assert abs(float(res.dispersion[0]) - 0.15**2) < 0.3 * 0.15**2
+
+
+def test_tensor_anisotropic_smoothing():
+    """A surface wiggly in x1 but (near) linear in x2 selects a much smaller
+    lambda for the x1 margin than the x2 margin -- the point of per-margin
+    smoothing the isotropic single-penalty form cannot express."""
+    rng = np.random.default_rng(4)
+    n = 1500
+    x1 = rng.uniform(0.0, 1.0, n)
+    x2 = rng.uniform(0.0, 1.0, n)
+    truth = np.sin(3 * np.pi * x1) * (x2 - 0.5)  # wiggly in x1, linear in x2
+    y = truth + rng.standard_normal(n) * 0.1
+    m1 = bspline_basis(jnp.asarray(x1), 9, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 9, center=True)
+    te = tensor_product_basis((m1, m2))
+    res = gam_fit(jnp.asarray(y[None, :]), [te])
+    lam1, lam2 = float(res.lam[0, 0]), float(res.lam[0, 1])
+    # the x2 margin is penalised orders of magnitude harder than x1.
+    assert lam2 > 100.0 * lam1
+
+
+def test_tensor_additive_with_marginal_smooth():
+    """A tensor interaction composes with ordinary marginal smooths in one fit
+    (te = s(x1) + s(x2) + ti(x1, x2) style additive model)."""
+    x1, x2, _, y = _interaction_data(seed=2)
+    s1 = bspline_basis(jnp.asarray(x1), 8, center=True)
+    s2 = bspline_basis(jnp.asarray(x2), 8, center=True)
+    m1 = bspline_basis(jnp.asarray(x1), 6, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 6, center=True)
+    te = tensor_product_basis((m1, m2))
+    res = gam_fit(jnp.asarray(y[None, :]), [s1, s2, te])
+    # three terms: 2 marginal (1 lambda each) + 1 tensor (2 lambdas) = 4 lambdas
+    assert res.lam.shape == (1, 4)
+    assert res.edf.shape == (1, 3)
+    assert bool(jnp.all(jnp.isfinite(res.coef)))
+
+
+def test_tensor_gam_cusolver_free():
+    x1, x2, _, y = _interaction_data(n=300)
+    m1 = bspline_basis(jnp.asarray(x1), 6, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 6, center=True)
+    te = tensor_product_basis((m1, m2))
+    Y = jnp.asarray(y[None, :])
+    f = jax.jit(lambda Y: gam_fit(Y, [te], n_outer=4, n_inner=4).coef)
     hlo = f.lower(Y).compile().as_text()
     targets = set(re.findall(r'custom_call_target="([^"]+)"', hlo))
     bad = [

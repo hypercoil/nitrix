@@ -43,10 +43,13 @@ from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
 
 __all__ = [
     'SplineBasis',
+    'TensorBasis',
     'bspline_basis',
     'cyclic_cubic_basis',
     'thinplate_regression_basis',
+    'tensor_product_basis',
     'spline_design',
+    'tensor_product_design',
 ]
 
 
@@ -537,3 +540,190 @@ def cyclic_cubic_basis(
         lo=lo,
         hi=hi,
     )
+
+
+# ---------------------------------------------------------------------------
+# Tensor-product interaction smooth (mgcv te()/ti(), anisotropic interactions)
+# ---------------------------------------------------------------------------
+
+
+def _row_kron(designs: Tuple[np.ndarray, ...]) -> np.ndarray:
+    """Row-wise Kronecker product of marginal designs.
+
+    For designs ``[A (n, k1), B (n, k2), ...]`` the result is ``(n, k1*k2*...)``
+    whose row ``i`` is the flattened outer product of the marginal rows -- the
+    tensor-product basis evaluated at the matched covariate tuple of row ``i``.
+    """
+    out = designs[0]
+    for d in designs[1:]:
+        n, ka = out.shape
+        kb = d.shape[1]
+        out = (out[:, :, None] * d[:, None, :]).reshape(n, ka * kb)
+    return out
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class TensorBasis:
+    """An anisotropic tensor-product interaction smooth ``f(x_1, ..., x_d)``.
+
+    Built from ``d`` marginal :class:`SplineBasis` (already sum-to-zero
+    constrained) by the **row-wise tensor product** of their designs and the
+    Kronecker-sum of per-margin penalties ``S_j = I (x) ... P_j ... (x) I`` --
+    so each margin keeps its own smoothing parameter (selected jointly by the
+    GAM Fellner-Schall loop, which handles ``> 1`` penalty per smooth).  This is
+    mgcv's tensor **interaction** (``ti``): the marginal centring removes the
+    main effects, so the term models the *interaction* and stays identifiable
+    against the intercept; add marginal ``s(x_j)`` smooths for a full ``te``.
+
+    The marginal penalties commute (Kronecker structure), so they are
+    **simultaneously diagonalisable**: ``pen_eig[j]`` is penalty ``j`` in the
+    joint eigenbasis (``U_1 (x) ... (x) U_d``), which the GAM engine uses to
+    evaluate the smoothing-parameter trace ``tr(S_lambda^+ S_j)`` as an
+    elementwise sum -- cuSOLVER-free, no per-iteration pseudo-inverse -- while
+    the fit itself keeps the original (non-rotated) tensor basis.
+
+    Attributes
+    ----------
+    design
+        ``(n, K)`` row-wise tensor design, ``K = prod_j k_j``.
+    penalties
+        ``(d, K, K)`` the ``d`` Kronecker-embedded marginal penalties ``S_j``.
+    pen_eig
+        ``(d, K)`` penalty ``j`` in the joint eigenbasis (its Kronecker
+        eigenvalues), tiny values floored to exact zero for the rank.
+    margins
+        The constituent marginal bases, for re-evaluation on a fresh grid.
+    dims
+        ``(k_1, ..., k_d)`` per-margin basis dimensions.
+    """
+
+    design: Float[Array, 'n K']
+    penalties: Float[Array, 'd K K']
+    pen_eig: Float[Array, 'd K']
+    margins: Tuple[SplineBasis, ...]
+    dims: Tuple[int, ...]
+
+    @property
+    def dim(self) -> int:
+        """Total tensor-basis dimension ``K = prod_j k_j``."""
+        return self.design.shape[-1]
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[Tuple[Any, ...], Tuple[int, ...]]:
+        children = (self.design, self.penalties, self.pen_eig, self.margins)
+        return children, self.dims
+
+    @classmethod
+    def tree_unflatten(
+        cls, aux: Tuple[int, ...], children: Tuple[Any, ...]
+    ) -> 'TensorBasis':
+        design, penalties, pen_eig, margins = children
+        return cls(
+            design=design,
+            penalties=penalties,
+            pen_eig=pen_eig,
+            margins=tuple(margins),
+            dims=aux,
+        )
+
+
+def tensor_product_basis(
+    margins: Tuple[SplineBasis, ...],
+    *,
+    eig_rtol: float = 1e-10,
+) -> TensorBasis:
+    """Build an anisotropic tensor-product interaction smooth from marginals.
+
+    Parameters
+    ----------
+    margins
+        Two or more :class:`SplineBasis` on the **matched** covariates (same
+        number of rows ``n``), each typically sum-to-zero constrained
+        (``center=True``).  Mixed kinds are allowed (e.g. a P-spline crossed
+        with a cyclic margin).
+    eig_rtol
+        Relative tolerance below which a marginal-penalty eigenvalue is floored
+        to exact zero (its unpenalised null space), so the smoothing-parameter
+        trace counts the correct penalty rank.
+
+    Returns
+    -------
+    ``TensorBasis`` (design ``(n, prod k_j)`` and the per-margin penalties).
+    """
+    if len(margins) < 2:
+        raise ValueError(
+            'tensor_product_basis: need at least two marginal bases.'
+        )
+    n = margins[0].design.shape[0]
+    for m in margins:
+        if m.design.shape[0] != n:
+            raise ValueError(
+                'tensor_product_basis: all margins must share the row count '
+                f'n={n}; got {m.design.shape[0]}.'
+            )
+    dtype = margins[0].design.dtype
+    designs = tuple(np.asarray(m.design) for m in margins)
+    dims = tuple(d.shape[1] for d in designs)
+    pens = [np.asarray(m.penalty) for m in margins]
+
+    design = _row_kron(designs)
+    big_k = design.shape[1]
+
+    # Per-margin eigendecomposition (the joint eigenbasis is the Kronecker
+    # product; each S_j is diagonal there with the margin's eigenvalues tiled).
+    eig_per_margin = []
+    for w_src in pens:
+        w, _ = np.linalg.eigh(w_src)
+        floor = eig_rtol * max(float(w.max()), np.finfo(w.dtype).tiny)
+        eig_per_margin.append(np.where(w > floor, w, 0.0))
+
+    penalties = np.zeros((len(margins), big_k, big_k))
+    pen_eig = np.zeros((len(margins), big_k))
+    eye = [np.eye(k) for k in dims]
+    for j in range(len(margins)):
+        # S_j = I (x) ... P_j ... (x) I  (full, original tensor basis).
+        mats = [eye[i] if i != j else pens[i] for i in range(len(margins))]
+        s_full = mats[0]
+        for mat in mats[1:]:
+            s_full = np.kron(s_full, mat)
+        penalties[j] = s_full
+        # pen_eig[j] = 1 (x) ... eig_j ... (x) 1  (the Kronecker eigenvalues).
+        vecs = [
+            np.ones(dims[i]) if i != j else eig_per_margin[i]
+            for i in range(len(margins))
+        ]
+        e = vecs[0]
+        for vec in vecs[1:]:
+            e = np.kron(e, vec)
+        pen_eig[j] = e
+
+    return TensorBasis(
+        design=jnp.asarray(design, dtype=dtype),
+        penalties=jnp.asarray(penalties, dtype=dtype),
+        pen_eig=jnp.asarray(pen_eig, dtype=dtype),
+        margins=tuple(margins),
+        dims=dims,
+    )
+
+
+def tensor_product_design(
+    basis: TensorBasis, xs: Tuple[Float[Array, ' g'], ...]
+) -> Float[Array, 'g K']:
+    """Re-evaluate a ``TensorBasis`` on a matched covariate grid.
+
+    ``xs`` is one grid per margin (all length ``g``); point ``t`` has covariate
+    tuple ``(xs[0][t], ..., xs[d-1][t])``.  Returns the ``(g, K)`` tensor design
+    -- ``@`` the fitted tensor coefficients renders the interaction surface
+    along that path.
+    """
+    if len(xs) != len(basis.margins):
+        raise ValueError(
+            f'tensor_product_design: got {len(xs)} grids for '
+            f'{len(basis.margins)} margins.'
+        )
+    designs = tuple(
+        np.asarray(spline_design(m, x)) for m, x in zip(basis.margins, xs)
+    )
+    return jnp.asarray(_row_kron(designs), dtype=basis.design.dtype)

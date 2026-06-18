@@ -59,9 +59,12 @@ from .fourier import (
 )
 from .basis import (
     SplineBasis,
+    TensorBasis,
     bspline_basis,
     cyclic_cubic_basis,
     spline_design,
+    tensor_product_basis,
+    tensor_product_design,
     thinplate_regression_basis,
 )
 from .connectivity import (
@@ -145,10 +148,13 @@ __all__ = [
     'compare_models',
     # basis
     'SplineBasis',
+    'TensorBasis',
     'bspline_basis',
     'cyclic_cubic_basis',
     'thinplate_regression_basis',
+    'tensor_product_basis',
     'spline_design',
+    'tensor_product_design',
     # gam
     'GAMResult',
     'gam_fit',
