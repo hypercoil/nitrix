@@ -47,7 +47,7 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
-__all__ = ['small_inv_logdet', 'spd_inv_logdet_chol']
+__all__ = ['small_inv_logdet', 'spd_inv_logdet_chol', 'sym_eig_jacobi']
 
 # Relative pivot floor (modified Cholesky).  A pivot / determinant is clamped
 # to this fraction of the matrix's diagonal scale before a ``sqrt`` / division,
@@ -82,7 +82,9 @@ def spd_inv_logdet_chol(
     # Modified-Cholesky pivot floor, relative to the matrix's diagonal scale so
     # a well-conditioned solve is unperturbed but a degenerate pivot stays
     # positive (finite, regularised) rather than producing sqrt(negative)=NaN.
-    floor = _PIVOT_REL_FLOOR * jnp.max(jnp.diagonal(A)) + jnp.finfo(A.dtype).tiny
+    floor = (
+        _PIVOT_REL_FLOOR * jnp.max(jnp.diagonal(A)) + jnp.finfo(A.dtype).tiny
+    )
 
     def body(j: Array, L: Float[Array, 'n n']) -> Float[Array, 'n n']:
         Lj = lax.dynamic_index_in_dim(L, j, axis=0, keepdims=False)  # (n,)
@@ -140,3 +142,73 @@ def small_inv_logdet(
         inv = jnp.array([[c, -b], [-b, a]], dtype=A.dtype) / det
         return inv, jnp.log(det)
     return spd_inv_logdet_chol(A, n)
+
+
+def sym_eig_jacobi(
+    A: Float[Array, 'n n'], n: int, n_sweeps: int = 12
+) -> Tuple[Float[Array, 'n'], Float[Array, 'n n']]:
+    """Symmetric eigendecomposition of a small ``(n, n)`` matrix, cuSOLVER-free.
+
+    Returns ``(evals, evecs)`` with ``A approx evecs @ diag(evals) @ evecs.T``;
+    the columns of ``evecs`` are orthonormal eigenvectors.  Eigenvalues are **not
+    sorted** (cyclic Jacobi visits pairs in a fixed order).
+
+    Why a hand-rolled Jacobi.  ``jnp.linalg.eigh`` issues a ``syevd`` cuSOLVER
+    custom-call, which is dead on the dev L4 (see ``small_inv_logdet``); and
+    ``safe_eigh``'s CPU fallback is eager (not ``jit`` / ``vmap`` -able), so it
+    cannot run *inside* a per-element batched computation.  A fixed-sweep cyclic
+    Jacobi is pure arithmetic (Givens rotations): jittable, ``vmap``-clean, and
+    exact to machine precision in a handful of sweeps for the tiny ``n`` this
+    serves (an ``L x L`` contrast covariance, ``L`` a few rows;
+    ``lme_f_contrast``'s Fai-Cornelius denominator-df eigendirections).
+
+    **Forward-only.**  The decomposition is for the value, not its gradient: a
+    naive reverse-mode sweep accumulates ``1 / off-diagonal^2`` rotation-angle
+    terms that overflow as the iteration converges (the standard hazard of
+    differentiating an iterative eigensolver).  Its sole consumer -- the
+    Satterthwaite F denominator df -- is not differentiated through (v3 §1.3), so
+    that is by design; wrap a call in ``lax.stop_gradient`` if it ever feeds a
+    differentiated path.
+
+    Each rotation zeroes one off-diagonal ``A[p, q]`` via the orthogonal
+    ``J(p, q)`` (the stable smaller-root angle), applied as ``A <- J^T A J`` and
+    ``V <- V J``; ``n`` is a Python int, so the ``n(n-1)/2`` pair sweep is
+    unrolled and ``n_sweeps`` cyclic passes drive the off-diagonal to zero
+    quadratically.  ``n_sweeps=12`` is generous for ``n <= 6``.
+    """
+    A = 0.5 * (A + A.T)
+    dtype = A.dtype
+    tiny = jnp.finfo(dtype).tiny
+    pairs = [(p, q) for p in range(n) for q in range(p + 1, n)]
+
+    def one_sweep(
+        carry: Tuple[Float[Array, 'n n'], Float[Array, 'n n']], _: Array
+    ) -> Tuple[Tuple[Float[Array, 'n n'], Float[Array, 'n n']], None]:
+        mat, vecs = carry
+        for p, q in pairs:
+            apq = mat[p, q]
+            app = mat[p, p]
+            aqq = mat[q, q]
+            do_rot = jnp.abs(apq) > tiny  # skip an already-zero off-diagonal
+            denom = jnp.where(do_rot, 2.0 * apq, 1.0)
+            tau = (aqq - app) / denom
+            sgn = jnp.where(tau >= 0, 1.0, -1.0)
+            t = sgn / (
+                jnp.abs(tau) + jnp.sqrt(tau * tau + 1.0)
+            )  # smaller root
+            t = jnp.where(do_rot, t, 0.0)
+            cos = 1.0 / jnp.sqrt(t * t + 1.0)
+            sin = t * cos
+            rot = jnp.eye(n, dtype=dtype)
+            rot = rot.at[p, p].set(cos)
+            rot = rot.at[q, q].set(cos)
+            rot = rot.at[p, q].set(sin)
+            rot = rot.at[q, p].set(-sin)
+            mat = rot.T @ mat @ rot
+            vecs = vecs @ rot
+        return (mat, vecs), None
+
+    (mat, vecs), _ = lax.scan(
+        one_sweep, (A, jnp.eye(n, dtype=dtype)), xs=None, length=n_sweeps
+    )
+    return jnp.diagonal(mat), vecs

@@ -28,7 +28,7 @@ import numpy as np
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.stats._smalllinalg import spd_inv_logdet_chol
+from nitrix.stats._smalllinalg import spd_inv_logdet_chol, sym_eig_jacobi
 from nitrix.stats.lme import flame_two_level, reml_fit
 from nitrix.stats.lme._varcomp import VarCompSpec, fit_varcomp_diagonal
 
@@ -242,6 +242,70 @@ def test_cholesky_graph_size_is_flat_in_p():
     assert large < 40, f'graph too large ({large} eqns) -- Cholesky unrolled?'
     assert large <= small + 3, (
         f'graph grows with p ({small} -> {large}) -- Cholesky no longer rolled.'
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4. The cuSOLVER-free small symmetric eigensolver (sym_eig_jacobi)
+# ---------------------------------------------------------------------------
+
+
+def test_sym_eig_jacobi_matches_numpy():
+    """Fixed-sweep cyclic Jacobi reproduces ``numpy.linalg.eigh`` (eigenvalues
+    and a reconstruction) for small symmetric matrices.
+
+    The oracle is numpy (CPU): ``sym_eig_jacobi`` exists precisely to avoid
+    ``jnp.linalg.eigh`` (``syevd`` cuSOLVER), so the reference must not be it.
+    """
+    rng = np.random.default_rng(0)
+    for n in (1, 2, 3, 4, 5, 6):
+        m = rng.standard_normal((n, n))
+        a = m @ m.T + 0.1 * np.eye(n)  # SPD, distinct eigenvalues
+        d, vecs = sym_eig_jacobi(jnp.asarray(a), n)
+        d, vecs = np.asarray(d), np.asarray(vecs)
+        # eigenvalues match (Jacobi does not sort -> compare sorted)
+        np.testing.assert_allclose(
+            np.sort(d), np.linalg.eigvalsh(a), atol=1e-10
+        )
+        # orthonormal eigenvectors and an exact reconstruction
+        np.testing.assert_allclose(vecs.T @ vecs, np.eye(n), atol=1e-10)
+        np.testing.assert_allclose(
+            vecs @ np.diag(d) @ vecs.T, a, atol=1e-9
+        )
+
+
+def test_sym_eig_jacobi_handles_diagonal_and_degenerate():
+    """Exact-diagonal input (the ``apq == 0`` rotation guard) and a repeated
+    eigenvalue both decompose cleanly."""
+    # exact diagonal: no rotation should fire, eigenvalues are the diagonal
+    d, vecs = sym_eig_jacobi(jnp.asarray(np.diag([5.0, 2.0, 9.0])), 3)
+    np.testing.assert_allclose(np.sort(np.asarray(d)), [2.0, 5.0, 9.0], atol=1e-12)
+    # degenerate (repeated eigenvalue): still orthonormal + reconstructs
+    a = np.diag([3.0, 3.0, 7.0]) + 0.0
+    d, vecs = sym_eig_jacobi(jnp.asarray(a), 3)
+    d, vecs = np.asarray(d), np.asarray(vecs)
+    np.testing.assert_allclose(vecs @ np.diag(d) @ vecs.T, a, atol=1e-10)
+    np.testing.assert_allclose(vecs.T @ vecs, np.eye(3), atol=1e-10)
+
+
+def test_sym_eig_jacobi_vmaps_and_is_cusolver_free():
+    """The eigensolver runs under ``vmap`` and its compiled HLO issues no
+    cuSOLVER custom-call (the property that lets ``lme_f_contrast`` form its
+    denominator-df eigendirections inside a per-voxel batched computation)."""
+    rng = np.random.default_rng(1)
+    batch = np.stack(
+        [
+            (lambda b: b @ b.T + 0.05 * np.eye(3))(rng.standard_normal((3, 3)))
+            for _ in range(64)
+        ]
+    )
+    f = jax.jit(jax.vmap(lambda m: sym_eig_jacobi(m, 3)))
+    d, vecs = f(jnp.asarray(batch))
+    rec = np.einsum('vij,vj,vkj->vik', np.asarray(vecs), np.asarray(d), np.asarray(vecs))
+    np.testing.assert_allclose(rec, batch, atol=1e-9)
+    hlo = f.lower(jnp.asarray(batch)).compile().as_text()
+    assert not _cusolver_calls(hlo), (
+        f'sym_eig_jacobi must be cuSOLVER-free; found {_cusolver_calls(hlo)}'
     )
 
 
