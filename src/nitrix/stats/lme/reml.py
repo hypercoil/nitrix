@@ -117,6 +117,7 @@ from ._varcomp import VarCompSpec, fit_varcomp_diagonal, varcomp_inference
 __all__ = [
     'REMLResult',
     'LMEResult',
+    'NestedLMEResult',
     'LMEContrast',
     'LMEFContrast',
     'reml_fit',
@@ -696,6 +697,34 @@ def reml_fit(
 # ---------------------------------------------------------------------------
 
 
+class NestedLMEResult(NamedTuple):
+    """Nested two-level mixed-model fit output (the ``lme_fit`` R3 path).
+
+    Attributes
+    ----------
+    beta_hat
+        ``(V, p)`` fixed-effect estimates.
+    var_outer
+        ``(V,)`` outer random-intercept variance ``sigma1^2`` (``(1 | g1)``).
+    var_inner
+        ``(V,)`` inner (nested) random-intercept variance ``sigma2^2``
+        (``(1 | g1:g2)``).
+    sigma_e_sq
+        ``(V,)`` residual variance.
+    log_lik
+        ``(V,)`` profile REML log-likelihood.
+    tier
+        ``'R3'`` (the telescoping-Woodbury nested solver).
+    """
+
+    beta_hat: Float[Array, 'V p']
+    var_outer: Float[Array, 'V']
+    var_inner: Float[Array, 'V']
+    sigma_e_sq: Float[Array, 'V']
+    log_lik: Float[Array, 'V']
+    tier: str
+
+
 class LMEResult(NamedTuple):
     """General mixed-model fit output (the ``lme_fit`` dispatcher result).
 
@@ -732,12 +761,13 @@ def lme_fit(
     *,
     group: Int[Array, 'N'],
     z: Optional[Float[Array, 'N r']] = None,
+    inner: Optional[Int[Array, 'N']] = None,
     structure: Structure = 'unstructured',
     n_iter: int = 20,
     damping: float = 1e-6,
     block: Optional[int] = None,
     low_rank: bool = False,
-) -> Union[REMLResult, LMEResult]:
+) -> Union[REMLResult, LMEResult, NestedLMEResult]:
     """Voxelwise mixed model, dispatched to the cheapest exact solver.
 
     A single grouping factor ``group`` with per-observation random covariates
@@ -762,6 +792,13 @@ def lme_fit(
       uncorrelated ``(x || g)`` random effect (independent intercept and slope),
       fitting only the ``r`` variances (``nt = r + 1`` parameters).
 
+    - **R3** -- a **nested** two-level hierarchy ``(1 | g1/g2)`` (pass the inner
+      factor as ``inner``; ``z`` must be ``None``): the telescoping-Woodbury
+      nested solver (``_nested``) over the three variance components
+      ``[sigma1^2, sigma2^2, sigma_e^2]`` -- block-diagonal across ``g1``,
+      Sherman-Morrison at each nested level, no ``N x N`` intermediate,
+      cuSOLVER-free.  Returns a :class:`NestedLMEResult`.
+
     Crossed / multiple grouping factors (R4) are the general sparse-MME follow-up
     (v3 §1.1, Tier-2).
 
@@ -770,10 +807,16 @@ def lme_fit(
     Y, X
         ``(V, N)`` responses and ``(N, p)`` shared fixed-effect design.
     group
-        ``(N,)`` integer group labels (``0 .. M-1``).
+        ``(N,)`` integer group labels (``0 .. M-1``).  The **outer** factor
+        ``g1`` when ``inner`` is given (R3).
     z
         ``(N, r)`` per-observation random covariates; ``None`` is the scalar
         random intercept (``r = 1``, ``z = 1``).
+    inner
+        ``(N,)`` **nested** inner factor ``g2`` (each ``(group, inner)`` pair is
+        a sublevel ``g1:g2``).  When given, routes to the R3 nested solver
+        (``z`` must be ``None``); ``None`` (default) keeps the single-factor
+        R1/R2 dispatch.
     structure
         ``'unstructured'`` (full ``r x r`` ``G``, ``(1 + x | g)``) or
         ``'diagonal'`` (independent variance components, ``(x || g)`` -- the
@@ -784,11 +827,38 @@ def lme_fit(
 
     Returns
     -------
-    ``REMLResult`` (R1) or ``LMEResult`` (R2).
+    ``REMLResult`` (R1), ``LMEResult`` (R2), or ``NestedLMEResult`` (R3).
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
     r = 1 if z is None else jnp.asarray(z).shape[-1]
+
+    if inner is not None:
+        # R3: nested two-level hierarchy (1 | g1/g2).
+        if z is not None:
+            raise ValueError(
+                'lme_fit: nested fit (inner=...) takes scalar intercepts at '
+                'both levels; pass z=None (random slopes nested under a factor '
+                'are a Tier-2 follow-up).'
+            )
+        from ._nested import fit_nested_reml
+
+        inner_arr = jnp.asarray(inner)
+        var_y = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
+        w = jnp.asarray([0.25, 0.25, 0.5], dtype=Y.dtype)
+        theta_init = jnp.log(jnp.maximum(var_y * w, 1e-6))  # (V, 3)
+        spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+        theta_hat, beta_hat, log_lik = fit_nested_reml(
+            Y, X, group, inner_arr, theta_init, spec=spec, block=block
+        )
+        return NestedLMEResult(
+            beta_hat=beta_hat,
+            var_outer=jnp.exp(theta_hat[:, 0]),
+            var_inner=jnp.exp(theta_hat[:, 1]),
+            sigma_e_sq=jnp.exp(theta_hat[:, 2]),
+            log_lik=log_lik,
+            tier='R3',
+        )
 
     if r == 1:
         # R1: one scalar random effect -> the FaST-LMM spectral fast path.

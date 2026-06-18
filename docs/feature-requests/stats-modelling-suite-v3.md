@@ -59,9 +59,17 @@
 > tracks statsmodels `GLSAR`). This is the **R0 + corr** path (structured
 > residual, no random effect); composing `corr=` *with* a random effect (R2 +
 > corr) and the `varIdent`/`varPower` variance functions are the §1.4 follow-up.
-> The rest of Tier-1/Tier-2 (§4 Beta/Tweedie/ordinal, §3.2–3.3 cr/gp/mrf, §1.1
-> R3/R4, §1.3 Kenward-Roger, §1.2 Laplace, §1.4 R2+corr / varFunc) remain
-> proposed. Driver: the **`nwx`**
+> **§1.1 R3 nested random effects** — `lme_fit(..., inner=g2)` fits `(1 | g1/g2)`
+> (random intercept per outer level + per nested sublevel) via the **telescoping
+> Woodbury**: `V` is block-diagonal across the outer factor and within each block
+> is a nested compound-symmetry + rank-one structure inverted by Sherman-Morrison
+> at each level, assembled from per-sublevel sufficient statistics aggregated by
+> `segment_sum` — no `N×N` intermediate, cuSOLVER-free, three variance components
+> by damped autodiff-Newton. β/σ₁²/σ₂²/σ_e² match an exact dense REML reference
+> (~1e-5) **and** statsmodels `MixedLM` with a nested vc (~1e-4); returns a
+> `NestedLMEResult`. The rest of Tier-1/Tier-2 (§4 Beta/Tweedie/ordinal, §3.2–3.3
+> cr/gp/mrf, §1.1 R4 crossed, §1.3 Kenward-Roger, §1.2 Laplace, §1.4 R2+corr /
+> varFunc) remain proposed. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /
@@ -185,7 +193,7 @@ def lme_fit(Y, X, random=(), *, family=GAUSSIAN, structure='auto',
 | R0 | none (residual only) | OLS / GLS | `O(N p²)` | shipped (`glm_fit`) |
 | R1 | one scalar factor `(1\|g)` | **FaST-LMM spectral REML** (dense; q-rank `low_rank=` when `q<N`) | `O(N p² + N)` / iter | **shipped (`reml_fit`) — unchanged** |
 | R2 | one factor, correlated/diagonal `r×r` `(1+x\|g)`, `(x\|\|g)` | **block-diagonal per-group Woodbury** (`r×r` inner solve per group) | `O(Σ_g n_g r² + G r³ + p²)` | new, cheap, cuSOLVER-free |
-| R3 | nested `(1\|g1/g2)` | hierarchical block solve (telescoping Woodbury) | structured, moderate | new |
+| R3 | nested `(1\|g1/g2)` | hierarchical block solve (telescoping Woodbury) | structured, moderate | **shipped (`lme_fit(inner=)`) — cuSOLVER-free** |
 | R4 | crossed `(1\|g1:g2)` / multiple factors | general AI-REML over the sparse mixed-model equations `(p + Σ q_g)` | `O((p+Σq_g)³)`-class — **expensive** | new, **HLO-gated** |
 
 **Why the split matters (the review's headline finding).** v1/v2's cheapness is
@@ -534,7 +542,8 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 
 **Tier 1 — high value (rounds out the GL(A)MM surface):**
 
-- §1.1 R3 (nested); ~~§1.2 GLMM (PQL)~~ ✅ (`glmm_fit`, level-count dispatch);
+- ~~§1.1 R3 (nested)~~ ✅ (`lme_fit(inner=)`, telescoping Woodbury);
+  ~~§1.2 GLMM (PQL)~~ ✅ (`glmm_fit`, level-count dispatch);
   ~~§1.4 AR1/CAR1~~ ✅ (`gls_fit` ar1/car1/cs; R2+corr & varFunc Tier-2);
   ~~§3.1 by-variable smooths~~ ✅; ~~§4 `S`-class families (Gamma/NB)~~ ✅ (Beta
   deferred); ~~§6.2 sandwich/cluster SEs~~ ✅.

@@ -35,6 +35,7 @@ from .reml import (
     LMEContrast,
     LMEFContrast,
     LMEResult,
+    NestedLMEResult,
     REMLResult,
     lme_f_contrast,
     lme_fit,
@@ -46,6 +47,7 @@ from .reml import (
 __all__ = [
     'REMLResult',
     'LMEResult',
+    'NestedLMEResult',
     'LMEContrast',
     'LMEFContrast',
     'FLAMEResult',
