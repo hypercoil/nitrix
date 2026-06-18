@@ -91,6 +91,9 @@ EXCLUDE: frozenset[str] = frozenset(
         # -- Metric constructors: build a FeatureMetric pytree, not an array op ---
         'smoothing.block_diagonal_metric',
         'smoothing.metric_from_spd',
+        # -- Family constructor: builds a Family config record (link/variance/    -
+        #    deviance), consumed by glm_fit / gam_fit -- not itself a score kernel.
+        'stats.negbinomial',
         # -- Thin vmap wrapper of an already-cataloged op -------------------------
         'geometry.spatial_transform_batched',  # vmap of spatial_transform
         # -- Post-fit read-outs on a GLMResult / GAMResult: contrasts, goodness- --

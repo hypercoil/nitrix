@@ -55,7 +55,16 @@ from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float
 
 from ._batching import blocked_vmap
-from ._family import BINOMIAL, GAUSSIAN, POISSON, Family, resolve_family
+from ._family import (
+    BINOMIAL,
+    GAMMA,
+    GAUSSIAN,
+    NEGBINOMIAL,
+    POISSON,
+    Family,
+    negbinomial,
+    resolve_family,
+)
 from ._irls import fit_penalised_irls, irls_warm_start
 from ._smalllinalg import small_inv_logdet
 
@@ -64,6 +73,9 @@ __all__ = [
     'GAUSSIAN',
     'BINOMIAL',
     'POISSON',
+    'GAMMA',
+    'NEGBINOMIAL',
+    'negbinomial',
     'GLMResult',
     'glm_fit',
     'predict',

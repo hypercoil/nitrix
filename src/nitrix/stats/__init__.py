@@ -81,7 +81,9 @@ from .gam import GAMResult, gam_fit, smooth_partial_effect
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
     BINOMIAL,
+    GAMMA,
     GAUSSIAN,
+    NEGBINOMIAL,
     POISSON,
     Family,
     GLMResult,
@@ -93,6 +95,7 @@ from .glm import (
     f_contrast,
     glm_fit,
     log_likelihood,
+    negbinomial,
     predict,
     r_squared,
     t_contrast,
@@ -136,6 +139,9 @@ __all__ = [
     'GAUSSIAN',
     'BINOMIAL',
     'POISSON',
+    'GAMMA',
+    'NEGBINOMIAL',
+    'negbinomial',
     'GLMResult',
     'glm_fit',
     'predict',

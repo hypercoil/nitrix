@@ -18,8 +18,15 @@
 > green. *(The original Tier-0 tranche was reconstructed on 2026-06-18 after a
 > Code-Ocean host crash rewound the branch; source recovered from the session
 > transcript + file-history and re-validated end-to-end. `lme_f_contrast` and the
-> diagonal-`G` path close the last two Tier-0 surface gaps.)* Tier-1/Tier-2 (§1.2
-> GLMM, §1.4 AR1/CAR1, §3.1 by-variable smooths, §4 families, §6.2 sandwich SEs,
+> diagonal-`G` path close the last two Tier-0 surface gaps.)*
+>
+> **Tier-1 in progress (2026-06-18):** **§4 `S`-class families** — `GAMMA`
+> (log link) and `negbinomial(alpha)` (NB2, known dispersion) added to the
+> `_FAMILIES` registry + IRLS core; coefficients + deviance match
+> `statsmodels.GLM` exactly. (Beta deferred: proper beta regression needs a
+> digamma-based score, not the standard GLM `mu_eta²/V` IRLS weight — a dedicated
+> fitter, not a `Family` record.) The rest of Tier-1/Tier-2 (§1.2 GLMM, §1.4
+> AR1/CAR1, §3.1 by-variable smooths, §4 Beta/Tweedie/ordinal, §6.2 sandwich SEs,
 > §1.1 R3/R4, §1.3 Kenward-Roger) remain proposed. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine

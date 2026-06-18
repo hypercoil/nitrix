@@ -20,7 +20,9 @@ jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats.glm import (
     BINOMIAL,
+    GAMMA,
     GAUSSIAN,
+    NEGBINOMIAL,
     POISSON,
     adj_r_squared,
     aic,
@@ -29,6 +31,7 @@ from nitrix.stats.glm import (
     f_contrast,
     glm_fit,
     log_likelihood,
+    negbinomial,
     predict,
     r_squared,
     t_contrast,
@@ -155,6 +158,74 @@ def test_binomial_matches_statsmodels():
     np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-7)
     _, se, _, _ = t_contrast(res, jnp.eye(3)[1])
     np.testing.assert_allclose(float(se[0]), smf.bse[1], atol=1e-6)
+
+
+@needs_sm
+def test_gamma_matches_statsmodels():
+    """Gamma (log link): coefficients, deviance, and -- with the deviance-scale
+    dispersion convention nitrix uses for an estimated-dispersion family -- the
+    contrast SE all match statsmodels.GLM(Gamma, link=Log)."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(11)
+    X = _design(rng, N=200)
+    mu = np.exp(X @ np.array([0.5, 0.4, -0.3]))
+    y = rng.gamma(5.0, mu / 5.0)  # mean mu, shape 5
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=GAMMA, n_iter=60)
+    smf = sm.GLM(
+        y, X, family=sm.families.Gamma(link=sm.families.links.Log())
+    ).fit(scale='dev')
+    np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-6)
+    np.testing.assert_allclose(float(res.deviance[0]), smf.deviance, rtol=1e-7)
+    np.testing.assert_allclose(
+        float(res.dispersion[0]), smf.scale, rtol=1e-6
+    )
+    _, se, _, _ = t_contrast(res, jnp.eye(3)[1])
+    np.testing.assert_allclose(float(se[0]), smf.bse[1], rtol=1e-5)
+
+
+@needs_sm
+def test_negbinomial_matches_statsmodels():
+    """Negative binomial (NB2, known alpha): coefficients and deviance match
+    statsmodels.GLM(NegativeBinomial(alpha)); the registry default is alpha=1."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(12)
+    X = _design(rng, N=200)
+    mu = np.exp(X @ np.array([0.5, 0.4, -0.3]))
+    alpha = 1.5
+    lam = rng.gamma(1.0 / alpha, alpha * mu)  # gamma-Poisson mixture -> NB2
+    y = rng.poisson(lam).astype(float)
+    res = glm_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), family=negbinomial(alpha), n_iter=60
+    )
+    smf = sm.GLM(
+        y, X, family=sm.families.NegativeBinomial(alpha=alpha)
+    ).fit()
+    np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-6)
+    np.testing.assert_allclose(float(res.deviance[0]), smf.deviance, rtol=1e-7)
+
+
+def test_family_registry_resolves_gamma_and_negbinomial():
+    """String names resolve to the built-ins; ``negbinomial(alpha)`` builds a
+    custom-dispersion family; a non-positive alpha is rejected."""
+    rng = np.random.default_rng(13)
+    X = jnp.asarray(_design(rng, N=120))
+    y = jnp.asarray(np.exp(rng.standard_normal(120)))[None, :]
+    # 'gamma' string == GAMMA instance
+    a = glm_fit(y, X, family='gamma', n_iter=40)
+    b = glm_fit(y, X, family=GAMMA, n_iter=40)
+    np.testing.assert_allclose(np.asarray(a.coef), np.asarray(b.coef), atol=1e-10)
+    # 'negbinomial' string == default alpha=1 == NEGBINOMIAL
+    yc = jnp.asarray(rng.poisson(2.0, 120).astype(float))[None, :]
+    c = glm_fit(yc, X, family='negbinomial', n_iter=40)
+    d = glm_fit(yc, X, family=NEGBINOMIAL, n_iter=40)
+    np.testing.assert_allclose(np.asarray(c.coef), np.asarray(d.coef), atol=1e-10)
+    # a different alpha is a different fit
+    e = glm_fit(yc, X, family=negbinomial(4.0), n_iter=40)
+    assert not np.allclose(np.asarray(c.coef), np.asarray(e.coef))
+    with pytest.raises(ValueError, match='alpha'):
+        negbinomial(0.0)
 
 
 # ---------------------------------------------------------------------------
