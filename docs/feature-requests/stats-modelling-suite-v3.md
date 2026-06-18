@@ -1,18 +1,26 @@
 # Statistical modelling suite v3 — GL(A)MM completeness for the `nwx` DSL (ledger)
 
-> **Status (2026-06-18): Tier-0 shipped.** The blocking tranche is implemented,
-> validated, and on `feat/stats-suite-v3`: **§2** GAMM surface (`REBasis` /
-> `re_smooth`, a third `Smooth` variant); **§5.1** non-aggressive (AROMA)
-> `partial_residualise` + a cuSOLVER-free Cholesky for `residualise`; **§1.3**
-> mixed-model fixed-effect inference (`lme_t_contrast`, Satterthwaite df; SE
-> matches statsmodels to ~6e-4); **§1.1** the `lme_fit` R1/R2 dispatcher + the
-> tier-R2 block-Woodbury REML for a correlated `(1 + x | g)` (matches statsmodels
-> MixedLM random-slope exactly). All cuSOLVER-free, ruff/mypy clean, per-component
-> tests green. *(This tranche was reconstructed on 2026-06-18 after a Code-Ocean
-> host crash rewound the branch; source recovered from the session transcript +
-> file-history and re-validated end-to-end.)* Tier-1/Tier-2 (§1.2 GLMM, §1.4
-> AR1/CAR1, §3.1 by-variable smooths, §4 families, §6.2 sandwich SEs, §1.1 R3/R4,
-> §1.3 Kenward-Roger) remain proposed. Driver: the **`nwx`**
+> **Status (2026-06-18): Tier-0 shipped + completed.** The blocking tranche is
+> implemented, validated, and on `feat/stats-suite-v3`: **§2** GAMM surface
+> (`REBasis` / `re_smooth`, a third `Smooth` variant); **§5.1** non-aggressive
+> (AROMA) `partial_residualise` + a cuSOLVER-free Cholesky for `residualise`;
+> **§1.3** mixed-model fixed-effect inference — both `lme_t_contrast`
+> (Satterthwaite df; SE matches statsmodels to ~6e-4) **and `lme_f_contrast`**
+> (multi-row Wald F with the Fai-Cornelius / lmerTest multivariate-Satterthwaite
+> denominator df, collapsing exactly to the t-test at `L = 1`); **§1.1** the
+> `lme_fit` R1/R2 dispatcher + the tier-R2 block-Woodbury REML for a correlated
+> `(1 + x | g)` (matches statsmodels MixedLM random-slope exactly) **and the
+> diagonal-`G` `(x || g)` `structure='diagonal'` path** (independent variance
+> components; off-diagonal held at zero; matches a statsmodels diagonal free-mask
+> fit). The F-contrast's denominator-df eigendirections use a new cuSOLVER-free
+> small-symmetric Jacobi eigensolver (`stats._smalllinalg.sym_eig_jacobi`,
+> jittable/`vmap`-clean). All cuSOLVER-free, ruff/mypy clean, per-component tests
+> green. *(The original Tier-0 tranche was reconstructed on 2026-06-18 after a
+> Code-Ocean host crash rewound the branch; source recovered from the session
+> transcript + file-history and re-validated end-to-end. `lme_f_contrast` and the
+> diagonal-`G` path close the last two Tier-0 surface gaps.)* Tier-1/Tier-2 (§1.2
+> GLMM, §1.4 AR1/CAR1, §3.1 by-variable smooths, §4 families, §6.2 sandwich SEs,
+> §1.1 R3/R4, §1.3 Kenward-Roger) remain proposed. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /
