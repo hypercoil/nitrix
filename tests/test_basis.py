@@ -11,13 +11,16 @@ jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats.basis import (
     REBasis,
+    SplineBasis,
     bspline_basis,
+    by_factor_smooth,
     cyclic_cubic_basis,
     re_smooth,
     spline_design,
     tensor_product_basis,
     tensor_product_design,
     thinplate_regression_basis,
+    varying_coefficient_smooth,
 )
 
 
@@ -318,3 +321,57 @@ def test_re_smooth_infers_levels_and_is_a_pytree():
     leaves, treedef = jax.tree_util.tree_flatten(re)
     rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
     assert isinstance(rebuilt, REBasis) and rebuilt.dim == 4
+
+
+def test_by_factor_smooth_returns_masked_blocks_per_level():
+    """``by_factor_smooth`` returns one SplineBasis per level; each design loads
+    only on its level's rows and shares the marginal penalty."""
+    x = _x(n=300)
+    by = jnp.asarray(np.tile([0, 1, 2], 100))
+    blocks = by_factor_smooth(x, by, n_basis=8)
+    assert len(blocks) == 3
+    marginal = bspline_basis(x, 8)
+    by_np = np.asarray(by)
+    for level, blk in enumerate(blocks):
+        assert isinstance(blk, SplineBasis)
+        d = np.asarray(blk.design)
+        # rows not in this level are exactly zero; rows in this level == marginal
+        assert np.all(d[by_np != level] == 0.0)
+        np.testing.assert_allclose(
+            d[by_np == level],
+            np.asarray(marginal.design)[by_np == level],
+            atol=1e-12,
+        )
+        # penalty is the shared marginal penalty
+        np.testing.assert_allclose(
+            np.asarray(blk.penalty), np.asarray(marginal.penalty), atol=1e-12
+        )
+
+
+def test_by_factor_smooth_respects_n_levels_for_absent_levels():
+    """``n_levels`` fixes the tuple length when a level is absent from the sample."""
+    x = _x(n=100)
+    by = jnp.asarray(np.zeros(100, dtype=np.int32))  # only level 0 present
+    blocks = by_factor_smooth(x, by, n_basis=6, n_levels=3)
+    assert len(blocks) == 3
+    # the two absent levels have all-zero designs
+    assert np.all(np.asarray(blocks[1].design) == 0.0)
+    assert np.all(np.asarray(blocks[2].design) == 0.0)
+
+
+def test_varying_coefficient_smooth_scales_design_by_covariate():
+    """``varying_coefficient_smooth`` is the marginal design scaled row-wise by
+    ``by``, with the penalty unchanged."""
+    x = _x(n=200)
+    rng = np.random.default_rng(2)
+    z = jnp.asarray(rng.standard_normal(200))
+    vc = varying_coefficient_smooth(x, z, n_basis=8)
+    marginal = bspline_basis(x, 8)
+    np.testing.assert_allclose(
+        np.asarray(vc.design),
+        np.asarray(marginal.design) * np.asarray(z)[:, None],
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(vc.penalty), np.asarray(marginal.penalty), atol=1e-12
+    )

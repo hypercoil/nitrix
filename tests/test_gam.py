@@ -22,8 +22,10 @@ jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats.basis import (
     bspline_basis,
+    by_factor_smooth,
     re_smooth,
     tensor_product_basis,
+    varying_coefficient_smooth,
 )
 from nitrix.stats.gam import (
     _assemble,
@@ -466,3 +468,66 @@ def test_gamm_smooth_plus_random_intercept():
     blup, _ = smooth_partial_effect(res, 1, re, jnp.arange(g, dtype=jnp.int32))
     # recovered BLUPs correlate with the true group offsets
     assert float(np.corrcoef(np.asarray(blup[0]), b)[0, 1]) > 0.9
+
+
+def test_by_factor_smooth_recovers_distinct_per_level_curves():
+    """``s(x, by=f)`` recovers a *different* smooth of ``x`` for each factor
+    level (the by-variable interaction)."""
+    rng = np.random.default_rng(0)
+    n = 600
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    lvl = rng.integers(0, 3, n)
+    curves = (
+        lambda t: np.sin(2 * np.pi * t),
+        lambda t: 4.0 * (t - 0.5) ** 2 - 0.5,
+        lambda t: -np.cos(3.0 * t),
+    )
+    f = np.array([curves[k](xi) for xi, k in zip(x, lvl)])
+    for k in range(3):  # match the sum-to-zero smooth
+        f[lvl == k] -= f[lvl == k].mean()
+    y = f + rng.standard_normal(n) * 0.25
+
+    parametric = np.column_stack(
+        [(lvl == 1).astype(float), (lvl == 2).astype(float)]
+    )
+    blocks = by_factor_smooth(jnp.asarray(x), jnp.asarray(lvl), n_basis=12)
+    assert len(blocks) == 3
+    res = gam_fit(
+        jnp.asarray(y[None, :]),
+        list(blocks),
+        parametric=jnp.asarray(parametric),
+        intercept=True,
+        n_outer=30,
+    )
+    xg = np.linspace(x.min(), x.max(), 100)
+    for level in range(3):
+        eff, _ = smooth_partial_effect(
+            res, level, blocks[level], jnp.asarray(xg)
+        )
+        e = np.array(eff[0])
+        e = e - e.mean()
+        t = curves[level](xg)
+        t = t - t.mean()
+        assert float(np.corrcoef(e, t)[0, 1]) > 0.97
+
+
+def test_varying_coefficient_smooth_recovers_smooth_coefficient():
+    """``s(x, by=z)`` for continuous ``z`` recovers the coefficient surface
+    ``z * f(x)`` -- the partial effect tracks ``f(x)``."""
+    rng = np.random.default_rng(1)
+    n = 600
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    z = rng.standard_normal(n)
+    g = np.sin(2 * np.pi * x)
+    g = g - g.mean()
+    y = z * g + rng.standard_normal(n) * 0.2
+
+    vc = varying_coefficient_smooth(jnp.asarray(x), jnp.asarray(z), n_basis=12)
+    res = gam_fit(jnp.asarray(y[None, :]), [vc], intercept=True, n_outer=30)
+    xg = np.linspace(x.min(), x.max(), 100)
+    eff, _ = smooth_partial_effect(res, 0, vc, jnp.asarray(xg))
+    e = np.array(eff[0])
+    e = e - e.mean()
+    gt = np.sin(2 * np.pi * xg)
+    gt = gt - gt.mean()
+    assert float(np.corrcoef(e, gt)[0, 1]) > 0.97

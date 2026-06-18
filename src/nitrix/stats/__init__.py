@@ -62,11 +62,13 @@ from .basis import (
     SplineBasis,
     TensorBasis,
     bspline_basis,
+    by_factor_smooth,
     cyclic_cubic_basis,
     re_smooth,
     spline_design,
     tensor_product_basis,
     tensor_product_design,
+    varying_coefficient_smooth,
     thinplate_regression_basis,
 )
 from .connectivity import (
@@ -161,6 +163,8 @@ __all__ = [
     'TensorBasis',
     'REBasis',
     'bspline_basis',
+    'by_factor_smooth',
+    'varying_coefficient_smooth',
     'cyclic_cubic_basis',
     'thinplate_regression_basis',
     'tensor_product_basis',

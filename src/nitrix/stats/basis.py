@@ -31,7 +31,7 @@ Everything is value -> value and cuSOLVER-free.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional, Tuple, cast
 
 import jax
@@ -50,6 +50,8 @@ __all__ = [
     'thinplate_regression_basis',
     'tensor_product_basis',
     're_smooth',
+    'by_factor_smooth',
+    'varying_coefficient_smooth',
     'spline_design',
     'tensor_product_design',
 ]
@@ -824,3 +826,101 @@ def re_smooth(
         design = design * jnp.asarray(by, dtype=design.dtype)[:, None]
     penalty = jnp.eye(q, dtype=design.dtype)
     return REBasis(design=design, penalty=penalty, levels=q)
+
+
+def by_factor_smooth(
+    x: Float[Array, ' n'],
+    by: Int[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    degree: int = 3,
+    penalty_order: int = 2,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+    n_levels: Optional[int] = None,
+) -> Tuple[SplineBasis, ...]:
+    """By-variable factor smooths ``s(x, by=f)`` -- one smooth of ``x`` per level.
+
+    mgcv's ``s(x, by=f)`` for a **factor** ``f``: a *separate* penalised smooth
+    of ``x`` for each level of ``f``, each with its **own** smoothing parameter.
+    Returns a tuple of ``len == n_levels`` :class:`SplineBasis` blocks; splat it
+    into ``gam_fit``'s ``smooths=`` (each block is an independent smooth, so the
+    Fellner-Schall loop selects a per-level ``lambda``).
+
+    Construction: a single marginal P-spline of ``x`` (shared knots / penalty /
+    centering), then level ``l``'s design is that marginal design with the rows
+    where ``f != l`` zeroed -- so level ``l``'s coefficients load only on its own
+    observations.  Because the per-level designs have disjoint nonzero rows, the
+    blocks are orthogonal in ``X^T W X`` (each level is fit on its own data).
+    Pair with a parametric factor main effect to carry the per-level mean (the
+    smooths are sum-to-zero when ``center=True``, as in mgcv).
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate.
+    by
+        ``(n,)`` integer factor labels in ``0 .. L-1``.
+    n_basis, degree, penalty_order, bounds, center
+        Marginal P-spline parameters (see :func:`bspline_basis`).
+    n_levels
+        Number of levels ``L`` (defaults to ``int(by.max()) + 1``); pass it when
+        a level is absent from this sample so the returned tuple length is stable.
+
+    Returns
+    -------
+    ``tuple`` of ``L`` :class:`SplineBasis`, one per factor level.
+    """
+    by = jnp.asarray(by)
+    n_lev = int(n_levels) if n_levels is not None else int(jnp.max(by)) + 1
+    base = bspline_basis(
+        x,
+        n_basis,
+        degree=degree,
+        penalty_order=penalty_order,
+        bounds=bounds,
+        center=center,
+    )
+    out = []
+    for level in range(n_lev):
+        mask = (by == level).astype(base.design.dtype)[:, None]  # (n, 1)
+        out.append(replace(base, design=base.design * mask))
+    return tuple(out)
+
+
+def varying_coefficient_smooth(
+    x: Float[Array, ' n'],
+    by: Float[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    degree: int = 3,
+    penalty_order: int = 2,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Varying-coefficient smooth ``s(x, by=z)`` for a **continuous** ``z``.
+
+    mgcv's ``s(x, by=z)`` with a numeric ``by``: the smooth term is
+    ``z * f(x)`` -- a coefficient on ``z`` that varies smoothly with ``x``.  The
+    design is the marginal P-spline of ``x`` scaled row-wise by ``z``; the
+    penalty is unchanged.  A single :class:`SplineBasis` for ``gam_fit``.
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate that the coefficient varies over.
+    by
+        ``(n,)`` continuous covariate the smooth multiplies.
+    n_basis, degree, penalty_order, bounds, center
+        Marginal P-spline parameters (see :func:`bspline_basis`).
+    """
+    base = bspline_basis(
+        x,
+        n_basis,
+        degree=degree,
+        penalty_order=penalty_order,
+        bounds=bounds,
+        center=center,
+    )
+    z = jnp.asarray(by, dtype=base.design.dtype)[:, None]  # (n, 1)
+    return replace(base, design=base.design * z)

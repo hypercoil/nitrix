@@ -29,10 +29,15 @@
 > `sandwich_cov(result, Y, X, kind='HC0..HC3', groups=…)` returns the robust
 > `(V, p, p)` coefficient covariance (`A⁻¹ B A⁻¹`); `t_contrast` / `f_contrast`
 > take a `cov=` override (default `None` = the unchanged model-based path). SEs
-> match `statsmodels` HC0–HC3 / cluster / GLM-Poisson to machine precision. The
-> rest of Tier-1/Tier-2 (§1.2 GLMM, §1.4 AR1/CAR1, §3.1 by-variable smooths, §4
-> Beta/Tweedie/ordinal, §1.1 R3/R4, §1.3 Kenward-Roger) remain proposed. Driver:
-> the **`nwx`**
+> match `statsmodels` HC0–HC3 / cluster / GLM-Poisson to machine precision.
+> **§3.1 by-variable smooths** — `by_factor_smooth(x, f)` returns one masked
+> `SplineBasis` per factor level (separate smooth + separate λ, mgcv
+> `s(x, by=f)`) and `varying_coefficient_smooth(x, z)` the continuous-`by`
+> varying coefficient (`z·f(x)`); both reuse `bspline_basis` + the FS loop with
+> **no `gam_fit` change**, and recover distinct per-level / coefficient curves
+> (corr > 0.97). The rest of Tier-1/Tier-2 (§1.2 GLMM, §1.4 AR1/CAR1, §4
+> Beta/Tweedie/ordinal, §3.2–3.3 cr/gp/mrf, §1.1 R3/R4, §1.3 Kenward-Roger)
+> remain proposed. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /
