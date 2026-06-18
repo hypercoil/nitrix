@@ -1,10 +1,15 @@
 # Statistical modelling suite v2 — completeness + regularised connectivity (ledger)
 
-> **Status (2026-06-17): planned — agreed scope, not started.** Follow-up to the
-> shipped v1 suite ([`stats-modelling-suite.md`](stats-modelling-suite.md):
-> LME size-dispatch, GLM/GAM/GAMM, TFCE `randomise` — merged to `main`). v2
-> collects (a) the items v1 deliberately deferred and (b) the long-deferred
-> **regularised connectivity estimators** Ledoit-Wolf and graphical LASSO
+> **Status (2026-06-17): Phases 0–4 SHIPPED on `feat/stats-suite-v2`** (Phase 0
+> hardening + shared-core refactors; Phase 1 Ledoit-Wolf/OAS + cluster-extent
+> enhancement + shared-λ GAM; Phase 2 thin-plate + cyclic bases, tensor-product
+> deferred; Phase 3 graphical LASSO; Phase 4 randomise F-contrast + GPD tail).
+> Remaining: Phase 5 (LME q-rank, gated on a large-`N` consumer) and the deferred
+> tensor-product `te`. Branch not yet merged to `main`. Follow-up to the shipped v1 suite
+> ([`stats-modelling-suite.md`](stats-modelling-suite.md): LME size-dispatch,
+> GLM/GAM/GAMM, TFCE `randomise` — merged to `main`). v2 collects (a) the items
+> v1 deliberately deferred and (b) the long-deferred **regularised connectivity
+> estimators** Ledoit-Wolf and graphical LASSO
 > ([`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md),
 > [`graphical-lasso.md`](graphical-lasso.md), SPEC §12.14). It reuses the v1
 > substrate wholesale — the cuSOLVER-free tiny-SPD solve (`stats._smalllinalg`,
@@ -236,15 +241,19 @@ below depends on shared cores that v1 did not factor out; adding features first
 would multiply the duplication the review found. Land these before any v2
 feature (details + anchors in §8.5).
 
-> **Status (2026-06-17): latent-bug subset SHIPPED** on
-> `fix/stats-v2-phase0-hardening` — **H1** (modified-Cholesky pivot floor;
-> well-conditioned solves bit-unchanged, singular/boundary now finite),
-> **H6** (randomise: uncorrected p on the raw statistic; constant-voxel
-> exclusion), and the **H7** latent items (dead `_blocked_vmap` line;
-> `penalty_order < n_basis` guard; corrected `_default_theta_init` docstring),
-> each with adversarial guards. Remaining Phase 0 = the shared-core refactors
-> **H2** (`_bspline_core`), **H3** (`_irls`), **H4** (`Family` registry),
-> **H5** (`_batching` + `block=` into glm/gam/randomise), and the rest of H8.
+> **Status (2026-06-17): Phase 0 SHIPPED** (latent bugs merged to `main`; the
+> shared-core refactors on `feat/stats-suite-v2`). **H1** (modified-Cholesky
+> pivot floor), **H6** (randomise: uncorrected p on the raw statistic;
+> constant-voxel exclusion), **H7** (dead line; `penalty_order` guard; docstring
+> fix) — all with adversarial guards — merged to `main`. **H2** shared
+> `numerics/_spline` (uniform B-spline weights + difference penalty, used by
+> `bias` *and* `stats.basis`); **H3** one `stats/_irls` penalised-IRLS core
+> (glm + gam collapse onto it); **H4** `stats/_family` + `_FAMILIES` registry
+> (`family: str | Family`); **H5** `stats/_batching.blocked_vmap` + `block=` on
+> `glm_fit` / `gam_fit` (randomise intentionally not chunked — TFCE needs the
+> whole field). All behaviour-preserving (bias/glm/gam/lme bit-identical);
+> block-chunking tested incl. ``V`` not a multiple of ``block``. Remaining: the
+> rest of H8 (further adversarial coverage), folded into the feature phases.
 
 - **H1. Modified-Cholesky pivot floor** in `_smalllinalg` (+ `p≤2` `det`/`a`
   guards) — a correctness prerequisite for q-rank LME (§1.1) and GLASSO (§4.2).
@@ -265,28 +274,100 @@ feature (details + anchors in §8.5).
 - **H8. Adversarial tests** — near-singular Cholesky, σ²-boundary, constant /
   empty voxel, non-contiguous / unequal blocks, TFCE-at-zero.
 
-**Phase 1 — quick wins (S), now higher-value per the perf review.** §2.4
-shared-λ GAM (the *single biggest GAM lever*: removes the ~20× per-voxel outer
-loop) + §4.1 Ledoit-Wolf/OAS (consumer waiting) + §3.1 cluster-extent/mass
-enhancement (≈100× cheaper per permutation than TFCE — relieves the
-randomise CRITICAL) + **TFCE perf** (`n_steps` default 100→~50; single-pass
-two-sided).
+**Phase 1 — quick wins.** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`.)*
+**§4.1 Ledoit-Wolf/OAS** (`stats.connectivity`; matches sklearn to ≤4e-16,
+SPD at p>n, differentiable/batched) + **§3.1 cluster-extent/mass enhancement**
+(`enhancement='cluster_extent'|'cluster_mass'` at a required `cluster_thresh`;
+one cluster-forming pass/perm, ≈100× cheaper than TFCE — the randomise-CRITICAL
+relief) + **§2.4 shared-λ GAM** (`lambda_mode='shared'`, Gaussian: pooled
+Fellner-Schall on `(p,p)` sufficient statistics, outer loop `O(n_outer p^3)`
+V-independent). **TFCE micro-perf NOT done** and de-scoped: the single-pass
+two-sided idea is *not* behaviour-preserving (clustering `|s|>h` wrongly merges
+adjacent opposite-sign blobs — needs a sign-aware CC kernel), and lowering the
+`n_steps` default trades accuracy; the cluster-extent mode is the shipped perf
+option. Deeper TFCE perf (hierarchical/Pallas CC) stays a gated Phase-5 item.
 
-**Phase 2 — mgcv-parity bases (M):** §2.1 thin-plate + §2.2 cyclic, then §2.3
-tensor-product (⚠ breaks the disjoint-block `rank_k/λ_k` FS shortcut — needs the
-general summed-penalty inverse; see §8.5).
+**Phase 2 — mgcv-parity bases (M).** *(§2.1 thin-plate + §2.2 cyclic SHIPPED
+2026-06-17 on `feat/stats-suite-v2`; §2.3 tensor-product DEFERRED — see below.)*
+**§2.1 `thinplate_regression_basis`** (`bs='tp'`, mgcv default; radial-penalty
+eigen-truncation to k−M wiggly + M unpenalised polynomial null-space terms,
+knot subsampling, PSD via positive-eigenvalue truncation) and **§2.2
+`cyclic_cubic_basis`** (`bs='cp'`; wrap-around B-spline + circular difference
+penalty) both recover smooths via the GAM Fellner-Schall engine and route
+through a **`kind`-dispatched `SplineBasis`** (`design(x) = raw_features(x) @
+constraint` unifies B-spline / radial+poly / cyclic re-evaluation).
 
-**Phase 3 — GLASSO (M-L):** §4.2 — coordinate descent with the **row loop
-rolled** (`lax.scan`, never Python-unrolled — the trap the rolled Cholesky
-fixed), `log det` via `spd_inv_logdet_chol` only at converged path points;
-unrolled-AD first, implicit-VJP follow-up.
+**§2.3 tensor-product (`te`) DEFERRED** — the correctness review's trap is
+load-bearing: te's per-margin penalties **overlap** (both act on the `k1·k2`
+coefficients), so they are *not* disjoint blocks and the FS shortcut
+`tr(S_λ⁻ S_k) = rank_k/λ_k` is invalid. The clean fix is mgcv's **natural
+parameterization** — reparameterise (via the marginal penalty eigendecompositions,
+one-off at construction) so every penalty is *diagonal*; then `S_λ` is diagonal
+and `tr(S_λ⁻ S_k)` is an elementwise sum (cuSOLVER-free, no per-voxel
+pseudo-inverse). This is a correctness-sensitive refactor of the validated FS
+engine (`_gam_fit_one` / `_gam_fit_shared_gaussian` must use the general
+`tr(S_λ⁻ S_k)`, and the single-smooth bases reparameterised to diagonal too), so
+it is split out rather than hacked in by breaking the disjoint-block assumption.
 
-**Phase 4 — randomise depth (M):** §3.2 F-contrast (per-permutation dispersion;
-hoist the constant `C·cov·Cᵀ` out of the perm scan) + §3.3 GPD tail (exclude
-the observed from the exceedances; lets `n_perm` drop, a linear runtime cut).
+**Phase 3 — GLASSO (M-L).** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`,
+commit `6776f35`.)* §4.2 `stats.connectivity` gains `glasso` (sparse precision),
+`glasso_path` (warm-started λ sweep via `lax.scan`), and `ebic_score`
+(Foygel-Drton 2010 extended BIC). FHT (2008) coordinate descent on the working
+covariance `W = Θ⁻¹` directly (no per-iter factorisation); the precision is
+recovered from the per-column lasso coefficients
+(`θ_jj = 1/(w_jj − w_12ᵀβ)`, `θ_-j = −β·θ_jj`) so sparsity is inherited
+**exactly** from the soft-threshold, not a dense `W⁻¹`. Off-diagonal-only L1
+penalty (the nilearn/standard convention: `W_jj = S_jj` held fixed; seed
+`W = S`). **All loops rolled** (`lax.fori_loop` outer/inner sweeps + `lax.scan`
+path → `O(p²)` graph, compile flat in `p`); differentiable through the fixed
+iteration budget (unrolled-AD; implicit-VJP deferred). cuSOLVER-free — the EBIC
+`log det` goes through `small_inv_logdet` (rolled Cholesky), HLO-audited.
+**Validation = the convex program's definition, NOT sklearn**: its own
+`GraphicalLasso` solution violates the off-diagonal-only KKT (different penalty
+convention / looser tol), so it is an unreliable bit-match oracle. Tests assert
+KKT stationarity `<1e-7` (active `|W−S|=λ`, inactive `≤λ`, diag `W=S`),
+symmetry/PD, the `λ=0` MLE limit (`Θ=S⁻¹`), monotone sparsity in `λ`, exact
+cross-block zeroing (conditional independence), warm-path == cold-solve, and
+EBIC selecting a sparse interior model that recovers a known banded graph.
+21 connectivity tests green.
 
-**Phase 5 — LME asymptotics (M):** §1.1 q-rank (after H1; gated on a large-`N`
-consumer). **Deep perf (gated, high effort):** hierarchical / Pallas
+**Phase 4 — randomise depth (M).** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`,
+commit `c1ec890`.)* **§3.2 F-contrast** — a `(m, p)` `contrast` matrix selects
+the joint F-test `F = (Cβ)ᵀ[C(XᵀX)⁻¹Cᵀ]⁻¹(Cβ)/(m σ²)` (matches `glm.f_contrast`
+exactly) instead of a t. The `(m, m)` middle matrix depends only on the design
+and contrast — **constant across permutations** — so its cuSOLVER-free inverse is
+hoisted out of the per-perm scan (only β is refit per relabelling). An F is
+non-negative and already joint over both directions, so enhancement + the
+uncorrected comparison go one-sided regardless of the (t-only) `two_sided` flag;
+Freedman-Lane nuisance handling is unchanged; the t-path stays bit-identical
+(regression-guarded). **§3.3 GPD tail** — `pvalue_method='gpd'` reads the FWE
+p-value from a method-of-moments generalized-Pareto fit to the upper tail of the
+null-max distribution (Winkler et al. 2016) instead of the discrete exceedance
+count, so corrected p-values resolve **below** the `1/n_perm` floor at fewer
+permutations. Exposed as a standalone `gpd_pvalue(stat, null_dist,
+n_exceedances)` (body via `searchsorted` — no `(V, n_perm)` broadcast — tail via
+the GPD survival); only the FWE map is smoothed, the uncorrected map + null
+distribution are untouched. Tests: observed F == `glm.f_contrast`, F-mode FWE
+floor + signal + null control, GPD recovers the Exp(1) tail + a peak FWE p
+strictly below `1/n_perm` (null/observed unchanged), GPD body == empirical. All
+cuSOLVER-free; 20 inference tests green.
+
+**Phase 5 — LME asymptotics (M).** *(SHIPPED 2026-06-17 on `feat/stats-suite-v2`,
+commit `28404ac`.)* §1.1 q-rank: `reml_fit(low_rank=True)` swaps the dense
+`O(N^3)` eig of `ZZ^T` for a `q x q` eig of `Z^T Z` (`O(N q^2 + q^3)`).
+`ZZ^T = U_r diag(s2) U_r^T`, `U_r = Z W / sqrt(s2)` (`N x q`); the `N - q`
+null-space directions all carry `sigma_e^2` and enter only through per-voxel
+Gram aggregates (`Gxx = X^T X - X_r^T X_r` shared; `Gxy`, `Gyy` per voxel) and
+the multiplicity `n0 = N - q` — no per-null-coordinate work. New
+`lme/_lowrank.py` is a **separate** two-component AI-REML engine (analytic score
++ average-information, no `N x N` intermediate, null-space terms added) so the
+50/50-GPU-validated `_varcomp` dense path is bit-for-bit untouched; shares
+`_small_inv_logdet` / `VarCompSpec` / `_blocked_vmap`, per-voxel cuSOLVER-free
+(the `Z^T Z` eig routes through `safe_eigh`). Opt-in (`low_rank=False` default);
+needs `q <= N`, `Z` full column rank. Validated: low-rank == dense to `1e-9` in
+log-likelihood (same optimum) + matches the balanced one-way ANOVA closed form to
+`1e-6`; HLO carries no `(V, N, N)` and no dense `N x N` factor beyond `U_r`.
+24 LME tests green. **Deep perf (gated, high effort):** hierarchical / Pallas
 connected-components for TFCE (exploit threshold-nesting monotonicity).
 
 Each phase validates against its pinned oracle (sklearn, mgcv, FSL/PALM) kept

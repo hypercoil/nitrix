@@ -16,12 +16,22 @@ import re
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.stats.basis import bspline_basis
-from nitrix.stats.gam import gam_fit, smooth_partial_effect
-from nitrix.stats.glm import POISSON
+from nitrix.stats.basis import (
+    bspline_basis,
+    tensor_product_basis,
+)
+from nitrix.stats.gam import (
+    _assemble,
+    _gam_fit_one,
+    _gam_fit_one_gaussian_xprod,
+    gam_fit,
+    smooth_partial_effect,
+)
+from nitrix.stats.glm import GAUSSIAN, POISSON
 
 
 def _smooth_data(seed=0, n=300, noise=0.2):
@@ -144,6 +154,60 @@ def test_additive_two_smooths():
     assert float(res.edf[0, 1]) < float(res.edf[0, 0])
 
 
+def test_shared_lambda_recovers_smooth_and_pools():
+    """Shared-lambda selects ONE smoothing parameter across all elements (the
+    pooled Fellner-Schall), recovers a smooth, and on homogeneous data lands
+    near the per-element median; non-Gaussian shared raises."""
+    rng = np.random.default_rng(0)
+    x = np.sort(rng.uniform(0.0, 1.0, 300))
+    truth = np.sin(2 * np.pi * x)
+    sb = bspline_basis(jnp.asarray(x), 20, center=True)
+    Y = jnp.asarray(truth[None, :] + rng.standard_normal((40, 300)) * 0.2)
+
+    shared = gam_fit(Y, [sb], lambda_mode='shared')
+    per_elt = gam_fit(Y, [sb], lambda_mode='per_element')
+
+    # one lambda for all elements
+    assert bool(jnp.allclose(shared.lam, shared.lam[0]))
+    # recovers the smooth
+    eff, _ = smooth_partial_effect(shared, 0, sb, jnp.asarray(x))
+    fit = float(shared.coef[0, 0]) + np.asarray(eff[0])
+    interior = (x > 0.05) & (x < 0.95)
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
+    # homogeneous data: shared lambda near the per-element median
+    assert 2.0 < float(shared.edf[0, 0]) < float(sb.dim)
+    med = float(jnp.median(per_elt.lam[:, 0]))
+    assert 0.3 < float(shared.lam[0, 0]) / med < 3.0
+
+    from nitrix.stats.glm import POISSON
+
+    with pytest.raises(NotImplementedError):
+        gam_fit(Y, [sb], family=POISSON, lambda_mode='shared')
+
+
+def test_gam_block_chunking_matches_single_vmap():
+    """The GAM ``block=`` memory knob is numerically transparent, incl. when V
+    is *not* a multiple of the block (the pad/trim path)."""
+    x, _, _ = _smooth_data()
+    sb = bspline_basis(jnp.asarray(x), 12, center=True)
+    rng = np.random.default_rng(7)
+    Y = jnp.asarray(
+        np.sin(2 * np.pi * x)[None, :]
+        + rng.standard_normal((23, len(x))) * 0.3
+    )  # 23 % 8 != 0
+    full = gam_fit(Y, [sb])
+    chunked = gam_fit(Y, [sb], block=8)
+    np.testing.assert_allclose(
+        np.asarray(chunked.coef), np.asarray(full.coef), atol=1e-9
+    )
+    np.testing.assert_allclose(
+        np.asarray(chunked.lam), np.asarray(full.lam), rtol=1e-6
+    )
+    assert chunked.edf.shape == full.edf.shape
+
+
 def test_mass_univariate_batched_matches_looped():
     x, _, _ = _smooth_data()
     sb = bspline_basis(jnp.asarray(x), 12, center=True)
@@ -180,7 +244,164 @@ def test_gam_hlo_is_cusolver_free():
         for c in targets
         if any(
             t in c.lower()
-            for t in ('cusolver', 'syevd', 'potrf', 'getrf', 'geqrf', 'gesvd', 'cholesky', 'eigh')
+            for t in (
+                'cusolver',
+                'syevd',
+                'potrf',
+                'getrf',
+                'geqrf',
+                'gesvd',
+                'cholesky',
+                'eigh',
+            )
         )
     ]
     assert not bad, bad
+
+
+# ---------------------------------------------------------------------------
+# Tensor-product (te / ti) interaction smooths
+# ---------------------------------------------------------------------------
+
+
+def _interaction_data(seed=0, n=1200, noise=0.15):
+    rng = np.random.default_rng(seed)
+    x1 = rng.uniform(0.0, 1.0, n)
+    x2 = rng.uniform(0.0, 1.0, n)
+    truth = np.sin(2 * np.pi * x1) * (x2 - 0.5)  # genuine interaction
+    y = truth + rng.standard_normal(n) * noise
+    return x1, x2, truth, y
+
+
+def test_tensor_recovers_interaction_surface():
+    """A tensor smooth recovers an interaction surface, selecting one smoothing
+    parameter per margin (Bayesian SE positive, EDF interior)."""
+    x1, x2, truth, y = _interaction_data()
+    m1 = bspline_basis(jnp.asarray(x1), 8, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 8, center=True)
+    te = tensor_product_basis((m1, m2))
+    res = gam_fit(jnp.asarray(y[None, :]), [te])
+
+    assert res.lam.shape == (1, 2)  # one smoothing parameter per margin
+    assert res.edf.shape == (1, 1)  # one EDF for the interaction term
+    eff, se = smooth_partial_effect(
+        res, 0, te, (jnp.asarray(x1), jnp.asarray(x2))
+    )
+    fit = float(res.coef[0, 0]) + np.asarray(eff[0])
+    interior = (x1 > 0.1) & (x1 < 0.9) & (x2 > 0.1) & (x2 < 0.9)
+    rmse = float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2)))
+    assert rmse < 0.05
+    assert 2.0 < float(res.edf[0, 0]) < float(te.dim)
+    assert bool((se > 0).all())
+    assert abs(float(res.dispersion[0]) - 0.15**2) < 0.3 * 0.15**2
+
+
+def test_tensor_anisotropic_smoothing():
+    """A surface wiggly in x1 but (near) linear in x2 selects a much smaller
+    lambda for the x1 margin than the x2 margin -- the point of per-margin
+    smoothing the isotropic single-penalty form cannot express."""
+    rng = np.random.default_rng(4)
+    n = 1500
+    x1 = rng.uniform(0.0, 1.0, n)
+    x2 = rng.uniform(0.0, 1.0, n)
+    truth = np.sin(3 * np.pi * x1) * (x2 - 0.5)  # wiggly in x1, linear in x2
+    y = truth + rng.standard_normal(n) * 0.1
+    m1 = bspline_basis(jnp.asarray(x1), 9, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 9, center=True)
+    te = tensor_product_basis((m1, m2))
+    res = gam_fit(jnp.asarray(y[None, :]), [te])
+    lam1, lam2 = float(res.lam[0, 0]), float(res.lam[0, 1])
+    # the x2 margin is penalised orders of magnitude harder than x1.
+    assert lam2 > 100.0 * lam1
+
+
+def test_tensor_additive_with_marginal_smooth():
+    """A tensor interaction composes with ordinary marginal smooths in one fit
+    (te = s(x1) + s(x2) + ti(x1, x2) style additive model)."""
+    x1, x2, _, y = _interaction_data(seed=2)
+    s1 = bspline_basis(jnp.asarray(x1), 8, center=True)
+    s2 = bspline_basis(jnp.asarray(x2), 8, center=True)
+    m1 = bspline_basis(jnp.asarray(x1), 6, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 6, center=True)
+    te = tensor_product_basis((m1, m2))
+    res = gam_fit(jnp.asarray(y[None, :]), [s1, s2, te])
+    # three terms: 2 marginal (1 lambda each) + 1 tensor (2 lambdas) = 4 lambdas
+    assert res.lam.shape == (1, 4)
+    assert res.edf.shape == (1, 3)
+    assert bool(jnp.all(jnp.isfinite(res.coef)))
+
+
+def test_tensor_gam_cusolver_free():
+    x1, x2, _, y = _interaction_data(n=300)
+    m1 = bspline_basis(jnp.asarray(x1), 6, center=True)
+    m2 = bspline_basis(jnp.asarray(x2), 6, center=True)
+    te = tensor_product_basis((m1, m2))
+    Y = jnp.asarray(y[None, :])
+    f = jax.jit(lambda Y: gam_fit(Y, [te], n_outer=4, n_inner=4).coef)
+    hlo = f.lower(Y).compile().as_text()
+    targets = set(re.findall(r'custom_call_target="([^"]+)"', hlo))
+    bad = [
+        c
+        for c in targets
+        if any(
+            t in c.lower()
+            for t in (
+                'cusolver',
+                'syevd',
+                'potrf',
+                'getrf',
+                'geqrf',
+                'gesvd',
+                'cholesky',
+                'eigh',
+            )
+        )
+    ]
+    assert not bad, bad
+
+
+# ---------------------------------------------------------------------------
+# Gaussian cross-product fast path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('k', [12, 20])
+def test_gaussian_xprod_matches_generic_irls(k):
+    """The cross-product Gaussian fit (now the per-element default) reproduces
+    the generic IRLS Fellner-Schall fit to floating point -- it is the SAME
+    estimator, computed from c = X^T y and g = y^T y instead of the N-vector."""
+    rng = np.random.default_rng(k)
+    x = np.sort(rng.uniform(0.0, 1.0, 320))
+    sb = bspline_basis(jnp.asarray(x), k, center=True)
+    X, penalties, pen_eig, _ = _assemble(320, [sb], None, True, jnp.float64)
+    p = X.shape[1]
+    y = jnp.asarray(np.sin(2 * np.pi * x) + rng.standard_normal(320) * 0.25)
+
+    bg, lg, vg, xg, pg = _gam_fit_one(
+        y, X, penalties, pen_eig, GAUSSIAN, p, 20, 15, 1e-8, 1e-6, 1e8
+    )
+    c = X.T @ y
+    g = y @ y
+    bx, lx, vx, xx, px = _gam_fit_one_gaussian_xprod(
+        c, g, X.T @ X, penalties, pen_eig, 320, p, 20, 1e-8, 1e-6, 1e8
+    )
+    np.testing.assert_allclose(np.asarray(bx), np.asarray(bg), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(lx), np.asarray(lg), atol=1e-9)
+    np.testing.assert_allclose(np.asarray(vx), np.asarray(vg), atol=1e-10)
+    np.testing.assert_allclose(float(px), float(pg), atol=1e-10)
+
+
+def test_gaussian_xprod_is_the_default_and_recovers_smooth():
+    """gam_fit on Gaussian data uses the cross-product path by default and still
+    recovers the smooth / EDF / dispersion (an end-to-end check of the default)."""
+    x, truth, y = _smooth_data(noise=0.2)
+    sb = bspline_basis(jnp.asarray(x), 20, center=True)
+    res = gam_fit(jnp.asarray(y[None, :]), [sb])
+    eff, _ = smooth_partial_effect(res, 0, sb, jnp.asarray(x))
+    fit = float(res.coef[0, 0]) + np.asarray(eff[0])
+    interior = (x > 0.05) & (x < 0.95)
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
+    assert 2.0 < float(res.edf[0, 0]) < float(sb.dim)
+    assert abs(float(res.dispersion[0]) - 0.2**2) < 0.25 * 0.2**2

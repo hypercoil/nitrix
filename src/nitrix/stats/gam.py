@@ -55,7 +55,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Tuple, cast
+from typing import Any, Literal, Optional, Sequence, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -63,11 +63,25 @@ import numpy as np
 from jax import lax
 from jaxtyping import Array, Float
 
+from ._batching import blocked_vmap
+from ._family import GAUSSIAN, Family, resolve_family
+from ._irls import fit_penalised_irls
 from ._smalllinalg import small_inv_logdet
-from .basis import SplineBasis, spline_design
-from .glm import GAUSSIAN, Family
+from .basis import (
+    SplineBasis,
+    TensorBasis,
+    spline_design,
+    tensor_product_design,
+)
 
 __all__ = ['GAMResult', 'gam_fit', 'smooth_partial_effect']
+
+# A pooled penalty eigenvalue at or below this is the unpenalised null space
+# (exact zero after the basis's eigenvalue floor), excluded from the
+# smoothing-parameter trace ``tr(S_lambda^+ S_k)``.
+_EIG_EPS = 0.0
+
+Smooth = Union[SplineBasis, TensorBasis]
 
 
 # ---------------------------------------------------------------------------
@@ -162,20 +176,45 @@ class GAMResult:
 # ---------------------------------------------------------------------------
 
 
+def _smooth_penalties(
+    sm: Smooth,
+) -> Sequence[Tuple[np.ndarray, np.ndarray]]:
+    """The smooth's penalty blocks as ``(S_block, eig_block)`` pairs.
+
+    A :class:`SplineBasis` contributes one penalty (its ``(k, k)`` matrix and
+    its eigenvalues, with the unpenalised null space floored to zero); a
+    :class:`TensorBasis` contributes one per margin (the Kronecker-embedded
+    penalty and its joint-eigenbasis Kronecker eigenvalues -- already floored).
+    ``eig_block`` is used only for the basis-invariant ``tr(S_lambda^+ S_k)``;
+    ``S_block`` (the original-basis matrix) drives the fit, so coefficients stay
+    in the input basis.
+    """
+    if isinstance(sm, TensorBasis):
+        pens = np.asarray(sm.penalties)
+        eigs = np.asarray(sm.pen_eig)
+        return [(pens[j], eigs[j]) for j in range(pens.shape[0])]
+    s_block = np.asarray(sm.penalty)
+    w, _ = np.linalg.eigh(s_block)
+    floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
+    return [(s_block, np.where(w > floor, w, 0.0))]
+
+
 def _assemble(
     n: int,
-    smooths: Sequence[SplineBasis],
+    smooths: Sequence[Smooth],
     parametric: Optional[Float[Array, 'N q']],
     intercept: bool,
     dtype: Any,
 ) -> Tuple[
     Float[Array, 'N p'],
-    Float[Array, 'm p p'],
+    Float[Array, 'K p p'],
+    Float[Array, 'K p'],
     Tuple[Tuple[int, int], ...],
-    np.ndarray,
 ]:
-    """Build the full design ``X``, stacked full-size penalties ``S_k``, the
-    per-smooth column slices, and the per-smooth penalty ranks."""
+    """Build the full design ``X``, the stacked full-size penalties ``S_k``,
+    their block eigenvalues ``pen_eig`` (for the Fellner-Schall trace), and the
+    per-smooth column slices.  A smooth may carry **multiple** penalties (a
+    tensor product has one per margin); ``K >= len(smooths)``."""
     blocks = []
     if intercept:
         blocks.append(jnp.ones((n, 1), dtype=dtype))
@@ -184,25 +223,29 @@ def _assemble(
     smooth_start = sum(b.shape[1] for b in blocks)
     slices = []
     col = smooth_start
+    pen_blocks = []  # (lo, hi, S_block, eig_block) per penalty
     for sm in smooths:
         blocks.append(jnp.asarray(sm.design, dtype=dtype))
-        slices.append((col, col + sm.dim))
-        col += sm.dim
+        kb = sm.dim
+        slices.append((col, col + kb))
+        for s_block, eig_block in _smooth_penalties(sm):
+            pen_blocks.append((col, col + kb, s_block, eig_block))
+        col += kb
     X = jnp.concatenate(blocks, axis=1)
     p = X.shape[1]
 
-    pen_full = []
-    ranks = []
-    for sm, (lo, hi) in zip(smooths, slices):
-        s_full = np.zeros((p, p))
-        s_block = np.asarray(sm.penalty)
-        s_full[lo:hi, lo:hi] = s_block
-        pen_full.append(s_full)
-        ranks.append(int(np.linalg.matrix_rank(s_block)))
-    penalties = jnp.asarray(np.stack(pen_full), dtype=dtype) if pen_full else (
-        jnp.zeros((0, p, p), dtype=dtype)
+    big_k = len(pen_blocks)
+    pen_full = np.zeros((big_k, p, p))
+    pen_eig = np.zeros((big_k, p))
+    for k, (lo, hi, s_block, eig_block) in enumerate(pen_blocks):
+        pen_full[k, lo:hi, lo:hi] = s_block
+        pen_eig[k, lo:hi] = eig_block
+    return (
+        X,
+        jnp.asarray(pen_full, dtype=dtype),
+        jnp.asarray(pen_eig, dtype=dtype),
+        tuple(slices),
     )
-    return X, penalties, tuple(slices), np.asarray(ranks, dtype=np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -220,34 +263,112 @@ def _penalised_irls(
     ridge: float,
     beta0: Float[Array, 'p'],
 ) -> Tuple[Float[Array, 'p'], Float[Array, 'p p'], Float[Array, 'p p']]:
-    """Penalised IRLS from a warm start.  Returns ``(beta, V, xtwx)`` where
-    ``V = (X^T W X + S_lambda + ridge)^{-1}`` and ``xtwx = X^T W X`` at the
-    converged working weights (the unpenalised Gram, for the EDF / FS traces)."""
-    ridge_eye = ridge * jnp.eye(p, dtype=X.dtype)
-
-    def step(_: Array, beta: Float[Array, 'p']) -> Float[Array, 'p']:
-        eta = X @ beta
-        mu = family.linkinv(eta)
-        dmu = family.mu_eta(eta)
-        var = family.variance(mu)
-        wts = dmu * dmu / jnp.clip(var, 1e-10, None)
-        z = eta + (y - mu) / jnp.clip(dmu, 1e-10, None)
-        Xw = X * wts[:, None]
-        a = Xw.T @ X + s_lambda + ridge_eye
-        a_inv, _ = small_inv_logdet(a, p)
-        return a_inv @ (Xw.T @ z)
-
-    beta = cast(
-        Float[Array, 'p'], lax.fori_loop(0, n_iter, step, beta0)
+    """Penalised IRLS from a warm start, via the shared core.  Returns
+    ``(beta, V, xtwx)`` -- the coefficients, ``V = (X^T W X + S_lambda +
+    ridge)^{-1}``, and the unpenalised Gram ``X^T W X`` (for the EDF / FS
+    traces), all at the converged ``beta``."""
+    beta, v, xtwx, _ = fit_penalised_irls(
+        y, X, family, penalty=s_lambda, beta0=beta0, n_iter=n_iter, ridge=ridge
     )
-    eta = X @ beta
-    mu = family.linkinv(eta)
-    dmu = family.mu_eta(eta)
-    var = family.variance(mu)
-    wts = dmu * dmu / jnp.clip(var, 1e-10, None)
-    xtwx = (X * wts[:, None]).T @ X
-    v, _ = small_inv_logdet(xtwx + s_lambda + ridge_eye, p)
     return beta, v, xtwx
+
+
+def _trace_slinv_sk(
+    ek: Float[Array, 'p'], s_lambda_eig: Float[Array, 'p']
+) -> Float[Array, '']:
+    """``tr(S_lambda^+ S_k)`` from the precomputed block eigenvalues.
+
+    With every penalty diagonal in its block's joint eigenbasis, the trace is an
+    elementwise sum ``sum_i [s_lambda_eig_i > 0] eig_k_i / s_lambda_eig_i`` --
+    basis-invariant, so it is exact even though the *fit* is carried in the
+    original (non-rotated) basis.  For a lone disjoint penalty this reduces to
+    ``rank_k / lambda_k`` (the old shortcut); for overlapping tensor-product
+    penalties it is the correct general trace, no pseudo-inverse needed.
+    """
+    safe = jnp.where(s_lambda_eig > _EIG_EPS, s_lambda_eig, 1.0)
+    return jnp.sum(jnp.where(s_lambda_eig > _EIG_EPS, ek / safe, 0.0))
+
+
+# ---------------------------------------------------------------------------
+# Shared-lambda fit (Gaussian): pooled Fellner-Schall on sufficient statistics
+# ---------------------------------------------------------------------------
+
+
+def _gam_fit_shared_gaussian(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    penalties: Float[Array, 'm p p'],
+    pen_eig: Float[Array, 'm p'],
+    n_outer: int,
+    ridge: float,
+    lam_floor: float,
+    lam_ceil: float,
+) -> Tuple[
+    Float[Array, 'V p'],
+    Float[Array, 'V m'],
+    Float[Array, 'V p p'],
+    Float[Array, 'V p p'],
+    Float[Array, 'V'],
+]:
+    """One smoothing parameter shared across all ``V`` elements (Gaussian).
+
+    For the Gaussian identity link the influence ``V = (X^T X + S_lambda)^{-1}``
+    is *shared* (no ``y`` dependence), so the **pooled** Fellner-Schall update
+    is a function only of the ``(p, p)`` sufficient statistics ``X^T X`` and
+    ``C = (Y X)^T (Y X) = sum_v (X^T y_v)(X^T y_v)^T`` and the scalar
+    ``tr(sum_v y_v y_v^T)``.  The outer loop is therefore ``O(n_outer p^3)`` --
+    **independent of ``V``** -- removing the per-element outer loop entirely;
+    only the final coefficient fit and the sufficient statistics touch ``V``.
+
+    Returns the same ``(beta, lam, V, xtwx, dispersion)`` per-element tuple as
+    the per-element path (``V`` / ``xtwx`` broadcast from the shared ``(p, p)``),
+    so the result assembly is identical.
+    """
+    v_count, n = Y.shape
+    m = penalties.shape[0]
+    p = X.shape[1]
+    xtx = X.T @ X
+    yx = Y @ X  # (V, p): row v is (X^T y_v)^T
+    c = yx.T @ yx  # (p, p): sum_v (X^T y_v)(X^T y_v)^T
+    g_tr = jnp.sum(Y * Y)  # tr(sum_v y_v y_v^T)
+    ridge_eye = ridge * jnp.eye(p, dtype=Y.dtype)
+
+    def outer(
+        lam: Float[Array, 'm'], _: Array
+    ) -> Tuple[Float[Array, 'm'], None]:
+        s_lambda = jnp.tensordot(lam, penalties, axes=(0, 0))
+        vmat, _ = small_inv_logdet(xtx + s_lambda + ridge_eye, p)
+        edf = jnp.trace(vmat @ xtx)
+        pooled_rss = (
+            g_tr - 2.0 * jnp.trace(vmat @ c) + jnp.trace(vmat @ xtx @ vmat @ c)
+        )
+        phi = pooled_rss / jnp.clip(v_count * (n - edf), 1e-3, None)
+        s_lambda_eig = lam @ pen_eig  # (p,) pooled block eigenvalues
+
+        def fs(k: Array) -> Float[Array, '']:
+            sk = penalties[k]
+            tr_vsk = jnp.sum(vmat * sk)  # tr(V S_k)
+            energy_sum = jnp.trace(sk @ vmat @ c @ vmat)  # sum_v b_v^T S_k b_v
+            tr_slinv_sk = _trace_slinv_sk(pen_eig[k], s_lambda_eig)
+            num = jnp.clip(lam[k] * tr_slinv_sk - lam[k] * tr_vsk, 1e-8, None)
+            den = jnp.clip(energy_sum / (v_count * phi), 1e-12, None)
+            return jnp.clip(num / den, lam_floor, lam_ceil)
+
+        return jax.vmap(fs)(jnp.arange(m)), None
+
+    lam, _ = lax.scan(outer, jnp.ones((m,), Y.dtype), xs=None, length=n_outer)
+
+    s_lambda = jnp.tensordot(lam, penalties, axes=(0, 0))
+    vmat, _ = small_inv_logdet(xtx + s_lambda + ridge_eye, p)
+    coef = yx @ vmat  # (V, p): beta_v = V (X^T y_v)
+    resid = Y - coef @ X.T
+    edf = jnp.trace(vmat @ xtx)
+    phi_v = jnp.sum(resid * resid, axis=1) / jnp.clip(n - edf, 1e-3, None)
+
+    v_bc = jnp.broadcast_to(vmat, (v_count, p, p))
+    xtwx_bc = jnp.broadcast_to(xtx, (v_count, p, p))
+    lam_bc = jnp.broadcast_to(lam, (v_count, m))
+    return coef, lam_bc, v_bc, xtwx_bc, phi_v
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +380,7 @@ def _gam_fit_one(
     y: Float[Array, 'N'],
     X: Float[Array, 'N p'],
     penalties: Float[Array, 'm p p'],
-    ranks: Float[Array, 'm'],
+    pen_eig: Float[Array, 'm p'],
     family: Family,
     p: int,
     n_outer: int,
@@ -294,16 +415,19 @@ def _gam_fit_one(
             resid = y - X @ beta
             phi = jnp.sum(resid * resid) / jnp.clip(n - edf_tot, 1e-3, None)
 
-        # Generalized Fellner-Schall update per smooth (disjoint blocks ->
-        # tr(S_lambda^- S_k) = rank_k / lambda_k).
+        # Generalized Fellner-Schall update per penalty.  The penalty trace
+        # tr(S_lambda^+ S_k) is read off the precomputed block eigenvalues (it
+        # equals rank_k/lambda_k for a disjoint penalty, the general elementwise
+        # sum for overlapping tensor-product penalties).
+        s_lambda_eig = lam @ pen_eig  # (p,) pooled block eigenvalues
+
         def fs(k: Array) -> Float[Array, '']:
             sk = penalties[k]
             tr_vsk = jnp.sum(v * sk)  # tr(V S_k)
             energy = beta @ (sk @ beta)
-            # Generalized Fellner-Schall: lambda_k * [rank_k/lambda_k -
-            # tr(V S_k)] / [energy / phi] = [rank_k - lambda_k tr(V S_k)] /
-            # [energy / phi].
-            num = jnp.clip(ranks[k] - lam[k] * tr_vsk, 1e-8, None)
+            tr_slinv_sk = _trace_slinv_sk(pen_eig[k], s_lambda_eig)
+            # lambda_k * [tr(S_lambda^+ S_k) - tr(V S_k)] / [energy / phi].
+            num = jnp.clip(lam[k] * tr_slinv_sk - lam[k] * tr_vsk, 1e-8, None)
             den = jnp.clip(energy / phi, 1e-12, None)
             return jnp.clip(num / den, lam_floor, lam_ceil)
 
@@ -331,22 +455,96 @@ def _gam_fit_one(
 
 
 # ---------------------------------------------------------------------------
+# Per-element Gaussian fast path: the cross-product (sufficient-statistic) fit
+# ---------------------------------------------------------------------------
+
+
+def _gam_fit_one_gaussian_xprod(
+    c: Float[Array, 'p'],
+    g: Float[Array, ''],
+    xtx: Float[Array, 'p p'],
+    penalties: Float[Array, 'm p p'],
+    pen_eig: Float[Array, 'm p'],
+    n: int,
+    p: int,
+    n_outer: int,
+    ridge: float,
+    lam_floor: float,
+    lam_ceil: float,
+) -> Tuple[
+    Float[Array, 'p'],
+    Float[Array, 'm'],
+    Float[Array, 'p p'],
+    Float[Array, 'p p'],
+    Float[Array, ''],
+]:
+    """Exact per-voxel Gaussian GAM fit from the cross-products ``c = X^T y_v``
+    and ``g = y_v^T y_v``.
+
+    For the Gaussian identity link the penalised IRLS converges in **one** step
+    to ``beta = (X^T X + S_lambda)^{-1} c`` -- a function of ``y`` only through
+    ``c`` -- and the dispersion (``phi = (g - 2 beta^T c + beta^T X^T X beta) /
+    (N - edf)``), the EDF, and the Fellner-Schall traces all reduce to ``(c, g,
+    X^T X)``.  So the whole per-voxel Fellner-Schall loop runs in ``p``-space
+    with **no N-dimensional vector in the loop** -- ``N`` enters only the one-off
+    cross-products ``X^T Y`` and ``diag(Y Y^T)`` -- and the result is identical
+    (to floating point) to ``_gam_fit_one`` for the Gaussian family.  Returns the
+    same ``(beta, lam, V, xtwx, dispersion)`` tuple; ``xtwx = X^T X`` is shared.
+    """
+    m = penalties.shape[0]
+    ridge_eye = ridge * jnp.eye(p, dtype=xtx.dtype)
+
+    def quantities(
+        lam: Float[Array, 'm'],
+    ) -> Tuple[Float[Array, 'p p'], Float[Array, 'p'], Float[Array, '']]:
+        s_lambda = jnp.tensordot(lam, penalties, axes=(0, 0))
+        v, _ = small_inv_logdet(xtx + s_lambda + ridge_eye, p)
+        beta = v @ c
+        edf = jnp.trace(v @ xtx)
+        rss = g - 2.0 * (beta @ c) + beta @ (xtx @ beta)
+        phi = rss / jnp.clip(n - edf, 1e-3, None)
+        return v, beta, phi
+
+    def outer(lam: Float[Array, 'm'], _: Array) -> Tuple[Float[Array, 'm'], None]:
+        v, beta, phi = quantities(lam)
+        s_lambda_eig = lam @ pen_eig
+
+        def fs(k: Array) -> Float[Array, '']:
+            sk = penalties[k]
+            tr_vsk = jnp.sum(v * sk)
+            energy = beta @ (sk @ beta)
+            tr_slinv_sk = _trace_slinv_sk(pen_eig[k], s_lambda_eig)
+            num = jnp.clip(lam[k] * tr_slinv_sk - lam[k] * tr_vsk, 1e-8, None)
+            den = jnp.clip(energy / phi, 1e-12, None)
+            return jnp.clip(num / den, lam_floor, lam_ceil)
+
+        return jax.vmap(fs)(jnp.arange(m)), None
+
+    lam0 = jnp.ones((m,), dtype=xtx.dtype)
+    lam, _ = lax.scan(outer, lam0, xs=None, length=n_outer)
+    v, beta, phi = quantities(lam)
+    return beta, lam, v, xtx, phi
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
 def gam_fit(
     Y: Float[Array, 'V N'],
-    smooths: Sequence[SplineBasis],
+    smooths: Sequence[Smooth],
     *,
     parametric: Optional[Float[Array, 'N q']] = None,
     intercept: bool = True,
-    family: Family = GAUSSIAN,
+    family: Union[str, Family] = GAUSSIAN,
+    lambda_mode: Literal['per_element', 'shared'] = 'per_element',
     n_outer: int = 20,
     n_inner: int = 15,
     ridge: float = 1e-8,
     lam_floor: float = 1e-6,
     lam_ceil: float = 1e8,
+    block: Optional[int] = None,
 ) -> GAMResult:
     """Fit a mass-univariate GAM: shared smooth bases, per-element responses.
 
@@ -355,8 +553,11 @@ def gam_fit(
     Y
         ``(V, N)`` responses.
     smooths
-        Penalised spline bases (one per smooth term), built with
-        ``stats.basis.bspline_basis`` on the (shared) covariates.
+        Penalised smooth bases (one per smooth term): a ``SplineBasis``
+        (``bspline_basis`` / ``thinplate_regression_basis`` / ``cyclic_cubic_basis``)
+        or a ``TensorBasis`` (``tensor_product_basis``) for an anisotropic
+        interaction.  A tensor smooth carries one smoothing parameter per margin,
+        all selected by the same Fellner-Schall loop.
     parametric
         Optional ``(N, q)`` unpenalised linear design (covariates entering
         linearly).  The intercept is added separately (see ``intercept``).
@@ -364,18 +565,29 @@ def gam_fit(
         Prepend an intercept column (default ``True``).
     family
         Exponential family (default ``GAUSSIAN``).
+    lambda_mode
+        ``'per_element'`` (default) selects a smoothing parameter per element
+        (ModelArray parity).  ``'shared'`` selects **one** smoothing parameter
+        across all elements via a pooled Fellner-Schall update on sufficient
+        statistics -- an ``O(n_outer p^3)``, ``V``-independent outer loop (much
+        faster when smoothness is homogeneous across the brain).  Gaussian only.
     n_outer, n_inner
         Fellner-Schall outer iterations and penalised-IRLS inner iterations.
     ridge
         Small stabiliser on the penalised normal equations.
     lam_floor, lam_ceil
         Clamp on each smoothing parameter.
+    block
+        Optional element-block size bounding peak memory (the per-element
+        ``(V, p, p)`` covariances) on brain-scale ``V``.  ``None`` (default) is
+        a single ``vmap``.
 
     Returns
     -------
     ``GAMResult`` (coefficients, selected ``lambda``, per-smooth EDF, dispersion,
     deviance, Bayesian covariance).
     """
+    family = resolve_family(family)
     n = X_n = Y.shape[-1]
     for sm in smooths:
         if sm.design.shape[0] != n:
@@ -386,27 +598,82 @@ def gam_fit(
     if not smooths:
         raise ValueError('gam_fit: provide at least one smooth term.')
 
-    X, penalties, slices, ranks = _assemble(
+    X, penalties, pen_eig, slices = _assemble(
         X_n, smooths, parametric, intercept, Y.dtype
     )
     p = X.shape[1]
-    ranks_j = jnp.asarray(ranks, dtype=Y.dtype)
 
-    def per_voxel(
-        y: Float[Array, 'N'],
-    ) -> Tuple[
-        Float[Array, 'p'],
-        Float[Array, 'm'],
-        Float[Array, 'p p'],
-        Float[Array, 'p p'],
-        Float[Array, ''],
-    ]:
-        return _gam_fit_one(
-            y, X, penalties, ranks_j, family, p,
-            n_outer, n_inner, ridge, lam_floor, lam_ceil,
+    if lambda_mode == 'shared':
+        if family.name != 'gaussian':
+            raise NotImplementedError(
+                "lambda_mode='shared' is implemented for the Gaussian family "
+                'only (the pooled sufficient statistics require a shared, '
+                "y-independent influence matrix); use 'per_element' otherwise."
+            )
+        coef, lam, v, xtwx, phi = _gam_fit_shared_gaussian(
+            Y, X, penalties, pen_eig, n_outer, ridge, lam_floor, lam_ceil
         )
+    elif family.name == 'gaussian':
+        # Exact cross-product fast path: the Gaussian fit depends on each y_v
+        # only through c_v = X^T y_v and g_v = y_v^T y_v, so the per-voxel
+        # Fellner-Schall loop runs in p-space with no N-dimensional vector in
+        # the loop (N enters only the one-off cross-products).
+        xtx = X.T @ X
+        c_all = Y @ X  # (V, p)
+        g_all = jnp.sum(Y * Y, axis=1)  # (V,)
 
-    coef, lam, v, xtwx, phi = jax.vmap(per_voxel)(Y)
+        def per_voxel_g(
+            c: Float[Array, 'p'], g: Float[Array, '']
+        ) -> Tuple[
+            Float[Array, 'p'],
+            Float[Array, 'm'],
+            Float[Array, 'p p'],
+            Float[Array, 'p p'],
+            Float[Array, ''],
+        ]:
+            return _gam_fit_one_gaussian_xprod(
+                c,
+                g,
+                xtx,
+                penalties,
+                pen_eig,
+                n,
+                p,
+                n_outer,
+                ridge,
+                lam_floor,
+                lam_ceil,
+            )
+
+        coef, lam, v, xtwx, phi = blocked_vmap(
+            per_voxel_g, (c_all, g_all), block=block
+        )
+    else:
+
+        def per_voxel(
+            y: Float[Array, 'N'],
+        ) -> Tuple[
+            Float[Array, 'p'],
+            Float[Array, 'm'],
+            Float[Array, 'p p'],
+            Float[Array, 'p p'],
+            Float[Array, ''],
+        ]:
+            return _gam_fit_one(
+                y,
+                X,
+                penalties,
+                pen_eig,
+                family,
+                p,
+                n_outer,
+                n_inner,
+                ridge,
+                lam_floor,
+                lam_ceil,
+            )
+
+        coef, lam, v, xtwx, phi = blocked_vmap(per_voxel, (Y,), block=block)
 
     # Effective degrees of freedom: F = V X^T W X (influence on coefficients).
     influence = jnp.einsum('vij,vjk->vik', v, xtwx)  # (V, p, p)
@@ -441,17 +708,22 @@ def gam_fit(
 def smooth_partial_effect(
     result: GAMResult,
     smooth_index: int,
-    basis: SplineBasis,
-    x: Float[Array, ' g'],
+    basis: Smooth,
+    x: Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]],
 ) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]:
     """Per-element partial effect of one smooth on a covariate grid ``x``.
 
     Returns ``(effect, se)``: the fitted smooth ``B(x) gamma_k`` and its
     pointwise standard error from the Bayesian covariance block (for a
-    credible band).  ``basis`` is the ``SplineBasis`` used to build the smooth.
+    credible band).  ``basis`` is the smooth used to build the term; for a
+    ``TensorBasis`` pass ``x`` as a tuple of matched per-margin grids (all
+    length ``g``) and the effect is the interaction surface along that path.
     """
     lo, hi = result.col_slices[smooth_index]
-    design = spline_design(basis, x)  # (g, k)
+    if isinstance(basis, TensorBasis):
+        design = tensor_product_design(basis, tuple(x))  # (g, K)
+    else:
+        design = spline_design(basis, cast(Float[Array, ' g'], x))  # (g, k)
     gamma = result.coef[:, lo:hi]  # (V, k)
     effect = gamma @ design.T  # (V, g)
     cov_block = result.cov_unscaled[:, lo:hi, lo:hi]  # (V, k, k)

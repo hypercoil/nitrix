@@ -47,6 +47,7 @@ from .matrix import (
     toeplitz_2d,
     vec2sym,
 )
+from .decompose import randomized_svd
 from .krylov import cg
 from .matrix_function import matrix_exp, matrix_log
 from .optimize import (
@@ -90,6 +91,8 @@ __all__ = [
     # matrix functions
     'matrix_exp',
     'matrix_log',
+    # decomposition
+    'randomized_svd',
     # optimisation (nonlinear least squares)
     'gauss_newton',
     'levenberg_marquardt',

@@ -47,14 +47,16 @@ ship, and a custom family is just another ``Family(...)``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple, cast
+from typing import Any, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
-from jax import lax
-from jax.scipy.special import betainc, gammaincc, gammaln, xlogy
+from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float
 
+from ._batching import blocked_vmap
+from ._family import BINOMIAL, GAUSSIAN, POISSON, Family, resolve_family
+from ._irls import fit_penalised_irls, irls_warm_start
 from ._smalllinalg import small_inv_logdet
 
 __all__ = [
@@ -77,126 +79,6 @@ __all__ = [
 ]
 
 _EPS = 1e-10
-
-
-# ---------------------------------------------------------------------------
-# Exponential family
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Family:
-    """An exponential-family + link, as a record of pure functions.
-
-    Frozen and hashable so it rides as a static config (and a future
-    ``custom_vjp`` nondiff arg).  The fields are the GLM/IRLS primitives:
-
-    - ``link`` / ``linkinv`` -- ``g(mu)`` and ``g^{-1}(eta)``.
-    - ``mu_eta`` -- ``d mu / d eta`` as a function of ``eta`` (IRLS weight).
-    - ``variance`` -- the variance function ``V(mu)``.
-    - ``unit_deviance`` -- per-observation deviance contribution ``d(y, mu)``.
-    - ``init_mu`` -- a fitted-mean initialiser from ``y`` (IRLS start).
-    - ``loglik`` -- per-observation log-likelihood ``l(y, mu, dispersion)``
-      (the dispersion argument is ignored by the fixed-dispersion families).
-    - ``has_fixed_dispersion`` -- ``True`` when the dispersion is 1 (binomial /
-      Poisson); ``False`` when it is estimated (Gaussian).
-    """
-
-    name: str
-    has_fixed_dispersion: bool
-    link: Callable[[Array], Array]
-    linkinv: Callable[[Array], Array]
-    mu_eta: Callable[[Array], Array]
-    variance: Callable[[Array], Array]
-    unit_deviance: Callable[[Array, Array], Array]
-    init_mu: Callable[[Array], Array]
-    loglik: Callable[[Array, Array, Array], Array]
-
-
-def _identity(x: Array) -> Array:
-    return x
-
-
-def _ones_like(x: Array) -> Array:
-    return jnp.ones_like(x)
-
-
-def _gaussian_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
-    phi = jnp.clip(dispersion, _EPS, None)
-    return -0.5 * (jnp.log(2.0 * jnp.pi * phi) + (y - mu) ** 2 / phi)
-
-
-GAUSSIAN = Family(
-    name='gaussian',
-    has_fixed_dispersion=False,
-    link=_identity,
-    linkinv=_identity,
-    mu_eta=_ones_like,
-    variance=_ones_like,
-    unit_deviance=lambda y, mu: (y - mu) ** 2,
-    init_mu=_identity,
-    loglik=_gaussian_loglik,
-)
-
-
-def _logit(mu: Array) -> Array:
-    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
-    return jnp.log(m / (1.0 - m))
-
-
-def _expit(eta: Array) -> Array:
-    return 0.5 * (1.0 + jnp.tanh(0.5 * eta))
-
-
-def _binomial_mu_eta(eta: Array) -> Array:
-    mu = _expit(eta)
-    return mu * (1.0 - mu)
-
-
-def _binomial_deviance(y: Array, mu: Array) -> Array:
-    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
-    return 2.0 * (xlogy(y, y / m) + xlogy(1.0 - y, (1.0 - y) / (1.0 - m)))
-
-
-def _binomial_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
-    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
-    return xlogy(y, m) + xlogy(1.0 - y, 1.0 - m)
-
-
-BINOMIAL = Family(
-    name='binomial',
-    has_fixed_dispersion=True,
-    link=_logit,
-    linkinv=_expit,
-    mu_eta=_binomial_mu_eta,
-    variance=lambda mu: mu * (1.0 - mu),
-    unit_deviance=_binomial_deviance,
-    init_mu=lambda y: (y + 0.5) / 2.0,
-    loglik=_binomial_loglik,
-)
-
-
-def _poisson_deviance(y: Array, mu: Array) -> Array:
-    m = jnp.clip(mu, _EPS, None)
-    return 2.0 * (xlogy(y, y / m) - (y - m))
-
-
-def _poisson_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
-    m = jnp.clip(mu, _EPS, None)
-    return xlogy(y, m) - m - gammaln(y + 1.0)
-
-
-POISSON = Family(
-    name='poisson',
-    has_fixed_dispersion=True,
-    link=lambda mu: jnp.log(jnp.clip(mu, _EPS, None)),
-    linkinv=jnp.exp,
-    mu_eta=jnp.exp,
-    variance=_identity,
-    unit_deviance=_poisson_deviance,
-    init_mu=lambda y: y + 0.1,
-    loglik=_poisson_loglik,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -319,59 +201,28 @@ def _pirls_one(
     n_iter: int,
     ridge: float,
 ) -> Tuple[Float[Array, 'p'], Float[Array, 'p p'], Float[Array, '']]:
-    """Single-element penalised IRLS.  Returns ``(beta, cov_unscaled, deviance)``.
-
-    ``penalty`` is the ``(p, p)`` smoothing penalty ``S`` (zeros for a plain
-    GLM; ``gam.py`` passes ``S(lambda)``).
-    """
-    ridge_eye = ridge * jnp.eye(p, dtype=X.dtype)
-
-    def normal_eqs(
-        wts: Float[Array, 'N'], z: Float[Array, 'N']
-    ) -> Tuple[Float[Array, 'p p'], Float[Array, 'p']]:
-        Xw = X * wts[:, None]
-        a = Xw.T @ X + penalty + ridge_eye
-        b = Xw.T @ z
-        return a, b
-
-    # Initialise beta by an OLS fit of the linked initial mean.
-    eta0 = family.link(family.init_mu(y))
-    a0, b0 = normal_eqs(w, eta0)
-    a0_inv, _ = small_inv_logdet(a0, p)
-    beta0: Float[Array, 'p'] = a0_inv @ b0
-
-    def step(_: Array, beta: Float[Array, 'p']) -> Float[Array, 'p']:
-        eta = X @ beta
-        mu = family.linkinv(eta)
-        dmu = family.mu_eta(eta)
-        var = family.variance(mu)
-        wts = w * dmu * dmu / jnp.clip(var, _EPS, None)
-        z = eta + (y - mu) / jnp.clip(dmu, _EPS, None)
-        a, b = normal_eqs(wts, z)
-        a_inv, _ = small_inv_logdet(a, p)
-        return a_inv @ b
-
-    beta = cast(Float[Array, 'p'], lax.fori_loop(0, n_iter, step, beta0))
-
-    eta = X @ beta
-    mu = family.linkinv(eta)
-    dmu = family.mu_eta(eta)
-    var = family.variance(mu)
-    wts = w * dmu * dmu / jnp.clip(var, _EPS, None)
-    a, _ = normal_eqs(wts, eta)
-    a_inv, _ = small_inv_logdet(a, p)
-    dev = jnp.sum(family.unit_deviance(y, mu))
-    return beta, a_inv, dev
+    """Single-element penalised IRLS via the shared core.  Returns
+    ``(beta, cov_unscaled, deviance)``.  ``penalty`` is the ``(p, p)`` smoothing
+    penalty (zeros for a plain GLM)."""
+    beta0 = irls_warm_start(
+        y, X, family, penalty=penalty, ridge=ridge, prior_weights=w
+    )
+    beta, v, _, dev = fit_penalised_irls(
+        y, X, family, penalty=penalty, beta0=beta0, n_iter=n_iter,
+        ridge=ridge, prior_weights=w,
+    )
+    return beta, v, dev
 
 
 def glm_fit(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
     *,
-    family: Family = GAUSSIAN,
+    family: Union[str, Family] = GAUSSIAN,
     weights: Optional[Float[Array, 'N']] = None,
     n_iter: int = 25,
     ridge: float = 0.0,
+    block: Optional[int] = None,
 ) -> GLMResult:
     """Fit a mass-univariate GLM: shared design ``X``, per-element responses.
 
@@ -382,7 +233,9 @@ def glm_fit(
     X
         ``(N, p)`` design, shared across elements.
     family
-        Exponential family + link (default ``GAUSSIAN`` identity = OLS).
+        Exponential family + link: a built-in name (``'gaussian'`` /
+        ``'binomial'`` / ``'poisson'``) or a ``Family`` instance.  Default
+        ``GAUSSIAN`` identity = OLS.
     weights
         Optional ``(N,)`` prior observation weights (WLS / known precision).
         ``None`` is unweighted.
@@ -390,12 +243,17 @@ def glm_fit(
         IRLS iterations for non-Gaussian families (ignored on the OLS path).
     ridge
         Optional L2 stabiliser added to the normal-equation matrix.
+    block
+        Optional element-block size bounding peak memory on the per-element
+        IRLS path (non-Gaussian families).  ``None`` (default) is a single
+        ``vmap``; the OLS fast path is already vectorised and ignores it.
 
     Returns
     -------
     ``GLMResult`` (coefficients, unscaled covariance, dispersion, deviance,
     null deviance).
     """
+    family = resolve_family(family)
     n, p = X.shape
     if Y.shape[-1] != n:
         raise ValueError(
@@ -415,10 +273,11 @@ def glm_fit(
         deviance = wrss
     else:
         penalty = jnp.zeros((p, p), dtype=X.dtype)
-        fit = jax.vmap(
-            lambda y: _pirls_one(y, X, w, penalty, family, p, n_iter, ridge)
+        coef, cov_unscaled, deviance = blocked_vmap(
+            lambda y: _pirls_one(y, X, w, penalty, family, p, n_iter, ridge),
+            (Y,),
+            block=block,
         )
-        coef, cov_unscaled, deviance = fit(Y)
         if family.has_fixed_dispersion:
             dispersion = jnp.ones((Y.shape[0],), dtype=Y.dtype)
         else:

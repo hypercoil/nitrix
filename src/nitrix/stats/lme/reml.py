@@ -204,6 +204,88 @@ def _default_theta_init(
     return init
 
 
+def _lowrank_theta_init(
+    Y: Float[Array, 'V N'],
+    s2: Float[Array, 'q'],
+    n: int,
+) -> Float[Array, 'V 2']:
+    """Low-rank counterpart of ``_default_theta_init``.
+
+    Reproduces the dense heuristic's split (10% of ``var(y)`` to the random
+    component, 50% to the residual, normalised) using the *full* basis scale
+    ``mean_N(lambda) = sum(s2) / N`` -- so the low-rank fit starts from the same
+    ``theta`` as the dense path and converges to the same optimum.
+    """
+    y_var = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
+    basis_scale_b = jnp.maximum(jnp.sum(s2) / n, 1e-12)  # mean_N(lambda)
+    w = jnp.asarray([0.1, 0.5], dtype=Y.dtype)
+    w = w / jnp.sum(w)
+    sb2 = jnp.maximum(y_var * w[0] / basis_scale_b, 1e-6)
+    se2 = jnp.maximum(y_var * w[1], 1e-6)
+    return jnp.concatenate([jnp.log(sb2), jnp.log(se2)], axis=-1)  # (V, 2)
+
+
+def _reml_fit_lowrank(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    Z: Float[Array, 'N q'],
+    theta_init: Optional[Float[Array, 'V 2']],
+    n_iter: int,
+    damping: float,
+    block: Optional[int],
+) -> REMLResult:
+    """FaST-LMM low-rank REML: ``q x q`` eig of ``Z^T Z`` instead of ``N x N``.
+
+    Requires ``q <= N`` with ``Z`` of full column rank (the usual random-effect
+    design).  ``ZZ^T = U_r diag(s2) U_r^T`` with ``U_r = Z W / sqrt(s2)``
+    (``N x q``), and the ``N - q`` null directions enter only through per-voxel
+    Gram aggregates -- never an ``N x N`` factor (see ``_lowrank``).
+    """
+    from ...linalg._solver import safe_eigh
+    from ._lowrank import fit_lowrank_reml
+
+    n, q = Z.shape
+    if q > n:
+        raise ValueError(
+            f'reml_fit(low_rank=True): needs q <= N, got q={q}, N={n}; the '
+            'low-rank form assumes a tall random-effect design.'
+        )
+
+    ZtZ = Z.T @ Z  # (q, q) -- the cheap factor
+    ZtZ = 0.5 * (ZtZ + ZtZ.T)
+    evals, W = safe_eigh(ZtZ)
+    s2 = jnp.clip(evals, 0.0, None)  # (q,) range spectrum (ZZ^T eigenvalues)
+    s = jnp.sqrt(jnp.clip(s2, jnp.finfo(Y.dtype).tiny, None))
+    u_r = (Z @ W) / s[None, :]  # (N, q) range left-singular vectors
+
+    y_range = Y @ u_r  # (V, q)
+    x_range = u_r.T @ X  # (q, p)
+    # Null-space Gram aggregates: X^T X - X_r^T X_r etc. (the orthogonal
+    # complement of the range, summarised -- no per-null-coordinate work).
+    gxx = X.T @ X - x_range.T @ x_range  # (p, p) shared
+    gxy = Y @ X - y_range @ x_range  # (V, p): X^T y_v - X_r^T y_r,v
+    gyy = jnp.sum(Y * Y, axis=-1) - jnp.sum(y_range * y_range, axis=-1)  # (V,)
+    n0 = n - q
+
+    if theta_init is None:
+        theta_init = _lowrank_theta_init(Y, s2, n)
+
+    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    theta_hat, beta_hat, log_lik = fit_lowrank_reml(
+        y_range,
+        x_range,
+        s2,
+        gxx,
+        gxy,
+        gyy,
+        theta_init,
+        n0,
+        spec=spec,
+        block=block,
+    )
+    return REMLResult(theta_hat=theta_hat, beta_hat=beta_hat, log_lik=log_lik)
+
+
 def reml_fit(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
@@ -213,6 +295,7 @@ def reml_fit(
     n_iter: int = 20,
     damping: float = 1e-6,
     block: Optional[int] = None,
+    low_rank: bool = False,
 ) -> REMLResult:
     """Voxelwise variance-components REML fit.
 
@@ -260,6 +343,15 @@ def reml_fit(
         per-Newton intermediates are live at once, bounding peak memory
         on brain-scale ``V``.  ``None`` (default) is a single ``vmap``
         over all voxels (identical numerics and HLO to before).
+    low_rank
+        Use the FaST-LMM **low-rank** decomposition: a ``q x q`` eig of
+        ``Z^T Z`` (``O(N q^2 + q^3)``) instead of the dense ``N x N`` eig of
+        ``ZZ^T`` (``O(N^3)``).  Requires ``q <= N`` with ``Z`` of full column
+        rank (the usual tall random-effect design); the ``N - q`` null
+        directions enter only through per-voxel Gram aggregates.  Default
+        ``False`` (the dense path, bit-for-bit unchanged); set ``True`` for
+        brain-scale cohorts where ``q << N`` -- it matches the dense fit to the
+        iterative tolerance.
 
     Returns
     -------
@@ -285,6 +377,9 @@ def reml_fit(
         raise ValueError(
             f'reml_fit: Y.shape[-1]={Y.shape[-1]} must match N={n}.'
         )
+
+    if low_rank:
+        return _reml_fit_lowrank(Y, X, Z, theta_init, n_iter, damping, block)
 
     # Eigendecompose ZZ^T (shared across voxels).
     ZZt = Z @ Z.T

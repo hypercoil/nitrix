@@ -19,6 +19,9 @@ Two submodules:
 - ``basis``      -- penalised spline bases (P-splines) for additive models.
 - ``gam``        -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
+- ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
+  covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
+  small-sample regime.
 - ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
 - ``inference``  -- permutation / TFCE cluster inference (the on-device FSL
   ``randomise`` engine) + FDR / Bonferroni.
@@ -54,7 +57,24 @@ from .fourier import (
     product_filter,
     product_filtfilt,
 )
-from .basis import SplineBasis, bspline_basis, spline_design
+from .basis import (
+    SplineBasis,
+    TensorBasis,
+    bspline_basis,
+    cyclic_cubic_basis,
+    spline_design,
+    tensor_product_basis,
+    tensor_product_design,
+    thinplate_regression_basis,
+)
+from .connectivity import (
+    ebic_score,
+    glasso,
+    glasso_path,
+    ledoit_wolf,
+    oas,
+    shrunk_covariance,
+)
 from .gam import GAMResult, gam_fit, smooth_partial_effect
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
@@ -128,12 +148,24 @@ __all__ = [
     'compare_models',
     # basis
     'SplineBasis',
+    'TensorBasis',
     'bspline_basis',
+    'cyclic_cubic_basis',
+    'thinplate_regression_basis',
+    'tensor_product_basis',
     'spline_design',
+    'tensor_product_design',
     # gam
     'GAMResult',
     'gam_fit',
     'smooth_partial_effect',
+    # connectivity
+    'ledoit_wolf',
+    'oas',
+    'shrunk_covariance',
+    'glasso',
+    'glasso_path',
+    'ebic_score',
     # pca
     'PCAResult',
     'pca_fit',

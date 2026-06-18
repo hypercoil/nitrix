@@ -58,6 +58,10 @@ import numpy as np
 from jaxtyping import Array, Float
 
 from nitrix.linalg._solver import safe_inv
+from nitrix.numerics._spline import (
+    difference_penalty_1d,
+    uniform_bspline_weights,
+)
 
 __all__ = ['bspline_approximate']
 
@@ -75,56 +79,10 @@ FitMethod = Literal['mba', 'least_squares', 'psplines']
 # ---------------------------------------------------------------------------
 
 
-def _uniform_bspline_weights(
-    t: Float[Array, ' n'],
-    order: int,
-) -> Float[Array, 'n order_plus_1']:
-    """Uniform B-spline basis weights for fractional positions ``t``.
-
-    Returns the ``order + 1`` non-zero basis values for each fractional
-    coordinate ``t`` in ``[0, 1]``.  These are the weights on the
-    ``order + 1`` consecutive control points spanning the local knot
-    interval.  The basis is a partition of unity (rows sum to 1).
-
-    Closed forms for the orders that matter in practice:
-
-    - order 1 (linear):    hat function, 2 control points.
-    - order 2 (quadratic): 3 control points.
-    - order 3 (cubic):     4 control points -- the N4 / ANTs default.
-    """
-    if order == 1:
-        return jnp.stack([1.0 - t, t], axis=-1)
-    if order == 2:
-        return jnp.stack(
-            [
-                0.5 * (1.0 - t) ** 2,
-                0.5 * (1.0 + 2.0 * t - 2.0 * t**2),
-                0.5 * t**2,
-            ],
-            axis=-1,
-        )
-    if order == 3:
-        t2 = t**2
-        t3 = t**3
-        return jnp.stack(
-            [
-                (1.0 - t) ** 3 / 6.0,
-                (3.0 * t3 - 6.0 * t2 + 4.0) / 6.0,
-                (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) / 6.0,
-                t3 / 6.0,
-            ],
-            axis=-1,
-        )
-    raise NotImplementedError(
-        f'spline_order={order!r} is not supported; nitrix.bias ships the '
-        'uniform B-spline basis for orders 1, 2, 3 (3 = cubic is the N4 / '
-        'ANTs default and the parity-validated path). Higher orders are a '
-        'documented extension point: add the uniform-knot Cox--de Boor '
-        'recursion here (the closed forms above are its order-1/2/3 '
-        'specialisations). Note we use *uniform* (non-clamped) knots to '
-        'match ITK/ANTs N4 -- not the endpoint-interpolating clamped knots '
-        'used by curve-fitting libraries.'
-    )
+# The uniform B-spline weight evaluator is shared with stats.basis -- see
+# ``nitrix.numerics._spline.uniform_bspline_weights`` (imported above).  N4 uses
+# *uniform* (non-clamped) knots to match ITK/ANTs, which is what that evaluator
+# provides.
 
 
 def _reconstruction_matrix(
@@ -161,7 +119,7 @@ def _reconstruction_matrix(
     span = jnp.clip(jnp.floor(s).astype(jnp.int32), 0, n_spans - 1)
     frac = s - span.astype(dtype)
 
-    weights = _uniform_bspline_weights(frac, order)  # (n_vox, order+1)
+    weights = uniform_bspline_weights(frac, order)  # (n_vox, order+1)
 
     # Scatter the (order + 1) banded weights into a dense (n_vox, n_control)
     # matrix.  Column index for tap j at voxel i is span[i] + j.
@@ -320,8 +278,7 @@ def _difference_penalty(
     for d, c in enumerate(control_sizes):
         if c <= order:
             continue  # too few control points to take this difference
-        diff = np.diff(np.eye(c), n=order, axis=0)
-        dtd = jnp.asarray(diff.T @ diff, dtype=dtype)
+        dtd = difference_penalty_1d(c, order, dtype)  # shared 1-D D^T D
         term: Optional[Array] = None
         for j in range(len(control_sizes)):
             block = dtd if j == d else eyes[j]
