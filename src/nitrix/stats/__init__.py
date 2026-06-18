@@ -58,10 +58,12 @@ from .fourier import (
     product_filtfilt,
 )
 from .basis import (
+    REBasis,
     SplineBasis,
     TensorBasis,
     bspline_basis,
     cyclic_cubic_basis,
+    re_smooth,
     spline_design,
     tensor_product_basis,
     tensor_product_design,
@@ -149,10 +151,12 @@ __all__ = [
     # basis
     'SplineBasis',
     'TensorBasis',
+    'REBasis',
     'bspline_basis',
     'cyclic_cubic_basis',
     'thinplate_regression_basis',
     'tensor_product_basis',
+    're_smooth',
     'spline_design',
     'tensor_product_design',
     # gam

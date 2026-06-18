@@ -22,6 +22,7 @@ jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats.basis import (
     bspline_basis,
+    re_smooth,
     tensor_product_basis,
 )
 from nitrix.stats.gam import (
@@ -405,3 +406,63 @@ def test_gaussian_xprod_is_the_default_and_recovers_smooth():
     )
     assert 2.0 < float(res.edf[0, 0]) < float(sb.dim)
     assert abs(float(res.dispersion[0]) - 0.2**2) < 0.25 * 0.2**2
+
+
+# ---------------------------------------------------------------------------
+# GAMM: random-effect smooth blocks (bs='re')
+# ---------------------------------------------------------------------------
+
+
+def test_gamm_random_intercept_recovers_variance_components():
+    """A random-intercept GAMM (one re_smooth block) recovers the variance
+    components: the Fellner-Schall smoothing parameter is the precision
+    1 / sigma_b^2 and the dispersion is sigma_e^2 -- matched against the
+    closed-form balanced-ANOVA REML estimates."""
+    rng = np.random.default_rng(0)
+    g, n_per, mu, sb, se = 8, 30, 2.0, 1.0, 0.5
+    b = rng.standard_normal(g) * sb
+    gid = np.repeat(np.arange(g), n_per)
+    y = mu + b[gid] + rng.standard_normal(g * n_per) * se
+
+    # closed-form balanced one-way REML (ANOVA) variance components
+    ybar_i = np.array([y[gid == i].mean() for i in range(g)])
+    ybar = y.mean()
+    ms_b = n_per * np.sum((ybar_i - ybar) ** 2) / (g - 1)
+    ms_w = np.sum((y - ybar_i[gid]) ** 2) / (g * n_per - g)
+    sb2_ref = (ms_b - ms_w) / n_per
+    se2_ref = ms_w
+
+    re = re_smooth(jnp.asarray(gid), n_levels=g)
+    res = gam_fit(jnp.asarray(y[None, :]), [re], n_outer=60)
+    lam = float(res.lam[0, 0])
+    disp = float(res.dispersion[0])
+    assert abs(disp - se2_ref) / se2_ref < 1e-4
+    assert abs(disp / lam - sb2_ref) / sb2_ref < 1e-4
+
+
+def test_gamm_smooth_plus_random_intercept():
+    """A GAMM with a spline smooth AND a random intercept fits both blocks: two
+    smoothing parameters, the smooth recovered, the group means absorbed."""
+    rng = np.random.default_rng(1)
+    g, n_per = 10, 40
+    gid = np.repeat(np.arange(g), n_per)
+    n = g * n_per
+    x = rng.uniform(0.0, 1.0, n)
+    b = rng.standard_normal(g) * 0.8
+    truth = np.sin(2 * np.pi * x)
+    y = truth + b[gid] + rng.standard_normal(n) * 0.25
+
+    sb = bspline_basis(jnp.asarray(x), 15, center=True)
+    re = re_smooth(jnp.asarray(gid), n_levels=g)
+    res = gam_fit(jnp.asarray(y[None, :]), [sb, re], n_outer=40)
+    assert res.lam.shape == (1, 2)
+    eff, _ = smooth_partial_effect(res, 0, sb, jnp.asarray(x))
+    fit = np.asarray(eff[0])
+    interior = (x > 0.05) & (x < 0.95)
+    centred = truth - truth.mean()
+    rmse = float(np.sqrt(np.mean((fit[interior] - centred[interior]) ** 2)))
+    assert rmse < 0.1
+    # random-effect block uses up to g-1 effective df
+    blup, _ = smooth_partial_effect(res, 1, re, jnp.arange(g, dtype=jnp.int32))
+    # recovered BLUPs correlate with the true group offsets
+    assert float(np.corrcoef(np.asarray(blup[0]), b)[0, 1]) > 0.9

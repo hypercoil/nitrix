@@ -68,6 +68,7 @@ from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
 from ._smalllinalg import small_inv_logdet
 from .basis import (
+    REBasis,
     SplineBasis,
     TensorBasis,
     spline_design,
@@ -81,7 +82,7 @@ __all__ = ['GAMResult', 'gam_fit', 'smooth_partial_effect']
 # smoothing-parameter trace ``tr(S_lambda^+ S_k)``.
 _EIG_EPS = 0.0
 
-Smooth = Union[SplineBasis, TensorBasis]
+Smooth = Union[SplineBasis, TensorBasis, REBasis]
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +194,9 @@ def _smooth_penalties(
         pens = np.asarray(sm.penalties)
         eigs = np.asarray(sm.pen_eig)
         return [(pens[j], eigs[j]) for j in range(pens.shape[0])]
+    if isinstance(sm, REBasis):
+        q = sm.dim
+        return [(np.asarray(sm.penalty), np.ones(q))]
     s_block = np.asarray(sm.penalty)
     w, _ = np.linalg.eigh(s_block)
     floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
@@ -505,7 +509,9 @@ def _gam_fit_one_gaussian_xprod(
         phi = rss / jnp.clip(n - edf, 1e-3, None)
         return v, beta, phi
 
-    def outer(lam: Float[Array, 'm'], _: Array) -> Tuple[Float[Array, 'm'], None]:
+    def outer(
+        lam: Float[Array, 'm'], _: Array
+    ) -> Tuple[Float[Array, 'm'], None]:
         v, beta, phi = quantities(lam)
         s_lambda_eig = lam @ pen_eig
 
@@ -722,6 +728,9 @@ def smooth_partial_effect(
     lo, hi = result.col_slices[smooth_index]
     if isinstance(basis, TensorBasis):
         design = tensor_product_design(basis, tuple(x))  # (g, K)
+    elif isinstance(basis, REBasis):
+        levels = jnp.asarray(x).astype(jnp.int32)
+        design = jax.nn.one_hot(levels, basis.dim, dtype=result.coef.dtype)
     else:
         design = spline_design(basis, cast(Float[Array, ' g'], x))  # (g, k)
     gamma = result.coef[:, lo:hi]  # (V, k)

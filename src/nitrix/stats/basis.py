@@ -37,17 +37,19 @@ from typing import Any, Optional, Tuple, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 
 from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
 
 __all__ = [
     'SplineBasis',
     'TensorBasis',
+    'REBasis',
     'bspline_basis',
     'cyclic_cubic_basis',
     'thinplate_regression_basis',
     'tensor_product_basis',
+    're_smooth',
     'spline_design',
     'tensor_product_design',
 ]
@@ -727,3 +729,98 @@ def tensor_product_design(
         np.asarray(spline_design(m, x)) for m, x in zip(basis.margins, xs)
     )
     return jnp.asarray(_row_kron(designs), dtype=basis.design.dtype)
+
+
+# ---------------------------------------------------------------------------
+# Random-effect smooth (mgcv bs='re') -- the GAMM block
+# ---------------------------------------------------------------------------
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class REBasis:
+    """A random-effect smooth block (mgcv ``bs="re"``) for a GAMM.
+
+    A random intercept / slope per level of a grouping factor, expressed as the
+    ``(design, penalty)`` block the GAM penalty machinery already consumes: the
+    design is the one-hot indicator (intercept) or one-hot times a covariate
+    (slope) over the factor levels, and the penalty is the **identity** (a
+    ridge).  The single smoothing parameter the Fellner-Schall loop selects
+    **is** the random-effect precision ``lambda = 1 / sigma_b^2`` -- the v1
+    "penalised GLM == variance-components REML" identity, now reachable.  It is a
+    third :data:`Smooth` variant alongside :class:`SplineBasis` /
+    :class:`TensorBasis`, so it slots straight into ``gam_fit`` with **no new
+    solver work** (a random effect is just one more penalty block).
+
+    Unlike a spline, an RE has no continuous covariate to re-evaluate, so it
+    carries only ``(design, penalty, levels)`` -- not the spline construction
+    parameters.
+
+    Attributes
+    ----------
+    design
+        ``(n, q)`` random-effect design: ``one_hot(g)`` (intercept) or
+        ``one_hot(g) * by`` (slope); ``q`` = number of factor levels.
+    penalty
+        ``(q, q)`` identity ridge penalty (``lambda I``).
+    levels
+        Number of factor levels ``q``.
+    """
+
+    design: Float[Array, 'n q']
+    penalty: Float[Array, 'q q']
+    levels: int
+
+    @property
+    def dim(self) -> int:
+        """Number of random-effect coefficients ``q`` (the factor levels)."""
+        return self.design.shape[-1]
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[Tuple[Array, ...], Tuple[int]]:
+        return (self.design, self.penalty), (self.levels,)
+
+    @classmethod
+    def tree_unflatten(
+        cls, aux: Tuple[int], children: Tuple[Any, ...]
+    ) -> 'REBasis':
+        design, penalty = children
+        (levels,) = aux
+        return cls(design=design, penalty=penalty, levels=levels)
+
+
+def re_smooth(
+    g: Int[Array, ' n'],
+    *,
+    by: Optional[Float[Array, ' n']] = None,
+    n_levels: Optional[int] = None,
+) -> REBasis:
+    """Build a random-effect smooth block (mgcv ``bs="re"``).
+
+    Parameters
+    ----------
+    g
+        ``(n,)`` integer group labels in ``0 .. q-1`` (the factor levels) -- one
+        per observation.
+    by
+        Optional ``(n,)`` covariate for a random **slope** ``(by | g)``; ``None``
+        gives a random **intercept** ``(1 | g)``.  The design is then
+        ``one_hot(g) * by[:, None]``.
+    n_levels
+        Number of levels ``q`` (defaults to ``int(g.max()) + 1``).  Pass it when
+        some levels are absent from this sample so the block width is stable.
+
+    Returns
+    -------
+    ``REBasis`` (a :data:`Smooth` variant) for ``gam_fit``.  The Fellner-Schall
+    smoothing parameter on this block is the random-effect precision
+    ``1 / sigma_b^2``; the fitted block coefficients are the BLUPs.
+    """
+    g = jnp.asarray(g)
+    q = int(n_levels) if n_levels is not None else int(jnp.max(g)) + 1
+    design = jax.nn.one_hot(g, q)  # (n, q)
+    if by is not None:
+        design = design * jnp.asarray(by, dtype=design.dtype)[:, None]
+    penalty = jnp.eye(q, dtype=design.dtype)
+    return REBasis(design=design, penalty=penalty, levels=q)

@@ -10,8 +10,10 @@ import numpy as np
 jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats.basis import (
+    REBasis,
     bspline_basis,
     cyclic_cubic_basis,
+    re_smooth,
     spline_design,
     tensor_product_basis,
     tensor_product_design,
@@ -87,7 +89,9 @@ def test_penalised_fit_recovers_smooth_function():
     fit = B @ beta + y.mean()
     # interior error well below the noise level
     interior = (x > 0.05) & (x < 0.95)
-    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +130,9 @@ def test_tprs_recovers_smooth_via_gam():
     eff, se = smooth_partial_effect(res, 0, tp, jnp.asarray(x))
     fit = float(res.coef[0, 0]) + np.asarray(eff[0])
     interior = (x > 0.05) & (x < 0.95)
-    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
     assert 2.0 < float(res.edf[0, 0]) < float(tp.dim)
     assert (se > 0).all()
 
@@ -185,7 +191,9 @@ def test_cyclic_recovers_periodic_smooth_via_gam():
     effx, _ = smooth_partial_effect(res, 0, cb, jnp.asarray(x))
     fit = float(res.coef[0, 0]) + np.asarray(effx[0])
     interior = (x > 0.05) & (x < 0.95)
-    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +258,11 @@ def test_tensor_fs_trace_eigenvalues_match_dense_pinv():
         s_eig = lam[0] * E[0] + lam[1] * E[1]
         for k in range(2):
             tr_dense = np.trace(s_pinv @ S[k])
-            tr_eig = np.sum(np.where(s_eig > 0, E[k] / np.where(s_eig > 0, s_eig, 1.0), 0.0))
+            tr_eig = np.sum(
+                np.where(
+                    s_eig > 0, E[k] / np.where(s_eig > 0, s_eig, 1.0), 0.0
+                )
+            )
             np.testing.assert_allclose(tr_eig, tr_dense, atol=1e-7)
 
 
@@ -268,3 +280,41 @@ def test_tensor_product_design_reevaluation():
     d2 = np.asarray(spline_design(m2, g2))
     ref = (d1[:, :, None] * d2[:, None, :]).reshape(11, m1.dim * m2.dim)
     np.testing.assert_allclose(np.asarray(D), ref, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Random-effect smooth (bs='re') -- the GAMM block
+# ---------------------------------------------------------------------------
+
+
+def test_re_smooth_intercept_is_one_hot_with_identity_penalty():
+    """A random intercept block is the one-hot indicator design with an
+    identity ridge penalty over the factor levels."""
+    g = jnp.asarray(np.array([0, 1, 2, 0, 1, 2, 0], dtype=np.int32))
+    re = re_smooth(g, n_levels=3)
+    assert isinstance(re, REBasis)
+    assert re.dim == 3 and re.levels == 3
+    assert re.design.shape == (7, 3)
+    # one-hot rows
+    np.testing.assert_array_equal(
+        np.asarray(re.design), np.eye(3)[np.asarray(g)]
+    )
+    np.testing.assert_array_equal(np.asarray(re.penalty), np.eye(3))
+
+
+def test_re_smooth_slope_scales_one_hot_by_covariate():
+    """A random slope block is one_hot(g) * by, column-localised per level."""
+    g = jnp.asarray(np.array([0, 1, 0, 1], dtype=np.int32))
+    by = jnp.asarray(np.array([2.0, -1.0, 0.5, 3.0]))
+    re = re_smooth(g, by=by, n_levels=2)
+    expect = np.eye(2)[np.asarray(g)] * np.asarray(by)[:, None]
+    np.testing.assert_allclose(np.asarray(re.design), expect, atol=1e-12)
+
+
+def test_re_smooth_infers_levels_and_is_a_pytree():
+    g = jnp.asarray(np.array([0, 3, 1, 2], dtype=np.int32))
+    re = re_smooth(g)
+    assert re.dim == 4  # inferred max + 1
+    leaves, treedef = jax.tree_util.tree_flatten(re)
+    rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert isinstance(rebuilt, REBasis) and rebuilt.dim == 4
