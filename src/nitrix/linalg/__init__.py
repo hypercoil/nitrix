@@ -57,7 +57,7 @@ from .optimize import (
     implicit_minimize,
     levenberg_marquardt,
 )
-from .residual import residualise
+from .residual import partial_residualise, residualise
 from .solve import cho_solve, solve
 from .spd import (
     cone_project_spd,
@@ -84,6 +84,7 @@ __all__ = [
     'vec2sym',
     # residual
     'residualise',
+    'partial_residualise',
     # solve
     'solve',
     'cho_solve',
