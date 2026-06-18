@@ -308,6 +308,20 @@ register(
 )
 register(
     OpInfo(
+        'nitrix.linalg.partial_residualise',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (10, 200)),),
+            {
+                'signal': jax.random.normal(_key(1), (3, 200)),
+                'noise': jax.random.normal(_key(2), (4, 200)),
+            },
+        ),
+        invariants=('non-aggressive (joint-fit) residualisation',),
+        notes='ICA-AROMA: removes only noise@beta_noise; cuSOLVER-free Cholesky',
+    )
+)
+register(
+    OpInfo(
         'nitrix.linalg.linear_kernel',
         fixture=lambda: ((jax.random.normal(_key(), (50, 16)),), {}),
         invariants=('shared with linear_distance via identity formula',),
@@ -474,6 +488,28 @@ register(
         vmap_arg=None,  # already voxelwise
         invariants=('FaST-LMM spectral rotation', 'no V*N^2 intermediate'),
         notes='~5e-3 parity with statsmodels.MixedLM',
+    )
+)
+
+
+def _lme_fit_fixture():
+    rng = np.random.default_rng(0)
+    g, n_per = 4, 20
+    N = g * n_per
+    Y = jnp.asarray(rng.standard_normal((8, N)).astype(np.float32))
+    X = jnp.asarray(rng.standard_normal((N, 2)).astype(np.float32))
+    group = jnp.asarray(np.repeat(np.arange(g), n_per))
+    return (Y, X), {'group': group, 'n_iter': 10}
+
+
+register(
+    OpInfo(
+        'nitrix.stats.lme.lme_fit',
+        fixture=_lme_fit_fixture,
+        diff_arg=0,
+        vmap_arg=None,  # already voxelwise
+        invariants=('performance-preserving R1/R2 dispatch',),
+        notes='r==1 -> reml_fit (R1 FaST-LMM); r>=2 -> block-Woodbury (R2)',
     )
 )
 
@@ -3099,6 +3135,160 @@ register(
         diff_arg=0,
         vmap_arg=0,
         invariants=('reconstruct from PCA coordinates',),
+    )
+)
+
+# --- stats: modelling suite (GLM / GAM / connectivity) + randomized SVD ------
+
+
+def _glm_fixture():
+    rng = np.random.default_rng(0)
+    V, N, p = 16, 30, 3
+    Y = jnp.asarray(rng.standard_normal((V, N)).astype(np.float32))
+    X = jnp.asarray(rng.standard_normal((N, p)).astype(np.float32))
+    return (Y, X), {}
+
+
+register(
+    OpInfo(
+        'nitrix.stats.glm_fit',
+        fixture=_glm_fixture,
+        diff_arg=0,
+        vmap_arg=None,  # already mass-univariate over V
+        invariants=('OLS fast path + exp-family P-IRLS', 'cuSOLVER-free'),
+        notes='returns GLMResult; grad reduces the coef leaf',
+    )
+)
+
+
+def _gam_setup():
+    """Build a GAM fit op over a closed-over P-spline basis (a non-array arg)."""
+    x = np.sort(np.random.default_rng(0).uniform(0.0, 1.0, 60)).astype(
+        np.float32
+    )
+    from nitrix.stats.basis import bspline_basis
+    from nitrix.stats.gam import gam_fit
+
+    sb = bspline_basis(jnp.asarray(x), 8, center=True)
+
+    def op(Y):
+        return gam_fit(Y, [sb], n_outer=4, n_inner=4)
+
+    def fixture():
+        rng = np.random.default_rng(1)
+        Y = jnp.asarray(
+            (
+                np.sin(2 * np.pi * x)[None, :]
+                + rng.standard_normal((16, 60)) * 0.3
+            ).astype(np.float32)
+        )
+        return (Y,), {}
+
+    return op, fixture
+
+
+_gam_op, _gam_fixture = _gam_setup()
+
+register(
+    OpInfo(
+        'nitrix.stats.gam_fit',
+        fixture=_gam_fixture,
+        fn_override=_gam_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'Gaussian cross-product fast path (no N in the inner loop)',
+            'generalized Fellner-Schall lambda selection',
+        ),
+        notes='shared P-spline basis closed over; grad reduces the coef leaf',
+    )
+)
+
+register(
+    OpInfo(
+        'nitrix.stats.ledoit_wolf',
+        fixture=lambda: ((jax.random.normal(_key(), (40, 8)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('Ledoit-Wolf analytic shrinkage', 'sklearn parity <=4e-16'),
+        notes='returns (cov, shrinkage); grad reduces the cov leaf',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.oas',
+        fixture=lambda: ((jax.random.normal(_key(), (40, 8)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('OAS analytic shrinkage (Chen 2010)', 'sklearn parity'),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.shrunk_covariance',
+        fixture=lambda: ((jax.random.normal(_key(), (40, 8)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('analytic-shrinkage covariance (Ledoit-Wolf default)',),
+    )
+)
+
+
+def _spd(p=8, seed=0):
+    rng = np.random.default_rng(seed)
+    a = rng.standard_normal((p, p)).astype(np.float32)
+    return jnp.asarray(a @ a.T / p + np.eye(p, dtype=np.float32))
+
+
+register(
+    OpInfo(
+        'nitrix.stats.glasso',
+        fixture=lambda: ((_spd(), 0.1), {'n_outer': 20, 'n_inner': 10}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'graphical-LASSO coordinate descent (rolled)',
+            'off-diagonal-only L1; cuSOLVER-free',
+        ),
+        notes='sparse precision; KKT-validated (not sklearn bit-match)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.glasso_path',
+        fixture=lambda: (
+            (_spd(), jnp.asarray([0.3, 0.1], dtype=jnp.float32)),
+            {'n_outer': 20, 'n_inner': 10},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('warm-started glasso lambda path (lax.scan)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.stats.ebic_score',
+        fixture=lambda: ((_spd(seed=1), _spd(seed=2), 50), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('extended BIC (Foygel-Drton 2010)', 'rolled-Cholesky logdet'),
+        notes='scalar model-selection score',
+    )
+)
+
+register(
+    OpInfo(
+        'nitrix.linalg.randomized_svd',
+        fixture=lambda: ((jax.random.normal(_key(), (200, 60)), 8), {
+            'key': _key(1)
+        }),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'HMT-2011 range finder + subspace iteration',
+            'eigh-based orthonormalisation (no qr/svd)',
+        ),
+        notes='eager (safe_eigh on the small Gram); jit/vmap/grad N/A',
     )
 )
 

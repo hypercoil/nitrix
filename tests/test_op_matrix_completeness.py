@@ -93,6 +93,34 @@ EXCLUDE: frozenset[str] = frozenset(
         'smoothing.metric_from_spd',
         # -- Thin vmap wrapper of an already-cataloged op -------------------------
         'geometry.spatial_transform_batched',  # vmap of spatial_transform
+        # -- Post-fit read-outs on a GLMResult / GAMResult: contrasts, goodness- --
+        #    of-fit, model comparison, prediction.  They operate on a *fitted*
+        #    result pytree (not raw arrays); the fit (glm_fit / gam_fit) is the
+        #    cataloged op and the dominant cost -- these are cheap reductions /
+        #    contrasts on its stored sufficient statistics, benchmarked with it.
+        'stats.t_contrast',
+        'stats.f_contrast',
+        'stats.r_squared',
+        'stats.adj_r_squared',
+        'stats.deviance_explained',
+        'stats.log_likelihood',
+        'stats.aic',
+        'stats.bic',
+        'stats.compare_models',
+        'stats.predict',
+        'stats.smooth_partial_effect',  # renders a fitted GAMResult smooth
+        'stats.lme.lme_t_contrast',  # consumes a fitted REMLResult (contrast test)
+        # -- Construction-time / re-evaluation spline-basis helpers: build a ------
+        #    SplineBasis / TensorBasis / REBasis pytree (or render its design on a
+        #    grid) to set up a GAM -- one-off, not the mass-univariate hot path.
+        #    gam_fit is the cataloged op.
+        'stats.bspline_basis',
+        'stats.cyclic_cubic_basis',
+        'stats.thinplate_regression_basis',
+        'stats.tensor_product_basis',
+        'stats.re_smooth',  # builds a random-effect (design, penalty) block
+        'stats.spline_design',
+        'stats.tensor_product_design',
     }
 )
 
