@@ -514,6 +514,31 @@ register(
 )
 
 
+def _gls_fit_fixture():
+    rng = np.random.default_rng(0)
+    g, n_per = 8, 10
+    N = g * n_per
+    Y = jnp.asarray(rng.standard_normal((8, N)).astype(np.float32))
+    X = jnp.asarray(rng.standard_normal((N, 2)).astype(np.float32))
+    group = jnp.asarray(np.repeat(np.arange(g), n_per))
+    return (Y, X), {'group': group, 'corr': 'ar1', 'n_iter': 10}
+
+
+register(
+    OpInfo(
+        'nitrix.stats.lme.gls_fit',
+        fixture=_gls_fit_fixture,
+        diff_arg=0,
+        vmap_arg=None,  # already voxelwise
+        invariants=(
+            'closed-form per-group whitening (innovations / rank-1)',
+            'cuSOLVER-free profile-REML Newton',
+        ),
+        notes='structured residual ar1/car1/cs; nlme gls parity (REML)',
+    )
+)
+
+
 def _flame_fixture():
     rng = np.random.default_rng(0)
     N, p, V = 30, 2, 16

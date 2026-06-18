@@ -94,6 +94,12 @@ EXCLUDE: frozenset[str] = frozenset(
         # -- Family constructor: builds a Family config record (link/variance/    -
         #    deviance), consumed by glm_fit / gam_fit -- not itself a score kernel.
         'stats.negbinomial',
+        # -- Correlation-structure constructors: build a CorrSpec config record    -
+        #    (per-group whitening + log-det), consumed by stats.lme.gls_fit -- not
+        #    themselves array ops.
+        'stats.lme.ar1',
+        'stats.lme.car1',
+        'stats.lme.cs',
         # -- Thin vmap wrapper of an already-cataloged op -------------------------
         'geometry.spatial_transform_batched',  # vmap of spatial_transform
         # -- Post-fit read-outs on a GLMResult / GAMResult: contrasts, goodness- --

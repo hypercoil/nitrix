@@ -48,9 +48,20 @@
 > (≡ statsmodels MixedLM), and an independent dense-numpy PQL reference (β / BLUPs
 > / σ_b² to ~1e-5) for Poisson + binomial; binary-PQL attenuation reproduced and
 > documented. (Random *slopes* under a non-Gaussian family, and Laplace, are
-> Tier-2; the Gaussian random slope is served by `lme_fit` R2.) The rest of
-> Tier-1/Tier-2 (§1.4 AR1/CAR1, §4 Beta/Tweedie/ordinal, §3.2–3.3 cr/gp/mrf, §1.1
-> R3/R4, §1.3 Kenward-Roger, §1.2 Laplace) remain proposed. Driver: the **`nwx`**
+> Tier-2; the Gaussian random slope is served by `lme_fit` R2.) **§1.4
+> error-correlation structures** — `gls_fit(Y, X, *, group, corr, time=…)` fits a
+> GLS with a structured within-group residual `σ_e² R(ρ)`: `ar1` (discrete
+> AR(1)), `car1` (continuous-time AR(1), unequal times), `cs` (compound
+> symmetry). Each structure supplies a **closed-form per-group whitening**
+> (`W R Wᵀ = I` — innovations recurrence for ar1/car1, rank-one for cs) so the fit
+> reduces to a profile-REML Newton over one parameter, cuSOLVER-free; β/ρ/σ_e²
+> match an **exact dense GLS-REML** reference to ~1e-7 for all three (and AR(1) β
+> tracks statsmodels `GLSAR`). This is the **R0 + corr** path (structured
+> residual, no random effect); composing `corr=` *with* a random effect (R2 +
+> corr) and the `varIdent`/`varPower` variance functions are the §1.4 follow-up.
+> The rest of Tier-1/Tier-2 (§4 Beta/Tweedie/ordinal, §3.2–3.3 cr/gp/mrf, §1.1
+> R3/R4, §1.3 Kenward-Roger, §1.2 Laplace, §1.4 R2+corr / varFunc) remain
+> proposed. Driver: the **`nwx`**
 > neuroimaging Wilkinson-extension DSL (in `gramform`;
 > `gramform/docs/nwx/spec.md`) emits an immutable `ModelSpec` IR that an engine
 > lowers onto `nitrix` score kernels. `nwx`'s v1 scope guarantee — GLM / GAM /
@@ -262,7 +273,7 @@ scalar normally not differentiated through (document, don't promise a VJP).
 **Effort: M (Satterthwaite) + M-L (Kenward-Roger, Tier-2).** **Oracle:**
 `lmerTest` (Satterthwaite), `pbkrtest` (Kenward-Roger).
 
-### §1.4 Error-correlation & heteroscedasticity structures  *(high value)*
+### §1.4 Error-correlation & heteroscedasticity structures  *(high value)* — ✅ SHIPPED (ar1/car1/cs GLS; R2+corr & varFunc Tier-2)
 
 **What.** Within-group residual correlation / non-constant variance (nlme
 parity): `ar1(time|g)`, `car1`, `cs` (compound symmetry), and variance functions
@@ -524,8 +535,9 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 **Tier 1 — high value (rounds out the GL(A)MM surface):**
 
 - §1.1 R3 (nested); ~~§1.2 GLMM (PQL)~~ ✅ (`glmm_fit`, level-count dispatch);
-  §1.4 AR1/CAR1; ~~§3.1 by-variable smooths~~ ✅; ~~§4 `S`-class families
-  (Gamma/NB)~~ ✅ (Beta deferred); ~~§6.2 sandwich/cluster SEs~~ ✅.
+  ~~§1.4 AR1/CAR1~~ ✅ (`gls_fit` ar1/car1/cs; R2+corr & varFunc Tier-2);
+  ~~§3.1 by-variable smooths~~ ✅; ~~§4 `S`-class families (Gamma/NB)~~ ✅ (Beta
+  deferred); ~~§6.2 sandwich/cluster SEs~~ ✅.
 
 **Tier 2 — future / heavier:**
 
