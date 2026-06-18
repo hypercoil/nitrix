@@ -55,15 +55,35 @@ def _tril_layout(r: int) -> Tuple[Tuple[int, int], ...]:
     return tuple((i, j) for i in range(r) for j in range(i + 1))
 
 
-def _build_chol(chol_params: Float[Array, 'm'], r: int) -> Float[Array, 'r r']:
+def _param_layout(
+    r: int, diagonal: bool = False
+) -> Tuple[Tuple[int, int], ...]:
+    """Free ``(i, j)`` positions of the Cholesky factor for ``G``.
+
+    ``diagonal=False`` -- the full lower triangle (``r(r+1)/2`` params): an
+    **unstructured** ``r x r`` within-group covariance ``(1 + x | g)``.
+    ``diagonal=True`` -- only the diagonal (``r`` params): an **independent**
+    (diagonal-``G``) random effect ``(x || g)``, where intercept and slope share
+    no covariance.  Both are tier-R2 (one grouping factor, block-diagonal ``V``).
+    """
+    if diagonal:
+        return tuple((i, i) for i in range(r))
+    return _tril_layout(r)
+
+
+def _build_chol(
+    chol_params: Float[Array, 'm'], r: int, diagonal: bool = False
+) -> Float[Array, 'r r']:
     """Lower-triangular Cholesky factor ``L`` from its free parameters.
 
     Diagonal entries are exponentiated (positive), off-diagonal entries are
     free -- so ``G = L L^T`` is positive-definite for any real ``chol_params``.
-    The loop is over the static ``r(r+1)/2`` layout (unrolled; ``r`` is tiny).
+    The loop is over the static layout (unrolled; ``r`` is tiny): the full lower
+    triangle (``diagonal=False``) or just the diagonal (``diagonal=True`` -> a
+    diagonal ``G``, i.e. an uncorrelated ``(x || g)`` random effect).
     """
     L = jnp.zeros((r, r), dtype=chol_params.dtype)
-    for k, (i, j) in enumerate(_tril_layout(r)):
+    for k, (i, j) in enumerate(_param_layout(r, diagonal)):
         val = jnp.exp(chol_params[k]) if i == j else chol_params[k]
         L = L.at[i, j].set(val)
     return L
@@ -105,10 +125,11 @@ def _nll_and_beta(
     r: int,
     p: int,
     ridge: float,
+    diagonal: bool,
 ) -> Tuple[Float[Array, ''], Float[Array, 'p']]:
     """Profile REML negative log-likelihood (and ``beta_hat``) at ``theta``."""
     se2 = jnp.exp(theta[-1])
-    L = _build_chol(theta[:-1], r)
+    L = _build_chol(theta[:-1], r, diagonal)
     g_cov = L @ L.T
     g_inv, logdet_g = _small_inv_logdet(g_cov, r)
 
@@ -144,13 +165,25 @@ def _fit_one(
     r: int,
     p: int,
     spec: VarCompSpec,
+    diagonal: bool,
 ) -> Tuple[Float[Array, 'nt'], Float[Array, 'p'], Float[Array, '']]:
     """Single-voxel block-Woodbury REML fit via damped autodiff-Newton."""
     nt = theta_init.shape[0]
 
     def nll(theta: Float[Array, 'nt']) -> Float[Array, '']:
         return _nll_and_beta(
-            theta, ztz, xtz, xtx, zty, xty, yty, n_minus_mr, r, p, spec.ridge
+            theta,
+            ztz,
+            xtz,
+            xtx,
+            zty,
+            xty,
+            yty,
+            n_minus_mr,
+            r,
+            p,
+            spec.ridge,
+            diagonal,
         )[0]
 
     grad_fn = jax.grad(nll)
@@ -182,7 +215,18 @@ def _fit_one(
 
     theta, _ = lax.scan(newton, theta_init, xs=None, length=spec.n_iter)
     final_nll, beta = _nll_and_beta(
-        theta, ztz, xtz, xtx, zty, xty, yty, n_minus_mr, r, p, spec.ridge
+        theta,
+        ztz,
+        xtz,
+        xtx,
+        zty,
+        xty,
+        yty,
+        n_minus_mr,
+        r,
+        p,
+        spec.ridge,
+        diagonal,
     )
     return theta, beta, -final_nll
 
@@ -197,14 +241,18 @@ def fit_blockwoodbury_reml(
     *,
     spec: VarCompSpec = VarCompSpec(),
     block: int | None = None,
+    diagonal: bool = False,
 ) -> Tuple[Float[Array, 'V nt'], Float[Array, 'V p'], Float[Array, 'V']]:
     """Batched block-Woodbury REML over ``V`` voxels (single grouping factor).
 
     ``Z`` is the ``(N, r)`` per-observation random-covariate design (e.g.
     ``[1, x]`` for ``(1 + x | g)``); ``group`` is the ``(N,)`` group label.
-    ``theta`` is ``[chol(G) params, log sigma_e^2]`` (``nt = r(r+1)/2 + 1``).
+    ``theta`` is ``[chol(G) params, log sigma_e^2]``: ``nt = r(r+1)/2 + 1`` for
+    an unstructured ``G`` (``diagonal=False``), or ``nt = r + 1`` for a diagonal
+    ``G`` (``diagonal=True``, the uncorrelated ``(x || g)`` random effect).
     Returns ``(theta_hat, beta_hat, log_lik)``; recover ``G = L L^T`` from the
-    Cholesky params and ``sigma_e^2 = exp(theta[-1])``.
+    Cholesky params (via ``_build_chol(..., diagonal)``) and ``sigma_e^2 =
+    exp(theta[-1])``.
     """
     p = X.shape[-1]
     r = Z.shape[-1]
@@ -219,7 +267,7 @@ def fit_blockwoodbury_reml(
         xty = X.T @ y  # (p,)
         yty = y @ y
         return _fit_one(
-            zty, xty, yty, th, ztz, xtz, xtx, n_minus_mr, r, p, spec
+            zty, xty, yty, th, ztz, xtz, xtx, n_minus_mr, r, p, spec, diagonal
         )
 
     return cast(

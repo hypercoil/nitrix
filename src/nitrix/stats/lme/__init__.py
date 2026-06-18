@@ -31,8 +31,10 @@ output statistics via the implicit-function-theorem VJP (see
 from .flame import FLAMEResult, flame_two_level
 from .reml import (
     LMEContrast,
+    LMEFContrast,
     LMEResult,
     REMLResult,
+    lme_f_contrast,
     lme_fit,
     lme_t_contrast,
     reml_fit,
@@ -43,9 +45,11 @@ __all__ = [
     'REMLResult',
     'LMEResult',
     'LMEContrast',
+    'LMEFContrast',
     'FLAMEResult',
     'reml_fit',
     'lme_fit',
     'lme_t_contrast',
+    'lme_f_contrast',
     'flame_two_level',
 ]

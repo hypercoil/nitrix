@@ -110,6 +110,7 @@ EXCLUDE: frozenset[str] = frozenset(
         'stats.predict',
         'stats.smooth_partial_effect',  # renders a fitted GAMResult smooth
         'stats.lme.lme_t_contrast',  # consumes a fitted REMLResult (contrast test)
+        'stats.lme.lme_f_contrast',  # consumes a fitted REMLResult (F-contrast test)
         # -- Construction-time / re-evaluation spline-basis helpers: build a ------
         #    SplineBasis / TensorBasis / REBasis pytree (or render its design on a
         #    grid) to set up a GAM -- one-off, not the mass-univariate hot path.
