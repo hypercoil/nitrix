@@ -29,7 +29,14 @@ import pytest
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.stats.lme import flame_two_level, reml_fit
+from nitrix.stats.lme import (
+    LMEResult,
+    REMLResult,
+    flame_two_level,
+    lme_fit,
+    lme_t_contrast,
+    reml_fit,
+)
 
 # ---------------------------------------------------------------------------
 # REML: balanced one-way reference
@@ -576,3 +583,185 @@ def test_reml_lowrank_no_NxN_intermediate():
         assert not (len(dims) == 2 and dims[0] == N and dims[1] == N), (
             f'unexpected dense N x N factor {dims}; low-rank should stay N x q'
         )
+
+
+# ---------------------------------------------------------------------------
+# Mixed-model fixed-effect inference (Satterthwaite)
+# ---------------------------------------------------------------------------
+
+
+def _random_intercept_data(G=12, n_per=8, beta=(1.5, -0.7), seed=0):
+    rng = np.random.default_rng(seed)
+    N = G * n_per
+    gid = np.repeat(np.arange(G), n_per)
+    X = np.column_stack([np.ones(N), rng.standard_normal(N)])
+    Z = np.zeros((N, G))
+    for i in range(G):
+        Z[gid == i, i] = 1.0
+    b = rng.standard_normal(G) * 0.9
+    y = X @ np.asarray(beta) + b[gid] + rng.standard_normal(N) * 0.6
+    return jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(Z), gid
+
+
+@pytest.mark.skipif(_skip_if_no_statsmodels(), reason='statsmodels missing')
+def test_lme_t_contrast_se_matches_statsmodels():
+    """The contrast SE = sqrt(c^T (X^T V^-1 X)^-1 c) matches lme4/statsmodels
+    MixedLM (REML) for the fixed-effect covariate."""
+    import pandas as pd
+    import statsmodels.api as sm
+
+    Y, X, Z, gid = _random_intercept_data()
+    res = reml_fit(Y, X, Z, n_iter=80)
+    ct = lme_t_contrast(res, jnp.asarray([0.0, 1.0]))
+
+    dat = pd.DataFrame(
+        {'y': np.asarray(Y[0]), 'x': np.asarray(X[:, 1]), 'g': gid}
+    )
+    md = sm.MixedLM.from_formula('y ~ x', groups='g', data=dat).fit(reml=True)
+    np.testing.assert_allclose(
+        float(ct.effect[0]), md.fe_params['x'], rtol=1e-3
+    )
+    np.testing.assert_allclose(float(ct.se[0]), md.bse_fe['x'], rtol=5e-3)
+    # a sane Satterthwaite df (between the contrast rank and N - p) and a
+    # significant covariate effect
+    assert 1.0 < float(ct.df[0]) < float(X.shape[0])
+    assert float(ct.p_value[0]) < 0.01
+
+
+def test_lme_satterthwaite_gradient_matches_finite_difference():
+    """The contrast-variance gradient w^T M_k w equals d(c^T C c)/dtheta_k by
+    finite difference -- the load-bearing Satterthwaite ingredient."""
+    from nitrix.linalg._solver import safe_eigh
+    from nitrix.stats.lme._varcomp import VarCompSpec, varcomp_inference
+
+    Y, X, Z, _ = _random_intercept_data(seed=1)
+    res = reml_fit(Y, X, Z, n_iter=80)
+    c = jnp.asarray([0.0, 1.0])
+
+    N = X.shape[0]
+    ZZt = Z @ Z.T
+    ev, U = safe_eigh(0.5 * (ZZt + ZZt.T))
+    lam = jnp.clip(ev, 0.0, None)
+    y_rot = (Y @ U)[0]
+    x_rot = U.T @ X
+    bdiag = jnp.stack([lam, jnp.ones_like(lam)])
+    spec = VarCompSpec.reml()
+    th = res.theta_hat[0]
+    off = jnp.zeros(N)
+
+    def cCc(theta):
+        a_inv, _, _ = varcomp_inference(
+            theta, y_rot, x_rot, bdiag, off, 2, spec
+        )
+        w = a_inv @ c
+        return float(c @ w)
+
+    w = res.fixed_cov[0] @ c
+    g_an = np.array([float(w @ res.grad_m[0, k] @ w) for k in range(2)])
+    eps = 1e-5
+    g_fd = np.array(
+        [
+            (cCc(th.at[k].add(eps)) - cCc(th.at[k].add(-eps))) / (2 * eps)
+            for k in range(2)
+        ]
+    )
+    np.testing.assert_allclose(g_an, g_fd, rtol=1e-4)
+
+
+def test_lme_t_contrast_lowrank_matches_dense():
+    """The contrast inference is identical on the low-rank and dense paths
+    (the null-space Satterthwaite gradient term is correct)."""
+    Y, X, Z, _ = _random_intercept_data(seed=2)
+    c = jnp.asarray([0.0, 1.0])
+    dense = lme_t_contrast(reml_fit(Y, X, Z, n_iter=80), c)
+    low = lme_t_contrast(reml_fit(Y, X, Z, n_iter=80, low_rank=True), c)
+    np.testing.assert_allclose(float(low.se[0]), float(dense.se[0]), atol=1e-7)
+    np.testing.assert_allclose(float(low.df[0]), float(dense.df[0]), rtol=1e-4)
+
+
+def test_lme_t_contrast_rejects_unknown_dof():
+    Y, X, Z, _ = _random_intercept_data()
+    res = reml_fit(Y, X, Z, n_iter=20)
+    with pytest.raises(ValueError, match='satterthwaite'):
+        lme_t_contrast(res, jnp.asarray([0.0, 1.0]), dof='kr')
+
+
+# ---------------------------------------------------------------------------
+# lme_fit dispatcher: R1 (scalar) -> reml_fit; R2 (correlated) -> block-Woodbury
+# ---------------------------------------------------------------------------
+
+
+def _slope_data(seed=0, M=40, n_per=20, g_cov=None, se=0.6):
+    rng = np.random.default_rng(seed)
+    if g_cov is None:
+        g_cov = np.array([[0.8, 0.3], [0.3, 0.5]])
+    N = M * n_per
+    gid = np.repeat(np.arange(M), n_per)
+    x = rng.standard_normal(N)
+    X = np.column_stack([np.ones(N), x])
+    L = np.linalg.cholesky(g_cov)
+    b = rng.standard_normal((M, 2)) @ L.T
+    y = (
+        X @ np.array([1.5, -0.7])
+        + np.sum(X * b[gid], axis=1)
+        + rng.standard_normal(N) * se
+    )
+    return y, X, gid
+
+
+def test_lme_fit_r1_dispatches_to_reml_fit():
+    """A scalar random intercept (no z) routes to the FaST-LMM R1 path: lme_fit
+    returns a REMLResult identical to reml_fit on the one-hot design."""
+    Y, X, Z, _ = _random_intercept_data()
+    gid = jnp.asarray(np.argmax(np.asarray(Z), axis=1))
+    r1 = lme_fit(Y, X, group=gid)
+    ref = reml_fit(Y, X, Z)
+    assert isinstance(r1, REMLResult)
+    np.testing.assert_allclose(
+        np.asarray(r1.beta_hat), np.asarray(ref.beta_hat), atol=1e-9
+    )
+
+
+@pytest.mark.skipif(
+    _skip_if_no_statsmodels(), reason='statsmodels not installed'
+)
+def test_lme_fit_r2_block_woodbury_matches_statsmodels():
+    """A correlated random slope (z given) routes to the tier-R2 block-Woodbury
+    REML; the recovered fixed effects, G, and residual variance match
+    statsmodels MixedLM (REML) to tight tolerance."""
+    import statsmodels.api as sm
+
+    y, X, gid = _slope_data()
+    r2 = lme_fit(
+        jnp.asarray(y[None, :]),
+        jnp.asarray(X),
+        group=jnp.asarray(gid),
+        z=jnp.asarray(X),
+        n_iter=200,
+    )
+    assert isinstance(r2, LMEResult)
+    assert r2.tier == 'R2'
+    md = sm.MixedLM(y, X, groups=gid, exog_re=X).fit(reml=True)
+    G_hat = np.asarray(r2.cov_re[0])
+    G_ref = np.asarray(md.cov_re)
+    assert np.max(np.abs(G_hat - G_ref)) / np.max(np.abs(G_ref)) < 1e-3
+    assert abs(float(r2.sigma_e_sq[0]) - md.scale) / md.scale < 1e-3
+    np.testing.assert_allclose(
+        np.asarray(r2.beta_hat[0]), np.asarray(md.fe_params), rtol=5e-3
+    )
+
+
+def test_lme_fit_r2_symmetric_psd_cov_re():
+    """The recovered random-effect covariance is symmetric PSD (log-Cholesky
+    parameterisation guarantees it)."""
+    y, X, gid = _slope_data(seed=1)
+    r2 = lme_fit(
+        jnp.asarray(y[None, :]),
+        jnp.asarray(X),
+        group=jnp.asarray(gid),
+        z=jnp.asarray(X),
+        n_iter=150,
+    )
+    G = np.asarray(r2.cov_re[0])
+    np.testing.assert_allclose(G, G.T, atol=1e-10)
+    assert float(np.linalg.eigvalsh(G).min()) > -1e-9

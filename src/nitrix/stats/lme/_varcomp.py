@@ -84,7 +84,7 @@ from jaxtyping import Array, Float
 from .._batching import blocked_vmap as _blocked_vmap
 from .._smalllinalg import small_inv_logdet as _small_inv_logdet
 
-__all__ = ['VarCompSpec', 'fit_varcomp_diagonal']
+__all__ = ['VarCompSpec', 'fit_varcomp_diagonal', 'varcomp_inference']
 
 
 # ---------------------------------------------------------------------------
@@ -382,3 +382,46 @@ def fit_varcomp_diagonal(
         Tuple[Float[Array, 'V K'], Float[Array, 'V p'], Float[Array, 'V']],
         _blocked_vmap(per_voxel_off, (Y, offset, theta_init), block=block),
     )
+
+
+# ---------------------------------------------------------------------------
+# Fixed-effect inference quantities at the fitted theta
+# ---------------------------------------------------------------------------
+
+
+def varcomp_inference(
+    theta: Float[Array, 'K'],
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    B: Float[Array, 'K N'],
+    offset: Float[Array, 'N'],
+    p: int,
+    spec: VarCompSpec,
+) -> Tuple[Float[Array, 'p p'], Float[Array, 'K K'], Float[Array, 'K p p']]:
+    """Fixed-effect inference quantities at the fitted ``theta``.
+
+    Surfaces what the per-voxel solve already forms (and the historical fit
+    discarded) for a mixed-model contrast test:
+
+    - ``fixed_cov = (X^T V^{-1} X)^{-1}`` -- ``Cov(beta_hat)`` (``A_inv``).
+    - ``theta_cov`` -- ``Cov(theta_hat)``, the inverse average-information matrix
+      (the asymptotic covariance of the REML variance components).
+    - ``grad_m`` -- the ``(K, p, p)`` tensors ``M_k = sum_i (g_{k,i} / d_i^2)
+      x_i x_i^T`` (``g_k = dd/dtheta_k``).  For a contrast ``c`` with ``w =
+      fixed_cov c`` these give the Satterthwaite gradient
+      ``d(c^T fixed_cov c)/dtheta_k = w^T M_k w`` -- contrast-independent, so a
+      single fit serves any contrast.  All cuSOLVER-free.
+    """
+    k = theta.shape[0]
+    sigma2 = jnp.exp(theta)
+    d = sigma2 @ B + offset
+    inv_d = 1.0 / d
+    _, A_inv, _, _ = _profile_beta(d, y, X, p, spec.ridge)
+    _, info, _ = _score_and_info(theta, y, X, B, offset, p, spec.ridge)
+    info_damped = info + spec.damping * jnp.eye(k, dtype=info.dtype)
+    theta_cov, _ = _small_inv_logdet(info_damped, k)
+
+    g = sigma2[:, None] * B  # (K, N) = dd/dtheta_k
+    weight = g * (inv_d * inv_d)[None, :]  # (K, N): g_{k,i} / d_i^2
+    grad_m = jnp.einsum('kn,np,nq->kpq', weight, X, X)  # (K, p, p)
+    return A_inv, theta_cov, grad_m
