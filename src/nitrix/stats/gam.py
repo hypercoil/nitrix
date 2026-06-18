@@ -185,10 +185,12 @@ def _smooth_penalties(
     A :class:`SplineBasis` contributes one penalty (its ``(k, k)`` matrix and
     its eigenvalues, with the unpenalised null space floored to zero); a
     :class:`TensorBasis` contributes one per margin (the Kronecker-embedded
-    penalty and its joint-eigenbasis Kronecker eigenvalues -- already floored).
-    ``eig_block`` is used only for the basis-invariant ``tr(S_lambda^+ S_k)``;
-    ``S_block`` (the original-basis matrix) drives the fit, so coefficients stay
-    in the input basis.
+    penalty and its joint-eigenbasis Kronecker eigenvalues -- already floored);
+    a :class:`REBasis` contributes its identity ridge (full rank ``q``, so the
+    eigenvalues are exactly one -- no host eigh needed).  ``eig_block`` is used
+    only for the basis-invariant ``tr(S_lambda^+ S_k)``; ``S_block`` (the
+    original-basis matrix) drives the fit, so coefficients stay in the input
+    basis.
     """
     if isinstance(sm, TensorBasis):
         pens = np.asarray(sm.penalties)
@@ -724,6 +726,9 @@ def smooth_partial_effect(
     credible band).  ``basis`` is the smooth used to build the term; for a
     ``TensorBasis`` pass ``x`` as a tuple of matched per-margin grids (all
     length ``g``) and the effect is the interaction surface along that path.
+    For a ``REBasis`` pass ``x`` as the integer level indices to read off -- the
+    effect is then the per-level random effect (the BLUP intercept, or the
+    random-slope coefficient) at those levels.
     """
     lo, hi = result.col_slices[smooth_index]
     if isinstance(basis, TensorBasis):

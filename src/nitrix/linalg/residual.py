@@ -11,18 +11,21 @@ explained by confounds).
 
 Two solver paths, both differentiable:
 
-- ``method="cholesky"`` (**default**): normal-equations OLS via
-  Cholesky.  Tall-and-skinny optimised -- for ``X: (obs, k)``
-  with ``obs >> k`` (typical fMRI: 400 TRs × 24 confounds), the
-  heavy step is ``X^T X`` (``O(obs * k^2)``, bandwidth-limited)
-  followed by a ``k × k`` Cholesky and two triangular solves
-  (``O(k^3)``).  Stable when the system is well-conditioned;
-  add an L2 ridge if you're not sure.  Note that ``X^T X`` is
-  numerically squared in condition number, so this path needs
-  either a well-conditioned ``X`` or an ``l2 > 0`` ridge.
-- ``method="svd"``: SVD-based lstsq.  Stable even for rank-
-  deficient ``X``.  Slower (~2× on tall systems) but works
-  without an L2 ridge on collinear columns.
+- ``method="cholesky"`` (**default**): normal-equations OLS via a
+  **cuSOLVER-free** rolled Cholesky (``_chol_lower``) + cuBLAS triangular
+  solves, so it runs on the cuSOLVER-affected GPU stacks (where
+  ``jnp.linalg.cholesky`` / ``svd`` fail to create a handle).  Tall-and-skinny
+  optimised -- for ``X: (obs, k)`` with ``obs >> k`` (typical fMRI: 400 TRs ×
+  24 confounds), the heavy step is ``X^T X`` (``O(obs * k^2)``,
+  bandwidth-limited) followed by a ``k × k`` Cholesky and two triangular solves
+  (``O(k^3)``).  ``X^T X`` is numerically squared in condition number, so this
+  path wants a well-conditioned ``X`` or an ``l2 > 0`` ridge; a rank-deficient
+  Gram is regularised by the modified-Cholesky pivot floor (a finite result,
+  not ``NaN`` -- but prefer ``l2 > 0`` for a controlled treatment).
+- ``method="svd"``: SVD-based lstsq.  Stable even for rank-deficient ``X``;
+  slower (~2× on tall systems) but works without an L2 ridge on collinear
+  columns.  **cuSOLVER-backed** (``gesvd``), so on the broken stacks use the
+  ``"cholesky"`` default (or run on a working backend).
 
 QR was considered as a third path but is currently broken on
 the test runner's GPU (cuSolver ABI mismatch); ``method="qr"``
