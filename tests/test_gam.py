@@ -24,8 +24,14 @@ from nitrix.stats.basis import (
     bspline_basis,
     tensor_product_basis,
 )
-from nitrix.stats.gam import gam_fit, smooth_partial_effect
-from nitrix.stats.glm import POISSON
+from nitrix.stats.gam import (
+    _assemble,
+    _gam_fit_one,
+    _gam_fit_one_gaussian_xprod,
+    gam_fit,
+    smooth_partial_effect,
+)
+from nitrix.stats.glm import GAUSSIAN, POISSON
 
 
 def _smooth_data(seed=0, n=300, noise=0.2):
@@ -167,7 +173,9 @@ def test_shared_lambda_recovers_smooth_and_pools():
     eff, _ = smooth_partial_effect(shared, 0, sb, jnp.asarray(x))
     fit = float(shared.coef[0, 0]) + np.asarray(eff[0])
     interior = (x > 0.05) & (x < 0.95)
-    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
     # homogeneous data: shared lambda near the per-element median
     assert 2.0 < float(shared.edf[0, 0]) < float(sb.dim)
     med = float(jnp.median(per_elt.lam[:, 0]))
@@ -186,7 +194,8 @@ def test_gam_block_chunking_matches_single_vmap():
     sb = bspline_basis(jnp.asarray(x), 12, center=True)
     rng = np.random.default_rng(7)
     Y = jnp.asarray(
-        np.sin(2 * np.pi * x)[None, :] + rng.standard_normal((23, len(x))) * 0.3
+        np.sin(2 * np.pi * x)[None, :]
+        + rng.standard_normal((23, len(x))) * 0.3
     )  # 23 % 8 != 0
     full = gam_fit(Y, [sb])
     chunked = gam_fit(Y, [sb], block=8)
@@ -235,7 +244,16 @@ def test_gam_hlo_is_cusolver_free():
         for c in targets
         if any(
             t in c.lower()
-            for t in ('cusolver', 'syevd', 'potrf', 'getrf', 'geqrf', 'gesvd', 'cholesky', 'eigh')
+            for t in (
+                'cusolver',
+                'syevd',
+                'potrf',
+                'getrf',
+                'geqrf',
+                'gesvd',
+                'cholesky',
+                'eigh',
+            )
         )
     ]
     assert not bad, bad
@@ -327,7 +345,63 @@ def test_tensor_gam_cusolver_free():
         for c in targets
         if any(
             t in c.lower()
-            for t in ('cusolver', 'syevd', 'potrf', 'getrf', 'geqrf', 'gesvd', 'cholesky', 'eigh')
+            for t in (
+                'cusolver',
+                'syevd',
+                'potrf',
+                'getrf',
+                'geqrf',
+                'gesvd',
+                'cholesky',
+                'eigh',
+            )
         )
     ]
     assert not bad, bad
+
+
+# ---------------------------------------------------------------------------
+# Gaussian cross-product fast path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('k', [12, 20])
+def test_gaussian_xprod_matches_generic_irls(k):
+    """The cross-product Gaussian fit (now the per-element default) reproduces
+    the generic IRLS Fellner-Schall fit to floating point -- it is the SAME
+    estimator, computed from c = X^T y and g = y^T y instead of the N-vector."""
+    rng = np.random.default_rng(k)
+    x = np.sort(rng.uniform(0.0, 1.0, 320))
+    sb = bspline_basis(jnp.asarray(x), k, center=True)
+    X, penalties, pen_eig, _ = _assemble(320, [sb], None, True, jnp.float64)
+    p = X.shape[1]
+    y = jnp.asarray(np.sin(2 * np.pi * x) + rng.standard_normal(320) * 0.25)
+
+    bg, lg, vg, xg, pg = _gam_fit_one(
+        y, X, penalties, pen_eig, GAUSSIAN, p, 20, 15, 1e-8, 1e-6, 1e8
+    )
+    c = X.T @ y
+    g = y @ y
+    bx, lx, vx, xx, px = _gam_fit_one_gaussian_xprod(
+        c, g, X.T @ X, penalties, pen_eig, 320, p, 20, 1e-8, 1e-6, 1e8
+    )
+    np.testing.assert_allclose(np.asarray(bx), np.asarray(bg), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(lx), np.asarray(lg), atol=1e-9)
+    np.testing.assert_allclose(np.asarray(vx), np.asarray(vg), atol=1e-10)
+    np.testing.assert_allclose(float(px), float(pg), atol=1e-10)
+
+
+def test_gaussian_xprod_is_the_default_and_recovers_smooth():
+    """gam_fit on Gaussian data uses the cross-product path by default and still
+    recovers the smooth / EDF / dispersion (an end-to-end check of the default)."""
+    x, truth, y = _smooth_data(noise=0.2)
+    sb = bspline_basis(jnp.asarray(x), 20, center=True)
+    res = gam_fit(jnp.asarray(y[None, :]), [sb])
+    eff, _ = smooth_partial_effect(res, 0, sb, jnp.asarray(x))
+    fit = float(res.coef[0, 0]) + np.asarray(eff[0])
+    interior = (x > 0.05) & (x < 0.95)
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
+    assert 2.0 < float(res.edf[0, 0]) < float(sb.dim)
+    assert abs(float(res.dispersion[0]) - 0.2**2) < 0.25 * 0.2**2

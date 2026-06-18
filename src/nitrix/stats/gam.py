@@ -455,6 +455,78 @@ def _gam_fit_one(
 
 
 # ---------------------------------------------------------------------------
+# Per-element Gaussian fast path: the cross-product (sufficient-statistic) fit
+# ---------------------------------------------------------------------------
+
+
+def _gam_fit_one_gaussian_xprod(
+    c: Float[Array, 'p'],
+    g: Float[Array, ''],
+    xtx: Float[Array, 'p p'],
+    penalties: Float[Array, 'm p p'],
+    pen_eig: Float[Array, 'm p'],
+    n: int,
+    p: int,
+    n_outer: int,
+    ridge: float,
+    lam_floor: float,
+    lam_ceil: float,
+) -> Tuple[
+    Float[Array, 'p'],
+    Float[Array, 'm'],
+    Float[Array, 'p p'],
+    Float[Array, 'p p'],
+    Float[Array, ''],
+]:
+    """Exact per-voxel Gaussian GAM fit from the cross-products ``c = X^T y_v``
+    and ``g = y_v^T y_v``.
+
+    For the Gaussian identity link the penalised IRLS converges in **one** step
+    to ``beta = (X^T X + S_lambda)^{-1} c`` -- a function of ``y`` only through
+    ``c`` -- and the dispersion (``phi = (g - 2 beta^T c + beta^T X^T X beta) /
+    (N - edf)``), the EDF, and the Fellner-Schall traces all reduce to ``(c, g,
+    X^T X)``.  So the whole per-voxel Fellner-Schall loop runs in ``p``-space
+    with **no N-dimensional vector in the loop** -- ``N`` enters only the one-off
+    cross-products ``X^T Y`` and ``diag(Y Y^T)`` -- and the result is identical
+    (to floating point) to ``_gam_fit_one`` for the Gaussian family.  Returns the
+    same ``(beta, lam, V, xtwx, dispersion)`` tuple; ``xtwx = X^T X`` is shared.
+    """
+    m = penalties.shape[0]
+    ridge_eye = ridge * jnp.eye(p, dtype=xtx.dtype)
+
+    def quantities(
+        lam: Float[Array, 'm'],
+    ) -> Tuple[Float[Array, 'p p'], Float[Array, 'p'], Float[Array, '']]:
+        s_lambda = jnp.tensordot(lam, penalties, axes=(0, 0))
+        v, _ = small_inv_logdet(xtx + s_lambda + ridge_eye, p)
+        beta = v @ c
+        edf = jnp.trace(v @ xtx)
+        rss = g - 2.0 * (beta @ c) + beta @ (xtx @ beta)
+        phi = rss / jnp.clip(n - edf, 1e-3, None)
+        return v, beta, phi
+
+    def outer(lam: Float[Array, 'm'], _: Array) -> Tuple[Float[Array, 'm'], None]:
+        v, beta, phi = quantities(lam)
+        s_lambda_eig = lam @ pen_eig
+
+        def fs(k: Array) -> Float[Array, '']:
+            sk = penalties[k]
+            tr_vsk = jnp.sum(v * sk)
+            energy = beta @ (sk @ beta)
+            tr_slinv_sk = _trace_slinv_sk(pen_eig[k], s_lambda_eig)
+            num = jnp.clip(lam[k] * tr_slinv_sk - lam[k] * tr_vsk, 1e-8, None)
+            den = jnp.clip(energy / phi, 1e-12, None)
+            return jnp.clip(num / den, lam_floor, lam_ceil)
+
+        return jax.vmap(fs)(jnp.arange(m)), None
+
+    lam0 = jnp.ones((m,), dtype=xtx.dtype)
+    lam, _ = lax.scan(outer, lam0, xs=None, length=n_outer)
+    v, beta, phi = quantities(lam)
+    return beta, lam, v, xtx, phi
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -540,6 +612,41 @@ def gam_fit(
             )
         coef, lam, v, xtwx, phi = _gam_fit_shared_gaussian(
             Y, X, penalties, pen_eig, n_outer, ridge, lam_floor, lam_ceil
+        )
+    elif family.name == 'gaussian':
+        # Exact cross-product fast path: the Gaussian fit depends on each y_v
+        # only through c_v = X^T y_v and g_v = y_v^T y_v, so the per-voxel
+        # Fellner-Schall loop runs in p-space with no N-dimensional vector in
+        # the loop (N enters only the one-off cross-products).
+        xtx = X.T @ X
+        c_all = Y @ X  # (V, p)
+        g_all = jnp.sum(Y * Y, axis=1)  # (V,)
+
+        def per_voxel_g(
+            c: Float[Array, 'p'], g: Float[Array, '']
+        ) -> Tuple[
+            Float[Array, 'p'],
+            Float[Array, 'm'],
+            Float[Array, 'p p'],
+            Float[Array, 'p p'],
+            Float[Array, ''],
+        ]:
+            return _gam_fit_one_gaussian_xprod(
+                c,
+                g,
+                xtx,
+                penalties,
+                pen_eig,
+                n,
+                p,
+                n_outer,
+                ridge,
+                lam_floor,
+                lam_ceil,
+            )
+
+        coef, lam, v, xtwx, phi = blocked_vmap(
+            per_voxel_g, (c_all, g_all), block=block
         )
     else:
 
