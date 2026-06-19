@@ -26,7 +26,7 @@ machinery at different ``(W, z)``:
   same cuSOLVER-free ``(p, p)`` solve.  ``gam.py`` calls the same inner solve
   with a non-zero penalty ``S``; here ``S = 0``.
 
-Every ``(p, p)`` solve goes through ``stats._smalllinalg.small_inv_logdet``
+Every ``(p, p)`` solve goes through ``linalg._smalllinalg.small_inv_logdet``
 (closed-form for ``p <= 2``, hand-Cholesky + ``trsm`` for ``p > 2``) -- no
 cuSOLVER custom-call, so the fit runs on the broken-cuSOLVER GPU.
 
@@ -54,6 +54,7 @@ import jax.numpy as jnp
 from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float, Int
 
+from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
 from ._family import (
     BINOMIAL,
@@ -68,7 +69,6 @@ from ._family import (
     tweedie,
 )
 from ._irls import fit_penalised_irls, irls_warm_start
-from ._smalllinalg import small_inv_logdet
 
 __all__ = [
     'Family',

@@ -49,7 +49,7 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
-from ._smalllinalg import small_inv_logdet
+from ..linalg._smalllinalg import small_inv_logdet
 
 __all__ = [
     'ebic_score',

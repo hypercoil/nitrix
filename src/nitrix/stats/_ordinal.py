@@ -38,8 +38,8 @@ import jax.numpy as jnp
 from jax.scipy.special import ndtr
 from jaxtyping import Array, Float, Int
 
+from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
-from ._smalllinalg import small_inv_logdet
 from .lme._optimise import damped_newton
 from .lme._varcomp import VarCompSpec
 

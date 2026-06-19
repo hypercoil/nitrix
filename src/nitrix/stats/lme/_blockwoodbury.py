@@ -48,8 +48,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int
 
+from ...linalg._smalllinalg import small_inv_logdet as _small_inv_logdet
 from .._batching import blocked_vmap as _blocked_vmap
-from .._smalllinalg import small_inv_logdet as _small_inv_logdet
 from ._optimise import damped_newton
 from ._varcomp import VarCompSpec
 

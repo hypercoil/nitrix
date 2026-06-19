@@ -50,8 +50,8 @@ from jax import lax
 from jax.scipy.special import digamma, gammaln, polygamma
 from jaxtyping import Array, Float
 
+from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
-from ._smalllinalg import small_inv_logdet
 
 __all__ = ['BetaResult', 'beta_fit']
 

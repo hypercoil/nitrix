@@ -61,7 +61,7 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
-from .._smalllinalg import small_inv_logdet, sym_eig_jacobi
+from ...linalg._smalllinalg import small_inv_logdet, sym_eig_jacobi
 
 if TYPE_CHECKING:
     # Annotation only -- importing at runtime would cycle (``_varcomp`` imports
