@@ -3273,6 +3273,49 @@ register(
     )
 )
 
+
+def _beta_setup():
+    """Beta regression op over a closed-over design (proportions in (0,1))."""
+    rng = np.random.default_rng(0)
+    n, p = 60, 2
+    x = rng.standard_normal((n, p)).astype(np.float32)
+    x[:, 0] = 1.0
+    X = jnp.asarray(x)
+    from nitrix.stats import beta_fit
+
+    def op(Y):
+        return beta_fit(Y, X, n_iter=15)
+
+    def fixture():
+        gen = np.random.default_rng(1)
+        mu = 1.0 / (1.0 + np.exp(-(0.3 + 0.5 * np.asarray(x[:, 1]))))
+        Y = jnp.asarray(
+            gen.beta(mu * 8.0, (1.0 - mu) * 8.0, size=(16, n)).astype(
+                np.float32
+            )
+        )
+        return (Y,), {}
+
+    return op, fixture
+
+
+_beta_op, _beta_fixture = _beta_setup()
+
+register(
+    OpInfo(
+        'nitrix.stats.beta_fit',
+        fixture=_beta_fixture,
+        fn_override=_beta_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'Ferrari-Cribari-Neto Fisher scoring (digamma score)',
+            'joint (beta, phi) information; cuSOLVER-free',
+        ),
+        notes='proportions in (0,1); shared X closed over',
+    )
+)
+
 register(
     OpInfo(
         'nitrix.stats.ledoit_wolf',

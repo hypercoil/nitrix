@@ -24,6 +24,7 @@ from nitrix.stats.glm import (
     GAUSSIAN,
     NEGBINOMIAL,
     POISSON,
+    TWEEDIE,
     adj_r_squared,
     aic,
     bic,
@@ -36,6 +37,7 @@ from nitrix.stats.glm import (
     r_squared,
     sandwich_cov,
     t_contrast,
+    tweedie,
 )
 
 
@@ -210,6 +212,42 @@ def test_negbinomial_matches_statsmodels():
     ).fit()
     np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-6)
     np.testing.assert_allclose(float(res.deviance[0]), smf.deviance, rtol=1e-7)
+
+
+@pytest.mark.parametrize('p', [1.3, 1.5, 1.7])
+def test_tweedie_matches_statsmodels(p):
+    """Tweedie (fixed power p in (1,2)): mean coefficients and deviance match
+    statsmodels.GLM(Tweedie(var_power=p, Log))."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(20)
+    X = _design(rng, N=220)
+    mu = np.exp(X @ np.array([0.5, 0.4, -0.3]))
+    y = rng.gamma(2.0, mu / 2.0)
+    y[rng.uniform(size=len(y)) < 0.15] = 0.0  # compound-Poisson-like zeros
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=tweedie(p))
+    smf = sm.GLM(
+        y,
+        X,
+        family=sm.families.Tweedie(
+            var_power=p, link=sm.families.links.Log()
+        ),
+    ).fit()
+    np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-6)
+    np.testing.assert_allclose(float(res.deviance[0]), smf.deviance, rtol=1e-7)
+
+
+def test_tweedie_power_validation_and_registry():
+    """The default 'tweedie' string is p=1.5; a power outside (1,2) is rejected."""
+    rng = np.random.default_rng(21)
+    X = jnp.asarray(_design(rng, N=120))
+    y = jnp.asarray(rng.gamma(2.0, 1.0, 120))[None, :]
+    a = glm_fit(y, X, family='tweedie', n_iter=40)
+    b = glm_fit(y, X, family=TWEEDIE, n_iter=40)
+    np.testing.assert_allclose(np.asarray(a.coef), np.asarray(b.coef), atol=1e-10)
+    for bad in (1.0, 2.0, 0.5, 2.5):
+        with pytest.raises(ValueError, match='power'):
+            tweedie(bad)
 
 
 def test_family_registry_resolves_gamma_and_negbinomial():

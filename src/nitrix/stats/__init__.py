@@ -80,6 +80,7 @@ from .connectivity import (
     shrunk_covariance,
 )
 from .gam import GAMResult, gam_fit, smooth_partial_effect
+from ._betareg import BetaResult, beta_fit
 from .glmm import GLMMResult, glmm_fit
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
@@ -88,6 +89,7 @@ from .glm import (
     GAUSSIAN,
     NEGBINOMIAL,
     POISSON,
+    TWEEDIE,
     Family,
     GLMResult,
     adj_r_squared,
@@ -103,6 +105,7 @@ from .glm import (
     r_squared,
     sandwich_cov,
     t_contrast,
+    tweedie,
 )
 from .pca import (
     PCAResult,
@@ -145,7 +148,9 @@ __all__ = [
     'POISSON',
     'GAMMA',
     'NEGBINOMIAL',
+    'TWEEDIE',
     'negbinomial',
+    'tweedie',
     'GLMResult',
     'glm_fit',
     'predict',
@@ -179,6 +184,9 @@ __all__ = [
     # glmm
     'GLMMResult',
     'glmm_fit',
+    # beta regression
+    'BetaResult',
+    'beta_fit',
     # connectivity
     'ledoit_wolf',
     'oas',

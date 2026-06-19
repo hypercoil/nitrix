@@ -61,9 +61,11 @@ from ._family import (
     GAUSSIAN,
     NEGBINOMIAL,
     POISSON,
+    TWEEDIE,
     Family,
     negbinomial,
     resolve_family,
+    tweedie,
 )
 from ._irls import fit_penalised_irls, irls_warm_start
 from ._smalllinalg import small_inv_logdet
@@ -75,7 +77,9 @@ __all__ = [
     'POISSON',
     'GAMMA',
     'NEGBINOMIAL',
+    'TWEEDIE',
     'negbinomial',
+    'tweedie',
     'GLMResult',
     'glm_fit',
     'predict',

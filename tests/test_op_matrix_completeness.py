@@ -94,6 +94,7 @@ EXCLUDE: frozenset[str] = frozenset(
         # -- Family constructor: builds a Family config record (link/variance/    -
         #    deviance), consumed by glm_fit / gam_fit -- not itself a score kernel.
         'stats.negbinomial',
+        'stats.tweedie',
         # -- Correlation-structure constructors: build a CorrSpec config record    -
         #    (per-group whitening + log-det), consumed by stats.lme.gls_fit -- not
         #    themselves array ops.
