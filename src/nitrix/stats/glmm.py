@@ -48,8 +48,10 @@ also fits non-Gaussian random **slopes** via the ``z`` / ``structure`` arguments
 diagonal ``(x || g)`` as independent ``re_smooth`` blocks through ``gam_fit``, and
 correlated ``(1 + x | g)`` via the block-Woodbury REML wrapped in the PQL loop (the
 penalised-IRLS = iteratively-reweighted-REML identity).  The Gaussian-family slope
-fit reduces to ``lme_fit`` (R2 block-Woodbury) exactly.  Random slopes under the
-Laplace marginal likelihood (``method='laplace'``) remain the follow-up.
+fit reduces to ``lme_fit`` (R2 block-Woodbury) exactly.  Random slopes are also
+served under the **Laplace** marginal likelihood (``method='laplace'``, the
+``r``-dimensional conditional-mode integral + ``r x r`` determinant correction),
+which corrects the PQL attenuation for binary / low-count slopes.
 
 References
 ----------
@@ -909,6 +911,212 @@ def _glmm_laplace(
     )
 
 
+# ---------------------------------------------------------------------------
+# Laplace-approximate random *slope* -- the r-dimensional lift of the scalar fit
+# ---------------------------------------------------------------------------
+
+
+def _laplace_slope_modes(
+    theta: Float[Array, 'pm'],
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    z: Float[Array, 'N r'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    r: int,
+    n_mode: int,
+    diagonal: bool,
+) -> Tuple[Float[Array, 'q r'], Float[Array, 'q r r'], Float[Array, 'N']]:
+    """Per-group conditional modes ``b_hat`` (r-vector) + curvature ``H`` + eta.
+
+    The ``r``-dimensional lift of :func:`_laplace_conditional_modes`: given the
+    fixed effects and ``G`` (in ``theta = [beta, chol(G)]``), the mode of
+    ``sum_i log p(y_i | beta, b_g) - 0.5 b_g^T G^{-1} b_g`` is found by per-group
+    ``r x r`` Newton (Fisher scoring) -- gradient ``sum_i s_i z_i - G^{-1} b_g``,
+    curvature ``H_g = sum_i w_i z_i z_i^T + G^{-1}`` -- vectorised over groups via
+    ``segment_sum`` of the per-observation outer products.  Returns the modes, the
+    per-group curvature ``H_g`` at the mode (for the determinant correction), and
+    the linear predictor.
+    """
+    from .lme._blockwoodbury import cov_re_from_chol
+
+    beta = theta[:p]
+    g_inv, _ = small_inv_logdet(cov_re_from_chol(theta[p:], r, diagonal), r)
+    eta_fix = X @ beta
+
+    def _curvature(eta: Array) -> Tuple[Array, Array, Array]:
+        mu = family.linkinv(eta)
+        var = jnp.clip(family.variance(mu), _EPS, None)
+        dmu = family.mu_eta(eta)
+        w = dmu * dmu / var  # (N,) Fisher weight
+        wzz = jax.ops.segment_sum(
+            w[:, None, None] * (z[:, :, None] * z[:, None, :]),
+            group,
+            num_segments=n_groups,
+        )  # (q, r, r) = sum_i w_i z_i z_i^T
+        return mu, dmu / var, wzz + g_inv[None]
+
+    def mode_step(
+        b: Float[Array, 'q r'], _: Array
+    ) -> Tuple[Float[Array, 'q r'], None]:
+        eta = jnp.clip(
+            eta_fix + jnp.einsum('nr,nr->n', z, b[group]),
+            -family.eta_bound,
+            family.eta_bound,
+        )
+        mu, dlog, h_mat = _curvature(eta)
+        score = (y - mu) * dlog  # (N,) d log p / d eta
+        grad = jax.ops.segment_sum(
+            score[:, None] * z, group, num_segments=n_groups
+        ) - jnp.einsum('rs,qs->qr', g_inv, b)  # (q, r)
+        h_inv = jax.vmap(lambda a: small_inv_logdet(a, r)[0])(h_mat)
+        return b + jnp.einsum('qrs,qs->qr', h_inv, grad), None
+
+    b, _ = lax.scan(
+        mode_step,
+        jnp.zeros((n_groups, r), dtype=X.dtype),
+        xs=None,
+        length=n_mode,
+    )
+    eta = jnp.clip(
+        eta_fix + jnp.einsum('nr,nr->n', z, b[group]),
+        -family.eta_bound,
+        family.eta_bound,
+    )
+    _, _, h_mat = _curvature(eta)
+    return b, h_mat, eta
+
+
+def _laplace_slope_nll(
+    theta: Float[Array, 'pm'],
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    z: Float[Array, 'N r'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    r: int,
+    n_mode: int,
+    diagonal: bool,
+) -> Float[Array, '']:
+    """Laplace-approximate marginal NLL for a random slope.
+
+    ``-sum_g [ ell_g(b_hat) - 0.5 b_hat^T G^{-1} b_hat - 0.5 logdet G
+    - 0.5 logdet H_g ]`` -- the ``r``-dimensional generalisation of the scalar
+    determinant correction (reduces to it at ``r = 1``: ``logdet G = log
+    sigma_b^2``, ``logdet H_g = log(sum_i w_i + 1/sigma_b^2)``).
+    """
+    from .lme._blockwoodbury import cov_re_from_chol
+
+    g_inv, logdet_g = small_inv_logdet(
+        cov_re_from_chol(theta[p:], r, diagonal), r
+    )
+    b, h_mat, eta = _laplace_slope_modes(
+        theta, y, X, z, group, n_groups, family, p, r, n_mode, diagonal
+    )
+    mu = family.linkinv(eta)
+    ll = jax.ops.segment_sum(
+        family.loglik(y, mu, jnp.asarray(1.0, dtype=X.dtype)),
+        group,
+        num_segments=n_groups,
+    )  # (q,)
+    logdet_h = jax.vmap(lambda a: small_inv_logdet(a, r)[1])(h_mat)  # (q,)
+    quad = 0.5 * jnp.einsum('qr,rs,qs->q', b, g_inv, b)  # 0.5 b^T G^{-1} b
+    log_lg = ll - quad - 0.5 * logdet_g - 0.5 * logdet_h
+    return -jnp.sum(log_lg)
+
+
+def _glmm_laplace_slope_one(
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    z: Float[Array, 'N r'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    r: int,
+    n_mode: int,
+    spec: VarCompSpec,
+    diagonal: bool,
+) -> Tuple[Float[Array, 'p'], Float[Array, 'q r'], Float[Array, 'r r'], Float[Array, '']]:
+    """Single-element Laplace random-slope GLMM fit.  Returns ``(beta, blups,
+    G, deviance)``."""
+    from ._irls import irls_warm_start
+    from .lme._blockwoodbury import _param_layout, cov_re_from_chol
+
+    def nll(theta: Float[Array, 'pm']) -> Float[Array, '']:
+        return _laplace_slope_nll(
+            theta, y, X, z, group, n_groups, family, p, r, n_mode, diagonal
+        )
+
+    # Link-scale init: warm-start beta, a small G (cf. the structured PQL slope).
+    var_e = jnp.var(family.link(family.init_mu(y)))
+    layout = _param_layout(r, diagonal)
+    diag = jnp.asarray([i == j for (i, j) in layout])
+    chol0 = jnp.where(
+        diag, 0.5 * jnp.log(jnp.maximum(0.1 * var_e, 1e-6)), 0.0
+    )
+    beta0 = irls_warm_start(
+        y, X, family, penalty=jnp.zeros((p, p), dtype=y.dtype), ridge=spec.ridge
+    )
+    theta0 = jnp.concatenate([beta0, chol0])
+    theta = damped_newton(nll, theta0, spec=spec)
+    beta = theta[:p]
+    g_cov = cov_re_from_chol(theta[p:], r, diagonal)
+    b, _, _ = _laplace_slope_modes(
+        theta, y, X, z, group, n_groups, family, p, r, n_mode, diagonal
+    )
+    deviance = 2.0 * nll(theta)
+    return beta, b, g_cov, deviance
+
+
+def _glmm_laplace_slope(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    z: Float[Array, 'N r'],
+    family: Family,
+    n_outer: int,
+    n_mode: int,
+    damping: float,
+    diagonal: bool,
+    block: Optional[int],
+) -> GLMMResult:
+    """Laplace random-slope GLMM over ``V`` elements."""
+    p = X.shape[-1]
+    r = z.shape[-1]
+    spec = VarCompSpec.reml(n_iter=n_outer, damping=damping)
+
+    def per_voxel(
+        y: Float[Array, 'N'],
+    ) -> Tuple[Array, Array, Array, Array]:
+        return _glmm_laplace_slope_one(
+            y, X, z, group, n_groups, family, p, r, n_mode, spec, diagonal
+        )
+
+    beta, blups, g_cov, deviance = blocked_vmap(per_voxel, (Y,), block=block)
+    re_var = (
+        jnp.diagonal(g_cov, axis1=-2, axis2=-1) if diagonal else g_cov
+    )  # (V, r) diagonal / (V, r, r) unstructured
+    nv = beta.shape[0]
+    return GLMMResult(
+        beta_hat=beta,
+        blups=blups,
+        re_var=re_var,
+        dispersion=jnp.ones((nv,), dtype=beta.dtype),
+        deviance=deviance,
+        edf_total=jnp.full((nv,), float(p), dtype=beta.dtype),
+        family=family,
+        n_obs=int(X.shape[0]),
+        n_groups=n_groups,
+        tier='laplace',
+    )
+
+
 def glmm_fit(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
@@ -980,8 +1188,10 @@ def glmm_fit(
         ``'laplace'`` -- the Laplace-approximate marginal likelihood (per-group
         conditional-mode integral + curvature correction): more accurate for
         binary / low-count GLMMs (it corrects the PQL bias), at the cost of an
-        inner mode-finding loop.  Laplace fits a scalar random intercept under a
-        fixed-dispersion family; the ``tier`` is ``'laplace'``.
+        inner mode-finding loop.  Fits a scalar random intercept, or a random
+        **slope** when ``z`` is given (the ``r``-dimensional mode + ``r x r``
+        determinant correction, ``structure`` selecting a full / diagonal ``G``);
+        the ``tier`` is ``'laplace'``.
     few_level_max
         Dispatch threshold on the number of levels ``q`` (default ``64`` -- the
         regime where the dense solve stops being trivially cheap).  ``'pql'``
@@ -1007,7 +1217,8 @@ def glmm_fit(
     the per-group information grows).  Laplace / adaptive-quadrature is the
     Tier-2 follow-up (v3 §11).  Random *slopes* (``z`` + ``structure``) are fit by
     PQL -- diagonal via ``gam_fit`` blocks, correlated via the block-Woodbury REML
-    (``tier='slope'``); the Laplace slope fit remains the follow-up.
+    (``tier='slope'``) -- or by Laplace (``method='laplace'``, ``tier='laplace'``),
+    which corrects the slope-variance attenuation for binary / low-count outcomes.
     """
     family = resolve_family(family)
     n = X.shape[0]
@@ -1029,24 +1240,29 @@ def glmm_fit(
                 f'glmm_fit: z must be (N, r) with N={n}; got shape '
                 f'{tuple(z.shape)}.'
             )
-        if method != 'pql':
-            raise NotImplementedError(
-                "glmm_fit: a random slope (z=) is only supported with "
-                "method='pql'; the Laplace slope fit is the follow-up."
+        if structure not in ('unstructured', 'diagonal'):
+            raise ValueError(
+                f"glmm_fit: structure={structure!r}; expected 'unstructured' "
+                "or 'diagonal'."
             )
-        if structure == 'diagonal':
+        diagonal = structure == 'diagonal'
+        if method == 'laplace':
+            return _glmm_laplace_slope(
+                Y, X, group, n_groups, z, family,
+                n_outer, n_mode, damping, diagonal, block,
+            )
+        if method != 'pql':
+            raise ValueError(
+                f"glmm_fit: method={method!r}; expected 'pql' or 'laplace'."
+            )
+        if diagonal:
             return _glmm_slope_diagonal(
                 Y, X, group, n_groups, z, family,
                 n_outer, n_inner, ridge, lam_floor, lam_ceil, block,
             )
-        if structure == 'unstructured':
-            return _glmm_slope_structured(
-                Y, X, group, n_groups, z, family,
-                n_outer, n_inner, ridge, damping, block,
-            )
-        raise ValueError(
-            f"glmm_fit: structure={structure!r}; expected 'unstructured' or "
-            "'diagonal'."
+        return _glmm_slope_structured(
+            Y, X, group, n_groups, z, family,
+            n_outer, n_inner, ridge, damping, block,
         )
 
     if method == 'laplace':

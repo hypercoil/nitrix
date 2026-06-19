@@ -200,8 +200,151 @@ def test_slope_validation():
             Y, Xj, group=gj, z=jnp.asarray(z), structure='bogus',
             family='poisson',
         )
-    with pytest.raises(NotImplementedError, match='pql'):
+    with pytest.raises(ValueError, match='method'):
         glmm_fit(
-            Y, Xj, group=gj, z=jnp.asarray(z), method='laplace',
+            Y, Xj, group=gj, z=jnp.asarray(z), method='bogus',
             family='poisson',
         )
+
+
+# ---------------------------------------------------------------------------
+# Laplace random slope (method='laplace') -- the r-dimensional mode integral
+# ---------------------------------------------------------------------------
+
+
+def test_laplace_slope_r1_matches_scalar_intercept_laplace():
+    """An r=1 Laplace slope (z = ones) is the scalar random-intercept Laplace
+    fit -- the r-dimensional mode / determinant correction must reduce to it."""
+    rng = np.random.default_rng(1)
+    q, n_per = 40, 12
+    group = np.repeat(np.arange(q), n_per).astype(np.int32)
+    n = q * n_per
+    X = np.c_[np.ones(n), rng.standard_normal(n)]
+    b = rng.standard_normal(q) * np.sqrt(0.5)
+    eta = X @ np.array([0.0, 0.8]) + b[group]
+    y = (rng.uniform(size=n) < 1.0 / (1.0 + np.exp(-eta))).astype(float)
+    Y, Xj, gj = jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(group)
+    slope = glmm_fit(
+        Y, Xj, group=gj, z=jnp.ones((n, 1)), structure='unstructured',
+        family='binomial', method='laplace', n_outer=40,
+    )
+    scalar = glmm_fit(
+        Y, Xj, group=gj, family='binomial', method='laplace', n_outer=40,
+    )
+    assert slope.tier == 'laplace'
+    np.testing.assert_allclose(slope.beta_hat[0], scalar.beta_hat[0], atol=1e-5)
+    np.testing.assert_allclose(
+        float(slope.re_var[0, 0, 0]), float(scalar.re_var[0]), atol=1e-5
+    )
+
+
+def _ref_laplace_slope_binomial(y, X, z, group, q, r, n_mode=40):
+    """scipy-minimised r-dimensional Laplace marginal -- the same estimator,
+    independent (numpy) linear algebra."""
+    from scipy.optimize import minimize
+
+    p = X.shape[1]
+    tril = [(i, j) for i in range(r) for j in range(i + 1)]
+
+    def build_G(chol):
+        L = np.zeros((r, r))
+        for k, (i, j) in enumerate(tril):
+            L[i, j] = np.exp(chol[k]) if i == j else chol[k]
+        return L @ L.T
+
+    def nll(params):
+        beta, G = params[:p], build_G(params[p:])
+        Ginv = np.linalg.inv(G)
+        etaf = X @ beta
+        b = np.zeros((q, r))
+        for _ in range(n_mode):
+            eta = etaf + np.einsum('nr,nr->n', z, b[group])
+            mu = 1.0 / (1.0 + np.exp(-eta))
+            w = mu * (1.0 - mu)
+            for g in range(q):
+                m = group == g
+                grad = z[m].T @ (y[m] - mu[m]) - Ginv @ b[g]
+                H = z[m].T @ (w[m, None] * z[m]) + Ginv
+                b[g] = b[g] + np.linalg.solve(H, grad)
+        eta = etaf + np.einsum('nr,nr->n', z, b[group])
+        mu = 1.0 / (1.0 + np.exp(-eta))
+        w = mu * (1.0 - mu)
+        _, logdetG = np.linalg.slogdet(G)
+        out = 0.0
+        for g in range(q):
+            m = group == g
+            ll = np.sum(y[m] * eta[m] - np.log1p(np.exp(eta[m])))
+            H = z[m].T @ (w[m, None] * z[m]) + Ginv
+            _, logdetH = np.linalg.slogdet(H)
+            out -= ll - 0.5 * b[g] @ Ginv @ b[g] - 0.5 * logdetG - 0.5 * logdetH
+        return out
+
+    res = minimize(
+        nll, np.r_[np.zeros(p), np.zeros(len(tril))], method='Nelder-Mead',
+        options={'xatol': 1e-6, 'fatol': 1e-6, 'maxiter': 8000},
+    )
+    return res.x[:p], build_G(res.x[p:])
+
+
+def test_laplace_slope_matches_scipy_reference():
+    """r=2 correlated Laplace slope matches the scipy-minimised Laplace
+    marginal (independent numpy reference)."""
+    G = np.array([[0.6, 0.2], [0.2, 0.4]])
+    X, z, group, y, _ = _sim_slope(
+        'binomial', seed=2, q=25, n_per=10, G=G, beta=(0.1, 0.6)
+    )
+    rb, rG = _ref_laplace_slope_binomial(y, X, z, group, 25, 2)
+    g = glmm_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), group=jnp.asarray(group),
+        z=jnp.asarray(z), structure='unstructured', family='binomial',
+        method='laplace', n_outer=60,
+    )
+    np.testing.assert_allclose(np.asarray(g.beta_hat[0]), rb, atol=2e-2)
+    np.testing.assert_allclose(np.asarray(g.re_var[0]), rG, atol=4e-2)
+
+
+def test_laplace_slope_beats_pql_attenuation():
+    """For a binary random slope, PQL under-estimates the slope-variance
+    component; Laplace recovers more of it (closer to the truth)."""
+    G = np.diag([0.4, 0.6])
+    X, z, group, y, _ = _sim_slope(
+        'binomial', seed=4, q=60, n_per=14, G=G, beta=(0.0, 0.5)
+    )
+    Yj, Xj, zj, gj = (
+        jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(z),
+        jnp.asarray(group),
+    )
+    lap = glmm_fit(
+        Yj, Xj, group=gj, z=zj, structure='unstructured', family='binomial',
+        method='laplace', n_outer=60,
+    )
+    pql = glmm_fit(
+        Yj, Xj, group=gj, z=zj, structure='unstructured', family='binomial',
+        method='pql', n_outer=40,
+    )
+    slope_var_lap = float(lap.re_var[0, 1, 1])
+    slope_var_pql = float(pql.re_var[0, 1, 1])
+    assert slope_var_pql < slope_var_lap  # PQL more attenuated
+    assert abs(slope_var_lap - 0.6) < abs(slope_var_pql - 0.6)
+
+
+def test_laplace_slope_shapes_and_diagonal():
+    G = np.diag([0.4, 0.3])
+    X, z, group, y, _ = _sim_slope('poisson', seed=2, q=12, n_per=12, G=G)
+    V = 3
+    Y = jnp.asarray(np.tile(y, (V, 1)))
+    Xj, zj, gj = jnp.asarray(X), jnp.asarray(z), jnp.asarray(group)
+    gu = glmm_fit(
+        Y, Xj, group=gj, z=zj, structure='unstructured', family='poisson',
+        method='laplace',
+    )
+    assert gu.tier == 'laplace'
+    assert gu.blups.shape == (V, 12, 2) and gu.re_var.shape == (V, 2, 2)
+    gd = glmm_fit(
+        Y, Xj, group=gj, z=zj, structure='diagonal', family='poisson',
+        method='laplace',
+    )
+    assert gd.re_var.shape == (V, 2)  # diagonal -> per-component variances
+    leaves, treedef = jax.tree_util.tree_flatten(gu)
+    gu2 = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert isinstance(gu2, GLMMResult) and gu2.tier == 'laplace'
