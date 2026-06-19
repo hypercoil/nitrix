@@ -31,7 +31,7 @@ contrast -- a ``(p,)`` t-contrast ``c`` or a ``(m, p)`` F-contrast ``C``:
    at fewer permutations (see ``gpd_pvalue``).
 
 Everything is cuSOLVER-free (the only solve is a shared ``(p, p)`` inverse via
-``stats._smalllinalg``) and runs on the broken-cuSOLVER GPU.  The enhancement
+``linalg._smalllinalg``) and runs on the broken-cuSOLVER GPU.  The enhancement
 is a non-differentiable inference kernel (it forms discrete clusters); the
 returned maps are arrays -- the CLI / containers / design parsing stay in the
 consumer.
@@ -48,8 +48,8 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Bool, Float, Int
 
+from ...linalg._smalllinalg import small_inv_logdet
 from ...morphology import connected_components
-from .._smalllinalg import small_inv_logdet
 from .cluster import cluster_mass_map, cluster_size_map
 from .permutation import permutations, sign_flips
 from .tfce import tfce

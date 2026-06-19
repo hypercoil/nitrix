@@ -28,7 +28,7 @@ import numpy as np
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.stats._smalllinalg import spd_inv_logdet_chol, sym_eig_jacobi
+from nitrix.linalg._smalllinalg import spd_inv_logdet_chol, sym_eig_jacobi
 from nitrix.stats.lme import flame_two_level, reml_fit
 from nitrix.stats.lme._varcomp import VarCompSpec, fit_varcomp_diagonal
 
@@ -190,7 +190,7 @@ def test_cholesky_pivot_floor_keeps_singular_input_finite():
     """The modified-Cholesky pivot floor keeps a degenerate (singular /
     boundary) system finite instead of producing NaN, while leaving a
     well-conditioned solve bit-unchanged."""
-    from nitrix.stats._smalllinalg import small_inv_logdet
+    from nitrix.linalg._smalllinalg import small_inv_logdet
 
     rng = np.random.default_rng(0)
     # Well-conditioned: floor never activates -> matches numpy to machine eps.

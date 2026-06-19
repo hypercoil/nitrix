@@ -27,8 +27,8 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
+from ..linalg._smalllinalg import small_inv_logdet
 from ._family import Family
-from ._smalllinalg import small_inv_logdet
 
 __all__ = ['fit_penalised_irls', 'irls_warm_start']
 

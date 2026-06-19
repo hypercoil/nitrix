@@ -9,7 +9,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 - **device**: cpu (cpu)
 - **platform**: Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39
 - **jax_version**: 0.10.1
-- **timestamp**: 2026-06-18T03:03:44Z
+- **timestamp**: 2026-06-19T07:38:23Z
 
 ## Legend
 
@@ -252,11 +252,19 @@ The error occurred while tracing the function <lambda> a`; `grad: grad has nan/i
 
 | op | jit | grad | vmap | jit(grad) | invariants | notes |
 |---|:--:|:--:|:--:|:--:|---|---|
+| `analytic_signal` | ✅ | ✅ | ✅ | ✅ | vectorised Hilbert mask; scipy.signal.hilbert parity |  |
+| `hilbert_transform` | ✅ | ✅ | ✅ | ✅ | imag part of analytic_signal |  |
+| `envelope` | ✅ | ✅ | ✅ | ✅ | |analytic_signal| |  |
 | `linear_interpolate` | ✅ | ✅ | — | ✅ | associative_scan (O(log n) parallel); no while_loop |  |
 | `lomb_scargle_interpolate` | ✅ | ✅ | — | ✅ | joint-GLM (passes through observed); shared-Gram across voxels; no boundary discontinuity |  |
 | `lomb_scargle_periodogram` | ✅ | ✅ | — | ✅ | Scargle 1982 normalisation; scipy.lombscargle parity |  |
 | `polynomial_detrend` | ✅ | ✅ | ✅ | ✅ | rescaled Vandermonde (stability); routes through residualise |  |
 | `tsconv` | ✅ | ✅ | — | ✅ | thin lax.conv_general_dilated wrapper |  |
+| `product_filter` | ✅ | ✅ | — | ✅ | frequency-domain product filter (rfft multiply) |  |
+| `product_filtfilt` | ✅ | ✅ | — | ✅ | zero-phase product_filter (forward + reverse) |  |
+| `instantaneous_phase` | ✅ | ✅ | ✅ | ✅ | phase of the analytic signal |  |
+| `instantaneous_frequency` | ✅ | ✅ | ✅ | ✅ | time-derivative of instantaneous phase |  |
+| `env_inst` | ✅ | ✅ | ✅ | ✅ | envelope + instantaneous phase/frequency (Hilbert) | returns a 3-tuple; grad probe reduces the first leaf |
 | `lowpass` | ✅ | ✅ | ✅ | ✅ | maxflat IIR low-pass |  |
 | `highpass` | ✅ | ✅ | ✅ | ✅ | maxflat IIR high-pass |  |
 | `bandpass` | ✅ | ✅ | ✅ | ✅ | maxflat IIR band-pass |  |
@@ -314,24 +322,17 @@ The error occurred while tracing the function <lambda> a`; `grad: grad has nan/i
 | `corr` | ✅ | ✅ | ✅ | ✅ | diagonal=1; complex-Hermitian preserved |  |
 | `partialcov` | ✅ | ✅ | ✅ | ✅ | precision-matrix-derived |  |
 | `precision` | ✅ | ✅ | ✅ | ✅ | inverse of cov |  |
-| `analytic_signal` | ✅ | ✅ | ✅ | ✅ | vectorised Hilbert mask; scipy.signal.hilbert parity |  |
-| `hilbert_transform` | ✅ | ✅ | ✅ | ✅ | imag part of analytic_signal |  |
-| `envelope` | ✅ | ✅ | ✅ | ✅ | |analytic_signal| |  |
 | `reml_fit` | ✅ | ✅ | — | ✅ | FaST-LMM spectral rotation; no V*N^2 intermediate | ~5e-3 parity with statsmodels.MixedLM |
 | `lme_fit` | ❌ | ✅ | — | ❌ | performance-preserving R1/R2 dispatch | r==1 -> reml_fit (R1 FaST-LMM); r>=2 -> block-Woodbury (R2) — errors: `jit: ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]
 The problem arose wi`; `jit(grad): ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]
 The problem arose wi` |
+| `gls_fit` | ❌ | ✅ | — | ✅ | closed-form per-group whitening (innovations / rank-1); cuSOLVER-free profile-REML Newton | structured residual ar1/car1/cs; nlme gls parity (REML) — errors: `jit: TypeError: function <lambda> at /root/capsule/code/nitrix/tools/op_matrix.py:75 traced for jit returned a value of type <class 'str` |
 | `flame_two_level` | ✅ | ✅ | — | ✅ | single-parameter REML (identifiability); shared X_group |  |
 | `partialcorr` | ✅ | ✅ | ✅ | ✅ | partial correlation (precision-normalised) |  |
 | `conditionalcov` | ✅ | ✅ | ✅ | ✅ | covariance of X conditioned on Y |  |
 | `conditionalcorr` | ✅ | ✅ | ✅ | ✅ | correlation of X conditioned on Y |  |
 | `pairedcov` | ✅ | ✅ | ✅ | ✅ | cross-covariance between X and Y |  |
 | `pairedcorr` | ✅ | ✅ | ✅ | ✅ | cross-correlation between X and Y |  |
-| `product_filter` | ✅ | ✅ | — | ✅ | frequency-domain product filter (rfft multiply) |  |
-| `product_filtfilt` | ✅ | ✅ | — | ✅ | zero-phase product_filter (forward + reverse) |  |
-| `instantaneous_phase` | ✅ | ✅ | ✅ | ✅ | phase of the analytic signal |  |
-| `instantaneous_frequency` | ✅ | ✅ | ✅ | ✅ | time-derivative of instantaneous phase |  |
-| `env_inst` | ✅ | ✅ | ✅ | ✅ | envelope + instantaneous phase/frequency (Hilbert) | returns a 3-tuple; grad probe reduces the first leaf |
 | `kl_diagonal_gaussian` | ✅ | ✅ | ✅ | ✅ | closed-form KL(N(μ, diag e^logvar) || N(0, I)) |  |
 | `gaussian_nll` | ✅ | ✅ | ✅ | ✅ | diagonal-Gaussian NLL (log-variance parameterised) |  |
 | `pca_fit` | ✅ | ✅ | — | ✅ | covariance-eigendecomposition PCA via safe_eigh (no svd) | returns PCAResult; grad reduces the components leaf |
@@ -339,6 +340,12 @@ The problem arose wi` |
 | `pca_inverse_transform` | ✅ | ✅ | ✅ | ✅ | reconstruct from PCA coordinates |  |
 | `glm_fit` | ✅ | ✅ | — | ✅ | OLS fast path + exp-family P-IRLS; cuSOLVER-free | returns GLMResult; grad reduces the coef leaf |
 | `gam_fit` | ✅ | ✅ | — | ✅ | Gaussian cross-product fast path (no N in the inner loop); generalized Fellner-Schall lambda selection | shared P-spline basis closed over; grad reduces the coef leaf |
+| `glmm_fit` | ❌ | ✅ | — | ❌ | PQL: working response -> Fellner-Schall variance-component step; level-count dispatch: few-level dense gam_fit / many-level Schur | scalar random intercept; shared X/group closed over — errors: `jit: ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]
+The problem arose wi`; `jit(grad): ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]
+The problem arose wi` |
+| `beta_fit` | ✅ | ✅ | — | ✅ | Ferrari-Cribari-Neto Fisher scoring (digamma score); joint (beta, phi) information; cuSOLVER-free | proportions in (0,1); shared X closed over |
+| `gaulss_fit` | ✅ | ✅ | — | ✅ | block-diagonal Fisher scoring (mean / log-scale); cuSOLVER-free | Gaussian location-scale; shared mean/scale designs closed over |
+| `ordinal_fit` | ✅ | — | — | — | cumulative-link (proportional-odds) MLE; ordered thresholds; cuSOLVER-free | ordered categorical; shared X closed over |
 | `ledoit_wolf` | ✅ | ✅ | — | ✅ | Ledoit-Wolf analytic shrinkage; sklearn parity <=4e-16 | returns (cov, shrinkage); grad reduces the cov leaf |
 | `oas` | ✅ | ✅ | — | ✅ | OAS analytic shrinkage (Chen 2010); sklearn parity |  |
 | `shrunk_covariance` | ✅ | ✅ | — | ✅ | analytic-shrinkage covariance (Ledoit-Wolf default) |  |
@@ -348,9 +355,9 @@ The problem arose wi` |
 
 ## Summary
 
-- **ops catalogued**: 255
-- **jit pass**: 236 / 255
-- **grad pass**: 221 / 225 (applicable)
+- **ops catalogued**: 260
+- **jit pass**: 239 / 260
+- **grad pass**: 225 / 229 (applicable)
 - **vmap pass**: 149 / 149 (applicable)
-- **jit(grad) pass**: 222 / 225
+- **jit(grad) pass**: 225 / 229
 - **performance**: see the nitrix-perf-bench suite + dashboard (this matrix is capability-only).

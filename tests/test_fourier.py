@@ -5,6 +5,7 @@
 Unit tests for Fourier-domain filtering
 """
 
+import math
 from pathlib import Path
 
 import jax
@@ -15,7 +16,7 @@ import pytest
 from scipy.fft import irfft, rfft
 from scipy.signal import chirp, hilbert
 
-from nitrix.stats import (
+from nitrix.signal import (
     analytic_signal,
     env_inst,
     envelope,
@@ -175,3 +176,104 @@ def test_shapes(fn, axis, n):
         X.shape[i] if i != axis else ax_shape for i in range(X.ndim)
     ]
     assert tuple(out.shape) == tuple(target_shape)
+
+
+# ---------------------------------------------------------------------------
+# Correctness oracles (relocated from test_stats.py when fourier moved to signal)
+# ---------------------------------------------------------------------------
+
+
+def test_analytic_signal_matches_scipy():
+    rng = np.random.default_rng(0)
+    x = jnp.asarray(rng.standard_normal(200))
+    xa = analytic_signal(x)
+    xa_ref = hilbert(np.asarray(x))
+    np.testing.assert_allclose(np.asarray(xa), xa_ref, atol=1e-13)
+
+
+def test_analytic_signal_real_part_equals_input():
+    rng = np.random.default_rng(0)
+    x = jnp.asarray(rng.standard_normal(200))
+    xa = analytic_signal(x)
+    np.testing.assert_allclose(xa.real, x, atol=1e-13)
+
+
+def test_analytic_signal_on_cosine_envelope_is_unity():
+    fs = 100.0
+    t = np.arange(200) / fs
+    x = jnp.asarray(np.cos(2 * np.pi * 5 * t))
+    env = jnp.abs(analytic_signal(x))
+    # Interior only -- end taper from FFT.
+    np.testing.assert_allclose(env[20:-20], 1.0, atol=1e-2)
+
+
+def test_analytic_signal_raises_on_complex():
+    x = jnp.asarray(np.zeros(100), dtype=jnp.complex64)
+    with pytest.raises(TypeError, match='must be strictly real'):
+        analytic_signal(x)
+
+
+def test_hilbert_transform_of_cosine_is_sine():
+    fs = 100.0
+    t = np.arange(200) / fs
+    x = jnp.asarray(np.cos(2 * np.pi * 5 * t))
+    h = hilbert_transform(x)
+    np.testing.assert_allclose(
+        h[20:-20], np.sin(2 * np.pi * 5 * t)[20:-20], atol=1e-2
+    )
+
+
+def test_envelope_matches_abs_analytic():
+    rng = np.random.default_rng(0)
+    x = jnp.asarray(rng.standard_normal(200))
+    np.testing.assert_allclose(
+        envelope(x),
+        jnp.abs(analytic_signal(x)),
+        atol=1e-15,
+    )
+
+
+def test_instantaneous_frequency_of_5hz_cosine():
+    fs = 100.0
+    t = np.arange(500) / fs
+    x = jnp.asarray(np.cos(2 * np.pi * 5 * t))
+    f = instantaneous_frequency(x, fs=fs)
+    # Interior should be ~5 Hz.
+    np.testing.assert_allclose(f[50:-50], 5.0, atol=0.1)
+
+
+def test_env_inst_matches_individual_calls():
+    rng = np.random.default_rng(0)
+    x = jnp.asarray(rng.standard_normal(200))
+    e, f, p = env_inst(x, fs=100.0)
+    np.testing.assert_allclose(e, envelope(x), atol=1e-13)
+    np.testing.assert_allclose(
+        p,
+        instantaneous_phase(x),
+        atol=1e-13,
+    )
+    np.testing.assert_allclose(
+        f,
+        instantaneous_frequency(x, fs=100.0),
+        atol=1e-13,
+    )
+
+
+def test_product_filter_preserves_dc_for_unit_weight():
+    x = jnp.asarray(np.ones(64))
+    weight = jnp.ones(33)  # rfft of length 64 has 33 freqs
+    out = product_filter(x, weight)
+    np.testing.assert_allclose(out, x, atol=1e-13)
+
+
+def test_product_filtfilt_zero_phase():
+    """Forward-backward filter has zero phase delay even with a
+    complex weight.
+    """
+    n = 128
+    x = jnp.asarray(np.sin(2 * np.pi * np.arange(n) * 5 / n))
+    # Complex weight with magnitude 1 but nonzero phase
+    phase = jnp.linspace(0, math.pi, n // 2 + 1)
+    weight = jnp.exp(1j * phase)
+    out = product_filtfilt(x, weight)
+    assert float(jnp.abs(out.imag).max()) < 1e-10

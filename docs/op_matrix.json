@@ -3,7 +3,7 @@
     "device": "cpu (cpu)",
     "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.1",
-    "timestamp": "2026-06-18T03:03:44Z"
+    "timestamp": "2026-06-19T07:38:23Z"
   },
   "perf_source": "nitrix-perf-bench",
   "ops": [
@@ -211,7 +211,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.analytic_signal",
+      "qualname": "nitrix.signal.analytic_signal",
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
@@ -223,7 +223,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.hilbert_transform",
+      "qualname": "nitrix.signal.hilbert_transform",
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
@@ -234,7 +234,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.envelope",
+      "qualname": "nitrix.signal.envelope",
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
@@ -266,6 +266,18 @@
         "performance-preserving R1/R2 dispatch"
       ],
       "notes": "r==1 -> reml_fit (R1 FaST-LMM); r>=2 -> block-Woodbury (R2)"
+    },
+    {
+      "qualname": "nitrix.stats.lme.gls_fit",
+      "jit": "TypeError: function <lambda> at /root/capsule/code/nitrix/tools/op_matrix.py:75 traced for jit returned a value of type <class 'str",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "closed-form per-group whitening (innovations / rank-1)",
+        "cuSOLVER-free profile-REML Newton"
+      ],
+      "notes": "structured residual ar1/car1/cs; nlme gls parity (REML)"
     },
     {
       "qualname": "nitrix.stats.lme.flame_two_level",
@@ -977,7 +989,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.product_filter",
+      "qualname": "nitrix.signal.product_filter",
       "jit": "pass",
       "grad": "pass",
       "vmap": "n/a",
@@ -988,7 +1000,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.product_filtfilt",
+      "qualname": "nitrix.signal.product_filtfilt",
       "jit": "pass",
       "grad": "pass",
       "vmap": "n/a",
@@ -999,7 +1011,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.instantaneous_phase",
+      "qualname": "nitrix.signal.instantaneous_phase",
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
@@ -1010,7 +1022,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.instantaneous_frequency",
+      "qualname": "nitrix.signal.instantaneous_frequency",
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
@@ -1021,7 +1033,7 @@
       "notes": ""
     },
     {
-      "qualname": "nitrix.stats.env_inst",
+      "qualname": "nitrix.signal.env_inst",
       "jit": "pass",
       "grad": "pass",
       "vmap": "pass",
@@ -2255,6 +2267,54 @@
         "generalized Fellner-Schall lambda selection"
       ],
       "notes": "shared P-spline basis closed over; grad reduces the coef leaf"
+    },
+    {
+      "qualname": "nitrix.stats.glmm_fit",
+      "jit": "ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]\nThe problem arose wi",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]\nThe problem arose wi",
+      "invariants": [
+        "PQL: working response -> Fellner-Schall variance-component step",
+        "level-count dispatch: few-level dense gam_fit / many-level Schur"
+      ],
+      "notes": "scalar random intercept; shared X/group closed over"
+    },
+    {
+      "qualname": "nitrix.stats.beta_fit",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Ferrari-Cribari-Neto Fisher scoring (digamma score)",
+        "joint (beta, phi) information; cuSOLVER-free"
+      ],
+      "notes": "proportions in (0,1); shared X closed over"
+    },
+    {
+      "qualname": "nitrix.stats.gaulss_fit",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "block-diagonal Fisher scoring (mean / log-scale)",
+        "cuSOLVER-free"
+      ],
+      "notes": "Gaussian location-scale; shared mean/scale designs closed over"
+    },
+    {
+      "qualname": "nitrix.stats.ordinal_fit",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "cumulative-link (proportional-odds) MLE",
+        "ordered thresholds; cuSOLVER-free"
+      ],
+      "notes": "ordered categorical; shared X closed over"
     },
     {
       "qualname": "nitrix.stats.ledoit_wolf",

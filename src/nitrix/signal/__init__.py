@@ -13,6 +13,9 @@ Submodules:
   high-pass (``bandpass`` / ``bandstop`` / ``lowpass`` /
   ``highpass``); and recursive Butterworth IIR (``iir_filter`` /
   ``butterworth_sos`` / ``sosfilt`` / ``sosfiltfilt``).
+- ``fourier``    -- spectral utilities: product-filter,
+  analytic-signal / Hilbert transform, instantaneous frequency /
+  phase, envelope.
 - ``tsconv``     -- time-series convolution (1D conv with
   channel and batch handling matching the fMRI use case).
 - ``interpolate`` -- 1D / N-D interpolation utilities.
@@ -32,6 +35,16 @@ from .filter import (
     sosfilt,
     sosfiltfilt,
 )
+from .fourier import (
+    analytic_signal,
+    env_inst,
+    envelope,
+    hilbert_transform,
+    instantaneous_frequency,
+    instantaneous_phase,
+    product_filter,
+    product_filtfilt,
+)
 from .interpolate import linear_interpolate
 from .lomb_scargle import (
     lomb_scargle_interpolate,
@@ -41,16 +54,24 @@ from .tsconv import tsconv
 from .window import sample_windows
 
 __all__ = [
+    'analytic_signal',
     'bandpass',
     'bandstop',
     'butterworth_sos',
+    'env_inst',
+    'envelope',
     'highpass',
+    'hilbert_transform',
     'iir_filter',
+    'instantaneous_frequency',
+    'instantaneous_phase',
     'linear_interpolate',
     'lomb_scargle_interpolate',
     'lomb_scargle_periodogram',
     'lowpass',
     'polynomial_detrend',
+    'product_filter',
+    'product_filtfilt',
     'sample_windows',
     'sosfilt',
     'sosfiltfilt',

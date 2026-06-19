@@ -110,8 +110,8 @@ import jax.numpy as jnp
 from jax.scipy.special import betainc
 from jaxtyping import Array, Float, Int
 
+from ...linalg._smalllinalg import small_inv_logdet, sym_eig_jacobi
 from .._batching import blocked_vmap
-from .._smalllinalg import small_inv_logdet, sym_eig_jacobi
 from ._corr import CorrSpec, resolve_corr
 from ._corrfit import CorrLMEResult
 from ._kr import kr_cov_and_scaled_f

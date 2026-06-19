@@ -83,7 +83,7 @@ def _chol_lower(A: Float[Array, 'k k']) -> Float[Array, 'k k']:
     """Lower-triangular Cholesky factor ``L`` (``A = L L^T``) of an SPD ``A``
     via a rolled, cuSOLVER-free factorization.
 
-    Mirrors ``stats._smalllinalg.spd_inv_logdet_chol``: ``jnp.linalg.cholesky``
+    Mirrors ``linalg._smalllinalg.spd_inv_logdet_chol``: ``jnp.linalg.cholesky``
     issues a ``potrf`` custom-call that fails on the broken-cuSOLVER L4, so we
     factor column-by-column with a ``lax.fori_loop`` (rolled, ``O(k^2)`` graph)
     using only elementwise algebra -- no cuSOLVER routine, fully differentiable.

@@ -66,9 +66,9 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float, Int
 
+from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
-from ._smalllinalg import small_inv_logdet
 from .basis import re_smooth
 from .gam import gam_fit
 from .lme._optimise import damped_newton

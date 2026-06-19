@@ -32,7 +32,7 @@ Two nested loops, one per element
   ratio ``phi / sigma_b^2`` of a mixed model).
 
 Both loops run a fixed number of iterations (``vmap``-clean over elements) and
-every solve is cuSOLVER-free (``stats._smalllinalg``), so the whole fit runs on
+every solve is cuSOLVER-free (``linalg._smalllinalg``), so the whole fit runs on
 the broken-cuSOLVER GPU.
 
 Outputs (ModelArray ``gam`` parity)
@@ -63,10 +63,10 @@ import numpy as np
 from jax import lax
 from jaxtyping import Array, Float
 
+from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
-from ._smalllinalg import small_inv_logdet
 from .basis import (
     REBasis,
     SplineBasis,

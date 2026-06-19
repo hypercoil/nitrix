@@ -53,8 +53,8 @@ from typing import NamedTuple, Optional, Tuple, cast
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from ...linalg._smalllinalg import small_inv_logdet
 from .._batching import blocked_vmap
-from .._smalllinalg import small_inv_logdet
 from ._optimise import damped_newton
 from ._varcomp import VarCompSpec
 

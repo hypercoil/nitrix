@@ -445,7 +445,7 @@ register(
 )
 register(
     OpInfo(
-        'nitrix.stats.analytic_signal',
+        'nitrix.signal.analytic_signal',
         fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
         invariants=('vectorised Hilbert mask', 'scipy.signal.hilbert parity'),
         # Complex output; reduce via |.|^2 so grad sees a real scalar.
@@ -454,14 +454,14 @@ register(
 )
 register(
     OpInfo(
-        'nitrix.stats.hilbert_transform',
+        'nitrix.signal.hilbert_transform',
         fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
         invariants=('imag part of analytic_signal',),
     )
 )
 register(
     OpInfo(
-        'nitrix.stats.envelope',
+        'nitrix.signal.envelope',
         fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
         invariants=('|analytic_signal|',),
     )
@@ -1515,7 +1515,7 @@ register(
 )
 register(
     OpInfo(
-        'nitrix.stats.product_filter',
+        'nitrix.signal.product_filter',
         fixture=lambda: (
             (jax.random.normal(_key(0), (4, 100)), jnp.ones(51)),
             {},
@@ -1527,7 +1527,7 @@ register(
 )
 register(
     OpInfo(
-        'nitrix.stats.product_filtfilt',
+        'nitrix.signal.product_filtfilt',
         fixture=lambda: (
             (jax.random.normal(_key(0), (4, 100)), jnp.ones(51)),
             {},
@@ -1539,21 +1539,21 @@ register(
 )
 register(
     OpInfo(
-        'nitrix.stats.instantaneous_phase',
+        'nitrix.signal.instantaneous_phase',
         fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
         invariants=('phase of the analytic signal',),
     )
 )
 register(
     OpInfo(
-        'nitrix.stats.instantaneous_frequency',
+        'nitrix.signal.instantaneous_frequency',
         fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
         invariants=('time-derivative of instantaneous phase',),
     )
 )
 register(
     OpInfo(
-        'nitrix.stats.env_inst',
+        'nitrix.signal.env_inst',
         fixture=lambda: ((jax.random.normal(_key(), (200,)),), {}),
         invariants=('envelope + instantaneous phase/frequency (Hilbert)',),
         notes='returns a 3-tuple; grad probe reduces the first leaf',

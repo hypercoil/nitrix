@@ -2,14 +2,12 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Tiny dense SPD linear algebra, size-dispatched and cuSOLVER-free.
+Tiny dense symmetric linear algebra, size-dispatched and cuSOLVER-free.
 
-The mass-univariate fits in ``nitrix.stats`` (LME / GLM / GAM) all reduce, per
-element, to a small ``(p, p)`` symmetric-positive-definite solve -- the
-profiled fixed-effect normal equations, the IRLS / penalised normal equations,
-the variance-component information matrix.  ``p`` is tiny (a handful of
-fixed-effect columns or spline coefficients), but the solve sits inside a
-``vmap`` over up to ~1M elements, so the choice of routine matters twice over:
+Inverse-plus-log-determinant of a small ``(p, p)`` symmetric-positive-definite
+matrix, and the symmetric eigendecomposition of one -- the per-element kernels
+behind a ``vmap`` over up to ~1M independent small solves.  At that batch the
+choice of routine matters twice over:
 
 - **Performance / compile.**  Differentiating a batched ``cholesky`` makes the
   XLA:CPU compile scale with the batch and inflates the autodiff tape.
@@ -21,22 +19,22 @@ fixed-effect columns or spline coefficients), but the solve sits inside a
   work.
 
 So we issue **no cuSOLVER custom-call at any ``p``**: closed-form algebra for
-``p in {1, 2}`` (the dominant designs), and for ``p > 2`` a hand-Cholesky whose
-inverse goes through ``triangular_solve`` (cuBLAS ``trsm``).  Everything is
-differentiable.
+``p in {1, 2}`` (the common small designs), and for ``p > 2`` a hand-Cholesky
+whose inverse goes through ``triangular_solve`` (cuBLAS ``trsm``).  Everything
+is differentiable.  ``sym_eig_jacobi`` is the matching eigendecomposition: a
+fixed-sweep cyclic Jacobi rotation (matmul-only, no cuSOLVER ``syevd``).
 
 Why a *rolled* Cholesky
 -----------------------
 
 The Cholesky loop is run as a ``lax.fori_loop`` over the ``p`` columns, **not**
 unrolled at trace time.  A trace-time unroll produces ``O(p^3)`` scalar ops in
-the graph, so compile time grows cubically in ``p`` -- fine for LME's tiny
-fixed-effect width (``p <= 5`` is ~0.4 s) but ruinous for GAM, where ``p = 1 +
-sum(smooth dims)`` reaches 20-30 (the unrolled form measured ~29 s for a single
-``p = 30`` inverse, dominating a ~96 s GAM compile).  Rolling the loop makes the
-graph ``O(p^2)`` (one compiled body), so compile is ~flat in ``p`` (~0.4 s at
-``p = 30``); runtime is unchanged (still ``O(p^3)`` flops).  The closed forms
-for ``p in {1, 2}`` -- the LME hot path -- are untouched.
+the graph, so compile time grows cubically in ``p`` -- negligible at ``p <= 5``
+(~0.4 s) but ruinous once ``p`` reaches 20-30 (the unrolled form measured ~29 s
+for a single ``p = 30`` inverse).  Rolling the loop makes the graph ``O(p^2)``
+(one compiled body), so compile is ~flat in ``p`` (~0.4 s at ``p = 30``);
+runtime is unchanged (still ``O(p^3)`` flops).  The closed forms for
+``p in {1, 2}`` are untouched.
 """
 
 from __future__ import annotations

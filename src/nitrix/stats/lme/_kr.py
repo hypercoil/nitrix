@@ -47,7 +47,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from .._smalllinalg import small_inv_logdet
+from ...linalg._smalllinalg import small_inv_logdet
 
 __all__ = ['kr_cov_and_scaled_f']
 
