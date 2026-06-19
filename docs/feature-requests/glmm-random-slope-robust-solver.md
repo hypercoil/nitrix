@@ -65,6 +65,48 @@ principled than EM. Worth doing first if the full rewrite is not yet justified.
 
 **Effort.** M (~0.5–1 day), mostly validation.
 
+## Performance findings (2026-06-19 review fan-out)
+
+A three-lens review of the shipped branch surfaced two performance issues that
+this rewrite (and one sibling item) should subsume:
+
+- **The nested REML is the dominant cost, and the rewrite fixes it.** The current
+  `_glmm_slope_structured_one` runs `n_outer` (≈20) PQL steps, and *each* calls
+  `_fit_one` — a full block-Woodbury REML = `n_inner` (≈10) damped-Newton
+  iterations with a 5-way backtracking line search — so ≈200 inner Newton bodies
+  per voxel, re-converging a warm-started REML that has barely moved. The
+  proposed **REML-EM outer is a single closed-form update per PQL step**, which
+  removes this multiplicatively (≈3–5× fewer inner bodies). Interim mitigation if
+  the rewrite is deferred: drop the *slope path's* effective `n_inner` to 1–3
+  (warm-started, the IRREML identity only needs the variance components to
+  *track*, not fully re-converge each step) — the public `n_inner=10` default is
+  shared with the cheap many-level IRLS path and is overkill here.
+
+- **`block=None` is a latent OOM for the slope/Laplace tiers.** These paths
+  materialise per-observation `(N, r, r)` outer products (`segment_sum` to
+  `(q, r, r)`); under the default `block=None` that is `(V, N, r, r)` live across
+  all voxels at once (and, for Laplace, additionally taped by `jax.hessian`).
+  The scalar paths tolerate `None` (their intermediates are `(N,)`/`(p, p)`).
+  **Recommendation:** a non-`None` default `block` for the slope/Laplace tiers, or
+  at least document that `block` is effectively required at brain scale.
+
+**Sibling item — the Laplace slope's autodiff cost (separate from this rewrite).**
+`_glmm_laplace_slope_one` lets `damped_newton` (`curvature=None`) take
+`jax.grad`/`jax.hessian` *through* the `n_mode`-step mode-finding `lax.scan` —
+the single largest cold-compile / autodiff-tape driver in the slope work. **The
+obvious shortcut (`stop_gradient` on the mode / envelope theorem) is unsound
+here:** the marginal's `-0.5 logdet H_g` term depends on the mode `b̂(θ)` through
+the IRLS weights, so its θ-gradient does *not* vanish at the mode — only the
+`ℓ_g(b̂) - ½b̂ᵀG⁻¹b̂` part does. Stopping the gradient would drop that term, change
+the estimator to an approximate (PQL-like) Laplace, and break the
+scipy-reference match. The correct optimisation is an **analytic Laplace
+gradient** (implicit-function-theorem derivative of the mode feeding the logdet
+term) supplied via the existing `curvature=` seam — a real derivation, scoped as
+its own follow-up, not part of this rewrite. Until then the autodiff-through-scan
+is the *correct* (if heavy) choice; it is exact when the mode is converged
+(quadratic Newton, fine at `n_mode=20` for well-posed groups) and only biased for
+ill-conditioned/empty groups with too few mode steps.
+
 **Live-code status.** Current solver: `src/nitrix/stats/glmm.py
 ::_glmm_slope_structured_one` (iterated full block-Woodbury REML in the PQL
 loop). The load-bearing clamp is `_family.py::_ETA_MAX = 20.0` +
