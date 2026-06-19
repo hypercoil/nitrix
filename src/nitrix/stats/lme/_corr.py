@@ -51,6 +51,7 @@ __all__ = [
     'ar1',
     'car1',
     'cs',
+    'iid',
     'resolve_corr',
 ]
 
@@ -238,6 +239,34 @@ def cs() -> CorrSpec:
     )
 
 
+def iid() -> CorrSpec:
+    """The trivial (identity) residual structure ``R = I`` -- no correlation, no
+    parameters.
+
+    Useful as the correlation slot when only a **variance function** is wanted
+    (a pure heteroscedastic GLS, ``nlme::gls(weights=…)`` with no
+    ``correlation``).  The whitener is the identity (padded positions zeroed) and
+    ``log|R_i| = 0``.
+    """
+
+    def whiten(
+        z_pad: Float[Array, 'G T k'],
+        gaps: Float[Array, 'G T'],
+        nsize: Float[Array, 'G'],
+        mask: Bool[Array, 'G T'],
+        raw: Float[Array, 'n'],
+    ) -> Tuple[Float[Array, 'G T k'], Float[Array, '']]:
+        return z_pad * mask[..., None], jnp.asarray(0.0, dtype=z_pad.dtype)
+
+    return CorrSpec(
+        name='iid',
+        n_params=0,
+        whiten=whiten,
+        to_natural=lambda raw: jnp.asarray(0.0),
+        init_raw=lambda dtype: jnp.zeros((0,), dtype=dtype),
+    )
+
+
 def _sigmoid(x: Float[Array, '']) -> Float[Array, '']:
     return 0.5 * (1.0 + jnp.tanh(0.5 * x))
 
@@ -246,6 +275,7 @@ _CORRS: Mapping[str, Callable[[], CorrSpec]] = {
     'ar1': ar1,
     'car1': car1,
     'cs': cs,
+    'iid': iid,
 }
 
 

@@ -39,6 +39,7 @@ from ._blockwoodbury import _nll_and_beta, _param_layout, cov_re_from_chol
 from ._corr import CorrSpec, resolve_corr
 from ._optimise import damped_newton
 from ._varcomp import VarCompSpec
+from ._varfunc import VarFunc, _apply_var_scale
 
 __all__ = [
     'GLSResult',
@@ -134,7 +135,12 @@ class GLSResult(NamedTuple):
         ``(V,)`` residual variance ``sigma_e^2``.
     rho
         ``(V,)`` natural correlation parameter ``rho`` (the structure's bounded
-        parameter; the lag-1 / decay / exchangeable correlation).
+        parameter; the lag-1 / decay / exchangeable correlation).  ``0`` for the
+        ``iid`` (no-correlation) structure.
+    var_params
+        ``(V, n_v)`` estimated variance-function parameters (``delta`` for
+        ``varPower``; the ``S - 1`` log-ratios ``tau`` for ``varIdent``).  Empty
+        ``(V, 0)`` when no ``weights`` variance function was given.
     log_lik
         ``(V,)`` profile REML log-likelihood at the fit.
     fixed_cov
@@ -144,15 +150,19 @@ class GLSResult(NamedTuple):
         Residual degrees of freedom ``N - p`` (scalar; for a t / F contrast).
     corr
         The correlation structure name.
+    weights
+        The variance-function name (``'varPower'`` / ``'varIdent'``), or ``None``.
     """
 
     beta_hat: Float[Array, 'V p']
     sigma_e_sq: Float[Array, 'V']
     rho: Float[Array, 'V']
+    var_params: Float[Array, 'V n_v']
     log_lik: Float[Array, 'V']
     fixed_cov: Float[Array, 'V p p']
     df_resid: int
     corr: str
+    weights: Optional[str]
 
 
 def _whitened_grams(
@@ -161,22 +171,36 @@ def _whitened_grams(
     x_pad: Float[Array, 'G T p'],
     layout: GroupLayout,
     corr: CorrSpec,
+    varfunc: Optional[VarFunc],
+    cov_pad: Optional[Float[Array, 'G T']],
+    n_corr: int,
 ) -> Tuple[
     Float[Array, 'p p'], Float[Array, 'p'], Float[Array, ''], Float[Array, '']
 ]:
-    """Whitened cross-products ``(X~^T X~, X~^T y~, y~^T y~, half_logdet)``."""
+    """Whitened cross-products ``(X~^T X~, X~^T y~, y~^T y~, half_logdet)``.
+
+    The Newton vector is ``raw = [corr_raw, var_raw]``; the variance function (if
+    any) pre-scales the joint stack by ``1 / g`` and contributes ``sum_i log g_i``
+    to the half-log-det before the correlation whitener runs.
+    """
     # Whiten y and X jointly (stack as the channel axis) so the recurrence runs
     # once over the shared (G, T) structure.
     stack = jnp.concatenate([x_pad, y_pad[..., None]], axis=-1)  # (G, T, p+1)
+    var_half = jnp.asarray(0.0, dtype=stack.dtype)
+    if varfunc is not None:
+        assert cov_pad is not None
+        stack, var_half = _apply_var_scale(
+            stack, cov_pad, layout.mask, varfunc, raw[n_corr:]
+        )
     w, half_logdet = corr.whiten(
-        stack, layout.gaps, layout.nsize, layout.mask, raw
+        stack, layout.gaps, layout.nsize, layout.mask, raw[:n_corr]
     )
     wx = w[..., :-1]  # (G, T, p)
     wy = w[..., -1]  # (G, T)
     xtx = jnp.einsum('gtp,gtq->pq', wx, wx)
     xty = jnp.einsum('gtp,gt->p', wx, wy)
     yty = jnp.sum(wy * wy)
-    return xtx, xty, yty, half_logdet
+    return xtx, xty, yty, half_logdet + var_half
 
 
 def _fit_one(
@@ -184,6 +208,9 @@ def _fit_one(
     x_pad: Float[Array, 'G T p'],
     layout: GroupLayout,
     corr: CorrSpec,
+    varfunc: Optional[VarFunc],
+    cov_pad: Optional[Float[Array, 'G T']],
+    n_corr: int,
     raw0: Float[Array, 'k'],
     n: int,
     p: int,
@@ -192,6 +219,7 @@ def _fit_one(
     Float[Array, 'p'],
     Float[Array, ''],
     Float[Array, ''],
+    Float[Array, 'n_v'],
     Float[Array, ''],
     Float[Array, 'p p'],
 ]:
@@ -202,7 +230,7 @@ def _fit_one(
 
     def neg2_reml(raw: Float[Array, 'k']) -> Float[Array, '']:
         xtx, xty, yty, half_logdet = _whitened_grams(
-            raw, y_pad, x_pad, layout, corr
+            raw, y_pad, x_pad, layout, corr, varfunc, cov_pad, n_corr
         )
         xtx_r = xtx + ridge * jnp.eye(p, dtype=xtx.dtype)
         xtx_inv, logdet_xtx = small_inv_logdet(xtx_r, p)
@@ -213,7 +241,7 @@ def _fit_one(
     raw = damped_newton(neg2_reml, raw0, spec=spec)
 
     xtx, xty, yty, half_logdet = _whitened_grams(
-        raw, y_pad, x_pad, layout, corr
+        raw, y_pad, x_pad, layout, corr, varfunc, cov_pad, n_corr
     )
     xtx_r = xtx + ridge * jnp.eye(p, dtype=xtx.dtype)
     xtx_inv, logdet_xtx = small_inv_logdet(xtx_r, p)
@@ -221,7 +249,8 @@ def _fit_one(
     rss = jnp.clip(yty - beta @ xty, 1e-30, None)
     sigma2 = rss / dof
     fixed_cov = sigma2 * xtx_inv
-    rho = corr.to_natural(raw)
+    rho = corr.to_natural(raw[:n_corr])
+    var_params = raw[n_corr:]
     # profile REML log-likelihood (full, with constants) for reporting.
     neg2 = (
         dof * jnp.log(sigma2)
@@ -231,7 +260,7 @@ def _fit_one(
         + dof * jnp.log(2.0 * jnp.pi)
     )
     log_lik = -0.5 * neg2
-    return beta, sigma2, rho, log_lik, fixed_cov
+    return beta, sigma2, rho, var_params, log_lik, fixed_cov
 
 
 def fit_corr_gls(
@@ -241,42 +270,65 @@ def fit_corr_gls(
     corr: CorrSpec,
     *,
     time: Optional[Float[Array, 'N']] = None,
+    weights: Optional[VarFunc] = None,
     n_iter: int = 15,
     damping: float = 1e-6,
     block: Optional[int] = None,
 ) -> GLSResult:
     """Voxelwise GLS-REML with a structured within-group residual.
 
-    Fits ``y_v = X beta_v + eps_v``, ``Cov(eps_v) = sigma_e^2 R(rho)``
-    block-diagonal across ``group``, with ``R`` the ``corr`` structure.  ``X`` is
-    shared across voxels; only ``y_v`` varies.  Returns a :class:`GLSResult`.
+    Fits ``y_v = X beta_v + eps_v``, ``Cov(eps_v) = sigma_e^2 diag(g) R(rho)
+    diag(g)`` block-diagonal across ``group``, with ``R`` the ``corr`` structure
+    and ``g`` the optional ``weights`` variance function.  ``X`` is shared across
+    voxels; only ``y_v`` varies.  Returns a :class:`GLSResult`.
     """
     n, p = X.shape
+    n_corr = corr.n_params
+    if n_corr + (0 if weights is None else weights.n_params) == 0:
+        raise ValueError(
+            "fit_corr_gls: nothing to estimate -- 'iid' correlation with no "
+            'weights variance function is ordinary least squares (use glm_fit).'
+        )
     layout = build_group_layout(group, time)
     idx = layout.idx
     mask_f = layout.mask.astype(X.dtype)
     x_pad = X[idx] * mask_f[..., None]  # (G, T, p) shared
-    raw0 = corr.init_raw(X.dtype)
+    cov_pad = (
+        None
+        if weights is None
+        else jnp.asarray(weights.covariate)[idx].astype(X.dtype)
+    )
+    raw0 = (
+        corr.init_raw(X.dtype)
+        if weights is None
+        else jnp.concatenate(
+            [corr.init_raw(X.dtype), weights.init_raw(X.dtype)]
+        )
+    )
     spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
 
     def per_voxel(
         y: Float[Array, 'N'],
-    ) -> Tuple[Array, Array, Array, Array, Array]:
+    ) -> Tuple[Array, Array, Array, Array, Array, Array]:
         y_pad = y[idx] * mask_f
-        return _fit_one(y_pad, x_pad, layout, corr, raw0, n, p, spec)
+        return _fit_one(
+            y_pad, x_pad, layout, corr, weights, cov_pad, n_corr, raw0, n, p, spec
+        )
 
-    beta, sigma2, rho, log_lik, fixed_cov = cast(
-        Tuple[Array, Array, Array, Array, Array],
+    beta, sigma2, rho, var_params, log_lik, fixed_cov = cast(
+        Tuple[Array, Array, Array, Array, Array, Array],
         blocked_vmap(per_voxel, (Y,), block=block),
     )
     return GLSResult(
         beta_hat=beta,
         sigma_e_sq=sigma2,
         rho=rho,
+        var_params=var_params,
         log_lik=log_lik,
         fixed_cov=fixed_cov,
         df_resid=int(n - p),
         corr=corr.name,
+        weights=None if weights is None else weights.name,
     )
 
 
@@ -285,19 +337,22 @@ def gls_fit(
     X: Float[Array, 'N p'],
     *,
     group: Int[Array, 'N'],
-    corr: Union[str, CorrSpec],
+    corr: Union[str, CorrSpec] = 'iid',
     time: Optional[Float[Array, 'N']] = None,
+    weights: Optional[VarFunc] = None,
     n_iter: int = 15,
     damping: float = 1e-6,
     block: Optional[int] = None,
 ) -> GLSResult:
     """Voxelwise generalised least squares with a structured residual (§1.4).
 
-    Fits, per voxel, ``y_v = X beta_v + eps_v`` with a within-group correlated
-    residual ``Cov(eps_v) = sigma_e^2 R(rho)`` -- ``nlme``'s
-    ``gls(correlation=corAR1 / corCAR1 / corCompSymm)``.  No random effect (the
-    R0 + corr path); for a random effect *plus* a structured residual, the
-    composition with the R2 block-Woodbury is the follow-up.
+    Fits, per voxel, ``y_v = X beta_v + eps_v`` with a within-group structured
+    residual ``Cov(eps_v) = sigma_e^2 diag(g) R(rho) diag(g)`` -- ``nlme``'s
+    ``gls(correlation=corAR1 / corCAR1 / corCompSymm, weights=varPower /
+    varIdent)``.  ``R`` is the correlation structure; ``g`` the optional variance
+    function (heteroscedasticity).  No random effect (the R0 + corr path); for a
+    random effect *plus* a structured residual, the composition with the R2
+    block-Woodbury is the follow-up.
 
     Parameters
     ----------
@@ -309,19 +364,25 @@ def gls_fit(
         groups and independent across them (block-diagonal ``V``).
     corr
         Correlation structure: ``'ar1'`` (discrete AR(1)), ``'car1'``
-        (continuous-time AR(1); pass ``time``), ``'cs'`` (compound symmetry), or
-        a :class:`CorrSpec`.
+        (continuous-time AR(1); pass ``time``), ``'cs'`` (compound symmetry),
+        ``'iid'`` (no correlation -- the default, for a pure variance-function
+        fit), or a :class:`CorrSpec`.
     time
         ``(N,)`` observation times for ``car1`` (and to order ``ar1`` when the
         rows are not already in within-group time order).  Defaults to the
         within-group appearance order (unit gaps).
+    weights
+        Optional residual **variance function** (heteroscedasticity):
+        ``var_power(v)`` (``Var ~ |v|^{2 delta}``) or ``var_ident(strata)``
+        (a separate variance per stratum).  Composes with any ``corr``; with
+        ``corr='iid'`` it is a pure heteroscedastic GLS.
     n_iter, damping, block
         Newton iterations, AI/LM damping, and the optional voxel-block size.
 
     Returns
     -------
-    ``GLSResult`` -- ``beta_hat``, ``sigma_e_sq``, ``rho``, ``log_lik``, the GLS
-    ``fixed_cov``, and ``df_resid = N - p``.
+    ``GLSResult`` -- ``beta_hat``, ``sigma_e_sq``, ``rho``, ``var_params``,
+    ``log_lik``, the GLS ``fixed_cov``, and ``df_resid = N - p``.
     """
     return fit_corr_gls(
         Y,
@@ -329,6 +390,7 @@ def gls_fit(
         jnp.asarray(group),
         resolve_corr(corr),
         time=None if time is None else jnp.asarray(time),
+        weights=weights,
         n_iter=n_iter,
         damping=damping,
         block=block,

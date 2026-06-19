@@ -64,8 +64,12 @@
 > structured residual, no random effect) **and R2 + corr** (`lme_fit(corr=…)`, a
 > random effect *plus* a structured residual): whitening by `R` reduces each
 > group to a standard block-Woodbury, so the per-group Woodbury algebra is reused
-> with `ρ` joining the REML `θ`; matches a dense REML reference across seeds. The
-> `varIdent`/`varPower` variance functions remain the §1.4 follow-up.
+> with `ρ` joining the REML `θ`; matches a dense REML reference across seeds.
+> **Tier-2 update:** the `varIdent` / `varPower` **variance functions** now ship
+> too (`gls_fit(weights=var_power(v) / var_ident(strata))`): heteroscedasticity
+> `Var(ε)=σ_e² diag(g) R diag(g)` enters as a diagonal `1/g` pre-scale of the
+> whitening (Jacobian `Σ log g`), composing with any `corr` (and a new `corr='iid'`
+> for a pure variance-function GLS). Matches a dense REML reference (δ/τ to <5e-3).
 > **§1.1 R3 nested random effects** — `lme_fit(..., inner=g2)` fits `(1 | g1/g2)`
 > (random intercept per outer level + per nested sublevel) via the **telescoping
 > Woodbury**: `V` is block-diagonal across the outer factor and within each block
@@ -80,8 +84,8 @@
 > solve per Newton step (cuSOLVER-free, cost-gated to the smaller factor); β /
 > both variances / σ_e² match an exact dense REML reference across seeds incl. the
 > factor swap; `CrossedLMEResult`. The rest of Tier-1/Tier-2 (§4
-> ordinal/distributional, §3.2–3.3 cr/gp/mrf, §1.3 Kenward-Roger,
-> §1.4 varFunc) remain proposed.
+> ordinal/distributional, §3.2–3.3 cr/gp/mrf, §1.3 Kenward-Roger)
+> remain proposed.
 >
 > **Engineering hardening (2026-06-18, post interim review).** A three-axis
 > review (correctness / performance / design) uncovered a **silent-wrong-answer
@@ -315,7 +319,7 @@ scalar normally not differentiated through (document, don't promise a VJP).
 **Effort: M (Satterthwaite) + M-L (Kenward-Roger, Tier-2).** **Oracle:**
 `lmerTest` (Satterthwaite), `pbkrtest` (Kenward-Roger).
 
-### §1.4 Error-correlation & heteroscedasticity structures  *(high value)* — ✅ SHIPPED (ar1/car1/cs; R0+corr GLS **and** R2+corr; varFunc Tier-2)
+### §1.4 Error-correlation & heteroscedasticity structures  *(high value)* — ✅ SHIPPED (ar1/car1/cs; R0+corr GLS **and** R2+corr; **varPower/varIdent** `gls_fit(weights=)`)
 
 **What.** Within-group residual correlation / non-constant variance (nlme
 parity): `ar1(time|g)`, `car1`, `cs` (compound symmetry), and variance functions
@@ -578,10 +582,11 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 
 - ~~§1.1 R3 (nested)~~ ✅ (`lme_fit(inner=)`, telescoping Woodbury);
   ~~§1.2 GLMM (PQL)~~ ✅ (`glmm_fit`, level-count dispatch);
-  ~~§1.4 AR1/CAR1~~ ✅ (`gls_fit` ar1/car1/cs **+ R2+corr** `lme_fit(corr=)`;
-  varFunc Tier-2);
-  ~~§3.1 by-variable smooths~~ ✅; ~~§4 `S`-class families (Gamma/NB)~~ ✅ (Beta
-  deferred); ~~§6.2 sandwich/cluster SEs~~ ✅.
+  ~~§1.4 AR1/CAR1 + varFunc~~ ✅ (`gls_fit` ar1/car1/cs/iid **+ R2+corr**
+  `lme_fit(corr=)` **+ varPower/varIdent** `gls_fit(weights=)`);
+  ~~§3.1 by-variable smooths~~ ✅; ~~§4 `S`-class families~~ ✅ (Gamma/NB **+
+  Tweedie + Beta**); ~~§1.2 Laplace GLMM~~ ✅ (`glmm_fit(method='laplace')`);
+  ~~§6.2 sandwich/cluster SEs~~ ✅.
 
 **Tier 2 — future / heavier:**
 

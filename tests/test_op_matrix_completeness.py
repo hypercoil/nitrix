@@ -101,6 +101,11 @@ EXCLUDE: frozenset[str] = frozenset(
         'stats.lme.ar1',
         'stats.lme.car1',
         'stats.lme.cs',
+        'stats.lme.iid',
+        # -- Variance-function constructors: build a VarFunc config record --------
+        #    (per-observation residual-scale + Jacobian), consumed by gls_fit.
+        'stats.lme.var_power',
+        'stats.lme.var_ident',
         # -- Thin vmap wrapper of an already-cataloged op -------------------------
         'geometry.spatial_transform_batched',  # vmap of spatial_transform
         # -- Post-fit read-outs on a GLMResult / GAMResult: contrasts, goodness- --
