@@ -304,6 +304,74 @@ def _glmm_slope_diagonal(
 # ---------------------------------------------------------------------------
 
 
+def _slope_solve(
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    z: Float[Array, 'N r'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    r: int,
+    g_inv: Float[Array, 'r r'],
+    se2: Float[Array, ''],
+    beta: Float[Array, 'p'],
+    b: Float[Array, 'q r'],
+    ridge_eye: Float[Array, 'p p'],
+) -> Tuple[
+    Float[Array, 'p'],
+    Float[Array, 'q r'],
+    Float[Array, 'N'],
+    Float[Array, 'N'],
+    Float[Array, 'q r r'],
+    Float[Array, 'q p r'],
+    Float[Array, 'q r r'],
+    Float[Array, 'p p'],
+]:
+    """One penalised-IRLS step for an ``r``-dimensional random slope, Schur-structured.
+
+    The ``r x r`` lift of :func:`_structured_solve`: at the current ``(beta, b)`` and
+    fixed ``(G, sigma_e^2)``, form the working response and weights, then solve the
+    penalised normal equations with per-group blocks ``D_g = Z_g^T W Z_g +
+    sigma_e^2 G^{-1}`` (``r x r``) and ``B_g = X_g^T W Z_g`` (``p x r``).  Eliminating
+    ``b`` gives the ``p x p`` Schur system ``S beta = rhs``, ``S = X^T W X - sum_g
+    B_g D_g^{-1} B_g^T`` -- per-group ``r x r`` inverses (``small_inv_logdet``), never
+    the ``(p + q r)``-wide system.  Returns ``(beta, b)`` and the pieces the REML-EM
+    update needs: ``w``, ``z_work``, and the per-group ``Z^T W Z`` / ``X^T W Z`` /
+    ``D^{-1}`` plus ``S^{-1}``.
+    """
+    eta = family.clip_eta(X @ beta + jnp.einsum('nr,nr->n', z, b[group]))
+    mu = family.linkinv(eta)
+    dmu = family.mu_eta(eta)
+    var = jnp.clip(family.variance(mu), _EPS, None)
+    w = dmu * dmu / var
+    z_work = eta + (y - mu) / safe_dmu(dmu)
+
+    wx = w[:, None] * X
+    wzwork = w * z_work
+    ztz = jax.ops.segment_sum(
+        (w[:, None] * z)[:, :, None] * z[:, None, :], group, num_segments=n_groups
+    )  # (q, r, r) = Z_g^T W Z_g
+    xtz = jax.ops.segment_sum(
+        wx[:, :, None] * z[:, None, :], group, num_segments=n_groups
+    )  # (q, p, r) = X_g^T W Z_g
+    zty = jax.ops.segment_sum(
+        wzwork[:, None] * z, group, num_segments=n_groups
+    )  # (q, r) = Z_g^T W z_work
+    xtwx = wx.T @ X  # (p, p)
+    xtwz = X.T @ wzwork  # (p,)
+
+    dinv = jax.vmap(lambda a: small_inv_logdet(a, r)[0])(
+        ztz + se2 * g_inv[None]
+    )  # (q, r, r) = D_g^{-1}
+    bdinvbt = jnp.einsum('gpr,grs,gqs->pq', xtz, dinv, xtz)  # (p, p)
+    s_inv, _ = small_inv_logdet(xtwx - bdinvbt + ridge_eye, X.shape[-1])
+    rhs_beta = xtwz - jnp.einsum('gpr,grs,gs->p', xtz, dinv, zty)
+    beta_new = s_inv @ rhs_beta
+    zr = zty - jnp.einsum('gpr,p->gr', xtz, beta_new)  # Z_g^T W (z_work - X beta)
+    b_new = jnp.einsum('grs,gs->gr', dinv, zr)  # (q, r)
+    return beta_new, b_new, w, z_work, ztz, xtz, dinv, s_inv
+
+
 def _glmm_slope_structured_one(
     y: Float[Array, 'N'],
     X: Float[Array, 'N p'],
@@ -316,7 +384,6 @@ def _glmm_slope_structured_one(
     n_outer: int,
     n_inner: int,
     ridge: float,
-    damping: float,
 ) -> Tuple[
     Float[Array, 'p'],
     Float[Array, 'q r'],
@@ -327,120 +394,118 @@ def _glmm_slope_structured_one(
 ]:
     """Single-voxel unstructured (correlated-``G``) random-slope GLMM via PQL.
 
-    The PQL outer loop forms the IRLS working response ``z_work`` and weights ``w``
-    at the current ``(beta, b, theta)``, **row-scales** by ``sqrt(w)`` so the
-    working model is a homoscedastic LME (residual ``sigma_e^2 I``), and fits it
-    with the block-Woodbury REML (:func:`_fit_one` -- per-group ``r x r`` Woodbury,
-    never the ``(p + q r)``-wide system).  The BLUPs are recovered per group as
-    ``b_i = M_i Z_i^T r_i`` with ``M_i = (sigma_e^2 G^{-1} + Z_i^T W_i Z_i)^{-1}``.
-    Because ``sqrt(w)``-scaled ``group_grams`` produce exactly the ``W``-weighted
-    Grams (and the unweighted group sizes the log-determinant needs), this *is* the
-    penalised-IRLS = iteratively-reweighted-REML identity; the Gaussian-family fit
-    (``w == 1``, ``z_work == y``) reduces to ``lme_fit``'s R2 block-Woodbury.
+    A **joint-Schur inner IRLS + monotone REML-EM outer** (FR
+    ``glmm-random-slope-robust-solver``).  Each outer step (a) runs ``n_inner``
+    penalised-IRLS steps for ``(beta, b)`` at fixed ``(G, sigma_e^2)`` through the
+    ``r x r`` Schur solve (:func:`_slope_solve`), then (b) updates the
+    random-effect covariance by EM::
 
-    Returns ``(beta, blups (q, r), cov_re (r, r), dispersion, deviance, edf)``.
+        G <- (1/q) sum_g [ b_g b_g^T + Cov(b_g) ],
+        Cov(b_g) = sigma_e^2 (D_g^{-1} + D_g^{-1} B_g^T S^{-1} B_g D_g^{-1}),
+
+    the posterior second moment of the random effects (the ``B_g^T S^{-1} B_g``
+    term is the beta-uncertainty correction that makes this **REML**-EM, not ML-EM
+    -- it is what reproduces ``lme_fit``'s REML for the Gaussian family).  Because
+    the M-step is a sum of PSD matrices it stays positive-definite, and because EM
+    is monotone in the REML objective it cannot over-shoot ``G`` the way the
+    earlier iterated-Newton-REML did -- so the fit no longer depends on the IRLS
+    ``eta`` clamp landing it in the right basin (the clamp reverts to pure overflow
+    safety).  ``sigma_e^2`` is pinned at ``1`` for a fixed-dispersion family
+    (binomial / Poisson / NB) and EM-updated (``(sum_i w_i r_i^2 + sum_g tr(Z_g^T W
+    Z_g Cov(b_g))) / N``) otherwise.
+
+    Returns ``(beta, blups (q, r), G (r, r), dispersion, deviance, edf)``.
     """
     from ._irls import irls_warm_start
-    from .lme._blockwoodbury import (
-        _fit_one,
-        _param_layout,
-        cov_re_from_chol,
-        group_grams,
-    )
 
-    spec = VarCompSpec.reml(n_iter=n_inner, damping=damping, ridge=ridge)
-    # Initialise on the *link* scale (not the raw-response scale): the GLM IRLS
-    # warm start fixes beta to project the linked initial mean onto X, and the
-    # variance components are seeded from the linked initial response.  Starting
-    # from eta = 0 instead would put the first working response on the wrong scale
-    # (catastrophic for the exp link -- y - 1 vs log y) and the PQL loop diverges.
-    eta0 = family.link(family.init_mu(y))
-    var_e = jnp.var(eta0)
-    layout = _param_layout(r, False)
-    diag = jnp.asarray([i == j for (i, j) in layout])
-    chol0 = jnp.where(
-        diag, 0.5 * jnp.log(jnp.maximum(0.1 * var_e, 1e-6)), 0.0
+    ridge_eye = ridge * jnp.eye(p, dtype=y.dtype)
+    ridge_r = ridge * jnp.eye(r, dtype=y.dtype)
+    n = X.shape[0]
+    fixed_disp = family.has_fixed_dispersion
+
+    # Link-scale init (see _glmm_slope_diagonal); a *small* G so the first inner
+    # IRLS shrinks the BLUPs hard -- EM then grows G monotonically, no over-shoot.
+    var_e = jnp.var(family.link(family.init_mu(y)))
+    g_init = jnp.maximum(0.1 * var_e, 1e-4) * jnp.eye(r, dtype=y.dtype)
+    se2_init = (
+        jnp.asarray(1.0, dtype=y.dtype)
+        if fixed_disp
+        else jnp.maximum(0.5 * var_e, 1e-4)
     )
-    theta0 = jnp.concatenate(
-        [chol0, jnp.log(jnp.maximum(0.5 * var_e, 1e-6))[None]]
-    )
-    beta0 = irls_warm_start(
+    beta_init = irls_warm_start(
         y, X, family, penalty=jnp.zeros((p, p), dtype=y.dtype), ridge=ridge
     )
-    b0 = jnp.zeros((n_groups, r), dtype=y.dtype)
+    b_init = jnp.zeros((n_groups, r), dtype=y.dtype)
 
-    def working(
-        beta: Array, b: Array
-    ) -> Tuple[Array, Array, Array]:
-        # Clamp the linear predictor (random slope b_slope * x can blow up the
-        # exp link mid-iteration); a no-op (eta_bound = inf) for the bounded links.
-        eta = family.clip_eta(X @ beta + jnp.einsum('nr,nr->n', z, b[group]))
-        mu = family.linkinv(eta)
-        dmu = family.mu_eta(eta)
-        var = jnp.clip(family.variance(mu), _EPS, None)
-        w = dmu * dmu / var
-        z_work = eta + (y - mu) / safe_dmu(dmu)
-        return w, z_work, eta
+    def run_inner(
+        g_inv: Array, se2: Array, beta: Array, b: Array
+    ) -> Tuple[Array, Array, Array, Array, Array, Array, Array, Array]:
+        def step(c: Tuple[Array, Array], _: Array) -> Tuple[Tuple[Array, Array], None]:
+            be, bb = c
+            be2, bb2, *_ = _slope_solve(
+                y, X, z, group, n_groups, family, r, g_inv, se2, be, bb, ridge_eye
+            )
+            return (be2, bb2), None
 
-    def blups_from(
-        theta: Array, ztz: Array, xtz: Array, zty: Array, beta: Array
-    ) -> Array:
-        se2 = jnp.exp(theta[-1])
-        g_inv, _ = small_inv_logdet(cov_re_from_chol(theta[:-1], r, False), r)
-        m_mat = jax.vmap(lambda a: small_inv_logdet(a, r)[0])(
-            se2 * g_inv[None] + ztz
+        (beta, b), _ = lax.scan(step, (beta, b), xs=None, length=n_inner)
+        return _slope_solve(
+            y, X, z, group, n_groups, family, r, g_inv, se2, beta, b, ridge_eye
         )
-        zr = zty - jnp.einsum('mpr,p->mr', xtz, beta)  # Z_i^T r_i
-        return jnp.einsum('mrs,ms->mr', m_mat, zr)  # M_i Z_i^T r_i
 
     def outer(
-        carry: Tuple[Array, Array, Array], _: Array
-    ) -> Tuple[Tuple[Array, Array, Array], None]:
-        theta, beta, b = carry
-        w, z_work, _ = working(beta, b)
-        sw = jnp.sqrt(w)
-        xs = sw[:, None] * X
-        zs = sw[:, None] * z
-        ys = sw * z_work
-        ztz, xtz, xtx, xtx_g, nvec, n_minus_mr = group_grams(
-            xs, zs, group, n_groups
-        )
-        zty = jax.ops.segment_sum(
-            zs * ys[:, None], group, num_segments=n_groups
-        )
-        xty = xs.T @ ys
-        yty = ys @ ys
-        xty_g = jax.ops.segment_sum(
-            xs * ys[:, None], group, num_segments=n_groups
-        )
-        yty_g = jax.ops.segment_sum(ys * ys, group, num_segments=n_groups)
-        theta, beta, _ = _fit_one(
-            zty, xty, yty, xty_g, yty_g, theta,
-            ztz, xtz, xtx, xtx_g, nvec, n_minus_mr, r, p, spec, False,
-        )
-        b = blups_from(theta, ztz, xtz, zty, beta)
-        return (theta, beta, b), None
+        carry: Tuple[Array, Array, Array, Array], _: Array
+    ) -> Tuple[Tuple[Array, Array, Array, Array], None]:
+        g_cov, se2, beta, b = carry
+        g_inv, _ = small_inv_logdet(g_cov, r)
+        pieces = run_inner(g_inv, se2, beta, b)
+        beta, b = pieces[0], pieces[1]
+        g_new, se2_new, _ = _em_step(*pieces, se2)
+        return (g_new, se2_new, beta, b), None
 
-    (theta, beta, b), _ = lax.scan(
-        outer, (theta0, beta0, b0), xs=None, length=n_outer
+    def _em_step(
+        beta: Array, b: Array, w: Array, z_work: Array, ztz: Array,
+        xtz: Array, dinv: Array, s_inv: Array, se2: Array,
+    ) -> Tuple[Array, Array, Array]:
+        # Posterior covariance V_bb = D^{-1} + D^{-1} B^T S^{-1} B D^{-1} (the
+        # beta-uncertainty term makes G REML, not ML); scaled by se2 it is Cov(b_g).
+        c_mat = jnp.einsum('grs,gps->grp', dinv, xtz)  # D^{-1} B^T  (q, r, p)
+        v_bb = dinv + jnp.einsum('grp,pq,gsq->grs', c_mat, s_inv, c_mat)
+        cov_b = se2 * v_bb
+        # M-step: G = mean over groups of (b b^T + Cov(b)) -- PSD by construction.
+        g_new = (
+            jnp.einsum('gr,gs->rs', b, b) + jnp.sum(cov_b, axis=0)
+        ) / n_groups + ridge_r
+        # Total effective df = tr(S^{-1} X^T W X) - 2 tr(S^{-1} B D^{-1} B^T)
+        #                      + sum_g tr(V_bb_g Z_g^T W Z_g)  (= tr(V_full Gram)).
+        bdinvbt = jnp.einsum('gpr,grs,gqs->pq', xtz, dinv, xtz)
+        xtwx = (w[:, None] * X).T @ X
+        edf = (
+            jnp.trace(s_inv @ xtwx)
+            - 2.0 * jnp.trace(s_inv @ bdinvbt)
+            + jnp.sum(jnp.einsum('grs,gsr->g', v_bb, ztz))
+        )
+        # sigma_e^2: pinned at 1 for a fixed-dispersion family; else the REML
+        # estimate rss / (N - edf) (the LMM generalisation of RSS/(N-p)).
+        if fixed_disp:
+            se2_new = jnp.asarray(1.0, dtype=y.dtype)
+        else:
+            resid = z_work - X @ beta - jnp.einsum('nr,nr->n', z, b[group])
+            rss = jnp.sum(w * resid * resid)
+            se2_new = rss / jnp.clip(n - edf, 1e-3, None)
+        return g_new, se2_new, edf
+
+    (g_cov, se2, beta, b), _ = lax.scan(
+        outer, (g_init, se2_init, beta_init, b_init), xs=None, length=n_outer
     )
 
-    # Final statistics at the converged fit.
-    se2 = jnp.exp(theta[-1])
-    cov_re = cov_re_from_chol(theta[:-1], r, False)
-    w, _, eta = working(beta, b)
-    mu = family.linkinv(eta)
-    deviance = jnp.sum(family.unit_deviance(y, mu))
-    sw = jnp.sqrt(w)
-    zs = sw[:, None] * z
-    ztz = jax.ops.segment_sum(
-        zs[:, :, None] * zs[:, None, :], group, num_segments=n_groups
-    )
-    g_inv, _ = small_inv_logdet(cov_re, r)
-    m_mat = jax.vmap(lambda a: small_inv_logdet(a, r)[0])(se2 * g_inv[None] + ztz)
-    # edf = p (unpenalised fixed) + sum_i tr(M_i Z_i^T W_i Z_i).
-    edf = p + jnp.sum(jnp.einsum('mrs,msr->m', m_mat, ztz))
-    return beta, b, cov_re, se2, deviance, edf
+    # Final statistics at the converged (G, sigma_e^2).
+    g_inv, _ = small_inv_logdet(g_cov, r)
+    pieces = run_inner(g_inv, se2, beta, b)
+    beta, b = pieces[0], pieces[1]
+    _, _, edf = _em_step(*pieces, se2)
+    eta = family.clip_eta(X @ beta + jnp.einsum('nr,nr->n', z, b[group]))
+    deviance = jnp.sum(family.unit_deviance(y, family.linkinv(eta)))
+    return beta, b, g_cov, se2, deviance, edf
 
 
 def _glmm_slope_structured(
@@ -453,10 +518,9 @@ def _glmm_slope_structured(
     n_outer: int,
     n_inner: int,
     ridge: float,
-    damping: float,
     block: Optional[int],
 ) -> GLMMResult:
-    """Unstructured random-slope GLMM over ``V`` elements (block-Woodbury PQL)."""
+    """Unstructured random-slope GLMM over ``V`` elements (joint-Schur + REML-EM)."""
     p = X.shape[-1]
     r = z.shape[-1]
 
@@ -464,8 +528,7 @@ def _glmm_slope_structured(
         y: Float[Array, 'N'],
     ) -> Tuple[Array, Array, Array, Array, Array, Array]:
         return _glmm_slope_structured_one(
-            y, X, z, group, n_groups, family, p, r,
-            n_outer, n_inner, ridge, damping,
+            y, X, z, group, n_groups, family, p, r, n_outer, n_inner, ridge,
         )
 
     beta, blups, cov_re, se2, deviance, edf = blocked_vmap(
@@ -1252,7 +1315,7 @@ def glmm_fit(
             )
         return _glmm_slope_structured(
             Y, X, group, n_groups, z, family,
-            n_outer, n_inner, ridge, damping, block,
+            n_outer, n_inner, ridge, block,
         )
 
     if method == 'laplace':

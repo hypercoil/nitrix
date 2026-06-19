@@ -81,9 +81,41 @@ def test_gaussian_unstructured_slope_matches_lme():
     )
     r = lme_fit(Y, Xj, z=zj, group=gj, structure='unstructured')
     assert g.tier == 'slope'
-    assert np.allclose(g.beta_hat, r.beta_hat, rtol=1e-3, atol=1e-4)
-    assert np.allclose(g.re_var, r.cov_re, rtol=1e-2, atol=1e-3)
-    assert np.allclose(g.dispersion, r.sigma_e_sq, rtol=1e-2, atol=1e-3)
+    # The REML-EM solver converges to lme_fit's REML optimum (both REML); the
+    # tight tolerances pin that it is the *same* estimator, not just close.
+    assert np.allclose(g.beta_hat, r.beta_hat, rtol=1e-4, atol=1e-5)
+    assert np.allclose(g.re_var, r.cov_re, rtol=1e-3, atol=1e-5)
+    assert np.allclose(g.dispersion, r.sigma_e_sq, rtol=1e-3, atol=1e-5)
+
+
+def test_structured_slope_clamp_insensitive():
+    """The REML-EM structured-slope solver is monotone, so the fit no longer
+    depends on the IRLS eta clamp landing it in the right basin: the recovered G
+    is identical across a wide range of eta_bound (the earlier iterated-Newton-
+    REML degenerated to intercept-variance -> 0 at a looser clamp).  The clamp is
+    now pure overflow safety for this path."""
+    from dataclasses import replace
+
+    from nitrix.stats import POISSON
+
+    G = np.array([[0.5, 0.25], [0.25, 0.4]])
+    X, z, group, y, _ = _sim_slope(
+        'poisson', seed=5, q=70, n_per=15, G=G, beta=(0.3, 0.6)
+    )
+    Yj, Xj, zj, gj = (
+        jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(z),
+        jnp.asarray(group),
+    )
+
+    def fit(bound):
+        return np.asarray(
+            glmm_fit(
+                Yj, Xj, group=gj, z=zj, structure='unstructured',
+                family=replace(POISSON, eta_bound=bound), n_outer=60,
+            ).re_var[0]
+        )
+
+    np.testing.assert_allclose(fit(20.0), fit(float('inf')), rtol=1e-4, atol=1e-5)
 
 
 # ---------------------------------------------------------------------------
