@@ -106,6 +106,17 @@ class Family:
     loglik: Callable[[Array, Array, Array], Array]
     eta_bound: float = float('inf')
 
+    def clip_eta(self, eta: Array) -> Array:
+        """Clamp the linear predictor to the family's numerically-sane range.
+
+        ``+-eta_bound`` -- ``inf`` for the bounded identity / logit links (a
+        no-op), ``_ETA_MAX`` for the unbounded ``exp`` links (where an
+        un-clamped ``eta`` blows up ``exp(eta)`` and the IRLS weights).  The
+        single source of truth for the clamp across the IRLS / PQL / Laplace
+        working-response sites.
+        """
+        return jnp.clip(eta, -self.eta_bound, self.eta_bound)
+
     def with_link(self, link: Union[str, 'Link']) -> 'Family':
         """A copy of this family with a **non-canonical** link substituted.
 

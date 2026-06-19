@@ -315,3 +315,20 @@ def test_james_stein_invalid_shrinkage_raises():
         residualise(Y, X, shrinkage='bogus')
     with pytest.raises(ValueError, match='shrinkage'):
         partial_residualise(Y, signal=X, noise=X, shrinkage='bogus')
+
+
+def test_james_stein_differentiable():
+    """residualise(shrinkage='james-stein') is differentiable -- the per-channel
+    clip and 1/||proj||^2 notwithstanding -- and matches finite differences."""
+    rng = np.random.default_rng(7)
+    Y = jnp.asarray(rng.standard_normal((1, 40)))
+    X = jnp.asarray(rng.standard_normal((6, 40)))
+
+    def loss(Yv):
+        return jnp.sum(residualise(Yv, X, shrinkage='james-stein') ** 2)
+
+    g = jax.grad(loss)(Y)
+    assert bool(jnp.all(jnp.isfinite(g)))
+    # eps sized for the float32 default this file runs under (no x64 config).
+    fd = (loss(Y.at[0, 2].add(1e-2)) - loss(Y.at[0, 2].add(-1e-2))) / (2e-2)
+    np.testing.assert_allclose(float(g[0, 2]), float(fd), atol=5e-3)

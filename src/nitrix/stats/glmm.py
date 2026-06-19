@@ -48,7 +48,8 @@ also fits non-Gaussian random **slopes** via the ``z`` / ``structure`` arguments
 diagonal ``(x || g)`` as independent ``re_smooth`` blocks through ``gam_fit``, and
 correlated ``(1 + x | g)`` via the block-Woodbury REML wrapped in the PQL loop (the
 penalised-IRLS = iteratively-reweighted-REML identity).  The Gaussian-family slope
-fit reduces to ``lme_fit`` (R2 block-Woodbury) exactly.  Random slopes are also
+fit is the same REML estimator as ``lme_fit`` (R2 block-Woodbury), to the
+iterative (optimiser) tolerance.  Random slopes are also
 served under the **Laplace** marginal likelihood (``method='laplace'``, the
 ``r``-dimensional conditional-mode integral + ``r x r`` determinant correction),
 which corrects the PQL attenuation for binary / low-count slopes.
@@ -74,6 +75,7 @@ from jaxtyping import Array, Float, Int
 from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
+from ._irls import safe_dmu
 from .basis import re_smooth
 from .gam import gam_fit
 from .lme._optimise import damped_newton
@@ -82,13 +84,6 @@ from .lme._varcomp import VarCompSpec
 __all__ = ['GLMMResult', 'glmm_fit']
 
 _EPS = 1e-10
-
-
-def _safe_dmu(dmu: Float[Array, 'N']) -> Float[Array, 'N']:
-    """Floor ``|dmu|`` away from zero, *preserving sign* (a decreasing link --
-    the reciprocal / inverse link has ``dmu < 0`` -- would otherwise have its
-    derivative flipped by a naive clip, exploding the working response)."""
-    return jnp.where(dmu < 0.0, jnp.minimum(dmu, -_EPS), jnp.maximum(dmu, _EPS))
 
 
 # ---------------------------------------------------------------------------
@@ -378,17 +373,13 @@ def _glmm_slope_structured_one(
         beta: Array, b: Array
     ) -> Tuple[Array, Array, Array]:
         # Clamp the linear predictor (random slope b_slope * x can blow up the
-        # exp link mid-iteration); eta_bound = inf for the bounded links.
-        eta = jnp.clip(
-            X @ beta + jnp.einsum('nr,nr->n', z, b[group]),
-            -family.eta_bound,
-            family.eta_bound,
-        )
+        # exp link mid-iteration); a no-op (eta_bound = inf) for the bounded links.
+        eta = family.clip_eta(X @ beta + jnp.einsum('nr,nr->n', z, b[group]))
         mu = family.linkinv(eta)
         dmu = family.mu_eta(eta)
         var = jnp.clip(family.variance(mu), _EPS, None)
         w = dmu * dmu / var
-        z_work = eta + (y - mu) / _safe_dmu(dmu)
+        z_work = eta + (y - mu) / safe_dmu(dmu)
         return w, z_work, eta
 
     def blups_from(
@@ -540,7 +531,7 @@ def _structured_solve(
     dmu = family.mu_eta(eta)
     var = family.variance(mu)
     w = dmu * dmu / jnp.clip(var, _EPS, None)  # (N,) working weights
-    z = eta + (y - mu) / _safe_dmu(dmu)  # (N,) working response
+    z = eta + (y - mu) / safe_dmu(dmu)  # (N,) working response
 
     sw = jax.ops.segment_sum(w, group, num_segments=n_groups)  # (q,)
     swz = jax.ops.segment_sum(w * z, group, num_segments=n_groups)  # (q,)
@@ -939,6 +930,13 @@ def _laplace_slope_modes(
     ``segment_sum`` of the per-observation outer products.  Returns the modes, the
     per-group curvature ``H_g`` at the mode (for the determinant correction), and
     the linear predictor.
+
+    ``H_g`` uses the **expected** (Fisher) information ``w_i = (dmu/deta)^2 / V``,
+    not the observed Hessian ``-d^2 ell/db^2`` -- the deliberate ``glmer``-
+    consistent "Fisher-scoring Laplace".  For the canonical links (logit / log)
+    the two coincide; for a non-canonical link (probit / cloglog slope) they
+    differ at higher order, so this is an approximation choice, not the exact
+    observed-information Laplace.
     """
     from .lme._blockwoodbury import cov_re_from_chol
 
@@ -961,11 +959,7 @@ def _laplace_slope_modes(
     def mode_step(
         b: Float[Array, 'q r'], _: Array
     ) -> Tuple[Float[Array, 'q r'], None]:
-        eta = jnp.clip(
-            eta_fix + jnp.einsum('nr,nr->n', z, b[group]),
-            -family.eta_bound,
-            family.eta_bound,
-        )
+        eta = family.clip_eta(eta_fix + jnp.einsum('nr,nr->n', z, b[group]))
         mu, dlog, h_mat = _curvature(eta)
         score = (y - mu) * dlog  # (N,) d log p / d eta
         grad = jax.ops.segment_sum(
@@ -980,11 +974,7 @@ def _laplace_slope_modes(
         xs=None,
         length=n_mode,
     )
-    eta = jnp.clip(
-        eta_fix + jnp.einsum('nr,nr->n', z, b[group]),
-        -family.eta_bound,
-        family.eta_bound,
-    )
+    eta = family.clip_eta(eta_fix + jnp.einsum('nr,nr->n', z, b[group]))
     _, _, h_mat = _curvature(eta)
     return b, h_mat, eta
 
@@ -1170,8 +1160,8 @@ def glmm_fit(
         Optional ``(N, r)`` random-effect design for a random **slope** (e.g.
         ``[1, x]`` -> random intercept + random slope of ``x``).  ``None``
         (default) is the scalar random intercept ``(1 | g)``.  Mirrors
-        ``lme_fit``'s ``z=`` argument; the Gaussian-family slope GLMM reduces
-        exactly to ``lme_fit(z=, structure=)``.
+        ``lme_fit``'s ``z=`` argument; the Gaussian-family slope GLMM is the same
+        REML fit as ``lme_fit(z=, structure=)`` (to optimiser tolerance).
     structure
         Random-effect covariance for a slope (``z`` given): ``'unstructured'``
         (full ``r x r`` ``G``, the correlated ``(1 + x | g)``) or ``'diagonal'``

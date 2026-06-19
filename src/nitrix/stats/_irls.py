@@ -30,9 +30,24 @@ from jaxtyping import Array, Float
 from ..linalg._smalllinalg import small_inv_logdet
 from ._family import Family
 
-__all__ = ['fit_penalised_irls', 'irls_warm_start']
+__all__ = ['fit_penalised_irls', 'irls_warm_start', 'safe_dmu']
 
 _EPS = 1e-10
+
+
+def safe_dmu(dmu: Float[Array, 'N']) -> Float[Array, 'N']:
+    """Floor ``|dmu|`` away from zero, *preserving sign*.
+
+    The single source of truth for the IRLS working-response denominator across
+    GLM / GAM / GLMM.  A *decreasing* link -- the reciprocal / inverse link has
+    ``dmu = -1/eta^2 < 0`` -- would otherwise have its derivative flipped to
+    ``+_EPS`` by a naive ``clip(dmu, _EPS, None)``, exploding the working response
+    ``z = eta + (y - mu) / dmu``.  For the increasing canonical links
+    (``dmu > 0``) this is exactly ``max(dmu, _EPS)``.
+    """
+    return jnp.where(
+        dmu < 0.0, jnp.minimum(dmu, -_EPS), jnp.maximum(dmu, _EPS)
+    )
 
 
 def _working(
@@ -47,20 +62,14 @@ def _working(
     # unbounded exp links a transient overshoot otherwise blows up exp(eta) and
     # the working weights (a single observation dominates -> garbage / NaN); the
     # bounded links carry eta_bound = inf, so this is a no-op for them.
-    eta = jnp.clip(X @ beta, -family.eta_bound, family.eta_bound)
+    eta = family.clip_eta(X @ beta)
     mu = family.linkinv(eta)
     dmu = family.mu_eta(eta)
     var = family.variance(mu)
     wts = dmu * dmu / jnp.clip(var, _EPS, None)
     if prior_weights is not None:
         wts = prior_weights * wts
-    # Floor |dmu| away from zero *preserving sign*: a decreasing link (the
-    # reciprocal / inverse link has dmu = -1/eta^2 < 0) would otherwise have its
-    # derivative flipped to +_EPS by a naive clip, exploding the working response.
-    safe_dmu = jnp.where(
-        dmu < 0.0, jnp.minimum(dmu, -_EPS), jnp.maximum(dmu, _EPS)
-    )
-    z = eta + (y - mu) / safe_dmu
+    z = eta + (y - mu) / safe_dmu(dmu)
     return wts, z, mu
 
 

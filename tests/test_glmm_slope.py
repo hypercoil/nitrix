@@ -348,3 +348,69 @@ def test_laplace_slope_shapes_and_diagonal():
     leaves, treedef = jax.tree_util.tree_flatten(gu)
     gu2 = jax.tree_util.tree_unflatten(treedef, leaves)
     assert isinstance(gu2, GLMMResult) and gu2.tier == 'laplace'
+
+
+# ---------------------------------------------------------------------------
+# Multi-voxel correctness (distinct y) + differentiability
+# ---------------------------------------------------------------------------
+
+
+def test_slope_multivoxel_matches_per_voxel():
+    """Distinct y per voxel: the vmapped multi-voxel fit must equal independent
+    single-voxel fits -- guards against per-voxel indexing / broadcast bugs that
+    a tiled-identical-voxel test cannot catch.  Gaussian family so the fit is
+    numerically stable (the Poisson slope path can amplify vmap-vs-scalar
+    float-reordering near its sensitive optimum -- a separate, documented issue)."""
+    rng = np.random.default_rng(11)
+    q, n_per = 8, 12
+    group = np.repeat(np.arange(q), n_per).astype(np.int32)
+    n = q * n_per
+    x = rng.standard_normal(n)
+    X = np.c_[np.ones(n), x]
+    z = np.c_[np.ones(n), x]
+    L = np.linalg.cholesky(np.array([[0.4, 0.1], [0.1, 0.3]]))
+    V = 3
+    ys = []
+    for v in range(V):
+        b = rng.standard_normal((q, 2)) @ L.T
+        eta = X @ np.array([0.2 + 0.1 * v, 0.5]) + np.einsum(
+            'nr,nr->n', z, b[group]
+        )
+        ys.append(eta + rng.standard_normal(n) * 0.5)  # distinct Gaussian rows
+    Y = jnp.asarray(np.stack(ys))  # (V, N)
+    Xj, zj, gj = jnp.asarray(X), jnp.asarray(z), jnp.asarray(group)
+    kw = dict(group=gj, z=zj, structure='unstructured', family='gaussian')
+    multi = glmm_fit(Y, Xj, **kw)
+    for v in range(V):
+        one = glmm_fit(Y[v : v + 1], Xj, **kw)
+        np.testing.assert_allclose(
+            multi.beta_hat[v], one.beta_hat[0], atol=1e-6
+        )
+        np.testing.assert_allclose(multi.re_var[v], one.re_var[0], atol=1e-6)
+        np.testing.assert_allclose(multi.blups[v], one.blups[0], atol=1e-6)
+
+
+def test_slope_differentiable():
+    """glmm_fit is differentiable through the structured-slope solver: the
+    reverse-mode gradient matches finite differences."""
+    rng = np.random.default_rng(0)
+    q, n_per = 5, 8
+    group = jnp.asarray(np.repeat(np.arange(q), n_per).astype(np.int32))
+    n = q * n_per
+    x = rng.standard_normal(n)
+    X = jnp.asarray(np.c_[np.ones(n), x])
+    z = jnp.asarray(np.c_[np.ones(n), x])
+    y = jnp.asarray(rng.poisson(np.exp(0.3 + 0.5 * x)).astype(float))
+
+    def loss(yv):
+        g = glmm_fit(
+            yv[None, :], X, group=group, z=z, structure='unstructured',
+            family='poisson', n_outer=12,
+        )
+        return jnp.sum(g.beta_hat[0])
+
+    gd = jax.grad(loss)(y)
+    assert bool(jnp.all(jnp.isfinite(gd)))
+    eps, i = 1e-5, 3
+    fd = (loss(y.at[i].add(eps)) - loss(y.at[i].add(-eps))) / (2 * eps)
+    np.testing.assert_allclose(float(gd[i]), float(fd), atol=1e-4)
