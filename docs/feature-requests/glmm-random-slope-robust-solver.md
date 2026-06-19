@@ -1,12 +1,15 @@
 # GLMM random-slope robust solver — joint-Schur PQL + REML-EM — `nitrix.stats.glmm`
 
-> **Status (2026-06-19): not started.** Hardening follow-up to the shipped
-> non-Gaussian random-slope work (branch `feat/glmm-random-slopes`:
-> `c8b44cd` the slope feature, `bdfc55c` the exp-link IRLS clamp). The
-> correlated-slope PQL path *works* and is validated, but is clamp-sensitive;
-> this FR tracks replacing its solver core with a monotone one. **Not a
-> correctness blocker** — promotion gated on the correlated-Poisson/Gamma
-> random-slope path becoming load-bearing for a real analysis.
+> **Status (2026-06-19): ✅ SHIPPED** (branch `feat/glmm-slope-followups`,
+> `be5a277`). `_glmm_slope_structured_one` is now the monotone joint-Schur +
+> REML-EM solver below. Validated: Gaussian unstructured == `lme_fit`'s REML
+> (beta / G / sigma_e^2 to ~1e-8, converged by the **default** `n_outer=20` — the
+> linear-convergence worry below did not materialise), and **clamp-insensitive**
+> (identical G across `eta_bound` ∈ {20, 30, 60, ∞} for the seed that degenerated
+> the old Newton at 30; a regression test pins it). The clamp reverts to pure
+> overflow safety. The two performance items below (nested-REML waste, `block`
+> default) are subsumed / still open as noted; the Laplace-gradient sibling item
+> is tracked separately. *Original FR (now implemented) follows.*
 
 **What.** Replace the solver *core* of the unstructured (correlated-`G`)
 random-slope GLMM — `glmm.py::_glmm_slope_structured_one` — with a **joint-Schur

@@ -280,10 +280,11 @@ lowers to the same HLO as `reml_fit(Y,X,Z)` (R1 no-regression proof).
 > determinant correction, which corrects the slope-variance attenuation for
 > binary/low-count outcomes). Gaussian-family slope == `lme_fit(z=, structure=)`
 > exactly; r=1 Laplace == the scalar Laplace; r=2 matches a scipy Laplace
-> reference. **Remaining follow-up:** the correlated-slope PQL solver is
-> clamp-sensitive — see
-> [`glmm-random-slope-robust-solver.md`](glmm-random-slope-robust-solver.md)
-> (joint-Schur PQL + REML-EM; not a correctness blocker).
+> reference. The correlated-slope solver is now the monotone, clamp-insensitive
+> **joint-Schur + REML-EM** (✅ shipped, see
+> [`glmm-random-slope-robust-solver.md`](glmm-random-slope-robust-solver.md)).
+> Remaining accuracy follow-ups: an analytic Laplace gradient (vs the current
+> autodiff-through-mode-scan) and adaptive Gauss-Hermite quadrature beyond Laplace.
 
 **What.** Random effects under a binomial / Poisson / … family via
 penalised-quasi-likelihood / Laplace-approximate REML: `glmm_fit(Y, X, random,
