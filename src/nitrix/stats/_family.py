@@ -19,15 +19,25 @@ type without a cycle.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Mapping, Union
 
 import jax.numpy as jnp
 from jax.scipy.special import gammaln, xlogy
+from jax.scipy.stats import norm as _norm
 from jaxtyping import Array
 
 __all__ = [
     'Family',
+    'Link',
+    'IDENTITY_LINK',
+    'LOG_LINK',
+    'LOGIT_LINK',
+    'PROBIT_LINK',
+    'CLOGLOG_LINK',
+    'SQRT_LINK',
+    'INVERSE_LINK',
+    'resolve_link',
     'GAUSSIAN',
     'BINOMIAL',
     'POISSON',
@@ -40,6 +50,26 @@ __all__ = [
 ]
 
 _EPS = 1e-10
+
+# Linear-predictor clamp for the unbounded (``exp``) inverse links.  ``mu =
+# exp(eta)`` overflows for ``eta`` beyond a few hundred and -- well before that --
+# produces astronomically large IRLS weights that let a single transient-overshoot
+# observation dominate the normal equations (garbage / NaN).  This is the textbook
+# fragility of PQL for a Poisson / Gamma random *slope* (a large ``b_slope * x``
+# blows up ``exp(eta)``) and of any log-link GAM whose smooth swings wide during
+# iteration.  ``mu = exp(20) ~ 5e8`` is already far past any realistic count /
+# rate, so clamping ``eta`` to ``+-20`` is harmless for a sane fit while breaking
+# the runaway feedback (empirically it is also the difference between the
+# random-slope PQL landing in the right REML basin vs a degenerate one).  The
+# bounded links (identity / logit) never overflow, so they keep ``eta_bound = inf``
+# (no clamp -- a Gaussian fit's ``eta = mu`` is legitimately unbounded).
+_ETA_MAX = 20.0
+
+
+def _safe_exp(eta: Array) -> Array:
+    """Overflow-safe ``exp`` inverse link: ``exp`` of an ``eta`` clamped to the
+    ``+-_ETA_MAX`` numerically-sane range (shared by the log-link families)."""
+    return jnp.exp(jnp.clip(eta, -_ETA_MAX, _ETA_MAX))
 
 
 @dataclass(frozen=True)
@@ -59,6 +89,10 @@ class Family:
     - ``has_fixed_dispersion`` -- ``True`` when the dispersion is 1 (binomial /
       Poisson; negative-binomial with a *known* ``alpha``); ``False`` when it is
       estimated (Gaussian, Gamma).
+    - ``eta_bound`` -- the IRLS clamp on the linear predictor (``inf`` for the
+      bounded identity / logit links; ``_ETA_MAX`` for the unbounded ``exp``
+      links, where it stabilises the working response).  The IRLS core
+      (:func:`~nitrix.stats._irls._working`) clamps ``eta`` to ``+-eta_bound``.
     """
 
     name: str
@@ -70,6 +104,57 @@ class Family:
     unit_deviance: Callable[[Array, Array], Array]
     init_mu: Callable[[Array], Array]
     loglik: Callable[[Array, Array, Array], Array]
+    eta_bound: float = float('inf')
+
+    def clip_eta(self, eta: Array) -> Array:
+        """Clamp the linear predictor to the family's numerically-sane range.
+
+        ``+-eta_bound`` -- ``inf`` for the bounded identity / logit links (a
+        no-op), ``_ETA_MAX`` for the unbounded ``exp`` links (where an
+        un-clamped ``eta`` blows up ``exp(eta)`` and the IRLS weights).  The
+        single source of truth for the clamp across the IRLS / PQL / Laplace
+        working-response sites.
+        """
+        return jnp.clip(eta, -self.eta_bound, self.eta_bound)
+
+    def with_link(self, link: Union[str, 'Link']) -> 'Family':
+        """A copy of this family with a **non-canonical** link substituted.
+
+        Only the link triple (``link`` / ``linkinv`` / ``mu_eta``) and the IRLS
+        ``eta_bound`` change; the distribution -- ``variance`` / ``unit_deviance``
+        / ``loglik`` / ``init_mu`` (all functions of ``mu``, not ``eta``) -- is
+        untouched, so e.g. ``BINOMIAL.with_link('probit')`` is the probit model
+        and ``POISSON.with_link('sqrt')`` the square-root-link Poisson, exactly as
+        in ``statsmodels`` ``Family(link=...)`` / mgcv.  The shared IRLS core is
+        Fisher scoring (``w = mu_eta^2 / V``, ``z = eta + (y - mu) / mu_eta``), so
+        any link composes without a solver change.
+        """
+        lk = resolve_link(link)
+        return replace(
+            self,
+            name=f'{self.name}[{lk.name}]',
+            link=lk.link,
+            linkinv=lk.linkinv,
+            mu_eta=lk.mu_eta,
+            eta_bound=lk.eta_bound,
+        )
+
+
+@dataclass(frozen=True)
+class Link:
+    """A link function as a record of its three IRLS primitives.
+
+    ``link`` = ``g(mu)``, ``linkinv`` = ``g^{-1}(eta)``, ``mu_eta`` = ``d mu /
+    d eta`` (as a function of ``eta``); ``eta_bound`` is the IRLS linear-predictor
+    clamp (``inf`` unless the inverse link can overflow).  Compose onto a
+    distribution with :meth:`Family.with_link`.
+    """
+
+    name: str
+    link: Callable[[Array], Array]
+    linkinv: Callable[[Array], Array]
+    mu_eta: Callable[[Array], Array]
+    eta_bound: float = float('inf')
 
 
 def _identity(x: Array) -> Array:
@@ -149,12 +234,13 @@ POISSON = Family(
     name='poisson',
     has_fixed_dispersion=True,
     link=lambda mu: jnp.log(jnp.clip(mu, _EPS, None)),
-    linkinv=jnp.exp,
-    mu_eta=jnp.exp,
+    linkinv=_safe_exp,
+    mu_eta=_safe_exp,
     variance=_identity,
     unit_deviance=_poisson_deviance,
     init_mu=lambda y: y + 0.1,
     loglik=_poisson_loglik,
+    eta_bound=_ETA_MAX,
 )
 
 
@@ -190,12 +276,13 @@ GAMMA = Family(
     name='gamma',
     has_fixed_dispersion=False,
     link=_log_link,
-    linkinv=jnp.exp,
-    mu_eta=jnp.exp,
+    linkinv=_safe_exp,
+    mu_eta=_safe_exp,
     variance=lambda mu: mu * mu,
     unit_deviance=_gamma_deviance,
     init_mu=lambda y: jnp.clip(y, _EPS, None),
     loglik=_gamma_loglik,
+    eta_bound=_ETA_MAX,
 )
 
 
@@ -239,12 +326,13 @@ def negbinomial(alpha: float = 1.0) -> Family:
         name='negbinomial',
         has_fixed_dispersion=True,
         link=_log_link,
-        linkinv=jnp.exp,
-        mu_eta=jnp.exp,
+        linkinv=_safe_exp,
+        mu_eta=_safe_exp,
         variance=variance,
         unit_deviance=unit_deviance,
         init_mu=lambda y: jnp.clip(y, 0.0, None) + 0.1,
         loglik=loglik,
+        eta_bound=_ETA_MAX,
     )
 
 
@@ -308,17 +396,131 @@ def tweedie(p: float = 1.5) -> Family:
         name='tweedie',
         has_fixed_dispersion=False,
         link=_log_link,
-        linkinv=jnp.exp,
-        mu_eta=jnp.exp,
+        linkinv=_safe_exp,
+        mu_eta=_safe_exp,
         variance=variance,
         unit_deviance=unit_deviance,
         init_mu=lambda y: jnp.clip(y, 0.0, None) + 0.1,
         loglik=loglik,
+        eta_bound=_ETA_MAX,
     )
 
 
 # Default Tweedie (p = 1.5); for another power pass ``tweedie(p)``.
 TWEEDIE = tweedie(1.5)
+
+
+# ---------------------------------------------------------------------------
+# Non-canonical links (compose onto a family via ``Family.with_link``)
+# ---------------------------------------------------------------------------
+
+IDENTITY_LINK = Link(
+    name='identity', link=_identity, linkinv=_identity, mu_eta=_ones_like
+)
+
+LOG_LINK = Link(
+    name='log',
+    link=_log_link,
+    linkinv=_safe_exp,
+    mu_eta=_safe_exp,
+    eta_bound=_ETA_MAX,
+)
+
+LOGIT_LINK = Link(
+    name='logit', link=_logit, linkinv=_expit, mu_eta=_binomial_mu_eta
+)
+
+
+def _probit_linkinv(eta: Array) -> Array:
+    return _norm.cdf(eta)
+
+
+def _probit_mu_eta(eta: Array) -> Array:
+    return jnp.clip(_norm.pdf(eta), _EPS, None)
+
+
+PROBIT_LINK = Link(
+    name='probit',
+    link=lambda mu: _norm.ppf(jnp.clip(mu, _EPS, 1.0 - _EPS)),
+    linkinv=_probit_linkinv,
+    mu_eta=_probit_mu_eta,
+)
+
+
+def _cloglog_link(mu: Array) -> Array:
+    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
+    return jnp.log(-jnp.log1p(-m))
+
+
+def _cloglog_linkinv(eta: Array) -> Array:
+    # 1 - exp(-exp(eta)); clamp eta so the inner exp cannot overflow.
+    return -jnp.expm1(-jnp.exp(jnp.clip(eta, -_ETA_MAX, _ETA_MAX)))
+
+
+def _cloglog_mu_eta(eta: Array) -> Array:
+    e = jnp.clip(eta, -_ETA_MAX, _ETA_MAX)
+    return jnp.clip(jnp.exp(e - jnp.exp(e)), _EPS, None)
+
+
+CLOGLOG_LINK = Link(
+    name='cloglog',
+    link=_cloglog_link,
+    linkinv=_cloglog_linkinv,
+    mu_eta=_cloglog_mu_eta,
+    eta_bound=_ETA_MAX,
+)
+
+SQRT_LINK = Link(
+    name='sqrt',
+    link=lambda mu: jnp.sqrt(jnp.clip(mu, 0.0, None)),
+    linkinv=lambda eta: eta * eta,
+    mu_eta=lambda eta: 2.0 * eta,
+)
+
+
+def _inverse_mu_eta(eta: Array) -> Array:
+    e = jnp.clip(eta, _EPS, None)
+    return -1.0 / (e * e)
+
+
+# Reciprocal (the canonical Gamma link).  ``mu = 1 / eta`` requires ``eta > 0``;
+# the IRLS clamps ``eta`` to a small positive floor (a sane init -- ``init_mu``
+# is positive, so ``eta_0 = 1 / mu_0 > 0`` -- keeps it there in practice).
+INVERSE_LINK = Link(
+    name='inverse',
+    link=lambda mu: 1.0 / jnp.clip(mu, _EPS, None),
+    linkinv=lambda eta: 1.0 / jnp.clip(eta, _EPS, None),
+    mu_eta=_inverse_mu_eta,
+    eta_bound=float('inf'),
+)
+
+
+_LINKS: Mapping[str, Link] = {
+    'identity': IDENTITY_LINK,
+    'log': LOG_LINK,
+    'logit': LOGIT_LINK,
+    'probit': PROBIT_LINK,
+    'cloglog': CLOGLOG_LINK,
+    'sqrt': SQRT_LINK,
+    'inverse': INVERSE_LINK,
+}
+
+
+def resolve_link(link: Union[str, Link]) -> Link:
+    """Resolve a ``str`` name or a :class:`Link` instance to a :class:`Link`.
+
+    Built-ins: ``'identity'`` / ``'log'`` / ``'logit'`` / ``'probit'`` /
+    ``'cloglog'`` / ``'sqrt'`` / ``'inverse'``; or pass a :class:`Link` directly.
+    """
+    if isinstance(link, Link):
+        return link
+    try:
+        return _LINKS[link]
+    except KeyError:
+        raise ValueError(
+            f'unknown link {link!r}; built-ins are {sorted(_LINKS)}, or pass '
+            f'a Link instance.'
+        ) from None
 
 
 # The registry of built-ins -- the open-set extension point (callers may also

@@ -270,7 +270,20 @@ structured/sparse `V⁻¹`. **Effort: M (R2) · M (R3) · L (R4).** **Oracle:**
 forms; nested/crossed ANOVA. **Guard:** `lme_fit(..., random=((Z,'scalar'),))`
 lowers to the same HLO as `reml_fit(Y,X,Z)` (R1 no-regression proof).
 
-### §1.2 GLMM — random effects with non-Gaussian families  *(high value)* — ✅ SHIPPED (scalar RE; PQL + **Laplace** `method='laplace'`; random-slope Tier-2)
+### §1.2 GLMM — random effects with non-Gaussian families  *(high value)* — ✅ SHIPPED (scalar RE **and random slopes**; PQL + **Laplace** `method='laplace'`, both)
+
+> **Random-slope update (2026-06-19, branch `feat/glmm-random-slopes`).** Non-Gaussian
+> random *slopes* now ship: `glmm_fit(z=, structure='unstructured'|'diagonal')`,
+> mirroring `lme_fit`. PQL — diagonal via `gam_fit` blocks, correlated via the
+> block-Woodbury REML in the PQL loop (`tier='slope'`) — **and Laplace**
+> (`method='laplace'`: the `r`-dimensional conditional-mode integral + `r × r`
+> determinant correction, which corrects the slope-variance attenuation for
+> binary/low-count outcomes). Gaussian-family slope == `lme_fit(z=, structure=)`
+> exactly; r=1 Laplace == the scalar Laplace; r=2 matches a scipy Laplace
+> reference. **Remaining follow-up:** the correlated-slope PQL solver is
+> clamp-sensitive — see
+> [`glmm-random-slope-robust-solver.md`](glmm-random-slope-robust-solver.md)
+> (joint-Schur PQL + REML-EM; not a correctness blocker).
 
 **What.** Random effects under a binomial / Poisson / … family via
 penalised-quasi-likelihood / Laplace-approximate REML: `glmm_fit(Y, X, random,

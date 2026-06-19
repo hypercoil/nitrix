@@ -15,8 +15,10 @@ from hypothesis import given, note
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as npst
 
+import numpy as np
+
 from nitrix._internal.testutil import cfg_variants_test
-from nitrix.linalg import residualise
+from nitrix.linalg import partial_residualise, residualise
 
 run_variants = cfg_variants_test(
     residualise,
@@ -227,3 +229,106 @@ def test_residualisation_exceptions():
     Y = jax.random.normal(key=ykey, shape=(3, 1000, 100))
     with pytest.raises(ValueError):
         residualise(Y, X, l2=10000.0, return_mode='invalid_mode')
+
+
+# ---------------------------------------------------------------------------
+# Soft / shrunk residualisation: James-Stein shrinkage of the nuisance fit
+# (v3 FR 5.2; the ridge-soft variant is the existing l2 > 0 path).
+# ---------------------------------------------------------------------------
+
+
+def test_james_stein_preserves_signal_vs_ols_spurious_confounds():
+    """With a high-dimensional confound set unrelated to Y, the OLS projection
+    is spurious and strips real signal variance; James-Stein shrinks that
+    removal toward zero, so the residual stays closer to the true signal."""
+    rng = np.random.default_rng(0)
+    n, k = 120, 40
+    s = rng.standard_normal(n)  # true signal of interest
+    X = rng.standard_normal((k, n))  # confounds (rowvar: C_X, obs)
+    Y = s[None, :]  # (C_Y=1, obs); no genuine confound effect
+    r_ols = np.asarray(residualise(jnp.asarray(Y), jnp.asarray(X)))
+    r_js = np.asarray(
+        residualise(jnp.asarray(Y), jnp.asarray(X), shrinkage='james-stein')
+    )
+    err_ols = np.linalg.norm(r_ols[0] - s)
+    err_js = np.linalg.norm(r_js[0] - s)
+    assert err_js < 0.5 * err_ols  # markedly more signal retained
+    # The shrunk projection removed is a fraction of the OLS one.
+    assert np.linalg.norm(Y[0] - r_js[0]) < np.linalg.norm(Y[0] - r_ols[0])
+
+
+def test_james_stein_no_shrinkage_for_few_regressors():
+    """For k <= 2 the JS factor is >= 1 and clamps to 1: identical to OLS."""
+    rng = np.random.default_rng(1)
+    n = 100
+    Y = rng.standard_normal((2, n))
+    X = rng.standard_normal((2, n))
+    r_ols = np.asarray(residualise(jnp.asarray(Y), jnp.asarray(X)))
+    r_js = np.asarray(
+        residualise(jnp.asarray(Y), jnp.asarray(X), shrinkage='james-stein')
+    )
+    np.testing.assert_allclose(r_js, r_ols, atol=1e-10)
+
+
+def test_james_stein_approaches_ols_for_strong_confounds():
+    """When the confounds genuinely explain Y, ||proj|| >> sigma^2 so the JS
+    factor -> 1 and the shrunk removal matches OLS closely."""
+    rng = np.random.default_rng(2)
+    n, k = 200, 10
+    X = rng.standard_normal((k, n))
+    beta = rng.standard_normal(k)
+    Y = (beta @ X)[None, :] + 0.05 * rng.standard_normal((1, n))
+    r_ols = np.asarray(residualise(jnp.asarray(Y), jnp.asarray(X)))
+    r_js = np.asarray(
+        residualise(jnp.asarray(Y), jnp.asarray(X), shrinkage='james-stein')
+    )
+    np.testing.assert_allclose(r_js, r_ols, rtol=1e-2, atol=1e-2)
+
+
+def test_james_stein_partial_residualise_shrinks_noise_removal():
+    """Non-aggressive partial residualisation with JS shrinkage removes less of
+    a spurious noise projection -> the denoised series stays closer to Y."""
+    rng = np.random.default_rng(3)
+    n = 150
+    s = rng.standard_normal(n)
+    signal = rng.standard_normal((3, n))
+    noise = rng.standard_normal((25, n))  # unrelated, high-dimensional
+    Y = s[None, :]
+    out_none = np.asarray(
+        partial_residualise(
+            jnp.asarray(Y), signal=jnp.asarray(signal), noise=jnp.asarray(noise)
+        )
+    )
+    out_js = np.asarray(
+        partial_residualise(
+            jnp.asarray(Y), signal=jnp.asarray(signal),
+            noise=jnp.asarray(noise), shrinkage='james-stein',
+        )
+    )
+    assert np.linalg.norm(out_js[0] - s) < np.linalg.norm(out_none[0] - s)
+
+
+def test_james_stein_invalid_shrinkage_raises():
+    Y = jnp.asarray(np.random.default_rng(0).standard_normal((1, 50)))
+    X = jnp.asarray(np.random.default_rng(1).standard_normal((5, 50)))
+    with pytest.raises(ValueError, match='shrinkage'):
+        residualise(Y, X, shrinkage='bogus')
+    with pytest.raises(ValueError, match='shrinkage'):
+        partial_residualise(Y, signal=X, noise=X, shrinkage='bogus')
+
+
+def test_james_stein_differentiable():
+    """residualise(shrinkage='james-stein') is differentiable -- the per-channel
+    clip and 1/||proj||^2 notwithstanding -- and matches finite differences."""
+    rng = np.random.default_rng(7)
+    Y = jnp.asarray(rng.standard_normal((1, 40)))
+    X = jnp.asarray(rng.standard_normal((6, 40)))
+
+    def loss(Yv):
+        return jnp.sum(residualise(Yv, X, shrinkage='james-stein') ** 2)
+
+    g = jax.grad(loss)(Y)
+    assert bool(jnp.all(jnp.isfinite(g)))
+    # eps sized for the float32 default this file runs under (no x64 config).
+    fd = (loss(Y.at[0, 2].add(1e-2)) - loss(Y.at[0, 2].add(-1e-2))) / (2e-2)
+    np.testing.assert_allclose(float(g[0, 2]), float(fd), atol=5e-3)
