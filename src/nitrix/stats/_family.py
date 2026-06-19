@@ -41,6 +41,26 @@ __all__ = [
 
 _EPS = 1e-10
 
+# Linear-predictor clamp for the unbounded (``exp``) inverse links.  ``mu =
+# exp(eta)`` overflows for ``eta`` beyond a few hundred and -- well before that --
+# produces astronomically large IRLS weights that let a single transient-overshoot
+# observation dominate the normal equations (garbage / NaN).  This is the textbook
+# fragility of PQL for a Poisson / Gamma random *slope* (a large ``b_slope * x``
+# blows up ``exp(eta)``) and of any log-link GAM whose smooth swings wide during
+# iteration.  ``mu = exp(20) ~ 5e8`` is already far past any realistic count /
+# rate, so clamping ``eta`` to ``+-20`` is harmless for a sane fit while breaking
+# the runaway feedback (empirically it is also the difference between the
+# random-slope PQL landing in the right REML basin vs a degenerate one).  The
+# bounded links (identity / logit) never overflow, so they keep ``eta_bound = inf``
+# (no clamp -- a Gaussian fit's ``eta = mu`` is legitimately unbounded).
+_ETA_MAX = 20.0
+
+
+def _safe_exp(eta: Array) -> Array:
+    """Overflow-safe ``exp`` inverse link: ``exp`` of an ``eta`` clamped to the
+    ``+-_ETA_MAX`` numerically-sane range (shared by the log-link families)."""
+    return jnp.exp(jnp.clip(eta, -_ETA_MAX, _ETA_MAX))
+
 
 @dataclass(frozen=True)
 class Family:
@@ -59,6 +79,10 @@ class Family:
     - ``has_fixed_dispersion`` -- ``True`` when the dispersion is 1 (binomial /
       Poisson; negative-binomial with a *known* ``alpha``); ``False`` when it is
       estimated (Gaussian, Gamma).
+    - ``eta_bound`` -- the IRLS clamp on the linear predictor (``inf`` for the
+      bounded identity / logit links; ``_ETA_MAX`` for the unbounded ``exp``
+      links, where it stabilises the working response).  The IRLS core
+      (:func:`~nitrix.stats._irls._working`) clamps ``eta`` to ``+-eta_bound``.
     """
 
     name: str
@@ -70,6 +94,7 @@ class Family:
     unit_deviance: Callable[[Array, Array], Array]
     init_mu: Callable[[Array], Array]
     loglik: Callable[[Array, Array, Array], Array]
+    eta_bound: float = float('inf')
 
 
 def _identity(x: Array) -> Array:
@@ -149,12 +174,13 @@ POISSON = Family(
     name='poisson',
     has_fixed_dispersion=True,
     link=lambda mu: jnp.log(jnp.clip(mu, _EPS, None)),
-    linkinv=jnp.exp,
-    mu_eta=jnp.exp,
+    linkinv=_safe_exp,
+    mu_eta=_safe_exp,
     variance=_identity,
     unit_deviance=_poisson_deviance,
     init_mu=lambda y: y + 0.1,
     loglik=_poisson_loglik,
+    eta_bound=_ETA_MAX,
 )
 
 
@@ -190,12 +216,13 @@ GAMMA = Family(
     name='gamma',
     has_fixed_dispersion=False,
     link=_log_link,
-    linkinv=jnp.exp,
-    mu_eta=jnp.exp,
+    linkinv=_safe_exp,
+    mu_eta=_safe_exp,
     variance=lambda mu: mu * mu,
     unit_deviance=_gamma_deviance,
     init_mu=lambda y: jnp.clip(y, _EPS, None),
     loglik=_gamma_loglik,
+    eta_bound=_ETA_MAX,
 )
 
 
@@ -239,12 +266,13 @@ def negbinomial(alpha: float = 1.0) -> Family:
         name='negbinomial',
         has_fixed_dispersion=True,
         link=_log_link,
-        linkinv=jnp.exp,
-        mu_eta=jnp.exp,
+        linkinv=_safe_exp,
+        mu_eta=_safe_exp,
         variance=variance,
         unit_deviance=unit_deviance,
         init_mu=lambda y: jnp.clip(y, 0.0, None) + 0.1,
         loglik=loglik,
+        eta_bound=_ETA_MAX,
     )
 
 
@@ -308,12 +336,13 @@ def tweedie(p: float = 1.5) -> Family:
         name='tweedie',
         has_fixed_dispersion=False,
         link=_log_link,
-        linkinv=jnp.exp,
-        mu_eta=jnp.exp,
+        linkinv=_safe_exp,
+        mu_eta=_safe_exp,
         variance=variance,
         unit_deviance=unit_deviance,
         init_mu=lambda y: jnp.clip(y, 0.0, None) + 0.1,
         loglik=loglik,
+        eta_bound=_ETA_MAX,
     )
 
 

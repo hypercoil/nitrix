@@ -43,7 +43,11 @@ def _working(
     prior_weights: Optional[Float[Array, 'N']],
 ) -> Tuple[Float[Array, 'N'], Float[Array, 'N'], Float[Array, 'N']]:
     """IRLS working weights ``W``, working response ``z``, and fitted ``mu``."""
-    eta = X @ beta
+    # Clamp the linear predictor to the family's numerically-sane range: for the
+    # unbounded exp links a transient overshoot otherwise blows up exp(eta) and
+    # the working weights (a single observation dominates -> garbage / NaN); the
+    # bounded links carry eta_bound = inf, so this is a no-op for them.
+    eta = jnp.clip(X @ beta, -family.eta_bound, family.eta_bound)
     mu = family.linkinv(eta)
     dmu = family.mu_eta(eta)
     var = family.variance(mu)
