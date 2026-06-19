@@ -446,3 +446,84 @@ def test_slope_differentiable():
     eps, i = 1e-5, 3
     fd = (loss(y.at[i].add(eps)) - loss(y.at[i].add(-eps))) / (2 * eps)
     np.testing.assert_allclose(float(gd[i]), float(fd), atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Gauss-Hermite quadrature (method='agq') -- the tier above Laplace
+# ---------------------------------------------------------------------------
+
+
+def test_agq_slope_n1_matches_laplace():
+    """AGQ with a single node is exactly the Laplace fit (the 1-point GH rule is
+    the Laplace determinant correction)."""
+    G = np.array([[0.6, 0.2], [0.2, 0.4]])
+    X, z, group, y, _ = _sim_slope(
+        'binomial', seed=2, q=25, n_per=10, G=G, beta=(0.1, 0.6)
+    )
+    Y, Xj, zj, gj = (
+        jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(z),
+        jnp.asarray(group),
+    )
+    kw = dict(
+        group=gj, z=zj, structure='unstructured', family='binomial', n_outer=60
+    )
+    lap = glmm_fit(Y, Xj, method='laplace', **kw)
+    agq1 = glmm_fit(Y, Xj, method='agq', n_quad=1, **kw)
+    assert agq1.tier == 'agq'
+    np.testing.assert_allclose(agq1.beta_hat[0], lap.beta_hat[0], atol=1e-5)
+    np.testing.assert_allclose(agq1.re_var[0], lap.re_var[0], atol=1e-5)
+
+
+def test_agq_slope_converges_and_corrects_laplace():
+    """AGQ integrates the marginal exactly in the node limit: the fit stabilises
+    as n_quad grows (AGQ(7) ~ AGQ(13)) and the marginal deviance is below
+    Laplace's (= AGQ(1)) -- the Laplace bias for small binary clusters is
+    corrected (the attenuated slope variance grows toward the converged value)."""
+    G = np.array([[0.6, 0.2], [0.2, 0.4]])
+    X, z, group, y, _ = _sim_slope(
+        'binomial', seed=2, q=25, n_per=10, G=G, beta=(0.1, 0.6)
+    )
+    Y, Xj, zj, gj = (
+        jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(z),
+        jnp.asarray(group),
+    )
+    kw = dict(
+        group=gj, z=zj, structure='unstructured', family='binomial', n_outer=80
+    )
+    lap = glmm_fit(Y, Xj, method='laplace', **kw)
+    a5 = glmm_fit(Y, Xj, method='agq', n_quad=5, **kw)
+    a9 = glmm_fit(Y, Xj, method='agq', n_quad=9, **kw)
+    # Converged: node-count independent by 5 points.
+    np.testing.assert_allclose(a5.re_var[0], a9.re_var[0], atol=2e-3)
+    np.testing.assert_allclose(
+        float(a5.deviance[0]), float(a9.deviance[0]), atol=2e-2
+    )
+    # A strictly better (lower) marginal deviance than Laplace ...
+    assert float(a5.deviance[0]) < float(lap.deviance[0]) - 1e-2
+    # ... and the attenuated slope variance is corrected upward.
+    assert float(a5.re_var[0, 1, 1]) > float(lap.re_var[0, 1, 1])
+
+
+def test_agq_shapes_and_validation():
+    G = np.diag([0.4, 0.3])
+    X, z, group, y, _ = _sim_slope('poisson', seed=2, q=10, n_per=12, G=G)
+    V = 3
+    Y = jnp.asarray(np.tile(y, (V, 1)))
+    Xj, zj, gj = jnp.asarray(X), jnp.asarray(z), jnp.asarray(group)
+    gu = glmm_fit(
+        Y, Xj, group=gj, z=zj, structure='unstructured', family='poisson',
+        method='agq', n_quad=3,
+    )
+    assert gu.tier == 'agq'
+    assert gu.blups.shape == (V, 10, 2) and gu.re_var.shape == (V, 2, 2)
+    gd = glmm_fit(
+        Y, Xj, group=gj, z=zj, structure='diagonal', family='poisson',
+        method='agq', n_quad=3,
+    )
+    assert gd.re_var.shape == (V, 2)
+    leaves, treedef = jax.tree_util.tree_flatten(gu)
+    gu2 = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert isinstance(gu2, GLMMResult) and gu2.tier == 'agq'
+    # AGQ requires a slope; z=None raises.
+    with pytest.raises(NotImplementedError, match='agq'):
+        glmm_fit(Y, Xj, group=gj, family='poisson', method='agq')

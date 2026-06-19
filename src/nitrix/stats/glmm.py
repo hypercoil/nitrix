@@ -69,10 +69,12 @@ from typing import Any, Optional, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import lax
+from jax.scipy.special import logsumexp
 from jaxtyping import Array, Float, Int
 
-from ..linalg._smalllinalg import small_inv_logdet
+from ..linalg._smalllinalg import small_inv_logdet, spd_chol
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import safe_dmu
@@ -120,7 +122,8 @@ class GLMMResult:
     tier
         Which solver ran: ``'few'`` (dense GAMM ``gam_fit``) or ``'many'`` (the
         structured Schur-complement PQL); ``'laplace'`` for the Laplace fit;
-        ``'slope'`` for the unstructured random-slope block-Woodbury PQL.
+        ``'slope'`` for the unstructured random-slope joint-Schur + REML-EM PQL;
+        ``'agq'`` for the adaptive Gauss-Hermite random-slope fit.
     """
 
     beta_hat: Float[Array, 'V p']
@@ -1170,6 +1173,192 @@ def _glmm_laplace_slope(
     )
 
 
+# ---------------------------------------------------------------------------
+# Adaptive Gauss-Hermite quadrature -- the accuracy tier above Laplace
+# ---------------------------------------------------------------------------
+
+
+def _gh_tensor_nodes(
+    n_quad: int, r: int
+) -> Tuple[Float[Array, 'K r'], Float[Array, 'K'], Float[Array, 'K']]:
+    """Tensor-product Gauss-Hermite nodes for an ``r``-dimensional integral.
+
+    Returns ``(nodes, log_weights, sumsq)`` for the ``K = n_quad**r`` tensor nodes
+    of the physicists' rule ``int exp(-t^2) g(t) dt ~ sum_k w_k g(t_k)``: the node
+    coordinates ``(K, r)``, the log product weight ``sum_j log w_{k_j}`` ``(K,)``,
+    and ``||t_k||^2`` ``(K,)``.  Static (computed once per fit in numpy)."""
+    x, w = np.polynomial.hermite.hermgauss(n_quad)
+    if r == 1:
+        nodes = x[:, None]
+        logw = np.log(w)
+    else:
+        mesh = np.meshgrid(*([x] * r), indexing='ij')
+        nodes = np.stack([m.ravel() for m in mesh], axis=-1)  # (K, r)
+        wmesh = np.meshgrid(*([w] * r), indexing='ij')
+        logw = sum(np.log(wm.ravel()) for wm in wmesh)  # (K,)
+    sumsq = np.sum(nodes**2, axis=-1)
+    return jnp.asarray(nodes), jnp.asarray(logw), jnp.asarray(sumsq)
+
+
+def _agq_slope_nll(
+    theta: Float[Array, 'pm'],
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    z: Float[Array, 'N r'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    r: int,
+    n_mode: int,
+    diagonal: bool,
+    nodes: Float[Array, 'K r'],
+    logw: Float[Array, 'K'],
+    sumsq: Float[Array, 'K'],
+) -> Float[Array, '']:
+    """Adaptive Gauss-Hermite marginal NLL for a random slope.
+
+    Centres / scales the tensor GH nodes at each group's conditional mode and
+    curvature -- ``b = b_hat_g + sqrt(2) L_g t_k`` with ``L_g L_g^T = H_g^{-1}``
+    (the curvature factor, principal-axis adaptive) -- so
+
+        log L_g = (r/2) log 2 - 0.5 logdet H_g
+                  + logsumexp_k [ log w_k + ||t_k||^2 + log g(b_hat_g + offset_k) ],
+
+    ``g(b) = exp(ell_g(b)) N(b; 0, G)`` the integrand.  With ``n_quad = 1``
+    (``t = 0``, ``w = sqrt(pi)``) the single term collapses to the Laplace
+    determinant correction exactly; more nodes integrate the random-effect
+    density directly, correcting the Laplace bias for small / low-count clusters
+    (lme4's ``nAGQ``).
+    """
+    from .lme._blockwoodbury import cov_re_from_chol
+
+    beta = theta[:p]
+    g_inv, logdet_g = small_inv_logdet(
+        cov_re_from_chol(theta[p:], r, diagonal), r
+    )
+    b_hat, h_mat, _ = _laplace_slope_modes(
+        theta, y, X, z, group, n_groups, family, p, r, n_mode, diagonal
+    )
+    # Per-group curvature factor L_g (L_g L_g^T = H_g^{-1}) and logdet H_g.
+    h_inv, logdet_h = jax.vmap(lambda h: small_inv_logdet(h, r))(h_mat)
+    l_scale = jax.vmap(lambda hi: spd_chol(hi, r))(h_inv)  # (q, r, r)
+    sqrt2 = jnp.sqrt(jnp.asarray(2.0, dtype=X.dtype))
+    offset = sqrt2 * jnp.einsum('grs,ks->gkr', l_scale, nodes)  # (q, K, r)
+    b_node = b_hat[:, None, :] + offset  # (q, K, r)
+
+    eta_fix = X @ beta
+    eta = family.clip_eta(
+        eta_fix[:, None] + jnp.einsum('nr,nkr->nk', z, b_node[group])
+    )  # (N, K)
+    ll = jax.ops.segment_sum(
+        family.loglik(
+            y[:, None], family.linkinv(eta), jnp.asarray(1.0, dtype=X.dtype)
+        ),
+        group,
+        num_segments=n_groups,
+    )  # (q, K)
+    quad = 0.5 * jnp.einsum('gkr,rs,gks->gk', b_node, g_inv, b_node)
+    log_g = ll - quad - 0.5 * logdet_g - 0.5 * r * jnp.log(2.0 * jnp.pi)
+    log_marg = (
+        0.5 * r * jnp.log(2.0)
+        - 0.5 * logdet_h
+        + logsumexp(logw[None, :] + sumsq[None, :] + log_g, axis=-1)
+    )
+    return -jnp.sum(log_marg)
+
+
+def _glmm_agq_slope_one(
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    z: Float[Array, 'N r'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    r: int,
+    n_mode: int,
+    spec: VarCompSpec,
+    diagonal: bool,
+    nodes: Float[Array, 'K r'],
+    logw: Float[Array, 'K'],
+    sumsq: Float[Array, 'K'],
+) -> Tuple[Float[Array, 'p'], Float[Array, 'q r'], Float[Array, 'r r'], Float[Array, '']]:
+    """Single-element AGQ random-slope fit.  Returns ``(beta, blups, G,
+    deviance)`` -- as the Laplace fit, but the marginal is the ``n_quad``-point
+    adaptive GH integral."""
+    from ._irls import irls_warm_start
+    from .lme._blockwoodbury import _param_layout, cov_re_from_chol
+
+    def nll(theta: Float[Array, 'pm']) -> Float[Array, '']:
+        return _agq_slope_nll(
+            theta, y, X, z, group, n_groups, family, p, r, n_mode, diagonal,
+            nodes, logw, sumsq,
+        )
+
+    var_e = jnp.var(family.link(family.init_mu(y)))
+    layout = _param_layout(r, diagonal)
+    diag = jnp.asarray([i == j for (i, j) in layout])
+    chol0 = jnp.where(
+        diag, 0.5 * jnp.log(jnp.maximum(0.1 * var_e, 1e-6)), 0.0
+    )
+    beta0 = irls_warm_start(
+        y, X, family, penalty=jnp.zeros((p, p), dtype=y.dtype), ridge=spec.ridge
+    )
+    theta = damped_newton(nll, jnp.concatenate([beta0, chol0]), spec=spec)
+    beta = theta[:p]
+    g_cov = cov_re_from_chol(theta[p:], r, diagonal)
+    b, _, _ = _laplace_slope_modes(
+        theta, y, X, z, group, n_groups, family, p, r, n_mode, diagonal
+    )
+    return beta, b, g_cov, 2.0 * nll(theta)
+
+
+def _glmm_agq_slope(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    z: Float[Array, 'N r'],
+    family: Family,
+    n_outer: int,
+    n_mode: int,
+    damping: float,
+    diagonal: bool,
+    n_quad: int,
+    block: Optional[int],
+) -> GLMMResult:
+    """Adaptive Gauss-Hermite random-slope GLMM over ``V`` elements."""
+    p = X.shape[-1]
+    r = z.shape[-1]
+    spec = VarCompSpec.reml(n_iter=n_outer, damping=damping)
+    nodes, logw, sumsq = _gh_tensor_nodes(n_quad, r)
+
+    def per_voxel(
+        y: Float[Array, 'N'],
+    ) -> Tuple[Array, Array, Array, Array]:
+        return _glmm_agq_slope_one(
+            y, X, z, group, n_groups, family, p, r, n_mode, spec, diagonal,
+            nodes, logw, sumsq,
+        )
+
+    beta, blups, g_cov, deviance = blocked_vmap(per_voxel, (Y,), block=block)
+    re_var = jnp.diagonal(g_cov, axis1=-2, axis2=-1) if diagonal else g_cov
+    nv = beta.shape[0]
+    return GLMMResult(
+        beta_hat=beta,
+        blups=blups,
+        re_var=re_var,
+        dispersion=jnp.ones((nv,), dtype=beta.dtype),
+        deviance=deviance,
+        edf_total=jnp.full((nv,), float(p), dtype=beta.dtype),
+        family=family,
+        n_obs=int(X.shape[0]),
+        n_groups=n_groups,
+        tier='agq',
+    )
+
+
 def glmm_fit(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
@@ -1183,6 +1372,7 @@ def glmm_fit(
     n_outer: int = 20,
     n_inner: int = 10,
     n_mode: int = 20,
+    n_quad: int = 5,
     ridge: float = 1e-8,
     lam_floor: float = 1e-6,
     lam_ceil: float = 1e8,
@@ -1245,13 +1435,21 @@ def glmm_fit(
         **slope** when ``z`` is given (the ``r``-dimensional mode + ``r x r``
         determinant correction, ``structure`` selecting a full / diagonal ``G``);
         the ``tier`` is ``'laplace'``.
+        ``'agq'`` -- adaptive Gauss-Hermite quadrature (**random slope only**, ``z``
+        required): the marginal random-effect integral by ``n_quad``-point tensor
+        GH, centred / scaled at each group's mode and curvature.  ``n_quad = 1`` is
+        exactly Laplace; more nodes integrate the density directly, converging to
+        the exact marginal (the ``lme4`` ``nAGQ`` accuracy tier, the gold standard
+        for small / low-count clusters).  ``tier`` is ``'agq'``.
     few_level_max
         Dispatch threshold on the number of levels ``q`` (default ``64`` -- the
         regime where the dense solve stops being trivially cheap).  ``'pql'``
         only.
-    n_outer, n_inner, n_mode
+    n_outer, n_inner, n_mode, n_quad
         PQL outer (Fellner-Schall) and inner (IRLS) iteration budgets; ``n_mode``
-        is the per-group conditional-mode Newton budget for ``method='laplace'``.
+        is the per-group conditional-mode Newton budget for ``method='laplace'`` /
+        ``'agq'``; ``n_quad`` is the GH nodes **per dimension** for ``'agq'``
+        (default ``5``; the integral uses ``n_quad ** r`` tensor nodes).
     ridge, lam_floor, lam_ceil, block
         Normal-equation stabiliser, smoothing-parameter clamps, and the optional
         element-block size bounding peak memory.
@@ -1261,17 +1459,18 @@ def glmm_fit(
     ``GLMMResult`` -- ``beta_hat``, per-level ``blups``, ``re_var``
     (``sigma_b^2``, or the ``r``-vector / ``r x r`` ``G`` for a slope),
     ``dispersion``, ``deviance``, ``edf_total``, and the ``tier`` that ran
-    (``'few'`` / ``'many'`` / ``'slope'``).
+    (``'few'`` / ``'many'`` / ``'slope'`` / ``'laplace'`` / ``'agq'``).
 
     Notes
     -----
     PQL carries the documented small-cluster bias for binary / low-count
     responses (it under-estimates the variance component; the bias vanishes as
-    the per-group information grows).  Laplace / adaptive-quadrature is the
-    Tier-2 follow-up (v3 §11).  Random *slopes* (``z`` + ``structure``) are fit by
-    PQL -- diagonal via ``gam_fit`` blocks, correlated via the block-Woodbury REML
-    (``tier='slope'``) -- or by Laplace (``method='laplace'``, ``tier='laplace'``),
-    which corrects the slope-variance attenuation for binary / low-count outcomes.
+    the per-group information grows).  Random *slopes* (``z`` + ``structure``) are
+    fit by PQL -- diagonal via ``gam_fit`` blocks, correlated via the joint-Schur
+    + REML-EM solver (``tier='slope'``) -- by Laplace (``method='laplace'``), or by
+    adaptive Gauss-Hermite quadrature (``method='agq'``, ``tier='agq'``), the
+    accuracy ladder for the slope-variance attenuation: AGQ with ``n_quad``
+    nodes converges to the exact marginal (``n_quad = 1`` is Laplace).
     """
     family = resolve_family(family)
     n = X.shape[0]
@@ -1304,9 +1503,15 @@ def glmm_fit(
                 Y, X, group, n_groups, z, family,
                 n_outer, n_mode, damping, diagonal, block,
             )
+        if method == 'agq':
+            return _glmm_agq_slope(
+                Y, X, group, n_groups, z, family,
+                n_outer, n_mode, damping, diagonal, n_quad, block,
+            )
         if method != 'pql':
             raise ValueError(
-                f"glmm_fit: method={method!r}; expected 'pql' or 'laplace'."
+                f"glmm_fit: method={method!r}; expected 'pql', 'laplace' or "
+                "'agq'."
             )
         if diagonal:
             return _glmm_slope_diagonal(
@@ -1321,6 +1526,12 @@ def glmm_fit(
     if method == 'laplace':
         return _glmm_laplace(
             Y, X, group, n_groups, family, n_outer, n_mode, damping, block
+        )
+    if method == 'agq':
+        raise NotImplementedError(
+            "glmm_fit: adaptive Gauss-Hermite (method='agq') currently requires "
+            'a random slope -- pass z= (use z=ones((N, 1)) for a scalar '
+            "intercept), or use method='laplace'."
         )
     if method != 'pql':
         raise ValueError(
