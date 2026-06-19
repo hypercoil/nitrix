@@ -1,12 +1,15 @@
 # GLMM random-slope robust solver — joint-Schur PQL + REML-EM — `nitrix.stats.glmm`
 
-> **Status (2026-06-19): not started.** Hardening follow-up to the shipped
-> non-Gaussian random-slope work (branch `feat/glmm-random-slopes`:
-> `c8b44cd` the slope feature, `bdfc55c` the exp-link IRLS clamp). The
-> correlated-slope PQL path *works* and is validated, but is clamp-sensitive;
-> this FR tracks replacing its solver core with a monotone one. **Not a
-> correctness blocker** — promotion gated on the correlated-Poisson/Gamma
-> random-slope path becoming load-bearing for a real analysis.
+> **Status (2026-06-19): ✅ SHIPPED** (branch `feat/glmm-slope-followups`,
+> `be5a277`). `_glmm_slope_structured_one` is now the monotone joint-Schur +
+> REML-EM solver below. Validated: Gaussian unstructured == `lme_fit`'s REML
+> (beta / G / sigma_e^2 to ~1e-8, converged by the **default** `n_outer=20` — the
+> linear-convergence worry below did not materialise), and **clamp-insensitive**
+> (identical G across `eta_bound` ∈ {20, 30, 60, ∞} for the seed that degenerated
+> the old Newton at 30; a regression test pins it). The clamp reverts to pure
+> overflow safety. The two performance items below (nested-REML waste, `block`
+> default) are subsumed / still open as noted; the Laplace-gradient sibling item
+> is tracked separately. *Original FR (now implemented) follows.*
 
 **What.** Replace the solver *core* of the unstructured (correlated-`G`)
 random-slope GLMM — `glmm.py::_glmm_slope_structured_one` — with a **joint-Schur
@@ -106,6 +109,28 @@ its own follow-up, not part of this rewrite. Until then the autodiff-through-sca
 is the *correct* (if heavy) choice; it is exact when the mode is converged
 (quadratic Newton, fine at `n_mode=20` for well-posed groups) and only biased for
 ill-conditioned/empty groups with too few mode steps.
+
+> **Investigated 2026-06-19 (measured, deferred).** Two things turned up that
+> change the cost/benefit:
+> 1. The cold-compile cost is dominated by the **gradient**-through-scan, not the
+>    hessian: replacing `jax.hessian` with a cheap *fixed-mode* curvature (exact
+>    `jax.grad`, mode `stop_gradient`'d **in the curvature only** — the gradient
+>    stays exact, so the optimum is unchanged: verified to 5.5e-7) cut per-iteration
+>    runtime ~2.7× but barely moved compile (4.65→4.41 s).
+> 2. That fixed-mode curvature is not a true Newton, so it **converges ~2–3× slower**
+>    (gradnorm 4.3e-3 at n_iter=60 vs 1e-8 for the real hessian) — the per-iteration
+>    speedup is cancelled, and it under-converges at the default iteration count.
+>
+> So the only real win is the **exact** analytic hessian made cheap, which requires
+> **implicit differentiation of the mode** (a `custom_vjp` whose backward solves the
+> IFT cotangent through the scan-free per-group score `F`, `∂F/∂b = -H_g`): it keeps
+> quadratic convergence *and* removes the scan from the autodiff tape. That is the
+> right fix, but it is a focused, higher-risk piece (custom_vjp block-structure
+> bookkeeping) whose payoff is mostly cold-compile time — which is **amortised** in a
+> jitted mass-univariate run (compile once over all `V` voxels). Deferred on ROI:
+> the autodiff-through-scan path is correct and the production cost is amortised.
+> The AGQ path (`method='agq'`) shares the same mode-finder and would benefit
+> identically if/when this lands.
 
 **Live-code status.** Current solver: `src/nitrix/stats/glmm.py
 ::_glmm_slope_structured_one` (iterated full block-Woodbury REML in the PQL

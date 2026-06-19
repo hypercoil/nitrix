@@ -45,7 +45,12 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
-__all__ = ['small_inv_logdet', 'spd_inv_logdet_chol', 'sym_eig_jacobi']
+__all__ = [
+    'small_inv_logdet',
+    'spd_inv_logdet_chol',
+    'spd_chol',
+    'sym_eig_jacobi',
+]
 
 # Relative pivot floor (modified Cholesky).  A pivot / determinant is clamped
 # to this fraction of the matrix's diagonal scale before a ``sqrt`` / division,
@@ -76,10 +81,30 @@ def spd_inv_logdet_chol(
     entries of ``L`` are zero, so the full dot automatically restricts to the
     ``k < j`` terms of the Cholesky-Banachiewicz recurrence.
     """
+    L = spd_chol(A, n)
+    log_det = 2.0 * jnp.sum(jnp.log(jnp.diagonal(L)))
+    eye = jnp.eye(n, dtype=A.dtype)
+    l_inv = lax.linalg.triangular_solve(
+        L, eye, left_side=True, lower=True, transpose_a=False
+    )
+    inv = l_inv.T @ l_inv  # A^{-1} = L^{-T} L^{-1}
+    return inv, log_det
+
+
+def spd_chol(A: Float[Array, 'n n'], n: int) -> Float[Array, 'n n']:
+    """Lower-triangular Cholesky factor ``L`` (``A = L L^T``) of a small SPD ``A``,
+    rolled and cuSOLVER-free.
+
+    The shared factor behind :func:`spd_inv_logdet_chol`: a column-by-column
+    ``lax.fori_loop`` (rolled, ``O(n^2)`` graph -- see the module docstring) using
+    only ``sqrt`` / division (all with VJPs, so it is **differentiable**).  The
+    modified-Cholesky pivot floor (relative to the diagonal scale) keeps a
+    degenerate ``A`` finite (a regularised factor) rather than ``sqrt(negative) =
+    NaN``.  Used to scale adaptive-quadrature nodes by a curvature factor
+    (``L L^T = H^{-1}``) as well as to invert / take the log-det of small SPD
+    blocks.
+    """
     idx = jnp.arange(n)
-    # Modified-Cholesky pivot floor, relative to the matrix's diagonal scale so
-    # a well-conditioned solve is unperturbed but a degenerate pivot stays
-    # positive (finite, regularised) rather than producing sqrt(negative)=NaN.
     floor = (
         _PIVOT_REL_FLOOR * jnp.max(jnp.diagonal(A)) + jnp.finfo(A.dtype).tiny
     )
@@ -95,17 +120,10 @@ def spd_inv_logdet_chol(
             lax.dynamic_update_index_in_dim(L, new_col, j, axis=1),
         )
 
-    L = cast(
+    return cast(
         Float[Array, 'n n'],
         lax.fori_loop(0, n, body, jnp.zeros((n, n), A.dtype)),
     )
-    log_det = 2.0 * jnp.sum(jnp.log(jnp.diagonal(L)))
-    eye = jnp.eye(n, dtype=A.dtype)
-    l_inv = lax.linalg.triangular_solve(
-        L, eye, left_side=True, lower=True, transpose_a=False
-    )
-    inv = l_inv.T @ l_inv  # A^{-1} = L^{-T} L^{-1}
-    return inv, log_det
 
 
 def small_inv_logdet(
