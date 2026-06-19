@@ -88,7 +88,7 @@
 > solve per Newton step (cuSOLVER-free, cost-gated to the smaller factor); β /
 > both variances / σ_e² match an exact dense REML reference across seeds incl. the
 > factor swap; `CrossedLMEResult`. The rest of Tier-1/Tier-2 (§4
-> ordinal/distributional, §3.2–3.3 cr/gp/mrf) remain proposed.
+> §3.3 monotone/adaptive smooths and §4 multinomial) remain proposed.
 >
 > **Engineering hardening (2026-06-18, post interim review).** A three-axis
 > review (correctness / performance / design) uncovered a **silent-wrong-answer
@@ -452,10 +452,12 @@ they are *not* uniform):
 - **`M` each — fiddly density / extra structure on the scalar IRLS:** **Tweedie**
   (compound; variance `V(μ)=μ^p`, but the deviance / log-likelihood normalising
   constant needs a series evaluation and a profiled power `p`).
-- **`M-L` — a second linear predictor (not the scalar IRLS):** **ordinal /
-  multinomial** (cumulative / multiple linear predictors) and the
-  **location-scale / distributional** families (`gaulss`-style: model `σ ~ …` as
-  well as the mean, for `nwx`'s reserved `sigma ~ …` part).
+- **`M-L` — a second linear predictor (not the scalar IRLS):** **ordinal**
+  (cumulative-link / proportional-odds) and the **location-scale / distributional**
+  family (`gaulss`: model `σ ~ …` as well as the mean) are **✅ SHIPPED** as
+  `ordinal_fit` and `gaulss_fit` — dedicated fitters (joint Fisher scoring /
+  cumulative-link MLE, cuSOLVER-free), matching `statsmodels` `OrderedModel` and a
+  scipy location-scale MLE exactly. Multinomial (unordered) remains proposed.
 
 **Why.** `{{ family=gamma|nb|tweedie|betar }}` are one-line requests in `nwx`.
 
@@ -605,7 +607,9 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 - ~~§1.1 R4 (crossed, HLO-gated)~~ ✅ (`lme_fit(cross=)`, Woodbury+diagonal-Schur,
   `O(min(q1,q2)³)`/step); ~~§1.2 Laplace~~ ✅ (`glmm_fit(method='laplace')`);
   ~~§1.3 Kenward-Roger~~ ✅ (`lme_{t,f}_contrast(dof='kr')`);
-  §3.2–§3.3 cr/gp/mrf/monotone/adaptive; §4 ordinal/distributional;
+  ~~§3.2 cr/gp/mrf~~ ✅ (`cr_basis`/`gp_basis`/`mrf_smooth`);
+  ~~§4 ordinal/distributional~~ ✅ (`ordinal_fit`/`gaulss_fit`);
+  §3.3 monotone/adaptive smooths; §4 multinomial;
   §5.2 soft residualisation; §6.1 robust (promote `robust-statistics.md`); §7
   RFT; §8 GCV/CV.
 

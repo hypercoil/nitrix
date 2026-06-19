@@ -3316,6 +3316,94 @@ register(
     )
 )
 
+
+def _gaulss_setup():
+    """Gaussian location-scale op over closed-over mean / scale designs."""
+    rng = np.random.default_rng(0)
+    n = 64
+    xm = np.c_[np.ones(n), rng.standard_normal(n)].astype(np.float32)
+    xs = np.c_[np.ones(n), rng.standard_normal(n)].astype(np.float32)
+    Xm, Xs = jnp.asarray(xm), jnp.asarray(xs)
+    from nitrix.stats import gaulss_fit
+
+    def op(Y):
+        return gaulss_fit(Y, Xm, scale_design=Xs, n_iter=20)
+
+    def fixture():
+        gen = np.random.default_rng(1)
+        sig = np.exp(xs @ np.array([-0.3, 0.4], np.float32))
+        Y = jnp.asarray(
+            (xm @ np.array([1.0, 0.7], np.float32))[None, :]
+            + gen.standard_normal((16, n)).astype(np.float32) * sig[None, :]
+        )
+        return (Y,), {}
+
+    return op, fixture
+
+
+_gaulss_op, _gaulss_fixture = _gaulss_setup()
+
+register(
+    OpInfo(
+        'nitrix.stats.gaulss_fit',
+        fixture=_gaulss_fixture,
+        fn_override=_gaulss_op,
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'block-diagonal Fisher scoring (mean / log-scale)',
+            'cuSOLVER-free',
+        ),
+        notes='Gaussian location-scale; shared mean/scale designs closed over',
+    )
+)
+
+
+def _ordinal_setup():
+    """Ordinal (cumulative-logit) op over a closed-over design."""
+    rng = np.random.default_rng(0)
+    n = 80
+    x = rng.standard_normal((n, 2)).astype(np.float32)
+    X = jnp.asarray(x)
+    from nitrix.stats import ordinal_fit
+
+    def op(Y):
+        return ordinal_fit(Y, X, n_classes=4, n_iter=20)
+
+    def fixture():
+        gen = np.random.default_rng(1)
+        eta = x @ np.array([0.8, -0.5], np.float32)
+        theta = np.array([-1.0, 0.3, 1.5], np.float32)
+        cum = 1.0 / (1.0 + np.exp(-(theta[None, :] - eta[:, None])))
+        probs = np.diff(np.c_[np.zeros(n), cum, np.ones(n)], axis=1)
+        Y = np.stack(
+            [
+                np.array([gen.choice(4, p=probs[i]) for i in range(n)])
+                for _ in range(16)
+            ]
+        )
+        return (jnp.asarray(Y.astype(np.int32)),), {}
+
+    return op, fixture
+
+
+_ordinal_op, _ordinal_fixture = _ordinal_setup()
+
+register(
+    OpInfo(
+        'nitrix.stats.ordinal_fit',
+        fixture=_ordinal_fixture,
+        fn_override=_ordinal_op,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=(
+            'cumulative-link (proportional-odds) MLE',
+            'ordered thresholds; cuSOLVER-free',
+        ),
+        notes='ordered categorical; shared X closed over',
+    )
+)
+
 register(
     OpInfo(
         'nitrix.stats.ledoit_wolf',
