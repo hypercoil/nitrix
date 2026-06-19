@@ -7,7 +7,11 @@
 > **§1.3** mixed-model fixed-effect inference — both `lme_t_contrast`
 > (Satterthwaite df; SE matches statsmodels to ~6e-4) **and `lme_f_contrast`**
 > (multi-row Wald F with the Fai-Cornelius / lmerTest multivariate-Satterthwaite
-> denominator df, collapsing exactly to the t-test at `L = 1`); **§1.1** the
+> denominator df, collapsing exactly to the t-test at `L = 1`). **Tier-2 update:**
+> both contrasts now also take `dof='kr'` (**Kenward-Roger**, pass `X=`/`Z=`): the
+> adjusted covariance `Φ_A` + scaled-`F` denominator df (KR2), reproducing the
+> exact ANOVA df on balanced designs (`G−2` between-group, `~N−G` within) and
+> matching an independent dense KR reference (`_kr.py`). **§1.1** the
 > `lme_fit` R1/R2 dispatcher + the tier-R2 block-Woodbury REML for a correlated
 > `(1 + x | g)` (matches statsmodels MixedLM random-slope exactly) **and the
 > diagonal-`G` `(x || g)` `structure='diagonal'` path** (independent variance
@@ -84,8 +88,7 @@
 > solve per Newton step (cuSOLVER-free, cost-gated to the smaller factor); β /
 > both variances / σ_e² match an exact dense REML reference across seeds incl. the
 > factor swap; `CrossedLMEResult`. The rest of Tier-1/Tier-2 (§4
-> ordinal/distributional, §3.2–3.3 cr/gp/mrf, §1.3 Kenward-Roger)
-> remain proposed.
+> ordinal/distributional, §3.2–3.3 cr/gp/mrf) remain proposed.
 >
 > **Engineering hardening (2026-06-18, post interim review).** A three-axis
 > review (correctness / performance / design) uncovered a **silent-wrong-answer
@@ -289,7 +292,7 @@ structure-dispatched variance-component update. **Effort: L.** **Oracle:**
 (§11). Differentiability: the fit is differentiable through the fixed PQL budget
 (the v1 LME-Newton pattern).
 
-### §1.3 Mixed-model fixed-effect inference — SE, contrasts, dof  *(BLOCKING; cheap)*
+### §1.3 Mixed-model fixed-effect inference — SE, contrasts, dof  *(BLOCKING; cheap)* — ✅ SHIPPED (Satterthwaite t/F **+ Kenward-Roger `dof='kr'`**)
 
 **What.** `REMLResult`/`LMEResult` currently exposes only `beta_hat`,
 `theta_hat`, `log_lik` (`lme/reml.py`) — no fixed-effect standard errors, no
@@ -592,8 +595,8 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 
 - ~~§1.1 R4 (crossed, HLO-gated)~~ ✅ (`lme_fit(cross=)`, Woodbury+diagonal-Schur,
   `O(min(q1,q2)³)`/step); ~~§1.2 Laplace~~ ✅ (`glmm_fit(method='laplace')`);
-  §1.3 Kenward-Roger;
-  §3.2–§3.3 cr/gp/mrf/monotone/adaptive; §4 Tweedie + ordinal/distributional;
+  ~~§1.3 Kenward-Roger~~ ✅ (`lme_{t,f}_contrast(dof='kr')`);
+  §3.2–§3.3 cr/gp/mrf/monotone/adaptive; §4 ordinal/distributional;
   §5.2 soft residualisation; §6.1 robust (promote `robust-statistics.md`); §7
   RFT; §8 GCV/CV.
 

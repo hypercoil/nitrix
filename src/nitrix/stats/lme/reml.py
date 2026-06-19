@@ -114,7 +114,21 @@ from .._batching import blocked_vmap
 from .._smalllinalg import small_inv_logdet, sym_eig_jacobi
 from ._corr import CorrSpec, resolve_corr
 from ._corrfit import CorrLMEResult
+from ._kr import kr_cov_and_scaled_f
 from ._varcomp import VarCompSpec, fit_varcomp_diagonal, varcomp_inference
+
+
+def _kr_rotated_basis(
+    X: Float[Array, 'N p'], Z: Float[Array, 'N q']
+) -> Tuple[Float[Array, 'N p'], Float[Array, 'N']]:
+    """The shared FaST-LMM rotation ``(X_rot, lambdas)`` from ``ZZ^T`` -- the
+    one-off ``safe_eigh`` Kenward-Roger needs to rebuild the rotated basis."""
+    from ...linalg._solver import safe_eigh
+
+    Xj, Zj = jnp.asarray(X), jnp.asarray(Z)
+    ZZt = Zj @ Zj.T
+    eigvals, U = safe_eigh(0.5 * (ZZt + ZZt.T))
+    return U.T @ Xj, jnp.clip(eigvals, 0.0, None)
 
 __all__ = [
     'REMLResult',
@@ -377,6 +391,8 @@ def lme_t_contrast(
     contrast: Float[Array, 'p'],
     *,
     dof: str = 'satterthwaite',
+    X: Optional[Float[Array, 'N p']] = None,
+    Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEContrast:
     """Per-voxel t-test of a mixed-model fixed-effect contrast ``c^T beta = 0``.
 
@@ -388,8 +404,14 @@ def lme_t_contrast(
         g_k = d(c^T C c)/dtheta_k = w^T M_k w,   w = C c
 
     using the per-voxel ``theta_cov`` / ``grad_m`` the fit already formed
-    (``_varcomp.varcomp_inference``).  cuSOLVER-free and differentiable.  Kenward-
-    Roger (a vcov bias correction) is the heavier follow-up (v3 §1.3, Tier-2).
+    (``_varcomp.varcomp_inference``).  cuSOLVER-free and differentiable.
+
+    ``dof='kr'`` instead applies the **Kenward-Roger** small-sample correction:
+    the adjusted covariance ``Phi_A`` (inflated for variance-component
+    uncertainty) and the scaled-``F`` denominator df, with ``t = sign(effect)
+    sqrt(F_KR)`` on ``df = m``.  KR rebuilds the rotated basis, so the original
+    design must be re-passed as ``X=`` / ``Z=`` (the compressed ``REMLResult``
+    does not retain it); see :mod:`._kr`.
 
     Parameters
     ----------
@@ -397,18 +419,49 @@ def lme_t_contrast(
         A :class:`REMLResult` from ``reml_fit``.
     contrast
         ``(p,)`` contrast vector ``c`` over the fixed effects.
+    dof
+        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger; pass ``X`` /
+        ``Z``).
+    X, Z
+        The original fixed / random design -- required for ``dof='kr'``.
 
     Returns
     -------
     ``LMEContrast`` ``(effect, se, t, df, p_value)``.
     """
-    if dof != 'satterthwaite':
+    if dof not in ('satterthwaite', 'kr'):
         raise ValueError(
-            f'lme_t_contrast: dof={dof!r}; only "satterthwaite" is implemented '
-            '(Kenward-Roger is v3 Tier-2).'
+            f'lme_t_contrast: dof={dof!r}; expected "satterthwaite" or "kr".'
         )
     c = jnp.asarray(contrast, dtype=result.beta_hat.dtype)
     effect = result.beta_hat @ c  # (V,)
+
+    if dof == 'kr':
+        if X is None or Z is None:
+            raise ValueError(
+                "lme_t_contrast: dof='kr' needs the original design -- pass "
+                'X= and Z= (the Kenward-Roger correction rebuilds the rotated '
+                'basis the compressed REMLResult does not retain).'
+            )
+        p = c.shape[0]
+        c_row = c[None, :]  # (1, p)
+        x_rot, lambdas = _kr_rotated_basis(X, Z)
+
+        def kr_t(
+            th: Float[Array, '2'], beta: Float[Array, 'p']
+        ) -> Tuple[Float[Array, ''], Float[Array, '']]:
+            f_kr, df2_kr, _ = kr_cov_and_scaled_f(
+                th, beta, x_rot, lambdas, c_row, p, 1
+            )
+            return f_kr, df2_kr
+
+        f_kr, df = jax.vmap(kr_t)(result.theta_hat, result.beta_hat)
+        t = jnp.sign(effect) * jnp.sqrt(jnp.clip(f_kr, 0.0, None))
+        se = jnp.abs(effect) / jnp.sqrt(jnp.clip(f_kr, 1e-30, None))
+        x = df / (df + t * t)
+        p_value = betainc(0.5 * df, 0.5, x)  # two-sided
+        return LMEContrast(effect=effect, se=se, t=t, df=df, p_value=p_value)
+
     w = jnp.einsum('vij,j->vi', result.fixed_cov, c)  # C c, (V, p)
     var = jnp.clip(jnp.einsum('vi,i->v', w, c), 1e-30, None)  # c^T C c
     se = jnp.sqrt(var)
@@ -454,6 +507,8 @@ def lme_f_contrast(
     contrast: Float[Array, 'L p'],
     *,
     dof: str = 'satterthwaite',
+    X: Optional[Float[Array, 'N p']] = None,
+    Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEFContrast:
     """Per-voxel F-test of a multi-row mixed-model contrast ``C beta = 0``.
 
@@ -481,7 +536,13 @@ def lme_f_contrast(
     ``df2`` the t-Satterthwaite df, same p-value).  The F-statistic is
     differentiable; the denominator df is not (the iterative eigensolver feeds it
     under ``stop_gradient`` -- a model-selection-style scalar, per v3 §1.3).
-    Kenward-Roger (``dof='kr'``) is the heavier Tier-2 follow-up.
+
+    ``dof='kr'`` instead applies the **Kenward-Roger** small-sample correction:
+    the adjusted covariance ``Phi_A`` and the moment-matched scaled-``F`` (their
+    KR2), referred to ``F(L, m)``.  It rebuilds the rotated basis, so re-pass the
+    original design as ``X=`` / ``Z=`` (the compressed ``REMLResult`` does not
+    retain it); ``F = t^2`` consistency with ``lme_t_contrast(dof='kr')`` holds
+    for ``L = 1``.  See :mod:`._kr`.
 
     Parameters
     ----------
@@ -490,15 +551,19 @@ def lme_f_contrast(
         the ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference fields).
     contrast
         ``(L, p)`` contrast matrix (or a ``(p,)`` single-row contrast).
+    dof
+        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger; pass ``X`` /
+        ``Z``).
+    X, Z
+        The original fixed / random design -- required for ``dof='kr'``.
 
     Returns
     -------
     ``LMEFContrast`` ``(f, df1, df2, p_value)``.
     """
-    if dof != 'satterthwaite':
+    if dof not in ('satterthwaite', 'kr'):
         raise ValueError(
-            f'lme_f_contrast: dof={dof!r}; only "satterthwaite" is implemented '
-            '(Kenward-Roger is v3 Tier-2).'
+            f'lme_f_contrast: dof={dof!r}; expected "satterthwaite" or "kr".'
         )
     if not isinstance(result, REMLResult):
         raise TypeError(
@@ -510,6 +575,30 @@ def lme_f_contrast(
     c_mat = jnp.atleast_2d(jnp.asarray(contrast, dtype=dtype))  # (L, p)
     n_rows = c_mat.shape[0]
     tiny = jnp.finfo(dtype).tiny
+
+    if dof == 'kr':
+        if X is None or Z is None:
+            raise ValueError(
+                "lme_f_contrast: dof='kr' needs the original design -- pass "
+                'X= and Z= (the Kenward-Roger correction rebuilds the rotated '
+                'basis the compressed REMLResult does not retain).'
+            )
+        p = c_mat.shape[1]
+        x_rot, lambdas = _kr_rotated_basis(X, Z)
+
+        def kr_voxel(
+            th: Float[Array, '2'], beta: Float[Array, 'p']
+        ) -> Tuple[Float[Array, ''], Float[Array, '']]:
+            f_kr, df2_kr, _ = kr_cov_and_scaled_f(
+                th, beta, x_rot, lambdas, c_mat, p, n_rows
+            )
+            return f_kr, df2_kr
+
+        f, df2 = jax.vmap(kr_voxel)(result.theta_hat, result.beta_hat)
+        df1 = jnp.full_like(f, float(n_rows))
+        x = df2 / (df2 + df1 * f)
+        p_value = betainc(0.5 * df2, 0.5 * df1, x)
+        return LMEFContrast(f=f, df1=df1, df2=df2, p_value=p_value)
 
     def per_voxel(
         beta: Float[Array, 'p'],

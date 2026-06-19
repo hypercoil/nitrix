@@ -685,7 +685,7 @@ def test_lme_t_contrast_rejects_unknown_dof():
     Y, X, Z, _ = _random_intercept_data()
     res = reml_fit(Y, X, Z, n_iter=20)
     with pytest.raises(ValueError, match='satterthwaite'):
-        lme_t_contrast(res, jnp.asarray([0.0, 1.0]), dof='kr')
+        lme_t_contrast(res, jnp.asarray([0.0, 1.0]), dof='bogus')
 
 
 # ---------------------------------------------------------------------------
@@ -944,7 +944,7 @@ def test_lme_f_contrast_rejects_unknown_dof():
     Y, X, Z = _two_covariate_data()
     res = reml_fit(Y, X, Z, n_iter=20)
     with pytest.raises(ValueError, match='satterthwaite'):
-        lme_f_contrast(res, jnp.asarray([0.0, 1.0, 0.0]), dof='kr')
+        lme_f_contrast(res, jnp.asarray([0.0, 1.0, 0.0]), dof='bogus')
 
 
 def test_lme_f_contrast_df_floor_no_nan_in_degenerate_case():
