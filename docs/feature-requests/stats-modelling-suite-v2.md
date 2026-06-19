@@ -1,11 +1,15 @@
 # Statistical modelling suite v2 — completeness + regularised connectivity (ledger)
 
-> **Status (2026-06-17): Phases 0–4 SHIPPED on `feat/stats-suite-v2`** (Phase 0
+> **Status (2026-06-18): COMPLETE and merged to `main`** (all of Phase 0
 > hardening + shared-core refactors; Phase 1 Ledoit-Wolf/OAS + cluster-extent
-> enhancement + shared-λ GAM; Phase 2 thin-plate + cyclic bases, tensor-product
-> deferred; Phase 3 graphical LASSO; Phase 4 randomise F-contrast + GPD tail).
-> Remaining: Phase 5 (LME q-rank, gated on a large-`N` consumer) and the deferred
-> tensor-product `te`. Branch not yet merged to `main`. Follow-up to the shipped v1 suite
+> enhancement + shared-λ GAM; Phase 2 thin-plate + cyclic + **tensor-product
+> `te/ti`** bases; Phase 3 graphical LASSO; Phase 4 randomise F-contrast + GPD
+> tail; Phase 5 LME q-rank low-rank REML), plus the post-Phase-5 tail — the
+> exact Gaussian **cross-product GAM** fast path and `linalg.randomized_svd`.
+> *(Branch reconstructed on 2026-06-18 after a Code-Ocean host crash rewound it
+> to Phase 5; the te / cross-product / randomized_svd tail + the v2→main merge
+> were recovered from the working tree + session transcript and re-validated.)*
+> Follow-up to the shipped v1 suite
 > ([`stats-modelling-suite.md`](stats-modelling-suite.md): LME size-dispatch,
 > GLM/GAM/GAMM, TFCE `randomise` — merged to `main`). v2 collects (a) the items
 > v1 deliberately deferred and (b) the long-deferred **regularised connectivity

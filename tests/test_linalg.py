@@ -27,6 +27,7 @@ jax.config.update('jax_enable_x64', True)
 from nitrix.linalg import (
     delete_diagonal,
     fill_diagonal,
+    partial_residualise,
     recondition_eigenspaces,
     residualise,
     squareform,
@@ -384,3 +385,95 @@ def test_residualise_obs_mismatch_raises():
     Y = jnp.zeros((5, 30))  # different obs
     with pytest.raises(ValueError, match='observations mismatch'):
         residualise(Y, X)
+
+
+# ---------------------------------------------------------------------------
+# Non-aggressive (ICA-AROMA) partial residualisation + cuSOLVER-free Cholesky
+# ---------------------------------------------------------------------------
+
+
+def _aroma_data(seed=0, n=200, m=50):
+    """Correlated-but-full-rank signal/noise sharing a latent factor."""
+    rng = np.random.default_rng(seed)
+    latent = rng.standard_normal((n, 2))
+    signal = (
+        latent @ rng.standard_normal((2, 3))
+        + rng.standard_normal((n, 3)) * 0.5
+    )
+    noise = (
+        latent @ rng.standard_normal((2, 4))
+        + rng.standard_normal((n, 4)) * 0.5
+    )
+    Y = (
+        signal @ rng.standard_normal((3, m))
+        + noise @ rng.standard_normal((4, m)) * 0.5
+        + rng.standard_normal((n, m)) * 0.1
+    )
+    return (
+        jnp.asarray(Y.T),
+        jnp.asarray(signal.T),
+        jnp.asarray(noise.T),
+        (
+            np.asarray(Y),
+            np.asarray(signal),
+            np.asarray(noise),
+        ),
+    )
+
+
+def test_partial_residualise_matches_joint_lstsq_reference():
+    """Non-aggressive denoising removes exactly noise @ beta_noise from the
+    JOINT [signal | noise] fit (the ICA-AROMA definition)."""
+    Yj, Sj, Nj, (Y, signal, noise) = _aroma_data()
+    out = partial_residualise(Yj, signal=Sj, noise=Nj)
+    X = np.concatenate([signal, noise], axis=1)
+    B = np.linalg.lstsq(X, Y, rcond=None)[0]
+    ref = (Y - noise @ B[signal.shape[1] :]).T
+    np.testing.assert_allclose(np.asarray(out), ref, atol=1e-9)
+
+
+def test_partial_residualise_empty_signal_is_aggressive():
+    """With no signal regressors it reduces exactly to the aggressive
+    residualise(Y, noise)."""
+    Yj, _, Nj, _ = _aroma_data()
+    n = Yj.shape[-1]
+    out = partial_residualise(Yj, signal=jnp.zeros((0, n)), noise=Nj)
+    np.testing.assert_allclose(
+        np.asarray(out), np.asarray(residualise(Yj, Nj)), atol=1e-10
+    )
+
+
+def test_partial_residualise_preserves_shared_variance():
+    """Non-aggressive retains the signal/noise-shared variance that the
+    aggressive path strips, so it leaves more variance behind."""
+    Yj, Sj, Nj, _ = _aroma_data()
+    out = partial_residualise(Yj, signal=Sj, noise=Nj)
+    agg = residualise(Yj, Nj)
+    assert float(jnp.var(out)) > float(jnp.var(agg))
+
+
+def test_partial_residualise_chol_svd_parity():
+    Yj, Sj, Nj, _ = _aroma_data()
+    c = partial_residualise(Yj, signal=Sj, noise=Nj, method='cholesky')
+    s = partial_residualise(Yj, signal=Sj, noise=Nj, method='svd')
+    np.testing.assert_allclose(np.asarray(c), np.asarray(s), atol=1e-9)
+
+
+def test_residualise_cholesky_is_cusolver_free():
+    """The default Cholesky path issues no broken-cuSOLVER (potrf/syevd/getrf
+    /geqrf/gesvd) custom call -- it lowers to the rolled fori_loop + cuBLAS trsm
+    only.  Matched against ``custom_call_target=`` so the test's own name in the
+    HLO metadata can't false-trigger."""
+    import re
+
+    rng = np.random.default_rng(0)
+    X = jnp.asarray(rng.standard_normal((8, 120)))  # (C_X, obs)
+    Y = jnp.asarray(rng.standard_normal((50, 120)))  # (C_Y, obs)
+    hlo = jax.jit(lambda Y_, X_: residualise(Y_, X_)).lower(Y, X).compile()
+    targets = re.findall(r'custom_call_target="([^"]+)"', hlo.as_text())
+    bad = [
+        t
+        for t in targets
+        if re.search(r'potrf|syevd|getrf|geqrf|gesvd|cusolver', t, re.I)
+    ]
+    assert not bad, bad

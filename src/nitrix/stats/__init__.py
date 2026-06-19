@@ -58,13 +58,20 @@ from .fourier import (
     product_filtfilt,
 )
 from .basis import (
+    REBasis,
     SplineBasis,
     TensorBasis,
     bspline_basis,
+    by_factor_smooth,
+    cr_basis,
     cyclic_cubic_basis,
+    gp_basis,
+    mrf_smooth,
+    re_smooth,
     spline_design,
     tensor_product_basis,
     tensor_product_design,
+    varying_coefficient_smooth,
     thinplate_regression_basis,
 )
 from .connectivity import (
@@ -76,11 +83,18 @@ from .connectivity import (
     shrunk_covariance,
 )
 from .gam import GAMResult, gam_fit, smooth_partial_effect
+from ._betareg import BetaResult, beta_fit
+from ._gaulss import GauLSSResult, gaulss_fit
+from ._ordinal import OrdinalResult, ordinal_fit
+from .glmm import GLMMResult, glmm_fit
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
     BINOMIAL,
+    GAMMA,
     GAUSSIAN,
+    NEGBINOMIAL,
     POISSON,
+    TWEEDIE,
     Family,
     GLMResult,
     adj_r_squared,
@@ -91,9 +105,12 @@ from .glm import (
     f_contrast,
     glm_fit,
     log_likelihood,
+    negbinomial,
     predict,
     r_squared,
+    sandwich_cov,
     t_contrast,
+    tweedie,
 )
 from .pca import (
     PCAResult,
@@ -134,11 +151,17 @@ __all__ = [
     'GAUSSIAN',
     'BINOMIAL',
     'POISSON',
+    'GAMMA',
+    'NEGBINOMIAL',
+    'TWEEDIE',
+    'negbinomial',
+    'tweedie',
     'GLMResult',
     'glm_fit',
     'predict',
     't_contrast',
     'f_contrast',
+    'sandwich_cov',
     'r_squared',
     'adj_r_squared',
     'deviance_explained',
@@ -149,16 +172,35 @@ __all__ = [
     # basis
     'SplineBasis',
     'TensorBasis',
+    'REBasis',
     'bspline_basis',
+    'by_factor_smooth',
+    'varying_coefficient_smooth',
     'cyclic_cubic_basis',
     'thinplate_regression_basis',
+    'cr_basis',
+    'gp_basis',
+    'mrf_smooth',
     'tensor_product_basis',
+    're_smooth',
     'spline_design',
     'tensor_product_design',
     # gam
     'GAMResult',
     'gam_fit',
     'smooth_partial_effect',
+    # glmm
+    'GLMMResult',
+    'glmm_fit',
+    # beta regression
+    'BetaResult',
+    'beta_fit',
+    # distributional (location-scale)
+    'GauLSSResult',
+    'gaulss_fit',
+    # ordinal (cumulative link)
+    'OrdinalResult',
+    'ordinal_fit',
     # connectivity
     'ledoit_wolf',
     'oas',

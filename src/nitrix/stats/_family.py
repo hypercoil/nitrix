@@ -31,6 +31,11 @@ __all__ = [
     'GAUSSIAN',
     'BINOMIAL',
     'POISSON',
+    'GAMMA',
+    'NEGBINOMIAL',
+    'TWEEDIE',
+    'negbinomial',
+    'tweedie',
     'resolve_family',
 ]
 
@@ -52,7 +57,8 @@ class Family:
     - ``loglik`` -- per-observation log-likelihood ``l(y, mu, dispersion)``
       (the dispersion argument is ignored by the fixed-dispersion families).
     - ``has_fixed_dispersion`` -- ``True`` when the dispersion is 1 (binomial /
-      Poisson); ``False`` when it is estimated (Gaussian).
+      Poisson; negative-binomial with a *known* ``alpha``); ``False`` when it is
+      estimated (Gaussian, Gamma).
     """
 
     name: str
@@ -152,12 +158,178 @@ POISSON = Family(
 )
 
 
+def _log_link(mu: Array) -> Array:
+    return jnp.log(jnp.clip(mu, _EPS, None))
+
+
+def _gamma_deviance(y: Array, mu: Array) -> Array:
+    ym = jnp.clip(y, _EPS, None)
+    m = jnp.clip(mu, _EPS, None)
+    return 2.0 * ((ym - m) / m - jnp.log(ym / m))
+
+
+def _gamma_loglik(y: Array, mu: Array, dispersion: Array) -> Array:
+    # Gamma(mean=mu, dispersion=phi): shape k = 1/phi, scale = phi * mu.
+    phi = jnp.clip(dispersion, _EPS, None)
+    m = jnp.clip(mu, _EPS, None)
+    ym = jnp.clip(y, _EPS, None)
+    k = 1.0 / phi
+    return (
+        (k - 1.0) * jnp.log(ym)
+        - ym / (phi * m)
+        - k * jnp.log(phi * m)
+        - gammaln(k)
+    )
+
+
+# Gamma uses a **log** link (positive mean by construction, the practical
+# default for RTs / volumes); the canonical inverse link is available by
+# constructing a custom ``Family``.  Dispersion (the gamma shape's reciprocal)
+# is estimated, as for Gaussian.
+GAMMA = Family(
+    name='gamma',
+    has_fixed_dispersion=False,
+    link=_log_link,
+    linkinv=jnp.exp,
+    mu_eta=jnp.exp,
+    variance=lambda mu: mu * mu,
+    unit_deviance=_gamma_deviance,
+    init_mu=lambda y: jnp.clip(y, _EPS, None),
+    loglik=_gamma_loglik,
+)
+
+
+def negbinomial(alpha: float = 1.0) -> Family:
+    """A negative-binomial (NB2) family with **known** dispersion ``alpha``.
+
+    NB2 parameterisation: ``V(mu) = mu + alpha * mu^2`` (overdispersed counts),
+    log link.  ``alpha`` is fixed at construction -- with it known, NB2 is a
+    proper one-parameter family (GLM dispersion 1), so the shared IRLS core fits
+    it directly.  Jointly *estimating* ``alpha`` (the profile-MLE outer loop) is
+    a documented follow-up.  ``alpha -> 0`` recovers Poisson.
+    """
+    if alpha <= 0.0:
+        raise ValueError(f'negbinomial: alpha must be > 0, got {alpha}.')
+    a = float(alpha)
+    inv_a = 1.0 / a
+
+    def variance(mu: Array) -> Array:
+        return mu + a * mu * mu
+
+    def unit_deviance(y: Array, mu: Array) -> Array:
+        ym = jnp.clip(y, 0.0, None)
+        m = jnp.clip(mu, _EPS, None)
+        return 2.0 * (
+            xlogy(ym, ym / m)
+            - (ym + inv_a) * jnp.log((1.0 + a * ym) / (1.0 + a * m))
+        )
+
+    def loglik(y: Array, mu: Array, dispersion: Array) -> Array:
+        ym = jnp.clip(y, 0.0, None)
+        m = jnp.clip(mu, _EPS, None)
+        return (
+            gammaln(ym + inv_a)
+            - gammaln(inv_a)
+            - gammaln(ym + 1.0)
+            + xlogy(ym, a * m)
+            - (ym + inv_a) * jnp.log(1.0 + a * m)
+        )
+
+    return Family(
+        name='negbinomial',
+        has_fixed_dispersion=True,
+        link=_log_link,
+        linkinv=jnp.exp,
+        mu_eta=jnp.exp,
+        variance=variance,
+        unit_deviance=unit_deviance,
+        init_mu=lambda y: jnp.clip(y, 0.0, None) + 0.1,
+        loglik=loglik,
+    )
+
+
+# Default NB2 (alpha = 1); for another dispersion pass ``negbinomial(alpha)``.
+NEGBINOMIAL = negbinomial(1.0)
+
+
+def tweedie(p: float = 1.5) -> Family:
+    """A Tweedie family with **fixed** power ``p`` (compound Poisson-Gamma).
+
+    ``1 < p < 2`` -- the semicontinuous regime (an exact zero with probability
+    mass plus a continuous positive part: rainfall, insurance claims, some
+    imaging measures).  Variance ``V(mu) = mu^p``, log link, dispersion estimated
+    (``has_fixed_dispersion=False``, like Gamma).  With ``p`` fixed the *mean*
+    coefficients fit the shared IRLS core directly (working weight ``mu^{2-p}``);
+    jointly profiling ``p`` is a follow-up (``p -> 1`` recovers Poisson, ``p -> 2``
+    Gamma).
+
+    The unit deviance is the closed form
+
+        d(y, mu) = 2[ y^{2-p}/((1-p)(2-p)) - y mu^{1-p}/(1-p) + mu^{2-p}/(2-p) ];
+
+    the log-likelihood uses the **saddlepoint approximation** (with the exact
+    compound-Poisson zero mass at ``y = 0``) -- enough for ``aic`` / ``bic`` model
+    comparison; the exact Dunn-Smyth series is the follow-up.
+    """
+    if not 1.0 < p < 2.0:
+        raise ValueError(
+            f'tweedie: power p must satisfy 1 < p < 2 (compound '
+            f'Poisson-Gamma), got {p}.'
+        )
+    pw = float(p)
+    one_m_p = 1.0 - pw  # in (-1, 0)
+    two_m_p = 2.0 - pw  # in (0, 1)
+
+    def variance(mu: Array) -> Array:
+        return jnp.clip(mu, _EPS, None) ** pw
+
+    def unit_deviance(y: Array, mu: Array) -> Array:
+        ym = jnp.clip(y, 0.0, None)
+        m = jnp.clip(mu, _EPS, None)
+        return 2.0 * (
+            ym**two_m_p / (one_m_p * two_m_p)
+            - ym * m**one_m_p / one_m_p
+            + m**two_m_p / two_m_p
+        )
+
+    def loglik(y: Array, mu: Array, dispersion: Array) -> Array:
+        phi = jnp.clip(dispersion, _EPS, None)
+        m = jnp.clip(mu, _EPS, None)
+        ym = jnp.clip(y, 0.0, None)
+        # Saddlepoint density for y > 0; exact compound-Poisson mass at y = 0.
+        dev = unit_deviance(ym, m)
+        ll_pos = -0.5 * jnp.log(2.0 * jnp.pi * phi * ym**pw + _EPS) - dev / (
+            2.0 * phi
+        )
+        ll_zero = -(m**two_m_p) / (phi * two_m_p)  # log P(Y = 0)
+        return jnp.where(y > 0.0, ll_pos, ll_zero)
+
+    return Family(
+        name='tweedie',
+        has_fixed_dispersion=False,
+        link=_log_link,
+        linkinv=jnp.exp,
+        mu_eta=jnp.exp,
+        variance=variance,
+        unit_deviance=unit_deviance,
+        init_mu=lambda y: jnp.clip(y, 0.0, None) + 0.1,
+        loglik=loglik,
+    )
+
+
+# Default Tweedie (p = 1.5); for another power pass ``tweedie(p)``.
+TWEEDIE = tweedie(1.5)
+
+
 # The registry of built-ins -- the open-set extension point (callers may also
 # pass any ``Family`` instance directly).
 _FAMILIES: Mapping[str, Family] = {
     'gaussian': GAUSSIAN,
     'binomial': BINOMIAL,
     'poisson': POISSON,
+    'gamma': GAMMA,
+    'negbinomial': NEGBINOMIAL,
+    'tweedie': TWEEDIE,
 }
 
 
@@ -165,7 +337,9 @@ def resolve_family(family: Union[str, Family]) -> Family:
     """Resolve a ``str`` name (a built-in) or a ``Family`` instance to a family.
 
     ``glm_fit`` / ``gam_fit`` accept either; a string is looked up in the
-    built-in registry (``'gaussian'`` / ``'binomial'`` / ``'poisson'``).
+    built-in registry (``'gaussian'`` / ``'binomial'`` / ``'poisson'`` /
+    ``'gamma'`` / ``'negbinomial'``).  ``'negbinomial'`` resolves to the default
+    ``alpha = 1``; for another dispersion pass ``negbinomial(alpha)`` directly.
     """
     if isinstance(family, Family):
         return family

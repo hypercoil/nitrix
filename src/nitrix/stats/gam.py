@@ -68,6 +68,7 @@ from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
 from ._smalllinalg import small_inv_logdet
 from .basis import (
+    REBasis,
     SplineBasis,
     TensorBasis,
     spline_design,
@@ -81,7 +82,7 @@ __all__ = ['GAMResult', 'gam_fit', 'smooth_partial_effect']
 # smoothing-parameter trace ``tr(S_lambda^+ S_k)``.
 _EIG_EPS = 0.0
 
-Smooth = Union[SplineBasis, TensorBasis]
+Smooth = Union[SplineBasis, TensorBasis, REBasis]
 
 
 # ---------------------------------------------------------------------------
@@ -184,15 +185,20 @@ def _smooth_penalties(
     A :class:`SplineBasis` contributes one penalty (its ``(k, k)`` matrix and
     its eigenvalues, with the unpenalised null space floored to zero); a
     :class:`TensorBasis` contributes one per margin (the Kronecker-embedded
-    penalty and its joint-eigenbasis Kronecker eigenvalues -- already floored).
-    ``eig_block`` is used only for the basis-invariant ``tr(S_lambda^+ S_k)``;
-    ``S_block`` (the original-basis matrix) drives the fit, so coefficients stay
-    in the input basis.
+    penalty and its joint-eigenbasis Kronecker eigenvalues -- already floored);
+    a :class:`REBasis` contributes its identity ridge (full rank ``q``, so the
+    eigenvalues are exactly one -- no host eigh needed).  ``eig_block`` is used
+    only for the basis-invariant ``tr(S_lambda^+ S_k)``; ``S_block`` (the
+    original-basis matrix) drives the fit, so coefficients stay in the input
+    basis.
     """
     if isinstance(sm, TensorBasis):
         pens = np.asarray(sm.penalties)
         eigs = np.asarray(sm.pen_eig)
         return [(pens[j], eigs[j]) for j in range(pens.shape[0])]
+    if isinstance(sm, REBasis):
+        q = sm.dim
+        return [(np.asarray(sm.penalty), np.ones(q))]
     s_block = np.asarray(sm.penalty)
     w, _ = np.linalg.eigh(s_block)
     floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
@@ -505,7 +511,9 @@ def _gam_fit_one_gaussian_xprod(
         phi = rss / jnp.clip(n - edf, 1e-3, None)
         return v, beta, phi
 
-    def outer(lam: Float[Array, 'm'], _: Array) -> Tuple[Float[Array, 'm'], None]:
+    def outer(
+        lam: Float[Array, 'm'], _: Array
+    ) -> Tuple[Float[Array, 'm'], None]:
         v, beta, phi = quantities(lam)
         s_lambda_eig = lam @ pen_eig
 
@@ -540,7 +548,7 @@ def gam_fit(
     family: Union[str, Family] = GAUSSIAN,
     lambda_mode: Literal['per_element', 'shared'] = 'per_element',
     n_outer: int = 20,
-    n_inner: int = 15,
+    n_inner: int = 10,
     ridge: float = 1e-8,
     lam_floor: float = 1e-6,
     lam_ceil: float = 1e8,
@@ -718,10 +726,16 @@ def smooth_partial_effect(
     credible band).  ``basis`` is the smooth used to build the term; for a
     ``TensorBasis`` pass ``x`` as a tuple of matched per-margin grids (all
     length ``g``) and the effect is the interaction surface along that path.
+    For a ``REBasis`` pass ``x`` as the integer level indices to read off -- the
+    effect is then the per-level random effect (the BLUP intercept, or the
+    random-slope coefficient) at those levels.
     """
     lo, hi = result.col_slices[smooth_index]
     if isinstance(basis, TensorBasis):
         design = tensor_product_design(basis, tuple(x))  # (g, K)
+    elif isinstance(basis, REBasis):
+        levels = jnp.asarray(x).astype(jnp.int32)
+        design = jax.nn.one_hot(levels, basis.dim, dtype=result.coef.dtype)
     else:
         design = spline_design(basis, cast(Float[Array, ' g'], x))  # (g, k)
     gamma = result.coef[:, lo:hi]  # (V, k)

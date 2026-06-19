@@ -10,12 +10,17 @@ import numpy as np
 jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats.basis import (
+    REBasis,
+    SplineBasis,
     bspline_basis,
+    by_factor_smooth,
     cyclic_cubic_basis,
+    re_smooth,
     spline_design,
     tensor_product_basis,
     tensor_product_design,
     thinplate_regression_basis,
+    varying_coefficient_smooth,
 )
 
 
@@ -87,7 +92,9 @@ def test_penalised_fit_recovers_smooth_function():
     fit = B @ beta + y.mean()
     # interior error well below the noise level
     interior = (x > 0.05) & (x < 0.95)
-    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +133,9 @@ def test_tprs_recovers_smooth_via_gam():
     eff, se = smooth_partial_effect(res, 0, tp, jnp.asarray(x))
     fit = float(res.coef[0, 0]) + np.asarray(eff[0])
     interior = (x > 0.05) & (x < 0.95)
-    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
     assert 2.0 < float(res.edf[0, 0]) < float(tp.dim)
     assert (se > 0).all()
 
@@ -185,7 +194,9 @@ def test_cyclic_recovers_periodic_smooth_via_gam():
     effx, _ = smooth_partial_effect(res, 0, cb, jnp.asarray(x))
     fit = float(res.coef[0, 0]) + np.asarray(effx[0])
     interior = (x > 0.05) & (x < 0.95)
-    assert float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    assert (
+        float(np.sqrt(np.mean((fit[interior] - truth[interior]) ** 2))) < 0.05
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +261,11 @@ def test_tensor_fs_trace_eigenvalues_match_dense_pinv():
         s_eig = lam[0] * E[0] + lam[1] * E[1]
         for k in range(2):
             tr_dense = np.trace(s_pinv @ S[k])
-            tr_eig = np.sum(np.where(s_eig > 0, E[k] / np.where(s_eig > 0, s_eig, 1.0), 0.0))
+            tr_eig = np.sum(
+                np.where(
+                    s_eig > 0, E[k] / np.where(s_eig > 0, s_eig, 1.0), 0.0
+                )
+            )
             np.testing.assert_allclose(tr_eig, tr_dense, atol=1e-7)
 
 
@@ -268,3 +283,95 @@ def test_tensor_product_design_reevaluation():
     d2 = np.asarray(spline_design(m2, g2))
     ref = (d1[:, :, None] * d2[:, None, :]).reshape(11, m1.dim * m2.dim)
     np.testing.assert_allclose(np.asarray(D), ref, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Random-effect smooth (bs='re') -- the GAMM block
+# ---------------------------------------------------------------------------
+
+
+def test_re_smooth_intercept_is_one_hot_with_identity_penalty():
+    """A random intercept block is the one-hot indicator design with an
+    identity ridge penalty over the factor levels."""
+    g = jnp.asarray(np.array([0, 1, 2, 0, 1, 2, 0], dtype=np.int32))
+    re = re_smooth(g, n_levels=3)
+    assert isinstance(re, REBasis)
+    assert re.dim == 3 and re.levels == 3
+    assert re.design.shape == (7, 3)
+    # one-hot rows
+    np.testing.assert_array_equal(
+        np.asarray(re.design), np.eye(3)[np.asarray(g)]
+    )
+    np.testing.assert_array_equal(np.asarray(re.penalty), np.eye(3))
+
+
+def test_re_smooth_slope_scales_one_hot_by_covariate():
+    """A random slope block is one_hot(g) * by, column-localised per level."""
+    g = jnp.asarray(np.array([0, 1, 0, 1], dtype=np.int32))
+    by = jnp.asarray(np.array([2.0, -1.0, 0.5, 3.0]))
+    re = re_smooth(g, by=by, n_levels=2)
+    expect = np.eye(2)[np.asarray(g)] * np.asarray(by)[:, None]
+    np.testing.assert_allclose(np.asarray(re.design), expect, atol=1e-12)
+
+
+def test_re_smooth_infers_levels_and_is_a_pytree():
+    g = jnp.asarray(np.array([0, 3, 1, 2], dtype=np.int32))
+    re = re_smooth(g)
+    assert re.dim == 4  # inferred max + 1
+    leaves, treedef = jax.tree_util.tree_flatten(re)
+    rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert isinstance(rebuilt, REBasis) and rebuilt.dim == 4
+
+
+def test_by_factor_smooth_returns_masked_blocks_per_level():
+    """``by_factor_smooth`` returns one SplineBasis per level; each design loads
+    only on its level's rows and shares the marginal penalty."""
+    x = _x(n=300)
+    by = jnp.asarray(np.tile([0, 1, 2], 100))
+    blocks = by_factor_smooth(x, by, n_basis=8)
+    assert len(blocks) == 3
+    marginal = bspline_basis(x, 8)
+    by_np = np.asarray(by)
+    for level, blk in enumerate(blocks):
+        assert isinstance(blk, SplineBasis)
+        d = np.asarray(blk.design)
+        # rows not in this level are exactly zero; rows in this level == marginal
+        assert np.all(d[by_np != level] == 0.0)
+        np.testing.assert_allclose(
+            d[by_np == level],
+            np.asarray(marginal.design)[by_np == level],
+            atol=1e-12,
+        )
+        # penalty is the shared marginal penalty
+        np.testing.assert_allclose(
+            np.asarray(blk.penalty), np.asarray(marginal.penalty), atol=1e-12
+        )
+
+
+def test_by_factor_smooth_respects_n_levels_for_absent_levels():
+    """``n_levels`` fixes the tuple length when a level is absent from the sample."""
+    x = _x(n=100)
+    by = jnp.asarray(np.zeros(100, dtype=np.int32))  # only level 0 present
+    blocks = by_factor_smooth(x, by, n_basis=6, n_levels=3)
+    assert len(blocks) == 3
+    # the two absent levels have all-zero designs
+    assert np.all(np.asarray(blocks[1].design) == 0.0)
+    assert np.all(np.asarray(blocks[2].design) == 0.0)
+
+
+def test_varying_coefficient_smooth_scales_design_by_covariate():
+    """``varying_coefficient_smooth`` is the marginal design scaled row-wise by
+    ``by``, with the penalty unchanged."""
+    x = _x(n=200)
+    rng = np.random.default_rng(2)
+    z = jnp.asarray(rng.standard_normal(200))
+    vc = varying_coefficient_smooth(x, z, n_basis=8)
+    marginal = bspline_basis(x, 8)
+    np.testing.assert_allclose(
+        np.asarray(vc.design),
+        np.asarray(marginal.design) * np.asarray(z)[:, None],
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(vc.penalty), np.asarray(marginal.penalty), atol=1e-12
+    )

@@ -28,13 +28,46 @@ output statistics via the implicit-function-theorem VJP (see
 ``docs/design/lme.md``).
 """
 
+from ._corr import CorrSpec, ar1, car1, cs, iid
+from ._corrfit import CorrLMEResult, GLSResult, gls_fit
+from ._varfunc import VarFunc, var_ident, var_power
 from .flame import FLAMEResult, flame_two_level
-from .reml import REMLResult, reml_fit
+from .reml import (
+    CrossedLMEResult,
+    LMEContrast,
+    LMEFContrast,
+    LMEResult,
+    NestedLMEResult,
+    REMLResult,
+    lme_f_contrast,
+    lme_fit,
+    lme_t_contrast,
+    reml_fit,
+)
 
 
 __all__ = [
     'REMLResult',
+    'LMEResult',
+    'NestedLMEResult',
+    'CrossedLMEResult',
+    'LMEContrast',
+    'LMEFContrast',
     'FLAMEResult',
+    'GLSResult',
+    'CorrLMEResult',
+    'CorrSpec',
+    'VarFunc',
     'reml_fit',
+    'lme_fit',
+    'lme_t_contrast',
+    'lme_f_contrast',
     'flame_two_level',
+    'gls_fit',
+    'ar1',
+    'car1',
+    'cs',
+    'iid',
+    'var_power',
+    'var_ident',
 ]

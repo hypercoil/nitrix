@@ -20,8 +20,11 @@ jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats.glm import (
     BINOMIAL,
+    GAMMA,
     GAUSSIAN,
+    NEGBINOMIAL,
     POISSON,
+    TWEEDIE,
     adj_r_squared,
     aic,
     bic,
@@ -29,9 +32,12 @@ from nitrix.stats.glm import (
     f_contrast,
     glm_fit,
     log_likelihood,
+    negbinomial,
     predict,
     r_squared,
+    sandwich_cov,
     t_contrast,
+    tweedie,
 )
 
 
@@ -118,6 +124,11 @@ def test_wls_matches_statsmodels():
     np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-10)
     _, se, _, _ = t_contrast(res, jnp.eye(3)[1])
     np.testing.assert_allclose(float(se[0]), smf.bse[1], atol=1e-9)
+    # Weighted r_squared needs the *weighted* null deviance (weighted-mean
+    # intercept-only MLE); regression guard for the unweighted-null-mean bug.
+    np.testing.assert_allclose(
+        float(r_squared(res)[0]), smf.rsquared, atol=1e-9
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +166,207 @@ def test_binomial_matches_statsmodels():
     np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-7)
     _, se, _, _ = t_contrast(res, jnp.eye(3)[1])
     np.testing.assert_allclose(float(se[0]), smf.bse[1], atol=1e-6)
+
+
+@needs_sm
+def test_gamma_matches_statsmodels():
+    """Gamma (log link): coefficients, deviance, and -- with the deviance-scale
+    dispersion convention nitrix uses for an estimated-dispersion family -- the
+    contrast SE all match statsmodels.GLM(Gamma, link=Log)."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(11)
+    X = _design(rng, N=200)
+    mu = np.exp(X @ np.array([0.5, 0.4, -0.3]))
+    y = rng.gamma(5.0, mu / 5.0)  # mean mu, shape 5
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=GAMMA, n_iter=60)
+    smf = sm.GLM(
+        y, X, family=sm.families.Gamma(link=sm.families.links.Log())
+    ).fit(scale='dev')
+    np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-6)
+    np.testing.assert_allclose(float(res.deviance[0]), smf.deviance, rtol=1e-7)
+    np.testing.assert_allclose(
+        float(res.dispersion[0]), smf.scale, rtol=1e-6
+    )
+    _, se, _, _ = t_contrast(res, jnp.eye(3)[1])
+    np.testing.assert_allclose(float(se[0]), smf.bse[1], rtol=1e-5)
+
+
+@needs_sm
+def test_negbinomial_matches_statsmodels():
+    """Negative binomial (NB2, known alpha): coefficients and deviance match
+    statsmodels.GLM(NegativeBinomial(alpha)); the registry default is alpha=1."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(12)
+    X = _design(rng, N=200)
+    mu = np.exp(X @ np.array([0.5, 0.4, -0.3]))
+    alpha = 1.5
+    lam = rng.gamma(1.0 / alpha, alpha * mu)  # gamma-Poisson mixture -> NB2
+    y = rng.poisson(lam).astype(float)
+    res = glm_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), family=negbinomial(alpha), n_iter=60
+    )
+    smf = sm.GLM(
+        y, X, family=sm.families.NegativeBinomial(alpha=alpha)
+    ).fit()
+    np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-6)
+    np.testing.assert_allclose(float(res.deviance[0]), smf.deviance, rtol=1e-7)
+
+
+@pytest.mark.parametrize('p', [1.3, 1.5, 1.7])
+def test_tweedie_matches_statsmodels(p):
+    """Tweedie (fixed power p in (1,2)): mean coefficients and deviance match
+    statsmodels.GLM(Tweedie(var_power=p, Log))."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(20)
+    X = _design(rng, N=220)
+    mu = np.exp(X @ np.array([0.5, 0.4, -0.3]))
+    y = rng.gamma(2.0, mu / 2.0)
+    y[rng.uniform(size=len(y)) < 0.15] = 0.0  # compound-Poisson-like zeros
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=tweedie(p))
+    smf = sm.GLM(
+        y,
+        X,
+        family=sm.families.Tweedie(
+            var_power=p, link=sm.families.links.Log()
+        ),
+    ).fit()
+    np.testing.assert_allclose(np.asarray(res.coef[0]), smf.params, atol=1e-6)
+    np.testing.assert_allclose(float(res.deviance[0]), smf.deviance, rtol=1e-7)
+
+
+def test_tweedie_power_validation_and_registry():
+    """The default 'tweedie' string is p=1.5; a power outside (1,2) is rejected."""
+    rng = np.random.default_rng(21)
+    X = jnp.asarray(_design(rng, N=120))
+    y = jnp.asarray(rng.gamma(2.0, 1.0, 120))[None, :]
+    a = glm_fit(y, X, family='tweedie', n_iter=40)
+    b = glm_fit(y, X, family=TWEEDIE, n_iter=40)
+    np.testing.assert_allclose(np.asarray(a.coef), np.asarray(b.coef), atol=1e-10)
+    for bad in (1.0, 2.0, 0.5, 2.5):
+        with pytest.raises(ValueError, match='power'):
+            tweedie(bad)
+
+
+def test_family_registry_resolves_gamma_and_negbinomial():
+    """String names resolve to the built-ins; ``negbinomial(alpha)`` builds a
+    custom-dispersion family; a non-positive alpha is rejected."""
+    rng = np.random.default_rng(13)
+    X = jnp.asarray(_design(rng, N=120))
+    y = jnp.asarray(np.exp(rng.standard_normal(120)))[None, :]
+    # 'gamma' string == GAMMA instance
+    a = glm_fit(y, X, family='gamma', n_iter=40)
+    b = glm_fit(y, X, family=GAMMA, n_iter=40)
+    np.testing.assert_allclose(np.asarray(a.coef), np.asarray(b.coef), atol=1e-10)
+    # 'negbinomial' string == default alpha=1 == NEGBINOMIAL
+    yc = jnp.asarray(rng.poisson(2.0, 120).astype(float))[None, :]
+    c = glm_fit(yc, X, family='negbinomial', n_iter=40)
+    d = glm_fit(yc, X, family=NEGBINOMIAL, n_iter=40)
+    np.testing.assert_allclose(np.asarray(c.coef), np.asarray(d.coef), atol=1e-10)
+    # a different alpha is a different fit
+    e = glm_fit(yc, X, family=negbinomial(4.0), n_iter=40)
+    assert not np.allclose(np.asarray(c.coef), np.asarray(e.coef))
+    with pytest.raises(ValueError, match='alpha'):
+        negbinomial(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Sandwich / cluster-robust standard errors (§6.2)
+# ---------------------------------------------------------------------------
+
+
+@needs_sm
+def test_sandwich_hc_matches_statsmodels():
+    """HC0-HC3 robust SEs match statsmodels.OLS.get_robustcov_results."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(20)
+    X = _design(rng, N=120)
+    # deliberately heteroscedastic errors
+    y = X @ np.array([1.0, 2.0, -1.0]) + rng.standard_normal(120) * (
+        0.5 + np.abs(X[:, 1])
+    )
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=GAUSSIAN)
+    smf = sm.OLS(y, X).fit()
+    for kind in ('HC0', 'HC1', 'HC2', 'HC3'):
+        v = np.asarray(
+            sandwich_cov(res, jnp.asarray(y[None, :]), jnp.asarray(X), kind=kind)
+        )[0]
+        se = np.sqrt(np.diag(v))
+        np.testing.assert_allclose(se, smf.get_robustcov_results(kind).bse, rtol=1e-10)
+
+
+@needs_sm
+def test_sandwich_cluster_matches_statsmodels():
+    """One-way cluster-robust SEs match statsmodels (G/(G-1)*(N-1)/(N-p))."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(21)
+    X = _design(rng, N=120)
+    groups = np.repeat(np.arange(20), 6)
+    # within-cluster correlated errors
+    u = rng.standard_normal(20)[groups] + rng.standard_normal(120) * 0.5
+    y = X @ np.array([0.5, 1.0, -0.5]) + u
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=GAUSSIAN)
+    v = np.asarray(
+        sandwich_cov(
+            res, jnp.asarray(y[None, :]), jnp.asarray(X), groups=jnp.asarray(groups)
+        )
+    )[0]
+    se = np.sqrt(np.diag(v))
+    smf = sm.OLS(y, X).fit().get_robustcov_results('cluster', groups=groups)
+    np.testing.assert_allclose(se, smf.bse, rtol=1e-10)
+
+
+@needs_sm
+def test_sandwich_glm_poisson_matches_statsmodels():
+    """The GLM (Poisson) sandwich HC0 matches statsmodels GLM cov_type='HC0'."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(22)
+    X = _design(rng, N=150)
+    mu = np.exp(X @ np.array([0.3, 0.5, -0.2]))
+    y = rng.poisson(mu).astype(float)
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=POISSON, n_iter=40)
+    v = np.asarray(
+        sandwich_cov(res, jnp.asarray(y[None, :]), jnp.asarray(X), kind='HC0')
+    )[0]
+    smf = sm.GLM(y, X, family=sm.families.Poisson()).fit(cov_type='HC0')
+    np.testing.assert_allclose(np.sqrt(np.diag(v)), smf.bse, rtol=1e-9)
+
+
+@needs_sm
+def test_t_contrast_cov_override_is_robust_and_default_unchanged():
+    """t_contrast(cov=sandwich) yields the robust SE; cov=None is the unchanged
+    model-based SE."""
+    import statsmodels.api as sm
+
+    rng = np.random.default_rng(23)
+    X = _design(rng, N=100)
+    y = X @ np.array([1.0, 0.5, -0.5]) + rng.standard_normal(100) * (
+        0.3 + np.abs(X[:, 2])
+    )
+    Yj, Xj = jnp.asarray(y[None, :]), jnp.asarray(X)
+    res = glm_fit(Yj, Xj, family=GAUSSIAN)
+    smf = sm.OLS(y, X).fit()
+    hc3 = sandwich_cov(res, Yj, Xj, kind='HC3')
+    _, se_rob, _, _ = t_contrast(res, jnp.eye(3)[1], cov=hc3)
+    np.testing.assert_allclose(
+        float(se_rob[0]), smf.get_robustcov_results('HC3').bse[1], rtol=1e-10
+    )
+    _, se_model, _, _ = t_contrast(res, jnp.eye(3)[1])
+    np.testing.assert_allclose(float(se_model[0]), smf.bse[1], rtol=1e-9)
+
+
+def test_sandwich_rejects_unknown_kind():
+    rng = np.random.default_rng(24)
+    X = jnp.asarray(_design(rng, N=60))
+    y = jnp.asarray(np.zeros(60))[None, :]
+    res = glm_fit(y, X, family=GAUSSIAN)
+    with pytest.raises(ValueError, match='HC'):
+        sandwich_cov(res, y, X, kind='HC9')
 
 
 # ---------------------------------------------------------------------------

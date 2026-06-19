@@ -31,23 +31,31 @@ Everything is value -> value and cuSOLVER-free.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 
+from ..graph import laplacian
 from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
 
 __all__ = [
     'SplineBasis',
     'TensorBasis',
+    'REBasis',
     'bspline_basis',
     'cyclic_cubic_basis',
     'thinplate_regression_basis',
+    'cr_basis',
+    'gp_basis',
+    'mrf_smooth',
     'tensor_product_basis',
+    're_smooth',
+    'by_factor_smooth',
+    'varying_coefficient_smooth',
     'spline_design',
     'tensor_product_design',
 ]
@@ -148,6 +156,7 @@ class SplineBasis:
     hi: float
     knots: Optional[Float[Array, ' nk']] = None
     radial_transform: Optional[Float[Array, 'nk kw']] = None
+    kernel_param: Optional[float] = None  # kernel range for kind='gp'
 
     @property
     def dim(self) -> int:
@@ -156,7 +165,9 @@ class SplineBasis:
 
     def tree_flatten(
         self,
-    ) -> Tuple[Tuple[Any, ...], Tuple[str, int, int, int, float, float]]:
+    ) -> Tuple[
+        Tuple[Any, ...], Tuple[str, int, int, int, float, float, Optional[float]]
+    ]:
         children = (
             self.design,
             self.penalty,
@@ -171,17 +182,18 @@ class SplineBasis:
             self.penalty_order,
             self.lo,
             self.hi,
+            self.kernel_param,
         )
         return children, aux
 
     @classmethod
     def tree_unflatten(
         cls,
-        aux: Tuple[str, int, int, int, float, float],
+        aux: Tuple[str, int, int, int, float, float, Optional[float]],
         children: Tuple[Any, ...],
     ) -> 'SplineBasis':
         design, penalty, constraint, knots, radial_transform = children
-        kind, n_basis, degree, penalty_order, lo, hi = aux
+        kind, n_basis, degree, penalty_order, lo, hi, kernel_param = aux
         return cls(
             design=design,
             penalty=penalty,
@@ -194,6 +206,7 @@ class SplineBasis:
             hi=hi,
             knots=knots,
             radial_transform=radial_transform,
+            kernel_param=kernel_param,
         )
 
 
@@ -287,6 +300,21 @@ def _raw_features(
         poly = _tps_poly(x, basis.penalty_order, basis.lo, basis.hi)
         return jnp.concatenate(
             [radial @ cast(Array, basis.radial_transform), poly], axis=1
+        )
+    if basis.kind == 'cr':
+        return _cr_design(
+            x, cast(Array, basis.knots), cast(Array, basis.radial_transform)
+        )
+    if basis.kind == 'gp':
+        knots = cast(Array, basis.knots)
+        cxz = _matern32_kernel(
+            jnp.abs(x[:, None] - knots[None, :]),
+            cast(float, basis.kernel_param),
+        )
+        return cxz @ cast(Array, basis.radial_transform)
+    if basis.kind == 'mrf':
+        return jax.nn.one_hot(
+            x.astype(jnp.int32), basis.n_basis, dtype=jnp.float32
         )
     raise ValueError(f'unknown spline kind {basis.kind!r}.')
 
@@ -543,6 +571,318 @@ def cyclic_cubic_basis(
 
 
 # ---------------------------------------------------------------------------
+# Cubic regression spline (mgcv bs='cr') -- knot-value parameterised
+# ---------------------------------------------------------------------------
+
+
+def _cr_construct(
+    knots: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """The mgcv ``cr`` construction: the ``beta -> f''`` map ``F`` and the
+    integrated-curvature penalty ``S = D^T B^{-1} D``.
+
+    A natural cubic spline parameterised by its values ``beta`` at the knots.
+    With ``h_i`` the knot spacings, ``B`` (tridiagonal) and ``D`` map the knot
+    values to the interior second derivatives ``m = B^{-1} D beta`` (``f''`` is
+    zero at the ends -- the *natural* boundary); ``F`` pads ``m`` with those
+    zeros, and ``S`` is the exact ``integral f''(x)^2 dx``.  Host-side (the knots
+    are static across the mass axis).
+    """
+    k = knots.shape[0]
+    h = np.diff(knots)  # (k-1,)
+    D = np.zeros((k - 2, k))
+    B = np.zeros((k - 2, k - 2))
+    for i in range(k - 2):
+        D[i, i] = 1.0 / h[i]
+        D[i, i + 1] = -1.0 / h[i] - 1.0 / h[i + 1]
+        D[i, i + 2] = 1.0 / h[i + 1]
+        B[i, i] = (h[i] + h[i + 1]) / 3.0
+        if i < k - 3:
+            B[i, i + 1] = h[i + 1] / 6.0
+            B[i + 1, i] = h[i + 1] / 6.0
+    binv_d = np.linalg.solve(B, D)  # (k-2, k)
+    F = np.zeros((k, k))
+    F[1:-1, :] = binv_d  # f''_1 = f''_k = 0 (natural)
+    S = D.T @ binv_d  # (k, k) penalty
+    return F, 0.5 * (S + S.T)
+
+
+def _cr_design(
+    x: Float[Array, ' m'],
+    knots: Float[Array, ' k'],
+    fmap: Float[Array, 'k k'],
+) -> Float[Array, 'm k']:
+    """Cardinal cubic-spline design at ``x`` (the knot-value interpolation)."""
+    x = jnp.asarray(x)
+    k = knots.shape[0]
+    j = jnp.clip(jnp.searchsorted(knots, x) - 1, 0, k - 2)  # (m,) interval
+    xl = knots[j]
+    xr = knots[j + 1]
+    h = xr - xl
+    am = (xr - x) / h
+    ap = (x - xl) / h
+    cm = ((xr - x) ** 3 / h - h * (xr - x)) / 6.0
+    cp = ((x - xl) ** 3 / h - h * (x - xl)) / 6.0
+    base = am[:, None] * jax.nn.one_hot(j, k, dtype=x.dtype) + ap[
+        :, None
+    ] * jax.nn.one_hot(j + 1, k, dtype=x.dtype)
+    return base + cm[:, None] * fmap[j] + cp[:, None] * fmap[j + 1]
+
+
+def _strictly_increasing(v: np.ndarray) -> np.ndarray:
+    """Nudge a sorted vector to be strictly increasing (de-duplicate knots)."""
+    out = v.astype(np.float64).copy()
+    span = max(float(out[-1] - out[0]), 1.0)
+    for i in range(1, out.shape[0]):
+        if out[i] <= out[i - 1]:
+            out[i] = out[i - 1] + 1e-9 * span
+    return out
+
+
+def cr_basis(
+    x: Float[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Build a cubic regression spline (mgcv ``bs='cr'``) for covariate ``x``.
+
+    A natural cubic spline parameterised by its values at ``n_basis`` knots
+    (placed at quantiles of ``x``), with the exact integrated-curvature penalty.
+    The cheap knot-based 1-D smoother: ``O(k)`` design, no eigen-truncation.
+    Equivalent to ``scipy``'s natural ``CubicSpline`` interpolation at the knots.
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate values.
+    n_basis
+        Number of knots / basis coefficients ``k`` (>= 4).
+    bounds
+        Unused for ``cr`` (knots come from the data quantiles); accepted for a
+        uniform smooth-constructor signature.
+    center
+        Apply the sum-to-zero identifiability constraint (default ``True``).
+
+    Returns
+    -------
+    ``SplineBasis`` (``kind='cr'``).
+    """
+    if n_basis < 4:
+        raise ValueError(f'cr_basis: n_basis={n_basis} must be >= 4.')
+    x = jnp.asarray(x)
+    x_np = np.asarray(x)
+    knots_np = _strictly_increasing(
+        np.quantile(x_np, np.linspace(0.0, 1.0, n_basis))
+    )
+    fmap_np, s_np = _cr_construct(knots_np)
+    knots = jnp.asarray(knots_np, dtype=x.dtype)
+    fmap = jnp.asarray(fmap_np, dtype=x.dtype)
+    design = _cr_design(x, knots, fmap)
+    penalty = jnp.asarray(s_np, dtype=x.dtype)
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return SplineBasis(
+        design=design,
+        penalty=penalty,
+        kind='cr',
+        constraint=constraint,
+        n_basis=n_basis,
+        degree=3,
+        penalty_order=2,
+        lo=float(knots_np[0]),
+        hi=float(knots_np[-1]),
+        knots=knots,
+        radial_transform=fmap,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gaussian-process smooth (mgcv bs='gp') -- a covariance-kernel basis
+# ---------------------------------------------------------------------------
+
+
+def _matern32_kernel(
+    r: Float[Array, '...'], rho: float
+) -> Float[Array, '...']:
+    """Matern-3/2 correlation ``(1 + sqrt(3) r / rho) exp(-sqrt(3) r / rho)``."""
+    s = jnp.sqrt(3.0) * r / rho
+    return (1.0 + s) * jnp.exp(-s)
+
+
+def gp_basis(
+    x: Float[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    rho: Optional[float] = None,
+    max_knots: int = 100,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Build a Gaussian-process smooth (mgcv ``bs='gp'``) for covariate ``x``.
+
+    A low-rank kriging smooth with a **Matern-3/2** covariance kernel of range
+    ``rho``: the smooth is ``f(x) = sum_j C(|x - z_j|) delta_j`` over knots ``z``
+    with the RKHS penalty ``delta^T C_zz delta`` (``C_zz`` the kernel Gram at the
+    knots).  Constructed like the thin-plate basis -- the radial features are
+    eigen-reparameterised so the penalty is diagonal and truncated to the
+    ``n_basis`` leading components (a one-off host ``eigh``, cuSOLVER-free on the
+    broken GPU).
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate values.
+    n_basis
+        Retained basis dimension ``k`` (the leading kriging components).
+    rho
+        Kernel range (correlation length).  Defaults to the data range / 2.
+    max_knots
+        Cap on the number of knots (quantile-placed) bounding the ``eigh`` cost.
+    bounds
+        ``(lo, hi)`` recorded for re-evaluation (defaults to the data range).
+    center
+        Apply the sum-to-zero identifiability constraint (default ``True``).
+
+    Returns
+    -------
+    ``SplineBasis`` (``kind='gp'``).
+    """
+    x = jnp.asarray(x)
+    n = x.shape[0]
+    x_np = np.asarray(x, dtype=np.float64)
+    lo = float(np.min(x_np)) if bounds is None else float(bounds[0])
+    hi = float(np.max(x_np)) if bounds is None else float(bounds[1])
+    rho_v = float(rho) if rho is not None else max((hi - lo) / 2.0, 1e-6)
+    if not 1 <= n_basis:
+        raise ValueError(f'gp_basis: n_basis={n_basis} must be >= 1.')
+
+    knots_np = _strictly_increasing(
+        np.quantile(x_np, np.linspace(0.0, 1.0, min(max_knots, n)))
+    )
+    nk = knots_np.shape[0]
+    if n_basis > nk:
+        raise ValueError(
+            f'gp_basis: n_basis={n_basis} exceeds the {nk} available knots.'
+        )
+    # Kernel Gram at the knots; eigen-reparameterise (host) so the penalty is
+    # diagonal, then keep the n_basis leading kriging components.
+    rk = np.abs(knots_np[:, None] - knots_np[None, :])
+    czz = np.asarray(_matern32_kernel(jnp.asarray(rk), rho_v))
+    evals, evecs = np.linalg.eigh(0.5 * (czz + czz.T))
+    order = np.argsort(evals)[::-1][:n_basis]
+    evals_k = np.clip(evals[order], 1e-10, None)
+    uk = evecs[:, order]  # (nk, k)
+    # f(x) = C_xz U_k diag(1/lambda) alpha; penalty alpha^T alpha on the
+    # whitened coefficients -> identity penalty in the eigenbasis.
+    radial_transform = jnp.asarray(uk / evals_k[None, :], dtype=x.dtype)
+    knots = jnp.asarray(knots_np, dtype=x.dtype)
+
+    def _gp_raw(xx: Float[Array, ' m']) -> Float[Array, 'm k']:
+        cxz = _matern32_kernel(jnp.abs(xx[:, None] - knots[None, :]), rho_v)
+        return cxz @ radial_transform
+
+    design = _gp_raw(x)
+    penalty = jnp.eye(n_basis, dtype=x.dtype)
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return SplineBasis(
+        design=design,
+        penalty=penalty,
+        kind='gp',
+        constraint=constraint,
+        n_basis=n_basis,
+        degree=0,
+        penalty_order=2,
+        lo=lo,
+        hi=hi,
+        knots=knots,
+        radial_transform=radial_transform,
+        kernel_param=rho_v,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Markov-random-field smooth (mgcv bs='mrf') -- graph-Laplacian penalty
+# ---------------------------------------------------------------------------
+
+
+def mrf_smooth(
+    labels: Int[Array, ' n'],
+    neighbours: Float[Array, 'R R'],
+    *,
+    center: bool = True,
+) -> SplineBasis:
+    """Build a Markov-random-field smooth (mgcv ``bs='mrf'``) over a region
+    adjacency -- the natural smoother on a parcel / vertex graph.
+
+    Each observation carries an integer region ``label`` in ``0 .. R-1``; the
+    smooth is a per-region effect (design = region indicator) penalised by the
+    **combinatorial graph Laplacian** ``L = D - A`` of the region adjacency
+    (``beta^T L beta = sum_{i~j} (beta_i - beta_j)^2`` -- neighbouring regions are
+    shrunk together).  The penalty is ``nitrix.graph.laplacian`` -- a direct
+    substrate reuse.
+
+    Parameters
+    ----------
+    labels
+        ``(n,)`` integer region index per observation (``0 .. R-1``).
+    neighbours
+        ``(R, R)`` region adjacency matrix (non-negative, symmetric; ``1`` for
+        adjacent regions).
+    center
+        Apply the (count-weighted) sum-to-zero constraint (default ``True``).
+
+    Returns
+    -------
+    ``SplineBasis`` (``kind='mrf'``); ``n_basis = R``.
+    """
+    labels = jnp.asarray(labels)
+    a = jnp.asarray(neighbours)
+    if a.ndim != 2 or a.shape[0] != a.shape[1]:
+        raise ValueError(
+            f'mrf_smooth: neighbours must be a square (R, R) adjacency; got '
+            f'{a.shape}.'
+        )
+    r = a.shape[0]
+    af = a.astype(jnp.result_type(a.dtype, jnp.float32))
+    design = jax.nn.one_hot(labels.astype(jnp.int32), r, dtype=af.dtype)
+    penalty = laplacian(0.5 * (af + af.T), normalisation='combinatorial')
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return SplineBasis(
+        design=design,
+        penalty=penalty,
+        kind='mrf',
+        constraint=constraint,
+        n_basis=r,
+        degree=0,
+        penalty_order=1,
+        lo=0.0,
+        hi=float(r - 1),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tensor-product interaction smooth (mgcv te()/ti(), anisotropic interactions)
 # ---------------------------------------------------------------------------
 
@@ -727,3 +1067,196 @@ def tensor_product_design(
         np.asarray(spline_design(m, x)) for m, x in zip(basis.margins, xs)
     )
     return jnp.asarray(_row_kron(designs), dtype=basis.design.dtype)
+
+
+# ---------------------------------------------------------------------------
+# Random-effect smooth (mgcv bs='re') -- the GAMM block
+# ---------------------------------------------------------------------------
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class REBasis:
+    """A random-effect smooth block (mgcv ``bs="re"``) for a GAMM.
+
+    A random intercept / slope per level of a grouping factor, expressed as the
+    ``(design, penalty)`` block the GAM penalty machinery already consumes: the
+    design is the one-hot indicator (intercept) or one-hot times a covariate
+    (slope) over the factor levels, and the penalty is the **identity** (a
+    ridge).  The single smoothing parameter the Fellner-Schall loop selects
+    **is** the random-effect precision ``lambda = 1 / sigma_b^2`` -- the v1
+    "penalised GLM == variance-components REML" identity, now reachable.  It is a
+    third :data:`Smooth` variant alongside :class:`SplineBasis` /
+    :class:`TensorBasis`, so it slots straight into ``gam_fit`` with **no new
+    solver work** (a random effect is just one more penalty block).
+
+    Unlike a spline, an RE has no continuous covariate to re-evaluate, so it
+    carries only ``(design, penalty, levels)`` -- not the spline construction
+    parameters.
+
+    Attributes
+    ----------
+    design
+        ``(n, q)`` random-effect design: ``one_hot(g)`` (intercept) or
+        ``one_hot(g) * by`` (slope); ``q`` = number of factor levels.
+    penalty
+        ``(q, q)`` identity ridge penalty (``lambda I``).
+    levels
+        Number of factor levels ``q``.
+    """
+
+    design: Float[Array, 'n q']
+    penalty: Float[Array, 'q q']
+    levels: int
+
+    @property
+    def dim(self) -> int:
+        """Number of random-effect coefficients ``q`` (the factor levels)."""
+        return self.design.shape[-1]
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[Tuple[Array, ...], Tuple[int]]:
+        return (self.design, self.penalty), (self.levels,)
+
+    @classmethod
+    def tree_unflatten(
+        cls, aux: Tuple[int], children: Tuple[Any, ...]
+    ) -> 'REBasis':
+        design, penalty = children
+        (levels,) = aux
+        return cls(design=design, penalty=penalty, levels=levels)
+
+
+def re_smooth(
+    g: Int[Array, ' n'],
+    *,
+    by: Optional[Float[Array, ' n']] = None,
+    n_levels: Optional[int] = None,
+) -> REBasis:
+    """Build a random-effect smooth block (mgcv ``bs="re"``).
+
+    Parameters
+    ----------
+    g
+        ``(n,)`` integer group labels in ``0 .. q-1`` (the factor levels) -- one
+        per observation.
+    by
+        Optional ``(n,)`` covariate for a random **slope** ``(by | g)``; ``None``
+        gives a random **intercept** ``(1 | g)``.  The design is then
+        ``one_hot(g) * by[:, None]``.
+    n_levels
+        Number of levels ``q`` (defaults to ``int(g.max()) + 1``).  Pass it when
+        some levels are absent from this sample so the block width is stable.
+
+    Returns
+    -------
+    ``REBasis`` (a :data:`Smooth` variant) for ``gam_fit``.  The Fellner-Schall
+    smoothing parameter on this block is the random-effect precision
+    ``1 / sigma_b^2``; the fitted block coefficients are the BLUPs.
+    """
+    g = jnp.asarray(g)
+    q = int(n_levels) if n_levels is not None else int(jnp.max(g)) + 1
+    design = jax.nn.one_hot(g, q)  # (n, q)
+    if by is not None:
+        design = design * jnp.asarray(by, dtype=design.dtype)[:, None]
+    penalty = jnp.eye(q, dtype=design.dtype)
+    return REBasis(design=design, penalty=penalty, levels=q)
+
+
+def by_factor_smooth(
+    x: Float[Array, ' n'],
+    by: Int[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    degree: int = 3,
+    penalty_order: int = 2,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+    n_levels: Optional[int] = None,
+) -> Tuple[SplineBasis, ...]:
+    """By-variable factor smooths ``s(x, by=f)`` -- one smooth of ``x`` per level.
+
+    mgcv's ``s(x, by=f)`` for a **factor** ``f``: a *separate* penalised smooth
+    of ``x`` for each level of ``f``, each with its **own** smoothing parameter.
+    Returns a tuple of ``len == n_levels`` :class:`SplineBasis` blocks; splat it
+    into ``gam_fit``'s ``smooths=`` (each block is an independent smooth, so the
+    Fellner-Schall loop selects a per-level ``lambda``).
+
+    Construction: a single marginal P-spline of ``x`` (shared knots / penalty /
+    centering), then level ``l``'s design is that marginal design with the rows
+    where ``f != l`` zeroed -- so level ``l``'s coefficients load only on its own
+    observations.  Because the per-level designs have disjoint nonzero rows, the
+    blocks are orthogonal in ``X^T W X`` (each level is fit on its own data).
+    Pair with a parametric factor main effect to carry the per-level mean (the
+    smooths are sum-to-zero when ``center=True``, as in mgcv).
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate.
+    by
+        ``(n,)`` integer factor labels in ``0 .. L-1``.
+    n_basis, degree, penalty_order, bounds, center
+        Marginal P-spline parameters (see :func:`bspline_basis`).
+    n_levels
+        Number of levels ``L`` (defaults to ``int(by.max()) + 1``); pass it when
+        a level is absent from this sample so the returned tuple length is stable.
+
+    Returns
+    -------
+    ``tuple`` of ``L`` :class:`SplineBasis`, one per factor level.
+    """
+    by = jnp.asarray(by)
+    n_lev = int(n_levels) if n_levels is not None else int(jnp.max(by)) + 1
+    base = bspline_basis(
+        x,
+        n_basis,
+        degree=degree,
+        penalty_order=penalty_order,
+        bounds=bounds,
+        center=center,
+    )
+    out = []
+    for level in range(n_lev):
+        mask = (by == level).astype(base.design.dtype)[:, None]  # (n, 1)
+        out.append(replace(base, design=base.design * mask))
+    return tuple(out)
+
+
+def varying_coefficient_smooth(
+    x: Float[Array, ' n'],
+    by: Float[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    degree: int = 3,
+    penalty_order: int = 2,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Varying-coefficient smooth ``s(x, by=z)`` for a **continuous** ``z``.
+
+    mgcv's ``s(x, by=z)`` with a numeric ``by``: the smooth term is
+    ``z * f(x)`` -- a coefficient on ``z`` that varies smoothly with ``x``.  The
+    design is the marginal P-spline of ``x`` scaled row-wise by ``z``; the
+    penalty is unchanged.  A single :class:`SplineBasis` for ``gam_fit``.
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate that the coefficient varies over.
+    by
+        ``(n,)`` continuous covariate the smooth multiplies.
+    n_basis, degree, penalty_order, bounds, center
+        Marginal P-spline parameters (see :func:`bspline_basis`).
+    """
+    base = bspline_basis(
+        x,
+        n_basis,
+        degree=degree,
+        penalty_order=penalty_order,
+        bounds=bounds,
+        center=center,
+    )
+    z = jnp.asarray(by, dtype=base.design.dtype)[:, None]  # (n, 1)
+    return replace(base, design=base.design * z)

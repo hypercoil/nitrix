@@ -103,15 +103,47 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any, Literal, NamedTuple, Optional, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
+from jax.scipy.special import betainc
+from jaxtyping import Array, Float, Int
 
-from ._varcomp import VarCompSpec, fit_varcomp_diagonal
+from .._batching import blocked_vmap
+from .._smalllinalg import small_inv_logdet, sym_eig_jacobi
+from ._corr import CorrSpec, resolve_corr
+from ._corrfit import CorrLMEResult
+from ._kr import kr_cov_and_scaled_f
+from ._varcomp import VarCompSpec, fit_varcomp_diagonal, varcomp_inference
 
-__all__ = ['REMLResult', 'reml_fit']
+
+def _kr_rotated_basis(
+    X: Float[Array, 'N p'], Z: Float[Array, 'N q']
+) -> Tuple[Float[Array, 'N p'], Float[Array, 'N']]:
+    """The shared FaST-LMM rotation ``(X_rot, lambdas)`` from ``ZZ^T`` -- the
+    one-off ``safe_eigh`` Kenward-Roger needs to rebuild the rotated basis."""
+    from ...linalg._solver import safe_eigh
+
+    Xj, Zj = jnp.asarray(X), jnp.asarray(Z)
+    ZZt = Zj @ Zj.T
+    eigvals, U = safe_eigh(0.5 * (ZZt + ZZt.T))
+    return U.T @ Xj, jnp.clip(eigvals, 0.0, None)
+
+__all__ = [
+    'REMLResult',
+    'LMEResult',
+    'NestedLMEResult',
+    'CrossedLMEResult',
+    'LMEContrast',
+    'LMEFContrast',
+    'reml_fit',
+    'lme_fit',
+    'lme_t_contrast',
+    'lme_f_contrast',
+]
+
+Structure = Literal['unstructured', 'diagonal']
 
 
 @jax.tree_util.register_pytree_node_class
@@ -128,11 +160,23 @@ class REMLResult:
         ``(V, p)`` -- fixed-effect estimates per voxel.
     log_lik
         ``(V,)`` -- profile REML log-likelihood at the fit.
+    fixed_cov
+        ``(V, p, p)`` -- ``Cov(beta_hat) = (X^T V^{-1} X)^{-1}`` at the fit.
+        The fixed-effect covariance for a contrast test (``lme_t_contrast``).
+    theta_cov
+        ``(V, 2, 2)`` -- ``Cov(theta_hat)`` (inverse average-information), for
+        the Satterthwaite denominator degrees of freedom.
+    grad_m
+        ``(V, 2, p, p)`` -- the contrast-independent Satterthwaite gradient
+        tensors ``M_k`` (see ``_varcomp.varcomp_inference``).
     """
 
     theta_hat: Float[Array, 'V 2']
     beta_hat: Float[Array, 'V p']
     log_lik: Float[Array, 'V']
+    fixed_cov: Float[Array, 'V p p']
+    theta_cov: Float[Array, 'V 2 2']
+    grad_m: Float[Array, 'V 2 p p']
 
     @property
     def sigma_b_sq(self) -> Float[Array, 'V']:
@@ -144,11 +188,15 @@ class REMLResult:
 
     def tree_flatten(
         self,
-    ) -> Tuple[
-        Tuple[Float[Array, 'V 2'], Float[Array, 'V p'], Float[Array, 'V']],
-        None,
-    ]:
-        return (self.theta_hat, self.beta_hat, self.log_lik), None
+    ) -> Tuple[Tuple[Array, ...], None]:
+        return (
+            self.theta_hat,
+            self.beta_hat,
+            self.log_lik,
+            self.fixed_cov,
+            self.theta_cov,
+            self.grad_m,
+        ), None
 
     @classmethod
     def tree_unflatten(
@@ -242,7 +290,7 @@ def _reml_fit_lowrank(
     Gram aggregates -- never an ``N x N`` factor (see ``_lowrank``).
     """
     from ...linalg._solver import safe_eigh
-    from ._lowrank import fit_lowrank_reml
+    from ._lowrank import fit_lowrank_reml, lowrank_inference
 
     n, q = Z.shape
     if q > n:
@@ -283,7 +331,318 @@ def _reml_fit_lowrank(
         spec=spec,
         block=block,
     )
-    return REMLResult(theta_hat=theta_hat, beta_hat=beta_hat, log_lik=log_lik)
+    p = X.shape[-1]
+
+    def _inf(
+        y: Float[Array, 'q'],
+        gx: Float[Array, 'p'],
+        gy: Float[Array, ''],
+        th: Float[Array, '2'],
+    ) -> Tuple[
+        Float[Array, 'p p'], Float[Array, '2 2'], Float[Array, '2 p p']
+    ]:
+        return lowrank_inference(th, y, x_range, s2, gxx, gx, gy, n0, p, spec)
+
+    fixed_cov, theta_cov, grad_m = cast(
+        Tuple[Array, Array, Array],
+        blocked_vmap(_inf, (y_range, gxy, gyy, theta_hat), block=block),
+    )
+    return REMLResult(
+        theta_hat=theta_hat,
+        beta_hat=beta_hat,
+        log_lik=log_lik,
+        fixed_cov=fixed_cov,
+        theta_cov=theta_cov,
+        grad_m=grad_m,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fixed-effect contrast inference (Satterthwaite)
+# ---------------------------------------------------------------------------
+
+
+class LMEContrast(NamedTuple):
+    """Per-voxel mixed-model t-contrast result.
+
+    Attributes
+    ----------
+    effect
+        ``(V,)`` -- the contrast estimate ``c^T beta_hat``.
+    se
+        ``(V,)`` -- its standard error ``sqrt(c^T Cov(beta_hat) c)``.
+    t
+        ``(V,)`` -- the t-statistic ``effect / se``.
+    df
+        ``(V,)`` -- Satterthwaite denominator degrees of freedom.
+    p_value
+        ``(V,)`` -- two-sided p-value from ``t`` on ``df`` degrees of freedom.
+    """
+
+    effect: Float[Array, 'V']
+    se: Float[Array, 'V']
+    t: Float[Array, 'V']
+    df: Float[Array, 'V']
+    p_value: Float[Array, 'V']
+
+
+def lme_t_contrast(
+    result: REMLResult,
+    contrast: Float[Array, 'p'],
+    *,
+    dof: str = 'satterthwaite',
+    X: Optional[Float[Array, 'N p']] = None,
+    Z: Optional[Float[Array, 'N q']] = None,
+) -> LMEContrast:
+    """Per-voxel t-test of a mixed-model fixed-effect contrast ``c^T beta = 0``.
+
+    The standard error is ``sqrt(c^T (X^T V^{-1} X)^{-1} c)`` from the fitted
+    ``result.fixed_cov``; the denominator degrees of freedom are
+    **Satterthwaite** (the default, ``dof='satterthwaite'``):
+
+        df = 2 (c^T C c)^2 / (g^T Cov(theta_hat) g),
+        g_k = d(c^T C c)/dtheta_k = w^T M_k w,   w = C c
+
+    using the per-voxel ``theta_cov`` / ``grad_m`` the fit already formed
+    (``_varcomp.varcomp_inference``).  cuSOLVER-free and differentiable.
+
+    ``dof='kr'`` instead applies the **Kenward-Roger** small-sample correction:
+    the adjusted covariance ``Phi_A`` (inflated for variance-component
+    uncertainty) and the scaled-``F`` denominator df, with ``t = sign(effect)
+    sqrt(F_KR)`` on ``df = m``.  KR rebuilds the rotated basis, so the original
+    design must be re-passed as ``X=`` / ``Z=`` (the compressed ``REMLResult``
+    does not retain it); see :mod:`._kr`.
+
+    Parameters
+    ----------
+    result
+        A :class:`REMLResult` from ``reml_fit``.
+    contrast
+        ``(p,)`` contrast vector ``c`` over the fixed effects.
+    dof
+        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger; pass ``X`` /
+        ``Z``).
+    X, Z
+        The original fixed / random design -- required for ``dof='kr'``.
+
+    Returns
+    -------
+    ``LMEContrast`` ``(effect, se, t, df, p_value)``.
+    """
+    if dof not in ('satterthwaite', 'kr'):
+        raise ValueError(
+            f'lme_t_contrast: dof={dof!r}; expected "satterthwaite" or "kr".'
+        )
+    c = jnp.asarray(contrast, dtype=result.beta_hat.dtype)
+    effect = result.beta_hat @ c  # (V,)
+
+    if dof == 'kr':
+        if X is None or Z is None:
+            raise ValueError(
+                "lme_t_contrast: dof='kr' needs the original design -- pass "
+                'X= and Z= (the Kenward-Roger correction rebuilds the rotated '
+                'basis the compressed REMLResult does not retain).'
+            )
+        p = c.shape[0]
+        c_row = c[None, :]  # (1, p)
+        x_rot, lambdas = _kr_rotated_basis(X, Z)
+
+        def kr_t(
+            th: Float[Array, '2'], beta: Float[Array, 'p']
+        ) -> Tuple[Float[Array, ''], Float[Array, '']]:
+            f_kr, df2_kr, _ = kr_cov_and_scaled_f(
+                th, beta, x_rot, lambdas, c_row, p, 1
+            )
+            return f_kr, df2_kr
+
+        f_kr, df = jax.vmap(kr_t)(result.theta_hat, result.beta_hat)
+        t = jnp.sign(effect) * jnp.sqrt(jnp.clip(f_kr, 0.0, None))
+        se = jnp.abs(effect) / jnp.sqrt(jnp.clip(f_kr, 1e-30, None))
+        x = df / (df + t * t)
+        p_value = betainc(0.5 * df, 0.5, x)  # two-sided
+        return LMEContrast(effect=effect, se=se, t=t, df=df, p_value=p_value)
+
+    w = jnp.einsum('vij,j->vi', result.fixed_cov, c)  # C c, (V, p)
+    var = jnp.clip(jnp.einsum('vi,i->v', w, c), 1e-30, None)  # c^T C c
+    se = jnp.sqrt(var)
+    t = effect / se
+
+    # Satterthwaite: g_k = w^T M_k w; df = 2 var^2 / (g^T theta_cov g).
+    g = jnp.einsum('vi,vkij,vj->vk', w, result.grad_m, w)  # (V, K)
+    denom = jnp.clip(
+        jnp.einsum('vk,vkl,vl->v', g, result.theta_cov, g), 1e-30, None
+    )
+    df = 2.0 * var * var / denom
+    x = df / (df + t * t)
+    p_value = betainc(0.5 * df, 0.5, x)  # two-sided
+    return LMEContrast(effect=effect, se=se, t=t, df=df, p_value=p_value)
+
+
+class LMEFContrast(NamedTuple):
+    """Per-voxel mixed-model F-contrast result.
+
+    Attributes
+    ----------
+    f
+        ``(V,)`` -- the Wald F-statistic
+        ``(C beta)^T (C Cov(beta) C^T)^{-1} (C beta) / L`` for the ``L``-row
+        contrast matrix ``C``.
+    df1
+        ``(V,)`` -- numerator degrees of freedom ``= L`` (the contrast rank;
+        constant across voxels, returned per-voxel for a uniform record).
+    df2
+        ``(V,)`` -- Satterthwaite (Fai-Cornelius) denominator degrees of freedom.
+    p_value
+        ``(V,)`` -- upper-tail p-value of ``f`` on ``(df1, df2)``.
+    """
+
+    f: Float[Array, 'V']
+    df1: Float[Array, 'V']
+    df2: Float[Array, 'V']
+    p_value: Float[Array, 'V']
+
+
+def lme_f_contrast(
+    result: REMLResult,
+    contrast: Float[Array, 'L p'],
+    *,
+    dof: str = 'satterthwaite',
+    X: Optional[Float[Array, 'N p']] = None,
+    Z: Optional[Float[Array, 'N q']] = None,
+) -> LMEFContrast:
+    """Per-voxel F-test of a multi-row mixed-model contrast ``C beta = 0``.
+
+    For an ``L``-row contrast matrix ``C`` (a single ``(p,)`` row is promoted to
+    ``L = 1``), the Wald F-statistic is
+
+        F = (C beta)^T (C Cov(beta) C^T)^{-1} (C beta) / L
+
+    with ``Cov(beta) = (X^T V^{-1} X)^{-1}`` from ``result.fixed_cov``.  The
+    denominator degrees of freedom use the **Fai-Cornelius / lmerTest**
+    multivariate-Satterthwaite construction (``dof='satterthwaite'``, the
+    default):
+
+    1. eigendecompose ``M = C Cov(beta) C^T = P diag(d) P^T`` (a small ``L x L``
+       symmetric solve, cuSOLVER-free ``sym_eig_jacobi``);
+    2. each eigendirection ``l_m = (P^T C)_m`` is an independent 1-df contrast
+       with variance ``d_m`` and a per-direction Satterthwaite
+       ``nu_m = 2 d_m^2 / (g_m^T Cov(theta) g_m)``, ``g_{m,k} = w_m^T M_k w_m``,
+       ``w_m = Cov(beta) l_m`` (the same ``M_k`` / ``Cov(theta)`` the fit formed,
+       ``result.grad_m`` / ``result.theta_cov``);
+    3. combine by the E-method: ``E = sum_m nu_m / (nu_m - 2)`` over
+       ``nu_m > 2``, and ``df2 = 2 E / (E - L)``.
+
+    For ``L = 1`` this collapses **exactly** to ``lme_t_contrast`` (``F = t^2``,
+    ``df2`` the t-Satterthwaite df, same p-value).  The F-statistic is
+    differentiable; the denominator df is not (the iterative eigensolver feeds it
+    under ``stop_gradient`` -- a model-selection-style scalar, per v3 §1.3).
+
+    ``dof='kr'`` instead applies the **Kenward-Roger** small-sample correction:
+    the adjusted covariance ``Phi_A`` and the moment-matched scaled-``F`` (their
+    KR2), referred to ``F(L, m)``.  It rebuilds the rotated basis, so re-pass the
+    original design as ``X=`` / ``Z=`` (the compressed ``REMLResult`` does not
+    retain it); ``F = t^2`` consistency with ``lme_t_contrast(dof='kr')`` holds
+    for ``L = 1``.  See :mod:`._kr`.
+
+    Parameters
+    ----------
+    result
+        A :class:`REMLResult` from ``reml_fit`` (the R1 FaST-LMM path; carries
+        the ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference fields).
+    contrast
+        ``(L, p)`` contrast matrix (or a ``(p,)`` single-row contrast).
+    dof
+        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger; pass ``X`` /
+        ``Z``).
+    X, Z
+        The original fixed / random design -- required for ``dof='kr'``.
+
+    Returns
+    -------
+    ``LMEFContrast`` ``(f, df1, df2, p_value)``.
+    """
+    if dof not in ('satterthwaite', 'kr'):
+        raise ValueError(
+            f'lme_f_contrast: dof={dof!r}; expected "satterthwaite" or "kr".'
+        )
+    if not isinstance(result, REMLResult):
+        raise TypeError(
+            'lme_f_contrast: needs a REMLResult from reml_fit (the R1 path); '
+            'the R2 block-Woodbury LMEResult does not yet surface the '
+            'fixed-effect inference fields.'
+        )
+    dtype = result.beta_hat.dtype
+    c_mat = jnp.atleast_2d(jnp.asarray(contrast, dtype=dtype))  # (L, p)
+    n_rows = c_mat.shape[0]
+    tiny = jnp.finfo(dtype).tiny
+
+    if dof == 'kr':
+        if X is None or Z is None:
+            raise ValueError(
+                "lme_f_contrast: dof='kr' needs the original design -- pass "
+                'X= and Z= (the Kenward-Roger correction rebuilds the rotated '
+                'basis the compressed REMLResult does not retain).'
+            )
+        p = c_mat.shape[1]
+        x_rot, lambdas = _kr_rotated_basis(X, Z)
+
+        def kr_voxel(
+            th: Float[Array, '2'], beta: Float[Array, 'p']
+        ) -> Tuple[Float[Array, ''], Float[Array, '']]:
+            f_kr, df2_kr, _ = kr_cov_and_scaled_f(
+                th, beta, x_rot, lambdas, c_mat, p, n_rows
+            )
+            return f_kr, df2_kr
+
+        f, df2 = jax.vmap(kr_voxel)(result.theta_hat, result.beta_hat)
+        df1 = jnp.full_like(f, float(n_rows))
+        x = df2 / (df2 + df1 * f)
+        p_value = betainc(0.5 * df2, 0.5 * df1, x)
+        return LMEFContrast(f=f, df1=df1, df2=df2, p_value=p_value)
+
+    def per_voxel(
+        beta: Float[Array, 'p'],
+        sigma: Float[Array, 'p p'],
+        theta_cov: Float[Array, 'K K'],
+        grad_m: Float[Array, 'K p p'],
+    ) -> Tuple[Float[Array, ''], Float[Array, '']]:
+        cb = c_mat @ beta  # (L,)
+        m_cov = c_mat @ sigma @ c_mat.T  # (L, L) = C Cov(beta) C^T
+        m_inv, _ = small_inv_logdet(m_cov, n_rows)
+        f = (cb @ m_inv @ cb) / n_rows  # the Wald F (differentiable)
+
+        # Denominator df (Fai-Cornelius E-method) -- not differentiated through.
+        d, eigvecs = sym_eig_jacobi(jax.lax.stop_gradient(m_cov), n_rows)
+        l_proj = eigvecs.T @ c_mat  # (L, p): per-eigendirection contrasts
+        w = l_proj @ sigma  # (L, p): w_m = Cov(beta) l_m
+        g = jnp.einsum('mp,kpq,mq->mk', w, grad_m, w)  # (L, K)
+        denom = jnp.einsum('mk,kl,ml->m', g, theta_cov, g)  # (L,)
+        d_safe = jnp.clip(d, tiny, None)
+        nu = 2.0 * d_safe * d_safe / jnp.clip(denom, tiny, None)  # (L,)
+        ratio = jnp.where(nu > 2.0, nu / (nu - 2.0), 0.0)
+        e_sum = jnp.sum(ratio)
+        # E-method df2 = 2E/(E-L) is only valid when E > L; in the degenerate
+        # small-sample / near-boundary case (no eigendirection has nu > 2, so
+        # E <= L) it would give df2 <= 0 and a NaN F p-value.  Fall back to a
+        # conservative df2 = 1 there (wide tails -> larger p), keeping betainc
+        # well-defined.
+        df2 = jnp.where(
+            e_sum > n_rows,
+            2.0 * e_sum / jnp.maximum(e_sum - n_rows, tiny),
+            1.0,
+        )
+        return f, df2
+
+    f, df2 = jax.vmap(per_voxel)(
+        result.beta_hat,
+        result.fixed_cov,
+        result.theta_cov,
+        result.grad_m,
+    )
+    df1 = jnp.full_like(f, float(n_rows))
+    x = df2 / (df2 + df1 * f)
+    p_value = betainc(0.5 * df2, 0.5 * df1, x)  # upper-tail F survival
+    return LMEFContrast(f=f, df1=df1, df2=df2, p_value=p_value)
 
 
 def reml_fit(
@@ -410,8 +769,372 @@ def reml_fit(
         spec=spec,
         block=block,
     )
+    p = X.shape[-1]
+    zero_off = jnp.zeros(n, dtype=Y.dtype)
+
+    def _inf(
+        y: Float[Array, 'N'], th: Float[Array, '2']
+    ) -> Tuple[
+        Float[Array, 'p p'], Float[Array, '2 2'], Float[Array, '2 p p']
+    ]:
+        return varcomp_inference(th, y, X_rot, V_basis_diag, zero_off, p, spec)
+
+    fixed_cov, theta_cov, grad_m = cast(
+        Tuple[Array, Array, Array],
+        blocked_vmap(_inf, (Y_rot, theta_hat), block=block),
+    )
     return REMLResult(
         theta_hat=theta_hat,
         beta_hat=beta_hat,
         log_lik=log_lik,
+        fixed_cov=fixed_cov,
+        theta_cov=theta_cov,
+        grad_m=grad_m,
+    )
+
+
+# ---------------------------------------------------------------------------
+# The structure-dispatched LME (v3 §1.1): cheapest exact solver per random spec
+# ---------------------------------------------------------------------------
+
+
+class NestedLMEResult(NamedTuple):
+    """Nested two-level mixed-model fit output (the ``lme_fit`` R3 path).
+
+    Attributes
+    ----------
+    beta_hat
+        ``(V, p)`` fixed-effect estimates.
+    var_outer
+        ``(V,)`` outer random-intercept variance ``sigma1^2`` (``(1 | g1)``).
+    var_inner
+        ``(V,)`` inner (nested) random-intercept variance ``sigma2^2``
+        (``(1 | g1:g2)``).
+    sigma_e_sq
+        ``(V,)`` residual variance.
+    log_lik
+        ``(V,)`` profile REML log-likelihood.
+    tier
+        ``'R3'`` (the telescoping-Woodbury nested solver).
+    """
+
+    beta_hat: Float[Array, 'V p']
+    var_outer: Float[Array, 'V']
+    var_inner: Float[Array, 'V']
+    sigma_e_sq: Float[Array, 'V']
+    log_lik: Float[Array, 'V']
+    tier: str
+
+
+class CrossedLMEResult(NamedTuple):
+    """Crossed two-factor mixed-model fit output (the ``lme_fit`` R4 path).
+
+    Attributes
+    ----------
+    beta_hat
+        ``(V, p)`` fixed-effect estimates.
+    var_group
+        ``(V,)`` random-intercept variance of the ``group`` factor.
+    var_cross
+        ``(V,)`` random-intercept variance of the crossed ``cross`` factor.
+    sigma_e_sq
+        ``(V,)`` residual variance.
+    log_lik
+        ``(V,)`` profile REML log-likelihood.
+    tier
+        ``'R4'`` (the crossed Woodbury + diagonal-Schur solver).
+    """
+
+    beta_hat: Float[Array, 'V p']
+    var_group: Float[Array, 'V']
+    var_cross: Float[Array, 'V']
+    sigma_e_sq: Float[Array, 'V']
+    log_lik: Float[Array, 'V']
+    tier: str
+
+
+class LMEResult(NamedTuple):
+    """General mixed-model fit output (the ``lme_fit`` dispatcher result).
+
+    Uniform across the dispatch tiers: the random-effect covariance is always a
+    full ``r x r`` matrix (``r = 1`` for a scalar random effect, ``r >= 2`` for a
+    correlated / diagonal random slope).
+
+    Attributes
+    ----------
+    beta_hat
+        ``(V, p)`` fixed-effect estimates.
+    cov_re
+        ``(V, r, r)`` random-effect covariance ``G`` (the within-group
+        covariance of the random effects).
+    sigma_e_sq
+        ``(V,)`` residual variance.
+    log_lik
+        ``(V,)`` profile REML log-likelihood.
+    tier
+        Which solver the dispatcher ran: ``'R1'`` (FaST-LMM spectral, one scalar
+        factor) or ``'R2'`` (block-Woodbury, one correlated / diagonal factor).
+    """
+
+    beta_hat: Float[Array, 'V p']
+    cov_re: Float[Array, 'V r r']
+    sigma_e_sq: Float[Array, 'V']
+    log_lik: Float[Array, 'V']
+    tier: str
+
+
+def lme_fit(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    *,
+    group: Int[Array, 'N'],
+    z: Optional[Float[Array, 'N r']] = None,
+    inner: Optional[Int[Array, 'N']] = None,
+    cross: Optional[Int[Array, 'N']] = None,
+    corr: Optional[Union[str, CorrSpec]] = None,
+    time: Optional[Float[Array, 'N']] = None,
+    structure: Structure = 'unstructured',
+    n_iter: int = 20,
+    damping: float = 1e-6,
+    block: Optional[int] = None,
+    low_rank: bool = False,
+) -> Union[
+    REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult
+]:
+    """Voxelwise mixed model, dispatched to the cheapest exact solver.
+
+    A single grouping factor ``group`` with per-observation random covariates
+    ``z`` (``None`` -> a scalar random intercept).  The dispatcher honours the
+    **performance-preserving** invariant (v3 §0.1): it routes to the cheapest
+    solver that is *exact* for the given random structure, so the shipped fast
+    paths stay the realised path for the cases they already serve.
+
+    Dispatch ladder
+    ---------------
+
+    - **R1** -- one **scalar** random effect (``z`` is ``None`` or a single
+      column): the FaST-LMM spectral ``reml_fit`` (dense, or q-rank via
+      ``low_rank=``).  Returns a :class:`REMLResult` (with the §1.3
+      fixed-effect inference fields).  *Bit-for-bit the shipped path.*
+    - **R2** -- one **correlated / diagonal** random effect (``z`` has ``r >= 2``
+      columns, e.g. ``[1, x]`` for ``(1 + x | g)``): the block-Woodbury REML
+      (``_blockwoodbury``) -- per-group ``r x r`` Woodbury, no ``N x N``
+      intermediate, cuSOLVER-free.  Returns an :class:`LMEResult`.
+      ``structure='unstructured'`` fits a full ``r x r`` ``G``;
+      ``structure='diagonal'`` constrains ``G`` to be diagonal -- the
+      uncorrelated ``(x || g)`` random effect (independent intercept and slope),
+      fitting only the ``r`` variances (``nt = r + 1`` parameters).
+
+    - **R3** -- a **nested** two-level hierarchy ``(1 | g1/g2)`` (pass the inner
+      factor as ``inner``; ``z`` must be ``None``): the telescoping-Woodbury
+      nested solver (``_nested``) over the three variance components
+      ``[sigma1^2, sigma2^2, sigma_e^2]`` -- block-diagonal across ``g1``,
+      Sherman-Morrison at each nested level, no ``N x N`` intermediate,
+      cuSOLVER-free.  Returns a :class:`NestedLMEResult`.
+    - **R2 + corr** -- a random effect **and** a structured within-group residual
+      ``Cov(eps) = sigma_e^2 R(rho)`` (pass ``corr=`` and, for ``car1``,
+      ``time=``).  Whitening by ``R`` reduces each group to a standard
+      block-Woodbury, so the per-group Woodbury algebra is reused with ``rho``
+      joining the REML ``theta``; cuSOLVER-free.  Returns a
+      :class:`CorrLMEResult`.  ``z=None`` is the random intercept; ``z`` a random
+      slope (``structure='diagonal'`` for ``(x || g)``).
+    - **R4** -- two **crossed** scalar random intercepts ``(1 | group) +
+      (1 | cross)`` (pass the second factor as ``cross``; ``z`` / ``inner`` /
+      ``corr`` must be unset).  ``V`` is not block-diagonal across either factor,
+      so this is the sparse-MME regime (v3 §1.1, **Tier-2**): a Woodbury with the
+      combined design, whose inner matrix has diagonal blocks (the level counts)
+      and an off-diagonal incidence, so a diagonal Schur eliminates the larger
+      factor and leaves a single dense ``min(q_group, q_cross)^3`` solve per
+      Newton step (``_crossed``).  cuSOLVER-free; **cheap when one factor is small,
+      expensive when both are large.**  Returns a :class:`CrossedLMEResult`.
+
+    Parameters
+    ----------
+    Y, X
+        ``(V, N)`` responses and ``(N, p)`` shared fixed-effect design.
+    group
+        ``(N,)`` integer group labels (``0 .. M-1``).  The **outer** factor
+        ``g1`` when ``inner`` is given (R3).
+    z
+        ``(N, r)`` per-observation random covariates; ``None`` is the scalar
+        random intercept (``r = 1``, ``z = 1``).
+    inner
+        ``(N,)`` **nested** inner factor ``g2`` (each ``(group, inner)`` pair is
+        a sublevel ``g1:g2``).  When given, routes to the R3 nested solver
+        (``z`` must be ``None``); ``None`` (default) keeps the single-factor
+        R1/R2 dispatch.
+    cross
+        ``(N,)`` second **crossed** factor.  When given, routes to the R4 crossed
+        solver -- ``(1 | group) + (1 | cross)``, the two factors crossed (not
+        nested).  ``z`` / ``inner`` / ``corr`` must be unset.  Tier-2; cost scales
+        with the *smaller* factor's level count cubed.
+    corr
+        Within-group residual correlation structure (``'ar1'`` / ``'car1'`` /
+        ``'cs'`` or a :class:`CorrSpec`).  When given, routes to the R2 + corr
+        whitened block-Woodbury (a random effect plus a structured residual);
+        ``None`` (default) is the ``sigma_e^2 I`` residual.
+    time
+        ``(N,)`` observation times for a ``car1`` residual (see ``corr``).
+    structure
+        ``'unstructured'`` (full ``r x r`` ``G``, ``(1 + x | g)``) or
+        ``'diagonal'`` (independent variance components, ``(x || g)`` -- the
+        off-diagonal of ``G`` is held at zero).  Both run the R2 block-Woodbury.
+    n_iter, damping, block, low_rank
+        Newton iterations, AI damping, voxel-block chunking, and (R1) the q-rank
+        toggle.
+
+    Returns
+    -------
+    ``REMLResult`` (R1), ``LMEResult`` (R2), ``NestedLMEResult`` (R3),
+    ``CorrLMEResult`` (R2 + corr), or ``CrossedLMEResult`` (R4 crossed).
+    """
+    group = jnp.asarray(group)
+    n_groups = int(jnp.max(group)) + 1
+    r = 1 if z is None else jnp.asarray(z).shape[-1]
+
+    if cross is not None:
+        # R4: two crossed scalar random intercepts (1|group) + (1|cross).
+        if z is not None or inner is not None or corr is not None:
+            raise NotImplementedError(
+                'lme_fit: crossed random effects (cross=) compose only with two '
+                'scalar intercepts; z / inner / corr are not yet supported '
+                'alongside it.'
+            )
+        from ._crossed import fit_crossed_reml
+
+        cross = jnp.asarray(cross)
+        q_g = n_groups
+        q_c = int(jnp.max(cross)) + 1
+        oh_g = jax.nn.one_hot(group, q_g, dtype=Y.dtype)
+        oh_c = jax.nn.one_hot(cross, q_c, dtype=Y.dtype)
+        # Order so the dense Schur solve is on the smaller factor (oh1 larger).
+        swap = q_c > q_g
+        oh1, oh2 = (oh_c, oh_g) if swap else (oh_g, oh_c)
+        var_y = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
+        w = jnp.asarray([0.25, 0.25, 0.5], dtype=Y.dtype)
+        theta_init = jnp.log(jnp.maximum(var_y * w, 1e-6))  # (V, 3)
+        spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+        theta_hat, beta_hat, log_lik = fit_crossed_reml(
+            Y, X, oh1, oh2, theta_init, spec=spec, block=block
+        )
+        var1 = jnp.exp(theta_hat[:, 0])  # variance of oh1
+        var2 = jnp.exp(theta_hat[:, 1])  # variance of oh2
+        var_group = var2 if swap else var1
+        var_cross = var1 if swap else var2
+        return CrossedLMEResult(
+            beta_hat=beta_hat,
+            var_group=var_group,
+            var_cross=var_cross,
+            sigma_e_sq=jnp.exp(theta_hat[:, 2]),
+            log_lik=log_lik,
+            tier='R4',
+        )
+
+    if corr is not None:
+        # R2 + corr: a random effect *and* a structured within-group residual.
+        if inner is not None:
+            raise NotImplementedError(
+                'lme_fit: a structured residual (corr=) on a nested design '
+                '(inner=) is a further composition; not yet supported.'
+            )
+        from ._corrfit import fit_corr_lme
+
+        z_design = (
+            jnp.ones((group.shape[0], 1), dtype=Y.dtype)
+            if z is None
+            else jnp.asarray(z, dtype=Y.dtype)
+        )
+        return fit_corr_lme(
+            Y,
+            X,
+            z_design,
+            group,
+            resolve_corr(corr),
+            time=None if time is None else jnp.asarray(time),
+            diagonal=structure == 'diagonal',
+            n_iter=n_iter,
+            damping=damping,
+            block=block,
+        )
+
+    if inner is not None:
+        # R3: nested two-level hierarchy (1 | g1/g2).
+        if z is not None:
+            raise ValueError(
+                'lme_fit: nested fit (inner=...) takes scalar intercepts at '
+                'both levels; pass z=None (random slopes nested under a factor '
+                'are a Tier-2 follow-up).'
+            )
+        from ._nested import fit_nested_reml
+
+        inner_arr = jnp.asarray(inner)
+        var_y = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
+        w = jnp.asarray([0.25, 0.25, 0.5], dtype=Y.dtype)
+        theta_init = jnp.log(jnp.maximum(var_y * w, 1e-6))  # (V, 3)
+        spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+        theta_hat, beta_hat, log_lik = fit_nested_reml(
+            Y, X, group, inner_arr, theta_init, spec=spec, block=block
+        )
+        return NestedLMEResult(
+            beta_hat=beta_hat,
+            var_outer=jnp.exp(theta_hat[:, 0]),
+            var_inner=jnp.exp(theta_hat[:, 1]),
+            sigma_e_sq=jnp.exp(theta_hat[:, 2]),
+            log_lik=log_lik,
+            tier='R3',
+        )
+
+    if r == 1:
+        # R1: one scalar random effect -> the FaST-LMM spectral fast path.
+        onehot = jax.nn.one_hot(group, n_groups, dtype=Y.dtype)  # (N, M)
+        z_design = onehot if z is None else onehot * jnp.asarray(z)
+        return reml_fit(
+            Y,
+            X,
+            z_design,
+            n_iter=n_iter,
+            damping=damping,
+            block=block,
+            low_rank=low_rank,
+        )
+
+    # R2: one correlated / diagonal random effect -> block-Woodbury REML.
+    from ._blockwoodbury import (
+        _param_layout,
+        cov_re_from_chol,
+        fit_blockwoodbury_reml,
+    )
+
+    diagonal = structure == 'diagonal'
+    z_arr = jnp.asarray(z, dtype=Y.dtype)
+    layout = _param_layout(r, diagonal)
+    diag_mask = jnp.asarray([i == j for (i, j) in layout], dtype=bool)  # (m,)
+    var_y = jnp.var(Y, axis=-1)  # (V,)
+    chol_diag = 0.5 * jnp.log(jnp.maximum(0.1 * var_y, 1e-6))  # (V,)
+    chol = jnp.where(diag_mask[None, :], chol_diag[:, None], 0.0)  # (V, m)
+    log_se2 = jnp.log(jnp.maximum(0.5 * var_y, 1e-6))[:, None]  # (V, 1)
+    theta_init = jnp.concatenate([chol, log_se2], axis=1)  # (V, nt)
+
+    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    theta_hat, beta_hat, log_lik = fit_blockwoodbury_reml(
+        Y,
+        X,
+        z_arr,
+        group,
+        n_groups,
+        theta_init,
+        spec=spec,
+        block=block,
+        diagonal=diagonal,
+    )
+    cov_re = jax.vmap(lambda th: cov_re_from_chol(th[:-1], r, diagonal))(
+        theta_hat
+    )  # (V, r, r)
+    sigma_e_sq = jnp.exp(theta_hat[:, -1])
+    return LMEResult(
+        beta_hat=beta_hat,
+        cov_re=cov_re,
+        sigma_e_sq=sigma_e_sq,
+        log_lik=log_lik,
+        tier='R2',
     )

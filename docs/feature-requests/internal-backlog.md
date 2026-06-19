@@ -43,6 +43,7 @@ in *Resolved* below.
 | B21 | [morphology-explicit-se-im2col-cost](morphology-explicit-se-im2col-cost.md) | perf characterisation (explicit-SE/disk-footprint im2col cost, measured) | M |
 | B22 | [register-sparse-dataclasses-as-pytrees](register-sparse-dataclasses-as-pytrees.md) | API/ergonomics (ELL/SectionedELL/Mesh not registered pytrees) | S-M |
 | B23 | [perf-wins-must-certify-at-scale](perf-wins-must-certify-at-scale.md) | benchmark-integrity principle (a win must certify at brain scale, not the benched size) | S (principle) |
+| B24 | [jacobi-eigensolver-cusolver-free](jacobi-eigensolver-cusolver-free.md) | parked feature (rolled Jacobi eig — cuSOLVER-free, jit/vmap-able small symmetric eig; gated on a batched small-eig consumer, surfaced by `randomized_svd`) | M |
 | G1 | [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md) | boundary-mode extension | S |
 
 (B1, B8, B9, and B19 are resolved — see below. `spatial_transform_batched`, JOSA §3,

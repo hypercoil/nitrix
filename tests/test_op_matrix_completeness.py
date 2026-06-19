@@ -91,8 +91,58 @@ EXCLUDE: frozenset[str] = frozenset(
         # -- Metric constructors: build a FeatureMetric pytree, not an array op ---
         'smoothing.block_diagonal_metric',
         'smoothing.metric_from_spd',
+        # -- Family constructor: builds a Family config record (link/variance/    -
+        #    deviance), consumed by glm_fit / gam_fit -- not itself a score kernel.
+        'stats.negbinomial',
+        'stats.tweedie',
+        # -- Correlation-structure constructors: build a CorrSpec config record    -
+        #    (per-group whitening + log-det), consumed by stats.lme.gls_fit -- not
+        #    themselves array ops.
+        'stats.lme.ar1',
+        'stats.lme.car1',
+        'stats.lme.cs',
+        'stats.lme.iid',
+        # -- Variance-function constructors: build a VarFunc config record --------
+        #    (per-observation residual-scale + Jacobian), consumed by gls_fit.
+        'stats.lme.var_power',
+        'stats.lme.var_ident',
         # -- Thin vmap wrapper of an already-cataloged op -------------------------
         'geometry.spatial_transform_batched',  # vmap of spatial_transform
+        # -- Post-fit read-outs on a GLMResult / GAMResult: contrasts, goodness- --
+        #    of-fit, model comparison, prediction.  They operate on a *fitted*
+        #    result pytree (not raw arrays); the fit (glm_fit / gam_fit) is the
+        #    cataloged op and the dominant cost -- these are cheap reductions /
+        #    contrasts on its stored sufficient statistics, benchmarked with it.
+        'stats.t_contrast',
+        'stats.f_contrast',
+        'stats.sandwich_cov',  # robust vcov from a fitted GLMResult + its data
+        'stats.r_squared',
+        'stats.adj_r_squared',
+        'stats.deviance_explained',
+        'stats.log_likelihood',
+        'stats.aic',
+        'stats.bic',
+        'stats.compare_models',
+        'stats.predict',
+        'stats.smooth_partial_effect',  # renders a fitted GAMResult smooth
+        'stats.lme.lme_t_contrast',  # consumes a fitted REMLResult (contrast test)
+        'stats.lme.lme_f_contrast',  # consumes a fitted REMLResult (F-contrast test)
+        # -- Construction-time / re-evaluation spline-basis helpers: build a ------
+        #    SplineBasis / TensorBasis / REBasis pytree (or render its design on a
+        #    grid) to set up a GAM -- one-off, not the mass-univariate hot path.
+        #    gam_fit is the cataloged op.
+        'stats.bspline_basis',
+        'stats.cyclic_cubic_basis',
+        'stats.thinplate_regression_basis',
+        'stats.cr_basis',
+        'stats.gp_basis',
+        'stats.mrf_smooth',
+        'stats.tensor_product_basis',
+        'stats.re_smooth',  # builds a random-effect (design, penalty) block
+        'stats.by_factor_smooth',  # builds per-level SplineBasis blocks (s(x,by=f))
+        'stats.varying_coefficient_smooth',  # builds a SplineBasis (s(x,by=z))
+        'stats.spline_design',
+        'stats.tensor_product_design',
     }
 )
 

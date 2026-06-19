@@ -3,7 +3,7 @@
     "device": "cpu (cpu)",
     "platform": "Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39",
     "jax_version": "0.10.1",
-    "timestamp": "2026-06-09T04:52:02Z"
+    "timestamp": "2026-06-18T03:03:44Z"
   },
   "perf_source": "nitrix-perf-bench",
   "ops": [
@@ -74,6 +74,17 @@
         "Cholesky-normal-equations"
       ],
       "notes": "Cholesky path; ~800x faster than numpy lstsq at V=100k"
+    },
+    {
+      "qualname": "nitrix.linalg.partial_residualise",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "non-aggressive (joint-fit) residualisation"
+      ],
+      "notes": "ICA-AROMA: removes only noise@beta_noise; cuSOLVER-free Cholesky"
     },
     {
       "qualname": "nitrix.linalg.linear_kernel",
@@ -244,6 +255,17 @@
         "no V*N^2 intermediate"
       ],
       "notes": "~5e-3 parity with statsmodels.MixedLM"
+    },
+    {
+      "qualname": "nitrix.stats.lme.lme_fit",
+      "jit": "ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]\nThe problem arose wi",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]\nThe problem arose wi",
+      "invariants": [
+        "performance-preserving R1/R2 dispatch"
+      ],
+      "notes": "r==1 -> reml_fit (R1 FaST-LMM); r>=2 -> block-Woodbury (R2)"
     },
     {
       "qualname": "nitrix.stats.lme.flame_two_level",
@@ -443,6 +465,28 @@
       "notes": ""
     },
     {
+      "qualname": "nitrix.graph.in_degree_vector",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "column sum (A\u1d401) via the additive ELL adjoint"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.graph.symmetric_degree_vector",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "\u00bd(out + in) -- degree of the symmetrised adjacency"
+      ],
+      "notes": ""
+    },
+    {
       "qualname": "nitrix.graph.laplacian_eigenmap",
       "jit": "pass",
       "grad": "pass",
@@ -579,6 +623,17 @@
       "jit_of_grad": "pass",
       "invariants": [
         "sparse ELL matmul"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.semiring.semiring_ell_rmatvec",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "sparse ELL adjoint (transpose) matmul"
       ],
       "notes": ""
     },
@@ -1495,6 +1550,17 @@
       "notes": ""
     },
     {
+      "qualname": "nitrix.sparse.sectioned_semiring_ell_rmatvec",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "bucketed (variable-degree) ELL adjoint matmul"
+      ],
+      "notes": ""
+    },
+    {
       "qualname": "nitrix.sparse.icosphere",
       "jit": "n/a",
       "grad": "n/a",
@@ -1925,6 +1991,17 @@
       "notes": ""
     },
     {
+      "qualname": "nitrix.geometry.field_log",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "stationary-velocity log via inverse scaling-and-squaring; exact round-trip exp(field_log(s))==s on the SVF submanifold"
+      ],
+      "notes": ""
+    },
+    {
       "qualname": "nitrix.numerics.l2_normalize",
       "jit": "pass",
       "grad": "pass",
@@ -2154,6 +2231,112 @@
         "reconstruct from PCA coordinates"
       ],
       "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.glm_fit",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "OLS fast path + exp-family P-IRLS",
+        "cuSOLVER-free"
+      ],
+      "notes": "returns GLMResult; grad reduces the coef leaf"
+    },
+    {
+      "qualname": "nitrix.stats.gam_fit",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Gaussian cross-product fast path (no N in the inner loop)",
+        "generalized Fellner-Schall lambda selection"
+      ],
+      "notes": "shared P-spline basis closed over; grad reduces the coef leaf"
+    },
+    {
+      "qualname": "nitrix.stats.ledoit_wolf",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Ledoit-Wolf analytic shrinkage",
+        "sklearn parity <=4e-16"
+      ],
+      "notes": "returns (cov, shrinkage); grad reduces the cov leaf"
+    },
+    {
+      "qualname": "nitrix.stats.oas",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "OAS analytic shrinkage (Chen 2010)",
+        "sklearn parity"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.shrunk_covariance",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "analytic-shrinkage covariance (Ledoit-Wolf default)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.glasso",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "graphical-LASSO coordinate descent (rolled)",
+        "off-diagonal-only L1; cuSOLVER-free"
+      ],
+      "notes": "sparse precision; KKT-validated (not sklearn bit-match)"
+    },
+    {
+      "qualname": "nitrix.stats.glasso_path",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "warm-started glasso lambda path (lax.scan)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.stats.ebic_score",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "extended BIC (Foygel-Drton 2010)",
+        "rolled-Cholesky logdet"
+      ],
+      "notes": "scalar model-selection score"
+    },
+    {
+      "qualname": "nitrix.linalg.randomized_svd",
+      "jit": "TracerBoolConversionError: Attempted boolean conversion of traced array with shape bool[].\nThe error occurred while tracing the function <lambda> a",
+      "grad": "grad has nan/inf",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "HMT-2011 range finder + subspace iteration",
+        "eigh-based orthonormalisation (no qr/svd)"
+      ],
+      "notes": "eager (safe_eigh on the small Gram); jit/vmap/grad N/A"
     },
     {
       "qualname": "nitrix.metrics.ssd",
@@ -2517,6 +2700,160 @@
         "forward multiplicative INU/bias field (exp coarse field)"
       ],
       "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.lncc_grad",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "closed-form \u2202(\u03a3 lncc)/\u2202moving (self-adjoint box filter)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.lncc_grad_center",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "ANTs centre-only LNCC force (five box sums)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.mi_grad",
+      "jit": "pass",
+      "grad": "grad has nan/inf",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "closed-form Mattes MI gradient (no histogram tape)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.winsorize",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "percentile intensity clip"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.metrics.match_histogram",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "CDF / quantile intensity transport"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.transform_mean",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "Fr\u00e9chet mean on the affine group (matrix log/exp)"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.velocity_mean",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "weighted mean of SVF velocity fields"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.transform_geodesic",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "matrix-log geodesic t\u00b7log A on the affine group"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.geometry.fuse_transforms",
+      "jit": "ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]\nThe problem arose wi",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "compose a heterogeneous transform chain to one field"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.matrix_log",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "pass",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "inverse scaling-and-squaring matrix logarithm"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.linalg.implicit_minimize",
+      "jit": "pass",
+      "grad": "pass",
+      "vmap": "n/a",
+      "jit_of_grad": "pass",
+      "invariants": [
+        "argmin differentiable by the implicit-function theorem"
+      ],
+      "notes": ""
+    },
+    {
+      "qualname": "nitrix.register.greedy_syn_register",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "greedy symmetric diffeomorphic registration (SyN; LNCC)"
+      ],
+      "notes": "end-to-end optimiser (benchmark-worthy)"
+    },
+    {
+      "qualname": "nitrix.register.volreg",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "fMRI motion correction (per-frame rigid to a reference)"
+      ],
+      "notes": "end-to-end optimiser (vmapped single-pair rigid)"
+    },
+    {
+      "qualname": "nitrix.register.bbr_register",
+      "jit": "pass",
+      "grad": "n/a",
+      "vmap": "n/a",
+      "jit_of_grad": "n/a",
+      "invariants": [
+        "boundary-based registration (intensity gradient at a surface)"
+      ],
+      "notes": "end-to-end optimiser (BBR; differentiate via implicit path)"
     }
   ]
 }

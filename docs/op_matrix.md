@@ -9,7 +9,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 - **device**: cpu (cpu)
 - **platform**: Linux-6.1.170-213.321.amzn2023.x86_64-x86_64-with-glibc2.39
 - **jax_version**: 0.10.1
-- **timestamp**: 2026-06-09T04:52:02Z
+- **timestamp**: 2026-06-18T03:03:44Z
 
 ## Legend
 
@@ -91,6 +91,12 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `compose_displacement` | ✅ | ✅ | — | ✅ | (id+outer)∘(id+inner) displacement composition |  |
 | `compose_velocity` | ✅ | ✅ | — | ✅ | BCH velocity composition (order 1 add; 2 adds ½[v,u]) |  |
 | `invert_displacement` | ✅ | ✅ | — | ✅ | inverse displacement via differentiable fixed point |  |
+| `field_log` | ✅ | ✅ | — | ✅ | stationary-velocity log via inverse scaling-and-squaring; exact round-trip exp(field_log(s))==s on the SVF submanifold |  |
+| `transform_mean` | ✅ | ✅ | — | ✅ | Fréchet mean on the affine group (matrix log/exp) |  |
+| `velocity_mean` | ✅ | ✅ | — | ✅ | weighted mean of SVF velocity fields |  |
+| `transform_geodesic` | ✅ | ✅ | ✅ | ✅ | matrix-log geodesic t·log A on the affine group |  |
+| `fuse_transforms` | ❌ | — | — | — | compose a heterogeneous transform chain to one field | errors: `jit: ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]
+The problem arose wi` |
 
 ## nitrix.graph
 
@@ -98,6 +104,8 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 |---|:--:|:--:|:--:|:--:|---|---|
 | `laplacian` | ✅ | ✅ | ✅ | ✅ | symmetric / random_walk / combinatorial variants |  |
 | `degree_vector` | ✅ | ✅ | ✅ | ✅ | dense / ELL / SectionedELL dispatch |  |
+| `in_degree_vector` | ✅ | ✅ | ✅ | ✅ | column sum (Aᵀ1) via the additive ELL adjoint |  |
+| `symmetric_degree_vector` | ✅ | ✅ | ✅ | ✅ | ½(out + in) -- degree of the symmetrised adjacency |  |
 | `laplacian_eigenmap` | ✅ | ✅ | — | ✅ | safe_eigh cuSolver fallback; LOBPCG implicit-VJP for sparse paths | dense=eigh, sparse=lobpcg; differentiable end-to-end |
 | `girvan_newman_null` | ✅ | ✅ | ✅ | ✅ | degree-product (configuration) null model |  |
 | `modularity_matrix` | ✅ | ✅ | ✅ | ✅ | B = A - gamma * null |  |
@@ -115,6 +123,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `toeplitz_2d` | ✅ | ✅ | ✅ | ✅ | vmap-over-roll recipe |  |
 | `recondition_eigenspaces` | ✅ | ✅ | ✅ | ✅ | PSD-preserving |  |
 | `residualise` | ✅ | ✅ | ✅ | ✅ | Cholesky-normal-equations | Cholesky path; ~800x faster than numpy lstsq at V=100k |
+| `partial_residualise` | ✅ | ✅ | ✅ | ✅ | non-aggressive (joint-fit) residualisation | ICA-AROMA: removes only noise@beta_noise; cuSOLVER-free Cholesky |
 | `linear_kernel` | ✅ | ✅ | ✅ | ✅ | shared with linear_distance via identity formula |  |
 | `linear_distance` | ✅ | ✅ | ✅ | ✅ | |x-y|^2 = |x|^2 + |y|^2 - 2 x.y identity (O(nm) memory) | 1000x memory reduction vs naive at d=1000 |
 | `rbf_kernel` | ✅ | ✅ | ✅ | ✅ | exp(-gamma * |x-y|^2) | ~375x faster than sklearn at (5000, 32) |
@@ -143,6 +152,10 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `gauss_newton` | ✅ | ✅ | ✅ | ✅ | matrix-free Gauss-Newton normal equations (cg inner) | unrolled loop -> jit/grad-clean; returns OptimizeResult |
 | `levenberg_marquardt` | ✅ | ✅ | ✅ | ✅ | damped normal equations; jnp.where accept/reject | monotone cost_history; returns OptimizeResult |
 | `implicit_least_squares` | ✅ | ✅ | — | ✅ | argmin differentiable by the implicit-function theorem | custom_vjp: exact grad w.r.t data without unrolling |
+| `randomized_svd` | ❌ | ❌ | — | ✅ | HMT-2011 range finder + subspace iteration; eigh-based orthonormalisation (no qr/svd) | eager (safe_eigh on the small Gram); jit/vmap/grad N/A — errors: `jit: TracerBoolConversionError: Attempted boolean conversion of traced array with shape bool[].
+The error occurred while tracing the function <lambda> a`; `grad: grad has nan/inf` |
+| `matrix_log` | ✅ | ✅ | ✅ | ✅ | inverse scaling-and-squaring matrix logarithm |  |
+| `implicit_minimize` | ✅ | ✅ | — | ✅ | argmin differentiable by the implicit-function theorem |  |
 
 ## nitrix.metrics
 
@@ -163,6 +176,11 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `dino_cross_entropy` | ✅ | ✅ | — | ✅ | centred / sharpened self-distillation CE (DINO) |  |
 | `ibot_cross_entropy` | ✅ | ✅ | — | ✅ | masked-token self-distillation CE (iBOT; mask mean) |  |
 | `koleo` | ✅ | ✅ | — | ✅ | Kozachenko-Leonenko feature-spread regulariser |  |
+| `lncc_grad` | ✅ | ✅ | ✅ | ✅ | closed-form ∂(Σ lncc)/∂moving (self-adjoint box filter) |  |
+| `lncc_grad_center` | ✅ | ✅ | ✅ | ✅ | ANTs centre-only LNCC force (five box sums) |  |
+| `mi_grad` | ✅ | ❌ | ✅ | ✅ | closed-form Mattes MI gradient (no histogram tape) | errors: `grad: grad has nan/inf` |
+| `winsorize` | ✅ | ✅ | ✅ | ✅ | percentile intensity clip |  |
+| `match_histogram` | ✅ | ✅ | ✅ | ✅ | CDF / quantile intensity transport |  |
 
 ## nitrix.morphology
 
@@ -215,6 +233,9 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `gradient_smoothness` | ✅ | ✅ | — | ✅ | diffusion (first-order) smoothness ‖∇u‖² |  |
 | `bending_energy` | ✅ | ✅ | — | ✅ | thin-plate (second-order) bending ‖∇²u‖² |  |
 | `jacobian_folding_penalty` | ✅ | ✅ | — | ✅ | folding penalty relu(-det J), J = I + ∇u |  |
+| `greedy_syn_register` | ✅ | — | — | — | greedy symmetric diffeomorphic registration (SyN; LNCC) | end-to-end optimiser (benchmark-worthy) |
+| `volreg` | ✅ | — | — | — | fMRI motion correction (per-frame rigid to a reference) | end-to-end optimiser (vmapped single-pair rigid) |
+| `bbr_register` | ✅ | — | — | — | boundary-based registration (intensity gradient at a surface) | end-to-end optimiser (BBR; differentiate via implicit path) |
 
 ## nitrix.semiring
 
@@ -222,6 +243,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 |---|:--:|:--:|:--:|:--:|---|---|
 | `semiring_matmul` | ✅ | ✅ | ✅ | ✅ | streaming kernel (no O(MKN) materialisation); Pallas/JAX fallback | 6-16x faster than JAX fori_loop on REAL/TROPICAL/EUCLIDEAN |
 | `semiring_ell_matmul` | ✅ | ✅ | — | ✅ | sparse ELL matmul |  |
+| `semiring_ell_rmatvec` | ✅ | ✅ | — | ✅ | sparse ELL adjoint (transpose) matmul |  |
 | `semiring_ell_edge_aggregate` | ✅ | ✅ | ✅ | ✅ | gather + nested vmap + semiring reduction; REAL / TROPICAL_MAX_PLUS / TROPICAL_MIN_PLUS supported; edge_fn signature (h_i, h_j, w, ij) | probed with GCN closure; covers GCN/GAT/EdgeConv/MoNet/ChebNet |
 | `semiring_conv` | ✅ | ✅ | ✅ | ✅ | NaN-safe patch extraction (jnp.take, not lax.conv_general_dilated_patches); explicit im2col + semiring_matmul | 1.7-1.9x slower than cuDNN fp32 (literature expected) |
 | `ell_row_softmax` | ✅ | ✅ | ✅ | ✅ | row-wise softmax over ELL neighbours; masks pads |  |
@@ -274,6 +296,7 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `ell_add_self_loops` | ✅ | ✅ | ✅ | ✅ | append (i, i) self-edge per row |  |
 | `mesh_coarsen_meanpool` | ✅ | ✅ | ✅ | ✅ | mean-pool sibling of mesh_pool_max (validity-weighted) |  |
 | `sectioned_semiring_ell_matmul` | ✅ | ✅ | ✅ | ✅ | bucketed (variable-degree) ELL matmul |  |
+| `sectioned_semiring_ell_rmatvec` | ✅ | ✅ | ✅ | ✅ | bucketed (variable-degree) ELL adjoint matmul |  |
 | `icosphere` | — | — | — | — | host-side icosphere subdivision (returns Mesh) |  |
 | `grid_identity` | — | — | — | — | identity ELL over a regular grid |  |
 | `regular_grid_stencil` | — | — | — | — | regular-grid stencil -> ELL |  |
@@ -295,6 +318,9 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `hilbert_transform` | ✅ | ✅ | ✅ | ✅ | imag part of analytic_signal |  |
 | `envelope` | ✅ | ✅ | ✅ | ✅ | |analytic_signal| |  |
 | `reml_fit` | ✅ | ✅ | — | ✅ | FaST-LMM spectral rotation; no V*N^2 intermediate | ~5e-3 parity with statsmodels.MixedLM |
+| `lme_fit` | ❌ | ✅ | — | ❌ | performance-preserving R1/R2 dispatch | r==1 -> reml_fit (R1 FaST-LMM); r>=2 -> block-Woodbury (R2) — errors: `jit: ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]
+The problem arose wi`; `jit(grad): ConcretizationTypeError: Abstract tracer value encountered where concrete value is expected: traced array with shape int32[]
+The problem arose wi` |
 | `flame_two_level` | ✅ | ✅ | — | ✅ | single-parameter REML (identifiability); shared X_group |  |
 | `partialcorr` | ✅ | ✅ | ✅ | ✅ | partial correlation (precision-normalised) |  |
 | `conditionalcov` | ✅ | ✅ | ✅ | ✅ | covariance of X conditioned on Y |  |
@@ -311,12 +337,20 @@ This matrix is **capability-only** (jit / grad / vmap / jit-of-grad + invariants
 | `pca_fit` | ✅ | ✅ | — | ✅ | covariance-eigendecomposition PCA via safe_eigh (no svd) | returns PCAResult; grad reduces the components leaf |
 | `pca_transform` | ✅ | ✅ | ✅ | ✅ | project onto a (pre-fitted) PCA basis |  |
 | `pca_inverse_transform` | ✅ | ✅ | ✅ | ✅ | reconstruct from PCA coordinates |  |
+| `glm_fit` | ✅ | ✅ | — | ✅ | OLS fast path + exp-family P-IRLS; cuSOLVER-free | returns GLMResult; grad reduces the coef leaf |
+| `gam_fit` | ✅ | ✅ | — | ✅ | Gaussian cross-product fast path (no N in the inner loop); generalized Fellner-Schall lambda selection | shared P-spline basis closed over; grad reduces the coef leaf |
+| `ledoit_wolf` | ✅ | ✅ | — | ✅ | Ledoit-Wolf analytic shrinkage; sklearn parity <=4e-16 | returns (cov, shrinkage); grad reduces the cov leaf |
+| `oas` | ✅ | ✅ | — | ✅ | OAS analytic shrinkage (Chen 2010); sklearn parity |  |
+| `shrunk_covariance` | ✅ | ✅ | — | ✅ | analytic-shrinkage covariance (Ledoit-Wolf default) |  |
+| `glasso` | ✅ | ✅ | — | ✅ | graphical-LASSO coordinate descent (rolled); off-diagonal-only L1; cuSOLVER-free | sparse precision; KKT-validated (not sklearn bit-match) |
+| `glasso_path` | ✅ | ✅ | — | ✅ | warm-started glasso lambda path (lax.scan) |  |
+| `ebic_score` | ✅ | ✅ | — | ✅ | extended BIC (Foygel-Drton 2010); rolled-Cholesky logdet | scalar model-selection score |
 
 ## Summary
 
-- **ops catalogued**: 225
-- **jit pass**: 209 / 225
-- **grad pass**: 197 / 199 (applicable)
-- **vmap pass**: 138 / 138 (applicable)
-- **jit(grad) pass**: 197 / 199
+- **ops catalogued**: 255
+- **jit pass**: 236 / 255
+- **grad pass**: 221 / 225 (applicable)
+- **vmap pass**: 149 / 149 (applicable)
+- **jit(grad) pass**: 222 / 225
 - **performance**: see the nitrix-perf-bench suite + dashboard (this matrix is capability-only).
