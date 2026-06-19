@@ -80,7 +80,7 @@
 > solve per Newton step (cuSOLVER-free, cost-gated to the smaller factor); β /
 > both variances / σ_e² match an exact dense REML reference across seeds incl. the
 > factor swap; `CrossedLMEResult`. The rest of Tier-1/Tier-2 (§4
-> ordinal/distributional, §3.2–3.3 cr/gp/mrf, §1.3 Kenward-Roger, §1.2 Laplace,
+> ordinal/distributional, §3.2–3.3 cr/gp/mrf, §1.3 Kenward-Roger,
 > §1.4 varFunc) remain proposed.
 >
 > **Engineering hardening (2026-06-18, post interim review).** A three-axis
@@ -263,7 +263,7 @@ structured/sparse `V⁻¹`. **Effort: M (R2) · M (R3) · L (R4).** **Oracle:**
 forms; nested/crossed ANOVA. **Guard:** `lme_fit(..., random=((Z,'scalar'),))`
 lowers to the same HLO as `reml_fit(Y,X,Z)` (R1 no-regression proof).
 
-### §1.2 GLMM — random effects with non-Gaussian families  *(high value)* — ✅ SHIPPED (scalar RE; Laplace + random-slope Tier-2)
+### §1.2 GLMM — random effects with non-Gaussian families  *(high value)* — ✅ SHIPPED (scalar RE; PQL + **Laplace** `method='laplace'`; random-slope Tier-2)
 
 **What.** Random effects under a binomial / Poisson / … family via
 penalised-quasi-likelihood / Laplace-approximate REML: `glmm_fit(Y, X, random,
@@ -586,7 +586,8 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 **Tier 2 — future / heavier:**
 
 - ~~§1.1 R4 (crossed, HLO-gated)~~ ✅ (`lme_fit(cross=)`, Woodbury+diagonal-Schur,
-  `O(min(q1,q2)³)`/step); §1.3 Kenward-Roger; §1.2 Laplace;
+  `O(min(q1,q2)³)`/step); ~~§1.2 Laplace~~ ✅ (`glmm_fit(method='laplace')`);
+  §1.3 Kenward-Roger;
   §3.2–§3.3 cr/gp/mrf/monotone/adaptive; §4 Tweedie + ordinal/distributional;
   §5.2 soft residualisation; §6.1 robust (promote `robust-statistics.md`); §7
   RFT; §8 GCV/CV.

@@ -71,6 +71,8 @@ from ._family import GAUSSIAN, Family, resolve_family
 from ._smalllinalg import small_inv_logdet
 from .basis import re_smooth
 from .gam import gam_fit
+from .lme._optimise import damped_newton
+from .lme._varcomp import VarCompSpec
 
 __all__ = ['GLMMResult', 'glmm_fit']
 
@@ -105,7 +107,7 @@ class GLMMResult:
         ``(V,)`` total effective degrees of freedom (fixed + random).
     tier
         Which solver ran: ``'few'`` (dense GAMM ``gam_fit``) or ``'many'`` (the
-        structured Schur-complement PQL).
+        structured Schur-complement PQL); ``'laplace'`` for the Laplace fit.
     """
 
     beta_hat: Float[Array, 'V p']
@@ -475,18 +477,179 @@ def _glmm_many_level(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Laplace-approximate GLMM (scalar random intercept) -- the §11 follow-up to PQL
+# ---------------------------------------------------------------------------
+
+
+def _laplace_conditional_modes(
+    theta: Float[Array, 'p1'],
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    n_mode: int,
+) -> Tuple[Float[Array, 'q'], Float[Array, 'q'], Float[Array, 'N']]:
+    """Per-group conditional modes ``b_hat`` (+ the curvature ``sw`` and ``eta``).
+
+    Given the fixed effects and ``sigma_b^2`` (in ``theta = [beta, log
+    sigma_b^2]``), the mode of ``sum_i log p(y_i | beta, b_g) - b_g^2/(2
+    sigma_b^2)`` is found by per-group Newton (Fisher scoring), vectorised over
+    groups via ``segment_sum`` -- ``O(N)``, no random-effect-wide system.
+    """
+    beta = theta[:p]
+    sb2 = jnp.exp(theta[p])
+    eta_fix = X @ beta
+
+    def mode_step(
+        b: Float[Array, 'q'], _: Array
+    ) -> Tuple[Float[Array, 'q'], None]:
+        eta = eta_fix + b[group]
+        mu = family.linkinv(eta)
+        var = jnp.clip(family.variance(mu), _EPS, None)
+        dmu = family.mu_eta(eta)
+        score = (y - mu) * dmu / var  # d log p / d eta
+        w = dmu * dmu / var  # Fisher weight
+        sg = jax.ops.segment_sum(score, group, num_segments=n_groups) - b / sb2
+        sh = jax.ops.segment_sum(w, group, num_segments=n_groups) + 1.0 / sb2
+        return b + sg / sh, None
+
+    b, _ = lax.scan(
+        mode_step, jnp.zeros((n_groups,), dtype=X.dtype), xs=None, length=n_mode
+    )
+    eta = eta_fix + b[group]
+    mu = family.linkinv(eta)
+    var = jnp.clip(family.variance(mu), _EPS, None)
+    sw = jax.ops.segment_sum(
+        family.mu_eta(eta) ** 2 / var, group, num_segments=n_groups
+    )  # curvature -ell'' at the mode (Fisher)
+    return b, sw, eta
+
+
+def _laplace_nll(
+    theta: Float[Array, 'p1'],
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    n_mode: int,
+) -> Float[Array, '']:
+    """Laplace-approximate marginal negative log-likelihood at ``theta``.
+
+    ``-sum_g [ ell_g(b_hat) - b_hat^2/(2 sigma_b^2) - 0.5 log sigma_b^2
+    - 0.5 log(sum_i w_i + 1/sigma_b^2) ]`` -- the Laplace approximation to the
+    random-effect integral (matches Gauss-Hermite to the approximation order, and
+    corrects the PQL attenuation for binary / low-count responses).
+    """
+    sb2 = jnp.exp(theta[p])
+    b, sw, eta = _laplace_conditional_modes(
+        theta, y, X, group, n_groups, family, p, n_mode
+    )
+    mu = family.linkinv(eta)
+    ll = jax.ops.segment_sum(
+        family.loglik(y, mu, jnp.asarray(1.0, dtype=X.dtype)),
+        group,
+        num_segments=n_groups,
+    )
+    log_lg = (
+        ll
+        - b * b / (2.0 * sb2)
+        - 0.5 * jnp.log(sb2)
+        - 0.5 * jnp.log(sw + 1.0 / sb2)
+    )
+    return -jnp.sum(log_lg)
+
+
+def _glmm_laplace_one(
+    y: Float[Array, 'N'],
+    X: Float[Array, 'N p'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    p: int,
+    n_mode: int,
+    spec: VarCompSpec,
+) -> Tuple[
+    Float[Array, 'p'],
+    Float[Array, 'q'],
+    Float[Array, ''],
+    Float[Array, ''],
+]:
+    """Single-element Laplace GLMM fit.  Returns ``(beta, blups, re_var,
+    deviance)``."""
+
+    def nll(theta: Float[Array, 'p1']) -> Float[Array, '']:
+        return _laplace_nll(theta, y, X, group, n_groups, family, p, n_mode)
+
+    theta0 = jnp.concatenate(
+        [jnp.zeros((p,), dtype=X.dtype), jnp.asarray([0.0], dtype=X.dtype)]
+    )  # beta = 0, log sigma_b^2 = 0
+    theta = damped_newton(nll, theta0, spec=spec)
+    beta = theta[:p]
+    sb2 = jnp.exp(theta[p])
+    b, _, _ = _laplace_conditional_modes(
+        theta, y, X, group, n_groups, family, p, n_mode
+    )
+    deviance = 2.0 * nll(theta)  # -2 log L_Laplace (the glmer deviance)
+    return beta, b, sb2, deviance
+
+
+def _glmm_laplace(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    group: Int[Array, 'N'],
+    n_groups: int,
+    family: Family,
+    n_outer: int,
+    n_mode: int,
+    damping: float,
+    block: Optional[int],
+) -> GLMMResult:
+    """Laplace GLMM over ``V`` elements (scalar random intercept)."""
+    p = X.shape[-1]
+    spec = VarCompSpec.reml(n_iter=n_outer, damping=damping)
+
+    def per_voxel(
+        y: Float[Array, 'N'],
+    ) -> Tuple[Array, Array, Array, Array]:
+        return _glmm_laplace_one(
+            y, X, group, n_groups, family, p, n_mode, spec
+        )
+
+    beta, blups, re_var, deviance = blocked_vmap(per_voxel, (Y,), block=block)
+    return GLMMResult(
+        beta_hat=beta,
+        blups=blups,
+        re_var=re_var,
+        dispersion=jnp.ones_like(re_var),
+        deviance=deviance,
+        edf_total=jnp.full_like(re_var, float(p)),
+        family=family,
+        n_obs=int(X.shape[0]),
+        n_groups=n_groups,
+        tier='laplace',
+    )
+
+
 def glmm_fit(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
     *,
     group: Int[Array, 'N'],
     family: Union[str, Family] = GAUSSIAN,
+    method: str = 'pql',
     few_level_max: int = 64,
     n_outer: int = 20,
     n_inner: int = 10,
+    n_mode: int = 20,
     ridge: float = 1e-8,
     lam_floor: float = 1e-6,
     lam_ceil: float = 1e8,
+    damping: float = 1e-6,
     block: Optional[int] = None,
 ) -> GLMMResult:
     """Mass-univariate random-intercept GLMM via PQL, dispatched on level count.
@@ -524,11 +687,21 @@ def glmm_fit(
         ``'negbinomial'`` / ``'gaussian'`` or a :class:`Family`).  Gaussian is
         accepted (it reduces to the LME) but ``lme_fit`` / ``reml_fit`` are the
         direct route for a Gaussian mixed model.
+    method
+        ``'pql'`` (default) -- penalised quasi-likelihood (cheap; documented
+        small-cluster attenuation for binary / low-count responses).
+        ``'laplace'`` -- the Laplace-approximate marginal likelihood (per-group
+        conditional-mode integral + curvature correction): more accurate for
+        binary / low-count GLMMs (it corrects the PQL bias), at the cost of an
+        inner mode-finding loop.  Laplace fits a scalar random intercept under a
+        fixed-dispersion family; the ``tier`` is ``'laplace'``.
     few_level_max
         Dispatch threshold on the number of levels ``q`` (default ``64`` -- the
-        regime where the dense solve stops being trivially cheap).
-    n_outer, n_inner
-        PQL outer (Fellner-Schall) and inner (IRLS) iteration budgets.
+        regime where the dense solve stops being trivially cheap).  ``'pql'``
+        only.
+    n_outer, n_inner, n_mode
+        PQL outer (Fellner-Schall) and inner (IRLS) iteration budgets; ``n_mode``
+        is the per-group conditional-mode Newton budget for ``method='laplace'``.
     ridge, lam_floor, lam_ceil, block
         Normal-equation stabiliser, smoothing-parameter clamps, and the optional
         element-block size bounding peak memory.
@@ -559,6 +732,15 @@ def glmm_fit(
             f'glmm_fit: group has {group.shape[0]} labels; expected N={n}.'
         )
     n_groups = int(jnp.max(group)) + 1
+
+    if method == 'laplace':
+        return _glmm_laplace(
+            Y, X, group, n_groups, family, n_outer, n_mode, damping, block
+        )
+    if method != 'pql':
+        raise ValueError(
+            f"glmm_fit: method={method!r}; expected 'pql' or 'laplace'."
+        )
 
     args = (
         Y,

@@ -266,3 +266,104 @@ def test_glmm_shape_validation():
         glmm_fit(Y[:, :-3], jnp.asarray(X), group=jnp.asarray(group))
     with pytest.raises(ValueError, match='expected N'):
         glmm_fit(Y, jnp.asarray(X), group=jnp.asarray(group[:-2]))
+
+
+# ---------------------------------------------------------------------------
+# Laplace-approximate GLMM (method='laplace') -- the §11 follow-up to PQL
+# ---------------------------------------------------------------------------
+
+
+def _ref_laplace_binomial(y, X, group, q, n_mode=20):
+    """numpy Laplace marginal NLL minimised by scipy -- the same estimator."""
+    from scipy.optimize import minimize
+
+    def expit(x):
+        return 1.0 / (1.0 + np.exp(-x))
+
+    p = X.shape[1]
+
+    def nll(theta):
+        beta, sb2 = theta[:p], np.exp(theta[p])
+        etaf = X @ beta
+        b = np.zeros(q)
+        for _ in range(n_mode):
+            eta = etaf + b[group]
+            mu = expit(eta)
+            w = mu * (1 - mu)
+            sg = np.bincount(group, weights=(y - mu), minlength=q)
+            sw = np.bincount(group, weights=w, minlength=q)
+            b = b + (sg - b / sb2) / (sw + 1.0 / sb2)
+        eta = etaf + b[group]
+        mu = expit(eta)
+        sw = np.bincount(group, weights=mu * (1 - mu), minlength=q)
+        ll = np.bincount(
+            group, weights=(y * eta - np.log1p(np.exp(eta))), minlength=q
+        )
+        return -np.sum(
+            ll - b * b / (2 * sb2) - 0.5 * np.log(sb2) - 0.5 * np.log(sw + 1 / sb2)
+        )
+
+    r = minimize(
+        nll, np.r_[np.zeros(p), 0.0], method='Nelder-Mead',
+        options={'xatol': 1e-7, 'fatol': 1e-7, 'maxiter': 6000},
+    )
+    return r.x[:p], np.exp(r.x[p])
+
+
+def _sim_binary(seed, q, n_per, sb2=0.5, slope=0.8):
+    rng = np.random.default_rng(seed)
+    group = np.repeat(np.arange(q), n_per).astype(np.int32)
+    n = q * n_per
+    X = np.ones((n, 2))
+    X[:, 1] = rng.standard_normal(n)
+    b = rng.standard_normal(q) * np.sqrt(sb2)
+    eta = X @ np.array([0.0, slope]) + b[group]
+    y = (rng.uniform(size=n) < 1.0 / (1.0 + np.exp(-eta))).astype(float)
+    return X, group, y
+
+
+def test_glmm_laplace_matches_reference():
+    """JAX Laplace fit matches the scipy-minimised numpy Laplace marginal."""
+    X, group, y = _sim_binary(seed=1, q=40, n_per=12)
+    rb, rsb2 = _ref_laplace_binomial(y, X, group, 40)
+    res = glmm_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), group=jnp.asarray(group),
+        family='binomial', method='laplace', n_outer=40,
+    )
+    assert res.tier == 'laplace'
+    assert np.allclose(np.asarray(res.beta_hat[0]), rb, atol=5e-3)
+    assert abs(float(res.re_var[0]) - rsb2) < 5e-3
+
+
+def test_glmm_laplace_beats_pql_attenuation():
+    """Laplace is less attenuated than PQL for small binary clusters (closer to
+    the true slope)."""
+    X, group, y = _sim_binary(seed=1, q=40, n_per=12, slope=0.8)
+    Yj, Xj, gj = jnp.asarray(y[None, :]), jnp.asarray(X), jnp.asarray(group)
+    lap = glmm_fit(Yj, Xj, group=gj, family='binomial', method='laplace', n_outer=40)
+    pql = glmm_fit(Yj, Xj, group=gj, family='binomial', method='pql')
+    lap_slope = float(lap.beta_hat[0, 1])
+    pql_slope = float(pql.beta_hat[0, 1])
+    assert pql_slope < lap_slope  # PQL more attenuated (smaller)
+    assert abs(lap_slope - 0.8) < abs(pql_slope - 0.8)
+
+
+def test_glmm_laplace_poisson_recovery():
+    X, group, y, _ = _sim('poisson', seed=11, q=30, n_per=15, sb2=0.3, beta=(0.3, 0.6))
+    res = glmm_fit(
+        jnp.asarray(y[None, :]), jnp.asarray(X), group=jnp.asarray(group),
+        family='poisson', method='laplace', n_outer=40,
+    )
+    assert res.tier == 'laplace'
+    assert abs(float(res.beta_hat[0, 1]) - 0.6) < 0.12
+    assert float(res.re_var[0]) > 0.0
+    assert res.blups.shape == (1, 30)
+
+
+def test_glmm_method_validation():
+    X, group, y, _ = _sim('poisson', seed=0, q=8, n_per=10)
+    with pytest.raises(ValueError, match='pql'):
+        glmm_fit(
+            jnp.asarray(y[None, :]), jnp.asarray(X), group=jnp.asarray(group),
+            method='bogus',
+        )
