@@ -58,20 +58,38 @@ from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
 from ._family import (
     BINOMIAL,
+    CLOGLOG_LINK,
     GAMMA,
     GAUSSIAN,
+    IDENTITY_LINK,
+    INVERSE_LINK,
+    LOG_LINK,
+    LOGIT_LINK,
     NEGBINOMIAL,
     POISSON,
+    PROBIT_LINK,
+    SQRT_LINK,
     TWEEDIE,
     Family,
+    Link,
     negbinomial,
     resolve_family,
+    resolve_link,
     tweedie,
 )
 from ._irls import fit_penalised_irls, irls_warm_start
 
 __all__ = [
     'Family',
+    'Link',
+    'IDENTITY_LINK',
+    'LOG_LINK',
+    'LOGIT_LINK',
+    'PROBIT_LINK',
+    'CLOGLOG_LINK',
+    'SQRT_LINK',
+    'INVERSE_LINK',
+    'resolve_link',
     'GAUSSIAN',
     'BINOMIAL',
     'POISSON',

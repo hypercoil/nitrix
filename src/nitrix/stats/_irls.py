@@ -54,7 +54,13 @@ def _working(
     wts = dmu * dmu / jnp.clip(var, _EPS, None)
     if prior_weights is not None:
         wts = prior_weights * wts
-    z = eta + (y - mu) / jnp.clip(dmu, _EPS, None)
+    # Floor |dmu| away from zero *preserving sign*: a decreasing link (the
+    # reciprocal / inverse link has dmu = -1/eta^2 < 0) would otherwise have its
+    # derivative flipped to +_EPS by a naive clip, exploding the working response.
+    safe_dmu = jnp.where(
+        dmu < 0.0, jnp.minimum(dmu, -_EPS), jnp.maximum(dmu, _EPS)
+    )
+    z = eta + (y - mu) / safe_dmu
     return wts, z, mu
 
 

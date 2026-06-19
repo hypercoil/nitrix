@@ -82,6 +82,13 @@ __all__ = ['GLMMResult', 'glmm_fit']
 _EPS = 1e-10
 
 
+def _safe_dmu(dmu: Float[Array, 'N']) -> Float[Array, 'N']:
+    """Floor ``|dmu|`` away from zero, *preserving sign* (a decreasing link --
+    the reciprocal / inverse link has ``dmu < 0`` -- would otherwise have its
+    derivative flipped by a naive clip, exploding the working response)."""
+    return jnp.where(dmu < 0.0, jnp.minimum(dmu, -_EPS), jnp.maximum(dmu, _EPS))
+
+
 # ---------------------------------------------------------------------------
 # Result container
 # ---------------------------------------------------------------------------
@@ -379,7 +386,7 @@ def _glmm_slope_structured_one(
         dmu = family.mu_eta(eta)
         var = jnp.clip(family.variance(mu), _EPS, None)
         w = dmu * dmu / var
-        z_work = eta + (y - mu) / jnp.clip(dmu, _EPS, None)
+        z_work = eta + (y - mu) / _safe_dmu(dmu)
         return w, z_work, eta
 
     def blups_from(
@@ -531,7 +538,7 @@ def _structured_solve(
     dmu = family.mu_eta(eta)
     var = family.variance(mu)
     w = dmu * dmu / jnp.clip(var, _EPS, None)  # (N,) working weights
-    z = eta + (y - mu) / jnp.clip(dmu, _EPS, None)  # (N,) working response
+    z = eta + (y - mu) / _safe_dmu(dmu)  # (N,) working response
 
     sw = jax.ops.segment_sum(w, group, num_segments=n_groups)  # (q,)
     swz = jax.ops.segment_sum(w * z, group, num_segments=n_groups)  # (q,)

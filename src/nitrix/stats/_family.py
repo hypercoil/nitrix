@@ -19,15 +19,25 @@ type without a cycle.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Mapping, Union
 
 import jax.numpy as jnp
 from jax.scipy.special import gammaln, xlogy
+from jax.scipy.stats import norm as _norm
 from jaxtyping import Array
 
 __all__ = [
     'Family',
+    'Link',
+    'IDENTITY_LINK',
+    'LOG_LINK',
+    'LOGIT_LINK',
+    'PROBIT_LINK',
+    'CLOGLOG_LINK',
+    'SQRT_LINK',
+    'INVERSE_LINK',
+    'resolve_link',
     'GAUSSIAN',
     'BINOMIAL',
     'POISSON',
@@ -94,6 +104,45 @@ class Family:
     unit_deviance: Callable[[Array, Array], Array]
     init_mu: Callable[[Array], Array]
     loglik: Callable[[Array, Array, Array], Array]
+    eta_bound: float = float('inf')
+
+    def with_link(self, link: Union[str, 'Link']) -> 'Family':
+        """A copy of this family with a **non-canonical** link substituted.
+
+        Only the link triple (``link`` / ``linkinv`` / ``mu_eta``) and the IRLS
+        ``eta_bound`` change; the distribution -- ``variance`` / ``unit_deviance``
+        / ``loglik`` / ``init_mu`` (all functions of ``mu``, not ``eta``) -- is
+        untouched, so e.g. ``BINOMIAL.with_link('probit')`` is the probit model
+        and ``POISSON.with_link('sqrt')`` the square-root-link Poisson, exactly as
+        in ``statsmodels`` ``Family(link=...)`` / mgcv.  The shared IRLS core is
+        Fisher scoring (``w = mu_eta^2 / V``, ``z = eta + (y - mu) / mu_eta``), so
+        any link composes without a solver change.
+        """
+        lk = resolve_link(link)
+        return replace(
+            self,
+            name=f'{self.name}[{lk.name}]',
+            link=lk.link,
+            linkinv=lk.linkinv,
+            mu_eta=lk.mu_eta,
+            eta_bound=lk.eta_bound,
+        )
+
+
+@dataclass(frozen=True)
+class Link:
+    """A link function as a record of its three IRLS primitives.
+
+    ``link`` = ``g(mu)``, ``linkinv`` = ``g^{-1}(eta)``, ``mu_eta`` = ``d mu /
+    d eta`` (as a function of ``eta``); ``eta_bound`` is the IRLS linear-predictor
+    clamp (``inf`` unless the inverse link can overflow).  Compose onto a
+    distribution with :meth:`Family.with_link`.
+    """
+
+    name: str
+    link: Callable[[Array], Array]
+    linkinv: Callable[[Array], Array]
+    mu_eta: Callable[[Array], Array]
     eta_bound: float = float('inf')
 
 
@@ -348,6 +397,119 @@ def tweedie(p: float = 1.5) -> Family:
 
 # Default Tweedie (p = 1.5); for another power pass ``tweedie(p)``.
 TWEEDIE = tweedie(1.5)
+
+
+# ---------------------------------------------------------------------------
+# Non-canonical links (compose onto a family via ``Family.with_link``)
+# ---------------------------------------------------------------------------
+
+IDENTITY_LINK = Link(
+    name='identity', link=_identity, linkinv=_identity, mu_eta=_ones_like
+)
+
+LOG_LINK = Link(
+    name='log',
+    link=_log_link,
+    linkinv=_safe_exp,
+    mu_eta=_safe_exp,
+    eta_bound=_ETA_MAX,
+)
+
+LOGIT_LINK = Link(
+    name='logit', link=_logit, linkinv=_expit, mu_eta=_binomial_mu_eta
+)
+
+
+def _probit_linkinv(eta: Array) -> Array:
+    return _norm.cdf(eta)
+
+
+def _probit_mu_eta(eta: Array) -> Array:
+    return jnp.clip(_norm.pdf(eta), _EPS, None)
+
+
+PROBIT_LINK = Link(
+    name='probit',
+    link=lambda mu: _norm.ppf(jnp.clip(mu, _EPS, 1.0 - _EPS)),
+    linkinv=_probit_linkinv,
+    mu_eta=_probit_mu_eta,
+)
+
+
+def _cloglog_link(mu: Array) -> Array:
+    m = jnp.clip(mu, _EPS, 1.0 - _EPS)
+    return jnp.log(-jnp.log1p(-m))
+
+
+def _cloglog_linkinv(eta: Array) -> Array:
+    # 1 - exp(-exp(eta)); clamp eta so the inner exp cannot overflow.
+    return -jnp.expm1(-jnp.exp(jnp.clip(eta, -_ETA_MAX, _ETA_MAX)))
+
+
+def _cloglog_mu_eta(eta: Array) -> Array:
+    e = jnp.clip(eta, -_ETA_MAX, _ETA_MAX)
+    return jnp.clip(jnp.exp(e - jnp.exp(e)), _EPS, None)
+
+
+CLOGLOG_LINK = Link(
+    name='cloglog',
+    link=_cloglog_link,
+    linkinv=_cloglog_linkinv,
+    mu_eta=_cloglog_mu_eta,
+    eta_bound=_ETA_MAX,
+)
+
+SQRT_LINK = Link(
+    name='sqrt',
+    link=lambda mu: jnp.sqrt(jnp.clip(mu, 0.0, None)),
+    linkinv=lambda eta: eta * eta,
+    mu_eta=lambda eta: 2.0 * eta,
+)
+
+
+def _inverse_mu_eta(eta: Array) -> Array:
+    e = jnp.clip(eta, _EPS, None)
+    return -1.0 / (e * e)
+
+
+# Reciprocal (the canonical Gamma link).  ``mu = 1 / eta`` requires ``eta > 0``;
+# the IRLS clamps ``eta`` to a small positive floor (a sane init -- ``init_mu``
+# is positive, so ``eta_0 = 1 / mu_0 > 0`` -- keeps it there in practice).
+INVERSE_LINK = Link(
+    name='inverse',
+    link=lambda mu: 1.0 / jnp.clip(mu, _EPS, None),
+    linkinv=lambda eta: 1.0 / jnp.clip(eta, _EPS, None),
+    mu_eta=_inverse_mu_eta,
+    eta_bound=float('inf'),
+)
+
+
+_LINKS: Mapping[str, Link] = {
+    'identity': IDENTITY_LINK,
+    'log': LOG_LINK,
+    'logit': LOGIT_LINK,
+    'probit': PROBIT_LINK,
+    'cloglog': CLOGLOG_LINK,
+    'sqrt': SQRT_LINK,
+    'inverse': INVERSE_LINK,
+}
+
+
+def resolve_link(link: Union[str, Link]) -> Link:
+    """Resolve a ``str`` name or a :class:`Link` instance to a :class:`Link`.
+
+    Built-ins: ``'identity'`` / ``'log'`` / ``'logit'`` / ``'probit'`` /
+    ``'cloglog'`` / ``'sqrt'`` / ``'inverse'``; or pass a :class:`Link` directly.
+    """
+    if isinstance(link, Link):
+        return link
+    try:
+        return _LINKS[link]
+    except KeyError:
+        raise ValueError(
+            f'unknown link {link!r}; built-ins are {sorted(_LINKS)}, or pass '
+            f'a Link instance.'
+        ) from None
 
 
 # The registry of built-ins -- the open-set extension point (callers may also
