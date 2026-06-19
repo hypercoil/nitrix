@@ -72,6 +72,38 @@ __all__ = ['residualise', 'partial_residualise']
 
 ReturnMode = Literal['residual', 'projection']
 Method = Literal['cholesky', 'svd']
+Shrinkage = Literal['none', 'james-stein']
+
+# Floor on the projection energy in the James-Stein denominator (a channel with
+# a numerically-zero projection has nothing to shrink -> factor clamps to 0).
+_JS_EPS = 1e-30
+
+
+def _james_stein_shrink(
+    resid: Float[Array, 'n m'],
+    proj: Float[Array, 'n m'],
+    k: int,
+) -> Float[Array, 'n m']:
+    """Positive-part James-Stein shrinkage of the per-channel nuisance projection.
+
+    Scales each target channel's projection by ``c = (1 - (k - 2) sigma^2 /
+    ||proj||^2)_+`` -- the soft / shrunk confound removal of the v3 FR (5.2).
+    ``sigma^2`` is the per-channel residual-variance estimate (from ``resid``,
+    ``n - k`` d.o.f.); ``k`` is the number of nuisance regressors.  When the
+    confounds explain a channel only weakly (small ``||proj||`` relative to the
+    noise) the removal is shrunk toward zero, so a high-dimensional / collinear
+    confound set does not strip real signal variance it merely captured by chance
+    -- the James-Stein estimator dominates the raw OLS removal in MSE for ``k >=
+    3``.  For ``k <= 2`` the factor is ``>= 1`` and clamps to ``1`` (no
+    shrinkage); the per-channel ``c`` is likewise clamped to ``[0, 1]``.
+    """
+    n = resid.shape[-2]
+    dof = max(n - k, 1)
+    sigma2 = jnp.sum(resid * resid, axis=-2) / dof  # (m,)
+    proj_ss = jnp.sum(proj * proj, axis=-2)  # (m,)
+    c = 1.0 - (k - 2.0) * sigma2 / jnp.clip(proj_ss, _JS_EPS, None)
+    c = jnp.clip(c, 0.0, 1.0)
+    return c[..., None, :] * proj
 
 # Modified-Cholesky pivot floor (relative to the Gram's diagonal scale): a
 # well-conditioned solve is unperturbed, while a degenerate pivot stays positive
@@ -170,6 +202,7 @@ def _residualise_core(
     l2: float,
     return_mode: ReturnMode,
     method: Method,
+    shrinkage: Shrinkage,
 ) -> Float[Array, 'n m']:
     """Unbatched core; callers compose batch via ``jax.vmap``."""
     if weights is not None:
@@ -190,6 +223,12 @@ def _residualise_core(
     # Reconstruct projection on the *unweighted* X; weights only
     # affect the betas, not the projection geometry.
     proj = X @ betas
+    if shrinkage == 'james-stein':
+        proj = _james_stein_shrink(Y - proj, proj, X.shape[-1])
+    elif shrinkage != 'none':
+        raise ValueError(
+            f'shrinkage={shrinkage!r}; expected "none" or "james-stein".'
+        )
     if return_mode == 'projection':
         return proj
     if return_mode == 'residual':
@@ -208,6 +247,7 @@ def residualise(
     rowvar: bool = True,
     return_mode: ReturnMode = 'residual',
     method: Method = 'cholesky',
+    shrinkage: Shrinkage = 'none',
 ) -> Num[Array, '... C_Y obs']:
     """Project ``Y`` orthogonally to the span of ``X`` (OLS).
 
@@ -234,7 +274,24 @@ def residualise(
         ``l2 > 0`` adds an ``l2 * I`` to the normal-equation
         matrix.  Bounds the condition number of the augmented
         system at ``1 / sqrt(l2)``; recommended whenever ``X``
-        might be near-collinear.
+        might be near-collinear.  This *is* the **ridge-shrunk
+        ("soft") residualisation** of the v3 FR (5.2): a shrunk
+        nuisance fit for an ill-conditioned confound set.
+    shrinkage
+        ``"none"`` (default) -- the raw projection is removed.
+        ``"james-stein"`` -- positive-part James-Stein shrinkage
+        of the per-channel nuisance projection toward zero (the
+        other "soft" variant of FR 5.2): the projection is scaled
+        by ``c = (1 - (k-2) sigma^2 / ||proj||^2)_+`` before being
+        subtracted, so confounds that explain a channel only
+        weakly remove correspondingly less -- protecting real
+        signal variance a high-dimensional / collinear confound
+        set would otherwise strip.  Dominates the OLS removal in
+        MSE for ``k >= 3`` regressors; a no-op for ``k <= 2``.
+        Composes with ``l2`` (shrinks whatever ridge / OLS
+        projection was fit).  Note the residual is then no longer
+        exactly orthogonal to ``X`` -- the intended bias-variance
+        trade of a soft removal.
     rowvar
         ``True`` (default): observation axis is the *last* axis
         of ``Y`` / ``X``.  ``False``: observation axis is the
@@ -323,6 +380,7 @@ def residualise(
                 l2=l2,
                 return_mode=return_mode,
                 method=method,
+                shrinkage=shrinkage,
             )
 
         fn = core
@@ -343,6 +401,7 @@ def residualise(
                 l2=l2,
                 return_mode=return_mode,
                 method=method,
+                shrinkage=shrinkage,
             )
 
         fn = core_w
@@ -362,6 +421,7 @@ def _partial_core(
     *,
     l2: float,
     method: Method,
+    shrinkage: Shrinkage,
 ) -> Float[Array, 'n m']:
     """Unbatched non-aggressive residualisation core.
 
@@ -380,7 +440,18 @@ def _partial_core(
     else:
         raise ValueError(f'method={method!r}; expected "cholesky" or "svd".')
     ks = signal.shape[-1]
-    return Y - noise @ betas[ks:]
+    noise_proj = noise @ betas[ks:]
+    if shrinkage == 'james-stein':
+        # sigma^2 from the *full*-fit residual (signal removed too -> the actual
+        # noise); shrink only the noise projection (k = #noise regressors).
+        noise_proj = _james_stein_shrink(
+            Y - X @ betas, noise_proj, noise.shape[-1]
+        )
+    elif shrinkage != 'none':
+        raise ValueError(
+            f'shrinkage={shrinkage!r}; expected "none" or "james-stein".'
+        )
+    return Y - noise_proj
 
 
 def partial_residualise(
@@ -391,6 +462,7 @@ def partial_residualise(
     l2: float = 0.0,
     rowvar: bool = True,
     method: Method = 'cholesky',
+    shrinkage: Shrinkage = 'none',
 ) -> Num[Array, '... C_Y obs']:
     """Non-aggressive (ICA-AROMA) partial residualisation of ``Y``.
 
@@ -415,13 +487,20 @@ def partial_residualise(
         Regressors to **remove** (e.g. the AROMA motion components), same layout.
     l2
         Ridge added to the joint Gram (``0`` = OLS).  Recommended if
-        ``[signal | noise]`` may be near-collinear.
+        ``[signal | noise]`` may be near-collinear -- the ridge-shrunk ("soft")
+        partial residualisation of FR 5.2.
     rowvar
         ``True`` (default): observation axis is the last axis; ``False``: the
         penultimate axis.
     method
         ``"cholesky"`` (default, cuSOLVER-free) or ``"svd"`` -- as in
         :func:`residualise`.
+    shrinkage
+        ``"none"`` (default) or ``"james-stein"`` -- positive-part James-Stein
+        shrinkage of the (joint-fit) **noise** projection toward zero before it
+        is removed, as in :func:`residualise`; the soft variant for a large /
+        collinear noise set (``sigma^2`` taken from the full-fit residual,
+        ``k`` = number of noise regressors).
 
     Returns
     -------
@@ -460,7 +539,9 @@ def partial_residualise(
         S_: Float[Array, '...'],
         N_: Float[Array, '...'],
     ) -> Float[Array, '...']:
-        return _partial_core(Y_, S_, N_, l2=l2, method=method)
+        return _partial_core(
+            Y_, S_, N_, l2=l2, method=method, shrinkage=shrinkage
+        )
 
     fn: Callable[..., Any] = core
     for _ in range(len(batch_shape)):
