@@ -415,7 +415,7 @@ core neurodevelopmental question. The design widens by `#levels × k`; cheap for
 the few-level factors `by=` typically carries (diagnosis groups). **Effort: M**
 (replicate the marginal design per level; reuse FS). **Oracle:** `mgcv` `by=`.
 
-### §3.2 Cubic-regression (`cr`), Gaussian-process (`gp`), Markov-random-field (`mrf`)  *(future)*
+### §3.2 Cubic-regression (`cr`), Gaussian-process (`gp`), Markov-random-field (`mrf`)  — ✅ SHIPPED
 
 **What.** `cr` (knot-based cubic regression, cheap 1-D), `gp` (Gaussian-process
 smooth), and especially `mrf` (Markov random field over a parcel/vertex
@@ -423,6 +423,15 @@ adjacency — the natural smoother on a cortical mesh, **penalty = the `nitrix.g
 Laplacian**, a clean substrate reuse). **Why.** `mrf` lets `nwx` express
 spatially-structured effects over a surface adjacency. **Effort: S (`cr`) /
 M (`gp`) / M (`mrf`).** **Oracle:** `mgcv` `bs='cr'|'gp'|'mrf'`.
+
+**Shipped** as `cr_basis` / `gp_basis` / `mrf_smooth` (all `SplineBasis`, slotting
+into `gam_fit` + the Fellner-Schall engine unchanged; `kind='cr'|'gp'|'mrf'`
+re-eval): `cr` is the natural cubic spline with the exact integrated-curvature
+penalty (matches `scipy` natural `CubicSpline` to 1e-9; linear → zero penalty);
+`gp` a low-rank Matern-3/2 kriging smooth (eigen-reparameterised like the TPRS,
+cuSOLVER-free); `mrf`'s penalty **is** `nitrix.graph.laplacian` (`β^T L β = Σ_{i~j}
+(β_i−β_j)²`, unobserved interior regions interpolated from neighbours). All
+recover their signal via GAM; cuSOLVER-free.
 
 ### §3.3 Shape-constrained & adaptive smooths  *(future)*
 

@@ -134,6 +134,9 @@ EXCLUDE: frozenset[str] = frozenset(
         'stats.bspline_basis',
         'stats.cyclic_cubic_basis',
         'stats.thinplate_regression_basis',
+        'stats.cr_basis',
+        'stats.gp_basis',
+        'stats.mrf_smooth',
         'stats.tensor_product_basis',
         'stats.re_smooth',  # builds a random-effect (design, penalty) block
         'stats.by_factor_smooth',  # builds per-level SplineBasis blocks (s(x,by=f))
