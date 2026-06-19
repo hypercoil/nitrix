@@ -283,8 +283,12 @@ lowers to the same HLO as `reml_fit(Y,X,Z)` (R1 no-regression proof).
 > reference. The correlated-slope solver is now the monotone, clamp-insensitive
 > **joint-Schur + REML-EM** (✅ shipped, see
 > [`glmm-random-slope-robust-solver.md`](glmm-random-slope-robust-solver.md)).
-> Remaining accuracy follow-ups: an analytic Laplace gradient (vs the current
-> autodiff-through-mode-scan) and adaptive Gauss-Hermite quadrature beyond Laplace.
+> Adaptive Gauss-Hermite quadrature beyond Laplace is ✅ shipped
+> (``method='agq'``, ``n_quad`` nodes; ``n_quad=1`` is Laplace, converges to the
+> exact marginal). The analytic Laplace gradient was investigated and **deferred
+> on ROI** (the cold-compile cost is dominated by the gradient-through-scan, and
+> the clean fix -- implicit-diff of the mode -- has an amortised payoff; see the
+> robust-solver FR).
 
 **What.** Random effects under a binomial / Poisson / … family via
 penalised-quasi-likelihood / Laplace-approximate REML: `glmm_fit(Y, X, random,
