@@ -9,9 +9,6 @@ Two submodules:
 
 - ``covariance`` -- (partial) (paired) (conditional) covariance
   / correlation over time series.  JIT-friendly batch handling.
-- ``fourier``    -- spectral utilities: product-filter,
-  analytic-signal, Hilbert transform, instantaneous frequency /
-  phase, envelope.
 - ``gaussian``   -- closed-form diagonal-Gaussian KL divergence and
   negative log-likelihood (log-variance parameterised).
 - ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
@@ -27,9 +24,6 @@ Two submodules:
   ``randomise`` engine) + FDR / Bonferroni.
 - ``pca``        -- principal-component analysis (fit / transform /
   inverse) via the covariance eigendecomposition.
-
-This subpackage replaces ``nitrix.functional.covariance`` and
-``nitrix.functional.fourier``.
 """
 
 from .covariance import (
@@ -46,16 +40,6 @@ from .covariance import (
     partialcov,
     pcorr,
     precision,
-)
-from .fourier import (
-    analytic_signal,
-    env_inst,
-    envelope,
-    hilbert_transform,
-    instantaneous_frequency,
-    instantaneous_phase,
-    product_filter,
-    product_filtfilt,
 )
 from .basis import (
     REBasis,
@@ -134,15 +118,6 @@ __all__ = [
     'partialcov',
     'pcorr',
     'precision',
-    # fourier
-    'analytic_signal',
-    'env_inst',
-    'envelope',
-    'hilbert_transform',
-    'instantaneous_frequency',
-    'instantaneous_phase',
-    'product_filter',
-    'product_filtfilt',
     # gaussian
     'kl_diagonal_gaussian',
     'gaussian_nll',

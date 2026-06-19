@@ -11,7 +11,7 @@ fed to ``nitrix.linalg.residualise``.
 
 **Frequency-domain filtering** (``bandpass`` / ``bandstop`` / ``lowpass`` /
 ``highpass``): a zero-phase filter applied as a real magnitude weight over
-the rfft frequency grid, via ``nitrix.stats.fourier.product_filter`` (the
+the rfft frequency grid, via ``nitrix.signal.fourier.product_filter`` (the
 low-level FFT-multiply engine).  ``bandstop`` is the notch case -- it
 *rejects* the ``(lo, hi)`` band and passes outside it; the canonical use is
 removing a respiratory peak from motion-estimate timeseries.  Three
@@ -51,8 +51,8 @@ from jax.typing import DTypeLike
 from jaxtyping import Array, Float, Num
 
 from ..linalg.residual import residualise
-from ..stats.fourier import product_filter
 from ._iir import butterworth_sos, iir_filter, sosfilt, sosfiltfilt
+from .fourier import product_filter
 
 __all__ = [
     'polynomial_detrend',

@@ -8,26 +8,18 @@ Coverage:
   weights (vector and matrix), and conditional cov paths.  The
   key concern -- "silently wrong on complex inputs" -- is
   explicitly tested via Hermiticity and ``np.cov`` parity.
-- **fourier**: match ``scipy.signal.hilbert`` to machine eps;
-  verify the analytic-signal definition on a cos / sin pair;
-  shape contract for ``env_inst``; analytic-signal raises on
-  complex input.
 """
 
 from __future__ import annotations
-
-import math
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-import scipy.signal
 
 jax.config.update('jax_enable_x64', True)
 
 from nitrix.stats import (
-    analytic_signal,
     ccorr,
     ccov,
     conditionalcorr,
@@ -35,12 +27,7 @@ from nitrix.stats import (
     corr,
     corrcoef,
     cov,
-    env_inst,
-    envelope,
     gaussian_nll,
-    hilbert_transform,
-    instantaneous_frequency,
-    instantaneous_phase,
     kl_diagonal_gaussian,
     pairedcov,
     partialcorr,
@@ -49,8 +36,6 @@ from nitrix.stats import (
     pca_transform,
     pcorr,
     precision,
-    product_filter,
-    product_filtfilt,
 )
 
 # ---------------------------------------------------------------------------
@@ -273,110 +258,6 @@ def test_aliases_match_canonical():
     np.testing.assert_allclose(pcorr(X), partialcorr(X), atol=1e-15)
     np.testing.assert_allclose(ccov(X, Y), conditionalcov(X, Y), atol=1e-15)
     np.testing.assert_allclose(ccorr(X, Y), conditionalcorr(X, Y), atol=1e-15)
-
-
-# ---------------------------------------------------------------------------
-# fourier
-# ---------------------------------------------------------------------------
-
-
-def test_analytic_signal_matches_scipy():
-    rng = np.random.default_rng(0)
-    x = jnp.asarray(rng.standard_normal(200))
-    xa = analytic_signal(x)
-    xa_ref = scipy.signal.hilbert(np.asarray(x))
-    np.testing.assert_allclose(np.asarray(xa), xa_ref, atol=1e-13)
-
-
-def test_analytic_signal_real_part_equals_input():
-    rng = np.random.default_rng(0)
-    x = jnp.asarray(rng.standard_normal(200))
-    xa = analytic_signal(x)
-    np.testing.assert_allclose(xa.real, x, atol=1e-13)
-
-
-def test_analytic_signal_on_cosine_envelope_is_unity():
-    fs = 100.0
-    t = np.arange(200) / fs
-    x = jnp.asarray(np.cos(2 * np.pi * 5 * t))
-    env = jnp.abs(analytic_signal(x))
-    # Interior only -- end taper from FFT.
-    np.testing.assert_allclose(env[20:-20], 1.0, atol=1e-2)
-
-
-def test_analytic_signal_raises_on_complex():
-    x = jnp.asarray(np.zeros(100), dtype=jnp.complex64)
-    with pytest.raises(TypeError, match='must be strictly real'):
-        analytic_signal(x)
-
-
-def test_hilbert_transform_of_cosine_is_sine():
-    fs = 100.0
-    t = np.arange(200) / fs
-    x = jnp.asarray(np.cos(2 * np.pi * 5 * t))
-    h = hilbert_transform(x)
-    np.testing.assert_allclose(
-        h[20:-20], np.sin(2 * np.pi * 5 * t)[20:-20], atol=1e-2
-    )
-
-
-def test_envelope_matches_abs_analytic():
-    rng = np.random.default_rng(0)
-    x = jnp.asarray(rng.standard_normal(200))
-    np.testing.assert_allclose(
-        envelope(x),
-        jnp.abs(analytic_signal(x)),
-        atol=1e-15,
-    )
-
-
-def test_instantaneous_frequency_of_5hz_cosine():
-    fs = 100.0
-    t = np.arange(500) / fs
-    x = jnp.asarray(np.cos(2 * np.pi * 5 * t))
-    f = instantaneous_frequency(x, fs=fs)
-    # Interior should be ~5 Hz.
-    np.testing.assert_allclose(f[50:-50], 5.0, atol=0.1)
-
-
-def test_env_inst_matches_individual_calls():
-    rng = np.random.default_rng(0)
-    x = jnp.asarray(rng.standard_normal(200))
-    e, f, p = env_inst(x, fs=100.0)
-    np.testing.assert_allclose(e, envelope(x), atol=1e-13)
-    np.testing.assert_allclose(
-        p,
-        instantaneous_phase(x),
-        atol=1e-13,
-    )
-    np.testing.assert_allclose(
-        f,
-        instantaneous_frequency(x, fs=100.0),
-        atol=1e-13,
-    )
-
-
-def test_product_filter_preserves_dc_for_unit_weight():
-    x = jnp.asarray(np.ones(64))
-    weight = jnp.ones(33)  # rfft of length 64 has 33 freqs
-    out = product_filter(x, weight)
-    np.testing.assert_allclose(out, x, atol=1e-13)
-
-
-def test_product_filtfilt_zero_phase():
-    """Forward-backward filter has zero phase delay even with a
-    complex weight.
-    """
-    n = 128
-    x = jnp.asarray(np.sin(2 * np.pi * np.arange(n) * 5 / n))
-    # Complex weight with magnitude 1 but nonzero phase
-    phase = jnp.linspace(0, math.pi, n // 2 + 1)
-    weight = jnp.exp(1j * phase)
-    out = product_filtfilt(x, weight)
-    # Output should remain in phase with input (after some scaling).
-    # Specifically, the imaginary part should be ~0 since the filter
-    # itself is zero-phase.
-    assert float(jnp.abs(out.imag).max()) < 1e-10
 
 
 # ---------------------------------------------------------------------------
