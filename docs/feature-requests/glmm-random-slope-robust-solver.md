@@ -110,6 +110,28 @@ is the *correct* (if heavy) choice; it is exact when the mode is converged
 (quadratic Newton, fine at `n_mode=20` for well-posed groups) and only biased for
 ill-conditioned/empty groups with too few mode steps.
 
+> **Investigated 2026-06-19 (measured, deferred).** Two things turned up that
+> change the cost/benefit:
+> 1. The cold-compile cost is dominated by the **gradient**-through-scan, not the
+>    hessian: replacing `jax.hessian` with a cheap *fixed-mode* curvature (exact
+>    `jax.grad`, mode `stop_gradient`'d **in the curvature only** — the gradient
+>    stays exact, so the optimum is unchanged: verified to 5.5e-7) cut per-iteration
+>    runtime ~2.7× but barely moved compile (4.65→4.41 s).
+> 2. That fixed-mode curvature is not a true Newton, so it **converges ~2–3× slower**
+>    (gradnorm 4.3e-3 at n_iter=60 vs 1e-8 for the real hessian) — the per-iteration
+>    speedup is cancelled, and it under-converges at the default iteration count.
+>
+> So the only real win is the **exact** analytic hessian made cheap, which requires
+> **implicit differentiation of the mode** (a `custom_vjp` whose backward solves the
+> IFT cotangent through the scan-free per-group score `F`, `∂F/∂b = -H_g`): it keeps
+> quadratic convergence *and* removes the scan from the autodiff tape. That is the
+> right fix, but it is a focused, higher-risk piece (custom_vjp block-structure
+> bookkeeping) whose payoff is mostly cold-compile time — which is **amortised** in a
+> jitted mass-univariate run (compile once over all `V` voxels). Deferred on ROI:
+> the autodiff-through-scan path is correct and the production cost is amortised.
+> The AGQ path (`method='agq'`) shares the same mode-finder and would benefit
+> identically if/when this lands.
+
 **Live-code status.** Current solver: `src/nitrix/stats/glmm.py
 ::_glmm_slope_structured_one` (iterated full block-Woodbury REML in the PQL
 loop). The load-bearing clamp is `_family.py::_ETA_MAX = 20.0` +
