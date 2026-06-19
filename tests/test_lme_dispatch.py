@@ -147,11 +147,16 @@ def test_flame_block_chunking_matches_single_vmap():
 
     full = flame_two_level(beta, var_within, X_group, n_iter=20)
     chunked = flame_two_level(beta, var_within, X_group, n_iter=20, block=6)
+    # block= only changes the vmap reduction order, so block vs single differ
+    # by floating-point reassociation (~1e-8 on the variance components here),
+    # not by the chunking maths.  atol=1e-6 stays ~50x above that reassociation
+    # noise yet far below any real chunking bug (which mishandles whole voxels,
+    # an O(1) error); a 1e-9 tolerance was below the reassociation floor.
     np.testing.assert_allclose(
-        np.asarray(chunked.sigma_b_sq), np.asarray(full.sigma_b_sq), atol=1e-9
+        np.asarray(chunked.sigma_b_sq), np.asarray(full.sigma_b_sq), atol=1e-6
     )
     np.testing.assert_allclose(
-        np.asarray(chunked.gamma_hat), np.asarray(full.gamma_hat), atol=1e-9
+        np.asarray(chunked.gamma_hat), np.asarray(full.gamma_hat), atol=1e-6
     )
 
 

@@ -54,7 +54,7 @@ References
 
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Callable, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -62,7 +62,11 @@ from jax import lax
 from jaxtyping import Array, Float
 
 from .._smalllinalg import small_inv_logdet, sym_eig_jacobi
-from ._varcomp import VarCompSpec
+
+if TYPE_CHECKING:
+    # Annotation only -- importing at runtime would cycle (``_varcomp`` imports
+    # ``damped_newton``).  Only ``spec``'s primitive fields are used here.
+    from ._varcomp import VarCompSpec
 
 __all__ = ['damped_newton']
 

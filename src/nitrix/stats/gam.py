@@ -548,7 +548,7 @@ def gam_fit(
     family: Union[str, Family] = GAUSSIAN,
     lambda_mode: Literal['per_element', 'shared'] = 'per_element',
     n_outer: int = 20,
-    n_inner: int = 15,
+    n_inner: int = 10,
     ridge: float = 1e-8,
     lam_floor: float = 1e-6,
     lam_ceil: float = 1e8,

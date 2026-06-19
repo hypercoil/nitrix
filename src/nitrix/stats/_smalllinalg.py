@@ -145,7 +145,7 @@ def small_inv_logdet(
 
 
 def sym_eig_jacobi(
-    A: Float[Array, 'n n'], n: int, n_sweeps: int = 12
+    A: Float[Array, 'n n'], n: int, n_sweeps: int = 8
 ) -> Tuple[Float[Array, 'n'], Float[Array, 'n n']]:
     """Symmetric eigendecomposition of a small ``(n, n)`` matrix, cuSOLVER-free.
 
@@ -174,7 +174,13 @@ def sym_eig_jacobi(
     ``J(p, q)`` (the stable smaller-root angle), applied as ``A <- J^T A J`` and
     ``V <- V J``; ``n`` is a Python int, so the ``n(n-1)/2`` pair sweep is
     unrolled and ``n_sweeps`` cyclic passes drive the off-diagonal to zero
-    quadratically.  ``n_sweeps=12`` is generous for ``n <= 6``.
+    quadratically.  ``n_sweeps=8`` reaches machine precision for ``n <= 7`` (the
+    largest matrix this serves -- a ``7``-component block-Woodbury Hessian;
+    empirically ``n = 7`` converges by ``6`` sweeps, ``n <= 5`` by ``5``).  The
+    rotation is applied as the dense ``J^T A J`` matmul rather than an explicit
+    rank-2 row/column update: the latter is fewer flops but unrolls into many
+    small dynamic-update-slice fusions that the XLA:CPU JIT fails to materialise,
+    and at this ``n`` the matmul cost is negligible.
     """
     A = 0.5 * (A + A.T)
     dtype = A.dtype

@@ -78,11 +78,11 @@ from dataclasses import dataclass
 from typing import Any, Optional, Tuple, cast
 
 import jax.numpy as jnp
-from jax import lax
 from jaxtyping import Array, Float
 
 from .._batching import blocked_vmap as _blocked_vmap
 from .._smalllinalg import small_inv_logdet as _small_inv_logdet
+from ._optimise import damped_newton
 
 __all__ = ['VarCompSpec', 'fit_varcomp_diagonal', 'varcomp_inference']
 
@@ -235,53 +235,8 @@ def _score_and_info(
 
 
 # ---------------------------------------------------------------------------
-# AI-REML Newton step with damping, step clipping, and backtracking
+# AI-REML fit via the shared optimiser (the analytic-curvature fork)
 # ---------------------------------------------------------------------------
-
-
-def _newton_step(
-    theta: Float[Array, 'K'],
-    y: Float[Array, 'N'],
-    X: Float[Array, 'N p'],
-    B: Float[Array, 'K N'],
-    offset: Float[Array, 'N'],
-    p: int,
-    spec: VarCompSpec,
-) -> Float[Array, 'K']:
-    """One AI-REML Newton step (analytic derivatives) + backtracking.
-
-    Robustness mirrors the historical solvers, now on analytic derivatives:
-
-    - **Damping** on the average-information diagonal (boundary stability).
-    - **Step clipping** to ``[-max_step, max_step]`` per axis (overshoot).
-    - **Backtracking**: halve the step until the nll decreases, ``n_backtrack``
-      tries, as a fixed-iteration ``fori_loop`` (vmap-clean).
-    """
-    score, info, nll_old = _score_and_info(theta, y, X, B, offset, p, spec.ridge)
-    k = theta.shape[0]
-    info_damped = info + spec.damping * jnp.eye(k, dtype=info.dtype)
-    info_inv, _ = _small_inv_logdet(info_damped, k)
-    delta: Float[Array, 'K'] = info_inv @ score
-    delta = jnp.clip(delta, -spec.max_step, spec.max_step)
-
-    def body(
-        _: Array, carry: Tuple[Array, Array, Array]
-    ) -> Tuple[Array, Array, Array]:
-        scale, theta_best, nll_best = carry
-        theta_try = theta - scale * delta
-        nll_try = _neg_loglik(theta_try, y, X, B, offset, p, spec.ridge)
-        accept = nll_try < nll_best
-        theta_new = jnp.where(accept, theta_try, theta_best)
-        nll_new = jnp.where(accept, nll_try, nll_best)
-        return (scale * 0.5, theta_new, nll_new)
-
-    init: Tuple[Array, Array, Array] = (
-        jnp.asarray(1.0, dtype=theta.dtype),
-        theta,
-        nll_old,
-    )
-    _, theta_final, _ = lax.fori_loop(0, spec.n_backtrack, body, init)
-    return cast(Float[Array, 'K'], theta_final)
 
 
 def _fit_one(
@@ -293,21 +248,32 @@ def _fit_one(
     p: int,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, 'K'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-element AI-REML fit.  Returns ``(theta, beta, log_lik)``."""
+    """Single-element AI-REML fit.  Returns ``(theta, beta, log_lik)``.
 
-    def step(
-        theta: Float[Array, 'K'], _: Any
-    ) -> Tuple[Float[Array, 'K'], None]:
-        return _newton_step(theta, y, X, B, offset, p, spec), None
+    Uses the shared ``_optimise.damped_newton`` through its **analytic-curvature
+    fork**: ``curvature`` returns the closed-form ``(score, average-information)``
+    (``_score_and_info``), so no autodiff Hessian is formed, and ``step='damped'``
+    is correct because the AI matrix is positive-(semi)definite by construction
+    (immune to the saddle problem the autodiff solvers guard against).  This is
+    the analytic counterpart of the autodiff path the block-Woodbury / nested /
+    correlation solvers take through the same optimiser.
+    """
 
-    theta_final, _ = lax.scan(
-        step, theta_init, xs=None, length=spec.n_iter
+    def nll(theta: Float[Array, 'K']) -> Float[Array, '']:
+        return _neg_loglik(theta, y, X, B, offset, p, spec.ridge)
+
+    def curvature(
+        theta: Float[Array, 'K'],
+    ) -> Tuple[Float[Array, 'K'], Float[Array, 'K K']]:
+        score, info, _ = _score_and_info(theta, y, X, B, offset, p, spec.ridge)
+        return score, info
+
+    theta_final = damped_newton(
+        nll, theta_init, spec=spec, curvature=curvature, step='damped'
     )
-
     d = _diag_variance(theta_final, B, offset)
     beta, _, _, _ = _profile_beta(d, y, X, p, spec.ridge)
-    nll = _neg_loglik(theta_final, y, X, B, offset, p, spec.ridge)
-    return theta_final, beta, -nll
+    return theta_final, beta, -nll(theta_final)
 
 
 # ---------------------------------------------------------------------------

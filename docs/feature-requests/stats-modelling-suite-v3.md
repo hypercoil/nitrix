@@ -23,9 +23,13 @@
 > **Tier-1 in progress (2026-06-18):** **§4 `S`-class families** — `GAMMA`
 > (log link) and `negbinomial(alpha)` (NB2, known dispersion) added to the
 > `_FAMILIES` registry + IRLS core; coefficients + deviance match
-> `statsmodels.GLM` exactly. (Beta deferred: proper beta regression needs a
-> digamma-based score, not the standard GLM `mu_eta²/V` IRLS weight — a dedicated
-> fitter, not a `Family` record.) **§6.2 sandwich / cluster-robust SEs** —
+> `statsmodels.GLM` exactly. (**Tier-2 update:** `tweedie(p)` (compound
+> Poisson-Gamma, `V(μ)=μ^p`, closed-form deviance + saddlepoint loglik) now also
+> on the registry — coef/deviance match `statsmodels.GLM(Tweedie)`. **Beta** is
+> shipped as the dedicated `beta_fit` (it needs a digamma-based score + joint
+> precision, not the `mu_eta²/V` IRLS weight, so it is its own Ferrari-Cribari-
+> Neto Fisher-scoring fitter, not a `Family`): coef / precision / SE / log-lik
+> match `statsmodels` `BetaModel`.) **§6.2 sandwich / cluster-robust SEs** —
 > `sandwich_cov(result, Y, X, kind='HC0..HC3', groups=…)` returns the robust
 > `(V, p, p)` coefficient covariance (`A⁻¹ B A⁻¹`); `t_contrast` / `f_contrast`
 > take a `cov=` override (default `None` = the unchanged model-based path). SEs
@@ -70,9 +74,14 @@
 > `segment_sum` — no `N×N` intermediate, cuSOLVER-free, three variance components
 > by damped autodiff-Newton. β/σ₁²/σ₂²/σ_e² match an exact dense REML reference
 > (~1e-5) **and** statsmodels `MixedLM` with a nested vc (~1e-4); returns a
-> `NestedLMEResult`. The rest of Tier-1/Tier-2 (§4 Beta/Tweedie/ordinal, §3.2–3.3
-> cr/gp/mrf, §1.1 R4 crossed, §1.3 Kenward-Roger, §1.2 Laplace, §1.4 varFunc)
-> remain proposed.
+> `NestedLMEResult`. **§1.1 R4 crossed** `(1|group) + (1|cross)` — shipped
+> (`lme_fit(cross=)`): Woodbury with the combined design + a **diagonal-Schur**
+> that eliminates the larger factor, leaving one dense `min(q_group, q_cross)³`
+> solve per Newton step (cuSOLVER-free, cost-gated to the smaller factor); β /
+> both variances / σ_e² match an exact dense REML reference across seeds incl. the
+> factor swap; `CrossedLMEResult`. The rest of Tier-1/Tier-2 (§4
+> ordinal/distributional, §3.2–3.3 cr/gp/mrf, §1.3 Kenward-Roger, §1.2 Laplace,
+> §1.4 varFunc) remain proposed.
 >
 > **Engineering hardening (2026-06-18, post interim review).** A three-axis
 > review (correctness / performance / design) uncovered a **silent-wrong-answer
@@ -219,7 +228,7 @@ def lme_fit(Y, X, random=(), *, family=GAUSSIAN, structure='auto',
 | R1 | one scalar factor `(1\|g)` | **FaST-LMM spectral REML** (dense; q-rank `low_rank=` when `q<N`) | `O(N p² + N)` / iter | **shipped (`reml_fit`) — unchanged** |
 | R2 | one factor, correlated/diagonal `r×r` `(1+x\|g)`, `(x\|\|g)` | **block-diagonal per-group Woodbury** (`r×r` inner solve per group) | `O(Σ_g n_g r² + G r³ + p²)` | new, cheap, cuSOLVER-free |
 | R3 | nested `(1\|g1/g2)` | hierarchical block solve (telescoping Woodbury) | structured, moderate | **shipped (`lme_fit(inner=)`) — cuSOLVER-free** |
-| R4 | crossed `(1\|g1:g2)` / multiple factors | general AI-REML over the sparse mixed-model equations `(p + Σ q_g)` | `O((p+Σq_g)³)`-class — **expensive** | new, **HLO-gated** |
+| R4 | crossed `(1\|g1) + (1\|g2)` | Woodbury + **diagonal-Schur** to the smaller factor | `O(min(q1,q2)³)` per step — cheap if one factor small | **shipped (`lme_fit(cross=)`) — cuSOLVER-free, cost-gated** |
 
 **Why the split matters (the review's headline finding).** v1/v2's cheapness is
 *specific to one grouping factor*: `V = σ_b² ZZ^T + σ_e² I` is diagonalised once
@@ -576,7 +585,8 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
 
 **Tier 2 — future / heavier:**
 
-- §1.1 R4 (crossed/multiple, HLO-gated); §1.3 Kenward-Roger; §1.2 Laplace;
+- ~~§1.1 R4 (crossed, HLO-gated)~~ ✅ (`lme_fit(cross=)`, Woodbury+diagonal-Schur,
+  `O(min(q1,q2)³)`/step); §1.3 Kenward-Roger; §1.2 Laplace;
   §3.2–§3.3 cr/gp/mrf/monotone/adaptive; §4 Tweedie + ordinal/distributional;
   §5.2 soft residualisation; §6.1 robust (promote `robust-statistics.md`); §7
   RFT; §8 GCV/CV.

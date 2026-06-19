@@ -49,11 +49,11 @@ from __future__ import annotations
 from typing import Tuple, cast
 
 import jax.numpy as jnp
-from jax import lax
 from jaxtyping import Array, Float
 
 from .._batching import blocked_vmap as _blocked_vmap
 from .._smalllinalg import small_inv_logdet as _small_inv_logdet
+from ._optimise import damped_newton
 from ._varcomp import VarCompSpec
 
 __all__ = ['fit_lowrank_reml', 'lowrank_inference']
@@ -208,48 +208,6 @@ def _score_and_info(
 # ---------------------------------------------------------------------------
 
 
-def _newton_step(
-    theta: Float[Array, '2'],
-    y_r: Float[Array, 'r'],
-    X_r: Float[Array, 'r p'],
-    s2: Float[Array, 'r'],
-    gxx: Float[Array, 'p p'],
-    gxy: Float[Array, 'p'],
-    gyy: Float[Array, ''],
-    n0: int,
-    p: int,
-    spec: VarCompSpec,
-) -> Float[Array, '2']:
-    """One AI-REML Newton step with damping, clipping, and backtracking."""
-    score, info, nll_old = _score_and_info(
-        theta, y_r, X_r, s2, gxx, gxy, gyy, n0, p, spec.ridge
-    )
-    info_damped = info + spec.damping * jnp.eye(2, dtype=info.dtype)
-    info_inv, _ = _small_inv_logdet(info_damped, 2)
-    delta = jnp.clip(info_inv @ score, -spec.max_step, spec.max_step)
-
-    def body(
-        _: Array, carry: Tuple[Array, Array, Array]
-    ) -> Tuple[Array, Array, Array]:
-        scale, theta_best, nll_best = carry
-        theta_try = theta - scale * delta
-        nll_try = _neg_loglik(
-            theta_try, y_r, X_r, s2, gxx, gxy, gyy, n0, p, spec.ridge
-        )
-        accept = nll_try < nll_best
-        theta_new = jnp.where(accept, theta_try, theta_best)
-        nll_new = jnp.where(accept, nll_try, nll_best)
-        return (scale * 0.5, theta_new, nll_new)
-
-    init: Tuple[Array, Array, Array] = (
-        jnp.asarray(1.0, dtype=theta.dtype),
-        theta,
-        nll_old,
-    )
-    _, theta_final, _ = lax.fori_loop(0, spec.n_backtrack, body, init)
-    return cast(Float[Array, '2'], theta_final)
-
-
 def _fit_one(
     y_r: Float[Array, 'r'],
     X_r: Float[Array, 'r p'],
@@ -262,22 +220,31 @@ def _fit_one(
     p: int,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, '2'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel low-rank AI-REML fit.  Returns ``(theta, beta, log_lik)``."""
+    """Single-voxel low-rank AI-REML fit.  Returns ``(theta, beta, log_lik)``.
 
-    def step(
-        theta: Float[Array, '2'], _: None
-    ) -> Tuple[Float[Array, '2'], None]:
-        return (
-            _newton_step(theta, y_r, X_r, s2, gxx, gxy, gyy, n0, p, spec),
-            None,
+    Uses the shared ``_optimise.damped_newton`` analytic-curvature fork
+    (closed-form ``(score, average-information)``, ``step='damped'`` since the AI
+    matrix is PSD by construction) -- the same path as the dense ``_varcomp``.
+    """
+
+    def nll(theta: Float[Array, '2']) -> Float[Array, '']:
+        return _neg_loglik(
+            theta, y_r, X_r, s2, gxx, gxy, gyy, n0, p, spec.ridge
         )
 
-    theta_final, _ = lax.scan(step, theta_init, xs=None, length=spec.n_iter)
-    beta, _, _, _, _ = _gls(theta_final, y_r, X_r, s2, gxx, gxy, p, spec.ridge)
-    nll = _neg_loglik(
-        theta_final, y_r, X_r, s2, gxx, gxy, gyy, n0, p, spec.ridge
+    def curvature(
+        theta: Float[Array, '2'],
+    ) -> Tuple[Float[Array, '2'], Float[Array, '2 2']]:
+        score, info, _ = _score_and_info(
+            theta, y_r, X_r, s2, gxx, gxy, gyy, n0, p, spec.ridge
+        )
+        return score, info
+
+    theta_final = damped_newton(
+        nll, theta_init, spec=spec, curvature=curvature, step='damped'
     )
-    return theta_final, beta, -nll
+    beta, _, _, _, _ = _gls(theta_final, y_r, X_r, s2, gxx, gxy, p, spec.ridge)
+    return theta_final, beta, -nll(theta_final)
 
 
 # ---------------------------------------------------------------------------

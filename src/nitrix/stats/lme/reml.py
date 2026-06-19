@@ -120,6 +120,7 @@ __all__ = [
     'REMLResult',
     'LMEResult',
     'NestedLMEResult',
+    'CrossedLMEResult',
     'LMEContrast',
     'LMEFContrast',
     'reml_fit',
@@ -736,6 +737,33 @@ class NestedLMEResult(NamedTuple):
     tier: str
 
 
+class CrossedLMEResult(NamedTuple):
+    """Crossed two-factor mixed-model fit output (the ``lme_fit`` R4 path).
+
+    Attributes
+    ----------
+    beta_hat
+        ``(V, p)`` fixed-effect estimates.
+    var_group
+        ``(V,)`` random-intercept variance of the ``group`` factor.
+    var_cross
+        ``(V,)`` random-intercept variance of the crossed ``cross`` factor.
+    sigma_e_sq
+        ``(V,)`` residual variance.
+    log_lik
+        ``(V,)`` profile REML log-likelihood.
+    tier
+        ``'R4'`` (the crossed Woodbury + diagonal-Schur solver).
+    """
+
+    beta_hat: Float[Array, 'V p']
+    var_group: Float[Array, 'V']
+    var_cross: Float[Array, 'V']
+    sigma_e_sq: Float[Array, 'V']
+    log_lik: Float[Array, 'V']
+    tier: str
+
+
 class LMEResult(NamedTuple):
     """General mixed-model fit output (the ``lme_fit`` dispatcher result).
 
@@ -773,6 +801,7 @@ def lme_fit(
     group: Int[Array, 'N'],
     z: Optional[Float[Array, 'N r']] = None,
     inner: Optional[Int[Array, 'N']] = None,
+    cross: Optional[Int[Array, 'N']] = None,
     corr: Optional[Union[str, CorrSpec]] = None,
     time: Optional[Float[Array, 'N']] = None,
     structure: Structure = 'unstructured',
@@ -780,7 +809,9 @@ def lme_fit(
     damping: float = 1e-6,
     block: Optional[int] = None,
     low_rank: bool = False,
-) -> Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult]:
+) -> Union[
+    REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult
+]:
     """Voxelwise mixed model, dispatched to the cheapest exact solver.
 
     A single grouping factor ``group`` with per-observation random covariates
@@ -818,9 +849,15 @@ def lme_fit(
       joining the REML ``theta``; cuSOLVER-free.  Returns a
       :class:`CorrLMEResult`.  ``z=None`` is the random intercept; ``z`` a random
       slope (``structure='diagonal'`` for ``(x || g)``).
-
-    Crossed / multiple grouping factors (R4) are the general sparse-MME follow-up
-    (v3 §1.1, Tier-2).
+    - **R4** -- two **crossed** scalar random intercepts ``(1 | group) +
+      (1 | cross)`` (pass the second factor as ``cross``; ``z`` / ``inner`` /
+      ``corr`` must be unset).  ``V`` is not block-diagonal across either factor,
+      so this is the sparse-MME regime (v3 §1.1, **Tier-2**): a Woodbury with the
+      combined design, whose inner matrix has diagonal blocks (the level counts)
+      and an off-diagonal incidence, so a diagonal Schur eliminates the larger
+      factor and leaves a single dense ``min(q_group, q_cross)^3`` solve per
+      Newton step (``_crossed``).  cuSOLVER-free; **cheap when one factor is small,
+      expensive when both are large.**  Returns a :class:`CrossedLMEResult`.
 
     Parameters
     ----------
@@ -837,6 +874,11 @@ def lme_fit(
         a sublevel ``g1:g2``).  When given, routes to the R3 nested solver
         (``z`` must be ``None``); ``None`` (default) keeps the single-factor
         R1/R2 dispatch.
+    cross
+        ``(N,)`` second **crossed** factor.  When given, routes to the R4 crossed
+        solver -- ``(1 | group) + (1 | cross)``, the two factors crossed (not
+        nested).  ``z`` / ``inner`` / ``corr`` must be unset.  Tier-2; cost scales
+        with the *smaller* factor's level count cubed.
     corr
         Within-group residual correlation structure (``'ar1'`` / ``'car1'`` /
         ``'cs'`` or a :class:`CorrSpec`).  When given, routes to the R2 + corr
@@ -854,12 +896,50 @@ def lme_fit(
 
     Returns
     -------
-    ``REMLResult`` (R1), ``LMEResult`` (R2), ``NestedLMEResult`` (R3), or
-    ``CorrLMEResult`` (R2 + corr).
+    ``REMLResult`` (R1), ``LMEResult`` (R2), ``NestedLMEResult`` (R3),
+    ``CorrLMEResult`` (R2 + corr), or ``CrossedLMEResult`` (R4 crossed).
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
     r = 1 if z is None else jnp.asarray(z).shape[-1]
+
+    if cross is not None:
+        # R4: two crossed scalar random intercepts (1|group) + (1|cross).
+        if z is not None or inner is not None or corr is not None:
+            raise NotImplementedError(
+                'lme_fit: crossed random effects (cross=) compose only with two '
+                'scalar intercepts; z / inner / corr are not yet supported '
+                'alongside it.'
+            )
+        from ._crossed import fit_crossed_reml
+
+        cross = jnp.asarray(cross)
+        q_g = n_groups
+        q_c = int(jnp.max(cross)) + 1
+        oh_g = jax.nn.one_hot(group, q_g, dtype=Y.dtype)
+        oh_c = jax.nn.one_hot(cross, q_c, dtype=Y.dtype)
+        # Order so the dense Schur solve is on the smaller factor (oh1 larger).
+        swap = q_c > q_g
+        oh1, oh2 = (oh_c, oh_g) if swap else (oh_g, oh_c)
+        var_y = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
+        w = jnp.asarray([0.25, 0.25, 0.5], dtype=Y.dtype)
+        theta_init = jnp.log(jnp.maximum(var_y * w, 1e-6))  # (V, 3)
+        spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+        theta_hat, beta_hat, log_lik = fit_crossed_reml(
+            Y, X, oh1, oh2, theta_init, spec=spec, block=block
+        )
+        var1 = jnp.exp(theta_hat[:, 0])  # variance of oh1
+        var2 = jnp.exp(theta_hat[:, 1])  # variance of oh2
+        var_group = var2 if swap else var1
+        var_cross = var1 if swap else var2
+        return CrossedLMEResult(
+            beta_hat=beta_hat,
+            var_group=var_group,
+            var_cross=var_cross,
+            sigma_e_sq=jnp.exp(theta_hat[:, 2]),
+            log_lik=log_lik,
+            tier='R4',
+        )
 
     if corr is not None:
         # R2 + corr: a random effect *and* a structured within-group residual.
@@ -931,8 +1011,8 @@ def lme_fit(
 
     # R2: one correlated / diagonal random effect -> block-Woodbury REML.
     from ._blockwoodbury import (
-        _build_chol,
         _param_layout,
+        cov_re_from_chol,
         fit_blockwoodbury_reml,
     )
 
@@ -958,12 +1038,9 @@ def lme_fit(
         block=block,
         diagonal=diagonal,
     )
-    cov_re = jax.vmap(
-        lambda th: (
-            _build_chol(th[:-1], r, diagonal)
-            @ _build_chol(th[:-1], r, diagonal).T
-        )
-    )(theta_hat)  # (V, r, r)
+    cov_re = jax.vmap(lambda th: cov_re_from_chol(th[:-1], r, diagonal))(
+        theta_hat
+    )  # (V, r, r)
     sigma_e_sq = jnp.exp(theta_hat[:, -1])
     return LMEResult(
         beta_hat=beta_hat,

@@ -35,7 +35,7 @@ from jaxtyping import Array, Bool, Float, Int
 
 from .._batching import blocked_vmap
 from .._smalllinalg import small_inv_logdet
-from ._blockwoodbury import _build_chol, _nll_and_beta, _param_layout
+from ._blockwoodbury import _nll_and_beta, _param_layout, cov_re_from_chol
 from ._corr import CorrSpec, resolve_corr
 from ._optimise import damped_newton
 from ._varcomp import VarCompSpec
@@ -88,26 +88,32 @@ def build_group_layout(
         keys = (np.arange(n), g_np)
     else:
         keys = (np.arange(n), t_np, g_np)
-    order = np.lexsort(keys)
+    order = np.lexsort(keys)  # row indices, sorted by group then time
     g_sorted = g_np[order]
     sizes = np.bincount(g_sorted, minlength=n_groups)
     t_max = int(sizes.max()) if n_groups else 0
 
+    # Left-pack vectorised (no Python loop over N): the sorted array is grouped
+    # contiguously, so each entry's within-group column is its sorted position
+    # minus its group's start offset.
+    group_start = np.zeros(n_groups, dtype=np.int64)
+    group_start[1:] = np.cumsum(sizes)[:-1]
+    within = np.arange(n, dtype=np.int64) - group_start[g_sorted]  # (N,)
+
     idx = np.zeros((n_groups, t_max), dtype=np.int64)
     gaps = np.zeros((n_groups, t_max), dtype=np.float64)
     mask = np.zeros((n_groups, t_max), dtype=bool)
-    pos = np.zeros(n_groups, dtype=np.int64)
-    for orig in order:
-        gid = g_np[orig]
-        p = pos[gid]
-        idx[gid, p] = orig
-        mask[gid, p] = True
-        if p >= 1:
-            prev = idx[gid, p - 1]
-            gaps[gid, p] = (
-                float(t_np[orig] - t_np[prev]) if time is not None else 1.0
-            )
-        pos[gid] += 1
+    idx[g_sorted, within] = order
+    mask[g_sorted, within] = True
+    if t_max:
+        t_sorted = t_np[order]
+        prev_t = np.empty(n, dtype=np.float64)
+        prev_t[:1] = 0.0
+        prev_t[1:] = t_sorted[:-1]
+        # gap to the previous in-group observation (column 0 has none -> 0);
+        # unit gaps when no times are given (AR1).
+        gap_val = (t_sorted - prev_t) if time is not None else np.ones(n)
+        gaps[g_sorted, within] = np.where(within >= 1, gap_val, 0.0)
 
     return GroupLayout(
         idx=jnp.asarray(idx),
@@ -235,7 +241,7 @@ def fit_corr_gls(
     corr: CorrSpec,
     *,
     time: Optional[Float[Array, 'N']] = None,
-    n_iter: int = 30,
+    n_iter: int = 15,
     damping: float = 1e-6,
     block: Optional[int] = None,
 ) -> GLSResult:
@@ -281,7 +287,7 @@ def gls_fit(
     group: Int[Array, 'N'],
     corr: Union[str, CorrSpec],
     time: Optional[Float[Array, 'N']] = None,
-    n_iter: int = 30,
+    n_iter: int = 15,
     damping: float = 1e-6,
     block: Optional[int] = None,
 ) -> GLSResult:
@@ -549,12 +555,9 @@ def fit_corr_lme(
         Tuple[Array, Array, Array],
         blocked_vmap(per_voxel, (Y, theta_init), block=block),
     )
-    cov_re = jax.vmap(
-        lambda th: (
-            _build_chol(th[:nt_g], r, diagonal)
-            @ _build_chol(th[:nt_g], r, diagonal).T
-        )
-    )(theta_hat)  # (V, r, r)
+    cov_re = jax.vmap(lambda th: cov_re_from_chol(th[:nt_g], r, diagonal))(
+        theta_hat
+    )  # (V, r, r)
     sigma_e_sq = jnp.exp(theta_hat[:, nt_g])
     rho = jax.vmap(lambda th: corr.to_natural(th[nt_g + 1 :]))(theta_hat)
     return CorrLMEResult(

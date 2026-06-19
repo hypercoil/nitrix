@@ -32,6 +32,7 @@ from ._corr import CorrSpec, ar1, car1, cs
 from ._corrfit import CorrLMEResult, GLSResult, gls_fit
 from .flame import FLAMEResult, flame_two_level
 from .reml import (
+    CrossedLMEResult,
     LMEContrast,
     LMEFContrast,
     LMEResult,
@@ -48,6 +49,7 @@ __all__ = [
     'REMLResult',
     'LMEResult',
     'NestedLMEResult',
+    'CrossedLMEResult',
     'LMEContrast',
     'LMEFContrast',
     'FLAMEResult',
