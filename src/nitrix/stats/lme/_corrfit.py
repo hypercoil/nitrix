@@ -37,9 +37,10 @@ from jaxtyping import Array, Bool, Float, Int
 from ...linalg._smalllinalg import small_inv_logdet
 from .._batching import blocked_vmap
 from .._result import register_result
-from ._blockwoodbury import _nll_and_beta, _param_layout, cov_re_from_chol
+from ._blockwoodbury import _nll_and_beta
 from ._corr import CorrSpec, resolve_corr
 from ._optimise import damped_newton
+from ._recov import _param_layout, cov_re_from_chol
 from ._varcomp import VarCompSpec
 from ._varfunc import VarFunc, _apply_var_scale
 

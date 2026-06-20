@@ -82,6 +82,7 @@ from ._result import register_result
 from .basis import re_smooth
 from .gam import gam_fit
 from .lme._optimise import damped_newton
+from .lme._recov import _param_layout, cov_re_from_chol
 from .lme._varcomp import VarCompSpec
 
 __all__ = ['GLMMResult', 'glmm_fit']
@@ -997,7 +998,6 @@ def _laplace_slope_modes(
     differ at higher order, so this is an approximation choice, not the exact
     observed-information Laplace.
     """
-    from .lme._blockwoodbury import cov_re_from_chol
 
     beta = theta[:p]
     g_inv, _ = small_inv_logdet(cov_re_from_chol(theta[p:], r, diagonal), r)
@@ -1058,7 +1058,6 @@ def _laplace_slope_nll(
     determinant correction (reduces to it at ``r = 1``: ``logdet G = log
     sigma_b^2``, ``logdet H_g = log(sum_i w_i + 1/sigma_b^2)``).
     """
-    from .lme._blockwoodbury import cov_re_from_chol
 
     g_inv, logdet_g = small_inv_logdet(
         cov_re_from_chol(theta[p:], r, diagonal), r
@@ -1094,7 +1093,6 @@ def _glmm_laplace_slope_one(
     """Single-element Laplace random-slope GLMM fit.  Returns ``(beta, blups,
     G, deviance)``."""
     from ._irls import irls_warm_start
-    from .lme._blockwoodbury import _param_layout, cov_re_from_chol
 
     def nll(theta: Float[Array, 'pm']) -> Float[Array, '']:
         return _laplace_slope_nll(
@@ -1223,7 +1221,6 @@ def _agq_slope_nll(
     density directly, correcting the Laplace bias for small / low-count clusters
     (lme4's ``nAGQ``).
     """
-    from .lme._blockwoodbury import cov_re_from_chol
 
     beta = theta[:p]
     g_inv, logdet_g = small_inv_logdet(
@@ -1280,7 +1277,6 @@ def _glmm_agq_slope_one(
     deviance)`` -- as the Laplace fit, but the marginal is the ``n_quad``-point
     adaptive GH integral."""
     from ._irls import irls_warm_start
-    from .lme._blockwoodbury import _param_layout, cov_re_from_chol
 
     def nll(theta: Float[Array, 'pm']) -> Float[Array, '']:
         return _agq_slope_nll(

@@ -1119,11 +1119,8 @@ def lme_fit(
         )
 
     # R2: one correlated / diagonal random effect -> block-Woodbury REML.
-    from ._blockwoodbury import (
-        _param_layout,
-        cov_re_from_chol,
-        fit_blockwoodbury_reml,
-    )
+    from ._blockwoodbury import fit_blockwoodbury_reml
+    from ._recov import _param_layout, cov_re_from_chol
 
     diagonal = structure == 'diagonal'
     z_arr = jnp.asarray(z, dtype=Y.dtype)
