@@ -89,6 +89,7 @@ __all__ = [
     'CLOGLOG_LINK',
     'SQRT_LINK',
     'INVERSE_LINK',
+    'resolve_family',
     'resolve_link',
     'GAUSSIAN',
     'BINOMIAL',

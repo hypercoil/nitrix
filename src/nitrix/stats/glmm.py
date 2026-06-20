@@ -87,6 +87,12 @@ __all__ = ['GLMMResult', 'glmm_fit']
 
 _EPS = 1e-10
 
+# AGQ node-count cap: the tensor grid is ``n_quad ** r`` nodes, differentiated
+# through the mode scan, so it is a compile/memory cliff for a large random-effect
+# dimension r.  ``128`` admits every realistic r=2 fit (n_quad up to 11) and r=3
+# up to n_quad=5, while blocking the genuine explosions (r>=4, large r=3).
+_AGQ_MAX_NODES = 128
+
 
 # ---------------------------------------------------------------------------
 # Result container
@@ -115,10 +121,18 @@ class GLMMResult:
     dispersion
         ``(V,)`` scale ``phi`` (residual variance for Gaussian / Gamma; ``1`` for
         the fixed-dispersion families -- binomial / Poisson / negative-binomial).
+        For the ``'laplace'`` / ``'agq'`` tiers this is a placeholder ``1`` (the
+        marginal-likelihood fits do not estimate a working dispersion) -- not for
+        model comparison.
     deviance
-        ``(V,)`` model deviance at the converged mean.
+        ``(V,)`` model deviance at the converged mean.  For ``'laplace'`` / ``'agq'``
+        it is ``-2`` x the (approximate) marginal log-likelihood (the ``glmer``
+        deviance), directly comparable across those fits.
     edf_total
-        ``(V,)`` total effective degrees of freedom (fixed + random).
+        ``(V,)`` total effective degrees of freedom (fixed + random).  For the
+        ``'laplace'`` / ``'agq'`` tiers this is the **fixed-effect count ``p``
+        only** (a placeholder, not the marginal effective df) -- do not form an
+        AIC/BIC from it.
     tier
         Which solver ran: ``'few'`` (dense GAMM ``gam_fit``) or ``'many'`` (the
         structured Schur-complement PQL); ``'laplace'`` for the Laplace fit;
@@ -1504,6 +1518,17 @@ def glmm_fit(
                 n_outer, n_mode, damping, diagonal, block,
             )
         if method == 'agq':
+            r = z.shape[-1]
+            n_nodes = n_quad**r
+            if n_nodes > _AGQ_MAX_NODES:
+                raise ValueError(
+                    f'glmm_fit: AGQ tensor grid has n_quad**r = {n_quad}**{r} '
+                    f'= {n_nodes} nodes (> {_AGQ_MAX_NODES}); the per-element '
+                    f'graph grows as n_quad**r and is differentiated through the '
+                    f'mode scan, so a large r is a compile / memory cliff.  Use a '
+                    f"smaller n_quad, method='laplace' (= AGQ with n_quad=1), or "
+                    f'a lower-dimensional random effect.'
+                )
             return _glmm_agq_slope(
                 Y, X, group, n_groups, z, family,
                 n_outer, n_mode, damping, diagonal, n_quad, block,

@@ -157,3 +157,14 @@ def test_resolve_link_validation():
     assert resolve_link(custom) is custom
     with pytest.raises(ValueError, match='unknown link'):
         resolve_link('bogus')
+
+
+def test_resolve_family_is_exported():
+    # D5: resolve_family was reachable but not exported (asymmetry with
+    # resolve_link); it is now part of the public stats surface.
+    import nitrix.stats as ns
+    from nitrix.stats import BINOMIAL, resolve_family
+
+    assert 'resolve_family' in ns.__all__
+    assert resolve_family('binomial') is BINOMIAL
+    assert resolve_family(BINOMIAL) is BINOMIAL

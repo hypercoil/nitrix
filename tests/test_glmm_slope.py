@@ -527,3 +527,10 @@ def test_agq_shapes_and_validation():
     # AGQ requires a slope; z=None raises.
     with pytest.raises(NotImplementedError, match='agq'):
         glmm_fit(Y, Xj, group=gj, family='poisson', method='agq')
+    # P3: the n_quad**r node-count cap blocks the compile/memory cliff.
+    z3 = jnp.concatenate([zj, zj[:, :1]], axis=-1)  # r = 3
+    with pytest.raises(ValueError, match=r'n_quad\*\*r'):
+        glmm_fit(
+            Y, Xj, group=gj, z=z3, structure='unstructured', family='poisson',
+            method='agq', n_quad=6,  # 6**3 = 216 > 128
+        )
