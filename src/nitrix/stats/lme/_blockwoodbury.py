@@ -50,7 +50,7 @@ from jaxtyping import Array, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet as _small_inv_logdet
 from .._batching import blocked_vmap as _blocked_vmap
-from ._optimise import damped_newton
+from .._optimise import damped_newton
 from ._recov import _build_chol
 from ._varcomp import VarCompSpec
 
@@ -337,7 +337,11 @@ def _fit_one(
         )
 
     theta = damped_newton(
-        nll, theta_init, spec=spec, curvature=curvature, step='damped'
+        nll,
+        theta_init,
+        **spec.newton_kwargs,
+        curvature=curvature,
+        step='damped',
     )
     final_nll, beta = _nll_and_beta(
         theta,

@@ -2,16 +2,23 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-The one shared damped/saddle-free Newton optimiser for the variance-component
-fits.
+The one shared damped/saddle-free Newton optimiser for the small-parameter fits.
 
-Every REML variance-component fit in this package minimises a (small,
-unconstrained) profile negative-log-likelihood by a fixed-iteration damped
-Newton with a backtracking line search.  Historically each solver
-(``_blockwoodbury`` / ``_nested`` / ``_corrfit``) re-implemented that loop as its
-own closure, which let the step rule drift -- the saddle-free fix below was at
-one point present in only one copy, leaving the others exposed to a silent
-non-convergence bug.  This module is the single source of truth.
+Every REML variance-component fit -- and the ordinal cumulative-link fit --
+minimises a small, unconstrained negative-log-likelihood by a fixed-iteration
+damped Newton with a backtracking line search.  Historically each solver
+re-implemented that loop as its own closure, which let the step rule drift -- the
+saddle-free fix below was at one point present in only one copy, leaving the
+others exposed to a silent non-convergence bug.  This module is the single source
+of truth.
+
+It lives in ``stats/`` (beside ``_irls`` / ``_batching``), **not** ``lme/`` (audit
+O2): it is a generic small-problem optimiser, so it takes its iteration budget as
+**primitive kwargs** (``n_iter`` / ``damping`` / ``max_step`` / ``n_backtrack``)
+rather than a ``lme`` ``VarCompSpec`` -- the non-mixed-model callers (e.g.
+``_ordinal``) no longer have to build a variance-components spec they have no use
+for.  ``VarCompSpec`` stays in ``lme/_varcomp.py`` and unpacks itself via
+``**spec.newton_kwargs`` at the mixed-model call sites.
 
 Two curvature sources, one optimiser (the closed-form vs autodiff *fork*)
 ----------------------------------------------------------------------
@@ -25,7 +32,7 @@ callback returning ``(gradient, curvature_matrix)``:
 - ``curvature=<fn>`` -- the **analytic** path: the solver supplies its own score
   and curvature (e.g. the AI-REML average-information matrix), so no autodiff
   Hessian is formed.  This is the seam the analytic AI-REML engines
-  (``_varcomp`` / ``_lowrank``) can adopt.
+  (``_varcomp`` / ``_lowrank``) adopt.
 
 The step rule (``step=``)
 ------------------------
@@ -44,7 +51,7 @@ The step rule (``step=``)
 - ``'damped'`` -- the classic Levenberg step ``(H + lambda I)^{-1} g`` via
   ``small_inv_logdet``.  Correct when ``H`` is PSD by construction -- e.g. the
   AI-REML average-information matrix -- so it is the right choice for the
-  analytic-curvature solvers (and bit-for-bit with their current behaviour).
+  analytic-curvature solvers.
 
 References
 ----------
@@ -54,19 +61,14 @@ References
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Literal, Optional, Tuple, cast
+from typing import Callable, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
-from ...linalg._smalllinalg import small_inv_logdet, sym_eig_jacobi
-
-if TYPE_CHECKING:
-    # Annotation only -- importing at runtime would cycle (``_varcomp`` imports
-    # ``damped_newton``).  Only ``spec``'s primitive fields are used here.
-    from ._varcomp import VarCompSpec
+from ..linalg._smalllinalg import small_inv_logdet, sym_eig_jacobi
 
 __all__ = ['damped_newton']
 
@@ -79,7 +81,8 @@ def _newton_direction(
     g: Float[Array, 'nt'],
     h: Float[Array, 'nt nt'],
     nt: int,
-    spec: VarCompSpec,
+    damping: float,
+    max_step: float,
     step: StepRule,
 ) -> Float[Array, 'nt']:
     """The (clipped) Newton step ``-H^{-1} g`` under the chosen step rule."""
@@ -88,19 +91,19 @@ def _newton_direction(
         # direction even at an indefinite (saddle) Hessian.  The iterative eig
         # shapes the step only, so it rides under stop_gradient.
         evals, evecs = sym_eig_jacobi(lax.stop_gradient(h), nt)
-        evals_pd = jnp.maximum(jnp.abs(evals), spec.damping)
+        evals_pd = jnp.maximum(jnp.abs(evals), damping)
         h_inv = (evecs / evals_pd) @ evecs.T
     else:
-        h_damped = h + spec.damping * jnp.eye(nt, dtype=h.dtype)
+        h_damped = h + damping * jnp.eye(nt, dtype=h.dtype)
         h_inv, _ = small_inv_logdet(h_damped, nt)
-    return jnp.clip(h_inv @ g, -spec.max_step, spec.max_step)
+    return jnp.clip(h_inv @ g, -max_step, max_step)
 
 
 def _backtrack(
     nll: Callable[[Float[Array, 'nt']], Float[Array, '']],
     theta: Float[Array, 'nt'],
     delta: Float[Array, 'nt'],
-    spec: VarCompSpec,
+    n_backtrack: int,
 ) -> Float[Array, 'nt']:
     """Halving line search: take the largest ``scale`` in ``{1, 1/2, ...}`` that
     decreases ``nll`` (keep ``theta`` if none does)."""
@@ -120,7 +123,7 @@ def _backtrack(
         )
 
     init = (jnp.asarray(1.0, theta.dtype), theta, nll_old)
-    _, theta_new, _ = lax.fori_loop(0, spec.n_backtrack, bt, init)
+    _, theta_new, _ = lax.fori_loop(0, n_backtrack, bt, init)
     return cast(Float[Array, 'nt'], theta_new)
 
 
@@ -128,11 +131,14 @@ def damped_newton(
     nll: Callable[[Float[Array, 'nt']], Float[Array, '']],
     theta0: Float[Array, 'nt'],
     *,
-    spec: VarCompSpec,
+    n_iter: int,
+    damping: float = 1e-6,
+    max_step: float = 1.0,
+    n_backtrack: int = 4,
     curvature: Optional[Curvature] = None,
     step: StepRule = 'saddle_free',
 ) -> Float[Array, 'nt']:
-    """Minimise ``nll`` from ``theta0`` by ``spec.n_iter`` damped Newton steps.
+    """Minimise ``nll`` from ``theta0`` by ``n_iter`` damped Newton steps.
 
     Parameters
     ----------
@@ -140,9 +146,14 @@ def damped_newton(
         The scalar objective ``theta -> negative log-likelihood``.
     theta0
         Initial parameter vector.
-    spec
-        :class:`~nitrix.stats.lme._varcomp.VarCompSpec` supplying ``n_iter``,
-        ``damping``, ``max_step``, ``n_backtrack``.
+    n_iter
+        Fixed number of Newton-scoring iterations.
+    damping
+        Levenberg / eigenvalue floor stabilising the step near a boundary.
+    max_step
+        Per-axis clip on the update (Newton overshoot guard).
+    n_backtrack
+        Backtracking halvings tried when the full step does not decrease ``nll``.
     curvature
         Optional ``theta -> (grad, curvature_matrix)``.  ``None`` (default) uses
         ``jax.grad`` + ``jax.hessian`` of ``nll`` (the autodiff fork); supply a
@@ -153,7 +164,8 @@ def damped_newton(
     Returns
     -------
     The optimised ``theta`` (the caller re-evaluates the objective for the
-    fitted statistics).
+    fitted statistics).  Mixed-model callers pass ``**spec.newton_kwargs`` to
+    forward their :class:`VarCompSpec` budget.
     """
     nt = theta0.shape[0]
     if curvature is None:
@@ -169,8 +181,8 @@ def damped_newton(
 
     def newton(theta: Float[Array, 'nt'], _: Array) -> Tuple[Array, None]:
         g, h = curv_fn(theta)
-        delta = _newton_direction(g, h, nt, spec, step)
-        return _backtrack(nll, theta, delta, spec), None
+        delta = _newton_direction(g, h, nt, damping, max_step, step)
+        return _backtrack(nll, theta, delta, n_backtrack), None
 
-    theta, _ = lax.scan(newton, theta0, xs=None, length=spec.n_iter)
+    theta, _ = lax.scan(newton, theta0, xs=None, length=n_iter)
     return theta

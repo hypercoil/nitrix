@@ -78,10 +78,10 @@ from ..linalg._smalllinalg import small_inv_logdet, spd_chol
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import safe_dmu
+from ._optimise import damped_newton
 from ._result import register_result
 from .basis import re_smooth
 from .gam import gam_fit
-from .lme._optimise import damped_newton
 from .lme._recov import _param_layout, cov_re_from_chol
 from .lme._varcomp import VarCompSpec
 
@@ -915,7 +915,7 @@ def _glmm_laplace_one(
     theta0 = jnp.concatenate(
         [jnp.zeros((p,), dtype=X.dtype), jnp.asarray([0.0], dtype=X.dtype)]
     )  # beta = 0, log sigma_b^2 = 0
-    theta = damped_newton(nll, theta0, spec=spec)
+    theta = damped_newton(nll, theta0, **spec.newton_kwargs)
     beta = theta[:p]
     sb2 = jnp.exp(theta[p])
     b, _, _ = _laplace_conditional_modes(
@@ -1110,7 +1110,7 @@ def _glmm_laplace_slope_one(
         y, X, family, penalty=jnp.zeros((p, p), dtype=y.dtype), ridge=spec.ridge
     )
     theta0 = jnp.concatenate([beta0, chol0])
-    theta = damped_newton(nll, theta0, spec=spec)
+    theta = damped_newton(nll, theta0, **spec.newton_kwargs)
     beta = theta[:p]
     g_cov = cov_re_from_chol(theta[p:], r, diagonal)
     b, _, _ = _laplace_slope_modes(
@@ -1293,7 +1293,9 @@ def _glmm_agq_slope_one(
     beta0 = irls_warm_start(
         y, X, family, penalty=jnp.zeros((p, p), dtype=y.dtype), ridge=spec.ridge
     )
-    theta = damped_newton(nll, jnp.concatenate([beta0, chol0]), spec=spec)
+    theta = damped_newton(
+        nll, jnp.concatenate([beta0, chol0]), **spec.newton_kwargs
+    )
     beta = theta[:p]
     g_cov = cov_re_from_chol(theta[p:], r, diagonal)
     b, _, _ = _laplace_slope_modes(

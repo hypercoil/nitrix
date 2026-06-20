@@ -47,7 +47,7 @@ from jaxtyping import Array, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet
 from .._batching import blocked_vmap
-from ._optimise import damped_newton
+from .._optimise import damped_newton
 from ._varcomp import VarCompSpec
 
 __all__ = ['NestedStats', 'nested_layout', 'fit_nested_reml']
@@ -210,7 +210,7 @@ def _fit_one(
             theta, stats, sy, gxy, gyy, sy1, p, n, spec.ridge
         )[0]
 
-    theta = damped_newton(nll, theta_init, spec=spec)
+    theta = damped_newton(nll, theta_init, **spec.newton_kwargs)
     final_nll, beta = _nll_and_beta(
         theta, stats, sy, gxy, gyy, sy1, p, n, spec.ridge
     )

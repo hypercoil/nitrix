@@ -53,7 +53,7 @@ from jaxtyping import Array, Float
 
 from ...linalg._smalllinalg import small_inv_logdet as _small_inv_logdet
 from .._batching import blocked_vmap as _blocked_vmap
-from ._optimise import damped_newton
+from .._optimise import damped_newton
 from ._varcomp import VarCompSpec
 
 __all__ = ['fit_lowrank_reml', 'lowrank_inference']
@@ -241,7 +241,11 @@ def _fit_one(
         return score, info
 
     theta_final = damped_newton(
-        nll, theta_init, spec=spec, curvature=curvature, step='damped'
+        nll,
+        theta_init,
+        **spec.newton_kwargs,
+        curvature=curvature,
+        step='damped',
     )
     beta, _, _, _, _ = _gls(theta_final, y_r, X_r, s2, gxx, gxy, p, spec.ridge)
     return theta_final, beta, -nll(theta_final)

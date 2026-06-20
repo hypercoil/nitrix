@@ -40,9 +40,8 @@ from jaxtyping import Array, Float, Int
 
 from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
+from ._optimise import damped_newton
 from ._result import register_result
-from .lme._optimise import damped_newton
-from .lme._varcomp import VarCompSpec
 
 __all__ = ['OrdinalResult', 'ordinal_fit']
 
@@ -117,7 +116,8 @@ def _ordinal_fit_one(
     k: int,
     p: int,
     cdf: Any,
-    spec: VarCompSpec,
+    n_iter: int,
+    ridge: float,
     raw0: Float[Array, 'nt'],
 ) -> Tuple[Float[Array, 'Km1'], Float[Array, 'p'], Float[Array, 'p p'], Float[Array, '']]:
     """Single-element ordinal fit.  Returns ``(thresholds, coef, cov_coef,
@@ -126,13 +126,13 @@ def _ordinal_fit_one(
     def nll(raw: Float[Array, 'nt']) -> Float[Array, '']:
         return _ordinal_nll(raw, y, X, k, p, cdf)
 
-    raw = damped_newton(nll, raw0, spec=spec, step='damped')
+    raw = damped_newton(nll, raw0, n_iter=n_iter, damping=ridge, step='damped')
     theta = _thresholds(raw, k)
     beta = raw[k - 1 :]
     nt = raw.shape[0]
     hess = jax.hessian(nll)(raw)
     hess_inv, _ = small_inv_logdet(
-        hess + spec.ridge * jnp.eye(nt, dtype=X.dtype), nt
+        hess + ridge * jnp.eye(nt, dtype=X.dtype), nt
     )
     cov_coef = hess_inv[k - 1 :, k - 1 :]
     return theta, beta, cov_coef, -nll(raw)
@@ -194,7 +194,6 @@ def ordinal_fit(
             f"ordinal_fit: link={link!r}; expected 'logit' or 'probit'."
         )
     k = n_classes
-    spec = VarCompSpec(n_iter=n_iter, damping=ridge)
     # Spread the initial thresholds across the response, zero slope.
     raw0 = jnp.concatenate(
         [
@@ -208,7 +207,7 @@ def ordinal_fit(
         y: Int[Array, 'N'],
     ) -> Tuple[Array, Array, Array, Array]:
         return _ordinal_fit_one(
-            y.astype(jnp.int32), X, k, p, cdf, spec, raw0
+            y.astype(jnp.int32), X, k, p, cdf, n_iter, ridge, raw0
         )
 
     thresholds, coef, cov_coef, log_lik = cast(
