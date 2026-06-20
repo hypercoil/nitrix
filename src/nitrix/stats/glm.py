@@ -47,7 +47,7 @@ ship, and a custom family is just another ``Family(...)``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -78,6 +78,7 @@ from ._family import (
     tweedie,
 )
 from ._irls import fit_penalised_irls, irls_warm_start
+from ._result import register_result
 
 __all__ = [
     'Family',
@@ -122,7 +123,17 @@ _EPS = 1e-10
 # ---------------------------------------------------------------------------
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=(
+        'coef',
+        'cov_unscaled',
+        'dispersion',
+        'deviance',
+        'null_deviance',
+        'log_lik',
+    ),
+    aux=('family', 'n_obs', 'rank'),
+)
 @dataclass(frozen=True)
 class GLMResult:
     """Per-element GLM fit output.
@@ -165,39 +176,6 @@ class GLMResult:
     def n_params(self) -> int:
         """Number of estimated parameters (coefficients + a dispersion)."""
         return self.rank + (0 if self.family.has_fixed_dispersion else 1)
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], Tuple[Family, int, int]]:
-        children = (
-            self.coef,
-            self.cov_unscaled,
-            self.dispersion,
-            self.deviance,
-            self.null_deviance,
-            self.log_lik,
-        )
-        return children, (self.family, self.n_obs, self.rank)
-
-    @classmethod
-    def tree_unflatten(
-        cls, aux: Tuple[Family, int, int], children: Tuple[Any, ...]
-    ) -> 'GLMResult':
-        family, n_obs, rank = aux
-        coef, cov_unscaled, dispersion, deviance, null_deviance, log_lik = (
-            children
-        )
-        return cls(
-            coef=coef,
-            cov_unscaled=cov_unscaled,
-            dispersion=dispersion,
-            deviance=deviance,
-            null_deviance=null_deviance,
-            log_lik=log_lik,
-            family=family,
-            n_obs=n_obs,
-            rank=rank,
-        )
 
 
 # ---------------------------------------------------------------------------

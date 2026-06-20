@@ -26,6 +26,7 @@ on the ``(p, p)`` whitened Gram.  Groups ride in a left-packed, time-sorted
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import NamedTuple, Optional, Tuple, Union, cast
 
 import jax
@@ -35,6 +36,7 @@ from jaxtyping import Array, Bool, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet
 from .._batching import blocked_vmap
+from .._result import register_result
 from ._blockwoodbury import _nll_and_beta, _param_layout, cov_re_from_chol
 from ._corr import CorrSpec, resolve_corr
 from ._optimise import damped_newton
@@ -124,7 +126,19 @@ def build_group_layout(
     )
 
 
-class GLSResult(NamedTuple):
+@register_result(
+    children=(
+        'beta_hat',
+        'sigma_e_sq',
+        'rho',
+        'var_params',
+        'log_lik',
+        'fixed_cov',
+    ),
+    aux=('df_resid', 'corr', 'weights'),
+)
+@dataclass(frozen=True)
+class GLSResult:
     """Per-voxel GLS fit with a structured residual.
 
     Attributes
@@ -402,7 +416,12 @@ def gls_fit(
 # ---------------------------------------------------------------------------
 
 
-class CorrLMEResult(NamedTuple):
+@register_result(
+    children=('beta_hat', 'cov_re', 'sigma_e_sq', 'rho', 'log_lik'),
+    aux=('corr', 'tier'),
+)
+@dataclass(frozen=True)
+class CorrLMEResult:
     """Per-voxel mixed model with a structured within-group residual (R2 + corr).
 
     Attributes

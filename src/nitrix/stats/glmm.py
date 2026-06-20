@@ -65,7 +65,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, Union, cast
+from typing import Optional, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -78,6 +78,7 @@ from ..linalg._smalllinalg import small_inv_logdet, spd_chol
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import safe_dmu
+from ._result import register_result
 from .basis import re_smooth
 from .gam import gam_fit
 from .lme._optimise import damped_newton
@@ -99,7 +100,17 @@ _AGQ_MAX_NODES = 128
 # ---------------------------------------------------------------------------
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=(
+        'beta_hat',
+        'blups',
+        're_var',
+        'dispersion',
+        'deviance',
+        'edf_total',
+    ),
+    aux=('family', 'n_obs', 'n_groups', 'tier'),
+)
 @dataclass(frozen=True)
 class GLMMResult:
     """Per-element random-intercept GLMM fit output (PQL).
@@ -113,11 +124,14 @@ class GLMMResult:
         slope (``z`` with ``r`` columns) this is ``(V, q, r)`` -- one ``r``-vector
         per level.
     re_var
-        ``(V,)`` random-effect variance ``sigma_b^2 = phi / lambda`` (``phi`` the
-        dispersion, ``lambda`` the Fellner-Schall precision on the RE block).  For
-        a random slope this is ``(V, r)`` (``structure='diagonal'``, the per-column
-        variance components) or ``(V, r, r)`` (``structure='unstructured'``, the
-        full random-effect covariance ``G``).
+        ``(V, r, r)`` random-effect covariance ``G`` -- **uniform across every
+        tier** (D4), matching :class:`LMEResult.cov_re` so downstream ``vmap`` /
+        indexing never has to branch on the fit kind.  A scalar random intercept
+        is ``(V, 1, 1)`` (``G = sigma_b^2 = phi / lambda``, with ``phi`` the
+        dispersion and ``lambda`` the Fellner-Schall precision on the RE block); a
+        diagonal random slope (``structure='diagonal'``) carries the per-column
+        variance components on the diagonal with zero off-diagonals; an
+        unstructured slope (``structure='unstructured'``) is the full covariance.
     dispersion
         ``(V,)`` scale ``phi`` (residual variance for Gaussian / Gamma; ``1`` for
         the fixed-dispersion families -- binomial / Poisson / negative-binomial).
@@ -142,7 +156,7 @@ class GLMMResult:
 
     beta_hat: Float[Array, 'V p']
     blups: Float[Array, 'V q']
-    re_var: Float[Array, 'V']
+    re_var: Float[Array, 'V r r']
     dispersion: Float[Array, 'V']
     deviance: Float[Array, 'V']
     edf_total: Float[Array, 'V']
@@ -150,43 +164,6 @@ class GLMMResult:
     n_obs: int
     n_groups: int
     tier: str
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], Tuple[Any, ...]]:
-        children = (
-            self.beta_hat,
-            self.blups,
-            self.re_var,
-            self.dispersion,
-            self.deviance,
-            self.edf_total,
-        )
-        return children, (
-            self.family,
-            self.n_obs,
-            self.n_groups,
-            self.tier,
-        )
-
-    @classmethod
-    def tree_unflatten(
-        cls, aux: Tuple[Any, ...], children: Tuple[Any, ...]
-    ) -> 'GLMMResult':
-        family, n_obs, n_groups, tier = aux
-        (beta_hat, blups, re_var, dispersion, deviance, edf_total) = children
-        return cls(
-            beta_hat=beta_hat,
-            blups=blups,
-            re_var=re_var,
-            dispersion=dispersion,
-            deviance=deviance,
-            edf_total=edf_total,
-            family=family,
-            n_obs=n_obs,
-            n_groups=n_groups,
-            tier=tier,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -233,11 +210,11 @@ def _glmm_few_level(
     beta_hat = res.coef[:, :p]  # (V, p)
     blups = res.coef[:, p : p + n_groups]  # (V, q)
     # sigma_b^2 = phi / lambda (the FS precision on the identity RE penalty).
-    re_var = res.dispersion / jnp.clip(res.lam[:, 0], _EPS, None)
+    re_var = res.dispersion / jnp.clip(res.lam[:, 0], _EPS, None)  # (V,)
     return GLMMResult(
         beta_hat=beta_hat,
         blups=blups,
-        re_var=re_var,
+        re_var=re_var[:, None, None],  # (V, 1, 1) -- uniform G shape (D4)
         dispersion=res.dispersion,
         deviance=res.deviance,
         edf_total=res.edf_total,
@@ -299,13 +276,15 @@ def _glmm_slope_diagonal(
     blups = jnp.swapaxes(
         res.coef[:, p : p + r * q].reshape(-1, r, q), 1, 2
     )  # (V, q, r)
-    re_var = res.dispersion[:, None] / jnp.clip(
+    re_var_diag = res.dispersion[:, None] / jnp.clip(
         res.lam[:, :r], _EPS, None
-    )  # (V, r)
+    )  # (V, r) per-column variance components
+    # D4: embed on the diagonal of a uniform (V, r, r) G (zero off-diagonals).
+    re_var = re_var_diag[..., None] * jnp.eye(r, dtype=re_var_diag.dtype)
     return GLMMResult(
         beta_hat=beta_hat,
         blups=blups,
-        re_var=re_var,
+        re_var=re_var,  # (V, r, r) diagonal
         dispersion=res.dispersion,
         deviance=res.deviance,
         edf_total=res.edf_total,
@@ -808,7 +787,7 @@ def _glmm_many_level(
     return GLMMResult(
         beta_hat=beta,
         blups=blups,
-        re_var=re_var,
+        re_var=re_var[:, None, None],  # (V, 1, 1) -- uniform G shape (D4)
         dispersion=phi,
         deviance=deviance,
         edf_total=edf_total,
@@ -971,7 +950,7 @@ def _glmm_laplace(
     return GLMMResult(
         beta_hat=beta,
         blups=blups,
-        re_var=re_var,
+        re_var=re_var[:, None, None],  # (V, 1, 1) -- uniform G shape (D4)
         dispersion=jnp.ones_like(re_var),
         deviance=deviance,
         edf_total=jnp.full_like(re_var, float(p)),
@@ -1169,9 +1148,8 @@ def _glmm_laplace_slope(
         )
 
     beta, blups, g_cov, deviance = blocked_vmap(per_voxel, (Y,), block=block)
-    re_var = (
-        jnp.diagonal(g_cov, axis1=-2, axis2=-1) if diagonal else g_cov
-    )  # (V, r) diagonal / (V, r, r) unstructured
+    # D4: uniform (V, r, r) G -- diagonal-valued in the diagonal case.
+    re_var = g_cov
     nv = beta.shape[0]
     return GLMMResult(
         beta_hat=beta,
@@ -1357,7 +1335,8 @@ def _glmm_agq_slope(
         )
 
     beta, blups, g_cov, deviance = blocked_vmap(per_voxel, (Y,), block=block)
-    re_var = jnp.diagonal(g_cov, axis1=-2, axis2=-1) if diagonal else g_cov
+    # D4: uniform (V, r, r) G -- diagonal-valued in the diagonal case.
+    re_var = g_cov
     nv = beta.shape[0]
     return GLMMResult(
         beta_hat=beta,

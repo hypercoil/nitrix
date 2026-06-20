@@ -146,7 +146,7 @@ def test_glmm_inverse_link_runs_finite():
     )
     assert bool(np.all(np.isfinite(np.asarray(g.beta_hat))))
     assert abs(float(g.beta_hat[0, 0]) - 1.4) < 0.4  # near the true intercept
-    assert float(g.re_var[0]) >= 0.0
+    assert float(g.re_var[0, 0, 0]) >= 0.0
 
 
 def test_resolve_link_validation():

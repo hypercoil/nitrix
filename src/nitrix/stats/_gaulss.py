@@ -41,20 +41,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple, cast
 
-import jax
 import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
 from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
+from ._result import register_result
 
 __all__ = ['GauLSSResult', 'gaulss_fit']
 
 _LOG_2PI = 1.8378770664093453
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=('coef_mu', 'coef_scale', 'cov_mu', 'cov_scale', 'log_lik'),
+    aux=('n_obs',),
+)
 @dataclass(frozen=True)
 class GauLSSResult:
     """Per-element Gaussian location-scale fit output.
@@ -81,32 +84,6 @@ class GauLSSResult:
     cov_scale: Float[Array, 'V q q']
     log_lik: Float[Array, 'V']
     n_obs: int
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], Tuple[Any, ...]]:
-        return (
-            self.coef_mu,
-            self.coef_scale,
-            self.cov_mu,
-            self.cov_scale,
-            self.log_lik,
-        ), (self.n_obs,)
-
-    @classmethod
-    def tree_unflatten(
-        cls, aux: Tuple[Any, ...], children: Tuple[Any, ...]
-    ) -> 'GauLSSResult':
-        (n_obs,) = aux
-        coef_mu, coef_scale, cov_mu, cov_scale, log_lik = children
-        return cls(
-            coef_mu=coef_mu,
-            coef_scale=coef_scale,
-            cov_mu=cov_mu,
-            cov_scale=cov_scale,
-            log_lik=log_lik,
-            n_obs=n_obs,
-        )
 
 
 def _gaulss_fit_one(

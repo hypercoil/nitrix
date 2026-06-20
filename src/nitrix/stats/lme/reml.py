@@ -103,7 +103,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, Optional, Tuple, Union, cast
+from typing import Literal, NamedTuple, Optional, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -112,6 +112,7 @@ from jaxtyping import Array, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet, sym_eig_jacobi
 from .._batching import blocked_vmap
+from .._result import register_result
 from ._corr import CorrSpec, resolve_corr
 from ._corrfit import CorrLMEResult
 from ._kr import kr_cov_and_scaled_f
@@ -146,7 +147,16 @@ __all__ = [
 Structure = Literal['unstructured', 'diagonal']
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=(
+        'theta_hat',
+        'beta_hat',
+        'log_lik',
+        'fixed_cov',
+        'theta_cov',
+        'grad_m',
+    ),
+)
 @dataclass(frozen=True)
 class REMLResult:
     """Per-voxel REML fit output.
@@ -185,24 +195,6 @@ class REMLResult:
     @property
     def sigma_e_sq(self) -> Float[Array, 'V']:
         return jnp.exp(self.theta_hat[..., 1])
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], None]:
-        return (
-            self.theta_hat,
-            self.beta_hat,
-            self.log_lik,
-            self.fixed_cov,
-            self.theta_cov,
-            self.grad_m,
-        ), None
-
-    @classmethod
-    def tree_unflatten(
-        cls, _aux: None, children: Tuple[Any, ...]
-    ) -> REMLResult:
-        return cls(*children)
 
 
 # ---------------------------------------------------------------------------
@@ -804,7 +796,12 @@ def reml_fit(
 # ---------------------------------------------------------------------------
 
 
-class NestedLMEResult(NamedTuple):
+@register_result(
+    children=('beta_hat', 'var_outer', 'var_inner', 'sigma_e_sq', 'log_lik'),
+    aux=('tier',),
+)
+@dataclass(frozen=True)
+class NestedLMEResult:
     """Nested two-level mixed-model fit output (the ``lme_fit`` R3 path).
 
     Attributes
@@ -832,7 +829,12 @@ class NestedLMEResult(NamedTuple):
     tier: str
 
 
-class CrossedLMEResult(NamedTuple):
+@register_result(
+    children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'),
+    aux=('tier',),
+)
+@dataclass(frozen=True)
+class CrossedLMEResult:
     """Crossed two-factor mixed-model fit output (the ``lme_fit`` R4 path).
 
     Attributes
@@ -859,7 +861,12 @@ class CrossedLMEResult(NamedTuple):
     tier: str
 
 
-class LMEResult(NamedTuple):
+@register_result(
+    children=('beta_hat', 'cov_re', 'sigma_e_sq', 'log_lik'),
+    aux=('tier',),
+)
+@dataclass(frozen=True)
+class LMEResult:
     """General mixed-model fit output (the ``lme_fit`` dispatcher result).
 
     Uniform across the dispatch tiers: the random-effect covariance is always a

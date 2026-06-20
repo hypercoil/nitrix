@@ -43,13 +43,13 @@ from dataclasses import dataclass
 from math import prod
 from typing import Any, Literal, Optional, Tuple, cast
 
-import jax
 import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Bool, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet
 from ...morphology import connected_components
+from .._result import register_result
 from .cluster import cluster_mass_map, cluster_size_map
 from .permutation import permutations, sign_flips
 from .tfce import tfce
@@ -66,7 +66,9 @@ PValueMethod = Literal['empirical', 'gpd']
 _VAR_REL_FLOOR = 1e-10
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=('stat', 'enhanced', 'p_fwe', 'p_uncorrected', 'null_max'),
+)
 @dataclass(frozen=True)
 class PermResult:
     """Permutation-test output (all maps in the input spatial shape).
@@ -91,21 +93,6 @@ class PermResult:
     p_fwe: Float[Array, '*spatial']
     p_uncorrected: Float[Array, '*spatial']
     null_max: Float[Array, 'n_perm']
-
-    def tree_flatten(self) -> Tuple[Tuple[Array, ...], None]:
-        return (
-            self.stat,
-            self.enhanced,
-            self.p_fwe,
-            self.p_uncorrected,
-            self.null_max,
-        ), None
-
-    @classmethod
-    def tree_unflatten(
-        cls, _aux: None, children: Tuple[Any, ...]
-    ) -> 'PermResult':
-        return cls(*children)
 
 
 def _ols_pre(

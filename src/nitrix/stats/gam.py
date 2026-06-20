@@ -77,6 +77,7 @@ from ..linalg._smalllinalg import small_inv_logdet, spd_chol, sym_eig_jacobi
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
+from ._result import register_result
 from .basis import (
     REBasis,
     SplineBasis,
@@ -106,7 +107,19 @@ Smooth = Union[SplineBasis, TensorBasis, REBasis]
 # ---------------------------------------------------------------------------
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=(
+        'coef',
+        'lam',
+        'edf',
+        'edf_total',
+        'dispersion',
+        'deviance',
+        'null_deviance',
+        'cov_unscaled',
+    ),
+    aux=('family', 'n_obs', 'col_slices'),
+)
 @dataclass(frozen=True)
 class GAMResult:
     """Per-element GAM fit output.
@@ -142,50 +155,6 @@ class GAMResult:
     family: Family
     n_obs: int
     col_slices: Tuple[Tuple[int, int], ...]
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], Tuple[Any, ...]]:
-        children = (
-            self.coef,
-            self.lam,
-            self.edf,
-            self.edf_total,
-            self.dispersion,
-            self.deviance,
-            self.null_deviance,
-            self.cov_unscaled,
-        )
-        return children, (self.family, self.n_obs, self.col_slices)
-
-    @classmethod
-    def tree_unflatten(
-        cls, aux: Tuple[Any, ...], children: Tuple[Any, ...]
-    ) -> 'GAMResult':
-        family, n_obs, col_slices = aux
-        (
-            coef,
-            lam,
-            edf,
-            edf_total,
-            dispersion,
-            deviance,
-            null_deviance,
-            cov_unscaled,
-        ) = children
-        return cls(
-            coef=coef,
-            lam=lam,
-            edf=edf,
-            edf_total=edf_total,
-            dispersion=dispersion,
-            deviance=deviance,
-            null_deviance=null_deviance,
-            cov_unscaled=cov_unscaled,
-            family=family,
-            n_obs=n_obs,
-            col_slices=col_slices,
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -59,18 +59,18 @@ NeuroImage 20, 1052-1063.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Optional
 
-import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from .._result import register_result
 from ._varcomp import VarCompSpec, fit_varcomp_diagonal
 
 __all__ = ['FLAMEResult', 'flame_two_level']
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(children=('sigma_b_sq', 'gamma_hat', 'log_lik'))
 @dataclass(frozen=True)
 class FLAMEResult:
     """Per-voxel FLAME fit output."""
@@ -78,20 +78,6 @@ class FLAMEResult:
     sigma_b_sq: Float[Array, 'V']
     gamma_hat: Float[Array, 'V p']
     log_lik: Float[Array, 'V']
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[
-        Tuple[Float[Array, 'V'], Float[Array, 'V p'], Float[Array, 'V']],
-        None,
-    ]:
-        return (self.sigma_b_sq, self.gamma_hat, self.log_lik), None
-
-    @classmethod
-    def tree_unflatten(
-        cls, _aux: None, children: Tuple[Any, ...]
-    ) -> 'FLAMEResult':
-        return cls(*children)
 
 
 def _flame_default_log_init(

@@ -44,7 +44,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple, cast
 
-import jax
 import jax.numpy as jnp
 from jax import lax
 from jax.scipy.special import digamma, gammaln, polygamma
@@ -52,13 +51,17 @@ from jaxtyping import Array, Float
 
 from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
+from ._result import register_result
 
 __all__ = ['BetaResult', 'beta_fit']
 
 _EPS = 1e-8
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=('coef', 'precision', 'cov_unscaled', 'log_lik'),
+    aux=('n_obs',),
+)
 @dataclass(frozen=True)
 class BetaResult:
     """Per-element beta-regression fit output.
@@ -84,30 +87,6 @@ class BetaResult:
     cov_unscaled: Float[Array, 'V p p']
     log_lik: Float[Array, 'V']
     n_obs: int
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], Tuple[Any, ...]]:
-        return (
-            self.coef,
-            self.precision,
-            self.cov_unscaled,
-            self.log_lik,
-        ), (self.n_obs,)
-
-    @classmethod
-    def tree_unflatten(
-        cls, aux: Tuple[Any, ...], children: Tuple[Any, ...]
-    ) -> 'BetaResult':
-        (n_obs,) = aux
-        coef, precision, cov_unscaled, log_lik = children
-        return cls(
-            coef=coef,
-            precision=precision,
-            cov_unscaled=cov_unscaled,
-            log_lik=log_lik,
-            n_obs=n_obs,
-        )
 
 
 def _logit(p: Float[Array, 'N']) -> Float[Array, 'N']:
