@@ -527,8 +527,14 @@ def sandwich_cov(
     cl_factor = 0.0
     n_groups = 0
     if groups is not None:
+        # Densify the cluster labels: the G/(G-1) finite-sample factor needs the
+        # true *distinct* cluster count, not max(label)+1 -- non-contiguous labels
+        # (e.g. from subject exclusion) would otherwise inflate G and under-correct
+        # the SE.  (Unlike the likelihood paths, this count has no cancellation.)
         groups = jnp.asarray(groups)
-        n_groups = int(jnp.max(groups)) + 1
+        uniq = jnp.unique(groups)
+        groups = jnp.searchsorted(uniq, groups)
+        n_groups = int(uniq.shape[0])
         cl_factor = (n_groups / (n_groups - 1.0)) * ((n - 1.0) / (n - p))
 
     def per_elem(

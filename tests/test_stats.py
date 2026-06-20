@@ -224,6 +224,33 @@ def test_partialcorr_diagonal_is_one():
     np.testing.assert_allclose(jnp.diagonal(R), 1.0, atol=1e-10)
 
 
+def test_partialcorr_offdiagonal_matches_numpy():
+    # Pin the off-diagonal sign/magnitude to an external oracle (was only
+    # diag==1 before).  precision/partial* now route through the cuSOLVER-free
+    # safe_inv (B1) -- this also guards that path's correctness.
+    rng = np.random.default_rng(3)
+    X = rng.standard_normal((5, 300))
+    R = np.asarray(partialcorr(jnp.asarray(X)))
+    omega = np.linalg.inv(np.cov(X))
+    d = np.sqrt(np.diag(omega))
+    ref = -omega / np.outer(d, d)
+    np.fill_diagonal(ref, 1.0)
+    np.testing.assert_allclose(R, ref, atol=1e-6)
+
+
+def test_precision_pinv_branch_rank_deficient():
+    # require_nonsingular=False routes through the new eigen-truncated symmetric
+    # pseudoinverse (B1, replacing the dead-cuSOLVER jnp.linalg.pinv/gesvd); it
+    # must equal numpy's Moore-Penrose pinv on a genuinely rank-deficient cov.
+    rng = np.random.default_rng(5)
+    X = jnp.asarray(rng.standard_normal((10, 5)))  # 10 channels, rank <= 5
+    P = np.asarray(precision(X, require_nonsingular=False))
+    ref = np.linalg.pinv(np.asarray(cov(X)))
+    assert np.all(np.isfinite(P))
+    np.testing.assert_allclose(P, P.T, atol=1e-8)
+    np.testing.assert_allclose(P, ref, atol=1e-6)
+
+
 def test_conditionalcov_residual_orthogonal_to_y():
     """After residualisation, the un-centered inner product
     ``X_residual @ Y.T`` is ~0 (orthogonality in the OLS sense,

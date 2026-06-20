@@ -54,6 +54,7 @@ from typing import Any, Optional, cast
 import jax.numpy as jnp
 from jaxtyping import Array, Num
 
+from ..linalg._solver import safe_eigh, safe_inv
 from ..linalg.residual import residualise
 
 __all__ = [
@@ -346,17 +347,41 @@ def precision(
     X
         See ``cov``.
     require_nonsingular
-        ``True`` (default) -- use ``jnp.linalg.inv`` (fails on
-        singular sigma).  ``False`` -- use the Moore-Penrose
-        pseudoinverse.  Pass ``l2 > 0`` to ``kwargs`` to
-        regularise rather than rely on the pseudoinverse for
-        rank-deficient cases.
+        ``True`` (default) -- a dense inverse (fails on singular sigma).
+        ``False`` -- the symmetric Moore-Penrose pseudoinverse (eigen-truncated).
+        Pass ``l2 > 0`` to ``kwargs`` to regularise rather than rely on the
+        pseudoinverse for rank-deficient cases.
+
+    Both routes go through the cuSOLVER-robust ``safe_*`` wrappers (an adaptive
+    CPU fallback on the broken-cuSOLVER GPU stacks), *not* a raw
+    ``jnp.linalg.inv`` / ``pinv`` -- the latter issue the dead ``getrf`` / ``gesvd``
+    custom-calls on the affected L4.  ``glasso`` is the per-element /
+    sparse-precision route; ``precision`` is the dense once-per-matrix one.
     """
     sigma = cov(X, **kwargs)
     if require_nonsingular:
-        # ``jnp.linalg.inv`` is typed as returning Any; restore.
-        return cast(Num[Array, '... c c'], jnp.linalg.inv(sigma))
-    return jnp.linalg.pinv(sigma)
+        return safe_inv(sigma)
+    return _sym_pinv(sigma)
+
+
+def _sym_pinv(sigma: Num[Array, '... c c']) -> Num[Array, '... c c']:
+    """Symmetric Moore-Penrose pseudoinverse via a cuSOLVER-free ``safe_eigh``.
+
+    ``sigma`` is a (symmetric) covariance, so the SVD-based ``jnp.linalg.pinv``
+    (dead ``gesvd``) is replaced by an eigendecomposition with the standard
+    relative eigenvalue cutoff (``max(|w|) * c * eps``).
+    """
+    w, v = safe_eigh(sigma)
+    cutoff = (
+        sigma.shape[-1]
+        * jnp.finfo(sigma.dtype).eps
+        * jnp.max(jnp.abs(w), axis=-1, keepdims=True)
+    )
+    w_inv = jnp.where(jnp.abs(w) > cutoff, 1.0 / w, 0.0)
+    return cast(
+        Num[Array, '... c c'],
+        (v * w_inv[..., None, :]) @ jnp.swapaxes(v, -1, -2),
+    )
 
 
 def partialcov(

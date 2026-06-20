@@ -82,7 +82,11 @@ def _bspline_design(
         )
     s = (x - lo) / (hi - lo) * n_spans
     span = jnp.clip(jnp.floor(s).astype(jnp.int32), 0, n_spans - 1)
-    frac = s - span.astype(x.dtype)
+    # Clamp the within-span coordinate to [0, 1]: for x outside [lo, hi] the span
+    # is already clamped to the boundary, and clamping frac too gives constant
+    # boundary extrapolation (a valid partition of unity) instead of evaluating
+    # the boundary cubic at frac > 1 / < 0, which loses the partition and diverges.
+    frac = jnp.clip(s - span.astype(x.dtype), 0.0, 1.0)
     w = uniform_bspline_weights(frac, degree)  # (n, degree + 1)
     n = x.shape[0]
     rows = jnp.arange(n)[:, None]

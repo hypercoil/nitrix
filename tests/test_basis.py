@@ -38,6 +38,20 @@ def test_bspline_partition_of_unity():
     )
 
 
+def test_bspline_partition_of_unity_out_of_range():
+    """B2: re-evaluating a basis outside its construction range stays a valid
+    partition of unity with bounded weights (constant boundary extrapolation),
+    not the diverging boundary-cubic (row-sums of -57/-793, weights >600) the
+    unclamped frac produced."""
+    b = bspline_basis(jnp.asarray(np.linspace(0.0, 1.0, 200)), 10, center=False)
+    xq = jnp.asarray([-2.0, -0.1, 0.5, 1.1, 3.0, 10.0])
+    B = np.asarray(spline_design(b, xq))
+    np.testing.assert_allclose(B.sum(1), 1.0, atol=1e-10)  # partition of unity
+    assert (B >= -1e-12).all() and (B <= 1.0 + 1e-12).all()  # bounded weights
+    # past the upper edge the design is flat (constant extrapolation).
+    np.testing.assert_allclose(B[4], B[5], atol=1e-12)  # x=3.0 vs x=10.0
+
+
 def test_difference_penalty_rank():
     """An order-``m`` difference penalty on ``k`` bases has rank ``k - m``
     (its null space is the degree-``m-1`` polynomials)."""
