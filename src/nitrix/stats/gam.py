@@ -55,18 +55,29 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Sequence, Tuple, Union, cast
+from typing import (
+    Any,
+    Literal,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    cast,
+)
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
+from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float
 
-from ..linalg._smalllinalg import small_inv_logdet
+from ..linalg._smalllinalg import small_inv_logdet, spd_chol, sym_eig_jacobi
 from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
+from ._result import register_result
 from .basis import (
     REBasis,
     SplineBasis,
@@ -75,7 +86,13 @@ from .basis import (
     tensor_product_design,
 )
 
-__all__ = ['GAMResult', 'gam_fit', 'smooth_partial_effect']
+__all__ = [
+    'GAMResult',
+    'SmoothTest',
+    'gam_fit',
+    'smooth_partial_effect',
+    'smooth_significance',
+]
 
 # A pooled penalty eigenvalue at or below this is the unpenalised null space
 # (exact zero after the basis's eigenvalue floor), excluded from the
@@ -90,7 +107,19 @@ Smooth = Union[SplineBasis, TensorBasis, REBasis]
 # ---------------------------------------------------------------------------
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=(
+        'coef',
+        'lam',
+        'edf',
+        'edf_total',
+        'dispersion',
+        'deviance',
+        'null_deviance',
+        'cov_unscaled',
+    ),
+    aux=('family', 'n_obs', 'col_slices'),
+)
 @dataclass(frozen=True)
 class GAMResult:
     """Per-element GAM fit output.
@@ -126,50 +155,6 @@ class GAMResult:
     family: Family
     n_obs: int
     col_slices: Tuple[Tuple[int, int], ...]
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], Tuple[Any, ...]]:
-        children = (
-            self.coef,
-            self.lam,
-            self.edf,
-            self.edf_total,
-            self.dispersion,
-            self.deviance,
-            self.null_deviance,
-            self.cov_unscaled,
-        )
-        return children, (self.family, self.n_obs, self.col_slices)
-
-    @classmethod
-    def tree_unflatten(
-        cls, aux: Tuple[Any, ...], children: Tuple[Any, ...]
-    ) -> 'GAMResult':
-        family, n_obs, col_slices = aux
-        (
-            coef,
-            lam,
-            edf,
-            edf_total,
-            dispersion,
-            deviance,
-            null_deviance,
-            cov_unscaled,
-        ) = children
-        return cls(
-            coef=coef,
-            lam=lam,
-            edf=edf,
-            edf_total=edf_total,
-            dispersion=dispersion,
-            deviance=deviance,
-            null_deviance=null_deviance,
-            cov_unscaled=cov_unscaled,
-            family=family,
-            n_obs=n_obs,
-            col_slices=col_slices,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -744,3 +729,131 @@ def smooth_partial_effect(
     var = jnp.einsum('gi,vij,gj->vg', design, cov_block, design)
     se = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-12, None))
     return effect, se
+
+
+# ---------------------------------------------------------------------------
+# Smooth-term significance (Wood 2013) -- the mgcv summary.gam p-value
+# ---------------------------------------------------------------------------
+
+
+class SmoothTest(NamedTuple):
+    """Per-smooth approximate-significance test (Wood 2013, integer-rank).
+
+    Each field is ``(V, m)`` -- one column per smooth (in ``smooths`` order), one
+    row per element.  ``stat`` is the test statistic ``T_r``, ``rank`` its
+    reference degrees of freedom, ``p_value`` the upper-tail p (chi-square for a
+    fixed-dispersion family, ``F`` with ``N - edf_total`` denominator df
+    otherwise), and ``edf`` the smooth's effective degrees of freedom (the
+    ``mgcv::summary.gam`` "edf" column).
+    """
+
+    stat: Float[Array, 'V m']
+    edf: Float[Array, 'V m']
+    rank: Float[Array, 'V m']
+    p_value: Float[Array, 'V m']
+
+
+def _smooth_test_block(
+    R: Float[Array, 'm m'],
+    beta: Float[Array, 'V m'],
+    v_block: Float[Array, 'V m m'],
+    edf_k: Float[Array, 'V'],
+    m: int,
+    known_scale: bool,
+    res_df: Float[Array, 'V'],
+) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']]:
+    """Per-smooth Wood-2013 integer-rank statistic + p-value, vmapped over V.
+
+    ``T_r = beta^T V_r^- beta`` with ``V_r^-`` the rank-``r`` pseudo-inverse of
+    the QR-projected covariance ``R V R^T`` (``r`` = rounded edf), built by
+    *masking* the eigen-spectrum rather than a dynamic slice so the per-voxel
+    rank composes under ``vmap``.
+    """
+    eps9 = jnp.finfo(R.dtype).eps**0.9
+    rbeta = beta @ R.T  # (V, m) -- row v is R @ beta_v
+    vr = jnp.einsum('as,vst,bt->vab', R, v_block, R)  # R V R^T (V, m, m)
+
+    def per_voxel(
+        vr_v: Array, rbeta_v: Array, edf_v: Array
+    ) -> Tuple[Array, Array]:
+        vals, vecs = sym_eig_jacobi(vr_v, m)  # unsorted
+        order = jnp.argsort(-vals)
+        vals = vals[order]
+        vecs = vecs[:, order]
+        # type=1 integer rank from the effective df (mgcv:::testStat).
+        fl = jnp.floor(edf_v)
+        k_int = fl + jnp.where((edf_v > fl + 0.05) | (fl == 0.0), 1.0, 0.0)
+        val_ok = vals > jnp.max(vals) * eps9
+        k_rank = jnp.minimum(k_int, jnp.sum(val_ok))
+        mask = (jnp.arange(m) < k_rank) & val_ok
+        proj = vecs.T @ rbeta_v  # (m,) = u_i^T R beta
+        contrib = jnp.where(
+            mask, proj * proj / jnp.clip(vals, eps9, None), 0.0
+        )
+        return jnp.sum(contrib), jnp.sum(mask).astype(R.dtype)
+
+    d, rank = jax.vmap(per_voxel)(vr, rbeta, edf_k)
+    rank_c = jnp.clip(rank, 1.0, None)
+    if known_scale:
+        # chi-square upper tail: P(chi^2_r > d) = Q(r/2, d/2).
+        pval = gammaincc(rank_c / 2.0, d / 2.0)
+    else:
+        # F upper tail: P(F_{r, res_df} > d/r) = I_x(res_df/2, r/2),
+        # x = res_df / (res_df + d).
+        x = res_df / (res_df + d)
+        pval = betainc(res_df / 2.0, rank_c / 2.0, x)
+    return d, rank, jnp.clip(pval, 0.0, 1.0)
+
+
+def smooth_significance(
+    result: GAMResult,
+    smooths: Sequence[Smooth],
+) -> SmoothTest:
+    """Approximate significance test for each smooth term (Wood 2013).
+
+    The ``mgcv::summary.gam`` smooth-term test in its integer-rank form
+    (``mgcv:::testStat`` with ``type=1``): project the smooth's coefficients
+    through its design's QR (``R``, ``R^T R = X^T X``), eigendecompose the
+    projected Bayesian covariance ``R V R^T``, and form the rank-truncated
+    quadratic form ``T_r = beta^T V_r^- beta`` with the rank set to the rounded
+    effective df.  ``T_r`` is approximately ``chi^2_r`` for a fixed-dispersion
+    family, or ``F_{r, N - edf_total}`` for an estimated scale -- the single
+    "is ``s(x)`` significant, edf, p" line a developmental / brain-age GAM
+    analyst reads off ``summary.gam``.
+
+    ``smooths`` is the same sequence passed to :func:`gam_fit` (their ``.design``
+    supplies each term's model matrix).  The test uses the forward-only
+    ``sym_eig_jacobi`` and is **not** differentiated through.
+
+    Returns a :class:`SmoothTest` of ``(V, m)`` arrays.  The fractional-rank
+    refinement (the ``mgcv`` default ``type=0``, which needs the weighted-
+    chi-square CDF) is a documented follow-up; the integer-rank test reproduces
+    ``testStat(..., type=1)`` and tracks the default closely.
+    """
+    n = result.n_obs
+    known_scale = result.family.has_fixed_dispersion
+    res_df = jnp.clip(n - result.edf_total, 1.0, None)  # (V,) F denom df
+    stats, edfs, ranks, pvals = [], [], [], []
+    for k, sm in enumerate(smooths):
+        lo, hi = result.col_slices[k]
+        m = hi - lo
+        Xk = jnp.asarray(sm.design, dtype=result.coef.dtype)  # (N, m)
+        R = spd_chol(Xk.T @ Xk, m).T  # upper, R^T R = X^T X
+        v_block = (
+            result.dispersion[:, None, None]
+            * result.cov_unscaled[:, lo:hi, lo:hi]
+        )  # (V, m, m) scaled Bayesian covariance
+        edf_k = result.edf[:, k]  # (V,)
+        d, rank, pval = _smooth_test_block(
+            R, result.coef[:, lo:hi], v_block, edf_k, m, known_scale, res_df
+        )
+        stats.append(d)
+        edfs.append(edf_k)
+        ranks.append(rank)
+        pvals.append(pval)
+    return SmoothTest(
+        stat=jnp.stack(stats, axis=-1),
+        edf=jnp.stack(edfs, axis=-1),
+        rank=jnp.stack(ranks, axis=-1),
+        p_value=jnp.stack(pvals, axis=-1),
+    )

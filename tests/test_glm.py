@@ -320,6 +320,27 @@ def test_sandwich_cluster_matches_statsmodels():
     np.testing.assert_allclose(se, smf.bse, rtol=1e-10)
 
 
+def test_sandwich_cluster_label_encoding_invariant():
+    """B3: the cluster-robust SE depends only on the *partition*, not the label
+    encoding -- non-contiguous / permuted cluster ids (e.g. from subject
+    exclusion) must give the identical SE.  Previously the G/(G-1) factor used
+    max(label)+1, so gappy labels inflated G and under-corrected the SE."""
+    rng = np.random.default_rng(7)
+    X = _design(rng, N=120)
+    groups = np.repeat(np.arange(20), 6).astype(np.int32)
+    y = X @ np.array([0.5, 1.0, -0.5]) + (
+        rng.standard_normal(20)[groups] + rng.standard_normal(120) * 0.5
+    )
+    Yj, Xj = jnp.asarray(y[None, :]), jnp.asarray(X)
+    res = glm_fit(Yj, Xj, family=GAUSSIAN)
+    base = np.asarray(sandwich_cov(res, Yj, Xj, groups=jnp.asarray(groups)))
+    gappy = np.asarray(sandwich_cov(res, Yj, Xj, groups=jnp.asarray(groups * 3)))
+    relabel = rng.permutation(60)[groups]  # arbitrary non-contiguous ids
+    perm = np.asarray(sandwich_cov(res, Yj, Xj, groups=jnp.asarray(relabel)))
+    np.testing.assert_allclose(base, gappy, atol=1e-12)
+    np.testing.assert_allclose(base, perm, atol=1e-12)
+
+
 @needs_sm
 def test_sandwich_glm_poisson_matches_statsmodels():
     """The GLM (Poisson) sandwich HC0 matches statsmodels GLM cov_type='HC0'."""

@@ -99,6 +99,17 @@ v1 claimed but never exposed), mixed-model fixed-effect inference
 (Satterthwaite / Kenward-Roger), AR1/CAR1 error structures, non-aggressive
 (AROMA) residualisation, sandwich/cluster SEs, and extra GLM families.
 
+**Audit register (2026-06-20):**
+[`stats-suite-audit.md`](stats-suite-audit.md) — consolidated findings from a
+seven-lens fan-out review of the *entire standing* stats suite (math correctness,
+engineering rigour, neuroimaging use, organisation, design, performance,
+hardware-awareness). Verdict: math sound, hardware-matched, no correctness bug;
+a small set of **verified** bugs (B1 `precision` cuSOLVER, B2 `spline_design`
+extrapolation, B3 `sandwich_cov` cluster count) + contract / perf / capability
+items, each with a stable ID and Status column. Records the **empirical
+refutation of the one Critical claim** (C1 "gappy labels bias REML" — bit-identical
+fits; exact log|V| cancellation) so it is not re-raised.
+
 ## Internal engineering backlog
 
 Ledger (framing, closed-by-design, resolved):

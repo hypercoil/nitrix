@@ -146,7 +146,7 @@ def test_glmm_inverse_link_runs_finite():
     )
     assert bool(np.all(np.isfinite(np.asarray(g.beta_hat))))
     assert abs(float(g.beta_hat[0, 0]) - 1.4) < 0.4  # near the true intercept
-    assert float(g.re_var[0]) >= 0.0
+    assert float(g.re_var[0, 0, 0]) >= 0.0
 
 
 def test_resolve_link_validation():
@@ -157,3 +157,14 @@ def test_resolve_link_validation():
     assert resolve_link(custom) is custom
     with pytest.raises(ValueError, match='unknown link'):
         resolve_link('bogus')
+
+
+def test_resolve_family_is_exported():
+    # D5: resolve_family was reachable but not exported (asymmetry with
+    # resolve_link); it is now part of the public stats surface.
+    import nitrix.stats as ns
+    from nitrix.stats import BINOMIAL, resolve_family
+
+    assert 'resolve_family' in ns.__all__
+    assert resolve_family('binomial') is BINOMIAL
+    assert resolve_family(BINOMIAL) is BINOMIAL

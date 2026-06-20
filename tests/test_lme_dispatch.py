@@ -210,6 +210,31 @@ def test_cholesky_pivot_floor_keeps_singular_input_finite():
     assert bool(jnp.all(jnp.isfinite(inv1))) and bool(jnp.isfinite(ld1))
 
 
+def test_pivot_floor_is_dtype_aware_fp32():
+    """P6: the modified-Cholesky pivot floor scales with the dtype's eps, so it
+    is *active* in float32.  The old fixed ``1e-12`` sat ~4 orders below fp32
+    eps (~1.2e-7) and was inert -- it could never catch a pivot that fp32
+    roundoff had already driven non-positive."""
+    from nitrix.linalg._smalllinalg import (
+        _pivot_rel_floor,
+        small_inv_logdet,
+    )
+
+    f32 = float(_pivot_rel_floor(jnp.float32))
+    f64 = float(_pivot_rel_floor(jnp.float64))
+    assert 1e-7 < f32 < 1e-3  # ~1e2 * 1.2e-7, well above fp32 roundoff
+    assert f64 < 1e-12  # ~1e2 * 2.2e-16, far tighter than the old fixed 1e-12
+    # A genuinely rank-1 float32 normal-equation matrix must still invert to a
+    # finite (regularised) result -- a NaN risk before the floor was active.
+    rng = np.random.default_rng(0)
+    for p in (2, 4):
+        u = jnp.asarray(rng.standard_normal((p, 1)), dtype=jnp.float32)
+        a = (u @ u.T).astype(jnp.float32)
+        assert a.dtype == jnp.float32
+        inv, ld = small_inv_logdet(a, p)
+        assert bool(jnp.all(jnp.isfinite(inv))) and bool(jnp.isfinite(ld))
+
+
 def test_reml_collinear_design_stays_finite():
     """A rank-deficient fixed-effect design (collinear covariate) fits to a
     finite result rather than NaN-propagating through the per-voxel solve."""

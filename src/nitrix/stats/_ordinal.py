@@ -40,6 +40,7 @@ from jaxtyping import Array, Float, Int
 
 from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
+from ._result import register_result
 from .lme._optimise import damped_newton
 from .lme._varcomp import VarCompSpec
 
@@ -48,7 +49,10 @@ __all__ = ['OrdinalResult', 'ordinal_fit']
 _EPS = 1e-12
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=('coef', 'thresholds', 'cov_coef', 'log_lik'),
+    aux=('n_obs', 'n_classes'),
+)
 @dataclass(frozen=True)
 class OrdinalResult:
     """Per-element ordinal (cumulative-link) fit output.
@@ -75,31 +79,6 @@ class OrdinalResult:
     log_lik: Float[Array, 'V']
     n_obs: int
     n_classes: int
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], Tuple[Any, ...]]:
-        return (
-            self.coef,
-            self.thresholds,
-            self.cov_coef,
-            self.log_lik,
-        ), (self.n_obs, self.n_classes)
-
-    @classmethod
-    def tree_unflatten(
-        cls, aux: Tuple[Any, ...], children: Tuple[Any, ...]
-    ) -> 'OrdinalResult':
-        n_obs, n_classes = aux
-        coef, thresholds, cov_coef, log_lik = children
-        return cls(
-            coef=coef,
-            thresholds=thresholds,
-            cov_coef=cov_coef,
-            log_lik=log_lik,
-            n_obs=n_obs,
-            n_classes=n_classes,
-        )
 
 
 def _thresholds(raw: Float[Array, 'nt'], k: int) -> Float[Array, 'Km1']:

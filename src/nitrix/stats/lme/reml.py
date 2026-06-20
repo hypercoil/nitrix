@@ -103,7 +103,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, Optional, Tuple, Union, cast
+from typing import Literal, NamedTuple, Optional, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -112,6 +112,7 @@ from jaxtyping import Array, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet, sym_eig_jacobi
 from .._batching import blocked_vmap
+from .._result import register_result
 from ._corr import CorrSpec, resolve_corr
 from ._corrfit import CorrLMEResult
 from ._kr import kr_cov_and_scaled_f
@@ -146,7 +147,16 @@ __all__ = [
 Structure = Literal['unstructured', 'diagonal']
 
 
-@jax.tree_util.register_pytree_node_class
+@register_result(
+    children=(
+        'theta_hat',
+        'beta_hat',
+        'log_lik',
+        'fixed_cov',
+        'theta_cov',
+        'grad_m',
+    ),
+)
 @dataclass(frozen=True)
 class REMLResult:
     """Per-voxel REML fit output.
@@ -185,24 +195,6 @@ class REMLResult:
     @property
     def sigma_e_sq(self) -> Float[Array, 'V']:
         return jnp.exp(self.theta_hat[..., 1])
-
-    def tree_flatten(
-        self,
-    ) -> Tuple[Tuple[Array, ...], None]:
-        return (
-            self.theta_hat,
-            self.beta_hat,
-            self.log_lik,
-            self.fixed_cov,
-            self.theta_cov,
-            self.grad_m,
-        ), None
-
-    @classmethod
-    def tree_unflatten(
-        cls, _aux: None, children: Tuple[Any, ...]
-    ) -> REMLResult:
-        return cls(*children)
 
 
 # ---------------------------------------------------------------------------
@@ -654,7 +646,7 @@ def reml_fit(
     n_iter: int = 20,
     damping: float = 1e-6,
     block: Optional[int] = None,
-    low_rank: bool = False,
+    low_rank: Optional[bool] = None,
 ) -> REMLResult:
     """Voxelwise variance-components REML fit.
 
@@ -705,11 +697,12 @@ def reml_fit(
     low_rank
         Use the FaST-LMM **low-rank** decomposition: a ``q x q`` eig of
         ``Z^T Z`` (``O(N q^2 + q^3)``) instead of the dense ``N x N`` eig of
-        ``ZZ^T`` (``O(N^3)``).  Requires ``q <= N`` with ``Z`` of full column
-        rank (the usual tall random-effect design); the ``N - q`` null
-        directions enter only through per-voxel Gram aggregates.  Default
-        ``False`` (the dense path, bit-for-bit unchanged); set ``True`` for
-        brain-scale cohorts where ``q << N`` -- it matches the dense fit to the
+        ``ZZ^T`` (``O(N^3)``).  Requires ``q <= N`` (the usual tall random-effect
+        design); the ``N - q`` null directions enter only through per-voxel Gram
+        aggregates, and a rank-deficient ``Z`` (e.g. phantom one-hot columns from
+        gappy labels) is absorbed by that null space.  **Default ``None``**
+        auto-selects: low-rank when ``q < N`` (the brain-scale case), dense
+        otherwise.  Pass ``True`` / ``False`` to force; the two match to the
         iterative tolerance.
 
     Returns
@@ -737,7 +730,12 @@ def reml_fit(
             f'reml_fit: Y.shape[-1]={Y.shape[-1]} must match N={n}.'
         )
 
-    if low_rank:
+    # Auto-select the low-rank decomposition when the random-effect design is
+    # genuinely tall (q < N) -- the common brain-scale case, where the q x q eig
+    # of Z^T Z is 1-2 orders cheaper than the dense N x N eig of ZZ^T and matches
+    # it to the iterative tolerance.  Explicit low_rank=True/False overrides.
+    use_low_rank = (Z.shape[-1] < n) if low_rank is None else low_rank
+    if use_low_rank:
         return _reml_fit_lowrank(Y, X, Z, theta_init, n_iter, damping, block)
 
     # Eigendecompose ZZ^T (shared across voxels).
@@ -798,7 +796,12 @@ def reml_fit(
 # ---------------------------------------------------------------------------
 
 
-class NestedLMEResult(NamedTuple):
+@register_result(
+    children=('beta_hat', 'var_outer', 'var_inner', 'sigma_e_sq', 'log_lik'),
+    aux=('tier',),
+)
+@dataclass(frozen=True)
+class NestedLMEResult:
     """Nested two-level mixed-model fit output (the ``lme_fit`` R3 path).
 
     Attributes
@@ -826,7 +829,12 @@ class NestedLMEResult(NamedTuple):
     tier: str
 
 
-class CrossedLMEResult(NamedTuple):
+@register_result(
+    children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'),
+    aux=('tier',),
+)
+@dataclass(frozen=True)
+class CrossedLMEResult:
     """Crossed two-factor mixed-model fit output (the ``lme_fit`` R4 path).
 
     Attributes
@@ -853,7 +861,12 @@ class CrossedLMEResult(NamedTuple):
     tier: str
 
 
-class LMEResult(NamedTuple):
+@register_result(
+    children=('beta_hat', 'cov_re', 'sigma_e_sq', 'log_lik'),
+    aux=('tier',),
+)
+@dataclass(frozen=True)
+class LMEResult:
     """General mixed-model fit output (the ``lme_fit`` dispatcher result).
 
     Uniform across the dispatch tiers: the random-effect covariance is always a
@@ -897,7 +910,7 @@ def lme_fit(
     n_iter: int = 20,
     damping: float = 1e-6,
     block: Optional[int] = None,
-    low_rank: bool = False,
+    low_rank: Optional[bool] = None,
 ) -> Union[
     REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult
 ]:
@@ -981,7 +994,8 @@ def lme_fit(
         off-diagonal of ``G`` is held at zero).  Both run the R2 block-Woodbury.
     n_iter, damping, block, low_rank
         Newton iterations, AI damping, voxel-block chunking, and (R1) the q-rank
-        toggle.
+        toggle -- ``None`` (default) auto-selects the FaST-LMM low-rank path when
+        ``q < N`` (the brain-scale case; matches the dense fit to tolerance).
 
     Returns
     -------

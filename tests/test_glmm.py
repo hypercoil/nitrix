@@ -136,7 +136,7 @@ def test_glmm_matches_dense_numpy_pql(link, few_level_max):
     )
     assert np.allclose(np.asarray(res.beta_hat[0]), rb, atol=1e-5)
     assert np.allclose(np.asarray(res.blups[0]), rblup, atol=1e-5)
-    assert abs(float(res.re_var[0]) - rrv) < 1e-4
+    assert abs(float(res.re_var[0, 0, 0]) - rrv) < 1e-4
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +165,8 @@ def test_glmm_gaussian_reduces_to_reml():
     onehot = jax.nn.one_hot(gj, q)
     r = reml_fit(Y, Xj, onehot)
     assert np.allclose(g.beta_hat, r.beta_hat, rtol=1e-4, atol=1e-4)
-    assert np.allclose(g.re_var, r.sigma_b_sq, rtol=1e-3, atol=1e-4)
+    # D4: re_var is (V, 1, 1) for a scalar intercept; compare the (V,) diagonal.
+    assert np.allclose(g.re_var[:, 0, 0], r.sigma_b_sq, rtol=1e-3, atol=1e-4)
     assert np.allclose(g.dispersion, r.sigma_e_sq, rtol=1e-3, atol=1e-4)
 
 
@@ -182,8 +183,8 @@ def test_glmm_poisson_recovery():
     Y = jnp.asarray(y[None, :])
     g = glmm_fit(Y, jnp.asarray(X), group=jnp.asarray(group), family='poisson')
     assert abs(float(g.beta_hat[0, 1]) - 0.6) < 0.12
-    assert abs(float(g.re_var[0]) - 0.3) < 0.2
-    assert float(g.re_var[0]) > 0.0
+    assert abs(float(g.re_var[0, 0, 0]) - 0.3) < 0.2
+    assert float(g.re_var[0, 0, 0]) > 0.0
 
 
 def test_glmm_binomial_pql_attenuation_vanishes():
@@ -231,7 +232,8 @@ def test_glmm_result_shapes_and_pytree():
     g = glmm_fit(Y, jnp.asarray(X), group=jnp.asarray(group), family='poisson')
     assert g.beta_hat.shape == (V, 2)
     assert g.blups.shape == (V, 12)
-    assert g.re_var.shape == (V,)
+    # D4: re_var is the uniform (V, r, r) G shape; scalar intercept -> (V, 1, 1).
+    assert g.re_var.shape == (V, 1, 1)
     assert g.dispersion.shape == (V,)
     # Fixed-dispersion family -> phi == 1.
     assert np.allclose(g.dispersion, 1.0)
@@ -256,7 +258,7 @@ def test_glmm_gamma_dispersion_estimated():
     g = glmm_fit(Y, jnp.asarray(X), group=jnp.asarray(group), family='gamma')
     assert float(g.dispersion[0]) > 0.0
     assert not np.isclose(float(g.dispersion[0]), 1.0)
-    assert float(g.re_var[0]) > 0.0
+    assert float(g.re_var[0, 0, 0]) > 0.0
 
 
 def test_glmm_shape_validation():
@@ -332,7 +334,7 @@ def test_glmm_laplace_matches_reference():
     )
     assert res.tier == 'laplace'
     assert np.allclose(np.asarray(res.beta_hat[0]), rb, atol=5e-3)
-    assert abs(float(res.re_var[0]) - rsb2) < 5e-3
+    assert abs(float(res.re_var[0, 0, 0]) - rsb2) < 5e-3
 
 
 def test_glmm_laplace_beats_pql_attenuation():
@@ -356,7 +358,7 @@ def test_glmm_laplace_poisson_recovery():
     )
     assert res.tier == 'laplace'
     assert abs(float(res.beta_hat[0, 1]) - 0.6) < 0.12
-    assert float(res.re_var[0]) > 0.0
+    assert float(res.re_var[0, 0, 0]) > 0.0
     assert res.blups.shape == (1, 30)
 
 

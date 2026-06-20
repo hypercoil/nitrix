@@ -64,10 +64,10 @@ def test_gaussian_diagonal_slope_matches_lme():
     r = lme_fit(Y, Xj, z=zj, group=gj, structure='diagonal')
     assert g.tier == 'few'
     assert np.allclose(g.beta_hat, r.beta_hat, rtol=1e-3, atol=1e-3)
-    assert np.allclose(
-        g.re_var, np.diagonal(np.asarray(r.cov_re), axis1=1, axis2=2),
-        rtol=2e-2, atol=3e-3,
-    )
+    # re_var is now a uniform (V, r, r) diagonal G (D4), as is lme's diagonal
+    # cov_re; compare the full matrices (off-diagonals are zero in both).
+    assert g.re_var.shape == r.cov_re.shape
+    assert np.allclose(g.re_var, r.cov_re, rtol=2e-2, atol=3e-3)
     assert np.allclose(g.dispersion, r.sigma_e_sq, rtol=2e-2, atol=3e-3)
 
 
@@ -125,7 +125,6 @@ def test_structured_slope_clamp_insensitive():
 
 @pytest.mark.parametrize('link', ['poisson', 'binomial'])
 def test_unstructured_r1_matches_scalar_intercept(link):
-    G = np.array([[0.4]])
     rng = np.random.default_rng(7)
     q, n_per = 18, 20
     group = np.repeat(np.arange(q), n_per).astype(np.int32)
@@ -148,7 +147,7 @@ def test_unstructured_r1_matches_scalar_intercept(link):
     assert slope.tier == 'slope'
     assert np.allclose(slope.beta_hat, scalar.beta_hat, rtol=1e-2, atol=3e-3)
     assert np.allclose(
-        slope.re_var[:, 0, 0], scalar.re_var, rtol=3e-2, atol=5e-3
+        slope.re_var[:, 0, 0], scalar.re_var[:, 0, 0], rtol=3e-2, atol=5e-3
     )
 
 
@@ -209,7 +208,11 @@ def test_slope_shapes_and_pytree():
     Xj, zj, gj = jnp.asarray(X), jnp.asarray(z), jnp.asarray(group)
     gd = glmm_fit(Y, Xj, group=gj, z=zj, structure='diagonal', family='poisson')
     assert gd.blups.shape == (V, 10, 2)
-    assert gd.re_var.shape == (V, 2)
+    # D4: diagonal G is the uniform (V, r, r) shape with zero off-diagonals.
+    assert gd.re_var.shape == (V, 2, 2)
+    assert np.allclose(gd.re_var[:, 0, 1], 0.0) and np.allclose(
+        gd.re_var[:, 1, 0], 0.0
+    )
     gu = glmm_fit(
         Y, Xj, group=gj, z=zj, structure='unstructured', family='poisson'
     )
@@ -266,7 +269,7 @@ def test_laplace_slope_r1_matches_scalar_intercept_laplace():
     assert slope.tier == 'laplace'
     np.testing.assert_allclose(slope.beta_hat[0], scalar.beta_hat[0], atol=1e-5)
     np.testing.assert_allclose(
-        float(slope.re_var[0, 0, 0]), float(scalar.re_var[0]), atol=1e-5
+        float(slope.re_var[0, 0, 0]), float(scalar.re_var[0, 0, 0]), atol=1e-5
     )
 
 
@@ -376,7 +379,9 @@ def test_laplace_slope_shapes_and_diagonal():
         Y, Xj, group=gj, z=zj, structure='diagonal', family='poisson',
         method='laplace',
     )
-    assert gd.re_var.shape == (V, 2)  # diagonal -> per-component variances
+    # D4: diagonal Laplace G is the uniform (V, r, r) shape.
+    assert gd.re_var.shape == (V, 2, 2)
+    assert np.allclose(gd.re_var[:, 0, 1], 0.0)
     leaves, treedef = jax.tree_util.tree_flatten(gu)
     gu2 = jax.tree_util.tree_unflatten(treedef, leaves)
     assert isinstance(gu2, GLMMResult) and gu2.tier == 'laplace'
@@ -520,10 +525,19 @@ def test_agq_shapes_and_validation():
         Y, Xj, group=gj, z=zj, structure='diagonal', family='poisson',
         method='agq', n_quad=3,
     )
-    assert gd.re_var.shape == (V, 2)
+    # D4: diagonal AGQ G is the uniform (V, r, r) shape.
+    assert gd.re_var.shape == (V, 2, 2)
+    assert np.allclose(gd.re_var[:, 0, 1], 0.0)
     leaves, treedef = jax.tree_util.tree_flatten(gu)
     gu2 = jax.tree_util.tree_unflatten(treedef, leaves)
     assert isinstance(gu2, GLMMResult) and gu2.tier == 'agq'
     # AGQ requires a slope; z=None raises.
     with pytest.raises(NotImplementedError, match='agq'):
         glmm_fit(Y, Xj, group=gj, family='poisson', method='agq')
+    # P3: the n_quad**r node-count cap blocks the compile/memory cliff.
+    z3 = jnp.concatenate([zj, zj[:, :1]], axis=-1)  # r = 3
+    with pytest.raises(ValueError, match=r'n_quad\*\*r'):
+        glmm_fit(
+            Y, Xj, group=gj, z=z3, structure='unstructured', family='poisson',
+            method='agq', n_quad=6,  # 6**3 = 216 > 128
+        )

@@ -33,6 +33,7 @@ from nitrix.stats.gam import (
     _gam_fit_one_gaussian_xprod,
     gam_fit,
     smooth_partial_effect,
+    smooth_significance,
 )
 from nitrix.stats.glm import GAUSSIAN, POISSON
 
@@ -531,3 +532,73 @@ def test_varying_coefficient_smooth_recovers_smooth_coefficient():
     gt = np.sin(2 * np.pi * xg)
     gt = gt - gt.mean()
     assert float(np.corrcoef(e, gt)[0, 1]) > 0.97
+
+
+def _ref_wood_teststat(beta, X, V, edf, res_df, known_scale):
+    """Independent numpy + scipy reference for the integer-rank Wood (2013)
+    smooth test (verified to reproduce mgcv:::testStat(type=1) exactly)."""
+    from scipy.stats import chi2, f
+
+    R = np.linalg.cholesky(X.T @ X).T  # upper, R^T R = X^T X
+    Vr = R @ V @ R.T
+    vals, vecs = np.linalg.eigh(0.5 * (Vr + Vr.T))
+    order = np.argsort(-vals)
+    vals, vecs = vals[order], vecs[:, order]
+    fl = np.floor(edf)
+    k = int(fl + (1 if (edf > fl + 0.05 or fl == 0) else 0))
+    val_ok = vals > vals.max() * np.finfo(float).eps**0.9
+    k = min(k, int(val_ok.sum()))
+    proj = vecs.T @ (R @ beta)
+    stat = float(np.sum(proj[:k] ** 2 / vals[:k]))
+    p = chi2.sf(stat, k) if known_scale else f.sf(stat / k, k, res_df)
+    return stat, k, float(p)
+
+
+def test_smooth_significance_matches_wood_reference_gaussian():
+    """N1: smooth_significance reproduces the integer-rank Wood (2013) test
+    (== mgcv:::testStat type=1) -- stat, rank, p -- and a real smooth is highly
+    significant while a null one is not."""
+    rng = np.random.default_rng(1)
+    n = 250
+    x1 = np.sort(rng.uniform(0, 1, n))
+    x2 = rng.uniform(0, 1, n)
+    y = np.sin(2 * np.pi * x1) * 1.2 + rng.standard_normal(n) * 0.5  # x2 null
+    s1, s2 = bspline_basis(jnp.asarray(x1), 12), bspline_basis(jnp.asarray(x2), 8)
+    smooths = [s1, s2]
+    res = gam_fit(jnp.asarray(y[None, :]), smooths, family='gaussian')
+    st = smooth_significance(res, smooths)
+    res_df = float(res.n_obs) - float(res.edf_total[0])
+    disp = float(res.dispersion[0])
+    for k, sm in enumerate(smooths):
+        lo, hi = res.col_slices[k]
+        ref = _ref_wood_teststat(
+            np.asarray(res.coef[0, lo:hi]), np.asarray(sm.design),
+            disp * np.asarray(res.cov_unscaled[0, lo:hi, lo:hi]),
+            float(res.edf[0, k]), res_df, known_scale=False,
+        )
+        np.testing.assert_allclose(float(st.stat[0, k]), ref[0], rtol=1e-5)
+        assert int(st.rank[0, k]) == ref[1]
+        np.testing.assert_allclose(float(st.p_value[0, k]), ref[2], rtol=1e-4)
+    assert float(st.p_value[0, 0]) < 1e-6  # signal
+    assert float(st.p_value[0, 1]) > 0.05  # null
+
+
+def test_smooth_significance_chi2_branch_binomial():
+    """The fixed-dispersion (binomial) family uses the chi-square branch, also
+    matching the Wood reference."""
+    rng = np.random.default_rng(4)
+    n = 400
+    x1 = np.sort(rng.uniform(0, 1, n))
+    y = rng.binomial(1, 1.0 / (1.0 + np.exp(-2.0 * np.sin(2 * np.pi * x1))))
+    s1 = bspline_basis(jnp.asarray(x1), 10)
+    res = gam_fit(jnp.asarray(y.astype(float)[None, :]), [s1], family='binomial')
+    st = smooth_significance(res, [s1])
+    lo, hi = res.col_slices[0]
+    ref = _ref_wood_teststat(
+        np.asarray(res.coef[0, lo:hi]), np.asarray(s1.design),
+        np.asarray(res.cov_unscaled[0, lo:hi, lo:hi]),
+        float(res.edf[0, 0]), -1.0, known_scale=True,
+    )
+    np.testing.assert_allclose(float(st.stat[0, 0]), ref[0], rtol=1e-5)
+    np.testing.assert_allclose(float(st.p_value[0, 0]), ref[2], rtol=1e-4)
+    assert float(st.p_value[0, 0]) < 1e-3
