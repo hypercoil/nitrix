@@ -318,6 +318,38 @@ def test_flame_voxelwise_per_voxel_match_unbatched():
         )
 
 
+def test_flame_matches_hand_computed_reference():
+    """The production FLAME REML matches the independent hand-rolled oracle.
+
+    ``_flame_hand_iter`` is a *different* inner loop (explicit log-scale Fisher
+    scoring with analytic score / information) than the production
+    ``fit_varcomp_diagonal`` solver -- so per-voxel agreement on both the
+    between-subject variance ``sigma_b^2`` and the fixed effects ``gamma`` pins
+    the production estimator to the REML optimum, not merely to self-consistency.
+    """
+    rng = np.random.default_rng(3)
+    N, p, V = 50, 2, 6
+    X_group = rng.standard_normal((N, p))
+    var_within = np.abs(rng.standard_normal((V, N))) * 0.5 + 0.1
+    beta = (
+        X_group @ np.array([1.0, 0.5])
+        + rng.standard_normal((V, N)) * 0.5
+        + rng.standard_normal((V, N)) * np.sqrt(var_within)
+    )
+    res = flame_two_level(
+        jnp.asarray(beta), jnp.asarray(var_within), jnp.asarray(X_group),
+        n_iter=40,
+    )
+    for v in range(V):
+        var_b, gamma = _flame_hand_iter(beta[v], var_within[v], X_group)
+        np.testing.assert_allclose(
+            float(res.sigma_b_sq[v]), var_b, rtol=1e-6, atol=1e-7
+        )
+        np.testing.assert_allclose(
+            np.asarray(res.gamma_hat[v]), gamma, rtol=1e-6, atol=1e-7
+        )
+
+
 # ---------------------------------------------------------------------------
 # Memory regression: no V * N * N intermediate
 # ---------------------------------------------------------------------------
