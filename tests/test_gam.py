@@ -23,8 +23,11 @@ jax.config.update('jax_enable_x64', True)
 from nitrix.stats.basis import (
     bspline_basis,
     by_factor_smooth,
+    cr_basis,
+    cyclic_cubic_basis,
     re_smooth,
     tensor_product_basis,
+    thinplate_regression_basis,
     varying_coefficient_smooth,
 )
 from nitrix.stats.gam import (
@@ -116,6 +119,55 @@ def test_edf_equals_influence_trace():
     xtx = X.T @ X
     edf_ref = np.trace(np.linalg.solve(xtx + lam * Sfull, xtx))
     np.testing.assert_allclose(float(res.edf_total[0]), edf_ref, atol=1e-4)
+
+
+# M6: absolute mgcv anchor for the REML / Fellner-Schall lambda selection.
+# Reference per-smooth EDF of gam(y ~ s(x, bs=<kind>, k=10), method='REML')
+# under mgcv 1.9.4 / R 4.5.3, on the dataset in `_m6_data` below.  The prior GAM
+# tests only checked the influence-trace EDF identity and that lambda *responds*
+# to noise -- never the absolute value a field-standard library lands on.
+_MGCV_EDF = {
+    'ps': 6.173218,  # P-spline      -- basis coincides with nitrix -> exact
+    'cr': 7.276841,  # cubic regr.   -- basis coincides with nitrix -> exact
+    'tp': 7.310446,  # thin-plate    -- nitrix's own construction -> comparable
+    'cc': 6.226646,  # cyclic cubic  -- nitrix's own construction -> comparable
+}
+
+
+def _m6_data():
+    rng = np.random.default_rng(0)
+    x = np.linspace(0.0, 1.0, 200)
+    y = np.sin(2.0 * np.pi * x) + rng.standard_normal(200) * 0.3
+    return jnp.asarray(x), jnp.asarray(y[None, :])
+
+
+@pytest.mark.parametrize('kind', ['ps', 'cr'])
+def test_gam_edf_matches_mgcv_exact(kind):
+    """M6: for the bases that coincide with mgcv (P-spline / cubic-regression)
+    the per-smooth EDF matches mgcv's REML fit to ~1e-3 -- an absolute, cross-
+    implementation pin on the Fellner-Schall lambda selection.  (The smoothing
+    parameter itself differs by mgcv's penalty-scaling convention and is
+    deliberately not asserted -- only the parametrisation-invariant EDF is.)"""
+    x, Y = _m6_data()
+    sb = bspline_basis(x, n_basis=10) if kind == 'ps' else cr_basis(x, n_basis=10)
+    res = gam_fit(Y, [sb])
+    np.testing.assert_allclose(float(res.edf[0, 0]), _MGCV_EDF[kind], rtol=2e-3)
+
+
+@pytest.mark.parametrize('kind', ['tp', 'cc'])
+def test_gam_edf_comparable_to_mgcv(kind):
+    """M6: thin-plate and cyclic smooths use nitrix's *own* basis construction
+    (different knot placement / null space than mgcv), so the REML EDF is
+    *comparable* to mgcv (within ~0.5 df) rather than identical -- a guard against
+    gross drift that documents the deliberate construction divergence."""
+    x, Y = _m6_data()
+    sb = (
+        thinplate_regression_basis(x, n_basis=10)
+        if kind == 'tp'
+        else cyclic_cubic_basis(x, n_basis=10)
+    )
+    res = gam_fit(Y, [sb])
+    assert abs(float(res.edf[0, 0]) - _MGCV_EDF[kind]) < 0.5
 
 
 def test_poisson_gam_recovers_log_mean():
