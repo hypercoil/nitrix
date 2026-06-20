@@ -654,7 +654,7 @@ def reml_fit(
     n_iter: int = 20,
     damping: float = 1e-6,
     block: Optional[int] = None,
-    low_rank: bool = False,
+    low_rank: Optional[bool] = None,
 ) -> REMLResult:
     """Voxelwise variance-components REML fit.
 
@@ -705,11 +705,12 @@ def reml_fit(
     low_rank
         Use the FaST-LMM **low-rank** decomposition: a ``q x q`` eig of
         ``Z^T Z`` (``O(N q^2 + q^3)``) instead of the dense ``N x N`` eig of
-        ``ZZ^T`` (``O(N^3)``).  Requires ``q <= N`` with ``Z`` of full column
-        rank (the usual tall random-effect design); the ``N - q`` null
-        directions enter only through per-voxel Gram aggregates.  Default
-        ``False`` (the dense path, bit-for-bit unchanged); set ``True`` for
-        brain-scale cohorts where ``q << N`` -- it matches the dense fit to the
+        ``ZZ^T`` (``O(N^3)``).  Requires ``q <= N`` (the usual tall random-effect
+        design); the ``N - q`` null directions enter only through per-voxel Gram
+        aggregates, and a rank-deficient ``Z`` (e.g. phantom one-hot columns from
+        gappy labels) is absorbed by that null space.  **Default ``None``**
+        auto-selects: low-rank when ``q < N`` (the brain-scale case), dense
+        otherwise.  Pass ``True`` / ``False`` to force; the two match to the
         iterative tolerance.
 
     Returns
@@ -737,7 +738,12 @@ def reml_fit(
             f'reml_fit: Y.shape[-1]={Y.shape[-1]} must match N={n}.'
         )
 
-    if low_rank:
+    # Auto-select the low-rank decomposition when the random-effect design is
+    # genuinely tall (q < N) -- the common brain-scale case, where the q x q eig
+    # of Z^T Z is 1-2 orders cheaper than the dense N x N eig of ZZ^T and matches
+    # it to the iterative tolerance.  Explicit low_rank=True/False overrides.
+    use_low_rank = (Z.shape[-1] < n) if low_rank is None else low_rank
+    if use_low_rank:
         return _reml_fit_lowrank(Y, X, Z, theta_init, n_iter, damping, block)
 
     # Eigendecompose ZZ^T (shared across voxels).
@@ -897,7 +903,7 @@ def lme_fit(
     n_iter: int = 20,
     damping: float = 1e-6,
     block: Optional[int] = None,
-    low_rank: bool = False,
+    low_rank: Optional[bool] = None,
 ) -> Union[
     REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult
 ]:
@@ -981,7 +987,8 @@ def lme_fit(
         off-diagonal of ``G`` is held at zero).  Both run the R2 block-Woodbury.
     n_iter, damping, block, low_rank
         Newton iterations, AI damping, voxel-block chunking, and (R1) the q-rank
-        toggle.
+        toggle -- ``None`` (default) auto-selects the FaST-LMM low-rank path when
+        ``q < N`` (the brain-scale case; matches the dense fit to tolerance).
 
     Returns
     -------
