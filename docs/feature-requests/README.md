@@ -110,6 +110,20 @@ items, each with a stable ID and Status column. Records the **empirical
 refutation of the one Critical claim** (C1 "gappy labels bias REML" — bit-identical
 fits; exact log|V| cancellation) so it is not re-raised.
 
+**GP / HGP models (proposed, 2026-06-20):**
+[`gaussian-process-models.md`](gaussian-process-models.md) — Gaussian-process
+regression as a first-class family (`nitrix.stats.gp`) and its **hierarchical**
+(multi-level, mixed-model sense) extension. Substrate is ~70 % shipped: a 1-D
+reduced-rank GP *smooth* (`gp_basis` + the generic Fellner–Schall loop) fits
+today, `reml_fit`'s FaST-LMM is a fixed-kernel GP in disguise (`K`↔`ZZᵀ`), and
+the kernels / cuSOLVER-free Cholesky+log-det / differentiable eigensolve prims
+exist. Net-new: alternative & multi-D kernels, **lengthscale estimation** (the
+one hard part — it breaks the fixed-eigenbasis fast paths; resolved by
+shared-ρ grid/profile or impl-VJP `eigh`), and the `gp_fit`/`GPResult` + HGP
+factor-smooth wrappers (Tier 3 composes the v3 §2/§3.1 GAMM surface). Blast
+radius on existing code ≈ nil (additive); ~3–4 weeks to full (a)-scope. The
+HBR / normative-modelling flavour (b) is deferred to a separate proposal.
+
 ## Internal engineering backlog
 
 Ledger (framing, closed-by-design, resolved):
