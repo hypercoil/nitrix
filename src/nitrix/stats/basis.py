@@ -1164,7 +1164,12 @@ def re_smooth(
     design = jax.nn.one_hot(g, q)  # (n, q)
     if by is not None:
         design = design * jnp.asarray(by, dtype=design.dtype)[:, None]
-    penalty = jnp.eye(q, dtype=design.dtype)
+    # The identity ridge depends only on the static level count q, so build it as
+    # a host (numpy) constant -- like the spline difference penalties.  A jnp.eye
+    # would be a *tracer* when re_smooth runs under jax.jit (e.g. a jitted
+    # glmm_fit few-level fit), which gam_fit's penalty machinery np.asarray's at
+    # trace time -- so the penalty must be concrete, not traced.
+    penalty = np.eye(q, dtype=design.dtype)
     return REBasis(design=design, penalty=penalty, levels=q)
 
 

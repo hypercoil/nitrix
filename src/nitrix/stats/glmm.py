@@ -1357,6 +1357,7 @@ def glmm_fit(
     X: Float[Array, 'N p'],
     *,
     group: Int[Array, 'N'],
+    n_groups: Optional[int] = None,
     z: Optional[Float[Array, 'N r']] = None,
     structure: str = 'unstructured',
     family: Union[str, Family] = GAUSSIAN,
@@ -1402,6 +1403,13 @@ def glmm_fit(
         intercept).
     group
         ``(N,)`` integer grouping factor (random intercept per level).
+    n_groups
+        Optional **static** level count ``q`` (levels are ``0 .. q-1``).  When
+        ``None`` (default) it is derived eagerly as ``int(max(group)) + 1`` --
+        byte-identical to before, but that concretises ``group`` and so makes
+        ``glmm_fit`` untraceable under ``jax.jit``.  Pass the count explicitly (a
+        Python ``int``) to trace the whole fit under ``jit`` -- e.g. to fuse it
+        into a larger program -- for every family / structure / method.
     z
         Optional ``(N, r)`` random-effect design for a random **slope** (e.g.
         ``[1, x]`` -> random intercept + random slope of ``x``).  ``None``
@@ -1476,7 +1484,14 @@ def glmm_fit(
         raise ValueError(
             f'glmm_fit: group has {group.shape[0]} labels; expected N={n}.'
         )
-    n_groups = int(jnp.max(group)) + 1
+    # The level count is a *static* shape driver (segment sums, output shapes,
+    # the few/many dispatch).  Deriving it from the data with int(jnp.max(...))
+    # concretises a tracer, so the eager-only default makes glmm_fit untraceable
+    # under jax.jit (P7); pass n_groups explicitly -- the count the caller
+    # already knows -- to fuse the whole fit (mirrors lme_fit / reml_fit, where
+    # the level structure is likewise caller-supplied).
+    if n_groups is None:
+        n_groups = int(jnp.max(group)) + 1
 
     if z is not None:
         z = jnp.asarray(z, dtype=X.dtype)
