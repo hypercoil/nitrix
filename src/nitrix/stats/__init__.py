@@ -66,7 +66,13 @@ from .connectivity import (
     oas,
     shrunk_covariance,
 )
-from .gam import GAMResult, gam_fit, smooth_partial_effect
+from .gam import (
+    GAMResult,
+    SmoothTest,
+    gam_fit,
+    smooth_partial_effect,
+    smooth_significance,
+)
 from ._betareg import BetaResult, beta_fit
 from ._gaulss import GauLSSResult, gaulss_fit
 from ._ordinal import OrdinalResult, ordinal_fit
@@ -182,8 +188,10 @@ __all__ = [
     'tensor_product_design',
     # gam
     'GAMResult',
+    'SmoothTest',
     'gam_fit',
     'smooth_partial_effect',
+    'smooth_significance',
     # glmm
     'GLMMResult',
     'glmm_fit',
