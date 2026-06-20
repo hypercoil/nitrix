@@ -96,6 +96,72 @@ def test_r2_blockwoodbury_recovers_all_seeds(seed):
     assert abs(float(res.sigma_e_sq[0]) - sed) < 2e-2
 
 
+def _dense_r2_diagonal(y, X, zc, group, G, p):
+    """Dense profile-REML oracle for an *uncorrelated* random slope ``(x || g)``:
+    the random-effect covariance is **diagonal** (no off-diagonal term), so the
+    profile has three variance parameters ``[log var0, log var1, log se]``."""
+
+    def neg2(th):
+        Gm = np.diag([np.exp(th[0]), np.exp(th[1])])
+        se = np.exp(th[2])
+        xvx = np.zeros((p, p))
+        xvy = np.zeros(p)
+        yvy = 0.0
+        ldv = 0.0
+        for g in range(G):
+            m = group == g
+            Zg = zc[m]
+            V = Zg @ Gm @ Zg.T + se * np.eye(int(m.sum()))
+            Vi = np.linalg.inv(V)
+            ldv += np.linalg.slogdet(V)[1]
+            xvx += X[m].T @ Vi @ X[m]
+            xvy += X[m].T @ Vi @ y[m]
+            yvy += y[m] @ Vi @ y[m]
+        beta = np.linalg.solve(xvx, xvy)
+        return ldv + np.linalg.slogdet(xvx)[1] + (yvy - beta @ xvy)
+
+    r = minimize(
+        neg2,
+        [0.0, 0.0, 0.0],
+        method='Nelder-Mead',
+        options={'xatol': 1e-7, 'fatol': 1e-7, 'maxiter': 10000},
+    )
+    return np.diag([np.exp(r.x[0]), np.exp(r.x[1])]), np.exp(r.x[2])
+
+
+@pytest.mark.parametrize('seed', SEEDS)
+def test_r2_diagonal_blockwoodbury_recovers_all_seeds(seed):
+    """M3: the uncorrelated ``(x || g)`` diagonal-G slope matches a dense diagonal
+    REML oracle -- previously only the unstructured (correlated) case had a dense
+    reference; the ``structure='diagonal'`` block-Woodbury path was unpinned."""
+    rng = np.random.default_rng(seed)
+    G, n_per, p = 15, 8, 2
+    group = np.repeat(np.arange(G), n_per).astype(np.int32)
+    N = G * n_per
+    X = np.ones((N, p))
+    X[:, 1] = rng.standard_normal(N)
+    zc = np.c_[np.ones(N), rng.standard_normal(N)]
+    # Independent (diagonal-G) random effects: var 0.6 (intercept), 0.4 (slope).
+    b = rng.standard_normal((G, 2)) * np.sqrt([0.6, 0.4])
+    y = (
+        X @ np.array([1.0, 0.5])
+        + np.einsum('nr,nr->n', zc, b[group])
+        + rng.standard_normal(N) * np.sqrt(0.4)
+    )
+    Gd, sed = _dense_r2_diagonal(y, X, zc, group, G, p)
+    res = lme_fit(
+        jnp.asarray(y[None, :]),
+        jnp.asarray(X),
+        group=jnp.asarray(group),
+        z=jnp.asarray(zc),
+        structure='diagonal',
+        n_iter=40,
+    )
+    # diagonal G -> off-diagonals exactly zero in both the fit and the oracle.
+    assert np.allclose(np.asarray(res.cov_re[0]), Gd, atol=2e-2)
+    assert abs(float(res.sigma_e_sq[0]) - sed) < 2e-2
+
+
 # ---------------------------------------------------------------------------
 # R3 nested (1 | g1/g2)
 # ---------------------------------------------------------------------------
