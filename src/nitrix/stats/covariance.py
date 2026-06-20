@@ -120,6 +120,7 @@ def _denom_factor(
     weights: Optional[Array] = None,
     W: Optional[Array] = None,
     ddof: int,
+    dtype: Any,
 ) -> Array:
     """Bessel-style denominator for (un)biased covariance.
 
@@ -130,9 +131,13 @@ def _denom_factor(
     For matrix weights: ``sum(W) - ddof * sum(W @ W.T) / sum(W)``
     (the natural generalisation; reduces to the vector case for
     diagonal W).
+
+    ``dtype`` is the data dtype: the unweighted count adopts it (was hard-coded
+    ``float32``, which silently downcast an x64 covariance denominator); the
+    weighted branches already inherit the weights' dtype.
     """
     if weights is None and W is None:
-        return jnp.asarray(n_obs - ddof, dtype=jnp.float32)
+        return jnp.asarray(n_obs - ddof, dtype=dtype)
     if weights is not None:
         w_sum = weights.sum(-1, keepdims=True)
         if ddof == 0:
@@ -172,7 +177,9 @@ def _cov_core(
     Yc = (Y - mu_Y).conj()
 
     n_obs = X.shape[-1]
-    fact = _denom_factor(n_obs, weights=weights, W=W, ddof=ddof)
+    fact = _denom_factor(
+        n_obs, weights=weights, W=W, ddof=ddof, dtype=Xc.dtype
+    )
 
     if W is not None:
         sigma = Xc @ W @ Yc.swapaxes(-1, -2) / fact[..., None, :]

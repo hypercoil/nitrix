@@ -35,6 +35,20 @@ for a single ``p = 30`` inverse).  Rolling the loop makes the graph ``O(p^2)``
 (one compiled body), so compile is ~flat in ``p`` (~0.4 s at ``p = 30``);
 runtime is unchanged (still ``O(p^3)`` flops).  The closed forms for
 ``p in {1, 2}`` are untouched.
+
+Numerical precision (x64 expectation)
+-------------------------------------
+
+These kernels factor the *normal-equation* matrix ``X^T W X`` (or a per-group
+Gram), whose condition number is the **square** of the design's -- so an
+ill-conditioned design squares into a near-singular pivot.  The modified-Cholesky
+pivot floor (:func:`_pivot_rel_floor`, ``~1e2 x finfo(dtype).eps``) keeps such a
+solve *finite and regularised* rather than ``NaN``, but it cannot restore digits
+roundoff has already lost.  For ill-conditioned designs the suite **expects
+float64** (``jax.config.update('jax_enable_x64', True)``): in float32 the floor
+fires far sooner (eps ~1.2e-5 vs ~2.2e-14), so the fit silently leans on the
+regulariser.  Prefer x64, or pre-condition / ridge the design, when the
+normal-equation condition number approaches ``1 / eps``.
 """
 
 from __future__ import annotations
@@ -52,14 +66,28 @@ __all__ = [
     'sym_eig_jacobi',
 ]
 
-# Relative pivot floor (modified Cholesky).  A pivot / determinant is clamped
-# to this fraction of the matrix's diagonal scale before a ``sqrt`` / division,
-# so a near-singular or boundary system (where the caller's ridge was too small
-# to keep the pivot positive against roundoff) yields a *regularised, finite*
-# solve instead of a silent ``NaN``.  It sits ~4 orders below fp32 eps and is
-# far below the smallest pivot of any well-conditioned matrix (cond < 1e12), so
-# it never perturbs a healthy solve -- only rescues a degenerate one.
-_PIVOT_REL_FLOOR = 1e-12
+# Relative pivot-floor multiplier (modified Cholesky), ~1e2 x the dtype's
+# machine epsilon.
+_PIVOT_REL_EPS_MULT = 100.0
+
+
+def _pivot_rel_floor(dtype: jnp.dtype) -> Float[Array, '']:
+    """Relative pivot floor, **dtype-aware**: ``~1e2 x finfo(dtype).eps``.
+
+    A pivot / determinant is clamped to this fraction of the matrix's diagonal
+    scale before a ``sqrt`` / division, so a near-singular or boundary system
+    (where the caller's ridge was too small to keep the pivot positive against
+    roundoff) yields a *regularised, finite* solve instead of a silent ``NaN``.
+
+    Tying it to ``eps`` (fp32 ~1.2e-5, fp64 ~2.2e-14) keeps the floor just above
+    the dtype's roundoff scale, so it sits below the smallest pivot of any
+    well-conditioned matrix (it never perturbs a healthy solve) yet still
+    catches a pivot that roundoff has driven non-positive.  The previous fixed
+    ``1e-12`` was ~4 orders *below* fp32 eps, so in fp32 it was **inert** -- it
+    could never rescue an fp32 pivot that had already gone negative -- and only
+    ever did anything in fp64.
+    """
+    return _PIVOT_REL_EPS_MULT * jnp.finfo(dtype).eps
 
 
 def spd_inv_logdet_chol(
@@ -106,7 +134,8 @@ def spd_chol(A: Float[Array, 'n n'], n: int) -> Float[Array, 'n n']:
     """
     idx = jnp.arange(n)
     floor = (
-        _PIVOT_REL_FLOOR * jnp.max(jnp.diagonal(A)) + jnp.finfo(A.dtype).tiny
+        _pivot_rel_floor(A.dtype) * jnp.max(jnp.diagonal(A))
+        + jnp.finfo(A.dtype).tiny
     )
 
     def body(j: Array, L: Float[Array, 'n n']) -> Float[Array, 'n n']:
@@ -143,10 +172,11 @@ def small_inv_logdet(
     ``A`` is assumed SPD (the callers add a ridge).
     """
     tiny = jnp.finfo(A.dtype).tiny
+    rel = _pivot_rel_floor(A.dtype)
     if n == 1:
         # Floor a non-positive / zero pivot (roundoff or constant input) so the
         # reciprocal and log stay finite; never perturbs an SPD scalar.
-        a = jnp.maximum(A[0, 0], _PIVOT_REL_FLOOR * jnp.abs(A[0, 0]) + tiny)
+        a = jnp.maximum(A[0, 0], rel * jnp.abs(A[0, 0]) + tiny)
         return (1.0 / a)[None, None], jnp.log(a)
     if n == 2:
         a = A[0, 0]
@@ -154,7 +184,7 @@ def small_inv_logdet(
         c = A[1, 1]
         # Floor the determinant relative to the diagonal product, so a
         # near-singular / indefinite 2x2 gives a finite regularised inverse.
-        det = jnp.maximum(a * c - b * b, _PIVOT_REL_FLOOR * a * c + tiny)
+        det = jnp.maximum(a * c - b * b, rel * a * c + tiny)
         inv = jnp.array([[c, -b], [-b, a]], dtype=A.dtype) / det
         return inv, jnp.log(det)
     return spd_inv_logdet_chol(A, n)
