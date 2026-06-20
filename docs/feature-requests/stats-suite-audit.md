@@ -91,6 +91,7 @@ immune.
 | **P3** | Med | ✅ **done** | `stats/glmm.py` AGQ | `K = n_quad**r` tensor nodes differentiated through the mode scan — explodes at r≥3. | **FIXED:** `_AGQ_MAX_NODES = 128` cap in the dispatch raises a clear `ValueError` (admits r=2 n_quad≤11, r=3 n_quad≤5; blocks r≥4 / large r=3) pointing to a smaller `n_quad` or Laplace. |
 | **P4** | Med | open | `stats/glmm.py` Laplace/Laplace-slope/AGQ | All three marginal GLMM fits take the autodiff-Hessian-through-mode-scan fork. See the **#36** FR (`glmm-random-slope-robust-solver.md`): the clean fix is implicit-diff of the mode (`custom_vjp`/IFT); deferred on ROI (cold-compile, amortised). | Tracked separately (#36). AGQ would benefit identically. |
 | **P5** | Low | open | `gam.py` `_smooth_penalties` (~195) | Data-independent penalty eigendecomp (`eigh` of `k×k`) recomputed every `gam_fit` call — wasteful across CV/λ loops. | Cache `penalty_eigs` in the `SplineBasis` container at construction. |
+| **P7** | High value | open | `stats/glmm.py` `glmm_fit` `n_groups = int(jnp.max(group)) + 1` (~1500) | **`glmm_fit` is not `jax.jit`-traceable** — it derives the level count as a concrete Python int from the data, so under `jit` (`group` a tracer) it raises `ConcretizationTypeError`. Consumers can't fuse a pipeline containing `glmm_fit`; it is the only marquee op perf-bench cannot benchmark (all rows `compile_error`); regresses the jit-safe contract `lme_fit`/`reml_fit` keep. Surfaced by **perf-bench**. See [`glmm-fit-jit-incompatible-static-group-count.md`](glmm-fit-jit-incompatible-static-group-count.md). | Add an optional **static** `n_groups: Optional[int] = None` (the value already threaded through every helper); `None` → eager `int(jnp.max(group))+1` (byte-identical today), supplied → traces under `jit` for all families/structures/methods. Additive, back-compatible. |
 | **P6** | Low | ✅ **done** | `linalg/_smalllinalg.py` `_PIVOT_REL_FLOOR=1e-12` (~62); `covariance.py:134` | Pivot floor / `ridge=1e-8` defaults sit below fp32 eps (~1.2e-7) → inert in fp32 on the squared-condition (X^T X) Cholesky; `covariance.py:134` hard-codes `float32`. Suite quietly assumes x64. (engineering + hardware) | **FIXED:** `_pivot_rel_floor(dtype) = 1e2·finfo(dtype).eps` (fp32 ~1.2e-5, fp64 ~2.2e-14) used in `spd_chol`/`small_inv_logdet` — now active in fp32 (regression test pins it), fp64 bit-unchanged vs numpy; `_denom_factor` takes the data `dtype` (no more hard-coded `float32`); module docstring documents the x64 expectation for squared-condition designs. |
 
 ## Mathematical correctness — test-gaps & doc (no bugs; all Low)
@@ -124,20 +125,55 @@ immune.
 
 ## Suggested sequencing
 
-- **Now (verified bugs, isolated, ~10–20 lines each + a regression test):** **B1**
-  (`precision` cuSOLVER), **B2** (`spline_design` clamp), **B3** (`sandwich_cov`
-  label densify — share a `_densify_labels` helper).
-- **Quick win:** **P2** (default `low_rank=True` when `M ≪ N`).
-- **High-leverage:** ~~**P1**~~ (deferred — no measured impact), **D1** ✅ (shared
-  `register_result` + **D4** ✅ uniform `re_var` `(V,r,r)` — done together), **N1** ✅
-  (GAM smooth-significance).
+### Round 1 — ✅ complete (merged to `main`, merge `356c9d2`)
+
+The originally-actionable sequence, all shipped + validated green per-file (376
+stats+linalg tests, 0 failures):
+
+- **Bugs:** **B1** (`precision` cuSOLVER), **B2** (`spline_design` clamp), **B3**
+  (`sandwich_cov` label densify). **B4/C1** ("gappy labels bias REML") refuted.
+- **Quick win:** **P2** (auto `low_rank` when `q < N`).
+- **High-leverage:** ~~**P1**~~ (deferred — no measured impact), **D1** (shared
+  `register_result` pytree) **+ D4** (uniform `re_var` `(V,r,r)`), **N1** (GAM
+  smooth-significance, mgcv-validated).
 - **Polish:** **D5** (`resolve_family` export), **P3** (AGQ r≥3 guard), **M1**
-  (`edf_total`), **M2** (FLAME oracle), **P6** (dtype-aware pivot).
-- **Deferred / document:** **O1** (`glmm/` split), **N2** (surface nulls), **D3**
-  (F-contrasts on R2+), **P4** (= #36, separate FR).
+  (`edf_total` doc), **M2** (FLAME oracle wired), **P6** (dtype-aware pivot floor).
+
+### Round 2 — remaining (this register), four waves by readiness
+
+Effort **S** ≈ <½ day · **M** ≈ ½–1 day · **L** ≈ multi-day. ⚖️ = needs a design
+decision (bring a proposal before coding).
+
+- **Wave 1 — quick high-value + harden what shipped (no decisions):**
+  **P7** (S, *lead* — optional static `n_groups` makes `glmm_fit` jit-traceable;
+  unblocks consumer fusion + the perf-bench flagship + `lme_fit` parity),
+  **M7** (S, soften JS docstring), **M3** (S, diagonal-G dense oracle),
+  **M4** (S, probit/cloglog slope Laplace test), **M6** (M, mgcv λ/EDF anchor),
+  **D9** (S, drop `VarCompSpec.reml`; doc intercept policy + `low_rank` R1-only).
+- **Wave 2 — code organisation (mechanical, behaviour-preserving):**
+  **O2** (M, move `damped_newton` to a stats-core module),
+  **D7** (S, lift `_param_layout`/`cov_re_from_chol` to `lme/_recov.py`),
+  **O1** (M, split `glmm.py` into a `glmm/` package),
+  **O3** ⚖️ (S, rename `_betareg`/`_gaulss`/`_ordinal` *or* document).
+- **Wave 3 — design contracts (decisions; complete the inference surface):**
+  **D2** ⚖️ (M, uniform lme `.cov_re (V,k,k)` + `.re_labels` — nested/crossed as
+  block-diagonal), **D3** ⚖️ (M–L, F/t-contrasts on R2/R3/R4/+corr),
+  **D6** (M, `Literal` dispatch taxonomies incl. `tier`),
+  **D8** (M, `SmoothBasis` `Protocol` over the `isinstance` chain).
+- **Wave 4 — neuroimaging capabilities (features; largest):**
+  **N5** (S, `confidence_interval` + standardized-effect helper),
+  **N2** (L, mesh/graph TFCE adjacency + spin test — surface/dMRI unlock),
+  **N4** (M, FLAME outlier-deweighting / FLAME1),
+  **N3/N6** ⚖️ (S–M, document the permutation-only / `-e`-not-`-g` stance *or*
+  implement), **N7** (S, conjunction/design conveniences — partly downstream).
+- **Deferred (tracked, not in waves):** **P4** (implicit-diff mode — separate FR
+  #36), **P5** (cache `penalty_eigs`).
 
 ## Cross-references
 
+- `docs/feature-requests/glmm-fit-jit-incompatible-static-group-count.md` — the
+  perf-bench-surfaced **P7** item (optional static `n_groups` for jit-traceable
+  `glmm_fit`).
 - `docs/feature-requests/glmm-random-slope-robust-solver.md` — the #36 analytic-
   Laplace-gradient / autodiff-through-scan item (overlaps **P3**/**P4**).
 - `docs/feature-requests/stats-modelling-suite-v3.md` — the v3 ledger this suite
