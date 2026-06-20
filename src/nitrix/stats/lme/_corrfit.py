@@ -319,7 +319,7 @@ def fit_corr_gls(
             [corr.init_raw(X.dtype), weights.init_raw(X.dtype)]
         )
     )
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    spec = VarCompSpec(n_iter=n_iter, damping=damping)
 
     def per_voxel(
         y: Float[Array, 'N'],
@@ -610,7 +610,7 @@ def fit_corr_lme(
         corr.init_raw(X.dtype)[None, :], (Y.shape[0], corr.n_params)
     )
     theta_init = jnp.concatenate([chol, log_se2, raw0], axis=1)  # (V, nt)
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    spec = VarCompSpec(n_iter=n_iter, damping=damping)
 
     def per_voxel(
         y: Float[Array, 'N'], th: Float[Array, 'nt']

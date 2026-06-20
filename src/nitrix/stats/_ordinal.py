@@ -194,7 +194,7 @@ def ordinal_fit(
             f"ordinal_fit: link={link!r}; expected 'logit' or 'probit'."
         )
     k = n_classes
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=ridge)
+    spec = VarCompSpec(n_iter=n_iter, damping=ridge)
     # Spread the initial thresholds across the response, zero slope.
     raw0 = jnp.concatenate(
         [

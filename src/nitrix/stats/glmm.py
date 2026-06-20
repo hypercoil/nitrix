@@ -937,7 +937,7 @@ def _glmm_laplace(
 ) -> GLMMResult:
     """Laplace GLMM over ``V`` elements (scalar random intercept)."""
     p = X.shape[-1]
-    spec = VarCompSpec.reml(n_iter=n_outer, damping=damping)
+    spec = VarCompSpec(n_iter=n_outer, damping=damping)
 
     def per_voxel(
         y: Float[Array, 'N'],
@@ -1138,7 +1138,7 @@ def _glmm_laplace_slope(
     """Laplace random-slope GLMM over ``V`` elements."""
     p = X.shape[-1]
     r = z.shape[-1]
-    spec = VarCompSpec.reml(n_iter=n_outer, damping=damping)
+    spec = VarCompSpec(n_iter=n_outer, damping=damping)
 
     def per_voxel(
         y: Float[Array, 'N'],
@@ -1323,7 +1323,7 @@ def _glmm_agq_slope(
     """Adaptive Gauss-Hermite random-slope GLMM over ``V`` elements."""
     p = X.shape[-1]
     r = z.shape[-1]
-    spec = VarCompSpec.reml(n_iter=n_outer, damping=damping)
+    spec = VarCompSpec(n_iter=n_outer, damping=damping)
     nodes, logw, sumsq = _gh_tensor_nodes(n_quad, r)
 
     def per_voxel(

@@ -71,7 +71,7 @@ immune.
 | **D6** | Low-Med | open | `glm_fit`/`glmm_fit`/`lme_fit`/`predict`/`sandwich_cov`/… | Dispatch axes (`family`/`method`/`structure`/`type`/`kind`) are bare `str` validated by deep `raise ValueError`; only `gam_fit`/`pca_fit`/`reml.Structure` use `Literal`. `tier` is a free `str` return. | Promote taxonomies to `Literal` (incl. `tier`) so legal values are in the signature / type-checker. |
 | **D7** | Low | open | `lme/_blockwoodbury.py` `_param_layout`/`cov_re_from_chol` | Shared RE-covariance (log-Cholesky) helpers reached across module boundaries from `reml.py`, `_corrfit.py`, and `glmm.py` (4× in-function private-name imports). (code-org + design) | Lift to a shared `lme/_recov.py` (or have `fit_blockwoodbury_reml` return `cov_re` directly). |
 | **D8** | Low-Med | open | `gam.py` `Smooth = Union[...]`, `_smooth_penalties` `isinstance` chain | New basis type ⇒ edit the union *and* every `isinstance` branch — the open-set registry story `Family`/`CorrSpec` get right is absent. | A `SmoothBasis` `Protocol` (shared `dim`/`design`/`penalty`) or a `penalty_blocks()` method on each basis. |
-| **D9** | Taste | open | various | `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` naming drift; intercept policy differs (`X`-carries-own vs `intercept=` vs forbidden); `VarCompSpec.reml` is pure ceremony (`= cls(**kw)`); `low_rank` is an R1-only silent no-op. | Standardise single-loop fitters on `n_iter`; document the intercept policy per signature; drop `.reml`; validate/doc `low_rank` R1-only. |
+| **D9** | Taste | ~mostly done | various | `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` naming drift; intercept policy differs (`X`-carries-own vs `intercept=` vs forbidden); `VarCompSpec.reml` is pure ceremony (`= cls(**kw)`); `low_rank` is an R1-only silent no-op. | **DONE:** dropped `VarCompSpec.reml` (11 call-sites → direct `VarCompSpec(...)`; `.flame` kept — it sets a real default); documented the intercept policy on the fitters that lacked it (`glm_fit`/`reml_fit`/`lme_fit` "carries its own intercept"; ordinal/gaulss/betareg/gam already noted theirs); `lme_fit.low_rank` now documented **R1-only** (silent no-op on R2/R3/R4/+corr). **Deferred (cosmetic):** the `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` rename across public signatures. |
 
 ## Code organisation
 
@@ -144,13 +144,13 @@ stats+linalg tests, 0 failures):
 Effort **S** ≈ <½ day · **M** ≈ ½–1 day · **L** ≈ multi-day. ⚖️ = needs a design
 decision (bring a proposal before coding).
 
-- **Wave 1 — quick high-value + harden what shipped (no decisions):**
-  **P7** ✅ (optional static `n_groups` + host-constant RE penalty make
-  `glmm_fit` jit-traceable on every path — unblocks consumer fusion + the
-  perf-bench flagship + `lme_fit` parity),
-  **M7** (S, soften JS docstring), **M3** (S, diagonal-G dense oracle),
-  **M4** (S, probit/cloglog slope Laplace test), **M6** (M, mgcv λ/EDF anchor),
-  **D9** (S, drop `VarCompSpec.reml`; doc intercept policy + `low_rank` R1-only).
+- **Wave 1 — ✅ complete** (quick high-value + harden what shipped):
+  **P7** ✅ (static `n_groups` + host-constant RE penalty → `glmm_fit`
+  jit-traceable on every path), **M7** ✅ (JS docstring softened + residual
+  Cholesky dedup), **M3** ✅ (diagonal-G dense oracle), **M4** ✅ (probit/cloglog
+  Laplace-curvature pin), **M6** ✅ (mgcv EDF anchor per basis kind), **D9** ✅
+  (dropped `VarCompSpec.reml`; intercept-policy + `low_rank` R1-only docs;
+  `n_iter` rename deferred as cosmetic).
 - **Wave 2 — code organisation (mechanical, behaviour-preserving):**
   **O2** (M, move `damped_newton` to a stats-core module),
   **D7** (S, lift `_param_layout`/`cov_re_from_chol` to `lme/_recov.py`),

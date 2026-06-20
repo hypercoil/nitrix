@@ -124,11 +124,6 @@ class VarCompSpec:
     ridge: float = 1e-8
 
     @classmethod
-    def reml(cls, **kw: Any) -> 'VarCompSpec':
-        """Defaults tuned for general two-component REML (``reml_fit``)."""
-        return cls(**kw)
-
-    @classmethod
     def flame(cls, **kw: Any) -> 'VarCompSpec':
         """Defaults tuned for the single-parameter FLAME REML."""
         return cls(**{'n_iter': 30, **kw})

@@ -679,7 +679,7 @@ def test_lme_satterthwaite_gradient_matches_finite_difference():
     y_rot = (Y @ U)[0]
     x_rot = U.T @ X
     bdiag = jnp.stack([lam, jnp.ones_like(lam)])
-    spec = VarCompSpec.reml()
+    spec = VarCompSpec()
     th = res.theta_hat[0]
     off = jnp.zeros(N)
 
