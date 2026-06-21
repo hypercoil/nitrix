@@ -2,8 +2,10 @@
 
 > Forward-looking engineering plan for the GP feature on `feat/stats-gp`. The
 > *what/why* lives in `docs/feature-requests/gaussian-process-models.md`; this is
-> the *how*, grounded in the as-built code (file:line). Status: **plan — no
-> `src/` code written yet.**
+> the *how*, grounded in the as-built code (file:line). Status: **PR1 + PR2
+> shipped** (`linalg/kernel.py` spectral densities, `stats/basis.py` `hsgp_basis`,
+> `stats/gp.py` `gp_fit`/`gp_predict`/`GPResult`; tests `test_hsgp.py`,
+> `test_gp.py`, `test_gp_mgcv_parity.py`). PR3–5 remain plan-only.
 
 ## 0. Principle & ordering
 
@@ -162,7 +164,7 @@ is the stronger HSGP correctness reference regardless. R tests guard on
 `Rscript` availability (skip when absent). Placement: mgcv↔`gp_basis` parity is a
 quick win; the mgcv↔`gp_fit` REML-range cross-check is natural in PR2.
 
-## 5. PR2 design sketch — `stats/gp.py` (no implementation yet)
+## 5. PR2 — `stats/gp.py` (**shipped**)
 
 ```python
 @register_result(children=('coef','cov_unscaled','theta','log_mlik','edf','dispersion'),
@@ -178,11 +180,40 @@ def gp_predict(result, basis, x_new) -> tuple[mean, var]: ...
 Engine: build one fixed `Φ` (shared under `vmap`); per voxel, profile-REML over
 `(log σ_f², log σ_e², log ρ)` with the diagonal-`S(ρ)` penalty (§1, form B);
 `ρ` shared across voxels (estimate on pooled criterion or a representative
-reduction), `(σ_f², σ_e²)` per voxel. `log_mlik` → shipped
-`aic`/`bic`/`compare_models`. **Invariants:** no runtime `eigh` (Φ closed-form),
-`O(V·N·m)` memory + an HLO-budget test mirroring `test_reml_max_tensor_size…`,
-ruff/mypy clean. Validation: `(σ_f, ρ, σ_e)` & `log_mlik` vs sklearn/GPy/brms
-~1e-4; finite-diff grad-through-`ρ`.
+reduction), `(σ_f², σ_e²)` per voxel.
+
+**As built (deltas from the sketch):**
+- **Form chosen — fixed design, diagonal penalty (a tightened form B).** `gp_fit`
+  uses `center=False` for the internal smooth, so the design `X = [1 | parametric |
+  Φ]` is *exactly* `ρ`-independent (no sum-to-zero `Z` to recompute per `ρ`) and the
+  penalty core is the pure diagonal `diag(1/s_j(ρ))` — the smooth/intercept
+  confounding is handled by the explicit intercept + the GP shrinkage (the brms
+  `gp()` convention), not a constraint. The Fellner–Schall trace collapses to the
+  disjoint-penalty shortcut `tr(S_λ⁺S)=m/λ`.
+- **`ρ` search — pooled-REML grid + parabolic refine.** A fixed log-spaced
+  `log ρ` grid (`n_rho`, default 24) over the pooled `−2 l_R = Σ_v (n−M₀)log D_{p,v}
+  + V(log|H| − log|S_λ|₊)`; each grid point runs the shared diagonal-penalty FS for
+  `λ`, then a 3-point parabola sub-grid-refines the argmin. Host-driven outer loop
+  (a host `argmin` separates the two device passes), so `gp_fit` is *not* one
+  `jit` — the heavy per-element work (the `ρ`-search `vmap` and the final fit) is.
+- **`gp_predict(result, x_new, *, parametric=None)`** — no `basis` argument: because
+  the eigenbasis is `ρ`-independent and uncentred, `Φ(x_new)` is reconstructed from
+  the recorded `(lo, hi, boundary, rank)` aux, so the result is self-contained.
+- **`GPResult` aux** = `(kernel, n_obs, rank, n_fixed, lo, hi, boundary)` (the
+  domain descriptors are needed for `gp_predict`'s self-contained reconstruction);
+  `theta` is `(V,3) = [log σ_f², log σ_e², log ρ]` (the `ρ` column is constant).
+- **`map_rho`** is an optional `ρ→penalty` callable added to the pooled objective
+  (MAP/prior-regularised lengthscale); `corr=` and `engine='exact'`/
+  `select='per-voxel'` raise `NotImplementedError` (PR3+).
+
+**Invariants (verified):** no runtime `eigh` (Φ closed-form), `O(V·(m+q)²)` working
+memory, an HLO-budget test (`test_gp_final_fit_hlo_is_cusolver_free_and_N_free`)
+asserting the final fit is cuSOLVER-free and carries **no `N`-sized tensor**,
+ruff/mypy clean. **Validation:** the `p`-space profiled REML matches a dense
+`(N,N)` marginal-likelihood reference to a constant offset (`< 1e-6` spread across
+`(λ,ρ)`); `ρ̂` + predictive mean track sklearn exact GPR; mgcv cross-check in
+`test_gp_mgcv_parity.py`. (brms/Stan absent — see §4 — so the sklearn exact-GP
+anchor stands in for the HSGP-to-HSGP comparison.)
 
 ## 6. Decisions (confirmed 2026-06-21)
 
@@ -190,10 +221,22 @@ ruff/mypy clean. Validation: `(σ_f, ρ, σ_e)` & `log_mlik` vs sklearn/GPy/brms
    fixed/default-`ρ` basis that rides `gam_fit`; `ρ`-selection deferred to PR2.
 2. **`ρ`-estimation home — dedicated `gp_fit` profile-REML.** Keep `gam_fit`'s
    hot path untouched and isolate the new `(σ_f², σ_e², ρ)` optimiser.
-   **End-of-PR2 review (committed):** assess whether the diagonal-`S(ρ)` step can
-   be folded into a *streamlined, generalised* Fellner–Schall (so any GAM smooth
-   gains `ρ`) **with no performance regression** on the existing GAM fast paths;
-   migrate only if that holds.
+   **End-of-PR2 review — verdict: KEEP `gp_fit` separate; do *not* fold `ρ` into
+   `gam_fit`'s Fellner–Schall.** As built, `gp_fit`'s `ρ`-search is a thin *outer*
+   loop wrapping the **unmodified** diagonal-penalty FS (which still selects `λ`
+   given a fixed penalty); `gam.py` is untouched and all reusable machinery
+   (`small_inv_logdet`, the disjoint-penalty FS shortcut, the Gaussian
+   cross-product fast path) is already shared. Folding `ρ` *into* the generic FS
+   fails the no-regression bar for two reasons: (i) FS is a *multiplicative*
+   fixed-point that scales a **fixed** penalty `S_k` by `λ_k` — but `ρ` *reshapes*
+   the penalty itself (`diag(1/s(ρ))`), for which there is no closed-form
+   multiplicative FS update, so it would need an interleaved Newton/grad-on-`ρ`
+   step; (ii) that step plus a per-iteration penalty rebuild would land on **every**
+   GAM smooth (including the `ρ`-free ones) — a real cost on the existing fast
+   paths for no benefit to non-GP terms. The only genuinely GP-specific addition is
+   the REML *value* `_reml_nll` (FS itself never computes a marginal likelihood);
+   keeping it in `gp.py` is the right boundary. Net: the migration condition
+   ("only if no perf regression") is not met → **no migration**.
 3. **Periodic kernel — deferred.** Standard HSGP covers Matérn/SE; the periodic
    basis is a separate construction (own follow-up).
 4. **Spectral-density home — `linalg/kernel.py`** (per the proposal).

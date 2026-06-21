@@ -52,7 +52,7 @@ What the legacy had that we drop:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -348,7 +348,7 @@ _MATERN_NU = {0.5, 1.5, 2.5}
 def se_spectral_density(
     omega: Float[Array, '...'],
     *,
-    rho: float,
+    rho: Union[float, Float[Array, '']],
     amplitude: float = 1.0,
 ) -> Float[Array, '...']:
     """1-D squared-exponential (RBF) spectral density.
@@ -366,7 +366,7 @@ def se_spectral_density(
 def matern_spectral_density(
     omega: Float[Array, '...'],
     *,
-    rho: float,
+    rho: Union[float, Float[Array, '']],
     nu: float,
     amplitude: float = 1.0,
 ) -> Float[Array, '...']:
@@ -411,7 +411,7 @@ def spectral_density(
     omega: Float[Array, '...'],
     *,
     kernel: str,
-    rho: float,
+    rho: Union[float, Float[Array, '']],
     amplitude: float = 1.0,
 ) -> Float[Array, '...']:
     """Dispatch a stationary-kernel 1-D spectral density by name.

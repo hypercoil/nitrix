@@ -18,6 +18,8 @@ Two submodules:
   Gaussian process) and the kriging ``gp_basis``.
 - ``gam``        -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
+- ``gp``         -- mass-univariate Gaussian-process regression (HSGP engine)
+  with REML-estimated kernel lengthscale (``gp_fit`` / ``gp_predict``).
 - ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
   covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
   small-sample regime.
@@ -76,6 +78,7 @@ from .gam import (
     smooth_partial_effect,
     smooth_significance,
 )
+from .gp import GPResult, gp_fit, gp_predict
 from .betareg import BetaResult, beta_fit
 from .gaulss import GauLSSResult, gaulss_fit
 from .ordinal import OrdinalResult, ordinal_fit
@@ -200,6 +203,10 @@ __all__ = [
     'gam_fit',
     'smooth_partial_effect',
     'smooth_significance',
+    # gp
+    'GPResult',
+    'gp_fit',
+    'gp_predict',
     # glmm
     'GLMMResult',
     'glmm_fit',
