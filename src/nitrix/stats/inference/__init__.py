@@ -34,7 +34,12 @@ tiny-``N`` design (where permutation is degenerate) supplies it itself.
 """
 
 from .cluster import cluster_mass_map, cluster_size_map
-from .multiple_comparisons import bonferroni, fdr_bh
+from .multiple_comparisons import (
+    bonferroni,
+    conjunction,
+    conjunction_pvalue,
+    fdr_bh,
+)
 from .permutation import permutations, sign_flips
 from .randomise import PermResult, gpd_pvalue, permutation_test
 from .tfce import tfce
@@ -50,4 +55,6 @@ __all__ = [
     'gpd_pvalue',
     'fdr_bh',
     'bonferroni',
+    'conjunction',
+    'conjunction_pvalue',
 ]

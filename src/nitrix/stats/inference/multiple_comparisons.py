@@ -2,12 +2,13 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Multiple-comparison corrections for mass-univariate p-value maps.
+Multiple-comparison corrections + multi-contrast combination for mass-univariate
+p-value / statistic maps.
 
-Companions to the permutation engine for the parametric route: the
-Benjamini-Hochberg FDR and the Bonferroni family-wise correction.  Both are
-pure array ops over a flat (per-element) p-value vector and return the adjusted
-p-values plus a rejection mask at a chosen level.
+Companions to the permutation engine: the Benjamini-Hochberg FDR and the
+Bonferroni family-wise correction (over a flat per-element p-value vector), and
+the **valid conjunction** (minimum-statistic) combination across contrasts
+(audit N7).  All are pure array ops.
 """
 
 from __future__ import annotations
@@ -17,7 +18,36 @@ from typing import Tuple
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float
 
-__all__ = ['fdr_bh', 'bonferroni']
+__all__ = ['fdr_bh', 'bonferroni', 'conjunction', 'conjunction_pvalue']
+
+
+def conjunction(
+    stats: Float[Array, 'k *spatial'],
+) -> Float[Array, '*spatial']:
+    """Minimum-statistic conjunction across ``k`` contrasts (Nichols et al. 2005).
+
+    ``stats`` stacks the ``k`` per-contrast statistic maps on the leading axis.
+    Returns the per-element **minimum** over contrasts -- the valid statistic for
+    the conjunction null *"at least one of the ``k`` effects is null"*: a voxel
+    survives a threshold only where **every** contrast clears it (the minimum
+    does).  This is the correct conjunction; the common
+    "all-effects-null" intersection of separately-thresholded maps tests a
+    *different* (global) null and does not control the conjunction error.
+    """
+    return jnp.min(jnp.asarray(stats), axis=0)
+
+
+def conjunction_pvalue(
+    p_values: Float[Array, 'k *spatial'],
+) -> Float[Array, '*spatial']:
+    """Conjunction p-value: the **maximum** per-contrast p-value over ``k``
+    contrasts (the p-scale dual of :func:`conjunction`).
+
+    The minimum-statistic conjunction is significant at ``alpha`` iff every
+    contrast's p-value is below ``alpha`` iff their maximum is -- so ``max p`` is
+    the valid conjunction p-value (Nichols et al. 2005).
+    """
+    return jnp.max(jnp.asarray(p_values), axis=0)
 
 
 def fdr_bh(

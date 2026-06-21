@@ -23,6 +23,8 @@ from nitrix.stats.glm import f_contrast, glm_fit, t_contrast
 from nitrix.stats.inference import (
     bonferroni,
     cluster_size_map,
+    conjunction,
+    conjunction_pvalue,
     fdr_bh,
     gpd_pvalue,
     permutation_test,
@@ -581,3 +583,46 @@ def test_randomise_gpd_resolves_below_floor():
         np.asarray(gpd.p_uncorrected),
         atol=1e-12,
     )
+
+
+# ---------------------------------------------------------------------------
+# N7: valid conjunction (minimum-statistic) across contrasts (Nichols 2005)
+# ---------------------------------------------------------------------------
+
+
+def test_conjunction_min_statistic_and_max_pvalue():
+    """N7: the conjunction is the per-voxel minimum statistic over contrasts --
+    significant only where every contrast clears threshold; the p-scale dual is
+    the maximum p-value."""
+    stats = jnp.asarray(
+        [
+            [3.0, 1.0, 5.0, 0.2],
+            [2.0, 4.0, 0.5, 6.0],
+            [4.0, 2.0, 3.0, 1.0],
+        ]
+    )
+    conj = np.asarray(conjunction(stats))
+    np.testing.assert_array_equal(conj, [2.0, 1.0, 0.5, 0.2])  # min per voxel
+    # thresholding the min == AND of the per-contrast thresholdings.
+    thr = 1.5
+    np.testing.assert_array_equal(
+        conj > thr, np.all(np.asarray(stats) > thr, axis=0)
+    )
+    pvals = jnp.asarray(
+        [
+            [0.01, 0.20, 0.001, 0.30],
+            [0.04, 0.50, 0.300, 0.02],
+        ]
+    )
+    cp = np.asarray(conjunction_pvalue(pvals))
+    np.testing.assert_array_equal(cp, [0.04, 0.50, 0.30, 0.30])  # max per voxel
+    np.testing.assert_array_equal(
+        cp < 0.05, np.all(np.asarray(pvals) < 0.05, axis=0)
+    )
+
+
+def test_conjunction_preserves_spatial_shape():
+    """conjunction reduces the leading contrast axis, keeping the spatial shape."""
+    stats = jnp.asarray(np.random.default_rng(0).standard_normal((4, 5, 6)))
+    assert conjunction(stats).shape == (5, 6)
+    assert conjunction_pvalue(jnp.abs(stats)).shape == (5, 6)
