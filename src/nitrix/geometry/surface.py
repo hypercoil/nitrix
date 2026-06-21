@@ -25,6 +25,8 @@ __all__ = [
     'mean_curvature',
     'gaussian_curvature',
     'principal_curvatures',
+    'areal_distortion',
+    'strain_distortion',
 ]
 
 
@@ -192,3 +194,108 @@ def principal_curvatures(
     k = gaussian_curvature(mesh, area_scheme=area_scheme)
     disc = jnp.sqrt(jnp.maximum(h**2 - k, 0.0))
     return jnp.stack([h + disc, h - disc], axis=-1)
+
+
+def areal_distortion(
+    source: Mesh,
+    warped: Mesh,
+    *,
+    area_scheme: str = 'voronoi',
+) -> Float[Array, 'n_vertices']:
+    """Per-vertex areal distortion ``log2(A_warped / A_source)``.
+
+    The surface analogue of ``jacobian_det_displacement`` and the MSM areal
+    regulariser / ``?h.jacobian`` QA readout: positive where the warp expands
+    area, negative where it contracts, zero for an isometry.  ``source`` and
+    ``warped`` **must share topology** (identical ``faces`` and corresponding
+    vertex indexing -- e.g. ``warped`` is ``source`` after a spherical /
+    inflation warp).
+
+    Parameters
+    ----------
+    source, warped
+        Triangle meshes with the same topology, before / after the warp.
+    area_scheme
+        Vertex-area scheme (``'voronoi'`` default).
+
+    Returns
+    -------
+    ``(n_vertices,)`` log2 area ratio.  Pure JAX; differentiable w.r.t. both
+    meshes' vertices.
+
+    Raises
+    ------
+    ValueError
+        If the two meshes' ``faces`` shapes differ (a topology mismatch).
+    """
+    if source.faces.shape != warped.faces.shape:
+        raise ValueError(
+            'areal_distortion: source and warped must share topology; '
+            f'faces shapes {source.faces.shape} != {warped.faces.shape}.'
+        )
+    a_src = vertex_areas(source, scheme=area_scheme)
+    a_warp = vertex_areas(warped, scheme=area_scheme)
+    return jnp.log2(jnp.maximum(a_warp, 1e-12) / jnp.maximum(a_src, 1e-12))
+
+
+def strain_distortion(
+    source: Mesh,
+    warped: Mesh,
+) -> Float[Array, 'n_faces 2']:
+    """Per-face principal stretches ``(lambda_1, lambda_2)``, ``lambda_1 >= lambda_2``.
+
+    The eigenvalues of the right Cauchy-Green tensor ``C = G_s^{-1} G_w`` are
+    the squared principal stretches of the per-triangle deformation from
+    ``source`` to ``warped``, where ``G_s`` / ``G_w`` are the 2x2 first
+    fundamental forms (edge Gram matrices) of the source / warped triangle.
+    Computed via the 2x2 eigenvalue closed form (no ``eigh``, so it bypasses
+    the cuSolver wedge): ``lambda^2 = (tr C +/- sqrt(tr C^2 - 4 det C)) / 2``.
+
+    An isometry gives ``(1, 1)``; a uniform scale ``s`` gives ``(s, s)``; an
+    anisotropic scale ``diag(a, b)`` gives ``(max(a,b), min(a,b))``.
+    ``source`` and ``warped`` **must share topology**.
+
+    Parameters
+    ----------
+    source, warped
+        Triangle meshes with the same topology, before / after the warp.
+
+    Returns
+    -------
+    ``(n_faces, 2)`` -- column 0 is ``lambda_1`` (larger stretch).  Pure JAX;
+    differentiable.
+
+    Raises
+    ------
+    ValueError
+        If the two meshes' ``faces`` shapes differ (a topology mismatch).
+    """
+    if source.faces.shape != warped.faces.shape:
+        raise ValueError(
+            'strain_distortion: source and warped must share topology; '
+            f'faces shapes {source.faces.shape} != {warped.faces.shape}.'
+        )
+    f = source.faces
+    vs, vw = source.vertices, warped.vertices
+    s1, s2 = vs[f[:, 1]] - vs[f[:, 0]], vs[f[:, 2]] - vs[f[:, 0]]
+    t1, t2 = vw[f[:, 1]] - vw[f[:, 0]], vw[f[:, 2]] - vw[f[:, 0]]
+    g11 = jnp.sum(s1 * s1, axis=-1)
+    g12 = jnp.sum(s1 * s2, axis=-1)
+    g22 = jnp.sum(s2 * s2, axis=-1)
+    w11 = jnp.sum(t1 * t1, axis=-1)
+    w12 = jnp.sum(t1 * t2, axis=-1)
+    w22 = jnp.sum(t2 * t2, axis=-1)
+    det_s = jnp.maximum(g11 * g22 - g12**2, 1e-12)
+    # tr(G_s^{-1} G_w) and det(G_s^{-1} G_w), C symmetrisable -> real eigenvalues.
+    tr_c = (g22 * w11 - 2.0 * g12 * w12 + g11 * w22) / det_s
+    det_c = (w11 * w22 - w12**2) / det_s
+    # Floor the discriminant strictly above zero: it keeps the gradient finite
+    # at the eigenvalue crossing lambda_1 == lambda_2 (where ``sqrt`` is
+    # otherwise non-differentiable), at the cost of a ~1e-6 split of genuinely
+    # equal stretches -- far below the float32 cancellation noise (~5e-4) that
+    # near-degenerate stretches already carry.  Distinct stretches are
+    # well-conditioned and unaffected.
+    disc = jnp.sqrt(jnp.maximum(tr_c**2 - 4.0 * det_c, 1e-12))
+    lam1 = jnp.sqrt(jnp.maximum((tr_c + disc) / 2.0, 0.0))
+    lam2 = jnp.sqrt(jnp.maximum((tr_c - disc) / 2.0, 0.0))
+    return jnp.stack([lam1, lam2], axis=-1)

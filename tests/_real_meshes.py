@@ -65,3 +65,29 @@ def fsaverage_white(
         np.asarray(faces, dtype=np.int32),
         overlays,
     )
+
+
+@functools.lru_cache(maxsize=None)
+def fsaverage_surface(
+    surf: str = 'white',
+    hemi: str = 'left',
+    mesh: str = 'fsaverage5',
+) -> Tuple[NDArray[Any], NDArray[Any]]:
+    """Return ``(vertices, faces)`` for any fsaverage surface (``white`` /
+    ``pial`` / ``infl`` / ``sphere``).
+
+    All surfaces of a given (mesh, hemi) **share topology** (same ``faces`` and
+    vertex correspondence), so e.g. ``white`` -> ``sphere`` is a real surface
+    warp for distortion tests.  Skips when unavailable.
+    """
+    datasets = pytest.importorskip('nilearn.datasets')
+    surface = pytest.importorskip('nilearn.surface')
+    try:
+        fs = datasets.fetch_surf_fsaverage(mesh)
+        coords, faces = surface.load_surf_mesh(fs[f'{surf}_{hemi}'])
+    except Exception as exc:  # network / data unavailable -> skip, don't fail
+        pytest.skip(f'real surface {surf}/{hemi} unavailable: {exc}')
+    return (
+        np.asarray(coords, dtype=np.float32),
+        np.asarray(faces, dtype=np.int32),
+    )

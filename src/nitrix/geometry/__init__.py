@@ -111,9 +111,11 @@ from .coords import (
     diffuse,
 )
 from .surface import (
+    areal_distortion,
     gaussian_curvature,
     mean_curvature,
     principal_curvatures,
+    strain_distortion,
 )
 
 __all__ = [
@@ -189,4 +191,6 @@ __all__ = [
     'mean_curvature',
     'gaussian_curvature',
     'principal_curvatures',
+    'areal_distortion',
+    'strain_distortion',
 ]
