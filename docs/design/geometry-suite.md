@@ -223,6 +223,46 @@ def principal_curvatures(mesh) -> Float[Array, 'n_vertices 2']
   curvature sign correlates with FS `?h.curv` (sulci < 0, gyri > 0) above a
   pinned floor.
 
+#### P1.1 as-built — sign convention & the FS `?h.curv` correlation (decision record)
+
+Shipped 2026-06-21 (`geometry/surface.py`; `tests/test_surface_curvature.py`).
+Two decisions, recorded here (not in the docstring, which stays
+consumer-agnostic per house style):
+
+- **Sign convention: convex-positive.** `mean_curvature` returns
+  `H = sign(H_vec·n)·‖H_vec‖`, `H_vec = ½ M⁻¹L v`, `n` the outward vertex
+  normal — so `H > 0` on convex regions (a sphere, gyral crowns), `< 0` in
+  sulcal fundi. This is the **opposite sign to FreeSurfer `?h.curv`** (which is
+  positive in sulci). Chosen because it follows directly from the
+  outward-normal / mean-curvature-vector definition with no extra flip;
+  consumers wanting FS sign negate. Differentiability forced a JAX-native
+  per-face cotangent apply (`_cotangent_apply`) rather than the host-side ELL
+  `mesh_cotangent_laplacian` (whose weights are numpy-constructed and so not
+  differentiable w.r.t. vertices); the two agree to ~1e-4 (regression-tested).
+
+- **Validation is class/correlation, not bit-parity** (the metrics↔ITK
+  posture). Sphere oracle is exact (`H = 1.0000`, Gauss–Bonnet `= 4π`);
+  real-cortex Gauss–Bonnet `= 4π` (genus-0). Against FS `?h.curv` on
+  fsaverage5 white the (anti-)correlation is **−0.90**, and the gap from unity
+  is **fully accounted for** (measured, not assumed):
+  1. **FS smooths `curv`** (`mris_curvature` averages by default) — the
+     dominant cause. Applying matched light smoothing (~2 one-ring passes) to
+     nitrix `H` lifts the correlation to **−0.95**, then it decays with
+     over-smoothing (the peak-then-decay signature of "the reference is a
+     lightly-smoothed version of what we compute").
+  2. **Different discrete estimators** — nitrix uses the cotangent/Meyer
+     mean-curvature normal; FS fits a local quadric (second fundamental form).
+     Both converge to continuous `H`; they differ pointwise on a discrete mesh.
+  3. **The fsaverage5 overlay is group-averaged + resolution-resampled** —
+     `curv` is a cross-subject average carried to ico5, not computed on the
+     exact 10 242-vertex tessellation (same artefact class as the `area`
+     overlay summing to 0.75× geometric).
+  4. **It is white-surface-specific** — measuring `H` on pial drops to −0.74,
+     confirming `?h.curv` is the white-surface curvature.
+  5. Minor: coarse ico5 + a few high-curvature outliers (Spearman −0.91 ≥
+     Pearson −0.90). The test threshold (−0.8) is deliberately conservative
+     for robustness across nilearn versions.
+
 ### P1.2 — areal & strain distortion (GS-6) · DIFF-JAX · Effort S · `geometry.surface`
 ```python
 def areal_distortion(source: Mesh, warped: Mesh) -> Float[Array, 'n_vertices']
