@@ -196,6 +196,18 @@ class REMLResult:
     def sigma_e_sq(self) -> Float[Array, 'V']:
         return jnp.exp(self.theta_hat[..., 1])
 
+    @property
+    def cov_re(self) -> Float[Array, 'V 1 1']:
+        """Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+        single scalar variance as a ``(V, 1, 1)``, matching
+        :attr:`LMEResult.cov_re`."""
+        return self.sigma_b_sq[:, None, None]
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
+        return ('group',)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -829,6 +841,19 @@ class NestedLMEResult:
     log_lik: Float[Array, 'V']
     tier: str
 
+    @property
+    def cov_re(self) -> Float[Array, 'V 2 2']:
+        """Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+        outer / inner factor variances on the diagonal of a ``(V, 2, 2)`` -- the
+        two nested factors are independent, so the off-diagonals are zero."""
+        v = jnp.stack([self.var_outer, self.var_inner], axis=-1)
+        return v[..., None] * jnp.eye(2, dtype=v.dtype)
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
+        return ('outer', 'inner')
+
 
 @register_result(
     children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'),
@@ -860,6 +885,19 @@ class CrossedLMEResult:
     sigma_e_sq: Float[Array, 'V']
     log_lik: Float[Array, 'V']
     tier: str
+
+    @property
+    def cov_re(self) -> Float[Array, 'V 2 2']:
+        """Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+        group / cross factor variances on the diagonal of a ``(V, 2, 2)`` -- the
+        two crossed factors are independent, so the off-diagonals are zero."""
+        v = jnp.stack([self.var_group, self.var_cross], axis=-1)
+        return v[..., None] * jnp.eye(2, dtype=v.dtype)
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
+        return ('group', 'cross')
 
 
 @register_result(
@@ -895,6 +933,13 @@ class LMEResult:
     sigma_e_sq: Float[Array, 'V']
     log_lik: Float[Array, 'V']
     tier: str
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``r`` within-factor random-effect dimensions of
+        :attr:`cov_re` (D2); the off-diagonals are genuine intercept/slope
+        covariances (unlike the block-diagonal multi-factor tiers)."""
+        return tuple(f're{j}' for j in range(self.cov_re.shape[-1]))
 
 
 def lme_fit(

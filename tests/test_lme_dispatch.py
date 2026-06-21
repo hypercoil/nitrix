@@ -357,3 +357,90 @@ def test_reml_general_p_runs_and_is_finite():
     assert result.beta_hat.shape == (V, 5)
     assert bool(jnp.all(jnp.isfinite(result.beta_hat)))
     assert bool(jnp.all(jnp.isfinite(result.theta_hat)))
+
+
+# ---------------------------------------------------------------------------
+# D2: uniform `.cov_re (V, k, k)` + `.re_labels` accessor across the five tiers
+# ---------------------------------------------------------------------------
+
+
+def test_uniform_re_covariance_accessor_across_tiers():
+    """D2: every ``lme_fit`` result type exposes a uniform ``.cov_re`` of shape
+    ``(V, k, k)`` whose diagonal is the per-term variances, plus ``.re_labels``
+    of length ``k``.  Single-factor tiers (R1 / R2 / R2+corr) carry the genuine
+    within-factor covariance (meaningful off-diagonals); the multi-factor tiers
+    (R3 nested / R4 crossed) are block-diagonal (the factors are independent, so
+    the off-diagonals are structurally zero)."""
+    from nitrix.stats.lme._corrfit import CorrLMEResult
+    from nitrix.stats.lme.reml import (
+        CrossedLMEResult,
+        LMEResult,
+        NestedLMEResult,
+        REMLResult,
+    )
+
+    V = 4
+
+    # R1 -- scalar intercept (REMLResult): cov_re == sigma_b_sq as (V, 1, 1).
+    reml = REMLResult(
+        theta_hat=jnp.log(jnp.array([[0.5, 0.4]] * V)),
+        beta_hat=jnp.zeros((V, 2)),
+        log_lik=jnp.zeros(V),
+        fixed_cov=jnp.zeros((V, 2, 2)),
+        theta_cov=jnp.zeros((V, 2, 2)),
+        grad_m=jnp.zeros((V, 2, 2, 2)),
+    )
+    assert reml.cov_re.shape == (V, 1, 1) and reml.re_labels == ('group',)
+    np.testing.assert_allclose(np.asarray(reml.cov_re[:, 0, 0]), 0.5)
+
+    # R2 -- correlated slope (LMEResult): the field IS the within-factor G.
+    G = np.array([[0.6, 0.2], [0.2, 0.4]])
+    lme = LMEResult(
+        beta_hat=jnp.zeros((V, 2)),
+        cov_re=jnp.broadcast_to(jnp.asarray(G), (V, 2, 2)),
+        sigma_e_sq=jnp.ones(V),
+        log_lik=jnp.zeros(V),
+        tier='R2',
+    )
+    assert lme.cov_re.shape == (V, 2, 2) and len(lme.re_labels) == 2
+    assert float(lme.cov_re[0, 0, 1]) == 0.2  # genuine off-diagonal covariance
+
+    # R3 nested + R4 crossed: block-diagonal (V, 2, 2), zero off-diagonals.
+    nested = NestedLMEResult(
+        beta_hat=jnp.zeros((V, 2)),
+        var_outer=jnp.full((V,), 0.6),
+        var_inner=jnp.full((V,), 0.3),
+        sigma_e_sq=jnp.ones(V),
+        log_lik=jnp.zeros(V),
+        tier='R3',
+    )
+    crossed = CrossedLMEResult(
+        beta_hat=jnp.zeros((V, 2)),
+        var_group=jnp.full((V,), 0.5),
+        var_cross=jnp.full((V,), 0.2),
+        sigma_e_sq=jnp.ones(V),
+        log_lik=jnp.zeros(V),
+        tier='R4',
+    )
+    for res, diag, labels in (
+        (nested, [0.6, 0.3], ('outer', 'inner')),
+        (crossed, [0.5, 0.2], ('group', 'cross')),
+    ):
+        assert res.cov_re.shape == (V, 2, 2) and res.re_labels == labels
+        np.testing.assert_allclose(
+            np.diagonal(np.asarray(res.cov_re[0])), diag
+        )
+        assert float(res.cov_re[0, 0, 1]) == 0.0  # independent factors
+        assert float(res.cov_re[0, 1, 0]) == 0.0
+
+    # R2+corr (CorrLMEResult): the field IS the within-factor G; labels of len r.
+    corr = CorrLMEResult(
+        beta_hat=jnp.zeros((V, 2)),
+        cov_re=jnp.broadcast_to(jnp.asarray(G), (V, 2, 2)),
+        sigma_e_sq=jnp.ones(V),
+        rho=jnp.full((V,), 0.3),
+        log_lik=jnp.zeros(V),
+        corr='ar1',
+        tier='R2+corr',
+    )
+    assert corr.cov_re.shape == (V, 2, 2) and len(corr.re_labels) == 2

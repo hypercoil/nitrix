@@ -452,6 +452,12 @@ class CorrLMEResult:
     corr: str
     tier: str
 
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``r`` within-factor random-effect dimensions of
+        :attr:`cov_re` (D2)."""
+        return tuple(f're{j}' for j in range(self.cov_re.shape[-1]))
+
 
 def _corr_lme_grams(
     raw: Float[Array, 'k'],
