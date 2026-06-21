@@ -47,7 +47,7 @@ ship, and a custom family is just another ``Family(...)``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Literal, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -336,11 +336,14 @@ def glm_fit(
 # ---------------------------------------------------------------------------
 
 
+PredictType = Literal['response', 'link']
+
+
 def predict(
     result: GLMResult,
     X: Float[Array, 'N p'],
     *,
-    type: str = 'response',
+    type: PredictType = 'response',
 ) -> Float[Array, 'V N']:
     """Per-element prediction on a (new) design ``X``.
 
@@ -448,6 +451,7 @@ def f_contrast(
 
 
 _HC_KINDS = ('HC0', 'HC1', 'HC2', 'HC3')
+HCKind = Literal['HC0', 'HC1', 'HC2', 'HC3']
 
 
 def sandwich_cov(
@@ -455,7 +459,7 @@ def sandwich_cov(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
     *,
-    kind: str = 'HC3',
+    kind: HCKind = 'HC3',
     groups: Optional[Int[Array, 'N']] = None,
     weights: Optional[Float[Array, 'N']] = None,
 ) -> Float[Array, 'V p p']:
@@ -603,11 +607,14 @@ def _chi2_sf(x: Array, df: float) -> Array:
     return gammaincc(0.5 * df, 0.5 * jnp.clip(x, 0.0, None))
 
 
+CompareTest = Literal['auto', 'F', 'LRT']
+
+
 def compare_models(
     full: GLMResult,
     reduced: GLMResult,
     *,
-    test: str = 'auto',
+    test: CompareTest = 'auto',
 ) -> Tuple[Float[Array, 'V'], Float[Array, 'V']]:
     """Per-element nested-model comparison (ModelArray ``full vs. reduced``).
 

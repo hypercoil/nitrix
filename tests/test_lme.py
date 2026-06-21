@@ -32,6 +32,7 @@ jax.config.update('jax_enable_x64', True)
 from nitrix.stats.lme import (
     LMEFContrast,
     LMEResult,
+    NestedLMEResult,
     REMLResult,
     flame_two_level,
     lme_f_contrast,
@@ -718,6 +719,150 @@ def test_lme_t_contrast_rejects_unknown_dof():
     res = reml_fit(Y, X, Z, n_iter=20)
     with pytest.raises(ValueError, match='satterthwaite'):
         lme_t_contrast(res, jnp.asarray([0.0, 1.0]), dof='bogus')
+
+
+# ---------------------------------------------------------------------------
+# D3-R2: fixed-effect contrasts on the R2 block-Woodbury LMEResult
+# ---------------------------------------------------------------------------
+
+
+def _dense_r2_inference(y, X, Z, group, n_g, cov_re, se2, c):
+    """Independent dense-numpy R2 contrast inference (fixed_cov / theta_cov /
+    grad_m / Satterthwaite df) from the fitted ``G`` and ``sigma_e^2`` -- the
+    oracle the JAX block-Woodbury ``bw_inference`` must reproduce (lmerTest's
+    compiled dependency chain does not build in this environment)."""
+    from nitrix.stats.lme._recov import cov_re_from_chol
+
+    N, r = X.shape[0], Z.shape[1]
+    # theta = [chol(G) params (log-diag), log sigma_e^2].
+    L = np.linalg.cholesky(cov_re)
+    tril = [(i, j) for i in range(r) for j in range(i + 1)]
+    chol = np.array(
+        [np.log(L[i, i]) if i == j else L[i, j] for (i, j) in tril]
+    )
+    nt_g = len(chol)
+    nt = nt_g + 1
+    V = np.zeros((N, N))
+    for g in range(n_g):
+        idx = np.where(group == g)[0]
+        Zg = Z[idx]
+        V[np.ix_(idx, idx)] = Zg @ cov_re @ Zg.T + se2 * np.eye(len(idx))
+    Vi = np.linalg.inv(V)
+    A_inv = np.linalg.inv(X.T @ Vi @ X)
+    P = Vi - Vi @ X @ A_inv @ X.T @ Vi
+    Py = P @ y
+    dG = np.asarray(
+        jax.jacfwd(lambda cp: cov_re_from_chol(cp, r, False))(
+            jnp.asarray(chol)
+        )
+    )  # (r, r, nt_g)
+    Vk = []
+    for k in range(nt_g):
+        dVk = np.zeros((N, N))
+        for g in range(n_g):
+            idx = np.where(group == g)[0]
+            Zg = Z[idx]
+            dVk[np.ix_(idx, idx)] = Zg @ dG[:, :, k] @ Zg.T
+        Vk.append(dVk)
+    Vk.append(se2 * np.eye(N))  # dV/d(log sigma_e^2)
+    grad_m = np.stack([X.T @ Vi @ Vk[k] @ Vi @ X for k in range(nt)])
+    ai = np.array(
+        [
+            [0.5 * (Vk[i] @ Py) @ P @ (Vk[j] @ Py) for j in range(nt)]
+            for i in range(nt)
+        ]
+    )
+    theta_cov = np.linalg.inv(ai + 1e-6 * np.eye(nt))
+    w = A_inv @ c
+    var = c @ A_inv @ c
+    gvec = np.array([w @ grad_m[k] @ w for k in range(nt)])
+    df = 2.0 * var * var / (gvec @ theta_cov @ gvec)
+    return A_inv, theta_cov, grad_m, df
+
+
+def test_lme_r2_contrast_inference_matches_dense_satterthwaite():
+    """D3-R2: the R2 ``LMEResult`` surfaces the fixed-effect inference fields, so
+    ``lme_t_contrast`` / ``lme_f_contrast`` run on a random-slope fit with the
+    same Satterthwaite df machinery as R1.  Validated end-to-end against an
+    independent dense-numpy reference."""
+    rng = np.random.default_rng(3)
+    n_g, n_per = 20, 10
+    group = np.repeat(np.arange(n_g), n_per).astype(np.int32)
+    N = n_g * n_per
+    X = np.c_[np.ones(N), rng.standard_normal(N)]
+    Z = np.c_[np.ones(N), rng.standard_normal(N)]
+    b = rng.standard_normal((n_g, 2)) @ np.linalg.cholesky(
+        np.array([[0.6, 0.2], [0.2, 0.4]])
+    ).T
+    y = (
+        X @ np.array([1.0, 0.5])
+        + np.einsum('nr,nr->n', Z, b[group])
+        + rng.standard_normal(N) * np.sqrt(0.4)
+    )
+    res = lme_fit(
+        jnp.asarray(y[None, :]),
+        jnp.asarray(X),
+        group=jnp.asarray(group),
+        z=jnp.asarray(Z),
+        n_iter=60,
+    )
+    assert res.tier == 'R2'
+    c = np.array([0.0, 1.0])
+    fc_d, tc_d, gm_d, df_d = _dense_r2_inference(
+        y, X, Z, group, n_g, np.asarray(res.cov_re[0]),
+        float(res.sigma_e_sq[0]), c,
+    )
+    # The surfaced inference tensors match the dense oracle.
+    np.testing.assert_allclose(np.asarray(res.fixed_cov[0]), fc_d, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(res.grad_m[0]), gm_d, atol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(res.theta_cov[0]), tc_d, rtol=1e-4, atol=1e-6
+    )
+    # The contrast df matches the dense Satterthwaite df.
+    tc = lme_t_contrast(res, jnp.asarray(c))
+    np.testing.assert_allclose(float(tc.df[0]), df_d, rtol=1e-4)
+    # L = 1: F == t^2, df2 == t-df (the documented collapse).
+    fcon = lme_f_contrast(res, jnp.asarray(c))
+    np.testing.assert_allclose(float(fcon.f[0]), float(tc.t[0]) ** 2, rtol=1e-6)
+    np.testing.assert_allclose(
+        float(fcon.df2[0]), float(tc.df[0]), rtol=1e-6
+    )
+
+
+def test_lme_r2_contrast_error_paths():
+    """D3: Kenward-Roger is R1-only on an R2 fit; nested/crossed/+corr results
+    carry no fixed-effect inference fields, so contrasts raise clearly."""
+    rng = np.random.default_rng(0)
+    n_g, n_per = 12, 8
+    group = np.repeat(np.arange(n_g), n_per).astype(np.int32)
+    N = n_g * n_per
+    X = np.c_[np.ones(N), rng.standard_normal(N)]
+    Z = np.c_[np.ones(N), rng.standard_normal(N)]
+    y = rng.standard_normal(N)
+    res = lme_fit(
+        jnp.asarray(y[None, :]),
+        jnp.asarray(X),
+        group=jnp.asarray(group),
+        z=jnp.asarray(Z),
+        n_iter=30,
+    )
+    with pytest.raises(NotImplementedError, match='kr'):
+        lme_t_contrast(
+            res, jnp.asarray([0.0, 1.0]), dof='kr',
+            X=jnp.asarray(X), Z=jnp.asarray(Z),
+        )
+    nested = NestedLMEResult(
+        beta_hat=jnp.zeros((1, 2)),
+        var_outer=jnp.ones(1),
+        var_inner=jnp.ones(1),
+        sigma_e_sq=jnp.ones(1),
+        log_lik=jnp.zeros(1),
+        tier='R3',
+    )
+    with pytest.raises(TypeError, match='not yet supported'):
+        lme_t_contrast(nested, jnp.asarray([0.0, 1.0]))
+    with pytest.raises(TypeError, match='not yet supported'):
+        lme_f_contrast(nested, jnp.asarray([0.0, 1.0]))
 
 
 # ---------------------------------------------------------------------------

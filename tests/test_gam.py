@@ -170,6 +170,52 @@ def test_gam_edf_comparable_to_mgcv(kind):
     assert abs(float(res.edf[0, 0]) - _MGCV_EDF[kind]) < 0.5
 
 
+def test_gam_accepts_custom_protocol_basis():
+    """D8: a *user* basis conforming to the ``SmoothBasis`` Protocol (``design``
+    / ``dim`` / ``penalty_blocks`` / ``eval_design``) fits via ``gam_fit`` and
+    works with ``smooth_partial_effect`` -- with **no** edit to gam.py.  gam
+    dispatches through the Protocol methods, not an ``isinstance`` chain, so the
+    smooth registry is open-set (like ``Family`` / ``CorrSpec``)."""
+
+    class _PolyRidgeBasis:
+        """A polynomial smooth with an identity ridge -- gam.py never heard of
+        this class."""
+
+        def __init__(self, x, k=4):
+            self._k = k
+            self._design = jnp.asarray(
+                np.vander(np.asarray(x), k + 1, increasing=True)[:, 1:]
+            )
+
+        @property
+        def design(self):
+            return self._design
+
+        @property
+        def dim(self):
+            return self._k
+
+        def penalty_blocks(self):
+            return [(np.eye(self._k), np.ones(self._k))]
+
+        def eval_design(self, x):
+            return jnp.asarray(
+                np.vander(np.asarray(x), self._k + 1, increasing=True)[:, 1:]
+            )
+
+    rng = np.random.default_rng(0)
+    x = np.linspace(-1.0, 1.0, 120)
+    y = x**2 + rng.standard_normal(120) * 0.1
+    res = gam_fit(jnp.asarray(y[None, :]), [_PolyRidgeBasis(x)])
+    assert float(res.edf_total[0]) > 1.0
+    assert bool(np.all(np.isfinite(np.asarray(res.coef))))
+    eff, se = smooth_partial_effect(
+        res, 0, _PolyRidgeBasis(x), jnp.asarray(np.linspace(-1.0, 1.0, 15))
+    )
+    assert eff.shape == (1, 15)
+    assert bool(np.all(np.isfinite(np.asarray(eff))))
+
+
 def test_poisson_gam_recovers_log_mean():
     rng = np.random.default_rng(2)
     x = np.sort(rng.uniform(0.0, 1.0, 400))

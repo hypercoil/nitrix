@@ -145,6 +145,7 @@ __all__ = [
 ]
 
 Structure = Literal['unstructured', 'diagonal']
+ContrastDof = Literal['satterthwaite', 'kr']
 
 
 @register_result(
@@ -195,6 +196,18 @@ class REMLResult:
     @property
     def sigma_e_sq(self) -> Float[Array, 'V']:
         return jnp.exp(self.theta_hat[..., 1])
+
+    @property
+    def cov_re(self) -> Float[Array, 'V 1 1']:
+        """Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+        single scalar variance as a ``(V, 1, 1)``, matching
+        :attr:`LMEResult.cov_re`."""
+        return self.sigma_b_sq[:, None, None]
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
+        return ('group',)
 
 
 # ---------------------------------------------------------------------------
@@ -379,10 +392,10 @@ class LMEContrast(NamedTuple):
 
 
 def lme_t_contrast(
-    result: REMLResult,
+    result: 'Union[REMLResult, LMEResult]',
     contrast: Float[Array, 'p'],
     *,
-    dof: str = 'satterthwaite',
+    dof: ContrastDof = 'satterthwaite',
     X: Optional[Float[Array, 'N p']] = None,
     Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEContrast:
@@ -408,12 +421,15 @@ def lme_t_contrast(
     Parameters
     ----------
     result
-        A :class:`REMLResult` from ``reml_fit``.
+        A :class:`REMLResult` (``reml_fit`` / R1) **or** the R2
+        :class:`LMEResult` (``lme_fit`` with a random slope) -- both carry the
+        ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference fields the
+        Satterthwaite df consumes (audit D3-R2).  ``dof='kr'`` is R1-only.
     contrast
         ``(p,)`` contrast vector ``c`` over the fixed effects.
     dof
-        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger; pass ``X`` /
-        ``Z``).
+        ``'satterthwaite'`` (default) or ``'kr'`` (Kenward-Roger, R1-only; pass
+        ``X`` / ``Z``).
     X, Z
         The original fixed / random design -- required for ``dof='kr'``.
 
@@ -425,10 +441,24 @@ def lme_t_contrast(
         raise ValueError(
             f'lme_t_contrast: dof={dof!r}; expected "satterthwaite" or "kr".'
         )
+    if not isinstance(result, (REMLResult, LMEResult)):
+        raise TypeError(
+            'lme_t_contrast: needs a REMLResult (reml_fit / R1) or the R2 '
+            f'LMEResult (lme_fit with a random slope); got '
+            f'{type(result).__name__}, which does not surface the fixed-effect '
+            'inference fields.  Nested (R3) / crossed (R4) / structured-residual '
+            '(+corr) contrasts are not yet supported.'
+        )
     c = jnp.asarray(contrast, dtype=result.beta_hat.dtype)
     effect = result.beta_hat @ c  # (V,)
 
     if dof == 'kr':
+        if not isinstance(result, REMLResult):
+            raise NotImplementedError(
+                "lme_t_contrast: dof='kr' (Kenward-Roger) is R1-only (a "
+                'REMLResult from reml_fit); use the default '
+                "dof='satterthwaite' for the R2 LMEResult."
+            )
         if X is None or Z is None:
             raise ValueError(
                 "lme_t_contrast: dof='kr' needs the original design -- pass "
@@ -495,10 +525,10 @@ class LMEFContrast(NamedTuple):
 
 
 def lme_f_contrast(
-    result: REMLResult,
+    result: 'Union[REMLResult, LMEResult]',
     contrast: Float[Array, 'L p'],
     *,
-    dof: str = 'satterthwaite',
+    dof: ContrastDof = 'satterthwaite',
     X: Optional[Float[Array, 'N p']] = None,
     Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEFContrast:
@@ -539,8 +569,10 @@ def lme_f_contrast(
     Parameters
     ----------
     result
-        A :class:`REMLResult` from ``reml_fit`` (the R1 FaST-LMM path; carries
-        the ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference fields).
+        A :class:`REMLResult` (``reml_fit`` / R1) **or** the R2
+        :class:`LMEResult` (``lme_fit`` with a random slope) -- both carry the
+        ``fixed_cov`` / ``theta_cov`` / ``grad_m`` inference fields (audit
+        D3-R2).  ``dof='kr'`` is R1-only.
     contrast
         ``(L, p)`` contrast matrix (or a ``(p,)`` single-row contrast).
     dof
@@ -557,11 +589,13 @@ def lme_f_contrast(
         raise ValueError(
             f'lme_f_contrast: dof={dof!r}; expected "satterthwaite" or "kr".'
         )
-    if not isinstance(result, REMLResult):
+    if not isinstance(result, (REMLResult, LMEResult)):
         raise TypeError(
-            'lme_f_contrast: needs a REMLResult from reml_fit (the R1 path); '
-            'the R2 block-Woodbury LMEResult does not yet surface the '
-            'fixed-effect inference fields.'
+            'lme_f_contrast: needs a REMLResult (reml_fit / R1) or the R2 '
+            f'LMEResult (lme_fit with a random slope); got '
+            f'{type(result).__name__}, which does not surface the fixed-effect '
+            'inference fields.  Nested (R3) / crossed (R4) / structured-residual '
+            '(+corr) contrasts are not yet supported.'
         )
     dtype = result.beta_hat.dtype
     c_mat = jnp.atleast_2d(jnp.asarray(contrast, dtype=dtype))  # (L, p)
@@ -569,6 +603,12 @@ def lme_f_contrast(
     tiny = jnp.finfo(dtype).tiny
 
     if dof == 'kr':
+        if not isinstance(result, REMLResult):
+            raise NotImplementedError(
+                "lme_f_contrast: dof='kr' (Kenward-Roger) is R1-only (a "
+                'REMLResult from reml_fit); use the default '
+                "dof='satterthwaite' for the R2 LMEResult."
+            )
         if X is None or Z is None:
             raise ValueError(
                 "lme_f_contrast: dof='kr' needs the original design -- pass "
@@ -829,6 +869,19 @@ class NestedLMEResult:
     log_lik: Float[Array, 'V']
     tier: str
 
+    @property
+    def cov_re(self) -> Float[Array, 'V 2 2']:
+        """Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+        outer / inner factor variances on the diagonal of a ``(V, 2, 2)`` -- the
+        two nested factors are independent, so the off-diagonals are zero."""
+        v = jnp.stack([self.var_outer, self.var_inner], axis=-1)
+        return v[..., None] * jnp.eye(2, dtype=v.dtype)
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
+        return ('outer', 'inner')
+
 
 @register_result(
     children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'),
@@ -861,18 +914,45 @@ class CrossedLMEResult:
     log_lik: Float[Array, 'V']
     tier: str
 
+    @property
+    def cov_re(self) -> Float[Array, 'V 2 2']:
+        """Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+        group / cross factor variances on the diagonal of a ``(V, 2, 2)`` -- the
+        two crossed factors are independent, so the off-diagonals are zero."""
+        v = jnp.stack([self.var_group, self.var_cross], axis=-1)
+        return v[..., None] * jnp.eye(2, dtype=v.dtype)
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
+        return ('group', 'cross')
+
 
 @register_result(
-    children=('beta_hat', 'cov_re', 'sigma_e_sq', 'log_lik'),
+    children=(
+        'beta_hat',
+        'cov_re',
+        'sigma_e_sq',
+        'log_lik',
+        'fixed_cov',
+        'theta_cov',
+        'grad_m',
+    ),
     aux=('tier',),
 )
 @dataclass(frozen=True)
 class LMEResult:
-    """General mixed-model fit output (the ``lme_fit`` dispatcher result).
+    """Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal
+    random slope ``(1 + x | g)`` / ``(x || g)``.
 
-    Uniform across the dispatch tiers: the random-effect covariance is always a
-    full ``r x r`` matrix (``r = 1`` for a scalar random effect, ``r >= 2`` for a
-    correlated / diagonal random slope).
+    The ``lme_fit`` dispatcher returns this for the R2 tier; the scalar-intercept
+    R1 tier returns a :class:`REMLResult` (the FaST-LMM path), and the nested /
+    crossed / structured-residual tiers their own result types.
+
+    Carries the fixed-effect contrast-inference tensors (``fixed_cov`` /
+    ``theta_cov`` / ``grad_m``, audit D3-R2), so ``lme_t_contrast`` /
+    ``lme_f_contrast`` accept it with the **same** Satterthwaite / Kenward-Roger
+    df machinery as R1.
 
     Attributes
     ----------
@@ -885,16 +965,35 @@ class LMEResult:
         ``(V,)`` residual variance.
     log_lik
         ``(V,)`` profile REML log-likelihood.
+    fixed_cov
+        ``(V, p, p)`` ``Cov(beta_hat) = (X^T V^{-1} X)^{-1}`` (the contrast
+        numerator covariance).
+    theta_cov
+        ``(V, nt, nt)`` ``Cov(theta_hat)`` (inverse average-information; for the
+        Satterthwaite denominator df).  ``nt = r(r+1)/2 + 1`` unstructured, or
+        ``r + 1`` diagonal.
+    grad_m
+        ``(V, nt, p, p)`` the Satterthwaite gradient tensors ``M_k =
+        X^T V^{-1} (dV/dtheta_k) V^{-1} X``.
     tier
-        Which solver the dispatcher ran: ``'R1'`` (FaST-LMM spectral, one scalar
-        factor) or ``'R2'`` (block-Woodbury, one correlated / diagonal factor).
+        ``'R2'`` (block-Woodbury, one correlated / diagonal factor).
     """
 
     beta_hat: Float[Array, 'V p']
     cov_re: Float[Array, 'V r r']
     sigma_e_sq: Float[Array, 'V']
     log_lik: Float[Array, 'V']
+    fixed_cov: Float[Array, 'V p p']
+    theta_cov: Float[Array, 'V nt nt']
+    grad_m: Float[Array, 'V nt p p']
     tier: str
+
+    @property
+    def re_labels(self) -> Tuple[str, ...]:
+        """Names of the ``r`` within-factor random-effect dimensions of
+        :attr:`cov_re` (D2); the off-diagonals are genuine intercept/slope
+        covariances (unlike the block-diagonal multi-factor tiers)."""
+        return tuple(f're{j}' for j in range(self.cov_re.shape[-1]))
 
 
 def lme_fit(
@@ -1133,16 +1232,19 @@ def lme_fit(
     theta_init = jnp.concatenate([chol, log_se2], axis=1)  # (V, nt)
 
     spec = VarCompSpec(n_iter=n_iter, damping=damping)
-    theta_hat, beta_hat, log_lik = fit_blockwoodbury_reml(
-        Y,
-        X,
-        z_arr,
-        group,
-        n_groups,
-        theta_init,
-        spec=spec,
-        block=block,
-        diagonal=diagonal,
+    theta_hat, beta_hat, log_lik, fixed_cov, theta_cov, grad_m = (
+        fit_blockwoodbury_reml(
+            Y,
+            X,
+            z_arr,
+            group,
+            n_groups,
+            theta_init,
+            spec=spec,
+            block=block,
+            diagonal=diagonal,
+            inference=True,
+        )
     )
     cov_re = jax.vmap(lambda th: cov_re_from_chol(th[:-1], r, diagonal))(
         theta_hat
@@ -1153,5 +1255,8 @@ def lme_fit(
         cov_re=cov_re,
         sigma_e_sq=sigma_e_sq,
         log_lik=log_lik,
+        fixed_cov=fixed_cov,
+        theta_cov=theta_cov,
+        grad_m=grad_m,
         tier='R2',
     )
