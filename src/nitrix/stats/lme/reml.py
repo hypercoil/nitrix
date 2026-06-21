@@ -145,6 +145,7 @@ __all__ = [
 ]
 
 Structure = Literal['unstructured', 'diagonal']
+ContrastDof = Literal['satterthwaite', 'kr']
 
 
 @register_result(
@@ -394,7 +395,7 @@ def lme_t_contrast(
     result: 'Union[REMLResult, LMEResult]',
     contrast: Float[Array, 'p'],
     *,
-    dof: str = 'satterthwaite',
+    dof: ContrastDof = 'satterthwaite',
     X: Optional[Float[Array, 'N p']] = None,
     Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEContrast:
@@ -527,7 +528,7 @@ def lme_f_contrast(
     result: 'Union[REMLResult, LMEResult]',
     contrast: Float[Array, 'L p'],
     *,
-    dof: str = 'satterthwaite',
+    dof: ContrastDof = 'satterthwaite',
     X: Optional[Float[Array, 'N p']] = None,
     Z: Optional[Float[Array, 'N q']] = None,
 ) -> LMEFContrast:

@@ -64,7 +64,7 @@ References
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int
@@ -82,6 +82,9 @@ from ._pql import (
 
 __all__ = ['GLMMResult', 'glmm_fit']
 
+GLMMStructure = Literal['unstructured', 'diagonal']
+GLMMMethod = Literal['pql', 'laplace', 'agq']
+
 
 def glmm_fit(
     Y: Float[Array, 'V N'],
@@ -90,9 +93,9 @@ def glmm_fit(
     group: Int[Array, 'N'],
     n_groups: Optional[int] = None,
     z: Optional[Float[Array, 'N r']] = None,
-    structure: str = 'unstructured',
+    structure: GLMMStructure = 'unstructured',
     family: Union[str, Family] = GAUSSIAN,
-    method: str = 'pql',
+    method: GLMMMethod = 'pql',
     few_level_max: int = 64,
     n_outer: int = 20,
     n_inner: int = 10,

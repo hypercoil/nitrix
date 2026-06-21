@@ -12,6 +12,7 @@ without a cycle.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from jaxtyping import Array, Float
 
@@ -19,6 +20,8 @@ from .._family import Family
 from .._result import register_result
 
 __all__ = ['GLMMResult']
+
+GLMMTier = Literal['few', 'many', 'slope', 'laplace', 'agq']
 
 _EPS = 1e-10
 
@@ -97,4 +100,4 @@ class GLMMResult:
     family: Family
     n_obs: int
     n_groups: int
-    tier: str
+    tier: GLMMTier
