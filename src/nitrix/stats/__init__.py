@@ -13,7 +13,9 @@ Two submodules:
   negative log-likelihood (log-variance parameterised).
 - ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
-- ``basis``      -- penalised spline bases (P-splines) for additive models.
+- ``basis``      -- penalised spline bases (P-splines) for additive models,
+  plus the ``hsgp_basis`` Hilbert-space approximate-GP smooth (reduced-rank
+  Gaussian process) and the kriging ``gp_basis``.
 - ``gam``        -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
 - ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
@@ -50,6 +52,7 @@ from .basis import (
     cr_basis,
     cyclic_cubic_basis,
     gp_basis,
+    hsgp_basis,
     mrf_smooth,
     re_smooth,
     spline_design,
@@ -185,6 +188,7 @@ __all__ = [
     'thinplate_regression_basis',
     'cr_basis',
     'gp_basis',
+    'hsgp_basis',
     'mrf_smooth',
     'tensor_product_basis',
     're_smooth',

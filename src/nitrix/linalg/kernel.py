@@ -67,6 +67,9 @@ __all__ = [
     'polynomial_kernel',
     'sigmoid_kernel',
     'cosine_kernel',
+    'se_spectral_density',
+    'matern_spectral_density',
+    'spectral_density',
 ]
 
 
@@ -323,3 +326,106 @@ def cosine_kernel(
     X0_n = parameterised_norm(X0, theta=theta)
     X1_n = X0_n if X1 is None else parameterised_norm(X1, theta=theta)
     return linear_kernel(X0_n, X1_n, theta=theta)
+
+
+# ---------------------------------------------------------------------------
+# Stationary-kernel spectral densities (1-D)
+# ---------------------------------------------------------------------------
+#
+# ``S_theta(omega)`` is the power spectral density of a stationary kernel
+# ``k(r)`` (the Fourier transform: ``k(r) = (1/pi) int_0^inf S(omega) cos(omega
+# r) domega``).  Evaluated at the Laplace eigen-frequencies it supplies the prior
+# variances of a Hilbert-space approximate Gaussian process (HSGP); see
+# :func:`nitrix.stats.basis.hsgp_basis`.  Parameterisation (lengthscale ``rho``,
+# amplitude ``amplitude``) matches scikit-learn's ``RBF`` / ``Matern`` kernels
+# scaled by ``amplitude**2``.
+
+# Matern smoothness -> spectral closed form is given per-nu below (nu in
+# {1/2, 3/2, 5/2}); a general-nu form via ``gammaln`` is a future add.
+_MATERN_NU = {0.5, 1.5, 2.5}
+
+
+def se_spectral_density(
+    omega: Float[Array, '...'],
+    *,
+    rho: float,
+    amplitude: float = 1.0,
+) -> Float[Array, '...']:
+    """1-D squared-exponential (RBF) spectral density.
+
+    ``S(omega) = amplitude**2 * sqrt(2 pi) * rho * exp(-rho**2 omega**2 / 2)`` --
+    the FT of ``k(r) = amplitude**2 exp(-r**2 / (2 rho**2))`` (scikit-learn
+    ``RBF(length_scale=rho)`` scaled by ``amplitude**2``).
+    """
+    omega = jnp.asarray(omega)
+    rho = jnp.asarray(rho, dtype=omega.dtype)
+    amp2 = jnp.asarray(amplitude, dtype=omega.dtype) ** 2
+    return amp2 * jnp.sqrt(2.0 * jnp.pi) * rho * jnp.exp(-0.5 * (rho * omega) ** 2)
+
+
+def matern_spectral_density(
+    omega: Float[Array, '...'],
+    *,
+    rho: float,
+    nu: float,
+    amplitude: float = 1.0,
+) -> Float[Array, '...']:
+    """1-D Matern spectral density for ``nu in {0.5, 1.5, 2.5}``.
+
+    Closed forms (``lam`` the Matern rate, ``omega`` the frequency), matched to
+    scikit-learn ``Matern(length_scale=rho, nu=nu)`` scaled by ``amplitude**2``::
+
+        nu=1/2 :  lam = 1/rho     ;  S = amp**2 * 2 lam      / (lam**2 + w**2)
+        nu=3/2 :  lam = sqrt3/rho ;  S = amp**2 * 4 lam**3   / (lam**2 + w**2)**2
+        nu=5/2 :  lam = sqrt5/rho ;  S = amp**2 * 16/3 lam**5/ (lam**2 + w**2)**3
+    """
+    if nu not in _MATERN_NU:
+        raise ValueError(
+            f'matern_spectral_density: nu={nu!r} unsupported; use 0.5, 1.5, or '
+            '2.5 (a general-nu form via gammaln is a future add).'
+        )
+    omega = jnp.asarray(omega)
+    rho = jnp.asarray(rho, dtype=omega.dtype)
+    amp2 = jnp.asarray(amplitude, dtype=omega.dtype) ** 2
+    w2 = omega**2
+    if nu == 0.5:
+        lam = 1.0 / rho
+        return amp2 * 2.0 * lam / (lam**2 + w2)
+    if nu == 1.5:
+        lam = jnp.sqrt(3.0) / rho
+        return amp2 * 4.0 * lam**3 / (lam**2 + w2) ** 2
+    lam = jnp.sqrt(5.0) / rho  # nu == 2.5
+    return amp2 * (16.0 / 3.0) * lam**5 / (lam**2 + w2) ** 3
+
+
+_KERNEL_NU = {
+    'matern12': 0.5,
+    'exp': 0.5,
+    'exponential': 0.5,
+    'matern32': 1.5,
+    'matern52': 2.5,
+}
+
+
+def spectral_density(
+    omega: Float[Array, '...'],
+    *,
+    kernel: str,
+    rho: float,
+    amplitude: float = 1.0,
+) -> Float[Array, '...']:
+    """Dispatch a stationary-kernel 1-D spectral density by name.
+
+    ``kernel`` in ``{'rbf'/'se', 'matern12'/'exp', 'matern32', 'matern52'}``.
+    """
+    k = kernel.lower().replace('/', '').replace('-', '').replace('_', '')
+    if k in ('rbf', 'se', 'sqexp', 'squaredexponential', 'gaussian'):
+        return se_spectral_density(omega, rho=rho, amplitude=amplitude)
+    if k in _KERNEL_NU:
+        return matern_spectral_density(
+            omega, rho=rho, nu=_KERNEL_NU[k], amplitude=amplitude
+        )
+    raise ValueError(
+        f'spectral_density: unknown kernel {kernel!r}; expected one of '
+        "'rbf'/'se', 'matern12'/'exp', 'matern32', 'matern52'."
+    )

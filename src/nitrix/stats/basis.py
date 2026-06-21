@@ -40,6 +40,7 @@ import numpy as np
 from jaxtyping import Array, Float, Int
 
 from ..graph import laplacian
+from ..linalg.kernel import spectral_density
 from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
 
 __all__ = [
@@ -52,6 +53,7 @@ __all__ = [
     'thinplate_regression_basis',
     'cr_basis',
     'gp_basis',
+    'hsgp_basis',
     'mrf_smooth',
     'tensor_product_basis',
     're_smooth',
@@ -362,6 +364,14 @@ def _raw_features(
             cast(float, basis.kernel_param),
         )
         return cxz @ cast(Array, basis.radial_transform)
+    if basis.kind == 'hsgp':
+        u = cast(Array, basis.knots)  # sqrt-lambda frequencies (m,)
+        rt = cast(Array, basis.radial_transform)  # (m, 2) = [sqrt-s, phase]
+        L = cast(float, basis.kernel_param)
+        phi = jnp.sqrt(1.0 / L) * jnp.sin(
+            u[None, :] * x[:, None] + rt[None, :, 1]
+        )
+        return phi * rt[None, :, 0]
     if basis.kind == 'mrf':
         return jax.nn.one_hot(
             x.astype(jnp.int32), basis.n_basis, dtype=jnp.float32
@@ -862,6 +872,135 @@ def gp_basis(
         knots=knots,
         radial_transform=radial_transform,
         kernel_param=rho_v,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hilbert-space approximate GP smooth (HSGP; Solin-Sarkka 2020,
+# Riutort-Mayol/Burkner 2023) -- the primary GP smoother
+# ---------------------------------------------------------------------------
+
+
+def hsgp_basis(
+    x: Float[Array, ' n'],
+    n_basis: int = 20,
+    *,
+    kernel: str = 'matern52',
+    rho: Optional[float] = None,
+    amplitude: float = 1.0,
+    boundary: float = 1.5,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Build a Hilbert-space approximate GP smooth (HSGP) for covariate ``x``.
+
+    A reduced-rank stationary GP on the bounded domain ``[c - L, c + L]``
+    (``c`` the data midrange, ``L = boundary * half-range``), expanded in the
+    Dirichlet-Laplacian eigenfunctions ``phi_j(x) = sqrt(1/L) sin(sqrt(lam_j)
+    (x - c + L))`` with ``sqrt(lam_j) = j pi / (2 L)``.  The kernel enters
+    **only** through the spectral density weights ``s_j = S_theta(sqrt(lam_j))``
+    (:func:`~nitrix.linalg.kernel.spectral_density`): the whitened design is
+    ``Psi = [sqrt(s_j) phi_j(x)]`` with an **identity penalty**, so the basis is
+    a drop-in smooth for :func:`gam_fit` and the Fellner-Schall smoothing
+    parameter ``lambda = 1 / sigma_f**2`` is the GP amplitude.
+
+    Unlike the kriging :func:`gp_basis`, the eigenfunctions are independent of
+    the kernel hyperparameters, so the lengthscale ``rho`` enters as a diagonal
+    reweighting of a fixed design -- the basis for ``eigh``-free ``rho``
+    estimation (the standalone ``gp_fit``; not this constructor, which fixes
+    ``rho``).
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate values.
+    n_basis
+        Number of retained eigenfunctions ``m`` (the reduced rank).
+    kernel
+        Stationary kernel: ``'matern12'`` / ``'matern32'`` / ``'matern52'`` /
+        ``'rbf'`` (squared-exponential).  See
+        :func:`~nitrix.linalg.kernel.spectral_density`.
+    rho
+        Kernel lengthscale.  Defaults to the data half-range (a sane fixed
+        value; lengthscale *estimation* is the standalone ``gp_fit``).
+    amplitude
+        Kernel amplitude folded into the weights; keep ``1.0`` when fitting via
+        ``gam_fit`` (the smoothing parameter carries the amplitude).
+    boundary
+        Domain-extension factor ``L / half-range`` (``>= 1``; default ``1.5``).
+        Larger values reduce boundary bias; small ``rho`` needs larger
+        ``n_basis``.
+    bounds
+        ``(lo, hi)`` data range override (defaults to the data min/max).
+    center
+        Apply the sum-to-zero identifiability constraint (default ``True``).
+
+    Returns
+    -------
+    ``SplineBasis`` (``kind='hsgp'``).
+    """
+    if not 1 <= n_basis:
+        raise ValueError(f'hsgp_basis: n_basis={n_basis} must be >= 1.')
+    if not boundary >= 1.0:
+        raise ValueError(f'hsgp_basis: boundary={boundary} must be >= 1.0.')
+    x = jnp.asarray(x)
+    x_np = np.asarray(x, dtype=np.float64)
+    lo = float(np.min(x_np)) if bounds is None else float(bounds[0])
+    hi = float(np.max(x_np)) if bounds is None else float(bounds[1])
+    c = 0.5 * (lo + hi)
+    L = float(boundary) * max(0.5 * (hi - lo), 1e-6)
+    rho_v = float(rho) if rho is not None else max(0.5 * (hi - lo), 1e-6)
+
+    # Laplace eigen-frequencies, spectral weights, and the per-mode phase that
+    # folds the centring constant c into the stored re-evaluation (so c need not
+    # be a SplineBasis field): sin(sqrt(lam_j)(x - c + L)) = sin(sqrt(lam_j) x +
+    # phase_j), phase_j = sqrt(lam_j)(L - c).
+    j = np.arange(1, n_basis + 1, dtype=np.float64)
+    sqrt_lambda = j * np.pi / (2.0 * L)  # (m,)
+    s = np.asarray(
+        spectral_density(
+            jnp.asarray(sqrt_lambda), kernel=kernel, rho=rho_v, amplitude=amplitude
+        ),
+        dtype=np.float64,
+    )
+    sqrt_s = np.sqrt(np.clip(s, 1e-30, None))
+    phase = sqrt_lambda * (L - c)
+
+    knots = jnp.asarray(sqrt_lambda, dtype=x.dtype)
+    radial_transform = jnp.asarray(
+        np.stack([sqrt_s, phase], axis=1), dtype=x.dtype
+    )  # (m, 2) = [sqrt-s, phase]
+    inv_sqrt_L = float(np.sqrt(1.0 / L))
+
+    def _hsgp_raw(xx: Float[Array, ' m']) -> Float[Array, 'm k']:
+        phi = inv_sqrt_L * jnp.sin(
+            knots[None, :] * xx[:, None] + radial_transform[None, :, 1]
+        )
+        return phi * radial_transform[None, :, 0]
+
+    design = _hsgp_raw(x)
+    penalty = jnp.eye(n_basis, dtype=x.dtype)
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return SplineBasis(
+        design=design,
+        penalty=penalty,
+        kind='hsgp',
+        constraint=constraint,
+        n_basis=n_basis,
+        degree=0,
+        penalty_order=2,
+        lo=lo,
+        hi=hi,
+        knots=knots,
+        radial_transform=radial_transform,
+        kernel_param=L,
     )
 
 

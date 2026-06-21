@@ -173,20 +173,19 @@ reduction), `(σ_f², σ_e²)` per voxel. `log_mlik` → shipped
 ruff/mypy clean. Validation: `(σ_f, ρ, σ_e)` & `log_mlik` vs sklearn/GPy/brms
 ~1e-4; finite-diff grad-through-`ρ`.
 
-## 6. Decisions to confirm before coding PR1
+## 6. Decisions (confirmed 2026-06-21)
 
-1. **PR1 scope** — ship the fixed-`ρ` `hsgp_basis` only (recommended; rides
-   `gam_fit`, smallest reviewable unit), *or* also include a grid-`ρ` selection
-   wrapper (`gp_smooth(select='reml')`) that profiles the GAM REML score over a
-   small `ρ` grid.
-2. **`ρ`-estimation home (PR2)** — a **dedicated `gp_fit` profile-REML**
-   (recommended; leaves `gam_fit`'s hot path untouched, isolates the new 3-param
-   optimiser), *or* extend `gam_fit`'s Fellner–Schall to a 2-param diagonal-`S(ρ)`
-   per-smooth update (more reuse, but edits the shared GAM solver).
-3. **Periodic kernel** — defer (recommended; standard HSGP covers Matérn/SE, the
-   periodic basis is a different construction), *or* include now.
-4. **Spectral-density home** — `linalg/kernel.py` (recommended, per the proposal),
-   *or* a stats-local helper.
+1. **PR1 scope — fixed-`ρ` `hsgp_basis` only.** Spectral densities + the
+   fixed/default-`ρ` basis that rides `gam_fit`; `ρ`-selection deferred to PR2.
+2. **`ρ`-estimation home — dedicated `gp_fit` profile-REML.** Keep `gam_fit`'s
+   hot path untouched and isolate the new `(σ_f², σ_e², ρ)` optimiser.
+   **End-of-PR2 review (committed):** assess whether the diagonal-`S(ρ)` step can
+   be folded into a *streamlined, generalised* Fellner–Schall (so any GAM smooth
+   gains `ρ`) **with no performance regression** on the existing GAM fast paths;
+   migrate only if that holds.
+3. **Periodic kernel — deferred.** Standard HSGP covers Matérn/SE; the periodic
+   basis is a separate construction (own follow-up).
+4. **Spectral-density home — `linalg/kernel.py`** (per the proposal).
 
 ## 7. Effort
 
