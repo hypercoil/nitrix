@@ -226,7 +226,12 @@ def test_volreg_validation():
             method='inverse_compositional',
             space=WorldSpace(fixed_affine=affine, moving_affine=affine),
         )
-    # C3: an explicit early-exit Convergence is rejected (the while_loop breaks
-    # the per-frame vmap); 'auto'/None resolve to the fixed scan and are fine.
-    with pytest.raises(ValueError, match='vmap'):
-        volreg(series, spec=RegistrationSpec(convergence=Convergence()))
+    # The inverse-compositional path now HONOURS an explicit Convergence
+    # (opt-in batch early-exit -- jax.vmap runs the while_loop to all-lanes-exit);
+    # only the forward path (forced here) cannot, and rejects it.
+    with pytest.raises(ValueError, match='forward path cannot early-exit'):
+        volreg(
+            series,
+            method='forward',
+            spec=RegistrationSpec(convergence=Convergence()),
+        )
