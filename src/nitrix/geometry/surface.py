@@ -16,10 +16,19 @@ Everything here is pure JAX and differentiable w.r.t. ``mesh.vertices``.
 
 from __future__ import annotations
 
+from typing import Optional
+
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int
 
-from ..sparse import Mesh, compute_vertex_normals, vertex_areas
+from ..linalg.krylov import cg
+from ..sparse import (
+    Mesh,
+    apply_operator,
+    compute_vertex_normals,
+    mesh_cotangent_laplacian,
+    vertex_areas,
+)
 
 __all__ = [
     'mean_curvature',
@@ -27,6 +36,7 @@ __all__ = [
     'principal_curvatures',
     'areal_distortion',
     'strain_distortion',
+    'surface_smooth',
 ]
 
 
@@ -299,3 +309,64 @@ def strain_distortion(
     lam1 = jnp.sqrt(jnp.maximum((tr_c + disc) / 2.0, 0.0))
     lam2 = jnp.sqrt(jnp.maximum((tr_c - disc) / 2.0, 0.0))
     return jnp.stack([lam1, lam2], axis=-1)
+
+
+def surface_smooth(
+    mesh: Mesh,
+    values: Float[Array, '... n_vertices'],
+    *,
+    fwhm: float,
+    area_scheme: str = 'voronoi',
+    tol: float = 1e-6,
+    maxiter: Optional[int] = None,
+) -> Float[Array, '... n_vertices']:
+    """Geodesic (along-surface) Gaussian smoothing by heat diffusion.
+
+    Smooths a per-vertex scalar *along the surface* (not through Euclidean
+    space) -- the correct smoother for ``sulc`` / ``curv`` / myelin / thickness
+    maps and surface-GLM inputs.  One **backward-Euler** heat step solves the
+    SPD system ``(M + t L) x = M x_0`` for the lumped mass ``M``
+    (``vertex_areas``) and cotangent stiffness ``L`` (``mesh_cotangent_laplacian``),
+    with diffusion time ``t = fwhm^2 / (16 ln 2)`` (the Gaussian variance
+    ``sigma^2 = 2t``, ``FWHM = 2 sqrt(2 ln 2) sigma``).  The solve is
+    matrix-free conjugate gradients (``linalg.krylov.cg``) -- GPU-native and
+    cuSolver-free.
+
+    This is the nitrix-native geodesic smoother; it is **not** identical to
+    Connectome Workbench's ``-metric-smoothing`` (a geodesic-distance-weighted
+    Gaussian) -- a documented divergence, see ``docs/design/geometry-suite.md``.
+
+    Conserves the area-weighted integral ``sum_i A_i x_i`` (since ``1^T L = 0``)
+    and fixes constants; ``fwhm = 0`` is the identity.
+
+    Parameters
+    ----------
+    mesh
+        Triangle mesh (concrete -- the operator is built host-side once).
+    values
+        Per-vertex field(s), shape ``(..., n_vertices)`` (vertex axis last).
+    fwhm
+        Target full-width-at-half-maximum of the smoothing kernel, in the
+        mesh's coordinate units.
+    area_scheme
+        Vertex-area / mass scheme (``'voronoi'`` default).
+    tol, maxiter
+        Conjugate-gradient tolerance / iteration cap.
+
+    Returns
+    -------
+    Smoothed field(s), same shape as ``values``.  Differentiable w.r.t.
+    ``values`` (implicit CG rule).
+    """
+    area = vertex_areas(mesh, scheme=area_scheme)  # (n,) lumped mass diagonal
+    lap = mesh_cotangent_laplacian(mesh)
+    t = fwhm**2 / (16.0 * jnp.log(2.0))
+
+    def _matvec(
+        v: Float[Array, '... n_vertices'],
+    ) -> Float[Array, '... n_vertices']:
+        lv = apply_operator(lap, v[..., None])[..., 0]  # L @ v, (..., n)
+        return area * v + t * lv
+
+    b = area * values
+    return cg(_matvec, b, tol=tol, maxiter=maxiter)

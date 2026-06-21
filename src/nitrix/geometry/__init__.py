@@ -116,6 +116,7 @@ from .surface import (
     mean_curvature,
     principal_curvatures,
     strain_distortion,
+    surface_smooth,
 )
 
 __all__ = [
@@ -193,4 +194,5 @@ __all__ = [
     'principal_curvatures',
     'areal_distortion',
     'strain_distortion',
+    'surface_smooth',
 ]
