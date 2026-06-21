@@ -111,12 +111,12 @@ immune.
 | ID | Sev | Status | Issue | Recommendation |
 |----|-----|--------|-------|----------------|
 | **N1** | High value | ✅ **done** | No GAM smooth-term p-values. | **SHIPPED:** `smooth_significance(result, smooths)` → `SmoothTest` (`stat`/`edf`/`rank`/`p_value`, `(V, m)`), the Wood-2013 integer-rank test (QR-projected eigen-pseudo-inverse, χ² for fixed-dispersion / F otherwise), mask-truncated for `vmap`. **Validated to EXACT `mgcv:::testStat(type=1)` parity** (both F and χ² branches, stat/rank/p to 6 digits, R 4.5.3 / mgcv 1.9.4). Regression vs an independent numpy+scipy reference. The fractional-rank default (`type=0`, needs the weighted-χ² CDF / Davies) is a documented follow-up. |
-| **N2** | High (surface/dMRI) | open | **TFCE/clustering are lattice-only** — no spin test (Alexander-Bloch/Váša) or mesh/graph adjacency; blocks surface (CIFTI) / fixel (ModelArray) workflows. | A mesh/graph `connected_components` path (the `morphology` dep exists) + a spin-test permutation operator. |
-| **N3** | Med | open | **No RFT / ACF-FWHM smoothness estimation** — permutation-only (defensible post-Eklund), but no parametric fallback for tiny-N and no AFNI/SPM parity. | Document the explicit "permutation-only" stance; a `3dFWHMx`-equivalent ACF/FWHM estimator if parity is wanted. |
-| **N4** | Med | open | **FLAME has no outlier-deweighting** (FLAME1/FLAMEO) — a named-feature gap vs the FSL comparator. | Surface as a known divergence; the deweighting iteration extends the existing REML loop. |
-| **N5** | Med | open | **No effect-size / CI outputs** anywhere (effect+SE+dof are returned, so CIs are one `t_crit` away). | A thin `confidence_interval(effect, se, dof, level)` + a standardized-effect helper. |
-| **N6** | Low | open | Cluster-robust SE is **one-way only**; no FSL `-g` variance-group / PALM `-vg`. | Document the `-e` (have it) vs `-g` (don't) distinction; add variance-groups if heteroscedastic two-sample is a target. |
-| **N7** | Low | open | No conjunction (min-statistic) / multi-contrast battery / one-/two-/paired-sample design helpers / FWE across contrasts. | Conveniences; partly intended for the `gramform`/`nwx` consumer layer. |
+| **N2** | High (surface/dMRI) | ⏸️ **deferred (post-geometry-suite)** | **TFCE/clustering are lattice-only** — no spin test (Alexander-Bloch/Váša) or mesh/graph adjacency; blocks surface (CIFTI) / fixel (ModelArray) workflows. | A mesh/graph `connected_components` path (the `morphology` dep exists) + a spin-test permutation operator. **Evaluated (2026-06-21):** *not* technically blocked — `sparse.mesh.mesh_k_ring_adjacency` + `morphology._label` + `geometry.sphere.{geodesic,coords,conv}` all ship and are stable; the `geometry-suite` adds surface-**reconstruction** primitives N2 doesn't depend on. Deferred anyway on value-timing: N2's consumers are downstream of the geometry sprint producing the surfaces, it is the largest Wave-4 item (L), and one sprint lets its API co-settle with the surface workflow. |
+| **N3** | Med | ✅ **documented** | **No RFT / ACF-FWHM smoothness estimation** — permutation-only (defensible post-Eklund), but no parametric fallback for tiny-N and no AFNI/SPM parity. | **DOCUMENTED:** the `inference` module docstring states the deliberate permutation-only stance (Eklund 2016: parametric RFT cluster inference is anti-conservative) — no ACF/FWHM estimator is provided or planned; a parametric tiny-N fallback is the consumer's. |
+| **N4** | Med | ✅ **done** | **FLAME has no outlier-deweighting** (FLAME1/FLAMEO) — a named-feature gap vs the FSL comparator. | **FIXED:** `flame_two_level(robust=True)` runs a Huber-IRLS deweighting outer loop — an outlier subject's within-variance is inflated (`s_i^2/w_i`) from its studentized residual, down-weighting it in the precision-weighted group fit; the converged per-subject `weights` ride on `FLAMEResult`. Deterministic robust M-estimator (documented as *not* the full Woolrich-2008 Bayesian outlier-mixture MCMC). Tests: outlier down-weighted + group estimate recovered vs the outlier-pulled standard fit; clean-data robust==standard; `robust=False` weights==1 (estimate unchanged). |
+| **N5** | Med | ✅ **done** | **No effect-size / CI outputs** anywhere (effect+SE+dof are returned, so CIs are one `t_crit` away). | **FIXED:** `confidence_interval(effect, se, dof, level=0.95)` and `standardized_effect(effect, scale)` (`stats/_effect.py`, exported). The per-element Student-t quantile (Newton on `betainc`, normal-seeded — so a per-voxel Satterthwaite `dof` works) is pinned vs `scipy.stats.t.ppf` to <1e-6. |
+| **N6** | Low | ✅ **documented** | Cluster-robust SE is **one-way only**; no FSL `-g` variance-group / PALM `-vg`. | **DOCUMENTED:** `sandwich_cov(groups=)` docstring states it is one-way (`-e` exchangeability) clustering, *not* a variance-group model (`-g` / `-vg`) — a separate per-group residual variance is a different estimator, not provided. |
+| **N7** | Low | ✅ **done (conjunction); design helpers downstream** | No conjunction (min-statistic) / multi-contrast battery / one-/two-/paired-sample design helpers / FWE across contrasts. | **FIXED:** `conjunction(stats)` (per-voxel minimum statistic, Nichols et al. 2005 — the *valid* conjunction null) + `conjunction_pvalue(p)` (max-p dual) in `inference.multiple_comparisons`. The one-/two-/paired-sample **design-matrix** helpers stay delegated to the `gramform`/`nwx` consumer layer (the formula/design interface is out of scope here, per the register's design-boundary note). |
 
 > **Out of scope (by design):** a Wilkinson **formula interface** and design/contrast
 > builders are *intentionally* delegated to the downstream `gramform` / `nwx` DSL,
@@ -163,11 +163,15 @@ decision (bring a proposal before coding).
   **D6** ✅ (`Literal` dispatch taxonomies), **D8** ✅ (`SmoothBasis` `Protocol`
   — open-set smooth registry).
 - **Wave 4 — neuroimaging capabilities (features; largest):**
-  **N5** (S, `confidence_interval` + standardized-effect helper),
-  **N2** (L, mesh/graph TFCE adjacency + spin test — surface/dMRI unlock),
-  **N4** (M, FLAME outlier-deweighting / FLAME1),
-  **N3/N6** ⚖️ (S–M, document the permutation-only / `-e`-not-`-g` stance *or*
-  implement), **N7** (S, conjunction/design conveniences — partly downstream).
+  **N5** ✅ (`confidence_interval` + `standardized_effect`),
+  **N2** ⏸️ **deferred to post-`geometry-suite`** (not technically blocked — the
+  mesh-adjacency / sphere-geodesic primitives ship in `sparse.mesh` /
+  `geometry.sphere` — but its consumers are downstream of the geometry sprint
+  producing the surfaces, and it is the largest item; let its API settle with
+  the surface workflow),
+  **N4** ✅ (FLAME outlier-deweighting / robust Huber-IRLS),
+  **N3/N6** ✅ (documented the permutation-only / `-e`-not-`-g` stance),
+  **N7** ✅ (conjunction min-statistic; design helpers stay downstream).
 - **Deferred (tracked, not in waves):** **P4** (implicit-diff mode — separate FR
   #36), **P5** (cache `penalty_eigs`).
 

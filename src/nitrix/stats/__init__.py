@@ -112,6 +112,7 @@ from .glm import (
     t_contrast,
     tweedie,
 )
+from ._effect import confidence_interval, standardized_effect
 from .pca import (
     PCAResult,
     pca_fit,
@@ -170,6 +171,9 @@ __all__ = [
     'aic',
     'bic',
     'compare_models',
+    # effect size / intervals
+    'confidence_interval',
+    'standardized_effect',
     # basis
     'SplineBasis',
     'TensorBasis',

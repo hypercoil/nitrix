@@ -17,10 +17,29 @@ in the consumer):
   enhancement per permutation -> FWE / uncorrected p-maps + the null max
   distribution.
 - ``multiple_comparisons`` -- FDR / Bonferroni / cluster p-value companions.
+
+Permutation-only, by design (audit N3)
+--------------------------------------
+
+This module is **deliberately nonparametric**: cluster / TFCE significance comes
+from the permutation null, not from a parametric random-field-theory (RFT)
+Gaussian-smoothness model.  Eklund, Nichols & Knutsson (2016, PNAS) showed the
+parametric cluster-extent tests (the SPM / FSL-FLAME RFT path) carry badly
+inflated false-positive rates under realistic spatial autocorrelation, whereas
+the permutation test holds its nominal level.  So there is **no ACF / FWHM
+smoothness estimator** here (no ``3dFWHMx`` / ``smoothest`` analogue) and none is
+planned -- the exchangeability-based null is the suite's single, defensible
+cluster-inference route.  A consumer that needs a parametric fallback for a
+tiny-``N`` design (where permutation is degenerate) supplies it itself.
 """
 
 from .cluster import cluster_mass_map, cluster_size_map
-from .multiple_comparisons import bonferroni, fdr_bh
+from .multiple_comparisons import (
+    bonferroni,
+    conjunction,
+    conjunction_pvalue,
+    fdr_bh,
+)
 from .permutation import permutations, sign_flips
 from .randomise import PermResult, gpd_pvalue, permutation_test
 from .tfce import tfce
@@ -36,4 +55,6 @@ __all__ = [
     'gpd_pvalue',
     'fdr_bh',
     'bonferroni',
+    'conjunction',
+    'conjunction_pvalue',
 ]

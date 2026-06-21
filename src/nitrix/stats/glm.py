@@ -488,7 +488,13 @@ def sandwich_cov(
     groups
         ``(N,)`` cluster labels for a **cluster-robust** covariance (one-way):
         ``B = sum_g s_g s_g^T``, ``s_g = sum_{i in g} x_i g_i``, with the
-        ``G/(G-1) * (N-1)/(N-p)`` small-sample factor.
+        ``G/(G-1) * (N-1)/(N-p)`` small-sample factor.  This is **one-way**
+        clustering -- FSL ``randomise``'s ``-e`` exchangeability-block analogue
+        (audit N6).  It is **not** a variance-group model (FSL ``-g`` / PALM
+        ``-vg``): a separate residual *variance* per group (heteroscedastic
+        two-sample / FLAME-style grouped variance) is a different estimator and
+        is not provided here -- the cluster-robust meat assumes a common model,
+        only correlating scores *within* a cluster.
     weights
         Optional ``(N,)`` prior weights matching the fit's ``weights=``.
 
