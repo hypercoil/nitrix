@@ -429,7 +429,7 @@ def test_laplace_slope_noncanonical_link_marginal_matches_numpy(link):
     from scipy.stats import norm
 
     from nitrix.stats import BINOMIAL
-    from nitrix.stats.glmm import _laplace_slope_nll
+    from nitrix.stats.glmm._laplace import _laplace_slope_nll
 
     rng = np.random.default_rng(3)
     q, n_per, r, n_mode = 20, 10, 2, 25
