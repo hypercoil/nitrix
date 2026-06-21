@@ -296,6 +296,17 @@ Honest economics: a single-pair *cold* GPU SyN (~15 s) is already on par with
 ANTs-CPU (~16 s) -- it is only a loss against its own *warm* potential, which the
 cache / cohort recovers.  The qualitative GPU win is the warm/amortised regime.
 
+*Evaluated and rejected (2026-06): parallel per-level compilation.*  Cold compile
+is dominated by the **distinct pyramid shapes** (three distinct-shape level bodies
+~18 s vs three same-shape ~7 s; the finest/full-res level alone is ~6 s).
+Compiling the per-level programs concurrently on threads (XLA releases the GIL)
+cuts cold only ~21 % -- the finest level is an un-parallelisable critical path --
+and it requires a **per-level-jit** structure that is mutually exclusive with the
+single-``jax.jit``-over-the-recipe path above (an outer ``jit`` inlines the inner
+ones back into one module).  The persistent module cache does **not** compose into
+that outer module either (distinct hash).  So the cache / cohort + autotune levers
+above capture the worthwhile wins without giving up the one-``jit`` model.
+
 ## 7. Out of scope (scope discipline)
 
 Atlas/template data structures and template-aware ops (→ ``thrux``); any
