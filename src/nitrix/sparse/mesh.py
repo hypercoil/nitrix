@@ -45,6 +45,7 @@ from typing import (
     Any,
     Callable,
     List,
+    Literal,
     Optional,
     Sequence,
     Tuple,
@@ -63,12 +64,14 @@ if TYPE_CHECKING:
     # Annotation-only; a runtime import would risk a cycle (the matmul
     # itself is imported lazily inside the functions below).
     from ..semiring._types import Semiring
+    from .ell_sectioned import SectionedELL
 
 
 __all__ = [
     'IcosphereHierarchy',
     'Mesh',
     'compute_vertex_normals',
+    'face_areas',
     'icosphere',
     'icosphere_bary_upsampler',
     'icosphere_cross_level_adjacency',
@@ -79,11 +82,14 @@ __all__ = [
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
     'mesh_laplacian_smooth',
+    'mesh_mass_matrix',
     'mesh_pool_max',
     'mesh_unpool_max',
+    'vertex_areas',
 ]
 
 
+@jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class Mesh:
     """Triangle mesh: vertex coordinates plus face indices.
@@ -95,6 +101,19 @@ class Mesh:
     faces : (n_faces, 3) array
         Per-face vertex indices.  ``faces[f] = [i, j, k]`` means
         face ``f`` connects vertices ``i``, ``j``, ``k``.  Integer.
+
+    Notes
+    -----
+    Registered as a JAX pytree: ``vertices`` and ``faces`` are both array
+    children, so a ``Mesh`` flows through ``jit`` / ``vmap`` / ``grad`` as a
+    first-class operand (the surface optimisers grad through ``vertices``;
+    ``faces`` is integer topology and takes a ``float0`` / zero cotangent).
+    ``faces`` is a *child* rather than static aux so a large integer array is
+    never forced into an unhashable treedef key (which would also recompile
+    per distinct topology).  Differentiating the *whole* ``Mesh`` needs
+    ``jax.grad(f, allow_int=True)`` (the ``faces`` integer leaf); the usual
+    surface-optimiser pattern instead grads w.r.t. ``vertices`` directly and
+    rebuilds the ``Mesh`` inside the loss.
     """
 
     vertices: Float[Array, 'n_vertices 3']
@@ -107,6 +126,23 @@ class Mesh:
     @property
     def n_faces(self) -> int:
         return int(self.faces.shape[0])
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[
+        Tuple[Float[Array, 'n_vertices 3'], Int[Array, 'n_faces 3']], None
+    ]:
+        """Children: ``(vertices, faces)``; no static aux."""
+        return (self.vertices, self.faces), None
+
+    @classmethod
+    def tree_unflatten(
+        cls,
+        _aux: None,
+        children: Tuple[Float[Array, 'n_vertices 3'], Int[Array, 'n_faces 3']],
+    ) -> 'Mesh':
+        vertices, faces = children
+        return cls(vertices=vertices, faces=faces)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +324,14 @@ class IcosphereHierarchy:
     meshes).  Cross-level ELLs returned from the constructors are
     plain JAX, so the downstream matmul / pool / upsample paths
     stay GPU-native.
+
+    Unlike ``Mesh`` / ``ELL`` / ``SectionedELL``, ``IcosphereHierarchy`` is
+    **deliberately not registered as a JAX pytree**.  Its ``parents`` tables
+    are host-side NumPy construction metadata (unhashable as static aux), and
+    the hierarchy is a *construction artefact*: a consumer uses it once on the
+    host to build the per-level meshes and cross-level ELLs, then traces those
+    array-bearing outputs -- the hierarchy object itself never needs to cross a
+    ``jit`` / ``grad`` / ``vmap`` boundary.
     """
 
     meshes: Tuple[Mesh, ...]
@@ -687,13 +731,39 @@ def _kring_adj_list(
     return [sorted(out[v] - {v}) for v in range(n)]
 
 
+# Format dispatch for the operator/measure constructors.  ``'auto'`` buckets
+# into a SectionedELL only when the per-row degree spread is wide enough that
+# flat-ELL padding wastes meaningful memory -- max degree above this multiple
+# of the median.  The icosphere / fsaverage families are near-uniform
+# (valence ~ 5-6, ratio ~ 1) and stay flat; non-template surfaces with a few
+# high-valence vertices (e.g. marching-cubes output) section.
+_AUTO_SECTION_RATIO = 2.0
+
+
+def _resolve_format(fmt: str, degrees: Sequence[int]) -> str:
+    """Resolve a ``format=`` request to ``'ell'`` or ``'sectioned'``."""
+    if fmt in ('ell', 'sectioned'):
+        return fmt
+    if fmt != 'auto':
+        raise ValueError(
+            f"format must be 'ell', 'sectioned', or 'auto'; got {fmt!r}."
+        )
+    d = np.asarray(list(degrees))
+    if d.size == 0:
+        return 'ell'
+    median = max(float(np.median(d)), 1.0)
+    ratio = float(d.max()) / median
+    return 'sectioned' if ratio > _AUTO_SECTION_RATIO else 'ell'
+
+
 def mesh_k_ring_adjacency(
     mesh: Mesh,
     *,
     k: int = 1,
     binary: bool = True,
     include_self: bool = False,
-) -> ELL:
+    format: Literal['ell', 'sectioned', 'auto'] = 'ell',
+) -> ELL | SectionedELL:
     """Build the k-ring adjacency of a mesh as an ELL.
 
     Parameters
@@ -712,17 +782,26 @@ def mesh_k_ring_adjacency(
     include_self
         If ``True``, every vertex's neighbour list includes itself.
         Default ``False`` (strict adjacency).
+    format
+        ``'ell'`` (default) returns a flat ``ELL`` padded to the global
+        max degree -- byte-identical to the prior behaviour.
+        ``'sectioned'`` returns a degree-bucketed ``SectionedELL`` (avoids
+        the flat-padding cliff on irregular-valence meshes).  ``'auto'``
+        picks ``'sectioned'`` only when the max/median degree ratio exceeds
+        ~2 (near-uniform meshes such as the icosphere / fsaverage stay flat).
 
     Returns
     -------
-    ELL of shape ``(n_vertices, n_vertices)`` with ``k_max = max
-    neighbour-set size`` (pad rows below k_max use the ELL identity).
+    ``ELL`` (``format='ell'``) or ``SectionedELL`` (``'sectioned'``) of
+    shape ``(n_vertices, n_vertices)``; both feed ``sparse.apply_operator``.
+    The flat ``ELL`` has ``k_max = max neighbour-set size`` (pad rows below
+    k_max use the ELL identity).
 
     Notes
     -----
     Construction is host-side NumPy (BFS per vertex); the resulting
-    ELL is plain JAX.  For repeated k-ring queries on the same
-    mesh, build the ELL once and reuse.
+    operator is plain JAX.  For repeated k-ring queries on the same
+    mesh, build the operator once and reuse.
     """
     if k < 1:
         raise ValueError(f'k must be >= 1; got {k}.')
@@ -732,6 +811,21 @@ def mesh_k_ring_adjacency(
     kring = _kring_adj_list(onering, k)
     if include_self:
         kring = [[v] + lst for v, lst in enumerate(kring)]
+
+    if _resolve_format(format, [len(lst) for lst in kring]) == 'sectioned':
+        from .ell_sectioned import sectioned_ell_from_ragged
+
+        vpr: list[Any] = []
+        ipr: list[Any] = []
+        for neigh in kring:
+            if not neigh:
+                ipr.append(jnp.asarray(np.empty(0, dtype=np.int32)))
+                vpr.append(jnp.asarray(np.empty(0, dtype=np.float32)))
+                continue
+            ipr.append(jnp.asarray(np.asarray(neigh, dtype=np.int32)))
+            w = 1.0 if binary else 1.0 / len(neigh)
+            vpr.append(jnp.asarray(np.full(len(neigh), w, dtype=np.float32)))
+        return sectioned_ell_from_ragged(vpr, ipr, n_cols=n, identity=0.0)
 
     k_max = max((len(lst) for lst in kring), default=1)
     # k_max could be 0 if all vertices are isolated (degenerate mesh).
@@ -810,7 +904,9 @@ def _cotangent_weights(
 
 def mesh_cotangent_laplacian(
     mesh: Mesh,
-) -> ELL:
+    *,
+    format: Literal['ell', 'sectioned', 'auto'] = 'ell',
+) -> ELL | SectionedELL:
     """Discrete Laplace-Beltrami operator (cotangent Laplacian) as ELL.
 
     The standard finite-element / discrete-exterior-calculus
@@ -830,11 +926,18 @@ def mesh_cotangent_laplacian(
     ----------
     mesh
         Triangle mesh.
+    format
+        ``'ell'`` (default) flat ``ELL``; ``'sectioned'`` degree-bucketed
+        ``SectionedELL``; ``'auto'`` sections only when the degree spread is
+        wide (icosphere / fsaverage stay flat).  Both feed
+        ``sparse.apply_operator``.  The diagonal-first column layout (below)
+        holds only for the flat ``ELL``.
 
     Returns
     -------
-    ELL of shape ``(n_vertices, n_vertices)``.  ``k_max`` is the
-    1-ring max degree plus 1 (the diagonal entry).
+    ``ELL`` or ``SectionedELL`` of shape ``(n_vertices, n_vertices)``.  For
+    the flat ``ELL``, ``k_max`` is the 1-ring max degree plus 1 (the diagonal
+    entry).
 
     Notes
     -----
@@ -879,6 +982,31 @@ def mesh_cotangent_laplacian(
     onering_w: list[list[Tuple[int, float]]] = [[] for _ in range(n)]
     for (i, j), w in edge_weight.items():
         onering_w[i].append((j, w))
+
+    if _resolve_format(format, [len(r) + 1 for r in onering_w]) == 'sectioned':
+        from .ell_sectioned import sectioned_ell_from_ragged
+
+        sec_dtype = mesh.vertices.dtype
+        identity = float(jnp.asarray(0.0, dtype=sec_dtype).item())
+        vpr: list[Any] = []
+        ipr: list[Any] = []
+        for v in range(n):
+            if not onering_w[v]:
+                ipr.append(jnp.asarray(np.asarray([v], dtype=np.int32)))
+                vpr.append(
+                    jnp.asarray(
+                        np.zeros(1, dtype=np.float64).astype(sec_dtype)
+                    )
+                )
+                continue
+            diag = sum(w for _, w in onering_w[v])
+            js = [v] + [j for j, _ in onering_w[v]]
+            ws = [diag] + [-w for _, w in onering_w[v]]
+            ipr.append(jnp.asarray(np.asarray(js, dtype=np.int32)))
+            vpr.append(
+                jnp.asarray(np.asarray(ws, dtype=np.float64).astype(sec_dtype))
+            )
+        return sectioned_ell_from_ragged(vpr, ipr, n_cols=n, identity=identity)
 
     # Max degree + 1 for the diagonal.
     k_max = max((len(r) for r in onering_w), default=0) + 1
@@ -1171,6 +1299,179 @@ def compute_vertex_normals(
         normals = normals.at[faces[:, k]].add(face_normals)
     norm = jnp.sqrt(jnp.sum(normals**2, axis=-1, keepdims=True))
     return normals / jnp.maximum(norm, 1e-12)
+
+
+def face_areas(mesh: Mesh) -> Float[Array, 'n_faces']:
+    """Per-face triangle area.
+
+    ``area_f = 1/2 * ||(v1 - v0) x (v2 - v0)||`` -- half the magnitude of
+    the face cross product (the same cross product
+    ``compute_vertex_normals`` accumulates, here taken as a magnitude).
+
+    Parameters
+    ----------
+    mesh
+        Triangle mesh.
+
+    Returns
+    -------
+    ``(n_faces,)`` face areas.  Pure JAX; differentiable w.r.t. vertices.
+    """
+    v = mesh.vertices
+    f = mesh.faces
+    v0, v1, v2 = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
+    cross = jnp.cross(v1 - v0, v2 - v0)
+    return 0.5 * jnp.sqrt(jnp.sum(cross**2, axis=-1))
+
+
+def vertex_areas(
+    mesh: Mesh,
+    *,
+    scheme: str = 'voronoi',
+) -> Float[Array, 'n_vertices']:
+    """Per-vertex surface area (the lumped mass-matrix diagonal).
+
+    The area measure under every area-weighted surface operation:
+    ``M^{-1} L`` mean curvature, areal distortion, anatomical surface area,
+    and the backward-Euler geodesic-smoothing solve ``(M + tL) x = M x_0``.
+
+    Two schemes, both partitioning each triangle's area among its three
+    vertices (so ``sum(vertex_areas) == sum(face_areas)`` exactly for both):
+
+    - ``'barycentric'`` -- each face donates ``area / 3`` to each of its
+      vertices.  Cheap, always non-negative, the safe fallback.
+    - ``'voronoi'`` (default) -- the mixed Voronoi rule of Meyer et al.
+      (2003).  For a non-obtuse triangle, vertex ``i`` receives the
+      circumcentric-dual (Voronoi) area
+      ``1/8 (cot(angle_k) |x_i - x_j|^2 + cot(angle_j) |x_i - x_k|^2)``.
+      For an **obtuse** triangle the Voronoi cell falls outside the
+      triangle, so the area is assigned ``area / 2`` to the obtuse vertex
+      and ``area / 4`` to each of the others.  **This obtuse branch is
+      load-bearing on real cortical surfaces** (the icosphere never
+      exercises it); the barycentric scheme silently ignores the issue.
+
+    Parameters
+    ----------
+    mesh
+        Triangle mesh.
+    scheme
+        ``'voronoi'`` (default, mixed/obtuse-safe) or ``'barycentric'``.
+
+    Returns
+    -------
+    ``(n_vertices,)`` per-vertex areas.  Pure JAX; differentiable w.r.t.
+    vertices.
+
+    Raises
+    ------
+    ValueError
+        If ``scheme`` is not ``'voronoi'`` or ``'barycentric'``.
+    """
+    v = mesh.vertices
+    f = mesh.faces
+    n = mesh.n_vertices
+    a, b, c = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
+    cross = jnp.cross(b - a, c - a)
+    two_area = jnp.sqrt(jnp.sum(cross**2, axis=-1))  # = 2 * area
+    area = 0.5 * two_area
+
+    if scheme == 'barycentric':
+        contrib = area / 3.0
+        out = jnp.zeros((n,), dtype=v.dtype)
+        for k in range(3):
+            out = out.at[f[:, k]].add(contrib)
+        return out
+
+    if scheme != 'voronoi':
+        raise ValueError(
+            f"vertex_areas: scheme must be 'voronoi' or 'barycentric'; "
+            f'got {scheme!r}.'
+        )
+
+    # cot(angle at vertex) = dot(edge, edge) / ||cross|| (= 2*area); the
+    # dot's sign also detects obtuseness (cos < 0).
+    safe_two_area = jnp.maximum(two_area, 1e-12)
+    dot_a = jnp.sum((b - a) * (c - a), axis=-1)
+    dot_b = jnp.sum((a - b) * (c - b), axis=-1)
+    dot_c = jnp.sum((a - c) * (b - c), axis=-1)
+    cot_a = dot_a / safe_two_area
+    cot_b = dot_b / safe_two_area
+    cot_c = dot_c / safe_two_area
+    l2_ab = jnp.sum((a - b) ** 2, axis=-1)
+    l2_bc = jnp.sum((b - c) ** 2, axis=-1)
+    l2_ca = jnp.sum((c - a) ** 2, axis=-1)
+
+    # Voronoi (acute) per-vertex areas; sum to the triangle area.
+    vor_a = (cot_c * l2_ab + cot_b * l2_ca) / 8.0
+    vor_b = (cot_c * l2_ab + cot_a * l2_bc) / 8.0
+    vor_c = (cot_b * l2_ca + cot_a * l2_bc) / 8.0
+
+    obt_a, obt_b, obt_c = dot_a < 0, dot_b < 0, dot_c < 0
+    tri_obt = obt_a | obt_b | obt_c
+    half, quarter = area / 2.0, area / 4.0
+    contrib_a = jnp.where(tri_obt, jnp.where(obt_a, half, quarter), vor_a)
+    contrib_b = jnp.where(tri_obt, jnp.where(obt_b, half, quarter), vor_b)
+    contrib_c = jnp.where(tri_obt, jnp.where(obt_c, half, quarter), vor_c)
+
+    out = jnp.zeros((n,), dtype=v.dtype)
+    out = out.at[f[:, 0]].add(contrib_a)
+    out = out.at[f[:, 1]].add(contrib_b)
+    out = out.at[f[:, 2]].add(contrib_c)
+    return out
+
+
+def mesh_mass_matrix(
+    mesh: Mesh,
+    *,
+    scheme: str = 'voronoi',
+    lumped: bool = True,
+) -> ELL:
+    """Mass matrix ``M`` of a triangle mesh, as a (diagonal) ELL operator.
+
+    The companion of ``mesh_cotangent_laplacian`` (which is the unnormalised
+    *stiffness* ``L``): the discrete inner product that turns the stiffness
+    into a true Laplace-Beltrami operator ``M^{-1} L``.  The lumped mass is
+    diagonal -- ``M_ii = vertex_areas(mesh)[i]`` -- hence trivially
+    invertible, which is exactly what ``M^{-1} L`` mean curvature and the
+    ``(M + tL)`` backward-Euler smoothing solve need.
+
+    Returned as a width-1 diagonal ``ELL`` so it composes through
+    ``sparse.apply_operator`` (``M @ x == vertex_areas[:, None] * x``); for
+    the common case the caller usually wants the diagonal vector directly
+    (use ``vertex_areas``).
+
+    Parameters
+    ----------
+    mesh
+        Triangle mesh.
+    scheme
+        Area scheme forwarded to ``vertex_areas`` (``'voronoi'`` default).
+    lumped
+        ``True`` (default) -- the diagonal lumped mass.  ``False`` (the
+        consistent linear-FEM mass with off-diagonal coupling) is not yet
+        implemented.
+
+    Returns
+    -------
+    ``ELL`` of shape ``(n_vertices, n_vertices)`` with ``k_max = 1``.
+
+    Raises
+    ------
+    NotImplementedError
+        If ``lumped=False`` (the consistent mass is a documented follow-up).
+    """
+    if not lumped:
+        raise NotImplementedError(
+            'mesh_mass_matrix: the consistent (non-lumped) linear-FEM mass '
+            'matrix is not yet implemented; pass lumped=True for the diagonal '
+            'Voronoi/barycentric mass (what M^{-1}L curvature and the '
+            '(M + tL) smoothing solve require).'
+        )
+    m = vertex_areas(mesh, scheme=scheme)
+    n = mesh.n_vertices
+    indices = jnp.arange(n, dtype=jnp.int32)[:, None]
+    values = m[:, None]
+    return ELL(values=values, indices=indices, n_cols=n, identity=0.0)
 
 
 def mesh_laplacian_smooth(

@@ -21,6 +21,7 @@ import warnings
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, Optional, Tuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int, Num
@@ -47,6 +48,7 @@ __all__ = [
 ]
 
 
+@jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class ELL:
     """ELL-format sparse matrix.
@@ -65,6 +67,19 @@ class ELL:
     identity
         The semiring identity that pad entries of ``values`` have been
         filled with.  ``None`` if the caller has handled sentinels.
+
+    Notes
+    -----
+    Registered as a JAX pytree: ``values`` / ``indices`` are the array
+    children (so an ``ELL`` flows through ``jit`` / ``vmap`` / ``grad`` as a
+    first-class operand, no manual unpack / repack) and ``(n_cols, identity)``
+    are static aux.  ``grad`` w.r.t. an ``ELL`` returns an ``ELL`` cotangent
+    with ``values`` populated and a ``float0`` (zero) ``indices`` cotangent --
+    consistent with the sparse eigensolver's ``custom_vjp``, which
+    differentiates ``values`` and zeros ``indices``.  Because ``indices`` is an
+    integer leaf, differentiating the *whole container* needs
+    ``jax.grad(f, allow_int=True)`` (or differentiate w.r.t. ``values``
+    directly); the integer leaf then carries the inert ``float0`` cotangent.
     """
 
     values: Num[Array, 'm k_max']
@@ -87,6 +102,27 @@ class ELL:
     @property
     def dtype(self) -> np.dtype[Any]:
         return self.values.dtype
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[
+        Tuple[Num[Array, 'm k_max'], Int[Array, 'm k_max']],
+        Tuple[int, Any],
+    ]:
+        """Children: ``(values, indices)``; aux: ``(n_cols, identity)``."""
+        return (self.values, self.indices), (self.n_cols, self.identity)
+
+    @classmethod
+    def tree_unflatten(
+        cls,
+        aux: Tuple[int, Any],
+        children: Tuple[Num[Array, 'm k_max'], Int[Array, 'm k_max']],
+    ) -> 'ELL':
+        values, indices = children
+        n_cols, identity = aux
+        return cls(
+            values=values, indices=indices, n_cols=n_cols, identity=identity
+        )
 
 
 def ell_pad(
