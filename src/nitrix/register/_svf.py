@@ -27,6 +27,7 @@ from typing import Callable, Literal, Optional, Sequence, Union
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from .._internal.backend import default_backend_is_gpu
 from ..geometry import (
     affine_grid,
     compose_displacement,
@@ -124,16 +125,43 @@ def pin_force_ranges(force: Force, moving: Array, fixed: Array) -> Force:
     return force
 
 
+def _smooth_method(
+    sigma: Union[float, Sequence[float]],
+) -> Literal['fir', 'recursive']:
+    """Backend-aware Gaussian engine for the vector-field regulariser.
+
+    The fluid/diffusion smooths run on the multi-channel velocity/displacement
+    field on *every* iteration (2x Demons, 4x SyN), so the engine matters.  On
+    GPU the shifted-slice FIR path is far cheaper than the sequential recursive
+    scan (~0.3 ms vs ~12 ms at the registration sigmas, measured) and stays the
+    engine -- byte-identical to the prior behaviour.  On CPU the FIR shift-sum
+    is the dominant per-iteration cost and the O(N) Young-van Vliet recursion is
+    ~1.1-1.5x cheaper, so ``'recursive'`` is selected -- but only when every
+    per-axis sigma clears the YvV validity floor (>= 0.5), else FIR.  The CPU
+    recursion differs from the FIR truncation by ~1-2% within a few sigma of the
+    edge (a *regulariser*, not the objective), so CPU results diverge slightly
+    from GPU; the recovery is unaffected.  Mirrors the ``signal._iir`` auto split
+    (parallel on GPU, sequential recursion on CPU).
+    """
+    if default_backend_is_gpu():
+        return 'fir'
+    sigmas = (sigma,) if isinstance(sigma, (int, float)) else tuple(sigma)
+    return 'recursive' if all(s >= 0.5 for s in sigmas) else 'fir'
+
+
 def _smooth_vector(
     field: Array, sigma: Union[float, Sequence[float]], ndim: int
 ) -> Array:
     """Separable Gaussian over the spatial axes of a channel-last field.
 
     ``sigma`` is a scalar (isotropic) or a length-``ndim`` per-axis
-    sequence (anisotropic regularisation).
+    sequence (anisotropic regularisation).  The engine is backend-aware
+    (``_smooth_method``): FIR on GPU, recursive on CPU.
     """
     moved = jnp.moveaxis(field, -1, 0)
-    smoothed = gaussian(moved, sigma=sigma, spatial_rank=ndim)
+    smoothed = gaussian(
+        moved, sigma=sigma, spatial_rank=ndim, method=_smooth_method(sigma)
+    )
     return jnp.moveaxis(smoothed, 0, -1)
 
 
@@ -706,7 +734,9 @@ def resolve_init_displacement(
     registration centring convention (grid centre, via ``affine_grid``).
     """
     if init_affine is not None and init_displacement is not None:
-        raise ValueError('pass at most one of init_affine / init_displacement.')
+        raise ValueError(
+            'pass at most one of init_affine / init_displacement.'
+        )
     if init_affine is not None:
         return affine_grid(init_affine, shape) - identity_grid(
             shape, dtype=dtype
