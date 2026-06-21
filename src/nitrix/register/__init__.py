@@ -70,7 +70,14 @@ wall-clock comparison) are **delegated to the nitrix-perf-bench agent**, which
 owns the cross-tool harness; they are not asserted in this repo.
 """
 
-from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
+from ._bbr import (
+    BBRResult,
+    BBRSearch,
+    BBRSpec,
+    BoundaryObjective,
+    bbr_cost,
+    bbr_register,
+)
 from ._core import Convergence, RegistrationResult, RegistrationSpec
 from ._force import (
     DemonsForce,
@@ -106,6 +113,7 @@ __all__ = [
     'bbr_register',
     'bbr_cost',
     'BBRSpec',
+    'BBRSearch',
     'BBRResult',
     'BoundaryObjective',
     'Objective',

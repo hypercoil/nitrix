@@ -151,6 +151,62 @@ boundary normal and accumulate a normalized cross-boundary contrast.
   waits for surface features.  `Rigid()` is the transform model (the typing
   doc: "BBR uses `Rigid()`").
 
+### 3.1 Recovery recipe — grid multistart + step annealing (2026-06-21)
+
+**Problem.** The shipped BBR (R6b) was a single local BFGS solve at a fixed
+sampling `step`.  On a real WM/GM boundary it recovered rotation but barely
+moved translation (a `~2.7°/3 mm` plant -> `~1.4°/2.5 mm` residual): BBR's cost
+is shallow and markedly **non-convex**, and at a fine `step` the translation
+basin is narrow and noisy (diagnosed by sweeping the cost — the minimum *is* at
+the truth, so the cost/normals were correct; it was a basin/tuning gap, not a
+formulation bug).
+
+**Fix (FSL `flirt --bbr` parity).** Two ingredients, both default-on:
+
+- **Step annealing** (`BBRSpec.schedule`, default `(4,2,1)`) — a *large*
+  sampling `step` samples far either side of the boundary, smoothing the cost
+  and widening its basin (it captures the gross translation a fine step is
+  blind to); finer stages refine, warm-started.  This mirrors FSL's annealed
+  `bbrstep`.
+- **Grid multistart** (`BBRSpec.search`, default on) — before refining, the
+  cost is evaluated under one `vmap` on a coarse grid of rigid seeds
+  (`3**6 = 729` for 3-D rigid) and the lowest-cost seed initialises the solve,
+  so a single descent cannot latch a wrong boundary alignment.  Mirrors FSL's
+  `gridmeasurecost`.  Pure annealing *without* the grid diverged on the folded
+  brain at `>3°` (wrong-basin latch); the grid cures it.
+
+Recovery on the real boundary: `2.7°/3 mm -> 0.1°/0.7 mm`, robust across plant
+sizes and boundary samples (and on a 3-D box synthetic, `7°/6 vox -> 0.5°/0.3 vox`).
+
+**Optimiser — normalised-block GD, and why not BFGS / Newton.** The per-stage
+solve replaces `jax.scipy` BFGS with a *normalised-block gradient descent*: the
+rotation and translation gradient blocks are unit-normalised and stepped by
+physical (rad / mm) step lengths with a geometric decay.  This is forced by the
+cost's structure — damped Newton **diverges** (the Hessian is indefinite on the
+non-convex tanh cost) and a single-rate GD cannot serve both the rad and mm
+blocks (the unit mismatch BFGS otherwise learns).  The normalised blocks make
+the step **amplitude- and unit-invariant** (the contrast `Q` is already a ratio),
+so the step lengths are image-independent defaults (`50×` intensity scaling ->
+identical recovery up to the `eps` denominator guard).
+
+**Scan/while toggle (aligned with the other recipes).** The GD step runs through
+the shared `run_iterations`, so `BBRSpec.convergence` gives the same toggle:
+`None` (and `'auto'` for BBR) is the fixed `lax.scan` (reproducible, reverse-
+differentiable); an explicit `Convergence` is the windowed-slope `lax.while_loop`
+early-exit (opt in; the early-exit barrier raises on reverse-mode, as elsewhere).
+Unlike the inverse-compositional recipes, **`'auto'` resolves to the scan** here:
+the GD early-exit only beats the (already fast) scan at a loosened threshold (at
+the tight default it is slower than the scan from while-loop overhead).
+
+**Performance (the decision driver).** Measured on the real boundary (L4 GPU,
+`N=5000`): grid+anneal GD-scan **8.9 ms** at 30 iters/stage (`11.6 ms` at the
+default 50) vs the grid+anneal BFGS path `11.3 ms` — so GD is *not slower*, and
+recovers better and more consistently (BFGS recovery is backend-inconsistent:
+`1.4°` GPU vs `0.1°` CPU on the same problem).  CPU ~320–450 ms.  vs FSL
+`flirt --bbr` `7.35 s` -> still `~650×`.  Unrolled reverse-mode diff through the
+scan is a by-product, not a goal — prefer `linalg.implicit_minimize` on
+`bbr_cost` (adjoint at the optimum, trajectory-independent) for gradients.
+
 ## 4. Greedy SyN
 
 **What.**  The design doc's stated upgrade — "a symmetric forward+inverse
