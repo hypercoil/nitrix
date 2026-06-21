@@ -310,7 +310,7 @@ def _reml_fit_lowrank(
     if theta_init is None:
         theta_init = _lowrank_theta_init(Y, s2, n)
 
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    spec = VarCompSpec(n_iter=n_iter, damping=damping)
     theta_hat, beta_hat, log_lik = fit_lowrank_reml(
         y_range,
         x_range,
@@ -670,7 +670,8 @@ def reml_fit(
         Response tensor, ``(V, N)`` -- ``V`` voxels, ``N`` subjects
         (or observations).
     X
-        Fixed-effect design, ``(N, p)``.  Shared across voxels.
+        Fixed-effect design, ``(N, p)``.  Shared across voxels; carries its own
+        intercept column (no intercept is added).
     Z
         Random-effect design, ``(N, q)``.  Shared across voxels.
         The random-effect covariance is ``sigma_b^2 I_q`` (single
@@ -758,7 +759,7 @@ def reml_fit(
     if theta_init is None:
         theta_init = _default_theta_init(Y_rot, V_basis_diag)
 
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    spec = VarCompSpec(n_iter=n_iter, damping=damping)
     theta_hat, beta_hat, log_lik = fit_varcomp_diagonal(
         Y_rot,
         X_rot,
@@ -964,7 +965,8 @@ def lme_fit(
     Parameters
     ----------
     Y, X
-        ``(V, N)`` responses and ``(N, p)`` shared fixed-effect design.
+        ``(V, N)`` responses and ``(N, p)`` shared fixed-effect design.  ``X``
+        carries its own intercept column (no intercept is added).
     group
         ``(N,)`` integer group labels (``0 .. M-1``).  The **outer** factor
         ``g1`` when ``inner`` is given (R3).
@@ -992,10 +994,14 @@ def lme_fit(
         ``'unstructured'`` (full ``r x r`` ``G``, ``(1 + x | g)``) or
         ``'diagonal'`` (independent variance components, ``(x || g)`` -- the
         off-diagonal of ``G`` is held at zero).  Both run the R2 block-Woodbury.
-    n_iter, damping, block, low_rank
-        Newton iterations, AI damping, voxel-block chunking, and (R1) the q-rank
-        toggle -- ``None`` (default) auto-selects the FaST-LMM low-rank path when
-        ``q < N`` (the brain-scale case; matches the dense fit to tolerance).
+    n_iter, damping, block
+        Newton iterations, AI damping, and voxel-block chunking (all tiers).
+    low_rank
+        **R1-only.** Toggles the FaST-LMM q-rank decomposition on the
+        single-scalar-factor (R1) path; ``None`` (default) auto-selects low-rank
+        when ``q < N`` (the brain-scale case; matches the dense fit to tolerance).
+        **Ignored on the R2 / R3 / R4 / +corr tiers**, which have no
+        dense-vs-low-rank choice -- passing it there is a silent no-op.
 
     Returns
     -------
@@ -1027,7 +1033,7 @@ def lme_fit(
         var_y = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
         w = jnp.asarray([0.25, 0.25, 0.5], dtype=Y.dtype)
         theta_init = jnp.log(jnp.maximum(var_y * w, 1e-6))  # (V, 3)
-        spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+        spec = VarCompSpec(n_iter=n_iter, damping=damping)
         theta_hat, beta_hat, log_lik = fit_crossed_reml(
             Y, X, oh1, oh2, theta_init, spec=spec, block=block
         )
@@ -1085,7 +1091,7 @@ def lme_fit(
         var_y = jnp.var(Y, axis=-1, keepdims=True)  # (V, 1)
         w = jnp.asarray([0.25, 0.25, 0.5], dtype=Y.dtype)
         theta_init = jnp.log(jnp.maximum(var_y * w, 1e-6))  # (V, 3)
-        spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+        spec = VarCompSpec(n_iter=n_iter, damping=damping)
         theta_hat, beta_hat, log_lik = fit_nested_reml(
             Y, X, group, inner_arr, theta_init, spec=spec, block=block
         )
@@ -1113,11 +1119,8 @@ def lme_fit(
         )
 
     # R2: one correlated / diagonal random effect -> block-Woodbury REML.
-    from ._blockwoodbury import (
-        _param_layout,
-        cov_re_from_chol,
-        fit_blockwoodbury_reml,
-    )
+    from ._blockwoodbury import fit_blockwoodbury_reml
+    from ._recov import _param_layout, cov_re_from_chol
 
     diagonal = structure == 'diagonal'
     z_arr = jnp.asarray(z, dtype=Y.dtype)
@@ -1129,7 +1132,7 @@ def lme_fit(
     log_se2 = jnp.log(jnp.maximum(0.5 * var_y, 1e-6))[:, None]  # (V, 1)
     theta_init = jnp.concatenate([chol, log_se2], axis=1)  # (V, nt)
 
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    spec = VarCompSpec(n_iter=n_iter, damping=damping)
     theta_hat, beta_hat, log_lik = fit_blockwoodbury_reml(
         Y,
         X,

@@ -55,7 +55,7 @@ from jaxtyping import Array, Float
 
 from ...linalg._smalllinalg import small_inv_logdet
 from .._batching import blocked_vmap
-from ._optimise import damped_newton
+from .._optimise import damped_newton
 from ._varcomp import VarCompSpec
 
 __all__ = ['CrossedStats', 'crossed_grams', 'fit_crossed_reml']
@@ -169,7 +169,7 @@ def _fit_one(
     def nll(theta: Float[Array, '3']) -> Float[Array, '']:
         return _nll_and_beta(theta, stats, zty, xty, yty, p, spec.ridge)[0]
 
-    theta = damped_newton(nll, theta_init, spec=spec)
+    theta = damped_newton(nll, theta_init, **spec.newton_kwargs)
     final_nll, beta = _nll_and_beta(theta, stats, zty, xty, yty, p, spec.ridge)
     return theta, beta, -final_nll
 

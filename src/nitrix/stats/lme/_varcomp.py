@@ -82,7 +82,7 @@ from jaxtyping import Array, Float
 
 from ...linalg._smalllinalg import small_inv_logdet as _small_inv_logdet
 from .._batching import blocked_vmap as _blocked_vmap
-from ._optimise import damped_newton
+from .._optimise import damped_newton
 
 __all__ = ['VarCompSpec', 'fit_varcomp_diagonal', 'varcomp_inference']
 
@@ -123,10 +123,20 @@ class VarCompSpec:
     n_backtrack: int = 4
     ridge: float = 1e-8
 
-    @classmethod
-    def reml(cls, **kw: Any) -> 'VarCompSpec':
-        """Defaults tuned for general two-component REML (``reml_fit``)."""
-        return cls(**kw)
+    @property
+    def newton_kwargs(self) -> dict:
+        """The iteration budget as ``stats._optimise.damped_newton`` kwargs.
+
+        The seam decoupling the generic optimiser from this mixed-model config
+        (audit O2): call sites pass ``**spec.newton_kwargs``; ``ridge`` (used by
+        the solvers' own fixed-effect floor, not the Newton step) is excluded.
+        """
+        return {
+            'n_iter': self.n_iter,
+            'damping': self.damping,
+            'max_step': self.max_step,
+            'n_backtrack': self.n_backtrack,
+        }
 
     @classmethod
     def flame(cls, **kw: Any) -> 'VarCompSpec':
@@ -269,7 +279,11 @@ def _fit_one(
         return score, info
 
     theta_final = damped_newton(
-        nll, theta_init, spec=spec, curvature=curvature, step='damped'
+        nll,
+        theta_init,
+        **spec.newton_kwargs,
+        curvature=curvature,
+        step='damped',
     )
     d = _diag_variance(theta_final, B, offset)
     beta, _, _, _ = _profile_beta(d, y, X, p, spec.ridge)

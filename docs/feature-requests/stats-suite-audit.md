@@ -69,17 +69,17 @@ immune.
 | **D4** | Med | ✅ **done** | `stats/glmm.py` `GLMMResult.re_var` (~108) | Silently shape-polymorphic `(V,)` / `(V,r)` / `(V,r,r)` by `z`/`structure` — a `vmap`/indexing footgun; contrast `LMEResult.cov_re` which is *always* `(V,r,r)`. (design F5 + slope review) | **FIXED (green-field, no back-compat):** `re_var` is now uniformly `(V, r, r)` across every tier (few/many/slope/laplace/agq) — scalar intercept `(V, 1, 1)`, diagonal slope a diagonal `(V, r, r)` (zero off-diagonals, asserted), unstructured the full `G` — matching `LMEResult.cov_re`. |
 | **D5** | Low | ✅ **done** | `_family.py` / `glm.py` / `stats/__init__.py` | `resolve_family` reachable but not exported, while `resolve_link` is (3×). | **FIXED:** added to `glm.__all__` + imported / exported from `stats.__init__`. |
 | **D6** | Low-Med | open | `glm_fit`/`glmm_fit`/`lme_fit`/`predict`/`sandwich_cov`/… | Dispatch axes (`family`/`method`/`structure`/`type`/`kind`) are bare `str` validated by deep `raise ValueError`; only `gam_fit`/`pca_fit`/`reml.Structure` use `Literal`. `tier` is a free `str` return. | Promote taxonomies to `Literal` (incl. `tier`) so legal values are in the signature / type-checker. |
-| **D7** | Low | open | `lme/_blockwoodbury.py` `_param_layout`/`cov_re_from_chol` | Shared RE-covariance (log-Cholesky) helpers reached across module boundaries from `reml.py`, `_corrfit.py`, and `glmm.py` (4× in-function private-name imports). (code-org + design) | Lift to a shared `lme/_recov.py` (or have `fit_blockwoodbury_reml` return `cov_re` directly). |
+| **D7** | Low | ✅ **done** | `lme/_recov.py` (new) | Shared RE-covariance (log-Cholesky) helpers reached across module boundaries from `reml.py`, `_corrfit.py`, and `glmm.py` (4× in-function private-name imports). (code-org + design) | **FIXED:** `_tril_layout`/`_param_layout`/`_build_chol`/`cov_re_from_chol` lifted verbatim to `lme/_recov.py` (jnp-only, no deps). `_blockwoodbury` imports `_build_chol` from it; `reml`/`_corrfit`/`glmm` source the helpers from `_recov` — and glmm's 5 in-function imports collapse to one top-level import. |
 | **D8** | Low-Med | open | `gam.py` `Smooth = Union[...]`, `_smooth_penalties` `isinstance` chain | New basis type ⇒ edit the union *and* every `isinstance` branch — the open-set registry story `Family`/`CorrSpec` get right is absent. | A `SmoothBasis` `Protocol` (shared `dim`/`design`/`penalty`) or a `penalty_blocks()` method on each basis. |
-| **D9** | Taste | open | various | `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` naming drift; intercept policy differs (`X`-carries-own vs `intercept=` vs forbidden); `VarCompSpec.reml` is pure ceremony (`= cls(**kw)`); `low_rank` is an R1-only silent no-op. | Standardise single-loop fitters on `n_iter`; document the intercept policy per signature; drop `.reml`; validate/doc `low_rank` R1-only. |
+| **D9** | Taste | ~mostly done | various | `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` naming drift; intercept policy differs (`X`-carries-own vs `intercept=` vs forbidden); `VarCompSpec.reml` is pure ceremony (`= cls(**kw)`); `low_rank` is an R1-only silent no-op. | **DONE:** dropped `VarCompSpec.reml` (11 call-sites → direct `VarCompSpec(...)`; `.flame` kept — it sets a real default); documented the intercept policy on the fitters that lacked it (`glm_fit`/`reml_fit`/`lme_fit` "carries its own intercept"; ordinal/gaulss/betareg/gam already noted theirs); `lme_fit.low_rank` now documented **R1-only** (silent no-op on R2/R3/R4/+corr). **Deferred (cosmetic):** the `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` rename across public signatures. |
 
 ## Code organisation
 
 | ID | Sev | Status | Location | Issue | Recommendation |
 |----|-----|--------|----------|-------|----------------|
-| **O1** | High | deferred? | `stats/glmm.py` (1556 LOC) | 6-solver monolith (few-level / structured slope / many-level Schur / Laplace / Laplace-slope / AGQ) behind one dispatcher; banners already mark the seams. | Split into a `glmm/` package mirroring `lme/`: `__init__.py` (dispatcher + `GLMMResult`), `_pql.py`, `_slope.py`, `_laplace.py`, `_agq.py`. Pure mechanical relocation. |
-| **O2** | High | open | `lme/_optimise.py` `damped_newton` (~127) | The "one shared Newton" is housed *inside* `lme/` yet driven by `_ordinal`/`_betareg`/`_gaulss` (non-mixed-model), and typed on `VarCompSpec` though it reads only primitive fields — forcing `_ordinal` to build a variance-components spec it has no use for. | Move `damped_newton` to a stats-core module (`stats/_optimise.py` beside `_irls`/`_batching`, or `numerics/`); take a small generic config / kwargs; `VarCompSpec` stays in `lme/_varcomp.py`. |
-| **O3** | Low | open | `_betareg.py`/`_gaulss.py`/`_ordinal.py` | `_`-prefixed yet export public API (`beta_fit`/…), unlike peer public fitters `glm`/`gam`/`glmm`. | Rename to `betareg.py`/`gaulss.py`/`ordinal.py`, or document "secondary public fitters". |
+| **O1** | High | ✅ **done** | `stats/glmm/` package | 6-solver monolith (1573 LOC: few-level / structured slope / many-level Schur / Laplace / Laplace-slope / AGQ) behind one dispatcher; banners already mark the seams. | **FIXED:** split into a `glmm/` package by **method family** — `__init__.py` (the `glmm_fit` dispatcher), `_base.py` (`GLMMResult` + constants), `_pql.py` (all PQL: few / diagonal-slope / unstructured-slope / many), `_laplace.py` (scalar + slope), `_agq.py` (borrows the mode-finder from `_laplace`). Pure relocation (byte-identical bodies, no cycle); new files made format-clean. |
+| **O2** | High | ✅ **done** | `stats/_optimise.py` (moved) | The "one shared Newton" was housed *inside* `lme/` yet driven by `_ordinal` (non-mixed-model), and typed on `VarCompSpec` though it reads only primitive fields — forcing `_ordinal` to build a variance-components spec it had no use for. (Only `_ordinal` actually used it; `_betareg`/`_gaulss` have their own IRLS.) | **FIXED:** `damped_newton` moved to `stats/_optimise.py` (beside `_irls`/`_batching`), now taking primitive kwargs (`n_iter`/`damping`/`max_step`/`n_backtrack`) — no `VarCompSpec`. Mixed-model sites pass `**spec.newton_kwargs` (a new `VarCompSpec` property); `_ordinal` drops `VarCompSpec` entirely and passes `n_iter`/`ridge` directly (its `ridge` now also floors the information solve, as its docstring already claimed — default `1e-8` bit-preserved). |
+| **O3** | Low | ✅ **done** | `betareg.py`/`gaulss.py`/`ordinal.py` | `_`-prefixed yet export public API (`beta_fit`/…), unlike peer public fitters `glm`/`gam`/`glmm`. | **FIXED (rename):** `git mv` to `betareg.py`/`gaulss.py`/`ordinal.py` (history preserved); the 3 imports in `stats/__init__.py` updated. `nitrix.stats.{betareg,gaulss,ordinal}` are now public module paths, matching `glm`/`gam`/`glmm`. Tests import from the public `nitrix.stats` namespace, so unaffected. |
 | **O4** | Low | open | `tests/test_stats.py` | `covariance`/`pca`/`gaussian`/`_irls` fold into `test_stats.py` (no 1:1 test file) while newer fitters are 1:1. | Split `test_stats.py` as those grow. |
 
 ## Performance / hardware
@@ -91,7 +91,8 @@ immune.
 | **P3** | Med | ✅ **done** | `stats/glmm.py` AGQ | `K = n_quad**r` tensor nodes differentiated through the mode scan — explodes at r≥3. | **FIXED:** `_AGQ_MAX_NODES = 128` cap in the dispatch raises a clear `ValueError` (admits r=2 n_quad≤11, r=3 n_quad≤5; blocks r≥4 / large r=3) pointing to a smaller `n_quad` or Laplace. |
 | **P4** | Med | open | `stats/glmm.py` Laplace/Laplace-slope/AGQ | All three marginal GLMM fits take the autodiff-Hessian-through-mode-scan fork. See the **#36** FR (`glmm-random-slope-robust-solver.md`): the clean fix is implicit-diff of the mode (`custom_vjp`/IFT); deferred on ROI (cold-compile, amortised). | Tracked separately (#36). AGQ would benefit identically. |
 | **P5** | Low | open | `gam.py` `_smooth_penalties` (~195) | Data-independent penalty eigendecomp (`eigh` of `k×k`) recomputed every `gam_fit` call — wasteful across CV/λ loops. | Cache `penalty_eigs` in the `SplineBasis` container at construction. |
-| **P6** | Low | ✅ **done** | `linalg/_smalllinalg.py` `_PIVOT_REL_FLOOR=1e-12` (~62); `covariance.py:134` | Pivot floor / `ridge=1e-8` defaults sit below fp32 eps (~1.2e-7) → inert in fp32 on the squared-condition (X^T X) Cholesky; `covariance.py:134` hard-codes `float32`. Suite quietly assumes x64. (engineering + hardware) | **FIXED:** `_pivot_rel_floor(dtype) = 1e2·finfo(dtype).eps` (fp32 ~1.2e-5, fp64 ~2.2e-14) used in `spd_chol`/`small_inv_logdet` — now active in fp32 (regression test pins it), fp64 bit-unchanged vs numpy; `_denom_factor` takes the data `dtype` (no more hard-coded `float32`); module docstring documents the x64 expectation for squared-condition designs. |
+| **P7** | High value | ✅ **done** | `stats/glmm.py` `glmm_fit`; `stats/basis.py` `re_smooth` | **`glmm_fit` was not `jax.jit`-traceable** — derived the level count as a concrete Python int from the data, so under `jit` it raised `ConcretizationTypeError`. Consumers couldn't fuse a pipeline containing it; perf-bench couldn't benchmark the flagship. Surfaced by **perf-bench**. See [`glmm-fit-jit-incompatible-static-group-count.md`](glmm-fit-jit-incompatible-static-group-count.md). | **FIXED:** optional static `n_groups: Optional[int] = None` (`None` → byte-identical eager `int(jnp.max(group))+1`; supplied → jit-traceable). The minimal `n_groups` change masked a 2nd blocker on the **few-level** path (`re_smooth` built its ridge as `jnp.eye(q)`, a tracer that `gam._smooth_penalties` `np.asarray`'s) — fixed by a host-constant `np.eye(q)`. All families × methods × intercept/slope now jit + match eager (acceptance + negative test). |
+| **P6** | Low | ✅ **done** | `linalg/_smalllinalg.py` `_PIVOT_REL_FLOOR=1e-12` (~62); `covariance.py:134` | Pivot floor / `ridge=1e-8` defaults sit below fp32 eps (~1.2e-7) → inert in fp32 on the squared-condition (X^T X) Cholesky; `covariance.py:134` hard-codes `float32`. Suite quietly assumes x64. (engineering + hardware) | **FIXED:** `_pivot_rel_floor(dtype) = 1e2·finfo(dtype).eps` (fp32 ~1.2e-5, fp64 ~2.2e-14) used in `spd_chol`/`small_inv_logdet` — now active in fp32 (regression test pins it), fp64 bit-unchanged vs numpy; `_denom_factor` takes the data `dtype` (no more hard-coded `float32`); module docstring documents the x64 expectation for squared-condition designs. **Follow-on:** `residual.py` carried a verbatim copy of the rolled Cholesky (`_chol_lower`) with the same inert `1e-12` floor — deleted; `_solve_cholesky` now reuses `spd_chol` (dtype-aware floor, drift removed). |
 
 ## Mathematical correctness — test-gaps & doc (no bugs; all Low)
 
@@ -99,11 +100,11 @@ immune.
 |----|-----|--------|----------|-------|----------------|
 | **M1** | Med | ✅ **done** (doc) | `glmm.py` Laplace/AGQ (`edf_total=float(p)`, `dispersion=1`) | Stubs: `edf_total` fixed-effect-only, `dispersion=1` wrong for a Gaussian Laplace fit. (engineering + math) | **DOCUMENTED:** `GLMMResult` now states `dispersion`/`edf_total` are placeholders for the laplace/agq tiers (not for AIC), and that `deviance` *is* the comparable -2·marginal-loglik. (Computing the real marginal edf is left as a future enhancement.) |
 | **M2** | Med | ✅ **done** | `tests/test_lme.py` `_flame_hand_iter` | The independent hand-computed FLAME oracle is **defined but never asserted** (dead code); FLAME pinned only by recover-truth + self-consistency. | **FIXED:** wired into `test_flame_matches_hand_computed_reference` — per-voxel `assert_allclose` of `sigma_b_sq` *and* `gamma` against the oracle (verified rtol 1e-6; the two solvers agree to ~1e-10). |
-| **M3** | Low | open | `_blockwoodbury.py` `diagonal=True` | Uncorrelated `(x‖g)` diagonal-G slope has **no** dense oracle (only the unstructured case is checked vs `_dense_r2`). | Add a `diagonal=True` case to the dense-REML battery. |
-| **M4** | Low | open | `glmm.py` Laplace/AGQ | Fisher-curvature Laplace is only tested on logit/log (canonical, Fisher = observed Hessian); the non-canonical-link (probit/cloglog slope) path is unpinned. | Add a probit/cloglog slope test vs an independent quadrature. |
+| **M3** | Low | ✅ **done** | `_blockwoodbury.py` `diagonal=True` | Uncorrelated `(x‖g)` diagonal-G slope has **no** dense oracle (only the unstructured case is checked vs `_dense_r2`). | **FIXED:** `test_r2_diagonal_blockwoodbury_recovers_all_seeds` (8 seeds) pins the `structure='diagonal'` block-Woodbury fit against a dense 3-parameter diagonal-G profile-REML oracle (`_dense_r2_diagonal`). |
+| **M4** | Low | ✅ **done** | `glmm.py` Laplace/AGQ | Fisher-curvature Laplace is only tested on logit/log (canonical, Fisher = observed Hessian); the non-canonical-link (probit/cloglog slope) path is unpinned. | **FIXED:** `test_laplace_slope_noncanonical_link_marginal_matches_numpy` (probit + cloglog) pins `_laplace_slope_nll` against an independent numpy Fisher-scoring computation at arbitrary `theta` (rtol 1e-6) — discriminating, since for a non-canonical link Fisher ≠ observed Hessian (a formula-level pin, free of optimiser noise). |
 | **M5** | Low | ✅ **done** | `covariance.py` `partialcorr` | Off-diagonal not pinned to an external oracle (only `diag==1`). | Closed by **B1**'s `test_partialcorr_offdiagonal_matches_numpy`. |
-| **M6** | Low | open | `gam.py` λ-selection | Absolute λ / EDF never compared to mgcv (only inner fit, EDF, FS-identity, and λ-responds). | One mgcv-anchored λ/EDF regression per basis kind. |
-| **M7** | Low | open | `linalg/residual.py` JS docstring | "James-Stein dominates OLS in MSE for k≥3" overstates — it's a sound heuristic (plug-in σ²), not the strict theorem. | Soften the wording. |
+| **M6** | Low | ✅ **done** | `gam.py` λ-selection | Absolute λ / EDF never compared to mgcv (only inner fit, EDF, FS-identity, and λ-responds). | **FIXED:** mgcv 1.9.4 / R 4.5.3 EDF anchors (`test_gam_edf_matches_mgcv_exact` / `_comparable_to_mgcv`). P-spline + cubic-regression bases coincide with nitrix → per-smooth EDF matches mgcv's REML fit to ~1e-4 (a tight absolute pin on Fellner-Schall λ-selection); thin-plate / cyclic use nitrix's own construction → comparable within ~0.5 df (documented). Absolute λ differs by mgcv's penalty-scaling convention (not asserted — EDF is the invariant). |
+| **M7** | Low | ✅ **done** | `linalg/residual.py` JS docstring | "James-Stein dominates OLS in MSE for k≥3" overstates — it's a sound heuristic (plug-in σ²), not the strict theorem. | **FIXED:** both docstrings now frame it as the positive-part JS *heuristic* — a plug-in analogue of the known-variance ``k>=3`` dominance theorem, not the exact result. |
 
 ## Neuroimaging community gaps (capability, not defects)
 
@@ -124,20 +125,56 @@ immune.
 
 ## Suggested sequencing
 
-- **Now (verified bugs, isolated, ~10–20 lines each + a regression test):** **B1**
-  (`precision` cuSOLVER), **B2** (`spline_design` clamp), **B3** (`sandwich_cov`
-  label densify — share a `_densify_labels` helper).
-- **Quick win:** **P2** (default `low_rank=True` when `M ≪ N`).
-- **High-leverage:** ~~**P1**~~ (deferred — no measured impact), **D1** ✅ (shared
-  `register_result` + **D4** ✅ uniform `re_var` `(V,r,r)` — done together), **N1** ✅
-  (GAM smooth-significance).
+### Round 1 — ✅ complete (merged to `main`, merge `356c9d2`)
+
+The originally-actionable sequence, all shipped + validated green per-file (376
+stats+linalg tests, 0 failures):
+
+- **Bugs:** **B1** (`precision` cuSOLVER), **B2** (`spline_design` clamp), **B3**
+  (`sandwich_cov` label densify). **B4/C1** ("gappy labels bias REML") refuted.
+- **Quick win:** **P2** (auto `low_rank` when `q < N`).
+- **High-leverage:** ~~**P1**~~ (deferred — no measured impact), **D1** (shared
+  `register_result` pytree) **+ D4** (uniform `re_var` `(V,r,r)`), **N1** (GAM
+  smooth-significance, mgcv-validated).
 - **Polish:** **D5** (`resolve_family` export), **P3** (AGQ r≥3 guard), **M1**
-  (`edf_total`), **M2** (FLAME oracle), **P6** (dtype-aware pivot).
-- **Deferred / document:** **O1** (`glmm/` split), **N2** (surface nulls), **D3**
-  (F-contrasts on R2+), **P4** (= #36, separate FR).
+  (`edf_total` doc), **M2** (FLAME oracle wired), **P6** (dtype-aware pivot floor).
+
+### Round 2 — remaining (this register), four waves by readiness
+
+Effort **S** ≈ <½ day · **M** ≈ ½–1 day · **L** ≈ multi-day. ⚖️ = needs a design
+decision (bring a proposal before coding).
+
+- **Wave 1 — ✅ complete** (quick high-value + harden what shipped):
+  **P7** ✅ (static `n_groups` + host-constant RE penalty → `glmm_fit`
+  jit-traceable on every path), **M7** ✅ (JS docstring softened + residual
+  Cholesky dedup), **M3** ✅ (diagonal-G dense oracle), **M4** ✅ (probit/cloglog
+  Laplace-curvature pin), **M6** ✅ (mgcv EDF anchor per basis kind), **D9** ✅
+  (dropped `VarCompSpec.reml`; intercept-policy + `low_rank` R1-only docs;
+  `n_iter` rename deferred as cosmetic).
+- **Wave 2 — ✅ complete** (code organisation, mechanical, behaviour-preserving):
+  **O2** ✅ (`damped_newton` → `stats/_optimise.py`, decoupled from `VarCompSpec`),
+  **D7** ✅ (RE-cov helpers → `lme/_recov.py`),
+  **O1** ✅ (`glmm.py` → `glmm/` package),
+  **O3** ✅ (renamed `_betareg`/`_gaulss`/`_ordinal` → public module paths).
+- **Wave 3 — design contracts (decisions; complete the inference surface):**
+  **D2** ⚖️ (M, uniform lme `.cov_re (V,k,k)` + `.re_labels` — nested/crossed as
+  block-diagonal), **D3** ⚖️ (M–L, F/t-contrasts on R2/R3/R4/+corr),
+  **D6** (M, `Literal` dispatch taxonomies incl. `tier`),
+  **D8** (M, `SmoothBasis` `Protocol` over the `isinstance` chain).
+- **Wave 4 — neuroimaging capabilities (features; largest):**
+  **N5** (S, `confidence_interval` + standardized-effect helper),
+  **N2** (L, mesh/graph TFCE adjacency + spin test — surface/dMRI unlock),
+  **N4** (M, FLAME outlier-deweighting / FLAME1),
+  **N3/N6** ⚖️ (S–M, document the permutation-only / `-e`-not-`-g` stance *or*
+  implement), **N7** (S, conjunction/design conveniences — partly downstream).
+- **Deferred (tracked, not in waves):** **P4** (implicit-diff mode — separate FR
+  #36), **P5** (cache `penalty_eigs`).
 
 ## Cross-references
 
+- `docs/feature-requests/glmm-fit-jit-incompatible-static-group-count.md` — the
+  perf-bench-surfaced **P7** item (optional static `n_groups` for jit-traceable
+  `glmm_fit`).
 - `docs/feature-requests/glmm-random-slope-robust-solver.md` — the #36 analytic-
   Laplace-gradient / autodiff-through-scan item (overlaps **P3**/**P4**).
 - `docs/feature-requests/stats-modelling-suite-v3.md` — the v3 ledger this suite

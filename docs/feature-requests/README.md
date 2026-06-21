@@ -110,6 +110,25 @@ items, each with a stable ID and Status column. Records the **empirical
 refutation of the one Critical claim** (C1 "gappy labels bias REML" — bit-identical
 fits; exact log|V| cancellation) so it is not re-raised.
 
+**GP / HGP models (proposed, 2026-06-20, rev. HSGP-primary):**
+[`gaussian-process-models.md`](gaussian-process-models.md) — Gaussian-process
+regression as a first-class family (`nitrix.stats.gp`) and its **hierarchical**
+(multi-level, mixed-model sense) extension. Substrate is ~70 % shipped: a 1-D
+reduced-rank kriging GP *smooth* (`gp_basis` + the generic Fellner–Schall loop)
+fits today, `reml_fit`'s FaST-LMM is a fixed-kernel GP in disguise (`K`↔`ZZᵀ`),
+and the cuSOLVER-free Cholesky+log-det / correlated-residual (`gls_fit corr=`)
+prims exist. **Primary engine: the Hilbert-space approximate GP (HSGP)** — a
+fixed Laplace-eigenfunction basis where the lengthscale enters only as a
+diagonal spectral reweighting, so `ρ`-estimation stays `eigh`-free and inside
+the suite's fast paths (it *dissolves* the kriging eigenbasis crux rather than
+working around it), handles multi-D / ARD natively, and composes with AR1/CAR1
+residuals for joint trend + autocorrelation fits. Net-new: the HSGP basis +
+kernel spectral densities, and the `gp_fit`/`GPResult` + HGP factor-smooth
+wrappers (Tier 3 composes the v3 §2/§3.1 GAMM surface). Blast radius on existing
+code ≈ nil (additive); ~3–4 weeks to full (a)-scope. Full-Bayes priors on `ρ` /
+the HBR / normative-modelling flavour (b) — the `brms`/`mvgam` territory — are
+deferred to a separate proposal.
+
 ## Internal engineering backlog
 
 Ledger (framing, closed-by-design, resolved):

@@ -369,3 +369,99 @@ def test_glmm_method_validation():
             jnp.asarray(y[None, :]), jnp.asarray(X), group=jnp.asarray(group),
             method='bogus',
         )
+
+
+# ---------------------------------------------------------------------------
+# P7: glmm_fit is jax.jit-traceable when the static level count is supplied
+# ---------------------------------------------------------------------------
+
+
+def _sim_family(family, *, seed, q, n_per):
+    """Tiny GLMM dataset for a family; returns jax (X, z, group, Y, q)."""
+    rng = np.random.default_rng(seed)
+    group = np.repeat(np.arange(q), n_per).astype(np.int32)
+    n = q * n_per
+    X = np.c_[np.ones(n), rng.standard_normal(n)]
+    z = np.c_[np.ones(n), rng.standard_normal(n)]
+    b = rng.standard_normal(q) * 0.3
+    eta = X @ np.array([0.3, 0.5]) + b[group]
+    if family == 'gaussian':
+        y = eta + rng.standard_normal(n) * 0.5
+    elif family == 'poisson':
+        y = rng.poisson(np.exp(np.clip(eta, None, 3.0))).astype(float)
+    else:  # binomial
+        y = (rng.uniform(size=n) < 1.0 / (1.0 + np.exp(-eta))).astype(float)
+    return (
+        jnp.asarray(X),
+        jnp.asarray(z),
+        jnp.asarray(group),
+        jnp.asarray(np.tile(y, (2, 1))),  # V = 2
+        q,
+    )
+
+
+# (label, family, extra kwargs, needs-slope) -- every dispatch path; the
+# expensive marginal methods (laplace / agq) on one representative family each.
+_JIT_CASES = [
+    ('pql-few-intercept', 'gaussian', dict(few_level_max=64), False),
+    ('pql-few-intercept', 'binomial', dict(few_level_max=64), False),
+    ('pql-few-intercept', 'poisson', dict(few_level_max=64), False),
+    ('pql-many-intercept', 'poisson', dict(few_level_max=0), False),
+    ('pql-slope-diagonal', 'poisson', dict(structure='diagonal'), True),
+    ('pql-slope-unstruct', 'gaussian', dict(structure='unstructured'), True),
+    (
+        'laplace-intercept',
+        'binomial',
+        dict(method='laplace', n_outer=8, n_mode=8),
+        False,
+    ),
+    (
+        'laplace-slope',
+        'binomial',
+        dict(method='laplace', n_outer=8, n_mode=8),
+        True,
+    ),
+    (
+        'agq-slope',
+        'poisson',
+        dict(method='agq', n_quad=3, n_outer=8, n_mode=8),
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    'label,family,kw,slope',
+    _JIT_CASES,
+    ids=[f'{c[0]}-{c[1]}' for c in _JIT_CASES],
+)
+def test_glmm_fit_jit_traceable_with_static_n_groups(label, family, kw, slope):
+    """P7: with an explicit static ``n_groups`` glmm_fit traces under ``jax.jit``
+    for every family / method / structure (incl. the few-level ``gam_fit`` path,
+    once the RE penalty is a host constant), and the jitted result matches eager.
+    """
+    X, z, group, Y, q = _sim_family(family, seed=0, q=6, n_per=12)
+    kwargs = dict(family=family, **kw)
+    if slope:
+        kwargs['z'] = z
+
+    def call(y):
+        return glmm_fit(y, X, group=group, n_groups=q, **kwargs).beta_hat
+
+    eager = np.asarray(call(Y))
+    jitted = np.asarray(jax.jit(call)(Y))  # must trace (no ConcretizationError)
+    np.testing.assert_allclose(jitted, eager, rtol=1e-5, atol=1e-6)
+
+
+def test_glmm_fit_without_n_groups_not_jit_traceable():
+    """Without ``n_groups`` the level count is derived from the data
+    (``int(jnp.max(group))``), which concretises a tracer -- so glmm_fit is not
+    jit-traceable.  Eager still works; this pins the documented contract."""
+    X, _z, group, Y, _q = _sim_family('poisson', seed=1, q=5, n_per=10)
+
+    def call(y):
+        return glmm_fit(y, X, group=group, family='poisson').beta_hat
+
+    assert np.all(np.isfinite(np.asarray(call(Y))))  # eager path is fine
+    with pytest.raises(jax.errors.ConcretizationTypeError):
+        jax.jit(call)(Y)

@@ -36,10 +36,11 @@ from jaxtyping import Array, Bool, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet
 from .._batching import blocked_vmap
+from .._optimise import damped_newton
 from .._result import register_result
-from ._blockwoodbury import _nll_and_beta, _param_layout, cov_re_from_chol
+from ._blockwoodbury import _nll_and_beta
 from ._corr import CorrSpec, resolve_corr
-from ._optimise import damped_newton
+from ._recov import _param_layout, cov_re_from_chol
 from ._varcomp import VarCompSpec
 from ._varfunc import VarFunc, _apply_var_scale
 
@@ -252,7 +253,7 @@ def _fit_one(
         rss = jnp.clip(yty - beta @ xty, 1e-30, None)
         return dof * jnp.log(rss) + 2.0 * half_logdet + logdet_xtx
 
-    raw = damped_newton(neg2_reml, raw0, spec=spec)
+    raw = damped_newton(neg2_reml, raw0, **spec.newton_kwargs)
 
     xtx, xty, yty, half_logdet = _whitened_grams(
         raw, y_pad, x_pad, layout, corr, varfunc, cov_pad, n_corr
@@ -319,7 +320,7 @@ def fit_corr_gls(
             [corr.init_raw(X.dtype), weights.init_raw(X.dtype)]
         )
     )
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    spec = VarCompSpec(n_iter=n_iter, damping=damping)
 
     def per_voxel(
         y: Float[Array, 'N'],
@@ -545,7 +546,7 @@ def _fit_one_corr_lme(
         )
         return base + half_logdet
 
-    theta = damped_newton(nll, theta_init, spec=spec)
+    theta = damped_newton(nll, theta_init, **spec.newton_kwargs)
     gse, raw = split(theta)
     ztz, xtz, xtx, zty, xty, yty, half_logdet = _corr_lme_grams(
         raw, x_pad, z_pad, y_pad, layout, corr, p, r
@@ -610,7 +611,7 @@ def fit_corr_lme(
         corr.init_raw(X.dtype)[None, :], (Y.shape[0], corr.n_params)
     )
     theta_init = jnp.concatenate([chol, log_se2, raw0], axis=1)  # (V, nt)
-    spec = VarCompSpec.reml(n_iter=n_iter, damping=damping)
+    spec = VarCompSpec(n_iter=n_iter, damping=damping)
 
     def per_voxel(
         y: Float[Array, 'N'], th: Float[Array, 'nt']

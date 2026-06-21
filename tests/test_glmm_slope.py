@@ -363,6 +363,107 @@ def test_laplace_slope_beats_pql_attenuation():
     assert abs(slope_var_lap - 0.6) < abs(slope_var_pql - 0.6)
 
 
+def _numpy_laplace_slope_nll(theta, y, X, z, group, q, r, link, n_mode):
+    """Independent numpy evaluation of ``glmm._laplace_slope_nll`` for a binomial
+    *non-canonical* link -- a Fisher-scoring mode + Fisher-curvature determinant
+    term, the same approximation ``glmm.py`` makes (NOT the observed-Hessian
+    Laplace), so it pins the link generalisation rather than re-deriving a
+    different estimator."""
+    from scipy.special import xlogy
+    from scipy.stats import norm
+
+    eps = 1e-10
+    p = X.shape[1]
+    beta = theta[:p]
+    chol = theta[p:]
+    tril = [(i, j) for i in range(r) for j in range(i + 1)]
+    L = np.zeros((r, r))
+    for k, (i, j) in enumerate(tril):
+        L[i, j] = np.exp(chol[k]) if i == j else chol[k]
+    G = L @ L.T
+    Ginv = np.linalg.inv(G)
+    _, logdetG = np.linalg.slogdet(G)
+
+    def inv_link(eta):
+        if link == 'probit':
+            return norm.cdf(eta), norm.pdf(eta)
+        ex = np.exp(eta)  # cloglog: mu = 1 - exp(-exp(eta))
+        return -np.expm1(-ex), ex * np.exp(-ex)
+
+    etaf = X @ beta
+    b = np.zeros((q, r))
+    for _ in range(n_mode):
+        eta = etaf + np.einsum('nr,nr->n', z, b[group])
+        mu, dmu = inv_link(eta)
+        var = np.clip(mu * (1.0 - mu), eps, None)
+        w = dmu * dmu / var
+        score = (y - mu) * dmu / var
+        for g in range(q):
+            m = group == g
+            grad = z[m].T @ score[m] - Ginv @ b[g]
+            H = z[m].T @ (w[m, None] * z[m]) + Ginv
+            b[g] = b[g] + np.linalg.solve(H, grad)
+    eta = etaf + np.einsum('nr,nr->n', z, b[group])
+    mu, dmu = inv_link(eta)
+    var = np.clip(mu * (1.0 - mu), eps, None)
+    w = dmu * dmu / var
+    mc = np.clip(mu, eps, 1.0 - eps)
+    out = 0.0
+    for g in range(q):
+        m = group == g
+        ll = np.sum(xlogy(y[m], mc[m]) + xlogy(1.0 - y[m], 1.0 - mc[m]))
+        H = z[m].T @ (w[m, None] * z[m]) + Ginv
+        _, logdetH = np.linalg.slogdet(H)
+        out -= ll - 0.5 * b[g] @ Ginv @ b[g] - 0.5 * logdetG - 0.5 * logdetH
+    return out
+
+
+@pytest.mark.parametrize('link', ['probit', 'cloglog'])
+def test_laplace_slope_noncanonical_link_marginal_matches_numpy(link):
+    """M4: the Laplace-marginal NLL for a non-canonical-link (probit / cloglog)
+    random slope matches an independent numpy Fisher-scoring computation at
+    arbitrary ``theta``.  The canonical (logit / log) tests cannot distinguish the
+    Fisher-scoring Laplace ``glmm.py`` uses from the observed-Hessian Laplace
+    (the two coincide there); a non-canonical link is where the choice bites, so
+    this pins the determinant-correction curvature on that path."""
+    from scipy.stats import norm
+
+    from nitrix.stats import BINOMIAL
+    from nitrix.stats.glmm._laplace import _laplace_slope_nll
+
+    rng = np.random.default_rng(3)
+    q, n_per, r, n_mode = 20, 10, 2, 25
+    group = np.repeat(np.arange(q), n_per).astype(np.int32)
+    n = q * n_per
+    x = rng.standard_normal(n)
+    X = np.c_[np.ones(n), x]
+    zc = np.c_[np.ones(n), x]
+    G = np.array([[0.5, 0.15], [0.15, 0.4]])
+    b = rng.standard_normal((q, r)) @ np.linalg.cholesky(G).T
+    # Keep eta moderate so cloglog's exp(exp(eta)) stays well in range.
+    eta = X @ np.array([0.0, 0.4]) + np.einsum('nr,nr->n', zc, b[group])
+    mu = norm.cdf(eta) if link == 'probit' else -np.expm1(-np.exp(eta))
+    y = (rng.uniform(size=n) < mu).astype(float)
+
+    fam = BINOMIAL.with_link(link)
+    Xj, zj, gj, yj = (
+        jnp.asarray(X), jnp.asarray(zc), jnp.asarray(group), jnp.asarray(y)
+    )
+    # A few thetas: beta = [b0, b1], chol = lower-tri (diag log) of G's factor.
+    for theta in (
+        np.array([0.0, 0.4, np.log(0.6), 0.1, np.log(0.5)]),
+        np.array([0.2, 0.5, np.log(0.4), -0.2, np.log(0.7)]),
+        np.array([-0.1, 0.3, np.log(0.8), 0.05, np.log(0.3)]),
+    ):
+        ref = _numpy_laplace_slope_nll(theta, y, X, zc, group, q, r, link, n_mode)
+        got = float(
+            _laplace_slope_nll(
+                jnp.asarray(theta), yj, Xj, zj, gj, q, fam, 2, r, n_mode, False
+            )
+        )
+        np.testing.assert_allclose(got, ref, rtol=1e-6, atol=1e-6)
+
+
 def test_laplace_slope_shapes_and_diagonal():
     G = np.diag([0.4, 0.3])
     X, z, group, y, _ = _sim_slope('poisson', seed=2, q=12, n_per=12, G=G)

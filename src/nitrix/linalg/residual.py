@@ -12,7 +12,7 @@ explained by confounds).
 Two solver paths, both differentiable:
 
 - ``method="cholesky"`` (**default**): normal-equations OLS via a
-  **cuSOLVER-free** rolled Cholesky (``_chol_lower``) + cuBLAS triangular
+  **cuSOLVER-free** rolled Cholesky (``_smalllinalg.spd_chol``) + cuBLAS triangular
   solves, so it runs on the cuSOLVER-affected GPU stacks (where
   ``jnp.linalg.cholesky`` / ``svd`` fail to create a handle).  Tall-and-skinny
   optimised -- for ``X: (obs, k)`` with ``obs >> k`` (typical fMRI: 400 TRs ×
@@ -64,8 +64,9 @@ from typing import Any, Callable, Literal, Optional, cast
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsla
-from jax import lax
 from jaxtyping import Array, Float, Num
+
+from ._smalllinalg import spd_chol
 
 __all__ = ['residualise', 'partial_residualise']
 
@@ -92,9 +93,12 @@ def _james_stein_shrink(
     ``n - k`` d.o.f.); ``k`` is the number of nuisance regressors.  When the
     confounds explain a channel only weakly (small ``||proj||`` relative to the
     noise) the removal is shrunk toward zero, so a high-dimensional / collinear
-    confound set does not strip real signal variance it merely captured by chance
-    -- the James-Stein estimator dominates the raw OLS removal in MSE for ``k >=
-    3``.  For ``k <= 2`` the factor is ``>= 1`` and clamps to ``1`` (no
+    confound set does not strip real signal variance it merely captured by chance.
+    This is the positive-part James-Stein *heuristic*: the strict dominance
+    theorem (lower total MSE for ``k >= 3``) holds for the canonical
+    known-variance Gaussian-mean problem; here it is a sound plug-in analogue
+    (estimated per-channel ``sigma^2``, applied to the projection), not that exact
+    result.  For ``k <= 2`` the factor is ``>= 1`` and clamps to ``1`` (no
     shrinkage); the per-channel ``c`` is likewise clamped to ``[0, 1]``.
     """
     n = resid.shape[-2]
@@ -104,46 +108,6 @@ def _james_stein_shrink(
     c = 1.0 - (k - 2.0) * sigma2 / jnp.clip(proj_ss, _JS_EPS, None)
     c = jnp.clip(c, 0.0, 1.0)
     return c[..., None, :] * proj
-
-# Modified-Cholesky pivot floor (relative to the Gram's diagonal scale): a
-# well-conditioned solve is unperturbed, while a degenerate pivot stays positive
-# (finite, regularised) instead of producing sqrt(negative) = NaN.
-_PIVOT_REL_FLOOR = 1e-12
-
-
-def _chol_lower(A: Float[Array, 'k k']) -> Float[Array, 'k k']:
-    """Lower-triangular Cholesky factor ``L`` (``A = L L^T``) of an SPD ``A``
-    via a rolled, cuSOLVER-free factorization.
-
-    Mirrors ``linalg._smalllinalg.spd_inv_logdet_chol``: ``jnp.linalg.cholesky``
-    issues a ``potrf`` custom-call that fails on the broken-cuSOLVER L4, so we
-    factor column-by-column with a ``lax.fori_loop`` (rolled, ``O(k^2)`` graph)
-    using only elementwise algebra -- no cuSOLVER routine, fully differentiable.
-    The modified-Cholesky pivot floor keeps a rank-deficient Gram finite (a
-    regularised factor) rather than NaN.
-    """
-    k = A.shape[-1]
-    idx = jnp.arange(k)
-    floor = (
-        _PIVOT_REL_FLOOR * jnp.max(jnp.diagonal(A)) + jnp.finfo(A.dtype).tiny
-    )
-
-    def body(j: Array, L: Float[Array, 'k k']) -> Float[Array, 'k k']:
-        Lj = lax.dynamic_index_in_dim(L, j, axis=0, keepdims=False)  # (k,)
-        s = L @ Lj  # s_i = sum_{l<j} L[i,l] L[j,l]
-        diag = jnp.sqrt(jnp.maximum(A[j, j] - s[j], floor))
-        col = (A[:, j] - s) / diag
-        new_col = jnp.where(idx == j, diag, jnp.where(idx > j, col, 0.0))
-        return cast(
-            Float[Array, 'k k'],
-            lax.dynamic_update_index_in_dim(L, new_col, j, axis=1),
-        )
-
-    return cast(
-        Float[Array, 'k k'],
-        lax.fori_loop(0, k, body, jnp.zeros((k, k), A.dtype)),
-    )
-
 
 def _solve_cholesky(
     X: Float[Array, 'n k'],
@@ -166,7 +130,7 @@ def _solve_cholesky(
     if l2 > 0.0:
         XtX = XtX + l2 * jnp.eye(k, dtype=X.dtype)
     XtY = X.T @ Y
-    L = _chol_lower(XtX)
+    L = spd_chol(XtX, k)
     z = jsla.solve_triangular(L, XtY, lower=True)
     return jsla.solve_triangular(L.T, z, lower=False)
 
@@ -286,8 +250,9 @@ def residualise(
         subtracted, so confounds that explain a channel only
         weakly remove correspondingly less -- protecting real
         signal variance a high-dimensional / collinear confound
-        set would otherwise strip.  Dominates the OLS removal in
-        MSE for ``k >= 3`` regressors; a no-op for ``k <= 2``.
+        set would otherwise strip.  A James-Stein shrinkage
+        heuristic (a plug-in analogue of the ``k >= 3`` dominance
+        result, not the strict theorem); a no-op for ``k <= 2``.
         Composes with ``l2`` (shrinks whatever ridge / OLS
         projection was fit).  Note the residual is then no longer
         exactly orthogonal to ``X`` -- the intended bias-variance

@@ -1,11 +1,22 @@
 # `glmm_fit` is not `jax.jit`-traceable — data-dependent `int(jnp.max(group))` — `nitrix.stats.glmm`
 
-> **Status (2026-06-20): OPEN.** Confirmed present on every ref as of today —
-> `main` / `origin/main` (`glmm.py:1486`) and the strictly-ahead audit branch
-> `docs/stats-suite-audit` HEAD `caa4ada` (`glmm.py:1500`). No `n_groups`
-> parameter on the `glmm_fit` signature on any ref (`def glmm_fit` main:1362 /
-> HEAD:1376). Surfaced by **perf-bench**: the GLMM flagship case cannot be
-> measured because the runner times every `jax` baseline under `jax.jit`.
+> **Status (2026-06-20): ✅ SHIPPED** (branch `feat/stats-audit-round2`, audit
+> item **P7**). `glmm_fit` now takes an optional static `n_groups: Optional[int]
+> = None`; supplied, it traces under `jax.jit` for **all** families × methods ×
+> intercept/slope (acceptance test
+> `test_glmm_fit_jit_traceable_with_static_n_groups`, jitted == eager), and a
+> negative test pins that omitting it still raises `ConcretizationTypeError`.
+>
+> **Note — the minimal fix was necessary but not sufficient.** The `n_groups`
+> concretization short-circuited first, masking a *second* blocker on the
+> **few-level** (`gam_fit` / `re_smooth`) path: `re_smooth` built its identity
+> ridge as `jnp.eye(q)`, a *tracer* under `jit`, and `gam.py`'s
+> `_smooth_penalties` `np.asarray`'s every penalty at trace time
+> (`TracerArrayConversionError`). Fixed by building the RE penalty as a host
+> constant `np.eye(q)` — consistent with the spline difference-penalties, which
+> are already host constants (the penalty depends only on the static level count,
+> not on group *values*). The many / slope / laplace / agq paths needed only the
+> `n_groups` change. *Original FR (now implemented) follows.*
 
 **What.** `glmm_fit` cannot be traced inside `jax.jit`. The very first thing it
 does after validation is derive the level count as a **concrete Python int**

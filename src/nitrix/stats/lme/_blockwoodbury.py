@@ -50,62 +50,11 @@ from jaxtyping import Array, Float, Int
 
 from ...linalg._smalllinalg import small_inv_logdet as _small_inv_logdet
 from .._batching import blocked_vmap as _blocked_vmap
-from ._optimise import damped_newton
+from .._optimise import damped_newton
+from ._recov import _build_chol
 from ._varcomp import VarCompSpec
 
 __all__ = ['fit_blockwoodbury_reml', 'group_grams']
-
-
-def _tril_layout(r: int) -> Tuple[Tuple[int, int], ...]:
-    """Row-major lower-triangular ``(i, j)`` index pairs of an ``r x r`` factor."""
-    return tuple((i, j) for i in range(r) for j in range(i + 1))
-
-
-def _param_layout(
-    r: int, diagonal: bool = False
-) -> Tuple[Tuple[int, int], ...]:
-    """Free ``(i, j)`` positions of the Cholesky factor for ``G``.
-
-    ``diagonal=False`` -- the full lower triangle (``r(r+1)/2`` params): an
-    **unstructured** ``r x r`` within-group covariance ``(1 + x | g)``.
-    ``diagonal=True`` -- only the diagonal (``r`` params): an **independent**
-    (diagonal-``G``) random effect ``(x || g)``, where intercept and slope share
-    no covariance.  Both are tier-R2 (one grouping factor, block-diagonal ``V``).
-    """
-    if diagonal:
-        return tuple((i, i) for i in range(r))
-    return _tril_layout(r)
-
-
-def _build_chol(
-    chol_params: Float[Array, 'm'], r: int, diagonal: bool = False
-) -> Float[Array, 'r r']:
-    """Lower-triangular Cholesky factor ``L`` from its free parameters.
-
-    Diagonal entries are exponentiated (positive), off-diagonal entries are
-    free -- so ``G = L L^T`` is positive-definite for any real ``chol_params``.
-    The loop is over the static layout (unrolled; ``r`` is tiny): the full lower
-    triangle (``diagonal=False``) or just the diagonal (``diagonal=True`` -> a
-    diagonal ``G``, i.e. an uncorrelated ``(x || g)`` random effect).
-    """
-    L = jnp.zeros((r, r), dtype=chol_params.dtype)
-    for k, (i, j) in enumerate(_param_layout(r, diagonal)):
-        val = jnp.exp(chol_params[k]) if i == j else chol_params[k]
-        L = L.at[i, j].set(val)
-    return L
-
-
-def cov_re_from_chol(
-    chol_params: Float[Array, 'm'], r: int, diagonal: bool = False
-) -> Float[Array, 'r r']:
-    """Random-effect covariance ``G = L L^T`` from the free Cholesky parameters.
-
-    The single source of truth shared by the R2 (``reml.lme_fit``) and R2+corr
-    (``_corrfit.fit_corr_lme``) result assembly -- both previously inlined
-    ``_build_chol(th) @ _build_chol(th).T`` (recomputing ``L`` twice).
-    """
-    L = _build_chol(chol_params, r, diagonal)
-    return L @ L.T
 
 
 def bw_score_and_ai(
@@ -388,7 +337,11 @@ def _fit_one(
         )
 
     theta = damped_newton(
-        nll, theta_init, spec=spec, curvature=curvature, step='damped'
+        nll,
+        theta_init,
+        **spec.newton_kwargs,
+        curvature=curvature,
+        step='damped',
     )
     final_nll, beta = _nll_and_beta(
         theta,

@@ -251,7 +251,8 @@ def glm_fit(
     Y
         ``(V, N)`` responses -- ``V`` elements, ``N`` observations.
     X
-        ``(N, p)`` design, shared across elements.
+        ``(N, p)`` design, shared across elements (include your own intercept
+        column -- no intercept is added).
     family
         Exponential family + link: a built-in name (``'gaussian'`` /
         ``'binomial'`` / ``'poisson'``) or a ``Family`` instance.  Default
