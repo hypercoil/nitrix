@@ -151,6 +151,17 @@ the `basis` bullet in the module docstring.
 Reference libs confirmed present in the shared venv: numpy 2.4, scipy 1.17,
 scikit-learn 1.9 (`gaussian_process`), jax 0.10.
 
+**R parity (env surveyed 2026-06-21).** R 4.5.3 + `mgcv` / `nlme` at
+`/scratch/nperf/renv/bin/Rscript` (**no `brms` / Stan**). mgcv
+`s(x, bs="gp", m=c(3, rho))` is Matérn-3/2 kriging — the *same construction* as
+`gp_basis` — so it anchors the **kriging parity basis exactly**; for the HSGP
+basis it is only a *secondary* cross-check (different basis, same Matérn-GP
+target, ~1e-2 on smooth data). The ideal HSGP-to-HSGP anchor (`brms::gp()`,
+itself HSGP) needs Stan and is unavailable; the sklearn exact-GP anchor (above)
+is the stronger HSGP correctness reference regardless. R tests guard on
+`Rscript` availability (skip when absent). Placement: mgcv↔`gp_basis` parity is a
+quick win; the mgcv↔`gp_fit` REML-range cross-check is natural in PR2.
+
 ## 5. PR2 design sketch — `stats/gp.py` (no implementation yet)
 
 ```python
