@@ -54,7 +54,7 @@ from .._optimise import damped_newton
 from ._recov import _build_chol
 from ._varcomp import VarCompSpec
 
-__all__ = ['fit_blockwoodbury_reml', 'group_grams']
+__all__ = ['fit_blockwoodbury_reml', 'group_grams', 'bw_inference']
 
 
 def bw_score_and_ai(
@@ -199,6 +199,104 @@ def bw_score_and_ai(
         0.5 * se2 * se2 * (py_vinv_py - xpy2_tot @ a_inv @ xpy2_tot)
     )
     return score_v, ai
+
+
+def bw_inference(
+    theta: Float[Array, 'nt'],
+    ztz: Float[Array, 'M r r'],
+    xtz: Float[Array, 'M p r'],
+    xtx: Float[Array, 'p p'],
+    xtx_g: Float[Array, 'M p p'],
+    zty: Float[Array, 'M r'],
+    xty_g: Float[Array, 'M p'],
+    yty_g: Float[Array, 'M'],
+    nvec: Float[Array, 'M'],
+    r: int,
+    p: int,
+    ridge: float,
+    diagonal: bool,
+    damping: float,
+) -> Tuple[Float[Array, 'p p'], Float[Array, 'nt nt'], Float[Array, 'nt p p']]:
+    """Fixed-effect contrast inference at the converged ``theta`` (audit D3-R2).
+
+    The block-Woodbury analogue of ``_varcomp.varcomp_inference`` -- the three
+    contrast-independent tensors the Satterthwaite / Kenward-Roger denominator-df
+    machinery in ``lme_t_contrast`` / ``lme_f_contrast`` consumes:
+
+    - ``fixed_cov = (X^T V^{-1} X)^{-1}`` -- ``Cov(beta_hat)`` (the Woodbury
+      ``a_inv``).
+    - ``theta_cov = (AI + damping I)^{-1}`` -- ``Cov(theta_hat)``, from the same
+      average-information ``bw_score_and_ai`` already forms (so identical to the
+      curvature the fit converged on).
+    - ``grad_m[k] = M_k = X^T V^{-1} (dV/dtheta_k) V^{-1} X`` -- with
+      ``dV_g/dtheta_k = Z_g (dG/dtheta_k) Z_g^T`` for the ``G`` (Cholesky)
+      parameters, so ``M_k = sum_g C_g (dG/dtheta_k) C_g^T`` with ``C_g = X_g^T
+      V_g^{-1} Z_g``; and ``dV/d(log sigma_e^2) = sigma_e^2 I``, so the residual
+      coordinate is ``M_last = sigma_e^2 (X^T V^{-2} X)``.
+
+    Runs **once** per voxel after the fit (not in the Newton loop), so it
+    recomputes the per-group Woodbury pieces it needs rather than threading them
+    out of the hot path.
+    """
+    # theta_cov from the same average information the fit used.
+    _, ai = bw_score_and_ai(
+        theta,
+        ztz,
+        xtz,
+        xtx,
+        xtx_g,
+        zty,
+        xty_g,
+        yty_g,
+        nvec,
+        r,
+        p,
+        ridge,
+        diagonal,
+    )
+    nt = ai.shape[0]
+    theta_cov, _ = _small_inv_logdet(
+        ai + damping * jnp.eye(nt, dtype=ai.dtype), nt
+    )
+
+    # Woodbury pieces for fixed_cov + grad_m (matching bw_score_and_ai exactly).
+    se2 = jnp.exp(theta[-1])
+    chol = theta[:-1]
+    nt_g = chol.shape[0]
+    inv_se = 1.0 / se2
+    g_cov = _build_chol(chol, r, diagonal) @ _build_chol(chol, r, diagonal).T
+    g_inv, _ = _small_inv_logdet(g_cov, r)
+    d_g = jnp.moveaxis(
+        jax.jacfwd(
+            lambda cp: (
+                _build_chol(cp, r, diagonal) @ _build_chol(cp, r, diagonal).T
+            )
+        )(chol),
+        -1,
+        0,
+    )  # (nt_g, r, r)
+    k_mat = se2 * g_inv[None] + ztz
+    m_mat = jax.vmap(lambda a: _small_inv_logdet(a, r)[0])(k_mat)  # (M, r, r)
+    xz_m = jnp.einsum('gpr,grs->gps', xtz, m_mat)
+    a_mat = (xtx - jnp.einsum('gpr,gqr->pq', xz_m, xtz)) / se2
+    a_mat = a_mat + ridge * jnp.eye(p, dtype=a_mat.dtype)
+    a_inv, _ = _small_inv_logdet(a_mat, p)  # fixed_cov = (X^T V^-1 X)^-1
+    ms = jnp.einsum('grs,gst->grt', m_mat, ztz)  # M S
+    c_mat = inv_se * (xtz - jnp.einsum('gpr,grs->gps', xtz, ms))  # X^T V^-1 Z
+    xz_mxz = jnp.einsum('gpr,grs,gqs->gpq', xtz, m_mat, xtz)
+    msm = jnp.einsum('grs,gst->grt', ms, m_mat)
+    xz_msmxz = jnp.einsum('gpr,grs,gqs->gpq', xtz, msm, xtz)
+    xt_v2_x = jnp.sum(
+        inv_se * inv_se * (xtx_g - 2.0 * xz_mxz + xz_msmxz), axis=0
+    )  # X^T V^-2 X
+    grad_g = jnp.stack(
+        [
+            jnp.einsum('gpr,rs,gqs->pq', c_mat, d_g[k], c_mat)
+            for k in range(nt_g)
+        ]
+    )  # (nt_g, p, p)
+    grad_m = jnp.concatenate([grad_g, (se2 * xt_v2_x)[None]], axis=0)
+    return a_inv, theta_cov, grad_m
 
 
 def group_grams(
@@ -371,7 +469,8 @@ def fit_blockwoodbury_reml(
     spec: VarCompSpec = VarCompSpec(),
     block: int | None = None,
     diagonal: bool = False,
-) -> Tuple[Float[Array, 'V nt'], Float[Array, 'V p'], Float[Array, 'V']]:
+    inference: bool = False,
+) -> Tuple[Float[Array, 'V nt'], ...]:
     """Batched block-Woodbury REML over ``V`` voxels (single grouping factor).
 
     ``Z`` is the ``(N, r)`` per-observation random-covariate design (e.g.
@@ -382,6 +481,11 @@ def fit_blockwoodbury_reml(
     Returns ``(theta_hat, beta_hat, log_lik)``; recover ``G = L L^T`` from the
     Cholesky params (via ``_build_chol(..., diagonal)``) and ``sigma_e^2 =
     exp(theta[-1])``.
+
+    With ``inference=True`` also returns the per-voxel contrast tensors
+    ``(fixed_cov, theta_cov, grad_m)`` from :func:`bw_inference` (audit D3-R2),
+    so the result is the 6-tuple ``(theta_hat, beta_hat, log_lik, fixed_cov,
+    theta_cov, grad_m)``.
     """
     p = X.shape[-1]
     r = Z.shape[-1]
@@ -389,7 +493,7 @@ def fit_blockwoodbury_reml(
 
     def per_voxel(
         y: Float[Array, 'N'], th: Float[Array, 'nt']
-    ) -> Tuple[Float[Array, 'nt'], Float[Array, 'p'], Float[Array, '']]:
+    ) -> Tuple[Array, ...]:
         zty = jax.ops.segment_sum(
             Z * y[:, None], group, num_segments=n_groups
         )  # (M, r)
@@ -401,7 +505,7 @@ def fit_blockwoodbury_reml(
         )  # (M,)
         xty = jnp.sum(xty_g, axis=0)  # (p,)
         yty = jnp.sum(yty_g)
-        return _fit_one(
+        theta, beta, log_lik = _fit_one(
             zty,
             xty,
             yty,
@@ -419,8 +523,27 @@ def fit_blockwoodbury_reml(
             spec,
             diagonal,
         )
+        if not inference:
+            return theta, beta, log_lik
+        fixed_cov, theta_cov, grad_m = bw_inference(
+            theta,
+            ztz,
+            xtz,
+            xtx,
+            xtx_g,
+            zty,
+            xty_g,
+            yty_g,
+            nvec,
+            r,
+            p,
+            spec.ridge,
+            diagonal,
+            spec.damping,
+        )
+        return theta, beta, log_lik, fixed_cov, theta_cov, grad_m
 
     return cast(
-        Tuple[Float[Array, 'V nt'], Float[Array, 'V p'], Float[Array, 'V']],
+        Tuple[Float[Array, 'V nt'], ...],
         _blocked_vmap(per_voxel, (Y, theta_init), block=block),
     )

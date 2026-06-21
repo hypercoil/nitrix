@@ -400,6 +400,9 @@ def test_uniform_re_covariance_accessor_across_tiers():
         cov_re=jnp.broadcast_to(jnp.asarray(G), (V, 2, 2)),
         sigma_e_sq=jnp.ones(V),
         log_lik=jnp.zeros(V),
+        fixed_cov=jnp.zeros((V, 2, 2)),  # D3-R2 inference fields (unused here)
+        theta_cov=jnp.zeros((V, 4, 4)),
+        grad_m=jnp.zeros((V, 4, 2, 2)),
         tier='R2',
     )
     assert lme.cov_re.shape == (V, 2, 2) and len(lme.re_labels) == 2
