@@ -317,10 +317,11 @@ def _warp_jacobian(
 
     def jacobian(params: Array) -> Array:
         grid = grid_of(params)
+
         # ∂warp/∂grid: the exact interpolation derivative, one JVP per axis.
         def dwarp_axis(axis: int) -> Array:
-            tangent = jnp.zeros(grid.shape, dtype=grid.dtype).at[..., axis].set(
-                1.0
+            tangent = (
+                jnp.zeros(grid.shape, dtype=grid.dtype).at[..., axis].set(1.0)
             )
             return cast(Array, jax.jvp(warp_at, (grid,), (tangent,))[1])
 
@@ -347,6 +348,7 @@ def optimize_objective(
     iterations: int,
     cg_tol: float,
     jacobian_fn: Optional[Callable[[Array], Array]] = None,
+    convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array]:
     """Minimise an ``Objective`` over ``params``; return ``(params, history)``.
 
@@ -358,8 +360,20 @@ def optimize_objective(
     (optional) supplies the residual's ``M×P`` Jacobian in closed form for the
     least-squares path (the analytic warp Jacobian -- far fewer gathers than
     ``jax.jacfwd``); ``None`` falls back to ``jacfwd`` (the parity oracle).
+
+    ``convergence`` (opt-in) early-exits the least-squares loop once the windowed
+    cost slope flattens (the GN/LM ``early_stop``); ``None`` (default) runs the
+    fixed ``n_iters`` scan.  It is **rejected on the scalar/BFGS path** -- that
+    optimiser is monolithic (no single-step) and stops only on its own
+    gradient/line-search criterion, so an ANTs-style windowed early-exit is not
+    expressible there yet (use ``convergence=None`` for MI / CR forward).
     """
     use_lsq = objective.is_least_squares and optimizer in ('auto', 'lm', 'gn')
+    early_stop = (
+        (convergence.threshold, convergence.window)
+        if convergence is not None
+        else None
+    )
     if use_lsq:
         if optimizer == 'gn':
             res = gauss_newton(
@@ -368,6 +382,7 @@ def optimize_objective(
                 n_iters=iterations,
                 cg_tol=cg_tol,
                 jacobian_fn=jacobian_fn,
+                early_stop=early_stop,
             )
         else:
             res = levenberg_marquardt(
@@ -376,9 +391,16 @@ def optimize_objective(
                 n_iters=iterations,
                 cg_tol=cg_tol,
                 jacobian_fn=jacobian_fn,
+                early_stop=early_stop,
             )
         return res.params, res.cost_history
 
+    if convergence is not None:
+        raise ValueError(
+            'convergence (windowed early-exit) is not supported on the '
+            'scalar/BFGS forward path (non-least-squares metric: MI / '
+            'correlation-ratio); pass convergence=None.'
+        )
     init_cost = objective.cost(params)
     out = minimize(
         objective.cost, params, method='BFGS', options={'maxiter': iterations}
@@ -396,6 +418,7 @@ def register_core(
     space: CoordinateSpace,
     sampler: _Sampler,
     init_params: Float[Array, ' p'],
+    convergence: Optional[Convergence] = None,
 ) -> RegistrationResult:
     """Coarse-to-fine register ``moving`` against a precomputed reference.
 
@@ -470,6 +493,7 @@ def register_core(
             iterations=iters_per_level[level],
             cg_tol=spec.cg_tol,
             jacobian_fn=jac_fn,
+            convergence=convergence,
         )
         histories.append(hist)
         prev_fixed_shape = f_shape
@@ -540,4 +564,7 @@ def multi_resolution_register(
         space=space,
         sampler=sampler,
         init_params=params,
+        # Opt-in forward early-exit (least-squares only); 'auto'/None -> fixed
+        # scan.  Single-pair only -- volreg vmaps register_core and leaves it None.
+        convergence=resolve_convergence(spec.convergence, ic=False),
     )

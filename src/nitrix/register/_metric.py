@@ -44,8 +44,10 @@ through its own recipe.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import ClassVar, Optional, Protocol
+from typing import ClassVar, Optional, Protocol, cast
 
+import jax.numpy as jnp
+from jax import lax
 from jaxtyping import Array, Float
 
 from ..metrics import correlation_ratio, lncc, mutual_information, ssd
@@ -243,30 +245,43 @@ class CorrelationRatio:
         )
 
 
+def _pin_range(x: Float[Array, '*spatial']) -> tuple[float, float]:
+    """A stationary ``(lo, hi)`` from the full-res data, jit-safe.
+
+    A ``stop_gradient``-ed ``jnp.min``/``jnp.max`` (not ``float()``): under
+    ``jax.jit`` the images are tracers, so an eager ``float(tracer)`` cannot run
+    -- a traced reduction can.  ``stop_gradient`` keeps the bin edges *constant*
+    (the histogram-gradient assumes fixed edges).  Mirrors ``_svf._pin_range``
+    (kept local -- ``_svf`` imports ``_force`` which imports this module).
+    """
+    lo = lax.stop_gradient(jnp.min(x))
+    hi = lax.stop_gradient(jnp.max(x))
+    return cast('tuple[float, float]', (lo, hi))
+
+
 def pin_metric_ranges(
     metric: Metric,
     moving: Float[Array, '*spatial'],
     fixed: Float[Array, '*spatial'],
 ) -> Metric:
-    """Pin a histogram metric's intensity ranges eagerly from the full-res images.
+    """Pin a histogram metric's intensity ranges from the full-res images.
 
     The matrix-driver analogue of ``register._svf.pin_force_ranges`` (A6, both
     halves): resolve any ``None`` range on an :class:`MI` / :class:`CorrelationRatio`
     **once** from the full-resolution ``moving`` / ``fixed`` before the pyramid --
-    eager Python floats, so the range rides the frozen spec as jit-static config
-    and the binning is stationary across the optimisation (a data ``min/max``
-    range otherwise drifts as the moving image deforms).  A no-op for a
-    least-squares / already-pinned metric.  **jit caveat:** under ``jax.jit``
-    with *traced* images, pass explicit ranges (``float(tracer)`` cannot run).
+    a ``stop_gradient``-ed reduction (``_pin_range``), so the range rides the
+    frozen spec as a *constant* (stationary binning -- a data ``min/max`` range
+    otherwise drifts as the moving image deforms) and the pin is **jit-safe**:
+    ``MI(bins=...)`` / ``CorrelationRatio(bins=...)`` trace with no explicit range
+    even under ``jax.jit`` (the eager value is unchanged).  A no-op for a
+    least-squares / already-pinned metric.
     """
     if isinstance(metric, MI) and (
         metric.range_moving is None or metric.range_fixed is None
     ):
-        rm = metric.range_moving or (float(moving.min()), float(moving.max()))
-        rf = metric.range_fixed or (float(fixed.min()), float(fixed.max()))
+        rm = metric.range_moving or _pin_range(moving)
+        rf = metric.range_fixed or _pin_range(fixed)
         return replace(metric, range_moving=rm, range_fixed=rf)
     if isinstance(metric, CorrelationRatio) and metric.range_fixed is None:
-        return replace(
-            metric, range_fixed=(float(fixed.min()), float(fixed.max()))
-        )
+        return replace(metric, range_fixed=_pin_range(fixed))
     return metric

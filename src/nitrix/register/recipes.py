@@ -43,19 +43,27 @@ from ._model import Affine, Rigid, TransformModel
 from ._preprocess import preprocess_images
 from ._space import CoordinateSpace, IndexSpace
 
-# C3: an explicit Convergence on a path that cannot honour it (the forward
-# GN/LM path -- only the single-pair inverse-compositional path early-exits).
+# C3: an explicit Convergence on a path that cannot honour it.  The forward
+# least-squares (GN/LM) path now early-exits (Lever A); only the scalar/BFGS
+# path (a non-least-squares metric: MI / correlation-ratio) cannot -- its
+# optimiser is monolithic and stops on its own gradient/line-search criterion.
 _CONVERGENCE_FORWARD_MSG = (
-    'spec.convergence (early-exit) is honoured only on the single-pair '
-    'inverse-compositional path (IndexSpace + a least-squares / SSD metric + a '
-    'Rigid / Affine model); this run resolves to the forward GN/LM path.  Use '
-    "convergence='auto' (the default) or None, or meet the IC preconditions."
+    'spec.convergence (windowed early-exit) is honoured on the inverse-'
+    'compositional and forward *least-squares* (GN/LM) paths, but not on the '
+    'scalar/BFGS forward path this run resolves to (a non-least-squares metric '
+    "-- MI / correlation-ratio).  Use convergence='auto' (the default) or None, "
+    'or an SSD metric.'
 )
 
 
 def _check_forward_convergence(spec: RegistrationSpec) -> None:
-    """Raise (C3) if an explicit ``Convergence`` reaches the forward path."""
-    if isinstance(spec.convergence, Convergence):
+    """Raise (C3) if an explicit ``Convergence`` reaches a path that can't honour
+    it -- now only the scalar/BFGS (non-least-squares) forward path; the forward
+    least-squares path early-exits via the optimiser ``early_stop`` (Lever A)."""
+    if (
+        isinstance(spec.convergence, Convergence)
+        and not spec.metric.is_least_squares
+    ):
         raise ValueError(_CONVERGENCE_FORWARD_MSG)
 
 
@@ -127,6 +135,7 @@ def _resolve_init_matrix(
     matrix = _moment_init_matrix(moving, fixed, ndim=ndim, scale=scale)
     coarse_factor = spec.pyramid_factor ** (spec.levels - 1)
     return matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] / coarse_factor)
+
 
 __all__ = ['rigid_register', 'affine_register']
 
