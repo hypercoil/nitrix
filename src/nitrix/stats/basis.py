@@ -32,7 +32,7 @@ Everything is value -> value and cuSOLVER-free.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Optional, Tuple, cast
+from typing import Any, List, Optional, Protocol, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -43,6 +43,7 @@ from ..graph import laplacian
 from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
 
 __all__ = [
+    'SmoothBasis',
     'SplineBasis',
     'TensorBasis',
     'REBasis',
@@ -59,6 +60,36 @@ __all__ = [
     'spline_design',
     'tensor_product_design',
 ]
+
+
+class SmoothBasis(Protocol):
+    """Structural interface of a GAM smooth term (audit D8).
+
+    A smooth carries a ``design`` matrix and a coefficient count ``dim``, knows
+    its own penalty blocks, and can re-evaluate its design on a covariate grid.
+    ``gam_fit`` dispatches through these members instead of an ``isinstance``
+    chain, so a **new** basis type (implementing this Protocol) needs no edit to
+    ``gam.py`` -- the open-set registry the :class:`Family` / :class:`CorrSpec`
+    surfaces already have.
+
+    The concrete bases (:class:`SplineBasis` / :class:`TensorBasis` /
+    :class:`REBasis`) all conform.
+    """
+
+    design: Float[Array, 'n k']
+
+    @property
+    def dim(self) -> int:
+        """Number of basis coefficients ``k``."""
+        ...
+
+    def penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """Penalty blocks ``[(S_block, eig_block)]`` (host constants)."""
+        ...
+
+    def eval_design(self, x: Any) -> Float[Array, 'g k']:
+        """Re-evaluate the design on the smooth's covariate grid ``x``."""
+        ...
 
 
 def _bspline_design(
@@ -166,6 +197,21 @@ class SplineBasis:
     def dim(self) -> int:
         """Number of (post-constraint) basis coefficients ``k``."""
         return self.design.shape[-1]
+
+    def penalty_blocks(self) -> list:
+        """Penalty blocks ``[(S, eig)]`` (audit D8): the ``(k, k)`` roughness
+        penalty and its eigenvalues, the unpenalised null space floored to
+        zero.  ``eig`` drives only the basis-invariant ``tr(S_lambda^+ S_k)``."""
+        s = np.asarray(self.penalty)
+        w, _ = np.linalg.eigh(s)
+        floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
+        return [(s, np.where(w > floor, w, 0.0))]
+
+    def eval_design(
+        self, x: Float[Array, ' g']
+    ) -> Float[Array, 'g k']:
+        """Re-evaluate the spline design on a covariate grid ``x`` (audit D8)."""
+        return spline_design(self, x)
 
     def tree_flatten(
         self,
@@ -953,6 +999,20 @@ class TensorBasis:
         """Total tensor-basis dimension ``K = prod_j k_j``."""
         return self.design.shape[-1]
 
+    def penalty_blocks(self) -> list:
+        """Penalty blocks ``[(S_j, eig_j)]`` (audit D8): one per margin -- the
+        Kronecker-embedded penalty and its joint-eigenbasis eigenvalues."""
+        pens = np.asarray(self.penalties)
+        eigs = np.asarray(self.pen_eig)
+        return [(pens[j], eigs[j]) for j in range(pens.shape[0])]
+
+    def eval_design(
+        self, x: Tuple[Float[Array, ' g'], ...]
+    ) -> Float[Array, 'g K']:
+        """Re-evaluate the tensor design on matched per-margin grids ``x``
+        (audit D8): pass one length-``g`` grid per margin."""
+        return tensor_product_design(self, tuple(x))
+
     def tree_flatten(
         self,
     ) -> Tuple[Tuple[Any, ...], Tuple[int, ...]]:
@@ -1117,6 +1177,19 @@ class REBasis:
     def dim(self) -> int:
         """Number of random-effect coefficients ``q`` (the factor levels)."""
         return self.design.shape[-1]
+
+    def penalty_blocks(self) -> list:
+        """Penalty blocks ``[(I, 1)]`` (audit D8): the identity ridge (full rank
+        ``q``, eigenvalues exactly one -- no host eigh)."""
+        return [(np.asarray(self.penalty), np.ones(self.dim))]
+
+    def eval_design(
+        self, x: Float[Array, ' g']
+    ) -> Float[Array, 'g q']:
+        """Re-evaluate as the one-hot of the requested level indices ``x``
+        (audit D8): the per-level random effect at those levels."""
+        levels = jnp.asarray(x).astype(jnp.int32)
+        return jax.nn.one_hot(levels, self.dim, dtype=self.design.dtype)
 
     def tree_flatten(
         self,

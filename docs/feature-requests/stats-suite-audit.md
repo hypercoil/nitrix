@@ -70,7 +70,7 @@ immune.
 | **D5** | Low | ✅ **done** | `_family.py` / `glm.py` / `stats/__init__.py` | `resolve_family` reachable but not exported, while `resolve_link` is (3×). | **FIXED:** added to `glm.__all__` + imported / exported from `stats.__init__`. |
 | **D6** | Low-Med | ✅ **done** | `glm.py`/`glmm/`/`lme/reml.py` | Dispatch axes (`method`/`structure`/`type`/`kind`/`test`/`dof`) were bare `str`; only `gam_fit`/`pca_fit`/`reml.Structure` used `Literal`. `tier` was a free `str`. | **FIXED:** `Literal` aliases for the multi-value dispatch axes — `predict.PredictType`, `sandwich_cov.HCKind`, `compare_models.CompareTest`, `glmm.GLMMStructure`/`GLMMMethod`, `lme.ContrastDof`, and `GLMMResult.tier` (`GLMMTier`, 5 values). The single-value lme result tiers (`'R2'`/`'R3'`/…) are already fixed by their result type. Annotation-only (runtime `raise ValueError` unchanged); 25 glm tests green. |
 | **D7** | Low | ✅ **done** | `lme/_recov.py` (new) | Shared RE-covariance (log-Cholesky) helpers reached across module boundaries from `reml.py`, `_corrfit.py`, and `glmm.py` (4× in-function private-name imports). (code-org + design) | **FIXED:** `_tril_layout`/`_param_layout`/`_build_chol`/`cov_re_from_chol` lifted verbatim to `lme/_recov.py` (jnp-only, no deps). `_blockwoodbury` imports `_build_chol` from it; `reml`/`_corrfit`/`glmm` source the helpers from `_recov` — and glmm's 5 in-function imports collapse to one top-level import. |
-| **D8** | Low-Med | open | `gam.py` `Smooth = Union[...]`, `_smooth_penalties` `isinstance` chain | New basis type ⇒ edit the union *and* every `isinstance` branch — the open-set registry story `Family`/`CorrSpec` get right is absent. | A `SmoothBasis` `Protocol` (shared `dim`/`design`/`penalty`) or a `penalty_blocks()` method on each basis. |
+| **D8** | Low-Med | ✅ **done** | `basis.py` `SmoothBasis` Protocol; `gam.py` | New basis type ⇒ edit the union *and* every `isinstance` branch — the open-set registry story `Family`/`CorrSpec` get right was absent. | **FIXED:** `SmoothBasis` `Protocol` (`design`/`dim`/`penalty_blocks()`/`eval_design()`); the 3 bases implement the methods, and gam.py dispatches through them — both `isinstance` chains (`_smooth_penalties`, `smooth_partial_effect`) are gone. A custom Protocol-conforming basis now fits via `gam_fit` + `smooth_partial_effect` with **no gam.py edit** (test pins the open-set property). |
 | **D9** | Taste | ~mostly done | various | `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` naming drift; intercept policy differs (`X`-carries-own vs `intercept=` vs forbidden); `VarCompSpec.reml` is pure ceremony (`= cls(**kw)`); `low_rank` is an R1-only silent no-op. | **DONE:** dropped `VarCompSpec.reml` (11 call-sites → direct `VarCompSpec(...)`; `.flame` kept — it sets a real default); documented the intercept policy on the fitters that lacked it (`glm_fit`/`reml_fit`/`lme_fit` "carries its own intercept"; ordinal/gaulss/betareg/gam already noted theirs); `lme_fit.low_rank` now documented **R1-only** (silent no-op on R2/R3/R4/+corr). **Deferred (cosmetic):** the `n_iter` vs `n_outer`/`n_inner`/`n_mode`/`n_quad` rename across public signatures. |
 
 ## Code organisation
@@ -156,12 +156,12 @@ decision (bring a proposal before coding).
   **D7** ✅ (RE-cov helpers → `lme/_recov.py`),
   **O1** ✅ (`glmm.py` → `glmm/` package),
   **O3** ✅ (renamed `_betareg`/`_gaulss`/`_ordinal` → public module paths).
-- **Wave 3 — design contracts (decisions; complete the inference surface):**
+- **Wave 3 — ✅ complete** (design contracts):
   **D2** ✅ (uniform lme `.cov_re (V,k,k)` + `.re_labels`; nested/crossed
   block-diagonal), **D3** ✅ R2 (F/t-contrasts on the R2 LMEResult via
   `bw_inference`; R3/R4/+corr deferred per scope decision),
-  **D6** (M, `Literal` dispatch taxonomies incl. `tier`),
-  **D8** (M, `SmoothBasis` `Protocol` over the `isinstance` chain).
+  **D6** ✅ (`Literal` dispatch taxonomies), **D8** ✅ (`SmoothBasis` `Protocol`
+  — open-set smooth registry).
 - **Wave 4 — neuroimaging capabilities (features; largest):**
   **N5** (S, `confidence_interval` + standardized-effect helper),
   **N2** (L, mesh/graph TFCE adjacency + spin test — surface/dMRI unlock),

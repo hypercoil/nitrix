@@ -63,7 +63,6 @@ from typing import (
     Sequence,
     Tuple,
     Union,
-    cast,
 )
 
 import jax
@@ -78,13 +77,7 @@ from ._batching import blocked_vmap
 from ._family import GAUSSIAN, Family, resolve_family
 from ._irls import fit_penalised_irls
 from ._result import register_result
-from .basis import (
-    REBasis,
-    SplineBasis,
-    TensorBasis,
-    spline_design,
-    tensor_product_design,
-)
+from .basis import SmoothBasis
 
 __all__ = [
     'GAMResult',
@@ -99,7 +92,10 @@ __all__ = [
 # smoothing-parameter trace ``tr(S_lambda^+ S_k)``.
 _EIG_EPS = 0.0
 
-Smooth = Union[SplineBasis, TensorBasis, REBasis]
+# Any object conforming to the :class:`SmoothBasis` Protocol (audit D8): the
+# built-in SplineBasis / TensorBasis / REBasis, or a user basis implementing
+# ``design`` / ``dim`` / ``penalty_blocks()`` / ``eval_design()``.
+Smooth = SmoothBasis
 
 
 # ---------------------------------------------------------------------------
@@ -162,34 +158,6 @@ class GAMResult:
 # ---------------------------------------------------------------------------
 
 
-def _smooth_penalties(
-    sm: Smooth,
-) -> Sequence[Tuple[np.ndarray, np.ndarray]]:
-    """The smooth's penalty blocks as ``(S_block, eig_block)`` pairs.
-
-    A :class:`SplineBasis` contributes one penalty (its ``(k, k)`` matrix and
-    its eigenvalues, with the unpenalised null space floored to zero); a
-    :class:`TensorBasis` contributes one per margin (the Kronecker-embedded
-    penalty and its joint-eigenbasis Kronecker eigenvalues -- already floored);
-    a :class:`REBasis` contributes its identity ridge (full rank ``q``, so the
-    eigenvalues are exactly one -- no host eigh needed).  ``eig_block`` is used
-    only for the basis-invariant ``tr(S_lambda^+ S_k)``; ``S_block`` (the
-    original-basis matrix) drives the fit, so coefficients stay in the input
-    basis.
-    """
-    if isinstance(sm, TensorBasis):
-        pens = np.asarray(sm.penalties)
-        eigs = np.asarray(sm.pen_eig)
-        return [(pens[j], eigs[j]) for j in range(pens.shape[0])]
-    if isinstance(sm, REBasis):
-        q = sm.dim
-        return [(np.asarray(sm.penalty), np.ones(q))]
-    s_block = np.asarray(sm.penalty)
-    w, _ = np.linalg.eigh(s_block)
-    floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
-    return [(s_block, np.where(w > floor, w, 0.0))]
-
-
 def _assemble(
     n: int,
     smooths: Sequence[Smooth],
@@ -219,7 +187,7 @@ def _assemble(
         blocks.append(jnp.asarray(sm.design, dtype=dtype))
         kb = sm.dim
         slices.append((col, col + kb))
-        for s_block, eig_block in _smooth_penalties(sm):
+        for s_block, eig_block in sm.penalty_blocks():
             pen_blocks.append((col, col + kb, s_block, eig_block))
         col += kb
     X = jnp.concatenate(blocks, axis=1)
@@ -716,13 +684,7 @@ def smooth_partial_effect(
     random-slope coefficient) at those levels.
     """
     lo, hi = result.col_slices[smooth_index]
-    if isinstance(basis, TensorBasis):
-        design = tensor_product_design(basis, tuple(x))  # (g, K)
-    elif isinstance(basis, REBasis):
-        levels = jnp.asarray(x).astype(jnp.int32)
-        design = jax.nn.one_hot(levels, basis.dim, dtype=result.coef.dtype)
-    else:
-        design = spline_design(basis, cast(Float[Array, ' g'], x))  # (g, k)
+    design = basis.eval_design(x)  # (g, k) -- D8: per-basis via the Protocol
     gamma = result.coef[:, lo:hi]  # (V, k)
     effect = gamma @ design.T  # (V, g)
     cov_block = result.cov_unscaled[:, lo:hi, lo:hi]  # (V, k, k)
