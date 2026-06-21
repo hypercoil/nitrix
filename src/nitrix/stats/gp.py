@@ -109,9 +109,11 @@ __all__ = [
         'log_mlik',
         'edf',
         'dispersion',
+        'corr_rho',
     ),
     aux=(
-        'kernel', 'engine', 'n_obs', 'rank', 'n_fixed', 'lo', 'hi', 'boundary'
+        'kernel', 'engine', 'corr', 'n_obs', 'rank', 'n_fixed',
+        'lo', 'hi', 'boundary',
     ),
 )
 @dataclass(frozen=True)
@@ -140,7 +142,11 @@ class GPResult:
         ``(V,)`` total effective degrees of freedom ``tr((X^T X + S_lambda)^{-1}
         X^T X)`` (fixed effects plus the smooth).
     dispersion
-        ``(V,)`` residual-scale estimate ``sigma_e^2``.
+        ``(V,)`` residual-scale estimate ``sigma_e^2`` (the residual is
+        ``sigma_e^2 R(corr_rho)`` when a ``corr`` structure is fitted).
+    corr_rho
+        ``(V,)`` natural residual-correlation parameter of the ``corr`` structure
+        (lag-1 AR / decay / exchangeable correlation); ``0`` when ``corr='iid'``.
     kernel
         Stationary kernel name (``'matern52'`` / ``'matern32'`` / ``'matern12'`` /
         ``'rbf'``).
@@ -148,6 +154,9 @@ class GPResult:
         Reduced-rank engine: ``'hsgp'`` (Hilbert-space eigenfunctions) or
         ``'exact'`` (kernel eigenfeatures -- full-rank when ``rank == N``, else the
         eigen-truncated Karhunen-Loeve / Nystrom approximation).
+    corr
+        Within-group residual-correlation structure name (``'ar1'`` / ``'car1'`` /
+        ``'cs'``), or ``'iid'`` (no correlation).
     n_obs
         Number of observations ``N``.
     rank
@@ -167,8 +176,10 @@ class GPResult:
     log_mlik: Float[Array, 'V']
     edf: Float[Array, 'V']
     dispersion: Float[Array, 'V']
+    corr_rho: Float[Array, 'V']
     kernel: str
     engine: str
+    corr: str
     n_obs: int
     rank: int
     n_fixed: int
@@ -546,6 +557,70 @@ def _final_fit_from_design(
 
 
 # ---------------------------------------------------------------------------
+# Per-engine (design, penalty) closures over rho -- shared by the corr= path
+# ---------------------------------------------------------------------------
+
+_DesignFn = Callable[[float], Float[Array, 'N p']]
+_PenFn = Callable[[float], Tuple[Float[Array, ' p'], Float[Array, '']]]
+
+
+def _hsgp_design_pen(
+    x: Float[Array, ' N'],
+    T: Float[Array, 'N q0'],
+    kernel: str,
+    m: int,
+    n_fixed: int,
+    lo: float,
+    hi: float,
+    boundary: float,
+    dtype: Any,
+) -> Tuple[_DesignFn, _PenFn]:
+    """HSGP ``(design, penalty)`` closures: a fixed design, a ``rho``-dependent
+    diagonal penalty ``diag(1/s(rho))``."""
+    c_mid, big_l = _hsgp_domain(lo, hi, boundary)
+    sqrt_lambda, phase, inv_sqrt_L = _hsgp_eigen(m, c_mid, big_l, dtype)
+    X = jnp.concatenate(
+        [T, _hsgp_features(x, sqrt_lambda, phase, inv_sqrt_L)], axis=1
+    )
+
+    def design(_rho: float) -> Float[Array, 'N p']:
+        return X
+
+    def pen(rho: float) -> Tuple[Array, Array]:
+        return _penalty_diag(
+            sqrt_lambda, kernel, jnp.asarray(rho, dtype=dtype), n_fixed
+        )
+
+    return design, pen
+
+
+def _exact_design_pen(
+    x_np: np.ndarray,
+    T: Float[Array, 'N q0'],
+    kernel: str,
+    m: int,
+    n_fixed: int,
+    dtype: Any,
+) -> Tuple[_DesignFn, _PenFn]:
+    """Exact ``(design, penalty)`` closures: a ``rho``-dependent kernel-
+    eigenfeature design, a fixed identity penalty (unit spectral weights)."""
+    d_unit = jnp.concatenate(
+        [jnp.zeros((n_fixed,), dtype), jnp.ones((m,), dtype)]
+    )
+    log_pdet_unit = jnp.asarray(0.0, dtype)
+
+    def design(rho: float) -> Float[Array, 'N p']:
+        return jnp.concatenate(
+            [T, _exact_features_train(x_np, kernel, rho, m, dtype)], axis=1
+        )
+
+    def pen(_rho: float) -> Tuple[Array, Array]:
+        return d_unit, log_pdet_unit
+
+    return design, pen
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -565,6 +640,10 @@ def gp_fit(
     n_rho: int = 24,
     map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]] = None,
     corr: Optional[Any] = None,
+    group: Optional[Any] = None,
+    time: Optional[Float[Array, ' N']] = None,
+    n_corr: int = 9,
+    corr_raw_bounds: Tuple[float, float] = (-2.5, 2.5),
     n_outer: int = 30,
     n_search: int = 15,
     ridge: float = 1e-8,
@@ -616,7 +695,24 @@ def gp_fit(
         Optional callable ``rho -> penalty`` adding ``-log p(rho)`` to the pooled
         objective (a MAP / prior-regularised lengthscale); ``None`` is pure REML.
     corr
-        Reserved for correlated-residual composition (PR3b); must be ``None``.
+        Within-group residual-correlation structure: ``'ar1'`` (discrete AR(1)),
+        ``'car1'`` (continuous-time AR(1); pass ``time``), ``'cs'`` (compound
+        symmetry), or a ``lme.CorrSpec``.  ``None`` (default) is the i.i.d.
+        residual.  When set, ``group`` is required; the residual is
+        ``sigma_e^2 R(rho_c)`` block-diagonal across ``group``, with ``rho_c``
+        estimated jointly with the lengthscale.
+    group
+        ``(N,)`` integer grouping factor for ``corr`` (the residual is correlated
+        *within* groups, independent across them).  Required when ``corr`` is set.
+    time
+        ``(N,)`` observation times for ``corr='car1'`` (and to order ``ar1`` when
+        rows are not in within-group time order).
+    n_corr
+        Number of grid points for the residual-correlation parameter search.
+    corr_raw_bounds
+        ``(lo, hi)`` range of the structure's *unconstrained* parameter for the
+        grid (``rho_c = tanh`` / ``sigmoid`` of it); the default ``(-2.5, 2.5)``
+        spans roughly ``|rho_c| < 0.99``.
     n_outer, n_search
         Fellner-Schall iterations for the final fit and for each ``rho``-search
         evaluation, respectively.
@@ -640,10 +736,6 @@ def gp_fit(
         raise NotImplementedError(
             f"gp_fit: select={select!r} -- only 'shared-rho' is implemented "
             '(per-element lengthscales are a later add).'
-        )
-    if corr is not None:
-        raise NotImplementedError(
-            'gp_fit: corr= (correlated-residual composition) is PR3b; pass None.'
         )
     if not boundary >= 1.0:
         raise ValueError(f'gp_fit: boundary={boundary} must be >= 1.0.')
@@ -683,6 +775,32 @@ def gp_fit(
     log_rho_grid_np = np.linspace(
         np.log(rho_lo), np.log(rho_hi), int(n_rho)
     )
+
+    # --- corr= composition: GP smooth + structured within-group residual -----
+    if corr is not None:
+        if group is None:
+            raise ValueError("gp_fit: corr= requires a `group` factor.")
+        from .lme._corr import resolve_corr
+
+        corr_spec = resolve_corr(corr)
+        raw_grid_np = np.linspace(
+            float(corr_raw_bounds[0]), float(corr_raw_bounds[1]), int(n_corr)
+        )
+        if engine == 'hsgp':
+            _design, _pen = _hsgp_design_pen(
+                x, T, kernel, m, n_fixed, lo, hi, boundary, Y.dtype
+            )
+        else:  # exact
+            _design, _pen = _exact_design_pen(
+                x_np, T, kernel, m, n_fixed, Y.dtype
+            )
+
+        return _gp_fit_corr(
+            Y, _design, _pen, group, time, corr_spec, n, m, n_fixed,
+            log_rho_grid_np, raw_grid_np, map_rho, kernel, engine,
+            n_outer, n_search, ridge, lam_floor, lam_ceil, block,
+            lo, hi, boundary,
+        )
 
     if engine == 'exact':
         return _gp_fit_exact(
@@ -772,6 +890,8 @@ def _assemble_gp_result(
     lo: float,
     hi: float,
     boundary: float,
+    corr_name: str = 'iid',
+    corr_rho: Optional[Array] = None,
 ) -> GPResult:
     """Pack the per-element fit arrays into a :class:`GPResult` (shared by both
     engines): ``theta = [log sigma_f^2, log sigma_e^2, log rho]`` with
@@ -785,6 +905,8 @@ def _assemble_gp_result(
          log_rho_col],
         axis=-1,
     )
+    if corr_rho is None:
+        corr_rho = jnp.zeros_like(sigma_e2)
     return GPResult(
         coef=beta,
         cov_unscaled=v,
@@ -792,8 +914,10 @@ def _assemble_gp_result(
         log_mlik=log_mlik,
         edf=edf,
         dispersion=sigma_e2,
+        corr_rho=corr_rho,
         kernel=kernel,
         engine=engine,
+        corr=corr_name,
         n_obs=int(n),
         rank=int(m),
         n_fixed=int(n_fixed),
@@ -845,17 +969,23 @@ def _gp_fit_exact(
         phi = _exact_features_train(x_np, kernel, rho, m, dtype)  # (N, m)
         return jnp.concatenate([T, phi], axis=1)
 
+    # Compile the pooled REML once; the moving design enters as a traced arg
+    # (the host kernel eigh per rho stays outside the compiled region).
+    @jax.jit
+    def _nll_jit(X: Array) -> Array:
+        return _pooled_nll_from_design(
+            Y, X, d, log_pdet_pen, n, m, n_fixed,
+            n_search, ridge, lam_floor, lam_ceil,
+        )
+
     # --- rho search: host loop (each rho needs a host kernel eigh) ----------
     nll_grid = []
     for log_rho in log_rho_grid_np:
         rho = float(np.exp(log_rho))
-        nll = _pooled_nll_from_design(
-            Y, _design(rho), d, log_pdet_pen, n, m, n_fixed,
-            n_search, ridge, lam_floor, lam_ceil,
-        )
+        nll = float(_nll_jit(_design(rho)))
         if map_rho is not None:
-            nll = nll + 2.0 * map_rho(jnp.asarray(rho, dtype=dtype))
-        nll_grid.append(float(nll))
+            nll = nll + 2.0 * float(map_rho(jnp.asarray(rho, dtype=dtype)))
+        nll_grid.append(nll)
 
     log_rho_hat = _parabolic_argmin(
         log_rho_grid_np, np.asarray(nll_grid)
@@ -870,6 +1000,131 @@ def _gp_fit_exact(
     return _assemble_gp_result(
         beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, 'exact',
         n, m, n_fixed, lo, hi, boundary,
+    )
+
+
+def _gp_fit_corr(
+    Y: Float[Array, 'V N'],
+    design_fn: Callable[[float], Float[Array, 'N p']],
+    pen_fn: Callable[[float], Tuple[Float[Array, ' p'], Float[Array, '']]],
+    group: Any,
+    time: Any,
+    corr_spec: Any,
+    n: int,
+    m: int,
+    n_fixed: int,
+    log_rho_grid_np: np.ndarray,
+    raw_grid_np: np.ndarray,
+    map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]],
+    kernel: str,
+    engine: str,
+    n_outer: int,
+    n_search: int,
+    ridge: float,
+    lam_floor: float,
+    lam_ceil: float,
+    block: Optional[int],
+    lo: float,
+    hi: float,
+    boundary: float,
+) -> GPResult:
+    """GP smooth + a structured within-group residual ``Cov(eps) = sigma_e^2
+    R(rho_c)`` (the ``corr=`` composition).
+
+    Whitening by ``R(rho_c)`` (``W R W^T = I`` per group; reused verbatim from
+    ``lme._corr``) turns the model into the PR2 penalised regression on whitened
+    data, so the criterion is the shared profiled REML **plus** the whitening
+    Jacobian ``log|R(rho_c)|``.  ``rho_c`` joins the lengthscale in a joint
+    ``(rho_GP, raw_c)`` grid (``raw_c`` the structure's unconstrained parameter);
+    the final fit's posterior is in whitened space, so ``gp_predict`` (the latent
+    GP mean/variance) is unchanged."""
+    from .lme._corrfit import build_group_layout
+
+    dtype = Y.dtype
+    v_count = Y.shape[0]
+    layout = build_group_layout(jnp.asarray(group), time)
+    idx, gaps, nsize, mask = (
+        layout.idx, layout.gaps, layout.nsize, layout.mask
+    )
+    mask_f = mask.astype(dtype)
+    # Y padded as channels (G, T, V) so one whitener whitens all elements.
+    y_pad = jnp.transpose(Y[:, idx], (1, 2, 0)) * mask_f[..., None]
+
+    def _whiten(stack: Array, raw: Array) -> Tuple[Array, Array]:
+        return cast(
+            Tuple[Array, Array],
+            corr_spec.whiten(stack, gaps, nsize, mask, raw),
+        )
+
+    def _cross(X: Array, raw: Array) -> Tuple[Array, Array, Array, Array]:
+        x_pad = X[idx] * mask_f[..., None]  # (G, T, p)
+        x_tilde, half_logdet = _whiten(x_pad, raw)
+        y_tilde, _ = _whiten(y_pad, raw)
+        xtx = jnp.einsum('gtp,gtq->pq', x_tilde, x_tilde)
+        c_all = jnp.einsum('gtp,gtv->vp', x_tilde, y_tilde)
+        g_all = jnp.einsum('gtv,gtv->v', y_tilde, y_tilde)
+        return xtx, c_all, g_all, half_logdet
+
+    # The whitened cross-products and the pooled REML are compiled **once** and
+    # reused across every grid cell (the moving design / penalty / corr parameter
+    # enter as traced array arguments) -- a Python loop that re-traced per cell
+    # would recompile O(n_rho * n_corr) programs and exhaust the compiler.
+    @jax.jit
+    def _nll_jit(X: Array, raw: Array, d: Array, log_pdet: Array) -> Array:
+        xtx, c_all, g_all, half_logdet = _cross(X, raw)
+        p = xtx.shape[0]
+        per = jax.vmap(
+            lambda c_v, g_v: _pooled_nll_one(
+                c_v, g_v, xtx, d, log_pdet, n, p, m, n_fixed,
+                n_search, ridge, lam_floor, lam_ceil,
+            )
+        )(c_all, g_all)
+        return jnp.sum(per) + v_count * 2.0 * half_logdet
+
+    cross_jit = jax.jit(_cross)
+
+    # --- joint (raw_c, rho_GP) grid search ----------------------------------
+    grid = np.empty((len(raw_grid_np), len(log_rho_grid_np)))
+    for i, raw_v in enumerate(raw_grid_np):
+        raw = jnp.asarray([raw_v], dtype=dtype)
+        for j, log_rho in enumerate(log_rho_grid_np):
+            rho = float(np.exp(log_rho))
+            d, log_pdet_pen = pen_fn(rho)
+            nll = float(_nll_jit(design_fn(rho), raw, d, log_pdet_pen))
+            if map_rho is not None:
+                nll = nll + 2.0 * float(map_rho(jnp.asarray(rho, dtype=dtype)))
+            grid[i, j] = nll
+
+    i_star = int(np.argmin(grid.min(axis=1)))
+    raw_hat = float(raw_grid_np[i_star])
+    log_rho_hat = _parabolic_argmin(log_rho_grid_np, grid[i_star])
+    rho_hat = float(np.exp(log_rho_hat))
+
+    # --- final per-element fit at (rho_hat, raw_hat) ------------------------
+    raw = jnp.asarray([raw_hat], dtype=dtype)
+    xtx, c_all, g_all, half_logdet = cross_jit(design_fn(rho_hat), raw)
+    d_hat, log_pdet_hat = pen_fn(rho_hat)
+    p = xtx.shape[0]
+
+    def _one(c_v: Array, g_v: Array) -> Tuple[Array, ...]:
+        return _gp_fit_one(
+            c_v, g_v, xtx, d_hat, log_pdet_hat, n, p, m, n_fixed,
+            n_outer, ridge, lam_floor, lam_ceil,
+        )
+
+    beta, v, lam, edf, phi, log_mlik = cast(
+        Tuple[Array, Array, Array, Array, Array, Array],
+        blocked_vmap(_one, (c_all, g_all), block=block),
+    )
+    # Add the whitening Jacobian to the reported marginal likelihood.
+    log_mlik = log_mlik - half_logdet
+    corr_rho = jnp.full_like(
+        phi, float(corr_spec.to_natural(jnp.asarray([raw_hat], dtype=dtype)))
+    )
+    return _assemble_gp_result(
+        beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, engine,
+        n, m, n_fixed, lo, hi, boundary,
+        corr_name=corr_spec.name, corr_rho=corr_rho,
     )
 
 

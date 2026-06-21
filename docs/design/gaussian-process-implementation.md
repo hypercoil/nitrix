@@ -20,13 +20,13 @@ PR independently shippable and gam_fit-compatible:
 | **PR1** | Spectral densities + fixed-`ρ` `hsgp_basis` (1-D) | `gam_fit` **unchanged** | `linalg/kernel.py`, `stats/basis.py`, test |
 | **PR2** | `gp_fit`/`GPResult`/`gp_predict` — HSGP, shared-`ρ` diagonal-`S(ρ)` REML, optional MAP-`ρ` | new `stats/gp.py` | + HLO-budget test |
 | **PR3a** | Tier 2b full-rank `engine='exact'` (kernel-eigenfeature REML) | shared PR2 core (≡ `lme.reml_fit`) | thin |
-| **PR3b** | `corr=` composition (structured residual: ar1/car1/cs) | `lme.gls_fit`/`fit_corr_lme` | |
+| **PR3b** | `corr=` composition (structured residual: ar1/car1/cs) | `lme._corr.whiten`, `build_group_layout` | thin |
 | **PR4** | Tier 3 `gp_factor_smooth` + `hgp_fit`; nested HGP | `re_smooth`/`by_factor_smooth`/`gam_fit`, `lme/_nested.py` | |
 | **PR5** | multi-D `hsgp_basis_nd` (tensor product); perf-bench | | |
 
 This document specifies **PR1 fully** and PR2 to the design level; PR3–5 are
-sketched (they don't constrain PR1/PR2). **PR3a is shipped** (`engine='exact'`);
-PR3b (`corr=`) and PR4–5 remain.
+sketched (they don't constrain PR1/PR2). **PR3a + PR3b are shipped**
+(`engine='exact'` and `corr=`); PR4–5 remain.
 
 ## 1. Math spec (1-D HSGP)
 
@@ -236,6 +236,37 @@ it differs only in the smooth design:
   tighter than HSGP's); each kernel; full-rank vs KL-truncated; `x_train` guard.
 - **Memory:** the exact engine is inherently `O(V·N²)` (`cov_unscaled` is `(V, p, p)`
   with `p ≈ N`) — the accepted exact-GP cost; the HLO-budget invariant is HSGP-only.
+
+## 5b. PR3b — `corr=` structured residual (**shipped**)
+
+Composes the GP smooth with a within-group correlated residual
+`Cov(ε) = σ_e² R(ρ_c)` (`nlme`-style `ar1` / `car1` / `cs`), the
+longitudinal-fMRI case (a smooth population trend over the covariate, autocorrelated
+residuals within subject). Rides the **existing** `lme._corr` whitening verbatim:
+
+- **Whitening reduction.** `W(ρ_c) R W^T = I` per group (the innovations form for
+  `ar1`/`car1`, the rank-one transform for `cs`), so on whitened `(ỹ, X̃)` the
+  residual is i.i.d. and the model is the PR2 penalised regression — the criterion
+  is the shared profiled REML **plus the whitening Jacobian** `log|R(ρ_c)|`
+  (`= 2·half_logdet`, returned by `CorrSpec.whiten`). Verified against a dense
+  block-`R` marginal-likelihood reference to a constant offset
+  (`test_corr_reml_matches_dense_up_to_constant`, `<1e-6`).
+- **Joint `(ρ_GP, ρ_c)` grid.** `ρ_c` enters via the structure's unconstrained
+  `raw_c` (gridded over `corr_raw_bounds`, default `(-2.5, 2.5)` ≈ `|ρ_c|<0.99`);
+  the lengthscale axis is parabolically refined at the winning `raw_c`. Both engines
+  compose (the design/penalty are built by `_hsgp_design_pen` / `_exact_design_pen`
+  closures; whitening is engine-agnostic).
+- **One compiled program.** All `Y` voxels are whitened at once by carrying the mass
+  axis as the whitener's channel dim (`(G,T,V)`); the per-cell whitened
+  cross-products + pooled REML are **`jit`-compiled once** and reused across every
+  grid cell (the moving design / penalty / `raw_c` are traced args) — a naive
+  per-cell `vmap` recompiled `O(n_rho·n_corr)` programs and exhausted the compiler
+  (fixed; the same one-compile pattern was applied to the exact grid).
+- **Output.** `GPResult` gains `corr_rho` (`(V,)`, the natural residual correlation;
+  `0` for `iid`) and `corr` (aux). The fit's posterior is in whitened space, so the
+  **latent** GP mean/variance — hence `gp_predict` — is unchanged (the residual
+  structure is a nuisance on `ε`, not on `f`). `corr='iid'` reproduces `corr=None`
+  exactly (`test_corr_iid_matches_no_corr`).
 
 **Invariants (verified):** no runtime `eigh` (Φ closed-form), `O(V·(m+q)²)` working
 memory, an HLO-budget test (`test_gp_final_fit_hlo_is_cusolver_free_and_N_free`)

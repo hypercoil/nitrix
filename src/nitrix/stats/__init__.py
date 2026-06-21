@@ -18,8 +18,9 @@ Two submodules:
   Gaussian process) and the kriging ``gp_basis``.
 - ``gam``        -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
-- ``gp``         -- mass-univariate Gaussian-process regression (HSGP engine)
-  with REML-estimated kernel lengthscale (``gp_fit`` / ``gp_predict``).
+- ``gp``         -- mass-univariate Gaussian-process regression (HSGP or exact
+  engine) with REML-estimated kernel lengthscale and optional ``corr=``
+  structured residual (``gp_fit`` / ``gp_predict``).
 - ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
   covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
   small-sample regime.

@@ -411,8 +411,8 @@ def test_gp_fit_argument_validation():
         gp_fit(y, xj, engine='fourier')  # type: ignore[arg-type]
     with pytest.raises(NotImplementedError):
         gp_fit(y, xj, select='per-voxel')  # type: ignore[arg-type]
-    with pytest.raises(NotImplementedError):
-        gp_fit(y, xj, corr='ar1')
+    with pytest.raises(ValueError):
+        gp_fit(y, xj, corr='ar1')  # group missing
     with pytest.raises(ValueError):
         gp_fit(y, xj, rank=0)
     with pytest.raises(ValueError):
@@ -552,3 +552,195 @@ def test_exact_predict_requires_x_train():
         gp_predict(res, jnp.asarray(x))  # exact needs x_train
     mean, std = gp_predict(res, jnp.asarray(x), x_train=jnp.asarray(x))
     assert mean.shape == (1, n) and std.shape == (1, n)
+
+
+# ---------------------------------------------------------------------------
+# 9. corr= -- GP smooth + structured within-group residual (PR3b)
+# ---------------------------------------------------------------------------
+
+
+def _ar1_series(rng, n, phi, sd):
+    e = np.zeros(n)
+    e[0] = rng.standard_normal() * sd / np.sqrt(1 - phi**2)
+    for i in range(1, n):
+        e[i] = phi * e[i - 1] + sd * rng.standard_normal()
+    return e
+
+
+def _block_ar1(group, rho_c):
+    """Dense block-diagonal AR(1) correlation ``R_{ij} = rho_c^{|i-j|}`` within
+    each group (unit-gap), independent across groups."""
+    g = np.asarray(group)
+    n = g.shape[0]
+    R = np.zeros((n, n))
+    for gi in np.unique(g):
+        idx = np.where(g == gi)[0]
+        d = np.abs(idx[:, None] - idx[None, :])  # within-group lag (unit gaps)
+        R[np.ix_(idx, idx)] = rho_c ** (np.abs(
+            np.arange(len(idx))[:, None] - np.arange(len(idx))[None, :]
+        ))
+        # overwrite cross terms to 0 already; diagonal handled by power 0 = 1
+        _ = d
+    return R
+
+
+def _dense_corr_reml_m2l(y, T, Phi, s, lam, R):
+    """Dense profiled ``-2 l_R`` for ``y = T alpha + Phi gamma + e`` with
+    ``gamma ~ N(0, (sigma^2/lam) diag(s))`` and ``e ~ N(0, sigma^2 R)`` -- the
+    reference for the whitened corr REML (cf. ``_dense_reml_m2l`` with R=I)."""
+    n = y.shape[0]
+    m0 = T.shape[1]
+    M = R + Phi @ (np.diag(s) / lam) @ Phi.T
+    Minv = np.linalg.inv(M)
+    A = T.T @ Minv @ T
+    alpha = np.linalg.solve(A, T.T @ Minv @ y)
+    r = y - T @ alpha
+    rss_m = r @ Minv @ r
+    _, logdet_m = np.linalg.slogdet(M)
+    _, logdet_a = np.linalg.slogdet(A)
+    return (n - m0) * np.log(rss_m) + logdet_m + logdet_a
+
+
+def test_corr_reml_matches_dense_up_to_constant():
+    """The whitened corr REML (p-space criterion + whitening Jacobian) equals the
+    dense block-``R`` marginal-likelihood REML up to an additive constant -- across
+    the lengthscale's ``lambda`` and the residual correlation ``rho_c``."""
+    from nitrix.stats.lme._corr import ar1
+    from nitrix.stats.lme._corrfit import build_group_layout
+
+    rng = np.random.default_rng(0)
+    G, Tn, rank = 6, 10, 12
+    t = np.linspace(0.0, 1.0, Tn)
+    x = np.tile(t, G)
+    group = np.repeat(np.arange(G), Tn)
+    n = G * Tn
+    y = np.sin(2 * np.pi * x) + 0.2 * rng.standard_normal(n)
+
+    Phi, sqrt_lambda, _ = _build_design(x, rank, 1.5)
+    T = np.ones((n, 1))
+    X = np.concatenate([T, Phi], axis=1)
+    m0, p, m = 1, X.shape[1], rank
+
+    spec = ar1()
+    layout = build_group_layout(jnp.asarray(group), None)
+    idx, mask = layout.idx, layout.mask
+    mask_f = mask.astype(jnp.float64)
+    x_pad = jnp.asarray(X)[idx] * mask_f[..., None]
+    y_pad = (jnp.asarray(y)[idx] * mask_f)[..., None]  # (G, T, 1)
+
+    diffs = []
+    for rho_c in (0.0, 0.3, 0.6, -0.4):
+        raw = jnp.asarray([np.arctanh(rho_c)])
+        xt, half_logdet = spec.whiten(x_pad, layout.gaps, layout.nsize, mask, raw)
+        yt, _ = spec.whiten(y_pad, layout.gaps, layout.nsize, mask, raw)
+        xtx = jnp.einsum('gtp,gtq->pq', xt, xt)
+        c = jnp.einsum('gtp,gtk->pk', xt, yt)[:, 0]
+        g = jnp.einsum('gtk,gtk->', yt, yt)
+        R = _block_ar1(group, rho_c)
+        s = np.asarray(
+            gpmod.spectral_density(jnp.asarray(sqrt_lambda), kernel='matern52',
+                                   rho=0.2)
+        )
+        d, log_pdet_pen = gpmod._penalty_diag(
+            jnp.asarray(sqrt_lambda), 'matern52', jnp.asarray(0.2), m0
+        )
+        for lam in (0.5, 5.0, 50.0):
+            _, logdet_h, _, _, _, d_p = gpmod._quantities(
+                jnp.asarray(lam), c, g, xtx, d, p, 0.0
+            )
+            pspace = float(
+                gpmod._reml_nll(d_p, logdet_h, jnp.asarray(lam),
+                                log_pdet_pen, n, m, m0)
+            )
+            pspace_corr = pspace + 2.0 * float(half_logdet)  # + log|R|
+            dense = _dense_corr_reml_m2l(y, T, Phi, s, lam, R)
+            diffs.append(pspace_corr - dense)
+
+    diffs = np.asarray(diffs)
+    assert np.ptp(diffs) < 1e-6, (
+        f'corr REML p-space vs dense not constant-offset: {np.ptp(diffs):.2e}'
+    )
+
+
+def test_corr_iid_matches_no_corr():
+    """``corr='iid'`` (identity whitening) reproduces the plain ``corr=None`` fit."""
+    rng = np.random.default_rng(2)
+    n = 80
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    group = (x > 0.5).astype(np.int64)  # arbitrary grouping; iid ignores it
+    y, _ = _gp_draw(rng, x, rho=0.25, noise=0.1)
+    base = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), rank=15, n_rho=20)
+    iid = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), rank=15, n_rho=20,
+                 corr='iid', group=jnp.asarray(group), n_corr=3)
+    assert iid.corr == 'iid'
+    assert np.allclose(np.asarray(base.coef), np.asarray(iid.coef), atol=1e-6)
+    assert np.allclose(np.asarray(base.theta), np.asarray(iid.theta), atol=1e-6)
+
+
+def test_corr_ar1_recovers_and_beats_iid():
+    """On AR(1) longitudinal data, ``corr='ar1'`` recovers a positive ``rho_c`` and
+    has a higher marginal likelihood than the i.i.d. fit."""
+    rng = np.random.default_rng(5)
+    G, Tn = 30, 10
+    t = np.linspace(0.0, 1.0, Tn)
+    x = np.tile(t, G)
+    group = np.repeat(np.arange(G), Tn)
+    trend = np.sin(2 * np.pi * t)
+    phi_true = 0.6
+    y = np.concatenate([trend + _ar1_series(rng, Tn, phi_true, 0.3)
+                        for _ in range(G)])
+
+    fit_ar1 = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), rank=15,
+                     corr='ar1', group=jnp.asarray(group), n_rho=20, n_corr=15)
+    fit_iid = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), rank=15, n_rho=20)
+    rho_c = float(fit_ar1.corr_rho[0])
+    assert 0.35 < rho_c < 0.85, rho_c
+    assert float(fit_ar1.log_mlik[0]) > float(fit_iid.log_mlik[0])
+
+
+def test_corr_requires_group():
+    rng = np.random.default_rng(7)
+    x = np.sort(rng.uniform(0.0, 1.0, 40))
+    y = jnp.asarray(rng.standard_normal((1, 40)))
+    with pytest.raises(ValueError):
+        gp_fit(y, jnp.asarray(x), corr='ar1')  # group missing
+
+
+@pytest.mark.parametrize('corr', ['ar1', 'cs', 'car1'])
+def test_corr_structures_run_each_engine(corr):
+    """Each correlation structure composes with both engines and recovers the
+    shared trend."""
+    rng = np.random.default_rng(9)
+    G, Tn = 14, 9
+    t = np.linspace(0.0, 1.0, Tn)
+    x = np.tile(t, G)
+    group = np.repeat(np.arange(G), Tn)
+    time = np.tile(t, G)  # for car1
+    trend = np.sin(2 * np.pi * t)
+    y = np.concatenate([trend + _ar1_series(rng, Tn, 0.4, 0.25)
+                        for _ in range(G)])
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), engine='hsgp',
+                 rank=12, corr=corr, group=jnp.asarray(group),
+                 time=jnp.asarray(time), n_rho=16, n_corr=9)
+    assert res.corr == corr
+    mean, _ = gp_predict(res, jnp.asarray(t))
+    assert np.corrcoef(np.asarray(mean)[0], trend)[0, 1] > 0.9
+
+
+def test_corr_with_exact_engine():
+    """corr= composes with the exact engine too."""
+    rng = np.random.default_rng(11)
+    G, Tn = 16, 8
+    t = np.linspace(0.0, 1.0, Tn)
+    x = np.tile(t, G)
+    group = np.repeat(np.arange(G), Tn)
+    trend = np.cos(2 * np.pi * t)
+    y = np.concatenate([trend + _ar1_series(rng, Tn, 0.5, 0.25)
+                        for _ in range(G)])
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), engine='exact',
+                 rank=Tn, corr='ar1', group=jnp.asarray(group),
+                 n_rho=14, n_corr=11)
+    assert res.engine == 'exact' and res.corr == 'ar1'
+    assert float(res.corr_rho[0]) > 0.2
+    mean, _ = gp_predict(res, jnp.asarray(t), x_train=jnp.asarray(x))
+    assert np.corrcoef(np.asarray(mean)[0], trend)[0, 1] > 0.9
