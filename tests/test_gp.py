@@ -408,7 +408,7 @@ def test_gp_fit_argument_validation():
     y = jnp.asarray(rng.standard_normal((1, 30)))
     xj = jnp.asarray(x)
     with pytest.raises(NotImplementedError):
-        gp_fit(y, xj, engine='exact')  # type: ignore[arg-type]
+        gp_fit(y, xj, engine='fourier')  # type: ignore[arg-type]
     with pytest.raises(NotImplementedError):
         gp_fit(y, xj, select='per-voxel')  # type: ignore[arg-type]
     with pytest.raises(NotImplementedError):
@@ -419,3 +419,136 @@ def test_gp_fit_argument_validation():
         gp_fit(y, xj, boundary=0.5)
     with pytest.raises(ValueError):
         gp_fit(y, jnp.asarray(x[:10]))  # x/Y length mismatch
+
+
+# ---------------------------------------------------------------------------
+# 8. engine='exact' -- full-rank kernel-eigenfeature GP (PR3a)
+# ---------------------------------------------------------------------------
+
+
+def test_exact_matches_reml_fit_at_fixed_rho():
+    """At a fixed ``rho`` the exact engine reproduces ``lme.reml_fit`` on
+    ``Z = chol(K_rho)`` -- the penalty<->variance-component identity in code: the
+    variance components, their ratio, and the fixed effect all agree."""
+    from nitrix.stats.lme import reml_fit
+
+    rng = np.random.default_rng(1)
+    n, V = 50, 4
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    Y = np.stack([_gp_draw(rng, x, rho=0.2, noise=0.1)[0] for _ in range(V)])
+    rho = 0.2
+
+    res = gp_fit(jnp.asarray(Y), jnp.asarray(x), kernel='matern52',
+                 engine='exact', rank=n, rho_bounds=(rho, rho), n_rho=1,
+                 n_outer=120)
+    sf2 = np.exp(np.asarray(res.theta[:, 0]))
+    se2 = np.exp(np.asarray(res.theta[:, 1]))
+    beta = np.asarray(res.coef[:, 0])
+
+    r = np.abs(x[:, None] - x[None, :])
+    Kg = gpmod._kernel_gram(r, 'matern52', rho) + 1e-8 * np.eye(n)
+    L = np.linalg.cholesky(Kg)
+    rr = reml_fit(jnp.asarray(Y), jnp.asarray(np.ones((n, 1))),
+                  jnp.asarray(L), n_iter=60)
+    sf2_r = np.asarray(rr.sigma_b_sq)
+    se2_r = np.asarray(rr.sigma_e_sq)
+    beta_r = np.asarray(rr.beta_hat[:, 0])
+
+    assert np.allclose(sf2, sf2_r, rtol=2e-3), (sf2, sf2_r)
+    assert np.allclose(se2, se2_r, rtol=2e-3), (se2, se2_r)
+    assert np.allclose(beta, beta_r, atol=1e-4), (beta, beta_r)
+
+
+def test_exact_matches_sklearn_gpr():
+    """The exact engine (full-rank) recovers an exact ``GaussianProcessRegressor``
+    -- an exact-vs-exact anchor, so lengthscale and predictive mean agree tightly."""
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import (
+        ConstantKernel as C,
+    )
+    from sklearn.gaussian_process.kernels import (
+        Matern,
+        WhiteKernel,
+    )
+
+    rng = np.random.default_rng(4)
+    n = 90
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    y, f = _gp_draw(rng, x, rho=0.17, amp=1.0, nu=2.5, noise=0.1)
+
+    kern = (
+        C(1.0, (1e-3, 1e3))
+        * Matern(length_scale=0.2, nu=2.5, length_scale_bounds=(1e-2, 1e1))
+        + WhiteKernel(0.05, (1e-5, 1e1))
+    )
+    gpr = GaussianProcessRegressor(
+        kernel=kern, normalize_y=True, n_restarts_optimizer=3
+    ).fit(x[:, None], y)
+    ls = gpr.kernel_.k1.k2.length_scale
+
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), kernel='matern52',
+                 engine='exact', rank=n, n_rho=40)
+    rho_hat = float(np.exp(res.theta[0, 2]))
+    assert res.engine == 'exact'
+    assert res.rank == n
+    # Exact vs exact: lengthscale within ~30% (REML vs sklearn ML).
+    assert 0.7 * ls < rho_hat < 1.4 * ls, (rho_hat, ls)
+
+    xg = np.linspace(0.03, 0.97, 70)
+    mean_nitrix, _ = gp_predict(res, jnp.asarray(xg), x_train=jnp.asarray(x))
+    mean_sklearn = gpr.predict(xg[:, None])
+    mean_nitrix = np.asarray(mean_nitrix)[0]
+    assert np.corrcoef(mean_nitrix, mean_sklearn)[0, 1] > 0.995
+    assert np.sqrt(np.mean((mean_nitrix - mean_sklearn) ** 2)) < 0.1
+
+
+@pytest.mark.parametrize('kernel', ['matern12', 'matern32', 'matern52', 'rbf'])
+def test_exact_each_kernel_recovers_smooth(kernel):
+    rng = np.random.default_rng(31)
+    n = 100
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    truth = np.sin(2 * np.pi * x)
+    y = truth + 0.1 * rng.standard_normal(n)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), kernel=kernel,
+                 engine='exact', rank=n, n_rho=24)
+    mean, _ = gp_predict(res, jnp.asarray(x), x_train=jnp.asarray(x))
+    assert np.corrcoef(np.asarray(mean)[0], truth)[0, 1] > 0.95
+
+
+def test_exact_truncated_rank_is_nystrom():
+    """``engine='exact'`` with ``rank < N`` is the eigen-truncated (KL/Nystrom)
+    approximation; it still recovers a smooth and ``rank`` is recorded."""
+    rng = np.random.default_rng(33)
+    n = 120
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    y, f = _gp_draw(rng, x, rho=0.3, noise=0.08)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), engine='exact',
+                 rank=12, n_rho=20)
+    assert res.rank == 12
+    assert res.coef.shape == (1, 1 + 12)
+    mean, _ = gp_predict(res, jnp.asarray(x), x_train=jnp.asarray(x))
+    assert np.corrcoef(np.asarray(mean)[0], f)[0, 1] > 0.95
+
+
+def test_exact_default_rank_is_full():
+    """``rank=None`` with ``engine='exact'`` defaults to the full rank ``N``."""
+    rng = np.random.default_rng(35)
+    n = 40
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    y, _ = _gp_draw(rng, x, rho=0.25, noise=0.1)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), engine='exact',
+                 n_rho=16)
+    assert res.rank == n
+
+
+def test_exact_predict_requires_x_train():
+    rng = np.random.default_rng(37)
+    n = 50
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    y, _ = _gp_draw(rng, x, rho=0.2, noise=0.1)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), engine='exact',
+                 rank=n, n_rho=16)
+    with pytest.raises(ValueError):
+        gp_predict(res, jnp.asarray(x))  # exact needs x_train
+    mean, std = gp_predict(res, jnp.asarray(x), x_train=jnp.asarray(x))
+    assert mean.shape == (1, n) and std.shape == (1, n)

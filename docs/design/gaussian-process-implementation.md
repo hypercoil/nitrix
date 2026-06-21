@@ -19,12 +19,14 @@ PR independently shippable and gam_fit-compatible:
 |----|-------|-------|----------|
 | **PR1** | Spectral densities + fixed-`ρ` `hsgp_basis` (1-D) | `gam_fit` **unchanged** | `linalg/kernel.py`, `stats/basis.py`, test |
 | **PR2** | `gp_fit`/`GPResult`/`gp_predict` — HSGP, shared-`ρ` diagonal-`S(ρ)` REML, optional MAP-`ρ` | new `stats/gp.py` | + HLO-budget test |
-| **PR3** | Tier 2b full-rank shared-kernel via `reml_fit`; `corr=` composition | `lme.reml_fit`, `gls_fit` | thin |
+| **PR3a** | Tier 2b full-rank `engine='exact'` (kernel-eigenfeature REML) | shared PR2 core (≡ `lme.reml_fit`) | thin |
+| **PR3b** | `corr=` composition (structured residual: ar1/car1/cs) | `lme.gls_fit`/`fit_corr_lme` | |
 | **PR4** | Tier 3 `gp_factor_smooth` + `hgp_fit`; nested HGP | `re_smooth`/`by_factor_smooth`/`gam_fit`, `lme/_nested.py` | |
 | **PR5** | multi-D `hsgp_basis_nd` (tensor product); perf-bench | | |
 
 This document specifies **PR1 fully** and PR2 to the design level; PR3–5 are
-sketched (they don't constrain PR1/PR2).
+sketched (they don't constrain PR1/PR2). **PR3a is shipped** (`engine='exact'`);
+PR3b (`corr=`) and PR4–5 remain.
 
 ## 1. Math spec (1-D HSGP)
 
@@ -199,12 +201,41 @@ reduction), `(σ_f², σ_e²)` per voxel.
 - **`gp_predict(result, x_new, *, parametric=None)`** — no `basis` argument: because
   the eigenbasis is `ρ`-independent and uncentred, `Φ(x_new)` is reconstructed from
   the recorded `(lo, hi, boundary, rank)` aux, so the result is self-contained.
-- **`GPResult` aux** = `(kernel, n_obs, rank, n_fixed, lo, hi, boundary)` (the
-  domain descriptors are needed for `gp_predict`'s self-contained reconstruction);
+- **`GPResult` aux** = `(kernel, engine, n_obs, rank, n_fixed, lo, hi, boundary)`
+  (the domain descriptors feed `gp_predict`'s self-contained HSGP reconstruction);
   `theta` is `(V,3) = [log σ_f², log σ_e², log ρ]` (the `ρ` column is constant).
 - **`map_rho`** is an optional `ρ→penalty` callable added to the pooled objective
-  (MAP/prior-regularised lengthscale); `corr=` and `engine='exact'`/
-  `select='per-voxel'` raise `NotImplementedError` (PR3+).
+  (MAP/prior-regularised lengthscale); `corr=` and `select='per-voxel'` raise
+  `NotImplementedError` (PR3b / later).
+
+## 5a. PR3a — `engine='exact'` (**shipped**)
+
+The full-rank GP shares the **entire** PR2 penalised-REML core (`_gp_fit_one`,
+`_quantities`, `_reml_nll`, the pooled-`ρ` grid + parabolic refine, `_assemble_gp_result`);
+it differs only in the smooth design:
+
+- **Design = kernel eigenfeatures** `Φ(ρ) = U_k diag(√λ_k)` from a host
+  `numpy.linalg.eigh` of the kernel Gram `K_ρ` (closed-form Matérn-½/3⁄2/5⁄2 + RBF,
+  matched to the same sklearn lengthscale convention as the spectral densities).
+  `ΦΦᵀ` is the rank-`k` truncation of `K_ρ` — **exact when `rank=N`** (default for
+  `engine='exact'`), the Karhunen-Loève / Nyström approximation for `rank<N`.
+- **Unlike HSGP, `Φ` *moves* with `ρ`** (the eigenbasis is kernel-dependent), so the
+  penalty is the plain identity (unit spectral weights), the cross-products are
+  rebuilt per `ρ`, and the `ρ`-search is a **host loop** (one shared `eigh` per grid
+  `ρ`, data-independent of `Y` ⇒ cuSOLVER-free; no `eigh` *in the jitted region*).
+- **`gp_predict`** adds an `x_train` argument (required for `'exact'`): the
+  out-of-sample features are the Nyström map `K(x*, x) U_k diag(1/√λ_k)`. HSGP stays
+  self-contained (no `x_train`).
+- **Equivalence to `lme.reml_fit`** (the "via `reml_fit`" intent): verified to
+  **machine precision** — at fixed `ρ`, `(σ_f², σ_e², β)` reproduce
+  `reml_fit(Y, X, Z=chol(K_ρ))` to `<2e-3` (`test_exact_matches_reml_fit_at_fixed_rho`).
+  The exact engine *is* FaST-LMM variance-components REML, computed through the
+  penalty form — so we reuse the one penalised-REML path rather than calling
+  `reml_fit` (no whitening-space round-trip, uniform `GPResult`/`gp_predict`).
+- **Validation:** exact-vs-exact sklearn GPR anchor (lengthscale + predictive mean,
+  tighter than HSGP's); each kernel; full-rank vs KL-truncated; `x_train` guard.
+- **Memory:** the exact engine is inherently `O(V·N²)` (`cov_unscaled` is `(V, p, p)`
+  with `p ≈ N`) — the accepted exact-GP cost; the HLO-budget invariant is HSGP-only.
 
 **Invariants (verified):** no runtime `eigh` (Φ closed-form), `O(V·(m+q)²)` working
 memory, an HLO-budget test (`test_gp_final_fit_hlo_is_cusolver_free_and_N_free`)
