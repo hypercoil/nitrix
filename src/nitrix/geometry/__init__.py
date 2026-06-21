@@ -118,6 +118,10 @@ from .surface import (
     strain_distortion,
     surface_smooth,
 )
+from .topology import (
+    euler_characteristic,
+    genus,
+)
 
 __all__ = [
     # grid
@@ -195,4 +199,7 @@ __all__ = [
     'areal_distortion',
     'strain_distortion',
     'surface_smooth',
+    # topology (the genus-0 defect gate)
+    'euler_characteristic',
+    'genus',
 ]
