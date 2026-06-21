@@ -515,9 +515,10 @@ class MIForce:
         Pinned ``(lo, hi)`` intensity ranges.  ``None`` is resolved **once** from
         the full-resolution images by the recipe (``_svf.pin_force_ranges``)
         before the pyramid -- a data ``min/max`` range drifts as the moving image
-        deforms (a non-stationary objective).  Under ``jax.jit`` with *traced*
-        images the caller must pass explicit ranges (``float(tracer)`` cannot
-        run eagerly).
+        deforms (a non-stationary objective).  The pin is a ``stop_gradient``-ed
+        reduction, so it is **jit-safe**: ``MIForce(bins=...)`` traces with no
+        explicit range (the range is auto-derived once and held constant).  Pass
+        an explicit range only to fix a binning other than the data min/max.
     magnitude
         Target per-voxel RMS magnitude (voxels); ``0.5`` matches
         ``MetricForce``.  ``normalized`` MI is intentionally absent -- NMI is the
@@ -589,7 +590,9 @@ class _BoundMI:
             range_fixed=self.range_fixed,
             sample_stride=self.sample_stride,
         )
-        grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
+        grad = spatial_gradient(
+            warped, spacing=_grad_spacing(self.rel_spacing)
+        )
         # Force convention u = −∂cost/∂warped·∇warped with cost = −MI gives
         # u = +mi_grad·∇warped (ascend MI), then the controlled-magnitude RMS
         # normalisation (a histogram metric is not a spatial mean -- 0c / B2).
@@ -681,7 +684,9 @@ class _BoundMetric:
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
         grad_cost = jax.grad(lambda w: self.metric.cost(w, self.fixed))(warped)
-        grad = spatial_gradient(warped, spacing=_grad_spacing(self.rel_spacing))
+        grad = spatial_gradient(
+            warped, spacing=_grad_spacing(self.rel_spacing)
+        )
         force = -grad_cost[..., None] * grad
         if getattr(self.metric, 'is_spatial_mean', False):
             # Spatial-mean cost (SSD, LNCC): the closed forms (and the driver's

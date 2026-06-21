@@ -301,7 +301,17 @@ def diffeomorphic_demons_register(
     Returns
     -------
     ``DiffeomorphicResult`` (``velocity``, ``displacement``, ``warped``,
-    ``jacobian_det``, ``cost_history``).
+    ``jacobian_det``, ``cost_history``).  ``velocity`` is ``None`` unless
+    ``spec.compute_velocity`` (the default skips its ``field_log`` recovery).
+
+    Warning
+    -------
+    The Gaussian regulariser dispatches engines per backend (parallel FIR on
+    GPU, recursive Young-van Vliet on CPU), which differ by ~1-2 % near the
+    edges -- so a pair can yield slightly different deformations on GPU vs CPU
+    (recovery accuracy is unaffected).  For a reproducible study, register every
+    subject of a cohort on the **same backend**; do not mix CPU- and GPU-computed
+    warps in one analysis.
     """
     ndim = fixed.ndim
     if ndim not in (2, 3) or moving.ndim != ndim:

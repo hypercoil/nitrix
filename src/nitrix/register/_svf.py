@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Optional, Sequence, Union, cast
 
 import jax.numpy as jnp
+from jax import lax
 from jaxtyping import Array
 
 from .._internal.backend import default_backend_is_gpu
@@ -103,24 +104,38 @@ def smooth_pyramid(
     )
 
 
+def _pin_range(x: Array) -> tuple[float, float]:
+    """A stationary ``(lo, hi)`` from the full-res data, jit-safe.
+
+    A ``stop_gradient``-ed ``jnp.min``/``jnp.max`` (not ``float()``): under
+    ``jax.jit`` the images are tracers, so an eager ``float(tracer)`` cannot run
+    -- a traced reduction can.  ``stop_gradient`` keeps the bin edges *constant*
+    (the Mattes piecewise-constant-edge assumption; no gradient flows through
+    the range derivation).  Eager value is identical to the old ``float`` path.
+    """
+    lo = lax.stop_gradient(jnp.min(x))
+    hi = lax.stop_gradient(jnp.max(x))
+    return cast('tuple[float, float]', (lo, hi))
+
+
 def pin_force_ranges(force: Force, moving: Array, fixed: Array) -> Force:
-    """Pin a histogram force's intensity ranges eagerly from the full-res images.
+    """Pin a histogram force's intensity ranges from the full-res images.
 
     A data ``min/max`` range drifts as the moving image deforms across the
     optimisation (a non-stationary objective) and truncates the force at the clip
     boundary, so each SVF recipe resolves any ``None`` range on an
     :class:`MIForce` **once**, before the pyramid, from the full-resolution
-    images -- eager Python floats, so the range rides the frozen force as
-    jit-static config and is the *correct* (piecewise-constant) gradient.  A
-    no-op for any other force (and for an ``MIForce`` whose ranges are already
-    pinned).  **jit caveat:** under ``jax.jit`` with *traced* images,
-    ``float(tracer)`` cannot run -- pass explicit ranges then.
+    images -- a ``stop_gradient``-ed reduction (``_pin_range``), so the range
+    rides the frozen force as a *constant* (the piecewise-constant-edge Mattes
+    gradient) and the pin is **jit-safe**: ``MIForce(bins=...)`` needs no
+    explicit range even under ``jax.jit`` (the eager value is unchanged).  A
+    no-op for any other force (and for an ``MIForce`` already pinned).
     """
     if isinstance(force, MIForce) and (
         force.range_moving is None or force.range_fixed is None
     ):
-        rm = force.range_moving or (float(moving.min()), float(moving.max()))
-        rf = force.range_fixed or (float(fixed.min()), float(fixed.max()))
+        rm = force.range_moving or _pin_range(moving)
+        rf = force.range_fixed or _pin_range(fixed)
         return replace(force, range_moving=rm, range_fixed=rf)
     return force
 
