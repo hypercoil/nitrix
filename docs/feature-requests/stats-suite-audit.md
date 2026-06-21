@@ -152,10 +152,10 @@ decision (bring a proposal before coding).
   (dropped `VarCompSpec.reml`; intercept-policy + `low_rank` R1-only docs;
   `n_iter` rename deferred as cosmetic).
 - **Wave 2 — code organisation (mechanical, behaviour-preserving):**
-  **O2** (M, move `damped_newton` to a stats-core module),
-  **D7** (S, lift `_param_layout`/`cov_re_from_chol` to `lme/_recov.py`),
-  **O1** (M, split `glmm.py` into a `glmm/` package),
-  **O3** ⚖️ (S, rename `_betareg`/`_gaulss`/`_ordinal` *or* document).
+  **O2** ✅ (`damped_newton` → `stats/_optimise.py`, decoupled from `VarCompSpec`),
+  **D7** ✅ (RE-cov helpers → `lme/_recov.py`),
+  **O1** ✅ (`glmm.py` → `glmm/` package),
+  **O3** ⚖️ (S, rename `_betareg`/`_gaulss`/`_ordinal` *or* document — **decision pending**).
 - **Wave 3 — design contracts (decisions; complete the inference surface):**
   **D2** ⚖️ (M, uniform lme `.cov_re (V,k,k)` + `.re_labels` — nested/crossed as
   block-diagonal), **D3** ⚖️ (M–L, F/t-contrasts on R2/R3/R4/+corr),
