@@ -143,6 +143,17 @@ class SyNSpec:
         looser threshold (``~1e-5`` gave ~10 % there at equal accuracy).
         (Contrast the matrix inverse-compositional path, which converges in a
         few of its iterations and so defaults early-exit *on*.)
+    compute_velocity
+        Whether to recover and return ``forward_velocity`` / ``inverse_velocity``.
+        ``False`` (default) leaves both ``None`` and skips the **two**
+        ``geometry.field_log`` finalisations (group mode) -- under ``jit`` that
+        loop nest is never traced, so it costs neither compile nor runtime.  The
+        deformation outputs (``displacement`` / ``warped`` / ``jacobian_det``)
+        never depend on the velocities -- they come from the half-displacements
+        directly (``invert_displacement`` + ``compose_displacement``).  Set
+        ``True`` to recover the velocities (e.g. for ``geometry.velocity_mean``).
+        **Default changed in this release** (was always computed); pass
+        ``compute_velocity=True`` to restore the old behaviour.
     """
 
     levels: int = 3
@@ -159,6 +170,7 @@ class SyNSpec:
     boundary_mode: BoundaryMode = 'nearest'
     representation: Literal['group', 'algebra'] = 'group'
     convergence: Optional[Convergence] = None
+    compute_velocity: bool = False
 
 
 class SyNResult(NamedTuple):
@@ -167,9 +179,11 @@ class SyNResult(NamedTuple):
     Attributes
     ----------
     forward_velocity
-        Velocity field ``v_fwd`` (moving -> midpoint), ``(*spatial, ndim)``.
+        Velocity field ``v_fwd`` (moving -> midpoint), ``(*spatial, ndim)``, or
+        ``None`` when ``SyNSpec.compute_velocity`` is ``False`` (the default --
+        the field_log recovery is skipped to save compile + runtime).
     inverse_velocity
-        Velocity field ``v_inv`` (fixed -> midpoint).
+        Velocity field ``v_inv`` (fixed -> midpoint), or ``None`` (see above).
     displacement
         The moving -> fixed deformation ``φ`` as a displacement field (add
         ``identity_grid`` for the absolute deformation).
@@ -182,8 +196,8 @@ class SyNResult(NamedTuple):
         Concatenated per-iteration ``1 − lncc`` trace.
     """
 
-    forward_velocity: Float[Array, '*spatial ndim']
-    inverse_velocity: Float[Array, '*spatial ndim']
+    forward_velocity: Optional[Float[Array, '*spatial ndim']]
+    inverse_velocity: Optional[Float[Array, '*spatial ndim']]
     displacement: Float[Array, '*spatial ndim']
     warped: Float[Array, '*spatial']
     jacobian_det: Float[Array, '*spatial']
@@ -417,19 +431,32 @@ def greedy_syn_register(
 
     # Algebra carries the half-velocities (exp each); group carries the half-
     # displacements directly (recover the velocities via field_log).  The final
-    # composition + single inversion is identical in both modes.
+    # composition + single inversion is identical in both modes.  The velocities
+    # feed none of displacement/warped/jacobian_det, so they are recovered only
+    # when requested (spec.compute_velocity) -- under jit the two field_log loop
+    # nests are then never traced (no compile, no runtime).
+    v_fwd: Optional[Array]
+    v_inv: Optional[Array]
     if spec.representation == 'algebra':
-        v_fwd, v_inv = state_fwd, state_inv
         s_fwd = integrate_velocity_field(
-            v_fwd, n_steps=spec.n_steps, mode=spec.boundary_mode
+            state_fwd, n_steps=spec.n_steps, mode=spec.boundary_mode
         )
         s_inv = integrate_velocity_field(
-            v_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
+            state_inv, n_steps=spec.n_steps, mode=spec.boundary_mode
         )
+        v_fwd = state_fwd if spec.compute_velocity else None
+        v_inv = state_inv if spec.compute_velocity else None
     else:
         s_fwd, s_inv = state_fwd, state_inv
-        v_fwd = field_log(s_fwd, n_sqrt=spec.n_steps, mode=spec.boundary_mode)
-        v_inv = field_log(s_inv, n_sqrt=spec.n_steps, mode=spec.boundary_mode)
+        if spec.compute_velocity:
+            v_fwd = field_log(
+                s_fwd, n_sqrt=spec.n_steps, mode=spec.boundary_mode
+            )
+            v_inv = field_log(
+                s_inv, n_sqrt=spec.n_steps, mode=spec.boundary_mode
+            )
+        else:
+            v_fwd = v_inv = None
     # moving -> fixed residual: fixed --(id+s_inv)⁻¹--> midpoint --(id+s_fwd)-->
     s_inv_inverse = invert_displacement(s_inv, mode=spec.boundary_mode)
     residual = compose_displacement(

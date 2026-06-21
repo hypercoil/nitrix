@@ -80,7 +80,9 @@ def _interior(a, m=6):
 def test_group_syn_recovers_like_algebra():
     fixed = _blobs(64)
     moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 45.0, 0))
-    spec = SyNSpec(levels=3, iterations=60, radius=2, step=0.5)
+    spec = SyNSpec(
+        levels=3, iterations=60, radius=2, step=0.5, compute_velocity=True
+    )
     alg = greedy_syn_register(
         moving, fixed, spec=replace(spec, representation='algebra')
     )
@@ -98,7 +100,7 @@ def test_group_syn_recovers_like_algebra():
 def test_group_demons_recovers_like_algebra():
     fixed = _blobs(64)
     moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 30.0, 1))
-    spec = DemonsSpec(levels=3, iterations=80)
+    spec = DemonsSpec(levels=3, iterations=80, compute_velocity=True)
     alg = diffeomorphic_demons_register(
         moving, fixed, spec=replace(spec, representation='algebra')
     )
@@ -123,7 +125,9 @@ def test_group_velocity_roundtrips_and_feeds_barycentre():
     # the v3 barycentre machinery (template construction).
     fixed = _blobs(64)
     moving = _warp(fixed, _smooth_velocity((64, 64), 8.0, 30.0, 2))
-    spec = DemonsSpec(levels=3, iterations=80, representation='group')
+    spec = DemonsSpec(
+        levels=3, iterations=80, representation='group', compute_velocity=True
+    )
     res = diffeomorphic_demons_register(moving, fixed, spec=spec)
     re_exp = integrate_velocity_field(
         res.velocity, n_steps=spec.n_steps, mode=spec.boundary_mode

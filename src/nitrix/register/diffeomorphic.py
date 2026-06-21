@@ -132,6 +132,17 @@ class DemonsSpec:
         ``while_loop`` overhead exceeds its saving on the fast GPU path) -- hence
         ``None`` is the default.  Useful for an *untuned / flat* schedule or the
         CPU path with a looser threshold.
+    compute_velocity
+        Whether to recover and return the stationary ``velocity`` field.
+        ``False`` (default) leaves ``DiffeomorphicResult.velocity`` as ``None``
+        and skips the ``geometry.field_log`` finalisation entirely -- under
+        ``jit`` that whole loop nest is never traced, so it costs neither compile
+        nor runtime (measured ~half the GPU warm time of a Demons solve, ~25-30%
+        of its HLO).  Most callers only need ``warped`` / ``displacement`` /
+        ``jacobian_det``, which never depend on ``velocity``.  Set ``True`` to get
+        the velocity back (e.g. to feed ``geometry.velocity_mean`` or the
+        transform-algebra path).  **Default changed in this release** (was always
+        computed); pass ``compute_velocity=True`` to restore the old behaviour.
     """
 
     levels: int = 3
@@ -147,6 +158,7 @@ class DemonsSpec:
     boundary_mode: BoundaryMode = 'nearest'
     representation: Literal['group', 'algebra'] = 'group'
     convergence: Optional[Convergence] = None
+    compute_velocity: bool = False
 
 
 class DiffeomorphicResult(NamedTuple):
@@ -155,7 +167,9 @@ class DiffeomorphicResult(NamedTuple):
     Attributes
     ----------
     velocity
-        The stationary velocity field, ``(*spatial, ndim)``.
+        The stationary velocity field, ``(*spatial, ndim)``, or ``None`` when
+        ``DemonsSpec.compute_velocity`` is ``False`` (the default -- see that
+        flag; the velocity recovery is skipped to save compile + runtime).
     displacement
         ``exp(velocity)`` as a displacement field (add ``identity_grid``
         for the absolute deformation).
@@ -168,7 +182,7 @@ class DiffeomorphicResult(NamedTuple):
         Concatenated per-iteration SSD trace.
     """
 
-    velocity: Float[Array, '*spatial ndim']
+    velocity: Optional[Float[Array, '*spatial ndim']]
     displacement: Float[Array, '*spatial ndim']
     warped: Float[Array, '*spatial']
     jacobian_det: Float[Array, '*spatial']
@@ -409,15 +423,21 @@ def diffeomorphic_demons_register(
 
     # Algebra mode carries the velocity (exp it for the residual); group mode
     # carries the displacement directly and recovers the velocity via field_log.
+    # The velocity feeds neither warped/displacement/jacobian_det, so it is only
+    # recovered when explicitly requested (spec.compute_velocity) -- under jit the
+    # field_log loop nest is then never traced (no compile, no runtime).
+    velocity: Optional[Array]
     if spec.representation == 'algebra':
-        velocity = state
         residual = integrate_velocity_field(
-            velocity, n_steps=spec.n_steps, mode=spec.boundary_mode
+            state, n_steps=spec.n_steps, mode=spec.boundary_mode
         )
+        velocity = state if spec.compute_velocity else None
     else:
         residual = state
-        velocity = field_log(
-            residual, n_sqrt=spec.n_steps, mode=spec.boundary_mode
+        velocity = (
+            field_log(residual, n_sqrt=spec.n_steps, mode=spec.boundary_mode)
+            if spec.compute_velocity
+            else None
         )
     total, warped, det = finalize_with_init(
         moving,
