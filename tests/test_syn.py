@@ -72,7 +72,11 @@ def test_syn_2d_recovery_and_diffeomorphism():
     assert init < 0.99
 
     res = greedy_syn_register(
-        moving, fixed, spec=SyNSpec(levels=3, iterations=60, step=0.5)
+        moving,
+        fixed,
+        spec=SyNSpec(
+            levels=3, iterations=60, step=0.5, compute_velocity=True
+        ),
     )
     assert float(ncc(res.warped, fixed)) > 0.99
     assert float(ncc(res.warped, fixed)) > init + 0.02
@@ -89,7 +93,9 @@ def test_syn_smoothing_default_off_byte_identical():
     fixed = _blobs_2d(48)
     v_true = _smooth_velocity((48, 48), 2, 8.0, 30.0, 7)
     moving = _warp_by_velocity(fixed, v_true)
-    spec = SyNSpec(levels=2, iterations=30, step=0.5)
+    spec = SyNSpec(
+        levels=2, iterations=30, step=0.5, compute_velocity=True
+    )
     res_default = greedy_syn_register(moving, fixed, spec=spec)
     res_zero = greedy_syn_register(
         moving, fixed, spec=spec, smoothing_sigma=0.0

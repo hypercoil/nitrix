@@ -70,7 +70,9 @@ def test_demons_2d_recovery_and_diffeomorphism():
     assert init < 0.99  # a genuine misalignment
 
     res = diffeomorphic_demons_register(
-        moving, fixed, spec=DemonsSpec(levels=3, iterations=60)
+        moving,
+        fixed,
+        spec=DemonsSpec(levels=3, iterations=60, compute_velocity=True),
     )
     assert float(ncc(res.warped, fixed)) > 0.99
     assert float(ncc(res.warped, fixed)) > init + 0.02
@@ -109,7 +111,9 @@ def test_demons_3d_recovery_and_diffeomorphism():
 def test_demons_identity():
     fixed = _blobs_2d(48)
     res = diffeomorphic_demons_register(
-        fixed, fixed, spec=DemonsSpec(levels=2, iterations=20)
+        fixed,
+        fixed,
+        spec=DemonsSpec(levels=2, iterations=20, compute_velocity=True),
     )
     assert float(jnp.abs(res.velocity).max()) < 1e-6
     assert float(ncc(res.warped, fixed)) > 0.999
@@ -158,7 +162,7 @@ def test_demons_smoothing_default_off_byte_identical():
     fixed = _blobs_2d(48)
     v_true = _smooth_velocity((48, 48), 2, 8.0, 30.0, 5)
     moving = _warp_by_velocity(fixed, v_true)
-    spec = DemonsSpec(levels=2, iterations=30)
+    spec = DemonsSpec(levels=2, iterations=30, compute_velocity=True)
     res_default = diffeomorphic_demons_register(moving, fixed, spec=spec)
     res_zero = diffeomorphic_demons_register(
         moving, fixed, spec=spec, smoothing_sigma=0.0
@@ -214,12 +218,19 @@ def test_demons_anisotropic_spacing_recovers_and_differs():
     init = float(ncc(moving, fixed))
 
     res_iso = diffeomorphic_demons_register(
-        moving, fixed, spec=DemonsSpec(levels=3, iterations=60)
+        moving,
+        fixed,
+        spec=DemonsSpec(levels=3, iterations=60, compute_velocity=True),
     )
     res_aniso = diffeomorphic_demons_register(
         moving,
         fixed,
-        spec=DemonsSpec(levels=3, iterations=60, spacing=(2.0, 1.0)),
+        spec=DemonsSpec(
+            levels=3,
+            iterations=60,
+            spacing=(2.0, 1.0),
+            compute_velocity=True,
+        ),
     )
 
     assert float(ncc(res_aniso.warped, fixed)) > 0.98
@@ -251,7 +262,9 @@ def test_demons_finite_on_uniform_background():
     fixed = jnp.asarray(bump)
     moving = jnp.asarray(np.roll(bump, 2, axis=0))  # background stays exact-0
     res = diffeomorphic_demons_register(
-        moving, fixed, spec=DemonsSpec(levels=1, iterations=1)
+        moving,
+        fixed,
+        spec=DemonsSpec(levels=1, iterations=1, compute_velocity=True),
     )
     assert bool(jnp.all(jnp.isfinite(res.warped)))
     assert bool(jnp.all(jnp.isfinite(res.velocity)))

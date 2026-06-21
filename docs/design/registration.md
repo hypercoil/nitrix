@@ -244,16 +244,57 @@ affine_register(moving, fixed,
                 spec=RegistrationSpec(metric=CorrelationRatio(bins=32),
                                       levels=3))
 
-# Diffeomorphic (log-Demons; guaranteed diffeomorphism).
+# Diffeomorphic (log-Demons; guaranteed diffeomorphism).  ``velocity`` is
+# recovered (geometry.field_log) only when requested -- the default skips it,
+# since it feeds none of displacement / warped / jacobian_det.
 d = diffeomorphic_demons_register(moving, fixed,
                                   spec=DemonsSpec(levels=3, iterations=80))
-d.velocity, d.displacement, d.warped
+d.displacement, d.warped            # d.velocity is None by default
 assert float(d.jacobian_det.min()) > 0.0   # no folding
+# Need the SVF? -> spec=DemonsSpec(..., compute_velocity=True); d.velocity
 
 # Differentiable layer (exact gradients at the optimum, no unrolling):
 from nitrix.linalg import implicit_least_squares
 # residual_fn((moving, fixed), theta) = (warp(moving, theta) - fixed).ravel()
 ```
+
+## 6.2 Performance & cold-compile amortisation
+
+The recipes are pure functions of ``(moving, fixed)`` with a jit-static
+``spec`` -- in production wrap the whole recipe in a single ``jax.jit``
+(``MIForce`` auto-derives its histogram range, so it traces with just a bin
+count -- no explicit range needed).  The warm GPU step is then small (an MNI-2mm
+``40x20x10`` group-Demons solve is ~30 ms on an L4, ~240x faster than ITK
+demons; SyN+MI ~90 ms, ~70x faster than ANTs-SyN).
+The dominant *single-pair* cost is the one-off XLA **cold compile** (~9-15 s,
+~3 distinct-shape pyramid levels each compiling a scan body), so the GPU win is
+realised **amortised**:
+
+- **Same-shape cohort / persistent cache** -- set ``JAX_COMPILATION_CACHE_DIR``
+  (or batch a cohort) so the cold compile is paid once per shape and reused;
+  cold then drops to ~0 for every subsequent registration of that shape.
+- **Skip unused outputs** -- ``compute_velocity`` defaults ``False``, so the
+  ``field_log`` finalisation is neither compiled nor run (~half the GPU warm
+  time of a Demons solve; SyN recovers two velocities, so ~half again).
+- **Backend-aware regulariser** -- the fluid/diffusion Gaussian smooths dispatch
+  per backend (FIR on GPU, recursive on CPU); the GPU path is unchanged, the CPU
+  recipe is ~1.4x faster (and ~2x with the lazy velocity above).
+- **Autotune** -- ``XLA_FLAGS=--xla_gpu_autotune_level=0`` trims the cold compile
+  ~20 % (Demons) with no measurable warm regression for these kernels.
+
+> **⚠️ Process a dataset on ONE backend.**  The Gaussian regulariser uses
+> *different* engines per backend (parallel FIR on GPU, recursive Young-van
+> Vliet on CPU), which differ by ~1-2 % near the edges -- so the **same pair can
+> produce slightly different deformations on GPU vs CPU**.  This is a numerical
+> divergence of the regulariser, not the objective (recovery accuracy is
+> unaffected), but for a *reproducible* study every subject must be registered on
+> the **same backend**: do not mix CPU- and GPU-computed warps within one cohort
+> / analysis.  (The same applies to any backend-dispatched primitive, e.g.
+> ``signal._iir``.)
+
+Honest economics: a single-pair *cold* GPU SyN (~15 s) is already on par with
+ANTs-CPU (~16 s) -- it is only a loss against its own *warm* potential, which the
+cache / cohort recovers.  The qualitative GPU win is the warm/amortised regime.
 
 ## 7. Out of scope (scope discipline)
 

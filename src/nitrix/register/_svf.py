@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Optional, Sequence, Union, cast
 
 import jax.numpy as jnp
+from jax import lax
 from jaxtyping import Array
 
+from .._internal.backend import default_backend_is_gpu
 from ..geometry import (
     affine_grid,
     compose_displacement,
@@ -102,26 +104,64 @@ def smooth_pyramid(
     )
 
 
+def _pin_range(x: Array) -> tuple[float, float]:
+    """A stationary ``(lo, hi)`` from the full-res data, jit-safe.
+
+    A ``stop_gradient``-ed ``jnp.min``/``jnp.max`` (not ``float()``): under
+    ``jax.jit`` the images are tracers, so an eager ``float(tracer)`` cannot run
+    -- a traced reduction can.  ``stop_gradient`` keeps the bin edges *constant*
+    (the Mattes piecewise-constant-edge assumption; no gradient flows through
+    the range derivation).  Eager value is identical to the old ``float`` path.
+    """
+    lo = lax.stop_gradient(jnp.min(x))
+    hi = lax.stop_gradient(jnp.max(x))
+    return cast('tuple[float, float]', (lo, hi))
+
+
 def pin_force_ranges(force: Force, moving: Array, fixed: Array) -> Force:
-    """Pin a histogram force's intensity ranges eagerly from the full-res images.
+    """Pin a histogram force's intensity ranges from the full-res images.
 
     A data ``min/max`` range drifts as the moving image deforms across the
     optimisation (a non-stationary objective) and truncates the force at the clip
     boundary, so each SVF recipe resolves any ``None`` range on an
     :class:`MIForce` **once**, before the pyramid, from the full-resolution
-    images -- eager Python floats, so the range rides the frozen force as
-    jit-static config and is the *correct* (piecewise-constant) gradient.  A
-    no-op for any other force (and for an ``MIForce`` whose ranges are already
-    pinned).  **jit caveat:** under ``jax.jit`` with *traced* images,
-    ``float(tracer)`` cannot run -- pass explicit ranges then.
+    images -- a ``stop_gradient``-ed reduction (``_pin_range``), so the range
+    rides the frozen force as a *constant* (the piecewise-constant-edge Mattes
+    gradient) and the pin is **jit-safe**: ``MIForce(bins=...)`` needs no
+    explicit range even under ``jax.jit`` (the eager value is unchanged).  A
+    no-op for any other force (and for an ``MIForce`` already pinned).
     """
     if isinstance(force, MIForce) and (
         force.range_moving is None or force.range_fixed is None
     ):
-        rm = force.range_moving or (float(moving.min()), float(moving.max()))
-        rf = force.range_fixed or (float(fixed.min()), float(fixed.max()))
+        rm = force.range_moving or _pin_range(moving)
+        rf = force.range_fixed or _pin_range(fixed)
         return replace(force, range_moving=rm, range_fixed=rf)
     return force
+
+
+def _smooth_method(
+    sigma: Union[float, Sequence[float]],
+) -> Literal['fir', 'recursive']:
+    """Backend-aware Gaussian engine for the vector-field regulariser.
+
+    The fluid/diffusion smooths run on the multi-channel velocity/displacement
+    field on *every* iteration (2x Demons, 4x SyN), so the engine matters.  On
+    GPU the shifted-slice FIR path is far cheaper than the sequential recursive
+    scan (~0.3 ms vs ~12 ms at the registration sigmas, measured) and stays the
+    engine -- byte-identical to the prior behaviour.  On CPU the FIR shift-sum
+    is the dominant per-iteration cost and the O(N) Young-van Vliet recursion is
+    ~1.1-1.5x cheaper, so ``'recursive'`` is selected -- but only when every
+    per-axis sigma clears the YvV validity floor (>= 0.5), else FIR.  The CPU
+    recursion differs from the FIR truncation by ~1-2% within a few sigma of the
+    edge (a *regulariser*, not the objective), so CPU results diverge slightly
+    from GPU; the recovery is unaffected.  Mirrors the ``signal._iir`` auto split
+    (parallel on GPU, sequential recursion on CPU).
+    """
+    if default_backend_is_gpu():
+        return 'fir'
+    sigmas = (sigma,) if isinstance(sigma, (int, float)) else tuple(sigma)
+    return 'recursive' if all(s >= 0.5 for s in sigmas) else 'fir'
 
 
 def _smooth_vector(
@@ -130,10 +170,13 @@ def _smooth_vector(
     """Separable Gaussian over the spatial axes of a channel-last field.
 
     ``sigma`` is a scalar (isotropic) or a length-``ndim`` per-axis
-    sequence (anisotropic regularisation).
+    sequence (anisotropic regularisation).  The engine is backend-aware
+    (``_smooth_method``): FIR on GPU, recursive on CPU.
     """
     moved = jnp.moveaxis(field, -1, 0)
-    smoothed = gaussian(moved, sigma=sigma, spatial_rank=ndim)
+    smoothed = gaussian(
+        moved, sigma=sigma, spatial_rank=ndim, method=_smooth_method(sigma)
+    )
     return jnp.moveaxis(smoothed, 0, -1)
 
 
@@ -706,7 +749,9 @@ def resolve_init_displacement(
     registration centring convention (grid centre, via ``affine_grid``).
     """
     if init_affine is not None and init_displacement is not None:
-        raise ValueError('pass at most one of init_affine / init_displacement.')
+        raise ValueError(
+            'pass at most one of init_affine / init_displacement.'
+        )
     if init_affine is not None:
         return affine_grid(init_affine, shape) - identity_grid(
             shape, dtype=dtype
