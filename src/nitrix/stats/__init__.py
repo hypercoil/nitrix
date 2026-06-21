@@ -73,9 +73,9 @@ from .gam import (
     smooth_partial_effect,
     smooth_significance,
 )
-from ._betareg import BetaResult, beta_fit
-from ._gaulss import GauLSSResult, gaulss_fit
-from ._ordinal import OrdinalResult, ordinal_fit
+from .betareg import BetaResult, beta_fit
+from .gaulss import GauLSSResult, gaulss_fit
+from .ordinal import OrdinalResult, ordinal_fit
 from .glmm import GLMMResult, glmm_fit
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (

@@ -79,7 +79,7 @@ immune.
 |----|-----|--------|----------|-------|----------------|
 | **O1** | High | ✅ **done** | `stats/glmm/` package | 6-solver monolith (1573 LOC: few-level / structured slope / many-level Schur / Laplace / Laplace-slope / AGQ) behind one dispatcher; banners already mark the seams. | **FIXED:** split into a `glmm/` package by **method family** — `__init__.py` (the `glmm_fit` dispatcher), `_base.py` (`GLMMResult` + constants), `_pql.py` (all PQL: few / diagonal-slope / unstructured-slope / many), `_laplace.py` (scalar + slope), `_agq.py` (borrows the mode-finder from `_laplace`). Pure relocation (byte-identical bodies, no cycle); new files made format-clean. |
 | **O2** | High | ✅ **done** | `stats/_optimise.py` (moved) | The "one shared Newton" was housed *inside* `lme/` yet driven by `_ordinal` (non-mixed-model), and typed on `VarCompSpec` though it reads only primitive fields — forcing `_ordinal` to build a variance-components spec it had no use for. (Only `_ordinal` actually used it; `_betareg`/`_gaulss` have their own IRLS.) | **FIXED:** `damped_newton` moved to `stats/_optimise.py` (beside `_irls`/`_batching`), now taking primitive kwargs (`n_iter`/`damping`/`max_step`/`n_backtrack`) — no `VarCompSpec`. Mixed-model sites pass `**spec.newton_kwargs` (a new `VarCompSpec` property); `_ordinal` drops `VarCompSpec` entirely and passes `n_iter`/`ridge` directly (its `ridge` now also floors the information solve, as its docstring already claimed — default `1e-8` bit-preserved). |
-| **O3** | Low | open | `_betareg.py`/`_gaulss.py`/`_ordinal.py` | `_`-prefixed yet export public API (`beta_fit`/…), unlike peer public fitters `glm`/`gam`/`glmm`. | Rename to `betareg.py`/`gaulss.py`/`ordinal.py`, or document "secondary public fitters". |
+| **O3** | Low | ✅ **done** | `betareg.py`/`gaulss.py`/`ordinal.py` | `_`-prefixed yet export public API (`beta_fit`/…), unlike peer public fitters `glm`/`gam`/`glmm`. | **FIXED (rename):** `git mv` to `betareg.py`/`gaulss.py`/`ordinal.py` (history preserved); the 3 imports in `stats/__init__.py` updated. `nitrix.stats.{betareg,gaulss,ordinal}` are now public module paths, matching `glm`/`gam`/`glmm`. Tests import from the public `nitrix.stats` namespace, so unaffected. |
 | **O4** | Low | open | `tests/test_stats.py` | `covariance`/`pca`/`gaussian`/`_irls` fold into `test_stats.py` (no 1:1 test file) while newer fitters are 1:1. | Split `test_stats.py` as those grow. |
 
 ## Performance / hardware
@@ -151,11 +151,11 @@ decision (bring a proposal before coding).
   Laplace-curvature pin), **M6** ✅ (mgcv EDF anchor per basis kind), **D9** ✅
   (dropped `VarCompSpec.reml`; intercept-policy + `low_rank` R1-only docs;
   `n_iter` rename deferred as cosmetic).
-- **Wave 2 — code organisation (mechanical, behaviour-preserving):**
+- **Wave 2 — ✅ complete** (code organisation, mechanical, behaviour-preserving):
   **O2** ✅ (`damped_newton` → `stats/_optimise.py`, decoupled from `VarCompSpec`),
   **D7** ✅ (RE-cov helpers → `lme/_recov.py`),
   **O1** ✅ (`glmm.py` → `glmm/` package),
-  **O3** ⚖️ (S, rename `_betareg`/`_gaulss`/`_ordinal` *or* document — **decision pending**).
+  **O3** ✅ (renamed `_betareg`/`_gaulss`/`_ordinal` → public module paths).
 - **Wave 3 — design contracts (decisions; complete the inference surface):**
   **D2** ⚖️ (M, uniform lme `.cov_re (V,k,k)` + `.re_labels` — nested/crossed as
   block-diagonal), **D3** ⚖️ (M–L, F/t-contrasts on R2/R3/R4/+corr),

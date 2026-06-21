@@ -16,7 +16,7 @@ It lives in ``stats/`` (beside ``_irls`` / ``_batching``), **not** ``lme/`` (aud
 O2): it is a generic small-problem optimiser, so it takes its iteration budget as
 **primitive kwargs** (``n_iter`` / ``damping`` / ``max_step`` / ``n_backtrack``)
 rather than a ``lme`` ``VarCompSpec`` -- the non-mixed-model callers (e.g.
-``_ordinal``) no longer have to build a variance-components spec they have no use
+``ordinal``) no longer have to build a variance-components spec they have no use
 for.  ``VarCompSpec`` stays in ``lme/_varcomp.py`` and unpacks itself via
 ``**spec.newton_kwargs`` at the mixed-model call sites.
 
