@@ -110,6 +110,11 @@ from .coords import (
     cmass_reference_displacement_grid,
     diffuse,
 )
+from .surface import (
+    gaussian_curvature,
+    mean_curvature,
+    principal_curvatures,
+)
 
 __all__ = [
     # grid
@@ -180,4 +185,8 @@ __all__ = [
     'cmass_reference_displacement_coor',
     'cmass_reference_displacement_grid',
     'diffuse',
+    # surface algorithms (differential geometry on meshes)
+    'mean_curvature',
+    'gaussian_curvature',
+    'principal_curvatures',
 ]
