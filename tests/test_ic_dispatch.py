@@ -304,12 +304,28 @@ def test_default_auto_early_exit_recovers_like_none_scan():
     assert np.allclose(np.asarray(auto.warped), np.asarray(scan.warped), atol=1e-6)
 
 
-def test_convergence_raises_on_forward_path():
-    # C3: an explicit Convergence on a path that cannot honour it (forward GN/LM
-    # -- here forced by method='forward') raises rather than being silently inert.
+def test_convergence_forward_ssd_honoured():
+    # Lever A: an explicit Convergence on the forward *least-squares* path
+    # (forced by method='forward', SSD metric) is now HONOURED (early-exit via
+    # the optimiser early_stop), not rejected -- and still recovers.
     moving, fixed = _rigid_pair(48)
-    spec = RegistrationSpec(levels=2, iterations=10, convergence=Convergence())
-    with pytest.raises(ValueError, match='inverse-compositional'):
+    spec = RegistrationSpec(
+        levels=2, iterations=(60, 30), convergence=Convergence()
+    )
+    res = rigid_register(moving, fixed, spec=spec, method='forward')
+    assert float(ncc(res.warped, fixed)) > 0.99
+
+
+def test_convergence_raises_on_forward_bfgs_path():
+    # C3 (narrowed): an explicit Convergence still raises on the scalar/BFGS
+    # forward path (a non-least-squares metric -- LNCC here), whose monolithic
+    # optimiser cannot honour a windowed early-exit.
+    moving, fixed = _rigid_pair(48)
+    spec = RegistrationSpec(
+        levels=2, iterations=10, metric=LNCC(radius=2),
+        convergence=Convergence(),
+    )
+    with pytest.raises(ValueError, match='scalar/BFGS'):
         rigid_register(moving, fixed, spec=spec, method='forward')
 
 

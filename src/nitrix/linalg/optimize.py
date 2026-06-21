@@ -166,6 +166,63 @@ def _operators(
     return _normal_operators(residual_fn, x)
 
 
+def _iterate(
+    step: Callable[[Any, Any], tuple[Any, Array]],
+    init_state: Any,
+    *,
+    n_iters: int,
+    early_stop: Optional[tuple[float, int]],
+    dtype: Any,
+) -> tuple[Any, Array]:
+    """Run ``step`` for ``n_iters`` (fixed scan) or until the cost slope converges.
+
+    ``early_stop=None`` (default) is exactly ``lax.scan`` over ``n_iters`` --
+    reproducible, ``vmap``-batchable and reverse-differentiable (the unchanged
+    optimiser behaviour).  An ``early_stop=(threshold, window)`` runs a
+    ``lax.while_loop`` that stops once the least-squares-line slope over the last
+    ``window`` per-iteration costs, normalised by the mean, drops below
+    ``threshold`` (the ANTs criterion).  The returned ``costs`` is length
+    ``n_iters`` with the unrun tail padded by the final cost, so the caller
+    assembles ``cost_history`` identically either way.  **Not
+    reverse-differentiable** (a ``while_loop`` has no reverse rule); use
+    ``early_stop=None`` for gradients.  (Mirrors
+    ``register._converge.run_iterations`` -- kept local to avoid a
+    ``linalg``->``register`` import inversion.)
+    """
+    if early_stop is None:
+        return jax.lax.scan(step, init_state, xs=None, length=n_iters)
+    threshold, window = early_stop
+    t = jnp.arange(window, dtype=dtype)
+    t_centred = t - jnp.mean(t)
+    t_var = jnp.sum(t_centred * t_centred)
+
+    def converged(buf: Array) -> Array:
+        slope = jnp.sum(t_centred * (buf - jnp.mean(buf))) / t_var
+        return jnp.abs(slope) / (jnp.abs(jnp.mean(buf)) + 1e-12) < threshold
+
+    def cond(carry: tuple[Any, Array, Array, Array]) -> Array:
+        _, i, buf, _ = carry
+        return (i < n_iters) & ((i < window) | ~converged(buf))
+
+    def body(
+        carry: tuple[Any, Array, Array, Array],
+    ) -> tuple[Any, Array, Array, Array]:
+        state, i, buf, hist = carry
+        state, cost = step(state, None)
+        buf = jnp.concatenate([buf[1:], cost[None]])
+        return state, i + 1, buf, hist.at[i].set(cost)
+
+    init = (
+        init_state,
+        jnp.asarray(0),
+        jnp.zeros((window,), dtype=dtype),
+        jnp.zeros((n_iters,), dtype=dtype),
+    )
+    state, last_i, buf, hist = jax.lax.while_loop(cond, body, init)
+    hist = jnp.where(jnp.arange(n_iters) < last_i, hist, buf[-1])
+    return state, hist
+
+
 def gauss_newton(
     residual_fn: ResidualFn,
     x0: Float[Array, ' p'],
@@ -176,6 +233,7 @@ def gauss_newton(
     cg_maxiter: Optional[int] = None,
     jacobian: JacobianStrategy = 'auto',
     jacobian_fn: Optional[ResidualFn] = None,
+    early_stop: Optional[tuple[float, int]] = None,
 ) -> OptimizeResult:
     """Gauss-Newton minimisation of ``½ ‖r(x)‖²``.
 
@@ -201,6 +259,13 @@ def gauss_newton(
         Normal-operator strategy: ``'assembled'`` (materialise ``JᵀJ``,
         for a small ``P``), ``'matrix_free'`` (matvec only, for a large
         ``P``), or ``'auto'`` (default; assembled when ``P`` is small).
+    early_stop
+        Opt-in early-exit ``(threshold, window)``: stop once the windowed
+        normalised cost slope drops below ``threshold`` (else run all
+        ``n_iters``).  ``None`` (default) keeps the fixed ``lax.scan`` --
+        reproducible, ``vmap``-batchable, reverse-differentiable.  An
+        ``early_stop`` runs a ``lax.while_loop`` (single-instance only; **not**
+        reverse-differentiable -- a ``while_loop`` has no reverse rule).
 
     Returns
     -------
@@ -213,7 +278,9 @@ def gauss_newton(
         delta = cg(a, -jt_r, l2=damping, tol=cg_tol, maxiter=cg_maxiter)
         return x + delta, _half_sq(r)
 
-    x, costs = jax.lax.scan(step, x0, xs=None, length=n_iters)
+    x, costs = _iterate(
+        step, x0, n_iters=n_iters, early_stop=early_stop, dtype=x0.dtype
+    )
     cost_final = _half_sq(residual_fn(x))
     cost_history = jnp.concatenate([costs, cost_final[None]])
     return OptimizeResult(params=x, cost=cost_final, cost_history=cost_history)
@@ -231,6 +298,7 @@ def levenberg_marquardt(
     cg_maxiter: Optional[int] = None,
     jacobian: JacobianStrategy = 'auto',
     jacobian_fn: Optional[ResidualFn] = None,
+    early_stop: Optional[tuple[float, int]] = None,
 ) -> OptimizeResult:
     """Levenberg-Marquardt minimisation of ``½ ‖r(x)‖²``.
 
@@ -252,6 +320,9 @@ def levenberg_marquardt(
         Initial damping ``λ``.
     lambda_up, lambda_down
         Multiplicative ``λ`` adjustment on reject / accept.
+    early_stop
+        Opt-in early-exit ``(threshold, window)`` -- as ``gauss_newton``
+        (default ``None`` keeps the fixed ``lax.scan``).
 
     Returns
     -------
@@ -275,8 +346,12 @@ def levenberg_marquardt(
         lam = jnp.where(accept, lam * lambda_down, lam * lambda_up)
         return (x, lam, cost), cost
 
-    (x, _, cost), costs = jax.lax.scan(
-        step, (x0, lam0, cost0), xs=None, length=n_iters
+    (x, _, cost), costs = _iterate(
+        step,
+        (x0, lam0, cost0),
+        n_iters=n_iters,
+        early_stop=early_stop,
+        dtype=x0.dtype,
     )
     cost_history = jnp.concatenate([cost0[None], costs])
     return OptimizeResult(params=x, cost=cost, cost_history=cost_history)
