@@ -69,15 +69,35 @@ from ._varcomp import VarCompSpec, fit_varcomp_diagonal
 
 __all__ = ['FLAMEResult', 'flame_two_level']
 
+_EPS = 1e-12
 
-@register_result(children=('sigma_b_sq', 'gamma_hat', 'log_lik'))
+
+def _huber_weight(
+    z: Float[Array, 'V N'], c: float
+) -> Float[Array, 'V N']:
+    """Huber down-weighting of a studentized residual ``z``: ``1`` for
+    ``|z| <= c``, else ``c / |z|`` (monotone, strictly positive -- never a hard
+    zero, so a down-weighted subject's inflated variance stays finite)."""
+    az = jnp.abs(z)
+    return jnp.where(az <= c, 1.0, c / jnp.clip(az, _EPS, None))
+
+
+@register_result(children=('sigma_b_sq', 'gamma_hat', 'log_lik', 'weights'))
 @dataclass(frozen=True)
 class FLAMEResult:
-    """Per-voxel FLAME fit output."""
+    """Per-voxel FLAME fit output.
+
+    ``weights`` is the per-voxel, per-subject outlier-deweighting weight (audit
+    N4): all ``1`` for the standard FLAME fit (``robust=False``), and the
+    converged robust weights in ``(0, 1]`` for ``robust=True`` -- a value well
+    below ``1`` marks a subject whose level-1 estimate was down-weighted as an
+    outlier.
+    """
 
     sigma_b_sq: Float[Array, 'V']
     gamma_hat: Float[Array, 'V p']
     log_lik: Float[Array, 'V']
+    weights: Float[Array, 'V N']
 
 
 def _flame_default_log_init(
@@ -107,6 +127,9 @@ def flame_two_level(
     n_iter: int = 30,
     damping: float = 1e-6,
     block: Optional[int] = None,
+    robust: bool = False,
+    n_deweight: int = 5,
+    robust_c: float = 1.345,
 ) -> FLAMEResult:
     """Voxelwise FLAME-style two-level fixed-effect group model.
 
@@ -134,10 +157,24 @@ def flame_two_level(
         Optional voxel-block size bounding peak memory on brain-scale
         ``V`` (see ``reml_fit``).  ``None`` (default) is a single
         ``vmap`` over all voxels.
+    robust
+        ``True`` enables **outlier deweighting** (audit N4 -- the FLAMEO-style
+        robust group analysis, FSL's FLAME1 -> FLAME-outlier): a subject whose
+        level-1 estimate is an outlier relative to the group model has its
+        within-variance inflated (``s_i^2 / w_i``), down-weighting it in the
+        precision-weighted group fit.  A deterministic Huber-IRLS deweighting
+        (not the full Woolrich 2008 Bayesian outlier-mixture MCMC); the converged
+        per-subject weights are returned in ``result.weights``.
+    n_deweight
+        Number of deweighting (IRLS reweight) steps when ``robust=True``.
+    robust_c
+        Huber tuning constant on the studentized residual (default ``1.345`` --
+        95% normal-efficiency); smaller is more aggressive at down-weighting.
 
     Returns
     -------
-    ``FLAMEResult`` with ``sigma_b_sq``, ``gamma_hat``, ``log_lik``.
+    ``FLAMEResult`` with ``sigma_b_sq``, ``gamma_hat``, ``log_lik``, and the
+    per-subject ``weights`` (all ``1`` unless ``robust=True``).
 
     Notes
     -----
@@ -171,19 +208,37 @@ def flame_two_level(
     # Single free variance component (between-subject); the known
     # within-variance enters as the fixed per-voxel diagonal offset.
     basis = jnp.ones((1, N), dtype=beta_subject.dtype)
-    theta_init = log_sigma_b_sq_init[:, None]  # (V, 1)
+    theta = log_sigma_b_sq_init[:, None]  # (V, 1)
     spec = VarCompSpec.flame(n_iter=n_iter, damping=damping)
-    theta_hat, gamma_hat, log_lik = fit_varcomp_diagonal(
-        beta_subject,
-        X_group,
-        basis,
-        theta_init,
-        offset=var_within,
-        spec=spec,
-        block=block,
-    )
+
+    def _fit(offset, theta_init):
+        return fit_varcomp_diagonal(
+            beta_subject,
+            X_group,
+            basis,
+            theta_init,
+            offset=offset,
+            spec=spec,
+            block=block,
+        )
+
+    weights = jnp.ones_like(beta_subject)  # (V, N)
+    if robust:
+        # IRLS outer loop: down-weight outlier subjects (inflate s_i^2 / w_i),
+        # re-fit, and re-derive the Huber weight from the studentized residual.
+        for _ in range(n_deweight):
+            theta, gamma_hat, _ = _fit(var_within / weights, theta)
+            sigma_b_sq = jnp.exp(theta[:, 0])  # (V,)
+            fitted = jnp.einsum('np,vp->vn', X_group, gamma_hat)  # (V, N)
+            v_total = sigma_b_sq[:, None] + var_within  # (V, N) -- true scale
+            z = (beta_subject - fitted) / jnp.sqrt(jnp.clip(v_total, _EPS, None))
+            weights = _huber_weight(z, robust_c)
+
+    # Reported estimate: a fit consistent with the (converged) weights.
+    theta_hat, gamma_hat, log_lik = _fit(var_within / weights, theta)
     return FLAMEResult(
         sigma_b_sq=jnp.exp(theta_hat[:, 0]),
         gamma_hat=gamma_hat,
         log_lik=log_lik,
+        weights=weights,
     )

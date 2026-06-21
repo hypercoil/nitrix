@@ -352,6 +352,77 @@ def test_flame_matches_hand_computed_reference():
 
 
 # ---------------------------------------------------------------------------
+# N4: FLAME outlier deweighting (robust group analysis)
+# ---------------------------------------------------------------------------
+
+
+def test_flame_nonrobust_weights_are_unity():
+    """robust=False leaves every weight at 1 (the standard FLAME fit), and the
+    estimate is unchanged."""
+    rng = np.random.default_rng(0)
+    N, V = 24, 5
+    X_group = np.ones((N, 1))
+    var_within = np.abs(rng.standard_normal((V, N))) * 0.4 + 0.1
+    beta = 1.0 + rng.standard_normal((V, N)) * 0.5 + rng.standard_normal(
+        (V, N)
+    ) * np.sqrt(var_within)
+    Yj, Vj, Xj = jnp.asarray(beta), jnp.asarray(var_within), jnp.asarray(X_group)
+    plain = flame_two_level(Yj, Vj, Xj, n_iter=40)
+    rob_default = flame_two_level(Yj, Vj, Xj, n_iter=40, robust=False)
+    assert np.allclose(np.asarray(plain.weights), 1.0)
+    np.testing.assert_allclose(
+        np.asarray(plain.gamma_hat), np.asarray(rob_default.gamma_hat)
+    )
+
+
+def test_flame_robust_downweights_outlier_subject():
+    """N4: an injected outlier subject is down-weighted (weight << 1) and the
+    robust group estimate is closer to the no-outlier truth than the standard
+    FLAME, which is pulled toward the outlier."""
+    rng = np.random.default_rng(1)
+    N = 22
+    X_group = np.ones((N, 1))
+    true_gamma = 1.0
+    var_within = np.full((1, N), 0.3)
+    beta = (
+        true_gamma
+        + rng.standard_normal((1, N)) * np.sqrt(0.4)
+        + rng.standard_normal((1, N)) * np.sqrt(0.3)
+    )
+    beta[0, 0] += 6.0  # one gross outlier subject
+    Yj, Vj, Xj = jnp.asarray(beta), jnp.asarray(var_within), jnp.asarray(X_group)
+    plain = flame_two_level(Yj, Vj, Xj, n_iter=40)
+    rob = flame_two_level(Yj, Vj, Xj, n_iter=40, robust=True, n_deweight=6)
+    # the outlier is down-weighted; the inliers are not.
+    assert float(rob.weights[0, 0]) < 0.5
+    assert float(np.median(np.asarray(rob.weights[0, 1:]))) > 0.9
+    # robust recovers the group effect better than the outlier-pulled standard.
+    assert abs(float(rob.gamma_hat[0, 0]) - true_gamma) < abs(
+        float(plain.gamma_hat[0, 0]) - true_gamma
+    )
+
+
+def test_flame_robust_no_outlier_matches_standard():
+    """With clean data (no outliers) the robust fit barely deweights, so it
+    tracks the standard FLAME estimate."""
+    rng = np.random.default_rng(2)
+    N, V = 30, 4
+    X_group = np.ones((N, 1))
+    var_within = np.full((V, N), 0.3)
+    beta = (
+        0.8
+        + rng.standard_normal((V, N)) * np.sqrt(0.5)
+        + rng.standard_normal((V, N)) * np.sqrt(0.3)
+    )
+    Yj, Vj, Xj = jnp.asarray(beta), jnp.asarray(var_within), jnp.asarray(X_group)
+    plain = flame_two_level(Yj, Vj, Xj, n_iter=40)
+    rob = flame_two_level(Yj, Vj, Xj, n_iter=40, robust=True, n_deweight=6)
+    np.testing.assert_allclose(
+        np.asarray(rob.gamma_hat), np.asarray(plain.gamma_hat), atol=0.1
+    )
+
+
+# ---------------------------------------------------------------------------
 # Memory regression: no V * N * N intermediate
 # ---------------------------------------------------------------------------
 
