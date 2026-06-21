@@ -111,10 +111,10 @@ immune.
 | ID | Sev | Status | Issue | Recommendation |
 |----|-----|--------|-------|----------------|
 | **N1** | High value | ✅ **done** | No GAM smooth-term p-values. | **SHIPPED:** `smooth_significance(result, smooths)` → `SmoothTest` (`stat`/`edf`/`rank`/`p_value`, `(V, m)`), the Wood-2013 integer-rank test (QR-projected eigen-pseudo-inverse, χ² for fixed-dispersion / F otherwise), mask-truncated for `vmap`. **Validated to EXACT `mgcv:::testStat(type=1)` parity** (both F and χ² branches, stat/rank/p to 6 digits, R 4.5.3 / mgcv 1.9.4). Regression vs an independent numpy+scipy reference. The fractional-rank default (`type=0`, needs the weighted-χ² CDF / Davies) is a documented follow-up. |
-| **N2** | High (surface/dMRI) | open | **TFCE/clustering are lattice-only** — no spin test (Alexander-Bloch/Váša) or mesh/graph adjacency; blocks surface (CIFTI) / fixel (ModelArray) workflows. | A mesh/graph `connected_components` path (the `morphology` dep exists) + a spin-test permutation operator. |
+| **N2** | High (surface/dMRI) | ⏸️ **deferred (post-geometry-suite)** | **TFCE/clustering are lattice-only** — no spin test (Alexander-Bloch/Váša) or mesh/graph adjacency; blocks surface (CIFTI) / fixel (ModelArray) workflows. | A mesh/graph `connected_components` path (the `morphology` dep exists) + a spin-test permutation operator. **Evaluated (2026-06-21):** *not* technically blocked — `sparse.mesh.mesh_k_ring_adjacency` + `morphology._label` + `geometry.sphere.{geodesic,coords,conv}` all ship and are stable; the `geometry-suite` adds surface-**reconstruction** primitives N2 doesn't depend on. Deferred anyway on value-timing: N2's consumers are downstream of the geometry sprint producing the surfaces, it is the largest Wave-4 item (L), and one sprint lets its API co-settle with the surface workflow. |
 | **N3** | Med | open | **No RFT / ACF-FWHM smoothness estimation** — permutation-only (defensible post-Eklund), but no parametric fallback for tiny-N and no AFNI/SPM parity. | Document the explicit "permutation-only" stance; a `3dFWHMx`-equivalent ACF/FWHM estimator if parity is wanted. |
 | **N4** | Med | open | **FLAME has no outlier-deweighting** (FLAME1/FLAMEO) — a named-feature gap vs the FSL comparator. | Surface as a known divergence; the deweighting iteration extends the existing REML loop. |
-| **N5** | Med | open | **No effect-size / CI outputs** anywhere (effect+SE+dof are returned, so CIs are one `t_crit` away). | A thin `confidence_interval(effect, se, dof, level)` + a standardized-effect helper. |
+| **N5** | Med | ✅ **done** | **No effect-size / CI outputs** anywhere (effect+SE+dof are returned, so CIs are one `t_crit` away). | **FIXED:** `confidence_interval(effect, se, dof, level=0.95)` and `standardized_effect(effect, scale)` (`stats/_effect.py`, exported). The per-element Student-t quantile (Newton on `betainc`, normal-seeded — so a per-voxel Satterthwaite `dof` works) is pinned vs `scipy.stats.t.ppf` to <1e-6. |
 | **N6** | Low | open | Cluster-robust SE is **one-way only**; no FSL `-g` variance-group / PALM `-vg`. | Document the `-e` (have it) vs `-g` (don't) distinction; add variance-groups if heteroscedastic two-sample is a target. |
 | **N7** | Low | open | No conjunction (min-statistic) / multi-contrast battery / one-/two-/paired-sample design helpers / FWE across contrasts. | Conveniences; partly intended for the `gramform`/`nwx` consumer layer. |
 
@@ -163,8 +163,12 @@ decision (bring a proposal before coding).
   **D6** ✅ (`Literal` dispatch taxonomies), **D8** ✅ (`SmoothBasis` `Protocol`
   — open-set smooth registry).
 - **Wave 4 — neuroimaging capabilities (features; largest):**
-  **N5** (S, `confidence_interval` + standardized-effect helper),
-  **N2** (L, mesh/graph TFCE adjacency + spin test — surface/dMRI unlock),
+  **N5** ✅ (`confidence_interval` + `standardized_effect`),
+  **N2** ⏸️ **deferred to post-`geometry-suite`** (not technically blocked — the
+  mesh-adjacency / sphere-geodesic primitives ship in `sparse.mesh` /
+  `geometry.sphere` — but its consumers are downstream of the geometry sprint
+  producing the surfaces, and it is the largest item; let its API settle with
+  the surface workflow),
   **N4** (M, FLAME outlier-deweighting / FLAME1),
   **N3/N6** ⚖️ (S–M, document the permutation-only / `-e`-not-`-g` stance *or*
   implement), **N7** (S, conjunction/design conveniences — partly downstream).
