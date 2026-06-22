@@ -756,24 +756,34 @@ def _spherical_barycentric(
     return fa.astype(np.int32), w.astype(np.float32)
 
 
-def _assemble_resample_ell(
-    cols_list: list[list[int]],
-    vals_list: list[list[float]],
+def _ell_from_triples(
+    rows: NDArray[Any],
+    cols: NDArray[Any],
+    vals: NDArray[Any],
     n_rows: int,
     n_cols: int,
 ) -> 'ELL':
-    """Pack ragged per-row (col, value) lists into a padded ``ELL``."""
+    """Pack coordinate ``(row, col, value)`` triples into a padded ``ELL``.
+
+    Vectorised (Tier C / audit AI-C2): sort the triples by row and scatter each
+    into its row's next free slot -- no Python per-row loop.  Caller must have
+    aggregated any duplicate ``(row, col)`` pairs; padding slots keep index 0 /
+    value 0 (zero weight -> no contribution).
+    """
     from ..sparse import ELL
 
-    k_max = max((len(c) for c in cols_list), default=1)
-    k_max = max(k_max, 1)
+    rows = rows.astype(np.int64)
+    deg = np.bincount(rows, minlength=n_rows)
+    k_max = max(int(deg.max(initial=0)), 1)
+    order = np.argsort(rows, kind='stable')
+    rs = rows[order]
+    start = np.zeros(n_rows + 1, dtype=np.int64)
+    np.cumsum(deg, out=start[1:])
+    slot = np.arange(rs.shape[0], dtype=np.int64) - start[rs]
     idx = np.zeros((n_rows, k_max), dtype=np.int32)
     val = np.zeros((n_rows, k_max), dtype=np.float32)
-    for r, (cs, vs) in enumerate(zip(cols_list, vals_list)):
-        k = len(cs)
-        if k:
-            idx[r, :k] = cs
-            val[r, :k] = vs
+    idx[rs, slot] = cols[order].astype(np.int32)
+    val[rs, slot] = vals[order].astype(np.float32)
     return ELL(
         values=jnp.asarray(val),
         indices=jnp.asarray(idx),
@@ -896,27 +906,40 @@ def surface_resample(
         # area-conserving core).
         fwd_idx, fwd_w = _spherical_barycentric(src_v, src_f, tgt_v)
         rev_idx, rev_w = _spherical_barycentric(tgt_v, tgt_f, src_v)
-        acc: list[dict[int, float]] = [{} for _ in range(n_tgt)]
-        for s in range(n_src):
-            for j in range(3):
-                wgt = float(rev_w[s, j]) * float(sa[s])
-                if wgt == 0.0:
-                    continue
-                t = int(rev_idx[s, j])
-                acc[t][s] = acc[t].get(s, 0.0) + wgt
-        cols_list: list[list[int]] = []
-        vals_list: list[list[float]] = []
-        for t in range(n_tgt):
-            d = acc[t]
-            if d:
-                cols = list(d.keys())
-                vals = [d[s] / float(ta[t]) for s in cols]
-            else:  # up-sampling hole -> barycentric fallback
-                cols = [int(fwd_idx[t, j]) for j in range(3)]
-                vals = [float(fwd_w[t, j]) for j in range(3)]
-            cols_list.append(cols)
-            vals_list.append(vals)
-        op = _assemble_resample_ell(cols_list, vals_list, n_tgt, n_src)
+        # Vectorised reverse scatter: each source s drops its (anatomical) area
+        # into the 3 corners of the target triangle it falls in.
+        rows = rev_idx.reshape(-1).astype(np.int64)  # target vertex
+        srcs = np.repeat(np.arange(n_src), 3).astype(np.int64)
+        wts = (rev_w * sa[:, None]).reshape(-1).astype(np.float64)
+        nz = wts != 0.0
+        rows, srcs, wts = rows[nz], srcs[nz], wts[nz]
+        if rows.size:  # aggregate duplicate (target, source) pairs
+            key = rows * np.int64(n_src) + srcs
+            ukey, inv = np.unique(key, return_inverse=True)
+            wagg = np.zeros(ukey.shape[0], dtype=np.float64)
+            np.add.at(wagg, inv, wts)
+            t_agg = (ukey // np.int64(n_src)).astype(np.int64)
+            s_agg = (ukey % np.int64(n_src)).astype(np.int64)
+        else:
+            t_agg = np.zeros(0, dtype=np.int64)
+            s_agg = np.zeros(0, dtype=np.int64)
+            wagg = np.zeros(0, dtype=np.float64)
+        val_agg = wagg / ta[t_agg]  # row-normalise by target vertex area
+        # Up-sampling holes (targets that received no source) fall back to the
+        # forward barycentric gather.
+        has = np.zeros(n_tgt, dtype=bool)
+        has[t_agg] = True
+        empt = np.where(~has)[0]
+        fb_rows = np.repeat(empt, 3).astype(np.int64)
+        fb_cols = fwd_idx[empt].reshape(-1).astype(np.int64)
+        fb_vals = fwd_w[empt].reshape(-1).astype(np.float64)
+        op = _ell_from_triples(
+            np.concatenate([t_agg, fb_rows]),
+            np.concatenate([s_agg, fb_cols]),
+            np.concatenate([val_agg, fb_vals]),
+            n_tgt,
+            n_src,
+        )
     else:
         raise ValueError(
             f"surface_resample: method must be 'adap_bary_area' or "
