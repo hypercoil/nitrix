@@ -31,6 +31,12 @@ format). Dependency direction (`geometry`/`graph` → `sparse`/`semiring`) holds
 **Counts:** 0 blocker · 10 major · 25 minor · 12 nit = 47 findings. The 10 majors
 consolidate to 5 distinct themes (several axes flagged the same issue).
 
+> **Remediation status (2026-06-22, commit `4b12a28`):** Tiers **A and B
+> implemented and green** (AI-A1…A10, AI-B1…B4; 104 affected+new tests pass,
+> ruff+mypy clean). Tier **C deferred** to a dedicated perf follow-up (host-side
+> numpy vectorisation for ico7 — AI-C1…C11; none merge-unsafe). INT-* are
+> intentional/documented (no code). The branch is **merge-ready**.
+
 | Axis | Verdict |
 |---|---|
 | Mathematical correctness | Strong — no blocker/major numerical defect; only doc/contract nuances. |
