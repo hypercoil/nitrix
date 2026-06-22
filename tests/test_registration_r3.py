@@ -209,11 +209,22 @@ def _make_pair(n=16, transform=(0.06, 1.0, -0.8)):
     return moving, fixed
 
 
-def test_rigid_recipe_differentiable_via_convergence_none():
-    # 3b: the single-pair IC default is the early-exit (while_loop), which is
-    # NOT reverse-differentiable -- jax.grad through it raises a loud, actionable
-    # error; convergence=None restores the reverse-differentiable fixed scan.
+def test_rigid_recipe_early_exit_not_diff_fixed_is():
+    # B2: mode='early_exit' (the single-pair IC while_loop) is NOT reverse-
+    # differentiable -- jax.grad through it raises a loud, actionable error;
+    # mode='fixed' (the default) is the reverse-differentiable fixed scan.
     moving, fixed = _make_pair()
+
+    def loss_early(m):
+        res = rigid_register(
+            m,
+            fixed,
+            spec=RegistrationSpec(levels=1, iterations=5, mode='early_exit'),
+        )
+        return jnp.sum(res.warped**2)
+
+    with pytest.raises(RuntimeError, match='implicit_least_squares'):
+        jax.grad(loss_early)(moving)
 
     def loss_default(m):
         res = rigid_register(
@@ -221,18 +232,7 @@ def test_rigid_recipe_differentiable_via_convergence_none():
         )
         return jnp.sum(res.warped**2)
 
-    with pytest.raises(RuntimeError, match='implicit_least_squares'):
-        jax.grad(loss_default)(moving)
-
-    def loss_scan(m):
-        res = rigid_register(
-            m,
-            fixed,
-            spec=RegistrationSpec(levels=1, iterations=5, convergence=None),
-        )
-        return jnp.sum(res.warped**2)
-
-    g = np.asarray(jax.grad(loss_scan)(moving))
+    g = np.asarray(jax.grad(loss_default)(moving))
     assert np.all(np.isfinite(g))
     assert np.abs(g).sum() > 0.0
 

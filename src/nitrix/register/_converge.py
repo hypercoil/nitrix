@@ -40,7 +40,7 @@ _EARLY_EXIT_NO_REVERSE = (
     'data-dependent iteration count cannot be back-propagated.  For gradients, '
     'use the implicit-function entry points (linalg.implicit_least_squares / '
     'implicit_minimize), which differentiate at the optimum and are '
-    'trajectory-independent; or pass convergence=None to restore the '
+    "trajectory-independent; or set mode='fixed' to restore the "
     'reverse-differentiable fixed-iteration scan.'
 )
 

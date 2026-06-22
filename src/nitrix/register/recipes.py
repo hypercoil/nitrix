@@ -35,7 +35,6 @@ from ..geometry._interpolate import (
     NearestNeighbour,
 )
 from ._core import (
-    Convergence,
     RegistrationResult,
     RegistrationSpec,
     multi_resolution_register,
@@ -53,28 +52,10 @@ from ._preprocess import preprocess_images
 from ._space import CoordinateSpace, IndexSpace, _conjugate_about
 from ._syn import SyNResult, SyNSpec, greedy_syn_register
 
-# C3: an explicit Convergence on a path that cannot honour it.  The forward
-# least-squares (GN/LM) path now early-exits (Lever A); only the scalar/BFGS
-# path (a non-least-squares metric: MI / correlation-ratio) cannot -- its
-# optimiser is monolithic and stops on its own gradient/line-search criterion.
-_CONVERGENCE_FORWARD_MSG = (
-    'spec.convergence (windowed early-exit) is honoured on the inverse-'
-    'compositional and forward *least-squares* (GN/LM) paths, but not on the '
-    'scalar/BFGS forward path this run resolves to (a non-least-squares metric '
-    "-- MI / correlation-ratio).  Use convergence='auto' (the default) or None, "
-    'or an SSD metric.'
-)
-
-
-def _check_forward_convergence(spec: RegistrationSpec) -> None:
-    """Raise (C3) if an explicit ``Convergence`` reaches a path that can't honour
-    it -- now only the scalar/BFGS (non-least-squares) forward path; the forward
-    least-squares path early-exits via the optimiser ``early_stop`` (Lever A)."""
-    if (
-        isinstance(spec.convergence, Convergence)
-        and not spec.metric.is_least_squares
-    ):
-        raise ValueError(_CONVERGENCE_FORWARD_MSG)
+# C3 / B2: rejecting an early-exit request on a path that cannot honour it (the
+# scalar/BFGS forward optimiser is monolithic) is now the single
+# ``resolve_convergence_mode`` gate, applied where the forward driver resolves
+# the mode (``multi_resolution_register``) -- no separate recipe-level check.
 
 
 def _image_moments(img: Array, ndim: int) -> tuple[Array, Array]:
@@ -371,7 +352,6 @@ def rigid_register(
         return ic_rigid_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
         )
-    _check_forward_convergence(spec)
     init_params = (
         None
         if init_matrix is None
@@ -537,7 +517,6 @@ def affine_register(
         return ic_affine_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
         )
-    _check_forward_convergence(spec)
     init_params = (
         None
         if init_matrix is None

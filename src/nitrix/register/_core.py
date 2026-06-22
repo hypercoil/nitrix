@@ -72,17 +72,16 @@ from ._space import CoordinateSpace, IndexSpace, _Sampler
 
 @dataclass(frozen=True)
 class Convergence:
-    """Early-exit convergence criterion (ANTs-style threshold + window).
+    """Windowed cost-slope criterion for the ``mode='early_exit'`` iteration.
 
-    Opt-in (``RegistrationSpec.convergence``) early stopping for the
-    **single-pair** inverse-compositional path: per level, a ``lax.while_loop``
-    runs until the cost has plateaued -- a least-squares-line fit over the last
-    ``window`` per-iteration costs whose normalised slope falls below
-    ``threshold`` -- or the level's iteration count (the hard cap) is reached.
-    The fixed ``lax.scan`` stays the default (``convergence=None``): it is
-    reproducible (data-independent trip count) and ``vmap``-batchable (the
-    cohort/volreg path), which early-exit is not -- so early-exit is for the
-    single-pair recipes only.
+    The threshold/window pair that parameterises the early-exit ``lax.while_loop``
+    (see :data:`ConvergenceMode`): per level, the loop runs until the cost has
+    plateaued -- a least-squares-line fit over the last ``window`` per-iteration
+    costs whose normalised slope falls below ``threshold`` -- or the level's
+    iteration count (the hard cap) is reached.  It is **inert** under
+    ``mode='fixed'`` (the fixed ``lax.scan``); the two are orthogonal fields
+    (B2), so a spec always carries a concrete :class:`Convergence`, used only
+    when ``mode='early_exit'``.
 
     Attributes
     ----------
@@ -94,35 +93,56 @@ class Convergence:
     Notes
     -----
     An early-exit forward is **not** reverse-differentiable (``lax.while_loop``
-    has no reverse rule); for a differentiable registration layer use the
-    implicit-function path (``linalg.implicit_least_squares`` /
-    ``implicit_minimize``), whose adjoint is solved at the optimum and is
-    trajectory-independent.
+    has no reverse rule); for a differentiable registration layer use
+    ``mode='fixed'`` (the ``scan``) or the implicit-function path
+    (``linalg.implicit_least_squares`` / ``implicit_minimize``), whose adjoint is
+    solved at the optimum and is trajectory-independent.
     """
 
     threshold: float = 1e-6
     window: int = 10
 
 
-# The ``convergence`` field's value space: an explicit :class:`Convergence`, an
-# explicit ``None`` (the reverse-differentiable fixed-scan opt-out), or the
-# ``'auto'`` sentinel (the default) -- resolved per path by ``resolve_convergence``.
-ConvergenceSpec = Union[Convergence, None, Literal['auto']]
+# The iteration strategy (B2), orthogonal to the :class:`Convergence`
+# parameters: ``'fixed'`` is the reproducible, reverse-differentiable,
+# ``vmap``-batchable ``lax.scan``; ``'early_exit'`` is the windowed-slope
+# ``lax.while_loop`` (single-pair; not reverse-differentiable).  Eligibility is
+# checked in the one ``resolve_convergence_mode`` gate below.
+ConvergenceMode = Literal['fixed', 'early_exit']
 
 
-def resolve_convergence(
-    convergence: ConvergenceSpec, *, ic: bool
+def resolve_convergence_mode(
+    mode: ConvergenceMode,
+    convergence: Convergence,
+    *,
+    supports_early_exit: bool,
+    path: str,
 ) -> Optional[Convergence]:
-    """Resolve the ``convergence`` sentinel for a concrete registration path.
+    """The single B2 eligibility gate: ``(mode, convergence)`` -> run-time control.
 
-    ``'auto'`` (the default) -> the early-exit ``Convergence()`` on the
-    **single-pair inverse-compositional** path (``ic=True``, the perf default,
-    3b), or ``None`` (the fixed ``scan``) on the ``vmap``-batched / forward paths
-    (``ic=False``) that cannot honour a ``while_loop``.  An explicit ``None``
-    (the opt-out) and an explicit :class:`Convergence` pass through unchanged.
+    Returns the concrete :class:`Convergence` to drive an early-exit
+    ``lax.while_loop`` (``mode='early_exit'``), or ``None`` for the fixed
+    ``lax.scan`` (``mode='fixed'`` -- the default, reproducible and
+    reverse-differentiable on every path).  ``mode='early_exit'`` on a path that
+    cannot honour a data-dependent trip count (``supports_early_exit=False`` --
+    the scalar/BFGS forward optimiser is monolithic) raises a loud, actionable
+    error naming ``path`` rather than failing obscurely downstream.  This is the
+    one place the polysemy used to live (three sentinel meanings at three sites);
+    every recipe now routes its mode decision through here.
     """
-    if convergence == 'auto':
-        return Convergence() if ic else None
+    if mode not in ('fixed', 'early_exit'):
+        raise ValueError(
+            f"mode must be 'fixed' or 'early_exit'; got {mode!r}."
+        )
+    if mode == 'fixed':
+        return None
+    if not supports_early_exit:
+        raise ValueError(
+            f"mode='early_exit' is not supported on {path} -- it cannot honour "
+            "a data-dependent trip count.  Use mode='fixed' (the reproducible "
+            'fixed scan), or the inverse-compositional recipes (IndexSpace + a '
+            'least-squares metric such as SSD), which do.'
+        )
     return convergence
 
 
@@ -161,20 +181,27 @@ class RegistrationSpec:
         Downsample factor and anti-alias sigma for the pyramid.
     cg_tol
         Inner-CG tolerance for the GN/LM path.
+    mode
+        Iteration strategy (B2), orthogonal to ``convergence``.  ``'fixed'``
+        (the spec default) runs the fixed ``lax.scan`` -- reproducible,
+        reverse-differentiable, and ``vmap``-batchable (``volreg``).
+        ``'early_exit'`` runs the windowed-slope ``lax.while_loop`` with
+        ``iterations`` as the hard cap; it is single-pair (a ``vmap``-ed
+        ``while_loop`` exits only when *all* lanes converge) and **not**
+        reverse-differentiable (``jax.grad`` through it raises a loud, actionable
+        error -- use ``mode='fixed'`` or the implicit-function path).  Rejected
+        on the scalar/BFGS forward path (a non-least-squares metric), which is
+        monolithic.  The spec default is ``'fixed'`` on **every** recipe
+        (reproducible + differentiable out of the box); ``'early_exit'`` is the
+        recommended opt-in for the single-pair inverse-compositional recipes
+        (``rigid_register`` / ``affine_register``), which converge in a few of
+        their iterations.
     convergence
-        Early-exit control.  ``'auto'`` (default) -> the windowed-slope
-        early-exit on the **single-pair inverse-compositional** path (the perf
-        default; ``iterations`` becomes the hard cap), the fixed ``scan``
-        elsewhere (forward / vmap-batched ``volreg``, which cannot honour a
-        while_loop).  ``None`` -> the fixed ``scan`` everywhere (the
-        reverse-differentiable opt-out).  A :class:`Convergence` -> that explicit
-        criterion (raises on a path that cannot honour it).  **Differentiability
-        (3b):** an early-exit forward is not reverse-differentiable; ``jax.grad``
-        through it raises a loud, actionable error -- use the implicit-function
-        path or ``convergence=None``.  **cost_history (C6):** on the early-exit
-        path the per-level trace is padded to the ``iterations`` cap with the
-        final cost (so the shape is path-independent; the value is constant past
-        the stop iteration).
+        The :class:`Convergence` (threshold / window) parameterising
+        ``mode='early_exit'``; **inert** under ``mode='fixed'``.  **cost_history
+        (C6):** on the early-exit path the per-level trace is padded to the
+        ``iterations`` cap with the final cost (so the shape is path-independent;
+        the value is constant past the stop iteration).
     """
 
     levels: int = 3
@@ -187,7 +214,8 @@ class RegistrationSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     cg_tol: float = 1e-6
-    convergence: ConvergenceSpec = 'auto'
+    mode: ConvergenceMode = 'fixed'
+    convergence: Convergence = field(default_factory=Convergence)
 
 
 class RegistrationResult(NamedTuple):
@@ -363,12 +391,12 @@ def optimize_objective(
     least-squares path (the analytic warp Jacobian -- far fewer gathers than
     ``jax.jacfwd``); ``None`` falls back to ``jacfwd`` (the parity oracle).
 
-    ``convergence`` (opt-in) early-exits the least-squares loop once the windowed
-    cost slope flattens (the GN/LM ``early_stop``); ``None`` (default) runs the
-    fixed ``n_iters`` scan.  It is **rejected on the scalar/BFGS path** -- that
-    optimiser is monolithic (no single-step) and stops only on its own
-    gradient/line-search criterion, so an ANTs-style windowed early-exit is not
-    expressible there yet (use ``convergence=None`` for MI / CR forward).
+    ``convergence`` (the resolved :class:`Convergence`, or ``None`` for the fixed
+    scan) early-exits the least-squares loop once the windowed cost slope flattens
+    (the GN/LM ``early_stop``).  The caller's ``resolve_convergence_mode`` gate
+    already rejects ``mode='early_exit'`` on the scalar/BFGS path (monolithic --
+    no single-step), so ``convergence`` is always ``None`` there; the guard below
+    is a defensive internal invariant.
     """
     use_lsq = objective.is_least_squares and optimizer in ('auto', 'lm', 'gn')
     early_stop = (
@@ -397,11 +425,11 @@ def optimize_objective(
             )
         return res.params, res.cost_history
 
-    if convergence is not None:
+    if convergence is not None:  # defensive: the upstream B2 gate ensures None
         raise ValueError(
-            'convergence (windowed early-exit) is not supported on the '
-            'scalar/BFGS forward path (non-least-squares metric: MI / '
-            'correlation-ratio); pass convergence=None.'
+            "mode='early_exit' is not supported on the scalar/BFGS forward path "
+            '(non-least-squares metric: MI / correlation-ratio); use mode='
+            "'fixed'."
         )
     init_cost = objective.cost(params)
     out = minimize(
@@ -566,7 +594,16 @@ def multi_resolution_register(
         space=space,
         sampler=sampler,
         init_params=params,
-        # Opt-in forward early-exit (least-squares only); 'auto'/None -> fixed
-        # scan.  Single-pair only -- volreg vmaps register_core and leaves it None.
-        convergence=resolve_convergence(spec.convergence, ic=False),
+        # Forward early-exit is honoured only on the least-squares (GN/LM)
+        # optimiser's windowed ``early_stop``; the scalar/BFGS path (a
+        # non-least-squares metric) is monolithic and rejects it (B2 gate).
+        # Single-pair only -- ``volreg`` vmaps ``register_core`` and threads the
+        # fixed scan (its forward branch passes no ``convergence``).
+        convergence=resolve_convergence_mode(
+            spec.mode,
+            spec.convergence,
+            supports_early_exit=spec.metric.is_least_squares
+            and spec.optimizer in ('auto', 'lm', 'gn'),
+            path='the scalar/BFGS forward path (a non-least-squares metric)',
+        ),
     )

@@ -50,7 +50,7 @@ from ._core import (
     Convergence,
     RegistrationResult,
     RegistrationSpec,
-    resolve_convergence,
+    resolve_convergence_mode,
     resolve_iterations,
 )
 from ._space import _conjugate_about
@@ -398,8 +398,15 @@ def ic_register_core(
     matrix = init_matrix
     histories = []
     iters_per_level = resolve_iterations(spec.iterations, spec.levels)
-    # Single-pair IC path: 'auto' -> early-exit (the 3b default); None -> scan.
-    convergence = resolve_convergence(spec.convergence, ic=True)
+    # Single-pair IC path: always early-exit-capable (the constant-template
+    # while_loop).  mode='early_exit' (the rigid/affine recipe default) -> the
+    # windowed loop; mode='fixed' -> the scan.
+    convergence = resolve_convergence_mode(
+        spec.mode,
+        spec.convergence,
+        supports_early_exit=True,
+        path='the inverse-compositional path',
+    )
     prev_shape = None
     for level in range(spec.levels - 1, -1, -1):
         ref = ref_levels[level]

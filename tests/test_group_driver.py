@@ -65,7 +65,9 @@ def _smooth_velocity(shape, sigma, scale, seed):
 def _warp(image, v):
     grid = identity_grid(image.shape, dtype=image.dtype)
     s = integrate_velocity_field(v)
-    return spatial_transform(image[..., None], grid + s, mode='nearest')[..., 0]
+    return spatial_transform(image[..., None], grid + s, mode='nearest')[
+        ..., 0
+    ]
 
 
 def _interior(a, m=6):
@@ -92,7 +94,10 @@ def test_group_syn_recovers_like_algebra():
     assert float(ncc(grp.warped, fixed)) > 0.99
     # recovery agrees with the oracle to tolerance (NOT field-wise equality --
     # greedy is a different variational problem from the SVF fixed point)
-    assert abs(float(ncc(grp.warped, fixed)) - float(ncc(alg.warped, fixed))) < 0.01
+    assert (
+        abs(float(ncc(grp.warped, fixed)) - float(ncc(alg.warped, fixed)))
+        < 0.01
+    )
     assert float(grp.jacobian_det.min()) > 0.0  # diffeomorphic (total)
     assert bool(jnp.all(jnp.isfinite(grp.forward_velocity)))  # field_log ok
 
@@ -108,7 +113,10 @@ def test_group_demons_recovers_like_algebra():
         moving, fixed, spec=replace(spec, representation='group')
     )
     assert float(ncc(grp.warped, fixed)) > float(ncc(moving, fixed))
-    assert abs(float(ncc(grp.warped, fixed)) - float(ncc(alg.warped, fixed))) < 0.01
+    assert (
+        abs(float(ncc(grp.warped, fixed)) - float(ncc(alg.warped, fixed)))
+        < 0.01
+    )
     assert float(grp.jacobian_det.min()) > 0.0
     assert bool(jnp.all(jnp.isfinite(grp.velocity)))
 
@@ -173,12 +181,17 @@ def test_demons_early_exit_recovers_and_pads_history():
     early = diffeomorphic_demons_register(
         moving,
         fixed,
-        spec=replace(spec, convergence=Convergence(threshold=1e-4, window=8)),
+        spec=replace(
+            spec,
+            mode='early_exit',
+            convergence=Convergence(threshold=1e-4, window=8),
+        ),
     )
     assert early.cost_history.shape == full.cost_history.shape  # padded
-    assert abs(
-        float(ncc(early.warped, fixed)) - float(ncc(full.warped, fixed))
-    ) < 0.005
+    assert (
+        abs(float(ncc(early.warped, fixed)) - float(ncc(full.warped, fixed)))
+        < 0.005
+    )
     # the early-exit fired: a constant padded tail before the 80 cap
     ch = np.asarray(early.cost_history)
     changing = int(np.sum(np.abs(np.diff(ch)) > 1e-12)) + 1
@@ -186,13 +199,13 @@ def test_demons_early_exit_recovers_and_pads_history():
     assert float(early.jacobian_det.min()) > 0.0
 
 
-def test_convergence_none_matches_default():
+def test_mode_fixed_matches_default():
     fixed = _blobs(48)
     moving = _warp(fixed, _smooth_velocity((48, 48), 6.0, 18.0, 3))
     spec = DemonsSpec(levels=1, iterations=20)
     a = diffeomorphic_demons_register(moving, fixed, spec=spec)
     b = diffeomorphic_demons_register(
-        moving, fixed, spec=replace(spec, convergence=None)
+        moving, fixed, spec=replace(spec, mode='fixed')
     )
     assert np.allclose(np.asarray(a.warped), np.asarray(b.warped))
 
@@ -205,6 +218,7 @@ def test_syn_early_exit_recovers_diffeomorphic():
         iterations=60,
         radius=2,
         step=0.5,
+        mode='early_exit',
         convergence=Convergence(threshold=1e-4, window=10),
     )
     res = greedy_syn_register(moving, fixed, spec=spec)

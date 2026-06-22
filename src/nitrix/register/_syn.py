@@ -54,7 +54,11 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode
 from ._converge import Convergence
-from ._core import resolve_iterations
+from ._core import (
+    ConvergenceMode,
+    resolve_convergence_mode,
+    resolve_iterations,
+)
 from ._force import Force, LNCCForce, resolve_force_schedule
 from ._preprocess import preprocess_images
 from ._svf import (
@@ -129,22 +133,26 @@ class SyNSpec:
         Both return the same ``SyNResult`` with one finalisation inversion;
         ``forward_velocity`` / ``inverse_velocity`` are recovered from the final
         displacements via ``geometry.field_log`` in group mode.
+    mode
+        Iteration strategy (B2).  ``'fixed'`` (the SVF default) runs the full
+        fixed schedule (a ``lax.scan``); ``'early_exit'`` runs the windowed-slope
+        ``lax.while_loop`` -- a level stops once the normalised cost slope drops
+        below ``convergence.threshold`` (or ``iterations`` is hit).
+        **Single-pair** (a ``vmap``-ed ``while_loop`` exits only when *all* lanes
+        converge -- the slowest governs -- so the per-pair benefit is lost in a
+        cohort; ``volreg`` uses that batch-aggregate form deliberately).  **When
+        to use (measured):** a *tapered* per-level ``iterations`` schedule (the
+        ANTs ``100x70x50x20`` discipline) already removes the over-iteration
+        early-exit targets, so the strict default ``threshold=1e-6`` then *costs*
+        time (the ``while_loop`` overhead exceeds its saving) -- hence
+        ``'fixed'`` is the SVF default.  Early-exit pays off for an *untuned /
+        flat* schedule, or on the CPU path with a looser threshold (``~1e-5``
+        gave ~10 % there at equal accuracy).  (The single-pair matrix inverse-
+        compositional recipes converge in a few iterations, so ``'early_exit'``
+        is the recommended opt-in there; the SVF default stays ``'fixed'``.)
     convergence
-        Optional ANTs-style early-exit (``Convergence(threshold, window)``): a
-        level stops once the windowed normalised cost slope drops below
-        ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
-        full fixed schedule.  **Single-pair** (a ``vmap``-ed ``while_loop`` exits
-        only when *all* lanes converge -- the slowest governs -- so the per-pair
-        benefit is lost in a cohort; ``volreg`` uses that batch-aggregate form
-        deliberately).  **When to use (measured):** a *tapered* per-level
-        ``iterations`` schedule (the ANTs ``100x70x50x20`` discipline) already
-        removes the over-iteration early-exit targets, so the strict default
-        ``threshold=1e-6`` then *costs* time (the ``while_loop`` overhead
-        exceeds its saving) -- hence ``None`` is the SVF default.  Early-exit
-        pays off for an *untuned / flat* schedule, or on the CPU path with a
-        looser threshold (``~1e-5`` gave ~10 % there at equal accuracy).
-        (Contrast the matrix inverse-compositional path, which converges in a
-        few of its iterations and so defaults early-exit *on*.)
+        The :class:`Convergence` (threshold / window) for ``mode='early_exit'``;
+        inert under ``mode='fixed'``.
     compute_velocity
         Whether to recover and return ``forward_velocity`` / ``inverse_velocity``.
         ``False`` (default) leaves both ``None`` and skips the **two**
@@ -171,7 +179,8 @@ class SyNSpec:
     pyramid_sigma: Optional[float] = None
     boundary_mode: BoundaryMode = 'nearest'
     representation: Literal['group', 'algebra'] = 'group'
-    convergence: Optional[Convergence] = None
+    mode: ConvergenceMode = 'fixed'
+    convergence: Convergence = Convergence()
     compute_velocity: bool = False
 
 
@@ -245,7 +254,12 @@ def _syn_level(
         rel_spacing=rel_spacing,
         mask=mask,
         restrict=restrict,
-        convergence=spec.convergence,
+        convergence=resolve_convergence_mode(
+            spec.mode,
+            spec.convergence,
+            supports_early_exit=True,
+            path='SyN',
+        ),
     )
 
 
@@ -429,7 +443,12 @@ def greedy_syn_register(
                 rel_spacing=rel_spacing,
                 mask=mask_l,
                 restrict=restrict,
-                convergence=spec.convergence,
+                convergence=resolve_convergence_mode(
+                    spec.mode,
+                    spec.convergence,
+                    supports_early_exit=True,
+                    path='SyN',
+                ),
             )
         return (f_fwd, f_inv), hist
 

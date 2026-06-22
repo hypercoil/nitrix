@@ -61,8 +61,11 @@ following ANTs / fMRIPrep features are **not yet implemented** --
   closed-form **(Mattes) MI** force, ``MIForce``, *is* shipped -- the fast
   cross-modal path; CR's ``cr_grad`` is the same machinery, built when a
   consumer asks);
-- **early-exit** (windowed cost-slope convergence) on the SVF recipes -- it is
-  wired only into the matrix inverse-compositional path.
+- **early-exit** (windowed cost-slope convergence): every recipe carries the
+  orthogonal ``mode`` (``'fixed'`` default / ``'early_exit'``) + ``convergence``
+  (threshold / window) spec fields (B2); ``'early_exit'`` runs the
+  ``lax.while_loop`` where the path supports it (the matrix inverse-compositional
+  recipes recommend it).
 
 **Real-data and ANTs-reference parity** (comparing nitrix transforms / warps
 to an ``antsRegistration`` reference on real volumes, and the iso-accuracy
@@ -78,7 +81,12 @@ from ._bbr import (
     bbr_cost,
     bbr_register,
 )
-from ._core import Convergence, RegistrationResult, RegistrationSpec
+from ._core import (
+    Convergence,
+    ConvergenceMode,
+    RegistrationResult,
+    RegistrationSpec,
+)
 from ._force import (
     DemonsForce,
     Force,
@@ -136,6 +144,7 @@ __all__ = [
     'RegistrationSpec',
     'RegistrationResult',
     'Convergence',
+    'ConvergenceMode',
     'Metric',
     'SSD',
     'LNCC',

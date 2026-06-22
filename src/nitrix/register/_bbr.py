@@ -38,11 +38,11 @@ translation gradient blocks are unit-normalised and stepped by physical (rad /
 mm) step lengths with a geometric decay -- this decouples the step from the
 image amplitude and from the rad-vs-mm unit mismatch (which defeats a naive
 Newton / single-rate step on this non-convex cost).  It runs through the shared
-:func:`._converge.run_iterations`, so ``BBRSpec.convergence`` gives the same
-scan/while toggle as every other path: ``None`` (and ``'auto'`` for BBR) is the
-fixed ``lax.scan`` (reproducible, reverse-differentiable); an explicit
-:class:`Convergence` is the windowed-slope ``lax.while_loop`` early-exit (opt
-in, a little faster, **not** reverse-differentiable).
+:func:`._converge.run_iterations`, so ``BBRSpec.mode`` gives the same scan/while
+toggle as every other path: ``'fixed'`` (the default) is the fixed ``lax.scan``
+(reproducible, reverse-differentiable); ``'early_exit'`` is the windowed-slope
+``lax.while_loop`` (opt in, a little faster, **not** reverse-differentiable),
+parameterised by ``BBRSpec.convergence``.
 
 A reverse-mode gradient of the *optimum* w.r.t. the moving image is best taken
 through the implicit-function layer (``linalg.implicit_minimize`` on
@@ -71,7 +71,7 @@ from ..geometry import apply_affine, sample_at_points
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg._solver import safe_inv
 from ._converge import run_iterations
-from ._core import Convergence, ConvergenceSpec
+from ._core import Convergence, ConvergenceMode, resolve_convergence_mode
 from ._model import Rigid, TransformModel
 
 __all__ = [
@@ -241,14 +241,17 @@ class BBRSpec:
         :class:`BBRSearch` grid multistart seed (default on), or ``None`` for a
         pure local refine from ``init_params`` (use when a prior affine has
         already brought the boundary within the fine basin).
+    mode
+        Iteration strategy (B2), the same toggle as the other recipes.
+        ``'fixed'`` (default) runs the fixed ``lax.scan`` (reproducible and
+        reverse-differentiable); ``'early_exit'`` runs the windowed-slope
+        ``lax.while_loop`` (opt in, a little faster on easy alignments, **not**
+        reverse-differentiable).  ``'fixed'`` is the BBR default deliberately:
+        the GD early-exit only beats the (already fast) scan at a loosened
+        ``convergence.threshold``.
     convergence
-        Iteration control, the same toggle as the other recipes: ``'auto'`` /
-        ``None`` run the fixed ``lax.scan`` (reproducible and reverse-
-        differentiable, the default); an explicit :class:`Convergence` runs the
-        windowed-slope ``lax.while_loop`` early-exit (opt in, a little faster on
-        easy alignments, **not** reverse-differentiable).  Unlike the inverse-
-        compositional recipes, ``'auto'`` resolves to the *scan* here: the GD
-        early-exit only beats the (already fast) scan at a loosened threshold.
+        The :class:`Convergence` (threshold / window) for ``mode='early_exit'``;
+        inert under ``mode='fixed'``.
     rotation_step, translation_step
         Per-iteration GD step lengths -- the rotation block (rad) and
         translation block (mm / voxels), applied to the unit-normalised
@@ -271,7 +274,8 @@ class BBRSpec:
     iterations: int = 50
     schedule: Optional[tuple[float, ...]] = (4.0, 2.0, 1.0)
     search: Optional[BBRSearch] = BBRSearch()
-    convergence: ConvergenceSpec = 'auto'
+    mode: ConvergenceMode = 'fixed'
+    convergence: Convergence = Convergence()
     rotation_step: float = 0.03
     translation_step: float = 2.0
     step_decay: float = 0.92
@@ -451,9 +455,15 @@ def bbr_register(
         if init_params is None
         else jnp.asarray(init_params, dtype=dtype)
     )
-    # 'auto' resolves to the fixed scan for BBR (the GD early-exit needs a
-    # loosened threshold to beat the already-fast scan -- so it is opt-in).
-    convergence = None if spec.convergence == 'auto' else spec.convergence
+    # BBR GD always supports the windowed while_loop; mode='fixed' (the default)
+    # -> scan, mode='early_exit' -> the loop (opt-in: it needs a loosened
+    # threshold to beat the already-fast scan).
+    convergence = resolve_convergence_mode(
+        spec.mode,
+        spec.convergence,
+        supports_early_exit=True,
+        path='BBR',
+    )
 
     points_a = jnp.asarray(points, dtype=dtype)
     normals_a = jnp.asarray(normals, dtype=dtype)

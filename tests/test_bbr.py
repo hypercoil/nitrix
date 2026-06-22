@@ -188,19 +188,24 @@ def test_bbr_cost_minimal_at_truth():
 
 
 def test_bbr_scan_while_toggle():
-    # Fixed scan (convergence=None / 'auto') and the windowed early-exit
-    # (an explicit Convergence) both recover; results are close.
+    # Fixed scan (mode='fixed', the default) and the windowed early-exit
+    # (mode='early_exit') both recover; results are close.
     moving, pts, nrm, truth = _planted_box()
-    scan = bbr_register(moving, pts, nrm, spec=BBRSpec(convergence=None))
+    scan = bbr_register(moving, pts, nrm, spec=BBRSpec(mode='fixed'))
     while_ = bbr_register(
-        moving, pts, nrm, spec=BBRSpec(convergence=Convergence(threshold=1e-4))
+        moving,
+        pts,
+        nrm,
+        spec=BBRSpec(
+            mode='early_exit', convergence=Convergence(threshold=1e-4)
+        ),
     )
     for res in (scan, while_):
         ang, trans = _rigid_error(res.matrix, truth)
         assert ang < 2.0 and trans < 1.5
-    # 'auto' is the scan: identical to convergence=None.
-    auto = bbr_register(moving, pts, nrm, spec=BBRSpec(convergence='auto'))
-    assert np.allclose(np.asarray(auto.params), np.asarray(scan.params))
+    # mode='fixed' is the default: identical to the explicit scan.
+    default = bbr_register(moving, pts, nrm, spec=BBRSpec())
+    assert np.allclose(np.asarray(default.params), np.asarray(scan.params))
 
 
 def test_bbr_reverse_diff_scan_and_barrier_while():
@@ -224,7 +229,7 @@ def test_bbr_reverse_diff_scan_and_barrier_while():
         schedule=(2.0, 1.0),
         iterations=8,
         search=None,
-        convergence=Convergence(),
+        mode='early_exit',
     )
     with pytest.raises(RuntimeError):
         jax.grad(cost_of(early))(moving)
