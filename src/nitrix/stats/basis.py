@@ -54,6 +54,7 @@ __all__ = [
     'cr_basis',
     'gp_basis',
     'hsgp_basis',
+    'gp_factor_smooth',
     'mrf_smooth',
     'tensor_product_basis',
     're_smooth',
@@ -1001,6 +1002,152 @@ def hsgp_basis(
         knots=knots,
         radial_transform=radial_transform,
         kernel_param=L,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Factor-smooth GP interaction (mgcv bs='fs' with a GP marginal) -- the
+# fixed-rho hierarchical-GP building block
+# ---------------------------------------------------------------------------
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class _FactorGPBasis:
+    """A factor-smooth GP interaction: a separate GP curve per factor level, all
+    sharing **one** smoothing parameter (mgcv ``bs="fs"`` with a GP marginal).
+
+    The whitened HSGP design ``Psi`` (at a fixed ``rho``) is replicated per group
+    -- level ``g``'s columns are ``Psi`` on its own rows, zero elsewhere -- and the
+    penalty is the **identity**, so the single Fellner-Schall smoothing parameter
+    on this block **is** the shared group precision ``1 / sigma_grp^2`` (the
+    penalty<->variance-component identity, exactly as :class:`REBasis` but with the
+    GP basis in place of the one-hot).  Pair it with a population
+    :func:`hsgp_basis` of the same ``rho`` (plus the intercept) in ``gam_fit`` for
+    the "GS" hierarchical GP at fixed ``rho`` -- the basis counterpart of
+    :func:`~nitrix.stats.hgp.hgp_fit` (which additionally estimates ``rho``).
+
+    Attributes
+    ----------
+    design
+        ``(n, L*m)`` factor-smooth design.
+    penalty
+        ``(L*m, L*m)`` identity ridge (the whitened-GP prior is i.i.d.).
+    base
+        The whitened HSGP marginal :class:`SplineBasis` (for re-evaluation).
+    n_levels
+        Number of factor levels ``L``.
+    """
+
+    design: Float[Array, 'n Lm']
+    penalty: Float[Array, 'Lm Lm']
+    base: 'SplineBasis'
+    n_levels: int
+
+    @property
+    def dim(self) -> int:
+        """Number of factor-smooth coefficients ``L*m``."""
+        return self.design.shape[-1]
+
+    def penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """Penalty blocks ``[(I, 1)]``: the identity ridge (full rank, eigenvalues
+        one -- a single shared smoothing parameter across all groups)."""
+        return [(np.asarray(self.penalty), np.ones(self.dim))]
+
+    def eval_design(
+        self, x: Any
+    ) -> Float[Array, 'g Lm']:
+        """Re-evaluate at new ``(x_vals, group)`` (a tuple, the by-factor
+        convention): the whitened GP design at ``x_vals`` placed in each
+        observation's group block."""
+        x_vals, group = x
+        psi = spline_design(self.base, jnp.asarray(x_vals))  # (g, m)
+        group = jnp.asarray(group).astype(jnp.int32)
+        onehot = jax.nn.one_hot(group, self.n_levels, dtype=psi.dtype)
+        inter = onehot[:, :, None] * psi[:, None, :]  # (g, L, m)
+        return inter.reshape(psi.shape[0], self.n_levels * self.base.dim)
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[Tuple[Any, ...], Tuple[int]]:
+        return (self.design, self.penalty, self.base), (self.n_levels,)
+
+    @classmethod
+    def tree_unflatten(
+        cls, aux: Tuple[int], children: Tuple[Any, ...]
+    ) -> '_FactorGPBasis':
+        design, penalty, base = children
+        (n_levels,) = aux
+        return cls(
+            design=design, penalty=penalty, base=base, n_levels=n_levels
+        )
+
+
+def gp_factor_smooth(
+    x: Float[Array, ' n'],
+    group: Int[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    kernel: str = 'matern52',
+    rho: Optional[float] = None,
+    amplitude: float = 1.0,
+    boundary: float = 1.5,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = False,
+    n_levels: Optional[int] = None,
+) -> _FactorGPBasis:
+    """Build a factor-smooth GP interaction (mgcv ``bs="fs"`` with a GP marginal).
+
+    A separate Hilbert-space GP curve of ``x`` for each level of ``group``, all
+    sharing **one** smoothing parameter (so the per-group curves are random
+    deviations with a common amplitude -- partial pooling).  This is the
+    **fixed-``rho``** building block of the hierarchical GP: drop it into
+    ``gam_fit`` alongside a population :func:`hsgp_basis` of the same ``rho`` (and
+    the intercept) for the "GS" hierarchical GP.  For *estimated* ``rho`` and the
+    full variance-component report, use :func:`~nitrix.stats.hgp.hgp_fit`.
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate.
+    group
+        ``(n,)`` integer factor labels ``0 .. L-1``.
+    n_basis
+        Per-group HSGP rank ``m`` (default ``10``; the design is ``L`` times this
+        wide, so a smaller rank than :func:`hsgp_basis` is usual).
+    kernel, rho, amplitude, boundary, bounds
+        HSGP marginal parameters (see :func:`hsgp_basis`); ``rho`` defaults to the
+        data half-range (a fixed value -- lengthscale estimation is ``hgp_fit``).
+    center
+        Sum-to-zero each group's smooth (default ``False`` -- the group curves
+        carry their own level, the usual factor-smooth; set ``True`` to pair with
+        an explicit per-group mean).
+    n_levels
+        Number of levels ``L`` (defaults to ``int(group.max()) + 1``); pass it when
+        a level is absent so the block width is stable.
+
+    Returns
+    -------
+    ``_FactorGPBasis`` (a :data:`SmoothBasis`) for ``gam_fit``; the single
+    Fellner-Schall smoothing parameter on this block is the shared group
+    precision ``1 / sigma_grp^2``.
+    """
+    base = hsgp_basis(
+        x, n_basis, kernel=kernel, rho=rho, amplitude=amplitude,
+        boundary=boundary, bounds=bounds, center=center,
+    )
+    group = jnp.asarray(group)
+    L = int(n_levels) if n_levels is not None else int(jnp.max(group)) + 1
+    m = base.dim
+    onehot = jax.nn.one_hot(group, L, dtype=base.design.dtype)  # (n, L)
+    inter = onehot[:, :, None] * base.design[:, None, :]  # (n, L, m)
+    design = inter.reshape(base.design.shape[0], L * m)
+    penalty = np.eye(L * m, dtype=base.design.dtype)
+    return _FactorGPBasis(
+        design=design,
+        penalty=penalty,  # type: ignore[arg-type]
+        base=base,
+        n_levels=L,
     )
 
 

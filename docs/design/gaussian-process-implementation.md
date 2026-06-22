@@ -22,13 +22,13 @@ PR independently shippable and gam_fit-compatible:
 | **PR3a** | Tier 2b full-rank `engine='exact'` (kernel-eigenfeature REML) | shared PR2 core (≡ `lme.reml_fit`) | thin |
 | **PR3b** | `corr=` composition (structured residual: ar1/car1/cs) | `lme._corr.whiten`, `build_group_layout` | thin |
 | **PR4a** | Tier 3 hierarchical `hgp_fit` (global + group smooths, GS model) | shared PR2 core, generalised to K penalty blocks | `stats/hgp.py` |
-| **PR4b** | `gp_factor_smooth` fixed-`ρ` basis (gam_fit drop-in); exact-engine hgp | `gam_fit`, `re_smooth` | |
+| **PR4b** | `gp_factor_smooth` fixed-`ρ` factor-smooth GP basis (gam_fit drop-in) | `gam_fit`, `hsgp_basis` | `basis.py` |
 | **PR5** | multi-D `hsgp_basis_nd` (tensor product); perf-bench | | |
 
 This document specifies **PR1 fully** and PR2 to the design level; PR3–5 are
-sketched (they don't constrain PR1/PR2). **PR2, PR3a/b, PR4a are shipped**
-(`gp_fit` HSGP + `engine='exact'` + `corr=`; `hgp_fit` hierarchical); PR4b + PR5
-remain.
+sketched (they don't constrain PR1/PR2). **PR2, PR3a/b, PR4a/b are shipped**
+(`gp_fit` HSGP + `engine='exact'` + `corr=`; `hgp_fit` hierarchical;
+`gp_factor_smooth` basis); PR5 (multi-D) remains.
 
 ## 1. Math spec (1-D HSGP)
 
@@ -309,8 +309,23 @@ sparse group is shrunk toward the population trend.
   groups don't truly differ (partial pooling). 6 tests; ruff/mypy clean.
 - **Cost.** The factor-smooth is `(1+L)` smooths wide, so working size is
   `O(V·(M_0+(1+L)m)²)` — the inherent per-group-curve cost; bound with `block`.
-  (Exploiting the disjoint-row block sparsity of the group design is a PR4b
+  (Exploiting the disjoint-row block sparsity of the group design is a later
   optimisation.)
+
+## 5d. PR4b — `gp_factor_smooth` fixed-`ρ` basis (**shipped**, `basis.py`)
+
+The basis counterpart of `hgp_fit`: the factor-smooth GP block (mgcv `bs="fs"`
+with a GP marginal) as a `gam_fit` drop-in — `hsgp_basis : gp_fit ::
+gp_factor_smooth : hgp_fit`. It replicates the **whitened** HSGP design `Ψ` (form
+A, fixed `ρ`) per group with an **identity** penalty (`_FactorGPBasis`, a
+`SmoothBasis` like `REBasis`), so the single Fellner-Schall parameter on the block
+is the shared group precision `1/σ²_grp`. Drop it into `gam_fit` next to a
+population `hsgp_basis` of the same `ρ` for the GS model at fixed `ρ`, composable
+with any other GAM term. `eval_design` takes a `(x, group)` tuple (the by-factor
+convention). Verified: contract (width `L·m`, one identity block, tuple
+round-trip), GS recovery via `gam_fit` (fitted vs truth corr `>0.99`, one shared
+group `λ`), stable width under `n_levels`. 3 tests; no new mypy errors (the
+`penalty` host-array follows the tolerated `REBasis` pattern).
 
 ## 6. Decisions (confirmed 2026-06-21)
 

@@ -238,3 +238,67 @@ def test_hgp_argument_validation():
         hgp_fit(Y, jnp.asarray(x), jnp.asarray(group), boundary=0.5)
     with pytest.raises(ValueError):
         hgp_fit(Y, jnp.asarray(x[:5]), jnp.asarray(group))  # length mismatch
+
+
+# ---------------------------------------------------------------------------
+# 4. gp_factor_smooth -- the fixed-rho factor-smooth GP basis (gam_fit drop-in)
+# ---------------------------------------------------------------------------
+
+
+def test_gp_factor_smooth_contract():
+    """Design width ``L*m``, one shared (identity) penalty block, tuple eval."""
+    from nitrix.stats import gp_factor_smooth
+
+    rng = np.random.default_rng(0)
+    x, group, _y, *_ = _hier_data(rng, L=5, per=12)
+    fb = gp_factor_smooth(jnp.asarray(x), jnp.asarray(group), 8,
+                          kernel='matern52', rho=0.2)
+    m = fb.base.dim
+    assert fb.dim == 5 * m
+    assert fb.design.shape == (len(x), 5 * m)
+    blocks = fb.penalty_blocks()
+    assert len(blocks) == 1  # one shared smoothing parameter
+    S, eig = blocks[0]
+    assert S.shape == (5 * m, 5 * m)
+    assert np.allclose(S, np.eye(5 * m))  # identity ridge
+    # tuple eval re-evaluates to the same design at the training points.
+    fe = fb.eval_design((jnp.asarray(x), jnp.asarray(group)))
+    assert np.allclose(np.asarray(fe), np.asarray(fb.design), atol=1e-10)
+
+
+def test_gp_factor_smooth_gam_fit_recovers_gs():
+    """``gam_fit([hsgp_basis, gp_factor_smooth])`` is the GS hierarchical GP at
+    fixed ``rho``: it recovers the per-group curves, with one shared group
+    smoothing parameter."""
+    from nitrix.stats import gam_fit, gp_factor_smooth, hsgp_basis
+
+    rng = np.random.default_rng(1)
+    x, group, y, t, pop, devs = _hier_data(rng, L=6, per=20)
+    rho = 0.2
+    pop_b = hsgp_basis(jnp.asarray(x), 12, kernel='matern52', rho=rho)
+    fac_b = gp_factor_smooth(jnp.asarray(x), jnp.asarray(group), 10,
+                             kernel='matern52', rho=rho)
+    res = gam_fit(jnp.asarray(y[None, :]), [pop_b, fac_b])
+    # Two smoothing parameters: population and the single shared group block.
+    assert res.lam.shape == (1, 2)
+
+    X = np.concatenate(
+        [np.ones((len(x), 1)), np.asarray(pop_b.design),
+         np.asarray(fac_b.design)], axis=1
+    )
+    fitted = np.asarray(res.coef[0]) @ X.T
+    truth = np.concatenate([pop + devs[g] for g in range(6)])
+    assert np.corrcoef(fitted, truth)[0, 1] > 0.99
+
+
+def test_gp_factor_smooth_n_levels_stable_width():
+    """``n_levels`` fixes the block width even when a level is absent."""
+    from nitrix.stats import gp_factor_smooth
+
+    rng = np.random.default_rng(2)
+    x = np.sort(rng.uniform(0.0, 1.0, 40))
+    group = np.where(x < 0.5, 0, 2)  # levels {0, 2}; level 1 absent
+    fb = gp_factor_smooth(jnp.asarray(x), jnp.asarray(group), 6,
+                          kernel='matern52', rho=0.2, n_levels=3)
+    assert fb.n_levels == 3
+    assert fb.dim == 3 * fb.base.dim
