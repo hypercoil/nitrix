@@ -357,3 +357,17 @@ def test_bbr_validation():
     p4 = jnp.zeros((10, 4))
     with pytest.raises(ValueError):
         bbr_register(jnp.zeros((8, 8, 8, 8)), p4, p4)
+
+
+def test_bbr_jit_smoke():
+    # jit-coverage: bbr_register compiles + runs under jax.jit and matches the
+    # eager result.
+    n, center, radius = 64, (32.0, 32.0), 15.0
+    moving = _disk(n, (35.0, 30.0), radius)
+    points, normals = _circle(center, radius, 48)
+    eager = bbr_register(moving, points, normals)
+    jitted = jax.jit(bbr_register)(moving, points, normals)
+    assert bool(jnp.all(jnp.isfinite(jitted.matrix)))
+    assert np.allclose(
+        np.asarray(eager.matrix), np.asarray(jitted.matrix), atol=1e-4
+    )

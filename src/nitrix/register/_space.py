@@ -53,9 +53,10 @@ on ``result.params``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Optional, Protocol
+from typing import Any, ClassVar, Optional, Protocol
 
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float
 
 from ..geometry import apply_affine
@@ -82,9 +83,12 @@ def _translation_homog(
 
 
 def _scale_homog(
-    s: Float[Array, ' d'], ndim: int, dtype: jnp.dtype
+    s: Any, ndim: int, dtype: jnp.dtype
 ) -> Float[Array, ' d1 d1']:
-    """Homogeneous ``(ndim+1, ndim+1)`` per-axis diagonal scaling matrix."""
+    """Homogeneous ``(ndim+1, ndim+1)`` per-axis diagonal scaling matrix.
+
+    ``s`` is array-like (a host NumPy ``_grid_scale`` constant or an ``Array``);
+    it is cast to ``dtype`` here."""
     eye = jnp.eye(ndim + 1, dtype=dtype)
     idx = jnp.arange(ndim)
     return eye.at[idx, idx].set(jnp.asarray(s, dtype=dtype))
@@ -110,18 +114,24 @@ def _conjugate_about(
     return t_pos @ transform @ t_neg
 
 
-def _grid_scale(full_shape: tuple[int, ...], shape: tuple[int, ...]) -> Array:
+def _grid_scale(
+    full_shape: tuple[int, ...], shape: tuple[int, ...]
+) -> np.ndarray:
     """Per-axis ``align-corners`` index scale from a pyramid level to full.
 
     ``downsample`` resamples with the align-corners grid (output voxel
     ``i`` samples input ``i * (in-1)/(out-1)``), so a level-``l`` voxel
     index maps to the full-resolution index by the pure per-axis scale
     ``(full - 1) / (level - 1)`` (no offset; corner 0 -> 0).
+
+    Computed on the **static** shape tuples with NumPy (a host constant), so no
+    ``float64`` literal enters the traced graph to be silently down-cast under
+    x64-off (float32); the consumer (``_scale_homog``) casts to the run dtype.
     """
-    full = jnp.asarray(full_shape, dtype=jnp.float64)
-    lvl = jnp.asarray(shape, dtype=jnp.float64)
+    full = np.asarray(full_shape, dtype=np.float64)
+    lvl = np.asarray(shape, dtype=np.float64)
     # Guard the degenerate single-voxel axis (no scale is well-defined).
-    denom = jnp.maximum(lvl - 1.0, 1.0)
+    denom = np.maximum(lvl - 1.0, 1.0)
     return (full - 1.0) / denom
 
 

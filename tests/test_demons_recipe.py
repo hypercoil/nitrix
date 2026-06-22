@@ -268,3 +268,21 @@ def test_demons_finite_on_uniform_background():
     )
     assert bool(jnp.all(jnp.isfinite(res.warped)))
     assert bool(jnp.all(jnp.isfinite(res.velocity)))
+
+
+def test_demons_jit_smoke():
+    # jit-coverage: the Demons recipe compiles + runs under jax.jit and matches
+    # the eager result.
+    fixed = _blobs_2d(48)
+    moving = _warp_by_velocity(fixed, _smooth_velocity((48, 48), 2, 6.0, 30.0, 1))
+    spec = DemonsSpec(levels=2, iterations=20)
+    eager = diffeomorphic_demons_register(moving, fixed, spec=spec)
+    jitted = jax.jit(
+        lambda m, f: diffeomorphic_demons_register(m, f, spec=spec)
+    )(moving, fixed)
+    assert bool(jnp.all(jnp.isfinite(jitted.displacement)))
+    assert np.allclose(
+        np.asarray(eager.displacement),
+        np.asarray(jitted.displacement),
+        atol=1e-5,
+    )

@@ -308,6 +308,12 @@ def rigid_register(
         additionally assumes a shared voxel grid.
     spec
         ``RegistrationSpec`` (pyramid depth, iterations, metric, ...).
+        **Metric choice:** ``SSD`` (default) within-modality -- the fast
+        inverse-compositional path; ``MI`` / ``CorrelationRatio`` cross-modal;
+        ``LNCC`` under a smooth intensity bias.  **Grid:** the default
+        ``IndexSpace`` assumes ``moving`` and ``fixed`` share a (roughly
+        isotropic) voxel grid -- use ``WorldSpace`` for anisotropic voxels or
+        differing grids (a rigid in index space shears in physical space).
     space
         Coordinate space to optimise in (``_space``): ``IndexSpace()``
         (default; voxel-space, shared-grid, on-device) or

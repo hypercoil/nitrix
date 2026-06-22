@@ -235,3 +235,17 @@ def test_volreg_validation():
             method='forward',
             spec=RegistrationSpec(convergence=Convergence()),
         )
+
+
+def test_volreg_jit_smoke():
+    # jit-coverage: volreg compiles + runs under jax.jit (no eager-only op) and
+    # matches the eager result.
+    base = _blobs_2d(48)
+    series = _series_index(base, _THETAS, 2)
+    spec = RegistrationSpec(levels=2, iterations=15)
+    eager = volreg(series, reference=0, spec=spec)
+    jitted = jax.jit(lambda s: volreg(s, reference=0, spec=spec))(series)
+    assert bool(jnp.all(jnp.isfinite(jitted.matrices)))
+    assert np.allclose(
+        np.asarray(eager.matrices), np.asarray(jitted.matrices), atol=1e-5
+    )

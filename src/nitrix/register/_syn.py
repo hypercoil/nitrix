@@ -133,8 +133,10 @@ class SyNSpec:
         Optional ANTs-style early-exit (``Convergence(threshold, window)``): a
         level stops once the windowed normalised cost slope drops below
         ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
-        full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
-        ``vmap``-batchable).  **When to use (measured):** a *tapered* per-level
+        full fixed schedule.  **Single-pair** (a ``vmap``-ed ``while_loop`` exits
+        only when *all* lanes converge -- the slowest governs -- so the per-pair
+        benefit is lost in a cohort; ``volreg`` uses that batch-aggregate form
+        deliberately).  **When to use (measured):** a *tapered* per-level
         ``iterations`` schedule (the ANTs ``100x70x50x20`` discipline) already
         removes the over-iteration early-exit targets, so the strict default
         ``threshold=1e-6`` then *costs* time (the ``while_loop`` overhead

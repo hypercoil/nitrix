@@ -333,7 +333,13 @@ def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
     clamp, that zeroes the *net* deformation there.
     """
     norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
-    cap = jnp.percentile(norm, _STEP_ROBUST_PCTL)
+    # Robust cap as the top-(100-pctl)% order statistic via lax.top_k
+    # (O(N log k)) rather than a full O(N log N) percentile sort every
+    # iteration: the k-th largest is the pctl-th percentile up to a sub-rank
+    # difference -- immaterial for a trust-region cap.  ``k`` is static (the
+    # field shape is).
+    k = max(1, math.ceil((100.0 - _STEP_ROBUST_PCTL) / 100.0 * norm.size))
+    cap = jnp.min(lax.top_k(norm.reshape(-1), k)[0])
     if scale_to:
         # ANTs ``ScaleUpdateField``: scale the *whole* field so the robust-max
         # displacement is **exactly** ``step`` (``scale = step / max``), not the
@@ -586,7 +592,12 @@ def symmetric_level(
             bch_order=1,
             ndim=ndim,
         )
-        return (v_fwd, v_inv), bound_fwd.cost(a)
+        # The convergence cost is the SYMMETRIC mean of both half-costs; keying
+        # the early-exit on the forward half alone lets an asymmetric metric
+        # (MI / CR) stop while the inverse half is still improving.  A no-op for
+        # a symmetric metric (SSD / LNCC: fwd == inv).
+        cost = 0.5 * (bound_fwd.cost(a) + bound_inv.cost(b))
+        return (v_fwd, v_inv), cost
 
     (v_fwd, v_inv), costs = run_iterations(
         step_fn,
@@ -720,7 +731,8 @@ def group_symmetric_level(
         s_inv = _smooth_vector(
             compose_displacement(s_inv, d_inv, mode=boundary_mode), sd, ndim
         )
-        return (s_fwd, s_inv), bound_fwd.cost(a)
+        # Symmetric mean of both half-costs (see symmetric_level).
+        return (s_fwd, s_inv), 0.5 * (bound_fwd.cost(a) + bound_inv.cost(b))
 
     (s_fwd, s_inv), costs = run_iterations(
         step_fn,

@@ -13,10 +13,12 @@ below ``threshold`` -- factored out of the matrix inverse-compositional path
 ``run_iterations`` runs a per-iteration ``step`` either as a fixed-length
 ``lax.scan`` (the default; reproducible and ``vmap``-batchable) or, when a
 :class:`Convergence` is supplied, as a ``lax.while_loop`` that early-exits.  The
-early-exit is **single-pair only** -- a data-dependent trip count is not
-``vmap``-batchable -- exactly as on the matrix IC path; it is differentiable
-only through the implicit path (a ``while_loop`` has no reverse rule), so use
-``implicit_*`` for gradients, not the unrolled trajectory.
+early-exit is offered **single-pair**: a ``vmap``-ed ``while_loop`` *does* batch
+-- it runs to the **all-lanes** exit, the slowest lane setting the trip count
+(``volreg`` uses exactly that batch-aggregate form) -- but the per-pair
+early-exit advantage then degrades to the cohort's slowest pair.  It is
+differentiable only through the implicit path (a ``while_loop`` has no reverse
+rule), so use ``implicit_*`` for gradients, not the unrolled trajectory.
 """
 
 from __future__ import annotations
@@ -90,9 +92,7 @@ def run_iterations(
     cost -- so ``cost_history`` keeps its shape either way.
     """
     if convergence is None:
-        return lax.scan(
-            step_fn, init_state, xs=None, length=iterations
-        )
+        return lax.scan(step_fn, init_state, xs=None, length=iterations)
 
     window = convergence.window
     threshold = convergence.threshold

@@ -331,7 +331,10 @@ def _grid_seed(
     candidates = init[None, :] + grid
     costs = jax.vmap(objective.cost)(candidates)
     # The seed only initialises the local solve; never back-propagate the
-    # discrete argmin (the optimum is seed-independent up to the basin).
+    # discrete argmin (the optimum is seed-independent up to the basin).  Guard
+    # NaN candidate costs (an off-grid seed can sample all-cval) so a NaN never
+    # wins the argmin.
+    costs = jnp.where(jnp.isnan(costs), jnp.inf, costs)
     return lax.stop_gradient(candidates[jnp.argmin(costs)])
 
 
