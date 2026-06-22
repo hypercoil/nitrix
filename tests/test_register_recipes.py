@@ -294,6 +294,42 @@ def test_rigid_2d_mi_recovery_cross_modal():
     assert np.isclose(float(res.params[0]), -0.12, atol=0.03)
 
 
+def test_affine_restarts_validation():
+    fixed = _blobs_2d(48)
+    with pytest.raises(ValueError):
+        affine_register(fixed, fixed, restarts=0)
+
+
+def test_affine_restarts_ignored_on_ssd_ic_path():
+    # The inverse-compositional SSD path is deterministic; restarts is a no-op
+    # (the result is identical to a single solve).
+    fixed = _blobs_2d(64)
+    A = jnp.asarray([[1.04, 0.05, 1.5], [-0.04, 0.97, -2.0], [0.0, 0.0, 1.0]])
+    moving = _warp_known(fixed, A)
+    spec = RegistrationSpec(levels=3, iterations=30, metric=SSD())
+    r1 = affine_register(moving, fixed, spec=spec)
+    r4 = affine_register(moving, fixed, spec=spec, restarts=4)
+    assert np.array_equal(np.asarray(r1.params), np.asarray(r4.params))
+
+
+def test_affine_restarts_multistart_recovers_and_reproducible():
+    # restarts>1 on the forward (BFGS) path runs K diversified solves and keeps
+    # the lowest-cost one (the GPU MI / CR nondeterminism mitigation).  Cross-
+    # modal affine; the fixed PRNG seed makes the multi-start reproducible.
+    fixed = _blobs_2d(64)
+    A = jnp.asarray([[1.05, 0.06, 2.0], [-0.05, 0.96, -1.5], [0.0, 0.0, 1.0]])
+    warped = _warp_known(fixed, A)
+    moving = jnp.sqrt(warped - warped.min() + 0.05)  # "different modality"
+    spec = RegistrationSpec(levels=3, iterations=40, metric=MI(bins=32))
+    res = affine_register(moving, fixed, spec=spec, init='moment', restarts=4)
+    res2 = affine_register(moving, fixed, spec=spec, init='moment', restarts=4)
+    mi0 = float(mutual_information(moving, fixed, bins=32))
+    mi1 = float(mutual_information(res.warped, fixed, bins=32))
+    assert mi1 > mi0  # the multi-start recovers (improves the objective)
+    # Deterministic perturbations -> reproducible result.
+    assert np.array_equal(np.asarray(res.params), np.asarray(res2.params))
+
+
 def test_identity_registration_is_near_zero():
     fixed = _blobs_2d(48)
     res = rigid_register(

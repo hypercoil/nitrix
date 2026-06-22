@@ -307,6 +307,34 @@ ones back into one module).  The persistent module cache does **not** compose in
 that outer module either (distinct hash).  So the cache / cohort + autotune levers
 above capture the worthwhile wins without giving up the one-``jit`` model.
 
+## 6.3 GPU determinism of the histogram metrics (affine MI / CR)
+
+The joint-histogram **scatter-add** (`metrics.information`: `hist.at[idx_m,
+idx_f].add(...)`) that `MI` / `CorrelationRatio` build their PDF from is
+**non-deterministic on GPU** (atomic float accumulation order), and the
+recovered transform varies run-to-run.  A recovery-quality audit (2026-06-21,
+RAW MNI, planted multimodal) localised the impact precisely:
+
+- **Rigid MI** (6-DOF BFGS): tolerant -- ~0.01 deg run-to-run spread.
+- **SyN + MIForce** (dense-field): tolerant -- the per-voxel forces are
+  Gaussian-smoothed and averaged over the field, so the noise washes out
+  (run-to-run warp deviation ~0.09 vox, no folding).
+- **Affine MI** (12-DOF forward BFGS): **fragile** -- the extra DOF amplify the
+  gradient noise into occasional *catastrophic* divergence (ncc ~0.55 instead of
+  ~0.90), a ~40-50 % failure rate on GPU at a moderate plant; **CPU is exact
+  (0 %)**.  `CorrelationRatio`-affine is mildly affected (~5 %).
+
+It is **isolated to the affine forward path**, so the mitigation is targeted
+rather than a (globally slower) deterministic histogram: ``affine_register(...,
+restarts=k)`` runs ``k`` forward solves from small deterministic init
+perturbations and keeps the lowest-cost one.  A diverged solve scores far worse,
+so it is never kept; ``restarts=4``--``6`` drives the GPU affine-MI failure rate
+to ~0 (measured 0/20) at ``k``x the forward cost.  Default ``restarts=1`` is
+unchanged; SSD takes the deterministic inverse-compositional path and ignores
+it; CPU never needs it.  (Stride-offset PDF subsampling was evaluated as a
+cheaper diversifier but the per-offset MI variation is ~0.2 % -- too small to
+reliably escape a divergence on its own.)
+
 ## 7. Out of scope (scope discipline)
 
 Atlas/template data structures and template-aware ops (→ ``thrux``); any

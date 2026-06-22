@@ -23,6 +23,7 @@ import warnings
 from dataclasses import replace
 from typing import Literal, Optional
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
@@ -39,6 +40,7 @@ from ._inverse_compositional import (
     ic_affine_register,
     ic_rigid_register,
 )
+from ._metric import pin_metric_ranges
 from ._model import Affine, Rigid, TransformModel
 from ._preprocess import preprocess_images
 from ._space import CoordinateSpace, IndexSpace
@@ -324,6 +326,83 @@ def rigid_register(
     )
 
 
+# Per-restart deterministic init-perturbation scales (affine Lie params): the
+# linear gl(n) block and the coarsest-level translation.  Small -- the restarts
+# diversify *around* the moment/identity start to dodge the rare GPU MI / CR
+# divergence, not to widen the capture range.
+_RESTART_LINEAR_JITTER = 0.06
+_RESTART_TRANS_JITTER = 1.5
+
+
+def _affine_multistart(
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
+    *,
+    ndim: int,
+    spec: RegistrationSpec,
+    space: CoordinateSpace,
+    base_init: Optional[Array],
+    restarts: int,
+) -> RegistrationResult:
+    """Run ``restarts`` forward affine solves from diversified inits; keep the
+    lowest-cost result.
+
+    The GPU joint-histogram scatter-add (``MI`` / ``CorrelationRatio``) is
+    non-deterministic, and the 12-DOF affine BFGS occasionally amplifies that
+    gradient noise into a catastrophic divergence (the dense-field force and
+    6-DOF rigid paths absorb it; ``SSD`` is exact).  Re-solving from small
+    deterministic init perturbations and keeping the best metric cost drives the
+    failure rate to ~0 -- a diverged run scores far worse, so it is never kept.
+    Deterministic (fixed PRNG seed), so the result is reproducible.
+    """
+    model = Affine()
+    base = (
+        jnp.zeros(model.n_params(ndim), dtype=moving.dtype)
+        if base_init is None
+        else base_init
+    )
+    n_lin = ndim * ndim
+    # Score every restart with one metric pinned on the full-res images: a data
+    # range drifts as the warp moves, so unpinned costs would not be comparable.
+    scorer = pin_metric_ranges(spec.metric, moving, fixed)
+    key = jax.random.PRNGKey(0)
+    best: Optional[RegistrationResult] = None
+    best_cost: Optional[Array] = None
+    for k in range(restarts):
+        if k == 0:
+            init_k = base  # the unperturbed moment / identity start
+        else:
+            key, k_lin, k_tr = jax.random.split(key, 3)
+            init_k = base + jnp.concatenate(
+                [
+                    _RESTART_LINEAR_JITTER
+                    * jax.random.normal(k_lin, (n_lin,), dtype=base.dtype),
+                    _RESTART_TRANS_JITTER
+                    * jax.random.normal(k_tr, (ndim,), dtype=base.dtype),
+                ]
+            )
+        res = multi_resolution_register(
+            moving,
+            fixed,
+            model=model,
+            ndim=ndim,
+            spec=spec,
+            space=space,
+            init_params=init_k,
+        )
+        cost = scorer.cost(res.warped, fixed)
+        if best is None or best_cost is None:
+            best, best_cost = res, cost
+        else:
+            take = cost < best_cost
+            best = jax.tree_util.tree_map(
+                lambda b, n, t=take: jnp.where(t, n, b), best, res
+            )
+            best_cost = jnp.where(take, cost, best_cost)
+    assert best is not None
+    return best
+
+
 def affine_register(
     moving: Float[Array, '*mspatial'],
     fixed: Float[Array, '*fspatial'],
@@ -334,6 +413,7 @@ def affine_register(
     init: Literal['identity', 'moment'] = 'identity',
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
+    restarts: int = 1,
 ) -> RegistrationResult:
     """Estimate the affine transform aligning ``moving`` to ``fixed``.
 
@@ -352,6 +432,18 @@ def affine_register(
     rigid -- the affine basin is narrow and a single zero start fails silently
     on a large misalignment.  ``winsorize`` / ``histogram_match`` condition the
     intensities before registration (see ``rigid_register``).
+
+    ``restarts`` (default ``1``) runs the **forward** solve from that many
+    diversified inits and keeps the lowest-cost result.  Its purpose is the
+    histogram metrics on GPU: the joint-histogram scatter-add (``MI`` /
+    ``CorrelationRatio``) is non-deterministic, and the 12-DOF affine BFGS
+    occasionally amplifies that gradient noise into a catastrophic divergence
+    (rigid's 6-DOF and the dense-field force absorb it; ``SSD`` is exact and
+    takes the deterministic inverse-compositional path, which ignores
+    ``restarts``).  A diverged solve scores far worse, so ``restarts=4``--``6``
+    drives the GPU affine-MI failure rate to ~0 at ``restarts``x the forward
+    cost; ``1`` is the single-solve default (unchanged, and all that CPU --
+    deterministic -- ever needs).
     """
     moving, fixed = preprocess_images(
         moving,
@@ -365,7 +457,11 @@ def affine_register(
     init_matrix = _resolve_init_matrix(
         init, moving, fixed, ndim=ndim, scale=True, space=space, spec=spec
     )
+    if restarts < 1:
+        raise ValueError(f'restarts must be >= 1; got {restarts}.')
     if _use_inverse_compositional(method, space, spec, model):
+        # The inverse-compositional SSD path is deterministic; restarts (a GPU
+        # MI / CR nondeterminism mitigation) is a no-op here.
         return ic_affine_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
         )
@@ -375,6 +471,16 @@ def affine_register(
         if init_matrix is None
         else _affine_params_from_matrix(init_matrix, ndim)
     )
+    if restarts > 1:
+        return _affine_multistart(
+            moving,
+            fixed,
+            ndim=ndim,
+            spec=spec,
+            space=space,
+            base_init=init_params,
+            restarts=restarts,
+        )
     return multi_resolution_register(
         moving,
         fixed,
