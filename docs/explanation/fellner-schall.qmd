@@ -1,0 +1,249 @@
+---
+title: "Fellner–Schall: the engine of the statistical suite"
+---
+
+::: {.callout-tldr title="Fast path"}
+`nitrix.stats` fits penalised models — smooths, generalised additive models,
+mixed models — to *every* voxel/vertex at once. The thing that makes them all
+*one* suite is a single outer-loop update that chooses how much to penalise:
+
+$$
+\lambda_k \;\leftarrow\; \lambda_k \,
+\frac{\operatorname{tr}(S_\lambda^{-} S_k) - \operatorname{tr}(V S_k)}
+     {\gamma_k^{\top} S_k \gamma_k / \phi}.
+$$
+
+It is **multiplicative** (so penalties stay positive), it **increases the
+marginal likelihood every step**, and — because a roughness penalty *is* a
+random-effect variance — the same update does smoothing-parameter selection
+*and* variance-component estimation. That equivalence is why `gam_fit`,
+`reml_fit`, `glmm_fit` and friends are siblings, not separate programs. Code:
+[`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py).
+:::
+
+## The problem every smooth shares {#fellner-schall}
+
+Fit, per element (voxel, vertex, fixel), a generalised additive model
+
+$$
+g\!\left(\mathbb{E}[y]\right) \;=\;
+X\beta \;+\; \sum_k f_k(x_k),
+\qquad f_k(x_k) = B_k(x_k)\,\gamma_k,
+$$ {#eq-gam}
+
+where each smooth $f_k$ is a spline expanded in a basis $B_k$ with coefficients
+$\gamma_k$ (see `nitrix.stats.basis`). Left unconstrained, a flexible basis
+overfits. So each smooth carries a **roughness penalty**
+
+$$
+\operatorname{pen}_k(\gamma_k) = \lambda_k\, \gamma_k^{\top} S_k \gamma_k,
+$$ {#eq-penalty}
+
+with a fixed penalty matrix $S_k$ (a differencing or curvature operator) and a
+**smoothing parameter** $\lambda_k \ge 0$ that we must *choose*. Small
+$\lambda_k$ → wiggly; large $\lambda_k$ → stiff. Everything below is about
+choosing $\lambda_k$ well, cheaply, for millions of elements at once.
+
+Given the $\lambda_k$, fitting the coefficients is the easy part: penalised
+iteratively-reweighted least squares (a weighted normal-equations solve with the
+block penalty $S_\lambda = \sum_k \lambda_k S_k$ added). In `nitrix` this inner
+loop is cuSOLVER-free (`linalg._smalllinalg`) so it runs on accelerators where
+the vendor solver is unavailable. The interesting question is the **outer loop**.
+
+## Why penalties are variances {#equivalence}
+
+Here is the observation the whole suite is built on.
+
+::: {#thm-equivalence}
+## Penalty–variance-component equivalence
+Fitting the smooth @eq-gam with the quadratic penalty @eq-penalty by penalised
+least squares is identical to computing the posterior mean of a Gaussian
+linear mixed model in which the coefficients carry the improper Gaussian prior
+$\gamma_k \sim \mathcal{N}\!\left(0,\, \sigma_{b,k}^2 S_k^{-}\right)$, with the
+correspondence
+$$
+\lambda_k \;=\; \frac{\phi}{\sigma_{b,k}^2},
+$$ {#eq-lambda-ratio}
+where $\phi$ is the model dispersion and $\sigma_{b,k}^2$ the random-effect
+variance.
+:::
+
+::: {.proof}
+The penalised least-squares objective
+$\lVert y - B\gamma\rVert^2/\phi + \sum_k \lambda_k \gamma_k^{\top} S_k \gamma_k$
+is, term for term, $-2\log$ of the Gaussian posterior
+$p(\gamma \mid y) \propto \exp\!\big(-\lVert y-B\gamma\rVert^2/2\phi\big)\,
+\prod_k \exp\!\big(-\gamma_k^{\top} S_k \gamma_k / 2\sigma_{b,k}^2\big)$
+once we set $\lambda_k = \phi/\sigma_{b,k}^2$. The maximiser of a Gaussian
+log-posterior is its mean, so the penalised fit and the mixed-model posterior
+mean coincide. $\square$
+:::
+
+@thm-equivalence is the hinge. "Choose the smoothing parameter $\lambda_k$" and
+"estimate the random-effect variance $\sigma_{b,k}^2$" are the *same task* read
+in two dialects. Choose your estimator for one and you have an estimator for the
+other. The estimator `nitrix` uses is **(restricted) marginal likelihood**, and
+the update that maximises it is Fellner–Schall.
+
+## The Fellner–Schall update {#the-update}
+
+Maximising the Laplace-approximate restricted marginal likelihood over
+$\lambda$ has no closed form, but it has a beautifully cheap fixed-point
+iteration [@wood2017fellnerschall]:
+
+$$
+\lambda_k \;\leftarrow\; \lambda_k \,
+\frac{\operatorname{tr}\!\left(S_\lambda^{-} S_k\right) - \operatorname{tr}\!\left(V S_k\right)}
+     {\gamma_k^{\top} S_k \gamma_k / \phi},
+\qquad
+V = \left(X^{\top} W X + S_\lambda\right)^{-1},
+$$ {#eq-fellner-schall}
+
+where $V$ is the Bayesian coefficient covariance and $W$ the IRLS weights. Three
+properties make it the right tool:
+
+1. **Multiplicative ⇒ positivity-preserving.** $\lambda_k$ is rescaled, never
+   shifted, so it cannot go negative — no projection, no clipping logic in the
+   hot path.
+2. **Ascent.** Each step increases the (Laplace) marginal likelihood, so a fixed
+   iteration count converges reliably — and a fixed count is exactly what a
+   `vmap`-clean, JIT-compiled per-element fit needs.
+3. **Disjoint-block thrift.** GAM smooths occupy non-overlapping coefficient
+   blocks, so the generalised inverse of the *summed* penalty collapses:
+
+::: {#lem-disjoint}
+## Disjoint-block trace
+If the smooths occupy disjoint coefficient blocks then
+$\operatorname{tr}(S_\lambda^{-} S_k) = \operatorname{rank}(S_k)/\lambda_k$,
+so no generalised inverse of $S_\lambda = \sum_j \lambda_j S_j$ is ever formed.
+:::
+
+That collapse is what lets the numerator be computed from per-smooth quantities
+alone — the difference between a model-wide pseudo-inverse and a handful of
+ranks. It is the line between "elegant on paper" and "runs per-voxel on a GPU."
+
+Putting the two loops together:
+
+::: {.algorithm}
+**Algorithm 1 — Generalised Fellner–Schall smoothing-parameter selection**
+
+```
+input:  data y, design X, smooth bases {B_k}, penalties {S_k}
+init:   λ_k ← 1                                  for all k
+repeat (fixed iteration count):
+    # inner: penalised IRLS at the current λ  (cuSOLVER-free WLS solve)
+    S_λ ← Σ_k λ_k S_k
+    (β, γ), W ← penalised_irls(y, X, {B_k}, S_λ)
+    V         ← (XᵀWX + S_λ)⁻¹
+    φ         ← dispersion(y, fitted)
+    # outer: one Fellner–Schall step per smooth
+    for each smooth k:
+        num   ← rank(S_k)/λ_k − tr(V S_k)        # Lemma (disjoint blocks)
+        den   ← (γ_kᵀ S_k γ_k) / φ
+        λ_k   ← λ_k · num / den
+return β, γ, λ, V, effective degrees of freedom
+```
+:::
+
+This maps one-to-one onto the implementation in
+[`gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py):
+the inner penalised IRLS, the outer multiplicative update, the disjoint-block
+trace shortcut, and the Bayesian covariance $V$ that later yields per-smooth
+**effective degrees of freedom** $\operatorname{edf}_k$ and confidence bands.
+
+## Watching it converge
+
+A self-contained demonstration — pure NumPy, no `nitrix`, no GPU, so it runs at
+doc-build time (SPEC §6.4). We fit a single penalised smooth to noisy data and
+let @eq-fellner-schall pick $\lambda$ from a deliberately bad start.
+
+```{python}
+#| label: fig-fs-convergence
+#| fig-cap: "Left: the Fellner–Schall iterates for λ converge in a few steps from a far-off start. Right: the resulting smooth recovers the true function without over- or under-fitting."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+n = 200
+x = np.linspace(0, 1, n)
+f_true = np.sin(2 * np.pi * x) + 0.3 * x
+y = f_true + rng.normal(0, 0.35, n)
+
+# Gaussian-bump basis + a second-difference roughness penalty S (rank K-2).
+K = 30
+knots = np.linspace(0, 1, K)
+h = 1.0 / (K - 1)
+B = np.exp(-0.5 * ((x[:, None] - knots[None, :]) / (1.2 * h)) ** 2)
+D = np.diff(np.eye(K), n=2, axis=0)
+S = D.T @ D
+rankS = np.linalg.matrix_rank(S)
+BtB, Bty = B.T @ B, B.T @ y
+
+def fit(lam):
+    A = BtB + lam * S
+    Ainv = np.linalg.inv(A)
+    beta = Ainv @ Bty
+    edf = np.trace(Ainv @ BtB)              # effective degrees of freedom
+    rss = float(np.sum((y - B @ beta) ** 2))
+    phi = rss / max(n - edf, 1.0)           # dispersion
+    V = phi * Ainv                          # Bayesian coefficient covariance
+    return beta, edf, phi, V
+
+lam, traj = 1.0e4, [1.0e4]                   # start far too smooth
+for _ in range(30):
+    beta, edf, phi, V = fit(lam)
+    num = rankS / lam - np.trace(V @ S)      # tr(S_λ⁻ S) − tr(V S)   [Lemma]
+    den = float(beta @ S @ beta) / phi       # γᵀSγ / φ
+    lam = float(np.clip(lam * num / den, 1e-6, 1e10))
+    traj.append(lam)
+
+beta, edf, phi, V = fit(lam)
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(9, 3.4))
+axL.semilogy(traj, marker="o", ms=3)
+axL.set(xlabel="Fellner–Schall iteration", ylabel="λ", title="convergence of λ")
+axR.scatter(x, y, s=8, alpha=0.35, label="data")
+axR.plot(x, f_true, lw=2, label="truth")
+axR.plot(x, B @ beta, lw=2, ls="--", label=f"fit (edf≈{edf:.1f})")
+axR.legend(loc="upper right", fontsize=8); axR.set_title("selected smooth")
+fig.tight_layout()
+plt.show()
+print(f"converged λ ≈ {lam:.3g}   effective degrees of freedom ≈ {edf:.2f}")
+```
+
+From a start four orders of magnitude too stiff, the multiplicative update walks
+$\lambda$ down to its marginal-likelihood optimum in a handful of steps and the
+fitted smooth tracks the truth — the qualitative behaviour `gam_fit` relies on
+when it runs a *fixed* iteration budget over a whole brain.
+
+## Where it goes next: Gaussian processes {#gp-extension}
+
+@thm-equivalence keeps paying out. A Gaussian-process smooth with kernel $K$ is
+*the same construction* with the penalty $S_k = K^{-1}$ — a GP prior is just
+another quadratic penalty, and @eq-fellner-schall estimates its variance
+unchanged. In `nitrix` today the fixed-kernel case already works: the
+variance-components solver (`stats/lme/reml.py`) is a fixed-kernel GP under the
+hood, and a kriging GP basis ships in `stats/basis.py`.
+
+::: {.callout-note title="Status: partially aspirational"}
+What is **not** yet shipped is lengthscale (kernel-hyperparameter) estimation.
+The planned path is a Hilbert-space approximate GP (HSGP), where the kernel
+becomes a fixed Laplace-eigenfunction basis whose hyperparameters enter only as
+a diagonal spectral reweighting — at which point Fellner–Schall selects them
+with no new machinery. See `nitrix/docs/feature-requests/gaussian-process-models.md`.
+:::
+
+## Related across the federation
+
+Fitted statistical maps do not live in a vacuum: they are written back through
+the on-disk data structure described in the
+{{< xref tensorbids:architecture "tensorbids architecture" >}} chapter, which
+is how downstream tools rediscover them.
+
+## See also
+
+- Code: [`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py),
+  `stats/lme/reml.py`, `stats/basis.py`.
+- The generalised Fellner–Schall method [@wood2017fellnerschall]; the standard
+  reference on penalised GAMs and the penalty/variance duality [@wood2017gam];
+  the spectral trick that makes the mixed-model fit fast [@lippert2011fastlmm].

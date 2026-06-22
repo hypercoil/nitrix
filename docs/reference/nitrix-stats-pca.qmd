@@ -1,0 +1,59 @@
+---
+title: "nitrix.stats.pca"
+generated: true
+signature-hash: 64a7d840ab3da177
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.pca` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `PCAResult` {#PCAResult}
+
+```python
+class PCAResult
+```
+
+Fitted PCA basis (a NamedTuple of arrays, not a module).
+
+*TODO: class overview.*
+
+## `pca_fit` {#pca_fit}
+
+```python
+pca_fit(X: Float[Array, 'n d'], *, n_components: Optional[int]=None, center: bool=True, solver: Solver='full', n_oversamples: int=10, n_power_iterations: int=2, key: Optional[Array]=None) -> PCAResult
+```
+
+Fit a PCA basis to ``X`` (rows = samples, columns = features).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `pca_transform` {#pca_transform}
+
+```python
+pca_transform(X: Float[Array, 'n d'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n k']
+```
+
+Project ``X`` onto a PCA basis: ``(X - mean) @ components.T``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `pca_inverse_transform` {#pca_inverse_transform}
+
+```python
+pca_inverse_transform(Z: Float[Array, 'n k'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n d']
+```
+
+Reconstruct from PCA coordinates: ``Z @ components + mean``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

@@ -1,0 +1,71 @@
+---
+title: "nitrix.stats.gam"
+generated: true
+signature-hash: 63907b15bf2a160f
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.gam` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `GAMResult` {#GAMResult}
+
+*decorated:* `@register_result(children=('coef', 'lam', 'edf', 'edf_total', 'dispersion', 'deviance', 'null_deviance', 'cov_unscaled'), aux=('family', 'n_obs', 'col_slices'))`, `@dataclass(frozen=True)`
+
+```python
+class GAMResult
+```
+
+Per-element GAM fit output.
+
+*TODO: class overview.*
+
+## `SmoothTest` {#SmoothTest}
+
+```python
+class SmoothTest
+```
+
+Per-smooth approximate-significance test (Wood 2013, integer-rank).
+
+*TODO: class overview.*
+
+## `gam_fit` {#gam_fit}
+
+```python
+gam_fit(Y: Float[Array, 'V N'], smooths: Sequence[Smooth], *, parametric: Optional[Float[Array, 'N q']]=None, intercept: bool=True, family: Union[str, Family]=GAUSSIAN, lambda_mode: Literal['per_element', 'shared']='per_element', n_outer: int=20, n_inner: int=10, ridge: float=1e-08, lam_floor: float=1e-06, lam_ceil: float=100000000.0, block: Optional[int]=None) -> GAMResult
+```
+
+Fit a mass-univariate GAM: shared smooth bases, per-element responses.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `smooth_partial_effect` {#smooth_partial_effect}
+
+```python
+smooth_partial_effect(result: GAMResult, smooth_index: int, basis: Smooth, x: Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]
+```
+
+Per-element partial effect of one smooth on a covariate grid ``x``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `smooth_significance` {#smooth_significance}
+
+```python
+smooth_significance(result: GAMResult, smooths: Sequence[Smooth]) -> SmoothTest
+```
+
+Approximate significance test for each smooth term (Wood 2013).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

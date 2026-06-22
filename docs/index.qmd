@@ -1,0 +1,24 @@
+---
+title: "nitrix"
+subtitle: "GPU-accelerated pure numerics for neuroimaging in JAX/XLA"
+toc: false
+---
+
+`nitrix` is the substrate numerics layer of the federation: statistics,
+geometry, registration, signal, graph, and morphology, written as pure
+JAX/XLA so they run — differentiably, batched, JIT-compiled — on a hardware
+accelerator.
+
+::: {.callout-tldr title="Fast path"}
+If you read one chapter, read
+[Fellner–Schall: the engine of the statistical suite](explanation/fellner-schall.qmd).
+It explains why one small fixed-point update unifies smoothing, mixed models,
+and (soon) Gaussian processes across the whole `nitrix.stats` package.
+:::
+
+## Explanation (the textbook layer)
+
+- [Fellner–Schall: the engine of the statistical suite](explanation/fellner-schall.qmd)
+
+More chapters (geometry, registration, the semiring substrate) follow the same
+pattern: derive the mathematics, justify the design, point at the code.

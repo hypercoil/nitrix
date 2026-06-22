@@ -1,0 +1,169 @@
+---
+title: "nitrix.stats.covariance"
+generated: true
+signature-hash: c7b8840fc1989337
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.covariance` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `cov` {#cov}
+
+```python
+cov(X: Num[Array, '... c obs'], *, rowvar: bool=True, bias: bool=False, ddof: Optional[int]=None, weights: Optional[Num[Array, '... obs']]=None, weight_matrix: Optional[Num[Array, '... obs obs']]=None, l2: float=0.0) -> Num[Array, '... c c']
+```
+
+Empirical covariance of variables in a tensor batch.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `corr` {#corr}
+
+```python
+corr(X: Num[Array, '... c obs'], **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Pearson correlation of variables in a tensor batch.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `pairedcov` {#pairedcov}
+
+```python
+pairedcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool=True, bias: bool=False, ddof: Optional[int]=None, weights: Optional[Num[Array, '... obs']]=None, weight_matrix: Optional[Num[Array, '... obs obs']]=None, l2: float=0.0) -> Num[Array, '... c d']
+```
+
+Cross-covariance between two sets of variables.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `pairedcorr` {#pairedcorr}
+
+```python
+pairedcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs: Any) -> Num[Array, '... c d']
+```
+
+Cross-correlation between two sets of variables.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `partialcov` {#partialcov}
+
+```python
+partialcov(X: Num[Array, '... c obs'], *, require_nonsingular: bool=True, **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Partial covariance: conditioning each pair on all others.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `partialcorr` {#partialcorr}
+
+```python
+partialcorr(X: Num[Array, '... c obs'], *, require_nonsingular: bool=True, **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Partial correlation: normalised partial covariance.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `conditionalcov` {#conditionalcov}
+
+```python
+conditionalcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool=True, bias: bool=False, ddof: Optional[int]=None, weights: Optional[Num[Array, '... obs']]=None, weight_matrix: Optional[Num[Array, '... obs obs']]=None, l2: float=0.0, residualise_l2: float=0.0) -> Num[Array, '... c c']
+```
+
+Covariance of ``X`` conditioned on the variables in ``Y``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `conditionalcorr` {#conditionalcorr}
+
+```python
+conditionalcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Correlation of ``X`` conditioned on the variables in ``Y``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `precision` {#precision}
+
+```python
+precision(X: Num[Array, '... c obs'], *, require_nonsingular: bool=True, **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Inverse covariance (precision) matrix.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `ccov` {#ccov}
+
+```python
+ccov(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Alias for ``conditionalcov``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `ccorr` {#ccorr}
+
+```python
+ccorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Alias for ``conditionalcorr``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `pcorr` {#pcorr}
+
+```python
+pcorr(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Alias for ``partialcorr``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `corrcoef` {#corrcoef}
+
+```python
+corrcoef(*args: Any, **kwargs: Any) -> Num[Array, '... c c']
+```
+
+Alias for ``corr`` (numpy convention).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

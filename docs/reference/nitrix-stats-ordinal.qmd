@@ -1,0 +1,37 @@
+---
+title: "nitrix.stats.ordinal"
+generated: true
+signature-hash: 8d6d7830ecd2f024
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.ordinal` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `OrdinalResult` {#OrdinalResult}
+
+*decorated:* `@register_result(children=('coef', 'thresholds', 'cov_coef', 'log_lik'), aux=('n_obs', 'n_classes'))`, `@dataclass(frozen=True)`
+
+```python
+class OrdinalResult
+```
+
+Per-element ordinal (cumulative-link) fit output.
+
+*TODO: class overview.*
+
+## `ordinal_fit` {#ordinal_fit}
+
+```python
+ordinal_fit(Y: Int[Array, 'V N'], X: Float[Array, 'N p'], *, n_classes: int, link: str='logit', n_iter: int=50, ridge: float=1e-08, block: Optional[int]=None) -> OrdinalResult
+```
+
+Mass-univariate ordinal regression (cumulative-link / proportional odds).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

@@ -1,0 +1,25 @@
+---
+title: "nitrix.stats.inference.tfce"
+generated: true
+signature-hash: 89cfd30180329f04
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.inference.tfce` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `tfce` {#tfce}
+
+```python
+tfce(stat: Float[Array, '*spatial'], *, E: float=0.5, H: float=2.0, n_steps: int=100, connectivity: int=1, two_sided: bool=True, mask: Optional[Bool[Array, '*spatial']]=None) -> Float[Array, '*spatial']
+```
+
+Threshold-free cluster enhancement of a statistic image.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

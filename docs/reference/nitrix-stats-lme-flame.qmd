@@ -1,0 +1,37 @@
+---
+title: "nitrix.stats.lme.flame"
+generated: true
+signature-hash: 6d0429e1e60d02b2
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.lme.flame` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `FLAMEResult` {#FLAMEResult}
+
+*decorated:* `@register_result(children=('sigma_b_sq', 'gamma_hat', 'log_lik', 'weights'))`, `@dataclass(frozen=True)`
+
+```python
+class FLAMEResult
+```
+
+Per-voxel FLAME fit output.
+
+*TODO: class overview.*
+
+## `flame_two_level` {#flame_two_level}
+
+```python
+flame_two_level(beta_subject: Float[Array, 'V N'], var_within: Float[Array, 'V N'], X_group: Float[Array, 'N p'], *, log_sigma_b_sq_init: Optional[Float[Array, 'V']]=None, n_iter: int=30, damping: float=1e-06, block: Optional[int]=None, robust: bool=False, n_deweight: int=5, robust_c: float=1.345) -> FLAMEResult
+```
+
+Voxelwise FLAME-style two-level fixed-effect group model.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

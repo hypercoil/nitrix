@@ -1,0 +1,37 @@
+---
+title: "nitrix.stats.inference.cluster"
+generated: true
+signature-hash: 11c00af41870b927
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.inference.cluster` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `cluster_size_map` {#cluster_size_map}
+
+```python
+cluster_size_map(labels: Int[Array, '*spatial']) -> Float[Array, '*spatial']
+```
+
+Per-voxel size (voxel count) of the connected component it belongs to.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `cluster_mass_map` {#cluster_mass_map}
+
+```python
+cluster_mass_map(labels: Int[Array, '*spatial'], stat: Float[Array, '*spatial'], threshold: float) -> Float[Array, '*spatial']
+```
+
+Per-voxel cluster *mass*: the component's summed ``stat - threshold``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
