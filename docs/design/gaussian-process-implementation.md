@@ -23,12 +23,12 @@ PR independently shippable and gam_fit-compatible:
 | **PR3b** | `corr=` composition (structured residual: ar1/car1/cs) | `lme._corr.whiten`, `build_group_layout` | thin |
 | **PR4a** | Tier 3 hierarchical `hgp_fit` (global + group smooths, GS model) | shared PR2 core, generalised to K penalty blocks | `stats/hgp.py` |
 | **PR4b** | `gp_factor_smooth` fixed-`ρ` factor-smooth GP basis (gam_fit drop-in) | `gam_fit`, `hsgp_basis` | `basis.py` |
-| **PR5** | multi-D `hsgp_basis_nd` (tensor product); perf-bench | | |
+| **PR5** | multi-D `hsgp_basis_nd` (tensor-product, isotropic + ARD); `dim`-general spectral densities | `gam_fit`, `linalg/kernel.py` | `basis.py`, `kernel.py` |
 
 This document specifies **PR1 fully** and PR2 to the design level; PR3–5 are
-sketched (they don't constrain PR1/PR2). **PR2, PR3a/b, PR4a/b are shipped**
+sketched (they don't constrain PR1/PR2). **PR2, PR3a/b, PR4a/b, PR5 are shipped**
 (`gp_fit` HSGP + `engine='exact'` + `corr=`; `hgp_fit` hierarchical;
-`gp_factor_smooth` basis); PR5 (multi-D) remains.
+`gp_factor_smooth`; `hsgp_basis_nd` multi-D). The full **(a)** scope is complete.
 
 ## 1. Math spec (1-D HSGP)
 
@@ -326,6 +326,36 @@ convention). Verified: contract (width `L·m`, one identity block, tuple
 round-trip), GS recovery via `gam_fit` (fitted vs truth corr `>0.99`, one shared
 group `λ`), stable width under `n_levels`. 3 tests; no new mypy errors (the
 `penalty` host-array follows the tolerated `REBasis` pattern).
+
+## 5e. PR5 — `hsgp_basis_nd` multi-dimensional HSGP (**shipped**, `basis.py` + `kernel.py`)
+
+A `D`-dimensional GP smooth (spatial smooth, or a smooth interaction of `D`
+continuous covariates) — the tensor-product HSGP.
+
+- **`dim`-general spectral densities** (`kernel.py`). `se_` / `matern_` /
+  `spectral_density` gain a `dim` argument: the SE form `(2π)^{D/2} ρ^D
+  exp(-½ρ²‖ω‖²)` and the Matérn form `C·(λ²+‖ω‖²)^{-(ν+D/2)}` with
+  `C = 2^D π^{D/2} Γ(ν+D/2)(2ν)^ν / (Γ(ν)ρ^{2ν})` (via `gammaln`). The `dim=1`
+  Matérn path is the **byte-identical** closed form (kept in a branch) so the
+  heavily-tested 1-D code and its sklearn inverse-FT anchor are untouched; tests
+  confirm the gammaln normaliser reproduces the closed forms at `D=1`.
+- **`hsgp_basis_nd(X, n_basis, *, kernel, rho, …)`** (`basis.py`). `X` is `(n, D)`;
+  the tensor-product Laplace eigenfunctions `∏_d φ_{j_d}(x_d)` (eigenvalue
+  `Σ_d λ_{j_d}`) over the cartesian mode grid (`M = ∏_d m_d`), whitened by the
+  spectral weight of the mode-frequency magnitude `‖ω‖=√(Σ_d λ_{j_d})`. **Isotropic**
+  (scalar `rho` → the `D`-dim radial density) or **separable / ARD** (per-dim `rho`
+  → product of 1-D densities). Identity penalty, optional sum-to-zero — a `gam_fit`
+  drop-in (`_HSGPndBasis`, `eval_design` takes new `(g, D)` points).
+- **Validation:** the `dim`-general densities reduce to the 1-D closed forms;
+  2-D recovery via `gam_fit` (isotropic and ARD, fitted vs truth corr `>0.98`);
+  **exact 2-D sklearn `GaussianProcessRegressor` parity** (predictive surface corr
+  `>0.97`); mass-univariate over voxels; a 3-D smoke (`M=4³`); arg validation.
+  8 tests; ruff/mypy clean (no new errors).
+- **Cost / "perf-bench".** `M = ∏_d m_d` grows fast with `D` (keep `m` modest for
+  `D≥2`); the design is `(n, M)` and `gam_fit` is `O(V·M²)` per voxel,
+  cuSOLVER-free. Lengthscale *estimation* for the multi-D basis (an isotropic/ARD
+  `gp_fit` extension) is the natural follow-up; the fixed-`ρ` basis already covers
+  the headline spatial-smooth use case via `gam_fit`.
 
 ## 6. Decisions (confirmed 2026-06-21)
 

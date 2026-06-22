@@ -52,10 +52,11 @@ What the legacy had that we drop:
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Optional, Union, cast
 
 import jax
 import jax.numpy as jnp
+from jax.scipy.special import gammaln
 from jaxtyping import Array, Float, Num
 
 __all__ = [
@@ -350,17 +351,21 @@ def se_spectral_density(
     *,
     rho: Union[float, Float[Array, '']],
     amplitude: float = 1.0,
+    dim: int = 1,
 ) -> Float[Array, '...']:
-    """1-D squared-exponential (RBF) spectral density.
+    """Squared-exponential (RBF) spectral density in ``dim`` dimensions.
 
-    ``S(omega) = amplitude**2 * sqrt(2 pi) * rho * exp(-rho**2 omega**2 / 2)`` --
-    the FT of ``k(r) = amplitude**2 exp(-r**2 / (2 rho**2))`` (scikit-learn
-    ``RBF(length_scale=rho)`` scaled by ``amplitude**2``).
+    ``S(w) = amplitude**2 * (2 pi)**(D/2) * rho**D * exp(-rho**2 ||w||**2 / 2)`` --
+    the ``D``-dimensional FT of ``k(r) = amplitude**2 exp(-r**2 / (2 rho**2))``
+    (scikit-learn ``RBF(length_scale=rho)`` scaled by ``amplitude**2``).  ``omega``
+    is the frequency magnitude ``||w||``; ``dim=1`` is the 1-D case
+    ``amp**2 sqrt(2 pi) rho exp(...)``.
     """
     omega = jnp.asarray(omega)
     rho = jnp.asarray(rho, dtype=omega.dtype)
     amp2 = jnp.asarray(amplitude, dtype=omega.dtype) ** 2
-    return amp2 * jnp.sqrt(2.0 * jnp.pi) * rho * jnp.exp(-0.5 * (rho * omega) ** 2)
+    const = (2.0 * jnp.pi) ** (dim / 2.0) * rho**dim
+    return cast(Array, amp2 * const * jnp.exp(-0.5 * (rho * omega) ** 2))
 
 
 def matern_spectral_density(
@@ -369,33 +374,49 @@ def matern_spectral_density(
     rho: Union[float, Float[Array, '']],
     nu: float,
     amplitude: float = 1.0,
+    dim: int = 1,
 ) -> Float[Array, '...']:
-    """1-D Matern spectral density for ``nu in {0.5, 1.5, 2.5}``.
+    """Matern spectral density in ``dim`` dimensions for ``nu in {0.5, 1.5, 2.5}``.
 
-    Closed forms (``lam`` the Matern rate, ``omega`` the frequency), matched to
-    scikit-learn ``Matern(length_scale=rho, nu=nu)`` scaled by ``amplitude**2``::
-
-        nu=1/2 :  lam = 1/rho     ;  S = amp**2 * 2 lam      / (lam**2 + w**2)
-        nu=3/2 :  lam = sqrt3/rho ;  S = amp**2 * 4 lam**3   / (lam**2 + w**2)**2
-        nu=5/2 :  lam = sqrt5/rho ;  S = amp**2 * 16/3 lam**5/ (lam**2 + w**2)**3
+    ``S(w) = amp**2 * C * (lam**2 + ||w||**2)**(-(nu + D/2))`` with the Matern rate
+    ``lam = sqrt(2 nu) / rho`` and ``C = 2**D pi**(D/2) Gamma(nu + D/2) (2 nu)**nu /
+    (Gamma(nu) rho**(2 nu))`` -- the ``D``-dimensional FT of scikit-learn
+    ``Matern(length_scale=rho, nu=nu)`` scaled by ``amplitude**2``.  ``omega`` is
+    the frequency magnitude ``||w||``.  At ``dim=1`` this reduces to the closed
+    forms ``2 lam/(lam^2+w^2)``, ``4 lam^3/(lam^2+w^2)^2``,
+    ``16/3 lam^5/(lam^2+w^2)^3`` (used directly to keep the well-tested 1-D path
+    byte-identical).
     """
     if nu not in _MATERN_NU:
         raise ValueError(
             f'matern_spectral_density: nu={nu!r} unsupported; use 0.5, 1.5, or '
-            '2.5 (a general-nu form via gammaln is a future add).'
+            '2.5.'
         )
     omega = jnp.asarray(omega)
     rho = jnp.asarray(rho, dtype=omega.dtype)
     amp2 = jnp.asarray(amplitude, dtype=omega.dtype) ** 2
     w2 = omega**2
-    if nu == 0.5:
-        lam = 1.0 / rho
-        return amp2 * 2.0 * lam / (lam**2 + w2)
-    if nu == 1.5:
-        lam = jnp.sqrt(3.0) / rho
-        return amp2 * 4.0 * lam**3 / (lam**2 + w2) ** 2
-    lam = jnp.sqrt(5.0) / rho  # nu == 2.5
-    return amp2 * (16.0 / 3.0) * lam**5 / (lam**2 + w2) ** 3
+    if dim == 1:
+        if nu == 0.5:
+            lam = 1.0 / rho
+            return amp2 * 2.0 * lam / (lam**2 + w2)
+        if nu == 1.5:
+            lam = jnp.sqrt(3.0) / rho
+            return amp2 * 4.0 * lam**3 / (lam**2 + w2) ** 2
+        lam = jnp.sqrt(5.0) / rho  # nu == 2.5
+        return amp2 * (16.0 / 3.0) * lam**5 / (lam**2 + w2) ** 3
+    # General D-dimensional isotropic form (gammaln for the normaliser).
+    half = nu + dim / 2.0
+    lam2 = 2.0 * nu / rho**2
+    log_c = (
+        dim * jnp.log(2.0)
+        + (dim / 2.0) * jnp.log(jnp.pi)
+        + gammaln(half)
+        + nu * jnp.log(2.0 * nu)
+        - gammaln(nu)
+        - 2.0 * nu * jnp.log(rho)
+    )
+    return amp2 * jnp.exp(log_c) * (lam2 + w2) ** (-half)
 
 
 _KERNEL_NU = {
@@ -413,17 +434,20 @@ def spectral_density(
     kernel: str,
     rho: Union[float, Float[Array, '']],
     amplitude: float = 1.0,
+    dim: int = 1,
 ) -> Float[Array, '...']:
-    """Dispatch a stationary-kernel 1-D spectral density by name.
+    """Dispatch a stationary-kernel spectral density (in ``dim`` dimensions).
 
-    ``kernel`` in ``{'rbf'/'se', 'matern12'/'exp', 'matern32', 'matern52'}``.
+    ``kernel`` in ``{'rbf'/'se', 'matern12'/'exp', 'matern32', 'matern52'}``;
+    ``omega`` is the frequency magnitude ``||w||`` and ``dim`` the input
+    dimension (``1`` by default -- the 1-D case).
     """
     k = kernel.lower().replace('/', '').replace('-', '').replace('_', '')
     if k in ('rbf', 'se', 'sqexp', 'squaredexponential', 'gaussian'):
-        return se_spectral_density(omega, rho=rho, amplitude=amplitude)
+        return se_spectral_density(omega, rho=rho, amplitude=amplitude, dim=dim)
     if k in _KERNEL_NU:
         return matern_spectral_density(
-            omega, rho=rho, nu=_KERNEL_NU[k], amplitude=amplitude
+            omega, rho=rho, nu=_KERNEL_NU[k], amplitude=amplitude, dim=dim
         )
     raise ValueError(
         f'spectral_density: unknown kernel {kernel!r}; expected one of '
