@@ -458,6 +458,63 @@ def ribbon_map(volume, white, pial, *, n_samples=10, weighting='pv',
   equirectangular SVF. If it matches the reference, close with the test + a
   docstring cross-ref; only if it fails does a code change apply.
 
+#### Phase 4 as-built (decision record)
+
+Shipped 2026-06-22 (`geometry/{surface,sphere,sphere_grid}.py`;
+`tests/test_{ribbon_map,surface_resample,josa_boundary}.py`). All three tasks
+green (61 tests incl. real fsaverage); ruff + mypy clean.
+
+- **P4.2 `ribbon_map` — midpoint quadrature, symmetric weightings.** Samples the
+  white→pial column at **midpoints** `t = (k+½)/n_samples` (not `linspace(0,1)`):
+  symmetric about the mid-thickness and never lands exactly on either surface
+  (where partial-volume is ambiguous). Both weightings are convex and symmetric,
+  giving the two load-bearing invariants for free — **constants preserved**
+  (weights sum to 1) and **a field linear along the column reduces to its
+  mid-thickness value** (symmetry) — which is what the constant / linear-ramp
+  tests assert. `'pv'` = uniform column mean; `'gaussian'` = mid-thickness-peaked
+  (std `sigma` in white→pial-fraction units). Pure JAX, differentiable w.r.t.
+  the volume and both surfaces; channels-last volumes return `(n_vertices, c)`.
+
+- **P4.1 `surface_resample` — the two Workbench modes are a genuine
+  constants-vs-integral dichotomy, surfaced as `method=`.** Not a single
+  "best" operator: `'barycentric'` (forward gather) is **row-stochastic →
+  constants exact**, ideal for smooth features / up-sampling; `'adap_bary_area'`
+  (default; reverse area-scatter, each target row ÷ target vertex area)
+  **conserves the area-weighted integral exactly** (verified rel-err 0.0 on
+  down-sampling) but preserves constants only approximately (~±3% measured). The
+  reason is fundamental (proof in the as-built): an operator that is both
+  row-stochastic *and* area-adjoint is the dual-cell *overlap-area* matrix, whose
+  exact spherical-polygon clipping is out of scope — so we ship the two
+  one-sided approximations and **document the divergence** (the non-negotiable-5
+  loud-fallback), exactly mirroring Workbench `BARYCENTRIC` vs `ADAP_BARY_AREA`.
+  Area-conservation is exact only where every target vertex receives source mass
+  (down-sampling / matched); up-sampling holes fall back to the gather (where
+  conservation is approximate) — also Workbench's behaviour.
+  - **Anatomical areas are an opt-in kwarg** (`source_area` / `target_area`,
+    the Workbench `-area-metrics`), defaulting to the spheres' own
+    `vertex_areas` — kwarg-not-fork (non-negotiable 6). The search itself is
+    radius-independent (vertices normalised to unit before the point-in-triangle
+    test), so registered spheres of any radius resample correctly.
+  - **Clean-room spherical point-in-triangle:** the containing triangle
+    maximises the minimum signed great-circle-edge distance (robust to fp; a
+    query on a shared edge/vertex ties to an incident triangle and interpolates
+    consistently → exact identity when `source == target`). Barycentric weights
+    are clipped-non-negative + renormalised, so a query fractionally outside
+    every triangle projects to the nearest edge and constants still hold.
+    `O(n_query·n_faces)`, chunked; a uniform-bucket broad-phase is a
+    profile-gated follow-up (announced in the docstring).
+
+- **P4.3 GS-13 — confirmed already shipped; closed with NO new code.** The
+  verify-first composition test passed first try: `spatial_transform` already
+  forwards `mode='nearest'` (and `'wrap'`/`'mirror'`/`'reflect'`), and the
+  `sphere_grid_pad_2d` longitudinal pad **equals `mode='wrap'`** (diff 2.8e-6)
+  while the pole halo (flip + W/2 roll) supplies a topology-correct
+  over-the-pole neighbourhood no flat mode provides. The full josa path
+  (`sphere_grid_pad_2d` → `integrate_velocity_field` → `spatial_transform(
+  mode='nearest')`) runs finite + shape-preserving, and pad/unpad round-trips
+  with the longitudinal-flow pole sign-flip. Closed with the test + a
+  `sphere_grid_pad_2d` docstring note (the predicted no-code outcome).
+
 ---
 
 ## 8. Phase 5 — parcellation + optional / research-tracked
