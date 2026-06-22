@@ -28,7 +28,7 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 
 from nitrix.stats import gp as gpmod
-from nitrix.stats.gp import GPResult, gp_fit, gp_predict
+from nitrix.stats.gp import GPResult, gp_aic, gp_bic, gp_fit, gp_predict
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -552,6 +552,83 @@ def test_exact_predict_requires_x_train():
         gp_predict(res, jnp.asarray(x))  # exact needs x_train
     mean, std = gp_predict(res, jnp.asarray(x), x_train=jnp.asarray(x))
     assert mean.shape == (1, n) and std.shape == (1, n)
+
+
+# ---------------------------------------------------------------------------
+# 8b. log_mlik is the full REML; gp_aic / gp_bic model selection
+# ---------------------------------------------------------------------------
+
+
+def test_log_mlik_is_full_reml():
+    """``GPResult.log_mlik`` is the *full* restricted log marginal likelihood
+    (constant included) -- it equals a dense reference at the fitted ``(lam, rho)``
+    to absolute precision, not just up to a constant."""
+    rng = np.random.default_rng(0)
+    n, rank = 70, 20
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    y, _ = _gp_draw(rng, x, rho=0.2, noise=0.1)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), rank=rank, n_rho=24)
+
+    sf2 = np.exp(float(res.theta[0, 0]))
+    se2 = np.exp(float(res.theta[0, 1]))
+    rho = np.exp(float(res.theta[0, 2]))
+    lam = se2 / sf2
+    Phi, sqrt_lambda, _ = _build_design(x, rank, res.boundary)
+    T = np.ones((n, 1))
+    m0 = 1
+    s = np.asarray(
+        gpmod.spectral_density(jnp.asarray(sqrt_lambda), kernel='matern52',
+                               rho=rho)
+    )
+    M = np.eye(n) + Phi @ (np.diag(s) / lam) @ Phi.T
+    Minv = np.linalg.inv(M)
+    A = T.T @ Minv @ T
+    alpha = np.linalg.solve(A, T.T @ Minv @ y)
+    r = y - T @ alpha
+    rss = r @ Minv @ r
+    _, ldM = np.linalg.slogdet(M)
+    _, ldA = np.linalg.slogdet(A)
+    sig2 = rss / (n - m0)
+    lR_full = -0.5 * (
+        (n - m0) * np.log(2 * np.pi) + (n - m0)
+        + (n - m0) * np.log(sig2) + ldM + ldA
+    )
+    assert abs(float(res.log_mlik[0]) - lR_full) < 1e-5
+
+
+def test_gp_aic_bic_select_kernel():
+    """AIC/BIC from the REML marginal likelihood prefer the data-generating
+    kernel; the helpers accept GP and HGP results."""
+    rng = np.random.default_rng(1)
+    n = 150
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    # Smooth (Matern-5/2) ground truth.
+    y, _ = _gp_draw(rng, x, rho=0.25, noise=0.1, nu=2.5)
+    r52 = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), kernel='matern52',
+                 rank=20, n_rho=24)
+    r12 = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), kernel='matern12',
+                 rank=20, n_rho=24)
+    aic52, aic12 = float(gp_aic(r52)[0]), float(gp_aic(r12)[0])
+    assert np.isfinite(aic52) and np.isfinite(aic12)
+    assert aic52 < aic12  # the smooth kernel wins on the smooth signal
+    # BIC penalises complexity more than AIC for N > e^2.
+    assert float(gp_bic(r52)[0]) > float(gp_aic(r52)[0])
+
+
+def test_gp_aic_bic_accepts_hgp():
+    from nitrix.stats import hgp_fit
+
+    rng = np.random.default_rng(2)
+    per, L = 16, 6
+    t = np.linspace(0.0, 1.0, per)
+    x = np.tile(t, L)
+    group = np.repeat(np.arange(L), per)
+    y = np.concatenate([np.sin(2 * np.pi * t) + 0.1 * rng.standard_normal(per)
+                        for _ in range(L)])
+    res = hgp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), jnp.asarray(group),
+                  rank=8, n_rho=14)
+    assert np.isfinite(float(gp_aic(res)[0]))
+    assert np.isfinite(float(gp_bic(res)[0]))
 
 
 # ---------------------------------------------------------------------------

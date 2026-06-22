@@ -76,7 +76,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Tuple, cast
+from typing import Any, Callable, Literal, Optional, Protocol, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -93,6 +93,8 @@ __all__ = [
     'GPResult',
     'gp_fit',
     'gp_predict',
+    'gp_aic',
+    'gp_bic',
 ]
 
 
@@ -416,6 +418,16 @@ def _fs_lambda(
     return lam
 
 
+def _reml_const(n: int, n_fixed: int) -> float:
+    """The ``(n, M_0)``-only additive constant of the profiled Gaussian REML
+    ``-2 l_R``:  ``(n - M_0)(log(2 pi) + 1 - log(n - M_0))``.  Including it makes
+    ``log_mlik`` the *full* restricted log marginal likelihood (so AIC/BIC across
+    models with different fixed-effect structure are valid), and -- being constant
+    in ``(lambda, rho)`` -- it does not move the ``rho`` search."""
+    dof = float(n - n_fixed)
+    return dof * (float(np.log(2.0 * np.pi)) + 1.0 - float(np.log(dof)))
+
+
 def _reml_nll(
     d_p: Float[Array, ''],
     logdet_h: Float[Array, ''],
@@ -425,12 +437,16 @@ def _reml_nll(
     m: int,
     n_fixed: int,
 ) -> Float[Array, '']:
-    """Per-element restricted negative log-likelihood (x2, up to an additive
-    constant in ``n`` / ``n_fixed``):  ``(n - M_0) log D_p + log|H| -
-    log|S_lambda|_+`` with ``log|S_lambda|_+ = m log lambda + sum_j log(1/s_j)``.
-    """
+    """Per-element restricted negative log-likelihood ``-2 l_R`` (full, incl. the
+    ``(n, M_0)`` constant):  ``(n - M_0) log D_p + log|H| - log|S_lambda|_+ +
+    (n - M_0)(log 2pi + 1 - log(n - M_0))``, with ``log|S_lambda|_+ = m log lambda
+    + sum_j log(1/s_j)``."""
     log_pdet_s = m * jnp.log(lam) + log_pdet_pen
-    return (n - n_fixed) * jnp.log(jnp.clip(d_p, 1e-30, None)) + logdet_h - log_pdet_s
+    core = (
+        (n - n_fixed) * jnp.log(jnp.clip(d_p, 1e-30, None))
+        + logdet_h - log_pdet_s
+    )
+    return core + _reml_const(n, n_fixed)
 
 
 # ---------------------------------------------------------------------------
@@ -1237,3 +1253,52 @@ def gp_predict(
     )
     std = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-30, None))
     return mean, std
+
+
+# ---------------------------------------------------------------------------
+# Model selection -- AIC / BIC from the REML marginal likelihood
+# ---------------------------------------------------------------------------
+
+
+class _ICResult(Protocol):
+    """The fields ``gp_aic`` / ``gp_bic`` read -- :class:`GPResult` and
+    ``HGPResult`` both conform structurally."""
+
+    log_mlik: Float[Array, 'V']
+    edf: Any
+    n_obs: int
+    n_fixed: int
+
+
+def _total_edf(result: _ICResult) -> Float[Array, 'V']:
+    """Total effective degrees of freedom (the AIC/BIC complexity ``k``).
+
+    ``GPResult.edf`` is already the total (fixed effects + smooth); the
+    hierarchical ``HGPResult.edf`` is ``(V, 2)`` over the smooth blocks only, so
+    the unpenalised ``n_fixed`` is added back."""
+    edf = jnp.asarray(result.edf)
+    if edf.ndim == 1:
+        return edf
+    return jnp.sum(edf, axis=-1) + result.n_fixed
+
+
+def gp_aic(result: _ICResult) -> Float[Array, 'V']:
+    """Per-element Akaike information criterion ``-2 l_R + 2 k`` for a GP / HGP
+    fit (lower is better).
+
+    Uses the **REML log marginal likelihood** ``log_mlik`` (so it is comparable
+    across kernels / ranks / amplitudes on the same data) and the effective
+    degrees of freedom ``k`` (:func:`_total_edf`) as the model complexity -- the
+    mgcv-style marginal AIC.  Like any REML criterion it is valid for models with
+    the **same fixed-effect structure** (a different ``parametric`` design changes
+    the restriction); within that, it is immediate for GP-vs-GP and GP-vs-spline
+    (an ``hsgp_basis`` / kernel choice) selection.
+    """
+    return -2.0 * result.log_mlik + 2.0 * _total_edf(result)
+
+
+def gp_bic(result: _ICResult) -> Float[Array, 'V']:
+    """Per-element Bayesian information criterion ``-2 l_R + k log N`` for a GP /
+    HGP fit (lower is better); see :func:`gp_aic` for the comparability caveat."""
+    k = _total_edf(result)
+    return -2.0 * result.log_mlik + k * jnp.log(jnp.asarray(float(result.n_obs)))

@@ -377,6 +377,24 @@ The `map_rho` mechanism itself was already threaded through every `gp_fit` path
 (HSGP/exact/`corr`) and `hgp_fit` in PR2/PR3/PR4 — PR6 only adds the named library.
 (Full *posterior* `ρ` priors remain scope (b) — Stan/`brms`.)
 
+## 5g. PR7 — model selection (`gp_aic` / `gp_bic`; full REML `log_mlik`) (**shipped**)
+
+Closes the one genuine Tier-2 oversight (the FR said `log_mlik` "feeds the shipped
+`aic`/`bic`/`compare_models`", which it did not — those are GLM-specific).
+
+- **`log_mlik` is now the *full* restricted log marginal likelihood.** The
+  profiled-REML `−2 l_R` differs from the PR2 core by exactly the `(n, M_0)`
+  constant `(n−M_0)(log 2π + 1 − log(n−M_0))` (measured: C₀ between the penalised
+  and marginal forms is **0**). Adding it makes `log_mlik` match a dense REML
+  reference *absolutely* (`<1e-5`), so AIC/BIC are valid even across models with
+  different fixed-effect structure. It's constant in `(λ, ρ)`, so no `ρ̂` moves and
+  the constant-offset anchor tests still hold (they check `ptp`, not the offset).
+- **`gp_aic` / `gp_bic`** — `−2 l_R + 2k` / `−2 l_R + k log N` with `k` the effective
+  dof (mgcv-style marginal IC). Duck-typed (a `Protocol`) over `GPResult` **and**
+  `HGPResult` (no circular import); `HGPResult`'s `(V,2)` smooth-block edf gets the
+  unpenalised `n_fixed` added back. Valid for same-fixed-effect GP-vs-GP /
+  GP-vs-spline (kernel / rank) selection. 3 tests.
+
 ## 6. Decisions (confirmed 2026-06-21)
 
 1. **PR1 scope — fixed-`ρ` `hsgp_basis` only.** Spectral densities + the

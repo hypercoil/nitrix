@@ -234,11 +234,18 @@ def _mb_reml_nll(
     n: int,
     n_fixed: int,
 ) -> Float[Array, '']:
-    """Per-element restricted negative log-likelihood (x2, up to a constant in
-    ``n`` / ``n_fixed``):  ``(n - M_0) log D_p + log|H| - sum_k (rank_k log lam_k
-    + log_pdet_k)`` with ``log_pdet_k = sum_{j in block k} log d_j``."""
+    """Per-element restricted negative log-likelihood ``-2 l_R`` (full, incl. the
+    ``(n, M_0)`` constant):  ``(n - M_0) log D_p + log|H| - sum_k (rank_k log lam_k
+    + log_pdet_k) + (n - M_0)(log 2pi + 1 - log(n - M_0))`` with ``log_pdet_k =
+    sum_{j in block k} log d_j``."""
+    dof = float(n - n_fixed)
+    const = dof * (float(np.log(2.0 * np.pi)) + 1.0 - float(np.log(dof)))
     log_pdet_s = jnp.sum(ranks * jnp.log(lam) + log_pdets)
-    return (n - n_fixed) * jnp.log(jnp.clip(d_p, 1e-30, None)) + logdet_h - log_pdet_s
+    core = (
+        (n - n_fixed) * jnp.log(jnp.clip(d_p, 1e-30, None))
+        + logdet_h - log_pdet_s
+    )
+    return core + const
 
 
 def _hgp_fit_one(

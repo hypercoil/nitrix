@@ -83,7 +83,7 @@ from .gam import (
     smooth_partial_effect,
     smooth_significance,
 )
-from .gp import GPResult, gp_fit, gp_predict
+from .gp import GPResult, gp_aic, gp_bic, gp_fit, gp_predict
 from .hgp import HGPResult, hgp_fit, hgp_predict
 from .priors import halfnormal_prior, invgamma_prior, lognormal_prior
 from .betareg import BetaResult, beta_fit
@@ -216,6 +216,8 @@ __all__ = [
     'GPResult',
     'gp_fit',
     'gp_predict',
+    'gp_aic',
+    'gp_bic',
     # hgp
     'HGPResult',
     'hgp_fit',
