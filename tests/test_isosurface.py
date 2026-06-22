@@ -18,8 +18,9 @@ from nitrix.geometry import (
     genus,
     marching_cubes,
     mean_curvature,
+    mesh_to_sdf,
 )
-from nitrix.sparse import compute_vertex_normals, face_areas
+from nitrix.sparse import Mesh, compute_vertex_normals, face_areas, icosphere
 
 
 def _sphere_sdf(n: int, radius: float, centre: float) -> np.ndarray:
@@ -100,3 +101,54 @@ def test_input_validation() -> None:
         marching_cubes(np.zeros((4, 4)))
     with pytest.raises(ValueError, match='length >= 2'):
         marching_cubes(np.zeros((1, 4, 4)))
+
+
+# --------------------------------------------------------------------------- #
+# mesh_to_sdf (the inverse direction)
+# --------------------------------------------------------------------------- #
+
+
+def _sphere_mesh(n_sub: int, radius: float, centre: float) -> Mesh:
+    m = icosphere(n_sub)
+    return Mesh(m.vertices * radius + centre, m.faces)
+
+
+def test_mesh_to_sdf_matches_analytic_sphere() -> None:
+    radius, centre, n = 10.0, 16.0, 32
+    sphere = _sphere_mesh(3, radius, centre)
+    sdf = np.asarray(mesh_to_sdf(sphere, (n, n, n)))
+    ax = np.arange(n)
+    x, y, z = np.meshgrid(ax, ax, ax, indexing='ij')
+    analytic = (
+        np.sqrt((x - centre) ** 2 + (y - centre) ** 2 + (z - centre) ** 2)
+        - radius
+    )
+    # The mesh approximates the sphere -> small deviation from the exact SDF.
+    assert np.abs(sdf - analytic).max() < 0.5
+    # Sign agrees away from the surface.
+    assert float((np.sign(sdf) == np.sign(analytic)).mean()) > 0.99
+
+
+def test_mesh_to_sdf_sign() -> None:
+    sphere = _sphere_mesh(3, 10.0, 16.0)
+    sdf = np.asarray(mesh_to_sdf(sphere, (32, 32, 32)))
+    assert sdf[16, 16, 16] < 0.0  # centre is inside
+    assert sdf[0, 0, 0] > 0.0  # corner is outside
+
+
+def test_sdf_marching_cubes_roundtrip_preserves_area() -> None:
+    sphere = _sphere_mesh(3, 10.0, 16.0)
+    sdf = np.asarray(mesh_to_sdf(sphere, (32, 32, 32)))
+    recovered = marching_cubes(sdf, level=0.0)
+    assert euler_characteristic(recovered) == 2
+    a0 = float(jnp.sum(face_areas(sphere)))
+    a1 = float(jnp.sum(face_areas(recovered)))
+    assert abs(a1 - a0) / a0 < 0.03
+
+
+def test_mesh_to_sdf_validation() -> None:
+    sphere = _sphere_mesh(2, 5.0, 8.0)
+    with pytest.raises(ValueError, match='3-D'):
+        mesh_to_sdf(sphere, (16, 16))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match='no faces'):
+        mesh_to_sdf(Mesh(sphere.vertices, sphere.faces[:0]), (16, 16, 16))

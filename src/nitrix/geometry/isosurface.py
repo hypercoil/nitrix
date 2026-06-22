@@ -2,9 +2,12 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Isosurface extraction (volume -> triangle mesh).
+Volume <-> surface conversion.
 
-``marching_cubes`` extracts the level-set of a scalar volume as a ``Mesh``.
+``marching_cubes`` extracts the level-set of a scalar volume as a ``Mesh``;
+``mesh_to_sdf`` is the inverse -- it rasterises a triangle mesh to a
+signed-distance volume.  Both are host-side NumPy builders (data-dependent
+work) co-located here as the field<->mesh pair.
 
 **Engine: marching tetrahedra.**  Each grid cube is split into six tetrahedra
 by the Freudenthal-Kuhn decomposition (all sharing the cube's main diagonal),
@@ -26,15 +29,16 @@ Faces are oriented so per-vertex normals point toward *increasing* scalar value
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, cast
 
 import jax.numpy as jnp
 import numpy as np
+from jaxtyping import Array, Float
 from numpy.typing import NDArray
 
 from ..sparse import Mesh
 
-__all__ = ['marching_cubes']
+__all__ = ['marching_cubes', 'mesh_to_sdf']
 
 # Cube corners c=0..7 as (dx, dy, dz), dx=bit0, dy=bit1, dz=bit2.
 _CUBE_CORNERS = np.array(
@@ -172,7 +176,11 @@ def marching_cubes(
 
     # Accumulate triangle corner edges as (global_a, global_b) pairs, plus the
     # per-triangle outward direction (the tet gradient).
-    v_ga: List[List[NDArray[Any]]] = [[], [], []]  # per triangle-vertex (0,1,2)
+    v_ga: List[List[NDArray[Any]]] = [
+        [],
+        [],
+        [],
+    ]  # per triangle-vertex (0,1,2)
     v_gb: List[List[NDArray[Any]]] = [[], [], []]
     d_list: List[NDArray[Any]] = []
 
@@ -276,3 +284,147 @@ def marching_cubes(
         vertices=jnp.asarray(verts, dtype=jnp.float32),
         faces=jnp.asarray(faces, dtype=jnp.int32),
     )
+
+
+def _closest_point_dist2(
+    p: NDArray[Any], a: NDArray[Any], b: NDArray[Any], c: NDArray[Any]
+) -> NDArray[Any]:
+    """Squared distance from points ``p`` (m,1,3) to triangles (a,b,c) (1,F,3).
+
+    Vectorised Ericson closest-point-on-triangle (the 7 Voronoi regions: the
+    triangle interior, three edges, three vertices).
+    """
+    ab, ac = b - a, c - a
+    ap = p - a
+    d1 = (ab * ap).sum(-1)
+    d2 = (ac * ap).sum(-1)
+    bp = p - b
+    d3 = (ab * bp).sum(-1)
+    d4 = (ac * bp).sum(-1)
+    cp = p - c
+    d5 = (ab * cp).sum(-1)
+    d6 = (ac * cp).sum(-1)
+    va = d3 * d6 - d5 * d4
+    vb = d5 * d2 - d1 * d6
+    vc = d1 * d4 - d3 * d2
+
+    def _safe(x: NDArray[Any]) -> NDArray[Any]:
+        return np.where(np.abs(x) < 1e-30, 1e-30, x)
+
+    denom = _safe(va + vb + vc)
+    v = (vb / denom)[..., None]
+    w = (vc / denom)[..., None]
+    c_int = a + v * ab + w * ac
+    c_ab = a + (d1 / _safe(d1 - d3))[..., None] * ab
+    c_ac = a + (d2 / _safe(d2 - d6))[..., None] * ac
+    c_bc = b + ((d4 - d3) / _safe((d4 - d3) + (d5 - d6)))[..., None] * (c - b)
+    a_b = np.broadcast_to(a, c_int.shape)
+    b_b = np.broadcast_to(b, c_int.shape)
+    c_b = np.broadcast_to(c, c_int.shape)
+    conds = [
+        ((d1 <= 0) & (d2 <= 0))[..., None],
+        ((d3 >= 0) & (d4 <= d3))[..., None],
+        ((vc <= 0) & (d1 >= 0) & (d3 <= 0))[..., None],
+        ((d6 >= 0) & (d5 <= d6))[..., None],
+        ((vb <= 0) & (d2 >= 0) & (d6 <= 0))[..., None],
+        ((va <= 0) & ((d4 - d3) >= 0) & ((d5 - d6) >= 0))[..., None],
+    ]
+    closest = np.select(
+        conds, [a_b, b_b, c_ab, c_b, c_ac, c_bc], default=c_int
+    )
+    diff = p - closest
+    return cast(NDArray[Any], (diff * diff).sum(-1))
+
+
+def _solid_angle(
+    p: NDArray[Any], a: NDArray[Any], b: NDArray[Any], c: NDArray[Any]
+) -> NDArray[Any]:
+    """Signed solid angle (m,F) subtended by triangles (a,b,c) at points ``p``
+    (Van Oosterom-Strackee); summed over faces and /4pi it is the generalised
+    winding number."""
+    pa, pb, pc = a - p, b - p, c - p
+    la = np.linalg.norm(pa, axis=-1)
+    lb = np.linalg.norm(pb, axis=-1)
+    lc = np.linalg.norm(pc, axis=-1)
+    num = (pa * np.cross(pb, pc)).sum(-1)
+    den = (
+        la * lb * lc
+        + (pa * pb).sum(-1) * lc
+        + (pb * pc).sum(-1) * la
+        + (pc * pa).sum(-1) * lb
+    )
+    return cast(NDArray[Any], 2.0 * np.arctan2(num, den))
+
+
+def mesh_to_sdf(
+    mesh: Mesh,
+    shape: Tuple[int, int, int],
+    *,
+    spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+) -> Float[Array, 'x y z']:
+    """Rasterise a triangle mesh to a signed-distance volume (negative inside).
+
+    The inverse of ``marching_cubes``: the training-target generator behind
+    learned level-set surface models and a field<->mesh round-trip validator.
+
+    Unsigned distance is the exact point-to-triangle distance (Ericson's
+    closest-point, the seven Voronoi regions), minimised over faces.  The sign
+    is from the **generalised winding number** (the summed solid angle / 4pi):
+    robust on a watertight mesh regardless of global face orientation
+    (``|winding| ~ 1`` inside, ``~ 0`` outside).
+
+    Cost is ``O(n_voxels * n_faces)`` (host-side NumPy, chunked over voxels to
+    bound memory) -- practical for moderate volumes / meshes; a spatial-hash
+    broad phase is a future acceleration.  Not differentiable.
+
+    Parameters
+    ----------
+    mesh
+        Triangle mesh (watertight, for a meaningful sign).
+    shape
+        Output volume shape ``(X, Y, Z)``.
+    spacing
+        Per-axis voxel size; grid point ``(i, j, k)`` is at
+        ``(i, j, k) * spacing`` in the mesh's coordinate frame.
+
+    Returns
+    -------
+    ``(X, Y, Z)`` signed-distance volume (negative inside), as a JAX array.
+
+    Raises
+    ------
+    ValueError
+        If ``shape`` is not 3-D or the mesh has no faces.
+    """
+    if len(shape) != 3:
+        raise ValueError(f'mesh_to_sdf: shape must be 3-D; got {shape}.')
+    verts = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces)
+    if faces.shape[0] == 0:
+        raise ValueError('mesh_to_sdf: mesh has no faces.')
+    a = verts[faces[:, 0]][None]  # (1, F, 3)
+    b = verts[faces[:, 1]][None]
+    c = verts[faces[:, 2]][None]
+
+    nx, ny, nz = shape
+    sx, sy, sz = spacing
+    gi, gj, gk = np.meshgrid(
+        np.arange(nx), np.arange(ny), np.arange(nz), indexing='ij'
+    )
+    pts = np.stack(
+        [gi.reshape(-1) * sx, gj.reshape(-1) * sy, gk.reshape(-1) * sz], axis=1
+    )  # (N, 3)
+
+    n_pts = pts.shape[0]
+    n_faces = faces.shape[0]
+    out = np.empty(n_pts, dtype=np.float64)
+    chunk = max(1, 1_000_000 // n_faces)  # bound (chunk, F, 3) memory
+    four_pi = 4.0 * np.pi
+    for start in range(0, n_pts, chunk):
+        p = pts[start : start + chunk][:, None, :]  # (m, 1, 3)
+        dist = np.sqrt(_closest_point_dist2(p, a, b, c).min(axis=1))  # (m,)
+        winding = _solid_angle(p, a, b, c).sum(axis=1) / four_pi  # (m,)
+        inside = np.abs(winding) > 0.5
+        out[start : start + chunk] = np.where(inside, -dist, dist)
+
+    return jnp.asarray(out.reshape(nx, ny, nz), dtype=jnp.float32)
