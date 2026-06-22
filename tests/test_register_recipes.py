@@ -368,6 +368,10 @@ def test_result_warped_matches_explicit_warp():
     res = rigid_register(
         moving, fixed, spec=RegistrationSpec(levels=2, iterations=20)
     )
-    # res.warped is moving sampled by res.matrix about the image centre.
-    explicit = _warp_known(moving, res.matrix)
+    # res.matrix is self-contained (the grid centre is baked in), so sampling
+    # moving by it *directly* -- no extra recentering -- reproduces res.warped.
+    grid = affine_grid(
+        res.matrix, moving.shape, center=jnp.zeros(2, res.matrix.dtype)
+    )
+    explicit = spatial_transform(moving[..., None], grid, mode='constant')[..., 0]
     assert np.allclose(np.asarray(res.warped), np.asarray(explicit), atol=1e-6)

@@ -53,6 +53,7 @@ from ._core import (
     resolve_convergence,
     resolve_iterations,
 )
+from ._space import _conjugate_about
 
 # A model's steepest-descent images and its compositional update / params
 # recovery -- the only pieces of the IC kernel that differ by transform group.
@@ -307,9 +308,9 @@ def _ic_level(
     selects the fixed ``scan`` or the windowed-slope early-exit (``run_iterations``).
     """
     fixed, grad, h_inv, center = ref
-    grid_c = (
-        identity_grid(fixed.shape, dtype=moving.dtype) - center
-    ).reshape(-1, ndim)
+    grid_c = (identity_grid(fixed.shape, dtype=moving.dtype) - center).reshape(
+        -1, ndim
+    )
     corners = _grid_corners(fixed.shape, center, moving.dtype)
     step_max = _TRUST_EXTENT_FACTOR * float(max(fixed.shape))
 
@@ -434,8 +435,11 @@ def ic_register_core(
         cval=spec.cval,
         method=spec.interpolation,
     )[..., 0]
+    # Return the self-contained centred matrix (the warp applies ``matrix``
+    # about ``center``), matching the IndexSpace forward path; ``params`` keeps
+    # the raw about-origin Lie coordinates of the un-centred matrix.
     return RegistrationResult(
-        matrix=matrix,
+        matrix=_conjugate_about(matrix, center, ndim, dtype),
         params=params_from_matrix(matrix, ndim),
         warped=warped,
         cost_history=jnp.concatenate(histories),

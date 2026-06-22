@@ -181,9 +181,17 @@ def test_hard_affine_ic_recovers():
         moving, fixed, spec=spec, method='inverse_compositional'
     )
     assert float(ncc(ic.warped, fixed)) > 0.99
-    # recovered fixed->moving index map ~= inverse of the resampling affine
-    # (interpolation-limited; nearest-neighbour resampling caps the accuracy).
-    assert np.allclose(np.asarray(ic.matrix), t_inv, atol=0.12)
+    # ic.matrix is self-contained (the grid centre is baked in); de-centre it to
+    # the about-origin frame and compare to the true origin inverse (the
+    # conditioning guard -- the linear block is centre-invariant; the centred
+    # translation would otherwise amplify the rotation error by the lever arm).
+    c = (np.asarray((64, 64)) - 1.0) / 2.0
+    t_pos = np.eye(3)
+    t_pos[:2, 2] = c
+    t_neg = np.eye(3)
+    t_neg[:2, 2] = -c
+    m_origin = t_neg @ np.asarray(ic.matrix) @ t_pos
+    assert np.allclose(m_origin, t_inv, atol=0.12)
 
 
 def test_affine_auto_uses_ic():
