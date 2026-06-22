@@ -292,9 +292,13 @@ continuous optimisers — fold-prevention makes the energy non-convex; needs a
 robust line-search / step schedule). **Live-code status.** Absent;
 coordinate conversion + geodesic distance shipped, the embedding optimiser is
 not. **Full SPEC-review design doc (§13.4):**
-[`spherical-parameterisation.md`](spherical-parameterisation.md) — Tutte+stereographic
-init, conformal+area energy (collapse-trap defence), Riemannian descent with a
-fold-safe line-search + Möbius normalisation, phased GS-2a–d build + test plan.
+[`spherical-parameterisation.md`](spherical-parameterisation.md) — supports both
+families: a one-shot **spectral** embedding (FastSurfer/recon-surf: generalised
+LBO `(L, M)` eigfns 1–3 → normalise; the fast default, verified against the
+recon-surf source) with a Tutte+stereographic guaranteed-bijective fallback, and
+the iterative conformal+area energy (collapse-trap defence) under Riemannian
+descent with a fold-safe line-search + Möbius normalisation. Phased GS-2a–d +
+test plan.
 
 ---
 

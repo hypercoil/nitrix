@@ -55,6 +55,16 @@ on.
 target field): here the target is the sphere itself and the objective is the
 intrinsic distortion of the embedding.
 
+Two algorithmic families solve this, and **GS-2 supports both** behind one
+surface: the **iterative energy-minimisation** family (FreeSurfer `mris_sphere`
+— fold-free + controllable distortion, slower) and the **one-shot spectral
+embedding** family (FastSurfer / recon-surf — the first three non-constant
+Laplace–Beltrami eigenfunctions normalised to the sphere; fast, but only
+*quality-gated* bijective). The spectral map is the fast default and a strong
+initialiser; the iterative optimiser is the guarantee and the
+distortion-controller. §5.1 makes the spectral path concrete and verified
+against the recon-surf source.
+
 ## 3. Scope boundary
 
 In scope (SPEC §5): the array math producing `Φ` from plain `(V, F)` arrays.
@@ -70,8 +80,8 @@ FreeSurfer's own `?h.sphere` as a distortion oracle.
 def spherical_parameterize(
     mesh: Mesh,
     *,
-    init: Literal['tutte', 'radial'] = 'tutte',
-    n_iterations: int = 200,
+    init: Literal['spectral', 'tutte', 'radial'] = 'spectral',
+    n_iterations: int = 200,        # 0 -> one-shot (init only, e.g. recon-surf)
     conformal_weight: float = 1.0,
     area_weight: float = 1.0,
     metric_weight: float = 0.0,
@@ -80,6 +90,11 @@ def spherical_parameterize(
 ) -> Float[Array, 'n_vertices 3']:   # vertices on the sphere of given radius
     ...
 
+# The one-shot spectral embedding (recon-surf method), also standalone (GS-2b).
+def spectral_sphere_embedding(
+    mesh: Mesh, *, radius: float = 1.0,
+) -> Float[Array, 'n_vertices 3']: ...     # LBO eigfns 1..3, normalised to S²
+
 # Supporting primitives (also independently useful; GS-2a / GS-2b).
 def signed_spherical_areas(
     vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3'],
@@ -87,8 +102,10 @@ def signed_spherical_areas(
 
 def is_bijective_sphere_map(
     vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3'],
-    *, tol: float = 1e-3,
-) -> bool: ...                              # all areas > 0 AND sum ≈ 4π
+    *, flip_area_tol: float = 0.0,
+) -> bool: ...                             # all areas > 0 (strict) AND sum ≈ 4π;
+                                           # flip_area_tol > 0 tolerates a small
+                                           # flipped-area fraction (recon-surf)
 
 def tutte_embedding(
     mesh: Mesh, *, weights: Literal['uniform', 'cotangent'] = 'uniform',
@@ -97,42 +114,80 @@ def tutte_embedding(
 
 `spherical_parameterize` returns vertices on `S²` with the **same `faces`**
 (the parameterisation never re-tessellates — correspondence is preserved, like
-`deform_to_sdf`). The default `init='tutte'` is the robust, bijectivity-
-guaranteed path; `init='radial'` is the fast path for near-convex inputs.
+`deform_to_sdf`). The init is a **fallback chain** (§5.1): `'spectral'` (the
+fast recon-surf one-shot, the default) → bijectivity-gated → `'tutte'`
+(guaranteed fold-free) if it folds; `'radial'` is the cheapest heuristic.
+`n_iterations=0` returns the **init alone** — so `init='spectral',
+n_iterations=0` is the recon-surf-grade one-shot map, while `n_iterations>0`
+refines it to a strict fold-free, controlled-distortion result (FreeSurfer
+`mris_sphere`-grade). The eigenfunction **sign/swap gauge** is *not* anatomically
+resolved here (nitrix is IO-free and orientation-agnostic — §5.1); that is the
+consumer's step.
 
 ## 5. Design — the four components
 
-### 5.1 Initialisation — guaranteed-bijective by construction
+### 5.1 Initialisation — a bijectivity-gated fallback chain
 
-A fold-free *start* is the single most important ingredient: from a bijective
+A good *start* is the single most important ingredient: from a (near-)bijective
 init the optimiser only has to *reduce distortion*, never *recover* bijectivity
-(which a from-scratch non-convex solve cannot guarantee).
+from scratch. We offer three inits, tried in order and gated by
+`is_bijective_sphere_map`, so we get recon-surf speed in the common case and a
+hard guarantee when needed.
 
-**Primary: Tutte embedding → inverse stereographic projection.**
-1. Cut one face `f₀` (or one vertex's star); `M ∖ f₀` is a topological **disk**.
-2. Fix `f₀`'s boundary vertices to a convex polygon in the plane.
+**Primary: spectral embedding (the recon-surf / FastSurfer method).** Verified
+against `Deep-MI/FastSurfer recon_surf/spherically_project.py` (June 2026):
+1. Solve the **Laplace–Beltrami generalised eigenproblem** `L φ = λ M φ` for the
+   smallest eigenpairs — `L` the **cotangent stiffness** (`mesh_cotangent_laplacian`),
+   `M` the **mass matrix** (`mesh_mass_matrix`, GS-5). FastSurfer uses
+   `lapy.Solver(lump=False)` (FEM cotangent `A` + mass `B`, `A x = λ B x`) and
+   ARPACK for `k=4`; nitrix uses the cuSolver-free LOBPCG / `laplacian_eigenmap`
+   smallest-eigenpair path. **This is the fourth consumer that makes GS-5's mass
+   matrix load-bearing** — using `M` is what makes it the Laplace–*Beltrami*
+   operator rather than a combinatorial graph Laplacian.
+2. Take the **first three non-constant eigenfunctions** `(φ₁, φ₂, φ₃)` (skip the
+   constant `φ₀`); on the round sphere these *are* the degree-1 harmonics
+   `x,y,z`, so for a near-spherical input the embedding is already nearly the
+   sphere.
+3. **Normalise each vertex's `(φ₁, φ₂, φ₃)` to length `radius`** → the spherical
+   map. One eigensolve, no iteration.
+
+   *Not guaranteed bijective.* FastSurfer accepts the spectral map under a
+   **quality gate**, not a proof: it raises unless sphere-area-fraction `> 0.99`,
+   **flipped-triangle-area-fraction `< 0.0008`** (a *small* fold fraction is
+   tolerated), and an eigenvector-orthogonality/volume measure `> 0.6`. nitrix
+   mirrors this with `is_bijective_sphere_map(flip_area_tol=…)`: pass the map if
+   it is strictly fold-free (`flip_area_tol=0`) or within a tolerated fold
+   fraction; otherwise fall through to Tutte.
+
+   *Sign/swap gauge is the consumer's job.* FastSurfer flips/swaps `(φ₁,φ₂,φ₃)`
+   to align with the FreeSurfer anterior-posterior / superior-inferior /
+   lateral-medial axes using the vertices' **anatomical (RAS) coordinates**.
+   nitrix is IO-free and orientation-agnostic, so `spectral_sphere_embedding`
+   returns the map up to the eigenfunction sign/ordering gauge (degenerate
+   eigenspaces on a symmetric surface make this genuinely ambiguous); resolving
+   it against an anatomical frame is a `thrux`/consumer step, not a nitrix one.
+   (We may offer an optional `axis_reference` to fix the gauge generically, but
+   the *anatomical* semantics stay out.)
+
+**Fallback: Tutte embedding → inverse stereographic projection** (the
+*guaranteed* fold-free init when the spectral map folds beyond tolerance).
+1. Cut one face `f₀`; `M ∖ f₀` is a topological **disk**.
+2. Fix `f₀`'s boundary to a convex polygon in the plane.
 3. Solve the **uniform-weight** (combinatorial) Laplace system
-   `L_uniform · x_interior = b` for the interior 2-D positions (one CG solve
-   per coordinate via the shipped `linalg.krylov.cg`). **Tutte's theorem**
-   (1963): for a 3-connected planar graph with the outer face fixed convex, the
-   *uniform-weight* barycentric embedding is **guaranteed fold-free**. (Cotangent
-   weights do *not* carry this guarantee — they can flip on non-Delaunay meshes
-   — so the init uses uniform weights deliberately; cotangent weights enter only
-   later, in the energy.)
-4. **Inverse-stereographic-project** the planar embedding onto `S²` (a
-   homeomorphism), so the spherical map inherits bijectivity. `f₀` maps to the
-   neighbourhood of the projection pole.
+   `L_uniform · x_interior = b` (one `linalg.krylov.cg` solve per coordinate).
+   **Tutte's theorem** (1963): for a 3-connected planar graph with the outer
+   face fixed convex, the *uniform-weight* barycentric embedding is **guaranteed
+   fold-free**. (Cotangent weights lose this guarantee — they flip on
+   non-Delaunay meshes — so Tutte uses uniform weights deliberately; cotangent
+   weights enter only in the energy.)
+4. **Inverse-stereographic-project** to `S²` (a homeomorphism), so bijectivity
+   is inherited. `f₀` maps near the projection pole (large local area distortion
+   there — irrelevant; §5.2–5.4 remove it). Standard robust start (Gu et al.
+   2004; Choi et al. 2015).
 
-The pole region carries large area distortion — irrelevant: the init only has
-to be bijective; §5.2–5.4 remove the distortion. This is the standard robust
-spherical-parameterisation start (Gu et al. 2004; Choi et al. 2015).
-
-**Fast path: radial projection.** For an *already near-convex* inflated surface,
-`φ_i = radius · (v_i − c) / ‖v_i − c‖` (centroid `c`) is often already
-bijective. `spherical_parameterize(init='radial')` uses it, then
-**`is_bijective_sphere_map` gates it**: if any triangle is flipped, fall back to
-Tutte (a loud, automatic fallback — never silently optimise from a folded
-start).
+**Cheapest: radial projection** `φ_i = radius · (v_i − c)/‖v_i − c‖` — often
+bijective for an already-convex inflated surface; gated identically and falling
+through to Tutte if it folds.
 
 ### 5.2 The energy — and the collapse trap
 
@@ -202,6 +257,7 @@ align principal axes for reproducibility.)
 | Need | Shipped primitive |
 |---|---|
 | Cotangent weights / Dirichlet energy | `sparse.mesh_cotangent_laplacian`, `geometry.surface._cotangent_apply` |
+| **Spectral LBO eigfns** (generalised `L φ = λ M φ`, smallest non-trivial) | `mesh_cotangent_laplacian` (L) + `mesh_mass_matrix` (M, GS-5) + `graph.connectopy.laplacian_eigenmap` / LOBPCG smallest-eigenpair (cuSolver-free) |
 | Tutte linear solve | `linalg.krylov.cg` (SPD, matrix-free, GPU-native) |
 | Uniform Laplacian (Tutte weights) | `sparse.mesh_k_ring_adjacency(binary=False)` / a uniform variant |
 | Original areas / areal distortion | `sparse.face_areas`, `geometry.surface.areal_distortion` |
@@ -212,8 +268,13 @@ align principal axes for reproducibility.)
 | Validation oracle | `fsaverage` `sphere_left` (test-side, via `tests/_real_meshes.fsaverage_surface`) |
 
 Net-new numerics: GS-2a (signed spherical area + bijectivity check — small,
-reuses the solid-angle formula), GS-2b (Tutte+stereographic init), GS-2c (the
-energy + Riemannian descent + fold-safe line-search + normalisation).
+reuses the solid-angle formula), GS-2b (the **spectral one-shot embedding** —
+thin wrapper over the generalised LBO eigensolve — plus the Tutte+stereographic
+fallback), GS-2c (the energy + Riemannian descent + fold-safe line-search +
+normalisation). The one dependency to confirm: `laplacian_eigenmap` (or LOBPCG)
+takes the **generalised** `(L, M)` problem and the **smallest** non-trivial
+eigenpairs (the eigsolve-dispatcher already plans shift-invert coverage; verify
+the API before GS-2b).
 
 ## 7. Differentiability & hardware
 
@@ -240,11 +301,16 @@ Build bottom-up so bijectivity is verifiable before the hard optimiser exists:
   **and** `Σ areas ≈ 4π` — the degree-1 cover test). Lift `_solid_angle` from
   `isosurface` into `geometry/_triangle_distance.py` (or a small shared helper)
   so both use one implementation. *Effort XS.* Gate for everything below.
-- **GS-2b — Tutte + stereographic initialisation.** `tutte_embedding`
-  (uniform-weight disk solve via `cg`) + inverse stereographic projection;
-  `init='radial'` fast path with the `is_bijective_sphere_map` auto-fallback.
-  *Effort M.* Exit: a **provably bijective** spherical map of a real inflated
-  white surface (every signed area `> 0`).
+- **GS-2b — initialisation chain.** (i) `spectral_sphere_embedding` — the
+  recon-surf one-shot: generalised LBO eigensolve `(L, M)` for eigfns 1–3 →
+  per-vertex normalise; this alone is the recon-surf-grade map and the default
+  fast path. (ii) `tutte_embedding` (uniform-weight disk solve via `cg`) +
+  inverse stereographic projection — the bijectivity-guaranteed fallback. (iii)
+  `init='radial'`. All gated by `is_bijective_sphere_map` with the
+  spectral→Tutte auto-fallback. *Effort M.* Exit: a bijective (or
+  within-`flip_area_tol`) spherical map of a real inflated white surface, with
+  the spectral path validated against the recon-surf quality thresholds and the
+  Tutte path **provably** fold-free (`signed area > 0`).
 - **GS-2c — the energy + Riemannian optimiser.** `E_conf`/`E_area`/`E_metric`,
   tangent-projected gradient descent, the **fold-safe backtracking line-search**,
   and the **Möbius/centroid normalisation**. *Effort L* (the core). Exit:
@@ -272,8 +338,11 @@ Two oracle classes, mirroring the rest of the suite:
      `min(signed_spherical_areas) > 0` and the area histogram is sane.
    - **Monotone descent**: total energy decreases over iterations.
 2. **Real cortical surface.** On `fsaverage` inflated/white (genus-0):
-   - the result is **bijective** (every signed area `> 0`, `Σ = 4π`) — the
-     property that matters most in the wild;
+   - the **spectral one-shot** map satisfies the recon-surf quality gate
+     (sphere-area-fraction `> 0.99`, flipped-area-fraction `< 0.0008`) — the
+     fast-path validation;
+   - the **full** result is **bijective** (every signed area `> 0`, `Σ = 4π`) —
+     the property that matters most in the wild;
    - **areal & metric distortion** (shipped `areal_distortion` /
      `strain_distortion`) are low and comparable to FreeSurfer's own
      `?h.sphere` distribution (class/correlation, not bit-parity — the
@@ -286,7 +355,9 @@ Two oracle classes, mirroring the rest of the suite:
 |---|---|---|
 | **Collapse to a point** (conformal trivial minimiser) | High | area term + Möbius/centroid normalisation each iteration (§5.2/5.4); no-collapse test |
 | **Folds during optimisation** | High | bijective Tutte init + fold-safe line-search (bijectivity is a loop invariant) + optional log-barrier |
-| **Non-convergence / slow at ico7 (160k verts)** | Med | Tutte init puts us in a good basin; CG for the linear solve; document iteration budget; coarse-to-fine over the icosphere hierarchy is a lever if needed |
+| **Non-convergence / slow at ico7 (160k verts)** | Med | spectral / Tutte init puts us in a good basin; CG for the linear solve; document iteration budget; coarse-to-fine over the icosphere hierarchy is a lever if needed |
+| **Spectral eigensolve: smallest non-trivial eigenpairs of the *generalised* `(L, M)` problem** | Med | confirm `laplacian_eigenmap`/LOBPCG supports `M` and smallest-eigenpair (shift-invert) before GS-2b; cuSolver-free path required (LOBPCG, not `eigh`); the Tutte fallback covers a spectral failure |
+| **Spectral map folds beyond tolerance / degenerate eigenspace** | Med | `is_bijective_sphere_map` gate + automatic Tutte fallback (recon-surf itself only *tolerates* `< 0.08%` flipped area and otherwise raises) |
 | **fp32 conditioning** | Low | the domain is the *unit* sphere (well-scaled) once initialised; areas/energies are O(1) |
 | **Gauge drift / non-reproducibility** | Low | centroid normalisation fixes translation; optional axis-anchor fixes rotation |
 | **Tutte 3-connectivity assumption violated** (degenerate mesh) | Low | document the precondition (a clean genus-0 manifold mesh); `is_bijective_sphere_map` catches a bad init and the radial→Tutte fallback is loud |
@@ -318,10 +389,27 @@ P1.1 curvature record.
   `geometry/sphere.py`, `tests/_real_meshes.py`.
 - **Governance.** `SPEC_UPDATE_v0.3.md §13` (acceptance, §13.4 L-review),
   `SPEC.md §5` (dep contract).
-- **Literature.** Tutte 1963 (barycentric embedding / fold-free guarantee);
-  Gu, Wang, Chan, Thompson, Yau 2004 (genus-zero surface conformal mapping);
-  Choi, Lam, Lui 2015 (FLASH / conformal-energy-minimisation, the collapse-free
-  spherical conformal map + Möbius normalisation); Smith & Schaefer 2015
-  (bijective parameterisation / flip-preventing energies); Fischl, Sereno, Dale
-  1999 (`mris_sphere`, the FreeSurfer metric/area relaxation); Kazhdan, Solomon,
-  Ben-Chen 2012 (mean-curvature-flow spherical conformal — an alternative init).
+- **Spectral one-shot (the `init='spectral'` path), verified June 2026.**
+  Henschel, Conjeti, Estrada, Diers, Fischl, Reuter 2020, *FastSurfer*
+  (NeuroImage; arXiv:1910.03866) — recon-surf solves the LBO eigenproblem
+  `Δf = −λf` for the first three non-constant eigenfunctions and scales the 3-D
+  spectral-embedding vector to unit length, as a one-shot alternative to
+  FreeSurfer's iterative inflation. Source of record:
+  `Deep-MI/FastSurfer recon_surf/spherically_project.py` — `lapy.Solver(lump=False)`
+  (FEM cotangent stiffness `A` + lumped mass `B`, generalised `A x = λ B x`,
+  ARPACK `k=4`); anatomical sign/swap correction against the AP/SI/LR axes;
+  per-vertex normalisation to radius 100; and a **bijectivity *quality gate***
+  (sphere-area-fraction `> 0.99`, flipped-area-fraction `< 0.0008`,
+  orthogonality `> 0.6`) that *raises* rather than guarantees fold-freeness.
+  `recon-surf.sh` makes spectral the **default** with `--fsqsphere` reverting to
+  FreeSurfer iterative — the same fast-default / iterative-fallback split this
+  doc adopts. The Reuter lab's LBO-spectral lineage: Reuter et al. 2006
+  (ShapeDNA), Wachinger et al. 2015 (BrainPrint).
+- **Iterative / theory.** Tutte 1963 (barycentric embedding / fold-free
+  guarantee); Gu, Wang, Chan, Thompson, Yau 2004 (genus-zero surface conformal
+  mapping); Choi, Lam, Lui 2015 (FLASH / conformal-energy-minimisation, the
+  collapse-free spherical conformal map + Möbius normalisation); Smith &
+  Schaefer 2015 (bijective parameterisation / flip-preventing energies); Fischl,
+  Sereno, Dale 1999 (`mris_sphere`, the FreeSurfer metric/area relaxation);
+  Kazhdan, Solomon, Ben-Chen 2012 (mean-curvature-flow spherical conformal — an
+  alternative init).
