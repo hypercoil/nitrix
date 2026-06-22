@@ -188,14 +188,20 @@ def _spherical_knn_indices(
 ) -> Int[Array, 'n k']:
     """Top-k nearest neighbours by spherical geodesic distance.
 
-    Materialises the ``(n, n)`` distance matrix; quadratic memory.
-    Practical for ``n <= 10k``.  Larger meshes should pre-compute the
-    adjacency (via a hierarchical tree or by the icosphere's natural
-    k-ring) and pass it as ``neighbourhood=indices``.
+    Tiled row-by-row with ``lax.map`` (Tier C / audit AI-C8): peak memory is
+    ``O(n)`` (one query's distances at a time), not the ``O(n^2)`` full distance
+    matrix -- so the int-``k`` path degrades gracefully instead of OOMing on a
+    large mesh.  Still ``O(n^2)`` *compute*; for very large meshes pre-compute
+    the adjacency (e.g. the icosphere's natural k-ring) and pass it as
+    ``neighbourhood=indices``.  Results are identical to the dense path.
     """
-    d = spherical_geodesic_distance(coor, coor, r=r)
-    _, indices = lax.top_k(-d, k)
-    return indices
+
+    def _knn_row(x: Float[Array, '3']) -> Int[Array, 'k']:
+        d_row = _geodesic_pair(x[None, :], coor, r)  # (n,)
+        _, idx = lax.top_k(-d_row, k)
+        return idx
+
+    return cast(Int[Array, 'n k'], lax.map(_knn_row, coor))
 
 
 def spherical_conv(
