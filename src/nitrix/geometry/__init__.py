@@ -91,7 +91,9 @@ from .affine import (
 )
 from .sphere import (
     cartesian_to_latlong,
+    is_bijective_sphere_map,
     latlong_to_cartesian,
+    signed_spherical_areas,
     spherical_conv,
     spherical_geodesic_distance,
 )
@@ -184,6 +186,8 @@ __all__ = [
     'latlong_to_cartesian',
     'spherical_conv',
     'spherical_geodesic_distance',
+    'signed_spherical_areas',
+    'is_bijective_sphere_map',
     # sphere_grid (parameterised regular grid)
     'sphere_grid_pad_2d',
     'sphere_grid_unpad_2d',

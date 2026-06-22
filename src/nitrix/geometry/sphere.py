@@ -29,6 +29,7 @@ from typing import Optional, Union
 
 import jax.lax as lax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float, Int
 
 from ..semiring import REAL, semiring_ell_matmul
@@ -38,6 +39,8 @@ __all__ = [
     'cartesian_to_latlong',
     'spherical_geodesic_distance',
     'spherical_conv',
+    'signed_spherical_areas',
+    'is_bijective_sphere_map',
 ]
 
 
@@ -302,3 +305,94 @@ def spherical_conv(
         n_cols=n,
         backend='jax',
     )
+
+
+# ---------------------------------------------------------------------------
+# Spherical-map bijectivity (GS-2a)
+# ---------------------------------------------------------------------------
+
+
+def signed_spherical_areas(
+    vertices: Float[Array, 'n_vertices 3'],
+    faces: Int[Array, 'n_faces 3'],
+) -> Float[Array, 'n_faces']:
+    """Signed solid angle (steradians) per triangle, subtended at the origin.
+
+    For triangle vertices on a sphere centred at the origin this is the signed
+    spherical-triangle area (the unit-sphere area; **radius-independent** -- the
+    solid angle does not depend on the sphere radius).  The **sign** is the
+    triangle's orientation (the triple product ``a . (b x c)``): a flipped /
+    folded triangle is negative.  For a bijective degree-1 cover the values sum
+    to ``+/- 4 pi`` and every triangle shares the dominant sign.  Computed by the
+    Van Oosterom-Strackee formula; pure JAX, differentiable.
+
+    Parameters
+    ----------
+    vertices
+        ``(n_vertices, 3)`` positions (assumed on a sphere about the origin).
+    faces
+        ``(n_faces, 3)`` triangle vertex indices.
+
+    Returns
+    -------
+    ``(n_faces,)`` signed solid angles.
+    """
+    a = vertices[faces[:, 0]]
+    b = vertices[faces[:, 1]]
+    c = vertices[faces[:, 2]]
+    la = jnp.sqrt(jnp.sum(a * a, axis=-1))
+    lb = jnp.sqrt(jnp.sum(b * b, axis=-1))
+    lc = jnp.sqrt(jnp.sum(c * c, axis=-1))
+    num = jnp.sum(a * jnp.cross(b, c), axis=-1)
+    den = (
+        la * lb * lc
+        + jnp.sum(a * b, axis=-1) * lc
+        + jnp.sum(b * c, axis=-1) * la
+        + jnp.sum(c * a, axis=-1) * lb
+    )
+    return 2.0 * jnp.arctan2(num, den)
+
+
+def is_bijective_sphere_map(
+    vertices: Float[Array, 'n_vertices 3'],
+    faces: Int[Array, 'n_faces 3'],
+    *,
+    flip_area_tol: float = 0.0,
+    total_tol: float = 1e-2,
+) -> bool:
+    """Whether (vertices-on-sphere, faces) is a (near-)bijective spherical map.
+
+    ``True`` iff the signed solid angles (``signed_spherical_areas``) form a
+    **degree-1 cover** -- their sum is within ``total_tol`` of ``+/- 4 pi`` --
+    **and** the fraction of solid angle in triangles flipped against the
+    dominant orientation is ``<= flip_area_tol``.  ``flip_area_tol = 0`` is the
+    strict fold-free test; a small tolerance (e.g. ``8e-4``) mirrors the
+    FastSurfer/recon-surf quality gate, which tolerates a tiny flipped fraction.
+
+    Host-side boolean (a decision, not a traced value) -- used to gate the
+    spherical-parameterisation init fallback chain.
+
+    Parameters
+    ----------
+    vertices, faces
+        The candidate spherical map.
+    flip_area_tol
+        Maximum tolerated flipped solid-angle fraction (``0`` = strict).
+    total_tol
+        Relative tolerance on ``|sum| == 4 pi`` (the cover test).
+
+    Returns
+    -------
+    ``bool``.
+    """
+    areas = np.asarray(signed_spherical_areas(vertices, faces))
+    total = float(areas.sum())
+    abs_total = float(np.abs(areas).sum())
+    if abs_total <= 0.0:
+        return False
+    four_pi = 4.0 * np.pi
+    cover_ok = abs(abs(total) - four_pi) <= total_tol * four_pi
+    dominant = 1.0 if total >= 0.0 else -1.0
+    flipped = float(np.abs(areas[np.sign(areas) != dominant]).sum())
+    flip_ok = (flipped / abs_total) <= flip_area_tol
+    return bool(cover_ok and flip_ok)
