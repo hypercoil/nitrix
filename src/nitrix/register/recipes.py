@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import replace
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional, Sequence, Union
 
 import jax
 import jax.numpy as jnp
@@ -40,16 +40,18 @@ from ._core import (
     RegistrationSpec,
     multi_resolution_register,
 )
+from ._force import Force
 from ._inverse_compositional import (
     _affine_params_from_matrix,
     _rigid_params_from_matrix,
     ic_affine_register,
     ic_rigid_register,
 )
-from ._metric import pin_metric_ranges
+from ._metric import MI, pin_metric_ranges
 from ._model import Affine, Rigid, TransformModel
 from ._preprocess import preprocess_images
-from ._space import CoordinateSpace, IndexSpace
+from ._space import CoordinateSpace, IndexSpace, _conjugate_about
+from ._syn import SyNResult, SyNSpec, greedy_syn_register
 
 # C3: an explicit Convergence on a path that cannot honour it.  The forward
 # least-squares (GN/LM) path now early-exits (Lever A); only the scalar/BFGS
@@ -145,7 +147,45 @@ def _resolve_init_matrix(
     return matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] / coarse_factor)
 
 
-__all__ = ['rigid_register', 'affine_register', 'apply_transform']
+def _init_from_transform(
+    transform: Array,
+    fixed: Array,
+    *,
+    ndim: int,
+    space: CoordinateSpace,
+    spec: RegistrationSpec,
+) -> Array:
+    """A self-contained (centred) recipe matrix -> the internal coarsest-level
+    about-origin init that ``_resolve_init_matrix`` returns.
+
+    The warm-start hook: ``rigid_register`` / ``affine_register`` return the
+    self-contained matrix (centre baked in, B1), so to *start* an optimise from
+    a prior stage's result we de-centre it to about-origin and rescale the
+    translation to the coarsest pyramid level (the driver upscales it back).
+    Index-space only -- the staged-pipeline frame.
+    """
+    if not isinstance(space, IndexSpace):
+        raise ValueError(
+            'init_transform is an index-space warm-start; it is not defined for '
+            'WorldSpace (pass a world init via the SyN/Demons init_affine, or '
+            'use IndexSpace).'
+        )
+    dtype = fixed.dtype
+    c = (jnp.asarray(fixed.shape, dtype=dtype) - 1.0) / 2.0
+    origin = _conjugate_about(
+        jnp.asarray(transform, dtype=dtype), -c, ndim, dtype
+    )
+    coarse_factor = spec.pyramid_factor ** (spec.levels - 1)
+    return origin.at[:ndim, ndim].set(origin[:ndim, ndim] / coarse_factor)
+
+
+__all__ = [
+    'rigid_register',
+    'affine_register',
+    'apply_transform',
+    'syn_pipeline',
+    'PipelineResult',
+]
 
 # Coarsest pyramid axis (voxels) below which the matrix Hessian -- especially the
 # 12-DOF affine one -- is too few-voxel to estimate reliably, so the constant-
@@ -250,6 +290,7 @@ def rigid_register(
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
+    init_transform: Optional[Float[Array, ' d1 d1']] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
 ) -> RegistrationResult:
@@ -284,6 +325,10 @@ def rigid_register(
         centre-of-mass start (intensity-weighted centroids, plus a per-axis
         diagonal scale for affine) that lands inside the optimiser's basin on a
         large misalignment a single zero start would miss.  ``IndexSpace`` only.
+    init_transform
+        A self-contained warm-start matrix (a prior recipe's ``result.matrix``),
+        taking precedence over ``init`` -- the staged-pipeline hook (e.g. affine
+        warm-started from rigid; see :func:`syn_pipeline`).  ``IndexSpace`` only.
     winsorize, histogram_match
         Intensity conditioning before registration (the fMRIPrep front-end):
         ``winsorize=(0.005, 0.995)`` clips each image to those percentiles
@@ -308,9 +353,14 @@ def rigid_register(
     )
     ndim = _spatial_ndim(moving, fixed)
     model = Rigid()
-    init_matrix = _resolve_init_matrix(
-        init, moving, fixed, ndim=ndim, scale=False, space=space, spec=spec
-    )
+    if init_transform is not None:
+        init_matrix = _init_from_transform(
+            init_transform, fixed, ndim=ndim, space=space, spec=spec
+        )
+    else:
+        init_matrix = _resolve_init_matrix(
+            init, moving, fixed, ndim=ndim, scale=False, space=space, spec=spec
+        )
     if _use_inverse_compositional(method, space, spec, model):
         return ic_rigid_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
@@ -417,6 +467,7 @@ def affine_register(
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
+    init_transform: Optional[Float[Array, ' d1 d1']] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
     restarts: int = 1,
@@ -436,8 +487,12 @@ def affine_register(
     under ``method="auto"`` for ``IndexSpace`` + an SSD metric).  ``init`` adds
     the **moment** start (centroid + per-axis scale), worth more here than for
     rigid -- the affine basin is narrow and a single zero start fails silently
-    on a large misalignment.  ``winsorize`` / ``histogram_match`` condition the
-    intensities before registration (see ``rigid_register``).
+    on a large misalignment.  ``init_transform`` (a prior recipe's
+    ``result.matrix``) is the self-contained warm-start hook, taking precedence
+    over ``init`` -- e.g. affine warm-started from rigid (see
+    :func:`syn_pipeline`); ``IndexSpace`` only.  ``winsorize`` /
+    ``histogram_match`` condition the intensities before registration (see
+    ``rigid_register``).
 
     ``restarts`` (default ``1``) runs the **forward** solve from that many
     diversified inits and keeps the lowest-cost result.  Its purpose is the
@@ -460,9 +515,14 @@ def affine_register(
     ndim = _spatial_ndim(moving, fixed)
     model = Affine()
     spec = _cap_levels(spec, fixed.shape)
-    init_matrix = _resolve_init_matrix(
-        init, moving, fixed, ndim=ndim, scale=True, space=space, spec=spec
-    )
+    if init_transform is not None:
+        init_matrix = _init_from_transform(
+            init_transform, fixed, ndim=ndim, space=space, spec=spec
+        )
+    else:
+        init_matrix = _resolve_init_matrix(
+            init, moving, fixed, ndim=ndim, scale=True, space=space, spec=spec
+        )
     if restarts < 1:
         raise ValueError(f'restarts must be >= 1; got {restarts}.')
     if _use_inverse_compositional(method, space, spec, model):
@@ -574,3 +634,125 @@ def apply_transform(
     if is_int:
         warped = jnp.round(warped).astype(image.dtype)
     return warped
+
+
+class PipelineResult(NamedTuple):
+    """Output of :func:`syn_pipeline` -- the composed staged transform.
+
+    Attributes
+    ----------
+    matrix
+        The linear composite -- the affine result (or the rigid result if the
+        pipeline stopped at ``'rigid'``), self-contained fixed -> moving.
+    displacement
+        The **full** fixed -> moving displacement field (``transform='syn'``),
+        already including the linear stages; ``None`` for ``'rigid'`` /
+        ``'affine'``.  :func:`apply_transform` uses this when present, else
+        ``matrix`` -- so ``apply_transform(image, pipeline_result)`` applies the
+        whole composite.
+    warped
+        ``moving`` resampled onto the ``fixed`` grid by the full transform.
+    rigid, affine, syn
+        The per-stage results (``affine`` / ``syn`` are ``None`` if that stage
+        did not run) -- their cost histories, params, Jacobian, etc.
+    """
+
+    matrix: Float[Array, ' d1 d1']
+    displacement: Optional[Float[Array, '*spatial ndim']]
+    warped: Float[Array, '*spatial']
+    rigid: RegistrationResult
+    affine: Optional[RegistrationResult]
+    syn: Optional[SyNResult]
+
+
+def syn_pipeline(
+    moving: Float[Array, '*spatial'],
+    fixed: Float[Array, '*spatial'],
+    *,
+    transform: Literal['rigid', 'affine', 'syn'] = 'syn',
+    rigid_spec: Optional[RegistrationSpec] = None,
+    affine_spec: Optional[RegistrationSpec] = None,
+    syn_spec: Optional[SyNSpec] = None,
+    force: Optional[Union[Force, Sequence[Force]]] = None,
+    affine_restarts: Optional[int] = None,
+) -> PipelineResult:
+    """Staged rigid -> affine -> SyN registration in one call.
+
+    The ``antsRegistrationSyN`` workhorse, composed from the leaf recipes: each
+    stage **warm-starts** the next -- rigid (moment init) seeds affine
+    (``init_transform``), the affine result seeds SyN (``init_affine``) -- so
+    the SyN stage's returned ``displacement`` is the **full** fixed -> moving
+    map (linear + non-linear).  ``apply_transform(image, result)`` then applies
+    the whole composite.  Numerics only -- no image I/O (``thrux``).
+
+    Parameters
+    ----------
+    moving, fixed
+        Single-channel images sharing a grid (the ``IndexSpace`` norm).
+    transform
+        How far to stage: ``'rigid'``, ``'affine'``, or ``'syn'`` (default).
+    rigid_spec, affine_spec, syn_spec, force
+        Per-stage configuration; ``None`` -> a cross-modal-robust default
+        (``MI`` linear stages, the default ``LNCCForce`` SyN -- the
+        antsRegistrationSyN convention).  For a faster **within-modality** run
+        pass ``SSD`` linear specs (the inverse-compositional fast path).
+    affine_restarts
+        Multi-start count for the affine stage; ``None`` -> ``4`` for a
+        histogram (``MI`` / ``CR``) affine metric (the non-deterministic GPU
+        scatter), else ``1``.
+
+    Returns
+    -------
+    ``PipelineResult`` (``matrix``, ``displacement``, ``warped``, and the
+    per-stage ``rigid`` / ``affine`` / ``syn`` results).
+    """
+    if transform not in ('rigid', 'affine', 'syn'):
+        raise ValueError(
+            f"transform must be 'rigid' | 'affine' | 'syn'; got {transform!r}."
+        )
+    if rigid_spec is None:
+        rigid_spec = RegistrationSpec(metric=MI(bins=32))
+    if affine_spec is None:
+        affine_spec = RegistrationSpec(metric=MI(bins=32))
+    if syn_spec is None:
+        syn_spec = SyNSpec()
+    if affine_restarts is None:
+        affine_restarts = 1 if affine_spec.metric.is_least_squares else 4
+
+    rigid = rigid_register(moving, fixed, spec=rigid_spec, init='moment')
+    if transform == 'rigid':
+        return PipelineResult(
+            matrix=rigid.matrix,
+            displacement=None,
+            warped=rigid.warped,
+            rigid=rigid,
+            affine=None,
+            syn=None,
+        )
+    affine = affine_register(
+        moving,
+        fixed,
+        spec=affine_spec,
+        init_transform=rigid.matrix,
+        restarts=affine_restarts,
+    )
+    if transform == 'affine':
+        return PipelineResult(
+            matrix=affine.matrix,
+            displacement=None,
+            warped=affine.warped,
+            rigid=rigid,
+            affine=affine,
+            syn=None,
+        )
+    syn = greedy_syn_register(
+        moving, fixed, spec=syn_spec, force=force, init_affine=affine.matrix
+    )
+    return PipelineResult(
+        matrix=affine.matrix,
+        displacement=syn.displacement,
+        warped=syn.warped,
+        rigid=rigid,
+        affine=affine,
+        syn=syn,
+    )

@@ -39,6 +39,7 @@ from nitrix.register import (  # noqa: E402
     apply_transform,
     greedy_syn_register,
     rigid_register,
+    syn_pipeline,
 )
 from nitrix.register._metric import pin_metric_ranges  # noqa: E402
 from nitrix.register.recipes import _moment_init_matrix  # noqa: E402
@@ -427,3 +428,72 @@ def test_apply_transform_validation():
 
     with pytest.raises(ValueError):
         apply_transform(_blobs_2d(16), _NoTransform())
+
+
+def test_syn_pipeline_full_chain():
+    # Staged rigid -> affine -> SyN in one call recovers an affine plant;
+    # apply_transform on the result reproduces the pipeline warp, and the SyN
+    # stage's displacement is the full composite (linear + non-linear).
+    fixed = _blobs_2d(80)
+    c = (jnp.asarray((80, 80), dtype=fixed.dtype) - 1.0) / 2.0
+    a = affine_exp(jnp.asarray([0.1, 0.04, -0.03, -0.07, 5.0, -4.0]), ndim=2)
+    grid = affine_grid(a, (80, 80), center=c)
+    moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
+    ssd = RegistrationSpec(levels=3, iterations=40, metric=SSD())
+    res = syn_pipeline(
+        moving,
+        fixed,
+        transform='syn',
+        rigid_spec=ssd,
+        affine_spec=ssd,
+        syn_spec=SyNSpec(levels=3, iterations=40, step=0.5),
+    )
+    assert float(ncc(res.warped, fixed)) > 0.98
+    assert res.displacement is not None  # full fixed->moving field
+    assert res.rigid is not None and res.affine is not None and res.syn is not None
+    out = apply_transform(moving, res)  # uses the displacement composite
+    # interiors are exact; the boundary band differs by apply_transform's
+    # 'constant' default vs the recipe boundary mode (amplified by the large
+    # affine displacement that maps the edge out of bounds).
+    sl = (slice(8, -8),) * 2
+    assert float(ncc(out[sl], res.warped[sl])) > 0.999
+
+
+def test_syn_pipeline_levels_and_warm_start():
+    # 'rigid' / 'affine' stop early (no displacement); the affine stage warm-
+    # started from rigid recovers an affine plant better than rigid alone.
+    fixed = _blobs_2d(80)
+    c = (jnp.asarray((80, 80), dtype=fixed.dtype) - 1.0) / 2.0
+    a = affine_exp(jnp.asarray([0.08, 0.05, -0.04, -0.06, 4.0, -3.0]), ndim=2)
+    grid = affine_grid(a, (80, 80), center=c)
+    moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
+    ssd = RegistrationSpec(levels=3, iterations=40, metric=SSD())
+    rig = syn_pipeline(moving, fixed, transform='rigid', rigid_spec=ssd)
+    aff = syn_pipeline(
+        moving, fixed, transform='affine', rigid_spec=ssd, affine_spec=ssd
+    )
+    assert rig.displacement is None and rig.syn is None and rig.affine is None
+    assert aff.displacement is None and aff.syn is None
+    # affine (warm-started from rigid) beats rigid alone on an affine plant.
+    assert float(ncc(aff.warped, fixed)) > float(ncc(rig.warped, fixed))
+    # both reproduce via the matrix path.
+    assert np.allclose(
+        np.asarray(apply_transform(moving, aff)),
+        np.asarray(aff.warped),
+        atol=1e-6,
+    )
+
+
+def test_syn_pipeline_default_metric_runs():
+    # The default (no specs) uses MI linear stages; the rigid-only path runs and
+    # recovers a rigid plant (MI rigid is reliable).
+    fixed = _blobs_2d(48)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 2.0, -1.5]), ndim=2))
+    res = syn_pipeline(moving, fixed, transform='rigid')
+    assert float(ncc(res.warped, fixed)) > 0.97
+
+
+def test_syn_pipeline_validation():
+    fixed = _blobs_2d(32)
+    with pytest.raises(ValueError):
+        syn_pipeline(fixed, fixed, transform='bogus')
