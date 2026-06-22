@@ -218,21 +218,28 @@ def _neighbour_lists(adjacency: ELL) -> List[List[int]]:
     """Per-vertex neighbour lists (host-side) from an ELL adjacency.
 
     A neighbour is an entry whose stored value is nonzero (the ELL padding
-    convention); self-loops and duplicates are dropped.
+    convention); self-loops and duplicates are dropped.  Vectorised
+    (Tier C / audit AI-C3): build the unique ``(row, col)`` edge set with numpy
+    and split into per-row lists, rather than a per-(vertex, slot) Python loop +
+    set.  Neighbour order within a row is irrelevant to the serial flood (which
+    is unchanged) -- a vertex's basin is fixed by the heap pop order, not the
+    order in which a popped vertex enumerates its neighbours.
     """
     idx = np.asarray(adjacency.indices)
     val = np.asarray(adjacency.values)
-    n = idx.shape[0]
-    out: List[List[int]] = [[] for _ in range(n)]
-    for i in range(n):
-        seen = set()
-        for p in range(idx.shape[1]):
-            if val[i, p] != 0:
-                j = int(idx[i, p])
-                if j != i and j not in seen:
-                    seen.add(j)
-                    out[i].append(j)
-    return out
+    n, k = idx.shape
+    self_idx = np.arange(n)[:, None]
+    valid = (val != 0) & (idx != self_idx)
+    rows = np.repeat(np.arange(n, dtype=np.int64), k)[valid.reshape(-1)]
+    cols = idx.reshape(-1)[valid.reshape(-1)].astype(np.int64)
+    if rows.size == 0:
+        return [[] for _ in range(n)]
+    key = np.unique(rows * np.int64(n) + cols)  # dedup (row, col), sorted
+    urows = key // np.int64(n)
+    ucols = (key % np.int64(n)).astype(np.int64)
+    deg = np.bincount(urows, minlength=n)
+    groups = np.split(ucols, np.cumsum(deg)[:-1])
+    return [g.tolist() for g in groups]
 
 
 def _merge_basins(
@@ -399,15 +406,15 @@ def mesh_watershed(
         ]
 
     # Local minima: an active vertex whose value <= every active neighbour's.
-    is_min = active.copy()
-    for i in range(n):
-        if not active[i]:
-            continue
-        fi = field_np[i]
-        for j in neighbours[i]:
-            if field_np[j] < fi:
-                is_min[i] = False
-                break
+    # Vectorised (Tier C / AI-C3) via the ELL adjacency + a segment min.
+    idx = np.asarray(adjacency.indices)
+    val = np.asarray(adjacency.values)
+    valid = (val != 0) & (idx != np.arange(n)[:, None])
+    if roi is not None:
+        valid = valid & active[idx] & active[:, None]
+    nbr_field = np.where(valid, field_np[idx], np.inf)
+    min_nbr = nbr_field.min(axis=1)  # +inf for a vertex with no active neighbour
+    is_min = active & (field_np <= min_nbr)
 
     # Coalesce connected equal-valued minima (plateau) into single seeds.
     parent = list(range(n))
