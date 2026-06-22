@@ -161,7 +161,7 @@ verified. Weaknesses are **duplication from the ship-PR-by-PR cadence** — no c
 defects; one consolidation pass removes ~300 lines.
 | ID | Sev | Status | Location | Issue | Direction |
 |----|-----|--------|----------|-------|-----------|
-| **DS1** | High | open | `hgp.py:165-316` vs `gp.py:452-611` | Diagonal penalised-REML core written **twice** (gp single-block, hgp K-block) when single-block is the K=1 case (`_quantities`/`_fs_lambda`/`_reml_nll` ≅ `_mb_*`). Flagged deliberate debt in design doc PR4a/5c. | Promote the K-block core to a shared `stats/_penreml.py`; `gp.py` calls it with K=1. Removes ~150 lines, public boundaries unchanged. |
+| **DS1** | High | ✅ done `cadbea0` | `hgp.py:165-316` vs `gp.py:452-611` | Diagonal penalised-REML core written **twice** (gp single-block, hgp K-block) when single-block is the K=1 case (`_quantities`/`_fs_lambda`/`_reml_nll` ≅ `_mb_*`). Flagged deliberate debt in design doc PR4a/5c. | **DONE:** new `stats/_penreml.py` is the single source of truth (`mb_quantities`/`mb_fs`/`mb_reml_nll`/`reml_const`). hgp re-exports it under the `_mb_*` names; gp's single-block fns are thin K=1 delegations. Shared core uses the single-block float expressions so all gp paths are **bit-identical** to pre-refactor (hgp shifts ~1.6e-13); every test-referenced internal name preserved. |
 | **DS2** | Med | open | `gp.py:683-736, 975-1037, 1095-1168, 1171-1285` | The design/penalty closure abstraction is wired only into the corr path; four other fit bodies re-spell the same scaffolding inline (5×). | Lift one `_run_gp_fit` driver. |
 | **DS3** | Med | open | `gp.py:367-380` vs `kernel.py:445-455`; `gp.py:383-400`; `gp.py:236-245` vs `basis.py:1004-1008` | Kernel-name normalisation and Matern/RBF stationary covariances duplicated/mis-homed vs `linalg/kernel.py`; HSGP eigenfunction design evaluated twice (blocked by an import cycle). | A neutral `stats/_hsgp.py` resolves the cycle and de-dups the design eval; re-home covariances to `linalg/kernel.py`. |
 | DS4–DS9 | Low | open | `gp.py:946,1323` (reaches into `lme._corr`/`_corrfit` privates); `gp.py:106-198` (mode-conditional `GPResult` fields across 4 engines); `hgp.py:684-688` (nested per-group predict unimplemented); etc. | See §7. | — |
@@ -202,11 +202,12 @@ earlier, but this front-loads risk reduction). All ✅ done + tested + committed
 Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 
 ### Round 2 — high-value capability + consistency (follow-up PRs, not merge-gating)
-> **Consistency batch ✅ done (`63d7707`):** CV3 + UX1 + UX2. Remaining: CV2, DS1, CV4.
+> **Consistency batch ✅ done (`63d7707`):** CV3 + UX1 + UX2.  **DS1 ✅ done (`cadbea0`).**
+> Remaining: CV2, CV4.
 - **CV3** ✅ `63d7707` (S) — package docstring (quick adoption win).
 - **UX1/UX2** ✅ `63d7707` (S–M) — `coef` alias on all 6 LME/GLMM result types + `x`-vs-`X` annotation/doc.
+- **DS1** ✅ `cadbea0` (M) — shared `stats/_penreml.py` K-block core (gp calls with K=1; bit-identical).
 - **CV2** (L) ⚖️ — non-Gaussian GP lengthscale (PQL-REML ρ); brings a design note first.
-- **DS1** (M) — shared `stats/_penreml.py` K-block core (gp calls with K=1).
 - **CV4** (S) — BY / Storey FDR.
 - **CV1** — **deferred, tracked under prior `N2`** (post-`geometry-suite`).
 
