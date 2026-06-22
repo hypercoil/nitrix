@@ -118,6 +118,7 @@ from .surface import (
     strain_distortion,
     surface_smooth,
 )
+from .isosurface import marching_cubes
 from .topology import (
     euler_characteristic,
     genus,
@@ -202,4 +203,6 @@ __all__ = [
     # topology (the genus-0 defect gate)
     'euler_characteristic',
     'genus',
+    # isosurface extraction (volume -> mesh)
+    'marching_cubes',
 ]
