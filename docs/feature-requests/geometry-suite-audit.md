@@ -45,7 +45,9 @@ consolidate to 5 distinct themes (several axes flagged the same issue).
 > - **Deferred (own follow-up):** AI-C5 (exact spatial broad-phase for
 >   point-to-triangle / spherical search) — correctness-sensitive (a pruning bug
 >   silently corrupts SDF/distance/resample); brute-force is exact today, ceiling
->   documented (A7).
+>   documented (A7). **Design doc:**
+>   [`mesh-spatial-acceleration.md`](mesh-spatial-acceleration.md) (the exactness
+>   guarantee + the two structures + parity validation, fixed before any code).
 > - **Skipped (rationale):** AI-C6 (device-side; XLA CSE already fuses the
 >   intra-body redundant `signed_spherical_areas`; risks the fold-safe optimiser),
 >   AI-C9 (default `auto` conflicts with the spectral/ROI flat-ELL requirement;
