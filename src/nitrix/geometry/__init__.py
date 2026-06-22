@@ -98,6 +98,7 @@ from .sphere import (
     spherical_conv,
     spherical_geodesic_distance,
     spherical_parameterize,
+    surface_resample,
 )
 from .sphere_grid import (
     sphere_grid_pad_2d,
@@ -193,6 +194,7 @@ __all__ = [
     'is_bijective_sphere_map',
     'spectral_sphere_embedding',
     'spherical_parameterize',
+    'surface_resample',
     # sphere_grid (parameterised regular grid)
     'sphere_grid_pad_2d',
     'sphere_grid_unpad_2d',

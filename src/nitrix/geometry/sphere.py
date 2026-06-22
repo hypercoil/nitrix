@@ -32,11 +32,12 @@ import jax.lax as lax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int
+from numpy.typing import NDArray
 
 from ..semiring import REAL, semiring_ell_matmul
 
 if TYPE_CHECKING:
-    from ..sparse import Mesh
+    from ..sparse import ELL, Mesh
 
 __all__ = [
     'latlong_to_cartesian',
@@ -47,6 +48,7 @@ __all__ = [
     'is_bijective_sphere_map',
     'spectral_sphere_embedding',
     'spherical_parameterize',
+    'surface_resample',
 ]
 
 
@@ -647,3 +649,245 @@ def spherical_parameterize(
         Float[Array, 'n_vertices 3'],
         jax.lax.fori_loop(0, n_iterations, _body, phi),
     )
+
+
+# ---------------------------------------------------------------------------
+# Surface resampling between registered spheres (ADAP_BARY_AREA / barycentric)
+# ---------------------------------------------------------------------------
+
+
+def _spherical_barycentric(
+    verts: NDArray[Any],
+    faces: NDArray[Any],
+    query: NDArray[Any],
+    *,
+    chunk: int = 256,
+) -> tuple[NDArray[Any], NDArray[Any]]:
+    """Host-side spherical point-in-triangle search + barycentric weights.
+
+    For each ``query`` point (unit vector) find the ``verts``/``faces`` triangle
+    that (radially) contains it and return its three source-vertex indices and
+    the planar barycentric weights of the query's radial projection onto that
+    triangle's plane.  Clean-room (no ``scipy.spatial``): the containing
+    triangle maximises the minimum signed great-circle-edge distance (robust to
+    fp; a query on a shared edge / vertex ties to an incident triangle, which
+    interpolates consistently).  ``O(n_query * n_faces)``, chunked over queries.
+
+    Returns ``(idx (Q, 3) int32, weights (Q, 3) float32)`` -- weights are
+    clipped non-negative and renormalised to a partition of unity (so a query
+    fractionally outside every triangle projects to the nearest edge / vertex
+    and constants are still preserved).
+    """
+    a = verts[faces[:, 0]]
+    b = verts[faces[:, 1]]
+    c = verts[faces[:, 2]]
+    n_ab = np.cross(a, b)
+    n_bc = np.cross(b, c)
+    n_ca = np.cross(c, a)
+    q_n = query.shape[0]
+    best_face = np.empty(q_n, dtype=np.int64)
+    for start in range(0, q_n, chunk):
+        q = query[start : start + chunk]
+        score = np.minimum(
+            np.minimum(q @ n_ab.T, q @ n_bc.T), q @ n_ca.T
+        )  # (q, F)
+        best_face[start : start + chunk] = np.argmax(score, axis=1)
+    fa = faces[best_face]  # (Q, 3) source vertex indices
+    av = verts[fa[:, 0]]
+    bv = verts[fa[:, 1]]
+    cv = verts[fa[:, 2]]
+    # Radial projection of the query onto the triangle plane.
+    m = np.cross(bv - av, cv - av)
+    denom = np.sum(query * m, axis=1)
+    denom = np.where(np.abs(denom) < 1e-20, 1e-20, denom)
+    p = (np.sum(av * m, axis=1) / denom)[:, None] * query
+    # Planar barycentric of p in (av, bv, cv).
+    v0 = bv - av
+    v1 = cv - av
+    v2 = p - av
+    d00 = np.sum(v0 * v0, axis=1)
+    d01 = np.sum(v0 * v1, axis=1)
+    d11 = np.sum(v1 * v1, axis=1)
+    d20 = np.sum(v2 * v0, axis=1)
+    d21 = np.sum(v2 * v1, axis=1)
+    det = d00 * d11 - d01 * d01
+    det = np.where(np.abs(det) < 1e-20, 1e-20, det)
+    wb = (d11 * d20 - d01 * d21) / det
+    wc = (d00 * d21 - d01 * d20) / det
+    wa = 1.0 - wb - wc
+    w = np.stack([wa, wb, wc], axis=1)
+    w = np.clip(w, 0.0, None)
+    w = w / np.maximum(w.sum(axis=1, keepdims=True), 1e-20)
+    return fa.astype(np.int32), w.astype(np.float32)
+
+
+def _assemble_resample_ell(
+    cols_list: list[list[int]],
+    vals_list: list[list[float]],
+    n_rows: int,
+    n_cols: int,
+) -> 'ELL':
+    """Pack ragged per-row (col, value) lists into a padded ``ELL``."""
+    from ..sparse import ELL
+
+    k_max = max((len(c) for c in cols_list), default=1)
+    k_max = max(k_max, 1)
+    idx = np.zeros((n_rows, k_max), dtype=np.int32)
+    val = np.zeros((n_rows, k_max), dtype=np.float32)
+    for r, (cs, vs) in enumerate(zip(cols_list, vals_list)):
+        k = len(cs)
+        if k:
+            idx[r, :k] = cs
+            val[r, :k] = vs
+    return ELL(
+        values=jnp.asarray(val),
+        indices=jnp.asarray(idx),
+        n_cols=n_cols,
+        identity=0.0,
+    )
+
+
+def surface_resample(
+    source_sphere: 'Mesh',
+    source_vals: Float[Array, 'n_source ...'],
+    target_sphere: 'Mesh',
+    *,
+    method: str = 'adap_bary_area',
+    source_area: Optional[Float[Array, 'n_source']] = None,
+    target_area: Optional[Float[Array, 'n_target']] = None,
+    semiring: Any = None,
+) -> tuple['ELL', Array]:
+    """Resample a per-vertex field between two registered spherical meshes.
+
+    The ``wb_command -metric-resample`` analogue and the fsaverage<->fs_LR (or
+    cross-resolution) bridge: ``source_sphere`` and ``target_sphere`` are two
+    tessellations of the **same** registered sphere (radius-independent -- both
+    are normalised to unit vectors for the search), and ``source_vals`` is
+    carried to the target tessellation.  Returns ``(operator, resampled)`` --
+    the resampling ``ELL`` (host-side construction) **and** the field after
+    applying it through the differentiable apply-seam; reuse the operator for
+    further fields of the same (source, target) pair.
+
+    Two methods, matching the two Workbench modes:
+
+    - ``method='barycentric'`` -- forward gather: each target vertex takes the
+      barycentric interpolation of the source triangle it falls in.  The
+      operator is **row-stochastic**, so constants are preserved exactly; best
+      for smooth features and up-sampling.
+    - ``method='adap_bary_area'`` (default) -- *adaptive barycentric, area
+      weighted*: each source vertex scatters its (anatomical) vertex area into
+      the target triangle it falls in, and each target row is normalised by the
+      target vertex area.  This **conserves the area-weighted integral exactly**
+      (``sum_t A_target[t] * out[t] == sum_s A_source[s] * in[s]``) whenever
+      every target vertex receives source mass (the down-sampling / matched
+      regime); target vertices that receive none (up-sampling holes) fall back
+      to the barycentric gather, where conservation becomes approximate.  This
+      is the faithful Workbench behaviour and the documented divergence: pick
+      ``'barycentric'`` when exact constant-preservation matters more than the
+      integral.
+
+    The ``*_area`` arrays are the **anatomical** vertex areas to weight by
+    (the Workbench ``-area-metrics``); default to the spheres' own vertex areas
+    (``vertex_areas``), which conserve the *sphere*-area-weighted integral.
+
+    Host-side construction (the spherical search emits a plain ``ELL``, the
+    HOST-CTOR class); the *application* is pure-JAX and differentiable w.r.t.
+    ``source_vals``.  The search is ``O(n_query * n_faces)`` (a uniform-bucket
+    broad-phase is a profile-gated follow-up).
+
+    Parameters
+    ----------
+    source_sphere, target_sphere
+        Registered spherical meshes (any radius; normalised internally).
+    source_vals
+        Per-source-vertex field, ``(n_source,)`` or ``(n_source, c)``.
+    method
+        ``'adap_bary_area'`` (default) or ``'barycentric'``.
+    source_area, target_area
+        Optional anatomical vertex areas (``adap_bary_area`` only); default to
+        the spheres' ``vertex_areas``.
+    semiring
+        Optional semiring for the apply (default ``REAL``).
+
+    Returns
+    -------
+    ``(operator, resampled)`` -- the resampling ``ELL`` ``(n_target, n_source)``
+    and the resampled field (``(n_target,)`` or ``(n_target, c)``).
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is unknown.
+    """
+    from ..sparse import ELL, apply_operator, vertex_areas
+
+    src_v = np.asarray(source_sphere.vertices, dtype=np.float64)
+    src_v = src_v / np.maximum(
+        np.linalg.norm(src_v, axis=1, keepdims=True), 1e-20
+    )
+    tgt_v = np.asarray(target_sphere.vertices, dtype=np.float64)
+    tgt_v = tgt_v / np.maximum(
+        np.linalg.norm(tgt_v, axis=1, keepdims=True), 1e-20
+    )
+    src_f = np.asarray(source_sphere.faces)
+    tgt_f = np.asarray(target_sphere.faces)
+    n_src = src_v.shape[0]
+    n_tgt = tgt_v.shape[0]
+
+    if method == 'barycentric':
+        idx, w = _spherical_barycentric(src_v, src_f, tgt_v)
+        op: ELL = ELL(
+            values=jnp.asarray(w),
+            indices=jnp.asarray(idx),
+            n_cols=n_src,
+            identity=0.0,
+        )
+    elif method == 'adap_bary_area':
+        sa = (
+            np.asarray(vertex_areas(source_sphere), dtype=np.float64)
+            if source_area is None
+            else np.asarray(source_area, dtype=np.float64)
+        )
+        ta = (
+            np.asarray(vertex_areas(target_sphere), dtype=np.float64)
+            if target_area is None
+            else np.asarray(target_area, dtype=np.float64)
+        )
+        # Forward gather (for up-sampling holes) + reverse scatter (the
+        # area-conserving core).
+        fwd_idx, fwd_w = _spherical_barycentric(src_v, src_f, tgt_v)
+        rev_idx, rev_w = _spherical_barycentric(tgt_v, tgt_f, src_v)
+        acc: list[dict[int, float]] = [{} for _ in range(n_tgt)]
+        for s in range(n_src):
+            for j in range(3):
+                wgt = float(rev_w[s, j]) * float(sa[s])
+                if wgt == 0.0:
+                    continue
+                t = int(rev_idx[s, j])
+                acc[t][s] = acc[t].get(s, 0.0) + wgt
+        cols_list: list[list[int]] = []
+        vals_list: list[list[float]] = []
+        for t in range(n_tgt):
+            d = acc[t]
+            if d:
+                cols = list(d.keys())
+                vals = [d[s] / float(ta[t]) for s in cols]
+            else:  # up-sampling hole -> barycentric fallback
+                cols = [int(fwd_idx[t, j]) for j in range(3)]
+                vals = [float(fwd_w[t, j]) for j in range(3)]
+            cols_list.append(cols)
+            vals_list.append(vals)
+        op = _assemble_resample_ell(cols_list, vals_list, n_tgt, n_src)
+    else:
+        raise ValueError(
+            f"surface_resample: method must be 'adap_bary_area' or "
+            f"'barycentric'; got {method!r}."
+        )
+
+    vals_arr = jnp.asarray(source_vals)
+    squeeze = vals_arr.ndim == 1
+    x = vals_arr[:, None] if squeeze else vals_arr
+    resampled = apply_operator(op, x, semiring=semiring)
+    if squeeze:
+        resampled = resampled[:, 0]
+    return op, resampled
