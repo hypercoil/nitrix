@@ -25,7 +25,7 @@ on ``semiring_ell_matmul`` over a k-NN adjacency for O(N · k) cost
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import jax.lax as lax
 import jax.numpy as jnp
@@ -34,6 +34,9 @@ from jaxtyping import Array, Float, Int
 
 from ..semiring import REAL, semiring_ell_matmul
 
+if TYPE_CHECKING:
+    from ..sparse import Mesh
+
 __all__ = [
     'latlong_to_cartesian',
     'cartesian_to_latlong',
@@ -41,6 +44,7 @@ __all__ = [
     'spherical_conv',
     'signed_spherical_areas',
     'is_bijective_sphere_map',
+    'spectral_sphere_embedding',
 ]
 
 
@@ -396,3 +400,101 @@ def is_bijective_sphere_map(
     flipped = float(np.abs(areas[np.sign(areas) != dominant]).sum())
     flip_ok = (flipped / abs_total) <= flip_area_tol
     return bool(cover_ok and flip_ok)
+
+
+# ---------------------------------------------------------------------------
+# Spectral spherical embedding (GS-2b -- the recon-surf one-shot)
+# ---------------------------------------------------------------------------
+
+
+def spectral_sphere_embedding(
+    mesh: 'Mesh',
+    *,
+    radius: float = 1.0,
+    n_eig: int = 10,
+    eig_iters: int = 50,
+) -> Float[Array, 'n_vertices 3']:
+    """One-shot spherical map from the Laplace-Beltrami eigenfunctions.
+
+    The FastSurfer / recon-surf method (verified against
+    ``Deep-MI/FastSurfer recon_surf/spherically_project.py``): solve the
+    **generalised** LBO eigenproblem ``L phi = lambda M phi`` -- cotangent
+    stiffness ``L`` (``mesh_cotangent_laplacian``), lumped mass ``M``
+    (``vertex_areas``) -- for the **first three non-constant eigenfunctions**
+    (smallest eigenvalues), and scale each vertex's ``(phi_1, phi_2, phi_3)`` to
+    ``radius``.  On the round sphere these eigenfunctions are the degree-1
+    harmonics ``x, y, z``, so a near-spherical input maps to the sphere in one
+    eigensolve, no iteration.
+
+    The diagonal mass makes ``L tilde = M^{-1/2} L M^{-1/2}`` symmetric.  We form
+    the affinity ``A = I - L tilde / c`` (``c`` a Gershgorin bound on the
+    spectrum), whose *largest* eigenpairs are ``L tilde``'s *smallest*, and find
+    them with **shift-invert** LOBPCG (``eigsolve_top_k`` + a tight negative
+    ``sigma``) -- the cuSolver-free path.  Shift-invert (not a plain reflection)
+    is essential: the smallest LBO eigenvalues are tightly clustered near 0, and
+    shift-invert is what amplifies their gaps enough to resolve the constant +
+    first-three eigenfunctions; ``n_eig`` over-samples to aid convergence.
+
+    **Not guaranteed bijective** -- it is the recon-surf-grade one-shot map
+    (a tiny flipped fraction may remain).  Gate with ``is_bijective_sphere_map``
+    and fall back to a guaranteed-bijective init, or refine with the iterative
+    optimiser, for a strictly fold-free result.  The eigenfunction
+    **sign/ordering gauge** is *not* resolved here (nitrix is
+    orientation-agnostic; recon-surf's anatomical sign/swap alignment is a
+    consumer step).
+
+    Host-side cotangent construction + JAX eigensolve; not differentiable w.r.t.
+    ``mesh.vertices`` (the cotangent weights are built host-side) -- this is an
+    init / preprocessing artefact.
+
+    Parameters
+    ----------
+    mesh
+        Genus-0 triangle mesh (ideally inflated / near-spherical).
+    radius
+        Output sphere radius.
+    n_eig
+        Number of eigenpairs to request (>= 4); over-sampling beyond the
+        constant + 3 used aids LOBPCG convergence on the clustered low spectrum.
+    eig_iters
+        LOBPCG outer / inner-CG iteration budget for the shift-invert solve.
+
+    Returns
+    -------
+    ``(n_vertices, 3)`` vertices on the sphere of the given radius.
+    """
+    from ..linalg._eigsolve import SolverSpec, eigsolve_top_k
+    from ..sparse import ELL, mesh_cotangent_laplacian, vertex_areas
+
+    lap = mesh_cotangent_laplacian(mesh)
+    inv_sqrt = 1.0 / jnp.sqrt(jnp.maximum(vertex_areas(mesh), 1e-12))
+    # L_tilde = D^{-1/2} L D^{-1/2} (symmetric): scale each entry by the
+    # inverse-sqrt mass of its row and column vertex.
+    lt_vals = lap.values * inv_sqrt[:, None] * inv_sqrt[lap.indices]
+    # Affinity A = I - L_tilde / c (spectrum in [0, 1], A's largest = L_tilde's
+    # smallest); the diagonal is column 0 in the cotangent ELL layout.
+    c = jnp.max(
+        jnp.sum(jnp.abs(lt_vals), axis=1)
+    )  # Gershgorin lambda_max bound
+    aff_vals = (-lt_vals / c).at[:, 0].add(1.0)
+    affinity = ELL(
+        values=aff_vals, indices=lap.indices, n_cols=lap.n_cols, identity=0.0
+    )
+    pair = eigsolve_top_k(
+        affinity,
+        n_eig,
+        spec=SolverSpec.shift_invert(
+            sigma=-0.01, outer_iters=eig_iters, cg_iters=eig_iters
+        ),
+    )
+    lam = c * (1.0 - pair.values)  # recovered L_tilde eigenvalues
+    order = jnp.argsort(lam)
+    psi = pair.vectors[:, order]  # ascending by eigenvalue
+    phi = (
+        inv_sqrt[:, None] * psi
+    )  # generalised eigenvectors (LBO eigenfunctions)
+    emb = phi[:, 1:4]  # skip the constant eigenfunction, take the next three
+    norm = jnp.maximum(
+        jnp.sqrt(jnp.sum(emb * emb, axis=-1, keepdims=True)), 1e-12
+    )
+    return radius * emb / norm
