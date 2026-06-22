@@ -129,11 +129,12 @@ RelSpacing = Optional[tuple[float, ...]]
 # the intensity scales registration sees.
 _DEMONS_DENOM_EPS = 1e-8
 
-# Below this RMS the force field is treated as no-signal and left at zero rather
-# than amplified to the target magnitude (``_normalise_rms``).  Absolute on the
-# already metric-scale-arbitrary cost gradient: only the genuinely-zero field
-# (a degenerate all-flat / perfectly-matched histogram) falls under it.
-_RMS_EPS = 1e-12
+# The no-signal RMS floor (``_normalise_rms``) is derived per dtype from
+# ``jnp.finfo(dtype).eps`` (E1): a fixed 1e-12 is below float32's ~1.2e-7
+# precision, so it would never fire in the production float32 path; the
+# finfo epsilon makes the genuinely-zero-field guard meaningful at both
+# precisions.  Only the degenerate all-flat / perfectly-matched field
+# (RMS indistinguishable from zero at the working precision) falls under it.
 
 
 def _grad_spacing(
@@ -163,7 +164,7 @@ def _normalise_rms(u: Float[Array, '*spatial ndim'], target: float) -> Array:
     zero, with the double-``where`` keeping the gradient finite there too.
     """
     rms = jnp.sqrt(jnp.mean(jnp.sum(u * u, axis=-1)))
-    safe = rms > _RMS_EPS
+    safe = rms > jnp.finfo(u.dtype).eps
     scale = jnp.where(safe, target / jnp.where(safe, rms, 1.0), 0.0)
     return u * scale
 

@@ -352,10 +352,13 @@ def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
         # one hot voxel shrink the whole step.  Safe to scale-up only because a
         # convergence gate (the SVF early-exit) bounds the constant-step
         # dithering this would otherwise invite.
-        safe = cap > 1e-12
+        # Dtype-derived zero-cap guard (E1): finfo(dtype).eps, not a fixed
+        # 1e-12 that float32 (~1.2e-7 precision) cannot represent meaningfully.
+        eps = jnp.finfo(u.dtype).eps
+        safe = cap > eps
         scale = jnp.where(safe, step / jnp.where(safe, cap, 1.0), 0.0)
     else:
-        scale = jnp.minimum(1.0, step / (cap + 1e-12))
+        scale = jnp.minimum(1.0, step / (cap + jnp.finfo(u.dtype).eps))
     return u * scale
 
 

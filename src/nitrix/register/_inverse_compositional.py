@@ -121,7 +121,14 @@ def _trust_scale(
     m_du = matrix @ (update - jnp.eye(ndim + 1, dtype=matrix.dtype))
     disp = (corners @ m_du.T)[:, :ndim]
     max_disp = jnp.max(jnp.sqrt(jnp.sum(disp * disp, axis=-1)))
-    return jnp.minimum(1.0, step_max / (max_disp + 1e-12))
+    # Dtype-derived 0/0 guard (E1): a fixed 1e-12 sits below float32's ~1.2e-7
+    # precision floor, so it is meaningless in the production float32 path; the
+    # finfo epsilon scales the guard to the working dtype.  Only active when the
+    # step induces ~zero corner motion (a converged step), so its exact value
+    # never affects a real update.
+    return jnp.minimum(
+        1.0, step_max / (max_disp + jnp.finfo(max_disp.dtype).eps)
+    )
 
 
 def _rotation_generators(ndim: int, dtype: Any) -> Array:
