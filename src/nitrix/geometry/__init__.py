@@ -97,6 +97,7 @@ from .sphere import (
     spectral_sphere_embedding,
     spherical_conv,
     spherical_geodesic_distance,
+    spherical_parameterize,
 )
 from .sphere_grid import (
     sphere_grid_pad_2d,
@@ -190,6 +191,7 @@ __all__ = [
     'signed_spherical_areas',
     'is_bijective_sphere_map',
     'spectral_sphere_embedding',
+    'spherical_parameterize',
     # sphere_grid (parameterised regular grid)
     'sphere_grid_pad_2d',
     'sphere_grid_unpad_2d',

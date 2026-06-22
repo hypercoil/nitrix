@@ -25,8 +25,9 @@ on ``semiring_ell_matmul`` over a k-NN adjacency for O(N · k) cost
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
+import jax
 import jax.lax as lax
 import jax.numpy as jnp
 import numpy as np
@@ -45,6 +46,7 @@ __all__ = [
     'signed_spherical_areas',
     'is_bijective_sphere_map',
     'spectral_sphere_embedding',
+    'spherical_parameterize',
 ]
 
 
@@ -499,3 +501,149 @@ def spectral_sphere_embedding(
         jnp.sqrt(jnp.sum(emb * emb, axis=-1, keepdims=True)), 1e-12
     )
     return radius * emb / norm
+
+
+# ---------------------------------------------------------------------------
+# Spherical parameterisation (GS-2c / GS-2d)
+# ---------------------------------------------------------------------------
+
+
+def spherical_parameterize(
+    mesh: 'Mesh',
+    *,
+    init: str = 'spectral',
+    n_iterations: int = 200,
+    conformal_weight: float = 1.0,
+    area_weight: float = 1.0,
+    step: float = 0.05,
+    radius: float = 1.0,
+) -> Float[Array, 'n_vertices 3']:
+    """Map an inflated genus-0 surface to the sphere, minimising distortion.
+
+    The `mris_sphere` analogue.  Starts from a fast (near-)bijective init and,
+    if ``n_iterations > 0``, refines it by **Riemannian gradient descent on
+    (S^2)^n** under a conformal + areal distortion energy, with a **fold-safe
+    backtracking line-search** (a step is accepted only if it lowers the energy
+    and does not increase the number of flipped triangles) and a
+    centroid/Mobius normalisation each step (which, with the area term, blocks
+    the conformal collapse-to-a-point).  Bijectivity is thus driven to strict
+    (no flipped triangles) and held.
+
+    ``n_iterations = 0`` returns the init alone -- with ``init='spectral'`` that
+    is the recon-surf-grade one-shot map (``spectral_sphere_embedding``).
+
+    Parameters
+    ----------
+    mesh
+        Inflated genus-0 mesh (e.g. ``inflate_surface`` output).
+    init
+        ``'spectral'`` (default, the recon-surf LBO embedding) or ``'radial'``
+        (centroid projection -- only for near-convex inputs).
+    n_iterations
+        Refinement iterations (``0`` -> init only).
+    conformal_weight, area_weight
+        Energy weights (Dirichlet/conformal core + areal log-ratio term).
+    step
+        Initial line-search step.
+    radius
+        Output sphere radius.
+
+    Returns
+    -------
+    ``(n_vertices, 3)`` vertices on the sphere of the given radius (same
+    ``faces`` -- correspondence preserved).
+    """
+    from ..sparse import (
+        ELL,
+        apply_operator,
+        face_areas,
+        mesh_cotangent_laplacian,
+    )
+
+    faces = mesh.faces
+    if init == 'spectral':
+        phi = spectral_sphere_embedding(mesh, radius=radius)
+    elif init == 'radial':
+        d = mesh.vertices - jnp.mean(mesh.vertices, axis=0)
+        nrm = jnp.maximum(jnp.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        phi = radius * d / nrm
+    else:
+        raise ValueError(
+            f"spherical_parameterize: init must be 'spectral' or 'radial'; "
+            f'got {init!r}.'
+        )
+    # Normalise to positive overall orientation (consistent outward winding) by
+    # mirroring one axis if needed, so a bijective map has all signed areas > 0
+    # (the spectral embedding's eigenfunction-sign gauge is otherwise arbitrary).
+    if float(jnp.sum(signed_spherical_areas(phi, faces))) < 0.0:
+        phi = phi.at[:, 0].multiply(-1.0)
+    if n_iterations <= 0:
+        return phi
+
+    lap = mesh_cotangent_laplacian(mesh)
+    assert isinstance(lap, ELL)
+    a0 = face_areas(mesh)
+    target = 4.0 * jnp.pi * a0 / jnp.sum(a0)  # solid-angle targets, sum 4 pi
+    r2 = radius * radius
+
+    def _energy(p: Array) -> Array:
+        e_conf = 0.5 * jnp.sum(p * apply_operator(lap, p))
+        areas = signed_spherical_areas(p, faces)
+        s = areas / target  # relative area (target s == 1)
+        # Area-ratio barrier s + 1/s (min at s == 1, -> inf as s -> 0+), plus a
+        # hinge that pushes small / negative (flipped) areas back up -- the
+        # latter keeps a *gradient* on folds (a plain max-clamp would not).
+        s_safe = jnp.maximum(s, 1e-3)
+        e_area = jnp.sum(s_safe + 1.0 / s_safe - 2.0)
+        e_flip = jnp.sum(jnp.maximum(1e-3 - s, 0.0))
+        return conformal_weight * e_conf + area_weight * e_area + 1e3 * e_flip
+
+    grad_energy = jax.grad(_energy)
+
+    def _retract(p: Array, grad_t: Array, alpha: float) -> Array:
+        q = p - alpha * grad_t
+        q = (
+            radius
+            * q
+            / jnp.maximum(jnp.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+        )
+        q = q - jnp.mean(q, axis=0)  # centroid (Mobius) normalisation
+        return (
+            radius
+            * q
+            / jnp.maximum(jnp.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+        )
+
+    def _body(_: int, p: Array) -> Array:
+        e0 = _energy(p)
+        n_flip0 = jnp.sum(signed_spherical_areas(p, faces) <= 0.0)
+        g = grad_energy(p)
+        grad_t = g - jnp.sum(g * p, axis=-1, keepdims=True) / r2 * p  # tangent
+        # Normalise so ``alpha`` bounds the largest per-vertex move: the stiff
+        # fold barrier otherwise makes the raw gradient huge at flipped
+        # triangles and any step overshoots.
+        gmax = jnp.max(jnp.linalg.norm(grad_t, axis=-1)) + 1e-12
+        grad_t = grad_t / gmax
+
+        def _cond(c: Any) -> Array:
+            alpha, accepted, _ = c
+            return jnp.logical_and(jnp.logical_not(accepted), alpha > 1e-5)
+
+        def _try(c: Any) -> Any:
+            alpha, _, _ = c
+            cand = _retract(p, grad_t, alpha)
+            n_flip = jnp.sum(signed_spherical_areas(cand, faces) <= 0.0)
+            ok = jnp.logical_and(_energy(cand) < e0, n_flip <= n_flip0)
+            return (
+                jnp.where(ok, alpha, alpha * 0.5),
+                ok,
+                jnp.where(ok, cand, p),
+            )
+
+        _, _, out = jax.lax.while_loop(_cond, _try, (step, False, p))
+        return out
+
+    return cast(
+        Float[Array, 'n_vertices 3'],
+        jax.lax.fori_loop(0, n_iterations, _body, phi),
+    )
