@@ -240,10 +240,14 @@ def marching_cubes(
 
     # Deduplicate crossing vertices by grid-edge key (lo, hi): a shared edge
     # interpolates to the same point regardless of which tet/cube referenced it.
-    edge_keys = np.stack(
-        [lo.reshape(-1), hi.reshape(-1)], axis=1
-    )  # (ntri*3, 2)
-    uniq, inverse = np.unique(edge_keys, axis=0, return_inverse=True)
+    # Combined 1-D integer key (lo * N + hi, hi < N) instead of a lexicographic
+    # np.unique(axis=0) -- same ordering, far faster on large isosurfaces
+    # (Tier C / audit AI-C7).
+    n_corners = nx * ny * nz
+    key = lo.reshape(-1).astype(np.int64) * np.int64(n_corners) + hi.reshape(
+        -1
+    ).astype(np.int64)
+    ukey, inverse = np.unique(key, return_inverse=True)
     faces = inverse.reshape(-1, 3).astype(np.int64)  # (ntri, 3)
 
     # Physical positions of every grid corner.
@@ -254,7 +258,8 @@ def marching_cubes(
     pos = np.stack([gi * sx, gj * sy, gk * sz], axis=1).astype(np.float64)
 
     # Linear edge interpolation at the crossing for each unique edge.
-    ea, eb = uniq[:, 0], uniq[:, 1]
+    ea = (ukey // np.int64(n_corners)).astype(np.int64)
+    eb = (ukey % np.int64(n_corners)).astype(np.int64)
     va, vb = val[ea], val[eb]
     denom = vb - va
     denom = np.where(np.abs(denom) < 1e-30, 1e-30, denom)

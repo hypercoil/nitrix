@@ -962,72 +962,65 @@ def mesh_cotangent_laplacian(
     #   if (i, j) = (b, c) or (c, b): k = 0 -> cot_a.
     #   if (i, j) = (c, a) or (a, c): k = 1 -> cot_b.
     #   if (i, j) = (a, b) or (b, a): k = 2 -> cot_c.
-    edge_pairs = []  # (i, j, w)
-    for k_local, (k_src, k_dst) in enumerate([(1, 2), (2, 0), (0, 1)]):
-        for f, tri in enumerate(faces_np):
-            i = int(tri[k_src])
-            j = int(tri[k_dst])
-            w = float(cot[f, k_local])
-            edge_pairs.append((i, j, w))
-            edge_pairs.append((j, i, w))
+    # Vectorised assembly (Tier C / audit AI-C1): build the 6 directed
+    # (i, j, w) contributions (both orientations of each of the 3 opposite
+    # edges), aggregate duplicate edges by a single combined integer key
+    # (i * n + j) + ``np.add.at`` -- no Python dict / per-face loop.
+    f0, f1, f2 = faces_np[:, 0], faces_np[:, 1], faces_np[:, 2]
+    # local edge opposite vertex k_local -> (k_src, k_dst): 0->(1,2), 1->(2,0),
+    # 2->(0,1); contribute cot[:, k_local] to both directions of that edge.
+    src = np.concatenate([f1, f2, f2, f0, f0, f1]).astype(np.int64)
+    dst = np.concatenate([f2, f1, f0, f2, f1, f0]).astype(np.int64)
+    wts = np.concatenate(
+        [cot[:, 0], cot[:, 0], cot[:, 1], cot[:, 1], cot[:, 2], cot[:, 2]]
+    ).astype(np.float64)
 
-    # Aggregate to sparse adjacency: w_ij = sum over (i, j) entries.
-    edge_weight: dict[Tuple[int, int], float] = {}
-    for i, j, w in edge_pairs:
-        key = (i, j)
-        edge_weight[key] = edge_weight.get(key, 0.0) + w
+    if src.size:
+        key = src * np.int64(n) + dst
+        uniq, inv = np.unique(key, return_inverse=True)
+        w_agg = np.zeros(uniq.shape[0], dtype=np.float64)
+        np.add.at(w_agg, inv, wts)
+        ui = (uniq // np.int64(n)).astype(np.int64)  # row of each edge
+        uj = (uniq % np.int64(n)).astype(np.int64)  # col of each edge
+    else:  # no faces -> isolated vertices, no off-diagonals
+        ui = np.zeros(0, dtype=np.int64)
+        uj = np.zeros(0, dtype=np.int64)
+        w_agg = np.zeros(0, dtype=np.float64)
 
-    # Per-row neighbour lists and weights.  The diagonal is emitted as
-    # COLUMN 0 of the flat ELL (see the assembly below); spectral_sphere_embedding
-    # depends on this diagonal-first layout.
-    onering_w: list[list[Tuple[int, float]]] = [[] for _ in range(n)]
-    for (i, j), w in edge_weight.items():
-        onering_w[i].append((j, w))
+    deg = np.bincount(ui, minlength=n)  # off-diagonal count per row
+    diag = np.zeros(n, dtype=np.float64)  # w_ii = sum_j w_ij
+    np.add.at(diag, ui, w_agg)
+    # Per-row slot of each edge: sort by row, position within the row + 1
+    # (slot 0 is the diagonal).
+    order = np.argsort(ui, kind='stable')
+    ui_s, uj_s, w_s = ui[order], uj[order], w_agg[order]
+    start = np.zeros(n + 1, dtype=np.int64)
+    np.cumsum(deg, out=start[1:])
+    slot = 1 + (np.arange(ui_s.shape[0], dtype=np.int64) - start[ui_s])
 
-    if _resolve_format(format, [len(r) + 1 for r in onering_w]) == 'sectioned':
+    if _resolve_format(format, (deg + 1).tolist()) == 'sectioned':
         from .ell_sectioned import sectioned_ell_from_ragged
 
         sec_dtype = mesh.vertices.dtype
         identity = float(jnp.asarray(0.0, dtype=sec_dtype).item())
         vpr: list[Any] = []
         ipr: list[Any] = []
-        for v in range(n):
-            if not onering_w[v]:
-                ipr.append(jnp.asarray(np.asarray([v], dtype=np.int32)))
-                vpr.append(
-                    jnp.asarray(
-                        np.zeros(1, dtype=np.float64).astype(sec_dtype)
-                    )
-                )
-                continue
-            diag = sum(w for _, w in onering_w[v])
-            js = [v] + [j for j, _ in onering_w[v]]
-            ws = [diag] + [-w for _, w in onering_w[v]]
-            ipr.append(jnp.asarray(np.asarray(js, dtype=np.int32)))
-            vpr.append(
-                jnp.asarray(np.asarray(ws, dtype=np.float64).astype(sec_dtype))
-            )
+        for v in range(n):  # ragged rows: slice the row-sorted edge arrays
+            lo, hi = int(start[v]), int(start[v + 1])
+            js = np.concatenate(([v], uj_s[lo:hi])).astype(np.int32)
+            ws = np.concatenate(([diag[v]], -w_s[lo:hi])).astype(np.float64)
+            ipr.append(jnp.asarray(js))
+            vpr.append(jnp.asarray(ws.astype(sec_dtype)))
         return sectioned_ell_from_ragged(vpr, ipr, n_cols=n, identity=identity)
 
-    # Max degree + 1 for the diagonal.
-    k_max = max((len(r) for r in onering_w), default=0) + 1
-
+    k_max = int(deg.max(initial=0)) + 1  # +1 for the diagonal column 0
     indices_np = np.zeros((n, k_max), dtype=np.int32)
     values_np = np.zeros((n, k_max), dtype=np.float64)
-    for v in range(n):
-        # Diagonal entry FIRST -- predictable layout for downstream
-        # consumers that may want to extract it.
-        indices_np[v, 0] = v
-        if not onering_w[v]:
-            indices_np[v, :] = v
-            continue
-        values_np[v, 0] = sum(w for _, w in onering_w[v])  # diagonal
-        for k_idx, (j, w) in enumerate(onering_w[v]):
-            indices_np[v, 1 + k_idx] = j
-            values_np[v, 1 + k_idx] = -w  # off-diagonal: -w_ij
-        # Pad remaining slots with the first neighbour idx, value 0.
-        if 1 + len(onering_w[v]) < k_max:
-            indices_np[v, 1 + len(onering_w[v]) :] = onering_w[v][0][0]
+    indices_np[:, 0] = np.arange(n)  # diagonal-first layout
+    values_np[:, 0] = diag
+    indices_np[ui_s, slot] = uj_s.astype(np.int32)
+    values_np[ui_s, slot] = -w_s  # off-diagonal: -w_ij
+    # Padding slots keep index 0 / value 0 (zero weight -> no contribution).
 
     # Return values matching the mesh.vertices dtype so downstream
     # autodiff doesn't trip on a dtype mismatch.

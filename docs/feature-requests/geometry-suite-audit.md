@@ -31,11 +31,26 @@ format). Dependency direction (`geometry`/`graph` → `sparse`/`semiring`) holds
 **Counts:** 0 blocker · 10 major · 25 minor · 12 nit = 47 findings. The 10 majors
 consolidate to 5 distinct themes (several axes flagged the same issue).
 
-> **Remediation status (2026-06-22, commit `4b12a28`):** Tiers **A and B
-> implemented and green** (AI-A1…A10, AI-B1…B4; 104 affected+new tests pass,
-> ruff+mypy clean). Tier **C deferred** to a dedicated perf follow-up (host-side
-> numpy vectorisation for ico7 — AI-C1…C11; none merge-unsafe). INT-* are
-> intentional/documented (no code). The branch is **merge-ready**.
+> **Remediation status (2026-06-22):** Tiers **A and B implemented and green**
+> (AI-A1…A10, AI-B1…B4; commit `4b12a28`) and merged to local `main` (merge
+> `1642303`).
+>
+> **Tier C in progress** on branch `perf/geometry-suite-tier-c`, parity-preserving
+> (existing analytic + real-mesh oracles stay green), each verified single-process:
+> - **Done:** AI-C1 (cotangent assembly), C2 (`adap_bary_area` scatter), C3
+>   (watershed neighbour-lists + minima scan), C4 (self-intersection broad-phase
+>   binning), C7 (marching-cubes 1-D dedup key), C8 (`spherical_conv` k-NN tiling).
+>   These remove the host-side O(n) Python-interpreter cliffs + the (n,n) k-NN
+>   matrix — the "wall at ico7" the audit emphasised.
+> - **Deferred (own follow-up):** AI-C5 (exact spatial broad-phase for
+>   point-to-triangle / spherical search) — correctness-sensitive (a pruning bug
+>   silently corrupts SDF/distance/resample); brute-force is exact today, ceiling
+>   documented (A7).
+> - **Skipped (rationale):** AI-C6 (device-side; XLA CSE already fuses the
+>   intra-body redundant `signed_spherical_areas`; risks the fold-safe optimiser),
+>   AI-C9 (default `auto` conflicts with the spectral/ROI flat-ELL requirement;
+>   fsaverage already flat under `auto`). AI-C10/C11 are DRY refactors
+>   (maintainability, not perf) — separately tracked.
 
 | Axis | Verdict |
 |---|---|
