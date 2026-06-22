@@ -21,8 +21,7 @@ exactly-coplanar overlaps (a documented, rare case).
 
 from __future__ import annotations
 
-from collections import defaultdict
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, cast
 
 import jax.numpy as jnp
 import numpy as np
@@ -43,9 +42,14 @@ def _candidate_pairs(tri: NDArray[Any]) -> NDArray[Any]:
     """Uniform-grid broad phase: candidate face-pair indices (C, 2).
 
     Faces are binned into a grid of cells ~ the median edge length; faces whose
-    AABBs share a cell are candidates.
+    AABBs share a cell are candidates.  Vectorised (Tier C / audit AI-C4): the
+    per-(face, cell) membership enumeration is numpy (no quad-nested Python
+    loop); only the within-cell pairing loops over occupied multi-face cells
+    (far fewer than faces) with a vectorised ``np.triu_indices`` per cell.
     """
     n_faces = tri.shape[0]
+    if n_faces < 2:
+        return np.zeros((0, 2), dtype=np.int64)
     fmin = tri.min(axis=1)
     fmax = tri.max(axis=1)
     edge = np.linalg.norm(tri[:, 1] - tri[:, 0], axis=1)
@@ -53,24 +57,49 @@ def _candidate_pairs(tri: NDArray[Any]) -> NDArray[Any]:
     lo = np.floor(fmin / cell).astype(np.int64)
     hi = np.floor(fmax / cell).astype(np.int64)
 
-    cellmap: Dict[Tuple[int, int, int], List[int]] = defaultdict(list)
-    for fi in range(n_faces):
-        for ix in range(lo[fi, 0], hi[fi, 0] + 1):
-            for iy in range(lo[fi, 1], hi[fi, 1] + 1):
-                for iz in range(lo[fi, 2], hi[fi, 2] + 1):
-                    cellmap[(ix, iy, iz)].append(fi)
+    # Enumerate (face, cell) memberships: face fi spans dims[fi] cells.
+    dims = hi - lo + 1  # (n_faces, 3)
+    counts = dims.prod(axis=1)  # cells per face
+    total = int(counts.sum())
+    face_id = np.repeat(np.arange(n_faces, dtype=np.int64), counts)
+    start = np.zeros(n_faces + 1, dtype=np.int64)
+    np.cumsum(counts, out=start[1:])
+    local = np.arange(total, dtype=np.int64) - start[face_id]  # idx within face
+    dpm = dims[face_id]
+    dz = local % dpm[:, 2]
+    dy = (local // dpm[:, 2]) % dpm[:, 1]
+    dx = local // (dpm[:, 2] * dpm[:, 1])
+    cx = lo[face_id, 0] + dx
+    cy = lo[face_id, 1] + dy
+    cz = lo[face_id, 2] + dz
+    # Combined non-negative cell key.
+    cxm, cym, czm = int(cx.min()), int(cy.min()), int(cz.min())
+    ny = int(cy.max()) - cym + 1
+    nz = int(cz.max()) - czm + 1
+    cellkey = ((cx - cxm) * ny + (cy - cym)) * nz + (cz - czm)
 
-    pairs: set[Tuple[int, int]] = set()
-    for members in cellmap.values():
-        m = len(members)
-        if m < 2:
+    # Group by cell (faces ascending within a group), pair within each.
+    order = np.lexsort((face_id, cellkey))
+    ck = cellkey[order]
+    fids = face_id[order]
+    _, grp_start, grp_cnt = np.unique(
+        ck, return_index=True, return_counts=True
+    )
+    blocks = []
+    for gs, gc in zip(grp_start.tolist(), grp_cnt.tolist()):
+        if gc < 2:
             continue
-        for i in range(m):
-            for j in range(i + 1, m):
-                pairs.add((members[i], members[j]))
-    if not pairs:
+        members = fids[gs : gs + gc]  # ascending face ids
+        ii, jj = np.triu_indices(gc, k=1)
+        blocks.append(np.stack([members[ii], members[jj]], axis=1))
+    if not blocks:
         return np.zeros((0, 2), dtype=np.int64)
-    return np.array(sorted(pairs), dtype=np.int64)
+    allp = np.concatenate(blocks, axis=0)  # (a < b) per row
+    # Dedup + sort (a pair may share several cells) via a combined key.
+    pkey = np.unique(allp[:, 0] * np.int64(n_faces) + allp[:, 1])
+    return np.stack(
+        [pkey // np.int64(n_faces), pkey % np.int64(n_faces)], axis=1
+    ).astype(np.int64)
 
 
 def _seg_tri_hit(
