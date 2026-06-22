@@ -466,7 +466,8 @@ def spectral_sphere_embedding(
     from ..linalg._eigsolve import SolverSpec, eigsolve_top_k
     from ..sparse import ELL, mesh_cotangent_laplacian, vertex_areas
 
-    lap = mesh_cotangent_laplacian(mesh)
+    lap = mesh_cotangent_laplacian(mesh)  # default format='ell' -> flat ELL
+    assert isinstance(lap, ELL)  # narrow the ELL | SectionedELL return type
     inv_sqrt = 1.0 / jnp.sqrt(jnp.maximum(vertex_areas(mesh), 1e-12))
     # L_tilde = D^{-1/2} L D^{-1/2} (symmetric): scale each entry by the
     # inverse-sqrt mass of its row and column vertex.
