@@ -101,3 +101,46 @@ def test_real_mesh_smoothing() -> None:
     assert np.allclose(
         float(jnp.sum(area * out)), float(jnp.sum(area * curv)), rtol=1e-3
     )
+
+
+# --------------------------------------------------------------------------- #
+# ROI / medial-wall masking (audit AI-B1)
+# --------------------------------------------------------------------------- #
+
+
+def test_roi_does_not_bleed_across_boundary() -> None:
+    # ROI (upper hemisphere) constant 1.0; the off-ROI (medial-wall stand-in)
+    # carries different fillings. The Neumann boundary makes the ROI output
+    # INDEPENDENT of the off-ROI values (the tolerance-robust no-bleed proof),
+    # and off-ROI vertices are returned unchanged.
+    mesh = icosphere(3)
+    z = np.asarray(mesh.vertices[:, 2])
+    roi = jnp.asarray(z >= 0.0)
+    roi_np = np.asarray(roi)
+    v1 = jnp.asarray(np.where(roi_np, 1.0, 10.0).astype(np.float32))
+    v2 = jnp.asarray(np.where(roi_np, 1.0, -50.0).astype(np.float32))
+    o1 = np.asarray(surface_smooth(mesh, v1, fwhm=3.0, roi=roi))
+    o2 = np.asarray(surface_smooth(mesh, v2, fwhm=3.0, roi=roi))
+    assert np.allclose(o1[roi_np], o2[roi_np], atol=1e-5)  # no bleed
+    assert np.allclose(o1[roi_np], 1.0, atol=1e-2)  # constant preserved
+    assert np.allclose(o1[~roi_np], 10.0, atol=1e-3)  # off-ROI unchanged
+
+
+def test_roi_preserves_constants_and_integral_within_roi() -> None:
+    mesh = icosphere(3)
+    z = np.asarray(mesh.vertices[:, 2])
+    roi = jnp.asarray(z >= -0.2)
+    roi_np = np.asarray(roi)
+    area = np.asarray(vertex_areas(mesh))
+    rng = np.random.default_rng(0)
+    vals = jnp.asarray(rng.standard_normal(mesh.n_vertices).astype(np.float32))
+    out = np.asarray(surface_smooth(mesh, vals, fwhm=4.0, roi=roi))
+    # Constant in -> constant out within ROI.
+    cout = np.asarray(
+        surface_smooth(mesh, jnp.ones(mesh.n_vertices), fwhm=4.0, roi=roi)
+    )
+    assert np.allclose(cout[roi_np], 1.0, atol=1e-4)
+    # Area-weighted integral conserved over the ROI (Neumann boundary).
+    lhs = float(np.sum(area[roi_np] * out[roi_np]))
+    rhs = float(np.sum(area[roi_np] * np.asarray(vals)[roi_np]))
+    assert np.isclose(lhs, rhs, rtol=1e-3)

@@ -19,6 +19,13 @@ The full topology *corrector* (FreeSurfer ``mris_fix_topology``) is deliberately
 deferred to a research track; the field->mesh pipeline keeps the seam open so a
 corrector can slot between extraction and inflation later.  See
 ``docs/design/geometry-suite.md`` (decision D1).
+
+Consequence for the field->mesh route (``recon-all-clinical``): because there is
+no corrector yet, raw ``marching_cubes`` output is **gate-only** -- if ``genus``
+reports ``> 0`` the suite can detect but not repair it.  The supported route to a
+genus-0 surface is a template-correspondence model (e.g. ``topofit``/``synthdist``)
++ ``deform_to_sdf``, which inherits genus-0 from the template; a marching-cubes
+mesh with handles must be corrected by an external tool until GS-7 lands.
 """
 
 from __future__ import annotations

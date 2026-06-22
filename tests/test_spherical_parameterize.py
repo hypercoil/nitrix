@@ -75,3 +75,26 @@ def test_real_cortex_becomes_strictly_bijective_and_lower_distortion() -> None:
         areal_distortion(inf_mesh, Mesh(refined, white.faces))
     ).std()
     assert d_ref <= d_init + 1e-3
+
+
+def test_radial_init_runs_and_orientation_is_positive() -> None:
+    # The jit-safe (jnp.where) orientation gauge (audit AI-A1) yields a
+    # positively-oriented map from the radial init too.
+    m = icosphere(2)
+    out = spherical_parameterize(m, init='radial', n_iterations=10)
+    assert float(jnp.sum(signed_spherical_areas(out, m.faces))) > 0.0
+
+
+def test_host_orchestrated_not_jittable_as_whole() -> None:
+    # Documented contract (audit AI-A1): host-orchestrated (host-side cotangent
+    # build), so the function as a whole is NOT jittable. Pin that so the
+    # contract and the code do not silently diverge.
+    import jax
+
+    m = icosphere(1)
+    with pytest.raises(Exception):
+        jax.jit(
+            lambda mesh: spherical_parameterize(
+                mesh, init='radial', n_iterations=1
+            )
+        )(m)

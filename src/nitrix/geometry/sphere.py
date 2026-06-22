@@ -25,7 +25,7 @@ on ``semiring_ell_matmul`` over a k-NN adjacency for O(N · k) cost
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 
 import jax
 import jax.lax as lax
@@ -135,11 +135,10 @@ def _geodesic_pair(
     cross = jnp.cross(X, Y, axis=-1)
     num = jnp.sqrt((cross**2).sum(-1))
     denom = (X * Y).sum(-1)
+    # ``num >= 0`` so ``arctan2(num, denom)`` is already the unsigned great-circle
+    # angle in ``[0, pi]`` (it handles the antipodal case via the sign of
+    # ``denom``); geodesic distance is then ``r * angle``.
     angle = jnp.arctan2(num, denom)
-    # ``arctan2`` returns in ``(-pi, pi]``; for antipodal points we
-    # want the non-negative angle, so wrap negative values into
-    # ``[0, pi]``.  Geodesic distance is then ``r * angle``.
-    angle = jnp.where(angle < 0, angle + jnp.pi, angle)
     return r * angle
 
 
@@ -345,6 +344,10 @@ def signed_spherical_areas(
     -------
     ``(n_faces,)`` signed solid angles.
     """
+    # NB: this is the Van Oosterom-Strackee solid angle with the apex at the
+    # origin; ``isosurface._solid_angle`` is the same formula for an arbitrary
+    # apex point (the numpy/host copy used by the winding-number SDF sign). Keep
+    # the two in sync (a shared apex-parameterised core is a tracked follow-up).
     a = vertices[faces[:, 0]]
     b = vertices[faces[:, 1]]
     c = vertices[faces[:, 2]]
@@ -417,6 +420,7 @@ def spectral_sphere_embedding(
     radius: float = 1.0,
     n_eig: int = 10,
     eig_iters: int = 50,
+    laplacian: Optional['ELL'] = None,
 ) -> Float[Array, 'n_vertices 3']:
     """One-shot spherical map from the Laplace-Beltrami eigenfunctions.
 
@@ -449,7 +453,15 @@ def spectral_sphere_embedding(
 
     Host-side cotangent construction + JAX eigensolve; not differentiable w.r.t.
     ``mesh.vertices`` (the cotangent weights are built host-side) -- this is an
-    init / preprocessing artefact.
+    init / preprocessing artefact.  Pass ``laplacian=`` to reuse an
+    already-assembled cotangent operator (``spherical_parameterize`` does this so
+    the operator is built once per call, not twice).
+
+    Note on a wedged dense-solver stack: the shift-invert LOBPCG core is
+    matrix-free / cuSolver-free, but its orthonormalisation shares the dense
+    solver-handle pool, so on a box whose pool is dead the eigensolve (and hence
+    this embedding) executes on the solver-device fallback (CPU), incurring a
+    host round-trip -- correct, just not GPU-resident there.
 
     Parameters
     ----------
@@ -470,8 +482,18 @@ def spectral_sphere_embedding(
     from ..linalg._eigsolve import SolverSpec, eigsolve_top_k
     from ..sparse import ELL, mesh_cotangent_laplacian, vertex_areas
 
-    lap = mesh_cotangent_laplacian(mesh)  # default format='ell' -> flat ELL
+    if laplacian is None:
+        laplacian = mesh_cotangent_laplacian(mesh)  # default 'ell' -> flat ELL
+    lap = laplacian
     assert isinstance(lap, ELL)  # narrow the ELL | SectionedELL return type
+    # The affinity I - L_tilde/c adds the identity to the diagonal entry, which
+    # the flat cotangent ELL stores at column 0; enforce that layout rather than
+    # assume it (see mesh_cotangent_laplacian's diagonal-first contract).
+    n = mesh.n_vertices
+    assert bool(jnp.all(lap.indices[:, 0] == jnp.arange(n))), (
+        'spectral_sphere_embedding expects the cotangent ELL diagonal at '
+        'column 0 (the mesh_cotangent_laplacian diagonal-first layout).'
+    )
     inv_sqrt = 1.0 / jnp.sqrt(jnp.maximum(vertex_areas(mesh), 1e-12))
     # L_tilde = D^{-1/2} L D^{-1/2} (symmetric): scale each entry by the
     # inverse-sqrt mass of its row and column vertex.
@@ -513,7 +535,7 @@ def spectral_sphere_embedding(
 def spherical_parameterize(
     mesh: 'Mesh',
     *,
-    init: str = 'spectral',
+    init: Literal['spectral', 'radial'] = 'spectral',
     n_iterations: int = 200,
     conformal_weight: float = 1.0,
     area_weight: float = 1.0,
@@ -533,6 +555,15 @@ def spherical_parameterize(
 
     ``n_iterations = 0`` returns the init alone -- with ``init='spectral'`` that
     is the recon-surf-grade one-shot map (``spectral_sphere_embedding``).
+
+    Execution class: **host-orchestrated**, not a jittable kernel.  It builds the
+    cotangent operator host-side (``mesh_cotangent_laplacian``, NumPy) once and,
+    for ``init='spectral'``, runs the host eigensolve; the per-iteration refine
+    *body* (energy, tangent-projected gradient, fold-safe line-search) is pure
+    JAX and runs on device, but the function as a whole is **not** jittable nor
+    differentiable w.r.t. ``mesh.vertices`` (the operator weights are NumPy
+    constants).  Call it to *produce* a spherical map; do not wrap it in
+    ``jax.jit`` / ``jax.grad``.
 
     Parameters
     ----------
@@ -563,8 +594,12 @@ def spherical_parameterize(
     )
 
     faces = mesh.faces
+    # Build the cotangent operator once and reuse it for both the spectral init
+    # and the refinement energy (the host-side assembly is the costly step).
+    lap = mesh_cotangent_laplacian(mesh)
+    assert isinstance(lap, ELL)
     if init == 'spectral':
-        phi = spectral_sphere_embedding(mesh, radius=radius)
+        phi = spectral_sphere_embedding(mesh, radius=radius, laplacian=lap)
     elif init == 'radial':
         d = mesh.vertices - jnp.mean(mesh.vertices, axis=0)
         nrm = jnp.maximum(jnp.linalg.norm(d, axis=1, keepdims=True), 1e-12)
@@ -577,13 +612,13 @@ def spherical_parameterize(
     # Normalise to positive overall orientation (consistent outward winding) by
     # mirroring one axis if needed, so a bijective map has all signed areas > 0
     # (the spectral embedding's eigenfunction-sign gauge is otherwise arbitrary).
-    if float(jnp.sum(signed_spherical_areas(phi, faces))) < 0.0:
-        phi = phi.at[:, 0].multiply(-1.0)
+    # jit-safe: select the sign via jnp.where rather than a host branch, so the
+    # 'radial' init + refinement compose under jit/grad without a device sync.
+    sign = jnp.where(jnp.sum(signed_spherical_areas(phi, faces)) < 0.0, -1.0, 1.0)
+    phi = phi.at[:, 0].multiply(sign)
     if n_iterations <= 0:
         return phi
 
-    lap = mesh_cotangent_laplacian(mesh)
-    assert isinstance(lap, ELL)
     a0 = face_areas(mesh)
     target = 4.0 * jnp.pi * a0 / jnp.sum(a0)  # solid-angle targets, sum 4 pi
     r2 = radius * radius
@@ -752,7 +787,7 @@ def surface_resample(
     source_vals: Float[Array, 'n_source ...'],
     target_sphere: 'Mesh',
     *,
-    method: str = 'adap_bary_area',
+    method: Literal['adap_bary_area', 'barycentric'] = 'adap_bary_area',
     source_area: Optional[Float[Array, 'n_source']] = None,
     target_area: Optional[Float[Array, 'n_target']] = None,
     semiring: Any = None,
@@ -788,7 +823,11 @@ def surface_resample(
 
     The ``*_area`` arrays are the **anatomical** vertex areas to weight by
     (the Workbench ``-area-metrics``); default to the spheres' own vertex areas
-    (``vertex_areas``), which conserve the *sphere*-area-weighted integral.
+    (``vertex_areas``), which conserve the *sphere*-area-weighted integral.  The
+    conserved inner product is always w.r.t. the **supplied** ``source_area`` /
+    ``target_area`` (i.e. ``sum_t target_area[t]*out[t] == sum_s
+    source_area[s]*in[s]``): if you override them, measure conservation against
+    the same arrays, not the sphere ``vertex_areas``.
 
     Host-side construction (the spherical search emits a plain ``ELL``, the
     HOST-CTOR class); the *application* is pure-JAX and differentiable w.r.t.

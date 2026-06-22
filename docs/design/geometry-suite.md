@@ -315,6 +315,22 @@ def marching_cubes(volume, *, level=0.0, spacing=(1.,1.,1.)) -> Mesh
   manifold (no non-manifold edges — the variant's whole point); real synthdist
   SDF smoke.
 
+#### P2.2 as-built — marching tetrahedra, not the asymptotic decider (decision record, audit AI-A8)
+
+Shipped (`isosurface.py`) as **Freudenthal–Kuhn marching tetrahedra** (6 tets per
+cube), *not* the asymptotic-decider 256-case MC the FR/§0-correction-5 locked.
+**Same guarantee, lower risk:** the 6-tet decomposition is crack-free and
+manifold *by construction* (it cannot produce the face-saddle ambiguity that the
+asymptotic decider exists to resolve), so the genus-0 / watertight goal still
+holds — verified (sphere area 0.1%, χ=2, all edges shared by exactly 2 faces,
+100% outward). **The community-visible tradeoff:** marching tets emits ~6× more,
+more sliver-prone triangles than asymptotic-decider MC; downstream
+cotangent/curvature operators see larger weights on slivers (mitigated by the
+AI-A5 `arctan2` angle), and any mesh-density comparison to a reference MC tool
+will differ. Recorded here so consumers know what they get; a true
+asymptotic-decider variant remains a possible `method=` follow-up if exact MC
+mesh density is ever required.
+
 ### P2.3 — point-to-triangle distance + mesh→SDF (GS-4) · HOST-CTOR · Effort M · `geometry.surface`
 ```python
 def mesh_to_sdf(mesh, shape, *, spacing=(1.,1.,1.)) -> Float[Array, 'X Y Z']
@@ -375,10 +391,21 @@ def inflate_surface(mesh, *, n_iterations=100, spring_weight=0.5,
 - **Tests:** folded synthetic surface inflates toward a sphere with bounded
   metric distortion; real white surface — sulc correlates with FS `?h.sulc`.
 
-### P3.2 — spherical parameterisation (GS-2) · DIFF-JAX forward · **Effort L, SPEC review** · `geometry.sphere`
+### P3.2 — spherical parameterisation (GS-2) · HOST-orchestrated (DIFF-JAX refine *body*) · **Effort L, SPEC review** · `geometry.sphere`
+
+> **Class correction (audit AI-A1):** originally tagged "DIFF-JAX forward". The
+> per-iteration refine *body* is pure-JAX/jittable, but the function as a whole
+> is **host-orchestrated** (host-side cotangent build + spectral eigensolve) and
+> is **not** jittable/differentiable w.r.t. `mesh.vertices`. The orientation
+> gauge flip is `jnp.where`-based (no host sync), and the cotangent operator is
+> built once per call and reused for both the spectral init and the refine
+> energy.
 ```python
-def spherical_parameterize(mesh, *, n_iterations=200, area_weight=1.0,
-                           distance_weight=1.0) -> Float[Array, 'n_vertices 3']
+# As-built signature (audit AI-A9 — the planned `distance_weight` shipped as
+# `conformal_weight`; `init`/`step`/`radius` were added):
+def spherical_parameterize(mesh, *, init='spectral', n_iterations=200,
+                           conformal_weight=1.0, area_weight=1.0, step=0.05,
+                           radius=1.0) -> Float[Array, 'n_vertices 3']
 ```
 - **Recommended formulation (the SPEC-review topic):** conformal / Tutte-style
   *initialisation* (not bare centroid-normalise), then GD on the

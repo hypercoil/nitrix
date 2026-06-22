@@ -227,3 +227,36 @@ def test_real_fsaverage_parcellation_smoke() -> None:
     n_parcels = np.unique(parcels).size
     assert 1 <= n_parcels < mesh.n_vertices
     assert parcels.min() == 0 and parcels.max() == n_parcels - 1
+
+
+# --------------------------------------------------------------------------- #
+# ROI masking (audit AI-B1)
+# --------------------------------------------------------------------------- #
+
+
+def test_boundary_map_roi_zeroes_outside_and_ignores_offroi_edges() -> None:
+    m = icosphere(3)
+    adj = mesh_k_ring_adjacency(m, k=1)
+    z = np.asarray(m.vertices[:, 2])
+    roi = jnp.asarray(z >= 0.0)
+    prof = _two_region_profiles(m)
+    b = np.asarray(surface_boundary_map(jnp.asarray(prof), adj, roi=roi))
+    roi_np = np.asarray(roi)
+    # Out-of-ROI vertices are exactly zero.
+    assert np.allclose(b[~roi_np], 0.0)
+    # In-ROI values are finite and present.
+    assert np.all(np.isfinite(b[roi_np]))
+
+
+def test_watershed_roi_labels_background_minus_one() -> None:
+    m = icosphere(3)
+    adj = mesh_k_ring_adjacency(m, k=1)
+    z = np.asarray(m.vertices[:, 2])
+    roi = jnp.asarray(z >= 0.0)
+    field = jnp.asarray((-np.abs(z)).astype(np.float32))  # poles are minima
+    lab = np.asarray(mesh_watershed(field, adj, roi=roi))
+    roi_np = np.asarray(roi)
+    assert np.all(lab[~roi_np] == -1)  # background outside ROI
+    assert np.all(lab[roi_np] >= 0)  # every ROI vertex is in a basin
+    # Basins are confined to the ROI (the north well only).
+    assert set(np.unique(lab[roi_np]).tolist()) == {0}

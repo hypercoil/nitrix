@@ -977,8 +977,9 @@ def mesh_cotangent_laplacian(
         key = (i, j)
         edge_weight[key] = edge_weight.get(key, 0.0) + w
 
-    # Per-row neighbour lists and weights.  Include the diagonal as
-    # the LAST column for ELL.
+    # Per-row neighbour lists and weights.  The diagonal is emitted as
+    # COLUMN 0 of the flat ELL (see the assembly below); spectral_sphere_embedding
+    # depends on this diagonal-first layout.
     onering_w: list[list[Tuple[int, float]]] = [[] for _ in range(n)]
     for (i, j), w in edge_weight.items():
         onering_w[i].append((j, w))
@@ -1439,6 +1440,14 @@ def mesh_mass_matrix(
     ``sparse.apply_operator`` (``M @ x == vertex_areas[:, None] * x``); for
     the common case the caller usually wants the diagonal vector directly
     (use ``vertex_areas``).
+
+    Note (audit AI-A7 / INT-2): the shipped algorithms consume the **lumped mass
+    as the ``vertex_areas`` vector directly** (``mean_curvature`` forms
+    ``0.5 L v / area``; ``surface_smooth`` forms ``area * v + t L v``;
+    ``spectral_sphere_embedding`` uses ``1/sqrt(area)``), not this ELL.  The ELL
+    form is a convenience for symmetry with ``L`` (so ``M`` can flow through the
+    same ``apply_operator`` seam); it is *not* a load-bearing seam that any
+    algorithm currently requires.
 
     Parameters
     ----------

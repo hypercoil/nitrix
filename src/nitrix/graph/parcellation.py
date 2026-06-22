@@ -26,11 +26,11 @@ reverse.  See ``SPEC_UPDATE_v0.3 §12.16 / §12.17``.
 from __future__ import annotations
 
 import heapq
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, Optional
 
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
 from numpy.typing import NDArray
 
 from ..semiring import REAL, TROPICAL_MAX_PLUS, semiring_ell_edge_aggregate
@@ -100,12 +100,29 @@ def _pearson(
 # ---------------------------------------------------------------------------
 
 
+def _roi_masked_adjacency(adjacency: ELL, roi: Bool[Array, 'n_vertices']) -> ELL:
+    """Drop edges pointing at out-of-ROI vertices (set their value to 0).
+
+    A neighbour outside the ROI (e.g. the medial wall) is turned into ELL
+    padding, so it contributes the semiring identity and is excluded from the
+    degree count -- the boundary map / flooding never crosses the ROI boundary.
+    """
+    keep = roi[adjacency.indices]  # (n, k) -- is each neighbour in the ROI?
+    return ELL(
+        values=jnp.where(keep, adjacency.values, 0.0),
+        indices=adjacency.indices,
+        n_cols=adjacency.n_cols,
+        identity=adjacency.identity,
+    )
+
+
 def surface_boundary_map(
     connectivity_profiles: Float[Array, 'n_vertices d_profile'],
     adjacency: ELL,
     *,
-    similarity: str = 'eta_squared',
-    aggregate: str = 'mean',
+    similarity: Literal['eta_squared', 'pearson'] = 'eta_squared',
+    aggregate: Literal['mean', 'max'] = 'mean',
+    roi: Optional[Bool[Array, 'n_vertices']] = None,
 ) -> Float[Array, 'n_vertices']:
     """Per-vertex functional-connectivity boundary map.
 
@@ -137,6 +154,11 @@ def surface_boundary_map(
     aggregate
         ``'mean'`` (default; mean dissimilarity over neighbours) or ``'max'``
         (the strongest neighbour border).
+    roi
+        Optional ``(n_vertices,)`` boolean cortex mask.  Edges to out-of-ROI
+        neighbours (e.g. the medial wall, whose profiles are meaningless) are
+        dropped so they raise no spurious boundary, and out-of-ROI vertices are
+        returned as ``0``.
 
     Returns
     -------
@@ -147,6 +169,8 @@ def surface_boundary_map(
     ValueError
         If ``similarity`` or ``aggregate`` is unknown.
     """
+    if roi is not None:
+        adjacency = _roi_masked_adjacency(adjacency, jnp.asarray(roi))
     if similarity == 'eta_squared':
         sim = eta_squared
     elif similarity == 'pearson':
@@ -180,6 +204,8 @@ def surface_boundary_map(
     if aggregate == 'mean':
         degree = jnp.sum(adjacency.values != 0, axis=1)
         out = out / jnp.maximum(degree, 1).astype(out.dtype)
+    if roi is not None:
+        out = jnp.where(jnp.asarray(roi), out, 0.0)
     return out
 
 
@@ -224,7 +250,8 @@ def _merge_basins(
     it is smaller than ``min_basin_size`` or shallower than ``h_min``.
     """
     n = len(labels)
-    roots = sorted(set(int(b) for b in labels.tolist()))
+    # -1 is the out-of-ROI background label: never a basin, never merged.
+    roots = sorted(set(int(b) for b in labels.tolist() if b >= 0))
     parent: Dict[int, int] = {b: b for b in roots}
 
     def find(b: int) -> int:
@@ -237,15 +264,19 @@ def _merge_basins(
     bmin: Dict[int, float] = {b: np.inf for b in roots}
     for i in range(n):
         b = int(labels[i])
+        if b < 0:
+            continue
         size[b] += 1
         bmin[b] = min(bmin[b], float(field[i]))
 
     saddle: Dict[Any, float] = {}
     for i in range(n):
         a = int(labels[i])
+        if a < 0:
+            continue
         for j in neighbours[i]:
             b = int(labels[j])
-            if a == b:
+            if b < 0 or a == b:
                 continue
             key = frozenset((a, b))
             s = max(float(field[i]), float(field[j]))
@@ -292,7 +323,11 @@ def _merge_basins(
     remap: Dict[int, int] = {}
     nxt = 0
     for i in range(n):
-        r = find(int(labels[i]))
+        lab = int(labels[i])
+        if lab < 0:  # preserve background
+            out[i] = -1
+            continue
+        r = find(lab)
         if r not in remap:
             remap[r] = nxt
             nxt += 1
@@ -306,6 +341,7 @@ def mesh_watershed(
     *,
     min_basin_size: int = 1,
     h_min: float = 0.0,
+    roi: Optional[Bool[Array, 'n_vertices']] = None,
 ) -> Int[Array, 'n_vertices']:
     """Priority-flood watershed labelling of a vertex field on a mesh.
 
@@ -338,18 +374,35 @@ def mesh_watershed(
     h_min
         Basins shallower than this depth are merged away (``0`` = no depth
         merge).
+    roi
+        Optional ``(n_vertices,)`` boolean cortex mask.  Out-of-ROI vertices
+        (e.g. the medial wall) are excluded from flooding and labelled ``-1``
+        (background); basins never cross the ROI boundary.
 
     Returns
     -------
-    ``(n_vertices,)`` int32 basin labels in ``[0, n_basins)``.
+    ``(n_vertices,)`` int32 basin labels in ``[0, n_basins)``, with ``-1`` for
+    out-of-ROI vertices when ``roi`` is given.
     """
     field_np = np.asarray(field, dtype=np.float64).reshape(-1)
     n = field_np.shape[0]
     neighbours = _neighbour_lists(adjacency)
+    active = (
+        np.ones(n, dtype=bool)
+        if roi is None
+        else np.asarray(roi, dtype=bool).reshape(-1)
+    )
+    if roi is not None:  # drop edges to out-of-ROI vertices
+        neighbours = [
+            [j for j in nb if active[j]] if active[i] else []
+            for i, nb in enumerate(neighbours)
+        ]
 
-    # Local minima: value <= every neighbour's value.
-    is_min = np.ones(n, dtype=bool)
+    # Local minima: an active vertex whose value <= every active neighbour's.
+    is_min = active.copy()
     for i in range(n):
+        if not active[i]:
+            continue
         fi = field_np[i]
         for j in neighbours[i]:
             if field_np[j] < fi:
@@ -395,10 +448,10 @@ def mesh_watershed(
                 labels[j] = labels[i]
                 heapq.heappush(heap, (max(level, field_np[j]), j))
 
-    # Any vertex unreached (disconnected component with no interior min) gets
-    # its own basin.
+    # Any active vertex unreached (disconnected component with no interior min)
+    # gets its own basin; out-of-ROI vertices stay -1 (background).
     for i in range(n):
-        if labels[i] == -1:
+        if labels[i] == -1 and active[i]:
             labels[i] = next_label
             next_label += 1
 

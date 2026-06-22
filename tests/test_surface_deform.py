@@ -101,3 +101,20 @@ def test_jittable_and_differentiable() -> None:
 
     g = jax.grad(loss)(start.vertices)
     assert np.all(np.isfinite(np.asarray(g)))
+
+
+def test_deform_mode_kwarg_is_forwarded() -> None:
+    # mode= is exposed (audit AI-A4) and forwarded to sample_at_points; both
+    # boundary modes run and the SDF gradient still drives a Linear sample.
+    m = icosphere(2)
+    centre = jnp.array([8.0, 8.0, 8.0])
+    mesh = Mesh(m.vertices * 4.0 + centre, m.faces)
+    # radial SDF of a sphere of radius 5 centred in a 16^3 grid.
+    gx, gy, gz = jnp.meshgrid(
+        jnp.arange(16.0), jnp.arange(16.0), jnp.arange(16.0), indexing='ij'
+    )
+    sdf = jnp.sqrt((gx - 8) ** 2 + (gy - 8) ** 2 + (gz - 8) ** 2) - 5.0
+    out_n = deform_to_sdf(mesh, sdf, n_iterations=10, mode='nearest')
+    out_c = deform_to_sdf(mesh, sdf, n_iterations=10, mode='constant')
+    assert np.all(np.isfinite(np.asarray(out_n.vertices)))
+    assert np.all(np.isfinite(np.asarray(out_c.vertices)))

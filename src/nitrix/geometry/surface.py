@@ -16,15 +16,16 @@ Everything here is pure JAX and differentiable w.r.t. ``mesh.vertices``.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
 
 from ..linalg.krylov import cg
 from ..sparse import (
+    ELL,
     Mesh,
     apply_operator,
     compute_vertex_normals,
@@ -92,10 +93,25 @@ def _cotangent_apply(
     return out
 
 
+def _require_faces(mesh: Mesh, fn: str) -> None:
+    """Reject empty / faceless meshes that would yield meaningless output.
+
+    ``marching_cubes`` can legitimately return an empty ``Mesh`` (no level set);
+    feeding that to a curvature/area op would silently produce all-zero garbage
+    instead of an error.
+    """
+    if mesh.n_vertices == 0 or mesh.faces.shape[0] == 0:
+        raise ValueError(
+            f'{fn}: mesh has no faces/vertices '
+            f'({mesh.n_vertices} vertices, {mesh.faces.shape[0]} faces); '
+            'a non-degenerate triangle mesh is required.'
+        )
+
+
 def mean_curvature(
     mesh: Mesh,
     *,
-    area_scheme: str = 'voronoi',
+    area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
 ) -> Float[Array, 'n_vertices']:
     """Per-vertex mean curvature ``H`` via the cotangent / mass operator.
 
@@ -124,6 +140,7 @@ def mean_curvature(
     ``(n_vertices,)`` mean curvature.  Pure JAX; differentiable w.r.t.
     ``mesh.vertices``.
     """
+    _require_faces(mesh, 'mean_curvature')
     lv = _cotangent_apply(mesh.vertices, mesh.faces, mesh.vertices)  # L v
     area = vertex_areas(mesh, scheme=area_scheme)
     h_vec = 0.5 * lv / jnp.maximum(area, 1e-12)[:, None]
@@ -136,7 +153,7 @@ def mean_curvature(
 def gaussian_curvature(
     mesh: Mesh,
     *,
-    area_scheme: str = 'voronoi',
+    area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
 ) -> Float[Array, 'n_vertices']:
     """Per-vertex Gaussian curvature ``K`` via the angle-defect formula.
 
@@ -161,6 +178,7 @@ def gaussian_curvature(
     -------
     ``(n_vertices,)`` Gaussian curvature.  Pure JAX; differentiable.
     """
+    _require_faces(mesh, 'gaussian_curvature')
     v = mesh.vertices
     f = mesh.faces
     n = mesh.n_vertices
@@ -169,10 +187,12 @@ def gaussian_curvature(
     def _angle(
         u: Float[Array, 'n_faces 3'], w: Float[Array, 'n_faces 3']
     ) -> Float[Array, 'n_faces']:
-        un = jnp.sqrt(jnp.sum(u**2, axis=-1))
-        wn = jnp.sqrt(jnp.sum(w**2, axis=-1))
-        cosang = jnp.sum(u * w, axis=-1) / jnp.maximum(un * wn, 1e-12)
-        return jnp.arccos(jnp.clip(cosang, -1.0, 1.0))
+        # angle via atan2(||u x w||, u . w): smooth and well-conditioned near
+        # collinear edges (the gradient of arccos(clip(.)) blows up / is zeroed
+        # at +/-1, which the sliver triangles on real cortex routinely hit).
+        cross = jnp.sqrt(jnp.sum(jnp.cross(u, w) ** 2, axis=-1))
+        dot = jnp.sum(u * w, axis=-1)
+        return jnp.arctan2(cross, dot)
 
     ang_a = _angle(b - a, c - a)
     ang_b = _angle(a - b, c - b)
@@ -189,7 +209,7 @@ def gaussian_curvature(
 def principal_curvatures(
     mesh: Mesh,
     *,
-    area_scheme: str = 'voronoi',
+    area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
 ) -> Float[Array, 'n_vertices 2']:
     """Per-vertex principal curvatures ``(kappa_1, kappa_2)``, ``kappa_1 >= kappa_2``.
 
@@ -220,7 +240,7 @@ def areal_distortion(
     source: Mesh,
     warped: Mesh,
     *,
-    area_scheme: str = 'voronoi',
+    area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
 ) -> Float[Array, 'n_vertices']:
     """Per-vertex areal distortion ``log2(A_warped / A_source)``.
 
@@ -272,7 +292,10 @@ def strain_distortion(
     the cuSolver wedge): ``lambda^2 = (tr C +/- sqrt(tr C^2 - 4 det C)) / 2``.
 
     An isometry gives ``(1, 1)``; a uniform scale ``s`` gives ``(s, s)``; an
-    anisotropic scale ``diag(a, b)`` gives ``(max(a,b), min(a,b))``.
+    anisotropic scale ``diag(a, b)`` gives ``(max(a,b), min(a,b))``.  (The
+    discriminant is floored at ``1e-12`` for a finite gradient at the
+    ``lambda_1 == lambda_2`` crossing, so genuinely equal stretches come back
+    split by ~``1e-6`` -- an isometry is ``(1, 1)`` only to ~``1e-6``.)
     ``source`` and ``warped`` **must share topology**.
 
     Parameters
@@ -321,12 +344,35 @@ def strain_distortion(
     return jnp.stack([lam1, lam2], axis=-1)
 
 
+def _roi_neumann_laplacian(lap: ELL, roi: Bool[Array, 'n_vertices']) -> ELL:
+    """Restrict a cotangent stiffness ELL to an ROI with a Neumann boundary.
+
+    Drops every off-diagonal coupling that crosses the ROI boundary and rebuilds
+    each in-ROI row's diagonal as the sum of its surviving weights (so the row
+    still sums to zero -> no flux across the medial wall, constants/integral
+    preserved within the ROI).  Out-of-ROI rows are zeroed entirely, so under
+    ``(M + tL)`` the mass term alone holds them at their input value.
+    """
+    idx = lap.indices
+    vals = lap.values
+    k = vals.shape[1]
+    is_offdiag = (jnp.arange(k) >= 1)[None, :]  # column 0 is the diagonal
+    keep = roi[:, None] & roi[idx] & is_offdiag  # both endpoints in ROI
+    off = jnp.where(keep, vals, 0.0)
+    diag = jnp.where(roi, -jnp.sum(off, axis=1), 0.0)  # row sums to 0 in ROI
+    new_vals = off.at[:, 0].set(diag)
+    return ELL(
+        values=new_vals, indices=idx, n_cols=lap.n_cols, identity=lap.identity
+    )
+
+
 def surface_smooth(
     mesh: Mesh,
     values: Float[Array, '... n_vertices'],
     *,
     fwhm: float,
-    area_scheme: str = 'voronoi',
+    area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
+    roi: Optional[Bool[Array, 'n_vertices']] = None,
     tol: float = 1e-6,
     maxiter: Optional[int] = None,
 ) -> Float[Array, '... n_vertices']:
@@ -360,6 +406,12 @@ def surface_smooth(
         mesh's coordinate units.
     area_scheme
         Vertex-area / mass scheme (``'voronoi'`` default).
+    roi
+        Optional ``(n_vertices,)`` boolean cortex mask.  Diffusion is given a
+        **Neumann boundary** at the ROI edge (no flux across it), so values do
+        not bleed across the medial wall (whose data are meaningless); out-of-ROI
+        vertices are returned unchanged.  This is the ``wb_command
+        -metric-smoothing -roi`` guard.
     tol, maxiter
         Conjugate-gradient tolerance / iteration cap.
 
@@ -370,6 +422,13 @@ def surface_smooth(
     """
     area = vertex_areas(mesh, scheme=area_scheme)  # (n,) lumped mass diagonal
     lap = mesh_cotangent_laplacian(mesh)
+    if roi is not None:
+        if not isinstance(lap, ELL):
+            raise ValueError(
+                'surface_smooth: roi masking requires a flat ELL Laplacian '
+                "(format='ell'); the sectioned operator is not supported."
+            )
+        lap = _roi_neumann_laplacian(lap, jnp.asarray(roi))
     t = fwhm**2 / (16.0 * jnp.log(2.0))
 
     def _matvec(
@@ -390,6 +449,8 @@ def deform_to_sdf(
     step: float = 0.2,
     smooth_weight: float = 0.1,
     spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    mode: BoundaryMode = 'nearest',
+    cval: float = 0.0,
 ) -> Mesh:
     """Advance a mesh's vertices along their normals onto a target SDF zero-set.
 
@@ -426,6 +487,14 @@ def deform_to_sdf(
     spacing
         Per-axis voxel size relating vertex physical coordinates to ``sdf``
         index space.
+    mode
+        Out-of-bounds boundary mode for the SDF sample (default ``'nearest'``
+        edge-clamp -- sensible for marching, so a vertex stepping outside the
+        volume reads the border distance rather than a zero-fill cliff).  This
+        is the *boundary* mode; the interpolation kernel stays ``Linear`` (so
+        the differentiability claim holds).
+    cval
+        Fill value for ``mode='constant'``.
 
     Returns
     -------
@@ -436,7 +505,11 @@ def deform_to_sdf(
     spacing_arr = jnp.asarray(spacing, dtype=mesh.vertices.dtype)
 
     def _body(_: int, verts: Float[Array, 'n_vertices 3']) -> Array:
-        s = sample_at_points(sdf, verts / spacing_arr, mode='nearest')  # (n,)
+        # mode= is the OOB boundary mode; interpolation stays Linear (default),
+        # so d(out)/d(verts) and d(out)/d(sdf) both flow.
+        s = sample_at_points(
+            sdf, verts / spacing_arr, mode=mode, cval=cval
+        )  # (n,)
         normals = compute_vertex_normals(verts, faces)
         verts = verts - step * s[..., None] * normals
         return mesh_laplacian_smooth(
@@ -451,7 +524,7 @@ def cortical_thickness(
     white: Mesh,
     pial: Mesh,
     *,
-    method: str = 'symmetric',
+    method: Literal['symmetric', 'correspondence'] = 'symmetric',
 ) -> Float[Array, 'n_vertices']:
     """Per-vertex cortical thickness between the white and pial surfaces.
 
@@ -592,7 +665,7 @@ def ribbon_map(
     pial: Mesh,
     *,
     n_samples: int = 10,
-    weighting: str = 'pv',
+    weighting: Literal['pv', 'gaussian'] = 'pv',
     sigma: float = 0.25,
     spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
     mode: BoundaryMode = 'constant',
@@ -617,6 +690,14 @@ def ribbon_map(
     the mid-thickness (a field varying linearly along the column reduces to its
     mid-thickness value exactly).  Pure JAX (``sample_at_points`` + a weighted
     sum), so **differentiable** w.r.t. ``volume`` and both surfaces.
+
+    This is a **column mean** (midpoint quadrature), not an endpoint-inclusive /
+    Simpson integral, and is midpoint-accurate (``O(1/n_samples^2)``) for a field
+    with curvature along the column.  It also does **not** do the
+    ``-ribbon-constrained`` per-voxel ribbon-membership masking (it samples the
+    white->pial line directly), so near thin/curved cortex a sample can dip into
+    adjacent WM/CSF; supply your own ribbon/GM-probability mask upstream if that
+    matters for HCP parity.
 
     Parameters
     ----------

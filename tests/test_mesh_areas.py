@@ -112,3 +112,29 @@ def test_vertex_areas_differentiable() -> None:
     g = jax.grad(total_area)(mesh.vertices)
     assert g.shape == mesh.vertices.shape
     assert np.all(np.isfinite(np.asarray(g)))
+
+
+# --------------------------------------------------------------------------- #
+# Obtuse-triangle mixed-Voronoi partition (audit AI-B4)
+# --------------------------------------------------------------------------- #
+
+
+def test_obtuse_triangle_mixed_voronoi_partition() -> None:
+    # The Meyer mixed rule: in an OBTUSE triangle the Voronoi partition is
+    # replaced by area/2 at the obtuse vertex and area/4 at the other two.  The
+    # icosphere never exercises this branch; a single hand-built obtuse triangle
+    # does.  Triangle (0,0,0)-(4,0,0)-(5,1,0): obtuse at vertex 1 (dot of its two
+    # edge vectors = -4 < 0); face area = 2.
+    tri = Mesh(
+        vertices=jnp.array(
+            [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [5.0, 1.0, 0.0]]
+        ),
+        faces=jnp.array([[0, 1, 2]]),
+    )
+    area = float(face_areas(tri)[0])
+    assert np.isclose(area, 2.0, atol=1e-5)
+    va = np.asarray(vertex_areas(tri, scheme='voronoi'))
+    # Partition of unity (sums to the face area).
+    assert np.isclose(va.sum(), area, atol=1e-5)
+    # Obtuse vertex (index 1) gets area/2; the two acute vertices area/4.
+    assert np.allclose(va, [area / 4, area / 2, area / 4], atol=1e-5)

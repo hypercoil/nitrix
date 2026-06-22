@@ -120,3 +120,20 @@ def test_real_gaussian_curvature_has_both_signs() -> None:
     v, f, _ = fsaverage_white()
     k = np.asarray(gaussian_curvature(Mesh(jnp.asarray(v), jnp.asarray(f))))
     assert k.min() < 0.0 < k.max()
+
+
+# --------------------------------------------------------------------------- #
+# Empty / degenerate mesh guard (audit AI-B3)
+# --------------------------------------------------------------------------- #
+
+
+def test_curvature_rejects_empty_mesh() -> None:
+    # marching_cubes can return an empty Mesh; curvature ops must raise rather
+    # than return meaningless zeros.
+    empty = Mesh(
+        jnp.zeros((0, 3), dtype=jnp.float32),
+        jnp.zeros((0, 3), dtype=jnp.int32),
+    )
+    for fn in (mean_curvature, gaussian_curvature, principal_curvatures):
+        with pytest.raises(ValueError, match='no faces/vertices'):
+            fn(empty)
