@@ -29,7 +29,7 @@ jax.config.update('jax_enable_x64', True)
 
 import jax.numpy as jnp
 
-from nitrix.stats.basis import gp_basis, hsgp_basis
+from nitrix.stats.basis import gp_basis, gp_factor_smooth, hsgp_basis
 from nitrix.stats.gam import gam_fit, smooth_partial_effect
 
 
@@ -127,3 +127,71 @@ def test_hsgp_cross_checks_mgcv():
     assert np.corrcoef(f_hsgp, f_mgcv)[0, 1] > 0.998
     assert np.sqrt(np.mean((f_hsgp - f_mgcv) ** 2)) < 0.025
     assert np.sqrt(np.mean((f_hsgp - truth) ** 2)) < 0.06
+
+
+def _mgcv_fs_fitted(x, y, fac, *, k, rho):
+    """Fitted values of mgcv's factor-smooth GAM ``y ~ s(x, bs='gp') + s(x, fac,
+    bs='fs')`` (REML) -- a population GP smooth plus a shared-wiggliness
+    factor-smooth (the GS hierarchical structure)."""
+    rs = _rscript()
+    assert rs is not None
+    with tempfile.TemporaryDirectory() as d:
+        np.savetxt(
+            os.path.join(d, 'xy.csv'), np.c_[x, y, fac],
+            delimiter=',', header='x,y,fac', comments='',
+        )
+        script = os.path.join(d, 'fit.R')
+        out = os.path.join(d, 'out.csv')
+        with open(script, 'w') as fh:
+            fh.write(
+                'suppressMessages(library(mgcv))\n'
+                f'df <- read.csv("{d}/xy.csv")\n'
+                'df$fac <- factor(df$fac)\n'
+                f'b <- gam(y ~ s(x, bs="gp", k={k}, m=c(3, {rho})) + '
+                f's(x, fac, bs="fs", k={k}, m=1), data=df, method="REML")\n'
+                f'write.csv(data.frame(fit=fitted(b)), "{out}", row.names=FALSE)\n'
+            )
+        p = subprocess.run(
+            [rs, script], capture_output=True, text=True, timeout=240
+        )
+        if not os.path.exists(out):
+            raise RuntimeError(f'mgcv fs fit failed:\n{p.stderr}')
+        return np.loadtxt(out, delimiter=',', skiprows=1)
+
+
+def _hier_fs_data(seed=11, n_groups=6, per=22):
+    rng = np.random.default_rng(seed)
+    t = np.linspace(0.0, 1.0, per)
+    pop = np.sin(2 * np.pi * t)
+    devs = [0.4 * np.sin(2 * np.pi * t + ph)
+            for ph in np.linspace(0.0, 2.0, n_groups)]
+    x = np.tile(t, n_groups)
+    fac = np.repeat(np.arange(n_groups), per)
+    y = np.concatenate([pop + devs[g] + 0.1 * rng.standard_normal(per)
+                        for g in range(n_groups)])
+    return x, y, fac
+
+
+@requires_mgcv
+def test_gp_factor_smooth_cross_checks_mgcv_fs():
+    """The GS hierarchical GP (``hsgp_basis`` population + ``gp_factor_smooth``)
+    cross-checks mgcv's factor-smooth ``s(x, fac, bs='fs')``.
+
+    The marginal bases differ (HSGP-gp vs mgcv's fs marginal), so this is a
+    structural check that the shared-wiggliness per-group factor-smooth recovers
+    the same fitted surface -- the per-observation fitted values track closely."""
+    rho, k = 0.2, 12
+    x, y, fac = _hier_fs_data()
+    pop_b = hsgp_basis(jnp.asarray(x), k, kernel='matern52', rho=rho)
+    fac_b = gp_factor_smooth(jnp.asarray(x), jnp.asarray(fac), 10,
+                             kernel='matern52', rho=rho)
+    res = gam_fit(jnp.asarray(y[None, :]), [pop_b, fac_b])
+    eff_pop, _ = smooth_partial_effect(res, 0, pop_b, jnp.asarray(x))
+    eff_fac, _ = smooth_partial_effect(
+        res, 1, fac_b, (jnp.asarray(x), jnp.asarray(fac))
+    )
+    f_nitrix = (
+        np.asarray(res.coef[:, 0:1]) + np.asarray(eff_pop) + np.asarray(eff_fac)
+    )[0]
+    f_mgcv = _mgcv_fs_fitted(x, y, fac, k=k, rho=rho)
+    assert np.corrcoef(f_nitrix, f_mgcv)[0, 1] > 0.95

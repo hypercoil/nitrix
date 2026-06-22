@@ -440,6 +440,23 @@ variance components (`σ²_pop`, `σ²_outer`, `σ²_inner`) sharing `ρ`.
   and the population trend (corr `>0.9`); `group_inner` is required. 3 tests; the
   GS suite + the renamed `_block_weights` reference unchanged; ruff/mypy clean.
 
+## 5j. PR10 — mgcv `bs="fs"` parity + `(m, L, ρ)` accuracy guard (**shipped**)
+
+The two FR-review validation/robustness gaps.
+
+- **mgcv factor-smooth parity** (`test_gp_factor_smooth_cross_checks_mgcv_fs`,
+  guarded): the GS hierarchical GP (`hsgp_basis` population + `gp_factor_smooth`
+  via `gam_fit`) cross-checks mgcv's `s(x, bs="gp") + s(x, fac, bs="fs")` — the
+  per-observation fitted values track to corr `>0.95`. A *structural* check (the
+  fs marginal differs from HSGP-gp), confirming the shared-wiggliness per-group
+  factor-smooth recovers the same surface as the reference implementation.
+- **R4 `(m, L, ρ)` resolution guard** (`_check_hsgp_resolution`): `hsgp_basis` /
+  `hsgp_basis_nd` `warnings.warn` when a *given* `ρ` is so short that the top
+  eigen-frequency `√λ_m·ρ < 2.4` — the basis under-resolves the kernel
+  (Riutort-Mayol coupling: short `ρ` needs a larger rank/boundary). A warning, not
+  an error; silent for `ρ=None` (the default) and for an adequate rank, and
+  per-axis for the multi-D basis.
+
 ## 6. Decisions (confirmed 2026-06-21)
 
 1. **PR1 scope — fixed-`ρ` `hsgp_basis` only.** Spectral densities + the

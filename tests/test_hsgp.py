@@ -131,6 +131,24 @@ def test_hsgp_basis_validates():
         hsgp_basis(x, n_basis=5, boundary=0.5)
 
 
+def test_hsgp_basis_resolution_warning():
+    """A short ``rho`` with too small a rank warns (the (m, L, rho) coupling);
+    an adequate rank, or ``rho=None``, is silent."""
+    import warnings
+
+    x = jnp.linspace(0.0, 1.0, 100)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        hsgp_basis(x, n_basis=8, kernel='matern52', rho=0.02)
+    assert any('under-resolve' in str(rec.message) for rec in w)
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        hsgp_basis(x, n_basis=40, kernel='matern52', rho=0.3)  # adequate
+        hsgp_basis(x, n_basis=8)  # rho=None default -> no resolution warning
+    assert not any('under-resolve' in str(rec.message) for rec in w)
+
+
 # ---------------------------------------------------------------------------
 # HSGP -> exact GP (the reference)
 # ---------------------------------------------------------------------------

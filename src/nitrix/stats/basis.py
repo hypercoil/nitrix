@@ -31,6 +31,7 @@ Everything is value -> value and cuSOLVER-free.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, replace
 from typing import Any, List, Optional, Protocol, Tuple, cast
 
@@ -882,6 +883,29 @@ def gp_basis(
 # Riutort-Mayol/Burkner 2023) -- the primary GP smoother
 # ---------------------------------------------------------------------------
 
+# Below this, the top eigen-frequency sqrt(lambda_m) * rho is too small for the
+# reduced-rank basis to resolve a kernel of lengthscale rho -- the (m, L, rho)
+# coupling of Riutort-Mayol et al. (2023): a short rho needs a larger rank (or a
+# larger boundary).  A warning, not an error.
+_HSGP_NYQUIST_MIN = 2.4
+
+
+def _check_hsgp_resolution(
+    sqrt_lambda_top: float, rho: Optional[float], n_basis: int, where: str
+) -> None:
+    """Warn when the rank under-resolves the kernel for a *given* ``rho``."""
+    if rho is None or not rho > 0:
+        return
+    reach = float(sqrt_lambda_top) * float(rho)
+    if reach < _HSGP_NYQUIST_MIN:
+        warnings.warn(
+            f'{where}: with n_basis={n_basis} the top eigen-frequency reaches '
+            f'only {reach:.2f}/rho (rho={float(rho):.3g}); the basis may '
+            'under-resolve the kernel. Increase n_basis or `boundary` for a '
+            'short lengthscale (Riutort-Mayol et al. 2023).',
+            stacklevel=3,
+        )
+
 
 def hsgp_basis(
     x: Float[Array, ' n'],
@@ -959,6 +983,9 @@ def hsgp_basis(
     # phase_j), phase_j = sqrt(lam_j)(L - c).
     j = np.arange(1, n_basis + 1, dtype=np.float64)
     sqrt_lambda = j * np.pi / (2.0 * L)  # (m,)
+    _check_hsgp_resolution(
+        float(sqrt_lambda[-1]), rho, n_basis, 'hsgp_basis'
+    )
     s = np.asarray(
         spectral_density(
             jnp.asarray(sqrt_lambda), kernel=kernel, rho=rho_v, amplitude=amplitude
@@ -1342,6 +1369,20 @@ def hsgp_basis_nd(
     freqs_np = np.stack([g.ravel() for g in grids], axis=1)  # (M, D)
     phase_np = freqs_np * (big_l - c_mid)[None, :]
     inv_sqrt_L = np.sqrt(1.0 / big_l)  # (D,)
+
+    # Per-axis (m, L, rho) resolution check (when a lengthscale is given).
+    if rho is not None:
+        rho_per = (
+            [float(v) for v in rho]
+            if not isinstance(rho, (int, float, np.floating, np.integer))
+            else [float(rho)] * d_in
+        )
+        if len(rho_per) == d_in:
+            for d in range(d_in):
+                _check_hsgp_resolution(
+                    float(sqrt_lams[d][-1]), rho_per[d], m_per[d],
+                    f'hsgp_basis_nd[axis {d}]',
+                )
 
     # Spectral weights: isotropic (||w||, D-dim density) or separable (product of
     # per-dimension 1-D densities).
