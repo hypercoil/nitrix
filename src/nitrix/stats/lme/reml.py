@@ -209,6 +209,12 @@ class REMLResult:
         """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
         return ('group',)
 
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -882,6 +888,12 @@ class NestedLMEResult:
         """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
         return ('outer', 'inner')
 
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
+
 
 @register_result(
     children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'),
@@ -926,6 +938,12 @@ class CrossedLMEResult:
     def re_labels(self) -> Tuple[str, ...]:
         """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
         return ('group', 'cross')
+
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
 
 
 @register_result(
@@ -994,6 +1012,12 @@ class LMEResult:
         :attr:`cov_re` (D2); the off-diagonals are genuine intercept/slope
         covariances (unlike the block-diagonal multi-factor tiers)."""
         return tuple(f're{j}' for j in range(self.cov_re.shape[-1]))
+
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
 
 
 def lme_fit(

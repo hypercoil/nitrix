@@ -76,7 +76,16 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Protocol, Tuple, cast
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Optional,
+    Protocol,
+    Tuple,
+    Union,
+    cast,
+)
 
 import jax
 import jax.numpy as jnp
@@ -751,7 +760,7 @@ def _exact_design_pen(
 
 def gp_fit(
     Y: Float[Array, 'V N'],
-    x: Any,
+    x: Union[Float[Array, ' N'], Float[Array, 'N D']],
     *,
     parametric: Optional[Float[Array, 'N q']] = None,
     kernel: str = 'matern52',
@@ -785,7 +794,9 @@ def gp_fit(
         ``(V, N)`` responses (one row per element).
     x
         ``(N,)`` covariate, or ``(N, D)`` for a **multi-dimensional** GP (a spatial
-        smooth / smooth interaction; HSGP tensor-product engine).
+        smooth / smooth interaction; HSGP tensor-product engine).  This is a single
+        covariate the GP smooths *over* -- **not** the full design matrix ``X`` of
+        ``glm_fit`` / ``gam_fit``; linear covariates go to ``parametric=``.
     parametric
         Optional ``(N, q)`` unpenalised linear design (covariates entering
         linearly alongside the intercept).

@@ -306,6 +306,15 @@ def test_glmm_laplace_agq_reject_free_dispersion():
     assert ok.tier in ('few', 'many')
 
 
+def test_glmm_result_coef_alias():
+    """UX1: GLMMResult exposes `.coef` aliasing `.beta_hat` for cross-suite parity
+    (so `result.coef` works on GLMM as on GLM/GAM/GP/HGP results)."""
+    X, group, y, _ = _sim('poisson', seed=0, q=6, n_per=10)
+    res = glmm_fit(jnp.asarray(y[None, :]), jnp.asarray(X),
+                   group=jnp.asarray(group), family='poisson')
+    assert res.coef is res.beta_hat
+
+
 # ---------------------------------------------------------------------------
 # Laplace-approximate GLMM (method='laplace') -- the §11 follow-up to PQL
 # ---------------------------------------------------------------------------

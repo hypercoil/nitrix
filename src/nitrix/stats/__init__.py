@@ -3,9 +3,9 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.stats -- statistical primitives.
+nitrix.stats -- mass-univariate statistical modelling for neuroimaging.
 
-Two submodules:
+Submodules:
 
 - ``covariance`` -- (partial) (paired) (conditional) covariance
   / correlation over time series.  JIT-friendly batch handling.
@@ -13,6 +13,9 @@ Two submodules:
   negative log-likelihood (log-variance parameterised).
 - ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
+- ``betareg`` / ``ordinal`` / ``gaulss`` -- additional response models: beta
+  regression (rates / proportions), ordinal (cumulative-link), and the Gaussian
+  location-scale (mean + variance) GAMLSS fit.
 - ``basis``      -- penalised spline bases (P-splines) for additive models,
   plus the ``hsgp_basis`` Hilbert-space approximate-GP smooth (reduced-rank
   Gaussian process) and the kriging ``gp_basis``.
@@ -23,10 +26,14 @@ Two submodules:
   structured residual (``gp_fit`` / ``gp_predict``).
 - ``hgp``        -- hierarchical / multi-level GP: a population smooth plus
   group-level smooth deviations sharing a kernel (``hgp_fit`` / ``hgp_predict``).
+- ``priors``     -- lengthscale MAP-rho regularisers (half-normal / inverse-gamma
+  / log-normal) for the ``gp_fit`` / ``hgp_fit`` kernel-range search.
 - ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
   covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
   small-sample regime.
 - ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
+- ``glmm``       -- generalised linear mixed models (PQL / Laplace / adaptive
+  Gauss-Hermite) for non-Gaussian responses with random effects.
 - ``inference``  -- permutation / TFCE cluster inference (the on-device FSL
   ``randomise`` engine) + FDR / Bonferroni.
 - ``pca``        -- principal-component analysis (fit / transform /

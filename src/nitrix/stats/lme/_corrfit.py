@@ -458,6 +458,12 @@ class CorrLMEResult:
         :attr:`cov_re` (D2)."""
         return tuple(f're{j}' for j in range(self.cov_re.shape[-1]))
 
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
+
 
 def _corr_lme_grams(
     raw: Float[Array, 'k'],

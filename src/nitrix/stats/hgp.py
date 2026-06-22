@@ -410,7 +410,8 @@ def hgp_fit(
     Y
         ``(V, N)`` responses.
     x
-        ``(N,)`` covariate.
+        ``(N,)`` covariate the GP smooths *over* (a single covariate, **not** the
+        full design matrix ``X``; linear covariates go to ``parametric=``).
     group
         ``(N,)`` integer factor labels ``0 .. L-1`` (the grouping the smooth
         varies over -- subjects, sites, ...).  For ``model='nested'`` this is the
