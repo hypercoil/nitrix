@@ -32,6 +32,7 @@ from ..sparse import (
     mesh_laplacian_smooth,
     vertex_areas,
 )
+from ._interpolate import BoundaryMode
 from ._triangle_distance import nearest_surface_distance
 from .grid import sample_at_points
 
@@ -45,6 +46,7 @@ __all__ = [
     'deform_to_sdf',
     'cortical_thickness',
     'inflate_surface',
+    'ribbon_map',
 ]
 
 
@@ -582,3 +584,94 @@ def inflate_surface(
     init = (v0, jnp.zeros((n_vertices,), dtype=v0.dtype))
     inflated, sulc = jax.lax.fori_loop(0, n_iterations, _body, init)
     return inflated, sulc
+
+
+def ribbon_map(
+    volume: Float[Array, 'x y z'],
+    white: Mesh,
+    pial: Mesh,
+    *,
+    n_samples: int = 10,
+    weighting: str = 'pv',
+    sigma: float = 0.25,
+    spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    mode: BoundaryMode = 'constant',
+) -> Float[Array, 'n_vertices']:
+    """Map a volume onto the surface by integrating the cortical ribbon.
+
+    The ``wb_command -volume-to-surface-mapping -ribbon-constrained`` analogue
+    and the basis of HCP **myelin maps** (T1w/T2w sampled on the surface).
+    ``white`` and ``pial`` must be in **vertex correspondence** (equal counts,
+    ``white[i]`` paired with ``pial[i]`` -- as ``deform_to_sdf`` produces); each
+    vertex's value is a weighted reduction over ``n_samples`` points taken along
+    its white->pial column ``v(t) = white + t * (pial - white)``, sampled with
+    the **midpoint rule** ``t = (k + 1/2) / n_samples`` (symmetric about the
+    mid-thickness; never lands exactly on either surface).
+
+    - ``weighting='pv'`` (default) -- uniform mean over the column samples (the
+      partial-volume column average).
+    - ``weighting='gaussian'`` -- Gaussian weighting toward the mid-thickness
+      ``t = 1/2`` with std ``sigma`` (in units of the white->pial fraction).
+
+    Both weightings sum to 1 (constants are preserved) and are symmetric about
+    the mid-thickness (a field varying linearly along the column reduces to its
+    mid-thickness value exactly).  Pure JAX (``sample_at_points`` + a weighted
+    sum), so **differentiable** w.r.t. ``volume`` and both surfaces.
+
+    Parameters
+    ----------
+    volume
+        Scalar volume ``(X, Y, Z)`` (or channels-last ``(X, Y, Z, c)``), in the
+        same physical frame as the meshes (sampled at ``v / spacing``).
+    white, pial
+        Surfaces in vertex correspondence (equal vertex counts).
+    n_samples
+        Number of column samples (static).
+    weighting
+        ``'pv'`` (default) or ``'gaussian'``.
+    sigma
+        Gaussian std as a fraction of the white->pial distance (``'gaussian'``
+        only).
+    spacing
+        Per-axis voxel size relating vertex physical coordinates to ``volume``
+        index space.
+    mode
+        Out-of-bounds boundary mode forwarded to ``sample_at_points``
+        (``'constant'`` zero-fill default, ``'nearest'`` edge-clamp).
+
+    Returns
+    -------
+    ``(n_vertices,)`` for a scalar volume, or ``(n_vertices, c)`` for a
+    channels-last volume.  Differentiable.
+
+    Raises
+    ------
+    ValueError
+        If the surfaces have different vertex counts, or ``weighting`` is
+        unknown.
+    """
+    if white.n_vertices != pial.n_vertices:
+        raise ValueError(
+            'ribbon_map: white and pial must be in vertex correspondence; '
+            f'got {white.n_vertices} vs {pial.n_vertices} vertices.'
+        )
+    dtype = white.vertices.dtype
+    spacing_arr = jnp.asarray(spacing, dtype=dtype)
+    t = (jnp.arange(n_samples, dtype=dtype) + 0.5) / n_samples  # (S,) midpoints
+    seg = pial.vertices - white.vertices  # (n, 3)
+    # Column sample points: (S, n, 3) -> index space.
+    points = white.vertices[None] + t[:, None, None] * seg[None]
+    sampled = sample_at_points(volume, points / spacing_arr, mode=mode)
+    # sampled: (S, n) scalar volume, or (S, n, c) channels-last.
+    if weighting == 'pv':
+        w = jnp.ones((n_samples,), dtype=dtype) / n_samples
+    elif weighting == 'gaussian':
+        w = jnp.exp(-0.5 * ((t - 0.5) / sigma) ** 2)
+        w = w / jnp.sum(w)
+    else:
+        raise ValueError(
+            f"ribbon_map: weighting must be 'pv' or 'gaussian'; got "
+            f'{weighting!r}.'
+        )
+    w = w.reshape((n_samples,) + (1,) * (sampled.ndim - 1))
+    return jnp.sum(w * sampled, axis=0)

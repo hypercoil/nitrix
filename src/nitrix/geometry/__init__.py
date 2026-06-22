@@ -122,6 +122,7 @@ from .surface import (
     inflate_surface,
     mean_curvature,
     principal_curvatures,
+    ribbon_map,
     strain_distortion,
     surface_smooth,
 )
@@ -218,6 +219,7 @@ __all__ = [
     'deform_to_sdf',
     'cortical_thickness',
     'inflate_surface',
+    'ribbon_map',
     # topology (the genus-0 defect gate)
     'euler_characteristic',
     'genus',
