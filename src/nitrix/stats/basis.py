@@ -843,8 +843,13 @@ def gp_basis(
     order = np.argsort(evals)[::-1][:n_basis]
     evals_k = np.clip(evals[order], 1e-10, None)
     uk = evecs[:, order]  # (nk, k)
-    # f(x) = C_xz U_k diag(1/lambda) alpha; penalty alpha^T alpha on the
-    # whitened coefficients -> identity penalty in the eigenbasis.
+    # f(x) = C_xz U_k diag(1/lambda) alpha.  The kriging RKHS penalty on the
+    # knot weights delta is delta^T C_zz delta; with delta = U_k diag(1/lambda)
+    # alpha and C_zz U_k = U_k diag(lambda) this is alpha^T diag(1/lambda) alpha
+    # -- NOT the identity.  Using diag(1/lambda) makes the implied prior
+    # covariance D diag(lambda) D^T = C_xz U_k diag(1/lambda) U_k^T C_zx reproduce
+    # the (Nystrom-truncated) Matern Gram C_xx, so the lambda<->sigma_f variance-
+    # component identity holds (an identity penalty is off by ~91%).
     radial_transform = jnp.asarray(uk / evals_k[None, :], dtype=x.dtype)
     knots = jnp.asarray(knots_np, dtype=x.dtype)
 
@@ -853,7 +858,7 @@ def gp_basis(
         return cxz @ radial_transform
 
     design = _gp_raw(x)
-    penalty = jnp.eye(n_basis, dtype=x.dtype)
+    penalty = jnp.diag(jnp.asarray(1.0 / evals_k, dtype=x.dtype))
 
     constraint: Optional[Array] = None
     if center:

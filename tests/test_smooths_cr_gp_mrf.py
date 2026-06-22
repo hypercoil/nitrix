@@ -96,6 +96,28 @@ def test_gp_recovers_smooth_via_gam():
     assert (se > 0).all()
 
 
+def test_gp_basis_penalty_encodes_matern_prior():
+    """MC1: the kriging penalty must be diag(1/lambda), not the identity, so the
+    implied prior covariance ``D P^{-1} D^T`` reproduces the Matern Gram ``C_xx``
+    (the lambda<->sigma_f variance-component identity). The old identity penalty
+    was ~91% off -- pinned here via the same design D under both penalties."""
+    from nitrix.stats.basis import _matern32_kernel
+
+    x = np.linspace(0.0, 1.0, 30)
+    rho = 0.25
+    b = gp_basis(jnp.asarray(x), 18, rho=rho, center=False)
+    d = np.asarray(b.design)
+    p = np.asarray(b.penalty)
+    implied = d @ np.linalg.solve(p, d.T)  # D P^{-1} D^T, correct penalty
+    xx = jnp.asarray(x)
+    c_xx = np.asarray(_matern32_kernel(jnp.abs(xx[:, None] - xx[None, :]), rho))
+    rel = np.linalg.norm(implied - c_xx) / np.linalg.norm(c_xx)
+    # the identity-penalty counterfactual (the bug) uses the SAME design D:
+    rel_identity = np.linalg.norm(d @ d.T - c_xx) / np.linalg.norm(c_xx)
+    assert rel < 0.05, (rel, rel_identity)
+    assert rel_identity > 0.5, (rel, rel_identity)
+
+
 def test_gp_pytree_roundtrip_preserves_kernel():
     x = jnp.asarray(np.linspace(0.0, 1.0, 40))
     b = gp_basis(x, 8, rho=0.3)
