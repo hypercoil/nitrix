@@ -20,7 +20,7 @@ level count instead of cubic.
 Rung 4 of [the ladder](index.qmd): it stacks rungs 1 and 2, then asks the new
 question those two never had to face — *how do you get a likelihood at all?*
 
-## 1. The combination
+## The combination
 
 Two structures we have already met, together:
 
@@ -46,7 +46,7 @@ group-indicator matrix, $b$ the per-group offsets, and $G=\sigma_b^2 I_q$). This
 the model behind "binary outcomes with a random intercept per subject" and similar
 mass-univariate group analyses. In `nitrix` it is `glmm_fit(Y, X, group=..., family=...)`.
 
-## 2. Why it is genuinely hard: the integral with no closed form {#sec-integral}
+## Why it is genuinely hard: the integral with no closed form {#sec-integral}
 
 Here is the thing that makes a GLMM categorically harder than either parent, and the
 idea that the rest of the chapter circles around.
@@ -87,7 +87,7 @@ answers to "how shall we approximate it?", trading accuracy against cost:
 Keep that table in view; the next three sections fill in each row from intuition to
 the exact routine.
 
-## 3. PQL: turn it back into the Gaussian integral you can do {#sec-pql}
+## PQL: turn it back into the Gaussian integral you can do {#sec-pql}
 
 The cheapest escape is the most opportunistic one: *if the only integral we know how
 to do exactly is the Gaussian one, can we bend the problem until that is the integral
@@ -177,7 +177,7 @@ It is also the motivation for the next rung, which approximates @eq-marginal
 *directly*. `nitrix` exposes it as `method='laplace'`.
 :::
 
-## 4. The one new problem: many levels {#sec-manylevels}
+## The one new problem: many levels {#sec-manylevels}
 
 Before climbing to better integrals, deal with a cost issue that is orthogonal to
 accuracy. A random effect with $q$ levels adds $q$ columns to the design, so a *dense*
@@ -224,7 +224,7 @@ generalises to per-group $r\times r$ blocks $D_g = Z_g^{\top}WZ_g + \sigma_e^2 G
 in `_slope_solve`, with $G$ itself updated by a monotone **REML-EM** step
 (`_glmm_slope_structured_one`) that keeps $G$ positive-definite by construction.
 
-## 5. The Laplace approximation: fit a Gaussian at the peak {#sec-laplace}
+## The Laplace approximation: fit a Gaussian at the peak {#sec-laplace}
 
 PQL dodged @eq-marginal. Now we face it. The integral we cannot do is
 
@@ -367,7 +367,7 @@ by contrast, return a real Pearson dispersion and a real effective-df trace
 (`_dispersion` in `_pql.py`). This is recorded on `GLMMResult` in `_base.py`.
 :::
 
-## 6. Adaptive Gauss–Hermite quadrature: sample the integrand at clever points {#sec-agq}
+## Adaptive Gauss–Hermite quadrature: sample the integrand at clever points {#sec-agq}
 
 Laplace replaced the integrand with *one* Gaussian. Its weakness, visible in
 @fig-glmm-laplace, is that the true integrand is **skewed** and a single symmetric
@@ -490,7 +490,7 @@ slope* for `method='agq'` (pass `z=`) and caps the grid at `_AGQ_MAX_NODES = 128
 AGQ is reserved for the low-$r$, small-cluster cases where its accuracy is worth the
 compile-time and memory.
 
-## 7. Choosing a tier, and beyond a scalar intercept
+## Choosing a tier, and beyond a scalar intercept
 
 Putting the rungs together, `glmm_fit` exposes a small, honest set of choices:
 

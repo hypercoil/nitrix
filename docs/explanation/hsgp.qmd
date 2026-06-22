@@ -30,7 +30,7 @@ The GP rung ships with the `stats-gp` work (`nitrix.stats.gp` —  `gp_fit`,
 that implementation.
 :::
 
-## 1. A motivating example {#sec-motivation}
+## A motivating example {#sec-motivation}
 
 Cortical thickness falls with age, but not on a straight line: it dips in
 adolescence, plateaus, then declines. You have thickness at one vertex for $N$
@@ -44,7 +44,7 @@ the whole story of this chapter. (Multiply the vertex up to the whole cortex and
 you want to do this for hundreds of thousands of vertices at once — which is why
 the cheap construction below matters.)
 
-## 2. Smoothness as correlation
+## Smoothness as correlation
 
 A [GAM](gam.qmd) smooth says "don't be wiggly" through a difference penalty. A
 **Gaussian process** says it through a *covariance*: model the unknown function as
@@ -59,7 +59,7 @@ and a **lengthscale** $\rho$ (how quickly correlation decays with distance — l
 $\rho$ = gently varying, small $\rho$ = wiggly). You specify *how points relate*
 rather than *which derivative to penalise*.
 
-## 3. A fixed-kernel GP is a mixed model
+## A fixed-kernel GP is a mixed model
 
 Evaluate the prior @eq-gp at the observed inputs and it becomes an ordinary
 multivariate Gaussian, $f \sim \mathcal{N}(0, K)$ with $K_{ij} = k(x_i, x_j)$.
@@ -71,7 +71,7 @@ or a GAM smooth whose penalty is $S=K^{-1}$ (the kriging `gp_basis`). Nothing ne
 this is the [grand equivalence](foundations.qmd#sec-equivalence) read one more
 time, with the random-effect covariance supplied by a kernel.
 
-## 4. The hard part: estimating the lengthscale
+## The hard part: estimating the lengthscale
 
 The catch is that we usually do **not** know $\rho$, and we want to learn it
 (that was the whole point of the cortical-thickness example). But $K$ depends on
@@ -82,11 +82,11 @@ structure moves every step, we are back to an $O(N^3)$ eigendecomposition per
 iteration. We need a representation in which the kernel hyperparameters do **not**
 touch the basis.
 
-## 5. HSGP: the Laplace-eigenfunction construction {#sec-hsgp}
+## HSGP: the Laplace-eigenfunction construction {#sec-hsgp}
 
 Here is the idea that makes it cheap, built from scratch.
 
-### 5.1 The obvious thing, and why we change basis
+### The obvious thing, and why we change basis
 
 The obvious thing is to keep working with $K$ and re-factorise it at every
 candidate $\rho$. That fails for exactly the reason above: the basis moves. The
@@ -94,7 +94,7 @@ cure is to expand $f$ in a basis that is *fixed once and for all*, and let $\rho
 act only on the **coefficients**. Which basis? We want one that is natural for
 "smoothness on an interval", and there is a canonical answer.
 
-### 5.2 The vibrating string: Laplace eigenfunctions
+### The vibrating string: Laplace eigenfunctions
 
 Picture a string pinned at both ends of an interval $[c-L,\,c+L]$. Pluck it and it
 rings in **standing waves** — the fundamental, then the first harmonic, then the
@@ -147,7 +147,7 @@ ax.legend(fontsize=8, ncol=5, loc="upper center")
 fig.tight_layout(); plt.show()
 ```
 
-### 5.3 Where the kernel comes back: the spectral density
+### Where the kernel comes back: the spectral density
 
 We have a basis with no kernel in it. So where does the choice of kernel — RBF
 vs. Matérn, this lengthscale vs. that one — re-enter? Through **how much we trust
@@ -192,7 +192,7 @@ because $S$ is diagonal. This is the same "every smoother is a penalty block"
 unification the [GAMM chapter](gamm.qmd#sec-unification) builds to; the GP is its
 last entry.
 
-### 5.4 Why one fixed basis works for *any* lengthscale
+### Why one fixed basis works for *any* lengthscale
 
 Here is the property that makes lengthscale estimation cheap. The eigenfunctions
 $\phi_j$ in @eq-eigfun do not contain $\rho$. Changing the lengthscale changes only
@@ -211,7 +211,7 @@ moving kernel. There is **no eigendecomposition in the loop**. Two payoffs:
   `hsgp_basis(x, n_basis=m, kernel=..., rho=...)` returns — a `SplineBasis` of
   `kind='hsgp'` you hand straight to `gam_fit`, lengthscale fixed.
 
-## 6. The spectral densities, kernel by kernel {#sec-spectral}
+## The spectral densities, kernel by kernel {#sec-spectral}
 
 `nitrix` supports four stationary kernels; their spectral densities are the real
 formulas in `nitrix.linalg.kernel` (`se_spectral_density`,
@@ -279,7 +279,7 @@ fig.suptitle("Long ρ → mass at low frequency → smooth; heavy Matérn tail k
 fig.tight_layout(); plt.show()
 ```
 
-## 7. How many eigenfunctions? Approximation quality vs $m$ {#sec-rank}
+## How many eigenfunctions? Approximation quality vs $m$ {#sec-rank}
 
 The sum in @eq-hsgp-kernel is truncated at $m$ terms. Why is a small $m$ enough,
 when the exact GP has one "basis function" per data point ($N$ of them)? Because
@@ -335,7 +335,7 @@ ax.legend(fontsize=8, ncol=2)
 fig.tight_layout(); plt.show()
 ```
 
-## 8. The kernel as a reweighting, by hand
+## The kernel as a reweighting, by hand
 
 A minimal HSGP — fixed sine basis, Matérn-5/2 spectral weights, an identity-ridge
 solve — in pure NumPy. Watch the lengthscale change the *weights on a fixed
@@ -383,7 +383,7 @@ The basis `phi` is built once; only `sqrt(s)` changes with $\rho$. That is the
 whole reason `gp_fit` can estimate a lengthscale cheaply — it is optimising a
 diagonal reweighting of a fixed matrix, never re-factorising a moving kernel.
 
-## 9. Estimating the lengthscale: `gp_fit` and `GPResult` {#sec-gpfit}
+## Estimating the lengthscale: `gp_fit` and `GPResult` {#sec-gpfit}
 
 `hsgp_basis` fixes $\rho$ and rides `gam_fit`. The standalone `gp_fit` closes the
 loop and **estimates** $\rho$ too. The model it fits per element (voxel/vertex)
@@ -452,7 +452,7 @@ by the penalty↔variance-component identity, useful as a ground-truth check on 
 HSGP approximation. You can also regularise $\rho$ with a prior via `map_rho=`
 (see §9.1).
 
-### 9.1 Lengthscale priors (`map_rho`) {#sec-priors}
+### Lengthscale priors (`map_rho`) {#sec-priors}
 
 A lengthscale can be weakly identified — short series, sparse coverage — and pure
 REML can then chase $\rho$ toward noise-fitting (tiny $\rho$) or toward
@@ -473,7 +473,7 @@ These are the lightweight, GPU-friendly stand-in for a full Bayesian prior on
 $\rho$ — see the aside in @sec-bayes-aside on the empirical-Bayes vs. full-Bayes
 distinction.
 
-## 10. Multiple dimensions and ARD {#sec-nd}
+## Multiple dimensions and ARD {#sec-nd}
 
 For a spatial smooth — thickness over a 2-D flattened patch, or a smooth
 interaction of two covariates — pass `x` as `(N, D)`. HSGP generalises by
@@ -497,7 +497,7 @@ There are two ways to set lengthscales:
   per-axis ranks, bounds, and (for ARD) the per-axis lengthscales, so `gp_predict`
   can rebuild the tensor basis.
 
-### 10.1 Hierarchical GPs: `hgp_fit` {#sec-hgp}
+### Hierarchical GPs: `hgp_fit` {#sec-hgp}
 
 When the data are grouped — subjects, sites, sessions — you may want a
 **population** trajectory plus **per-group deviations** that share a kernel. That
@@ -527,7 +527,7 @@ and there is still no eigendecomposition. The result is an `HGPResult` whose
 Partial pooling falls out for free: a group with few observations is shrunk toward
 the population curve, exactly as a random effect is shrunk toward its mean.
 
-## 11. Aside: if you know GPs from Bayesian inference {#sec-bayes-aside}
+## Aside: if you know GPs from Bayesian inference {#sec-bayes-aside}
 
 You may have met Gaussian processes the *other* way round — as Bayesian
 nonparametric priors over functions, fit by maximising a marginal likelihood and
@@ -586,7 +586,7 @@ over $\rho$. That is the deliberate trade for fitting hundreds of thousands of G
 at once on a GPU; placing priors on $\rho$ and sampling them is out of scope here
 (Stan/`brms`/PyMC territory).
 
-## 12. The ladder, complete
+## The ladder, complete
 
 A Gaussian process turned out to be the final entry in the same list: a penalty
 block, now a **kernel** block, whose own hyperparameters are estimable because

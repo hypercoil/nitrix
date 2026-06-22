@@ -26,7 +26,7 @@ foundations chapter, and it leans on the [spectral
 solver](solvers.qmd#sec-spectral) and the [Newton machinery](solvers.qmd#sec-newton)
 from the shared-machinery page.
 
-## 1. The problem: observations that aren't independent
+## The problem: observations that aren't independent
 
 The GLM chapter assumed each observation carried independent noise. Real designs
 break that constantly:
@@ -49,7 +49,7 @@ interval will be far too narrow, and we will declare effects "significant" that 
 second cohort would not reproduce. The mixed model is how we count the witnesses
 correctly.
 
-## 2. Fixed effects, random effects, and structured noise
+## Fixed effects, random effects, and structured noise
 
 Split the linear predictor into two kinds of term:
 
@@ -88,7 +88,7 @@ unknowns $\sigma_b^2$ and $\sigma_e^2$ live inside $V_y$, and the entire rest of
 this chapter is about (a) what those unknowns *are*, (b) how to estimate them
 without bias, and (c) how to do it fast enough for a brain.
 
-## 3. Variance components: the unknowns inside $V_y$ {#sec-varcomp}
+## Variance components: the unknowns inside $V_y$ {#sec-varcomp}
 
 The numbers $\theta = (\sigma_b^2, \sigma_e^2)$ that parameterise $V_y$ are called
 the **variance components**. In the general mixed model the marginal covariance is
@@ -199,7 +199,7 @@ fit applies, with one extra $\log$-determinant term in the objective for the
 whitening Jacobian. The correlation/scale parameters then join $\theta$ in the
 same Newton vector and are estimated alongside the variances.
 
-## 4. REML: estimating variances without the downward bias {#sec-reml}
+## REML: estimating variances without the downward bias {#sec-reml}
 
 We now know *what* to estimate ($\theta$) and have a crude estimator (@eq-mom). To
 do it properly we maximise a likelihood — with one essential refinement.
@@ -352,7 +352,7 @@ are *estimated*, the right reference distribution for a fixed-effect $t$-test is
 $t$ with fractional, data-dependent degrees of freedom, which `lme_t_contrast` /
 `lme_f_contrast` compute from exactly these tensors. (`lme/reml.py`.)
 
-## 5. The scaling wall, and the FaST-LMM trick that breaks it {#sec-fastlmm}
+## The scaling wall, and the FaST-LMM trick that breaks it {#sec-fastlmm}
 
 Look again at @eq-reml: it has a $\log|V_y|$ and a $V_y^{-1}$, and $V_y$ is
 $N\times N$. Done naively, each evaluation is $O(N^3)$ — and we repeat it, every
@@ -396,7 +396,7 @@ absorbed by that null space. The one eigendecomposition uses the cuSOLVER-robust
 `safe_eigh`; `reml_fit` auto-selects low-rank whenever $q < N$, and the per-voxel
 inner loop makes no vendor-solver call at all.
 
-## 6. FLAME: when the within-group variance is known {#sec-flame}
+## FLAME: when the within-group variance is known {#sec-flame}
 
 fMRI group analysis has a special, common structure that makes one of the two
 variances *disappear*. Each subject's time series is first fit by a level-1 GLM,
@@ -428,7 +428,7 @@ exactly why it gets its own one-parameter solver. (`nitrix` also offers a
 `robust=True` Huber-style down-weighting of outlier subjects, FSL's FLAME-outlier
 idea, which inflates a suspicious subject's $s_i^2$ before refitting.)
 
-## 7. Beyond one random intercept {#sec-beyond}
+## Beyond one random intercept {#sec-beyond}
 
 A single scalar random intercept is the simplest mixed model and the one the
 FaST-LMM path serves. Real designs ask for more, and `nitrix`'s `lme_fit`
@@ -518,7 +518,7 @@ dof='kr', X=X, Z=Z)` (it must re-derive the rotated basis, so the original desig
 is re-passed); the default `dof='satterthwaite'` is the cheaper large-sample
 correction. Use KR when groups are few.
 
-## 8. A worked example: borrowing strength
+## A worked example: borrowing strength
 
 The signature behaviour of a mixed model is **partial pooling**: a group's
 estimate is pulled toward the global mean, the more so when the group is small or

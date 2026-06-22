@@ -19,7 +19,7 @@ chapters are one method.
 Rung 3 of [the ladder](index.qmd). It builds on the [GLM](glm.qmd) (the penalised
 solve) and pays off the [LME](lme.qmd) connection.
 
-## 1. From a coefficient to a shape
+## From a coefficient to a shape
 
 A GLM gives each covariate one coefficient — a straight-line effect. But many
 effects are curved: a response that rises then falls with age, a nuisance whose
@@ -36,7 +36,7 @@ page builds exactly that, and at scale: the same smooth basis is shared across
 $V$ vertices while each vertex gets its own response (mass-univariate, the way
 `gam_fit` is written).
 
-## 2. Make the shape linear again: basis expansion {#sec-basis}
+## Make the shape linear again: basis expansion {#sec-basis}
 
 Here is the move that unlocks everything else. We do not know $f$, but suppose
 we fix in advance a small library of simple, known functions $B_1, \dots, B_K$ —
@@ -55,7 +55,7 @@ row, and the smooth's weights become additional coefficients. A rich basis (larg
 $K$) can trace almost any shape. The only open question is *which* basis — and
 that choice is the whole craft of this chapter.
 
-### 2.1 The basis a reader would invent first — and why it fails
+### The basis a reader would invent first — and why it fails
 
 The most natural basis is the **monomials** $B_k(x) = x^{k-1}$, i.e. fit a
 high-degree polynomial $f(x)=\gamma_0 + \gamma_1 x + \gamma_2 x^2 + \cdots$. It
@@ -76,7 +76,7 @@ Two reasons, both fatal at scale:
 The cure is to keep the "weighted sum of simple functions" idea but swap the
 basis for one whose functions are **local**.
 
-### 2.2 B-splines: local bumps stitched at knots
+### B-splines: local bumps stitched at knots
 
 Picture instead a row of overlapping, hump-shaped functions, each living over a
 short stretch of the $x$-axis and zero outside it. A smooth curve is then a
@@ -151,7 +151,7 @@ ax.legend(fontsize=8, loc="upper right")
 fig.tight_layout(); plt.show()
 ```
 
-### 2.3 The other bases `nitrix` ships
+### The other bases `nitrix` ships
 
 A B-spline is the default 1-D smoother, but `basis.py` exposes a family of
 constructors, each a `SplineBasis` carrying a `(design, penalty)` pair plus the
@@ -187,7 +187,7 @@ Every constructor takes `center=True` by default — the identifiability fix of
 `design` / `dim` / `penalty_blocks()` / `eval_design()` and a new basis type
 needs no edit to `gam.py`.
 
-## 3. The catch, and the cure: a roughness penalty {#sec-penalty}
+## The catch, and the cure: a roughness penalty {#sec-penalty}
 
 A rich basis overfits — with $K$ free humps it will happily chase noise into
 wiggles. The naive fix is to use fewer humps, but that is a blunt instrument: it
@@ -248,7 +248,7 @@ penalty $\lambda S$ added inside the same SPD solve. `nitrix` literally calls th
 same penalised-IRLS core (`fit_penalised_irls`, via `_penalised_irls` in
 `gam.py`); a plain GLM passes $S=0$, the GAM passes the smooth's penalty.
 
-### 3.1 The penalty's null space — why $S$ is rank-deficient
+### The penalty's null space — why $S$ is rank-deficient
 
 There is a subtlety worth dwelling on, because it explains an otherwise puzzling
 fact: $S=D^{\top}D$ does *not* penalise everything. A second difference is zero
@@ -290,7 +290,7 @@ fig.colorbar(im1, ax=axs[1], fraction=0.046)
 fig.tight_layout(); plt.show()
 ```
 
-## 4. Identifiability: the smooth that fights the intercept
+## Identifiability: the smooth that fights the intercept
 
 A smooth has a hidden redundancy with the model intercept. You can add a constant
 $c$ to every value of $f(x)$ and subtract $c$ from the intercept and the fitted
@@ -328,7 +328,7 @@ is cuSOLVER-free and differentiable. Every `*_basis` constructor applies it when
 $K-1$ columns, and the constraint is stored so partial effects re-evaluate in the
 same reparameterised coordinates.
 
-## 5. Two loops, both already built
+## Two loops, both already built
 
 Fitting a GAM is two nested loops, and you have seen both:
 
@@ -343,7 +343,7 @@ Fitting a GAM is two nested loops, and you have seen both:
 Nothing here is new machinery; a GAM is the GLM solver wrapped in the smoothing-
 parameter selector. (See `stats/gam.py`, `stats/basis.py`.)
 
-## 6. The hinge: a penalty *is* a variance {#sec-hinge}
+## The hinge: a penalty *is* a variance {#sec-hinge}
 
 Why does Fellner–Schall — a *variance-component* estimator from the
 [LME](lme.qmd) chapter — choose a *smoothing* parameter? Because they are the same
@@ -372,7 +372,7 @@ smoothing parameter the same Fellner–Schall loop selects for it *is* the
 random-effect precision $1/\sigma_b^2$. No new solver — a random effect is one
 more penalty block.
 
-## 7. How flexible was the fit? Effective degrees of freedom {#sec-edf}
+## How flexible was the fit? Effective degrees of freedom {#sec-edf}
 
 A penalised smooth has $K$ coefficients but is *not* as flexible as $K$ free
 parameters — the penalty ties them together, so it "spends" fewer than $K$. How
@@ -461,7 +461,7 @@ divides by $N - \text{EDF}$, not $N - p$) and the approximate significance tests
 (`smooth_significance` implements Wood's 2013 `summary.gam` test, with the
 smooth's rounded EDF as its reference degrees of freedom).
 
-## 8. Beyond one dimension: tensor-product smooths
+## Beyond one dimension: tensor-product smooths
 
 What if the effect depends on *two* covariates jointly — say a thickness surface
 over (age, a regional coordinate) that is not separable into a sum of 1-D
@@ -485,7 +485,7 @@ $\operatorname{tr}(S_\lambda^{+}S_k)$ in `_trace_slinv_sk` is an elementwise sum
 cuSOLVER-free, no per-iteration pseudo-inverse — while the fit itself stays in the
 original tensor basis.
 
-## 9. Too little, too much, just right
+## Too little, too much, just right
 
 Three fits of one smooth at three penalty strengths — pure NumPy, build-time. The
 middle is roughly what Fellner–Schall finds.

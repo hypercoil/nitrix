@@ -28,7 +28,7 @@ carry you from *novice* (you can use a fitter and pick the right model) to
 means) to *developer* (you could implement the solver yourself). This page lays
 the three planks that the whole climb rests on.
 
-## 1. The builder's through-line {#sec-throughline}
+## The builder's through-line {#sec-throughline}
 
 Here is the single sentence that the rest of the book elaborates. **Every model in
 `nitrix.stats` is the same three-part object:**
@@ -57,7 +57,7 @@ vertex, or fixel — at once, hundreds of thousands of tiny regressions sharing 
 design. That shapes the numerics (more in §6), but conceptually nothing changes:
 each element is one instance of the three-part object.
 
-## 2. A motivating question {#sec-motivation}
+## A motivating question {#sec-motivation}
 
 Hold one concrete question in mind for the whole page. Suppose we measure
 **cortical thickness** at a patch of cortex in a group of people, several
@@ -82,7 +82,7 @@ about this data are not captured by "fit a line":
 
 Each plank answers one of these, and the planks turn out to be deeply connected.
 
-## 3. Variance: the quantity we actually model {#sec-variance}
+## Variance: the quantity we actually model {#sec-variance}
 
 ### The mean is only half the story
 
@@ -223,7 +223,7 @@ variance the model accounts for. Whenever a later chapter says it "decomposes
 variance" or "estimates a variance component," it is doing a richer version of this
 one move you already trust.
 
-## 4. Exponential families: one template, many noise models {#sec-expfam}
+## Exponential families: one template, many noise models {#sec-expfam}
 
 ### Why one template
 
@@ -421,7 +421,7 @@ canonical inverse link; the canonical link is available by building a custom `Fa
 The same `_family.py` also ships overdispersed counts (`NEGBINOMIAL`, $V=\mu+\alpha\mu^2$)
 and the semicontinuous `TWEEDIE` ($V=\mu^p$), each a point on the same template.
 
-## 5. The grand equivalence: penalty = prior = variance component = kernel {#sec-equivalence}
+## The grand equivalence: penalty = prior = variance component = kernel {#sec-equivalence}
 
 This is the conceptual payoff of the whole book, and it is worth slowing down for.
 Our third motivating wrinkle was the wiggliness knob: how smooth should the
@@ -593,7 +593,7 @@ HSGP are one engine, not five programs: each fits a penalised weighted normal-eq
 system and chooses the scale parameter by a (restricted) likelihood. The next section
 names that shared machinery.
 
-## 6. The shared computational substrate {#sec-substrate}
+## The shared computational substrate {#sec-substrate}
 
 Everything above reduces, computationally, to two moves repeated across the suite:
 
@@ -617,7 +617,7 @@ a **fixed number of iterations** (no data-dependent stopping) and every $p\times
 avoids the vendor GPU solver (`cuSOLVER`, which is unreliable on some accelerators) — that
 is why `_irls.py` routes every solve through the in-house `small_inv_logdet`.
 
-## 7. Notation {#sec-notation}
+## Notation {#sec-notation}
 
 The whole suite uses these symbols. Other chapters point back here; keep this table
 nearby on a first read.
@@ -638,7 +638,7 @@ nearby on a first read.
 | $V_y = ZGZ^{\top}+R$ | marginal (observation) covariance |
 | $\top$, $\operatorname{tr}$ | transpose; trace |
 
-## 8. How to read this suite {#sec-how-to-read}
+## How to read this suite {#sec-how-to-read}
 
 Three paths, matched to the novice → practitioner → developer arc:
 

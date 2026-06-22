@@ -24,7 +24,7 @@ later chapters get shorter: when [the GLM chapter](glm.qmd#sec-irls) says "solve
 the penalised normal equations" or [the LME chapter](lme.qmd) says "the FaST-LMM
 trick", the *how* lives here.
 
-## 1. Four jobs, one accelerator
+## Four jobs, one accelerator
 
 It is worth seeing, up front, that the diversity of models in this suite hides a
 very small numerical core. A linear model, a logistic regression, a smoothing
@@ -71,7 +71,7 @@ random intercept per subject. That is one tiny fit, `vmap`-ed a million times. T
 *number* of fits is enormous. Every choice below is made to keep the per-fit work
 tiny, branch-free, and on the accelerator.
 
-## 2. The small dense solve {#sec-cholesky}
+## The small dense solve {#sec-cholesky}
 
 ### The system, and why not to invert
 
@@ -277,7 +277,7 @@ agree — the one read off the factor diagonal (@eq-logdet) and a reference. Tha
 agreement is the whole point: one factorisation, both the solve and the volume
 term.
 
-## 3. Newton, and how to trust it {#sec-newton}
+## Newton, and how to trust it {#sec-newton}
 
 The second recurring job is to pick a few scalars — log-variances in a
 [mixed model](lme.qmd#sec-reml), smoothing parameters in a
@@ -537,7 +537,7 @@ overlong step, and leaves the basin entirely; the damped step takes the same
 the minimum. That contrast — direction from the curvature, length from a line
 search — is the whole content of damping.
 
-## 4. Inverting a giant covariance cheaply {#sec-woodbury}
+## Inverting a giant covariance cheaply {#sec-woodbury}
 
 The third job appears the moment there are random effects. A
 [mixed model](lme.qmd) has marginal (observation) covariance
@@ -678,7 +678,7 @@ shares no random effect with one in group 4. That sparsity is what lets the
 per-group Woodbury treat each block in isolation, so the whole inverse never has to
 see $N$ at once.
 
-## 5. Diagonalising once: the spectral trick {#sec-spectral}
+## Diagonalising once: the spectral trick {#sec-spectral}
 
 The fourth job is the most elegant, and it is what makes the *scalar* random-effect
 case (one variance per subject) blazingly fast at brain scale. It lives in

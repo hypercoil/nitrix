@@ -19,7 +19,7 @@ Rung 5 of [the ladder](index.qmd). This chapter does not add machinery; it
 removes a distinction. Everything you need has already been built — by the end you
 will see all of it as a single equation with interchangeable parts.
 
-## 1. A question that needs both halves {#sec-motivation}
+## A question that needs both halves {#sec-motivation}
 
 Here is a study that will not fit on any single earlier rung. You have cortical
 thickness measured in a brain region for a few hundred people, scanned at four
@@ -57,12 +57,12 @@ example.
 The promise of this chapter is that @eq-gamm looks like three different kinds of
 thing glued together, but is really *one* kind of thing repeated. Let us earn that.
 
-## 2. A smooth already is a fixed effect plus a random effect {#sec-unification}
+## A smooth already is a fixed effect plus a random effect {#sec-unification}
 
 Recall the one fact the GAM chapter left you with: a roughness penalty
 $\lambda\,\gamma^{\top}S\gamma$ on a smooth's coefficients is *mathematically the
 same object* as the shrinkage a random effect feels (see
-[GAM §6](gam.qmd#sec-penalty) and the [grand equivalence](foundations.qmd#sec-equivalence)).
+[the GAM penalty](gam.qmd#sec-penalty) and the [grand equivalence](foundations.qmd#sec-equivalence)).
 We now make that concrete enough to *see*, because it is the hinge the whole
 chapter swings on.
 
@@ -149,7 +149,7 @@ smoothing parameter $\lambda$ *is* the random-effect precision $1/\sigma^2$. Run
 that statement backward and a random intercept is itself a smooth whose penalty
 happens to be the identity. There is no boundary between the two rungs to cross.
 
-## 3. Everything is a penalty block
+## Everything is a penalty block
 
 With the hinge in hand, the rest of the model assembles itself. Write the two
 regularised terms of our age-by-site model side by side:
@@ -269,7 +269,7 @@ builds the term $z\cdot f(x)$ — a coefficient on `z` that varies smoothly with
 penalty unchanged. In every case the output is another `(design, penalty)` block
 the same machinery consumes.
 
-## 4. One loop selects them all
+## One loop selects them all
 
 We now have $K$ tuning parameters — one $\lambda_k$ per smooth, one $1/\sigma_b^2$
 per random effect — and they must be chosen *together*, because they trade off
@@ -313,7 +313,7 @@ number of groups dispatches to "the dense GAMM path — `gam_fit` with a
 `re_smooth` block and the GLM family." A GLMM with few levels *is* a GAMM; the two
 chapters were describing the same fit from two directions.
 
-## 5. The ladder, folded
+## The ladder, folded
 
 Stand back and the whole suite is one statement:
 
@@ -371,8 +371,8 @@ and the kernel is a Gaussian process. The loop never changes.
   (`re_smooth`/`REBasis`, `by_factor_smooth`, `varying_coefficient_smooth`),
   [`nitrix/stats/glmm/__init__.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glmm/__init__.py)
   (the few-level GAMM path).
-- The unification it rests on: [GAM §6 — the hinge](gam.qmd#sec-hinge),
-  [GAM §3 — the penalty](gam.qmd#sec-penalty), the
+- The unification it rests on: [the GAM hinge](gam.qmd#sec-hinge),
+  [the GAM penalty](gam.qmd#sec-penalty), the
   [grand equivalence](foundations.qmd#sec-equivalence), and the
   [Fellner–Schall](fellner-schall.qmd) page.
 - Previous rung: [GLMM](glmm.qmd). Next rung: [Gaussian processes](hsgp.qmd).
