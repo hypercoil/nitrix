@@ -85,6 +85,7 @@ from .gam import (
 )
 from .gp import GPResult, gp_fit, gp_predict
 from .hgp import HGPResult, hgp_fit, hgp_predict
+from .priors import halfnormal_prior, invgamma_prior, lognormal_prior
 from .betareg import BetaResult, beta_fit
 from .gaulss import GauLSSResult, gaulss_fit
 from .ordinal import OrdinalResult, ordinal_fit
@@ -219,6 +220,10 @@ __all__ = [
     'HGPResult',
     'hgp_fit',
     'hgp_predict',
+    # priors (map_rho regularisers)
+    'halfnormal_prior',
+    'invgamma_prior',
+    'lognormal_prior',
     # glmm
     'GLMMResult',
     'glmm_fit',

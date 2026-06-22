@@ -692,8 +692,11 @@ def gp_fit(
     n_rho
         Number of log-spaced grid points for the ``rho`` search.
     map_rho
-        Optional callable ``rho -> penalty`` adding ``-log p(rho)`` to the pooled
-        objective (a MAP / prior-regularised lengthscale); ``None`` is pure REML.
+        Optional callable ``rho -> -log p(rho)`` adding a lengthscale prior to the
+        pooled objective (a MAP / prior-regularised ``rho``); ``None`` is pure
+        REML.  Use a builder from :mod:`nitrix.stats.priors`
+        (``halfnormal_prior`` / ``invgamma_prior`` / ``lognormal_prior``) or any
+        pure-JAX callable.
     corr
         Within-group residual-correlation structure: ``'ar1'`` (discrete AR(1)),
         ``'car1'`` (continuous-time AR(1); pass ``time``), ``'cs'`` (compound

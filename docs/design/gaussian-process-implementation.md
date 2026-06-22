@@ -26,9 +26,10 @@ PR independently shippable and gam_fit-compatible:
 | **PR5** | multi-D `hsgp_basis_nd` (tensor-product, isotropic + ARD); `dim`-general spectral densities | `gam_fit`, `linalg/kernel.py` | `basis.py`, `kernel.py` |
 
 This document specifies **PR1 fully** and PR2 to the design level; PR3–5 are
-sketched (they don't constrain PR1/PR2). **PR2, PR3a/b, PR4a/b, PR5 are shipped**
-(`gp_fit` HSGP + `engine='exact'` + `corr=`; `hgp_fit` hierarchical;
-`gp_factor_smooth`; `hsgp_basis_nd` multi-D). The full **(a)** scope is complete.
+sketched (they don't constrain PR1/PR2). **PR2, PR3a/b, PR4a/b, PR5, PR6 are
+shipped** (`gp_fit` HSGP + `engine='exact'` + `corr=`; `hgp_fit` hierarchical;
+`gp_factor_smooth`; `hsgp_basis_nd` multi-D; lengthscale-prior regularisers). The
+full **(a)** scope is complete.
 
 ## 1. Math spec (1-D HSGP)
 
@@ -356,6 +357,25 @@ continuous covariates) — the tensor-product HSGP.
   cuSOLVER-free. Lengthscale *estimation* for the multi-D basis (an isotropic/ARD
   `gp_fit` extension) is the natural follow-up; the fixed-`ρ` basis already covers
   the headline spatial-smooth use case via `gam_fit`.
+
+## 5f. PR6 — lengthscale-prior regularisers (**shipped**, `stats/priors.py`)
+
+Closes the loop on the feature-request "Priors on `ρ`" nod: the curated set of
+MAP-`ρ` penalties the `map_rho=` hook was built for. Each builder returns a
+pure-JAX `ρ → −log p(ρ)` callable that drops into `gp_fit`/`hgp_fit`'s `map_rho=`
+(the objective gains `2·map_rho` on the `−2 l_R` scale ⇒ MAP-`ρ`):
+
+- `halfnormal_prior(sd)` — `ρ²/(2 sd²)`, caps **large** `ρ` (near-linear fits).
+- `invgamma_prior(a, b)` — `(a+1)log ρ + b/ρ`, penalises **small** `ρ` (the
+  PC-style regulariser stopping the lengthscale collapsing into noise-fitting).
+- `lognormal_prior(mu, sd)` — `(log ρ−μ)²/(2 sd²) + log ρ`, centres on median
+  `exp(μ)`.
+
+Verified: the closed-form `−log p` values; the documented pull directions; jittable;
+and that each shifts `ρ̂` the right way through `gp_fit` and `hgp_fit` (6 tests).
+The `map_rho` mechanism itself was already threaded through every `gp_fit` path
+(HSGP/exact/`corr`) and `hgp_fit` in PR2/PR3/PR4 — PR6 only adds the named library.
+(Full *posterior* `ρ` priors remain scope (b) — Stan/`brms`.)
 
 ## 6. Decisions (confirmed 2026-06-21)
 
