@@ -815,6 +815,89 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 
 ### 10.3 Shipped entries
 
+### 2026-06-22 — Cortical-surface geometry suite (Phases 0–5) + four §12 graduations
+
+- **Type:** Plan revision + §12 → §10.A graduations + downstream deviation
+  (consumer-driven scope).
+- **Triggered by:** Building the classical mesh-geometry layer the learned
+  cortical-surface stack (`topofit`/`fastcsr`/`synthdist`/`sugar`/`josa`, ilex)
+  does *not* supply — the `recon-all` / `recon-all-clinical` / HCP-minimal /
+  functional-parcellation pipelines. Feature request
+  `docs/feature-requests/geometry-suite.md` (GS-1…14 ledger + locked decisions
+  D1–D3); implementation plan `docs/design/geometry-suite.md` (per-task
+  contracts + as-built decision records); SPEC-review FRs
+  `docs/feature-requests/{spherical-parameterisation,place-surface}.md`.
+- **Description:** Shipped on branch `feat/geometry-suite-phase0` in phases
+  P0–P5. **P0** (substrate): PyTree registration of `ELL`/`SectionedELL`/`Mesh`
+  (B22 enabler), `sparse.{face_areas,vertex_areas,mesh_mass_matrix}` (GS-5),
+  SectionedELL operator emission (`format=`), the `sparse.apply_operator`
+  `{ELL,SectionedELL}` seam, the real-FS-mesh test fixture. **P1**
+  (measurement): `geometry.surface.{mean,gaussian,principal}_curvature` (12.6),
+  `{areal,strain}_distortion` (GS-6), `surface_smooth` (heat-diffusion, 12.3-adj).
+  **P2** (field↔mesh + movers): `topology.{euler_characteristic,genus}` gate,
+  `isosurface.{marching_cubes,mesh_to_sdf}` (GS-3/4), `surface.deform_to_sdf`
+  (GS-10), `cortical_thickness` (GS-9), `intersection.{find,remove}_self_intersections`
+  (GS-8). **P3** (hard optimisers): `surface.inflate_surface` + sulc (GS-1),
+  `sphere.{signed_spherical_areas,is_bijective_sphere_map,spectral_sphere_embedding,
+  spherical_parameterize}` (GS-2, the SPEC-reviewed keystone). **P4** (HCP
+  back-end): `sphere.surface_resample` (12.15), `surface.ribbon_map` (GS-14),
+  GS-13 josa boundary verified (no-code). **P5** (parcellation):
+  `graph.parcellation.{surface_boundary_map,eta_squared,mesh_watershed}`
+  (12.16/12.17).
+- **§12 graduations (per the §13 protocol — the surface pipelines are the named
+  blocked consumers with verified substrate compositions):**
+  - **§12.6 mesh-curvature** → `geometry.surface.{mean,gaussian,principal}_curvature`
+    (cotangent/Meyer `M⁻¹L` mean-curvature normal + angle-defect Gaussian;
+    convex-positive sign, the documented inverse of FS `?h.curv`).
+  - **§12.15 ADAP_BARY_AREA resample** → `geometry.sphere.surface_resample`
+    (host-side spherical point-in-triangle → barycentric `ELL` + the diff
+    apply-seam; `barycentric` constants-exact vs `adap_bary_area`
+    integral-exact, the Workbench dichotomy as `method=`).
+  - **§12.16 surface-boundary-map** → `graph.parcellation.surface_boundary_map`
+    (a named wrapper on `semiring_ell_edge_aggregate`; `eta_squared` companion).
+  - **§12.17 mesh-watershed** → `graph.parcellation.mesh_watershed`
+    (host-side Barnes-2014 priority-flood; `h_min` depth-merge cleaner).
+  - *§12.3-adjacent* heat-kernel smoothing → `geometry.surface.surface_smooth`
+    (backward-Euler `(M+tL)x=Mx₀` via `linalg.krylov.cg`; **decision D2** — the
+    documented divergence from `wb_command -metric-smoothing`).
+- **Capability shipped (beyond §12 → new §10.A):** GS-1/2/3/4/5/6/8/9/10/14 +
+  euler/genus + the apply-seam + ribbon-map + the bijectivity primitives, all as
+  pure functions returning arrays / frozen `Mesh`/`ELL` containers. The
+  geometry-light (`marching_cubes`/topofit-white → `deform_to_sdf` → `inflate`
+  → `spherical_parameterize`) and HCP (`ribbon_map` + `surface_resample`)
+  pipelines are end-to-end. **GS-2** shipped per its SPEC-review FR (spectral
+  recon-surf one-shot + fold-safe Riemannian refine; gradient-normalisation
+  keystone). PyTree lift (B22) logged as a substrate enabler, not a §12
+  graduation.
+- **Pre-merge audit:** 7-axis static review (`docs/feature-requests/geometry-suite-audit.md`):
+  ready-with-minor-fixes, **0 blockers**, 47 findings. Tiers A+B remediated
+  (jit-safe gauge + HOST-orchestrated reclass of `spherical_parameterize`,
+  `Literal` enums, `surface_smooth`/parcellation medial-wall ROI mask incl.
+  off-ROI-magnitude/NaN safety, build-cotangent-once, `arctan2` curvature angle,
+  empty-mesh guards, +tests). Tier C (host-side numpy vectorisation for ico7 —
+  all HOST-CTOR/QA, none merge-unsafe) deferred to a post-merge perf follow-up.
+- **Shape:** JAX-only; the mesh tier is **XLA, not Pallas** (Triton cannot lower
+  `lax.gather`, per `docs/design/ell-on-triton.md`) — the deliberate substrate
+  bet. **cuSolver-free** throughout (matrix-free `cg`, closed-form 2×2 strain
+  eigensolve, LOBPCG shift-invert) — survives the dev L4's dead cuSolver pool by
+  design. Host-side combinatorial construction (marching cubes, watershed,
+  resample assembly, self-intersection) emits plain arrays / `ELL` and is never
+  called inside a jitted loop (the §2.5 HOST-CTOR/HOST-QA rule).
+- **Deferred work:** Tier-C ico7 vectorisation; GS-11 `place_surface` (Effort-L,
+  SPEC-review FR written, **gated on a concrete consumer**); GS-7 topology
+  corrector + the GS-2 Tutte/stereographic fallback + DEC (12.5) + SHT (12.9),
+  all research-tracked on a named consumer (decision D1 keeps the field→mesh
+  corrector seam open). Real-data parity vs FreeSurfer/Workbench is
+  class/correlation by design (the metrics↔ITK posture), not bit-parity.
+- **Non-negotiables held:** §2.2 respected — pure functions, frozen
+  pytree-registered `Mesh`/`ELL` containers (no equinox modules), runtime
+  imports stay `jax`/`jaxtyping`/`numpy` (nibabel/nilearn are test-only), the
+  JAX fallback floor, jaxtyping, ruff, mypy. Extensions are kwargs not forks
+  (SPEC_UPDATE_v0.3 §14: `format=`, `method=`, `roi=`, `init=`, `weighting=`).
+  Validated green per-file on the L4 (analytic icosphere oracle + real fsaverage
+  checks); the 11 `graph` LOBPCG/eigh failures are the pre-existing dead-cuSolver
+  env, not suite defects.
+
 ### 2026-06-09 — ilex-backlog implementation sprint (Phases 1–5) + review-driven boundary
 
 - **Type:** Downstream deviation (consumer-driven scope) + Plan revision (boundary)
