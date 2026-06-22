@@ -561,6 +561,16 @@ Shipped 2026-06-22 (`graph/parcellation.py`; `tests/test_parcellation.py`,
 - Same `fori_loop` skeleton as P2.4 with an image-gradient / target-intensity
   external force. Optional — learned models replace it; ship for classic
   `recon-all` parity / hard clinical cases.
+- **SPEC-review FR written 2026-06-22** —
+  [`../feature-requests/place-surface.md`](../feature-requests/place-surface.md).
+  Design locked (external intensity/gradient force as a Newton-on-normal
+  isosurface seek; the **load-bearing call**: in-loop jittable surrogates only —
+  tangential smooth + curvature + area-positivity + fold-safe step — with the
+  host-side `remove_self_intersections` confined to **between** jitted chunks
+  via `cleanup_every`, per §2.5; home `register.surface`, reusing
+  `register._converge`). **Build gated on a concrete consumer** (the FR's
+  recommendation): not built speculatively — Phases 0–5 give the full
+  geometry-light + HCP pipeline without it.
 
 ### P5.3 — research-tracked (on a named consumer, §13.1)
 - **GS-7 corrector** (Fischl 2001 / Ségonne 2007) — the D1 seam is kept open;

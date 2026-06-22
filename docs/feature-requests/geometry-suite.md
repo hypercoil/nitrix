@@ -552,7 +552,9 @@ from `spatial_gradient`/target-intensity instead of an SDF. Reuses the
 **Home.** `register.surface` (it is a registration-style optimiser).
 **Effort L.** **Live-code status.** Absent. *Optional* — learned models
 (`topofit`/`synthdist`) replace it in the default pipeline; ship for
-classic-`recon-all` parity and hard clinical cases.
+classic-`recon-all` parity and hard clinical cases. **SPEC-review design
+doc:** [`place-surface.md`](place-surface.md) (the Effort-L §13.4 review
+artifact; build gated on a concrete consumer).
 
 ---
 
