@@ -20,6 +20,10 @@ from .ell import (
     ell_to_dense,
     ell_pad,
 )
+from ._apply import (
+    MeshOperator,
+    apply_operator,
+)
 from .ell_sectioned import (
     SectionedELL,
     sectioned_ell_from_ragged,
@@ -35,6 +39,7 @@ from .mesh import (
     IcosphereHierarchy,
     Mesh,
     compute_vertex_normals,
+    face_areas,
     icosphere,
     icosphere_bary_upsampler,
     icosphere_cross_level_adjacency,
@@ -45,8 +50,10 @@ from .mesh import (
     mesh_cotangent_laplacian,
     mesh_k_ring_adjacency,
     mesh_laplacian_smooth,
+    mesh_mass_matrix,
     mesh_pool_max,
     mesh_unpool_max,
+    vertex_areas,
 )
 
 __all__ = [
@@ -57,6 +64,9 @@ __all__ = [
     'ell_mask',
     'ell_to_dense',
     'ell_pad',
+    # format-agnostic apply seam
+    'MeshOperator',
+    'apply_operator',
     # sectioned ell
     'SectionedELL',
     'sectioned_ell_from_ragged',
@@ -70,6 +80,7 @@ __all__ = [
     'IcosphereHierarchy',
     'Mesh',
     'compute_vertex_normals',
+    'face_areas',
     'icosphere',
     'icosphere_bary_upsampler',
     'icosphere_cross_level_adjacency',
@@ -80,6 +91,8 @@ __all__ = [
     'mesh_cotangent_laplacian',
     'mesh_k_ring_adjacency',
     'mesh_laplacian_smooth',
+    'mesh_mass_matrix',
     'mesh_pool_max',
     'mesh_unpool_max',
+    'vertex_areas',
 ]

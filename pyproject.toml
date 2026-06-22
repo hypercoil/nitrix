@@ -54,6 +54,13 @@ dev = [
     # >= 0.21: earlier numpyro imports jax.experimental.pjit.pjit_p, removed in
     # jax 0.10.  Test-only reference dep (not a runtime import; SPEC §5.2).
     "numpyro >= 0.21.0",
+    # Real cortical-surface meshes (fsaverage) for the geometry-suite
+    # validation harness.  Test-only: the loaders live in
+    # tests/_real_meshes.py and hand nitrix plain arrays; never a runtime
+    # import (SPEC §5.2).  Guarded by importorskip so the suite runs without
+    # them.  (templateflow is added with the fs_LR loader when it lands.)
+    "nibabel",
+    "nilearn",
 ]
 
 [project.urls]

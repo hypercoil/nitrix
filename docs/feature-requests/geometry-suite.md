@@ -9,6 +9,91 @@
 > and the HCP minimal-preprocessing pipelines on top of its curated synth\*
 > + learned-surface model suite.
 
+## 0. 2026-06-21 — correction pass & build decisions
+
+> A pre-build review (recorded in full as the implementation plan at
+> [`docs/design/geometry-suite.md`](../design/geometry-suite.md)) found this
+> ledger sound in scope but **wrong or under-specified on a few load-bearing
+> numerics**, and resolved three scope forks. The corrections are folded into
+> the item entries below; this section is the summary of record.
+
+**Math / sequencing corrections (folded into §3 / §5 / §7):**
+
+1. **The mass matrix is missing and load-bearing.** `mesh_cotangent_laplacian`
+   ships the *unnormalised stiffness* `L` only; there is **no** vertex-area /
+   mass-matrix symbol in `src/nitrix`. So mean curvature is **not**
+   `L @ vertices` (that is the *integrated* mean-curvature normal
+   `2·H·A_mixed·n̂`); recovering `H` needs `M⁻¹`. **GS-5 (areas + a lumped mass
+   matrix) is a Phase-0 prerequisite for the correctness of both
+   `mesh-curvature` and GS-12**, not a Phase-1 convenience. The §7 graph gains
+   the edge **GS-5 → GS-12**.
+2. **GS-12 is an implicit sparse *solve*, not a dense exponential.** Use
+   backward-Euler `(M + tL) x = M·x₀` via the shipped `linalg.krylov.cg` on the
+   ELL operator; dense `matrix_exp` does not scale to ico7 (163 842 vertices).
+   See decision **D2** for the parity stance.
+3. **GS-4's dependency was mis-stated.** It needs a **point-to-triangle**
+   (unsigned) distance + a sign test — a new clean-room host-side primitive,
+   *not* the morphology mask-EDT in
+   [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md).
+4. **GS-10 cannot call GS-8 in-loop.** GS-8 (BVH / Möller) is host-side and
+   un-jittable; GS-10's `fori_loop` uses only jittable regularisation
+   (Laplacian fraction + step clamp). GS-8 is a **post-hoc** cleanup pass.
+5. **GS-3 variant matters.** Specify the **asymptotic-decider** marching-cubes
+   variant — plain Lorensen–Cline's face-saddle ambiguity produces
+   non-manifold output that *fights* the genus-0 goal. Output vertex count is
+   data-dependent → host-side construction emitting a `Mesh`.
+6. **GS-13 is probably already shipped.** `spatial_transform` already forwards
+   `mode='nearest'` (the geometry JOSA sprint); the equirectangular path
+   composes `sphere_grid_pad_2d` + `spatial_transform(mode='nearest')`. Verify
+   with a composition test before writing any code.
+
+**Substrate prerequisites elevated to Phase 0 (the first pass assumed these
+present or trivial):**
+
+- **PyTree lift** of `ELL` / `SectionedELL` / `Mesh`
+  ([register-sparse-dataclasses-as-pytrees](register-sparse-dataclasses-as-pytrees.md),
+  B22) — every differentiable optimiser (GS-1/2/10/11) and the GS-12 solve
+  needs these across `jit` / `grad` / `scan`. **Consciously decline**
+  `IcosphereHierarchy` (host-side NumPy `parents` → unhashable aux; a
+  construction artefact, not a traced operand).
+- **`SectionedELL` operator emission** for arbitrary (non-icosphere) meshes
+  (decision **D3**) + a **format-agnostic apply-seam** over {`ELL`,
+  `SectionedELL`} so the measurement layer never branches on storage.
+- A **real-FS-mesh validation fixture** in `tests/` (principle below).
+
+**Locked decisions (2026-06-21):**
+
+- **D1 — Topology: geometry-light this pass, pivot-ready.** Ship marching cubes
+  (asymptotic-decider) + `euler_characteristic` / `genus` as the **defect
+  gate**; rely on the `topofit`-white → GS-10 SDF-march geometry-light path
+  that inherits genus-0. **Defer** the full GS-7 corrector to a research track
+  but keep the seam `GS-3 → [GS-7 slot] → GS-1` open (corrector consumes /
+  emits `Mesh`). Pivot if friction develops.
+- **D2 — GS-12 smoothing: heat-diffusion native, divergence documented.** Ship
+  the backward-Euler heat smoother; document that it is *not*
+  `wb_command -metric-smoothing` (a geodesic-distance-weighted Gaussian) — the
+  same posture as the metrics↔ITK convention. Workbench parity, if ever needed,
+  arrives behind a `method=` kwarg (§14), not a fork.
+- **D3 — `SectionedELL` for arbitrary meshes.** The operator / measure layer
+  gains a sectioned path for irregular-valence `recon-all` surfaces; the
+  icosphere (uniform valence ≈ 6) stays plain `ELL`.
+
+**Real-mesh validation principle.** Test on real FreeSurfer / fs_LR meshes
+**early**, IO-safe: the IO lives in `tests/` only (nilearn / templateflow /
+nibabel are test-only per SPEC §5.2 + §8), never in `nitrix`. The test plays
+the "consumer reads files → hands nitrix arrays" role, so it doubles as a live
+test of the `icosphere_hierarchy_from_levels` array-handoff seam. **Every
+Phase-0/1 primitive must pass on both an icosphere (analytic oracle) and a real
+FS mesh** — compared to FS's own per-vertex overlays (`?h.area`, `?h.curv`,
+`?h.sulc`, `?h.thickness`) where one exists (class / correlation, not
+bit-parity).
+
+**Governance.** GS-1…14 are candidates **beyond the current §12 set**; each
+needs the §13 four-gate (named consumer ✓, composition sketch ✓, SoC, effort).
+Per **§13.4 the Effort-L items — GS-2 (parameterise) and GS-11 (place_surface)
+— need a SPEC-level review before slotting.** Record each §12→§10.A graduation
+in `IMPLEMENTATION_PLAN.md` at merge.
+
 ## 1. Why this doc exists
 
 ilex now curates the *neural* half of cortical reconstruction end-to-end —
@@ -99,9 +184,12 @@ compose on them.**
 
 Consequences worth stating plainly:
 
-- The **"Laplacian expansion" and "curvature operator" substrate is already
-  here.** Mean curvature is `mesh_cotangent_laplacian @ vertices` today
-  (the [mesh-curvature](mesh-curvature.md) FR just needs to name it).
+- The **Laplace–Beltrami *stiffness* substrate is here, but the *mass* matrix
+  is not.** `mesh_cotangent_laplacian @ vertices` gives the **integrated**
+  mean-curvature normal `2·H·A_mixed·n̂`, *not* the mean curvature `H` — that
+  needs the mixed-Voronoi mass `M⁻¹` (GS-5), which is **not shipped**. The
+  [mesh-curvature](mesh-curvature.md) FR therefore depends on GS-5; it cannot
+  just "name" an existing op. See §0 correction 1.
 - The **HCP PreFreeSurfer volumetric front-end is largely shipped**: rigid /
   affine / BBR / SyN registration + B-spline bias correction cover ACPC,
   T1w↔T2w (BBR), brain-mask-via-template, and the MNI affine+nonlinear warp.
@@ -203,7 +291,14 @@ registration. **Home.** `geometry.sphere`. **Effort L** (the hardest of the
 continuous optimisers — fold-prevention makes the energy non-convex; needs a
 robust line-search / step schedule). **Live-code status.** Absent;
 coordinate conversion + geodesic distance shipped, the embedding optimiser is
-not.
+not. **Full SPEC-review design doc (§13.4):**
+[`spherical-parameterisation.md`](spherical-parameterisation.md) — supports both
+families: a one-shot **spectral** embedding (FastSurfer/recon-surf: generalised
+LBO `(L, M)` eigfns 1–3 → normalise; the fast default, verified against the
+recon-surf source) with a Tutte+stereographic guaranteed-bijective fallback, and
+the iterative conformal+area energy (collapse-trap defence) under Riemannian
+descent with a fold-safe line-search + Möbius normalisation. Phased GS-2a–d +
+test plan.
 
 ---
 
@@ -223,9 +318,15 @@ def marching_cubes(
 ) -> Mesh:
 ```
 
-**Composition.** Standard 256-case edge-table lookup + linear edge
-interpolation. Host-side table construction (like the icosphere midpoint
-table); the per-cube vectorised gather/interpolate is JAX. No IO.
+**Composition.** **Asymptotic-decider** 256-case edge-table lookup + linear
+edge interpolation (plain Lorensen–Cline's face-saddle ambiguity yields
+non-manifold output that fights the genus-0 goal — §0 correction 5). Host-side
+table construction (like the icosphere midpoint table); the per-cube gather /
+interpolate is vectorised, but the **output vertex count is data-dependent**,
+so the whole op is a host-side construction emitting a `Mesh` (the icosphere
+idiom), not a fixed-shape JAX kernel. No IO. Pairs with the GS-7 defect gate
+(`euler_characteristic` / `genus`) and keeps the `GS-3 → [GS-7 slot] → GS-1`
+seam open (decision D1).
 
 **Likely consumer.** `fastcsr`, `synthdist`, any level-set surface model;
 volumetric label → surface for QA. **Home.** Numerical and IO-free, so
@@ -251,12 +352,14 @@ def mesh_to_sdf(
 ) -> Float[Array, 'X Y Z']:
 ```
 
-**Composition.** Unsigned distance transform + sign from generalised winding
-number / normal test. The distance-transform substrate is already proposed
-in [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md);
-this is the signed surface-aware wrapper. **Home.** `geometry.surface`.
-**Effort M.** **Live-code status.** Absent (depends on the distance-transform
-FR).
+**Composition.** Unsigned **point-to-triangle** distance (a new clean-room
+host-side primitive, uniform-grid accelerated — *not* the morphology mask-EDT
+in [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md),
+which measures distance to a binary mask, §0 correction 3) + sign from
+generalised winding number / normal test. `scipy.spatial` is banned at runtime
+(SPEC §5.2), so the broad-phase is a clean-room uniform-grid hash, not
+`cKDTree`. **Home.** `geometry.surface`. **Effort M.** **Live-code status.**
+Absent (needs the new triangle-distance primitive).
 
 ---
 
@@ -272,14 +375,20 @@ mass-matrix-normalised LBO.
 ```python
 def face_areas(mesh: Mesh) -> Float[Array, 'n_faces']: ...
 def vertex_areas(mesh: Mesh, *, scheme: Literal['barycentric', 'voronoi'] = 'voronoi') -> Float[Array, 'n_vertices']: ...
+def mesh_mass_matrix(mesh: Mesh, *, scheme: Literal['barycentric', 'voronoi'] = 'voronoi', lumped: bool = True) -> ELL: ...  # diagonal lumped M (== vertex_areas)
 ```
 
 **Composition.** Cross-product face areas (the magnitude already computed
-inside `compute_vertex_normals`) scattered to vertices; the Voronoi/mixed
-rule per Meyer et al. Pure JAX. **Home.** `sparse.mesh` (beside the
-cotangent assembly that wants the same areas for the mass matrix). **Effort
-XS.** **Live-code status.** Face-normal magnitude computed but not exposed as
-area; no vertex-area symbol.
+inside `compute_vertex_normals`) scattered to vertices; the Voronoi / mixed
+rule per Meyer et al. — the **obtuse-triangle branch is load-bearing on real
+surfaces** (barycentric is the safe fallback). The lumped mass matrix `M` is
+the diagonal of `vertex_areas`; ship it first (diagonal → trivially
+invertible, which both `M⁻¹L` curvature and the GS-12 backward-Euler solve
+need). Pure JAX. **Home.** `sparse.mesh` (the operator / measure layer).
+**Effort S.** **Live-code status.** Absent — no area or mass symbol exists; the
+cotangent Laplacian is unnormalised stiffness only. **Prerequisite (Phase 0):**
+`mesh-curvature` and GS-12 are *incorrect* without `M`; this ships before
+either (§0 correction 1).
 
 ---
 
@@ -334,6 +443,13 @@ XS). **Live-code status.** Absent. **Note for consumers:** prefer the
 `topofit`-template route to avoid this entirely; reserve the corrector for
 level-set models.
 
+**Decision D1 (2026-06-21).** Ship `euler_characteristic` / `genus` now as the
+**defect gate** (the signal that tells a consumer the genus-0 escape hatch is
+unsafe); **defer the corrector** to a research track. The geometry-light path
+bypasses it. Keep the seam `GS-3 → [GS-7 slot] → GS-1` open so a corrector can
+slot in later (consume / emit `Mesh`) without re-architecting. Pivot if
+friction develops.
+
 ---
 
 ### GS-8 — Self-intersection detection / removal (`mris_remove_intersection`) → `geometry.surface.intersection`
@@ -352,7 +468,9 @@ def remove_self_intersections(mesh: Mesh, *, n_iterations: int = 10) -> Mesh: ..
 **Composition.** Spatial-hash / BVH broad-phase + Möller triangle-triangle
 narrow-phase (host-side); removal is local Laplacian relaxation of offending
 vertices (reuses `mesh_laplacian_smooth`). **Home.** `geometry.surface`.
-**Effort M.** **Live-code status.** Absent.
+**Effort M.** **Live-code status.** Absent. **Use as a post-hoc cleanup, not
+an in-loop guard** — the host-side broad/narrow phase cannot run inside a
+jitted `fori_loop`, so GS-10 must not call it per-iteration (§0 correction 4).
 
 ---
 
@@ -402,10 +520,12 @@ def deform_to_sdf(
 **Composition.** `fori_loop`: sample the SDF (and its `spatial_gradient`) at
 vertices via `sample_at_points`, step along the normal (`compute_vertex_normals`)
 scaled by the local SDF value, apply a Laplacian smoothing fraction
-(`mesh_laplacian_smooth`), periodically guard with GS-8. Fully differentiable
-— usable inside a learned-refinement loss. **Home.** `geometry.surface` (or a
-`register` surface recipe). **Effort M.** **Live-code status.** Absent; every
-ingredient shipped except GS-8.
+(`mesh_laplacian_smooth`) and a step clamp. **The loop uses only jittable
+regularisation — no in-loop GS-8 guard** (host-side, un-jittable; §0 correction
+4); run GS-8 as a post-hoc cleanup if needed. Fully differentiable — usable
+inside a learned-refinement loss. **Home.** `geometry.surface` (or a `register`
+surface recipe). **Effort M.** **Live-code status.** Absent; every in-loop
+ingredient is shipped.
 
 ---
 
@@ -432,7 +552,9 @@ from `spatial_gradient`/target-intensity instead of an SDF. Reuses the
 **Home.** `register.surface` (it is a registration-style optimiser).
 **Effort L.** **Live-code status.** Absent. *Optional* — learned models
 (`topofit`/`synthdist`) replace it in the default pipeline; ship for
-classic-`recon-all` parity and hard clinical cases.
+classic-`recon-all` parity and hard clinical cases. **SPEC-review design
+doc:** [`place-surface.md`](place-surface.md) (the Effort-L §13.4 review
+artifact; build gated on a concrete consumer).
 
 ---
 
@@ -450,14 +572,17 @@ def surface_smooth(
 ) -> Float[Array, '... n_vertices']:
 ```
 
-**Composition.** Heat-method diffusion — `exp(-t·L)` applied via a few
-implicit (backward-Euler) cotangent-Laplacian solves, FWHM↦t closed form.
-Builds directly on `mesh_cotangent_laplacian` + the
-[heat-kernel-diffusion](heat-kernel-diffusion.md) substrate (12.3, partial).
-**Home.** `smoothing.metric` (beside the existing `smoothing.gaussian`) or
-`geometry.surface`. **Effort S.** **Live-code status.** Volumetric Gaussian
-shipped; no surface/geodesic smoother. Note `smoothing/metric.py` already
-exists — confirm whether it is the natural host.
+**Composition.** Backward-Euler heat diffusion: solve `(M + tL) x = M·x₀` (one
+implicit step, or a few), with `t = FWHM² / (16 ln 2)` and `M` the GS-5 lumped
+mass. Solved via the **shipped `linalg.krylov.cg`** on the `(M + tL)` ELL /
+SectionedELL operator (SPD), through the apply-seam — *not* a dense `exp(-tL)`,
+which does not scale to ico7 (§0 correction 2). Depends on **GS-5** (`M`).
+**Decision D2:** ship as the nitrix-native geodesic smoother and **document the
+divergence** from `wb_command -metric-smoothing` (a geodesic-distance-weighted
+Gaussian); a Workbench-parity variant, if ever needed, arrives behind a
+`method=` kwarg. **Home.** `geometry.surface` (`surface_smooth`). **Effort M.**
+**Live-code status.** Volumetric Gaussian shipped; no surface / geodesic
+smoother; `cg` + (once GS-5 lands) `M` are the ingredients.
 
 ---
 
@@ -476,8 +601,12 @@ and [spatial-transform-linear-extrap](spatial-transform-linear-extrap.md).
 **Composition.** `sphere_grid_pad_2d` + `integrate_velocity_field` +
 `spatial_transform` already provide the padded 2D-grid SVF warp; this is the
 boundary keyword. **Home.** `geometry.grid` / `geometry.sphere_grid`.
-**Effort S.** **Live-code status.** Padding + SVF integration shipped;
-boundary keyword is the gap.
+**Effort S.** **Live-code status.** **Likely already satisfied** —
+`spatial_transform` already forwards `mode='nearest'` (the geometry JOSA
+sprint), so the equirectangular path composes `sphere_grid_pad_2d` +
+`spatial_transform(mode='nearest')`. **Verify with a composition test before
+writing code** (§0 correction 6); if it passes, close GS-13 with the test +
+a docstring note rather than new code.
 
 ---
 
@@ -552,37 +681,54 @@ correction (GS-7) become **non-optional** (no template escape hatch).
 ## 7. Phasing & dependency graph
 
 ```
-Phase 1  measure (compose on shipped LBO/adjacency/areas) — unblock features + QA
-  GS-5 vertex/face area ──┬─> GS-6 areal/strain distortion
-                          └─> (mesh-curvature 12.6) ──> sugar/josa features
-  GS-12 geodesic smoothing (on heat-kernel 12.3)
+Phase 0  substrate & enablers (NEW — corrects/unblocks everything below)
+  B22 pytree lift (ELL/SectionedELL/Mesh; decline IcosphereHierarchy)
+  GS-5 vertex/face area + lumped mass matrix M
+  SectionedELL operator emission (arbitrary meshes) + {ELL,SectionedELL} apply-seam
+  real-FS-mesh test fixture (nilearn/templateflow, test-only IO)
 
-Phase 2  field <-> mesh + movers
-  GS-3 marching cubes ──> GS-7 topology correction (level-set route)
-  GS-4 mesh->SDF (on distance-transform FR)
-  GS-8 self-intersection ──> GS-10 SDF normal-march ──> GS-9 thickness (corr.)
+Phase 1  measure (compose on substrate) — unblock features + QA
+  GS-5 ──┬─> GS-6 areal/strain distortion
+         ├─> (mesh-curvature 12.6: H = M⁻¹L v) ──> sugar/josa features
+         └─> GS-12 geodesic smoothing  ((M+tL)x=Mx₀ via linalg.krylov.cg)
 
-Phase 3  the hard continuous optimisers
-  GS-1 inflation ──> GS-2 spherical parameterisation ──> sugar/josa inputs
+Phase 2  field <-> mesh + geometry-light movers
+  GS-3 marching cubes (asymptotic-decider) ──> euler/genus defect gate ──[GS-7 slot]
+  GS-4 mesh->SDF (point-to-triangle distance, NEW prim)
+  GS-10 SDF normal-march (jittable; no in-loop GS-8) ──> GS-9 thickness (corr.)
+  GS-8 self-intersection (post-hoc cleanup, not in-loop)
+
+Phase 3  hard continuous optimisers (SPEC-review-gated, §13.4)
+  GS-1 inflation+sulc ──> GS-2 spherical parameterisation (L) ──> sugar/josa inputs
 
 Phase 4  HCP back-end
-  surface-resample-adap-bary (12.15)   GS-14 ribbon map   GS-13 josa boundary mode
+  surface-resample-adap-bary (12.15)   GS-14 ribbon map   GS-13 josa boundary (verify shipped)
 
-Phase 5  optional classical fallback
-  GS-11 intensity-driven deformable fit (recon-all parity / hard clinical)
+Phase 5  parcellation + optional/research-tracked
+  surface-boundary-map (12.16) ──> mesh-watershed (12.17)
+  GS-11 intensity-driven deformable fit (optional; L, SPEC-gated)
+  GS-7 corrector / DEC (12.5) / SHT (12.9): research-tracked on a named consumer
 ```
 
-Rationale: Phase 1 is pure composition on shipped substrate (low risk, high
-immediate value — features for the learned registrars + morphometry). Phase 2
-unlocks the `fastcsr`/`synthdist` field route and the geometry-light pial
-strategy. Phase 3 holds the two genuinely hard continuous optimisers (and the
-combinatorial GS-7). Phase 4 finishes HCP. Phase 5 restores full classic
-parity. The **geometry-light path** (`topofit` white → GS-10 SDF-march to
-pial → GS-1 → GS-2 → `sugar`/`josa`) never invokes GS-3/GS-7 and is the
-recommended default.
+Rationale: Phase 0 is pure substrate that makes the rest *correct* (mass
+matrix) and *differentiable* (pytree lift) and *efficient on real meshes*
+(SectionedELL) — low risk, unblocks everything. Phase 1 is composition on that
+substrate (low risk, high immediate value — features for the learned registrars
++ morphometry). Phase 2 unlocks the `fastcsr`/`synthdist` field route and the
+geometry-light pial strategy. Phase 3 isolates the two genuinely hard
+continuous optimisers behind the §13.4 SPEC-review gate. Phase 4 finishes HCP.
+Phase 5 adds parcellation and quarantines the research-grade corrector. The
+**geometry-light path** (`topofit` white → GS-10 SDF-march to pial → GS-1 →
+GS-2 → `sugar`/`josa`) never invokes GS-3/GS-7 and is the recommended default
+(decision D1). Full per-task detail, signatures, and the test matrix live in
+the implementation plan — [`docs/design/geometry-suite.md`](../design/geometry-suite.md).
 
 ## 8. Cross-references
 
+- **Implementation plan.** [`docs/design/geometry-suite.md`](../design/geometry-suite.md)
+  — the concrete phased build (per-task signatures, contracts, differentiability
+  classes, the test matrix, governance/graduation records, and the risk
+  register). This ledger is the *what/why*; that doc is the *how*.
 - **Acceptance.** `SPEC_UPDATE_v0.3.md §12` (brainstorm catalogue — the §4
   items 12.5/12.6/12.9/12.15/12.16/12.17 are this suite's surface members) /
   `§13` (acceptance protocol). New items GS-1/2/3/4/7/8/9/10/13/14 are

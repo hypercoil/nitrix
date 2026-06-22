@@ -187,6 +187,16 @@ def sphere_grid_pad_2d(
     The pole flip + W/2 roll is the natural "go over the pole"
     topology of an equirectangular grid.
 
+    For the ``josa`` spherical-diffeomorphism warp (GS-13), this
+    composes directly with the existing sampler -- no sphere-aware
+    sampler is needed: pad the SVF here (with ``pole_negate_channel``
+    for the longitudinal flow component), ``integrate_velocity_field``,
+    then ``spatial_transform(..., mode='nearest')``.  The longitudinal
+    seam is handled by this padding (equivalent to ``mode='wrap'``) and
+    the over-the-pole halo by the flip + roll; ``mode='nearest'`` then
+    edge-replicates the (already topology-correct) padded borders.  See
+    ``tests/test_josa_boundary.py`` for the composition.
+
     Raises
     ------
     ValueError

@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence, Tuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Int, Num
@@ -48,6 +49,7 @@ __all__ = [
 ]
 
 
+@jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class SectionedELL:
     """Bucketed-row ELL.
@@ -91,6 +93,43 @@ class SectionedELL:
         b in sections)`` entries.
         """
         return sum(s.values.size for s in self.sections)
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[
+        Tuple[Tuple[ELL, ...], Tuple[NDArray[Any], ...]],
+        Tuple[int, int, Any],
+    ]:
+        """Children: ``(sections, row_groups)``; aux: scalars.
+
+        The per-bucket ``ELL`` pytrees carry the differentiable ``values``
+        leaves; the row-group index arrays ride along as leaves (integer ->
+        zero/float0 cotangent).  The *number* of buckets is structural
+        (encoded in the treedef), so the static Python dispatch loop length
+        in the matmul is preserved across a trace.  ``(n_rows, n_cols,
+        identity)`` are hashable static aux.
+        """
+        return (self.sections, self.row_groups), (
+            self.n_rows,
+            self.n_cols,
+            self.identity,
+        )
+
+    @classmethod
+    def tree_unflatten(
+        cls,
+        aux: Tuple[int, int, Any],
+        children: Tuple[Tuple[ELL, ...], Tuple[NDArray[Any], ...]],
+    ) -> 'SectionedELL':
+        sections, row_groups = children
+        n_rows, n_cols, identity = aux
+        return cls(
+            sections=tuple(sections),
+            row_groups=tuple(row_groups),
+            n_rows=n_rows,
+            n_cols=n_cols,
+            identity=identity,
+        )
 
 
 # ---------------------------------------------------------------------------

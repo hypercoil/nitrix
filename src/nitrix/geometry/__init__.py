@@ -91,9 +91,14 @@ from .affine import (
 )
 from .sphere import (
     cartesian_to_latlong,
+    is_bijective_sphere_map,
     latlong_to_cartesian,
+    signed_spherical_areas,
+    spectral_sphere_embedding,
     spherical_conv,
     spherical_geodesic_distance,
+    spherical_parameterize,
+    surface_resample,
 )
 from .sphere_grid import (
     sphere_grid_pad_2d,
@@ -109,6 +114,27 @@ from .coords import (
     cmass_reference_displacement_coor,
     cmass_reference_displacement_grid,
     diffuse,
+)
+from .surface import (
+    areal_distortion,
+    cortical_thickness,
+    deform_to_sdf,
+    gaussian_curvature,
+    inflate_surface,
+    mean_curvature,
+    principal_curvatures,
+    ribbon_map,
+    strain_distortion,
+    surface_smooth,
+)
+from .intersection import (
+    find_self_intersections,
+    remove_self_intersections,
+)
+from .isosurface import marching_cubes, mesh_to_sdf
+from .topology import (
+    euler_characteristic,
+    genus,
 )
 
 __all__ = [
@@ -164,6 +190,11 @@ __all__ = [
     'latlong_to_cartesian',
     'spherical_conv',
     'spherical_geodesic_distance',
+    'signed_spherical_areas',
+    'is_bijective_sphere_map',
+    'spectral_sphere_embedding',
+    'spherical_parameterize',
+    'surface_resample',
     # sphere_grid (parameterised regular grid)
     'sphere_grid_pad_2d',
     'sphere_grid_unpad_2d',
@@ -180,4 +211,24 @@ __all__ = [
     'cmass_reference_displacement_coor',
     'cmass_reference_displacement_grid',
     'diffuse',
+    # surface algorithms (differential geometry on meshes)
+    'mean_curvature',
+    'gaussian_curvature',
+    'principal_curvatures',
+    'areal_distortion',
+    'strain_distortion',
+    'surface_smooth',
+    'deform_to_sdf',
+    'cortical_thickness',
+    'inflate_surface',
+    'ribbon_map',
+    # topology (the genus-0 defect gate)
+    'euler_characteristic',
+    'genus',
+    # volume <-> surface conversion
+    'marching_cubes',
+    'mesh_to_sdf',
+    # self-intersection (host-side QA / cleanup)
+    'find_self_intersections',
+    'remove_self_intersections',
 ]

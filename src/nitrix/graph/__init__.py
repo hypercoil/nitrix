@@ -16,6 +16,10 @@ Submodules:
   (dense + sparse-aware factored path).
 - ``connectopy`` -- ``laplacian_eigenmap`` and ``diffusion_embedding``
   with both dense (``eigh``) and sparse (``lobpcg``) solver paths.
+- ``parcellation`` -- functional-parcellation steps: ``surface_boundary_map``
+  (connectivity-profile boundary detection, composing
+  ``semiring_ell_edge_aggregate``) + ``eta_squared`` similarity, and
+  ``mesh_watershed`` (host-side priority-flood basins on a vertex field).
 
 See SPEC §4.5, SPEC §6.1, and IMPLEMENTATION_PLAN §6.1 tasks 3.5-3.7.
 """
@@ -38,6 +42,11 @@ from .connectopy import (
     diffusion_embedding,
     laplacian_eigenmap,
 )
+from .parcellation import (
+    eta_squared,
+    mesh_watershed,
+    surface_boundary_map,
+)
 
 __all__ = [
     # laplacian
@@ -55,4 +64,8 @@ __all__ = [
     # connectopy
     'diffusion_embedding',
     'laplacian_eigenmap',
+    # parcellation (functional boundary map -> watershed)
+    'eta_squared',
+    'surface_boundary_map',
+    'mesh_watershed',
 ]
