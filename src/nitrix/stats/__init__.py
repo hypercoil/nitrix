@@ -21,6 +21,8 @@ Two submodules:
 - ``gp``         -- mass-univariate Gaussian-process regression (HSGP or exact
   engine) with REML-estimated kernel lengthscale and optional ``corr=``
   structured residual (``gp_fit`` / ``gp_predict``).
+- ``hgp``        -- hierarchical / multi-level GP: a population smooth plus
+  group-level smooth deviations sharing a kernel (``hgp_fit`` / ``hgp_predict``).
 - ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
   covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
   small-sample regime.
@@ -80,6 +82,7 @@ from .gam import (
     smooth_significance,
 )
 from .gp import GPResult, gp_fit, gp_predict
+from .hgp import HGPResult, hgp_fit, hgp_predict
 from .betareg import BetaResult, beta_fit
 from .gaulss import GauLSSResult, gaulss_fit
 from .ordinal import OrdinalResult, ordinal_fit
@@ -208,6 +211,10 @@ __all__ = [
     'GPResult',
     'gp_fit',
     'gp_predict',
+    # hgp
+    'HGPResult',
+    'hgp_fit',
+    'hgp_predict',
     # glmm
     'GLMMResult',
     'glmm_fit',

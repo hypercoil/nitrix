@@ -21,12 +21,14 @@ PR independently shippable and gam_fit-compatible:
 | **PR2** | `gp_fit`/`GPResult`/`gp_predict` — HSGP, shared-`ρ` diagonal-`S(ρ)` REML, optional MAP-`ρ` | new `stats/gp.py` | + HLO-budget test |
 | **PR3a** | Tier 2b full-rank `engine='exact'` (kernel-eigenfeature REML) | shared PR2 core (≡ `lme.reml_fit`) | thin |
 | **PR3b** | `corr=` composition (structured residual: ar1/car1/cs) | `lme._corr.whiten`, `build_group_layout` | thin |
-| **PR4** | Tier 3 `gp_factor_smooth` + `hgp_fit`; nested HGP | `re_smooth`/`by_factor_smooth`/`gam_fit`, `lme/_nested.py` | |
+| **PR4a** | Tier 3 hierarchical `hgp_fit` (global + group smooths, GS model) | shared PR2 core, generalised to K penalty blocks | `stats/hgp.py` |
+| **PR4b** | `gp_factor_smooth` fixed-`ρ` basis (gam_fit drop-in); exact-engine hgp | `gam_fit`, `re_smooth` | |
 | **PR5** | multi-D `hsgp_basis_nd` (tensor product); perf-bench | | |
 
 This document specifies **PR1 fully** and PR2 to the design level; PR3–5 are
-sketched (they don't constrain PR1/PR2). **PR3a + PR3b are shipped**
-(`engine='exact'` and `corr=`); PR4–5 remain.
+sketched (they don't constrain PR1/PR2). **PR2, PR3a/b, PR4a are shipped**
+(`gp_fit` HSGP + `engine='exact'` + `corr=`; `hgp_fit` hierarchical); PR4b + PR5
+remain.
 
 ## 1. Math spec (1-D HSGP)
 
@@ -276,6 +278,39 @@ ruff/mypy clean. **Validation:** the `p`-space profiled REML matches a dense
 `(λ,ρ)`); `ρ̂` + predictive mean track sklearn exact GPR; mgcv cross-check in
 `test_gp_mgcv_parity.py`. (brms/Stan absent — see §4 — so the sklearn exact-GP
 anchor stands in for the HSGP-to-HSGP comparison.)
+
+## 5c. PR4a — `hgp_fit` hierarchical GP (**shipped**, `stats/hgp.py`)
+
+The multi-level / "(a)"-scope GP: a population smooth plus group-level smooth
+*deviations* that share the kernel — the GP analogue of a random-slope mixed
+model, and the "GS" hierarchical GAM (Pedersen et al. 2019). Partial pooling: a
+sparse group is shrunk toward the population trend.
+
+- **Model.** `y = β0 + f_pop(x) + Σ_g 1[g] f_g(x) + ε`, `f_pop ~ GP(0,σ²_pop K_ρ)`,
+  `f_g ~ iid GP(0,σ²_grp K_ρ)`. Two GP variance components + noise + a single
+  shared `ρ`.
+- **Construction = two diagonal penalty blocks.** `X = [1 | Φ(x) | Φ(x)⊗onehot(g)]`
+  (the factor-smooth interaction: group `g`'s columns are `Φ` on its own rows); the
+  penalty is `blkdiag(λ_pop diag(1/s), λ_grp diag(1/s)⊗I_L)` — **fully diagonal,
+  disjoint blocks**, so the FS trace stays `rank_k/λ_k` and the REML
+  log-pseudo-determinant is a per-block sum (no `eigh`). `λ_pop`, `λ_grp` are the
+  inverse GP amplitudes; the shared `ρ` is profiled by the same pooled-REML grid.
+- **Generalised core.** `gp.py`'s single-block diagonal REML is generalised to **K
+  blocks** in `hgp.py` (`_mb_quantities` / `_mb_fs` / `_mb_reml_nll`): the penalty
+  is `Σ_k λ_k diag(d_blocks[k])`, FS updates each `λ_k`. (Kept in `hgp.py` so the
+  PR2/PR3 single-block paths stay untouched; a future refactor can unify.)
+- **`hgp_predict`** returns the population curve (`levels=None`) or per-group curves
+  (`levels=…`, population + that group's deviation), reconstructing `Φ(x_new)` from
+  the recorded domain (HSGP, `ρ`-independent — self-contained).
+- **Validation:** the 2-block p-space REML matches a **dense** hierarchical
+  marginal-likelihood reference (`M = I + σ²_pop·…+σ²_grp·…`) to a constant offset
+  (`<1e-6` across `(λ_pop,λ_grp)`); recovers population + per-group curves (group
+  curves track their own data > the bare population curve); `σ²_grp` collapses when
+  groups don't truly differ (partial pooling). 6 tests; ruff/mypy clean.
+- **Cost.** The factor-smooth is `(1+L)` smooths wide, so working size is
+  `O(V·(M_0+(1+L)m)²)` — the inherent per-group-curve cost; bound with `block`.
+  (Exploiting the disjoint-row block sparsity of the group design is a PR4b
+  optimisation.)
 
 ## 6. Decisions (confirmed 2026-06-21)
 
