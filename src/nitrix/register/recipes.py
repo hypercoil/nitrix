@@ -263,6 +263,30 @@ def _use_inverse_compositional(
     )
 
 
+def _use_ic_with_mask(
+    method: str,
+    space: CoordinateSpace,
+    spec: RegistrationSpec,
+    model: TransformModel,
+    *,
+    mask: Optional[Array],
+) -> bool:
+    """IC dispatch, mask-aware (A3): a fixed-grid cost ``mask`` routes to the
+    forward path -- the inverse-compositional constant-template Hessian is a
+    full-grid linearisation built once from the whole reference, so it does not
+    honour a per-voxel mask.  An explicit ``method='inverse_compositional'`` with
+    a mask is a loud error (the request cannot be satisfied)."""
+    if mask is not None:
+        if method == 'inverse_compositional':
+            raise ValueError(
+                "method='inverse_compositional' cannot honour a cost mask (its "
+                'constant-template Hessian is a full-grid linearisation); use '
+                "method='auto' (routes to the forward path) or 'forward'."
+            )
+        return False
+    return _use_inverse_compositional(method, space, spec, model)
+
+
 def rigid_register(
     moving: Float[Array, '*mspatial'],
     fixed: Float[Array, '*fspatial'],
@@ -272,6 +296,7 @@ def rigid_register(
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
     init_transform: Optional[Float[Array, ' d1 d1']] = None,
+    mask: Optional[Float[Array, '*fspatial']] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
 ) -> RegistrationResult:
@@ -316,6 +341,14 @@ def rigid_register(
         A self-contained warm-start matrix (a prior recipe's ``result.matrix``),
         taking precedence over ``init`` -- the staged-pipeline hook (e.g. affine
         warm-started from rigid; see :func:`syn_pipeline`).  ``IndexSpace`` only.
+    mask
+        Optional non-negative per-voxel weight on the ``fixed`` grid (A3): the
+        cost is restricted to / weighted by it (a brain mask, lesion exclusion,
+        FoV), out-of-mask voxels ignored -- for ``MI`` / ``CorrelationRatio`` it
+        gates the joint-histogram scatter, not just the reduction.  A mask routes
+        to the **forward** path (the inverse-compositional constant-template
+        Hessian assumes the full grid); ``method='inverse_compositional'`` with a
+        mask raises.
     winsorize, histogram_match
         Intensity conditioning before registration (the fMRIPrep front-end):
         ``winsorize=(0.005, 0.995)`` clips each image to those percentiles
@@ -348,7 +381,7 @@ def rigid_register(
         init_matrix = _resolve_init_matrix(
             init, moving, fixed, ndim=ndim, scale=False, space=space, spec=spec
         )
-    if _use_inverse_compositional(method, space, spec, model):
+    if _use_ic_with_mask(method, space, spec, model, mask=mask):
         return ic_rigid_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
         )
@@ -365,6 +398,7 @@ def rigid_register(
         spec=spec,
         space=space,
         init_params=init_params,
+        mask=mask,
     )
 
 
@@ -385,6 +419,7 @@ def _affine_multistart(
     space: CoordinateSpace,
     base_init: Optional[Array],
     restarts: int,
+    mask: Optional[Array] = None,
 ) -> RegistrationResult:
     """Run ``restarts`` forward affine solves from diversified inits; keep the
     lowest-cost result.
@@ -431,8 +466,9 @@ def _affine_multistart(
             spec=spec,
             space=space,
             init_params=init_k,
+            mask=mask,
         )
-        cost = scorer.cost(res.warped, fixed)
+        cost = scorer.cost(res.warped, fixed, mask=mask)
         if best is None or best_cost is None:
             best, best_cost = res, cost
         else:
@@ -454,6 +490,7 @@ def affine_register(
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
     init_transform: Optional[Float[Array, ' d1 d1']] = None,
+    mask: Optional[Float[Array, '*fspatial']] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
     restarts: int = 1,
@@ -476,9 +513,10 @@ def affine_register(
     on a large misalignment.  ``init_transform`` (a prior recipe's
     ``result.matrix``) is the self-contained warm-start hook, taking precedence
     over ``init`` -- e.g. affine warm-started from rigid (see
-    :func:`syn_pipeline`); ``IndexSpace`` only.  ``winsorize`` /
-    ``histogram_match`` condition the intensities before registration (see
-    ``rigid_register``).
+    :func:`syn_pipeline`); ``IndexSpace`` only.  ``mask`` (an optional fixed-grid
+    cost weight; see ``rigid_register``) restricts the cost to a region and
+    routes to the forward path.  ``winsorize`` / ``histogram_match`` condition
+    the intensities before registration (see ``rigid_register``).
 
     ``restarts`` (default ``1``) runs the **forward** solve from that many
     diversified inits and keeps the lowest-cost result.  Its purpose is the
@@ -511,7 +549,7 @@ def affine_register(
         )
     if restarts < 1:
         raise ValueError(f'restarts must be >= 1; got {restarts}.')
-    if _use_inverse_compositional(method, space, spec, model):
+    if _use_ic_with_mask(method, space, spec, model, mask=mask):
         # The inverse-compositional SSD path is deterministic; restarts (a GPU
         # MI / CR nondeterminism mitigation) is a no-op here.
         return ic_affine_register(
@@ -531,6 +569,7 @@ def affine_register(
             space=space,
             base_init=init_params,
             restarts=restarts,
+            mask=mask,
         )
     return multi_resolution_register(
         moving,
@@ -540,6 +579,7 @@ def affine_register(
         spec=spec,
         space=space,
         init_params=init_params,
+        mask=mask,
     )
 
 

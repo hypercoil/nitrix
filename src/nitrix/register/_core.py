@@ -299,6 +299,24 @@ def _warp(
     return warped[..., 0]
 
 
+def _mask_jacobian(
+    base: Callable[[Array], Array], sqrt_w: Array
+) -> Callable[[Array], Array]:
+    """Row-scale a residual Jacobian by ``sqrt(mask)`` (A3, the masked LSQ path).
+
+    The masked SSD residual is ``sqrt(mask) * (warped - fixed)`` (see
+    ``SSD.residual``); its Jacobian is therefore the unmasked Jacobian with each
+    voxel row multiplied by ``sqrt(mask)``, so an out-of-mask voxel (weight 0)
+    contributes a zero row and drops out of the Gauss-Newton normal equations.
+    """
+    rows = sqrt_w[:, None]
+
+    def jacobian(params: Array) -> Array:
+        return base(params) * rows
+
+    return jacobian
+
+
 def _warp_jacobian(
     sampler: _Sampler,
     moving: Array,
@@ -449,6 +467,7 @@ def register_core(
     sampler: _Sampler,
     init_params: Float[Array, ' p'],
     convergence: Optional[Convergence] = None,
+    pyr_mask: Optional[tuple[Float[Array, '*fspatial 1'], ...]] = None,
 ) -> RegistrationResult:
     """Coarse-to-fine register ``moving`` against a precomputed reference.
 
@@ -457,6 +476,11 @@ def register_core(
     batched recipe (``volreg``) can compute the shared reference work once
     and ``vmap`` only this core over a series of moving images.  Builds
     the moving pyramid, runs the coarse-to-fine optimise, and finalises.
+
+    ``pyr_mask`` (optional, A3) is the ``fixed``-grid weight pyramidised to
+    match ``pyr_f`` -- threaded into the metric cost (every level) and, on the
+    least-squares path, into the residual Jacobian (``sqrt(mask)`` row-scaling,
+    so out-of-mask voxels drop from the Gauss-Newton normal equations).
     """
     dtype = moving.dtype
     pyr_m = gaussian_pyramid(
@@ -474,6 +498,7 @@ def register_core(
     for level in range(spec.levels - 1, -1, -1):
         m_l = pyr_m[level][..., 0]
         f_l = pyr_f[level][..., 0]
+        mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
         f_shape = f_l.shape
         m_shape = m_l.shape
         if space.requires_grid_rescale and prev_fixed_shape is not None:
@@ -499,12 +524,16 @@ def register_core(
             )
 
         objective = MetricObjective(
-            metric=spec.metric, warp=warp_fn, fixed=f_l
+            metric=spec.metric, warp=warp_fn, fixed=f_l, mask=mask_l
         )
         # Closed-form warp Jacobian for the least-squares (SSD) forward path
-        # -- far fewer gathers than jacfwd (the parity oracle).
-        jac_fn = (
-            _warp_jacobian(
+        # -- far fewer gathers than jacfwd (the parity oracle).  A mask scales
+        # the residual rows by sqrt(mask) (matching ``SSD.residual``), so the
+        # Jacobian rows scale the same way -- out-of-mask voxels contribute a
+        # zero row to the Gauss-Newton normal equations.
+        jac_fn: Optional[Callable[[Array], Array]] = None
+        if spec.metric.is_least_squares:
+            jac_fn = _warp_jacobian(
                 sampler,
                 m_l,
                 model=model,
@@ -513,9 +542,8 @@ def register_core(
                 moving_shape=m_shape,
                 spec=spec,
             )
-            if spec.metric.is_least_squares
-            else None
-        )
+            if mask_l is not None:
+                jac_fn = _mask_jacobian(jac_fn, jnp.sqrt(mask_l).reshape(-1))
         params, hist = optimize_objective(
             objective,
             params,
@@ -555,12 +583,23 @@ def multi_resolution_register(
     spec: RegistrationSpec,
     init_params: Optional[Float[Array, ' p']] = None,
     space: CoordinateSpace = IndexSpace(),
+    mask: Optional[Float[Array, '*fspatial']] = None,
 ) -> RegistrationResult:
-    """Coarse-to-fine registration driver shared by the recipes."""
+    """Coarse-to-fine registration driver shared by the recipes.
+
+    ``mask`` (optional, A3) is a non-negative per-voxel weight on the ``fixed``
+    grid; it is pyramidised alongside ``fixed`` and threaded into the per-level
+    metric cost (and the least-squares Jacobian) so the registration ignores
+    out-of-mask voxels.
+    """
     if moving.ndim != ndim or fixed.ndim != ndim:
         raise ValueError(
             f'expected {ndim}-D single-channel images; got moving '
             f'{moving.shape}, fixed {fixed.shape}.'
+        )
+    if mask is not None and mask.shape != fixed.shape:
+        raise ValueError(
+            f'mask shape {mask.shape} must match the fixed grid {fixed.shape}.'
         )
     # Pin a histogram metric's ranges once from the full-res images (A6;
     # stationary objective).  Here, not in register_core, because volreg vmaps
@@ -573,6 +612,18 @@ def multi_resolution_register(
         levels=spec.levels,
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
+    )
+    # Pyramidise the mask on the fixed grid (same anti-aliased downsample as the
+    # image); a hard mask softens to fractional weights at coarse boundaries.
+    pyr_mask = (
+        None
+        if mask is None
+        else gaussian_pyramid(
+            mask[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        )
     )
     sampler = space.sampler(
         ndim=ndim,
@@ -594,6 +645,7 @@ def multi_resolution_register(
         space=space,
         sampler=sampler,
         init_params=params,
+        pyr_mask=pyr_mask,
         # Forward early-exit is honoured only on the least-squares (GN/LM)
         # optimiser's windowed ``early_stop``; the scalar/BFGS path (a
         # non-least-squares metric) is monolithic and rejects it (B2 gate).

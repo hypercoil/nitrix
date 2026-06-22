@@ -56,6 +56,7 @@ def _joint_hist_from_softbins(
     frac_f: Array,
     bins: int,
     dtype: jnp.dtype,
+    weight: Optional[Array] = None,
 ) -> Float[Array, 'bins bins']:
     """Scatter pre-computed soft bins into the normalised joint histogram.
 
@@ -63,11 +64,19 @@ def _joint_hist_from_softbins(
     and the closed-form gradient (:func:`mi_grad`) share one scatter and one
     normalisation -- the gradient is then exactly the derivative of the table
     the cost sees.
+
+    ``weight`` (optional, the per-voxel domain mask, same length as the soft-bin
+    index vectors) **gates the scatter**: a masked-out voxel contributes nothing
+    to the histogram, so the metric ignores it -- the only correct place to mask
+    a histogram statistic (masking the reduction afterwards would leave the
+    out-of-mask voxels in the joint distribution).  ``None`` is the unweighted
+    scatter (byte-identical to the pre-mask form).
     """
     hist = jnp.zeros((bins, bins), dtype=dtype)
     for idx_m, w_m in ((lower_m, 1.0 - frac_m), (lower_m + 1, frac_m)):
         for idx_f, w_f in ((lower_f, 1.0 - frac_f), (lower_f + 1, frac_f)):
-            hist = hist.at[idx_m, idx_f].add(w_m * w_f)
+            contrib = w_m * w_f if weight is None else weight * w_m * w_f
+            hist = hist.at[idx_m, idx_f].add(contrib)
     return hist / jnp.maximum(hist.sum(), 1e-12)
 
 
@@ -78,6 +87,7 @@ def joint_histogram(
     bins: int = 32,
     range_moving: Optional[tuple[float, float]] = None,
     range_fixed: Optional[tuple[float, float]] = None,
+    mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, 'bins bins']:
     """Differentiable joint intensity histogram (Parzen soft-binning).
 
@@ -97,6 +107,10 @@ def joint_histogram(
         the bounds are then piecewise-constant in the inputs; pin an
         explicit range for a binning that is stable across optimisation
         steps.
+    mask
+        Optional non-negative per-voxel weight (same shape as the images)
+        gating the scatter: an out-of-mask voxel contributes nothing to the
+        joint distribution, so a downstream MI / CR ignores it.
 
     Returns
     -------
@@ -119,8 +133,9 @@ def joint_histogram(
     lo_f, hi_f = _resolve_range(f, range_fixed)
     lower_m, frac_m = _soft_bin(m, bins, lo_m, hi_m)
     lower_f, frac_f = _soft_bin(f, bins, lo_f, hi_f)
+    weight = None if mask is None else mask.reshape(-1)
     return _joint_hist_from_softbins(
-        lower_m, frac_m, lower_f, frac_f, bins, m.dtype
+        lower_m, frac_m, lower_f, frac_f, bins, m.dtype, weight
     )
 
 
@@ -133,6 +148,7 @@ def mutual_information(
     range_fixed: Optional[tuple[float, float]] = None,
     normalized: bool = False,
     eps: float = 1e-10,
+    mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, '']:
     """Mutual information (or normalised MI) of two images.
 
@@ -142,7 +158,9 @@ def mutual_information(
     Higher is more similar; use ``-mutual_information`` as a cost.
 
     ``bins`` / ``range_*`` are forwarded to ``joint_histogram``;
-    ``eps`` guards the logs.
+    ``eps`` guards the logs.  ``mask`` (optional per-voxel weight) gates the
+    joint-histogram scatter (an out-of-mask voxel is excluded from the
+    distribution -- the correct masking point for a histogram statistic).
 
     Notes
     -----
@@ -161,6 +179,7 @@ def mutual_information(
         bins=bins,
         range_moving=range_moving,
         range_fixed=range_fixed,
+        mask=mask,
     )
     p_m = hist.sum(axis=1)
     p_f = hist.sum(axis=0)
@@ -270,6 +289,7 @@ def correlation_ratio(
     bins: int = 32,
     range_fixed: Optional[tuple[float, float]] = None,
     eps: float = 1e-10,
+    mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, '']:
     """Roche's correlation ratio ``η²(moving | fixed)``.
 
@@ -290,21 +310,30 @@ def correlation_ratio(
     FSL / Roche lineage; SimpleITK's registration framework ships no
     correlation-ratio metric, so there is no domain co-oracle (a numpy
     fp64 reimplementation is the only reference).  Uses the same linear
-    soft binning as :func:`joint_histogram` (differentiable).
+    soft binning as :func:`joint_histogram` (differentiable).  ``mask``
+    (optional per-voxel weight) gates the per-group scatter **and** the global
+    mean / total variance, so an out-of-mask voxel is excluded from η².
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)
+    w = None if mask is None else mask.reshape(-1)
     lo_f, hi_f = _resolve_range(f, range_fixed)
     lower_f, frac_f = _soft_bin(f, bins, lo_f, hi_f)
 
     n_k = jnp.zeros((bins,), dtype=m.dtype)
     s_k = jnp.zeros((bins,), dtype=m.dtype)
     for idx_f, w_f in ((lower_f, 1.0 - frac_f), (lower_f + 1, frac_f)):
-        n_k = n_k.at[idx_f].add(w_f)
-        s_k = s_k.at[idx_f].add(w_f * m)
+        wf = w_f if w is None else w * w_f
+        n_k = n_k.at[idx_f].add(wf)
+        s_k = s_k.at[idx_f].add(wf * m)
 
-    mu = m.mean()
+    if w is None:
+        mu = m.mean()
+        total = jnp.sum((m - mu) ** 2)
+    else:
+        sw = jnp.maximum(w.sum(), eps)
+        mu = jnp.sum(w * m) / sw
+        total = jnp.sum(w * (m - mu) ** 2)
     mu_k = s_k / (n_k + eps)
     between = jnp.sum(n_k * (mu_k - mu) ** 2)
-    total = jnp.sum((m - mu) ** 2)
     return between / (total + eps)

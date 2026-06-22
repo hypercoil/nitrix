@@ -126,6 +126,7 @@ def lncc(
     mode: BoundaryMode = 'reflect',
     eps: float = 1e-5,
     reduction: Reduction = 'mean',
+    mask: Optional[Float[Array, '... *spatial']] = None,
 ) -> Float[Array, '...']:
     """Local (windowed) normalised cross-correlation -- the ANTs form.
 
@@ -160,6 +161,13 @@ def lncc(
     reduction
         ``"mean"`` (default), ``"sum"``, or ``"none"`` (the per-voxel
         local-CC map).
+    mask
+        Optional non-negative per-voxel weight (image shape) restricting /
+        weighting the **reduction** of the local-CC map -- an out-of-mask voxel
+        does not count toward the mean.  Note this masks at reduction time only:
+        the windowed sums at an in-mask voxel still draw on out-of-mask
+        neighbours within its box (a deliberate, documented approximation --
+        full window-gated sums would be a separate, costlier kernel).
 
     Returns
     -------
@@ -206,7 +214,7 @@ def lncc(
     var_m = sum_mm - sum_m * sum_m / n
     var_f = sum_ff - sum_f * sum_f / n
     cc = (cross * cross) / (var_m * var_f + eps)
-    return _reduce(cc, None, reduction)
+    return _reduce(cc, mask, reduction)
 
 
 def lncc_grad(

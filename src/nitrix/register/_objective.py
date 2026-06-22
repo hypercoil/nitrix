@@ -31,7 +31,7 @@ branch in the driver.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Protocol, runtime_checkable
+from typing import Callable, Optional, Protocol, runtime_checkable
 
 from jaxtyping import Array, Float
 
@@ -71,18 +71,25 @@ class MetricObjective:
     Pairs a metric with the level's warp closure (``params -> warped``)
     and the ``fixed`` image, so ``cost(params) = metric.cost(warp(params),
     fixed)`` -- the form the coarse-to-fine driver optimises.
+
+    ``mask`` (optional, A3) is a per-voxel weight on the ``fixed`` grid (the
+    level's resolution) threaded into the metric so the cost is computed over a
+    region; ``None`` is the full-image cost.
     """
 
     metric: Metric
     warp: Callable[[Float[Array, ' p']], Float[Array, '*spatial']]
     fixed: Float[Array, '*spatial']
+    mask: Optional[Float[Array, '*spatial']] = None
 
     @property
     def is_least_squares(self) -> bool:
         return self.metric.is_least_squares
 
     def cost(self, params: Float[Array, ' p']) -> Float[Array, '']:
-        return self.metric.cost(self.warp(params), self.fixed)
+        return self.metric.cost(self.warp(params), self.fixed, mask=self.mask)
 
     def residual(self, params: Float[Array, ' p']) -> Float[Array, ' m']:
-        return self.metric.residual(self.warp(params), self.fixed)
+        return self.metric.residual(
+            self.warp(params), self.fixed, mask=self.mask
+        )
