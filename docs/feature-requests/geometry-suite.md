@@ -291,7 +291,10 @@ registration. **Home.** `geometry.sphere`. **Effort L** (the hardest of the
 continuous optimisers — fold-prevention makes the energy non-convex; needs a
 robust line-search / step schedule). **Live-code status.** Absent;
 coordinate conversion + geodesic distance shipped, the embedding optimiser is
-not.
+not. **Full SPEC-review design doc (§13.4):**
+[`spherical-parameterisation.md`](spherical-parameterisation.md) — Tutte+stereographic
+init, conformal+area energy (collapse-trap defence), Riemannian descent with a
+fold-safe line-search + Möbius normalisation, phased GS-2a–d build + test plan.
 
 ---
 
