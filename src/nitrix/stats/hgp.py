@@ -61,12 +61,11 @@ from typing import Any, Callable, Optional, Tuple, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax
 from jaxtyping import Array, Float, Int
 
-from ..linalg._smalllinalg import small_inv_logdet
 from ..linalg.kernel import spectral_density
 from ._batching import blocked_vmap
+from ._penreml import mb_fs, mb_quantities, mb_reml_nll
 from ._result import register_result
 from .gp import _hsgp_domain, _hsgp_eigen, _hsgp_features, _parabolic_argmin
 
@@ -155,98 +154,14 @@ class HGPResult:
 # Multi-block diagonal penalised-REML core (K smoothing parameters)
 # ---------------------------------------------------------------------------
 #
-# Generalises the single-block core of nitrix.stats.gp to a penalty that is the
-# sum of K disjoint diagonal blocks ``S_lambda = sum_k lam_k diag(d_blocks[k])``.
-# Every quantity stays diagonal, so there is no eigendecomposition and the FS
-# penalty trace keeps the disjoint closed form ``tr(S_lambda^+ S_k) = rank_k /
-# lam_k``.
-
-
-def _mb_quantities(
-    lam: Float[Array, ' K'],
-    c: Float[Array, ' p'],
-    g: Float[Array, ''],
-    xtx: Float[Array, 'p p'],
-    d_blocks: Float[Array, 'K p'],
-    p: int,
-    ridge: float,
-) -> Tuple[
-    Float[Array, 'p p'],
-    Float[Array, ''],
-    Float[Array, ' p'],
-    Float[Array, ''],
-    Float[Array, ''],
-    Float[Array, ''],
-]:
-    """``(V, log|H|, beta, edf, rss, D_p)`` at smoothing parameters ``lam`` for the
-    diagonal penalty ``sum_k lam_k diag(d_blocks[k])`` (cf. ``gp._quantities``)."""
-    s_diag = lam @ d_blocks + ridge  # (p,)
-    h = xtx + jnp.diag(s_diag)
-    v, logdet_h = small_inv_logdet(h, p)
-    beta = v @ c
-    edf = jnp.sum(v * xtx)
-    rss = g - 2.0 * (beta @ c) + beta @ (xtx @ beta)
-    d_p = g - beta @ c
-    return v, logdet_h, beta, edf, rss, d_p
-
-
-def _mb_fs(
-    c: Float[Array, ' p'],
-    g: Float[Array, ''],
-    xtx: Float[Array, 'p p'],
-    d_blocks: Float[Array, 'K p'],
-    ranks: Float[Array, ' K'],
-    n: int,
-    p: int,
-    n_outer: int,
-    ridge: float,
-    lam_floor: float,
-    lam_ceil: float,
-) -> Float[Array, ' K']:
-    """Generalized Fellner-Schall selection of the ``K`` smoothing parameters
-    (one per diagonal penalty block), from cross-products."""
-
-    def outer(lam: Float[Array, ' K'], _: Array) -> Tuple[Float[Array, ' K'], None]:
-        v, _, beta, edf, rss, _ = _mb_quantities(lam, c, g, xtx, d_blocks, p, ridge)
-        phi = rss / jnp.clip(n - edf, 1e-3, None)
-        vdiag = jnp.diagonal(v)  # (p,)
-
-        def fs(k: Array) -> Float[Array, '']:
-            dk = d_blocks[k]
-            tr_vd = jnp.sum(vdiag * dk)
-            energy = jnp.sum(dk * beta * beta)
-            num = jnp.clip(ranks[k] - lam[k] * tr_vd, 1e-8, None)
-            den = jnp.clip(energy / phi, 1e-12, None)
-            return jnp.clip(num / den, lam_floor, lam_ceil)
-
-        return jax.vmap(fs)(jnp.arange(d_blocks.shape[0])), None
-
-    lam0 = jnp.ones((d_blocks.shape[0],), dtype=xtx.dtype)
-    lam, _ = lax.scan(outer, lam0, xs=None, length=n_outer)
-    return lam
-
-
-def _mb_reml_nll(
-    d_p: Float[Array, ''],
-    logdet_h: Float[Array, ''],
-    lam: Float[Array, ' K'],
-    ranks: Float[Array, ' K'],
-    log_pdets: Float[Array, ' K'],
-    n: int,
-    n_fixed: int,
-) -> Float[Array, '']:
-    """Per-element restricted negative log-likelihood ``-2 l_R`` (full, incl. the
-    ``(n, M_0)`` constant):  ``(n - M_0) log D_p + log|H| - sum_k (rank_k log lam_k
-    + log_pdet_k) + (n - M_0)(log 2pi + 1 - log(n - M_0))`` with ``log_pdet_k =
-    sum_{j in block k} log d_j``."""
-    dof = float(n - n_fixed)
-    const = dof * (float(np.log(2.0 * np.pi)) + 1.0 - float(np.log(dof)))
-    log_pdet_s = jnp.sum(ranks * jnp.log(lam) + log_pdets)
-    core = (
-        (n - n_fixed) * jnp.log(jnp.clip(d_p, 1e-30, None))
-        + logdet_h - log_pdet_s
-    )
-    return core + const
+# The K-block core (``mb_quantities`` / ``mb_fs`` / ``mb_reml_nll``) lives in
+# ``nitrix.stats._penreml`` -- the single source of truth shared with the
+# single-block (``K = 1``) ``nitrix.stats.gp``.  Re-exported here under the
+# historical ``_mb_*`` names used by the entry points below and the tests; ``hgp``
+# builds the ``(K,)`` penalty layout (``_block_weights``) on top of it.
+_mb_quantities = mb_quantities
+_mb_fs = mb_fs
+_mb_reml_nll = mb_reml_nll
 
 
 def _hgp_fit_one(

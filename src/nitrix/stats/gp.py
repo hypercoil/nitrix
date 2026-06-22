@@ -93,9 +93,9 @@ import numpy as np
 from jax import lax
 from jaxtyping import Array, Float
 
-from ..linalg._smalllinalg import small_inv_logdet
 from ..linalg.kernel import spectral_density
 from ._batching import blocked_vmap
+from ._penreml import mb_fs, mb_quantities, mb_reml_nll
 from ._result import register_result
 
 __all__ = [
@@ -480,16 +480,10 @@ def _quantities(
 
     ``H = X^T X + lambda diag(d) + ridge I``; ``V = H^{-1}``; ``beta = V c``;
     ``edf = tr(V X^T X)``; ``rss = ||y - X beta||^2``; ``D_p = y^T y - beta^T c``
-    is the penalised residual sum of squares (``= rss + beta^T S beta``).
+    is the penalised residual sum of squares (``= rss + beta^T S beta``).  This is
+    the ``K = 1`` case of :func:`nitrix.stats._penreml.mb_quantities`.
     """
-    s_diag = lam * d + ridge
-    h = xtx + jnp.diag(s_diag)
-    v, logdet_h = small_inv_logdet(h, p)
-    beta = v @ c
-    edf = jnp.sum(v * xtx)  # tr(V X^T X)
-    rss = g - 2.0 * (beta @ c) + beta @ (xtx @ beta)
-    d_p = g - beta @ c
-    return v, logdet_h, beta, edf, rss, d_p
+    return mb_quantities(jnp.atleast_1d(lam), c, g, xtx, d[None, :], p, ridge)
 
 
 def _fs_lambda(
@@ -510,31 +504,13 @@ def _fs_lambda(
 
     ``tr(S_lambda^+ S) = m / lambda`` for a disjoint diagonal penalty, so the
     update is ``lambda <- lambda (m / lambda - tr(V diag(d))) / (energy / phi)``
-    with ``energy = beta^T diag(d) beta`` and ``phi = rss / (n - edf)``.
+    with ``energy = beta^T diag(d) beta`` and ``phi = rss / (n - edf)``.  This is
+    the ``K = 1`` case of :func:`nitrix.stats._penreml.mb_fs` (rank ``m``).
     """
-
-    def outer(lam: Float[Array, ''], _: Array) -> Tuple[Float[Array, ''], None]:
-        v, _, beta, edf, rss, _ = _quantities(lam, c, g, xtx, d, p, ridge)
-        phi = rss / jnp.clip(n - edf, 1e-3, None)
-        tr_vd = jnp.sum(jnp.diagonal(v) * d)  # tr(V diag(d))
-        energy = (d * beta) @ beta
-        num = jnp.clip(m - lam * tr_vd, 1e-8, None)
-        den = jnp.clip(energy / phi, 1e-12, None)
-        return jnp.clip(num / den, lam_floor, lam_ceil), None
-
-    lam0 = jnp.asarray(1.0, dtype=xtx.dtype)
-    lam, _ = lax.scan(outer, lam0, xs=None, length=n_outer)
-    return lam
-
-
-def _reml_const(n: int, n_fixed: int) -> float:
-    """The ``(n, M_0)``-only additive constant of the profiled Gaussian REML
-    ``-2 l_R``:  ``(n - M_0)(log(2 pi) + 1 - log(n - M_0))``.  Including it makes
-    ``log_mlik`` the *full* restricted log marginal likelihood (so AIC/BIC across
-    models with different fixed-effect structure are valid), and -- being constant
-    in ``(lambda, rho)`` -- it does not move the ``rho`` search."""
-    dof = float(n - n_fixed)
-    return dof * (float(np.log(2.0 * np.pi)) + 1.0 - float(np.log(dof)))
+    ranks = jnp.asarray([m], dtype=xtx.dtype)
+    return mb_fs(
+        c, g, xtx, d[None, :], ranks, n, p, n_outer, ridge, lam_floor, lam_ceil
+    )[0]
 
 
 def _reml_nll(
@@ -549,13 +525,17 @@ def _reml_nll(
     """Per-element restricted negative log-likelihood ``-2 l_R`` (full, incl. the
     ``(n, M_0)`` constant):  ``(n - M_0) log D_p + log|H| - log|S_lambda|_+ +
     (n - M_0)(log 2pi + 1 - log(n - M_0))``, with ``log|S_lambda|_+ = m log lambda
-    + sum_j log(1/s_j)``."""
-    log_pdet_s = m * jnp.log(lam) + log_pdet_pen
-    core = (
-        (n - n_fixed) * jnp.log(jnp.clip(d_p, 1e-30, None))
-        + logdet_h - log_pdet_s
+    + sum_j log(1/s_j)``.  The ``K = 1`` case of
+    :func:`nitrix.stats._penreml.mb_reml_nll` (rank ``m``)."""
+    return mb_reml_nll(
+        d_p,
+        logdet_h,
+        jnp.atleast_1d(lam),
+        jnp.asarray([m], dtype=jnp.asarray(lam).dtype),
+        jnp.atleast_1d(log_pdet_pen),
+        n,
+        n_fixed,
     )
-    return core + _reml_const(n, n_fixed)
 
 
 # ---------------------------------------------------------------------------
