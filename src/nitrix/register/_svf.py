@@ -745,15 +745,21 @@ def resolve_init_displacement(
     or ``init_displacement`` (a displacement field on the fixed grid, e.g. a
     SynthMorph network output) may be given; the diffeomorphic recipe pre-warps
     ``moving`` by the result and registers the residual (warm-start /
-    multi-stage).  An affine is expanded to its displacement field with the
-    registration centring convention (grid centre, via ``affine_grid``).
+    multi-stage).  An affine is expanded to its displacement field by applying
+    the **self-contained** recipe matrix about the origin (its grid centre is
+    already baked in -- B1).
     """
     if init_affine is not None and init_displacement is not None:
         raise ValueError(
             'pass at most one of init_affine / init_displacement.'
         )
     if init_affine is not None:
-        return affine_grid(init_affine, shape) - identity_grid(
+        # The recipes return a SELF-CONTAINED matrix (the grid centre baked in,
+        # B1), so apply it about the origin -- re-centring it here (the old
+        # affine_grid default) would double-centre and silently defeat the
+        # warm-start.
+        center = jnp.zeros(len(shape), dtype=dtype)
+        return affine_grid(init_affine, shape, center=center) - identity_grid(
             shape, dtype=dtype
         )
     return init_displacement
