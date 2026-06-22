@@ -389,6 +389,45 @@ def spherical_parameterize(mesh, *, n_iterations=200, area_weight=1.0,
   → **all signed triangle areas > 0** (bijectivity), distortion vs the FS
   `?h.sphere` within a pinned band.
 
+#### P3.2 as-built — spectral default + iterative refine (decision record)
+
+Shipped 2026-06-22 (`geometry/sphere.py`; `tests/test_{sphere_bijectivity,
+spectral_sphere,spherical_parameterize}.py`). The SPEC-review FR
+([`../feature-requests/spherical-parameterisation.md`](../feature-requests/spherical-parameterisation.md))
+was extended after a verified FastSurfer/recon-surf review; the as-built:
+
+- **Two families, one surface.** `spherical_parameterize(init='spectral',
+  n_iterations=...)`: `n_iterations=0` is the recon-surf one-shot
+  (`spectral_sphere_embedding`), `>0` refines to strict-fold-free + lower
+  distortion. GS-2a `signed_spherical_areas` / `is_bijective_sphere_map` (signed
+  solid angle; degree-1-cover + flip-fraction test) are the bijectivity oracle.
+- **Spectral solve.** Generalised LBO `L φ = λ M φ` (cotangent + GS-5 mass) →
+  symmetrise `L̃ = M^{-1/2}LM^{-1/2}` → affinity `I − L̃/c` → **shift-invert
+  LOBPCG** (`eigsolve_top_k` + `SolverSpec.shift_invert`, σ=−0.01, oversampled).
+  *Two measured findings drove this:* (1) a plain reflection + LOBPCG folds ~47%
+  of triangles because the smallest LBO eigenvalues cluster near 0 — only
+  shift-invert amplifies their gaps enough to resolve the constant + first-three;
+  (2) `laplacian_eigenmap` is the **wrong** entry point (it builds a
+  degree-normalised graph Laplacian, not the cotangent-mass LBO), so the
+  lower-level `eigsolve` is used directly.
+- **Orientation gauge.** The spectral eigenfunction signs are arbitrary, so the
+  init's overall winding can be negative; we mirror one axis to positive
+  orientation before refining (the anatomical AP/SI/LR sign/swap that recon-surf
+  does stays a consumer concern — nitrix is IO-free).
+- **The load-bearing optimiser detail: gradient normalisation.** The flip
+  barrier is stiff, so the raw tangent gradient spikes at flipped triangles and
+  any step overshoots — verified to make **zero** progress on real cortex.
+  Normalising the tangent gradient so `step` bounds the largest per-vertex move
+  fixes it: the spectral init's residual folds (~23 / 20 480 on fsaverage5) go
+  to **0** and areal distortion drops (0.84 → 0.74 at n=300, lower with more
+  iters), bijectivity held every iteration by the fold-safe line-search.
+- **Collapse defence** (the conformal trivial minimiser): the areal-ratio term
+  + per-step centroid/Möbius normalisation; no collapse observed.
+- **Deferred:** the Tutte+stereographic guaranteed-bijective fallback (for
+  inputs where the spectral init folds beyond the optimiser's basin). Not
+  blocking — the spectral init is bijective-within-tolerance on inflated inputs
+  (the realistic inflate→parameterise pipeline); documented as a follow-up.
+
 ---
 
 ## 7. Phase 4 — HCP back-end
