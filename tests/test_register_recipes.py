@@ -33,8 +33,11 @@ from nitrix.register import (  # noqa: E402
     SSD,
     CorrelationRatio,
     RegistrationSpec,
+    SyNSpec,
     WorldSpace,
     affine_register,
+    apply_transform,
+    greedy_syn_register,
     rigid_register,
 )
 from nitrix.register._metric import pin_metric_ranges  # noqa: E402
@@ -375,3 +378,52 @@ def test_result_warped_matches_explicit_warp():
     )
     explicit = spatial_transform(moving[..., None], grid, mode='constant')[..., 0]
     assert np.allclose(np.asarray(res.warped), np.asarray(explicit), atol=1e-6)
+
+
+def test_apply_transform_matrix_reproduces_warped():
+    # Applying the recovered (self-contained) matrix to the moving image
+    # reproduces res.warped (recipe + apply_transform share the Linear /
+    # 'constant' defaults).
+    fixed = _blobs_2d(64)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 3.0, -2.0]), ndim=2))
+    res = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=2, iterations=25)
+    )
+    out = apply_transform(moving, res)
+    assert np.allclose(np.asarray(out), np.asarray(res.warped), atol=1e-6)
+
+
+def test_apply_transform_label_preserves_values():
+    # An integer label map warped by the recovered transform stays integer and
+    # introduces no new labels (NearestNeighbour default for integer input).
+    fixed = _blobs_2d(64)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 3.0, -2.0]), ndim=2))
+    res = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=2, iterations=25)
+    )
+    m = np.asarray(moving)
+    labels = ((m > 0.3).astype(np.int32) + (m > 0.6).astype(np.int32))  # {0,1,2}
+    out = apply_transform(jnp.asarray(labels), res)
+    assert np.asarray(out).dtype == labels.dtype
+    assert set(np.unique(np.asarray(out)).tolist()) <= {0, 1, 2}
+
+
+def test_apply_transform_displacement_reproduces_warped():
+    # The displacement path (SyN / Demons result) reproduces the recipe's warp.
+    fixed = _blobs_2d(64)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.05, 2.0, -1.0]), ndim=2))
+    syn = greedy_syn_register(
+        moving, fixed, spec=SyNSpec(levels=2, iterations=20, step=0.5)
+    )
+    out = apply_transform(moving, syn)
+    # Reproduces the recipe's warp up to the boundary band (apply_transform's
+    # default 'constant' vs the recipe's boundary mode); interiors are exact.
+    assert float(ncc(out, syn.warped)) > 0.998
+
+
+def test_apply_transform_validation():
+    class _NoTransform:
+        pass
+
+    with pytest.raises(ValueError):
+        apply_transform(_blobs_2d(16), _NoTransform())

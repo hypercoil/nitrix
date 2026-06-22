@@ -98,7 +98,7 @@ from .diffeomorphic import (
     DiffeomorphicResult,
     diffeomorphic_demons_register,
 )
-from .recipes import affine_register, rigid_register
+from .recipes import affine_register, apply_transform, rigid_register
 from .regulariser import (
     bending_energy,
     gradient_smoothness,
@@ -108,6 +108,7 @@ from .regulariser import (
 __all__ = [
     'rigid_register',
     'affine_register',
+    'apply_transform',
     'volreg',
     'VolregResult',
     'bbr_register',

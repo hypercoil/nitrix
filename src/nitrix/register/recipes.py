@@ -27,7 +27,13 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from ..geometry import identity_grid
+from ..geometry import affine_grid, identity_grid, spatial_transform
+from ..geometry._interpolate import (
+    BoundaryMode,
+    Interpolator,
+    Linear,
+    NearestNeighbour,
+)
 from ._core import (
     Convergence,
     RegistrationResult,
@@ -139,7 +145,7 @@ def _resolve_init_matrix(
     return matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] / coarse_factor)
 
 
-__all__ = ['rigid_register', 'affine_register']
+__all__ = ['rigid_register', 'affine_register', 'apply_transform']
 
 # Coarsest pyramid axis (voxels) below which the matrix Hessian -- especially the
 # 12-DOF affine one -- is too few-voxel to estimate reliably, so the constant-
@@ -490,3 +496,81 @@ def affine_register(
         space=space,
         init_params=init_params,
     )
+
+
+def apply_transform(
+    image: Float[Array, '*spatial'],
+    result: object,
+    *,
+    reference_shape: Optional[tuple[int, ...]] = None,
+    method: Optional[Interpolator] = None,
+    mode: BoundaryMode = 'constant',
+    cval: float = 0.0,
+) -> Float[Array, '*rspatial']:
+    """Apply a recovered transform to an in-memory image / label map.
+
+    Resamples ``image`` -- an array in the **moving** frame of the registration
+    that produced ``result`` (a second contrast, a label map, an atlas) -- onto
+    the reference (fixed) grid by the recovered transform.  Dispatches on the
+    result: a homogeneous matrix (``rigid_register`` / ``affine_register`` --
+    the self-contained ``fixed -> moving`` voxel map) or a dense displacement
+    field (``greedy_syn_register`` / ``diffeomorphic_demons_register``).
+    In-memory resampling only -- image **file** I/O is out of scope (``thrux``).
+
+    Parameters
+    ----------
+    image
+        Single-channel array to resample, on the registration's moving grid.
+    result
+        A ``RegistrationResult`` (uses ``.matrix``) or a diffeomorphic result
+        (uses ``.displacement``).
+    reference_shape
+        Output grid for a **matrix** result; ``None`` -> ``image.shape``
+        (correct when moving and fixed share a grid, the ``IndexSpace`` norm --
+        pass the fixed shape for ``WorldSpace`` / differing grids).  A
+        displacement result defines its own output grid.
+    method
+        Interpolation kernel; ``None`` -> ``NearestNeighbour`` for an **integer**
+        ``image`` (label-preserving, no interpolation bleed) and ``Linear``
+        otherwise.  For anti-aliased multi-label resampling pass
+        ``MultiLabel(labels=...)``; for overlap of a warped label map see
+        ``metrics.dice`` / ``metrics.jaccard``.
+    mode, cval
+        Out-of-bounds handling (default ``'constant'`` 0 -- background).
+
+    Returns
+    -------
+    ``image`` resampled onto the reference grid (same dtype as ``image``).
+    """
+    image = jnp.asarray(image)
+    is_int = jnp.issubdtype(image.dtype, jnp.integer)
+    if method is None:
+        method = NearestNeighbour() if is_int else Linear()
+    disp = getattr(result, 'displacement', None)
+    if disp is not None:
+        coords = identity_grid(disp.shape[:-1], dtype=disp.dtype) + disp
+    else:
+        matrix = getattr(result, 'matrix', None)
+        if matrix is None:
+            raise ValueError(
+                'result must carry a .matrix (rigid / affine) or a '
+                '.displacement field (SyN / Demons).'
+            )
+        ndim = matrix.shape[-1] - 1
+        shape = (
+            image.shape if reference_shape is None else tuple(reference_shape)
+        )
+        # B1: .matrix is the self-contained fixed -> moving voxel map (the grid
+        # centre is baked in), so apply it directly about the origin.
+        coords = affine_grid(
+            matrix, shape, center=jnp.zeros(ndim, dtype=matrix.dtype)
+        )
+    # NearestNeighbour returns exact stored values, so the float round-trip is
+    # label-exact; out-of-bounds resolve to ``cval`` (0 -> background).
+    src = image.astype(coords.dtype) if is_int else image
+    warped = spatial_transform(
+        src[..., None], coords, mode=mode, cval=cval, method=method
+    )[..., 0]
+    if is_int:
+        warped = jnp.round(warped).astype(image.dtype)
+    return warped

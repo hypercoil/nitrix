@@ -196,14 +196,16 @@ class RegistrationResult(NamedTuple):
     Attributes
     ----------
     matrix
-        The estimated homogeneous transform, ``(ndim + 1, ndim + 1)``.  In
-        ``IndexSpace`` this is the full-resolution **index-space** map from
-        fixed-voxel to moving-voxel coordinates (``== model.exp(params)``);
-        in ``WorldSpace`` it is the **world->world** transform (fixed-world
-        to moving-world, mm).
+        The estimated homogeneous transform, ``(ndim + 1, ndim + 1)``,
+        **self-contained**: the centre the warp applies it about is baked in, so
+        ``apply_affine(coords, matrix)`` reproduces the warp and it composes
+        with another result.  In ``IndexSpace`` it is the full-resolution
+        fixed-voxel -> moving-voxel index map; in ``WorldSpace`` the
+        fixed-world -> moving-world transform (mm).  (The raw about-origin
+        ``model.exp(params)`` is recovered from ``params``.)
     params
-        The transform's Lie parameters at full resolution (voxel units in
-        ``IndexSpace``; physical units in ``WorldSpace``).
+        The transform's raw **about-origin** Lie parameters at full resolution
+        (voxel units in ``IndexSpace``; physical units in ``WorldSpace``).
     warped
         ``moving`` resampled onto the ``fixed`` grid by the recovered
         transform.
