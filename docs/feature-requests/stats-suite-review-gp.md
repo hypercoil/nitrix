@@ -138,7 +138,7 @@ the high items are the highest-leverage follow-ups.
 | ID | Sev | Status | Location | Gap | Direction |
 |----|-----|--------|----------|-----|-----------|
 | **CV1** | High | **deferred → tracked under prior `N2`** | `inference/tfce.py:67-77`; `cluster.py:72` | Cluster/TFCE inference is **lattice-only** — no surface-mesh adjacency, blocking the FreeSurfer/HCP vertex-wise workflow FSL randomise/PALM support. | **Duplicate of [`stats-suite-audit.md`](stats-suite-audit.md) N2** (deferred post-`geometry-suite`; mesh-adjacency/sphere-geodesic prims already ship). Not re-litigated here — see N2 for the standing plan. |
-| **CV2** | High | open | `gp.py:771-772` | GP lengthscale estimation is **Gaussian-only**; non-Gaussian GP regression (binary activation, lesion counts — the FR's own headline) is reachable only with ρ *pinned*. | Wrap PIRLS (gam.py working-response/weights) around the diagonal-S(ρ) penalty so the pooled-REML ρ grid runs on the Laplace/PQL marginal for Binomial/Poisson; document the PQL-attenuation caveat as `glmm_fit` does. |
+| **CV2** | High | ✅ Phase 1 done `e7ac76e` | `gp.py:771-772` | GP lengthscale estimation is **Gaussian-only**; non-Gaussian GP regression (binary activation, lesion counts — the FR's own headline) is reachable only with ρ *pinned*. | **DONE (Phase 1):** `gp_fit(family='binomial'\|'poisson')` estimates ρ by **PQL-REML** — relinearise to the per-element weighted Gaussian working problem, profile ρ with the same `_pooled_nll_one`/`_gp_fit_one` core (per-voxel `X^TWX` inside `blocked_vmap`). Gaussian path **byte-identical** (no marquee regression); `gp_predict(type='response')`; recovery + ρ-tracking + guarded mgcv tests. Design: [`gp-non-gaussian-lengthscale.md`](../design/gp-non-gaussian-lengthscale.md). **Phase 2 deferred:** LAML (mgcv-grade), multi-D/ARD, gamma/negbin, corr=. |
 | **CV3** | Med | ✅ done `63d7707` | `__init__.py:11-13` | Top-level package docstring still advertises stats as covariance/spectral only, **hiding** the GLM/GAM/GP/LME/GLMM/inference surface. | One-paragraph rewrite — outsized adoption leverage, ~5 min. |
 | **CV4** | Med | ✅ done `5be6354` | `multiple_comparisons.py:53-75` | FDR is **BH-only** — no dependence-aware BY or Storey q-value, notable given strong voxel correlation. | **DONE:** `fdr_by` (Benjamini-Yekutieli, arbitrary-dependence; == statsmodels), `storey_pi0` + `fdr_storey` (π₀-adaptive, higher power), unified `fdr(method=)` dispatcher. `fdr_bh` refactored onto a shared `_bh_stepup` (byte-identical). |
 | CV5–CV7 | Low | open | — | posterior-uncertainty / plotting-IO ergonomics; see §7. | — |
@@ -203,11 +203,13 @@ Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 
 ### Round 2 — high-value capability + consistency (follow-up PRs, not merge-gating)
 > **Consistency batch ✅ done (`63d7707`):** CV3 + UX1 + UX2.  **DS1 ✅ done (`cadbea0`).**
-> **CV4 ✅ done (`5be6354`).** Remaining: **CV2** (design note drafted -> `docs/design/gp-non-gaussian-lengthscale.md`).
+> **CV4 ✅ done (`5be6354`). CV2 Phase 1 ✅ done (`e7ac76e`)** — non-Gaussian GP
+> lengthscale (PQL-REML) for Binomial/Poisson; LAML/multi-D/gamma deferred to
+> Phase 2. **Round 2 complete** (CV1 deferred = prior audit N2).
 - **CV3** ✅ `63d7707` (S) — package docstring (quick adoption win).
 - **UX1/UX2** ✅ `63d7707` (S–M) — `coef` alias on all 6 LME/GLMM result types + `x`-vs-`X` annotation/doc.
 - **DS1** ✅ `cadbea0` (M) — shared `stats/_penreml.py` K-block core (gp calls with K=1; bit-identical).
-- **CV2** (L) ⚖️ — non-Gaussian GP lengthscale (PQL-REML ρ); brings a design note first.
+- **CV2** ✅ Phase 1 `e7ac76e` (L) — non-Gaussian GP lengthscale (PQL-REML ρ, Binomial/Poisson); Phase 2 (LAML / multi-D / gamma) deferred.
 - **CV4** ✅ `5be6354` (S) — BY / Storey FDR + unified `fdr(method=)` dispatcher.
 - **CV1** — **deferred, tracked under prior `N2`** (post-`geometry-suite`).
 
