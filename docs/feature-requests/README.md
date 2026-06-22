@@ -129,6 +129,29 @@ code ≈ nil (additive); ~3–4 weeks to full (a)-scope. Full-Bayes priors on `�
 the HBR / normative-modelling flavour (b) — the `brms`/`mvgam` territory — are
 deferred to a separate proposal.
 
+## Registration suite (`nitrix.register`)
+
+Context/ledger + audit roadmap:
+[`registration-suite.md`](registration-suite.md) — frames the suite
+(rigid/affine, log-Demons / greedy-SyN, volreg, BBR), credits the shipped
+substrate, indexes the atomised registration FRs below (the duplicate guard),
+and specs the **genuinely-new gaps** from a six-lens audit (2026-06-22, 42→40
+verified findings). **Numerics-only; image/file I/O → `thrux`.**
+
+Atomised registration FRs (add to these, don't duplicate): metric-ADT /
+transform-model ([`registration-typing-metric-adt`](registration-typing-metric-adt.md)),
+matrix per-iter perf levers ([`registration-matrix-recipe-perf-levers`](registration-matrix-recipe-perf-levers.md)),
+cold compile ([`registration-recipe-cold-compile`](registration-recipe-cold-compile.md)),
+transparent differentiability ([`registration-recipe-transparent-differentiability`](registration-recipe-transparent-differentiability.md)),
+early-stop while-loop ([`registration-early-stopping-while-loop`](registration-early-stopping-while-loop.md)),
+v3 follow-ups ([`registration-suite-v3-followups`](registration-suite-v3-followups.md)),
+affine small-grid ([`register-affine-small-grid-divergence`](register-affine-small-grid-divergence.md)),
+demons 0/0 ([`register-demons-force-divide-by-zero`](register-demons-force-divide-by-zero.md)),
+metric conventions ([`metrics-convention-vs-domain-tools`](metrics-convention-vs-domain-tools.md)),
+Pallas ESM force ([`pallas-demons-esm-force`](pallas-demons-esm-force.md)),
+Mosaic GPU kernels ([`mosaic-hopper-registration-kernels`](mosaic-hopper-registration-kernels.md)),
+field regularisers ([`field-regularisers`](field-regularisers.md)).
+
 ## Internal engineering backlog
 
 Ledger (framing, closed-by-design, resolved):
