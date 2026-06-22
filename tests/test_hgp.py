@@ -108,8 +108,8 @@ def test_mb_reml_matches_dense_up_to_constant():
                                 rho=0.2)
     )
     inv_s = 1.0 / np.clip(s, 1e-30, None)
-    d_blocks, ranks, _ = hgpmod._block_diag_weights(
-        jnp.asarray(inv_s), m0, L
+    d_blocks, ranks, _ = hgpmod._block_weights(
+        jnp.asarray(inv_s), m0, (L,)
     )
     log_pdets = jnp.asarray(
         [np.sum(np.log(inv_s)), L * np.sum(np.log(inv_s))]
@@ -302,3 +302,132 @@ def test_gp_factor_smooth_n_levels_stable_width():
                           kernel='matern52', rho=0.2, n_levels=3)
     assert fb.n_levels == 3
     assert fb.dim == 3 * fb.base.dim
+
+
+# ---------------------------------------------------------------------------
+# 5. Nested two-level HGP (gp | g1/g2)
+# ---------------------------------------------------------------------------
+
+
+def _nested_data(rng, n_out=3, n_in=4, per=16, out_amp=0.5, in_amp=0.3,
+                 noise=0.08):
+    """Population + outer-site + inner-subject(nested) deviations."""
+    t = np.linspace(0.0, 1.0, per)
+    pop = np.sin(2 * np.pi * t)
+    rows, xs, g1, g2 = [], [], [], []
+    inner = 0
+    for o in range(n_out):
+        out_dev = out_amp * np.sin(2 * np.pi * t + o)
+        for _ in range(n_in):
+            in_dev = in_amp * np.sin(2 * np.pi * t + inner * 0.4)
+            rows.append(pop + out_dev + in_dev + noise * rng.standard_normal(per))
+            xs.append(t)
+            g1.append(np.full(per, o))
+            g2.append(np.full(per, inner))
+            inner += 1
+    return (
+        np.concatenate(xs),
+        np.concatenate(g1).astype(int),
+        np.concatenate(g2).astype(int),
+        np.concatenate(rows),
+        t, pop, n_out, inner,
+    )
+
+
+def _dense_nested_reml_m2l(y, T, Phi, Phif1, Phif2, s, L1, L2,
+                           lam_pop, lam_out, lam_in):
+    """Dense profiled ``-2 l_R`` for the nested model (three GP components)."""
+    n = y.shape[0]
+    m0 = T.shape[1]
+    Sp = np.diag(s)
+    M = (
+        np.eye(n)
+        + Phi @ (Sp / lam_pop) @ Phi.T
+        + Phif1 @ np.kron(np.eye(L1), Sp / lam_out) @ Phif1.T
+        + Phif2 @ np.kron(np.eye(L2), Sp / lam_in) @ Phif2.T
+    )
+    Minv = np.linalg.inv(M)
+    A = T.T @ Minv @ T
+    alpha = np.linalg.solve(A, T.T @ Minv @ y)
+    r = y - T @ alpha
+    rss = r @ Minv @ r
+    _, ldM = np.linalg.slogdet(M)
+    _, ldA = np.linalg.slogdet(A)
+    return (n - m0) * np.log(rss) + ldM + ldA
+
+
+def test_nested_mb_reml_matches_dense():
+    """The 3-block nested p-space REML equals the dense reference up to a
+    constant, across the three smoothing parameters."""
+    rng = np.random.default_rng(0)
+    rank = 6
+    x, g1, g2, y, _t, _pop, L1, L2 = _nested_data(rng, n_out=2, n_in=2, per=10)
+    n = len(x)
+    Phi, sqrt_lambda = _hsgp_phi(x, rank)
+    T = np.ones((n, 1))
+    m0 = 1
+    Phif1 = np.asarray(
+        hgpmod._factor_smooth_design(jnp.asarray(Phi), jnp.asarray(g1), L1)
+    )
+    Phif2 = np.asarray(
+        hgpmod._factor_smooth_design(jnp.asarray(Phi), jnp.asarray(g2), L2)
+    )
+    X = np.concatenate([T, Phi, Phif1, Phif2], axis=1)
+    p = X.shape[1]
+    xtx = jnp.asarray(X.T @ X)
+    c = jnp.asarray(X.T @ y)
+    gg = jnp.asarray(y @ y)
+    s = np.asarray(
+        hgpmod.spectral_density(jnp.asarray(sqrt_lambda), kernel='matern52',
+                                rho=0.2)
+    )
+    inv_s = 1.0 / np.clip(s, 1e-30, None)
+    d_blocks, ranks, _ = hgpmod._block_weights(jnp.asarray(inv_s), m0, (L1, L2))
+    log_pdets = jnp.asarray(
+        [np.sum(np.log(inv_s)), L1 * np.sum(np.log(inv_s)),
+         L2 * np.sum(np.log(inv_s))]
+    )
+
+    diffs = []
+    for lp in (1.0, 10.0):
+        for lo_ in (2.0, 20.0):
+            for li in (5.0,):
+                lam = jnp.asarray([lp, lo_, li])
+                _, ldh, _, _, _, dp = hgpmod._mb_quantities(
+                    lam, c, gg, xtx, d_blocks, p, 0.0
+                )
+                pspace = float(
+                    hgpmod._mb_reml_nll(dp, ldh, lam, ranks, log_pdets, n, m0)
+                )
+                dense = _dense_nested_reml_m2l(
+                    y, T, Phi, Phif1, Phif2, s, L1, L2, lp, lo_, li
+                )
+                diffs.append(pspace - dense)
+    diffs = np.asarray(diffs)
+    assert np.ptp(diffs) < 1e-6, f'nested REML offset spread {np.ptp(diffs):.2e}'
+
+
+def test_hgp_nested_fit_and_components():
+    """``hgp_fit(model='nested')`` returns three GP variance components, recovers
+    the population trend, and accepts gp_aic."""
+    from nitrix.stats import gp_aic
+
+    rng = np.random.default_rng(1)
+    x, g1, g2, y, t, pop, _L1, _L2 = _nested_data(rng, n_out=4, n_in=4, per=20)
+    res = hgp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), jnp.asarray(g1),
+                  group_inner=jnp.asarray(g2), model='nested', rank=8, n_rho=18)
+    assert res.model == 'nested'
+    assert res.theta.shape == (1, 5)  # 3 GP + noise + rho
+    assert res.edf.shape == (1, 3)
+    assert tuple(res.n_levels) == (4, 16)
+    assert np.isfinite(float(gp_aic(res)[0]))
+    pop_mean, _ = hgp_predict(res, jnp.asarray(t))
+    assert np.corrcoef(np.asarray(pop_mean)[0], pop)[0, 1] > 0.9
+
+
+def test_hgp_nested_requires_group_inner():
+    rng = np.random.default_rng(2)
+    x, g1, _g2, y, *_ = _nested_data(rng, n_out=2, n_in=2, per=10)
+    with pytest.raises(ValueError):
+        hgp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), jnp.asarray(g1),
+                model='nested')

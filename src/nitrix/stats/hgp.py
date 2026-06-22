@@ -103,29 +103,30 @@ class HGPResult:
     Attributes
     ----------
     coef
-        ``(V, p)`` coefficients over ``[fixed | pop-smooth | group-smooths]`` with
-        ``p = n_fixed + m + n_levels * m``: the unpenalised fixed effects, the
-        population eigenfunction coefficients, then each group's deviation
-        coefficients (group ``g`` occupies ``[n_fixed + (1+g) m : n_fixed +
-        (2+g) m]``).
+        ``(V, p)`` coefficients over ``[fixed | pop-smooth | group-smooths…]``:
+        the unpenalised fixed effects, the population eigenfunction coefficients,
+        then each grouping level's per-group deviation coefficients.  ``'GS'``:
+        ``p = n_fixed + m + L m``; ``'nested'``: ``p = n_fixed + m + (L1 + L2) m``.
     cov_unscaled
         ``(V, p, p)`` Bayesian covariance ``(X^T X + S_lambda)^{-1}``.
     theta
-        ``(V, 4)`` ``[log sigma_pop^2, log sigma_grp^2, log sigma_e^2, log rho]``
-        (the ``rho`` column is constant -- one shared lengthscale).
+        ``(V, K + 2)`` ``[log sigma_pop^2, (log sigma_grp_i^2)…, log sigma_e^2,
+        log rho]`` -- one GP variance per component (``K = 2`` for ``'GS'``,
+        ``3`` for ``'nested'``); the ``rho`` column is constant (one shared
+        lengthscale).
     log_mlik
-        ``(V,)`` REML log marginal likelihood at the fit (up to an additive
-        constant in ``n`` / ``n_fixed`` only).
+        ``(V,)`` REML log marginal likelihood at the fit.
     edf
-        ``(V, 2)`` effective degrees of freedom of the population and the (pooled)
-        group smooths.
+        ``(V, K)`` effective degrees of freedom of each GP component (population,
+        then each grouping level).
     dispersion
         ``(V,)`` residual variance ``sigma_e^2``.
     kernel, engine, model
         Kernel name, reduced-rank engine (``'hsgp'``), and hierarchical model
-        (``'GS'`` -- global + group smoothers, shared group wiggliness).
+        (``'GS'`` -- global + group smoothers; ``'nested'`` -- two-level g1/g2).
     n_levels
-        Number of factor levels ``L``.
+        Number of factor levels: ``L`` (``'GS'``) or the tuple ``(L1, L2)``
+        (``'nested'``).
     n_obs, rank, n_fixed
         ``N``, the per-smooth rank ``m``, and the number of fixed columns ``M_0``.
     lo, hi, boundary
@@ -134,14 +135,14 @@ class HGPResult:
 
     coef: Float[Array, 'V p']
     cov_unscaled: Float[Array, 'V p p']
-    theta: Float[Array, 'V 4']
+    theta: Float[Array, 'V K2']
     log_mlik: Float[Array, 'V']
-    edf: Float[Array, 'V 2']
+    edf: Float[Array, 'V K']
     dispersion: Float[Array, 'V']
     kernel: str
     engine: str
     model: str
-    n_levels: int
+    n_levels: Any
     n_obs: int
     rank: int
     n_fixed: int
@@ -267,12 +268,13 @@ def _hgp_fit_one(
     Float[Array, ' p'],
     Float[Array, 'p p'],
     Float[Array, ' K'],
-    Float[Array, ' 2'],
+    Float[Array, ' K'],
     Float[Array, ''],
     Float[Array, ''],
 ]:
     """Single-element hierarchical fit at fixed ``rho``.  Returns ``(beta, V, lam,
-    edf2, dispersion, log_mlik)`` with ``edf2 = [edf_pop, edf_grp]``."""
+    edf_blocks, dispersion, log_mlik)`` with ``edf_blocks`` the per-GP-component
+    effective dof (population, then each grouping level)."""
     lam = _mb_fs(
         c, g, xtx, d_blocks, ranks, n, p, n_outer, ridge, lam_floor, lam_ceil
     )
@@ -283,10 +285,10 @@ def _hgp_fit_one(
     nll = _mb_reml_nll(d_p, logdet_h, lam, ranks, log_pdets, n, n_fixed)
     # Per-smooth EDF: tr over each smooth's columns of the influence V X^T X.
     influence_diag = jnp.sum(v * xtx, axis=0)  # (p,) diag(V X^T X) columnwise
-    (p_lo, p_hi), (g_lo, g_hi) = block_cols
-    edf_pop = jnp.sum(influence_diag[p_lo:p_hi])
-    edf_grp = jnp.sum(influence_diag[g_lo:g_hi])
-    return beta, v, lam, jnp.stack([edf_pop, edf_grp]), phi, -0.5 * nll
+    edf_blocks = jnp.stack(
+        [jnp.sum(influence_diag[lo:hi]) for (lo, hi) in block_cols]
+    )
+    return beta, v, lam, edf_blocks, phi, -0.5 * nll
 
 
 def _hgp_pooled_nll_one(
@@ -330,31 +332,37 @@ def _factor_smooth_design(
     return inter.reshape(phi.shape[0], n_levels * phi.shape[1])
 
 
-def _block_diag_weights(
-    inv_s: Float[Array, ' m'], n_fixed: int, n_levels: int
-) -> Tuple[Float[Array, '2 p'], Float[Array, ' 2'], Tuple[Tuple[int, int], ...]]:
-    """The two diagonal penalty blocks (population, group) over the full ``p``
-    columns, their ranks, and the smooth column slices.
+def _block_weights(
+    inv_s: Float[Array, ' m'], n_fixed: int, level_counts: Tuple[int, ...]
+) -> Tuple[Float[Array, 'K p'], Float[Array, ' K'], Tuple[Tuple[int, int], ...]]:
+    """The ``K = 1 + len(level_counts)`` diagonal penalty blocks over the full
+    ``p`` columns, their ranks, and the smooth column slices.
 
-    ``d_blocks[0]`` carries ``1/s`` on the population columns, ``d_blocks[1]``
-    carries ``1/s`` (tiled over the ``L`` groups) on the factor-smooth columns;
-    both are zero on the unpenalised fixed columns."""
+    Block 0 is the **population** smooth (``1/s`` on its ``m`` columns); block
+    ``i+1`` is the ``i``-th **factor-smooth** (``1/s`` tiled over its
+    ``level_counts[i]`` groups). ``level_counts = (L,)`` is the GS model;
+    ``(L1, L2)`` is the nested two-level model. Every block is diagonal with
+    disjoint columns."""
     m = inv_s.shape[0]
-    p = n_fixed + m + n_levels * m
-    zeros_fixed = jnp.zeros((n_fixed,), dtype=inv_s.dtype)
-    zeros_pop = jnp.zeros((m,), dtype=inv_s.dtype)
-    zeros_grp = jnp.zeros((n_levels * m,), dtype=inv_s.dtype)
-    d_pop = jnp.concatenate([zeros_fixed, inv_s, zeros_grp])
-    d_grp = jnp.concatenate(
-        [zeros_fixed, zeros_pop, jnp.tile(inv_s, n_levels)]
+    reps = (1,) + tuple(level_counts)  # population is one copy
+    widths = tuple(rep * m for rep in reps)
+    p = n_fixed + sum(widths)
+    d_blocks = []
+    ranks = []
+    block_cols = []
+    col = n_fixed
+    for rep, w in zip(reps, widths):
+        pre = jnp.zeros((col,), dtype=inv_s.dtype)
+        post = jnp.zeros((p - col - w,), dtype=inv_s.dtype)
+        d_blocks.append(jnp.concatenate([pre, jnp.tile(inv_s, rep), post]))
+        ranks.append(float(w))
+        block_cols.append((col, col + w))
+        col += w
+    return (
+        jnp.stack(d_blocks),
+        jnp.asarray(ranks, dtype=inv_s.dtype),
+        tuple(block_cols),
     )
-    d_blocks = jnp.stack([d_pop, d_grp])  # (2, p)
-    ranks = jnp.asarray([m, n_levels * m], dtype=inv_s.dtype)
-    block_cols = (
-        (n_fixed, n_fixed + m),
-        (n_fixed + m, p),
-    )
-    return d_blocks, ranks, block_cols
 
 
 def _inv_s(sqrt_lambda: Array, kernel: str, rho: float, dtype: Any) -> Array:
@@ -375,6 +383,7 @@ def hgp_fit(
     x: Float[Array, ' N'],
     group: Int[Array, ' N'],
     *,
+    group_inner: Optional[Int[Array, ' N']] = None,
     parametric: Optional[Float[Array, 'N q']] = None,
     kernel: str = 'matern52',
     rank: int = 12,
@@ -385,6 +394,7 @@ def hgp_fit(
     n_rho: int = 24,
     map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]] = None,
     n_levels: Optional[int] = None,
+    n_levels_inner: Optional[int] = None,
     n_outer: int = 30,
     n_search: int = 15,
     ridge: float = 1e-8,
@@ -403,7 +413,11 @@ def hgp_fit(
         ``(N,)`` covariate.
     group
         ``(N,)`` integer factor labels ``0 .. L-1`` (the grouping the smooth
-        varies over -- subjects, sites, ...).
+        varies over -- subjects, sites, ...).  For ``model='nested'`` this is the
+        **outer** factor.
+    group_inner
+        ``(N,)`` integer labels of the **inner** factor (nested within ``group``),
+        ``0 .. L2-1`` globally.  Required for ``model='nested'``.
     parametric
         Optional ``(N, q)`` unpenalised linear design (with the intercept).
     kernel, rank, boundary, bounds
@@ -411,9 +425,14 @@ def hgp_fit(
         per-smooth eigenfunction count (default ``12`` -- the design is ``1 + L``
         smooths wide, so a smaller rank than ``gp_fit`` is usual).
     model
-        Hierarchical structure.  ``'GS'`` (only): a global smoother **and**
-        group-level smoothers with a single shared group wiggliness
-        (``sigma_grp^2``).
+        Hierarchical structure.  ``'GS'`` (default): a global smoother plus
+        group-level smoothers with one shared group wiggliness ``sigma_grp^2``.
+        ``'nested'``: a two-level hierarchy ``(gp | g1/g2)`` -- population +
+        outer-group + inner-group(nested) GP deviations, three variance components
+        (``sigma_pop^2``, ``sigma_outer^2``, ``sigma_inner^2``) sharing ``rho``.
+    n_levels, n_levels_inner
+        Outer / inner factor-level counts (default to ``max + 1``); pass when a
+        level is absent so the block widths are stable.
     rho_bounds, n_rho, map_rho
         Shared-lengthscale search (as :func:`~nitrix.stats.gp.gp_fit`); ``map_rho``
         is an optional ``rho -> -log p(rho)`` lengthscale prior (e.g. a builder
@@ -429,10 +448,10 @@ def hgp_fit(
     log sigma_grp^2, log sigma_e^2, log rho]``, REML marginal likelihood, the
     population / group EDF, and dispersion.
     """
-    if model != 'GS':
+    if model not in ('GS', 'nested'):
         raise NotImplementedError(
-            f"hgp_fit: model={model!r} -- only 'GS' (global + group smoothers) "
-            'is implemented.'
+            f"hgp_fit: model={model!r} -- expected 'GS' (global + group "
+            "smoothers) or 'nested' (two-level g1/g2)."
         )
     if rank < 1:
         raise ValueError(f'hgp_fit: rank={rank} must be >= 1.')
@@ -448,8 +467,30 @@ def hgp_fit(
             f'hgp_fit: x ({x.shape[0]}) and group ({group.shape[0]}) must have '
             f'length N={n} to match Y.'
         )
+    nested = model == 'nested' or group_inner is not None
     L = int(n_levels) if n_levels is not None else int(jnp.max(group)) + 1
+    groupings = [group]
+    level_counts = [L]
+    if nested:
+        if group_inner is None:
+            raise ValueError(
+                "hgp_fit: model='nested' requires `group_inner` (the inner "
+                'factor nested within `group`).'
+            )
+        group_inner = jnp.asarray(group_inner)
+        if group_inner.shape[0] != n:
+            raise ValueError(
+                f'hgp_fit: group_inner ({group_inner.shape[0]}) must have '
+                f'length N={n}.'
+            )
+        L2 = (
+            int(n_levels_inner) if n_levels_inner is not None
+            else int(jnp.max(group_inner)) + 1
+        )
+        groupings.append(group_inner)
+        level_counts.append(L2)
     m = int(rank)
+    n_blocks = 1 + len(level_counts)
 
     x_np = np.asarray(x, dtype=np.float64)
     lo = float(np.min(x_np)) if bounds is None else float(bounds[0])
@@ -457,16 +498,22 @@ def hgp_fit(
     c_mid, big_l = _hsgp_domain(lo, hi, boundary)
     sqrt_lambda, phase, inv_sqrt_L = _hsgp_eigen(m, c_mid, big_l, Y.dtype)
 
-    # Fixed design: [1 | parametric | Phi_pop | Phi_factor]; rho enters the
-    # diagonal penalty weights only.
+    # Fixed design: [1 | parametric | Phi_pop | Phi_factor(g1) | Phi_factor(g2)…];
+    # rho enters the diagonal penalty weights only.
     phi = _hsgp_features(x, sqrt_lambda, phase, inv_sqrt_L)  # (N, m)
     fixed_blocks = [jnp.ones((n, 1), dtype=Y.dtype)]
     if parametric is not None:
         fixed_blocks.append(jnp.asarray(parametric, dtype=Y.dtype))
     n_fixed = sum(b.shape[1] for b in fixed_blocks)
-    phi_factor = _factor_smooth_design(phi, group, L)  # (N, L*m)
-    X = jnp.concatenate(fixed_blocks + [phi, phi_factor], axis=1)  # (N, p)
+    factor_designs = [
+        _factor_smooth_design(phi, grp, lc)
+        for grp, lc in zip(groupings, level_counts)
+    ]
+    X = jnp.concatenate(
+        fixed_blocks + [phi] + factor_designs, axis=1
+    )  # (N, p)
     p = X.shape[1]
+    level_counts_t = tuple(level_counts)
 
     xtx = X.T @ X
     c_all = Y @ X
@@ -484,10 +531,12 @@ def hgp_fit(
         rho: float,
     ) -> Tuple[Array, Array, Array, Tuple[Tuple[int, int], ...]]:
         inv_s = _inv_s(sqrt_lambda, kernel, rho, Y.dtype)
-        d_blocks, ranks, block_cols = _block_diag_weights(inv_s, n_fixed, L)
+        d_blocks, ranks, block_cols = _block_weights(
+            inv_s, n_fixed, level_counts_t
+        )
+        reps = (1,) + level_counts_t
         log_pdets = jnp.asarray(
-            [jnp.sum(jnp.log(inv_s)), L * jnp.sum(jnp.log(inv_s))],
-            dtype=Y.dtype,
+            [rep * jnp.sum(jnp.log(inv_s)) for rep in reps], dtype=Y.dtype
         )
         return d_blocks, ranks, log_pdets, block_cols
 
@@ -527,16 +576,19 @@ def hgp_fit(
         blocked_vmap(_final, (c_all, g_all), block=block),
     )
 
+    # theta = [log sigma_k^2 (one per GP component), log sigma_e^2, log rho].
     sigma_e2 = phi_disp
-    sigma_pop2 = sigma_e2 / jnp.clip(lam[:, 0], 1e-30, None)
-    sigma_grp2 = sigma_e2 / jnp.clip(lam[:, 1], 1e-30, None)
+    sigma_gp2 = [
+        sigma_e2 / jnp.clip(lam[:, k], 1e-30, None) for k in range(n_blocks)
+    ]
     log_rho_col = jnp.full_like(sigma_e2, np.log(rho_hat))
     theta = jnp.stack(
-        [jnp.log(jnp.clip(sigma_pop2, 1e-30, None)),
-         jnp.log(jnp.clip(sigma_grp2, 1e-30, None)),
-         jnp.log(jnp.clip(sigma_e2, 1e-30, None)),
-         log_rho_col],
+        [jnp.log(jnp.clip(s, 1e-30, None)) for s in sigma_gp2]
+        + [jnp.log(jnp.clip(sigma_e2, 1e-30, None)), log_rho_col],
         axis=-1,
+    )
+    n_levels_aux: Any = (
+        tuple(level_counts) if nested else int(level_counts[0])
     )
     return HGPResult(
         coef=beta,
@@ -547,8 +599,8 @@ def hgp_fit(
         dispersion=sigma_e2,
         kernel=kernel,
         engine='hsgp',
-        model='GS',
-        n_levels=int(L),
+        model='nested' if nested else 'GS',
+        n_levels=n_levels_aux,
         n_obs=int(n),
         rank=int(m),
         n_fixed=int(n_fixed),
@@ -609,7 +661,9 @@ def hgp_predict(
         )
     t_new = jnp.concatenate(fixed_blocks, axis=1)  # (g, mf)
 
-    # Population design: [T | Phi | 0 ... 0] over the group columns.
+    # Population design: [T | Phi | 0 ... 0] over all group columns (works for
+    # GS and nested -- the group-column count is read off the coefficient width).
+    n_group_cols = result.coef.shape[1] - mf - m
     fixed_part = result.coef[:, :mf] @ t_new.T  # (V, g)
     beta_pop = result.coef[:, mf:mf + m]  # (V, m)
     pop_smooth = beta_pop @ phi_new.T  # (V, g)
@@ -617,13 +671,19 @@ def hgp_predict(
 
     if levels is None:
         x_design = jnp.concatenate(
-            [t_new, phi_new, jnp.zeros((gsz, result.n_levels * m), dtype=dtype)],
+            [t_new, phi_new, jnp.zeros((gsz, n_group_cols), dtype=dtype)],
             axis=1,
         )
         var = jnp.einsum('gi,vij,gj->vg', x_design, result.cov_unscaled, x_design)
         std = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-30, None))
         return pop_mean, std
 
+    if result.model == 'nested':
+        raise NotImplementedError(
+            "hgp_predict: per-group curves for model='nested' are not yet "
+            'supported; use levels=None for the population curve.'
+        )
+    n_lev = int(result.n_levels)
     levels = jnp.asarray(levels).astype(jnp.int32)
 
     def _one_level(ell: Array) -> Tuple[Array, Array]:
@@ -632,10 +692,10 @@ def hgp_predict(
         mean = pop_mean + beta_g @ phi_new.T  # (V, g)
         # Curve design: T + population Phi + this group's Phi block (the other
         # group blocks zero), as (g, L*m).
-        onehot = jax.nn.one_hot(ell, result.n_levels, dtype=dtype)  # (L,)
+        onehot = jax.nn.one_hot(ell, n_lev, dtype=dtype)  # (L,)
         grp_cols = (
             phi_new[:, None, :] * onehot[None, :, None]
-        ).reshape(gsz, result.n_levels * m)  # (g, L*m)
+        ).reshape(gsz, n_lev * m)  # (g, L*m)
         x_design = jnp.concatenate([t_new, phi_new, grp_cols], axis=1)
         var = jnp.einsum('gi,vij,gj->vg', x_design, result.cov_unscaled, x_design)
         std = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-30, None))

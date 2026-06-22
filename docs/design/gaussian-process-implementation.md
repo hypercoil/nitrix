@@ -418,6 +418,28 @@ The FR-review follow-up: PR5 shipped the fixed-`ρ` `hsgp_basis_nd`; PR8 makes
   clean. (ARD on a vector `ρ` is reported in `nd_meta`; a future per-axis MAP prior
   is the obvious extension.)
 
+## 5i. PR9 — nested two-level HGP `(gp | g1/g2)` (**shipped**)
+
+The FR P6 deliverable: a nested hierarchy on top of `hgp_fit`. Population +
+**outer-group** + **inner-group (nested in outer)** GP deviations — three GP
+variance components (`σ²_pop`, `σ²_outer`, `σ²_inner`) sharing `ρ`.
+
+- **Falls straight out of the K-block core.** The hgp diagonal-penalty REML was
+  already K-block (`_mb_*`); PR9 generalises the design/weights helper
+  (`_block_weights(inv_s, n_fixed, level_counts)`) to any number of factor-smooth
+  blocks. Nested = `level_counts = (L1, L2)` ⇒ K=3 blocks `[pop, Φ⊗oh(g1),
+  Φ⊗oh(g2)]`; GS = `(L,)`. The fit, FS, REML are unchanged.
+- **`hgp_fit(model='nested', group=g1, group_inner=g2)`.** `HGPResult` widens
+  generically: `theta` is `(V, K+2)` (`(V,5)` nested), `edf` is `(V, K)`,
+  `n_levels` is `(L1, L2)`. `gp_aic`/`gp_bic` work (the `_total_edf` sums the K
+  blocks). `hgp_predict` returns the population curve (`levels=None`) for both
+  models; per-group curves for the nested model are a documented follow-up.
+- **Validation:** a dense **3-component** marginal-likelihood reference
+  (`M = I + σ²_pop·…+σ²_outer·…+σ²_inner·…`) matches the p-space REML to a constant
+  offset (`<1e-6`); the three variance components recover the simulated structure
+  and the population trend (corr `>0.9`); `group_inner` is required. 3 tests; the
+  GS suite + the renamed `_block_weights` reference unchanged; ruff/mypy clean.
+
 ## 6. Decisions (confirmed 2026-06-21)
 
 1. **PR1 scope — fixed-`ρ` `hsgp_basis` only.** Spectral densities + the
