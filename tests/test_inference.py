@@ -180,6 +180,60 @@ def test_fdr_and_bonferroni_match_statsmodels():
     np.testing.assert_allclose(np.asarray(padjb), padjb_sm, atol=1e-10)
 
 
+@needs_sm
+def test_fdr_by_matches_statsmodels():
+    """CV4: Benjamini-Yekutieli (arbitrary-dependence FDR) equals statsmodels'
+    fdr_by, and is uniformly more conservative than BH."""
+    from statsmodels.stats.multitest import multipletests
+
+    from nitrix.stats.inference.multiple_comparisons import fdr_by
+
+    rng = np.random.default_rng(5)
+    p = np.clip(rng.beta(0.4, 4.0, 300), 1e-6, 1.0)
+    _, padj = fdr_by(jnp.asarray(p), alpha=0.05)
+    _, padj_sm, _, _ = multipletests(p, alpha=0.05, method='fdr_by')
+    np.testing.assert_allclose(np.asarray(padj), padj_sm, atol=1e-10)
+    _, bh = fdr_bh(jnp.asarray(p))
+    assert np.all(np.asarray(padj) >= np.asarray(bh) - 1e-12)  # BY >= BH
+
+
+def test_storey_pi0_and_adaptive_fdr():
+    """CV4: Storey's pi0 estimates the true-null fraction; the pi0-adaptive FDR
+    is at least as powerful as BH and recovers BH when pi0 -> 1."""
+    from nitrix.stats.inference.multiple_comparisons import (
+        fdr,
+        fdr_storey,
+        storey_pi0,
+    )
+
+    rng = np.random.default_rng(7)
+    # 800 nulls (uniform) + 200 strong alternatives
+    p = np.clip(
+        np.concatenate([rng.uniform(0, 1, 800), rng.beta(0.3, 8.0, 200)]),
+        1e-8, 1.0,
+    )
+    pj = jnp.asarray(p)
+    pi0 = float(storey_pi0(pj))
+    assert 0.0 < pi0 <= 1.0 and abs(pi0 - 0.8) < 0.15  # ~true null fraction
+    _, st = fdr_storey(pj)
+    _, bh = fdr_bh(pj)
+    assert np.all(np.asarray(st) <= np.asarray(bh) + 1e-12)  # >= power
+    # all-null data: pi0 ~ 1, Storey ~ BH
+    pn = jnp.asarray(rng.uniform(0, 1, 1000))
+    assert float(storey_pi0(pn)) > 0.9
+    np.testing.assert_allclose(
+        np.asarray(fdr_storey(pn)[1]), np.asarray(fdr_bh(pn)[1]), atol=0.05
+    )
+    # dispatcher routes to each method; unknown method raises
+    for method in ('bh', 'by', 'storey'):
+        rej, q = fdr(pj, method=method)
+        assert rej.shape == (1000,) and q.shape == (1000,)
+    with pytest.raises(ValueError, match='expected'):
+        fdr(pj, method='holm')
+    with pytest.raises(ValueError, match='must lie'):
+        storey_pi0(pj, lam=1.0)
+
+
 # ---------------------------------------------------------------------------
 # randomise driver
 # ---------------------------------------------------------------------------

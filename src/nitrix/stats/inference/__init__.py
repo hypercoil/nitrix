@@ -38,7 +38,11 @@ from .multiple_comparisons import (
     bonferroni,
     conjunction,
     conjunction_pvalue,
+    fdr,
     fdr_bh,
+    fdr_by,
+    fdr_storey,
+    storey_pi0,
 )
 from .permutation import permutations, sign_flips
 from .randomise import PermResult, gpd_pvalue, permutation_test
@@ -53,7 +57,11 @@ __all__ = [
     'permutation_test',
     'PermResult',
     'gpd_pvalue',
+    'fdr',
     'fdr_bh',
+    'fdr_by',
+    'fdr_storey',
+    'storey_pi0',
     'bonferroni',
     'conjunction',
     'conjunction_pvalue',
