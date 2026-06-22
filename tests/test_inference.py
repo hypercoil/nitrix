@@ -69,6 +69,22 @@ def test_sign_flips_properties():
             assert len(set(vals.tolist())) == 1  # whole block shares sign
 
 
+def test_sign_flips_noncontiguous_blocks_stay_independent():
+    """MC3: negative / sparse block labels must be canonicalised, not aliased.
+    ``[-1, -1, 0, 0]`` is two distinct blocks; members share a sign but the two
+    blocks flip independently (no column-index wrap coupling them into one)."""
+    blocks = jnp.asarray([-1, -1, 0, 0])
+    sf = np.asarray(sign_flips(4, 4000, jax.random.PRNGKey(3), blocks=blocks))
+    assert bool(jnp.all(jnp.asarray(sf[0]) == 1.0))
+    assert np.all(sf[:, 0] == sf[:, 1]) and np.all(sf[:, 2] == sf[:, 3])
+    # the two distinct blocks are independent: ~0 correlation over many draws,
+    # and all four (+-,+-) sign combinations appear (an aliased single block
+    # would only ever produce two of them).
+    combos = {(int(a), int(b)) for a, b in zip(sf[1:, 0], sf[1:, 2])}
+    assert len(combos) == 4
+    assert abs(np.corrcoef(sf[1:, 0], sf[1:, 2])[0, 1]) < 0.1
+
+
 def test_permutations_properties():
     pm = permutations(10, 200, jax.random.PRNGKey(0))
     assert bool(jnp.all(pm[0] == jnp.arange(10)))  # identity first

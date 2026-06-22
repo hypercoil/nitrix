@@ -72,6 +72,23 @@ def test_spectral_density_dispatch_aliases():
         matern_spectral_density(w, rho=0.3, nu=2.0)
 
 
+def test_spectral_density_integer_omega_not_corrupted():
+    """MC2: an integer ``omega`` array must not coerce ``rho``/``amplitude`` to
+    int (which zeroed SE and NaN'd Matern); results must match the float omega
+    and a float32 omega must stay float32 (the x32 path is preserved)."""
+    w_int = jnp.array([0, 1, 2, 3])
+    w_flt = jnp.array([0.0, 1.0, 2.0, 3.0])
+    se_i = np.asarray(se_spectral_density(w_int, rho=0.3, amplitude=1.7))
+    se_f = np.asarray(se_spectral_density(w_flt, rho=0.3, amplitude=1.7))
+    np.testing.assert_allclose(se_i, se_f, rtol=1e-12)
+    assert np.all(np.isfinite(se_i)) and np.any(se_i != 0.0)
+    mt_i = np.asarray(matern_spectral_density(w_int, rho=0.4, nu=2.5, amplitude=1.3))
+    mt_f = np.asarray(matern_spectral_density(w_flt, rho=0.4, nu=2.5, amplitude=1.3))
+    np.testing.assert_allclose(mt_i, mt_f, rtol=1e-12)
+    assert np.all(np.isfinite(mt_i))
+    assert se_spectral_density(w_flt.astype(jnp.float32), rho=0.3).dtype == jnp.float32
+
+
 @pytest.mark.parametrize('kernel,nu', [('matern12', 0.5), ('matern32', 1.5),
                                        ('matern52', 2.5), ('rbf', None)])
 def test_spectral_density_inverse_ft_matches_sklearn(kernel, nu):

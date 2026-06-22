@@ -51,7 +51,16 @@ def sign_flips(
             jax.random.bernoulli(key, 0.5, (n_perm, n)), 1.0, -1.0
         )
     else:
-        ids = jnp.asarray(blocks)
+        # Canonicalise arbitrary (possibly negative / non-contiguous) labels to a
+        # dense 0..K-1 encoding so each distinct label is one independent
+        # whole-block flip. Without this, a negative label wraps the column index
+        # and sparse labels alias distinct blocks into one column -- silently
+        # coupling exchangeability blocks (fewer effective relabellings ->
+        # invalid null). sign_flips is already eager-only (int(ids.max())), so
+        # jnp.unique here costs no jit-traceability. (permutations() uses the
+        # labels only as a sort key and is correct for any distinct integer
+        # labels, so it is left untouched to stay jit-traceable.)
+        ids = jnp.unique(jnp.asarray(blocks), return_inverse=True)[1].reshape(-1)
         n_blocks = int(ids.max()) + 1
         block_flips = jnp.where(
             jax.random.bernoulli(key, 0.5, (n_perm, n_blocks)), 1.0, -1.0

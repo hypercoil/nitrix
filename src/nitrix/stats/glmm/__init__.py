@@ -66,7 +66,9 @@ from __future__ import annotations
 
 from typing import Literal, Optional, Union
 
+import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float, Int
 
 from .._family import GAUSSIAN, Family, resolve_family
@@ -224,8 +226,26 @@ def glmm_fit(
     # under jax.jit (P7); pass n_groups explicitly -- the count the caller
     # already knows -- to fuse the whole fit (mirrors lme_fit / reml_fit, where
     # the level structure is likewise caller-supplied).
+    # Resolve the static level count exactly as before: int(jnp.max(group))
+    # concretises a tracer, so without an explicit n_groups this (correctly)
+    # raises under jit -- the P7 contract (pass n_groups to trace).
     if n_groups is None:
         n_groups = int(jnp.max(group)) + 1
+    # Validate the label range on the host when `group` is concrete (the eager
+    # case, or a constant captured by an outer jit -- np.asarray reads the
+    # constant without building a tracer). one_hot / segment_sum / b[group] all
+    # silently zero out-of-range or negative indices, so a bad label would drop
+    # that observation from the group structure (a wrong-but-finite fit). A
+    # genuinely traced `group` is skipped (the caller owns the contract).
+    if not isinstance(group, jax.core.Tracer):
+        g_host = np.asarray(group)
+        g_min, g_max = int(g_host.min()), int(g_host.max())
+        if g_min < 0 or g_max >= n_groups:
+            raise ValueError(
+                f'glmm_fit: group labels must lie in [0, n_groups={n_groups}); '
+                f'got min={g_min}, max={g_max}. Pass contiguous 0-based labels '
+                'so no observation silently drops out of the group structure.'
+            )
 
     if z is not None:
         z = jnp.asarray(z, dtype=X.dtype)

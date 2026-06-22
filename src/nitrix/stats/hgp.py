@@ -468,7 +468,18 @@ def hgp_fit(
             f'length N={n} to match Y.'
         )
     nested = model == 'nested' or group_inner is not None
-    L = int(n_levels) if n_levels is not None else int(jnp.max(group)) + 1
+    # Validate the label range host-side: jax.nn.one_hot maps any label >= L or
+    # < 0 to an all-zero row, so an out-of-range/negative label would silently
+    # drop that observation out of the group structure (a wrong-but-finite fit).
+    g_min, g_max = int(jnp.min(group)), int(jnp.max(group))
+    L = int(n_levels) if n_levels is not None else g_max + 1
+    if g_min < 0 or g_max >= L:
+        raise ValueError(
+            f'hgp_fit: group labels must lie in [0, n_levels={L}); got '
+            f'min={g_min}, max={g_max}. Use contiguous 0-based labels (and, if '
+            'passing n_levels explicitly, n_levels >= max(group)+1) so no '
+            'observation silently drops out of the group structure.'
+        )
     groupings = [group]
     level_counts = [L]
     if nested:
@@ -483,10 +494,14 @@ def hgp_fit(
                 f'hgp_fit: group_inner ({group_inner.shape[0]}) must have '
                 f'length N={n}.'
             )
-        L2 = (
-            int(n_levels_inner) if n_levels_inner is not None
-            else int(jnp.max(group_inner)) + 1
-        )
+        gi_min, gi_max = int(jnp.min(group_inner)), int(jnp.max(group_inner))
+        L2 = int(n_levels_inner) if n_levels_inner is not None else gi_max + 1
+        if gi_min < 0 or gi_max >= L2:
+            raise ValueError(
+                f'hgp_fit: group_inner labels must lie in [0, '
+                f'n_levels_inner={L2}); got min={gi_min}, max={gi_max}. Inner '
+                'labels must be globally numbered 0..L2-1 (not per-outer).'
+            )
         groupings.append(group_inner)
         level_counts.append(L2)
     m = int(rank)

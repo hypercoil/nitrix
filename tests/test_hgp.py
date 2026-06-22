@@ -240,6 +240,27 @@ def test_hgp_argument_validation():
         hgp_fit(Y, jnp.asarray(x[:5]), jnp.asarray(group))  # length mismatch
 
 
+def test_hgp_group_label_range_validation():
+    """ER1: out-of-range / negative group labels would be silently zero-rowed by
+    one_hot (dropping observations); hgp_fit must reject them instead."""
+    rng = np.random.default_rng(8)
+    x, group, y, *_ = _hier_data(rng, L=4, per=12)
+    Y = jnp.asarray(y[None, :])
+    # n_levels too small for the labels present
+    with pytest.raises(ValueError, match='group labels must lie'):
+        hgp_fit(Y, jnp.asarray(x), jnp.asarray(group), n_levels=3)
+    # negative label
+    bad = np.array(group)
+    bad[: len(bad) // 4] = -1
+    with pytest.raises(ValueError, match='group labels must lie'):
+        hgp_fit(Y, jnp.asarray(x), jnp.asarray(bad))
+    # nested inner-label range is validated too
+    inner = np.zeros_like(group)
+    with pytest.raises(ValueError, match='group_inner labels must lie'):
+        hgp_fit(Y, jnp.asarray(x), jnp.asarray(group), model='nested',
+                group_inner=jnp.asarray(inner), n_levels_inner=0)
+
+
 # ---------------------------------------------------------------------------
 # 4. gp_factor_smooth -- the fixed-rho factor-smooth GP basis (gam_fit drop-in)
 # ---------------------------------------------------------------------------

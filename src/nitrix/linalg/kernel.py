@@ -362,8 +362,15 @@ def se_spectral_density(
     ``amp**2 sqrt(2 pi) rho exp(...)``.
     """
     omega = jnp.asarray(omega)
-    rho = jnp.asarray(rho, dtype=omega.dtype)
-    amp2 = jnp.asarray(amplitude, dtype=omega.dtype) ** 2
+    # Promote an integer omega to the default float (f64 under x64, else f32)
+    # BEFORE deriving rho/amp -- else `dtype=omega.dtype` truncates rho/amplitude
+    # to int (rho->0 zeros the density). A float omega is preserved as-is
+    # (float32 stays float32 for the x32 path).
+    if not jnp.issubdtype(omega.dtype, jnp.floating):
+        omega = omega.astype(float)
+    dt = omega.dtype
+    rho = jnp.asarray(rho, dtype=dt)
+    amp2 = jnp.asarray(amplitude, dtype=dt) ** 2
     const = (2.0 * jnp.pi) ** (dim / 2.0) * rho**dim
     return cast(Array, amp2 * const * jnp.exp(-0.5 * (rho * omega) ** 2))
 
@@ -393,8 +400,15 @@ def matern_spectral_density(
             '2.5.'
         )
     omega = jnp.asarray(omega)
-    rho = jnp.asarray(rho, dtype=omega.dtype)
-    amp2 = jnp.asarray(amplitude, dtype=omega.dtype) ** 2
+    # See se_spectral_density: promote an integer omega to the default float
+    # before casting rho/amplitude (otherwise an integer omega truncates rho ->
+    # lam=1/0 -> NaN). A float omega is preserved, keeping the dim=1 closed forms
+    # byte-identical.
+    if not jnp.issubdtype(omega.dtype, jnp.floating):
+        omega = omega.astype(float)
+    dt = omega.dtype
+    rho = jnp.asarray(rho, dtype=dt)
+    amp2 = jnp.asarray(amplitude, dtype=dt) ** 2
     w2 = omega**2
     if dim == 1:
         if nu == 0.5:
