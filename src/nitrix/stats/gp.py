@@ -115,7 +115,7 @@ __all__ = [
     ),
     aux=(
         'kernel', 'engine', 'corr', 'n_obs', 'rank', 'n_fixed',
-        'lo', 'hi', 'boundary',
+        'lo', 'hi', 'boundary', 'nd_meta',
     ),
 )
 @dataclass(frozen=True)
@@ -170,6 +170,13 @@ class GPResult:
         Domain descriptors recorded for ``engine='hsgp'`` re-evaluation: the data
         range ``[lo, hi]`` and the boundary factor ``L = boundary * (hi - lo) / 2``
         (unused by ``engine='exact'``, which rebuilds the kernel from ``x_train``).
+    nd_meta
+        ``None`` for a 1-D fit; for a multi-dimensional fit (``X`` is ``(N, D)``)
+        a hashable tuple ``(m_per, bounds, ard_rho)`` -- the per-axis ranks, the
+        per-axis ``(lo, hi)``, and (for ARD) the per-axis lengthscales -- used to
+        rebuild the tensor-product eigenbasis in :func:`gp_predict`.  ``theta[:, 2]``
+        then carries ``log rho`` (the shared isotropic lengthscale, or the
+        geometric mean of the ARD lengthscales).
     """
 
     coef: Float[Array, 'V p']
@@ -188,6 +195,7 @@ class GPResult:
     lo: float
     hi: float
     boundary: float
+    nd_meta: Optional[Any]
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +265,98 @@ def _penalty_diag(
         [jnp.zeros((n_fixed,), dtype=inv_s.dtype), inv_s]
     )
     return d, jnp.sum(jnp.log(inv_s))
+
+
+# ---------------------------------------------------------------------------
+# Multi-dimensional (tensor-product) HSGP eigenstructure -- the rho-independent
+# spatial / multi-covariate basis (isotropic or ARD lengthscale estimation)
+# ---------------------------------------------------------------------------
+
+
+def _hsgp_eigen_nd(
+    x_np: np.ndarray, m_per: Tuple[int, ...], boundary: float, dtype: Any
+) -> Tuple[Array, Array, Array, Array, Tuple[Tuple[float, float], ...]]:
+    """Tensor-product Laplace eigenstructure on the box domain (host build).
+
+    Returns ``(freqs, phase, inv_sqrt_L, omega_norm, bounds)``: per-mode per-axis
+    eigen-frequencies ``(M, D)``, phases ``(M, D)``, the per-axis ``sqrt(1/L_d)``
+    ``(D,)``, the mode-frequency magnitude ``||w|| = sqrt(sum_d lambda_{j_d})``
+    ``(M,)``, and the per-axis ``(lo, hi)`` (recorded for re-evaluation).
+    ``M = prod_d m_per[d]``."""
+    lo = x_np.min(axis=0)
+    hi = x_np.max(axis=0)
+    c_mid = 0.5 * (lo + hi)
+    big_l = float(boundary) * np.maximum(0.5 * (hi - lo), 1e-6)
+    d_in = x_np.shape[1]
+    sqrt_lams = [
+        np.arange(1, m_per[d] + 1, dtype=np.float64) * np.pi / (2.0 * big_l[d])
+        for d in range(d_in)
+    ]
+    grids = np.meshgrid(*sqrt_lams, indexing='ij')
+    freqs = np.stack([g.ravel() for g in grids], axis=1)  # (M, D)
+    phase = freqs * (big_l - c_mid)[None, :]
+    inv_sqrt_L = np.sqrt(1.0 / big_l)
+    omega_norm = np.sqrt((freqs**2).sum(axis=1))
+    bounds = tuple((float(lo[d]), float(hi[d])) for d in range(d_in))
+    return (
+        jnp.asarray(freqs, dtype=dtype),
+        jnp.asarray(phase, dtype=dtype),
+        jnp.asarray(inv_sqrt_L, dtype=dtype),
+        jnp.asarray(omega_norm, dtype=dtype),
+        bounds,
+    )
+
+
+def _hsgp_features_nd(
+    X: Float[Array, 'g D'],
+    freqs: Float[Array, 'M D'],
+    phase: Float[Array, 'M D'],
+    inv_sqrt_L: Float[Array, ' D'],
+) -> Float[Array, 'g M']:
+    """The (rho-independent) tensor-product eigenfunction design ``Phi`` at ``X``:
+    ``prod_d sqrt(1/L_d) sin(w_{m,d} x_d + phase_{m,d})``."""
+    X = jnp.asarray(X)
+    arg = freqs[None, :, :] * X[:, None, :] + phase[None, :, :]  # (g, M, D)
+    terms = inv_sqrt_L[None, None, :] * jnp.sin(arg)
+    return jnp.prod(terms, axis=2)  # (g, M)
+
+
+def _penalty_diag_nd_iso(
+    omega_norm: Float[Array, ' M'],
+    kernel: str,
+    rho: float,
+    dim: int,
+    n_fixed: int,
+) -> Tuple[Float[Array, ' p'], Float[Array, '']]:
+    """Isotropic tensor-HSGP diagonal penalty: ``1/S_D(||w||; rho)`` (the ``D``-dim
+    radial spectral density), zeros on the fixed columns."""
+    s = spectral_density(
+        omega_norm, kernel=kernel, rho=jnp.asarray(rho, dtype=omega_norm.dtype),
+        amplitude=1.0, dim=dim,
+    )
+    inv_s = 1.0 / jnp.clip(s, 1e-30, None)
+    d = jnp.concatenate([jnp.zeros((n_fixed,), dtype=inv_s.dtype), inv_s])
+    return d, jnp.sum(jnp.log(inv_s))
+
+
+def _penalty_diag_nd_ard(
+    freqs: Float[Array, 'M D'],
+    kernel: str,
+    rho_vec: Tuple[float, ...],
+    n_fixed: int,
+) -> Tuple[Float[Array, ' p'], Float[Array, '']]:
+    """Separable / ARD tensor-HSGP penalty: ``1 / prod_d S_1(w_{m,d}; rho_d)`` (a
+    per-axis 1-D density), zeros on the fixed columns."""
+    dtype = freqs.dtype
+    s = jnp.ones((freqs.shape[0],), dtype=dtype)
+    for d in range(freqs.shape[1]):
+        s = s * spectral_density(
+            freqs[:, d], kernel=kernel,
+            rho=jnp.asarray(rho_vec[d], dtype=dtype), amplitude=1.0, dim=1,
+        )
+    inv_s = 1.0 / jnp.clip(s, 1e-30, None)
+    d_full = jnp.concatenate([jnp.zeros((n_fixed,), dtype=dtype), inv_s])
+    return d_full, jnp.sum(jnp.log(inv_s))
 
 
 # ---------------------------------------------------------------------------
@@ -643,15 +743,16 @@ def _exact_design_pen(
 
 def gp_fit(
     Y: Float[Array, 'V N'],
-    x: Float[Array, ' N'],
+    x: Any,
     *,
     parametric: Optional[Float[Array, 'N q']] = None,
     kernel: str = 'matern52',
-    rank: Optional[int] = None,
+    rank: Optional[Any] = None,
     boundary: float = 1.5,
     bounds: Optional[Tuple[float, float]] = None,
     engine: Literal['hsgp', 'exact'] = 'hsgp',
     select: Literal['shared-rho'] = 'shared-rho',
+    ard: bool = False,
     rho_bounds: Optional[Tuple[float, float]] = None,
     n_rho: int = 24,
     map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]] = None,
@@ -675,7 +776,8 @@ def gp_fit(
     Y
         ``(V, N)`` responses (one row per element).
     x
-        ``(N,)`` covariate.
+        ``(N,)`` covariate, or ``(N, D)`` for a **multi-dimensional** GP (a spatial
+        smooth / smooth interaction; HSGP tensor-product engine).
     parametric
         Optional ``(N, q)`` unpenalised linear design (covariates entering
         linearly alongside the intercept).
@@ -684,10 +786,15 @@ def gp_fit(
         ``'matern12'`` / ``'rbf'``.
     rank
         Smooth-basis rank ``m``.  ``None`` (default) uses an engine-appropriate
-        value: ``20`` for ``'hsgp'`` (small ``rho`` needs a larger ``rank``), and
-        ``N`` for ``'exact'`` (full-rank).  An explicit ``rank < N`` with
-        ``engine='exact'`` gives the eigen-truncated Karhunen-Loeve / Nystrom
-        approximation.
+        value: ``20`` for 1-D ``'hsgp'`` (small ``rho`` needs a larger ``rank``),
+        ``N`` for ``'exact'`` (full-rank), and ``8`` **per axis** for a
+        multi-dimensional fit.  An explicit ``rank < N`` with ``engine='exact'``
+        gives the eigen-truncated Karhunen-Loeve / Nystrom approximation; for
+        multi-D, ``rank`` may be a per-axis sequence ``[m_1, ..., m_D]``.
+    ard
+        Multi-D only: ``False`` (default) estimates one **isotropic** lengthscale
+        (a radial kernel of ``||x - x'||``); ``True`` estimates a **per-axis**
+        lengthscale (ARD / separable kernel) by coordinate descent over the axes.
     boundary
         Domain-extension factor ``L / half-range`` (``>= 1``; default ``1.5``;
         ``'hsgp'`` only).
@@ -765,6 +872,43 @@ def gp_fit(
     if x.shape[0] != n:
         raise ValueError(
             f'gp_fit: x has {x.shape[0]} points; expected N={n} to match Y.'
+        )
+    if x.ndim == 2 and x.shape[1] == 1:
+        x = x[:, 0]  # an (N, 1) covariate is the 1-D case
+
+    # --- multi-dimensional (tensor-product) HSGP: X is (N, D), D >= 2 --------
+    if x.ndim == 2:
+        if engine != 'hsgp':
+            raise NotImplementedError(
+                "gp_fit: multi-dimensional X needs engine='hsgp' (the exact "
+                'engine is 1-D only).'
+            )
+        if corr is not None:
+            raise NotImplementedError(
+                'gp_fit: corr= is not supported with multi-dimensional X.'
+            )
+        d_in = x.shape[1]
+        if rank is None:
+            m_per = (8,) * d_in
+        elif isinstance(rank, (int, np.integer)):
+            m_per = (int(rank),) * d_in
+        else:
+            m_per = tuple(int(v) for v in rank)
+            if len(m_per) != d_in:
+                raise ValueError(
+                    f'gp_fit: rank has {len(m_per)} entries; expected D={d_in}.'
+                )
+        if any(mm < 1 for mm in m_per):
+            raise ValueError('gp_fit: every per-axis rank must be >= 1.')
+        fixed_nd = [jnp.ones((n, 1), dtype=Y.dtype)]
+        if parametric is not None:
+            fixed_nd.append(jnp.asarray(parametric, dtype=Y.dtype))
+        n_fixed_nd = sum(b.shape[1] for b in fixed_nd)
+        return _gp_fit_nd(
+            Y, np.asarray(x, dtype=np.float64),
+            jnp.concatenate(fixed_nd, axis=1), n_fixed_nd, kernel, m_per,
+            boundary, ard, rho_bounds, n_rho, map_rho,
+            n_outer, n_search, ridge, lam_floor, lam_ceil, block,
         )
 
     # Engine-appropriate default rank: 20 (hsgp) or N (exact, full-rank).
@@ -911,6 +1055,7 @@ def _assemble_gp_result(
     boundary: float,
     corr_name: str = 'iid',
     corr_rho: Optional[Array] = None,
+    nd_meta: Optional[Any] = None,
 ) -> GPResult:
     """Pack the per-element fit arrays into a :class:`GPResult` (shared by both
     engines): ``theta = [log sigma_f^2, log sigma_e^2, log rho]`` with
@@ -943,6 +1088,7 @@ def _assemble_gp_result(
         lo=lo,
         hi=hi,
         boundary=float(boundary),
+        nd_meta=nd_meta,
     )
 
 
@@ -1019,6 +1165,123 @@ def _gp_fit_exact(
     return _assemble_gp_result(
         beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, 'exact',
         n, m, n_fixed, lo, hi, boundary,
+    )
+
+
+def _gp_fit_nd(
+    Y: Float[Array, 'V N'],
+    x_np: np.ndarray,
+    T: Float[Array, 'N q0'],
+    n_fixed: int,
+    kernel: str,
+    m_per: Tuple[int, ...],
+    boundary: float,
+    ard: bool,
+    rho_bounds: Optional[Tuple[float, float]],
+    n_rho: int,
+    map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]],
+    n_outer: int,
+    n_search: int,
+    ridge: float,
+    lam_floor: float,
+    lam_ceil: float,
+    block: Optional[int],
+) -> GPResult:
+    """Multi-dimensional HSGP fit (tensor-product eigenbasis).  Isotropic (one
+    shared ``rho``, a 1-D grid) or ARD (per-axis ``rho``, coordinate descent over
+    the axes); the eigenbasis is ``rho``-independent so the pooled-REML core is
+    reused with the diagonal penalty as the only moving part."""
+    dtype = Y.dtype
+    d_in = x_np.shape[1]
+    n = Y.shape[-1]
+    freqs, phase, inv_sqrt_L, omega_norm, bounds = _hsgp_eigen_nd(
+        x_np, m_per, boundary, dtype
+    )
+    phi = _hsgp_features_nd(jnp.asarray(x_np, dtype=dtype), freqs, phase, inv_sqrt_L)
+    X = jnp.concatenate([T, phi], axis=1)
+    p = X.shape[1]
+    m = phi.shape[1]
+    xtx = X.T @ X
+    c_all = Y @ X
+    g_all = jnp.sum(Y * Y, axis=1)
+
+    @jax.jit
+    def _pooled(d: Array, log_pdet: Array) -> Array:
+        per = jax.vmap(
+            lambda c_v, g_v: _pooled_nll_one(
+                c_v, g_v, xtx, d, log_pdet, n, p, m, n_fixed,
+                n_search, ridge, lam_floor, lam_ceil,
+            )
+        )(c_all, g_all)
+        return jnp.sum(per)
+
+    half = [0.5 * (bd[1] - bd[0]) for bd in bounds]
+
+    def _grid(base: float) -> np.ndarray:
+        lo_b, hi_b = (
+            (0.05 * base, 2.0 * base) if rho_bounds is None
+            else (float(rho_bounds[0]), float(rho_bounds[1]))
+        )
+        return np.linspace(np.log(lo_b), np.log(hi_b), int(n_rho))
+
+    if not ard:
+        # --- isotropic: 1-D grid over the shared rho -----------------------
+        grid = _grid(float(np.mean(half)))
+        nll_grid = []
+        for lr in grid:
+            rho = float(np.exp(lr))
+            d, lpp = _penalty_diag_nd_iso(omega_norm, kernel, rho, d_in, n_fixed)
+            nll = float(_pooled(d, lpp))
+            if map_rho is not None:
+                nll = nll + 2.0 * float(map_rho(jnp.asarray(rho, dtype=dtype)))
+            nll_grid.append(nll)
+        rho_hat = float(np.exp(_parabolic_argmin(grid, np.asarray(nll_grid))))
+        d_hat, lpp_hat = _penalty_diag_nd_iso(
+            omega_norm, kernel, rho_hat, d_in, n_fixed
+        )
+        ard_rho: Optional[Tuple[float, ...]] = None
+        rho_report = rho_hat
+    else:
+        # --- ARD: coordinate descent over the per-axis lengthscales --------
+        rho_vec = list(half)
+        for _cycle in range(3):
+            for axis in range(d_in):
+                grid = _grid(half[axis])
+                nll_axis = []
+                for lr in grid:
+                    trial = list(rho_vec)
+                    trial[axis] = float(np.exp(lr))
+                    d, lpp = _penalty_diag_nd_ard(
+                        freqs, kernel, tuple(trial), n_fixed
+                    )
+                    nll = float(_pooled(d, lpp))
+                    if map_rho is not None:
+                        nll = nll + 2.0 * float(
+                            map_rho(jnp.asarray(trial[axis], dtype=dtype))
+                        )
+                    nll_axis.append(nll)
+                rho_vec[axis] = float(
+                    np.exp(_parabolic_argmin(grid, np.asarray(nll_axis)))
+                )
+        ard_rho = tuple(rho_vec)
+        d_hat, lpp_hat = _penalty_diag_nd_ard(freqs, kernel, ard_rho, n_fixed)
+        rho_report = float(np.exp(np.mean(np.log(rho_vec))))  # geometric mean
+
+    def _one(c_v: Array, g_v: Array) -> Tuple[Array, ...]:
+        return _gp_fit_one(
+            c_v, g_v, xtx, d_hat, lpp_hat, n, p, m, n_fixed,
+            n_outer, ridge, lam_floor, lam_ceil,
+        )
+
+    beta, v, lam, edf, disp, log_mlik = cast(
+        Tuple[Array, Array, Array, Array, Array, Array],
+        blocked_vmap(_one, (c_all, g_all), block=block),
+    )
+    nd_meta = (tuple(m_per), bounds, ard_rho)
+    return _assemble_gp_result(
+        beta, v, lam, edf, disp, log_mlik, rho_report, kernel, 'hsgp',
+        n, m, n_fixed, bounds[0][0], bounds[0][1], boundary,
+        nd_meta=nd_meta,
     )
 
 
@@ -1212,7 +1475,23 @@ def gp_predict(
     """
     dtype = result.coef.dtype
     x_new = jnp.asarray(x_new, dtype=dtype)
-    if result.engine == 'exact':
+    if x_new.ndim == 2 and x_new.shape[1] == 1 and result.nd_meta is None:
+        x_new = x_new[:, 0]
+    if result.nd_meta is not None:
+        # Multi-dimensional fit: rebuild the tensor-product eigenbasis from the
+        # recorded per-axis ranks and bounds (rho-independent -- self-contained).
+        m_per, bounds, _ard_rho = result.nd_meta
+        x_np = np.asarray(x_new, dtype=np.float64)
+        lo_arr = np.asarray([b[0] for b in bounds])
+        hi_arr = np.asarray([b[1] for b in bounds])
+        # _hsgp_eigen_nd derives the domain from the data min/max -- feed the
+        # recorded bounds as two rows so it reconstructs the training domain.
+        freqs, phase, inv_sqrt_L, _omega, _b = _hsgp_eigen_nd(
+            np.stack([lo_arr, hi_arr]), tuple(m_per), result.boundary, dtype
+        )
+        phi_new = _hsgp_features_nd(x_new, freqs, phase, inv_sqrt_L)
+        _ = x_np
+    elif result.engine == 'exact':
         if x_train is None:
             raise ValueError(
                 "gp_predict: engine='exact' needs the original `x_train` to "

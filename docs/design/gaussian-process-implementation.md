@@ -395,6 +395,29 @@ Closes the one genuine Tier-2 oversight (the FR said `log_mlik` "feeds the shipp
   unpenalised `n_fixed` added back. Valid for same-fixed-effect GP-vs-GP /
   GP-vs-spline (kernel / rank) selection. 3 tests.
 
+## 5h. PR8 — multi-D lengthscale estimation in `gp_fit` (**shipped**)
+
+The FR-review follow-up: PR5 shipped the fixed-`ρ` `hsgp_basis_nd`; PR8 makes
+`gp_fit` *estimate* the multi-D lengthscale (so spatial GPs need no supplied `ρ`).
+
+- **`gp_fit(X, …)` accepts `(N, D)`** and routes to the tensor-product HSGP. The
+  eigenbasis is `ρ`-independent, so the same pooled-REML core runs with the
+  diagonal penalty as the only moving part — no new optimiser, just the penalty
+  builder.
+- **Isotropic** (`ard=False`, default): one shared `ρ` (the `D`-dim radial spectral
+  density `S_D(‖ω‖)`), a 1-D grid as in 1-D `gp_fit`. **ARD** (`ard=True`): a
+  per-axis `ρ_d` (separable density `∏_d S_1(ω_d;ρ_d)`) by **coordinate descent**
+  over the axes (each axis a 1-D grid+parabola, a few cycles) — recovers the
+  anisotropy (verified: longer `ρ` on the smooth axis than the wiggly one).
+- **`GPResult` gains one aux field `nd_meta` = `(m_per, bounds, ard_rho)`** (a
+  hashable tuple), so `gp_predict` rebuilds the tensor eigenbasis **self-contained**
+  (no `x_train`); `theta[:,2]` carries the isotropic `ρ` or the ARD geometric mean.
+- **Validation:** 2-D recovery (corr `>0.98`), ARD anisotropy direction, exact 2-D
+  sklearn-GPR parity (`>0.97`), per-axis `rank`, predict, arg-validation
+  (exact/`corr` reject multi-D). 4 tests; 1-D `gp_fit` suite unchanged; ruff/mypy
+  clean. (ARD on a vector `ρ` is reported in `nd_meta`; a future per-axis MAP prior
+  is the obvious extension.)
+
 ## 6. Decisions (confirmed 2026-06-21)
 
 1. **PR1 scope — fixed-`ρ` `hsgp_basis` only.** Spectral densities + the

@@ -25,7 +25,13 @@ from nitrix.linalg.kernel import (
     se_spectral_density,
     spectral_density,
 )
-from nitrix.stats import gam_fit, hsgp_basis_nd, smooth_partial_effect
+from nitrix.stats import (
+    gam_fit,
+    gp_fit,
+    gp_predict,
+    hsgp_basis_nd,
+    smooth_partial_effect,
+)
 
 # ---------------------------------------------------------------------------
 # 1. dim-generalised spectral densities
@@ -195,3 +201,83 @@ def test_hsgp_nd_argument_validation():
         hsgp_basis_nd(jnp.asarray(X), [8, 8, 8])  # wrong length for D=2
     with pytest.raises(ValueError):
         hsgp_basis_nd(jnp.asarray(X), 8, rho=[0.2, 0.3, 0.4])  # wrong rho length
+
+
+# ---------------------------------------------------------------------------
+# 3. Multi-D lengthscale estimation in gp_fit (isotropic + ARD)
+# ---------------------------------------------------------------------------
+
+
+def test_gp_fit_2d_isotropic_estimates_rho():
+    """``gp_fit`` on ``(N, 2)`` X estimates a shared (isotropic) lengthscale and
+    predicts the surface; the result is self-contained (no x_train)."""
+    rng = np.random.default_rng(0)
+    X = rng.uniform(0.0, 1.0, (500, 2))
+    truth = _surface(X)
+    y = truth + 0.1 * rng.standard_normal(len(X))
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(X), kernel='matern52',
+                 rank=8, n_rho=20)
+    assert res.engine == 'hsgp'
+    assert res.nd_meta is not None
+    rho_hat = float(np.exp(res.theta[0, 2]))
+    assert 0.05 < rho_hat < 2.0
+    mean, std = gp_predict(res, jnp.asarray(X))  # no x_train needed
+    assert mean.shape == (1, len(X))
+    assert np.all(np.asarray(std) > 0)
+    assert np.corrcoef(np.asarray(mean)[0], truth)[0, 1] > 0.98
+
+
+def test_gp_fit_2d_ard_recovers_anisotropy():
+    """ARD recovers a longer lengthscale on the smooth axis than the wiggly one."""
+    rng = np.random.default_rng(1)
+    X = rng.uniform(0.0, 1.0, (600, 2))
+    # smooth in axis 0, wiggly in axis 1
+    truth = np.sin(2 * np.pi * X[:, 0]) * np.sin(6 * np.pi * X[:, 1])
+    y = truth + 0.1 * rng.standard_normal(len(X))
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(X), kernel='matern52',
+                 rank=10, ard=True, n_rho=16)
+    rho_axes = res.nd_meta[2]
+    assert rho_axes is not None
+    assert rho_axes[0] > rho_axes[1]  # smooth axis has the longer lengthscale
+    mean, _ = gp_predict(res, jnp.asarray(X))
+    assert np.corrcoef(np.asarray(mean)[0], truth)[0, 1] > 0.97
+
+
+def test_gp_fit_2d_matches_sklearn():
+    """Estimated-rho 2-D gp_fit tracks an exact 2-D GaussianProcessRegressor."""
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import (
+        ConstantKernel as C,
+    )
+    from sklearn.gaussian_process.kernels import (
+        Matern,
+        WhiteKernel,
+    )
+
+    rng = np.random.default_rng(2)
+    X = rng.uniform(0.0, 1.0, (300, 2))
+    truth = _surface(X)
+    y = truth + 0.1 * rng.standard_normal(len(X))
+    gpr = GaussianProcessRegressor(
+        kernel=C(1.0) * Matern(length_scale=0.3, nu=2.5,
+                               length_scale_bounds=(5e-2, 2.0))
+        + WhiteKernel(0.05), normalize_y=True, n_restarts_optimizer=2,
+    ).fit(X, y)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(X), kernel='matern52',
+                 rank=9, n_rho=24)
+    Xg = rng.uniform(0.05, 0.95, (120, 2))
+    mean, _ = gp_predict(res, jnp.asarray(Xg))
+    assert np.corrcoef(np.asarray(mean)[0], gpr.predict(Xg))[0, 1] > 0.97
+
+
+def test_gp_fit_nd_per_axis_rank_and_validation():
+    rng = np.random.default_rng(3)
+    X = rng.uniform(0.0, 1.0, (200, 2))
+    y = _surface(X) + 0.1 * rng.standard_normal(len(X))
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(X), rank=[6, 8], n_rho=14)
+    assert res.coef.shape == (1, 1 + 6 * 8)
+    with pytest.raises(NotImplementedError):
+        gp_fit(jnp.asarray(y[None, :]), jnp.asarray(X), engine='exact')
+    with pytest.raises(NotImplementedError):
+        gp_fit(jnp.asarray(y[None, :]), jnp.asarray(X), corr='ar1',
+               group=jnp.zeros(len(X), int))
