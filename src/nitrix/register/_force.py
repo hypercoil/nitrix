@@ -71,6 +71,7 @@ from ..metrics import (
     lncc_grad_center,
     mi_grad,
     mutual_information,
+    nmi_grad,
 )
 from ._metric import Metric
 
@@ -521,9 +522,15 @@ class MIForce:
         an explicit range only to fix a binning other than the data min/max.
     magnitude
         Target per-voxel RMS magnitude (voxels); ``0.5`` matches
-        ``MetricForce``.  ``normalized`` MI is intentionally absent -- NMI is the
-        deferred quotient-rule form (route it through
-        ``MetricForce(MI(normalized=True))``).
+        ``MetricForce``.
+    normalized
+        Use Studholme's normalised MI (``NMI = (H_m + H_f) / H_mf``, the ANTs
+        cross-modal default), routing the force through the closed-form
+        ``metrics.nmi_grad`` (the quotient-rule ``∂NMI/∂warped``, C1) instead of
+        ``mi_grad``.  ``False`` (default) is unnormalised Mattes MI.  The cost
+        (``BoundForce.cost``) follows the same flag.  The RMS-``magnitude``
+        normalisation makes NMI and MI interchangeable as drop-in forces (the
+        scale difference between the two raw gradients is absorbed).
     sample_stride
         Estimate the joint histogram from every ``sample_stride``-th voxel (ITK
         "Regular" sampling -- the histogram scatter is the MI bottleneck, and
@@ -545,6 +552,7 @@ class MIForce:
     range_fixed: Optional[tuple[float, float]] = None
     magnitude: float = 0.5
     sample_stride: int = 1
+    normalized: bool = False
 
     def bind(
         self,
@@ -559,6 +567,7 @@ class MIForce:
             range_fixed=self.range_fixed,
             magnitude=self.magnitude,
             sample_stride=self.sample_stride,
+            normalized=self.normalized,
             fixed=fixed,
             ndim=ndim,
             rel_spacing=rel_spacing,
@@ -575,14 +584,17 @@ class _BoundMI:
     ndim: int
     rel_spacing: RelSpacing
     sample_stride: int = 1
+    normalized: bool = False
 
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
         # The joint histogram depends on BOTH images at the current warp, so --
         # unlike DemonsForce's ∇fixed -- there is nothing image-dependent to
-        # hoist in ``bind``; mi_grad recomputes the histogram every iteration.
-        g = mi_grad(
+        # hoist in ``bind``; the gradient recomputes the histogram every
+        # iteration.  ``normalized`` routes to the closed-form NMI gradient (C1).
+        grad_fn = nmi_grad if self.normalized else mi_grad
+        g = grad_fn(
             warped,
             self.fixed,
             bins=self.bins,
@@ -593,9 +605,10 @@ class _BoundMI:
         grad = spatial_gradient(
             warped, spacing=_grad_spacing(self.rel_spacing)
         )
-        # Force convention u = −∂cost/∂warped·∇warped with cost = −MI gives
-        # u = +mi_grad·∇warped (ascend MI), then the controlled-magnitude RMS
-        # normalisation (a histogram metric is not a spatial mean -- 0c / B2).
+        # Force convention u = −∂cost/∂warped·∇warped with cost = −MI/−NMI gives
+        # u = +grad·∇warped (ascend MI / NMI), then the controlled-magnitude RMS
+        # normalisation (a histogram metric is not a spatial mean -- 0c / B2;
+        # this also absorbs the scale gap between the MI and NMI gradients).
         force = _normalise_rms(g[..., None] * grad, self.magnitude)
         return _to_voxel(force, self.rel_spacing)
 
@@ -606,6 +619,7 @@ class _BoundMI:
             bins=self.bins,
             range_moving=self.range_moving,
             range_fixed=self.range_fixed,
+            normalized=self.normalized,
         )
 
 

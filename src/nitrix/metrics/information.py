@@ -39,6 +39,7 @@ __all__ = [
     'joint_histogram',
     'mutual_information',
     'mi_grad',
+    'nmi_grad',
     'correlation_ratio',
 ]
 
@@ -291,8 +292,8 @@ def mi_grad(
     exactly-empty bin is a documented divergence (the mask is non-smooth there
     -- the analogue of ``lncc_grad``'s boundary divergence).  Voxels outside
     ``[lo_m, hi_m]`` get zero force (the soft bin is clipped, so its derivative
-    vanishes).  **Unnormalised** Mattes MI only -- NMI is the deferred
-    quotient-rule form (route it through ``MetricForce(MI(normalized=True))``).
+    vanishes).  **Unnormalised** Mattes MI only -- the normalised (Studholme) NMI
+    gradient is :func:`nmi_grad` (the quotient-rule form).
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)
@@ -320,6 +321,81 @@ def mi_grad(
     w = jnp.where(p > 0, log_p - log_pm[:, None], 0.0)  # (bins, bins)
     d = w[1:, :] - w[:-1, :]  # (bins-1, bins): forward diff along moving axis
     g = (s_m / m.size) * ((1.0 - frac_f) * d[k, ll] + frac_f * d[k, ll + 1])
+    g = jnp.where((m >= lo_m) & (m <= hi_m), g, 0.0)  # clip -> zero derivative
+    return g.reshape(moving.shape)
+
+
+def nmi_grad(
+    moving: Float[Array, '...'],
+    fixed: Float[Array, '...'],
+    *,
+    bins: int = 32,
+    range_moving: Optional[tuple[float, float]] = None,
+    range_fixed: Optional[tuple[float, float]] = None,
+    sample_stride: int = 1,
+    eps: float = 1e-10,
+) -> Float[Array, '...']:
+    """Closed-form ``∂NMI/∂moving`` -- the normalised-MI (Studholme) gradient.
+
+    The analytic per-voxel derivative of :func:`mutual_information` with
+    ``normalized=True`` (``NMI = (H_m + H_f) / H_mf``) w.r.t. the moving
+    intensities, the NMI analogue of :func:`mi_grad` (the deferred quotient-rule
+    form, now shipped).  As in the Mattes derivation the gradient flows through
+    **only** the moving soft-bin weights, so the fixed marginal entropy ``H_f`` is
+    invariant (``Σ_a ∂β_m/∂m = 0``).  The quotient rule over ``H_m`` (varies) and
+    ``H_mf`` then gives
+
+    ``∂NMI/∂m(x) = −(s_m / (N·H_mf)) · [ Dₘ[k] − NMI·((1−t_f)·D_mf[k,l]
+                  + t_f·D_mf[k,l+1]) ]``
+
+    with ``s_m = (bins−1)/span_m``; ``k``/``l`` the moving/fixed lower bins; ``t_f``
+    the fixed fractional weight; ``Dₘ[a] = log P_m[a+1] − log P_m[a]`` the
+    moving-marginal forward difference; and ``D_mf[a,b] = log P[a+1,b] − log P[a,b]``
+    the joint forward difference (along the moving axis).  (Setting ``NMI -> 1`` and
+    the prefactor ``-1/(N·H_mf) -> 1/N`` recovers the same ``Dₘ`` / ``D_mf``
+    structure :func:`mi_grad` reduces ``MI = H_m + H_f − H_mf`` to.)
+
+    Parameters mirror :func:`mi_grad` (``bins`` / ``range_*`` / ``sample_stride``;
+    pin the ranges).  Returns ``∂NMI/∂moving`` (an **ascent** direction -- NMI is
+    a similarity), same shape as ``moving``.
+
+    Notes
+    -----
+    The empty-bin ``where(· > 0, …)`` masking matches
+    :func:`mutual_information`'s ``normalized=True`` branch, so
+    ``nmi_grad == jax.grad(mutual_information(normalized=True))`` to tolerance on
+    populated bins (the parity oracle); the boundary divergence at an exactly-empty
+    bin is the same documented non-smoothness as :func:`mi_grad`.  Voxels outside
+    ``[lo_m, hi_m]`` get zero force.
+    """
+    m = moving.reshape(-1)
+    f = fixed.reshape(-1)
+    lo_m, hi_m = _resolve_range(m, range_moving)
+    lo_f, hi_f = _resolve_range(f, range_fixed)
+    s_m = (bins - 1) / jnp.maximum(hi_m - lo_m, _MI_SPAN_FLOOR)
+    k, frac_m = _soft_bin(m, bins, lo_m, hi_m)
+    ll, frac_f = _soft_bin(f, bins, lo_f, hi_f)
+    if sample_stride > 1:
+        sub = slice(None, None, sample_stride)
+        p = _joint_hist_from_softbins(
+            k[sub], frac_m[sub], ll[sub], frac_f[sub], bins, m.dtype
+        )
+    else:
+        p = _joint_hist_from_softbins(k, frac_m, ll, frac_f, bins, m.dtype)
+    p_m = p.sum(axis=1)
+    p_f = p.sum(axis=0)
+    # Entropies exactly as mutual_information(normalized=True) (same NMI value).
+    h_m = -jnp.sum(jnp.where(p_m > 0, p_m * jnp.log(p_m + eps), 0.0))
+    h_f = -jnp.sum(jnp.where(p_f > 0, p_f * jnp.log(p_f + eps), 0.0))
+    h_mf = -jnp.sum(jnp.where(p > 0, p * jnp.log(p + eps), 0.0))
+    nmi = (h_m + h_f) / (h_mf + eps)
+    # Forward differences along the moving axis (empty-bin masked, as the cost).
+    log_p = jnp.where(p > 0, jnp.log(p), 0.0)
+    log_pm = jnp.where(p_m > 0, jnp.log(p_m), 0.0)
+    d_mf = log_p[1:, :] - log_p[:-1, :]  # (bins-1, bins)
+    d_m = log_pm[1:] - log_pm[:-1]  # (bins-1,)
+    g_mf = (1.0 - frac_f) * d_mf[k, ll] + frac_f * d_mf[k, ll + 1]
+    g = -(s_m / (m.size * (h_mf + eps))) * (d_m[k] - nmi * g_mf)
     g = jnp.where((m >= lo_m) & (m <= hi_m), g, 0.0)  # clip -> zero derivative
     return g.reshape(moving.shape)
 

@@ -48,6 +48,7 @@ from .information import (
     joint_histogram,
     mi_grad,
     mutual_information,
+    nmi_grad,
 )
 from .preprocess import match_histogram, winsorize
 from .overlap import dice, jaccard
@@ -74,6 +75,7 @@ __all__ = [
     'joint_histogram',
     'mutual_information',
     'mi_grad',
+    'nmi_grad',
     'correlation_ratio',
     # preprocessing (fMRIPrep front-end)
     'winsorize',
