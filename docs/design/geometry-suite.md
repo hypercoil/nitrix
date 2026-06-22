@@ -526,6 +526,37 @@ green (61 tests incl. real fsaverage); ruff + mypy clean.
 - **Tests:** synthetic two-region profile → a boundary at the seam; watershed
   recovers the two basins; real connectivity smoke.
 
+#### P5.1 as-built (decision record)
+
+Shipped 2026-06-22 (`graph/parcellation.py`; `tests/test_parcellation.py`,
+17 tests). New `graph.parcellation` submodule (`graph` depends on
+`sparse`/`semiring`, never the reverse).
+
+- **`surface_boundary_map` is a true named wrapper — zero new kernel.** The
+  edge function `1 - similarity(h_i, h_j)` rides `semiring_ell_edge_aggregate`,
+  so it inherits the format-agnostic ELL substrate and is **differentiable**
+  w.r.t. the profiles. `aggregate='mean'` uses `REAL` + a degree divide;
+  `'max'` uses `TROPICAL_MAX_PLUS`. Padding is masked through the **`w == 0`
+  signal** the aggregator passes for exactly this purpose (REAL pad → 0,
+  max-plus pad → −∞), which is why the adjacency must use the standard ELL pad
+  convention (nonzero weights for real edges — the `mesh_k_ring_adjacency`
+  output). `eta_squared` (Cohen 2008) is the default similarity (robust to
+  per-profile offset/scale vs Pearson); both are exact (1 identical / 0
+  reversed). Measured: seam boundary ≫ 10× interior on a two-region icosphere.
+- **`mesh_watershed` is host-side by necessity** (priority-flood is serial),
+  returning a JAX int array — the `mesh_k_ring_adjacency` host-construct→array
+  pattern. Barnes-2014 monotone flood (`max(level, field[j])` key) from local
+  minima, with **connected equal-valued minima coalesced** into one seed (no
+  plateau over-segmentation → a constant field gives exactly one basin).
+- **`h_min` (depth/prominence) is the load-bearing cleaner, not
+  `min_basin_size`.** A noisy real boundary map floods into many shallow basins
+  (~70 on the test); the **depth merge** (`h_min`, saddle-minus-minimum
+  prominence, merging into the lowest-saddle neighbour) collapses them to the 2
+  true parcels, where the size merge alone does not (shallow basins can still
+  be large). Both default off (`min_basin_size=1`, `h_min=0`) → a pure
+  watershed; merges are opt-in. The full pipeline (two-region profile →
+  boundary → `mesh_watershed(h_min=…)`) recovers exactly 2 contiguous parcels.
+
 ### P5.2 — place_surface (GS-11) · DIFF-JAX · **Effort L, SPEC review, optional** · `register.surface`
 - Same `fori_loop` skeleton as P2.4 with an image-gradient / target-intensity
   external force. Optional — learned models replace it; ship for classic
