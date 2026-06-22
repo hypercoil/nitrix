@@ -19,6 +19,8 @@ website:
         text: Home
       - text: Explanation
         menu:
+          - explanation/index.qmd
+          - explanation/glm.qmd
           - explanation/fellner-schall.qmd
       - href: ../
         text: Federation

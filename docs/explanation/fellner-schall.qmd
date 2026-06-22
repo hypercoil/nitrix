@@ -1,11 +1,13 @@
 ---
-title: "Fellner–Schall: the engine of the statistical suite"
+title: "Choosing smoothing parameters: the Fellner–Schall method"
 ---
 
 ::: {.callout-tldr title="Fast path"}
-`nitrix.stats` fits penalised models — smooths, generalised additive models,
-mixed models — to *every* voxel/vertex at once. The thing that makes them all
-*one* suite is a single outer-loop update that chooses how much to penalise:
+Several rungs of [the ladder](index.qmd) add a **penalty** to the weighted
+least-squares solve from the [GLM chapter](glm.qmd): a smooth's wiggliness
+penalty (GAM), a random effect's variance (LME), a kernel prior (HSGP). Each
+penalty carries a strength $\lambda$ that must be *chosen*, not guessed.
+**Fellner–Schall** is the cheap update that chooses it:
 
 $$
 \lambda_k \;\leftarrow\; \lambda_k \,
@@ -13,13 +15,20 @@ $$
      {\gamma_k^{\top} S_k \gamma_k / \phi}.
 $$
 
-It is **multiplicative** (so penalties stay positive), it **increases the
+It is **multiplicative** (so $\lambda$ stays positive), it **increases the
 marginal likelihood every step**, and — because a roughness penalty *is* a
-random-effect variance — the same update does smoothing-parameter selection
-*and* variance-component estimation. That equivalence is why `gam_fit`,
-`reml_fit`, `glmm_fit` and friends are siblings, not separate programs. Code:
+random-effect variance (the equivalence shown below) — the *same* update selects
+smoothing parameters and estimates variance components. That reuse is why it
+recurs across the suite. Code:
 [`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py).
 :::
+
+This is a **shared-machinery** chapter, not a model of its own: Fellner–Schall is
+one algorithm the suite reuses. It sits directly on top of the [GLM](glm.qmd)
+solve — add a penalty to those weighted normal equations and you immediately need
+a principled way to set the penalty's strength; this is that way. We introduce it
+in its most natural home, the smoothing penalty of a generalised additive model,
+and the mixed-model and Gaussian-process rungs reuse it unchanged.
 
 ## The problem every smooth shares {#fellner-schall}
 

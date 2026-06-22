@@ -10,15 +10,20 @@ JAX/XLA so they run — differentiably, batched, JIT-compiled — on a hardware
 accelerator.
 
 ::: {.callout-tldr title="Fast path"}
-If you read one chapter, read
-[Fellner–Schall: the engine of the statistical suite](explanation/fellner-schall.qmd).
-It explains why one small fixed-point update unifies smoothing, mixed models,
-and (soon) Gaussian processes across the whole `nitrix.stats` package.
+Start with [the statistical modelling suite](explanation/index.qmd) — a textbook
+that climbs from generalised linear models up to Gaussian processes for a reader
+who knows linear algebra but not formal statistics. Read the
+[GLM foundation](explanation/glm.qmd) first; every other model is "GLM plus one
+idea".
 :::
 
 ## Explanation (the textbook layer)
 
-- [Fellner–Schall: the engine of the statistical suite](explanation/fellner-schall.qmd)
+- [The statistical modelling suite](explanation/index.qmd) — the model ladder
+  (GLM → LME → GAM → GLMM → GAMM → HSGP) and the shared algorithms behind it.
+  - [Generalised linear models: the foundation](explanation/glm.qmd)
+  - [Choosing smoothing parameters: the Fellner–Schall method](explanation/fellner-schall.qmd)
 
-More chapters (geometry, registration, the semiring substrate) follow the same
-pattern: derive the mathematics, justify the design, point at the code.
+More chapters (the rest of the ladder, plus geometry, registration, the semiring
+substrate) follow the same pattern: derive the mathematics, justify the design,
+point at the code.

@@ -1,0 +1,85 @@
+---
+title: "The statistical modelling suite"
+---
+
+::: {.callout-tldr title="Fast path"}
+`nitrix.stats` is one family of models, not a pile of unrelated fitters. Almost
+every model here is solved by the *same two moves*:
+
+1. **Solve a weighted normal-equations system** $(X^{\top} W X + P)\,\beta = X^{\top} W z$ — a small $p\times p$ linear solve you already understand from least squares.
+2. **Choose the extra parameters** (a noise variance, a smoothing strength, a random-effect variance) by maximising a likelihood with a cheap iteration.
+
+The chapters below climb a ladder — GLM → LME → GAM → GLMM → GAMM → HSGP — and
+at each rung only *one new idea* is added to those two moves. Read GLM first;
+everything else is "GLM plus one thing".
+:::
+
+This suite is written for a reader who is **comfortable with linear algebra**
+(matrices, least squares, eigendecomposition) but has **no formal training in
+statistics or numerical methods**. We build every model up from the linear
+algebra you know, and we explain each statistical idea and each solver the first
+time it appears.
+
+## The ladder
+
+Every model is a linear predictor $X\beta$ (a matrix times a coefficient
+vector) wrapped in successively more structure. Each rung reuses the rung below
+and adds exactly one ingredient:
+
+| Rung | Model | The one new ingredient |
+|---|---|---|
+| 1 | **GLM** — generalised linear model | a *link* + *non-Gaussian noise* (so we fit by **IRLS**) |
+| 2 | **LME** — linear mixed-effects | *random effects* $Z$ (correlated noise → **variance components**, REML) |
+| 3 | **GAM** — generalised additive model | *smooth terms* (a wiggliness **penalty** $P$ on the coefficients) |
+| 4 | **GLMM** — generalised linear mixed model | GLM **and** LME at once (non-Gaussian + random effects) |
+| 5 | **GAMM** — generalised additive mixed model | smooths **and** random effects (they turn out to be the same thing) |
+| 6 | **HSGP** — Hilbert-space Gaussian process | a *kernel* prior, written as just another penalty |
+
+The surprising payoff, made precise in the GAM chapter: **a smoothing penalty
+and a random-effect variance are the same object seen from two directions.**
+That single equivalence is why GAM, LME, GLMM, GAMM and HSGP share one engine
+instead of being six separate programs.
+
+## The shared machinery
+
+Because the rungs reuse each other, a handful of algorithms do the heavy lifting
+across the whole suite. Each is introduced where it first naturally arises and
+reused (by cross-reference) thereafter:
+
+| Tool | What it does | Introduced in |
+|---|---|---|
+| **IRLS** (iteratively reweighted least squares) | turns a non-Gaussian fit into a sequence of ordinary weighted least-squares solves | [GLM](glm.qmd) |
+| **Damped Newton** | makes that iteration converge reliably even when a step would overshoot | [GLM](glm.qmd) |
+| **cuSOLVER-free small-linalg** | does every $p\times p$ solve without the vendor GPU solver, so fits run on accelerators where it is broken | [GLM](glm.qmd) |
+| **FaST-LMM spectral trick** | diagonalises the random-effect covariance once so each fit is elementwise-cheap | LME |
+| **Fellner–Schall** | the multiplicative update that chooses smoothing / variance parameters | [smoothing parameters](fellner-schall.qmd) |
+| **Block-Woodbury / Schur** | inverts a huge "many groups" covariance by only touching small blocks | GLMM |
+
+## How `nitrix` runs these at scale
+
+One detail colours every chapter. `nitrix.stats` is **mass-univariate**: the
+same design matrix $X$ is fit to *every* element of an image (every voxel,
+vertex, or fixel) at once — hundreds of thousands of tiny regressions sharing
+one design. Two consequences recur throughout:
+
+- The expensive, shared pieces (a factorisation of $X$, an eigendecomposition of
+  the random-effect design) are computed **once** and reused across all
+  elements; only the per-element response changes.
+- Every fit runs a **fixed number of iterations** so it can be `vmap`-mapped and
+  JIT-compiled across the whole image, and every linear solve avoids the vendor
+  GPU solver (`cuSOLVER`) so it stays portable across accelerators.
+
+## Reading paths
+
+- **Fast path** — read each chapter's TL;DR, plus the GLM chapter in full. That
+  is enough to use the suite and to know which model fits which question.
+- **Thorough path** — read in ladder order. Each chapter assumes the one below
+  it and points back to the shared-machinery page when an algorithm recurs.
+
+## Chapters
+
+- [Generalised linear models — the foundation](glm.qmd) *(start here)*
+- [Choosing smoothing parameters: the Fellner–Schall method](fellner-schall.qmd)
+- *Linear mixed-effects models* — coming next
+- *Generalised additive models* · *GLMMs* · *GAMMs* · *Hilbert-space GPs* —
+  building up the ladder
