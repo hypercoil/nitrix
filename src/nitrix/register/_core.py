@@ -202,6 +202,18 @@ class RegistrationSpec:
         (C6):** on the early-exit path the per-level trace is padded to the
         ``iterations`` cap with the final cost (so the shape is path-independent;
         the value is constant past the stop iteration).
+    ic_line_search
+        Opt-in cost-decrease guard for the inverse-compositional step (F1).
+        ``False`` (default) takes the trust-region-clamped Gauss-Newton step
+        directly -- the fast path (its single warp/iter is the IC speed win).
+        ``True`` backtracks along the clamped direction and accepts the largest
+        fraction that decreases the SSD, leaving the iterate unmoved if none does
+        -- so the per-level cost is **monotone non-increasing** even when the
+        constant-template Hessian proposes an ascent step on a hard case.  It
+        costs extra warps/iter (the candidate evaluations -- ~3x the IC step on
+        GPU), so it is off by default and enabled for robustness on pathological
+        data; a step that already decreases at full length is taken
+        byte-unchanged either way.  No effect off the inverse-compositional path.
     """
 
     levels: int = 3
@@ -216,6 +228,7 @@ class RegistrationSpec:
     cg_tol: float = 1e-6
     mode: ConvergenceMode = 'fixed'
     convergence: Convergence = field(default_factory=Convergence)
+    ic_line_search: bool = False
 
 
 class RegistrationResult(NamedTuple):
