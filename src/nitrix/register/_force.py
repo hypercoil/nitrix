@@ -627,7 +627,13 @@ class MetricForce:
       ``1/N`` and recovers the *sum-convention* gradient the closed forms use --
       ``MetricForce(LNCC(r))`` is then numerically identical to ``LNCCForce(r)``
       (the parity oracle, in magnitude not only direction), and the magnitude
-      shrinks naturally as the gradient does.
+      shrinks naturally as the gradient does.  ``SSD`` has **no** normalised
+      closed form here -- ``MetricForce(SSD)`` is the *raw* optical-flow
+      gradient ``(warped − fixed)·∇warped``, not the Thirion-normalised demons
+      force, and recovers markedly worse on a monomodal warp (it is unscaled by
+      ``|∇|² + (m−f)²``, so the regulariser / trust-region clamp dominates and
+      the field under-recovers); for monomodal SSD-type registration prefer
+      :class:`DemonsForce` (the ``diffeomorphic_demons_register`` default).
     - **Global histogram scalar** (``MI`` / ``CorrelationRatio``, or any metric
       that does not declare ``is_spatial_mean``): there is no ``1/N`` to undo,
       so ``·N`` would be an arbitrary, metric-scale-dependent constant -- under
