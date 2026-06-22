@@ -100,3 +100,35 @@ def test_fan_sectioned_matches_ell() -> None:
 def test_bad_format_raises() -> None:
     with pytest.raises(ValueError, match="'ell', 'sectioned', or 'auto'"):
         mesh_cotangent_laplacian(icosphere(0), format='bogus')
+
+
+# --------------------------------------------------------------------------- #
+# Vectorised cotangent assembly invariants (Tier C / audit AI-C1)
+# --------------------------------------------------------------------------- #
+
+
+def test_vectorised_cotangent_invariants() -> None:
+    # The vectorised flat-ELL assembly must preserve the defining cotangent
+    # Laplacian invariants: rows sum to zero (constants in the kernel) and the
+    # operator is symmetric (w_ij == w_ji).
+    mesh = icosphere(3)
+    lap = mesh_cotangent_laplacian(mesh)
+    assert isinstance(lap, ELL)
+    n = mesh.n_vertices
+    dense = np.asarray(apply_operator(lap, jnp.eye(n)[..., None])[..., 0]).T
+    # The diagonal-first layout keeps column 0 == the vertex index.
+    assert np.array_equal(np.asarray(lap.indices)[:, 0], np.arange(n))
+    assert np.allclose(dense.sum(axis=1), 0.0, atol=1e-4)  # L @ 1 == 0
+    assert np.allclose(dense, dense.T, atol=1e-5)  # symmetric
+
+
+def test_vectorised_cotangent_real_mesh_rowsum_zero() -> None:
+    # On a real irregular-valence cortical surface (where the old Python-dict
+    # assembly was the bottleneck) the vectorised path still gives L @ 1 == 0.
+    from _real_meshes import fsaverage_white
+
+    v, f, _ = fsaverage_white()
+    lap = mesh_cotangent_laplacian(Mesh(jnp.asarray(v), jnp.asarray(f)))
+    ones = jnp.ones((v.shape[0], 1))
+    row_sums = np.asarray(apply_operator(lap, ones)[..., 0])
+    assert np.allclose(row_sums, 0.0, atol=1e-3)
