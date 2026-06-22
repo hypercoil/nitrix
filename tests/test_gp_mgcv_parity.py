@@ -31,6 +31,7 @@ import jax.numpy as jnp
 
 from nitrix.stats.basis import gp_basis, gp_factor_smooth, hsgp_basis
 from nitrix.stats.gam import gam_fit, smooth_partial_effect
+from nitrix.stats.gp import gp_fit, gp_predict
 
 
 @functools.lru_cache(maxsize=1)
@@ -195,3 +196,53 @@ def test_gp_factor_smooth_cross_checks_mgcv_fs():
     )[0]
     f_mgcv = _mgcv_fs_fitted(x, y, fac, k=k, rho=rho)
     assert np.corrcoef(f_nitrix, f_mgcv)[0, 1] > 0.95
+
+
+def _mgcv_gp_poisson_fitted(x, y, *, k, rho):
+    """Response-scale fitted rates of a Poisson GP smooth at a fixed ``rho``
+    (``gam(y ~ s(x, bs='gp', m=c(3, rho)), family=poisson(), method='REML')``)."""
+    rs = _rscript()
+    assert rs is not None
+    with tempfile.TemporaryDirectory() as d:
+        np.savetxt(
+            os.path.join(d, 'xy.csv'), np.c_[x, y],
+            delimiter=',', header='x,y', comments='',
+        )
+        script = os.path.join(d, 'fit.R')
+        out = os.path.join(d, 'out.csv')
+        with open(script, 'w') as fh:
+            fh.write(
+                'suppressMessages(library(mgcv))\n'
+                f'df <- read.csv("{d}/xy.csv")\n'
+                f'b <- gam(y ~ s(x, bs="gp", k={k}, m=c(3, {rho})), '
+                'family=poisson(), data=df, method="REML")\n'
+                f'write.csv(data.frame(fit=fitted(b)), "{out}", row.names=FALSE)\n'
+            )
+        p = subprocess.run(
+            [rs, script], capture_output=True, text=True, timeout=180
+        )
+        if not os.path.exists(out):
+            raise RuntimeError(f'mgcv poisson gp fit failed:\n{p.stderr}')
+        return np.loadtxt(out, delimiter=',', skiprows=1)
+
+
+@requires_mgcv
+def test_gp_glm_poisson_cross_checks_mgcv():
+    """CV2 Phase 1: the nitrix Poisson GP (PQL-REML ``rho``) cross-checks mgcv's
+    Poisson GP smooth evaluated at the nitrix-estimated ``rho`` -- the
+    response-scale fitted rates track closely, and both recover the true rate.
+    (A structural check: nitrix's PQL ``rho``-selection differs from mgcv's LAML,
+    so ``rho`` is fed in rather than compared.)"""
+    rng = np.random.default_rng(13)
+    n = 160
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    eta = 0.8 + np.sin(2 * np.pi * x)
+    y = rng.poisson(np.exp(eta)).astype(float)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), family='poisson',
+                 n_rho=16, n_pql=8)
+    rho_hat = float(np.exp(res.theta[0, 2]))
+    mu_nitrix, _ = gp_predict(res, jnp.asarray(x), type='response')
+    f_nitrix = np.asarray(mu_nitrix[0])
+    f_mgcv = _mgcv_gp_poisson_fitted(x, y, k=20, rho=rho_hat)
+    assert np.corrcoef(f_nitrix, f_mgcv)[0, 1] > 0.95
+    assert np.corrcoef(f_nitrix, np.exp(eta))[0, 1] > 0.9

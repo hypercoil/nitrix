@@ -95,6 +95,8 @@ from jaxtyping import Array, Float
 
 from ..linalg.kernel import spectral_density
 from ._batching import blocked_vmap
+from ._family import Family, resolve_family
+from ._irls import safe_dmu
 from ._penreml import mb_fs, mb_quantities, mb_reml_nll
 from ._result import register_result
 
@@ -124,7 +126,7 @@ __all__ = [
     ),
     aux=(
         'kernel', 'engine', 'corr', 'n_obs', 'rank', 'n_fixed',
-        'lo', 'hi', 'boundary', 'nd_meta',
+        'lo', 'hi', 'boundary', 'nd_meta', 'family',
     ),
 )
 @dataclass(frozen=True)
@@ -186,6 +188,12 @@ class GPResult:
         rebuild the tensor-product eigenbasis in :func:`gp_predict`.  ``theta[:, 2]``
         then carries ``log rho`` (the shared isotropic lengthscale, or the
         geometric mean of the ARD lengthscales).
+    family
+        Response family name: ``'gaussian'`` (default; exact REML), or
+        ``'binomial'`` / ``'poisson'`` for a non-Gaussian GP whose lengthscale is
+        estimated by PQL-REML (``theta``'s ``log sigma_e^2`` column is then the
+        quasi-likelihood dispersion, ``1`` nominally for those families, and
+        ``coef`` is on the *link* scale -- see :func:`gp_predict` ``type=``).
     """
 
     coef: Float[Array, 'V p']
@@ -205,6 +213,7 @@ class GPResult:
     hi: float
     boundary: float
     nd_meta: Optional[Any]
+    family: str = 'gaussian'
 
 
 # ---------------------------------------------------------------------------
@@ -758,6 +767,9 @@ def gp_fit(
     time: Optional[Float[Array, ' N']] = None,
     n_corr: int = 9,
     corr_raw_bounds: Tuple[float, float] = (-2.5, 2.5),
+    family: Union[str, Family] = 'gaussian',
+    prior_weights: Optional[Float[Array, ' N']] = None,
+    n_pql: int = 8,
     n_outer: int = 30,
     n_search: int = 15,
     ridge: float = 1e-8,
@@ -865,6 +877,26 @@ def gp_fit(
     if not boundary >= 1.0:
         raise ValueError(f'gp_fit: boundary={boundary} must be >= 1.0.')
 
+    fam = resolve_family(family)
+    non_gaussian = fam.name != 'gaussian'
+    if non_gaussian:
+        if fam.name not in ('binomial', 'poisson'):
+            raise NotImplementedError(
+                f'gp_fit: family={fam.name!r} -- non-Gaussian lengthscale '
+                "estimation currently supports 'binomial' and 'poisson' "
+                '(Phase 1, PQL-REML); use a fixed rho via hsgp_basis(...) + '
+                'gam_fit for other families.'
+            )
+        if engine != 'hsgp':
+            raise NotImplementedError(
+                "gp_fit: a non-Gaussian family needs engine='hsgp' (Phase 1)."
+            )
+        if corr is not None:
+            raise NotImplementedError(
+                'gp_fit: corr= is not supported with a non-Gaussian family '
+                '(Phase 1).'
+            )
+
     Y = jnp.asarray(Y)
     x = jnp.asarray(x, dtype=Y.dtype)
     n = Y.shape[-1]
@@ -877,6 +909,11 @@ def gp_fit(
 
     # --- multi-dimensional (tensor-product) HSGP: X is (N, D), D >= 2 --------
     if x.ndim == 2:
+        if non_gaussian:
+            raise NotImplementedError(
+                'gp_fit: a non-Gaussian family is 1-D only (Phase 1); '
+                'multi-dimensional non-Gaussian GP is a Phase-2 add.'
+            )
         if engine != 'hsgp':
             raise NotImplementedError(
                 "gp_fit: multi-dimensional X needs engine='hsgp' (the exact "
@@ -972,6 +1009,13 @@ def gp_fit(
         )
 
     # ==================== engine == 'hsgp' ==================================
+    if non_gaussian:
+        return _gp_fit_glm_hsgp(
+            Y, x, T, n_fixed, fam, kernel, m, log_rho_grid_np, map_rho,
+            n_pql, n_outer, n_search, ridge, lam_floor, lam_ceil, block,
+            lo, hi, boundary, prior_weights,
+        )
+
     c_mid, big_l = _hsgp_domain(lo, hi, boundary)
     sqrt_lambda, phase, inv_sqrt_L = _hsgp_eigen(m, c_mid, big_l, Y.dtype)
 
@@ -1057,6 +1101,7 @@ def _assemble_gp_result(
     corr_name: str = 'iid',
     corr_rho: Optional[Array] = None,
     nd_meta: Optional[Any] = None,
+    family: str = 'gaussian',
 ) -> GPResult:
     """Pack the per-element fit arrays into a :class:`GPResult` (shared by both
     engines): ``theta = [log sigma_f^2, log sigma_e^2, log rho]`` with
@@ -1090,6 +1135,129 @@ def _assemble_gp_result(
         hi=hi,
         boundary=float(boundary),
         nd_meta=nd_meta,
+        family=family,
+    )
+
+
+def _gp_fit_glm_hsgp(
+    Y: Float[Array, 'V N'],
+    x: Float[Array, ' N'],
+    T: Float[Array, 'N q0'],
+    n_fixed: int,
+    family: Family,
+    kernel: str,
+    m: int,
+    log_rho_grid_np: np.ndarray,
+    map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]],
+    n_pql: int,
+    n_outer: int,
+    n_search: int,
+    ridge: float,
+    lam_floor: float,
+    lam_ceil: float,
+    block: Optional[int],
+    lo: float,
+    hi: float,
+    boundary: float,
+    prior_weights: Optional[Float[Array, ' N']],
+) -> GPResult:
+    """Non-Gaussian GP (HSGP engine) by PQL-REML lengthscale estimation (CV2).
+
+    Each PQL iteration relinearises the GLM to a per-element *weighted* Gaussian
+    working problem ``(z_v, W_v)`` (the IRLS working response / weights), then
+    profiles the shared ``rho`` and selects ``lambda`` with the **same** pooled-REML
+    core as the Gaussian path -- only the cross-products become ``X^T W_v X`` /
+    ``X^T W_v z_v``, computed per element *inside* ``blocked_vmap`` so ``block``
+    bounds peak memory (no full ``(V, p, p)`` working Gram).  The working weights
+    are held fixed within each inner ``rho`` search (their Jacobian is constant in
+    ``rho``), so the search is exactly the Gaussian profile REML; the outer loop
+    relinearises until the linear predictor settles.
+
+    This is **PQL** (Breslow-Clayton): biased for binary / low-count data -- the
+    documented Phase-1 caveat (cf. ``glmm_fit``); the proper Laplace REML / LAML is
+    the Phase-2 upgrade.  ``coef`` is on the link scale; the reported ``dispersion``
+    is the working quasi-likelihood scale (``~1`` for a calibrated binomial /
+    poisson fit)."""
+    dtype = Y.dtype
+    n = Y.shape[-1]
+    c_mid, big_l = _hsgp_domain(lo, hi, boundary)
+    sqrt_lambda, phase, inv_sqrt_L = _hsgp_eigen(m, c_mid, big_l, dtype)
+    phi_design = _hsgp_features(x, sqrt_lambda, phase, inv_sqrt_L)  # (N, m)
+    X = jnp.concatenate([T, phi_design], axis=1)  # (N, p)
+    p = X.shape[1]
+    pw = (
+        jnp.ones((n,), dtype) if prior_weights is None
+        else jnp.asarray(prior_weights, dtype)
+    )
+
+    def _working_xprod(
+        eta_v: Float[Array, ' N'], y_v: Float[Array, ' N']
+    ) -> Tuple[Array, Array, Array]:
+        """One element's working cross-products ``(X^T W X, X^T W z, z^T W z)``
+        (IRLS working weights ``W`` / response ``z``, as in ``_irls._working``)."""
+        eta_c = family.clip_eta(eta_v)
+        mu = family.linkinv(eta_c)
+        dmu = family.mu_eta(eta_c)
+        wts = dmu * dmu / jnp.clip(family.variance(mu), 1e-10, None) * pw
+        z = eta_c + (y_v - mu) / safe_dmu(dmu)
+        xw = X * wts[:, None]
+        return xw.T @ X, xw.T @ z, jnp.sum(wts * z * z)
+
+    @jax.jit
+    def _pooled(eta_all: Array, d: Array, log_pdet: Array) -> Array:
+        def one(eta_v: Array, y_v: Array) -> Array:
+            xtwx, c, g = _working_xprod(eta_v, y_v)
+            return _pooled_nll_one(
+                c, g, xtwx, d, log_pdet, n, p, m, n_fixed,
+                n_search, ridge, lam_floor, lam_ceil,
+            )
+
+        return jnp.sum(blocked_vmap(one, (eta_all, Y), block=block))
+
+    @jax.jit
+    def _final(
+        eta_all: Array, d: Array, log_pdet: Array
+    ) -> Tuple[Array, Array, Array, Array, Array, Array]:
+        def one(eta_v: Array, y_v: Array) -> Tuple[Array, ...]:
+            xtwx, c, g = _working_xprod(eta_v, y_v)
+            return _gp_fit_one(
+                c, g, xtwx, d, log_pdet, n, p, m, n_fixed,
+                n_outer, ridge, lam_floor, lam_ceil,
+            )
+
+        return cast(
+            Tuple[Array, Array, Array, Array, Array, Array],
+            blocked_vmap(one, (eta_all, Y), block=block),
+        )
+
+    # PQL outer loop: relinearise until the linear predictor settles.
+    eta = family.clip_eta(family.link(family.init_mu(Y)))  # (V, N)
+    rho_hat = float(np.exp(float(np.mean(log_rho_grid_np))))
+    fit: Optional[Tuple[Array, Array, Array, Array, Array, Array]] = None
+    for _pql in range(max(int(n_pql), 1)):
+        nll_grid = []
+        for log_rho in log_rho_grid_np:
+            rho = float(np.exp(log_rho))
+            d, log_pdet = _penalty_diag(
+                sqrt_lambda, kernel, jnp.asarray(rho, dtype), n_fixed
+            )
+            val = float(_pooled(eta, d, log_pdet))
+            if map_rho is not None:
+                val = val + 2.0 * float(map_rho(jnp.asarray(rho, dtype)))
+            nll_grid.append(val)
+        log_rho_hat = _parabolic_argmin(log_rho_grid_np, np.asarray(nll_grid))
+        rho_hat = float(np.exp(log_rho_hat))
+        d_hat, log_pdet_hat = _penalty_diag(
+            sqrt_lambda, kernel, jnp.asarray(rho_hat, dtype), n_fixed
+        )
+        fit = _final(eta, d_hat, log_pdet_hat)
+        eta = family.clip_eta(fit[0] @ X.T)  # (V, N) updated linear predictor
+
+    assert fit is not None
+    beta, v, lam, edf, phi, log_mlik = fit
+    return _assemble_gp_result(
+        beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, 'hsgp',
+        n, m, n_fixed, lo, hi, boundary, family=family.name,
     )
 
 
@@ -1447,6 +1615,7 @@ def gp_predict(
     *,
     parametric: Optional[Float[Array, 'g q']] = None,
     x_train: Optional[Float[Array, ' N']] = None,
+    type: Literal['link', 'response'] = 'link',
 ) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]:
     """Per-element posterior mean and standard deviation of the GP at ``x_new``.
 
@@ -1471,6 +1640,12 @@ def gp_predict(
     x_train
         ``(N,)`` original training covariate -- **required for ``engine='exact'``**
         (ignored for ``'hsgp'``).
+    type
+        ``'link'`` (default) returns the latent linear-predictor ``eta``; for a
+        non-Gaussian fit, ``'response'`` maps the mean through ``family.linkinv``
+        (the mean response, e.g. a probability / rate) and scales ``std`` by the
+        delta-method factor ``|d mu / d eta|`` (a point-estimate response-scale
+        SD).  A no-op for the Gaussian (identity-link) fit.
 
     Returns
     -------
@@ -1531,12 +1706,21 @@ def gp_predict(
         )
     x_design = jnp.concatenate(fixed_blocks + [phi_new], axis=1)  # (g, p)
 
-    mean = result.coef @ x_design.T  # (V, g)
+    if type not in ('link', 'response'):
+        raise ValueError(
+            f"gp_predict: type={type!r}; expected 'link' or 'response'."
+        )
+    eta = result.coef @ x_design.T  # (V, g) -- latent (link-scale) mean
     var = jnp.einsum(
         'gi,vij,gj->vg', x_design, result.cov_unscaled, x_design
     )
     std = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-30, None))
-    return mean, std
+    if type == 'response' and result.family != 'gaussian':
+        fam = resolve_family(result.family)
+        # delta method: sd(mu) ~ |d mu / d eta| sd(eta), a point estimate.
+        std = jnp.abs(fam.mu_eta(eta)) * std
+        return fam.linkinv(eta), std
+    return eta, std
 
 
 # ---------------------------------------------------------------------------

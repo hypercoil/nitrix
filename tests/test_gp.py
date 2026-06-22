@@ -871,3 +871,106 @@ def test_block_bounds_rho_search_without_changing_results(case):
     b = gp_fit(jnp.asarray(y), xa, block=3, **kw)
     np.testing.assert_allclose(np.asarray(pred(a)), np.asarray(pred(b)), atol=1e-7)
     np.testing.assert_allclose(np.asarray(a.theta), np.asarray(b.theta), atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# CV2 -- non-Gaussian GP lengthscale estimation (PQL-REML, Phase 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('family', ['poisson', 'binomial'])
+def test_gp_glm_recovers_smooth(family):
+    """CV2 Phase 1: a Binomial / Poisson GP recovers the latent smooth and a
+    finite lengthscale by PQL-REML; gp_predict gives a valid response-scale mean."""
+    rng = np.random.default_rng(1)
+    n, V = 200, 6
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    truth = np.sin(2 * np.pi * x)
+    grid = np.linspace(0.02, 0.98, 100)
+    tgrid = np.sin(2 * np.pi * grid)
+    tgrid = tgrid - tgrid.mean()
+    if family == 'poisson':
+        Y = rng.poisson(np.exp(0.8 + truth)[None, :] * np.ones((V, 1))).astype(float)
+        res = gp_fit(jnp.asarray(Y), jnp.asarray(x), family='poisson',
+                     n_rho=16, n_pql=8)
+        pw = None
+    else:
+        ntr = 20
+        pmu = 1.0 / (1.0 + np.exp(-1.5 * truth))
+        Y = rng.binomial(ntr, pmu[None, :] * np.ones((V, 1))).astype(float) / ntr
+        pw = jnp.full((n,), float(ntr))
+        res = gp_fit(jnp.asarray(Y), jnp.asarray(x), family='binomial',
+                     prior_weights=pw, n_rho=16, n_pql=8)
+    assert res.family == family
+    assert 0.0 < float(np.exp(res.theta[0, 2])) < 2.0
+    assert np.all(np.isfinite(np.asarray(res.coef)))
+    # latent (link-scale) fit tracks the smooth shape
+    eta, eta_sd = gp_predict(res, jnp.asarray(grid))
+    e = np.asarray(eta[0]) - float(np.mean(eta[0]))
+    assert np.corrcoef(e, tgrid)[0, 1] > 0.9
+    assert np.all(np.asarray(eta_sd) > 0)
+    # response-scale mean is in the family's range
+    mu, mu_sd = gp_predict(res, jnp.asarray(grid), type='response')
+    if family == 'poisson':
+        assert np.all(np.asarray(mu) > 0)
+    else:
+        assert np.all((np.asarray(mu) > 0) & (np.asarray(mu) < 1))
+    assert np.all(np.asarray(mu_sd) > 0)
+
+
+def test_gp_glm_rho_tracks_lengthscale():
+    """CV2: the estimated rho is larger for a smoother (longer-scale) latent
+    field -- the lengthscale is genuinely estimated, not pinned."""
+    rng = np.random.default_rng(3)
+    n, V = 220, 6
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+
+    def fit_rho(freq):
+        eta = 0.8 + np.sin(freq * np.pi * x)
+        Y = rng.poisson(np.exp(eta)[None, :] * np.ones((V, 1))).astype(float)
+        r = gp_fit(jnp.asarray(Y), jnp.asarray(x), family='poisson',
+                   n_rho=16, n_pql=8)
+        return float(np.exp(r.theta[0, 2]))
+
+    rho_short, rho_long = fit_rho(2.0), fit_rho(0.7)
+    assert rho_short < rho_long
+
+
+def test_gp_gaussian_family_is_byte_identical():
+    """No marquee regression: family='gaussian' takes the existing exact path,
+    bit-for-bit, and gp_predict type='response' is a no-op for it."""
+    rng = np.random.default_rng(4)
+    n, V = 120, 5
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    Y = jnp.asarray(np.sin(2 * np.pi * x)[None, :] + 0.2 * rng.standard_normal((V, n)))
+    a = gp_fit(Y, jnp.asarray(x), n_rho=14)
+    b = gp_fit(Y, jnp.asarray(x), n_rho=14, family='gaussian')
+    assert float(jnp.max(jnp.abs(a.coef - b.coef))) == 0.0
+    assert float(jnp.max(jnp.abs(a.theta - b.theta))) == 0.0
+    assert b.family == 'gaussian'
+    grid = jnp.linspace(0.05, 0.95, 40)
+    ml, sl = gp_predict(b, grid)
+    mr, sr = gp_predict(b, grid, type='response')
+    assert float(jnp.max(jnp.abs(ml - mr))) == 0.0
+    assert float(jnp.max(jnp.abs(sl - sr))) == 0.0
+
+
+def test_gp_glm_phase1_guards():
+    """CV2 Phase 1 scope: non-Gaussian needs engine='hsgp', 1-D, no corr; an
+    unsupported family and a bad predict type raise clearly."""
+    rng = np.random.default_rng(5)
+    n = 60
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    Y = jnp.asarray(rng.poisson(2.0, (3, n)).astype(float))
+    g = jnp.asarray(np.repeat(np.arange(6), 10))
+    with pytest.raises(NotImplementedError, match='engine'):
+        gp_fit(Y, jnp.asarray(x), family='poisson', engine='exact')
+    with pytest.raises(NotImplementedError, match='corr'):
+        gp_fit(Y, jnp.asarray(x), family='poisson', corr='ar1', group=g)
+    with pytest.raises(NotImplementedError, match='1-D'):
+        gp_fit(Y, jnp.asarray(rng.uniform(0, 1, (n, 2))), family='poisson')
+    with pytest.raises(NotImplementedError, match='binomial'):
+        gp_fit(Y, jnp.asarray(x), family='gamma')
+    res = gp_fit(Y, jnp.asarray(x), family='poisson', n_rho=8, n_pql=4)
+    with pytest.raises(ValueError, match='type='):
+        gp_predict(res, jnp.asarray(x), type='quantile')
