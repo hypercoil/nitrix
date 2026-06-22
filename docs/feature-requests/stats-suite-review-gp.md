@@ -52,6 +52,13 @@ Clear the **Round 1 blockers** (§1) before merge; everything else is tracked fo
 The merge-gating set. All are confirmed (MC4 partial). Suggested order is cheapest-guard
 first → correctness → memory; see §8 for rationale.
 
+> **✅ Round 1 COMPLETE (2026-06-22)** — all 7 blockers fixed, tested, ruff/mypy-clean,
+> committed on `feat/stats-gp`:
+> **ER1·MC2·MC3** `18707fe` · **MC1** `d914cd9` · **MC4** `587fed9` (minimal `ValueError`
+> guard; full log-φ marginal deferred) · **PF1** `07b3447` · **PF2** `b97c812` (core
+> `(V,p,p)` influence transient removed; `(V,N)`/cov-return residual → Round 3). The Status
+> cells below read `open` as authored; treat this banner as the live state.
+
 | # | ID | Sev | Status | Location | Issue (verified) | Fix |
 |---|----|-----|--------|----------|------------------|-----|
 | 1 | **ER1** | High | open | `hgp.py:329, 471-491`; `glmm/__init__.py:227` | **Out-of-range / negative group labels silently dropped.** `jax.nn.one_hot` (hgp) and `segment_sum`/`b[group]` (glmm) map any label `≥ n_levels` or `< 0` to a zero row/segment, so observations silently fall out of the group structure → wrong-but-finite fit, no error. Exactly the path an explicit `n_levels`/`n_groups` invites. *Suite-wide pattern.* | Host-side, after resolving `L`/`L2`/`n_groups`: `if max(group) ≥ L or min(group) < 0: raise ValueError(...)` (and `group_inner` vs `L2`). One host sync already happens. Add negative/too-small-`n_levels` tests. |
@@ -180,9 +187,9 @@ artifact `docs/design/stats-suite-review.md` §5.
 
 Effort **S** ≈ <½ day · **M** ≈ ½–1 day · **L** ≈ multi-day.
 
-### Round 1 — pre-merge blockers (this PR) — **in progress**
+### Round 1 — pre-merge blockers (this PR) — ✅ **COMPLETE**
 Order = cheapest validation guard → correctness → memory (later items don't depend on
-earlier, but this front-loads risk reduction):
+earlier, but this front-loads risk reduction). All ✅ done + tested + committed:
 
 1. **ER1** (S) — group-label validation, `hgp` + `glmm` (host guard).
 2. **MC2** (S) — integer-`omega` dtype promotion in `kernel.py`.
