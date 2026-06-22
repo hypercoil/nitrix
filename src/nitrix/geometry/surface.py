@@ -44,6 +44,7 @@ __all__ = [
     'surface_smooth',
     'deform_to_sdf',
     'cortical_thickness',
+    'inflate_surface',
 ]
 
 
@@ -498,3 +499,86 @@ def cortical_thickness(
         f"cortical_thickness: method must be 'symmetric' or "
         f"'correspondence'; got {method!r}."
     )
+
+
+def inflate_surface(
+    mesh: Mesh,
+    *,
+    n_iterations: int = 100,
+    spring_weight: float = 0.5,
+    metric_weight: float = 1.0,
+    step: float = 0.5,
+) -> Tuple[Float[Array, 'n_vertices 3'], Float[Array, 'n_vertices']]:
+    """Inflate a folded genus-0 surface, returning ``(inflated, sulcal_depth)``.
+
+    The `mris_inflate` analogue and the **sole source of ``?h.sulc``** -- the
+    sulcal-depth feature the learned surface registrars (`sugar`/`josa`) consume
+    and the mandatory precursor to spherical parameterisation (GS-2).
+
+    Each iteration moves every vertex by a fraction ``step`` of two bounded
+    forces:
+
+    - a **spring (smoothing) force** toward the 1-ring neighbour mean
+      (weight ``spring_weight``) -- unfolds the cortex; and
+    - a **metric-restoring force** that pulls each 1-ring edge back toward its
+      *original* length (weight ``metric_weight``) -- preserves size/distances
+      so the surface inflates rather than collapses.
+
+    **Sulcal depth** is the integral over the inflation of each vertex's
+    displacement along its (outward) normal: buried sulcal vertices are pushed
+    outward (positive), gyral crowns inward (negative) -- the FreeSurfer
+    ``?h.sulc`` convention (positive in sulci).
+
+    A jitted ``lax.fori_loop`` of pure-JAX bounded-force steps (no host-side
+    construction); differentiable w.r.t. ``mesh.vertices``.
+
+    Parameters
+    ----------
+    mesh
+        Folded genus-0 triangle mesh (e.g. a white surface).
+    n_iterations
+        Number of inflation steps (static).
+    spring_weight
+        Weight of the neighbour-mean smoothing force.
+    metric_weight
+        Weight of the edge-length-restoring force (prevents collapse).
+    step
+        Per-iteration step fraction in ``(0, 1]``.
+
+    Returns
+    -------
+    ``(inflated_vertices (n, 3), sulcal_depth (n,))``.  Differentiable.
+    """
+    faces = mesh.faces
+    v0 = mesh.vertices
+    n_vertices = mesh.n_vertices
+    i0, i1, i2 = faces[:, 0], faces[:, 1], faces[:, 2]
+    # Directed per-face edges (each undirected edge appears both ways for a
+    # closed mesh) -- avoids host-side unique-edge construction, stays jittable.
+    src = jnp.concatenate([i0, i1, i2])
+    dst = jnp.concatenate([i1, i2, i0])
+    deg = jnp.zeros((n_vertices,), dtype=v0.dtype).at[src].add(1.0)
+    inv_deg = (1.0 / jnp.maximum(deg, 1.0))[:, None]
+    rest = jnp.sqrt(jnp.sum((v0[src] - v0[dst]) ** 2, axis=-1))  # (E,)
+
+    def _body(
+        _: int,
+        carry: Tuple[Float[Array, 'n_vertices 3'], Float[Array, 'n_vertices']],
+    ) -> Tuple[Float[Array, 'n_vertices 3'], Float[Array, 'n_vertices']]:
+        v, sulc = carry
+        # Spring force: toward the 1-ring neighbour mean (bounded).
+        neigh_sum = jnp.zeros_like(v).at[src].add(v[dst])
+        f_spring = neigh_sum * inv_deg - v
+        # Metric force: restore each edge toward its original (rest) length.
+        d = v[src] - v[dst]
+        length = jnp.sqrt(jnp.sum(d * d, axis=-1) + 1e-12)
+        edge_grad = ((length - rest) / length)[:, None] * d  # +grad on src
+        f_metric = jnp.zeros_like(v).at[src].add(-edge_grad) * inv_deg
+        dv = step * (spring_weight * f_spring + metric_weight * f_metric)
+        normals = compute_vertex_normals(v, faces)
+        sulc = sulc + jnp.sum(dv * normals, axis=-1)
+        return (v + dv, sulc)
+
+    init = (v0, jnp.zeros((n_vertices,), dtype=v0.dtype))
+    inflated, sulc = jax.lax.fori_loop(0, n_iterations, _body, init)
+    return inflated, sulc
