@@ -16,8 +16,9 @@ Everything here is pure JAX and differentiable w.r.t. ``mesh.vertices``.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Tuple
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int
 
@@ -27,8 +28,10 @@ from ..sparse import (
     apply_operator,
     compute_vertex_normals,
     mesh_cotangent_laplacian,
+    mesh_laplacian_smooth,
     vertex_areas,
 )
+from .grid import sample_at_points
 
 __all__ = [
     'mean_curvature',
@@ -37,6 +40,7 @@ __all__ = [
     'areal_distortion',
     'strain_distortion',
     'surface_smooth',
+    'deform_to_sdf',
 ]
 
 
@@ -370,3 +374,68 @@ def surface_smooth(
 
     b = area * values
     return cg(_matvec, b, tol=tol, maxiter=maxiter)
+
+
+def deform_to_sdf(
+    mesh: Mesh,
+    sdf: Float[Array, 'x y z'],
+    *,
+    n_iterations: int = 50,
+    step: float = 0.2,
+    smooth_weight: float = 0.1,
+    spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+) -> Mesh:
+    """Advance a mesh's vertices along their normals onto a target SDF zero-set.
+
+    The recommended *geometry-light* surface mover: each iteration samples the
+    signed-distance field at the current vertices, steps every vertex a
+    fraction ``step`` of its local SDF value back along its (outward) normal
+    -- ``v <- v - step * sdf(v) * n`` -- then applies a Laplacian-smoothing
+    fraction.  Deforming e.g. a white surface outward onto a pial SDF this way
+    **preserves vertex correspondence and inherits genus-0** (the topology /
+    ``faces`` never change -- no re-tessellation, no topology correction), and
+    correspondence cortical thickness falls out for free.
+
+    A jitted ``lax.fori_loop`` of pure-JAX ops (``sample_at_points`` +
+    ``compute_vertex_normals`` + ``mesh_laplacian_smooth``), so it is **fully
+    differentiable** w.r.t. both the ``sdf`` and the initial vertices -- usable
+    inside a learned-refinement loss.  Regularisation is in-loop and jittable
+    only: no host-side self-intersection guard (run ``remove_self_intersections``
+    as a post-hoc cleanup if needed).
+
+    Parameters
+    ----------
+    mesh
+        Genus-0 starting mesh (e.g. a white surface).
+    sdf
+        Target signed-distance volume ``(X, Y, Z)`` (negative inside), in the
+        same physical frame as the mesh (sampled at ``vertices / spacing``).
+    n_iterations
+        Number of march iterations (static).
+    step
+        Per-iteration fraction of the local SDF value to move (``0 < step <=
+        1``); smaller is more stable.
+    smooth_weight
+        Laplacian-smoothing fraction applied each iteration (``0`` = none).
+    spacing
+        Per-axis voxel size relating vertex physical coordinates to ``sdf``
+        index space.
+
+    Returns
+    -------
+    ``Mesh`` with the same ``faces`` (correspondence + genus preserved) and
+    advanced ``vertices``.  Differentiable.
+    """
+    faces = mesh.faces
+    spacing_arr = jnp.asarray(spacing, dtype=mesh.vertices.dtype)
+
+    def _body(_: int, verts: Float[Array, 'n_vertices 3']) -> Array:
+        s = sample_at_points(sdf, verts / spacing_arr, mode='nearest')  # (n,)
+        normals = compute_vertex_normals(verts, faces)
+        verts = verts - step * s[..., None] * normals
+        return mesh_laplacian_smooth(
+            verts, faces, lam=smooth_weight, iterations=1
+        )
+
+    out = jax.lax.fori_loop(0, n_iterations, _body, mesh.vertices)
+    return Mesh(vertices=out, faces=faces)
