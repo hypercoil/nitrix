@@ -6,28 +6,45 @@ title: "Hilbert-space Gaussian processes: smoothing with kernels"
 A **Gaussian-process** smooth asks for smoothness a different way: instead of
 "penalise the second difference", you say "function values at nearby inputs are
 correlated, with the correlation decaying over a **lengthscale** $\rho$" — a
-kernel. Evaluated at the data, that prior is just a random effect with covariance
+kernel. Evaluated at the data, that prior is a random effect with covariance
 $K$, so a *fixed-kernel* GP is already an [LME](lme.qmd) (penalty $S=K^{-1}$). The
 hard part is **estimating $\rho$**, because changing it changes $K$ and its
 eigenvectors. **HSGP** (Hilbert-space approximate GP) fixes that: expand the GP in
 a fixed basis of **Laplace eigenfunctions** (sines), into which the kernel enters
-*only* as a **diagonal reweighting** of the columns. Then the basis never moves,
-$\rho$ becomes a cheap parameter to estimate, the amplitude is the
-[Fellner–Schall](fellner-schall.qmd) smoothing parameter, and a GP is just one
-more [penalty block](gamm.qmd) you hand to `gam_fit`.
+*only* as a **diagonal reweighting** of the columns by the kernel's *spectral
+density*. Then the basis never moves, $\rho$ becomes a cheap parameter to
+estimate, the amplitude is the [Fellner–Schall](fellner-schall.qmd) smoothing
+parameter, and a GP is one more [penalty block](gamm.qmd) you hand to
+`gam_fit` — or, with the lengthscale estimated for you, to `gp_fit`.
 :::
 
 Rung 6 — the top of [the ladder](index.qmd). It builds on the
 [GAM](gam.qmd)/[LME](lme.qmd) equivalence and the spectral idea from the
-[LME chapter](lme.qmd#the-scaling-wall-and-the-fast-lmm-trick-that-breaks-it).
+[LME chapter](lme.qmd#sec-fastlmm).
 
 ::: {.callout-note title="Where this lives"}
-The GP rung ships on the `feat/stats-gp` branch (`nitrix.stats.gp`,
-`hsgp_basis` in `nitrix.stats.basis`); it is being folded into the suite. This
-chapter describes that implementation.
+The GP rung ships with the `stats-gp` work (`nitrix.stats.gp` —  `gp_fit`,
+`gp_predict`, `GPResult`; `nitrix.stats.hgp` — `hgp_fit` for hierarchical GPs;
+`hsgp_basis` / `hsgp_basis_nd` in `nitrix.stats.basis`; the lengthscale priors in
+`nitrix.stats.priors`). It is being folded into the suite; this chapter describes
+that implementation.
 :::
 
-## 1. Smoothness as correlation
+## 1. A motivating example {#sec-motivation}
+
+Cortical thickness falls with age, but not on a straight line: it dips in
+adolescence, plateaus, then declines. You have thickness at one vertex for $N$
+subjects against age $x$, and you want the trajectory $f(x)$ without committing to
+a polynomial degree. A [GAM](gam.qmd) would lay down a spline basis and penalise
+the wiggliness. A **Gaussian process** answers the same question by stating a
+belief about *correlation*: "subjects close in age should have similar fitted
+thickness, and how fast that similarity decays with age-gap is a thing I will
+**learn** from the data." That decay rate is the lengthscale, and learning it is
+the whole story of this chapter. (Multiply the vertex up to the whole cortex and
+you want to do this for hundreds of thousands of vertices at once — which is why
+the cheap construction below matters.)
+
+## 2. Smoothness as correlation
 
 A [GAM](gam.qmd) smooth says "don't be wiggly" through a difference penalty. A
 **Gaussian process** says it through a *covariance*: model the unknown function as
@@ -42,67 +59,283 @@ and a **lengthscale** $\rho$ (how quickly correlation decays with distance — l
 $\rho$ = gently varying, small $\rho$ = wiggly). You specify *how points relate*
 rather than *which derivative to penalise*.
 
-## 2. A fixed-kernel GP is a mixed model
+## 3. A fixed-kernel GP is a mixed model
 
 Evaluate the prior @eq-gp at the observed inputs and it becomes an ordinary
 multivariate Gaussian, $f \sim \mathcal{N}(0, K)$ with $K_{ij} = k(x_i, x_j)$.
 That is precisely a **random effect** — the [LME](lme.qmd) chapter's $b$ — only
 with covariance $K$ in place of $\sigma_b^2 ZZ^{\top}$. Equivalently it is a
 penalty block with $S = K^{-1}$. So if the kernel (and hence $\rho$) is **fixed**,
-GP regression is *already in the suite*: it is the LME fit with $ZZ^{\top}\to K$,
-or a GAM smooth whose penalty is $K^{-1}$ (the kriging `gp_basis`). Nothing new.
+GP regression is *already in the suite*: it is the LME fit with $ZGZ^{\top}\to K$,
+or a GAM smooth whose penalty is $S=K^{-1}$ (the kriging `gp_basis`). Nothing new —
+this is the [grand equivalence](foundations.qmd#sec-equivalence) read one more
+time, with the random-effect covariance supplied by a kernel.
 
-## 3. The hard part: estimating the lengthscale
+## 4. The hard part: estimating the lengthscale
 
-The catch is that we usually do **not** know $\rho$, and we want to learn it.
-But $K$ depends on $\rho$ through and through — change $\rho$ and the entire
-matrix, including its eigenvectors, changes. The [FaST-LMM trick](lme.qmd) that
-made variance estimation cheap relied on diagonalising a *fixed* structure once;
-if the structure moves every step, we are back to an $O(N^3)$ eigendecomposition
-per iteration. We need a representation in which the kernel hyperparameters do
-**not** touch the basis.
+The catch is that we usually do **not** know $\rho$, and we want to learn it
+(that was the whole point of the cortical-thickness example). But $K$ depends on
+$\rho$ through and through — change $\rho$ and the entire matrix, **including its
+eigenvectors**, changes. The [FaST-LMM trick](lme.qmd) that made variance
+estimation cheap relied on diagonalising a *fixed* structure once; if the
+structure moves every step, we are back to an $O(N^3)$ eigendecomposition per
+iteration. We need a representation in which the kernel hyperparameters do **not**
+touch the basis.
 
-## 4. HSGP: put the kernel in the weights, not the basis
+## 5. HSGP: the Laplace-eigenfunction construction {#sec-hsgp}
 
-Here is the idea that makes it cheap. On a bounded interval, a stationary GP can
-be approximated by its first $m$ **Laplace eigenfunctions** — literally fixed
-sine waves
+Here is the idea that makes it cheap, built from scratch.
+
+### 5.1 The obvious thing, and why we change basis
+
+The obvious thing is to keep working with $K$ and re-factorise it at every
+candidate $\rho$. That fails for exactly the reason above: the basis moves. The
+cure is to expand $f$ in a basis that is *fixed once and for all*, and let $\rho$
+act only on the **coefficients**. Which basis? We want one that is natural for
+"smoothness on an interval", and there is a canonical answer.
+
+### 5.2 The vibrating string: Laplace eigenfunctions
+
+Picture a string pinned at both ends of an interval $[c-L,\,c+L]$. Pluck it and it
+rings in **standing waves** — the fundamental, then the first harmonic, then the
+second — each a pure sine that vanishes at the two ends. These standing waves are
+the **eigenfunctions of the Laplacian** $-\,d^2/dx^2$ with Dirichlet (pinned-end)
+boundary conditions: functions $\phi_j$ for which $-\phi_j'' = \omega_j^2\,\phi_j$.
+On the bounded domain there is a *discrete* ladder of them,
 
 $$
-\phi_j(x) = \sqrt{\tfrac1L}\,\sin\!\Big(\sqrt{\lambda_j}\,(x - c + L)\Big),
-\qquad \sqrt{\lambda_j} = \frac{j\pi}{2L},
+\phi_j(x) = \sqrt{\tfrac1L}\,\sin\!\Big(\omega_j\,(x - c + L)\Big),
+\qquad \omega_j = \frac{j\pi}{2L},\quad j = 1,2,\dots
 $$ {#eq-eigfun}
 
-on the domain $[c-L,\,c+L]$ ($c$ the data midpoint, $L$ a boundary-padded
-half-range). These do not depend on the kernel at all. The kernel enters **only**
-through its **spectral density** $S_\theta$ evaluated at the eigenfrequencies,
-giving one weight per basis function:
+The integer $j$ counts the half-waves on the interval, $\omega_j$ is the spatial
+frequency (eigenvalue $\omega_j^2$), and the $\sqrt{1/L}$ normalises each one.
+Two facts make these the right basis. First, **they depend only on the domain,
+never on the kernel** — no $\rho$ anywhere in @eq-eigfun. Second, **low $j$ is
+smooth, high $j$ is wiggly**, by construction: the index *is* a frequency, so a
+function built from the first few $\phi_j$ is automatically gentle. This is the
+fixed basis `_hsgp_eigen` builds in `gp.py` (it returns $\omega_j$, a per-mode
+phase $\omega_j(L-c)$ that folds the centring constant in, and the $\sqrt{1/L}$
+amplitude), and `_hsgp_features` evaluates it as $\Phi = [\phi_j(x)]$.
+@fig-hsgp-eigfun draws the first few: each is a pure sine with one more half-wave
+than the last, and the index $j$ literally counts the wiggles — which is why
+truncating the expansion at $m$ modes is the same as refusing to represent
+anything wigglier than the $m$-th harmonic.
+
+```{python}
+#| label: fig-hsgp-eigfun
+#| fig-cap: "The first five Laplace–Dirichlet eigenfunctions φⱼ on the interval [−1, 1] — the standing waves of a string pinned at both ends. Each vanishes at the boundary and carries one more half-wave than the last (j counts the wiggles), and none of them depends on the kernel or the lengthscale. This is the fixed basis; the kernel will only choose how heavily to weight each one."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+L = 1.0          # half-width of the domain [-1, 1]
+c = 0.0          # centre
+x = np.linspace(-1, 1, 400)
+
+def phi(x, j):                                   # eq-eigfun: standing wave j
+    omega_j = j * np.pi / (2 * L)
+    return np.sqrt(1.0 / L) * np.sin(omega_j * (x - c + L))
+
+fig, ax = plt.subplots(figsize=(8, 3.4))
+for j in [1, 2, 3, 4, 5]:
+    ax.plot(x, phi(x, j), lw=2, label=f"j = {j}")
+ax.axhline(0, color="0.7", lw=0.8)
+ax.set(title="Laplace–Dirichlet eigenfunctions: a fixed sine basis (no kernel, no ρ)",
+       xlabel="x", ylabel=r"$\phi_j(x)$")
+ax.legend(fontsize=8, ncol=5, loc="upper center")
+fig.tight_layout(); plt.show()
+```
+
+### 5.3 Where the kernel comes back: the spectral density
+
+We have a basis with no kernel in it. So where does the choice of kernel — RBF
+vs. Matérn, this lengthscale vs. that one — re-enter? Through **how much we trust
+each frequency**.
+
+A stationary kernel $k(x,x')=k(x-x')$ has a **spectral density** $S(\omega)$: its
+Fourier transform, telling you how the function's "energy" is spread across
+frequencies (this is Bochner's theorem — a stationary covariance and a
+non-negative spectral density are the same information). A smooth kernel puts most
+of its mass at low $\omega$; a rough one keeps mass out at high $\omega$. The
+reduced-rank insight of Solin & Särkkä is that on the bounded domain you can
+**approximate the kernel by reweighting the fixed eigenfunctions by the spectral
+density evaluated at their own frequency**:
 
 $$
-s_j = S_\theta\!\big(\sqrt{\lambda_j}\big),
-\qquad \Psi = \big[\sqrt{s_j}\,\phi_j(x)\big]_{j=1}^{m},
-$$ {#eq-hsgp}
+k(x,x') \;\approx\; \sum_{j=1}^m S(\omega_j)\,\phi_j(x)\,\phi_j(x').
+$$ {#eq-hsgp-kernel}
 
-and the whitened design $\Psi$ carries an **identity** penalty. Two payoffs fall
-out:
+Read it piece by piece. $\phi_j(x)\phi_j(x')$ is the rank-one outer product of one
+standing wave — the contribution of frequency $\omega_j$ to the covariance. The
+scalar $S(\omega_j)$ is *how much of that frequency the kernel wants*: a number per
+eigenfunction. Summing the first $m$ of them rebuilds $k$. @fig-hsgp-approx shows
+this series converging as $m$ grows.
 
-- **The basis is fixed.** The eigenfunctions $\phi_j$ never change, so there is no
-  per-step eigendecomposition. The lengthscale $\rho$ enters as a **diagonal
-  reweighting** $\sqrt{s_j(\rho)}$ of a fixed design — estimating it is cheap and
-  `eigh`-free.
-- **It is a drop-in smooth.** With an identity penalty, $\Psi$ is just another
-  [GAM](gam.qmd) basis: the [Fellner–Schall](fellner-schall.qmd) smoothing
-  parameter $\lambda = 1/\sigma_f^2$ *is* the GP amplitude, so `hsgp_basis(x, ...)`
-  hands straight to `gam_fit`.
+Now compare @eq-hsgp-kernel to the eigendecomposition of a covariance matrix,
+$K = \sum_j d_j\, u_j u_j^{\top}$. They are the *same shape*: the $\phi_j$ play the
+role of fixed eigenvectors $u_j$, and $S(\omega_j)$ plays the role of the
+eigenvalue $d_j$ — the **prior variance of the $j$-th coefficient**. That is the
+punchline. If we write $f(x)=\sum_j \gamma_j\,\phi_j(x)$, then @eq-hsgp-kernel says
+the coefficients are independent Gaussians with
 
-So in `nitrix`, a GP smooth is one more entry in the penalty-block list of a
-[GAMM](gamm.qmd): `hsgp_basis` (or `hsgp_basis_nd` for 2-D/3-D smooths, with
-isotropic or per-axis **ARD** lengthscales) builds the $(\Psi, I)$ pair. The
-standalone `gp_fit` goes one step further and estimates the lengthscale too —
-REML over the diagonal reweighting for $\rho$, Fellner–Schall for the amplitude —
-returning a `GPResult`. Kernels: Matérn-1/2, 3/2, 5/2, and squared-exponential.
+$$
+\gamma_j \sim \mathcal{N}\big(0,\ S(\omega_j)\big),
+\qquad\Longrightarrow\qquad
+S \;=\; \operatorname{diag}\!\Big(\tfrac{1}{S(\omega_1)},\dots,\tfrac{1}{S(\omega_m)}\Big),
+$$ {#eq-hsgp-penalty}
 
-## 5. The kernel as a reweighting, by hand
+a **diagonal penalty matrix** $S$ (precision = inverse prior variance, exactly the
+penalty-is-precision reading of [foundations](foundations.qmd#sec-equivalence)). A
+Gaussian process is *another penalty block* — and a particularly nice one,
+because $S$ is diagonal. This is the same "every smoother is a penalty block"
+unification the [GAMM chapter](gamm.qmd#sec-unification) builds to; the GP is its
+last entry.
+
+### 5.4 Why one fixed basis works for *any* lengthscale
+
+Here is the property that makes lengthscale estimation cheap. The eigenfunctions
+$\phi_j$ in @eq-eigfun do not contain $\rho$. Changing the lengthscale changes only
+the **weights** $S(\omega_j)$ in @eq-hsgp-penalty — it slides prior variance
+between the *same* fixed columns, never moving them. So estimating $\rho$ is
+optimising a diagonal reweighting of a matrix we factor once, not re-factorising a
+moving kernel. There is **no eigendecomposition in the loop**. Two payoffs:
+
+- **The basis is fixed.** The lengthscale enters as a diagonal reweighting
+  $1/S(\omega_j;\rho)$ of a fixed design — cheap, and `eigh`-free.
+- **It is a drop-in smooth.** Fold the weights into the design,
+  $\Psi = \big[\sqrt{S(\omega_j)}\,\phi_j(x)\big]$, and the penalty becomes the
+  **identity**: $\Psi$ is then nothing but another [GAM](gam.qmd) basis, and the
+  [Fellner–Schall](fellner-schall.qmd#sec-fs-update) smoothing parameter
+  $\lambda = 1/\sigma_f^2$ *is* the GP amplitude. This is exactly what
+  `hsgp_basis(x, n_basis=m, kernel=..., rho=...)` returns — a `SplineBasis` of
+  `kind='hsgp'` you hand straight to `gam_fit`, lengthscale fixed.
+
+## 6. The spectral densities, kernel by kernel {#sec-spectral}
+
+`nitrix` supports four stationary kernels; their spectral densities are the real
+formulas in `nitrix.linalg.kernel` (`se_spectral_density`,
+`matern_spectral_density`, dispatched by `spectral_density`). In 1-D, with
+amplitude folded into the smoothing parameter:
+
+- **Squared-exponential / RBF** $k(r)=\exp(-r^2/2\rho^2)$:
+  $$
+  S_{\mathrm{RBF}}(\omega) \;=\; \sqrt{2\pi}\,\rho\;\exp\!\big(-\tfrac12\rho^2\omega^2\big).
+  $$ {#eq-S-rbf}
+  A Gaussian in $\omega$ — it decays *super-fast*, so an RBF GP is extremely
+  smooth (infinitely differentiable). Doubling $\rho$ both narrows the Gaussian
+  (concentrating mass at low frequency) and lifts its height.
+
+- **Matérn-$\nu$** with rate $\lambda = \sqrt{2\nu}/\rho$ (matching scikit-learn's
+  `Matern(length_scale=rho)`), for $\nu\in\{\tfrac12,\tfrac32,\tfrac52\}$:
+  $$
+  S_{1/2}(\omega)=\frac{2\lambda}{\lambda^2+\omega^2},\quad
+  S_{3/2}(\omega)=\frac{4\lambda^3}{(\lambda^2+\omega^2)^2},\quad
+  S_{5/2}(\omega)=\frac{16}{3}\,\frac{\lambda^5}{(\lambda^2+\omega^2)^3}.
+  $$ {#eq-S-matern}
+  These decay only *polynomially* in $\omega$ — a **heavy tail** that keeps some
+  mass at high frequency, so a Matérn GP admits rougher functions than an RBF one
+  ($\nu=\tfrac12$ is the non-differentiable exponential kernel; $\nu=\tfrac52$ is
+  twice-differentiable, the sensible default for trajectories). The smoothness
+  index $\nu$ is fixed by your choice of kernel; $\rho$ slides the cutoff.
+
+The lengthscale does one thing to all of these: **a long $\rho$ concentrates
+spectral mass at low frequency**, so @eq-hsgp-penalty upweights the gentle
+low-$j$ eigenfunctions and starves the wiggly high-$j$ ones — a smooth fit. A short
+$\rho$ spreads mass to higher $\omega$ and lets the wiggles back in.
+@fig-hsgp-spectral makes this visible.
+
+```{python}
+#| label: fig-hsgp-spectral
+#| fig-cap: "Spectral densities S(ω), normalised to S(0)=1 so the *shape* is what we compare. Left: RBF — a Gaussian in ω that dies fast. Right: Matérn-5/2 — a polynomial tail that lingers at high frequency (so Matérn admits rougher functions). In both, the long lengthscale (ρ=0.5, solid) packs mass at low ω (smooth); the short lengthscale (ρ=0.15, dashed) spreads it to high ω (wiggly)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1-D closed forms from nitrix.linalg.kernel:
+#   RBF       S(w) ∝ exp(-rho^2 w^2 / 2)
+#   Matern52  S(w) ∝ lam^5 / (lam^2 + w^2)^3,  lam = sqrt(5)/rho
+omega = np.linspace(0, 30, 400)
+
+def rbf_S(om, rho):
+    s = np.exp(-0.5 * (rho * om) ** 2)
+    return s / s[0]
+
+def matern52_S(om, rho):
+    lam = np.sqrt(5.0) / rho
+    s = lam**5 / (lam**2 + om**2) ** 3
+    return s / s[0]
+
+fig, ax = plt.subplots(1, 2, figsize=(8.4, 3.4), sharey=True)
+for rho, style in [(0.5, "-"), (0.15, "--")]:
+    ax[0].plot(omega, rbf_S(omega, rho), style, lw=2, label=f"ρ = {rho}")
+    ax[1].plot(omega, matern52_S(omega, rho), style, lw=2, label=f"ρ = {rho}")
+ax[0].set(title="RBF spectral density", xlabel="frequency ω", ylabel="S(ω) / S(0)")
+ax[1].set(title="Matérn-5/2 spectral density", xlabel="frequency ω")
+for a in ax:
+    a.legend(fontsize=9)
+    a.set_ylim(0, 1.05)
+fig.suptitle("Long ρ → mass at low frequency → smooth; heavy Matérn tail keeps wiggles", fontsize=9)
+fig.tight_layout(); plt.show()
+```
+
+## 7. How many eigenfunctions? Approximation quality vs $m$ {#sec-rank}
+
+The sum in @eq-hsgp-kernel is truncated at $m$ terms. Why is a small $m$ enough,
+when the exact GP has one "basis function" per data point ($N$ of them)? Because
+the spectral density *kills the high-frequency terms for you*: once $\omega_j$ is
+large, $S(\omega_j)$ is tiny (@eq-S-rbf, @eq-S-matern), so those eigenfunctions
+carry almost no prior variance and contribute almost nothing to the sum. You only
+need enough modes to reach the frequencies the kernel still cares about. The rule
+of thumb: **a shorter lengthscale needs more modes** (it keeps higher frequencies
+alive), which is why `gp_fit` defaults to `rank=20` for a 1-D HSGP and
+`hsgp_basis` to `n_basis=20`. @fig-hsgp-approx reconstructs a kernel column and
+watches the truncation converge.
+
+```{python}
+#| label: fig-hsgp-approx
+#| fig-cap: "Reconstructing a Matérn-5/2 kernel column k(x, 0) by the HSGP series ∑ⱼ S(ωⱼ) φⱼ(x) φⱼ(0) for m = 4, 8, 16, 32 eigenfunctions (normalised to peak 1). With only m=4 the curve is visibly too wiggly at the tails; by m=16 it sits on the exact kernel (dashed). The spectral density downweights the high-j modes, so a modest m ≪ N suffices."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+L_dom = 1.0           # domain [-1, 1]
+c = 0.0
+x = np.linspace(-1, 1, 300)
+x0 = 0.0              # reconstruct the column k(x, 0)
+rho = 0.25
+
+def phi(x, j):                                   # Laplace eigenfunctions (eq-eigfun)
+    omega_j = j * np.pi / (2 * L_dom)
+    return np.sqrt(1.0 / L_dom) * np.sin(omega_j * (x - c + L_dom))
+
+def S(j, rho):                                   # Matern-5/2 spectral density at ω_j
+    omega_j = j * np.pi / (2 * L_dom)
+    lam = np.sqrt(5.0) / rho
+    return (16.0 / 3.0) * lam**5 / (lam**2 + omega_j**2) ** 3
+
+def k_true(x, x0, rho):                          # exact Matern-5/2 covariance
+    a = np.sqrt(5.0) * np.abs(x - x0) / rho
+    return (1.0 + a + a * a / 3.0) * np.exp(-a)
+
+def k_approx(x, x0, rho, m):                     # the truncated HSGP series (eq-hsgp-kernel)
+    j = np.arange(1, m + 1)
+    return (S(j, rho)[None, :] * phi(x[:, None], j[None, :])
+            * phi(np.array([x0]), j)[None, :]).sum(axis=1)
+
+fig, ax = plt.subplots(figsize=(8, 3.6))
+kt = k_true(x, x0, rho); kt = kt / kt.max()
+ax.plot(x, kt, "k--", lw=2, label="exact Matérn-5/2")
+for m in [4, 8, 16, 32]:
+    ka = k_approx(x, x0, rho, m); ka = ka / ka.max()
+    ax.plot(x, ka, lw=1.6, label=f"m = {m}")
+ax.set(title="HSGP reconstruction of a kernel column k(x, 0) as m grows",
+       xlabel="x", ylabel="k(x, 0) (normalised)")
+ax.legend(fontsize=8, ncol=2)
+fig.tight_layout(); plt.show()
+```
+
+## 8. The kernel as a reweighting, by hand
 
 A minimal HSGP — fixed sine basis, Matérn-5/2 spectral weights, an identity-ridge
 solve — in pure NumPy. Watch the lengthscale change the *weights on a fixed
@@ -150,7 +383,151 @@ The basis `phi` is built once; only `sqrt(s)` changes with $\rho$. That is the
 whole reason `gp_fit` can estimate a lengthscale cheaply — it is optimising a
 diagonal reweighting of a fixed matrix, never re-factorising a moving kernel.
 
-## Aside: if you know GPs from Bayesian inference
+## 9. Estimating the lengthscale: `gp_fit` and `GPResult` {#sec-gpfit}
+
+`hsgp_basis` fixes $\rho$ and rides `gam_fit`. The standalone `gp_fit` closes the
+loop and **estimates** $\rho$ too. The model it fits per element (voxel/vertex)
+is exactly the cortical-thickness one:
+
+$$
+y_v = T\alpha_v + f_v(x) + e_v,\qquad
+f_v \sim \mathcal{GP}(0,\sigma_f^2 K_\rho),\qquad
+e_v \sim \mathcal{N}(0,\sigma_e^2),
+$$
+
+with `T` the optional unpenalised `parametric` design (intercept plus any linear
+covariates). The clever part is the **profiling**: for a candidate $\rho$ the model
+is a Gaussian penalised regression with a single smoothing parameter
+$\lambda = \sigma_e^2/\sigma_f^2$ — the GAM identity again, where the
+Fellner–Schall parameter *is* the inverse GP amplitude. So `gp_fit` nests two
+loops:
+
+- **Inner (fixed $\rho$):** the generalized
+  [Fellner–Schall](fellner-schall.qmd#sec-fs-update) step (Wood & Fasiolo 2017)
+  picks $\lambda$ — the same `gam_fit` machinery, here with one diagonal penalty
+  $\operatorname{diag}(1/S(\omega_j;\rho))$ on the smooth block (`_fs_lambda`,
+  `_penalty_diag`).
+- **Outer (select $\rho$):** a 1-D search over $\log\rho$ of the **pooled REML
+  marginal likelihood** $\sum_v \ell_R(\rho,\lambda_v)$ on a fixed log-spaced grid
+  (`n_rho=24` points, default range $(0.05,2.0)\times$ data-range) refined by a
+  parabola (`_parabolic_argmin`). The lengthscale $\rho$ is **shared across
+  elements** (one eigenbasis, one smoothness), while the amplitude $\sigma_f^2$
+  and noise $\sigma_e^2$ are **per element** — the natural mass-univariate
+  factoring.
+
+With $\sigma_e^2$ profiled out, the per-element restricted negative log-likelihood
+that `_reml_nll` evaluates is (up to a constant in $N$ and the unpenalised count
+$M_0$ only)
+
+$$
+-2\,\ell_R = (N - M_0)\log D_p + \log|H| - \log|S_\lambda|_{+},
+$$ {#eq-reml-nll}
+
+with $H = X^{\top}X + S_\lambda$ the penalised Hessian, $D_p = y^{\top}y -
+\beta^{\top}X^{\top}y$ the penalised residual sum of squares, $S_\lambda =
+\lambda\,\operatorname{diag}(0,\dots,0,1/S(\omega_1),\dots)$ (zeros on the fixed
+columns), and $\log|S_\lambda|_{+} = m\log\lambda - \sum_j \log S(\omega_j)$ its
+log-pseudo-determinant. This is the [(RE)ML objective](lme.qmd#sec-reml) of the
+LME chapter, now profiled to a function of $\rho$ alone. Every solve goes through
+the dense `small_inv_logdet` (the suite's batched
+[Cholesky-with-log-determinant](solvers.qmd#sec-cholesky)) — no per-element
+$(N\times N)$ GP covariance is ever materialised; peak memory is $O(V(m+q)^2)$.
+
+`gp_fit` returns a **`GPResult`** with: `coef` $(V,p)$ over `[fixed | smooth]`;
+`cov_unscaled` $(V,p,p)$ the Bayesian covariance $(X^{\top}X+S_\lambda)^{-1}$;
+`theta` $(V,3)$ the per-element $[\log\sigma_f^2,\log\sigma_e^2,\log\rho]$ (the
+$\rho$ column constant, since it is shared); `log_mlik`, `edf` (the total effective
+degrees of freedom $\operatorname{tr}((X^{\top}X+S_\lambda)^{-1}X^{\top}X)$ — see
+the [GAM EDF discussion](gam.qmd#sec-edf)), and `dispersion`. `gp_predict` then
+re-evaluates the (fixed) eigenfunctions at new inputs and returns the posterior
+mean $X_{\text{new}}\beta$ and standard deviation
+$\sqrt{\sigma_e^2\operatorname{diag}(X_{\text{new}}VX_{\text{new}}^{\top})}$.
+
+Two engines sit behind the same API. The default `engine='hsgp'` is everything
+above. The alternative `engine='exact'` does a one-off host eigendecomposition of
+the actual kernel Gram per $\rho$ (`_exact_eigen`), building the Karhunen–Loève
+features $\Phi = U\Lambda^{1/2}$; it is the full-rank GP when `rank == N` and the
+eigen-truncated (Nyström) approximation otherwise — equivalent to `lme.reml_fit`
+by the penalty↔variance-component identity, useful as a ground-truth check on the
+HSGP approximation. You can also regularise $\rho$ with a prior via `map_rho=`
+(see §9.1).
+
+### 9.1 Lengthscale priors (`map_rho`) {#sec-priors}
+
+A lengthscale can be weakly identified — short series, sparse coverage — and pure
+REML can then chase $\rho$ toward noise-fitting (tiny $\rho$) or toward
+near-linear (huge $\rho$). The `priors` module supplies penalised-complexity-style
+regularisers, each a callable $\rho \mapsto -\log p(\rho)$ that `gp_fit` *adds* to
+the pooled REML objective in @eq-reml-nll, turning the selected $\rho$ into a
+**maximum-a-posteriori** value:
+
+- `invgamma_prior(a, b)`: $-\log p = (a+1)\log\rho + b/\rho$ — the $b/\rho$ term
+  diverges as $\rho\to 0$, pulling the estimate **up**, away from noise-fitting
+  (the practical default for weak identification).
+- `halfnormal_prior(sd)`: $-\log p = \rho^2/(2\,\text{sd}^2)$ — a soft cap pulling
+  the estimate **down**, away from over-smooth near-linear fits.
+- `lognormal_prior(mu, sd)`: $-\log p = (\log\rho-\mu)^2/(2\,\text{sd}^2)+\log\rho$
+  — a symmetric-in-$\log\rho$ pull toward a prior median $e^{\mu}$.
+
+These are the lightweight, GPU-friendly stand-in for a full Bayesian prior on
+$\rho$ — see the aside in @sec-bayes-aside on the empirical-Bayes vs. full-Bayes
+distinction.
+
+## 10. Multiple dimensions and ARD {#sec-nd}
+
+For a spatial smooth — thickness over a 2-D flattened patch, or a smooth
+interaction of two covariates — pass `x` as `(N, D)`. HSGP generalises by
+**tensor product**: the eigenfunctions of the Laplacian on a box are products of
+the 1-D standing waves, $\phi_{\mathbf j}(\mathbf x) = \prod_d \phi_{j_d}(x_d)$,
+with frequency magnitude $\|\boldsymbol\omega_{\mathbf j}\| = \sqrt{\sum_d
+\omega_{j_d}^2}$ (`_hsgp_eigen_nd`, `_hsgp_features_nd`). The kernel enters through
+the same spectral density, now evaluated in $D$ dimensions
+(`spectral_density(..., dim=D)`), and `gp_fit` defaults to `rank=8` *per axis*.
+There are two ways to set lengthscales:
+
+- **Isotropic** (`ard=False`, default): one shared lengthscale, a radial kernel of
+  $\|\mathbf x-\mathbf x'\|$; the penalty uses the $D$-dimensional radial density
+  $1/S_D(\|\boldsymbol\omega\|;\rho)$ (`_penalty_diag_nd_iso`).
+- **ARD** (`ard=True`): **automatic relevance determination** — a *separate*
+  lengthscale $\rho_d$ per input dimension, so the fit can learn that thickness
+  varies slowly along one axis and fast along another (and effectively switch an
+  axis off by sending its $\rho_d$ large). The penalty factorises across axes,
+  $1/\prod_d S_1(\omega_{j_d};\rho_d)$ (`_penalty_diag_nd_ard`); `gp_fit` estimates
+  the $\rho_d$ by coordinate descent over the axes. `GPResult.nd_meta` records the
+  per-axis ranks, bounds, and (for ARD) the per-axis lengthscales, so `gp_predict`
+  can rebuild the tensor basis.
+
+### 10.1 Hierarchical GPs: `hgp_fit` {#sec-hgp}
+
+When the data are grouped — subjects, sites, sessions — you may want a
+**population** trajectory plus **per-group deviations** that share a kernel. That
+is `hgp_fit`, the GP analogue of a random-slope mixed model and the "GS"
+hierarchical GAM of Pedersen et al. (2019):
+
+$$
+y_{ij} = \beta_0 + f(x_{ij}) + f_{g(i)}(x_{ij}) + e_{ij},\quad
+f\sim\mathcal{GP}(0,\sigma_{\mathrm{pop}}^2 K_\rho),\quad
+f_g\sim\mathcal{GP}(0,\sigma_{\mathrm{grp}}^2 K_\rho)\ \text{iid}.
+$$
+
+Both the population and the group smooths use the *same* fixed HSGP eigenbasis
+$\Phi$; stacking the population columns with the group columns ($\Phi$ masked to
+each group's rows) gives one penalised design with a **block-diagonal, fully
+diagonal** penalty — one smoothing-parameter block per variance component,
+$\operatorname{blkdiag}(\lambda_{\mathrm{pop}}\operatorname{diag}(1/S),\,
+\lambda_{\mathrm{grp}}\operatorname{diag}(1/S)\otimes I_L)$. The two smoothing
+parameters $\lambda_{\mathrm{pop}}=\sigma_e^2/\sigma_{\mathrm{pop}}^2$ and
+$\lambda_{\mathrm{grp}}=\sigma_e^2/\sigma_{\mathrm{grp}}^2$ are selected by the
+same Fellner–Schall step as a multi-smooth GAM, and the shared $\rho$ by the same
+pooled-REML grid as `gp_fit`. Because every block is diagonal with disjoint
+columns, the FS penalty trace keeps the closed form $\operatorname{rank}_k/\lambda_k$
+and there is still no eigendecomposition. The result is an `HGPResult` whose
+`theta` carries $[\log\sigma_{\mathrm{pop}}^2,\log\sigma_{\mathrm{grp}}^2,\log\sigma_e^2,
+\log\rho]$ (`model='GS'`), with a two-level `'nested'` variant for `(gp | g1/g2)`.
+Partial pooling falls out for free: a group with few observations is shrunk toward
+the population curve, exactly as a random effect is shrunk toward its mean.
+
+## 11. Aside: if you know GPs from Bayesian inference {#sec-bayes-aside}
 
 You may have met Gaussian processes the *other* way round — as Bayesian
 nonparametric priors over functions, fit by maximising a marginal likelihood and
@@ -160,18 +537,20 @@ the translation is exact.
 
 A GP has two equivalent descriptions. The **function-space** view you know writes
 a prior directly over functions, $f\sim\mathcal{GP}(0,k)$. The **weight-space**
-view writes $f(x)=\sum_j \beta_j\,\psi_j(x)$ with a Gaussian prior on the weights —
+view writes $f(x)=\sum_j \gamma_j\,\psi_j(x)$ with a Gaussian prior on the weights —
 which is exactly a basis expansion with a quadratic penalty. Mercer's theorem says
-these are the same GP. Reading this chapter's penalties as priors:
+these are the same GP, and @eq-hsgp-kernel is precisely that bridge made finite:
+the eigenfunctions are the features $\psi_j$ and the spectral density is the prior
+variance. Reading this chapter's penalties as priors:
 
 - the penalty matrix $S = K^{-1}$ **is the prior precision**;
 - the penalised objective $\lVert\cdot\rVert_W^2 + \lambda\gamma^{\top}S\gamma$ is
   $-\log$ posterior, so the **penalised fit $\hat f$ is the GP posterior mean**
   (the MAP, which for a Gaussian *is* the mean);
 - you still get uncertainty: the Bayesian coefficient covariance
-  $V=(\Psi^{\top}W\Psi + S)^{-1}$ is the **(conditional) posterior covariance**,
-  and the confidence bands of the [GAM chapter](gam.qmd#how-flexible-was-the-fit-effective-degrees-of-freedom)
-  are the GP's posterior credible bands.
+  $V=(\Psi^{\top}W\Psi + S)^{-1}$ (`GPResult.cov_unscaled`) is the **(conditional)
+  posterior covariance**, and the confidence bands of the
+  [GAM chapter](gam.qmd#sec-edf) are the GP's posterior credible bands.
 
 How the hyperparameters are chosen will also be familiar. Optimising the
 lengthscale and amplitude by (RE)ML here is the same **marginal-likelihood /
@@ -186,29 +565,33 @@ fit by penalised likelihood rather than MCMC.
 | In Bayesian-GP language | In this suite |
 |---|---|
 | kernel / covariance $k$ | penalty $S = K^{-1}$ (a [random effect](lme.qmd)) |
-| output scale / signal variance $\sigma_f^2$ | amplitude $=1/\lambda$ ([Fellner–Schall](fellner-schall.qmd) parameter) |
-| lengthscale $\ell$ | lengthscale $\rho$ |
-| observation noise / nugget $\sigma_n^2$ | residual variance $\sigma_e^2$ |
-| log marginal likelihood / evidence | the (RE)ML objective (see [LME](lme.qmd#eq-reml)) |
+| output scale / signal variance $\sigma_f^2$ | amplitude $=1/\lambda$ ([Fellner–Schall](fellner-schall.qmd#sec-fs-update) parameter) |
+| lengthscale $\ell$ | lengthscale $\rho$ (`theta[:, 2]`) |
+| observation noise / nugget $\sigma_n^2$ | residual variance $\sigma_e^2$ (`dispersion`) |
+| log marginal likelihood / evidence | the (RE)ML objective (@eq-reml-nll; [LME](lme.qmd#sec-reml)) |
 | type-II MLE / empirical Bayes | REML hyperparameter estimation |
-| GP posterior mean | the penalised fit $\hat f$ |
-| GP posterior variance | $\operatorname{diag}(V)$ → credible bands |
-| inducing points / sparse / reduced-rank | the $m$ retained eigenfunctions |
-| sparse-spectrum / Hilbert-space features | the design $\Psi=[\sqrt{s_j}\,\phi_j]$ |
+| prior on the lengthscale | a `map_rho=` penalty → MAP $\rho$ (@sec-priors) |
+| GP posterior mean | the penalised fit $\hat f$ (`coef`) |
+| GP posterior variance | $\operatorname{diag}(V)$ → credible bands (`cov_unscaled`) |
+| inducing points / sparse / reduced-rank | the $m$ retained eigenfunctions (`rank`) |
+| ARD / per-dimension lengthscales | `ard=True` ($\rho_d$ per axis, @sec-nd) |
+| sparse-spectrum / Hilbert-space features | the design $\Psi=[\sqrt{S(\omega_j)}\,\phi_j]$ |
 
 The one honest difference: `nitrix` does **empirical-Bayes** GP regression, not
 full Bayesian inference. It produces point estimates of $(\rho,\sigma_f^2,\sigma_e^2)$
 by marginal likelihood and then a closed-form Gaussian posterior over $f$ given
-those — no MCMC, no posterior *over* the hyperparameters. That is the deliberate
-trade for fitting hundreds of thousands of GPs at once on a GPU; placing priors on
-$\rho$ and sampling is out of scope here.
+those — no MCMC, no posterior *over* the hyperparameters. A `map_rho=` prior adds a
+MAP regulariser on $\rho$, but still selects a single value; it is not a posterior
+over $\rho$. That is the deliberate trade for fitting hundreds of thousands of GPs
+at once on a GPU; placing priors on $\rho$ and sampling them is out of scope here
+(Stan/`brms`/PyMC territory).
 
-## The ladder, complete
+## 12. The ladder, complete
 
 A Gaussian process turned out to be the final entry in the same list: a penalty
 block, now a **kernel** block, whose own hyperparameters are estimable because
 HSGP made them a diagonal reweighting. The whole suite remains the one sentence
-from the [GAMM chapter](gamm.qmd#the-ladder-folded):
+from the [GAMM chapter](gamm.qmd#sec-unification):
 
 > solve $(X^{\top}WX + \sum_k \lambda_k S_k)\gamma = X^{\top}Wz$ by penalised
 > IRLS, and choose the $\lambda_k$ (and, for a kernel block, its lengthscale) by
@@ -216,12 +599,41 @@ from the [GAMM chapter](gamm.qmd#the-ladder-folded):
 
 From a straight line to a Gaussian process, it is one engine.
 
+## Further reading
+
+- Solin, A. & Särkkä, S. (2020). *Hilbert space methods for reduced-rank Gaussian
+  process regression.* Statistics and Computing 30, 419–446. — The construction
+  this chapter is built on: Laplace eigenfunctions reweighted by the spectral
+  density.
+- Riutort-Mayol, G., Bürkner, P.-C., Andersen, M. R., Solin, A. & Vehtari, A.
+  (2023). *Practical Hilbert space approximate Bayesian Gaussian processes for
+  probabilistic programming.* Statistics and Computing 33, 17. — Practical
+  guidance on choosing the rank $m$ and boundary factor $L$.
+- Rasmussen, C. E. & Williams, C. K. I. (2006). *Gaussian Processes for Machine
+  Learning.* MIT Press (free online). — The function-space view, kernels, and
+  evidence maximisation; the reference behind the Bayesian aside.
+- Wood, S. N. & Fasiolo, M. (2017). *A generalized Fellner–Schall method for
+  smoothing parameter optimization.* Biometrics 73, 1071–1081. — The inner
+  $\lambda$ / amplitude step `gp_fit` reuses.
+- Pedersen, E. J., Miller, D. L., Simpson, G. L. & Ross, N. (2019). *Hierarchical
+  generalized additive models in ecology.* PeerJ 7, e6876. — The "GS" hierarchical
+  smoother behind `hgp_fit`.
+
 ## See also
 
-- Code (on `feat/stats-gp`): `nitrix.stats.gp` (`gp_fit`, `GPResult`),
-  `nitrix.stats.basis` (`hsgp_basis`, `hsgp_basis_nd`, `gp_factor_smooth`),
-  `nitrix.linalg.kernel` (`spectral_density`); design note
-  `docs/design/gaussian-process-implementation.md`.
+- Code (ships with the `stats-gp` work):
+  [`nitrix.stats.gp`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gp.py)
+  (`gp_fit`, `gp_predict`, `GPResult`, `gp_aic`, `gp_bic`),
+  [`nitrix.stats.hgp`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/hgp.py)
+  (`hgp_fit`, `hgp_predict`, `HGPResult`),
+  [`nitrix.stats.basis`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/basis.py)
+  (`hsgp_basis`, `hsgp_basis_nd`, `gp_basis`, `gp_factor_smooth`),
+  [`nitrix.stats.priors`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/priors.py)
+  (`halfnormal_prior`, `invgamma_prior`, `lognormal_prior`),
+  [`nitrix.linalg.kernel`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/kernel.py)
+  (`spectral_density`).
 - Rests on: [GAM](gam.qmd) (penalty blocks), [LME](lme.qmd) (the fixed-kernel
-  view + the spectral trick), [Fellner–Schall](fellner-schall.qmd) (amplitude),
-  [GAMM](gamm.qmd) (the unified list).
+  view + the spectral trick), [Fellner–Schall](fellner-schall.qmd#sec-fs-update)
+  (amplitude), [GAMM](gamm.qmd#sec-unification) (the unified list),
+  [solvers](solvers.qmd#sec-cholesky) (`small_inv_logdet`),
+  [foundations](foundations.qmd#sec-equivalence) (penalty-is-precision).

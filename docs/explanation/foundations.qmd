@@ -1,0 +1,688 @@
+---
+title: "Foundations: variance, families, and penalties"
+---
+
+::: {.callout-tldr title="Fast path"}
+This is rung 0 — the page that turns "I know linear algebra" into "I can read the
+rest of this book as one story." Three ideas underpin the whole suite:
+
+1. **We model variance, not just the mean.** Spread is the quantity of interest,
+   and when data come in groups it *splits* into named buckets — the
+   *variance components* that mixed models estimate.
+2. **One exponential-family template** covers Gaussian, binary, count and positive
+   responses, and it dictates exactly how each observation is weighted: the *mean
+   determines the variance*.
+3. **A smoothing penalty, a Gaussian prior, a random-effect variance, and a GP
+   kernel are four names for one object.** That single equivalence is why six
+   models share one engine instead of being six separate programs.
+
+If you read only one page before the ladder, read this one.
+:::
+
+This suite is written for a reader who is comfortable with **linear algebra** —
+matrices, least squares, eigendecomposition, rank, transposes — but who has had
+**no formal training in statistics or numerical methods**. Everything here is
+built up from the linear algebra you already own. Our aim across the book is to
+carry you from *novice* (you can use a fitter and pick the right model) to
+*practitioner* (you understand why each fit converges and what each parameter
+means) to *developer* (you could implement the solver yourself). This page lays
+the three planks that the whole climb rests on.
+
+## 1. The builder's through-line {#sec-throughline}
+
+Here is the single sentence that the rest of the book elaborates. **Every model in
+`nitrix.stats` is the same three-part object:**
+
+1. a **linear predictor** $\eta = X\beta$ — a design matrix times a coefficient
+   vector, the part you already know from ordinary least squares;
+2. a **noise / penalty structure** — how the observations scatter around that
+   predictor, and how strongly the coefficients are pulled toward zero or toward
+   each other;
+3. a **procedure to choose that structure's parameters** — the variances,
+   dispersions and smoothing strengths that part (2) introduced.
+
+Each rung of the ladder keeps part (1) untouched and *enriches part (2)*, then
+leans on a shared part (3) to fit the new parameters. A GLM adds a non-Gaussian
+noise shape; an LME adds correlated noise from grouping; a GAM adds a roughness
+penalty; a GLMM combines two of those; a GAMM combines all of them; an HSGP writes
+a kernel as one more penalty. The ladder is therefore not six topics but one
+object, viewed at six levels of structural richness — and three planks support all
+six. This page builds those three planks: **variance** (§3), the
+**exponential family** (§4), and the **grand equivalence** (§5). With them in hand
+the rest of the book reads as one argument.
+
+A note on what "fitting" even means here. `nitrix.stats` is **mass-univariate**:
+the same design $X$ is applied to *every* element of an image — every voxel,
+vertex, or fixel — at once, hundreds of thousands of tiny regressions sharing one
+design. That shapes the numerics (more in §6), but conceptually nothing changes:
+each element is one instance of the three-part object.
+
+## 2. A motivating question {#sec-motivation}
+
+Hold one concrete question in mind for the whole page. Suppose we measure
+**cortical thickness** at a patch of cortex in a group of people, several
+measurements per person (repeat scans, or neighbouring vertices), and we want to
+know: *does thickness change with age?*
+
+A naive analysis regresses thickness on age and reads off a slope. But three things
+about this data are not captured by "fit a line":
+
+- The measurements **cluster by subject** — two scans of the same person are more
+  alike than two scans of different people. The scatter is not one homogeneous
+  cloud; it has structure we must name and model. (This is §3, and the seed of
+  mixed models.)
+- If instead of thickness we measured a **count** (number of lesions) or a
+  **probability** (is this voxel "activated", yes/no), the spread would no longer
+  be constant — it would *depend on the mean*. We need a noise model that adapts.
+  (This is §4, and the engine of GLMs.)
+- The age effect might not be a straight line but a **smooth curve**, and we must
+  decide *how wiggly* to let it be without overfitting. The knob that controls
+  wiggliness turns out to be the same knob as "how much do subjects vary." (This
+  is §5, and the spine of the whole suite.)
+
+Each plank answers one of these, and the planks turn out to be deeply connected.
+
+## 3. Variance: the quantity we actually model {#sec-variance}
+
+### The mean is only half the story
+
+You already have a working picture of **variance**: it is the average squared
+distance of the data from their mean — a single number that says *how spread out*
+the values are. For a sample $y_1,\dots,y_N$ with mean $\bar y$,
+
+$$
+\operatorname{Var}(y) \;=\; \frac{1}{N}\sum_{i=1}^{N}(y_i-\bar y)^2 .
+$$ {#eq-variance}
+
+Regression, as you first met it, is about the **mean**: the fitted line predicts
+$\bar y$ as a function of the covariates. But the line is only half the model. The
+*other* half is how the data scatter about it — and that scatter is where almost
+all of statistics lives. The mean tells you *where*; the variance tells you *how
+confident you may be*, *how surprising* a new point is, and — crucially for us —
+*what structure the noise has*. The whole rest of this book is, in one phrase,
+**bookkeeping of variance**.
+
+### When data come in groups, variance splits
+
+Here is the move that turns a bag of numbers into a model. Suppose the
+measurements come in **groups** — in our example, the repeated thickness
+measurements *grouped by subject*. Look at @fig-foundations-varcomp. Two kinds of
+spread are visible at once:
+
+- **within-group spread**: how much one subject's repeated measurements scatter
+  about *that subject's own mean* (the blue spans);
+- **between-group spread**: how much the *subject means* scatter about the *grand
+  mean* (the red span).
+
+```{python}
+#| label: fig-foundations-varcomp
+#| fig-cap: "Cortical thickness for five subjects, several measurements each. The blue spans are within-subject spread (scatter about each subject's own mean, red dashes); the red span on the left is between-subject spread (scatter of the subject means about the grand mean, grey dashed line). Total variability is the sum of the two."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# Cortical thickness (mm) for 5 subjects, several measurements each.
+n_subj = 5
+n_per = 8
+subj_means = 2.6 + 0.35 * rng.standard_normal(n_subj)  # between-subject spread
+within_sd = 0.12                                        # within-subject spread
+
+vals = []
+groups = []
+for s in range(n_subj):
+    v = subj_means[s] + within_sd * rng.standard_normal(n_per)
+    vals.append(v)
+    groups.append(np.full(n_per, s))
+vals = np.concatenate(vals)
+groups = np.concatenate(groups)
+
+grand_mean = vals.mean()
+
+fig, ax = plt.subplots(figsize=(6.4, 4.0))
+ax.axhline(grand_mean, color="0.5", ls="--", lw=1.2, label="grand mean")
+
+for s in range(n_subj):
+    x = s + 1
+    yv = vals[groups == s]
+    gm = yv.mean()
+    ax.scatter(np.full_like(yv, x) + 0.04 * rng.standard_normal(yv.size), yv,
+               color="C0", s=22, zorder=3)
+    ax.scatter([x], [gm], color="C3", s=90, marker="_", zorder=4, lw=2.5)
+    ax.vlines(x + 0.28, yv.min(), yv.max(), color="C0", lw=2, alpha=0.6)
+
+gmeans = np.array([vals[groups == s].mean() for s in range(n_subj)])
+ax.vlines(0.4, gmeans.min(), gmeans.max(), color="C3", lw=3)
+ax.text(0.5, gmeans.mean(), "between\n(SSB)", color="C3", va="center", fontsize=9)
+ax.text(n_subj + 0.55, grand_mean, "within\n(SSW)", color="C0", va="center", fontsize=9)
+
+ax.set_xticks(range(1, n_subj + 1))
+ax.set_xticklabels([f"subj {s+1}" for s in range(n_subj)])
+ax.set_ylabel("cortical thickness (mm)")
+ax.set_title("Total variance splits into between- and within-group parts")
+ax.set_xlim(0.0, n_subj + 1.3)
+ax.legend(loc="lower right", fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+Now write the total spread as a sum of squared distances from the grand mean. With
+$y_{ij}$ the $j$-th measurement in group $i$, $\bar y_i$ the group mean, and
+$\bar y$ the grand mean, add and subtract the group mean inside each term —
+$y_{ij}-\bar y = (y_{ij}-\bar y_i) + (\bar y_i - \bar y)$ — and square. The cross
+term sums to zero (within each group, the deviations about $\bar y_i$ cancel by
+definition), leaving the clean identity
+
+$$
+\underbrace{\sum_{i,j}(y_{ij}-\bar y)^2}_{\text{SST, total}}
+\;=\;
+\underbrace{\sum_{i,j}(\bar y_i-\bar y)^2}_{\text{SSB, between}}
+\;+\;
+\underbrace{\sum_{i,j}(y_{ij}-\bar y_i)^2}_{\text{SSW, within}} .
+$$ {#eq-anova}
+
+This is the **ANOVA identity**, and it is the most important picture on this page.
+Total variability is *exactly* between-group variability plus within-group
+variability — no remainder. Read it as a statement about *attributing* spread: some
+of the variation is because subjects differ from one another (SSB), and the rest is
+because a single subject's measurements differ among themselves (SSW).
+
+### A variance component is a labelled bucket of variance
+
+The payoff is a definition you will use for the rest of the book. A **variance
+component** is *a labelled bucket of variance tied to a grouping factor.* In
+@fig-foundations-varcomp there are two buckets: a "between-subjects" component and a
+"within-subject (residual)" component. Estimating their sizes — "how much of the
+spread is subject-to-subject vs. measurement-to-measurement" — is precisely what a
+**linear mixed-effects model** does. We will write the between-subjects bucket as a
+random-effect variance and the within-subject bucket as the residual variance; the
+LME chapter formalises this and the variance-component parameters live in $\theta$
+([the canonical notation](#sec-notation)). The ANOVA identity is the seed: a mixed
+model is the ANOVA identity made continuous, with a covariate (age) carried along.
+
+### The simplest decomposition you already know: $R^2$
+
+You have actually met variance decomposition before, under a different name. When
+you fit a line by least squares, the total spread of $y$ splits into a part the fit
+**explains** and a part it leaves as **residual**:
+
+$$
+\underbrace{\sum_i (y_i-\bar y)^2}_{\text{total}}
+=
+\underbrace{\sum_i (\hat y_i-\bar y)^2}_{\text{explained}}
++
+\underbrace{\sum_i (y_i-\hat y_i)^2}_{\text{residual}},
+\qquad
+R^2 = \frac{\text{explained}}{\text{total}} .
+$$ {#eq-rsq}
+
+This is structurally the *same* identity as @eq-anova — "explained" plays the role
+of "between" and "residual" the role of "within" — and $R^2$ is the fraction of
+variance the model accounts for. Whenever a later chapter says it "decomposes
+variance" or "estimates a variance component," it is doing a richer version of this
+one move you already trust.
+
+## 4. Exponential families: one template, many noise models {#sec-expfam}
+
+### Why one template
+
+Our second motivating wrinkle was that the *noise shape* depends on what we
+measured. Gaussian scatter (cortical thickness) is symmetric and its spread does
+not depend on the mean. Counts (lesions) are non-negative integers whose spread
+*grows* with the mean. A yes/no label (activated?) is a coin flip whose variance is
+largest at probability $\tfrac12$ and zero at the extremes. We do not want a
+separate theory for each. We want one **template** that has all of these as special
+cases, so a single fitting routine can serve them all. That template is the
+**exponential family**, and it is exactly the object `_family.py` implements.
+
+### The actual `Family` object
+
+In `nitrix.stats`, a noise model is a `Family` — a frozen, hashable record of pure
+functions (so it can ride as a static argument through `vmap`/JIT). Reading
+`src/nitrix/stats/_family.py`, the fields that matter to us are:
+
+- `link` / `linkinv` — the link $g(\mu)$ and its inverse $g^{-1}(\eta)$, mapping
+  between the linear predictor $\eta$ and the mean $\mu$;
+- `variance` — the **variance function** $V(\mu)$, the spread *as a function of the
+  mean*;
+- `unit_deviance` — the per-observation **deviance** contribution $d(y,\mu)$;
+- `loglik` — the per-observation log-likelihood;
+- `has_fixed_dispersion` — whether the dispersion $\phi$ is fixed at $1$ (Binomial,
+  Poisson) or estimated (Gaussian, Gamma).
+
+The built-in registry holds `GAUSSIAN`, `BINOMIAL`, `POISSON`, `GAMMA`,
+`NEGBINOMIAL` and `TWEEDIE`; `negbinomial(alpha)` and `tweedie(p)` are factories,
+and `Family.with_link(...)` swaps in a non-canonical link (`'probit'`, `'cloglog'`,
+`'sqrt'`, `'inverse'`, …) while leaving the distribution untouched. Everything
+below explains *why* those particular fields are the right ones.
+
+### Building the canonical form from intuition
+
+Start from a wish: *one density formula whose shape is steered by a single
+parameter.* Write a generic density and ask what the simplest such "steerable"
+family looks like. If we want the steering parameter $\theta$ — call it the
+**natural parameter** — to enter in the cleanest possible way, we put it *linearly*
+in the exponent, multiplying the data $y$:
+
+$$
+f(y;\theta,\phi)=\exp\!\left\{\frac{y\,\theta - b(\theta)}{\phi} + c(y,\phi)\right\} .
+$$ {#eq-expfam}
+
+Let us name every piece, because each one earns its keep:
+
+- $\theta$ is the **natural parameter** — the one dial that moves the distribution.
+- $y\theta$ is the *only* place the data and the dial interact, and they interact
+  linearly. This single design choice is what makes the whole GLM machinery work.
+- $b(\theta)$ is the **cumulant function** (or log-partition). It is not free: it is
+  whatever makes the density integrate to $1$. As we are about to see, this one
+  normalising job forces $b$ to encode *both* the mean and the variance.
+- $\phi$ is the **dispersion** — an overall scale on the noise (variance for the
+  Gaussian; fixed at $1$ for Poisson/Binomial).
+- $c(y,\phi)$ collects the terms that depend only on $y$ and $\phi$, not on
+  $\theta$. It makes the density normalise but carries no information about the
+  mean, so it never touches the fitting of $\beta$.
+
+That is the entire template. Its power is that the unknown of interest enters as
+the bare product $y\theta$; everything model-specific is bundled into the one
+function $b$.
+
+### The single fact: the mean determines the variance
+
+Now the derivation that makes @eq-expfam pay off — and it is short, so we show every
+step. A density integrates to one for *every* value of $\theta$:
+
+$$
+\int f(y;\theta,\phi)\,dy = 1 \quad\text{for all }\theta .
+$$
+
+Because this holds for all $\theta$, we may differentiate both sides with respect
+to $\theta$ and the right-hand side stays $0$. Differentiating once under the
+integral, and using $\partial_\theta f = \frac{y-b'(\theta)}{\phi}\,f$ (the
+chain rule applied to the exponent in @eq-expfam), gives
+$\int \frac{y-b'(\theta)}{\phi} f\,dy = 0$, i.e. $\mathbb{E}[y] = b'(\theta)$.
+Differentiating a *second* time and simplifying gives the variance. The two results
+are:
+
+$$
+\boxed{\;\mathbb{E}[y] = \mu = b'(\theta), \qquad
+\operatorname{Var}[y] = \phi\,b''(\theta) = \phi\,V(\mu).\;}
+$$ {#eq-meanvar}
+
+Read what just happened. The mean is the *first* derivative of $b$, and the variance
+is the *second* derivative of the same $b$ — so once you fix the mean, the variance
+is no longer free. Define the **variance function** $V(\mu) = b''(\theta(\mu))$, the
+variance written as a function of the mean. Then the entire noise behaviour is
+captured by $V(\mu)$ and the scalar $\phi$. This is *the* foundational fact of the
+GLM world:
+
+> In an exponential family, **the mean determines the variance.**
+
+It is exactly why count data far from zero is noisier than count data near zero (for
+Poisson, $V(\mu)=\mu$), and why a fair-coin probability is the noisiest (for
+Bernoulli, $V(\mu)=\mu(1-\mu)$ peaks at $\mu=\tfrac12$). And it is the fact that
+fixes the **IRLS weights** in the GLM chapter: an observation is weighted by how
+informative it is, which is inversely related to its variance. Concretely, the IRLS
+core in `_irls.py` forms the working weight `w = mu_eta**2 / V(mu)` and working
+response `z = eta + (y - mu) / mu_eta` — see
+[the working-response derivation](glm.qmd#sec-working). The weight is small exactly
+where $V(\mu)$ is large; @eq-meanvar is what tells you where that is.
+
+### The mean–variance curve, seen
+
+@fig-foundations-meanvar draws $V(\mu)$ for the four classic families on one axis.
+The picture *is* the intuition: the Gaussian curve is flat (constant spread), the
+Poisson rises linearly (noisier where the count is larger), the Bernoulli arches and
+returns to zero at the certain outcomes, and the Gamma rises quadratically
+(multiplicative noise — a 10% error, not a fixed-size error).
+
+```{python}
+#| label: fig-foundations-meanvar
+#| fig-cap: "The variance function V(mu) for four exponential families. Gaussian is flat (spread independent of the mean); Poisson grows like mu (counts far from zero are noisier); Bernoulli is mu(1-mu), largest at a fair coin and zero at a sure outcome; Gamma is mu^2 (constant *relative* noise). The mean determines the variance — these curves are that fact, drawn."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+mu = np.linspace(0.01, 3.0, 400)
+mu01 = np.linspace(0.01, 0.99, 400)  # Bernoulli mean lives in (0, 1)
+
+fig, ax = plt.subplots(figsize=(6.6, 4.2))
+ax.plot(mu, np.ones_like(mu), label="Gaussian:  V = 1 (constant)", lw=2)
+ax.plot(mu, mu, label=r"Poisson:  V = $\mu$", lw=2)
+ax.plot(mu01, mu01 * (1.0 - mu01), label=r"Bernoulli:  V = $\mu(1-\mu)$", lw=2)
+ax.plot(mu, mu ** 2, label=r"Gamma:  V = $\mu^2$", lw=2)
+
+ax.set_xlabel(r"mean response  $\mu$")
+ax.set_ylabel(r"variance function  $V(\mu)$")
+ax.set_title("The mean dictates the variance (one curve per family)")
+ax.set_ylim(0, 3.2)
+ax.legend(loc="upper left", fontsize=9)
+fig.tight_layout()
+plt.show()
+```
+
+### The canonical link
+
+The link $g$ connects the linear predictor to the mean: $\eta = g(\mu)$, equivalently
+$\mu = g^{-1}(\eta)$. We always have $\eta = X\beta$, but $\mu$ may live on a
+restricted range — a probability in $(0,1)$, a positive rate in $(0,\infty)$ — and the
+link is what bends the unbounded line onto that range. Among all valid links, one is
+special: the **canonical link** is the $g$ that makes the natural parameter equal the
+linear predictor, $\theta=\eta$. Why care? Because @eq-expfam couples $y$ to the model
+*only* through $y\theta$; choosing $\theta=\eta=X\beta$ makes the algebra of fitting
+maximally clean (the Fisher-scoring weights simplify, $X^{\top} y$ becomes a sufficient
+statistic). For the Gaussian the canonical link is the identity ($\mu=\eta$); for
+Poisson it is the log ($\mu=e^{\eta}$, keeping rates positive); for Bernoulli it is the
+logit ($\mu=\operatorname{expit}(\eta)$, keeping probabilities in $(0,1)$). These are
+exactly the defaults baked into `GAUSSIAN`, `POISSON`, `BINOMIAL`. A non-canonical link
+(probit, cloglog) is perfectly legal — `Family.with_link` swaps it in — it gives up
+only that one bit of algebraic convenience.
+
+### The deviance: a family's natural badness-of-fit
+
+How well does a fitted $\mu$ match the data $y$? For Gaussian noise the natural answer
+is the sum of squared residuals — but that is *specific* to the Gaussian. The exponential
+family gives a measure that adapts to each noise shape. Imagine the best possible fit:
+one that sets $\hat\mu_i = y_i$ for every observation (the **saturated** model — it bends
+to every point). It has the highest log-likelihood any model could achieve on this data.
+The **deviance** is twice the gap between that ceiling and your model's log-likelihood:
+
+$$
+D = 2\big(\ell_{\text{saturated}} - \ell_{\text{model}}\big)
+  = \sum_i d(y_i,\mu_i),
+$$ {#eq-deviance}
+
+a sum of non-negative per-observation **unit deviances** $d(y,\mu)$ — exactly the
+`unit_deviance` field of `Family`. The deviance is the family's own notion of
+"sum of squared residuals": for the Gaussian, $d(y,\mu)=(y-\mu)^2$ and the deviance *is*
+the residual sum of squares (look at `GAUSSIAN.unit_deviance` — it is literally
+`(y - mu) ** 2`). For the Poisson it is the count-aware
+$2\big(y\log(y/\mu)-(y-\mu)\big)$, and for the Binomial the log-odds form
+$2\big(y\log\tfrac{y}{\mu}+(1-y)\log\tfrac{1-y}{1-\mu}\big)$ — both readable straight off
+`_poisson_deviance` and `_binomial_deviance`. Deviance is what IRLS drives downhill, and
+what model-comparison criteria (AIC/BIC) are built from.
+
+### The four families at a glance
+
+Putting @eq-meanvar to work, each family is pinned down by its cumulant $b(\theta)$, which
+fixes $\mu=b'(\theta)$, the variance function $V(\mu)=b''$, and the canonical link:
+
+| Family | $b(\theta)$ | $\mu=b'(\theta)$ | $V(\mu)$ | Canonical link |
+|---|---|---|---|---|
+| Gaussian | $\theta^2/2$ | $\theta$ | $1$ | identity |
+| Bernoulli | $\log(1+e^{\theta})$ | $\dfrac{e^{\theta}}{1+e^{\theta}}$ | $\mu(1-\mu)$ | logit |
+| Poisson | $e^{\theta}$ | $e^{\theta}$ | $\mu$ | log |
+| Gamma | $-\log(-\theta)$ | $-1/\theta$ | $\mu^2$ | inverse (`nitrix` defaults to log) |
+
+(Read each row left to right as a worked instance of @eq-meanvar: differentiate $b$ once
+to get $\mu$, twice to get $V$.) `nitrix`'s `GAMMA` uses a **log** link by default — the
+practical choice for positive measures like reaction times or volumes — rather than the
+canonical inverse link; the canonical link is available by building a custom `Family`.
+The same `_family.py` also ships overdispersed counts (`NEGBINOMIAL`, $V=\mu+\alpha\mu^2$)
+and the semicontinuous `TWEEDIE` ($V=\mu^p$), each a point on the same template.
+
+## 5. The grand equivalence: penalty = prior = variance component = kernel {#sec-equivalence}
+
+This is the conceptual payoff of the whole book, and it is worth slowing down for.
+Our third motivating wrinkle was the wiggliness knob: how smooth should the
+age-trajectory be? We will show that this knob is *the same object* as the
+between-subjects variance from §3 — and as a Bayesian prior, and as a Gaussian-process
+kernel. Four vocabularies, one matrix.
+
+### Start with a penalty you would invent yourself
+
+Suppose you fit a flexible curve as a linear combination of many basis functions,
+$f(x)=\sum_k \beta_k\,\phi_k(x)$, so the curve is again $X\beta$ for a basis matrix
+$X$. With many basis functions, plain least squares overfits — it chases every noisy
+wiggle. The natural fix, which you could invent unaided, is to *add a cost for
+wiggliness*: penalise the fit when the coefficients describe a rough curve. Measure
+roughness with a quadratic form $\beta^{\top} S\beta$ (for a curvature penalty, $S$
+is a second-difference operator — large when neighbouring coefficients jump around),
+weight it by a knob $\lambda$, and minimise
+
+$$
+\lVert y - X\beta\rVert^2 \;+\; \lambda\,\beta^{\top} S\beta .
+$$ {#eq-penalised}
+
+Here $S$ is the **penalty matrix** (we always write the penalty matrix as $S$ in this book, never $P$),
+and $\lambda$ is the **smoothing parameter**. Large $\lambda$ ⇒ wiggliness is
+expensive ⇒ a flat fit; small $\lambda$ ⇒ wiggliness is cheap ⇒ a wiggly fit. So far
+this is pure linear algebra: @eq-penalised is **ridge regression** with a shaped
+penalty, and its solution is the penalised normal equations
+$(X^{\top}X + \lambda S)\beta = X^{\top}y$ — the same solve `_irls.py` performs (with
+weights) as $(X^{\top}WX + S)\beta = X^{\top}Wz$.
+
+### The same objective is a negative log-posterior
+
+Now read @eq-penalised through a *probabilistic* lens. Suppose the data are Gaussian
+about the fit with variance $\sigma^2$, and — this is the new idea — suppose we hold a
+prior belief that the coefficients are *small and smooth*, encoded as a Gaussian prior
+$\beta \sim N(0,\,\tau^2 S^{-1})$. ($S^{-1}$ as a covariance means $S$ is the prior
+*precision*: directions where $S$ is large are directions the prior keeps tight.) The
+negative log-posterior is the negative log-likelihood plus the negative log-prior:
+
+$$
+-\log p(\beta\mid y)
+\;=\;
+\underbrace{\frac{1}{2\sigma^2}\lVert y-X\beta\rVert^2}_{\text{from the Gaussian likelihood}}
+\;+\;
+\underbrace{\frac{1}{2\tau^2}\,\beta^{\top} S\beta}_{\text{from the Gaussian prior}}
+\;+\;\text{const} .
+$$ {#eq-logpost}
+
+Multiply through by $2\sigma^2$: this is *term for term* @eq-penalised, with
+
+$$
+\lambda \;=\; \frac{\sigma^2}{\tau^2} .
+$$ {#eq-lambda-tau}
+
+Stop and feel the weight of this. The penalised least-squares fit you would have
+invented from scratch is **identically** the *maximum-a-posteriori* estimate of a
+Bayesian model with a Gaussian prior. The penalty matrix $S$ **is** the prior
+precision. The smoothing strength $\lambda$ **is** a *variance ratio*: noise variance
+over prior variance. A large $\lambda$ (strong smoothing) is the same statement as a
+small $\tau$ (a tight prior that insists the coefficients be small).
+
+### …and a tight prior is a small random-effect variance
+
+One more rename closes the loop back to §3. "Treat the coefficients as random,
+drawn from $N(0,\tau^2 S^{-1})$" is the *definition* of a **random effect** with
+variance component $\tau^2$. So:
+
+- "shrink the wiggly coefficients" (penalty view, GAM), **is**
+- "give them a tight prior" (Bayesian view, HSGP), **is**
+- "treat them as a random effect with small variance" (mixed-model view, LME).
+
+The smoothing parameter $\lambda$, the prior standard deviation $\tau$, and the
+random-effect variance component $\theta$ are *the same number wearing three hats*.
+@fig-foundations-equivalence makes this literal: a single sequence of fits, drawn
+once and labelled twice — once by the penalty strength $\lambda$, once by the
+equivalent prior standard deviation $\tau=\sigma/\sqrt{\lambda}$. Same curves; two
+vocabularies.
+
+```{python}
+#| label: fig-foundations-equivalence
+#| fig-cap: "One smoothing fit, two labels. The same three curves (a smooth recovered from noisy data via a roughness-penalised basis fit) are shown twice. Left: labelled by the penalty strength lambda — a roughness cost. Right: labelled by the equivalent prior standard deviation tau = sigma / sqrt(lambda) — a Bayesian prior width. Strong penalty (large lambda, red) is the same fit as a tight prior (small tau): penalty strength and prior width are one knob, related by lambda = sigma^2 / tau^2."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# A noisy nonlinear signal: a stand-in for a smooth age-trajectory to recover.
+n = 60
+x = np.linspace(0, 1, n)
+f_true = np.sin(2 * np.pi * x) + 0.4 * np.sin(6 * np.pi * x)
+sigma = 0.45
+y = f_true + sigma * rng.standard_normal(n)
+
+# A dense Gaussian-bump basis with a second-difference roughness penalty S.
+K = 24
+centres = np.linspace(-0.05, 1.05, K)
+width = 0.06
+B = np.exp(-0.5 * ((x[:, None] - centres[None, :]) / width) ** 2)
+
+D = np.zeros((K - 2, K))
+for i in range(K - 2):
+    D[i, i] = 1.0
+    D[i, i + 1] = -2.0
+    D[i, i + 2] = 1.0
+S = D.T @ D  # the penalty matrix
+
+BtB = B.T @ B
+Bty = B.T @ y
+
+
+def fit(lam):
+    coef = np.linalg.solve(BtB + lam * S, Bty)
+    return B @ coef
+
+
+lams = [0.05, 2.0, 80.0]
+colors = ["C0", "C2", "C3"]
+
+fig, axes = plt.subplots(1, 2, figsize=(9.4, 4.0), sharey=True)
+
+ax = axes[0]
+ax.scatter(x, y, s=14, color="0.6", zorder=1, label="data")
+for lam, c in zip(lams, colors):
+    ax.plot(x, fit(lam), color=c, lw=2.2, label=fr"$\lambda={lam:g}$")
+ax.set_title(r"Penalty view: tune $\lambda$ (roughness cost)")
+ax.set_xlabel("age (scaled)")
+ax.set_ylabel("response")
+ax.legend(fontsize=8, loc="upper right")
+
+ax = axes[1]
+ax.scatter(x, y, s=14, color="0.6", zorder=1)
+for lam, c in zip(lams, colors):
+    tau = sigma / np.sqrt(lam)
+    ax.plot(x, fit(lam), color=c, lw=2.2, label=fr"$\tau={tau:.2f}$")
+ax.set_title(r"Prior view: tune $\tau$ (prior sd of coefficients)")
+ax.set_xlabel("age (scaled)")
+ax.legend(fontsize=8, loc="upper right")
+
+fig.suptitle(r"One fit, two labels:  $\lambda=\sigma^2/\tau^2$", fontsize=12)
+fig.tight_layout(rect=(0, 0, 1, 0.95))
+plt.show()
+```
+
+### From coefficients to functions: the kernel
+
+There is a fourth hat, and it is what turns this from a curiosity into the HSGP
+chapter. A prior on the *coefficients* $\beta$ induces, through $f=X\beta$, a prior
+on the *function values* $f$. Push the coefficient covariance $\tau^2 S^{-1}$ through
+the basis: the function values have covariance
+$\operatorname{Cov}(f) = X\,(\tau^2 S^{-1})\,X^{\top}$. A covariance *between the
+values of a function at different inputs* is precisely a **kernel**, and a function
+with a Gaussian prior over its values is a **Gaussian process**. So the penalty $S$,
+read as a prior on coefficients, *is* a GP kernel in disguise — and a clever choice of
+basis ($X$) and penalty ($S$) reproduces a desired kernel cheaply. That is the
+Hilbert-space Gaussian process; see [the HSGP chapter](hsgp.qmd).
+
+### Why this is the spine of the suite
+
+State it plainly, because it is the reason the library exists in one piece rather than
+six:
+
+> A smoothing **penalty** (GAM), a Gaussian **prior** (Bayes/HSGP), a random-effect
+> **variance component** (LME), and a GP **kernel** are four names for one object —
+> a quadratic form $\beta^{\top} S\beta$ with a scale parameter.
+
+Because the object is shared, the *machinery* is shared. GAM, LME, GLMM, GAMM and
+HSGP are one engine, not five programs: each fits a penalised weighted normal-equations
+system and chooses the scale parameter by a (restricted) likelihood. The next section
+names that shared machinery.
+
+## 6. The shared computational substrate {#sec-substrate}
+
+Everything above reduces, computationally, to two moves repeated across the suite:
+
+1. **Solve a (penalised) weighted normal-equations system.** Every model ends at
+   $(X^{\top} W X + S)\,\beta = X^{\top} W z$ — a small $p\times p$ linear solve you
+   recognise from least squares, with weights $W$ from the family (§4) and a penalty
+   $S$ from the equivalence (§5). The numerics of doing this stably — Cholesky,
+   damped Newton, the cuSOLVER-free dense inverse `small_inv_logdet`, block-Woodbury
+   for many groups — live in [the solvers page](solvers.qmd).
+2. **Choose the variance/smoothing parameters** $\theta,\lambda$ by maximising a
+   **(restricted) likelihood** with a cheap iteration. The multiplicative
+   Fellner–Schall update that does this is shared across GAM/LME/GLMM/GAMM; see
+   [Choosing smoothing parameters](fellner-schall.qmd).
+
+Two design constraints from the mass-univariate setting colour both moves. Because one
+shared design $X$ is fit to an entire image at once, the expensive shared pieces — a
+factorisation of $X$, an eigendecomposition of the random-effect design — are computed
+**once** and reused across all elements; only the per-element response changes. And
+because each fit must `vmap`/JIT across hundreds of thousands of elements, every fit runs
+a **fixed number of iterations** (no data-dependent stopping) and every $p\times p$ solve
+avoids the vendor GPU solver (`cuSOLVER`, which is unreliable on some accelerators) — that
+is why `_irls.py` routes every solve through the in-house `small_inv_logdet`.
+
+## 7. Notation {#sec-notation}
+
+The whole suite uses these symbols. Other chapters point back here; keep this table
+nearby on a first read.
+
+| Symbol | Meaning |
+|---|---|
+| $y$, $Y$ | response vector; mass-univariate response matrix ($V\times N$: $V$ elements, $N$ observations) |
+| $N$, $p$ | number of observations; number of fixed-effect coefficients |
+| $X$, $\beta$ | fixed-effects design ($N\times p$); fixed-effect coefficients |
+| $Z$, $b$ | random-effects design ($N\times q$); random-effect coefficients |
+| $\eta=X\beta$ | linear predictor |
+| $g$, $\mu=g^{-1}(\eta)$ | link function; mean response |
+| $W$, $z$ | IRLS working weights (diagonal); IRLS working response |
+| $V(\mu)$, $\phi$ | variance function; dispersion parameter |
+| $S$, $\lambda$ | **penalty matrix** (roughness/precision); smoothing parameter(s) — always $S$, never $P$ |
+| $\theta$ | variance components / covariance parameters (the things (RE)ML estimates) |
+| $G$, $R$ | random-effect covariance ($q\times q$); residual covariance ($N\times N$) |
+| $V_y = ZGZ^{\top}+R$ | marginal (observation) covariance |
+| $\top$, $\operatorname{tr}$ | transpose; trace |
+
+## 8. How to read this suite {#sec-how-to-read}
+
+Three paths, matched to the novice → practitioner → developer arc:
+
+- **Novice (fast path).** Read this page, then each chapter's TL;DR callout, plus the
+  GLM chapter in full. That is enough to choose the right model for a question and to
+  use the fitters.
+- **Practitioner (ladder order).** Read in ladder order — foundations → glm → lme →
+  gam → glmm → gamm → hsgp — detouring to [solvers](solvers.qmd) and
+  [Fellner–Schall](fellner-schall.qmd) when an algorithm recurs. You will understand
+  why each fit converges and what every parameter means.
+- **Developer (source-linked deep read).** Read the ladder *and* follow each
+  **See also** link into `src/nitrix/stats/`. The pages are written so that the prose
+  maps onto the actual functions (`Family`, `fit_penalised_irls`, `small_inv_logdet`,
+  the Fellner–Schall update), so you could reimplement a rung from the chapter.
+
+## Further reading
+
+- McCullagh, P. & Nelder, J. A. (1989). *Generalized Linear Models* (2nd ed.).
+  Chapman & Hall/CRC. The canonical reference for exponential families, links, and
+  deviance.
+- Efron, B. & Hastie, T. (2016). *Computer Age Statistical Inference*. Cambridge
+  University Press. Clear modern treatment of exponential families and deviance
+  (and much else); freely available from the authors.
+- Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*
+  (2nd ed.). Chapman & Hall/CRC. The definitive source for the penalty ⇔ random-effect
+  ⇔ prior view, and the engine that unifies GAM/LME/GAMM.
+- Pinheiro, J. C. & Bates, D. M. (2000). *Mixed-Effects Models in S and S-PLUS*.
+  Springer. Variance components and the structure of grouped data.
+- Gelman, A. & Hill, J. (2007). *Data Analysis Using Regression and
+  Multilevel/Hierarchical Models*. Cambridge University Press. An applied,
+  intuition-first account of variance decomposition and multilevel structure.
+- Rasmussen, C. E. & Williams, C. K. I. (2006). *Gaussian Processes for Machine
+  Learning*. MIT Press. Kernels as priors over functions; the GP end of the
+  equivalence. Freely available at gaussianprocess.org/gpml.
+
+## See also
+
+- Source: [`_family.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_family.py)
+  — the `Family` record, the built-in families, links, variance functions and
+  deviances described in §4.
+- Source: [`_irls.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_irls.py)
+  — the penalised IRLS core that performs the shared $(X^{\top}WX+S)\beta=X^{\top}Wz$
+  solve.
+- Next rung: [Generalised linear models — the foundation](glm.qmd) *(start the ladder
+  here)*.
+- Shared machinery: [Solvers](solvers.qmd) and
+  [Choosing smoothing parameters: the Fellner–Schall method](fellner-schall.qmd).

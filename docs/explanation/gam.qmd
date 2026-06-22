@@ -9,7 +9,7 @@ The trick is to write the smooth as a linear combination of fixed wiggly buildin
 blocks, $f(x) = B(x)\gamma$ — now it is **linear in $\gamma$** and drops straight
 into the [GLM](glm.qmd) solve. To stop it overfitting, add a **roughness
 penalty** $\lambda\,\gamma^{\top}S\gamma$, turning the solve into
-$(X^{\top}WX + \lambda S)\gamma = X^{\top}Wz$ — the GLM normal equations with one
+$(X^{\top}WX + \lambda S)\beta = X^{\top}Wz$ — the GLM normal equations with one
 extra term. The penalty strength $\lambda$ is chosen by
 [Fellner–Schall](fellner-schall.qmd). And the punchline: **that penalty is a
 random-effect variance in disguise**, so a GAM *is* an [LME](lme.qmd), and the two
@@ -26,80 +26,332 @@ effects are curved: a response that rises then falls with age, a nuisance whose
 influence saturates. We want to estimate a **function** $f(x)$, not a slope, and
 we don't want to commit in advance to "quadratic" or "cubic".
 
-## 2. Make the shape linear again: basis expansion
+**A running example.** Take cortical thickness against age across the lifespan.
+Thickness grows in childhood, plateaus, then declines — a clearly nonlinear
+trajectory whose exact shape we do *not* know. We could guess a cubic, but a
+cubic forces one global curvature and will fight the data wherever the true
+curvature changes. We want a representation flexible enough to follow the real
+curve, yet controllable enough not to chase measurement noise. The rest of the
+page builds exactly that, and at scale: the same smooth basis is shared across
+$V$ vertices while each vertex gets its own response (mass-univariate, the way
+`gam_fit` is written).
 
-Represent the unknown function as a weighted sum of fixed, simple "bump"
-functions $B_1, \dots, B_K$ — a **basis**:
+## 2. Make the shape linear again: basis expansion {#sec-basis}
+
+Here is the move that unlocks everything else. We do not know $f$, but suppose
+we fix in advance a small library of simple, known functions $B_1, \dots, B_K$ —
+call them **basis functions** — and write the unknown $f$ as a *weighted sum* of
+them:
 
 $$
 f(x) = \sum_{k=1}^{K} B_k(x)\,\gamma_k = B(x)\,\gamma .
 $$ {#eq-basis}
 
-The basis functions are fixed; only the weights $\gamma$ are unknown. Crucially
-$f$ is now **linear in $\gamma$**, so estimating a smooth is just estimating extra
-coefficients — the GLM machinery applies unchanged, with $B(x)$ appended to the
-design matrix. A rich basis (large $K$) can trace almost any shape.
+The basis functions are fixed; only the weights $\gamma$ are unknown. The point
+is that $f$ is now **linear in $\gamma$**, so "estimate a curve" has become
+"estimate $K$ numbers" — and the entire GLM machinery applies unchanged: append
+the row vector $B(x_i) = [B_1(x_i), \dots, B_K(x_i)]$ to observation $i$'s design
+row, and the smooth's weights become additional coefficients. A rich basis (large
+$K$) can trace almost any shape. The only open question is *which* basis — and
+that choice is the whole craft of this chapter.
 
-## 3. The catch, and the cure: a roughness penalty
+### 2.1 The basis a reader would invent first — and why it fails
 
-A rich basis overfits — it chases noise into wiggles. The fix is not to use fewer
-bumps (that forces a global stiffness) but to **penalise wiggliness**:
+The most natural basis is the **monomials** $B_k(x) = x^{k-1}$, i.e. fit a
+high-degree polynomial $f(x)=\gamma_0 + \gamma_1 x + \gamma_2 x^2 + \cdots$. It
+is linear in $\gamma$, so it drops into the GLM, and with enough terms it can
+bend any way we like. So why not stop here?
+
+Two reasons, both fatal at scale:
+
+- **Polynomials are global.** Each $B_k(x)=x^{k-1}$ is nonzero everywhere, so a
+  data point near age 80 tugs on the coefficient that also controls the fit near
+  age 5. A bump in one region ripples across the whole domain — the fit cannot be
+  locally flexible without being globally wild.
+- **High-degree polynomials oscillate.** Pushing the degree up to gain
+  flexibility makes the fit swing violently between data points (the Runge
+  phenomenon), and the design columns $1, x, x^2, \dots$ become nearly collinear,
+  so $X^{\top}X$ is badly conditioned and the solve is numerically fragile.
+
+The cure is to keep the "weighted sum of simple functions" idea but swap the
+basis for one whose functions are **local**.
+
+### 2.2 B-splines: local bumps stitched at knots
+
+Picture instead a row of overlapping, hump-shaped functions, each living over a
+short stretch of the $x$-axis and zero outside it. A smooth curve is then a
+weighted sum of these local humps: raise the weight on the hump sitting over age
+40 and you lift the fit *there* and almost nowhere else. That locality is exactly
+what polynomials lacked.
+
+Those humps are **B-splines**. Concretely: lay down a grid of **knots** along the
+$x$-axis. Between adjacent knots the B-spline is a low-degree polynomial piece
+(cubic by default), and the pieces are stitched together so the overall function
+is continuous up to its second derivative — smooth to the eye, with no visible
+kinks. Each individual B-spline $B_k$ is nonzero over only a handful of
+neighbouring knot-spans (a cubic B-spline touches four), so the design matrix
+$B$ is **banded**: each row has only $\text{degree}+1$ nonzeros. A useful sanity
+property is the **partition of unity** — at every $x$ the basis values sum to
+one, $\sum_k B_k(x) = 1$ — so the basis can represent a constant exactly with
+equal weights, and a row of $B$ is a local weighted average.
+
+`nitrix` builds this in `basis.py`. `bspline_basis(x, n_basis, degree=3,
+penalty_order=2)` constructs a **uniform cubic B-spline** design over the data
+range. Under the hood `_bspline_design` maps each $x_i$ to a parametric
+coordinate $s = (x_i - \text{lo})/(\text{hi}-\text{lo})\cdot(\,K-\text{degree})$,
+finds which span it falls in (`floor(s)`), and fills the $\text{degree}+1$
+nonzero entries of that row with the closed-form **uniform B-spline weights**
+(`uniform_bspline_weights` in `numerics/_spline.py` — the cubic weights are the
+familiar $(1-t)^3/6$, $(3t^3-6t^2+4)/6$, $\dots$, the same evaluator validated
+for N4 bias-field correction). Because the weights are written out in closed
+form rather than recursed, the construction is cuSOLVER-free and differentiable,
+like the rest of the suite.
+
+@fig-gam-basis shows the set of bumps. Note how each is a localised hump and how
+they overlap their neighbours — that overlap is what lets the weighted sum be
+*smooth* rather than a staircase.
+
+```{python}
+#| label: fig-gam-basis
+#| fig-cap: "A uniform cubic B-spline basis: ten overlapping local humps over [0,1]. Each B_k is nonzero over only a few knot-spans (locality); the dashed line shows the partition of unity (the basis values sum to 1 everywhere)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+def bspline_design(x, n_basis, degree=3, lo=0.0, hi=1.0):
+    # Uniform cubic B-spline design, mirroring nitrix.numerics._spline.
+    n_spans = n_basis - degree
+    s = (x - lo) / (hi - lo) * n_spans
+    span = np.clip(np.floor(s).astype(int), 0, n_spans - 1)
+    t = np.clip(s - span, 0.0, 1.0)
+    t2, t3 = t**2, t**3
+    w = np.stack([                       # the four cubic B-spline weights
+        (1 - t)**3 / 6.0,
+        (3*t3 - 6*t2 + 4) / 6.0,
+        (-3*t3 + 3*t2 + 3*t + 1) / 6.0,
+        t3 / 6.0,
+    ], axis=-1)
+    B = np.zeros((x.size, n_basis))
+    for i in range(x.size):
+        for j in range(degree + 1):
+            B[i, span[i] + j] += w[i, j]
+    return B
+
+x = np.linspace(0, 1, 400)
+K = 10
+B = bspline_design(x, K)
+
+fig, ax = plt.subplots(figsize=(8, 3.2))
+for k in range(K):
+    ax.plot(x, B[:, k], lw=2)
+ax.plot(x, B.sum(axis=1), "k--", lw=1, label="partition of unity (rows sum to 1)")
+ax.set(title=f"{K} uniform cubic B-spline basis functions",
+       xlabel="x", ylabel="$B_k(x)$")
+ax.legend(fontsize=8, loc="upper right")
+fig.tight_layout(); plt.show()
+```
+
+### 2.3 The other bases `nitrix` ships
+
+A B-spline is the default 1-D smoother, but `basis.py` exposes a family of
+constructors, each a `SplineBasis` carrying a `(design, penalty)` pair plus the
+parameters to re-evaluate the smooth on a fresh grid (for plotting partial
+effects). All of them are real and grounded in source:
+
+- **Thin-plate regression spline** (`thinplate_regression_basis`, `mgcv`'s
+  `bs='tp'`): isotropic and knot-free. It starts from the full thin-plate basis
+  (one radial function $|x-z_j|^3$ per knot) and *truncates* it by an
+  eigendecomposition of the radial penalty, keeping the leading wiggly
+  components plus a low-order polynomial null space (Wood 2003). The truncating
+  `eigh` is a one-off host computation, so it dodges the broken GPU's `syevd`.
+- **Cyclic cubic P-spline** (`cyclic_cubic_basis`, `bs='cp'`): for periodic
+  covariates (cortical angle, phase, time-of-day) — the basis wraps at the
+  period so $f$ and its derivatives match at the ends, with a *circular*
+  difference penalty.
+- **Cubic regression spline** (`cr_basis`, `bs='cr'`): a natural cubic spline
+  parameterised by its values at the knots, with the *exact* integrated-curvature
+  penalty $\int f''(x)^2\,dx$ assembled in `_cr_construct`.
+- **Gaussian-process / kriging smooth** (`gp_basis`, `bs='gp'`): a low-rank
+  Matérn-3/2 kriging basis — the bridge to the [HSGP](hsgp.qmd) chapter, where
+  the penalty literally *is* an inverse covariance.
+- **Markov-random-field smooth** (`mrf_smooth`, `bs='mrf'`): smoothing over a
+  graph or parcellation, with the combinatorial graph Laplacian as penalty so
+  neighbouring regions are shrunk together.
+- **Tensor-product interaction** (`tensor_product_basis`): a 2-D (or higher)
+  smooth $f(x_1, x_2)$ built from marginal bases by the row-wise Kronecker
+  product of their designs, with one smoothing parameter *per margin*. We return
+  to it in §8.
+
+Every constructor takes `center=True` by default — the identifiability fix of
+§4 — and conforms to the `SmoothBasis` protocol, so `gam_fit` dispatches through
+`design` / `dim` / `penalty_blocks()` / `eval_design()` and a new basis type
+needs no edit to `gam.py`.
+
+## 3. The catch, and the cure: a roughness penalty {#sec-penalty}
+
+A rich basis overfits — with $K$ free humps it will happily chase noise into
+wiggles. The naive fix is to use fewer humps, but that is a blunt instrument: it
+imposes a single global stiffness and throws away resolution everywhere to tame
+overfitting somewhere. The better fix keeps the rich basis and instead
+**penalises wiggliness directly.**
+
+What is "wiggliness"? For a curve built from B-splines, where each coefficient
+$\gamma_k$ controls the height of one local hump, a *smooth* curve is one whose
+neighbouring coefficients change gradually; a *wiggly* curve is one whose
+adjacent coefficients jump up and down. So a natural measure of roughness is the
+size of the **second differences** of the coefficient sequence — the discrete
+analogue of curvature. Define the second-difference operator $D$ by
+
+$$
+(D\gamma)_k = \gamma_{k} - 2\gamma_{k+1} + \gamma_{k+2},
+$$ {#eq-diffop}
+
+a $(K-2)\times K$ matrix that is zero except for the stencil $[1,-2,1]$ marching
+down its rows. Then $\lVert D\gamma\rVert^2 = \sum_k (D\gamma)_k^2$ is large
+exactly when the curve bends sharply and small when it is nearly linear. Writing
+$\lVert D\gamma\rVert^2 = \gamma^{\top}(D^{\top}D)\gamma$ gives us the **penalty
+matrix**
+
+$$
+S = D^{\top}D ,
+$$ {#eq-penmat}
+
+a banded, symmetric, positive-*semi*definite matrix. This is exactly what
+`difference_penalty_1d(n, order=2)` returns in `numerics/_spline.py`: it forms
+$D = $ `np.diff(np.eye(n), n=2, axis=0)` and returns $D^{\top}D$. (The default
+`penalty_order=2` penalises curvature; order 1 would penalise slope, order 3
+jerk.) This is the **P-spline** of Eilers & Marx — a B-spline basis with a
+discrete difference penalty — and it is the smooth `nitrix` ships as default.
+
+Now the fit is a single penalised least-squares (here written for the smooth
+coefficients $\gamma$; in the assembled model $z$ and weights $W$ come from the
+GLM's IRLS step):
 
 $$
 \min_{\gamma}\ \underbrace{\lVert z - B\gamma\rVert_W^2}_{\text{fit}}
 \;+\; \underbrace{\lambda\,\gamma^{\top}S\gamma}_{\text{roughness}} ,
 $$ {#eq-penobj}
 
-where the fixed matrix $S$ measures roughness (curvature, or jumps between
-neighbouring coefficients) and $\lambda \ge 0$ tunes the trade-off: $\lambda\to 0$
-interpolates the noise; $\lambda\to\infty$ forces a straight line. Minimising
-@eq-penobj is the GLM's weighted normal equations with one added term:
+where $\lambda \ge 0$ tunes the trade-off: $\lambda\to 0$ interpolates the noise;
+$\lambda\to\infty$ drives $D\gamma\to 0$, i.e. forces a straight line.
+Differentiating @eq-penobj and setting the gradient to zero gives the GLM's
+weighted normal equations with **one added term** (the assembled design $X$ now
+holds the intercept, any parametric columns, and the smooth's $B$; $\beta$ stacks
+all their coefficients):
 
 $$
-(X^{\top}W X + \lambda S)\,\gamma = X^{\top}W z .
+(X^{\top}W X + \lambda S)\,\beta = X^{\top}W z .
 $$ {#eq-pennormal}
 
-That is the *only* change from the GLM: a penalty $\lambda S$ added inside the same
-$p\times p$ (now $(p{+}K)\times(p{+}K)$) solve. `nitrix` literally calls the same
-penalised-IRLS core; the GLM passes $S=0$, the GAM passes the smooth's penalty.
+That is the *only* change from the [GLM's IRLS solve](glm.qmd#sec-irls): a
+penalty $\lambda S$ added inside the same SPD solve. `nitrix` literally calls the
+same penalised-IRLS core (`fit_penalised_irls`, via `_penalised_irls` in
+`gam.py`); a plain GLM passes $S=0$, the GAM passes the smooth's penalty.
 
-## 4. The smooths `nitrix` ships
+### 3.1 The penalty's null space — why $S$ is rank-deficient
 
-The default is the **P-spline** (Eilers & Marx): a uniform cubic B-spline basis
-$B$ with a discrete *difference* penalty $S$ that penalises large jumps between
-adjacent coefficients — `mgcv`'s `bs='ps'`. The B-spline weights reuse the
-closed-form evaluator already validated for bias-field correction. Other bases for
-other geometries ship too: thin-plate (isotropic 2-D smooths), cyclic (for
-periodic covariates like phase), Gaussian-process / kriging bases, Markov random
-fields (smoothing over a graph or parcellation), and tensor products (interactions
-of two covariates).
+There is a subtlety worth dwelling on, because it explains an otherwise puzzling
+fact: $S=D^{\top}D$ does *not* penalise everything. A second difference is zero
+for any coefficient sequence that is **constant or linear** in $k$ — a flat or
+straight line has no curvature to punish. Those sequences live in the **null
+space** of $D$ (and hence of $S$), so $S$ has rank $K-2$, not $K$. The penalty
+leaves the constant and linear parts of the fit *free*; it only shrinks the
+genuinely wiggly components. That is exactly the behaviour we want — and it is
+the reason the fit collapses to a line, not to zero, as $\lambda\to\infty$.
 
-One subtlety, handled once: a smooth would otherwise overlap the model intercept
-(both can add a constant), making them unidentifiable. `nitrix` constrains each
-smooth to **sum to zero over the data** and absorbs that constraint by
-reparameterising through a single **Householder reflection** — not a QR
-factorisation, so it stays cuSOLVER-free and differentiable, like the rest of the
-suite.
+@fig-gam-penalty shows $D$ and $S=D^{\top}D$ as images: the banded stencil in
+$D$, and the resulting five-banded, rank-deficient $S$.
+
+```{python}
+#| label: fig-gam-penalty
+#| fig-cap: "The P-spline machinery. Left: the second-difference operator D, the stencil [1,-2,1] marching down its rows. Right: the penalty S = DᵀD — symmetric, five-banded, and rank-deficient (it does not penalise the constant or linear part: its 2-D null space)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+def difference_penalty(n, order):
+    D = np.diff(np.eye(n), n=order, axis=0)   # the order-th difference operator
+    return D, D.T @ D
+
+K = 12
+D, S = difference_penalty(K, 2)               # second-difference (curvature) penalty
+
+fig, axs = plt.subplots(1, 2, figsize=(8, 3.4))
+im0 = axs[0].imshow(D, cmap="RdBu", vmin=-2, vmax=2)
+axs[0].set(title=r"$D$: second-difference operator  $(K-2)\times K$",
+           xlabel="coefficient", ylabel="row")
+fig.colorbar(im0, ax=axs[0], fraction=0.046)
+
+im1 = axs[1].imshow(S, cmap="RdBu", vmin=-S.max(), vmax=S.max())
+rank = np.linalg.matrix_rank(S)
+axs[1].set(title=rf"$S=D^\top D$  (banded, rank {rank} of {K})",
+           xlabel="coefficient", ylabel="coefficient")
+fig.colorbar(im1, ax=axs[1], fraction=0.046)
+fig.tight_layout(); plt.show()
+```
+
+## 4. Identifiability: the smooth that fights the intercept
+
+A smooth has a hidden redundancy with the model intercept. You can add a constant
+$c$ to every value of $f(x)$ and subtract $c$ from the intercept and the fitted
+values do not move at all. The model cannot tell the two apart — the parameters
+are **unidentifiable**, the relevant block of $X^{\top}WX$ is singular, and the
+solve is ambiguous.
+
+The standard cure is a **sum-to-zero constraint**: require the smooth to average
+to zero over the data, $\sum_i f(x_i) = 0$, i.e. $(\mathbf{1}^{\top}B)\gamma = 0$.
+This pins down the constant once and for all — the intercept owns the overall
+level, the smooth owns only the *shape*. The question is how to *impose* the
+single linear constraint $c^{\top}\gamma = 0$ (with $c = B^{\top}\mathbf{1}$, the
+column sums of $B$) without making the solver carry it around.
+
+The trick is to **reparameterise** rather than constrain. We seek a new,
+unconstrained coordinate $\alpha$ with one fewer dimension, related by
+$\gamma = Z\alpha$, such that *every* $\alpha$ automatically satisfies the
+constraint — that is, $Z$'s columns must be an orthonormal basis of the null
+space of $c^{\top}$ (so $c^{\top}Z = 0$). Then we fit $\alpha$ freely, with the
+reparameterised design $BZ$ and penalty $Z^{\top}SZ$, and the constraint can
+never be violated. The intuition: *rotate to a coordinate system in which the
+constraint direction has been deleted.*
+
+Textbooks build $Z$ with a QR factorisation, but `nitrix` cannot call cuSOLVER's
+`qr` on the broken GPU. Since there is only **one** constraint to absorb, a full
+QR is overkill: a single **Householder reflection** does it. `_householder_null`
+in `basis.py` constructs the reflection $H$ that maps $c$ onto the first
+coordinate axis ($Hc \propto e_1$), and takes $Z = H[:, 1:]$ — the reflection's
+last $K-1$ columns. Because $H$ is orthogonal and $Hc$ points along $e_1$, those
+columns are orthonormal and orthogonal to $c$, exactly the null-space basis we
+need. It is pure elementwise algebra (an outer product and a subtraction), so it
+is cuSOLVER-free and differentiable. Every `*_basis` constructor applies it when
+`center=True` (the default), replacing `design = design @ constraint` and
+`penalty = constraint.T @ penalty @ constraint`; the returned basis then has
+$K-1$ columns, and the constraint is stored so partial effects re-evaluate in the
+same reparameterised coordinates.
 
 ## 5. Two loops, both already built
 
 Fitting a GAM is two nested loops, and you have seen both:
 
 - **Inner** (fixed $\lambda$): solve @eq-pennormal by penalised IRLS — the
-  [GLM](glm.qmd) fit with the penalty added.
-- **Outer** (choose $\lambda$): the [Fellner–Schall](fellner-schall.qmd) update,
-  which raises the marginal likelihood and keeps $\lambda$ positive.
+  [GLM](glm.qmd#sec-irls) fit with the penalty added. For the Gaussian identity
+  link this converges in one step, and `gam.py` exploits that with a
+  cross-product fast path (`_gam_fit_one_gaussian_xprod`) that runs the whole
+  per-voxel loop in $p$-space, touching the $N$-dimensional data only once.
+- **Outer** (choose $\lambda$): the [Fellner–Schall](fellner-schall.qmd#sec-fs-update)
+  update, which raises the marginal likelihood and keeps $\lambda$ positive.
 
 Nothing here is new machinery; a GAM is the GLM solver wrapped in the smoothing-
 parameter selector. (See `stats/gam.py`, `stats/basis.py`.)
 
-## 6. The hinge: a penalty *is* a variance
+## 6. The hinge: a penalty *is* a variance {#sec-hinge}
 
 Why does Fellner–Schall — a *variance-component* estimator from the
 [LME](lme.qmd) chapter — choose a *smoothing* parameter? Because they are the same
 thing. The roughness penalty $\lambda\gamma^{\top}S\gamma$ is exactly the
-log-density of a Gaussian prior $\gamma \sim \mathcal{N}(0,\,\sigma_b^2 S^{-})$,
-with
+negative log-density of a Gaussian prior $\gamma \sim \mathcal{N}(0,\,\sigma_b^2 S^{-})$
+(with $S^{-}$ a generalised inverse, since $S$ is rank-deficient — the
+unpenalised null space of §3.1 is the *flat* prior on the constant/linear part),
+and the smoothing parameter is a ratio of variances:
 
 $$
 \lambda = \frac{\sigma_e^2}{\sigma_b^2}.
@@ -108,22 +360,132 @@ $$ {#eq-equiv}
 Read left to right it is a *smoothing parameter*; read right to left it is a
 *ratio of variances*. So a smooth term **is a random effect**, a GAM **is an
 LME**, and "how smooth?" **is** "how big is the random-effect variance?". This is
-the equivalence stated formally as a theorem on the
-[Fellner–Schall page](fellner-schall.qmd#equivalence); it is the single reason the
-whole suite shares one engine instead of being a pile of separate fitters.
+the equivalence derived in full on the
+[foundations page](foundations.qmd#sec-equivalence) and stated as a theorem on
+the [Fellner–Schall page](fellner-schall.qmd#equivalence); it is the single
+reason the whole suite shares one engine instead of being a pile of separate
+fitters. (We keep it crisp here — the derivation lives in foundations.)
 
-## 7. How flexible was the fit? Effective degrees of freedom
+Concretely, this is why `re_smooth` in `basis.py` works: a random-effect block
+is nothing but a smooth whose penalty is the **identity** ($S=I$, a ridge), and the
+smoothing parameter the same Fellner–Schall loop selects for it *is* the
+random-effect precision $1/\sigma_b^2$. No new solver — a random effect is one
+more penalty block.
+
+## 7. How flexible was the fit? Effective degrees of freedom {#sec-edf}
 
 A penalised smooth has $K$ coefficients but is *not* as flexible as $K$ free
-parameters — the penalty ties them together. Its true flexibility is the
-**effective degrees of freedom** (EDF), the trace of the matrix mapping data to
-fitted values, $\operatorname{tr}\!\big[(X^{\top}WX+\lambda S)^{-1}X^{\top}WX\big]$.
-EDF runs from 1 (penalised to a straight line) up to $K$ (unpenalised). It is the
-honest "how many parameters did this smooth really use", and it drives the
-approximate significance tests and the confidence bands, both read off the
-Bayesian coefficient covariance $V=(X^{\top}WX+\lambda S)^{-1}$.
+parameters — the penalty ties them together, so it "spends" fewer than $K$. How
+many does it really spend? Look at the **smoother (hat) matrix**, the linear map
+from the working response to the fitted values:
 
-## 8. Too little, too much, just right
+$$
+A = X(X^{\top}W X + \lambda S)^{-1}X^{\top}W .
+$$ {#eq-hat}
+
+For an ordinary unpenalised linear model ($S=0$, or $\lambda=0$) this is the
+familiar projection onto the column space of $X$, and $\operatorname{tr}(A)$
+equals $p$, the number of parameters — the textbook "degrees of freedom". The
+beautiful fact is that this *still* reads as a parameter count when a penalty is
+present: the **effective degrees of freedom**
+
+$$
+\text{EDF} = \operatorname{tr}(A)
+= \operatorname{tr}\!\big[(X^{\top}W X + \lambda S)^{-1} X^{\top}W X\big] .
+$$ {#eq-edf}
+
+(The two forms are equal by the cyclic property of the trace.) Intuitively each
+diagonal entry of $A$ measures how much a fitted value depends on its *own* data
+point: a free parameter contributes $\approx 1$, a heavily shrunk one contributes
+$\approx 0$, and the trace adds these "fractions of a parameter" up. As $\lambda$
+grows the penalty borrows strength across coefficients and the count falls; as
+$\lambda\to 0$ it rises back toward $K$. So EDF interpolates between a straight
+line (EDF $\to 2$, the dimension of the unpenalised null space — a constant and a
+slope) and an interpolant (EDF $\to K$, the basis dimension). It is the honest
+"how many parameters did this smooth really use".
+
+`gam.py` computes exactly this. After the fit it forms the influence matrix
+`influence = V @ xtwx` with $V = (X^{\top}WX + \lambda S)^{-1}$ the Bayesian
+covariance (the same matrix used for confidence bands and the
+`smooth_significance` tests), takes its diagonal, and sums the entries belonging
+to each smooth's column block — the per-smooth `edf`, with the total in
+`edf_total`. @fig-gam-edf traces EDF as a function of $\lambda$: a smooth,
+monotone curve from the basis dimension down to 2, the dial that "how smooth?"
+turns.
+
+```{python}
+#| label: fig-gam-edf
+#| fig-cap: "Effective degrees of freedom EDF = tr(A) as a function of the smoothing parameter λ, for a K=20 P-spline. Flexibility trades smoothly against penalty: EDF runs from K (unpenalised, right) down to 2 (penalised to a straight line, left). Fellner–Schall picks one point on this curve."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+def bspline_design(x, n_basis, degree=3, lo=0.0, hi=1.0):
+    n_spans = n_basis - degree
+    s = (x - lo) / (hi - lo) * n_spans
+    span = np.clip(np.floor(s).astype(int), 0, n_spans - 1)
+    t = np.clip(s - span, 0.0, 1.0)
+    t2, t3 = t**2, t**3
+    w = np.stack([(1 - t)**3 / 6, (3*t3 - 6*t2 + 4)/6,
+                  (-3*t3 + 3*t2 + 3*t + 1)/6, t3/6], axis=-1)
+    B = np.zeros((x.size, n_basis))
+    for i in range(x.size):
+        for j in range(degree + 1):
+            B[i, span[i] + j] += w[i, j]
+    return B
+
+n, K = 200, 20
+x = np.linspace(0, 1, n)
+B = bspline_design(x, K)
+D = np.diff(np.eye(K), n=2, axis=0); S = D.T @ D
+BtB = B.T @ B
+
+# EDF(lambda) = tr[(BᵀB + lambda S)⁻¹ BᵀB], the trace of the smoother matrix.
+lams = np.logspace(-6, 6, 200)
+edf = np.array([np.trace(np.linalg.solve(BtB + lam*S, BtB)) for lam in lams])
+
+fig, ax = plt.subplots(figsize=(8, 3.4))
+ax.semilogx(lams, edf, lw=2.5, color="C0")
+ax.axhline(K, ls=":", color="0.5"); ax.axhline(2, ls=":", color="0.5")
+ax.text(lams[0], K - 0.6, f"unpenalised: EDF → K = {K}", fontsize=8, va="top")
+ax.text(lams[-1], 2.4, "fully penalised: EDF → 2 (a line)",
+        fontsize=8, ha="right")
+ax.set(title="effective degrees of freedom vs smoothing parameter",
+       xlabel=r"$\lambda$ (smoothing parameter)", ylabel="EDF = tr(A)")
+ax.invert_xaxis()
+fig.tight_layout(); plt.show()
+```
+
+EDF is not only diagnostic: it feeds the dispersion estimate (residual variance
+divides by $N - \text{EDF}$, not $N - p$) and the approximate significance tests
+(`smooth_significance` implements Wood's 2013 `summary.gam` test, with the
+smooth's rounded EDF as its reference degrees of freedom).
+
+## 8. Beyond one dimension: tensor-product smooths
+
+What if the effect depends on *two* covariates jointly — say a thickness surface
+over (age, a regional coordinate) that is not separable into a sum of 1-D
+effects? Build a marginal basis for each covariate and take their
+**tensor product**: the 2-D basis function is the product $B^{(1)}_a(x_1)\,
+B^{(2)}_b(x_2)$ of one hump from each margin, so the surface is $f(x_1,x_2) =
+\sum_{a,b} \gamma_{ab}\,B^{(1)}_a(x_1)B^{(2)}_b(x_2)$. `tensor_product_basis` in
+`basis.py` forms this by the **row-wise Kronecker product** of the marginal
+designs (`_row_kron`), giving a $(n, \prod_j k_j)$ design.
+
+The key design choice is the penalty. A tensor smooth should be allowed to be
+*rougher in one direction than the other* (anisotropic), so it carries **one
+penalty per margin**, $S_j = I \otimes \cdots \otimes S^{(j)} \otimes \cdots
+\otimes I$ — penalty $j$ acts on margin $j$'s wiggliness and is the identity on
+the others. The Fellner–Schall loop already handles more than one penalty per
+smooth (its `fs` step is `vmap`ped over penalty blocks), so it selects a separate
+$\lambda_j$ per margin. The marginal penalties commute, so they are
+simultaneously diagonalisable; `TensorBasis` precomputes the joint-eigenbasis
+eigenvalues (`pen_eig`) so the smoothing-parameter trace
+$\operatorname{tr}(S_\lambda^{+}S_k)$ in `_trace_slinv_sk` is an elementwise sum —
+cuSOLVER-free, no per-iteration pseudo-inverse — while the fit itself stays in the
+original tensor basis.
+
+## 9. Too little, too much, just right
 
 Three fits of one smooth at three penalty strengths — pure NumPy, build-time. The
 middle is roughly what Fellner–Schall finds.
@@ -169,10 +531,35 @@ fig.tight_layout(); plt.show()
 - Swap the difference penalty for a **kernel** penalty $S = K^{-1}$ and the smooth
   becomes a [Gaussian process](hsgp.qmd).
 
+## Further reading
+
+- Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*, 2nd
+  ed. Chapman & Hall/CRC. — The standard reference; basis construction, the
+  penalty/variance equivalence, EDF, and the `mgcv` smoothers all live here.
+- Eilers, P. H. C. & Marx, B. D. (1996). *Flexible smoothing with B-splines and
+  penalties.* Statistical Science 11(2), 89–121. — The original P-spline paper
+  (B-spline basis + discrete difference penalty), the default smooth `nitrix`
+  ships.
+- Wood, S. N. (2011). *Fast stable restricted maximum likelihood and marginal
+  likelihood estimation of semiparametric generalized linear models.* Journal of
+  the Royal Statistical Society, Series B 73(1), 3–36. — REML smoothing-parameter
+  selection, the theory behind the outer loop.
+- Wood, S. N. (2003). *Thin plate regression splines.* Journal of the Royal
+  Statistical Society, Series B 65(1), 95–114. — The eigen-truncation behind
+  `thinplate_regression_basis`.
+- Wood, S. N. & Fasiolo, M. (2017). *A generalized Fellner–Schall method for
+  smoothing parameter optimization with application to Tweedie location, scale
+  and shape models.* Biometrics 73(4), 1071–1081. — The update `gam.py` uses.
+- Hastie, T. & Tibshirani, R. (1990). *Generalized Additive Models.* Chapman &
+  Hall. — The original GAM monograph (backfitting and the additive idea).
+
 ## See also
 
 - Code: [`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py),
   [`nitrix/stats/basis.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/basis.py).
-- The selector: [Fellner–Schall](fellner-schall.qmd). The equivalence's other
-  face: [linear mixed-effects models](lme.qmd). References: Wood 2017
-  [@wood2017gam].
+- The selector: [Fellner–Schall](fellner-schall.qmd). The equivalence's
+  foundation: [the grand equivalence](foundations.qmd#sec-equivalence) and
+  [linear mixed-effects models](lme.qmd). The inner solve:
+  [the GLM's IRLS](glm.qmd#sec-irls).
+- Previous rung: [GLM](glm.qmd). Next rung: [GLMM](glmm.qmd), then
+  [GAMM](gamm.qmd) and [HSGP](hsgp.qmd).

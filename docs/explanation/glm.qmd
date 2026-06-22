@@ -8,13 +8,18 @@ columns of $X$ — i.e. by solving the **normal equations** $X^{\top}X\,\beta = 
 A **generalised** linear model lets the response be counts, probabilities, or
 positive values instead of Gaussian. We fit it by **IRLS**: repeatedly turn the
 non-Gaussian problem into a *weighted* least-squares problem
-$X^{\top} W X\,\beta = X^{\top} W z$ and re-solve, until it stops moving. Every
-solve is the same tiny $p\times p$ system. That solve — plus the weights $W$ and
-the "working response" $z$ — is the machinery the entire suite is built on.
+$X^{\top} W X\,\beta = X^{\top} W z$ and re-solve, until it stops moving. The one
+new idea this page adds is that IRLS is not a trick — it is **Fisher scoring**,
+and the weights $W$ and working response $z$ are *forced* by the exponential
+family's mean–variance identity. That single $p\times p$ solve — plus $W$ and $z$
+— is the machinery the entire suite is built on.
 :::
 
 This is the bottom rung of [the ladder](index.qmd). Read it carefully: every
-later model is this chapter plus one new idea.
+later model is this chapter plus one new idea. It sits directly on top of
+[foundations](foundations.qmd) (the variance and the exponential family) and
+hands its linear-algebra chores to [solvers](solvers.qmd) (the small dense solve,
+damped Newton).
 
 ## 1. The linear model is a projection
 
@@ -61,13 +66,18 @@ element. Factor that $p\times p$ matrix **once** and every element's coefficient
 are a couple of matrix multiplications away:
 
 $$
-\hat B = Y\,X\,(X^{\top}X)^{-1} \qu. \;
+\hat B = Y\,X\,(X^{\top}X)^{-1} .
 $$
 
 No per-element factorisation — one $p\times p$ inverse fits the whole image. This
 "shared design, per-element response" shape is why `glm_fit` takes a vectorised
-fast path for the ordinary-least-squares case, and it recurs at every rung of the
-ladder (the shared piece is computed once; only the response varies).
+fast path for the ordinary-least-squares case. Reading `glm.py`, the Gaussian
+identity-link branch (`_ols_fit`) really does form $X^{\top}WX$ once, invert it
+once via `small_inv_logdet`, and recover all $V$ coefficient vectors as
+`(Y @ Xw) @ xtwx_inv`. Every other family falls back to a per-element
+(`vmap`-ed) IRLS — the subject of the rest of this page. The shape recurs at
+every rung of the ladder: the shared piece is computed once; only the response
+varies.
 
 ## 3. When the response isn't Gaussian
 
@@ -95,98 +105,246 @@ rate. Alongside the link, each response type has a **variance function**
 $V(\mu)$ saying how the noise scales with the mean (constant for Gaussian,
 $\mu(1-\mu)$ for binary, $\mu$ for Poisson counts).
 
-In `nitrix` a response type is a small frozen `Family` value bundling the link,
-the variance function, and a deviance (a goodness-of-fit measure). `GAUSSIAN`,
-`BINOMIAL`, `POISSON`, `GAMMA` and more ship; a custom one is just another
-`Family(...)`.
+These two objects — the link and the variance function — are exactly the two
+fields that matter to fitting in a `nitrix` `Family` (the frozen record described
+in [foundations §4](foundations.qmd#sec-expfam)). And they are not independent
+free choices: the variance function is *forced* by the distribution through the
+mean–variance identity $\operatorname{Var}[y]=\phi\,V(\mu)$ derived in
+[foundations](foundations.qmd#sec-expfam). That identity is what makes the next
+two sections inevitable rather than arbitrary.
 
-## 4. IRLS: fitting by repeated weighted least squares
+In `nitrix` a response type is a small frozen `Family` value bundling the link
+(`link` / `linkinv`), the slope $\mathrm{d}\mu/\mathrm{d}\eta$ (`mu_eta`), the
+variance function (`variance`), a deviance (`unit_deviance`), and a log-likelihood
+(`loglik`). `GAUSSIAN`, `BINOMIAL`, `POISSON`, `GAMMA`, `NEGBINOMIAL` and
+`TWEEDIE` ship in the registry; `Family.with_link(...)` swaps in a non-canonical
+link (`'probit'`, `'cloglog'`, `'sqrt'`, `'inverse'`); a fully custom one is
+another `Family(...)` with your own fields.
 
-Here is the key move, and it is pure linear algebra plus one Taylor expansion.
-For a non-Gaussian family there is no closed-form $\beta$. But if we **linearise**
-the model around our current guess, the update step becomes an ordinary weighted
-least-squares solve — which we *can* do in closed form.
+## 4. Where the working weights and response come from {#sec-working}
 
-Concretely, given a current $\beta$ with linear predictor $\eta = X\beta$ and
-mean $\mu = g^{-1}(\eta)$, define two per-observation quantities:
+Before fitting, let us see that the weights $W$ and the working response $z$ are
+*forced*, not chosen — the brief's first promise. Everything below flows from one
+fact carried over from [foundations](foundations.qmd#sec-expfam): for an
+exponential family the mean determines the variance,
+
+$$
+\operatorname{Var}[y_i] = \phi\,V(\mu_i),\qquad \mu_i = g^{-1}(\eta_i),\qquad \eta_i = x_i\beta .
+$$
+
+**The score.** Maximising the likelihood means setting its gradient (the
+**score**) to zero. For one observation the log-likelihood depends on $\beta$
+only through $\mu_i$, which depends on $\beta$ only through $\eta_i = x_i\beta$.
+The chain rule therefore threads through three links —
+$\partial_\beta = \frac{\partial \ell}{\partial \mu}\,\frac{\mathrm{d}\mu}{\mathrm{d}\eta}\,\frac{\partial\eta}{\partial\beta}$
+— and a standard exponential-family fact (shown in
+[foundations](foundations.qmd#sec-expfam)) is that
+$\partial \ell/\partial\mu = (y-\mu)/(\phi V(\mu))$. Stacking over observations,
+the score is
+
+$$
+U(\beta) \;=\; \frac{1}{\phi}\sum_{i} x_i^{\top}\,
+\frac{(y_i-\mu_i)}{V(\mu_i)}\,\frac{\mathrm{d}\mu_i}{\mathrm{d}\eta_i}
+\;=\; \frac{1}{\phi}\,X^{\top}\!\big(\text{residual, reweighted}\big).
+$$ {#eq-score}
+
+Read it: the score is the design matrix times the residual $y-\mu$, each
+observation reweighted by how *sharply the mean responds to the predictor*
+($\mathrm{d}\mu/\mathrm{d}\eta$) and how *noisy* it is ($1/V(\mu)$). An
+observation in a flat region of the link, or in a high-variance region, gets a
+quiet vote. Nothing here was invented; every factor is a derivative we were
+forced to take.
+
+**The Fisher information.** Newton's method needs the curvature — minus the
+second derivative of the log-likelihood. Using the *expected* curvature instead
+of the exact one (that choice is what distinguishes **Fisher scoring** from raw
+Newton) makes the algebra collapse: the cross terms vanish in expectation because
+$\mathbb{E}[y_i-\mu_i]=0$, and what survives is
+
+$$
+\mathcal{I}(\beta) \;=\; \frac{1}{\phi}\,X^{\top} W X,
+\qquad
+W = \operatorname{diag}(w_i),\quad
+w_i = \frac{1}{V(\mu_i)}\left(\frac{\mathrm{d}\mu_i}{\mathrm{d}\eta_i}\right)^{2} .
+$$ {#eq-fisher}
+
+There is your weight matrix, derived rather than declared: $W$ is the *only*
+thing the curvature depends on, and each $w_i$ is the same two factors as the
+score, now squared. This is exactly the `wts = dmu * dmu / variance` line in
+`_irls._working` and the `w = mu_eta^2 / V` documented on `Family.with_link`.
+
+**Assembling the update.** A Fisher-scoring step is
+$\beta^{+} = \beta + \mathcal{I}^{-1}U$. Substitute @eq-score and @eq-fisher (the
+$1/\phi$ cancels):
+
+$$
+X^{\top}WX\,\beta^{+} \;=\; X^{\top}WX\,\beta + X^{\top}WX\,\mathcal{I}^{-1}U
+\;=\; X^{\top}W\Big(\underbrace{X\beta + (y-\mu)\,\tfrac{\mathrm{d}\eta}{\mathrm{d}\mu}}_{\textstyle z}\Big),
+$$
+
+where the last equality is a one-line rearrangement: $W^{-1}$ times the
+reweighting in $U$ leaves exactly the residual on the $\eta$-scale,
+$(y-\mu)\,\mathrm{d}\eta/\mathrm{d}\mu$, added to the current $\eta=X\beta$. Name
+that bracket the **working response**
 
 $$
 \underbrace{z = \eta + (y - \mu)\,\frac{\mathrm{d}\eta}{\mathrm{d}\mu}}_{\text{working response}},
 \qquad
-\underbrace{W = \frac{1}{V(\mu)}\left(\frac{\mathrm{d}\mu}{\mathrm{d}\eta}\right)^{2}}_{\text{working weights}} .
+\underbrace{W = \frac{1}{V(\mu)}\left(\frac{\mathrm{d}\mu}{\mathrm{d}\eta}\right)^{2}}_{\text{working weights}} ,
 $$ {#eq-working}
 
-The **working response** $z$ is a first-order Taylor "linearised observation": it
-maps the residual back onto the linear-predictor scale. The **working weights**
-$W$ downweight observations whose mean is in a high-variance or flat-link region
-(where the data say less about $\beta$). With these, the next $\beta$ solves a
-*weighted* version of the normal equations:
+and the Fisher-scoring step *is* the weighted normal equations
 
 $$
-X^{\top} W X\,\beta = X^{\top} W z .
+X^{\top} W X\,\beta^{+} = X^{\top} W z .
 $$ {#eq-wls}
 
-Recompute $\eta,\mu,z,W$ at the new $\beta$ and repeat. This is **iteratively
-reweighted least squares** (IRLS): the same $p\times p$ solve as ordinary
-regression, wrapped in a loop that updates the weights and the working response.
-Ordinary least squares is just the special case $W=I$, $z=y$ that converges in
-one step.
+So $z$ is a first-order Taylor "linearised observation" — it maps each residual
+back onto the linear-predictor scale — and $W$ downweights observations whose
+mean sits in a high-variance or flat-link region. Both fell out of the score
+equations; we did not get to pick them.
 
-A subtlety `nitrix` handles in one place: the factor $\mathrm{d}\eta/\mathrm{d}\mu$
-in $z$ can be negative (the inverse link is *decreasing*), so its magnitude is
-floored away from zero **with its sign preserved** — clipping it to a small
-positive number would flip a derivative and make the working response explode.
+A subtlety `nitrix` handles in one place (`_irls.safe_dmu`): the factor
+$\mathrm{d}\eta/\mathrm{d}\mu = 1/(\mathrm{d}\mu/\mathrm{d}\eta)$ in $z$ can be
+*negative* — the inverse link is decreasing for the reciprocal/`'inverse'` link,
+where $\mathrm{d}\mu/\mathrm{d}\eta = -1/\eta^2 < 0$. Its magnitude is therefore
+floored away from zero **with its sign preserved**; a naive `clip(dmu, eps, None)`
+would flip a derivative and make $z$ explode. For the increasing canonical links
+this reduces to `max(dmu, eps)`.
 
-This single penalised-IRLS solve is the literal core shared by GLM and GAM
-(`nitrix.stats._irls`): GLM calls it with no penalty; the next rungs call it with
-a penalty $P$ added to $X^{\top}W X$.
+@fig-glm-meanvar makes $W$ concrete: it plots $w_i$ across the range of $\mu$ for
+three families, so you can *see* which observations IRLS listens to.
 
-## 5. Why "damped Newton" — making the loop trustworthy
+```{python}
+#| label: fig-glm-meanvar
+#| fig-cap: "Working weights $W=(\\mathrm{d}\\mu/\\mathrm{d}\\eta)^2/V(\\mu)$ as a function of the mean $\\mu$. Bernoulli weights peak at $\\mu=0.5$ and vanish at the certain extremes; Poisson weights grow with the rate (bigger counts are more informative); Gamma's log link exactly cancels its $V=\\mu^2$, leaving a flat weight."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
 
-IRLS is not a heuristic; it is **Fisher scoring**, which is Newton's method for
-maximising the likelihood with the (expected) curvature in place of the exact
-Hessian. Newton's method takes the step that would land exactly at the optimum
-*if the function were quadratic*. Likelihoods are only approximately quadratic, so
-a raw step can overshoot — especially early, from a poor start — and the
-likelihood can go *down*.
+# Working weights W = (dmu/deta)^2 / V(mu) for three families, as a function of mu.
+# Where W is large, the observation is "informative" about beta; where W -> 0,
+# IRLS effectively ignores it.
 
-**Damping** is the fix: shrink the step until it actually improves the objective.
-Two equivalent views you can picture from linear algebra:
+mu_b = np.linspace(1e-3, 1 - 1e-3, 400)        # Bernoulli mean in (0,1)
+# logit link: dmu/deta = mu(1-mu), V(mu) = mu(1-mu)  ->  W = mu(1-mu)
+W_bern = mu_b * (1 - mu_b)
 
-- **Step control**: take the Newton direction but a fraction of its length
-  (halve the step until the likelihood improves).
-- **Ridge on the curvature**: add a small $\lambda I$ to $X^{\top}W X$ before
-  solving. Large $\lambda$ → a short, safe, gradient-like step; small $\lambda$ →
-  the full Newton step near the optimum. This is the Levenberg idea, and it
-  doubles as numerical insurance when $X^{\top}W X$ is nearly singular.
+mu_p = np.linspace(1e-2, 8.0, 400)             # Poisson mean (positive rate)
+# log link: dmu/deta = mu, V(mu) = mu          ->  W = mu
+W_pois = mu_p
 
-`nitrix` runs a **fixed** number of damped IRLS iterations (so the whole fit is
-`vmap`-clean and JIT-compiled across the image) and evaluates the final
-covariance $V=(X^{\top}W X + \text{ridge})^{-1}$ *at the converged* $\beta$ —
-the correct point for standard errors.
+mu_g = np.linspace(1e-2, 8.0, 400)             # Gamma mean (positive)
+# log link: dmu/deta = mu, V(mu) = mu^2        ->  W = 1 (constant)
+W_gam = np.ones_like(mu_g)
 
-## 6. The solve itself: small, and cuSOLVER-free
+fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.2))
 
-Every step is one $p\times p$ solve, and $p$ is tiny — so the solver can be too.
-`nitrix` routes all of them through a hand-written `small_inv_logdet`: a
-closed-form inverse for $p\le 2$, and a hand-coded Cholesky factorisation plus
-triangular solves for larger $p$. Crucially it makes **no `cuSOLVER` custom
-call**. On the GPU stacks where the vendor solver is broken, the textbook
-`jnp.linalg.solve` would fail; this hand-rolled path keeps the entire suite
-running on the accelerator. (The same portability constraint shapes the
-eigendecompositions and factorisations everywhere else in `nitrix`.)
+axes[0].plot(mu_b, W_bern, lw=2, color="C0")
+axes[0].axvline(0.5, ls=":", color="0.5")
+axes[0].set(xlabel=r"$\mu$ (probability)", ylabel=r"working weight $W$",
+            title="Bernoulli (logit)")
+axes[0].annotate("peaks at $\\mu=0.5$", (0.5, 0.25), fontsize=8, ha="center")
+axes[0].annotate("vanishes\nat extremes", (0.04, 0.02), fontsize=8)
 
-## 7. From a fit to an answer: contrasts and p-values
+axes[1].plot(mu_p, W_pois, lw=2, color="C1")
+axes[1].set(xlabel=r"$\mu$ (rate)", title="Poisson (log)")
+axes[1].annotate("grows with the mean:\nbig counts carry more", (0.4, 6.0),
+                 fontsize=8)
 
-A fitted $\beta$ is rarely the end; you want to test a hypothesis — "is this
-coefficient nonzero?", "does this group differ?". A **contrast** $c$ picks out a
-linear combination $c^{\top}\beta$ (e.g. a difference of two group means). Its
-estimate, standard error (read off the covariance $V$), and the resulting $t$ or
-$F$ statistic give a per-element test. `nitrix` turns those statistics into exact
-p-values with the regularised incomplete beta function — again with no vendor
-solver, so inference is as portable as the fit.
+axes[2].plot(mu_g, W_gam, lw=2, color="C2")
+axes[2].set(xlabel=r"$\mu$", title=r"Gamma (log), $V=\mu^2$", ylim=(0, 2))
+axes[2].annotate("flat: log link exactly\nbalances $V=\\mu^2$", (0.4, 1.3),
+                 fontsize=8)
 
-## 8. A worked IRLS, by hand
+fig.tight_layout(); plt.show()
+```
+
+## 5. IRLS, rigorously: it *is* Fisher scoring {#sec-irls}
+
+Section 4 did the heavy lifting; here is the loop it justifies, stated cleanly.
+Given a current $\beta$ with $\eta=X\beta$ and $\mu=g^{-1}(\eta)$:
+
+1. compute the working weights $W$ and working response $z$ of @eq-working;
+2. solve the weighted normal equations @eq-wls for a new $\beta$;
+3. recompute $\eta,\mu,z,W$ and repeat until $\beta$ stops moving.
+
+This is **iteratively reweighted least squares** (IRLS): the same $p\times p$
+solve as ordinary regression, wrapped in a loop that refreshes the weights and
+the working response. Ordinary least squares is the special case $W=I$, $z=y$ —
+the link is the identity and $V$ is constant, so the working response *is* the
+data and the loop converges in a single step (which is why `glm_fit` short-circuits
+the Gaussian case to `_ols_fit`).
+
+The point worth dwelling on: because @eq-wls was *derived* as a Fisher-scoring
+step (not posited), IRLS inherits Newton's quadratic local convergence. Near the
+optimum the working linearisation is excellent and the error squares each
+iteration — which is exactly the few-step plateau you will see in @fig-irls.
+
+This single penalised-IRLS solve is the literal core shared by GLM and GAM. In
+the source it is `fit_penalised_irls` in `nitrix.stats._irls`, and its inner
+`step` is one line — `a_inv @ (Xw.T @ z)` with `a = Xw.T @ X + penalty + ridge`.
+GLM calls it with the penalty matrix $S = 0$ (`glm.py` passes
+`penalty = jnp.zeros((p, p))`); the GAM rung calls the *same* function with a
+non-zero $S$. The warm start (`irls_warm_start`) is itself one weighted least-
+squares fit of the linked initial mean $g(\text{init\_mu}(y))$, so the loop begins
+near the answer.
+
+For the *robustness* of that loop — what to do when a raw Newton/Fisher step
+overshoots and the likelihood goes down — we hand off to the shared machinery
+page rather than re-derive it here. The fix is **damping**: take the Newton
+direction but a safe fraction of its length, equivalently add a small ridge
+$\lambda I$ to the curvature $X^{\top}WX$ before solving (large $\lambda$ → a
+short, gradient-like step; small $\lambda$ → the full Newton step near the
+optimum). The full story — line search, the Levenberg ridge, why the small dense
+solve stays SPD — lives in [solvers §3](solvers.qmd#sec-newton), and the small
+$p\times p$ solve itself in [solvers §2](solvers.qmd#sec-cholesky). `nitrix` runs
+a **fixed** budget of IRLS iterations (`n_iter`, default 25) so the whole fit is
+`vmap`-clean and JIT-compiled across the image, and it evaluates the final
+covariance $V=(X^{\top}WX + S + \text{ridge})^{-1}$ *at the converged* $\beta$ —
+the correct point for standard errors (the comment in `_irls.py` flags this
+final re-evaluation as intentional, not redundant).
+
+## 6. The deviance: the family's natural loss
+
+We keep saying "until $\beta$ stops moving" and "goodness of fit" — but on what
+scale? For Gaussian data the obvious yardstick is the residual sum of squares.
+The **deviance** is the right generalisation, and it is built from one idea:
+compare your model to the best a model of this family *could possibly* do.
+
+Imagine a model so flexible it has one free mean per observation — it can set
+$\hat\mu_i = y_i$ exactly. This is the **saturated model**; it fits the data
+perfectly and is the ceiling on log-likelihood. The deviance measures how far
+*below* that ceiling your model sits, on twice the log-likelihood scale:
+
+$$
+D \;=\; 2\big(\ell_{\text{saturated}} - \ell_{\text{model}}\big)
+\;=\; \sum_i d(y_i,\hat\mu_i),
+$$ {#eq-deviance}
+
+where the per-observation contribution $d(y_i,\mu_i)$ is the family's
+`unit_deviance`. Two features earn the definition its keep. First, it is always
+$\ge 0$ and equals $0$ only for a perfect fit — a genuine loss. Second, for the
+Gaussian family $d(y,\mu)=(y-\mu)^2$ (read it straight off `GAUSSIAN.unit_deviance`
+in `_family.py`), so the deviance is *exactly* the residual sum of squares and
+this whole framework reduces to least squares. For binary data $d$ is the
+familiar $2\big[y\log\frac{y}{\mu}+(1-y)\log\frac{1-y}{1-\mu}\big]$; for Poisson,
+$2\big[y\log\frac{y}{\mu}-(y-\mu)\big]$ — both visible in `_binomial_deviance` /
+`_poisson_deviance`.
+
+`nitrix` uses the deviance for three things. (1) **Goodness of fit**:
+`deviance_explained` returns $1 - D/D_0$ where $D_0$ is the
+`null_deviance` (the intercept-only fit), the family-general cousin of $R^2$ —
+and for Gaussian it *is* $R^2$, since then $D$ is the residual and $D_0$ the
+total sum of squares. (2) The **dispersion** estimate $\hat\phi = D/(N-p)$ for
+the families that estimate it (Gaussian, Gamma; the fixed-dispersion families
+report $\phi=1$). (3) Implicitly, **convergence assurance**: because IRLS is
+Fisher scoring, the deviance drops fast and plateaus within a handful of steps
+(@fig-irls), which is what makes a *fixed* iteration budget safe — there is no
+adaptive stopping test to break the `vmap`, and the budget is comfortably past
+the plateau.
+
+## 7. A worked IRLS, by hand
 
 To make IRLS concrete, here is a *logistic* regression fit by the loop above —
 pure NumPy, no `nitrix`, runs at doc-build time. Watch the weighted least-squares
@@ -235,30 +393,201 @@ fig.tight_layout(); plt.show()
 print(f"converged β ≈ {beta.round(3)}   (true {beta_true})")
 ```
 
-Each iteration is exactly @eq-wls with the logistic family's $W$ and $z$. The
-log-likelihood rises and flattens within a few steps — the convergence `glm_fit`
-relies on when it runs a fixed iteration budget over a whole brain.
+For the logistic family $W=\mu(1-\mu)$ and the bracketed update is exactly
+@eq-wls — the same `z`/`W` you derived in §4, now in five lines of NumPy. The
+log-likelihood rises and flattens within a few steps: this is the fast Fisher-
+scoring convergence that lets `glm_fit` run a fixed iteration budget over a whole
+brain.
+
+## 8. The solve itself: small, and cuSOLVER-free
+
+Every step is one $p\times p$ solve, and $p$ is tiny — so the solver can be too.
+`nitrix` routes all of them through a hand-written `small_inv_logdet`
+(`linalg/_smalllinalg.py`): a closed-form inverse for $p\le 2$, and a hand-coded
+Cholesky factorisation plus triangular solves for larger $p$, returning both the
+inverse and the log-determinant in one pass. Crucially it makes **no `cuSOLVER`
+custom call**. On the GPU stacks where the vendor solver is broken, the textbook
+`jnp.linalg.solve` would fail; this hand-rolled path keeps the entire suite
+running on the accelerator. The full derivation of that routine — and why it is
+numerically sound — is [solvers §2](solvers.qmd#sec-cholesky); the point to carry
+forward is that GLM, GAM, contrasts and the family zoo all funnel through this one
+solve.
+
+## 9. From a fit to an answer: contrasts and p-values {#sec-contrasts}
+
+A fitted $\beta$ is rarely the end; you want to test a hypothesis — "is this
+coefficient nonzero?", "does this group differ?". The grammar for asking is a
+**contrast**.
+
+**A contrast is a question phrased as a vector.** Pick a vector $c\in\mathbb{R}^p$
+and the linear combination $c^{\top}\beta$ *is* your question: $c=(0,1,0,\dots)$
+asks about the second coefficient; $c=(0,0,1,-1,\dots)$ asks whether two group
+means differ. The estimate of the answer is the same linear combination of the fit, $c^{\top}\hat\beta$, and because
+$\hat\beta$ has covariance $V$, the estimate's variance is the quadratic form
+
+$$
+\widehat{\operatorname{Var}}\big(c^{\top}\hat\beta\big) = c^{\top} V c,
+\qquad V = \hat\phi\,(X^{\top}WX)^{-1} .
+$$ {#eq-contrast-var}
+
+Read $V$ straight off the inverse Fisher information from §4: the curvature *is*
+the precision of $\hat\beta$, so its inverse is the covariance, scaled by the
+dispersion $\hat\phi$. In `glm.py` the unscaled $(X^{\top}WX)^{-1}$ is stored as
+`cov_unscaled` and `t_contrast` forms `dispersion * einsum('...ij,i,j->...',
+cov_unscaled, c, c)` — literally @eq-contrast-var.
+
+**The t-statistic.** Standardise the estimate by its own standard error:
+
+$$
+t = \frac{c^{\top}\hat\beta}{\sqrt{c^{\top}Vc}} .
+$$
+
+Under the null $c^{\top}\beta=0$, this follows a Student-$t$ distribution on
+$N-p$ residual degrees of freedom (`result.dof_resid`). `t_contrast` returns the
+4-tuple `(effect, se, t, p_value)` — the contrast estimate, its standard error,
+the statistic, and the two-sided p-value — which are the ModelArray `lm` output
+columns.
+
+**The p-value, without a vendor solver.** A p-value is a tail probability of that
+$t$ distribution, and here is the load-bearing identity the source uses: the
+Student-$t$ tail is a value of the **regularised incomplete beta function**
+$I_x(a,b)$. Concretely the two-sided survival probability is
+
+$$
+P\big(|T| > |t|\big) = I_{x}\!\left(\tfrac{\nu}{2}, \tfrac12\right),
+\qquad x = \frac{\nu}{\nu + t^2},\quad \nu = N-p,
+$$ {#eq-tbeta}
+
+which is exactly `_t_two_sided_sf` in `glm.py`:
+`betainc(0.5*df, 0.5, df/(df + t*t))`. Why phrase it through $I_x$ at all? Because
+$I_x(a,b)$ has a portable, differentiable implementation
+(`jax.scipy.special.betainc`) that needs **no** vendor special-function or linear-
+algebra call — so the *inference* is as portable and as accelerator-clean as the
+*fit*. (The same identity, with different shape parameters, gives the $F$ tail in
+`_f_sf` and the t-quantile inverted by a few Newton steps in `_effect._t_ppf`,
+which backs `confidence_interval`.)
+
+**Multi-row contrasts: the $F$-test.** Sometimes the question has several parts at
+once — "does *any* of these three coefficients differ from zero?". Stack the
+questions as the rows of a matrix $C$ ($m\times p$) and test $C\beta=0$ jointly.
+The natural statistic is the squared length of $C\hat\beta$ in the metric of its
+own covariance (a Wald quadratic form), divided by its rank:
+
+$$
+F = \frac{1}{m}\,(C\hat\beta)^{\top}\,(C V C^{\top})^{-1}\,(C\hat\beta) ,
+$$ {#eq-fstat}
+
+which `f_contrast` computes — `mat = C @ cov @ C.T`, inverted by the same
+`small_inv_logdet`, then `quad / (m * dispersion)` — returning `(F, p_value, df1,
+df2)` on $(m,\,N-p)$ degrees of freedom with the p-value from @eq-tbeta's
+$F$-cousin. For *nested* model comparison `compare_models` offers the
+extra-sum-of-squares $F$-test (Gaussian) or the likelihood-ratio test
+$2(\ell_{\text{full}}-\ell_{\text{reduced}})\sim\chi^2$ (other families).
+
+**The result object.** All of this hangs off a single frozen-dataclass
+`GLMResult` (`glm.py`), registered as a JAX pytree by `register_result`
+(`_result.py`) so it stacks cleanly under `vmap` and survives `jit` — the array
+fields (`coef`, `cov_unscaled`, `dispersion`, `deviance`, `null_deviance`,
+`log_lik`) ride as traced children, the metadata (`family`, `n_obs`, `rank`) as
+static aux. The fitter-agnostic readouts in `_effect.py` (`confidence_interval`,
+`standardized_effect`) then turn an `(effect, se, dof)` triple into the
+confidence interval or Cohen's-d-style ratio a report actually quotes — also
+cuSOLVER-free, the t-quantile found by Newton iteration on the same `betainc` CDF.
+
+## 10. The family zoo, grounded {#sec-zoo}
+
+The IRLS core serves every classic GLM family by swapping the `Family` record;
+`_family.py` ships `GAUSSIAN`, `BINOMIAL`, `POISSON`, `GAMMA`, `NEGBINOMIAL`
+(overdispersed counts, $V(\mu)=\mu+\alpha\mu^2$) and `TWEEDIE` (the semicontinuous
+$1<p<2$ regime), with `Family.with_link` composing probit / cloglog / sqrt /
+inverse links. But `nitrix.stats` is deliberately broader than "logistic plus a
+few links": some responses break the *one linear predictor, fixed dispersion*
+assumption of the scalar IRLS core and get their own fitter. Three worth knowing,
+each grounded in real source:
+
+- **Beta regression** (`betareg.py`, `beta_fit`) for proportions in $(0,1)$ —
+  tissue fractions, fractional occupancy. The model is $y\sim\text{Beta}(\mu\phi,
+  (1-\mu)\phi)$ with $\mu=\text{logit}^{-1}(X\beta)$ and an estimated **precision**
+  $\phi$. Its score is *digamma*-based, not the $\mathrm{d}\mu/\mathrm{d}\eta^2/V$
+  weight, so it alternates an IRLS-style step for $\beta$ with a Newton step for
+  $\log\phi$ (Ferrari & Cribari-Neto 2004); the returned `cov_unscaled` is the
+  $\beta$ block of the *joint* $(\beta,\phi)$ information inverse, so the standard
+  errors honestly account for estimating $\phi$.
+
+- **Ordinal / cumulative-link** (`ordinal.py`, `ordinal_fit`) for ordered
+  categories — clinical stage, a Likert rating. It places $K-1$ ordered thresholds
+  and a *single* shared slope (the proportional-odds assumption),
+  $P(y\le k)=F(\theta_k - x^{\top}\beta)$ with $F$ the logistic or normal CDF. The
+  thresholds are kept ordered by the unconstrained reparameterisation
+  $\theta=\theta_1+\text{cumsum}([0,e^{\delta}])$ and the concave log-likelihood is
+  maximised by the shared damped Newton — the same [solvers
+  §3](solvers.qmd#sec-newton) routine.
+
+- **Gaussian location-scale** (`gaulss.py`, `gaulss_fit`) — the bridge toward
+  GAMLSS. The ordinary GLM gives the *mean* a linear predictor and treats the
+  scale as one nuisance number; `gaulss` gives the **scale its own** linear
+  predictor, $y_i\sim N(\mu_i,\sigma_i^2)$ with $\mu_i=x_i^{\top}\beta_\mu$ and
+  $\log\sigma_i = z_i^{\top}\beta_\sigma$, modelling heteroscedasticity directly.
+  The Gaussian location-scale expected information is *block-diagonal* between the
+  two coefficient blocks (because $\mathbb{E}[y-\mu]=0$ kills the cross term), so
+  each Fisher-scoring step is two decoupled `small_inv_logdet` solves — a clean
+  illustration that "model the variance too" costs only a second weighted solve.
+
+Every one of these is `vmap`-clean over voxels and cuSOLVER-free, fit by the same
+Fisher-scoring-plus-small-solve pattern this page is built on.
 
 ## Where this goes
 
 Everything above recurs:
 
-- Add a **penalty** $P$ to @eq-wls, $(X^{\top}W X + P)\beta = X^{\top}W z$, and the
-  smooth, wiggly terms of a **GAM** drop out — with $P$'s strength chosen by the
-  [Fellner–Schall](fellner-schall.qmd) update.
+- Add a **penalty matrix** $S$ to @eq-wls, $(X^{\top}W X + S)\beta = X^{\top}W z$,
+  and the smooth, wiggly terms of a **GAM** drop out — with $S$'s strength chosen
+  by the [Fellner–Schall](fellner-schall.qmd#sec-fs-update) update.
 - Add **random effects** and the noise becomes correlated; estimating its
-  structure is the *linear mixed model*, where the same Newton loop runs on a
-  cleverly **diagonalised** covariance.
+  structure is the [linear mixed model](lme.qmd#sec-reml), where the same Newton
+  loop runs on a cleverly **diagonalised** covariance.
 - Combine the two and you have **GLMMs** and **GAMMs**.
 
 The working response, the working weights, the small cuSOLVER-free solve, and
 damped Newton are the constants; each later chapter changes only what sits inside
 or beside the $p\times p$ system.
 
+## Further reading
+
+- Nelder, J. A. & Wedderburn, R. W. M. (1972). *Generalized Linear Models.*
+  Journal of the Royal Statistical Society, Series A, 135(3), 370–384 — the
+  original paper that unified the families and introduced IRLS.
+- McCullagh, P. & Nelder, J. A. (1989). *Generalized Linear Models*, 2nd ed.
+  Chapman & Hall/CRC — the standard reference; deviance, links, variance functions.
+- Green, P. J. (1984). *Iteratively Reweighted Least Squares for Maximum
+  Likelihood Estimation, and some Robust and Resistant Alternatives.* Journal of
+  the Royal Statistical Society, Series B, 46(2), 149–192 — IRLS as Fisher
+  scoring and its role in penalised likelihood.
+- Agresti, A. (2015). *Foundations of Linear and Generalized Linear Models.*
+  Wiley — a modern, readable development from the linear model upward.
+- Ferrari, S. & Cribari-Neto, F. (2004). *Beta Regression for Modelling Rates and
+  Proportions.* Journal of Applied Statistics, 31(7), 799–815 — the estimator
+  behind `beta_fit`.
+- Rigby, R. A. & Stasinopoulos, D. M. (2005). *Generalized Additive Models for
+  Location, Scale and Shape.* Journal of the Royal Statistical Society, Series C,
+  54(3), 507–554 — the GAMLSS framework that `gaulss` previews.
+
 ## See also
 
 - Code: [`nitrix/stats/glm.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glm.py),
-  the shared solver `stats/_irls.py`, and `linalg/_smalllinalg.py`.
-- Next rung: *linear mixed-effects models* (random effects and variance
-  components); and [smoothing-parameter selection](fellner-schall.qmd) for the
-  penalty that turns a GLM into a GAM.
+  the shared solver [`stats/_irls.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_irls.py),
+  the family records [`stats/_family.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_family.py),
+  the result/effect helpers [`stats/_result.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_result.py)
+  and [`stats/_effect.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_effect.py),
+  the family zoo [`stats/betareg.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/betareg.py),
+  [`stats/ordinal.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/ordinal.py),
+  [`stats/gaulss.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gaulss.py),
+  and the small dense solve
+  [`linalg/_smalllinalg.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_smalllinalg.py).
+- Builds on: [foundations](foundations.qmd#sec-expfam) (the exponential family and
+  mean–variance identity) and [solvers](solvers.qmd#sec-newton) (the small dense
+  solve and damped Newton).
+- Next rung: [linear mixed-effects models](lme.qmd#sec-reml) (random effects and
+  variance components); and [smoothing-parameter
+  selection](fellner-schall.qmd#sec-fs-update) for the penalty $S$ that turns a
+  GLM into a GAM.

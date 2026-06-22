@@ -3,10 +3,14 @@ title: "The statistical modelling suite"
 ---
 
 ::: {.callout-tldr title="Fast path"}
+New here? Read **[Foundations](foundations.qmd)** first (rung 0): it builds the
+three ideas — variance, exponential families, and the penalty = prior = variance
+component = kernel equivalence — that the whole suite rests on.
+
 `nitrix.stats` is one family of models, not a pile of unrelated fitters. Almost
 every model here is solved by the *same two moves*:
 
-1. **Solve a weighted normal-equations system** $(X^{\top} W X + P)\,\beta = X^{\top} W z$ — a small $p\times p$ linear solve you already understand from least squares.
+1. **Solve a weighted normal-equations system** $(X^{\top} W X + S)\,\beta = X^{\top} W z$ — a small $p\times p$ linear solve you already understand from least squares.
 2. **Choose the extra parameters** (a noise variance, a smoothing strength, a random-effect variance) by maximising a likelihood with a cheap iteration.
 
 The chapters below climb a ladder — GLM → LME → GAM → GLMM → GAMM → HSGP — and
@@ -30,7 +34,7 @@ and adds exactly one ingredient:
 |---|---|---|
 | 1 | **GLM** — generalised linear model | a *link* + *non-Gaussian noise* (so we fit by **IRLS**) |
 | 2 | **LME** — linear mixed-effects | *random effects* $Z$ (correlated noise → **variance components**, REML) |
-| 3 | **GAM** — generalised additive model | *smooth terms* (a wiggliness **penalty** $P$ on the coefficients) |
+| 3 | **GAM** — generalised additive model | *smooth terms* (a wiggliness **penalty** $S$ on the coefficients) |
 | 4 | **GLMM** — generalised linear mixed model | GLM **and** LME at once (non-Gaussian + random effects) |
 | 5 | **GAMM** — generalised additive mixed model | smooths **and** random effects (they turn out to be the same thing) |
 | 6 | **HSGP** — Hilbert-space Gaussian process | a *kernel* prior, written as just another penalty |
@@ -49,11 +53,11 @@ reused (by cross-reference) thereafter:
 | Tool | What it does | Introduced in |
 |---|---|---|
 | **IRLS** (iteratively reweighted least squares) | turns a non-Gaussian fit into a sequence of ordinary weighted least-squares solves | [GLM](glm.qmd) |
-| **Damped Newton** | makes that iteration converge reliably even when a step would overshoot | [GLM](glm.qmd) |
-| **cuSOLVER-free small-linalg** | does every $p\times p$ solve without the vendor GPU solver, so fits run on accelerators where it is broken | [GLM](glm.qmd) |
+| **Damped Newton** | makes that iteration converge reliably even when a step would overshoot | [the solvers page](solvers.qmd) |
+| **cuSOLVER-free small-linalg** | does every $p\times p$ solve without the vendor GPU solver, so fits run on accelerators where it is broken | [the solvers page](solvers.qmd) |
 | **FaST-LMM spectral trick** | diagonalises the random-effect covariance once so each fit is elementwise-cheap | LME |
 | **Fellner–Schall** | the multiplicative update that chooses smoothing / variance parameters | [smoothing parameters](fellner-schall.qmd) |
-| **Block-Woodbury / Schur** | inverts a huge "many groups" covariance by only touching small blocks | GLMM |
+| **Block-Woodbury / Schur** | inverts a huge "many groups" covariance by only touching small blocks | [the solvers page](solvers.qmd) |
 
 ## How `nitrix` runs these at scale
 
@@ -78,6 +82,10 @@ one design. Two consequences recur throughout:
 
 ## Chapters
 
+Start here:
+
+- [**Foundations: variance, families, and penalties**](foundations.qmd) *(rung 0 — read this first)*
+
 The ladder, in order:
 
 1. [Generalised linear models — the foundation](glm.qmd) *(start here)*
@@ -89,4 +97,5 @@ The ladder, in order:
 
 Shared machinery:
 
+- [Solvers — damped Newton, the cuSOLVER-free solve, and block-Woodbury](solvers.qmd)
 - [Choosing smoothing parameters: the Fellner–Schall method](fellner-schall.qmd)
