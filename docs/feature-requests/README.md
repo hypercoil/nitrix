@@ -110,6 +110,16 @@ items, each with a stable ID and Status column. Records the **empirical
 refutation of the one Critical claim** (C1 "gappy labels bias REML" — bit-identical
 fits; exact log|V| cancellation) so it is not re-raised.
 
+**GP / HGP pre-merge review register (2026-06-22):**
+[`stats-suite-review-gp.md`](stats-suite-review-gp.md) — consolidated findings from a
+seven-lens, 13-reviewer / 53-agent **adversarially-verified** fan-out review of the
+`feat/stats-gp` branch (PR1–PR10) *plus* a suite-wide re-audit. Verdict:
+**ship-after-fixes** — math sound and cuSOLVER-free/jit-clean verified, but **7 merge-gating
+blockers** (silent-wrong-result-on-bad-input traps + a `block=`-ignored ρ-search/GAM-epilogue
+OOM cliff), each with a stable ID and Status column, sequenced into Round 1 (this PR) →
+Round 4. Records the **2 refuted claims** so they are not re-raised, and cross-references the
+standing audit (CV1 = its **N2** surface-TFCE; MC4 deepens its **M1**).
+
 **GP / HGP models (proposed, 2026-06-20, rev. HSGP-primary):**
 [`gaussian-process-models.md`](gaussian-process-models.md) — Gaussian-process
 regression as a first-class family (`nitrix.stats.gp`) and its **hierarchical**
