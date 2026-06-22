@@ -120,6 +120,10 @@ from .surface import (
     strain_distortion,
     surface_smooth,
 )
+from .intersection import (
+    find_self_intersections,
+    remove_self_intersections,
+)
 from .isosurface import marching_cubes, mesh_to_sdf
 from .topology import (
     euler_characteristic,
@@ -210,4 +214,7 @@ __all__ = [
     # volume <-> surface conversion
     'marching_cubes',
     'mesh_to_sdf',
+    # self-intersection (host-side QA / cleanup)
+    'find_self_intersections',
+    'remove_self_intersections',
 ]
