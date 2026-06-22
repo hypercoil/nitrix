@@ -557,12 +557,17 @@ def hgp_fit(
 
     @jax.jit
     def _pooled(d_blocks: Array, ranks: Array, log_pdets: Array) -> Array:
-        per = jax.vmap(
+        # Chunk the pooled-NLL reduction by `block` too: the hierarchical design
+        # is (1 + sum(level_counts)) * m wide, so an un-chunked search over all V
+        # is the acuter OOM cliff. blocked_vmap(...).sum() is a drop-in.
+        per = blocked_vmap(
             lambda c_v, g_v: _hgp_pooled_nll_one(
                 c_v, g_v, xtx, d_blocks, ranks, log_pdets, n, p, n_fixed,
                 n_search, ridge, lam_floor, lam_ceil,
-            )
-        )(c_all, g_all)
+            ),
+            (c_all, g_all),
+            block=block,
+        )
         return jnp.sum(per)
 
     nll_grid = []

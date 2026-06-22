@@ -261,6 +261,22 @@ def test_hgp_group_label_range_validation():
                 group_inner=jnp.asarray(inner), n_levels_inner=0)
 
 
+def test_hgp_block_bounds_rho_search_without_changing_results():
+    """PF1: `block=` chunks the hierarchical pooled-NLL rho search too (the
+    (1+L)*m-wide design is the acuter cliff); the result is identical to the
+    un-chunked search."""
+    rng = np.random.default_rng(9)
+    x, group, y, *_ = _hier_data(rng, L=6, per=16)
+    V = 6
+    Y = jnp.asarray(np.tile(y, (V, 1)) + 0.05 * rng.standard_normal((V, len(y))))
+    a = hgp_fit(Y, jnp.asarray(x), jnp.asarray(group), n_rho=10, block=None)
+    b = hgp_fit(Y, jnp.asarray(x), jnp.asarray(group), n_rho=10, block=2)
+    np.testing.assert_allclose(np.asarray(a.coef), np.asarray(b.coef), atol=1e-10)
+    np.testing.assert_allclose(
+        np.asarray(a.theta), np.asarray(b.theta), atol=1e-10
+    )
+
+
 # ---------------------------------------------------------------------------
 # 4. gp_factor_smooth -- the fixed-rho factor-smooth GP basis (gam_fit drop-in)
 # ---------------------------------------------------------------------------

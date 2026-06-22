@@ -623,19 +623,27 @@ def _pooled_nll_from_design(
     ridge: float,
     lam_floor: float,
     lam_ceil: float,
+    block: Optional[int],
 ) -> Float[Array, '']:
     """Pooled ``-2 l_R`` for a design ``X`` whose smooth columns move with ``rho``
-    (the ``engine='exact'`` case: the cross-products are rebuilt per ``rho``)."""
+    (the ``engine='exact'`` case: the cross-products are rebuilt per ``rho``).
+
+    The per-element reduction goes through ``blocked_vmap`` so ``block`` bounds
+    the rho-search's peak memory (``O(block * p**2)``) exactly as it bounds the
+    final fit -- for ``engine='exact'`` with ``rank=N`` the per-element Hessian
+    is ``(N, N)``, so an un-chunked search over all ``V`` is the OOM cliff."""
     p = X.shape[1]
     xtx = X.T @ X
     c_all = Y @ X
     g_all = jnp.sum(Y * Y, axis=1)
-    per = jax.vmap(
+    per = blocked_vmap(
         lambda c_v, g_v: _pooled_nll_one(
             c_v, g_v, xtx, d, log_pdet_pen, n, p, m, n_fixed,
             n_outer, ridge, lam_floor, lam_ceil,
-        )
-    )(c_all, g_all)
+        ),
+        (c_all, g_all),
+        block=block,
+    )
     return jnp.sum(per)
 
 
@@ -991,12 +999,14 @@ def gp_fit(
     def _pooled_nll(log_rho: Float[Array, '']) -> Float[Array, '']:
         rho = jnp.exp(log_rho)
         d, log_pdet_pen = _penalty_diag(sqrt_lambda, kernel, rho, n_fixed)
-        per = jax.vmap(
+        per = blocked_vmap(
             lambda c_v, g_v: _pooled_nll_one(
                 c_v, g_v, xtx, d, log_pdet_pen, n, p, m, n_fixed,
                 n_search, ridge, lam_floor, lam_ceil,
-            )
-        )(c_all, g_all)
+            ),
+            (c_all, g_all),
+            block=block,
+        )
         nll = jnp.sum(per)
         if map_rho is not None:
             nll = nll + 2.0 * map_rho(rho)
@@ -1140,7 +1150,7 @@ def _gp_fit_exact(
     def _nll_jit(X: Array) -> Array:
         return _pooled_nll_from_design(
             Y, X, d, log_pdet_pen, n, m, n_fixed,
-            n_search, ridge, lam_floor, lam_ceil,
+            n_search, ridge, lam_floor, lam_ceil, block,
         )
 
     # --- rho search: host loop (each rho needs a host kernel eigh) ----------
@@ -1207,12 +1217,14 @@ def _gp_fit_nd(
 
     @jax.jit
     def _pooled(d: Array, log_pdet: Array) -> Array:
-        per = jax.vmap(
+        per = blocked_vmap(
             lambda c_v, g_v: _pooled_nll_one(
                 c_v, g_v, xtx, d, log_pdet, n, p, m, n_fixed,
                 n_search, ridge, lam_floor, lam_ceil,
-            )
-        )(c_all, g_all)
+            ),
+            (c_all, g_all),
+            block=block,
+        )
         return jnp.sum(per)
 
     half = [0.5 * (bd[1] - bd[0]) for bd in bounds]
@@ -1355,12 +1367,14 @@ def _gp_fit_corr(
     def _nll_jit(X: Array, raw: Array, d: Array, log_pdet: Array) -> Array:
         xtx, c_all, g_all, half_logdet = _cross(X, raw)
         p = xtx.shape[0]
-        per = jax.vmap(
+        per = blocked_vmap(
             lambda c_v, g_v: _pooled_nll_one(
                 c_v, g_v, xtx, d, log_pdet, n, p, m, n_fixed,
                 n_search, ridge, lam_floor, lam_ceil,
-            )
-        )(c_all, g_all)
+            ),
+            (c_all, g_all),
+            block=block,
+        )
         return jnp.sum(per) + v_count * 2.0 * half_logdet
 
     cross_jit = jax.jit(_cross)

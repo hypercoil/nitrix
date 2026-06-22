@@ -821,3 +821,53 @@ def test_corr_with_exact_engine():
     assert float(res.corr_rho[0]) > 0.2
     mean, _ = gp_predict(res, jnp.asarray(t), x_train=jnp.asarray(x))
     assert np.corrcoef(np.asarray(mean)[0], trend)[0, 1] > 0.9
+
+
+@pytest.mark.parametrize('case', ['hsgp', 'exact', 'nd', 'corr'])
+def test_block_bounds_rho_search_without_changing_results(case):
+    """PF1: `block=` now chunks the pooled-NLL rho search (not just the final
+    fit), so it bounds peak memory.  The fitted function (predictive mean) and
+    the variance components are invariant to the chunk size.  Chunked summation
+    reorders the floating-point adds by ~1e-15; the well-conditioned engines are
+    unaffected, while the full-rank ``exact`` engine's near-null eigen-direction
+    coefficients amplify it -- the *function* is unchanged, so we pin the
+    predictive mean, not the raw coefficients."""
+    rng = np.random.default_rng(21)
+    v, nn = 8, 60
+    if case == 'nd':
+        x2 = rng.uniform(0.0, 1.0, (nn, 2))
+        y = (np.sin(2 * np.pi * x2[:, 0])[None, :]
+             + 0.1 * rng.standard_normal((v, nn)))
+        xa = jnp.asarray(x2)
+        kw = dict(n_rho=10)
+
+        def pred(r):
+            return gp_predict(r, xa)[0]
+    elif case == 'corr':
+        g = np.repeat(np.arange(6), 10)
+        x = np.tile(np.linspace(0.0, 1.0, 10), 6)
+        y = np.sin(2 * np.pi * x)[None, :] + 0.1 * rng.standard_normal((v, 60))
+        xa = jnp.asarray(x)
+        kw = dict(corr='ar1', group=jnp.asarray(g), n_rho=8, n_corr=6)
+        xg = jnp.asarray(np.linspace(0.05, 0.95, 20))
+
+        def pred(r):
+            return gp_predict(r, xg)[0]
+    else:  # hsgp / exact
+        x = np.sort(rng.uniform(0.0, 1.0, nn))
+        y = np.sin(2 * np.pi * x)[None, :] + 0.1 * rng.standard_normal((v, nn))
+        xa = jnp.asarray(x)
+        if case == 'exact':
+            kw = dict(engine='exact', rank=nn, n_rho=10)
+
+            def pred(r):
+                return gp_predict(r, xa, x_train=xa)[0]
+        else:
+            kw = dict(rank=24, n_rho=10)
+
+            def pred(r):
+                return gp_predict(r, xa)[0]
+    a = gp_fit(jnp.asarray(y), xa, block=None, **kw)
+    b = gp_fit(jnp.asarray(y), xa, block=3, **kw)
+    np.testing.assert_allclose(np.asarray(pred(a)), np.asarray(pred(b)), atol=1e-7)
+    np.testing.assert_allclose(np.asarray(a.theta), np.asarray(b.theta), atol=1e-6)
