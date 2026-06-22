@@ -112,6 +112,7 @@ from .coords import (
 )
 from .surface import (
     areal_distortion,
+    cortical_thickness,
     deform_to_sdf,
     gaussian_curvature,
     mean_curvature,
@@ -202,6 +203,7 @@ __all__ = [
     'strain_distortion',
     'surface_smooth',
     'deform_to_sdf',
+    'cortical_thickness',
     # topology (the genus-0 defect gate)
     'euler_characteristic',
     'genus',

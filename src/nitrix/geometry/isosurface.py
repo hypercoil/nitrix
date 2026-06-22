@@ -37,6 +37,7 @@ from jaxtyping import Array, Float
 from numpy.typing import NDArray
 
 from ..sparse import Mesh
+from ._triangle_distance import _closest_point_dist2
 
 __all__ = ['marching_cubes', 'mesh_to_sdf']
 
@@ -284,56 +285,6 @@ def marching_cubes(
         vertices=jnp.asarray(verts, dtype=jnp.float32),
         faces=jnp.asarray(faces, dtype=jnp.int32),
     )
-
-
-def _closest_point_dist2(
-    p: NDArray[Any], a: NDArray[Any], b: NDArray[Any], c: NDArray[Any]
-) -> NDArray[Any]:
-    """Squared distance from points ``p`` (m,1,3) to triangles (a,b,c) (1,F,3).
-
-    Vectorised Ericson closest-point-on-triangle (the 7 Voronoi regions: the
-    triangle interior, three edges, three vertices).
-    """
-    ab, ac = b - a, c - a
-    ap = p - a
-    d1 = (ab * ap).sum(-1)
-    d2 = (ac * ap).sum(-1)
-    bp = p - b
-    d3 = (ab * bp).sum(-1)
-    d4 = (ac * bp).sum(-1)
-    cp = p - c
-    d5 = (ab * cp).sum(-1)
-    d6 = (ac * cp).sum(-1)
-    va = d3 * d6 - d5 * d4
-    vb = d5 * d2 - d1 * d6
-    vc = d1 * d4 - d3 * d2
-
-    def _safe(x: NDArray[Any]) -> NDArray[Any]:
-        return np.where(np.abs(x) < 1e-30, 1e-30, x)
-
-    denom = _safe(va + vb + vc)
-    v = (vb / denom)[..., None]
-    w = (vc / denom)[..., None]
-    c_int = a + v * ab + w * ac
-    c_ab = a + (d1 / _safe(d1 - d3))[..., None] * ab
-    c_ac = a + (d2 / _safe(d2 - d6))[..., None] * ac
-    c_bc = b + ((d4 - d3) / _safe((d4 - d3) + (d5 - d6)))[..., None] * (c - b)
-    a_b = np.broadcast_to(a, c_int.shape)
-    b_b = np.broadcast_to(b, c_int.shape)
-    c_b = np.broadcast_to(c, c_int.shape)
-    conds = [
-        ((d1 <= 0) & (d2 <= 0))[..., None],
-        ((d3 >= 0) & (d4 <= d3))[..., None],
-        ((vc <= 0) & (d1 >= 0) & (d3 <= 0))[..., None],
-        ((d6 >= 0) & (d5 <= d6))[..., None],
-        ((vb <= 0) & (d2 >= 0) & (d6 <= 0))[..., None],
-        ((va <= 0) & ((d4 - d3) >= 0) & ((d5 - d6) >= 0))[..., None],
-    ]
-    closest = np.select(
-        conds, [a_b, b_b, c_ab, c_b, c_ac, c_bc], default=c_int
-    )
-    diff = p - closest
-    return cast(NDArray[Any], (diff * diff).sum(-1))
 
 
 def _solid_angle(

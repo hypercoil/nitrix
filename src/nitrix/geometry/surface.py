@@ -20,6 +20,7 @@ from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float, Int
 
 from ..linalg.krylov import cg
@@ -31,6 +32,7 @@ from ..sparse import (
     mesh_laplacian_smooth,
     vertex_areas,
 )
+from ._triangle_distance import nearest_surface_distance
 from .grid import sample_at_points
 
 __all__ = [
@@ -41,6 +43,7 @@ __all__ = [
     'strain_distortion',
     'surface_smooth',
     'deform_to_sdf',
+    'cortical_thickness',
 ]
 
 
@@ -439,3 +442,59 @@ def deform_to_sdf(
 
     out = jax.lax.fori_loop(0, n_iterations, _body, mesh.vertices)
     return Mesh(vertices=out, faces=faces)
+
+
+def cortical_thickness(
+    white: Mesh,
+    pial: Mesh,
+    *,
+    method: str = 'symmetric',
+) -> Float[Array, 'n_vertices']:
+    """Per-vertex cortical thickness between the white and pial surfaces.
+
+    Requires the two surfaces to be in **vertex correspondence** (equal vertex
+    counts, ``white[i]`` paired with ``pial[i]`` -- as produced by
+    ``deform_to_sdf`` marching a white surface to a pial SDF).
+
+    - ``'correspondence'`` -- ``||pial[i] - white[i]||`` per vertex.  Exact when
+      the pial was deformed from the white; pure JAX and **differentiable**
+      w.r.t. both meshes' vertices.
+    - ``'symmetric'`` (default, Fischl & Dale 2000) -- the average of the
+      nearest white[i]->pial-surface and pial[i]->white-surface distances.
+      Host-side nearest-point queries (not differentiable); more robust when
+      the normal-correspondence is imperfect.
+
+    Parameters
+    ----------
+    white, pial
+        Surfaces in vertex correspondence (equal vertex counts).
+    method
+        ``'symmetric'`` (default) or ``'correspondence'``.
+
+    Returns
+    -------
+    ``(n_vertices,)`` thickness.
+
+    Raises
+    ------
+    ValueError
+        If the surfaces have different vertex counts, or ``method`` is unknown.
+    """
+    if white.n_vertices != pial.n_vertices:
+        raise ValueError(
+            'cortical_thickness: white and pial must be in vertex '
+            f'correspondence; got {white.n_vertices} vs {pial.n_vertices} '
+            'vertices.'
+        )
+    if method == 'correspondence':
+        return jnp.sqrt(
+            jnp.sum((pial.vertices - white.vertices) ** 2, axis=-1)
+        )
+    if method == 'symmetric':
+        d_w2p = nearest_surface_distance(np.asarray(white.vertices), pial)
+        d_p2w = nearest_surface_distance(np.asarray(pial.vertices), white)
+        return jnp.asarray(0.5 * (d_w2p + d_p2w), dtype=white.vertices.dtype)
+    raise ValueError(
+        f"cortical_thickness: method must be 'symmetric' or "
+        f"'correspondence'; got {method!r}."
+    )
