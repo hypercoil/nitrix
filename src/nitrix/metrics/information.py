@@ -32,6 +32,7 @@ from typing import Optional
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from .._internal.backend import default_backend_is_gpu
 from ._common import _resolve_range, _soft_bin
 
 __all__ = [
@@ -48,6 +49,24 @@ __all__ = [
 # recommended pinned-range path makes it moot.
 _MI_SPAN_FLOOR = 1e-6
 
+# Voxel-count gate (E2) for the deterministic one-hot-matmul joint histogram,
+# used **on GPU only** (see the branch).  Below this the soft bins are
+# materialised as two ``(N, bins)`` soft one-hot matrices whose product is the
+# histogram -- a matmul reduction, which is **deterministic on GPU**, unlike the
+# ``.at[].add`` scatter (a non-associative atomic add whose float result depends
+# on the run -- the affine-MI GPU non-determinism source).  Measured trade
+# (L4): the matmul is ~2-6x *slower* than the scatter per isolated histogram,
+# but the histogram is a small fraction of an MI evaluation, so end-to-end
+# affine-MI is perf-neutral -- and it makes ``restarts=1`` deterministic,
+# retiring the 4-6x ``restarts`` multiplier that was the only prior GPU
+# determinism mitigation (the real win).  Above the gate the ``(N, bins)``
+# one-hots would dominate memory, so the scatter takes over (the finest
+# full-resolution level only; the coarse affine levels -- where the 12-DOF basin
+# is decided -- stay deterministic).  ``bins=32`` => ~50 MB of fp32 one-hots at
+# the cap.  **CPU keeps the scatter unconditionally**: it is already
+# deterministic there (no atomic contention) and 5-20x faster than the one-hot.
+_ONEHOT_HIST_MAX_VOXELS = 200_000
+
 
 def _joint_hist_from_softbins(
     lower_m: Array,
@@ -58,25 +77,48 @@ def _joint_hist_from_softbins(
     dtype: jnp.dtype,
     weight: Optional[Array] = None,
 ) -> Float[Array, 'bins bins']:
-    """Scatter pre-computed soft bins into the normalised joint histogram.
+    """Accumulate pre-computed soft bins into the normalised joint histogram.
 
     Factored out of :func:`joint_histogram` so the cost (``mutual_information``)
-    and the closed-form gradient (:func:`mi_grad`) share one scatter and one
-    normalisation -- the gradient is then exactly the derivative of the table
+    and the closed-form gradient (:func:`mi_grad`) share one accumulation and
+    one normalisation -- the gradient is then exactly the derivative of the table
     the cost sees.
 
+    Two equivalent accumulations, gated by backend and size (E2): **on GPU**,
+    below ``_ONEHOT_HIST_MAX_VOXELS`` voxels, the soft bins become two
+    ``(N, bins)`` soft one-hot matrices and the histogram is their product
+    ``ohₘᵀ @ ohf`` -- a matmul (deterministic) rather than a ``.at[].add`` scatter
+    (a non-associative atomic add, the GPU MI non-determinism source that
+    ``affine_register(restarts=)`` otherwise papers over).  Everywhere else (CPU,
+    or above the gate) the scatter is used -- on CPU it is already deterministic
+    and faster than the one-hot, and above the gate the one-hots would dominate
+    memory.  Both ``default_backend_is_gpu()`` and ``N`` are static under ``jit``,
+    so the branch is resolved at trace time.
+
     ``weight`` (optional, the per-voxel domain mask, same length as the soft-bin
-    index vectors) **gates the scatter**: a masked-out voxel contributes nothing
-    to the histogram, so the metric ignores it -- the only correct place to mask
-    a histogram statistic (masking the reduction afterwards would leave the
-    out-of-mask voxels in the joint distribution).  ``None`` is the unweighted
-    scatter (byte-identical to the pre-mask form).
+    index vectors) gates the accumulation: a masked-out voxel contributes nothing
+    to the histogram (A3).  ``None`` is the unweighted form.
     """
-    hist = jnp.zeros((bins, bins), dtype=dtype)
-    for idx_m, w_m in ((lower_m, 1.0 - frac_m), (lower_m + 1, frac_m)):
-        for idx_f, w_f in ((lower_f, 1.0 - frac_f), (lower_f + 1, frac_f)):
-            contrib = w_m * w_f if weight is None else weight * w_m * w_f
-            hist = hist.at[idx_m, idx_f].add(contrib)
+    n = lower_m.shape[0]
+    if default_backend_is_gpu() and n <= _ONEHOT_HIST_MAX_VOXELS:
+        idx = jnp.arange(bins)
+        oh_m = (
+            (1.0 - frac_m)[:, None] * (lower_m[:, None] == idx)
+            + frac_m[:, None] * ((lower_m + 1)[:, None] == idx)
+        ).astype(dtype)
+        oh_f = (
+            (1.0 - frac_f)[:, None] * (lower_f[:, None] == idx)
+            + frac_f[:, None] * ((lower_f + 1)[:, None] == idx)
+        ).astype(dtype)
+        if weight is not None:
+            oh_m = oh_m * weight[:, None]
+        hist = oh_m.T @ oh_f
+    else:
+        hist = jnp.zeros((bins, bins), dtype=dtype)
+        for idx_m, w_m in ((lower_m, 1.0 - frac_m), (lower_m + 1, frac_m)):
+            for idx_f, w_f in ((lower_f, 1.0 - frac_f), (lower_f + 1, frac_f)):
+                contrib = w_m * w_f if weight is None else weight * w_m * w_f
+                hist = hist.at[idx_m, idx_f].add(contrib)
     return hist / jnp.maximum(hist.sum(), 1e-12)
 
 

@@ -519,16 +519,17 @@ def affine_register(
     the intensities before registration (see ``rigid_register``).
 
     ``restarts`` (default ``1``) runs the **forward** solve from that many
-    diversified inits and keeps the lowest-cost result.  Its purpose is the
-    histogram metrics on GPU: the joint-histogram scatter-add (``MI`` /
-    ``CorrelationRatio``) is non-deterministic, and the 12-DOF affine BFGS
-    occasionally amplifies that gradient noise into a catastrophic divergence
-    (rigid's 6-DOF and the dense-field force absorb it; ``SSD`` is exact and
-    takes the deterministic inverse-compositional path, which ignores
-    ``restarts``).  A diverged solve scores far worse, so ``restarts=4``--``6``
-    drives the GPU affine-MI failure rate to ~0 at ``restarts``x the forward
-    cost; ``1`` is the single-solve default (unchanged, and all that CPU --
-    deterministic -- ever needs).
+    diversified inits and keeps the lowest-cost result -- a pure
+    basin-of-attraction lever.  It **no longer** doubles as the GPU MI
+    determinism fix: the joint histogram now takes a deterministic one-hot-matmul
+    path on GPU at affine pyramid sizes (``<= 200k`` voxels/level; E2), so
+    ``MI`` / ``CorrelationRatio`` recover reproducibly at ``restarts=1``.
+    (Historically the GPU joint-histogram scatter-add was non-deterministic and
+    the 12-DOF affine BFGS occasionally amplified that noise into a catastrophic
+    divergence, so ``restarts=4``--``6`` was the mitigation; that is retired for
+    sizes under the gate.  ``SSD`` is exact and takes the inverse-compositional
+    path, which ignores ``restarts``.)  Above the gate (the finest full-res
+    level), or for a genuinely multi-basin start, ``restarts > 1`` still helps.
     """
     moving, fixed = preprocess_images(
         moving,
