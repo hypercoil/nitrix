@@ -422,13 +422,15 @@ def surface_smooth(
     """
     area = vertex_areas(mesh, scheme=area_scheme)  # (n,) lumped mass diagonal
     lap = mesh_cotangent_laplacian(mesh)
+    roi_arr = None
     if roi is not None:
         if not isinstance(lap, ELL):
             raise ValueError(
                 'surface_smooth: roi masking requires a flat ELL Laplacian '
                 "(format='ell'); the sectioned operator is not supported."
             )
-        lap = _roi_neumann_laplacian(lap, jnp.asarray(roi))
+        roi_arr = jnp.asarray(roi)
+        lap = _roi_neumann_laplacian(lap, roi_arr)
     t = fwhm**2 / (16.0 * jnp.log(2.0))
 
     def _matvec(
@@ -437,8 +439,17 @@ def surface_smooth(
         lv = apply_operator(lap, v[..., None])[..., 0]  # L @ v, (..., n)
         return area * v + t * lv
 
-    b = area * values
-    return cg(_matvec, b, tol=tol, maxiter=maxiter)
+    if roi_arr is None:
+        return cg(_matvec, area * values, tol=tol, maxiter=maxiter)
+    # The Neumann mask decouples the ROI and out-of-ROI blocks, but CG shares a
+    # single global tolerance: feeding the (possibly huge, out-of-distribution,
+    # or NaN) medial-wall values into ``b`` would dominate ``||b||`` and starve
+    # the ROI of precision (or poison the whole solve with NaN).  So drive the
+    # solve from the ROI data alone (out-of-ROI -> 0 in the decoupled diagonal
+    # block) and restore the out-of-ROI vertices to their input afterwards.
+    masked = jnp.where(roi_arr, values, 0.0)
+    x = cg(_matvec, area * masked, tol=tol, maxiter=maxiter)
+    return jnp.where(roi_arr, x, values)
 
 
 def deform_to_sdf(

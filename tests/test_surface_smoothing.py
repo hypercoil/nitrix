@@ -126,6 +126,37 @@ def test_roi_does_not_bleed_across_boundary() -> None:
     assert np.allclose(o1[~roi_np], 10.0, atol=1e-3)  # off-ROI unchanged
 
 
+def test_roi_precision_independent_of_offroi_magnitude() -> None:
+    # A real failure mode: the medial wall can carry large out-of-distribution
+    # values (unnormalised intensity, sentinel fills). Because CG shares one
+    # global tolerance, a huge off-ROI value must NOT starve the ROI of
+    # precision -- the ROI result must match the reference (small off-ROI fill).
+    mesh = icosphere(3)
+    z = np.asarray(mesh.vertices[:, 2])
+    roi = jnp.asarray(z >= 0.0)
+    roi_np = np.asarray(roi)
+    rng = np.random.default_rng(2)
+    roi_field = rng.standard_normal(mesh.n_vertices).astype(np.float32)
+    small = jnp.asarray(np.where(roi_np, roi_field, 0.1).astype(np.float32))
+    huge = jnp.asarray(np.where(roi_np, roi_field, 1e8).astype(np.float32))
+    o_small = np.asarray(surface_smooth(mesh, small, fwhm=4.0, roi=roi))
+    o_huge = np.asarray(surface_smooth(mesh, huge, fwhm=4.0, roi=roi))
+    assert np.allclose(o_small[roi_np], o_huge[roi_np], atol=1e-5)
+
+
+def test_roi_is_nan_safe_off_region() -> None:
+    # NaN-filled masked regions are common; they must not poison the ROI solve.
+    mesh = icosphere(3)
+    z = np.asarray(mesh.vertices[:, 2])
+    roi = jnp.asarray(z >= 0.0)
+    roi_np = np.asarray(roi)
+    vals = jnp.asarray(np.where(roi_np, 1.0, np.nan).astype(np.float32))
+    out = np.asarray(surface_smooth(mesh, vals, fwhm=4.0, roi=roi))
+    assert np.all(np.isfinite(out[roi_np]))  # ROI clean despite off-ROI NaN
+    assert np.allclose(out[roi_np], 1.0, atol=1e-3)
+    assert np.all(np.isnan(out[~roi_np]))  # masked region stays NaN
+
+
 def test_roi_preserves_constants_and_integral_within_roi() -> None:
     mesh = icosphere(3)
     z = np.asarray(mesh.vertices[:, 2])
