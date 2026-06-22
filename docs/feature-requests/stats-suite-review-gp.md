@@ -139,7 +139,7 @@ the high items are the highest-leverage follow-ups.
 |----|-----|--------|----------|-----|-----------|
 | **CV1** | High | **deferred → tracked under prior `N2`** | `inference/tfce.py:67-77`; `cluster.py:72` | Cluster/TFCE inference is **lattice-only** — no surface-mesh adjacency, blocking the FreeSurfer/HCP vertex-wise workflow FSL randomise/PALM support. | **Duplicate of [`stats-suite-audit.md`](stats-suite-audit.md) N2** (deferred post-`geometry-suite`; mesh-adjacency/sphere-geodesic prims already ship). Not re-litigated here — see N2 for the standing plan. |
 | **CV2** | High | open | `gp.py:771-772` | GP lengthscale estimation is **Gaussian-only**; non-Gaussian GP regression (binary activation, lesion counts — the FR's own headline) is reachable only with ρ *pinned*. | Wrap PIRLS (gam.py working-response/weights) around the diagonal-S(ρ) penalty so the pooled-REML ρ grid runs on the Laplace/PQL marginal for Binomial/Poisson; document the PQL-attenuation caveat as `glmm_fit` does. |
-| **CV3** | Med | open | `__init__.py:11-13` | Top-level package docstring still advertises stats as covariance/spectral only, **hiding** the GLM/GAM/GP/LME/GLMM/inference surface. | One-paragraph rewrite — outsized adoption leverage, ~5 min. |
+| **CV3** | Med | ✅ done `63d7707` | `__init__.py:11-13` | Top-level package docstring still advertises stats as covariance/spectral only, **hiding** the GLM/GAM/GP/LME/GLMM/inference surface. | One-paragraph rewrite — outsized adoption leverage, ~5 min. |
 | **CV4** | Med | open | `multiple_comparisons.py:53-75` | FDR is **BH-only** — no dependence-aware BY or Storey q-value, notable given strong voxel correlation. | Add BY (always-valid under dependence) + optional Storey π₀. |
 | CV5–CV7 | Low | open | — | posterior-uncertainty / plotting-IO ergonomics; see §7. | — |
 
@@ -149,8 +149,8 @@ inconsistency the additions sit inside** (a user moving between models the suite
 hits a different convention at each step).
 | ID | Sev | Status | Location | Inconsistency | Direction |
 |----|-----|--------|----------|---------------|-----------|
-| **UX1** | High | open | `gp.py:122`; `glmm/_base.py:52`; `lme/reml.py:162` | Coefficient field forks **`coef`** (GLM/GAM/GP/HGP/Beta/Ordinal) vs **`beta_hat`** (LME/GLMM); `coef_mu`/`coef_scale` (GauLSS). Generic `result.coef @ contrast` silently breaks across families. | Converge on `coef` (the majority/neutral choice); add a deprecated `beta_hat`→`coef` alias property on LME/GLMM. New GP/HGP code already chose `coef`. |
-| **UX2** | High | open | `gp.py:744`; `hgp.py:383` | Covariate arg is lowercase **`x`** (single covariate) in GP/HGP but uppercase **`X`** (full design) everywhere else; `gp_fit`'s `x` typed `Any` vs `hgp_fit`'s `Float[Array,'N']`. | Keep `x` (it genuinely is one covariate) but tighten the annotation to `Union[Float[Array,'N'], Float[Array,'N D']]` and add a one-line "`x` is NOT the full design — linear covariates go to `parametric=`" note at each docstring head. |
+| **UX1** | High | ✅ done `63d7707` | `gp.py:122`; `glmm/_base.py:52`; `lme/reml.py:162` | Coefficient field forks **`coef`** (GLM/GAM/GP/HGP/Beta/Ordinal) vs **`beta_hat`** (LME/GLMM); `coef_mu`/`coef_scale` (GauLSS). Generic `result.coef @ contrast` silently breaks across families. | Converge on `coef` (the majority/neutral choice); add a deprecated `beta_hat`→`coef` alias property on LME/GLMM. New GP/HGP code already chose `coef`. |
+| **UX2** | High | ✅ done `63d7707` | `gp.py:744`; `hgp.py:383` | Covariate arg is lowercase **`x`** (single covariate) in GP/HGP but uppercase **`X`** (full design) everywhere else; `gp_fit`'s `x` typed `Any` vs `hgp_fit`'s `Float[Array,'N']`. | Keep `x` (it genuinely is one covariate) but tighten the annotation to `Union[Float[Array,'N'], Float[Array,'N D']]` and add a one-line "`x` is NOT the full design — linear covariates go to `parametric=`" note at each docstring head. |
 | **UX3** | Med | open | `gp.py:1564,1579` vs `glm.py:599,604` | Two parallel name-clashing IC families (`aic`/`bic` vs `gp_aic`/`gp_bic`); GAM supports neither. | Make `aic`/`bic` polymorphic over result types, or cross-reference. |
 | **UX4** | Med | open | `hgp.py:381`; `gp.py:744` vs `basis.py:911`; `gp.py:122`, `lme/reml.py:175`, `ordinal.py:66` | `group` positional in `hgp_fit` but keyword-only in `lme_fit`/`glmm_fit`; reduced-rank count `rank` (fit) vs `n_basis` (basis); coef-cov named 3 ways (`cov_unscaled`/`fixed_cov`/`cov_coef`) with a hidden scaled-vs-unscaled distinction. | Converge names; document the scaled/unscaled distinction at each site. |
 | UX5–UX14 | Low | open | — | predict-return asymmetry, duplicated `n_levels` docstring, `n_search`/`n_inner`, unimplemented `select=` Literal, `PriorFn`/spectral-density non-export, `PCAResult` NamedTuple-vs-dataclass; see §7. | — |
@@ -202,9 +202,10 @@ earlier, but this front-loads risk reduction). All ✅ done + tested + committed
 Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 
 ### Round 2 — high-value capability + consistency (follow-up PRs, not merge-gating)
-- **CV3** (S) — package docstring (quick adoption win).
+> **Consistency batch ✅ done (`63d7707`):** CV3 + UX1 + UX2. Remaining: CV2, DS1, CV4.
+- **CV3** ✅ `63d7707` (S) — package docstring (quick adoption win).
+- **UX1/UX2** ✅ `63d7707` (S–M) — `coef` alias on all 6 LME/GLMM result types + `x`-vs-`X` annotation/doc.
 - **CV2** (L) ⚖️ — non-Gaussian GP lengthscale (PQL-REML ρ); brings a design note first.
-- **UX1/UX2** (S–M) — `coef`/`beta_hat` convergence + `x`-vs-`X` annotation/doc.
 - **DS1** (M) — shared `stats/_penreml.py` K-block core (gp calls with K=1).
 - **CV4** (S) — BY / Storey FDR.
 - **CV1** — **deferred, tracked under prior `N2`** (post-`geometry-suite`).
