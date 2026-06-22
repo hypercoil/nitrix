@@ -291,6 +291,21 @@ def test_glmm_group_label_range_validation():
     assert res.beta_hat.shape[-1] == X.shape[1]
 
 
+def test_glmm_laplace_agq_reject_free_dispersion():
+    """MC4: the Laplace/AGQ marginal evaluates the family at dispersion=1, which
+    mis-specifies a free-dispersion family (the residual scale is folded into
+    G). glmm_fit must reject gaussian on those paths and keep the PQL path."""
+    X, group, y, _ = _sim('gaussian', seed=2, q=6, n_per=10)
+    Y = jnp.asarray(y[None, :])
+    g = jnp.asarray(group)
+    for method in ('laplace', 'agq'):  # guard fires before the z dispatch
+        with pytest.raises(ValueError, match='fixed dispersion'):
+            glmm_fit(Y, jnp.asarray(X), group=g, family='gaussian', method=method)
+    # gaussian is still fine on the default PQL path (which estimates the scale)
+    ok = glmm_fit(Y, jnp.asarray(X), group=g, family='gaussian')
+    assert ok.tier in ('few', 'many')
+
+
 # ---------------------------------------------------------------------------
 # Laplace-approximate GLMM (method='laplace') -- the §11 follow-up to PQL
 # ---------------------------------------------------------------------------

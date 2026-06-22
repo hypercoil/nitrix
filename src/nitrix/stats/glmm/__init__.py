@@ -247,6 +247,21 @@ def glmm_fit(
                 'so no observation silently drops out of the group structure.'
             )
 
+    # The Laplace / AGQ marginal likelihoods evaluate the family at a fixed
+    # dispersion of 1; for a free-dispersion family the residual scale is not a
+    # parameter of that marginal, so the optimiser silently folds the missing
+    # scale into the random-effect covariance G (a wrong fit). Only the PQL path
+    # estimates the dispersion.  Reject the mis-specified combination outright.
+    if method in ('laplace', 'agq') and not family.has_fixed_dispersion:
+        raise ValueError(
+            f'glmm_fit: method={method!r} marginalises with a fixed dispersion '
+            f'of 1, which mis-specifies the free-dispersion family '
+            f'{family.name!r} (the residual scale would be absorbed into the '
+            f"random-effect covariance). Use method='pql' (which estimates the "
+            'dispersion), or for a Gaussian response use lme_fit / reml_fit '
+            '(exact REML).'
+        )
+
     if z is not None:
         z = jnp.asarray(z, dtype=X.dtype)
         if z.ndim != 2 or z.shape[0] != n:
