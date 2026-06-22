@@ -1,0 +1,92 @@
+---
+title: "Generalised additive mixed models: closing the loop"
+---
+
+::: {.callout-tldr title="Fast path"}
+A **GAMM** has smooth terms *and* random effects in one model. But the
+[GAM chapter](gam.qmd#the-hinge-a-penalty-is-a-variance) already showed that a
+smooth **is** a random effect — both are a quadratic penalty block
+$\gamma_k^{\top}S_k\gamma_k$ on a slice of the coefficients. A GAM already fits a
+*sum* of penalty blocks. So a GAMM is "a GAM with one more kind of block", needs
+**no new solver**, and the single [Fellner–Schall](fellner-schall.qmd) loop
+estimates every smoothing parameter *and* every variance component together. This
+is where the ladder folds shut.
+:::
+
+Rung 5 of [the ladder](index.qmd), and the shortest — because by now you have all
+the parts.
+
+## 1. The model
+
+Put smooths and random effects in the same predictor:
+
+$$
+g\big(\mathbb{E}[y]\big) = X\beta + \sum_k f_k(x_k) + Z b,
+\qquad f_k = B_k\gamma_k,\quad b\sim\mathcal{N}(0,\sigma_b^2 I).
+$$ {#eq-gamm}
+
+A typical use: a smooth age trend ($f$) estimated while accounting for a random
+intercept per scanning site ($Zb$).
+
+## 2. Everything is a penalty block
+
+Write the two regularised terms side by side:
+
+| term | penalty | strength |
+|---|---|---|
+| smooth $f_k$ | $\lambda_k\,\gamma_k^{\top}S_k\gamma_k$ (roughness) | $\lambda_k$ |
+| random effect $b$ | $\dfrac{\sigma_e^2}{\sigma_b^2}\,b^{\top}b$ (ridge) | $\sigma_e^2/\sigma_b^2$ |
+
+They are the *same kind of object* — a quadratic penalty on a block of
+coefficients, with a strength to be chosen — differing only in the matrix $S_k$
+(a difference/curvature operator for a smooth, the identity for a random
+intercept). The total penalty is just their sum, $\sum_k \lambda_k S_k$, slotted
+into the one penalised solve we have used since the GLM:
+
+$$
+\Big(X^{\top}WX + \textstyle\sum_k \lambda_k S_k\Big)\,\gamma = X^{\top}Wz .
+$$ {#eq-gamm-solve}
+
+## 3. One loop selects them all
+
+Because the blocks occupy **disjoint** slices of the coefficient vector, the
+[Fellner–Schall](fellner-schall.qmd#the-update) update for each $\lambda_k$
+decouples (the disjoint-block simplification on that page): one outer loop nudges
+every smoothing parameter and every variance component at once, each from its own
+block's quantities. The inner loop is still the [GLM](glm.qmd)'s penalised IRLS.
+No part of this is new.
+
+Concretely, `nitrix` exposes a random effect as just another basis-plus-penalty
+through `re_smooth` (the `bs="re"` block), and `gam_fit` accepts a *list* of
+smooths that can freely mix spline smooths and random-effect blocks. Factor-wise
+smooths (`by_factor_smooth`) and varying-coefficient terms (`varying_coefficient_smooth`)
+are the same idea with structured blocks. The [GLMM](glmm.qmd) few-level path is
+*literally* `gam_fit` with a `re_smooth` block and a GLM family — a GAMM by another
+name.
+
+## 4. The ladder, folded
+
+Stand back and the whole suite is one statement:
+
+> **Fit $(X^{\top}WX + \sum_k \lambda_k S_k)\gamma = X^{\top}Wz$ by penalised
+> IRLS, and choose the $\lambda_k$ by Fellner–Schall.**
+
+Every rung is a choice of what goes in that sum:
+
+- no blocks → [GLM](glm.qmd);
+- identity blocks → [LME](lme.qmd) (random effects);
+- roughness blocks → [GAM](gam.qmd) (smooths);
+- both, non-Gaussian → [GLMM](glmm.qmd);
+- both kinds of block at once → **GAMM** (here);
+- a **kernel** block $S=K^{-1}$ → [Gaussian process](hsgp.qmd) (next).
+
+The reason the suite is *one* suite, not six fitters, is this single solve plus
+this single selector.
+
+## See also
+
+- Code: [`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py)
+  (the multi-block fit), [`nitrix/stats/basis.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/basis.py)
+  (`re_smooth`, `by_factor_smooth`, `varying_coefficient_smooth`).
+- The unification it rests on: [GAM §6](gam.qmd#the-hinge-a-penalty-is-a-variance)
+  and the [Fellner–Schall](fellner-schall.qmd) page.

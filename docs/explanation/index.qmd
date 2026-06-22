@@ -78,8 +78,15 @@ one design. Two consequences recur throughout:
 
 ## Chapters
 
-- [Generalised linear models — the foundation](glm.qmd) *(start here)*
+The ladder, in order:
+
+1. [Generalised linear models — the foundation](glm.qmd) *(start here)*
+2. [Linear mixed-effects models — structured noise](lme.qmd)
+3. [Generalised additive models — learning smooth shapes](gam.qmd)
+4. [Generalised linear mixed models — non-Gaussian and grouped](glmm.qmd)
+5. [Generalised additive mixed models — closing the loop](gamm.qmd)
+6. [Hilbert-space Gaussian processes — smoothing with kernels](hsgp.qmd)
+
+Shared machinery:
+
 - [Choosing smoothing parameters: the Fellner–Schall method](fellner-schall.qmd)
-- *Linear mixed-effects models* — coming next
-- *Generalised additive models* · *GLMMs* · *GAMMs* · *Hilbert-space GPs* —
-  building up the ladder

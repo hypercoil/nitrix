@@ -1,0 +1,125 @@
+---
+title: "Generalised linear mixed models: non-Gaussian and grouped"
+---
+
+::: {.callout-tldr title="Fast path"}
+A **GLMM** is the [GLM](glm.qmd) and the [LME](lme.qmd) at once: a non-Gaussian
+response (binary, counts) *and* grouped observations (a random intercept per
+subject). The honest likelihood needs an integral with no closed form, so
+`nitrix` uses **PQL** (penalised quasi-likelihood): run the GLM's IRLS outer
+loop, treat the random effect as a [penalty](gam.qmd) on the group offsets, and
+take one [Fellner–Schall](fellner-schall.qmd) step to update its strength
+$\lambda=\phi/\sigma_b^2$ each pass. That is just "penalised GLM = variance
+components" under a GLM family — no new solver. The only genuinely new idea is a
+**scaling** one: when a factor has many levels (a random intercept per *subject*),
+a block-structured **Schur/Woodbury** trick keeps the cost linear in the number of
+levels instead of cubic.
+:::
+
+Rung 4 of [the ladder](index.qmd): it simply stacks rungs 1 and 2.
+
+## 1. The combination
+
+Two structures we have already met, together:
+
+- a **non-Gaussian family** — binary lesion present/absent per subject, event
+  counts per subject ([GLM](glm.qmd));
+- a **random effect** — each subject has its own baseline offset ([LME](lme.qmd)).
+
+$$
+g\big(\mathbb{E}[y\mid b]\big) = X\beta + b_{\text{group}},
+\qquad b_j \sim \mathcal{N}(0,\sigma_b^2),\quad j = 1,\dots,q.
+$$ {#eq-glmm}
+
+This is the model behind "binary outcomes with a random intercept per subject" and
+similar mass-univariate group analyses.
+
+## 2. Why it's harder than either alone
+
+For a Gaussian LME we could integrate the random effects out in closed form — that
+is what gave the tidy covariance $V$ of the [LME chapter](lme.qmd). For a
+non-Gaussian family that integral $\int p(y\mid b)\,p(b)\,\mathrm{d}b$ has **no
+closed form**: the link makes it non-Gaussian in $b$. We need an approximation.
+
+## 3. PQL: reuse everything
+
+The workhorse is **penalised quasi-likelihood** (Breslow & Clayton 1993), and it
+is built entirely from parts you have. Each outer pass:
+
+1. From the current fit, form the GLM **working response** $z$ and **weights** $W$
+   (the [working response and weights](glm.qmd#eq-working)) — exactly the
+   [GLM](glm.qmd) IRLS step.
+2. Treat the random intercept as a **ridge penalty** on the group offsets and
+   solve the [penalised weighted normal equations](gam.qmd#eq-pennormal) — exactly
+   the [GAM](gam.qmd) inner solve, with the group-indicator block playing the role of
+   a smooth.
+3. Take **one [Fellner–Schall](fellner-schall.qmd) step** to update the penalty
+   strength $\lambda = \phi/\sigma_b^2$ — exactly the variance-component update.
+
+Iterate to a fixed budget. That is the whole estimator. It is the
+penalised-GLM-equals-variance-components identity (the [penalty–variance
+equivalence](gam.qmd#the-hinge-a-penalty-is-a-variance)) operating *inside* a
+GLM family: a random intercept is a smooth, its variance is a smoothing parameter,
+and PQL is the GAM fit with non-Gaussian working weights.
+
+::: {.callout-note title="A caveat worth stating"}
+PQL is approximate, and it **attenuates** (biases toward zero) for sparse binary
+or low-count data. `nitrix` offers a `method='laplace'` alternative that corrects
+this with a proper Laplace approximation of the marginal likelihood (§5).
+:::
+
+## 4. The one new problem: many levels
+
+A random effect with $q$ levels adds $q$ columns to the design, so a dense
+penalised solve costs $O\big((p+q)^3\big)$ per element. The size of $q$ splits the
+world:
+
+- **Few levels** — site, scanner, batch ($q \sim 10$–$50$): the dense solve is
+  cheap and *optimal*; `nitrix` runs the literal [GAMM](gamm.qmd) path
+  (`gam_fit` with a random-effect smooth block and the GLM family).
+- **Many levels** — a random intercept per *subject* ($q \sim 10^2$–$10^3$): the
+  cube is a latency cliff.
+
+The escape is structure. A **single** grouping factor makes the random-effect
+block of the normal equations **block-diagonal across groups** — group $i$'s
+offset only touches group $i$'s rows. Inverting a block-diagonal matrix means
+inverting its small blocks, so a **Schur complement** onto the $p$-dimensional
+fixed-effect block costs only $O(Np^2 + q)$ — *linear* in the level count, and
+still cuSOLVER-free. `nitrix` dispatches on $q$: the two paths run the **same**
+PQL iteration (same working response, same Fellner–Schall update), so they give
+the same answer; the dispatch changes only the linear-algebra cost.
+
+This block-diagonal-then-Schur idea is the **block-Woodbury** structure
+(`stats/lme/_blockwoodbury.py`): rather than forming an $N\times N$ or $(p+q)$-wide
+matrix, assemble the objective from per-group reductions ($Z_i^{\top}Z_i$,
+$X_i^{\top}Z_i$, $X_i^{\top}X_i$) and a single $p\times p$ solve.
+
+## 5. Beyond a scalar intercept
+
+The same scaffolding stretches further:
+
+- **Random slopes**, uncorrelated $(x \,\|\, g)$: just more independent penalty
+  blocks through the GAM path.
+- **Random slopes**, correlated $(1 + x \mid g)$: a small $r\times r$ within-group
+  covariance $G$ ($r\le 3$), estimated by the per-group **block-Woodbury REML**
+  wrapped in the PQL loop. $G$ is carried in *log-Cholesky* coordinates so it stays
+  positive-definite under an unconstrained Newton step, and the step uses the same
+  analytic average-information curvature as the [LME](lme.qmd) fit.
+- **Laplace marginal likelihood** (`method='laplace'`): integrate the random
+  effects by expanding around their conditional mode and correcting with an
+  $r\times r$ determinant — the principled fix for PQL's small-count attenuation.
+
+## What's genuinely new here
+
+Almost nothing — and that is the point. A GLMM is the GLM's IRLS, the GAM's
+penalty, and Fellner–Schall, composed. The *only* new ingredient is the
+block-Woodbury / Schur trick that keeps "a parameter per subject" affordable. Next
+we make the GAM–LME unification explicit ([GAMM](gamm.qmd)), then swap the penalty
+for a kernel ([HSGP](hsgp.qmd)).
+
+## See also
+
+- Code: [`nitrix/stats/glmm/`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glmm/__init__.py)
+  (PQL + dispatch), `stats/lme/_blockwoodbury.py` (the many-level/correlated path).
+- Builds on: [GLM](glm.qmd), [LME](lme.qmd), [GAM](gam.qmd),
+  [Fellner–Schall](fellner-schall.qmd). Reference: Breslow & Clayton 1993.

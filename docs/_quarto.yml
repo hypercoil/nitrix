@@ -21,6 +21,11 @@ website:
         menu:
           - explanation/index.qmd
           - explanation/glm.qmd
+          - explanation/lme.qmd
+          - explanation/gam.qmd
+          - explanation/glmm.qmd
+          - explanation/gamm.qmd
+          - explanation/hsgp.qmd
           - explanation/fellner-schall.qmd
       - href: ../
         text: Federation

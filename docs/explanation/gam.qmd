@@ -1,0 +1,178 @@
+---
+title: "Generalised additive models: learning smooth shapes"
+---
+
+::: {.callout-tldr title="Fast path"}
+Sometimes a covariate's effect isn't a straight line — think age, or a motion
+nuisance. A **smooth term** $f(x)$ captures the shape without you specifying it.
+The trick is to write the smooth as a linear combination of fixed wiggly building
+blocks, $f(x) = B(x)\gamma$ — now it is **linear in $\gamma$** and drops straight
+into the [GLM](glm.qmd) solve. To stop it overfitting, add a **roughness
+penalty** $\lambda\,\gamma^{\top}S\gamma$, turning the solve into
+$(X^{\top}WX + \lambda S)\gamma = X^{\top}Wz$ — the GLM normal equations with one
+extra term. The penalty strength $\lambda$ is chosen by
+[Fellner–Schall](fellner-schall.qmd). And the punchline: **that penalty is a
+random-effect variance in disguise**, so a GAM *is* an [LME](lme.qmd), and the two
+chapters are one method.
+:::
+
+Rung 3 of [the ladder](index.qmd). It builds on the [GLM](glm.qmd) (the penalised
+solve) and pays off the [LME](lme.qmd) connection.
+
+## 1. From a coefficient to a shape
+
+A GLM gives each covariate one coefficient — a straight-line effect. But many
+effects are curved: a response that rises then falls with age, a nuisance whose
+influence saturates. We want to estimate a **function** $f(x)$, not a slope, and
+we don't want to commit in advance to "quadratic" or "cubic".
+
+## 2. Make the shape linear again: basis expansion
+
+Represent the unknown function as a weighted sum of fixed, simple "bump"
+functions $B_1, \dots, B_K$ — a **basis**:
+
+$$
+f(x) = \sum_{k=1}^{K} B_k(x)\,\gamma_k = B(x)\,\gamma .
+$$ {#eq-basis}
+
+The basis functions are fixed; only the weights $\gamma$ are unknown. Crucially
+$f$ is now **linear in $\gamma$**, so estimating a smooth is just estimating extra
+coefficients — the GLM machinery applies unchanged, with $B(x)$ appended to the
+design matrix. A rich basis (large $K$) can trace almost any shape.
+
+## 3. The catch, and the cure: a roughness penalty
+
+A rich basis overfits — it chases noise into wiggles. The fix is not to use fewer
+bumps (that forces a global stiffness) but to **penalise wiggliness**:
+
+$$
+\min_{\gamma}\ \underbrace{\lVert z - B\gamma\rVert_W^2}_{\text{fit}}
+\;+\; \underbrace{\lambda\,\gamma^{\top}S\gamma}_{\text{roughness}} ,
+$$ {#eq-penobj}
+
+where the fixed matrix $S$ measures roughness (curvature, or jumps between
+neighbouring coefficients) and $\lambda \ge 0$ tunes the trade-off: $\lambda\to 0$
+interpolates the noise; $\lambda\to\infty$ forces a straight line. Minimising
+@eq-penobj is the GLM's weighted normal equations with one added term:
+
+$$
+(X^{\top}W X + \lambda S)\,\gamma = X^{\top}W z .
+$$ {#eq-pennormal}
+
+That is the *only* change from the GLM: a penalty $\lambda S$ added inside the same
+$p\times p$ (now $(p{+}K)\times(p{+}K)$) solve. `nitrix` literally calls the same
+penalised-IRLS core; the GLM passes $S=0$, the GAM passes the smooth's penalty.
+
+## 4. The smooths `nitrix` ships
+
+The default is the **P-spline** (Eilers & Marx): a uniform cubic B-spline basis
+$B$ with a discrete *difference* penalty $S$ that penalises large jumps between
+adjacent coefficients — `mgcv`'s `bs='ps'`. The B-spline weights reuse the
+closed-form evaluator already validated for bias-field correction. Other bases for
+other geometries ship too: thin-plate (isotropic 2-D smooths), cyclic (for
+periodic covariates like phase), Gaussian-process / kriging bases, Markov random
+fields (smoothing over a graph or parcellation), and tensor products (interactions
+of two covariates).
+
+One subtlety, handled once: a smooth would otherwise overlap the model intercept
+(both can add a constant), making them unidentifiable. `nitrix` constrains each
+smooth to **sum to zero over the data** and absorbs that constraint by
+reparameterising through a single **Householder reflection** — not a QR
+factorisation, so it stays cuSOLVER-free and differentiable, like the rest of the
+suite.
+
+## 5. Two loops, both already built
+
+Fitting a GAM is two nested loops, and you have seen both:
+
+- **Inner** (fixed $\lambda$): solve @eq-pennormal by penalised IRLS — the
+  [GLM](glm.qmd) fit with the penalty added.
+- **Outer** (choose $\lambda$): the [Fellner–Schall](fellner-schall.qmd) update,
+  which raises the marginal likelihood and keeps $\lambda$ positive.
+
+Nothing here is new machinery; a GAM is the GLM solver wrapped in the smoothing-
+parameter selector. (See `stats/gam.py`, `stats/basis.py`.)
+
+## 6. The hinge: a penalty *is* a variance
+
+Why does Fellner–Schall — a *variance-component* estimator from the
+[LME](lme.qmd) chapter — choose a *smoothing* parameter? Because they are the same
+thing. The roughness penalty $\lambda\gamma^{\top}S\gamma$ is exactly the
+log-density of a Gaussian prior $\gamma \sim \mathcal{N}(0,\,\sigma_b^2 S^{-})$,
+with
+
+$$
+\lambda = \frac{\sigma_e^2}{\sigma_b^2}.
+$$ {#eq-equiv}
+
+Read left to right it is a *smoothing parameter*; read right to left it is a
+*ratio of variances*. So a smooth term **is a random effect**, a GAM **is an
+LME**, and "how smooth?" **is** "how big is the random-effect variance?". This is
+the equivalence stated formally as a theorem on the
+[Fellner–Schall page](fellner-schall.qmd#equivalence); it is the single reason the
+whole suite shares one engine instead of being a pile of separate fitters.
+
+## 7. How flexible was the fit? Effective degrees of freedom
+
+A penalised smooth has $K$ coefficients but is *not* as flexible as $K$ free
+parameters — the penalty ties them together. Its true flexibility is the
+**effective degrees of freedom** (EDF), the trace of the matrix mapping data to
+fitted values, $\operatorname{tr}\!\big[(X^{\top}WX+\lambda S)^{-1}X^{\top}WX\big]$.
+EDF runs from 1 (penalised to a straight line) up to $K$ (unpenalised). It is the
+honest "how many parameters did this smooth really use", and it drives the
+approximate significance tests and the confidence bands, both read off the
+Bayesian coefficient covariance $V=(X^{\top}WX+\lambda S)^{-1}$.
+
+## 8. Too little, too much, just right
+
+Three fits of one smooth at three penalty strengths — pure NumPy, build-time. The
+middle is roughly what Fellner–Schall finds.
+
+```{python}
+#| label: fig-smoothing
+#| fig-cap: "The smoothing trade-off. λ too small chases noise; λ too large flattens the signal; a balanced λ (what Fellner–Schall selects) recovers the shape."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(3)
+n = 200
+x = np.linspace(0, 1, n)
+f_true = np.sin(2*np.pi*x) + 0.3*x
+y = f_true + rng.normal(0, 0.35, n)
+
+K = 30                                            # Gaussian-bump basis
+knots = np.linspace(0, 1, K); h = 1/(K-1)
+B = np.exp(-0.5*((x[:, None]-knots[None, :])/(1.2*h))**2)
+D = np.diff(np.eye(K), n=2, axis=0); S = D.T @ D  # 2nd-difference roughness
+BtB, Bty = B.T @ B, B.T @ y
+
+def fit(lam):                                     # one penalised solve, eq-pennormal
+    return B @ np.linalg.solve(BtB + lam*S, Bty)
+
+fig, ax = plt.subplots(figsize=(8, 3.4))
+ax.scatter(x, y, s=8, alpha=0.25, color="0.5", label="data")
+ax.plot(x, f_true, "k--", lw=1.5, label="truth")
+for lam, name in [(1e-4, "λ too small (wiggly)"), (1e3, "λ too large (stiff)"), (1.0, "λ balanced")]:
+    ax.plot(x, fit(lam), lw=2, label=name)
+ax.legend(fontsize=8, ncol=2); ax.set(title="one smooth, three penalty strengths")
+fig.tight_layout(); plt.show()
+```
+
+## Where this goes
+
+- Keep a **non-Gaussian family** and it is still a GAM — the inner loop already
+  handles it (counts, binary).
+- Add explicit **random-effect blocks** alongside the smooths and you get a
+  [GAMM](gamm.qmd) — and since a smooth already *is* a random effect (§6), that
+  is barely a new model at all.
+- Swap the difference penalty for a **kernel** penalty $S = K^{-1}$ and the smooth
+  becomes a [Gaussian process](hsgp.qmd).
+
+## See also
+
+- Code: [`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py),
+  [`nitrix/stats/basis.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/basis.py).
+- The selector: [Fellner–Schall](fellner-schall.qmd). The equivalence's other
+  face: [linear mixed-effects models](lme.qmd). References: Wood 2017
+  [@wood2017gam].

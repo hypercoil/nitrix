@@ -1,0 +1,226 @@
+---
+title: "Linear mixed-effects models: structured noise"
+---
+
+::: {.callout-tldr title="Fast path"}
+When observations come in groups (many scans per subject, many subjects per
+site), they are **not independent**, and pretending they are gives wrong error
+bars. A **mixed model** adds *random effects* $Zb$ that absorb the group
+structure, leaving the per-observation noise white again. The price: the response
+now has a **structured covariance** $V = \sigma_b^2 ZZ^{\top} + \sigma_e^2 I$ with
+unknown variances to estimate. Estimating them naively costs an $N\times N$ solve
+per element — hopeless at brain scale — so `nitrix` uses the **FaST-LMM spectral
+trick**: eigendecompose the random-effect structure *once*, rotate into a basis
+where $V$ is **diagonal**, and the per-element fit becomes elementwise-cheap. The
+variances are then found by a few **damped Newton** steps. Those variances are
+the same object as the [smoothing penalties](fellner-schall.qmd) of the next
+chapter.
+:::
+
+This is rung 2 of [the ladder](index.qmd). It assumes the [GLM chapter](glm.qmd):
+the linear model, least squares, and the small shared solve.
+
+## 1. The problem: observations that aren't independent
+
+The GLM chapter assumed each observation carried independent noise. Real designs
+break that constantly:
+
+- several runs from the **same subject** are more alike than runs from different
+  subjects;
+- subjects scanned at the **same site** share scanner quirks.
+
+Ordinary least squares still gives a sensible $\hat\beta$, but its *standard
+errors* are wrong — it counts correlated observations as if they were independent,
+and is overconfident. We need to model the correlation.
+
+## 2. Fixed effects, random effects, and structured noise
+
+Split the linear predictor into two kinds of term:
+
+$$
+y = X\beta + Z b + \varepsilon,
+\qquad b \sim \mathcal{N}(0, \sigma_b^2 I_q),
+\qquad \varepsilon \sim \mathcal{N}(0, \sigma_e^2 I_N).
+$$ {#eq-lme}
+
+- $X\beta$ are the **fixed effects** — the population-level coefficients we want
+  to estimate (a group difference, an age slope), exactly as in the GLM.
+- $Zb$ are the **random effects** — one offset $b_j$ per group (per subject, per
+  site), drawn from a shared distribution. $Z$ is an indicator matrix saying which
+  group each observation belongs to. We do not estimate each $b_j$ as a free
+  parameter; we estimate the single **variance** $\sigma_b^2$ that says how much
+  groups differ.
+
+The distinction is the whole idea: treat a factor with many levels not as many
+coefficients but as *draws from one distribution*, summarised by its variance.
+
+Because $b$ is random, fold it into the noise. The marginal covariance of $y$
+(averaging over $b$) is no longer white:
+
+$$
+\operatorname{Cov}(y) \;=\; V \;=\; \sigma_b^2\, ZZ^{\top} + \sigma_e^2 I_N .
+$$ {#eq-V}
+
+So a mixed model is "the GLM with a **structured covariance** $V$ instead of
+$\sigma_e^2 I$". Everything else follows from that one change.
+
+## 3. Estimating $\beta$ and the variances (REML)
+
+If we knew $V$, the best $\hat\beta$ would be **generalised** least squares —
+least squares with $V^{-1}$ as the weight:
+$\hat\beta = (X^{\top}V^{-1}X)^{-1} X^{\top}V^{-1}y$ (the GLM's
+[normal equations](glm.qmd#eq-normal) with $W = V^{-1}$). But $V$ depends on the unknown
+$\theta = (\sigma_b^2, \sigma_e^2)$, so we must estimate those first.
+
+We choose $\theta$ by maximising a likelihood, with one refinement.
+**Restricted** maximum likelihood (REML) maximises the likelihood of the
+*residuals* rather than the raw data — equivalently, it accounts for the degrees
+of freedom spent estimating $\beta$. Plain maximum likelihood systematically
+*under*-estimates variances for the same reason the sample variance divides by
+$n-1$, not $n$; REML is the mixed-model generalisation of that correction.
+Profiling $\beta$ out analytically leaves an objective in $\theta$ alone:
+
+$$
+\text{nll}(\theta) = \tfrac12\big[\log|V| + \log|X^{\top}V^{-1}X| + r^{\top}V^{-1}r\big],
+\qquad r = y - X\hat\beta(\theta).
+$$ {#eq-reml}
+
+`nitrix` parameterises $\theta = \log(\sigma^2)$ so the optimisation is
+unconstrained and the variances stay positive automatically.
+
+## 4. The scaling wall, and the FaST-LMM trick that breaks it
+
+Look at @eq-reml: it has a $\log|V|$ and a $V^{-1}$, and $V$ is $N\times N$. Done
+naively, each evaluation is $O(N^3)$ — and we repeat it, every Newton step, for
+*every voxel*. At hundreds of thousands of voxels this is hopeless.
+
+The escape (Lippert et al. 2011, **FaST-LMM**) is one eigendecomposition.
+Diagonalise the random-effect structure once, $ZZ^{\top} = U\Lambda U^{\top}$, and
+**rotate** the data into that basis, $\tilde y = U^{\top}y$, $\tilde X = U^{\top}X$.
+In the rotated basis the covariance @eq-V is *diagonal*:
+
+$$
+\tilde V = \sigma_b^2\Lambda + \sigma_e^2 I = \operatorname{diag}(d),
+\qquad d_i = \sigma_b^2\lambda_i + \sigma_e^2 .
+$$ {#eq-rotated}
+
+Now every expensive piece is elementwise: $\log|V| = \sum_i \log d_i$, $V^{-1}$ is
+$\operatorname{diag}(1/d)$, and $X^{\top}V^{-1}X = \sum_i \tilde x_i \tilde x_i^{\top}/d_i$.
+Per-iteration cost collapses from $O(N^3)$ to $O(Np^2 + N)$. The eigendecomposition
+is computed **once** at the outer call and shared across all voxels (the same
+"compute the shared piece once" pattern as the GLM's $X^{\top}X$). A scalar
+random effect that was a brain-melting $N\times N$ solve becomes a handful of
+vector operations per voxel.
+
+`nitrix` adds a **low-rank** refinement: when the number of groups $q$ is smaller
+than $N$ (the usual case — far fewer subjects than observations), it eigendecomposes
+the $q\times q$ matrix $Z^{\top}Z$ instead of the $N\times N$ matrix $ZZ^{\top}$,
+and a rank-deficient $Z$ (e.g. empty label levels) is absorbed by the null space.
+The one eigendecomposition uses the cuSOLVER-robust `safe_eigh`; the per-voxel
+inner loop makes no vendor-solver call at all.
+
+## 5. Choosing the variances: damped Newton on two numbers
+
+With the rotation in hand, minimising @eq-reml over $\theta$ is a tiny
+two-parameter problem solved by **Newton scoring** — the same Newton idea as the
+GLM's IRLS, now on the variance components. `nitrix` uses the analytic REML
+gradient and the **average-information** curvature (a closed-form, guaranteed
+positive-definite stand-in for the Hessian), so each step is exact and cheap; no
+autodiff Hessian, no cuSOLVER. As in the GLM, the step is **damped**
+(Levenberg-style): a small ridge on the curvature guarantees the objective
+improves even far from the optimum and near the variance-floor boundary. A fixed
+~20-iteration budget (typically converging in 5–10) keeps the whole fit
+`vmap`-clean across the image.
+
+The fit returns, per voxel, the log-variances $\hat\theta$, the fixed effects
+$\hat\beta$, the fixed-effect covariance $(X^{\top}V^{-1}X)^{-1}$ for contrast
+tests, and the curvature of $\hat\theta$ for Satterthwaite degrees of freedom
+(`stats/lme/reml.py`).
+
+## 6. FLAME: when the within-group variance is known
+
+fMRI group analysis has a special, common structure. Each subject's time series
+is first fit by a level-1 GLM, yielding a per-subject effect $\beta_i$ **and its
+standard error** $s_i$. The group model is then
+
+$$
+\beta_i = X_{\text{grp}}\gamma + b_i + \varepsilon_i,
+\qquad b_i\sim\mathcal{N}(0,\sigma_b^2),\quad \varepsilon_i\sim\mathcal{N}(0,s_i^2),
+$$
+
+where the within-subject variance $s_i^2$ is **known** (it came from level 1) and
+only the between-subject variance $\sigma_b^2$ is unknown. This is FSL's
+**FLAME** model (Beckmann et al. 2003). Because $s_i^2$ is known, $V$ is already
+diagonal and only *one* variance is estimated — a single-parameter REML, which
+`nitrix` runs as the shared diagonalised-REML fit with one free component
+(`stats/lme/flame.py`). Fitting it as a generic two-parameter REML would be
+non-identifiable (the known within-variance and a free scale would trade off), so
+it gets its own one-parameter solver.
+
+## 7. A worked example: borrowing strength
+
+The signature behaviour of a mixed model is **partial pooling**: a group's
+estimate is pulled toward the global mean, the more so when the group is small or
+noisy. Pure NumPy, runs at build time.
+
+```{python}
+#| label: fig-shrinkage
+#| fig-cap: "Partial pooling. Noisy per-group means (no pooling) are shrunk toward the global mean by the mixed model; small/extreme groups move most. The shrunk estimates sit closer to the truth."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(1)
+M = 20                                   # groups
+true_mu = 5.0
+b = rng.normal(0, 1.0, M)                # true group offsets, sigma_b = 1
+group_true = true_mu + b
+n = rng.integers(2, 12, M)               # unequal group sizes
+sigma_e = 2.0
+ybar = np.array([rng.normal(group_true[j], sigma_e/np.sqrt(n[j])) for j in range(M)])
+
+# variance components (method-of-moments, the idea REML refines)
+grand = ybar.mean()
+s_b2 = max(ybar.var(ddof=1) - (sigma_e**2 / n).mean(), 0.1)
+s_e2 = sigma_e**2
+shrink = (n * s_b2) / (n * s_b2 + s_e2)          # per-group weight on its own mean
+partial = grand + shrink * (ybar - grand)         # empirical-Bayes estimate
+
+j = np.argsort(ybar)
+fig, ax = plt.subplots(figsize=(8, 3.4))
+ax.axhline(grand, color="0.6", lw=1, ls=":", label="global mean")
+ax.plot(range(M), ybar[j], "o", label="no pooling (group mean)")
+ax.plot(range(M), partial[j], "s", label="partial pooling (mixed)")
+ax.plot(range(M), group_true[j], "x", color="k", label="truth")
+for i, jj in enumerate(j):
+    ax.plot([i, i], [ybar[jj], partial[jj]], color="0.8", lw=1, zorder=0)
+ax.set(xlabel="group (sorted)", ylabel="estimate", title="partial pooling shrinks toward the mean")
+ax.legend(fontsize=8, ncol=2)
+fig.tight_layout(); plt.show()
+rmse = lambda e: np.sqrt(np.mean((e - group_true)**2))
+print(f"RMSE  no-pool={rmse(ybar):.3f}   partial-pool={rmse(partial):.3f}")
+```
+
+The shrinkage weight $\frac{n_j\sigma_b^2}{n_j\sigma_b^2 + \sigma_e^2}$ is exactly
+the ratio of variances $V$ encodes. Estimating $\sigma_b^2,\sigma_e^2$ well — what
+REML does — is what makes the pooling right.
+
+## Where this connects
+
+Rewrite the shrinkage weight's denominator and a familiar quantity appears: the
+ratio $\sigma_e^2/\sigma_b^2$ is a **penalty strength**. Shrinking a group's
+offset toward zero is the same operation as penalising a coefficient toward zero.
+That is not a coincidence — it is the **penalty–variance equivalence** the next
+chapter makes precise. A random effect *is* a penalised coefficient whose penalty
+strength is a variance ratio; which is why the [GAM](gam.qmd) machinery and this
+LME machinery are two faces of one method, and why the
+[Fellner–Schall](fellner-schall.qmd) update can estimate both.
+
+## See also
+
+- Code: [`nitrix/stats/lme/reml.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/reml.py),
+  `lme/flame.py`, `lme/_varcomp.py`, the shared `stats/_optimise.py` damped Newton.
+- References: Lippert et al. 2011 (FaST-LMM) [@lippert2011fastlmm]; Beckmann,
+  Jenkinson & Smith 2003 (FLAME).
+- Next rung: [generalised additive models](gam.qmd) — the same penalty, applied
+  to *smoothness* instead of group membership.

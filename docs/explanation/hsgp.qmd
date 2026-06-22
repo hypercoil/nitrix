@@ -1,0 +1,227 @@
+---
+title: "Hilbert-space Gaussian processes: smoothing with kernels"
+---
+
+::: {.callout-tldr title="Fast path"}
+A **Gaussian-process** smooth asks for smoothness a different way: instead of
+"penalise the second difference", you say "function values at nearby inputs are
+correlated, with the correlation decaying over a **lengthscale** $\rho$" — a
+kernel. Evaluated at the data, that prior is just a random effect with covariance
+$K$, so a *fixed-kernel* GP is already an [LME](lme.qmd) (penalty $S=K^{-1}$). The
+hard part is **estimating $\rho$**, because changing it changes $K$ and its
+eigenvectors. **HSGP** (Hilbert-space approximate GP) fixes that: expand the GP in
+a fixed basis of **Laplace eigenfunctions** (sines), into which the kernel enters
+*only* as a **diagonal reweighting** of the columns. Then the basis never moves,
+$\rho$ becomes a cheap parameter to estimate, the amplitude is the
+[Fellner–Schall](fellner-schall.qmd) smoothing parameter, and a GP is just one
+more [penalty block](gamm.qmd) you hand to `gam_fit`.
+:::
+
+Rung 6 — the top of [the ladder](index.qmd). It builds on the
+[GAM](gam.qmd)/[LME](lme.qmd) equivalence and the spectral idea from the
+[LME chapter](lme.qmd#the-scaling-wall-and-the-fast-lmm-trick-that-breaks-it).
+
+::: {.callout-note title="Where this lives"}
+The GP rung ships on the `feat/stats-gp` branch (`nitrix.stats.gp`,
+`hsgp_basis` in `nitrix.stats.basis`); it is being folded into the suite. This
+chapter describes that implementation.
+:::
+
+## 1. Smoothness as correlation
+
+A [GAM](gam.qmd) smooth says "don't be wiggly" through a difference penalty. A
+**Gaussian process** says it through a *covariance*: model the unknown function as
+
+$$
+f \sim \mathcal{GP}\big(0,\ k(x, x')\big),
+$$ {#eq-gp}
+
+where the **kernel** $k$ sets how strongly $f(x)$ and $f(x')$ co-vary. A Matérn or
+squared-exponential kernel has two knobs: an **amplitude** (how far $f$ ranges)
+and a **lengthscale** $\rho$ (how quickly correlation decays with distance — large
+$\rho$ = gently varying, small $\rho$ = wiggly). You specify *how points relate*
+rather than *which derivative to penalise*.
+
+## 2. A fixed-kernel GP is a mixed model
+
+Evaluate the prior @eq-gp at the observed inputs and it becomes an ordinary
+multivariate Gaussian, $f \sim \mathcal{N}(0, K)$ with $K_{ij} = k(x_i, x_j)$.
+That is precisely a **random effect** — the [LME](lme.qmd) chapter's $b$ — only
+with covariance $K$ in place of $\sigma_b^2 ZZ^{\top}$. Equivalently it is a
+penalty block with $S = K^{-1}$. So if the kernel (and hence $\rho$) is **fixed**,
+GP regression is *already in the suite*: it is the LME fit with $ZZ^{\top}\to K$,
+or a GAM smooth whose penalty is $K^{-1}$ (the kriging `gp_basis`). Nothing new.
+
+## 3. The hard part: estimating the lengthscale
+
+The catch is that we usually do **not** know $\rho$, and we want to learn it.
+But $K$ depends on $\rho$ through and through — change $\rho$ and the entire
+matrix, including its eigenvectors, changes. The [FaST-LMM trick](lme.qmd) that
+made variance estimation cheap relied on diagonalising a *fixed* structure once;
+if the structure moves every step, we are back to an $O(N^3)$ eigendecomposition
+per iteration. We need a representation in which the kernel hyperparameters do
+**not** touch the basis.
+
+## 4. HSGP: put the kernel in the weights, not the basis
+
+Here is the idea that makes it cheap. On a bounded interval, a stationary GP can
+be approximated by its first $m$ **Laplace eigenfunctions** — literally fixed
+sine waves
+
+$$
+\phi_j(x) = \sqrt{\tfrac1L}\,\sin\!\Big(\sqrt{\lambda_j}\,(x - c + L)\Big),
+\qquad \sqrt{\lambda_j} = \frac{j\pi}{2L},
+$$ {#eq-eigfun}
+
+on the domain $[c-L,\,c+L]$ ($c$ the data midpoint, $L$ a boundary-padded
+half-range). These do not depend on the kernel at all. The kernel enters **only**
+through its **spectral density** $S_\theta$ evaluated at the eigenfrequencies,
+giving one weight per basis function:
+
+$$
+s_j = S_\theta\!\big(\sqrt{\lambda_j}\big),
+\qquad \Psi = \big[\sqrt{s_j}\,\phi_j(x)\big]_{j=1}^{m},
+$$ {#eq-hsgp}
+
+and the whitened design $\Psi$ carries an **identity** penalty. Two payoffs fall
+out:
+
+- **The basis is fixed.** The eigenfunctions $\phi_j$ never change, so there is no
+  per-step eigendecomposition. The lengthscale $\rho$ enters as a **diagonal
+  reweighting** $\sqrt{s_j(\rho)}$ of a fixed design — estimating it is cheap and
+  `eigh`-free.
+- **It is a drop-in smooth.** With an identity penalty, $\Psi$ is just another
+  [GAM](gam.qmd) basis: the [Fellner–Schall](fellner-schall.qmd) smoothing
+  parameter $\lambda = 1/\sigma_f^2$ *is* the GP amplitude, so `hsgp_basis(x, ...)`
+  hands straight to `gam_fit`.
+
+So in `nitrix`, a GP smooth is one more entry in the penalty-block list of a
+[GAMM](gamm.qmd): `hsgp_basis` (or `hsgp_basis_nd` for 2-D/3-D smooths, with
+isotropic or per-axis **ARD** lengthscales) builds the $(\Psi, I)$ pair. The
+standalone `gp_fit` goes one step further and estimates the lengthscale too —
+REML over the diagonal reweighting for $\rho$, Fellner–Schall for the amplitude —
+returning a `GPResult`. Kernels: Matérn-1/2, 3/2, 5/2, and squared-exponential.
+
+## 5. The kernel as a reweighting, by hand
+
+A minimal HSGP — fixed sine basis, Matérn-5/2 spectral weights, an identity-ridge
+solve — in pure NumPy. Watch the lengthscale change the *weights on a fixed
+design*, not the design.
+
+```{python}
+#| label: fig-hsgp
+#| fig-cap: "HSGP with a fixed sine basis. The lengthscale ρ only reweights the columns (via the Matérn-5/2 spectral density); a short ρ keeps high-frequency sines and fits wiggles, a long ρ damps them and fits a gentle curve."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(5)
+n = 200
+x = np.linspace(0, 1, n)
+f_true = np.sin(2*np.pi*x) + 0.3*x
+y = f_true + rng.normal(0, 0.35, n)
+
+m = 40                                            # retained eigenfunctions
+c = 0.5*(x.min()+x.max()); L = 1.5*0.5*(x.max()-x.min())
+j = np.arange(1, m+1)
+omega = j*np.pi/(2*L)                             # sqrt(lambda_j), the eigenfreqs
+phi = np.sqrt(1/L)*np.sin(np.outer(x - c + L, omega))   # fixed sine basis (n×m)
+
+def matern52_S(om, rho):                          # spectral density weights (shape only)
+    nu = 2.5
+    return (2*nu/rho**2 + om**2)**(-(nu + 0.5))
+
+def hsgp_fit(rho, tau=1e-3):
+    s = matern52_S(omega, rho)
+    Psi = phi * np.sqrt(s)[None, :]               # kernel enters ONLY here, as weights
+    beta = np.linalg.solve(Psi.T@Psi + tau*np.eye(m), Psi.T@y)
+    return Psi @ beta
+
+fig, ax = plt.subplots(figsize=(8, 3.4))
+ax.scatter(x, y, s=8, alpha=0.25, color="0.5", label="data")
+ax.plot(x, f_true, "k--", lw=1.5, label="truth")
+for rho, name in [(0.03, "short ρ (wiggly)"), (0.5, "long ρ (smooth)")]:
+    ax.plot(x, hsgp_fit(rho), lw=2, label=name)
+ax.legend(fontsize=8, ncol=2); ax.set(title="HSGP: lengthscale reweights a fixed sine basis")
+fig.tight_layout(); plt.show()
+```
+
+The basis `phi` is built once; only `sqrt(s)` changes with $\rho$. That is the
+whole reason `gp_fit` can estimate a lengthscale cheaply — it is optimising a
+diagonal reweighting of a fixed matrix, never re-factorising a moving kernel.
+
+## Aside: if you know GPs from Bayesian inference
+
+You may have met Gaussian processes the *other* way round — as Bayesian
+nonparametric priors over functions, fit by maximising a marginal likelihood and
+reported as a posterior mean with credible bands (Rasmussen & Williams). Nothing
+here contradicts that; it is the **same object in the weight-space dialect**, and
+the translation is exact.
+
+A GP has two equivalent descriptions. The **function-space** view you know writes
+a prior directly over functions, $f\sim\mathcal{GP}(0,k)$. The **weight-space**
+view writes $f(x)=\sum_j \beta_j\,\psi_j(x)$ with a Gaussian prior on the weights —
+which is exactly a basis expansion with a quadratic penalty. Mercer's theorem says
+these are the same GP. Reading this chapter's penalties as priors:
+
+- the penalty matrix $S = K^{-1}$ **is the prior precision**;
+- the penalised objective $\lVert\cdot\rVert_W^2 + \lambda\gamma^{\top}S\gamma$ is
+  $-\log$ posterior, so the **penalised fit $\hat f$ is the GP posterior mean**
+  (the MAP, which for a Gaussian *is* the mean);
+- you still get uncertainty: the Bayesian coefficient covariance
+  $V=(\Psi^{\top}W\Psi + S)^{-1}$ is the **(conditional) posterior covariance**,
+  and the confidence bands of the [GAM chapter](gam.qmd#how-flexible-was-the-fit-effective-degrees-of-freedom)
+  are the GP's posterior credible bands.
+
+How the hyperparameters are chosen will also be familiar. Optimising the
+lengthscale and amplitude by (RE)ML here is the same **marginal-likelihood /
+evidence maximisation** — "type-II MLE", "empirical Bayes" — that GP toolkits
+(GPML, scikit-learn, GPyTorch) use to set kernel hyperparameters; REML only adds a
+correction for the degrees of freedom spent on the fixed effects $X$. And **HSGP
+is not a `nitrix` invention**: the Laplace-eigenfunction-plus-spectral-density
+construction is the reduced-rank Hilbert-space GP of Solin & Särkkä (2020), the
+same approximation behind the `gp()` term in Stan/`brms` and PyMC's `HSGP` — here
+fit by penalised likelihood rather than MCMC.
+
+| In Bayesian-GP language | In this suite |
+|---|---|
+| kernel / covariance $k$ | penalty $S = K^{-1}$ (a [random effect](lme.qmd)) |
+| output scale / signal variance $\sigma_f^2$ | amplitude $=1/\lambda$ ([Fellner–Schall](fellner-schall.qmd) parameter) |
+| lengthscale $\ell$ | lengthscale $\rho$ |
+| observation noise / nugget $\sigma_n^2$ | residual variance $\sigma_e^2$ |
+| log marginal likelihood / evidence | the (RE)ML objective (see [LME](lme.qmd#eq-reml)) |
+| type-II MLE / empirical Bayes | REML hyperparameter estimation |
+| GP posterior mean | the penalised fit $\hat f$ |
+| GP posterior variance | $\operatorname{diag}(V)$ → credible bands |
+| inducing points / sparse / reduced-rank | the $m$ retained eigenfunctions |
+| sparse-spectrum / Hilbert-space features | the design $\Psi=[\sqrt{s_j}\,\phi_j]$ |
+
+The one honest difference: `nitrix` does **empirical-Bayes** GP regression, not
+full Bayesian inference. It produces point estimates of $(\rho,\sigma_f^2,\sigma_e^2)$
+by marginal likelihood and then a closed-form Gaussian posterior over $f$ given
+those — no MCMC, no posterior *over* the hyperparameters. That is the deliberate
+trade for fitting hundreds of thousands of GPs at once on a GPU; placing priors on
+$\rho$ and sampling is out of scope here.
+
+## The ladder, complete
+
+A Gaussian process turned out to be the final entry in the same list: a penalty
+block, now a **kernel** block, whose own hyperparameters are estimable because
+HSGP made them a diagonal reweighting. The whole suite remains the one sentence
+from the [GAMM chapter](gamm.qmd#the-ladder-folded):
+
+> solve $(X^{\top}WX + \sum_k \lambda_k S_k)\gamma = X^{\top}Wz$ by penalised
+> IRLS, and choose the $\lambda_k$ (and, for a kernel block, its lengthscale) by
+> marginal likelihood.
+
+From a straight line to a Gaussian process, it is one engine.
+
+## See also
+
+- Code (on `feat/stats-gp`): `nitrix.stats.gp` (`gp_fit`, `GPResult`),
+  `nitrix.stats.basis` (`hsgp_basis`, `hsgp_basis_nd`, `gp_factor_smooth`),
+  `nitrix.linalg.kernel` (`spectral_density`); design note
+  `docs/design/gaussian-process-implementation.md`.
+- Rests on: [GAM](gam.qmd) (penalty blocks), [LME](lme.qmd) (the fixed-kernel
+  view + the spectral trick), [Fellner–Schall](fellner-schall.qmd) (amplitude),
+  [GAMM](gamm.qmd) (the unified list).
