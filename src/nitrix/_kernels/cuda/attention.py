@@ -2,30 +2,33 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Pallas Triton fused scaled-dot-product (flash) attention.
+Pallas Triton fused scaled-dot-product (flash) attention -- forward + backward.
 
-Forked from ``jax.experimental.pallas.ops.gpu.attention`` (the Triton
-``mha`` forward) and extended with the two capability gaps the stock kernel
-lacks: an **additive bias** tile (Swin relative-position table) threaded into
-the online softmax, and an explicit **boolean mask** tile (SAM-style padding /
-cross-attention), in addition to ``causal``.  The score matrix ``(s, t)`` is
-never materialised: the K loop streams a running ``(max, sum_exp)`` softmax
-state (the same pattern as nitrix's ``LOG`` semiring monoid).
+Forked from ``jax.experimental.pallas.ops.gpu.attention`` (the Triton ``mha``)
+and extended with the two capability gaps the stock kernel lacks: an **additive
+bias** tile (Swin relative-position table) threaded into the online softmax, and
+an explicit **boolean mask** tile (SAM-style padding / cross-attention), in
+addition to ``causal``.  The score matrix ``(s, t)`` is never materialised --
+the forward streams a running ``(max, sum_exp)`` state (the same pattern as
+nitrix's ``LOG`` semiring monoid), and the backward recomputes the score tiles
+in-SRAM rather than reading a stored ``(s, t)`` activation.
 
-Differentiation is via a ``custom_vjp`` whose backward recomputes the gradient
-through the JAX reference (the "xla backward"): correct ``dq/dk/dv`` and the
-learnable-``bias`` gradient ``d_bias`` (broadcasting reduced by autodiff),
-finite-difference checked.  The fully-fused Triton backward (recompute-in-tile
-+ in-kernel ``d_bias``) is the next suite increment; this one already delivers
-the forward / inference activation-memory win.
+The backward is two kernels (no ``q_blocks == k_blocks`` constraint): one
+accumulates ``dk`` / ``dv`` and, when a bias is supplied, writes the
+**learnable-bias gradient** ``d_bias`` tile-by-tile; the other accumulates
+``dq``.  Both recompute ``p = exp2(scores + bias - lse)`` from the forward's
+``lse`` residual, so no per-step softmax state is stored.  The wrapper's
+``custom_vjp`` reduces ``d_bias`` over the broadcast axes to the user's bias
+shape.
 
-Scope (else ``PallasNotTileable`` -> loud JAX fallback): NVIDIA Ampere+,
-power-of-two head dim with ``d_v == d``, and query / key lengths divisible by
-the block size.  Anisotropic / awkward shapes fall back; pad-to-multiple is a
-later refinement.
+Scope (else ``PallasNotTileable`` -> loud JAX fallback): NVIDIA Ampere+, float32,
+power-of-two head dim >= 16 with ``d_v == d``, and query / key lengths divisible
+by the block size.  Anisotropic / awkward shapes fall back; pad-to-multiple is a
+later refinement, and the at-scale wall-clock-vs-reference certification is the
+sibling perf suite's job.
 
-Implementation detail: never import from ``nitrix._kernels.cuda`` directly.
-Use ``nitrix.nn.attention.scaled_dot_product_attention`` which handles backend
+Implementation detail: never import from ``nitrix._kernels.cuda`` directly.  Use
+``nitrix.nn.attention.scaled_dot_product_attention`` which handles backend
 dispatch and fallback observability.
 """
 
@@ -54,13 +57,12 @@ _LOG2E = math.log2(math.e)
 # Large negative sentinel for masked logits (survives the base-2 exp -> 0).
 _MASK_VALUE = -0.7 * float(jnp.finfo(jnp.float32).max)
 
-# Block tile sizes.  64 (not the stock 128) keeps the live SRAM footprint --
-# q / k / v / qk / bias / mask tiles -- inside the ~99 KB shared-memory budget
-# of Ampere/Lovelace SMs once the additive-bias and mask tiles are added on top
-# of the stock flash working set.  Perf-tuning the tile ladder is the sibling
-# perf suite's job; correctness + fitting SRAM is this suite's.
-_BLOCK_Q = 64
-_BLOCK_K = 64
+# One block size for forward and backward so a shape that tiles the forward
+# tiles the backward too.  32 keeps the live SRAM footprint -- q / k / v / qk /
+# bias / mask tiles plus the backward dk/dv/dq accumulators -- inside the ~99 KB
+# shared-memory budget of Ampere/Lovelace SMs.  Perf-tuning the tile ladder is
+# the sibling perf suite's job; correctness + fitting SRAM is this suite's.
+_BLOCK = 32
 
 
 class PallasNotTileable(RuntimeError):
@@ -83,6 +85,7 @@ def _fwd_kernel(
     bias_ref: Any,
     mask_ref: Any,
     o_ref: Any,
+    lse_ref: Any,
     *,
     sm_scale: float,
     causal: bool,
@@ -146,6 +149,7 @@ def _fwd_kernel(
     o, m_i, l_i = lax.fori_loop(0, upper, body, (o, m_i, l_i))
     o = o / l_i[:, None]
     o_ref[...] = o.astype(o_ref.dtype)
+    lse_ref[...] = (m_i + jnp.log2(l_i)).astype(lse_ref.dtype)
 
 
 def _mha_forward(
@@ -159,8 +163,8 @@ def _mha_forward(
     causal: bool,
     block_q: int,
     block_k: int,
-) -> Float[Array, 'b s h d']:
-    """Pallas ``pallas_call`` driver on the stock ``(b, s, h, d)`` layout."""
+) -> tuple[Float[Array, 'b s h d'], Float[Array, 'b h s']]:
+    """Pallas driver on the stock ``(b, s, h, d)`` layout; returns (out, lse)."""
     b, s, h, d = q.shape
     t = k.shape[1]
     grid = (pl.cdiv(s, block_q), b, h)
@@ -186,27 +190,332 @@ def _mha_forward(
             (None, None, block_q, t), lambda i, j, hh: (j, hh, i, 0)
         ),
     ]
-    out_specs = pl.BlockSpec(
-        (None, block_q, None, d), lambda i, j, hh: (j, i, hh, 0)
-    )
+    out_specs = [
+        pl.BlockSpec((None, block_q, None, d), lambda i, j, hh: (j, i, hh, 0)),
+        pl.BlockSpec((None, None, block_q), lambda i, j, hh: (j, hh, i)),
+    ]
+    out_shape = [
+        jax.ShapeDtypeStruct((b, s, h, d), q.dtype),
+        jax.ShapeDtypeStruct((b, h, s), jnp.float32),
+    ]
     num_warps = 4 if d <= 64 else 8
-    out = pl.pallas_call(
+    out, lse = pl.pallas_call(
         kernel,
         grid=grid,
         in_specs=in_specs,
         out_specs=out_specs,
-        out_shape=jax.ShapeDtypeStruct((b, s, h, d), q.dtype),
+        out_shape=out_shape,
         compiler_params=plgpu.CompilerParams(
             num_warps=num_warps, num_stages=2
         ),
         name='nitrix_mha_forward',
     )(q, k, v, bias, mask)
-    return cast(Float[Array, 'b s h d'], out)
+    return (
+        cast(Float[Array, 'b s h d'], out),
+        cast(Float[Array, 'b h s'], lse),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Backward kernels (recompute the score tiles; never read a stored (s, t))
+# ---------------------------------------------------------------------------
+
+
+def _bwd_kv_kernel(
+    q_ref: Any,
+    do_ref: Any,
+    k_ref: Any,
+    v_ref: Any,
+    lse_ref: Any,
+    delta_ref: Any,
+    bias_ref: Any,
+    mask_ref: Any,
+    dk_ref: Any,
+    dv_ref: Any,
+    *out_extra: Any,
+    sm_scale: float,
+    causal: bool,
+    block_q: int,
+    block_k: int,
+    num_q: int,
+    has_bias: bool,
+) -> None:
+    # dk / dv for one K tile (+ d_bias stripe when has_bias); loop over all Q.
+    dbias_ref: Any = out_extra[0] if has_bias else None
+    start_k = pl.program_id(0)
+    d = k_ref.shape[-1]
+    k = k_ref[...]
+    v = v_ref[...]
+    qk_scale = sm_scale * _LOG2E
+    span_k = start_k * block_k + jnp.arange(block_k)
+
+    def body(start_q: int, carry: Any) -> Any:
+        dk, dv = carry
+        qs = pl.ds(start_q * block_q, block_q)
+        q = q_ref[qs, :]
+        do = do_ref[qs, :]
+        lse_i = lse_ref[qs]
+        delta_i = delta_ref[qs]
+        qk = pl.dot(q, k.T) * qk_scale
+        if has_bias:
+            qk = qk + bias_ref[qs, :] * _LOG2E
+        keep = None
+        if mask_ref is not None:
+            keep = mask_ref[qs, :]
+        if causal:
+            span_q = start_q * block_q + jnp.arange(block_q)
+            cm = span_q[:, None] >= span_k[None, :]
+            keep = cm if keep is None else (keep & cm)
+        if keep is not None:
+            qk = jnp.where(keep, qk, _MASK_VALUE)
+        p = jnp.exp2(qk - lse_i[:, None])  # true softmax weights
+        dv = dv + pl.dot(p.astype(do.dtype).T, do)
+        dp = pl.dot(do, v.T) - delta_i[:, None]
+        ds = p * dp  # dL/dscore == dL/dbias (unscaled)
+        if has_bias:
+            dbias_ref[qs, :] = ds.astype(dbias_ref.dtype)
+        dk = dk + sm_scale * pl.dot(ds.astype(q.dtype).T, q)
+        return dk.astype(jnp.float32), dv.astype(jnp.float32)
+
+    dk0 = jnp.zeros((block_k, d), dtype=jnp.float32)
+    dv0 = jnp.zeros((block_k, d), dtype=jnp.float32)
+    dk, dv = lax.fori_loop(0, num_q, body, (dk0, dv0))
+    dk_ref[...] = dk.astype(dk_ref.dtype)
+    dv_ref[...] = dv.astype(dv_ref.dtype)
+
+
+def _bwd_q_kernel(
+    q_ref: Any,
+    do_ref: Any,
+    k_ref: Any,
+    v_ref: Any,
+    lse_ref: Any,
+    delta_ref: Any,
+    bias_ref: Any,
+    mask_ref: Any,
+    dq_ref: Any,
+    *,
+    sm_scale: float,
+    causal: bool,
+    block_q: int,
+    block_k: int,
+    num_k: int,
+    has_bias: bool,
+) -> None:
+    # dq for one Q tile; loop over all K.
+    start_q = pl.program_id(0)
+    d = q_ref.shape[-1]
+    q = q_ref[...]
+    do = do_ref[...]
+    lse_i = lse_ref[...]
+    delta_i = delta_ref[...]
+    qk_scale = sm_scale * _LOG2E
+    span_q = start_q * block_q + jnp.arange(block_q)
+
+    def body(start_k: int, dq: Any) -> Any:
+        ks = pl.ds(start_k * block_k, block_k)
+        k = k_ref[ks, :]
+        v = v_ref[ks, :]
+        qk = pl.dot(q, k.T) * qk_scale
+        if has_bias:
+            qk = qk + bias_ref[:, ks] * _LOG2E
+        keep = None
+        if mask_ref is not None:
+            keep = mask_ref[:, ks]
+        if causal:
+            span_k = start_k * block_k + jnp.arange(block_k)
+            cm = span_q[:, None] >= span_k[None, :]
+            keep = cm if keep is None else (keep & cm)
+        if keep is not None:
+            qk = jnp.where(keep, qk, _MASK_VALUE)
+        p = jnp.exp2(qk - lse_i[:, None])
+        dp = pl.dot(do, v.T) - delta_i[:, None]
+        ds = p * dp
+        dq = dq + sm_scale * pl.dot(ds.astype(k.dtype), k)
+        return dq.astype(jnp.float32)
+
+    dq0 = jnp.zeros((block_q, d), dtype=jnp.float32)
+    dq = lax.fori_loop(0, num_k, body, dq0)
+    dq_ref[...] = dq.astype(dq_ref.dtype)
+
+
+def _mha_backward(
+    q: Float[Array, 'b s h d'],
+    k: Float[Array, 'b t h d'],
+    v: Float[Array, 'b t h d'],
+    do: Float[Array, 'b s h d'],
+    lse: Float[Array, 'b h s'],
+    delta: Float[Array, 'b h s'],
+    bias: Optional[Float[Array, 'b h s t']],
+    mask: Optional[Bool[Array, 'b h s t']],
+    *,
+    sm_scale: float,
+    causal: bool,
+    block: int,
+) -> tuple[Array, Array, Array, Optional[Array]]:
+    b, s, h, d = q.shape
+    t = k.shape[1]
+    num_q = s // block
+    num_k = t // block
+    has_bias = bias is not None
+    num_warps = 4 if d <= 64 else 8
+    cp = plgpu.CompilerParams(num_warps=num_warps, num_stages=2)
+
+    # --- dk / dv (+ d_bias): grid over K tiles, loop over Q ---
+    q_full = pl.BlockSpec((None, s, None, d), lambda kb, j, hh: (j, 0, hh, 0))
+    do_full = pl.BlockSpec((None, s, None, d), lambda kb, j, hh: (j, 0, hh, 0))
+    kv_tile = pl.BlockSpec(
+        (None, block, None, d), lambda kb, j, hh: (j, kb, hh, 0)
+    )
+    svec_full = pl.BlockSpec((None, None, s), lambda kb, j, hh: (j, hh, 0))
+    stripe = pl.BlockSpec(
+        (None, None, s, block), lambda kb, j, hh: (j, hh, 0, kb)
+    )
+    kv_in: list[Optional[pl.BlockSpec]] = [
+        q_full,
+        do_full,
+        kv_tile,
+        kv_tile,
+        svec_full,
+        svec_full,
+        None if bias is None else stripe,
+        None if mask is None else stripe,
+    ]
+    kv_out = [kv_tile, kv_tile]  # dk, dv
+    kv_out_shape = [
+        jax.ShapeDtypeStruct((b, t, h, d), q.dtype),
+        jax.ShapeDtypeStruct((b, t, h, d), q.dtype),
+    ]
+    if has_bias:
+        kv_out = kv_out + [stripe]
+        kv_out_shape = kv_out_shape + [
+            jax.ShapeDtypeStruct((b, h, s, t), jnp.float32)
+        ]
+    kv_results = pl.pallas_call(
+        partial(
+            _bwd_kv_kernel,
+            sm_scale=sm_scale,
+            causal=causal,
+            block_q=block,
+            block_k=block,
+            num_q=num_q,
+            has_bias=has_bias,
+        ),
+        grid=(num_k, b, h),
+        in_specs=kv_in,
+        out_specs=kv_out,
+        out_shape=kv_out_shape,
+        compiler_params=cp,
+        name='nitrix_mha_backward_kv',
+    )(q, do, k, v, lse, delta, bias, mask)
+    dk = kv_results[0]
+    dv = kv_results[1]
+    dbias = kv_results[2] if has_bias else None
+
+    # --- dq: grid over Q tiles, loop over K ---
+    q_tile = pl.BlockSpec(
+        (None, block, None, d), lambda qb, j, hh: (j, qb, hh, 0)
+    )
+    kv_full = pl.BlockSpec((None, t, None, d), lambda qb, j, hh: (j, 0, hh, 0))
+    qvec = pl.BlockSpec((None, None, block), lambda qb, j, hh: (j, hh, qb))
+    q_row = pl.BlockSpec(
+        (None, None, block, t), lambda qb, j, hh: (j, hh, qb, 0)
+    )
+    q_in: list[Optional[pl.BlockSpec]] = [
+        q_tile,
+        q_tile,
+        kv_full,
+        kv_full,
+        qvec,
+        qvec,
+        None if bias is None else q_row,
+        None if mask is None else q_row,
+    ]
+    dq = pl.pallas_call(
+        partial(
+            _bwd_q_kernel,
+            sm_scale=sm_scale,
+            causal=causal,
+            block_q=block,
+            block_k=block,
+            num_k=num_k,
+            has_bias=has_bias,
+        ),
+        grid=(num_q, b, h),
+        in_specs=q_in,
+        out_specs=q_tile,
+        out_shape=jax.ShapeDtypeStruct((b, s, h, d), q.dtype),
+        compiler_params=cp,
+        name='nitrix_mha_backward_q',
+    )(q, do, k, v, lse, delta, bias, mask)
+    return dq, dk, dv, dbias
 
 
 # ---------------------------------------------------------------------------
 # Layout adapter: public ``(... h s d)`` <-> kernel ``(b, s, h, d)``
 # ---------------------------------------------------------------------------
+
+
+def _to_bshd(x: Array, nb: int, h: int, length: int, d: int) -> Array:
+    return x.reshape(nb, h, length, d).transpose(0, 2, 1, 3)
+
+
+def _from_bshd(
+    x: Array, batch: tuple[int, ...], h: int, length: int, d: int
+) -> Array:
+    return x.transpose(0, 2, 1, 3).reshape(*batch, h, length, d)
+
+
+def _unbroadcast(g: Array, shape: tuple[int, ...]) -> Array:
+    """Reduce a broadcasted cotangent ``g`` down to ``shape`` (VJP of broadcast)."""
+    while g.ndim > len(shape):
+        g = g.sum(axis=0)
+    axes = tuple(
+        i for i, dim in enumerate(shape) if dim == 1 and g.shape[i] != 1
+    )
+    if axes:
+        g = g.sum(axis=axes, keepdims=True)
+    return g.reshape(shape)
+
+
+def _fused_forward_with_lse(
+    q: Float[Array, '... h s d'],
+    k: Float[Array, '... h t d'],
+    v: Float[Array, '... h t d_v'],
+    bias: Optional[Float[Array, '... h s t']],
+    mask: Optional[Bool[Array, '... h s t']],
+    scale: float,
+    causal: bool,
+) -> tuple[Float[Array, '... h s d_v'], Float[Array, '... h s']]:
+    *batch, h, s, d = q.shape
+    t = k.shape[-2]
+    nb = math.prod(batch) if batch else 1
+    block = min(_BLOCK, s)
+    bf = (
+        None
+        if bias is None
+        else jnp.broadcast_to(bias, (*batch, h, s, t)).reshape(nb, h, s, t)
+    )
+    mf = (
+        None
+        if mask is None
+        else jnp.broadcast_to(mask, (*batch, h, s, t)).reshape(nb, h, s, t)
+    )
+    out, lse = _mha_forward(
+        _to_bshd(q, nb, h, s, d),
+        _to_bshd(k, nb, h, t, d),
+        _to_bshd(v, nb, h, t, d),
+        bf,
+        mf,
+        sm_scale=scale,
+        causal=causal,
+        block_q=block,
+        block_k=min(_BLOCK, t),
+    )
+    return (
+        _from_bshd(out, tuple(batch), h, s, d),
+        lse.reshape(*batch, h, s),
+    )
 
 
 def _fused_forward(
@@ -218,19 +527,34 @@ def _fused_forward(
     scale: float,
     causal: bool,
 ) -> Float[Array, '... h s d_v']:
+    out, _ = _fused_forward_with_lse(q, k, v, bias, mask, scale, causal)
+    return out
+
+
+def _fused_backward(
+    q: Float[Array, '... h s d'],
+    k: Float[Array, '... h t d'],
+    v: Float[Array, '... h t d_v'],
+    bias: Optional[Float[Array, '... h s t']],
+    mask: Optional[Bool[Array, '... h s t']],
+    o: Float[Array, '... h s d_v'],
+    lse: Float[Array, '... h s'],
+    do: Float[Array, '... h s d_v'],
+    scale: float,
+    causal: bool,
+) -> tuple[Array, Array, Array, Optional[Array]]:
     *batch, h, s, d = q.shape
     t = k.shape[-2]
     nb = math.prod(batch) if batch else 1
-    block_q = min(_BLOCK_Q, s)
-    block_k = min(_BLOCK_K, t)
-
-    def to_bshd(x: Array, length: int) -> Array:
-        # (*batch, h, length, d) -> (nb, length, h, d)
-        return x.reshape(nb, h, length, d).transpose(0, 2, 1, 3)
-
-    qf = to_bshd(q, s)
-    kf = to_bshd(k, t)
-    vf = to_bshd(v, t)
+    block = min(_BLOCK, s)
+    qf = _to_bshd(q, nb, h, s, d)
+    kf = _to_bshd(k, nb, h, t, d)
+    vf = _to_bshd(v, nb, h, t, d)
+    of = _to_bshd(o, nb, h, s, d)
+    dof = _to_bshd(do, nb, h, s, d)
+    # delta_i = sum_j p_ij dp_ij = o_i . do_i (cheap; no (s, t) materialised).
+    delta = (of * dof).sum(axis=-1).transpose(0, 2, 1)  # (nb, h, s)
+    lsef = lse.reshape(nb, h, s)
     bf = (
         None
         if bias is None
@@ -241,23 +565,30 @@ def _fused_forward(
         if mask is None
         else jnp.broadcast_to(mask, (*batch, h, s, t)).reshape(nb, h, s, t)
     )
-    out = _mha_forward(
+    dq_f, dk_f, dv_f, dbias_f = _mha_backward(
         qf,
         kf,
         vf,
+        dof,
+        lsef,
+        delta,
         bf,
         mf,
         sm_scale=scale,
         causal=causal,
-        block_q=block_q,
-        block_k=block_k,
+        block=block,
     )
-    # (nb, s, h, d) -> (*batch, h, s, d)
-    return out.transpose(0, 2, 1, 3).reshape(*batch, h, s, d)
+    dq = _from_bshd(dq_f, tuple(batch), h, s, d)
+    dk = _from_bshd(dk_f, tuple(batch), h, t, d)
+    dv = _from_bshd(dv_f, tuple(batch), h, t, d)
+    dbias: Optional[Array] = None
+    if bias is not None and dbias_f is not None:
+        dbias = _unbroadcast(dbias_f.reshape(*batch, h, s, t), bias.shape)
+    return dq, dk, dv, dbias
 
 
 # ---------------------------------------------------------------------------
-# Differentiable wrapper (custom_vjp; backward via the reference recompute)
+# Differentiable wrapper (custom_vjp; fused forward + fused backward)
 # ---------------------------------------------------------------------------
 
 
@@ -283,8 +614,8 @@ def _sdpa_p_fwd(
     scale: float,
     causal: bool,
 ) -> tuple[Array, tuple[Any, ...]]:
-    out = _fused_forward(q, k, v, bias, mask, scale, causal)
-    return out, (q, k, v, bias, mask)
+    out, lse = _fused_forward_with_lse(q, k, v, bias, mask, scale, causal)
+    return out, (q, k, v, bias, mask, out, lse)
 
 
 def _sdpa_p_bwd(
@@ -293,28 +624,10 @@ def _sdpa_p_bwd(
     res: tuple[Any, ...],
     g: Array,
 ) -> tuple[Any, ...]:
-    # Gradient of the *reference* (the function the fused forward approximates):
-    # correct dq/dk/dv and the learnable-bias gradient d_bias, with bias
-    # broadcasting reduced automatically by autodiff.  mask is boolean -> None.
-    from ...nn.attention._reference import (
-        reference_scaled_dot_product_attention as _ref,
+    q, k, v, bias, mask, o, lse = res
+    dq, dk, dv, dbias = _fused_backward(
+        q, k, v, bias, mask, o, lse, g, scale, causal
     )
-
-    q, k, v, bias, mask = res
-    if bias is None:
-
-        def f_nb(q: Array, k: Array, v: Array) -> Array:
-            return _ref(q, k, v, mask=mask, scale=scale, causal=causal)
-
-        _, vjp = jax.vjp(f_nb, q, k, v)
-        dq, dk, dv = vjp(g)
-        return dq, dk, dv, None, None
-
-    def f_b(q: Array, k: Array, v: Array, bias: Array) -> Array:
-        return _ref(q, k, v, bias=bias, mask=mask, scale=scale, causal=causal)
-
-    _, vjp = jax.vjp(f_b, q, k, v, bias)
-    dq, dk, dv, dbias = vjp(g)
     return dq, dk, dv, dbias, None
 
 
@@ -349,8 +662,8 @@ def _check_tileable(
         raise PallasNotTileable(
             f'fused attention requires a power-of-two head dim >= 16; got {d}.'
         )
-    block_q = min(_BLOCK_Q, s)
-    block_k = min(_BLOCK_K, t)
+    block_q = min(_BLOCK, s)
+    block_k = min(_BLOCK, t)
     if s % block_q != 0 or t % block_k != 0:
         raise PallasNotTileable(
             f'fused attention requires s % {block_q} == 0 and t % {block_k} '

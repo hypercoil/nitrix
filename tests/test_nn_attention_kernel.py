@@ -52,6 +52,11 @@ def _relerr(a, b):
     return float(jnp.max(jnp.abs(a - b)) / (jnp.max(jnp.abs(b)) + 1e-30))
 
 
+# Gradients span a wide dynamic range, so the fused-backward parity is checked
+# with a max-relative tolerance rather than elementwise atol/rtol.
+_GRAD_TOL = 3.0e-3
+
+
 def _case(name):
     """Return ``(q, k, v, kwargs, scale)`` for a named attention path."""
     h, d = 2, 64
@@ -91,30 +96,33 @@ def test_forward_parity_with_reference(name):
     )
 
 
-# --- gradient parity (incl. d_bias) -------------------------------------
+# --- gradient parity (fused Triton backward, incl. in-kernel d_bias) -----
 
 
 @pallas_only
-def test_gradient_parity_dense():
-    q, k, v, _, scale = _case('dense')
+@pytest.mark.parametrize('name', ['dense', 'causal', 'mask', 'cross'])
+def test_gradient_parity_dqkv(name):
+    # Exercises the fused recompute-in-tile backward vs the autodiff
+    # reference (dq / dk / dv).
+    q, k, v, kwargs, scale = _case(name)
 
     def lk(q, k, v):
-        return jnp.sum(kern(q, k, v, scale=scale) ** 2)
+        return jnp.sum(kern(q, k, v, scale=scale, **kwargs) ** 2)
 
     def lr(q, k, v):
-        return jnp.sum(ref_sdpa(q, k, v, scale=scale) ** 2)
+        return jnp.sum(ref_sdpa(q, k, v, scale=scale, **kwargs) ** 2)
 
     gk = jax.grad(lk, argnums=(0, 1, 2))(q, k, v)
     gr = jax.grad(lr, argnums=(0, 1, 2))(q, k, v)
     for a, b in zip(gk, gr):
         assert np.all(np.isfinite(np.asarray(a)))
-        np.testing.assert_allclose(
-            np.asarray(a), np.asarray(b), atol=_ATOL, rtol=_RTOL
-        )
+        assert _relerr(a, b) < _GRAD_TOL
 
 
 @pallas_only
 def test_gradient_parity_with_bias_dbias():
+    # The in-kernel d_bias path: the learnable-bias gradient, reduced to the
+    # (shared-over-batch) bias shape.
     q, k, v, kwargs, scale = _case('bias')
     bias = kwargs['bias']
 
@@ -126,13 +134,10 @@ def test_gradient_parity_with_bias_dbias():
 
     gk = jax.grad(lk, argnums=(0, 1, 2, 3))(q, k, v, bias)
     gr = jax.grad(lr, argnums=(0, 1, 2, 3))(q, k, v, bias)
-    # d_bias is reduced to the (shared-over-batch) bias shape by autodiff.
-    assert gk[3].shape == bias.shape
+    assert gk[3].shape == bias.shape  # d_bias reduced to bias shape
     for a, b in zip(gk, gr):
         assert np.all(np.isfinite(np.asarray(a)))
-        np.testing.assert_allclose(
-            np.asarray(a), np.asarray(b), atol=_ATOL, rtol=_RTOL
-        )
+        assert _relerr(a, b) < _GRAD_TOL
 
 
 # --- gross-memory contract ----------------------------------------------
@@ -168,6 +173,31 @@ def test_forward_does_not_materialise_score_matrix():
     temp_r = comp_r.memory_analysis().temp_size_in_bytes
     score_bytes = b * h * s * s * 4
     assert temp_k < score_bytes  # never holds a full (s, t) score tile
+    assert temp_k < temp_r
+
+
+@pallas_only
+def test_backward_does_not_materialise_score_matrix():
+    # The fused backward recomputes score tiles in-SRAM; the reference
+    # backward materialises the (s, t) scores.  (No bias -> no (s, t) output.)
+    b, h, s, d = 1, 1, 512, 64
+    q = _mk((b, h, s, d), 1)
+    k = _mk((b, h, s, d), 2)
+    v = _mk((b, h, s, d), 3)
+
+    def grad_of(backend):
+        def loss(q, k, v):
+            return jnp.sum(
+                scaled_dot_product_attention(q, k, v, backend=backend) ** 2
+            )
+
+        return jax.grad(loss, argnums=(0, 1, 2))
+
+    comp_k = jax.jit(grad_of('pallas-cuda')).lower(q, k, v).compile()
+    comp_r = jax.jit(grad_of('jax')).lower(q, k, v).compile()
+    temp_k = comp_k.memory_analysis().temp_size_in_bytes
+    temp_r = comp_r.memory_analysis().temp_size_in_bytes
+    assert temp_k < b * h * s * s * 4  # dq/dk/dv recompute, no stored (s, t)
     assert temp_k < temp_r
 
 

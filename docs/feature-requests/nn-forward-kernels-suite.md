@@ -280,23 +280,29 @@ lower-triangular `mask`; permutation-equivariance over `t`); FD-VJP for each of
 battery (from `test_lncc_force_kernel.py`); gross-mem probe asserting the
 `(s, t)` score matrix is never materialised on the fused path.
 
-> **Status (2026-06-23): P0b forward SHIPPED.** The fused Pallas/Triton
-> *forward* kernel (online-softmax flash, additive-bias + boolean-mask tiles +
-> causal, base-2 streamed) is implemented and validated on an L4:
-> `pallas ≈ jax` ≤ 4e-4 (under the 2e-3 pinned tolerance) for
-> dense / bias / causal / mask / cross; the gross-mem probe confirms
-> **0 temp bytes** for the fused path vs the reference's full `(s, t)` score
-> tensor. Differentiation is a `custom_vjp` whose backward recomputes through
-> the reference — correct `dq/dk/dv` and the learnable-bias `d_bias`
-> (broadcasting reduced by autodiff), grad-parity ≤ 6e-4. Scope gate
-> (→ loud fallback): Ampere+, float32, power-of-two head dim ≥ 16 with
-> `d_v == d`, seq divisible by the (64) block; tile size dropped to 64 to keep
-> the bias/mask tiles inside the SM shared-memory budget. **Deferred to P0b-2
-> (perf):** the fully-fused Triton *backward* (recompute-in-tile + in-kernel
-> `d_bias`) for the training-memory win, and pad-to-multiple-with-mask for
-> arbitrary seq / non-pow2 head dim. Logged per `IMPLEMENTATION_PLAN.md §2.3`
-> (ship the JAX-correct path, fuse the perf later); the perf suite owns the
-> at-scale wall-clock-vs-FA2 certification.
+> **Status (2026-06-23): P0b SHIPPED (fused forward + fused backward).**
+> Validated on an L4.
+>
+> *Forward* — fused Pallas/Triton online-softmax flash (additive-bias +
+> boolean-mask tiles + causal, base-2 streamed): `pallas ≈ jax` ≤ 4e-4 (under
+> the 2e-3 pinned tolerance) for dense / bias / causal / mask / cross; gross-mem
+> probe = **0 temp bytes** vs the reference's full `(s, t)` score tensor.
+>
+> *Backward* — fully-fused, two kernels (no `q_blocks == k_blocks` constraint):
+> one accumulates `dk`/`dv` and writes the learnable-bias gradient `d_bias`
+> tile-by-tile (in-kernel, reduced to the bias shape by the wrapper), the other
+> accumulates `dq`; both **recompute** the score tiles in-SRAM from the
+> forward's `lse` residual (no stored `(s, t)`). Grad-parity vs autodiff
+> reference ≤ 9e-4 (`dq/dk/dv/d_bias`) across all paths; backward gross-mem
+> probe confirms no `(s, t)` temp for `dq/dk/dv`.
+>
+> Scope gate (→ loud fallback): Ampere+, float32, power-of-two head dim ≥ 16
+> with `d_v == d`, seq divisible by the block. Unified block = 32 (fwd + bwd
+> tile identically and fit the bias/mask + accumulator tiles inside the SM
+> shared-memory budget); x64-robust (pinned carry/divisor dtypes). **Deferred
+> (perf only):** tile-ladder tuning, pad-to-multiple-with-mask for arbitrary
+> seq / non-pow2 head dim, and the at-scale wall-clock-vs-FA2 certification —
+> the last is the sibling perf suite's job (`bench/`).
 
 ### 7.2 `nitrix.nn.ssm.selective_scan` — P1, ENABLING
 
