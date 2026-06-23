@@ -213,11 +213,18 @@ Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 - **CV4** ✅ `5be6354` (S) — BY / Storey FDR + unified `fdr(method=)` dispatcher.
 - **CV1** — **deferred, tracked under prior `N2`** (post-`geometry-suite`).
 
-### Round 3 — medium correctness/robustness hardening
-**MC5** (corr bounds), **MC6** (AR1 time order), **MC7** (log_lik normalisation), **ER2**
-(nested global numbering), **ER3** (GLM rank), **ER4** (lme `z` shape), **ER5** (sandwich
-jit), **ER6/HW1** (dtype-leak pattern), **PF3** (hgp `lax.map`), **PF4** (`Family`/`Link`
-hashing), **DS2/DS3** (fit-driver + `_hsgp.py` de-dup).
+### Round 3 — medium correctness/robustness hardening (in progress)
+> **Done:** **ER3·ER5** `d260bb4` (GLM effective-rank dof + jit-traceable cluster sandwich) ·
+> **MC6·ER2·ER4·ER6** `ee84fda` (AR1 time-order warning; nested global-numbering guard;
+> 1-D `z` coercion; integer-Y / cluster-size / mrf dtype leaks).
+> **Remaining:** **MC5** (corr bounds), **MC7** (log_lik normalisation), **PF3** (hgp
+> `lax.map`), **PF4** (`Family`/`Link` hashing — needs param-encoded names), **DS2/DS3**
+> (fit-driver + `_hsgp.py` de-dup).
+
+**MC5** (corr bounds), **MC6** ✅ (AR1 time order), **MC7** (log_lik normalisation), **ER2**
+✅ (nested global numbering), **ER3** ✅ (GLM rank), **ER4** ✅ (lme `z` shape), **ER5** ✅
+(sandwich jit), **ER6/HW1** ✅ (dtype-leak pattern), **PF3** (hgp `lax.map`), **PF4**
+(`Family`/`Link` hashing), **DS2/DS3** (fit-driver + `_hsgp.py` de-dup).
 
 ### Round 4 — low/polish + test-coverage backlog
 **ER7** (test gaps) + the §7 low-severity items, as bandwidth allows.

@@ -477,24 +477,29 @@ def hgp_fit(
         rho_lo, rho_hi = float(rho_bounds[0]), float(rho_bounds[1])
     log_rho_grid = np.linspace(np.log(rho_lo), np.log(rho_hi), int(n_rho))
 
+    reps = (1,) + level_counts_t
+
     def _blocks(
-        rho: float,
+        rho: Any,
     ) -> Tuple[Array, Array, Array, Tuple[Tuple[int, int], ...]]:
+        """Penalty layout at ``rho``: ``(d_blocks, ranks, log_pdets, block_cols)``
+        (``rho`` may be a Python float or a traced scalar)."""
         inv_s = _inv_s(sqrt_lambda, kernel, rho, Y.dtype)
         d_blocks, ranks, block_cols = _block_weights(
             inv_s, n_fixed, level_counts_t
         )
-        reps = (1,) + level_counts_t
         log_pdets = jnp.asarray(
             [rep * jnp.sum(jnp.log(inv_s)) for rep in reps], dtype=Y.dtype
         )
         return d_blocks, ranks, log_pdets, block_cols
 
-    @jax.jit
-    def _pooled(d_blocks: Array, ranks: Array, log_pdets: Array) -> Array:
-        # Chunk the pooled-NLL reduction by `block` too: the hierarchical design
-        # is (1 + sum(level_counts)) * m wide, so an un-chunked search over all V
-        # is the acuter OOM cliff. blocked_vmap(...).sum() is a drop-in.
+    # PF3: profile rho on-device with lax.map (mirrors gp_fit's HSGP search) --
+    # the prior host Python loop forced n_rho separate device->host syncs.  The
+    # pooled-NLL reduction is chunked by `block` (blocked_vmap(...).sum()): the
+    # hierarchical design is (1 + sum(level_counts)) * m wide, so an un-chunked
+    # search over all V is the acuter OOM cliff.
+    def _pooled_nll(log_rho: Float[Array, '']) -> Float[Array, '']:
+        d_blocks, ranks, log_pdets, _ = _blocks(jnp.exp(log_rho))
         per = blocked_vmap(
             lambda c_v, g_v: _hgp_pooled_nll_one(
                 c_v, g_v, xtx, d_blocks, ranks, log_pdets, n, p, n_fixed,
@@ -503,17 +508,13 @@ def hgp_fit(
             (c_all, g_all),
             block=block,
         )
-        return jnp.sum(per)
-
-    nll_grid = []
-    for log_rho in log_rho_grid:
-        rho = float(np.exp(log_rho))
-        d_blocks, ranks, log_pdets, _ = _blocks(rho)
-        nll = float(_pooled(d_blocks, ranks, log_pdets))
+        nll = jnp.sum(per)
         if map_rho is not None:
-            nll = nll + 2.0 * float(map_rho(jnp.asarray(rho, dtype=Y.dtype)))
-        nll_grid.append(nll)
+            nll = nll + 2.0 * map_rho(jnp.exp(log_rho))
+        return nll
 
+    log_rho_grid_j = jnp.asarray(log_rho_grid, dtype=Y.dtype)
+    nll_grid = jax.lax.map(_pooled_nll, log_rho_grid_j)  # (n_rho,) on-device
     log_rho_hat = _parabolic_argmin(log_rho_grid, np.asarray(nll_grid))
     rho_hat = float(np.exp(log_rho_hat))
 
