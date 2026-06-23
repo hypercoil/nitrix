@@ -189,6 +189,14 @@ bucket index. No new runtime dependency; all host-side numpy.
   `_triangle_distance`; wire `method=` into `nearest_surface_distance` (and hence
   `mesh_to_sdf` + symmetric `cortical_thickness`). Exit: bit-exact parity vs
   brute on a real white surface + analytic sphere SDF; the fallback path tested.
+  **DONE 2026-06-23** (branch `perf/mesh-spatial-acceleration`): `method=`
+  `'auto'`/`'grid'`/`'brute'`; the exactness bound (`d_min <= R*cell`) +
+  unconditional brute fallback at `r_max` hold; **bit-exact (`np.array_equal`)
+  vs brute** on icosphere + real fsaverage (near/far/fallback) + analytic
+  sphere; real `cortical_thickness` (corr 0.94 vs FS) and `mesh_to_sdf`
+  consumers stay green. Note: it accelerates near-surface queries (thickness,
+  SDF near-band); far SDF-grid voxels fall back to brute (exact, no worse) — a
+  narrow-band / sweep SDF for the far field is a separate future enhancement.
 - **C5b — spherical bucket index** for `surface_resample._spherical_barycentric`.
   Exit: bit-exact parity vs brute on fs5↔fs4; bucket-boundary + fallback tested.
 - **C5c — validation + perf record.** The §7 matrix; a logged perf comparison.
