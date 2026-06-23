@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """Tests for ``nitrix.nn.ssm.selective_scan`` -- the P1a reference + dispatch.
 
-P1a ships the JAX reference (sequential ``lax.scan`` oracle + parallel
-``associative_scan``, auto-selected by platform) and the dispatcher; the fused
-chunked-scan kernel lands in P1b.  These tests pin the golden corpus, the scan
-math against an independent naive oracle and its invariants (scan == associative,
-D-skip linearity, ``A -> 0`` cumulative map), the autodiff gradient, and the
-dispatch / loud-fallback contract.
+The JAX reference offers ``sequential`` (``lax.scan`` oracle), ``associative``
+(parallel prefix), and ``chunked`` (pure-XLA memory-sparing: chunked scan that
+never materialises the ``(l, d, n)`` trajectory -- the Pallas-free analogue of
+the fused kernel).  These tests pin the golden corpus, the scan math against an
+independent naive oracle and its invariants (scan == associative == chunked,
+D-skip linearity, ``A -> 0`` cumulative map, chunked memory < associative), the
+autodiff gradient, and the dispatch / loud-fallback contract.
 """
 
 from __future__ import annotations
@@ -138,6 +139,78 @@ def test_zero_A_reduces_to_cumulative_map():
     H = jnp.cumsum(dBx, axis=-3)
     expected = (H * C[..., None, :]).sum(axis=-1)
     assert np.allclose(np.asarray(got), np.asarray(expected), atol=1e-10)
+
+
+# --- chunked (pure-XLA, memory-sparing) method --------------------------
+
+
+@pytest.mark.parametrize('with_d', [False, True])
+def test_chunked_matches_sequential(with_d):
+    # Aggressive inputs (A = -exp(randn), softplus delta) -- XLA-stable, the
+    # regime the fp32 fused kernel cannot do.
+    x, delta, A, B, C, D = _inputs(2, 64, 4, 3, seed=20, with_d=with_d)
+    chk = ref_scan(x, delta, A, B, C, D, method='chunked', chunk_size=16)
+    seq = ref_scan(x, delta, A, B, C, D, method='sequential')
+    assert np.all(np.isfinite(np.asarray(chk)))
+    assert np.allclose(np.asarray(chk), np.asarray(seq), atol=1e-10)
+
+
+def test_chunked_no_batch():
+    x, delta, A, B, C, D = _inputs(None, 32, 4, 3, seed=21)
+    chk = ref_scan(x, delta, A, B, C, D, method='chunked', chunk_size=8)
+    seq = ref_scan(x, delta, A, B, C, D, method='sequential')
+    assert np.allclose(np.asarray(chk), np.asarray(seq), atol=1e-10)
+
+
+def test_chunked_gradient_matches_sequential():
+    x, delta, A, B, C, D = _inputs(2, 64, 4, 3, seed=22)
+
+    def loss(fn):
+        return lambda *a: jnp.sum(ref_scan(*a, **fn) ** 2)
+
+    gk = jax.grad(
+        loss({'method': 'chunked', 'chunk_size': 16}),
+        argnums=(0, 1, 2, 3, 4, 5),
+    )(x, delta, A, B, C, D)
+    gr = jax.grad(loss({'method': 'sequential'}), argnums=(0, 1, 2, 3, 4, 5))(
+        x, delta, A, B, C, D
+    )
+    for a, b in zip(gk, gr):
+        assert np.allclose(np.asarray(a), np.asarray(b), atol=1e-9)
+
+
+def test_chunked_requires_divisible_length():
+    x, delta, A, B, C, D = _inputs(2, 40, 4, 3, seed=23)  # 40 % 16 != 0
+    with pytest.raises(ValueError):
+        ref_scan(x, delta, A, B, C, D, method='chunked', chunk_size=16)
+
+
+def test_chunked_uses_less_memory_than_associative():
+    # At scale the chunked scan never materialises the (l, d, n) trajectory,
+    # so its temp stays ~flat in l while associative grows with (l, d, n) --
+    # in both the forward and the (rematerialised) backward.
+    x, delta, A, B, C, D = _inputs(1, 512, 8, 16, seed=24, dtype=np.float32)
+
+    def fwd(method):
+        return jax.jit(lambda *a: ref_scan(*a, **method))
+
+    def bwd(method):
+        return jax.jit(
+            jax.grad(
+                lambda *a: jnp.sum(ref_scan(*a, **method) ** 2),
+                argnums=(0, 1, 2, 3, 4, 5),
+            )
+        )
+
+    chunked = {'method': 'chunked', 'chunk_size': 64}
+    assoc = {'method': 'associative'}
+    args = (x, delta, A, B, C, D)
+    fwd_k = fwd(chunked).lower(*args).compile().memory_analysis()
+    fwd_a = fwd(assoc).lower(*args).compile().memory_analysis()
+    bwd_k = bwd(chunked).lower(*args).compile().memory_analysis()
+    bwd_a = bwd(assoc).lower(*args).compile().memory_analysis()
+    assert fwd_k.temp_size_in_bytes < fwd_a.temp_size_in_bytes
+    assert bwd_k.temp_size_in_bytes < bwd_a.temp_size_in_bytes
 
 
 # --- autodiff ------------------------------------------------------------
