@@ -75,6 +75,10 @@ M–L and is the subject of the companion research note.
 - [`spatial-transform-linear-extrap`](spatial-transform-linear-extrap.md),
   [`boundary-mode-parity`](boundary-mode-parity.md) — sibling
   `map_coordinates` items.
+- [`cubic-bspline-prefilter-backend-parity`](cubic-bspline-prefilter-backend-parity.md)
+  — the order-3 *numeric parity* sibling to this order-1 *perf* gap: the
+  `CubicBSpline` prefilter's `associative=default_backend_is_gpu()` scan is
+  backend-dependent (this gap's order-1 path is not).
 - `src/nitrix/geometry/_interpolate.py` (`_map_coordinates_sample`,
   `_separable_gather`, `_gather_sample` — the per-platform engine choice that
   this gap motivated); `src/nitrix/geometry/grid.py` (`spatial_transform`,
