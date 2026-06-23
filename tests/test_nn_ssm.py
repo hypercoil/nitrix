@@ -197,10 +197,10 @@ def test_explicit_pallas_on_cpu_raises():
 
 
 @pallas_only
-def test_pallas_falls_back_loudly_until_p1b():
-    # P1a: no fused kernel yet -> pallas-cuda falls back loudly to the
-    # reference (which still uses the parallel associative_scan on GPU).
-    x, delta, A, B, C, D = _inputs(2, 8, 4, 3, seed=10)
+def test_pallas_falls_back_loudly_on_unsupported_shape():
+    # A length not divisible by the kernel chunk size falls back loudly to the
+    # reference.  (Supported-shape kernel behaviour is in test_nn_ssm_kernel.py.)
+    x, delta, A, B, C, D = _inputs(2, 24, 4, 3, seed=10)
     reset_fallback_state()
     with warnings.catch_warnings(record=True) as rec:
         warnings.simplefilter('always')
