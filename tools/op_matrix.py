@@ -1742,6 +1742,7 @@ _RESAMPLE_VARIANT_FIXTURE = lambda: (  # noqa: E731
 
 def _resample_method_variants():
     from nitrix.geometry import (
+        CatmullRomCubic,
         CubicBSpline,
         Lanczos,
         MultiLabel,
@@ -1785,6 +1786,20 @@ def _resample_method_variants():
                 'order-3 B-spline; recursive prefilter (scan/assoc-scan) + 4-tap gather',
             ),
             notes='bit-exact scipy order=3 (mode=mirror); differentiable',
+        )
+    )
+    register(
+        OpInfo(
+            'nitrix.geometry.resample[catmull]',
+            fixture=_RESAMPLE_VARIANT_FIXTURE,
+            fn_override=_resampler(CatmullRomCubic()),
+            diff_arg=0,
+            vmap_arg=None,
+            invariants=(
+                'cardinal cubic-Hermite (tension -1/2); 4-tap separable gather, '
+                'no prefilter; partition of unity (constants/linears exact)',
+            ),
+            notes='interpolating C^1; differentiable; can overshoot (neg. lobes)',
         )
     )
     register(

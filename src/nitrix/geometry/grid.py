@@ -50,6 +50,7 @@ from jaxtyping import Array, Float
 
 from ._interpolate import (
     BoundaryMode,
+    CatmullRomCubic,
     CubicBSpline,
     Interpolator,
     Lanczos,
@@ -76,6 +77,7 @@ __all__ = [
     'NearestNeighbour',
     'Lanczos',
     'CubicBSpline',
+    'CatmullRomCubic',
     'MultiLabel',
     # legacy alias kept for now -- remove at v0.1 cleanup
     'cmass_regular_grid',
