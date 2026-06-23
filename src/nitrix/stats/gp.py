@@ -532,8 +532,9 @@ def _final_fit_from_design(
 # Per-engine (design, penalty) closures over rho -- shared by the corr= path
 # ---------------------------------------------------------------------------
 
+_RhoArg = Union[float, Float[Array, '']]  # rho as a host float or a traced scalar
 _DesignFn = Callable[[float], Float[Array, 'N p']]
-_PenFn = Callable[[float], Tuple[Float[Array, ' p'], Float[Array, '']]]
+_PenFn = Callable[[_RhoArg], Tuple[Float[Array, ' p'], Float[Array, '']]]
 
 
 def _hsgp_design_pen(
@@ -558,7 +559,7 @@ def _hsgp_design_pen(
     def design(_rho: float) -> Float[Array, 'N p']:
         return X
 
-    def pen(rho: float) -> Tuple[Array, Array]:
+    def pen(rho: _RhoArg) -> Tuple[Array, Array]:
         return _penalty_diag(
             sqrt_lambda, kernel, jnp.asarray(rho, dtype=dtype), n_fixed
         )
@@ -586,7 +587,7 @@ def _exact_design_pen(
             [T, _exact_features_train(x_np, kernel, rho, m, dtype)], axis=1
         )
 
-    def pen(_rho: float) -> Tuple[Array, Array]:
+    def pen(_rho: _RhoArg) -> Tuple[Array, Array]:
         return d_unit, log_pdet_unit
 
     return design, pen
@@ -881,13 +882,13 @@ def gp_fit(
             lo, hi, boundary, prior_weights,
         )
 
-    c_mid, big_l = _hsgp_domain(lo, hi, boundary)
-    sqrt_lambda, phase, inv_sqrt_L = _hsgp_eigen(m, c_mid, big_l, Y.dtype)
-
-    # Fixed full design X = [intercept | parametric | Phi]; rho enters only the
-    # diagonal penalty.
-    phi_design = _hsgp_features(x, sqrt_lambda, phase, inv_sqrt_L)  # (N, m)
-    X = jnp.concatenate([T, phi_design], axis=1)  # (N, p)
+    # Fixed design + rho-dependent diagonal-penalty closures (DS2: the shared
+    # construction, also used by the corr / exact paths). The HSGP design is
+    # rho-independent, so it is evaluated once and the cross-products reused.
+    design_fn, pen_fn = _hsgp_design_pen(
+        x, T, kernel, m, n_fixed, lo, hi, boundary, Y.dtype
+    )
+    X = design_fn(0.0)  # (N, p) -- fixed; rho enters only the penalty
     p = X.shape[1]
 
     xtx = X.T @ X
@@ -898,7 +899,7 @@ def gp_fit(
 
     def _pooled_nll(log_rho: Float[Array, '']) -> Float[Array, '']:
         rho = jnp.exp(log_rho)
-        d, log_pdet_pen = _penalty_diag(sqrt_lambda, kernel, rho, n_fixed)
+        d, log_pdet_pen = pen_fn(rho)
         per = blocked_vmap(
             lambda c_v, g_v: _pooled_nll_one(
                 c_v, g_v, xtx, d, log_pdet_pen, n, p, m, n_fixed,
@@ -919,9 +920,7 @@ def gp_fit(
     rho_hat = float(np.exp(log_rho_hat))
 
     # --- final per-element fit at rho_hat -----------------------------------
-    d_hat, log_pdet_hat = _penalty_diag(
-        sqrt_lambda, kernel, jnp.asarray(rho_hat, dtype=Y.dtype), n_fixed
-    )
+    d_hat, log_pdet_hat = pen_fn(rho_hat)
 
     def _final_one(
         c_v: Float[Array, ' p'], g_v: Float[Array, '']
@@ -1157,16 +1156,11 @@ def _gp_fit_exact(
     the shared PR2 penalised-REML core -- equivalent to ``lme.reml_fit`` on
     ``Z = chol(K_rho)`` by the penalty<->variance-component identity."""
     dtype = Y.dtype
-    # Unit spectral weights: penalty diag = [0...0, 1...1]; log-pdet 0.
-    d = jnp.concatenate(
-        [jnp.zeros((n_fixed,), dtype=dtype), jnp.ones((m,), dtype=dtype)]
-    )
-    log_pdet_pen = jnp.asarray(0.0, dtype=dtype)
     n = Y.shape[-1]
-
-    def _design(rho: float) -> Float[Array, 'N p']:
-        phi = _exact_features_train(x_np, kernel, rho, m, dtype)  # (N, m)
-        return jnp.concatenate([T, phi], axis=1)
+    # DS2: shared exact (design, penalty) closures (also used by the corr path) --
+    # a rho-dependent kernel-eigenfeature design and a fixed unit-weight penalty.
+    _design, _pen = _exact_design_pen(x_np, T, kernel, m, n_fixed, dtype)
+    d, log_pdet_pen = _pen(0.0)
 
     # Compile the pooled REML once; the moving design enters as a traced arg
     # (the host kernel eigh per rho stays outside the compiled region).
