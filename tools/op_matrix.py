@@ -4146,6 +4146,91 @@ register(
 )
 
 
+# --- nn (neural-network forward-block kernels) ------------------------------
+# The fused pallas-cuda path lands in suite Phase 2; the cataloged op is the
+# public dispatcher (jax reference today).  Layout (b, h, s, d); inherently
+# batched over (b, h), so vmap is redundant.
+register(
+    OpInfo(
+        'nitrix.nn.scaled_dot_product_attention',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (2, 4, 16, 8)),
+                jax.random.normal(_key(1), (2, 4, 16, 8)),
+                jax.random.normal(_key(2), (2, 4, 16, 8)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'online-softmax streaming (fused path)',
+            'flash attention',
+        ),
+        notes='dense SDPA; jax reference (fused pallas path = suite Phase 2)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.nn.selective_scan',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (2, 16, 8)),  # x
+                jax.nn.softplus(
+                    jax.random.normal(_key(1), (2, 16, 8))
+                ),  # delta
+                -jnp.exp(
+                    jax.random.normal(_key(2), (8, 4))
+                ),  # A (contractive)
+                jax.random.normal(_key(3), (2, 16, 4)),  # B
+                jax.random.normal(_key(4), (2, 16, 4)),  # C
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'linear-recurrence associative scan',
+            'Mamba/S6 selective',
+        ),
+        notes='selective scan; jax reference (fused pallas path = suite P1b)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.nn.layer_norm',
+        fixture=lambda: ((jax.random.normal(_key(0), (4, 32)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('zero-mean/unit-var over last axis', 'out_scale hook'),
+        notes='LayerNorm; jax reference (fused norm kernel perf-gated, §7.3)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.nn.group_norm',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (2, 8, 4, 4)), 4),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('per-group normalisation', 'channels-first n-D'),
+        notes='GroupNorm; jax reference (fused norm kernel perf-gated, §7.3)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.nn.instance_norm',
+        fixture=lambda: ((jax.random.normal(_key(0), (2, 8, 4, 4)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('per-sample/channel normalisation', 'channels-first n-D'),
+        notes='InstanceNorm; jax reference (fused norm kernel perf-gated, §7.3)',
+    )
+)
+
+
 # ---------------------------------------------------------------------------
 # Geometry surface / mesh suite, GP regression, stationary spectral densities.
 # Fixtures reuse icosphere(1) (42 verts, 80 faces).  Host-side rasterise/extract

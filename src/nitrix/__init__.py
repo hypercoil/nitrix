@@ -40,4 +40,7 @@ Top-level subpackages (full surface in each ``__init__.py``):
                   curves + noise, spatial flip / crop / resized-crop,
                   random affine + diffeomorphic fields, and label-to-
                   image (GMM) + bias-field synthesis.
+- ``nn``       -- functional neural-network forward-block kernels
+                  (scaled_dot_product_attention; selective_scan and fused
+                  norms planned) behind the pallas-cuda / jax dispatch.
 """

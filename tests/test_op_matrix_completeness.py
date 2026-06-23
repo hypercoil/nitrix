@@ -45,6 +45,7 @@ SUBPKGS = [
     'metrics',
     'register',
     'augment',
+    'nn',
 ]
 
 # Callable public functions intentionally kept OUT of the op matrix.  Membership
