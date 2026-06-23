@@ -366,10 +366,28 @@ gross-mem probe (no full `(l, d_state)` trajectory stored on the fused path).
 > `sequential ≡ associative` (≤1e-10, fp64); `D`-skip linearity; `A→0` ≡ cumsum
 > map; autodiff FD-check; byte-identical `backend='jax'`; jit; loud fallback on
 > `pallas-cuda` (P1a stub) — 14 tests. Cataloged in the op-matrix; combined nn
-> suite 47 passed / 3 skipped; ruff + mypy clean. **Deferred to P1b:** the fused
-> clean-room chunked block-parallel Pallas kernel + recompute-adjoint
-> `custom_vjp` (state never round-trips HBM) — the training-memory win; the
-> reference already delivers the GPU work-parallelism.
+> suite 47 passed / 3 skipped; ruff + mypy clean.
+
+> **Status (2026-06-23): P1b forward SHIPPED.** Fused Pallas forward kernel
+> (`_kernels/cuda/selective_scan.py`). **Triton-Pallas constraint discovered:**
+> it lowers only `cumsum` — not `cumprod` / `associative_scan` / `slice` (no
+> element indexing of register tiles) / `flip`. The recurrence is therefore a
+> **chunked cumsum closed form** — `logP_t = A·cumsum(Δ)_t`,
+> `h_t = exp(logP_t)·(cumsum(Δ·B·x·exp(−logP_t)) + h_start)`, chunked (16) so
+> `exp(±logP)` stays in fp32 range, carrying the `(n,)` state across chunks via
+> whole-tile sums. Grid over `(batch, channel)`; the `(l, d, n)` trajectory
+> never hits HBM (gross-mem probe: fused temp ≪ reference's `(l,d,n)`).
+> `custom_vjp` forward = fused kernel, backward = reference recompute (correct
+> `dx/dΔ/dA/dB/dC/dD`, all ranges). Validated on L4 (realistic Mamba: small Δ,
+> `A=−(1..n)`): fwd `pallas≈jax` ≤ 1.7e-7; grads match reference; dispatch +
+> loud fallback (non-pow2 `n`, non-divisible / non-pow2-chunk length, float64).
+> **fp32 dynamic-range limit** (documented): within-chunk `|A·cumsum(Δ)| < ~80`
+> — fine for the small-Δ Mamba regime; extreme ranges fall back to
+> `backend='jax'`. **Remaining (P1b backward):** the fully-fused recompute-adjoint
+> backward (reverse chunked cumsum + in-kernel `dA/dB/dC/dD` via
+> `plgpu.atomic_add` with zero-init aliasing) for the *training*-memory win —
+> math fully derived (the forward already emits the per-chunk start states it
+> needs); the reference backward holds the correctness budget meanwhile.
 
 ### 7.3 `nitrix.nn.norm.{layer_norm, group_norm, instance_norm}` — P3, CONVENIENCE (deferred)
 
