@@ -127,8 +127,39 @@ def regen_attention() -> None:
     )
 
 
+def regen_ssm() -> None:
+    from nitrix.nn.ssm import reference_selective_scan
+
+    rng = np.random.RandomState(10)
+    b, length, d, n = 2, 6, 4, 3
+    x = _randn(rng, b, length, d)
+    # delta is post-softplus (positive); A is negative (contractive).
+    delta = np.log1p(np.exp(_randn(rng, b, length, d))).astype(np.float32)
+    a = -np.exp(_randn(rng, d, n)).astype(np.float32)
+    bmat = _randn(rng, b, length, n)
+    cmat = _randn(rng, b, length, n)
+    dvec = _randn(rng, d)
+    out = np.asarray(
+        reference_selective_scan(
+            x, delta, a, bmat, cmat, dvec, method='sequential'
+        ),
+        dtype=np.float32,
+    )
+    _save(
+        'selective_scan_float32',
+        x=x,
+        delta=delta,
+        A=a,
+        B=bmat,
+        C=cmat,
+        D=dvec,
+        out=out,
+    )
+
+
 def main() -> None:
     regen_attention()
+    regen_ssm()
 
 
 if __name__ == '__main__':

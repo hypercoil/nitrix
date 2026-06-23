@@ -355,6 +355,22 @@ relationship be recorded. Second oracle for the VJP = autodiff through the
 a cumulative input map); FD-VJP vs the `associative_scan` autodiff oracle;
 gross-mem probe (no full `(l, d_state)` trajectory stored on the fused path).
 
+> **Status (2026-06-23): P1a SHIPPED (reference + dispatcher).** The pure-JAX
+> reference (`nn/ssm/_reference.py`) implements the discretised S6 recurrence
+> with both a sequential `lax.scan` oracle (`method='sequential'`) and a
+> parallel `lax.associative_scan` (`method='associative'`), `method='auto'`
+> flipping by platform via `default_backend_is_gpu()` — so the **GPU already
+> gets the `O(log L)` parallel-scan speedup** through the reference. Public
+> `nn.ssm.selective_scan` dispatches; autodiff-native (no hand VJP).
+> Validated: golden corpus; reference == independent numpy naive oracle (≤1e-10);
+> `sequential ≡ associative` (≤1e-10, fp64); `D`-skip linearity; `A→0` ≡ cumsum
+> map; autodiff FD-check; byte-identical `backend='jax'`; jit; loud fallback on
+> `pallas-cuda` (P1a stub) — 14 tests. Cataloged in the op-matrix; combined nn
+> suite 47 passed / 3 skipped; ruff + mypy clean. **Deferred to P1b:** the fused
+> clean-room chunked block-parallel Pallas kernel + recompute-adjoint
+> `custom_vjp` (state never round-trips HBM) — the training-memory win; the
+> reference already delivers the GPU work-parallelism.
+
 ### 7.3 `nitrix.nn.norm.{layer_norm, group_norm, instance_norm}` — P3, CONVENIENCE (deferred)
 
 **Surface:**

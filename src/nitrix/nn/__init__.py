@@ -16,16 +16,20 @@ Submodules:
 
 - ``attention`` -- ``scaled_dot_product_attention`` (dense / windowed
   additive-bias / causal / cross), with a flash-attention fast path.
-- ``ssm``       -- ``selective_scan`` (Mamba / S6).  *(planned -- suite P1)*
+- ``ssm``       -- ``selective_scan`` (Mamba / S6), with a parallel
+  ``associative_scan`` GPU path; fused chunked-scan kernel planned (P1b).
 - ``norm``      -- fused layer / group / instance norm.  *(planned -- P3)*
 
 See ``docs/feature-requests/nn-forward-kernels-suite.md``.
 """
 
-from . import attention
+from . import attention, ssm
 from .attention import scaled_dot_product_attention
+from .ssm import selective_scan
 
 __all__ = [
     'attention',
+    'ssm',
     'scaled_dot_product_attention',
+    'selective_scan',
 ]
