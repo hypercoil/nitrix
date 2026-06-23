@@ -463,6 +463,25 @@ Cross-ref [`lp-normalize.md`](lp-normalize.md) (the *reference* instance-norm
 stats home in `numerics.normalize`) — that owns the plain reference op; this
 owns the fused-kernel variant. Do not duplicate.
 
+> **Status (2026-06-23): P3 reference + API + `out_scale` SHIPPED; fused kernel
+> stays perf-gated.** `nitrix.nn.norm.{layer_norm, group_norm, instance_norm}` —
+> pure-JAX references (rsqrt / biased variance; LN over the trailing axis,
+> GN/IN channels-first n-D, `instance == group(C)`) + three-level dispatch, each
+> with the curse-of-depth `out_scale` hook (`out = out_scale·(x̂·w + b)`, folds
+> LayerNorm-Scaling / DeepNorm / ReZero into the affine for free). The
+> references are the **shippable correct path today**; `_kernels/cuda/norm.py`
+> stubs raise `PallasNotTileable` → loud fallback. **The fused single-pass
+> kernel is deliberately *not* built yet**: unlike attention / selective-scan
+> there is **no activation cliff** to remove — the win is pure bandwidth, which
+> XLA's own elementwise+reduction fusion already largely captures, so a custom
+> Pallas norm must be **certified to beat XLA by the perf suite before it ships**
+> (the suite's "perf wins must certify at scale" rule). The stock LN fork
+> (fwd + dx + dw/db) is well-trodden and ready as a drop-in when a profiler flags
+> norm bandwidth. Tests (16): golden (LN/GN/IN), numpy-oracle parity, `out_scale`
+> linearity, `instance == group(C)`, normalised statistics, autodiff FD,
+> byte-identical `backend='jax'`, jit, loud fallback. Op-matrix: 3 entries. Full
+> nn suite 77 passed / 4 skipped.
+
 ### 7.4 P2 — nimox-extraction blockers (cross-reference only, no code here)
 
 affine-matrix-algebra / spherical-parameterisation / field-regularisers are
