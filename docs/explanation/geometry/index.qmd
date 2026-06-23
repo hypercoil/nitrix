@@ -1,0 +1,426 @@
+---
+title: "Discrete geometry: meshes, volumes, and the operators on them"
+---
+
+::: {.callout-tldr title="Fast path"}
+Neuroimaging geometry lives in two discrete representations — **volumes** (voxel
+grids: images, masks, distance fields) and **surfaces** (triangle meshes: the
+cortical sheet). Each is a finite approximation of a *smooth continuous object*:
+a region of space, a curved 2-manifold. This unit builds the operators on
+them — Laplacians, curvature, distance, isosurfaces — from intuition to rigour,
+and shows that almost all of the work is done by **two** ideas:
+
+- one **semiring** operator-machine (a gather-and-reduce) that becomes diffusion,
+  dilation, or a distance transform purely by swapping its arithmetic;
+- one **Laplace–Beltrami** operator $\Delta = M^{-1}L$ that drives smoothing,
+  curvature, and spectra.
+
+A page-per-topic ladder follows; this page is the map.
+:::
+
+This unit is written for a reader **fluent in linear algebra** — matrices, least
+squares, eigendecomposition, transposes, rank — but with **no formal training in
+differential geometry, numerical methods, or graphics**. We build every operator
+up from the linear algebra you already own, and we explain each geometric idea the
+first time it appears. It is the sibling of the [statistical modelling
+suite](../statistics/index.qmd) and shares its house style.
+
+## The one governing idea {#sec-governing}
+
+A triangle mesh is not a surface; a voxel grid is not a region of space. Each is a
+*discretisation* — a finite stand-in for a smooth continuous object we can never
+store exactly. The cortical sheet is a smooth 2-manifold; we hold it as a few
+hundred thousand triangles. A brain mask is a smooth solid region; we hold it as a
+grid of 1-mm cubes. The whole craft of this unit is to compute a geometric
+quantity — a Laplacian, a curvature, a distance — *on the discrete object* in such
+a way that, **as the discretisation is refined, the answer converges to the
+continuous truth**.
+
+That single sentence sets three standards we hold every routine to:
+
+1. **Discrete approximates smooth.** Every operator is the discrete shadow of a
+   continuous one (a finite-difference stencil approximates $\partial^2/\partial
+   x^2$; the cotangent Laplacian approximates the Laplace–Beltrami operator
+   $\Delta$ on the manifold). We always name the continuous object being
+   approximated.
+2. **Convergence under refinement.** A good discrete operator is not merely
+   "close enough at the resolution you happen to have"; its error shrinks as the
+   mesh is subdivided or the grid is made finer. Where the rate is known, we say
+   it.
+3. **Validation by oracle and correlation, not bit-parity.** We do not check a
+   geometry routine by demanding it match a reference implementation
+   bit-for-bit — two correct codes will disagree in the last few bits. We check
+   it against an **analytic oracle** (a sphere of radius $r$ has mean curvature
+   $H = 1/r$ everywhere; the Gauss–Bonnet theorem fixes $\sum_i K_i A_i = 2\pi
+   \chi$ for a closed surface) and against real data by **class and correlation**
+   (does it land in the right regime, and does it track a trusted tool like ITK
+   with high correlation?). This "metrics ↔ ITK" posture — agreement in
+   *behaviour*, not in *bits* — runs through the whole unit.
+
+Hold these three together and the unit has a spine: every page introduces a
+discrete operator, names its continuous limit, and tells you how to know it is
+right.
+
+## The two representations and the bridge {#sec-bridge}
+
+Everything here is one of two shapes, and a single round trip connects them.
+
+**Volumes.** A scalar field sampled on a regular grid: an intensity image, a
+binary mask, a probability map, or a (signed-)distance field $s(x)$ that is
+negative inside an object and zero on its boundary. Coordinates are **index space**
+(grid index $i$ ↔ position $i$), arrays are **channels-last**, and multi-axis grids
+use `indexing='ij'`. Volume operators — morphology, the Euclidean distance
+transform, the SDF — live in [Volumes](volumes.qmd).
+
+**Surfaces.** A triangle mesh $(V, F)$: vertices $V \in \mathbb{R}^{n\times 3}$
+(rows $v_i$) and faces $F \in \mathbb{Z}^{m\times 3}$ (triples of vertex indices).
+The cortical sheet is the canonical example. Mesh operators — the cotangent
+Laplacian, curvature, the spectrum — span
+[Laplace–Beltrami](laplace-beltrami.qmd) through [Curvature](curvature.qmd).
+
+**The bridge.** The two representations convert into each other through the **zero
+level set** of a signed-distance field. Given a volume, `marching_cubes`
+([volume-surface](volume-surface.qmd#sec-marching)) walks the grid and stitches
+together the polygon where $s$ crosses the isovalue, producing a mesh. Given a
+mesh, `mesh_to_sdf` ([volume-surface](volume-surface.qmd#sec-mesh-sdf)) rasterises
+it back to a signed-distance volume by computing, at every voxel, the distance to
+the nearest triangle. The two are inverses up to discretisation error, and the
+round trip is the workhorse behind mask-to-surface and surface-repair pipelines.
+
+@fig-index-bridge runs the round trip in 2D, where it is easy to see: an analytic
+SDF, the contour `marching_cubes` would extract (here its 2D cousin,
+marching-squares), and the SDF you recover by rasterising that contour back.
+
+```{python}
+#| label: fig-index-bridge
+#| fig-cap: "The volume ↔ surface bridge. Left: an analytic signed-distance field s(x), negative (blue) inside, zero on the black contour. Middle: the s=0 level set extracted by marching-squares (the 2D sibling of marching_cubes). Right: rasterising that contour back to a signed-distance volume — the round trip closes up to discretisation error."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# --- An analytic signed-distance field: union of two discs (negative inside) ---
+# We work on a 2D slice; the same idea lifts verbatim to 3D voxels.
+n = 200
+xs = np.linspace(-1.5, 1.5, n)
+X, Y = np.meshgrid(xs, xs, indexing="ij")
+
+def disc_sdf(cx, cy, r):
+    return np.sqrt((X - cx) ** 2 + (Y - cy) ** 2) - r
+
+# union of SDFs is the elementwise min
+s = np.minimum(disc_sdf(-0.35, 0.0, 0.7), disc_sdf(0.45, 0.1, 0.55))
+
+# --- Marching squares: extract the s = 0 contour by linear edge interpolation ---
+# For each grid edge whose endpoints straddle 0, place a vertex where s crosses 0.
+def marching_squares(field, gx, gy):
+    segs = []
+    inside = field < 0.0
+    for i in range(field.shape[0] - 1):
+        for j in range(field.shape[1] - 1):
+            # the 4 corners of cell (i,j) going CCW
+            corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+            code = sum((1 << k) for k, c in enumerate(corners) if inside[c])
+            if code in (0, 15):
+                continue
+            # crossing point on an edge between corners a,b
+            pts = []
+            for a, b in [(0, 1), (1, 2), (2, 3), (3, 0)]:
+                ca, cb = corners[a], corners[b]
+                sa, sb = field[ca], field[cb]
+                if (sa < 0) != (sb < 0):
+                    t = sa / (sa - sb)
+                    px = gx[ca[0]] + t * (gx[cb[0]] - gx[ca[0]])
+                    py = gy[ca[1]] + t * (gy[cb[1]] - gy[ca[1]])
+                    pts.append((px, py))
+            # connect the (usually 2) crossing points
+            for k in range(0, len(pts) - 1, 2):
+                segs.append((pts[k], pts[k + 1]))
+    return segs
+
+segs = marching_squares(s, xs, xs)
+
+# --- Rasterise the extracted contour back to an SDF: distance to nearest segment ---
+# (the mesh -> SDF leg of the round trip; we use segment midpoints as a proxy)
+mids = np.array([((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in segs])
+P = np.stack([X.ravel(), Y.ravel()], axis=1)
+d = np.min(np.linalg.norm(P[:, None, :] - mids[None, :, :], axis=2), axis=1)
+s_back = d.reshape(X.shape) * np.where(s < 0, -1.0, 1.0)
+
+fig, ax = plt.subplots(1, 3, figsize=(12, 4))
+ax[0].contourf(X, Y, s, levels=20, cmap="RdBu")
+ax[0].contour(X, Y, s, levels=[0], colors="k", linewidths=1.5)
+ax[0].set_title("volume: analytic SDF $s(x)$\n(negative inside)")
+for a, b in segs:
+    ax[1].plot([a[0], b[0]], [a[1], b[1]], color="k", lw=1.0)
+ax[1].set_xlim(-1.5, 1.5); ax[1].set_ylim(-1.5, 1.5)
+ax[1].set_title("surface: marching-squares\ncontour of $s=0$")
+ax[2].contourf(X, Y, s_back, levels=20, cmap="RdBu")
+ax[2].contour(X, Y, s_back, levels=[0], colors="k", linewidths=1.5)
+ax[2].set_title("back to volume:\nrasterised SDF")
+for a in ax:
+    a.set_aspect("equal"); a.set_xticks([]); a.set_yticks([])
+fig.suptitle("The volume <-> surface bridge: a round trip through the s=0 level set", y=1.02)
+fig.tight_layout()
+plt.show()
+```
+
+The 3D routines, `marching_cubes` and `mesh_to_sdf`, are both **HOST-CTOR**:
+their output shape is data-dependent (you cannot know the triangle count until you
+have walked the grid), so they are host-side NumPy builders that emit JAX arrays
+rather than fixed-shape jittable kernels — never put either inside a `jit`-ed loop.
+`nitrix`'s `marching_cubes` uses **marching *tetrahedra*** (a Freudenthal–Kuhn
+split of each cube into six tets) rather than the classic Lorensen–Cline cube
+table, precisely because the tetrahedral version is *watertight and manifold by
+construction* — a property that matters for the genus-0 goal discussed in
+[volume-surface](volume-surface.qmd#sec-topology).
+
+## The unifying threads {#sec-threads}
+
+Three ideas recur on nearly every page. Meet them once here; each chapter develops
+its own.
+
+### Thread 1 — the semiring machine {#sec-thread-semiring}
+
+A surprising number of geometry operators are the *same computation* — visit each
+element's neighbours, combine the gathered values, reduce them to one number — run
+over *different arithmetic*. Abstract the arithmetic into a **semiring**: a pair
+$(\oplus, \otimes)$ of a reduce and a combine, with an identity for $\oplus$. Then:
+
+- **REAL** $(\oplus, \otimes) = (+, \times)$ gives the ordinary weighted sum: one
+  step of **diffusion / smoothing**;
+- **max-plus** $(\max, +)$ gives **dilation** — morphological growth;
+- **min-plus** $(\min, +)$ gives a relaxation of the **distance transform** —
+  shortest path under additive edge costs.
+
+@fig-index-semiring runs one tiny gather-and-reduce loop with three different
+$(\oplus, \otimes)$ pairs and gets three different geometric behaviours out of it.
+
+```{python}
+#| label: fig-index-semiring
+#| fig-cap: "One operator machine, three semirings. The same gather-and-reduce over a 3-tap neighbourhood becomes diffusion under REAL (+,×), dilation under max-plus (max,+), and a distance transform under min-plus (min,+). The grey object is identical in all three panels; only the arithmetic changed."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# One discrete signal on a line; one 3-tap stencil; three different (reduce, combine)
+# pairs run the SAME gather-and-reduce machine to do three different geometric jobs.
+n = 60
+x = np.arange(n)
+mask = ((x > 18) & (x < 30)) | ((x > 38) & (x < 44))  # a binary "object"
+mask = mask.astype(float)
+
+# 3-tap neighbourhood stencil (offsets -1, 0, +1) with structuring weights.
+offsets = np.array([-1, 0, 1])
+w_diffuse = np.array([0.25, 0.5, 0.25])  # REAL: (+, *) weighted average
+w_struct = np.array([0.0, 0.0, 0.0])     # tropical: flat structuring element
+
+def gather(sig, off):
+    idx = np.clip(np.arange(n)[:, None] + off[None, :], 0, n - 1)
+    return sig[idx]  # (n, k)
+
+# REAL semiring (+, *): one diffusion step -> smoothing
+def step_real(sig):
+    g = gather(sig, offsets)
+    return (g * w_diffuse[None, :]).sum(axis=1)
+
+# max-plus (max, +): dilation -> grows the object
+def step_maxplus(sig):
+    g = gather(sig, offsets)
+    return (g + w_struct[None, :]).max(axis=1)
+
+# min-plus (min, +): one relaxation of a distance transform.
+# Seed: 0 inside the object, +inf outside; each step takes the min over
+# neighbours + edge cost (=1), so values become distance-to-object.
+INF = 1e9
+def step_minplus(dist):
+    g = gather(dist, offsets)
+    cost = np.array([1.0, 0.0, 1.0])  # step to a neighbour costs 1, stay costs 0
+    return (g + cost[None, :]).min(axis=1)
+
+real = mask.copy()
+for _ in range(8):
+    real = step_real(real)
+
+dil = mask.copy()
+for _ in range(4):
+    dil = step_maxplus(dil)
+
+dist = np.where(mask > 0, 0.0, INF)
+for _ in range(n):
+    dist = step_minplus(dist)
+
+fig, ax = plt.subplots(3, 1, figsize=(9, 6), sharex=True)
+ax[0].step(x, mask, where="mid", color="0.5", label="object (mask)")
+ax[0].plot(x, real, color="C0", lw=2, label="REAL $(+,\\times)$: diffusion / smoothing")
+ax[0].legend(loc="upper right"); ax[0].set_ylabel("value")
+
+ax[1].step(x, mask, where="mid", color="0.5", label="object (mask)")
+ax[1].step(x, dil, where="mid", color="C3", lw=2, label="max-plus $(\\max,+)$: dilation")
+ax[1].legend(loc="upper right"); ax[1].set_ylabel("value")
+
+ax[2].step(x, mask, where="mid", color="0.5", label="object (mask)")
+ax[2].plot(x, dist, color="C2", lw=2, label="min-plus $(\\min,+)$: distance transform")
+ax[2].legend(loc="upper right"); ax[2].set_ylabel("distance")
+ax[2].set_xlabel("grid index")
+
+fig.suptitle("One operator machine, three semirings: swap $(\\oplus,\\otimes)$, change the geometry", y=0.98)
+fig.tight_layout()
+plt.show()
+```
+
+In `nitrix` this machine is real code, not only a metaphor. The
+[`nitrix.semiring`](operators.qmd#sec-semiring) package exports the algebras
+(`REAL`, `LOG`, `TROPICAL_MAX_PLUS`, `TROPICAL_MIN_PLUS`, `BOOLEAN`, `EUCLIDEAN`)
+and the streaming reductions (`semiring_matmul`, `semiring_ell_matmul`,
+`semiring_conv`) that consume them. The morphology operators
+([volumes](volumes.qmd#sec-morphology)) — `dilate`, `erode`, `open`, `close`,
+`distance_transform` — are thin specialisations of `semiring_conv` over the
+tropical algebras, and the sphere convolution `spherical_conv` is `REAL`
+re-backed on `semiring_ell_matmul` for $O(n \cdot k)$ instead of $O(n^2)$. Learn
+the machine once on the [operators](operators.qmd) page; you will recognise it
+everywhere after.
+
+### Thread 2 — the Laplace–Beltrami operator {#sec-thread-lbo}
+
+If the semiring machine is the engine of the *volume* side, the **Laplace–Beltrami
+operator** is the engine of the *surface* side. On a smooth manifold $\Delta$
+measures how much a function differs from the average of its neighbourhood — it is
+the curved-space generalisation of the familiar $\nabla^2$. Discretised on a mesh
+it factors into two pieces from the canonical notation: a **stiffness** matrix $L$
+(the cotangent Laplacian, symmetric PSD, with edge weights $w_{ij} = \tfrac12(\cot
+\alpha_{ij} + \cot \beta_{ij})$) and a **mass** matrix $M = \operatorname{diag}(A_i)$
+(the lumped per-vertex areas), giving
+
+$$
+\Delta = M^{-1} L .
+$$ {#eq-index-lbo}
+
+That one operator unlocks three chapters. Run heat flow with it and you get
+**smoothing**: `surface_smooth` diffuses a per-vertex scalar field — `sulc`,
+`curv`, myelin, thickness — *along* the cortex with one backward-Euler step,
+solving the SPD system $(M + tL)\,x = M x_0$ for diffusion time $t$. (Its
+combinatorial cousin `mesh_laplacian_smooth` smooths vertex *positions* with the
+uniform 1-ring Laplacian instead of the cotangent one — a cheaper geometric
+denoiser, not the metric-aware field smoother.) Apply $\Delta$ to the *coordinate*
+functions and you read off **curvature**:
+mean curvature $H$ from $\Delta$ acting on the embedding, Gaussian curvature $K$
+from the angle defect, principal curvatures $\kappa_1 \ge \kappa_2$ from the shape
+operator ([curvature](curvature.qmd)). Solve the generalised eigenproblem $L\phi_k
+= \lambda_k M \phi_k$ and you get the **spectrum**: eigenfunctions $\phi_k$ and
+eigenvalues $\lambda_k$ that give a shape-DNA descriptor, a heat kernel, and a
+spectral embedding ([spectral](spectral.qmd)). The pieces are built in
+[Laplace–Beltrami](laplace-beltrami.qmd) (`mesh_cotangent_laplacian`,
+`mesh_mass_matrix`); everything downstream reuses them.
+
+The graph world mirrors this exactly: the [`nitrix.graph`](graph-geometry.qmd)
+package builds a `laplacian` on an arbitrary weighted graph and reuses the same
+spectral toolkit (`laplacian_eigenmap`, `diffusion_embedding`) for connectomes and
+parcellation — a mesh is, after all, a graph with geometry attached.
+
+### Thread 3 — device discipline {#sec-thread-device}
+
+The third thread is not mathematics but engineering, and it explains the API's
+shape. `nitrix` runs on GPUs through **XLA, not Pallas/Triton**, and deliberately
+avoids the vendor solver **cuSOLVER** (which is unreliable on the accelerators we
+target). That forces a clean split, made precise in
+[foundations](foundations.qmd#sec-classes), that we tag throughout the unit:
+
+- **DIFF-JAX** — jittable *and* differentiable, fixed output shape: the operators
+  you put inside training loops (the cotangent Laplacian apply, smoothing, the
+  semiring matmuls).
+- **HOST-CTOR** — data-dependent *construction* whose output shape you cannot know
+  in advance (the icosphere builder, `marching_cubes`, `mesh_to_sdf`). It runs on
+  the host and emits JAX arrays.
+- **HOST-QA** — host-side *query / quality-assurance* that returns a Python scalar
+  or does cleanup (`euler_characteristic`, `genus`, `find_self_intersections`).
+
+The single rule that ties them together: **never call a HOST op inside a jitted
+loop.** Build your mesh and run your QA gates on the host once; then hand the
+fixed-shape arrays to the DIFF-JAX operators for the hot path. Every page tags its
+routines so you always know which side of that line you are on.
+
+## Chapters {#sec-chapters}
+
+Read in order for the full climb; each chapter assumes the ones before it.
+
+1. [**Foundations**](foundations.qmd) — discretisation, the DIFF-JAX / HOST-CTOR /
+   HOST-QA execution classes, device discipline, coordinate and array conventions,
+   and how we validate (analytic oracle + correlation). *Read this first.*
+2. [**Operators**](operators.qmd) — the ELL sparse format, the semiring machine,
+   the `apply` interface, and adjacency: the substrate everything else runs on.
+3. [**Laplace–Beltrami**](laplace-beltrami.qmd) — the cotangent stiffness $L$, the
+   lumped mass $M$, and mesh smoothing: the surface engine.
+4. [**Spectral geometry**](spectral.qmd) — the eigenproblem $L\phi_k = \lambda_k M
+   \phi_k$, the heat kernel, and spectral embeddings.
+5. [**Curvature**](curvature.qmd) — mean, Gaussian, and principal curvatures, and
+   areal/strain distortion, validated against the sphere and Gauss–Bonnet.
+6. [**Volumes**](volumes.qmd) — morphology, the exact Euclidean distance
+   transform, and signed-distance fields: the semiring machine on grids.
+7. [**Volume ↔ surface**](volume-surface.qmd) — `marching_cubes`, `mesh_to_sdf`,
+   and the genus-0 topology gate: the bridge between the two representations.
+
+Technical-reference tier (referenced throughout, read as needed):
+
+- [**Solvers**](solvers.qmd) — the cuSOLVER-free eigensolve, conjugate gradients,
+  and the kernels behind them.
+- [**Performance**](performance.qmd) — ELL / SectionedELL storage, padding, and the
+  XLA backend.
+- [**Graph geometry**](graph-geometry.qmd) — the graph Laplacian, graph pooling,
+  and spectral graph methods, reusing the surface toolkit for connectomes.
+
+## Scope: what this unit is, and is not {#sec-scope}
+
+This unit is the **geometry of objects and the operators on them** — meshes,
+volumes, Laplacians, curvature, distance, isosurfaces. It is *not* about **maps
+between geometries**: registration, resampling, the Lie-group transform chart
+(`rigid_exp` / `affine_exp`), diffeomorphic velocity-field warps, spherical
+parameterisation, and `surface_resample` all belong to a **separate
+registration/deformation unit**, and parcellation/label transfer to another again.
+When this unit touches a map (the volume ↔ surface bridge, say) it does so only as
+a relationship between objects, never as a registration problem.
+
+## Reading paths {#sec-paths}
+
+- **Fast path** — read each chapter's TL;DR plus [foundations](foundations.qmd) and
+  [operators](operators.qmd) in full. That is enough to use the unit and to know
+  which operator answers which question.
+- **Thorough path** — read in chapter order. Each chapter names the continuous
+  object it approximates, proves convergence where it can, and validates against an
+  analytic oracle.
+- **Developer path** — follow the source links in each page's *See also* and lean on
+  the reference tier ([solvers](solvers.qmd), [performance](performance.qmd),
+  [graph geometry](graph-geometry.qmd)) for storage layouts, kernel choices, and the
+  execution-class contract.
+
+## Further reading
+
+- M. Botsch, L. Kobbelt, M. Pauly, P. Alliez, B. Lévy (2010). *Polygon Mesh
+  Processing*. A K Peters / CRC Press. — the standard reference for discrete mesh
+  operators, the cotangent Laplacian, and remeshing.
+- K. Crane, F. de Goes, M. Desbrun, P. Schröder (2013). *Digital Geometry
+  Processing with Discrete Exterior Calculus*. ACM SIGGRAPH Courses. — the
+  discrete-approximates-smooth viewpoint developed rigorously.
+- M. Meyer, M. Desbrun, P. Schröder, A. H. Barr (2003). "Discrete
+  Differential-Geometry Operators for Triangulated 2-Manifolds." In *Visualization
+  and Mathematics III*, Springer. — the mixed-Voronoi area and cotangent operator.
+- W. E. Lorensen, H. E. Cline (1987). "Marching Cubes: A High Resolution 3D Surface
+  Construction Algorithm." *ACM SIGGRAPH Computer Graphics* 21(4). — the original
+  isosurface algorithm; we use the crack-free marching-tetrahedra variant.
+- B. Lévy, R. H. Zhang (2010). "Spectral Mesh Processing." ACM SIGGRAPH Courses. —
+  the Laplace–Beltrami spectrum as a geometric signal-processing basis.
+- F. Baccelli, G. Cohen, G. J. Olsder, J.-P. Quadrat (1992). *Synchronization and
+  Linearity: An Algebra for Discrete Event Systems*. Wiley. — the tropical
+  (max-plus / min-plus) semiring foundations behind the operator machine.
+
+## See also
+
+- Package root: [`nitrix.geometry`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/__init__.py)
+- The operator substrate: [`nitrix.semiring`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/__init__.py)
+  and [`nitrix.sparse`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/__init__.py)
+- Grid operators: [`nitrix.morphology`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/morphology/__init__.py)
+- The graph mirror: [`nitrix.graph`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/graph/__init__.py)
+- Sibling unit: [the statistical modelling suite](../statistics/index.qmd).

@@ -1,0 +1,563 @@
+---
+title: "Generalised linear mixed models: non-Gaussian and grouped"
+---
+
+::: {.callout-tldr title="Fast path"}
+A **GLMM** is the [GLM](glm.qmd) and the [LME](lme.qmd) at once: a non-Gaussian
+response (binary, counts) *and* grouped observations (a random intercept per
+subject). The honest likelihood needs you to **integrate the random effects out**,
+and for a non-Gaussian family that integral has **no closed form** — that single
+fact organises this whole chapter. Everything below is a different way to do the
+intractable integral, in ascending accuracy and cost: **PQL** (linearise the
+response, reuse the LME), the **Laplace approximation** (fit a Gaussian at the
+integrand's peak), and **adaptive Gauss–Hermite quadrature** (sample the integrand
+at several clever points). Laplace is AGQ with one node; PQL is a cruder cousin of
+Laplace. The one *scaling* idea, orthogonal to accuracy, is that with many grouping
+levels a block-structured **Schur/Woodbury** trick keeps the cost linear in the
+level count instead of cubic.
+:::
+
+Rung 4 of [the ladder](index.qmd): it stacks rungs 1 and 2, then asks the new
+question those two never had to face — *how do you get a likelihood at all?*
+
+## The combination
+
+Two structures we have already met, together:
+
+- a **non-Gaussian family** — lesion present/absent per scan, event counts per
+  subject ([GLM](glm.qmd));
+- a **random effect** — each subject carries its own baseline offset
+  ([LME](lme.qmd)).
+
+A concrete, vivid question to keep in mind: *for each voxel, does the probability of
+a supra-threshold activation rise with task load, once we allow every subject their
+own baseline excitability?* The response is binary (active / not), the predictor is
+a fixed task-load slope, and the subject baselines are a random intercept. Written
+as a model,
+
+$$
+g\big(\mathbb{E}[y\mid b]\big) = X\beta + Zb,
+\qquad b \sim \mathcal{N}(0, G),
+$$ {#eq-glmm}
+
+where $g$ is the link, $X\beta$ the fixed-effect linear predictor, $Z$ the
+random-effects design (for a scalar random intercept $Z$ is the one-hot
+group-indicator matrix, $b$ the per-group offsets, and $G=\sigma_b^2 I_q$). This is
+the model behind "binary outcomes with a random intercept per subject" and similar
+mass-univariate group analyses. In `nitrix` it is `glmm_fit(Y, X, group=..., family=...)`.
+
+## Why it is genuinely hard: the integral with no closed form {#sec-integral}
+
+Here is the thing that makes a GLMM categorically harder than either parent, and the
+idea that the rest of the chapter circles around.
+
+What we *want* is the likelihood of the data given the parameters we estimate
+($\beta$, $G$). But the model in @eq-glmm is written *conditional on* the random
+effects $b$, which we do not observe and do not want to estimate as parameters (there
+can be thousands of them). The honest move is to treat $b$ as a nuisance and
+**average it out** under its own distribution:
+
+$$
+L(\beta, G) = \int p(y \mid b;\beta)\, p(b; G)\, \mathrm{d}b .
+$$ {#eq-marginal}
+
+Read this as "the probability of the data, averaged over every possible draw of the
+subject offsets, weighted by how plausible each draw is." That is *the* marginal (or
+integrated) likelihood, and it is the right thing to maximise.
+
+For a **Gaussian** LME this integral is a Gaussian integrated against a Gaussian,
+and that has an exact closed form — it collapsed to the tidy marginal covariance
+$V_y = ZGZ^{\top}+R$ of the [LME chapter](lme.qmd#sec-varcomp). That collapse is a
+gift of the Gaussian family; it is the reason the LME never had to talk about
+intractable integrals.
+
+For a **non-Gaussian** family the gift is withdrawn. $p(y\mid b)$ is now Bernoulli or
+Poisson — exponential in a *nonlinear* function of $b$ through the link — so the
+integrand in @eq-marginal is no longer Gaussian in $b$ and the integral has **no
+closed form**. There is no algebra that produces $L(\beta,G)$ exactly. We are forced
+to *approximate the integral*, and the three methods `nitrix` ships are exactly three
+answers to "how shall we approximate it?", trading accuracy against cost:
+
+| method | the idea in one line | accuracy | cost |
+|---|---|---|---|
+| **PQL** (`'pql'`) | linearise the response, then do the *Gaussian* integral | lowest | cheapest |
+| **Laplace** (`'laplace'`) | fit one Gaussian at the integrand's peak | better | moderate |
+| **AGQ** (`'agq'`) | sample the integrand at several quadrature points | highest | most |
+
+Keep that table in view; the next three sections fill in each row from intuition to
+the exact routine.
+
+## PQL: turn it back into the Gaussian integral you can do {#sec-pql}
+
+The cheapest escape is the most opportunistic one: *if the only integral we know how
+to do exactly is the Gaussian one, can we bend the problem until that is the integral
+we face?* That is precisely what **penalised quasi-likelihood** (Breslow & Clayton
+1993) does, and it is built entirely from parts you already have.
+
+The trick has two moves you have each seen before.
+
+**Move 1 — linearise the response (borrow the GLM's working response).** Inside the
+[GLM](glm.qmd), IRLS never works with $y$ directly; it works with a local linear
+surrogate, the **working response** $z$ and **working weights** $W$ (the
+[working response and weights](glm.qmd#sec-working)),
+
+$$
+z = \eta + (y - \mu)\,\frac{\mathrm{d}\eta}{\mathrm{d}\mu},
+\qquad
+W = \operatorname{diag}\!\Big(\frac{(\mathrm{d}\mu/\mathrm{d}\eta)^2}{V(\mu)}\Big).
+$$ {#eq-working}
+
+$z$ is "where a Newton step thinks the response should be on the linear-predictor
+scale," and $W$ down-weights observations whose mean is in a high-variance regime.
+The point that makes PQL possible: *treated as data, $z$ is approximately Gaussian
+with covariance $W^{-1}$.* So one IRLS step replaces the awkward non-Gaussian $y$
+with a Gaussian-looking $z$.
+
+**Move 2 — treat the random effect as a penalty (borrow the GAM/LME hinge).** Once
+the working response is (locally) Gaussian, fitting @eq-glmm to $z$ is *exactly a
+Gaussian mixed model on $z$*. And a Gaussian mixed model is a **penalised** least
+squares: the random-effect prior $b\sim\mathcal N(0,\sigma_b^2 I)$ is identical to a
+ridge **penalty** $\tfrac{1}{\sigma_b^2}\,b^{\top} S\, b$ with penalty matrix
+$S = I_q$ — the [grand equivalence](foundations.qmd#sec-equivalence) "a penalty *is*
+a variance." So solving for $(\beta,b)$ is the penalised weighted normal-equations
+solve
+
+$$
+\begin{bmatrix} X^{\top}WX & X^{\top}WZ \\ Z^{\top}WX & Z^{\top}WZ + \lambda S \end{bmatrix}
+\begin{bmatrix}\beta\\ b\end{bmatrix}
+=
+\begin{bmatrix} X^{\top}Wz \\ Z^{\top}Wz \end{bmatrix},
+\qquad \lambda = \frac{\phi}{\sigma_b^2},
+$$ {#eq-pennormal}
+
+which is *the same* solve the [GAM](gam.qmd) does inside, with the group-indicator
+block $Z$ playing the role of a smooth and $S=I_q$ its penalty. The smoothing
+parameter $\lambda$ is the inverse random-effect variance (up to the dispersion
+$\phi$).
+
+Now the integral is gone: we never integrate $b$ out at all. Instead each PQL pass is
+
+1. From the current fit, form the working response $z$ and weights $W$ of
+   @eq-working — exactly the [GLM](glm.qmd#sec-working) IRLS step (the **inner** loop).
+2. Solve the penalised system @eq-pennormal for $(\beta, b)$ at the current $\lambda$
+   — exactly the [GAM](gam.qmd) inner solve.
+3. Take **one [Fellner–Schall](fellner-schall.qmd#sec-fs-update) step** to update the
+   penalty strength $\lambda = \phi/\sigma_b^2$ — exactly the variance-component
+   update (the **outer** loop).
+
+Iterate to a fixed budget. That is the whole estimator: IRLS inside, Fellner–Schall
+outside, a penalised solve in between. The penalty matrix is the identity $S=I_q$, so
+the Fellner–Schall update specialises neatly. With $V$ the penalised inverse and $b$
+the current BLUPs, the
+[generalised Fellner–Schall update](fellner-schall.qmd#sec-fs-update) reads
+
+$$
+\lambda \;\leftarrow\; \lambda\,
+\frac{\operatorname{tr}\!\big(S_\lambda^{+} S\big) - \operatorname{tr}(VS)}{b^{\top} S\, b / \phi}
+\;=\;
+\lambda\,\frac{q - \lambda\,\operatorname{tr}(V_{bb})}{b^{\top} b / \phi},
+$$ {#eq-fsupdate}
+
+since for the full-rank identity penalty $\operatorname{tr}(S_\lambda^{+}S)=q/\lambda$
+and $\operatorname{tr}(VS)=\operatorname{tr}(V_{bb})$. The numerator is "how much
+random-effect signal the fit actually used"; the denominator $b^{\top}b/\phi$ is the
+energy in the offsets. You can see both pieces literally in the source: in
+`stats/glmm/_pql.py`, `_glmm_many_one` computes `energy = b @ b`, the curvature trace
+`tr_vbb`, and `lam_new = clip(num / den, lam_floor, lam_ceil)`.
+
+::: {.callout-note title="Be honest: PQL is biased for binary/low-count data"}
+PQL is a *quasi*-likelihood method: it never wrote down @eq-marginal, it bent the
+problem so it would not have to. The bend is a single linearisation of the response
+around the current mean, which is accurate when each group carries a lot of
+information (large groups, counts well away from zero) and **crude when it does not**.
+For sparse binary data or low counts — exactly the small-cluster regime common in
+neuroimaging — PQL systematically **attenuates** (biases toward zero) the variance
+component $\sigma_b^2$. This is not a bug; it is the price of avoiding the integral.
+It is also the motivation for the next rung, which approximates @eq-marginal
+*directly*. `nitrix` exposes it as `method='laplace'`.
+:::
+
+## The one new problem: many levels {#sec-manylevels}
+
+Before climbing to better integrals, deal with a cost issue that is orthogonal to
+accuracy. A random effect with $q$ levels adds $q$ columns to the design, so a *dense*
+solve of @eq-pennormal costs $O\big((p+q)^3\big)$ per element. The size of $q$ splits
+the world, and `glmm_fit` **dispatches on the level count** (`_base.py`, threshold
+`few_level_max`, default 64):
+
+- **Few levels** — site, scanner, batch ($q \sim 10$–$50$): the dense solve is cheap
+  and *optimal*. `nitrix` runs the literal [GAMM](gamm.qmd) path: `_glmm_few_level`
+  calls `gam_fit` with a `re_smooth(group)` block and the GLM family, $X$ entering as
+  the unpenalised parametric block. The random-effect penalty's Fellner–Schall
+  smoothing parameter *is* the RE precision $1/\sigma_b^2$ (the code reads
+  `re_var = res.dispersion / res.lam[:, 0]`).
+- **Many levels** — a random intercept per *subject* ($q \sim 10^2$–$10^3$): the cube
+  is a latency cliff, and `_glmm_many_level` takes a structured route.
+
+The escape is structure, and it is the [block-Woodbury](solvers.qmd#sec-woodbury)
+idea applied here, so we link rather than re-derive. A **single** grouping factor
+makes the random-effect block of @eq-pennormal **diagonal across groups**: with
+$Z=\operatorname{onehot}(\text{group})$, the block $Z^{\top}WZ=\operatorname{diag}(s_w)$
+is diagonal ($s_{w,g}=\sum_{i\in g} w_i$), because group $g$'s offset only touches
+group $g$'s rows. Inverting a diagonal-plus-$\lambda I$ block is free, so eliminating
+$b$ by a **Schur complement** onto the small $p$-dimensional fixed block,
+
+$$
+S_{\text{Schur}}\,\beta = \text{rhs},
+\qquad
+S_{\text{Schur}} = X^{\top}WX - B\,D^{-1}B^{\top},
+\quad D=\operatorname{diag}(s_w)+\lambda I,
+\quad B = X^{\top}WZ,
+$$
+
+costs only $O(Np^2 + q)$ — *linear* in the level count, and entirely
+cuSOLVER-free (every inverse is either diagonal or the small $p\times p$
+`small_inv_logdet`). You can read this verbatim in `_structured_solve`: it builds
+`sw`, `swx = Z^T W X`, `dinv = 1/(sw + lam)`, `bdinvbt = B D^{-1} B^T`, and a single
+`small_inv_logdet` on the $p\times p$ Schur matrix.
+
+The crucial invariant: the two paths run the **same** PQL iteration (same working
+response, same Fellner–Schall update, same budgets), so they give the same answer to
+iterative tolerance; dispatch changes only the linear-algebra cost. For correlated
+random *slopes* (an $r\times r$ within-group covariance $G$), the same structure
+generalises to per-group $r\times r$ blocks $D_g = Z_g^{\top}WZ_g + \sigma_e^2 G^{-1}$
+in `_slope_solve`, with $G$ itself updated by a monotone **REML-EM** step
+(`_glmm_slope_structured_one`) that keeps $G$ positive-definite by construction.
+
+## The Laplace approximation: fit a Gaussian at the peak {#sec-laplace}
+
+PQL dodged @eq-marginal. Now we face it. The integral we cannot do is
+
+$$
+L = \int e^{h(b)}\,\mathrm{d}b,
+\qquad
+h(b) = \log p(y\mid b) + \log p(b; G),
+$$ {#eq-laplace-integral}
+
+where $h$ bundles the log-likelihood and the log-prior into one "log-integrand." How
+would *you* approximate an integral of $e^{h}$ when $h$ is some smooth bump you cannot
+integrate? Here is the natural idea, and it is the whole of Laplace.
+
+Most of the mass of $e^{h}$ sits near wherever $h$ is largest — its peak $\hat b$,
+the **conditional mode** of the random effect. Near a peak, *any* smooth function
+looks like a downward parabola: that is the content of the second-order Taylor expansion. So
+expand $h$ around $\hat b$,
+
+$$
+h(b) \approx h(\hat b) + \tfrac12 (b-\hat b)^{\top} h''(\hat b)\,(b-\hat b),
+$$
+
+(the first-order term vanishes because $\hat b$ is a stationary point — that is what
+"mode" means). Exponentiate: $e^{h(b)} \approx e^{h(\hat b)}\,
+\exp\!\big[-\tfrac12 (b-\hat b)^{\top}(-h''(\hat b))(b-\hat b)\big]$. The right-hand
+side is an **un-normalised Gaussian** — a bell curve centred at the mode with
+precision $-h''(\hat b)$. And a Gaussian is the one integral we *can* always do:
+$\int \exp(-\tfrac12 x^{\top} A x)\,\mathrm{d}x = (2\pi)^{r/2}/\sqrt{\det A}$. So
+
+$$
+L \;\approx\; e^{h(\hat b)}\,\frac{(2\pi)^{r/2}}{\sqrt{\det\big(-h''(\hat b)\big)}}.
+$$ {#eq-laplace}
+
+In words: **the height of the peak, $e^{h(\hat b)}$, times the width of the peak,
+encoded by $1/\sqrt{\det(-h'')}$.** A tall, broad bump contains a lot of integral; a
+tall, narrow one contains less. That product is the Laplace approximation, and you
+could have written it yourself the moment you accepted "fit a Gaussian at the peak."
+
+@fig-glmm-laplace draws this for a single group: a skewed Bernoulli/Poisson-times-Gaussian
+integrand with the Laplace Gaussian overlaid at its mode. The fit is good near the
+peak and *misses the skew* in the tail — and crucially the true mean of the integrand
+sits to one side of the mode, which is the geometry behind the residual bias.
+
+```{python}
+#| label: fig-glmm-laplace
+#| fig-cap: "The Laplace approximation fits a Gaussian (red) at the mode of the true random-effect integrand (grey, a small Poisson group). It matches the peak but is symmetric, so it misses the left skew — and the true mean (green) sits left of the mode it centres on."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# A single group's random effect b enters a Poisson (log-link) likelihood.
+# Integrand over b:  Poisson(y | exp(eta0 + b)) * N(b; 0, sb2).
+# A small group with a low observed count (here y = 0) makes the integrand
+# visibly left-skewed: the exp() penalises large b sharply but small b mildly.
+sb2 = 2.0        # random-effect prior variance
+eta0 = 0.6       # fixed linear predictor for this group
+y = 0            # observed count: small -> skewed integrand
+
+def log_integrand(b):
+    eta = eta0 + b
+    ll = y * eta - np.exp(eta)               # Poisson log-likelihood (drop const)
+    lp = -0.5 * b * b / sb2                   # Gaussian prior on b (drop const)
+    return ll + lp
+
+b_grid = np.linspace(-8, 4, 800)
+log_h = np.array([log_integrand(b) for b in b_grid])
+h = np.exp(log_h - log_h.max())              # normalise peak to 1 for display
+
+# --- Laplace: find the mode, take curvature, fit a Gaussian there ---
+def grad(b):
+    return (y - np.exp(eta0 + b)) - b / sb2
+
+def neg_curv(b):
+    return np.exp(eta0 + b) + 1.0 / sb2       # -h''(b), the Fisher curvature
+
+b_hat = 0.0
+for _ in range(50):
+    b_hat += grad(b_hat) / neg_curv(b_hat)
+
+H = neg_curv(b_hat)                            # -h''(b_hat)
+lap = np.exp(-0.5 * H * (b_grid - b_hat) ** 2)  # Gaussian bump, peak 1
+
+# True mean of the integrand vs the mode (Laplace centres on the mode).
+true_mean = np.sum(b_grid * h) / np.sum(h)
+
+fig, ax = plt.subplots(figsize=(6.2, 3.8))
+ax.fill_between(b_grid, h, color="0.80", label="true integrand $e^{h(b)}$")
+ax.plot(b_grid, lap, color="C3", lw=2.0,
+        label=r"Laplace Gaussian at $\hat b$")
+ax.axvline(b_hat, color="C0", ls="--", lw=1.2, label=r"mode $\hat b$")
+ax.axvline(true_mean, color="C2", ls=":", lw=1.4, label="true mean")
+ax.set_xlabel("random effect $b$")
+ax.set_ylabel("integrand (peak-normalised)")
+ax.set_title("Laplace fits a Gaussian at the peak; it misses the left skew")
+ax.legend(loc="upper left", fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+Two things make @eq-laplace cheap and exact-where-it-counts in the implementation
+(`stats/glmm/_laplace.py`):
+
+- **Finding the mode $\hat b$ is per-group Newton, $O(N)$.** Because a single grouping
+  factor makes the groups independent given $(\beta,G)$, the mode of each group's
+  $h_g$ is found by its own little Newton/Fisher-scoring iteration, all groups at once
+  via `segment_sum`. `_laplace_conditional_modes` runs exactly this: the gradient is
+  $\sum_i (y_i-\mu_i)\,\mathrm{d}\eta_i + (\text{prior pull }-b/\sigma_b^2)$, the
+  curvature is $\sum_i w_i + 1/\sigma_b^2$ (the Fisher weight plus the prior), and
+  `b <- b + score/curv`. No random-effect-wide system is ever formed.
+- **The determinant $\det(-h'')$ is the Fisher curvature at the mode.** For a scalar
+  intercept it is the scalar $\sum_i w_i + 1/\sigma_b^2$ — the `sw + 1/sb2` you see in
+  `_laplace_nll`, which assembles
+  $-\log L \approx -\sum_g [\,\ell_g(\hat b) - \hat b^2/(2\sigma_b^2)
+  - \tfrac12\log\sigma_b^2 - \tfrac12\log(s_{w,g}+1/\sigma_b^2)\,]$. The last term is
+  exactly the $-\tfrac12\log\det(-h'')$ "width" factor of @eq-laplace.
+
+Then the outer loop is plain: maximise the Laplace-approximate marginal likelihood
+over $(\beta, \log\sigma_b^2)$ with a `damped_newton` step (so $\sigma_b^2$ stays
+positive via the log-parameterisation). For a random **slope** the same logic lifts to
+an $r$-dimensional mode and an $r\times r$ curvature determinant
+(`_laplace_slope_modes` / `_laplace_slope_nll`), with $\log\det H_g$ from
+`small_inv_logdet`.
+
+**Why this beats PQL.** PQL is, viewed this way, a *cruder cousin* of Laplace: it
+linearises the response once and then does a Gaussian integral, which is roughly
+"approximate $h$ to second order but at the *current iterate* rather than at the true
+mode, and ignore how the curvature itself depends on $b$." Laplace expands at the
+actual conditional mode and keeps the determinant term that PQL drops, which is the
+term that corrects the small-cluster attenuation. It costs an inner mode-finding loop;
+it buys back the bias.
+
+::: {.callout-note title="One caveat about the result fields"}
+For the `'laplace'` (and `'agq'`) tiers the returned `dispersion` is a placeholder
+$1$, `edf_total` is the fixed-effect count $p$ only (a placeholder), and `deviance`
+is $-2\times$ the *marginal* approximate log-likelihood — directly comparable across
+Laplace/AGQ fits, but do not form an AIC/BIC from the placeholder EDF. The PQL tiers,
+by contrast, return a real Pearson dispersion and a real effective-df trace
+(`_dispersion` in `_pql.py`). This is recorded on `GLMMResult` in `_base.py`.
+:::
+
+## Adaptive Gauss–Hermite quadrature: sample the integrand at clever points {#sec-agq}
+
+Laplace replaced the integrand with *one* Gaussian. Its weakness, visible in
+@fig-glmm-laplace, is that the true integrand is **skewed** and a single symmetric
+Gaussian cannot represent skew. The fix writes itself: instead of trusting one bump,
+**evaluate the actual integrand at several points and take a weighted sum** — a
+quadrature rule. The more points, the more of the true shape (skew, fat tails) you
+capture.
+
+Which points, and which weights? For an integral against a Gaussian weight the optimal
+choice is the classical one: **Gauss–Hermite quadrature**, which approximates
+$\int e^{-t^2} g(t)\,\mathrm{d}t \approx \sum_k w_k\, g(t_k)$ with nodes $t_k$ and
+weights $w_k$ (the roots and weights of the Hermite polynomials,
+`np.polynomial.hermite.hermgauss`). $K$ nodes integrate any polynomial up to degree
+$2K-1$ exactly — that is why a handful of well-placed evaluations beat thousands of
+random samples.
+
+The "adaptive" qualifier is the one idea that makes this work *here*. Vanilla
+Gauss–Hermite places its nodes around $0$ with unit spread — but our integrand's mass
+is around the conditional mode $\hat b$ with the curvature spread we already computed
+for Laplace. Evaluating a sharply peaked integrand on a grid centred at the wrong
+place wastes every node. So **shift and stretch the nodes to where the mass is**:
+place them at
+
+$$
+b_k = \hat b + \sqrt{2}\,L\,t_k,
+\qquad L L^{\top} = \big(-h''(\hat b)\big)^{-1},
+$$ {#eq-agq-nodes}
+
+i.e. centre on the mode and scale by the Laplace covariance factor $L$ (a Cholesky of
+the inverse curvature). This is exactly the reuse you would hope for: AGQ *borrows*
+the mode and curvature from the Laplace machinery (`_agq.py` calls
+`_laplace_slope_modes` and takes `spd_chol` of the inverse Hessian) and then lays its
+nodes down in those adapted coordinates. The marginal log-likelihood becomes a
+log-sum-exp over nodes,
+
+$$
+\log L_g \approx \tfrac{r}{2}\log 2 - \tfrac12\log\det H_g
++ \operatorname{logsumexp}_k\!\big[\log w_k + \|t_k\|^2 + \log g(b_k)\big],
+$$
+
+which is precisely `_agq_slope_nll`: it builds `offset = sqrt(2) * L @ nodes`,
+evaluates the integrand `log_g` at every node, and reduces with `logsumexp`.
+
+The beautiful special case: **with $K=1$ node** ($t=0$, $w=\sqrt\pi$) the single term
+collapses to exactly the Laplace determinant correction. So **Laplace is AGQ with one
+node**, and `n_quad` is a literal accuracy dial — more nodes integrate the
+random-effect density directly and converge to the *exact* marginal. This is the
+gold-standard `lme4`-style `nAGQ` tier for small, low-count clusters.
+
+@fig-glmm-agq overlays the Gauss–Hermite nodes on the same skewed integrand, sized by
+their weights: the nodes off to the heavy-tailed side carry real integrand value that
+the single Laplace Gaussian could not represent — that captured asymmetry is the bias
+AGQ removes.
+
+```{python}
+#| label: fig-glmm-agq
+#| fig-cap: "Adaptive Gauss–Hermite quadrature on the same integrand: nodes (blue, size ∝ weight) are placed at the mode and scaled by the Laplace curvature. The off-centre nodes sample the skewed tail that the single Gaussian missed; more nodes converge to the exact marginal, and n_quad = 1 is exactly Laplace."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# Same skewed Poisson x Gaussian integrand as the Laplace figure.
+sb2 = 2.0
+eta0 = 0.6
+y = 0
+
+def log_integrand(b):
+    eta = eta0 + b
+    return (y * eta - np.exp(eta)) - 0.5 * b * b / sb2
+
+b_grid = np.linspace(-8, 4, 800)
+log_h = np.array([log_integrand(b) for b in b_grid])
+h = np.exp(log_h - log_h.max())
+
+# Mode + curvature (as in the Laplace figure).
+def grad(b):
+    return (y - np.exp(eta0 + b)) - b / sb2
+
+def neg_curv(b):
+    return np.exp(eta0 + b) + 1.0 / sb2
+
+b_hat = 0.0
+for _ in range(50):
+    b_hat += grad(b_hat) / neg_curv(b_hat)
+H = neg_curv(b_hat)
+sd = 1.0 / np.sqrt(H)                 # curvature scale = Laplace std-dev
+
+# --- Adaptive Gauss-Hermite: nodes placed at b_hat + sqrt(2) * sd * t_k ---
+n_quad = 7
+t, w = np.polynomial.hermite.hermgauss(n_quad)
+b_nodes = b_hat + np.sqrt(2.0) * sd * t
+# Marker height = integrand value at the node; marker SIZE = adaptive GH
+# weight (the raw weight rescaled by exp(t^2), the change-of-variables factor).
+h_nodes = np.exp(np.array([log_integrand(b) for b in b_nodes]) - log_h.max())
+node_w = w * np.exp(t ** 2)
+sizes = 420 * node_w / node_w.max()
+
+fig, ax = plt.subplots(figsize=(6.2, 3.8))
+ax.fill_between(b_grid, h, color="0.80", label="true integrand $e^{h(b)}$")
+ax.vlines(b_nodes, 0, h_nodes, color="C0", lw=1.0, alpha=0.6)
+ax.scatter(b_nodes, h_nodes, s=sizes, color="C0", zorder=3,
+           label="GH nodes (size $\\propto$ weight)")
+ax.axvline(b_hat, color="C3", ls="--", lw=1.2, label=r"mode $\hat b$")
+ax.set_xlabel("random effect $b$")
+ax.set_ylabel("integrand (peak-normalised)")
+ax.set_title(f"Adaptive Gauss-Hermite: {n_quad} nodes capture the skew Laplace missed")
+ax.legend(loc="upper left", fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+One practical wall, made explicit in the code. For a random effect of dimension $r$,
+the tensor grid has $K = $`n_quad`$^{\,r}$ nodes — every node differentiated through
+the mode scan — so the cost explodes with $r$. `glmm_fit` therefore *requires a random
+slope* for `method='agq'` (pass `z=`) and caps the grid at `_AGQ_MAX_NODES = 128`
+(`_base.py`), raising a clear error otherwise; for a scalar intercept you would use
+`method='laplace'`, which is the $K=1$ corner anyway. That dimensional cliff is why
+AGQ is reserved for the low-$r$, small-cluster cases where its accuracy is worth the
+compile-time and memory.
+
+## Choosing a tier, and beyond a scalar intercept
+
+Putting the rungs together, `glmm_fit` exposes a small, honest set of choices:
+
+- **`method='pql'`** (default): cheapest, reuses the GLM+GAM+Fellner–Schall stack.
+  Dispatches on level count (§4): few-level dense GAMM, many-level structured Schur.
+  Documented attenuation for binary/low-count clusters.
+- **`method='laplace'`**: the principled fix for that attenuation — the conditional-mode
+  integral with the determinant correction. Scalar intercept, or a random slope when
+  `z` is given.
+- **`method='agq'`** (random slope only): the accuracy ceiling, AGQ converging to the
+  exact marginal, `n_quad=1` recovering Laplace.
+
+The same scaffolding stretches past a scalar intercept in every tier:
+
+- **Random slopes, uncorrelated $(x \,\Vert\, g)$**: independent penalty/variance
+  blocks, one `re_smooth(group, by=z[:,k])` per column through the GAM path
+  (`_glmm_slope_diagonal`); $G$ is diagonal.
+- **Random slopes, correlated $(1 + x \mid g)$**: a small $r\times r$ within-group
+  covariance $G$ ($r\le 3$), estimated by the per-group **block-Woodbury REML-EM**
+  wrapped in the PQL loop (`_glmm_slope_structured_one`), or by the Laplace/AGQ
+  $r$-dimensional mode integral. The EM M-step is a sum of PSD matrices, so $G$ stays
+  positive-definite without an explicit constraint.
+
+## What is genuinely new here
+
+The organising idea is the integral, not the algebra. A GLMM is "average the random
+effects out of a non-Gaussian likelihood," and that integral has no closed form; the
+three methods are three ways to do it, and they nest cleanly — PQL is a cruder Laplace,
+Laplace is one-node AGQ, AGQ is the exact answer in the limit. Almost every other
+ingredient (IRLS, the penalty–variance hinge, Fellner–Schall, block-Woodbury) is
+reused verbatim from earlier rungs. Next we make the GAM–LME unification explicit
+([GAMM](gamm.qmd)), then swap the penalty for a kernel ([HSGP](hsgp.qmd)).
+
+## Further reading
+
+- Breslow, N. E. & Clayton, D. G. (1993). *Approximate inference in generalized linear
+  mixed models.* Journal of the American Statistical Association **88**(421), 9–25.
+  (The original PQL paper; also the source of the documented small-cluster bias.)
+- Pinheiro, J. C. & Bates, D. M. (1995). *Approximations to the log-likelihood function
+  in the nonlinear mixed-effects model.* Journal of Computational and Graphical
+  Statistics **4**(1), 12–35. (Adaptive Gaussian quadrature for mixed models.)
+- Bates, D., Mächler, M., Bolker, B. & Walker, S. (2015). *Fitting linear mixed-effects
+  models using lme4.* Journal of Statistical Software **67**(1), 1–48. (The `nAGQ`
+  accuracy ladder and the modern reference implementation.)
+- Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*, 2nd ed.
+  Chapman & Hall/CRC. (The GLMM chapter, and the penalised-likelihood / Laplace view
+  that ties this rung to the GAM.)
+- Wood, S. N. & Fasiolo, M. (2017). *A generalized Fellner–Schall method for smoothing
+  parameter optimization.* Biometrics **73**(4), 1071–1081. (The outer variance-component
+  update PQL reuses.)
+
+## See also
+
+- Code: [`nitrix/stats/glmm/`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glmm/__init__.py)
+  (the `glmm_fit` dispatcher),
+  [`glmm/_pql.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glmm/_pql.py)
+  (PQL: few-level GAMM, many-level Schur, random-slope REML-EM),
+  [`glmm/_laplace.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glmm/_laplace.py)
+  (the Laplace marginal), and
+  [`glmm/_agq.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glmm/_agq.py)
+  (adaptive Gauss–Hermite quadrature). The many-level/correlated linear algebra lives
+  in [`stats/lme/_blockwoodbury.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_blockwoodbury.py).
+- Builds on: [GLM](glm.qmd#sec-working) (working response/weights),
+  [LME](lme.qmd#sec-varcomp) (the Gaussian integral that *does* close),
+  [GAM](gam.qmd) (the penalised solve),
+  [Fellner–Schall](fellner-schall.qmd#sec-fs-update) (the variance-component update),
+  the [grand equivalence](foundations.qmd#sec-equivalence), and the
+  [block-Woodbury](solvers.qmd#sec-woodbury) solver.
+- Next rungs: [GAMM](gamm.qmd) (the explicit GAM–LME unification) and
+  [HSGP](hsgp.qmd) (penalty → kernel).

@@ -1,0 +1,378 @@
+---
+title: "Generalised additive mixed models: closing the loop"
+---
+
+::: {.callout-tldr title="Fast path"}
+A **GAMM** has smooth terms *and* random effects in one model. But the
+[GAM chapter](gam.qmd#sec-hinge) already showed that a
+smooth **is** a random effect — both are a quadratic penalty block
+$\gamma_k^{\top}S\gamma_k$ on a slice of the coefficients. A GAM already fits a
+*sum* of penalty blocks. So a GAMM is "a GAM with one more kind of block", needs
+**no new solver**, and the single [Fellner–Schall](fellner-schall.qmd) loop
+estimates every smoothing parameter *and* every variance component together. The
+one new idea here: a single penalised smooth, looked at the right way, already
+*contains* a fixed effect and a random effect — so the GAM and the LME were never
+two models. This is where the ladder folds shut.
+:::
+
+Rung 5 of [the ladder](index.qmd). This chapter does not add machinery; it
+removes a distinction. Everything you need has already been built — by the end you
+will see all of it as a single equation with interchangeable parts.
+
+## A question that needs both halves {#sec-motivation}
+
+Here is a study that will not fit on any single earlier rung. You have cortical
+thickness measured in a brain region for a few hundred people, scanned at four
+different sites, several of them more than once. You want to answer two questions
+at once:
+
+1. **How does thickness change with age?** Not linearly — thinning accelerates in
+   later life, so the population trajectory is a *curve* you do not want to
+   pre-specify. That is a job for a **smooth** $f(\text{age})$ — the [GAM](gam.qmd).
+2. **How much does the scanner matter?** Two sites with different hardware give
+   systematically offset measurements, and you do not care about *those four
+   particular machines* — you care about the population of sites they represent,
+   and about not letting a site with many scans dominate the curve. That is a job
+   for a **random intercept** per site — the [LME](lme.qmd).
+
+You cannot answer (1) honestly without (2): if site offsets leak into the age
+curve, you will read scanner drift as biology. And you cannot answer (2) without
+(1): a wrong functional form for age dumps its residual into the site effects. The
+two terms have to be estimated *together*, in one model:
+
+$$
+g\big(\mathbb{E}[y]\big) = \underbrace{X\beta}_{\text{parametric}}
+  + \underbrace{\textstyle\sum_k f_k(x_k)}_{\text{smooths}}
+  + \underbrace{Z b}_{\text{random effects}},
+\qquad f_k = B_k\gamma_k,\quad b\sim\mathcal{N}(0,\sigma_b^2 I).
+$$ {#eq-gamm}
+
+Here $X\beta$ is anything entering linearly (the grand mean, sex, a linear motion
+covariate), each $f_k=B_k\gamma_k$ is a basis-expanded smooth with its own
+roughness penalty, and $Zb$ is the per-site random intercept with $Z$ the one-hot
+site indicator. A model with both smooths and random effects under a link $g$ is a
+**generalised additive mixed model**. We will keep returning to this age-by-site
+example.
+
+The promise of this chapter is that @eq-gamm looks like three different kinds of
+thing glued together, but is really *one* kind of thing repeated. Let us earn that.
+
+## A smooth already is a fixed effect plus a random effect {#sec-unification}
+
+Recall the one fact the GAM chapter left you with: a roughness penalty
+$\lambda\,\gamma^{\top}S\gamma$ on a smooth's coefficients is *mathematically the
+same object* as the shrinkage a random effect feels (see
+[the GAM penalty](gam.qmd#sec-penalty) and the [grand equivalence](foundations.qmd#sec-equivalence)).
+We now make that concrete enough to *see*, because it is the hinge the whole
+chapter swings on.
+
+**Start from the penalty matrix and ask what it cannot see.** A second-difference
+roughness penalty measures *wiggliness*: $\gamma^{\top}S\gamma$ is large when the
+smooth curves sharply and zero when it does not curve at all. But a straight line
+does not curve. So a constant and a linear trend both give $\gamma^{\top}S\gamma=0$
+— the penalty is *blind* to them. In linear-algebra terms, the constant-and-linear
+functions are exactly the **null space** of $S$ (the vectors $\gamma$ with
+$S\gamma=0$). For a $d$-th order difference penalty the null space is all
+polynomials of degree $<d$; for the common second-difference penalty it is
+$\{\text{constant},\ \text{linear}\}$, dimension two.
+
+This splits the smooth's coefficient vector into two parts that the penalty treats
+completely differently:
+
+$$
+\gamma = \underbrace{\gamma_{\text{null}}}_{\text{unpenalised}}
+       + \underbrace{\gamma_{\text{range}}}_{\text{penalised}},
+\qquad
+\gamma^{\top}S\gamma = \gamma_{\text{range}}^{\top}S\gamma_{\text{range}}.
+$$ {#eq-decomp}
+
+The null-space part $\gamma_{\text{null}}$ pays no penalty no matter how large it
+gets: it is free to take whatever value least-squares wants. **That is exactly how
+a fixed effect behaves** — estimated with no shrinkage. The range-space part
+$\gamma_{\text{range}}$ pays $\lambda\,\gamma_{\text{range}}^{\top}S\gamma_{\text{range}}$,
+which is the same as putting a mean-zero Gaussian prior on it with precision
+$\lambda$ — i.e. a variance $\sigma^2 = 1/\lambda$. **That is exactly how a random
+effect behaves** — shrunk toward zero, by an amount the data choose.
+
+So read @eq-decomp again, slowly: a single penalised smooth is the *sum* of an
+unpenalised low-order trend (a **fixed effect**) and a penalised mean-zero wiggle
+(a **random effect** with variance $1/\lambda$). The GAM did not contain a random
+effect by analogy; it contained one literally. @fig-gamm-decomp shows the split on
+a concrete curve — the same wiggly smooth pulled apart into the straight line the
+penalty ignores and the mean-zero wiggle it shrinks.
+
+```{python}
+#| label: fig-gamm-decomp
+#| fig-cap: "A penalised smooth splits into its null-space part — an unpenalised straight-line *fixed* effect — plus its range-space part — a mean-zero *random* wiggle with variance $1/\\lambda$. The two sum back to the whole curve. The GAM's smooth and the LME's random effect are the same object relabelled."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+x = np.linspace(0.0, 1.0, 200)
+
+# A wiggly smooth = a linear trend plus a few sinusoidal bumps.
+trend = 0.8 + 1.6 * x                      # the low-order (null-space) part
+wiggle = (0.35 * np.sin(2 * np.pi * 1.5 * x)
+          + 0.20 * np.sin(2 * np.pi * 3.0 * x + 0.7)
+          - 0.15 * np.cos(2 * np.pi * 2.0 * x))
+# Project the linear part OUT of the wiggle so the split is the genuine
+# null-space / range-space decomposition: the wiggle is orthogonal to {1, x}.
+P = np.column_stack([np.ones_like(x), x])   # null space of S (deg <= 1)
+beta_hat, *_ = np.linalg.lstsq(P, wiggle, rcond=None)
+wiggle = wiggle - P @ beta_hat
+whole = trend + wiggle
+
+fig, ax = plt.subplots(1, 3, figsize=(11, 3.4), sharey=True)
+ax[0].plot(x, whole, color="C3", lw=2)
+ax[0].set_title("the smooth  $f(x)$")
+ax[1].plot(x, trend, color="C0", lw=2)
+ax[1].set_title("fixed part: null space of $S$\n(the straight-line trend)")
+ax[2].plot(x, wiggle, color="C2", lw=2)
+ax[2].axhline(0.0, color="0.6", lw=0.8, ls="--")
+ax[2].set_title("random part: penalised wiggle\n(mean-zero, variance $1/\\lambda$)")
+ax[0].set_ylabel("response")
+for a in ax:
+    a.set_xlabel("age (scaled)")
+    a.spines[["top", "right"]].set_visible(False)
+fig.suptitle("A penalised smooth = fixed straight line  +  random mean-zero wiggle",
+             y=1.04, fontsize=11)
+fig.tight_layout()
+plt.show()
+```
+
+This is the **mixed-model representation of a penalised spline** (Ruppert, Wand &
+Carroll). It is not a trick for visualisation; it is *the* reason GAM-fitting and
+LME-fitting share code. Fit the smooth, and you have fitted a tiny mixed model:
+its fixed effect is the trend, its one random effect is the wiggle, and the
+smoothing parameter $\lambda$ *is* the random-effect precision $1/\sigma^2$. Run
+that statement backward and a random intercept is itself a smooth whose penalty
+happens to be the identity. There is no boundary between the two rungs to cross.
+
+## Everything is a penalty block
+
+With the hinge in hand, the rest of the model assembles itself. Write the two
+regularised terms of our age-by-site model side by side:
+
+| term | penalty | strength |
+|---|---|---|
+| smooth $f_k$ | $\lambda_k\,\gamma_k^{\top}S\gamma_k$ (roughness) | $\lambda_k$ |
+| random effect $b$ | $\dfrac{1}{\sigma_b^2}\,b^{\top}b$ (ridge) | $1/\sigma_b^2$ |
+
+They are the *same kind of object* — a quadratic penalty on a block of
+coefficients, with a strength to be chosen — differing only in the matrix inside:
+a difference/curvature operator for a smooth, the identity for a random intercept.
+Because each term owns a **disjoint** slice of the coefficient vector, stacking
+them amounts to placing each block on the diagonal of one big penalty matrix:
+
+$$
+S(\lambda) = \operatorname{diag}\big(\lambda_1 S_1,\ \lambda_2 S_2,\ \dots,\ \lambda_K S_K\big),
+$$ {#eq-blockdiag}
+
+with the unpenalised parametric head contributing a zero block (it pays no
+penalty, so it sits in the null space of $S(\lambda)$ — a fixed effect, exactly as
+in §2). @fig-gamm-blocks shows this matrix for our example: two smooths and a
+random intercept, each a labelled block, the parametric head a dark zero block.
+The "everything is a penalty block" slogan is now something you can literally look
+at.
+
+```{python}
+#| label: fig-gamm-blocks
+#| fig-cap: "The combined block-diagonal penalty $S(\\lambda)=\\mathrm{diag}(\\lambda_1 S_1,\\dots)$ for a GAMM with two P-spline smooths (age, motion; second-difference roughness blocks) and a per-site random intercept (an identity ridge), plus an unpenalised parametric head (the dark zero block). Smooths and random effects are *the same kind of block*; only the matrix inside differs."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+def diff_penalty(k, order=2):
+    """k x k second-difference roughness penalty  D^T D."""
+    D = np.diff(np.eye(k), n=order, axis=0)
+    return D.T @ D
+
+lam_age, lam_motion, lam_site = 8.0, 2.0, 25.0   # smoothing params / RE precision
+k_age, k_motion, q_site, p_par = 8, 8, 6, 2
+
+blocks = [np.zeros((p_par, p_par)),              # unpenalised parametric head
+          lam_age * diff_penalty(k_age),
+          lam_motion * diff_penalty(k_motion),
+          lam_site * np.eye(q_site)]             # the random-effect ridge
+sizes = [p_par, k_age, k_motion, q_site]
+p = sum(sizes)
+S = np.zeros((p, p))
+off = 0
+for B, s in zip(blocks, sizes):
+    S[off:off + s, off:off + s] = B
+    off += s
+
+fig, ax = plt.subplots(figsize=(5.2, 4.8))
+im = ax.imshow(S, cmap="viridis")
+fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="penalty weight")
+labels = ["parametric\n(unpenalised)", "smooth: age", "smooth: motion", "RE: site"]
+off = 0
+for lab, s in zip(labels, sizes):
+    centre = off + s / 2 - 0.5
+    ax.text(centre, centre, lab, ha="center", va="center",
+            color="white", fontsize=8, fontweight="bold")
+    off += s
+    if off < p:
+        ax.axhline(off - 0.5, color="white", lw=0.8)
+        ax.axvline(off - 0.5, color="white", lw=0.8)
+ax.set_title("$S(\\lambda)=\\mathrm{diag}(\\lambda_1 S_1,\\dots)$:\n"
+             "one block per term, smooths and random effects alike")
+ax.set_xlabel("coefficient index")
+ax.set_ylabel("coefficient index")
+fig.tight_layout()
+plt.show()
+```
+
+Stack the corresponding designs left-to-right into one combined $X=[\,1\mid X_{\text{par}}\mid B_1\mid B_2\mid Z\,]$,
+and the entire GAMM collapses into the single penalised normal-equations solve we
+have used since the GLM — the [penalised IRLS](glm.qmd#sec-irls) step:
+
+$$
+\Big(X^{\top}WX + S(\lambda)\Big)\,\gamma = X^{\top}Wz ,
+$$ {#eq-gamm-solve}
+
+with $W$ the IRLS working weights and $z$ the working response (so a non-Gaussian
+link — Poisson counts, binomial proportions — costs nothing extra; it is the GLM's
+inner loop unchanged). The same Cholesky factorisation that solves a GLM solves a
+GAMM; the only difference is what got added to $X^{\top}WX$.
+
+### How `nitrix` assembles it
+
+This is exactly the shape the library builds. `gam_fit` (in `gam.py`) takes a
+*list* of `smooths`, and its `_assemble` helper does precisely @eq-blockdiag: it
+concatenates each smooth's `design` into the combined $X$ and writes each smooth's
+penalty into its own diagonal block of a stacked penalty tensor, recording the
+column `slices` so each block knows which coefficients it owns. The optional
+`parametric=` argument and the intercept enter as unpenalised columns — the zero
+block above.
+
+A random effect is not a special case in this code; it is *one more smooth*.
+`re_smooth(g, by=...)` (in `basis.py`) returns an `REBasis` whose `design` is the
+one-hot indicator `one_hot(g)` of the grouping factor (or `one_hot(g) * by` for a
+random *slope*) and whose `penalty` is the **identity** — a ridge. Its docstring
+states the equivalence outright: the single Fellner–Schall smoothing parameter on
+this block "**is** the random-effect precision $\lambda = 1/\sigma_b^2$", and its
+fitted block coefficients are the BLUPs (best linear unbiased predictors). Because
+`REBasis` is a third `Smooth` variant alongside `SplineBasis` and
+`TensorBasis`, it "slots straight into `gam_fit` with **no new solver work**." Our
+age-by-site model is therefore literally
+`gam_fit(Y, smooths=[bspline_basis(age), re_smooth(site)], ...)`.
+
+Two structured variants are the same idea with shaped designs. `by_factor_smooth(x, by=f)`
+builds a *separate* penalised smooth of `x` per level of a factor `f` — returning a
+tuple of `SplineBasis` blocks, each level's design carrying nonzero rows only for
+its own observations, so the blocks stay orthogonal in $X^{\top}WX$ and each gets
+its own $\lambda$. `varying_coefficient_smooth(x, by=z)` for a *continuous* `z`
+builds the term $z\cdot f(x)$ — a coefficient on `z` that varies smoothly with `x`
+— by scaling the P-spline design of `x` row-wise by `z`, leaving the roughness
+penalty unchanged. In every case the output is another `(design, penalty)` block
+the same machinery consumes.
+
+## One loop selects them all
+
+We now have $K$ tuning parameters — one $\lambda_k$ per smooth, one $1/\sigma_b^2$
+per random effect — and they must be chosen *together*, because they trade off
+against each other (smooth the age curve too hard and its residual inflates the
+site variance). The [Fellner–Schall](fellner-schall.qmd) page derived the update
+that does this; here it runs once per block.
+
+**Why it decouples cleanly.** The general Fellner–Schall step for block $k$ is
+
+$$
+\lambda_k \leftarrow \lambda_k\,
+  \frac{\operatorname{tr}\!\big(S(\lambda)^{-}S_k\big) - \operatorname{tr}(V S_k)}
+       {\gamma_k^{\top}S_k\gamma_k\,/\,\phi},
+$$ {#eq-fs}
+
+where $V=(X^{\top}WX+S(\lambda))^{-1}$ is the influence matrix, $\phi$ the
+dispersion, and $S(\lambda)^{-}$ a generalised inverse. The numerator compares how
+much *room* the penalty leaves the block ($\operatorname{tr}(S(\lambda)^{-}S_k)$,
+loosely the model degrees of freedom the block could use) against how much the
+*fit* actually uses ($\operatorname{tr}(VS_k)$); the denominator is the realised
+penalty energy of the block. The ratio nudges $\lambda_k$ up when the block is
+using less wiggle than it is allowed and down when it is straining against the
+penalty — exactly the REML logic for a variance component, now reading "smoothing
+parameter" or "random-effect precision" indifferently.
+
+The expensive-looking piece is $\operatorname{tr}(S(\lambda)^{-}S_k)$, which in
+general needs the generalised inverse of the *summed* penalty. But because the
+blocks are disjoint (the [disjoint-block lemma](fellner-schall.qmd#the-update)),
+this trace collapses to $\operatorname{rank}(S_k)/\lambda_k$ — read straight off
+the block's own rank, no pseudo-inverse of $S(\lambda)$ required. `nitrix` keeps
+each block's penalty eigenvalues precomputed (`pen_eig`) and forms the trace as the
+elementwise sum `_trace_slinv_sk`, which reduces to exactly $\operatorname{rank}_k/\lambda_k$
+for a lone disjoint block and stays correct for the overlapping margins of a
+tensor-product smooth. So one outer loop visits every block, applies @eq-fs to each
+from its own quantities, and the inner loop is the GLM's penalised IRLS unchanged.
+Every smoothing parameter and every variance component in our age-by-site model is
+selected by *the same* loop, in one pass over the blocks.
+
+The [GLMM](glmm.qmd) few-level path is the proof in code: `glmm_fit` with a small
+number of groups dispatches to "the dense GAMM path — `gam_fit` with a
+`re_smooth` block and the GLM family." A GLMM with few levels *is* a GAMM; the two
+chapters were describing the same fit from two directions.
+
+## The ladder, folded
+
+Stand back and the whole suite is one statement:
+
+> **Fit $(X^{\top}WX + S(\lambda))\,\gamma = X^{\top}Wz$ by penalised IRLS, and
+> choose the $\lambda_k$ by Fellner–Schall.**
+
+Every rung is a choice of what goes in $S(\lambda)$, and each contributed exactly
+one part of the machinery that makes the GAMM work:
+
+| rung | what goes in $S(\lambda)$ | what it contributed |
+|---|---|---|
+| [GLM](glm.qmd) | nothing (empty penalty) | the IRLS inner loop: $W$, $z$, the link |
+| [LME](lme.qmd) | identity blocks (ridges) | variance components; REML selection |
+| [GAM](gam.qmd) | roughness blocks | penalised splines; the penalty $S$ |
+| [GLMM](glmm.qmd) | identity blocks, non-Gaussian | integrating out the random effect under a link |
+| **GAMM** (here) | roughness *and* identity blocks | the assembly: both kinds at once |
+| [Gaussian process](hsgp.qmd) | a **kernel** block $S=K^{-1}$ | next rung |
+
+The GAMM does not add a sixth algorithm; it shows the first five were one algorithm
+with different blocks. That is why the suite is *one* suite, not six fitters: a
+single solve, a single selector, and an interchangeable inventory of penalty
+blocks.
+
+And the last column of that table is the doorway to the [next chapter](hsgp.qmd). A
+Gaussian process is nothing more than one more penalty block whose matrix is the
+inverse of a covariance kernel, $S=K^{-1}$. Drop it into $S(\lambda)$ alongside the
+splines and ridges and the same loop estimates its hyperparameters too. The smooth
+was a random effect; the random effect was a penalty; the penalty is a kernel —
+and the kernel is a Gaussian process. The loop never changes.
+
+## Further reading
+
+- Ruppert, D., Wand, M. P. & Carroll, R. J. (2003). *Semiparametric Regression*.
+  Cambridge University Press. The foundational treatment of penalised splines as
+  mixed models — the null-space/range-space decomposition of §2 is theirs, and it
+  is the cleanest route into this chapter.
+- Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R* (2nd
+  ed.). Chapman & Hall/CRC. The GAMM chapters; the practical reference for
+  assembling smooths and random effects in one penalised model.
+- Wood, S. N. (2004). Stable and efficient multiple smoothing parameter estimation
+  for generalized additive models. *Journal of the American Statistical
+  Association*, 99(467), 673–686. How to select many smoothing/variance parameters
+  jointly and stably — the problem §4's one loop solves.
+- Wood, S. N. (2011). Fast stable restricted maximum likelihood and marginal
+  likelihood estimation of semiparametric generalized linear models. *Journal of
+  the Royal Statistical Society: Series B*, 73(1), 3–36. The REML view that ties
+  the smoothing-parameter and variance-component estimation together.
+
+## See also
+
+- Code: [`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py)
+  (`gam_fit`, the `_assemble` block-diagonal penalty builder, the Fellner–Schall
+  trace `_trace_slinv_sk`),
+  [`nitrix/stats/basis.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/basis.py)
+  (`re_smooth`/`REBasis`, `by_factor_smooth`, `varying_coefficient_smooth`),
+  [`nitrix/stats/glmm/__init__.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/glmm/__init__.py)
+  (the few-level GAMM path).
+- The unification it rests on: [the GAM hinge](gam.qmd#sec-hinge),
+  [the GAM penalty](gam.qmd#sec-penalty), the
+  [grand equivalence](foundations.qmd#sec-equivalence), and the
+  [Fellner–Schall](fellner-schall.qmd) page.
+- Previous rung: [GLMM](glmm.qmd). Next rung: [Gaussian processes](hsgp.qmd).

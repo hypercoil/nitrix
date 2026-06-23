@@ -1,0 +1,37 @@
+---
+title: "nitrix.stats.gaulss"
+generated: true
+signature-hash: 8d36ef45eb999afc
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.gaulss` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `GauLSSResult` {#GauLSSResult}
+
+*decorated:* `@register_result(children=('coef_mu', 'coef_scale', 'cov_mu', 'cov_scale', 'log_lik'), aux=('n_obs',))`, `@dataclass(frozen=True)`
+
+```python
+class GauLSSResult
+```
+
+Per-element Gaussian location-scale fit output.
+
+*TODO: class overview.*
+
+## `gaulss_fit` {#gaulss_fit}
+
+```python
+gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']]=None, n_iter: int=50, ridge: float=1e-08, block: Optional[int]=None) -> GauLSSResult
+```
+
+Mass-univariate Gaussian location-scale regression (``gaulss``).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

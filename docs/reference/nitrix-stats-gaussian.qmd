@@ -1,0 +1,37 @@
+---
+title: "nitrix.stats.gaussian"
+generated: true
+signature-hash: acd0692a924f97e5
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.gaussian` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `kl_diagonal_gaussian` {#kl_diagonal_gaussian}
+
+```python
+kl_diagonal_gaussian(mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg]=None, reduction: Reduction='sum') -> Float[Array, '...']
+```
+
+KL divergence of ``N(mean, diag exp(log_var))`` from ``N(0, I)``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `gaussian_nll` {#gaussian_nll}
+
+```python
+gaussian_nll(x: Float[Array, '...'], mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg]=None, reduction: Reduction='mean') -> Float[Array, '...']
+```
+
+Negative log-likelihood of ``x`` under ``N(mean, exp(log_var))``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

@@ -1,0 +1,878 @@
+---
+title: "The shared solvers: small systems, safe steps, and big covariances"
+---
+
+::: {.callout-tldr title="Fast path"}
+Strip away the statistics and every fit in this suite reduces to a handful of
+numerical jobs. Two of them recur in *every* chapter: **solve a small dense
+system** $A\beta = c$ where $A$ is $p\times p$ (the normal equations), and
+**choose a few scalars** — variances, smoothing strengths — by a cheap **Newton**
+iteration. Two further tricks keep the *big* $N\times N$ observation covariance
+from ever being formed: the **Woodbury identity** (correct a cheap inverse with a
+small rank-$q$ fix) and **spectral diagonalisation** (one eigendecomposition turns
+the problem into independent 1-D coordinates). The single new idea of this page:
+*all four are hand-rolled in `nitrix`* — no vendor GPU solver is ever called —
+because the cuSOLVER custom call is broken on the target accelerators. This page
+is the shared substrate the model chapters link to instead of re-deriving the
+numerics each time.
+:::
+
+This is a *machinery* page, not a rung on [the ladder](index.qmd). The model
+chapters — [GLM](glm.qmd), [LME](lme.qmd), [GAM](gam.qmd), [GLMM](glmm.qmd) — each
+point here for the four numerical primitives they all share. Read it once and the
+later chapters get shorter: when [the GLM chapter](glm.qmd#sec-irls) says "solve
+the penalised normal equations" or [the LME chapter](lme.qmd) says "the FaST-LMM
+trick", the *how* lives here.
+
+## Four jobs, one accelerator
+
+It is worth seeing, up front, that the diversity of models in this suite hides a
+very small numerical core. A linear model, a logistic regression, a smoothing
+spline, a mixed model — fit any of them and you will, in the inner loop, be doing
+one of exactly four things:
+
+1. **Solve a small dense SPD system** $A\beta = c$, with $A$ a $p\times p$
+   symmetric positive-definite matrix (the normal equations, possibly weighted
+   and penalised). Section [§2](#sec-cholesky).
+2. **Minimise a small smooth objective** in a few scalars (log-variances,
+   smoothing parameters) by Newton's method. Section [§3](#sec-newton).
+3. **Invert a giant $N\times N$ covariance** $V_y = ZGZ^{\top}+R$ without ever
+   forming it — by the Woodbury identity. Section [§4](#sec-woodbury).
+4. **Diagonalise once** so a whole sweep of trial variances is cheap — the
+   spectral / FaST-LMM trick. Section [§5](#sec-spectral).
+
+A word on the hardware constraint that shapes all four, because it is unusual and
+it explains design choices that would otherwise look perverse. The natural way to
+solve $A\beta=c$ on a GPU is to call the vendor library: in JAX that is
+`jnp.linalg.solve` / `jnp.linalg.cholesky` / `jnp.linalg.eigh`, which lower to
+**cuSOLVER** custom calls (`potrf` for Cholesky, `syevd` for the symmetric
+eigendecomposition, `getrf` for LU). On the development accelerator (an NVIDIA L4)
+the cuSOLVER handle pool is dead — the *first* cuSOLVER routine in a process fails
+to create a handle, so those calls raise rather than compute. Only cuBLAS
+(matrix multiply and `triangular_solve`/`trsm`) and the elementwise surface work.
+This is documented in the source itself (see the module docstring of
+`linalg/_smalllinalg.py`).
+
+The consequence is a hard rule that runs through everything below: **issue no
+cuSOLVER custom call at any size**. Where a textbook would call a library Cholesky
+or eig, `nitrix` ships a hand-rolled version built from matmul, `sqrt`, division,
+and `triangular_solve` — all of which *do* work, and all of which are
+differentiable (so the whole fit can be run under `jax.grad`, `jit`, and `vmap`
+across a million voxels at once). The one exception is the *single, shared*
+eigendecomposition of [§5](#sec-spectral), which is computed once per dataset
+through a robust `safe_eigh` that falls back to the CPU if cuSOLVER is unavailable
+— it is outside the per-voxel hot path, so it can afford to.
+
+A motivating example to carry through. Picture a voxelwise fMRI analysis: at each
+of $V\approx 10^5$–$10^6$ voxels you have $N$ observations and want to fit the
+same model — say cortical activation as a function of a task regressor, with a
+random intercept per subject. That is one tiny fit, `vmap`-ed a million times. The
+*size* of each fit is small ($p$ a handful, $N$ a few dozen to a few hundred); the
+*number* of fits is enormous. Every choice below is made to keep the per-fit work
+tiny, branch-free, and on the accelerator.
+
+## The small dense solve {#sec-cholesky}
+
+### The system, and why not to invert
+
+Start from the job. Fitting a linear model by least squares means solving the
+**normal equations** (derived in [the GLM chapter](glm.qmd#sec-irls)); in the
+weighted, penalised form that the whole suite actually uses they read
+
+$$
+\underbrace{(X^{\top} W X + S)}_{A}\,\beta = \underbrace{X^{\top} W z}_{c},
+$$ {#eq-normal}
+
+with $W$ a diagonal matrix of working weights, $z$ a working response, and $S$ the
+**penalty matrix** (roughness or precision; zero for an ordinary GLM, a smoothing
+penalty for a [GAM](gam.qmd#sec-penalty)). The matrix $A = X^{\top} W X + S$ is
+$p\times p$, **symmetric** (it is a Gram matrix plus a symmetric penalty), and
+**positive-definite** (as long as $X$ has full column rank and $W\succ 0$).
+Symmetric positive-definite — SPD — is the friendliest class of matrix there is,
+and the algorithm below earns its keep by exploiting exactly that.
+
+The naive thing a newcomer reaches for is to compute the inverse $A^{-1}$ and form
+$\beta = A^{-1} c$. Resist it, for two reasons. First, it is **wasteful**:
+computing the full inverse does roughly three times the arithmetic of just solving
+for the one $\beta$ you want, and you usually do not need the other entries of
+$A^{-1}$. Second — and this matters more — forming $A^{-1}$ and multiplying is
+**less numerically stable** than solving the system directly; the explicit inverse
+amplifies rounding error in a way a direct solve does not. The rule of thumb every
+numerical analyst internalises: *never invert when you can solve.*
+
+So how do we solve an SPD system without inverting? With its square root.
+
+### Cholesky: the square root of an SPD matrix
+
+Here is the idea you could have had yourself. Gaussian elimination factors any
+matrix into a lower-triangular times an upper-triangular piece, $A = LU$.
+Triangular systems are trivial to solve — you read off one unknown at a time. So
+elimination *turns a hard solve into two easy ones*. Now add the one fact that an
+SPD matrix gives you for free: it is symmetric, so the lower and upper factors are
+not independent — the upper one is just the transpose of the lower. The whole
+factorisation collapses to a single triangular factor:
+
+$$
+A = L L^{\top}, \qquad L \text{ lower-triangular with } L_{ii} > 0.
+$$ {#eq-chol}
+
+This $L$ is the **Cholesky factor** — the matrix "square root" of $A$ in the sense
+that $L L^{\top} = A$, exactly the way $\sqrt{a}\,\sqrt{a} = a$ for a positive
+scalar. (That an SPD matrix *has* such a factor, and a unique one with positive
+diagonal, is the content of the Cholesky theorem; positive-definiteness is what
+guarantees every quantity you take a square root of below stays positive.)
+
+You can read the recurrence straight off $A = LL^{\top}$. Matching the $(i,j)$
+entry for $i \ge j$ gives $A_{ij} = \sum_{k\le j} L_{ik}L_{jk}$. Solve for the
+unknown $L$ entries one column at a time — the diagonal first,
+$$
+L_{jj} = \sqrt{A_{jj} - \textstyle\sum_{k<j} L_{jk}^2},
+\qquad
+L_{ij} = \frac{1}{L_{jj}}\Big(A_{ij} - \textstyle\sum_{k<j} L_{ik}L_{jk}\Big)
+\;\;(i>j).
+$$
+Read it as: the diagonal entry is what is "left over" of $A_{jj}$ after removing
+the part already explained by earlier columns, square-rooted; each below-diagonal
+entry is the corresponding leftover, scaled by that diagonal. This is the
+**Cholesky–Banachiewicz** order, and it is exactly what `nitrix` implements (see
+`spd_chol` in `linalg/_smalllinalg.py`). One implementation nicety worth flagging
+because it looks like magic: the source computes the inner sum as the *full* dot
+product `L @ L[j]` rather than masking out $k<j$ — and that is correct precisely
+because the not-yet-filled entries of $L$ are still zero, so the dot product
+automatically restricts to the $k<j$ terms.
+
+With $L$ in hand, solving $A\beta = c$ is two triangular sweeps:
+
+$$
+L\,w = c \;\;(\text{forward substitution}),\qquad
+L^{\top}\beta = w \;\;(\text{back substitution}).
+$$ {#eq-trisolve}
+
+Forward substitution solves for $w$ top-to-bottom (the first row gives $w_1$
+immediately, the second row uses $w_1$ to give $w_2$, and so on); back
+substitution solves for $\beta$ bottom-to-top. Each sweep is $O(p^2)$ and dead
+simple. `nitrix` does both at once through a single `triangular_solve`
+(cuBLAS `trsm`, which works on the broken stack) against the identity to get the
+inverse when it needs the full coefficient covariance, or against $c$ when it only
+needs $\beta$.
+
+### The log-determinant falls out for free
+
+Here is the payoff that makes Cholesky the right factorisation for *statistics*,
+not just for solving. Every likelihood you will meet in this suite contains a term
+$\log\det V$ or $\log\det A$ — the "volume" term of a Gaussian (see
+[foundations](foundations.qmd#sec-variance)). Determinants are numerically nasty:
+$\det A$ is a product of $p$ numbers that can underflow to $0$ or overflow to
+$\infty$ even when $A$ is perfectly well-behaved. But once you have $A = LL^{\top}$,
+the determinant is
+
+$$
+\det A = \det(L)\det(L^{\top}) = \Big(\prod_i L_{ii}\Big)^2
+\;\Longrightarrow\;
+\log\det A = 2\sum_i \log L_{ii}.
+$$ {#eq-logdet}
+
+A *sum of logs of the diagonal* — computed in the safe additive regime, no
+overflow, no separate work. This is the deep reason the whole suite carries
+$\log\det$ rather than $\det$ everywhere: not just because the log is the form the
+likelihood wants, but because Cholesky hands it to you for free and in the stable
+representation. Every REML and IRLS objective in the later chapters reads its
+$\log\det$ off a Cholesky diagonal exactly this way.
+
+### `small_inv_logdet`: the shipped routine
+
+The function the whole suite calls for the small dense solve is
+`small_inv_logdet(A, n)` in `linalg/_smalllinalg.py`. It returns *both* the inverse
+(or solve) *and* the log-determinant in one pass — because, as we just saw, the
+factorisation that gives one gives the other essentially for free, and almost
+every caller needs both (the coefficient covariance *and* the likelihood's volume
+term). It is **size-dispatched** on the compile-time integer `n`:
+
+- **$n = 1$**: a reciprocal and a `log`. Nothing to factor.
+- **$n = 2$**: the closed-form symmetric inverse
+  $\frac{1}{\det}\begin{bmatrix} c & -b \\ -b & a \end{bmatrix}$ for
+  $A=\begin{bmatrix} a & b \\ b & c \end{bmatrix}$, with
+  $\det = ac - b^2$ and $\log\det = \log(ac-b^2)$. These are the common small
+  designs — an intercept and one covariate — so the closed form avoids any loop.
+- **$n > 2$**: the hand-rolled Cholesky path above (`spd_inv_logdet_chol`):
+  factor $A = LL^{\top}$, invert through `triangular_solve`, read $\log\det$ off
+  the diagonal as @eq-logdet.
+
+Two details from the source are worth understanding rather than skimming. First,
+**the Cholesky loop is *rolled*, not unrolled** — it runs as a `lax.fori_loop`
+over the $p$ columns rather than being flattened into $O(p^3)$ scalar operations
+at trace time. The reason is compile time: an unrolled factor makes the XLA
+compile cost grow *cubically* in $p$ (the source measured ~29 s to compile a
+single $p=30$ inverse unrolled), whereas rolling the loop keeps the compiled graph
+$O(p^2)$ — one loop body — so compile stays roughly flat (~0.4 s at $p=30$). The
+runtime flop count is the same $O(p^3)$ either way; only the *graph* shrinks. At
+the brain scale, where this kernel is `vmap`-ed across a million voxels and
+differentiated, that compile-time blowup would be ruinous.
+
+Second, the **modified-Cholesky pivot floor**. The matrix being factored is the
+normal-equation matrix $X^{\top}WX$, whose condition number is the *square* of the
+design's — so an ill-conditioned design squares into a near-singular pivot, and
+the $A_{jj} - \sum_{k<j}L_{jk}^2$ under the square root can dip non-positive from
+roundoff alone. Rather than emit a `NaN` (which would poison the whole batched
+`vmap`), the code clamps that pivot to a small floor, `~1e2 × eps(dtype)` times the
+diagonal scale. This keeps a degenerate solve *finite and regularised* rather than
+broken. It cannot restore digits that roundoff already lost — which is why the
+suite expects **float64** for ill-conditioned designs (in float32 the floor fires
+far sooner). The honest framing the source uses: the floor is numerical insurance,
+not a substitute for a well-posed design.
+
+@fig-solvers-cholesky shows a small SPD matrix and its Cholesky factor side by
+side, so you can see the triangular structure and check $LL^{\top}=A$ numerically.
+
+```{python}
+#| label: fig-solvers-cholesky
+#| fig-cap: "A 5x5 SPD matrix A (left) and its lower-triangular Cholesky factor L (centre). The reconstruction LLᵀ (right) matches A to machine precision; note L is exactly zero above the diagonal."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# Build a small SPD matrix: A = B Bᵀ + ridge, guaranteed positive-definite.
+p = 5
+B = rng.standard_normal((p, p))
+A = B @ B.T + p * np.eye(p)
+
+# Hand-rolled Cholesky (Cholesky–Banachiewicz), mirroring spd_chol's recurrence.
+def chol(A):
+    n = A.shape[0]
+    L = np.zeros((n, n))
+    for j in range(n):
+        s = L[j, :j] @ L[j, :j]
+        L[j, j] = np.sqrt(A[j, j] - s)
+        for i in range(j + 1, n):
+            L[i, j] = (A[i, j] - L[i, :j] @ L[j, :j]) / L[j, j]
+    return L
+
+L = chol(A)
+recon = L @ L.T
+max_err = np.max(np.abs(recon - A))
+logdet_chol = 2.0 * np.sum(np.log(np.diag(L)))
+logdet_ref = np.linalg.slogdet(A)[1]
+
+fig, axes = plt.subplots(1, 3, figsize=(9, 3))
+for ax, M, title in zip(
+    axes, (A, L, recon), ("A (SPD)", r"L (Cholesky)", r"$LL^\top$")
+):
+    im = ax.imshow(M, cmap="RdBu_r", vmin=-np.max(np.abs(A)), vmax=np.max(np.abs(A)))
+    ax.set_title(title)
+    ax.set_xticks(range(p))
+    ax.set_yticks(range(p))
+fig.colorbar(im, ax=axes, shrink=0.7)
+fig.suptitle(
+    rf"$\max|LL^\top - A| = {max_err:.1e}$    "
+    rf"$\log\det A$: chol $= {logdet_chol:.4f}$, ref $= {logdet_ref:.4f}$",
+    y=1.02,
+)
+plt.show()
+```
+
+The reconstruction error sits at machine precision, and the two log-determinants
+agree — the one read off the factor diagonal (@eq-logdet) and a reference. That
+agreement is the whole point: one factorisation, both the solve and the volume
+term.
+
+## Newton, and how to trust it {#sec-newton}
+
+The second recurring job is to pick a few scalars — log-variances in a
+[mixed model](lme.qmd#sec-reml), smoothing parameters in a
+[GAM](gam.qmd#sec-penalty), the cut-points of an ordinal model — by minimising a
+small, smooth negative log-likelihood $f(\theta)$. Here $\theta$ is short (two to
+a handful of components), $f$ is smooth, and we want the minimiser. The optimiser
+that does this across the whole suite is `damped_newton` in `stats/_optimise.py`.
+We build it up one rung at a time.
+
+### Gradient descent, and why it crawls
+
+The first thing anyone tries is **gradient descent**: the gradient $\nabla f$
+points uphill, so step downhill,
+
+$$
+\theta \leftarrow \theta - \alpha\,\nabla f(\theta).
+$$ {#eq-gd}
+
+It works, but it can be agonisingly slow. Picture the loss surface as a long
+narrow valley — steep across, gently sloping along. The gradient points mostly
+*across* the valley (the steep direction), so the iterate zig-zags from wall to
+wall while creeping only slowly toward the minimum at the far end. The technical
+name for "long narrow valley" is **ill-conditioning** (the Hessian's eigenvalues
+span a wide range), and gradient descent's step count grows with that spread. We
+need a method that knows about the *shape* of the valley, not just its slope.
+
+### Newton: use the curvature
+
+The shape of the valley is exactly what the second derivative — the **Hessian**
+$H = \nabla^2 f$ — encodes. Here is the idea, and it is one you could invent.
+Near the current point, approximate $f$ by its second-order Taylor expansion: a
+quadratic bowl. We know exactly where a quadratic is minimised — set its gradient
+to zero. So *jump straight to the bottom of the local quadratic*. Expanding
+$f(\theta + \delta) \approx f(\theta) + \nabla^{\top}\delta +
+\tfrac12 \delta^{\top} H \delta$ and minimising over $\delta$ gives
+$H\delta = -\nabla$, i.e.
+
+$$
+\theta \leftarrow \theta - H^{-1}\nabla f(\theta).
+$$ {#eq-newton}
+
+This is **Newton's method**. Notice what $H^{-1}$ does: it rescales the gradient
+by the curvature, stretching the step out along the gently-sloping floor of the
+valley and shrinking it across the steep walls — precisely the correction gradient
+descent lacked. If $f$ *is* a quadratic, one Newton step lands exactly on the
+minimum. For a smooth $f$ near its optimum, convergence is quadratic — the number
+of correct digits roughly doubles each step. (Solving $H\delta = -\nabla$ is, of
+course, the small dense SPD solve of [§2](#sec-cholesky) — when $H$ is SPD.)
+
+### Fisher scoring is IRLS
+
+There is a beautiful special case worth naming because it ties this section to the
+[GLM chapter](glm.qmd#sec-irls). For a GLM, the Hessian of the log-likelihood is
+random (it depends on the data through second derivatives), but its *expectation*
+— the **Fisher information** — has a clean closed form. Replacing $H$ by its
+expectation $\mathcal{I}$ in @eq-newton is called **Fisher scoring**, and for a
+GLM the resulting update is *exactly* iteratively-reweighted least squares:
+
+$$
+\beta \leftarrow \beta + \mathcal{I}^{-1}\,\nabla\ell
+\;=\;(X^{\top}WX)^{-1}X^{\top}W z,
+$$
+
+the weighted normal equations @eq-normal with the IRLS weights $W$ and working
+response $z$. So "Fisher scoring on a GLM" and "IRLS" are two names for one
+algorithm — Newton's idea with the expected curvature substituted in. The suite's
+IRLS core (`_irls.py`, `fit_penalised_irls`) is this loop, run for a fixed number
+of iterations, each iteration a `small_inv_logdet` solve of @eq-normal.
+
+### The overshoot problem, and damping
+
+Newton's promise — one step to the bottom — holds for a *quadratic*. Real
+likelihoods are not quadratic, and far from the optimum the local quadratic
+approximation can be poor or even *wrong-way-up*. Two failures bite:
+
+1. **Overshoot.** A full Newton step from a bad start can leap clear past the
+   minimum and land somewhere the objective is *worse* than where it began.
+2. **Indefinite curvature.** Away from the optimum $H$ can be indefinite (it has
+   negative eigenvalues — a saddle). Then $-H^{-1}\nabla$ is not even a *descent*
+   direction; it can point uphill, and the iterate stalls or diverges. The REML
+   objective in particular is non-convex in the log-Cholesky parameterisation and
+   is riddled with saddles away from the optimum (this is flagged explicitly in
+   `_optimise.py`).
+
+The cure is **damping**, and there are two equivalent ways to picture it.
+
+*View A — step control (line search).* Take the Newton *direction* but do not
+trust its *length*. Try the full step; if it does not decrease $f$, halve it, and
+halve again, until it does. This is **backtracking line search**, and it
+guarantees you never make things worse. `nitrix` implements exactly this in
+`_backtrack`: try scales $1, \tfrac12, \tfrac14, \dots$ for a fixed number of
+halvings and keep the best (if none improves, keep $\theta$ unchanged).
+
+*View B — ridge on the curvature (Levenberg).* Add a multiple of the identity to
+the Hessian before solving:
+
+$$
+\theta \leftarrow \theta - (H + \lambda I)^{-1}\nabla f.
+$$ {#eq-levenberg}
+
+Read the two limits and the whole method falls out. When $\lambda$ is **large**,
+$H+\lambda I \approx \lambda I$ and the step becomes $-\tfrac1\lambda\nabla$ — a
+short, safe gradient-descent step. When $\lambda$ is **small**, it is the full
+Newton step @eq-newton. So $\lambda$ dials continuously between "cautious
+gradient" far away and "aggressive Newton" near the optimum. It doubles as
+numerical insurance: a positive $\lambda$ keeps $H+\lambda I$ invertible even when
+$H$ itself is near-singular. This is the **Levenberg** step, and `_optimise.py`
+offers it as `step='damped'` (solved through `small_inv_logdet`) for the cases
+where $H$ is PSD by construction — for instance the **average-information** REML
+curvature, which is PSD by design (see [§4](#sec-woodbury) and the LME chapter).
+
+For the saddle-prone case the source goes one better. Its default,
+`step='saddle_free'`, eigendecomposes $H$ (via the cuSOLVER-free Jacobi routine of
+the next paragraph) and replaces each eigenvalue $\mu_i$ by $|\mu_i|$ (floored).
+Flipping the sign of the negative eigenvalues turns a saddle into a bowl while
+keeping the directions $H$ identified, so the step is *guaranteed* to be a descent
+direction even at an indefinite Hessian (Dauphin et al. 2014). The eigendecomposition
+runs under `stop_gradient` because it only shapes the step, not the value.
+
+That eigendecomposition is itself hand-rolled, for the same cuSOLVER reason as
+Cholesky: `sym_eig_jacobi` in `linalg/_smalllinalg.py` is a **cyclic Jacobi**
+eigensolver — a fixed number of sweeps of plane (Givens) rotations, each zeroing
+one off-diagonal entry, applied as $A \leftarrow J^{\top} A J$. It is pure
+arithmetic (no cuSOLVER `syevd`), `vmap`-clean, and converges to machine precision
+in a handful of sweeps for the tiny matrices it serves (a contrast covariance or a
+$\le 7$-component Hessian). It is *forward-only* — differentiating an iterative
+eigensolver overflows as the off-diagonals vanish — which is fine because its
+consumers run under `stop_gradient`.
+
+### What `damped_newton` actually does
+
+Putting the rungs together, `damped_newton(nll, theta0, *, n_iter, damping,
+max_step, n_backtrack, curvature, step)` runs a **fixed** number of iterations
+(`n_iter`), each one:
+
+1. evaluate the gradient and curvature at $\theta$ — either by autodiff
+   (`curvature=None` uses `jax.grad` + `jax.hessian` of `nll`) or by an
+   **analytic** callback the solver supplies (e.g. the closed-form REML score and
+   average-information matrix; this is the fork the block-Woodbury and FaST-LMM
+   engines take, avoiding a second-order autodiff through a Cholesky);
+2. form the step direction by the chosen rule (`saddle_free` or `damped`),
+   **clipping** each component to `max_step` as a final overshoot guard;
+3. backtrack (`n_backtrack` halvings) along that direction, keeping the best.
+
+The *fixed* iteration budget is the crucial design choice for this codebase: a
+`while`-loop with a convergence test branches on data, which breaks clean `vmap` /
+`jit` across the image. A fixed `lax.scan` of, say, 20 steps is branch-free, so
+the identical compiled program runs at every voxel — and the damping + backtracking
+ensure those 20 steps are monotone and safe rather than merely numerous. This is
+the single source of truth for the optimiser; the chapters that estimate variance
+components all call into it.
+
+@fig-solvers-newton contrasts a raw Newton step overshooting a non-quadratic valley
+with a damped step converging cleanly.
+
+```{python}
+#| label: fig-solvers-newton
+#| fig-cap: "A non-quadratic loss surface (contours), minimum at (1,1). From a poor start the raw Newton trajectory (red) trusts its local quadratic model, takes a step far too long, and flies out of the frame — it diverges. The damped trajectory (black) takes the saddle-free direction but backtracks any step that would not decrease the loss, walking down the valley floor to the minimum (star)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+# A curved valley with minimum at (1, 1), wrapped in log1p so that FAR from the
+# optimum the quadratic (Newton) model is badly wrong -- the regime where a full
+# Newton step overshoots. Same idea as Rosenbrock, gentler tails.
+def base(p):
+    x, y = p
+    return (1.0 - x) ** 2 + 10.0 * (y - x * x) ** 2
+
+def f(p):
+    return np.log1p(base(p))
+
+def grad(p):
+    x, y = p
+    gb = np.array([
+        -2.0 * (1.0 - x) - 40.0 * x * (y - x * x),
+        20.0 * (y - x * x),
+    ])
+    return gb / (1.0 + base(p))
+
+def hess(p):
+    x, y = p
+    b = base(p)
+    gb = np.array([
+        -2.0 * (1.0 - x) - 40.0 * x * (y - x * x),
+        20.0 * (y - x * x),
+    ])
+    Hb = np.array([
+        [2.0 - 40.0 * (y - 3.0 * x * x), -40.0 * x],
+        [-40.0 * x, 20.0],
+    ])
+    return Hb / (1.0 + b) - np.outer(gb, gb) / (1.0 + b) ** 2
+
+def raw_step(p):
+    # Full Newton: trust the local quadratic completely.
+    return p - np.linalg.solve(hess(p), grad(p))
+
+def damped_step(p):
+    # Saddle-free curvature (|eigenvalues|, floored -> a guaranteed descent
+    # direction even at an indefinite Hessian) plus a backtracking line search:
+    # the same direction, never lengthened past where the loss decreases.
+    H = hess(p)
+    g = grad(p)
+    w, Q = np.linalg.eigh(H)
+    H_psd = Q @ np.diag(np.maximum(np.abs(w), 1e-2)) @ Q.T
+    delta = np.linalg.solve(H_psd, g)
+    scale = 1.0
+    for _ in range(40):
+        trial = p - scale * delta
+        if f(trial) < f(p):
+            return trial
+        scale *= 0.5
+    return p
+
+start = np.array([-1.0, 1.5])
+raw = [start.copy()]
+dmp = [start.copy()]
+for _ in range(12):
+    raw.append(raw_step(raw[-1]))
+    dmp.append(damped_step(dmp[-1]))
+raw = np.array(raw)
+dmp = np.array(dmp)
+
+xs = np.linspace(-2.0, 2.0, 320)
+ys = np.linspace(-1.5, 2.5, 320)
+XX, YY = np.meshgrid(xs, ys)
+ZZ = np.log1p((1.0 - XX) ** 2 + 10.0 * (YY - XX * XX) ** 2)
+
+fig, ax = plt.subplots(figsize=(6, 4.5))
+ax.contour(XX, YY, ZZ, levels=18, cmap="Greys", linewidths=0.6)
+# Clip the raw trajectory to the window so the divergence reads as a line
+# leaving the frame rather than rescaling the whole plot.
+rc = raw.copy()
+rc[:, 0] = np.clip(rc[:, 0], -2.0, 2.0)
+rc[:, 1] = np.clip(rc[:, 1], -1.5, 2.5)
+ax.plot(rc[:, 0], rc[:, 1], "-o", color="crimson", ms=3, lw=1.2,
+        label="raw Newton (diverges)")
+ax.annotate("raw step\nflies off", xy=rc[2], xytext=(-1.9, -1.2),
+            color="crimson", fontsize=8,
+            arrowprops=dict(arrowstyle="->", color="crimson", lw=1.0))
+ax.plot(dmp[:, 0], dmp[:, 1], "-o", color="black", ms=3, lw=1.2,
+        label="damped + backtrack")
+ax.plot(1.0, 1.0, "*", color="gold", ms=18, mec="k", label="minimum")
+ax.plot(*start, "s", color="steelblue", ms=8, label="start")
+ax.set_xlim(-2.0, 2.0)
+ax.set_ylim(-1.5, 2.5)
+ax.set_xlabel(r"$\theta_1$")
+ax.set_ylabel(r"$\theta_2$")
+ax.legend(loc="upper left", fontsize=8)
+ax.set_title("Raw vs damped Newton on a curved valley")
+plt.show()
+```
+
+The raw step trusts the local quadratic far from the optimum, takes a wildly
+overlong step, and leaves the basin entirely; the damped step takes the same
+*direction* but never lets the loss go up, so it tracks the valley floor down to
+the minimum. That contrast — direction from the curvature, length from a line
+search — is the whole content of damping.
+
+## Inverting a giant covariance cheaply {#sec-woodbury}
+
+The third job appears the moment there are random effects. A
+[mixed model](lme.qmd) has marginal (observation) covariance
+
+$$
+V_y = Z G Z^{\top} + R,
+$$ {#eq-marg-cov}
+
+where $Z$ is the $N\times q$ random-effects design, $G$ the $q\times q$
+random-effect covariance, and $R$ the residual covariance (often $\sigma_e^2 I_N$).
+Every REML likelihood needs $V_y^{-1}$ and $\log\det V_y$ — but $V_y$ is
+$N\times N$. At $N$ in the hundreds, per voxel, across a million voxels, forming
+and factoring it ($O(N^3)$ each) is hopeless. We must never build it.
+
+### The Woodbury idea
+
+Here is the intuition before any formula. $R$ is cheap to invert — it is diagonal.
+The expensive part, $ZGZ^{\top}$, is a *low-rank* bump on top of $R$: it has rank
+at most $q$, and $q$ is small (a few random effects, or a few parameters per
+group). So we are asking: *if I already know the inverse of the cheap part $R$, how
+much does a low-rank bump change it?* Surely not by much work — a rank-$q$ change
+to a matrix ought to cost something like $q$, not $N$. The **Woodbury identity**
+makes that precise:
+
+$$
+(R + Z G Z^{\top})^{-1}
+= R^{-1} - R^{-1} Z\,(G^{-1} + Z^{\top} R^{-1} Z)^{-1} Z^{\top} R^{-1}.
+$$ {#eq-woodbury}
+
+Read it as a *correction*. Start from the cheap inverse $R^{-1}$. Then subtract a
+correction that lives entirely in the $q$-dimensional random-effect space: the
+only matrix you actually invert is the **capacitance matrix**
+$K = G^{-1} + Z^{\top} R^{-1} Z$, which is just $q\times q$. Everything else is a
+matrix multiply by $Z$ or $R^{-1}$. The cost collapses from $O(N^3)$ to roughly
+$O(q^3 + Nq)$ — the $q^3$ to invert $K$, the $Nq$ for the multiplies. When $q \ll
+N$, that is the difference between feasible and not. The matching determinant
+identity (so $\log\det V_y$ is also cheap) is the matrix determinant lemma,
+$\log\det V_y = \log\det R + \log\det G + \log\det K$.
+
+This single identity is the workhorse behind every mixed-model and GLMM fit in the
+suite. The [GLMM chapter](glmm.qmd) calls it the block-Woodbury structure; the LME
+chapter uses it for correlated random slopes.
+
+### Block-Woodbury: many groups stay cheap
+
+Now the refinement `nitrix` actually ships, in `lme/_blockwoodbury.py`. The
+generic Woodbury inverts one $q\times q$ capacitance. But in a grouped design — the
+typical case, one random intercept-and-slope *per subject* — the random-effect
+covariance $G$ and the design $Z$ have **block structure**: observations in
+different groups share no random effects, so $V_y$ is **block-diagonal across
+groups**. The marginal covariance is
+
+$$
+V_y = \operatorname{blockdiag}_i\big(\sigma_e^2 I_{n_i} + Z_i G Z_i^{\top}\big),
+$$
+
+one block per group $i$ (group $i$ has $n_i$ rows and its own $n_i\times r$
+random-covariate block $Z_i$, where $r$ is the per-group random dimension — e.g.
+$r=2$ for a random intercept and slope). A block-diagonal matrix inverts
+block-by-block, so Woodbury applies *independently within each group*. Define the
+per-group capacitance
+
+$$
+K_i = \sigma_e^2 G^{-1} + Z_i^{\top} Z_i \quad (r\times r),
+$$ {#eq-blockwoodbury}
+
+and the whole REML objective assembles from per-group $r\times r$ reductions plus
+one $p\times p$ fixed-effect solve. The source spells out exactly the two
+quantities every likelihood needs, per group:
+
+$$
+X_i^{\top} V_i^{-1} X_i
+= \sigma_e^{-2}\big(X_i^{\top}X_i - (X_i^{\top}Z_i)\,K_i^{-1}\,(Z_i^{\top}X_i)\big),
+\qquad
+\log|V_i| = (n_i - r)\log\sigma_e^2 + \log|G| + \log|K_i|.
+$$
+
+The accounting is the point: every matrix that gets inverted is $r\times r$ (with
+$r \le 3$) or $p\times p$ — never $N\times N$, never even $n_i\times n_i$. Adding
+*more groups* adds more independent $r\times r$ blocks, so the cost grows linearly
+in the number of groups rather than cubically in $N$. The connection to the
+**Schur complement**: $K_i$ is exactly the Schur complement that arises when you
+eliminate the fixed effects from the joint (mixed-model) equations of a group —
+"correcting" the within-group Gram for what the random effects explain. The
+function `group_grams` precomputes the data-independent per-group Grams
+($Z_i^{\top}Z_i$, $X_i^{\top}Z_i$, $X_i^{\top}X_i$) once and shares them across all
+voxels; `bw_score_and_ai` then assembles the analytic REML score and
+average-information curvature from them — feeding the **analytic-curvature** fork of
+`damped_newton` from [§3](#sec-newton), with `step='damped'` because that AI
+curvature is PSD by construction.
+
+@fig-solvers-woodbury shows the block structure of $ZZ^{\top}$ for grouped data —
+the sparsity Woodbury exploits.
+
+```{python}
+#| label: fig-solvers-woodbury
+#| fig-cap: "Left: the random-effects design Z for 6 groups (one random intercept + slope per group), observations sorted by group. Right: ZZᵀ — block-diagonal across groups, so V = ZGZᵀ + R inverts one small block at a time rather than as one NxN matrix."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+n_groups = 6
+per_group = 5
+r = 2  # random intercept + slope
+N = n_groups * per_group
+
+# Block-structured Z: each group's rows load only on that group's r columns.
+Z = np.zeros((N, n_groups * r))
+group = np.repeat(np.arange(n_groups), per_group)
+for i in range(N):
+    g = group[i]
+    x = rng.uniform(-1, 1)  # the random-slope covariate
+    Z[i, g * r + 0] = 1.0       # intercept
+    Z[i, g * r + 1] = x         # slope
+ZZt = Z @ Z.T
+
+fig, axes = plt.subplots(1, 2, figsize=(8.5, 4))
+axes[0].imshow(Z, cmap="viridis", aspect="auto")
+axes[0].set_title(r"$Z$  ($N\times qr$)")
+axes[0].set_xlabel("random-effect column")
+axes[0].set_ylabel("observation (sorted by group)")
+im = axes[1].imshow(ZZt, cmap="magma")
+axes[1].set_title(r"$ZZ^\top$ — block-diagonal across groups")
+axes[1].set_xlabel("observation")
+axes[1].set_ylabel("observation")
+fig.colorbar(im, ax=axes[1], shrink=0.8)
+# Draw the group block boundaries.
+for b in range(1, n_groups):
+    axes[1].axhline(b * per_group - 0.5, color="white", lw=0.6)
+    axes[1].axvline(b * per_group - 0.5, color="white", lw=0.6)
+plt.show()
+```
+
+The off-diagonal blocks of $ZZ^{\top}$ are exactly zero: an observation in group 1
+shares no random effect with one in group 4. That sparsity is what lets the
+per-group Woodbury treat each block in isolation, so the whole inverse never has to
+see $N$ at once.
+
+## Diagonalising once: the spectral trick {#sec-spectral}
+
+The fourth job is the most elegant, and it is what makes the *scalar* random-effect
+case (one variance per subject) blazingly fast at brain scale. It lives in
+`lme/reml.py` and is the **FaST-LMM** trick of Lippert et al. (2011).
+
+### The setup that makes it possible
+
+Specialise [the marginal covariance](#eq-marg-cov) to a single scalar random effect
+with $R = \sigma_e^2 I$:
+
+$$
+V = \sigma_b^2\, Z Z^{\top} + \sigma_e^2 I_N.
+$$
+
+The shape $ZZ^{\top}$ is **fixed** — it does not change as we search over the
+variances. Only the two scalars $\sigma_b^2, \sigma_e^2$ move. That is the
+structure to exploit: when the only unknowns are scalar multipliers of a fixed
+matrix, we should pay the cost of understanding that matrix's geometry *once* and
+then ride it for free at every trial value.
+
+### One eigendecomposition rotates the problem diagonal
+
+The geometry of a symmetric matrix is its eigendecomposition. Write
+$ZZ^{\top} = U \Lambda U^{\top}$ with $U$ orthonormal and $\Lambda =
+\operatorname{diag}(\lambda_1,\dots,\lambda_N)$. Rotate the data and design into
+that eigenbasis: $\tilde y = U^{\top} y$, $\tilde X = U^{\top} X$. Because $U$ is
+orthonormal, $U^{\top} I U = I$, so in the rotated coordinates the *whole*
+covariance becomes **diagonal**:
+
+$$
+\tilde V = U^{\top} V U
+= \sigma_b^2 \Lambda + \sigma_e^2 I
+= \operatorname{diag}(d), \qquad
+d_i = \sigma_b^2 \lambda_i + \sigma_e^2.
+$$ {#eq-spectral}
+
+Now look at what every expensive operation in the REML objective becomes. The
+profile REML negative log-likelihood (derived in [the LME chapter](lme.qmd#sec-reml))
+is
+
+$$
+\mathrm{nll}(\theta) = \tfrac12\Big[\log\det V
++ \log\det(X^{\top} V^{-1} X) + r^{\top} V^{-1} r\Big],
+$$
+
+and in the rotated, diagonal coordinates each piece collapses to a **sum over
+eigenvalues**:
+
+$$
+\log\det V = \sum_i \log d_i,\qquad
+V^{-1} = \operatorname{diag}(1/d_i),\qquad
+\tilde X^{\top} V^{-1}\tilde X = \sum_i \frac{\tilde x_i \tilde x_i^{\top}}{d_i}.
+$$
+
+There is no matrix to factor any more. Each trial value of the variances costs
+$O(N p^2 + N)$ — *elementwise* work on the vector $d$ — instead of an $O(N^3)$
+refactorisation of $V$. The Newton iteration of [§3](#sec-newton) over $\theta =
+(\log\sigma_b^2, \log\sigma_e^2)$ runs entirely on the diagonal $d$.
+
+### Computed once, reused across the whole image
+
+The eigendecomposition $ZZ^{\top} = U\Lambda U^{\top}$ costs $O(N^3)$ — but it
+depends only on the *design* $Z$, which is **shared across all voxels** (every
+voxel has the same subjects and the same group structure; only $y$ differs). So it
+is computed **once**, at the outer call, and $U, \Lambda$ are reused for every one
+of the million per-voxel fits. The one-off $O(N^3)$ is amortised to nothing; the
+per-voxel work is the cheap diagonal Newton. This is the single place the suite
+*does* use a library eigendecomposition — through `safe_eigh`, which tries the
+fast path and falls back to a CPU eig if cuSOLVER is unavailable — precisely
+because it is outside the hot path and run once.
+
+There is a further refinement in the source worth knowing: when the random-effect
+design is *tall* ($q < N$, the brain-scale norm — many observations, few random
+effects), `reml_fit(low_rank=True)` eigendecomposes the much smaller $q\times q$
+matrix $Z^{\top}Z$ instead of the $N\times N$ matrix $ZZ^{\top}$, recovering the
+range-space eigenvectors as $U_r = ZW/\sqrt{s}$ and handling the $N-q$ null
+directions through cheap Gram aggregates. The dispatcher auto-selects this when
+$q < N$. The two paths match to the iterative tolerance; the low-rank one is one to
+two orders of magnitude cheaper to set up.
+
+@fig-solvers-spectral profiles the REML objective over the variance ratio — the
+clean 1-D curve the diagonalised objective produces, evaluated at a sweep of trial
+values for almost no cost.
+
+```{python}
+#| label: fig-solvers-spectral
+#| fig-cap: "Profile REML objective vs the log variance-ratio log(σ_b²/σ_e²), evaluated through the spectral form (a sum over the fixed ZZᵀ eigenvalues). Each trial value is an O(N) sweep over the diagonal d, not an O(N³) refactorisation; the optimum (star) is where the random-effect variance is identified."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# Simulate one voxel of a random-intercept model: N subjects in M groups.
+N, M, p = 40, 8, 2
+group = np.repeat(np.arange(M), N // M)
+Z = np.zeros((N, M))
+Z[np.arange(N), group] = 1.0            # one random intercept per group
+X = np.column_stack([np.ones(N), rng.standard_normal(N)])  # intercept + covariate
+beta_true = np.array([1.0, 0.5])
+sb2_true, se2_true = 1.5, 0.5
+b = rng.standard_normal(M) * np.sqrt(sb2_true)
+y = X @ beta_true + Z @ b + rng.standard_normal(N) * np.sqrt(se2_true)
+
+# Shared eigendecomposition of ZZᵀ — computed ONCE.
+ZZt = Z @ Z.T
+lam, U = np.linalg.eigh(ZZt)
+lam = np.clip(lam, 0.0, None)
+y_rot = U.T @ y
+X_rot = U.T @ X
+
+def profile_reml_nll(log_ratio):
+    # Profile out the overall scale: fix se2 = 1, sb2 = exp(log_ratio).
+    sb2 = np.exp(log_ratio)
+    d = sb2 * lam + 1.0                       # diagonal of rotated V
+    Vinv_diag = 1.0 / d
+    XtVinvX = (X_rot.T * Vinv_diag) @ X_rot   # p x p
+    XtVinvy = (X_rot.T * Vinv_diag) @ y_rot
+    beta = np.linalg.solve(XtVinvX, XtVinvy)
+    r = y_rot - X_rot @ beta
+    rss = np.sum(r * r * Vinv_diag)
+    logdet_V = np.sum(np.log(d))
+    logdet_XtVinvX = np.linalg.slogdet(XtVinvX)[1]
+    return 0.5 * (logdet_V + logdet_XtVinvX + rss)
+
+ratios = np.linspace(-4.0, 4.0, 200)
+nll = np.array([profile_reml_nll(lr) for lr in ratios])
+opt = ratios[np.argmin(nll)]
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.plot(ratios, nll, color="navy", lw=1.6)
+ax.axvline(opt, color="crimson", ls="--", lw=1.0)
+ax.plot(opt, nll.min(), "*", color="gold", ms=16, mec="k")
+ax.axvline(np.log(sb2_true / se2_true), color="grey", ls=":", lw=1.0,
+           label="true ratio")
+ax.set_xlabel(r"$\log(\sigma_b^2/\sigma_e^2)$")
+ax.set_ylabel("profile REML negative log-likelihood")
+ax.set_title("REML objective via the spectral (FaST-LMM) form")
+ax.legend(fontsize=8)
+plt.show()
+```
+
+The curve is smooth and unimodal, with its minimum near the true variance ratio —
+and every one of its 200 points cost an $O(N)$ diagonal sweep, not a refactorisation.
+That is the spectral trick in one picture: pay $O(N^3)$ once for the rotation, then
+search the variances for almost free.
+
+## Further reading
+
+- Golub, G. H., & Van Loan, C. F. (2013). *Matrix Computations* (4th ed.). Johns
+  Hopkins University Press. — The reference for the Cholesky factorisation,
+  triangular solves, conditioning, and the Woodbury / Sherman–Morrison identities.
+- Nocedal, J., & Wright, S. J. (2006). *Numerical Optimization* (2nd ed.).
+  Springer. — Newton's method, line search and backtracking, Levenberg–Marquardt
+  damping, and trust regions.
+- Dauphin, Y. N., Pascanu, R., Gulcehre, C., Cho, K., Ganguli, S., & Bengio, Y.
+  (2014). Identifying and attacking the saddle point problem in high-dimensional
+  non-convex optimization. *NeurIPS*. — The saddle-free Newton modification (flip
+  the sign of negative Hessian eigenvalues) used by `step='saddle_free'`.
+- Henderson, C. R. (1975). Best linear unbiased estimation and prediction under a
+  selection model. *Biometrics*, 31. — The mixed-model equations and the joint
+  fixed/random system the Schur complement eliminates.
+- Harville, D. A. (1977). Maximum likelihood approaches to variance component
+  estimation and to related problems. *JASA*, 72. — REML and the variance-component
+  likelihood computations.
+- Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M., Davidson, R. I., &
+  Heckerman, D. (2011). FaST linear mixed models for genome-wide association
+  studies. *Nature Methods*, 8. — The spectral diagonalisation trick of
+  [§5](#sec-spectral).
+- Lindstrom, M. J., & Bates, D. M. (1990). Newton–Raphson and EM algorithms for
+  linear mixed-effects models. *JASA*, 83. — Newton-scoring for variance components.
+
+## See also
+
+Source for the routines on this page (GitHub):
+
+- [`linalg/_smalllinalg.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_smalllinalg.py)
+  — `small_inv_logdet`, `spd_chol`, `spd_inv_logdet_chol`, `sym_eig_jacobi` (the
+  cuSOLVER-free small dense linear algebra).
+- [`stats/_optimise.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_optimise.py)
+  — `damped_newton` (the shared damped/saddle-free Newton optimiser).
+- [`stats/_irls.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_irls.py)
+  — `fit_penalised_irls` (Fisher scoring = IRLS).
+- [`stats/lme/_blockwoodbury.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_blockwoodbury.py)
+  — the per-group block-Woodbury REML.
+- [`stats/lme/reml.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/reml.py)
+  — `reml_fit` (the FaST-LMM spectral path).
+
+Where these solvers are used:
+
+- [GLM](glm.qmd#sec-irls) — IRLS is Fisher scoring; every step is the small dense
+  solve of [§2](#sec-cholesky).
+- [LME](lme.qmd#sec-reml) — REML by Newton ([§3](#sec-newton)) over variances,
+  with the spectral trick of [§5](#sec-spectral).
+- [GLMM](glmm.qmd) — the block-Woodbury structure of [§4](#sec-woodbury).
+- [GAM](gam.qmd#sec-penalty) and [Fellner–Schall](fellner-schall.qmd#the-update) —
+  the penalised normal equations @eq-normal and the small Newton step.

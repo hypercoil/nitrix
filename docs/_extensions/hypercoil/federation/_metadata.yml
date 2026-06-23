@@ -1,0 +1,35 @@
+# Shared format defaults consumed by every library and the hub (SPEC §4.4).
+# Library _quarto.yml files must NOT redeclare anything here — doing so is a
+# config-drift bug. Distributed via the federation extension; merged through
+# `metadata-files`.
+toc: true
+toc-depth: 3
+number-sections: true
+code-copy: true
+code-overflow: wrap
+code-annotations: hover
+# Dark syntax theme: light token colours on the deep code-block surface set in
+# federation.scss ($code-block-bg). Keeps source legible on the black base.
+highlight-style: atom-one-dark
+link-external-newwindow: true
+
+# Executable figures: keep runtime warnings out of the rendered page — they are
+# author-facing noise (e.g. platform BLAS FP warnings), not reader content.
+execute:
+  warning: false
+
+# LaTeX math.
+html-math-method: mathjax
+
+# Theorem/proof-family environments are Quarto built-ins (thm/lem/cor/def/exm/
+# exr + proof). Algorithm listings get a custom crossref kind so `@alg-…` works.
+crossref:
+  custom:
+    - kind: float
+      key: alg
+      reference-prefix: Algorithm
+      caption-prefix: Algorithm
+      latex-env: algorithm
+
+# Citation style: numeric, against the shared federation bibliography.
+citations-hover: true

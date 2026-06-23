@@ -1,0 +1,49 @@
+---
+title: "nitrix.stats.inference.randomise"
+generated: true
+signature-hash: 0b7733b10d7ca435
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.inference.randomise` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `PermResult` {#PermResult}
+
+*decorated:* `@register_result(children=('stat', 'enhanced', 'p_fwe', 'p_uncorrected', 'null_max'))`, `@dataclass(frozen=True)`
+
+```python
+class PermResult
+```
+
+Permutation-test output (all maps in the input spatial shape).
+
+*TODO: class overview.*
+
+## `gpd_pvalue` {#gpd_pvalue}
+
+```python
+gpd_pvalue(stat: Float[Array, '...'], null_dist: Float[Array, 'n'], *, n_exceedances: int=250) -> Float[Array, '...']
+```
+
+Tail-accelerated exceedance p-value via a generalized Pareto fit.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `permutation_test` {#permutation_test}
+
+```python
+permutation_test(data: Float[Array, '*spatial N'], design: Float[Array, 'N p'], contrast: Float[Array, 'p'] | Float[Array, 'm p'], *, key: Array, n_perm: int=500, enhancement: Enhancement='tfce', exchange: Exchange='sign', nuisance: Optional[Float[Array, 'N q']]=None, blocks: Optional[Int[Array, 'N']]=None, mask: Optional[Bool[Array, '*spatial']]=None, two_sided: bool=True, var_smooth: Optional[float]=None, connectivity: int=1, cluster_thresh: Optional[float]=None, tfce_E: float=0.5, tfce_H: float=2.0, tfce_steps: int=100, pvalue_method: PValueMethod='empirical', gpd_n_exceedances: int=250) -> PermResult
+```
+
+Permutation test of a GLM t- or F-contrast with FWE control.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

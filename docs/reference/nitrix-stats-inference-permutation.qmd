@@ -1,0 +1,37 @@
+---
+title: "nitrix.stats.inference.permutation"
+generated: true
+signature-hash: f7ecf581fdc5e717
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.inference.permutation` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `sign_flips` {#sign_flips}
+
+```python
+sign_flips(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']]=None) -> Float[Array, 'n_perm N']
+```
+
+``(n_perm, n)`` matrix of ``+/-1`` sign flips (row 0 = identity).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `permutations` {#permutations}
+
+```python
+permutations(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']]=None) -> Int[Array, 'n_perm N']
+```
+
+``(n_perm, n)`` permutation-index matrix (row 0 = identity).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

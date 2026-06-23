@@ -1,0 +1,61 @@
+---
+title: "nitrix.stats.inference.multiple_comparisons"
+generated: true
+signature-hash: 6eb5eee5c25a0f9b
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.inference.multiple_comparisons` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `fdr_bh` {#fdr_bh}
+
+```python
+fdr_bh(p_values: Float[Array, 'n'], *, alpha: float=0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+
+Benjamini-Hochberg FDR correction.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `bonferroni` {#bonferroni}
+
+```python
+bonferroni(p_values: Float[Array, 'n'], *, alpha: float=0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+
+Bonferroni family-wise correction.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `conjunction` {#conjunction}
+
+```python
+conjunction(stats: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
+```
+
+Minimum-statistic conjunction across ``k`` contrasts (Nichols et al. 2005).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `conjunction_pvalue` {#conjunction_pvalue}
+
+```python
+conjunction_pvalue(p_values: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
+```
+
+Conjunction p-value: the **maximum** per-contrast p-value over ``k``
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

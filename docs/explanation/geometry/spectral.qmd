@@ -1,0 +1,826 @@
+---
+title: "Spectral geometry: manifold harmonics and embedding"
+---
+
+::: {.callout-tldr title="Fast path"}
+The eigenfunctions of the Laplace–Beltrami operator $\Delta = M^{-1}L$ are the
+natural **vibration modes** of a surface — *Fourier on a manifold*. They form an
+orthonormal basis ordered by smoothness: $\phi_0$ is the constant
+($\lambda_0 = 0$), then increasingly wiggly harmonics. Two payoffs follow.
+
+- The low modes are the smoothest non-constant functions on the surface, so any
+  filter that reweights them by a function of frequency is a mesh operation — and
+  the geodesic smoothing of the [previous page](laplace-beltrami.qmd#sec-smoothing)
+  *is* a low-pass filter in this basis.
+- On the round sphere the first three non-constant eigenfunctions **are** the
+  coordinate functions $x, y, z$. So embedding each vertex by $(\phi_1,\phi_2,\phi_3)$
+  and normalising maps a genus-0 surface onto the sphere **in one eigensolve** —
+  the recon-surf "spectral inflation" implemented by `spectral_sphere_embedding`.
+:::
+
+This page sits on the spectral rung of the unit, immediately after
+[the Laplace–Beltrami operator](laplace-beltrami.qmd#sec-cotangent). It assumes you
+are comfortable with **eigendecomposition** — $A x = \lambda x$, orthogonal
+eigenvectors of a symmetric matrix, the generalised problem $A x = \lambda B x$ —
+but have had **no formal training in differential geometry or numerical
+eigensolvers**. We build everything from the discrete Fourier basis you already
+know, then show how `nitrix` resolves it on real meshes without ever forming a
+dense matrix.
+
+The unit's governing idea runs straight through here. A triangle mesh is a
+**discrete approximation of a smooth surface**; its eigenpairs
+$(\lambda_k, \phi_k)$ approximate the eigenpairs of the continuous Laplace–Beltrami
+operator, and they **converge to that continuous truth under refinement**. We will
+not check this with bit-parity against any reference implementation — the right
+posture is the same `metrics↔ITK` one used throughout the unit: validate against
+an **analytic oracle** (the sphere, whose spectrum and harmonics are known in
+closed form) by **class and correlation**, not equality.
+
+## A motivating question {#sec-motivation}
+
+You have reconstructed a **cortical surface** — a genus-0 triangle mesh wrapping
+one hemisphere, the input to every surface-based analysis. Two questions recur, and
+both are spectral.
+
+First, **how do I compare shapes?** Two cortices, or one cortex before and after
+preprocessing, are different tessellations with no vertex correspondence. You want a
+fingerprint that depends on the *shape* and not on the meshing — ideally one that is
+invariant to rotation, translation, and even to remeshing. The eigenvalues
+$\lambda_0 \le \lambda_1 \le \dots$ of $\Delta$ are exactly such a fingerprint (the
+**Shape-DNA**), because they are determined by the surface's intrinsic geometry, not
+by how you happened to triangulate it.
+
+Second, **how do I put two cortices into correspondence at all?** The workhorse
+answer is to map each hemisphere onto a common sphere and register there. The first
+step of that pipeline — turning an inflated cortical surface into a near-spherical
+map — is, remarkably, a single eigensolve. The first three non-constant harmonics
+of the cortex behave like the sphere's own $x, y, z$, so they *are* an embedding
+onto the sphere. We return to this in @sec-embedding; it is the flagship routine of
+this page.
+
+Both questions are answered by the eigenstructure of the operator the
+[last page](laplace-beltrami.qmd#sec-cotangent) built. We now open it up.
+
+## Eigenfunctions as manifold harmonics {#sec-eigen}
+
+### Start from the basis you already know
+
+Take the unit interval $[0, 1]$ and the humble second-derivative operator
+$-\partial_x^2$, with the function pinned to zero at both ends (a guitar string
+clamped at the bridge and the nut). Ask the eigenvalue question: which functions are
+sent back to a scalar multiple of themselves?
+
+$$
+-\partial_x^2 \, u = \lambda \, u, \qquad u(0) = u(1) = 0.
+$$ {#eq-interval-eig}
+
+You can write the answer down from memory. The functions that survive double
+differentiation up to a sign are sines and cosines, and the boundary condition keeps
+only the sines that vanish at both ends:
+
+$$
+u_k(x) = \sin(k\pi x), \qquad \lambda_k = (k\pi)^2, \qquad k = 1, 2, 3, \dots
+$$ {#eq-interval-modes}
+
+This is the **Fourier sine basis**, and the eigenvalue $\lambda_k = (k\pi)^2$ is a
+direct measure of **frequency**: small $k$ is a slow, smooth half-wave; large $k$
+oscillates fast. Two facts will carry over and are worth naming now. The
+eigenfunctions are **orthogonal** ($\int_0^1 \sin(j\pi x)\sin(k\pi x)\,dx = 0$ for
+$j \ne k$), and they are **ordered by smoothness**: $\lambda_k$ is, up to a
+constant, the average squared slope $\int (u_k')^2 / \int u_k^2$, so "small
+eigenvalue" literally means "few wiggles". The whole of Fourier analysis is: expand
+a signal in this basis, and you have sorted it by frequency.
+
+### The same question on a curved surface
+
+Now replace the interval with a surface and $-\partial_x^2$ with the
+Laplace–Beltrami operator $\Delta$ — the [previous page's](laplace-beltrami.qmd#sec-cotangent)
+"how much does a field differ from its local average, measured along the surface".
+The eigenvalue question is identical in spirit: which fields on the surface are sent
+back to a multiple of themselves by $\Delta$?
+
+There is one wrinkle, and it is the entire reason the discrete problem is a
+*generalised* eigenproblem. On a mesh, $\Delta$ does not arrive as a single matrix.
+It factors as $\Delta = M^{-1}L$: the symmetric positive-semidefinite **cotangent
+stiffness** $L$ (the metric / shape part) divided by the diagonal **lumped mass**
+$M = \operatorname{diag}(A_i)$ (the per-vertex area). Substituting and clearing the
+inverse mass:
+
+$$
+\Delta \phi_k = \lambda_k \phi_k
+\;\Longleftrightarrow\;
+M^{-1} L \phi_k = \lambda_k \phi_k
+\;\Longleftrightarrow\;
+\boxed{\,L \phi_k = \lambda_k M \phi_k\,}.
+$$ {#eq-gen-eig}
+
+The boxed form is the **generalised symmetric eigenproblem** $L\phi = \lambda M\phi$,
+and it is the discrete realisation of the continuous Laplace–Beltrami eigenproblem.
+Reading the symbols: $L$ is the stiffness assembled by
+[`mesh_cotangent_laplacian`](laplace-beltrami.qmd#sec-cotangent), $M$ is the mass
+from [`vertex_areas`](laplace-beltrami.qmd#sec-mass), $\phi_k \in \mathbb{R}^n$ is
+the $k$-th eigenfunction sampled at the vertices, and $\lambda_k \ge 0$ is its
+frequency. The mass appears on the right because orthogonality on a curved surface
+is **area-weighted**: the natural inner product is
+$\langle \phi_j, \phi_k\rangle_M = \phi_j^\top M \phi_k$, and the eigenfunctions are
+orthonormal in *that* product, not the plain Euclidean one. (This is the discrete
+version of "integrate over the surface", $\int_{\mathcal{S}} \phi_j \phi_k \, dA$.)
+
+These $\phi_k$ are the **manifold harmonics**: a shape-intrinsic Fourier basis. As
+on the interval, $\lambda_0 = 0$ with $\phi_0$ the constant (the Laplacian sends
+constants to zero — every row of $L$ sums to zero, which the
+[previous page](laplace-beltrami.qmd#sec-cotangent) made the diagonal carry), then
+$\lambda_1 \le \lambda_2 \le \dots$ in order of increasing wiggliness. @fig-spectral-eigenfunctions
+shows the first four on a subdivided icosphere: the flat constant, then the three
+harmonics that are visibly the $x$, $y$, and $z$ coordinate fields.
+
+```{python}
+#| label: fig-spectral-eigenfunctions
+#| fig-cap: "The first four manifold harmonics of an icosphere, computed by the
+#|   generalised LBO eigenproblem $L\\phi=\\lambda M\\phi$ on a hand-built mesh.
+#|   $\\phi_0$ is the constant ($\\lambda_0=0$); $\\phi_1,\\phi_2,\\phi_3$ are
+#|   the degree-1 spherical harmonics — visibly the coordinate functions
+#|   $x,y,z$. The colour is the eigenfunction value."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+# ---- Build an icosphere by hand (icosahedron + edge-midpoint subdivision) ----
+def icosahedron():
+    t = (1.0 + np.sqrt(5.0)) / 2.0
+    v = np.array([
+        [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+        [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+        [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+    ], dtype=float)
+    f = np.array([
+        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+        [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+        [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    ], dtype=int)
+    v /= np.linalg.norm(v, axis=1, keepdims=True)
+    return v, f
+
+def subdivide(v, f):
+    mid = {}
+    v = list(v)
+    def midpoint(a, b):
+        key = (min(a, b), max(a, b))
+        if key in mid:
+            return mid[key]
+        m = (np.asarray(v[a]) + np.asarray(v[b])) / 2.0
+        m /= np.linalg.norm(m)
+        v.append(m)
+        mid[key] = len(v) - 1
+        return mid[key]
+    nf = []
+    for a, b, c in f:
+        ab = midpoint(a, b); bc = midpoint(b, c); ca = midpoint(c, a)
+        nf += [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]]
+    return np.array(v), np.array(nf)
+
+def icosphere(level):
+    v, f = icosahedron()
+    for _ in range(level):
+        v, f = subdivide(v, f)
+    return v, f
+
+V, F = icosphere(3)
+n = V.shape[0]
+
+# ---- Cotangent stiffness L (PSD) + barycentric lumped mass diagonal A ----
+def cotangent_system(V, F):
+    L = np.zeros((n, n))
+    A = np.zeros(n)
+    for i, j, k in F:
+        cross = np.cross(V[j] - V[i], V[k] - V[i])
+        area = 0.5 * np.linalg.norm(cross)
+        A[i] += area / 3.0; A[j] += area / 3.0; A[k] += area / 3.0
+        # cot of the angle at p, opposite edge (q, r), added to that edge
+        for (p, q, r) in [(i, j, k), (j, k, i), (k, i, j)]:
+            u = V[q] - V[p]; w = V[r] - V[p]
+            cot = np.dot(u, w) / (np.linalg.norm(np.cross(u, w)) + 1e-30)
+            wt = 0.5 * cot
+            L[q, r] -= wt; L[r, q] -= wt
+            L[q, q] += wt; L[r, r] += wt
+    return L, A
+
+L, A = cotangent_system(V, F)
+
+# ---- Generalised eigenproblem via symmetric whitening L~ = M^-1/2 L M^-1/2 ----
+inv_sqrt = 1.0 / np.sqrt(A)
+Lt = (inv_sqrt[:, None] * L) * inv_sqrt[None, :]
+Lt = 0.5 * (Lt + Lt.T)
+w, U = np.linalg.eigh(Lt)
+order = np.argsort(w)
+phi = inv_sqrt[:, None] * U[:, order]   # generalised eigenfunctions
+
+tris = V[F]
+fig = plt.figure(figsize=(11, 3))
+titles = [r"$\phi_0$ (constant, $\lambda_0=0$)",
+          r"$\phi_1 \sim x$", r"$\phi_2 \sim y$", r"$\phi_3 \sim z$"]
+for col in range(4):
+    ax = fig.add_subplot(1, 4, col + 1, projection="3d")
+    face_c = phi[:, col][F].mean(axis=1)
+    norm = plt.Normalize(face_c.min(), face_c.max())
+    colors = plt.cm.coolwarm(norm(face_c))
+    ax.add_collection3d(Poly3DCollection(tris, facecolors=colors, edgecolors="none"))
+    ax.set_xlim(-1, 1); ax.set_ylim(-1, 1); ax.set_zlim(-1, 1)
+    ax.set_box_aspect((1, 1, 1)); ax.set_axis_off()
+    ax.set_title(titles[col], fontsize=9)
+    ax.view_init(elev=20, azim=35)
+fig.suptitle("Low-frequency manifold harmonics of the icosphere", fontsize=11)
+fig.tight_layout()
+plt.show()
+```
+
+### The spectrum is an isometry invariant (Shape-DNA)
+
+Here is why the eigenvalues answer the first motivating question. The generalised
+problem @eq-gen-eig depends on the mesh **only through $L$ and $M$**, and both are
+built from intrinsic quantities — edge cotangents and triangle areas — that do not
+change if you rotate, translate, or reflect the surface in space. They do not even
+depend on how the surface is *embedded* in $\mathbb{R}^3$, only on its internal
+metric. So the sequence $\lambda_0, \lambda_1, \lambda_2, \dots$ is an **isometry
+invariant**: bend a sheet of paper without stretching it and the spectrum is
+unchanged. Reuter, Wolter and Peinecke (2006) named the truncated spectrum the
+**Shape-DNA** and used it precisely as a shape fingerprint.
+
+Two honest caveats keep this practitioner-grade. The spectrum is invariant under
+isometry but it is *not* a complete invariant — rare "isospectral" shapes share a
+spectrum without being congruent ("can you hear the shape of a drum?" — no, not
+always). And on a *discrete* mesh the invariance is only approximate: it holds in the
+limit of refinement, and a coarse or anisotropic tessellation perturbs the high
+eigenvalues first. This is the convergence-under-refinement theme again — the low
+spectrum is robust and trustworthy; trust the tail less.
+
+### The federation link: this is HSGP's closed-surface twin {#sec-hsgp-link}
+
+If you have read the stats unit, @eq-gen-eig should feel familiar, because you have
+met it before in a different costume. The **Hilbert-space approximate Gaussian
+process** ([HSGP](../statistics/hsgp.qmd#sec-hsgp)) approximates a GP by expanding it in the
+**eigenfunctions of the Laplacian on a bounded interval** — which, by
+@eq-interval-modes, are exactly $\sin(k\pi x)$ — and then reweighting mode $k$ by the
+**spectral density** of the kernel evaluated at the eigenvalue, $S(\sqrt{\lambda_k})$.
+
+That is the same construction as here, term for term:
+
+- a **Laplacian eigenbasis** $\{\phi_k\}$ ordered by frequency $\lambda_k$ —
+  $\sin(k\pi x)$ on the interval, the manifold harmonics on the surface;
+- a **spectral reweighting** $g(\lambda_k)$ that picks out which frequencies to keep
+  — the GP spectral density in HSGP, a low-pass damping in surface smoothing
+  (@sec-heat-kernel).
+
+The only difference is the **domain**: HSGP lives on a box with chosen boundary
+conditions, manifold harmonics live on a closed curved surface where the geometry
+*supplies* the operator. Same idea, different manifold. Reading the two pages
+together is the fastest way to internalise "eigenfunctions of a Laplacian as a basis,
+reweighted by a spectral density" as one technique with two homes.
+
+## The heat kernel and spectral filtering {#sec-heat-kernel}
+
+### Diffusion is diagonal in the eigenbasis
+
+The [previous page](laplace-beltrami.qmd#sec-smoothing) smoothed a field by letting
+heat diffuse along the surface. Let us see what that does *to each harmonic*, because
+the answer makes the whole spectral picture click.
+
+Heat flow is the equation $\partial_t u = -\Delta u$: every point relaxes toward its
+local average, and the formal solution after time $t$ is $u(t) = e^{-t\Delta} u(0)$.
+The exponential of an operator is intimidating in general, but in the eigenbasis it
+collapses to scalar arithmetic, because $\Delta$ acts on $\phi_k$ as plain
+multiplication by $\lambda_k$. Expand the initial field in harmonics,
+$u(0) = \sum_k c_k \phi_k$. Then each coefficient decays on its own:
+
+$$
+e^{-t\Delta}\,\phi_k = e^{-t\lambda_k}\,\phi_k
+\;\;\Longrightarrow\;\;
+u(t) = \sum_k c_k \, e^{-t\lambda_k}\,\phi_k.
+$$ {#eq-heat-kernel}
+
+Read @eq-heat-kernel as a recipe: diffusion **multiplies mode $k$ by
+$e^{-t\lambda_k}$**. The constant ($\lambda_0 = 0$) is untouched — heat conserves
+the mean. Low frequencies (small $\lambda_k$) are barely damped; high frequencies
+(large $\lambda_k$) are crushed exponentially. That is the precise sense in which
+**geodesic smoothing is a low-pass filter on manifold harmonics**: the damping
+profile $g(\lambda) = e^{-t\lambda}$ is the transfer function, and $t$ sets the
+cutoff. This is the closed-surface analogue of the HSGP spectral density from
+@sec-hsgp-link — there the kernel chooses $g$; here the diffusion time does.
+
+### What `surface_smooth` actually computes, in spectral terms
+
+`nitrix` does **not** form the eigenbasis to smooth. Computing all of $e^{-t\Delta}$
+through @eq-heat-kernel would need every eigenpair — wasteful, and the high modes are
+exactly the ones a discrete mesh resolves worst. Instead
+[`surface_smooth`](laplace-beltrami.qmd#sec-smoothing) takes **one backward-Euler
+step**: it solves the sparse SPD system
+
+$$
+(M + t L)\,x = M\,x_0,
+\qquad t = \frac{\mathrm{FWHM}^2}{16\ln 2},
+$$ {#eq-backward-euler}
+
+by matrix-free conjugate gradients, never materialising a dense operator. The link to
+the spectral view is exact and worth making explicit. Plug a single harmonic
+$x_0 = \phi_k$ into @eq-backward-euler. Using $L\phi_k = \lambda_k M\phi_k$, the mass
+cancels and the harmonic passes through with gain
+
+$$
+\hat{g}(\lambda_k) = \frac{1}{1 + t\lambda_k}.
+$$ {#eq-bweuler-transfer}
+
+So backward-Euler is *also* a low-pass filter on the manifold harmonics — its
+transfer function $\frac{1}{1+t\lambda}$ is the rational (Padé) approximation of the
+true heat damping $e^{-t\lambda}$ from @eq-heat-kernel. They agree to first order in
+$t\lambda$, both fix the constant, both monotonically suppress high modes; the
+backward-Euler version is unconditionally stable and costs one CG solve instead of an
+eigendecomposition. This is why the previous page could implement diffusion without
+ever mentioning eigenfunctions: the eigenbasis is the *explanation*, the sparse solve
+is the *implementation*.
+
+The general principle behind all of this: **any spectral filter $g(\lambda_k)$ is a
+mesh operation**. Reweight each harmonic by $g$ and you have a band-pass, a
+sharpening filter, a Tikhonov regulariser, or a GP prior — all without leaving the
+mesh. `nitrix` ships the two filters its pipelines need (the heat low-pass via
+`surface_smooth`, and the implicit embedding filter of @sec-embedding) rather than a
+general spectral-filter entry point; if you need an arbitrary $g$, assemble it from
+the eigenpairs that @sec-embedding's solver returns.
+
+## Spectral embedding: a sphere in one eigensolve {#sec-embedding}
+
+This is the flagship. We now answer the second motivating question — turning a
+genus-0 cortical surface into a spherical map — and we do it with a single call to
+[`spectral_sphere_embedding`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/sphere.py),
+the FastSurfer / recon-surf "spectral inflation" verified against `Deep-MI/FastSurfer
+recon_surf/spherically_project.py`.
+
+### Why the first three harmonics *are* the sphere
+
+Run @fig-spectral-eigenfunctions back through your eye. On the round sphere, $\phi_1$,
+$\phi_2$, $\phi_3$ were not merely *some* smooth functions — they were the coordinate
+fields $x$, $y$, $z$ themselves. This is not a coincidence of the icosphere; it is a
+theorem. The degree-one spherical harmonics are exactly the restrictions of $x$, $y$,
+$z$ to the sphere, they share the same Laplace eigenvalue, and they span the first
+non-trivial eigenspace. So on the sphere, **the map "vertex $\mapsto$ its first three
+harmonic values" is the identity** (up to scale and a choice of axes).
+
+The leap — the discrete realisation of the **uniformisation theorem**, which says any
+genus-0 surface is conformally a sphere — is that for a surface that is merely
+*close* to a sphere (an inflated cortex), its first three harmonics are *close* to
+the sphere's $x, y, z$. So the embedding
+
+$$
+v_i \;\longmapsto\; r \cdot \frac{(\phi_1, \phi_2, \phi_3)_i}{\lVert(\phi_1,\phi_2,\phi_3)_i\rVert}
+$$ {#eq-embedding}
+
+— take each vertex's first three non-constant harmonic values as a 3-vector and
+normalise it to radius $r$ — lands every vertex on the sphere, in **one eigensolve,
+no iteration**. The constant $\phi_0$ is dropped (it carries no positional
+information), and the normalisation projects radially onto the sphere. That is the
+entirety of `spectral_sphere_embedding`'s mathematical content.
+
+### The numerical problem: the smallest eigenvalues are clustered
+
+You might now reach for a dense `eigh`, take the four smallest eigenpairs, and be
+done. On a real cortex with hundreds of thousands of vertices that is a non-starter —
+a dense $n \times n$ factorisation is out of memory and out of time — so we need an
+**iterative** solver that touches the operator only through matrix–vector products.
+And iterative solvers have a specific weakness that bites *exactly here*: they
+converge fast on **well-separated extremal** eigenvalues and slowly on **clustered**
+ones. The eigenvalues we want — $\lambda_0, \dots, \lambda_3$ — are the *smallest*,
+and on a near-sphere they are tightly bunched just above zero. That is the worst case.
+
+`spectral_sphere_embedding` defeats this with three moves, each fixing the previous
+one's flaw. We walk the real mechanics from the source.
+
+**Move 1 — symmetrise the generalised problem.** Iterative eigensolvers want a single
+symmetric operator, but @eq-gen-eig has the mass on the right. Because $M$ is diagonal
+and positive, we can absorb it by a change of variables $\psi = M^{1/2}\phi$, which
+turns $L\phi = \lambda M\phi$ into the ordinary symmetric problem
+$\tilde L \psi = \lambda \psi$ with
+
+$$
+\tilde L = M^{-1/2} L M^{-1/2}.
+$$ {#eq-symmetrise}
+
+In code this is one line: `lt_vals = lap.values * inv_sqrt[:, None] *
+inv_sqrt[lap.indices]`, scaling each stored ELL entry by the inverse-square-root mass
+of its row vertex and its column vertex. $\tilde L$ shares its eigenvalues with
+$\Delta$, and recovering the eigenfunctions afterwards is the single un-whitening
+$\phi = M^{-1/2}\psi$ (`phi = inv_sqrt[:, None] * psi`).
+
+**Move 2 — flip smallest into largest with an affinity.** Iterative methods find the
+*largest* eigenpairs easily; we want the *smallest*. The fix is to build an
+**affinity** whose large eigenpairs are $\tilde L$'s small ones:
+
+$$
+A = I - \tilde L / c,
+$$ {#eq-affinity}
+
+where $c$ is a **Gershgorin bound** on $\tilde L$'s largest eigenvalue (`c =
+jnp.max(jnp.sum(jnp.abs(lt_vals), axis=1))` — the largest absolute row sum, which by
+Gershgorin's circle theorem dominates the spectrum). Dividing by $c$ scales the
+spectrum into $[0, 1]$, and subtracting from the identity *reverses the order*:
+$\tilde L$'s smallest eigenvalue (near $0$) becomes $A$'s largest (near $1$). The
+construction adds the identity onto the diagonal, which the cotangent ELL stores at
+**column 0** (the diagonal-first layout the
+[previous page](laplace-beltrami.qmd#sec-cotangent) established) — the source
+*asserts* this layout rather than assuming it (`assert bool(jnp.all(lap.indices[:, 0]
+== jnp.arange(n)))`) before doing `aff_vals = (-lt_vals / c).at[:, 0].add(1.0)`.
+
+**Move 3 — shift-invert to pry apart the cluster.** Reversing the order is not
+enough, because $A$'s largest eigenvalues are still *clustered near 1* (they are
+$1$ minus the clustered small $\lambda$'s, so the bunching is merely shifted, not
+cured). A plain power-style reflection therefore
+cannot separate $\phi_0$ from $\phi_1, \phi_2, \phi_3$ in a reasonable number of
+iterations, and the recovered "first three" come out contaminated — and a
+contaminated embedding **folds**: triangles turn inside out. This is the load-bearing
+measured finding behind the design: a plain spectral reflection folds **~47% of
+triangles** on real surfaces, because the gaps it needs are vanishingly small.
+
+The cure is **shift-invert**. Instead of iterating on $A$, iterate on
+$(\tilde L - \sigma I)^{-1}$ for a small negative shift $\sigma$ (here
+$\sigma = -0.01$). Inversion maps the eigenvalues nearest $\sigma$ to the *largest*
+magnitudes, and — crucially — it **amplifies their relative gaps**: two eigenvalues
+that differ by a hair near zero differ by a chasm after inversion. The clustered
+modes that defeated the plain method are now the well-separated extremal ones an
+iterative solver loves. The inverse is never formed; it is applied through an inner
+**conjugate-gradient** solve, so the whole thing stays matrix-free. @fig-spectral-embedding
+shows the difference directly: the plain-reflection embedding folds a visible fraction
+of its triangles, while the shift-invert embedding is essentially fold-free.
+
+`nitrix` expresses moves 2–3 through the eigensolver of the
+[solvers page](solvers.qmd#sec-eigensolve),
+[`eigsolve_top_k`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_eigsolve.py),
+driven by a frozen `SolverSpec`:
+
+```python
+pair = eigsolve_top_k(
+    affinity,                                   # A = I - L~/c, an ELL operator
+    n_eig,                                      # over-sample beyond the 4 needed
+    spec=SolverSpec.shift_invert(
+        sigma=-0.01, outer_iters=eig_iters, cg_iters=eig_iters,
+    ),
+)
+lam   = c * (1.0 - pair.values)                 # recover L~ eigenvalues
+order = jnp.argsort(lam)                         # ascending by frequency
+psi   = pair.vectors[:, order]
+phi   = inv_sqrt[:, None] * psi                  # back to LBO eigenfunctions
+emb   = phi[:, 1:4]                              # drop phi_0, keep phi_1..phi_3
+```
+
+Note `n_eig` (default 10, must be $\ge 4$) **over-samples**: requesting more pairs
+than the four you need gives LOBPCG extra subspace room and speeds convergence on the
+clustered low spectrum. After the solve, the affinity eigenvalues are converted back
+to $\tilde L$ eigenvalues by inverting @eq-affinity (`lam = c * (1.0 - pair.values)`),
+sorted ascending, the eigenfunctions un-whitened, the constant dropped, and the
+remaining three normalised per @eq-embedding.
+
+### The solver underneath: `eigsolve_top_k` and `SolverSpec`
+
+A short tour of the machinery, since this page is the spectral surface's primary
+consumer of it (full treatment on the [solvers page](solvers.qmd#sec-eigensolve)).
+
+[`SolverSpec`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_eigsolve.py)
+is a **frozen, hashable** dataclass carrying all static solver configuration. Its
+hashability is load-bearing: the whole spec rides `jax.custom_vjp`'s
+`nondiff_argnums` as a single argument, so the iterative forward branches on
+`spec.method` at trace time. Build it through its classmethods, never the raw
+constructor:
+
+- `SolverSpec.auto()` — the default; resolves to dense `eigh` for a materialised
+  matrix, `lobpcg` for a sparse operand. (Tag: this is the policy
+  `spectral_sphere_embedding` overrides.)
+- `SolverSpec.eigh()` — dense full spectrum sliced to the top-$k$; **dense-only** (it
+  materialises the whole spectrum), unusable on a full cortex.
+- `SolverSpec.lobpcg(n_iters, tol, …)` — plain LOBPCG; the benchmarked sparse default
+  for *extremal* spectra that are already well-separated.
+- `SolverSpec.shift_invert(sigma, outer_iters, cg_iters, …)` — the one this page
+  uses; LOBPCG on $(\,\tilde L - \sigma I)^{-1}$ via inner CG, for the *clustered*
+  small spectrum.
+- `SolverSpec.poly(degree, shift, …)` — a shifted-power polynomial spectral filter,
+  the alternative cluster-amplifier when an inner CG solve is undesirable.
+
+A subtle but important flag is `promise_symmetry` (default `True`). When the stored
+operator is genuinely symmetric — as the cotangent affinity on a regular mesh is —
+the forward applies its matvec directly. When it is not (e.g. an affinity sparsified
+by top-$k$-per-row, whose pattern is asymmetric), set `promise_symmetry=False` and the
+ELL / SectionedELL forward applies the symmetric part $\tfrac12(AX + A^\top X)$
+instead. The embedding leaves it at the default because the cotangent affinity is
+symmetric by construction.
+
+[`eigsolve_top_k`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_eigsolve.py)
+itself returns an **`EigPair(values, vectors)`** named tuple, eigenvalues
+*largest-first*, and accepts dense, `ELL`, or `SectionedELL` operands — the same
+storage formats the [operators page](operators.qmd#sec-ell) defined. It is
+**differentiable w.r.t. the operator** for every method, via a single shared implicit
+VJP: the gradient depends only on the converged eigenpair, not on which solver
+produced it, so one backward serves all methods, specialised only by storage format
+(dense $VKV^\top$; ELL projection onto the sparsity pattern; per-section for
+SectionedELL). This is the same differentiable-eigensolver that the
+[graph-geometry page](graph-geometry.qmd#sec-spectral-graph) uses for learned
+connectopies — there you *do* backpropagate through the eigensolve; here you do not.
+
+### Execution classes — and why this one is not differentiable
+
+The pieces of the embedding fall into the unit's three execution classes, and the
+distinction is not academic — it dictates what you may wrap in `jax.jit`.
+
+- **DIFF-JAX** (jittable + differentiable). `signed_spherical_areas` (below) and the
+  affinity matvec are pure JAX. The eigensolve `eigsolve_top_k` is differentiable
+  w.r.t. its operator.
+- **HOST-CTOR** (data-dependent host construction). The cotangent operator inside
+  `spectral_sphere_embedding` is assembled host-side by `mesh_cotangent_laplacian`
+  (NumPy), exactly as on the [previous page](laplace-beltrami.qmd#sec-cotangent). You
+  can pass `laplacian=` to **reuse** an already-assembled operator — which
+  `spherical_parameterize` does, so the costly host assembly happens once per call,
+  not twice.
+- **HOST-QA** (host query / decision). `is_bijective_sphere_map` (below) returns a
+  Python `bool`.
+
+The consequence, stated plainly in the source: `spectral_sphere_embedding` is **not
+differentiable w.r.t. `mesh.vertices`**, because the cotangent weights are built
+host-side as constants. It is an **init / preprocessing artefact** — call it to
+*produce* a spherical map; do not wrap it in `jax.grad`. This is the unit-wide rule
+**never call a HOST op inside a jitted loop**: the host construction must happen once,
+outside any traced region, and the device-resident eigensolve and area checks run on
+the result. (A footnote in the source warns of a further wrinkle: the shift-invert
+core is matrix-free, but its orthonormalisation shares the dense solver-handle pool,
+so on a box whose pool is dead the eigensolve falls back to CPU — correct, though not
+GPU-resident there.)
+
+### Validate, do not assume: bijectivity by signed area
+
+The embedding is explicitly **not guaranteed bijective** — it is the recon-surf-grade
+one-shot map, and a tiny flipped fraction may remain even with shift-invert. So
+bijectivity is **checked, not assumed**, and the check is a clean instance of the
+unit's analytic-oracle posture. The oracle is **Gauss–Bonnet for the sphere**: a
+genuine degree-1 cover of the unit sphere subtends a total solid angle of exactly
+$4\pi$ steradians.
+
+[`signed_spherical_areas`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/sphere.py)
+computes, for each triangle, the **signed solid angle** it subtends at the origin —
+the area of the spherical triangle on the unit sphere, with a sign:
+
+$$
+\Omega_f = 2\,\operatorname{atan2}\!\big(\,a\cdot(b\times c),\;
+\lvert a\rvert\lvert b\rvert\lvert c\rvert + (a\cdot b)\lvert c\rvert
++ (b\cdot c)\lvert a\rvert + (c\cdot a)\lvert b\rvert \,\big),
+$$ {#eq-solid-angle}
+
+the **Van Oosterom–Strackee** formula, for triangle vertices $a, b, c$. It is
+radius-independent (a solid angle does not care about sphere size), pure JAX, and
+differentiable. The load-bearing part is the **sign**: it is the orientation of the
+triangle (the triple product $a\cdot(b\times c)$). A correctly oriented triangle has
+positive signed area; a **folded** triangle — one turned inside out by a bad
+embedding — has **negative** signed area. That single sign is how a fold announces
+itself, and it is what @fig-spectral-embedding colours by.
+
+[`is_bijective_sphere_map`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/sphere.py)
+turns these into a host decision (**HOST-QA**, a Python `bool`). The map passes iff
+two conditions hold:
+
+- **degree-1 cover**: the signed areas sum to within `total_tol` of $\pm 4\pi$ — the
+  Gauss–Bonnet oracle; and
+- **fold-free**: the fraction of solid angle in triangles flipped against the
+  dominant orientation is $\le$ `flip_area_tol`. With `flip_area_tol=0` this is the
+  strict no-fold test; a small tolerance (the source notes `8e-4`) mirrors the
+  FastSurfer / recon-surf quality gate, which tolerates a vanishing flipped fraction.
+
+The intended workflow is therefore: run `spectral_sphere_embedding`, gate with
+`is_bijective_sphere_map`, and if it fails fall back to a guaranteed-bijective init or
+refine. One gauge is deliberately *not* resolved here: the eigenfunction
+**sign and ordering** are arbitrary (nitrix is orientation-agnostic; an eigenvector
+can flip sign or two equal-eigenvalue modes can swap), so the anatomical sign/axis
+alignment is a downstream consumer step.
+
+```{python}
+#| label: fig-spectral-embedding
+#| fig-cap: "Spectral spherical embedding of a gently deformed genus-0 surface.
+#|   Left: a plain affinity reflection (fixed-iteration power method) cannot
+#|   separate the clustered smallest eigenvalues, so the first three harmonics
+#|   are contaminated and many triangles fold (red = negative signed area).
+#|   Middle: shift-invert amplifies the eigenvalue gaps and the same iteration
+#|   budget yields an essentially fold-free map. Right: the distribution of
+#|   per-triangle signed solid angles — the plain map has a negative tail, the
+#|   shift-invert map does not. Pure-numpy reproduction of the mechanism in
+#|   `spectral_sphere_embedding`."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+rng = np.random.default_rng(0)
+
+def icosahedron():
+    t = (1.0 + np.sqrt(5.0)) / 2.0
+    v = np.array([
+        [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+        [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+        [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+    ], dtype=float)
+    f = np.array([
+        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+        [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+        [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    ], dtype=int)
+    v /= np.linalg.norm(v, axis=1, keepdims=True)
+    return v, f
+
+def subdivide(v, f):
+    mid = {}; v = list(v)
+    def midpoint(a, b):
+        key = (min(a, b), max(a, b))
+        if key in mid: return mid[key]
+        m = (np.asarray(v[a]) + np.asarray(v[b])) / 2.0
+        m /= np.linalg.norm(m); v.append(m); mid[key] = len(v) - 1
+        return mid[key]
+    nf = []
+    for a, b, c in f:
+        ab = midpoint(a, b); bc = midpoint(b, c); ca = midpoint(c, a)
+        nf += [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]]
+    return np.array(v), np.array(nf)
+
+def icosphere(level):
+    v, f = icosahedron()
+    for _ in range(level): v, f = subdivide(v, f)
+    return v, f
+
+# A mildly deformed near-spherical genus-0 surface (so the map is non-trivial).
+V0, F = icosphere(2)
+defo = 1.0 + 0.18 * V0[:, 0] * V0[:, 1] + 0.12 * V0[:, 2] ** 2
+V = V0 * defo[:, None]
+n = V.shape[0]
+
+def cotangent_system(V, F):
+    L = np.zeros((n, n)); A = np.zeros(n)
+    for i, j, k in F:
+        area = 0.5 * np.linalg.norm(np.cross(V[j] - V[i], V[k] - V[i]))
+        A[i] += area / 3; A[j] += area / 3; A[k] += area / 3
+        for (p, q, r) in [(i, j, k), (j, k, i), (k, i, j)]:
+            u = V[q] - V[p]; w = V[r] - V[p]
+            cot = np.dot(u, w) / (np.linalg.norm(np.cross(u, w)) + 1e-30)
+            wt = 0.5 * cot
+            L[q, r] -= wt; L[r, q] -= wt; L[q, q] += wt; L[r, r] += wt
+    return L, A
+
+L, A = cotangent_system(V, F)
+inv_sqrt = 1.0 / np.sqrt(A)
+Lt = (inv_sqrt[:, None] * L) * inv_sqrt[None, :]
+Lt = 0.5 * (Lt + Lt.T)
+c = np.max(np.sum(np.abs(Lt), axis=1))            # Gershgorin lambda_max bound
+
+# Signed solid angle per triangle (Van Oosterom-Strackee, apex at origin).
+def signed_areas(P, F):
+    a = P[F[:, 0]]; b = P[F[:, 1]]; cc = P[F[:, 2]]
+    la = np.linalg.norm(a, axis=1); lb = np.linalg.norm(b, axis=1)
+    lc = np.linalg.norm(cc, axis=1)
+    num = np.sum(a * np.cross(b, cc), axis=1)
+    den = (la * lb * lc + np.sum(a * b, axis=1) * lc
+           + np.sum(b * cc, axis=1) * la + np.sum(cc * a, axis=1) * lb)
+    return 2.0 * np.arctan2(num, den)
+
+def embed_from(phi):
+    emb = phi[:, 1:4]
+    return emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12)
+
+k = 8
+n_iter = 40
+X0 = rng.standard_normal((n, k))
+
+def subspace_iterate(op, X, iters):
+    """Block subspace iteration + Rayleigh-Ritz, ordered by Lt eigenvalue."""
+    for _ in range(iters):
+        X = op(X)
+        X, _ = np.linalg.qr(X)
+    Sm = X.T @ Lt @ X
+    Sm = 0.5 * (Sm + Sm.T)
+    _, wc = np.linalg.eigh(Sm)
+    return X @ wc
+
+# Plain reflection: iterate on A = I - Lt/c. Smallest Lt eigenvalues map to
+# A-eigenvalues clustered just below 1 -> the fixed-budget power method cannot
+# separate phi_0..phi_3 -> the embedding folds.
+U_plain = subspace_iterate(lambda X: X - (Lt @ X) / c, X0.copy(), n_iter)
+emb_plain = embed_from(inv_sqrt[:, None] * U_plain[:, :4])
+
+# Shift-invert: iterate on (Lt - sigma I)^-1, sigma < 0. Inversion separates
+# the clustered small eigenvalues -> the same budget resolves them cleanly.
+sigma = -0.01
+A_shift = np.linalg.inv(Lt - sigma * np.eye(n))   # dense stand-in for inner CG
+U_si = subspace_iterate(lambda X: A_shift @ X, X0.copy(), n_iter)
+emb_si = embed_from(inv_sqrt[:, None] * U_si[:, :4])
+
+sa_plain = signed_areas(emb_plain, F)
+sa_si = signed_areas(emb_si, F)
+for sa in (sa_plain, sa_si):           # orient so "folded" is the minority sign
+    if sa.sum() < 0:
+        sa *= -1.0
+frac_plain = (sa_plain < 0).mean()
+frac_si = (sa_si < 0).mean()
+
+fig = plt.figure(figsize=(11, 3.6))
+
+def panel(ax, P, sa, title):
+    colors = np.where((sa < 0)[:, None], np.array([0.85, 0.15, 0.15, 1.0]),
+                      np.array([0.6, 0.7, 0.85, 1.0]))
+    ax.add_collection3d(Poly3DCollection(P[F], facecolors=colors,
+                                         edgecolors="k", linewidths=0.1))
+    ax.set_xlim(-1, 1); ax.set_ylim(-1, 1); ax.set_zlim(-1, 1)
+    ax.set_box_aspect((1, 1, 1)); ax.set_axis_off()
+    ax.set_title(title, fontsize=9); ax.view_init(elev=18, azim=30)
+
+panel(fig.add_subplot(1, 3, 1, projection="3d"), emb_plain, sa_plain,
+      f"plain reflection\nfolded triangles: {frac_plain*100:.0f}%")
+panel(fig.add_subplot(1, 3, 2, projection="3d"), emb_si, sa_si,
+      f"shift-invert init\nfolded triangles: {frac_si*100:.0f}%")
+
+ax3 = fig.add_subplot(1, 3, 3)
+bins = np.linspace(min(sa_plain.min(), sa_si.min()),
+                   max(sa_plain.max(), sa_si.max()), 40)
+ax3.hist(sa_plain, bins=bins, alpha=0.6, color="tab:red", label="plain")
+ax3.hist(sa_si, bins=bins, alpha=0.6, color="tab:blue", label="shift-invert")
+ax3.axvline(0.0, color="k", lw=0.8, ls="--")
+ax3.set_xlabel("signed solid angle / triangle (sr)")
+ax3.set_ylabel("count"); ax3.legend(fontsize=8)
+ax3.set_title("negative = folded", fontsize=9)
+
+fig.suptitle("Spectral spherical embedding: folds and the shift-invert cure",
+             fontsize=11)
+fig.tight_layout()
+plt.show()
+```
+
+### Where this goes next
+
+The spectral embedding is the **intrinsic-geometry** half of the story and the
+natural stopping point for this page. What it produces is a fast, recon-surf-grade
+spherical map — good enough to seed registration, not yet a strictly fold-free,
+anatomically aligned parameterisation. Two further routines live in `sphere.py` and
+belong to the **registration unit**; we name and forward-point them, but do not
+document them here:
+
+- `spherical_parameterize` — the `mris_sphere` analogue. It takes the spectral
+  embedding as its `init='spectral'` and refines it by **Riemannian gradient descent
+  on $(S^2)^n$** under a conformal + areal energy, with a **fold-safe backtracking
+  line-search** that drives bijectivity to strict and holds it. (Calling it with
+  `n_iterations=0` returns the spectral embedding alone.)
+- `surface_resample` / `spherical_conv` — moving fields *between* registered
+  spheres and convolving on the sphere. These are extrinsic, correspondence-level
+  operations, not intrinsic spectral geometry.
+
+The eigenmachinery you have met here — `eigsolve_top_k`, `SolverSpec`, the
+shift-invert path — reappears in the [solvers page](solvers.qmd#sec-eigensolve) (the
+full solver suite and the implicit VJP) and the
+[graph-geometry page](graph-geometry.qmd#sec-spectral-graph) (the same eigensolve on
+a graph Laplacian, where you *do* backpropagate through it). Belkin and Niyogi's
+**Laplacian eigenmaps** — embedding any data graph by its low Laplacian
+eigenfunctions — is the discrete-data sibling of @eq-embedding; the surface case is
+the special one where the graph is a triangulated manifold.
+
+## Further reading
+
+- Lévy, B. (2006). *Laplace–Beltrami eigenfunctions: towards an algorithm that
+  "understands" geometry.* IEEE International Conference on Shape Modeling and
+  Applications (SMI). — the manifesto for manifold harmonics as a geometry-aware
+  Fourier basis.
+- Reuter, M., Wolter, F.-E., & Peinecke, N. (2006). *Laplace–Beltrami spectra as
+  "Shape-DNA" of surfaces and solids.* Computer-Aided Design, 38(4), 342–366. — the
+  spectrum as an isometry-invariant shape fingerprint.
+- Vallet, B., & Lévy, B. (2008). *Spectral geometry processing with manifold
+  harmonics.* Computer Graphics Forum (Eurographics), 27(2), 251–260. — filtering and
+  processing fields directly in the harmonic basis.
+- Belkin, M., & Niyogi, P. (2003). *Laplacian eigenmaps for dimensionality reduction
+  and data representation.* Neural Computation, 15(6), 1373–1396. — the discrete-data
+  sibling of spectral embedding.
+- Knyazev, A. V. (2001). *Toward the optimal preconditioned eigensolver: locally
+  optimal block preconditioned conjugate gradient method (LOBPCG).* SIAM Journal on
+  Scientific Computing, 23(2), 517–541. — the iterative eigensolver `eigsolve_top_k`
+  is built on.
+- Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). *Discrete
+  differential-geometry operators for triangulated 2-manifolds.* Visualization and
+  Mathematics III. — the cotangent operator and mixed-Voronoi mass these eigenpairs
+  are computed from.
+
+## See also
+
+- Source: [`geometry/sphere.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/sphere.py)
+  — `spectral_sphere_embedding`, `signed_spherical_areas`, `is_bijective_sphere_map`
+  (and the registration-unit `spherical_parameterize`, `surface_resample`,
+  `spherical_conv`).
+- Source: [`linalg/_eigsolve.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_eigsolve.py)
+  — `eigsolve_top_k`, `SolverSpec`, `EigPair`, the shift-invert / LOBPCG forwards and
+  the shared implicit VJP.
+- Source: [`sparse/mesh.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)
+  — `mesh_cotangent_laplacian`, `vertex_areas`, `face_areas` (the $L$ and $M$ this
+  page eigendecomposes).
+- Previous page: [the Laplace–Beltrami operator](laplace-beltrami.qmd#sec-cotangent)
+  — where $L$ and $M$ are built, and [geodesic smoothing](laplace-beltrami.qmd#sec-smoothing).
+- Reference tier: [the solvers page](solvers.qmd#sec-eigensolve) — the full eigensolver
+  suite; [graph geometry](graph-geometry.qmd#sec-spectral-graph) — the same eigensolve
+  on a graph Laplacian.
+- Cross-unit: [HSGP](../statistics/hsgp.qmd#sec-hsgp) — the bounded-interval twin of the manifold
+  harmonics, Laplacian eigenfunctions reweighted by a spectral density.

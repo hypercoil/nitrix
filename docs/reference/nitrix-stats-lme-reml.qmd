@@ -1,0 +1,191 @@
+---
+title: "nitrix.stats.lme.reml"
+generated: true
+signature-hash: 4b527e8109ea873a
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.lme.reml` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `REMLResult` {#REMLResult}
+
+*decorated:* `@register_result(children=('theta_hat', 'beta_hat', 'log_lik', 'fixed_cov', 'theta_cov', 'grad_m'))`, `@dataclass(frozen=True)`
+
+```python
+class REMLResult
+```
+
+Per-voxel REML fit output.
+
+*TODO: class overview.*
+
+
+### Methods
+
+```python
+sigma_b_sq(self) -> Float[Array, 'V']
+```
+
+```python
+sigma_e_sq(self) -> Float[Array, 'V']
+```
+
+```python
+cov_re(self) -> Float[Array, 'V 1 1']
+```
+
+Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+
+```python
+re_labels(self) -> Tuple[str, ...]
+```
+
+Names of the ``k`` random-effect dimensions of :attr:`cov_re`.
+
+## `LMEResult` {#LMEResult}
+
+*decorated:* `@register_result(children=('beta_hat', 'cov_re', 'sigma_e_sq', 'log_lik', 'fixed_cov', 'theta_cov', 'grad_m'), aux=('tier',))`, `@dataclass(frozen=True)`
+
+```python
+class LMEResult
+```
+
+Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal
+
+*TODO: class overview.*
+
+
+### Methods
+
+```python
+re_labels(self) -> Tuple[str, ...]
+```
+
+Names of the ``r`` within-factor random-effect dimensions of
+
+## `NestedLMEResult` {#NestedLMEResult}
+
+*decorated:* `@register_result(children=('beta_hat', 'var_outer', 'var_inner', 'sigma_e_sq', 'log_lik'), aux=('tier',))`, `@dataclass(frozen=True)`
+
+```python
+class NestedLMEResult
+```
+
+Nested two-level mixed-model fit output (the ``lme_fit`` R3 path).
+
+*TODO: class overview.*
+
+
+### Methods
+
+```python
+cov_re(self) -> Float[Array, 'V 2 2']
+```
+
+Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+
+```python
+re_labels(self) -> Tuple[str, ...]
+```
+
+Names of the ``k`` random-effect dimensions of :attr:`cov_re`.
+
+## `CrossedLMEResult` {#CrossedLMEResult}
+
+*decorated:* `@register_result(children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'), aux=('tier',))`, `@dataclass(frozen=True)`
+
+```python
+class CrossedLMEResult
+```
+
+Crossed two-factor mixed-model fit output (the ``lme_fit`` R4 path).
+
+*TODO: class overview.*
+
+
+### Methods
+
+```python
+cov_re(self) -> Float[Array, 'V 2 2']
+```
+
+Random-effect covariance as the uniform ``(V, k, k)`` block (D2): the
+
+```python
+re_labels(self) -> Tuple[str, ...]
+```
+
+Names of the ``k`` random-effect dimensions of :attr:`cov_re`.
+
+## `LMEContrast` {#LMEContrast}
+
+```python
+class LMEContrast
+```
+
+Per-voxel mixed-model t-contrast result.
+
+*TODO: class overview.*
+
+## `LMEFContrast` {#LMEFContrast}
+
+```python
+class LMEFContrast
+```
+
+Per-voxel mixed-model F-contrast result.
+
+*TODO: class overview.*
+
+## `reml_fit` {#reml_fit}
+
+```python
+reml_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], Z: Float[Array, 'N q'], *, theta_init: Optional[Float[Array, 'V 2']]=None, n_iter: int=20, damping: float=1e-06, block: Optional[int]=None, low_rank: Optional[bool]=None) -> REMLResult
+```
+
+Voxelwise variance-components REML fit.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `lme_fit` {#lme_fit}
+
+```python
+lme_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, group: Int[Array, 'N'], z: Optional[Float[Array, 'N r']]=None, inner: Optional[Int[Array, 'N']]=None, cross: Optional[Int[Array, 'N']]=None, corr: Optional[Union[str, CorrSpec]]=None, time: Optional[Float[Array, 'N']]=None, structure: Structure='unstructured', n_iter: int=20, damping: float=1e-06, block: Optional[int]=None, low_rank: Optional[bool]=None) -> Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]
+```
+
+Voxelwise mixed model, dispatched to the cheapest exact solver.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `lme_t_contrast` {#lme_t_contrast}
+
+```python
+lme_t_contrast(result: 'Union[REMLResult, LMEResult]', contrast: Float[Array, 'p'], *, dof: ContrastDof='satterthwaite', X: Optional[Float[Array, 'N p']]=None, Z: Optional[Float[Array, 'N q']]=None) -> LMEContrast
+```
+
+Per-voxel t-test of a mixed-model fixed-effect contrast ``c^T beta = 0``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `lme_f_contrast` {#lme_f_contrast}
+
+```python
+lme_f_contrast(result: 'Union[REMLResult, LMEResult]', contrast: Float[Array, 'L p'], *, dof: ContrastDof='satterthwaite', X: Optional[Float[Array, 'N p']]=None, Z: Optional[Float[Array, 'N q']]=None) -> LMEFContrast
+```
+
+Per-voxel F-test of a multi-row mixed-model contrast ``C beta = 0``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+

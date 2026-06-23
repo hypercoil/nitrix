@@ -1,0 +1,635 @@
+---
+title: "Linear mixed-effects models: structured noise"
+---
+
+::: {.callout-tldr title="Fast path"}
+When observations come in groups (many scans per subject, many subjects per
+site), they are **not independent**, and pretending they are gives wrong error
+bars. A **mixed model** adds *random effects* $Zb$ that absorb the group
+structure, leaving the per-observation noise white again. The price: the response
+now has a **structured covariance** $V_y = \sigma_b^2 ZZ^{\top} + \sigma_e^2 I$
+with unknown **variance components** $\theta$ to estimate. The clean way to
+estimate them is **REML**, which corrects the same downward bias that makes you
+divide a sample variance by $n-1$ instead of $n$. Estimating them naively costs
+an $N\times N$ solve per element — hopeless at brain scale — so `nitrix` uses the
+**FaST-LMM spectral trick**: eigendecompose the random-effect structure *once*,
+rotate into a basis where $V_y$ is **diagonal**, and the per-element fit becomes
+elementwise-cheap, with the variances found by a few **average-information Newton**
+steps. Those variances are the same object as the
+[smoothing penalties](fellner-schall.qmd) of the next chapter.
+:::
+
+This is rung 2 of [the ladder](index.qmd). It assumes the [GLM chapter](glm.qmd):
+the linear model, least squares, and the small shared solve. It builds directly on
+the [definition of variance and covariance](foundations.qmd#sec-variance) from the
+foundations chapter, and it leans on the [spectral
+solver](solvers.qmd#sec-spectral) and the [Newton machinery](solvers.qmd#sec-newton)
+from the shared-machinery page.
+
+## The problem: observations that aren't independent
+
+The GLM chapter assumed each observation carried independent noise. Real designs
+break that constantly:
+
+- several runs from the **same subject** are more alike than runs from different
+  subjects;
+- subjects scanned at the **same site** share scanner quirks.
+
+Ordinary least squares still gives a sensible $\hat\beta$, but its *standard
+errors* are wrong — it counts correlated observations as if they were independent,
+and is overconfident. We need to model the correlation.
+
+Here is the concrete question to keep in mind. We have measured **cortical
+thickness** in one voxel, four times per subject (two visits, two hemispheres,
+say), for twenty subjects, and we want the population **age slope**. Eighty
+numbers — but they are not eighty independent witnesses. The four measurements
+from one subject mostly agree with *each other*; they are really closer to twenty
+witnesses. If we ignore that and run plain OLS, the age slope's confidence
+interval will be far too narrow, and we will declare effects "significant" that a
+second cohort would not reproduce. The mixed model is how we count the witnesses
+correctly.
+
+## Fixed effects, random effects, and structured noise
+
+Split the linear predictor into two kinds of term:
+
+$$
+y = X\beta + Z b + \varepsilon,
+\qquad b \sim \mathcal{N}(0, \sigma_b^2 I_q),
+\qquad \varepsilon \sim \mathcal{N}(0, \sigma_e^2 I_N).
+$$ {#eq-lme}
+
+- $X\beta$ are the **fixed effects** — the population-level coefficients we want
+  to estimate (the age slope, a group difference), exactly as in the GLM.
+- $Zb$ are the **random effects** — one offset $b_j$ per group (per subject, per
+  site), drawn from a shared distribution. $Z$ is an indicator matrix saying which
+  group each observation belongs to. We do not estimate each $b_j$ as a free
+  parameter; we estimate the single **variance** $\sigma_b^2$ that says how much
+  groups differ.
+
+The distinction is the whole idea: treat a factor with many levels not as many
+coefficients but as *draws from one distribution*, summarised by its variance.
+Twenty subject offsets become **one number**, $\sigma_b^2$ — "how much do subjects
+differ from each other?".
+
+Because $b$ is random, fold it into the noise. Using the rule that
+$\operatorname{Cov}(Mb) = M\operatorname{Cov}(b)M^{\top}$ from the [foundations
+page](foundations.qmd#sec-variance), and that $b$ and $\varepsilon$ are
+independent, the marginal covariance of $y$ (averaging over the unobserved $b$) is
+no longer white:
+
+$$
+\operatorname{Cov}(y) \;=\; V_y \;=\; \sigma_b^2\, ZZ^{\top} + \sigma_e^2 I_N .
+$$ {#eq-V}
+
+So a mixed model is "the GLM with a **structured covariance** $V_y$ instead of
+$\sigma_e^2 I$". Everything else follows from that one change. The two
+unknowns $\sigma_b^2$ and $\sigma_e^2$ live inside $V_y$, and the entire rest of
+this chapter is about (a) what those unknowns *are*, (b) how to estimate them
+without bias, and (c) how to do it fast enough for a brain.
+
+## Variance components: the unknowns inside $V_y$ {#sec-varcomp}
+
+The numbers $\theta = (\sigma_b^2, \sigma_e^2)$ that parameterise $V_y$ are called
+the **variance components**. In the general mixed model the marginal covariance is
+written $V_y = ZGZ^{\top} + R$, where $G$ ($q\times q$) is the covariance of the
+random effects and $R$ ($N\times N$) is the residual covariance; the variance
+components are precisely *the unknowns inside $G$ and $R$*. For the one-random-intercept
+model @eq-lme they are as simple as they get: $G = \sigma_b^2 I_q$ and
+$R = \sigma_e^2 I_N$, so $\theta$ is two numbers and nothing more.
+
+### What the structure looks like
+
+Start from the picture before any algebra. Two measurements from the *same*
+subject share that subject's offset $b_j$, so they covary by exactly
+$\sigma_b^2$. Two measurements from *different* subjects share no random effect,
+so they are uncorrelated. And every measurement carries its own independent noise
+$\varepsilon_i$, contributing $\sigma_e^2$ to its own variance. Put those three
+sentences together and you have already written $V_y$: a **block-diagonal**
+matrix, one block per subject, each block equal to $\sigma_b^2$ everywhere with an
+extra $\sigma_e^2$ added down the diagonal. The off-diagonal blocks (different
+subjects) are zero. @eq-V is exactly that matrix; $ZZ^{\top}$ is the "same group?"
+indicator, $1$ inside a block and $0$ between blocks.
+
+@fig-lme-cov draws it for three subjects of unequal size, so you can *see* the
+"subjects are correlated with themselves" structure that makes the noise non-white.
+
+```{python}
+#| label: fig-lme-cov
+#| fig-cap: "The marginal covariance $V_y=\\sigma_b^2 ZZ^\\top+\\sigma_e^2 I$ for three subjects with 4, 3, and 5 observations. Each diagonal block is one subject: every pair within it covaries by $\\sigma_b^2$ (the bright square), with an extra $\\sigma_e^2$ on the diagonal. Different subjects (off-diagonal blocks) are uncorrelated — black. This block structure is what 'observations aren't independent' means."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+group_sizes = [4, 3, 5]
+N = sum(group_sizes)
+Z = np.zeros((N, len(group_sizes)))      # one indicator column per subject
+row = 0
+for j, n in enumerate(group_sizes):
+    Z[row:row + n, j] = 1.0
+    row += n
+
+sigma_b2, sigma_e2 = 1.0, 0.4
+V = sigma_b2 * (Z @ Z.T) + sigma_e2 * np.eye(N)
+
+fig, ax = plt.subplots(figsize=(4.6, 4.0))
+im = ax.imshow(V, cmap="magma")
+edges = np.cumsum([0] + group_sizes)
+for e in edges:
+    ax.axhline(e - 0.5, color="white", lw=0.8)
+    ax.axvline(e - 0.5, color="white", lw=0.8)
+ax.set(title=r"marginal covariance $V_y=\sigma_b^2 ZZ^\top+\sigma_e^2 I$",
+       xlabel="observation", ylabel="observation")
+fig.colorbar(im, ax=ax, shrink=0.85, label="covariance")
+fig.tight_layout(); plt.show()
+```
+
+### The first estimator you would invent — and why it breaks
+
+How would you guess $\sigma_b^2$ and $\sigma_e^2$ from data, with no theory? The
+natural move is **method-of-moments / ANOVA**, and it is worth doing because it is
+the intuition REML will refine. Within a subject, all the spread is noise, so the
+pooled within-subject variance estimates $\sigma_e^2$. Across subjects, the spread
+of the *subject means* reflects **both** the between-subject variance $\sigma_b^2$
+*and* the leftover noise in each mean (a mean of $n_j$ noisy values still has
+variance $\sigma_e^2/n_j$). So you estimate the total spread of the means and
+*subtract off* the part you already know is noise:
+
+$$
+\hat\sigma_b^2 \;=\; \underbrace{\operatorname{Var}(\text{group means})}_{\text{between spread}}
+\;-\; \underbrace{\overline{\sigma_e^2/n_j}}_{\text{noise still in a mean}} .
+$$ {#eq-mom}
+
+That is a real, usable estimator — the shrinkage figure later in this chapter uses
+exactly @eq-mom. But it has two flaws that motivate everything that follows.
+**First, it can go negative.** If the subjects happen to look similar, the
+subtraction in @eq-mom can produce a negative number, which is nonsense for a
+variance; you have to clamp it at zero (the code does `max(..., 0.1)`). **Second,
+it ignores the cost of estimating $\beta$.** The "spread of the means" pretends we
+know the population mean, but we estimated it from the same data — and as we will
+see in @sec-reml, that wastes degrees of freedom and biases the variance *down*.
+Method-of-moments is the right intuition with the wrong bookkeeping. REML fixes the
+bookkeeping.
+
+### Variance components beyond the two-number case
+
+In `nitrix` the variance-component machinery is deliberately general. The shared
+REML core, `lme/_varcomp.py`, never hard-codes "two variances": it works with a
+covariance written as a sum of $K$ components, $\operatorname{diag}(V_y) = \sum_k
+\sigma_k^2\, B_{k} + \text{offset}$, where each $B_k$ is one component's diagonal
+contribution in a basis where $V_y$ is diagonal (see @sec-fastlmm). The
+one-random-intercept fit (`reml_fit`) instantiates this diagonal core with $K=2$
+and $B = [\lambda,\, 1]$ and `offset` $=0$; FLAME (@sec-flame) with $K=1$, $B =
+[\mathbf 1]$ and `offset` $=$ the known within-subject variance. The richer designs
+of @sec-beyond — nested, crossed, random slopes — cannot be diagonalised by a single
+rotation, so they do not use this diagonal core; instead they share only the *Newton
+recipe* (the analytic-curvature `damped_newton`, and for crossed the same
+`VarCompSpec` iteration budget), each carrying its own structure-exploiting objective
+over its own three (nested/crossed) or block (random-slope) variance components. The
+residual itself can be *structured* rather than a
+plain $\sigma_e^2 I$: `lme/_corr.py` lets $R = \sigma_e^2 R(\rho)$ carry a
+within-group correlation parameter (AR(1) in time, compound symmetry), and
+`lme/_varfunc.py` lets the residual *scale* vary across observations,
+$\operatorname{Var}(\varepsilon_i) = \sigma_e^2 g_i^2$ — heteroscedasticity by a
+power of a covariate (`var_power`) or per-stratum (`var_ident`). Both are folded in
+by **whitening**: divide each group's data by its own $R^{1/2}$ (or by $g_i$), and
+on the whitened data the residual is back to i.i.d., so the same variance-component
+fit applies, with one extra $\log$-determinant term in the objective for the
+whitening Jacobian. The correlation/scale parameters then join $\theta$ in the
+same Newton vector and are estimated alongside the variances.
+
+## REML: estimating variances without the downward bias {#sec-reml}
+
+We now know *what* to estimate ($\theta$) and have a crude estimator (@eq-mom). To
+do it properly we maximise a likelihood — with one essential refinement.
+
+### The bias, by analogy you already know
+
+You already accept one bias correction without thinking about it. The sample
+variance divides by $n-1$, not $n$:
+
+$$
+\hat\sigma^2 = \frac{1}{n-1}\sum_i (x_i - \bar x)^2 .
+$$
+
+Why $n-1$? Because you used the data *twice*: once to estimate the mean $\bar x$,
+and again to measure spread *around that same estimated mean*. The points sit
+closer to their own sample mean than to the true mean, so $\sum (x_i-\bar x)^2$ is
+systematically too small; dividing by $n-1$ instead of $n$ exactly compensates for
+the one degree of freedom spent on $\bar x$.
+
+The identical thing happens in a mixed model, but worse: we spend $p$ degrees of
+freedom estimating the whole fixed-effect vector $\hat\beta$, and then measure
+residual spread around that fitted $X\hat\beta$. Plain maximum likelihood ignores
+this and **under-estimates the variances** — the more fixed effects, the worse the
+bias. **Restricted maximum likelihood (REML)** is the mixed-model generalisation of
+the $n-1$ correction: it estimates $\theta$ from a version of the likelihood that
+has the fixed effects *projected out*, so no degrees of freedom are silently
+double-counted.
+
+### The objective, term by term
+
+Concretely, REML maximises the likelihood of the residual contrasts — the part of
+the data orthogonal to the column space of $X$, which carries no information about
+$\beta$ but all the information about $\theta$. Profiling $\beta$ out analytically
+(at any fixed $\theta$ the best $\hat\beta$ is the generalised least squares
+solution, below) leaves an objective in $\theta$ alone. Writing it as a negative
+log-likelihood to minimise:
+
+$$
+\text{nll}(\theta) = \tfrac12\Big[\,\underbrace{r^{\top}V_y^{-1}r}_{\text{data fit}}
+\;+\; \underbrace{\log|V_y|}_{\text{complexity}}
+\;+\; \underbrace{\log|X^{\top}V_y^{-1}X|}_{\text{REML correction}}\,\Big],
+\qquad r = y - X\hat\beta(\theta).
+$$ {#eq-reml}
+
+Read the three terms as three forces:
+
+- $r^{\top}V_y^{-1}r$ is the **data-fit** term — generalised, $V_y$-weighted
+  residual sum of squares. It pushes the variances *up*: inflating $V_y$ makes any
+  residual cheap. On its own it would send $\sigma^2\to\infty$.
+- $\log|V_y|$ is the **complexity / Occam** term. The determinant of $V_y$ is the
+  volume the model is willing to spread probability over; a bigger $V_y$ has a
+  bigger $\log|V_y|$. It pushes the variances *down*. The optimum balances these
+  two — exactly the variance level that makes the residuals look "typical" under
+  $V_y$.
+- $\log|X^{\top}V_y^{-1}X|$ is **REML's signature term**, and it is precisely the
+  $n-1$ correction in disguise. $X^{\top}V_y^{-1}X$ is the precision (inverse
+  covariance) of $\hat\beta$; its log-determinant is the penalty for having spent
+  data on estimating $\beta$. Delete this one term and @eq-reml becomes ordinary ML
+  — and the variance estimates come out biased low. This term is the whole
+  difference between REML and ML.
+
+Once $\hat\theta$ is found, the fixed effects come from **generalised least
+squares** — least squares with $V_y^{-1}$ as the weight, the GLM's
+[normal equations](glm.qmd#sec-irls) with $W = V_y^{-1}$:
+
+$$
+\hat\beta = (X^{\top}V_y^{-1}X)^{-1} X^{\top}V_y^{-1}y .
+$$ {#eq-gls}
+
+`nitrix` parameterises $\theta = \log(\sigma^2)$ so the optimisation is
+unconstrained and the variances stay positive automatically — so the
+negative-variance pathology of @eq-mom cannot occur at all.
+
+@fig-lme-reml is the loss surface itself: @eq-reml evaluated on a grid of
+$(\sigma_b^2, \sigma_e^2)$, with the optimum (the bottom of the bowl) marked. It is
+this surface that `reml.py` walks downhill.
+
+```{python}
+#| label: fig-lme-reml
+#| fig-cap: "The REML objective @eq-reml over the two variance components, for one simulated random-intercept voxel. Contours are the restricted negative log-likelihood; the red star is its minimum (the REML estimate), the white dot the true variances used to simulate the data. The surface is smooth and has a single well — which is why a handful of Newton steps suffice. The valley is gently diagonal: the data constrain the *total* variance well but trade off between its between- and within-group split, exactly the ridge that biases naive ML."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+M, n = 8, 6                                   # groups, obs per group
+N = M * n
+sigma_b2_true, sigma_e2_true = 1.5, 0.6
+Z = np.repeat(np.eye(M), n, axis=0)           # (N, M) group indicators
+X = np.ones((N, 1))                           # intercept-only fixed effect
+b = rng.normal(0, np.sqrt(sigma_b2_true), M)
+eps = rng.normal(0, np.sqrt(sigma_e2_true), N)
+y = X @ np.array([5.0]) + Z @ b + eps         # beta_true = 5
+ZZt = Z @ Z.T
+
+def reml_nll(sb2, se2):
+    V = sb2 * ZZt + se2 * np.eye(N)
+    Vi = np.linalg.inv(V)
+    XtViX = X.T @ Vi @ X
+    beta = np.linalg.solve(XtViX, X.T @ Vi @ y)
+    r = y - X @ beta
+    _, logdetV = np.linalg.slogdet(V)
+    _, logdetXtViX = np.linalg.slogdet(XtViX)
+    return 0.5 * (logdetV + logdetXtViX + r @ Vi @ r)   # eq-reml
+
+SB, SE = np.meshgrid(np.linspace(0.05, 4.0, 80), np.linspace(0.05, 2.0, 80))
+surf = np.vectorize(reml_nll)(SB, SE)
+imin = np.unravel_index(np.argmin(surf), surf.shape)
+
+fig, ax = plt.subplots(figsize=(5.4, 4.2))
+ax.contour(SB, SE, surf, levels=25, cmap="viridis")
+ax.plot(SB[imin], SE[imin], "r*", ms=15, label="REML optimum")
+ax.plot(sigma_b2_true, sigma_e2_true, "wo", mec="k", label="truth")
+ax.set(xlabel=r"$\sigma_b^2$ (between-group)", ylabel=r"$\sigma_e^2$ (residual)",
+       title="REML objective (restricted negative log-likelihood)")
+ax.legend(loc="upper right", fontsize=9)
+fig.tight_layout(); plt.show()
+```
+
+### How `reml.py` optimises it
+
+The surface in @fig-lme-reml is smooth and (in $\log$-variance coordinates)
+single-welled, so a second-order method converges in a few steps. `nitrix` uses
+**Newton scoring** — the same Newton idea as the GLM's IRLS, now on the variance
+components — but with two deliberate choices that make it brain-scale, both living
+in `lme/_varcomp.py`:
+
+- **Analytic average-information curvature, not an autodiff Hessian.** The exact
+  REML gradient (the *score*) is available in closed form, and instead of the true
+  Hessian `nitrix` uses the **average-information** matrix (Gilmour, Thompson &
+  Cullis 1995) — the average of the observed and expected information. It is cheap,
+  closed-form, and guaranteed positive-(semi)definite, so the Newton step always
+  points downhill; there is no saddle to guard against and no second-order autodiff
+  through a Cholesky. The score and AI matrix are both assembled as reductions over
+  the $N$ observations with **no $N\times N$ intermediate** ever formed.
+- **Damped and budgeted.** As in the GLM, the step is **damped**
+  (Levenberg-style): a small ridge on the AI curvature, plus backtracking, keeps
+  the objective decreasing even far from the optimum and near the variance-floor
+  boundary where a component is collapsing to zero. A fixed ~20-iteration budget
+  (typically converging in 5–10) keeps the whole fit `vmap`-clean across the image,
+  via the shared `damped_newton` in `stats/_optimise.py`
+  ([Newton machinery](solvers.qmd#sec-newton)).
+
+The fit (`REMLResult`) returns, per voxel, the log-variances $\hat\theta$, the
+fixed effects $\hat\beta$ via @eq-gls, the fixed-effect covariance
+$(X^{\top}V_y^{-1}X)^{-1}$ (`fixed_cov`) for contrast tests, the covariance of
+$\hat\theta$ itself (`theta_cov`, the inverse AI matrix) and the gradient tensors
+(`grad_m`) needed for **Satterthwaite degrees of freedom** — because the variances
+are *estimated*, the right reference distribution for a fixed-effect $t$-test is a
+$t$ with fractional, data-dependent degrees of freedom, which `lme_t_contrast` /
+`lme_f_contrast` compute from exactly these tensors. (`lme/reml.py`.)
+
+## The scaling wall, and the FaST-LMM trick that breaks it {#sec-fastlmm}
+
+Look again at @eq-reml: it has a $\log|V_y|$ and a $V_y^{-1}$, and $V_y$ is
+$N\times N$. Done naively, each evaluation is $O(N^3)$ — and we repeat it, every
+Newton step, for *every voxel*. At hundreds of thousands of voxels this is
+hopeless.
+
+The escape (Lippert et al. 2011, **FaST-LMM**) is one eigendecomposition. The
+mechanics of *why* an eigendecomposition diagonalises a symmetric matrix live on
+the [spectral-solver page](solvers.qmd#sec-spectral); here is the payoff in one
+breath. Diagonalise the random-effect structure once, $ZZ^{\top} = U\Lambda
+U^{\top}$, and **rotate** the data into that orthonormal basis, $\tilde y =
+U^{\top}y$, $\tilde X = U^{\top}X$. Because $U$ is orthogonal it does not change any
+least-squares quantity — but in the rotated basis the covariance @eq-V is
+*diagonal*:
+
+$$
+\tilde V_y = \sigma_b^2\Lambda + \sigma_e^2 I = \operatorname{diag}(d),
+\qquad d_i = \sigma_b^2\lambda_i + \sigma_e^2 .
+$$ {#eq-rotated}
+
+Now every expensive piece is elementwise: $\log|V_y| = \sum_i \log d_i$,
+$V_y^{-1}$ is $\operatorname{diag}(1/d)$, and $X^{\top}V_y^{-1}X = \sum_i \tilde
+x_i \tilde x_i^{\top}/d_i$. Per-iteration cost collapses from $O(N^3)$ to
+$O(Np^2 + N)$. Crucially, the eigendecomposition depends only on $Z$, which is
+**shared across all voxels** — so it is computed **once** at the outer call and
+reused for the whole image (the same "compute the shared piece once" pattern as the
+GLM's $X^{\top}X$). A scalar random effect that was a brain-melting $N\times N$
+solve becomes a handful of vector operations per voxel. This is the mass-univariate
+payoff: **eigendecompose once, reuse across the image.**
+
+`nitrix` adds a **low-rank** refinement (`lme/_lowrank.py`). When the number of
+random-effect columns $q$ is smaller than $N$ — the usual case, far fewer subjects
+than observations — it eigendecomposes the $q\times q$ matrix $Z^{\top}Z$ instead
+of the $N\times N$ matrix $ZZ^{\top}$, recovering the same nonzero spectrum and the
+range eigenvectors $U_r = ZW/s$ without ever forming the $N\times N$ factor. The
+$N-q$ "null" directions all carry the same total variance $\sigma_e^2$ (the random
+effect is silent there), so they never need to be materialised individually: they
+enter the objective only through three small per-voxel Gram aggregates and a
+multiplicity count $n_0 = N-q$. A rank-deficient $Z$ (e.g. empty label levels) is
+absorbed by that null space. The one eigendecomposition uses the cuSOLVER-robust
+`safe_eigh`; `reml_fit` auto-selects low-rank whenever $q < N$, and the per-voxel
+inner loop makes no vendor-solver call at all.
+
+## FLAME: when the within-group variance is known {#sec-flame}
+
+fMRI group analysis has a special, common structure that makes one of the two
+variances *disappear*. Each subject's time series is first fit by a level-1 GLM,
+yielding a per-subject effect $\beta_i$ **and its standard error** $s_i$ — the
+measurement error of that subject's own estimate. The group model is then a
+**measurement-error mixed model**:
+
+$$
+\beta_i = X_{\text{grp}}\gamma + b_i + \varepsilon_i,
+\qquad b_i\sim\mathcal{N}(0,\sigma_b^2),\quad \varepsilon_i\sim\mathcal{N}(0,s_i^2),
+$$ {#eq-flame}
+
+where the within-subject variance $s_i^2$ is **known** (it came from level 1) and
+only the between-subject variance $\sigma_b^2$ is unknown. This is FSL's
+**FLAME** model (Beckmann, Jenkinson & Smith 2003; Woolrich et al. 2004).
+
+The intuition for why known-$R$ simplifies everything: in the general model we had
+to estimate the whole residual covariance $R = \sigma_e^2 I$, fighting the data-fit
+term against the complexity term. Here $R = \operatorname{diag}(s_1^2, \ldots,
+s_N^2)$ is *handed to us*. The total per-subject variance is then $\sigma_b^2 +
+s_i^2$ — already diagonal, no rotation needed — and the only thing left to estimate
+is the single scalar $\sigma_b^2$. So FLAME is a **one-parameter REML**:
+`flame_two_level` runs the shared diagonalised-REML core (`_varcomp`) with **one**
+free component, basis $B = [\mathbf{1}]$, and a fixed per-observation **offset**
+equal to the known $s_i^2$ (`lme/flame.py`). Fitting it as a generic
+two-parameter REML would be non-identifiable — a free residual *scale* and a free
+$\sigma_b^2$ would trade off, with nothing in the data to separate them — which is
+exactly why it gets its own one-parameter solver. (`nitrix` also offers a
+`robust=True` Huber-style down-weighting of outlier subjects, FSL's FLAME-outlier
+idea, which inflates a suspicious subject's $s_i^2$ before refitting.)
+
+## Beyond one random intercept {#sec-beyond}
+
+A single scalar random intercept is the simplest mixed model and the one the
+FaST-LMM path serves. Real designs ask for more, and `nitrix`'s `lme_fit`
+dispatches each to the cheapest *exact* solver. The unifying idea throughout: the
+random structure dictates the block pattern of $V_y$, and each solver exploits that
+pattern so it never forms an $N\times N$ matrix.
+
+### Crossed vs nested random effects
+
+Two grouping factors can relate to each other in two fundamentally different ways,
+and the difference shows up directly in $Z$ and in the block structure of $V_y$.
+
+- **Nested** (`lme/_nested.py`): subjects **within** sites — each subject belongs
+  to exactly one site. The factors telescope: site, then subject-within-site. The
+  random part is $Z_1 b_1 + Z_2 b_2$ with $b_1$ the site offsets and $b_2$ the
+  (within-site) subject offsets, so $G$ is block-diagonal with two variances,
+  $\theta = (\sigma_1^2, \sigma_2^2, \sigma_e^2)$. Because each subject lives under
+  one site, $V_y$ is **block-diagonal across sites**, and *within* a site block it
+  is a compound-symmetry-within-subject structure plus a rank-one site term. Both
+  levels invert in closed form by **Sherman–Morrison** (the "telescoping
+  Woodbury"), assembled from per-sublevel counts and group-sums via `segment_sum`
+  — no $N\times N$ factor. (`lme_fit(..., inner=...)` → `NestedLMEResult`.)
+- **Crossed** (`lme/_crossed.py`): subjects **×** stimuli — every subject sees
+  every stimulus, so an observation has *both* a subject level and a stimulus level
+  and the two factors do not nest. Now $V_y = \sigma_1^2 Z_1 Z_1^{\top} +
+  \sigma_2^2 Z_2 Z_2^{\top} + \sigma_e^2 I$ is **not** block-diagonal across either
+  factor (a subject's rows are tangled with a stimulus's rows), so neither the
+  FaST-LMM rotation nor the per-group Woodbury applies. The tractable structure is
+  a Woodbury on the stacked design $[Z_1\,|\,Z_2]$ whose inner matrix has two
+  diagonal blocks (the per-level counts) joined by the $q_1\times q_2$
+  cross-tabulation; a **Schur complement** eliminates the larger factor cheaply and
+  leaves a single dense $\min(q_1,q_2)^3$ solve per Newton step. Cheap when one
+  factor is small (30 stimuli × 1000 subjects), expensive when both are large.
+  (`lme_fit(..., cross=...)` → `CrossedLMEResult`.)
+
+### Random slopes and correlated effects
+
+A scalar intercept says "subjects differ in level". Often they also differ in
+**slope** — each subject has their own age trajectory. Then $Z_i = [\mathbf{1},
+\text{age}]$ per group, and the per-group random effect is a small *vector*
+$b_i\sim\mathcal{N}(0, G)$ with a $2\times 2$ covariance $G$ — its diagonal the
+intercept and slope variances, its off-diagonal the **intercept–slope
+correlation** ("do subjects who start high rise faster?"). This is `(1 + x | g)`.
+
+This breaks FaST-LMM (one rotation can no longer diagonalise a non-scalar $G$), but
+for a *single* grouping factor $V_y$ is still block-diagonal across groups, so a
+**per-group Woodbury** keeps the heavy algebra at the tiny $r\times r$ (here $2\times
+2$) and $p\times p$ scale (`lme/_blockwoodbury.py`, tier R2). $G$ is carried in
+**log-Cholesky** coordinates ($G = LL^{\top}$, log diagonal) so it stays
+positive-definite under an unconstrained Newton step. Passing
+`structure='diagonal'` constrains $G$ to be diagonal — the uncorrelated `(x || g)`
+effect, independent intercept and slope. For designs where the within-group
+random covariates are themselves rich, `lme/_lowrank.py` provides the same
+low-rank parameterisation used in @sec-fastlmm to keep the per-group cost down.
+(`lme/_corr.py` is the companion piece for a *correlated residual* within a group —
+AR(1) in time, compound symmetry — folded in by whitening, as in @sec-varcomp.)
+
+### Kenward–Roger small-sample correction {#sec-kr}
+
+There is a subtle inferential bug waiting in every mixed model with **few groups**.
+When we test a fixed-effect contrast $c^{\top}\beta = 0$, the standard error comes
+from $(X^{\top}V_y^{-1}X)^{-1}$ — but we plugged in $\hat\theta$ as if it were the
+*true* $V_y$. It is not; we *estimated* it, and with only, say, twelve subjects we
+estimated it poorly. Ignoring that extra uncertainty makes the naive $t$- and
+$F$-tests **anti-conservative**: standard errors come out too small, $t$-statistics
+too big, $p$-values too optimistic, and you over-reject. (The same disease the $n-1$
+correction and REML treat for *estimation*, now reappearing for *inference*.)
+
+**Kenward & Roger (1997)** fix both halves of the problem (`lme/_kr.py`):
+
+1. **An inflated covariance** $\Phi_A$. They add a correction term to
+   $\Phi = (X^{\top}V_y^{-1}X)^{-1}$ that accounts for the variability of
+   $\hat\theta$ — built from the derivatives of $V_y$ with respect to the variance
+   components and the REML information matrix $W$ of $\theta$. The estimate of
+   $\beta$ is more uncertain than $\Phi$ alone admits, and $\Phi_A \succeq \Phi$
+   restores the missing variance.
+2. **Adjusted denominator degrees of freedom.** They moment-match the resulting
+   Wald statistic to a scaled $F$-distribution with a reduced, data-dependent
+   denominator df $m$ — wider tails, so the critical value is appropriately larger
+   for small samples.
+
+For the R1 model $V_y$ is **linear** in the natural components $(\sigma_b^2,
+\sigma_e^2)$, which kills the second-derivative term and lets every KR quantity
+reduce to diagonal weighted sums in the FaST-LMM rotated basis — closed-form and
+cuSOLVER-free. In `nitrix` you reach it with `lme_t_contrast(result, c,
+dof='kr', X=X, Z=Z)` (it must re-derive the rotated basis, so the original design
+is re-passed); the default `dof='satterthwaite'` is the cheaper large-sample
+correction. Use KR when groups are few.
+
+## A worked example: borrowing strength
+
+The signature behaviour of a mixed model is **partial pooling**: a group's
+estimate is pulled toward the global mean, the more so when the group is small or
+noisy. This is the practical face of the variance components — the shrinkage weight
+is built *entirely* from $\sigma_b^2$ and $\sigma_e^2$. Pure NumPy, runs at build
+time, using the method-of-moments estimate @eq-mom (the idea REML refines).
+
+```{python}
+#| label: fig-shrinkage
+#| fig-cap: "Partial pooling. Noisy per-group means (no pooling) are shrunk toward the global mean by the mixed model; small/extreme groups move most. The shrunk estimates sit closer to the truth — the printed RMSE confirms it."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(1)
+M = 20                                   # groups
+true_mu = 5.0
+b = rng.normal(0, 1.0, M)                # true group offsets, sigma_b = 1
+group_true = true_mu + b
+n = rng.integers(2, 12, M)               # unequal group sizes
+sigma_e = 2.0
+ybar = np.array([rng.normal(group_true[j], sigma_e/np.sqrt(n[j])) for j in range(M)])
+
+# variance components (method-of-moments, the idea REML refines)
+grand = ybar.mean()
+s_b2 = max(ybar.var(ddof=1) - (sigma_e**2 / n).mean(), 0.1)
+s_e2 = sigma_e**2
+shrink = (n * s_b2) / (n * s_b2 + s_e2)          # per-group weight on its own mean
+partial = grand + shrink * (ybar - grand)         # empirical-Bayes estimate
+
+j = np.argsort(ybar)
+fig, ax = plt.subplots(figsize=(8, 3.4))
+ax.axhline(grand, color="0.6", lw=1, ls=":", label="global mean")
+ax.plot(range(M), ybar[j], "o", label="no pooling (group mean)")
+ax.plot(range(M), partial[j], "s", label="partial pooling (mixed)")
+ax.plot(range(M), group_true[j], "x", color="k", label="truth")
+for i, jj in enumerate(j):
+    ax.plot([i, i], [ybar[jj], partial[jj]], color="0.8", lw=1, zorder=0)
+ax.set(xlabel="group (sorted)", ylabel="estimate", title="partial pooling shrinks toward the mean")
+ax.legend(fontsize=8, ncol=2)
+fig.tight_layout(); plt.show()
+rmse = lambda e: np.sqrt(np.mean((e - group_true)**2))
+print(f"RMSE  no-pool={rmse(ybar):.3f}   partial-pool={rmse(partial):.3f}")
+```
+
+The shrinkage weight $\frac{n_j\sigma_b^2}{n_j\sigma_b^2 + \sigma_e^2}$ is exactly
+the ratio of variances $V_y$ encodes. A large group ($n_j$ big) or a large
+between-group variance ($\sigma_b^2$ big) trusts its own mean; a small or
+low-variance group is pulled hard toward the centre. Estimating
+$\sigma_b^2,\sigma_e^2$ well — what REML does — is what makes the pooling right.
+
+## Where this connects
+
+Rewrite the shrinkage weight's denominator and a familiar quantity appears: the
+ratio $\sigma_e^2/\sigma_b^2$ is a **penalty strength**. Shrinking a group's
+offset toward zero is the same operation as penalising a coefficient toward zero
+with a penalty matrix $S$. That is not a coincidence — it is the
+**penalty–variance equivalence** the next chapter makes precise: a random effect
+*is* a penalised coefficient whose penalty strength is a variance ratio, and the
+penalty matrix $S$ of a [GAM](gam.qmd#sec-penalty) plays the role of $G^{-1}$ here.
+Which is why the GAM machinery and this LME machinery are two faces of one method,
+and why the [Fellner–Schall](fellner-schall.qmd#sec-fs-update) update can estimate
+both with the same step.
+
+## Further reading
+
+- Patterson, H. D. & Thompson, R. (1971). *Recovery of inter-block information when
+  block sizes are unequal*. **Biometrika** 58(3), 545–554. (The original REML.)
+- Harville, D. A. (1977). *Maximum likelihood approaches to variance component
+  estimation and to related problems*. **JASA** 72(358), 320–338. (Variance-component
+  computation; the restricted likelihood as a likelihood of error contrasts.)
+- Gilmour, A. R., Thompson, R. & Cullis, B. R. (1995). *Average information REML*.
+  **Biometrics** 51, 1440–1450. (The closed-form curvature `nitrix` uses.)
+- Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M., Davidson, R. I. & Heckerman,
+  D. (2011). *FaST linear mixed models for genome-wide association studies*.
+  **Nature Methods** 8, 833–835. (The spectral rotation of @sec-fastlmm.)
+- Kenward, M. G. & Roger, J. H. (1997). *Small sample inference for fixed effects
+  from restricted maximum likelihood*. **Biometrics** 53, 983–997. (The df
+  adjustment of @sec-kr.)
+- Pinheiro, J. C. & Bates, D. M. (2000). *Mixed-Effects Models in S and S-PLUS*.
+  Springer. (Random slopes, nested/crossed designs, correlation and
+  variance-function structures.)
+- Bates, D., Mächler, M., Bolker, B. & Walker, S. (2015). *Fitting linear
+  mixed-effects models using lme4*. **Journal of Statistical Software** 67(1),
+  1–48.
+- Woolrich, M. W., Behrens, T. E. J., Beckmann, C. F., Jenkinson, M. & Smith, S. M.
+  (2004). *Multilevel linear modelling for fMRI group analysis using Bayesian
+  inference*. **NeuroImage** 21(4), 1732–1747. (FLAME, the known-within-variance
+  group model of @sec-flame.)
+- Beckmann, C. F., Jenkinson, M. & Smith, S. M. (2003). *General multilevel linear
+  modeling for group analysis in fMRI*. **NeuroImage** 20(2), 1052–1063.
+
+## See also
+
+- Code:
+  [`nitrix/stats/lme/reml.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/reml.py)
+  (`reml_fit`, `lme_fit`, the contrast tests),
+  [`lme/_varcomp.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_varcomp.py)
+  (the shared AI-REML core),
+  [`lme/flame.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/flame.py),
+  [`lme/_lowrank.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_lowrank.py),
+  [`lme/_nested.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_nested.py),
+  [`lme/_crossed.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_crossed.py),
+  [`lme/_blockwoodbury.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_blockwoodbury.py),
+  [`lme/_corr.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_corr.py),
+  [`lme/_varfunc.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_varfunc.py),
+  [`lme/_kr.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/lme/_kr.py),
+  and the shared `stats/_optimise.py` damped Newton.
+- Foundations: [variance and covariance](foundations.qmd#sec-variance);
+  [spectral solver](solvers.qmd#sec-spectral) and
+  [Newton machinery](solvers.qmd#sec-newton).
+- Previous rung: [generalised linear models](glm.qmd). Next rung:
+  [generalised additive models](gam.qmd) — the same penalty, applied to
+  *smoothness* instead of group membership.

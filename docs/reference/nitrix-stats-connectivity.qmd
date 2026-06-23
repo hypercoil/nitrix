@@ -1,0 +1,85 @@
+---
+title: "nitrix.stats.connectivity"
+generated: true
+signature-hash: b00307a2abe072c7
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.connectivity` (signatures only). Replace the
+skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
+`check_reference_staleness.py` flags this page if the underlying
+signatures drift from this stub.
+:::
+
+## `ebic_score` {#ebic_score}
+
+```python
+ebic_score(theta: Float[Array, 'p p'], S: Float[Array, 'p p'], n: int | Float[Array, ''], *, gamma: float=0.5, edge_tol: float=1e-08) -> Float[Array, '']
+```
+
+Extended Bayesian Information Criterion of a precision estimate.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `glasso` {#glasso}
+
+```python
+glasso(S: Float[Array, 'p p'], lam: float | Float[Array, ''], *, n_outer: int=100, n_inner: int=50) -> Float[Array, 'p p']
+```
+
+Graphical-LASSO sparse precision (inverse covariance).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `glasso_path` {#glasso_path}
+
+```python
+glasso_path(S: Float[Array, 'p p'], lambdas: Float[Array, 'L'], *, n_outer: int=100, n_inner: int=50) -> Float[Array, 'L p p']
+```
+
+Warm-started graphical-LASSO regularisation path over ``lambdas``.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `ledoit_wolf` {#ledoit_wolf}
+
+```python
+ledoit_wolf(X: Float[Array, 'n p'], *, assume_centered: bool=False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
+```
+
+Ledoit-Wolf analytic-shrinkage covariance.
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `oas` {#oas}
+
+```python
+oas(X: Float[Array, 'n p'], *, assume_centered: bool=False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
+```
+
+Oracle-Approximating-Shrinkage covariance (Chen et al. 2010).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
+## `shrunk_covariance` {#shrunk_covariance}
+
+```python
+shrunk_covariance(X: Float[Array, 'n p'], *, method: ShrinkageMethod='ledoit_wolf', assume_centered: bool=False) -> Float[Array, 'p p']
+```
+
+Analytic-shrinkage covariance via ``method`` (the cov only).
+
+**Parameters** — *TODO: document each parameter.*
+
+**Returns** — *TODO.*
+
