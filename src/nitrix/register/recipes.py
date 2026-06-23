@@ -225,21 +225,43 @@ def _spatial_ndim(moving: Array, fixed: Array) -> int:
     return ndim
 
 
-def _use_inverse_compositional(
+def _resolve_ic_dispatch(
     method: str,
     space: CoordinateSpace,
     spec: RegistrationSpec,
     model: TransformModel,
+    *,
+    mask: Optional[Array] = None,
 ) -> bool:
-    """Resolve the ``method`` argument against the IC fast-path preconditions.
+    """The single inverse-compositional-vs-forward dispatch resolver (G1).
 
-    The inverse-compositional kernel (constant-template Hessian, ~4-7x the
-    forward GN/LM throughput) applies to a **rigid or affine** least-squares
-    (SSD) registration in **IndexSpace** (the template is linearised in voxel
-    coordinates).  ``"auto"`` takes it when those hold and falls back to the
-    forward path otherwise (the parity oracle); ``"inverse_compositional"``
-    forces it (and validates); ``"forward"`` always takes the forward path.
+    Returns whether to take the inverse-compositional fast path (constant-template
+    Hessian, ~4-7x the forward GN/LM throughput).  It applies to a **rigid or
+    affine** least-squares (SSD) registration in **IndexSpace** (the template is
+    linearised in voxel coordinates) with an unmasked cost.  ``method``:
+    ``"auto"`` takes it when those preconditions hold and falls back to the
+    forward path otherwise (the parity oracle); ``"inverse_compositional"`` forces
+    it (and validates the preconditions); ``"forward"`` always takes the forward
+    path.
+
+    A fixed-grid cost ``mask`` (A3) routes to the forward path regardless -- the
+    constant-template Hessian is a full-grid linearisation built once from the
+    whole reference, so it cannot honour a per-voxel mask; an explicit
+    ``method='inverse_compositional'`` with a mask is a loud error.
     """
+    if mask is not None:
+        if method == 'inverse_compositional':
+            raise ValueError(
+                "method='inverse_compositional' cannot honour a cost mask (its "
+                'constant-template Hessian is a full-grid linearisation); use '
+                "method='auto' (routes to the forward path) or 'forward'."
+            )
+        if method not in ('auto', 'forward'):
+            raise ValueError(
+                f'method must be "auto", "forward", or '
+                f'"inverse_compositional"; got {method!r}.'
+            )
+        return False
     supported = (
         isinstance(space, IndexSpace)
         and spec.metric.is_least_squares
@@ -261,30 +283,6 @@ def _use_inverse_compositional(
         f'method must be "auto", "forward", or "inverse_compositional"; '
         f'got {method!r}.'
     )
-
-
-def _use_ic_with_mask(
-    method: str,
-    space: CoordinateSpace,
-    spec: RegistrationSpec,
-    model: TransformModel,
-    *,
-    mask: Optional[Array],
-) -> bool:
-    """IC dispatch, mask-aware (A3): a fixed-grid cost ``mask`` routes to the
-    forward path -- the inverse-compositional constant-template Hessian is a
-    full-grid linearisation built once from the whole reference, so it does not
-    honour a per-voxel mask.  An explicit ``method='inverse_compositional'`` with
-    a mask is a loud error (the request cannot be satisfied)."""
-    if mask is not None:
-        if method == 'inverse_compositional':
-            raise ValueError(
-                "method='inverse_compositional' cannot honour a cost mask (its "
-                'constant-template Hessian is a full-grid linearisation); use '
-                "method='auto' (routes to the forward path) or 'forward'."
-            )
-        return False
-    return _use_inverse_compositional(method, space, spec, model)
 
 
 def rigid_register(
@@ -381,7 +379,7 @@ def rigid_register(
         init_matrix = _resolve_init_matrix(
             init, moving, fixed, ndim=ndim, scale=False, space=space, spec=spec
         )
-    if _use_ic_with_mask(method, space, spec, model, mask=mask):
+    if _resolve_ic_dispatch(method, space, spec, model, mask=mask):
         return ic_rigid_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
         )
@@ -550,7 +548,7 @@ def affine_register(
         )
     if restarts < 1:
         raise ValueError(f'restarts must be >= 1; got {restarts}.')
-    if _use_ic_with_mask(method, space, spec, model, mask=mask):
+    if _resolve_ic_dispatch(method, space, spec, model, mask=mask):
         # The inverse-compositional SSD path is deterministic; restarts (a GPU
         # MI / CR nondeterminism mitigation) is a no-op here.
         return ic_affine_register(

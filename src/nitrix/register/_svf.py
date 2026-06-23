@@ -21,7 +21,7 @@ unification is the warranted one, not a forced matrix+SVF merge.)
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Callable, Literal, Optional, Sequence, Union, cast
 
 import jax.numpy as jnp
@@ -41,10 +41,11 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode
 from ..smoothing import gaussian
-from ._converge import Convergence, run_iterations
+from ._converge import Convergence, ConvergenceMode, run_iterations
 from ._force import Force, MIForce
 
 __all__ = [
+    'SVFSpec',
     'svf_coarse_to_fine',
     'single_sided_level',
     'symmetric_level',
@@ -57,6 +58,89 @@ __all__ = [
     'resolve_smoothing',
     'smooth_pyramid',
 ]
+
+
+@dataclass(frozen=True)
+class SVFSpec:
+    """Shared stationary-velocity-field schedule (G1) -- the base both SVF
+    recipe specs (:class:`DemonsSpec`, :class:`SyNSpec`) embed.
+
+    Holds the multi-resolution + regularisation + convergence fields the
+    log-Demons and greedy-SyN recipes have in common, so a recipe spec adds only
+    its own force/update knobs (Demons: ``alpha`` / ``bch_order``; SyN:
+    ``radius`` / ``step`` / ``step_mode``) and the field's type, default, and
+    docstring live in exactly one place.
+
+    Attributes
+    ----------
+    levels
+        Gaussian-pyramid resolutions (coarse-to-fine).
+    iterations
+        Iterations per level: an ``int`` (the same count at every level) or a
+        length-``levels`` **coarse-to-fine** tuple (front-load the cheap coarse
+        levels, cap the expensive finest one -- the ANTs schedule discipline,
+        e.g. ``(100, 70, 50, 20)`` over a 4-level pyramid).
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) regularisation.
+    sigma_diffusion
+        Gaussian sigma for the diffusion (accumulated-field) regularisation.
+    spacing
+        Per-axis voxel spacing (physical units); ``float`` or length-``ndim``
+        tuple.  ``None`` (default) registers in voxel units.  Only the
+        **anisotropy** is used -- the regularisation (and the LNCC window /
+        ESM force) are made physically isotropic by the *relative* spacing
+        ``spacing / geomean(spacing)`` (level-independent), so isotropic spacing
+        reduces exactly to ``None``; the velocity field stays voxel-native.
+    pyramid_factor, pyramid_sigma
+        Pyramid downsample factor / anti-alias sigma.
+    boundary_mode
+        Out-of-bounds handling for the warps.
+    representation
+        Dense-deformation domain: ``'group'`` (default) carries the
+        *displacement(s)* and uses the greedy compositive update (warp directly,
+        compose the increment -- the perf path); ``'algebra'`` carries the
+        *stationary velocity(ies)* and re-exponentiates every iteration (the
+        exact-SVF path, byte-identical to the pre-v4 recipe, the parity oracle).
+        The velocity output is recovered from the final displacement(s) via
+        ``geometry.field_log`` in group mode.  (The recipe sets how many
+        displacements / velocities -- one for Demons, a symmetric pair for SyN.)
+    mode
+        Iteration strategy (B2).  ``'fixed'`` (the SVF default) runs the full
+        fixed schedule (a ``lax.scan``); ``'early_exit'`` runs the windowed-slope
+        ``lax.while_loop`` -- a level stops once the normalised cost slope drops
+        below ``convergence.threshold`` (or ``iterations`` is hit).
+        **Single-pair** (a ``vmap``-ed ``while_loop`` runs to the all-lanes exit,
+        the slowest pair governing).  A *tapered* per-level ``iterations``
+        schedule already removes the over-iteration the early-exit targets, so
+        the strict ``threshold=1e-6`` then *costs* time on the fast GPU path --
+        hence ``'fixed'`` is the SVF default; early-exit pays off for an untuned
+        / flat schedule or the CPU path with a looser threshold.
+    convergence
+        The :class:`Convergence` (threshold / window) for ``mode='early_exit'``;
+        inert under ``mode='fixed'``.
+    compute_velocity
+        Whether to recover and return the stationary velocity output (the
+        ``geometry.field_log`` of the final displacement(s)).  ``False`` (default)
+        leaves it ``None`` and skips the ``field_log`` finalisation entirely --
+        under ``jit`` that loop nest is never traced, so it costs neither compile
+        nor runtime; the deformation outputs (``warped`` / ``displacement`` /
+        ``jacobian_det``) never depend on it.  Set ``True`` to recover it (e.g.
+        to feed ``geometry.velocity_mean`` or the transform-algebra path).  **The
+        default changed in this release** (was always computed).
+    """
+
+    levels: int = 3
+    iterations: Union[int, tuple[int, ...]] = 80
+    sigma_fluid: float = 1.0
+    sigma_diffusion: float = 1.5
+    spacing: Optional[Union[float, tuple[float, ...]]] = None
+    pyramid_factor: float = 2.0
+    pyramid_sigma: Optional[float] = None
+    boundary_mode: BoundaryMode = 'nearest'
+    representation: Literal['group', 'algebra'] = 'group'
+    mode: ConvergenceMode = 'fixed'
+    convergence: Convergence = Convergence()
+    compute_velocity: bool = False
 
 
 def resolve_smoothing(

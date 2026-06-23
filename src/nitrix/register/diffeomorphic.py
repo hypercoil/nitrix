@@ -37,7 +37,7 @@ tolerance, not field-wise.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, NamedTuple, Optional, Sequence, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
 from jaxtyping import Array, Float
 
@@ -46,16 +46,14 @@ from ..geometry import (
     gaussian_pyramid,
     integrate_velocity_field,
 )
-from ..geometry._interpolate import BoundaryMode
 from ._converge import (
-    Convergence,
-    ConvergenceMode,
     resolve_convergence_mode,
 )
 from ._core import resolve_iterations
 from ._force import DemonsForce, Force, resolve_force_schedule
 from ._preprocess import preprocess_images
 from ._svf import (
+    SVFSpec,
     _relative_spacing,
     finalize_with_init,
     group_single_sided_level,
@@ -76,99 +74,32 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class DemonsSpec:
+class DemonsSpec(SVFSpec):
     """Static configuration for the log-Demons recipe (jit-static).
+
+    Embeds :class:`._svf.SVFSpec` (G1) for the shared schedule / regularisation /
+    convergence fields (``levels``, ``iterations``, ``sigma_fluid`` /
+    ``sigma_diffusion``, ``spacing``, ``pyramid_factor`` / ``pyramid_sigma``,
+    ``boundary_mode``, ``representation``, ``mode`` / ``convergence``,
+    ``compute_velocity``); Demons carries a single displacement / velocity, so
+    its ``representation`` / ``compute_velocity`` recover the one ``velocity``
+    field (``DiffeomorphicResult.velocity``).  The Demons-specific force knobs:
 
     Attributes
     ----------
-    levels
-        Gaussian-pyramid resolutions (coarse-to-fine).
-    iterations
-        Demons iterations per level: an ``int`` (the same count at every
-        level) or a length-``levels`` **coarse-to-fine** tuple (front-load the
-        cheap coarse levels, cap the expensive finest one -- the ANTs schedule
-        discipline, e.g. ``(100, 70, 50, 20)`` over a 4-level pyramid).
-    sigma_fluid
-        Gaussian sigma for the fluid (per-update) regularisation.
-    sigma_diffusion
-        Gaussian sigma for the diffusion (accumulated-velocity)
-        regularisation.
     n_steps
-        Scaling-and-squaring steps for ``exp(v)``.
+        Scaling-and-squaring steps for ``exp(v)`` (the algebra path; ``'auto'``
+        is not used here -- the count is jit-static).
     alpha
-        Force normalisation: ``denom = |J|² + α²(F − M∘φ)²``.  Larger
-        ``α`` damps the step where the intensity difference is large.
+        Force normalisation: ``denom = |J|² + α²(F − M∘φ)²``.  Larger ``α`` damps
+        the step where the intensity difference is large.
     bch_order
         Log-update order: ``1`` additive (default), ``2`` adds ½[v,u].
-    spacing
-        Per-axis voxel spacing (physical units); ``float`` or length-``ndim``
-        tuple.  ``None`` (default) registers in voxel units.  Only the
-        **anisotropy** is used -- the regularisation and the ESM force are
-        made physically isotropic by the *relative* spacing
-        ``spacing / geomean(spacing)`` (level-independent: the
-        coarse-to-fine align-corners scale cancels in the ratio).  So
-        isotropic spacing reduces exactly to ``None``; an anisotropic grid
-        is corrected for the bias where a voxel-isotropic Gaussian / force
-        is physically anisotropic.  The velocity field stays voxel-native
-        (the ESM force is converted mm -> voxel before it updates ``v``).
-    pyramid_factor, pyramid_sigma
-        Pyramid downsample factor / anti-alias sigma.
-    boundary_mode
-        Out-of-bounds handling for the warps.
-    representation
-        Dense-deformation domain: ``'group'`` (default) carries the
-        *displacement* and uses the greedy compositive demons update (warp
-        directly, compose the increment -- ~2 gathers/iter, the perf path);
-        ``'algebra'`` carries the *stationary velocity* and uses the log-domain
-        update (``exp`` every iteration -- the exact-SVF path, byte-identical to
-        the pre-v4 recipe, the parity oracle).  Both return the same
-        ``DiffeomorphicResult``; in group mode ``velocity`` is recovered from the
-        final displacement via ``geometry.field_log`` (the best-fit stationary
-        velocity, exact iff the warp is in ``image(exp)``).
-    mode
-        Iteration strategy (B2).  ``'fixed'`` (default) runs the full fixed
-        schedule (a ``lax.scan``); ``'early_exit'`` runs the windowed-slope
-        ``lax.while_loop`` -- a level stops once the normalised cost slope drops
-        below ``convergence.threshold`` (or ``iterations`` is hit).
-        **Single-pair** (a ``vmap``-ed ``while_loop`` runs to the all-lanes exit,
-        the slowest pair governing -- so the per-pair benefit degrades in a
-        cohort).  **When to use (measured):** like SyN, a *tapered* per-level
-        ``iterations`` schedule already removes the over-iteration, so the strict
-        default ``threshold=1e-6`` then *costs* time (the ``while_loop`` overhead
-        exceeds its saving on the fast GPU path) -- hence ``'fixed'`` is the
-        default.  Useful for an *untuned / flat* schedule or the CPU path with a
-        looser threshold.
-    convergence
-        The :class:`Convergence` (threshold / window) for ``mode='early_exit'``;
-        inert under ``mode='fixed'``.
-    compute_velocity
-        Whether to recover and return the stationary ``velocity`` field.
-        ``False`` (default) leaves ``DiffeomorphicResult.velocity`` as ``None``
-        and skips the ``geometry.field_log`` finalisation entirely -- under
-        ``jit`` that whole loop nest is never traced, so it costs neither compile
-        nor runtime (measured ~half the GPU warm time of a Demons solve, ~25-30%
-        of its HLO).  Most callers only need ``warped`` / ``displacement`` /
-        ``jacobian_det``, which never depend on ``velocity``.  Set ``True`` to get
-        the velocity back (e.g. to feed ``geometry.velocity_mean`` or the
-        transform-algebra path).  **Default changed in this release** (was always
-        computed); pass ``compute_velocity=True`` to restore the old behaviour.
     """
 
-    levels: int = 3
-    iterations: Union[int, tuple[int, ...]] = 80
-    sigma_fluid: float = 1.0
-    sigma_diffusion: float = 1.5
     n_steps: int = 6
     alpha: float = 0.4
     bch_order: int = 1
-    spacing: Optional[Union[float, tuple[float, ...]]] = None
-    pyramid_factor: float = 2.0
-    pyramid_sigma: Optional[float] = None
-    boundary_mode: BoundaryMode = 'nearest'
-    representation: Literal['group', 'algebra'] = 'group'
-    mode: ConvergenceMode = 'fixed'
-    convergence: Convergence = Convergence()
-    compute_velocity: bool = False
 
 
 class DiffeomorphicResult(NamedTuple):
