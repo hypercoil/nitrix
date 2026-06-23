@@ -53,12 +53,12 @@ from ..geometry import (
     invert_displacement,
 )
 from ..geometry._interpolate import BoundaryMode
-from ._converge import Convergence
-from ._core import (
+from ._converge import (
+    Convergence,
     ConvergenceMode,
     resolve_convergence_mode,
-    resolve_iterations,
 )
+from ._core import resolve_iterations
 from ._force import Force, LNCCForce, resolve_force_schedule
 from ._preprocess import preprocess_images
 from ._svf import (

@@ -70,8 +70,12 @@ from jaxtyping import Array, Float
 from ..geometry import apply_affine, sample_at_points
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg._solver import safe_inv
-from ._converge import run_iterations
-from ._core import Convergence, ConvergenceMode, resolve_convergence_mode
+from ._converge import (
+    Convergence,
+    ConvergenceMode,
+    resolve_convergence_mode,
+    run_iterations,
+)
 from ._model import Rigid, TransformModel
 
 __all__ = [

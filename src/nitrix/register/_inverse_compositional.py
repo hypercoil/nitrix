@@ -45,12 +45,14 @@ from ..geometry import (
 )
 from ..linalg._solver import safe_inv
 from ..linalg.matrix_function import matrix_exp, matrix_log
-from ._converge import run_iterations
-from ._core import (
+from ._converge import (
     Convergence,
+    resolve_convergence_mode,
+    run_iterations,
+)
+from ._core import (
     RegistrationResult,
     RegistrationSpec,
-    resolve_convergence_mode,
     resolve_iterations,
 )
 from ._space import _conjugate_about

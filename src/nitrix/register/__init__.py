@@ -81,9 +81,8 @@ from ._bbr import (
     bbr_cost,
     bbr_register,
 )
+from ._converge import Convergence, ConvergenceMode
 from ._core import (
-    Convergence,
-    ConvergenceMode,
     RegistrationResult,
     RegistrationSpec,
 )

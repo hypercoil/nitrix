@@ -36,11 +36,8 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..geometry import gaussian_pyramid, rigid_exp
-from ._core import (
-    RegistrationSpec,
-    register_core,
-    resolve_convergence_mode,
-)
+from ._converge import resolve_convergence_mode
+from ._core import RegistrationSpec, register_core
 from ._inverse_compositional import (
     ReferenceLevel,
     ic_reference,

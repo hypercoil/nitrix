@@ -44,7 +44,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import (
     Callable,
-    Literal,
     NamedTuple,
     Optional,
     Sequence,
@@ -64,86 +63,19 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg import gauss_newton, levenberg_marquardt
+from ._converge import (
+    Convergence,
+    ConvergenceMode,
+    resolve_convergence_mode,
+)
 from ._metric import SSD, Metric, pin_metric_ranges
 from ._model import TransformModel
 from ._objective import MetricObjective, Objective
 from ._space import CoordinateSpace, IndexSpace, _Sampler
 
-
-@dataclass(frozen=True)
-class Convergence:
-    """Windowed cost-slope criterion for the ``mode='early_exit'`` iteration.
-
-    The threshold/window pair that parameterises the early-exit ``lax.while_loop``
-    (see :data:`ConvergenceMode`): per level, the loop runs until the cost has
-    plateaued -- a least-squares-line fit over the last ``window`` per-iteration
-    costs whose normalised slope falls below ``threshold`` -- or the level's
-    iteration count (the hard cap) is reached.  It is **inert** under
-    ``mode='fixed'`` (the fixed ``lax.scan``); the two are orthogonal fields
-    (B2), so a spec always carries a concrete :class:`Convergence`, used only
-    when ``mode='early_exit'``.
-
-    Attributes
-    ----------
-    threshold
-        Stop when the windowed normalised cost slope drops below this.
-    window
-        Number of recent costs the slope is fit over (the convergence window).
-
-    Notes
-    -----
-    An early-exit forward is **not** reverse-differentiable (``lax.while_loop``
-    has no reverse rule); for a differentiable registration layer use
-    ``mode='fixed'`` (the ``scan``) or the implicit-function path
-    (``linalg.implicit_least_squares`` / ``implicit_minimize``), whose adjoint is
-    solved at the optimum and is trajectory-independent.
-    """
-
-    threshold: float = 1e-6
-    window: int = 10
-
-
-# The iteration strategy (B2), orthogonal to the :class:`Convergence`
-# parameters: ``'fixed'`` is the reproducible, reverse-differentiable,
-# ``vmap``-batchable ``lax.scan``; ``'early_exit'`` is the windowed-slope
-# ``lax.while_loop`` (single-pair; not reverse-differentiable).  Eligibility is
-# checked in the one ``resolve_convergence_mode`` gate below.
-ConvergenceMode = Literal['fixed', 'early_exit']
-
-
-def resolve_convergence_mode(
-    mode: ConvergenceMode,
-    convergence: Convergence,
-    *,
-    supports_early_exit: bool,
-    path: str,
-) -> Optional[Convergence]:
-    """The single B2 eligibility gate: ``(mode, convergence)`` -> run-time control.
-
-    Returns the concrete :class:`Convergence` to drive an early-exit
-    ``lax.while_loop`` (``mode='early_exit'``), or ``None`` for the fixed
-    ``lax.scan`` (``mode='fixed'`` -- the default, reproducible and
-    reverse-differentiable on every path).  ``mode='early_exit'`` on a path that
-    cannot honour a data-dependent trip count (``supports_early_exit=False`` --
-    the scalar/BFGS forward optimiser is monolithic) raises a loud, actionable
-    error naming ``path`` rather than failing obscurely downstream.  This is the
-    one place the polysemy used to live (three sentinel meanings at three sites);
-    every recipe now routes its mode decision through here.
-    """
-    if mode not in ('fixed', 'early_exit'):
-        raise ValueError(
-            f"mode must be 'fixed' or 'early_exit'; got {mode!r}."
-        )
-    if mode == 'fixed':
-        return None
-    if not supports_early_exit:
-        raise ValueError(
-            f"mode='early_exit' is not supported on {path} -- it cannot honour "
-            "a data-dependent trip count.  Use mode='fixed' (the reproducible "
-            'fixed scan), or the inverse-compositional recipes (IndexSpace + a '
-            'least-squares metric such as SSD), which do.'
-        )
-    return convergence
+# ``Convergence`` / ``ConvergenceMode`` / ``resolve_convergence_mode`` live in
+# ``._converge`` (the iteration-driver module that owns the early-exit machinery,
+# G1); imported above so ``RegistrationSpec`` and the drivers can reference them.
 
 
 @dataclass(frozen=True)
