@@ -709,3 +709,60 @@ def test_conjunction_preserves_spatial_shape():
     stats = jnp.asarray(np.random.default_rng(0).standard_normal((4, 5, 6)))
     assert conjunction(stats).shape == (5, 6)
     assert conjunction_pvalue(jnp.abs(stats)).shape == (5, 6)
+
+
+# ---------------------------------------------------------------------------
+# ER7: permutation_test driver options -- mask / var_smooth / restricted blocks
+# ---------------------------------------------------------------------------
+
+
+def _blob_data(seed=0, H=8, W=8, N=24):
+    rng = np.random.default_rng(seed)
+    data = rng.standard_normal((H, W, N))
+    data[2:5, 2:5, :] += 0.9  # a signal blob
+    X = np.c_[np.ones(N), rng.standard_normal(N)]
+    return jnp.asarray(data), jnp.asarray(X), jnp.asarray([1.0, 0.0])
+
+
+def test_permutation_test_mask_excludes_out_of_mask_voxels():
+    """ER7: out-of-mask voxels do not contribute to (or receive) FWE; restricting
+    the family to the mask only sharpens in-mask FWE p-values (fewer voxels
+    compete for the null maximum)."""
+    data, X, c = _blob_data()
+    mask_np = np.zeros((8, 8), dtype=bool)
+    mask_np[2:5, 2:5] = True
+    kw = dict(design=X, contrast=c, n_perm=200, key=jax.random.PRNGKey(0))
+    base = permutation_test(data, **kw)
+    masked = permutation_test(data, mask=jnp.asarray(mask_np), **kw)
+    pf = np.asarray(masked.p_fwe)
+    # out-of-mask voxels are inert (p_fwe == 1)
+    np.testing.assert_allclose(pf[~mask_np], 1.0, atol=1e-12)
+    # in-mask FWE is no weaker than the whole-volume family
+    assert np.all(pf[mask_np] <= np.asarray(base.p_fwe)[mask_np] + 1e-9)
+
+
+def test_permutation_test_var_smooth_changes_statistic():
+    """ER7: var_smooth replaces the raw t with a variance-smoothed pseudo-t
+    (FSL ``-v``); the statistic map changes but stays finite with valid FWE."""
+    data, X, c = _blob_data()
+    kw = dict(design=X, contrast=c, n_perm=200, key=jax.random.PRNGKey(1))
+    base = permutation_test(data, **kw)
+    smoothed = permutation_test(data, var_smooth=1.0, **kw)
+    assert not np.allclose(np.asarray(base.stat), np.asarray(smoothed.stat))
+    assert np.all(np.isfinite(np.asarray(smoothed.stat)))
+    pf = np.asarray(smoothed.p_fwe)
+    assert pf.min() >= 1.0 / 200 - 1e-9 and pf.max() <= 1.0 + 1e-9
+
+
+def test_permutation_test_restricted_blocks_run_and_are_valid():
+    """ER7: exchangeability blocks restrict the sign-flip null to within-block
+    relabellings; the driver plumbs them through to valid FWE p-values."""
+    data, X, c = _blob_data()
+    blocks = jnp.asarray(np.repeat(np.arange(12), 2))  # paired blocks
+    res = permutation_test(
+        data, design=X, contrast=c, n_perm=200, key=jax.random.PRNGKey(2),
+        exchange='sign', blocks=blocks,
+    )
+    pf = np.asarray(res.p_fwe)
+    assert pf.min() >= 1.0 / 200 - 1e-9 and pf.max() <= 1.0 + 1e-9
+    assert np.all(np.isfinite(pf))

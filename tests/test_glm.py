@@ -250,6 +250,36 @@ def test_tweedie_power_validation_and_registry():
             tweedie(bad)
 
 
+@pytest.mark.parametrize(
+    'family, est_dispersion',
+    [(GAUSSIAN, True), (GAMMA, True), ('tweedie', True), (POISSON, False)],
+)
+def test_glm_aic_counts_estimated_dispersion(family, est_dispersion):
+    """ER7: AIC is self-consistent with log_likelihood (aic = -2 llf + 2 k), and
+    an estimated-dispersion family (Gaussian / Gamma / Tweedie) counts the
+    dispersion as a free parameter (k = p + 1), while a fixed-dispersion family
+    (Poisson / Binomial) does not (k = p). statsmodels' GLM AIC uses k = p for
+    all families; nitrix additionally counts the estimated scale -- pin that
+    convention here so it cannot silently drift."""
+    rng = np.random.default_rng(7)
+    X = _design(rng, N=160)
+    p = X.shape[1]
+    mu = np.exp(X @ np.array([0.3, 0.2, -0.2]))
+    if family is GAUSSIAN:
+        y = X @ np.array([1.0, 0.5, -0.3]) + rng.standard_normal(160)
+    elif family is POISSON:
+        y = rng.poisson(mu).astype(float)
+    else:  # GAMMA / tweedie
+        y = rng.gamma(5.0, mu / 5.0)
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=family, n_iter=60)
+    k = p + (1 if est_dispersion else 0)
+    np.testing.assert_allclose(
+        float(aic(res)[0]),
+        -2.0 * float(log_likelihood(res)[0]) + 2.0 * k,
+        rtol=1e-10,
+    )
+
+
 def test_family_registry_resolves_gamma_and_negbinomial():
     """String names resolve to the built-ins; ``negbinomial(alpha)`` builds a
     custom-dispersion family; a non-positive alpha is rejected."""
