@@ -245,7 +245,7 @@ Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 > tiny-`N`; hgp explicit `bounds=` / `n_levels=`; GLM AIC parameter-count convention
 > (estimated-dispersion counts the scale); `permutation_test` `mask` / `var_smooth` /
 > restricted exchangeability `blocks`. (HC0–3 + WLS were already anchored.)
-> **Docstring polish (`<pending>`):** GPResult mode-conditional-fields orientation note;
+> **Docstring polish (`26fabb6`):** GPResult mode-conditional-fields orientation note;
 > `select=` documented as the sole (forward-compat) mode; removed the duplicate hgp
 > `n_levels` docstring entry; `linear_distance` matrix-`theta` symmetry caveat. (Investigated
 > and intentionally left: `n_search`/`n_inner` are distinct concepts in distinct modules, not
