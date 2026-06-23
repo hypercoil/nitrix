@@ -377,17 +377,22 @@ gross-mem probe (no full `(l, d_state)` trajectory stored on the fused path).
 > `exp(±logP)` stays in fp32 range, carrying the `(n,)` state across chunks via
 > whole-tile sums. Grid over `(batch, channel)`; the `(l, d, n)` trajectory
 > never hits HBM (gross-mem probe: fused temp ≪ reference's `(l,d,n)`).
-> `custom_vjp` forward = fused kernel, backward = reference recompute (correct
-> `dx/dΔ/dA/dB/dC/dD`, all ranges). Validated on L4 (realistic Mamba: small Δ,
-> `A=−(1..n)`): fwd `pallas≈jax` ≤ 1.7e-7; grads match reference; dispatch +
-> loud fallback (non-pow2 `n`, non-divisible / non-pow2-chunk length, float64).
-> **fp32 dynamic-range limit** (documented): within-chunk `|A·cumsum(Δ)| < ~80`
-> — fine for the small-Δ Mamba regime; extreme ranges fall back to
-> `backend='jax'`. **Remaining (P1b backward):** the fully-fused recompute-adjoint
-> backward (reverse chunked cumsum + in-kernel `dA/dB/dC/dD` via
-> `plgpu.atomic_add` with zero-init aliasing) for the *training*-memory win —
-> math fully derived (the forward already emits the per-chunk start states it
-> needs); the reference backward holds the correctness budget meanwhile.
+> `custom_vjp` forward = fused kernel; **backward = fully-fused recompute-adjoint**
+> (reverse chunked cumsum `a_t = dy_t C_t + dA_{t+1}a_{t+1}` via
+> `rev_cumsum(z)=sum(z)−cumsum(z)+z`; `h_{t-1}` recovered as
+> `(h_t−Δ B x)/exp(Δ A)`; `dx`/`dΔ` direct per-channel writes; grid-shared
+> `dB`/`dC` via `plgpu.atomic_add` with zero-init `input_output_aliases`;
+> `dA`/`dD` as per-program partials reduced in JAX) — so the `(l,d,n)` trajectory
+> hits HBM in **neither** pass (the training-memory win). Validated on L4
+> (realistic Mamba: small Δ, `A=−(1..n)`): fwd `pallas≈jax` ≤ 1.7e-7; grad parity
+> vs autodiff reference ~1e-7 for `dx/dΔ/dA/dB/dC/dD` (with-D / no-D / no-batch);
+> fwd + bwd gross-mem probes confirm no `(l,d,n)` temp (bwd 11 KB vs ref 135 KB);
+> dispatch + loud fallback (non-pow2 `n`, non-divisible / non-pow2-chunk length,
+> float64). **fp32 dynamic-range limit** (documented, both passes): within-chunk
+> `|A·cumsum(Δ)| < ~80` — fine for the small-Δ Mamba regime; extreme ranges fall
+> back to `backend='jax'`. **P1 COMPLETE** (reference + fused forward + fused
+> backward). Remaining suite-wide: P3 fused norms (gated on a perf signal);
+> at-scale wall-clock-vs-`mamba-ssm` is the perf suite's job.
 
 ### 7.3 `nitrix.nn.norm.{layer_norm, group_norm, instance_norm}` — P3, CONVENIENCE (deferred)
 
