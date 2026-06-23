@@ -1,0 +1,862 @@
+---
+title: "The operator algebra: sparse storage and semirings"
+---
+
+::: {.callout-tldr title="Fast path"}
+Almost every operator in this unit is the same move: **gather a few neighbours and
+reduce them**. A vertex talks to its 1-ring; a voxel talks to its window. Two ideas
+carry the whole substrate.
+
+- **ELL** is how we *store* the neighbour lists: two dense `(n, k_max)` arrays
+  (`values` + `indices`), short rows padded with a no-op so every row is the same
+  width — a fixed rectangular loop that XLA loves.
+- A **semiring** is how we *choose the arithmetic*: a pair $(\oplus, \otimes)$ of a
+  reduce and a combine. The same gather becomes **diffusion** under REAL
+  $(+,\times)$, **dilation** under max-plus $(\max,+)$, and a **distance transform**
+  under min-plus $(\min,+)$.
+
+One gather, many algebras. `apply_operator(op, x, semiring=…)` is the seam that
+hides whether `op` is a flat `ELL` (the icosphere) or a bucketed `SectionedELL`
+(a real cortex), so the same algorithm code runs on both.
+:::
+
+This page is the **substrate**. The cotangent Laplacian
+([Laplace–Beltrami](laplace-beltrami.qmd)), the surface spectrum
+([spectral](spectral.qmd)), curvature ([curvature](curvature.qmd)), and the
+volumetric morphology and distance transforms ([volumes](volumes.qmd)) are all,
+underneath, the same two arrays and the same gather-and-reduce — only the algebra
+and the neighbour map change. Learn the machine here and you will recognise it on
+every later page. It assumes the [foundations](foundations.qmd) page: the
+discretise-then-converge posture, and the **DIFF-JAX / HOST-CTOR / HOST-QA**
+execution classes (and the rule *never call a HOST op inside a jitted loop*) that we
+tag throughout.
+
+## A mesh or a grid is a sparse neighbour map {#sec-neighbours}
+
+Here is the motivating question, the one we return to. You have a cortical surface —
+a triangle mesh with a few hundred thousand vertices — and a scalar painted on it
+(a thickness map, a task contrast, a curvature estimate). You want to **smooth it
+along the surface**: replace each vertex's value with a weighted average of its
+neighbours. That is one operation. But the *same* mesh, with the *same* neighbour
+structure, also has to support: growing a labelled region by one ring (a
+morphological dilation), finding the graph distance from a seed region (a
+shortest-path / distance transform), and pooling features to a coarser mesh. Four
+different geometric jobs, one neighbour map.
+
+What does "neighbour map" mean as linear algebra? An operator that mixes each
+vertex with its neighbours is a **matrix** $A$, where $A_{ij} \ne 0$ exactly when
+$j$ is a neighbour of $i$, and the matvec $(Ax)_i = \sum_j A_{ij} x_j$ does the
+mixing. The obvious thing is to store $A$ as a dense $n \times n$ matrix and call
+`jnp.matmul`. That fails immediately: a cortical mesh has $n \approx 3\times 10^5$
+vertices, so a dense $A$ is $\sim 9\times 10^{10}$ entries — hundreds of gigabytes —
+and almost all of them are zero, because each vertex has only **five or six**
+neighbours. The cure is to store only the non-zeros. That is what *sparse* means,
+and the rest of this section is about choosing the right sparse layout for the
+shapes geometry actually produces.
+
+The crucial fact about geometric adjacency is that it is **sparse but
+structured**: not a random scatter of non-zeros, but *roughly the same small number
+per row*. A well-meshed surface has valence clustered tightly around 6; a
+3×3×3 voxel window has exactly 27 taps. This near-uniform row length is the property
+the storage format will exploit.
+
+## ELL storage {#sec-ell}
+
+Start from the simplest sparse idea a reader would invent: for each row $i$, keep a
+**list of its neighbours' column indices** and a matching **list of the weights**.
+Row 4 of our hub example might be `indices = [3, 5, 6, 7, 1, 2]`,
+`values = [w, w, w, w, w, w]`. This is a *ragged* structure — different rows have
+different lengths — and ragged arrays are exactly what XLA cannot compile to a
+fast kernel: every shape must be known and rectangular at trace time.
+
+The fix is one idea: **pad every row to a common width** $k_{\max} = \max_i
+\deg(i)$, and store the result as two ordinary dense arrays. This is the **ELL**
+format (the name is historical, from ELLPACK). In `nitrix` it is the
+[`ELL`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell.py)
+dataclass, with exactly the fields you would guess:
+
+- `values: (m, k_max)` — the non-pad weights, one row per output row;
+- `indices: (m, k_max)` — the column each weight multiplies;
+- `n_cols: int` — the implicit $n$-dimension (the outer dim of the operand the ELL
+  will contract with);
+- `identity` — the scalar the pad positions of `values` were filled with.
+
+A row with fewer than $k_{\max}$ neighbours has its trailing slots **padded**, and
+the padding is the whole trick. Two things must be true of a pad slot for it to be a
+*true no-op* under the reduction:
+
+1. its **value** is the **semiring identity** — the element that the reduce leaves
+   untouched ($0$ for ordinary sums, so a padded term contributes nothing); and
+2. its **index** is an **in-range sentinel** — any valid row of the operand — so the
+   `gather` that fetches it never reads out of bounds. The gathered value is
+   multiplied by the identity and discarded, so *which* in-range row it points at
+   does not matter, only that it is in range.
+
+`ELL` records the identity it used so downstream kernels know the convention. The
+construction helper
+[`ell_pad`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell.py)`(values,
+indices, *, k_max, n_cols, identity=0.0, pad_index=0)` does exactly this: it fills
+`values[i, k_i:]` with `identity` and `indices[i, k_i:]` with `pad_index` (which it
+checks lies in `[0, n_cols)`), returning the padded `ELL`. **(HOST-CTOR** — the
+ragged input has a data-dependent length; you call it once to build the operator.)
+
+### The matvec is a fixed rectangular loop
+
+Why go to this trouble? Because the matvec is now a loop with **no ragged shapes**.
+The output for row $i$ is
+
+$$
+C[i, j] \;=\; \bigoplus_{p=0}^{k_{\max}-1} \Big(\, \text{values}[i, p] \;\otimes\; B[\text{indices}[i, p],\, j] \,\Big),
+$$ {#eq-operators-ellmatvec}
+
+where $p$ runs over the $k_{\max}$ slots of the row, $B$ is the dense operand we are
+contracting against (a per-vertex field, shape `(n_cols, ncol)`), and
+$(\oplus, \otimes)$ is the algebra — for now read them as $(+, \times)$. Naming each
+piece: $\text{indices}[i, p]$ says *which* neighbour, $\text{values}[i, p]$ says
+*how much*, the gather $B[\text{indices}[i, p]]$ fetches the neighbour's value, the
+combine $\otimes$ weights it, and the reduce $\oplus$ folds the $k_{\max}$ terms into
+one. The cost is a fixed $O(n \cdot k_{\max})$ — one perfectly rectangular pass, no
+dynamic shapes, ideal for XLA. This is the
+[`reference_semiring_ell_matmul`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/_reference.py)
+kernel, which walks the $k_{\max}$ axis with `lax.fori_loop` and the algebra's
+combine/reduce; we meet its public wrapper in [the apply seam](#sec-apply).
+
+### Why ELL, and not CSR or BCOO
+
+A linear-algebra reader will know **CSR** (compressed sparse row: a flat values
+array plus per-row pointers) and may know JAX's **BCOO** (batched coordinate
+format). Both are more *general* than ELL — they store genuinely ragged patterns
+with no padding waste. ELL deliberately trades that generality for a property they
+lack: **a single static shape**. CSR's per-row pointer offsets make the inner loop
+length data-dependent, which forces either a scan with dynamic bounds or a
+segment-sum — both awkward under `jit` and hard to keep differentiable with a clean
+custom gradient. ELL's two fixed `(n, k_max)` arrays are ordinary dense tensors,
+nothing more; they flow through `jit` / `vmap` / `grad` with no special handling. The design bet, recorded
+in
+[`sparse-specialisations.md`](https://github.com/hypercoil/nitrix/blob/main/docs/design/sparse-specialisations.md)
+and [`ell-on-triton.md`](https://github.com/hypercoil/nitrix/blob/main/docs/design/ell-on-triton.md),
+is a **thin dense pair, no `jax.experimental.sparse` dependency anywhere** — because
+geometric adjacency is *structured* sparse (near-uniform degree), the padding waste
+is small and the compile-and-differentiate story is clean. `ELL` is registered as a
+JAX **pytree** (children `values` / `indices`, static aux `n_cols` / `identity`), so
+it is itself a first-class operand: you can `jit` a function that takes an `ELL`, and
+`grad` through it returns an `ELL` cotangent with `values` populated and a zero
+(`float0`) `indices` cotangent — consistent with treating indices as integer
+topology you never differentiate.
+
+### The padding cliff, and SectionedELL
+
+The bet has a failure mode, and it is worth seeing clearly. ELL pads *every* row to
+the **global** $k_{\max}$. That is nearly free when degrees are uniform
+($k_{\max} \approx \text{median degree}$, as on the icosphere). It becomes
+**pathological** when one row is much longer than the rest: a single high-valence
+hub, or a distance-thresholded neighbourhood in an irregular point cloud where
+$k_{\max}$ can be 10–100× the median. Then most of the `(n, k_max)` grid is
+identity padding — memory and FLOPs spent on no-ops. This is the **padding cliff**.
+@fig-operators-ell shows it on a tiny graph: a path of eight vertices with one hub,
+where the flat ELL wastes more than half its cells.
+
+```{python}
+#| label: fig-operators-ell
+#| fig-cap: "Left: a small irregular adjacency stored as a flat ELL. Every row is padded to the global k_max=6 set by the single hub vertex; real cells (blue) carry a neighbour index, padded cells (grey, 'id') carry the semiring identity and an in-range sentinel index. More than half the grid is wasted padding — the padding cliff. Right: the same adjacency as a SectionedELL — rows are bucketed by ceil(log2(degree)), each bucket gets its own small k_max, and the total stored cells drop sharply."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+
+rng = np.random.default_rng(0)
+
+# --- A small irregular adjacency on 8 vertices (a line with one "hub") -------
+# Neighbour lists of varying length: most rows are short, one vertex is a hub.
+adj = {
+    0: [1],
+    1: [0, 2],
+    2: [1, 3],
+    3: [2, 4],
+    4: [3, 5, 6, 7, 1, 2],   # the hub: high valence
+    5: [4],
+    6: [4],
+    7: [4],
+}
+n = len(adj)
+k_max = max(len(v) for v in adj.values())  # global padding width
+
+# Build the flat-ELL indices/values grids; mark which cells are real vs pad.
+ell_idx = np.full((n, k_max), -1, dtype=int)   # -1 marks pad here for drawing
+real = np.zeros((n, k_max), dtype=bool)
+for i in range(n):
+    nb = adj[i]
+    ell_idx[i, : len(nb)] = nb
+    real[i, : len(nb)] = True
+
+fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
+
+# ---- Left: flat ELL, padding cliff ----
+A = ax[0]
+for i in range(n):
+    for p in range(k_max):
+        is_real = real[i, p]
+        color = "#9ecae1" if is_real else "#f0f0f0"
+        A.add_patch(Rectangle((p, n - 1 - i), 1, 1, facecolor=color,
+                              edgecolor="0.4", lw=0.8))
+        txt = str(ell_idx[i, p]) if is_real else "id"
+        A.text(p + 0.5, n - 1 - i + 0.5, txt, ha="center", va="center",
+               fontsize=9, color=("k" if is_real else "0.6"))
+A.set_xlim(0, k_max); A.set_ylim(0, n)
+A.set_xticks(np.arange(k_max) + 0.5); A.set_xticklabels(range(k_max))
+A.set_yticks(np.arange(n) + 0.5); A.set_yticklabels(range(n - 1, -1, -1))
+A.set_xlabel("slot p  (0 .. k_max-1)"); A.set_ylabel("row i (vertex)")
+n_real = real.sum(); n_pad = real.size - n_real
+A.set_title(f"flat ELL: (n, k_max)=({n},{k_max})\n"
+            f"{n_real} real cells, {n_pad} identity-padded "
+            f"({100*n_pad/real.size:.0f}% wasted)")
+A.set_aspect("equal")
+
+# ---- Right: SectionedELL, rows bucketed by ceil(log2(degree)) ----
+def bucket(d):
+    return 0 if d <= 1 else (d - 1).bit_length()
+
+buckets = {}
+for i in range(n):
+    b = bucket(len(adj[i]))
+    buckets.setdefault(b, []).append(i)
+
+B = ax[1]
+y = 0
+total_sectioned = 0
+palette = ["#a1d99b", "#fdae6b", "#bcbddc", "#fa9fb5"]
+for b in sorted(buckets):
+    rows = buckets[b]
+    bk = 1 if b == 0 else 2 ** b           # bucket-local k_max
+    bk = max(bk, max(len(adj[i]) for i in rows))
+    total_sectioned += len(rows) * bk
+    for r, i in enumerate(rows):
+        nb = adj[i]
+        for p in range(bk):
+            is_real = p < len(nb)
+            color = palette[b % len(palette)] if is_real else "#f0f0f0"
+            B.add_patch(Rectangle((p, y), 1, 1, facecolor=color,
+                                  edgecolor="0.4", lw=0.8))
+            txt = str(nb[p]) if is_real else "id"
+            B.text(p + 0.5, y + 0.5, txt, ha="center", va="center",
+                   fontsize=9, color=("k" if is_real else "0.6"))
+        B.text(-0.4, y + 0.5, f"v{i}", ha="right", va="center", fontsize=8)
+        y += 1
+    B.text(-1.7, y - len(rows) / 2, f"bucket {b}\nk={bk}", ha="center",
+           va="center", fontsize=8, color="0.3")
+    y += 0.4
+
+B.set_xlim(-2.2, k_max); B.set_ylim(0, y)
+B.set_xticks(np.arange(k_max) + 0.5); B.set_xticklabels(range(k_max))
+B.set_yticks([])
+B.set_xlabel("slot p (bucket-local)")
+B.set_title(f"SectionedELL: rows bucketed by degree\n"
+            f"{total_sectioned} stored cells vs {real.size} flat "
+            f"({100*total_sectioned/real.size:.0f}% of flat)")
+B.set_aspect("equal")
+
+fig.suptitle("ELL stores neighbour lists as a dense (n, k_max) pair; "
+             "SectionedELL buckets rows by degree to dodge the padding cliff",
+             y=1.02, fontsize=11)
+fig.tight_layout()
+plt.show()
+```
+
+The cure is one idea on top of ELL: **bucket the rows by degree**, store one small
+ELL per bucket, and scatter the results back. That is
+[`SectionedELL`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell_sectioned.py).
+Its bucketing is `ceil(log2(degree))`: degree 1 → bucket 0 ($k_{\max}=1$), degree 2
+→ bucket 1 ($k=2$), degrees 3–4 → bucket 2 ($k=4$), degrees 5–8 → bucket 3
+($k=8$), and so on, so a bucket's local $k_{\max}$ is the power of two that bounds
+its rows' degrees. Memory is now dominated by the *largest bucket*, not by the
+worst-case row. The container holds `sections` (one `ELL` each), `row_groups` (the
+original row indices per bucket, kept as host NumPy so they can serve as static
+scatter indices), and the same `n_rows` / `n_cols` / `identity` scalars; a
+`total_storage` property lets you check the win against a flat ELL. You build one
+with
+[`sectioned_ell_from_ragged`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell_sectioned.py)`(values_per_row,
+indices_per_row, *, n_cols, identity=0.0, pad_index=0, bucket_by=None)` from ragged
+per-row lists **(HOST-CTOR** — the per-bucket shapes are data-dependent). The right
+half of @fig-operators-ell shows the same adjacency sectioned: the hub lands alone
+in a wide bucket; everyone else sits in narrow ones, and the total stored cells
+fall. This page gives you the *idea*; the storage economics, alignment, and tiling
+live in [performance](performance.qmd#sec-storage).
+
+### Construction, masking, and self-loops
+
+A few more `ELL` helpers round out the storage surface; all are **HOST-CTOR or
+DIFF-JAX** as noted.
+
+- [`ell_from_dense`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell.py)`(dense,
+  *, k_max=None, threshold=0.0, identity=0.0, symmetrize=False)` builds an ELL from a
+  dense matrix by keeping, per row, the largest-magnitude $k_{\max}$ entries above
+  `threshold` **(HOST-CTOR**, NumPy on the host — a convenience for tests and small
+  workloads). One sharp edge worth knowing: top-$k$-per-row selection is **not
+  symmetry-preserving** — row $i$ may keep edge $(i,j)$ while row $j$ drops $(j,i)$ —
+  so the stored pattern is generally asymmetric even for a symmetric input. That
+  matters for the spectral consumers whose iterative solvers assume a symmetric
+  operator. Two remedies: pass `symmetrize=True` to store an exactly-symmetric kNN
+  graph $\tfrac12(S + S^\top)$ over the closure $P \cup P^\top$ (but beware: a hub
+  selected by every row can densify that row to the full $n$); or use the
+  storage-free **matvec** symmetrisation $\tfrac12(Ax + A^\top x)$, which never
+  materialises the closure — that is what `semiring_ell_rmatvec` (below) is for.
+- [`ell_to_dense`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell.py)`(ell)`
+  scatters an ELL back to a dense `(m, n_cols)` matrix via `scatter_add`
+  **(DIFF-JAX)** — useful in tests and fallback paths. Because the scatter is
+  additive, round-trip correctness holds for `REAL`; do not rely on it under a
+  non-additive algebra.
+- [`ell_mask`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell.py)`(ell,
+  valid, *, semiring=…)` zeroes out edges that reach a masked vertex/voxel
+  **(DIFF-JAX)**. This is the *incomplete-geometry* helper: the cortical **medial
+  wall** is excluded from analysis, and volumetric work is restricted to a
+  grey-matter mask. The subtlety the docstring is careful about: a masked edge is a
+  true no-op only if its value is the algebra's **$\otimes$-annihilator** — the
+  element $z$ with $z \otimes b$ equal to the additive identity for *every* $b$ —
+  which is read for you from `semiring.annihilator`. For most algebras the
+  annihilator coincides with the additive identity ($0$ for REAL, $-\infty$ for LOG
+  and max-plus, $+\infty$ for min-plus), but `EUCLIDEAN` is the exception: its
+  combine $(a-b)^2$ has *no* annihilator, so masking it by a value is impossible and
+  `ell_mask(semiring=EUCLIDEAN)` raises — you must drop the columns structurally
+  instead. (Prefer the `semiring=` form; the bare `identity=` form is deprecated
+  precisely because it invites the identity-vs-annihilator confusion.)
+- [`ell_add_self_loops`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell.py)`(ell,
+  edge_attr=None, *, fill='mean', self_value=1.0)` appends an $(i,i)$ edge to every
+  row, growing $k_{\max}$ by one **(DIFF-JAX)**. Self-loops are a
+  graph-convolution construct, **not** part of geometric mesh adjacency
+  (`mesh_k_ring_adjacency` is self-loop-free): GAT attends each vertex to itself, and
+  the GCN renormalisation trick adds $\hat A = A + I$. The synthesised self-edge's
+  attribute is derived from the row's existing valid edges (`'mean'`, `'add'`, or
+  `'zero'`), with pad slots excluded via `values != identity`.
+
+## The semiring abstraction {#sec-semiring}
+
+Now the heart of the page — the idea that organises the whole unit. Look again at
+@eq-operators-ellmatvec. Two operations appear: a **combine** $\otimes$ that weights
+a gathered neighbour, and a **reduce** $\oplus$ that folds the weighted terms into
+one number. In ordinary sparse matvec these are *fixed* — $\otimes$ is
+multiplication, $\oplus$ is addition. The insight is to make them **parameters**.
+
+A **semiring** is exactly that pair, $(\oplus, \otimes)$, equipped with an identity
+for $\oplus$ (the value a padded slot must carry to vanish under the reduce).
+Crucially, the *kernel* in @eq-operators-ellmatvec — the gather over the neighbour
+list, the rectangular $k_{\max}$ loop — does **not depend on which pair you choose**.
+Swap the algebra, keep the kernel, and the same neighbour map computes a different
+geometric quantity. This is the unit's organising thesis: **change the algebra, not
+the kernel.**
+
+`nitrix` makes the algebra a first-class object. The
+[`Semiring`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/_types.py)
+dataclass bundles a **`monoid`** (the reduce, with `init` / `update` / `merge` /
+`finalize` — the four hooks a streaming reduction needs), a **`binary_op`**
+(the combine, a `Semigroup` with a single `combine` method), an **`identity`**, an
+**`annihilator`** (for `ell_mask`), a `name`, and the differentiation rules
+(`matmul_vjp`, `ell_matmul_vjp`). There are two flavours: the relaxed `Semiring`
+makes no associativity promise (fine for the streaming kernels, which fix the
+reduction order), and `StrictSemiring` additionally asserts $\otimes$ associates and
+distributes — the contract a tree/cross-device reduction needs. The split is a
+*signed declaration*, not a runtime check: `as_strict()` / `as_relaxed()` only
+re-tag.
+
+### The built-in algebras
+
+`nitrix.semiring` ships six pre-built algebras
+([`algebras.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/algebras.py)),
+and the table is worth holding in your head, because each row is a different
+operator on the *same* mesh or grid:
+
+| Algebra | $\otimes$ (combine) | $\oplus$ (reduce) | identity | geometric meaning |
+|---|---|---|---|---|
+| `REAL` | $a \cdot b$ | $\sum$ | $0$ | weighted average, **diffusion / smoothing** |
+| `TROPICAL_MAX_PLUS` | $a + b$ | $\max$ | $-\infty$ | morphological **dilation** / max-pool |
+| `TROPICAL_MIN_PLUS` | $a + b$ | $\min$ | $+\infty$ | **erosion**, shortest path, **distance transform** |
+| `LOG` | $a + b$ | $\operatorname{logsumexp}$ | $-\infty$ | soft / marginal aggregation |
+| `BOOLEAN` | $a \wedge b$ | $\vee$ | `False` | reachability / connectivity |
+| `EUCLIDEAN` | $(a-b)^2$ | $\sum$ then $\sqrt{\cdot}$ | $0$ | $\ell_2$ neighbour distance |
+
+Read the first three rows as the spine of the unit. **REAL** $(+, \times)$ is the
+ordinary sparse matvec: one step of diffusion, the weighted average behind mesh
+smoothing and the cotangent-Laplacian apply. **max-plus** $(\max, +)$ — "combine by
+adding the structuring weight, reduce by taking the max" — is morphological
+**dilation**; it powers the grid morphology and max-pooling in
+[volumes](volumes.qmd#sec-morphology). **min-plus** $(\min, +)$ is its mirror:
+erosion, and — iterated to a fixed point — the **distance transform** and
+single-source shortest path in [volumes](volumes.qmd#sec-edt). These two are the
+**tropical** semirings, the algebra of dynamic programming and shortest paths.
+
+The other three fill out the surface. **LOG** replaces the hard $\max$ with a
+soft `logsumexp`, computed with an online, NaN-safe $(\text{running max},
+\sum e^{\,\cdot})$ state — the same numerically-stable trick as flash-attention
+softmax — for marginal / soft-min aggregations. **BOOLEAN** $(\wedge, \vee)$ is pure
+connectivity: is there *any* edge carrying signal? **EUCLIDEAN** is the odd one out
+and a useful teaching case: its combine $(a-b)^2$ is not associative and it applies
+a non-monoidal $\sqrt{\cdot}$ projection only at the end (which is why it is a
+*relaxed* `Semiring`, not strict), and it is the one algebra with **no annihilator**
+— there is no $z$ for which $(z-b)^2$ is $0$ for every $b$ — so it cannot be
+value-masked. You can also compose your own algebra from any `Monoid` and
+`Semigroup`; the kernels do not care whether it is built-in.
+
+@fig-operators-semiring runs one ELL operator under the three spine algebras on a
+toy 1-D signal and gets three different shapes out of it — proof that the kernel is
+shared and only the arithmetic changed.
+
+```{python}
+#| label: fig-operators-semiring
+#| fig-cap: "One ELL operator, three semirings, one input signal. The path-graph adjacency and the gather-and-reduce loop are identical across panels; only (reduce, combine) changes. REAL (+,×) with row-normalised weights gives a weighted average (a diffusion/smoothing step). max-plus (max,+) with a flat structuring element takes the max over each window (grayscale dilation — the bump widens and the notch fills). min-plus (min,+) takes the min (erosion — the bump shrinks)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# --- The SAME ELL operator, three algebras ----------------------------------
+# A path graph on 11 vertices: each interior vertex neighbours i-1, i, i+1.
+# We store it as a fixed (n, k_max=3) ELL: indices = neighbour ids, values
+# = per-edge weights. Pad the two endpoints' missing slot with the algebra
+# identity at matvec time (here all rows already have 3 slots via self-clamp).
+n = 11
+idx = np.zeros((n, 3), dtype=int)
+for i in range(n):
+    idx[i] = [max(i - 1, 0), i, min(i + 1, n - 1)]
+
+# A toy per-vertex signal: a single bump plus a notch.
+B = np.zeros(n)
+B[3:6] = 1.0
+B[7] = 0.4
+
+def ell_matmul(values, indices, b, combine, reduce_, identity):
+    # C[i] = reduce_p ( values[i,p] combine b[indices[i,p]] )
+    out = np.full(n, identity, dtype=float)
+    for i in range(n):
+        acc = identity
+        for p in range(indices.shape[1]):
+            acc = reduce_(acc, combine(values[i, p], b[indices[i, p]]))
+        out[i] = acc
+    return out
+
+# REAL (+, x): a row-normalised average -> one diffusion / smoothing step.
+val_real = np.full((n, 3), 1.0 / 3.0)
+out_real = ell_matmul(val_real, idx, B,
+                      combine=lambda v, x: v * x,
+                      reduce_=lambda a, b: a + b, identity=0.0)
+
+# max-plus (max, +): a flat structuring element -> grayscale DILATION.
+val_struct = np.zeros((n, 3))  # 0 = additive identity for the (+) combine
+out_max = ell_matmul(val_struct, idx, B,
+                     combine=lambda v, x: v + x,
+                     reduce_=lambda a, b: max(a, b), identity=-np.inf)
+
+# min-plus (min, +): same structuring element -> grayscale EROSION.
+out_min = ell_matmul(val_struct, idx, B,
+                     combine=lambda v, x: v + x,
+                     reduce_=lambda a, b: min(a, b), identity=+np.inf)
+
+x = np.arange(n)
+fig, ax = plt.subplots(1, 3, figsize=(13, 3.8), sharey=True)
+for a in ax:
+    a.step(x, B, where="mid", color="0.6", lw=1.5, label="input $B$")
+    a.set_xlabel("vertex i"); a.set_ylim(-0.15, 1.25)
+    a.grid(alpha=0.25)
+
+ax[0].step(x, out_real, where="mid", color="C0", lw=2.4,
+           label="REAL $(+,\\times)$")
+ax[0].set_title("REAL: weighted average\n(diffusion / smoothing)")
+ax[0].set_ylabel("value"); ax[0].legend(loc="upper right", fontsize=8)
+
+ax[1].step(x, out_max, where="mid", color="C3", lw=2.4,
+           label="max-plus $(\\max,+)$")
+ax[1].set_title("max-plus: max over window\n(dilation)")
+ax[1].legend(loc="upper right", fontsize=8)
+
+ax[2].step(x, out_min, where="mid", color="C2", lw=2.4,
+           label="min-plus $(\\min,+)$")
+ax[2].set_title("min-plus: min over window\n(erosion)")
+ax[2].legend(loc="upper right", fontsize=8)
+
+fig.suptitle("One ELL operator, three semirings: swap $(\\oplus,\\otimes)$, "
+             "change the geometry", y=1.03)
+fig.tight_layout()
+plt.show()
+```
+
+### The kernels that consume an algebra
+
+Two public reductions take a `semiring=` argument and run @eq-operators-ellmatvec
+(or its dense sibling). Both are **DIFF-JAX**.
+
+- [`semiring_ell_matmul`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/ell.py)`(values,
+  indices, B, *, semiring=REAL, n_cols=None, backend='auto')` is the load-bearing
+  kernel of the unit — the ELL gather-and-reduce of @eq-operators-ellmatvec. It is a
+  `jax.custom_vjp` whose backward routes to the algebra's `ell_matmul_vjp`; leading
+  axes broadcast via `vmap`. The `backend` selects `'jax'` (the always-available
+  path) or `'pallas-cuda'` (an opt-in Triton kernel that falls back to JAX, with one
+  warning, when it cannot tile a shape — see
+  [`ell-on-triton.md`](https://github.com/hypercoil/nitrix/blob/main/docs/design/ell-on-triton.md)).
+- [`semiring_matmul`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/matmul.py)`(A,
+  B, *, semiring=REAL, backend='auto')` is the *dense* analogue: $C[i,j] =
+  \bigoplus_k (A[i,k] \otimes B[k,j])$ for small/dense operands. (For `REAL` on real
+  inputs it equals `A @ B`; call `jnp.matmul` directly there. `nitrix`'s advantage is
+  the *other* algebras.) Both have pure-JAX reference cores
+  ([`_reference.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/_reference.py))
+  that are the correctness floor every accelerated kernel is checked against — the
+  **validation-by-reference posture** of the [foundations](foundations.qmd#sec-validation)
+  page: agreement with the reference within tolerance, not bit-parity across
+  backends.
+
+### The transpose direction, and differentiability
+
+[`semiring_ell_rmatvec`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/ell.py)`(values,
+indices, X, *, semiring=REAL, n_cols)` is the **adjoint** $Y = A^\top X$
+**(DIFF-JAX)**. Where the matvec *gathers* — each output row pulls from its
+neighbours — the rmatvec *scatters*: each row's contribution is added into the
+columns it points at. It is **REAL-only**, because the additive scatter needs linear
+structure: composing the two gives the **storage-free symmetric-part matvec**
+$\tfrac12(Ax + A^\top x)$ that the spectral solvers use when an adjacency's top-$k$
+construction (e.g. `ell_from_dense`) did not preserve symmetry. A non-additive
+algebra has no meaningful "average of $A$ and $A^\top$", so any other `semiring`
+raises.
+
+On differentiability: every built-in algebra carries a hand-derived
+`jax.custom_vjp`, so `jax.grad` / `jacrev` over `semiring_ell_matmul` returns
+finite-difference-checked gradients with no further setup. The `indices` are integer
+topology and take a zero (`float0`) cotangent — you differentiate the **values** and
+the operand `B`, never the indices. The tropical algebras are subtle: the $\max$ /
+$\min$ reduce is non-smooth, so their backward is the **subgradient** — a one-hot
+gather routing the cotangent to the arg-max / arg-min neighbour (a single winner
+takes the gradient). LOG's backward is softmax-weighted; EUCLIDEAN's uses a
+normalised-difference rule with a guard. The depth of these rules — why the tropical
+subgradient is the right thing, how the LOG online state differentiates — lives in
+[solvers](solvers.qmd#sec-kernels); here it is enough to know the gradients are real
+and checked.
+
+### Functional edges: messages, not just stored weights
+
+The kernels above reduce **stored** edge values. Two more public functions reduce
+**computed** edge messages — the graph-neural-network pattern — and both live in
+[`ell_edge.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/ell_edge.py).
+
+- [`semiring_ell_edge_aggregate`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/ell_edge.py)`(edge_fn,
+  ell, x, *, semiring=REAL, edge_attr=None)` **(DIFF-JAX)** computes, for each edge,
+  a message $e[i,p] = \texttt{edge\_fn}(x_i,\, x_{\text{indices}[i,p]},\,
+  \text{values}[i,p],\, (i,j)[,\, a])$ from the source feature, the neighbour
+  feature, the stored scalar weight, the index pair, and an optional per-edge
+  attribute vector — then reduces $\bigoplus_p e[i,p]$ under the algebra. This is the
+  edge-functional mesh-conv of EdgeConv/DGCNN, GAT, MoNet, and GCN: the *reduce* half
+  is identical to `semiring_ell_matmul`, only the value-of-edge step is functional
+  rather than stored. (First-cut support is `REAL` / `TROPICAL_MAX_PLUS` /
+  `TROPICAL_MIN_PLUS` — the algebras whose monoid is a single axis-reduction; LOG and
+  EUCLIDEAN raise.) The user's `edge_fn` is responsible for letting pad slots
+  contribute the identity, typically by multiplying the message by `values` (which is
+  $0$ at REAL pads).
+- [`ell_row_softmax`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/ell_edge.py)`(scores,
+  ell)` **(DIFF-JAX)** normalises per-edge scores along the $k_{\max}$ axis so each
+  row sums to 1, **masking padding** (pad slots carry `values == identity`, are
+  forced to $-\infty$ before the softmax, and an all-pad row returns all-zeros rather
+  than `NaN`). It is the attention pre-pass for GAT/GATv2: score the edges,
+  `ell_row_softmax` them into weights, feed the weights back as the `values` of an
+  edge-aggregate under `REAL`. There is also
+  [`semiring_conv`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/conv.py),
+  the *regular-grid* sibling of the ELL matmul — the same gather-and-reduce over a
+  shift stencil rather than a neighbour list — which is the substrate the volumetric
+  morphology of [volumes](volumes.qmd#sec-morphology) is built on; we meet it there.
+
+## The apply seam {#sec-apply}
+
+We now have two storage formats (`ELL`, `SectionedELL`) and one algebra family. The
+last piece of the substrate is the seam that lets every downstream algorithm ignore
+*which* storage format it was handed. That is
+[`apply_operator`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/_apply.py)`(op,
+x, *, semiring=None, backend='jax')` **(DIFF-JAX)**.
+
+The contract is small and exact. `op` is a `MeshOperator` — the union type
+`ELL | SectionedELL`. `x` is a per-vertex field of shape `(..., n, d)` (use a
+trailing singleton `(..., n, 1)` for a scalar field). `apply_operator` dispatches on
+the format — an `ELL` routes to `semiring_ell_matmul`, a `SectionedELL` to
+`sectioned_semiring_ell_matmul` (which runs the per-bucket matmuls and scatters back
+to original row order) — and **`vmap`s the 2-D core over the leading batch axes**.
+The operator is *shared* across the batch, not itself batched. The result is the
+contracted field `(..., m, d)`.
+
+Why this matters is the line worth carrying forward: **operators vs algorithms**,
+*assembly downstairs, composition upstairs*. The dependency runs one way,
+`geometry → sparse`: the geometry layer *assembles* an operator (a cotangent
+Laplacian, a k-ring adjacency, an icosphere pooling map) and hands it to the sparse
+layer; the sparse layer *applies* it. Because `apply_operator` hides the storage
+format, a flat `ELL` (the near-uniform icosphere) and a `SectionedELL` (a `recon-all`
+white surface with a few high-valence vertices) **flow through identical algorithm
+code** — the curvature, distortion, and geodesic-smoothing routines never branch on
+storage. That is the same "factor the independent axes, don't hand-write the cross
+product" discipline the eigensolver and interpolator use: the *method* (the algebra)
+and the *task* (which operator) compose freely above the seam; the storage format is
+dispatched once, below it.
+
+`SectionedELL` carries its own apply pair —
+[`sectioned_semiring_ell_matmul`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell_sectioned.py)
+and the REAL-only adjoint
+[`sectioned_semiring_ell_rmatvec`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell_sectioned.py)
+— which compose to the same $\tfrac12(AX + A^\top X)$ symmetric matvec on bucketed
+adjacencies. One device note that ties back to the execution classes: **building** a
+`SectionedELL` is HOST-CTOR (the per-bucket shapes are data-dependent, not
+`jit`-able), but **reusing** one is `jit`-friendly — the per-bucket matmuls trace
+once and the dispatch is a static Python loop. So you pay the host cost **once** per
+adjacency, then run the operator through `jit`-ed code many times. This is exactly
+*never call a HOST op inside a jitted loop*: assemble on the host, apply on device.
+
+## Adjacency and measures {#sec-adjacency}
+
+Everything above needed an operator to apply. This section is where the operators
+come from on the surface side — the combinatorial and metric data a mesh hands to
+the substrate. The unifying line, the one that sets up the next page:
+
+> **A mesh is a graph** — the faces tell you *who neighbours whom* — **plus a
+> metric** — the vertex positions give you *the weights*.
+
+The graph half is pure topology (face indices); the metric half is geometry (vertex
+coordinates). @fig-operators-adjacency shows both halves on a level-1 icosphere: the
+1-ring degree (combinatorics) and the per-vertex area (metric). Hold this split: the
+[cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent) on the next page is exactly
+*the graph adjacency, reweighted by a metric quantity* (the cotangent edge weights),
+and the [mass matrix](laplace-beltrami.qmd#sec-mass) is the vertex-area diagonal.
+
+```{python}
+#| label: fig-operators-adjacency
+#| fig-cap: "A mesh is a graph plus a metric, on a level-1 icosphere (42 vertices). Left: the combinatorics — each vertex coloured by its 1-ring degree (valence). Twelve vertices inherit valence 5 from the icosahedron's corners; the rest are valence 6. This is the graph the adjacency operator encodes. Right: the metric — each vertex coloured by its barycentric area A_i, the per-vertex measure the area-weighted operators use. The graph says who-neighbours-whom; the metric says how-much-each-weighs."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# --- Build a level-1 icosphere by hand (icosahedron + one subdivision) -------
+phi = (1.0 + np.sqrt(5.0)) / 2.0
+V = np.array([
+    [-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0],
+    [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
+    [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1],
+], dtype=float)
+V /= np.linalg.norm(V, axis=1, keepdims=True)
+F = np.array([
+    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+], dtype=int)
+
+def subdivide(V, F):
+    cache = {}
+    V = V.tolist()
+    def mid(i, j):
+        key = (min(i, j), max(i, j))
+        if key in cache:
+            return cache[key]
+        m = (np.array(V[i]) + np.array(V[j])) / 2.0
+        m /= np.linalg.norm(m)
+        V.append(m.tolist()); cache[key] = len(V) - 1
+        return cache[key]
+    NF = []
+    for a, b, c in F:
+        ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+        NF += [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]]
+    return np.array(V), np.array(NF)
+
+V, F = subdivide(V, F)   # level-1 icosphere: 42 vertices
+
+n = len(V)
+
+# --- The COMBINATORICS: 1-ring degree (who-neighbours-whom) ------------------
+adj = [set() for _ in range(n)]
+for a, b, c in F:
+    for i, j in [(a, b), (b, c), (c, a)]:
+        adj[i].add(j); adj[j].add(i)
+degree = np.array([len(s) for s in adj])
+
+# --- The METRIC: per-vertex (barycentric) area -------------------------------
+v0, v1, v2 = V[F[:, 0]], V[F[:, 1]], V[F[:, 2]]
+face_area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
+vert_area = np.zeros(n)
+for k in range(3):
+    np.add.at(vert_area, F[:, k], face_area / 3.0)
+
+# Orthographic projection onto the xy-plane for plotting; colour by quantity.
+X, Y = V[:, 0], V[:, 1]
+order = np.argsort(V[:, 2])  # painter's order, back to front
+
+fig, ax = plt.subplots(1, 2, figsize=(12, 5.2))
+
+# Draw edges once.
+edges = set()
+for a, b, c in F:
+    for i, j in [(a, b), (b, c), (c, a)]:
+        edges.add((min(i, j), max(i, j)))
+
+for A, vals, title, cmap, lbl in [
+    (ax[0], degree, "combinatorics: 1-ring degree\n(the GRAPH: who neighbours whom)",
+     "viridis", "valence (5 or 6)"),
+    (ax[1], vert_area, "metric: per-vertex area $A_i$\n(the WEIGHTS the operators use)",
+     "magma", "vertex area"),
+]:
+    for i, j in edges:
+        A.plot([X[i], X[j]], [Y[i], Y[j]], color="0.8", lw=0.5, zorder=1)
+    sc = A.scatter(X[order], Y[order], c=vals[order], cmap=cmap,
+                   s=90, edgecolor="k", lw=0.4, zorder=2)
+    A.set_title(title); A.set_aspect("equal"); A.set_xticks([]); A.set_yticks([])
+    fig.colorbar(sc, ax=A, fraction=0.046, pad=0.04, label=lbl)
+
+n5 = int((degree == 5).sum())
+fig.suptitle(f"A mesh is a GRAPH plus a METRIC. Level-1 icosphere: {n} vertices, "
+             f"{n5} have valence 5 (the icosahedron's corners), the rest valence 6",
+             y=1.0, fontsize=10.5)
+fig.tight_layout()
+plt.show()
+```
+
+### The Mesh container, and how a mesh is born
+
+A
+[`Mesh`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py) is
+the minimal pair the canonical notation names: `vertices` $V \in \mathbb{R}^{n
+\times 3}$ and `faces` $F \in \mathbb{Z}^{m \times 3}$ (each face a triple of vertex
+indices). It is a JAX pytree — *both* arrays are children, so a `Mesh` flows through
+`jit` / `grad` as an operand; surface optimisers grad through `vertices` while
+`faces` (integer topology) takes a zero cotangent.
+
+The analytic mesh this whole unit validates against is the **icosphere**, built by
+[`icosphere`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(n_iterations=0)`
+**(HOST-CTOR)**. It starts from the 12-vertex icosahedron and recursively
+subdivides: each triangle splits into four, each new edge-midpoint is projected back
+onto the unit sphere. After $n$ iterations it has $10 \cdot 4^n + 2$ vertices
+($n=1 \to 42$, $n=2 \to 162$, …, $n=7 \to 163842$, matching FreeSurfer's `ico7`).
+The icosphere is the unit's **convergence-under-refinement testbed**: it is a
+sequence of ever-finer discrete approximations of the *same* smooth object (the unit
+sphere), so you can compute a quantity at each level and watch the error shrink
+toward the analytic truth (a sphere has mean curvature $H = 1/r$ everywhere; its
+total Gaussian curvature is $4\pi$ by Gauss–Bonnet). Its valence is near-uniform —
+twelve valence-5 vertices, the rest valence-6 — which is exactly why its adjacency
+stays a flat `ELL` and never sections.
+
+For multiscale work there is the
+[`IcosphereHierarchy`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)
+(a tuple of meshes at levels $0..L$ plus parent–child tables), built by
+[`icosphere_hierarchy`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(max_level)`
+or, from your own meshes,
+[`icosphere_hierarchy_from_levels`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py).
+Unlike `Mesh` / `ELL`, the hierarchy is **deliberately not a pytree** — its parent
+tables are host-side construction metadata; it is a HOST-CTOR artefact you use once
+on the host to emit array-bearing operators, which then cross the `jit` boundary. Two
+constructors turn it into cross-level ELLs:
+[`icosphere_cross_level_adjacency`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(hierarchy,
+coarse_level, fine_level)` (a coarse→fine pooling adjacency with a $1/0$ validity
+indicator in its `values`) and
+[`icosphere_bary_upsampler`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(hierarchy,
+coarse_level, fine_level)` (a fine-from-coarse barycentric upsampler); both are
+**HOST-CTOR** and feed the spherical pooling/unpooling discussed in
+[graph geometry](graph-geometry.qmd#sec-pooling).
+
+### The combinatorial operator: k-ring adjacency
+
+The graph half of the mesh becomes an applyable operator through
+[`mesh_k_ring_adjacency`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(mesh,
+*, k=1, binary=True, include_self=False, format='ell')` **(HOST-CTOR)**. The
+construction climbs in the obvious way: read the undirected edges off the faces to
+get the **1-ring** (each vertex's immediate neighbours), then BFS-expand $k$ steps to
+the **k-ring** (neighbours within $k$ hops). The flags set what the operator *means*:
+
+- `binary=True` stores a $1$ at each neighbour and $0$ (the ELL identity) at pads —
+  a plain adjacency, the right thing to reduce under a tropical algebra (count,
+  dilate, reach).
+- `binary=False` stores $1/|\mathcal{N}(i)|$ per row — a **row-stochastic**
+  random-walk operator, so a `REAL` matvec is a neighbour *average*: one step of
+  diffusion / smoothing.
+- `include_self` adds the vertex to its own neighbour list (off by default — geometric
+  adjacency is strictly the neighbours; the centre weight is the Laplacian's job).
+- `format` is `'ell'` (flat), `'sectioned'`, or `'auto'` — and `'auto'` is the
+  policy in action: it sections **only** when the max/median degree ratio exceeds
+  $\sim 2$. Near-uniform template surfaces (icosphere, `fsaverage`) stay flat;
+  irregular-valence surfaces (e.g. marching-cubes output with a few high-valence
+  vertices) section. The return type is therefore `ELL | SectionedELL` — which is
+  exactly why `apply_operator` exists to absorb the difference.
+
+### The metric operators: areas and normals
+
+The metric half is three differentiable, pure-JAX measures — all **DIFF-JAX**, all
+grad-through-`vertices`, the hot-path ingredients of the area-weighted operators on
+later pages.
+
+- [`face_areas`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(mesh)`
+  returns $\tfrac12 \lVert (v_1 - v_0) \times (v_2 - v_0) \rVert$ per face — half the
+  magnitude of the face cross product. The intuition is the standard one from linear
+  algebra: the cross product of two edge vectors has magnitude equal to the area of
+  the parallelogram they span, so half of it is the triangle.
+- [`vertex_areas`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(mesh,
+  *, scheme='voronoi')` is the **lumped mass diagonal** $A_i$ — the per-vertex area
+  that weights every area-aware operation ($M^{-1}L$ mean curvature, areal
+  distortion, the geodesic-smoothing solve $(M + tL)x = Mx_0$). It splits each
+  triangle's area among its three vertices, two ways. `'barycentric'` gives each
+  vertex $\text{area}/3$ — cheap, always non-negative, the safe fallback.
+  `'voronoi'` (default) is the mixed-Voronoi rule of Meyer et al. (2003): for a
+  non-obtuse triangle vertex $i$ gets its circumcentric-dual area $\tfrac18(\cot
+  \angle_k \lvert x_i - x_j \rvert^2 + \cot \angle_j \lvert x_i - x_k \rvert^2)$, but
+  for an **obtuse** triangle — where the Voronoi cell would fall outside the triangle
+  — the obtuse vertex gets $\text{area}/2$ and the others $\text{area}/4$. Both
+  schemes satisfy a useful invariant exactly: $\sum_i A_i = \sum_f \text{area}_f$
+  (the per-vertex areas partition the total surface area). The obtuse branch is
+  **load-bearing on real cortical surfaces** and never exercised by the
+  icosphere — a reminder that the analytic oracle, while perfect for convergence
+  checks, does not stress every code path.
+- [`compute_vertex_normals`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)`(vertices,
+  faces)` gives unit per-vertex normals $n_i$. Each face contributes its
+  un-normalised cross-product normal $(v_1 - v_0) \times (v_2 - v_0)$ — whose
+  magnitude is twice the face area, so **larger faces weight more** — scattered onto
+  its three vertices; the per-vertex sum is then L2-normalised (a zero-area vertex
+  maps to the zero vector, not `NaN`). The orientation $n_i$ is what later turns an
+  unsigned curvature magnitude into a *signed* mean curvature.
+
+That is the full surface-adjacency surface: a `Mesh`, an analytic icosphere (and its
+hierarchy) to validate against, one combinatorial operator (`mesh_k_ring_adjacency`),
+and three metric measures (`face_areas`, `vertex_areas`, `compute_vertex_normals`).
+Graph + metric. The [next page](laplace-beltrami.qmd#sec-cotangent) fuses them into
+the cotangent Laplacian.
+
+## Further reading
+
+- J. Kepner, J. Gilbert (2011). *Graph Algorithms in the Language of Linear
+  Algebra*. SIAM. — the semiring / GraphBLAS view that "change the algebra, not the
+  kernel" formalises; the canonical text on matrix-shaped graph computation.
+- D. Maclagan, B. Sturmfels (2015). *Introduction to Tropical Geometry*. AMS Graduate
+  Studies in Mathematics 161. — the min-plus / max-plus (tropical) semirings, the
+  algebra behind erosion, dilation, and the distance transform.
+- N. Bell, M. Garland (2009). "Implementing Sparse Matrix-Vector Multiplication on
+  Throughput-Oriented Processors." *Proc. SC '09*. — the comparative study of sparse
+  formats (including ELL/ELLPACK and the hybrid HYB) on GPUs that motivates ELL's
+  fixed-shape bet.
+- F. Baccelli, G. Cohen, G. J. Olsder, J.-P. Quadrat (1992). *Synchronization and
+  Linearity: An Algebra for Discrete Event Systems*. Wiley. — the foundational
+  treatment of max-plus algebra.
+- M. Meyer, M. Desbrun, P. Schröder, A. H. Barr (2003). "Discrete
+  Differential-Geometry Operators for Triangulated 2-Manifolds." In *Visualization
+  and Mathematics III*, Springer. — the mixed-Voronoi vertex-area rule used by
+  `vertex_areas`.
+- P. Veličković, G. Cucurull, A. Casanova, A. Romero, P. Liò, Y. Bengio (2018).
+  "Graph Attention Networks." *ICLR*. — the attention aggregation that
+  `ell_row_softmax` + `semiring_ell_edge_aggregate` implement.
+
+## See also
+
+- ELL storage and primitives: [`sparse/ell.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell.py)
+- Sectioned (degree-bucketed) ELL: [`sparse/ell_sectioned.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell_sectioned.py)
+- The format-agnostic apply seam: [`sparse/_apply.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/_apply.py)
+- The algebras and protocols: [`semiring/algebras.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/algebras.py),
+  [`semiring/_types.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/_types.py)
+- The reductions: [`semiring/ell.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/ell.py),
+  [`semiring/matmul.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/matmul.py),
+  [`semiring/ell_edge.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/ell_edge.py),
+  the reference cores [`semiring/_reference.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring/_reference.py)
+- The mesh container, icosphere, adjacency, and measures: [`sparse/mesh.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)
+- Design records: [`docs/design/sparse-specialisations.md`](https://github.com/hypercoil/nitrix/blob/main/docs/design/sparse-specialisations.md),
+  [`docs/design/ell-on-triton.md`](https://github.com/hypercoil/nitrix/blob/main/docs/design/ell-on-triton.md)
+- Neighbouring pages: [foundations](foundations.qmd) (execution classes, validation) ·
+  [Laplace–Beltrami](laplace-beltrami.qmd) (the cotangent stiffness and mass) ·
+  [volumes](volumes.qmd) (the semiring machine on grids) ·
+  [performance](performance.qmd#sec-storage) (ELL/SectionedELL storage economics) ·
+  [solvers](solvers.qmd#sec-kernels) (the differentiable-kernel depth) ·
+  [graph geometry](graph-geometry.qmd) (pooling and the graph mirror) ·
+  sibling unit: [the statistical modelling suite](../index.qmd).

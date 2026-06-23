@@ -7,6 +7,7 @@ project:
   render:
     - index.qmd
     - explanation/*.qmd
+    - explanation/geometry/*.qmd
 
 website:
   title: "nitrix"
@@ -17,7 +18,7 @@ website:
     left:
       - href: index.qmd
         text: Home
-      - text: Explanation
+      - text: Statistics
         menu:
           - explanation/index.qmd
           - explanation/foundations.qmd
@@ -31,6 +32,21 @@ website:
           - text: "---"
           - explanation/solvers.qmd
           - explanation/fellner-schall.qmd
+      - text: Geometry
+        menu:
+          - explanation/geometry/index.qmd
+          - explanation/geometry/foundations.qmd
+          - text: "---"
+          - explanation/geometry/operators.qmd
+          - explanation/geometry/laplace-beltrami.qmd
+          - explanation/geometry/spectral.qmd
+          - explanation/geometry/curvature.qmd
+          - explanation/geometry/volumes.qmd
+          - explanation/geometry/volume-surface.qmd
+          - text: "---"
+          - explanation/geometry/solvers.qmd
+          - explanation/geometry/performance.qmd
+          - explanation/geometry/graph-geometry.qmd
       - href: ../
         text: Federation
 
