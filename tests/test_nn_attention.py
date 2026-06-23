@@ -261,8 +261,10 @@ def test_explicit_pallas_on_cpu_raises():
 
 
 @pallas_only
-def test_pallas_falls_back_loudly_until_phase2():
-    # Phase 1: no fused kernel yet -> pallas-cuda falls back loudly to jax.
+def test_pallas_falls_back_loudly_on_unsupported_shape():
+    # A shape outside the fused kernel's supported set (tiny head dim < 16,
+    # and d_v != d) falls back loudly to the JAX reference.  (Supported-shape
+    # kernel behaviour is covered in test_nn_attention_kernel.py.)
     rng = np.random.RandomState(33)
     q = jnp.asarray(rng.standard_normal((1, 2, 8, 8)))
     k = jnp.asarray(rng.standard_normal((1, 2, 8, 8)))
