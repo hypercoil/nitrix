@@ -304,6 +304,17 @@ battery (from `test_lncc_force_kernel.py`); gross-mem probe asserting the
 > seq / non-pow2 head dim, and the at-scale wall-clock-vs-FA2 certification —
 > the last is the sibling perf suite's job (`bench/`).
 
+> **P0 follow-up — QK-norm (curse-of-depth / logit-growth control).** RMS/Layer
+> normalising `q` and `k` along the head dim before `QKᵀ` (used to tame attention
+> logit growth at depth/scale) is a genuine *fusion opportunity for this
+> attention kernel*: the kernel already loads `q` once and streams `k` tiles, so
+> the per-row normalisation folds in before the dot — avoiding a separate
+> normalisation pass and the materialisation of normed `q`/`k`. Proposed as an
+> opt-in `qk_norm: bool = False` (+ optional learnable per-head scale, whose
+> gradient reuses the `d_bias` reduction pattern). Distinct from the `nitrix.nn.norm`
+> kernels (§7.3) — this is an *attention*-kernel extension, sequenced after the
+> P0b baseline. Filed here so the sequencing is visible.
+
 ### 7.2 `nitrix.nn.ssm.selective_scan` — P1, ENABLING
 
 **Surface:**
@@ -400,15 +411,31 @@ gross-mem probe (no full `(l, d_state)` trajectory stored on the fused path).
 
 ```python
 def layer_norm(x: Float[Array, '... c'], weight=None, bias=None, *,
-               eps: float = 1e-5, backend: Backend = 'auto') -> ...
-# group_norm(x, num_groups, weight, bias, *, eps, backend)   channels-first n-D
-# instance_norm(x, weight, bias, *, eps, backend)            per-sample/channel
+               eps: float = 1e-5, out_scale: float = 1.0,
+               backend: Backend = 'auto') -> ...
+# group_norm(x, num_groups, weight, bias, *, eps, out_scale, backend)
+# instance_norm(x, weight, bias, *, eps, out_scale, backend)
 ```
+
+**`out_scale` — the "curse of depth" hook.** A constant multiplier on the norm
+output, `out = out_scale · (norm(x)·w + b)`. This covers the constant
+depth-scaling family — **LayerNorm Scaling** (`out_scale = 1/√l`, Sun et al.),
+residual `1/√(2N)`, DeepNorm-α, ReZero/SkipInit — at **zero marginal cost**:
+it folds into the affine params (`out = norm(x)·(out_scale·w) + (out_scale·b)`),
+so the fused kernel is unchanged when `out_scale = 1.0` and the per-layer
+constant rides on the norm's single pass; the backward just scales the
+cotangent. Per-layer-varying `out_scale` adds no specialisation cost (it folds
+into `w`/`b`, which already vary per layer). Default `1.0` keeps the golden
+corpus untouched. *Not* covered (orthogonal, leave to XLA's elementwise fusion):
+per-channel **LayerScale** `γ` on the residual-branch epilogue — learnable, so a
+custom epilogue would need a `dγ` reduction, exactly the `d_bias` / `dB` reduce
+pattern already built; only worth a kernel if profiled. Sandwich-LN / nGPT are
+just more norm ops, each fused independently.
 
 **Reference** (`nn/norm/_reference.py`): pure-JAX `lax.rsqrt`-based stats
 reproducing the equinox `LayerNorm`/`GroupNorm` and nimox `instance_norm` math
 (we cannot import equinox — SPEC §5.2); group/instance add a reshape-to-groups
-reduction.
+reduction.  `out_scale` applied uniformly (forward + backward).
 
 **Fused kernel** (`_kernels/cuda/norm.py`): fork stock `layer_norm.py` /
 `rms_norm.py` (single-pass Welford or two-pass in SRAM, fused affine, recompute
