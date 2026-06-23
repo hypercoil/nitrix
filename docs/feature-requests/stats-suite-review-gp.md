@@ -98,7 +98,7 @@ results or cryptic internal errors (suite-wide). Blocker ER1 in §1.
 | **ER4** | Med | open | `lme/reml.py:1112` | 1-D random covariate `z` shape `(N,)` misroutes (`r = shape[-1] = N`) → confusing deep `IndexError`. | Coerce `z[:, None]`, or raise naming the `(N,r)` contract. |
 | **ER5** | Med | open | `glm.py:519-528` | Cluster-robust `sandwich_cov` not jittable (`jnp.unique` data-dependent shape + `int()` on a tracer) despite inviting jitted pipelines. | Document eager-only, or accept pre-densified `groups`+`n_groups`. |
 | **ER6** | Low | open | `hgp.py:461-462`; `gp.py:869-870`; `basis.py:378-381, 1492-1494`; `cluster.py:47` | **Suite-wide dtype-leak pattern** under the fp64 invariant — integer `Y`/`x` propagation; `mrf_smooth` float32 design/penalty (confirmed); `cluster_size_map` hardcoded float32 (confirmed). Erodes TFCE fp64 exactness; risks non-integer extents past 2²⁴. Related to prior audit **P6** (pivot-floor x64). | Promote against the canonical float dtype consistently. |
-| **ER7** | Low | open | tests (`test_hgp.py`, `test_gp.py:914-919`, `kernel.py:96-329`, `glm.py`, `test_inference.py:172-506`) | **Broad test-coverage gaps** (mostly confirmed/partial): GP HSGP `rank≥N`/tiny-N; hgp `block`/`map_rho`/`bounds`/explicit-`n_levels`; core kernel primitives untested; GLM HC1-3 / Gamma-Tweedie llf-AIC / weighted IRLS; inference driver `var_smooth`/`blocks`/`mask`/sign-flip Freedman–Lane. | Add targeted tests as the items above are fixed. |
+| **ER7** | Low | ✅ `157f385`,`d91c44a` | tests (`test_kernel.py`*new*, `test_gp.py`, `test_hgp.py`, `test_glm.py`, `test_inference.py`) | **Broad test-coverage gaps** — closed: new `test_kernel.py` (primitives vs numpy/sklearn); GP `rank≥N`/tiny-N; hgp explicit `bounds=`/`n_levels=`; GLM AIC dispersion-count convention (HC0–3 + WLS already anchored); inference `mask`/`var_smooth`/restricted `blocks`. Sign-flip + Freedman–Lane were already covered. | Done. |
 | ER8–ER37 | Low | open | — | See §7: `n>p` validation, weights/Y shape checks, `dof≤0`/`cluster_thresh` guards, GPD tiny-count degeneracy, `n_perm` vs distinct-relabelling guard, `beta_fit` silent clip, `glasso` zero-diagonal divide, matrix-weight covariance on indefinite W, PCA silent truncation, etc. | — |
 
 ---
@@ -240,8 +240,13 @@ Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 > **`6fe1d22`** (jit/vmap-aware value guards, `Tracer`-gated) — `beta_fit` out-of-(0,1)
 > clip warning; `glasso` non-positive `S`-diagonal raise; `cov/corr` asymmetric
 > `weight_matrix` warning.
-> **Remaining:** the docstring/naming polish (predict-return asymmetry, `n_search`/`n_inner`
-> naming, duplicated docstrings) and the **ER7** test-coverage gaps. As bandwidth allows.
+> **ER7 test gaps (`157f385`, `d91c44a`):** new `test_kernel.py` (the kernel primitives vs
+> numpy / scikit-learn, incl. Mahalanobis + batched/jit); GP `rank≥N` over-parameterised +
+> tiny-`N`; hgp explicit `bounds=` / `n_levels=`; GLM AIC parameter-count convention
+> (estimated-dispersion counts the scale); `permutation_test` `mask` / `var_smooth` /
+> restricted exchangeability `blocks`. (HC0–3 + WLS were already anchored.)
+> **Remaining:** only the cosmetic docstring/naming polish (predict-return asymmetry,
+> `n_search`/`n_inner` naming, duplicated docstrings). As bandwidth allows.
 
 ---
 
