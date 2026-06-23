@@ -767,7 +767,7 @@ def gp_fit(
     group: Optional[Any] = None,
     time: Optional[Float[Array, ' N']] = None,
     n_corr: int = 9,
-    corr_raw_bounds: Tuple[float, float] = (-2.5, 2.5),
+    corr_raw_bounds: Tuple[float, float] = (-4.0, 4.0),
     family: Union[str, Family] = 'gaussian',
     prior_weights: Optional[Float[Array, ' N']] = None,
     n_pql: int = 8,
@@ -848,9 +848,13 @@ def gp_fit(
     n_corr
         Number of grid points for the residual-correlation parameter search.
     corr_raw_bounds
-        ``(lo, hi)`` range of the structure's *unconstrained* parameter for the
-        grid (``rho_c = tanh`` / ``sigmoid`` of it); the default ``(-2.5, 2.5)``
-        spans roughly ``|rho_c| < 0.99``.
+        ``(lo, hi)`` range of the structure's *unconstrained* grid parameter
+        (MC5).  ``ar1`` maps it by ``tanh`` -- the default ``(-4, 4)`` spans
+        ``rho_c in (-0.999, 0.999)``.  ``car1`` / ``cs`` map it by ``sigmoid``,
+        a **one-sided** window ``rho_c in (0.018, 0.982)`` (``cs`` is positive by
+        construction, the common exchangeable regime; ``car1`` is a positive
+        decay).  The raw grid is not parabolically refined, so widen the bounds /
+        raise ``n_corr`` for a finer estimate; an estimate at the grid edge warns.
     n_outer, n_search
         Fellner-Schall iterations for the final fit and for each ``rho``-search
         evaluation, respectively.
@@ -1564,6 +1568,17 @@ def _gp_fit_corr(
 
     i_star = int(np.argmin(grid.min(axis=1)))
     raw_hat = float(raw_grid_np[i_star])
+    if i_star in (0, len(raw_grid_np) - 1):
+        # MC5: the corr parameter is grid-quantised; a boundary argmin means the
+        # estimate is clamped at the search edge (the true value may be stronger).
+        rho_c_edge = float(corr_spec.to_natural(jnp.asarray([raw_hat], dtype=dtype)))
+        warnings.warn(
+            f"gp_fit: the corr='{corr_spec.name}' parameter hit the edge of the "
+            f'search grid (rho_c={rho_c_edge:.3f}); widen corr_raw_bounds if the '
+            'true within-group correlation is stronger (note cs / car1 are '
+            'positive by construction).',
+            stacklevel=2,
+        )
     log_rho_hat = _parabolic_argmin(log_rho_grid_np, grid[i_star])
     rho_hat = float(np.exp(log_rho_hat))
 

@@ -996,3 +996,39 @@ def test_gp_corr_ar1_without_time_warns():
     assert msgs(corr='ar1')
     assert not msgs(corr='cs')
     assert not msgs(corr='ar1', time=jnp.asarray(np.tile(np.arange(10.0), 6)))
+
+
+def test_gp_corr_bounds_edge_clamp_warns():
+    """MC5: the corr parameter is grid-quantised over corr_raw_bounds; the wider
+    default (-4, 4) contains a moderate correlation (silent), but an estimate
+    pinned at the search edge warns."""
+    import warnings
+
+    rng = np.random.default_rng(3)
+    G, T = 16, 12
+    t = np.linspace(0.0, 1.0, T)
+    x = np.tile(t, G)
+    g = np.repeat(np.arange(G), T)
+
+    def _ar1(n, rho, sd):
+        e = rng.standard_normal(n) * sd
+        z = np.zeros(n)
+        z[0] = e[0]
+        for i in range(1, n):
+            z[i] = rho * z[i - 1] + e[i]
+        return z
+
+    y = np.concatenate([np.cos(2 * np.pi * t) + _ar1(T, 0.7, 0.25)
+                        for _ in range(G)])
+    Y = jnp.asarray(y[None, :])
+    tt = jnp.asarray(np.tile(np.arange(T * 1.0), G))
+
+    def edge(**kw):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            gp_fit(Y, jnp.asarray(x), corr='ar1', group=jnp.asarray(g),
+                   time=tt, n_rho=8, n_corr=9, **kw)
+            return any('edge of the search grid' in str(m.message) for m in w)
+
+    assert not edge()  # default (-4, 4) contains a ~0.7 correlation
+    assert edge(corr_raw_bounds=(-2.0, 0.0))  # excludes the optimum -> clamps
