@@ -12,6 +12,7 @@ the shared framing + history and indexes its atomised items:
 |---|---|---|
 | Consumer-pipeline substrate | [`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md) | Kernels a named downstream (ilex → thrux) is blocked or workaround-laden without |
 | Consumer training-substrate | [`ilex-training-substrate.md`](ilex-training-substrate.md) | Augmentation / loss / model numerics ilex grew after 2026-06-02 (2026-06-08 audit) |
+| Consumer forward-block kernels | [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md) | The transformer / state-space forward blocks (attention, selective-scan) — the first NN-kernel tier (2026-06-23) |
 | Statistical modelling suite | [`stats-modelling-suite.md`](stats-modelling-suite.md) | Mass-univariate GLM/GAM/GAMM, LME size-dispatch, TFCE `randomise` — perf-bench + ModelArray + niffi |
 | Internal engineering backlog | [`internal-backlog.md`](internal-backlog.md) | Parked perf / Pallas / API-refinement items, each gated on a **Trigger** |
 | Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
@@ -71,6 +72,23 @@ Expansions to existing docs (new drivers / scope from this audit):
 [point-sample](point-sample.md) (arbitrary-point `grid_sample`; 3 dups; task
 #138), [ode-integrators](ode-integrators.md) (per-vertex NODE; diffrax can't
 follow into nitrix).
+
+## Consumer forward-block kernels (nimox → nitrix)
+
+Context, the new-family rationale (why attention/SSM weren't in the 2026-06-08
+audit), the parity two-tier contract, and the priority-marked index:
+[`nn-forward-block-kernels.md`](nn-forward-block-kernels.md). The first
+*neural-network forward-block* kernel tier in nitrix — pure `(Array,…)->Array`
+contractions lifted out of the ilex/nimox transformer and Mamba modules, where
+a hardware-aware (Pallas/Triton) implementation pays off most. Consumer is
+`nimox` (being promoted to a standalone repo in the ilex cycle; ilex axis ii).
+
+| Pri | Doc | Severity | Home |
+|---|---|---|---|
+| P0 | [attention-kernels](attention-kernels.md) (flash + windowed-bias + causal + cross) | ENABLING | `nitrix.attention` |
+| P1 | [selective-scan](selective-scan.md) (Mamba/S6 fused scan) | ENABLING | `nitrix.ssm` |
+| P2 | [affine-matrix-algebra](affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
+| P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn` |
 
 ## Statistical modelling suite (perf-bench → ModelArray → niffi)
 
