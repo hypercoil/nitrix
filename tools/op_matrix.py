@@ -4146,6 +4146,32 @@ register(
 )
 
 
+# --- nn (neural-network forward-block kernels) ------------------------------
+# The fused pallas-cuda path lands in suite Phase 2; the cataloged op is the
+# public dispatcher (jax reference today).  Layout (b, h, s, d); inherently
+# batched over (b, h), so vmap is redundant.
+register(
+    OpInfo(
+        'nitrix.nn.scaled_dot_product_attention',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (2, 4, 16, 8)),
+                jax.random.normal(_key(1), (2, 4, 16, 8)),
+                jax.random.normal(_key(2), (2, 4, 16, 8)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'online-softmax streaming (fused path)',
+            'flash attention',
+        ),
+        notes='dense SDPA; jax reference (fused pallas path = suite Phase 2)',
+    )
+)
+
+
 # ---------------------------------------------------------------------------
 # Geometry surface / mesh suite, GP regression, stationary spectral densities.
 # Fixtures reuse icosphere(1) (42 verts, 80 faces).  Host-side rasterise/extract
