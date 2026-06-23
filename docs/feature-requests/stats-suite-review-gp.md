@@ -233,14 +233,15 @@ Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 (`_hsgp.py` de-dup).
 
 ### Round 4 — low/polish + test-coverage backlog (in progress)
-> **Done (6):** **`7754a01`** — `PriorFn` + kernel spectral densities re-exported from
+> **Done (9):** **`7754a01`** — `PriorFn` + kernel spectral densities re-exported from
 > the `nitrix.stats` / `nitrix.linalg` roots; `hsgp_basis(n_basis=1, center=True)` empty-
 > design guard; `gp_fit(group=…, corr=None)` ignored-`group` warning. **`f0e7a28`** —
 > `permutation_test` saturated-design (dof≤0) guard; `pca_fit` `n_components` range guard.
-> **Remaining:** the rest of the §7 low items (value-based guards — `beta_fit` out-of-(0,1),
-> `glasso` non-positive `S` diagonal, matrix-weight indefinite `W`; these need jit/vmap-aware
-> gating), the docstring/naming polish, and the **ER7** test-coverage gaps. As bandwidth
-> allows.
+> **`6fe1d22`** (jit/vmap-aware value guards, `Tracer`-gated) — `beta_fit` out-of-(0,1)
+> clip warning; `glasso` non-positive `S`-diagonal raise; `cov/corr` asymmetric
+> `weight_matrix` warning.
+> **Remaining:** the docstring/naming polish (predict-return asymmetry, `n_search`/`n_inner`
+> naming, duplicated docstrings) and the **ER7** test-coverage gaps. As bandwidth allows.
 
 ---
 
