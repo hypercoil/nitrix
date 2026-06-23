@@ -102,6 +102,7 @@ References
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal, NamedTuple, Optional, Tuple, Union, cast
 
@@ -117,6 +118,14 @@ from ._corr import CorrSpec, resolve_corr
 from ._corrfit import CorrLMEResult
 from ._kr import kr_cov_and_scaled_f
 from ._varcomp import VarCompSpec, fit_varcomp_diagonal, varcomp_inference
+
+# MC7: the profile-REML cores (_varcomp / _blockwoodbury / _crossed / _nested)
+# return ``log_lik = -0.5 [log|V| + log|X^T V^{-1} X| + r^T V^{-1} r]`` -- the
+# *non-normalised* restricted log-likelihood, omitting the ``(N - p) log(2 pi)``
+# Gaussian constant that the GLS path (and statsmodels) include.  Subtracting
+# ``(N - p) * _HALF_LOG_2PI`` makes every tier report the **full** restricted
+# log-likelihood, so log_lik is comparable across tiers (and AIC/BIC valid).
+_HALF_LOG_2PI = 0.5 * math.log(2.0 * math.pi)
 
 
 def _kr_rotated_basis(
@@ -361,7 +370,7 @@ def _reml_fit_lowrank(
     return REMLResult(
         theta_hat=theta_hat,
         beta_hat=beta_hat,
-        log_lik=log_lik,
+        log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
         fixed_cov=fixed_cov,
         theta_cov=theta_cov,
         grad_m=grad_m,
@@ -831,7 +840,7 @@ def reml_fit(
     return REMLResult(
         theta_hat=theta_hat,
         beta_hat=beta_hat,
-        log_lik=log_lik,
+        log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
         fixed_cov=fixed_cov,
         theta_cov=theta_cov,
         grad_m=grad_m,
@@ -1181,7 +1190,7 @@ def lme_fit(
             var_group=var_group,
             var_cross=var_cross,
             sigma_e_sq=jnp.exp(theta_hat[:, 2]),
-            log_lik=log_lik,
+            log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
             tier='R4',
         )
 
@@ -1235,7 +1244,7 @@ def lme_fit(
             var_outer=jnp.exp(theta_hat[:, 0]),
             var_inner=jnp.exp(theta_hat[:, 1]),
             sigma_e_sq=jnp.exp(theta_hat[:, 2]),
-            log_lik=log_lik,
+            log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
             tier='R3',
         )
 
@@ -1290,7 +1299,7 @@ def lme_fit(
         beta_hat=beta_hat,
         cov_re=cov_re,
         sigma_e_sq=sigma_e_sq,
-        log_lik=log_lik,
+        log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
         fixed_cov=fixed_cov,
         theta_cov=theta_cov,
         grad_m=grad_m,

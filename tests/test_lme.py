@@ -577,6 +577,11 @@ def test_reml_matches_statsmodels_reference():
         float(mdf.scale),
         atol=5e-3,
     )
+    # MC7: log_lik is the FULL restricted log-likelihood (with the (N-p)log(2pi)
+    # constant), matching statsmodels' llf -- so it is cross-tier comparable.
+    np.testing.assert_allclose(
+        float(result.log_lik[0]), float(mdf.llf), atol=1e-2
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -999,6 +1004,8 @@ def test_lme_fit_r2_block_woodbury_matches_statsmodels():
     np.testing.assert_allclose(
         np.asarray(r2.beta_hat[0]), np.asarray(md.fe_params), rtol=5e-3
     )
+    # MC7: the R2 block-Woodbury log_lik also matches statsmodels' full REML llf.
+    np.testing.assert_allclose(float(r2.log_lik[0]), float(md.llf), atol=5e-2)
 
 
 def test_lme_fit_accepts_1d_random_slope():
