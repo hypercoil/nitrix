@@ -33,6 +33,7 @@ import numpy as np
 import pytest
 
 from nitrix.geometry import (
+    CatmullRomCubic,
     CubicBSpline,
     CubicBSplineBoundaryWarning,
     Interpolator,
@@ -1003,6 +1004,153 @@ def test_cubic_bspline_jit_and_vmap():
     batch = jax.random.normal(jax.random.key(36), (3, 8, 8, 1))
     f = jax.jit(lambda im: resample(im, (11, 11), method=CubicBSpline()))
     assert jax.vmap(f)(batch).shape == (3, 11, 11, 1)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3b: Catmull-Rom cardinal cubic-Hermite
+# ---------------------------------------------------------------------------
+
+
+def _cardinal_cubic_hermite(a, b, c, d, t):
+    """The FD-Net STN ``_hermite`` polynomial -- the upstream parity oracle.
+
+    The exact cardinal-cubic (tension -1/2) form the ilex ``fd_net`` port
+    pins against; ``a, b, c, d`` are the four taps and ``t`` the fractional
+    position in ``[0, 1]`` between ``b`` and ``c``.
+    """
+    p = a * (-0.5) + b * 1.5 + c * (-1.5) + d * 0.5
+    q = a + b * (-2.5) + c * 2.0 + d * (-0.5)
+    r = a * (-0.5) + c * 0.5
+    return p * t * t * t + q * t * t + r * t + b
+
+
+def test_catmull_weights_at_knot():
+    """At ``t = 0`` the weights are exactly ``(0, 1, 0, 0)`` (interpolation)."""
+    _, w = CatmullRomCubic()._axis_taps_weights(jnp.array([0.0]))
+    np.testing.assert_allclose(
+        np.asarray(w[0]), [0.0, 1.0, 0.0, 0.0], atol=1e-7
+    )
+
+
+def test_catmull_weights_at_midpoint():
+    """At ``t = 0.5`` the weights are ``(-1/16, 9/16, 9/16, -1/16)``."""
+    _, w = CatmullRomCubic()._axis_taps_weights(jnp.array([0.5]))
+    np.testing.assert_allclose(
+        np.asarray(w[0]), [-1 / 16, 9 / 16, 9 / 16, -1 / 16], atol=1e-7
+    )
+
+
+def test_catmull_matches_upstream_hermite():
+    """Bit-exact agreement with the FD-Net STN cardinal cubic (the consumer).
+
+    The load-bearing parity test: the gather must reproduce the upstream
+    4-tap Hermite to fp32 ULP at every fractional position, so the ilex
+    ``fd_net`` port can switch to nitrix without changing numerics.
+    """
+    samples = jnp.array([5.0, 7.0, 11.0, 13.0, 17.0, 19.0], jnp.float32)
+    image = samples.reshape(6, 1)
+    a, b, c, d = 7.0, 11.0, 13.0, 17.0  # taps around floor=2
+    for t in (0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875):
+        out = float(
+            CatmullRomCubic().sample(
+                image, jnp.array([[2.0 + t]]), mode='nearest', cval=0.0
+            )[0, 0]
+        )
+        assert out == pytest.approx(
+            _cardinal_cubic_hermite(a, b, c, d, t), abs=1e-6
+        )
+
+
+@pytest.mark.parametrize('ndim', [1, 2, 3])
+def test_catmull_reproduces_grid_samples(ndim):
+    """Interpolating spline: it passes through the samples at integer coords."""
+    shape = (7,) * ndim
+    img = jax.random.normal(jax.random.key(50), shape + (1,))
+    axes = jnp.meshgrid(
+        *[jnp.arange(n, dtype=jnp.float32) for n in shape], indexing='ij'
+    )
+    coords = jnp.stack(axes, axis=-1)
+    out = CatmullRomCubic().sample(img, coords, mode='mirror', cval=0.0)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(img), atol=1e-5)
+
+
+def test_catmull_is_partition_of_unity():
+    """The cardinal cubic reproduces constants (weights sum to 1 for all t)."""
+    ts = jnp.linspace(0.0, 0.999, 257)
+    _, w = CatmullRomCubic()._axis_taps_weights(ts)
+    np.testing.assert_allclose(np.asarray(jnp.sum(w, axis=-1)), 1.0, atol=1e-6)
+
+
+def test_catmull_reproduces_linear_ramp():
+    """Degree-1 reproduction: a linear ramp is resampled exactly (interior)."""
+    ramp = jnp.arange(12.0, dtype=jnp.float32).reshape(12, 1)
+    coords = jnp.linspace(2.0, 9.0, 15).reshape(15, 1)  # interior taps only
+    out = CatmullRomCubic().sample(ramp, coords, mode='nearest', cval=0.0)
+    np.testing.assert_allclose(
+        np.asarray(out.flatten()), np.asarray(coords.flatten()), atol=1e-4
+    )
+
+
+def test_catmull_can_overshoot_unlike_linear():
+    """Negative side lobes: the output may exceed the local sample range.
+
+    The defining trade-off vs :class:`Linear` (a convex blend that cannot
+    overshoot).  A step edge induces ringing past the sample bounds.
+    """
+    img = jnp.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0], jnp.float32).reshape(6, 1)
+    coords = jnp.linspace(0.0, 5.0, 41).reshape(41, 1)
+    out = CatmullRomCubic().sample(img, coords, mode='nearest', cval=0.0)
+    assert float(jnp.min(out)) < -1e-3 or float(jnp.max(out)) > 1.0 + 1e-3
+
+
+def test_catmull_resample_matches_scattered_gather():
+    """resample (1-D passes) == spatial_transform (dense gather) for Catmull."""
+    img = jax.random.normal(jax.random.key(51), (9, 9, 2))
+    target = (6, 6)
+    via_resample = resample(
+        img, target, method=CatmullRomCubic(), mode='nearest'
+    )
+    ii, jj = jnp.meshgrid(
+        jnp.linspace(0.0, 8.0, 6),
+        jnp.linspace(0.0, 8.0, 6),
+        indexing='ij',
+    )
+    coords = jnp.stack([ii, jj], axis=-1)
+    via_gather = spatial_transform(
+        img, coords, method=CatmullRomCubic(), mode='nearest'
+    )
+    np.testing.assert_allclose(
+        np.asarray(via_resample), np.asarray(via_gather), atol=1e-5
+    )
+
+
+def test_catmull_differentiable_values_and_coords():
+    """Smooth (C^1): non-trivial, finite gradients in values and coordinates."""
+    img = jax.random.normal(jax.random.key(52), (8, 8, 1))
+    gv = jax.grad(
+        lambda im: resample(im, (12, 12), method=CatmullRomCubic()).sum()
+    )(img)
+    gc = jax.grad(
+        lambda d: spatial_transform(img, d, method=CatmullRomCubic()).sum()
+    )(identity_grid((8, 8)) + 0.3)
+    for g in (gv, gc):
+        assert bool(jnp.all(jnp.isfinite(g)))
+        assert bool(jnp.any(g != 0.0))
+
+
+def test_catmull_jit_and_vmap():
+    batch = jax.random.normal(jax.random.key(53), (3, 8, 8, 1))
+    f = jax.jit(lambda im: resample(im, (11, 11), method=CatmullRomCubic()))
+    assert jax.vmap(f)(batch).shape == (3, 11, 11, 1)
+
+
+def test_catmull_record_protocol_frozen_hashable():
+    """Static-config contract: conforms, frozen, hashable, value-equal."""
+    assert isinstance(CatmullRomCubic(), Interpolator)
+    assert CatmullRomCubic() == CatmullRomCubic()
+    assert hash(CatmullRomCubic()) == hash(CatmullRomCubic())
+    assert CatmullRomCubic.differentiable_in_values
+    assert CatmullRomCubic.differentiable_in_coords
 
 
 # ---------------------------------------------------------------------------

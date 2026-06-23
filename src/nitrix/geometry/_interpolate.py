@@ -40,6 +40,15 @@ Methods:
   a 4-tap cubic basis gather.  Differentiable in values and coordinates;
   bit-exact with ``scipy`` ``order=3, mode='mirror'``.  The path nnUNet /
   ``hd_bet`` style preprocessing needs.
+- ``CatmullRomCubic`` -- the cardinal (tension ``-1/2``) cubic-Hermite
+  *interpolating* spline: a 4-tap separable gather with **no prefilter**
+  (it interpolates the raw samples directly), so -- unlike ``CubicBSpline``
+  -- no backend-dependent scan.  Differentiable in values and coordinates;
+  ``C^1`` (vs ``CubicBSpline``'s ``C^2``), a partition of unity (reproduces
+  constants and linear ramps) but *not* a convex combination (small negative
+  side lobes, so it can overshoot/ring near edges).  The OpenCV
+  ``INTER_CUBIC`` / Keras-STN cardinal cubic a parity-locked consumer
+  (ilex ``fd_net``) pins against.
 - ``MultiLabel`` -- ANTs-style label resampling for segmentations: each
   label's indicator mask is resampled with an ``inner`` kernel (default
   ``Linear``) and the per-voxel arg-max label is returned.  Anti-aliases
@@ -121,6 +130,7 @@ __all__ = [
     'Lanczos',
     'CubicBSpline',
     'CubicBSplineBoundaryWarning',
+    'CatmullRomCubic',
     'MultiLabel',
 ]
 
@@ -951,6 +961,114 @@ class CubicBSpline:
             tap_rule=self._axis_taps_weights,
             mode='mirror',
             cval=0.0,
+        )
+
+
+@dataclass(frozen=True)
+class CatmullRomCubic:
+    """Catmull-Rom cubic-Hermite interpolation -- the cardinal cubic spline.
+
+    The *interpolating* C^1 cubic Hermite spline whose tangents are centred
+    finite differences (tension ``a = -1/2``): the curve passes through the
+    samples, so -- unlike :class:`CubicBSpline` -- it needs **no prefilter**.
+    The gather is a direct 4-tap separable cubic applied to the raw samples;
+    at integer positions it reproduces them exactly.
+
+    Coefficients for the 4 taps
+    ``{floor(x) - 1, floor(x), floor(x) + 1, floor(x) + 2}`` at fractional
+    position ``t = x - floor(x)``::
+
+        w_{-1}(t) = -0.5 t^3 +     t^2 - 0.5 t
+        w_{ 0}(t) =  1.5 t^3 - 2.5 t^2       + 1
+        w_{+1}(t) = -1.5 t^3 + 2.0 t^2 + 0.5 t
+        w_{+2}(t) =  0.5 t^3 - 0.5 t^2
+
+    At ``t = 0`` the weights are ``(0, 1, 0, 0)`` (the sample at ``floor(x)``)
+    and at ``t = 1`` they are ``(0, 0, 1, 0)`` (``floor(x) + 1``) -- the
+    interpolation property.
+
+    Distinct from the other cubics: :class:`CubicBSpline` is *approximating*
+    (it needs the recursive prefilter to interpolate, and that prefilter is
+    backend-dependent), and is ``C^2``-smooth with a partition-of-unity basis;
+    :class:`Lanczos` is a windowed sinc.  Catmull-Rom is the cardinal cubic of
+    OpenCV ``INTER_CUBIC`` / Keras image ``cubic`` / the Keras
+    "BilinearInterpolation" STN (a misnomer -- it evaluates a 4x4 Catmull-Rom
+    stencil), so a consumer parity-locked to that family (e.g. ilex
+    ``fd_net``'s spatial transformer) reproduces the upstream bit-for-bit.
+
+    Smooth in both the image values and the sample coordinates (the basis is
+    ``C^1`` -- piecewise cubic, continuous with continuous first derivative
+    across knots), so it is differentiable end-to-end and usable for
+    coordinate-driven registration losses.  Having no ``map_coordinates``
+    equivalent, it always uses the explicit separable gather (no platform
+    branch) -- and, with no prefilter, no backend-dependent scan either.
+
+    Notes
+    -----
+    The cardinal-cubic basis **is** a partition of unity -- the four weights
+    sum to exactly 1 for every ``t`` (the ``t^3``/``t^2``/``t^1`` coefficients
+    cancel across the taps) -- so it reproduces constants *and* linear ramps
+    exactly (the Keys ``a = -1/2`` kernel has third-order accuracy).  No
+    renormalisation is applied (none is needed -- and the raw cardinal weights
+    are what the parity-locked consumers pin against).  The kernel is *not*,
+    however, a **convex** combination: the outer taps carry small negative
+    weights (the ``w_{-1}`` / ``w_{+2}`` lobes reach ``~-0.07``), so the output
+    can overshoot the local sample range (ringing near sharp edges) -- unlike
+    :class:`Linear` (non-negative weights), whose output is bounded by its
+    neighbours.  This overshoot is the price of the higher-order fit; where a
+    strictly bounded, non-ringing resample is required, prefer :class:`Linear`.
+    """
+
+    differentiable_in_values: ClassVar[bool] = True
+    differentiable_in_coords: ClassVar[bool] = True
+    prefers_separable_resample: ClassVar[bool] = True
+
+    def _axis_taps_weights(
+        self,
+        coord: Float[Array, 'n'],
+    ) -> Tuple[Int[Array, 'n 4'], Float[Array, 'n 4']]:
+        base = jnp.floor(coord)
+        frac = coord - base
+        lower = base.astype(jnp.int32)
+        taps = jnp.stack(
+            [lower - 1, lower, lower + 1, lower + 2],
+            axis=-1,
+        )
+        # Cardinal cubic (tension a = -1/2) at the four tap distances; the
+        # raw Hermite weights (no renormalisation -- see the class docstring).
+        t = frac
+        t2 = t * t
+        t3 = t2 * t
+        w_m1 = -0.5 * t3 + t2 - 0.5 * t
+        w_0 = 1.5 * t3 - 2.5 * t2 + 1.0
+        w_p1 = -1.5 * t3 + 2.0 * t2 + 0.5 * t
+        w_p2 = 0.5 * t3 - 0.5 * t2
+        weights = jnp.stack([w_m1, w_0, w_p1, w_p2], axis=-1)
+        return taps, weights
+
+    def _prepare(
+        self,
+        image: Float[Array, '*spatial c'],
+        mode: BoundaryMode,
+    ) -> Float[Array, '*spatial c']:
+        # Direct interpolator: it gathers the raw samples, no prefilter.
+        del mode
+        return image
+
+    def sample(
+        self,
+        image: Float[Array, '*spatial c'],
+        coords: Float[Array, '*out_spatial ndim'],
+        *,
+        mode: BoundaryMode,
+        cval: float,
+    ) -> Float[Array, '*out_spatial c']:
+        return _separable_gather(
+            image,
+            coords,
+            tap_rule=self._axis_taps_weights,
+            mode=mode,
+            cval=cval,
         )
 
 

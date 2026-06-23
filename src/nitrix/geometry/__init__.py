@@ -12,7 +12,7 @@ Submodules:
   ``resample``, ``center_of_mass_grid``.  ``resample`` /
   ``spatial_transform`` dispatch over an ``Interpolator`` kernel
   (``Linear`` default, ``NearestNeighbour``, ``Lanczos``, ``CubicBSpline``,
-  ``MultiLabel``) -- see ``geometry._interpolate``.
+  ``CatmullRomCubic``, ``MultiLabel``) -- see ``geometry._interpolate``.
 - ``sphere`` -- 2-sphere **mesh** primitives: coordinate
   conversions, geodesic distance, and ``spherical_conv`` re-backed
   on ``semiring_ell_matmul`` for ``O(n · k)`` instead of ``O(n²)``.
@@ -35,6 +35,7 @@ See SPEC §4.4, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
 """
 
 from ._interpolate import (
+    CatmullRomCubic,
     CubicBSpline,
     CubicBSplineBoundaryWarning,
     Interpolator,
@@ -184,6 +185,7 @@ __all__ = [
     'Lanczos',
     'CubicBSpline',
     'CubicBSplineBoundaryWarning',
+    'CatmullRomCubic',
     'MultiLabel',
     # sphere (mesh)
     'cartesian_to_latlong',

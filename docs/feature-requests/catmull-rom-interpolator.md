@@ -1,12 +1,35 @@
 # CatmullRom interpolator — `nitrix.geometry._interpolate`
 
-> **Status (2026-06-23): open (consumer request, ilex → nitrix).** Verified
-> against `nitrix main@6449cfa`: the `Interpolator` set is `Linear` /
+> **Status (2026-06-23): SHIPPED.** `CatmullRomCubic` added to the
+> `Interpolator` dispatch set (`geometry._interpolate`), re-exported from
+> `nitrix.geometry` and `geometry.grid`, and wired into the `method=` dispatch
+> of `resample` / `spatial_transform`. Bit-exact with the ilex
+> `CatmullRomCubic` reference and the FD-Net STN `_hermite` polynomial (fp32
+> ULP at every fractional offset — the load-bearing port-parity test). 16 new
+> tests (analytic weights, interpolation property 1-D/2-D/3-D, upstream-Hermite
+> parity, partition-of-unity, linear-ramp reproduction, overshoot, resample ==
+> spatial_transform, differentiability, jit/vmap, record contract); op-matrix
+> entry `resample[catmull]`; full geometry suite 131 passed. **Consumer action:
+> `nimox._interpolate` can drop the vendored `CatmullRomCubic` and import
+> `from nitrix.geometry import CatmullRomCubic`.**
+>
+> **Correction carried to the consumer.** The vendored ilex docstring claims
+> the cardinal-cubic basis is *not* a partition of unity ("weights sum to 1
+> only at the knots and the midpoint"). That is **wrong** — the four
+> tension-(-1/2) weights sum to exactly 1 for *all* `t` (verified
+> algebraically and numerically), so the kernel reproduces constants **and**
+> linear ramps exactly (Keys third-order accuracy). The real caveat is that it
+> is not a *convex* combination (small negative side lobes ~-0.07 → can
+> overshoot/ring near edges), unlike `Linear`. The nitrix docstring states this
+> correctly; the ilex vendored copy should be corrected when it is retired.
+>
+> _Original request (open, consumer request, ilex → nitrix). Verified against
+> `nitrix main@6449cfa`: the `Interpolator` set was `Linear` /
 > `NearestNeighbour` / `Lanczos` / `CubicBSpline` (`_interpolate.py`) — no
 > interpolating cubic-Hermite (Catmull-Rom) kernel. Surfaced while migrating
-> ilex's geometry cluster onto nitrix; this is the one interpolation primitive
-> with no nitrix equivalent, so it **blocks** the `nimox._interpolate`
-> migration (the others — warp/affine — landed).
+> ilex's geometry cluster onto nitrix; this was the one interpolation primitive
+> with no nitrix equivalent, so it **blocked** the `nimox._interpolate`
+> migration (the others — warp/affine — landed)._
 
 **What.** Add a **Catmull-Rom** cubic interpolator to the `Interpolator`
 dispatch set, matching ilex's vendored
