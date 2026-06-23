@@ -4196,6 +4196,39 @@ register(
         notes='selective scan; jax reference (fused pallas path = suite P1b)',
     )
 )
+register(
+    OpInfo(
+        'nitrix.nn.layer_norm',
+        fixture=lambda: ((jax.random.normal(_key(0), (4, 32)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('zero-mean/unit-var over last axis', 'out_scale hook'),
+        notes='LayerNorm; jax reference (fused norm kernel perf-gated, §7.3)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.nn.group_norm',
+        fixture=lambda: (
+            (jax.random.normal(_key(0), (2, 8, 4, 4)), 4),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('per-group normalisation', 'channels-first n-D'),
+        notes='GroupNorm; jax reference (fused norm kernel perf-gated, §7.3)',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.nn.instance_norm',
+        fixture=lambda: ((jax.random.normal(_key(0), (2, 8, 4, 4)),), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('per-sample/channel normalisation', 'channels-first n-D'),
+        notes='InstanceNorm; jax reference (fused norm kernel perf-gated, §7.3)',
+    )
+)
 
 
 # ---------------------------------------------------------------------------

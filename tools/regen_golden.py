@@ -157,9 +157,60 @@ def regen_ssm() -> None:
     )
 
 
+def regen_norm() -> None:
+    from nitrix.nn.norm import (
+        reference_group_norm,
+        reference_instance_norm,
+        reference_layer_norm,
+    )
+
+    # LayerNorm over the trailing axis.
+    rng = np.random.RandomState(20)
+    x_ln = _randn(rng, 2, 6, 8)
+    w_ln = _randn(rng, 8)
+    b_ln = _randn(rng, 8)
+    _save(
+        'layer_norm_float32',
+        x=x_ln,
+        weight=w_ln,
+        bias=b_ln,
+        out=np.asarray(
+            reference_layer_norm(x_ln, w_ln, b_ln, out_scale=0.5),
+            dtype=np.float32,
+        ),
+    )
+
+    # GroupNorm / InstanceNorm: channels-first (N, C, *spatial).
+    rng = np.random.RandomState(21)
+    x_gn = _randn(rng, 2, 8, 4, 4)
+    w_gn = _randn(rng, 8)
+    b_gn = _randn(rng, 8)
+    _save(
+        'group_norm_float32',
+        x=x_gn,
+        weight=w_gn,
+        bias=b_gn,
+        out=np.asarray(
+            reference_group_norm(x_gn, 4, w_gn, b_gn),
+            dtype=np.float32,
+        ),
+    )
+    _save(
+        'instance_norm_float32',
+        x=x_gn,
+        weight=w_gn,
+        bias=b_gn,
+        out=np.asarray(
+            reference_instance_norm(x_gn, w_gn, b_gn),
+            dtype=np.float32,
+        ),
+    )
+
+
 def main() -> None:
     regen_attention()
     regen_ssm()
+    regen_norm()
 
 
 if __name__ == '__main__':

@@ -33,3 +33,20 @@ rtol = 1e-11
 [selective_scan.float32.pallas-cuda]
 atol = 2e-3
 rtol = 2e-3
+
+[layer_norm.float32]
+atol = 1e-6
+rtol = 1e-5
+
+[group_norm.float32]
+atol = 1e-6
+rtol = 1e-5
+
+[instance_norm.float32]
+atol = 1e-6
+rtol = 1e-5
+
+# Fused single-pass norm path (suite §7.3, perf-gated).
+[layer_norm.float32.pallas-cuda]
+atol = 2e-3
+rtol = 2e-3

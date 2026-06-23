@@ -17,19 +17,25 @@ Submodules:
 - ``attention`` -- ``scaled_dot_product_attention`` (dense / windowed
   additive-bias / causal / cross), with a flash-attention fast path.
 - ``ssm``       -- ``selective_scan`` (Mamba / S6), with a parallel
-  ``associative_scan`` GPU path; fused chunked-scan kernel planned (P1b).
-- ``norm``      -- fused layer / group / instance norm.  *(planned -- P3)*
+  ``associative_scan`` GPU path + a fused chunked-scan kernel.
+- ``norm``      -- ``layer_norm`` / ``group_norm`` / ``instance_norm`` with the
+  curse-of-depth ``out_scale`` hook; fused single-pass kernel is perf-gated.
 
 See ``docs/feature-requests/nn-forward-kernels-suite.md``.
 """
 
-from . import attention, ssm
+from . import attention, norm, ssm
 from .attention import scaled_dot_product_attention
+from .norm import group_norm, instance_norm, layer_norm
 from .ssm import selective_scan
 
 __all__ = [
     'attention',
     'ssm',
+    'norm',
     'scaled_dot_product_attention',
     'selective_scan',
+    'layer_norm',
+    'group_norm',
+    'instance_norm',
 ]
