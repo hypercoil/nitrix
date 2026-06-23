@@ -27,6 +27,7 @@ jax.config.update('jax_enable_x64', True)
 
 import jax.numpy as jnp
 
+from nitrix.linalg.kernel import spectral_density
 from nitrix.stats import gp as gpmod
 from nitrix.stats.gp import GPResult, gp_aic, gp_bic, gp_fit, gp_predict
 
@@ -105,7 +106,7 @@ def test_reml_pspace_matches_dense_up_to_constant():
                 jnp.asarray(sqrt_lambda), kernel, jnp.asarray(rho), m0
             )
             s = np.asarray(
-                gpmod.spectral_density(
+                spectral_density(
                     jnp.asarray(sqrt_lambda), kernel=kernel, rho=rho
                 )
             )
@@ -577,7 +578,7 @@ def test_log_mlik_is_full_reml():
     T = np.ones((n, 1))
     m0 = 1
     s = np.asarray(
-        gpmod.spectral_density(jnp.asarray(sqrt_lambda), kernel='matern52',
+        spectral_density(jnp.asarray(sqrt_lambda), kernel='matern52',
                                rho=rho)
     )
     M = np.eye(n) + Phi @ (np.diag(s) / lam) @ Phi.T
@@ -715,7 +716,7 @@ def test_corr_reml_matches_dense_up_to_constant():
         g = jnp.einsum('gtk,gtk->', yt, yt)
         R = _block_ar1(group, rho_c)
         s = np.asarray(
-            gpmod.spectral_density(jnp.asarray(sqrt_lambda), kernel='matern52',
+            spectral_density(jnp.asarray(sqrt_lambda), kernel='matern52',
                                    rho=0.2)
         )
         d, log_pdet_pen = gpmod._penalty_diag(

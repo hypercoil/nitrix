@@ -65,9 +65,10 @@ from jaxtyping import Array, Float, Int
 
 from ..linalg.kernel import spectral_density
 from ._batching import blocked_vmap
+from ._hsgp import _hsgp_domain, _hsgp_eigen, _hsgp_features
 from ._penreml import mb_fs, mb_quantities, mb_reml_nll
 from ._result import register_result
-from .gp import _hsgp_domain, _hsgp_eigen, _hsgp_features, _parabolic_argmin
+from .gp import _parabolic_argmin
 
 __all__ = [
     'HGPResult',

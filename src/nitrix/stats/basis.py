@@ -43,6 +43,7 @@ from jaxtyping import Array, Float, Int
 from ..graph import laplacian
 from ..linalg.kernel import spectral_density
 from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
+from ._hsgp import _hsgp_domain, _hsgp_features
 
 __all__ = [
     'SmoothBasis',
@@ -979,8 +980,7 @@ def hsgp_basis(
     x_np = np.asarray(x, dtype=np.float64)
     lo = float(np.min(x_np)) if bounds is None else float(bounds[0])
     hi = float(np.max(x_np)) if bounds is None else float(bounds[1])
-    c = 0.5 * (lo + hi)
-    L = float(boundary) * max(0.5 * (hi - lo), 1e-6)
+    c, L = _hsgp_domain(lo, hi, boundary)  # DS3: shared HSGP domain
     rho_v = float(rho) if rho is not None else max(0.5 * (hi - lo), 1e-6)
 
     # Laplace eigen-frequencies, spectral weights, and the per-mode phase that
@@ -1008,9 +1008,8 @@ def hsgp_basis(
     inv_sqrt_L = float(np.sqrt(1.0 / L))
 
     def _hsgp_raw(xx: Float[Array, ' m']) -> Float[Array, 'm k']:
-        phi = inv_sqrt_L * jnp.sin(
-            knots[None, :] * xx[:, None] + radial_transform[None, :, 1]
-        )
+        # DS3: shared eigenfunction design, then the sqrt-spectral amplitude.
+        phi = _hsgp_features(xx, knots, radial_transform[:, 1], inv_sqrt_L)
         return phi * radial_transform[None, :, 0]
 
     design = _hsgp_raw(x)
