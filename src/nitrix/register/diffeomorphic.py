@@ -250,6 +250,18 @@ def diffeomorphic_demons_register(
     ``jacobian_det``, ``cost_history``).  ``velocity`` is ``None`` unless
     ``spec.compute_velocity`` (the default skips its ``field_log`` recovery).
 
+    Notes
+    -----
+    **Cohort registration (D4).**  This is a pure ``(moving, fixed) -> result``
+    function, so register a *cohort* to a shared reference with ``jax.vmap``::
+
+        jax.vmap(lambda m: diffeomorphic_demons_register(m, fixed, spec=spec))(moving_stack)
+
+    The batch-aggregate early-exit comes for free: under ``mode='early_exit'`` the
+    per-subject ``lax.while_loop`` runs (via ``vmap``) to the **all-lanes** exit,
+    the slowest subject setting the trip count -- the same pattern ``volreg`` uses
+    for its frames.  No dedicated cohort driver is needed.
+
     Warning
     -------
     The Gaussian regulariser dispatches engines per backend (parallel FIR on
