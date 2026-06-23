@@ -3229,6 +3229,7 @@ register(
     )
 )
 
+
 def _glmm_setup():
     """Build a Poisson random-intercept GLMM op over a closed-over design."""
     rng = np.random.default_rng(0)
@@ -3410,7 +3411,10 @@ register(
         fixture=lambda: ((jax.random.normal(_key(), (40, 8)),), {}),
         diff_arg=0,
         vmap_arg=None,
-        invariants=('Ledoit-Wolf analytic shrinkage', 'sklearn parity <=4e-16'),
+        invariants=(
+            'Ledoit-Wolf analytic shrinkage',
+            'sklearn parity <=4e-16',
+        ),
         notes='returns (cov, shrinkage); grad reduces the cov leaf',
     )
 )
@@ -3471,7 +3475,10 @@ register(
         fixture=lambda: ((_spd(seed=1), _spd(seed=2), 50), {}),
         diff_arg=0,
         vmap_arg=None,
-        invariants=('extended BIC (Foygel-Drton 2010)', 'rolled-Cholesky logdet'),
+        invariants=(
+            'extended BIC (Foygel-Drton 2010)',
+            'rolled-Cholesky logdet',
+        ),
         notes='scalar model-selection score',
     )
 )
@@ -3479,9 +3486,10 @@ register(
 register(
     OpInfo(
         'nitrix.linalg.randomized_svd',
-        fixture=lambda: ((jax.random.normal(_key(), (200, 60)), 8), {
-            'key': _key(1)
-        }),
+        fixture=lambda: (
+            (jax.random.normal(_key(), (200, 60)), 8),
+            {'key': _key(1)},
+        ),
         diff_arg=0,
         vmap_arg=None,
         invariants=(
@@ -3983,7 +3991,9 @@ register(
         fixture=lambda: (_img_pair(), {'radius': 4, 'spatial_rank': 2}),
         diff_arg=0,
         vmap_arg=0,
-        invariants=('closed-form ∂(Σ lncc)/∂moving (self-adjoint box filter)',),
+        invariants=(
+            'closed-form ∂(Σ lncc)/∂moving (self-adjoint box filter)',
+        ),
     )
 )
 register(
@@ -4002,6 +4012,15 @@ register(
         diff_arg=0,
         vmap_arg=0,
         invariants=('closed-form Mattes MI gradient (no histogram tape)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.nmi_grad',
+        fixture=lambda: (_img_pair(), {'bins': 16}),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('closed-form Studholme NMI gradient (quotient rule)',),
     )
 )
 register(
@@ -4095,7 +4114,9 @@ register(
         fixture=_syn_fixture,
         diff_arg=None,
         vmap_arg=None,
-        invariants=('greedy symmetric diffeomorphic registration (SyN; LNCC)',),
+        invariants=(
+            'greedy symmetric diffeomorphic registration (SyN; LNCC)',
+        ),
         notes='end-to-end optimiser (benchmark-worthy)',
     )
 )
@@ -4105,7 +4126,9 @@ register(
         fixture=_volreg_fixture,
         diff_arg=None,
         vmap_arg=None,
-        invariants=('fMRI motion correction (per-frame rigid to a reference)',),
+        invariants=(
+            'fMRI motion correction (per-frame rigid to a reference)',
+        ),
         notes='end-to-end optimiser (vmapped single-pair rigid)',
     )
 )
@@ -4115,8 +4138,9 @@ register(
         fixture=_bbr_fixture,
         diff_arg=None,
         vmap_arg=None,
-        invariants=('boundary-based registration (intensity gradient at a '
-                    'surface)',),
+        invariants=(
+            'boundary-based registration (intensity gradient at a surface)',
+        ),
         notes='end-to-end optimiser (BBR; differentiate via implicit path)',
     )
 )

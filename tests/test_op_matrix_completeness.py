@@ -79,6 +79,15 @@ EXCLUDE: frozenset[str] = frozenset(
         #    Interpolator and the inverse affine, evaluated *inside*
         #    register.bbr_register (cataloged) -- the user op is bbr_register.
         'register.bbr_cost',
+        # -- A type alias and two compositions over already-cataloged ops: --------
+        #    ConvergenceMode is ``Literal['fixed','early_exit']`` (a non-callable
+        #    type alias, not an op); apply_transform dispatches to the cataloged
+        #    spatial_transform / apply_affine (a warp wrapper, no new kernel);
+        #    syn_pipeline chains the cataloged rigid_register / affine_register /
+        #    greedy_syn_register (its cost is its stages', benchmarked there).
+        'register.ConvergenceMode',
+        'register.apply_transform',
+        'register.syn_pipeline',
         # -- Pure structural / shape-layout helpers: ~free, no cross-framework ----
         #    baseline.
         'numerics.apply_mask',
