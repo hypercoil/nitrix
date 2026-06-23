@@ -232,3 +232,22 @@ def test_step_clamp_diffeo_noop_when_diffeomorphic():
     assert float(jacobian_det_displacement(delta).min()) > 0.1
     clamped = _step_clamp_diffeo(delta)
     assert np.allclose(np.asarray(clamped), np.asarray(delta))
+
+
+def test_grad_through_scan_svf(  # E3
+):
+    # Reverse-mode through the differentiable (fixed-scan) SVF path works: the
+    # scan body is jax.checkpoint'd (E3), so grad memory is O(state) + recompute
+    # rather than O(iterations * state).  checkpoint is a forward no-op, so the
+    # recovery is unchanged; here we gate that the gradient is finite + nonzero.
+    fixed = _blobs(48)
+    moving = _warp(fixed, _smooth_velocity((48, 48), 6.0, 10.0, 1))
+    spec = DemonsSpec(levels=1, iterations=12)
+
+    def loss(m):
+        warped = diffeomorphic_demons_register(m, fixed, spec=spec).warped
+        return jnp.sum(warped**2)
+
+    g = np.asarray(jax.grad(loss)(moving))
+    assert np.all(np.isfinite(g))
+    assert np.abs(g).sum() > 0.0

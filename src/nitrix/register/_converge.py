@@ -170,9 +170,20 @@ def run_iterations(
     ``threshold`` (or the ``iterations`` hard cap is hit), returning a
     ``(iterations,)`` ``costs`` trace whose unrun tail is padded with the final
     cost -- so ``cost_history`` keeps its shape either way.
+
+    The fixed-``scan`` body is wrapped in ``jax.checkpoint`` (E3): reverse-mode
+    through the unrolled trajectory then rematerialises each step in the backward
+    pass instead of storing every iterate, so ``grad`` memory is ``O(state)`` +
+    recompute rather than ``O(iterations * state)`` (the dense-field SVF carry is
+    large).  ``checkpoint`` is a no-op on the forward pass, so the (common,
+    grad-free) forward result and its compile are byte-unchanged; only reverse
+    mode trades the recompute for the memory.
     """
     if convergence is None:
-        return lax.scan(step_fn, init_state, xs=None, length=iterations)
+        # remat the body so grad through the unrolled scan stays memory-bounded.
+        return lax.scan(
+            jax.checkpoint(step_fn), init_state, xs=None, length=iterations
+        )
 
     window = convergence.window
     threshold = convergence.threshold
