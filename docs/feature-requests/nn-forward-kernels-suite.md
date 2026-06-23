@@ -405,6 +405,22 @@ gross-mem probe (no full `(l, d_state)` trajectory stored on the fused path).
 > backward). Remaining suite-wide: P3 fused norms (gated on a perf signal);
 > at-scale wall-clock-vs-`mamba-ssm` is the perf suite's job.
 
+> **Status (2026-06-23): pure-XLA memory-sparing `method='chunked'` SHIPPED.**
+> `reference_selective_scan(method='chunked', chunk_size=)` — a Pallas-free
+> analogue of the fused kernel's memory behaviour for rigs without Triton:
+> chunked `lax.scan` (carry = `(d,n)` state) + within-chunk `associative_scan`,
+> `n` collapsed into `y` in-body so the `(l,d,n)` trajectory is never
+> materialised, `jax.checkpoint` on the body for the backward. Two wins over
+> naive `associative_scan`: (1) memory — temp stays ~flat in `l` vs `O(l·d·n)`
+> (L4, d=n=16: fwd `l=4096` = 60 KB vs 2.6 MB ≈ 44×; bwd 1.7 MB vs 11.6 MB ≈
+> 6.6×; crossover by `l≈256`); (2) numerics — XLA-stable, so **none of the fused
+> kernel's fp32 within-chunk range limit** (correct on aggressive `A`/`Δ`). It
+> is a memory↔parallel-depth trade (more sequential chunk-steps), so it wins
+> where memory matters and can be marginally slower in the small/latency-bound
+> regime → **size-based dispatch into the public `jax` path is deferred to the
+> perf suite**; the public `selective_scan` is unchanged for now. Validated
+> `chunked == sequential == associative` ~1e-16 (fwd + grad), ±D / ±batch.
+
 ### 7.3 `nitrix.nn.norm.{layer_norm, group_norm, instance_norm}` — P3, CONVENIENCE (deferred)
 
 **Surface:**
