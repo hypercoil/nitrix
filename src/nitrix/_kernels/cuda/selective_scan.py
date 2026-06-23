@@ -14,15 +14,15 @@ chunk size keeps ``exp(±logP)`` bounded; the chunk-final state is carried to th
 next chunk via whole-tile sums (no indexing).  The ``(l, d, n)`` state trajectory
 is never materialised in HBM -- only ``y (l, d)`` and the per-chunk start states.
 
-Backward (current): a ``custom_vjp`` whose backward recomputes the gradient
-through the JAX reference -- correct ``dx/ddelta/dA/dB/dC/dD`` for all input
-ranges.  The forward already delivers the inference activation-memory win (no
-``(l, d, n)`` in HBM); the forward also emits the per-chunk start states the
-fully-fused backward needs.  The fully-fused recompute-adjoint backward (reverse
-chunked cumsum ``a_t = dy_t C_t + dA_{t+1} a_{t+1}`` via
-``rev_cumsum(z) = sum(z) - cumsum(z) + z``; ``h_{t-1}`` recovered as
-``(h_t - Δ_t B_t x_t) / exp(Δ_t A)``; shared-grad reductions via
-``plgpu.atomic_add``) is the next increment for the *training*-memory win.
+Backward is the fully-fused recompute-adjoint (the *training*-memory win: no
+``(l, d, n)`` trajectory in HBM in either pass).  The reverse linear recurrence
+``a_t = dy_t C_t + dA_{t+1} a_{t+1}`` is the same chunked cumsum form run in
+reverse (``rev_cumsum(z) = sum(z) - cumsum(z) + z``, no flip); the forward
+states ``h_{t-1}`` are recomputed from the saved per-chunk start states as
+``(h_t - Δ_t B_t x_t) / exp(Δ_t A)``.  ``dx`` / ``dΔ`` are per-channel direct
+writes; the grid-shared gradients ``dB`` / ``dC`` (summed over channels) use
+``plgpu.atomic_add`` with zero-init via ``input_output_aliases``, and ``dA`` /
+``dD`` (summed over batch) are emitted as per-program partials reduced in JAX.
 
 Scope (else ``PallasNotTileable`` -> loud JAX fallback): NVIDIA Ampere+, float32,
 sequence length divisible by the chunk size.  The sibling perf suite owns the
@@ -136,8 +136,8 @@ def _mha_like_forward(
     out_specs = [
         pl.BlockSpec((None, length, None), lambda j, dd: (j, 0, dd)),  # y
         pl.BlockSpec(
-            (None, None, nc, n), lambda j, dd: (j, dd, 0, 0)
-        ),  # hstart
+            (None, nc, None, n), lambda j, dd: (j, 0, dd, 0)
+        ),  # hstart -> (b, nc, d, n) as hstart[j, c, dd, :]
     ]
     out_shape = [
         jax.ShapeDtypeStruct((b, length, d), x.dtype),
@@ -192,7 +192,187 @@ def _fused_forward(
 
 
 # ---------------------------------------------------------------------------
-# Differentiable wrapper (custom_vjp; fused forward, reference backward for now)
+# Backward kernel (recompute-adjoint; reverse chunked cumsum, no (l, d, n) HBM)
+# ---------------------------------------------------------------------------
+
+
+def _bwd_kernel(
+    x_ref: Any,
+    delta_ref: Any,
+    a_ref: Any,
+    b_ref: Any,
+    c_ref: Any,
+    d_ref: Any,
+    dy_ref: Any,
+    hstart_ref: Any,
+    dbz_ref: Any,  # zero-init input aliased to dB (unused directly)
+    dcz_ref: Any,  # zero-init input aliased to dC (unused directly)
+    dx_ref: Any,
+    ddelta_ref: Any,
+    da_ref: Any,
+    dd_ref: Any,
+    db_ref: Any,
+    dc_ref: Any,
+    *,
+    length: int,
+    chunk: int,
+    has_d: bool,
+) -> None:
+    del dbz_ref, dcz_ref  # only their aliasing (zero-init of db/dc) is used
+    A = a_ref[...][None, :]  # (1, n)
+    n = a_ref.shape[0]
+    nc = length // chunk
+    d_val = d_ref[...] if has_d else None
+
+    def body(i: int, carry: Any) -> Any:
+        adj_carry, da_acc, dd_acc = carry  # (1, n), (n,), scalar
+        c = nc - 1 - i  # reverse order
+        cs = pl.ds(c * chunk, chunk)
+        xf = x_ref[cs]
+        df = delta_ref[cs]
+        dyf = dy_ref[cs]
+        bc = b_ref[cs, :]
+        cc = c_ref[cs, :]
+        xc = xf[:, None]
+        dc = df[:, None]
+        dyc = dyf[:, None]
+        hstart_c = hstart_ref[pl.ds(c, 1), :]  # (1, n)
+
+        log_p = jnp.cumsum(dc, axis=0) * A  # (L, n)
+        p = jnp.exp(log_p)
+        inv_p = jnp.exp(-log_p)
+        tr = jnp.exp(dc * A)  # per-step transition
+        bi_x = dc * xc * bc  # Δ B x
+        bi_p = bi_x * inv_p
+        h = p * (jnp.cumsum(bi_p, axis=0) + hstart_c)  # h_t (recomputed)
+        h_prev = (h - bi_x) * jnp.exp(-dc * A)  # h_{t-1}
+
+        # adjoint a_t = invP * (rev_cumsum(exp(logP) dy C) + exp(logP_end) carry)
+        z = p * dyc * cc
+        rev = jnp.sum(z, axis=0, keepdims=True) - jnp.cumsum(z, axis=0) + z
+        e_end = jnp.exp(jnp.sum(dc, axis=0, keepdims=True) * A)  # (1, n)
+        adj = inv_p * (rev + e_end * adj_carry)
+        carry_out = jnp.sum(z, axis=0, keepdims=True) + e_end * adj_carry
+
+        adj_b = jnp.sum(adj * bc, axis=1)  # Σ_n adj B  (L,)
+        dx_chunk = adj_b * df
+        if has_d:
+            dx_chunk = dx_chunk + dyf * d_val
+        ddelta_chunk = adj_b * xf + jnp.sum(adj * h_prev * A * tr, axis=1)
+        dx_ref[cs] = dx_chunk
+        ddelta_ref[cs] = ddelta_chunk
+        plgpu.atomic_add(db_ref, (cs, slice(None)), adj * dc * xc)
+        plgpu.atomic_add(dc_ref, (cs, slice(None)), dyc * h)
+        da_acc = da_acc + jnp.sum(adj * h_prev * dc * tr, axis=0)
+        dd_acc = dd_acc + jnp.sum(dyf * xf)
+        return (
+            carry_out.astype(jnp.float32),
+            da_acc.astype(jnp.float32),
+            dd_acc.astype(jnp.float32),
+        )
+
+    init = (
+        jnp.zeros((1, n), jnp.float32),
+        jnp.zeros((n,), jnp.float32),
+        jnp.zeros((), jnp.float32),
+    )
+    _, da_acc, dd_acc = lax.fori_loop(0, nc, body, init)
+    da_ref[...] = da_acc
+    dd_ref[...] = dd_acc
+
+
+def _mha_like_backward(
+    x: Float[Array, 'b l d'],
+    delta: Float[Array, 'b l d'],
+    A: Float[Array, 'd n'],
+    B: Float[Array, 'b l n'],
+    C: Float[Array, 'b l n'],
+    D: Optional[Float[Array, 'd']],
+    dy: Float[Array, 'b l d'],
+    hstart: Float[Array, 'b nc d n'],
+    *,
+    chunk: int,
+) -> tuple[Array, Array, Array, Array, Array, Array]:
+    b, length, d = x.shape
+    n = A.shape[1]
+    nc = length // chunk
+    has_d = D is not None
+    seq = pl.BlockSpec((None, length, None), lambda j, dd: (j, 0, dd))
+    bc = pl.BlockSpec((None, length, n), lambda j, dd: (j, 0, 0))
+    a_spec = pl.BlockSpec((None, n), lambda j, dd: (dd, 0))
+    d_spec = None if D is None else pl.BlockSpec((None,), lambda j, dd: (dd,))
+    hs = pl.BlockSpec((None, nc, None, n), lambda j, dd: (j, 0, dd, 0))
+    da_spec = pl.BlockSpec((None, None, n), lambda j, dd: (j, dd, 0))
+    dd_spec = pl.BlockSpec((None, None), lambda j, dd: (j, dd))
+    zeros_bln = jnp.zeros((b, length, n), x.dtype)
+    in_specs = [seq, seq, a_spec, bc, bc, d_spec, seq, hs, bc, bc]
+    out_specs = [seq, seq, da_spec, dd_spec, bc, bc]
+    # A ``None`` D operand is dropped from the flattened inputs, so the
+    # zeros->dB/dC alias indices shift down by one when D is absent.
+    dbz_idx = 8 if has_d else 7
+    aliases = {dbz_idx: 4, dbz_idx + 1: 5}
+    out_shape = [
+        jax.ShapeDtypeStruct((b, length, d), x.dtype),  # dx
+        jax.ShapeDtypeStruct((b, length, d), x.dtype),  # ddelta
+        jax.ShapeDtypeStruct(
+            (b, d, n), jnp.float32
+        ),  # dA partial (over batch)
+        jax.ShapeDtypeStruct((b, d), jnp.float32),  # dD partial (over batch)
+        jax.ShapeDtypeStruct((b, length, n), x.dtype),  # dB (atomic)
+        jax.ShapeDtypeStruct((b, length, n), x.dtype),  # dC (atomic)
+    ]
+    dx, ddelta, da_p, dd_p, dbg, dcg = pl.pallas_call(
+        partial(_bwd_kernel, length=length, chunk=chunk, has_d=has_d),
+        grid=(b, d),
+        in_specs=in_specs,
+        out_specs=out_specs,
+        out_shape=out_shape,
+        input_output_aliases=aliases,  # zeros_bln inputs -> dB / dC
+        compiler_params=plgpu.CompilerParams(num_warps=4, num_stages=1),
+        name='nitrix_selective_scan_bwd',
+    )(x, delta, A, B, C, D, dy, hstart, zeros_bln, zeros_bln)
+    dA = jnp.sum(da_p, axis=0)  # (d, n)
+    dD = jnp.sum(dd_p, axis=0)  # (d,)
+    return dx, ddelta, dA, dbg, dcg, dD
+
+
+def _fused_backward(
+    x: Float[Array, '... l d'],
+    delta: Float[Array, '... l d'],
+    A: Float[Array, 'd n'],
+    B: Float[Array, '... l n'],
+    C: Float[Array, '... l n'],
+    D: Optional[Float[Array, 'd']],
+    hstart: Any,
+    dy: Float[Array, '... l d'],
+    chunk: int,
+) -> tuple[Array, Array, Array, Array, Array, Array]:
+    *batch, length, d = x.shape
+    n = A.shape[1]
+    nb = math.prod(batch) if batch else 1
+    dx, ddelta, dA, dB, dC, dD = _mha_like_backward(
+        _flat(x, nb, length, d),
+        _flat(delta, nb, length, d),
+        A,
+        _flat(B, nb, length, n),
+        _flat(C, nb, length, n),
+        D,
+        _flat(dy, nb, length, d),
+        hstart,
+        chunk=chunk,
+    )
+    return (
+        dx.reshape(*batch, length, d),
+        ddelta.reshape(*batch, length, d),
+        dA,
+        dB.reshape(*batch, length, n),
+        dC.reshape(*batch, length, n),
+        dD,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Differentiable wrapper (custom_vjp; fused forward + fused backward)
 # ---------------------------------------------------------------------------
 
 
@@ -224,27 +404,12 @@ def _scan_p_fwd(
 
 
 def _scan_p_bwd(chunk: int, res: tuple[Any, ...], g: Array) -> tuple[Any, ...]:
-    from ...nn.ssm._reference import reference_selective_scan as _ref
-
-    x, delta, A, B, C, D, _hstart = res
-    if D is None:
-
-        def f_nd(
-            x: Array, delta: Array, A: Array, B: Array, C: Array
-        ) -> Array:
-            return _ref(x, delta, A, B, C, method='sequential')
-
-        _, vjp = jax.vjp(f_nd, x, delta, A, B, C)
-        dx, dd, dA, dB, dC = vjp(g)
-        return dx, dd, dA, dB, dC, None
-
-    def f_d(
-        x: Array, delta: Array, A: Array, B: Array, C: Array, D: Array
-    ) -> Array:
-        return _ref(x, delta, A, B, C, D, method='sequential')
-
-    _, vjp = jax.vjp(f_d, x, delta, A, B, C, D)
-    return tuple(vjp(g))
+    x, delta, A, B, C, D, hstart = res
+    dx, ddelta, dA, dB, dC, dD = _fused_backward(
+        x, delta, A, B, C, D, hstart, g, chunk
+    )
+    # D passed as None -> its cotangent is None (non-differentiable slot).
+    return dx, ddelta, dA, dB, dC, (None if D is None else dD)
 
 
 _scan_p.defvjp(_scan_p_fwd, _scan_p_bwd)

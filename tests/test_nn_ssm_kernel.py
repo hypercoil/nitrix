@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """Tests for the fused Pallas selective-scan kernel (suite P1b).
 
-GPU-only (NVIDIA Ampere+).  P1b ships the fused *forward* (chunked cumsum
-closed-form, state in SRAM, no (l, d, n) trajectory in HBM) with a ``custom_vjp``
-whose backward currently recomputes through the reference (correct grads, all
-input ranges); the fully-fused backward is a follow-up.  These tests pin the
-forward parity (pallas ~= jax within the ``tolerance.toml`` pallas-cuda row on
-realistic-Mamba inputs), the gross-memory contract, gradient correctness, and
-the dispatch / loud-fallback behaviour.
+GPU-only (NVIDIA Ampere+).  P1b ships the fully-fused forward + backward
+(chunked cumsum closed-form forward; reverse chunked-cumsum recompute-adjoint
+backward) -- the (l, d, n) state trajectory is materialised in HBM in neither
+pass.  These tests pin the forward parity (pallas ~= jax within the
+``tolerance.toml`` pallas-cuda row on realistic-Mamba inputs), the forward and
+backward gross-memory contracts, the fused-backward gradient parity, and the
+dispatch / loud-fallback behaviour.
 
 Note: the fused forward uses a cumsum closed-form with an fp32 within-chunk
 dynamic-range limit (|A * cumsum(delta)| < ~80), satisfied by the realistic
@@ -121,7 +121,31 @@ def test_forward_does_not_materialise_state_trajectory():
     assert temp_k < temp_r
 
 
-# --- gradient correctness (custom_vjp) ----------------------------------
+@pallas_only
+def test_backward_does_not_materialise_state_trajectory():
+    # The fused recompute-adjoint backward keeps state in SRAM + only the
+    # (l/chunk)-reduced chunk-start residual; the reference backward stores the
+    # full (l, d, n) trajectory.
+    b, length, d, n = 2, 128, 8, 4
+    x, delta, A, B, C, D = _inputs(b, length, d, n, seed=7)
+
+    def grad_of(backend):
+        return jax.grad(
+            lambda *a: jnp.sum(selective_scan(*a, backend=backend) ** 2),
+            argnums=(0, 1, 2, 3, 4, 5),
+        )
+
+    comp_k = (
+        jax.jit(grad_of('pallas-cuda')).lower(x, delta, A, B, C, D).compile()
+    )
+    comp_r = jax.jit(grad_of('jax')).lower(x, delta, A, B, C, D).compile()
+    temp_k = comp_k.memory_analysis().temp_size_in_bytes
+    temp_r = comp_r.memory_analysis().temp_size_in_bytes
+    assert temp_k < b * length * d * n * 4  # no full (l, d, n) trajectory
+    assert temp_k < temp_r
+
+
+# --- gradient correctness (fused recompute-adjoint backward) ------------
 
 
 @pallas_only
