@@ -1,0 +1,352 @@
+---
+title: "Registration: maps between geometries"
+---
+
+::: {.callout-tldr title="Fast path"}
+**Registration is the act of finding a map between two geometries.** Given a
+*fixed* image $I_f$ and a *moving* image $I_m$, we search for a transform
+$\varphi$ that pulls the moving image onto the fixed grid so the two agree — and
+the search is always the same shape: minimise a **mismatch energy**
+
+$$
+\mathcal E(\varphi) \;=\; \underbrace{\mathcal S\!\left(I_f,\; I_m\circ\varphi\right)}_{\text{data term}} \;+\; \lambda\,\underbrace{\mathcal R(\varphi)}_{\text{regulariser}}
+$$
+
+over a *family* of transforms. This unit climbs the **transform ladder** —
+rigid → affine → diffeomorphic → surface — and at every rung answers the same
+four questions: how is the transform **represented**, how is it **applied**
+(resampling), how is mismatch **scored** (a similarity metric), and how is it
+**found** (optimisation), all while keeping the map **physical** (a diffeomorphism
+does not tear or fold). A page-per-topic ladder follows; this page is the map.
+:::
+
+This unit is written for a reader **fluent in linear algebra** — matrices, least
+squares, gradients, the chain rule — who has read the
+[discrete-geometry unit](../geometry/index.qmd) (meshes and grids as finite
+approximations of smooth objects) but has **no formal training in image
+registration, Lie theory, or numerical optimisation**. We build every idea up from
+what you already own and explain each new concept the first time it appears. It is
+the sibling of the [statistical modelling suite](../statistics/index.qmd) and the
+[geometry unit](../geometry/index.qmd), and shares their house style: intuition
+first, then the earned equation, then the real `nitrix` routine.
+
+## The one governing idea {#sec-governing}
+
+The geometry unit studied **objects** — a cortical mesh, a brain mask, the
+operators that live on them. This unit studies **maps between objects**: how to
+bring one subject's anatomy into correspondence with another's, or with a template.
+That is *registration*, and almost everything in the unit is a special case of a
+single sentence:
+
+> A registration is a **map** $\varphi$ between two geometries, found by
+> **minimising a mismatch energy** $\mathcal E(\varphi) = \mathcal S(I_f, I_m\circ\varphi) + \lambda\mathcal R(\varphi)$
+> over a **parametrised family** of transforms.
+
+Read off the three ingredients, because the unit is organised around them:
+
+1. **A family of transforms** — the set $\varphi$ is allowed to range over. Make it
+   small (six rigid degrees of freedom) and the problem is easy but rigid; make it
+   large (a dense velocity field with millions of degrees of freedom) and it can
+   match individual sulci but needs strong regularisation to stay physical. This is
+   the **transform ladder** of @sec-ladder.
+2. **A similarity** $\mathcal S$ — the *data term* that says how well the warped
+   moving image matches the fixed one. Same-modality images can be compared by
+   intensity differences; cross-modality images (a T1 and an EPI) cannot, and need
+   information-theoretic scores. Built in [similarity](similarity.qmd).
+3. **A regulariser** $\mathcal R$ — the *prior* that keeps the map smooth and
+   invertible. For small families it is implicit (a rigid map is automatically
+   smooth); for deformable families it is the difference between a useful warp and a
+   torn one. Built in [diffeomorphic](diffeomorphic.qmd).
+
+The data convention that makes the picture coherent — and the single most important
+one in the unit — is that we **pull the moving image back onto the fixed grid**:
+$\varphi:\Omega_f\to\Omega_m$, and the warped moving image is the composition
+$I_m\circ\varphi$. We never push pixels forward (that leaves holes); we ask, for
+each fixed-grid location, *where in the moving image do I read from?* — and resample
+there. [Foundations](foundations.qmd#sec-pullback) earns this convention in full.
+
+## The transform ladder {#sec-ladder}
+
+The choice of transform family is the choice that organises everything else. The
+families form a ladder of increasing flexibility, each a strict superset of the one
+below, each trading degrees of freedom for the need to regularise:
+
+- **Rigid** ($SE(3)$, 6 DOF in 3-D): rotation + translation. The right family for
+  *within-subject, same-session* alignment — realigning the volumes of an fMRI
+  series, where the head moved but its shape did not.
+- **Affine** ($\mathrm{Aff}(3)$, 12 DOF): adds scale and shear. The right family for
+  a *global* match to a template — a first, coarse normalisation to MNI that absorbs
+  brain-size differences.
+- **Diffeomorphic** (a velocity field, effectively millions of DOF): a smooth,
+  invertible, non-linear warp. The right family for *inter-subject normalisation*,
+  matching one cortex's folding pattern to another's.
+- **Surface** (maps on the sphere): registration *of the cortical sheet itself*,
+  carried out after flattening each hemisphere to a sphere — the common coordinate
+  frame for cross-subject comparison.
+
+@fig-index-ladder runs the bottom three rungs on one synthetic image so the
+trade-off is visible: more freedom buys a closer match, at the cost of a wilder map
+that must be reined in by a regulariser.
+
+```{python}
+#| label: fig-index-ladder
+#| fig-cap: "The transform ladder. A fixed image (left) and a moving image are matched by transforms of growing flexibility: rigid (rotation+translation) captures a pose change but cannot change shape; affine adds scale/shear; a deformable warp bends space locally to match fine detail. The bottom row shows the displacement each map applies to a reference grid — note how it grows from a uniform rotation to a spatially varying field."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# --- A synthetic 2-D "anatomy": a few smooth blobs on a grid ---
+n = 120
+xs = np.linspace(-1, 1, n)
+X, Y = np.meshgrid(xs, xs, indexing="ij")
+
+def blobs(Xc, Yc):
+    img = np.zeros_like(Xc)
+    for (cx, cy, r, a) in [(-0.25, 0.0, 0.45, 1.0), (0.35, 0.2, 0.28, 0.8),
+                           (0.1, -0.4, 0.2, 0.6)]:
+        img += a * np.exp(-((Xc - cx) ** 2 + (Yc - cy) ** 2) / (2 * r ** 2))
+    return img
+
+fixed = blobs(X, Y)
+
+# Sampling convention: to build the warped image we PULL BACK — for each fixed
+# coordinate p we evaluate the (analytic) moving anatomy at phi(p).
+def sample(coords_x, coords_y):
+    return blobs(coords_x, coords_y)
+
+# Rung 1: rigid (rotate about centre by theta, translate)
+theta = np.deg2rad(20.0)
+c, s = np.cos(theta), np.sin(theta)
+rx = c * X - s * Y + 0.10
+ry = s * X + c * Y - 0.05
+rigid = sample(rx, ry)
+
+# Rung 2: affine (add anisotropic scale + shear, still linear)
+ax_ = 1.25 * (c * X - s * Y) + 0.20 * Y + 0.10
+ay_ = 0.85 * (s * X + c * Y) + 0.05
+affine = sample(ax_, ay_)
+
+# Rung 3: deformable (a smooth, spatially varying sinusoidal warp on top)
+dx = ax_ + 0.10 * np.sin(3.0 * Y)
+dy = ay_ + 0.10 * np.cos(3.0 * X)
+deform = sample(dx, dy)
+
+fig, ax = plt.subplots(2, 4, figsize=(13, 6.6))
+titles = ["fixed $I_f$", "rigid (6 DOF)", "affine (12 DOF)", "deformable (~$10^6$ DOF)"]
+imgs = [fixed, rigid, affine, deform]
+for a, img, t in zip(ax[0], imgs, titles):
+    a.imshow(img.T, origin="lower", cmap="magma", extent=[-1, 1, -1, 1])
+    a.set_title(t); a.set_xticks([]); a.set_yticks([])
+
+# Bottom row: the displacement each map applies to a reference grid (quiver)
+step = 10
+gx, gy = X[::step, ::step], Y[::step, ::step]
+disp = [
+    (np.zeros_like(gx), np.zeros_like(gy)),                       # identity (under fixed)
+    (rx[::step, ::step] - gx, ry[::step, ::step] - gy),
+    (ax_[::step, ::step] - gx, ay_[::step, ::step] - gy),
+    (dx[::step, ::step] - gx, dy[::step, ::step] - gy),
+]
+dtitles = ["(reference grid)", "rigid displacement", "affine displacement", "deformable displacement"]
+for a, (ux, uy), t in zip(ax[1], disp, dtitles):
+    a.quiver(gx, gy, ux, uy, np.hypot(ux, uy), cmap="viridis", scale=6, width=0.006)
+    a.set_title(t); a.set_xticks([]); a.set_yticks([]); a.set_aspect("equal")
+
+fig.suptitle("The transform ladder: more degrees of freedom, a closer match, a wilder map", y=1.0)
+fig.tight_layout()
+plt.show()
+```
+
+The ladder is not a hierarchy of "better" methods — it is a hierarchy of
+*assumptions*. Use the smallest family that can express the misalignment you expect;
+every extra degree of freedom you grant is a degree of freedom an optimiser can
+abuse. In practice the families compose: the standard pipeline
+([recipes](recipes.qmd#sec-matrix-recipes)) climbs the ladder in stages — rigid,
+then affine, then a deformable warp — each initialising the next.
+
+## The common loop and the unifying threads {#sec-threads}
+
+Every registration in this unit, from a six-parameter rigid fit to a dense
+diffeomorphism, runs the **same loop**: warp the moving image by the current
+transform (a pull-back resample), *score* the mismatch against the fixed image,
+*step* the transform to reduce it, and repeat — usually from a coarse image down to
+a fine one. @fig-index-loop is that skeleton; the chapters fill in each box.
+
+```{python}
+#| label: fig-index-loop
+#| fig-cap: "The registration loop, shared by every recipe in the unit. The transform is applied by pull-back resampling (resampling.qmd); the warped moving image is scored against the fixed image by a similarity metric (similarity.qmd); the optimiser steps the transform's parameters or velocity field to reduce the energy (optimization.qmd, diffeomorphic.qmd); a Gaussian image pyramid wraps the whole loop coarse-to-fine to widen the capture range."
+#| code-fold: true
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+
+fig, ax = plt.subplots(figsize=(11, 4.2))
+ax.set_xlim(0, 11); ax.set_ylim(0, 4.2); ax.axis("off")
+
+def box(x, y, w, h, text, fc):
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.06",
+                                fc=fc, ec="0.2", lw=1.4))
+    ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=10)
+
+def arrow(x0, y0, x1, y1):
+    ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle="-|>",
+                                 mutation_scale=16, lw=1.6, color="0.25"))
+
+box(0.2, 1.6, 1.8, 1.0, "moving $I_m$\nfixed $I_f$", "#d8e8f0")
+box(2.5, 1.6, 2.0, 1.0, "warp by $\\varphi$\n(pull-back\nresample)", "#cfe8d8")
+box(5.1, 1.6, 2.0, 1.0, "score mismatch\n$S(I_f,\\,I_m\\circ\\varphi)$", "#f0e2cf")
+box(7.7, 1.6, 2.0, 1.0, "step $\\varphi$\n(optimiser /\nforce)", "#f0d8e2")
+arrow(2.0, 2.1, 2.5, 2.1)
+arrow(4.5, 2.1, 5.1, 2.1)
+arrow(7.1, 2.1, 7.7, 2.1)
+# feedback loop
+arrow(8.7, 1.6, 8.7, 0.8); arrow(8.7, 0.8, 3.5, 0.8); arrow(3.5, 0.8, 3.5, 1.6)
+ax.text(6.1, 0.55, "iterate to convergence", ha="center", fontsize=9, color="0.3")
+# pyramid wrapper
+ax.add_patch(FancyBboxPatch((2.3, 0.35), 7.6, 3.4, boxstyle="round,pad=0.06",
+                            fc="none", ec="#6a6", lw=1.6, ls="--"))
+ax.text(6.1, 3.55, "Gaussian pyramid: coarse $\\rightarrow$ fine", ha="center",
+        fontsize=10, color="#383")
+fig.tight_layout()
+plt.show()
+```
+
+Three ideas recur on nearly every page; meet them once here.
+
+### Thread 1 — optimise on the Lie algebra, not the group {#sec-thread-lie}
+
+A rotation matrix is a curved, constrained object: nine numbers obeying
+$R^\top R = I$. If you let an optimiser move those nine numbers freely it will
+immediately leave the set of rotations. The fix, used everywhere in the unit, is to
+parametrise a transform by its **Lie algebra** — the flat tangent space at the
+identity, an unconstrained vector $\theta$ — and map back to the group with the
+matrix **exponential**. Three turns of an axis-angle vector become a rotation
+through Rodrigues' formula; a general generator becomes an invertible affine through
+`matrix_exp`; a velocity *field* becomes a diffeomorphism through scaling-and-
+squaring. Optimise in the algebra (free, well-conditioned), live in the group
+(constrained, correct). This single idea links [transforms](transforms.qmd#sec-lie-exp)
+and [diffeomorphic](diffeomorphic.qmd#sec-svf).
+
+### Thread 2 — index space, world space, and centring {#sec-thread-space}
+
+The *same* transform means different things depending on the coordinate frame it
+acts in. `nitrix` makes the frame explicit through a
+[`CoordinateSpace`](foundations.qmd#sec-spaces): **IndexSpace** works in voxel
+indices on a shared grid (fast, the default), while **WorldSpace** works in physical
+millimetres through each image's voxel-to-world affine (correct under anisotropic
+voxels and mismatched grids). And in both, transforms act **about the image centre**,
+not the array origin — because a rotation about a far-away origin has enormous
+translational leverage and conditions the optimisation terribly. The frame and the
+centre are not incidental; they are part of what a transform *is*.
+
+### Thread 3 — diffeomorphism by construction, and device discipline {#sec-thread-device}
+
+A warp that folds space (its Jacobian determinant goes negative) has torn the
+anatomy and is meaningless. Rather than detect and reject folds after the fact, the
+deformable recipes make invertibility **structural**: a transform written as
+$\exp(v)$ of a velocity field is a diffeomorphism by construction, and the symmetric
+SyN construction is invertible by the way it is assembled. The same
+engineering discipline as the rest of `nitrix` applies — operators are tagged
+**DIFF-JAX** (jittable + differentiable, the hot path), **HOST-CTOR**
+(data-dependent construction), or **HOST-QA** (host-side query), and the rule
+*never call a HOST op inside a jitted loop* holds throughout
+([foundations](foundations.qmd#sec-classes)). A whole registration is differentiable
+end-to-end: you can backpropagate a downstream loss through the warp.
+
+## Chapters {#sec-chapters}
+
+Read in order for the full climb; each chapter assumes the ones before it.
+
+1. [**Foundations**](foundations.qmd) — the registration problem, the pull-back
+   convention, the transform ladder, coordinate spaces, the execution classes, and
+   how we validate (synthetic-warp recovery, not bit-parity). *Read this first.*
+2. [**Transforms**](transforms.qmd) — linear transforms as a Lie group: the
+   homogeneous matrix, the $T\,R\,S\,E$ decomposition, the exponential chart
+   (`rigid_exp` / `affine_exp` / `matrix_exp`), least-squares fitting, and the
+   transform manifold (Fréchet means, geodesics).
+3. [**Resampling**](resampling.qmd) — applying a transform by differentiable
+   interpolation: the kernels (`Linear`, `Lanczos`, `CubicBSpline`, `MultiLabel`),
+   boundary modes, the separable gather, and the Gaussian pyramid.
+4. [**Similarity**](similarity.qmd) — the data term: `SSD`, `LNCC`, `MI`, and
+   `CorrelationRatio`; same- vs cross-modality; masking and intensity conditioning.
+5. [**Optimisation**](optimization.qmd) — finding a linear transform: the objective
+   ADT, coarse-to-fine warm-starting, Gauss–Newton / LM and BFGS, the
+   inverse-compositional fast path, and convergence control.
+6. [**Diffeomorphic registration**](diffeomorphic.qmd) — deformable warps that do not
+   tear: displacement vs velocity fields, scaling-and-squaring, the BCH composition,
+   field inversion, regularisers, and the dense-field forces (Demons, SyN).
+7. [**Surface registration**](surface-registration.qmd) — the sphere as a common
+   frame: spherical parameterisation, barycentric `surface_resample`, and spherical
+   convolution.
+
+Technical-reference tier (referenced throughout, read as needed):
+
+- [**Recipes**](recipes.qmd) — the catalogue of end-to-end registrators
+  (`rigid_register`, `affine_register`, `syn_pipeline`, `greedy_syn_register`,
+  `diffeomorphic_demons_register`, `volreg`, `bbr_register`), their spec dataclasses,
+  and a decision table for choosing among them.
+- [**Performance**](performance.qmd) — the XLA/Pallas backends, fused force kernels,
+  `vmap` batching, the inverse-compositional Hessian reuse, and the cost levers.
+
+## Scope: what this unit is, and is not {#sec-scope}
+
+This unit is **maps between geometries**: registration, resampling, the Lie-group
+transform chart, diffeomorphic velocity-field warps, and spherical surface
+registration. It is the counterpart the [geometry unit](../geometry/index.qmd#sec-scope)
+forward-points to — that unit owns the **objects and intrinsic operators** (meshes,
+volumes, the Laplace–Beltrami operator, curvature, the spectral embedding,
+`euler_characteristic` / `genus`, the spherical *grid* padding), and we build on
+them without re-deriving them. Two boundaries to keep in mind:
+
+- **Intrinsic vs extrinsic on the sphere.** The geometry unit's *spectral inflation*
+  and fold gates (`is_bijective_sphere_map`, `signed_spherical_areas`) are intrinsic
+  geometry; this unit's `spherical_parameterize` / `surface_resample` /
+  `spherical_conv` are the extrinsic, correspondence-level operations
+  ([surface-registration](surface-registration.qmd)).
+- **Parcellation and labels are deferred.** Transferring an *atlas* of region labels,
+  building connectomes, and the region-coherence penalties belong to a separate
+  **connectivity / labels** unit, not this one.
+
+## Reading paths {#sec-paths}
+
+- **Fast path** — read each chapter's TL;DR plus [foundations](foundations.qmd) in
+  full and the [recipes](recipes.qmd) catalogue. That is enough to register images
+  and to know which recipe answers which question.
+- **Thorough path** — read in chapter order. Each chapter motivates its piece of the
+  energy $\mathcal E(\varphi)$, earns the equation from intuition, and grounds it in
+  the real `nitrix` routine.
+- **Developer path** — follow the source links in each page's *See also*, lean on the
+  reference tier ([recipes](recipes.qmd), [performance](performance.qmd)) for the spec
+  knobs and kernel choices, and hold every routine to the execution-class contract.
+
+## Further reading
+
+- J. V. Hajnal, D. L. G. Hill, D. J. Hawkes (eds.) (2001). *Medical Image
+  Registration*. CRC Press. — the standard survey of the field's metrics, transforms,
+  and optimisation.
+- B. B. Avants, C. L. Epstein, M. Grossman, J. C. Gee (2008). "Symmetric
+  diffeomorphic image registration with cross-correlation." *Medical Image Analysis*
+  12(1). — the SyN algorithm the deformable recipes follow.
+- T. Vercauteren, X. Pennec, A. Perchant, N. Ayache (2009). "Diffeomorphic demons:
+  efficient non-parametric image registration." *NeuroImage* 45(1). — the log-domain
+  Demons construction.
+- M. Jenkinson, P. Bannister, M. Brady, S. Smith (2002). "Improved optimization for
+  the robust and accurate linear registration and motion correction of brain images."
+  *NeuroImage* 17(2). — FLIRT/MCFLIRT, the rigid/affine and motion-correction lineage.
+- D. N. Greve, B. Fischl (2009). "Accurate and robust brain image alignment using
+  boundary-based registration." *NeuroImage* 48(1). — BBR.
+- S. Baker, I. Matthews (2004). "Lucas–Kanade 20 Years On: A Unifying Framework."
+  *IJCV* 56(3). — the forward/inverse-compositional optimisation framework.
+- B. Fischl, M. I. Sereno, A. M. Dale (1999). "Cortical surface-based analysis II:
+  inflation, flattening, and a surface-based coordinate system." *NeuroImage* 9(2).
+  — spherical surface registration.
+
+## See also
+
+- Package root: [`nitrix.register`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/__init__.py)
+- The transform substrate: [`nitrix.geometry`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/__init__.py)
+  (`affine.py`, `transform.py`, `deformation.py`, `grid.py`, `_interpolate.py`,
+  `pyramid.py`, `sphere.py`) and [`nitrix.linalg.matrix_function`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/matrix_function.py)
+- Sibling units: [the discrete-geometry suite](../geometry/index.qmd) and
+  [the statistical modelling suite](../statistics/index.qmd).

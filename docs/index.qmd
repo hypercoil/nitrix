@@ -10,13 +10,15 @@ JAX/XLA so they run — differentiably, batched, JIT-compiled — on a hardware
 accelerator.
 
 ::: {.callout-tldr title="Fast path"}
-Two textbook units for readers who know linear algebra but not the domain: [the
+Three textbook units for readers who know linear algebra but not the domain: [the
 statistical modelling suite](explanation/statistics/index.qmd) — climbing from
-generalised linear models up to Gaussian processes — and [discrete
+generalised linear models up to Gaussian processes — [discrete
 geometry](explanation/geometry/index.qmd) — meshes, volumes, and the operators on
-them. For statistics, read the [GLM foundation](explanation/statistics/glm.qmd)
-first ("every model is GLM plus one idea"); for geometry, the [operator
-algebra](explanation/geometry/operators.qmd).
+them — and [registration](explanation/registration/index.qmd) — the maps between
+those geometries. For statistics, read the [GLM
+foundation](explanation/statistics/glm.qmd) first ("every model is GLM plus one
+idea"); for geometry, the [operator algebra](explanation/geometry/operators.qmd);
+for registration, the [foundations](explanation/registration/foundations.qmd).
 :::
 
 ## Explanation (the textbook layer)
@@ -30,6 +32,11 @@ algebra](explanation/geometry/operators.qmd).
   distance transforms, isosurfaces, over a shared semiring substrate.
   - [The operator algebra: ELL + semirings](explanation/geometry/operators.qmd)
   - [The Laplace–Beltrami operator](explanation/geometry/laplace-beltrami.qmd)
+- [Registration](explanation/registration/index.qmd) — maps between geometries:
+  the transform ladder (rigid → affine → diffeomorphic → surface), similarity
+  metrics, differentiable resampling, and the optimisation that finds the map.
+  - [The registration problem](explanation/registration/foundations.qmd)
+  - [Linear transforms as a Lie group](explanation/registration/transforms.qmd)
 
-More units (registration and maps between geometries, signal, connectivity) follow
-the same pattern: derive the mathematics, justify the design, point at the code.
+More units (signal, connectivity and labels) follow the same pattern: derive the
+mathematics, justify the design, point at the code.

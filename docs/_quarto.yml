@@ -8,6 +8,7 @@ project:
     - index.qmd
     - explanation/statistics/*.qmd
     - explanation/geometry/*.qmd
+    - explanation/registration/*.qmd
 
 website:
   title: "nitrix"
@@ -47,6 +48,20 @@ website:
           - explanation/geometry/solvers.qmd
           - explanation/geometry/performance.qmd
           - explanation/geometry/graph-geometry.qmd
+      - text: Registration
+        menu:
+          - explanation/registration/index.qmd
+          - explanation/registration/foundations.qmd
+          - text: "---"
+          - explanation/registration/transforms.qmd
+          - explanation/registration/resampling.qmd
+          - explanation/registration/similarity.qmd
+          - explanation/registration/optimization.qmd
+          - explanation/registration/diffeomorphic.qmd
+          - explanation/registration/surface-registration.qmd
+          - text: "---"
+          - explanation/registration/recipes.qmd
+          - explanation/registration/performance.qmd
       - href: ../
         text: Federation
 
