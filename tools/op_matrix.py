@@ -4147,6 +4147,342 @@ register(
 
 
 # ---------------------------------------------------------------------------
+# Geometry surface / mesh suite, GP regression, stationary spectral densities.
+# Fixtures reuse icosphere(1) (42 verts, 80 faces).  Host-side rasterise/extract
+# ops are skip_jit + diff_arg=None; the differentiable surface ops carry a
+# diff_arg on their float (vertex / value) input.
+# ---------------------------------------------------------------------------
+
+
+def _ico():
+    from nitrix.sparse import icosphere
+
+    return icosphere(1)
+
+
+def _mesh_only():
+    return (_ico(),), {}
+
+
+def _mesh2_only():  # LBO spectral maps need n_eig*5 < n_verts; icosphere(1) is too small
+    from nitrix.sparse import icosphere
+
+    return (icosphere(2),), {}
+
+
+def _mesh_vf():  # signed_spherical_areas(vertices, faces)
+    m = _ico()
+    return (m.vertices, m.faces), {}
+
+
+def _mesh_pair():  # source / warped (or white / pial) -- same topology
+    return (_ico(), _ico()), {}
+
+
+def _vertex_field():  # surface_smooth(mesh, values, *, fwhm)
+    m = _ico()
+    return (m, jnp.cos(m.vertices[:, 0] * 3.0)), {'fwhm': 8.0}
+
+
+def _sdf_volume(n=16):
+    lin = jnp.linspace(-1.5, 1.5, n)
+    g = jnp.stack(jnp.meshgrid(lin, lin, lin, indexing='ij'), axis=-1)
+    # float32 to match the icosphere vertex dtype (deform_to_sdf scans over both).
+    return (jnp.sqrt((g**2).sum(-1)) - 1.0).astype(jnp.float32)
+
+
+def _marching_cubes_fix():
+    return (np.asarray(_sdf_volume()),), {'level': 0.0}
+
+
+def _mesh_to_sdf_fix():
+    return (_ico(), (16, 16, 16)), {}
+
+
+def _deform_to_sdf_fix():
+    return (_ico(), _sdf_volume()), {}
+
+
+def _ribbon_fix():  # ribbon_map(volume, white, pial)
+    m = _ico()
+    return (_sdf_volume(), m, m), {}
+
+
+def _resample_fix():  # surface_resample(source_sphere, source_vals, target_sphere)
+    m = _ico()
+    return (m, jnp.cos(m.vertices[:, 0] * 3.0), m), {}
+
+
+def _apply_operator_fix():
+    from nitrix.sparse import mesh_k_ring_adjacency
+
+    m = _ico()
+    return (mesh_k_ring_adjacency(m), m.vertices), {}
+
+
+def _boundary_map_fix():
+    from nitrix.sparse import mesh_k_ring_adjacency
+
+    m = _ico()
+    prof = jax.random.normal(_key(0), (m.n_vertices, 8))
+    return (prof, mesh_k_ring_adjacency(m)), {}
+
+
+def _eta_sq_fix():
+    return (
+        jax.random.normal(_key(0), (40, 8)),
+        jax.random.normal(_key(1), (40, 8)),
+    ), {}
+
+
+def _gp_fit_fix():
+    return (
+        jax.random.normal(_key(0), (6, 24)),
+        jnp.linspace(0.0, 1.0, 24),
+    ), {}
+
+
+def _hgp_fit_fix():
+    return (
+        jax.random.normal(_key(0), (6, 24)),
+        jnp.linspace(0.0, 1.0, 24),
+        jnp.asarray(np.arange(24) % 3),
+    ), {}
+
+
+def _matern_sd_fix():
+    return (jnp.linspace(0.1, 5.0, 16),), {'rho': 1.0, 'nu': 1.5}
+
+
+def _se_sd_fix():
+    return (jnp.linspace(0.1, 5.0, 16),), {'rho': 1.0}
+
+
+_GEOM_OPS = [
+    # (qualname, fixture, diff_arg, vmap_arg, skip_jit, invariant)
+    (
+        'nitrix.geometry.gaussian_curvature',
+        _mesh_only,
+        0,
+        None,
+        False,
+        'angle-defect Gaussian curvature',
+    ),
+    (
+        'nitrix.geometry.mean_curvature',
+        _mesh_only,
+        0,
+        None,
+        False,
+        'cotangent-Laplacian mean curvature',
+    ),
+    (
+        'nitrix.geometry.principal_curvatures',
+        _mesh_only,
+        0,
+        None,
+        False,
+        'principal curvatures from H, K',
+    ),
+    (
+        'nitrix.geometry.signed_spherical_areas',
+        _mesh_vf,
+        0,
+        None,
+        False,
+        'Van Oosterom-Strackee solid angle',
+    ),
+    (
+        'nitrix.geometry.areal_distortion',
+        _mesh_pair,
+        0,
+        None,
+        False,
+        'log2 area ratio (same topology)',
+    ),
+    (
+        'nitrix.geometry.strain_distortion',
+        _mesh_pair,
+        0,
+        None,
+        False,
+        'per-face principal stretches',
+    ),
+    (
+        'nitrix.geometry.cortical_thickness',
+        _mesh_pair,
+        None,
+        None,
+        False,
+        'white<->pial surface distance',
+    ),
+    (
+        'nitrix.geometry.inflate_surface',
+        _mesh_only,
+        0,
+        None,
+        False,
+        'spring-relaxed inflation + sulc',
+    ),
+    (
+        'nitrix.geometry.spectral_sphere_embedding',
+        _mesh2_only,
+        None,
+        None,
+        False,
+        'LBO-eigenfunction spherical map',
+    ),
+    (
+        'nitrix.geometry.spherical_parameterize',
+        _mesh2_only,
+        None,
+        None,
+        False,
+        'conformal+areal spherical map',
+    ),
+    (
+        'nitrix.geometry.surface_smooth',
+        _vertex_field,
+        1,
+        None,
+        False,
+        'geodesic heat-diffusion smoothing',
+    ),
+    (
+        'nitrix.geometry.surface_resample',
+        _resample_fix,
+        1,
+        None,
+        False,
+        'barycentric inter-sphere resample',
+    ),
+    (
+        'nitrix.geometry.ribbon_map',
+        _ribbon_fix,
+        0,
+        None,
+        False,
+        'cortical-ribbon midpoint quadrature',
+    ),
+    (
+        'nitrix.geometry.deform_to_sdf',
+        _deform_to_sdf_fix,
+        0,
+        None,
+        False,
+        'normal advection onto SDF zero-set',
+    ),
+    (
+        'nitrix.geometry.marching_cubes',
+        _marching_cubes_fix,
+        None,
+        None,
+        True,
+        'Freudenthal-Kuhn isosurface (host)',
+    ),
+    (
+        'nitrix.geometry.mesh_to_sdf',
+        _mesh_to_sdf_fix,
+        None,
+        None,
+        True,
+        'mesh -> signed-distance volume (host)',
+    ),
+    (
+        'nitrix.graph.surface_boundary_map',
+        _boundary_map_fix,
+        0,
+        None,
+        False,
+        'FC dissimilarity boundary map',
+    ),
+    (
+        'nitrix.graph.eta_squared',
+        _eta_sq_fix,
+        0,
+        0,
+        False,
+        'Cohen eta-squared similarity',
+    ),
+    (
+        'nitrix.sparse.face_areas',
+        _mesh_only,
+        0,
+        None,
+        False,
+        'per-face triangle area',
+    ),
+    (
+        'nitrix.sparse.vertex_areas',
+        _mesh_only,
+        0,
+        None,
+        False,
+        'Voronoi/barycentric vertex area',
+    ),
+    (
+        'nitrix.sparse.mesh_mass_matrix',
+        _mesh_only,
+        None,
+        None,
+        False,
+        'lumped mass matrix (diagonal ELL)',
+    ),
+    (
+        'nitrix.sparse.apply_operator',
+        _apply_operator_fix,
+        1,
+        None,
+        False,
+        'format-agnostic sparse apply',
+    ),
+    (
+        'nitrix.linalg.matern_spectral_density',
+        _matern_sd_fix,
+        0,
+        0,
+        False,
+        'Matern spectral density (FT)',
+    ),
+    (
+        'nitrix.linalg.se_spectral_density',
+        _se_sd_fix,
+        0,
+        0,
+        False,
+        'squared-exponential spectral density',
+    ),
+    (
+        'nitrix.stats.gp_fit',
+        _gp_fit_fix,
+        0,
+        None,
+        False,
+        'mass-univariate GP (REML lengthscale)',
+    ),
+    (
+        'nitrix.stats.hgp_fit',
+        _hgp_fit_fix,
+        0,
+        None,
+        False,
+        'hierarchical GP (shared kernel)',
+    ),
+]
+for _qn, _fx, _da, _va, _sj, _inv in _GEOM_OPS:
+    register(
+        OpInfo(
+            _qn,
+            fixture=_fx,
+            diff_arg=_da,
+            vmap_arg=_va,
+            skip_jit=_sj,
+            invariants=(_inv,),
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------
 

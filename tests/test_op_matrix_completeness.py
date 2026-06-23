@@ -152,6 +152,50 @@ EXCLUDE: frozenset[str] = frozenset(
         'stats.varying_coefficient_smooth',  # builds a SplineBasis (s(x,by=z))
         'stats.spline_design',
         'stats.tensor_product_design',
+        # -- GP / HSGP construction-time basis builders: build a Smooth / --------
+        #    TensorBasis design pytree (one-off, pre-fit), like the GAM basis
+        #    helpers above; gp_fit / hgp_fit are the cataloged hot-path ops.
+        'stats.gp_factor_smooth',
+        'stats.hsgp_basis',
+        'stats.hsgp_basis_nd',
+        # -- Prior constructors: build a PriorFn lengthscale-penalty closure ------
+        #    (config), like the negbinomial / tweedie / Family constructors.
+        'stats.halfnormal_prior',
+        'stats.invgamma_prior',
+        'stats.lognormal_prior',
+        'stats.PriorFn',  # a Callable type alias (non-callable typedef), not an op
+        # -- Family / link resolvers: normalise a str|Family / str|Link spec to ---
+        #    its canonical config record (constructor dispatch), not array kernels.
+        'stats.resolve_family',
+        'stats.resolve_link',
+        # -- Post-fit readouts on a fitted GP / HGP / GLM / GAM result pytree: ----
+        #    confidence intervals, GP information criteria, GP prediction, and the
+        #    smooth-significance test -- cheap reductions on stored sufficient
+        #    statistics (like t_contrast / aic / bic / predict / smooth_partial_effect).
+        'stats.confidence_interval',
+        'stats.standardized_effect',  # effect/scale Cohen's-d ratio (readout)
+        'stats.gp_aic',
+        'stats.gp_bic',
+        'stats.gp_predict',
+        'stats.hgp_predict',
+        'stats.smooth_significance',
+        # -- Thin dispatcher over the cataloged stationary-kernel spectral --------
+        #    densities (se_spectral_density / matern_spectral_density).
+        'linalg.spectral_density',
+        # -- Sparse-operator type alias (ELL | SectionedELL): non-callable. -------
+        'sparse.MeshOperator',
+        # -- Host-side mesh topology / QA / cleanup (combinatorial, not jit/diff/ -
+        #    vmap-able; run post-hoc): Euler characteristic & genus are scalar
+        #    topology read-outs; the self-intersection detect/repair and the
+        #    sphere-bijectivity gate are host-side QA, not benchmark kernels.
+        'geometry.euler_characteristic',
+        'geometry.genus',
+        'geometry.find_self_intersections',
+        'geometry.remove_self_intersections',
+        'geometry.is_bijective_sphere_map',
+        # -- Priority-flood watershed: inherently serial, host-orchestrated -------
+        #    segmentation over mesh adjacency (host-side -> JAX array pattern).
+        'graph.mesh_watershed',
     }
 )
 
