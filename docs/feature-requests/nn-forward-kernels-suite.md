@@ -304,16 +304,22 @@ battery (from `test_lncc_force_kernel.py`); gross-mem probe asserting the
 > seq / non-pow2 head dim, and the at-scale wall-clock-vs-FA2 certification —
 > the last is the sibling perf suite's job (`bench/`).
 
-> **P0 follow-up — QK-norm (curse-of-depth / logit-growth control).** RMS/Layer
-> normalising `q` and `k` along the head dim before `QKᵀ` (used to tame attention
-> logit growth at depth/scale) is a genuine *fusion opportunity for this
-> attention kernel*: the kernel already loads `q` once and streams `k` tiles, so
-> the per-row normalisation folds in before the dot — avoiding a separate
-> normalisation pass and the materialisation of normed `q`/`k`. Proposed as an
-> opt-in `qk_norm: bool = False` (+ optional learnable per-head scale, whose
-> gradient reuses the `d_bias` reduction pattern). Distinct from the `nitrix.nn.norm`
-> kernels (§7.3) — this is an *attention*-kernel extension, sequenced after the
-> P0b baseline. Filed here so the sequencing is visible.
+> **QK-norm (curse-of-depth / logit-growth control) — SHIPPED (2026-06-23,
+> zero-regression).** Opt-in `qk_norm: bool = False` on
+> `scaled_dot_product_attention`: RMS-normalise `q`/`k` over the head dim before
+> the dot (Gemma2 / ViT-22B convention, `eps=1e-6`, no learnable scale).
+> **Built to leave the fused kernel + its `custom_vjp` byte-for-byte unchanged:**
+> the RMS pre-op (`qk_rms_norm`) is applied *outside* the fused core on the
+> pallas path (and inside the reference on the jax path), so autodiff composes
+> the norm's VJP with the unchanged fused forward/backward. `qk_norm=False` is
+> byte-identical to the prior path — verified as an explicit regression guard on
+> both backends. Validated on L4: reference `qk_norm` == manual RMS+attention
+> (exact); fused vs reference ≤ 3e-4 (dense/bias/causal); grad ≤ 3.6e-4; golden
+> case `attention_qk_norm` added. **Follow-up (perf only):** the *in-kernel*
+> tile-fusion of the RMS (normalise `q`/`k` tiles before the dot, avoiding the
+> `q̂`/`k̂` materialisation) is a pure-bandwidth optimisation for the perf suite;
+> the `(s, t)` flash memory contract is unaffected. A learnable per-dim QK scale,
+> if ever needed, reuses the `d_bias` reduction pattern.
 
 ### 7.2 `nitrix.nn.ssm.selective_scan` — P1, ENABLING
 
