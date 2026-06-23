@@ -146,6 +146,11 @@ def test_hsgp_basis_validates():
         hsgp_basis(x, n_basis=0)
     with pytest.raises(ValueError, match='boundary'):
         hsgp_basis(x, n_basis=5, boundary=0.5)
+    # n_basis=1 with the sum-to-zero constraint would leave an empty (n, 0)
+    # design (the constraint drops one column) -- rejected; center=False is fine.
+    with pytest.raises(ValueError, match='empty'):
+        hsgp_basis(x, n_basis=1, center=True)
+    assert hsgp_basis(x, n_basis=1, center=False).design.shape[1] == 1
 
 
 def test_hsgp_basis_resolution_warning():

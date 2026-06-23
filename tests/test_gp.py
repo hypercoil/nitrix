@@ -1033,3 +1033,24 @@ def test_gp_corr_bounds_edge_clamp_warns():
 
     assert not edge()  # default (-4, 4) contains a ~0.7 correlation
     assert edge(corr_raw_bounds=(-2.0, 0.0))  # excludes the optimum -> clamps
+
+
+def test_gp_group_without_corr_warns():
+    """Round 4: `group` is only used by corr=; passing it with corr=None (where
+    it is silently ignored) warns; corr= consumes it silently."""
+    import warnings
+
+    rng = np.random.default_rng(2)
+    x = np.sort(rng.uniform(0.0, 1.0, 40))
+    Y = jnp.asarray(np.sin(2 * np.pi * x)[None, :]
+                    + 0.1 * rng.standard_normal((3, 40)))
+    g = jnp.asarray(np.repeat(np.arange(4), 10))
+
+    def warned(**kw):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            gp_fit(Y, jnp.asarray(x), group=g, n_rho=6, **kw)
+            return any('only used by' in str(m.message) for m in w)
+
+    assert warned()  # corr=None -> group ignored -> warns
+    assert not warned(corr='cs', n_corr=5)  # corr= consumes group

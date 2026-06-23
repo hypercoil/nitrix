@@ -122,3 +122,18 @@ def test_prior_composes_with_hgp_fit():
     mapf = hgp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), jnp.asarray(group),
                    rank=8, n_rho=16, map_rho=invgamma_prior(a=10.0, b=10.0))
     assert float(np.exp(mapf.theta[0, 3])) > float(np.exp(ml.theta[0, 3]))
+
+
+def test_prior_and_kernel_api_exports():
+    """Round 4: PriorFn (the map_rho callable type) is re-exported from
+    nitrix.stats, and the kernel spectral densities from nitrix.linalg."""
+    from nitrix.linalg import (
+        matern_spectral_density,
+        se_spectral_density,
+        spectral_density,
+    )
+    from nitrix.stats import PriorFn
+
+    assert PriorFn is not None
+    assert all(callable(f) for f in
+               (se_spectral_density, matern_spectral_density, spectral_density))

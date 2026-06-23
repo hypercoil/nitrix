@@ -751,6 +751,12 @@ def gp_fit(
                 'gp_fit: corr= is not supported with a non-Gaussian family '
                 '(Phase 1).'
             )
+    if corr is None and group is not None:
+        warnings.warn(
+            'gp_fit: `group` is only used by the corr= structured residual; '
+            'with corr=None it is ignored.',
+            stacklevel=2,
+        )
 
     Y = jnp.asarray(Y)
     if not jnp.issubdtype(Y.dtype, jnp.floating):

@@ -974,6 +974,12 @@ def hsgp_basis(
     """
     if not 1 <= n_basis:
         raise ValueError(f'hsgp_basis: n_basis={n_basis} must be >= 1.')
+    if center and n_basis < 2:
+        raise ValueError(
+            f'hsgp_basis: n_basis={n_basis} with center=True leaves an empty '
+            '(n, 0) design -- the sum-to-zero constraint drops one column. Use '
+            'n_basis >= 2, or center=False.'
+        )
     if not boundary >= 1.0:
         raise ValueError(f'hsgp_basis: boundary={boundary} must be >= 1.0.')
     x = jnp.asarray(x)
