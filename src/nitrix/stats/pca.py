@@ -222,6 +222,11 @@ def pca_fit(
         ``explained_variance`` ``(k,)``.
     """
     n, d = X.shape
+    if n_components is not None and not 1 <= n_components <= min(n, d):
+        raise ValueError(
+            f'pca_fit: n_components={n_components} must be in '
+            f'[1, min(n, d)={min(n, d)}] (n={n} samples, d={d} features).'
+        )
     mean = jnp.mean(X, axis=0) if center else jnp.zeros(d, X.dtype)
     xc = X - mean
     denom = max(n - 1, 1)

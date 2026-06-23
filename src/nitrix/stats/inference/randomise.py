@@ -236,6 +236,12 @@ def permutation_test(
 
     M, xtx_inv = _ols_pre(design)
     dof = float(n - p)
+    if dof <= 0:
+        raise ValueError(
+            f'permutation_test: saturated design (n={n} <= p={p}); residual '
+            f'dof={dof:.0f}, so the t/F statistics and their permutation null '
+            'are undefined. Reduce the design rank or add observations.'
+        )
     if is_f:
         m_rank = c.shape[0]
         # The (m, m) middle matrix C (X^T X)^{-1} C^T depends only on the design

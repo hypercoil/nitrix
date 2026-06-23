@@ -456,6 +456,19 @@ def test_randomise_cluster_enhancement(mode):
         )
 
 
+def test_randomise_saturated_design_raises():
+    """Round 4: a saturated design (n <= p, residual dof <= 0) makes the t/F
+    statistics undefined; it is rejected rather than returning all-p=1."""
+    rng = np.random.default_rng(0)
+    Y = jnp.asarray(rng.standard_normal((1, 5)))
+    X = jnp.asarray(rng.standard_normal((5, 5)))  # n == p -> dof = 0
+    with pytest.raises(ValueError, match='saturated'):
+        permutation_test(
+            Y, X, jnp.asarray(np.eye(5)[:1]),
+            n_perm=10, key=jax.random.PRNGKey(0),
+        )
+
+
 def test_randomise_voxel_enhancement_and_cusolver_free():
     rng = np.random.default_rng(5)
     H, W, N = 10, 10, 16

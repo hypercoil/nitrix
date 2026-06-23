@@ -362,6 +362,17 @@ def test_pca_full_reconstruction_is_exact():
     np.testing.assert_allclose(np.asarray(x_rec), np.asarray(X), atol=1e-8)
 
 
+def test_pca_n_components_out_of_range_raises():
+    """Round 4: n_components beyond the achievable rank min(n, d) is rejected
+    (rather than silently truncated)."""
+    X = jnp.asarray(np.random.default_rng(0).standard_normal((10, 4)))
+    with pytest.raises(ValueError, match='min'):
+        pca_fit(X, n_components=7)  # > min(n, d) = 4
+    with pytest.raises(ValueError, match='min'):
+        pca_fit(X, n_components=0)
+    assert pca_fit(X, n_components=4).components.shape == (4, 4)
+
+
 def test_pca_components_orthonormal():
     rng = np.random.default_rng(1)
     X = jnp.asarray(rng.standard_normal((100, 6)))
