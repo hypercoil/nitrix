@@ -697,12 +697,119 @@ def spherical_parameterize(
 # ---------------------------------------------------------------------------
 
 
+def _coarse_level_for(n_faces: int) -> int:
+    """Pick an icosphere bucketing level coarse enough to keep the per-bucket
+    candidate set small without an enormous per-bucket Python loop."""
+    if n_faces < 8192:
+        return 2  # 162 buckets
+    if n_faces < 131072:
+        return 3  # 642 buckets
+    return 4  # 2562 buckets
+
+
+def _spherical_best_face(
+    verts: NDArray[Any],
+    faces: NDArray[Any],
+    query: NDArray[Any],
+    n_ab: NDArray[Any],
+    n_bc: NDArray[Any],
+    n_ca: NDArray[Any],
+    *,
+    method: str,
+    chunk: int,
+) -> NDArray[Any]:
+    """Index of the (radially) containing source triangle per query.
+
+    ``method='brute'`` is the exact ``O(Q*F)`` argmax of the min-signed-edge
+    score.  ``method='bucket'`` (Tier C / audit AI-C5b) prunes candidates with a
+    coarse-icosphere-vertex spatial index: bin source faces by their centroid's
+    nearest coarse vertex, gather each query's coarse vertex + its 1-ring of
+    coarse neighbours, and argmax over only those candidates.  Exactness: on a
+    closed sphere mesh a query lies in exactly one triangle, the *only* one with
+    score >= 0, so a non-negative bucketed best IS that global argmax; any query
+    whose bucketed best is negative (the container fell outside the searched
+    buckets) falls back to the exact brute argmax.  ``'auto'`` buckets only when
+    ``F`` is large enough to amortise the index.
+    """
+
+    def brute(q: NDArray[Any]) -> NDArray[Any]:
+        out = np.empty(q.shape[0], dtype=np.int64)
+        for s in range(0, q.shape[0], chunk):
+            qq = q[s : s + chunk]
+            score = np.minimum(
+                np.minimum(qq @ n_ab.T, qq @ n_bc.T), qq @ n_ca.T
+            )
+            out[s : s + chunk] = np.argmax(score, axis=1)
+        return out
+
+    n_faces = faces.shape[0]
+    use_bucket = method == 'bucket' or (
+        method == 'auto'
+        and n_faces >= 2048
+        and query.shape[0] * n_faces > 5_000_000
+    )
+    if not use_bucket:
+        return brute(query)
+
+    from ..sparse import ELL, icosphere, mesh_k_ring_adjacency
+
+    coarse = icosphere(_coarse_level_for(n_faces))
+    cverts = np.asarray(coarse.vertices)  # unit sphere; dot-argmax = nearest
+    n_c = cverts.shape[0]
+    centroid = verts[faces[:, 0]] + verts[faces[:, 1]] + verts[faces[:, 2]]
+    cf = np.argmax(centroid @ cverts.T, axis=1)  # face -> nearest coarse vertex
+    cq = np.argmax(query @ cverts.T, axis=1)  # query -> nearest coarse vertex
+    # Extended bucket: face f belongs to coarse bucket cf[f] AND every 1-ring
+    # neighbour of cf[f] (so a query near a coarse-cell boundary still sees it).
+    kr = mesh_k_ring_adjacency(coarse, k=1)  # uniform valence -> flat ELL
+    assert isinstance(kr, ELL)
+    kidx = np.asarray(kr.indices)
+    kval = np.asarray(kr.values)
+    rows = [cf]
+    cols = [np.arange(n_faces, dtype=np.int64)]
+    for p in range(kidx.shape[1]):
+        valid = kval[:, p][cf] != 0
+        rows.append(kidx[:, p][cf][valid])
+        cols.append(np.arange(n_faces, dtype=np.int64)[valid])
+    brow = np.concatenate(rows)
+    bcol = np.concatenate(cols)
+    order = np.argsort(brow, kind='stable')
+    brow_s, bcol_s = brow[order], bcol[order]
+    bstart = np.zeros(n_c + 1, dtype=np.int64)
+    np.cumsum(np.bincount(brow_s, minlength=n_c), out=bstart[1:])
+
+    best_face = np.full(query.shape[0], -1, dtype=np.int64)
+    best_score = np.full(query.shape[0], -np.inf, dtype=np.float64)
+    for c in range(n_c):
+        qm = cq == c
+        if not qm.any():
+            continue
+        cand = bcol_s[bstart[c] : bstart[c + 1]]
+        if cand.shape[0] == 0:
+            continue
+        qsub = query[qm]
+        sc = np.minimum(
+            np.minimum(qsub @ n_ab[cand].T, qsub @ n_bc[cand].T),
+            qsub @ n_ca[cand].T,
+        )  # (m, K)
+        bi = np.argmax(sc, axis=1)
+        best_face[qm] = cand[bi]
+        best_score[qm] = sc[np.arange(qsub.shape[0]), bi]
+    # perf-agent: the brute-fallback fraction below is an optimisation signal --
+    # see docs/feature-requests/mesh-spatial-acceleration.md (Perf-agent note).
+    miss = best_score < 0.0
+    if miss.any():
+        best_face[miss] = brute(query[miss])
+    return best_face
+
+
 def _spherical_barycentric(
     verts: NDArray[Any],
     faces: NDArray[Any],
     query: NDArray[Any],
     *,
     chunk: int = 256,
+    method: str = 'auto',
 ) -> tuple[NDArray[Any], NDArray[Any]]:
     """Host-side spherical point-in-triangle search + barycentric weights.
 
@@ -712,7 +819,11 @@ def _spherical_barycentric(
     triangle's plane.  Clean-room (no ``scipy.spatial``): the containing
     triangle maximises the minimum signed great-circle-edge distance (robust to
     fp; a query on a shared edge / vertex ties to an incident triangle, which
-    interpolates consistently).  ``O(n_query * n_faces)``, chunked over queries.
+    interpolates consistently).
+
+    The containing-triangle search is ``method='auto'`` -- a coarse-icosphere
+    spatial index (``_spherical_best_face``) for large meshes, exact-equal to
+    the brute ``O(n_query * n_faces)`` argmax via the container/brute-fallback.
 
     Returns ``(idx (Q, 3) int32, weights (Q, 3) float32)`` -- weights are
     clipped non-negative and renormalised to a partition of unity (so a query
@@ -725,14 +836,9 @@ def _spherical_barycentric(
     n_ab = np.cross(a, b)
     n_bc = np.cross(b, c)
     n_ca = np.cross(c, a)
-    q_n = query.shape[0]
-    best_face = np.empty(q_n, dtype=np.int64)
-    for start in range(0, q_n, chunk):
-        q = query[start : start + chunk]
-        score = np.minimum(
-            np.minimum(q @ n_ab.T, q @ n_bc.T), q @ n_ca.T
-        )  # (q, F)
-        best_face[start : start + chunk] = np.argmax(score, axis=1)
+    best_face = _spherical_best_face(
+        verts, faces, query, n_ab, n_bc, n_ca, method=method, chunk=chunk
+    )
     fa = faces[best_face]  # (Q, 3) source vertex indices
     av = verts[fa[:, 0]]
     bv = verts[fa[:, 1]]

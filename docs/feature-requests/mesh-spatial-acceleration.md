@@ -189,12 +189,64 @@ bucket index. No new runtime dependency; all host-side numpy.
   `_triangle_distance`; wire `method=` into `nearest_surface_distance` (and hence
   `mesh_to_sdf` + symmetric `cortical_thickness`). Exit: bit-exact parity vs
   brute on a real white surface + analytic sphere SDF; the fallback path tested.
+  **DONE 2026-06-23** (branch `perf/mesh-spatial-acceleration`): `method=`
+  `'auto'`/`'grid'`/`'brute'`; the exactness bound (`d_min <= R*cell`) +
+  unconditional brute fallback at `r_max` hold; **bit-exact (`np.array_equal`)
+  vs brute** on icosphere + real fsaverage (near/far/fallback) + analytic
+  sphere; real `cortical_thickness` (corr 0.94 vs FS) and `mesh_to_sdf`
+  consumers stay green. Note: it accelerates near-surface queries (thickness,
+  SDF near-band); far SDF-grid voxels fall back to brute (exact, no worse). Two
+  separate far-field options (neither needed for correctness): a narrow-band /
+  sweep SDF inside nitrix, **or** — the natural one for the geometry-light
+  pipeline — **bootstrap the SDF from `synthdist` (ilex)**: that pipeline already
+  produces a learned distance field, so a consumer feeds *that* into
+  `deform_to_sdf` rather than recomputing the far field with `mesh_to_sdf` at
+  all. nitrix's exact `mesh_to_sdf` is the clean-room path for the no-model /
+  golden-reference / validation case (nitrix stays IO- and model-free; the
+  `synthdist` hand-off is a consumer concern, arrays in).
 - **C5b — spherical bucket index** for `surface_resample._spherical_barycentric`.
   Exit: bit-exact parity vs brute on fs5↔fs4; bucket-boundary + fallback tested.
+  **DONE 2026-06-23** (branch `perf/mesh-spatial-acceleration`):
+  `_spherical_best_face(method='auto'/'brute'/'bucket')` bins source faces by
+  their centroid's nearest **coarse-icosphere vertex** (level scaled to face
+  count), gathers each query's coarse vertex + its 1-ring, and argmaxes the
+  containment score over only those candidates; a query whose bucketed best is
+  ``< 0`` (container outside the searched buckets) falls back to the exact brute
+  argmax. The resampled **field** is bit-exact vs brute (icosphere + real
+  fs5↔fs4 spheres; the ~0.2% `best_face` edge-tie differences interpolate
+  identically on the shared edge). `surface_resample` auto-buckets on the real
+  fs5↔fs4 test and stays green (identity, integral conservation, round-trip).
 - **C5c — validation + perf record.** The §7 matrix; a logged perf comparison.
 
 Each phase keeps `method='brute'` as the reference and commits independently with
 its parity test.
+
+## 9a. Perf-agent note (fallback-rate as an optimisation signal)
+
+**Both** accelerators fall back to the exact brute scan for queries the index
+cannot resolve — and the **fallback fraction is the key tuning signal**, flagged
+at each fallback site in code (`grep "perf-agent:"`):
+
+- **C5a** (`_triangle_distance._grid_nearest_dist2` → `nearest_surface_distance`):
+  queries not finalised within `r_max` shells (`~done`). High on full-grid SDF
+  (far voxels are genuinely far) — *expected*; the real fixes there are a
+  narrow-band/sweep SDF **or** sourcing the field from `synthdist` (ilex) so the
+  far field is never brute-computed at all (see C5a note above). High on a
+  *near-surface* workload would instead signal a mis-sized `cell` (too small →
+  triangles span many cells; too large → many candidates) or too small `r_max`.
+- **C5b** (`sphere._spherical_best_face`): queries whose bucketed best score is
+  `< 0` (the container fell outside the coarse vertex + 1-ring). High signals the
+  coarse level is too fine relative to the source-triangle angular size (buckets
+  smaller than triangles) — coarsen `_coarse_level_for`, or widen the searched
+  ring to the 2-ring.
+
+**Suggested perf-agent task:** instrument these two `miss`/fallback fractions on
+real recon-all/HCP-scale inputs (a 256³ SDF; symmetric thickness at ico6/7;
+fs_LR_32k↔fsaverage resample) and, where the fraction is high *on a workload that
+should be local*, tune `cell` / `r_max` / `_coarse_level_for` (or add the
+narrow-band SDF / 2-ring widening). The fallback keeps every result exact
+regardless, so this is pure speed, safe to tune empirically. No `@perf` marker
+exists yet — a perf-harness is its own infra task.
 
 ## 10. Governance
 
