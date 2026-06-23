@@ -1,0 +1,717 @@
+---
+title: "Performance: backends, kernels, and cost"
+---
+
+::: {.callout-tldr title="Fast path"}
+This is the **reference-tier** page of the unit. The narrative chapters taught
+*what* a registration computes — represent a map, apply it
+([resampling](resampling.qmd#sec-pullback-sampling)), score the mismatch
+([similarity](similarity.qmd#sec-ssd)), and minimise it
+([optimization](optimization.qmd#sec-objective)). This page is about *how the
+hot pieces are dispatched and how much they cost*, so a developer can tune a
+pipeline rather than discover the wall in production. One quantity organises
+everything: **the warp — an interpolation gather — is the hot kernel, and almost
+every cost lever is "how many full-field warps (and stencils, and convolutions)
+do I pay, at what size?"**
+
+- **Backends** (@sec-backends): two ops have a platform-dependent engine. The
+  velocity-field **Gaussian smoother** runs the separable FIR shift-sum on GPU
+  and the Young–van Vliet recursive IIR on CPU (whenever σ clears the validity
+  floor) — a *platform* decision, not a σ crossover; the **interpolation
+  gather** runs `jax.scipy.ndimage.map_coordinates` for `Linear`/`NearestNeighbour`
+  and an explicit separable gather for the wide kernels.
+- **Kernels** (@sec-kernels): two custom Pallas/Triton force kernels —
+  `LNCCForce(derivative='center')` and `DemonsForce` — fuse a stencil + force
+  combine to collapse HBM round-trips, *when the problem is large enough* (the
+  when-it-pays-off framing, sibling to the geometry unit's
+  [ELL discussion](../geometry/performance.qmd#sec-backend)).
+- **Batching** (@sec-batching): `vmap` over a frame series with the reference
+  pyramid + steepest-descent images **hoisted out** of the batch; the
+  inverse-compositional constant-template Hessian reuse (~4–7×).
+- **Cost** (@sec-cost): the levers — scaling-and-squaring `n_steps`, pyramid
+  depth, per-level iteration schedules, early-exit — and the one hard rule:
+  **never call a HOST op inside a jitted loop.**
+:::
+
+This page is more engineering-flavoured than its siblings, but the unit's posture
+holds throughout. Validation is **class / correlation, never bit-parity**: a fused
+kernel earns its place by being *tolerance-equal* to a pure-JAX parity oracle and
+*faster at scale*, never by being the only path. And the cost reasoning is the same
+*where does this method's curve cross the reference's?* question the
+[geometry performance page](../geometry/performance.qmd#sec-classes-cost) asks of
+its sparse operators — applied here to warps, stencils, and convolutions.
+
+A note on the tags used below. The unit classifies each public routine by
+**execution class** — **DIFF-JAX** (jittable + differentiable), **HOST-CTOR**
+(data-dependent construction, host side), **HOST-QA** (a host query returning a
+Python scalar/bool) — as introduced on the
+[foundations page](foundations.qmd#sec-classes). These are a *documentation*
+convention, not literal source annotations; they exist precisely to make the
+governing performance rule concrete, and @sec-cost states it.
+
+## A motivating task {#sec-motivation}
+
+You are tuning a preprocessing pipeline. The same three registrations from the rest
+of the unit are in it — align a subject's T1 to MNI (rigid then affine), realign a
+moving fMRI series (`volreg`), warp the result with a diffeomorphism
+(`diffeomorphic_demons_register` / `greedy_syn_register`) — and the question is no
+longer "does it recover the warp?" (it does) but "**why is the first call slow, and
+which knob makes the steady state fast?**" The honest first measurement is a trap:
+the default `rigid_register` *compiles* for ~2.4 minutes on an L4, then *runs* in
+38 ms — read as one number, that is "registration is slow on GPU"; read correctly,
+it is a one-time cold compile over a fast steady state
+([the cold-compile finding][cold]). Every section below is an answer to "what is
+this really costing, and what do I change?"
+
+[cold]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/registration-recipe-cold-compile.md
+
+## Backends: two ops with a platform-dependent engine {#sec-backends}
+
+Most of `nitrix` runs one algorithm everywhere and lets XLA target the device. Two
+performance-critical operations do *not*: each picks its engine from the deployment
+platform, because the optimal choice flips between CPU and GPU. Both decisions are
+made at **trace time** from a concrete signal (`jax.default_backend()`), so they are
+`jit`-safe — the branch is resolved when the graph is built, not inside it.
+
+### The Gaussian-smoothing split: FIR on GPU, recursive IIR on CPU
+
+The diffeomorphic recipes smooth a *velocity / displacement field* twice per
+iteration — a **fluid** smooth of the raw update and a **diffusion** smooth of the
+accumulated field (@sec-cost) — and SyN does it four times. So the smoother is on
+the per-iteration hot path, and its engine matters. There are two ways to compute a
+separable Gaussian, and they have opposite cost profiles.
+
+The obvious one is a **truncated FIR convolution**: build a 1-D Gaussian kernel of
+half-width $\lfloor\texttt{truncate}\cdot\sigma + \tfrac12\rfloor$ (scipy's
+convention; `truncate=4` by default) and convolve along each axis. The tap count is
+
+$$
+K \;=\; 2\left\lfloor \texttt{truncate}\cdot\sigma + \tfrac12 \right\rfloor + 1,
+$$ {#eq-fir-taps}
+
+which grows **linearly with $\sigma$** — at the registration sigmas ($\sigma=1$–1.5)
+that is only 9–13 taps. `smoothing.gaussian(x, *, sigma, method='fir')`
+(**DIFF-JAX**) runs this, and below a ~64-tap crossover (`_FIR_SHIFT_MAX_TAPS = 64`)
+it does *not* even call `lax.conv_general_dilated`: it uses a **shifted-slice
+weighted sum** $\sum_j k_j\,\texttt{shift}(x, j)$, which is byte-identical to the
+conv but beats it ~2.5× on GPU and ~3× on CPU (the conv's im2col/lowering overhead
+dwarfs a handful of vectorised slice-muladds at small $K$). Above ~64 taps the
+conv's $O(N\cdot K)$ work amortises and that path takes over.
+
+The alternative is the **Young–van Vliet 3rd-order recursive Gaussian**
+(`method='recursive'`): a fixed forward-then-backward IIR recurrence
+$w_n = B\,x_n + a_1 w_{n-1} + a_2 w_{n-2} + a_3 w_{n-3}$ whose coefficients are fit
+so the DC gain is exactly 1 (a constant input is preserved). Its cost is **$O(N)$
+per axis, independent of $\sigma$** — there is no kernel to grow. The catch is that
+it is a *sequential* `lax.scan` (O(N) depth), it is an *approximation* (a 3rd-order
+pole fit, ~1% interior error vs the FIR Gaussian), and it needs $\sigma \ge 0.5$
+(`_YVV_MIN_SIGMA`) for the pole placement to stay accurate.
+
+So the two *cost* curves cross over. @fig-performance-gaussian plots it: the FIR
+work climbs with $\sigma$ while the recursion stays flat, so beyond some $\sigma$ the
+sigma-independent recursion is the cheaper arithmetic. But — and this is the subtle
+part — `_smooth_method` does **not** pick the engine from a $\sigma$ crossover. The
+*device* dominates the decision, because the recursion's O(N) sequential *depth*
+matters more than its O(N) work count. The selection rule, in
+`register/_svf.py::_smooth_method`, is platform-first:
+
+- **On GPU, always FIR** — at *any* $\sigma$, regardless of the cost curves. The
+  parallel shift-sum is ~0.3 ms against the sequential recursion's ~12 ms at the
+  registration sigmas (the docstring's measured figures): a `lax.scan` of O(N) depth
+  starves a device built for parallel width, so the recursion never wins on GPU even
+  where its arithmetic is cheaper. GPU smoothing therefore stays byte-identical to
+  the FIR path.
+- **On CPU, recursive** — but the gate is the YvV *validity floor*, not a tap
+  crossover: it fires whenever every per-axis $\sigma \ge 0.5$ (`_YVV_MIN_SIGMA`),
+  else FIR. On a CPU the FIR shift-sum is the dominant per-iteration cost and the
+  sequential recursion runs at native speed, so the sigma-independent recursion is
+  ~1.1–1.5× cheaper (the docstring's measured range) across the whole valid range —
+  which is why the gate is a floor and not a crossover.
+
+The ~80-tap mark the figure draws is a *different* crossover: it is the
+shift-sum→`conv` switch **inside** the FIR path (the `_FIR_SHIFT_MAX_TAPS = 64`
+threshold, set conservatively below the ~80-tap point the source comment records as
+measured), not the FIR-vs-recursive engine boundary. The recursive engine is never
+selected by a tap count at all — only by the platform and the $\sigma \ge 0.5$ floor.
+
+The price of the CPU choice is honest: the recursion uses an edge-extension boundary
+and differs from the FIR truncation by ~1–2% within a few $\sigma$ of the edge, so
+CPU and GPU results diverge *slightly* — but it is a *regulariser*, not the
+objective, so the recovery is unaffected. This is the same platform split
+`signal._iir` uses (parallel-prefix on GPU, sequential recursion on CPU), and the
+reasoning is identical: **the optimal recurrence engine flips with whether the
+device rewards parallel depth.**
+
+```{python}
+#| label: fig-performance-gaussian
+#| fig-cap: "The Gaussian-smoothing cost curves. Left: the FIR kernel tap count (eq. @eq-fir-taps) grows linearly with σ; the registration sigmas (1–1.5, shaded) sit at 9–13 taps, deep in the cheap shift-sum regime. Right: per-axis arithmetic vs σ — the FIR conv is O(N·taps) and climbs, while the Young–van Vliet recursion is O(N) and flat (independent of σ), so beyond ~80 taps (σ≈10 at truncate=4) the recursion is the cheaper arithmetic. NOTE the engine is NOT picked from this crossover: nitrix runs FIR on GPU at *any* σ (the parallel shift-sum wins; the recursion's sequential O(N) depth starves the device) and the recursion on CPU whenever every per-axis σ clears the YvV validity floor (≥ 0.5) — a floor, not a tap crossover. The ~80-tap mark drawn here is actually the shift-sum→conv switch *inside* the FIR path (_FIR_SHIFT_MAX_TAPS = 64)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+N = 256
+truncate = 4.0
+CROSS_TAPS = 80                          # measured shift-sum->conv switch (~80 taps;
+                                         # _FIR_SHIFT_MAX_TAPS=64 is set below it)
+sigmas = np.linspace(0.5, 22.0, 90)
+taps = 2 * np.floor(truncate * sigmas + 0.5).astype(int) + 1
+fir_work = N * taps                      # O(N * taps)
+yvv_work = np.full_like(sigmas, N * CROSS_TAPS)  # sigma-independent recursion cost
+
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(11, 4.2))
+axL.plot(sigmas, taps, color="#b03b4b", lw=2)
+axL.axhline(CROSS_TAPS, color="0.4", ls=":", lw=1.2,
+            label="recursive-equivalent (~80 taps)")
+axL.axvspan(0.5, 1.5, color="#cde0f0", alpha=0.7,
+            label="registration σ (1–1.5; 9–13 taps)")
+axL.set_xlabel("Gaussian σ (voxels)")
+axL.set_ylabel(r"FIR kernel taps  $= 2\lfloor 4\sigma + \frac{1}{2}\rfloor + 1$")
+axL.set_title("FIR kernel width grows linearly with σ")
+axL.legend(fontsize=8, loc="upper left")
+
+axR.plot(sigmas, fir_work / 1e3, color="#b03b4b", lw=2,
+         label="FIR conv  O(N·taps)  (grows with σ)")
+axR.plot(sigmas, yvv_work / 1e3, color="#3b6fb0", lw=2,
+         label="Young–van Vliet recursive  O(N), σ-independent")
+axR.axvspan(0.5, 1.5, color="#cde0f0", alpha=0.7)
+xover = sigmas[np.argmin(np.abs(fir_work - yvv_work))]
+axR.axvline(xover, color="0.4", ls=":", lw=1.2)
+axR.text(xover + 0.4, N * CROSS_TAPS / 1e3 * 1.30,
+         f"cost cross ≈ σ {xover:.0f}\n(NOT the engine gate)",
+         fontsize=8, color="0.3")
+axR.set_xlabel("Gaussian σ (voxels)")
+axR.set_ylabel("per-axis arithmetic (×10³ muladds, N=256)")
+axR.set_title("Per-axis arithmetic vs σ (engine is platform-gated)")
+axR.legend(fontsize=8, loc="upper left")
+
+fig.suptitle("Gaussian smoothing: FIR (σ-growing) vs recursive IIR (σ-flat)",
+             fontsize=12)
+fig.tight_layout(rect=(0, 0, 1, 0.95))
+plt.show()
+```
+
+### The interpolation-gather split
+
+The warp gather has its own two-engine story, developed in full on
+[the resampling page](resampling.qmd#sec-separable). For the orders scipy's
+`map_coordinates` supports natively — order 1 (`Linear`) and order 0
+(`NearestNeighbour`) — the kernel lowers onto `jax.scipy.ndimage.map_coordinates`
+(`_map_coordinates_sample`), the XLA-native gather. On the pinned JAX
+(`cuda12==0.10.1`) this is **faster than the explicit corner gather on the GPU too**
+(1.1–1.5× for any image $\ge 48^3$); an earlier "GPU prefers the explicit gather"
+dispatch was stale. The wide kernels (`Lanczos`, `CubicBSpline`) have no
+`map_coordinates` equivalent, so they use the explicit **separable gather**
+(`_separable_gather`), which evaluates $T$ taps per axis rather than the dense
+$T^{\text{ndim}}$ corners — an order of magnitude for a 6-tap `Lanczos` in 3-D.
+
+The one thing the performance reader must carry from there is the **CPU/GPU backend
+gap**, the subject of [its own characterisation][b15]. The gather is GPU-strong when
+*fused into a larger graph* — `integrate_velocity_field` (which iterates the gather,
+@sec-cost) runs ~13× over a cupy reimplementation on the L4, because XLA fuses the
+self-composition while cupy pays a kernel launch per step. But two narrower faces
+lose: (1) on **CPU**, XLA's `map_coordinates` lowering is ~5–9× slower than scipy's
+tight C loop for the *iterated* small-grid `integrate_velocity_field` (per-call/scan
+overhead dominates) — so CPU-side SVF-exponential preprocessing at small grids eats
+that gap; (2) for a **single-shot** GPU warp, `cupyx`'s specialised kernel edges
+`nitrix` out (~1.8×). Both are throughput characterisations, not correctness issues
+(fidelity passes everywhere), and they motivated the per-platform engine choice
+above. The mooted cures — a `pure_callback`+scipy CPU path, a dlpack/FFI cupy GPU
+path, or a Pallas trilinear-resample kernel — are scoped in
+[the alternative-backends research note][b16] but gated on a blocked consumer; the
+in-XLA gather is the GA path. The same `register/recipes.py` Gaussian-pyramid
+machinery that feeds coarse-to-fine ([resampling](resampling.qmd#sec-pyramid)) sits
+on this gather, so a pipeline's resampling cost is this engine's cost.
+
+This is the same forward-*method* ⟂ *backend* factoring the geometry unit draws for
+its ELL matvec ([XLA, not Pallas](../geometry/performance.qmd#sec-backend)): the
+*task* (warp by a deformation, resize) is orthogonal to the *kernel* (`Linear`,
+`Lanczos`) and to the *engine* (`map_coordinates` vs separable gather). Adding a
+kernel never touches the engine dispatch.
+
+[b15]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/interpolation-backend-cpu-gpu-gap.md
+[b16]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/alternative-interp-backends-xla.md
+
+## Custom kernels: when a fused force pays off {#sec-kernels}
+
+The diffeomorphic recipes are the most bandwidth-bound work in the unit. Post the
+loop-roll ([the cold-compile fix][cold]), the Demons recipe's GPU steady time grows
+**super-linearly** with volume (96³→160³: 80→648 ms, an 8.1× cost for 4.6× the
+voxels) — the per-iteration traffic is several 3-component spatial fields at low
+arithmetic intensity, and `greedy_syn_register` scales with the *identical* exponent
+(it is a *family* property of the [SVF substrate](diffeomorphic.qmd#sec-svf), not a
+Demons quirk). When an operation is memory-bound and composed of primitives XLA
+*breaks fusion between*, a hand-written **fused kernel** can collapse the round-trips
+— and that is exactly when it pays off, the sibling of the geometry unit's
+"flat-box `reduce_window` vs im2col" decision.
+
+### The force kernels and the fusion they buy
+
+Two force kernels ship as Pallas/Triton, behind the `backend=` field on the
+`Force` records. Recall the per-iteration force step
+([diffeomorphic forces](diffeomorphic.qmd#sec-forces)): from the warped moving image
+$I_m\circ\varphi$ it forms a velocity update $u$, which needs $\nabla(I_m\circ\varphi)$
+— a **stencil**. XLA happily fuses the *elementwise* force chain
+(`diff`, `j`, `denom`, `scale`, `u`) but **breaks fusion at the stencil**, so
+$\nabla(I_m\circ\varphi)$ (a `ndim`-component field) round-trips HBM before the force
+consumes it. The fused kernel reads the warped image *once* with a one-voxel halo,
+computes the stencil in-tile, does the channel reduction, and writes **only** $u$:
+
+- **`DemonsForce(backend=…)`** → `demons_esm_force_pallas`. Fuses the symmetric
+  central-difference $\nabla(I_m\circ\varphi)$ with the ESM combine
+  $u = (I_f - I_m\circ\varphi)\,J / (|J|^2 + \alpha^2(I_f - I_m\circ\varphi)^2)$,
+  $J = \tfrac12(\nabla I_f + \nabla(I_m\circ\varphi))$. The kernel is **ULP-equal**
+  to the pure-JAX `_BoundDemons.update`, *including* the `denom > eps` guard
+  (`_DEMONS_DENOM_EPS = 1e-8`), edge-padding the halo to match
+  `spatial_gradient(mode='nearest')` exactly. Tiles are **ndim-aware** — each
+  Triton program holds its whole $(T{+}1)^{\text{ndim}}$ haloed tile in registers,
+  so the tile *volume* must stay small (a 16³ side in 3-D; a 64³ tile spills
+  registers and wedges `ptxas`).
+- **`LNCCForce(derivative='center', backend=…)`** → `lncc_center_force_pallas`. The
+  centre-only LNCC force needs five windowed sums ($\Sigma m, \Sigma f, \Sigma m^2,
+  \Sigma f^2, \Sigma mf$). The kernel uses ITK's **scanning window**: a program owns
+  a $(T_y, T_z)$ column and **scans $x$**, carrying the five sums as running state
+  and *dropping the trailing $x$-plane, adding the leading one* each step — $O(\text{window
+  area})$ per voxel, not $O(\text{window volume})$. Unlike a direct $(2r{+}1)^3$
+  accumulation (which merely *ties* the JAX integral image), the streamed single
+  pass **beats** it, and the win grows with volume (the kernel docstring records
+  ~1.5× at 128³, ~2.2× at 192³, ~3× at 256³ for one box sum). It is tolerance-equal to
+  `LNCCForce(derivative='center').update`, boundary included.
+
+A clean detail in both: the kernel body is *rolled* (`lax.fori_loop` over the window
+offsets), not unrolled — an unrolled $(2r{+}1)^2 \times$ five-sum body blows up
+`ptxas` (84 s even at 16³), so the roll keeps cold-compile radius-independent. The
+[mosaic-demons design doc][esm] gives the full per-step anatomy.
+
+[esm]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/pallas-demons-esm-force.md
+
+### The when-it-pays-off gate
+
+A fused kernel is not free, and `nitrix` is deliberate about when it fires — the
+same "do not build/run a Pallas kernel where it does not measurably win" discipline
+the [geometry unit's backend policy](../geometry/performance.qmd#sec-backend) takes.
+The dispatch falls back to the pure-JAX path — *loudly*, a `NitrixBackendFallback`
+warning deduplicated per `(function, shape, dtype, backend)` — under any of:
+
+| condition | why the kernel defers |
+|---|---|
+| **CPU** (`backend` resolves to `'jax'`) | the kernels are GPU-tile programs |
+| **pre-Ampere GPU** | `pallas-cuda` needs sm_80+ (`_AMPERE_MIN_MAJOR = 8`) |
+| **not 3-D** / **anisotropic spacing** | the kernels are 3-D isotropic single-pair |
+| **a `vmap` cohort** | a batched force is the dense-field cohort path, not single-pair |
+| **untileable shape** (`PallasNotTileable`) | no friendly tile divides an extent |
+| **too small** (LNCC: `warped.size < _MIN_KERNEL_VOXELS`, ~$128^3$) | a *silent* size defer |
+
+The size gate is the subtle, instructive one. The LNCC sliding-window kernel only
+beats the JAX integral image above ~$128^3$; *below* that, its per-program $x$-scan
+overhead dominates. And the ANTs schedule **front-loads iterations at the coarse
+(small) levels** — so firing the kernel there would *slow* the recipe. The gate
+defers the coarse levels to JAX and runs the kernel only at the large fine stages
+(e.g. the 256³ full-resolution level) where it wins. This is the cost reasoning in
+miniature: a kernel is a win *at a scale*, and the dispatch encodes that scale rather
+than firing blindly.
+
+The backend literals are `'auto'`, `'pallas-cuda'`, `'jax'` (`resolve_backend`):
+`'auto'` resolves to `pallas-cuda` on Ampere+ and `jax` otherwise; an explicit
+`'pallas-cuda'` on unsupported hardware is a hard error (not a silent downgrade, so a
+deployment mistake surfaces). The proposed **Mosaic GPU** (Hopper/Blackwell) kernels
+— a larger-bin MI joint-histogram, an in-tile separable LNCC — are *filed but
+unbuilt*: they are blocked on the Triton backend's no-intermediate-slicing and
+atomics-merge limits, and the development box is an L4 (Ada, sm_89) on which Mosaic
+does not run, so the team [does not build a kernel it cannot test][mosaic]. There is
+no `'pallas-mosaic'` arm in the code today.
+
+The MI force (`MIForce`, `bins=32`, `sample_stride=1`) is the other side of this
+coin: its bottleneck is the joint-histogram **scatter**, and on the pinned Triton
+backend a Pallas histogram merely *ties* the XLA `scatter_add` (the 32²-entry table
+is L2-cached, so global atomics are not DRAM-bound). So `MIForce` ships *without* a
+Pallas backend field — the win is hardware-gated to Hopper, where a per-block SMEM
+histogram is the established fast path. Its one cheap lever is `sample_stride`
+(ITK "Regular" sampling): estimate the histogram from every $k$-th voxel.
+
+## Batching: hoisting shared work out of the loop {#sec-batching}
+
+The single biggest GPU win in the unit is structural, not a kernel: **batch a
+cohort with `vmap` and hoist everything shared out of the per-element body.** The
+canonical case is `volreg`, motion realignment of a 4-D series.
+
+### `volreg`: one reference, a vmapped per-frame solve
+
+`volreg(series, *, reference='mean', passes=1, spec, space, method='auto')`
+(**DIFF-JAX**) rigidly registers every frame of a $(T, *\text{spatial})$ series to a
+common reference. The naive thing — loop over frames, register each — recomputes the
+reference's expensive setup $T$ times and compiles a graph per frame. `volreg`
+instead does the shared work **once** and `vmap`s only the per-frame update:
+
+```python
+pyr_f     = gaussian_pyramid(ref, levels=spec.levels, ...)   # reference pyramid: once
+ref_levels = ic_reference(pyr_f, ndim)                       # SD images + Hessian: once
+matrix, params, realigned, costs = jax.vmap(per_frame, in_axes=(0, 0))(series, init)
+```
+
+The reference's Gaussian pyramid is built once; the **inverse-compositional
+steepest-descent images and the Gauss–Newton Hessian** (next section) are built once
+for the whole series in `ic_reference`; only `ic_register_core` (the per-frame
+warp/update) rides the `vmap` over the frame axis (`in_axes=(0, 0)` — one frame, one
+init). The whole series compiles **once**. A two-pass schedule (`passes=2`)
+re-references to the mean of the first-pass realignment and warm-starts from its
+parameters — the standard robustness step when the initial reference is the blurred
+mean of an unaligned series.
+
+`volreg` uses the **fixed `lax.scan`**, not early-exit, and the reason is the cohort.
+A `vmap`-ed `lax.while_loop` *does* batch — but it runs until the **slowest lane**
+exits (the all-lanes condition), so the per-frame early-exit advantage degrades to
+the cohort's slowest frame. The structural win is the batched-GPU throughput, not
+per-frame early stopping, so the fixed scan (reproducible, `vmap`-batchable,
+reverse-differentiable) is the right default. (`volreg` does offer an opt-in
+batch-aggregate early-exit on the IC path, where each frame freezes once converged
+and the cohort stops at the slowest — useful when motion varies widely — but it is
+not reverse-differentiable.) Because the per-frame solve is the matrix-free
+Gauss–Newton/LM path, `volreg` requires a **least-squares metric** (`SSD`); the
+scalar BFGS metrics have no batched path.
+
+A smaller hoist worth naming: every `Force` exposes `bind(fixed, *, ndim,
+rel_spacing) -> BoundForce`, which **hoists the fixed-image-dependent state once**
+(e.g. $\nabla I_f$). The driver binds the force per level, then calls
+`BoundForce.update(warped)` every iteration — the fixed gradient is computed once,
+not re-derived each step. The same hoist-the-constant-template idea, one rung down.
+
+### Inverse-compositional: the constant-template Hessian
+
+The deeper batching win is *why* the per-frame solve is cheap, and it is the
+[inverse-compositional fast path](optimization.qmd#sec-inverse-comp). A forward
+Gauss–Newton/LM iteration re-linearises the **warped moving** image every step:
+`jax.jacfwd` of the residual does $P$ forward-mode tangent warps ($P=6$ rigid, 12
+affine), plus the residual warp, plus LM's trial-cost warp — about **$P+2$ full-field
+warps per iteration**. The warp is the hot kernel, so per-iteration cost tracks that
+count.
+
+The inverse-compositional scheme linearises the **template** (fixed image) instead,
+*at the identity*. The steepest-descent images
+$\mathrm{SD}[x,j] = \nabla I_f(x)\cdot\partial W(x;\theta)/\partial\theta_j|_0$ and the
+Gauss–Newton Hessian $H = \mathrm{SD}^\top\mathrm{SD}$ do **not** depend on the
+current iterate, so they are computed **once per level** (`_steepest_descent`,
+`_hessian_inv`; precomputed by `ic_reference`) and **reused every iteration**. Per
+iteration only the cheap part runs: **one warp**, the error, the projection
+$\mathrm{SD}^\top e$ from the gradient moments, an $H^{-1}$ matvec, and a closed-form
+compositional matrix update. One warp per iteration against the forward path's
+$P+2$ — the measured speedup is **~4–7×** (7.1× at 64³, 6.5× at 96³, 3.7× at 128³ on the
+L4; the ratio erodes at scale because the per-iteration $\mathrm{SD}^\top e$ re-reads
+the full $(M, P)$ steepest-descent array, a bandwidth cost). @fig-performance-warps
+shows both the mechanism (the warp count) and the measured win.
+
+In `volreg` this compounds with the cohort hoist: $H$ is built once *for the whole
+series* on the reference, then the single-warp update is `vmap`-ed over all frames.
+That is two hoists stacked — the reference Hessian out of the *iteration* loop, and
+the reference setup out of the *frame* loop. The constant-template Hessian is also
+the source of a hazard (it can be unreliable on a few-voxel coarse grid), guarded by
+a trust-region step clamp (`_TRUST_EXTENT_FACTOR = 1.0`) and an opt-in backtracking
+line search (`_BACKTRACK_ALPHAS = (1.0, 0.5, 0.25)`) over a tiny relative ridge
+(`_RIDGE = 1e-4`) — detailed on [the optimization page](optimization.qmd#sec-inverse-comp).
+
+```{python}
+#| label: fig-performance-warps
+#| fig-cap: "Why inverse-compositional is faster: it pays one warp per iteration, not P+2. Left: full-field warps (interpolation gathers — the hot kernel) per optimiser iteration. The forward Gauss-Newton/LM path does ≈ P+2 (jacfwd's P tangent warps + the residual warp + LM's trial-cost warp; P=6 rigid, 12 affine); inverse-compositional linearises the constant template ONCE per level and reuses the steepest-descent images + Hessian, so each iteration is a single warp + a projection + a closed-form matrix update. Right: the measured steady-state speedup (L4, f32, 3 levels × 20 iters, identical recovery) — 7.1× at 64³ eroding to 3.7× at 128³ as the per-iteration SDᵀe re-read becomes bandwidth-bound."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+labels = ["rigid (P=6)", "affine (P=12)"]
+fwd = [6 + 2, 12 + 2]          # forward GN/LM: ~ P + 2 warps/iter
+ic = [1, 1]                    # inverse-compositional: 1 warp/iter
+
+x = np.arange(len(labels))
+w = 0.36
+fig, (axA, axB) = plt.subplots(1, 2, figsize=(10.5, 4.2))
+
+bars_f = axA.bar(x - w / 2, fwd, w, color="#b03b4b",
+                 label="forward GN/LM  (≈ P + 2)")
+bars_i = axA.bar(x + w / 2, ic, w, color="#3b6fb0",
+                 label="inverse-compositional  (1)")
+for b, v in zip(bars_f, fwd):
+    axA.text(b.get_x() + b.get_width() / 2, v, str(v), ha="center",
+             va="bottom", fontsize=9)
+for b, v in zip(bars_i, ic):
+    axA.text(b.get_x() + b.get_width() / 2, v, str(v), ha="center",
+             va="bottom", fontsize=9)
+axA.set_xticks(x)
+axA.set_xticklabels(labels)
+axA.set_ylabel("full-field warps (gathers) per iteration")
+axA.set_title("Per-iteration warp count")
+axA.legend(fontsize=8, loc="upper left")
+axA.set_ylim(0, 16)
+
+sizes = ["64³", "96³", "128³"]
+speedup = [7.1, 6.5, 3.7]      # measured IC vs forward (L4, perf-levers doc)
+bars = axB.bar(sizes, speedup, color="#4477aa")
+for b, v in zip(bars, speedup):
+    axB.text(b.get_x() + b.get_width() / 2, v, f"{v}×", ha="center",
+             va="bottom", fontsize=9)
+axB.axhline(1.0, color="0.5", ls="--", lw=1)
+axB.set_ylabel("IC vs forward speedup (measured, L4)")
+axB.set_title("Constant-template Hessian reuse: measured win")
+axB.set_ylim(0, 8.2)
+
+fig.suptitle("Why inverse-compositional is faster: one warp per iteration",
+             fontsize=12)
+fig.tight_layout(rect=(0, 0, 1, 0.95))
+plt.show()
+```
+
+### Cold compile, and how to amortise it
+
+`vmap` and the loop-roll also fix the *first-call* cost. The optimiser, Demons, and
+scaling-and-squaring loops are rolled with `lax.scan` — XLA compiles **one**
+iteration, not `levels × iters` copies, so cold-compile time is roughly **constant in
+the iteration count** (the default rigid recipe dropped from ~145 s to ~9 s when the
+loops were rolled; a jaxpr equation-count regression guard locks this in). The
+remaining cold compile amortises the usual way:
+
+- **Reuse the jit cache.** The compile is keyed on the *static* configuration —
+  shapes, dtype, and the frozen `RegistrationSpec` / `Interpolator` / `Force`
+  records (they ride `jit` static arguments). Register many subjects *at the same
+  shape and spec* and you pay one compile, then the steady state each.
+- **Keep shapes stable.** A data-dependent shape forces a retrace. This is why
+  `MultiLabel`'s label set is a static constructor tuple
+  ([resampling](resampling.qmd#sec-kernels)) and why `integrate_velocity_field`'s
+  `n_steps='auto'` is **eager-only** (it reads `max|v|` to size the scan — a host
+  query, unavailable under `jit`). Under `jit`, pass a concrete `int`.
+
+The [cold-compile decision record][cold] has the full before/after table.
+
+## The cost levers, and the one rule {#sec-cost}
+
+With the engines, kernels, and batching in hand, here is the tuning menu — the knobs
+a developer actually turns, drawn from [the perf-levers writeup][levers].
+
+### Scaling-and-squaring `n_steps`: composition accuracy vs cost
+
+The diffeomorphic exponential `integrate_velocity_field(velocity, *, n_steps=7,
+mode='nearest')` (**DIFF-JAX**) integrates a stationary velocity field to a
+displacement by **scaling-and-squaring**: scale $v$ by $1/2^{\texttt{n\_steps}}$ so
+the first sub-step is near-diffeomorphic, then compose the field with itself
+`n_steps` times,
+
+$$
+\varphi_0 = v / 2^{\texttt{n\_steps}},
+\qquad
+\varphi_{i+1} = \varphi_i + \varphi_i \circ (\mathrm{id} + \varphi_i),
+$$ {#eq-ss}
+
+the doubling rolled with `lax.scan`. Each composition is a warp — a gather — so the
+cost is **linear in `n_steps`**, and this loop is *nested inside* the diffeomorphic
+iteration loop, so it multiplies. The accuracy story is the other half:
+@fig-performance-ss shows the composition error roughly **halving with each
+doubling**, so there are sharply diminishing returns. The default `n_steps=7` (a
+128× scaling) reduces the error ~130× over `n_steps=0` and sits well past the elbow.
+The recipes use `n_steps=6` (Demons) / `n_steps=5` (SyN) — fewer doublings, because
+their pre-affine-aligned *residual* velocities are small, so a coarser integration is
+already inside the diffeomorphic regime. The floor is physical: too few doublings and
+the first sub-step exceeds the ~0.5-voxel regime where $\mathrm{id} + v/2^n$ is
+invertible, and the flow can **fold** (a negative-Jacobian map — no longer a
+diffeomorphism). `n_steps='auto'` picks $\lceil\log_2(2\,\max|v|)\rceil$ (clamped to
+$[1, 12]$) — but it is **HOST-QA** (reads `max|v|` concretely), so it is eager-only.
+
+```{python}
+#| label: fig-performance-ss
+#| fig-cap: "Scaling-and-squaring: the accuracy/cost trade. The RMS error of the integrated displacement field vs a converged (n_steps=14) reference, for three velocity magnitudes, as a function of n_steps (log-y). The error halves with each doubling — diminishing returns — so the default n_steps=7 (dashed) sits well past the elbow at a ~130× error reduction over n_steps=0. Cost is linear in n_steps (one self-composition warp each), and this loop nests inside the diffeomorphic iteration, so it multiplies: the recipes use n_steps=5–6 on their small pre-aligned residual velocities. Too few doublings (left) and the first sub-step leaves the ~0.5-voxel invertibility regime and the flow can fold."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+H = W = 96
+yy, xx = np.mgrid[0:H, 0:W].astype(float)
+cy, cx = H / 2.0, W / 2.0
+rx = (xx - cx) / W
+ry = (yy - cy) / H
+decay = np.exp(-(rx ** 2 + ry ** 2) / 0.10)
+idgrid = np.stack(np.meshgrid(np.arange(H), np.arange(W), indexing="ij"),
+                  axis=-1).astype(float)
+
+
+def bilinear(field, coords):
+    cr, cc = coords[..., 0], coords[..., 1]
+    r0 = np.floor(cr).astype(int)
+    c0 = np.floor(cc).astype(int)
+    fr = cr - r0
+    fc = cc - c0
+    r0c, r1c = np.clip(r0, 0, H - 1), np.clip(r0 + 1, 0, H - 1)
+    c0c, c1c = np.clip(c0, 0, W - 1), np.clip(c0 + 1, 0, W - 1)
+    out = np.empty_like(field)
+    for ch in range(2):
+        f = field[..., ch]
+        top = f[r0c, c0c] * (1 - fc) + f[r0c, c1c] * fc
+        bot = f[r1c, c0c] * (1 - fc) + f[r1c, c1c] * fc
+        out[..., ch] = top * (1 - fr) + bot * fr
+    return out
+
+
+def integrate(v, n):
+    phi = v / float(2 ** n)
+    for _ in range(n):
+        phi = phi + bilinear(phi, idgrid + phi)   # phi o (id + phi)
+    return phi
+
+
+steps = np.arange(0, 11)
+fig, ax = plt.subplots(figsize=(7.2, 4.2))
+for amp, col in zip([8.0, 16.0, 32.0], ["#3b6fb0", "#d08a2c", "#b03b4b"]):
+    v = amp * decay[..., None] * np.stack([-ry, rx], axis=-1)
+    ref = integrate(v, 14)
+    errs = [np.sqrt(np.mean(np.sum((integrate(v, n) - ref) ** 2, -1)))
+            for n in steps]
+    maxv = float(np.max(np.sqrt(np.sum(v * v, -1))))
+    ax.semilogy(steps, np.maximum(errs, 1e-12), "-o", ms=4, color=col,
+                label=f"max|v| ≈ {maxv:.0f} vox")
+
+ax.axvline(7, color="0.4", ls="--", lw=1.2, label="default n_steps = 7")
+ax.set_xlabel("n_steps (number of doublings)")
+ax.set_ylabel("RMS composition error vs converged flow (vox, log)")
+ax.set_title("Scaling-and-squaring: accuracy vs cost")
+ax.legend(fontsize=8, loc="upper right")
+ax.set_ylim(1e-6, None)
+fig.tight_layout()
+plt.show()
+```
+
+### Pyramid depth and per-level iteration schedules
+
+The [Gaussian pyramid](resampling.qmd#sec-pyramid) is a cost lever as well as an
+accuracy one. `RegistrationSpec.levels` (default 3) sets how many resolutions; each
+extra coarse level is cheap (an 8× smaller volume in 3-D) and buys capture range, so
+depth is usually a *bargain*. But there is a floor: the affine Hessian degrades on a
+few-voxel grid, so the affine recipes cap the pyramid (`_MIN_COARSE_AXIS = 16`) so
+the coarsest level keeps $\ge 16$ voxels per axis — loudly, via an
+`AffinePyramidDepthWarning` ([optimization](optimization.qmd#sec-coarse-fine)).
+
+The cheapest lever of all is the **per-level iteration schedule**.
+`RegistrationSpec.iterations` accepts a length-`levels` coarse-to-fine tuple, not just
+a scalar (`resolve_iterations` expands and reverses it to the finest-first driver
+order). The finest level is the costliest per iteration yet converges fastest (a
+second-order solver needs a handful of finest steps), so front-load the cheap coarse
+levels and starve the expensive fine one: a schedule like `(40, 20, 5)` is faster
+than and as accurate as a flat `30`. For `volreg` this is dramatic — motion
+realignment is a small-displacement problem, so `(4, 2, 1)` realigns identically to
+the default 30/level at ~1/8 the cost (the default over-iterates by ~25×).
+
+### Early exit: stop when the cost plateaus
+
+The other iteration-count lever is `mode='early_exit'`
+([optimization](optimization.qmd#sec-convergence)): instead of a fixed `lax.scan`,
+run a `lax.while_loop` that stops once the cost plateaus. The criterion
+(`Convergence(threshold=1e-6, window=10)`) is ANTs-style — fit a least-squares line
+over the last `window` per-iteration costs, normalise its slope by the mean cost, and
+stop when $|\text{slope}|/|\text{mean}| < \text{threshold}$. On a hard single-pair
+rigid warp this converges in ~18 of 90 iterations (~1.7×) at identical recovery. The
+caveat is hard: a `lax.while_loop` has **no reverse-mode rule** (the data-dependent
+trip count cannot be back-propagated), so `jax.grad` through an early-exit
+registration is unsupported — the code raises an actionable error pointing you to the
+fixed scan or the [implicit-function layer](optimization.qmd#sec-gauss-newton). And
+under `vmap` it degrades to the slowest lane (@sec-batching), which is why `volreg`
+defaults to the fixed scan.
+
+### The execution-class rule
+
+Every lever above is an instance of one rule, and it is the rule to internalise from
+this page (the same governing rule the
+[geometry unit states](../geometry/performance.qmd#sec-classes-cost)):
+
+> **Never call a HOST op — HOST-CTOR or HOST-QA — inside a jitted loop.**
+
+The expensive *constructions* are **HOST-CTOR**: building a Gaussian pyramid, the
+inverse-compositional `ic_reference` (steepest-descent images + Hessian),
+`resolve_iterations`. They are designed to be **amortised** — built once per
+shape/reference, then reused across iterations and across a `vmap`-ed cohort (the
+whole point of @sec-batching). The host *queries* are **HOST-QA**: `n_steps='auto'`
+(reads `max|v|`), any `.item()`/`float()` on a traced value, a Python `if` on a
+device scalar. Either kind inside a jitted loop is the single most expensive mistake
+this surface invites: a HOST-CTOR re-pays its construction (and likely *retraces*,
+since its output shape is data-dependent) every step, turning a build-once cost into
+a per-step cost; a HOST-QA simply will not trace. The per-iteration work that *does*
+run inside `jit`/`vmap`/`grad` stays **DIFF-JAX**: the warp, the force update, the
+scaling-and-squaring composition, the matrix update. Get that boundary right and the
+levers above are all you touch.
+
+[levers]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/registration-matrix-recipe-perf-levers.md
+[mosaic]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/mosaic-hopper-registration-kernels.md
+
+## Further reading
+
+- Young, I. T. and van Vliet, L. J. (1995). "Recursive implementation of the
+  Gaussian filter." *Signal Processing*, 44(2), 139–151; and Vliet, L. J., Young,
+  I. T., and Verbeek, P. W. (1998/2002). — the 3rd-order recursive Gaussian and the
+  pole-fit coefficients the CPU smoother uses.
+- Deriche, R. (1993). *Recursively implementing the Gaussian and its derivatives.*
+  INRIA Research Report 1893. — the canonical recursive-Gaussian alternative; the
+  sigma-independent-cost idea.
+- Baker, S. and Matthews, I. (2004). "Lucas–Kanade 20 years on: a unifying
+  framework." *International Journal of Computer Vision*, 56(3), 221–255. — the
+  inverse-compositional constant-template Hessian; the one-warp-per-iteration win.
+- Cox, R. W. and Jesmanowicz, A. (1999). "Real-time 3D image registration for
+  functional MRI." *Magnetic Resonance in Medicine*, 42, 1014–1018; Jenkinson, M.,
+  Bannister, P., Brady, M., and Smith, S. (2002). "Improved optimization for the
+  robust and accurate linear registration and motion correction of brain images."
+  *NeuroImage*, 17(2), 825–841. — AFNI `3dvolreg` and FSL `mcflirt`, the batched
+  motion-realignment lineage `volreg` follows.
+- Vercauteren, T., Pennec, X., Perchant, A., and Ayache, N. (2009). "Diffeomorphic
+  demons: efficient non-parametric image registration." *NeuroImage*, 45(1),
+  S61–S72. — the ESM demons force the Pallas kernel fuses, and the velocity-field
+  scaling-and-squaring exponential.
+- Arsigny, V., Commowick, O., Pennec, X., and Ayache, N. (2006). "A log-Euclidean
+  framework for statistics on diffeomorphisms." *MICCAI 2006*. — stationary velocity
+  fields and the scaling-and-squaring integration of @eq-ss.
+- Avants, B. B., Epstein, C. L., Grossman, M., and Gee, J. C. (2008). "Symmetric
+  diffeomorphic image registration with cross-correlation." *Medical Image
+  Analysis*, 12(1), 26–41. — the greedy-SyN / LNCC lineage the force kernels match in
+  behaviour, and the windowed-convergence schedule.
+- Bell, N. and Garland, M. (2009). *Implementing sparse matrix-vector multiplication
+  on throughput-oriented processors.* SC '09. — the throughput-vs-overhead reasoning
+  (fused fast path vs materialising path) the kernel gate shares with the geometry
+  unit's ELL analysis.
+- The JAX documentation on Pallas GPU lowering (Triton and Mosaic backends),
+  `lax.scan` / `lax.while_loop`, and `jax.scipy.ndimage.map_coordinates` — the
+  primitives whose lowering behaviour sets this page's backend policy.
+
+## See also
+
+- Source — the Gaussian-smoothing backend split and engines:
+  [`smoothing/gaussian.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/smoothing/gaussian.py)
+  (FIR shift-sum / conv, Young–van Vliet recursive),
+  [`register/_svf.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_svf.py)
+  (`_smooth_method`, `_smooth_vector`),
+  [`_internal/backend.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_internal/backend.py)
+  (`resolve_backend`, `auto_backend`, `default_backend_is_gpu`, `NitrixBackendFallback`).
+- Source — the interpolation-gather engines:
+  [`geometry/_interpolate.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/_interpolate.py)
+  (`_map_coordinates_sample`, `_separable_gather`),
+  [`geometry/grid.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/grid.py)
+  (`integrate_velocity_field`, the scaling-and-squaring scan).
+- Source — the custom force kernels and their dispatch:
+  [`_kernels/cuda/lncc_force.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_kernels/cuda/lncc_force.py),
+  [`_kernels/cuda/demons_force.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_kernels/cuda/demons_force.py),
+  [`register/_force.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_force.py)
+  (`LNCCForce`, `DemonsForce`, `MIForce`, `MetricForce`, `SumForce`, the size/shape gates).
+- Source — batching and the fast path:
+  [`register/_volreg.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_volreg.py),
+  [`register/_inverse_compositional.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_inverse_compositional.py),
+  [`register/_converge.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_converge.py),
+  [`register/_core.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_core.py)
+  (`RegistrationSpec`, `resolve_iterations`).
+- Design / decision records:
+  [`registration-matrix-recipe-perf-levers.md`](https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/registration-matrix-recipe-perf-levers.md),
+  [`registration-recipe-cold-compile.md`](https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/registration-recipe-cold-compile.md),
+  [`pallas-demons-esm-force.md`](https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/pallas-demons-esm-force.md),
+  [`mosaic-hopper-registration-kernels.md`](https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/mosaic-hopper-registration-kernels.md),
+  [`interpolation-backend-cpu-gpu-gap.md`](https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/interpolation-backend-cpu-gpu-gap.md),
+  [`alternative-interp-backends-xla.md`](https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/alternative-interp-backends-xla.md).
+- Neighbouring pages: [resampling and the gather engines](resampling.qmd#sec-separable) ·
+  [the inverse-compositional optimiser](optimization.qmd#sec-inverse-comp) ·
+  [the diffeomorphic / SVF substrate](diffeomorphic.qmd#sec-svf) ·
+  [the recipes and specs](recipes.qmd#sec-specs). Cross-unit: the
+  [geometry performance page](../geometry/performance.qmd#sec-backend) (the
+  fused-vs-composed kernel decision and the XLA-not-Pallas policy this page mirrors).

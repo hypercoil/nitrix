@@ -1,0 +1,914 @@
+---
+title: "Diffeomorphic registration: velocity fields that do not tear"
+---
+
+::: {.callout-tldr title="Fast path"}
+This is the top of the [transform ladder](foundations.qmd#sec-ladder) — the
+*deformable* rung, where the map is a dense per-voxel field rather than a small
+matrix. A global affine can centre a subject's brain in MNI space, but it cannot
+match one person's sulci to another's: that needs a transform with a free vector
+at every voxel. The danger is that such a map can **tear or fold** — two voxels
+landing on the same place, the warp turning anatomy inside out. The single idea
+that buys safety: don't parametrise the *displacement* and hope it stays
+invertible; parametrise a **velocity field** and *flow along it*. A flow can
+stretch arbitrarily but never crosses itself, so its endpoint map is a
+diffeomorphism **by construction**.
+
+This page owns the whole deformable path end-to-end:
+
+- **displacement vs absolute coordinates**, and why composing two warps is *not*
+  adding their fields (`compose_displacement`, `jacobian_det_displacement`);
+- **stationary velocity fields**, the exponential `exp(v)` by
+  scaling-and-squaring (`integrate_velocity_field`), and the two ways to carry the
+  state (`representation='algebra'` vs `'group'`);
+- the **log-domain algebra** — composing velocities (`compose_velocity`, the BCH
+  correction), inverting a warp (`invert_displacement`), and the SVF logarithm
+  (`field_log`), with the crucial caveat that `exp` is not onto;
+- the **regularisers** that keep the map physical — explicit penalties
+  (`gradient_smoothness`, `bending_energy`, `jacobian_folding_penalty`) and the
+  implicit Gaussian smoothing the recipes use;
+- the **force ADT** and the dense-field solvers (`DemonsForce`, `LNCCForce`,
+  `MIForce`, `MetricForce`, `SumForce`) and the recipes that drive them
+  (`diffeomorphic_demons_register`, `greedy_syn_register`).
+
+If you read the [optimization page](optimization.qmd#sec-objective) for the
+matrix recipes, this is its dense-field sibling: same coarse-to-fine spine,
+different state.
+:::
+
+## A motivating question {#sec-motivation}
+
+Hold one concrete task for the whole page. You have two subjects'
+**T1-weighted scans**, already roughly aligned by a rigid-plus-affine stage (the
+[matrix rungs](transforms.qmd#sec-decomposition)), and you want to bring one
+subject's cortex into precise correspondence with the other's — gyrus on gyrus,
+sulcus in sulcus — so you can compare cortical thickness or pool a statistical map
+across a cohort in a common template. The affine got the brains the same size and
+position; it cannot do the rest, because **individual folding patterns differ**.
+Subject A has a bifurcating superior frontal sulcus where subject B has a single
+deep one. No rotation, scaling, or shear of the whole head moves A's sulcus onto
+B's without dragging the rest of the cortex out of register. We need a transform
+with a *local* degree of freedom — a displacement vector at every voxel.
+
+That richness is also the hazard. A free field of $N$ vectors over $N$ voxels can
+do anything, including the one thing a map between anatomies must never do:
+**fold**. If the deformation pushes two neighbouring voxels past each other, the
+map is no longer injective — two bits of subject A's brain land on the same bit of
+B's, the local volume goes to zero and then negative, and "cortical thickness at
+this point" stops meaning anything. We want the expressive power of a dense field
+*and* the guarantee that the map is a **diffeomorphism**: smooth, invertible, with
+a smooth inverse. That is the whole subject of this page. We will build it the way
+the unit always does — start with the obvious thing, watch it break, add one idea.
+
+## Displacement, absolute coordinates, and composition {#sec-displacement}
+
+The obvious representation of a deformable map is a **displacement field**
+$u(x)$: at each voxel $x$, the vector you add to get where it goes,
+$$
+\varphi(x) = x + u(x).
+$$ {#eq-disp}
+This is the **relative** convention, and it is the one every public field in this
+module uses: a channels-last array of shape `(*spatial, ndim)`, one displacement
+vector per voxel, in **index space** (voxel $i$ sits at coordinate $i$;
+`indexing='ij'`, the convention from the [geometry
+unit](../geometry/foundations.qmd)). The displacement of the identity map is the
+zero field.
+
+To *apply* a warp we must sample the moving image at the deformed positions — the
+[pull-back](foundations.qmd#sec-pullback). But a sampler reads from **absolute**
+coordinates, not relative ones: `spatial_transform(image, deformation)` (the
+[backward-warp engine](resampling.qmd#sec-pullback-sampling)) treats
+`deformation` as the coordinate to sample at, so you must hand it the *absolute*
+field
+$$
+\text{deformation}(x) = x + u(x) = \texttt{identity\_grid}(\text{shape}) + u,
+$$ {#eq-abs}
+where `identity_grid(shape)` (**DIFF-JAX**, from `geometry.grid`) is exactly the
+field `grid[i] == i`. This split — relative $u$ for storage and algebra, absolute
+`identity_grid + u` at the sampler boundary — is a constant background motif; every
+routine below pays it. The displacement is what you carry, regularise, and
+exponentiate; the absolute grid is what the sampler consumes.
+
+### Composing two warps is not adding their fields {#sec-compose}
+
+Here is the first place the naive instinct fails. You have two displacement
+fields — warp by `inner` first, then by `outer` — and you want the single field
+that does both. The tempting answer is `inner + outer`. It is wrong, and the
+reason is the heart of why deformable registration has its own algebra.
+
+Composition means *function* composition: the combined map is
+$(\mathrm{id} + \text{outer}) \circ (\mathrm{id} + \text{inner})$. Track a point.
+First `inner` sends $x \mapsto x + \text{inner}(x)$. Then `outer` acts **at that
+new location**, not at $x$: it adds $\text{outer}(x + \text{inner}(x))$. So
+$$
+\varphi(x) = x + \text{inner}(x) + \text{outer}\bigl(x + \text{inner}(x)\bigr),
+$$ {#eq-compose}
+and the composed *displacement* is
+$\text{inner} + \text{outer}\circ(\mathrm{id} + \text{inner})$ — the second field
+**sampled through the first**, not added to it. That sampling is exactly what
+`compose_displacement(outer, inner)` (**DIFF-JAX**, `geometry.deformation`)
+computes:
+
+```python
+grid = identity_grid(spatial_shape) + inner
+warped_outer = spatial_transform(outer, grid, mode='nearest')
+return inner + warped_outer
+```
+
+The elementwise sum `inner + outer` only equals this when `outer` is constant over
+the support of `inner` — i.e. essentially never for two non-trivial warps.
+@fig-diffeomorphic-compose makes the gap concrete: two shears that do not commute
+(`inner` shears axis 0 by axis 1, `outer` shears axis 1 by axis 0). The true
+composition curves; the elementwise sum is a flat parallelogram; the overlay shows
+several voxels of disagreement. The `mode='nearest'` default (edge-replicate) is
+the flow-field convention — a displacement field has no meaningful "outside", so
+sampling past the edge clamps rather than zero-fills, matching
+`integrate_velocity_field` and the rest of the SVF stack.
+
+```{python}
+#| label: fig-diffeomorphic-compose
+#| fig-cap: "Composing warps is function composition, not addition. Two non-commuting shears, composed via `compose_displacement` (left, blue) versus added elementwise (centre, red); the overlay (right) shows a multi-voxel gap. The elementwise sum is wrong because the outer warp acts at the *deformed* location, so it must be sampled through the inner warp."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+H = W = 64
+ii, jj = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+grid = np.stack([ii, jj], axis=-1).astype(np.float64)
+
+def sample(field, coords):
+    Hh, Ww = field.shape[:2]
+    x = np.clip(coords[..., 0], 0, Hh - 1)
+    y = np.clip(coords[..., 1], 0, Ww - 1)
+    x0 = np.floor(x).astype(int); x1 = np.minimum(x0 + 1, Hh - 1)
+    y0 = np.floor(y).astype(int); y1 = np.minimum(y0 + 1, Ww - 1)
+    wx = (x - x0)[..., None]; wy = (y - y0)[..., None]
+    return ((1 - wx) * (1 - wy) * field[x0, y0] + (1 - wx) * wy * field[x0, y1]
+            + wx * (1 - wy) * field[x1, y0] + wx * wy * field[x1, y1])
+
+def compose_displacement(outer, inner):  # (id+outer) o (id+inner)
+    return inner + sample(outer, grid + inner)
+
+c = np.array([(H - 1) / 2.0, (W - 1) / 2.0])
+rel = grid - c
+k = 0.45
+inner = rel @ np.array([[0.0, k], [0.0, 0.0]]).T   # shear x0 by x1
+outer = rel @ np.array([[0.0, 0.0], [k, 0.0]]).T   # shear x1 by x0
+
+composed = compose_displacement(outer, inner)
+naive_sum = outer + inner
+rms = float(np.sqrt(np.mean(np.sum((composed - naive_sum) ** 2, axis=-1))))
+
+fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.7))
+def plot_warp(ax, disp, title, color):
+    d = grid + disp
+    for r in range(0, H, 4):
+        ax.plot(d[r, :, 1], d[r, :, 0], color=color, lw=0.6)
+    for cc in range(0, W, 4):
+        ax.plot(d[:, cc, 1], d[:, cc, 0], color=color, lw=0.6)
+    ax.set_title(title, fontsize=10)
+    ax.set_xlim(-18, W + 18); ax.set_ylim(H + 18, -18)
+    ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+
+plot_warp(axes[0], composed, "compose_displacement(outer, inner)\n(id+outer) ∘ (id+inner)", "#1f77b4")
+plot_warp(axes[1], naive_sum, "outer + inner\n(elementwise sum — wrong)", "#d62728")
+plot_warp(axes[2], composed, "overlay", "#1f77b4")
+plot_warp(axes[2], naive_sum, f"overlay: RMS gap = {rms:.1f} vox", "#d62728")
+fig.suptitle("Composing warps is not adding displacements", fontsize=11)
+fig.tight_layout(rect=[0, 0, 1, 0.93])
+plt.show()
+```
+
+### Detecting a fold: the Jacobian determinant {#sec-jacdet}
+
+When does a displacement field stop being a valid map? When it folds — when the
+local volume element collapses. The map's local linearisation is its **Jacobian**
+$$
+J = \nabla\varphi = I + \nabla u,
+$$ {#eq-jac}
+the matrix of partial derivatives of the deformed coordinate. The map is locally
+orientation-preserving (no fold) exactly when $\det J > 0$; $\det J = 1$ is
+locally volume-preserving; $\det J \to 0$ is a local collapse and $\det J < 0$ is a
+fold, where anatomy turns inside out. This is *the* diffeomorphism QA: a warp is a
+diffeomorphism on the grid iff $\det J > 0$ at **every** voxel.
+
+`jacobian_displacement(u)` (**DIFF-JAX**, `geometry.grid`) builds $I + \nabla u$ by
+central differences along each spatial axis, returning the full
+`(*spatial, d, d)` Jacobian; `boundary_mode` (`'nearest'` default, the voxelmorph
+QA convention) and per-axis `spacing` control the difference stencil.
+`jacobian_det_displacement(u)` (**DIFF-JAX**) returns just the per-voxel
+determinant, and is the one you actually call — for $d \le 3$ it uses the
+closed-form $2\times2$ / Sarrus $3\times3$ determinant (no LU factorisation noise,
+no $O(d^3)$ cost), falling back to `jnp.linalg.det` only for $d > 3$. Every recipe
+returns this field as `jacobian_det`; the standard acceptance test is *"no voxels
+with $\det J \le 0$."* @fig-diffeomorphic-jacdet shows a gentle pinch (positive
+everywhere — a diffeomorphism) beside a strong one that folds (a ring of
+$\det J \le 0$ voxels, outlined).
+
+```{python}
+#| label: fig-diffeomorphic-jacdet
+#| fig-cap: "The Jacobian determinant det(I + ∇u) is the folding detector. A gentle pinch (left) keeps det J > 0 everywhere — a diffeomorphism. A strong pinch (right) drives det J ≤ 0 in a ring (black contour): the map folds and is no longer invertible there. Every recipe returns this field as `jacobian_det`; the acceptance test is 'no voxels with det J ≤ 0'."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
+
+H = W = 80
+ii, jj = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+grid = np.stack([ii, jj], axis=-1).astype(np.float64)
+c = np.array([(H - 1) / 2.0, (W - 1) / 2.0])
+g = np.exp(-np.sum((grid - c) ** 2, axis=-1) / (2.0 * 12.0 ** 2))
+direction = np.zeros_like(grid); direction[..., 0] = grid[..., 0] - c[0]
+
+def displacement(amp):
+    return -amp * direction * g[..., None]
+
+def central_diff(field, axis):
+    nxt = np.roll(field, -1, axis=axis); prv = np.roll(field, +1, axis=axis)
+    sl_last = [slice(None)] * field.ndim; sl_last[axis] = -1
+    sl_first = [slice(None)] * field.ndim; sl_first[axis] = 0
+    nxt[tuple(sl_last)] = field[tuple(sl_last)]
+    prv[tuple(sl_first)] = field[tuple(sl_first)]
+    return (nxt - prv) / 2.0
+
+def jac_det(u):  # det(I + grad u), 2x2 closed form
+    d0 = central_diff(u, 0); d1 = central_diff(u, 1)
+    return (1.0 + d0[..., 0]) * (1.0 + d1[..., 1]) - d1[..., 0] * d0[..., 1]
+
+det_smooth = jac_det(displacement(0.30))
+det_fold = jac_det(displacement(1.25))
+
+fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.8))
+norm = TwoSlopeNorm(vmin=min(det_fold.min(), -0.5), vcenter=0.0,
+                    vmax=max(det_smooth.max(), det_fold.max(), 2.0))
+for ax, det, title in (
+    (axes[0], det_smooth, f"smooth warp\nmin det J = {det_smooth.min():.2f} > 0  (diffeomorphism)"),
+    (axes[1], det_fold, f"folding warp\nmin det J = {det_fold.min():.2f} ≤ 0  (tears)"),
+):
+    im = ax.imshow(det, cmap="RdBu", norm=norm)
+    ax.contour(det, levels=[0.0], colors="k", linewidths=1.4)
+    ax.set_title(title, fontsize=10); ax.set_xticks([]); ax.set_yticks([])
+cbar = fig.colorbar(im, ax=axes, shrink=0.85, label="det J = det(I + ∇u)")
+cbar.ax.axhline(0.0, color="k", lw=1.2)
+fig.suptitle("Jacobian determinant detects folding (det J ≤ 0 ⇒ the map tears)", fontsize=11)
+plt.show()
+```
+
+A field stored as a raw displacement gives us no *guarantee* against this; we can
+only check after the fact. The next section removes the check by changing what we
+parametrise.
+
+## Stationary velocity fields and the exponential {#sec-svf}
+
+Here is the idea that makes the guarantee structural rather than hoped-for.
+Instead of writing down the displacement directly, describe the **velocity** of a
+flow. Picture every voxel as a particle in a steady fluid. A **stationary velocity
+field** $v(x)$ assigns each spatial location a fixed velocity vector — fixed in
+*space*, so a particle's velocity depends only on where it currently is, not on
+the clock. Release the particles and let them drift for unit time. Where each one
+ends up defines the deformation
+$$
+\varphi = \exp(v),
+$$ {#eq-exp}
+the **flow** (or Lie exponential) of $v$. This is the same object as the matrix
+exponential from the [transforms page](transforms.qmd#sec-lie-exp), lifted from a
+$d\times d$ generator to a dense field of generators — one tangent vector per
+voxel instead of one for the whole image.
+
+Why does flowing guarantee a diffeomorphism? Because a steady flow's trajectories
+**cannot cross**. If two particles were ever at the same place at the same time
+they would have the same velocity and the same future and past — so they were
+always the same particle. Distinct start points stay distinct, the endpoint map is
+a bijection, and because $v$ is smooth the flow and its inverse are smooth. The map
+is a diffeomorphism *by construction*: not "we checked $\det J$ and it happened to
+be positive," but "no field of finite velocity, flowed for finite time, can fold."
+That is the entire payoff. The price is that we now have to *integrate* the flow.
+
+### Computing the flow: scaling and squaring {#sec-ss}
+
+Integrating an ODE sounds expensive. The trick that makes it cheap — and
+differentiable, and GPU-clean — is **scaling and squaring**, the same algorithm
+used for the matrix exponential. It rests on one identity of flows: flowing for
+time 1 equals flowing for time $1/2$ and then *doing it again*,
+$$
+\exp(v) = \exp(v/2) \circ \exp(v/2).
+$$ {#eq-halving}
+Run this backwards. Scale $v$ down by $2^n$ until the sub-step is tiny — under
+about half a voxel. Over so small a step the flow is indistinguishable from a
+single Euler step, so $\exp(v/2^n) \approx \mathrm{id} + v/2^n$ is *already* an
+(approximately) diffeomorphic displacement, with no integration needed. Then
+recover the full flow by **squaring** — composing the field with itself — $n$
+times, each composition doubling the integration time:
+$$
+\phi_0 = \frac{v}{2^n}, \qquad
+\phi_{i+1} = \phi_i + \phi_i \circ (\mathrm{id} + \phi_i),
+$$ {#eq-ss}
+where the composition is precisely the `compose_displacement` operation of
+@eq-compose (a field sampled through itself). After $n$ doublings, $\phi_n$ is the
+displacement of $\exp(v)$. Each squaring is one resample; the cost is $n$ warps,
+not an ODE solve.
+
+This is `integrate_velocity_field(velocity, n_steps=7, mode='nearest')`
+(**DIFF-JAX**, `geometry.grid`):
+
+```python
+phi0 = velocity / float(2**n_steps)
+def _double(phi, _):
+    return phi + spatial_transform(phi, id_grid + phi, mode=mode), None
+phi, _ = jax.lax.scan(_double, phi0, xs=None, length=n_steps)
+```
+
+The doubling loop is a `lax.scan` over a **static** `n_steps`, so it compiles once
+and stays differentiable — the diffeomorphic recipes nest this inside their
+iteration loop, where an unrolled Python loop would multiply the compiled graph.
+Two knobs earn comment:
+
+- **`n_steps`** is the number of doublings (default 7, i.e. a $128\times$
+  down-scale). More steps is more accurate but more compute (per-step accuracy
+  roughly halves each doubling). It must be large enough that the *first* sub-step
+  $\max\|v\|/2^n$ lands inside the $\sim$0.5-voxel regime where $\mathrm{id} + v/2^n$
+  is itself invertible — below that the integrated flow can fold, defeating the
+  whole construction. The rule of thumb $n \ge \lceil\log_2(2\max\|v\|)\rceil$ is
+  what `n_steps='auto'` computes from the velocity. But `'auto'` reads
+  $\max\|v\|$ as a concrete value to size the static scan, so it is **eager-only**:
+  it cannot run under `jax.jit` (the scan length must be static, and a traced
+  reduction cannot provide it), and the recipes always pass an explicit `int`. A
+  warp larger than the grid can resolve folds at *any* `n_steps` — that is a
+  resolution limit, not an integration one.
+- **`mode='nearest'`** (edge-replicate) is the only boundary mode that yields a
+  sensible flow at the image border; `'constant'` silently miscomputes the flow
+  within $\sim n$ voxels of every edge. This default was deliberately flipped from
+  the naive `'constant'` to match voxelmorph's `VecInt(method='ss')`.
+
+@fig-diffeomorphic-ss integrates an analytic *rotational* velocity field (a rigid
+rotation generator about the centre) at increasing `n_steps`. At `n_steps=0` the
+bare first-order step $\mathrm{id}+v$ visibly shears the grid — the large
+peripheral velocity over-shoots in a straight line; by `n_steps=6` the warp is a
+clean rotation matching the closed-form flow (RMS error dropping from $\sim$1.6 to
+$\sim$0.2 voxels).
+
+```{python}
+#| label: fig-diffeomorphic-ss
+#| fig-cap: "Scaling-and-squaring converges to the true flow. An analytic rotational velocity field (a rotation generator about the centre) integrated at increasing n_steps. n_steps=0 is the bare first-order step id+v, which over-shoots the periphery in straight lines; each squaring doubles the integration time, and by n_steps=6 the warp matches the closed-form rotation (rightmost). RMS error to the exact flow shrinks monotonically."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+H = W = 64
+ii, jj = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+grid = np.stack([ii, jj], axis=-1).astype(np.float64)
+c = np.array([(H - 1) / 2.0, (W - 1) / 2.0])
+omega = 0.35  # the flow's total turn (radians); generator A = omega * R90
+rel = grid - c
+v = omega * np.stack([-rel[..., 1], rel[..., 0]], axis=-1)
+
+def sample(field, coords):
+    Hh, Ww = field.shape[:2]
+    x = np.clip(coords[..., 0], 0, Hh - 1); y = np.clip(coords[..., 1], 0, Ww - 1)
+    x0 = np.floor(x).astype(int); x1 = np.minimum(x0 + 1, Hh - 1)
+    y0 = np.floor(y).astype(int); y1 = np.minimum(y0 + 1, Ww - 1)
+    wx = (x - x0)[..., None]; wy = (y - y0)[..., None]
+    return ((1 - wx) * (1 - wy) * field[x0, y0] + (1 - wx) * wy * field[x0, y1]
+            + wx * (1 - wy) * field[x1, y0] + wx * wy * field[x1, y1])
+
+def scaling_and_squaring(vel, n):
+    phi = vel / (2.0 ** n)
+    for _ in range(n):
+        phi = phi + sample(phi, grid + phi)
+    return phi
+
+ct, st = np.cos(omega), np.sin(omega)        # exp(A) is rotation by omega
+true_disp = (rel @ np.array([[ct, -st], [st, ct]]).T) + c - grid
+
+steps_list = [0, 1, 3, 6]
+fig, axes = plt.subplots(1, len(steps_list) + 1, figsize=(3.0 * (len(steps_list) + 1), 3.2))
+def plot_grid(ax, disp, title, color="#1f77b4"):
+    d = grid + disp
+    for r in range(0, H, 4):
+        ax.plot(d[r, :, 1], d[r, :, 0], color=color, lw=0.6)
+    for cc in range(0, W, 4):
+        ax.plot(d[:, cc, 1], d[:, cc, 0], color=color, lw=0.6)
+    ax.set_title(title, fontsize=10)
+    ax.set_xlim(-2, W + 1); ax.set_ylim(H + 1, -2)
+    ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+
+for ax, n in zip(axes[:-1], steps_list):
+    disp = scaling_and_squaring(v, n)
+    err = np.sqrt(np.mean(np.sum((disp - true_disp) ** 2, axis=-1)))
+    plot_grid(ax, disp, f"n_steps = {n}\nRMS err = {err:.2f} vox")
+plot_grid(axes[-1], true_disp, "true flow\n(closed-form)", color="#b30000")
+fig.suptitle("Scaling-and-squaring: exp(v) converges to the true flow", fontsize=11)
+fig.tight_layout(rect=[0, 0, 1, 0.92])
+plt.show()
+```
+
+### Two representations: algebra vs group {#sec-representation}
+
+There is a choice in *what state the iteration carries*, exposed as
+`SVFSpec.representation` and threaded through every SVF recipe. It is the
+performance/exactness lever of the whole module, so it is worth understanding
+before the recipes.
+
+- **`'algebra'`** carries the stationary velocity $v$ and **re-exponentiates every
+  iteration** (`integrate_velocity_field` inside the loop). The state lives in the
+  Lie *algebra* (the tangent space of velocities); the update is additive there,
+  $v \leftarrow v + u$, and the displacement $\exp(v)$ is recomputed from scratch
+  each step. This is the **exact** SVF — byte-identical to the pre-v4 recipe, the
+  parity oracle — but pays $\sim$7 gathers per iteration (the $n$-step
+  scaling-and-squaring plus the warp).
+- **`'group'`** (the default) carries the *displacement* $s$ directly — the state
+  lives in the *group* of deformations — and uses the **greedy compositive
+  update**: warp the moving image by $\mathrm{id}+s$ in one gather, then *compose*
+  the regularised increment onto $s$ ($\varphi \leftarrow \varphi \circ
+  (\mathrm{id}+\delta)$). No per-iteration `exp`; $\sim$2 gathers per iteration. The
+  velocity, if you want it, is recovered **once** at finalisation via `field_log`.
+
+The two are not the same fixed point — a greedy composition of many forces is not
+generally $\exp$ of a single stationary velocity (next section) — so they agree on
+*synthetic recovery* to tolerance, not field-for-field. The default is `'group'`
+for speed; reach for `'algebra'` when you need the exact-SVF semantics or a parity
+check.
+
+## The log-domain algebra {#sec-bch}
+
+To compose, invert, and average velocity fields we need to work in the **log
+domain** — to do arithmetic on $v$ that corresponds to composition of the maps
+$\exp(v)$. This is where the Lie structure stops being decoration and starts doing
+work.
+
+### Composing velocities: BCH {#sec-compose-vel}
+
+Suppose you have two velocities $v$ and $u$ and want the single velocity $z$ whose
+exponential is the composed map: $\exp(z) = \exp(v) \circ \exp(u)$. For *scalars*
+(or commuting matrices) the answer is trivial: $e^v e^u = e^{v+u}$, so $z = v + u$.
+The obvious thing is to add the velocities. And that is `compose_velocity(v, u,
+order=1)` (**DIFF-JAX**, `geometry.deformation`): just $v + u$, the additive
+log-domain update almost every diffeomorphic-Demons implementation uses.
+
+It is **exact only when the fields commute**. In general two flows do not — flowing
+along $v$ then $u$ lands somewhere different from $u$ then $v$ — and the discrepancy
+is captured by the **Baker–Campbell–Hausdorff** series. The first correction is
+$$
+z = v + u + \tfrac{1}{2}[v, u] + \dots,
+$$ {#eq-bch}
+where $[v, u]$ is the **Lie bracket** of the two velocity fields. The bracket
+measures exactly how much the two flows fail to commute. For velocity fields it is
+the difference of directional derivatives,
+$$
+[v, u] = (v\cdot\nabla)\,u - (u\cdot\nabla)\,v,
+$$ {#eq-bracket}
+i.e. how much $u$ changes as you drift along $v$, minus how much $v$ changes as you
+drift along $u$. `compose_velocity(v, u, order=2)` adds the
+$\tfrac{1}{2}[v,u]$ term; the implementation forms each directional derivative as
+the Jacobian of the field (recovered as $\nabla u = J - I$ from
+`jacobian_displacement`) contracted against the other field. In the Demons recipe
+this is the `bch_order` knob: `1` is the plain additive update (default), `2` the
+BCH-corrected log-update — more faithful when the per-step force is large enough
+that non-commutativity matters.
+
+### Inverting a warp {#sec-inversion}
+
+A diffeomorphism has an inverse; we frequently need it (the symmetric SyN
+construction below builds $\varphi$ from a forward and an inverse half). For an SVF
+the inverse is free in the log domain — $\exp(v)^{-1} = \exp(-v)$, flow backwards.
+But when we carry the *displacement* (group mode) we need the inverse of a field
+$\varphi = \mathrm{id} + s$ directly. The defining condition is that composing the
+two gives the identity, $(\mathrm{id}+s)\circ(\mathrm{id}+s_{\text{inv}}) =
+\mathrm{id}$. Expanding with @eq-compose and solving for $s_{\text{inv}}$ gives a
+**fixed-point** equation:
+$$
+s_{\text{inv}} = -\,s \circ (\mathrm{id} + s_{\text{inv}}).
+$$ {#eq-inv}
+Read it as a recipe: a good inverse displacement is *minus the forward
+displacement, sampled at where the inverse sends you*. Iterate it from
+$s_{\text{inv}}=0$ and it converges — geometrically, at rate $\|\nabla s\|$. In the
+**diffeomorphic regime** $\|\nabla s\| < 1$ (which the recipes' smoothing
+guarantees) that is fast; the iteration plateaus only as $\|\nabla s\| \to 1$, a
+stiff near-folding deformation.
+
+`invert_displacement(s, ...)` (**DIFF-JAX**, `geometry.deformation`) solves this
+via `numerics.fixed_point_solve`, so it is differentiable w.r.t. $s$ by the
+**implicit-function theorem** (the gradient flows through the *solution*, not by
+unrolling the iteration — O(1) memory in the iteration count). Two arguments are
+about robustness:
+
+- **`acceleration`** — `'picard'` (default) is the plain iteration above, fastest
+  *and* most accurate on the smoothed regime registration actually produces;
+  `'anderson'` is a solve-free quasi-Newton mixing that converges where Picard
+  genuinely stalls ($\|\nabla s\| \to 1$). Use Anderson only once Picard plateaus.
+- **`return_residual`** (**HOST-QA** when its scalar is read) — the failure mode is
+  a *silent* non-converged inverse returned at the iteration cap. Passing
+  `return_residual=True` also returns the realised inversion error
+  $\mathrm{rms}\bigl((\mathrm{id}+s)\circ(\mathrm{id}+s_{\text{inv}}) -
+  \mathrm{id}\bigr)$ so the caller can **assert** convergence rather than trust it.
+
+### The diffeomorphism square root {#sec-sqrt}
+
+The inversion fixed point has a sibling that powers the logarithm: the
+**diffeomorphism square root**, the half-way warp $w$ with $(\mathrm{id}+w) \circ
+(\mathrm{id}+w) = \mathrm{id}+s$ (i.e. `compose_displacement(w, w) = s`). It is the
+internal `_diffeo_sqrt` helper, and its construction is a small lesson in
+fixed-point design. The naive iteration $w \leftarrow s - w\circ(\mathrm{id}+w)$
+has a near-identity Jacobian of $-I$ and **oscillates**. The cure is a single idea:
+**half-damping**,
+$$
+w \leftarrow w + \tfrac{1}{2}\bigl(s - \texttt{compose\_displacement}(w, w)\bigr),
+\qquad w_0 = s/2,
+$$ {#eq-sqrt}
+which makes the near-identity Jacobian $0$, turning the iteration **super-linear**
+(residual $\sim 10^{-10}$ in well under ten steps even for a large deformation) —
+plain Picard, no acceleration needed.
+
+### The SVF logarithm, and why `exp` is not onto {#sec-log}
+
+`field_log(displacement, ...)` (**DIFF-JAX**, `geometry.deformation`) is the
+inverse of `integrate_velocity_field`: given a deformation $\varphi = \mathrm{id} +
+s$, recover the stationary velocity $v$ with $\exp(v) = \varphi$. It is **inverse
+scaling-and-squaring** — the dense analogue of `linalg.matrix_log`. Run the
+exponential backwards: take $n_{\sqrt{}}$ diffeomorphism square roots (@eq-sqrt)
+until the warp is near identity, then $\exp$ of a near-identity field is just the
+field itself, so $v \approx 2^{n_{\sqrt{}}} \cdot w$ (the small square-root
+displacement scaled back up by the doublings you undid).
+
+Now the caveat the docstring is emphatic about, and that every group-mode recipe
+depends on: **`exp` is not surjective.** A general diffeomorphism — in particular a
+greedy composition of many *non-commuting* warps, which is exactly what group mode
+accumulates — is **not** $\exp(v)$ for any single stationary $v$. The SVFs form a
+submanifold of the diffeomorphism group, not all of it. So `field_log` returns the
+**best SVF fit**, and you must hold two distinct accuracy notions apart:
+
+- **Round-trip fidelity** — `integrate_velocity_field(field_log(s),
+  n_steps=n_sqrt) == id + s` is **exact** (to `sqrt_tol`), *unconditionally*,
+  because $v/2^{n_{\sqrt{}}}$ *is* the square-root displacement by construction.
+  This is what reproduces the given warp — what most consumers (and the recipes'
+  velocity recovery) need.
+- **Generating-velocity fidelity** — if $\varphi$ *is* $\exp(v_{\text{true}})$,
+  then $v = v_{\text{true}} + O(\|v\|^2/2^{n_{\sqrt{}}})$ (the log approximation,
+  halving with each extra root); on a *non-SVF* $\varphi$ there is no
+  $v_{\text{true}}$ and the fit carries a nonzero residual $\|\exp(v)-\varphi\|$.
+
+These two pull `correction` in opposite directions. `'first_order'` (default) sets
+$v = 2^{n_{\sqrt{}}}\cdot w$ and **preserves the exact round-trip**; `'bch'` applies
+the one-term correction $v = 2^{n_{\sqrt{}}}(w - \tfrac{1}{2}(w\cdot\nabla)w)$ — a
+better *generating* velocity, but it **breaks** the exact round-trip. Use `'bch'`
+only when the velocity is the object of interest (geodesic / momentum analysis, the
+velocity barycentre that feeds `geometry.velocity_mean` / `transform_mean`); keep
+`'first_order'` whenever you intend to re-exponentiate and recover the warp.
+
+## Keeping the map physical: regularisers {#sec-regularisers}
+
+A dense field with $N$ free vectors will happily over-fit noise into a jagged,
+near-folding mess that matches intensities and means nothing anatomically. The cure
+is **regularisation** — adding a smoothness / physicality term so the optimiser
+prefers a *coherent* deformation. There are two distinct ways this enters, and the
+module ships both.
+
+### Explicit penalties {#sec-penalties}
+
+These are scalar energies you **add to the objective** (the
+[data term + regulariser](foundations.qmd#sec-problem) of the unit's governing
+equation) — for a directly-optimised or learned warp where you control the loss.
+All three live in `register.regulariser`, take a channels-last displacement field,
+are **DIFF-JAX**, and share a `reduction` argument (`'mean'` default, `'sum'`, or
+`'none'` for the per-voxel energy map). The equations below show the per-voxel
+energy summed over the grid — the `'sum'` reduction; the **default `'mean'`** is
+that sum divided by the voxel count, which keeps the penalty weight resolution- and
+level-independent (the natural choice across a coarse-to-fine pyramid).
+
+- **`gradient_smoothness(u)`** — the **diffusion** (first-order) penalty, the
+  squared Frobenius norm of the displacement Jacobian summed over its entries,
+  $$
+  \mathcal{R}_{\text{diff}}(u) = \sum_x \|\nabla u(x)\|_F^2
+  = \sum_x \sum_{i,j}\Bigl(\frac{\partial u_i}{\partial x_j}\Bigr)^2 .
+  $$ {#eq-grad-smooth}
+  It penalises *slope* — sharp or incoherent flow — and is zero only for a constant
+  (translation) field. Cheap and the default workhorse.
+- **`bending_energy(u)`** — the **thin-plate** (second-order) penalty, the squared
+  Frobenius norm of the per-voxel Hessian (all second partials
+  $\partial^2 u_c/\partial x_a\partial x_b$),
+  $$
+  \mathcal{R}_{\text{bend}}(u) = \sum_x \|\nabla^2 u(x)\|_F^2 .
+  $$ {#eq-bending}
+  It penalises *curvature*, not slope — so a uniform **affine** flow is **free**
+  (its second derivatives vanish). That affine-invariance is the reason to prefer
+  it when the true deformation has a strong large-scale linear component you do not
+  want to fight; it is computed by differentiating the displacement Jacobian a
+  second time.
+- **`jacobian_folding_penalty(u)`** — the direct anti-fold term, the rectified
+  negative determinant,
+  $$
+  \mathcal{R}_{\text{fold}}(u) = \sum_x \max\bigl(-\det J(x),\, 0\bigr),
+  $$ {#eq-fold-pen}
+  zero wherever the map is orientation-preserving ($\det J > 0$) and growing with
+  the depth of any fold ($\det J \le 0$). It targets *exactly* the
+  @fig-diffeomorphic-jacdet failure, building on `jacobian_det_displacement`.
+
+### Implicit smoothing in the SVF recipes {#sec-implicit}
+
+The diffeomorphic recipes do **not** add these to a loss. They regularise
+*implicitly*, by **Gaussian-smoothing** the field every iteration. The Gaussian is
+the Green's function of the fluid/diffusion regularisation operator, so smoothing
+the update is mathematically equivalent to penalising its non-smoothness — but it
+needs no extra gradient and no penalty weight to tune. The recipes use an
+**operator splitting** with two smoothings, named for the classic continuum models:
+
+- **fluid** (`sigma_fluid`) smooths each **update** before it is applied — the
+  velocity of the flow is regularised, so the *increment* stays coherent
+  (viscous-fluid registration);
+- **diffusion** (`sigma_diffusion`) smooths the **accumulated** field after the
+  update — the total deformation is regularised (elastic / diffusion
+  registration).
+
+So one iteration is: compute the raw force; **fluid**-smooth it; add it to (or
+compose it onto) the field; **diffusion**-smooth the result. This is `_regularise`
+(algebra) / `_group_regularise` (group) in the shared substrate. The group driver
+adds a per-step **Jacobian-backtracking guard** (`_step_clamp_diffeo`): halve the
+increment until $\det(I+\nabla\delta) > 0.1$ everywhere — a clamp on the *Jacobian*,
+because a mere magnitude clamp can still fold, and because the *total*-field
+$\det > 0$ QA is necessary but not sufficient (an intermediate compose can fold
+while the total stays positive).
+
+### Anisotropy: physical isotropy from voxel spacing {#sec-anisotropy}
+
+Brain volumes are often acquired anisotropically (e.g. $1\times1\times3$ mm). A
+Gaussian sigma or an LNCC window measured in *voxels* then spans different
+*physical* extents per axis, biasing the registration. The fix threaded through the
+whole SVF substrate is the **relative spacing** $\text{spacing}/\text{geomean}
+(\text{spacing})$: level-independent (the coarse-to-fine scale cancels in the
+ratio), exactly $1$ for isotropic data (so isotropic reduces to `None`), and used
+to make the per-axis sigma and the LNCC window *physically* isotropic
+($\sigma_{\text{axis}} = \sigma / r_{\text{axis}}$). The velocity field itself stays
+voxel-native; only the *physics* (smoothing extent, window size, gradient scaling)
+is anisotropy-corrected. You pass it once as `SVFSpec.spacing`.
+
+## Driving the field: forces and the dense-field solvers {#sec-forces}
+
+We now have everything to *find* the warp. The matrix recipes minimise an
+[`Objective`](optimization.qmd#sec-objective) over a parameter vector; the
+dense-field recipes **ascend** a similarity over a velocity field, and the object
+that turns the current alignment into a per-voxel velocity update is a **`Force`**.
+A `Force` is to the SVF drivers what `Objective` is to the matrix driver: it
+decouples the *metric* from the *algorithm*, so one driver runs under any force.
+
+### The Force ADT {#sec-force-adt}
+
+The protocol is a two-step **bind/update** hoist (`register._force`):
+
+```python
+bound = force.bind(fixed, ndim=ndim, rel_spacing=rel_spacing)  # hoist fixed-state
+u    = bound.update(warped)   # raw per-voxel velocity update (voxel units)
+cost = bound.cost(warped)     # scalar similarity (lower is better)
+```
+
+`Force.bind(fixed, ...)` returns a `BoundForce` with everything *fixed*-dependent
+precomputed (e.g. Demons' $\nabla F$), so the single-sided driver binds **once per
+level** and reuses it across iterations; the symmetric driver binds **per step**
+(its "fixed" is the other image warped to the midpoint, which changes every
+iteration). This is the same hoisting discipline as the matrix `Objective`'s
+`ic_reference`, paid only where it is recoverable.
+
+The **force direction** is the chain rule. For a minimisation cost
+$c(\text{warped})$, gradient descent on the moving deformation moves along
+$$
+u = -\frac{\partial c}{\partial(\text{warped})}\cdot\nabla(\text{warped}),
+$$ {#eq-force-dir}
+since $\partial c/\partial(\text{deformation}) = (\partial c/\partial \text{warped})
+\cdot \nabla\text{warped}$ by the chain rule (the warped image's spatial gradient
+is the sensitivity of intensity to where you sample). Every closed-form force below
+is this expression with the metric-specific $\partial c/\partial\text{warped}$ slotted
+in; that is the **parity oracle** — `MetricForce(LNCC)` and the closed-form
+`LNCCForce` must agree in *direction* to machine precision.
+
+### The forces {#sec-force-zoo}
+
+All are frozen dataclasses, all **DIFF-JAX** through `bind`/`update`:
+
+- **`DemonsForce(alpha=0.4, backend='jax')`** — the closed-form **efficient
+  symmetric (ESM) demons** force, the `diffeomorphic_demons_register` default:
+  $$
+  u = \frac{(F - M\circ\varphi)\,J}{\|J\|^2 + \alpha^2 (F - M\circ\varphi)^2},
+  \qquad J = \tfrac{1}{2}(\nabla F + \nabla(M\circ\varphi)).
+  $$ {#eq-demons}
+  The symmetric gradient $J$ uses *both* images' gradients (faster convergence than
+  the one-sided optical-flow force); $\alpha$ damps the step where the intensity
+  difference is large. There is **no inner solve** — that closed form is what keeps
+  the diffeomorphic recipe GPU-clean. The denominator vanishes only on a matched
+  uniform region (both gradient *and* mismatch zero), where the force is zeroed by
+  a double-`where` guard that also keeps the *backward* finite (a bare `diff/denom`
+  NaNs the gradient even where the forward is masked). `bind` hoists $\nabla F$.
+- **`LNCCForce(radius=2, derivative='exact', backend='jax')`** — the analytic
+  **local cross-correlation** force, the `greedy_syn_register` default; ascends the
+  windowed CC and is robust to smooth intensity inhomogeneity (which plain SSD is
+  not). $\partial(\text{sim})/\partial\text{warped}$ is `metrics.lncc_grad` (computed
+  from nine box sums over a $2\,\text{radius}+1$ window). `derivative='exact'`
+  (default) is the exact gradient of the summed CC; `derivative='center'` is the
+  cheaper ANTs/ITK centre-only convention (five box sums, $\sim$1.5–1.75$\times$
+  faster) — a *different* force, not `lncc_grad`'s gradient. `backend` can route the
+  `'center'` force to a fused sliding-window Pallas/Triton kernel on a supported GPU
+  for large 3-D volumes (the size gate defers small/coarse levels to JAX, where the
+  integral image wins); see the [performance page](performance.qmd#sec-kernels).
+  The window is made physically isotropic on anisotropic grids (per-axis radius
+  $\text{radius}/r_{\text{axis}}$).
+- **`MIForce(bins=32, magnitude=0.5, normalized=False, sample_stride=1, ...)`** —
+  the closed-form **Mattes mutual-information** force, the fast cross-modal path
+  (the fMRIPrep metric): `mi_grad · ∇warped`, the analytic $\partial\text{MI}/
+  \partial\text{warped}$, instead of a full `jax.grad` of the soft-histogram cost
+  every iteration. Because MI is *not* a spatial mean, its raw $1/N$ gradient has an
+  arbitrary metric-scale-dependent magnitude, so the force is **RMS-normalised** to
+  a controlled per-voxel `magnitude` (the same controlled step the clamped-SyN /
+  unclamped-Demons drivers need). `normalized=True` routes the closed-form
+  `metrics.nmi_grad` for Studholme's NMI (the ANTs cross-modal default);
+  `sample_stride` estimates the histogram from every $k$-th voxel (ITK "Regular"
+  sampling — the histogram scatter is the bottleneck) while applying the force
+  densely. Its `range_moving`/`range_fixed` are pinned **once** before the pyramid
+  (see `pin_force_ranges` below).
+- **`MetricForce(metric, magnitude=0.5)`** — the **escape hatch**: drive a recipe
+  by $-\partial(\text{metric.cost})/\partial\text{warped}\cdot\nabla\text{warped}$
+  via `jax.grad` of *any* [`Metric`](similarity.qmd#sec-ssd), so a metric with no
+  hand-written force still registers diffeomorphically. *No performance guarantee* —
+  the autodiff tape is the price of generality. Its magnitude logic keys on
+  `metric.is_spatial_mean`: for a **spatial-mean** cost (SSD/LNCC) it rescales the
+  gradient by the voxel count to undo the $1/N$, recovering the *sum-convention*
+  gradient — so `MetricForce(LNCC(r))` is numerically **identical** to
+  `LNCCForce(r)` (the magnitude parity oracle); for a **global histogram scalar**
+  (MI/CR) it RMS-normalises to `magnitude` instead. Note `MetricForce(SSD)` is the
+  *raw* optical-flow gradient, **not** the normalised Demons force — for monomodal
+  SSD-type work prefer `DemonsForce`.
+- **`SumForce(terms)`** — the **combinator**: a weighted sum of forces (the
+  dense-field analogue of ANTs `-m MI[...] -m CC[...]` in one stage). `update` is
+  $\sum_i w_i\cdot\text{force}_i.\text{update}$ and `cost` the matching weighted
+  sum; it is itself a `Force`, so it composes any of the above (mixing tiers freely,
+  e.g. a structural `LNCCForce` plus a cross-modal `MIForce`) with no driver change.
+  Each term is bound once.
+
+`resolve_force_schedule(force, default=..., levels=...)` turns the recipe's `force`
+argument into a per-level list: `None` → the recipe's closed-form `default` at every
+level; a single `Force` → that force everywhere; a length-`levels`
+**coarse-to-fine** sequence → one force per level (reversed to the finest-first
+pyramid indexing the driver uses) — e.g. a cheap force at the coarse levels, a
+high-signal one at the finest. `pin_force_ranges(force, moving, fixed)` is the
+companion **HOST-CTOR**-ish hoist: it resolves any `None` intensity range on an
+`MIForce` **once**, before the pyramid, from the full-resolution images (a
+`stop_gradient`-ed reduction, so it is jit-safe and the bin edges stay constant) —
+because a data min/max range *drifts* as the moving image deforms, a non-stationary
+objective.
+
+### The coarse-to-fine drivers {#sec-drivers}
+
+The shared spine is `svf_coarse_to_fine` (`register._svf`): it carries a tuple of
+$n_{\text{fields}}$ voxel-unit velocity (or displacement) fields from the coarsest
+[Gaussian-pyramid](resampling.qmd#sec-pyramid) level to the finest, **prolonging**
+between levels (an interpolating upsample times the per-axis voxel-scale ratio that
+keeps the field in voxel units), and delegating the per-level update to a
+`level_solve` callback. The four level kernels are the algebra/group $\times$
+single-sided/symmetric matrix:
+
+- **`single_sided_level`** (Demons structure, algebra) — warp `moving` by
+  $\exp(v)$, bind the force to `fixed` **once**, and drive $v$ up the similarity:
+  `exp` → warp → fluid-smooth the force → log-update ($v + u$ or BCH) →
+  diffusion-smooth $v$. Rolled with `lax.scan`.
+- **`symmetric_level`** (SyN structure, algebra) — warp **both** images to the
+  shared midpoint, bind the force **per step** (each image's "fixed" is the other at
+  the midpoint), and ascend the similarity in each direction, regularising both
+  half-velocities. Returns `(v_fwd, v_inv, costs)`.
+- **`group_single_sided_level`** / **`group_symmetric_level`** — the group-domain
+  siblings: carry the displacement(s), warp **directly** by $\mathrm{id}+s$ (no
+  `exp`), and **compose** the regularised increment onto $s$ ($\sim$2 / $\sim$4
+  gathers per iteration vs $\sim$7 / $\sim$12 for algebra). They drop `n_steps` /
+  `bch_order` (no integration, no log-domain BCH), and the inverse / velocity are
+  recovered only **once** at finalisation — a different driver, not a re-parametrised
+  one.
+
+The masking and axis-restriction knobs ride every level fn: `mask` gates the force
+to a region (the masked area drives, the rest follows by regularisation);
+`restrict` (length-`ndim`) weights the force per spatial axis so a `0` *persistently*
+suppresses deformation along that axis (e.g. `(1, 1, 0)` for in-plane-only — the
+zeroed component never enters the additive update, and the spatial-only smoothing
+cannot reintroduce it). The trust-region step control (`_normalise_step`) is the
+SyN convention: a robust (99th-percentile, outlier-proof) cap on the per-voxel
+displacement so the warp stays diffeomorphic under a fixed iteration budget —
+`step_mode='clamp'` ($\min(1, \text{step}/\|u\|_{\text{cap}})$, never amplifies) or
+`'normalize'` (the ANTs magnitude-invariant scale-to-step, which avoids
+under-stepping a small-magnitude force like the centre-only LNCC).
+
+### The two recipes {#sec-recipes}
+
+**`diffeomorphic_demons_register(moving, fixed, *, spec=DemonsSpec(), ...)`**
+(`register.diffeomorphic`) is the log-domain Demons recipe (Vercauteren 2009): a
+single stationary velocity, the closed-form ESM `DemonsForce` by default, SSD-class
+matching, coarse-to-fine. Returns a `DiffeomorphicResult(velocity, displacement,
+warped, jacobian_det, cost_history)`. `DemonsSpec` adds `n_steps` (scaling-and-
+squaring count), `alpha` (force normalisation), and `bch_order` (1 additive / 2
+with $\tfrac12[v,u]$) to the shared `SVFSpec`.
+
+**`greedy_syn_register(moving, fixed, *, spec=SyNSpec(), ...)`** (`register._syn`)
+is the greedy symmetric SyN recipe (Avants 2008, the greedy gradient-flow variant —
+no geodesic shooting), the diffeomorphic-quality jump: two velocities $v_{\text{fwd}}$
+(moving → midpoint) and $v_{\text{inv}}$ (fixed → midpoint), the LNCC force by
+default, robust to intensity inhomogeneity, with no moving/fixed asymmetry. The
+final moving → fixed map is the **midpoint composition**
+$$
+\varphi = (\mathrm{id} + s_{\text{fwd}}) \circ (\mathrm{id} + s_{\text{inv}})^{-1},
+$$ {#eq-syn}
+built from the two halves via `invert_displacement` + `compose_displacement` — a
+diffeomorphism **by construction** (each half is, and composition of
+diffeomorphisms is one). The single inversion stays at finalisation in group mode
+(not per step). `SyNSpec` adds `radius`, `step`, `step_mode`, `n_steps`.
+
+Both recipes share the same front matter: `preprocess_images` (optional
+`winsorize` / `histogram_match` intensity conditioning), `resolve_init_displacement`
++ `prewarp_moving` for an `init_affine` or `init_displacement` **warm-start** (the
+[matrix recipes'](recipes.qmd#sec-matrix-recipes) output, or a SynthMorph field —
+`moving` is pre-warped onto the `fixed` grid and only the *residual* is registered),
+optional per-level `smoothing_sigma` (ANTs `-s`, decoupled from the shrink), and
+`finalize_with_init` (compose the residual with the init, warp the *original*
+moving, return the **total**-map Jacobian determinant). Both are pure
+$(\text{moving}, \text{fixed}) \to \text{result}$ functions, so a **cohort**
+registers to a shared template with a single `jax.vmap` over the moving stack — the
+`mode='early_exit'` `while_loop` then runs (via `vmap`) to the all-lanes exit, the
+slowest subject setting the trip count.
+
+One reproducibility caveat both flag: the vector-field Gaussian regulariser
+dispatches engines per backend (parallel FIR on GPU, recursive Young–van Vliet on
+CPU), which differ by $\sim$1–2% near the edges — so the *same* pair can yield
+slightly different deformations on GPU vs CPU (recovery accuracy is unaffected).
+Register every subject of a study on the **same backend**; do not mix CPU- and
+GPU-computed warps in one analysis.
+
+### Back to the motivating question {#sec-payoff}
+
+For the inter-subject cortical task: affine-align first, hand the affine to
+`greedy_syn_register` as `init_affine`, and let the LNCC-driven symmetric flow match
+the sulci. The result's `displacement` warps subject A onto B, `warped` is A
+resampled into correspondence, and — the test that matters — `jacobian_det`
+**positive everywhere** certifies the cortical map did not tear or fold. That
+guarantee is not luck; it is the SVF construction (@eq-exp), the
+diffeomorphism-by-construction midpoint composition (@eq-syn), and the
+implicit smoothing, working together.
+
+## Further reading
+
+- Arsigny, V., Commowick, O., Pennec, X., & Ayache, N. (2006). *A log-Euclidean
+  framework for statistics on diffeomorphisms.* MICCAI. The stationary-velocity /
+  log-Euclidean viewpoint — `exp`, `log`, and the BCH composition behind
+  `compose_velocity` and `field_log`.
+- Vercauteren, T., Pennec, X., Perchant, A., & Ayache, N. (2009). *Diffeomorphic
+  demons: efficient non-parametric image registration.* NeuroImage, 45(1, Supp. 1).
+  The log-domain Demons recipe and the efficient-symmetric (ESM) force of
+  @eq-demons.
+- Avants, B. B., Epstein, C. L., Grossman, M., & Gee, J. C. (2008). *Symmetric
+  diffeomorphic image registration with cross-correlation.* Medical Image Analysis,
+  12(1). SyN — the symmetric midpoint construction (@eq-syn) and the local-CC
+  driving force the greedy recipe approaches.
+- Beg, M. F., Miller, M. I., Trouvé, A., & Younes, L. (2005). *Computing large
+  deformation metric mappings via geodesics on flows of diffeomorphisms.*
+  International Journal of Computer Vision, 61(2). LDDMM — the geodesic-shooting
+  formulation the *greedy* SyN variant simplifies (gradient flow + Gaussian
+  regularisation, no shooting).
+- Ashburner, J. (2007). *A fast diffeomorphic image registration algorithm
+  (DARTEL).* NeuroImage, 38(1). Scaling-and-squaring of a stationary velocity field
+  at scale — the algorithm behind `integrate_velocity_field`.
+- Higham, N. J. (2008). *Functions of Matrices: Theory and Computation.* SIAM. The
+  scaling-and-squaring exp/log analysis (@eq-halving, @eq-ss) in the matrix setting
+  `field_log` mirrors densely.
+- Thirion, J.-P. (1998). *Image matching as a diffusion process: an analogy with
+  Maxwell's demons.* Medical Image Analysis, 2(3). The original demons force and the
+  fluid/diffusion regularisation split the recipes use.
+- Modersitzki, J. (2004). *Numerical Methods for Image Registration.* Oxford
+  University Press. The elastic / fluid / diffusion regularisers (@eq-grad-smooth,
+  @eq-bending) as variational energies.
+
+## See also
+
+- Source — the velocity/displacement algebra (`compose_displacement`,
+  `compose_velocity`, `invert_displacement`, `field_log`, the diffeomorphism square
+  root):
+  [`src/nitrix/geometry/deformation.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/deformation.py).
+- Source — `integrate_velocity_field` (scaling-and-squaring), `identity_grid`,
+  `spatial_transform`, `jacobian_displacement`, `jacobian_det_displacement`:
+  [`src/nitrix/geometry/grid.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/grid.py).
+- Source — the explicit penalties (`gradient_smoothness`, `bending_energy`,
+  `jacobian_folding_penalty`):
+  [`src/nitrix/register/regulariser.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/regulariser.py).
+- Source — the Force ADT and the closed-form / generic forces (`DemonsForce`,
+  `LNCCForce`, `MIForce`, `MetricForce`, `SumForce`, `resolve_force_schedule`):
+  [`src/nitrix/register/_force.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_force.py).
+- Source — the SVF substrate (`svf_coarse_to_fine`, the single-sided / symmetric /
+  group level kernels, `SVFSpec`, the regularisation and step-clamp helpers):
+  [`src/nitrix/register/_svf.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_svf.py).
+- Source — the log-Demons recipe (`diffeomorphic_demons_register`, `DemonsSpec`,
+  `DiffeomorphicResult`):
+  [`src/nitrix/register/diffeomorphic.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/diffeomorphic.py).
+- Source — the greedy-SyN recipe (`greedy_syn_register`, `SyNSpec`, `SyNResult`):
+  [`src/nitrix/register/_syn.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_syn.py).
+- Source — the differentiable fixed-point solver behind `invert_displacement` /
+  `field_log`:
+  [`src/nitrix/numerics/fixed_point.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/numerics/fixed_point.py).
+- Previous in reading order: [the optimisation engine](optimization.qmd#sec-objective)
+  (the matrix-recipe sibling of this page's drivers) and
+  [similarity metrics](similarity.qmd#sec-lncc) (the LNCC / MI the forces ascend).
+  Next: [surface registration](surface-registration.qmd#sec-parameterize). The
+  recipe-level configuration and SVF cookbook live in
+  [recipes](recipes.qmd#sec-svf-recipes); the force kernels and backends in
+  [performance](performance.qmd#sec-kernels). Sibling units:
+  [geometry](../geometry/foundations.qmd), [statistics](../statistics/foundations.qmd).

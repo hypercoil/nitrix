@@ -1,0 +1,776 @@
+---
+title: "Linear transforms as a Lie group"
+---
+
+::: {.callout-tldr title="Fast path"}
+This is the substrate page of the registration unit: the **linear transforms** —
+rigid, similarity, affine — that the rigid/affine rungs of the
+[transform ladder](foundations.qmd#sec-ladder) optimise over. One idea organises
+everything:
+
+- A linear transform is a **homogeneous matrix** $\mathbf{A}$, composed by matrix
+  multiply and inverted by matrix inverse. You can read a transform two ways: as a
+  **geometric factorisation** $\mathbf{A}=T\,R\,S\,E$ (translate · rotate · scale ·
+  shear), good for *reading off and constraining* meaning, or as the
+  **exponential of a Lie-algebra element**, good for *optimising*.
+- **An optimiser should move on the tangent space at the identity, not on the group
+  itself.** The Lie chart $\exp:\mathfrak g\to G$ turns "find a rotation" — a
+  constrained problem on a curved surface of orthogonal matrices — into "find a
+  vector" — an unconstrained problem in flat space. `rigid_exp` (Rodrigues) and
+  `affine_exp` (`matrix_exp`) are that chart.
+- Transforms form a **Riemannian manifold**, so averaging and interpolating them
+  (template construction, motion summary) must go through `log`/`exp`, never an
+  entrywise mean.
+
+The single new skill: read a transform as a point on a curved group, and an
+*update* to it as a vector in flat tangent space.
+:::
+
+This unit is written for a reader fluent in **linear algebra** — matrices, least
+squares, eigendecomposition, the chain rule — who has read the geometry unit
+(grids and meshes as discrete stand-ins for smooth manifolds) but has had **no
+formal training in image registration, Lie theory, or numerical optimisation**.
+The previous page, [Foundations](foundations.qmd#sec-ladder), set up the governing
+idea — *a registration is a map between two geometries, found by minimising a
+mismatch energy over a parametrised family of transforms* — and laid out the
+transform ladder. This page owns the bottom two rungs: the **linear** transforms
+and the algebra that makes them optimisable, averageable, and composable. It is the
+sibling of the geometry unit's
+[volumes page](../geometry/volumes.qmd) (same house style).
+
+## A motivating question {#sec-motivation}
+
+Hold one concrete question for the whole page. A subject lies in the scanner for a
+ten-minute fMRI run; over those ten minutes their head drifts and nods. Each volume
+in the time series is the same head in a slightly different **pose**, and before we
+can compare voxel $i$ across volumes we must *realign* them — undo the motion. The
+classic question: **what six numbers describe a rigid head motion?**
+
+"Rigid" because a head does not stretch or shear between two seconds — it only
+*rotates* and *translates*. In 3-D that is three rotation angles and three
+translations: six numbers, the six **degrees of freedom** of a rigid-body motion.
+The realignment problem is then: for each volume, find the six numbers that best
+bring it back onto a reference. That immediately raises three sub-questions this
+page answers in turn:
+
+1. How do we *represent* a rigid (or affine) transform so we can apply it to every
+   voxel and compose a chain of them? (Homogeneous matrices, @sec-homogeneous.)
+2. How do we *parametrise* it with exactly six (or twelve) numbers so an optimiser
+   can search — and so that every point in the search space is a valid transform?
+   (The Lie exponential chart, @sec-lie-exp; the geometric factorisation,
+   @sec-decomposition.)
+3. Once we have a transform per volume, how do we *summarise* the motion — its mean
+   pose, a halfway pose — without leaving the space of valid transforms?
+   (The transform manifold, @sec-transform-manifold.)
+
+The same machinery aligns a subject's T1 to MNI (affine, twelve numbers), or builds
+a study template from a cohort of transforms. Rigid head motion is just the
+smallest instance.
+
+## The homogeneous matrix {#sec-homogeneous}
+
+A linear map $x\mapsto Mx$ fixes the origin: it can rotate, scale, and shear, but it
+cannot *move* anything that sits at $0$. A head motion includes a translation, so a
+bare $N\times N$ matrix is not enough. The obvious fix is to carry a separate
+translation vector $t$ and write $x\mapsto Mx+t$ — and that works, but it is clumsy:
+composing two such maps, $(M_2,t_2)\circ(M_1,t_1)$, is *not* a single
+matrix multiply (you get $M_2M_1$ for the linear part but $M_2t_1+t_2$ for the
+translation), so a chain of transforms is a chain of special-case bookkeeping.
+
+The cure is one idea: **lift the coordinate one dimension**. Append a $1$ to every
+point, $x\mapsto(x,1)$, and stack the linear block and the translation into one
+$(N{+}1)\times(N{+}1)$ matrix with a fixed bottom row:
+
+$$
+\mathbf{A}=\begin{pmatrix} M & t \\ \mathbf 0^\top & 1 \end{pmatrix},
+\qquad
+\mathbf{A}\begin{pmatrix} x \\ 1 \end{pmatrix}
+=\begin{pmatrix} Mx+t \\ 1 \end{pmatrix}.
+$$ {#eq-homogeneous}
+
+Now the affine map $Mx+t$ *is* a matrix–vector product, and — the payoff —
+**composition is plain matrix multiplication**: $\mathbf{A}_2\mathbf{A}_1$ applies
+$\mathbf{A}_1$ first, then $\mathbf{A}_2$, with the translations handled
+automatically by the extra row. The extra dimension is the price; uniform algebra is
+what you buy. This is the canonical $\mathbf A$ of the
+[notation table](foundations.qmd#sec-spaces): an $(N{+}1)\times(N{+}1)$ homogeneous
+matrix, affine block $\mathbf A_{:N,:N}$, translation $\mathbf A_{:N,N}$.
+
+`nitrix` stores affines compactly as the **rectangular** $(N,N{+}1)$ form — the top
+$N$ rows, since the bottom row $(\mathbf 0^\top,1)$ is implied — and squares them up
+only when it needs the full matrix algebra.
+
+- **`make_square_affine(mat)`** — `(..., N, N+1)` → `(..., N+1, N+1)`, appending the
+  fixed row $(\mathbf 0^\top,1)$ (a no-op if already square). **DIFF-JAX**: pure
+  array construction, batched over leading dimensions.
+- **`compose_affine(mats)`** — composes a *sequence* of affines **left-to-right**:
+  `compose_affine((A, B, C))` returns $\mathbf A\mathbf B\mathbf C$, which applies
+  **C first, then B, then A** (the last listed is applied first, exactly as nested
+  application $\mathbf A(\mathbf B(\mathbf C x))$ reads). It squares each operand,
+  multiplies, and drops the implied row back off. **DIFF-JAX**. (Note the signature
+  takes one `Sequence`, not varargs.)
+- **`invert_affine(mat)`** — the multiplicative inverse $\mathbf A^{-1}$, returned in
+  the same rectangular form. It squares the matrix, calls the inverse, and slices the
+  top rows back.
+
+The composition order is worth dwelling on because it is the source of most affine
+bugs. A registration pipeline is "rigid, *then* affine, *then* deformable" — the
+order you apply stages to the moving image. As matrices that reads **right-to-left**
+under the convention of @eq-homogeneous (the rightmost matrix touches the coordinate
+first), so the pipeline matrix is $\mathbf A_{\text{def}}\mathbf A_{\text{aff}}\mathbf
+A_{\text{rig}}$ and the `compose_affine` argument list is
+`(A_def, A_aff, A_rig)` — *reverse* of the application order in prose. Hold that
+straight and affine plumbing stops biting.
+
+### Why `safe_*` and analytic determinants {#sec-safe}
+
+`invert_affine` does not call `jnp.linalg.inv` directly; it calls
+`linalg._solver.safe_inv`. The reason is a hardware reality, not a numerical one.
+On certain CUDA/JAX stacks the **cuSolver handle pool is broken** — an ABI mismatch
+that makes every dense factorisation (`inv`, `solve`, `cholesky`, `eigh`, `qr`,
+`svd`) fail at runtime with `gpusolverDnCreate failed`, while matmul, conv, and
+triangular solves keep working. The `safe_*` wrappers (`safe_inv`,
+`safe_cholesky`, `safe_cho_solve`) probe a $2\times2$ call once, cache the verdict,
+and **adaptively latch** to the CPU if a real call fails at runtime, moving the
+result back to the originating device. They are the cuSolver-robust seam the geometry
+unit's [solver page](../geometry/solvers.qmd) introduces, reused here.
+
+Where it can, `affine.py` sidesteps the factorisation entirely by computing
+**analytically**: the $2\times2$ and $3\times3$ determinants (`_det2x2`, `_det3x3`)
+are cofactor expansions, pure matmul-free arithmetic, GPU-native on any stack. The
+rule the geometry unit states applies here too: the differentiable hot loop of an
+optimiser must stay on closed-form, cuSolver-free paths; the factorisation-bearing
+ops (`invert_affine`, `fit_affine`, the Karcher mean of @sec-transform-manifold) are
+either rare or offline.
+
+## Reading a transform: the geometric factorisation {#sec-decomposition}
+
+The homogeneous matrix is the right object to *apply*, but its sixteen entries are
+opaque: you cannot look at a $4\times4$ matrix and say "this rotates 12° and scales
+the $z$-axis by 1.1." Yet those are exactly the quantities a practitioner wants — to
+*read off* ("did the fit pick up an implausible 30% scale?") and to *constrain*
+("force this fit to be rigid"). For that we need a parametrisation in which the
+geometric factors are individually named.
+
+Any linear map decomposes — uniquely, up to sign conventions — into four geometric
+operations applied in a fixed order. `nitrix` uses **$\mathbf A = T\,R\,S\,E$**:
+
+$$
+\mathbf A \;=\; \underbrace{T}_{\text{translate}}\;
+\underbrace{R}_{\text{rotate}}\;
+\underbrace{S}_{\text{scale}}\;
+\underbrace{E}_{\text{shear}},
+$$ {#eq-trse}
+
+read right-to-left as the order applied to a point: **shear** $E$ first (a
+unit-diagonal upper-triangular matrix that slides one axis along another), then
+anisotropic **scale** $S$ (a diagonal matrix, one factor per axis), then **rotate**
+$R$ (an orthogonal matrix, $\det=+1$), then **translate** $T$. @fig-transforms-trse
+builds exactly this product one factor at a time on a unit square.
+
+```{python}
+#| label: fig-transforms-trse
+#| fig-cap: "The geometric factorisation $\\mathbf A=T\\,R\\,S\\,E$ applied to a unit square, one factor at a time (the faint grey square is the identity reference in every panel). Reading right-to-left in the product, the shear $E$ slides the top edge sideways; the anisotropic scale $S=\\mathrm{diag}(1.6,0.7)$ stretches $x$ and squashes $y$; the rotation $R$ (30°) turns the whole figure; the translation $T$ shifts it bodily. This is the order `params_to_affine_matrix` composes, and the factors are exactly what `affine_matrix_to_params` reads back off a matrix."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+# A unit square (closed polygon), columns are points.
+sq = np.array([[0, 1, 1, 0, 0],
+               [0, 0, 1, 1, 0]], dtype=float)
+
+def hom(M2, t=(0.0, 0.0)):
+    H = np.eye(3)
+    H[:2, :2] = M2
+    H[:2, 2] = t
+    return H
+
+theta = np.radians(30.0)
+R = np.array([[np.cos(theta), -np.sin(theta)],
+              [np.sin(theta),  np.cos(theta)]])
+S = np.diag([1.6, 0.7])                 # anisotropic scale
+E = np.array([[1.0, 0.5], [0.0, 1.0]])  # shear (strict-upper entry s=0.5)
+t = np.array([1.2, 0.4])                # translation
+
+stages = [
+    ("identity",         np.eye(3),          '0.6'),
+    ("E  shear",         hom(E),             '#4477aa'),
+    ("S·E  + scale",     hom(S @ E),         '#66ccee'),
+    ("R·S·E  + rotate",  hom(R @ S @ E),     '#ee6677'),
+    ("T·R·S·E  + shift", hom(R @ S @ E, t),  '#228833'),
+]
+
+def apply(H, pts):
+    p = np.vstack([pts, np.ones((1, pts.shape[1]))])
+    return (H @ p)[:2]
+
+fig, axes = plt.subplots(1, 5, figsize=(15, 3.2), sharex=True, sharey=True)
+for ax, (name, H, col) in zip(axes, stages):
+    ax.plot(sq[0], sq[1], color='0.85', lw=1.0)
+    out = apply(H, sq)
+    ax.fill(out[0], out[1], color=col, alpha=0.25)
+    ax.plot(out[0], out[1], color=col, lw=2.0)
+    ax.set_title(name, fontsize=10)
+    ax.set_aspect('equal')
+    ax.axhline(0, color='0.9', lw=0.5, zorder=0)
+    ax.axvline(0, color='0.9', lw=0.5, zorder=0)
+    ax.set_xlim(-0.8, 3.0)
+    ax.set_ylim(-0.8, 2.6)
+
+fig.suptitle("$\\mathbf{A}=T\\,R\\,S\\,E$ built one factor at a time (rightmost applied first)",
+             fontsize=12)
+plt.tight_layout(rect=[0, 0, 1, 0.94])
+plt.show()
+```
+
+### Parameters in, matrix out — and back {#sec-params}
+
+**`params_to_affine_matrix(par, *, ndim=3, deg=True, shift_scale=False)`** assembles
+@eq-trse from a flat parameter vector. The parameter order along the last axis is
+**translation, rotation, scale, shear**, with segment lengths $(d,\ d(d{-}1)/2,\ d,\
+d(d{-}1)/2)$ — so in 3-D that is $(3,3,3,3)=12$ numbers, in 2-D $(2,1,2,1)=6$.
+Crucially, **missing trailing parameters default to identity**: scale defaults to
+$1$, everything else to $0$. So a length-6 prefix in 3-D (three translations, three
+angles) gives a **rigid** transform — rotation and translation only, unit scale, no
+shear — without your having to spell out the trailing identity factors. The function
+takes an explicit `ndim` precisely because a 6-vector is ambiguous: it could be a
+rigid 3-D transform or a full 2-D one. `shift_scale=True` adds $1$ to the scale
+segment so that the all-zeros vector is the identity — the convention you want when
+the parameters are a *network-predicted perturbation* around identity. **DIFF-JAX**,
+batched.
+
+**`affine_matrix_to_params(mat, *, deg=True)`** is the inverse: it reads the four
+geometric factors back off a matrix (rectangular $(d,d{+}1)$ or square $(d{+}1,d{+}1)$
+— `ndim` is inferred from the shape). The mechanism is an **RQ-style decomposition
+via Cholesky**. The linear block $M$ factors as $R\,S\,E$ with $R$ orthogonal and
+$S\,E$ upper-triangular; the Gram matrix $M^\top M = (SE)^\top R^\top R (SE) =
+(SE)^\top(SE)$ drops the rotation, so its Cholesky factor *is* the lower-triangular
+$(SE)^\top$. The diagonal of that factor gives the **scales**, the off-diagonal
+(after dividing out the scales) the **shears**, and $R = M(SE)^{-1}$ recovers the
+rotation, which `rotation_matrix_to_angles` turns into angles. A determinant-sign fix
+on the first scale lets a reflection ($\det<0$) round-trip. **DIFF-JAX**, but it
+calls `safe_cholesky` and `safe_inv`, so it rides the cuSolver-robust seam — fine for
+construction, not for a hot loop.
+
+These two are exact inverses (round-tripping to machine precision in the
+non-degenerate regime), which is what makes the factorisation *trustworthy* for
+reading off meaning: a fitted affine's scales are the diagonal of a Cholesky factor,
+not a vague impression.
+
+### Rotations and Euler angles {#sec-euler}
+
+The rotation factor $R$ has its own chart, **`angles_to_rotation_matrix`** /
+**`rotation_matrix_to_angles`**, with a dimension-specific convention:
+
+- **2-D** is a single planar angle $\theta$, $(\cos,-\sin;\sin,\cos)$ — and its
+  inverse is one `atan2`.
+- **3-D** is **right-handed intrinsic** $R = R_x R_y R_z$ (rotate about $x$, then
+  $y$, then $z$), built from the nine entries in @eq-trse's $R$ block. Angles are in
+  **degrees by default** (`deg=False` for radians).
+
+Three Euler angles are a beautiful and cursed chart. Beautiful because they are the
+fewest numbers (three) that name a 3-D rotation in human terms; cursed because the
+map *degenerates* when the middle rotation reaches $\pm90°$ — the first and third
+axes line up and you lose a degree of freedom. This is **gimbal lock**, and naïvely
+inverting $R\to$ angles divides by $\cos(\text{ang}_1)=0$ there.
+`rotation_matrix_to_angles` handles it with an explicit branch: when
+$|\text{ang}_1|=90°$ (detected as $\big||\text{ang}_1|-\tfrac\pi2\big|<10^{-6}$) it
+fixes $\text{ang}_0=0$ and solves the remaining angle from a different matrix entry,
+and a guarded `_divide_no_nan` keeps the generic branch finite. The lesson — *Euler
+angles are a chart with a coordinate singularity* — is exactly why the optimiser does
+**not** use them, and why @sec-lie-exp exists.
+
+The practitioner's payoff of this whole section is **constraint by construction**. A
+*rigid* fit is "unit scale, zero shear" — so you keep only the translation+rotation
+prefix of the parameter vector and let `params_to_affine_matrix` default the rest. A
+*similarity* (7-DOF) fit ties the three scales to a single isotropic factor. You
+never have to project a free matrix back onto the rigid manifold; you withhold the
+unwanted factors from the parameter vector and let the defaults fill them in.
+
+## The Lie exponential chart {#sec-lie-exp}
+
+Here is the central idea of the page, and the reason registration borrows from Lie
+theory at all. We want to *optimise* over rotations (rigid) or invertible maps
+(affine). Both are **curved, constrained sets**: a rotation matrix must satisfy
+$R^\top R = I$ and $\det R = +1$ (a six-equation constraint on nine numbers); an
+orientation-preserving invertible matrix must have $\det>0$. If an optimiser nudges
+the nine entries of $R$ freely, it walks *off* the set of rotations — the result is no
+longer orthogonal, and "the nearest rotation" is a re-projection it must keep
+redoing. Euler angles avoid that but reintroduce gimbal lock (@sec-euler). We want a
+chart with **no constraints and no singularity at the working point**.
+
+The obvious starting move: a rotation near the identity is "identity plus a little
+skew." Recall that for a curve of rotations $R(s)$ with $R(0)=I$, the derivative
+$\dot R(0)$ is **skew-symmetric** ($\Omega^\top=-\Omega$) — that is the linearisation
+of the constraint $R^\top R=I$. So the **tangent space at the identity** is the space
+of skew-symmetric matrices, which in 3-D is parametrised by an axis-angle vector
+$\omega\in\mathbb R^3$ through
+
+$$
+[\omega]_\times=\begin{pmatrix}0&-\omega_z&\omega_y\\\omega_z&0&-\omega_x\\
+-\omega_y&\omega_x&0\end{pmatrix},
+$$ {#eq-skew}
+
+the skew-symmetric matrix of $\omega$ (so that $[\omega]_\times v=\omega\times v$).
+This space — skew-symmetric matrices in 3-D, plus a free translation — is the **Lie
+algebra** $\mathfrak{se}(d)$, the flat tangent space at the identity of the rigid
+group $SE(d)$. It is *unconstrained*: any $\omega$ is a valid element, any small
+nudge stays in the algebra. The optimiser lives here.
+
+The bridge from the flat algebra back to the curved group is the **exponential map**.
+For rotations it has a closed form — **Rodrigues' formula** — which you can almost
+derive by hand. The matrix exponential is $\exp(\Omega)=\sum_k \Omega^k/k!$; for a
+skew-symmetric $\Omega=[\omega]_\times$ with angle $\theta=\|\omega\|$, the powers
+collapse because $[\omega]_\times^3=-\theta^2[\omega]_\times$, and the series folds
+into sines and cosines:
+
+$$
+R=\exp([\omega]_\times)=I+\frac{\sin\theta}{\theta}[\omega]_\times
++\frac{1-\cos\theta}{\theta^2}[\omega]_\times^2.
+$$ {#eq-rodrigues}
+
+Read it as: rotate about the axis $\omega/\theta$ by the angle $\theta=\|\omega\|$.
+The $\sin\theta/\theta$ term is the first-order turn, the
+$(1-\cos\theta)/\theta^2$ term the second-order curvature correction — exactly the
+two terms you would get truncating the series and grouping. @fig-transforms-rodrigues
+shows $\exp$ of a single skew generator turning a fan of vectors rigidly as the angle
+grows.
+
+```{python}
+#| label: fig-transforms-rodrigues
+#| fig-cap: "Rodrigues in action. A fan of unit vectors is rotated by $R=\\exp([\\omega]_\\times)$ for $\\omega=(0,0,\\theta)$ — a generator about the $z$-axis — at six increasing angles from $0$ to $90°$. Every blade turns by the same angle and keeps unit length: $\\exp$ of a skew-symmetric generator is always a proper rotation, with no constraint to enforce and no re-orthogonalisation. This is the map `rigid_exp` applies in closed form, and the reason an optimiser can move freely on the flat axis-angle vector $\\omega$."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+def skew(w):
+    x, y, z = w
+    return np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
+
+def rodrigues(w):
+    th = np.linalg.norm(w)
+    K = skew(w)
+    if th < 1e-12:
+        return np.eye(3) + K
+    return (np.eye(3)
+            + (np.sin(th) / th) * K
+            + ((1 - np.cos(th)) / th**2) * (K @ K))
+
+phis = np.linspace(-50, 50, 9) * np.pi / 180.0          # the fan blades
+fan = np.stack([np.cos(phis), np.sin(phis), np.zeros_like(phis)], axis=1)
+angles = np.linspace(0, np.pi / 2, 6)                   # increasing rotation
+
+fig, ax = plt.subplots(figsize=(6.2, 6.2))
+cmap = plt.cm.viridis
+for j, th in enumerate(angles):
+    R = rodrigues(np.array([0.0, 0.0, th]))
+    rot = fan @ R.T
+    col = cmap(j / (len(angles) - 1))
+    for k in range(fan.shape[0]):
+        ax.plot([0, rot[k, 0]], [0, rot[k, 1]], color=col, lw=1.4, alpha=0.9)
+    ax.plot(rot[:, 0], rot[:, 1], 'o', color=col, ms=3,
+            label=f'$\\theta={np.degrees(th):.0f}^\\circ$')
+
+ax.set_aspect('equal')
+ax.set_xlim(-0.4, 1.15)
+ax.set_ylim(-0.85, 1.15)
+ax.axhline(0, color='0.8', lw=0.6, zorder=0)
+ax.axvline(0, color='0.8', lw=0.6, zorder=0)
+ax.set_xlabel('$x$')
+ax.set_ylabel('$y$')
+ax.set_title("Rodrigues: $R=\\exp([\\omega]_\\times)$ rotates a fan rigidly")
+ax.legend(loc='lower left', fontsize=8, framealpha=0.9)
+plt.tight_layout()
+plt.show()
+```
+
+### `rigid_exp` / `rigid_log` and the small-angle guard {#sec-rigid-exp}
+
+**`rigid_exp(params, *, ndim)`** is @eq-rodrigues plus a direct translation, packaged
+as a homogeneous matrix. The parameter layout is **rotation first, translation last**:
+3-D is $(\omega_x,\omega_y,\omega_z,t_x,t_y,t_z)$ (6); 2-D is $(\theta,t_x,t_y)$ (3).
+The rotation block is the closed-form $\exp$ (Rodrigues in 3-D via the internal
+`_so3_exp`, the planar rotation in 2-D), and the translation is applied **directly**
+— *not* through the $\mathfrak{se}(3)$ left-Jacobian. This is a deliberate
+simplification: the chart is "axis-angle rotation $\oplus$ raw translation," which is
+the screw decomposition only at the identity, but it is smooth, invertible near
+identity, and — the point — **closed-form and GPU-native** (no cuSolver), so the
+rigid optimiser's hot loop stays on-device. **DIFF-JAX**.
+
+**`rigid_log(matrix, *, ndim)`** inverts it — recovering $(\omega, t)$ from a rigid
+matrix. The axis-angle log (`_so3_log`) reads the angle off the trace
+($\cos\theta=(\operatorname{tr}R-1)/2$, the standard rotation-trace identity) and the
+axis off the antisymmetric part ($R-R^\top=2\sin\theta\,[\omega/\theta]_\times$), so
+$\omega = \tfrac{\theta}{2\sin\theta}\,(r_{21}-r_{12},\,r_{02}-r_{20},\,r_{10}-r_{01})$.
+It is valid for rotations **away from $\theta = \pi$** (the registration regime, where
+per-iteration rotations are small); the antipodal case — where $\sin\theta\to0$ but the
+axis is *not* recoverable from the antisymmetric part — is not handled.
+
+Both `exp` and `log` carry a **small-angle guard**, and it is worth understanding
+because it is a classic autodiff trap. Rodrigues divides by $\theta$ and
+$\theta^2$; at $\omega=0$ those are $0/0$, and even though the *values* have finite
+limits ($\sin\theta/\theta\to1$, $(1-\cos\theta)/\theta^2\to\tfrac12$), a naïve
+implementation poisons the **gradient**. The trick `_so3_exp` uses: compute
+$\theta^2=\|\omega\|^2$, and inside the small region replace it with a safe $1.0$
+before taking the square root, then `jnp.where` in the Taylor approximations
+($a\approx1-\theta^2/6$, $b\approx\tfrac12-\theta^2/24$). The reason the guard must be
+on the value fed to `sqrt`, not just on the final `where`, is subtle:
+$\mathrm{sqrt}'(0)=\infty$, and reverse-mode evaluates *both* branches of a `where`,
+so the unselected branch's $0\cdot\infty=\text{NaN}$ leaks into the gradient even
+though it is never "chosen." (Forward-mode is unaffected, so the bug hides until you
+call `grad`.) This is the kind of detail the equation hides and the code must get
+right.
+
+### `affine_exp` and the general matrix exponential {#sec-affine-exp}
+
+For the affine rung the constraint is weaker — we only need $\det>0$ (orientation
+preserving and invertible), not orthogonality — and the algebra is correspondingly
+larger: $\mathfrak{gl}(d)$, the space of **all** $d\times d$ matrices, is the tangent
+space at the identity of $GL^+(d)$. There is no closed-form $\exp$ for a general
+generator, so **`affine_exp(params, *, ndim)`** takes the first $d^2$ parameters as a
+row-major generator matrix $A$, the last $d$ as the translation, and computes the
+linear block as the **true matrix exponential** $\exp(A)$. Because $\det(e^A)=e^{\mathrm{tr}\,A}>0$
+for any real $A$, *every* parameter vector maps to an invertible,
+orientation-preserving map — the affine analogue of Rodrigues always returning a
+proper rotation. The search space is unconstrained $\mathbb R^{d^2+d}$, and the chart
+guarantees validity. **DIFF-JAX**.
+
+The engine is **`matrix_exp`** in `linalg.matrix_function`, and its implementation is
+chosen for the same GPU reason as `safe_*`: it is **scaling-and-squaring with a
+truncated Taylor series**, *pure matmul*, no factorisation.
+
+$$
+e^A=\bigl(e^{A/2^s}\bigr)^{2^s},
+\qquad
+e^{A/2^s}\approx\sum_{k=0}^{q}\frac{(A/2^s)^k}{k!}.
+$$ {#eq-scaling-squaring}
+
+Scale $A$ down by $2^{-s}$ until its norm is tiny, sum a short Taylor series (the
+small argument makes it converge fast), then **square the result $s$ times** to undo
+the scaling — each squaring doubling the effective argument. With the defaults
+($s=8$, order $12$) the scaled norm is negligible for any generator a registration
+produces, so the result matches a reference `expm` to machine precision; the
+alternative, `jax.scipy.linalg.expm` (Padé), needs a linear solve and so wedges or
+falls back to CPU on the broken-cuSolver stacks. Pure matmul keeps `affine_exp`
+`jit`- and `grad`-clean and on-device.
+
+**`matrix_log`** is the inverse — **inverse scaling-and-squaring**: take $s$ matrix
+square roots (by the **Denman–Beavers** iteration $Y_{k+1}=\tfrac12(Y_k+Z_k^{-1})$,
+$Z_{k+1}=\tfrac12(Z_k+Y_k^{-1})$, which drives $Y_k\to M^{1/2}$ quadratically) to
+push $A$ toward the identity, sum the Taylor series of $\log(I+X)$ on the small
+remainder $X=A^{1/2^s}-I$, then scale back by $2^s$. The square-root step routes its
+inverses through `safe_inv`, so unlike `matrix_exp` this is **not** for an optimiser
+hot loop — it backs the offline Karcher mean of @sec-transform-manifold.
+
+`matrix_log` carries one **domain caveat** you must respect: the principal logarithm
+does not exist for a matrix with an eigenvalue on the **closed negative real axis** —
+a reflection ($\det<0$) or a $180°$ rotation (eigenvalue $-1$). Rather than return
+finite garbage there, `matrix_log` **returns NaN**: it checks the round-trip residual
+$\|\exp(\log A)-A\|/\|A\|$ (itself pure matmul, cuSolver-free) against a tolerance and
+NaNs out if the reconstruction fails. So a NaN means *"raise `n_sqrt` (the input may
+merely exceed the Taylor radius); if still NaN, the input is genuinely out of
+domain."* A loud failure, by design — the negative-real-axis boundary is also why a
+near-antipodal cohort breaks the Karcher mean (@sec-transform-manifold).
+
+### The `TransformModel`: `Rigid` and `Affine` {#sec-model}
+
+The registration engine does not call `rigid_exp` / `affine_exp` directly; it holds a
+**`TransformModel`** — a tiny frozen record that bundles the exponential chart with
+the two pieces of parameter-layout knowledge the coarse-to-fine driver needs. The
+`TransformModel` is a structural `Protocol` with immutable
+`@dataclass(frozen=True)` implementers (`Rigid`, `Affine`), hashable so they ride as
+`jit` static arguments. It exposes three methods:
+
+- **`n_params(ndim)`** — the length of the parameter vector. `Rigid`: $1{+}d$ in 2-D,
+  $3{+}d$ in 3-D (rotation DOF + translation). `Affine`: $d^2+d$. **HOST-QA** (a
+  Python `int`).
+- **`exp(params, *, ndim)`** — the chart, dispatching to `rigid_exp` or `affine_exp`.
+  **DIFF-JAX**.
+- **`rescale_to_grid(params, ratio)`** — when the coarse-to-fine driver warm-starts a
+  finer pyramid level, the **translation** parameters (in voxel units) must scale by
+  the per-axis `finer_shape / coarser_shape` ratio, while the rotation/linear block
+  (dimensionless) stays put. Both models share `_rescale_translation_last`, which
+  scales only the trailing `len(ratio)` parameters — the shared "linear block first,
+  translation last" layout. **DIFF-JAX**.
+
+Holding the layout *on the model* — rather than the driver slicing `params[-ndim:]` —
+is what lets a new parametrisation (a 7-DOF similarity, a constrained rigid, the
+rigid block a BBR recipe optimises) drop in as one record without touching the
+driver. Note the dense-velocity-field family (diffeomorphic/SyN, the
+[next rung](diffeomorphic.qmd#sec-svf)) is **not** a `TransformModel`: its parameter is
+a field, not a small vector, and it lowers onto a different driver.
+
+## Closed-form affine from matched points {#sec-fit}
+
+Optimisation is the general tool, but sometimes you already have **correspondences**
+— matched landmark pairs, or the centroids of matched labels — and an affine between
+two point sets has a **closed form**. No iteration, no Lie chart — one least-squares
+solve.
+
+**`fit_affine(source, target, weights=None)`** finds the affine $\mathbf A$ that maps
+`target` onto `source` in the least-squares sense, minimising the (optionally
+weighted) squared residual over the $M$ corresponding points. Write each point in
+homogeneous form (append a $1$), stack them into $X$ (the homogeneous `target`,
+$M\times(N{+}1)$) and $y$ (the `source`, $M\times N$). We want $\beta$ (the
+transpose of $\mathbf A$) with $X\beta\approx y$. The least-squares solution is the
+**normal equations**
+
+$$
+(X^\top W X)\,\beta = X^\top W\,y,
+$$ {#eq-normal}
+
+with $W$ the diagonal of `weights`. The Gram matrix $X^\top W X$ is **symmetric
+positive-definite** (for non-degenerate, full-rank correspondences), so `fit_affine`
+solves it by an **SPD Cholesky solve** (`safe_cho_solve`) — the cuSolver-robust seam
+again — and transposes $\beta$ back into the $(N,N{+}1)$ rectangular affine. **DIFF-JAX**
+(through `safe_*`), batched and N-D (unlike the rotation chart, which is 2-/3-D only).
+
+Two practical notes. The weights let you **downweight outlier correspondences** (a
+mismatched landmark gets a small $w$), the seed of robust fitting. And `fit_affine`
+is the natural **closed-form initialiser** for the gradient-based optimiser: solve
+the affine from a coarse correspondence first, then refine on the Lie chart. The two
+parametrisations of this page — geometric factors (@sec-decomposition) and the
+exponential chart (@sec-lie-exp) — meet here: you can `affine_matrix_to_params` a
+`fit_affine` result to *read* its rotation and scale, or feed it as the warm start an
+optimiser refines.
+
+## Centering: rotate about the image centre {#sec-centering}
+
+We have transforms and a way to fit them; the last piece of plumbing is **how a
+matrix becomes sample coordinates**, and it hides a decision that quietly governs
+whether the optimisation even works.
+
+**`apply_affine(coords, matrix, *, center=None)`** applies a homogeneous matrix to a
+field of coordinates, but with a twist: an optional **centre** $c$ about which the
+linear part acts.
+
+$$
+\text{out}=M\,(p-c)+t+c.
+$$ {#eq-apply}
+
+With $c=0$ this is the plain $Mp+t$ of @eq-homogeneous. With $c\ne0$ it **subtracts
+the centre, applies the linear map, then adds the centre back** — so the rotation and
+scale pivot about $c$ rather than the coordinate origin. **`affine_grid(matrix,
+spatial_shape, *, center=None)`** builds the absolute sample-coordinate grid the
+resampler consumes: it lays down the `identity_grid` (index space, `grid[i] == i`,
+`indexing='ij'`) and applies the matrix about the centre. When `center=None`,
+`affine_grid` **defaults the centre to the grid centre** $(\text{shape}-1)/2$ — the
+**registration convention** (rotate about the image centre, not the voxel at the
+corner). Both are **DIFF-JAX**.
+
+Why does this matter so much? Consider a tiny rotation of a $200^3$ image. About the
+**origin** (the corner voxel), a $1°$ rotation moves the far corner by $200\cdot
+\sin(1°)\approx 3.5$ voxels — the *translation* and *rotation* parameters are wildly
+coupled, and a unit step in the rotation parameter moves the image enormously and
+unevenly. The **rotation has huge leverage about the corner.** About the
+**centre**, the same $1°$ rotation moves the farthest voxel by only $100\cdot\sin(1°)
+\approx 1.75$ voxels, symmetrically, and rotation and translation decouple. In the
+language of optimisation, centering **conditions the problem**: it equalises the
+scales of the parameters so the Hessian is better-balanced, the Gauss–Newton step is
+well-scaled, and the optimiser converges in far fewer iterations. The same logic is
+why `fit_affine` is often run on **mean-centred** point sets. Centering is not
+cosmetic; it is the difference between a problem that converges and one that crawls.
+
+## Transforms form a manifold {#sec-transform-manifold}
+
+Return to the motivating question with a twist: you have realigned every volume of an
+fMRI run and now hold *one rigid transform per volume*. You want the **mean pose** of
+the run (to define a reference), or you are building a study **template** and need the
+average of a cohort of subject-to-MNI affines. The naïve move — average the matrices
+entrywise — is **wrong**, and seeing why is the whole point of this section.
+
+The set of rigid (or affine) transforms is not a vector space; it is a **curved
+group** — a Riemannian manifold. The entrywise average of two rotations is *not a
+rotation* (it is not orthogonal), and the entrywise average of two affines can be
+**singular** even when both inputs are perfectly invertible. @fig-transforms-geodesic
+makes this visible: interpolating between two affines by entrywise linear blend
+collapses the figure through a near-degenerate state, while the geodesic stays a
+clean rotation+scale throughout.
+
+```{python}
+#| label: fig-transforms-geodesic
+#| fig-cap: "Why averaging on the manifold matters. Interpolating from the identity to an affine $B$ (a $176°$ rotation with a $1.4\\times$ scale). Left: the geodesic $\\exp(t\\,\\log B)$ — every intermediate is a clean rotation+scale, its determinant rising smoothly $1.0\\to1.96$ ($=s^2$). Right: the naive entrywise blend $(1-t)I+tB$ — at the midpoint the determinant collapses to $\\sim0.04$ (a near-singular, nearly-flattened square): the average of two well-conditioned transforms is degenerate. `transform_geodesic` / `transform_mean` walk the left path; an entrywise mean walks the right."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+from numpy.linalg import det
+
+# Minimal real 2x2 matrix exp / log (scaling-and-squaring + Denman-Beavers),
+# the numpy analogue of nitrix's matrix_exp / matrix_log.
+def m_exp(A, s=12, order=18):
+    B = A / (2.0 ** s)
+    term = np.eye(A.shape[0]); res = np.eye(A.shape[0])
+    for k in range(1, order + 1):
+        term = term @ B / k
+        res = res + term
+    for _ in range(s):
+        res = res @ res
+    return res
+
+def m_sqrt(M, iters=40):
+    Y, Z = M.copy(), np.eye(M.shape[0])
+    for _ in range(iters):
+        Y, Z = 0.5 * (Y + np.linalg.inv(Z)), 0.5 * (Z + np.linalg.inv(Y))
+    return Y
+
+def m_log(A, s=12, order=18):
+    R = A.copy()
+    for _ in range(s):
+        R = m_sqrt(R)
+    X = R - np.eye(A.shape[0])
+    Xk = X.copy(); ser = X.copy()
+    for k in range(2, order + 1):
+        Xk = Xk @ X
+        ser = ser + ((-1.0) ** (k + 1)) * Xk / k
+    return ser * (2.0 ** s)
+
+def hom(M2, t):
+    H = np.eye(3); H[:2, :2] = M2; H[:2, 2] = t; return H
+
+A = np.eye(3)
+ang = np.radians(176.0)
+Rb = np.array([[np.cos(ang), -np.sin(ang)], [np.sin(ang), np.cos(ang)]])
+B = hom(1.4 * Rb, [0.6, -0.3])
+
+ts = np.linspace(0, 1, 7)
+logB = m_log(B)
+geo = [m_exp(t * logB) for t in ts]
+lerp = [(1 - t) * A + t * B for t in ts]
+
+sq = np.array([[-0.35, 0.35, 0.35, -0.35, -0.35],
+               [-0.35, -0.35, 0.35, 0.35, -0.35]])
+def apply(H, pts):
+    p = np.vstack([pts, np.ones((1, pts.shape[1]))]); return (H @ p)[:2]
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 5.2))
+cmap = plt.cm.plasma
+for ax, fams, title in [
+    (axes[0], geo, "Geodesic  $\\exp(t\\,\\log B)$ — stays a rotation+scale"),
+    (axes[1], lerp, "Naive entrywise lerp  $(1-t)I + tB$ — collapses"),
+]:
+    for j, (t, H) in enumerate(zip(ts, fams)):
+        out = apply(H, sq)
+        col = cmap(j / (len(ts) - 1))
+        ax.plot(out[0], out[1], color=col, lw=1.8,
+                label=f"$t={t:.2f}$  det$={det(H[:2,:2]):+.2f}$")
+    ax.set_aspect('equal'); ax.set_xlim(-2.2, 2.2); ax.set_ylim(-2.2, 2.2)
+    ax.axhline(0, color='0.9', lw=0.5); ax.axvline(0, color='0.9', lw=0.5)
+    ax.set_title(title, fontsize=10)
+    ax.legend(fontsize=6.5, loc='upper left', framealpha=0.85)
+
+fig.suptitle("Averaging transforms must respect the manifold", fontsize=12)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.show()
+```
+
+The cure is to do everything **through the chart**: map to the flat algebra with
+`log`, do the linear-algebra operation there, and map back with `exp`. `nitrix`
+deliberately uses the **true matrix chart** (`matrix_log`/`matrix_exp`) here, not the
+closed-form `rigid_log` — because the matrix log is smooth at the identity, whereas
+the $\mathfrak{so}(n)$ rotation-vector log has a singularity the iteration's
+identity-init would hit.
+
+- **`transform_geodesic(transform, t)`** — the point at fraction $t$ along the
+  geodesic from identity to `transform`, $\exp(t\,\log T)$. At $t=0$ it is the
+  identity, at $t=1$ it is $T$, and at **$t=\tfrac12$ it is the matrix square root** —
+  $\text{geodesic}(T,\tfrac12)^2=T$ exactly, which an entrywise half-blend can never
+  guarantee. To interpolate between two transforms $A$ and $B$, compose:
+  $A\cdot\text{geodesic}(A^{-1}B,t)$. Offline (uses `matrix_log`).
+
+- **`transform_mean(transforms, *, weights=None, iters=10, return_residual=False)`** —
+  the **Fréchet (Karcher) mean** of a stack of homogeneous transforms: the Riemannian
+  barycentre, the point minimising the sum of squared geodesic distances. It is found
+  by the standard log/exp **fixed point**
+
+  $$
+  \mu \;\leftarrow\; \mu\cdot\exp\!\Big(\sum_k w_k\,\log(\mu^{-1}T_k)\Big),
+  $$ {#eq-karcher}
+
+  starting from $\mu=T_0$: at each step, map every transform into the tangent space
+  *at the current estimate* ($\log(\mu^{-1}T_k)$), take the ordinary weighted mean
+  there (the algebra *is* flat), and step $\mu$ by the $\exp$ of that mean tangent.
+  The mean of rigid transforms is rigid; of affines, affine. Two design choices to
+  know. `iters` is a **hard cap, not a tolerance loop** — a data-dependent
+  `float(residual) < tol` break would forfeit the `jit`/`grad`-cleanliness the op
+  advertises, so a *widely dispersed* cohort (rotation spread $\gtrsim\pi/2$) may not
+  converge within the default 10; raise `iters` and pass `return_residual=True` to
+  *check* convergence (the residual $\|\sum_k w_k\log(\mu^{-1}T_k)\|\to0$ at a true
+  barycentre) rather than trust it. And a **near-antipodal** cohort (a pair $\approx\pi$
+  apart) sits on `matrix_log`'s negative-real-axis boundary (@sec-affine-exp): the
+  tangent is NaN there and propagates to a NaN mean — a loud "the mean is ill-defined,"
+  not silent garbage. Offline (`matrix_log` ⇒ `safe_inv`).
+
+- **`velocity_mean(velocities, *, weights=None)`** — the Fréchet mean of **stationary
+  velocity fields**. The beautiful simplification: an SVF *is* its own Lie-algebra
+  element (it lives in the tangent space already; its $\exp$ is the diffeomorphism,
+  per the [SVF page](diffeomorphic.qmd#sec-svf)), so its barycentre is just the
+  ordinary **(weighted) arithmetic mean** — no log/exp loop at all. This is the
+  Lie-algebra property in its purest form, and it is **DIFF-JAX** and GPU-native
+  (unlike `transform_mean`), the substrate for deformable-template centring.
+
+- **`fuse_transforms(transforms, shape, *, mode='nearest')`** — collapse a multi-stage
+  pipeline (homogeneous matrices *and* displacement fields, interleaved) into **one
+  displacement field** on the output grid, so the moving image is resampled **once**.
+  The stages are listed in application order (`transforms[0]` first, as a rigid →
+  affine → deformable pipeline runs), and `fuse_transforms` composes them on the
+  sampling grid in **reverse** — $g=T_1(T_2(\dots T_N(x)))$ — applying matrices about
+  the grid centre (the @sec-centering convention) and adding sampled displacements,
+  then subtracts the identity grid to return a relative displacement. The payoff is
+  both **quality** (no compounded resampling blur — every intermediate interpolation
+  is a quality loss) and **throughput** (one gather instead of $N$). It uses no
+  `safe_inv`, so it is GPU-native.
+
+The use case ties the page together. To build a study template you align each subject
+to a working reference, take the `transform_mean` of the subject-to-reference affines
+to define the *average pose*, and iterate — the groupwise-registration loop, with the
+barycentre as its centring step. To summarise head motion across runs you take the
+mean (or the geodesic spread) of the per-volume rigid transforms. And to apply a
+rigid + affine + warp pipeline you `fuse_transforms` it into a single field and
+resample once. Every one of these respects the manifold; none of them would be
+correct as an entrywise average.
+
+## Further reading
+
+- Hartley, R. and Zisserman, A. (2004). *Multiple View Geometry in Computer Vision*,
+  2nd ed. Cambridge University Press. — Homogeneous coordinates and the affine/
+  projective transform groups, from first principles.
+- Murray, R. M., Li, Z., and Sastry, S. S. (1994). *A Mathematical Introduction to
+  Robotic Manipulation*. CRC Press. — The classic, readable account of $SE(3)$,
+  twists, and the exponential map (Rodrigues, screw motions).
+- Hall, B. C. (2015). *Lie Groups, Lie Algebras, and Representations*, 2nd ed.
+  Springer. — The matrix-Lie-group exponential/logarithm and the BCH formula, at the
+  right level of rigour.
+- Higham, N. J. (2008). *Functions of Matrices: Theory and Computation*. SIAM. —
+  Scaling-and-squaring for `expm`, inverse scaling-and-squaring and the
+  Denman–Beavers iteration for `logm`/`sqrtm`, and their conditioning.
+- Pennec, X., Fillard, P., and Ayache, N. (2006). "A Riemannian Framework for Tensor
+  Computing." *International Journal of Computer Vision*, 66(1), 41–66. — The Fréchet
+  mean and geodesic interpolation on a matrix manifold; the template-construction
+  rationale.
+- Arsigny, V., Commowick, O., Pennec, X., and Ayache, N. (2006). "A Log-Euclidean
+  Framework for Statistics on Diffeomorphisms." *MICCAI 2006*. — Why averaging
+  transforms goes through the log domain; the SVF-as-algebra view.
+- Cox, R. W. and Jesmanowicz, A. (1999). "Real-Time 3D Image Registration for
+  Functional MRI." *Magnetic Resonance in Medicine*, 42(6), 1014–1018. — The
+  `3dvolreg` lineage: rigid realignment of an fMRI series as iterated linearised
+  least squares.
+
+## See also
+
+- The exponential charts and grid application —
+  [`src/nitrix/geometry/transform.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/transform.py).
+- The geometric $T R S E$ factorisation, fit, compose/invert —
+  [`src/nitrix/geometry/affine.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/affine.py).
+- The manifold barycentre / geodesic / fusion —
+  [`src/nitrix/geometry/algebra.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/algebra.py).
+- The general matrix `exp` / `log` —
+  [`src/nitrix/linalg/matrix_function.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/matrix_function.py).
+- The cuSolver-robust solver seam —
+  [`src/nitrix/linalg/_solver.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_solver.py).
+- The `Rigid` / `Affine` transform models —
+  [`src/nitrix/register/_model.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_model.py).
+- Neighbouring pages: the transform ladder and pull-back framing
+  ([Foundations](foundations.qmd#sec-ladder)); how a sample grid becomes a warped
+  image ([Resampling](resampling.qmd#sec-pullback-sampling)); the optimiser that
+  moves on the Lie chart ([Optimization](optimization.qmd#sec-gauss-newton)); and the
+  next rung, dense velocity fields ([Diffeomorphic](diffeomorphic.qmd#sec-svf)).

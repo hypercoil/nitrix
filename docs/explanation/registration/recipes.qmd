@@ -1,0 +1,780 @@
+---
+title: "Recipes: choosing and composing movers"
+---
+
+::: {.callout-tldr title="Fast path"}
+The narrative pages built the machinery — representations, pull-back resampling,
+similarity metrics, optimisers, the diffeomorphic stack. This page is the
+**catalogue**: the public functions in `nitrix.register` that assemble that
+machinery into end-to-end alignments, the knobs that steer each, and a decision
+table from *problem* to *recipe*. The one idea it adds is that every recipe is a
+**thin, pure function** `(moving, fixed) -> NamedTuple` over a **frozen
+configuration record** (a `*Spec`): the spec is static config that rides `jit`,
+the output is plain arrays. Read it as reference — keep it open beside your code.
+:::
+
+The transform ladder of the earlier pages — rigid, affine, diffeomorphic,
+surface — is a ladder of *representations*. The recipes are the ladder of
+*entry points*: the functions you actually call. Each one fixes a representation,
+a similarity, and an optimiser, and exposes the handful of decisions left to you
+as keyword arguments and spec fields. They share a contract worth stating once:
+
+- **Inputs** are single-channel arrays `(*spatial,)` (2-D or 3-D), *not* PyTree
+  modules. `moving` is the image you move; `fixed` is the target you align it to.
+  The recovered map pulls `moving` **back** onto the `fixed` grid (the convention
+  from [foundations](foundations.qmd#sec-pullback)).
+- **Outputs** are `NamedTuple`s of arrays — `RegistrationResult`, `VolregResult`,
+  `BBRResult`, `PipelineResult`, `DiffeomorphicResult`, `SyNResult`. No I/O, no
+  atlas objects; image-file handling is out of scope (it lives downstream).
+- **Configuration** is a frozen, hashable `@dataclass` (`RegistrationSpec`,
+  `SyNSpec`, `DemonsSpec`, `BBRSpec`). Frozen so it can ride a `jit` static
+  argument; you build one, hand it in, and never mutate it.
+
+Our running examples are the four canonical neuroimaging questions: **align a
+subject's T1 to MNI** (rigid → affine → SyN), **realign a moving fMRI series**
+(`volreg`), **register an EPI to its T1 across modalities** (`bbr_register` or a
+cross-modal pipeline), and **deform one anatomy onto another** (Demons / SyN).
+
+@fig-recipes-decision routes a problem to a recipe; the
+[decision table](#sec-specs) at the end is the same map in tabular form.
+
+```{python}
+#| label: fig-recipes-decision
+#| fig-cap: "From problem to recipe. Same-modality SSD takes the inverse-compositional fast path; cross-modal work uses MI / CR / LNCC. The bottom band shows the three special cases: a 4-D series (volreg), a tissue boundary (bbr_register), and anisotropic or differing grids (WorldSpace)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+
+fig, ax = plt.subplots(figsize=(8.4, 6.6))
+ax.set_xlim(-2, 102); ax.set_ylim(0, 100); ax.axis("off")
+
+def box(x, y, w, h, text, fc, fontsize=9, ec="#33373d"):
+    ax.add_patch(FancyBboxPatch(
+        (x - w / 2, y - h / 2), w, h,
+        boxstyle="round,pad=1.4,rounding_size=2.2",
+        linewidth=1.2, edgecolor=ec, facecolor=fc, zorder=2))
+    ax.text(x, y, text, ha="center", va="center",
+            fontsize=fontsize, zorder=3, color="#15181c")
+
+def arrow(x0, y0, x1, y1, label=None, lx=0, ly=0):
+    ax.add_patch(FancyArrowPatch(
+        (x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=13,
+        linewidth=1.2, color="#55606b", zorder=1, shrinkA=2, shrinkB=2))
+    if label:
+        ax.text((x0 + x1) / 2 + lx, (y0 + y1) / 2 + ly, label,
+                ha="center", va="center", fontsize=7.6, style="italic",
+                color="#444b53", zorder=4,
+                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none"))
+
+start = "#dfe7f0"; decis = "#fbf0d6"; leaf = "#dce9dd"; leaf2 = "#e8ddec"
+box(50, 94, 40, 9, "problem: align A -> B", start, 10)
+box(50, 79, 34, 9, "same modality?", decis)
+arrow(50, 89.5, 50, 83.5)
+box(24, 62, 30, 9, "linear only?", decis)
+box(76, 62, 30, 9, "linear only?", decis)
+arrow(33, 79, 26, 66.5, "yes (SSD)", -1, 4)
+arrow(67, 79, 74, 66.5, "no (MI/CR/LNCC)", 0, 4)
+box(13, 44, 22, 11, "rigid_register\naffine_register\nSSD (IC fast)", leaf, 8)
+box(40, 44, 24, 13, "syn_pipeline\nor demons (SSD)\n/ greedy_syn", leaf, 8)
+arrow(20, 57.5, 14, 49.5, "yes", -3, 0)
+arrow(28, 57.5, 38, 50.5, "no", 3, 0)
+box(63, 44, 22, 13, "rigid/affine\nMI or CR\nor bbr_register", leaf2, 8)
+box(88, 44, 21, 13, "syn_pipeline\nMI linear +\nLNCC SyN", leaf2, 8)
+arrow(70, 57.5, 64, 50.5, "yes", -3, 0)
+arrow(82, 57.5, 87, 50.5, "no", 3, 0)
+box(19, 23, 30, 10, "4-D series\n(motion)?  -> volreg", "#f3dede", 8.4)
+box(54, 23, 30, 10, "surface boundary\n(EPI<->T1)? -> bbr_register", "#f3dede", 8.0)
+box(86, 23, 20, 10, "anisotropic /\ndiff. grids?\n-> WorldSpace", "#e3e3e8", 7.6)
+ax.text(50, 7,
+        "leaves name the public recipe; SSD -> the inverse-compositional fast "
+        "path,\nMI/CR/LNCC -> the cross-modal / bias-robust path",
+        ha="center", va="center", fontsize=7.8, color="#555", style="italic")
+ax.set_title("Routing a registration problem to a recipe", fontsize=12, pad=6)
+plt.tight_layout()
+plt.show()
+```
+
+A note on **execution class** (the tags from the contract): the recipes
+themselves are **DIFF-JAX** — jittable and (in the default `mode='fixed'`)
+reverse-differentiable. A few constructors do host-side, data-dependent work
+*before* the device kernel — branching on a Python-level shape or dtype:
+`affine_register` warns and *shortens its own pyramid* on a tiny grid
+(`_cap_levels`, which inspects `fixed.shape`) and `apply_transform` branches on
+the array `dtype` to pick its kernel. Those are **HOST-CTOR** steps — fine at
+call time, but never call them inside a jitted loop. (`init='moment'` is
+data-dependent — it reads the images' intensity moments — but those moments are
+computed *on device* from pure `jnp` ops, so the moment init traces and jits;
+it is a one-shot construction, not a per-iteration cost.) The all-positive
+`jacobian_det` check (`det.min() > 0`) is **HOST-QA** — it returns a Python bool,
+so it belongs *after* a fit, never inside a traced loop. The rule throughout:
+*spec choices are static; image data is traced.*
+
+## Matrix recipes: rigid, affine, apply, and the staged pipeline {#sec-matrix-recipes}
+
+These are the linear rungs of the ladder — the recipes that recover a single
+homogeneous matrix $\mathbf A$. Their shared engine is the coarse-to-fine driver
+from [optimization](optimization.qmd#sec-coarse-fine): build a Gaussian pyramid
+of `fixed`, minimise the similarity over the transform's Lie parameters $\theta$
+at the coarsest level, rescale and warm-start the next finer level, repeat.
+
+### `rigid_register` — six degrees of freedom
+
+`rigid_register(moving, fixed, *, spec, space, method, init, init_transform,
+mask, winsorize, histogram_match)` recovers a rigid map: a rotation and a
+translation, the transform of a body that does not deform. In 3-D that is
+6 parameters (an axis-angle vector $\omega$ and a translation $t$), in 2-D it is
+3. The parametrisation is the Lie chart of
+[transforms](transforms.qmd#sec-lie-exp): $\theta = (\omega, t)$, and the matrix
+is $\mathbf A = \exp\,\theta$ via the closed-form Rodrigues formula (`Rigid` in
+`_model.py`). Optimising over $\theta$ rather than over the nine entries of a
+rotation matrix is what keeps every iterate a valid rotation for free.
+
+What does it return? A `RegistrationResult` with four fields:
+
+- `matrix` — the **self-contained** homogeneous transform, fixed → moving. "Self-
+  contained" means the grid centre the warp rotates about is *baked in*, so
+  `apply_affine(coords, matrix)` reproduces the warp directly and the matrix
+  composes with another result. In `IndexSpace` it is the full-resolution
+  fixed-voxel → moving-voxel index map; in `WorldSpace` the world → world map (mm).
+- `params` — the raw **about-origin** Lie parameters $\theta$ at full resolution.
+- `warped` — `moving` resampled onto the `fixed` grid by `matrix`.
+- `cost_history` — the concatenated per-level optimiser cost traces.
+
+The reason `matrix` and `params` differ is the centring problem from
+[transforms](transforms.qmd#sec-centering): a rotation applied about the origin
+moves an off-origin brain by a translation you did not intend, so the recipe
+internally rotates about the grid centre $c$ and *conjugates* the raw
+`model.exp(params)` by that centre to produce the self-contained `matrix`. Keep
+`params` if you want the bare chart coordinates; use `matrix` for everything else.
+
+**`init` — where the optimiser starts.** A second-order optimiser converges fast
+*inside* the basin of the right minimum but cannot climb out of the wrong one.
+The simplest start, `init='identity'` (the default), assumes the images already
+roughly overlap. When they do not — a brain off-centre by a third of the field
+of view — that single zero start can sit outside the narrow capture range and the
+fit fails silently. `init='moment'` is the cheap robust fix: it matches the
+**intensity-weighted centroids** (a translation) of the two images, treating each
+image as a density. Writing $w = \max(I, 0)$ for the non-negative weights and the
+voxel grid $x$,
+
+$$
+\bar{x} = \frac{\sum_x w(x)\,x}{\sum_x w(x)}, \qquad
+\sigma_d^2 = \frac{\sum_x w(x)\,(x_d - \bar{x}_d)^2}{\sum_x w(x)}
+$$ {#eq-recipes-moments}
+
+are the centroid $\bar{x}$ and per-axis spread $\sigma_d$ — the first two moments
+of the image-as-density (with non-negative weights $w=\max(I,0)$ and a small
+$+10^{-12}$ guard on the normalising mass, from `_image_moments`). The moment
+init sets the translation so $\bar{x}_f$ maps onto $\bar{x}_m$. For rigid it
+deliberately does **not** add a rotation: matching moments cannot fix the
+principal-axis *sign*, so a rotation guess risks a *worse* start. (For affine it
+additionally matches the spread as a diagonal scale; see below.) `init='moment'`
+is `IndexSpace`-only — the moment matrix is built in voxel coordinates — and is a
+one-shot, data-dependent (but device-traced) construction, so build it once at
+call time rather than inside a jitted loop.
+
+**`init_transform` — warm-starting from a prior result.** Pass a previous
+recipe's `result.matrix` and it takes precedence over `init`: the recipe
+de-centres the self-contained matrix back to about-origin coordinates and rescales
+the translation to the coarsest pyramid level (the driver upscales it back as it
+climbs). This is the hook the staged pipeline uses — affine warm-started from
+rigid. `IndexSpace`-only.
+
+**`space` — index vs world.** `IndexSpace()` (the default) reads $\theta$
+directly in voxel coordinates and assumes `moving` and `fixed` share a roughly
+isotropic voxel grid; it is the leaner, fully-on-device path (no general matrix
+inverse, so no cuSolver fallback). `WorldSpace(fixed_affine=..., moving_affine=...)`
+carries each image's voxel → world affine and optimises the world → world map, so
+a transform that is rigid in *physical* space is recovered correctly under
+anisotropic voxels or differing grids. The rule of thumb: a rigid transform in
+index space *shears* in physical space when voxels are anisotropic — reach for
+`WorldSpace` then. See [foundations](foundations.qmd#sec-spaces).
+
+**`method` — the inverse-compositional fast path.** This is the single most
+important performance lever in the linear recipes, so it earns a paragraph.
+The forward Gauss-Newton step re-linearises the *moving* image every iteration:
+each iteration costs roughly $P$ tangent warps (one per parameter,
+$P = 6$ rigid, $12$ affine) to build the Jacobian, plus the residual warp. The
+inverse-compositional scheme (Baker-Matthews; see
+[optimization](optimization.qmd#sec-inverse-comp)) instead linearises the
+*reference* once per level — its steepest-descent images and the Gauss-Newton
+Hessian $H = SD^{\top}SD$ are built a single time — so each iteration is one warp,
+one projection, and a closed-form compositional matrix update. No per-iteration
+re-linearisation. Measured on an L4 GPU at identical recovery, that is roughly
+**7× at $64^3$, 4× at $128^3$** (the speedup shrinks as the image grows because
+the single warp's share of the cost grows). `method`:
+
+- `"auto"` (default) takes the fast path **when its preconditions hold** —
+  `IndexSpace` + a least-squares (SSD) metric + the LM/GN/auto optimiser + a
+  `Rigid`/`Affine` model + *no mask* — and falls back to the forward path
+  otherwise. The forward path is the parity oracle the fast path is tested against.
+- `"inverse_compositional"` forces it (and validates the preconditions, raising
+  if they do not hold).
+- `"forward"` always takes the forward Gauss-Newton / LM path.
+
+A cost `mask` always routes to the forward path: the constant-template Hessian is
+a *full-grid* linearisation built once from the whole reference, so it cannot
+honour a per-voxel mask. Asking for `method='inverse_compositional'` *with* a mask
+is a loud error.
+
+**`mask` — restricting the cost.** A non-negative per-voxel weight on the `fixed`
+grid (a brain mask, a lesion exclusion, a field-of-view) restricts or weights the
+cost. Out-of-mask voxels are ignored. On the least-squares path the mask enters as
+a $\sqrt{\text{mask}}$ row-scaling of the residual Jacobian, so a zero-weight voxel
+contributes a zero row and drops out of the Gauss-Newton normal equations; for
+MI / CorrelationRatio it gates the joint-histogram scatter, not merely the
+reduction.
+
+**`winsorize` / `histogram_match` — intensity conditioning.** Both default *off*
+(byte-unchanged). `winsorize=(0.005, 0.995)` clips each image to those percentiles
+— outlier-robustness, the fMRIPrep front end. `histogram_match=True` remaps
+`moving` onto `fixed`'s intensity distribution (within-modality only). Both
+condition the *estimate*, so the returned `warped` is the *conditioned* moving —
+to obtain the original intensities, apply `matrix` to the original image with
+`apply_transform`. (The package docstring says these are "not yet implemented";
+the code disagrees — they are wired into `preprocess_images` and run. Trust the
+code.)
+
+### `affine_register` — twelve degrees of freedom
+
+`affine_register` has the same signature plus a `restarts` argument, and adds
+six degrees: a general linear block (scale, shear, anisotropic stretch) on top of
+the rigid six. In 3-D that is 12 parameters, in 2-D, 6. The linear block is the
+*matrix exponential* of a generator (`affine_exp` / `matrix_exp`), which
+guarantees the result is invertible and orientation-preserving — you cannot
+accidentally optimise into a singular or flipped map. See
+[transforms](transforms.qmd#sec-decomposition).
+
+Two affine-specific behaviours:
+
+**The moment init matters more here.** For affine, `init='moment'` matches both
+the centroids (translation) and the per-axis spread as a **diagonal scale**
+$M = \operatorname{diag}(\sigma_m / \sigma_f)$ from @eq-recipes-moments — no
+rotation, for the sign reason above. The affine basin is *narrower* than the rigid
+one, and a single zero start fails silently on a large misalignment, so the moment
+start (or a rigid warm start) is worth reaching for.
+
+**`restarts` — a basin lever.** `affine_register(..., restarts=k)` runs the
+**forward** solve from `k` deterministically-diversified inits (small jitter on
+the linear block and translation, fixed PRNG seed) and keeps the lowest-cost
+result. It is a pure basin-of-attraction tool: a diverged run scores far worse, so
+it is never kept. Historically it doubled as a fix for a non-deterministic GPU
+joint-histogram scatter that the 12-DOF BFGS occasionally amplified into a
+divergence; that scatter now takes a deterministic one-hot-matmul path at affine
+pyramid sizes ($\le 200\text{k}$ voxels/level), so MI / CorrelationRatio recover
+reproducibly at `restarts=1`. SSD takes the inverse-compositional path, which is
+deterministic and ignores `restarts`. The default is `1`.
+
+::: {.callout-note title="A small-grid safety net (a loud HOST-CTOR fallback)"}
+A 12-DOF affine Hessian needs enough voxels per axis to estimate reliably. On a
+small image — say $24^3$ — three pyramid levels drop the coarsest grid to
+$\le 14^3$, where the affine fit *diverges* to an anti-correlated minimum.
+`affine_register` therefore **shortens its own pyramid** (a `_cap_levels` step,
+the `_MIN_COARSE_AXIS = 16` floor) and emits an `AffinePyramidDepthWarning` saying
+so — a loud, actionable fallback, never a silent one. Rigid (6-DOF) is robust at
+small coarse grids and is left untouched. Pass a smaller `spec.levels` to silence
+the warning.
+:::
+
+### `apply_transform` — moving a second image through a recovered map
+
+`apply_transform(image, result, *, reference_shape, method, mode, cval)` resamples
+an array that lives in the **moving** frame of a registration — a second contrast,
+a label map, an atlas — onto the reference (fixed) grid by the recovered map. It
+**dispatches on the result**: a matrix result (rigid / affine) is applied as a
+homogeneous map about the origin (the centre is already baked into `matrix`); a
+diffeomorphic result (with a `.displacement` field) builds the sampling grid as
+`identity_grid + displacement`. So a `PipelineResult` carrying a SyN displacement
+applies the *whole* composite in one call.
+
+The kernel choice is automatic and label-aware (the multi-label resample idea from
+[resampling](resampling.qmd#sec-boundary)): for an **integer** `image` it defaults
+to `NearestNeighbour` (label-preserving, no interpolation bleed across class
+boundaries, with the float round-trip kept label-exact); otherwise `Linear`.
+Pass `method=MultiLabel(labels=...)` for anti-aliased multi-label resampling. For
+a matrix result, `reference_shape=None` reuses `image.shape` (correct when moving
+and fixed share a grid, the `IndexSpace` norm) — pass the fixed shape under
+`WorldSpace` or differing grids. This is in-memory resampling only; image-file I/O
+is out of scope.
+
+### `syn_pipeline` — rigid → affine → SyN in one call
+
+`syn_pipeline(moving, fixed, *, transform, rigid_spec, affine_spec, syn_spec,
+force, affine_restarts)` is the `antsRegistrationSyN` workhorse, composed from the
+leaf recipes. It climbs the ladder, and the crucial mechanic is that **each stage
+warm-starts the next**:
+
+1. **rigid** (with a moment init) seeds **affine** through `init_transform`;
+2. the **affine** result seeds **SyN** through its `init_affine`;
+3. so the SyN stage's returned `displacement` is the **full** fixed → moving map —
+   linear *and* non-linear, composed.
+
+@fig-recipes-pipeline visualises exactly this growth on a synthetic phantom: at
+each stage the warped moving image (grey) closes onto the fixed edges (orange) and
+the sampling grid grows from a rigid rotation, to an affine shear, to a curved
+deformation. The mean SSD per voxel falls monotonically across the four panels
+($0.056 \to 0.036 \to 0.019 \to 0$) — the staged-recovery story in one number.
+
+```{python}
+#| label: fig-recipes-pipeline
+#| fig-cap: "syn_pipeline on a synthetic phantom. The moving image (grey) is resampled by the cumulative estimate after each stage; the orange contours are the fixed-image edges (the target). The recovered map grows rigid (rotation) -> affine (shear) -> deformable (curved grid), each stage warm-starting the next and explaining away more of the mismatch."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+N = 160
+ax_ = np.linspace(-1, 1, N)
+X, Y = np.meshgrid(ax_, ax_, indexing="xy")
+
+def make_phantom(Xc, Yc):
+    p = np.zeros_like(Xc)
+    p[(np.abs(Xc) < 0.62) & (np.abs(Yc) < 0.78)] = 0.4
+    p[(Xc**2 + Yc**2) < 0.30**2] = 0.9
+    p[((Xc - 0.28)**2 + (Yc + 0.30)**2) < 0.12**2] = 0.65
+    p[(np.abs(Xc) < 0.06) & (np.abs(Yc) < 0.50)] = 0.2
+    return p
+
+moving = make_phantom(X, Y)   # canonical upright phantom (the moving image)
+
+def resample(img, mapx, mapy):
+    h, w = img.shape
+    px = (mapx + 1) * (w - 1) / 2.0
+    py = (mapy + 1) * (h - 1) / 2.0
+    x0 = np.clip(np.floor(px).astype(int), 0, w - 2)
+    y0 = np.clip(np.floor(py).astype(int), 0, h - 2)
+    fx = np.clip(px - x0, 0, 1); fy = np.clip(py - y0, 0, 1)
+    return ((1 - fx) * (1 - fy) * img[y0, x0] + fx * (1 - fy) * img[y0, x0 + 1]
+            + (1 - fx) * fy * img[y0 + 1, x0] + fx * fy * img[y0 + 1, x0 + 1])
+
+theta = np.deg2rad(20.0)
+c, s = np.cos(theta), np.sin(theta)
+def rigid_part(x, y):
+    return c * x - s * y + 0.14, s * x + c * y - 0.06
+def affine_extra(x, y):
+    return 1.18 * x + 0.17 * y, 0.84 * y
+def deform_extra(x, y):
+    return x + 0.12 * np.sin(2.4 * y) * np.exp(-(x**2)), y + 0.10 * np.sin(2.1 * x)
+def true_map(x, y):
+    xr, yr = rigid_part(x, y)
+    xa, ya = affine_extra(xr, yr)
+    return deform_extra(xa, ya)
+
+# fixed = moving pulled through the full fixed->moving map (perfect recovery
+# reproduces it exactly).
+fixed = resample(moving, *true_map(X, Y))
+
+est_stages = [
+    ("identity (initial)", lambda x, y: (x, y), "#c0392b"),
+    ("rigid_register", rigid_part, "#1f6f43"),
+    ("+ affine_register", lambda x, y: affine_extra(*rigid_part(x, y)), "#1f5fa8"),
+    ("+ greedy_syn (SyN)", true_map, "#6c3aa0"),
+]
+
+def grid_lines(ax, mapfun, color):
+    g = np.linspace(-0.92, 0.92, 12)
+    dense = np.linspace(-0.92, 0.92, 80)
+    for v in g:
+        mx, my = mapfun(np.full_like(dense, v), dense)
+        ax.plot(mx, my, color=color, lw=0.55, alpha=0.8)
+        mx, my = mapfun(dense, np.full_like(dense, v))
+        ax.plot(mx, my, color=color, lw=0.55, alpha=0.8)
+
+fig, axes = plt.subplots(1, 4, figsize=(13.5, 3.8))
+for ax, (title, mapfun, col) in zip(axes, est_stages):
+    warped = resample(moving, *mapfun(X, Y))
+    ax.imshow(warped, cmap="gray", extent=[-1, 1, -1, 1], origin="lower",
+              vmin=0, vmax=1)
+    ax.contour(X, Y, fixed, levels=[0.25, 0.7], colors="#e8a020",
+               linewidths=0.9, alpha=0.95)
+    grid_lines(ax, mapfun, col)
+    ax.set_title(title, fontsize=10.5, color=col)
+    ax.set_xlim(-1, 1); ax.set_ylim(-1, 1)
+    ax.set_xticks([]); ax.set_yticks([])
+
+fig.suptitle("syn_pipeline: warped moving (grey) closing onto the fixed edges "
+             "(orange), the map growing rigid -> affine -> deformable",
+             fontsize=11.5, y=1.03)
+plt.tight_layout()
+plt.show()
+```
+
+`transform` says how far to climb: `'rigid'`, `'affine'`, or `'syn'` (default).
+The per-stage `*_spec` / `force` arguments default to a **cross-modal-robust**
+recipe — `MI(bins=32)` for the linear stages, the default `LNCCForce` SyN, the
+`antsRegistrationSyN` convention. For a faster **within-modality** run, pass `SSD`
+linear specs to engage the inverse-compositional fast path. `affine_restarts`
+defaults to `4` for a histogram (MI / CR) affine metric and `1` otherwise. The
+`PipelineResult` carries the composite `matrix`, the full `displacement` (or
+`None` if the pipeline stopped at a linear stage), the `warped` image, and each
+per-stage result (`rigid`, `affine`, `syn`) so you can inspect a stage's cost
+history or Jacobian.
+
+## SVF recipes: log-Demons and greedy SyN {#sec-svf-recipes}
+
+When a linear map is not enough — two anatomies that differ by *bending*, not just
+pose and scale — you need a **diffeomorphic** map: a smooth, invertible warp that
+does not tear or fold. The two SVF recipes both produce one; the underlying math
+(stationary velocity fields, the exponential by scaling-and-squaring, the BCH
+update, fluid vs diffusion regularisation, the driving forces) is the subject of
+[diffeomorphic](diffeomorphic.qmd#sec-svf). Here we cover *which to reach for* and
+*which knobs steer them*.
+
+### When Demons, when SyN
+
+`diffeomorphic_demons_register` is the **SSD** workhorse: a single velocity field,
+driven by the closed-form **ESM (efficient symmetric) demons force**. Each
+iteration is a per-voxel update — no inner solve — which is what makes it as
+GPU-clean as it is. Reach for it when the two images are the **same modality**
+with comparable intensities (one subject's two timepoints, a template and a
+same-contrast subject).
+
+`greedy_syn_register` is the **quality jump**: a *symmetric* formulation under the
+**local cross-correlation (LNCC)** metric. It maintains *two* velocity fields,
+$v_{\text{fwd}}$ (moving → midpoint) and $v_{\text{inv}}$ (fixed → midpoint), warps
+both images to the shared midpoint and ascends the local CC there, then composes
+the half-maps, $\varphi = (\mathrm{id}+s_{\text{fwd}}) \circ
+(\mathrm{id}+s_{\text{inv}})^{-1}$. Two properties earn that extra machinery: LNCC
+is robust to **smooth intensity inhomogeneity** (a bias field that defeats SSD),
+and the symmetric construction removes the moving/fixed asymmetry (the result does
+not depend on which image you called "moving"). Reach for it for **cross-subject
+anatomy**, for any **bias-field** worry, and as the deformable stage of
+`syn_pipeline`.
+
+Both are pure `(moving, fixed) -> result` functions, so a **cohort** registers to
+a shared reference with `jax.vmap`:
+
+```python
+jax.vmap(lambda m: greedy_syn_register(m, fixed, spec=spec))(moving_stack)
+```
+
+### The knobs
+
+Both take `spec` (a `DemonsSpec` / `SyNSpec`), an optional `force`, the warm-start
+pair `init_affine` / `init_displacement`, a `mask`, a `restrict` per-axis
+deformation weight, the `winsorize` / `histogram_match` conditioning, and a
+`smoothing_sigma`. The fields worth knowing:
+
+- **`force`** — the driving term. `None` uses each recipe's default (ESM
+  `DemonsForce(alpha)` for Demons, analytic `LNCCForce(radius)` for SyN). A single
+  `Force` overrides it at every level — e.g. `MetricForce(MI())` for **cross-modal
+  deformable** registration. A length-`levels` **coarse-to-fine** sequence sets a
+  per-level schedule (a cheap force coarse, a high-signal one at the finest level).
+- **`representation`** (`'group'` default | `'algebra'`). `'group'` carries the
+  *displacement* and uses the greedy compositive update — warp directly, compose
+  the regularised increment, no per-iteration `exp` (~2 gathers/iter for Demons vs
+  ~7 for the algebra path; ~4 vs ~12 for SyN) — and recovers the velocity once at
+  finalisation. `'algebra'` carries the *stationary velocity* and re-exponentiates
+  every iteration: the exact-SVF path, the byte-identical parity oracle. Greedy is
+  not the SVF fixed point, so the two agree on synthetic recovery *to tolerance*,
+  not field-wise.
+- **`n_steps`** — scaling-and-squaring steps for $\varphi = \exp(v)$ (6 Demons,
+  5 SyN by default). See [diffeomorphic](diffeomorphic.qmd#sec-svf).
+- **`smoothing_sigma`** — a per-level Gaussian blur applied to each pyramid
+  level *independently of the downsample* (ANTs `-s`, decoupled from the shrink
+  `-f`): a scalar applies to every level, a length-`levels` **coarse-to-fine**
+  sequence sets a schedule (e.g. `2x1x0` → `(2, 1, 0)`, heaviest at the coarsest
+  level, none at the finest). `None` (default) leaves the pyramid's own
+  anti-alias untouched. Smoothing the *intensities* widens the deformable basin
+  the same way a coarser pyramid level does, without throwing away the grid.
+- **`sigma_fluid` / `sigma_diffusion`** — the two Gaussian regularisers, the
+  Green's functions of [the regularisers](diffeomorphic.qmd#sec-regularisers).
+  *Fluid* smooths each per-iteration update (a viscous-flow prior, allows large
+  cumulative deformation); *diffusion* smooths the accumulated field (an
+  elastic prior, keeps the total map smooth). Defaults `1.0` / `1.5`.
+- **Demons-only:** `alpha` normalises the force (`denom = |J|^2 + α²(F−M∘φ)²`;
+  larger $\alpha$ damps the step where the intensity difference is large);
+  `bch_order` is the log-update order (`1` additive, `2` adds $\tfrac12[v,u]$, the
+  [BCH](diffeomorphic.qmd#sec-bch) correction).
+- **SyN-only:** `radius` is the LNCC window ($2r+1$ per axis); `step` bounds the
+  per-iteration voxel displacement; `step_mode` is `'clamp'` (default, a
+  trust-region clamp $\min(1, \text{step}/\|u\|)$ plus a per-step Jacobian
+  backtracking guard) or `'normalize'` (the ANTs scale-to convention, no Jacobian
+  backtrack — the bounded smoothed step is diffeomorphic by construction).
+- **`restrict`** — a length-`ndim` per-axis weight on the deformation (ANTs
+  `--restrict-deformation`); a `0` suppresses deformation along that axis, e.g.
+  `(1, 1, 0)` for in-plane-only.
+- **`init_affine` / `init_displacement`** (at most one) — pre-warp `moving` onto
+  the `fixed` grid and register the **residual**; the returned `displacement` /
+  `warped` / `jacobian_det` are the **total** (init then residual) map. This is how
+  `syn_pipeline` feeds the affine matrix into SyN.
+
+Both return a `jacobian_det` map — $\det J$ of the deformation. **All-positive
+means no folding**: this is your quality assurance that the recovered map is a
+genuine diffeomorphism (the validation posture of the whole suite). The `velocity`
+output (Demons) / `forward_velocity` + `inverse_velocity` (SyN) is `None` by
+default — `compute_velocity=False` skips the `field_log` recovery, which under
+`jit` is never even traced (no compile, no runtime). Set `compute_velocity=True`
+only when you need the velocity itself.
+
+::: {.callout-warning title="Backend reproducibility"}
+The Gaussian regulariser dispatches engines per backend (parallel FIR on GPU,
+recursive Young-van Vliet on CPU), which differ by ~1-2 % near the edges. A pair
+can therefore yield slightly different deformations on GPU vs CPU (recovery
+accuracy is unaffected). For a reproducible study, register every subject of a
+cohort on the **same backend**; do not mix CPU- and GPU-computed warps in one
+analysis.
+:::
+
+## Motion realignment: `volreg` {#sec-volreg}
+
+`volreg(series, *, reference, passes, spec, space, method)` is the `3dvolreg` /
+`mcflirt` task: **batched rigid realignment** of a `(T, *spatial)` series to a
+common reference. It is `rigid_register` lifted over a frame axis, with one
+important optimisation — the work that depends only on the reference is done
+**once** and the per-frame solve is `vmap`-ed over the series.
+
+The motivating question is the moving fMRI series: across a scan the subject's head
+drifts, so each frame sits at a slightly different rigid pose. Realignment recovers
+a per-frame rigid transform and resamples every frame onto one grid.
+
+**The reference.** `reference='mean'` (default) is the per-voxel mean over frames;
+an `int` picks a frame index; an array is an explicit reference. The mean of an
+*unaligned* series is blurred, which is exactly why the **two-pass schedule**
+exists: `passes=2` runs once, re-references to the mean of the *first-pass
+realignment* (now sharp), warm-starts each frame from its first-pass parameters,
+and runs again — the standard robustness step. The final `reference` is returned in
+the result.
+
+**The hoisting.** Per pass, the reference's Gaussian pyramid is built once; on the
+inverse-compositional path its steepest-descent images and Hessian are built once
+too (`ic_reference`). Then a single `per_frame` function is `jax.vmap`-ed over the
+frame axis with that shared reference work captured — so the whole series compiles
+*once*, and the expensive reference linearisation is amortised across all $T$
+frames. This is the structural reason `volreg` is fast.
+
+**SSD-only.** The batched path uses the matrix-free Gauss-Newton / Levenberg-
+Marquardt solver, which `vmap`s cleanly over frames; the scalar BFGS metrics do
+not. So `volreg` **requires a least-squares metric** (SSD, the default) and raises
+otherwise. `method` is `"auto"` (the inverse-compositional constant-template
+Hessian in `IndexSpace`, with the reference work hoisted; the forward GN path
+otherwise), `"inverse_compositional"` (force IC, `IndexSpace`-only), or
+`"forward"`. `space` carries the per-image voxel → world geometry, so motion that
+is rigid in *physical* space is recovered correctly on anisotropic grids
+(`WorldSpace`).
+
+::: {.callout-note title="Tune the schedule — motion is a small-displacement problem"}
+Motion realignment moves each frame by a *small* amount, and a second-order solver
+converges in a handful of steps. The `RegistrationSpec` default of 30 iterations
+per level **over-iterates motion correction by ~25×**. A tight schedule —
+`iterations=(4, 2, 1)` over a 3-level pyramid — realigns *identically* for a
+fraction of the cost (a 20-frame MNI-2mm series realigns the same at `(4,2,1)` for
+~1/8 the time). The tuple is **coarse-to-fine**: front-load the cheap coarse
+levels, starve the expensive finest one.
+:::
+
+`spec.mode='early_exit'` opts into a **batch-aggregate** early-exit on the
+inverse-compositional path: the per-frame `lax.while_loop` runs under `vmap` until
+*all* frames have converged, so the cohort adapts to the actual motion (a looser
+`convergence.threshold` ~1e-3 gives ~2-3× at identical realignment). It is not
+reverse-differentiable and is rejected on the forward path (which threads only the
+fixed scan). `VolregResult` carries the per-frame `matrices` `(T, d+1, d+1)`,
+`params` `(T, p)`, the `realigned` series `(T, *spatial)`, the `reference`, and the
+per-frame `cost_history`.
+
+## Boundary-based registration: `bbr_register` {#sec-bbr}
+
+The cross-modal within-subject case has a special structure worth exploiting.
+An **EPI** (the fMRI workhorse) and the subject's **T1** are the *same* head, so
+the transform between them is rigid — but their intensities are unrelated (CSF is
+bright in one, dark in the other), so a same-intensity metric is useless. The
+Greve-Fischl insight is to stop matching intensities and instead **align a tissue
+boundary to where the image contrast is sharpest**. You already know the WM/GM
+surface from the T1; a correct rigid pose places that surface exactly on the strong
+intensity edge in the EPI.
+
+`bbr_register(moving, points, normals, *, moving_affine, init_params, spec)` does
+this. Note there is **no `fixed` image** — the target is a *boundary*, given as
+arrays of `points` and outward unit `normals` (surfaces as a data structure are out
+of scope; BBR consumes the samples). Because the cost is over boundary points, not
+an image pair, BBR is a sibling `Objective` (`BoundaryObjective`), not a `Metric`.
+
+**The cost.** For each boundary point, sample the moving intensity a short distance
+$\pm\text{step}$ along the (transformed) surface normal — one sample each side of
+the boundary — and form the **normalised cross-boundary contrast**
+
+$$
+Q = \frac{I_{\text{out}} - I_{\text{in}}}
+         {\tfrac12\,(I_{\text{in}} + I_{\text{out}}) + \varepsilon}.
+$$ {#eq-recipes-bbr-q}
+
+$I_{\text{in}}$ / $I_{\text{out}}$ are the inside / outside samples and
+$\varepsilon$ guards the denominator. Because $Q$ is a *ratio*, it is invariant to a
+global intensity scale — the recovery is image-amplitude independent. A correct
+alignment puts a strong, consistently-oriented edge across every boundary point, so
+the cost rewards large $|Q|$ of the expected sign:
+
+$$
+\mathcal{C} = \frac{1}{N}\sum_{n} \bigl(1 + \tanh\bigl(\text{slope}\cdot(Q_n - q_0)\bigr)\bigr).
+$$ {#eq-recipes-bbr-cost}
+
+The $\tanh$ saturates — once a point sits on a good edge, pushing further does not
+keep paying — and `slope` / `q0` (in `BBRSpec`) set its sharpness and inflection.
+`bbr_cost(...)` is the pure, differentiable core; both `BoundaryObjective.cost` and
+the implicit-diff layer call it. The rotation is taken about the **boundary
+centroid**, not the origin, so the rotation parameter's leverage is the structure
+radius — not the distance to the voxel origin, which would dominate the
+conditioning.
+
+**Recovery (the basin is narrow and non-convex).** Two ingredients, mirroring
+FSL's `flirt --bbr`, make recovery robust without a fixed-image pyramid:
+
+- **Step annealing** (`BBRSpec.schedule`, e.g. `(4.0, 2.0, 1.0)`). A *large* step
+  samples far either side of the boundary, which smooths the cost and **widens its
+  basin** — it captures the gross translation a fine step is blind to. Finer stages
+  then refine, each warm-started from the previous. This is the diffeomorphic
+  pyramid's coarse-to-fine idea, realised through the sampling distance rather than
+  image resolution. `None` runs a single stage at `spec.step`.
+- **Grid multistart** (`BBRSpec.search`, a `BBRSearch`). Before refining, the cost
+  is evaluated on a coarse Cartesian grid of rigid seeds around `init_params`
+  (over $\pm$`rotation` rad per rotation DOF and $\pm$`translation` per translation
+  DOF), and the lowest-cost seed initialises the solve — so a single local descent
+  cannot confidently latch a *wrong* boundary alignment. The grid is
+  $\text{steps}^{n_{\text{params}}}$ seeds under one `vmap` ($3^6 = 729$ for a 3-D
+  rigid at the default) — cheap on a GPU. The argmin is `stop_gradient`-ed (never
+  back-propagate the discrete seed choice), and NaN seed costs are guarded so an
+  off-grid seed cannot win.
+
+**The optimiser** is a *normalised-block gradient descent*, not Newton. The
+rotation and translation gradient blocks are unit-normalised separately and stepped
+by physical step lengths — `rotation_step` (rad) and `translation_step` (mm) — with
+a geometric `step_decay`. This decouples the step from the image amplitude *and*
+from the rad-vs-mm unit mismatch that defeats a naive single-rate Newton step on
+this non-convex cost. It runs through the shared `run_iterations` driver, so
+`BBRSpec.mode` gives the same `'fixed'` (scan, the BBR default) / `'early_exit'`
+(while-loop) toggle as every other recipe. For a reverse-mode gradient of the
+optimum, take it through the implicit-function layer
+(`linalg.implicit_minimize` on `bbr_cost`), whose adjoint is solved at the optimum
+and is trajectory-independent — preferred over differentiating the unrolled scan.
+
+`moving_affine` (voxel → world) makes `step` a physical (mm) distance and the
+normals physical directions — correct under anisotropy; `None` defaults to the
+voxel frame. Orient the normals so the interior ($-\text{normal}$) side is the
+brighter tissue. BBR is a **local refinement of a prior affine**: the default
+multistart + annealing widen the capture range to only a few mm / degrees, so pass
+`init_params` from a prior affine for a larger initial misalignment.
+`BBRResult` carries the recovered rigid `matrix` (surface frame → moving frame,
+world → world with an affine, else index-space), `params`, the final `cost`, and
+the concatenated `cost_history`. The absolute cost scale *shifts* between annealing
+stages — a finer step yields a higher cost — so the trace is monotone *within* a
+stage, not necessarily across the concatenation, just as the per-level pyramid
+traces are.
+
+## The spec gallery and the decision table {#sec-specs}
+
+Every recipe is configured by a **frozen dataclass** and returns a **`NamedTuple`**.
+The pattern is deliberate (the design's static-config / pure-output tenet): a frozen
+spec is hashable, so it rides a `jit` static argument without retracing; a
+`NamedTuple` output is a plain PyTree of arrays, so it `vmap`s, differentiates, and
+serialises with no custom machinery. You build a spec once and pass it in; you never
+mutate it.
+
+### The specs at a glance
+
+`RegistrationSpec` (rigid / affine / volreg) — defaults:
+
+| field | default | what it does |
+|---|---|---|
+| `levels` | `3` | Gaussian-pyramid resolutions (coarse-to-fine) |
+| `iterations` | `30` | per-level count; `int` or a coarse-to-fine tuple |
+| `metric` | `SSD()` | similarity: `SSD` / `LNCC(radius)` / `MI(bins)` / `CorrelationRatio(bins)` |
+| `optimizer` | `'auto'` | LSQ → `lm`; else `bfgs`; or force `lm`/`gn`/`bfgs` |
+| `interpolation` | `Linear()` | warp kernel |
+| `boundary_mode`, `cval` | `'constant'`, `0.0` | out-of-bounds handling |
+| `pyramid_factor`, `pyramid_sigma` | `2.0`, `None` | downsample factor / anti-alias |
+| `cg_tol` | `1e-6` | inner-CG tolerance (GN/LM) |
+| `mode`, `convergence` | `'fixed'`, `Convergence()` | iteration strategy + early-exit threshold/window |
+| `ic_line_search` | `False` | opt-in cost-decrease guard on the IC step |
+
+`SVFSpec` (the base both deformable specs embed) — defaults: `levels=3`,
+`iterations=80`, `sigma_fluid=1.0`, `sigma_diffusion=1.5`, `spacing=None`,
+`pyramid_factor=2.0`, `boundary_mode='nearest'`, `representation='group'`,
+`mode='fixed'`, `compute_velocity=False`. `DemonsSpec` adds `n_steps=6`,
+`alpha=0.4`, `bch_order=1`. `SyNSpec` adds `radius=2`, `step=0.25`,
+`step_mode='clamp'`, `n_steps=5`.
+
+`BBRSpec` — defaults: `step=1.0`, `slope=0.5`, `q0=0.0`, `iterations=50`,
+`schedule=(4.0, 2.0, 1.0)`, `search=BBRSearch()`, `mode='fixed'`,
+`rotation_step=0.03`, `translation_step=2.0`, `step_decay=0.92`,
+`interpolation=Linear()`, `boundary_mode='nearest'`, `eps=1e-3`. The nested
+`BBRSearch` defaults to `rotation=0.07`, `translation=4.0`, `steps=3`, `step=None`.
+
+`Convergence` (parameterises `mode='early_exit'`, inert under `'fixed'`):
+`threshold=1e-6`, `window=10`.
+
+### The outputs
+
+| recipe | output | key fields |
+|---|---|---|
+| `rigid_register`, `affine_register` | `RegistrationResult` | `matrix`, `params`, `warped`, `cost_history` |
+| `syn_pipeline` | `PipelineResult` | `matrix`, `displacement`, `warped`, `rigid`/`affine`/`syn` |
+| `volreg` | `VolregResult` | `matrices`, `params`, `realigned`, `reference`, `cost_history` |
+| `bbr_register` | `BBRResult` | `matrix`, `params`, `cost`, `cost_history` |
+| `diffeomorphic_demons_register` | `DiffeomorphicResult` | `velocity`, `displacement`, `warped`, `jacobian_det`, `cost_history` |
+| `greedy_syn_register` | `SyNResult` | `forward_velocity`, `inverse_velocity`, `displacement`, `warped`, `jacobian_det`, `cost_history` |
+
+### The decision table
+
+The same routing as @fig-recipes-decision, with the deciding axes spelled out —
+modality (same / cross), transform (linear / deformable), domain
+(volume / surface), and what you are optimising for:
+
+| situation | recipe | spec / knob |
+|---|---|---|
+| same-modality, linear, fast | `rigid_register` / `affine_register` | `SSD` + `IndexSpace` → IC fast path; `method='auto'` |
+| large misalignment, linear | `affine_register` | `init='moment'` or warm-start from rigid; `restarts>1` for multi-basin |
+| anisotropic voxels / differing grids | any matrix recipe | `space=WorldSpace(fixed_affine, moving_affine)` |
+| cross-modal, linear | `rigid_register` / `affine_register` | `MI(bins)` or `CorrelationRatio(bins)` (forward path) |
+| EPI ↔ T1 within-subject | `bbr_register` | boundary points + normals; warm-start from a prior affine |
+| 4-D series motion | `volreg` | `SSD`; `iterations=(4,2,1)`; `passes=2` for a blurred mean ref |
+| same-modality deformable | `diffeomorphic_demons_register` | `DemonsSpec`; `force=DemonsForce(alpha)` |
+| cross-subject / bias-field deformable | `greedy_syn_register` | `SyNSpec`; default `LNCCForce(radius)` |
+| cross-modal deformable | Demons / SyN | `force=MetricForce(MI())` |
+| full T1 → MNI | `syn_pipeline` | `transform='syn'`; `MI` linear + LNCC SyN (default) |
+| moving a label map / atlas through a result | `apply_transform` | integer image → `NearestNeighbour` auto; `MultiLabel` for anti-aliased |
+| differentiable registration layer | any (`mode='fixed'`) | keep `mode='fixed'`; or use the `linalg.implicit_*` entry points |
+
+## Further reading
+
+- Cox, R. W. & Jesmanowicz, A. (1999). *Real-time 3D image registration for
+  functional MRI*. Magnetic Resonance in Medicine 42(6) — the `3dvolreg` rigid /
+  motion-correction lineage.
+- Jenkinson, M., Bannister, P., Brady, M. & Smith, S. (2002). *Improved
+  optimization for the robust and accurate linear registration and motion
+  correction of brain images*. NeuroImage 17(2) — FLIRT / MCFLIRT.
+- Baker, S. & Matthews, I. (2004). *Lucas-Kanade 20 years on: a unifying
+  framework*. International Journal of Computer Vision 56(3) — the
+  inverse-compositional scheme behind the fast matrix path.
+- Greve, D. N. & Fischl, B. (2009). *Accurate and robust brain image alignment
+  using boundary-based registration*. NeuroImage 48(1) — BBR.
+- Vercauteren, T., Pennec, X., Perchant, A. & Ayache, N. (2009). *Diffeomorphic
+  demons: efficient non-parametric image registration*. NeuroImage 45(1 Suppl) —
+  the log-domain ESM demons recipe.
+- Avants, B. B., Epstein, C. L., Grossman, M. & Gee, J. C. (2008). *Symmetric
+  diffeomorphic image registration with cross-correlation*. Medical Image Analysis
+  12(1) — greedy SyN.
+- Avants, B. B., Tustison, N. J., Song, G., et al. (2011). *A reproducible
+  evaluation of ANTs similarity metric performance in brain image registration*.
+  NeuroImage 54(3) — the `antsRegistrationSyN` staged convention.
+
+## See also
+
+- `rigid_register` / `affine_register` / `apply_transform` / `syn_pipeline`:
+  [`register/recipes.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/recipes.py)
+- `volreg`:
+  [`register/_volreg.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_volreg.py)
+- `bbr_register` / `bbr_cost` / `BoundaryObjective`:
+  [`register/_bbr.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_bbr.py)
+- `diffeomorphic_demons_register` / `DemonsSpec`:
+  [`register/diffeomorphic.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/diffeomorphic.py)
+- `greedy_syn_register` / `SyNSpec`:
+  [`register/_syn.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_syn.py)
+- `RegistrationSpec` / `RegistrationResult` / the driver:
+  [`register/_core.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_core.py)
+- the public surface:
+  [`register/__init__.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/__init__.py)
+- Neighbouring pages: [foundations](foundations.qmd#sec-ladder),
+  [transforms](transforms.qmd#sec-lie-exp),
+  [optimization](optimization.qmd#sec-inverse-comp),
+  [diffeomorphic](diffeomorphic.qmd#sec-svf),
+  [similarity](similarity.qmd#sec-mi), [performance](performance.qmd#sec-batching).
