@@ -42,12 +42,15 @@ consolidate to 5 distinct themes (several axes flagged the same issue).
 >   binning), C7 (marching-cubes 1-D dedup key), C8 (`spherical_conv` k-NN tiling).
 >   These remove the host-side O(n) Python-interpreter cliffs + the (n,n) k-NN
 >   matrix — the "wall at ico7" the audit emphasised.
-> - **Deferred (own follow-up):** AI-C5 (exact spatial broad-phase for
->   point-to-triangle / spherical search) — correctness-sensitive (a pruning bug
->   silently corrupts SDF/distance/resample); brute-force is exact today, ceiling
->   documented (A7). **Design doc:**
->   [`mesh-spatial-acceleration.md`](mesh-spatial-acceleration.md) (the exactness
->   guarantee + the two structures + parity validation, fixed before any code).
+> - **AI-C5 — DONE (C5a+C5b)** on branch `perf/mesh-spatial-acceleration`, per
+>   the design doc [`mesh-spatial-acceleration.md`](mesh-spatial-acceleration.md):
+>   C5a uniform-grid + expanding-shell exact `nearest_surface_distance`
+>   (`method='auto'/'grid'/'brute'`; behind `mesh_to_sdf` + symmetric
+>   `cortical_thickness`); C5b coarse-icosphere-vertex bucket search behind
+>   `surface_resample`. Both **bit-exact-parity-gated** vs brute with an
+>   unconditional brute fallback. C5c (perf record) delegated to the perf agent
+>   via the FR's Perf-agent note (the brute-fallback fraction is the tuning
+>   signal). SDF far-field: brute-fallback or bootstrap from `synthdist` (ilex).
 > - **Skipped (rationale):** AI-C6 (device-side; XLA CSE already fuses the
 >   intra-body redundant `signed_spherical_areas`; risks the fold-safe optimiser),
 >   AI-C9 (default `auto` conflicts with the spectral/ROI flat-ELL requirement;
