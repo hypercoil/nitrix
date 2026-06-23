@@ -51,6 +51,7 @@ from typing import Literal, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, Float, Int
 
@@ -240,6 +241,7 @@ def glm_fit(
     *,
     family: Union[str, Family] = GAUSSIAN,
     weights: Optional[Float[Array, 'N']] = None,
+    rank: Optional[int] = None,
     n_iter: int = 25,
     ridge: float = 0.0,
     block: Optional[int] = None,
@@ -260,6 +262,11 @@ def glm_fit(
     weights
         Optional ``(N,)`` prior observation weights (WLS / known precision).
         ``None`` is unweighted.
+    rank
+        Effective rank of ``X`` for the residual degrees of freedom (dispersion /
+        SE / AIC).  ``None`` (default) detects it host-side (``matrix_rank``) when
+        ``X`` is concrete, falling back to ``p`` under ``jax.jit``; pass it
+        explicitly for a known rank-deficient design traced under ``jit``.
     n_iter
         IRLS iterations for non-Gaussian families (ignored on the OLS path).
     ridge
@@ -282,6 +289,19 @@ def glm_fit(
         )
     w = jnp.ones((n,), dtype=Y.dtype) if weights is None else weights
 
+    # Effective rank for the residual dof (dispersion / SE / AIC): a rank-deficient
+    # design (collinear columns) has rank < p, so n - p over-counts the dof -- the
+    # ridge / pivot floor keeps the solve finite but the SEs would be wrong.
+    # Detect it host-side when X is concrete; under jit (X a tracer) fall back to p
+    # (pass `rank=` for a known-deficient design, as with glmm's n_groups).  A
+    # genuinely full-rank design gives rank == p, so dof is byte-unchanged.
+    if rank is not None:
+        rank_eff = int(rank)
+    elif isinstance(X, jax.core.Tracer):
+        rank_eff = p
+    else:
+        rank_eff = int(np.linalg.matrix_rank(np.asarray(X)))
+
     # Null-model deviance: the intercept-only MLE is the **weighted** mean
     # mu0 = sum(w y)/sum(w) (the ordinary mean when unweighted), and the
     # deviance carries the same prior weights as the model deviance, so
@@ -296,7 +316,7 @@ def glm_fit(
     is_ols = family.name == 'gaussian'
     if is_ols:
         coef, cov_unscaled, wrss = _ols_fit(Y, X, w, ridge)
-        dof = float(n - p)
+        dof = float(n - rank_eff)
         dispersion = wrss / dof if dof > 0 else wrss
         deviance = wrss
     else:
@@ -309,7 +329,7 @@ def glm_fit(
         if family.has_fixed_dispersion:
             dispersion = jnp.ones((Y.shape[0],), dtype=Y.dtype)
         else:
-            dof = float(n - p)
+            dof = float(n - rank_eff)
             dispersion = deviance / dof if dof > 0 else deviance
 
     # Maximised log-likelihood.  Gaussian uses the MLE dispersion (RSS / N),
@@ -327,7 +347,7 @@ def glm_fit(
         log_lik=log_lik,
         family=family,
         n_obs=int(n),
-        rank=int(p),
+        rank=rank_eff,
     )
 
 
@@ -461,6 +481,7 @@ def sandwich_cov(
     *,
     kind: HCKind = 'HC3',
     groups: Optional[Int[Array, 'N']] = None,
+    n_groups: Optional[int] = None,
     weights: Optional[Float[Array, 'N']] = None,
 ) -> Float[Array, 'V p p']:
     """Robust (sandwich) coefficient covariance for a fitted GLM.
@@ -495,6 +516,15 @@ def sandwich_cov(
         two-sample / FLAME-style grouped variance) is a different estimator and
         is not provided here -- the cluster-robust meat assumes a common model,
         only correlating scores *within* a cluster.
+
+        The cluster path is **eager-only** by default: the distinct-cluster count
+        is found with ``jnp.unique`` (a data-dependent shape).  To trace the whole
+        estimator under ``jax.jit``, pre-densify ``groups`` to contiguous
+        ``0..n_groups-1`` labels and pass ``n_groups``.
+    n_groups
+        Optional distinct-cluster count.  ``None`` (default) densifies ``groups``
+        host-side; supplying it (with contiguous labels) keeps ``sandwich_cov``
+        jit-traceable.  Ignored when ``groups`` is ``None``.
     weights
         Optional ``(N,)`` prior weights matching the fit's ``weights=``.
 
@@ -515,17 +545,24 @@ def sandwich_cov(
     w_prior = None if weights is None else jnp.asarray(weights, dtype=X.dtype)
 
     cl_factor = 0.0
-    n_groups = 0
+    ng = 0
     if groups is not None:
-        # Densify the cluster labels: the G/(G-1) finite-sample factor needs the
-        # true *distinct* cluster count, not max(label)+1 -- non-contiguous labels
-        # (e.g. from subject exclusion) would otherwise inflate G and under-correct
-        # the SE.  (Unlike the likelihood paths, this count has no cancellation.)
         groups = jnp.asarray(groups)
-        uniq = jnp.unique(groups)
-        groups = jnp.searchsorted(uniq, groups)
-        n_groups = int(uniq.shape[0])
-        cl_factor = (n_groups / (n_groups - 1.0)) * ((n - 1.0) / (n - p))
+        if n_groups is None:
+            # Eager-only path: densify the cluster labels to the true *distinct*
+            # cluster count (B3) -- the G/(G-1) finite-sample factor needs it, and
+            # non-contiguous labels (e.g. from subject exclusion) would otherwise
+            # inflate G and under-correct the SE.  jnp.unique has a data-dependent
+            # shape, so this branch is not jit-traceable.
+            uniq = jnp.unique(groups)
+            groups = jnp.searchsorted(uniq, groups)
+            ng = int(uniq.shape[0])
+        else:
+            # Caller-supplied count: `groups` is assumed already densified to
+            # contiguous 0..n_groups-1 labels, which lets the whole estimator
+            # trace under jax.jit.
+            ng = int(n_groups)
+        cl_factor = (ng / (ng - 1.0)) * ((n - 1.0) / (n - p))
 
     def per_elem(
         y: Float[Array, 'N'], b: Float[Array, 'p'], ainv: Float[Array, 'p p']
@@ -552,7 +589,7 @@ def sandwich_cov(
             meat = jnp.einsum('n,np,nq->pq', fac, X, X)
         else:
             u = X * g[:, None]  # (N, p) per-observation score
-            s = jax.ops.segment_sum(u, groups, num_segments=n_groups)  # (G, p)
+            s = jax.ops.segment_sum(u, groups, num_segments=ng)  # (G, p)
             meat = (s.T @ s) * cl_factor
         return ainv @ meat @ ainv
 

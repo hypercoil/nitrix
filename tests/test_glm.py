@@ -341,6 +341,57 @@ def test_sandwich_cluster_label_encoding_invariant():
     np.testing.assert_allclose(base, perm, atol=1e-12)
 
 
+def test_glm_rank_deficient_uses_effective_rank():
+    """ER3: the residual dof uses the *effective* rank of X, not p -- a
+    rank-deficient (collinear) design reports rank < p and the corrected
+    dispersion; a full-rank design is unchanged; jit falls back to p / accepts
+    an explicit rank=."""
+    import functools
+
+    rng = np.random.default_rng(11)
+    X = _design(rng, N=80)  # full-rank (N, 3)
+    Y = jnp.asarray(
+        (X @ np.array([1.0, 0.5, -0.3]))[None, :]
+        + 0.3 * rng.standard_normal((3, 80))
+    )
+    Xj = jnp.asarray(X)
+    full = glm_fit(Y, Xj, family=GAUSSIAN)
+    assert full.rank == X.shape[1]
+    # append a collinear column: effective rank stays 3, not p=4
+    Xd = jnp.asarray(np.c_[X, X[:, 1]])
+    defic = glm_fit(Y, Xd, family=GAUSSIAN, ridge=1e-8)
+    assert defic.rank == X.shape[1]
+    # dof = N - rank (=N-3) for both, so the dispersion matches the full-rank fit
+    # (n - p = N - 4 would have over-counted the dof)
+    np.testing.assert_allclose(
+        np.asarray(defic.dispersion), np.asarray(full.dispersion), rtol=0.05
+    )
+    # jit on a deficient design: pass rank= (X is a tracer -> auto would use p)
+    cj = jax.jit(functools.partial(glm_fit, family=GAUSSIAN, ridge=1e-8, rank=3))(Y, Xd)
+    assert cj.rank == 3
+
+
+def test_sandwich_cluster_jit_with_n_groups():
+    """ER5: with pre-densified contiguous groups + an explicit n_groups the
+    cluster-robust sandwich traces under jax.jit and matches the eager densify."""
+    import functools
+
+    rng = np.random.default_rng(9)
+    X = _design(rng, N=120)
+    groups = np.repeat(np.arange(20), 6).astype(np.int32)  # contiguous 0..19
+    y = (X @ np.array([0.5, 1.0, -0.5])
+         + rng.standard_normal(20)[groups] + rng.standard_normal(120) * 0.5)
+    Yj, Xj = jnp.asarray(y[None, :]), jnp.asarray(X)
+    res = glm_fit(Yj, Xj, family=GAUSSIAN)
+    eager = np.asarray(sandwich_cov(res, Yj, Xj, groups=jnp.asarray(groups)))
+    jitted = np.asarray(
+        jax.jit(functools.partial(
+            sandwich_cov, groups=jnp.asarray(groups), n_groups=20
+        ))(res, Yj, Xj)
+    )
+    np.testing.assert_allclose(eager, jitted, atol=1e-12)
+
+
 @needs_sm
 def test_sandwich_glm_poisson_matches_statsmodels():
     """The GLM (Poisson) sandwich HC0 matches statsmodels GLM cov_type='HC0'."""
