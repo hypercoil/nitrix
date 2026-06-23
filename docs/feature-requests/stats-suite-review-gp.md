@@ -245,8 +245,15 @@ Each lands with its regression test; full GP/HGP/suite sweep green before merge.
 > tiny-`N`; hgp explicit `bounds=` / `n_levels=`; GLM AIC parameter-count convention
 > (estimated-dispersion counts the scale); `permutation_test` `mask` / `var_smooth` /
 > restricted exchangeability `blocks`. (HC0–3 + WLS were already anchored.)
-> **Remaining:** only the cosmetic docstring/naming polish (predict-return asymmetry,
-> `n_search`/`n_inner` naming, duplicated docstrings). As bandwidth allows.
+> **Docstring polish (`<pending>`):** GPResult mode-conditional-fields orientation note;
+> `select=` documented as the sole (forward-compat) mode; removed the duplicate hgp
+> `n_levels` docstring entry; `linear_distance` matrix-`theta` symmetry caveat. (Investigated
+> and intentionally left: `n_search`/`n_inner` are distinct concepts in distinct modules, not
+> an inconsistency; the predict-return contract is already documented per function; nested-HGP
+> per-group predict already raises a clear `NotImplementedError`; `lognormal_prior` docstring
+> is already correct.)
+> **Round 4 complete** — only non-cosmetic deferrals remain (PF4, and the prior-audit CV1
+> surface-TFCE, both out of scope for this branch).
 
 ---
 

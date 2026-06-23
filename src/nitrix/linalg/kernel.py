@@ -151,7 +151,10 @@ def linear_distance(
     theta
         Optional metric tensor.  ``None`` -> standard squared L2;
         vector -> diagonal Mahalanobis ``sum_d theta_d (x_d - y_d)^2``;
-        matrix -> full Mahalanobis ``(x - y)^T theta (x - y)``.
+        matrix -> full Mahalanobis ``(x - y)^T theta (x - y)``.  The matrix form
+        is exact only for a **symmetric** ``theta`` (the identity-form expansion
+        uses one cross term ``2 x^T theta y``); pass ``0.5 (theta + theta.T)``
+        for an asymmetric input.
 
     Returns
     -------

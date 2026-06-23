@@ -143,6 +143,12 @@ __all__ = [
 class GPResult:
     """Per-element Gaussian-process fit output (``gp_fit``).
 
+    Some fields are engine- or mode-conditional: ``lo`` / ``hi`` / ``boundary``
+    drive ``engine='hsgp'`` re-evaluation only; ``nd_meta`` is set only for a
+    multi-dimensional fit (``None`` otherwise); ``corr_rho`` is ``0`` unless a
+    ``corr`` structure was fitted; and for a non-Gaussian ``family`` ``coef`` is
+    on the link scale (see :func:`gp_predict`).
+
     Attributes
     ----------
     coef
@@ -670,8 +676,11 @@ def gp_fit(
         ``rho``, cuSOLVER-free, equivalent to ``lme.reml_fit`` by the
         penalty<->variance-component identity).
     select
-        Lengthscale-selection mode.  ``'shared-rho'``: one ``rho`` across all
-        elements, per-element amplitude and noise.
+        Lengthscale-selection mode.  ``'shared-rho'`` (the only mode, and the
+        default) shares a single ``rho`` across all elements with per-element
+        amplitude and noise -- the mass-univariate design that keeps the final
+        fit ``N``-free.  The parameter is a forward-compatibility hook for a
+        future per-element ``rho``.
     rho_bounds
         ``(rho_lo, rho_hi)`` search range.  Defaults to ``(0.05, 2.0) * (hi - lo)``.
     n_rho

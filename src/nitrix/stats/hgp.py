@@ -354,8 +354,6 @@ def hgp_fit(
         Shared-lengthscale search (as :func:`~nitrix.stats.gp.gp_fit`); ``map_rho``
         is an optional ``rho -> -log p(rho)`` lengthscale prior (e.g. a builder
         from :mod:`nitrix.stats.priors`).
-    n_levels
-        Number of factor levels ``L`` (defaults to ``int(group.max()) + 1``).
     n_outer, n_search, ridge, lam_floor, lam_ceil, block
         Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`).
 
