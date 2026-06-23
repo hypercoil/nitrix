@@ -488,6 +488,20 @@ owns the fused-kernel variant. Do not duplicate.
 > byte-identical `backend='jax'`, jit, loud fallback. Op-matrix: 3 entries. Full
 > nn suite 77 passed / 4 skipped.
 
+> **Decision (2026-06-23): fused LN kernel MEASURED — not worth implementing.**
+> `bench/perf_layer_norm.py` benchmarks the *stock* Pallas LayerNorm (the kernel
+> we'd fork) vs the XLA reference on the L4 (`bench/PERF_LAYER_NORM.md`).
+> **Verdict:** **no memory win ever** (identical peak — no cliff to remove);
+> **fp32** forward at parity (0.97–1.01×) and forward+backward *slower*
+> (0.61–0.95×); **bf16** forward 1.4–1.9× faster **but** forward+backward 2–4×
+> *slower* (the fused backward dominates). Since the norm op carries a
+> `custom_vjp` and is used in training (fwd+bwd), the fused path is a regression
+> with no memory upside → **the XLA reference is the final P3 norm surface; the
+> kernel stays an unbuilt loud-fallback stub.** The one real win — bf16
+> *forward-only* — is a perf-suite re-eval trigger for an inference-only
+> deployment, not a now item. This is the gating working as designed: measure,
+> then don't build.
+
 ### 7.4 P2 — nimox-extraction blockers (cross-reference only, no code here)
 
 affine-matrix-algebra / spherical-parameterisation / field-regularisers are
