@@ -1001,6 +1001,24 @@ def test_lme_fit_r2_block_woodbury_matches_statsmodels():
     )
 
 
+def test_lme_fit_accepts_1d_random_slope():
+    """ER4: a 1-D random covariate z of shape (N,) is a single random slope; it
+    is coerced to the (N, 1) contract (r=1) -- a bare (N,) previously set r=N and
+    misrouted into a deep IndexError. The 1-D and (N, 1) fits are identical."""
+    y, X, gid = _slope_data(seed=2)
+    z1 = X[:, 1]  # a single covariate, 1-D
+    r_1d = lme_fit(jnp.asarray(y[None, :]), jnp.asarray(X),
+                   group=jnp.asarray(gid), z=jnp.asarray(z1), n_iter=80)
+    r_2d = lme_fit(jnp.asarray(y[None, :]), jnp.asarray(X),
+                   group=jnp.asarray(gid), z=jnp.asarray(z1[:, None]), n_iter=80)
+    # r=1 -> the same (R1 scalar) dispatch as the explicit (N, 1) z, bit-for-bit
+    assert type(r_1d) is type(r_2d)
+    assert r_1d.cov_re.shape == (1, 1, 1)
+    np.testing.assert_allclose(
+        np.asarray(r_1d.beta_hat), np.asarray(r_2d.beta_hat), atol=1e-10
+    )
+
+
 def test_lme_fit_r2_symmetric_psd_cov_re():
     """The recovered random-effect covariance is symmetric PSD (log-Cholesky
     parameterisation guarantees it)."""

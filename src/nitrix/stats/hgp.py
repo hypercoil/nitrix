@@ -375,6 +375,8 @@ def hgp_fit(
         raise ValueError(f'hgp_fit: boundary={boundary} must be >= 1.0.')
 
     Y = jnp.asarray(Y)
+    if not jnp.issubdtype(Y.dtype, jnp.floating):
+        Y = Y.astype(float)  # ER6: integer Y would coerce the whole fit to int
     x = jnp.asarray(x, dtype=Y.dtype)
     group = jnp.asarray(group)
     n = Y.shape[-1]
@@ -417,6 +419,23 @@ def hgp_fit(
                 f'hgp_fit: group_inner labels must lie in [0, '
                 f'n_levels_inner={L2}); got min={gi_min}, max={gi_max}. Inner '
                 'labels must be globally numbered 0..L2-1 (not per-outer).'
+            )
+        # ER2: the inner factor must be GLOBALLY numbered -- each inner level
+        # nested within exactly one outer level. Per-outer numbering (each outer
+        # group's inner labels restarting at 0) passes the range check above but
+        # silently aliases distinct subjects across outer groups -> mis-pooling.
+        # A properly nested factor has each inner label paired with one outer.
+        go_np = np.asarray(group)
+        gi_np = np.asarray(group_inner)
+        pairs = np.unique(np.stack([gi_np, go_np], axis=1), axis=0)
+        if pairs.shape[0] != len(np.unique(gi_np)):
+            raise ValueError(
+                'hgp_fit: model=\'nested\' requires globally-numbered inner '
+                'labels (each inner level nested within a single `group` level); '
+                'an inner label appears under multiple outer levels. Renumber '
+                'the inner factor globally (e.g. encode the (outer, inner) pair), '
+                'not per-outer -- or use a crossed model if the factors are '
+                'genuinely crossed.'
             )
         groupings.append(group_inner)
         level_counts.append(L2)

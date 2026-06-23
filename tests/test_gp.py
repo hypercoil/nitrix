@@ -974,3 +974,25 @@ def test_gp_glm_phase1_guards():
     res = gp_fit(Y, jnp.asarray(x), family='poisson', n_rho=8, n_pql=4)
     with pytest.raises(ValueError, match='type='):
         gp_predict(res, jnp.asarray(x), type='quantile')
+
+
+def test_gp_corr_ar1_without_time_warns():
+    """MC6: ar1/car1 with time=None assumes within-group time order, so it warns;
+    cs (order-invariant) and an explicit time= are silent."""
+    import warnings
+
+    rng = np.random.default_rng(8)
+    g = np.repeat(np.arange(6), 10)
+    x = np.tile(np.linspace(0.0, 1.0, 10), 6)
+    Y = jnp.asarray(np.sin(2 * np.pi * x)[None, :] + 0.1 * rng.standard_normal((3, 60)))
+
+    def msgs(**kw):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            gp_fit(Y, jnp.asarray(x), group=jnp.asarray(g),
+                   n_rho=6, n_corr=6, **kw)
+            return [str(r.message) for r in w if 'time order' in str(r.message)]
+
+    assert msgs(corr='ar1')
+    assert not msgs(corr='cs')
+    assert not msgs(corr='ar1', time=jnp.asarray(np.tile(np.arange(10.0), 6)))

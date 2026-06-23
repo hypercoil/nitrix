@@ -1133,7 +1133,19 @@ def lme_fit(
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
-    r = 1 if z is None else jnp.asarray(z).shape[-1]
+    if z is not None:
+        # ER4: a 1-D random covariate (N,) is a single random slope; coerce it to
+        # the (N, r) contract so r = z.shape[-1] = 1 (a bare (N,) would otherwise
+        # set r = N and misroute the dispatch into a deep IndexError).
+        z = jnp.asarray(z, dtype=Y.dtype)
+        if z.ndim == 1:
+            z = z[:, None]
+        elif z.ndim != 2 or z.shape[0] != group.shape[0]:
+            raise ValueError(
+                f'lme_fit: z must be (N, r) with N={group.shape[0]}; got shape '
+                f'{tuple(z.shape)}.'
+            )
+    r = 1 if z is None else z.shape[-1]
 
     if cross is not None:
         # R4: two crossed scalar random intercepts (1|group) + (1|cross).

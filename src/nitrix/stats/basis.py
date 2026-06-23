@@ -376,8 +376,9 @@ def _raw_features(
         )
         return phi * rt[None, :, 0]
     if basis.kind == 'mrf':
+        # ER6: re-evaluate in the stored design's dtype (not a hardcoded f32).
         return jax.nn.one_hot(
-            x.astype(jnp.int32), basis.n_basis, dtype=jnp.float32
+            x.astype(jnp.int32), basis.n_basis, dtype=basis.design.dtype
         )
     raise ValueError(f'unknown spline kind {basis.kind!r}.')
 
@@ -1494,7 +1495,10 @@ def mrf_smooth(
             f'{a.shape}.'
         )
     r = a.shape[0]
-    af = a.astype(jnp.result_type(a.dtype, jnp.float32))
+    # ER6: promote an integer adjacency to the canonical float (f64 under x64),
+    # not result_type(int, float32) which is float32 under JAX's promotion and
+    # would leak float32 into the mrf design / penalty under the x64 invariant.
+    af = a if jnp.issubdtype(a.dtype, jnp.floating) else a.astype(float)
     design = jax.nn.one_hot(labels.astype(jnp.int32), r, dtype=af.dtype)
     penalty = laplacian(0.5 * (af + af.T), normalisation='combinatorial')
 

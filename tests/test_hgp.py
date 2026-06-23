@@ -261,6 +261,45 @@ def test_hgp_group_label_range_validation():
                 group_inner=jnp.asarray(inner), n_levels_inner=0)
 
 
+def test_hgp_nested_requires_global_inner_numbering():
+    """ER2: a per-outer-numbered inner factor (each outer's inner labels restart
+    at 0) passes the range check but aliases distinct subjects -> mis-pool; the
+    nested fit must reject it. A globally-numbered inner factor is accepted."""
+    rng = np.random.default_rng(12)
+    L, inner_per, per = 3, 2, 12
+    t = np.linspace(0.0, 1.0, per)
+    x = np.tile(t, L * inner_per)
+    outer = np.repeat(np.arange(L), inner_per * per)
+    # per-outer numbering: inner labels 0..inner_per-1 restart within each outer
+    inner_local = np.tile(np.repeat(np.arange(inner_per), per), L)
+    # global numbering: unique inner id per (outer, inner_local) pair
+    inner_global = np.repeat(np.arange(L * inner_per), per)
+    y = (np.sin(2 * np.pi * x) + 0.1 * rng.standard_normal(x.size))[None, :]
+    Y = jnp.asarray(y)
+    with pytest.raises(ValueError, match='globally-numbered inner'):
+        hgp_fit(Y, jnp.asarray(x), jnp.asarray(outer), model='nested',
+                group_inner=jnp.asarray(inner_local))
+    res = hgp_fit(Y, jnp.asarray(x), jnp.asarray(outer), model='nested',
+                  group_inner=jnp.asarray(inner_global), rank=6, n_rho=8)
+    assert res.model == 'nested'
+
+
+def test_gp_hgp_accept_integer_responses():
+    """ER6: an integer-dtype response is promoted to float (not coerced to int,
+    which would zero the whole fit)."""
+    rng = np.random.default_rng(15)
+    n = 60
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    Yi = np.rint(5 * np.sin(2 * np.pi * x) + 10).astype(np.int64)[None, :]
+    from nitrix.stats.gp import gp_fit
+    rg = gp_fit(jnp.asarray(Yi), jnp.asarray(x), n_rho=8)
+    assert jnp.issubdtype(rg.coef.dtype, jnp.floating)
+    assert np.all(np.isfinite(np.asarray(rg.coef))) and np.any(rg.coef != 0)
+    g = jnp.asarray(np.repeat(np.arange(6), 10))
+    rh = hgp_fit(jnp.asarray(Yi), jnp.asarray(x), g, rank=6, n_rho=8)
+    assert jnp.issubdtype(rh.coef.dtype, jnp.floating)
+
+
 def test_hgp_block_bounds_rho_search_without_changing_results():
     """PF1: `block=` chunks the hierarchical pooled-NLL rho search too (the
     (1+L)*m-wide design is the acuter cliff); the result is identical to the

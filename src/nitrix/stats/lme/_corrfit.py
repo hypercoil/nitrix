@@ -26,6 +26,7 @@ on the ``(p, p)`` whitened Gram.  Groups ride in a left-packed, time-sorted
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import NamedTuple, Optional, Tuple, Union, cast
 
@@ -77,6 +78,12 @@ def build_group_layout(
     the time delta to the previous in-group observation (``0`` at ``t = 0`` and
     on the pad).  Host-side (NumPy) -- ``group`` / ``time`` are static across the
     mass axis.
+
+    With ``time=None`` the within-group **appearance order** is taken as the time
+    order (consecutive rows one lag apart).  For the order-dependent ``ar1`` /
+    ``car1`` structures this is a real assumption: pass ``time=`` when the rows are
+    not already time-ordered, or the correlation is estimated over the wrong
+    adjacencies (``fit_corr_gls`` / ``gp_fit`` warn in this case -- MC6).
     """
     g_np = np.asarray(group)
     n = g_np.shape[0]
@@ -303,6 +310,17 @@ def fit_corr_gls(
         raise ValueError(
             "fit_corr_gls: nothing to estimate -- 'iid' correlation with no "
             'weights variance function is ordinary least squares (use glm_fit).'
+        )
+    if time is None and corr.name in ('ar1', 'car1'):
+        # MC6: without `time`, build_group_layout pairs *consecutive rows* within
+        # each group (appearance order). For the order-dependent ar1 / car1
+        # structures that silently estimates the correlation over the wrong
+        # adjacencies if the rows are not already in within-group time order.
+        warnings.warn(
+            f"fit_corr_gls: corr='{corr.name}' with time=None assumes each "
+            "group's rows are already in within-group time order (consecutive "
+            'rows one lag apart). Pass time= if they are not.',
+            stacklevel=2,
         )
     layout = build_group_layout(group, time)
     idx = layout.idx

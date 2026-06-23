@@ -75,6 +75,7 @@ References
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -898,6 +899,8 @@ def gp_fit(
             )
 
     Y = jnp.asarray(Y)
+    if not jnp.issubdtype(Y.dtype, jnp.floating):
+        Y = Y.astype(float)  # ER6: integer Y would coerce the whole fit to int
     x = jnp.asarray(x, dtype=Y.dtype)
     n = Y.shape[-1]
     if x.shape[0] != n:
@@ -982,6 +985,15 @@ def gp_fit(
         from .lme._corr import resolve_corr
 
         corr_spec = resolve_corr(corr)
+        if time is None and corr_spec.name in ('ar1', 'car1'):
+            # MC6: ar1/car1 pair consecutive within-group rows; without `time`
+            # that assumes the rows are already in within-group time order.
+            warnings.warn(
+                f"gp_fit: corr='{corr_spec.name}' with time=None assumes each "
+                "group's rows are already in within-group time order; pass "
+                'time= if they are not.',
+                stacklevel=2,
+            )
         raw_grid_np = np.linspace(
             float(corr_raw_bounds[0]), float(corr_raw_bounds[1]), int(n_corr)
         )

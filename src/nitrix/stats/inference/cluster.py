@@ -44,7 +44,10 @@ def cluster_size_map(
 
     Background voxels (label ``0``) map to ``0``.
     """
-    return _component_totals(labels, jnp.ones(labels.shape, dtype=jnp.float32))
+    # ER6: count in the canonical float (f64 under x64), not a hardcoded f32 --
+    # cluster sizes past 2**24 are not exactly representable in float32, eroding
+    # the TFCE / cluster-extent fp64 exactness.
+    return _component_totals(labels, jnp.ones(labels.shape, dtype=float))
 
 
 def cluster_mass_map(
