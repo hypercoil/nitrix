@@ -49,9 +49,12 @@ Functions exposed:
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Optional, cast
 
+import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Num
 
 from ..linalg._solver import safe_eigh, safe_inv
@@ -167,6 +170,19 @@ def _cov_core(
     (we compute it here).  Handles unweighted, vector-weighted, and
     matrix-weighted cases via three explicit branches.
     """
+    # Round 4: the matrix-weight path uses the right marginal W.sum(-1) as the
+    # observation weight, which is only a valid covariance weight when W is
+    # symmetric. Flag an asymmetric W host-side (skip under jit).
+    if W is not None and not isinstance(W, jax.core.Tracer):
+        w_host = np.asarray(W)
+        if not np.allclose(w_host, np.swapaxes(w_host, -1, -2)):
+            warnings.warn(
+                'cov/corr: the matrix weight W is not symmetric; the weighted '
+                'mean uses the right marginal W.sum(-1), so an asymmetric W '
+                'yields an asymmetric, generally invalid covariance weight. '
+                'Pass a symmetric (ideally PSD) W.',
+                stacklevel=3,
+            )
     mu_X = _weighted_mean(X, weights=weights, W=W)
     if Y is X:
         mu_Y = mu_X

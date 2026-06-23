@@ -167,6 +167,17 @@ def test_glasso_zero_lambda_is_mle():
     np.testing.assert_allclose(theta, np.linalg.inv(S), atol=1e-6)
 
 
+def test_glasso_non_positive_diagonal_raises():
+    """Round 4: the off-diagonal-only solver fixes W_jj = S_jj and divides by it,
+    so a non-positive diagonal (inf/nan) is rejected with a clear error."""
+    S = _sample_cov(40, 5, seed=1)
+    assert glasso(jnp.asarray(S), 0.1).shape == (5, 5)  # valid S is fine
+    S_bad = S.copy()
+    S_bad[2, 2] = -0.1
+    with pytest.raises(ValueError, match='non-positive diagonal'):
+        glasso(jnp.asarray(S_bad), 0.1)
+
+
 def test_glasso_monotone_sparsity():
     """Edge count is non-increasing in lambda (stronger penalty -> sparser)."""
     S = _sample_cov(60, 12, seed=14)

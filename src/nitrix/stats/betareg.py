@@ -41,10 +41,13 @@ References
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple, cast
 
+import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import lax
 from jax.scipy.special import digamma, gammaln, polygamma
 from jaxtyping import Array, Float
@@ -239,6 +242,19 @@ def beta_fit(
         raise ValueError(
             f'beta_fit: Y.shape[-1]={Y.shape[-1]} must match N={n}.'
         )
+    # Round 4: responses outside (0, 1) are silently clipped to the boundary,
+    # which corrupts the data without notice. Flag it host-side (skip under jit,
+    # where Y is a tracer and the values are unavailable).
+    if not isinstance(Y, jax.core.Tracer):
+        y_host = np.asarray(Y)
+        if np.any((y_host <= 0.0) | (y_host >= 1.0)):
+            warnings.warn(
+                'beta_fit: some responses lie outside the open interval (0, 1) '
+                'and are clipped to [1e-8, 1 - 1e-8]; beta regression models '
+                'rates / proportions strictly in (0, 1). Rescale if these are '
+                'counts or unbounded values.',
+                stacklevel=2,
+            )
 
     def per_voxel(
         y: Float[Array, 'N'],

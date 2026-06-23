@@ -69,3 +69,22 @@ def test_beta_shape_validation():
     X, y = _sim(0, n=100)
     with pytest.raises(ValueError, match='must match N'):
         beta_fit(jnp.asarray(y[None, :-3]), jnp.asarray(X))
+
+
+def test_beta_out_of_unit_interval_warns():
+    """Round 4: responses outside (0, 1) are clipped to the boundary; warn rather
+    than silently corrupt the data."""
+    import warnings
+
+    X, y = _sim(0, n=80)
+    y_in = np.clip(y, 1e-3, 1 - 1e-3)
+    y_bad = y_in.copy()
+    y_bad[0] = 1.5  # out of (0, 1)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        beta_fit(jnp.asarray(y_in[None, :]), jnp.asarray(X), n_iter=5)
+        assert not any('outside the open interval' in str(m.message) for m in w)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        beta_fit(jnp.asarray(y_bad[None, :]), jnp.asarray(X), n_iter=5)
+        assert any('outside the open interval' in str(m.message) for m in w)

@@ -143,6 +143,24 @@ def test_cov_nondiagonal_weight_matrix_is_symmetric_and_finite():
     np.testing.assert_allclose(np.asarray(S), np.asarray(S).T, atol=1e-10)
 
 
+def test_cov_asymmetric_weight_matrix_warns():
+    """Round 4: an asymmetric matrix weight gives an invalid (asymmetric)
+    covariance weight via the right marginal -- warn; a symmetric W is silent."""
+    import warnings
+
+    rng = np.random.default_rng(2)
+    X = jnp.asarray(rng.standard_normal((4, 30)))
+    A = rng.standard_normal((30, 30))
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        cov(X, weight_matrix=jnp.asarray(A + A.T))  # symmetric
+        assert not any('not symmetric' in str(m.message) for m in w)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        cov(X, weight_matrix=jnp.asarray(A))  # asymmetric
+        assert any('not symmetric' in str(m.message) for m in w)
+
+
 # ---------------------------------------------------------------------------
 # covariance: complex-valued (the silently-wrong concern)
 # ---------------------------------------------------------------------------
