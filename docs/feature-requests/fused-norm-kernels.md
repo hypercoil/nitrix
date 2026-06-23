@@ -3,7 +3,9 @@
 > **Status (2026-06-23), against `nitrix main@6449cfa`.** Not present. Part of
 > the [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md) bundle —
 > **P3, CONVENIENCE (perf-only)**. Lowest priority: the reference path is
-> already adequate, so this is a follow-up, not a blocker.
+> already adequate, so this is a follow-up, not a blocker. **Home locked to
+> `nitrix.nn.norm`** and the sequenced build is in
+> [`nn-forward-kernels-suite.md`](nn-forward-kernels-suite.md) §7.3.
 
 **What.** Fused forward+backward Pallas kernels for the three normalisations
 the zoo uses on the hot path: `layer_norm`, `group_norm`, `instance_norm`
@@ -48,9 +50,9 @@ def layer_norm(
 # instance_norm(x, weight, bias, *, eps, backend); per-sample, per-channel.
 ```
 
-Home: a small new `nitrix.nn` package (or fold into `numerics.normalize` if
-preferred — the impl plan should pick one; `nitrix.nn` keeps the fused-kernel
-forward blocks together with `attention` / `ssm`).
+Home: `nitrix.nn.norm` (locked) — the fused-kernel forward blocks live together
+under `nitrix.nn` with `attention` / `ssm`; the plain *reference* instance-norm
+stats stay in `numerics.normalize` (see [`lp-normalize`](lp-normalize.md)).
 
 **Implementation + tests.** Standard pattern: `*/_reference.py` reproduces the
 equinox/`rsqrt` math; `_kernels/cuda/` holds the fused single-pass kernel with

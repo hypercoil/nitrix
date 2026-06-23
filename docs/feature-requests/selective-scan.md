@@ -2,9 +2,11 @@
 
 > **Status (2026-06-23), against `nitrix main@6449cfa`.** Not present. Part of
 > the [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md) bundle —
-> **P1, ENABLING**. Read that ledger first for the shared framing.
+> **P1, ENABLING**. Read that ledger first for the shared framing. **Home
+> locked to `nitrix.nn.ssm`** and the sequenced build is in
+> [`nn-forward-kernels-suite.md`](nn-forward-kernels-suite.md) §7.2.
 
-**What.** A selective state-space scan primitive `nitrix.ssm.selective_scan`,
+**What.** A selective state-space scan primitive `nitrix.nn.ssm.selective_scan`,
 with a `jax` reference (today's `lax.scan` recurrence) and a `pallas-cuda`
 fused kernel, lifting the inner contraction out of
 `ilex/nimox/modules/_mamba.py`.
@@ -58,8 +60,8 @@ def selective_scan(
 
 **Implementation shape (house pattern).**
 
-- `nitrix/ssm/__init__.py` — public `selective_scan` + `resolve_backend`.
-- `nitrix/ssm/_reference.py` — the current `lax.scan` recurrence, kept as the
+- `nitrix/nn/ssm/__init__.py` — public `selective_scan` + `resolve_backend`.
+- `nitrix/nn/ssm/_reference.py` — the current `lax.scan` recurrence, kept as the
   bit-exact oracle (ilex Tier-1 parity swaps onto this with no drift).
 - `nitrix/_kernels/cuda/selective_scan.py` — fused block-parallel associative
   scan (state in SRAM per tile), `None` on tiling failure → reference + warn.

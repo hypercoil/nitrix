@@ -3,10 +3,12 @@
 > **Status (2026-06-23), against `nitrix main@6449cfa`.** Not present. Part of
 > the [`nn-forward-block-kernels.md`](nn-forward-block-kernels.md) bundle —
 > **P0, ENABLING**. Read that ledger first for the shared framing (new family,
-> parity two-tier, dispatch fit, boundary).
+> parity two-tier, dispatch fit, boundary). **Home locked to
+> `nitrix.nn.attention`** and the sequenced build is in
+> [`nn-forward-kernels-suite.md`](nn-forward-kernels-suite.md) §7.1.
 
 **What.** A single scaled-dot-product-attention primitive
-`nitrix.attention.scaled_dot_product_attention`, with a `jax` reference
+`nitrix.nn.attention.scaled_dot_product_attention`, with a `jax` reference
 (exactly today's `einsum + softmax`) and a `pallas-cuda` flash-attention fast
 path, subsuming the four hand-rolled reimplementations in ilex nimox:
 
@@ -65,9 +67,9 @@ def scaled_dot_product_attention(
 
 **Implementation shape (house pattern).**
 
-- `nitrix/attention/__init__.py` — public `scaled_dot_product_attention`,
+- `nitrix/nn/attention/__init__.py` — public `scaled_dot_product_attention`,
   `resolve_backend` dispatch.
-- `nitrix/attention/_reference.py` — `einsum + (bias) + (mask/causal) +
+- `nitrix/nn/attention/_reference.py` — `einsum + (bias) + (mask/causal) +
   softmax + einsum`. Reproduces the current nimox math **bit-for-bit** (same
   fp32 accumulation, same softmax axis) so ilex Tier-1 parity is untouched.
 - `nitrix/_kernels/cuda/attention.py` — flash-attention via online softmax;

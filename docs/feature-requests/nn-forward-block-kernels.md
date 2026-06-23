@@ -4,7 +4,23 @@
 > items below exist in `src/nitrix` (verified: no `attention`, `ssm`,
 > `selective_scan`, or fused-norm kernel; `ell_row_softmax` in `semiring/`
 > is unrelated). This is a **new consumer family**: the first
-> *neural-network forward-block* kernel tier in nitrix. The existing two
+> *neural-network forward-block* kernel tier in nitrix.
+>
+> **Sequenced implementation plan:**
+> [`nn-forward-kernels-suite.md`](nn-forward-kernels-suite.md) — the concrete,
+> phased build of this ledger (namespace, golden harness, per-op design,
+> exit gates). Read it for *how*; this doc is the *why* + duplicate guard.
+>
+> **Namespace (locked 2026-06-23):** all forward-block kernels live under one
+> top-level package **`nitrix.nn`** (`nitrix.nn.attention`, `nitrix.nn.ssm`,
+> `nitrix.nn.norm`), not three top-level packages — keeps the flat top level
+> coherent as the family grows. Supersedes the per-item `Home` hints below.
+>
+> **Scope (locked 2026-06-23):** nitrix owns *correctness + gross memory*
+> (golden corpus, `pallas ≈ jax` parity, FD-VJP, no score-matrix/state-trajectory
+> materialisation); the sibling **perf suite** (`bench/`) owns *wall-clock
+> parity at scale* vs heavy torch/triton/cuda references. This suite does not
+> gate on a throughput number. The existing two
 > consumer families — [`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md)
 > (vendored-model pre/post-processing → thrux) and
 > [`ilex-training-substrate.md`](ilex-training-substrate.md) (augment / loss /
@@ -80,8 +96,9 @@ Each kernel follows the shipped `semiring_matmul` template verbatim:
 `_kernels/cuda/*` (returns `None` on tiling failure → reference fallback) or
 `*/_reference.py`. jaxtyping signatures, single-quote / 79-col ruff,
 mypy-strict, golden corpus under `tests/golden/`, tolerance in
-`tests/tolerance.toml`. New top-level packages `nitrix.attention` and
-`nitrix.ssm` (flat-domain style, matching `geometry` / `metrics` / `semiring`).
+`tests/tolerance.toml`. One new top-level package `nitrix.nn` with op-family
+submodules `nitrix.nn.{attention, ssm, norm}` (see the plan doc §2 for the
+namespace rationale).
 
 ## Ledger (priority-marked)
 
@@ -92,12 +109,12 @@ perf-only follow-up, reference path already adequate.
 
 | Pri | Item | Doc | Severity | Home | Status |
 |---|---|---|---|---|---|
-| **P0** | Scaled dot-product / flash attention (dense + windowed-bias + causal + cross) | [attention-kernels](attention-kernels.md) | ENABLING | `nitrix.attention` | proposed |
-| **P1** | Selective state-space scan (Mamba/S6) | [selective-scan](selective-scan.md) | ENABLING | `nitrix.ssm` | proposed |
+| **P0** | Scaled dot-product / flash attention (dense + windowed-bias + causal + cross) | [attention-kernels](attention-kernels.md) | ENABLING | `nitrix.nn.attention` | planned ([suite](nn-forward-kernels-suite.md) §7.1) |
+| **P1** | Selective state-space scan (Mamba/S6) | [selective-scan](selective-scan.md) | ENABLING | `nitrix.nn.ssm` | planned ([suite](nn-forward-kernels-suite.md) §7.2) |
 | **P2** | Affine param↔matrix algebra (unblocks nimox affine vendor) | [affine-matrix-algebra](affine-matrix-algebra.md) *(existing)* | ENABLING | `geometry.transform` | filed 2026-06-08 |
 | **P2** | Spherical parameterisation (JOSA) | [spherical-parameterisation](spherical-parameterisation.md) *(existing)* | ENABLING | `geometry.sphere` | filed |
 | **P2** | Jacobian-determinant / field regularisers (JOSA jacobian) | [field-regularisers](field-regularisers.md) *(existing)* | ENABLING | `register.regulariser` | partly shipped |
-| **P3** | Fused LayerNorm / GroupNorm / InstanceNorm (forward+backward) | [fused-norm-kernels](fused-norm-kernels.md) | CONVENIENCE (perf) | `nitrix.nn` | proposed |
+| **P3** | Fused LayerNorm / GroupNorm / InstanceNorm (forward+backward) | [fused-norm-kernels](fused-norm-kernels.md) | CONVENIENCE (perf) | `nitrix.nn.norm` | planned ([suite](nn-forward-kernels-suite.md) §7.3) |
 
 **P2 note.** The affine / spherical / jacobian gaps are already filed under
 `ilex-training-substrate.md` and `layering-roadmap.md §6`; they are listed

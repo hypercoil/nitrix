@@ -77,18 +77,23 @@ follow into nitrix).
 
 Context, the new-family rationale (why attention/SSM weren't in the 2026-06-08
 audit), the parity two-tier contract, and the priority-marked index:
-[`nn-forward-block-kernels.md`](nn-forward-block-kernels.md). The first
-*neural-network forward-block* kernel tier in nitrix — pure `(Array,…)->Array`
-contractions lifted out of the ilex/nimox transformer and Mamba modules, where
-a hardware-aware (Pallas/Triton) implementation pays off most. Consumer is
-`nimox` (being promoted to a standalone repo in the ilex cycle; ilex axis ii).
+[`nn-forward-block-kernels.md`](nn-forward-block-kernels.md). The **sequenced
+implementation plan** is
+[`nn-forward-kernels-suite.md`](nn-forward-kernels-suite.md) (namespace, golden
+harness, per-op design, phasing). The first *neural-network forward-block*
+kernel tier in nitrix — pure `(Array,…)->Array` contractions lifted out of the
+ilex/nimox transformer and Mamba modules, where a hardware-aware (Pallas/Triton)
+implementation pays off most. Consumer is `nimox` (being promoted to a standalone
+repo in the ilex cycle; ilex axis ii). **All under one namespace `nitrix.nn`**
+(`attention` / `ssm` / `norm` submodules); nitrix owns correctness + gross
+memory, the perf suite (`bench/`) owns wall-clock parity at scale.
 
 | Pri | Doc | Severity | Home |
 |---|---|---|---|
-| P0 | [attention-kernels](attention-kernels.md) (flash + windowed-bias + causal + cross) | ENABLING | `nitrix.attention` |
-| P1 | [selective-scan](selective-scan.md) (Mamba/S6 fused scan) | ENABLING | `nitrix.ssm` |
+| P0 | [attention-kernels](attention-kernels.md) (flash + windowed-bias + causal + cross) | ENABLING | `nitrix.nn.attention` |
+| P1 | [selective-scan](selective-scan.md) (Mamba/S6 fused scan) | ENABLING | `nitrix.nn.ssm` |
 | P2 | [affine-matrix-algebra](affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
-| P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn` |
+| P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn.norm` |
 
 ## Statistical modelling suite (perf-bench → ModelArray → niffi)
 
