@@ -23,7 +23,7 @@ squares, eigendecomposition, transposes, rank — but with **no formal training 
 differential geometry, numerical methods, or graphics**. We build every operator
 up from the linear algebra you already own, and we explain each geometric idea the
 first time it appears. It is the sibling of the [statistical modelling
-suite](../index.qmd) and shares its house style.
+suite](../statistics/index.qmd) and shares its house style.
 
 ## The one governing idea {#sec-governing}
 
@@ -423,4 +423,4 @@ a relationship between objects, never as a registration problem.
   and [`nitrix.sparse`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/__init__.py)
 - Grid operators: [`nitrix.morphology`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/morphology/__init__.py)
 - The graph mirror: [`nitrix.graph`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/graph/__init__.py)
-- Sibling unit: [the statistical modelling suite](../index.qmd).
+- Sibling unit: [the statistical modelling suite](../statistics/index.qmd).

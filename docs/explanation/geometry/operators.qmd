@@ -859,4 +859,4 @@ the cotangent Laplacian.
   [performance](performance.qmd#sec-storage) (ELL/SectionedELL storage economics) ·
   [solvers](solvers.qmd#sec-kernels) (the differentiable-kernel depth) ·
   [graph geometry](graph-geometry.qmd) (pooling and the graph mirror) ·
-  sibling unit: [the statistical modelling suite](../index.qmd).
+  sibling unit: [the statistical modelling suite](../statistics/index.qmd).

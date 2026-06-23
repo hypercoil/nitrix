@@ -16,7 +16,7 @@ none of them touches a dense factorisation:
   every mesh apply — and carries the differentiability story for the whole unit.
 
 All three are GPU-native and **cuSolver-free**. The dense, factorisation-heavy
-machinery that powers the [stats unit's solvers](../solvers.qmd) — damped Newton,
+machinery that powers the [stats unit's solvers](../statistics/solvers.qmd) — damped Newton,
 Woodbury, the FaST-LMM spectral trick — mostly *does not appear here*: geometry
 poses different problems. This page says what is used, why, and what is
 deliberately absent. It also tours the load-bearing **host-side construction**
@@ -343,7 +343,7 @@ not a tape of every forward iteration — constant memory in the iteration count
 
 ### A genuine cross-unit shared solver
 
-This is the *same* `cg` the [stats unit's solvers page](../solvers.qmd) reaches
+This is the *same* `cg` the [stats unit's solvers page](../statistics/solvers.qmd) reaches
 for. There, the Gauss–Newton / Levenberg–Marquardt normal equations
 $(J^\top J + \lambda\,\text{diag})\,\boldsymbol\delta = -J^\top\mathbf{r}$ of the
 registration path are SPD and small, and solving them matrix-free on-device beats a
@@ -624,12 +624,12 @@ plt.show()
 ## What the stats unit uses that geometry does not {#sec-not-used}
 
 A reference page is as useful for what it rules *out*. The [stats solvers
-page](../solvers.qmd) is dominated by dense, factorisation-heavy numerics for
+page](../statistics/solvers.qmd) is dominated by dense, factorisation-heavy numerics for
 fitting statistical models; geometry poses different problems and reaches for
 almost none of it. Being explicit:
 
 - **No damped Newton / Fisher scoring / IRLS.** There is no GLM or GLMM here, so
-  the [stats Newton machinery](../solvers.qmd#sec-newton) — line search, Hessian
+  the [stats Newton machinery](../statistics/solvers.qmd#sec-newton) — line search, Hessian
   modification, the trust-region damping — has no consumer in the geometry suite.
   The one iterative-refinement primitive geometry *does* use is `fixed_point_solve`
   (`numerics/fixed_point.py`, `DIFF-JAX`), but for a different purpose: inverting a
@@ -638,7 +638,7 @@ almost none of it. Being explicit:
   implicit-function-theorem backward — a fixed-point iteration, not a Newton solve
   on a likelihood.
 - **No Woodbury, no FaST-LMM spectral trick.** The [stats spectral
-  trick](../solvers.qmd#sec-spectral) and [Woodbury inversion](../solvers.qmd#sec-woodbury)
+  trick](../statistics/solvers.qmd#sec-spectral) and [Woodbury inversion](../statistics/solvers.qmd#sec-woodbury)
   exist to invert a structured variance-component covariance $V = \sigma^2 I + ZGZ^\top$
   cheaply. There is no random-effects covariance in geometry, so neither appears.
   Geometry's "spectral" work is the *operator's own* eigendecomposition
@@ -776,4 +776,4 @@ differentiates it*.
   [Laplace–Beltrami](laplace-beltrami.qmd) (the stiffness and mass this page
   solves), [spectral](spectral.qmd) (what the eigenpairs *mean*),
   [volume↔surface](volume-surface.qmd) (marching tets), and the stats unit's
-  [solvers](../solvers.qmd) (the shared `cg`, the dense machinery geometry omits).
+  [solvers](../statistics/solvers.qmd) (the shared `cg`, the dense machinery geometry omits).

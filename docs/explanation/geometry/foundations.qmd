@@ -34,7 +34,7 @@ the book is to carry you from *novice* (you can call a routine and pick the righ
 one) to *practitioner* (you understand why each answer converges and what each
 argument means) to *developer* (you could implement it yourself). This page lays
 the three planks the whole climb rests on. It is the sibling of the
-[`nitrix.stats` foundations page](../foundations.qmd); the two units share one
+[`nitrix.stats` foundations page](../statistics/foundations.qmd); the two units share one
 house style.
 
 ## A motivating question {#sec-motivation}
@@ -600,4 +600,4 @@ matvec](operators.qmd#sec-ell) that every mesh computation rides on.
 - Next in reading order: [the operator layer](operators.qmd#sec-ell), then
   [the cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent) and
   [curvature](curvature.qmd#sec-mean). Sibling unit:
-  [the `nitrix.stats` foundations page](../foundations.qmd).
+  [the `nitrix.stats` foundations page](../statistics/foundations.qmd).

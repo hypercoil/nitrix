@@ -260,7 +260,7 @@ spectrum is robust and trustworthy; trust the tail less.
 
 If you have read the stats unit, @eq-gen-eig should feel familiar, because you have
 met it before in a different costume. The **Hilbert-space approximate Gaussian
-process** ([HSGP](../hsgp.qmd#sec-hsgp)) approximates a GP by expanding it in the
+process** ([HSGP](../statistics/hsgp.qmd#sec-hsgp)) approximates a GP by expanding it in the
 **eigenfunctions of the Laplacian on a bounded interval** — which, by
 @eq-interval-modes, are exactly $\sin(k\pi x)$ — and then reweighting mode $k$ by the
 **spectral density** of the kernel evaluated at the eigenvalue, $S(\sqrt{\lambda_k})$.
@@ -822,5 +822,5 @@ the special one where the graph is a triangulated manifold.
 - Reference tier: [the solvers page](solvers.qmd#sec-eigensolve) — the full eigensolver
   suite; [graph geometry](graph-geometry.qmd#sec-spectral-graph) — the same eigensolve
   on a graph Laplacian.
-- Cross-unit: [HSGP](../hsgp.qmd#sec-hsgp) — the bounded-interval twin of the manifold
+- Cross-unit: [HSGP](../statistics/hsgp.qmd#sec-hsgp) — the bounded-interval twin of the manifold
   harmonics, Laplacian eigenfunctions reweighted by a spectral density.

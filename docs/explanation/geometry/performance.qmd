@@ -661,5 +661,5 @@ SDF matches $\lVert x\rVert - r$) for the *physics*, and parity-vs-reference for
   semiring matvec this page sizes) · [foundations](foundations.qmd#sec-classes)
   (execution classes) · [volumes](volumes.qmd#sec-morphology) (the morphology ops) ·
   [solvers](solvers.qmd) (the iterative consumers of these operators). Cross-unit:
-  [HSGP](../hsgp.qmd#sec-hsgp) in the stats unit for a comparable
+  [HSGP](../statistics/hsgp.qmd#sec-hsgp) in the stats unit for a comparable
   storage-vs-accuracy trade in the spectral-prior setting.

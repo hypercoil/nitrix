@@ -6,7 +6,7 @@ project:
   # part of the rendered site (RECON: treat as signal, verify before lifting).
   render:
     - index.qmd
-    - explanation/*.qmd
+    - explanation/statistics/*.qmd
     - explanation/geometry/*.qmd
 
 website:
@@ -20,18 +20,18 @@ website:
         text: Home
       - text: Statistics
         menu:
-          - explanation/index.qmd
-          - explanation/foundations.qmd
+          - explanation/statistics/index.qmd
+          - explanation/statistics/foundations.qmd
           - text: "---"
-          - explanation/glm.qmd
-          - explanation/lme.qmd
-          - explanation/gam.qmd
-          - explanation/glmm.qmd
-          - explanation/gamm.qmd
-          - explanation/hsgp.qmd
+          - explanation/statistics/glm.qmd
+          - explanation/statistics/lme.qmd
+          - explanation/statistics/gam.qmd
+          - explanation/statistics/glmm.qmd
+          - explanation/statistics/gamm.qmd
+          - explanation/statistics/hsgp.qmd
           - text: "---"
-          - explanation/solvers.qmd
-          - explanation/fellner-schall.qmd
+          - explanation/statistics/solvers.qmd
+          - explanation/statistics/fellner-schall.qmd
       - text: Geometry
         menu:
           - explanation/geometry/index.qmd
