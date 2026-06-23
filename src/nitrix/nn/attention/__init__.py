@@ -24,6 +24,7 @@ from jaxtyping import Array, Bool, Float
 from ..._internal.backend import Backend, fallback, resolve_backend
 from ._reference import (
     default_scale,
+    qk_rms_norm,
     reference_scaled_dot_product_attention,
 )
 
@@ -102,6 +103,7 @@ def scaled_dot_product_attention(
     mask: Optional[Bool[Array, '... h s t']] = None,
     scale: Optional[float] = None,
     causal: bool = False,
+    qk_norm: bool = False,
     backend: Backend = 'auto',
 ) -> Float[Array, '... h s d_v']:
     """Scaled-dot-product attention with backend dispatch.
@@ -122,7 +124,7 @@ def scaled_dot_product_attention(
         Query / key / value, layout ``(..., h, s, d)`` / ``(..., h, t, d)``
         / ``(..., h, t, d_v)``.  The module owns heads / windowing; the
         kernel sees already-partitioned ``q``/``k``/``v``.
-    bias, mask, scale, causal
+    bias, mask, scale, causal, qk_norm
         As in :func:`reference_scaled_dot_product_attention`.
     backend
         ``'auto'`` / ``'pallas-cuda'`` / ``'jax'``.
@@ -133,18 +135,23 @@ def scaled_dot_product_attention(
 
     Differentiability
     -----------------
-    The reference path is autodiff-native (``jax.grad`` / ``vjp`` /
-    ``jacrev`` flow through it directly).  The fused path will register a
-    hand-derived ``custom_vjp`` (including the learnable-``bias`` gradient)
-    in suite Phase 2.
+    The reference path is autodiff-native.  On the fused path, ``qk_norm`` is a
+    pure-elementwise RMS pre-op applied *outside* the kernel's ``custom_vjp``,
+    so autodiff chains its VJP onto the unchanged fused forward / backward (the
+    in-kernel tile-fusion of the norm is a later bandwidth-only optimisation).
+    ``qk_norm=False`` is byte-identical to the no-norm path.
     """
     _validate(q, k, v)
     resolved_scale = default_scale(q.shape[-1]) if scale is None else scale
     resolved = resolve_backend(backend)
     if resolved == 'pallas-cuda':
+        # RMS-norm outside the fused core: the kernel + its custom_vjp are
+        # unchanged; autodiff composes the norm's VJP with the fused VJP.
+        q_in = qk_rms_norm(q) if qk_norm else q
+        k_in = qk_rms_norm(k) if qk_norm else k
         out = _attention_pallas(
-            q,
-            k,
+            q_in,
+            k_in,
             v,
             bias=bias,
             mask=mask,
@@ -172,4 +179,5 @@ def scaled_dot_product_attention(
         mask=mask,
         scale=resolved_scale,
         causal=causal,
+        qk_norm=qk_norm,
     )

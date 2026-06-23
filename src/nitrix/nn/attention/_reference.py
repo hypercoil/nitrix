@@ -26,12 +26,27 @@ from jaxtyping import Array, Bool, Float
 __all__ = [
     'reference_scaled_dot_product_attention',
     'default_scale',
+    'qk_rms_norm',
 ]
+
+# RMSNorm epsilon for QK-norm (the Gemma2 / ViT-22B convention).
+_QK_RMS_EPS = 1e-6
 
 
 def default_scale(head_dim: int) -> float:
     """Softmax temperature ``1 / sqrt(head_dim)`` (the SDPA default)."""
     return 1.0 / math.sqrt(float(head_dim))
+
+
+def qk_rms_norm(z: Float[Array, '... d']) -> Float[Array, '... d']:
+    """RMSNorm over the trailing head dim (QK-norm; no mean, no learnable scale).
+
+    ``z̄ = z / sqrt(mean(z², axis=-1) + eps)``.  A cheap pure-elementwise pre-op
+    applied to ``q`` and ``k`` before the dot; autodiff-native, so it composes
+    with both the reference and the fused kernel without touching either.
+    """
+    ms = jnp.mean(jnp.square(z), axis=-1, keepdims=True)
+    return z * jax.lax.rsqrt(ms + _QK_RMS_EPS)
 
 
 def reference_scaled_dot_product_attention(
@@ -43,6 +58,7 @@ def reference_scaled_dot_product_attention(
     mask: Optional[Bool[Array, '... h s t']] = None,
     scale: Optional[float] = None,
     causal: bool = False,
+    qk_norm: bool = False,
 ) -> Float[Array, '... h s d_v']:
     """Reference scaled-dot-product attention (oracle).
 
@@ -68,6 +84,9 @@ def reference_scaled_dot_product_attention(
     causal
         If ``True``, query ``i`` attends only to keys ``j <= i`` (indices
         aligned at 0 -- the standard self-attention convention).
+    qk_norm
+        If ``True``, RMS-normalise ``q`` and ``k`` over the head dim before the
+        dot (QK-norm; logit-growth control at depth/scale).
 
     Returns
     -------
@@ -82,6 +101,9 @@ def reference_scaled_dot_product_attention(
     """
     if scale is None:
         scale = default_scale(q.shape[-1])
+    if qk_norm:
+        q = qk_rms_norm(q)
+        k = qk_rms_norm(k)
 
     out_dtype = jnp.result_type(q, k, v)
     acc_dtype = jnp.promote_types(out_dtype, jnp.float32)

@@ -43,6 +43,7 @@ ATTENTION_CASES = [
     'attention_windowed_bias_float32',
     'attention_causal_float32',
     'attention_cross_float32',
+    'attention_qk_norm_float32',
 ]
 
 
@@ -54,6 +55,7 @@ def _call_from_golden(data: dict[str, np.ndarray]) -> jnp.ndarray:
         bias=jnp.asarray(data['bias']) if 'bias' in data else None,
         mask=jnp.asarray(data['mask']) if 'mask' in data else None,
         causal=bool(data['causal']),
+        qk_norm=bool(data['qk_norm']) if 'qk_norm' in data else False,
     )
 
 
@@ -107,6 +109,36 @@ def test_reference_matches_naive_oracle():
     )[0, 0]
     want = _naive(q, k, v, bias=bias)
     assert np.allclose(np.asarray(got), want, atol=1e-10)
+
+
+# --- qk-norm -------------------------------------------------------------
+
+
+def test_qk_norm_applies_rmsnorm_to_q_and_k():
+    rng = np.random.RandomState(40)
+    q = jnp.asarray(rng.standard_normal((2, 2, 5, 4)))
+    k = jnp.asarray(rng.standard_normal((2, 2, 6, 4)))
+    v = jnp.asarray(rng.standard_normal((2, 2, 6, 3)))
+
+    def rms(z):
+        return (
+            z * (np.mean(np.asarray(z) ** 2, -1, keepdims=True) + 1e-6) ** -0.5
+        )
+
+    via_flag = ref_sdpa(q, k, v, qk_norm=True)
+    manual = ref_sdpa(jnp.asarray(rms(q)), jnp.asarray(rms(k)), v)
+    assert np.allclose(np.asarray(via_flag), np.asarray(manual), atol=1e-10)
+
+
+def test_qk_norm_false_is_identity():
+    rng = np.random.RandomState(41)
+    q = jnp.asarray(rng.standard_normal((2, 2, 5, 4)))
+    k = jnp.asarray(rng.standard_normal((2, 2, 5, 4)))
+    v = jnp.asarray(rng.standard_normal((2, 2, 5, 3)))
+    assert np.array_equal(
+        np.asarray(ref_sdpa(q, k, v, qk_norm=False)),
+        np.asarray(ref_sdpa(q, k, v)),
+    )
 
 
 # --- math properties -----------------------------------------------------

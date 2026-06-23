@@ -43,6 +43,7 @@ def _ref(
     bias: Optional[np.ndarray] = None,
     mask: Optional[np.ndarray] = None,
     causal: bool = False,
+    qk_norm: bool = False,
 ) -> np.ndarray:
     out = reference_scaled_dot_product_attention(
         q,
@@ -51,6 +52,7 @@ def _ref(
         bias=bias,
         mask=mask,
         causal=causal,
+        qk_norm=qk_norm,
     )
     return np.asarray(out, dtype=np.float32)
 
@@ -124,6 +126,23 @@ def regen_attention() -> None:
         v=v,
         causal=np.array(False),
         out=_ref(q, k, v),
+    )
+
+    # QK-norm (RMS-norm q/k along the head dim before the dot)
+    rng = np.random.RandomState(4)
+    q, k, v = (
+        _randn(rng, b, h, s, d),
+        _randn(rng, b, h, t, d),
+        _randn(rng, b, h, t, dv),
+    )
+    _save(
+        'attention_qk_norm_float32',
+        q=q,
+        k=k,
+        v=v,
+        causal=np.array(False),
+        qk_norm=np.array(True),
+        out=_ref(q, k, v, qk_norm=True),
     )
 
 

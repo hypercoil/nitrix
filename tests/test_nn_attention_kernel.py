@@ -140,6 +140,57 @@ def test_gradient_parity_with_bias_dbias():
         assert _relerr(a, b) < _GRAD_TOL
 
 
+# --- qk-norm (RMS pre-op outside the fused core) ------------------------
+
+
+@pallas_only
+@pytest.mark.parametrize('name', ['dense', 'bias', 'causal'])
+def test_qk_norm_parity(name):
+    q, k, v, kwargs, scale = _case(name)
+    got = scaled_dot_product_attention(
+        q, k, v, scale=scale, qk_norm=True, backend='pallas-cuda', **kwargs
+    )
+    want = ref_sdpa(q, k, v, scale=scale, qk_norm=True, **kwargs)
+    np.testing.assert_allclose(
+        np.asarray(got), np.asarray(want), atol=_ATOL, rtol=_RTOL
+    )
+
+
+@pallas_only
+def test_qk_norm_false_is_byte_identical_to_no_norm():
+    # Regression guard: qk_norm=False does not perturb the fused path.
+    q, k, v, _, scale = _case('dense')
+    a = scaled_dot_product_attention(
+        q, k, v, scale=scale, qk_norm=False, backend='pallas-cuda'
+    )
+    b = scaled_dot_product_attention(
+        q, k, v, scale=scale, backend='pallas-cuda'
+    )
+    assert np.array_equal(np.asarray(a), np.asarray(b))
+
+
+@pallas_only
+def test_qk_norm_gradient_matches_reference():
+    q, k, v, _, scale = _case('dense')
+
+    def lk(q, k, v):
+        return jnp.sum(
+            scaled_dot_product_attention(
+                q, k, v, scale=scale, qk_norm=True, backend='pallas-cuda'
+            )
+            ** 2
+        )
+
+    def lr(q, k, v):
+        return jnp.sum(ref_sdpa(q, k, v, scale=scale, qk_norm=True) ** 2)
+
+    gk = jax.grad(lk, argnums=(0, 1, 2))(q, k, v)
+    gr = jax.grad(lr, argnums=(0, 1, 2))(q, k, v)
+    for a, b in zip(gk, gr):
+        assert np.all(np.isfinite(np.asarray(a)))
+        assert _relerr(a, b) < _GRAD_TOL
+
+
 # --- gross-memory contract ----------------------------------------------
 
 
