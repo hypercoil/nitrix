@@ -21,7 +21,7 @@ unification is the warranted one, not a forced matrix+SVF merge.)
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Callable, Literal, Optional, Sequence, Union, cast
 
 import jax.numpy as jnp
@@ -41,10 +41,11 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode
 from ..smoothing import gaussian
-from ._converge import Convergence, run_iterations
+from ._converge import Convergence, ConvergenceMode, run_iterations
 from ._force import Force, MIForce
 
 __all__ = [
+    'SVFSpec',
     'svf_coarse_to_fine',
     'single_sided_level',
     'symmetric_level',
@@ -57,6 +58,89 @@ __all__ = [
     'resolve_smoothing',
     'smooth_pyramid',
 ]
+
+
+@dataclass(frozen=True)
+class SVFSpec:
+    """Shared stationary-velocity-field schedule (G1) -- the base both SVF
+    recipe specs (:class:`DemonsSpec`, :class:`SyNSpec`) embed.
+
+    Holds the multi-resolution + regularisation + convergence fields the
+    log-Demons and greedy-SyN recipes have in common, so a recipe spec adds only
+    its own force/update knobs (Demons: ``alpha`` / ``bch_order``; SyN:
+    ``radius`` / ``step`` / ``step_mode``) and the field's type, default, and
+    docstring live in exactly one place.
+
+    Attributes
+    ----------
+    levels
+        Gaussian-pyramid resolutions (coarse-to-fine).
+    iterations
+        Iterations per level: an ``int`` (the same count at every level) or a
+        length-``levels`` **coarse-to-fine** tuple (front-load the cheap coarse
+        levels, cap the expensive finest one -- the ANTs schedule discipline,
+        e.g. ``(100, 70, 50, 20)`` over a 4-level pyramid).
+    sigma_fluid
+        Gaussian sigma for the fluid (per-update) regularisation.
+    sigma_diffusion
+        Gaussian sigma for the diffusion (accumulated-field) regularisation.
+    spacing
+        Per-axis voxel spacing (physical units); ``float`` or length-``ndim``
+        tuple.  ``None`` (default) registers in voxel units.  Only the
+        **anisotropy** is used -- the regularisation (and the LNCC window /
+        ESM force) are made physically isotropic by the *relative* spacing
+        ``spacing / geomean(spacing)`` (level-independent), so isotropic spacing
+        reduces exactly to ``None``; the velocity field stays voxel-native.
+    pyramid_factor, pyramid_sigma
+        Pyramid downsample factor / anti-alias sigma.
+    boundary_mode
+        Out-of-bounds handling for the warps.
+    representation
+        Dense-deformation domain: ``'group'`` (default) carries the
+        *displacement(s)* and uses the greedy compositive update (warp directly,
+        compose the increment -- the perf path); ``'algebra'`` carries the
+        *stationary velocity(ies)* and re-exponentiates every iteration (the
+        exact-SVF path, byte-identical to the pre-v4 recipe, the parity oracle).
+        The velocity output is recovered from the final displacement(s) via
+        ``geometry.field_log`` in group mode.  (The recipe sets how many
+        displacements / velocities -- one for Demons, a symmetric pair for SyN.)
+    mode
+        Iteration strategy (B2).  ``'fixed'`` (the SVF default) runs the full
+        fixed schedule (a ``lax.scan``); ``'early_exit'`` runs the windowed-slope
+        ``lax.while_loop`` -- a level stops once the normalised cost slope drops
+        below ``convergence.threshold`` (or ``iterations`` is hit).
+        **Single-pair** (a ``vmap``-ed ``while_loop`` runs to the all-lanes exit,
+        the slowest pair governing).  A *tapered* per-level ``iterations``
+        schedule already removes the over-iteration the early-exit targets, so
+        the strict ``threshold=1e-6`` then *costs* time on the fast GPU path --
+        hence ``'fixed'`` is the SVF default; early-exit pays off for an untuned
+        / flat schedule or the CPU path with a looser threshold.
+    convergence
+        The :class:`Convergence` (threshold / window) for ``mode='early_exit'``;
+        inert under ``mode='fixed'``.
+    compute_velocity
+        Whether to recover and return the stationary velocity output (the
+        ``geometry.field_log`` of the final displacement(s)).  ``False`` (default)
+        leaves it ``None`` and skips the ``field_log`` finalisation entirely --
+        under ``jit`` that loop nest is never traced, so it costs neither compile
+        nor runtime; the deformation outputs (``warped`` / ``displacement`` /
+        ``jacobian_det``) never depend on it.  Set ``True`` to recover it (e.g.
+        to feed ``geometry.velocity_mean`` or the transform-algebra path).  **The
+        default changed in this release** (was always computed).
+    """
+
+    levels: int = 3
+    iterations: Union[int, tuple[int, ...]] = 80
+    sigma_fluid: float = 1.0
+    sigma_diffusion: float = 1.5
+    spacing: Optional[Union[float, tuple[float, ...]]] = None
+    pyramid_factor: float = 2.0
+    pyramid_sigma: Optional[float] = None
+    boundary_mode: BoundaryMode = 'nearest'
+    representation: Literal['group', 'algebra'] = 'group'
+    mode: ConvergenceMode = 'fixed'
+    convergence: Convergence = Convergence()
+    compute_velocity: bool = False
 
 
 def resolve_smoothing(
@@ -333,7 +417,13 @@ def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
     clamp, that zeroes the *net* deformation there.
     """
     norm = jnp.sqrt(jnp.sum(u * u, axis=-1))
-    cap = jnp.percentile(norm, _STEP_ROBUST_PCTL)
+    # Robust cap as the top-(100-pctl)% order statistic via lax.top_k
+    # (O(N log k)) rather than a full O(N log N) percentile sort every
+    # iteration: the k-th largest is the pctl-th percentile up to a sub-rank
+    # difference -- immaterial for a trust-region cap.  ``k`` is static (the
+    # field shape is).
+    k = max(1, math.ceil((100.0 - _STEP_ROBUST_PCTL) / 100.0 * norm.size))
+    cap = jnp.min(lax.top_k(norm.reshape(-1), k)[0])
     if scale_to:
         # ANTs ``ScaleUpdateField``: scale the *whole* field so the robust-max
         # displacement is **exactly** ``step`` (``scale = step / max``), not the
@@ -346,10 +436,13 @@ def _normalise_step(u: Array, step: float, *, scale_to: bool = False) -> Array:
         # one hot voxel shrink the whole step.  Safe to scale-up only because a
         # convergence gate (the SVF early-exit) bounds the constant-step
         # dithering this would otherwise invite.
-        safe = cap > 1e-12
+        # Dtype-derived zero-cap guard (E1): finfo(dtype).eps, not a fixed
+        # 1e-12 that float32 (~1.2e-7 precision) cannot represent meaningfully.
+        eps = jnp.finfo(u.dtype).eps
+        safe = cap > eps
         scale = jnp.where(safe, step / jnp.where(safe, cap, 1.0), 0.0)
     else:
-        scale = jnp.minimum(1.0, step / (cap + 1e-12))
+        scale = jnp.minimum(1.0, step / (cap + jnp.finfo(u.dtype).eps))
     return u * scale
 
 
@@ -586,7 +679,12 @@ def symmetric_level(
             bch_order=1,
             ndim=ndim,
         )
-        return (v_fwd, v_inv), bound_fwd.cost(a)
+        # The convergence cost is the SYMMETRIC mean of both half-costs; keying
+        # the early-exit on the forward half alone lets an asymmetric metric
+        # (MI / CR) stop while the inverse half is still improving.  A no-op for
+        # a symmetric metric (SSD / LNCC: fwd == inv).
+        cost = 0.5 * (bound_fwd.cost(a) + bound_inv.cost(b))
+        return (v_fwd, v_inv), cost
 
     (v_fwd, v_inv), costs = run_iterations(
         step_fn,
@@ -720,7 +818,8 @@ def group_symmetric_level(
         s_inv = _smooth_vector(
             compose_displacement(s_inv, d_inv, mode=boundary_mode), sd, ndim
         )
-        return (s_fwd, s_inv), bound_fwd.cost(a)
+        # Symmetric mean of both half-costs (see symmetric_level).
+        return (s_fwd, s_inv), 0.5 * (bound_fwd.cost(a) + bound_inv.cost(b))
 
     (s_fwd, s_inv), costs = run_iterations(
         step_fn,
@@ -745,15 +844,21 @@ def resolve_init_displacement(
     or ``init_displacement`` (a displacement field on the fixed grid, e.g. a
     SynthMorph network output) may be given; the diffeomorphic recipe pre-warps
     ``moving`` by the result and registers the residual (warm-start /
-    multi-stage).  An affine is expanded to its displacement field with the
-    registration centring convention (grid centre, via ``affine_grid``).
+    multi-stage).  An affine is expanded to its displacement field by applying
+    the **self-contained** recipe matrix about the origin (its grid centre is
+    already baked in -- B1).
     """
     if init_affine is not None and init_displacement is not None:
         raise ValueError(
             'pass at most one of init_affine / init_displacement.'
         )
     if init_affine is not None:
-        return affine_grid(init_affine, shape) - identity_grid(
+        # The recipes return a SELF-CONTAINED matrix (the grid centre baked in,
+        # B1), so apply it about the origin -- re-centring it here (the old
+        # affine_grid default) would double-centre and silently defeat the
+        # warm-start.
+        center = jnp.zeros(len(shape), dtype=dtype)
+        return affine_grid(init_affine, shape, center=center) - identity_grid(
             shape, dtype=dtype
         )
     return init_displacement

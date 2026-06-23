@@ -26,7 +26,6 @@ from nitrix.geometry import (  # noqa: E402
 from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import (  # noqa: E402
     LNCC,
-    Convergence,
     RegistrationSpec,
     WorldSpace,
     volreg,
@@ -226,12 +225,26 @@ def test_volreg_validation():
             method='inverse_compositional',
             space=WorldSpace(fixed_affine=affine, moving_affine=affine),
         )
-    # The inverse-compositional path now HONOURS an explicit Convergence
-    # (opt-in batch early-exit -- jax.vmap runs the while_loop to all-lanes-exit);
-    # only the forward path (forced here) cannot, and rejects it.
-    with pytest.raises(ValueError, match='forward path cannot early-exit'):
+    # The inverse-compositional path HONOURS mode='early_exit' (opt-in batch
+    # early-exit -- jax.vmap runs the while_loop to all-lanes-exit); only the
+    # forward path (forced here) cannot, and rejects it.
+    with pytest.raises(ValueError, match='volreg forward'):
         volreg(
             series,
             method='forward',
-            spec=RegistrationSpec(convergence=Convergence()),
+            spec=RegistrationSpec(mode='early_exit'),
         )
+
+
+def test_volreg_jit_smoke():
+    # jit-coverage: volreg compiles + runs under jax.jit (no eager-only op) and
+    # matches the eager result.
+    base = _blobs_2d(48)
+    series = _series_index(base, _THETAS, 2)
+    spec = RegistrationSpec(levels=2, iterations=15)
+    eager = volreg(series, reference=0, spec=spec)
+    jitted = jax.jit(lambda s: volreg(s, reference=0, spec=spec))(series)
+    assert bool(jnp.all(jnp.isfinite(jitted.matrices)))
+    assert np.allclose(
+        np.asarray(eager.matrices), np.asarray(jitted.matrices), atol=1e-5
+    )

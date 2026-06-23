@@ -1175,6 +1175,79 @@ def test_integrate_velocity_field_mode_constant_vs_nearest_differs_at_boundary()
     )
 
 
+# ---------------------------------------------------------------------------
+# F2: scaling-and-squaring step count -- 'auto' (log2 rule) + diffeomorphism
+# ---------------------------------------------------------------------------
+
+
+def _smooth_velocity_field(n, sigma, max_norm, seed):
+    """A smooth random 2-D velocity scaled so its max vector norm ~ max_norm."""
+    from nitrix.smoothing import gaussian
+
+    rng = np.random.RandomState(seed)
+    v = np.moveaxis(rng.standard_normal((n, n, 2)), -1, 0)
+    v = np.asarray(gaussian(jnp.asarray(v), sigma=sigma, spatial_rank=2))
+    v = np.moveaxis(v, 0, -1)
+    v = v / np.sqrt((v**2).sum(-1)).max() * max_norm
+    return jnp.asarray(v)
+
+
+def test_integrate_auto_matches_log2_rule():
+    # 'auto' picks the standard ceil(log2(2*max|v|)) (F2).
+    import math
+
+    from nitrix.geometry.grid import _resolve_n_steps
+
+    for max_norm in (4.0, 8.0, 17.0):
+        v = _smooth_velocity_field(64, 6.0, max_norm, 0)
+        mv = float(jnp.sqrt((v**2).sum(-1)).max())
+        assert _resolve_n_steps(v, 'auto') == math.ceil(math.log2(2 * mv))
+
+
+def test_integrate_auto_diffeomorphic_where_understepped_folds():
+    # At a moderate velocity an under-stepped integration (n_steps=0) folds,
+    # while 'auto' (enough squarings) stays diffeomorphic -- the F2 guarantee.
+    from nitrix.geometry import jacobian_det_displacement
+
+    v = _smooth_velocity_field(96, 6.0, 12.0, 0)
+    folded = integrate_velocity_field(v, n_steps=0)
+    auto = integrate_velocity_field(v, n_steps='auto')
+    assert (
+        float(jacobian_det_displacement(folded).min()) < 0.0
+    )  # under-stepped
+    assert float(jacobian_det_displacement(auto).min()) > 0.0  # diffeomorphic
+
+
+def test_integrate_auto_equals_resolved_int():
+    # 'auto' runs exactly the int path at the resolved count (no hidden change).
+    from nitrix.geometry.grid import _resolve_n_steps
+
+    v = _smooth_velocity_field(48, 5.0, 6.0, 1)
+    k = _resolve_n_steps(v, 'auto')
+    np.testing.assert_array_equal(
+        np.asarray(integrate_velocity_field(v, n_steps='auto')),
+        np.asarray(integrate_velocity_field(v, n_steps=k)),
+    )
+
+
+def test_integrate_auto_raises_under_jit():
+    # 'auto' reads concrete max|v| to size the static scan -> unavailable in jit.
+    v = _smooth_velocity_field(32, 4.0, 4.0, 2)
+    with pytest.raises(ValueError, match='concrete velocity'):
+        jax.jit(lambda x: integrate_velocity_field(x, n_steps='auto'))(v)
+
+
+def test_integrate_default_diffeomorphic_across_magnitudes():
+    # The fixed default n_steps keeps the flow diffeomorphic across the realistic
+    # (affine-pre-aligned) magnitude range -- the guard for the fixed choice.
+    from nitrix.geometry import jacobian_det_displacement
+
+    for max_norm in (2.0, 4.0, 8.0, 16.0):
+        v = _smooth_velocity_field(96, 6.0, max_norm, 3)
+        phi = integrate_velocity_field(v)  # default n_steps
+        assert float(jacobian_det_displacement(phi).min()) > 0.0
+
+
 def test_center_of_mass_grid_1d():
     w = jnp.array([[0.0, 0.0, 1.0, 0.0]])
     cm = center_of_mass_grid(w)

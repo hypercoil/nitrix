@@ -52,12 +52,14 @@ from ..geometry import (
     integrate_velocity_field,
     invert_displacement,
 )
-from ..geometry._interpolate import BoundaryMode
-from ._converge import Convergence
+from ._converge import (
+    resolve_convergence_mode,
+)
 from ._core import resolve_iterations
 from ._force import Force, LNCCForce, resolve_force_schedule
 from ._preprocess import preprocess_images
 from ._svf import (
+    SVFSpec,
     _relative_spacing,
     finalize_with_init,
     group_symmetric_level,
@@ -78,99 +80,42 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class SyNSpec:
+class SyNSpec(SVFSpec):
     """Static configuration for the greedy-SyN recipe (jit-static).
+
+    Embeds :class:`._svf.SVFSpec` (G1) for the shared schedule / regularisation /
+    convergence fields (``levels``, ``iterations``, ``sigma_fluid`` /
+    ``sigma_diffusion``, ``spacing``, ``pyramid_factor`` / ``pyramid_sigma``,
+    ``boundary_mode``, ``representation``, ``mode`` / ``convergence``,
+    ``compute_velocity``); SyN is *symmetric*, so it carries a pair of
+    displacements / velocities -- ``representation`` / ``compute_velocity``
+    recover both ``forward_velocity`` and ``inverse_velocity``, and ``spacing``
+    additionally makes the LNCC window physically isotropic.  The SyN-specific
+    force / step knobs:
 
     Attributes
     ----------
-    levels
-        Gaussian-pyramid resolutions (coarse-to-fine).
-    iterations
-        SyN iterations per level: an ``int`` (the same count at every level)
-        or a length-``levels`` **coarse-to-fine** tuple (front-load the cheap
-        coarse levels, cap the expensive finest one -- the ANTs schedule
-        discipline, e.g. ``(100, 70, 50, 20)`` over a 4-level pyramid).
     radius
         LNCC window radius (size ``2·radius + 1`` per axis).
     step
-        Maximum per-iteration voxel displacement (the force field is
-        normalised to this bound, the greedy-SyN gradient-step convention).
+        Maximum per-iteration voxel displacement (the force field is normalised
+        to this bound, the greedy-SyN gradient-step convention).
     step_mode
-        How ``step`` bounds the update (group driver).  ``'clamp'`` (default)
-        is the trust-region clamp (``min(1, step/‖u‖)``) + a per-step Jacobian
+        How ``step`` bounds the update (group driver).  ``'clamp'`` (default) is
+        the trust-region clamp (``min(1, step/‖u‖)``) + a per-step Jacobian
         backtracking guard.  ``'normalize'`` is the ANTs recipe: a
         magnitude-invariant **scale-to** (``step/‖u‖``, so a small-magnitude
         force such as ``LNCCForce(derivative='center')`` is not under-stepped)
-        and no Jacobian backtracking (the bounded smoothed step is
-        diffeomorphic by construction).  Default ``'clamp'`` is byte-identical.
-    sigma_fluid
-        Gaussian sigma for the fluid (per-update) regularisation.
-    sigma_diffusion
-        Gaussian sigma for the diffusion (accumulated-velocity)
-        regularisation.
+        and no Jacobian backtracking (the bounded smoothed step is diffeomorphic
+        by construction).  Default ``'clamp'`` is byte-identical.
     n_steps
-        Scaling-and-squaring steps for ``exp(v)``.
-    spacing
-        Per-axis voxel spacing; only the anisotropy is used (the relative
-        spacing, ``None`` -> isotropic), identically to ``DemonsSpec``.  It also
-        makes the LNCC window **physically isotropic** (the per-axis radius is
-        scaled by ``1 / rel_spacing``), so the captured mm extent is the same on
-        every axis.
-    pyramid_factor, pyramid_sigma
-        Pyramid downsample factor / anti-alias sigma.
-    boundary_mode
-        Out-of-bounds handling for the warps.
-    representation
-        Dense-deformation domain: ``'group'`` (default) carries the two
-        *displacements* and uses the greedy compositive update (warp directly,
-        compose the increment -- ~4 gathers/iter, the perf path); ``'algebra'``
-        carries the *stationary velocities* and re-exponentiates every iteration
-        (the exact-SVF path, byte-identical to the pre-v4 recipe, the oracle).
-        Both return the same ``SyNResult`` with one finalisation inversion;
-        ``forward_velocity`` / ``inverse_velocity`` are recovered from the final
-        displacements via ``geometry.field_log`` in group mode.
-    convergence
-        Optional ANTs-style early-exit (``Convergence(threshold, window)``): a
-        level stops once the windowed normalised cost slope drops below
-        ``threshold`` (or ``iterations`` is hit).  ``None`` (default) runs the
-        full fixed schedule.  **Single-pair only** (the ``while_loop`` is not
-        ``vmap``-batchable).  **When to use (measured):** a *tapered* per-level
-        ``iterations`` schedule (the ANTs ``100x70x50x20`` discipline) already
-        removes the over-iteration early-exit targets, so the strict default
-        ``threshold=1e-6`` then *costs* time (the ``while_loop`` overhead
-        exceeds its saving) -- hence ``None`` is the SVF default.  Early-exit
-        pays off for an *untuned / flat* schedule, or on the CPU path with a
-        looser threshold (``~1e-5`` gave ~10 % there at equal accuracy).
-        (Contrast the matrix inverse-compositional path, which converges in a
-        few of its iterations and so defaults early-exit *on*.)
-    compute_velocity
-        Whether to recover and return ``forward_velocity`` / ``inverse_velocity``.
-        ``False`` (default) leaves both ``None`` and skips the **two**
-        ``geometry.field_log`` finalisations (group mode) -- under ``jit`` that
-        loop nest is never traced, so it costs neither compile nor runtime.  The
-        deformation outputs (``displacement`` / ``warped`` / ``jacobian_det``)
-        never depend on the velocities -- they come from the half-displacements
-        directly (``invert_displacement`` + ``compose_displacement``).  Set
-        ``True`` to recover the velocities (e.g. for ``geometry.velocity_mean``).
-        **Default changed in this release** (was always computed); pass
-        ``compute_velocity=True`` to restore the old behaviour.
+        Scaling-and-squaring steps for ``exp(v)`` (the algebra path).
     """
 
-    levels: int = 3
-    iterations: Union[int, tuple[int, ...]] = 80
     radius: int = 2
     step: float = 0.25
     step_mode: Literal['clamp', 'normalize'] = 'clamp'
-    sigma_fluid: float = 1.0
-    sigma_diffusion: float = 1.5
     n_steps: int = 5
-    spacing: Optional[Union[float, tuple[float, ...]]] = None
-    pyramid_factor: float = 2.0
-    pyramid_sigma: Optional[float] = None
-    boundary_mode: BoundaryMode = 'nearest'
-    representation: Literal['group', 'algebra'] = 'group'
-    convergence: Optional[Convergence] = None
-    compute_velocity: bool = False
 
 
 class SyNResult(NamedTuple):
@@ -243,7 +188,12 @@ def _syn_level(
         rel_spacing=rel_spacing,
         mask=mask,
         restrict=restrict,
-        convergence=spec.convergence,
+        convergence=resolve_convergence_mode(
+            spec.mode,
+            spec.convergence,
+            supports_early_exit=True,
+            path='SyN',
+        ),
     )
 
 
@@ -311,6 +261,18 @@ def greedy_syn_register(
     ``displacement``, ``warped``, ``jacobian_det``, ``cost_history``).  The
     velocities are ``None`` unless ``spec.compute_velocity`` (the default skips
     their ``field_log`` recovery).
+
+    Notes
+    -----
+    **Cohort registration (D4).**  This is a pure ``(moving, fixed) -> result``
+    function, so register a *cohort* to a shared reference with ``jax.vmap``::
+
+        jax.vmap(lambda m: greedy_syn_register(m, fixed, spec=spec))(moving_stack)
+
+    The batch-aggregate early-exit comes for free: under ``mode='early_exit'`` the
+    per-subject ``lax.while_loop`` runs (via ``vmap``) to the **all-lanes** exit,
+    the slowest subject setting the trip count -- the same pattern ``volreg`` uses
+    for its frames.  No dedicated cohort driver is needed.
 
     Warning
     -------
@@ -427,7 +389,12 @@ def greedy_syn_register(
                 rel_spacing=rel_spacing,
                 mask=mask_l,
                 restrict=restrict,
-                convergence=spec.convergence,
+                convergence=resolve_convergence_mode(
+                    spec.mode,
+                    spec.convergence,
+                    supports_early_exit=True,
+                    path='SyN',
+                ),
             )
         return (f_fwd, f_inv), hist
 

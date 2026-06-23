@@ -44,7 +44,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import (
     Callable,
-    Literal,
     NamedTuple,
     Optional,
     Sequence,
@@ -64,66 +63,19 @@ from ..geometry import (
 )
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
 from ..linalg import gauss_newton, levenberg_marquardt
+from ._converge import (
+    Convergence,
+    ConvergenceMode,
+    resolve_convergence_mode,
+)
 from ._metric import SSD, Metric, pin_metric_ranges
 from ._model import TransformModel
 from ._objective import MetricObjective, Objective
 from ._space import CoordinateSpace, IndexSpace, _Sampler
 
-
-@dataclass(frozen=True)
-class Convergence:
-    """Early-exit convergence criterion (ANTs-style threshold + window).
-
-    Opt-in (``RegistrationSpec.convergence``) early stopping for the
-    **single-pair** inverse-compositional path: per level, a ``lax.while_loop``
-    runs until the cost has plateaued -- a least-squares-line fit over the last
-    ``window`` per-iteration costs whose normalised slope falls below
-    ``threshold`` -- or the level's iteration count (the hard cap) is reached.
-    The fixed ``lax.scan`` stays the default (``convergence=None``): it is
-    reproducible (data-independent trip count) and ``vmap``-batchable (the
-    cohort/volreg path), which early-exit is not -- so early-exit is for the
-    single-pair recipes only.
-
-    Attributes
-    ----------
-    threshold
-        Stop when the windowed normalised cost slope drops below this.
-    window
-        Number of recent costs the slope is fit over (the convergence window).
-
-    Notes
-    -----
-    An early-exit forward is **not** reverse-differentiable (``lax.while_loop``
-    has no reverse rule); for a differentiable registration layer use the
-    implicit-function path (``linalg.implicit_least_squares`` /
-    ``implicit_minimize``), whose adjoint is solved at the optimum and is
-    trajectory-independent.
-    """
-
-    threshold: float = 1e-6
-    window: int = 10
-
-
-# The ``convergence`` field's value space: an explicit :class:`Convergence`, an
-# explicit ``None`` (the reverse-differentiable fixed-scan opt-out), or the
-# ``'auto'`` sentinel (the default) -- resolved per path by ``resolve_convergence``.
-ConvergenceSpec = Union[Convergence, None, Literal['auto']]
-
-
-def resolve_convergence(
-    convergence: ConvergenceSpec, *, ic: bool
-) -> Optional[Convergence]:
-    """Resolve the ``convergence`` sentinel for a concrete registration path.
-
-    ``'auto'`` (the default) -> the early-exit ``Convergence()`` on the
-    **single-pair inverse-compositional** path (``ic=True``, the perf default,
-    3b), or ``None`` (the fixed ``scan``) on the ``vmap``-batched / forward paths
-    (``ic=False``) that cannot honour a ``while_loop``.  An explicit ``None``
-    (the opt-out) and an explicit :class:`Convergence` pass through unchanged.
-    """
-    if convergence == 'auto':
-        return Convergence() if ic else None
-    return convergence
+# ``Convergence`` / ``ConvergenceMode`` / ``resolve_convergence_mode`` live in
+# ``._converge`` (the iteration-driver module that owns the early-exit machinery,
+# G1); imported above so ``RegistrationSpec`` and the drivers can reference them.
 
 
 @dataclass(frozen=True)
@@ -161,20 +113,39 @@ class RegistrationSpec:
         Downsample factor and anti-alias sigma for the pyramid.
     cg_tol
         Inner-CG tolerance for the GN/LM path.
+    mode
+        Iteration strategy (B2), orthogonal to ``convergence``.  ``'fixed'``
+        (the spec default) runs the fixed ``lax.scan`` -- reproducible,
+        reverse-differentiable, and ``vmap``-batchable (``volreg``).
+        ``'early_exit'`` runs the windowed-slope ``lax.while_loop`` with
+        ``iterations`` as the hard cap; it is single-pair (a ``vmap``-ed
+        ``while_loop`` exits only when *all* lanes converge) and **not**
+        reverse-differentiable (``jax.grad`` through it raises a loud, actionable
+        error -- use ``mode='fixed'`` or the implicit-function path).  Rejected
+        on the scalar/BFGS forward path (a non-least-squares metric), which is
+        monolithic.  The spec default is ``'fixed'`` on **every** recipe
+        (reproducible + differentiable out of the box); ``'early_exit'`` is the
+        recommended opt-in for the single-pair inverse-compositional recipes
+        (``rigid_register`` / ``affine_register``), which converge in a few of
+        their iterations.
     convergence
-        Early-exit control.  ``'auto'`` (default) -> the windowed-slope
-        early-exit on the **single-pair inverse-compositional** path (the perf
-        default; ``iterations`` becomes the hard cap), the fixed ``scan``
-        elsewhere (forward / vmap-batched ``volreg``, which cannot honour a
-        while_loop).  ``None`` -> the fixed ``scan`` everywhere (the
-        reverse-differentiable opt-out).  A :class:`Convergence` -> that explicit
-        criterion (raises on a path that cannot honour it).  **Differentiability
-        (3b):** an early-exit forward is not reverse-differentiable; ``jax.grad``
-        through it raises a loud, actionable error -- use the implicit-function
-        path or ``convergence=None``.  **cost_history (C6):** on the early-exit
-        path the per-level trace is padded to the ``iterations`` cap with the
-        final cost (so the shape is path-independent; the value is constant past
-        the stop iteration).
+        The :class:`Convergence` (threshold / window) parameterising
+        ``mode='early_exit'``; **inert** under ``mode='fixed'``.  **cost_history
+        (C6):** on the early-exit path the per-level trace is padded to the
+        ``iterations`` cap with the final cost (so the shape is path-independent;
+        the value is constant past the stop iteration).
+    ic_line_search
+        Opt-in cost-decrease guard for the inverse-compositional step (F1).
+        ``False`` (default) takes the trust-region-clamped Gauss-Newton step
+        directly -- the fast path (its single warp/iter is the IC speed win).
+        ``True`` backtracks along the clamped direction and accepts the largest
+        fraction that decreases the SSD, leaving the iterate unmoved if none does
+        -- so the per-level cost is **monotone non-increasing** even when the
+        constant-template Hessian proposes an ascent step on a hard case.  It
+        costs extra warps/iter (the candidate evaluations -- ~3x the IC step on
+        GPU), so it is off by default and enabled for robustness on pathological
+        data; a step that already decreases at full length is taken
+        byte-unchanged either way.  No effect off the inverse-compositional path.
     """
 
     levels: int = 3
@@ -187,7 +158,9 @@ class RegistrationSpec:
     pyramid_factor: float = 2.0
     pyramid_sigma: Optional[float] = None
     cg_tol: float = 1e-6
-    convergence: ConvergenceSpec = 'auto'
+    mode: ConvergenceMode = 'fixed'
+    convergence: Convergence = field(default_factory=Convergence)
+    ic_line_search: bool = False
 
 
 class RegistrationResult(NamedTuple):
@@ -196,14 +169,16 @@ class RegistrationResult(NamedTuple):
     Attributes
     ----------
     matrix
-        The estimated homogeneous transform, ``(ndim + 1, ndim + 1)``.  In
-        ``IndexSpace`` this is the full-resolution **index-space** map from
-        fixed-voxel to moving-voxel coordinates (``== model.exp(params)``);
-        in ``WorldSpace`` it is the **world->world** transform (fixed-world
-        to moving-world, mm).
+        The estimated homogeneous transform, ``(ndim + 1, ndim + 1)``,
+        **self-contained**: the centre the warp applies it about is baked in, so
+        ``apply_affine(coords, matrix)`` reproduces the warp and it composes
+        with another result.  In ``IndexSpace`` it is the full-resolution
+        fixed-voxel -> moving-voxel index map; in ``WorldSpace`` the
+        fixed-world -> moving-world transform (mm).  (The raw about-origin
+        ``model.exp(params)`` is recovered from ``params``.)
     params
-        The transform's Lie parameters at full resolution (voxel units in
-        ``IndexSpace``; physical units in ``WorldSpace``).
+        The transform's raw **about-origin** Lie parameters at full resolution
+        (voxel units in ``IndexSpace``; physical units in ``WorldSpace``).
     warped
         ``moving`` resampled onto the ``fixed`` grid by the recovered
         transform.
@@ -267,6 +242,24 @@ def _warp(
         method=spec.interpolation,
     )
     return warped[..., 0]
+
+
+def _mask_jacobian(
+    base: Callable[[Array], Array], sqrt_w: Array
+) -> Callable[[Array], Array]:
+    """Row-scale a residual Jacobian by ``sqrt(mask)`` (A3, the masked LSQ path).
+
+    The masked SSD residual is ``sqrt(mask) * (warped - fixed)`` (see
+    ``SSD.residual``); its Jacobian is therefore the unmasked Jacobian with each
+    voxel row multiplied by ``sqrt(mask)``, so an out-of-mask voxel (weight 0)
+    contributes a zero row and drops out of the Gauss-Newton normal equations.
+    """
+    rows = sqrt_w[:, None]
+
+    def jacobian(params: Array) -> Array:
+        return base(params) * rows
+
+    return jacobian
 
 
 def _warp_jacobian(
@@ -361,12 +354,12 @@ def optimize_objective(
     least-squares path (the analytic warp Jacobian -- far fewer gathers than
     ``jax.jacfwd``); ``None`` falls back to ``jacfwd`` (the parity oracle).
 
-    ``convergence`` (opt-in) early-exits the least-squares loop once the windowed
-    cost slope flattens (the GN/LM ``early_stop``); ``None`` (default) runs the
-    fixed ``n_iters`` scan.  It is **rejected on the scalar/BFGS path** -- that
-    optimiser is monolithic (no single-step) and stops only on its own
-    gradient/line-search criterion, so an ANTs-style windowed early-exit is not
-    expressible there yet (use ``convergence=None`` for MI / CR forward).
+    ``convergence`` (the resolved :class:`Convergence`, or ``None`` for the fixed
+    scan) early-exits the least-squares loop once the windowed cost slope flattens
+    (the GN/LM ``early_stop``).  The caller's ``resolve_convergence_mode`` gate
+    already rejects ``mode='early_exit'`` on the scalar/BFGS path (monolithic --
+    no single-step), so ``convergence`` is always ``None`` there; the guard below
+    is a defensive internal invariant.
     """
     use_lsq = objective.is_least_squares and optimizer in ('auto', 'lm', 'gn')
     early_stop = (
@@ -395,11 +388,11 @@ def optimize_objective(
             )
         return res.params, res.cost_history
 
-    if convergence is not None:
+    if convergence is not None:  # defensive: the upstream B2 gate ensures None
         raise ValueError(
-            'convergence (windowed early-exit) is not supported on the '
-            'scalar/BFGS forward path (non-least-squares metric: MI / '
-            'correlation-ratio); pass convergence=None.'
+            "mode='early_exit' is not supported on the scalar/BFGS forward path "
+            '(non-least-squares metric: MI / correlation-ratio); use mode='
+            "'fixed'."
         )
     init_cost = objective.cost(params)
     out = minimize(
@@ -419,6 +412,7 @@ def register_core(
     sampler: _Sampler,
     init_params: Float[Array, ' p'],
     convergence: Optional[Convergence] = None,
+    pyr_mask: Optional[tuple[Float[Array, '*fspatial 1'], ...]] = None,
 ) -> RegistrationResult:
     """Coarse-to-fine register ``moving`` against a precomputed reference.
 
@@ -427,6 +421,11 @@ def register_core(
     batched recipe (``volreg``) can compute the shared reference work once
     and ``vmap`` only this core over a series of moving images.  Builds
     the moving pyramid, runs the coarse-to-fine optimise, and finalises.
+
+    ``pyr_mask`` (optional, A3) is the ``fixed``-grid weight pyramidised to
+    match ``pyr_f`` -- threaded into the metric cost (every level) and, on the
+    least-squares path, into the residual Jacobian (``sqrt(mask)`` row-scaling,
+    so out-of-mask voxels drop from the Gauss-Newton normal equations).
     """
     dtype = moving.dtype
     pyr_m = gaussian_pyramid(
@@ -444,6 +443,7 @@ def register_core(
     for level in range(spec.levels - 1, -1, -1):
         m_l = pyr_m[level][..., 0]
         f_l = pyr_f[level][..., 0]
+        mask_l = None if pyr_mask is None else pyr_mask[level][..., 0]
         f_shape = f_l.shape
         m_shape = m_l.shape
         if space.requires_grid_rescale and prev_fixed_shape is not None:
@@ -469,12 +469,16 @@ def register_core(
             )
 
         objective = MetricObjective(
-            metric=spec.metric, warp=warp_fn, fixed=f_l
+            metric=spec.metric, warp=warp_fn, fixed=f_l, mask=mask_l
         )
         # Closed-form warp Jacobian for the least-squares (SSD) forward path
-        # -- far fewer gathers than jacfwd (the parity oracle).
-        jac_fn = (
-            _warp_jacobian(
+        # -- far fewer gathers than jacfwd (the parity oracle).  A mask scales
+        # the residual rows by sqrt(mask) (matching ``SSD.residual``), so the
+        # Jacobian rows scale the same way -- out-of-mask voxels contribute a
+        # zero row to the Gauss-Newton normal equations.
+        jac_fn: Optional[Callable[[Array], Array]] = None
+        if spec.metric.is_least_squares:
+            jac_fn = _warp_jacobian(
                 sampler,
                 m_l,
                 model=model,
@@ -483,9 +487,8 @@ def register_core(
                 moving_shape=m_shape,
                 spec=spec,
             )
-            if spec.metric.is_least_squares
-            else None
-        )
+            if mask_l is not None:
+                jac_fn = _mask_jacobian(jac_fn, jnp.sqrt(mask_l).reshape(-1))
         params, hist = optimize_objective(
             objective,
             params,
@@ -525,12 +528,23 @@ def multi_resolution_register(
     spec: RegistrationSpec,
     init_params: Optional[Float[Array, ' p']] = None,
     space: CoordinateSpace = IndexSpace(),
+    mask: Optional[Float[Array, '*fspatial']] = None,
 ) -> RegistrationResult:
-    """Coarse-to-fine registration driver shared by the recipes."""
+    """Coarse-to-fine registration driver shared by the recipes.
+
+    ``mask`` (optional, A3) is a non-negative per-voxel weight on the ``fixed``
+    grid; it is pyramidised alongside ``fixed`` and threaded into the per-level
+    metric cost (and the least-squares Jacobian) so the registration ignores
+    out-of-mask voxels.
+    """
     if moving.ndim != ndim or fixed.ndim != ndim:
         raise ValueError(
             f'expected {ndim}-D single-channel images; got moving '
             f'{moving.shape}, fixed {fixed.shape}.'
+        )
+    if mask is not None and mask.shape != fixed.shape:
+        raise ValueError(
+            f'mask shape {mask.shape} must match the fixed grid {fixed.shape}.'
         )
     # Pin a histogram metric's ranges once from the full-res images (A6;
     # stationary objective).  Here, not in register_core, because volreg vmaps
@@ -543,6 +557,18 @@ def multi_resolution_register(
         levels=spec.levels,
         factor=spec.pyramid_factor,
         sigma=spec.pyramid_sigma,
+    )
+    # Pyramidise the mask on the fixed grid (same anti-aliased downsample as the
+    # image); a hard mask softens to fractional weights at coarse boundaries.
+    pyr_mask = (
+        None
+        if mask is None
+        else gaussian_pyramid(
+            mask[..., None],
+            levels=spec.levels,
+            factor=spec.pyramid_factor,
+            sigma=spec.pyramid_sigma,
+        )
     )
     sampler = space.sampler(
         ndim=ndim,
@@ -564,7 +590,17 @@ def multi_resolution_register(
         space=space,
         sampler=sampler,
         init_params=params,
-        # Opt-in forward early-exit (least-squares only); 'auto'/None -> fixed
-        # scan.  Single-pair only -- volreg vmaps register_core and leaves it None.
-        convergence=resolve_convergence(spec.convergence, ic=False),
+        pyr_mask=pyr_mask,
+        # Forward early-exit is honoured only on the least-squares (GN/LM)
+        # optimiser's windowed ``early_stop``; the scalar/BFGS path (a
+        # non-least-squares metric) is monolithic and rejects it (B2 gate).
+        # Single-pair only -- ``volreg`` vmaps ``register_core`` and threads the
+        # fixed scan (its forward branch passes no ``convergence``).
+        convergence=resolve_convergence_mode(
+            spec.mode,
+            spec.convergence,
+            supports_early_exit=spec.metric.is_least_squares
+            and spec.optimizer in ('auto', 'lm', 'gn'),
+            path='the scalar/BFGS forward path (a non-least-squares metric)',
+        ),
     )

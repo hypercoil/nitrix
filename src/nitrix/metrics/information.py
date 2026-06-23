@@ -32,12 +32,14 @@ from typing import Optional
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from .._internal.backend import default_backend_is_gpu
 from ._common import _resolve_range, _soft_bin
 
 __all__ = [
     'joint_histogram',
     'mutual_information',
     'mi_grad',
+    'nmi_grad',
     'correlation_ratio',
 ]
 
@@ -48,6 +50,24 @@ __all__ = [
 # recommended pinned-range path makes it moot.
 _MI_SPAN_FLOOR = 1e-6
 
+# Voxel-count gate (E2) for the deterministic one-hot-matmul joint histogram,
+# used **on GPU only** (see the branch).  Below this the soft bins are
+# materialised as two ``(N, bins)`` soft one-hot matrices whose product is the
+# histogram -- a matmul reduction, which is **deterministic on GPU**, unlike the
+# ``.at[].add`` scatter (a non-associative atomic add whose float result depends
+# on the run -- the affine-MI GPU non-determinism source).  Measured trade
+# (L4): the matmul is ~2-6x *slower* than the scatter per isolated histogram,
+# but the histogram is a small fraction of an MI evaluation, so end-to-end
+# affine-MI is perf-neutral -- and it makes ``restarts=1`` deterministic,
+# retiring the 4-6x ``restarts`` multiplier that was the only prior GPU
+# determinism mitigation (the real win).  Above the gate the ``(N, bins)``
+# one-hots would dominate memory, so the scatter takes over (the finest
+# full-resolution level only; the coarse affine levels -- where the 12-DOF basin
+# is decided -- stay deterministic).  ``bins=32`` => ~50 MB of fp32 one-hots at
+# the cap.  **CPU keeps the scatter unconditionally**: it is already
+# deterministic there (no atomic contention) and 5-20x faster than the one-hot.
+_ONEHOT_HIST_MAX_VOXELS = 200_000
+
 
 def _joint_hist_from_softbins(
     lower_m: Array,
@@ -56,18 +76,50 @@ def _joint_hist_from_softbins(
     frac_f: Array,
     bins: int,
     dtype: jnp.dtype,
+    weight: Optional[Array] = None,
 ) -> Float[Array, 'bins bins']:
-    """Scatter pre-computed soft bins into the normalised joint histogram.
+    """Accumulate pre-computed soft bins into the normalised joint histogram.
 
     Factored out of :func:`joint_histogram` so the cost (``mutual_information``)
-    and the closed-form gradient (:func:`mi_grad`) share one scatter and one
-    normalisation -- the gradient is then exactly the derivative of the table
+    and the closed-form gradient (:func:`mi_grad`) share one accumulation and
+    one normalisation -- the gradient is then exactly the derivative of the table
     the cost sees.
+
+    Two equivalent accumulations, gated by backend and size (E2): **on GPU**,
+    below ``_ONEHOT_HIST_MAX_VOXELS`` voxels, the soft bins become two
+    ``(N, bins)`` soft one-hot matrices and the histogram is their product
+    ``ohₘᵀ @ ohf`` -- a matmul (deterministic) rather than a ``.at[].add`` scatter
+    (a non-associative atomic add, the GPU MI non-determinism source that
+    ``affine_register(restarts=)`` otherwise papers over).  Everywhere else (CPU,
+    or above the gate) the scatter is used -- on CPU it is already deterministic
+    and faster than the one-hot, and above the gate the one-hots would dominate
+    memory.  Both ``default_backend_is_gpu()`` and ``N`` are static under ``jit``,
+    so the branch is resolved at trace time.
+
+    ``weight`` (optional, the per-voxel domain mask, same length as the soft-bin
+    index vectors) gates the accumulation: a masked-out voxel contributes nothing
+    to the histogram (A3).  ``None`` is the unweighted form.
     """
-    hist = jnp.zeros((bins, bins), dtype=dtype)
-    for idx_m, w_m in ((lower_m, 1.0 - frac_m), (lower_m + 1, frac_m)):
-        for idx_f, w_f in ((lower_f, 1.0 - frac_f), (lower_f + 1, frac_f)):
-            hist = hist.at[idx_m, idx_f].add(w_m * w_f)
+    n = lower_m.shape[0]
+    if default_backend_is_gpu() and n <= _ONEHOT_HIST_MAX_VOXELS:
+        idx = jnp.arange(bins)
+        oh_m = (
+            (1.0 - frac_m)[:, None] * (lower_m[:, None] == idx)
+            + frac_m[:, None] * ((lower_m + 1)[:, None] == idx)
+        ).astype(dtype)
+        oh_f = (
+            (1.0 - frac_f)[:, None] * (lower_f[:, None] == idx)
+            + frac_f[:, None] * ((lower_f + 1)[:, None] == idx)
+        ).astype(dtype)
+        if weight is not None:
+            oh_m = oh_m * weight[:, None]
+        hist = oh_m.T @ oh_f
+    else:
+        hist = jnp.zeros((bins, bins), dtype=dtype)
+        for idx_m, w_m in ((lower_m, 1.0 - frac_m), (lower_m + 1, frac_m)):
+            for idx_f, w_f in ((lower_f, 1.0 - frac_f), (lower_f + 1, frac_f)):
+                contrib = w_m * w_f if weight is None else weight * w_m * w_f
+                hist = hist.at[idx_m, idx_f].add(contrib)
     return hist / jnp.maximum(hist.sum(), 1e-12)
 
 
@@ -78,6 +130,7 @@ def joint_histogram(
     bins: int = 32,
     range_moving: Optional[tuple[float, float]] = None,
     range_fixed: Optional[tuple[float, float]] = None,
+    mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, 'bins bins']:
     """Differentiable joint intensity histogram (Parzen soft-binning).
 
@@ -97,6 +150,10 @@ def joint_histogram(
         the bounds are then piecewise-constant in the inputs; pin an
         explicit range for a binning that is stable across optimisation
         steps.
+    mask
+        Optional non-negative per-voxel weight (same shape as the images)
+        gating the scatter: an out-of-mask voxel contributes nothing to the
+        joint distribution, so a downstream MI / CR ignores it.
 
     Returns
     -------
@@ -119,8 +176,9 @@ def joint_histogram(
     lo_f, hi_f = _resolve_range(f, range_fixed)
     lower_m, frac_m = _soft_bin(m, bins, lo_m, hi_m)
     lower_f, frac_f = _soft_bin(f, bins, lo_f, hi_f)
+    weight = None if mask is None else mask.reshape(-1)
     return _joint_hist_from_softbins(
-        lower_m, frac_m, lower_f, frac_f, bins, m.dtype
+        lower_m, frac_m, lower_f, frac_f, bins, m.dtype, weight
     )
 
 
@@ -133,6 +191,7 @@ def mutual_information(
     range_fixed: Optional[tuple[float, float]] = None,
     normalized: bool = False,
     eps: float = 1e-10,
+    mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, '']:
     """Mutual information (or normalised MI) of two images.
 
@@ -142,7 +201,9 @@ def mutual_information(
     Higher is more similar; use ``-mutual_information`` as a cost.
 
     ``bins`` / ``range_*`` are forwarded to ``joint_histogram``;
-    ``eps`` guards the logs.
+    ``eps`` guards the logs.  ``mask`` (optional per-voxel weight) gates the
+    joint-histogram scatter (an out-of-mask voxel is excluded from the
+    distribution -- the correct masking point for a histogram statistic).
 
     Notes
     -----
@@ -161,6 +222,7 @@ def mutual_information(
         bins=bins,
         range_moving=range_moving,
         range_fixed=range_fixed,
+        mask=mask,
     )
     p_m = hist.sum(axis=1)
     p_f = hist.sum(axis=0)
@@ -230,8 +292,8 @@ def mi_grad(
     exactly-empty bin is a documented divergence (the mask is non-smooth there
     -- the analogue of ``lncc_grad``'s boundary divergence).  Voxels outside
     ``[lo_m, hi_m]`` get zero force (the soft bin is clipped, so its derivative
-    vanishes).  **Unnormalised** Mattes MI only -- NMI is the deferred
-    quotient-rule form (route it through ``MetricForce(MI(normalized=True))``).
+    vanishes).  **Unnormalised** Mattes MI only -- the normalised (Studholme) NMI
+    gradient is :func:`nmi_grad` (the quotient-rule form).
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)
@@ -263,6 +325,81 @@ def mi_grad(
     return g.reshape(moving.shape)
 
 
+def nmi_grad(
+    moving: Float[Array, '...'],
+    fixed: Float[Array, '...'],
+    *,
+    bins: int = 32,
+    range_moving: Optional[tuple[float, float]] = None,
+    range_fixed: Optional[tuple[float, float]] = None,
+    sample_stride: int = 1,
+    eps: float = 1e-10,
+) -> Float[Array, '...']:
+    """Closed-form ``∂NMI/∂moving`` -- the normalised-MI (Studholme) gradient.
+
+    The analytic per-voxel derivative of :func:`mutual_information` with
+    ``normalized=True`` (``NMI = (H_m + H_f) / H_mf``) w.r.t. the moving
+    intensities, the NMI analogue of :func:`mi_grad` (the deferred quotient-rule
+    form, now shipped).  As in the Mattes derivation the gradient flows through
+    **only** the moving soft-bin weights, so the fixed marginal entropy ``H_f`` is
+    invariant (``Σ_a ∂β_m/∂m = 0``).  The quotient rule over ``H_m`` (varies) and
+    ``H_mf`` then gives
+
+    ``∂NMI/∂m(x) = −(s_m / (N·H_mf)) · [ Dₘ[k] − NMI·((1−t_f)·D_mf[k,l]
+                  + t_f·D_mf[k,l+1]) ]``
+
+    with ``s_m = (bins−1)/span_m``; ``k``/``l`` the moving/fixed lower bins; ``t_f``
+    the fixed fractional weight; ``Dₘ[a] = log P_m[a+1] − log P_m[a]`` the
+    moving-marginal forward difference; and ``D_mf[a,b] = log P[a+1,b] − log P[a,b]``
+    the joint forward difference (along the moving axis).  (Setting ``NMI -> 1`` and
+    the prefactor ``-1/(N·H_mf) -> 1/N`` recovers the same ``Dₘ`` / ``D_mf``
+    structure :func:`mi_grad` reduces ``MI = H_m + H_f − H_mf`` to.)
+
+    Parameters mirror :func:`mi_grad` (``bins`` / ``range_*`` / ``sample_stride``;
+    pin the ranges).  Returns ``∂NMI/∂moving`` (an **ascent** direction -- NMI is
+    a similarity), same shape as ``moving``.
+
+    Notes
+    -----
+    The empty-bin ``where(· > 0, …)`` masking matches
+    :func:`mutual_information`'s ``normalized=True`` branch, so
+    ``nmi_grad == jax.grad(mutual_information(normalized=True))`` to tolerance on
+    populated bins (the parity oracle); the boundary divergence at an exactly-empty
+    bin is the same documented non-smoothness as :func:`mi_grad`.  Voxels outside
+    ``[lo_m, hi_m]`` get zero force.
+    """
+    m = moving.reshape(-1)
+    f = fixed.reshape(-1)
+    lo_m, hi_m = _resolve_range(m, range_moving)
+    lo_f, hi_f = _resolve_range(f, range_fixed)
+    s_m = (bins - 1) / jnp.maximum(hi_m - lo_m, _MI_SPAN_FLOOR)
+    k, frac_m = _soft_bin(m, bins, lo_m, hi_m)
+    ll, frac_f = _soft_bin(f, bins, lo_f, hi_f)
+    if sample_stride > 1:
+        sub = slice(None, None, sample_stride)
+        p = _joint_hist_from_softbins(
+            k[sub], frac_m[sub], ll[sub], frac_f[sub], bins, m.dtype
+        )
+    else:
+        p = _joint_hist_from_softbins(k, frac_m, ll, frac_f, bins, m.dtype)
+    p_m = p.sum(axis=1)
+    p_f = p.sum(axis=0)
+    # Entropies exactly as mutual_information(normalized=True) (same NMI value).
+    h_m = -jnp.sum(jnp.where(p_m > 0, p_m * jnp.log(p_m + eps), 0.0))
+    h_f = -jnp.sum(jnp.where(p_f > 0, p_f * jnp.log(p_f + eps), 0.0))
+    h_mf = -jnp.sum(jnp.where(p > 0, p * jnp.log(p + eps), 0.0))
+    nmi = (h_m + h_f) / (h_mf + eps)
+    # Forward differences along the moving axis (empty-bin masked, as the cost).
+    log_p = jnp.where(p > 0, jnp.log(p), 0.0)
+    log_pm = jnp.where(p_m > 0, jnp.log(p_m), 0.0)
+    d_mf = log_p[1:, :] - log_p[:-1, :]  # (bins-1, bins)
+    d_m = log_pm[1:] - log_pm[:-1]  # (bins-1,)
+    g_mf = (1.0 - frac_f) * d_mf[k, ll] + frac_f * d_mf[k, ll + 1]
+    g = -(s_m / (m.size * (h_mf + eps))) * (d_m[k] - nmi * g_mf)
+    g = jnp.where((m >= lo_m) & (m <= hi_m), g, 0.0)  # clip -> zero derivative
+    return g.reshape(moving.shape)
+
+
 def correlation_ratio(
     moving: Float[Array, '...'],
     fixed: Float[Array, '...'],
@@ -270,6 +407,7 @@ def correlation_ratio(
     bins: int = 32,
     range_fixed: Optional[tuple[float, float]] = None,
     eps: float = 1e-10,
+    mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, '']:
     """Roche's correlation ratio ``η²(moving | fixed)``.
 
@@ -290,21 +428,30 @@ def correlation_ratio(
     FSL / Roche lineage; SimpleITK's registration framework ships no
     correlation-ratio metric, so there is no domain co-oracle (a numpy
     fp64 reimplementation is the only reference).  Uses the same linear
-    soft binning as :func:`joint_histogram` (differentiable).
+    soft binning as :func:`joint_histogram` (differentiable).  ``mask``
+    (optional per-voxel weight) gates the per-group scatter **and** the global
+    mean / total variance, so an out-of-mask voxel is excluded from η².
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)
+    w = None if mask is None else mask.reshape(-1)
     lo_f, hi_f = _resolve_range(f, range_fixed)
     lower_f, frac_f = _soft_bin(f, bins, lo_f, hi_f)
 
     n_k = jnp.zeros((bins,), dtype=m.dtype)
     s_k = jnp.zeros((bins,), dtype=m.dtype)
     for idx_f, w_f in ((lower_f, 1.0 - frac_f), (lower_f + 1, frac_f)):
-        n_k = n_k.at[idx_f].add(w_f)
-        s_k = s_k.at[idx_f].add(w_f * m)
+        wf = w_f if w is None else w * w_f
+        n_k = n_k.at[idx_f].add(wf)
+        s_k = s_k.at[idx_f].add(wf * m)
 
-    mu = m.mean()
+    if w is None:
+        mu = m.mean()
+        total = jnp.sum((m - mu) ** 2)
+    else:
+        sw = jnp.maximum(w.sum(), eps)
+        mu = jnp.sum(w * m) / sw
+        total = jnp.sum(w * (m - mu) ** 2)
     mu_k = s_k / (n_k + eps)
     between = jnp.sum(n_k * (mu_k - mu) ** 2)
-    total = jnp.sum((m - mu) ** 2)
     return between / (total + eps)

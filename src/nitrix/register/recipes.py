@@ -21,50 +21,41 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import replace
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional, Sequence, Union
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from ..geometry import identity_grid
+from ..geometry import affine_grid, identity_grid, spatial_transform
+from ..geometry._interpolate import (
+    BoundaryMode,
+    Interpolator,
+    Linear,
+    NearestNeighbour,
+)
 from ._core import (
-    Convergence,
     RegistrationResult,
     RegistrationSpec,
     multi_resolution_register,
 )
+from ._force import Force
 from ._inverse_compositional import (
     _affine_params_from_matrix,
     _rigid_params_from_matrix,
     ic_affine_register,
     ic_rigid_register,
 )
+from ._metric import MI, pin_metric_ranges
 from ._model import Affine, Rigid, TransformModel
 from ._preprocess import preprocess_images
-from ._space import CoordinateSpace, IndexSpace
+from ._space import CoordinateSpace, IndexSpace, _conjugate_about
+from ._syn import SyNResult, SyNSpec, greedy_syn_register
 
-# C3: an explicit Convergence on a path that cannot honour it.  The forward
-# least-squares (GN/LM) path now early-exits (Lever A); only the scalar/BFGS
-# path (a non-least-squares metric: MI / correlation-ratio) cannot -- its
-# optimiser is monolithic and stops on its own gradient/line-search criterion.
-_CONVERGENCE_FORWARD_MSG = (
-    'spec.convergence (windowed early-exit) is honoured on the inverse-'
-    'compositional and forward *least-squares* (GN/LM) paths, but not on the '
-    'scalar/BFGS forward path this run resolves to (a non-least-squares metric '
-    "-- MI / correlation-ratio).  Use convergence='auto' (the default) or None, "
-    'or an SSD metric.'
-)
-
-
-def _check_forward_convergence(spec: RegistrationSpec) -> None:
-    """Raise (C3) if an explicit ``Convergence`` reaches a path that can't honour
-    it -- now only the scalar/BFGS (non-least-squares) forward path; the forward
-    least-squares path early-exits via the optimiser ``early_stop`` (Lever A)."""
-    if (
-        isinstance(spec.convergence, Convergence)
-        and not spec.metric.is_least_squares
-    ):
-        raise ValueError(_CONVERGENCE_FORWARD_MSG)
+# C3 / B2: rejecting an early-exit request on a path that cannot honour it (the
+# scalar/BFGS forward optimiser is monolithic) is now the single
+# ``resolve_convergence_mode`` gate, applied where the forward driver resolves
+# the mode (``multi_resolution_register``) -- no separate recipe-level check.
 
 
 def _image_moments(img: Array, ndim: int) -> tuple[Array, Array]:
@@ -137,7 +128,45 @@ def _resolve_init_matrix(
     return matrix.at[:ndim, ndim].set(matrix[:ndim, ndim] / coarse_factor)
 
 
-__all__ = ['rigid_register', 'affine_register']
+def _init_from_transform(
+    transform: Array,
+    fixed: Array,
+    *,
+    ndim: int,
+    space: CoordinateSpace,
+    spec: RegistrationSpec,
+) -> Array:
+    """A self-contained (centred) recipe matrix -> the internal coarsest-level
+    about-origin init that ``_resolve_init_matrix`` returns.
+
+    The warm-start hook: ``rigid_register`` / ``affine_register`` return the
+    self-contained matrix (centre baked in, B1), so to *start* an optimise from
+    a prior stage's result we de-centre it to about-origin and rescale the
+    translation to the coarsest pyramid level (the driver upscales it back).
+    Index-space only -- the staged-pipeline frame.
+    """
+    if not isinstance(space, IndexSpace):
+        raise ValueError(
+            'init_transform is an index-space warm-start; it is not defined for '
+            'WorldSpace (pass a world init via the SyN/Demons init_affine, or '
+            'use IndexSpace).'
+        )
+    dtype = fixed.dtype
+    c = (jnp.asarray(fixed.shape, dtype=dtype) - 1.0) / 2.0
+    origin = _conjugate_about(
+        jnp.asarray(transform, dtype=dtype), -c, ndim, dtype
+    )
+    coarse_factor = spec.pyramid_factor ** (spec.levels - 1)
+    return origin.at[:ndim, ndim].set(origin[:ndim, ndim] / coarse_factor)
+
+
+__all__ = [
+    'rigid_register',
+    'affine_register',
+    'apply_transform',
+    'syn_pipeline',
+    'PipelineResult',
+]
 
 # Coarsest pyramid axis (voxels) below which the matrix Hessian -- especially the
 # 12-DOF affine one -- is too few-voxel to estimate reliably, so the constant-
@@ -196,21 +225,43 @@ def _spatial_ndim(moving: Array, fixed: Array) -> int:
     return ndim
 
 
-def _use_inverse_compositional(
+def _resolve_ic_dispatch(
     method: str,
     space: CoordinateSpace,
     spec: RegistrationSpec,
     model: TransformModel,
+    *,
+    mask: Optional[Array] = None,
 ) -> bool:
-    """Resolve the ``method`` argument against the IC fast-path preconditions.
+    """The single inverse-compositional-vs-forward dispatch resolver (G1).
 
-    The inverse-compositional kernel (constant-template Hessian, ~4-7x the
-    forward GN/LM throughput) applies to a **rigid or affine** least-squares
-    (SSD) registration in **IndexSpace** (the template is linearised in voxel
-    coordinates).  ``"auto"`` takes it when those hold and falls back to the
-    forward path otherwise (the parity oracle); ``"inverse_compositional"``
-    forces it (and validates); ``"forward"`` always takes the forward path.
+    Returns whether to take the inverse-compositional fast path (constant-template
+    Hessian, ~4-7x the forward GN/LM throughput).  It applies to a **rigid or
+    affine** least-squares (SSD) registration in **IndexSpace** (the template is
+    linearised in voxel coordinates) with an unmasked cost.  ``method``:
+    ``"auto"`` takes it when those preconditions hold and falls back to the
+    forward path otherwise (the parity oracle); ``"inverse_compositional"`` forces
+    it (and validates the preconditions); ``"forward"`` always takes the forward
+    path.
+
+    A fixed-grid cost ``mask`` (A3) routes to the forward path regardless -- the
+    constant-template Hessian is a full-grid linearisation built once from the
+    whole reference, so it cannot honour a per-voxel mask; an explicit
+    ``method='inverse_compositional'`` with a mask is a loud error.
     """
+    if mask is not None:
+        if method == 'inverse_compositional':
+            raise ValueError(
+                "method='inverse_compositional' cannot honour a cost mask (its "
+                'constant-template Hessian is a full-grid linearisation); use '
+                "method='auto' (routes to the forward path) or 'forward'."
+            )
+        if method not in ('auto', 'forward'):
+            raise ValueError(
+                f'method must be "auto", "forward", or '
+                f'"inverse_compositional"; got {method!r}.'
+            )
+        return False
     supported = (
         isinstance(space, IndexSpace)
         and spec.metric.is_least_squares
@@ -242,6 +293,8 @@ def rigid_register(
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
+    init_transform: Optional[Float[Array, ' d1 d1']] = None,
+    mask: Optional[Float[Array, '*fspatial']] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
 ) -> RegistrationResult:
@@ -259,6 +312,12 @@ def rigid_register(
         additionally assumes a shared voxel grid.
     spec
         ``RegistrationSpec`` (pyramid depth, iterations, metric, ...).
+        **Metric choice:** ``SSD`` (default) within-modality -- the fast
+        inverse-compositional path; ``MI`` / ``CorrelationRatio`` cross-modal;
+        ``LNCC`` under a smooth intensity bias.  **Grid:** the default
+        ``IndexSpace`` assumes ``moving`` and ``fixed`` share a (roughly
+        isotropic) voxel grid -- use ``WorldSpace`` for anisotropic voxels or
+        differing grids (a rigid in index space shears in physical space).
     space
         Coordinate space to optimise in (``_space``): ``IndexSpace()``
         (default; voxel-space, shared-grid, on-device) or
@@ -276,6 +335,18 @@ def rigid_register(
         centre-of-mass start (intensity-weighted centroids, plus a per-axis
         diagonal scale for affine) that lands inside the optimiser's basin on a
         large misalignment a single zero start would miss.  ``IndexSpace`` only.
+    init_transform
+        A self-contained warm-start matrix (a prior recipe's ``result.matrix``),
+        taking precedence over ``init`` -- the staged-pipeline hook (e.g. affine
+        warm-started from rigid; see :func:`syn_pipeline`).  ``IndexSpace`` only.
+    mask
+        Optional non-negative per-voxel weight on the ``fixed`` grid (A3): the
+        cost is restricted to / weighted by it (a brain mask, lesion exclusion,
+        FoV), out-of-mask voxels ignored -- for ``MI`` / ``CorrelationRatio`` it
+        gates the joint-histogram scatter, not just the reduction.  A mask routes
+        to the **forward** path (the inverse-compositional constant-template
+        Hessian assumes the full grid); ``method='inverse_compositional'`` with a
+        mask raises.
     winsorize, histogram_match
         Intensity conditioning before registration (the fMRIPrep front-end):
         ``winsorize=(0.005, 0.995)`` clips each image to those percentiles
@@ -300,14 +371,18 @@ def rigid_register(
     )
     ndim = _spatial_ndim(moving, fixed)
     model = Rigid()
-    init_matrix = _resolve_init_matrix(
-        init, moving, fixed, ndim=ndim, scale=False, space=space, spec=spec
-    )
-    if _use_inverse_compositional(method, space, spec, model):
+    if init_transform is not None:
+        init_matrix = _init_from_transform(
+            init_transform, fixed, ndim=ndim, space=space, spec=spec
+        )
+    else:
+        init_matrix = _resolve_init_matrix(
+            init, moving, fixed, ndim=ndim, scale=False, space=space, spec=spec
+        )
+    if _resolve_ic_dispatch(method, space, spec, model, mask=mask):
         return ic_rigid_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
         )
-    _check_forward_convergence(spec)
     init_params = (
         None
         if init_matrix is None
@@ -321,7 +396,87 @@ def rigid_register(
         spec=spec,
         space=space,
         init_params=init_params,
+        mask=mask,
     )
+
+
+# Per-restart deterministic init-perturbation scales (affine Lie params): the
+# linear gl(n) block and the coarsest-level translation.  Small -- the restarts
+# diversify *around* the moment/identity start to dodge the rare GPU MI / CR
+# divergence, not to widen the capture range.
+_RESTART_LINEAR_JITTER = 0.06
+_RESTART_TRANS_JITTER = 1.5
+
+
+def _affine_multistart(
+    moving: Float[Array, '*mspatial'],
+    fixed: Float[Array, '*fspatial'],
+    *,
+    ndim: int,
+    spec: RegistrationSpec,
+    space: CoordinateSpace,
+    base_init: Optional[Array],
+    restarts: int,
+    mask: Optional[Array] = None,
+) -> RegistrationResult:
+    """Run ``restarts`` forward affine solves from diversified inits; keep the
+    lowest-cost result.
+
+    The GPU joint-histogram scatter-add (``MI`` / ``CorrelationRatio``) is
+    non-deterministic, and the 12-DOF affine BFGS occasionally amplifies that
+    gradient noise into a catastrophic divergence (the dense-field force and
+    6-DOF rigid paths absorb it; ``SSD`` is exact).  Re-solving from small
+    deterministic init perturbations and keeping the best metric cost drives the
+    failure rate to ~0 -- a diverged run scores far worse, so it is never kept.
+    Deterministic (fixed PRNG seed), so the result is reproducible.
+    """
+    model = Affine()
+    base = (
+        jnp.zeros(model.n_params(ndim), dtype=moving.dtype)
+        if base_init is None
+        else base_init
+    )
+    n_lin = ndim * ndim
+    # Score every restart with one metric pinned on the full-res images: a data
+    # range drifts as the warp moves, so unpinned costs would not be comparable.
+    scorer = pin_metric_ranges(spec.metric, moving, fixed)
+    key = jax.random.PRNGKey(0)
+    best: Optional[RegistrationResult] = None
+    best_cost: Optional[Array] = None
+    for k in range(restarts):
+        if k == 0:
+            init_k = base  # the unperturbed moment / identity start
+        else:
+            key, k_lin, k_tr = jax.random.split(key, 3)
+            init_k = base + jnp.concatenate(
+                [
+                    _RESTART_LINEAR_JITTER
+                    * jax.random.normal(k_lin, (n_lin,), dtype=base.dtype),
+                    _RESTART_TRANS_JITTER
+                    * jax.random.normal(k_tr, (ndim,), dtype=base.dtype),
+                ]
+            )
+        res = multi_resolution_register(
+            moving,
+            fixed,
+            model=model,
+            ndim=ndim,
+            spec=spec,
+            space=space,
+            init_params=init_k,
+            mask=mask,
+        )
+        cost = scorer.cost(res.warped, fixed, mask=mask)
+        if best is None or best_cost is None:
+            best, best_cost = res, cost
+        else:
+            take = cost < best_cost
+            best = jax.tree_util.tree_map(
+                lambda b, n, t=take: jnp.where(t, n, b), best, res
+            )
+            best_cost = jnp.where(take, cost, best_cost)
+    assert best is not None
+    return best
 
 
 def affine_register(
@@ -332,8 +487,11 @@ def affine_register(
     space: CoordinateSpace = IndexSpace(),
     method: str = 'auto',
     init: Literal['identity', 'moment'] = 'identity',
+    init_transform: Optional[Float[Array, ' d1 d1']] = None,
+    mask: Optional[Float[Array, '*fspatial']] = None,
     winsorize: Optional[tuple[float, float]] = None,
     histogram_match: bool = False,
+    restarts: int = 1,
 ) -> RegistrationResult:
     """Estimate the affine transform aligning ``moving`` to ``fixed``.
 
@@ -350,8 +508,26 @@ def affine_register(
     under ``method="auto"`` for ``IndexSpace`` + an SSD metric).  ``init`` adds
     the **moment** start (centroid + per-axis scale), worth more here than for
     rigid -- the affine basin is narrow and a single zero start fails silently
-    on a large misalignment.  ``winsorize`` / ``histogram_match`` condition the
-    intensities before registration (see ``rigid_register``).
+    on a large misalignment.  ``init_transform`` (a prior recipe's
+    ``result.matrix``) is the self-contained warm-start hook, taking precedence
+    over ``init`` -- e.g. affine warm-started from rigid (see
+    :func:`syn_pipeline`); ``IndexSpace`` only.  ``mask`` (an optional fixed-grid
+    cost weight; see ``rigid_register``) restricts the cost to a region and
+    routes to the forward path.  ``winsorize`` / ``histogram_match`` condition
+    the intensities before registration (see ``rigid_register``).
+
+    ``restarts`` (default ``1``) runs the **forward** solve from that many
+    diversified inits and keeps the lowest-cost result -- a pure
+    basin-of-attraction lever.  It **no longer** doubles as the GPU MI
+    determinism fix: the joint histogram now takes a deterministic one-hot-matmul
+    path on GPU at affine pyramid sizes (``<= 200k`` voxels/level; E2), so
+    ``MI`` / ``CorrelationRatio`` recover reproducibly at ``restarts=1``.
+    (Historically the GPU joint-histogram scatter-add was non-deterministic and
+    the 12-DOF affine BFGS occasionally amplified that noise into a catastrophic
+    divergence, so ``restarts=4``--``6`` was the mitigation; that is retired for
+    sizes under the gate.  ``SSD`` is exact and takes the inverse-compositional
+    path, which ignores ``restarts``.)  Above the gate (the finest full-res
+    level), or for a genuinely multi-basin start, ``restarts > 1`` still helps.
     """
     moving, fixed = preprocess_images(
         moving,
@@ -362,19 +538,38 @@ def affine_register(
     ndim = _spatial_ndim(moving, fixed)
     model = Affine()
     spec = _cap_levels(spec, fixed.shape)
-    init_matrix = _resolve_init_matrix(
-        init, moving, fixed, ndim=ndim, scale=True, space=space, spec=spec
-    )
-    if _use_inverse_compositional(method, space, spec, model):
+    if init_transform is not None:
+        init_matrix = _init_from_transform(
+            init_transform, fixed, ndim=ndim, space=space, spec=spec
+        )
+    else:
+        init_matrix = _resolve_init_matrix(
+            init, moving, fixed, ndim=ndim, scale=True, space=space, spec=spec
+        )
+    if restarts < 1:
+        raise ValueError(f'restarts must be >= 1; got {restarts}.')
+    if _resolve_ic_dispatch(method, space, spec, model, mask=mask):
+        # The inverse-compositional SSD path is deterministic; restarts (a GPU
+        # MI / CR nondeterminism mitigation) is a no-op here.
         return ic_affine_register(
             moving, fixed, ndim=ndim, spec=spec, init_matrix=init_matrix
         )
-    _check_forward_convergence(spec)
     init_params = (
         None
         if init_matrix is None
         else _affine_params_from_matrix(init_matrix, ndim)
     )
+    if restarts > 1:
+        return _affine_multistart(
+            moving,
+            fixed,
+            ndim=ndim,
+            spec=spec,
+            space=space,
+            base_init=init_params,
+            restarts=restarts,
+            mask=mask,
+        )
     return multi_resolution_register(
         moving,
         fixed,
@@ -383,4 +578,205 @@ def affine_register(
         spec=spec,
         space=space,
         init_params=init_params,
+        mask=mask,
+    )
+
+
+def apply_transform(
+    image: Float[Array, '*spatial'],
+    result: object,
+    *,
+    reference_shape: Optional[tuple[int, ...]] = None,
+    method: Optional[Interpolator] = None,
+    mode: BoundaryMode = 'constant',
+    cval: float = 0.0,
+) -> Float[Array, '*rspatial']:
+    """Apply a recovered transform to an in-memory image / label map.
+
+    Resamples ``image`` -- an array in the **moving** frame of the registration
+    that produced ``result`` (a second contrast, a label map, an atlas) -- onto
+    the reference (fixed) grid by the recovered transform.  Dispatches on the
+    result: a homogeneous matrix (``rigid_register`` / ``affine_register`` --
+    the self-contained ``fixed -> moving`` voxel map) or a dense displacement
+    field (``greedy_syn_register`` / ``diffeomorphic_demons_register``).
+    In-memory resampling only -- image **file** I/O is out of scope (``thrux``).
+
+    Parameters
+    ----------
+    image
+        Single-channel array to resample, on the registration's moving grid.
+    result
+        A ``RegistrationResult`` (uses ``.matrix``) or a diffeomorphic result
+        (uses ``.displacement``).
+    reference_shape
+        Output grid for a **matrix** result; ``None`` -> ``image.shape``
+        (correct when moving and fixed share a grid, the ``IndexSpace`` norm --
+        pass the fixed shape for ``WorldSpace`` / differing grids).  A
+        displacement result defines its own output grid.
+    method
+        Interpolation kernel; ``None`` -> ``NearestNeighbour`` for an **integer**
+        ``image`` (label-preserving, no interpolation bleed) and ``Linear``
+        otherwise.  For anti-aliased multi-label resampling pass
+        ``MultiLabel(labels=...)``; for overlap of a warped label map see
+        ``metrics.dice`` / ``metrics.jaccard``.
+    mode, cval
+        Out-of-bounds handling (default ``'constant'`` 0 -- background).
+
+    Returns
+    -------
+    ``image`` resampled onto the reference grid (same dtype as ``image``).
+    """
+    image = jnp.asarray(image)
+    is_int = jnp.issubdtype(image.dtype, jnp.integer)
+    if method is None:
+        method = NearestNeighbour() if is_int else Linear()
+    disp = getattr(result, 'displacement', None)
+    if disp is not None:
+        coords = identity_grid(disp.shape[:-1], dtype=disp.dtype) + disp
+    else:
+        matrix = getattr(result, 'matrix', None)
+        if matrix is None:
+            raise ValueError(
+                'result must carry a .matrix (rigid / affine) or a '
+                '.displacement field (SyN / Demons).'
+            )
+        ndim = matrix.shape[-1] - 1
+        shape = (
+            image.shape if reference_shape is None else tuple(reference_shape)
+        )
+        # B1: .matrix is the self-contained fixed -> moving voxel map (the grid
+        # centre is baked in), so apply it directly about the origin.
+        coords = affine_grid(
+            matrix, shape, center=jnp.zeros(ndim, dtype=matrix.dtype)
+        )
+    # NearestNeighbour returns exact stored values, so the float round-trip is
+    # label-exact; out-of-bounds resolve to ``cval`` (0 -> background).
+    src = image.astype(coords.dtype) if is_int else image
+    warped = spatial_transform(
+        src[..., None], coords, mode=mode, cval=cval, method=method
+    )[..., 0]
+    if is_int:
+        warped = jnp.round(warped).astype(image.dtype)
+    return warped
+
+
+class PipelineResult(NamedTuple):
+    """Output of :func:`syn_pipeline` -- the composed staged transform.
+
+    Attributes
+    ----------
+    matrix
+        The linear composite -- the affine result (or the rigid result if the
+        pipeline stopped at ``'rigid'``), self-contained fixed -> moving.
+    displacement
+        The **full** fixed -> moving displacement field (``transform='syn'``),
+        already including the linear stages; ``None`` for ``'rigid'`` /
+        ``'affine'``.  :func:`apply_transform` uses this when present, else
+        ``matrix`` -- so ``apply_transform(image, pipeline_result)`` applies the
+        whole composite.
+    warped
+        ``moving`` resampled onto the ``fixed`` grid by the full transform.
+    rigid, affine, syn
+        The per-stage results (``affine`` / ``syn`` are ``None`` if that stage
+        did not run) -- their cost histories, params, Jacobian, etc.
+    """
+
+    matrix: Float[Array, ' d1 d1']
+    displacement: Optional[Float[Array, '*spatial ndim']]
+    warped: Float[Array, '*spatial']
+    rigid: RegistrationResult
+    affine: Optional[RegistrationResult]
+    syn: Optional[SyNResult]
+
+
+def syn_pipeline(
+    moving: Float[Array, '*spatial'],
+    fixed: Float[Array, '*spatial'],
+    *,
+    transform: Literal['rigid', 'affine', 'syn'] = 'syn',
+    rigid_spec: Optional[RegistrationSpec] = None,
+    affine_spec: Optional[RegistrationSpec] = None,
+    syn_spec: Optional[SyNSpec] = None,
+    force: Optional[Union[Force, Sequence[Force]]] = None,
+    affine_restarts: Optional[int] = None,
+) -> PipelineResult:
+    """Staged rigid -> affine -> SyN registration in one call.
+
+    The ``antsRegistrationSyN`` workhorse, composed from the leaf recipes: each
+    stage **warm-starts** the next -- rigid (moment init) seeds affine
+    (``init_transform``), the affine result seeds SyN (``init_affine``) -- so
+    the SyN stage's returned ``displacement`` is the **full** fixed -> moving
+    map (linear + non-linear).  ``apply_transform(image, result)`` then applies
+    the whole composite.  Numerics only -- no image I/O (``thrux``).
+
+    Parameters
+    ----------
+    moving, fixed
+        Single-channel images sharing a grid (the ``IndexSpace`` norm).
+    transform
+        How far to stage: ``'rigid'``, ``'affine'``, or ``'syn'`` (default).
+    rigid_spec, affine_spec, syn_spec, force
+        Per-stage configuration; ``None`` -> a cross-modal-robust default
+        (``MI`` linear stages, the default ``LNCCForce`` SyN -- the
+        antsRegistrationSyN convention).  For a faster **within-modality** run
+        pass ``SSD`` linear specs (the inverse-compositional fast path).
+    affine_restarts
+        Multi-start count for the affine stage; ``None`` -> ``4`` for a
+        histogram (``MI`` / ``CR``) affine metric (the non-deterministic GPU
+        scatter), else ``1``.
+
+    Returns
+    -------
+    ``PipelineResult`` (``matrix``, ``displacement``, ``warped``, and the
+    per-stage ``rigid`` / ``affine`` / ``syn`` results).
+    """
+    if transform not in ('rigid', 'affine', 'syn'):
+        raise ValueError(
+            f"transform must be 'rigid' | 'affine' | 'syn'; got {transform!r}."
+        )
+    if rigid_spec is None:
+        rigid_spec = RegistrationSpec(metric=MI(bins=32))
+    if affine_spec is None:
+        affine_spec = RegistrationSpec(metric=MI(bins=32))
+    if syn_spec is None:
+        syn_spec = SyNSpec()
+    if affine_restarts is None:
+        affine_restarts = 1 if affine_spec.metric.is_least_squares else 4
+
+    rigid = rigid_register(moving, fixed, spec=rigid_spec, init='moment')
+    if transform == 'rigid':
+        return PipelineResult(
+            matrix=rigid.matrix,
+            displacement=None,
+            warped=rigid.warped,
+            rigid=rigid,
+            affine=None,
+            syn=None,
+        )
+    affine = affine_register(
+        moving,
+        fixed,
+        spec=affine_spec,
+        init_transform=rigid.matrix,
+        restarts=affine_restarts,
+    )
+    if transform == 'affine':
+        return PipelineResult(
+            matrix=affine.matrix,
+            displacement=None,
+            warped=affine.warped,
+            rigid=rigid,
+            affine=affine,
+            syn=None,
+        )
+    syn = greedy_syn_register(
+        moving, fixed, spec=syn_spec, force=force, init_affine=affine.matrix
+    )
+    return PipelineResult(
+        matrix=affine.matrix,
+        displacement=syn.displacement,
+        warped=syn.warped,
+        rigid=rigid,
+        affine=affine,
+        syn=syn,
     )

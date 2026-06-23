@@ -80,16 +80,22 @@ def test_moment_projection_matches_steepest_descent():
         center = (jnp.asarray(shape, dtype=fixed.dtype) - 1.0) / 2.0
         err = jnp.asarray(rng.standard_normal(shape).reshape(-1))
         grad = spatial_gradient(fixed).reshape(-1, ndim)
-        grid_c = (identity_grid(shape, dtype=fixed.dtype) - center).reshape(-1, ndim)
+        grid_c = (identity_grid(shape, dtype=fixed.dtype) - center).reshape(
+            -1, ndim
+        )
         m = grad.T @ (grid_c * err[:, None])
         g = grad.T @ err
         rigid_ref = _steepest_descent(fixed, center, ndim).T @ err
         affine_ref = _affine_steepest_descent(fixed, center, ndim).T @ err
         assert np.allclose(
-            np.asarray(_rigid_project_moments(m, g, ndim)), np.asarray(rigid_ref), atol=1e-9
+            np.asarray(_rigid_project_moments(m, g, ndim)),
+            np.asarray(rigid_ref),
+            atol=1e-9,
         )
         assert np.allclose(
-            np.asarray(_affine_project_moments(m, g, ndim)), np.asarray(affine_ref), atol=1e-9
+            np.asarray(_affine_project_moments(m, g, ndim)),
+            np.asarray(affine_ref),
+            atol=1e-9,
         )
 
 
@@ -181,9 +187,17 @@ def test_hard_affine_ic_recovers():
         moving, fixed, spec=spec, method='inverse_compositional'
     )
     assert float(ncc(ic.warped, fixed)) > 0.99
-    # recovered fixed->moving index map ~= inverse of the resampling affine
-    # (interpolation-limited; nearest-neighbour resampling caps the accuracy).
-    assert np.allclose(np.asarray(ic.matrix), t_inv, atol=0.12)
+    # ic.matrix is self-contained (the grid centre is baked in); de-centre it to
+    # the about-origin frame and compare to the true origin inverse (the
+    # conditioning guard -- the linear block is centre-invariant; the centred
+    # translation would otherwise amplify the rotation error by the lever arm).
+    c = (np.asarray((64, 64)) - 1.0) / 2.0
+    t_pos = np.eye(3)
+    t_pos[:2, 2] = c
+    t_neg = np.eye(3)
+    t_neg[:2, 2] = -c
+    m_origin = t_neg @ np.asarray(ic.matrix) @ t_pos
+    assert np.allclose(m_origin, t_inv, atol=0.12)
 
 
 def test_affine_auto_uses_ic():
@@ -271,6 +285,7 @@ def test_early_exit_recovers_like_fixed_scan():
     spec_early = RegistrationSpec(
         levels=3,
         iterations=30,
+        mode='early_exit',
         convergence=Convergence(threshold=1e-6, window=10),
     )
     res_fixed = rigid_register(moving, fixed, spec=spec_fixed)
@@ -287,43 +302,42 @@ def test_early_exit_recovers_like_fixed_scan():
     assert res_early.cost_history.shape == res_fixed.cost_history.shape
 
 
-def test_default_auto_early_exit_recovers_like_none_scan():
-    # 3b: the default (convergence='auto') early-exits on the single-pair IC
-    # path, recovering to the same optimum as the explicit convergence=None fixed
-    # scan (the reverse-differentiable opt-out) -- the early-exit default does
-    # not change the result, only the iteration count.
+def test_ic_early_exit_recovers_like_default_scan():
+    # B2: the IC mode='early_exit' lands at the same optimum as the default
+    # (mode='fixed') scan -- early-exit changes the iteration count, not the
+    # result.  (mode='fixed' is now the spec default on every recipe; early_exit
+    # is the recommended single-pair IC opt-in.)
     moving, fixed = _rigid_pair(64)
-    auto = rigid_register(
+    default = rigid_register(
         moving, fixed, spec=RegistrationSpec(levels=3, iterations=20)
     )
-    scan = rigid_register(
+    early = rigid_register(
         moving,
         fixed,
-        spec=RegistrationSpec(levels=3, iterations=20, convergence=None),
+        spec=RegistrationSpec(levels=3, iterations=20, mode='early_exit'),
     )
-    assert np.allclose(np.asarray(auto.warped), np.asarray(scan.warped), atol=1e-6)
+    assert np.allclose(
+        np.asarray(early.warped), np.asarray(default.warped), atol=1e-6
+    )
 
 
 def test_convergence_forward_ssd_honoured():
-    # Lever A: an explicit Convergence on the forward *least-squares* path
-    # (forced by method='forward', SSD metric) is now HONOURED (early-exit via
-    # the optimiser early_stop), not rejected -- and still recovers.
+    # Lever A: mode='early_exit' on the forward *least-squares* path (forced by
+    # method='forward', SSD metric) is HONOURED (early-exit via the optimiser
+    # early_stop), not rejected -- and still recovers.
     moving, fixed = _rigid_pair(48)
-    spec = RegistrationSpec(
-        levels=2, iterations=(60, 30), convergence=Convergence()
-    )
+    spec = RegistrationSpec(levels=2, iterations=(60, 30), mode='early_exit')
     res = rigid_register(moving, fixed, spec=spec, method='forward')
     assert float(ncc(res.warped, fixed)) > 0.99
 
 
 def test_convergence_raises_on_forward_bfgs_path():
-    # C3 (narrowed): an explicit Convergence still raises on the scalar/BFGS
-    # forward path (a non-least-squares metric -- LNCC here), whose monolithic
-    # optimiser cannot honour a windowed early-exit.
+    # C3 (narrowed): mode='early_exit' still raises on the scalar/BFGS forward
+    # path (a non-least-squares metric -- LNCC here), whose monolithic optimiser
+    # cannot honour a windowed early-exit.
     moving, fixed = _rigid_pair(48)
     spec = RegistrationSpec(
-        levels=2, iterations=10, metric=LNCC(radius=2),
-        convergence=Convergence(),
+        levels=2, iterations=10, metric=LNCC(radius=2), mode='early_exit'
     )
     with pytest.raises(ValueError, match='scalar/BFGS'):
         rigid_register(moving, fixed, spec=spec, method='forward')
@@ -331,7 +345,7 @@ def test_convergence_raises_on_forward_bfgs_path():
 
 def test_early_exit_affine():
     moving, fixed = _affine_pair(64)
-    spec = RegistrationSpec(levels=3, iterations=30, convergence=Convergence())
+    spec = RegistrationSpec(levels=3, iterations=30, mode='early_exit')
     res = affine_register(moving, fixed, spec=spec)
     assert float(ncc(res.warped, fixed)) > 0.99
 

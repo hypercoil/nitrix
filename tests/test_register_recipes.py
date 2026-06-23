@@ -33,9 +33,13 @@ from nitrix.register import (  # noqa: E402
     SSD,
     CorrelationRatio,
     RegistrationSpec,
+    SyNSpec,
     WorldSpace,
     affine_register,
+    apply_transform,
+    greedy_syn_register,
     rigid_register,
+    syn_pipeline,
 )
 from nitrix.register._metric import pin_metric_ranges  # noqa: E402
 from nitrix.register.recipes import _moment_init_matrix  # noqa: E402
@@ -294,6 +298,42 @@ def test_rigid_2d_mi_recovery_cross_modal():
     assert np.isclose(float(res.params[0]), -0.12, atol=0.03)
 
 
+def test_affine_restarts_validation():
+    fixed = _blobs_2d(48)
+    with pytest.raises(ValueError):
+        affine_register(fixed, fixed, restarts=0)
+
+
+def test_affine_restarts_ignored_on_ssd_ic_path():
+    # The inverse-compositional SSD path is deterministic; restarts is a no-op
+    # (the result is identical to a single solve).
+    fixed = _blobs_2d(64)
+    A = jnp.asarray([[1.04, 0.05, 1.5], [-0.04, 0.97, -2.0], [0.0, 0.0, 1.0]])
+    moving = _warp_known(fixed, A)
+    spec = RegistrationSpec(levels=3, iterations=30, metric=SSD())
+    r1 = affine_register(moving, fixed, spec=spec)
+    r4 = affine_register(moving, fixed, spec=spec, restarts=4)
+    assert np.array_equal(np.asarray(r1.params), np.asarray(r4.params))
+
+
+def test_affine_restarts_multistart_recovers_and_reproducible():
+    # restarts>1 on the forward (BFGS) path runs K diversified solves and keeps
+    # the lowest-cost one (the GPU MI / CR nondeterminism mitigation).  Cross-
+    # modal affine; the fixed PRNG seed makes the multi-start reproducible.
+    fixed = _blobs_2d(64)
+    A = jnp.asarray([[1.05, 0.06, 2.0], [-0.05, 0.96, -1.5], [0.0, 0.0, 1.0]])
+    warped = _warp_known(fixed, A)
+    moving = jnp.sqrt(warped - warped.min() + 0.05)  # "different modality"
+    spec = RegistrationSpec(levels=3, iterations=40, metric=MI(bins=32))
+    res = affine_register(moving, fixed, spec=spec, init='moment', restarts=4)
+    res2 = affine_register(moving, fixed, spec=spec, init='moment', restarts=4)
+    mi0 = float(mutual_information(moving, fixed, bins=32))
+    mi1 = float(mutual_information(res.warped, fixed, bins=32))
+    assert mi1 > mi0  # the multi-start recovers (improves the objective)
+    # Deterministic perturbations -> reproducible result.
+    assert np.array_equal(np.asarray(res.params), np.asarray(res2.params))
+
+
 def test_identity_registration_is_near_zero():
     fixed = _blobs_2d(48)
     res = rigid_register(
@@ -332,6 +372,128 @@ def test_result_warped_matches_explicit_warp():
     res = rigid_register(
         moving, fixed, spec=RegistrationSpec(levels=2, iterations=20)
     )
-    # res.warped is moving sampled by res.matrix about the image centre.
-    explicit = _warp_known(moving, res.matrix)
+    # res.matrix is self-contained (the grid centre is baked in), so sampling
+    # moving by it *directly* -- no extra recentering -- reproduces res.warped.
+    grid = affine_grid(
+        res.matrix, moving.shape, center=jnp.zeros(2, res.matrix.dtype)
+    )
+    explicit = spatial_transform(moving[..., None], grid, mode='constant')[..., 0]
     assert np.allclose(np.asarray(res.warped), np.asarray(explicit), atol=1e-6)
+
+
+def test_apply_transform_matrix_reproduces_warped():
+    # Applying the recovered (self-contained) matrix to the moving image
+    # reproduces res.warped (recipe + apply_transform share the Linear /
+    # 'constant' defaults).
+    fixed = _blobs_2d(64)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 3.0, -2.0]), ndim=2))
+    res = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=2, iterations=25)
+    )
+    out = apply_transform(moving, res)
+    assert np.allclose(np.asarray(out), np.asarray(res.warped), atol=1e-6)
+
+
+def test_apply_transform_label_preserves_values():
+    # An integer label map warped by the recovered transform stays integer and
+    # introduces no new labels (NearestNeighbour default for integer input).
+    fixed = _blobs_2d(64)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 3.0, -2.0]), ndim=2))
+    res = rigid_register(
+        moving, fixed, spec=RegistrationSpec(levels=2, iterations=25)
+    )
+    m = np.asarray(moving)
+    labels = ((m > 0.3).astype(np.int32) + (m > 0.6).astype(np.int32))  # {0,1,2}
+    out = apply_transform(jnp.asarray(labels), res)
+    assert np.asarray(out).dtype == labels.dtype
+    assert set(np.unique(np.asarray(out)).tolist()) <= {0, 1, 2}
+
+
+def test_apply_transform_displacement_reproduces_warped():
+    # The displacement path (SyN / Demons result) reproduces the recipe's warp.
+    fixed = _blobs_2d(64)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.05, 2.0, -1.0]), ndim=2))
+    syn = greedy_syn_register(
+        moving, fixed, spec=SyNSpec(levels=2, iterations=20, step=0.5)
+    )
+    out = apply_transform(moving, syn)
+    # Reproduces the recipe's warp up to the boundary band (apply_transform's
+    # default 'constant' vs the recipe's boundary mode); interiors are exact.
+    assert float(ncc(out, syn.warped)) > 0.998
+
+
+def test_apply_transform_validation():
+    class _NoTransform:
+        pass
+
+    with pytest.raises(ValueError):
+        apply_transform(_blobs_2d(16), _NoTransform())
+
+
+def test_syn_pipeline_full_chain():
+    # Staged rigid -> affine -> SyN in one call recovers an affine plant;
+    # apply_transform on the result reproduces the pipeline warp, and the SyN
+    # stage's displacement is the full composite (linear + non-linear).
+    fixed = _blobs_2d(80)
+    c = (jnp.asarray((80, 80), dtype=fixed.dtype) - 1.0) / 2.0
+    a = affine_exp(jnp.asarray([0.1, 0.04, -0.03, -0.07, 5.0, -4.0]), ndim=2)
+    grid = affine_grid(a, (80, 80), center=c)
+    moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
+    ssd = RegistrationSpec(levels=3, iterations=40, metric=SSD())
+    res = syn_pipeline(
+        moving,
+        fixed,
+        transform='syn',
+        rigid_spec=ssd,
+        affine_spec=ssd,
+        syn_spec=SyNSpec(levels=3, iterations=40, step=0.5),
+    )
+    assert float(ncc(res.warped, fixed)) > 0.98
+    assert res.displacement is not None  # full fixed->moving field
+    assert res.rigid is not None and res.affine is not None and res.syn is not None
+    out = apply_transform(moving, res)  # uses the displacement composite
+    # interiors are exact; the boundary band differs by apply_transform's
+    # 'constant' default vs the recipe boundary mode (amplified by the large
+    # affine displacement that maps the edge out of bounds).
+    sl = (slice(8, -8),) * 2
+    assert float(ncc(out[sl], res.warped[sl])) > 0.999
+
+
+def test_syn_pipeline_levels_and_warm_start():
+    # 'rigid' / 'affine' stop early (no displacement); the affine stage warm-
+    # started from rigid recovers an affine plant better than rigid alone.
+    fixed = _blobs_2d(80)
+    c = (jnp.asarray((80, 80), dtype=fixed.dtype) - 1.0) / 2.0
+    a = affine_exp(jnp.asarray([0.08, 0.05, -0.04, -0.06, 4.0, -3.0]), ndim=2)
+    grid = affine_grid(a, (80, 80), center=c)
+    moving = spatial_transform(fixed[..., None], grid, mode='nearest')[..., 0]
+    ssd = RegistrationSpec(levels=3, iterations=40, metric=SSD())
+    rig = syn_pipeline(moving, fixed, transform='rigid', rigid_spec=ssd)
+    aff = syn_pipeline(
+        moving, fixed, transform='affine', rigid_spec=ssd, affine_spec=ssd
+    )
+    assert rig.displacement is None and rig.syn is None and rig.affine is None
+    assert aff.displacement is None and aff.syn is None
+    # affine (warm-started from rigid) beats rigid alone on an affine plant.
+    assert float(ncc(aff.warped, fixed)) > float(ncc(rig.warped, fixed))
+    # both reproduce via the matrix path.
+    assert np.allclose(
+        np.asarray(apply_transform(moving, aff)),
+        np.asarray(aff.warped),
+        atol=1e-6,
+    )
+
+
+def test_syn_pipeline_default_metric_runs():
+    # The default (no specs) uses MI linear stages; the rigid-only path runs and
+    # recovers a rigid plant (MI rigid is reliable).
+    fixed = _blobs_2d(48)
+    moving = _warp_known(fixed, rigid_exp(jnp.asarray([0.1, 2.0, -1.5]), ndim=2))
+    res = syn_pipeline(moving, fixed, transform='rigid')
+    assert float(ncc(res.warped, fixed)) > 0.97
+
+
+def test_syn_pipeline_validation():
+    fixed = _blobs_2d(32)
+    with pytest.raises(ValueError):
+        syn_pipeline(fixed, fixed, transform='bogus')

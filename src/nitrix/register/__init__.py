@@ -61,8 +61,11 @@ following ANTs / fMRIPrep features are **not yet implemented** --
   closed-form **(Mattes) MI** force, ``MIForce``, *is* shipped -- the fast
   cross-modal path; CR's ``cr_grad`` is the same machinery, built when a
   consumer asks);
-- **early-exit** (windowed cost-slope convergence) on the SVF recipes -- it is
-  wired only into the matrix inverse-compositional path.
+- **early-exit** (windowed cost-slope convergence): every recipe carries the
+  orthogonal ``mode`` (``'fixed'`` default / ``'early_exit'``) + ``convergence``
+  (threshold / window) spec fields (B2); ``'early_exit'`` runs the
+  ``lax.while_loop`` where the path supports it (the matrix inverse-compositional
+  recipes recommend it).
 
 **Real-data and ANTs-reference parity** (comparing nitrix transforms / warps
 to an ``antsRegistration`` reference on real volumes, and the iso-accuracy
@@ -70,8 +73,19 @@ wall-clock comparison) are **delegated to the nitrix-perf-bench agent**, which
 owns the cross-tool harness; they are not asserted in this repo.
 """
 
-from ._bbr import BBRResult, BBRSpec, BoundaryObjective, bbr_cost, bbr_register
-from ._core import Convergence, RegistrationResult, RegistrationSpec
+from ._bbr import (
+    BBRResult,
+    BBRSearch,
+    BBRSpec,
+    BoundaryObjective,
+    bbr_cost,
+    bbr_register,
+)
+from ._converge import Convergence, ConvergenceMode
+from ._core import (
+    RegistrationResult,
+    RegistrationSpec,
+)
 from ._force import (
     DemonsForce,
     Force,
@@ -91,7 +105,13 @@ from .diffeomorphic import (
     DiffeomorphicResult,
     diffeomorphic_demons_register,
 )
-from .recipes import affine_register, rigid_register
+from .recipes import (
+    PipelineResult,
+    affine_register,
+    apply_transform,
+    rigid_register,
+    syn_pipeline,
+)
 from .regulariser import (
     bending_energy,
     gradient_smoothness,
@@ -101,11 +121,15 @@ from .regulariser import (
 __all__ = [
     'rigid_register',
     'affine_register',
+    'apply_transform',
+    'syn_pipeline',
+    'PipelineResult',
     'volreg',
     'VolregResult',
     'bbr_register',
     'bbr_cost',
     'BBRSpec',
+    'BBRSearch',
     'BBRResult',
     'BoundaryObjective',
     'Objective',
@@ -119,6 +143,7 @@ __all__ = [
     'RegistrationSpec',
     'RegistrationResult',
     'Convergence',
+    'ConvergenceMode',
     'Metric',
     'SSD',
     'LNCC',

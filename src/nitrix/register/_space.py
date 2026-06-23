@@ -42,15 +42,21 @@ The space's three responsibilities are the three things that differ:
 ``requires_grid_rescale`` (whether the warm-start rescales voxel-unit
 params between levels), and ``result_transform`` (what "the recovered
 matrix" means -- a voxel-space index map for :class:`IndexSpace`, a
-world->world transform for :class:`WorldSpace`).
+world->world transform for :class:`WorldSpace`).  **Both spaces return a
+self-contained matrix**: the centre the warp applies the transform about (the
+fixed grid centre for index space, the fixed world centre for world space) is
+baked into ``result.matrix`` via :func:`_conjugate_about`, so ``apply_affine``
+reproduces the warp and the two compose -- the raw about-origin parameters live
+on ``result.params``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Optional, Protocol
+from typing import Any, ClassVar, Optional, Protocol
 
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float
 
 from ..geometry import apply_affine
@@ -77,26 +83,55 @@ def _translation_homog(
 
 
 def _scale_homog(
-    s: Float[Array, ' d'], ndim: int, dtype: jnp.dtype
+    s: Any, ndim: int, dtype: jnp.dtype
 ) -> Float[Array, ' d1 d1']:
-    """Homogeneous ``(ndim+1, ndim+1)`` per-axis diagonal scaling matrix."""
+    """Homogeneous ``(ndim+1, ndim+1)`` per-axis diagonal scaling matrix.
+
+    ``s`` is array-like (a host NumPy ``_grid_scale`` constant or an ``Array``);
+    it is cast to ``dtype`` here."""
     eye = jnp.eye(ndim + 1, dtype=dtype)
     idx = jnp.arange(ndim)
     return eye.at[idx, idx].set(jnp.asarray(s, dtype=dtype))
 
 
-def _grid_scale(full_shape: tuple[int, ...], shape: tuple[int, ...]) -> Array:
+def _conjugate_about(
+    transform: Float[Array, ' d1 d1'],
+    center: Float[Array, ' d'],
+    ndim: int,
+    dtype: jnp.dtype,
+) -> Float[Array, ' d1 d1']:
+    """``Tr(center) @ transform @ Tr(-center)`` -- re-express an about-origin
+    homogeneous transform as the equivalent map applied about ``center``.
+
+    The shared centering used to make a returned matrix **self-contained**: the
+    optimiser works with ``model.exp(params)`` about the origin, but the warp
+    applies it about the grid (or world) centre, so the returned matrix bakes
+    that centre in -- ``apply_affine(coords, matrix)`` then reproduces the warp
+    directly, and two centred matrices compose without re-deriving the centre.
+    """
+    t_pos = _translation_homog(center, ndim, dtype)
+    t_neg = _translation_homog(-center, ndim, dtype)
+    return t_pos @ transform @ t_neg
+
+
+def _grid_scale(
+    full_shape: tuple[int, ...], shape: tuple[int, ...]
+) -> np.ndarray:
     """Per-axis ``align-corners`` index scale from a pyramid level to full.
 
     ``downsample`` resamples with the align-corners grid (output voxel
     ``i`` samples input ``i * (in-1)/(out-1)``), so a level-``l`` voxel
     index maps to the full-resolution index by the pure per-axis scale
     ``(full - 1) / (level - 1)`` (no offset; corner 0 -> 0).
+
+    Computed on the **static** shape tuples with NumPy (a host constant), so no
+    ``float64`` literal enters the traced graph to be silently down-cast under
+    x64-off (float32); the consumer (``_scale_homog``) casts to the run dtype.
     """
-    full = jnp.asarray(full_shape, dtype=jnp.float64)
-    lvl = jnp.asarray(shape, dtype=jnp.float64)
+    full = np.asarray(full_shape, dtype=np.float64)
+    lvl = np.asarray(shape, dtype=np.float64)
     # Guard the degenerate single-voxel axis (no scale is well-defined).
-    denom = jnp.maximum(lvl - 1.0, 1.0)
+    denom = np.maximum(lvl - 1.0, 1.0)
     return (full - 1.0) / denom
 
 
@@ -131,6 +166,7 @@ class _IndexSampler:
 
     ndim: int
     dtype: jnp.dtype
+    full_fixed_shape: tuple[int, ...]
 
     def index_sampling(
         self,
@@ -145,7 +181,16 @@ class _IndexSampler:
     def result_transform(
         self, transform: Float[Array, ' d1 d1']
     ) -> Float[Array, ' d1 d1']:
-        return transform
+        # Bake in the full-res grid centre (the warp applies the transform about
+        # that centre via ``affine_grid``), so the returned matrix is the
+        # self-contained ``fixed-voxel -> moving-voxel`` map -- directly usable
+        # by ``apply_affine`` and composable with a WorldSpace result (which
+        # centres the same way at line ~204).  ``params`` keeps the raw
+        # about-origin Lie coordinates.
+        center = (
+            jnp.asarray(self.full_fixed_shape, dtype=self.dtype) - 1.0
+        ) / 2.0
+        return _conjugate_about(transform, center, self.ndim, self.dtype)
 
 
 @dataclass(frozen=True)
@@ -232,8 +277,12 @@ class IndexSpace:
     -- use :class:`WorldSpace` there.
 
     No general matrix inverse is taken, so the path stays fully on-device
-    (no cuSolver fallback), and ``result`` is the ``fixed-voxel ->
-    moving-voxel`` homogeneous index map (``== model.exp(params)``).
+    (no cuSolver fallback).  ``result.matrix`` is the **self-contained**
+    ``fixed-voxel -> moving-voxel`` homogeneous index map -- ``model.exp(params)``
+    re-centred at the fixed grid centre (``_conjugate_about``), so
+    ``apply_affine(coords, result.matrix)`` reproduces the warp directly and it
+    composes with a ``WorldSpace`` result.  ``result.params`` holds the raw
+    about-origin Lie coordinates.
     """
 
     requires_grid_rescale: ClassVar[bool] = True
@@ -246,7 +295,9 @@ class IndexSpace:
         full_moving_shape: tuple[int, ...],
         dtype: jnp.dtype,
     ) -> _IndexSampler:
-        return _IndexSampler(ndim=ndim, dtype=dtype)
+        return _IndexSampler(
+            ndim=ndim, dtype=dtype, full_fixed_shape=full_fixed_shape
+        )
 
 
 @dataclass(frozen=True)

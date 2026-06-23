@@ -84,16 +84,32 @@ class Metric(Protocol):
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, '']:
-        """Scalar minimisation cost (lower is a better match)."""
+        """Scalar minimisation cost (lower is a better match).
+
+        ``mask`` (optional non-negative per-voxel weight, the ``fixed`` grid)
+        restricts the cost to a region: out-of-mask voxels are ignored.  For a
+        histogram metric (MI / CR) it gates the scatter (excludes the voxel from
+        the joint distribution), not merely the reduction.
+        """
         ...
 
     def residual(
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, ' m']:
-        """Least-squares residual vector (``is_least_squares`` only)."""
+        """Least-squares residual vector (``is_least_squares`` only).
+
+        With ``mask`` the residual is weighted by ``sqrt(mask)`` so that
+        ``½‖residual‖²`` is the masked sum-of-squares (an out-of-mask voxel
+        contributes a zero row, dropping out of the Gauss-Newton normal
+        equations).
+        """
         ...
 
 
@@ -113,15 +129,22 @@ class SSD:
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, '']:
-        return ssd(warped, fixed)
+        return ssd(warped, fixed, mask=mask)
 
     def residual(
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, ' m']:
-        return (warped - fixed).ravel()
+        diff = warped - fixed
+        if mask is not None:
+            diff = diff * jnp.sqrt(mask)
+        return diff.ravel()
 
 
 @dataclass(frozen=True)
@@ -145,13 +168,17 @@ class LNCC:
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, '']:
-        return 1.0 - lncc(warped, fixed, radius=self.radius)
+        return 1.0 - lncc(warped, fixed, radius=self.radius, mask=mask)
 
     def residual(
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, ' m']:
         raise NotImplementedError('LNCC is not a least-squares metric.')
 
@@ -187,6 +214,8 @@ class MI:
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, '']:
         return -mutual_information(
             warped,
@@ -195,12 +224,15 @@ class MI:
             normalized=self.normalized,
             range_moving=self.range_moving,
             range_fixed=self.range_fixed,
+            mask=mask,
         )
 
     def residual(
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, ' m']:
         raise NotImplementedError('MI is not a least-squares metric.')
 
@@ -230,15 +262,23 @@ class CorrelationRatio:
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, '']:
         return 1.0 - correlation_ratio(
-            warped, fixed, bins=self.bins, range_fixed=self.range_fixed
+            warped,
+            fixed,
+            bins=self.bins,
+            range_fixed=self.range_fixed,
+            mask=mask,
         )
 
     def residual(
         self,
         warped: Float[Array, '*spatial'],
         fixed: Float[Array, '*spatial'],
+        *,
+        mask: Optional[Float[Array, '*spatial']] = None,
     ) -> Float[Array, ' m']:
         raise NotImplementedError(
             'CorrelationRatio is not a least-squares metric.'

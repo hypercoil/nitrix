@@ -74,13 +74,17 @@ def test_volreg_batch_early_exit_realigns_like_fixed():
     fixed = volreg(
         series,
         reference=0,
-        spec=base.__class__(**{**base.__dict__, 'convergence': None}),
+        spec=base.__class__(**{**base.__dict__, 'mode': 'fixed'}),
     )
     ee = volreg(
         series,
         reference=0,
         spec=base.__class__(
-            **{**base.__dict__, 'convergence': Convergence(1e-3, 6)}
+            **{
+                **base.__dict__,
+                'mode': 'early_exit',
+                'convergence': Convergence(1e-3, 6),
+            }
         ),
     )
     init_var = _interframe_var(series)
@@ -94,16 +98,14 @@ def test_volreg_batch_early_exit_realigns_like_fixed():
 
 
 def test_volreg_default_is_fixed_scan():
-    # 'auto' (default) and None both run the reproducible fixed scan.
+    # mode='fixed' (the default) runs the reproducible fixed scan.
     series = _series()
-    spec = RegistrationSpec(
-        levels=2, iterations=(40, 20)
-    )  # convergence='auto'
+    spec = RegistrationSpec(levels=2, iterations=(40, 20))  # mode='fixed'
     a = volreg(series, reference=0, spec=spec)
     b = volreg(
         series,
         reference=0,
-        spec=spec.__class__(**{**spec.__dict__, 'convergence': None}),
+        spec=spec.__class__(**{**spec.__dict__, 'mode': 'fixed'}),
     )
     assert np.allclose(
         np.asarray(a.realigned), np.asarray(b.realigned), atol=1e-5
@@ -114,8 +116,6 @@ def test_volreg_forward_path_rejects_convergence():
     # the forward path (forced via method='forward') cannot early-exit -- only the
     # inverse-compositional path honours the vmap'd while_loop.
     series = _series()
-    spec = RegistrationSpec(
-        levels=2, iterations=(20, 10), convergence=Convergence(1e-3, 6)
-    )
-    with pytest.raises(ValueError, match='forward path cannot early-exit'):
+    spec = RegistrationSpec(levels=2, iterations=(20, 10), mode='early_exit')
+    with pytest.raises(ValueError, match='volreg forward'):
         volreg(series, reference=0, spec=spec, method='forward')

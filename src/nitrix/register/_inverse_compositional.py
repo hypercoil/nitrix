@@ -45,14 +45,17 @@ from ..geometry import (
 )
 from ..linalg._solver import safe_inv
 from ..linalg.matrix_function import matrix_exp, matrix_log
-from ._converge import run_iterations
-from ._core import (
+from ._converge import (
     Convergence,
+    resolve_convergence_mode,
+    run_iterations,
+)
+from ._core import (
     RegistrationResult,
     RegistrationSpec,
-    resolve_convergence,
     resolve_iterations,
 )
+from ._space import _conjugate_about
 
 # A model's steepest-descent images and its compositional update / params
 # recovery -- the only pieces of the IC kernel that differ by transform group.
@@ -89,6 +92,16 @@ _TRUST_EXTENT_FACTOR = (
     1.0  # cap the per-step grid motion at this * the grid extent
 )
 
+# F1 backtracking ladder: step fractions along the trust-clamped Gauss-Newton
+# direction (in the Lie algebra) the cost-decrease guard tries, largest first.
+# The largest fraction that decreases the cost is accepted (so a step that
+# already decreases at full length -- the well-conditioned case -- is taken
+# byte-unchanged at 1.0); if none decreases (a bad-direction step from the
+# constant-template Hessian on a hard case), the iterate is left unmoved, which
+# makes the per-level cost monotone non-increasing.  Three rungs keep the extra
+# warps bounded; the no-move fallback is the implicit fourth.
+_BACKTRACK_ALPHAS = (1.0, 0.5, 0.25)
+
 
 def _grid_corners(shape: tuple[int, ...], center: Array, dtype: Any) -> Array:
     """Homogeneous, centred grid corners ``(2**ndim, ndim+1)`` -- where an affine
@@ -120,7 +133,14 @@ def _trust_scale(
     m_du = matrix @ (update - jnp.eye(ndim + 1, dtype=matrix.dtype))
     disp = (corners @ m_du.T)[:, :ndim]
     max_disp = jnp.max(jnp.sqrt(jnp.sum(disp * disp, axis=-1)))
-    return jnp.minimum(1.0, step_max / (max_disp + 1e-12))
+    # Dtype-derived 0/0 guard (E1): a fixed 1e-12 sits below float32's ~1.2e-7
+    # precision floor, so it is meaningless in the production float32 path; the
+    # finfo epsilon scales the guard to the working dtype.  Only active when the
+    # step induces ~zero corner motion (a converged step), so its exact value
+    # never affects a real update.
+    return jnp.minimum(
+        1.0, step_max / (max_disp + jnp.finfo(max_disp.dtype).eps)
+    )
 
 
 def _rotation_generators(ndim: int, dtype: Any) -> Array:
@@ -307,29 +327,57 @@ def _ic_level(
     selects the fixed ``scan`` or the windowed-slope early-exit (``run_iterations``).
     """
     fixed, grad, h_inv, center = ref
-    grid_c = (
-        identity_grid(fixed.shape, dtype=moving.dtype) - center
-    ).reshape(-1, ndim)
+    grid_c = (identity_grid(fixed.shape, dtype=moving.dtype) - center).reshape(
+        -1, ndim
+    )
     corners = _grid_corners(fixed.shape, center, moving.dtype)
     step_max = _TRUST_EXTENT_FACTOR * float(max(fixed.shape))
 
-    def step(matrix: Array, _: Any) -> tuple[Array, Array]:
-        grid = affine_grid(matrix, fixed.shape, center=center)
-        warped = spatial_transform(
+    def warp_at(mat: Array) -> Array:
+        return spatial_transform(
             moving[..., None],
-            grid,
+            affine_grid(mat, fixed.shape, center=center),
             mode=spec.boundary_mode,
             cval=spec.cval,
             method=spec.interpolation,
         )[..., 0]
+
+    def step(matrix: Array, _: Any) -> tuple[Array, Array]:
+        warped = warp_at(matrix)
         err = (warped - fixed).reshape(-1)
+        c0 = 0.5 * jnp.sum(err * err)
         m = grad.T @ (grid_c * err[:, None])  # (ndim, ndim) moment tensor
         g = grad.T @ err  # (ndim,) translation moments
         delta = h_inv @ project_moments(m, g, ndim)
         update = compositional_update(delta, ndim)
         scale = _trust_scale(matrix, update, corners, ndim, step_max)
-        update = compositional_update(delta * scale, ndim)
-        return matrix @ update, 0.5 * jnp.sum(err * err)
+        clamped = delta * scale  # trust-clamped GN increment (Lie algebra)
+
+        if spec.ic_line_search:
+            # F1 cost-decrease guard (opt-in): a clamped Gauss-Newton step from
+            # the *constant* template Hessian can still increase the SSD on a
+            # hard case (the direction, not just the magnitude, can be wrong).
+            # Backtrack along the clamped direction and accept the largest
+            # fraction that decreases the cost; if none does, leave the iterate
+            # unmoved -- so the per-level cost is monotone non-increasing.  A
+            # full-length decrease (the well-conditioned case) is taken
+            # byte-unchanged at alpha=1.  ``spec.ic_line_search`` is static, so
+            # the candidate warps are traced only when the guard is on.
+            alphas = jnp.asarray(_BACKTRACK_ALPHAS, dtype=moving.dtype)
+
+            def cost_at(alpha: float) -> Array:
+                cand = warp_at(
+                    matrix @ compositional_update(clamped * alpha, ndim)
+                )
+                return 0.5 * jnp.sum((cand - fixed) ** 2)
+
+            costs = jnp.stack([cost_at(a) for a in _BACKTRACK_ALPHAS])
+            decreased = costs < c0
+            clamped = clamped * jnp.where(
+                jnp.any(decreased), alphas[jnp.argmax(decreased)], 0.0
+            )
+
+        return matrix @ compositional_update(clamped, ndim), c0
 
     return run_iterations(
         step,
@@ -397,8 +445,15 @@ def ic_register_core(
     matrix = init_matrix
     histories = []
     iters_per_level = resolve_iterations(spec.iterations, spec.levels)
-    # Single-pair IC path: 'auto' -> early-exit (the 3b default); None -> scan.
-    convergence = resolve_convergence(spec.convergence, ic=True)
+    # Single-pair IC path: always early-exit-capable (the constant-template
+    # while_loop).  mode='early_exit' (the rigid/affine recipe default) -> the
+    # windowed loop; mode='fixed' -> the scan.
+    convergence = resolve_convergence_mode(
+        spec.mode,
+        spec.convergence,
+        supports_early_exit=True,
+        path='the inverse-compositional path',
+    )
     prev_shape = None
     for level in range(spec.levels - 1, -1, -1):
         ref = ref_levels[level]
@@ -434,8 +489,11 @@ def ic_register_core(
         cval=spec.cval,
         method=spec.interpolation,
     )[..., 0]
+    # Return the self-contained centred matrix (the warp applies ``matrix``
+    # about ``center``), matching the IndexSpace forward path; ``params`` keeps
+    # the raw about-origin Lie coordinates of the un-centred matrix.
     return RegistrationResult(
-        matrix=matrix,
+        matrix=_conjugate_about(matrix, center, ndim, dtype),
         params=params_from_matrix(matrix, ndim),
         warped=warped,
         cost_history=jnp.concatenate(histories),

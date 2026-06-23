@@ -40,6 +40,7 @@ Renamings from legacy code, for clarity:
 
 from __future__ import annotations
 
+import math
 from typing import Any, Callable, Literal, Optional, Sequence, Union, cast
 
 import jax
@@ -339,10 +340,56 @@ def spatial_transform_batched(
 # ---------------------------------------------------------------------------
 
 
+# ``n_steps='auto'`` bounds (F2): the floor keeps at least one squaring (so the
+# result is the composed flow, not the bare first-order step); the cap bounds
+# the scan length for a pathologically large velocity -- a warp beyond ~0.5*2^cap
+# voxels cannot stay diffeomorphic on the grid regardless of squaring count (a
+# resolution limit, not an integration-step one), so more steps are wasted.
+_AUTO_SS_FLOOR = 1
+_AUTO_SS_CAP = 12
+
+
+def _resolve_n_steps(
+    velocity: Float[Array, '*spatial ndim'],
+    n_steps: Union[int, Literal['auto']],
+) -> int:
+    """Resolve ``n_steps`` (F2): pass an ``int`` through; derive ``'auto'``.
+
+    Scaling-and-squaring is diffeomorphic only when the first sub-step ``v /
+    2**n_steps`` is small enough (~<= 0.5 vox) that ``id + v/2**n`` is itself
+    invertible; below that the integrated flow can fold (measured: a moderate
+    velocity folds at ``n_steps=0``).  ``'auto'`` sets the standard
+    ``n_steps = ceil(log2(2 * max|v|))`` so the first sub-step clears the regime,
+    clamped to ``[_AUTO_SS_FLOOR, _AUTO_SS_CAP]``.  It reads ``max|v|`` as a
+    **concrete** value, so it is unavailable under ``jax.jit`` (the scan length
+    must be static, which a traced reduction cannot provide) -- pass an explicit
+    ``int`` there (the recipes do; their pre-affine-aligned residual velocities
+    sit well inside the default ``n_steps``'s regime).
+    """
+    if isinstance(n_steps, int):
+        return n_steps
+    if n_steps != 'auto':
+        raise ValueError(f"n_steps must be an int or 'auto'; got {n_steps!r}.")
+    try:
+        max_v = float(jnp.max(jnp.sqrt(jnp.sum(velocity * velocity, axis=-1))))
+    except (
+        jax.errors.TracerArrayConversionError,
+        jax.errors.ConcretizationTypeError,
+    ) as exc:
+        raise ValueError(
+            "integrate_velocity_field(n_steps='auto') needs a concrete velocity "
+            '-- it reads max|v| to size the static scaling-and-squaring scan, '
+            'which jax.jit cannot do from a traced array.  Pass an explicit int '
+            'n_steps under jit.'
+        ) from exc
+    rule = math.ceil(math.log2(max(2.0 * max_v, 1.0)))
+    return int(min(_AUTO_SS_CAP, max(_AUTO_SS_FLOOR, rule)))
+
+
 def integrate_velocity_field(
     velocity: Float[Array, '*spatial ndim'],
     *,
-    n_steps: int = 7,
+    n_steps: Union[int, Literal['auto']] = 7,
     mode: BoundaryMode = 'nearest',
     cval: float = 0.0,
 ) -> Float[Array, '*spatial ndim']:
@@ -370,8 +417,18 @@ def integrate_velocity_field(
         Stationary velocity field, channel-last,
         ``(*spatial, ndim)``.
     n_steps
-        Number of doublings.  Default ``7`` (i.e., 128× scaling).
-        Larger ``n_steps`` -> more accurate but more compute.
+        Number of doublings.  Default ``7`` (i.e., 128× scaling).  Larger
+        ``n_steps`` -> more accurate but more compute (the per-step accuracy
+        roughly halves with each doubling).  Scaling-and-squaring is
+        diffeomorphic only while the first sub-step ``max|v| / 2**n_steps`` is
+        within the ``~0.5``-voxel regime where ``id + v/2**n`` is itself
+        invertible -- below that the flow can **fold**, so ``n_steps`` should
+        cover the velocity magnitude (``>= ceil(log2(2*max|v|))``).  ``'auto'``
+        picks exactly that (F2) from the velocity, but reads ``max|v|`` as a
+        concrete value, so it is **eager-only** (unavailable under ``jax.jit`` --
+        the scan length must be static; pass an explicit ``int`` there).  Note a
+        warp larger than the grid can resolve folds at *any* ``n_steps`` (a
+        resolution limit, not an integration one).
     mode
         Boundary behaviour for the per-step
         ``spatial_transform(phi, id + phi)`` call.  Default
@@ -410,6 +467,7 @@ def integrate_velocity_field(
             f'has {len(spatial_shape)} dims but trailing ndim is '
             f'{spatial_rank}.'
         )
+    n_steps = _resolve_n_steps(velocity, n_steps)  # F2: 'auto' -> int (eager)
     id_grid = identity_grid(spatial_shape, dtype=velocity.dtype)
     # Initial small step.
     phi0 = velocity / float(2**n_steps)

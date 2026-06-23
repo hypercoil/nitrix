@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """Forward least-squares early-exit (Lever A): opt-in, default-unchanged.
 
-``spec.convergence`` (a windowed cost-slope criterion) now early-exits the
-*forward* Gauss-Newton / Levenberg-Marquardt path too, not just the
-inverse-compositional path -- via the optimiser ``early_stop`` (a ``while_loop``).
-It stays **opt-in**: ``convergence=None`` / ``'auto'`` keep the fixed ``lax.scan``
+``mode='early_exit'`` (windowed cost-slope, B2) early-exits the *forward*
+Gauss-Newton / Levenberg-Marquardt path too, not just the inverse-compositional
+path -- via the optimiser ``early_stop`` (a ``while_loop``).  It stays
+**opt-in**: ``mode='fixed'`` (the default) keeps the fixed ``lax.scan``
 (reproducible, vmap-batchable, reverse-differentiable).  The scalar/BFGS path
 (MI / correlation-ratio) still rejects it (monolithic optimiser).  Gates: forward
-SSD + Convergence recovers like the fixed scan; the default forward is unchanged;
-MI + Convergence raises.
+SSD + early_exit recovers like the fixed scan; the default forward is unchanged;
+MI + early_exit raises.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from nitrix.metrics import ncc  # noqa: E402
 from nitrix.register import (  # noqa: E402
     MI,
     SSD,
-    Convergence,
     RegistrationSpec,
     rigid_register,
 )
@@ -62,15 +61,13 @@ def test_forward_ssd_early_exit_recovers_like_fixed():
     fixed_res = rigid_register(
         moving,
         fixed,
-        spec=base.__class__(**{**base.__dict__, 'convergence': None}),
+        spec=base.__class__(**{**base.__dict__, 'mode': 'fixed'}),
         method='forward',
     )
     ee_res = rigid_register(
         moving,
         fixed,
-        spec=base.__class__(
-            **{**base.__dict__, 'convergence': Convergence(1e-6, 10)}
-        ),
+        spec=base.__class__(**{**base.__dict__, 'mode': 'early_exit'}),
         method='forward',
     )
     # both recover; early-exit matches the fixed scan to tolerance (it stops once
@@ -89,10 +86,10 @@ def test_forward_ssd_early_exit_recovers_like_fixed():
 
 
 def test_forward_default_is_fixed_scan():
-    # convergence=None forward is deterministic / reproducible (the scan path).
+    # mode='fixed' (the default) forward is deterministic / reproducible.
     moving, fixed = _rigid_pair()
     spec = RegistrationSpec(
-        levels=2, iterations=(80, 40), metric=SSD(), convergence=None
+        levels=2, iterations=(80, 40), metric=SSD(), mode='fixed'
     )
     a = rigid_register(moving, fixed, spec=spec, method='forward')
     b = rigid_register(moving, fixed, spec=spec, method='forward')
@@ -105,7 +102,7 @@ def test_forward_mi_convergence_rejected():
         levels=2,
         iterations=(40, 20),
         metric=MI(bins=32),
-        convergence=Convergence(1e-6, 10),
+        mode='early_exit',
     )
     with pytest.raises(ValueError, match='scalar/BFGS'):
         rigid_register(moving, fixed, spec=spec, method='forward')
