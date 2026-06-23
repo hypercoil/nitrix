@@ -276,6 +276,8 @@ def nearest_surface_distance(
     cell = max(cell, 1e-9)
 
     d2, done = _grid_nearest_dist2(q, tri, cell, r_max)
+    # perf-agent: the ``~done`` brute-fallback fraction is an optimisation signal
+    # -- see docs/feature-requests/mesh-spatial-acceleration.md (Perf-agent note).
     if not done.all():  # exact brute fallback for unfinalised queries
         miss = ~done
         d2[miss] = _brute_nearest_dist2(q[miss], tri, chunk_target)

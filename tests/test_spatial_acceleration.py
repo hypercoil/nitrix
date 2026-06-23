@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from _real_meshes import fsaverage_white
+from _real_meshes import fsaverage_surface, fsaverage_white
 
 from nitrix.geometry._triangle_distance import nearest_surface_distance
 from nitrix.sparse import Mesh, icosphere
@@ -102,3 +102,55 @@ def test_real_fsaverage_grid_matches_brute() -> None:
     db = nearest_surface_distance(q, mesh, method='brute')
     dg = nearest_surface_distance(q, mesh, method='grid', r_max=8)
     assert np.array_equal(db, dg)
+
+
+# --------------------------------------------------------------------------- #
+# C5b: spherical bucket search behind surface_resample (AI-C5)
+# --------------------------------------------------------------------------- #
+
+
+def _resample_field(idx, w, field):
+    return (w * np.asarray(field)[idx]).sum(axis=1)
+
+
+def test_spherical_bucket_field_parity() -> None:
+    # Bucket vs brute: the resampled FIELD is bit-exact (edge-tie best_face
+    # differences interpolate identically on the shared edge).
+    from nitrix.geometry.sphere import _spherical_barycentric
+
+    src = icosphere(4)  # 5120 faces -> bucket path engages
+    v = np.asarray(src.vertices, np.float64)
+    f = np.asarray(src.faces)
+    q = np.asarray(icosphere(5).vertices, np.float64)  # 10242 queries
+    ib, wb = _spherical_barycentric(v, f, q, method='brute')
+    ik, wk = _spherical_barycentric(v, f, q, method='bucket')
+    for field in (v[:, 0], v[:, 1] ** 2 - 0.3 * v[:, 2]):
+        assert np.allclose(
+            _resample_field(ib, wb, field),
+            _resample_field(ik, wk, field),
+            atol=1e-6,
+        )
+
+
+def test_spherical_bucket_real_field_parity() -> None:
+    # The real resample use case: a proper registered SPHERE tessellation
+    # (fsaverage5 sphere) as source, fsaverage4 sphere vertices as queries.
+    # (Not the folded white surface -- radially projecting that overlaps
+    # triangles and has no well-defined containing triangle.)
+    from nitrix.geometry.sphere import _spherical_barycentric
+
+    vs, fs = fsaverage_surface('sphere', 'left', 'fsaverage5')
+    vq, _ = fsaverage_surface('sphere', 'left', 'fsaverage4')
+    v = np.asarray(vs, np.float64)
+    v = v / np.linalg.norm(v, axis=1, keepdims=True)
+    f = np.asarray(fs)
+    q = np.asarray(vq, np.float64)
+    q = q / np.linalg.norm(q, axis=1, keepdims=True)
+    ib, wb = _spherical_barycentric(v, f, q, method='brute')
+    ik, wk = _spherical_barycentric(v, f, q, method='bucket')
+    for field in (v[:, 0], v[:, 2]):
+        assert np.allclose(
+            _resample_field(ib, wb, field),
+            _resample_field(ik, wk, field),
+            atol=1e-6,
+        )
