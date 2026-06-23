@@ -101,3 +101,9 @@ class GLMMResult:
     n_obs: int
     n_groups: int
     tier: GLMMTier
+
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat

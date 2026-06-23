@@ -250,6 +250,36 @@ def test_tweedie_power_validation_and_registry():
             tweedie(bad)
 
 
+@pytest.mark.parametrize(
+    'family, est_dispersion',
+    [(GAUSSIAN, True), (GAMMA, True), ('tweedie', True), (POISSON, False)],
+)
+def test_glm_aic_counts_estimated_dispersion(family, est_dispersion):
+    """ER7: AIC is self-consistent with log_likelihood (aic = -2 llf + 2 k), and
+    an estimated-dispersion family (Gaussian / Gamma / Tweedie) counts the
+    dispersion as a free parameter (k = p + 1), while a fixed-dispersion family
+    (Poisson / Binomial) does not (k = p). statsmodels' GLM AIC uses k = p for
+    all families; nitrix additionally counts the estimated scale -- pin that
+    convention here so it cannot silently drift."""
+    rng = np.random.default_rng(7)
+    X = _design(rng, N=160)
+    p = X.shape[1]
+    mu = np.exp(X @ np.array([0.3, 0.2, -0.2]))
+    if family is GAUSSIAN:
+        y = X @ np.array([1.0, 0.5, -0.3]) + rng.standard_normal(160)
+    elif family is POISSON:
+        y = rng.poisson(mu).astype(float)
+    else:  # GAMMA / tweedie
+        y = rng.gamma(5.0, mu / 5.0)
+    res = glm_fit(jnp.asarray(y[None, :]), jnp.asarray(X), family=family, n_iter=60)
+    k = p + (1 if est_dispersion else 0)
+    np.testing.assert_allclose(
+        float(aic(res)[0]),
+        -2.0 * float(log_likelihood(res)[0]) + 2.0 * k,
+        rtol=1e-10,
+    )
+
+
 def test_family_registry_resolves_gamma_and_negbinomial():
     """String names resolve to the built-ins; ``negbinomial(alpha)`` builds a
     custom-dispersion family; a non-positive alpha is rejected."""
@@ -339,6 +369,57 @@ def test_sandwich_cluster_label_encoding_invariant():
     perm = np.asarray(sandwich_cov(res, Yj, Xj, groups=jnp.asarray(relabel)))
     np.testing.assert_allclose(base, gappy, atol=1e-12)
     np.testing.assert_allclose(base, perm, atol=1e-12)
+
+
+def test_glm_rank_deficient_uses_effective_rank():
+    """ER3: the residual dof uses the *effective* rank of X, not p -- a
+    rank-deficient (collinear) design reports rank < p and the corrected
+    dispersion; a full-rank design is unchanged; jit falls back to p / accepts
+    an explicit rank=."""
+    import functools
+
+    rng = np.random.default_rng(11)
+    X = _design(rng, N=80)  # full-rank (N, 3)
+    Y = jnp.asarray(
+        (X @ np.array([1.0, 0.5, -0.3]))[None, :]
+        + 0.3 * rng.standard_normal((3, 80))
+    )
+    Xj = jnp.asarray(X)
+    full = glm_fit(Y, Xj, family=GAUSSIAN)
+    assert full.rank == X.shape[1]
+    # append a collinear column: effective rank stays 3, not p=4
+    Xd = jnp.asarray(np.c_[X, X[:, 1]])
+    defic = glm_fit(Y, Xd, family=GAUSSIAN, ridge=1e-8)
+    assert defic.rank == X.shape[1]
+    # dof = N - rank (=N-3) for both, so the dispersion matches the full-rank fit
+    # (n - p = N - 4 would have over-counted the dof)
+    np.testing.assert_allclose(
+        np.asarray(defic.dispersion), np.asarray(full.dispersion), rtol=0.05
+    )
+    # jit on a deficient design: pass rank= (X is a tracer -> auto would use p)
+    cj = jax.jit(functools.partial(glm_fit, family=GAUSSIAN, ridge=1e-8, rank=3))(Y, Xd)
+    assert cj.rank == 3
+
+
+def test_sandwich_cluster_jit_with_n_groups():
+    """ER5: with pre-densified contiguous groups + an explicit n_groups the
+    cluster-robust sandwich traces under jax.jit and matches the eager densify."""
+    import functools
+
+    rng = np.random.default_rng(9)
+    X = _design(rng, N=120)
+    groups = np.repeat(np.arange(20), 6).astype(np.int32)  # contiguous 0..19
+    y = (X @ np.array([0.5, 1.0, -0.5])
+         + rng.standard_normal(20)[groups] + rng.standard_normal(120) * 0.5)
+    Yj, Xj = jnp.asarray(y[None, :]), jnp.asarray(X)
+    res = glm_fit(Yj, Xj, family=GAUSSIAN)
+    eager = np.asarray(sandwich_cov(res, Yj, Xj, groups=jnp.asarray(groups)))
+    jitted = np.asarray(
+        jax.jit(functools.partial(
+            sandwich_cov, groups=jnp.asarray(groups), n_groups=20
+        ))(res, Yj, Xj)
+    )
+    np.testing.assert_allclose(eager, jitted, atol=1e-12)
 
 
 @needs_sm

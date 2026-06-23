@@ -102,6 +102,7 @@ References
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal, NamedTuple, Optional, Tuple, Union, cast
 
@@ -117,6 +118,14 @@ from ._corr import CorrSpec, resolve_corr
 from ._corrfit import CorrLMEResult
 from ._kr import kr_cov_and_scaled_f
 from ._varcomp import VarCompSpec, fit_varcomp_diagonal, varcomp_inference
+
+# MC7: the profile-REML cores (_varcomp / _blockwoodbury / _crossed / _nested)
+# return ``log_lik = -0.5 [log|V| + log|X^T V^{-1} X| + r^T V^{-1} r]`` -- the
+# *non-normalised* restricted log-likelihood, omitting the ``(N - p) log(2 pi)``
+# Gaussian constant that the GLS path (and statsmodels) include.  Subtracting
+# ``(N - p) * _HALF_LOG_2PI`` makes every tier report the **full** restricted
+# log-likelihood, so log_lik is comparable across tiers (and AIC/BIC valid).
+_HALF_LOG_2PI = 0.5 * math.log(2.0 * math.pi)
 
 
 def _kr_rotated_basis(
@@ -208,6 +217,12 @@ class REMLResult:
     def re_labels(self) -> Tuple[str, ...]:
         """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
         return ('group',)
+
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +370,7 @@ def _reml_fit_lowrank(
     return REMLResult(
         theta_hat=theta_hat,
         beta_hat=beta_hat,
-        log_lik=log_lik,
+        log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
         fixed_cov=fixed_cov,
         theta_cov=theta_cov,
         grad_m=grad_m,
@@ -825,7 +840,7 @@ def reml_fit(
     return REMLResult(
         theta_hat=theta_hat,
         beta_hat=beta_hat,
-        log_lik=log_lik,
+        log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
         fixed_cov=fixed_cov,
         theta_cov=theta_cov,
         grad_m=grad_m,
@@ -882,6 +897,12 @@ class NestedLMEResult:
         """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
         return ('outer', 'inner')
 
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
+
 
 @register_result(
     children=('beta_hat', 'var_group', 'var_cross', 'sigma_e_sq', 'log_lik'),
@@ -926,6 +947,12 @@ class CrossedLMEResult:
     def re_labels(self) -> Tuple[str, ...]:
         """Names of the ``k`` random-effect dimensions of :attr:`cov_re`."""
         return ('group', 'cross')
+
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
 
 
 @register_result(
@@ -994,6 +1021,12 @@ class LMEResult:
         :attr:`cov_re` (D2); the off-diagonals are genuine intercept/slope
         covariances (unlike the block-diagonal multi-factor tiers)."""
         return tuple(f're{j}' for j in range(self.cov_re.shape[-1]))
+
+    @property
+    def coef(self) -> Float[Array, 'V p']:
+        """Alias for :attr:`beta_hat` -- the fixed-effect coefficients, named
+        ``coef`` for cross-suite parity with GLM / GAM / GP / HGP results (UX1)."""
+        return self.beta_hat
 
 
 def lme_fit(
@@ -1109,7 +1142,19 @@ def lme_fit(
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
-    r = 1 if z is None else jnp.asarray(z).shape[-1]
+    if z is not None:
+        # ER4: a 1-D random covariate (N,) is a single random slope; coerce it to
+        # the (N, r) contract so r = z.shape[-1] = 1 (a bare (N,) would otherwise
+        # set r = N and misroute the dispatch into a deep IndexError).
+        z = jnp.asarray(z, dtype=Y.dtype)
+        if z.ndim == 1:
+            z = z[:, None]
+        elif z.ndim != 2 or z.shape[0] != group.shape[0]:
+            raise ValueError(
+                f'lme_fit: z must be (N, r) with N={group.shape[0]}; got shape '
+                f'{tuple(z.shape)}.'
+            )
+    r = 1 if z is None else z.shape[-1]
 
     if cross is not None:
         # R4: two crossed scalar random intercepts (1|group) + (1|cross).
@@ -1145,7 +1190,7 @@ def lme_fit(
             var_group=var_group,
             var_cross=var_cross,
             sigma_e_sq=jnp.exp(theta_hat[:, 2]),
-            log_lik=log_lik,
+            log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
             tier='R4',
         )
 
@@ -1199,7 +1244,7 @@ def lme_fit(
             var_outer=jnp.exp(theta_hat[:, 0]),
             var_inner=jnp.exp(theta_hat[:, 1]),
             sigma_e_sq=jnp.exp(theta_hat[:, 2]),
-            log_lik=log_lik,
+            log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
             tier='R3',
         )
 
@@ -1254,7 +1299,7 @@ def lme_fit(
         beta_hat=beta_hat,
         cov_re=cov_re,
         sigma_e_sq=sigma_e_sq,
-        log_lik=log_lik,
+        log_lik=log_lik - (X.shape[0] - X.shape[1]) * _HALF_LOG_2PI,
         fixed_cov=fixed_cov,
         theta_cov=theta_cov,
         grad_m=grad_m,

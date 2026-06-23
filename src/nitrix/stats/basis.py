@@ -31,6 +31,7 @@ Everything is value -> value and cuSOLVER-free.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, replace
 from typing import Any, List, Optional, Protocol, Tuple, cast
 
@@ -40,7 +41,9 @@ import numpy as np
 from jaxtyping import Array, Float, Int
 
 from ..graph import laplacian
+from ..linalg.kernel import spectral_density
 from ..numerics._spline import difference_penalty_1d, uniform_bspline_weights
+from ._hsgp import _hsgp_domain, _hsgp_features
 
 __all__ = [
     'SmoothBasis',
@@ -52,6 +55,9 @@ __all__ = [
     'thinplate_regression_basis',
     'cr_basis',
     'gp_basis',
+    'hsgp_basis',
+    'hsgp_basis_nd',
+    'gp_factor_smooth',
     'mrf_smooth',
     'tensor_product_basis',
     're_smooth',
@@ -362,9 +368,18 @@ def _raw_features(
             cast(float, basis.kernel_param),
         )
         return cxz @ cast(Array, basis.radial_transform)
+    if basis.kind == 'hsgp':
+        u = cast(Array, basis.knots)  # sqrt-lambda frequencies (m,)
+        rt = cast(Array, basis.radial_transform)  # (m, 2) = [sqrt-s, phase]
+        L = cast(float, basis.kernel_param)
+        phi = jnp.sqrt(1.0 / L) * jnp.sin(
+            u[None, :] * x[:, None] + rt[None, :, 1]
+        )
+        return phi * rt[None, :, 0]
     if basis.kind == 'mrf':
+        # ER6: re-evaluate in the stored design's dtype (not a hardcoded f32).
         return jax.nn.one_hot(
-            x.astype(jnp.int32), basis.n_basis, dtype=jnp.float32
+            x.astype(jnp.int32), basis.n_basis, dtype=basis.design.dtype
         )
     raise ValueError(f'unknown spline kind {basis.kind!r}.')
 
@@ -830,8 +845,13 @@ def gp_basis(
     order = np.argsort(evals)[::-1][:n_basis]
     evals_k = np.clip(evals[order], 1e-10, None)
     uk = evecs[:, order]  # (nk, k)
-    # f(x) = C_xz U_k diag(1/lambda) alpha; penalty alpha^T alpha on the
-    # whitened coefficients -> identity penalty in the eigenbasis.
+    # f(x) = C_xz U_k diag(1/lambda) alpha.  The kriging RKHS penalty on the
+    # knot weights delta is delta^T C_zz delta; with delta = U_k diag(1/lambda)
+    # alpha and C_zz U_k = U_k diag(lambda) this is alpha^T diag(1/lambda) alpha
+    # -- NOT the identity.  Using diag(1/lambda) makes the implied prior
+    # covariance D diag(lambda) D^T = C_xz U_k diag(1/lambda) U_k^T C_zx reproduce
+    # the (Nystrom-truncated) Matern Gram C_xx, so the lambda<->sigma_f variance-
+    # component identity holds (an identity penalty is off by ~91%).
     radial_transform = jnp.asarray(uk / evals_k[None, :], dtype=x.dtype)
     knots = jnp.asarray(knots_np, dtype=x.dtype)
 
@@ -840,7 +860,7 @@ def gp_basis(
         return cxz @ radial_transform
 
     design = _gp_raw(x)
-    penalty = jnp.eye(n_basis, dtype=x.dtype)
+    penalty = jnp.diag(jnp.asarray(1.0 / evals_k, dtype=x.dtype))
 
     constraint: Optional[Array] = None
     if center:
@@ -862,6 +882,578 @@ def gp_basis(
         knots=knots,
         radial_transform=radial_transform,
         kernel_param=rho_v,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hilbert-space approximate GP smooth (HSGP; Solin-Sarkka 2020,
+# Riutort-Mayol/Burkner 2023) -- the primary GP smoother
+# ---------------------------------------------------------------------------
+
+# Below this, the top eigen-frequency sqrt(lambda_m) * rho is too small for the
+# reduced-rank basis to resolve a kernel of lengthscale rho -- the (m, L, rho)
+# coupling of Riutort-Mayol et al. (2023): a short rho needs a larger rank (or a
+# larger boundary).  A warning, not an error.
+_HSGP_NYQUIST_MIN = 2.4
+
+
+def _check_hsgp_resolution(
+    sqrt_lambda_top: float, rho: Optional[float], n_basis: int, where: str
+) -> None:
+    """Warn when the rank under-resolves the kernel for a *given* ``rho``."""
+    if rho is None or not rho > 0:
+        return
+    reach = float(sqrt_lambda_top) * float(rho)
+    if reach < _HSGP_NYQUIST_MIN:
+        warnings.warn(
+            f'{where}: with n_basis={n_basis} the top eigen-frequency reaches '
+            f'only {reach:.2f}/rho (rho={float(rho):.3g}); the basis may '
+            'under-resolve the kernel. Increase n_basis or `boundary` for a '
+            'short lengthscale (Riutort-Mayol et al. 2023).',
+            stacklevel=3,
+        )
+
+
+def hsgp_basis(
+    x: Float[Array, ' n'],
+    n_basis: int = 20,
+    *,
+    kernel: str = 'matern52',
+    rho: Optional[float] = None,
+    amplitude: float = 1.0,
+    boundary: float = 1.5,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = True,
+) -> SplineBasis:
+    """Build a Hilbert-space approximate GP smooth (HSGP) for covariate ``x``.
+
+    A reduced-rank stationary GP on the bounded domain ``[c - L, c + L]``
+    (``c`` the data midrange, ``L = boundary * half-range``), expanded in the
+    Dirichlet-Laplacian eigenfunctions ``phi_j(x) = sqrt(1/L) sin(sqrt(lam_j)
+    (x - c + L))`` with ``sqrt(lam_j) = j pi / (2 L)``.  The kernel enters
+    **only** through the spectral density weights ``s_j = S_theta(sqrt(lam_j))``
+    (:func:`~nitrix.linalg.kernel.spectral_density`): the whitened design is
+    ``Psi = [sqrt(s_j) phi_j(x)]`` with an **identity penalty**, so the basis is
+    a drop-in smooth for :func:`gam_fit` and the Fellner-Schall smoothing
+    parameter ``lambda = 1 / sigma_f**2`` is the GP amplitude.
+
+    Unlike the kriging :func:`gp_basis`, the eigenfunctions are independent of
+    the kernel hyperparameters, so the lengthscale ``rho`` enters as a diagonal
+    reweighting of a fixed design -- the basis for ``eigh``-free ``rho``
+    estimation (the standalone ``gp_fit``; not this constructor, which fixes
+    ``rho``).
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate values.
+    n_basis
+        Number of retained eigenfunctions ``m`` (the reduced rank).
+    kernel
+        Stationary kernel: ``'matern12'`` / ``'matern32'`` / ``'matern52'`` /
+        ``'rbf'`` (squared-exponential).  See
+        :func:`~nitrix.linalg.kernel.spectral_density`.
+    rho
+        Kernel lengthscale.  Defaults to the data half-range (a sane fixed
+        value; lengthscale *estimation* is the standalone ``gp_fit``).
+    amplitude
+        Kernel amplitude folded into the weights; keep ``1.0`` when fitting via
+        ``gam_fit`` (the smoothing parameter carries the amplitude).
+    boundary
+        Domain-extension factor ``L / half-range`` (``>= 1``; default ``1.5``).
+        Larger values reduce boundary bias; small ``rho`` needs larger
+        ``n_basis``.
+    bounds
+        ``(lo, hi)`` data range override (defaults to the data min/max).
+    center
+        Apply the sum-to-zero identifiability constraint (default ``True``).
+
+    Returns
+    -------
+    ``SplineBasis`` (``kind='hsgp'``).
+    """
+    if not 1 <= n_basis:
+        raise ValueError(f'hsgp_basis: n_basis={n_basis} must be >= 1.')
+    if center and n_basis < 2:
+        raise ValueError(
+            f'hsgp_basis: n_basis={n_basis} with center=True leaves an empty '
+            '(n, 0) design -- the sum-to-zero constraint drops one column. Use '
+            'n_basis >= 2, or center=False.'
+        )
+    if not boundary >= 1.0:
+        raise ValueError(f'hsgp_basis: boundary={boundary} must be >= 1.0.')
+    x = jnp.asarray(x)
+    x_np = np.asarray(x, dtype=np.float64)
+    lo = float(np.min(x_np)) if bounds is None else float(bounds[0])
+    hi = float(np.max(x_np)) if bounds is None else float(bounds[1])
+    c, L = _hsgp_domain(lo, hi, boundary)  # DS3: shared HSGP domain
+    rho_v = float(rho) if rho is not None else max(0.5 * (hi - lo), 1e-6)
+
+    # Laplace eigen-frequencies, spectral weights, and the per-mode phase that
+    # folds the centring constant c into the stored re-evaluation (so c need not
+    # be a SplineBasis field): sin(sqrt(lam_j)(x - c + L)) = sin(sqrt(lam_j) x +
+    # phase_j), phase_j = sqrt(lam_j)(L - c).
+    j = np.arange(1, n_basis + 1, dtype=np.float64)
+    sqrt_lambda = j * np.pi / (2.0 * L)  # (m,)
+    _check_hsgp_resolution(
+        float(sqrt_lambda[-1]), rho, n_basis, 'hsgp_basis'
+    )
+    s = np.asarray(
+        spectral_density(
+            jnp.asarray(sqrt_lambda), kernel=kernel, rho=rho_v, amplitude=amplitude
+        ),
+        dtype=np.float64,
+    )
+    sqrt_s = np.sqrt(np.clip(s, 1e-30, None))
+    phase = sqrt_lambda * (L - c)
+
+    knots = jnp.asarray(sqrt_lambda, dtype=x.dtype)
+    radial_transform = jnp.asarray(
+        np.stack([sqrt_s, phase], axis=1), dtype=x.dtype
+    )  # (m, 2) = [sqrt-s, phase]
+    inv_sqrt_L = float(np.sqrt(1.0 / L))
+
+    def _hsgp_raw(xx: Float[Array, ' m']) -> Float[Array, 'm k']:
+        # DS3: shared eigenfunction design, then the sqrt-spectral amplitude.
+        phi = _hsgp_features(xx, knots, radial_transform[:, 1], inv_sqrt_L)
+        return phi * radial_transform[None, :, 0]
+
+    design = _hsgp_raw(x)
+    penalty = jnp.eye(n_basis, dtype=x.dtype)
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return SplineBasis(
+        design=design,
+        penalty=penalty,
+        kind='hsgp',
+        constraint=constraint,
+        n_basis=n_basis,
+        degree=0,
+        penalty_order=2,
+        lo=lo,
+        hi=hi,
+        knots=knots,
+        radial_transform=radial_transform,
+        kernel_param=L,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Factor-smooth GP interaction (mgcv bs='fs' with a GP marginal) -- the
+# fixed-rho hierarchical-GP building block
+# ---------------------------------------------------------------------------
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class _FactorGPBasis:
+    """A factor-smooth GP interaction: a separate GP curve per factor level, all
+    sharing **one** smoothing parameter (mgcv ``bs="fs"`` with a GP marginal).
+
+    The whitened HSGP design ``Psi`` (at a fixed ``rho``) is replicated per group
+    -- level ``g``'s columns are ``Psi`` on its own rows, zero elsewhere -- and the
+    penalty is the **identity**, so the single Fellner-Schall smoothing parameter
+    on this block **is** the shared group precision ``1 / sigma_grp^2`` (the
+    penalty<->variance-component identity, exactly as :class:`REBasis` but with the
+    GP basis in place of the one-hot).  Pair it with a population
+    :func:`hsgp_basis` of the same ``rho`` (plus the intercept) in ``gam_fit`` for
+    the "GS" hierarchical GP at fixed ``rho`` -- the basis counterpart of
+    :func:`~nitrix.stats.hgp.hgp_fit` (which additionally estimates ``rho``).
+
+    Attributes
+    ----------
+    design
+        ``(n, L*m)`` factor-smooth design.
+    penalty
+        ``(L*m, L*m)`` identity ridge (the whitened-GP prior is i.i.d.).
+    base
+        The whitened HSGP marginal :class:`SplineBasis` (for re-evaluation).
+    n_levels
+        Number of factor levels ``L``.
+    """
+
+    design: Float[Array, 'n Lm']
+    penalty: Float[Array, 'Lm Lm']
+    base: 'SplineBasis'
+    n_levels: int
+
+    @property
+    def dim(self) -> int:
+        """Number of factor-smooth coefficients ``L*m``."""
+        return self.design.shape[-1]
+
+    def penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """Penalty blocks ``[(I, 1)]``: the identity ridge (full rank, eigenvalues
+        one -- a single shared smoothing parameter across all groups)."""
+        return [(np.asarray(self.penalty), np.ones(self.dim))]
+
+    def eval_design(
+        self, x: Any
+    ) -> Float[Array, 'g Lm']:
+        """Re-evaluate at new ``(x_vals, group)`` (a tuple, the by-factor
+        convention): the whitened GP design at ``x_vals`` placed in each
+        observation's group block."""
+        x_vals, group = x
+        psi = spline_design(self.base, jnp.asarray(x_vals))  # (g, m)
+        group = jnp.asarray(group).astype(jnp.int32)
+        onehot = jax.nn.one_hot(group, self.n_levels, dtype=psi.dtype)
+        inter = onehot[:, :, None] * psi[:, None, :]  # (g, L, m)
+        return inter.reshape(psi.shape[0], self.n_levels * self.base.dim)
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[Tuple[Any, ...], Tuple[int]]:
+        return (self.design, self.penalty, self.base), (self.n_levels,)
+
+    @classmethod
+    def tree_unflatten(
+        cls, aux: Tuple[int], children: Tuple[Any, ...]
+    ) -> '_FactorGPBasis':
+        design, penalty, base = children
+        (n_levels,) = aux
+        return cls(
+            design=design, penalty=penalty, base=base, n_levels=n_levels
+        )
+
+
+def gp_factor_smooth(
+    x: Float[Array, ' n'],
+    group: Int[Array, ' n'],
+    n_basis: int = 10,
+    *,
+    kernel: str = 'matern52',
+    rho: Optional[float] = None,
+    amplitude: float = 1.0,
+    boundary: float = 1.5,
+    bounds: Optional[Tuple[float, float]] = None,
+    center: bool = False,
+    n_levels: Optional[int] = None,
+) -> _FactorGPBasis:
+    """Build a factor-smooth GP interaction (mgcv ``bs="fs"`` with a GP marginal).
+
+    A separate Hilbert-space GP curve of ``x`` for each level of ``group``, all
+    sharing **one** smoothing parameter (so the per-group curves are random
+    deviations with a common amplitude -- partial pooling).  This is the
+    **fixed-``rho``** building block of the hierarchical GP: drop it into
+    ``gam_fit`` alongside a population :func:`hsgp_basis` of the same ``rho`` (and
+    the intercept) for the "GS" hierarchical GP.  For *estimated* ``rho`` and the
+    full variance-component report, use :func:`~nitrix.stats.hgp.hgp_fit`.
+
+    Parameters
+    ----------
+    x
+        ``(n,)`` covariate.
+    group
+        ``(n,)`` integer factor labels ``0 .. L-1``.
+    n_basis
+        Per-group HSGP rank ``m`` (default ``10``; the design is ``L`` times this
+        wide, so a smaller rank than :func:`hsgp_basis` is usual).
+    kernel, rho, amplitude, boundary, bounds
+        HSGP marginal parameters (see :func:`hsgp_basis`); ``rho`` defaults to the
+        data half-range (a fixed value -- lengthscale estimation is ``hgp_fit``).
+    center
+        Sum-to-zero each group's smooth (default ``False`` -- the group curves
+        carry their own level, the usual factor-smooth; set ``True`` to pair with
+        an explicit per-group mean).
+    n_levels
+        Number of levels ``L`` (defaults to ``int(group.max()) + 1``); pass it when
+        a level is absent so the block width is stable.
+
+    Returns
+    -------
+    ``_FactorGPBasis`` (a :data:`SmoothBasis`) for ``gam_fit``; the single
+    Fellner-Schall smoothing parameter on this block is the shared group
+    precision ``1 / sigma_grp^2``.
+    """
+    base = hsgp_basis(
+        x, n_basis, kernel=kernel, rho=rho, amplitude=amplitude,
+        boundary=boundary, bounds=bounds, center=center,
+    )
+    group = jnp.asarray(group)
+    L = int(n_levels) if n_levels is not None else int(jnp.max(group)) + 1
+    m = base.dim
+    onehot = jax.nn.one_hot(group, L, dtype=base.design.dtype)  # (n, L)
+    inter = onehot[:, :, None] * base.design[:, None, :]  # (n, L, m)
+    design = inter.reshape(base.design.shape[0], L * m)
+    penalty = np.eye(L * m, dtype=base.design.dtype)
+    return _FactorGPBasis(
+        design=design,
+        penalty=penalty,  # type: ignore[arg-type]
+        base=base,
+        n_levels=L,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multi-dimensional Hilbert-space GP smooth (tensor-product HSGP) -- a spatial /
+# multi-covariate GP (Riutort-Mayol/Burkner 2023 sec.3)
+# ---------------------------------------------------------------------------
+
+
+def _hsgp_nd_raw(
+    X: Float[Array, 'g D'],
+    freqs: Float[Array, 'M D'],
+    phase: Float[Array, 'M D'],
+    inv_sqrt_L: Float[Array, ' D'],
+    sqrt_s: Float[Array, ' M'],
+) -> Float[Array, 'g M']:
+    """Whitened tensor-product eigenfunction design (pre-constraint): for mode
+    ``m`` and point ``x``, ``sqrt(s_m) * prod_d sqrt(1/L_d) sin(w_{m,d} x_d +
+    phase_{m,d})``."""
+    X = jnp.asarray(X)
+    arg = freqs[None, :, :] * X[:, None, :] + phase[None, :, :]  # (g, M, D)
+    terms = inv_sqrt_L[None, None, :] * jnp.sin(arg)
+    phi = jnp.prod(terms, axis=2)  # (g, M)
+    return phi * sqrt_s[None, :]
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class _HSGPndBasis:
+    """A multi-dimensional Hilbert-space approximate GP smooth (tensor-product).
+
+    The ``D``-dimensional analogue of :func:`hsgp_basis`: a reduced-rank GP on a
+    box domain, expanded in the **tensor-product** Laplace-Dirichlet eigenfunctions
+    ``phi_{j_1..j_D}(x) = prod_d phi_{j_d}(x_d)`` (eigenvalue ``sum_d lambda_{j_d}``),
+    with the kernel entering only through the spectral-density weights of the mode
+    frequency magnitude.  Whitened design, identity penalty -- a drop-in
+    ``gam_fit`` smooth (the Fellner-Schall parameter is the GP amplitude).
+
+    Attributes
+    ----------
+    design
+        ``(n, M)`` whitened design (``M = prod_d m_d`` modes, post-constraint).
+    penalty
+        ``(M, M)`` identity penalty (post-constraint).
+    constraint
+        Sum-to-zero reparameterisation ``Z`` (``None`` if unconstrained).
+    freqs, phase
+        ``(M0, D)`` per-mode per-dimension eigen-frequency and phase (pre-
+        constraint ``M0``).
+    inv_sqrt_L
+        ``(D,)`` per-dimension ``sqrt(1/L_d)`` amplitude.
+    sqrt_s
+        ``(M0,)`` per-mode spectral-weight square roots.
+    n_dim
+        Input dimension ``D``.
+    """
+
+    design: Float[Array, 'n M']
+    penalty: Float[Array, 'M M']
+    constraint: Optional[Float[Array, 'M0 M']]
+    freqs: Float[Array, 'M0 D']
+    phase: Float[Array, 'M0 D']
+    inv_sqrt_L: Float[Array, ' D']
+    sqrt_s: Float[Array, ' M0']
+    n_dim: int
+
+    @property
+    def dim(self) -> int:
+        """Number of (post-constraint) basis coefficients ``M``."""
+        return self.design.shape[-1]
+
+    def penalty_blocks(self) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """Penalty blocks ``[(S, eig)]`` (identity ridge; one smoothing param)."""
+        s = np.asarray(self.penalty)
+        w, _ = np.linalg.eigh(s)
+        floor = 1e-10 * max(float(w.max()), float(np.finfo(w.dtype).tiny))
+        return [(s, np.where(w > floor, w, 0.0))]
+
+    def eval_design(self, x: Float[Array, 'g D']) -> Float[Array, 'g M']:
+        """Re-evaluate the tensor-product design at new points ``x`` (``(g, D)``)."""
+        raw = _hsgp_nd_raw(
+            jnp.asarray(x), self.freqs, self.phase, self.inv_sqrt_L, self.sqrt_s
+        )
+        if self.constraint is not None:
+            raw = raw @ self.constraint
+        return raw
+
+    def tree_flatten(
+        self,
+    ) -> Tuple[Tuple[Any, ...], Tuple[int]]:
+        return (
+            (
+                self.design, self.penalty, self.constraint,
+                self.freqs, self.phase, self.inv_sqrt_L, self.sqrt_s,
+            ),
+            (self.n_dim,),
+        )
+
+    @classmethod
+    def tree_unflatten(
+        cls, aux: Tuple[int], children: Tuple[Any, ...]
+    ) -> '_HSGPndBasis':
+        (design, penalty, constraint, freqs, phase, inv_sqrt_L, sqrt_s) = children
+        (n_dim,) = aux
+        return cls(
+            design=design, penalty=penalty, constraint=constraint,
+            freqs=freqs, phase=phase, inv_sqrt_L=inv_sqrt_L, sqrt_s=sqrt_s,
+            n_dim=n_dim,
+        )
+
+
+def hsgp_basis_nd(
+    X: Float[Array, 'n D'],
+    n_basis: Any = 8,
+    *,
+    kernel: str = 'matern52',
+    rho: Any = None,
+    amplitude: float = 1.0,
+    boundary: float = 1.5,
+    center: bool = True,
+) -> _HSGPndBasis:
+    """Build a multi-dimensional Hilbert-space GP smooth (tensor-product HSGP).
+
+    The ``D``-D GP smoother (a spatial smooth, or a smooth interaction of ``D``
+    continuous covariates): the reduced-rank GP on a box domain expanded in the
+    tensor-product Laplace eigenfunctions.  Either **isotropic** (one lengthscale,
+    a radial kernel of ``||x - x'||``) or **separable / ARD** (a per-dimension
+    lengthscale, a product kernel) -- selected by ``rho``.
+
+    Parameters
+    ----------
+    X
+        ``(n, D)`` covariates (``D >= 1`` columns).
+    n_basis
+        Per-dimension rank: an int (the same ``m`` for every dimension) or a
+        length-``D`` sequence ``[m_1, ..., m_D]``.  The total rank is the product
+        ``M = prod_d m_d`` (it grows fast with ``D`` -- keep ``m`` modest for
+        ``D >= 2``).
+    kernel
+        Stationary kernel: ``'matern52'`` (default) / ``'matern32'`` /
+        ``'matern12'`` / ``'rbf'``.
+    rho
+        Lengthscale.  A scalar gives an **isotropic** GP (the ``D``-dimensional
+        spectral density of ``||w||``); a length-``D`` sequence gives a
+        **separable / ARD** GP (the product of per-dimension 1-D densities).
+        ``None`` (default) is isotropic with ``rho`` the mean per-dimension
+        half-range.
+    amplitude
+        Kernel amplitude folded into the weights; keep ``1.0`` for ``gam_fit``.
+    boundary
+        Domain-extension factor ``L_d / half-range_d`` (``>= 1``; default ``1.5``).
+    center
+        Apply the sum-to-zero identifiability constraint (default ``True``).
+
+    Returns
+    -------
+    ``_HSGPndBasis`` (a :data:`SmoothBasis`) for ``gam_fit``; its
+    ``eval_design`` takes new ``(g, D)`` points.
+    """
+    X = jnp.asarray(X)
+    if X.ndim != 2:
+        raise ValueError(f'hsgp_basis_nd: X must be (n, D); got shape {X.shape}.')
+    n, d_in = X.shape
+    if not boundary >= 1.0:
+        raise ValueError(f'hsgp_basis_nd: boundary={boundary} must be >= 1.0.')
+    x_np = np.asarray(X, dtype=np.float64)
+
+    if isinstance(n_basis, (int, np.integer)):
+        m_per = [int(n_basis)] * d_in
+    else:
+        m_per = [int(v) for v in n_basis]
+        if len(m_per) != d_in:
+            raise ValueError(
+                f'hsgp_basis_nd: n_basis has {len(m_per)} entries; expected '
+                f'D={d_in}.'
+            )
+    if any(mm < 1 for mm in m_per):
+        raise ValueError('hsgp_basis_nd: every per-dimension rank must be >= 1.')
+
+    lo = x_np.min(axis=0)
+    hi = x_np.max(axis=0)
+    c_mid = 0.5 * (lo + hi)
+    big_l = float(boundary) * np.maximum(0.5 * (hi - lo), 1e-6)  # (D,)
+
+    # Per-dimension eigen-frequencies, then the tensor (cartesian) mode grid.
+    sqrt_lams = [
+        np.arange(1, m_per[d] + 1, dtype=np.float64) * np.pi / (2.0 * big_l[d])
+        for d in range(d_in)
+    ]
+    grids = np.meshgrid(*sqrt_lams, indexing='ij')
+    freqs_np = np.stack([g.ravel() for g in grids], axis=1)  # (M, D)
+    phase_np = freqs_np * (big_l - c_mid)[None, :]
+    inv_sqrt_L = np.sqrt(1.0 / big_l)  # (D,)
+
+    # Per-axis (m, L, rho) resolution check (when a lengthscale is given).
+    if rho is not None:
+        rho_per = (
+            [float(v) for v in rho]
+            if not isinstance(rho, (int, float, np.floating, np.integer))
+            else [float(rho)] * d_in
+        )
+        if len(rho_per) == d_in:
+            for d in range(d_in):
+                _check_hsgp_resolution(
+                    float(sqrt_lams[d][-1]), rho_per[d], m_per[d],
+                    f'hsgp_basis_nd[axis {d}]',
+                )
+
+    # Spectral weights: isotropic (||w||, D-dim density) or separable (product of
+    # per-dimension 1-D densities).
+    if rho is None:
+        rho_iso = float(np.mean(0.5 * (hi - lo)))
+        s = np.asarray(
+            spectral_density(
+                jnp.asarray(np.sqrt((freqs_np**2).sum(axis=1))),
+                kernel=kernel, rho=rho_iso, amplitude=amplitude, dim=d_in,
+            )
+        )
+    elif isinstance(rho, (int, float, np.floating, np.integer)):
+        s = np.asarray(
+            spectral_density(
+                jnp.asarray(np.sqrt((freqs_np**2).sum(axis=1))),
+                kernel=kernel, rho=float(rho), amplitude=amplitude, dim=d_in,
+            )
+        )
+    else:
+        rho_seq = [float(v) for v in rho]
+        if len(rho_seq) != d_in:
+            raise ValueError(
+                f'hsgp_basis_nd: rho has {len(rho_seq)} entries; expected '
+                f'D={d_in}.'
+            )
+        s = np.ones(freqs_np.shape[0], dtype=np.float64)
+        for d in range(d_in):
+            s = s * np.asarray(
+                spectral_density(
+                    jnp.asarray(freqs_np[:, d]), kernel=kernel,
+                    rho=rho_seq[d], amplitude=amplitude, dim=1,
+                )
+            )
+    sqrt_s = np.sqrt(np.clip(s, 1e-30, None))
+
+    freqs = jnp.asarray(freqs_np, dtype=X.dtype)
+    phase = jnp.asarray(phase_np, dtype=X.dtype)
+    inv_sqrt_L_j = jnp.asarray(inv_sqrt_L, dtype=X.dtype)
+    sqrt_s_j = jnp.asarray(sqrt_s, dtype=X.dtype)
+
+    design = _hsgp_nd_raw(X, freqs, phase, inv_sqrt_L_j, sqrt_s_j)
+    m_total = design.shape[1]
+    penalty = jnp.eye(m_total, dtype=X.dtype)
+
+    constraint: Optional[Array] = None
+    if center:
+        col_sums = jnp.sum(design, axis=0)
+        constraint = _householder_null(col_sums)
+        design = design @ constraint
+        penalty = constraint.T @ penalty @ constraint
+
+    return _HSGPndBasis(
+        design=design,
+        penalty=penalty,
+        constraint=constraint,
+        freqs=freqs,
+        phase=phase,
+        inv_sqrt_L=inv_sqrt_L_j,
+        sqrt_s=sqrt_s_j,
+        n_dim=int(d_in),
     )
 
 
@@ -908,7 +1500,10 @@ def mrf_smooth(
             f'{a.shape}.'
         )
     r = a.shape[0]
-    af = a.astype(jnp.result_type(a.dtype, jnp.float32))
+    # ER6: promote an integer adjacency to the canonical float (f64 under x64),
+    # not result_type(int, float32) which is float32 under JAX's promotion and
+    # would leak float32 into the mrf design / penalty under the x64 invariant.
+    af = a if jnp.issubdtype(a.dtype, jnp.floating) else a.astype(float)
     design = jax.nn.one_hot(labels.astype(jnp.int32), r, dtype=af.dtype)
     penalty = laplacian(0.5 * (af + af.T), normalisation='combinatorial')
 

@@ -447,3 +447,8 @@ def test_uniform_re_covariance_accessor_across_tiers():
         tier='R2+corr',
     )
     assert corr.cov_re.shape == (V, 2, 2) and len(corr.re_labels) == 2
+
+    # UX1: every tier also exposes a `.coef` alias for `.beta_hat`, so generic
+    # post-processing (`result.coef @ contrast`) works across the whole suite.
+    for res in (reml, lme, nested, crossed, corr):
+        assert res.coef is res.beta_hat

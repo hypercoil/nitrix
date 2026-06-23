@@ -46,6 +46,7 @@ from typing import Literal, Tuple, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import lax
 from jaxtyping import Array, Float
 
@@ -264,6 +265,18 @@ def glasso(
         exactly zero (the conditional-independence graph).
     """
     p = S.shape[0]
+    # Round 4: the off-diagonal-only solver fixes W_jj = S_jj and divides by it
+    # (and seeds 1 / S_jj), so a non-positive diagonal yields inf / nan. Reject it
+    # host-side (skip under jit, where S is a tracer).
+    if not isinstance(S, jax.core.Tracer):
+        diag = np.diag(np.asarray(S))
+        if np.any(diag <= 0.0):
+            raise ValueError(
+                'glasso: the input covariance S has a non-positive diagonal '
+                f'entry (min={float(diag.min()):.3g}); the solver fixes '
+                'W_jj = S_jj and divides by it. Pass a valid covariance with a '
+                'strictly positive diagonal (e.g. a regularised / shrunk S).'
+            )
     lam = jnp.asarray(lam, dtype=S.dtype)
     B0 = jnp.zeros((p, p), S.dtype)
     W, B = _glasso_wb(S, lam, S, B0, n_outer, n_inner)

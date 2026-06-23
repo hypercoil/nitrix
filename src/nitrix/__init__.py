@@ -9,8 +9,11 @@ differentiable programming.
 Top-level subpackages (full surface in each ``__init__.py``):
 
 - ``linalg``   -- matrix utilities, residualisation, kernels, SPD ops.
-- ``stats``    -- (paired / partial / conditional) covariance and
-                  correlation; spectral / analytic-signal utilities.
+- ``stats``    -- mass-univariate modelling: GLM / GAM(M) / Gaussian-process
+                  (HSGP) and hierarchical-GP regression, linear & generalised
+                  mixed models (LME / GLMM, REML / FLAME), beta / ordinal /
+                  location-scale GLMs, regularised covariance / connectivity,
+                  PCA, and permutation / TFCE cluster inference.
 - ``signal``   -- windowing, interpolation (linear + Lomb-Scargle),
                   polynomial detrend, time-series convolution.
 - ``numerics`` -- shape / layout utilities, intensity normalisation.

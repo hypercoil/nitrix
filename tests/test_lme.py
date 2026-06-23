@@ -577,6 +577,11 @@ def test_reml_matches_statsmodels_reference():
         float(mdf.scale),
         atol=5e-3,
     )
+    # MC7: log_lik is the FULL restricted log-likelihood (with the (N-p)log(2pi)
+    # constant), matching statsmodels' llf -- so it is cross-tier comparable.
+    np.testing.assert_allclose(
+        float(result.log_lik[0]), float(mdf.llf), atol=1e-2
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -998,6 +1003,26 @@ def test_lme_fit_r2_block_woodbury_matches_statsmodels():
     assert abs(float(r2.sigma_e_sq[0]) - md.scale) / md.scale < 1e-3
     np.testing.assert_allclose(
         np.asarray(r2.beta_hat[0]), np.asarray(md.fe_params), rtol=5e-3
+    )
+    # MC7: the R2 block-Woodbury log_lik also matches statsmodels' full REML llf.
+    np.testing.assert_allclose(float(r2.log_lik[0]), float(md.llf), atol=5e-2)
+
+
+def test_lme_fit_accepts_1d_random_slope():
+    """ER4: a 1-D random covariate z of shape (N,) is a single random slope; it
+    is coerced to the (N, 1) contract (r=1) -- a bare (N,) previously set r=N and
+    misrouted into a deep IndexError. The 1-D and (N, 1) fits are identical."""
+    y, X, gid = _slope_data(seed=2)
+    z1 = X[:, 1]  # a single covariate, 1-D
+    r_1d = lme_fit(jnp.asarray(y[None, :]), jnp.asarray(X),
+                   group=jnp.asarray(gid), z=jnp.asarray(z1), n_iter=80)
+    r_2d = lme_fit(jnp.asarray(y[None, :]), jnp.asarray(X),
+                   group=jnp.asarray(gid), z=jnp.asarray(z1[:, None]), n_iter=80)
+    # r=1 -> the same (R1 scalar) dispatch as the explicit (N, 1) z, bit-for-bit
+    assert type(r_1d) is type(r_2d)
+    assert r_1d.cov_re.shape == (1, 1, 1)
+    np.testing.assert_allclose(
+        np.asarray(r_1d.beta_hat), np.asarray(r_2d.beta_hat), atol=1e-10
     )
 
 

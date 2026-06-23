@@ -636,9 +636,11 @@ def gam_fit(
 
         coef, lam, v, xtwx, phi = blocked_vmap(per_voxel, (Y,), block=block)
 
-    # Effective degrees of freedom: F = V X^T W X (influence on coefficients).
-    influence = jnp.einsum('vij,vjk->vik', v, xtwx)  # (V, p, p)
-    edf_diag = jnp.diagonal(influence, axis1=-2, axis2=-1)  # (V, p)
+    # Effective degrees of freedom: the diagonal of the influence F = V X^T W X,
+    # computed directly as diag(V @ xtwx)_i = sum_j V[v,i,j] xtwx[v,j,i] so the
+    # full (V, p, p) influence matrix is never materialised (it was the dominant
+    # unbounded epilogue allocation -- ~3.2 GB at V=1e6, p=20, fp64).
+    edf_diag = jnp.einsum('vij,vji->vi', v, xtwx)  # (V, p)
     edf = jnp.stack(
         [jnp.sum(edf_diag[:, lo:hi], axis=-1) for (lo, hi) in slices], axis=-1
     )

@@ -52,10 +52,11 @@ What the legacy had that we drop:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union, cast
 
 import jax
 import jax.numpy as jnp
+from jax.scipy.special import gammaln
 from jaxtyping import Array, Float, Num
 
 __all__ = [
@@ -67,6 +68,9 @@ __all__ = [
     'polynomial_kernel',
     'sigmoid_kernel',
     'cosine_kernel',
+    'se_spectral_density',
+    'matern_spectral_density',
+    'spectral_density',
 ]
 
 
@@ -147,7 +151,10 @@ def linear_distance(
     theta
         Optional metric tensor.  ``None`` -> standard squared L2;
         vector -> diagonal Mahalanobis ``sum_d theta_d (x_d - y_d)^2``;
-        matrix -> full Mahalanobis ``(x - y)^T theta (x - y)``.
+        matrix -> full Mahalanobis ``(x - y)^T theta (x - y)``.  The matrix form
+        is exact only for a **symmetric** ``theta`` (the identity-form expansion
+        uses one cross term ``2 x^T theta y``); pass ``0.5 (theta + theta.T)``
+        for an asymmetric input.
 
     Returns
     -------
@@ -323,3 +330,143 @@ def cosine_kernel(
     X0_n = parameterised_norm(X0, theta=theta)
     X1_n = X0_n if X1 is None else parameterised_norm(X1, theta=theta)
     return linear_kernel(X0_n, X1_n, theta=theta)
+
+
+# ---------------------------------------------------------------------------
+# Stationary-kernel spectral densities (1-D)
+# ---------------------------------------------------------------------------
+#
+# ``S_theta(omega)`` is the power spectral density of a stationary kernel
+# ``k(r)`` (the Fourier transform: ``k(r) = (1/pi) int_0^inf S(omega) cos(omega
+# r) domega``).  Evaluated at the Laplace eigen-frequencies it supplies the prior
+# variances of a Hilbert-space approximate Gaussian process (HSGP); see
+# :func:`nitrix.stats.basis.hsgp_basis`.  Parameterisation (lengthscale ``rho``,
+# amplitude ``amplitude``) matches scikit-learn's ``RBF`` / ``Matern`` kernels
+# scaled by ``amplitude**2``.
+
+# Matern smoothness -> spectral closed form is given per-nu below (nu in
+# {1/2, 3/2, 5/2}); a general-nu form via ``gammaln`` is a future add.
+_MATERN_NU = {0.5, 1.5, 2.5}
+
+
+def se_spectral_density(
+    omega: Float[Array, '...'],
+    *,
+    rho: Union[float, Float[Array, '']],
+    amplitude: float = 1.0,
+    dim: int = 1,
+) -> Float[Array, '...']:
+    """Squared-exponential (RBF) spectral density in ``dim`` dimensions.
+
+    ``S(w) = amplitude**2 * (2 pi)**(D/2) * rho**D * exp(-rho**2 ||w||**2 / 2)`` --
+    the ``D``-dimensional FT of ``k(r) = amplitude**2 exp(-r**2 / (2 rho**2))``
+    (scikit-learn ``RBF(length_scale=rho)`` scaled by ``amplitude**2``).  ``omega``
+    is the frequency magnitude ``||w||``; ``dim=1`` is the 1-D case
+    ``amp**2 sqrt(2 pi) rho exp(...)``.
+    """
+    omega = jnp.asarray(omega)
+    # Promote an integer omega to the default float (f64 under x64, else f32)
+    # BEFORE deriving rho/amp -- else `dtype=omega.dtype` truncates rho/amplitude
+    # to int (rho->0 zeros the density). A float omega is preserved as-is
+    # (float32 stays float32 for the x32 path).
+    if not jnp.issubdtype(omega.dtype, jnp.floating):
+        omega = omega.astype(float)
+    dt = omega.dtype
+    rho = jnp.asarray(rho, dtype=dt)
+    amp2 = jnp.asarray(amplitude, dtype=dt) ** 2
+    const = (2.0 * jnp.pi) ** (dim / 2.0) * rho**dim
+    return cast(Array, amp2 * const * jnp.exp(-0.5 * (rho * omega) ** 2))
+
+
+def matern_spectral_density(
+    omega: Float[Array, '...'],
+    *,
+    rho: Union[float, Float[Array, '']],
+    nu: float,
+    amplitude: float = 1.0,
+    dim: int = 1,
+) -> Float[Array, '...']:
+    """Matern spectral density in ``dim`` dimensions for ``nu in {0.5, 1.5, 2.5}``.
+
+    ``S(w) = amp**2 * C * (lam**2 + ||w||**2)**(-(nu + D/2))`` with the Matern rate
+    ``lam = sqrt(2 nu) / rho`` and ``C = 2**D pi**(D/2) Gamma(nu + D/2) (2 nu)**nu /
+    (Gamma(nu) rho**(2 nu))`` -- the ``D``-dimensional FT of scikit-learn
+    ``Matern(length_scale=rho, nu=nu)`` scaled by ``amplitude**2``.  ``omega`` is
+    the frequency magnitude ``||w||``.  At ``dim=1`` this reduces to the closed
+    forms ``2 lam/(lam^2+w^2)``, ``4 lam^3/(lam^2+w^2)^2``,
+    ``16/3 lam^5/(lam^2+w^2)^3`` (used directly to keep the well-tested 1-D path
+    byte-identical).
+    """
+    if nu not in _MATERN_NU:
+        raise ValueError(
+            f'matern_spectral_density: nu={nu!r} unsupported; use 0.5, 1.5, or '
+            '2.5.'
+        )
+    omega = jnp.asarray(omega)
+    # See se_spectral_density: promote an integer omega to the default float
+    # before casting rho/amplitude (otherwise an integer omega truncates rho ->
+    # lam=1/0 -> NaN). A float omega is preserved, keeping the dim=1 closed forms
+    # byte-identical.
+    if not jnp.issubdtype(omega.dtype, jnp.floating):
+        omega = omega.astype(float)
+    dt = omega.dtype
+    rho = jnp.asarray(rho, dtype=dt)
+    amp2 = jnp.asarray(amplitude, dtype=dt) ** 2
+    w2 = omega**2
+    if dim == 1:
+        if nu == 0.5:
+            lam = 1.0 / rho
+            return amp2 * 2.0 * lam / (lam**2 + w2)
+        if nu == 1.5:
+            lam = jnp.sqrt(3.0) / rho
+            return amp2 * 4.0 * lam**3 / (lam**2 + w2) ** 2
+        lam = jnp.sqrt(5.0) / rho  # nu == 2.5
+        return amp2 * (16.0 / 3.0) * lam**5 / (lam**2 + w2) ** 3
+    # General D-dimensional isotropic form (gammaln for the normaliser).
+    half = nu + dim / 2.0
+    lam2 = 2.0 * nu / rho**2
+    log_c = (
+        dim * jnp.log(2.0)
+        + (dim / 2.0) * jnp.log(jnp.pi)
+        + gammaln(half)
+        + nu * jnp.log(2.0 * nu)
+        - gammaln(nu)
+        - 2.0 * nu * jnp.log(rho)
+    )
+    return amp2 * jnp.exp(log_c) * (lam2 + w2) ** (-half)
+
+
+_KERNEL_NU = {
+    'matern12': 0.5,
+    'exp': 0.5,
+    'exponential': 0.5,
+    'matern32': 1.5,
+    'matern52': 2.5,
+}
+
+
+def spectral_density(
+    omega: Float[Array, '...'],
+    *,
+    kernel: str,
+    rho: Union[float, Float[Array, '']],
+    amplitude: float = 1.0,
+    dim: int = 1,
+) -> Float[Array, '...']:
+    """Dispatch a stationary-kernel spectral density (in ``dim`` dimensions).
+
+    ``kernel`` in ``{'rbf'/'se', 'matern12'/'exp', 'matern32', 'matern52'}``;
+    ``omega`` is the frequency magnitude ``||w||`` and ``dim`` the input
+    dimension (``1`` by default -- the 1-D case).
+    """
+    k = kernel.lower().replace('/', '').replace('-', '').replace('_', '')
+    if k in ('rbf', 'se', 'sqexp', 'squaredexponential', 'gaussian'):
+        return se_spectral_density(omega, rho=rho, amplitude=amplitude, dim=dim)
+    if k in _KERNEL_NU:
+        return matern_spectral_density(
+            omega, rho=rho, nu=_KERNEL_NU[k], amplitude=amplitude, dim=dim
+        )
+    raise ValueError(
+        f'spectral_density: unknown kernel {kernel!r}; expected one of '
+        "'rbf'/'se', 'matern12'/'exp', 'matern32', 'matern52'."
+    )

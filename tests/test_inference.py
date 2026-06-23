@@ -69,6 +69,22 @@ def test_sign_flips_properties():
             assert len(set(vals.tolist())) == 1  # whole block shares sign
 
 
+def test_sign_flips_noncontiguous_blocks_stay_independent():
+    """MC3: negative / sparse block labels must be canonicalised, not aliased.
+    ``[-1, -1, 0, 0]`` is two distinct blocks; members share a sign but the two
+    blocks flip independently (no column-index wrap coupling them into one)."""
+    blocks = jnp.asarray([-1, -1, 0, 0])
+    sf = np.asarray(sign_flips(4, 4000, jax.random.PRNGKey(3), blocks=blocks))
+    assert bool(jnp.all(jnp.asarray(sf[0]) == 1.0))
+    assert np.all(sf[:, 0] == sf[:, 1]) and np.all(sf[:, 2] == sf[:, 3])
+    # the two distinct blocks are independent: ~0 correlation over many draws,
+    # and all four (+-,+-) sign combinations appear (an aliased single block
+    # would only ever produce two of them).
+    combos = {(int(a), int(b)) for a, b in zip(sf[1:, 0], sf[1:, 2])}
+    assert len(combos) == 4
+    assert abs(np.corrcoef(sf[1:, 0], sf[1:, 2])[0, 1]) < 0.1
+
+
 def test_permutations_properties():
     pm = permutations(10, 200, jax.random.PRNGKey(0))
     assert bool(jnp.all(pm[0] == jnp.arange(10)))  # identity first
@@ -162,6 +178,60 @@ def test_fdr_and_bonferroni_match_statsmodels():
     rejb, padjb = bonferroni(jnp.asarray(p), alpha=0.05)
     _, padjb_sm, _, _ = multipletests(p, alpha=0.05, method='bonferroni')
     np.testing.assert_allclose(np.asarray(padjb), padjb_sm, atol=1e-10)
+
+
+@needs_sm
+def test_fdr_by_matches_statsmodels():
+    """CV4: Benjamini-Yekutieli (arbitrary-dependence FDR) equals statsmodels'
+    fdr_by, and is uniformly more conservative than BH."""
+    from statsmodels.stats.multitest import multipletests
+
+    from nitrix.stats.inference.multiple_comparisons import fdr_by
+
+    rng = np.random.default_rng(5)
+    p = np.clip(rng.beta(0.4, 4.0, 300), 1e-6, 1.0)
+    _, padj = fdr_by(jnp.asarray(p), alpha=0.05)
+    _, padj_sm, _, _ = multipletests(p, alpha=0.05, method='fdr_by')
+    np.testing.assert_allclose(np.asarray(padj), padj_sm, atol=1e-10)
+    _, bh = fdr_bh(jnp.asarray(p))
+    assert np.all(np.asarray(padj) >= np.asarray(bh) - 1e-12)  # BY >= BH
+
+
+def test_storey_pi0_and_adaptive_fdr():
+    """CV4: Storey's pi0 estimates the true-null fraction; the pi0-adaptive FDR
+    is at least as powerful as BH and recovers BH when pi0 -> 1."""
+    from nitrix.stats.inference.multiple_comparisons import (
+        fdr,
+        fdr_storey,
+        storey_pi0,
+    )
+
+    rng = np.random.default_rng(7)
+    # 800 nulls (uniform) + 200 strong alternatives
+    p = np.clip(
+        np.concatenate([rng.uniform(0, 1, 800), rng.beta(0.3, 8.0, 200)]),
+        1e-8, 1.0,
+    )
+    pj = jnp.asarray(p)
+    pi0 = float(storey_pi0(pj))
+    assert 0.0 < pi0 <= 1.0 and abs(pi0 - 0.8) < 0.15  # ~true null fraction
+    _, st = fdr_storey(pj)
+    _, bh = fdr_bh(pj)
+    assert np.all(np.asarray(st) <= np.asarray(bh) + 1e-12)  # >= power
+    # all-null data: pi0 ~ 1, Storey ~ BH
+    pn = jnp.asarray(rng.uniform(0, 1, 1000))
+    assert float(storey_pi0(pn)) > 0.9
+    np.testing.assert_allclose(
+        np.asarray(fdr_storey(pn)[1]), np.asarray(fdr_bh(pn)[1]), atol=0.05
+    )
+    # dispatcher routes to each method; unknown method raises
+    for method in ('bh', 'by', 'storey'):
+        rej, q = fdr(pj, method=method)
+        assert rej.shape == (1000,) and q.shape == (1000,)
+    with pytest.raises(ValueError, match='expected'):
+        fdr(pj, method='holm')
+    with pytest.raises(ValueError, match='must lie'):
+        storey_pi0(pj, lam=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +453,19 @@ def test_randomise_cluster_enhancement(mode):
             key=jax.random.PRNGKey(0),
             n_perm=10,
             enhancement=mode,
+        )
+
+
+def test_randomise_saturated_design_raises():
+    """Round 4: a saturated design (n <= p, residual dof <= 0) makes the t/F
+    statistics undefined; it is rejected rather than returning all-p=1."""
+    rng = np.random.default_rng(0)
+    Y = jnp.asarray(rng.standard_normal((1, 5)))
+    X = jnp.asarray(rng.standard_normal((5, 5)))  # n == p -> dof = 0
+    with pytest.raises(ValueError, match='saturated'):
+        permutation_test(
+            Y, X, jnp.asarray(np.eye(5)[:1]),
+            n_perm=10, key=jax.random.PRNGKey(0),
         )
 
 
@@ -626,3 +709,60 @@ def test_conjunction_preserves_spatial_shape():
     stats = jnp.asarray(np.random.default_rng(0).standard_normal((4, 5, 6)))
     assert conjunction(stats).shape == (5, 6)
     assert conjunction_pvalue(jnp.abs(stats)).shape == (5, 6)
+
+
+# ---------------------------------------------------------------------------
+# ER7: permutation_test driver options -- mask / var_smooth / restricted blocks
+# ---------------------------------------------------------------------------
+
+
+def _blob_data(seed=0, H=8, W=8, N=24):
+    rng = np.random.default_rng(seed)
+    data = rng.standard_normal((H, W, N))
+    data[2:5, 2:5, :] += 0.9  # a signal blob
+    X = np.c_[np.ones(N), rng.standard_normal(N)]
+    return jnp.asarray(data), jnp.asarray(X), jnp.asarray([1.0, 0.0])
+
+
+def test_permutation_test_mask_excludes_out_of_mask_voxels():
+    """ER7: out-of-mask voxels do not contribute to (or receive) FWE; restricting
+    the family to the mask only sharpens in-mask FWE p-values (fewer voxels
+    compete for the null maximum)."""
+    data, X, c = _blob_data()
+    mask_np = np.zeros((8, 8), dtype=bool)
+    mask_np[2:5, 2:5] = True
+    kw = dict(design=X, contrast=c, n_perm=200, key=jax.random.PRNGKey(0))
+    base = permutation_test(data, **kw)
+    masked = permutation_test(data, mask=jnp.asarray(mask_np), **kw)
+    pf = np.asarray(masked.p_fwe)
+    # out-of-mask voxels are inert (p_fwe == 1)
+    np.testing.assert_allclose(pf[~mask_np], 1.0, atol=1e-12)
+    # in-mask FWE is no weaker than the whole-volume family
+    assert np.all(pf[mask_np] <= np.asarray(base.p_fwe)[mask_np] + 1e-9)
+
+
+def test_permutation_test_var_smooth_changes_statistic():
+    """ER7: var_smooth replaces the raw t with a variance-smoothed pseudo-t
+    (FSL ``-v``); the statistic map changes but stays finite with valid FWE."""
+    data, X, c = _blob_data()
+    kw = dict(design=X, contrast=c, n_perm=200, key=jax.random.PRNGKey(1))
+    base = permutation_test(data, **kw)
+    smoothed = permutation_test(data, var_smooth=1.0, **kw)
+    assert not np.allclose(np.asarray(base.stat), np.asarray(smoothed.stat))
+    assert np.all(np.isfinite(np.asarray(smoothed.stat)))
+    pf = np.asarray(smoothed.p_fwe)
+    assert pf.min() >= 1.0 / 200 - 1e-9 and pf.max() <= 1.0 + 1e-9
+
+
+def test_permutation_test_restricted_blocks_run_and_are_valid():
+    """ER7: exchangeability blocks restrict the sign-flip null to within-block
+    relabellings; the driver plumbs them through to valid FWE p-values."""
+    data, X, c = _blob_data()
+    blocks = jnp.asarray(np.repeat(np.arange(12), 2))  # paired blocks
+    res = permutation_test(
+        data, design=X, contrast=c, n_perm=200, key=jax.random.PRNGKey(2),
+        exchange='sign', blocks=blocks,
+    )
+    pf = np.asarray(res.p_fwe)
+    assert pf.min() >= 1.0 / 200 - 1e-9 and pf.max() <= 1.0 + 1e-9
+    assert np.all(np.isfinite(pf))

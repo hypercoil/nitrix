@@ -3,9 +3,9 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.stats -- statistical primitives.
+nitrix.stats -- mass-univariate statistical modelling for neuroimaging.
 
-Two submodules:
+Submodules:
 
 - ``covariance`` -- (partial) (paired) (conditional) covariance
   / correlation over time series.  JIT-friendly batch handling.
@@ -13,13 +13,27 @@ Two submodules:
   negative log-likelihood (log-variance parameterised).
 - ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
-- ``basis``      -- penalised spline bases (P-splines) for additive models.
+- ``betareg`` / ``ordinal`` / ``gaulss`` -- additional response models: beta
+  regression (rates / proportions), ordinal (cumulative-link), and the Gaussian
+  location-scale (mean + variance) GAMLSS fit.
+- ``basis``      -- penalised spline bases (P-splines) for additive models,
+  plus the ``hsgp_basis`` Hilbert-space approximate-GP smooth (reduced-rank
+  Gaussian process) and the kriging ``gp_basis``.
 - ``gam``        -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
+- ``gp``         -- mass-univariate Gaussian-process regression (HSGP or exact
+  engine) with REML-estimated kernel lengthscale and optional ``corr=``
+  structured residual (``gp_fit`` / ``gp_predict``).
+- ``hgp``        -- hierarchical / multi-level GP: a population smooth plus
+  group-level smooth deviations sharing a kernel (``hgp_fit`` / ``hgp_predict``).
+- ``priors``     -- lengthscale MAP-rho regularisers (half-normal / inverse-gamma
+  / log-normal) for the ``gp_fit`` / ``hgp_fit`` kernel-range search.
 - ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
   covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
   small-sample regime.
 - ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
+- ``glmm``       -- generalised linear mixed models (PQL / Laplace / adaptive
+  Gauss-Hermite) for non-Gaussian responses with random effects.
 - ``inference``  -- permutation / TFCE cluster inference (the on-device FSL
   ``randomise`` engine) + FDR / Bonferroni.
 - ``pca``        -- principal-component analysis (fit / transform /
@@ -50,6 +64,9 @@ from .basis import (
     cr_basis,
     cyclic_cubic_basis,
     gp_basis,
+    gp_factor_smooth,
+    hsgp_basis,
+    hsgp_basis_nd,
     mrf_smooth,
     re_smooth,
     spline_design,
@@ -73,6 +90,9 @@ from .gam import (
     smooth_partial_effect,
     smooth_significance,
 )
+from .gp import GPResult, gp_aic, gp_bic, gp_fit, gp_predict
+from .hgp import HGPResult, hgp_fit, hgp_predict
+from .priors import PriorFn, halfnormal_prior, invgamma_prior, lognormal_prior
 from .betareg import BetaResult, beta_fit
 from .gaulss import GauLSSResult, gaulss_fit
 from .ordinal import OrdinalResult, ordinal_fit
@@ -185,6 +205,9 @@ __all__ = [
     'thinplate_regression_basis',
     'cr_basis',
     'gp_basis',
+    'hsgp_basis',
+    'hsgp_basis_nd',
+    'gp_factor_smooth',
     'mrf_smooth',
     'tensor_product_basis',
     're_smooth',
@@ -196,6 +219,21 @@ __all__ = [
     'gam_fit',
     'smooth_partial_effect',
     'smooth_significance',
+    # gp
+    'GPResult',
+    'gp_fit',
+    'gp_predict',
+    'gp_aic',
+    'gp_bic',
+    # hgp
+    'HGPResult',
+    'hgp_fit',
+    'hgp_predict',
+    # priors (map_rho regularisers)
+    'PriorFn',
+    'halfnormal_prior',
+    'invgamma_prior',
+    'lognormal_prior',
     # glmm
     'GLMMResult',
     'glmm_fit',

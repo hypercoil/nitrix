@@ -270,6 +270,51 @@ def test_glmm_shape_validation():
         glmm_fit(Y, jnp.asarray(X), group=jnp.asarray(group[:-2]))
 
 
+def test_glmm_group_label_range_validation():
+    """ER1: labels outside [0, n_groups) are silently dropped by segment_sum /
+    one_hot; glmm_fit must reject them eagerly while staying jit-traceable when
+    `group` is a tracer (P7)."""
+    X, group, y, _ = _sim('poisson', seed=1, q=6, n_per=10)
+    Y = jnp.asarray(y[None, :])
+    # supplied n_groups too small for the labels present
+    with pytest.raises(ValueError, match='group labels must lie'):
+        glmm_fit(Y, jnp.asarray(X), group=jnp.asarray(group), n_groups=4)
+    # negative label, auto n_groups
+    bad = np.array(group)
+    bad[: len(bad) // 5] = -1
+    with pytest.raises(ValueError, match='group labels must lie'):
+        glmm_fit(Y, jnp.asarray(X), group=jnp.asarray(bad))
+    # under jit the host guard is skipped (group is a tracer) -> still traces
+    import functools
+    fit = jax.jit(functools.partial(glmm_fit, n_groups=6))
+    res = fit(Y, jnp.asarray(X), group=jnp.asarray(group))
+    assert res.beta_hat.shape[-1] == X.shape[1]
+
+
+def test_glmm_laplace_agq_reject_free_dispersion():
+    """MC4: the Laplace/AGQ marginal evaluates the family at dispersion=1, which
+    mis-specifies a free-dispersion family (the residual scale is folded into
+    G). glmm_fit must reject gaussian on those paths and keep the PQL path."""
+    X, group, y, _ = _sim('gaussian', seed=2, q=6, n_per=10)
+    Y = jnp.asarray(y[None, :])
+    g = jnp.asarray(group)
+    for method in ('laplace', 'agq'):  # guard fires before the z dispatch
+        with pytest.raises(ValueError, match='fixed dispersion'):
+            glmm_fit(Y, jnp.asarray(X), group=g, family='gaussian', method=method)
+    # gaussian is still fine on the default PQL path (which estimates the scale)
+    ok = glmm_fit(Y, jnp.asarray(X), group=g, family='gaussian')
+    assert ok.tier in ('few', 'many')
+
+
+def test_glmm_result_coef_alias():
+    """UX1: GLMMResult exposes `.coef` aliasing `.beta_hat` for cross-suite parity
+    (so `result.coef` works on GLMM as on GLM/GAM/GP/HGP results)."""
+    X, group, y, _ = _sim('poisson', seed=0, q=6, n_per=10)
+    res = glmm_fit(jnp.asarray(y[None, :]), jnp.asarray(X),
+                   group=jnp.asarray(group), family='poisson')
+    assert res.coef is res.beta_hat
+
+
 # ---------------------------------------------------------------------------
 # Laplace-approximate GLMM (method='laplace') -- the §11 follow-up to PQL
 # ---------------------------------------------------------------------------

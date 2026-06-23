@@ -31,10 +31,13 @@ from .kernel import (
     gaussian_kernel,
     linear_distance,
     linear_kernel,
+    matern_spectral_density,
     parameterised_norm,
     polynomial_kernel,
     rbf_kernel,
+    se_spectral_density,
     sigmoid_kernel,
+    spectral_density,
 )
 from .matrix import (
     delete_diagonal,
@@ -105,10 +108,13 @@ __all__ = [
     'gaussian_kernel',
     'linear_distance',
     'linear_kernel',
+    'matern_spectral_density',
     'parameterised_norm',
     'polynomial_kernel',
     'rbf_kernel',
+    'se_spectral_density',
     'sigmoid_kernel',
+    'spectral_density',
     # spd
     'cone_project_spd',
     'mean_euclidean',
