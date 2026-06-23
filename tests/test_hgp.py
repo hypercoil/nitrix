@@ -316,6 +316,28 @@ def test_hgp_block_bounds_rho_search_without_changing_results():
     )
 
 
+def test_hgp_explicit_bounds_and_n_levels():
+    """ER7: explicit `bounds=` overrides the HSGP domain (changing the fit), and
+    an explicit `n_levels=` matching the data is byte-identical to the inferred
+    layout (the static-count jit-traceability hook)."""
+    rng = np.random.default_rng(3)
+    x, group, y, *_ = _hier_data(rng, L=5, per=12)
+    Y = jnp.asarray(y[None, :])
+    xa, ga = jnp.asarray(x), jnp.asarray(group)
+
+    default = hgp_fit(Y, xa, ga, rank=8, n_rho=8)
+    widened = hgp_fit(Y, xa, ga, rank=8, n_rho=8, bounds=(-0.5, 1.5))
+    assert (widened.lo, widened.hi) == (-0.5, 1.5)
+    assert (default.lo, default.hi) != (widened.lo, widened.hi)
+    assert not np.allclose(np.asarray(default.coef), np.asarray(widened.coef))
+
+    explicit = hgp_fit(Y, xa, ga, rank=8, n_rho=8, n_levels=5)
+    assert explicit.n_levels == 5
+    np.testing.assert_allclose(
+        np.asarray(default.coef), np.asarray(explicit.coef), atol=1e-10
+    )
+
+
 # ---------------------------------------------------------------------------
 # 4. gp_factor_smooth -- the fixed-rho factor-smooth GP basis (gam_fit drop-in)
 # ---------------------------------------------------------------------------

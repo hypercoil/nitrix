@@ -1054,3 +1054,35 @@ def test_gp_group_without_corr_warns():
 
     assert warned()  # corr=None -> group ignored -> warns
     assert not warned(corr='cs', n_corr=5)  # corr= consumes group
+
+
+def test_gp_hsgp_rank_ge_n_is_regularised():
+    """ER7: an over-parameterised HSGP (rank >= N, so p > N) stays finite -- the
+    diagonal penalty regularises the rank-deficient normal equations -- and the
+    predictive mean still tracks the signal rather than interpolating noise."""
+    rng = np.random.default_rng(0)
+    n = 14
+    x = np.sort(rng.uniform(0.0, 1.0, n))
+    y = np.sin(2 * np.pi * x) + 0.1 * rng.standard_normal(n)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), rank=24, n_rho=10)
+    assert res.coef.shape == (1, 25)  # intercept + 24 eigenfunctions, p > n
+    assert np.all(np.isfinite(np.asarray(res.coef)))
+    xg = np.linspace(0.05, 0.95, 40)
+    mean, _ = gp_predict(res, jnp.asarray(xg))
+    mean = np.asarray(mean)[0]
+    assert np.all(np.isfinite(mean))
+    # the penalty keeps it a smooth fit, not a noise interpolant
+    assert np.corrcoef(mean, np.sin(2 * np.pi * xg))[0, 1] > 0.95
+
+
+def test_gp_tiny_n_fits_finitely():
+    """ER7: a tiny series (N=4) with rank > N still produces a finite, usable
+    fit (edge of the reduced-rank regime)."""
+    rng = np.random.default_rng(1)
+    x = np.sort(rng.uniform(0.0, 1.0, 4))
+    y = np.sin(2 * np.pi * x)
+    res = gp_fit(jnp.asarray(y[None, :]), jnp.asarray(x), rank=6, n_rho=6)
+    assert res.coef.shape == (1, 7)
+    mean, var = gp_predict(res, jnp.asarray(x))
+    assert np.all(np.isfinite(np.asarray(mean)))
+    assert np.all(np.asarray(var) >= 0.0)
