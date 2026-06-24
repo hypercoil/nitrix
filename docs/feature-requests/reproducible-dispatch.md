@@ -246,7 +246,14 @@ into the `jit` cache key; out of scope for P0.
   f32 budget 2e-4; `register.field_smooth` 3e-2, the looser FIR-vs-YvV
   approximation contract on a boundary-decaying field). CubicBSpline docstring
   fixed in P2. 7 tests pass.
-- **P4 — enforcement guard.** Registry-completeness CI test.
+- **P4 — enforcement guard. ✅ SHIPPED** (commit 2f20ebb).
+  `tests/test_reproducible_dispatch_guard.py` AST-scans `src/nitrix`: (1)
+  `resolve_driver(op=...)` strings == the registry (no unregistered op, no
+  orphan); (2) every `default_backend_is_gpu()` call site is in a governed-module
+  allowlist (a new silent platform flip fails CI); (3) allowlist hygiene.
+  Verified the guard catches simulated violations.
+
+**ROLLOUT COMPLETE (P0–P4).** Full reproducible-dispatch suite green (29 tests).
 
 The ilex request (`cubic-bspline-prefilter-backend-parity`) is satisfied by
 P2–P3 for free: honest docstring + tested tolerance + global switch + a `driver`
