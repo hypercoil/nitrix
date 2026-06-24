@@ -437,28 +437,54 @@ _EDT_BIG = 1e10
 _EDT_BIG_THRESHOLD = 1e9  # accumulated cost >= this <=> no boundary reachable
 
 
+def _resolve_sampling(
+    sampling: Optional[Union[float, Sequence[float]]],
+    ndim: int,
+) -> tuple[float, ...]:
+    """Resolve ``sampling`` to a per-axis voxel-spacing tuple (scipy semantics).
+
+    ``None`` -> unit spacing on every axis; a scalar -> that spacing on every
+    axis; a sequence -> per-axis (must match ``ndim``).
+    """
+    if sampling is None:
+        return (1.0,) * ndim
+    if isinstance(sampling, (int, float)):
+        return (float(sampling),) * ndim
+    spac = tuple(float(s) for s in sampling)
+    if len(spac) != ndim:
+        raise ValueError(
+            f'distance_transform: sampling has {len(spac)} entries but the '
+            f'input is {ndim}-D; give one spacing per axis (or a scalar).'
+        )
+    return spac
+
+
 def _edt_along_axis(
     g: Float[Array, '...'],
     axis: int,
     *,
+    spacing: float = 1.0,
     backend: Backend,
 ) -> Float[Array, '...']:
     """Squared 1D EDT along ``axis`` as a tropical min-plus matmul.
 
-    The 1D squared distance transform ``out[p] = min_q (g[q] + (q - p)^2)`` is
-    exactly the tropical (min, +) contraction of the per-position cost ``g``
-    against the squared-distance matrix ``D2[q, p] = (q - p)^2``.  Reshaping
-    the off-axis dims into a batch of lines, the whole pass is one
+    The 1D squared distance transform
+    ``out[p] = min_q (g[q] + (spacing·(q - p))^2)`` is exactly the tropical
+    (min, +) contraction of the per-position cost ``g`` against the
+    squared-distance matrix ``D2[q, p] = (spacing·(q - p))^2``.  Reshaping the
+    off-axis dims into a batch of lines, the whole pass is one
     ``semiring_matmul`` (``(lines, n) @ (n, n)``) -- which carries the
     Pallas-CUDA streaming kernel and its JAX fallback, so the EDT inherits a
     backend-dispatched, differentiable, no-control-flow implementation instead
-    of a per-line stack scan.
+    of a per-line stack scan.  ``spacing`` is the per-axis voxel size (the
+    anisotropic EDT); ``spacing == 1.0`` is byte-identical to the unit grid.
     """
     g = jnp.moveaxis(g, axis, -1)
     shape = g.shape
     n = shape[-1]
     pos = jnp.arange(n, dtype=g.dtype)
-    d2 = (pos[:, None] - pos[None, :]) ** 2  # (n, n) squared-distance matrix
+    delta = jnp.asarray(spacing, g.dtype) * (pos[:, None] - pos[None, :])
+    d2 = delta**2  # (n, n) squared (anisotropic) distance matrix
     out = semiring_matmul(
         g.reshape(-1, n),
         d2,
@@ -471,6 +497,7 @@ def _edt_along_axis(
 def _distance_transform_edt(
     mask: Num[Array, '... *spatial'],
     *,
+    sampling: Optional[Union[float, Sequence[float]]] = None,
     backend: Backend = 'auto',
 ) -> Float[Array, '... *spatial']:
     """Exact Euclidean DT as a separable sequence of min-plus matmuls.
@@ -479,17 +506,21 @@ def _distance_transform_edt(
     the sequential composition of the 1D squared-EDT (``_edt_along_axis``)
     along each axis; ``sqrt`` once at the end.  Seeds are the zero positions of
     ``mask``; every axis is treated as spatial (scipy
-    ``distance_transform_edt`` convention).
+    ``distance_transform_edt`` convention).  ``sampling`` is the per-axis voxel
+    spacing (anisotropic grids); each axis pass scales by its own spacing, so
+    the separable composition yields the exact anisotropic squared distance
+    ``Σ_axis (spacing_axis·Δ_axis)^2``.
     """
     arr = jnp.asarray(mask)
     dtype = jnp.promote_types(arr.dtype, jnp.float32)
+    spac = _resolve_sampling(sampling, arr.ndim)
     g = jnp.where(
         arr == 0,
         jnp.zeros((), dtype),
         jnp.asarray(_EDT_BIG, dtype),
     )
     for axis in range(arr.ndim):
-        g = _edt_along_axis(g, axis, backend=backend)
+        g = _edt_along_axis(g, axis, spacing=spac[axis], backend=backend)
     return jnp.where(
         g >= _EDT_BIG_THRESHOLD,
         jnp.asarray(jnp.inf, dtype),
@@ -501,6 +532,7 @@ def distance_transform(
     mask: Num[Array, '... *spatial'],
     *,
     metric: str = 'euclidean',
+    sampling: Optional[Union[float, Sequence[float]]] = None,
     structuring_element: Optional[Num[Array, '*kspatial']] = None,
     max_iters: Optional[int] = None,
     backend: Backend = 'auto',
@@ -538,6 +570,13 @@ def distance_transform(
     metric
         ``"euclidean"`` (default, exact EDT), ``"chebyshev"`` (chessboard
         chamfer), or ``"city_block"`` (Manhattan chamfer).
+    sampling
+        Per-axis voxel spacing for the **euclidean** engine (anisotropic grids,
+        e.g. a 1x1x3 mm MRI): a scalar (isotropic) or one value per spatial
+        axis (``scipy.ndimage.distance_transform_edt`` ``sampling=`` semantics).
+        ``None`` (default) is unit spacing.  Only the euclidean engine supports
+        it (the chamfer engine encodes integer steps in its kernel); passing it
+        with a chamfer ``metric`` / ``structuring_element`` raises.
     structuring_element
         Explicit per-step cost kernel for the chamfer engine.  When given,
         **selects the chamfer path regardless of** ``metric`` and is used as
@@ -570,7 +609,17 @@ def distance_transform(
     and custom step-cost kernels.  See ``docs/design/perf-audit-2025-05.md``.
     """
     if structuring_element is None and metric == 'euclidean':
-        return _distance_transform_edt(mask, backend=backend)
+        return _distance_transform_edt(
+            mask, sampling=sampling, backend=backend
+        )
+
+    if sampling is not None:
+        raise ValueError(
+            'distance_transform: sampling= (anisotropic voxel spacing) is only '
+            'supported by the exact euclidean engine; the chamfer engine '
+            "(metric='chebyshev'/'city_block' or a structuring_element) encodes "
+            'integer steps in its step kernel. Use metric="euclidean".'
+        )
 
     spatial_rank = jnp.asarray(mask).ndim
     if structuring_element is not None:
@@ -628,6 +677,7 @@ def distance_transform(
 def distance_transform_edt(
     mask: Num[Array, '... *spatial'],
     *,
+    sampling: Optional[Union[float, Sequence[float]]] = None,
     backend: Backend = 'auto',
 ) -> Float[Array, '... *spatial']:
     """Exact Euclidean distance transform (scipy ``distance_transform_edt``).
@@ -635,6 +685,8 @@ def distance_transform_edt(
     Thin alias for ``distance_transform(mask, metric="euclidean")`` -- the
     separable min-plus-matmul engine (semiring Pallas-CUDA kernel + JAX
     fallback).  Distance from each non-zero voxel to the nearest zero voxel;
-    ``+inf`` where ``mask`` is everywhere non-zero.
+    ``+inf`` where ``mask`` is everywhere non-zero.  ``sampling`` is the
+    per-axis voxel spacing (scalar or one per axis; scipy semantics) for
+    anisotropic grids.
     """
-    return _distance_transform_edt(mask, backend=backend)
+    return _distance_transform_edt(mask, sampling=sampling, backend=backend)

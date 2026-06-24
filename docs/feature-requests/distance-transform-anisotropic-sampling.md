@@ -1,10 +1,30 @@
 # B20. `distance_transform` euclidean has no `sampling=` (anisotropic spacing)
 
-> **Status (2026-06-06): open — feature gap from `nitrix-perf-bench`.** Surfaced
+> **Status (2026-06-24): RESOLVED — `sampling=` shipped.**
+> `distance_transform(metric='euclidean', sampling=...)` and
+> `distance_transform_edt(..., sampling=...)` now take a scalar or per-axis voxel
+> spacing (scipy semantics); each axis pass scales its squared-distance matrix
+> by that spacing, so the separable composition is the exact anisotropic squared
+> distance `Σ_axis (spacing_axis·Δ_axis)²`. Verified exact vs
+> `scipy.ndimage.distance_transform_edt(sampling=...)` (2-D + 3-D, fp32) and
+> byte-identical to the unit grid when `sampling` is `None`/`1.0`. The chamfer
+> engine rejects `sampling=` (it encodes integer steps in its kernel). Surfaced
+> for the surface-metrics tier (`classification-surface-metrics.md`), which this
+> unblocks.
+>
+> **FH dispatch evaluated and rejected (same session).** The suggestion below
+> notes the euclidean engine is an O(n²) brute-force min-plus matmul; a
+> Felzenszwalb–Huttenlocher O(n) per-line scan was prototyped and benchmarked
+> (`bench/PERF_EDT_FH.md`). The brute-force matmul **wins at every size on both
+> CPU and GPU** (20–100× on GPU; 2.4–3.7× on CPU; no crossover), because FH's
+> per-line stack scan is dominated by data-dependent control flow under `vmap`.
+> No size dispatch added — the matmul engine carries `sampling=` for free.
+>
+> _Original (2026-06-06): open — feature gap from `nitrix-perf-bench`. Surfaced
 > while hardening the euclidean EDT case (B18 Win 1): the tight gate is exact vs
-> scipy *with unit spacing*, but nitrix has no way to express anisotropic voxel
+> scipy with unit spacing, but nitrix had no way to express anisotropic voxel
 > spacing, which real medical volumes have. Authored perf-bench-side; nitrix
-> disposes.
+> disposes._
 
 ## TL;DR
 
