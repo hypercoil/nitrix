@@ -150,7 +150,7 @@ def _conv_1d_along_axis(
     # / L2c, and platform-independent).  Exact-equal to the conv (the gaussian
     # tap order matches the padded VALID correlation), so every consumer is
     # unchanged numerically.  Large kernels keep the conv (its O(N·K) lowering
-    # amortises; ``method='recursive'`` is the sigma-independent path above that).
+    # amortises; ``driver='recursive'`` is the sigma-independent path above that).
     K_taps = int(kernel.size)
     if K_taps <= _FIR_SHIFT_MAX_TAPS:
         n = x.shape[axis]
@@ -189,7 +189,7 @@ def _yvv_coeffs(sigma: float) -> tuple[float, float, float, float]:
     """
     if sigma < _YVV_MIN_SIGMA:
         raise ValueError(
-            f"method='recursive' (Young-van Vliet) needs sigma >= "
+            f"driver='recursive' (Young-van Vliet) needs sigma >= "
             f'{_YVV_MIN_SIGMA}; got {sigma}.  Use the FIR path (the default) '
             f'for small sigma -- its kernel is tiny there.'
         )
@@ -273,7 +273,7 @@ def gaussian(
     truncate: float = 4.0,
     kernel_size: Union[None, int, Sequence[Optional[int]]] = None,
     mode: str = 'reflect',
-    method: Literal['fir', 'recursive'] = 'fir',
+    driver: Literal['fir', 'recursive'] = 'fir',
     spatial_rank: Optional[int] = None,
 ) -> Float[Array, '... *spatial']:
     """Separable n-D Gaussian smoothing.
@@ -320,20 +320,24 @@ def gaussian(
         even-tap Gaussian-weighted average (e.g. the
         spheremorph / JOSA NegativeJacobianFiltering 2×2 kernel
         at ``sigma=0.7``); otherwise prefer the default heuristic.
-    method
-        ``"fir"`` (default) -- the truncated separable convolution above.
-        ``"recursive"`` -- the **Young-van Vliet** 3rd-order recursive Gaussian:
-        O(N) per axis, **independent of sigma** (no kernel growth), so it wins
-        for **large** sigma where the FIR kernel would be many taps.  Approximate
-        (a 3rd-order pole fit; ~1% interior error vs the FIR Gaussian), needs
-        ``sigma >= 0.5``, uses an **edge-extension** boundary (it ignores
-        ``mode`` / ``kernel_size`` / ``truncate``), and runs as a sequential
-        ``lax.scan`` (O(N) depth -- great for a one-off smooth, but at the small
-        sigmas of, e.g., a deformable-registration regulariser the parallel FIR
-        conv is faster on GPU, so it is **not** the registration default).
+    driver
+        Numerical variant (the ``driver`` axis).  ``"fir"`` (default) -- the
+        truncated separable convolution above.  ``"recursive"`` -- the
+        **Young-van Vliet** 3rd-order recursive Gaussian: O(N) per axis,
+        **independent of sigma** (no kernel growth), so it wins for **large**
+        sigma where the FIR kernel would be many taps.  Approximate (a 3rd-order
+        pole fit; ~1% interior error vs the FIR Gaussian), needs ``sigma >=
+        0.5``, uses an **edge-extension** boundary (it ignores ``mode`` /
+        ``kernel_size`` / ``truncate``), and runs as a sequential ``lax.scan``
+        (O(N) depth -- great for a one-off smooth, but at the small sigmas of,
+        e.g., a deformable-registration regulariser the parallel FIR conv is
+        faster on GPU, so it is **not** the registration default).  The two
+        variants differ by ~1-2% near edges (see the divergent op
+        ``register.field_smooth``, which auto-selects between them); ``"fir"`` is
+        the canonical / more faithful path.
     mode
         Boundary handling: ``"reflect"`` (default), ``"constant"``
-        (zero-pad), or ``"edge"`` (replicate boundary).  ``method="recursive"``
+        (zero-pad), or ``"edge"`` (replicate boundary).  ``driver="recursive"``
         ignores this (it uses edge extension).
 
         **Framework cross-references**: ``mode='reflect'`` matches
@@ -387,17 +391,17 @@ def gaussian(
     sigmas = _normalise_sigma(sigma, spatial_rank)
     spatial_axes = tuple(range(x.ndim - spatial_rank, x.ndim))
 
-    if method == 'recursive':
+    if driver == 'recursive':
         if kernel_size is not None:
             raise ValueError(
-                "method='recursive' has no kernel; do not pass kernel_size."
+                "driver='recursive' has no kernel; do not pass kernel_size."
             )
         out = x
         for axis, s in zip(spatial_axes, sigmas):
             out = _recursive_gaussian_1d(out, axis, s)
         return out
-    if method != 'fir':
-        raise ValueError(f"method={method!r}; expected 'fir' or 'recursive'.")
+    if driver != 'fir':
+        raise ValueError(f"driver={driver!r}; expected 'fir' or 'recursive'.")
 
     kernel_sizes = _normalise_kernel_size(kernel_size, spatial_rank)
     out = x

@@ -50,6 +50,20 @@ register_divergent_op(
     summary='IIR SOS cascade: FFT-convolution vs sequential vs associative scan',
 )
 
+# --- register.field_smooth ------------------------------------------------
+# The SVF/Demons/SyN velocity-field Gaussian regulariser: FIR shifted-slice
+# convolution (GPU) vs Young-van Vliet recursion (CPU, sigma>=0.5).  They differ
+# ~1-2% within a few sigma of the edge.  Canonical = 'fir' (the more faithful
+# path; a regulariser, not the objective, so the loose tolerance is by design).
+register_divergent_op(
+    'register.field_smooth',
+    canonical='fir',
+    fast={'gpu': 'fir', 'cpu': 'recursive'},
+    driver_values=('fir', 'recursive'),
+    tolerance={'float32': 3e-2, 'float64': 3e-2},
+    summary='velocity-field Gaussian regulariser: FIR vs Young-van Vliet recursion',
+)
+
 # --- geometry.cubic_bspline_prefilter -------------------------------------
 # The CubicBSpline interpolant's recursive prefilter: parallel associative_scan
 # (GPU) vs sequential scan (CPU) reassociate the long pole filter differently.

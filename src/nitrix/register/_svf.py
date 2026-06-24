@@ -29,6 +29,7 @@ from jax import lax
 from jaxtyping import Array
 
 from .._internal.backend import default_backend_is_gpu
+from .._internal.config import resolve_driver
 from ..geometry import (
     affine_grid,
     compose_displacement,
@@ -224,23 +225,16 @@ def pin_force_ranges(force: Force, moving: Array, fixed: Array) -> Force:
     return force
 
 
-def _smooth_method(
+def _smooth_fast(
     sigma: Union[float, Sequence[float]],
 ) -> Literal['fir', 'recursive']:
-    """Backend-aware Gaussian engine for the vector-field regulariser.
+    """The hardware-/sigma-aware Gaussian engine pick (the ``driver`` fast path).
 
-    The fluid/diffusion smooths run on the multi-channel velocity/displacement
-    field on *every* iteration (2x Demons, 4x SyN), so the engine matters.  On
-    GPU the shifted-slice FIR path is far cheaper than the sequential recursive
-    scan (~0.3 ms vs ~12 ms at the registration sigmas, measured) and stays the
-    engine -- byte-identical to the prior behaviour.  On CPU the FIR shift-sum
-    is the dominant per-iteration cost and the O(N) Young-van Vliet recursion is
-    ~1.1-1.5x cheaper, so ``'recursive'`` is selected -- but only when every
-    per-axis sigma clears the YvV validity floor (>= 0.5), else FIR.  The CPU
-    recursion differs from the FIR truncation by ~1-2% within a few sigma of the
-    edge (a *regulariser*, not the objective), so CPU results diverge slightly
-    from GPU; the recovery is unaffected.  Mirrors the ``signal._iir`` auto split
-    (parallel on GPU, sequential recursion on CPU).
+    On GPU the shifted-slice FIR path is far cheaper than the sequential
+    recursive scan (~0.3 ms vs ~12 ms at the registration sigmas, measured), so
+    FIR.  On CPU the FIR shift-sum dominates and the O(N) Young-van Vliet
+    recursion is ~1.1-1.5x cheaper, so ``'recursive'`` -- but only when every
+    per-axis sigma clears the YvV validity floor (>= 0.5), else FIR.
     """
     if default_backend_is_gpu():
         return 'fir'
@@ -248,18 +242,51 @@ def _smooth_method(
     return 'recursive' if all(s >= 0.5 for s in sigmas) else 'fir'
 
 
+def _smooth_method(
+    sigma: Union[float, Sequence[float]],
+    driver: str = 'auto',
+) -> Literal['fir', 'recursive']:
+    """Resolve the Gaussian engine for the vector-field regulariser.
+
+    The fluid/diffusion smooths run on the multi-channel velocity/displacement
+    field on *every* iteration (2x Demons, 4x SyN), so the engine matters --
+    hence the hardware-aware default (:func:`_smooth_fast`).  But FIR and the
+    recursive Young-van Vliet path differ by ~1-2% within a few sigma of the
+    edge, so an ``'auto'`` choice diverges CPU-vs-GPU.  This routes through the
+    ``driver`` axis (the divergent op ``register.field_smooth``): ``'auto'`` ->
+    the fast pick; ``nitrix.reproducible()`` forces the canonical ``'fir'`` on
+    every platform (the regulariser is then bit-stable cross-platform up to the
+    FIR/recursive tolerance); an explicit ``driver`` overrides.
+    """
+    return cast(
+        Literal['fir', 'recursive'],
+        resolve_driver(
+            driver,
+            op='register.field_smooth',
+            fast=lambda: _smooth_fast(sigma),
+        ),
+    )
+
+
 def _smooth_vector(
-    field: Array, sigma: Union[float, Sequence[float]], ndim: int
+    field: Array,
+    sigma: Union[float, Sequence[float]],
+    ndim: int,
+    driver: str = 'auto',
 ) -> Array:
     """Separable Gaussian over the spatial axes of a channel-last field.
 
     ``sigma`` is a scalar (isotropic) or a length-``ndim`` per-axis
-    sequence (anisotropic regularisation).  The engine is backend-aware
-    (``_smooth_method``): FIR on GPU, recursive on CPU.
+    sequence (anisotropic regularisation).  The engine is the ``driver`` axis
+    (``_smooth_method``): hardware-aware by default (FIR on GPU, recursive on
+    CPU), forced to canonical FIR under ``nitrix.reproducible()``.
     """
     moved = jnp.moveaxis(field, -1, 0)
     smoothed = gaussian(
-        moved, sigma=sigma, spatial_rank=ndim, method=_smooth_method(sigma)
+        moved,
+        sigma=sigma,
+        spatial_rank=ndim,
+        driver=_smooth_method(sigma, driver),
     )
     return jnp.moveaxis(smoothed, 0, -1)
 
