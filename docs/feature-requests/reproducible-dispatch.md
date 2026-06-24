@@ -223,9 +223,20 @@ into the `jit` cache key; out of scope for P0.
   / `reproducible_enabled`), `resolve_driver`, the `DivergentOp` registry +
   `nitrix.divergent_ops()`, public surface at the package root. 16 tests; no
   site behaviour changed yet (registry empty until P2 wires the real ops).
-- **P2 — retrofit the 5 sites** through `resolve_driver` with `driver=`
-  (deprecation aliases for `signal.backend=` / `ssm.method=`). *Touches public
-  signatures — held for explicit go-ahead on the deprecation surface.*
+- **P2 — retrofit the 5 sites. ✅ SHIPPED** (commits 5b8f084, e5e3a95, ee8e84f,
+  6f25518). All five route through `resolve_driver` and are registered in the
+  central manifest (cold `divergent_ops()` lists all five). **Clean break, no
+  deprecation shim** (all callers in-ecosystem, per the go-ahead): `signal`
+  `backend=`→`driver=`, `ssm` `method=`→`driver=`, `smoothing.gaussian`
+  `method=`→`driver=`; `CubicBSpline` gained a `driver` field; the gaussian-
+  regulariser and histogram auto-picks now route through the axis. Added the
+  backend-axis half: `auto_backend()`→`jax` under reproducibility mode (explicit
+  `backend=`/env overrides). Verified on L4 (each variant diverges within its
+  registered budget; `reproducible()` forces the canonical / deterministic path);
+  demons-recipe + metrics regression byte-identical in normal mode (49 passed).
+  *Per-recipe `driver=` threading for the gaussian/histogram sites deferred —
+  the reproducibility mode is the lever; the underlying `_smooth_method` /
+  `_joint_hist_from_softbins` already accept `driver`.*
 - **P3 — contract.** Cross-variant `tolerance.toml` rows + `variant ≈ canonical`
   golden tests; fix the CubicBSpline docstring.
 - **P4 — enforcement guard.** Registry-completeness CI test.
