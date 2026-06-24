@@ -43,4 +43,27 @@ Top-level subpackages (full surface in each ``__init__.py``):
 - ``nn``       -- functional neural-network forward-block kernels
                   (scaled_dot_product_attention; selective_scan and fused
                   norms planned) behind the pallas-cuda / jax dispatch.
+
+Library-wide reproducibility (the ``driver`` axis -- see
+``docs/feature-requests/reproducible-dispatch.md``): where an op has more than
+one numerically-divergent implementation, the default is hardware-aware; wrap
+work in ``with nitrix.reproducible():`` (or set ``NITRIX_REPRODUCIBLE=1``) to
+force the canonical variant everywhere for cross-platform / cross-run stability,
+and call ``nitrix.divergent_ops()`` to enumerate the sites and their tolerances.
 """
+
+from ._internal.config import (
+    DivergentOp,
+    divergent_ops,
+    reproducible,
+    reproducible_enabled,
+    set_reproducible,
+)
+
+__all__ = [
+    'DivergentOp',
+    'divergent_ops',
+    'reproducible',
+    'reproducible_enabled',
+    'set_reproducible',
+]
