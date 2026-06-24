@@ -1,6 +1,6 @@
 # Mixed-precision (fp16/bf16) strategy for nitrix
 
-> **Status (2026-06-24): P0 shipped; P1-P3 design-research, no code.**
+> **Status (2026-06-24): P0-P1 shipped; P2-P3 design-research.**
 > Synthesised from a three-part audit of `nitrix main@85fc6ac` (precision
 > handling, op suitability, consumer demand). Companion to
 > [`reproducible-dispatch`](reproducible-dispatch.md) (the `driver` axis) —
@@ -200,15 +200,28 @@ Folded principles 1–6 into `SPEC.md` **§2 tenet 11** ("Precision policy — t
 Cheapest, highest-leverage step; prevents ad-hoc dtype kwargs creeping onto
 Bucket-B ops.
 
-**P1 — Uniform fp32-accumulation floor + bf16 golden corpus for Bucket A
-(highest-value concrete work; unblocks D2 with no new API).**
-- Enforce the fp32-acc invariant in `nn.ssm` (currently `result_type` at
-  `_reference.py:125` — add an explicit `≥fp32` floor on the recurrence state and
-  the chunk accumulators) and `nn.norm` (pin mean/var reduction to ≥fp32).
-- Add fp16 + bf16 cases to the golden corpus for all three Bucket-A families,
-  certified within published per-dtype tolerances (extend the existing
-  fp32/fp64 corpus). This is the artifact that lets ilex's mpx layer trust
-  "hand nitrix bf16, get bf16 back within tolerance."
+**P1 — Uniform fp32-accumulation floor + bf16/fp16 golden coverage for Bucket A
+(highest-value concrete work; unblocks D2 with no new API). ✅ SHIPPED
+2026-06-24.**
+- Enforced the fp32-acc invariant in all three references by the same boundary
+  pattern: a float16/bfloat16 input is upcast to float32, the whole op runs in
+  float32, and the result is cast back at the I/O boundary — so the reduced
+  output is the float32 oracle quantised to the I/O dtype (**platform-stable**:
+  no bf16 tensor-core multiply variance). `nn.ssm` (recurrence state + readout +
+  the chunked accumulators) and `nn.norm` (mean/var + affine) needed the fix;
+  `nn.attention` already floored the accumulation and was tightened to upcast
+  q/k/v (so its reduced path is platform-stable too). **No-op for float32 /
+  float64** (acc_dtype == io_dtype) — byte-identical, existing golden untouched.
+- Golden coverage: reduced precision is certified against the **checked-in
+  float32 golden** (inputs cast to bf16/fp16, asserted within published
+  per-dtype tolerances in `tests/tolerance.toml`) — reusing the canonical oracle
+  rather than adding redundant bf16 fixtures (numpy cannot round-trip bf16
+  through `np.savez`; the invariant makes the reduced output a deterministic
+  quantisation of the fp32 golden anyway). `tests/test_nn_mixed_precision.py`
+  pins the bit-exact invariant, dtype preservation, the load-bearing floor, the
+  golden tolerance, and jit/autodiff. (Drive-by: fixed a stale `method=` →
+  `driver=` call in `tools/regen_golden.py` left by the reproducible-dispatch
+  rename.)
 - No public signature change. Serves 3DINO/SwiFT bf16 *training* directly.
 
 **P2 — Explicit parity knobs for D1 (demand-gated, one per upstream hack).**

@@ -203,7 +203,9 @@ def reference_selective_scan(
     peak memory at ``O(chunk·d·n + l·d)`` instead of ``O(l·d·n)`` and, being
     XLA-stable, has none of the fused kernel's fp32 within-chunk range limit.
     Degenerate ``A -> 0`` (``dA -> 1``) reduces the update to a cumulative sum of
-    ``Δ_t B_t x_t``.
+    ``Δ_t B_t x_t``.  A float16/bfloat16 input is upcast to float32 for the
+    recurrence and readout and cast back at the end (the fp32-accumulation
+    invariant, SPEC §2 tenet 11); float32 / float64 inputs are unchanged.
     """
     resolved = resolve_driver(
         driver,
@@ -212,6 +214,25 @@ def reference_selective_scan(
             'associative' if default_backend_is_gpu() else 'sequential'
         ),
     )
+    # fp32-accumulation invariant (SPEC §2 tenet 11): the first-order recurrence
+    # accumulates in >= float32 regardless of the I/O dtype, so a bf16/fp16 scan
+    # does not reassociate the state update in reduced precision.  Upcast at the
+    # boundary, run the existing machinery, cast back -- a no-op for float32 /
+    # float64 inputs (acc_dtype == io_dtype), byte-identical to before.
+    io_dtype = (
+        jnp.result_type(x, delta, A, B, C)
+        if D is None
+        else jnp.result_type(x, delta, A, B, C, D)
+    )
+    acc_dtype = jnp.promote_types(io_dtype, jnp.float32)
+    if acc_dtype != io_dtype:
+        x = x.astype(acc_dtype)
+        delta = delta.astype(acc_dtype)
+        A = A.astype(acc_dtype)
+        B = B.astype(acc_dtype)
+        C = C.astype(acc_dtype)
+        if D is not None:
+            D = D.astype(acc_dtype)
     if resolved == 'chunked':
         chunk = min(chunk_size, x.shape[-2])
         if x.shape[-2] % chunk != 0:
@@ -219,10 +240,12 @@ def reference_selective_scan(
                 f"driver='chunked' requires l % chunk_size == 0; got "
                 f'l={x.shape[-2]}, chunk_size={chunk_size}.'
             )
-        return _scan_chunked(x, delta, A, B, C, D, chunk)
-    dA, dBx = _discretize(x, delta, A, B)
-    if resolved == 'associative':
-        h = _scan_associative(dA, dBx)
-    else:  # 'sequential' (resolve_driver guarantees a registered value)
-        h = _scan_sequential(dA, dBx)
-    return _readout(h, C, x, D)
+        out = _scan_chunked(x, delta, A, B, C, D, chunk)
+    else:
+        dA, dBx = _discretize(x, delta, A, B)
+        if resolved == 'associative':
+            h = _scan_associative(dA, dBx)
+        else:  # 'sequential' (resolve_driver guarantees a registered value)
+            h = _scan_sequential(dA, dBx)
+        out = _readout(h, C, x, D)
+    return out if out.dtype == io_dtype else out.astype(io_dtype)

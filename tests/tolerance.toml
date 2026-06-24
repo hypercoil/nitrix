@@ -50,3 +50,48 @@ rtol = 1e-5
 [layer_norm.float32.pallas-cuda]
 atol = 2e-3
 rtol = 2e-3
+
+# --- Reduced-precision reference (fp32-accumulation invariant, SPEC §2 tenet 11)
+# The bf16/fp16 reference upcasts to float32, computes the whole op in float32,
+# and casts back -- so the reduced output is the float32 oracle quantised to the
+# I/O dtype (platform-stable).  These budgets are the I/O-dtype quantisation
+# scale (bf16 ~2^-8, fp16 ~2^-11); the golden is generated from this path.
+[attention.bfloat16]
+atol = 1e-2
+rtol = 8e-3
+[attention.float16]
+atol = 1e-3
+rtol = 1e-3
+
+# Recurrence: reduced-precision error accumulates over the sequence, so the
+# budget is looser than a single matmul / reduction (this is the I/O-dtype
+# quantisation propagated through the length-L scan, not an accumulation defect
+# -- the float32-accumulation invariant is pinned bit-exactly in the
+# test_nn_mixed_precision invariant tests).
+[selective_scan.bfloat16]
+atol = 2e-2
+rtol = 2e-2
+[selective_scan.float16]
+atol = 4e-3
+rtol = 1e-2
+
+[layer_norm.bfloat16]
+atol = 1e-2
+rtol = 8e-3
+[layer_norm.float16]
+atol = 1e-3
+rtol = 1e-3
+
+[group_norm.bfloat16]
+atol = 1e-2
+rtol = 8e-3
+[group_norm.float16]
+atol = 1e-3
+rtol = 1e-3
+
+[instance_norm.bfloat16]
+atol = 1e-2
+rtol = 8e-3
+[instance_norm.float16]
+atol = 1e-3
+rtol = 1e-3
