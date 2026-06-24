@@ -160,7 +160,7 @@ def regen_ssm() -> None:
     dvec = _randn(rng, d)
     out = np.asarray(
         reference_selective_scan(
-            x, delta, a, bmat, cmat, dvec, method='sequential'
+            x, delta, a, bmat, cmat, dvec, driver='sequential'
         ),
         dtype=np.float32,
     )

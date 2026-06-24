@@ -95,18 +95,29 @@ def reference_scaled_dot_product_attention(
 
     Notes
     -----
-    Scores and softmax accumulate in at least float32 (float64 inputs stay
-    float64); the output is cast back to the input result type.  A fully
-    masked query row yields ``nan`` (degenerate; callers keep >= 1 key).
+    All compute runs in at least float32: a float16/bfloat16 input is upcast to
+    float32 for QK-norm / scores / softmax / value-aggregation and cast back at
+    the end (the fp32-accumulation invariant, SPEC §2 tenet 11), so the oracle is
+    platform-stable; float64 inputs stay float64.  A fully masked query row
+    yields ``nan`` (degenerate; callers keep >= 1 key).
     """
     if scale is None:
         scale = default_scale(q.shape[-1])
-    if qk_norm:
-        q = qk_rms_norm(q)
-        k = qk_rms_norm(k)
 
     out_dtype = jnp.result_type(q, k, v)
     acc_dtype = jnp.promote_types(out_dtype, jnp.float32)
+    if acc_dtype != out_dtype:
+        # fp32-accumulation invariant (SPEC §2 tenet 11): a reduced-precision
+        # (bf16/fp16) attention runs QK-norm, scores, softmax, and the value
+        # aggregation in >= float32 and casts back to the I/O dtype at the end,
+        # so the oracle is platform-stable (no bf16 tensor-core multiply
+        # variance).  No-op for float32 / float64 inputs (acc_dtype == out_dtype).
+        q = q.astype(acc_dtype)
+        k = k.astype(acc_dtype)
+        v = v.astype(acc_dtype)
+    if qk_norm:
+        q = qk_rms_norm(q)
+        k = qk_rms_norm(k)
 
     logits = jnp.einsum(
         '...hsd,...htd->...hst',

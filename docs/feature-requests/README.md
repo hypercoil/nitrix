@@ -92,6 +92,7 @@ memory, the perf suite (`bench/`) owns wall-clock parity at scale.
 |---|---|---|---|
 | P0 | [attention-kernels](attention-kernels.md) (flash + windowed-bias + causal + cross) | ENABLING | `nitrix.nn.attention` |
 | P1 | [selective-scan](selective-scan.md) (Mamba/S6 fused scan) | ENABLING | `nitrix.nn.ssm` |
+| P3 | [attention-no-upcast-knob](attention-no-upcast-knob.md) (caller-controlled SDPA accumulation precision; nimox `diffusion_unet._Attention` consumer) | CONVENIENCE | `nitrix.nn.attention` |
 | P2 | [affine-matrix-algebra](affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
 | P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn.norm` |
 

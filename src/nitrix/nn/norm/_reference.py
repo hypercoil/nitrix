@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
 
@@ -42,15 +43,26 @@ def reference_layer_norm(
     eps: float = 1e-5,
     out_scale: float = 1.0,
 ) -> Float[Array, '... c']:
-    """LayerNorm over the trailing axis (oracle)."""
+    """LayerNorm over the trailing axis (oracle).
+
+    Reductions (mean / variance) and the affine run in at least float32: a
+    float16/bfloat16 input is upcast and the result cast back (the
+    fp32-accumulation invariant, SPEC §2 tenet 11); float32 / float64 unchanged.
+    """
+    io_dtype = x.dtype
+    acc_dtype = jnp.promote_types(io_dtype, jnp.float32)
+    upcast = acc_dtype != io_dtype
+    if upcast:
+        x = x.astype(acc_dtype)
     mean = x.mean(axis=-1, keepdims=True)
     var = x.var(axis=-1, keepdims=True)
     x_hat = (x - mean) * lax.rsqrt(var + eps)
     if weight is not None:
-        x_hat = x_hat * weight
+        x_hat = x_hat * (weight.astype(acc_dtype) if upcast else weight)
     if bias is not None:
-        x_hat = x_hat + bias
-    return out_scale * x_hat
+        x_hat = x_hat + (bias.astype(acc_dtype) if upcast else bias)
+    out = out_scale * x_hat
+    return out.astype(io_dtype) if upcast else out
 
 
 def reference_group_norm(
@@ -62,7 +74,16 @@ def reference_group_norm(
     eps: float = 1e-5,
     out_scale: float = 1.0,
 ) -> Float[Array, 'n c *spatial']:
-    """GroupNorm over ``(C/num_groups, *spatial)`` per sample/group (oracle)."""
+    """GroupNorm over ``(C/num_groups, *spatial)`` per sample/group (oracle).
+
+    Reductions (mean / variance) and the affine run in at least float32 (the
+    fp32-accumulation invariant, SPEC §2 tenet 11); float32 / float64 unchanged.
+    """
+    io_dtype = x.dtype
+    acc_dtype = jnp.promote_types(io_dtype, jnp.float32)
+    upcast = acc_dtype != io_dtype
+    if upcast:
+        x = x.astype(acc_dtype)
     n, c = x.shape[0], x.shape[1]
     spatial = x.shape[2:]
     grouped = x.reshape(n, num_groups, c // num_groups, *spatial)
@@ -72,10 +93,13 @@ def reference_group_norm(
     x_hat = ((grouped - mean) * lax.rsqrt(var + eps)).reshape(x.shape)
     affine_shape = (1, c) + (1,) * len(spatial)
     if weight is not None:
-        x_hat = x_hat * weight.reshape(affine_shape)
+        w = weight.astype(acc_dtype) if upcast else weight
+        x_hat = x_hat * w.reshape(affine_shape)
     if bias is not None:
-        x_hat = x_hat + bias.reshape(affine_shape)
-    return out_scale * x_hat
+        b = bias.astype(acc_dtype) if upcast else bias
+        x_hat = x_hat + b.reshape(affine_shape)
+    out = out_scale * x_hat
+    return out.astype(io_dtype) if upcast else out
 
 
 def reference_instance_norm(
