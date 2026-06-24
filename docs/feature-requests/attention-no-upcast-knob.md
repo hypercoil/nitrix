@@ -9,6 +9,80 @@
 > / `selective_scan`; **one core could not** and is the actual consumer
 > below. Home: `nitrix.nn.attention`.
 
+## nitrix determination (2026-06-24): OPEN / latent — not WONTFIX
+
+An earlier read leaned WONTFIX on the grounds that brain_ldm runs fp32-only in
+ilex today (verified: `ilex/models/brain_ldm/parity.py` builds its oracle at
+`float32`; no `float16`/`bfloat16` anywhere in nimox or ilex models). That was
+**too strong** — the gating question is not "is the *port* fp32 today" but "is
+the *upstream model* designed for reduced precision," and on checking the
+upstream the answer is **yes**.
+
+**Upstream MONAI is fp16-intended; the upcast is an intentional capability, not
+a port artifact.** brain_ldm ports MONAI's `DiffusionModelUNet`. In the MONAI
+source (`monai/networks/nets/diffusion_model_unet.py:97,110`) `upcast_attention`
+maps to `attention_dtype = torch.float if upcast_attention else None`
+(docstring: *"upcast attention operations to full precision"*), and the block
+applies it **asymmetrically** — `monai/networks/blocks/selfattention.py:174-176`
+casts **only `q` and `k`** to fp32; **`v` is never cast**, so the value matmul
+stays native:
+
+```python
+if self.attention_dtype is not None:   # fp32 when upcast_attention=True
+    q = q.to(self.attention_dtype)
+    k = k.to(self.attention_dtype)
+    # v left native -> scores/softmax in fp32, value matmul in native dtype
+```
+
+This is the verbatim Stable-Diffusion / diffusers stability hack, whose *whole
+reason to exist* is **fp16 inference**: force scores/softmax to fp32 to dodge
+fp16-`exp()` overflow while keeping the value matmul cheap in native precision.
+At fp32 it is a no-op — a model author only sets `upcast_attention=True` when
+the model is meant to run in fp16. brain_ldm's config sets it `True`
+(`nimox/architectures/diffusion_unet.py:54,1470`), which is upstream's explicit
+signal that **fp16 is an intended deployment mode**. So ilex's current fp32-only
+run is a **port-stage parity simplification, not a permanent property** — the
+nimox `_Attention.upcast_attention` field is a faithful port of a real upstream
+capability, and the nitrix SDPA's inability to express it is a **genuine latent
+capability gap**, inert only until ilex flips brain_ldm to fp16. For a faithful
+port that is a *when*, not an *if*.
+
+**The FR's proposed `acc_dtype` is the wrong primitive.** The upstream upcast is
+**asymmetric** (q/k → fp32, value matmul → native). A single `acc_dtype` ties
+all three stages together, so it **cannot reproduce `upcast_attention=True`** —
+it would force the value matmul to fp32 too, breaking bit-exact upstream parity.
+(The FR's own "hazard 3" half-saw this but proposed deferring it; against the
+upstream it is not deferrable, because `upcast=True` is the *default* for the
+deep blocks — `nimox/architectures/diffusion_unet.py:54,1470`.) The faithful
+knob is a **boolean that upcasts q/k only** — e.g. `qk_upcast: bool = False` —
+mapping 1:1 to both the upstream `attention_dtype`-on-qk-only semantics and the
+consumer surface `upcast_attention: bool`, leaving the value matmul in the input
+dtype. That is cleaner than `acc_dtype` *and* the only spelling that matches
+upstream. Define it as "q/k accumulate in fp32; scores/softmax in fp32; value
+matmul + output in the input dtype."
+
+**One nuance to pin before any fp16 parity claim.** MONAI's *manual* path leaves
+`att_mat` in fp32 entering the value einsum (no cast-back in
+`selfattention.py`), whereas **diffusers** — and the nimox port
+(`diffusion_unet.py:591-593`, `attn = attn.astype(v.dtype)`) — cast the
+attention probabilities **back to `v.dtype`** before the value matmul. So
+"value matmul native vs fp32-promoted" differs by which upstream is treated as
+canonical. The nimox port follows the diffusers cast-back semantics, so a nitrix
+`qk_upcast` defined as *"q/k fp32, everything downstream native"* matches what
+the port actually implements; the ilex/nimox owner should confirm brain_ldm is
+locked to diffusers-semantics (it appears to be) before relying on bit-exact
+fp16 parity.
+
+**Recommendation.** Keep OPEN (latent). Do **not** build speculatively today
+(nothing runs fp16 yet, so it would be untested public surface), but when ilex
+schedules fp16 brain_ldm inference, implement **`qk_upcast: bool`** (q/k → fp32,
+value matmul + output native), reference-path only, mirroring the
+`selective_scan` `backend='pallas-cuda'` raise for the sub-fp32 ⇒ not-fused
+contract — **not** a single `acc_dtype`. This FR is also the first concrete
+instance of the broader question tracked in
+[`mixed-precision-strategy`](mixed-precision-strategy.md) (when, where, and how
+reduced precision should enter nitrix at all).
+
 **What.** A caller-facing knob on
 `nitrix.nn.attention.scaled_dot_product_attention` to **opt out of the
 mandatory ≥float32 score/softmax accumulation**, so the logits, softmax,
@@ -160,8 +234,15 @@ whether the consumer needs `upcast_attention=True` *bit-exact* or just
 ## Acceptance
 
 nimox's `diffusion_unet._Attention` drops its hand-rolled core and calls
-`scaled_dot_product_attention(..., acc_dtype=<native when not upcast>)`,
-reproducing the published brain_ldm mixed-precision numerics; the default
-fp32 path and ilex Tier-1 parity are untouched; the fused path stays fp32-only
-by contract. (If brain_ldm is confirmed fp32-only in ilex, this FR is
-**WONTFIX** — the core migrates without a knob.)
+`scaled_dot_product_attention(..., qk_upcast=self.upcast_attention)`,
+reproducing the published brain_ldm mixed-precision numerics (q/k → fp32,
+value matmul + output native); the default path and ilex Tier-1 parity are
+untouched; the fused path stays fp32-only by contract.
+
+> **Status superseded (2026-06-24): OPEN / latent, not WONTFIX** — see the
+> *nitrix determination* section above. The upstream MONAI model is
+> fp16-intended (`upcast_attention` is an intentional reduced-precision
+> capability), so this is a genuine latent gap rather than WONTFIX; the
+> faithful knob is `qk_upcast: bool` (asymmetric q/k upcast), **not** the
+> single `acc_dtype` proposed in the body. Build when ilex schedules fp16
+> brain_ldm inference, not before.
