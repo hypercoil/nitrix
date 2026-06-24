@@ -1,453 +1,545 @@
-# nitrix — Specification (draft v0)
+# nitrix — Specification (v1, consolidated)
 
-> **Status.** Architectural spec — first pass. Hand-off target: Claude app, downstream
-> implementation planning.
-> **Scope.** This document describes *what* nitrix is, what belongs in it, what does not,
-> and the contract it offers upstream libraries (`thrux`, `bitsjax`, `nimox`) and downstream
-> consumers (`ilex`, `entense`). Implementation pseudo-code is intentionally absent.
+> **Status.** Architectural specification, consolidated against the shipped
+> code (2026-06-24). This single document supersedes and folds in the former
+> `SPEC_UPDATE.md` / `SPEC_UPDATE_v0.2…v0.5.md` (their binding content is now
+> inline; see the **Provenance map**, §11, which maps old section numbers here
+> so existing in-code `SPEC_UPDATE §x` citations still resolve).
+> **Scope.** *What* nitrix is, what belongs in it, what does not, and the
+> contract it offers upstream libraries (`thrux`, `bitsjax`, `nimox`) and
+> downstream consumers (`ilex`, `entense`). The firm concern boundaries (§1
+> non-goals, §6) are load-bearing and take precedence over any convenience.
 
 ---
 
 ## 1. Charter
 
-nitrix is the **lowest-level numerical substrate** of the diffprog neuroimaging ecosystem.
-It is a pure-numeric, all-JAX library: every public symbol takes JAX arrays and returns JAX
-arrays. nitrix has no knowledge of image containers, sidecar metadata, BIDS, filesystems,
-training loops, or PyTree modules. Those concerns belong to other libraries that *depend on
-nitrix*.
+nitrix is the **lowest-level numerical substrate** of the diffprog neuroimaging
+ecosystem: a pure-numeric, all-JAX library where every public symbol takes JAX
+arrays (and, where relevant, a `jax.random` key or a static shape/param spec) and
+returns JAX arrays. nitrix has no knowledge of image containers, sidecar
+metadata, BIDS, filesystems, training loops, or PyTree modules. Those concerns
+belong to libraries that *depend on* nitrix.
 
-The long-term vision is a substrate of differentiable numerical primitives sufficient to
-build software in the class of FSL / FreeSurfer / ANTs / AFNI on GPU-accelerated hardware.
-The shorter-term vision is the union of:
+The long-term vision is a substrate of differentiable numerical primitives
+sufficient to build software in the class of FSL / FreeSurfer / ANTs / AFNI on
+GPU-accelerated hardware. In practice the surface has grown consumer-first
+(ilex / JOSA ports surface a primitive → it lands here), and that is expected to
+continue — governed not by "declared in advance" but by the separation-of-
+concerns invariant (§6, §9).
 
-1. **Marquee items** (§3): keops-like semiring ops; sparsity for brain geometries;
-   multi-criterion smoothing; LME (stretch); essentials for the rest of the ecosystem.
-2. **Foundational primitives** (§4) needed by `ilex` models and `entense` / `bitsjax`
-   transforms.
+### 1.1 Hardware scope
 
-### Non-goals
+- **In scope:** NVIDIA GPUs of **Ampere generation and newer** (A100, A40, RTX
+  30/40/50xx, L4/L40, H100/H200, B100/B200) via the **Pallas Triton** backend,
+  and a **pure-JAX CPU fallback** (functionally correct; CPU performance is not a
+  goal, but is exercised in CI as the correctness floor).
+- **Out of scope at GA:** TPU / `pallas-tpu` (no dev access; the streaming-kernel
+  design is architecturally compatible — revisit post-1.0 if access appears),
+  AMD ROCm, Apple Metal, Intel GPUs (all fall back to JAX-CPU), and the
+  Mosaic-GPU backend (Hopper-only would exclude most academic-lab hardware).
+- **Accepted risk:** Pallas Triton is maintained best-effort by JAX, not as the
+  primary Pallas target. The JAX fallback is the contractual floor; the §3.2
+  fallback machinery covers Triton regressions, and releases pin a minimum JAX
+  version (§8).
+
+### Non-goals (firm boundary)
 
 - No NIfTI / GIfTI / CIfTI I/O — that is `thrux`.
-- No transform / pipeline / dataset abstractions — that is `bitsjax` and `entense`.
-- No Equinox modules — those are `nimox`.
-- No template / atlas registration as user-facing API (low-level primitives only — atlas
-  data structures and template-aware operations live in `thrux`).
+- No transform / pipeline / dataset abstractions — that is `bitsjax` / `entense`.
+- No Equinox / PyTree modules — those are `nimox`. nitrix returns `NamedTuple`s
+  or frozen dataclasses of arrays, never module objects.
+- No template / atlas registration as user-facing API (low-level primitives only;
+  atlas data structures live in `thrux`).
+- No `loss` namespace and no objective scalarisation — that is `nimox` (§5).
 
 ---
 
 ## 2. Design tenets
 
-1. **Pure functional.** Every public symbol is a function `(Array, …) -> Array`. No state,
-   no PyTrees in the public API. (PyTree-shaped configs are acceptable as keyword args.)
-2. **All differentiable.** Subgradients are explicit where appropriate; custom VJPs are
-   registered where numerical stability or efficiency requires it (precedent:
-   `linalg/matrix.py` `sym2vec_*` rules in the existing codebase).
-3. **JAX + Pallas, with fallbacks.** Hardware-aware Pallas kernels (NVIDIA / TPU) for the
-   marquee ops; pure JAX fallbacks always present. Backend selection deterministic and
-   user-overridable.
-4. **Typed at boundaries.** `jaxtyping.Array` / `Float[Array, "..."]` annotations on all
-   public functions. No bare `Array | NDArray` unions.
-5. **No transitive heavyweight deps.** `nitrix` may import only `jax`, `jaxtyping`,
-   `numpy`. `scipy`, `nibabel`, `numpyro`, `equinox`, etc. are NOT permitted at runtime
-   import. Test deps are scoped to `tests/`.
-6. **Stable kernels, breakable APIs.** Until 1.0, the API is mutable, but kernel output
-   must be numerically reproducible across releases (test against pinned references).
+1. **Pure functional.** Every public symbol is a function over arrays. *Clarified
+   (formerly "(Array,…)→Array"):* a symbol may also be a **keyed pure generator**
+   — `(shape | params, key) -> Array`, where the `jax.random` key is itself a
+   typed `Array` — so `augment.*` generators and randomized solvers
+   (`stats.pca(solver='randomized')`) are in scope. Pure in the JAX sense:
+   deterministic given `(inputs, key)`, no hidden state. RNG *policy* (which key,
+   how to split, schedules) stays with the caller. No PyTrees-as-modules in the
+   public API; PyTree-shaped *config* records are acceptable keyword args.
+2. **All differentiable.** Subgradients are explicit where appropriate; custom
+   VJPs are registered where numerical stability or efficiency requires it.
+   Non-differentiable outputs (hard labels, arg-max) are documented as such.
+3. **JAX + Pallas-Triton on NVIDIA, with JAX fallback.** Hardware-aware Pallas
+   Triton kernels for the marquee ops on Ampere+; a pure-JAX fallback is always
+   present and exercised in CI. Backend selection is deterministic and
+   user-overridable (§3). CPU is functionally supported; CPU perf is not a goal.
+4. **Typed at boundaries.** `jaxtyping` annotations on all public functions. No
+   bare `Array | NDArray` unions.
+5. **No transitive heavyweight deps.** nitrix may import only `jax`, `jaxtyping`,
+   `numpy`. `scipy`, `nibabel`, `numpyro`, `equinox`, etc. are forbidden at
+   runtime import; test/reference deps are scoped to `tests/`.
+6. **Stable kernels, breakable APIs.** Until 1.0 the API is mutable, but kernel
+   output is numerically reproducible across releases (pinned references, §8).
+7. **Loud fallbacks.** A silent performance regression is a bug. When a resolved
+   backend cannot run (Triton can't tile a shape/algebra, hardware unsupported,
+   …) nitrix falls back to JAX and emits a structured `NitrixBackendFallback`
+   warning, deduplicated per `(function, shape, dtype, backend)` per process.
+   `NITRIX_SILENCE_FALLBACK=1` suppresses; `NITRIX_STRICT_BACKEND=1` escalates to
+   error.
+8. **Reproducibility via a golden corpus.** Each kernel × dtype (× backend ×
+   driver) has a checked-in reference under `tests/golden/`; tolerances are
+   pinned in `tests/tolerance.toml` (and, for the driver axis, in the divergent-op
+   registry, §3.3). A tolerance change is a public-API change (CHANGELOG entry).
+9. **Reproducible dispatch (the `driver` axis).** Where nitrix auto-selects among
+   *numerically divergent* implementations of one operation (e.g. sequential vs
+   parallel scan, FIR vs recursive Gaussian, deterministic vs atomic histogram),
+   the default is hardware-aware, but (a) it is overridable per call by a
+   consistently-named `driver=` keyword (distinct from `backend=`), and (b) a
+   single library-level mode — `nitrix.reproducible()` / `NITRIX_REPRODUCIBLE=1`
+   — forces the **canonical** variant at *every* such site (and a deterministic
+   reduction where the default is run-to-run nondeterministic), trading peak
+   performance for cross-platform / cross-run stability up to each site's
+   registered tolerance. Every such site is a registered, golden-tested contract
+   (`nitrix.divergent_ops()`); the divergence is documented, never silent. The
+   promise is *same algorithm / reduction order + determinism*, **not**
+   bit-identity across hardware (FMA / transcendental / fusion residuals remain,
+   bounded by the tolerance). Mechanically-equivalent dispatch (bit/ULP-identical,
+   tested) is exempt. See §3.3 and `docs/feature-requests/reproducible-dispatch.md`.
+10. **Two-tier parity.** An op may ship a bit-faithful JAX **reference** (the
+    oracle consumers may pin) plus a fused **Pallas** path certified only
+    `pallas ≈ jax` within the pinned `[op.dtype.pallas-cuda]` tolerance. The
+    `custom_vjp` lives on the fused path; the reference is autodiff-native.
 
 ---
 
-## 3. Marquee subsystems
+## 3. Dispatch & backends
 
-Each marquee item has its own subpackage with a clear surface. Status flags below describe
-*intended* state at first GA; current legacy / partial state lives in §6 (Migration).
+### 3.1 Two orthogonal axes
 
-### 3.1 `nitrix.semiring` — KeOps-style reductions  [CORE]
+- **`backend=`** — the *execution engine*: `'pallas-cuda'` vs `'jax'`. Resolves
+  via `nitrix._internal.backend.resolve_backend`.
+- **`driver=`** — the *numerical variant* of the same math (the scipy/torch
+  convention). Resolves via `nitrix._internal.config.resolve_driver`. Distinct
+  from `backend=` (engine), `method=` (algorithm *family*, e.g. interpolator or
+  eigensolver), and `representation=` (e.g. registration group/algebra).
 
-Arbitrary-algebra reductions over matmul, convolution, and ELL-sparse adjacency contractions.
-The full target surface includes the strict semirings (sum-product, tropical max-plus /
-min-plus, log-sum-exp, Boolean) **and** "semiring-analogous" algebras whose `(*)` is not
-strictly associative — most importantly the **Euclidean** algebra
-(`sqrt ∘ Σ ∘ (a − b)²`) and its relatives. These power both linear-algebraic reductions
-*and* distance-driven operations (k-NN, neighbourhood smoothing, geodesic propagation).
-This generality is a deliberate design bet: a single performant kernel substrate covers
-matmul, convolution, distance, graph algebra, and morphology.
+Keep them distinct: `backend` picks *where/which kernel* runs; `driver` picks
+*which numerically-divergent recipe*.
 
-#### Algebra representation
+### 3.2 Backend resolution (§7.2) + fallback observability
 
-The algebra is decomposed into a small pair of Protocols (informed by the
-`semiring_gemm.py` brainstorm; see §11):
+Three-level: explicit `backend=` keyword → `NITRIX_BACKEND` env → auto-detect.
+Auto-detect resolves to `'pallas-cuda'` only when an Ampere+ NVIDIA GPU is
+visible (compute-capability probed once at import), else `'jax'`. Under
+reproducibility mode (tenet 9) auto-detect prefers `'jax'` (the reference), so a
+fused-kernel op reproduces across platforms; an explicit `backend=`/env still
+overrides. An explicit `backend='pallas-cuda'` on unsupported hardware raises
+`NitrixBackendError`. Fallback is loud (tenet 7). `Backend = Literal['auto',
+'pallas-cuda', 'jax']` (no `pallas-tpu`). Pallas kernels live in `_kernels/`;
+nitrix pins a minimum JAX version and files a release-blocking issue (never a
+silent disable) if a Triton change breaks a kernel between pins.
 
-- **`Semigroup`** — a single `combine(a, b)` broadcasting binary op (the `(*)` step).
-- **`Monoid[S]`** — `(init, update, merge, finalize)` over a pytree state `S`. The pytree
-  state is critical: it lets numerically-stable online reductions (e.g. log-sum-exp's
-  `(running_max, sum_exp)` carry; Welford-style variance; running-norm Euclidean) thread
-  state through the K loop without materialising intermediates.
-- **`Semiring`** — the frozen `(monoid, semigroup, name)` triple.
+### 3.3 Driver resolution + reproducibility mode
 
-Pre-built algebras: `real`, `tropical_max_plus`, `tropical_min_plus`, `log`, `euclidean`,
-`boolean`. User-defined Monoids and Semigroups compose freely.
+`resolve_driver(driver, *, op, fast)` returns the concrete variant: an explicit
+`driver` wins; else the registered **canonical** under reproducibility mode; else
+`fast()` (the hardware-/shape-aware pick, evaluated lazily). Reproducibility mode
+is a trace-time `contextvars` flag seeded from `NITRIX_REPRODUCIBLE`, toggled by
+`nitrix.reproducible()` (context manager, nestable; `reproducible(False)` carves
+a fast region) / `set_reproducible()`. Every divergent op is registered in the
+central manifest (`nitrix._internal._divergent_ops`, eager-imported so
+`nitrix.divergent_ops()` is complete at `import nitrix`) with
+`{op, canonical, fast, driver_values, tolerance}`. Public surface at the package
+root: `reproducible`, `reproducible_enabled`, `set_reproducible`, `divergent_ops`,
+`DivergentOp`. **Registered divergent ops (5):** `signal.iir` (fft/scan/
+associative; canon `scan`), `nn.ssm.selective_scan` (sequential/associative/
+chunked; canon `sequential`), `geometry.cubic_bspline_prefilter` (sequential/
+associative; canon `sequential`), `register.field_smooth` (fir/recursive; canon
+`fir`), `metrics.joint_histogram` (onehot/scatter — the determinism case; canon
+`onehot`). A completeness guard (§8) fails CI if a new platform-flip is added
+ungoverned.
 
-#### Public surface (illustrative signatures)
+### 3.4 Pallas surface
 
-```python
-def semiring_matmul(
-    A: Num[Array, "... m k"],
-    B: Num[Array, "... k n"],
-    *, semiring: Semiring = REAL,
-    backend: Backend = "auto",
-) -> Num[Array, "... m n"]
-```
-
-```python
-def semiring_conv(
-    x: Num[Array, "... *spatial c_in"],
-    k: Num[Array, "... *kspatial c_in c_out"],
-    *, semiring: Semiring = REAL,
-    stride: ..., padding: ..., dilation: ...,
-    backend: Backend = "auto",
-) -> Num[Array, "... *spatial c_out"]
-```
-
-```python
-def semiring_ell_matmul(           # the central op for brain-geometry workloads
-    values: Num[Array, "m k_max"], # ELL values (m rows × at most k_max neighbours)
-    indices: Int[Array, "m k_max"],
-    B: Num[Array, "n n_cols"],
-    *, semiring: Semiring = REAL,
-    n_rows: int,                   # outer dim of the implicit M×N sparse matrix
-    backend: Backend = "auto",
-) -> Num[Array, "m n_cols"]
-```
-
-#### Kernel strategy
-
-- **KeOps-style streaming.** The K-block iteration folds rank-1 outer combines directly
-  into the (BM, BN) accumulator; the (BM, BK, BN) value tensor is never materialised. This
-  keeps peak on-chip memory at `O(BM·BN + BM·BK + BK·BN)` and makes algebras whose `(*)`
-  is non-multiplicative (Euclidean, tropical, log) practical at scale.
-- **No tensor-core / `dot` primitive.** Tensor cores assume `(*) = ×`. We issue plain
-  CUDA-core / TPU SIMD ops so the same kernel codegens across all algebras. For the real
-  semiring on hardware that can use tensor cores, an optional `backend="tensor_core"`
-  specialisation falls back to `jnp.matmul`; this is a thin fast path, not the primary
-  surface.
-- **Pytree accumulator.** Monoid state is a pytree; `lax.fori_loop` over K threads the
-  state through. `finalize` applies once at the end (e.g. Euclidean's `sqrt`, log's
-  `m + log(s)`).
-- **No BCOO.** ELL is the primary sparse format (see §3.2). The ELL kernel walks the
-  per-row neighbour list via gather + the same Monoid/Semigroup glue — Pallas-friendly,
-  no jaxlib-sparse adversarial path.
-
-#### Backends
-
-`pallas-cuda` (default on NVIDIA) and `pallas-tpu` (default on TPU); JAX fallback (built
-on `lax.fori_loop` + the same `reference_semiring_gemm`-style algebra plumbing) for CPU
-and for shapes / algebras the Pallas builder cannot tile cleanly. Backend selection per
-§7.2.
-
-#### Why this is a foundation, not a feature
-
-The same machinery underpins: graph path algebras (tropical), softmax / attention-style
-reductions (log), k-NN and bilateral search (Euclidean as the inner step of a
-nearest-neighbour scan), morphological opening / closing (tropical conv), spherical
-convolution on mesh sparsity (real or weighted on ELL adjacency), and binary connectivity
-analysis (Boolean). Subsequent §3 items (sparse, smoothing, morphology) are largely
-*specialisations* of this surface, not parallel implementations.
-
-### 3.2 `nitrix.sparse` — geometry-aware sparsity  [CORE]
-
-Sparsity primitives for the structures we actually care about in neuroimaging. **ELL is
-the primary format** — brain-geometry adjacencies (mesh k-rings, deformed icospheres,
-distance-thresholded neighbourhoods, atlas parcel members) are naturally
-fixed-degree-per-row, so ELL captures them losslessly with zero padding overhead in the
-common case and a single padded-row dimension in the worst.
-
-Submodules:
-
-- `sparse.ell` — ELL format primitives (construction, reshape, gather/scatter, padding
-  with semiring identity, batch broadcasting). The format is a thin pair of arrays
-  `(values: [m, k_max], indices: [m, k_max])` plus a row-count and an algebra-identity for
-  pad positions. **No jax-sparse BCOO.** The historical BCOO-based path in
-  `hypercoil/functional/sparse.py` has been a persistent friction surface against the
-  XLA / Pallas boundary; we implement on plain dense arrays + gather primitives so the
-  kernels integrate cleanly.
-- `sparse.grid` — regular-grid sparsity (low-bandwidth band matrices, stencil ops). The
-  thin specialisation of ELL where every row has the same neighbour offsets.
-- `sparse.mesh` — icosphere / deformed-icosphere mesh sparsity built atop `sparse.ell`:
-  k-ring adjacency, sparse Laplacians, geodesic neighbourhoods.
-
-The semiring kernels in §3.1 operate directly on ELL representations
-(`semiring_ell_matmul`, `semiring_ell_conv`). Treat ELL + semiring as a single
-co-designed pair: they are the substrate for both linear ops on graph adjacency *and*
-distance-driven ops over k-NN graphs.
-
-### 3.3 `nitrix.smoothing` — multi-criterion / hyper-spatial  [CORE]
-
-Edge-preserving, multi-channel, multi-domain smoothing centred on the **permutohedral
-lattice**. Multi-domain means the feature space can mix space, intensity, gradient
-direction, time, etc. — permutohedral handles arbitrary `d_f` in expected linear time and
-subsumes the bilateral / trilateral / cross-bilateral special cases that SUSAN, Gaussian,
-and friends individually cover.
-
-```python
-def permutohedral_lattice(
-    values: Float[Array, "n d_v"],
-    features: Float[Array, "n d_f"],
-    *, sigma_features: Float[Array, "d_f"],
-) -> Float[Array, "n d_v"]
-```
-
-Plus a baseline `gaussian` (for cases where edge preservation is not wanted) and a
-`bilateral` thin wrapper (the canonical `d_f = d_space + d_intensity` configuration).
-
-SUSAN is intentionally **not** part of the public surface: its USAN/edge-preservation
-behaviour is recovered by feeding intensity (and, optionally, intensity gradient) into the
-permutohedral feature space. Skipping SUSAN cuts implementation scope without giving up
-capability.
-
-### 3.4 `nitrix.morphology` — built atop semiring  [CORE]
-
-Binary and grayscale erode / dilate / open / close, distance transforms. Implemented as
-specialisations of `semiring.conv` with `TROPICAL_MIN` / `TROPICAL_MAX`. Listed separately
-because it is a major user-facing surface, not because it has independent implementation.
-
-### 3.5 `nitrix.stats.lme` — voxelwise LME  [STRETCH]
-
-Efficient voxelwise linear mixed-effects fits. Out of scope for first GA; the spec reserves
-the namespace and documents the API shape so downstream consumers can plan around it.
-
-```python
-def voxelwise_lme(
-    Y: Float[Array, "n_obs *voxels"],
-    X: Float[Array, "n_obs p"],       # fixed effects design
-    Z: Float[Array, "n_obs q"],       # random effects design
-    groups: Int[Array, "n_obs"],
-    *, method: Literal["reml", "ml"] = "reml",
-) -> LMEResult                          # NamedTuple of arrays — NOT a PyTree module
-```
-
-Open: solver choice (closed-form on small q vs iterative); whether to expose Henderson's
-mixed-model equations as a separate primitive.
+Pallas kernels are an implementation detail behind the public API; kernel files
+are private (`_kernels/cuda/`: attention, selective_scan, norm, semiring_matmul,
+semiring_ell_matmul, demons_force, lncc_force). Each registers a `custom_vjp`
+whose backward is a paired Pallas kernel or a JAX fallback. Wall-clock parity
+versus heavy external references (torch / triton / cuda / ANTs / scipy) is **not**
+nitrix's concern — it is delegated to the sibling perf suite (`bench/`,
+`nitrix-perf-bench`). nitrix owns correctness and gross-memory behaviour.
 
 ---
 
-## 4. Foundational primitives  [CORE]
+## 4. Subsystems (the shipped surface)
 
-These are the lower-glamour but high-traffic operations that ilex models, entense
-transforms, nimox modules, and bitsjax resolvers actually call. Most exist (in some form)
-in the current nitrix or in hypercoil; the migration map (§6) details origins.
+The code is the surface-of-record; this section states each subsystem's intent,
+its key surface, and any contract/boundary. "[CORE]" marks the marquee substrate.
 
-### 4.1 `nitrix.linalg`
+### 4.1 `nitrix.semiring` — KeOps-style streaming reductions  [CORE]
 
-- `matrix.py` — symmetric / `sym2vec` / `vec2sym` / `squareform` / `toeplitz` /
-  `toeplitz_2d` / `delete_diagonal` / `fill_diagonal` / `diag_embed` /
-  `recondition_eigenspaces`. (Existing nitrix is healthy here.)
-- `spd.py` — SPD manifold: `symexp`, `symlog`, `symmap`, `symsqrt`; tangent-space project /
-  unproject (`BatchTangentProject` numerics, not the module). **Stability rewrite required**
-  — current hypercoil implementation is flagged numerically unstable.
-- `kernel.py` — parameterised kernels (linear, polynomial, Gaussian, RBF, Laplace) with
-  single-dispatch over input matrix type. Includes initialisation helpers (Laplace,
-  Toeplitz) folded in from legacy `hypercoil/init/`.
-- `residual.py` — `residualise` (L2-regularised least squares). Existing; keep, fix the
-  off-diagonal-weight gap from `covariance.py` while we are here.
+Arbitrary-algebra reductions over matmul, convolution, and ELL-sparse adjacency
+contraction, with the K-loop folding rank-1 combines into the accumulator (the
+`(BM,BK,BN)` value tensor is never materialised). Algebras are a `(Monoid,
+Semigroup, name)` triple over pytree carry state. **Typing:** `Semiring` (relaxed,
+no associativity guarantee — the default) and `StrictSemiring <: Semiring` (asserts
+associativity/distributivity); ops needing free reassociation document the
+requirement. **Built-ins:** `REAL`, `LOG`, `TROPICAL_MAX_PLUS`,
+`TROPICAL_MIN_PLUS`, `BOOLEAN` (strict), `EUCLIDEAN` (relaxed, non-associative).
+**Surface:** `semiring_matmul`, `semiring_conv`, `semiring_ell_matmul`,
+`semiring_ell_rmatvec`, `semiring_ell_edge_aggregate` (user `edge_fn` per
+(vertex, neighbour) reduced under REAL/TROPICAL_*), `ell_row_softmax`, each with a
+`reference_*` JAX oracle. No tensor-core `dot` (the algebra is general); no BCOO.
+User-defined algebras are forward-only by default (wrap in `custom_vjp` to
+differentiate).
 
-### 4.2 `nitrix.stats`
+### 4.2 `nitrix.sparse` — geometry-aware sparsity  [CORE]
 
-- `covariance.py` — `cov`, `corr`, `partialcov`, `partialcorr`, `pairedcov`, `pairedcorr`,
-  `conditionalcov`, `conditionalcorr`, `precision`, `corrnorm`. **Bug fix required**:
-  non-diagonal weight matrices currently silently produce wrong answers post-JIT
-  (`covariance.py:719–726`). Either implement properly or raise unambiguously.
-- `fourier.py` — `product_filter`, `product_filtfilt`, `analytic_signal`,
-  `hilbert_transform`, `envelope`, `instantaneous_phase`, `instantaneous_frequency`.
-  (Existing; keep.)
-- `lme.py` — STRETCH (§3.5).
+**ELL is the primary format** (`ELL`: `(values, indices)` + row count +
+algebra-identity padding) — brain adjacencies are naturally fixed-degree.
+**`SectionedELL`** (CORE, not stretch) buckets variable-degree rows by
+`ceil(log2(k))` and scatters back, preventing silent OOM on ragged graphs
+(`sectioned_ell_from_ragged`, `sectioned_semiring_ell_matmul/_rmatvec`). Plus
+regular-grid sparsity (`grid_identity`, `grid_laplacian`, `regular_grid_stencil`)
+and a mesh layer atop ELL: `Mesh`, `icosphere`, `IcosphereHierarchy`
+(`icosphere_hierarchy`, `icosphere_cross_level_adjacency` for pooling,
+`icosphere_bary_upsampler` for continuous upsampling — all cross-level operators
+are ELLs), `mesh_cotangent_laplacian`, `mesh_k_ring_adjacency`,
+`mesh_laplacian_smooth`, `mesh_mass_matrix`, `mesh_pool_max`/`mesh_unpool_max`,
+`mesh_bary_upsample`, `mesh_coarsen_meanpool`, `vertex_areas`, `face_areas`,
+`compute_vertex_normals`. No `jax.experimental.sparse` BCOO.
 
-### 4.3 `nitrix.signal`
+### 4.3 `nitrix.morphology` — built atop semiring  [CORE]
 
-- `window.py` — `sample_windows` (existing). **Drop `numpyro` dependency** — use
-  `jax.random` directly for multinomial sampling.
-- `filter.py` — FIR / IIR / frequency-domain filters. Pure-numeric implementations,
-  separated from the module-shaped `nn/freqfilter.py` and `nn/iirfilter.py` in hypercoil.
-- `tsconv.py` — basis / polynomial / time-series convolutions (port of
-  `hypercoil/functional/tsconv.py`).
-- `interpolate.py` — spectral / linear / hybrid interpolation for missing data (extract
-  numerics from `hypercoil/functional/interpolate.py`).
-- `normalize.py` — `intensity_normalize` (min / p99 / clip) and friends. Migrates out of
-  `ilex/models/synthstrip/preprocessing.py`.
+Binary/grayscale `dilate`/`erode`/`open`/`close` and `distance_transform`(`_edt`)
+as TROPICAL_MIN/MAX_PLUS specialisations of the semiring conv; plus gather-backed
+ops outside the semiring (state unbounded in the K-loop): `median_filter`
+(`gather → median`), `connected_components` / `largest_connected_component`
+(label-propagation fixed point), and `max_pool_with_indices_nd` /`max_unpool_nd`
+(strided argmax variant of dilate; cross-framework parity is argmax-of-output,
+not raw-logit).
 
-### 4.4 `nitrix.geometry`
+### 4.4 `nitrix.smoothing` — edge-preserving / baseline  [CORE]
 
-- `grid.py` — `cmass_regular_grid`, `identity_grid`, `spatial_transform`, `vec_int`,
-  `rescale` (migrates `ilex/models/voxelmorph/_numerical.py`; folds in existing nitrix
-  `geom.py` grid bits).
-- `sphere.py` — icosphere generation, spherical geodesics, sphere-to-normals / latlong,
-  spherical convolution. Existing `geom.py` + `hypercoil/functional/sphere.py`. Spherical
-  conv is **re-backed** by `semiring.conv` over mesh sparsity (§3.1–3.2) — drop the legacy
-  O(N²) inner loop.
-- `coords.py` — coordinate utilities (`cmass_coor`, `cmass_reference_displacement_*`,
-  spherical ↔ Cartesian).
-- `metrictensor.py` — metric-tensor primitives (port from hypercoil).
+- `gaussian` — separable Gaussian, the unconditional baseline (the FIR vs
+  Young–van Vliet recursive engine is the `driver` axis, §3.3).
+- `bilateral_gaussian` — the **bounded** high-dimensional bilateral (the marquee
+  edge-preserving capability): one gather + one weighted reduction via
+  `semiring_ell_matmul` over a bounded neighbourhood (`int` k-NN / index array /
+  `ELL`), with values/features decoupled, a factored `FeatureMetric` (`M=LLᵀ`),
+  optional validity `mask`, and fixed-affinity `n_iters` (bounded dense-CRF
+  mean-field). Statically shaped, jit/vmap/grad-clean, smooth gradients
+  everywhere.
+- `FeatureMetric` ADT (`nitrix.smoothing.metric`): `DiagonalMetric(sigma)`,
+  `FactorMetric(L)` (low-rank when `k<d_f`), `block_diagonal_metric`,
+  `metric_from_spd`; registered pytrees, `L` differentiable end-to-end. Data-
+  driven metric *fitting* is a consumer concern (built from `stats`/`linalg`).
+- `susan_emulator` — `bilateral_gaussian` + `median_filter` composition
+  (documents its deltas from FSL SUSAN); `brute_force_knn`,
+  `spatial_cube_neighbourhood` helpers.
+- **`permutohedral_lattice` is RETIRED** (not deferred): bounded support dissolves
+  the lattice/hash/splat-blur-slice machinery and its gradient discontinuity.
+  Bounded bilateral supersedes its role; the symbol does not exist and the
+  namespace is not reserved.
 
-### 4.5 `nitrix.graph`
+### 4.5 `nitrix.linalg`
 
-- `laplacian.py` — graph / modularity Laplacian, modularity matrix, Girvan–Newman null,
-  coaffiliation.
-- `connectopy.py` — eigenmaps, diffusion maps (extract from `hypercoil/functional/`,
-  decouple from brainspace).
-- `community.py` — community / relaxed-modularity numerics.
+Matrix utilities (`sym2vec`/`vec2sym`/`squareform`/`symmetric`/`toeplitz`(`_2d`)/
+`delete_diagonal`/`fill_diagonal`/`recondition_eigenspaces`); confound regression
+(`residualise`, `partial_residualise`); solvers (`solve`, `cho_solve`, `cg`, and
+the cuSolver-safe `safe_*` family that probe-and-latch to CPU on a dead solver
+pool); `matrix_exp`/`matrix_log`; `randomized_svd`; nonlinear least squares /
+optimisation (`gauss_newton`, `levenberg_marquardt`, `implicit_least_squares`,
+`implicit_minimize`, `OptimizeResult`); parameterised kernels (`gaussian_kernel`,
+`rbf_kernel`, `linear_kernel`, `polynomial_kernel`, `cosine_kernel`,
+`sigmoid_kernel`, `matern_spectral_density`, `se_spectral_density`,
+`parameterised_norm`, `linear_distance`); SPD-manifold ops (`symexp`, `symlog`,
+`symsqrt`, `symmap`, `sympower`, `tangent_project_spd`, `cone_project_spd`,
+`mean_euclidean`, `mean_log_euclidean`).
 
-### 4.6 `nitrix.numerics` — uncategorised array ops
+### 4.6 `nitrix.stats`
 
-- `tensor_ops.py` — `transpose`, `reshape_to`, `transpose_tf_conv_kernel`,
-  `broadcast_bias`, etc. The pure-array half of `ilex/core/adapters.py` (the adapter
-  *registry* stays in ilex).
+Mass-univariate modelling and second-order statistics. Package-level:
+covariance/correlation family (`cov`, `corr`, `partialcov`, `partialcorr`,
+`precision`, …); GLM (`glm_fit`, `predict`, `t_contrast`, `f_contrast`,
+`GLMResult`, `Family`, `Link`); additive models (`gam_fit`, `GAMResult`); Gaussian
+processes (`gp_fit`/`gp_predict`, `hgp_fit`/`hgp_predict`, HSGP); generalised
+mixed models (`glmm_fit`); non-Gaussian GLMs (`beta_fit`, `gaulss_fit`,
+`ordinal_fit`); `pca_fit`/`transform`/`inverse` (eigh-only, cuSolver-safe; keyed
+`solver='randomized'`); bases (`bspline_basis`, `hsgp_basis`, `gp_basis`,
+`gp_factor_smooth`); shrinkage / sparse precision (`ledoit_wolf`, `oas`, `glasso`,
+`glasso_path`); effect size (`confidence_interval`, `standardized_effect`).
+Submodules: **`stats.lme`** [CORE, promoted from STRETCH] — voxelwise `reml_fit`
+(FaST-LMM spectral rotation, vmap over voxels with no `V·N²` intermediate; ~5e-3
+vs statsmodels), `lme_fit`, `flame_two_level` (FSL FLAME); **`stats.inference`** —
+`permutation_test`, `tfce`, `cluster_size_map`, `fdr`, `bonferroni`;
+**`stats.gaussian`** — distributional score kernels (`gaussian_nll`,
+`kl_diagonal_gaussian`, §5). All return `NamedTuple`s of arrays, never modules.
 
-### 4.7 `nitrix._internal`
+### 4.7 `nitrix.signal`
 
-Internal utilities (axis manipulation, mask helpers, complex-number decompose / recompose,
-docstring formatters). Existing; healthy.
+1-D / time-series DSP: Butterworth IIR (`butterworth_sos`, `iir_filter`,
+`sosfilt`, `sosfiltfilt` — the fft/scan/associative engine is the `driver` axis,
+§3.3) and the `bandpass`/`bandstop`/`lowpass`/`highpass` wrappers; Hilbert/analytic
+(`hilbert_transform`, `analytic_signal`, `envelope`, `env_inst`,
+`instantaneous_phase`/`_frequency`); `tsconv` (basis/polynomial/time-series conv);
+Lomb–Scargle for non-uniform sampling (`lomb_scargle_interpolate`,
+`lomb_scargle_periodogram`); `linear_interpolate`; `polynomial_detrend`;
+`product_filter`/`product_filtfilt`; `sample_windows` (uses `jax.random`, not
+`numpyro`).
+
+### 4.8 `nitrix.geometry`
+
+Grids & warps (`identity_grid`, `spatial_transform`(`_batched`), `resample`,
+`sample_at_points`, `integrate_velocity_field`, `jacobian_displacement`/`_det`,
+`spatial_gradient`, `downsample`/`upsample`/`gaussian_pyramid`); the `Interpolator`
+ADT (`Linear`, `NearestNeighbour`, `Lanczos`, `CubicBSpline` — whose recursive
+prefilter is the `driver` axis, §3.3 — `CatmullRomCubic`, `MultiLabel`) dispatched
+by `method=`; affine/Lie chart (`rigid_exp`/`rigid_log`, `affine_exp`,
+`params_to_affine_matrix`/`affine_matrix_to_params`, `angles_to_rotation_matrix`/
+inverse, `fit_affine`, `apply_affine`, `affine_grid`, `make_square_affine`,
+`invert_affine`, `compose_affine`); transform algebra (`compose_displacement`/
+`compose_velocity`, `invert_displacement`, `field_log`, `transform_mean`/
+`velocity_mean`, `fuse_transforms`, `transform_geodesic`); sphere/surface
+(`spherical_conv` re-backed by `semiring_ell_*`, `spherical_geodesic_distance`,
+`spectral_sphere_embedding`, `spherical_parameterize`, `surface_resample`,
+`marching_cubes`, `inflate_surface`, `cartesian_to_latlong`/inverse,
+`signed_spherical_areas`, `is_bijective_sphere_map`, `sphere_grid_pad/unpad_2d`).
+
+### 4.9 `nitrix.graph`
+
+Laplacian (multi-format: dense / ELL / SectionedELL) and `laplacian_matvec`;
+degree vectors; modularity (`modularity_matrix`(`_matvec`), `coaffiliation`,
+`girvan_newman_null`, `relaxed_modularity`); spectral embedding
+(`laplacian_eigenmap`, `diffusion_embedding`); surface analysis
+(`surface_boundary_map` on `edge_aggregate` + `eta_squared`, `mesh_watershed`
+priority-flood).
+
+### 4.10 `nitrix.metrics` — differentiable comparison kernels
+
+**Comparison score kernels, not "losses"** (§5): similarity (`ssd`, `ncc`, `lncc`
++ `lncc_grad`(`_center`), `joint_histogram` — the onehot/scatter `driver` site —
+`mutual_information` + `mi_grad`/`nmi_grad`, `correlation_ratio`); overlap (`dice`,
+`jaccard`); stable-from-logits classification (`bce_with_logits`,
+`cross_entropy_with_logits`, `focal_loss`); contrastive (`info_nce` — layout-
+agnostic, positive of `za[i]` is `zb[i]` — `dino_cross_entropy`,
+`ibot_cross_entropy`, `koleo`); plus `winsorize`, `match_histogram`. Each returns
+an **unreduced** tensor by default and may expose only the flat leaf
+`reduction ∈ {'none','sum','mean'}` plus the domain-mask weighted mean (§5).
+
+### 4.11 `nitrix.register` — pairwise registration recipes
+
+Linear (`rigid_register` SE(3) GN/LM, `affine_register` 12-DOF via `matrix_exp`,
+`volreg` batched realignment, `bbr_register` boundary-based) and dense
+(`diffeomorphic_demons_register` log-domain SVF, `greedy_syn_register` symmetric
+SyN, `syn_pipeline`); composable ADTs (`Force`/`LNCCForce`/`DemonsForce`/
+`MIForce`/`MetricForce`/`SumForce`, `Metric`/`SSD`/`LNCC`/`MI`/`CorrelationRatio`,
+`Objective`/`MetricObjective`/`BoundaryObjective`, `TransformModel`/`Rigid`/
+`Affine`, `CoordinateSpace`/`IndexSpace`/`WorldSpace`, `Convergence`,
+`RegistrationSpec`/`Result`); field regularisers (`gradient_smoothness`,
+`bending_energy`, `jacobian_folding_penalty`) as score kernels (§5). The velocity-
+field Gaussian regulariser is the `register.field_smooth` `driver` site (§3.3).
+
+### 4.12 `nitrix.numerics`
+
+ODE integrators (`euler`, `rk4`, `odeint` — `lax.scan`, diffrax-free) and
+`fixed_point_solve` (implicit-VJP); normalisation family (`intensity_normalize`,
+`zscore_normalize`, `robust_zscore_normalize`, `psc_normalize`, `demean`,
+`l2_normalize`, `lp_normalize`, `instance_norm`, `percentile_rescale(mask=)`);
+shape/window math (`pad_to_multiple`, `crop_to_multiple`, `nonzero_bounding_box`,
+`gaussian_window`, `overlap_add`); array utilities (`apply_mask`, `conform_mask`,
+`broadcast_ignoring`, `complex_decompose`/`recompose`, `fold_axis`/`unfold_axes`,
+`orient_and_conform`, `promote_to_rank`).
+
+### 4.13 `nitrix.nn` — functional forward-block kernels
+
+`scaled_dot_product_attention` (dense/windowed-bias/causal/cross, optional
+`qk_norm`, fused flash path + fully-fused backward incl. learnable `d_bias`),
+`selective_scan` (Mamba/S6 — the sequential/associative/chunked `driver` site,
+fused chunked-cumsum path), and `layer_norm`/`group_norm`/`instance_norm` (with
+the curse-of-depth `out_scale` hook). Two-tier parity (tenet 10): a bit-faithful
+JAX reference + a fused Pallas path certified `pallas ≈ jax`. The fused norm
+kernel was measured and deliberately **not** built (XLA wins; see
+`bench/PERF_LAYER_NORM.md`).
+
+### 4.14 `nitrix.augment` — keyed augmentation kernels
+
+A numeric category (pure deterministic, keyed generators per tenet 1), ratified
+with a substrate-composition story (§6/§9): geometric ops *compose* existing
+substrate (`random_resized_crop`→`spatial_transform`, `random_affine_matrix`→
+`params_to_affine_matrix`, `random_svf_displacement`→`integrate_velocity_field`),
+while intensity/synthesis atoms are irreducible leaves (`gamma_contrast`,
+`random_histogram_shift`, `gibbs_ringing`, `gaussian_noise`, `rician_noise`,
+`gmm_label_to_image`, `simulate_bias_field`) plus `random_flip`/`random_crop`.
+Augmentation *policy* (specs, registries, compose, multi-crop fan-out) stays in
+ilex/bitsjax.
+
+### 4.15 `nitrix.bias` — intensity inhomogeneity
+
+`n4_bias_field_correction` (ITK/ANTs N4 parity), the `bias_field_correction`
+dispatcher (`method='n4'|'least_squares'|'psplines'`), `bspline_approximate`
+(separable cubic MBA scattered-data fit), `sharpen_histogram` (N3/N4 sharpening),
+`histogram_match` (Nyúl–Udupa).
 
 ---
 
-## 5. Dependency contract
+## 5. Score-kernel ↔ scalarisation boundary  [NORMATIVE]
 
-### 5.1 nitrix may import
+The line between nitrix and `nimox`, drawn at the seam so there is one vocabulary,
+not two rival ones:
 
-- `jax`, `jax.numpy`, `jax.experimental.pallas`
-- `jaxtyping`
-- `numpy` (for type aliases only)
+- **Score kernel (nitrix)** — a pure function comparing/transforming arrays with
+  *irreducible numerical content* (stable-from-logits rewrite, soft overlap,
+  distance/similarity, distributional closed form, field regulariser). Canonical
+  output is the **unreduced** tensor (`reduction='none'`), value → value.
+- **Scalarisation (nimox)** — a higher-order combinator that *wraps* a score into
+  a single training scalar (reductions, term weighting, `scheme` composition),
+  function → function.
 
-### 5.2 nitrix may **not** import
+Invariants:
+1. nitrix score kernels return unreduced tensors by default and MAY expose only
+   the **flat, non-compositional** leaf `reduction ∈ {'none','sum','mean'}` (the
+   innermost element a nimox `inner=` composition calls). nitrix does **not** own
+   compositional / norm / max / softmax-self-weighted scalarisation.
+2. The **one** weighted reduction nitrix owns is the **domain-mask weighted mean**
+   `Σ(w·x)/Σw` — a property of *measurement* (foreground/validity masks make a
+   score over background numerically meaningless), categorically distinct from
+   *objective* weighting (class/term/hard-example weights = nimox).
+3. Objective *structure* (view-pair layout, masked-token selection, EMA/centre
+   bookkeeping, multi-term weighting) is recipe → nimox. A kernel takes structure
+   as an explicit arg or exposes a structure-free core.
+4. **No `loss` namespace in nitrix.** "Loss" (signed, scalarised, weighted
+   objective) is a nimox concept; nitrix hosts score kernels in `metrics`,
+   `stats`, and `register` regularisers.
 
-- `equinox`, `quax` — modules are upstream concerns
-- `numpyro` — currently violated by `window.py`; fix on migration
-- `scipy`, `sklearn`, `pingouin` — test-only
-- `nibabel`, `templateflow`, `lytemaps` — container-level, lives in `thrux`
-- `hypercoil`, `ilex`, `entense`, `thrux`, `bitsjax`, `nimox`, `conveyant`, `gramform`,
-  `paranox`
-- the standard library beyond what is needed for typing
-
-### 5.3 Upstream contract
-
-- `thrux` imports nitrix and wraps its kernels in container-aware raise / lower pairs.
-- `bitsjax` imports nitrix (and thrux) and packages ops as tensorbids operators / resolver
-  steps.
-- `nimox` imports nitrix and wraps primitives in Equinox PyTree modules.
-- `ilex` and `entense` import the above, not nitrix directly (except where a model's
-  internal numerics are pure-tensor; this is allowed but discouraged — prefer going through
-  nimox / bitsjax).
-
----
-
-## 6. Migration map  (module-level)
-
-The detailed source-by-source action list lives in `MIGRATION.md`. Summary by destination:
-
-| Destination subpkg | Sources |
-|---|---|
-| `nitrix.semiring` | NEW — design from the `semiring_gemm.py` brainstorm (§11); no legacy port |
-| `nitrix.sparse` | NEW. **Do not port** `hypercoil/functional/sparse.py` — historical BCOO friction. Re-implement on plain JAX gather + dense arrays. ELL primary; grid / mesh as ELL specialisations |
-| `nitrix.smoothing` | NEW. Gaussian baseline can fold in the kernel from existing `geom.py`; permutohedral is clean-room. SUSAN dropped |
-| `nitrix.morphology` | NEW — built atop semiring |
-| `nitrix.linalg` | existing nitrix `matrix.py`, `residual.py` + hypercoil `functional/{matrix, kernel, symmap, semidefinite, metrictensor}` + `init/{laplace, toeplitz, semidefinite}` |
-| `nitrix.stats` | existing `covariance.py`, `fourier.py` + hypercoil `functional/cov` consolidation; LME is NEW (stretch) |
-| `nitrix.signal` | existing `window.py` (de-numpyro'd) + hypercoil `functional/{tsconv, interpolate, fourier-bits}` + ilex `models/synthstrip/preprocessing.py` `intensity_normalize` |
-| `nitrix.geometry` | existing `geom.py` (split) + hypercoil `functional/{sphere, cmass, metrictensor}` + ilex `models/voxelmorph/_numerical.py` |
-| `nitrix.graph` | hypercoil `functional/{graph, connectopy, cmass}` |
-| `nitrix.numerics` | ilex `core/adapters.py` pure-array half (≈ lines 150–250) |
-| entense `instance.py` impls (`polynomial_detrend_p`, `confound_regression_p`) | merge into `nitrix.signal.filter` / `nitrix.linalg.residual` |
+Implementation: one `nitrix._internal.reductions.reduce(values, *, axis, weight,
+reduction)` (the `'mean'`+`weight` branch is the §5.2 domain-mask mean) backs all
+score kernels — no per-module `_reduce` copies.
 
 ---
 
-## 7. Performance & kernels
+## 6. Dependency contract & concern boundaries
 
-### 7.1 Pallas surface
+### 6.1 nitrix may import
+`jax` / `jax.numpy` / `jax.experimental.pallas`, `jaxtyping`, `numpy` (type
+aliases / static host math only).
 
-Pallas kernels are an **implementation detail** behind the public API. The user-facing
-function (`semiring_matmul`, `permutohedral_lattice`, etc.) chooses a backend; the kernel
-file is private (`_kernels/`).
+### 6.2 nitrix may **not** import
+`equinox`, `quax`, `numpyro`, `scipy`, `sklearn`, `pingouin` (test-only),
+`nibabel`, `templateflow`, `lytemaps`, `hypercoil`, `ilex`, `entense`, `thrux`,
+`bitsjax`, `nimox`, `conveyant`, `gramform`, `paranox`, or stdlib beyond typing
+needs.
 
-### 7.2 Backend selection
+### 6.3 Upstream contract
+`thrux` wraps nitrix kernels in container-aware raise/lower pairs; `bitsjax`
+packages ops as tensorbids operators / resolver steps; `nimox` wraps primitives
+in Equinox modules and owns scalarisation (§5). `ilex`/`entense` import those, not
+nitrix directly (allowed but discouraged for pure-tensor internals).
 
-Three-level resolution: explicit `backend=` keyword → env var (`NITRIX_BACKEND`) →
-auto-detect from `jax.default_backend()`. Auto-detect prefers `pallas-cuda` on NVIDIA,
-`pallas-tpu` on TPU, `jax` fallback otherwise.
+### 6.4 Structural rules (firm)
+- **No new top-level subpackage without a substrate-composition story** (no
+  classifiers, no models, no application packages). `augment` qualifies as a
+  numeric category (§4.14); it is not a precedent for model packages.
+- **No PyTree-of-arrays / module classes** — `NamedTuple` or frozen dataclass
+  only.
+- **No "message-passing" base class.** Graph/mesh ops are reductions over ELL.
+- **No hardware-specific code paths** beyond the `pallas-cuda` / `jax` pair.
+- **Prefer a keyword over forking a function.**
 
-### 7.3 Differentiability
+---
 
-Every kernel has a JAX-side gradient. Pallas kernels register a `jax.custom_vjp` whose
-backward is either (a) a paired Pallas kernel, or (b) a JAX fallback. Tests assert
-forward / backward numerical agreement across backends (tolerance pinned per dtype).
+## 7. Migration (historical)
+
+The v0→v1 source-by-source port (from `hypercoil` / `ilex` / legacy `nitrix`) is
+complete; the detailed action list lives in `MIGRATION.md` and git history and is
+no longer normative. Concern boundaries (§6) govern any future port.
 
 ---
 
 ## 8. Testing & validation
 
-- pytest, pinned numerical references (pingouin, scipy.ndimage, sklearn, communities) live
-  in `tests/` and are not runtime deps.
-- Add hypothesis-based property tests for the marquee ops (associativity / identity for
-  semirings; idempotence for morphological close-after-open at large kernels; etc.).
-- Add backend-parity tests: same op via `pallas-cuda` and `jax` fallback must agree to
-  pinned tolerance.
-- Add the **JIT-trap regression** test for `covariance` with non-diagonal weights — this is
-  a known bug, not a feature.
+- pytest with pinned numerical references (scipy / statsmodels / sklearn /
+  pingouin) under `tests/`, never runtime deps.
+- **Golden corpus** (`tests/golden/*.npz`, `tests/tolerance.toml`, loader
+  `tests/_golden.py`, regen `tools/regen_golden.py`): reference-vs-golden per
+  `(op, dtype)`, loosened per `(op, dtype, backend)` for the fused path.
+- **Backend parity:** `pallas-cuda ≈ jax` to the pinned tolerance; both paths run
+  in CI (the Pallas path needs a GPU runner; CPU is the correctness floor under
+  `JAX_PLATFORMS=cpu`). No TPU tests (two axes, not three).
+- **Driver cross-variant contract:** every registered divergent op asserts
+  `variant ≈ canonical` within the registry tolerance, read directly from
+  `divergent_ops()` (`tests/test_reproducible_dispatch_contract.py`).
+- **Completeness guards:** the op-matrix guard (`tools/op_matrix.py` +
+  `tests/test_op_matrix_completeness.py`) and the reproducible-dispatch guard
+  (`tests/test_reproducible_dispatch_guard.py`, which fails CI on a new ungoverned
+  `default_backend_is_gpu()` flip or an unregistered/orphan driver op).
+- **Hypothesis** property tests for the marquee ops (semiring identity/associativity,
+  morphological idempotence, interpolation invariants, …).
 
 ---
 
-## 9. Open questions
+## 9. Primitive admission & evolution
 
-Resolved (during this drafting pass):
+The surface grows consumer-first; admission is gated, not ad-hoc.
 
-- ~~Semiring representation~~ — adopt the Monoid + Semigroup Protocol pair with pytree
-  accumulator state (per `semiring_gemm.py` brainstorm).
-- ~~Sparse format unification~~ — ELL primary, dense JAX gather under the hood; no BCOO.
-- ~~Backwards compat~~ — no legacy users; we break freely.
+**Admission rule.** A symbol is admitted iff it has **irreducible numerical /
+structural content** *or* is a named member of a **coherent vocabulary family**
+(discoverability + convention). Excluded when it is *(trivial elementwise op) ∘
+(reduction)* with no content — e.g. `mse`/`l1` stay out (they are
+`scalarise(square|abs(a−b))` in nimox); `gamma_contrast`, the noise generators,
+and the `augment.geometric` family stay in.
 
-Deferred:
-
-1. **Morphology placement.** Independent subpackage (current spec) or buried inside
-   `semiring` as thin convenience wrappers?
-2. **LME scope.** Voxelwise-independent (cheapest, plenty useful) vs voxelwise-with-
-   spatial-regularisation (much harder, much more useful)?
-3. **Kernel registry exposure.** Should `linalg.kernel` expose raw kernels for `thrux` to
-   wrap, or only high-level ops?
-4. **`numerics.reshape` vs `numerics.tensor_ops`.** Submodule split-out granularity inside
-   the small "uncategorised" area.
-5. **lytemaps.** Does nitrix subsume lytemaps's JAX-compilable bits, or does lytemaps
-   remain orthogonal (high-level wrappers around nitrix)? Recommended: orthogonal for now;
-   revisit when nitrix.geometry.sphere matures.
-6. **Tensor-core fast path.** For the real semiring on hardware that can use tensor cores,
-   does the `backend="tensor_core"` specialisation pay off enough to maintain? Or stay
-   pure-Pallas everywhere for simplicity?
+**Graduation gate** (formerly `SPEC_UPDATE_v0.3 §13`). A candidate primitive
+(catalogued live in `docs/feature-requests/`, where the former `SPEC_UPDATE_v0.3
+§12` brainstorm catalogue now lives) graduates to sprint scope only when **all**
+hold: (1) a concrete named consumer is
+blocked/workaround-laden without it; (2) substrate composition is verified (no new
+kernel, no parallel API); (3) the separation-of-concerns invariant holds; (4)
+effort fits the time budget (XS/S rides a consumer sprint; M needs a slot; L needs
+SPEC review). Shipped deviations are logged with consumer + composition story; the
+acceptance test is the invariant, not advance declaration.
 
 ---
 
-## 10. Success criteria (first GA)
+## 10. Status & open questions
 
-- All §4 foundational primitives implemented, tested, JAX + Pallas where applicable.
-- `semiring.{matmul, conv, ell_matmul}` shipped with `real`, `tropical_max_plus`,
-  `tropical_min_plus`, `log`, `euclidean`, `boolean` built-in algebras, and a documented
-  user-extension path (custom `Monoid` / `Semigroup`).
-- KeOps-style streaming kernel passes parity tests against `reference_semiring_gemm` and
-  against naive broadcast formulations, with identity propagation (e.g. `-inf` in
-  tropical / log) and numerical stability (log with large magnitudes) regressions covered.
-- `sparse.{ell, grid, mesh}` shipped; `geometry.sphere.spherical_conv` re-backed by
-  `semiring_ell_conv`. No `jax.experimental.sparse` BCOO dependency.
-- `smoothing.gaussian`, `smoothing.bilateral`, `smoothing.permutohedral_lattice` shipped
-  and tested against reference implementations. SUSAN intentionally absent.
-- `morphology.{binary, grayscale}` shipped atop tropical-semiring conv.
-- All known bugs (covariance non-diag weights; `numpyro` import; 2D-only `spatial_conv`)
-  resolved before any of the above land.
-- Downstream blockers for `ilex`, `entense`, `thrux`, `bitsjax`, `nimox` cleared.
-- `lme` namespace reserved; no implementation required.
+**Genuinely open:**
+1. **Ampere ELL Triton-vs-XLA gate.** If Triton gather on Ampere underperforms
+   `jnp.take_along_axis` + reduction by > 2×, the ELL kernel ships JAX-default with
+   Triton opt-in. (Benchmark before committing Triton as the ELL default.)
+2. **TPU support** — architecturally compatible, blocked on dev access; post-1.0.
+3. **Kernel-registry exposure** — should `linalg.kernel` expose raw kernels for
+   `thrux` to wrap, or only high-level ops? (Blocks the thrux contract.)
+4. **Tensor-core fast path** — is a `backend='tensor_core'` real-semiring
+   specialisation worth maintaining, or stay pure-Pallas?
+5. **SPEC §2 tenet text** — the reproducible-dispatch tenet (tenet 9) is drafted
+   here; fold the final wording into any downstream SPEC mirror as needed.
+
+**Resolved** (historical, see git history): semiring representation (Monoid +
+Semigroup, pytree carry); sparse format (ELL + SectionedELL, no BCOO); permutohedral
+(retired for bounded bilateral); morphology placement (own subpackage); LME scope
+(voxelwise CORE); the score-kernel ↔ scalarisation boundary (§5); `augment`
+ratification; backwards compat (no legacy users — break freely).
 
 ---
 
-## 11. Source artefacts referenced
+## 11. Provenance map (consolidation)
 
-- **Semiring brainstorm (prior session, untested stubs, does not match house style):**
-  - `_refstubs/semiring_gemm.py` — `Monoid` / `Semigroup` / `Semiring` Protocols,
-    pre-built algebras (`real`, `tropical_*`, `log`, `euclidean`), KeOps-style Pallas
-    kernel builder, pure-JAX reference implementation.
-  - `_refstubs/test_semiring_gemm.py` — parity tests against naive broadcast and the
-    pure-JAX reference; identity-propagation and numerical-stability regressions.
-  Treat as design input, not as a port target. Reimplement in the diffprog house style;
-  preserve the Protocol shape, pytree-state pattern, and KeOps streaming idea.
+This document folds in the former incremental specs; in-code `SPEC_UPDATE §x`
+citations resolve here:
+
+| Former location | Now |
+|---|---|
+| `SPEC_UPDATE` §2.7 loud fallbacks | §2 tenet 7, §3.2 |
+| `SPEC_UPDATE` §2.8 golden corpus | §2 tenet 8, §8 |
+| `SPEC_UPDATE` §3.1 strict/relaxed semiring + differentiability | §4.1 |
+| `SPEC_UPDATE` §3.2 sectioned ELL | §4.2 |
+| `SPEC_UPDATE` §3.3 smoothing tiers | §4.4 |
+| `SPEC_UPDATE` §3.4 morphology split (gather-backed median) | §4.3 |
+| `SPEC_UPDATE` §7.2 backend selection | §3.2 |
+| `SPEC_UPDATE_v0.2` §1.1 hardware scope / §2.3 / §7.2 Ampere | §1.1, §2 tenet 3, §3.2 |
+| `SPEC_UPDATE_v0.3` §10.A edge-aggregate / icosphere hierarchy / pooling / LME→CORE | §4.1, §4.2, §4.3, §4.6 |
+| `SPEC_UPDATE_v0.3` §12 candidate catalogue / §13 gate / §14 out-of-scope | `docs/feature-requests/`, §9, §6.4 |
+| `SPEC_UPDATE_v0.4` §3.3 permutohedral retired / FeatureMetric | §4.4 |
+| `SPEC_UPDATE_v0.5` §1 score-kernel ↔ scalarisation | §5 |
+| `SPEC_UPDATE_v0.5` §2 keyed generators / §3 augment / §3.1 admission rule | §2 tenet 1, §4.14, §9 |
+| reproducible-dispatch principle (2026-06-24) | §2 tenet 9, §3.3, §8 |

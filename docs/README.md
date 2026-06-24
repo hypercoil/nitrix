@@ -107,7 +107,7 @@ benchmark reports, and survive being plucked into the eventual
   argmax-agreement parity caveat documented), and the
   ``sparse.mesh`` convenience wrappers (``mesh_pool_max`` /
   ``mesh_unpool_max`` / ``mesh_bary_upsample``).  Closes the
-  ilex mesh-graph consumer asks FA2–FA5 (see ``SPEC_UPDATE_v0.3 §10.A``).
+  ilex mesh-graph consumer asks FA2–FA5 (see ``SPEC.md §4.2``; §11 provenance).
 - [`design/backward-kernels.md`](design/backward-kernels.md) -- the
   per-algebra ``jax.custom_vjp`` story, the per-algebra differentiability
   vocabulary, and the G1 finite-difference gate.
@@ -184,8 +184,8 @@ benchmark reports, and survive being plucked into the eventual
   cells fall out of the refactor.  ``eigh`` is folded in only in its
   extremal role; ``safe_eigh`` stays the full-spectrum primitive.
 - [`design/permutohedral-g2.md`](design/permutohedral-g2.md) --
-  the G2 tripwire outcome for ``permutohedral_lattice`` (**retired**
-  in SPEC_UPDATE_v0.4; superseded by the bounded bilateral, see
+  the G2 tripwire outcome for ``permutohedral_lattice`` (**retired**;
+  see ``SPEC.md §4.4``; superseded by the bounded bilateral, see
   ``bounded-bilateral.md``).  Retained as the historical record of the
   structural obstacles (hash-table representation, neighbour lookups
   during blur, simplex-identity gradient discontinuity) that bounded
