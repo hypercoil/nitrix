@@ -14,7 +14,7 @@ scalarisation, multi-term weighting) is nimox's ``scalarise`` / ``scheme``.
 "Loss" is therefore a nimox concept; ``metrics`` ships the kernels (a
 metric becomes a loss via ``1 - metric`` or its cross-entropy + scalarise).
 
-Five families:
+Six families:
 
 - ``intensity`` -- ``ssd``, ``ncc`` (global), ``lncc`` (local /
   windowed).  Within-modality; ``lncc`` is robust to smooth intensity
@@ -34,13 +34,19 @@ Five families:
   ``dino_cross_entropy`` / ``ibot_cross_entropy`` (self-distillation),
   ``koleo`` (feature-spread entropy regulariser): self-supervised
   representation kernels.
+- ``surface`` -- ``hausdorff95`` and ``surface_dice``: boundary-distance
+  reporting metrics over the ``morphology`` erosion + EDT substrate, parity
+  pinned to MONAI (reporting; non-differentiable).
 
 Substrate-composition note (SPEC §9 invariant): ``lncc``'s
 local sums are a separable box filter (the ``_internal.separable``
 engine shared with ``geometry.spatial_gradient``); ``ncc`` is the
 ``stats.corr`` shape; MI / CR are soft (Parzen) histogram scatter-adds;
-all share the one ``_internal.reductions`` leaf.  No new kernel.  All are
-differentiable w.r.t. their array arguments.
+the ``surface`` metrics reuse ``morphology.{erode, distance_transform_edt}``;
+all share the one ``_internal.reductions`` leaf.  No new kernel.  The
+comparison kernels are differentiable w.r.t. their array arguments; the
+``classification`` evaluation metrics and the ``surface`` metrics are
+reporting outputs and are not (hard-output carve-out, SPEC §2 tenet 2).
 """
 
 from .intensity import lncc, lncc_grad, lncc_grad_center, ncc, ssd
@@ -53,6 +59,7 @@ from .information import (
 )
 from .preprocess import match_histogram, winsorize
 from .overlap import dice, jaccard
+from .surface import hausdorff95, surface_dice
 from .classification import (
     bce_with_logits,
     confusion_matrix,
@@ -87,6 +94,9 @@ __all__ = [
     # overlap
     'dice',
     'jaccard',
+    # surface distance
+    'hausdorff95',
+    'surface_dice',
     # classification
     'bce_with_logits',
     'cross_entropy_with_logits',
