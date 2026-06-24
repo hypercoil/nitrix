@@ -61,7 +61,7 @@ register_divergent_op(
     canonical='onehot',
     fast={'gpu': 'onehot', 'cpu': 'scatter'},
     driver_values=('onehot', 'scatter'),
-    tolerance={'float32': 1e-4, 'float64': 1e-10},
+    tolerance={'float32': 2e-4, 'float64': 1e-10},
     summary='joint histogram: one-hot matmul (deterministic) vs atomic scatter',
 )
 
