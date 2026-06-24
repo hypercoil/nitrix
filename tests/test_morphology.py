@@ -234,6 +234,49 @@ def test_distance_transform_rejects_unknown_metric():
         distance_transform(mask, metric='manhattan', backend='jax')
 
 
+@pytest.mark.parametrize(
+    'shape,sampling',
+    [
+        ((20, 24), (1.0, 3.0)),
+        ((20, 24), (2.5, 1.0)),
+        ((20, 24), 2.0),
+        ((10, 12, 14), (1.0, 1.0, 3.0)),
+        ((10, 12, 14), (2.0, 1.0, 0.5)),
+    ],
+)
+def test_distance_transform_anisotropic_matches_scipy(shape, sampling):
+    # B20: anisotropic voxel spacing -- the exact EDT must match scipy's
+    # distance_transform_edt(sampling=...), not just the unit grid.
+    rng = np.random.RandomState(2)
+    mask = (rng.random(shape) > 0.2).astype(np.float32)
+    got = distance_transform_edt(
+        jnp.asarray(mask), sampling=sampling, backend='jax'
+    )
+    ref = scipy_ndi.distance_transform_edt(mask > 0.5, sampling=sampling)
+    np.testing.assert_allclose(got, ref, rtol=1e-4, atol=1e-3)
+
+
+def test_distance_transform_unit_sampling_byte_identical():
+    # sampling=None and sampling=1.0 are the same unit grid (byte-identical).
+    rng = np.random.RandomState(3)
+    mask = jnp.asarray((rng.random((16, 18)) > 0.4).astype(np.float32))
+    none = distance_transform_edt(mask, backend='jax')
+    unit = distance_transform_edt(mask, sampling=1.0, backend='jax')
+    np.testing.assert_array_equal(np.asarray(none), np.asarray(unit))
+
+
+def test_distance_transform_sampling_validation():
+    mask = jnp.asarray(np.ones((8, 8), np.float32))
+    # wrong number of spacings
+    with pytest.raises(ValueError, match='sampling'):
+        distance_transform_edt(mask, sampling=(1.0, 2.0, 3.0), backend='jax')
+    # sampling is euclidean-only; chamfer rejects it
+    with pytest.raises(ValueError, match='sampling'):
+        distance_transform(
+            mask, metric='chebyshev', sampling=2.0, backend='jax'
+        )
+
+
 # ---------------------------------------------------------------------------
 # median_filter
 # ---------------------------------------------------------------------------
@@ -553,8 +596,12 @@ def test_connected_components_diagonal_merges_under_full_connectivity():
     mask = np.zeros((4, 4), dtype=bool)
     mask[1, 1] = True
     mask[2, 2] = True
-    assert int(connected_components(jnp.asarray(mask), connectivity=1).max()) == 2
-    assert int(connected_components(jnp.asarray(mask), connectivity=2).max()) == 1
+    assert (
+        int(connected_components(jnp.asarray(mask), connectivity=1).max()) == 2
+    )
+    assert (
+        int(connected_components(jnp.asarray(mask), connectivity=2).max()) == 1
+    )
 
 
 def test_connected_components_empty_mask():
