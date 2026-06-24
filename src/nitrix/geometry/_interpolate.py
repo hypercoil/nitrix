@@ -870,7 +870,7 @@ class CubicBSplineBoundaryWarning(UserWarning):
     ``CubicBSpline`` always uses the mirror boundary (the only one its
     prefilter implements), so an explicit non-mirror ``mode`` -- or a
     non-zero ``cval`` -- is ignored.  Per the "loud fallbacks" tenet
-    (SPEC_UPDATE 2.7) that override is announced rather than silent.  Pass
+    (SPEC 2.7) that override is announced rather than silent.  Pass
     ``mode='mirror'`` (or leave ``mode`` at its default) to silence it, or
     filter this category.  The default ``mode='constant'`` with ``cval=0``
     is treated as "unspecified" and does *not* warn.

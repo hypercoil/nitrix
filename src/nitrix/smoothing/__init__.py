@@ -5,7 +5,7 @@
 """
 nitrix.smoothing -- edge-preserving / non-edge-preserving smoothing.
 
-Two tiers (SPEC §3.3):
+Two tiers (SPEC §4.4):
 
 - ``gaussian`` -- separable n-D Gaussian; unconditional baseline for
   cases where edge preservation is not wanted.

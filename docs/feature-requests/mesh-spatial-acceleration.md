@@ -58,7 +58,7 @@ nearest-surface / point-location query.
 
 ## 3. Scope boundary
 
-In scope (SPEC §5): a clean-room uniform-grid spatial index + **exact**
+In scope (SPEC §6): a clean-room uniform-grid spatial index + **exact**
 nearest-triangle / point-location query, host-side, vectorised, returning the
 **bit-identical** result of the brute-force it replaces. No public API change —
 it sits *behind* `nearest_surface_distance` / `mesh_to_sdf` / `surface_resample`.
@@ -273,4 +273,4 @@ heuristic, fallback rate on real data, measured speed-up) in
   `geometry/intersection.py` (the C4 vectorised binning idiom),
   `geometry/sphere_grid.py` (equirectangular topology).
 - Governance: `SPEC.md §5` (no `scipy.spatial` runtime dep),
-  `SPEC_UPDATE_v0.3.md §13`.
+  `SPEC §9`.

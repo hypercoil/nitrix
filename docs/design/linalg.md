@@ -10,7 +10,7 @@
 > cosine; squared-L2 via the identity-formula to avoid the legacy
 > ``O(n m d)`` materialisation), ``spd`` (matrix log / exp / sqrt /
 > power / tangent-space projection / log-Euclidean mean with the
-> SPEC §4.1 stability rewrite), and a shared ``_solver`` helper
+> SPEC §4.5 stability rewrite), and a shared ``_solver`` helper
 > for cuSolver-robust eigh.
 
 ## Why a green-field rewrite
@@ -128,9 +128,9 @@ Dropped from the legacy:
   wanting a sparse kernel matrix build it via ``semiring_ell_matmul``
   with the appropriate algebra.
 
-## `spd`: the SPEC §4.1 stability rewrite
+## `spd`: the SPEC §4.5 stability rewrite
 
-The legacy ``symmap`` had a documented stability gap (SPEC §4.1):
+The legacy ``symmap`` had a documented stability gap (SPEC §4.5):
 applying ``log`` / ``sqrt`` to eigenvalues underflowed for small
 eigenvalues, and the ``fill_nans=True`` flag silently substituted
 ``0`` for ``NaN`` -- mathematically wrong (``log(0) = -inf``,
@@ -198,4 +198,4 @@ move at concrete-eval time -- correct in both regimes.
 - [`graph.md`](graph.md) -- the ``connectopy`` consumer of ``_solver``.
 - [`lobpcg-implicit-vjp.md`](lobpcg-implicit-vjp.md) -- the LOBPCG
   consumer of ``_solver``.
-- SPEC §4.1 (SPD stability), §4.2 (kernel surface).
+- SPEC §4.5 (SPD stability), §4.2 (kernel surface).

@@ -6,7 +6,7 @@
 > wedge-resilient on-device solver for the GN/LM normal equations (see
 > `docs/design/registration.md` and `IMPLEMENTATION_PLAN.md §10.3`). Still
 > open: `minres` / `lsqr` / `bicgstab` (same template), gated by §13.
-> Provenance: `SPEC_UPDATE_v0.3.md §12.1`.
+> Provenance: `docs/feature-requests catalogue §12.1`.
 
 **What.** Matrix-free iterative linear solvers, generalising the
 implicit-operator pattern already proven by the `laplacian_eigenmap`
@@ -46,7 +46,7 @@ generalise, but no public Krylov surface.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.1` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.1` — origin entry; `§13` — acceptance protocol.
 - [`fixed-point-combinators.md`](fixed-point-combinators.md) — downstream
   consumer (inner solve).
 - [`docs/design/lobpcg-implicit-vjp.md`](../design/lobpcg-implicit-vjp.md) —

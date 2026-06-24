@@ -254,7 +254,7 @@ Two caveats are *tuning*, not correctness:
   (``linalg/_eigsolve``), exercised by connectopy and community; promote
   ``eigsolve_top_k`` / ``EigPair`` / ``SolverSpec`` to public
   ``nitrix.linalg.eigsolve`` when a second consumer (aCompCor) lands, to
-  avoid premature API lock-in (SPEC §2.6 golden-output stability).
+  avoid premature API lock-in (SPEC §2 tenet 6 golden-output stability).
 
 ## Plan of work
 

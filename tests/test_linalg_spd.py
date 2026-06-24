@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for ``nitrix.linalg.spd`` (SPD manifold operations).
 
-The SPEC §4.1 stability rewrite: legacy ``hypercoil.functional.symmap``
+The SPEC §4.5 stability rewrite: legacy ``hypercoil.functional.symmap``
 underflowed at small eigenvalues (silent ``NaN`` -> ``0`` via
 ``fill_nans=True``).  The green-field implementation clips
 eigenvalues at the rank-truncation threshold and surfaces ``NaN``
@@ -100,7 +100,7 @@ def test_sympower_identity_at_power_one():
 
 
 # ---------------------------------------------------------------------------
-# Ill-conditioned input (the SPEC §4.1 stability concern)
+# Ill-conditioned input (the SPEC §4.5 stability concern)
 # ---------------------------------------------------------------------------
 
 

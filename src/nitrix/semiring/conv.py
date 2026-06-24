@@ -2,7 +2,7 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Public ``semiring_conv`` -- the third member of the SPEC §3.1 trinity.
+Public ``semiring_conv`` -- the third member of the SPEC §4.1 trinity.
 
 For each output spatial position, the kernel is multiplied with the
 input receptive field via the algebra's ``binary_op`` and then

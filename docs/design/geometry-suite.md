@@ -50,7 +50,7 @@ From SPEC §2 / §5 and `IMPLEMENTATION_PLAN.md §2.2`, holding for every task:
    Workbench), any non-differentiable path, any host-side stage is announced in
    the docstring; silent degradation is a defect.
 6. **Backward-compatible.** No break to a shipped symbol; extend via a kwarg,
-   never a fork (SPEC_UPDATE_v0.3 §14). New behaviour is opt-in.
+   never a fork (SPEC §6.4). New behaviour is opt-in.
 
 ## 2. Architectural decisions (locked)
 
@@ -634,7 +634,7 @@ P0.2/P1.1 ops on the un-normalised real white surface, not just the unit sphere.
 
 ## 10. Governance & graduation
 
-Per SPEC_UPDATE_v0.3 §13, each item carries the four-gate. Named consumer
+Per SPEC §9, each item carries the four-gate. Named consumer
 (`recon-all-clinical` / HCP / `sugar` / `josa`) and composition sketch are
 satisfied by the FR; the operative gates are SoC and effort:
 
@@ -709,7 +709,7 @@ optimisers** (pytree), **P0.3/P0.4 → arbitrary-mesh ops**, **P2.2 → P2.1**,
   [`mesh-graph-conv.md`](mesh-graph-conv.md),
   [`sparse-specialisations.md`](sparse-specialisations.md),
   [`ell-on-triton.md`](ell-on-triton.md), [`testing-strategy.md`](testing-strategy.md).
-- **Governance:** `SPEC.md §5` (dep contract), `SPEC_UPDATE_v0.3.md §13`
+- **Governance:** `SPEC.md §5` (dep contract), `SPEC §9`
   (acceptance) / §14 (kwarg-not-fork), `IMPLEMENTATION_PLAN.md §2.2`
   (non-negotiables) / §10 (deviation log).
 - **Dependency FRs adopted by the suite:** `mesh-curvature.md` (12.6),

@@ -4,7 +4,7 @@
 > shipped (`mesh_bary_upsample` / `icosphere_bary_upsampler`); the
 > arbitrary-triangulation `ADAP_BARY_AREA` case is not.** Brainstorm
 > candidate; promotion gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.15`.
+> `docs/feature-requests catalogue §12.15`.
 
 **What.** Connectome Workbench's `ADAP_BARY_AREA` cross-mesh resampling
 (`wb_command -metric-resample` / `-surface-resample`), for the
@@ -53,7 +53,7 @@ arbitrary-mesh `surface_resample` and no area-weighted / adaptive variant.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.15` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.15` — origin entry; `§13` — acceptance protocol.
 - `src/nitrix/sparse/mesh.py` — `mesh_bary_upsample` / `icosphere_bary_upsampler`.
 - [`ilex-pipeline-substrate.md`](ilex-pipeline-substrate.md) — the
   surface↔sphere parameterisation scope boundary (the `surfa`-side projection

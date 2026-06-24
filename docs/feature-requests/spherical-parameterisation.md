@@ -1,7 +1,7 @@
 # GS-2 — Spherical parameterisation (`mris_sphere`) → `geometry.sphere.spherical_parameterize`
 
 > **Status (2026-06-22): SPEC-review design doc / FR.** GS-2 is the geometry
-> suite's hardest continuous optimiser (Effort **L**), which `SPEC_UPDATE_v0.3
+> suite's hardest continuous optimiser (Effort **L**), which `SPEC §9
 > §13.4` flags for **SPEC-level review before it lands**. This document is that
 > review artifact: it fixes the rationale, the mathematical design and its
 > components, the phased implementation process, the test plan, and the risk
@@ -67,7 +67,7 @@ against the recon-surf source.
 
 ## 3. Scope boundary
 
-In scope (SPEC §5): the array math producing `Φ` from plain `(V, F)` arrays.
+In scope (SPEC §6): the array math producing `Φ` from plain `(V, F)` arrays.
 Out of scope: reading `?h.inflated`/`?h.sphere` binaries, `$SUBJECTS_DIR`
 (→ `thrux`/consumer). The validation harness reads `fsaverage` surfaces
 **test-side only** (the established `tests/_real_meshes.py` seam), including
@@ -387,7 +387,7 @@ P1.1 curvature record.
   `geometry/surface.py` (`_cotangent_apply`, `areal_distortion`,
   `strain_distortion`), `geometry/isosurface.py` (`_solid_angle`),
   `geometry/sphere.py`, `tests/_real_meshes.py`.
-- **Governance.** `SPEC_UPDATE_v0.3.md §13` (acceptance, §13.4 L-review),
+- **Governance.** `SPEC §9` (acceptance, §13.4 L-review),
   `SPEC.md §5` (dep contract).
 - **Spectral one-shot (the `init='spectral'` path), verified June 2026.**
   Henschel, Conjeti, Estrada, Diers, Fischl, Reuter 2020, *FastSurfer*

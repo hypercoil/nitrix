@@ -2,7 +2,7 @@
 
 > **Status (2026-06-02): not started — blocked on `kmeans` (§12.18); the
 > eigenvector half is shipped.** Brainstorm candidate; promotion gated by
-> the §13 acceptance protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.19`.
+> the §13 acceptance protocol. Provenance: `docs/feature-requests catalogue §12.19`.
 
 **What.** Shi–Malik 1997 / Craddock 2012-style normalised-cut spectral
 clustering — a thin composition wrapper.
@@ -25,7 +25,7 @@ tracked in [`clustering-primitives.md`](clustering-primitives.md).
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.19` — origin entry; `§13` — acceptance protocol;
+- `docs/feature-requests catalogue §12.19` — origin entry; `§13` — acceptance protocol;
   `§12.20` — strategy survey (Craddock NCut row).
 - [`clustering-primitives.md`](clustering-primitives.md) — the `kmeans`
   dependency.

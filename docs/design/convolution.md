@@ -11,7 +11,7 @@
 
 ## The reduction
 
-``semiring_conv`` is the third member of the SPEC §3.1 trinity
+``semiring_conv`` is the third member of the SPEC §4.1 trinity
 (``matmul``, ``ell_matmul``, ``conv``).  The math:
 
 ```
@@ -172,7 +172,7 @@ attractive 1.x follow-up after the GA cut.
 
 ## Cross-references
 
-- SPEC §3.1 ``semiring_conv`` signature.
+- SPEC §4.1 ``semiring_conv`` signature.
 - ``src/nitrix/semiring/conv.py`` -- module.
 - ``tests/test_conv.py`` -- 18 tests covering REAL parity with cuDNN,
   per-algebra correctness, identity propagation, finite-diff grad,

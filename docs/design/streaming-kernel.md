@@ -56,7 +56,7 @@ real-multiply-add.  We want the same kernel to lower for
 (``(logsumexp, +)``), for ``EUCLIDEAN`` (``(+, (a-b)²)`` plus a
 ``sqrt`` projection), and so on.  Issuing plain CUDA-core SIMD ops
 costs us ~8× peak throughput on Ampere TF32 hardware, but it's the
-*only* approach that supports the algebra surface in SPEC §3.1.
+*only* approach that supports the algebra surface in SPEC §4.1.
 
 Users who specifically want tensor-core throughput on the real
 semiring should call ``jnp.matmul`` directly -- ``nitrix.semiring``'s
@@ -67,7 +67,7 @@ the ``semiring_matmul`` docstring.
 ## Verifying the memory claim
 
 The streaming-kernel design is *the* load-bearing perf claim from
-SPEC §3.1 ("peak on-chip memory at O(BM·BN + BM·BK + BK·BN)").  We
+SPEC §4.1 ("peak on-chip memory at O(BM·BN + BM·BK + BK·BN)").  We
 verify it empirically with
 [`bench/mem_streaming_kernel.py`](../../bench/mem_streaming_kernel.py),
 which reads ``jax.devices()[0].memory_stats()['peak_bytes_in_use']``
@@ -118,7 +118,7 @@ change causes either the JAX or the Pallas peak to scale with
 
 ## Cross-references
 
-- SPEC §3.1 "Kernel strategy"; the original design intent.
+- SPEC §4.1 "Kernel strategy"; the original design intent.
 - ``src/nitrix/_kernels/cuda/semiring_matmul.py`` -- Pallas kernel.
 - ``src/nitrix/semiring/_reference.py`` -- JAX reference.
 - ``bench/mem_streaming_kernel.py`` -- HBM measurement script.

@@ -4,7 +4,7 @@
 """
 Sectioned ELL -- bucketed-row format for variable-degree adjacencies.
 
-Per SPEC_UPDATE §3.2, the naive ELL layout pads every row to the
+Per SPEC §4.2, the naive ELL layout pads every row to the
 global ``k_max``.  That's memory-efficient when ``k_max ≈
 median(k)`` but pathological when the worst-case row is much
 larger -- e.g. distance-thresholded neighbourhoods in irregular

@@ -3,7 +3,7 @@
 > **Status (2026-06-02): partial — `diffusion_embedding` (Coifman & Lafon
 > 2006) is shipped; the explicit heat-kernel operator `K_t = exp(−tL)` is
 > not.** Brainstorm candidate; promotion gated by the §13 acceptance
-> protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.3`.
+> protocol. Provenance: `docs/feature-requests catalogue §12.3`.
 
 **What.** The heat-kernel matrix function of the Laplacian, plus
 heat-kernel-mass-normalised diffusion-map embedding.
@@ -31,6 +31,6 @@ just its leading eigenspace.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.3` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.3` — origin entry; `§13` — acceptance protocol.
 - [`matrix-functions.md`](matrix-functions.md) — `matrix_exp` dependency.
 - `src/nitrix/graph/connectopy.py` — the shipped `diffusion_embedding`.

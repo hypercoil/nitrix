@@ -84,7 +84,7 @@ mode.
 
 ## The golden-corpus scaffolding (sketch, not yet populated)
 
-Per SPEC_UPDATE §2.8, we owe a ``tests/golden/`` checked-in array
+Per SPEC §2 tenet 8, we owe a ``tests/golden/`` checked-in array
 per ``(kernel, dtype, algebra, backend)`` cell.  The directory
 exists (``tests/golden/``) but is empty.  The current per-algebra
 naive-broadcast tests serve as a quasi-golden corpus, but they
@@ -108,7 +108,7 @@ post-Phase-2 task; see IMPLEMENTATION_PLAN §3.1 Phase 0.2 task
   revisiting if the algebra surface grows.
 - **CI on multiple GPU generations.**  Currently A10G (Ampere)
   only.  Lovelace / Hopper / Blackwell support is on the roadmap
-  per SPEC_UPDATE_v0.2 §1.1 but blocked on runner availability.
+  per SPEC §1.1 but blocked on runner availability.
 
 ## Cross-references
 
@@ -116,5 +116,5 @@ post-Phase-2 task; see IMPLEMENTATION_PLAN §3.1 Phase 0.2 task
 - ``tests/golden/`` -- empty; future golden corpus.
 - IMPLEMENTATION_PLAN §3.1 Phase 0.2 -- the test scaffolding
   requirements.
-- SPEC §8, SPEC_UPDATE §8, SPEC_UPDATE_v0.2 §8 -- the
+- SPEC §8, SPEC §8, SPEC §8 -- the
   authoritative testing contract.

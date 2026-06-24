@@ -4,7 +4,7 @@
 """
 Public ``semiring_matmul`` with three-level backend selection.
 
-The function shape matches SPEC §3.1::
+The function shape matches SPEC §4.1::
 
     semiring_matmul(
         A: Num[Array, "... m k"],
@@ -273,7 +273,7 @@ def semiring_matmul(
     Differentiability
     -----------------
     Built-in algebras carry a hand-derived ``jax.custom_vjp`` rule
-    (see ``nitrix.semiring._backward`` and SPEC_UPDATE §3.1).  When
+    (see ``nitrix.semiring._backward`` and SPEC §4.1).  When
     ``semiring.matmul_vjp`` is non-``None`` the call routes through
     that wrapper; ``jax.grad`` / ``jax.vjp`` / ``jax.jacrev`` therefore
     return finite-difference-checked gradients without further

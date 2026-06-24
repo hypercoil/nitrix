@@ -16,7 +16,7 @@ the shared framing + history and indexes its atomised items:
 | Statistical modelling suite | [`stats-modelling-suite.md`](stats-modelling-suite.md) | Mass-univariate GLM/GAM/GAMM, LME size-dispatch, TFCE `randomise` — perf-bench + ModelArray + niffi |
 | Internal engineering backlog | [`internal-backlog.md`](internal-backlog.md) | Parked perf / Pallas / API-refinement items, each gated on a **Trigger** |
 | Doc-drift / correctness fixes | [`perf-bench-feedback.md`](perf-bench-feedback.md) | Mechanical docstring fixes (file:line-pinned), *not* primitive proposals |
-| SPEC §12 brainstorm catalogue | `SPEC_UPDATE_v0.3.md §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
+| docs/feature-requests catalogue §12 brainstorm catalogue | `docs/feature-requests catalogue §12` (origin) | Substrate-compatible *candidate* primitives; promotion gated by `§13` |
 
 Status is verified against the live `src/nitrix` surface as of 2026-06-02
 (interpolation-method dispatcher — `Lanczos` / `MultiLabel` /
@@ -224,9 +224,9 @@ mechanical docstring fixes, not primitive proposals.
 | [doc-gaussian-kernel-gamma](doc-gaussian-kernel-gamma.md) | `linalg/kernel.py:37` |
 | [doc-relaxed-modularity-newman-factor](doc-relaxed-modularity-newman-factor.md) | `graph/community.py:245` |
 
-## SPEC §12 brainstorm catalogue (candidate primitives)
+## docs/feature-requests catalogue §12 brainstorm catalogue (candidate primitives)
 
-`§` = origin entry in `SPEC_UPDATE_v0.3.md` (the canonical origin record; the
+`§` = origin entry in `SPEC §9` (the canonical origin record; the
 `§13` acceptance protocol references items by number). **Status** is against
 live code: *not started* / *partial* (some substrate shipped).
 
@@ -254,9 +254,9 @@ live code: *not started* / *partial* (some substrate shipped).
 
 **§12.20** (functional-parcellation strategy survey) is informational — a
 strategy→primitive mapping table, not a primitive — and stays in
-`SPEC_UPDATE_v0.3.md §12.20`. The parcellation docs (12.16–12.19) link to it.
+`docs/feature-requests catalogue §12.20`. The parcellation docs (12.16–12.19) link to it.
 
-**Candidate not yet in SPEC §12:**
+**Candidate not yet in docs/feature-requests catalogue §12:**
 [ledoit-wolf-shrinkage](ledoit-wolf-shrinkage.md) (`stats.ledoit_wolf`, effort
 S) — analytic shrinkage covariance; sibling of 12.14 glasso and nilearn's
 *default* connectome estimator. Surfaced by perf-bench (nilearn defaults to

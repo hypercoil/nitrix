@@ -63,7 +63,7 @@ implicit-VJP needed, unlike GLASSO).
 ## Cross-references
 
 - [`graphical-lasso.md`](graphical-lasso.md) — sibling regularised-precision
-  estimator (§12.14); `SPEC_UPDATE_v0.3.md §13` acceptance protocol.
+  estimator (§12.14); `SPEC §9` acceptance protocol.
 - [`perf-bench-feedback.md`](perf-bench-feedback.md) — the perf-bench-surfaced
   ledger (this gap surfaced matching nilearn's connectome estimators).
 - `src/nitrix/stats/covariance.py` — `cov` / `precision` / `partialcorr`.

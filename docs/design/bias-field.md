@@ -26,7 +26,7 @@ nitrix contract (SPEC §1, §2.1).  The container-aware wrapper (load a
 NIfTI, resample to a mask, write the corrected image) belongs upstream in
 ``thrux``; nitrix owns the numerics.
 
-It is a *new subsystem* not enumerated in the original SPEC §3/§4.  It was
+It is a *new subsystem* not enumerated in the original SPEC §4/§4.  It was
 added under the deviation protocol (IMPLEMENTATION_PLAN §2) in response to
 a direct downstream request.  The two sub-primitives are exposed
 (``bias.bspline_approximate``, ``bias.sharpen_histogram``) rather than
@@ -73,7 +73,7 @@ Wiener noise 0.01, spline order 3, convergence threshold 1e-3.
 The general Lee--Wolberg--Shin MBA is a *scatter* over arbitrary point
 positions: each data point splats a weighted contribution onto the
 ``(order+1)^d`` control points around it.  That is the friction surface
-the SPEC §3.2 warns against (scatter/gather adversarial to XLA / Pallas).
+the SPEC §4.2 warns against (scatter/gather adversarial to XLA / Pallas).
 
 But N4's data points are *image voxels*, which lie on a **regular grid**.
 On a regular grid the tensor-product B-spline weight from a voxel to a

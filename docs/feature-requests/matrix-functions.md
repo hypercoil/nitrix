@@ -7,7 +7,7 @@
 > and `IMPLEMENTATION_PLAN.md §10.3`). The `sym*` family was already shipped.
 > Still open: a general `matrix_function(A, fn)` entry point, `matrix_log`,
 > `matrix_polynomial`, `frechet_derivative`. Remaining items gated by the §13
-> acceptance protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.2`.
+> acceptance protocol. Provenance: `docs/feature-requests catalogue §12.2`.
 
 **What.** A general `matrix_function(A, fn)` — apply `fn` to the
 eigenvalues of a symmetric `A`, reassemble — plus three named
@@ -43,7 +43,7 @@ general `matrix_function`, `matrix_exp`, `matrix_polynomial`, or
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.2` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.2` — origin entry; `§13` — acceptance protocol.
 - [`heat-kernel-diffusion.md`](heat-kernel-diffusion.md) and
   [`graph-wavelet-transform.md`](graph-wavelet-transform.md) — depend on
   `matrix_exp` / `matrix_polynomial`.

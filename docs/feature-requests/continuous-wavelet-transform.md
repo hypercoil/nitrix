@@ -2,7 +2,7 @@
 
 > **Status (2026-06-02): not started.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.12`.
+> `docs/feature-requests catalogue §12.12`.
 
 **What.** Continuous-wavelet analysis at user-specified mother wavelets
 (Ricker, Morlet, Paul).
@@ -31,6 +31,6 @@ is the natural host.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.12` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.12` — origin entry; `§13` — acceptance protocol.
 - `src/nitrix/signal/tsconv.py` — the convolution substrate.
 - [`docs/design/signal-and-numerics.md`](../design/signal-and-numerics.md).

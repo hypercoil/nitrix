@@ -16,7 +16,7 @@ Public surface:
   optional per-edge ``edge_attr``) + ``ell_row_softmax`` (GAT attention
   pre-pass)
 
-See ``nitrix/SPEC.md`` §3.1 and ``SPEC_UPDATE.md`` §3.1.
+See ``nitrix/SPEC.md`` §3.1 and ``SPEC.md`` §3.1.
 """
 
 from ._types import (

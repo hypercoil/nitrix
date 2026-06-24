@@ -11,7 +11,7 @@ digital domain by the bilinear transform, realised as a cascade of
 second-order sections (biquads).
 
 The design is implemented from scratch in NumPy -- ``scipy`` is a test-only
-dependency (SPEC §5.2), so ``butterworth_sos`` reproduces the math of
+dependency (SPEC §6.2), so ``butterworth_sos`` reproduces the math of
 ``scipy.signal.butter(output='sos')`` (validated to machine precision in
 ``tests/test_iir.py``) without importing it.  Cut-offs / order are static
 (constant-folded into the trace); the design is not differentiated.

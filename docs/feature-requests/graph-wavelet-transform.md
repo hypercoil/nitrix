@@ -2,7 +2,7 @@
 
 > **Status (2026-06-02): not started — blocked on `matrix_polynomial`
 > (§12.2).** Brainstorm candidate; promotion gated by the §13 acceptance
-> protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.13`.
+> protocol. Provenance: `docs/feature-requests catalogue §12.13`.
 
 **What.** Hammond et al.'s Spectral Graph Wavelet Transform — Chebyshev-
 polynomial approximations of band-pass filters in the Laplacian
@@ -26,7 +26,7 @@ engineering for connectome analyses.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.13` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.13` — origin entry; `§13` — acceptance protocol.
 - [`matrix-functions.md`](matrix-functions.md) — `matrix_polynomial`
   dependency.
 - `src/nitrix/graph/laplacian.py`.

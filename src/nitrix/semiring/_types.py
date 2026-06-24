@@ -5,7 +5,7 @@
 Semiring algebra Protocols and value classes.
 
 This module fixes the type shape that the rest of the substrate code
-expresses against. The relaxed-vs-strict split follows SPEC_UPDATE §3.1:
+expresses against. The relaxed-vs-strict split follows SPEC §4.1:
 
 - ``Semiring`` (relaxed) is the default; makes no associativity promise on
   ``binary_op``.  Kernels that fix a sequential reduction order
@@ -156,7 +156,7 @@ class Semiring(Generic[S]):
         Built-in algebras supply this; user-defined algebras default
         to ``None``, in which case ``jax.grad`` over
         ``semiring_matmul`` raises with a clear message.  Per
-        SPEC_UPDATE §3.1 differentiability vocabulary, the per-algebra
+        SPEC §4.1 differentiability vocabulary, the per-algebra
         backwards live in ``nitrix.semiring._backward``.
     ell_matmul_vjp
         Same shape, for ``semiring_ell_matmul``.  ``indices`` is

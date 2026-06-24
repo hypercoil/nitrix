@@ -239,5 +239,5 @@ Stable IDs; `→AI` maps each to its consolidated action item.
   [`../design/geometry-suite.md`](../design/geometry-suite.md); SPEC-review FRs:
   [`spherical-parameterisation.md`](spherical-parameterisation.md),
   [`place-surface.md`](place-surface.md).
-- Governance: `SPEC_UPDATE_v0.3 §13` (acceptance), `§14` (kwarg-not-fork),
+- Governance: `SPEC §9` (acceptance), `§14` (kwarg-not-fork),
   `IMPLEMENTATION_PLAN.md §10` (graduations at merge).

@@ -6,7 +6,7 @@
 > registration suite — backs `geometry.invert_displacement`
 > (`s_inv = -s∘(id + s_inv)`) — per the §13 protocol; see
 > `docs/design/registration.md` and `IMPLEMENTATION_PLAN.md §10.3`.
-> Provenance: `SPEC_UPDATE_v0.3.md §12.8`.
+> Provenance: `docs/feature-requests catalogue §12.8`.
 
 **What.** A deep-equilibrium-style fixed-point solver with an implicit-VJP
 backward.
@@ -41,7 +41,7 @@ general combinator + implicit-VJP is not extracted.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.8` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.8` — origin entry; `§13` — acceptance protocol.
 - [`krylov-solvers.md`](krylov-solvers.md) — the inner-solve dependency.
 - `src/nitrix/geometry/grid.py` — `integrate_velocity_field`, the special
   case this generalises.

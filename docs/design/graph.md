@@ -13,7 +13,7 @@
 
 ## Why split modularity into ``community.py``
 
-SPEC §4.5 lists ``modularity_matrix``, ``girvan_newman_null``, and
+SPEC §4.9 lists ``modularity_matrix``, ``girvan_newman_null``, and
 ``coaffiliation`` under ``laplacian.py``.  We pushed back: the
 *algebraic* shape of these operators overlaps with Laplacians (both
 are symmetric, both encode the graph structure linearly) but their
@@ -24,7 +24,7 @@ machinery -- and removes a circular-import risk in any future
 refactor where the eigensolvers want to import Laplacian
 machinery but not community machinery.
 
-The module is otherwise faithful to SPEC §4.5: same surface
+The module is otherwise faithful to SPEC §4.9: same surface
 functions, same default arguments.
 
 ## Multi-format support: where the math admits
@@ -183,7 +183,7 @@ ships with a registered VJP.
 
 ## What we considered and didn't pick
 
-- **Re-using ``jax.experimental.sparse`` BCOO**.  The SPEC §3.2
+- **Re-using ``jax.experimental.sparse`` BCOO**.  The SPEC §4.2
   explicitly forbids this; ``semiring_ell_matmul`` is the
   sanctioned sparse path.  Internally, ``laplacian_matvec`` and
   the eigensolver matvec closures route through it.
@@ -205,7 +205,7 @@ ships with a registered VJP.
 
 ## Cross-references
 
-- SPEC §4.5 -- the graph subsurface.
+- SPEC §4.9 -- the graph subsurface.
 - SPEC §6.1 tasks 3.5-3.7 -- the migration plan.
 - ``src/nitrix/graph/{laplacian, community, connectopy}.py``.
 - ``tests/test_graph.py`` -- 34 tests including the dense-vs-sparse

@@ -2,7 +2,7 @@
 """Backend-parity, identity-propagation, and numerical-stability tests
 for ``nitrix.semiring.semiring_matmul``.
 
-Per SPEC §10 and SPEC_UPDATE §10, these are the load-bearing tests
+Per SPEC §10 and SPEC §10, these are the load-bearing tests
 behind the G1 backward-kernel gate (forward correctness only at this
 phase; backward kernels are 2.A.5).  Each test asserts:
 

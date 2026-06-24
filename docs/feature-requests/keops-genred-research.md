@@ -8,7 +8,7 @@
 
 KeOps's `Genred` takes a user formula in a string DSL and JIT-compiles a
 CUDA kernel that streams the reduction without materialising the per-edge
-tensor. The SPEC §3.1 "KeOps-style streaming kernel" claim invokes this
+tensor. The SPEC §4.1 "KeOps-style streaming kernel" claim invokes this
 lineage; what's missing is a concrete research note on whether a
 Pallas-backed analogue could host arbitrary user formulas (the
 `edge_aggregate` generic case).

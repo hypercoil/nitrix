@@ -1,7 +1,7 @@
 # GS-11 — Intensity-driven deformable surface fit (`mris_place_surface`) → `register.surface.place_surface`
 
 > **Status (2026-06-22): SPEC-review design doc / FR.** GS-11 is an Effort **L**
-> optimiser, which `SPEC_UPDATE_v0.3 §13.4` flags for **SPEC-level review before
+> optimiser, which `SPEC §9` flags for **SPEC-level review before
 > it lands** — and, unlike GS-2, it is **explicitly optional**: learned boundary
 > models (`topofit` / `fastcsr` / `synthdist`, ilex) replace it in the default
 > pipeline, so this document must justify *whether* to build it as much as
@@ -80,7 +80,7 @@ intensity profile, with no precomputed field.
 
 ## 3. Scope boundary
 
-In scope (SPEC §5): the array math producing `V'` from plain `(image, V, F)`
+In scope (SPEC §6): the array math producing `V'` from plain `(image, V, F)`
 arrays + scalar parameters. **Out of scope:**
 
 - Reading MGZ/NIfTI volumes or surface binaries, `$SUBJECTS_DIR` (→
@@ -366,8 +366,8 @@ the P1.1 / P3.2 / P5.1 records.
   `geometry/intersection.py` (`remove_self_intersections`),
   `register/_converge.py` (`run_iterations`, `Convergence`), `register/_force.py`
   (the `Force`/`SumForce` design analogue), `tests/_real_meshes.py`.
-- **Governance.** `SPEC_UPDATE_v0.3.md §13` (acceptance, §13.4 L-review),
-  `SPEC.md §5` (dep contract), `SPEC_UPDATE_v0.3.md §14` (kwarg-not-fork — the
+- **Governance.** `SPEC §9` (acceptance, §13.4 L-review),
+  `SPEC.md §5` (dep contract), `SPEC §6.4` (kwarg-not-fork — the
   `boundary`/`force` modes are kwargs on one entry point).
 - **Method lineage.** Dale, Fischl, Sereno 1999 (cortical surface
   reconstruction — the deformable-surface white/pial fit); Fischl, Sereno, Dale

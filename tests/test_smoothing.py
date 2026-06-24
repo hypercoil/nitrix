@@ -801,7 +801,7 @@ def test_susan_emulator_with_median_prepass():
 
 
 def test_permutohedral_lattice_symbol_retired():
-    """Permutohedral was retired in SPEC_UPDATE_v0.4; the bounded
+    """Permutohedral was retired in SPEC §4.4; the bounded
     bilateral (``bilateral_gaussian`` + factored metric / mask /
     ``n_iters``) supersedes it.  The symbol no longer exists.
     See docs/design/bounded-bilateral.md.
@@ -814,7 +814,7 @@ def test_permutohedral_lattice_symbol_retired():
 
 
 def test_susan_emulator_canonical_home_is_smoothing():
-    """SUSAN lives in ``nitrix.smoothing`` per SPEC_UPDATE §3.3.
+    """SUSAN lives in ``nitrix.smoothing`` per SPEC §4.4.
 
     It is *not* re-exported from ``nitrix.morphology`` to avoid a
     circular import with ``median_filter``; users should import it

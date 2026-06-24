@@ -32,7 +32,7 @@ substrate the surface ports needed is shipped: `semiring_ell_edge_aggregate(+edg
 jacobian_det_displacement, sphere_grid_pad_2d}`, `smoothing.gaussian(kernel_size=)`,
 and `bias.histogram_match` (Nyul–Udupa). The resolution history for that whole
 tier lives in `IMPLEMENTATION_PLAN.md §10.3` (shipped-deviation log) and
-`SPEC_UPDATE_v0.3 §10.A`. The remaining gap is the *mundane, ubiquitous volumetric
+`SPEC §9`. The remaining gap is the *mundane, ubiquitous volumetric
 pre/post-processing* every CNN/UNet/ViT v0 punted on — that is what the atomised
 items collect.
 
@@ -53,7 +53,7 @@ So the phase-1 lift does not over-reach:
   already in `nimox.modules.affine`.
 - **Surface↔sphere parameterisation** (`surfa.SphericalMapBarycentric`),
   FreeSurfer `.sphere` / `.mgz` I/O, atlas label-LUT remap → consumer / `thrux`;
-  explicitly rejected from `nitrix` (SPEC §5.2).
+  explicitly rejected from `nitrix` (SPEC §6.2).
 - **Sliding-window inference orchestration** (tiling, scheduling) → `nimox.inference`
   / `thrux`; only the per-window weighting kernel + overlap-add reduction is
   `nitrix`-shaped ([`sliding-window-weighting.md`](sliding-window-weighting.md)).
@@ -101,4 +101,4 @@ Shipped 2026-06-02 (see `IMPLEMENTATION_PLAN.md §10.3`, 2026-06-02 entry):
 
 The large mesh/surface/warp tier these ports needed is already shipped; its
 resolution history lives in `IMPLEMENTATION_PLAN.md §10.3` and
-`SPEC_UPDATE_v0.3 §10.A` (and git history), not here.
+`SPEC §9` (and git history), not here.

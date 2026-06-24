@@ -3,7 +3,7 @@
 > **Status (2026-06-02): partial — `mesh_cotangent_laplacian` is shipped;
 > the full DEC operator stack is not.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.5`.
+> `docs/feature-requests catalogue §12.5`.
 
 **What.** Generalise the cotangent Laplacian to the full discrete-exterior-
 calculus stack: incidence operators, Hodge stars, Hodge decomposition.
@@ -37,7 +37,7 @@ would build on. No incidence / Hodge-star / `hodge_decompose` symbols.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.5` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.5` — origin entry; `§13` — acceptance protocol.
 - [`mesh-curvature.md`](mesh-curvature.md) — sibling geometry primitive.
 - `src/nitrix/sparse/mesh.py` — the cotangent Laplacian this generalises.
 - [`docs/design/mesh-graph-conv.md`](../design/mesh-graph-conv.md).

@@ -3,9 +3,9 @@
 > **TL;DR.**  Every public kernel resolves a backend via *explicit
 > kwarg → env var → autodetect*; mismatches emit a deduplicated
 > ``NitrixBackendFallback`` warning that can be silenced or escalated
-> to an error.  Per SPEC_UPDATE §2.7, silent perf regressions are a
+> to an error.  Per SPEC §2 tenet 7, silent perf regressions are a
 > bug.  The library is restricted to NVIDIA Ampere+ for Pallas Triton
-> and pure JAX everywhere else (SPEC_UPDATE_v0.2 §1.1).
+> and pure JAX everywhere else (SPEC §1.1).
 
 ## Why this exists
 
@@ -15,7 +15,7 @@ We commit to two contradictory-sounding things at once:
    exercised in CI (SPEC tenet 3).  A Pallas-only kernel is not
    shippable.
 2. *Stable kernels:* once a shape × algebra × dtype combination has a
-   golden output, it has that output across releases (SPEC §2.6).
+   golden output, it has that output across releases (SPEC §2 tenet 6).
 
 These commitments together mean that when Pallas Triton breaks
 (churn upstream, a kernel the Triton lowering cannot handle, an
@@ -45,7 +45,7 @@ Three levels, in order:
    once at module import; subsequent calls reuse the cached result.
 
 The ``Backend`` literal type is exactly
-``Literal["auto", "pallas-cuda", "jax"]`` per SPEC_UPDATE_v0.2 §3.1
+``Literal["auto", "pallas-cuda", "jax"]`` per SPEC §4.1
 -- no ``pallas-tpu``, no AMD, no Mosaic.
 
 ## How fallback observability works
@@ -71,7 +71,7 @@ participates in the standard ``warnings.filterwarnings`` machinery.
 
 ## What we considered and didn't pick
 
-- **Silent fallback.**  Removed by SPEC_UPDATE §2.7.  The cost of
+- **Silent fallback.**  Removed by SPEC §2 tenet 7.  The cost of
   silent fallbacks during a Pallas regression cycle is exactly the
   perf-cliff problem JAX users hit with TF32-vs-fp32: indistinguishable
   outputs at the dtype level, very different perf, no log trail.
@@ -115,7 +115,7 @@ goes silent, so logs stay clean.
 
 ## Cross-references
 
-- SPEC §7.2, SPEC_UPDATE §7.2, SPEC_UPDATE_v0.2 §7.2 -- the
+- SPEC §3.2, SPEC §3.2, SPEC §3.2 -- the
   authoritative backend-selection rules.
 - ``tests/test_backend.py`` -- end-to-end coverage of resolution,
   deduplication, env-var knobs.

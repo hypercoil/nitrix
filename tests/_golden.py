@@ -4,7 +4,7 @@
 Each fixture under ``tests/golden/<name>.npz`` bundles the inputs *and* the
 reference output, so a test recomputes the reference from the stored inputs
 and asserts it still matches the checked-in output (cross-release
-reproducibility, SPEC_UPDATE §2.8).  Tolerances live in
+reproducibility, SPEC §2 tenet 8).  Tolerances live in
 ``tests/tolerance.toml``.  Regenerate with ``python tools/regen_golden.py``.
 """
 

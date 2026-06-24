@@ -4,7 +4,7 @@
 """
 Bounded bilateral smoothing via the semiring substrate.
 
-The marquee edge-preserving capability (SPEC §3.3): a true
+The marquee edge-preserving capability (SPEC §4.4): a true
 high-dimensional bilateral filter over a **bounded** neighbourhood.
 For each output position, gather the feature-space neighbourhood,
 weight by a Gaussian over a metric on feature space, normalise, and

@@ -8,7 +8,7 @@
 > semiring substrate — statically shaped, ``jit`` / ``vmap`` / ``grad``
 > clean, GPU-native, and free of any separability artefact.  It *is*
 > ``nitrix.smoothing.bilateral_gaussian``, generalised in
-> SPEC_UPDATE_v0.4.  The permutohedral lattice is **retired**: bounded
+> SPEC §4.4.  The permutohedral lattice is **retired**: bounded
 > support dissolves every obstacle that motivated it, and the bounded
 > bilateral fills its intended role for the feature dimensionalities we
 > target (and, via a low-rank metric, beyond).  This note supersedes
@@ -30,7 +30,7 @@ removes the reason the lattice existed.  With a fixed-arity neighbour
 index there is no lattice, no hash table, no splat/blur/slice, and no
 piecewise-constant simplex selection — only a dense gather over a static
 index and a smooth weighted sum.  That operator was already shipped as
-``bilateral_gaussian``; SPEC_UPDATE_v0.4 generalises it and removes the
+``bilateral_gaussian``; SPEC §4.4 generalises it and removes the
 permutohedral stub.
 
 ## The operator
@@ -149,6 +149,6 @@ differs, and all three already exist in ``nitrix``:
 - [`sparse/mesh.py`](../../src/nitrix/sparse/mesh.py), [`sparse/grid.py`](../../src/nitrix/sparse/grid.py) — neighbour sources (ELL).
 - [`permutohedral-g2.md`](permutohedral-g2.md) — the retired lattice's G2 assessment (superseded).
 - [`smoothing.md`](smoothing.md) — the smoothing module design.
-- SPEC_UPDATE_v0.4 §3.3 — the spec amendment retiring permutohedral.
+- SPEC §4.4 — the spec amendment retiring permutohedral.
 - Krähenbühl & Koltun 2011 — dense-CRF mean-field reading of the iterate.
 - Adams, Baek, Davis 2010 — the permutohedral algorithm retired here.

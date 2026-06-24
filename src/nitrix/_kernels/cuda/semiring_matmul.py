@@ -8,7 +8,7 @@ Computes ``C[i, j] = (+)_k (A[i, k] (*) B[k, j])`` on NVIDIA GPUs.  The
 K loop carries a pytree-shaped accumulator (``Monoid`` state) through
 ``lax.fori_loop``; the inner per-K-step folds a rank-1 outer combine
 into the accumulator without ever materialising the ``(BM, BK, BN)``
-value tensor.  This is the KeOps-style streaming pattern from SPEC §3.1.
+value tensor.  This is the KeOps-style streaming pattern from SPEC §4.1.
 
 The kernel does **not** issue ``dot``/tensor-core primitives: every
 ``(*)`` is a plain elementwise op on the chosen semigroup, so the same

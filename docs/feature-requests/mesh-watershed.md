@@ -3,7 +3,7 @@
 > **Status (2026-06-02): not started.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. A host-side (NumPy) primitive
 > returning a JAX array — same pattern as `mesh_k_ring_adjacency`.
-> Provenance: `SPEC_UPDATE_v0.3.md §12.17`.
+> Provenance: `docs/feature-requests catalogue §12.17`.
 
 **What.** Priority-flood watershed on a vertex-valued scalar field with
 arbitrary mesh adjacency.
@@ -45,7 +45,7 @@ JAX-array-output pattern is established (`sparse.mesh_k_ring_adjacency`); the
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.17` — origin entry; `§13` — acceptance protocol;
+- `docs/feature-requests catalogue §12.17` — origin entry; `§13` — acceptance protocol;
   `§12.20` — strategy survey (Gordon row: boundary_map + watershed).
 - [`surface-boundary-map.md`](surface-boundary-map.md) — the upstream input.
 - `src/nitrix/sparse/mesh.py` — `mesh_k_ring_adjacency`, the host-side

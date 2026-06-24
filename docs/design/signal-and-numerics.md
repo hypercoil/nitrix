@@ -171,7 +171,7 @@ defensive but not load-bearing.
 ## `signal.filter`: frequency-domain and recursive-IIR filters
 
 Two filtering families requested by `bitsjax` (`bits.signal.bandpass`,
-`bits.signal.iir_filter`); both are SPEC §4.3 primitives.  Neither ports
+`bits.signal.iir_filter`); both are SPEC §4.7 primitives.  Neither ports
 the rejected hypercoil `nn/freqfilter.py` / `nn/iirfilter.py`.
 
 **Frequency-domain (`bandpass` / `bandstop` / `lowpass` / `highpass`).**
@@ -189,7 +189,7 @@ differentiable, JIT-friendly.
 **Recursive Butterworth (`iir_filter` / `butterworth_sos` / `sosfilt` /
 `sosfiltfilt`).**  A genuine IIR: analog poles → frequency transform →
 bilinear → second-order sections, designed **from scratch in NumPy** (no
-runtime scipy, SPEC §5.2) and validated to machine precision against
+runtime scipy, SPEC §6.2) and validated to machine precision against
 `scipy.signal.butter`/`sosfilt`/`sosfiltfilt`.  The design is a static host
 constant; only the *application* is traced.  Three application engines,
 selected by `backend='auto'` per platform:
@@ -282,7 +282,7 @@ signal's edge value so there is no transient (scipy `lfilter_zi`).
 
 ### Matching scipy exactly: the process
 
-`scipy.signal` is the reference but a **test-only** dependency (SPEC §5.2),
+`scipy.signal` is the reference but a **test-only** dependency (SPEC §6.2),
 so the runtime is pure NumPy + JAX and scipy is the oracle in `test_iir.py`.
 We aligned by **decomposing the pipeline** and validating each stage on its
 own -- debugging a blind end-to-end `filtfilt` mismatch is otherwise

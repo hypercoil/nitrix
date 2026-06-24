@@ -9,7 +9,7 @@
 > exp-decay closed form, RK4≪Euler accuracy, energy conservation, and grad
 > correctness. Still roadmap: adaptive (Dormand–Prince), symplectic
 > (leapfrog / implicit-midpoint), and the memory-efficient adjoint backward.
-> Provenance: `SPEC_UPDATE_v0.3.md §12.11`.
+> Provenance: `docs/feature-requests catalogue §12.11`.
 
 **What.** General-purpose ODE integration, differentiable via the adjoint
 equation.
@@ -40,7 +40,7 @@ Hamiltonian-Monte-Carlo posterior samplers for fMRI.
 are **per-vertex neural-ODE** surface models: they integrate
 `dx/dt = f(t, x, args)` over a vertex set. Today they use `diffrax`
 (`ilex/nimox/modules/ode.py:107` `integrate_vertex_flow`) — which **cannot
-follow into nitrix** (off the allowlist; SPEC §5.2). This is the demand
+follow into nitrix** (off the allowlist; SPEC §6.2). This is the demand
 signal for a pure-`jax.lax.scan` fixed-step `rk4`/`euler` (and adaptive
 `dormand_prince`) under `nitrix.numerics.ode`: the nimox `SurfaceNeuralODE`
 module would then call the nitrix integrator instead of diffrax. Note this is
@@ -56,7 +56,7 @@ no `nitrix.numerics.ode` namespace.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.11` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.11` — origin entry; `§13` — acceptance protocol.
 - [`fixed-point-combinators.md`](fixed-point-combinators.md) and
   [`krylov-solvers.md`](krylov-solvers.md) — adjoint-pass dependencies.
 - `src/nitrix/geometry/grid.py` — `integrate_velocity_field`, the special

@@ -2,7 +2,7 @@
 """Real FreeSurfer / fs_LR mesh fixtures for the geometry suite (test-only IO).
 
 The IO lives **here, never in nitrix**: ``nilearn`` / ``templateflow`` /
-``nibabel`` are test-only dependencies (SPEC §5.2 + §8 golden corpus); the
+``nibabel`` are test-only dependencies (SPEC §6.2 + §8 golden corpus); the
 library imports only ``jax`` / ``jaxtyping`` / ``numpy``.  Each loader reads
 files and hands nitrix **plain arrays** -- the "consumer reads files -> nitrix
 gets arrays" contract that ``icosphere_hierarchy_from_levels`` was designed

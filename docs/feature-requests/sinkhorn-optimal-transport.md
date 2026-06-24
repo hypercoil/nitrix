@@ -3,7 +3,7 @@
 > **Status (2026-06-02): not started.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. A new top-level subpackage — §14
 > requires a clear substrate-composition story before one is added; the LOG
-> semiring supplies it (see below). Provenance: `SPEC_UPDATE_v0.3.md §12.4`.
+> semiring supplies it (see below). Provenance: `docs/feature-requests catalogue §12.4`.
 
 **What.** Entropic optimal transport via Sinkhorn iteration — the flagship
 use case for the `LOG` semiring.
@@ -34,7 +34,7 @@ and `semiring_matmul` it would build on are shipped
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.4` — origin entry; `§13` — acceptance protocol;
+- `docs/feature-requests catalogue §12.4` — origin entry; `§13` — acceptance protocol;
   `§14` — new-subpackage bar.
 - `src/nitrix/semiring/algebras.py` — the `LOG` algebra.
 - [`docs/design/streaming-kernel.md`](../design/streaming-kernel.md) — the

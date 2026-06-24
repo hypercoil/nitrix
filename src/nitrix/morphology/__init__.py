@@ -5,7 +5,7 @@
 """
 nitrix.morphology -- mathematical morphology built atop the semiring substrate.
 
-Per SPEC §3.4 / SPEC_UPDATE §3.4 the user-facing API takes
+Per SPEC §4.3 / SPEC §4.3 the user-facing API takes
 single-channel arrays ``(..., *spatial)`` -- no explicit channel
 dim.  Users with multi-channel inputs should ``jax.vmap`` over the
 channel axis.
@@ -30,7 +30,7 @@ Gather-backed:
 
 - ``median_filter`` -- gather → ``jnp.median``.  Explicitly *not* a
   semiring op (state size is unbounded in the K loop); see
-  SPEC_UPDATE §3.4.
+  SPEC §4.3.
 
 Labelling:
 
@@ -71,7 +71,7 @@ __all__ = [
     'max_unpool_nd',
 ]
 
-# ``susan_emulator`` lives in ``nitrix.smoothing`` per SPEC_UPDATE §3.3
+# ``susan_emulator`` lives in ``nitrix.smoothing`` per SPEC §4.4
 # (it composes ``bilateral_gaussian`` + ``median_filter`` and is a
 # smoothing op that *uses* ``median_filter`` as a sub-step).  We do
 # *not* re-export it here -- doing so creates a circular import via

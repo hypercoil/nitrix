@@ -11,7 +11,7 @@
 
 ## The differentiability vocabulary
 
-From SPEC_UPDATE §3.1, the per-algebra story:
+From SPEC §4.1, the per-algebra story:
 
 | Algebra | Forward | Backward strategy |
 |---|---|---|
@@ -163,7 +163,7 @@ computed in registers (similar to flash attention's backward); est.
 - **Materialising the softmax / argmax across K.**  Faster forward,
   but ``(M, K, N)`` memory cost for ``LOG`` on 1024² with K=1024 is
   4 GB.  We chose to pay the recompute cost; this matches FlashAttention
-  v2's design choice and the SPEC_UPDATE §3.1 language explicitly
+  v2's design choice and the SPEC §4.1 language explicitly
   ("recompute the softmax in the backward K loop, not materialised").
 - **Symbolic autograd over the algebra's formula.**  KeOps does this
   via templated formulae; for us it would require expressing every
@@ -177,7 +177,7 @@ computed in registers (similar to flash attention's backward); est.
 
 ## Cross-references
 
-- SPEC_UPDATE §3.1 "Differentiability vocabulary".
+- SPEC §4.1 "Differentiability vocabulary".
 - IMPLEMENTATION_PLAN §5.2 (G1 gate at 2.A.5).
 - ``src/nitrix/semiring/_backward.py`` -- the rules.
 - ``tests/test_backward.py`` -- 15 finite-difference tests.

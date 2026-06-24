@@ -138,7 +138,7 @@ recovers a geometrically-meaningful "centre on the sphere".
 
 - **Migrating ``girvan_newman_null``, ``modularity_matrix`` etc.**
   These graph primitives live in ``functional/geom.py`` for
-  historical reasons but per SPEC §4.5 they belong in
+  historical reasons but per SPEC §4.9 they belong in
   ``nitrix.graph``.  Deferred to the Phase 3 graph sprint.
 - **Keeping ``spatial_conv`` and ``euclidean_conv`` as separate
   surfaces.**  Both were generic over the metric; the legacy
@@ -412,7 +412,7 @@ and are documented at the API:
 ### Governance and what we didn't pick
 
 This is an **extension of an existing primitive** (``resample`` gains a
-kwarg), which SPEC_UPDATE_v0.3 §14 explicitly blesses ("prefer adding a
+kwarg), which SPEC §6.4 explicitly blesses ("prefer adding a
 kwarg over forking a function") -- not a new subpackage, not a §12 -> §10.A
 graduation.  It is deviation-logged in ``IMPLEMENTATION_PLAN.md §10.3``.
 
@@ -432,7 +432,7 @@ graduation.  It is deviation-logged in ``IMPLEMENTATION_PLAN.md §10.3``.
 
 ## Cross-references
 
-- SPEC §4.4 (geometry primitives) and §6.1 task 3 (the migration
+- SPEC §4.8 (geometry primitives) and §6.1 task 3 (the migration
   plan).
 - ``src/nitrix/geometry/{grid,sphere,sphere_grid,coords}.py`` and
   ``src/nitrix/geometry/_interpolate.py`` (the ``Interpolator`` ADT,

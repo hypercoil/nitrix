@@ -4,7 +4,7 @@
 """
 Median filter -- a gather-based op, deliberately *not* a semiring op.
 
-Per SPEC_UPDATE §3.4, the true median requires materialising the
+Per SPEC §4.3, the true median requires materialising the
 full neighbourhood at each output position because the state size
 for a streaming reduction is unbounded in K.  For the small
 neighbourhoods morphology targets (3×3 = 9 voxels, 3×3×3 = 27 voxels,
