@@ -75,7 +75,7 @@ def test_golden_reference_reproducible():
         jnp.asarray(data['B']),
         jnp.asarray(data['C']),
         jnp.asarray(data['D']),
-        method='sequential',
+        driver='sequential',
     )
     atol, rtol = tol('selective_scan', np.float32)
     np.testing.assert_allclose(
@@ -105,7 +105,7 @@ def _naive(x, delta, A, B, C, D=None):
 
 def test_reference_matches_naive_oracle():
     x, delta, A, B, C, D = _inputs(None, 7, 4, 3, seed=1)
-    got = ref_scan(x, delta, A, B, C, D, method='sequential')
+    got = ref_scan(x, delta, A, B, C, D, driver='sequential')
     want = _naive(x, delta, A, B, C, D)
     assert np.allclose(np.asarray(got), want, atol=1e-10)
 
@@ -116,15 +116,15 @@ def test_reference_matches_naive_oracle():
 @pytest.mark.parametrize('seed', [2, 3])
 def test_sequential_equals_associative(seed):
     x, delta, A, B, C, D = _inputs(2, 8, 4, 3, seed=seed)
-    seq = ref_scan(x, delta, A, B, C, D, method='sequential')
-    aso = ref_scan(x, delta, A, B, C, D, method='associative')
+    seq = ref_scan(x, delta, A, B, C, D, driver='sequential')
+    aso = ref_scan(x, delta, A, B, C, D, driver='associative')
     assert np.allclose(np.asarray(seq), np.asarray(aso), atol=1e-10)
 
 
 def test_d_skip_is_linear():
     x, delta, A, B, C, D = _inputs(2, 6, 4, 3, seed=4)
-    with_d = ref_scan(x, delta, A, B, C, D, method='sequential')
-    without = ref_scan(x, delta, A, B, C, None, method='sequential')
+    with_d = ref_scan(x, delta, A, B, C, D, driver='sequential')
+    without = ref_scan(x, delta, A, B, C, None, driver='sequential')
     assert np.allclose(
         np.asarray(with_d), np.asarray(without) + np.asarray(D * x), atol=1e-10
     )
@@ -134,7 +134,7 @@ def test_zero_A_reduces_to_cumulative_map():
     # A -> 0 => dA = 1 => h_t is the cumulative sum of dBx over the sequence.
     x, delta, _, B, C, _ = _inputs(2, 6, 4, 3, seed=5)
     A0 = jnp.zeros((4, 3))
-    got = ref_scan(x, delta, A0, B, C, None, method='sequential')
+    got = ref_scan(x, delta, A0, B, C, None, driver='sequential')
     dBx = delta[..., None] * B[..., None, :] * x[..., None]  # (b, l, d, n)
     H = jnp.cumsum(dBx, axis=-3)
     expected = (H * C[..., None, :]).sum(axis=-1)
@@ -149,16 +149,16 @@ def test_chunked_matches_sequential(with_d):
     # Aggressive inputs (A = -exp(randn), softplus delta) -- XLA-stable, the
     # regime the fp32 fused kernel cannot do.
     x, delta, A, B, C, D = _inputs(2, 64, 4, 3, seed=20, with_d=with_d)
-    chk = ref_scan(x, delta, A, B, C, D, method='chunked', chunk_size=16)
-    seq = ref_scan(x, delta, A, B, C, D, method='sequential')
+    chk = ref_scan(x, delta, A, B, C, D, driver='chunked', chunk_size=16)
+    seq = ref_scan(x, delta, A, B, C, D, driver='sequential')
     assert np.all(np.isfinite(np.asarray(chk)))
     assert np.allclose(np.asarray(chk), np.asarray(seq), atol=1e-10)
 
 
 def test_chunked_no_batch():
     x, delta, A, B, C, D = _inputs(None, 32, 4, 3, seed=21)
-    chk = ref_scan(x, delta, A, B, C, D, method='chunked', chunk_size=8)
-    seq = ref_scan(x, delta, A, B, C, D, method='sequential')
+    chk = ref_scan(x, delta, A, B, C, D, driver='chunked', chunk_size=8)
+    seq = ref_scan(x, delta, A, B, C, D, driver='sequential')
     assert np.allclose(np.asarray(chk), np.asarray(seq), atol=1e-10)
 
 
@@ -169,10 +169,10 @@ def test_chunked_gradient_matches_sequential():
         return lambda *a: jnp.sum(ref_scan(*a, **fn) ** 2)
 
     gk = jax.grad(
-        loss({'method': 'chunked', 'chunk_size': 16}),
+        loss({'driver': 'chunked', 'chunk_size': 16}),
         argnums=(0, 1, 2, 3, 4, 5),
     )(x, delta, A, B, C, D)
-    gr = jax.grad(loss({'method': 'sequential'}), argnums=(0, 1, 2, 3, 4, 5))(
+    gr = jax.grad(loss({'driver': 'sequential'}), argnums=(0, 1, 2, 3, 4, 5))(
         x, delta, A, B, C, D
     )
     for a, b in zip(gk, gr):
@@ -182,7 +182,7 @@ def test_chunked_gradient_matches_sequential():
 def test_chunked_requires_divisible_length():
     x, delta, A, B, C, D = _inputs(2, 40, 4, 3, seed=23)  # 40 % 16 != 0
     with pytest.raises(ValueError):
-        ref_scan(x, delta, A, B, C, D, method='chunked', chunk_size=16)
+        ref_scan(x, delta, A, B, C, D, driver='chunked', chunk_size=16)
 
 
 def test_chunked_uses_less_memory_than_associative():
@@ -202,8 +202,8 @@ def test_chunked_uses_less_memory_than_associative():
             )
         )
 
-    chunked = {'method': 'chunked', 'chunk_size': 64}
-    assoc = {'method': 'associative'}
+    chunked = {'driver': 'chunked', 'chunk_size': 64}
+    assoc = {'driver': 'associative'}
     args = (x, delta, A, B, C, D)
     fwd_k = fwd(chunked).lower(*args).compile().memory_analysis()
     fwd_a = fwd(assoc).lower(*args).compile().memory_analysis()
@@ -221,7 +221,7 @@ def test_autodiff_gradient_matches_finite_difference():
 
     def loss(x):
         return jnp.sum(
-            ref_scan(x, delta, A, B, C, D, method='sequential') ** 2
+            ref_scan(x, delta, A, B, C, D, driver='sequential') ** 2
         )
 
     g = np.asarray(jax.grad(loss)(x))

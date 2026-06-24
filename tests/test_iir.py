@@ -104,8 +104,8 @@ def test_sosfiltfilt_matches_scipy(btype, order, lo, hi):
 def test_backend_parity():
     x = jnp.asarray(np.random.default_rng(2).normal(size=(6, 500)))
     sos = butterworth_sos(order=4, fs=FS, btype='bandpass', lo=0.05, hi=0.2)
-    a = np.asarray(sosfilt(x, sos, backend='scan'))
-    b = np.asarray(sosfilt(x, sos, backend='associative'))
+    a = np.asarray(sosfilt(x, sos, driver='scan'))
+    b = np.asarray(sosfilt(x, sos, driver='associative'))
     np.testing.assert_allclose(a, b, atol=1e-9)
 
 
@@ -207,7 +207,7 @@ def test_grad_associative_backend():
                 btype='lowpass',
                 hi=0.1,
                 zero_phase=False,
-                backend='associative',
+                driver='associative',
             )
             ** 2
         )
@@ -221,8 +221,8 @@ def test_fft_backend_matches_scipy(btype, order, lo, hi):
     # its output is exactly convolution with the (truncated) impulse response.
     x = np.random.default_rng(3).normal(size=(4, 400))
     sos = butterworth_sos(order=order, fs=FS, btype=btype, lo=lo, hi=hi)
-    sf = np.asarray(sosfilt(jnp.asarray(x), sos, backend='fft'))
-    ff = np.asarray(sosfiltfilt(jnp.asarray(x), sos, backend='fft'))
+    sf = np.asarray(sosfilt(jnp.asarray(x), sos, driver='fft'))
+    ff = np.asarray(sosfiltfilt(jnp.asarray(x), sos, driver='fft'))
     np.testing.assert_allclose(
         sf, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-9
     )
@@ -242,7 +242,7 @@ def test_fft_grad_finite():
                 butterworth_sos(
                     order=4, fs=FS, btype='bandpass', lo=0.05, hi=0.2
                 ),
-                backend='fft',
+                driver='fft',
             )
         )
     )(x)
@@ -256,7 +256,7 @@ def test_fft_impulse_atol_param():
     sos = butterworth_sos(order=4, fs=FS, btype='bandpass', lo=0.05, hi=0.2)
     ref = ss.sosfilt(sos.copy(), x, axis=-1)
     loose = np.asarray(
-        sosfilt(jnp.asarray(x), sos, backend='fft', impulse_atol=1e-6)
+        sosfilt(jnp.asarray(x), sos, driver='fft', impulse_atol=1e-6)
     )
     np.testing.assert_allclose(loose, ref, atol=1e-4)
 
@@ -270,7 +270,7 @@ def test_fft_too_sharp_falls_back():
         order=8, fs=FS, btype='bandpass', lo=0.0004, hi=0.0008
     )
     with pytest.warns(UserWarning, match='falling back'):
-        out = np.asarray(sosfilt(jnp.asarray(x), sos, backend='fft'))
+        out = np.asarray(sosfilt(jnp.asarray(x), sos, driver='fft'))
     np.testing.assert_allclose(
         out, ss.sosfilt(sos.copy(), x, axis=-1), atol=1e-8
     )
@@ -290,5 +290,5 @@ def test_validation():
         sosfilt(
             x,
             butterworth_sos(order=2, fs=FS, btype='lowpass', hi=0.1),
-            backend='nope',
+            driver='nope',
         )

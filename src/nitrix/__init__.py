@@ -60,6 +60,11 @@ from ._internal.config import (
     set_reproducible,
 )
 
+# Eagerly populate the divergent-op registry (the central contract manifest) so
+# divergent_ops() is complete at ``import nitrix`` -- without importing each
+# subpackage that owns a site.  Import for side effect only.
+from ._internal import _divergent_ops as _divergent_ops  # noqa: F401
+
 __all__ = [
     'DivergentOp',
     'divergent_ops',

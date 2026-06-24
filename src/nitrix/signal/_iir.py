@@ -19,10 +19,10 @@ dependency (SPEC §5.2), so ``butterworth_sos`` reproduces the math of
 Application is the recurrence ``y[n] = b0 x[n] + b1 x[n-1] + b2 x[n-2]
 - a1 y[n-1] - a2 y[n-2]`` per biquad, with two engines:
 
-- ``backend='scan'`` (default) -- sequential ``lax.scan`` over time,
-  vectorised across all channels; compiles to a single fused loop, low
+- ``driver='scan'`` (the canonical variant) -- sequential ``lax.scan`` over
+  time, vectorised across all channels; compiles to a single fused loop, low
   memory.  Best for the fMRI regime (modest ``T``, many voxels).
-- ``backend='associative'`` -- the biquad's linear recurrence composed via
+- ``driver='associative'`` -- the biquad's linear recurrence composed via
   ``lax.associative_scan`` (the parallel-prefix pattern also used by
   ``signal.linear_interpolate``); ``O(log T)`` depth, for latency-bound
   long single series.  Forward filtering only.
@@ -45,6 +45,7 @@ import numpy as np
 from jaxtyping import Array, Num
 
 from .._internal.backend import default_backend_is_gpu
+from .._internal.config import resolve_driver
 
 # Hard cap on the impulse-response length the FFT engine will truncate to.
 # A filter that has not decayed below ``impulse_atol`` within this many taps
@@ -55,21 +56,27 @@ _IIR_FFT_MAX_TAPS = 1 << 15
 __all__ = ['butterworth_sos', 'sosfilt', 'sosfiltfilt', 'iir_filter']
 
 _BType = str  # 'lowpass' | 'highpass' | 'bandpass' | 'bandstop'
-_Backend = str  # 'auto' | 'fft' | 'scan' | 'associative'
+_Driver = str  # 'auto' | 'fft' | 'scan' | 'associative'
+
+# The 'signal.iir' divergent-op contract is registered centrally in
+# nitrix._internal._divergent_ops (so divergent_ops() is complete at import);
+# this module only resolves against it.
 
 
-def _resolve_iir_backend(backend: _Backend) -> _Backend:
-    """Resolve ``'auto'`` to the engine that wins on this platform.
+def _resolve_iir_driver(driver: _Driver) -> _Driver:
+    """Resolve the IIR ``driver`` to a concrete engine.
 
-    On GPU the recursion is latency-bound, so ``'auto'`` selects the parallel
-    ``'fft'`` convolution engine (which beats cupy on the L4 and falls back to
-    a recurrence for filters too sharp to truncate cheaply).  On CPU the
-    sequential ``'scan'`` recurrence is fast and exact, so ``'auto'`` keeps it.
-    Explicit ``'fft'`` / ``'scan'`` / ``'associative'`` pass through.
+    ``'auto'`` -> the platform-fast engine (``'fft'`` on GPU -- the recursion is
+    latency-bound there and the parallel FFT convolution beats cupy on the L4;
+    sequential ``'scan'`` on CPU).  Reproducibility mode forces the canonical
+    ``'scan'``.  Explicit ``'fft'`` / ``'scan'`` / ``'associative'`` pass
+    through (validated against the registered set).
     """
-    if backend == 'auto':
-        return 'fft' if default_backend_is_gpu() else 'scan'
-    return backend
+    return resolve_driver(
+        driver,
+        op='signal.iir',
+        fast=lambda: 'fft' if default_backend_is_gpu() else 'scan',
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -535,35 +542,34 @@ def _sosfilt_apply(
     x: Array,
     *,
     zi: Optional[np.ndarray],
-    backend: _Backend,
+    driver: _Driver,
     impulse_atol: float,
 ) -> Array:
-    """Apply the cascade with the platform-resolved engine.
+    """Apply the cascade with the resolved engine (the ``driver`` axis).
 
     ``'fft'`` truncates the impulse response at ``impulse_atol`` and convolves;
     if the filter has not decayed within ``_IIR_FFT_MAX_TAPS`` it falls back to
     a recurrence (``associative`` on GPU, ``scan`` on CPU) with a warning.
     """
-    backend = _resolve_iir_backend(backend)
-    if backend == 'fft':
+    driver = _resolve_iir_driver(driver)
+    if driver == 'fft':
         n_taps = _sos_impulse_taps(sos, impulse_atol)
         if n_taps is not None:
             return _sosfilt_fft(sos, x, zi, n_taps)
-        backend = 'associative' if default_backend_is_gpu() else 'scan'
+        driver = 'associative' if default_backend_is_gpu() else 'scan'
         warnings.warn(
             f'sosfilt: impulse response has not decayed below '
             f'impulse_atol={impulse_atol:g} within {_IIR_FFT_MAX_TAPS} taps '
             f'(filter too sharp for the FFT engine); falling back to '
-            f'backend={backend!r}.',
+            f'driver={driver!r}.',
             stacklevel=3,
         )
-    if backend == 'scan':
+    if driver == 'scan':
         return _sosfilt_scan(sos, x, zi=zi)
-    if backend == 'associative':
+    if driver == 'associative':
         return _sosfilt_associative(sos, x, zi=zi)
     raise ValueError(
-        f"backend={backend!r}; expected 'auto', 'fft', 'scan' or "
-        "'associative'."
+        f"driver={driver!r}; expected 'auto', 'fft', 'scan' or 'associative'."
     )
 
 
@@ -572,7 +578,7 @@ def sosfilt(
     sos: np.ndarray,
     *,
     axis: int = -1,
-    backend: _Backend = 'auto',
+    driver: _Driver = 'auto',
     impulse_atol: float = 1e-12,
 ) -> Num[Array, '... obs']:
     """Apply a causal IIR filter (forward only) given its SOS cascade.
@@ -585,14 +591,18 @@ def sosfilt(
         ``(n_sections, 6)`` second-order sections (e.g. from
         ``butterworth_sos``).  Static host coefficients (NumPy); they are
         baked into the engine, not traced.
-    backend
-        ``'auto'`` (default) picks the engine by platform: ``'fft'`` on GPU,
-        ``'scan'`` on CPU.  The recursion is latency-bound on the GPU, so the
-        parallel FFT-convolution engine (an IIR filter is LTI, so its output
-        is exactly convolution with the impulse response) wins there -- it
-        beats cupy on the L4; on the CPU the sequential ``lax.scan`` is fast
-        and exact, so it is kept.  Force ``'fft'``, ``'scan'`` or the
-        parallel-prefix ``'associative'`` to override.
+    driver
+        Numerical variant (the ``driver`` axis).  ``'auto'`` (default) picks the
+        engine by platform: ``'fft'`` on GPU, ``'scan'`` on CPU.  The recursion
+        is latency-bound on the GPU, so the parallel FFT-convolution engine (an
+        IIR filter is LTI, so its output is exactly convolution with the impulse
+        response) wins there -- it beats cupy on the L4; on the CPU the
+        sequential ``lax.scan`` is fast and exact, so it is kept.  Force
+        ``'fft'``, ``'scan'`` or the parallel-prefix ``'associative'`` to
+        override; ``nitrix.reproducible()`` forces the canonical ``'scan'``.
+        These variants reassociate the arithmetic differently, so they agree
+        only to a documented tolerance (``nitrix.divergent_ops()``), not bit-
+        for-bit -- hence the per-call / reproducibility override.
     impulse_atol
         FFT engine only: truncate the impulse response where it has decayed
         below this absolute tolerance (default ``1e-12``, effectively exact).
@@ -606,7 +616,7 @@ def sosfilt(
         sos_np,
         x,
         zi=None,
-        backend=backend,
+        driver=driver,
         impulse_atol=impulse_atol,
     )
     return jnp.moveaxis(y, 0, axis)
@@ -619,7 +629,7 @@ def sosfiltfilt(
     axis: int = -1,
     padtype: str = 'odd',
     padlen: Optional[int] = None,
-    backend: _Backend = 'auto',
+    driver: _Driver = 'auto',
     impulse_atol: float = 1e-12,
 ) -> Num[Array, '... obs']:
     """Zero-phase forward-backward IIR filter (scipy ``sosfiltfilt``-exact).
@@ -629,8 +639,8 @@ def sosfiltfilt(
     Matches ``scipy.signal.sosfiltfilt`` to machine precision.
 
     Both passes thread the steady-state ``zi`` initial conditions through the
-    platform-resolved engine (``backend='auto'`` -> ``'fft'`` on GPU, ``'scan'``
-    on CPU; see ``sosfilt``).  The FFT engine adds the ``zi`` transient
+    resolved engine (``driver='auto'`` -> ``'fft'`` on GPU, ``'scan'`` on CPU;
+    see ``sosfilt``).  The FFT engine adds the ``zi`` transient
     ``x[0] * g`` (the cascade's zero-input response) over the first ``n_taps``
     samples, so the edges stay scipy-exact -- the zero-phase path is no longer
     scan-only.  ``impulse_atol`` controls the FFT truncation (see ``sosfilt``).
@@ -667,14 +677,14 @@ def sosfiltfilt(
         sos_np,
         xp,
         zi=zi,
-        backend=backend,
+        driver=driver,
         impulse_atol=impulse_atol,
     )
     y = _sosfilt_apply(
         sos_np,
         jnp.flip(y, axis=0),
         zi=zi,
-        backend=backend,
+        driver=driver,
         impulse_atol=impulse_atol,
     )
     y = jnp.flip(y, axis=0)
@@ -692,7 +702,7 @@ def iir_filter(
     hi: Optional[float] = None,
     order: int = 2,
     zero_phase: bool = True,
-    backend: _Backend = 'auto',
+    driver: _Driver = 'auto',
     impulse_atol: float = 1e-12,
     axis: int = -1,
 ) -> Num[Array, '... obs']:
@@ -719,10 +729,10 @@ def iir_filter(
         squared magnitude, the fMRI default).  ``False`` -- single causal
         forward pass (``sosfilt``); preserves causality but imposes the
         Butterworth phase delay.
-    backend
-        Engine for both the causal (``zero_phase=False``) and zero-phase
-        (``zero_phase=True``) paths: ``'auto'`` (default; ``'fft'`` on GPU,
-        ``'scan'`` on CPU -- see ``sosfilt``) or a forced ``'fft'`` /
+    driver
+        Numerical variant for both the causal (``zero_phase=False``) and
+        zero-phase (``zero_phase=True``) paths: ``'auto'`` (default; ``'fft'``
+        on GPU, ``'scan'`` on CPU -- see ``sosfilt``) or a forced ``'fft'`` /
         ``'scan'`` / ``'associative'``.
     impulse_atol
         FFT-engine impulse-response truncation tolerance (see ``sosfilt``).
@@ -738,13 +748,13 @@ def iir_filter(
             X,
             sos,
             axis=axis,
-            backend=backend,
+            driver=driver,
             impulse_atol=impulse_atol,
         )
     return sosfilt(
         X,
         sos,
         axis=axis,
-        backend=backend,
+        driver=driver,
         impulse_atol=impulse_atol,
     )

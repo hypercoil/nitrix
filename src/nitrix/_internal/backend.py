@@ -157,7 +157,24 @@ def env_backend() -> Optional[Backend]:
 
 
 def auto_backend() -> ResolvedBackend:
-    """Resolve ``auto`` to a concrete backend based on host hardware."""
+    """Resolve ``auto`` to a concrete backend based on host hardware.
+
+    Under reproducibility mode (``nitrix.reproducible()`` /
+    ``NITRIX_REPRODUCIBLE=1``) the **reference** engine (``jax``) is preferred,
+    so a fused-kernel op (selective_scan, attention, ...) runs its canonical
+    reference path and reproduces across platforms -- the ``pallas-cuda``
+    kernels are certified to the ``[op.dtype.pallas-cuda]`` tolerance, not
+    bit-for-bit, which is a real cross-platform divergence.  This is the
+    backend-axis half of the reproducible-dispatch principle; an explicit
+    ``backend=`` keyword or ``NITRIX_BACKEND`` still overrides (explicit > mode),
+    exactly as an explicit ``driver=`` overrides the numerical-variant axis.
+    """
+    # Local import to avoid any import-order coupling (config imports no
+    # backend symbols, so this direction is acyclic).
+    from .config import reproducible_enabled
+
+    if reproducible_enabled():
+        return 'jax'
     if _HAS_AMPERE_NVIDIA:
         return 'pallas-cuda'
     return 'jax'

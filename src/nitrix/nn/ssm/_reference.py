@@ -13,7 +13,7 @@ This is a first-order linear recurrence ``h_t = a_t ⊙ h_{t-1} + b_t`` with
 ``a_t = exp(Δ_t A)`` and ``b_t = Δ_t B_t x_t``, so it admits both a sequential
 ``lax.scan`` form (the bit-exact oracle) and a parallel
 ``lax.associative_scan`` form (combinator
-``(a₁,b₁)∘(a₂,b₂) = (a₁a₂, a₂b₁+b₂)``).  ``method='auto'`` picks the parallel
+``(a₁,b₁)∘(a₂,b₂) = (a₁a₂, a₂b₁+b₂)``).  ``driver='auto'`` picks the parallel
 prefix scan on GPU (``O(log L)`` depth) and the sequential scan on CPU -- the
 same platform-dependent choice as ``signal._iir`` -- so the GPU gets the
 work-parallel speedup before any fused kernel exists.
@@ -32,10 +32,14 @@ from jax import lax
 from jaxtyping import Array, Float
 
 from ..._internal.backend import default_backend_is_gpu
+from ..._internal.config import resolve_driver
 
 __all__ = ['reference_selective_scan']
 
-Method = Literal['auto', 'sequential', 'associative', 'chunked']
+Driver = Literal['auto', 'sequential', 'associative', 'chunked']
+
+# The 'nn.ssm.selective_scan' divergent-op contract is registered centrally in
+# nitrix._internal._divergent_ops; this module only resolves against it.
 
 
 def _lin_combine(
@@ -157,7 +161,7 @@ def reference_selective_scan(
     C: Float[Array, '... l n'],
     D: Optional[Float[Array, 'd']] = None,
     *,
-    method: Method = 'auto',
+    driver: Driver = 'auto',
     chunk_size: int = 64,
 ) -> Float[Array, '... l d']:
     """Reference Mamba / S6 selective scan (oracle).
@@ -174,12 +178,16 @@ def reference_selective_scan(
         Selective input / output projections, ``(..., l, n)``.
     D
         Optional per-channel skip / residual, ``(d,)``.
-    method
-        ``'sequential'`` (the bit-exact ``lax.scan`` oracle), ``'associative'``
+    driver
+        Numerical variant (the ``driver`` axis).  ``'sequential'`` (the
+        bit-exact ``lax.scan`` oracle -- the canonical variant), ``'associative'``
         (parallel prefix, materialises the ``(l, d, n)`` trajectory),
         ``'chunked'`` (pure-XLA memory-sparing: chunked scan that never
         materialises ``(l, d, n)`` -- the Pallas-free analogue of the fused
         kernel), or ``'auto'`` (parallel on GPU, sequential on CPU).
+        ``nitrix.reproducible()`` forces the canonical ``'sequential'``; the
+        variants agree only to a documented tolerance
+        (``nitrix.divergent_ops()``), not bit-for-bit.
     chunk_size
         Chunk length for ``method='chunked'`` (must divide ``l``); the
         memory / parallel-depth trade-off knob.  Size-based dispatch is left to
@@ -197,25 +205,24 @@ def reference_selective_scan(
     Degenerate ``A -> 0`` (``dA -> 1``) reduces the update to a cumulative sum of
     ``Δ_t B_t x_t``.
     """
-    resolved = method
-    if resolved == 'auto':
-        resolved = 'associative' if default_backend_is_gpu() else 'sequential'
+    resolved = resolve_driver(
+        driver,
+        op='nn.ssm.selective_scan',
+        fast=lambda: (
+            'associative' if default_backend_is_gpu() else 'sequential'
+        ),
+    )
     if resolved == 'chunked':
         chunk = min(chunk_size, x.shape[-2])
         if x.shape[-2] % chunk != 0:
             raise ValueError(
-                f"method='chunked' requires l % chunk_size == 0; got "
+                f"driver='chunked' requires l % chunk_size == 0; got "
                 f'l={x.shape[-2]}, chunk_size={chunk_size}.'
             )
         return _scan_chunked(x, delta, A, B, C, D, chunk)
     dA, dBx = _discretize(x, delta, A, B)
-    if resolved == 'sequential':
-        h = _scan_sequential(dA, dBx)
-    elif resolved == 'associative':
+    if resolved == 'associative':
         h = _scan_associative(dA, dBx)
-    else:
-        raise ValueError(
-            "method must be 'auto'/'sequential'/'associative'/'chunked'; "
-            f'got {method!r}.'
-        )
+    else:  # 'sequential' (resolve_driver guarantees a registered value)
+        h = _scan_sequential(dA, dBx)
     return _readout(h, C, x, D)
