@@ -1,12 +1,14 @@
 # Mixed-precision (fp16/bf16) strategy for nitrix
 
-> **Status (2026-06-24): design research, no code.** Synthesised from a
-> three-part audit of `nitrix main@85fc6ac` (precision handling, op suitability,
-> consumer demand). Companion to [`reproducible-dispatch`](reproducible-dispatch.md)
-> (the `driver` axis) — mixed precision is a *fourth*, orthogonal axis and this
-> doc argues it must stay outside the `driver`/divergent-op system. The first
-> concrete instance is [`attention-no-upcast-knob`](attention-no-upcast-knob.md)
-> (brain_ldm `qk_upcast`).
+> **Status (2026-06-24): P0 shipped; P1-P3 design-research, no code.**
+> Synthesised from a three-part audit of `nitrix main@85fc6ac` (precision
+> handling, op suitability, consumer demand). Companion to
+> [`reproducible-dispatch`](reproducible-dispatch.md) (the `driver` axis) —
+> mixed precision is a *fourth*, orthogonal axis and this doc argues it must stay
+> outside the `driver`/divergent-op system. **P0 (the policy tenet) is now folded
+> into `SPEC.md` §2 tenet 11 + §3.1.** The first concrete instance is
+> [`attention-no-upcast-knob`](attention-no-upcast-knob.md) (brain_ldm
+> `qk_upcast`).
 
 ## TL;DR — the blast radius is genuinely narrow
 
@@ -191,11 +193,12 @@ fp16 but gain nothing; no action.
 
 ## Phasing
 
-**P0 — Policy + SPEC tenet (doc-only, do first).** Fold principles 1–6 into a
-SPEC tenet ("§2 tenet 11: precision policy") and a short §3 dispatch note that
-dtype is an axis distinct from `driver`. Mirrors how reproducible-dispatch
-rolled out (principle before code). Cheapest, highest-leverage step; prevents
-ad-hoc dtype kwargs creeping onto Bucket-B ops.
+**P0 — Policy + SPEC tenet (doc-only, do first). ✅ SHIPPED 2026-06-24.**
+Folded principles 1–6 into `SPEC.md` **§2 tenet 11** ("Precision policy — the
+`dtype` axis") plus a **§3.1** dispatch note that `dtype` is a distinct axis from
+`driver`. Mirrors how reproducible-dispatch rolled out (principle before code).
+Cheapest, highest-leverage step; prevents ad-hoc dtype kwargs creeping onto
+Bucket-B ops.
 
 **P1 — Uniform fp32-accumulation floor + bf16 golden corpus for Bucket A
 (highest-value concrete work; unblocks D2 with no new API).**

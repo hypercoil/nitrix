@@ -108,6 +108,29 @@ concerns invariant (§6, §9).
     oracle consumers may pin) plus a fused **Pallas** path certified only
     `pallas ≈ jax` within the pinned `[op.dtype.pallas-cuda]` tolerance. The
     `custom_vjp` lives on the fused path; the reference is autodiff-native.
+11. **Precision policy (the `dtype` axis).** nitrix is **float32 / float64-first**:
+    correctness and reproducibility are the contract, and the scientific core
+    (linalg, stats, register, metrics, signal, geometry, bias, semiring) is
+    fp32/fp64-only — reduced precision there is a *correctness bug*, not a
+    speed/quality trade (squared normal-equation conditioning, log-domain
+    underflow, `finfo(dtype).eps/.tiny` guards that misfire below fp32, amplified
+    GPU-scatter nondeterminism). Reduced precision (fp16/bf16) is admitted **only**
+    at the neural-network forward seam (`nn.attention`, `nn.ssm`, `nn.norm`),
+    under a hard **fp32-accumulation invariant**: inputs and outputs may be
+    reduced, but every reduction / matmul / recurrence accumulates in **≥ float32**
+    and is cast back to the I/O dtype at the end. `dtype` is its own axis — the
+    *precision of the data* — orthogonal to `backend` / `driver` / `method` (§3.1)
+    and **never** a divergent-op registry entry (tenet 9): it is governed by the
+    input array dtype plus explicit, op-specific precision knobs, not by
+    auto-dispatch. Two corollaries: (a) an explicit *sub*-fp32 accumulation request
+    is **reference-path only** — fused flash/scan kernels keep fp32 online
+    accumulators by construction, so combining it with `backend='pallas-cuda'`
+    raises and `'auto'` resolves to `jax`; (b) `nitrix.reproducible()` rejects or
+    promotes sub-fp32 accumulation on any path whose determinism it guarantees
+    (the histogram scatter), the determinism contract outranking the precision
+    request. Reduced precision entering the scientific core is a loud event
+    (tenet 7), not silent garbage. See
+    `docs/feature-requests/mixed-precision-strategy.md`.
 
 ---
 
@@ -124,6 +147,12 @@ concerns invariant (§6, §9).
 
 Keep them distinct: `backend` picks *where/which kernel* runs; `driver` picks
 *which numerically-divergent recipe*.
+
+**`dtype` is a further distinct axis** — the *precision of the data*, governed by
+the precision policy (§2 tenet 11), **not** by `driver`. `driver` selects an
+algorithm at a *fixed* precision; `dtype` selects the precision itself. Reduced
+precision is admitted only at the NN-forward seam under a ≥float32 accumulation
+floor, and is never a divergent-op entry.
 
 ### 3.2 Backend resolution (§7.2) + fallback observability
 
