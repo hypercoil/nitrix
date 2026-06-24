@@ -50,6 +50,21 @@ register_divergent_op(
     summary='IIR SOS cascade: FFT-convolution vs sequential vs associative scan',
 )
 
+# --- metrics.joint_histogram ----------------------------------------------
+# Soft joint-histogram accumulation: one-hot matmul (deterministic) vs .at[].add
+# scatter (a non-associative atomic add -- RUN-TO-RUN nondeterministic on GPU;
+# deterministic on CPU).  Canonical = 'onehot' (deterministic on any platform;
+# O(N*bins) memory -- reproducibility's cost at scale).  This is the determinism
+# half of the principle, not just cross-platform reassociation.
+register_divergent_op(
+    'metrics.joint_histogram',
+    canonical='onehot',
+    fast={'gpu': 'onehot', 'cpu': 'scatter'},
+    driver_values=('onehot', 'scatter'),
+    tolerance={'float32': 1e-4, 'float64': 1e-10},
+    summary='joint histogram: one-hot matmul (deterministic) vs atomic scatter',
+)
+
 # --- register.field_smooth ------------------------------------------------
 # The SVF/Demons/SyN velocity-field Gaussian regulariser: FIR shifted-slice
 # convolution (GPU) vs Young-van Vliet recursion (CPU, sigma>=0.5).  They differ

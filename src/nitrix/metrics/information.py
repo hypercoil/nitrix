@@ -33,6 +33,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from .._internal.backend import default_backend_is_gpu
+from .._internal.config import resolve_driver
 from ._common import _resolve_range, _soft_bin
 
 __all__ = [
@@ -77,6 +78,7 @@ def _joint_hist_from_softbins(
     bins: int,
     dtype: jnp.dtype,
     weight: Optional[Array] = None,
+    driver: str = 'auto',
 ) -> Float[Array, 'bins bins']:
     """Accumulate pre-computed soft bins into the normalised joint histogram.
 
@@ -85,23 +87,36 @@ def _joint_hist_from_softbins(
     one normalisation -- the gradient is then exactly the derivative of the table
     the cost sees.
 
-    Two equivalent accumulations, gated by backend and size (E2): **on GPU**,
-    below ``_ONEHOT_HIST_MAX_VOXELS`` voxels, the soft bins become two
-    ``(N, bins)`` soft one-hot matrices and the histogram is their product
-    ``ohₘᵀ @ ohf`` -- a matmul (deterministic) rather than a ``.at[].add`` scatter
-    (a non-associative atomic add, the GPU MI non-determinism source that
-    ``affine_register(restarts=)`` otherwise papers over).  Everywhere else (CPU,
-    or above the gate) the scatter is used -- on CPU it is already deterministic
-    and faster than the one-hot, and above the gate the one-hots would dominate
-    memory.  Both ``default_backend_is_gpu()`` and ``N`` are static under ``jit``,
-    so the branch is resolved at trace time.
+    Two equivalent accumulations, selected by the ``driver`` axis (the divergent
+    op ``metrics.joint_histogram``): ``'onehot'`` turns the soft bins into two
+    ``(N, bins)`` soft one-hot matrices and forms the histogram as their product
+    ``ohₘᵀ @ ohf`` -- a matmul (**deterministic**); ``'scatter'`` is the
+    ``.at[].add`` accumulation (a non-associative atomic add on GPU -- the
+    **run-to-run** MI non-determinism source that ``affine_register(restarts=)``
+    otherwise papers over; deterministic on CPU).  ``driver='auto'`` picks
+    ``'onehot'`` on GPU below ``_ONEHOT_HIST_MAX_VOXELS`` voxels (above which the
+    one-hots would dominate memory, so the scatter takes over) and ``'scatter'``
+    on CPU (already deterministic and faster there).  ``nitrix.reproducible()``
+    forces the canonical ``'onehot'`` for determinism on **any** size -- note
+    this is ``O(N·bins)`` memory, the cost of reproducibility at scale.  Both the
+    platform and ``N`` are static under ``jit``, so the branch is resolved at
+    trace time.
 
     ``weight`` (optional, the per-voxel domain mask, same length as the soft-bin
     index vectors) gates the accumulation: a masked-out voxel contributes nothing
     to the histogram (A3).  ``None`` is the unweighted form.
     """
     n = lower_m.shape[0]
-    if default_backend_is_gpu() and n <= _ONEHOT_HIST_MAX_VOXELS:
+    resolved = resolve_driver(
+        driver,
+        op='metrics.joint_histogram',
+        fast=lambda: (
+            'onehot'
+            if default_backend_is_gpu() and n <= _ONEHOT_HIST_MAX_VOXELS
+            else 'scatter'
+        ),
+    )
+    if resolved == 'onehot':
         idx = jnp.arange(bins)
         oh_m = (
             (1.0 - frac_m)[:, None] * (lower_m[:, None] == idx)
