@@ -7,7 +7,7 @@ nitrix.metrics -- differentiable comparison kernels.
 
 The *score kernels* that compare arrays and return a numeric tensor with
 genuine numerical content: similarity, overlap, classification, and
-contrastive objectives.  Per ``SPEC_UPDATE_v0.5 §1`` these are the nitrix
+contrastive objectives.  Per ``SPEC §5`` these are the nitrix
 half of the score-kernel / scalarisation boundary -- they return the
 unreduced (or flat-reduced) score; turning a score into a *loss* (sign,
 scalarisation, multi-term weighting) is nimox's ``scalarise`` / ``scheme``.
@@ -34,7 +34,7 @@ Five families:
   ``koleo`` (feature-spread entropy regulariser): self-supervised
   representation kernels.
 
-Substrate-composition note (SPEC_UPDATE_v0.3 §0 invariant): ``lncc``'s
+Substrate-composition note (SPEC §9 invariant): ``lncc``'s
 local sums are a separable box filter (the ``_internal.separable``
 engine shared with ``geometry.spatial_gradient``); ``ncc`` is the
 ``stats.corr`` shape; MI / CR are soft (Parzen) histogram scatter-adds;

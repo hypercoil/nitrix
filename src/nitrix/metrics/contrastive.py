@@ -14,7 +14,7 @@ Contrastive / self-supervised representation kernels.
 - ``koleo`` -- the Kozachenko--Leonenko differential-entropy regulariser:
   spread features out by penalising small nearest-neighbour distances.
 
-Per ``SPEC_UPDATE_v0.5 §1`` these are *score kernels*: they take the
+Per ``SPEC §5`` these are *score kernels*: they take the
 **objective structure** (the view pairing, the masked-token selection, the
 teacher ``center`` and its EMA) as explicit arguments rather than baking a
 recipe in, and they reduce through the shared leaf reduction. The EMA /

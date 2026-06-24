@@ -4,7 +4,7 @@
 """
 Exchangeability operators for permutation inference.
 
-Keyed pure generators (SPEC_UPDATE_v0.5 §2) that build the set of relabellings
+Keyed pure generators (SPEC §2 tenet 1) that build the set of relabellings
 used by ``randomise``-style permutation tests:
 
 - ``sign_flips`` -- the ``+/-1`` sign-flip matrix for symmetric / one-sample

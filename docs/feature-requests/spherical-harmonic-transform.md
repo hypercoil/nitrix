@@ -2,7 +2,7 @@
 
 > **Status (2026-06-02): not started.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.9`.
+> `docs/feature-requests catalogue §12.9`.
 
 **What.** Classical spherical-harmonic synthesis and analysis at arbitrary
 band-limits — real and complex SHs, forward/inverse via Driscoll–Healy
@@ -33,7 +33,7 @@ the quadrature grid would build on.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.9` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.9` — origin entry; `§13` — acceptance protocol.
 - `src/nitrix/geometry/sphere.py` — the substrate this extends.
 - [`docs/design/sphere-grid.md`](../design/sphere-grid.md) — the
   parameterised-grid topology (the equirectangular sampling SHT needs).

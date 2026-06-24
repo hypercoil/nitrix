@@ -2,7 +2,7 @@
 
 > **Status (2026-06-02): not started.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.6`.
+> `docs/feature-requests catalogue §12.6`.
 
 **What.** Pointwise curvature scalars on a triangulated surface.
 
@@ -31,7 +31,7 @@ shape-feature extraction, surface-based registration regularisation.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.6` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.6` — origin entry; `§13` — acceptance protocol.
 - [`discrete-exterior-calculus.md`](discrete-exterior-calculus.md) — sibling
   geometry primitive (shares the cotangent-Laplacian substrate).
 - `src/nitrix/sparse/mesh.py`.

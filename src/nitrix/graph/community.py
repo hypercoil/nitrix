@@ -12,7 +12,7 @@ is the operator whose eigendecomposition gives Newman-style
 community structure, and ``coaffiliation`` is the symmetric outer
 product of a community-assignment matrix.  We split them out from
 ``laplacian.py`` so that module can be pure "graph Laplacians";
-the SPEC §4.5 grouping is loosened on this basis.
+the SPEC §4.9 grouping is loosened on this basis.
 
 The relaxed-modularity score has both *dense* and *sparse* call
 paths.  The sparse path uses the factorisation::

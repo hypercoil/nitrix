@@ -65,7 +65,7 @@ here as the rationale record:
   case while preserving separability.
 - **Out of nitrix scope** (correctly): trained-atlas-as-tensor (→ nimox `eqx.Module`
   field), FreeSurfer `.sphere`/`.mgz` I/O and surface↔sphere parameterisation
-  (`surfa`) (→ consumer / thrux; SPEC §5.2), TF-checkpoint key renaming (→
+  (`surfa`) (→ consumer / thrux; SPEC §6.2), TF-checkpoint key renaming (→
   `ilex.core.adapters`).
 
 ## Resolved items
@@ -74,7 +74,7 @@ Full resolution history for the consumer-driven gaps (gaussian docstrings, the
 edge-aggregate / icosphere-hierarchy / mesh-pool stack, `max_pool_with_indices_nd` /
 `max_unpool_nd`, SUGAR deltas, GATv2 self-loops, Nyul–Udupa `histogram_match`) lives
 in **`IMPLEMENTATION_PLAN.md §10.3`** (shipped-deviation log) and
-**`SPEC_UPDATE_v0.3 §10.A`** — these supersede the retired `NITRIX_FEEDBACK_ILEX.md`
+**`SPEC §9`** — these supersede the retired `NITRIX_FEEDBACK_ILEX.md`
 / `NITRIX_FEEDBACK_JOSA.md` ledgers. Backlog items closed here:
 
 - **B1. Move resolved findings in `NITRIX_FEEDBACK_ILEX.md`** — done 2026-05-20.

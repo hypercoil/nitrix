@@ -3,7 +3,7 @@
 > **Status (2026-06-02): not started — the empirical-covariance input
 > (`stats.cov`) and dense `stats.precision` are shipped; the L1-penalised
 > sparse estimator is not.** Brainstorm candidate; promotion gated by the
-> §13 acceptance protocol. Provenance: `SPEC_UPDATE_v0.3.md §12.14`.
+> §13 acceptance protocol. Provenance: `docs/feature-requests catalogue §12.14`.
 
 **What.** Sparse precision-matrix estimation (Friedman / Hastie / Tibshirani
 2008):
@@ -50,7 +50,7 @@ this sparsifies), and `linalg.symlog` (the ADMM `proximal_log_det` piece).
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.14` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.14` — origin entry; `§13` — acceptance protocol.
 - [`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md) — sibling
   regularised-covariance estimator (analytic shrinkage; nilearn's *default*
   connectome estimator, the lighter default-path counterpart to GLASSO).

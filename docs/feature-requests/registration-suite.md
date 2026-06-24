@@ -43,7 +43,7 @@ trackable roadmap.
 
 ## 2. Scope boundary
 
-**In scope — numerical primitives only**, consistent with the SPEC §5
+**In scope — numerical primitives only**, consistent with the SPEC §6
 dependency contract (`numpy` + `jax`; no `nibabel`, no filesystem, no image
 I/O). Kept in scope and specced below: in-memory **transform algebra**
 (compose / invert / fuse — owned by [`affine-matrix-algebra`](affine-matrix-algebra.md)),

@@ -106,7 +106,7 @@ Any of:
    concat).  We swap the stub for a real kernel; the bench probe
    flips, the policy doc is rewritten.
 2. We accept a Hopper-only Mosaic GPU code path -- excluded at first
-   GA per SPEC_UPDATE_v0.2 §1.1 because it would cut out the bulk of
+   GA per SPEC §1.1 because it would cut out the bulk of
    academic-lab hardware.  Revisit at 1.x.
 3. We write a shape-specialised Pallas variant that avoids gather --
    e.g., small fixed ``k_max`` with the kspatial × c_in axis fully
@@ -122,17 +122,17 @@ Any of:
   100k mesh vertices, 8k feature columns) that's 3 GB.  Defeats the
   point of ELL.
 - **Routing through ``jax.experimental.sparse`` BCOO.**  Explicitly
-  excluded by SPEC §3.2: BCOO has been a persistent friction surface
+  excluded by SPEC §4.2: BCOO has been a persistent friction surface
   against the XLA / Pallas boundary; the entire reason ELL is the
   primary format is to avoid that machinery.
 - **CPU Pallas backend.**  Pallas does have a CPU lowering, but the
-  spec restricts us to NVIDIA Ampere+ for Pallas (SPEC_UPDATE_v0.2
+  spec restricts us to NVIDIA Ampere+ for Pallas (SPEC §1.1
   §1.1).  CPU users get the JAX path.
 
 ## Cross-references
 
 - IMPLEMENTATION_PLAN §3.1 (G0 decision rule), §5.2 (Phase 2.A.8).
-- SPEC §3.2 (ELL format), SPEC_UPDATE §3.2 (sectioned ELL -- a future
+- SPEC §4.2 (ELL format), SPEC §4.2 (sectioned ELL -- a future
   addition layered on top of this kernel).
 - ``bench/g0_ampere_ell.py`` -- the G0 baseline script.
 - ``bench/G0_ELL_REPORT.md`` -- the frozen report.

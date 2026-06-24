@@ -4,8 +4,7 @@
 """
 Backend selection and fallback observability.
 
-Implements the three-level resolution required by SPEC §7.2 and
-SPEC_UPDATE_v0.2 §7.2:
+Implements the three-level resolution required by SPEC §3.2:
 
     explicit ``backend=`` keyword > ``NITRIX_BACKEND`` env var > auto-detect
 
@@ -41,7 +40,7 @@ _VALID_BACKENDS: tuple[Backend, ...] = ('auto', 'pallas-cuda', 'jax')
 class NitrixBackendFallback(UserWarning):
     """Emitted when a backend resolves to a fallback path.
 
-    Per SPEC_UPDATE §2.7 ("Loud fallbacks"), silent perf regressions are
+    Per SPEC §2 tenet 7 ("Loud fallbacks"), silent perf regressions are
     a bug. Whenever Pallas Triton cannot tile a given shape × algebra
     combination, the resolved backend changes to ``jax`` and this
     warning is raised exactly once per ``(function, shape-signature,

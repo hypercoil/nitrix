@@ -34,7 +34,7 @@ benchmark reports, and survive being plucked into the eventual
   ``residual`` (Cholesky-default OLS / WLS / ridge,
   ~9× faster than the legacy SVD path), ``kernel`` (squared-L2
   via the identity formula to eliminate the legacy ``O(n m d)``
-  memory blowup), ``spd`` (SPEC §4.1 stability rewrite with
+  memory blowup), ``spd`` (SPEC §4.5 stability rewrite with
   eigenvalue-threshold clipping), plus the shared
   ``_solver.safe_eigh`` helper.
 - [`design/stats.md`](design/stats.md) -- ``covariance`` (real and
@@ -63,7 +63,7 @@ benchmark reports, and survive being plucked into the eventual
   pytree, the relaxed-``Semiring`` vs ``StrictSemiring`` split, and how
   user-defined algebras plug in.
 - [`design/streaming-kernel.md`](design/streaming-kernel.md) -- what the
-  "KeOps-style streaming kernel" claim from SPEC §3.1 actually means in
+  "KeOps-style streaming kernel" claim from SPEC §4.1 actually means in
   our code, why we deliberately avoid tensor cores, and how we verified
   the ``O(M·N)`` peak-HBM claim empirically.
 - [`design/ell-on-triton.md`](design/ell-on-triton.md) -- why

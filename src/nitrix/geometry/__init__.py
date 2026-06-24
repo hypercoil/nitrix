@@ -31,7 +31,7 @@ Submodules:
   closed-form least-squares ``fit_affine`` between point sets;
   complementary to the ``transform`` exponential chart.
 
-See SPEC §4.4, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
+See SPEC §4.8, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
 """
 
 from ._interpolate import (

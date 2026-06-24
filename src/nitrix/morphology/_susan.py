@@ -4,7 +4,7 @@
 """
 SUSAN emulator convenience wrapper.
 
-Per SPEC_UPDATE §3.3, ``susan_emulator`` composes
+Per SPEC §4.4, ``susan_emulator`` composes
 ``smoothing.bilateral_gaussian`` (for the brightness-similarity
 weighting half) with ``morphology.median_filter`` (for the impulse-
 noise half FSL's SUSAN handles via local median).

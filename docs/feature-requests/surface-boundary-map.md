@@ -3,7 +3,7 @@
 > **Status (2026-06-02): not started — composes entirely from shipped
 > primitives (a named wrapper, no new kernel).** Brainstorm candidate;
 > promotion gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.16`.
+> `docs/feature-requests catalogue §12.16`.
 
 **What.** The Cohen / Wig / Gordon / Schaefer functional-parcellation
 boundary-detection lineage (Cohen 2008; Wig 2014; Gordon 2016; Schaefer
@@ -52,7 +52,7 @@ adjacent parcellation-substrate functions (`laplacian`, `modularity_matrix`,
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.16` — origin entry; `§13` — acceptance protocol;
+- `docs/feature-requests catalogue §12.16` — origin entry; `§13` — acceptance protocol;
   `§12.20` — the functional-parcellation strategy survey this enables
   (Gordon / Schaefer rows).
 - [`mesh-watershed.md`](mesh-watershed.md) — the natural downstream

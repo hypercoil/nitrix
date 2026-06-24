@@ -3,7 +3,7 @@
 > **Status (2026-06-02): not started — the load-bearing missing piece for
 > the "functional-parcellation by clustering" family.** Brainstorm
 > candidate; promotion gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.18`.
+> `docs/feature-requests catalogue §12.18`.
 
 **What.** A small family of clustering primitives several parcellation
 strategies share.
@@ -44,7 +44,7 @@ shipped (`stats.corr` / `cov`, `linalg.linear_kernel` / `cosine_kernel`).
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.18` — origin entry; `§13` — acceptance protocol;
+- `docs/feature-requests catalogue §12.18` — origin entry; `§13` — acceptance protocol;
   `§12.20` — strategy survey (Yeo / Bellec / Eickhoff rows).
 - [`normalised-cut.md`](normalised-cut.md) — downstream (kmeans on eigvecs).
 - [`fixed-point-combinators.md`](fixed-point-combinators.md) — convergence

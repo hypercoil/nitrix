@@ -522,7 +522,7 @@ path with §5.1. **Effort: S.** **Oracle:** ridge-regression residual identity.
 
 ### §6.1 Robust regression / M-estimators  *(adjacent — promote existing doc)*
 
-Already specified in [`robust-statistics.md`](robust-statistics.md) (SPEC §12.7;
+Already specified in [`robust-statistics.md`](robust-statistics.md) (docs/feature-requests catalogue §12.7;
 v2 §9 names it a future v3 candidate): `huber_regress`, `tukey_bisquare_regress`,
 `mad`, as IRLS over the shipped least-squares solve. **v3 names `nwx` as the
 concrete driver** (`{{ estimator=robust }}`) — this FR elevates priority and
@@ -632,7 +632,7 @@ superset carrying the per-voxel `(Xᵀ V⁻¹ X)⁻¹` and `cov(θ̂)` that §1.
   RFT; §8 GCV/CV.
 
 Each tier validates against its pinned oracle (`lme4`/`lmerTest`/`pbkrtest`,
-`nlme`, `mgcv`, `statsmodels`, SPM/FSL) kept in `tests/` (SPEC §5.2), **with the
+`nlme`, `mgcv`, `statsmodels`, SPM/FSL) kept in `tests/` (SPEC §6.2), **with the
 §0.1 no-regression guard** (the shipped configuration still lowers to the shipped
 op) plus the no-large-intermediate HLO audit and cuSOLVER-free guard on every new
 mass-univariate op (per v1/v2 discipline).
@@ -662,7 +662,7 @@ mass-univariate op (per v1/v2 discipline).
 - v2 ledger (shipped, merged to `main`):
   [`stats-modelling-suite-v2.md`](stats-modelling-suite-v2.md).
 - Robust statistics (promoted here as Tier 2, `nwx`-driven):
-  [`robust-statistics.md`](robust-statistics.md) (SPEC §12.7).
+  [`robust-statistics.md`](robust-statistics.md) (docs/feature-requests catalogue §12.7).
 - Driver spec: `gramform/docs/nwx/spec.md` (the `ModelSpec` IR these kernels
   lower from).
 - Live substrate touched: `src/nitrix/stats/lme/{reml,_varcomp,_lowrank}.py`,
@@ -673,7 +673,7 @@ mass-univariate op (per v1/v2 discipline).
   `gam_fit` Gaussian cross-product path, `reml_fit(low_rank=)`.
 - Design: [`../design/stats.md`](../design/stats.md),
   [`../design/lme.md`](../design/lme.md).
-- Governing spec: SPEC §1, §5.2; SPEC_UPDATE_v0.5 §1 (score-kernel boundary).
+- Governing spec: SPEC §1, §5.2; SPEC §5 (score-kernel boundary).
 
 ## §13. Engineering-review record (incorporated 2026-06-17)
 

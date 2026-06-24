@@ -413,7 +413,7 @@ def icosphere_hierarchy_from_levels(
     **nitrix does not source the topology.**  Reading FreeSurfer
     ``.sphere`` binaries (``nibabel.freesurfer.read_geometry``),
     resolving ``$SUBJECTS_DIR``, or loading any neuroimaging container
-    is outside nitrix's dependency contract (SPEC §5.2: no ``nibabel``,
+    is outside nitrix's dependency contract (SPEC §6.2: no ``nibabel``,
     no filesystem / container concerns -- those live in ``thrux`` or the
     consuming port).  The caller reads the files and hands nitrix plain
     arrays; this constructor validates them and produces the same

@@ -4,7 +4,7 @@
 """
 SUSAN-style edge-preserving smoothing.
 
-Per SPEC_UPDATE §3.3, ``susan_emulator`` is the convenience wrapper
+Per SPEC §4.4, ``susan_emulator`` is the convenience wrapper
 that composes ``bilateral_gaussian`` (the brightness-similarity
 weighting half of FSL SUSAN) with ``morphology.median_filter`` (the
 impulse-noise fallback half).  The user passes a raw n-D image

@@ -1,6 +1,6 @@
 # Permutohedral lattice: the G2 tripwire outcome
 
-> **RETIRED (SPEC_UPDATE_v0.4).**  The permutohedral lattice is no longer
+> **RETIRED (SPEC §4.4).**  The permutohedral lattice is no longer
 > a target; the symbol and its stub have been removed.  Bounded support
 > dissolves every obstacle this assessment identified, and the **bounded
 > bilateral** (``bilateral_gaussian`` with a factored metric, validity
@@ -10,7 +10,7 @@
 > of *why* the lattice was unfit for pure JAX.
 
 > **TL;DR (historical).**  ``permutohedral_lattice`` shipped as a stub
-> raising ``NotImplementedError`` at first GA, per the SPEC_UPDATE §3.3
+> raising ``NotImplementedError`` at first GA, per the SPEC §4.4
 > tripwire's "no interim partial shipping" rule.  The technical
 > assessment: a *correctness-first dense* implementation works for
 > ``d_f ≤ 3`` but fails the perf criterion at the target ``d_f``;
@@ -21,7 +21,7 @@
 
 ## The criterion-by-criterion assessment
 
-SPEC_UPDATE §3.3 defines four tripwire criteria, all of which must
+SPEC §4.4 defines four tripwire criteria, all of which must
 pass for the symbol to ship:
 
 | # | Criterion | Verdict |
@@ -152,7 +152,7 @@ k-NN boundary, which we don't currently differentiate through.
 
 ## Why "no interim partial shipping" is the right call
 
-SPEC_UPDATE §3.3 is explicit:
+SPEC §4.4 is explicit:
 
 > Failing any of (1)–(4), the namespace is reserved but the symbol
 > raises ``NotImplementedError`` pointing to ``bilateral_gaussian``
@@ -193,7 +193,7 @@ another 1-2 for tripwire-passing tuning.
 - ``src/nitrix/smoothing/permutohedral.py`` -- the stub.
 - ``src/nitrix/smoothing/bilateral.py`` -- the unconditional
   marquee fallback.
-- SPEC_UPDATE §3.3 -- the tripwire spec.
+- SPEC §4.4 -- the tripwire spec.
 - Adams, Baek, Davis 2010, "Fast High-Dimensional Filtering Using
   the Permutohedral Lattice" -- the algorithm.
 - Krähenbühl & Koltun 2011, "Efficient Inference in Fully

@@ -28,7 +28,7 @@ code here.
    parity.** §3.
 3. **Golden corpus + tolerance matrix is materialised in Phase 0.** This stands
    up the long-mandated but never-built `tests/golden/` + `tests/tolerance.toml`
-   convention (SPEC_UPDATE §2.8; `IMPLEMENTATION_PLAN.md §2.2-4`). §6.
+   convention (SPEC §2 tenet 8; `IMPLEMENTATION_PLAN.md §2.2-4`). §6.
 4. **Two-tier parity contract is the load-bearing constraint.** Each op ships a
    bit-faithful JAX *reference* (the oracle ilex pins its forward-parity to) and
    a *fused* Pallas path certified `pallas-cuda ≈ jax` only inside nitrix. §4.
@@ -166,7 +166,7 @@ Investigated `jax/experimental/pallas/ops/` in the pinned venv (jax 0.10):
 
 Conceptual tie-in worth recording: stock attention's `(running_max, sum_exp)`
 online-softmax carry is the **same pytree-state streaming pattern as nitrix's
-`LOG` semiring monoid** (SPEC §3.1 / `docs/design/streaming-kernel.md`).
+`LOG` semiring monoid** (SPEC §4.1 / `docs/design/streaming-kernel.md`).
 Attention is structurally a LOG-semiring reduction with a value-weighted
 readout — good framing for reviewers and for the companion design doc.
 
@@ -184,7 +184,7 @@ Two adaptation points for the stock attention fork:
 ## 6. Golden-corpus + tolerance harness (Phase 0 deliverable)
 
 This suite finally materialises the convention the spec has mandated since v0.1
-(`IMPLEMENTATION_PLAN.md §2.2-4`, SPEC_UPDATE §2.8) but which the recent force
+(`IMPLEMENTATION_PLAN.md §2.2-4`, SPEC §2 tenet 8) but which the recent force
 kernels skipped (they use live-reference parity only). Attention is the first
 NN kernel and the right place to set it up properly.
 
@@ -208,7 +208,7 @@ tools/
 - **`tolerance.toml`** is a table: `[<op>.<dtype>]` rows with `atol`/`rtol`, and
   optional `[<op>.<dtype>.<backend>]` overrides (the fused path gets a looser
   row than the reference-vs-golden row). Pinned per release; a change is a
-  CHANGELOG entry (SPEC §2.6).
+  CHANGELOG entry (SPEC §2 tenet 6).
 - **`regen_golden.py`** generates each array from the *reference* path with a
   fixed seed and `jax_enable_x64` policy, so goldens are reproducible and
   reviewable. Never regenerated from the fused path.
@@ -456,7 +456,7 @@ just more norm ops, each fused independently.
 
 **Reference** (`nn/norm/_reference.py`): pure-JAX `lax.rsqrt`-based stats
 reproducing the equinox `LayerNorm`/`GroupNorm` and nimox `instance_norm` math
-(we cannot import equinox — SPEC §5.2); group/instance add a reshape-to-groups
+(we cannot import equinox — SPEC §6.2); group/instance add a reshape-to-groups
 reduction.  `out_scale` applied uniformly (forward + backward).
 
 **Fused kernel** (`_kernels/cuda/norm.py`): fork stock `layer_norm.py` /

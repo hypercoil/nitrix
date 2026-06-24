@@ -4,7 +4,7 @@
 """
 The one reduction surface for nitrix score kernels.
 
-Per ``SPEC_UPDATE_v0.5 §1`` (the score-kernel ↔ scalarisation boundary):
+Per ``SPEC §5`` (the score-kernel ↔ scalarisation boundary):
 a nitrix score kernel returns the **unreduced** tensor by default and may
 expose a *flat, non-compositional* reduction as a leaf convenience. This is
 that leaf -- the single ``Reduction`` literal and ``reduce`` helper shared

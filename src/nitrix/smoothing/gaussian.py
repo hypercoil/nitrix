@@ -4,7 +4,7 @@
 """
 Separable n-D Gaussian filter.
 
-Per SPEC_UPDATE §3.3, the unconditional baseline smoother.  Pure
+Per SPEC §4.4, the unconditional baseline smoother.  Pure
 JAX -- uses ``lax.conv_general_dilated`` for the underlying 1D
 convolutions (since the algebra is REAL and we want the tensor-core
 fast path for free).  The n-D Gaussian factors exactly as a product

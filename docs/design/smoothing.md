@@ -11,7 +11,7 @@
 > sibling in ``nitrix.sparse`` for variable-degree adjacencies.  All
 > are pure-JAX; bilateral and susan re-use the existing semiring
 > substrate with no new kernel code.  The permutohedral lattice is
-> **retired** (SPEC_UPDATE_v0.4); see
+> **retired** (SPEC §4.4); see
 > [`bounded-bilateral.md`](bounded-bilateral.md).
 
 ## Gaussian: separable, n-D, scipy-parity
@@ -72,7 +72,7 @@ same shape as the input.
 
 ## Bilateral: the marquee capability (a bounded bilateral)
 
-Per SPEC §3.3 (as amended by SPEC_UPDATE_v0.4) the marquee
+Per SPEC §4.4 (as amended by SPEC §4.4) the marquee
 edge-preserving smoother: a true high-dimensional bilateral over a
 **bounded** neighbourhood and a factored feature metric.
 Mathematically::
@@ -211,7 +211,7 @@ Documented behavioural deltas from FSL SUSAN (in the docstring):
 
 ## Sectioned ELL: the variable-degree story
 
-Per SPEC_UPDATE §3.2, sectioned ELL is CORE.  The motivation:
+Per SPEC §4.2, sectioned ELL is CORE.  The motivation:
 
 - Distance-thresholded neighbourhoods in irregular point clouds:
   ``k_max`` can be 10-100× ``median(k)``.
@@ -254,8 +254,8 @@ API would gain a ``sectioned=True`` flag.
   fits a flat ELL perfectly and adding bucketing overhead is wasteful.
   Both formats live in ``nitrix.sparse``.
 - **Permutohedral lattice for bilateral.**  Originally a
-  tripwire-gated target (SPEC_UPDATE §3.3), now **retired**
-  (SPEC_UPDATE_v0.4): bounded support dissolves the lattice's reason
+  tripwire-gated target (SPEC §4.4), now **retired**
+  (SPEC §4.4): bounded support dissolves the lattice's reason
   for existing, and the bounded bilateral above fills its role for the
   feature dimensionalities we target (and, via a low-rank metric,
   beyond).  See [`bounded-bilateral.md`](bounded-bilateral.md) and
@@ -274,8 +274,8 @@ API would gain a ``sectioned=True`` flag.
 
 ## Cross-references
 
-- SPEC §3.3, SPEC_UPDATE §3.3 -- the smoothing surface.
-- SPEC_UPDATE §3.2 -- the sectioned ELL motivation.
+- SPEC §4.4, SPEC §4.4 -- the smoothing surface.
+- SPEC §4.2 -- the sectioned ELL motivation.
 - ``src/nitrix/smoothing/`` -- gaussian, bilateral, susan.
 - ``src/nitrix/sparse/ell_sectioned.py`` -- sectioned ELL.
 - ``tests/test_smoothing.py``, ``tests/test_ell_sectioned.py``.

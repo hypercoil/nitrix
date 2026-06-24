@@ -112,13 +112,13 @@ treats it identically to a built-in.  Two things to know:
   rejected on the first numerical-stability test draft.
 - **KeOps-style symbolic autodiff.**  KeOps generates backwards by
   differentiating the user's formula DAG.  Out of scope for first
-  GA; per SPEC_UPDATE §3.1, custom-algebra users wrap their own
+  GA; per SPEC §4.1, custom-algebra users wrap their own
   ``jax.custom_vjp`` if they want gradients.  Saves a lot of
   implementation cost; the marginal user-base benefiting is small.
 - **``Algebra`` instead of ``Semiring``.**  The name "semiring" is
   arguably slightly wrong for ``EUCLIDEAN`` (since its ``(*)`` is
   non-associative), but the term "semiring-analogous algebra"
-  per SPEC §3.1 is what the literature uses and the codebase is
+  per SPEC §4.1 is what the literature uses and the codebase is
   consistent with.
 
 ## Learning: `identity` is the monoid identity, not the annihilator
@@ -154,7 +154,7 @@ form still works but emits a ``DeprecationWarning``.  See
 
 ## Cross-references
 
-- SPEC §3.1 "Algebra representation"; SPEC_UPDATE §3.1 (strict/relaxed
+- SPEC §4.1 "Algebra representation"; SPEC §4.1 (strict/relaxed
   split).
 - ``src/nitrix/semiring/_types.py`` -- the Protocol definitions.
 - ``src/nitrix/semiring/algebras.py`` -- the six built-ins.

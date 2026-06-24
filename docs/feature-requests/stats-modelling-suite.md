@@ -68,7 +68,7 @@ Per SPEC §1 and v0.5 §1 (normative):
   (linear solves, scan-unrolled Newton). The *inference loop* (TFCE /
   connected-components / permutation) is a **non-differentiable inference
   kernel**, consistent with how `morphology.connected_components` is already
-  treated (subgradients "where appropriate", SPEC §2.2). Stated as an explicit
+  treated (subgradients "where appropriate", SPEC §2 tenet 2). Stated as an explicit
   design decision, not an omission.
 
 ## §2. Locked decisions (2026-06-16)
@@ -362,7 +362,7 @@ class PermResult(NamedTuple): stat_map; enhanced_map; p_fwe; p_uncorr; null_max
 
 ## §10. Validation / oracles
 
-External oracles live in `tests/` only (never runtime deps, SPEC §5.2):
+External oracles live in `tests/` only (never runtime deps, SPEC §6.2):
 `statsmodels.MixedLM` / `statsmodels.GLM`, `mgcv::gam` (rpy2 or pinned
 fixtures), FSL `randomise` reference outputs, ModelArray. Each new
 mass-univariate op carries the no-large-intermediate HLO audit and a
@@ -389,5 +389,5 @@ brain-scale-`V` GPU certification, plus backend-parity where kernels exist
   `src/nitrix/morphology/_label.py`, `src/nitrix/bias/_bspline.py`,
   `src/nitrix/_internal/reductions.py`, `src/nitrix/smoothing/gaussian.py`.
 - Governing spec: SPEC §1 (substrate role), §2.2 (non-negotiables),
-  SPEC_UPDATE_v0.5 §1 (score-kernel ↔ scalarisation boundary), §2 (keyed pure
-  generators); SPEC_UPDATE_v0.3 §10.A.4 (LME promotion).
+  SPEC §5 (score-kernel ↔ scalarisation boundary), §2 (keyed pure
+  generators); SPEC §4.6 (LME promotion).

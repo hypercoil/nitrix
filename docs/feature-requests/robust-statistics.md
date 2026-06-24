@@ -2,7 +2,7 @@
 
 > **Status (2026-06-02): not started.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.7`.
+> `docs/feature-requests catalogue §12.7`.
 
 **What.** M-estimator regression and the scale estimator that pairs with it.
 
@@ -31,6 +31,6 @@ group analysis, robust mixed-effects via joint LME + IRLS.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.7` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.7` — origin entry; `§13` — acceptance protocol.
 - `src/nitrix/linalg/residual.py` — the LS solve IRLS reweights.
 - [`docs/design/lme.md`](../design/lme.md) — the joint LME + IRLS consumer.

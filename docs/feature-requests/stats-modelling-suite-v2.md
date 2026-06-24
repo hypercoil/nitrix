@@ -15,7 +15,7 @@
 > v1 deliberately deferred and (b) the long-deferred **regularised connectivity
 > estimators** Ledoit-Wolf and graphical LASSO
 > ([`ledoit-wolf-shrinkage.md`](ledoit-wolf-shrinkage.md),
-> [`graphical-lasso.md`](graphical-lasso.md), SPEC §12.14). It reuses the v1
+> [`graphical-lasso.md`](graphical-lasso.md), docs/feature-requests catalogue §12.14). It reuses the v1
 > substrate wholesale — the cuSOLVER-free tiny-SPD solve (`stats._smalllinalg`,
 > incl. the rolled Cholesky), the chunked-`vmap` spine (`_blocked_vmap`), the
 > `_varcomp` REML engine, the GLM/IRLS core, and the spline-basis machinery —
@@ -37,7 +37,7 @@ v1 shipped the spine; v2 fills it out along two axes:
    these are the regularised counterparts.
 
 Both axes are **score kernels** (arrays → covariance / statistic / p-value
-arrays), per SPEC_UPDATE_v0.5 §1 — same classification as the v1 suite; no
+arrays), per SPEC §5 — same classification as the v1 suite; no
 new scalarisation, container, or CLI surface. The cuSOLVER-free discipline and
 the differentiability expectations carry over unchanged.
 
@@ -375,7 +375,7 @@ log-likelihood (same optimum) + matches the balanced one-way ANOVA closed form t
 connected-components for TFCE (exploit threshold-nesting monotonicity).
 
 Each phase validates against its pinned oracle (sklearn, mgcv, FSL/PALM) kept
-in `tests/` only (SPEC §5.2), with the no-large-intermediate HLO audit and the
+in `tests/` only (SPEC §6.2), with the no-large-intermediate HLO audit and the
 cuSOLVER-free guard extended to every new mass-univariate op.
 
 ## §8. Open decisions
@@ -474,5 +474,5 @@ F-contrast in randomise needs per-permutation dispersion.
 - Design: [`../design/stats.md`](../design/stats.md),
   [`../design/lme.md`](../design/lme.md),
   [`../design/eigsolve-dispatcher.md`](../design/eigsolve-dispatcher.md).
-- Governing spec: SPEC §1, §5.2; SPEC_UPDATE_v0.5 §1 (score-kernel boundary);
-  SPEC_UPDATE_v0.3 §12.14 / §13 (GLASSO origin + acceptance protocol).
+- Governing spec: SPEC §1, §5.2; SPEC §5 (score-kernel boundary);
+  docs/feature-requests catalogue §12.14 / §13 (GLASSO origin + acceptance protocol).

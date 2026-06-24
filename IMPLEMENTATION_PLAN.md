@@ -1,6 +1,6 @@
 # nitrix — Implementation plan (draft v0)
 
-> **Scope.** Reads on top of SPEC.md (v0) + SPEC_UPDATE.md (v0.1) + SPEC_UPDATE_v0.2.md
+> **Scope.** Reads on top of SPEC.md (v0) + SPEC.md (v0.1) + SPEC §1.1.md
 > + MIGRATION.md. Where this plan conflicts with MIGRATION.md §6 (recommended order),
 > this plan supersedes — see §1.2 below for rationale.
 >
@@ -47,7 +47,7 @@ from downstream consumers needing capabilities, not files.
 | **1. Foundation** | `linalg`, `stats`, `signal` consolidated; downstream can swap nitrix imports for hypercoil imports | weeks | none — pure consolidation |
 | **2. Substrate** | `semiring` + `sparse.ell` shipped; downstream can build distance ops, graph algebra, attention-like reductions | months | Triton stability; backward-kernel correctness |
 | **3. Geometry & graph** | `geometry`, `graph` shipped, spherical conv re-backed | weeks | depends on Phase 2 |
-| **4. Marquee** | `smoothing`, `morphology` shipped; permutohedral retired (SPEC_UPDATE_v0.4), bounded bilateral supersedes it | weeks–months | — (permutohedral risk eliminated) |
+| **4. Marquee** | `smoothing`, `morphology` shipped; permutohedral retired (SPEC §4.4), bounded bilateral supersedes it | weeks–months | — (permutohedral risk eliminated) |
 | **5. Polish** | LME namespace reserved; docs; benchmark suite; first GA | weeks | none — pure cleanup |
 
 The phases are not equal-sized. Phase 2 is the long pole. Phases 1 and 3 can compress
@@ -84,10 +84,10 @@ without resolving it would invalidate downstream assumptions.
 
 | Gate | Decides | Phase | §reference |
 |---|---|---|---|
-| **G0. Ampere-ELL benchmark** | Triton-default vs JAX-default for ELL kernels | end of Phase 0 | SPEC_UPDATE_v0.2 §4 |
-| **G1. Backward-kernel correctness** | Whether each `StrictSemiring` backward passes finite-difference checks at pinned tolerance | mid Phase 2 | SPEC_UPDATE §3.1 |
-| **G2. Permutohedral tripwire** | RESOLVED → **retired**. Bounded support dissolves the lattice's obstacles; the bounded bilateral (`bilateral_gaussian` + factored metric / mask / `n_iters`) supersedes it | closed | SPEC_UPDATE_v0.4 §3.3; `docs/design/bounded-bilateral.md` |
-| **G3. Backend-fallback observability** | Whether the warning infrastructure works under real fallback conditions | end of Phase 2 | SPEC_UPDATE_v0.2 §7.2 |
+| **G0. Ampere-ELL benchmark** | Triton-default vs JAX-default for ELL kernels | end of Phase 0 | SPEC §10 |
+| **G1. Backward-kernel correctness** | Whether each `StrictSemiring` backward passes finite-difference checks at pinned tolerance | mid Phase 2 | SPEC §4.1 |
+| **G2. Permutohedral tripwire** | RESOLVED → **retired**. Bounded support dissolves the lattice's obstacles; the bounded bilateral (`bilateral_gaussian` + factored metric / mask / `n_iters`) supersedes it | closed | SPEC §4.4; `docs/design/bounded-bilateral.md` |
+| **G3. Backend-fallback observability** | Whether the warning infrastructure works under real fallback conditions | end of Phase 2 | SPEC §3.2 |
 
 Gate outcomes are recorded in §10 deviation log even when they pass cleanly. A failed
 gate triggers replanning, not workarounds-in-place.
@@ -107,22 +107,22 @@ Without it, "deviation tolerance" becomes "the plan is decorative."
 The following hold under **all** circumstances, including downstream pressure. An
 agent considering a deviation that violates any of these should refuse and escalate.
 
-1. **Dependency contract (SPEC §5).** `nitrix` does not import `equinox`, `quax`,
+1. **Dependency contract (SPEC §6).** `nitrix` does not import `equinox`, `quax`,
    `numpyro`, `scipy`, `nibabel`, or anything upstream. A "quick fix" that re-introduces
    any of these is the bug, not the fix. If you find yourself wanting to, the
    capability belongs in a different library.
-2. **Pure-functional public API (SPEC §2.1).** No PyTrees, no state, no module
+2. **Pure-functional public API (SPEC §2 tenet 1).** No PyTrees, no state, no module
    objects in the public surface. A downstream library can wrap nitrix functions in
    modules; nitrix does not ship modules.
-3. **JAX fallback floor (SPEC_UPDATE_v0.2 §7.2).** Every kernel has a working JAX
+3. **JAX fallback floor (SPEC §3.2).** Every kernel has a working JAX
    fallback path exercised in CI. A Pallas-only kernel is not shippable.
-4. **Golden corpus (SPEC_UPDATE §2.8).** Every kernel × dtype × algebra combination
+4. **Golden corpus (SPEC §2 tenet 8).** Every kernel × dtype × algebra combination
    that ships has a checked-in reference array. Adding a kernel without golden tests
    is not "done."
-5. **Backward compatibility of kernel outputs across releases (SPEC §2.6).** Once a
+5. **Backward compatibility of kernel outputs across releases (SPEC §2 tenet 6).** Once a
    kernel ships, changing its numerics within the pinned tolerance is a CHANGELOG
    entry. Changing it outside the tolerance is an API break.
-6. **Loud fallbacks (SPEC_UPDATE §2.7).** Backend fallback emits a warning. Silent
+6. **Loud fallbacks (SPEC §2 tenet 7).** Backend fallback emits a warning. Silent
    fallback is a bug regardless of how it was introduced.
 
 ### 2.3 Negotiable under deviation pressure
@@ -241,7 +241,7 @@ shapes. Decision:
 
 - **Triton < 2× JAX wall-time:** Triton is default in Phase 2. Standard plan.
 - **Triton 2–5× slower:** JAX is default on Ampere; Triton is opt-in via
-  `backend="pallas-cuda"`. Update SPEC_UPDATE_v0.2 §4 footnote to reflect the actual
+  `backend="pallas-cuda"`. Update SPEC §10 footnote to reflect the actual
   measurement; document the reasoning in the kernel docstrings.
 - **Triton ≥ 5× slower or unstable:** Substantially harder conversation. Either (a)
   investigate Triton-side performance issues with the JAX team, (b) rewrite the
@@ -255,7 +255,7 @@ script that can be re-run on new hardware, and a decision recorded in §10.
 
 #### 0.4 Repository scaffolding
 
-- Top-level `nitrix/` package layout matching SPEC §3 and §4 (empty modules with
+- Top-level `nitrix/` package layout matching SPEC §4 and §4 (empty modules with
   docstrings).
 - `_kernels/cuda/` directory for Pallas kernels (empty at this point).
 - `_refstubs/` directory checked in but **explicitly excluded** from the package
@@ -312,7 +312,7 @@ Port `hypercoil/functional/kernel.py` with the single-dispatch surface. Fold
 
 #### 1.B.4 `nitrix.linalg.spd` `SERIAL`
 
-This one is `SERIAL` because it requires a numerical stability rewrite per SPEC §4.1.
+This one is `SERIAL` because it requires a numerical stability rewrite per SPEC §4.5.
 Port `hypercoil/functional/symmap.py` and `hypercoil/functional/semidefinite.py`,
 **rewriting the SPD implementation for stability**. The migration is the natural
 opportunity per MIGRATION.md §5. Tests cover the stability regression explicitly.
@@ -491,7 +491,7 @@ Per-algebra Pallas backward kernels, paired with their forwards. Same conditiona
 
 ELL format: `(values, indices, n_rows, identity)` with gather / scatter / pad / reshape
 primitives. Plus `nitrix.sparse.ell.sectioned` (the bucketed-row variant for
-variable-degree adjacencies). Per SPEC_UPDATE §3.2, sectioned-ELL is CORE.
+variable-degree adjacencies). Per SPEC §4.2, sectioned-ELL is CORE.
 
 `semiring_ell_matmul` and `semiring_ell_conv` accept either flat or sectioned ELL.
 
@@ -524,7 +524,7 @@ At Phase 2 exit, downstream gets:
 
 ### 5.4 Phase 2 exit checklist
 
-- [ ] All §10 success criteria for §3.1 and §3.2 met (per SPEC + SPEC_UPDATE).
+- [ ] All §10 success criteria for §3.1 and §3.2 met (per SPEC + SPEC).
 - [ ] G1 backward-kernel gate passed for at least `REAL`, `LOG`, `TROPICAL_*`.
       `EUCLIDEAN` and `BOOLEAN` outcomes recorded.
 - [ ] G3 fallback-observability gate passed.
@@ -600,7 +600,7 @@ Port hypercoil community / relaxed-modularity numerics.
 
 **Exit criteria.** `nitrix.smoothing` (gaussian, bilateral_gaussian —
 the bounded bilateral), `nitrix.morphology` shipped. Permutohedral
-retired (SPEC_UPDATE_v0.4); no symbol ships.
+retired (SPEC §4.4); no symbol ships.
 
 ### 7.1 Phase 4 tasks
 
@@ -612,7 +612,7 @@ Separable Gaussian. Pure JAX. The unconditional baseline. Cheap.
 
 Direct N-body bilateral over arbitrary `d_f`, implemented as a `semiring_ell_matmul`
 over a bounded feature-space adjacency. This is the **marquee capability**, and (per
-SPEC_UPDATE_v0.4) the bounded bilateral that supersedes permutohedral. It takes a
+SPEC §4.4) the bounded bilateral that supersedes permutohedral. It takes a
 factored feature metric (`FeatureMetric`: `DiagonalMetric` / `FactorMetric`, with
 `block_diagonal_metric` / `metric_from_spd` constructors), a validity `mask` for
 ragged / padded neighbourhoods (grid box, mesh k-ring, geodesic ball), and
@@ -645,7 +645,7 @@ small extents).
 
 #### 4.6 ~~`nitrix.smoothing.permutohedral_lattice` — G2 gate~~ — RETIRED
 
-**Resolved (SPEC_UPDATE_v0.4): retired, not shipped.** The G2 assessment
+**Resolved (SPEC §4.4): retired, not shipped.** The G2 assessment
 (`docs/design/permutohedral-g2.md`) found the lattice's pure-JAX obstacles —
 dynamic-membership hash table, blur-time neighbour materialisation, simplex-identity
 gradient discontinuity — to be consequences of targeting *unbounded* support in high
@@ -663,7 +663,7 @@ namespace is not reserved (no consumers to redirect). See
       unconditionally.
 - [ ] Morphology shipped: erode, dilate, open, close, distance_transform via tropical
       semiring; median_filter via gather; susan_emulator composing both.
-- [x] G2 resolved → permutohedral retired (SPEC_UPDATE_v0.4); bounded bilateral
+- [x] G2 resolved → permutohedral retired (SPEC §4.4); bounded bilateral
       supersedes it.
 
 ---
@@ -677,7 +677,7 @@ namespace is not reserved (no consumers to redirect). See
 ### 8.1 Phase 5 tasks
 
 - **`nitrix.stats.lme` namespace reserved.** Stub module with `NotImplementedError`
-  raises and a clear roadmap docstring. No implementation per SPEC §3.5.
+  raises and a clear roadmap docstring. No implementation per SPEC §4.6.
 - **Documentation pass.** Every public symbol has a docstring including a one-line
   summary, signature in jaxtyping, example, and (where relevant) backend notes.
 - **Benchmark suite.** Reusable benchmark scripts checked in under `bench/`, covering
@@ -693,12 +693,12 @@ namespace is not reserved (no consumers to redirect). See
 - **Release process documentation.** How to cut a release, how to update the pinned
   jax minimum, how to add a new backend (future-proofing for TPU).
 
-### 8.2 GA criteria (rolling up SPEC §10 + SPEC_UPDATE additions)
+### 8.2 GA criteria (rolling up SPEC §10 + SPEC additions)
 
 All of:
 
 - [ ] Phases 0–4 exit checklists clear.
-- [ ] All §10 success criteria from SPEC and SPEC_UPDATEs met.
+- [ ] All §10 success criteria from SPEC met.
 - [ ] Backend-parity CI green on Ampere. Hopper / Blackwell coverage is 1.x.
 - [ ] Golden corpus populated for every (kernel, dtype, algebra, backend) cell.
 - [ ] Documentation pass complete.
@@ -739,7 +739,7 @@ in the subpackage's own `_PLAN.md` (to be created in Phase 0 scaffolding).
 - [ ] `gaussian` unconditional.
 - [ ] `bilateral_gaussian` (the bounded bilateral) unconditional: factored
       `FeatureMetric`, validity mask, `n_iters`.
-- [x] `permutohedral_lattice` retired (SPEC_UPDATE_v0.4); bounded bilateral
+- [x] `permutohedral_lattice` retired (SPEC §4.4); bounded bilateral
       supersedes it.
 
 ### 9.4 `nitrix.morphology`
@@ -893,7 +893,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   pytree-registered `Mesh`/`ELL` containers (no equinox modules), runtime
   imports stay `jax`/`jaxtyping`/`numpy` (nibabel/nilearn are test-only), the
   JAX fallback floor, jaxtyping, ruff, mypy. Extensions are kwargs not forks
-  (SPEC_UPDATE_v0.3 §14: `format=`, `method=`, `roi=`, `init=`, `weighting=`).
+  (SPEC §6.4: `format=`, `method=`, `roi=`, `init=`, `weighting=`).
   Validated green per-file on the L4 (analytic icosphere oracle + real fsaverage
   checks); the 11 `graph` LOBPCG/eigh failures are the pre-existing dead-cuSolver
   env, not suite defects.
@@ -910,7 +910,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   **score-kernel ↔ scalarisation boundary** and the **keyed-generator**
   symbol category were never specified; both are now drawn.
 - **Capability shipped:** See the per-symbol table in
-  **`SPEC_UPDATE_v0.5.md §10.A`** (the detailed record for this sprint).
+  **`SPEC §5.md §10.A`** (the detailed record for this sprint).
 - **Shape:** JAX-only throughout. Dense factorisations (PCA, affine
   decompose) route through `linalg._solver.safe_*` for the cuSolver-dead GPU.
 - **Deferred work:** Pallas kernels; adaptive/symplectic ODE + adjoint;
@@ -932,7 +932,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   lands so the non-default is testable, rather than add speculative API now.
 - **Non-negotiables held:** §2.2 respected — pure functions, NamedTuple /
   frozen containers, no equinox/scipy runtime imports, jaxtyping throughout.
-  The boundary (`SPEC_UPDATE_v0.5 §1`), keyed-generator clarification (§2),
+  The boundary (`SPEC §5`), keyed-generator clarification (§2),
   and `augment` ratification (§3) keep the additions inside the substrate's
   organising principles rather than creating a parallel structure.
 
@@ -1014,7 +1014,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   Full forward/backward, golden + property tests, CPU correctness floor.
 - **Rejected (concern leakage):** the feedback's Delta-3 options A/B that would
   read FreeSurfer `.sphere` binaries (`nibabel`, `$SUBJECTS_DIR`) inside nitrix.
-  That violates SPEC §5.2 / non-negotiable §2.2.1. nitrix stays array-only; the
+  That violates SPEC §6.2 / non-negotiable §2.2.1. nitrix stays array-only; the
   consumer/`thrux` does the I/O and hands in plain arrays via
   `icosphere_hierarchy_from_levels`.
 - **Deferred work:** Pallas dispatch for `semiring_ell_edge_aggregate` (internal-backlog B3);
@@ -1063,7 +1063,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
   `jax.experimental.pjit.pjit_p`, removed in jax 0.10).  After the fix,
   `signal`/`window`/`lme`/`geom` pass.
 - **Non-negotiables held:** `numpyro` remains test-only (absent from the Docker
-  runtime env; SPEC §5.2); no new runtime deps.
+  runtime env; SPEC §6.2); no new runtime deps.
 
 ### 2026-05-20 — Harden `toeplitz` against an XLA-CPU compiler crash on jax >= 0.10
 
@@ -1363,7 +1363,7 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 
 ### 2026-06-07 — Resampling interpolation-method dispatcher (Lanczos / MultiLabel / NN)
 
-- **Type:** Primitive extension (additive kwarg; SPEC_UPDATE_v0.3 §14
+- **Type:** Primitive extension (additive kwarg; SPEC §6.4
   "prefer adding a kwarg over forking a function" — not a §12 → §10.A
   graduation, not a new subpackage).
 - **Triggered by:** standard neuroimaging-workflow interpolation strategies
@@ -1458,8 +1458,8 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 
 A few patterns worth knowing if you're picking up partway through:
 
-- **The plan trusts the spec.** When in doubt about a design question, the SPEC and
-  SPEC_UPDATEs are authoritative. The plan tells you when to build; the spec tells you
+- **The plan trusts the spec.** When in doubt about a design question, the SPEC is
+  authoritative. The plan tells you when to build; the spec tells you
   what to build.
 - **Phase 1 (Track B) tasks are good first PRs.** They are mechanical, small, and
   unblock downstream consumers immediately. If an agent is new to the codebase, start
@@ -1467,7 +1467,7 @@ A few patterns worth knowing if you're picking up partway through:
 - **Phase 0 fixes must precede the migration that touches them.** Don't migrate
   `covariance.py` before the JIT-trap fix is in.
 - **`_refstubs/semiring_gemm.py` is design input only.** It is in the wrong house
-  style and does not reflect the strict/relaxed Protocol split from SPEC_UPDATE §3.1.
+  style and does not reflect the strict/relaxed Protocol split from SPEC §4.1.
   Re-implement.
 - **The deviation log is a contract, not a confessional.** It exists so the next
   agent (in 3 weeks or 3 months) knows what was shipped under pressure and what's
@@ -1475,7 +1475,7 @@ A few patterns worth knowing if you're picking up partway through:
 - **CI failures on Pallas / Triton paths are not always your fault.** Pallas Triton
   is best-effort per JAX. If a CI failure correlates with a `jax` version bump and
   reproduces only on Pallas, file the upstream issue and route the affected kernel to
-  the JAX fallback per SPEC_UPDATE_v0.2 §7.2. The plan does not require you to fix
+  the JAX fallback per SPEC §3.2. The plan does not require you to fix
   Pallas regressions.
 
 ---
@@ -1493,4 +1493,4 @@ A few patterns worth knowing if you're picking up partway through:
   nitrix during the transition is hypercoil's concern. The nitrix plan ends at "nitrix
   exports the symbol."
 - **Downstream library timelines.** thrux, nimox, ilex, entense, bitsjax have their
-  own plans; this plan ends at the contract boundary in SPEC §5.3.
+  own plans; this plan ends at the contract boundary in SPEC §6.3.

@@ -21,7 +21,7 @@ Submodules:
   ``semiring_ell_edge_aggregate``) + ``eta_squared`` similarity, and
   ``mesh_watershed`` (host-side priority-flood basins on a vertex field).
 
-See SPEC §4.5, SPEC §6.1, and IMPLEMENTATION_PLAN §6.1 tasks 3.5-3.7.
+See SPEC §4.9, SPEC §6.1, and IMPLEMENTATION_PLAN §6.1 tasks 3.5-3.7.
 """
 
 from .laplacian import (

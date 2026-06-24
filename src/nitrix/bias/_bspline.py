@@ -26,7 +26,7 @@ banded matrices.  We exploit this:
 
 Both are dense, XLA-friendly (the contractions lower to ``dot`` /
 tensor cores), differentiable, and free of the ``jax.experimental.sparse``
-/ scatter friction the SPEC §3.2 warns against.  See
+/ scatter friction the SPEC §4.2 warns against.  See
 ``docs/design/bias-field.md`` for the derivation and the equivalence to
 ITK's control-point-lattice accumulation.
 

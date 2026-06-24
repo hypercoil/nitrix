@@ -5,7 +5,7 @@
 Built-in algebras shipped with ``nitrix.semiring``.
 
 Each algebra is exported as a module-level ``Semiring`` (relaxed) or
-``StrictSemiring`` instance per SPEC_UPDATE §3.1:
+``StrictSemiring`` instance per SPEC §4.1:
 
 ================== ===================== ============== ========================
 Algebra            Type                  Identity       Backward (Phase 2.A.5)

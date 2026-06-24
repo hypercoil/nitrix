@@ -6,7 +6,7 @@
 nitrix.nn.attention -- scaled-dot-product / flash attention.
 
 Public ``scaled_dot_product_attention`` with three-level backend
-selection (SPEC §7.2).  The two-tier parity contract (suite plan §4): the
+selection (SPEC §3.2).  The two-tier parity contract (suite plan §4): the
 ``jax`` reference is the bit-faithful oracle; ``pallas-cuda`` is the fused
 flash path (suite Phase 2), certified ``pallas-cuda ≈ jax`` only inside
 nitrix.  ilex pins its own forward-parity to ``backend='jax'``.

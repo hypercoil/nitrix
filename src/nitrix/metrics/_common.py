@@ -115,7 +115,7 @@ def _reduce(
 ) -> Array:
     """Masked reduce -- a thin adapter over the shared ``reduce`` leaf.
 
-    ``mask`` is the per-element domain mask (``SPEC_UPDATE_v0.5 §1.2``); it
+    ``mask`` is the per-element domain mask (``SPEC §5``); it
     maps to the shared helper's ``weight`` so ``reduction='mean'`` is the
     domain-mask weighted mean ``Σ(w·x)/Σw``.
     """

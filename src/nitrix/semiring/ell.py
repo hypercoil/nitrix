@@ -4,7 +4,7 @@
 """
 Public ``semiring_ell_matmul`` with three-level backend selection.
 
-The function shape matches SPEC §3.1::
+The function shape matches SPEC §4.1::
 
     semiring_ell_matmul(
         values: Num[Array, "m k_max"],
@@ -20,7 +20,7 @@ The ELL row's pad positions are expected to be filled with the algebra's
 identity (e.g., ``0`` for ``REAL``, ``-inf`` for ``LOG``).  See
 ``nitrix.sparse.ell.ell_pad`` for the helper.
 
-Per SPEC_UPDATE_v0.2 §4, ``semiring_ell_matmul`` is the central op for
+Per SPEC §10, ``semiring_ell_matmul`` is the central op for
 brain-geometry workloads and is the load-bearing kernel behind the G0
 gate.  At first GA we ship the JAX path unconditionally and the Pallas
 path opt-in (pending the Ampere benchmark in ``bench/g0_ampere_ell.py``).

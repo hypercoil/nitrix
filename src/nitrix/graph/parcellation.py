@@ -20,7 +20,7 @@ Wig 2014; Gordon 2016; Schaefer 2018), in two composable steps:
   the ``mesh_k_ring_adjacency`` host-construct -> JAX-array pattern.
 
 ``geometry`` / ``graph`` depend on ``sparse`` and ``semiring``, never the
-reverse.  See ``SPEC_UPDATE_v0.3 §12.16 / §12.17``.
+reverse.  See ``docs/feature-requests catalogue §12.16 / §12.17``.
 """
 
 from __future__ import annotations

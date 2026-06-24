@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """G1 — finite-difference checks for the per-algebra backward kernels.
 
-Per SPEC_UPDATE §3.1 each built-in algebra (except ``BOOLEAN``) ships
+Per SPEC §4.1 each built-in algebra (except ``BOOLEAN``) ships
 with a hand-derived backward that must pass finite-difference checks
 at the pinned per-dtype tolerance.  Per IMPLEMENTATION_PLAN §3.1 G1,
 failing this gate for a given algebra means that algebra ships

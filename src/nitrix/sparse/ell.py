@@ -4,7 +4,7 @@
 """
 ELL sparse format primitives.
 
-ELL is the primary format in nitrix.sparse (SPEC §3.2): the per-row
+ELL is the primary format in nitrix.sparse (SPEC §4.2): the per-row
 neighbour list is stored as two arrays, ``values: (m, k_max)`` and
 ``indices: (m, k_max)``.  Rows with fewer than ``k_max`` neighbours
 have the trailing entries padded with the semiring identity in
@@ -12,7 +12,7 @@ have the trailing entries padded with the semiring identity in
 
 The format is intentionally a thin pair of dense arrays: no BCOO, no
 ``jax.experimental.sparse`` import.  Sectioned ELL (variable-degree;
-SPEC_UPDATE §3.2) will live in ``nitrix.sparse.ell_sectioned``.
+SPEC §4.2) will live in ``nitrix.sparse.ell_sectioned``.
 """
 
 from __future__ import annotations

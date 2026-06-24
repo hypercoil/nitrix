@@ -4,7 +4,7 @@
 """
 JAX-side backward rules for the built-in semiring algebras.
 
-Per SPEC_UPDATE §3.1 (differentiability vocabulary), each built-in
+Per SPEC §4.1 (differentiability vocabulary), each built-in
 ships with a hand-derived backward in the same algebra family.
 Per IMPLEMENTATION_PLAN §5.2 (Phase 2.A.5 — SERIAL for G1), backward
 is JAX-only at first GA; per-algebra Pallas backwards (2.A.7) come

@@ -80,7 +80,7 @@ present or trivial):**
 
 **Real-mesh validation principle.** Test on real FreeSurfer / fs_LR meshes
 **early**, IO-safe: the IO lives in `tests/` only (nilearn / templateflow /
-nibabel are test-only per SPEC §5.2 + §8), never in `nitrix`. The test plays
+nibabel are test-only per SPEC §6.2 + §8), never in `nitrix`. The test plays
 the "consumer reads files → hands nitrix arrays" role, so it doubles as a live
 test of the `icosphere_hierarchy_from_levels` array-handoff seam. **Every
 Phase-0/1 primitive must pass on both an icosphere (analytic oracle) and a real
@@ -121,7 +121,7 @@ needs it.
 
 ## 2. Scope boundary
 
-**In scope — numerical primitives only**, consistent with the SPEC §5
+**In scope — numerical primitives only**, consistent with the SPEC §6
 dependency contract (`numpy` + `jax`; **no `nibabel`, no filesystem, no
 container/atlas resolution**). Host-side combinatorial *construction* that
 emits plain arrays / `ELL` is in scope and already idiomatic here — the
@@ -357,7 +357,7 @@ host-side primitive, uniform-grid accelerated — *not* the morphology mask-EDT
 in [distance-transform-anisotropic-sampling](distance-transform-anisotropic-sampling.md),
 which measures distance to a binary mask, §0 correction 3) + sign from
 generalised winding number / normal test. `scipy.spatial` is banned at runtime
-(SPEC §5.2), so the broad-phase is a clean-room uniform-grid hash, not
+(SPEC §6.2), so the broad-phase is a clean-room uniform-grid hash, not
 `cKDTree`. **Home.** `geometry.surface`. **Effort M.** **Live-code status.**
 Absent (needs the new triangle-distance primitive).
 
@@ -729,7 +729,7 @@ the implementation plan — [`docs/design/geometry-suite.md`](../design/geometry
   — the concrete phased build (per-task signatures, contracts, differentiability
   classes, the test matrix, governance/graduation records, and the risk
   register). This ledger is the *what/why*; that doc is the *how*.
-- **Acceptance.** `SPEC_UPDATE_v0.3.md §12` (brainstorm catalogue — the §4
+- **Acceptance.** `docs/feature-requests catalogue §12` (brainstorm catalogue — the §4
   items 12.5/12.6/12.9/12.15/12.16/12.17 are this suite's surface members) /
   `§13` (acceptance protocol). New items GS-1/2/3/4/7/8/9/10/13/14 are
   candidate additions beyond the current §12 set.

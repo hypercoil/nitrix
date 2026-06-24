@@ -2,7 +2,7 @@
 
 > **Status (2026-06-02): not started.** Brainstorm candidate; promotion
 > gated by the §13 acceptance protocol. Provenance:
-> `SPEC_UPDATE_v0.3.md §12.10`.
+> `docs/feature-requests catalogue §12.10`.
 
 **What.** Pure-numerics reduction utilities any substrate reduction can drop
 in for accuracy / reproducibility / low-precision accumulation.
@@ -32,7 +32,7 @@ reductions for golden-corpus tests.
 
 ## Cross-references
 
-- `SPEC_UPDATE_v0.3.md §12.10` — origin entry; `§13` — acceptance protocol.
+- `docs/feature-requests catalogue §12.10` — origin entry; `§13` — acceptance protocol.
 - `src/nitrix/stats/covariance.py` — a prime drop-in site (FP32 covariance
   drift over long series).
 - [`docs/design/testing-strategy.md`](../design/testing-strategy.md) —

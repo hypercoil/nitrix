@@ -11,12 +11,12 @@
 > is a separate gather-based op (the canonical example of a neighbourhood
 > reduction whose state is unbounded in K).  All ops are bit-exact / exact-to-
 > round-off with ``scipy.ndimage`` on the 2D / 3D / 4D test cases.
-> Single-channel API per SPEC_UPDATE §3.4 (the natural shape for
+> Single-channel API per SPEC §4.3 (the natural shape for
 > neuroimaging volumes; users with channels ``vmap`` externally).
 
 ## Why morphology is the first marquee user surface
 
-We invested heavily in the streaming kernel substrate (SPEC §3.1)
+We invested heavily in the streaming kernel substrate (SPEC §4.1)
 specifically so that downstream user-facing ops could be specialisations
 rather than parallel implementations.  Morphology is the cleanest test
 of that thesis: every grayscale op is exactly a ``semiring_conv`` with
@@ -85,7 +85,7 @@ pending a fidelity oracle (see its docstring).
 
 ## API choice: single-channel ``(..., *spatial)``
 
-SPEC_UPDATE §3.4 specifies the user-facing surface takes
+SPEC §4.3 specifies the user-facing surface takes
 ``(..., *spatial)`` -- no explicit channel dim.  The reasoning:
 
 - ``scipy.ndimage`` convention is rank-agnostic.  Users porting from
@@ -162,7 +162,7 @@ with cupy on GPU and faster than scipy on CPU.  See the perf-bench
 
 ## Median filter: deliberately not a semiring op
 
-SPEC_UPDATE §3.4 makes this point sharply: the true median requires
+SPEC §4.3 makes this point sharply: the true median requires
 materialising the full neighbourhood at each output position, because
 the state size for a streaming reduction is *unbounded in K*.  For
 the small neighbourhoods morphology targets (3×3 = 9 voxels, mesh
@@ -188,7 +188,7 @@ because the median *isn't* one of our semiring algebras.
 The result: ``median_filter`` lives in ``morphology`` alongside the
 semiring-backed ops, but the implementation strategy is different.
 This is the prototype for handling "almost a semiring" ops, per
-SPEC_UPDATE §3.4 "the split of morphology between semiring-backed
+SPEC §4.3 "the split of morphology between semiring-backed
 and gather-backed is the prototype for handling the next 'almost a
 semiring' op that comes along: don't force it."
 
@@ -218,7 +218,7 @@ buys us beyond the algebra surface.
 
 ## ``susan_emulator``: a stub with a pointer
 
-Per SPEC_UPDATE §3.3, ``susan_emulator`` is the convenience wrapper
+Per SPEC §4.4, ``susan_emulator`` is the convenience wrapper
 composing ``smoothing.bilateral_gaussian`` (the brightness-similarity
 half) with ``morphology.median_filter`` (the impulse-noise half).  The
 former is Phase 4 smoothing work not yet landed; until it lands,
@@ -277,7 +277,7 @@ write a single ``custom_vjp`` for morphology.
 
 ## Cross-references
 
-- SPEC §3.4 ``morphology`` surface; SPEC_UPDATE §3.4 (median filter
+- SPEC §4.3 ``morphology`` surface; SPEC §4.3 (median filter
   carve-out, semiring vs gather split).
 - ``src/nitrix/morphology/`` -- the module.
 - ``tests/test_morphology.py`` -- 27 test functions (46 parametrised cases),
