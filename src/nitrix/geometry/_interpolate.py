@@ -89,6 +89,15 @@ both the engine *and* the parity **oracle** the tests pin the gather against.
 gather; ``_separable_gather`` is also the algorithmic shape the parked 5d Pallas
 pointer-load kernel ports onto.
 
+This cross-backend bit-identity is an order-0/1 property only.  ``CubicBSpline``
+(order 3) runs a recursive **prefilter** whose engine is the ``driver`` axis
+(parallel ``associative_scan`` on GPU / sequential ``scan`` on CPU); those
+reassociate the long pole filter differently, so a cubic resample can differ
+CPU-vs-GPU beyond a ULP.  It is a registered divergent op
+(``geometry.cubic_bspline_prefilter``): force ``CubicBSpline(driver='sequential')``
+or ``nitrix.reproducible()`` for cross-platform stability (see
+``docs/feature-requests/reproducible-dispatch.md``).
+
 Boundary handling (``mode`` / ``cval``) is a property of the *call*, not
 the kernel, so it stays a keyword on ``sample`` / ``resample`` /
 ``spatial_transform`` rather than a field on the record.  The five modes
@@ -121,6 +130,7 @@ import jax.scipy.ndimage as jsp_ndi
 from jaxtyping import Array, Float, Int
 
 from .._internal.backend import default_backend_is_gpu
+from .._internal.config import resolve_driver
 
 __all__ = [
     'BoundaryMode',
@@ -527,7 +537,12 @@ def _first_order_causal(
     - ``lax.associative_scan`` (GPU; ``O(log n)`` depth, the parallel
       form that removes the scan's sequential-depth cost).
 
-    Both are exact (no truncation); they agree to a ULP.
+    Both are exact (no truncation), but they **reassociate the recurrence
+    differently**, so over a long pole filter they diverge beyond a ULP -- a
+    cross-platform numerical difference, not bit-equality.  This is governed by
+    the ``driver`` axis (the divergent op ``geometry.cubic_bspline_prefilter``;
+    ``CubicBSpline(driver=...)`` / ``nitrix.reproducible()``); the cross-variant
+    budget is in ``nitrix.divergent_ops()``.
     """
     n = inputs.shape[0]
     init = jnp.reshape(init, (1,))
@@ -596,6 +611,8 @@ def _bspline_prefilter_1d(
 def _bspline_prefilter(
     image: Float[Array, '*spatial c'],
     mode: BoundaryMode,
+    *,
+    driver: str = 'auto',
 ) -> Float[Array, '*spatial c']:
     """Separable cubic B-spline prefilter over the spatial axes.
 
@@ -605,10 +622,23 @@ def _bspline_prefilter(
     standard B-spline convention; ``mode`` then governs only the gather
     extrapolation -- exact ``scipy`` ``order=3`` parity holds for
     ``mode='mirror'``, interior parity otherwise).
+
+    The recursion engine is the ``driver`` axis: ``'auto'`` runs the parallel
+    ``associative_scan`` on GPU / sequential ``scan`` on CPU (which diverge
+    beyond a ULP over a long filter); ``nitrix.reproducible()`` or
+    ``driver='sequential'`` forces the canonical sequential recurrence on every
+    platform.  See the divergent op ``geometry.cubic_bspline_prefilter``.
     """
     del mode  # prefilter boundary is always mirror (documented)
     ndim = image.ndim - 1
-    associative = default_backend_is_gpu()
+    resolved = resolve_driver(
+        driver,
+        op='geometry.cubic_bspline_prefilter',
+        fast=lambda: (
+            'associative' if default_backend_is_gpu() else 'sequential'
+        ),
+    )
+    associative = resolved == 'associative'
     out = image
     for axis in range(ndim):
         if out.shape[axis] < 2:
@@ -905,7 +935,18 @@ class CubicBSpline:
     explicit non-mirror ``mode`` (or a non-zero ``cval``) raises a
     :class:`CubicBSplineBoundaryWarning` (the bare default
     ``mode='constant', cval=0`` is treated as unspecified and is silent).
+
+    Reproducibility: the prefilter is a recursive IIR filter, so its engine is
+    the ``driver`` axis (the divergent op ``geometry.cubic_bspline_prefilter``).
+    ``driver='auto'`` (default) runs the parallel ``associative_scan`` on GPU /
+    sequential ``scan`` on CPU, which **reassociate the long pole filter
+    differently** -- so a cubic resample can differ CPU-vs-GPU beyond a ULP
+    (unlike the ``order``-0/1 kernels, which are bit-identical across backends).
+    Force ``driver='sequential'`` (or wrap in ``nitrix.reproducible()``) for a
+    cross-platform-stable result; ``nitrix.divergent_ops()`` reports the budget.
     """
+
+    driver: str = 'auto'
 
     differentiable_in_values: ClassVar[bool] = True
     differentiable_in_coords: ClassVar[bool] = True
@@ -940,7 +981,7 @@ class CubicBSpline:
         image: Float[Array, '*spatial c'],
         mode: BoundaryMode,
     ) -> Float[Array, '*spatial c']:
-        return _bspline_prefilter(image, mode)
+        return _bspline_prefilter(image, mode, driver=self.driver)
 
     def sample(
         self,

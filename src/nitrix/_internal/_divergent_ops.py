@@ -49,3 +49,17 @@ register_divergent_op(
     tolerance={'float32': 1e-4, 'float64': 1e-9},
     summary='IIR SOS cascade: FFT-convolution vs sequential vs associative scan',
 )
+
+# --- geometry.cubic_bspline_prefilter -------------------------------------
+# The CubicBSpline interpolant's recursive prefilter: parallel associative_scan
+# (GPU) vs sequential scan (CPU) reassociate the long pole filter differently.
+# Canonical = sequential.  (order-0/1 gathers are bit-identical cross-backend
+# and are NOT divergent ops -- only this order-3 prefilter is.)
+register_divergent_op(
+    'geometry.cubic_bspline_prefilter',
+    canonical='sequential',
+    fast={'gpu': 'associative', 'cpu': 'sequential'},
+    driver_values=('sequential', 'associative'),
+    tolerance={'float32': 1e-4, 'float64': 1e-10},
+    summary='cubic B-spline prefilter: sequential vs associative recursion',
+)
