@@ -217,11 +217,15 @@ into the `jit` cache key; out of scope for P0.
 
 ## 7. Rollout plan
 
-- **P0 — this doc.** Codify the principle + per-site ledger; review-first.
-- **P1 — substrate.** `_internal/config.py`, `resolve_driver`, the registry +
-  `nitrix.divergent_ops()`.
+- **P0 — this doc. ✅ SHIPPED** (commit a7fcbc4). Principle + per-site ledger.
+- **P1 — substrate. ✅ SHIPPED** (commit b531955). `_internal/config.py`
+  (reproducibility contextvar + env seed + `reproducible()` / `set_reproducible`
+  / `reproducible_enabled`), `resolve_driver`, the `DivergentOp` registry +
+  `nitrix.divergent_ops()`, public surface at the package root. 16 tests; no
+  site behaviour changed yet (registry empty until P2 wires the real ops).
 - **P2 — retrofit the 5 sites** through `resolve_driver` with `driver=`
-  (deprecation aliases for `signal.backend=` / `ssm.method=`).
+  (deprecation aliases for `signal.backend=` / `ssm.method=`). *Touches public
+  signatures — held for explicit go-ahead on the deprecation surface.*
 - **P3 — contract.** Cross-variant `tolerance.toml` rows + `variant ≈ canonical`
   golden tests; fix the CubicBSpline docstring.
 - **P4 — enforcement guard.** Registry-completeness CI test.
