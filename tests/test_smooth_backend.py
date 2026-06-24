@@ -52,7 +52,7 @@ def test_smooth_vector_gpu_byte_identical_to_fir(monkeypatch):
     out = svf._smooth_vector(fld, 1.0, 2)
     moved = jnp.moveaxis(fld, -1, 0)
     ref = jnp.moveaxis(
-        gaussian(moved, sigma=1.0, spatial_rank=2, method='fir'), 0, -1
+        gaussian(moved, sigma=1.0, spatial_rank=2, driver='fir'), 0, -1
     )
     assert np.array_equal(np.asarray(out), np.asarray(ref))
 

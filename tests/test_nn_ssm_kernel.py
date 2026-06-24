@@ -73,7 +73,7 @@ def _relerr(a, b):
 def test_forward_parity_with_reference(with_d):
     x, delta, A, B, C, D = _inputs(2, 64, 8, 4, seed=0, with_d=with_d)
     got = kern(x, delta, A, B, C, D)
-    want = ref_scan(x, delta, A, B, C, D, method='sequential')
+    want = ref_scan(x, delta, A, B, C, D, driver='sequential')
     assert got.shape == want.shape
     np.testing.assert_allclose(
         np.asarray(got, np.float32),
@@ -92,7 +92,7 @@ def test_forward_parity_no_batch_and_longer_seq():
     B = B[0]
     C = C[0]
     got = kern(x, delta, A, B, C, D)
-    want = ref_scan(x, delta, A, B, C, D, method='sequential')
+    want = ref_scan(x, delta, A, B, C, D, driver='sequential')
     assert _relerr(got, want) < _RTOL
 
 
@@ -159,7 +159,7 @@ def test_gradient_matches_reference(with_d):
         return jnp.sum(kern(*a) ** 2)
 
     def lr(*a):
-        return jnp.sum(ref_scan(*a, method='sequential') ** 2)
+        return jnp.sum(ref_scan(*a, driver='sequential') ** 2)
 
     gk = jax.grad(lk, argnums=tuple(range(nargs)))(*args)
     gr = jax.grad(lr, argnums=tuple(range(nargs)))(*args)
@@ -182,7 +182,7 @@ def test_auto_dispatch_uses_kernel_without_warning():
             w for w in rec if issubclass(w.category, NitrixBackendFallback)
         ]
     assert len(fired) == 0
-    ref = ref_scan(x, delta, A, B, C, D, method='sequential')
+    ref = ref_scan(x, delta, A, B, C, D, driver='sequential')
     assert _relerr(out, ref) < _RTOL
 
 
@@ -192,7 +192,7 @@ def test_jit_through_kernel():
     out = jax.jit(lambda *a: selective_scan(*a, backend='pallas-cuda'))(
         x, delta, A, B, C, D
     )
-    ref = ref_scan(x, delta, A, B, C, D, method='sequential')
+    ref = ref_scan(x, delta, A, B, C, D, driver='sequential')
     assert _relerr(out, ref) < _RTOL
 
 

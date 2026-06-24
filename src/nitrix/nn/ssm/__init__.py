@@ -20,8 +20,13 @@ from typing import Optional
 
 from jaxtyping import Array, Float
 
-from ..._internal.backend import Backend, fallback, resolve_backend
-from ._reference import reference_selective_scan
+from ..._internal.backend import (
+    Backend,
+    NitrixBackendError,
+    fallback,
+    resolve_backend,
+)
+from ._reference import Driver, reference_selective_scan
 
 __all__ = [
     'selective_scan',
@@ -99,13 +104,14 @@ def selective_scan(
     C: Float[Array, '... l n'],
     D: Optional[Float[Array, 'd']] = None,
     *,
+    driver: Driver = 'auto',
     backend: Backend = 'auto',
 ) -> Float[Array, '... l d']:
     """Mamba / S6 selective state-space scan with backend dispatch.
 
     Computes the discretised selective recurrence (see
     :func:`reference_selective_scan` for the math).  ``backend`` selects the
-    implementation: ``'jax'`` (the reference; parallel ``associative_scan`` on
+    execution engine: ``'jax'`` (the reference; parallel ``associative_scan`` on
     GPU), ``'pallas-cuda'`` (the fused chunked-scan fast path, suite P1b;
     currently falls back to the reference with a loud warning), or ``'auto'``.
 
@@ -113,8 +119,18 @@ def selective_scan(
     ----------
     x, delta, A, B, C, D
         As in :func:`reference_selective_scan`.
+    driver
+        The numerical variant of the **reference** path (the ``driver`` axis):
+        ``'auto'`` / ``'sequential'`` / ``'associative'`` / ``'chunked'`` (see
+        :func:`reference_selective_scan`).  A non-``'auto'`` ``driver`` selects
+        the reference path (the fused kernel has no driver variants), so it is a
+        contradiction to combine it with an explicit ``backend='pallas-cuda'``.
+        ``nitrix.reproducible()`` forces the canonical ``'sequential'`` *and*
+        the reference engine (see ``backend``).
     backend
-        ``'auto'`` / ``'pallas-cuda'`` / ``'jax'``.
+        ``'auto'`` / ``'pallas-cuda'`` / ``'jax'`` execution engine.  Under
+        ``nitrix.reproducible()``, ``'auto'`` resolves to ``'jax'`` (the
+        reference), since the fused kernel is certified only to a tolerance.
 
     Returns
     -------
@@ -127,6 +143,16 @@ def selective_scan(
     (the SSM analogue of the ``numerics.ode`` recompute-forward adjoint).
     """
     _validate(x, delta, A, B, C, D)
+    if driver != 'auto':
+        # An explicit numerical variant selects the (jax) reference path.
+        if backend == 'pallas-cuda':
+            raise NitrixBackendError(
+                f'selective_scan: driver={driver!r} selects a reference '
+                "variant and does not apply to backend='pallas-cuda' (the "
+                "fused kernel has no driver variants). Use backend='jax' or "
+                "backend='auto'."
+            )
+        return reference_selective_scan(x, delta, A, B, C, D, driver=driver)
     resolved = resolve_backend(backend)
     if resolved == 'pallas-cuda':
         out = _selective_scan_pallas(x, delta, A, B, C, D)
@@ -143,4 +169,4 @@ def selective_scan(
             shapes=(tuple(x.shape), tuple(A.shape)),
             dtype=x.dtype,
         )
-    return reference_selective_scan(x, delta, A, B, C, D)
+    return reference_selective_scan(x, delta, A, B, C, D, driver='auto')

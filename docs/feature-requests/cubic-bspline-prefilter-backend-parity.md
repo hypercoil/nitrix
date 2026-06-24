@@ -15,6 +15,13 @@ associative = default_backend_is_gpu()
 _bspline_prefilter_1d(row, _BSPLINE_POLE, associative=associative)
 ```
 
+> **Generalised (2026-06-24):** this is now the motivating instance of a
+> codebase-wide design principle — [`reproducible-dispatch`](reproducible-dispatch.md)
+> — governing *every* numerically-divergent auto-dispatch (5 sites; this is #5).
+> Its P2/P3 deliver the resolution here: an honest docstring, a `driver` field on
+> `CubicBSpline`, a tested cross-variant tolerance, and the global `reproducible`
+> switch — satisfying all three options below at once.
+
 So the order-3 prefilter runs a **parallel associative scan on GPU** and a
 **sequential recurrence on CPU**. Those are mathematically equivalent but
 **floating-point-associativity different**, so `spatial_transform` /
