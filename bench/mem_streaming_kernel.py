@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Peak-HBM measurement: does the streaming kernel materialise (M, K, N)?
 
-Per SPEC §3.1 the KeOps-style streaming kernel claims peak on-chip
+Per SPEC §4.1 the KeOps-style streaming kernel claims peak on-chip
 memory of ``O(BM*BN + BM*BK + BK*BN)`` — never the full
 ``(BM, BK, BN)`` value tensor.  This script verifies the *device*-side
 shape of that claim by reading ``jax.devices()[0].memory_stats()

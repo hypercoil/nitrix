@@ -159,7 +159,7 @@ def render_report(rows, host, pallas_falls_back: bool) -> str:
     lines = [
         '# G0 — Ampere ELL policy + JAX-path baseline',
         '',
-        '> SPEC reference: IMPLEMENTATION_PLAN §3.1; SPEC_UPDATE_v0.2 §4.',
+        '> SPEC reference: IMPLEMENTATION_PLAN §3.1; SPEC §10.',
         '> This is a *policy* document plus the JAX-path baseline; the',
         '> Pallas-vs-JAX wall-time comparison is deferred until Pallas',
         '> Triton lowers the `gather` primitive on the pinned JAX.',

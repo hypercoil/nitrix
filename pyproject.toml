@@ -30,7 +30,7 @@ dependencies = [
     # bench/G0_ELL_REPORT.md, the kernels, and the Pallas-Triton gather-lowering
     # analysis are all against 0.10.0).  Below 0.10.0, jax.random.multinomial
     # (used by signal/window.py) is absent and the Pallas surface diverges, so
-    # this is a hard floor per SPEC_UPDATE_v0.2 §7.2 ("pin a minimum jax").
+    # this is a hard floor per SPEC §3.2 ("pin a minimum jax").
     "jax >= 0.10.0",
     "jaxtyping >= 0.2.31",
     "numpy >= 2.0",
@@ -52,12 +52,12 @@ dev = [
     "pingouin",
     "gnureadline",
     # >= 0.21: earlier numpyro imports jax.experimental.pjit.pjit_p, removed in
-    # jax 0.10.  Test-only reference dep (not a runtime import; SPEC §5.2).
+    # jax 0.10.  Test-only reference dep (not a runtime import; SPEC §6.2).
     "numpyro >= 0.21.0",
     # Real cortical-surface meshes (fsaverage) for the geometry-suite
     # validation harness.  Test-only: the loaders live in
     # tests/_real_meshes.py and hand nitrix plain arrays; never a runtime
-    # import (SPEC §5.2).  Guarded by importorskip so the suite runs without
+    # import (SPEC §6.2).  Guarded by importorskip so the suite runs without
     # them.  (templateflow is added with the fs_LR loader when it lands.)
     "nibabel",
     "nilearn",
