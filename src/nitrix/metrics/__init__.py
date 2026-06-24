@@ -25,10 +25,11 @@ Five families:
   arbitrary; CR: deterministic) intensity relationship.
 - ``overlap`` -- ``dice`` and ``jaccard`` (IoU), the soft
   region-overlap coefficients on probabilistic masks.
-- ``classification`` -- ``bce_with_logits``,
-  ``cross_entropy_with_logits``, ``focal_loss``: the cross-entropy
-  family (numerically stable from-logits forms) for supervised
-  classification / segmentation.
+- ``classification`` -- the cross-entropy family (``bce_with_logits``,
+  ``cross_entropy_with_logits``, ``focal_loss``: numerically stable
+  from-logits losses) plus the evaluation metrics ``roc_auc`` (rank /
+  Mann-Whitney AUROC), ``confusion_matrix``, and ``topk_accuracy`` (reporting;
+  non-differentiable).
 - ``contrastive`` -- ``info_nce`` (InfoNCE / NT-Xent),
   ``dino_cross_entropy`` / ``ibot_cross_entropy`` (self-distillation),
   ``koleo`` (feature-spread entropy regulariser): self-supervised
@@ -54,8 +55,11 @@ from .preprocess import match_histogram, winsorize
 from .overlap import dice, jaccard
 from .classification import (
     bce_with_logits,
+    confusion_matrix,
     cross_entropy_with_logits,
     focal_loss,
+    roc_auc,
+    topk_accuracy,
 )
 from .contrastive import (
     dino_cross_entropy,
@@ -87,6 +91,9 @@ __all__ = [
     'bce_with_logits',
     'cross_entropy_with_logits',
     'focal_loss',
+    'roc_auc',
+    'confusion_matrix',
+    'topk_accuracy',
     # contrastive / self-supervised
     'info_nce',
     'dino_cross_entropy',
