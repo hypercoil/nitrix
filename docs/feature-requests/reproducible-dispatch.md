@@ -237,8 +237,15 @@ into the `jit` cache key; out of scope for P0.
   *Per-recipe `driver=` threading for the gaussian/histogram sites deferred —
   the reproducibility mode is the lever; the underlying `_smooth_method` /
   `_joint_hist_from_softbins` already accept `driver`.*
-- **P3 — contract.** Cross-variant `tolerance.toml` rows + `variant ≈ canonical`
-  golden tests; fix the CubicBSpline docstring.
+- **P3 — contract. ✅ SHIPPED** (commit 84689f3). `tests/test_reproducible_
+  dispatch_contract.py`: every variant of every registered op asserted
+  ``variant ≈ canonical`` within the **registry** tolerance (read from
+  `divergent_ops()` directly -- the registry is the single source of truth, no
+  `tolerance.toml` mirror), plus a sync guard that fails if a new op lacks a
+  runner. Tolerances measured + pinned honestly (iir/ssm/cubic ~ULP; histogram
+  f32 budget 2e-4; `register.field_smooth` 3e-2, the looser FIR-vs-YvV
+  approximation contract on a boundary-decaying field). CubicBSpline docstring
+  fixed in P2. 7 tests pass.
 - **P4 — enforcement guard.** Registry-completeness CI test.
 
 The ilex request (`cubic-bspline-prefilter-backend-parity`) is satisfied by
