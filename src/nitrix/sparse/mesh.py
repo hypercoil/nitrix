@@ -71,7 +71,9 @@ __all__ = [
     'IcosphereHierarchy',
     'Mesh',
     'compute_vertex_normals',
+    'edge_face_adjacency',
     'face_areas',
+    'face_normals',
     'icosphere',
     'icosphere_bary_upsampler',
     'icosphere_cross_level_adjacency',
@@ -1259,6 +1261,101 @@ def mesh_bary_upsample(
 # ---------------------------------------------------------------------------
 # Per-vertex differential geometry (normals, uniform smoothing)
 # ---------------------------------------------------------------------------
+
+
+def face_normals(
+    vertices: Float[Array, 'n_vertices 3'],
+    faces: Int[Array, 'n_faces 3'],
+) -> Float[Array, 'n_faces 3']:
+    """Unit per-face normals of a triangle mesh.
+
+    The normalised edge cross product ``(v1 - v0) x (v2 - v0) / ||.||`` for
+    each face, oriented by the face's vertex winding.  Distinct from the
+    un-normalised, area-weighted face cross product
+    ``compute_vertex_normals`` accumulates onto vertices: here each face
+    normal is **unit** length, so it is the per-face surface direction
+    (e.g. for a face-normal-consistency regulariser or a flat-shading
+    normal), not an area weight.
+
+    Parameters
+    ----------
+    vertices
+        ``(n_vertices, 3)`` coordinates.
+    faces
+        ``(n_faces, 3)`` vertex indices.
+
+    Returns
+    -------
+    ``(n_faces, 3)`` unit face normals (a degenerate / zero-area face maps
+    to a zero vector rather than ``NaN``).  Pure JAX; differentiable w.r.t.
+    ``vertices``.
+    """
+    v0 = vertices[faces[:, 0]]
+    v1 = vertices[faces[:, 1]]
+    v2 = vertices[faces[:, 2]]
+    cross = jnp.cross(v1 - v0, v2 - v0)
+    norm = jnp.sqrt(jnp.sum(cross**2, axis=-1, keepdims=True))
+    return cross / jnp.maximum(norm, 1e-12)
+
+
+def edge_face_adjacency(
+    faces: Int[Array, 'n_faces 3'],
+) -> Int[Array, 'n_adjacent_pairs 2']:
+    """Pairs of faces sharing an edge (the face-adjacency topology).
+
+    For every undirected edge incident to **exactly two** faces, emit the
+    ``(face_a, face_b)`` index pair; boundary edges (one incident face) and
+    non-manifold edges (three or more) contribute no pair.  This is the
+    topology a face-pair regulariser consumes -- e.g. a normal-consistency
+    penalty comparing :func:`face_normals` across each shared edge.
+
+    Host-side / static construction (NumPy over ``faces``), like
+    :func:`mesh_k_ring_adjacency` and :func:`_edges_from_faces`: the result
+    depends only on the integer connectivity, not on vertex coordinates, so
+    it is computed once on the host and the returned index array then flows
+    through ``jit`` as a constant gather table.
+
+    Parameters
+    ----------
+    faces
+        ``(n_faces, 3)`` vertex indices.
+
+    Returns
+    -------
+    ``(n_adjacent_pairs, 2)`` integer array of face-index pairs, ordered by
+    the shared edge (each row ``[a, b]`` has ``a < b``).  Empty
+    ``(0, 2)`` when no edge is shared by two faces.
+    """
+    faces_np = np.asarray(faces)
+    n_faces = faces_np.shape[0]
+    # The three undirected edges of every face, each tagged with its face id.
+    edges = np.concatenate(
+        [
+            faces_np[:, [0, 1]],
+            faces_np[:, [1, 2]],
+            faces_np[:, [2, 0]],
+        ],
+        axis=0,
+    )
+    edges = np.sort(edges, axis=1)  # undirected: canonical (min, max)
+    fid = np.tile(np.arange(n_faces, dtype=np.int64), 3)
+    # Sort contributions by edge so each edge's incident faces are a
+    # contiguous run; the run length is its incident-face count.
+    order = np.lexsort((edges[:, 1], edges[:, 0]))
+    fid_sorted = fid[order]
+    _, start, counts = np.unique(
+        edges[order], axis=0, return_index=True, return_counts=True
+    )
+    # Exactly two incident faces == interior manifold edge.  Boundary edges
+    # (count 1) and non-manifold edges (count >= 3) yield no pair.
+    starts_two = start[counts == 2]
+    pairs = np.stack(
+        [fid_sorted[starts_two], fid_sorted[starts_two + 1]], axis=1
+    )
+    pairs = np.sort(pairs, axis=1)  # face_a < face_b
+    if pairs.size == 0:
+        return jnp.zeros((0, 2), dtype=jnp.int32)
+    return jnp.asarray(pairs.astype(np.int32))
 
 
 def compute_vertex_normals(
