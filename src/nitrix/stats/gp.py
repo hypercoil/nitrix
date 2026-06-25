@@ -135,8 +135,17 @@ __all__ = [
         'corr_rho',
     ),
     aux=(
-        'kernel', 'engine', 'corr', 'n_obs', 'rank', 'n_fixed',
-        'lo', 'hi', 'boundary', 'nd_meta', 'family',
+        'kernel',
+        'engine',
+        'corr',
+        'n_obs',
+        'rank',
+        'n_fixed',
+        'lo',
+        'hi',
+        'boundary',
+        'nd_meta',
+        'family',
     ),
 )
 @dataclass(frozen=True)
@@ -232,7 +241,6 @@ class GPResult:
     family: str = 'gaussian'
 
 
-
 # ---------------------------------------------------------------------------
 # Exact-engine kernel eigenfeatures (rho-dependent design; host eigendecomp)
 # ---------------------------------------------------------------------------
@@ -254,9 +262,7 @@ def _normalise_kernel(kernel: str) -> str:
     )
 
 
-def _kernel_gram(
-    r: np.ndarray, kernel: str, rho: float
-) -> np.ndarray:
+def _kernel_gram(r: np.ndarray, kernel: str, rho: float) -> np.ndarray:
     """Stationary covariance ``k(r)`` on a distance array ``r`` (host numpy),
     matched to scikit-learn ``Matern(length_scale=rho)`` / ``RBF(length_scale=rho)``
     -- the same parameterisation as :func:`~nitrix.linalg.kernel.spectral_density`,
@@ -492,8 +498,19 @@ def _pooled_nll_from_design(
     g_all = jnp.sum(Y * Y, axis=1)
     per = blocked_vmap(
         lambda c_v, g_v: _pooled_nll_one(
-            c_v, g_v, xtx, d, log_pdet_pen, n, p, m, n_fixed,
-            n_outer, ridge, lam_floor, lam_ceil,
+            c_v,
+            g_v,
+            xtx,
+            d,
+            log_pdet_pen,
+            n,
+            p,
+            m,
+            n_fixed,
+            n_outer,
+            ridge,
+            lam_floor,
+            lam_ceil,
         ),
         (c_all, g_all),
         block=block,
@@ -524,8 +541,19 @@ def _final_fit_from_design(
 
     def _one(c_v: Array, g_v: Array) -> Tuple[Array, ...]:
         return _gp_fit_one(
-            c_v, g_v, xtx, d, log_pdet_pen, n, p, m, n_fixed,
-            n_outer, ridge, lam_floor, lam_ceil,
+            c_v,
+            g_v,
+            xtx,
+            d,
+            log_pdet_pen,
+            n,
+            p,
+            m,
+            n_fixed,
+            n_outer,
+            ridge,
+            lam_floor,
+            lam_ceil,
         )
 
     return cast(
@@ -538,7 +566,9 @@ def _final_fit_from_design(
 # Per-engine (design, penalty) closures over rho -- shared by the corr= path
 # ---------------------------------------------------------------------------
 
-_RhoArg = Union[float, Float[Array, '']]  # rho as a host float or a traced scalar
+_RhoArg = Union[
+    float, Float[Array, '']
+]  # rho as a host float or a traced scalar
 _DesignFn = Callable[[float], Float[Array, 'N p']]
 _PenFn = Callable[[_RhoArg], Tuple[Float[Array, ' p'], Float[Array, '']]]
 
@@ -813,10 +843,23 @@ def gp_fit(
             fixed_nd.append(jnp.asarray(parametric, dtype=Y.dtype))
         n_fixed_nd = sum(b.shape[1] for b in fixed_nd)
         return _gp_fit_nd(
-            Y, np.asarray(x, dtype=np.float64),
-            jnp.concatenate(fixed_nd, axis=1), n_fixed_nd, kernel, m_per,
-            boundary, ard, rho_bounds, n_rho, map_rho,
-            n_outer, n_search, ridge, lam_floor, lam_ceil, block,
+            Y,
+            np.asarray(x, dtype=np.float64),
+            jnp.concatenate(fixed_nd, axis=1),
+            n_fixed_nd,
+            kernel,
+            m_per,
+            boundary,
+            ard,
+            rho_bounds,
+            n_rho,
+            map_rho,
+            n_outer,
+            n_search,
+            ridge,
+            lam_floor,
+            lam_ceil,
+            block,
         )
 
     # Engine-appropriate default rank: 20 (hsgp) or N (exact, full-rank).
@@ -843,14 +886,12 @@ def gp_fit(
         rho_lo, rho_hi = 0.05 * span, 2.0 * span
     else:
         rho_lo, rho_hi = float(rho_bounds[0]), float(rho_bounds[1])
-    log_rho_grid_np = np.linspace(
-        np.log(rho_lo), np.log(rho_hi), int(n_rho)
-    )
+    log_rho_grid_np = np.linspace(np.log(rho_lo), np.log(rho_hi), int(n_rho))
 
     # --- corr= composition: GP smooth + structured within-group residual -----
     if corr is not None:
         if group is None:
-            raise ValueError("gp_fit: corr= requires a `group` factor.")
+            raise ValueError('gp_fit: corr= requires a `group` factor.')
         from .lme._corr import resolve_corr
 
         corr_spec = resolve_corr(corr)
@@ -876,25 +917,75 @@ def gp_fit(
             )
 
         return _gp_fit_corr(
-            Y, _design, _pen, group, time, corr_spec, n, m, n_fixed,
-            log_rho_grid_np, raw_grid_np, map_rho, kernel, engine,
-            n_outer, n_search, ridge, lam_floor, lam_ceil, block,
-            lo, hi, boundary,
+            Y,
+            _design,
+            _pen,
+            group,
+            time,
+            corr_spec,
+            n,
+            m,
+            n_fixed,
+            log_rho_grid_np,
+            raw_grid_np,
+            map_rho,
+            kernel,
+            engine,
+            n_outer,
+            n_search,
+            ridge,
+            lam_floor,
+            lam_ceil,
+            block,
+            lo,
+            hi,
+            boundary,
         )
 
     if engine == 'exact':
         return _gp_fit_exact(
-            Y, x_np, T, n_fixed, kernel, m, log_rho_grid_np, map_rho,
-            n_outer, n_search, ridge, lam_floor, lam_ceil, block,
-            lo, hi, boundary,
+            Y,
+            x_np,
+            T,
+            n_fixed,
+            kernel,
+            m,
+            log_rho_grid_np,
+            map_rho,
+            n_outer,
+            n_search,
+            ridge,
+            lam_floor,
+            lam_ceil,
+            block,
+            lo,
+            hi,
+            boundary,
         )
 
     # ==================== engine == 'hsgp' ==================================
     if non_gaussian:
         return _gp_fit_glm_hsgp(
-            Y, x, T, n_fixed, fam, kernel, m, log_rho_grid_np, map_rho,
-            n_pql, n_outer, n_search, ridge, lam_floor, lam_ceil, block,
-            lo, hi, boundary, prior_weights,
+            Y,
+            x,
+            T,
+            n_fixed,
+            fam,
+            kernel,
+            m,
+            log_rho_grid_np,
+            map_rho,
+            n_pql,
+            n_outer,
+            n_search,
+            ridge,
+            lam_floor,
+            lam_ceil,
+            block,
+            lo,
+            hi,
+            boundary,
+            prior_weights,
         )
 
     # Fixed design + rho-dependent diagonal-penalty closures (DS2: the shared
@@ -917,8 +1008,19 @@ def gp_fit(
         d, log_pdet_pen = pen_fn(rho)
         per = blocked_vmap(
             lambda c_v, g_v: _pooled_nll_one(
-                c_v, g_v, xtx, d, log_pdet_pen, n, p, m, n_fixed,
-                n_search, ridge, lam_floor, lam_ceil,
+                c_v,
+                g_v,
+                xtx,
+                d,
+                log_pdet_pen,
+                n,
+                p,
+                m,
+                n_fixed,
+                n_search,
+                ridge,
+                lam_floor,
+                lam_ceil,
             ),
             (c_all, g_all),
             block=block,
@@ -929,10 +1031,11 @@ def gp_fit(
         return nll
 
     nll_grid = lax.map(_pooled_nll, log_rho_grid)  # (n_rho,)
-    log_rho_hat = _parabolic_argmin(
-        np.asarray(log_rho_grid), np.asarray(nll_grid)
-    )
-    rho_hat = float(np.exp(log_rho_hat))
+    # Traceable rho refinement: a JAX-native parabolic argmin keeps rho_hat a
+    # traced scalar, so this Gaussian HSGP path runs under jax.jit / jax.vmap
+    # with the covariate domain closed over (e.g. vmap-fit over datasets).
+    log_rho_hat = _parabolic_argmin_jax(log_rho_grid, nll_grid)
+    rho_hat = jnp.exp(log_rho_hat)
 
     # --- final per-element fit at rho_hat -----------------------------------
     d_hat, log_pdet_hat = pen_fn(rho_hat)
@@ -948,16 +1051,40 @@ def gp_fit(
         Float[Array, ''],
     ]:
         return _gp_fit_one(
-            c_v, g_v, xtx, d_hat, log_pdet_hat, n, p, m, n_fixed,
-            n_outer, ridge, lam_floor, lam_ceil,
+            c_v,
+            g_v,
+            xtx,
+            d_hat,
+            log_pdet_hat,
+            n,
+            p,
+            m,
+            n_fixed,
+            n_outer,
+            ridge,
+            lam_floor,
+            lam_ceil,
         )
 
     beta, v, lam, edf, phi, log_mlik = blocked_vmap(
         _final_one, (c_all, g_all), block=block
     )
     return _assemble_gp_result(
-        beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, 'hsgp',
-        n, m, n_fixed, lo, hi, boundary,
+        beta,
+        v,
+        lam,
+        edf,
+        phi,
+        log_mlik,
+        rho_hat,
+        kernel,
+        'hsgp',
+        n,
+        m,
+        n_fixed,
+        lo,
+        hi,
+        boundary,
     )
 
 
@@ -968,7 +1095,7 @@ def _assemble_gp_result(
     edf: Array,
     phi: Array,
     log_mlik: Array,
-    rho_hat: float,
+    rho_hat: Any,  # a python float (eager paths) or a traced scalar (HSGP)
     kernel: str,
     engine: str,
     n: int,
@@ -987,11 +1114,15 @@ def _assemble_gp_result(
     ``sigma_f^2 = sigma_e^2 / lambda`` and the shared ``rho`` broadcast."""
     sigma_e2 = phi
     sigma_f2 = phi / jnp.clip(lam, 1e-30, None)
-    log_rho_col = jnp.full_like(sigma_e2, np.log(rho_hat))
+    # jnp (not np) log so a traced rho_hat (the traceable HSGP path) flows
+    # through; a python-float rho_hat (eager paths) promotes the same.
+    log_rho_col = jnp.full_like(sigma_e2, jnp.log(rho_hat))
     theta = jnp.stack(
-        [jnp.log(jnp.clip(sigma_f2, 1e-30, None)),
-         jnp.log(jnp.clip(sigma_e2, 1e-30, None)),
-         log_rho_col],
+        [
+            jnp.log(jnp.clip(sigma_f2, 1e-30, None)),
+            jnp.log(jnp.clip(sigma_e2, 1e-30, None)),
+            log_rho_col,
+        ],
         axis=-1,
     )
     if corr_rho is None:
@@ -1065,7 +1196,8 @@ def _gp_fit_glm_hsgp(
     X = jnp.concatenate([T, phi_design], axis=1)  # (N, p)
     p = X.shape[1]
     pw = (
-        jnp.ones((n,), dtype) if prior_weights is None
+        jnp.ones((n,), dtype)
+        if prior_weights is None
         else jnp.asarray(prior_weights, dtype)
     )
 
@@ -1087,8 +1219,19 @@ def _gp_fit_glm_hsgp(
         def one(eta_v: Array, y_v: Array) -> Array:
             xtwx, c, g = _working_xprod(eta_v, y_v)
             return _pooled_nll_one(
-                c, g, xtwx, d, log_pdet, n, p, m, n_fixed,
-                n_search, ridge, lam_floor, lam_ceil,
+                c,
+                g,
+                xtwx,
+                d,
+                log_pdet,
+                n,
+                p,
+                m,
+                n_fixed,
+                n_search,
+                ridge,
+                lam_floor,
+                lam_ceil,
             )
 
         return jnp.sum(blocked_vmap(one, (eta_all, Y), block=block))
@@ -1100,8 +1243,19 @@ def _gp_fit_glm_hsgp(
         def one(eta_v: Array, y_v: Array) -> Tuple[Array, ...]:
             xtwx, c, g = _working_xprod(eta_v, y_v)
             return _gp_fit_one(
-                c, g, xtwx, d, log_pdet, n, p, m, n_fixed,
-                n_outer, ridge, lam_floor, lam_ceil,
+                c,
+                g,
+                xtwx,
+                d,
+                log_pdet,
+                n,
+                p,
+                m,
+                n_fixed,
+                n_outer,
+                ridge,
+                lam_floor,
+                lam_ceil,
             )
 
         return cast(
@@ -1135,8 +1289,22 @@ def _gp_fit_glm_hsgp(
     assert fit is not None
     beta, v, lam, edf, phi, log_mlik = fit
     return _assemble_gp_result(
-        beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, 'hsgp',
-        n, m, n_fixed, lo, hi, boundary, family=family.name,
+        beta,
+        v,
+        lam,
+        edf,
+        phi,
+        log_mlik,
+        rho_hat,
+        kernel,
+        'hsgp',
+        n,
+        m,
+        n_fixed,
+        lo,
+        hi,
+        boundary,
+        family=family.name,
     )
 
 
@@ -1182,8 +1350,18 @@ def _gp_fit_exact(
     @jax.jit
     def _nll_jit(X: Array) -> Array:
         return _pooled_nll_from_design(
-            Y, X, d, log_pdet_pen, n, m, n_fixed,
-            n_search, ridge, lam_floor, lam_ceil, block,
+            Y,
+            X,
+            d,
+            log_pdet_pen,
+            n,
+            m,
+            n_fixed,
+            n_search,
+            ridge,
+            lam_floor,
+            lam_ceil,
+            block,
         )
 
     # --- rho search: host loop (each rho needs a host kernel eigh) ----------
@@ -1195,19 +1373,40 @@ def _gp_fit_exact(
             nll = nll + 2.0 * float(map_rho(jnp.asarray(rho, dtype=dtype)))
         nll_grid.append(nll)
 
-    log_rho_hat = _parabolic_argmin(
-        log_rho_grid_np, np.asarray(nll_grid)
-    )
+    log_rho_hat = _parabolic_argmin(log_rho_grid_np, np.asarray(nll_grid))
     rho_hat = float(np.exp(log_rho_hat))
 
     # --- final per-element fit at rho_hat -----------------------------------
     beta, v, lam, edf, phi, log_mlik = _final_fit_from_design(
-        Y, _design(rho_hat), d, log_pdet_pen, n, m, n_fixed,
-        n_outer, ridge, lam_floor, lam_ceil, block,
+        Y,
+        _design(rho_hat),
+        d,
+        log_pdet_pen,
+        n,
+        m,
+        n_fixed,
+        n_outer,
+        ridge,
+        lam_floor,
+        lam_ceil,
+        block,
     )
     return _assemble_gp_result(
-        beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, 'exact',
-        n, m, n_fixed, lo, hi, boundary,
+        beta,
+        v,
+        lam,
+        edf,
+        phi,
+        log_mlik,
+        rho_hat,
+        kernel,
+        'exact',
+        n,
+        m,
+        n_fixed,
+        lo,
+        hi,
+        boundary,
     )
 
 
@@ -1240,7 +1439,9 @@ def _gp_fit_nd(
     freqs, phase, inv_sqrt_L, omega_norm, bounds = _hsgp_eigen_nd(
         x_np, m_per, boundary, dtype
     )
-    phi = _hsgp_features_nd(jnp.asarray(x_np, dtype=dtype), freqs, phase, inv_sqrt_L)
+    phi = _hsgp_features_nd(
+        jnp.asarray(x_np, dtype=dtype), freqs, phase, inv_sqrt_L
+    )
     X = jnp.concatenate([T, phi], axis=1)
     p = X.shape[1]
     m = phi.shape[1]
@@ -1252,8 +1453,19 @@ def _gp_fit_nd(
     def _pooled(d: Array, log_pdet: Array) -> Array:
         per = blocked_vmap(
             lambda c_v, g_v: _pooled_nll_one(
-                c_v, g_v, xtx, d, log_pdet, n, p, m, n_fixed,
-                n_search, ridge, lam_floor, lam_ceil,
+                c_v,
+                g_v,
+                xtx,
+                d,
+                log_pdet,
+                n,
+                p,
+                m,
+                n_fixed,
+                n_search,
+                ridge,
+                lam_floor,
+                lam_ceil,
             ),
             (c_all, g_all),
             block=block,
@@ -1264,7 +1476,8 @@ def _gp_fit_nd(
 
     def _grid(base: float) -> np.ndarray:
         lo_b, hi_b = (
-            (0.05 * base, 2.0 * base) if rho_bounds is None
+            (0.05 * base, 2.0 * base)
+            if rho_bounds is None
             else (float(rho_bounds[0]), float(rho_bounds[1]))
         )
         return np.linspace(np.log(lo_b), np.log(hi_b), int(n_rho))
@@ -1275,7 +1488,9 @@ def _gp_fit_nd(
         nll_grid = []
         for lr in grid:
             rho = float(np.exp(lr))
-            d, lpp = _penalty_diag_nd_iso(omega_norm, kernel, rho, d_in, n_fixed)
+            d, lpp = _penalty_diag_nd_iso(
+                omega_norm, kernel, rho, d_in, n_fixed
+            )
             nll = float(_pooled(d, lpp))
             if map_rho is not None:
                 nll = nll + 2.0 * float(map_rho(jnp.asarray(rho, dtype=dtype)))
@@ -1314,8 +1529,19 @@ def _gp_fit_nd(
 
     def _one(c_v: Array, g_v: Array) -> Tuple[Array, ...]:
         return _gp_fit_one(
-            c_v, g_v, xtx, d_hat, lpp_hat, n, p, m, n_fixed,
-            n_outer, ridge, lam_floor, lam_ceil,
+            c_v,
+            g_v,
+            xtx,
+            d_hat,
+            lpp_hat,
+            n,
+            p,
+            m,
+            n_fixed,
+            n_outer,
+            ridge,
+            lam_floor,
+            lam_ceil,
         )
 
     beta, v, lam, edf, disp, log_mlik = cast(
@@ -1324,8 +1550,21 @@ def _gp_fit_nd(
     )
     nd_meta = (tuple(m_per), bounds, ard_rho)
     return _assemble_gp_result(
-        beta, v, lam, edf, disp, log_mlik, rho_report, kernel, 'hsgp',
-        n, m, n_fixed, bounds[0][0], bounds[0][1], boundary,
+        beta,
+        v,
+        lam,
+        edf,
+        disp,
+        log_mlik,
+        rho_report,
+        kernel,
+        'hsgp',
+        n,
+        m,
+        n_fixed,
+        bounds[0][0],
+        bounds[0][1],
+        boundary,
         nd_meta=nd_meta,
     )
 
@@ -1371,7 +1610,10 @@ def _gp_fit_corr(
     v_count = Y.shape[0]
     layout = build_group_layout(jnp.asarray(group), time)
     idx, gaps, nsize, mask = (
-        layout.idx, layout.gaps, layout.nsize, layout.mask
+        layout.idx,
+        layout.gaps,
+        layout.nsize,
+        layout.mask,
     )
     mask_f = mask.astype(dtype)
     # Y padded as channels (G, T, V) so one whitener whitens all elements.
@@ -1402,8 +1644,19 @@ def _gp_fit_corr(
         p = xtx.shape[0]
         per = blocked_vmap(
             lambda c_v, g_v: _pooled_nll_one(
-                c_v, g_v, xtx, d, log_pdet, n, p, m, n_fixed,
-                n_search, ridge, lam_floor, lam_ceil,
+                c_v,
+                g_v,
+                xtx,
+                d,
+                log_pdet,
+                n,
+                p,
+                m,
+                n_fixed,
+                n_search,
+                ridge,
+                lam_floor,
+                lam_ceil,
             ),
             (c_all, g_all),
             block=block,
@@ -1429,7 +1682,9 @@ def _gp_fit_corr(
     if i_star in (0, len(raw_grid_np) - 1):
         # MC5: the corr parameter is grid-quantised; a boundary argmin means the
         # estimate is clamped at the search edge (the true value may be stronger).
-        rho_c_edge = float(corr_spec.to_natural(jnp.asarray([raw_hat], dtype=dtype)))
+        rho_c_edge = float(
+            corr_spec.to_natural(jnp.asarray([raw_hat], dtype=dtype))
+        )
         warnings.warn(
             f"gp_fit: the corr='{corr_spec.name}' parameter hit the edge of the "
             f'search grid (rho_c={rho_c_edge:.3f}); widen corr_raw_bounds if the '
@@ -1448,8 +1703,19 @@ def _gp_fit_corr(
 
     def _one(c_v: Array, g_v: Array) -> Tuple[Array, ...]:
         return _gp_fit_one(
-            c_v, g_v, xtx, d_hat, log_pdet_hat, n, p, m, n_fixed,
-            n_outer, ridge, lam_floor, lam_ceil,
+            c_v,
+            g_v,
+            xtx,
+            d_hat,
+            log_pdet_hat,
+            n,
+            p,
+            m,
+            n_fixed,
+            n_outer,
+            ridge,
+            lam_floor,
+            lam_ceil,
         )
 
     beta, v, lam, edf, phi, log_mlik = cast(
@@ -1462,15 +1728,27 @@ def _gp_fit_corr(
         phi, float(corr_spec.to_natural(jnp.asarray([raw_hat], dtype=dtype)))
     )
     return _assemble_gp_result(
-        beta, v, lam, edf, phi, log_mlik, rho_hat, kernel, engine,
-        n, m, n_fixed, lo, hi, boundary,
-        corr_name=corr_spec.name, corr_rho=corr_rho,
+        beta,
+        v,
+        lam,
+        edf,
+        phi,
+        log_mlik,
+        rho_hat,
+        kernel,
+        engine,
+        n,
+        m,
+        n_fixed,
+        lo,
+        hi,
+        boundary,
+        corr_name=corr_spec.name,
+        corr_rho=corr_rho,
     )
 
 
-def _parabolic_argmin(
-    log_rho: np.ndarray, nll: np.ndarray
-) -> float:
+def _parabolic_argmin(log_rho: np.ndarray, nll: np.ndarray) -> float:
     """Sub-grid minimiser of ``nll(log_rho)`` by a 3-point parabolic fit around
     the grid argmin (clamped to the bracketing interval); returns the grid point
     itself at a boundary minimum."""
@@ -1484,14 +1762,45 @@ def _parabolic_argmin(
         return float(x1)
     a = (x2 * (y1 - y0) + x1 * (y0 - y2) + x0 * (y2 - y1)) / denom
     b = (
-        x2 * x2 * (y0 - y1)
-        + x1 * x1 * (y2 - y0)
-        + x0 * x0 * (y1 - y2)
+        x2 * x2 * (y0 - y1) + x1 * x1 * (y2 - y0) + x0 * x0 * (y1 - y2)
     ) / denom
     if a <= 0.0:  # not convex -- fall back to the grid point
         return float(x1)
     vertex = -0.5 * b / a
     return float(np.clip(vertex, x0, x2))
+
+
+def _parabolic_argmin_jax(
+    log_rho: Float[Array, ' r'], nll: Float[Array, ' r']
+) -> Float[Array, '']:
+    """Traceable twin of :func:`_parabolic_argmin` (``jit`` / ``vmap``-safe).
+
+    The same 3-point parabolic sub-grid refinement around the grid argmin, but
+    written branchlessly (``jnp.where`` for the boundary / degenerate-bracket /
+    non-convex fallbacks) so it returns a **traced** scalar ``log_rho_hat`` --
+    letting the rho-search epilogue run inside ``jax.jit`` / ``jax.vmap`` (with
+    the covariate domain closed over).  fp-faithful to the eager helper: the
+    vertex arithmetic is identical, only the host control flow is lifted.
+    """
+    n = nll.shape[0]
+    i = jnp.argmin(nll)
+    boundary = (i == 0) | (i == n - 1)
+    ic = jnp.clip(i, 1, n - 2)  # valid 3-point window even at a boundary min
+    x0, x1, x2 = log_rho[ic - 1], log_rho[ic], log_rho[ic + 1]
+    y0, y1, y2 = nll[ic - 1], nll[ic], nll[ic + 1]
+    denom = (x0 - x1) * (x0 - x2) * (x1 - x2)
+    safe_denom = jnp.where(jnp.abs(denom) < 1e-30, 1.0, denom)
+    a = (x2 * (y1 - y0) + x1 * (y0 - y2) + x0 * (y2 - y1)) / safe_denom
+    b = (
+        x2 * x2 * (y0 - y1) + x1 * x1 * (y2 - y0) + x0 * x0 * (y1 - y2)
+    ) / safe_denom
+    safe_a = jnp.where(a == 0.0, 1.0, a)
+    vertex = jnp.clip(-0.5 * b / safe_a, x0, x2)
+    # Degenerate bracket or non-convex parabola -> the grid point x1; a boundary
+    # minimum -> its own grid point (the eager helper's two fallbacks).
+    use_vertex = (jnp.abs(denom) >= 1e-30) & (a > 0.0)
+    interior = jnp.where(use_vertex, vertex, x1)
+    return jnp.where(boundary, log_rho[i], interior)
 
 
 def gp_predict(
@@ -1566,7 +1875,10 @@ def gp_predict(
         phi_new = _exact_features_predict(
             np.asarray(x_new, dtype=np.float64),
             np.asarray(x_train, dtype=np.float64),
-            result.kernel, rho_hat, result.rank, dtype,
+            result.kernel,
+            rho_hat,
+            result.rank,
+            dtype,
         )  # (g, m)
     else:
         c_mid, big_l = _hsgp_domain(result.lo, result.hi, result.boundary)
@@ -1596,9 +1908,7 @@ def gp_predict(
             f"gp_predict: type={type!r}; expected 'link' or 'response'."
         )
     eta = result.coef @ x_design.T  # (V, g) -- latent (link-scale) mean
-    var = jnp.einsum(
-        'gi,vij,gj->vg', x_design, result.cov_unscaled, x_design
-    )
+    var = jnp.einsum('gi,vij,gj->vg', x_design, result.cov_unscaled, x_design)
     std = jnp.sqrt(jnp.clip(result.dispersion[:, None] * var, 1e-30, None))
     if type == 'response' and result.family != 'gaussian':
         fam = resolve_family(result.family)
@@ -1654,4 +1964,6 @@ def gp_bic(result: _ICResult) -> Float[Array, 'V']:
     """Per-element Bayesian information criterion ``-2 l_R + k log N`` for a GP /
     HGP fit (lower is better); see :func:`gp_aic` for the comparability caveat."""
     k = _total_edf(result)
-    return -2.0 * result.log_mlik + k * jnp.log(jnp.asarray(float(result.n_obs)))
+    return -2.0 * result.log_mlik + k * jnp.log(
+        jnp.asarray(float(result.n_obs))
+    )
