@@ -87,15 +87,16 @@ from .gam import (
     GAMResult,
     SmoothTest,
     gam_fit,
+    gam_predict,
     smooth_partial_effect,
     smooth_significance,
 )
 from .gp import GPResult, gp_aic, gp_bic, gp_fit, gp_predict
 from .hgp import HGPResult, hgp_fit, hgp_predict
 from .priors import PriorFn, halfnormal_prior, invgamma_prior, lognormal_prior
-from .betareg import BetaResult, beta_fit
-from .gaulss import GauLSSResult, gaulss_fit
-from .ordinal import OrdinalResult, ordinal_fit
+from .betareg import BetaResult, beta_fit, beta_predict
+from .gaulss import GauLSSResult, gaulss_fit, gaulss_predict
+from .ordinal import OrdinalResult, ordinal_fit, ordinal_predict
 from .glmm import GLMMResult, glmm_fit
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
@@ -217,6 +218,7 @@ __all__ = [
     'GAMResult',
     'SmoothTest',
     'gam_fit',
+    'gam_predict',
     'smooth_partial_effect',
     'smooth_significance',
     # gp
@@ -240,12 +242,15 @@ __all__ = [
     # beta regression
     'BetaResult',
     'beta_fit',
+    'beta_predict',
     # distributional (location-scale)
     'GauLSSResult',
     'gaulss_fit',
+    'gaulss_predict',
     # ordinal (cumulative link)
     'OrdinalResult',
     'ordinal_fit',
+    'ordinal_predict',
     # connectivity
     'ledoit_wolf',
     'oas',

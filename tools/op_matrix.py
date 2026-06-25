@@ -4832,6 +4832,90 @@ register(
 )
 
 
+# response-regression predict surface (nimox-estimators Tier-3): each op fits
+# once (closed over the design) and predicts; the differentiability is unit-
+# tested, so the catalogue probes the predict read-out (diff_arg=None, like the
+# end-to-end register recipes).
+def _response_predict_setup():
+    from nitrix.stats import (
+        beta_fit,
+        beta_predict,
+        gaulss_fit,
+        gaulss_predict,
+        ordinal_fit,
+        ordinal_predict,
+    )
+    from nitrix.stats.basis import bspline_basis
+    from nitrix.stats.gam import gam_fit, gam_predict
+
+    rng = np.random.default_rng(0)
+    n, p, v = 30, 3, 8
+    x_mat = jnp.asarray(rng.standard_normal((n, p)).astype(np.float32))
+    beta_res = beta_fit(
+        jnp.asarray(rng.uniform(0.1, 0.9, (v, n)).astype(np.float32)),
+        x_mat,
+        n_iter=10,
+    )
+    gaulss_res = gaulss_fit(
+        jnp.asarray(rng.standard_normal((v, n)).astype(np.float32)),
+        x_mat,
+        n_iter=10,
+    )
+    ordinal_res = ordinal_fit(
+        jnp.asarray(rng.integers(0, 4, (v, n)).astype(np.int32)),
+        x_mat,
+        n_classes=4,
+        n_iter=10,
+    )
+    xs = np.sort(rng.uniform(0.0, 1.0, n)).astype(np.float32)
+    sb = bspline_basis(jnp.asarray(xs), 8, center=True)
+    gam_res = gam_fit(
+        jnp.asarray(np.sin(2 * np.pi * xs)[None, :].astype(np.float32)),
+        [sb],
+        n_outer=4,
+        n_inner=4,
+    )
+    return {
+        'beta': (
+            lambda x_: beta_predict(beta_res, x_),
+            lambda: ((x_mat,), {}),
+        ),
+        'gaulss': (
+            lambda x_: gaulss_predict(gaulss_res, x_),
+            lambda: ((x_mat,), {}),
+        ),
+        'ordinal': (
+            lambda x_: ordinal_predict(ordinal_res, x_),
+            lambda: ((x_mat,), {}),
+        ),
+        'gam': (
+            lambda x_: gam_predict(gam_res, [sb], [x_]),
+            lambda: ((jnp.asarray(xs),), {}),
+        ),
+    }
+
+
+_PREDICT_OPS = _response_predict_setup()
+
+for _name, _inv in (
+    ('beta', 'logit-link mean predict'),
+    ('gaulss', '(mean, scale) location-scale predict'),
+    ('ordinal', 'cumulative-link class-probability predict'),
+    ('gam', 'assembled-design smooth predict (linkinv)'),
+):
+    _pop, _pfx = _PREDICT_OPS[_name]
+    register(
+        OpInfo(
+            f'nitrix.stats.{_name}_predict',
+            fixture=_pfx,
+            fn_override=_pop,
+            diff_arg=None,
+            vmap_arg=None,
+            invariants=(_inv,),
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------

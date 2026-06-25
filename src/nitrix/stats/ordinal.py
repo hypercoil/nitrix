@@ -31,7 +31,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Callable, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -43,14 +43,23 @@ from ._batching import blocked_vmap
 from ._optimise import damped_newton
 from ._result import register_result
 
-__all__ = ['OrdinalResult', 'ordinal_fit']
+__all__ = ['OrdinalResult', 'ordinal_fit', 'ordinal_predict']
 
 _EPS = 1e-12
 
 
+def _link_cdf(link: str) -> Callable[[Array], Array]:
+    """The cumulative-link CDF ``F`` for ``link`` (shared by fit and predict)."""
+    if link == 'logit':
+        return cast(Callable[[Array], Array], jax.nn.sigmoid)
+    if link == 'probit':
+        return cast(Callable[[Array], Array], ndtr)
+    raise ValueError(f"link={link!r}; expected 'logit' or 'probit'.")
+
+
 @register_result(
     children=('coef', 'thresholds', 'cov_coef', 'log_lik'),
-    aux=('n_obs', 'n_classes'),
+    aux=('n_obs', 'n_classes', 'link'),
 )
 @dataclass(frozen=True)
 class OrdinalResult:
@@ -70,6 +79,10 @@ class OrdinalResult:
         ``(V,)`` maximised log-likelihood.
     n_obs, n_classes
         Number of observations ``N`` and ordered classes ``K``.
+    link
+        The cumulative link used at fit (``'logit'`` / ``'probit'``), stored so
+        :func:`ordinal_predict` reconstructs the same CDF without the caller
+        re-specifying it.
     """
 
     coef: Float[Array, 'V p']
@@ -78,6 +91,7 @@ class OrdinalResult:
     log_lik: Float[Array, 'V']
     n_obs: int
     n_classes: int
+    link: str
 
 
 def _thresholds(raw: Float[Array, 'nt'], k: int) -> Float[Array, 'Km1']:
@@ -119,7 +133,12 @@ def _ordinal_fit_one(
     n_iter: int,
     ridge: float,
     raw0: Float[Array, 'nt'],
-) -> Tuple[Float[Array, 'Km1'], Float[Array, 'p'], Float[Array, 'p p'], Float[Array, '']]:
+) -> Tuple[
+    Float[Array, 'Km1'],
+    Float[Array, 'p'],
+    Float[Array, 'p p'],
+    Float[Array, ''],
+]:
     """Single-element ordinal fit.  Returns ``(thresholds, coef, cov_coef,
     log_lik)``."""
 
@@ -185,14 +204,7 @@ def ordinal_fit(
         raise ValueError(
             f'ordinal_fit: Y.shape[-1]={Y.shape[-1]} must match N={n}.'
         )
-    if link == 'logit':
-        cdf = jax.nn.sigmoid
-    elif link == 'probit':
-        cdf = ndtr
-    else:
-        raise ValueError(
-            f"ordinal_fit: link={link!r}; expected 'logit' or 'probit'."
-        )
+    cdf = _link_cdf(link)
     k = n_classes
     # Spread the initial thresholds across the response, zero slope.
     raw0 = jnp.concatenate(
@@ -221,4 +233,61 @@ def ordinal_fit(
         log_lik=log_lik,
         n_obs=int(n),
         n_classes=int(k),
+        link=link,
+    )
+
+
+def ordinal_predict(
+    result: OrdinalResult,
+    X: Float[Array, 'N p'],
+    *,
+    type: Literal['class_prob', 'cum_prob', 'class'] = 'class_prob',
+) -> Float[Array, '...']:
+    """Per-element ordinal prediction on a (new) design ``X``.
+
+    Applies the fitted cumulative-link model ``P(y <= j) = F(theta_j - X beta)``
+    (``F`` the stored ``result.link`` CDF) at the new design and returns,
+    per ``type``:
+
+    - ``'class_prob'`` (default): the per-class simplex ``P(y = k)``, shape
+      ``(V, N, K)`` -- the diff of the cumulative probabilities.
+    - ``'cum_prob'``: the cumulative probabilities ``P(y <= j)`` for the
+      ``K - 1`` interior thresholds, shape ``(V, N, K - 1)``.
+    - ``'class'``: the arg-max class label, shape ``(V, N)`` (**non**
+      -differentiable -- a hard label).
+
+    Parameters
+    ----------
+    result
+        An :class:`OrdinalResult` from :func:`ordinal_fit`.
+    X
+        ``(N, p)`` design (no intercept column, as at fit -- the thresholds
+        absorb it).
+    type
+        Output kind (see above).
+
+    Returns
+    -------
+    Predictions of the shape listed above.  ``'class_prob'`` / ``'cum_prob'``
+    are differentiable w.r.t. ``X`` (and the fitted coefficients / thresholds);
+    ``'class'`` is the non-differentiable arg-max.
+    """
+    cdf = _link_cdf(result.link)
+    eta = result.coef @ X.T  # (V, N)
+    # cum[v, n, j] = P(y <= j) = F(theta_vj - eta_vn).
+    cum = cdf(result.thresholds[:, None, :] - eta[:, :, None])  # (V, N, K-1)
+    if type == 'cum_prob':
+        return cum
+    v, n = eta.shape
+    zeros = jnp.zeros((v, n, 1), dtype=cum.dtype)
+    ones = jnp.ones((v, n, 1), dtype=cum.dtype)
+    cum_full = jnp.concatenate([zeros, cum, ones], axis=-1)  # (V, N, K+1)
+    probs = jnp.clip(jnp.diff(cum_full, axis=-1), _EPS, None)  # (V, N, K)
+    if type == 'class_prob':
+        return probs
+    if type == 'class':
+        return jnp.argmax(probs, axis=-1)  # (V, N)
+    raise ValueError(
+        f"ordinal_predict: type={type!r}; expected 'class_prob', 'cum_prob', "
+        "or 'class'."
     )

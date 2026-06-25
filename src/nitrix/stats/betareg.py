@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Literal, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -56,7 +56,7 @@ from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
 from ._result import register_result
 
-__all__ = ['BetaResult', 'beta_fit']
+__all__ = ['BetaResult', 'beta_fit', 'beta_predict']
 
 _EPS = 1e-8
 
@@ -146,13 +146,10 @@ def _beta_fit_one(
             - digamma((1.0 - mu) * phi)
             + digamma(phi)
         )
-        k_phi = (
-            jnp.sum(
-                polygamma(1, mu * phi) * mu * mu
-                + polygamma(1, (1.0 - mu) * phi) * (1.0 - mu) * (1.0 - mu)
-            )
-            - n * polygamma(1, phi)
-        )
+        k_phi = jnp.sum(
+            polygamma(1, mu * phi) * mu * mu
+            + polygamma(1, (1.0 - mu) * phi) * (1.0 - mu) * (1.0 - mu)
+        ) - n * polygamma(1, phi)
         log_phi = log_phi + jnp.clip(
             u_phi / (phi * jnp.clip(k_phi, 1e-6, None)), -2.0, 2.0
         )
@@ -177,13 +174,10 @@ def _beta_fit_one(
         )
         * dmu
     )  # (p,)
-    k_phiphi = (
-        jnp.sum(
-            polygamma(1, mu * phi) * mu * mu
-            + polygamma(1, (1.0 - mu) * phi) * (1.0 - mu) * (1.0 - mu)
-        )
-        - n * polygamma(1, phi)
-    )
+    k_phiphi = jnp.sum(
+        polygamma(1, mu * phi) * mu * mu
+        + polygamma(1, (1.0 - mu) * phi) * (1.0 - mu) * (1.0 - mu)
+    ) - n * polygamma(1, phi)
     info = jnp.zeros((p + 1, p + 1), dtype=X.dtype)
     info = info.at[:p, :p].set(k_bb)
     info = info.at[:p, p].set(k_bphi)
@@ -271,4 +265,42 @@ def beta_fit(
         cov_unscaled=cov,
         log_lik=log_lik,
         n_obs=int(n),
+    )
+
+
+def beta_predict(
+    result: BetaResult,
+    X: Float[Array, 'N p'],
+    *,
+    type: Literal['response', 'link'] = 'response',
+) -> Float[Array, 'V N']:
+    """Per-element beta-regression prediction on a (new) design ``X``.
+
+    The :func:`beta_fit` analogue of :func:`nitrix.stats.predict`: the mean
+    model is the logit link, so ``type='link'`` returns the linear predictor
+    ``eta = X beta`` and ``type='response'`` (default) returns the fitted mean
+    ``mu = expit(eta)`` in ``(0, 1)``.
+
+    Parameters
+    ----------
+    result
+        A :class:`BetaResult` from :func:`beta_fit`.
+    X
+        ``(N, p)`` design (same columns as the fit).
+    type
+        ``'response'`` (the mean ``mu``) or ``'link'`` (the linear predictor
+        ``eta``).
+
+    Returns
+    -------
+    ``(V, N)`` predictions.  Differentiable w.r.t. ``X`` (and the fitted
+    ``result.coef``).
+    """
+    eta = result.coef @ X.T
+    if type == 'link':
+        return eta
+    if type == 'response':
+        return _expit(eta)
+    raise ValueError(
+        f"beta_predict: type={type!r}; expected 'response' or 'link'."
     )

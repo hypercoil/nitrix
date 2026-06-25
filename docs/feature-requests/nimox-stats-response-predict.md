@@ -1,6 +1,22 @@
 # Public `*_predict` for the response-regression fitters (Beta / Ordinal / GauLSS / GAM)
 
-> **Request (2026-06-25): nimox-estimators Tier-3 → nitrix.** A small,
+> **Status (2026-06-25): SHIPPED.** `stats.beta_predict` / `ordinal_predict` /
+> `gaulss_predict` / `gam_predict` public, mirroring `stats.predict`
+> (`eta = coef @ X.T → linkinv`). `beta_predict` reuses `_expit`;
+> `gaulss_predict` returns the `(mean, scale)` pair (Z default intercept);
+> `ordinal_predict` returns the class simplex / cumulative / arg-max
+> (`type=`); `gam_predict` reassembles `[intercept | parametric | smooths]`
+> via the stored `col_slices` / `intercept` and each `smooth.eval_design`
+> (generalising `smooth_partial_effect`), then `family.linkinv`. Two small
+> **additive** result fields were surfaced so predict is self-contained:
+> `OrdinalResult.link` and `GAMResult.intercept` — both static aux, so the
+> **fit jaxprs are byte-identical** (verified) and there is **zero fit-path
+> perf cost**. Self-consistency + differentiability + link-round-trip tests in
+> `tests/test_stats_predict.py` (9); existing ordinal/gam suites green (35).
+> nimox `BetaRegression` / `OrdinalRegression` / `GaussianLocationScale` /
+> `AdditiveModel` can now delegate `transform`.
+>
+> **Original request (2026-06-25): nimox-estimators Tier-3 → nitrix.** A small,
 > additive API-surface completion. `nitrix.stats.glm_fit` already pairs with a
 > public `stats.predict(result, X_new)` (apply the fitted coefficients to a new
 > design), which let nimox wrap a `GLM` fit/transform estimator. The sibling

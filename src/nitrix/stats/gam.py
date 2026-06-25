@@ -83,6 +83,7 @@ __all__ = [
     'GAMResult',
     'SmoothTest',
     'gam_fit',
+    'gam_predict',
     'smooth_partial_effect',
     'smooth_significance',
 ]
@@ -114,7 +115,7 @@ Smooth = SmoothBasis
         'null_deviance',
         'cov_unscaled',
     ),
-    aux=('family', 'n_obs', 'col_slices'),
+    aux=('family', 'n_obs', 'col_slices', 'intercept'),
 )
 @dataclass(frozen=True)
 class GAMResult:
@@ -138,6 +139,12 @@ class GAMResult:
         ``(V,)`` model and intercept-only deviance.
     cov_unscaled
         ``(V, p, p)`` Bayesian covariance ``(X^T W X + S_lambda)^{-1}``.
+    col_slices
+        Per-smooth ``(lo, hi)`` column ranges into ``coef`` (the smooth blocks
+        only; the intercept / parametric columns precede the first smooth).
+    intercept
+        Whether the fitted design carried a leading intercept column -- stored
+        so :func:`gam_predict` reassembles the design identically.
     """
 
     coef: Float[Array, 'V p']
@@ -151,6 +158,7 @@ class GAMResult:
     family: Family
     n_obs: int
     col_slices: Tuple[Tuple[int, int], ...]
+    intercept: bool
 
 
 # ---------------------------------------------------------------------------
@@ -665,6 +673,81 @@ def gam_fit(
         family=family,
         n_obs=int(n),
         col_slices=slices,
+        intercept=intercept,
+    )
+
+
+def gam_predict(
+    result: GAMResult,
+    smooths: Sequence[Smooth],
+    x_smooths: Sequence[Any],
+    *,
+    parametric: Optional[Float[Array, 'N q']] = None,
+    type: Literal['response', 'link'] = 'response',
+) -> Float[Array, 'V N']:
+    """Per-element GAM prediction on (new) covariates.
+
+    Reassembles the fitted design ``[intercept | parametric | B_1(x_1) | ...]``
+    at the new covariates -- evaluating each smooth's basis at ``x_smooths[k]``
+    with the **same** fitted knots/penalty (``smooth.eval_design``, the
+    machinery :func:`smooth_partial_effect` uses for one block) and the stored
+    ``result.col_slices`` / ``result.intercept`` layout -- then returns
+    ``eta = design @ coef`` (``type='link'``) or ``family.linkinv(eta)``
+    (``type='response'``, default).
+
+    Parameters
+    ----------
+    result
+        A :class:`GAMResult` from :func:`gam_fit`.
+    smooths
+        The same ``Smooth`` terms passed to :func:`gam_fit`, in the same order
+        (used here only to evaluate the basis at the new covariates).
+    x_smooths
+        New covariate(s) per smooth (one entry per ``smooths`` term, each in the
+        form that ``smooth.eval_design`` accepts -- an ``(N,)`` grid, a tuple of
+        per-margin grids for a tensor smooth, or integer level indices for a
+        random-effect basis).  All terms must evaluate to the same row count
+        ``N``.
+    parametric
+        ``(N, q)`` parametric design at the new covariates; ``None`` if the fit
+        had none.  Must match the fit's parametric column count.
+    type
+        ``'response'`` (the mean, via the link inverse) or ``'link'`` (the
+        linear predictor ``eta``).
+
+    Returns
+    -------
+    ``(V, N)`` predictions, differentiable w.r.t. the new covariates / the
+    parametric design (and the fitted coefficients).
+    """
+    blocks = []
+    n_ref: Optional[int] = None
+    if parametric is not None:
+        parametric = jnp.asarray(parametric)
+        n_ref = parametric.shape[0]
+    designs = []
+    for smooth, x in zip(smooths, x_smooths):
+        d = smooth.eval_design(x)  # (N, k)
+        designs.append(d)
+        n_ref = d.shape[0] if n_ref is None else n_ref
+    if n_ref is None:
+        raise ValueError(
+            'gam_predict: provide at least one smooth (with covariates) or a '
+            'parametric design to define the prediction rows.'
+        )
+    if result.intercept:
+        blocks.append(jnp.ones((n_ref, 1), dtype=result.coef.dtype))
+    if parametric is not None:
+        blocks.append(parametric.astype(result.coef.dtype))
+    blocks.extend(d.astype(result.coef.dtype) for d in designs)
+    design = jnp.concatenate(blocks, axis=1)  # (N, p)
+    eta = result.coef @ design.T  # (V, N)
+    if type == 'link':
+        return eta
+    if type == 'response':
+        return result.family.linkinv(eta)
+    raise ValueError(
+        f"gam_predict: type={type!r}; expected 'response' or 'link'."
     )
 
 
@@ -733,7 +816,7 @@ def _smooth_test_block(
     *masking* the eigen-spectrum rather than a dynamic slice so the per-voxel
     rank composes under ``vmap``.
     """
-    eps9 = jnp.finfo(R.dtype).eps**0.9
+    eps9 = jnp.finfo(R.dtype).eps ** 0.9
     rbeta = beta @ R.T  # (V, m) -- row v is R @ beta_v
     vr = jnp.einsum('as,vst,bt->vab', R, v_block, R)  # R V R^T (V, m, m)
 

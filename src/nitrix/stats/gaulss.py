@@ -49,7 +49,7 @@ from ..linalg._smalllinalg import small_inv_logdet
 from ._batching import blocked_vmap
 from ._result import register_result
 
-__all__ = ['GauLSSResult', 'gaulss_fit']
+__all__ = ['GauLSSResult', 'gaulss_fit', 'gaulss_predict']
 
 _LOG_2PI = 1.8378770664093453
 
@@ -117,9 +117,9 @@ def _gaulss_fit_one(
         beta_mu = small_inv_logdet(xw.T @ X + eye_p, p)[0] @ (xw.T @ y)
         resid = y - X @ beta_mu
         u = -1.0 + resid * resid * w  # scale score per obs
-        beta_s = beta_s + small_inv_logdet(
-            2.0 * (Z.T @ Z) + eye_q, q
-        )[0] @ (Z.T @ u)
+        beta_s = beta_s + small_inv_logdet(2.0 * (Z.T @ Z) + eye_q, q)[0] @ (
+            Z.T @ u
+        )
         return (beta_mu, beta_s), None
 
     (beta_mu, beta_s), _ = lax.scan(
@@ -206,3 +206,42 @@ def gaulss_fit(
         log_lik=log_lik,
         n_obs=int(n),
     )
+
+
+def gaulss_predict(
+    result: GauLSSResult,
+    X: Float[Array, 'N p'],
+    *,
+    scale_design: Optional[Float[Array, 'N q']] = None,
+) -> Tuple[Float[Array, 'V N'], Float[Array, 'V N']]:
+    """Per-element Gaussian location-scale prediction on a (new) design.
+
+    Returns the **pair** ``(mean, scale)`` -- the heteroscedastic point of the
+    model -- on the new covariates: the mean ``mu = X beta_mu`` (identity link)
+    and the standard deviation ``sigma = exp(Z beta_scale)`` (log link).
+
+    Parameters
+    ----------
+    result
+        A :class:`GauLSSResult` from :func:`gaulss_fit`.
+    X
+        ``(N, p)`` mean-model design (same columns as the fit).
+    scale_design
+        ``(N, q)`` scale-model design; ``None`` (default) uses an intercept
+        column ``(N, 1)`` -- the homoscedastic default matching ``gaulss_fit``.
+        Must have the same column count ``q`` the fit's scale model used.
+
+    Returns
+    -------
+    ``(mean, scale)``, each ``(V, N)``.  Both differentiable w.r.t. their
+    designs (and the fitted coefficients).
+    """
+    mu = result.coef_mu @ X.T  # (V, N)
+    n = X.shape[0]
+    z = (
+        jnp.ones((n, 1), dtype=X.dtype)
+        if scale_design is None
+        else jnp.asarray(scale_design, dtype=X.dtype)
+    )
+    sigma = jnp.exp(result.coef_scale @ z.T)  # (V, N)
+    return mu, sigma
