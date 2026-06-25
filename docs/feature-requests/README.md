@@ -186,6 +186,29 @@ Pallas ESM force ([`pallas-demons-esm-force`](pallas-demons-esm-force.md)),
 Mosaic GPU kernels ([`mosaic-hopper-registration-kernels`](mosaic-hopper-registration-kernels.md)),
 field regularisers ([`field-regularisers`](field-regularisers.md)).
 
+## Dynamical-systems / DE suite (`nitrix.numerics`)
+
+Forward-looking scoping ledger:
+[`dynamics-suite.md`](dynamics-suite.md) — frames the differentiable
+**differential-equation integration substrate** that would unlock a subdiscipline
+of neuroimaging dynamics (DCM, neural→haemodynamic forward models, TVB-style
+whole-brain network simulation, brain digital twins), credits the shipped
+substrate (the fixed-step ODE family + linalg/noise/signal plumbing), indexes the
+atomised DE FRs below (the duplicate guard), and specs the **genuinely-new
+integrator gaps** (DS-1 SDE family · DS-2 Brownian/keyed-noise contract · DS-3
+exponential/local-linearization · DS-4 symplectic leapfrog · DS-5 DDE).
+**Numerics-only**: integrators + plumbing are nitrix; every *model* and
+*inversion framework* → downstream (nimox / ilex). Mostly **prospective** — each
+DS item is gated on a named blocked consumer (SPEC §9).
+
+Atomised DE FRs (add to these, don't duplicate): ODE family + adaptive/adjoint
+roadmap ([`ode-integrators`](ode-integrators.md), the seed), fixed-point /
+implicit combinators ([`fixed-point-combinators`](fixed-point-combinators.md)),
+Krylov solvers ([`krylov-solvers`](krylov-solvers.md), the non-symmetric resolvent
+for spectral DCM), matrix functions ([`matrix-functions`](matrix-functions.md)),
+heat-kernel diffusion ([`heat-kernel-diffusion`](heat-kernel-diffusion.md), linear
+network spreading).
+
 ## Internal engineering backlog
 
 Ledger (framing, closed-by-design, resolved):
