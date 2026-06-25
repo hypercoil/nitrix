@@ -94,6 +94,11 @@ from ._force import (
     MIForce,
     SumForce,
 )
+from ._implicit import (
+    affine_register_implicit,
+    register_implicit,
+    rigid_register_implicit,
+)
 from ._metric import LNCC, MI, SSD, CorrelationRatio, Metric
 from ._model import Affine, Rigid, TransformModel
 from ._objective import MetricObjective, Objective
@@ -121,6 +126,9 @@ from .regulariser import (
 __all__ = [
     'rigid_register',
     'affine_register',
+    'register_implicit',
+    'rigid_register_implicit',
+    'affine_register_implicit',
     'apply_transform',
     'syn_pipeline',
     'PipelineResult',

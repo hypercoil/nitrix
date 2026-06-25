@@ -1,6 +1,25 @@
 # A public differentiable-registration layer (implicit-diff, self-contained matrix)
 
-> **Status (2026-06-25): request (nimox-estimators E3 → nitrix).** nitrix
+> **Status (2026-06-25): SHIPPED.** `register.register_implicit` (single-level
+> core) + `register.rigid_register_implicit` / `affine_register_implicit`
+> (coarse-to-fine, each level solved implicitly) on
+> `feat/nimox-register-implicit`. It **owns the centring conjugation by reuse**:
+> the implicit path is a per-level `_implicit_level_solve` plugged into the same
+> `_core` coarse-to-fine driver the forward recipes use (the level orchestration
+> was hoisted behind a `LevelSolver` seam, forward path byte-identical /
+> regression-gated), so it shares `_space`'s sampler / `_warp` /
+> `result_transform` and returns the **same self-contained `RegistrationResult`**
+> — no re-derived `_self_contained`. SSD routes to `implicit_least_squares`, any
+> other metric (LNCC / MI / CR) to `implicit_minimize` (the general-metric
+> differentiable layer). Acceptance met: synthetic-warp **recovery** parity with
+> the forward recipe + an **IFT-grad vs finite-difference** directional check +
+> a differentiable-LNCC recovery (`tests/test_register_implicit.py`). Realises
+> the long-deferred "R3 implicit-diff differentiable-layer wrapper"
+> (IMPLEMENTATION_PLAN 2026-06-08 deviation). nimox `AffineRegister(gradient=
+> 'implicit')` / `RigidRegister(...)` can now delegate and delete `_self_contained`
+> + the hand-rolled residual.
+>
+> **Original request (2026-06-25): nimox-estimators E3 → nitrix.** nitrix
 > already ships the pieces for a differentiable registration *layer* — the
 > implicit-function entry points `linalg.implicit_least_squares` /
 > `implicit_minimize` (IFT-exact, O(1) memory, the path `register/_converge.py`
