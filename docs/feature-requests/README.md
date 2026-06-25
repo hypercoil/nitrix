@@ -95,6 +95,7 @@ memory, the perf suite (`bench/`) owns wall-clock parity at scale.
 | P3 | [attention-no-upcast-knob](attention-no-upcast-knob.md) (caller-controlled SDPA accumulation precision; nimox `diffusion_unet._Attention` consumer) | CONVENIENCE | `nitrix.nn.attention` |
 | P2 | [affine-matrix-algebra](affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
 | P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn.norm` |
+| P3 | [nimox-mesh-loss-geometry](nimox-mesh-loss-geometry.md) (face normals / edge-face topology / seg-seg distance / chamfer NN — nimox mesh-loss consolidation; confirm equivalents to delegate, pairs with [mesh-spatial-acceleration](mesh-spatial-acceleration.md)) | CONVENIENCE (consolidation) | `geometry` |
 
 ## Statistical modelling suite (perf-bench → ModelArray → niffi)
 
