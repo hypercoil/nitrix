@@ -17,8 +17,8 @@ Submodules:
 - ``spatial``    -- volumetric shape / windowing utilities: pad / crop
   to a multiple, nonzero bounding box, Gaussian patch window +
   overlap-add normalisation.
-- ``ode``        -- fixed-step ODE integrators (euler / rk4) for
-  continuous-time / neural-ODE models.
+- ``ode``        -- fixed-step ODE integrators (euler / midpoint / rk4)
+  for continuous-time / neural-ODE models.
 - ``fixed_point`` -- ``fixed_point_solve`` (the implicit-VJP fixed-point
   iteration), re-exported at the package top level.
 
@@ -29,7 +29,7 @@ consolidation.
 
 from . import normalize, ode, spatial, tensor_ops
 from .fixed_point import fixed_point_solve
-from .ode import euler, odeint, rk4
+from .ode import euler, midpoint, odeint, rk4
 from .spatial import (
     crop_to_multiple,
     gaussian_window,
@@ -65,6 +65,7 @@ __all__ = [
     'fixed_point_solve',
     # ode integrators
     'euler',
+    'midpoint',
     'rk4',
     'odeint',
     # spatial shape / windowing
