@@ -10,7 +10,13 @@ import pytest
 
 jax.config.update('jax_enable_x64', True)
 
-from nitrix.numerics import euler, midpoint, odeint, rk4
+from nitrix.numerics import (
+    euler,
+    local_linearization,
+    midpoint,
+    odeint,
+    rk4,
+)
 
 # --- hand-written reference steppers (the textbook explicit-RK tableaux) ----
 # These unroll the step expression in a plain (eager) Python loop, with the
@@ -250,3 +256,96 @@ def test_adaptive_methods_rejected(name):
     f = lambda _t, y: -y  # noqa: E731
     with pytest.raises(ValueError, match='adaptive'):
         odeint(f, jnp.array([1.0]), t, method=name)
+
+
+# --- local linearization (exponential integrator, DS-3) -------------------
+# The A-stable exponential stepper behind SPM's ``spm_int``: exact for an
+# affine-autonomous field at any step size, and stable on stiff systems where
+# the explicit steppers diverge.  The DCM-Balloon proof-of-feasibility path.
+
+
+def _linear_exact(a, b, y0, t):
+    # Closed form of dy/dt = A y + b (autonomous):
+    #   y(t) = expm(tA) (y0 + A^{-1} b) - A^{-1} b.
+    from scipy.linalg import expm
+
+    a_np, b_np = np.asarray(a), np.asarray(b)
+    ainv_b = np.linalg.solve(a_np, b_np)
+    shifted = np.asarray(y0) + ainv_b
+    return np.stack(
+        [expm(tk * a_np) @ shifted - ainv_b for tk in np.asarray(t)]
+    )
+
+
+def test_ll_exact_for_affine_linear_system():
+    # The defining property: LL integrates an affine-autonomous field exactly
+    # (to matrix_exp round-off) at ANY step size -- here a deliberately coarse
+    # 4-point grid, where rk4 would still carry visible truncation error.
+    pytest.importorskip('scipy')
+    a = jnp.asarray([[-1.0, 2.0], [0.0, -3.0]])
+    b = jnp.asarray([0.5, -0.2])
+    y0 = jnp.asarray([1.0, -0.5])
+    t = jnp.linspace(0.0, 2.0, 4)
+    f = lambda _t, y: a @ y + b  # noqa: E731
+    ys = local_linearization(f, y0, t)
+    ref = _linear_exact(a, b, y0, t)
+    np.testing.assert_allclose(np.asarray(ys), ref, rtol=1e-6, atol=1e-8)
+
+
+def test_ll_stable_on_stiff_system_where_euler_diverges():
+    # Stiff: dy/dt = -100 y.  Explicit Euler at dt=0.1 has amplification
+    # |1 - 100*0.1| = 9 -> blows up; LL gives exp(-100 t) and stays bounded.
+    f = lambda _t, y: -100.0 * y  # noqa: E731
+    t = jnp.linspace(
+        0.0, 1.0, 11
+    )  # dt=0.1, far past the explicit stability limit
+    y0 = jnp.asarray([1.0])
+    ll = local_linearization(f, y0, t)
+    eu = euler(f, y0, t)
+    ref = np.exp(-100.0 * np.asarray(t))[:, None]
+    np.testing.assert_allclose(np.asarray(ll), ref, atol=1e-6)
+    assert abs(float(eu[-1, 0])) > 1e3  # euler diverged
+    assert abs(float(ll[-1, 0])) < 1e-3  # LL bounded (~0)
+
+
+def test_ll_dispatch_via_odeint():
+    t = jnp.linspace(0.0, 1.0, 6)
+    f = lambda _t, y: -y  # noqa: E731
+    y0 = jnp.asarray([1.0])
+    np.testing.assert_array_equal(
+        np.asarray(odeint(f, y0, t, method='local_linearization')),
+        np.asarray(local_linearization(f, y0, t)),
+    )
+
+
+def test_ll_differentiable_through_solver():
+    # grad of a closed-over parameter, straight through the matrix-exp scan.
+    t = jnp.linspace(0.0, 1.0, 6)
+
+    def integrate_with(rate):
+        f = lambda _t, y: rate * y  # noqa: E731  -- ``rate`` closed over
+        return local_linearization(f, jnp.array([1.0]), t)[-1, 0]
+
+    val = integrate_with(jnp.asarray(-0.5))
+    np.testing.assert_allclose(float(val), np.exp(-0.5), rtol=1e-5)
+    g = jax.grad(integrate_with)(jnp.asarray(-0.5))
+    assert bool(jnp.isfinite(g))
+    np.testing.assert_allclose(float(g), np.exp(-0.5), rtol=1e-4)
+
+
+def test_ll_vmap_over_batch():
+    # LL requires a flat 1-D state; vmap it for a batch of independent systems
+    # (the multi-region pattern the Balloon model uses).
+    t = jnp.linspace(0.0, 1.0, 6)
+    rates = jnp.asarray([-0.5, -1.0, -2.0])
+    y0 = jnp.ones((3, 1))
+
+    def integ(rate, init):
+        return local_linearization(lambda _t, y: rate * y, init, t)
+
+    ys = jax.vmap(integ)(rates, y0)
+    assert ys.shape == (3, len(t), 1)
+    ref = np.exp(np.asarray(rates)[:, None] * np.asarray(t)[None, :])[
+        ..., None
+    ]
+    np.testing.assert_allclose(np.asarray(ys), ref, rtol=1e-5)
