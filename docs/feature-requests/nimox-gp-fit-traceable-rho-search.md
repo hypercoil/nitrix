@@ -1,6 +1,22 @@
 # Make `gp_fit`'s lengthscale-search epilogue traceable (jit / vmap the GP fit)
 
-> **Request (2026-06-25): nimox-estimators consumer → nitrix.** `gp_fit` is
+> **Status (2026-06-25): SHIPPED (Tier-A).** The Gaussian HSGP rho-search
+> epilogue is traceable: a JAX-native `_parabolic_argmin_jax` (grid argmin +
+> 3-point parabolic refine, `jnp.where` fallbacks → a **traced** scalar)
+> replaces the host `_parabolic_argmin(np.asarray(...))`, `rho_hat` stays a
+> traced scalar (dropped the `float()`), and `_assemble_gp_result` uses
+> `jnp.log` so it flows through. `gp_fit` (Gaussian HSGP) now runs under
+> `jax.jit` / `jax.vmap` with the covariate closed over —
+> `vmap(lambda Y: gp_fit(Y, x, ...))(Y_stack)` returns per-dataset `GPResult`s
+> that **fp-match a loop of eager fits** (`tests/test_gp_traceable.py`); the 53
+> existing GP fit/predict tests stay green (the eager path now runs the new
+> code — a tracing change, not a numerics change). **Deferred:** Tier-B (traced
+> `x`, a result-schema change) and the non-Gaussian PQL / exact / varying-coef
+> host searches (still eager; lower priority — Gaussian HSGP is the default and
+> the nimox estimator's primary path). nimox `GaussianProcessRegressor` can flip
+> its eager-only witness to a vmap-fit proof.
+>
+> **Original request (2026-06-25): nimox-estimators consumer → nitrix.** `gp_fit` is
 > currently **eager-only**: its REML lengthscale (``rho``) selection computes the
 > per-grid NLL in pure JAX (``lax.map``) but then drops to the host for the
 > sub-grid refinement — `_parabolic_argmin(np.asarray(log_rho_grid),
