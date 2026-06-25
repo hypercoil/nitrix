@@ -1,6 +1,28 @@
 # Public BLUP `predict` for the mixed-effects fitters (LME / GLMM)
 
-> **Request (2026-06-25): nimox-estimators Tier-3 → nitrix.** The mixed-model
+> **Status (2026-06-25): SHIPPED (R1/R2/GLMM); R4/R2+corr/R3 staged.**
+> `stats.lme.lme_predict` / `stats.lme.ranef` + `stats.glmm_predict` /
+> `stats.ranef` are public. **Population** level (`X @ beta_hat`) works for
+> **every** tier. **Conditional** (BLUP) level: GLMM (modes always retained)
+> and the LME **R1** (scalar intercept) + **R2** (random slope) tiers via the
+> opt-in `lme_fit(..., retain_blups=False)` (default off), which runs a post-fit
+> mixed-model-equation BLUP pass (`b_g = (Z_g^T Z_g/σ_e² + G^{-1})^{-1}
+> Z_g^T r_g/σ_e²`) — a **post-pass that never touches the inner REML solver**,
+> so the default fit path is **byte-identical** (verified: R1/R2 default result
+> arrays sha-match baseline; 67 existing lme/glmm tests green) and `retain_blups`
+> is **zero-cost when off**. A uniform `ranef(result)` reads the modes across
+> GLMM + the LME tiers; unseen / `None` groups fall back to the marginal mean.
+> Tests: independent MME-BLUP oracle for R1 + R2, GLMM conditional, unseen-group
+> fallback, opt-in contract (`tests/test_mixed_predict.py`).
+>
+> **Staged (not yet conditional):** the **crossed (R4)**, **structured-residual
+> (R2+corr)** and **nested (R3)** tiers — their `V` is not block-diagonal-by-
+> group, so the standard post-pass doesn't apply; `retain_blups=True` there
+> raises a clear `NotImplementedError` (population still works).  See the
+> blast-radius note in the handoff thread (R2+corr ≈ R2 + R(ρ) un-whiten; R4 a
+> joint crossed solve; R3 a per-sublevel mode replay).
+>
+> **Original request (2026-06-25): nimox-estimators Tier-3 → nitrix.** The mixed-model
 > sibling of [`nimox-stats-response-predict.md`](nimox-stats-response-predict.md),
 > filed separately because its apply contract is materially different. The
 > mass-univariate **mixed-effects** fitters — `lme_fit` (REML / FaST-LMM,

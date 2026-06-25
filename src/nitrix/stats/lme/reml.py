@@ -103,7 +103,7 @@ References
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, NamedTuple, Optional, Tuple, Union, cast
 
 import jax
@@ -114,6 +114,7 @@ from jaxtyping import Array, Float, Int
 from ...linalg._smalllinalg import small_inv_logdet, sym_eig_jacobi
 from .._batching import blocked_vmap
 from .._result import register_result
+from ._blup import _blups_standard
 from ._corr import CorrSpec, resolve_corr
 from ._corrfit import CorrLMEResult
 from ._kr import kr_cov_and_scaled_f
@@ -165,6 +166,7 @@ ContrastDof = Literal['satterthwaite', 'kr']
         'fixed_cov',
         'theta_cov',
         'grad_m',
+        'blups',
     ),
 )
 @dataclass(frozen=True)
@@ -197,6 +199,11 @@ class REMLResult:
     fixed_cov: Float[Array, 'V p p']
     theta_cov: Float[Array, 'V 2 2']
     grad_m: Float[Array, 'V 2 p p']
+    blups: Optional[Float[Array, 'V q']] = None
+    """``(V, q)`` per-group random-intercept BLUPs, or ``None`` when the fit did
+    not retain them (``lme_fit(..., retain_blups=False)``, the default).  Read
+    via :func:`~nitrix.stats.ranef`; consumed by
+    :func:`~nitrix.stats.lme_predict` at ``level='conditional'``."""
 
     @property
     def sigma_b_sq(self) -> Float[Array, 'V']:
@@ -964,6 +971,7 @@ class CrossedLMEResult:
         'fixed_cov',
         'theta_cov',
         'grad_m',
+        'blups',
     ),
     aux=('tier',),
 )
@@ -1014,6 +1022,11 @@ class LMEResult:
     theta_cov: Float[Array, 'V nt nt']
     grad_m: Float[Array, 'V nt p p']
     tier: str
+    blups: Optional[Float[Array, 'V q r']] = None
+    """``(V, q, r)`` per-group random-effect modes, or ``None`` when the fit did
+    not retain them (the default ``retain_blups=False``).  Read via
+    :func:`~nitrix.stats.ranef`; used by :func:`~nitrix.stats.lme_predict` at
+    ``level='conditional'``."""
 
     @property
     def re_labels(self) -> Tuple[str, ...]:
@@ -1044,6 +1057,7 @@ def lme_fit(
     damping: float = 1e-6,
     block: Optional[int] = None,
     low_rank: Optional[bool] = None,
+    retain_blups: bool = False,
 ) -> Union[
     REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult
 ]:
@@ -1142,6 +1156,16 @@ def lme_fit(
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
+    if retain_blups and (
+        cross is not None or inner is not None or corr is not None
+    ):
+        raise NotImplementedError(
+            'lme_fit: retain_blups is currently supported for the single-factor '
+            'R1 (scalar intercept) and R2 (random slope) tiers.  Conditional '
+            'BLUPs for crossed (cross=), nested (inner=) and structured-residual '
+            '(corr=) fits are staged; population-level lme_predict works for '
+            'every tier without retaining modes.'
+        )
     if z is not None:
         # ER4: a 1-D random covariate (N,) is a single random slope; coerce it to
         # the (N, r) contract so r = z.shape[-1] = 1 (a bare (N,) would otherwise
@@ -1252,7 +1276,7 @@ def lme_fit(
         # R1: one scalar random effect -> the FaST-LMM spectral fast path.
         onehot = jax.nn.one_hot(group, n_groups, dtype=Y.dtype)  # (N, M)
         z_design = onehot if z is None else onehot * jnp.asarray(z)
-        return reml_fit(
+        result = reml_fit(
             Y,
             X,
             z_design,
@@ -1261,6 +1285,19 @@ def lme_fit(
             block=block,
             low_rank=low_rank,
         )
+        if retain_blups:
+            z_eff = (
+                jnp.ones((group.shape[0], 1), dtype=Y.dtype)
+                if z is None
+                else jnp.asarray(z, dtype=Y.dtype)
+            )
+            b = _blups_standard(
+                Y, X, result.beta_hat, z_eff, group,
+                result.cov_re, result.sigma_e_sq, n_groups,
+            )  # (V, q, 1)
+            # Scalar intercept -> (V, q); an explicit 1-col slope keeps (V, q, 1).
+            result = replace(result, blups=b[..., 0] if z is None else b)
+        return result
 
     # R2: one correlated / diagonal random effect -> block-Woodbury REML.
     from ._blockwoodbury import fit_blockwoodbury_reml
@@ -1295,6 +1332,13 @@ def lme_fit(
         theta_hat
     )  # (V, r, r)
     sigma_e_sq = jnp.exp(theta_hat[:, -1])
+    blups = (
+        _blups_standard(
+            Y, X, beta_hat, z_arr, group, cov_re, sigma_e_sq, n_groups
+        )
+        if retain_blups
+        else None
+    )
     return LMEResult(
         beta_hat=beta_hat,
         cov_re=cov_re,
@@ -1304,4 +1348,5 @@ def lme_fit(
         theta_cov=theta_cov,
         grad_m=grad_m,
         tier='R2',
+        blups=blups,
     )

@@ -97,7 +97,8 @@ from .priors import PriorFn, halfnormal_prior, invgamma_prior, lognormal_prior
 from .betareg import BetaResult, beta_fit, beta_predict
 from .gaulss import GauLSSResult, gaulss_fit, gaulss_predict
 from .ordinal import OrdinalResult, ordinal_fit, ordinal_predict
-from .glmm import GLMMResult, glmm_fit
+from .glmm import GLMMResult, glmm_fit, glmm_predict
+from .lme import ranef
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
     BINOMIAL,
@@ -239,6 +240,8 @@ __all__ = [
     # glmm
     'GLMMResult',
     'glmm_fit',
+    'glmm_predict',
+    'ranef',
     # beta regression
     'BetaResult',
     'beta_fit',

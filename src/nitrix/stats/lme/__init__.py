@@ -28,6 +28,7 @@ output statistics via the implicit-function-theorem VJP (see
 ``docs/design/lme.md``).
 """
 
+from ._blup import lme_predict, ranef
 from ._corr import CorrSpec, ar1, car1, cs, iid
 from ._corrfit import CorrLMEResult, GLSResult, gls_fit
 from ._varfunc import VarFunc, var_ident, var_power
@@ -60,6 +61,8 @@ __all__ = [
     'VarFunc',
     'reml_fit',
     'lme_fit',
+    'lme_predict',
+    'ranef',
     'lme_t_contrast',
     'lme_f_contrast',
     'flame_two_level',
