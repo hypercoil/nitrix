@@ -84,6 +84,69 @@
   physical training fall out of `jax.grad` through the scan; (2) **GPU + `vmap`**
   over parameter sweeps and cohorts. Every primitive below preserves both.
 
+**RFC-1 (2026-06-25) — where the *inversion* boundary actually falls (tentative;
+not a locked decision).**
+
+> Unlike D1–D6, this is an **open proposal recorded to be argued with**, not a
+> settled rule — it will sharpen, and may move, when the first real DCM / TVB
+> consumer lands. D1 puts "models + inversion frameworks" downstream, but
+> *"has an inversion / a solver"* cannot by itself be the test: `glm_fit`,
+> `lme_fit`, `n4`, and the registration recipes all bundle a solver **and** a
+> model fit, and all correctly live **in** nitrix. RFC-1 proposes the finer line.
+
+- **The discriminator — closed parametric form vs. open model program.** nitrix
+  hosts inference for model families whose **form it can close over**: `Xβ + link`
+  (GLM), the mixed-model form (LME), the B-spline log-bias field (N4),
+  `transform-group + cost-from-a-menu` (register). The caller supplies *arrays*;
+  the form is finite and universal, and there is one canonical computation for
+  everyone. DCM has **no single form to own** — the generative model is a
+  user-authored coupled ODE and the **model *space* is the scientific result**
+  (which edges exist, compared by evidence). A discipline of *authoring-and-
+  comparing* forms is downstream; a fixed form nitrix can own is nitrix-eligible.
+
+- **Corollary test — self-contained vs. framework-relative output.** GLM
+  coefficients, a bias field, and a transform are complete on their own. DCM's
+  posterior `(μ, Σ)` and free energy `F` are only interpretable inside model
+  comparison (`F` is comparative) and hierarchy (`Σ` feeds PEB). Output that is
+  meaningful only within a surrounding framework belongs *with* that framework.
+
+- **Proposed layering — the DRY answer.** The fit decomposes by *layer*, each
+  living in exactly **one** place, so no consumer reimplements the core scaffold:
+  - **A — kernels** (integrate; Gauss–Newton / LM + the local-linearization
+    ascent step; ReML precision update; `logdet`; the spectral resolvent solve):
+    **nitrix, already shipped** (`linalg.optimize`, `linalg.matrix_exp`,
+    `numerics.ode.local_linearization`, `linalg._smalllinalg`, `stats.lme.reml`).
+  - **B — the form-agnostic inversion loop**: variational-Laplace over a
+    *supplied* `g(θ)` + Gaussian prior → `(μ, Σ, F)`, baking in **no** model
+    structure (model, priors, precision components are all inputs). **Tentatively
+    nitrix** — the Bayesian sibling of the already-resident `reml_fit` /
+    `gauss_newton`, e.g. `nitrix.stats.variational_laplace`. This is the single
+    shared "numerical core scaffold"; it must live in **one** place, whichever
+    side of the line it ultimately lands.
+  - **C — the DCM-ness**: the specific generative model + connection-matrix priors
+    + BMR / BMS / PEB / BMA + the posterior/evidence ensemble — **downstream
+    (nimox)**.
+  - **D — interface adapters**: a `thrux` graph node / an `entense` differentiable
+    step / a nimox `fit · predict · score` estimator — **per-library, and *meant*
+    to differ**; that divergence is the reason those libraries exist.
+
+- **Consequence for duplication — none.** Dependency DAG
+  `nitrix ← nimox ← {thrux, entense}`: layers A/B are shared from nitrix, C lives
+  once in nimox, and thrux/entense **wrap** the nimox estimator rather than
+  re-deriving VL. The verbatim-duplication failure mode arises only if Layer B
+  lives *nowhere* (each consumer assembling it inline) — so the fix is to give the
+  generic loop a single home, **not** to push the DCM recipe (Layer C) into nitrix.
+
+- **Open / expected to sharpen.** (1) Whether Layer B is nitrix or nimox — turns
+  on whether "variational free energy" reads as a *numerical* objective (like
+  `½‖r‖²`) or a *modeling* commitment. (2) Whether the generic VL loop stays
+  genuinely form-agnostic once spectral DCM's **complex non-symmetric resolvent**
+  `(iωI − J)⁻¹` and stochastic DCM's **generalized-coordinate filtering** are in
+  view, or whether those fork it. (3) Whether `gauss_newton` should grow a full
+  Gaussian-prior form (prior precision matrix + mean), or that stays a Layer-B
+  concern. **Revisit when the first consumer files** — do not treat RFC-1 as
+  authoritative until then.
+
 ## 1. Why this doc exists
 
 The neuroimaging dynamical-systems landscape — DCM, neural→haemodynamic forward
