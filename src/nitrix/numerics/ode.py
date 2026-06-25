@@ -11,17 +11,30 @@ third-party ODE library (the integration is a ``lax.scan``, so reverse-mode
 ``grad`` differentiates straight through the solver).
 
 - ``euler`` -- the first-order explicit step (cheap, low accuracy).
+- ``midpoint`` -- the second-order explicit-midpoint step (RK2).
 - ``rk4`` -- the classic fourth-order Runge--Kutta step (the default).
 - ``odeint`` -- dispatch over ``method``.
 
 One step is taken per consecutive pair of time points, so granularity is
 controlled by how densely ``t`` is sampled.  The vector field takes
-``f(t, y)`` (close over any extra parameters in the caller).
+``f(t, y)``; extra parameters are closed over in the caller -- e.g.
+``odeint(lambda t, y: field(t, y, args), y0, t)``.  There is deliberately
+*no* ``args=`` keyword: the integrator's contract is a bare ``f(t, y)``, and
+closed-over arrays differentiate and ``jit`` exactly as a kwarg would.
 
-Roadmap (per the §12.11 catalogue entry): adaptive steppers
-(Dormand--Prince), symplectic steppers (leapfrog / implicit-midpoint), and
-the memory-efficient adjoint backward (a fixed-point + Krylov solve) layer
-on the same ``f(t, y)`` interface.
+The step arithmetic is the textbook explicit-Runge--Kutta tableau (the same
+``Euler`` / explicit-``Midpoint`` / classic ``RK4`` steps a library such as
+``diffrax`` takes for those fixed-step methods), so a model whose weights
+were trained or evaluated against that arithmetic reproduces here -- the
+bring-your-own-weights parity requirement of the surface neural-ODE backend
+swap (see ``docs/feature-requests/ode-integrators.md``).
+
+Roadmap (per the §12.11 catalogue entry): *adaptive* steppers (the embedded
+Dormand--Prince ``dopri5`` / ``dopri8`` and ``tsit5`` pairs -- a
+``while_loop`` + step-size controller, a different control-flow shape from
+this static ``scan``), *symplectic* steppers (leapfrog / implicit-midpoint),
+and the memory-efficient continuous-adjoint backward (a fixed-point + Krylov
+solve) layering on the same ``f(t, y)`` interface.
 """
 
 from __future__ import annotations
@@ -32,14 +45,20 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-__all__ = ['euler', 'rk4', 'odeint']
+__all__ = ['euler', 'midpoint', 'rk4', 'odeint']
 
 VectorField = Callable[[Array, Array], Array]
-Method = Literal['euler', 'rk4']
+Method = Literal['euler', 'midpoint', 'rk4']
 
 
 def _euler_step(f: VectorField, t: Array, dt: Array, y: Array) -> Array:
     return y + dt * f(t, y)
+
+
+def _midpoint_step(f: VectorField, t: Array, dt: Array, y: Array) -> Array:
+    # Explicit midpoint (RK2): evaluate the field at the half-step.
+    k1 = f(t, y)
+    return y + dt * f(t + 0.5 * dt, y + 0.5 * dt * k1)
 
 
 def _rk4_step(f: VectorField, t: Array, dt: Array, y: Array) -> Array:
@@ -91,6 +110,23 @@ def euler(
     return _integrate(_euler_step, f, y0, t)
 
 
+def midpoint(
+    f: VectorField,
+    y0: Float[Array, '...'],
+    t: Float[Array, 't'],
+) -> Float[Array, 't ...']:
+    """Integrate ``dy/dt = f(t, y)`` with the explicit midpoint method (RK2).
+
+    Same interface as :func:`euler`; second-order local error -- a step takes
+    two field evaluations (``f`` at the start and at the half-step) for an
+    extra order of accuracy.  This is the explicit RK2 stepper, *not* the
+    symplectic implicit-midpoint method (which requires a per-step solve);
+    it completes the ``[euler, midpoint, rk4]`` method set of the surface
+    neural-ODE consumers.
+    """
+    return _integrate(_midpoint_step, f, y0, t)
+
+
 def rk4(
     f: VectorField,
     y0: Float[Array, '...'],
@@ -113,10 +149,22 @@ def odeint(
 ) -> Float[Array, 't ...']:
     """Integrate ``dy/dt = f(t, y)`` with the chosen fixed-step ``method``.
 
-    ``method="rk4"`` (default) or ``"euler"``.
+    ``method`` is one of ``"rk4"`` (default), ``"midpoint"``, or ``"euler"``.
+    The adaptive methods (``dopri5`` / ``dopri8`` / ``tsit5``) are not part of
+    this fixed-step set; passing one raises with a pointer to that gap.
     """
     if method == 'rk4':
         return rk4(f, y0, t)
+    if method == 'midpoint':
+        return midpoint(f, y0, t)
     if method == 'euler':
         return euler(f, y0, t)
-    raise ValueError(f"method={method!r}; expected 'rk4' or 'euler'.")
+    if method in ('dopri5', 'dopri8', 'tsit5'):
+        raise ValueError(
+            f'method={method!r} is an adaptive stepper, not part of the '
+            "fixed-step set; use 'euler', 'midpoint', or 'rk4'. Adaptive "
+            'integration is roadmapped (see ode-integrators.md).'
+        )
+    raise ValueError(
+        f"method={method!r}; expected 'euler', 'midpoint', or 'rk4'."
+    )
