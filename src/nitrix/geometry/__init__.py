@@ -128,6 +128,10 @@ from .surface import (
     strain_distortion,
     surface_smooth,
 )
+from ._mesh_distance import (
+    point_set_nearest_sq_dist,
+    segment_segment_sq_dist,
+)
 from .intersection import (
     find_self_intersections,
     remove_self_intersections,
@@ -233,4 +237,7 @@ __all__ = [
     # self-intersection (host-side QA / cleanup)
     'find_self_intersections',
     'remove_self_intersections',
+    # differentiable dense distance kernels (mesh-loss substrate)
+    'segment_segment_sq_dist',
+    'point_set_nearest_sq_dist',
 ]
