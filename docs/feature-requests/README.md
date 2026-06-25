@@ -96,6 +96,8 @@ memory, the perf suite (`bench/`) owns wall-clock parity at scale.
 | P2 | [affine-matrix-algebra](affine-matrix-algebra.md) / [spherical-parameterisation](spherical-parameterisation.md) / [field-regularisers](field-regularisers.md) *(existing — nimox-extraction blockers)* | ENABLING | `geometry` / `register` |
 | P3 | [fused-norm-kernels](fused-norm-kernels.md) (fused LN/GN/IN, perf-only) | CONVENIENCE | `nitrix.nn.norm` |
 | P3 | [nimox-mesh-loss-geometry](nimox-mesh-loss-geometry.md) (face normals / edge-face topology / seg-seg distance / chamfer NN — nimox mesh-loss consolidation; confirm equivalents to delegate, pairs with [mesh-spatial-acceleration](mesh-spatial-acceleration.md)) | CONVENIENCE (consolidation) | `geometry` |
+| P3 | [nimox-differentiable-registration-layer](nimox-differentiable-registration-layer.md) (public implicit-diff registration returning a self-contained matrix — owns the centring conjugation nimox `AffineRegister(gradient='implicit')` hand-rolls; optional general-metric `implicit_minimize` path) | ENABLING (differentiable layer) — nimox has an interim hand-roll | `register` / `linalg` |
+| P3 | [nimox-histogram-match-fit-apply](nimox-histogram-match-fit-apply.md) (split `bias.histogram_match` into `fit(reference)->landmarks` / `apply(source, landmarks)` so nimox `HistogramMatch` carries ~9 floats not a reference volume) | CONVENIENCE (refinement) | `bias` |
 
 ## Statistical modelling suite (perf-bench → ModelArray → niffi)
 
