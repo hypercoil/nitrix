@@ -815,6 +815,49 @@ outcomes and shipped-under-pressure capabilities — gets a row.
 
 ### 10.3 Shipped entries
 
+### 2026-06-25 — nimox-estimators consumer batch (fit/apply seam: histogram + mesh-loss geometry + implicit registration)
+
+- **Type:** Downstream deviation (consumer-driven, `nimox.estimators` /
+  `nimox.loss`) + SPEC normative addition.
+- **Triggered by:** `nimox` building an immutable sklearn-`fit`/`transform`
+  estimator façade + a training mesh-loss family; three FRs all hitting the same
+  seam (`docs/feature-requests/nimox-{histogram-match-fit-apply,
+  mesh-loss-geometry,differentiable-registration-layer}.md`).
+- **Description / Capability shipped:**
+  - **SPEC §6.5 — estimator (fit/apply) seam [NORMATIVE]:** nitrix exposes pure
+    `fit(reference)->state` / `apply(input, state)` pairs (state = arrays); nimox
+    owns the stateful immutable container. The §5 estimator analogue.
+  - **`bias.histogram_match_fit` / `histogram_match_apply`:** the Nyúl–Udupa
+    landmark seam made public (fit ~9 reference landmarks once, apply to many);
+    `histogram_match` redefined as `apply(·, fit(·))` — byte-faithful by
+    construction (§6.5).
+  - **`sparse.face_normals` / `sparse.edge_face_adjacency` +
+    `geometry.segment_segment_sq_dist` / `geometry.point_set_nearest_sq_dist`:**
+    the dense, differentiable mesh-loss geometry kernels nimox delegates
+    (confirmed delegation map; loss reductions stay in nimox per §5; spatial
+    index stays in the gated `mesh-spatial-acceleration` FR).
+  - **`register.register_implicit` (single-level) + `rigid_register_implicit` /
+    `affine_register_implicit` (coarse-to-fine):** the differentiable-layer
+    registration that **realises the deferred R3 implicit-diff wrapper** (see the
+    2026-06-08 registration-suite entry's "Deferred work"). The forward
+    coarse-to-fine driver was hoisted behind a `LevelSolver` seam in `_core.py`
+    (forward path byte-identical, regression-gated by the full recovery suite);
+    the implicit per-level solve owns the centring convention *by reuse* of
+    `_space`/`_warp`/`result_transform`. SSD→`implicit_least_squares`, else→
+    `implicit_minimize` (a differentiable LNCC/MI layer).
+- **Shape:** JAX-only (no Pallas); pure composition of shipped primitives.
+  Validated CPU: histogram 15, mesh 30, implicit-register 9 (incl. IFT-grad vs
+  finite-difference) + forward recipe regression 27 — all green; ruff + mypy
+  clean.
+- **Deferred work:** nimox-side deletion of its hand-rolled `_self_contained` +
+  mesh helpers (delegation is nimox's commit); `register_implicit` WorldSpace is
+  available transparently (same `_Sampler` Protocol) but untested here.
+- **Non-negotiables held:** pure-functional surface (NamedTuples / frozen
+  records / Protocols, no PyTree modules); JAX-fallback floor; jaxtyping; ruff;
+  mypy; `custom_vjp` reused (the `implicit_*` IFT backward), none added. No new
+  runtime deps; concern boundaries (§5, §6) held — reductions / containers stay
+  downstream.
+
 ### 2026-06-22 — Cortical-surface geometry suite (Phases 0–5) + four §12 graduations
 
 - **Type:** Plan revision + §12 → §10.A graduations + downstream deviation

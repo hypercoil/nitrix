@@ -46,6 +46,7 @@ from typing import (
     Callable,
     NamedTuple,
     Optional,
+    Protocol,
     Sequence,
     Union,
     cast,
@@ -62,7 +63,12 @@ from ..geometry import (
     spatial_transform,
 )
 from ..geometry._interpolate import BoundaryMode, Interpolator, Linear
-from ..linalg import gauss_newton, levenberg_marquardt
+from ..linalg import (
+    gauss_newton,
+    implicit_least_squares,
+    implicit_minimize,
+    levenberg_marquardt,
+)
 from ._converge import (
     Convergence,
     ConvergenceMode,
@@ -401,6 +407,171 @@ def optimize_objective(
     return out.x, jnp.stack([init_cost, out.fun])
 
 
+class LevelSolver(Protocol):
+    """Per-pyramid-level solve, the one axis the forward and implicit drivers
+    differ on.
+
+    The coarse-to-fine driver (:func:`register_core`) owns the pyramid, the
+    inter-level warm-start rescale, and the result assembly identically either
+    way; *how a single level is minimised* is this callback -- the forward
+    Gauss-Newton / LM / BFGS optimise (:func:`_forward_level_solve`) or the
+    implicit-function solve (:func:`_implicit_level_solve`).  Both take the
+    bound ``sampler`` + level images + the current parameters and return
+    ``(params, cost_trace)``.
+    """
+
+    def __call__(
+        self,
+        sampler: _Sampler,
+        moving_level: Array,
+        fixed_level: Array,
+        mask_level: Optional[Array],
+        params: Array,
+        *,
+        model: TransformModel,
+        ndim: int,
+        spec: RegistrationSpec,
+        fixed_shape: tuple[int, ...],
+        moving_shape: tuple[int, ...],
+        iterations: int,
+        convergence: Optional[Convergence],
+    ) -> tuple[Array, Array]: ...
+
+
+def _forward_level_solve(
+    sampler: _Sampler,
+    moving_level: Array,
+    fixed_level: Array,
+    mask_level: Optional[Array],
+    params: Array,
+    *,
+    model: TransformModel,
+    ndim: int,
+    spec: RegistrationSpec,
+    fixed_shape: tuple[int, ...],
+    moving_shape: tuple[int, ...],
+    iterations: int,
+    convergence: Optional[Convergence],
+) -> tuple[Array, Array]:
+    """One level of the forward GN / LM / BFGS optimise (the default solver).
+
+    The exact per-level body the coarse-to-fine driver has always run, lifted
+    behind :class:`LevelSolver` so the implicit path can swap in
+    :func:`_implicit_level_solve` without duplicating the orchestration.
+    """
+
+    def warp_fn(p: Array) -> Array:
+        return _warp(
+            sampler,
+            moving_level,
+            model.exp(p, ndim=ndim),
+            fixed_shape=fixed_shape,
+            moving_shape=moving_shape,
+            spec=spec,
+        )
+
+    objective = MetricObjective(
+        metric=spec.metric, warp=warp_fn, fixed=fixed_level, mask=mask_level
+    )
+    # Closed-form warp Jacobian for the least-squares (SSD) forward path -- far
+    # fewer gathers than jacfwd (the parity oracle).  A mask scales the residual
+    # rows by sqrt(mask) (matching ``SSD.residual``), so the Jacobian rows scale
+    # the same way -- out-of-mask voxels contribute a zero row to the
+    # Gauss-Newton normal equations.
+    jac_fn: Optional[Callable[[Array], Array]] = None
+    if spec.metric.is_least_squares:
+        jac_fn = _warp_jacobian(
+            sampler,
+            moving_level,
+            model=model,
+            ndim=ndim,
+            fixed_shape=fixed_shape,
+            moving_shape=moving_shape,
+            spec=spec,
+        )
+        if mask_level is not None:
+            jac_fn = _mask_jacobian(jac_fn, jnp.sqrt(mask_level).reshape(-1))
+    return optimize_objective(
+        objective,
+        params,
+        optimizer=spec.optimizer,
+        iterations=iterations,
+        cg_tol=spec.cg_tol,
+        jacobian_fn=jac_fn,
+        convergence=convergence,
+    )
+
+
+def _implicit_level_solve(
+    sampler: _Sampler,
+    moving_level: Array,
+    fixed_level: Array,
+    mask_level: Optional[Array],
+    params: Array,
+    *,
+    model: TransformModel,
+    ndim: int,
+    spec: RegistrationSpec,
+    fixed_shape: tuple[int, ...],
+    moving_shape: tuple[int, ...],
+    iterations: int,
+    convergence: Optional[Convergence],
+) -> tuple[Array, Array]:
+    """One level solved by the implicit-function theorem (the differentiable
+    layer).
+
+    Differentiates the level's optimum w.r.t. the (level) images directly --
+    ``implicit_least_squares`` for a least-squares (SSD) metric (Gauss-Newton
+    Hessian), ``implicit_minimize`` for a general metric (LNCC / MI / CR --
+    exact Hessian via BFGS forward).  ``data = (moving_level, fixed_level)`` is
+    the differentiable argument, so the gradient flows through the pyramid back
+    to the originals; the ``mask`` is closed over as a constant.  ``convergence``
+    is inert here (the implicit solve runs its own fixed forward iteration);
+    ``dtheta*/dparams = 0`` (IFT), so on a multi-level run the coarse levels act
+    as a gradient-stopped initialiser and the finest level carries the
+    IFT-exact gradient.
+    """
+    del convergence  # the implicit solve has its own (fixed) forward iteration
+    metric = spec.metric
+
+    def warp_of(moving_img: Array, p: Array) -> Array:
+        return _warp(
+            sampler,
+            moving_img,
+            model.exp(p, ndim=ndim),
+            fixed_shape=fixed_shape,
+            moving_shape=moving_shape,
+            spec=spec,
+        )
+
+    data = (moving_level, fixed_level)
+    if metric.is_least_squares:
+
+        def residual_fn(d: tuple[Array, Array], p: Array) -> Array:
+            mv, fx = d
+            return metric.residual(warp_of(mv, p), fx, mask=mask_level)
+
+        theta = implicit_least_squares(
+            residual_fn, data, params, n_iters=iterations, cg_tol=spec.cg_tol
+        )
+        r0 = residual_fn(data, params)
+        r1 = residual_fn(data, theta)
+        hist = jnp.stack(
+            [0.5 * jnp.vdot(r0, r0).real, 0.5 * jnp.vdot(r1, r1).real]
+        )
+        return theta, hist
+
+    def objective_fn(d: tuple[Array, Array], p: Array) -> Array:
+        mv, fx = d
+        return metric.cost(warp_of(mv, p), fx, mask=mask_level)
+
+    theta = implicit_minimize(
+        objective_fn, data, params, maxiter=iterations, cg_tol=spec.cg_tol
+    )
+    hist = jnp.stack([objective_fn(data, params), objective_fn(data, theta)])
+    return theta, hist
+
+
 def register_core(
     moving: Float[Array, '*mspatial'],
     pyr_f: tuple[Float[Array, '*fspatial 1'], ...],
@@ -413,6 +584,7 @@ def register_core(
     init_params: Float[Array, ' p'],
     convergence: Optional[Convergence] = None,
     pyr_mask: Optional[tuple[Float[Array, '*fspatial 1'], ...]] = None,
+    solve_level: LevelSolver = _forward_level_solve,
 ) -> RegistrationResult:
     """Coarse-to-fine register ``moving`` against a precomputed reference.
 
@@ -453,49 +625,18 @@ def register_core(
             )
             params = model.rescale_to_grid(params, ratio)
 
-        def warp_fn(
-            p: Array,
-            m_l: Array = m_l,
-            f_shape: tuple[int, ...] = f_shape,
-            m_shape: tuple[int, ...] = m_shape,
-        ) -> Array:
-            return _warp(
-                sampler,
-                m_l,
-                model.exp(p, ndim=ndim),
-                fixed_shape=f_shape,
-                moving_shape=m_shape,
-                spec=spec,
-            )
-
-        objective = MetricObjective(
-            metric=spec.metric, warp=warp_fn, fixed=f_l, mask=mask_l
-        )
-        # Closed-form warp Jacobian for the least-squares (SSD) forward path
-        # -- far fewer gathers than jacfwd (the parity oracle).  A mask scales
-        # the residual rows by sqrt(mask) (matching ``SSD.residual``), so the
-        # Jacobian rows scale the same way -- out-of-mask voxels contribute a
-        # zero row to the Gauss-Newton normal equations.
-        jac_fn: Optional[Callable[[Array], Array]] = None
-        if spec.metric.is_least_squares:
-            jac_fn = _warp_jacobian(
-                sampler,
-                m_l,
-                model=model,
-                ndim=ndim,
-                fixed_shape=f_shape,
-                moving_shape=m_shape,
-                spec=spec,
-            )
-            if mask_l is not None:
-                jac_fn = _mask_jacobian(jac_fn, jnp.sqrt(mask_l).reshape(-1))
-        params, hist = optimize_objective(
-            objective,
+        params, hist = solve_level(
+            sampler,
+            m_l,
+            f_l,
+            mask_l,
             params,
-            optimizer=spec.optimizer,
+            model=model,
+            ndim=ndim,
+            spec=spec,
+            fixed_shape=f_shape,
+            moving_shape=m_shape,
             iterations=iters_per_level[level],
-            cg_tol=spec.cg_tol,
-            jacobian_fn=jac_fn,
             convergence=convergence,
         )
         histories.append(hist)
@@ -529,6 +670,7 @@ def multi_resolution_register(
     init_params: Optional[Float[Array, ' p']] = None,
     space: CoordinateSpace = IndexSpace(),
     mask: Optional[Float[Array, '*fspatial']] = None,
+    solve_level: LevelSolver = _forward_level_solve,
 ) -> RegistrationResult:
     """Coarse-to-fine registration driver shared by the recipes.
 
@@ -536,6 +678,12 @@ def multi_resolution_register(
     grid; it is pyramidised alongside ``fixed`` and threaded into the per-level
     metric cost (and the least-squares Jacobian) so the registration ignores
     out-of-mask voxels.
+
+    ``solve_level`` is the per-level minimiser (:class:`LevelSolver`):
+    :func:`_forward_level_solve` (default; GN / LM / BFGS) or
+    :func:`_implicit_level_solve` (the implicit-function differentiable layer).
+    The driver is otherwise identical -- the pyramid, the warm-start rescale,
+    and the result assembly do not depend on which one runs.
     """
     if moving.ndim != ndim or fixed.ndim != ndim:
         raise ValueError(
@@ -591,6 +739,7 @@ def multi_resolution_register(
         sampler=sampler,
         init_params=params,
         pyr_mask=pyr_mask,
+        solve_level=solve_level,
         # Forward early-exit is honoured only on the least-squares (GN/LM)
         # optimiser's windowed ``early_stop``; the scalar/BFGS path (a
         # non-least-squares metric) is monolithic and rejects it (B2 gate).

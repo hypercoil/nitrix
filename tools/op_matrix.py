@@ -4583,6 +4583,256 @@ for _qn, _fx, _da, _va, _sj, _inv in _GEOM_OPS:
 
 
 # ---------------------------------------------------------------------------
+# 2026-06-25 consumer batch + backfill of earlier-merged ops.  The nimox
+# fit/apply seam (histogram split, mesh-loss geometry, implicit registration)
+# plus the classification / surface metrics and the midpoint / local-
+# linearization integrators that shipped without a catalogue entry.
+# ---------------------------------------------------------------------------
+
+
+def _img_1d():
+    return jax.random.normal(_key(), (16, 16))
+
+
+def _midpoint_op(y0, t):
+    from nitrix.numerics import midpoint
+
+    return midpoint(_decay_field, y0, t)
+
+
+def _local_lin_op(y0, t):
+    from nitrix.numerics import local_linearization
+
+    return local_linearization(_decay_field, y0, t)
+
+
+def _implicit_spec():
+    from nitrix.register import RegistrationSpec
+
+    return RegistrationSpec(levels=1, iterations=3)
+
+
+def _register_implicit_fixture():
+    from nitrix.register import Rigid
+
+    return _reg_images(), {'model': Rigid(), 'n_iters': 3}
+
+
+def _bool_masks():
+    return (
+        jax.random.uniform(_key(0), (12, 12)) > 0.5,
+        jax.random.uniform(_key(1), (12, 12)) > 0.5,
+    )
+
+
+# bias.histogram_match fit/apply (non-differentiable landmark search; the
+# convenience is apply(.,fit(.)) -- §6.5).
+register(
+    OpInfo(
+        'nitrix.bias.histogram_match_fit',
+        fixture=lambda: ((_img_1d(),), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('Nyul-Udupa reference landmark fit (~9 floats)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.bias.histogram_match_apply',
+        fixture=lambda: (
+            (_img_1d(), jnp.linspace(-2.0, 2.0, 9)),
+            {'threshold_at_mean': False},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('apply fitted landmarks via jnp.interp',),
+    )
+)
+
+# geometry dense differentiable distance kernels (mesh-loss substrate).
+register(
+    OpInfo(
+        'nitrix.geometry.segment_segment_sq_dist',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (5, 3)),
+                jax.random.normal(_key(1), (5, 3)),
+                jax.random.normal(_key(2), (5, 3)),
+                jax.random.normal(_key(3), (5, 3)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('Ericson clamped segment-segment squared distance',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.geometry.point_set_nearest_sq_dist',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (12, 3)),
+                jax.random.normal(_key(1), (20, 3)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'dense per-query nearest squared distance (chamfer core)',
+        ),
+    )
+)
+
+# sparse mesh-topology primitives.
+register(
+    OpInfo(
+        'nitrix.sparse.face_normals',
+        fixture=lambda: (_tetra_mesh(), {}),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=('unit per-face cross-product normals',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.sparse.edge_face_adjacency',
+        fixture=lambda: ((_tetra_mesh()[1],), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        skip_jit=True,
+        invariants=('shared-edge face pairs', 'host-side construction'),
+    )
+)
+
+# register implicit-diff differentiable layer (end-to-end optimiser; the
+# differentiability IS the implicit-function backward -- probe-skipped like the
+# forward recipes).
+register(
+    OpInfo(
+        'nitrix.register.register_implicit',
+        fixture=_register_implicit_fixture,
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('single-level implicit-function differentiable register',),
+        notes='IFT-differentiable w.r.t. images; self-contained matrix',
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.rigid_register_implicit',
+        fixture=lambda: (
+            _reg_images(),
+            {'spec': _implicit_spec()},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('coarse-to-fine rigid, each level implicit',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.register.affine_register_implicit',
+        fixture=lambda: (
+            _reg_images(),
+            {'spec': _implicit_spec()},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('coarse-to-fine affine, each level implicit',),
+    )
+)
+
+# numerics integrators that shipped without a catalogue entry.
+register(
+    OpInfo(
+        'nitrix.numerics.midpoint',
+        fixture=_ode_fixture,
+        fn_override=_midpoint_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('explicit midpoint (RK2) via lax.scan',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.numerics.local_linearization',
+        fixture=_ode_fixture,
+        fn_override=_local_lin_op,
+        diff_arg=0,
+        vmap_arg=0,
+        invariants=('Ozaki local-linearization (A-stable exponential)',),
+    )
+)
+
+# metrics classification + surface tiers.
+register(
+    OpInfo(
+        'nitrix.metrics.roc_auc',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (32,)),
+                (jax.random.uniform(_key(1), (32,)) > 0.5).astype(jnp.int32),
+            ),
+            {},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('rank / Mann-Whitney AUC (tie-corrected)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.confusion_matrix',
+        fixture=lambda: (
+            (
+                jax.random.randint(_key(0), (32,), 0, 4),
+                jax.random.randint(_key(1), (32,), 0, 4),
+            ),
+            {'num_classes': 4},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('bincount(target*C+pred) confusion matrix',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.topk_accuracy',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(0), (32, 5)),
+                jax.random.randint(_key(1), (32,), 0, 5),
+            ),
+            {'k': 2},
+        ),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('top-k label-hit fraction',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.hausdorff95',
+        fixture=lambda: ((_bool_masks()), {}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('95th-percentile symmetric surface distance (MONAI)',),
+    )
+)
+register(
+    OpInfo(
+        'nitrix.metrics.surface_dice',
+        fixture=lambda: (_bool_masks(), {'tolerance': 1.0}),
+        diff_arg=None,
+        vmap_arg=None,
+        invariants=('normalised surface Dice at tolerance (MONAI)',),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------
 
