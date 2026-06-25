@@ -4916,6 +4916,72 @@ for _name, _inv in (
     )
 
 
+# mixed-effects predict surface (nimox-estimators Tier-3 B): BLUP ranef +
+# conditional prediction (LME opt-in retain_blups, GLMM modes always retained).
+def _mixed_predict_setup():
+    from nitrix.stats import glmm_fit, glmm_predict, ranef
+    from nitrix.stats.lme import lme_fit, lme_predict
+
+    rng = np.random.default_rng(0)
+    q, per, p, v = 6, 10, 2, 4
+    n = q * per
+    x_mat = jnp.asarray(rng.standard_normal((n, p)).astype(np.float32))
+    x_mat = x_mat.at[:, 0].set(1.0)
+    grp = jnp.asarray(np.repeat(np.arange(q), per).astype(np.int32))
+    lme_res = lme_fit(
+        jnp.asarray(rng.standard_normal((v, n)).astype(np.float32)),
+        x_mat,
+        group=grp,
+        retain_blups=True,
+    )
+    glmm_res = glmm_fit(
+        jnp.asarray((rng.uniform(size=(v, n)) > 0.5).astype(np.float32)),
+        x_mat,
+        group=grp,
+        family='binomial',
+    )
+    return {
+        'lme_predict': (
+            lambda x_: lme_predict(
+                lme_res, x_, group=grp, level='conditional'
+            ),
+            lambda: ((x_mat,), {}),
+        ),
+        'glmm_predict': (
+            lambda x_: glmm_predict(
+                glmm_res, x_, group=grp, level='conditional'
+            ),
+            lambda: ((x_mat,), {}),
+        ),
+        'ranef': (lambda: ranef(lme_res), lambda: ((), {})),
+    }
+
+
+_MIXED_OPS = _mixed_predict_setup()
+
+for _qn, _key, _inv in (
+    (
+        'nitrix.stats.lme.lme_predict',
+        'lme_predict',
+        'conditional BLUP predict',
+    ),
+    ('nitrix.stats.glmm_predict', 'glmm_predict', 'conditional GLMM predict'),
+    ('nitrix.stats.lme.ranef', 'ranef', 'random-effect modes (BLUPs)'),
+    ('nitrix.stats.ranef', 'ranef', 'random-effect modes (BLUPs)'),
+):
+    _mop, _mfx = _MIXED_OPS[_key]
+    register(
+        OpInfo(
+            _qn,
+            fixture=_mfx,
+            fn_override=_mop,
+            diff_arg=None,
+            vmap_arg=None,
+            invariants=(_inv,),
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Host snapshot
 # ---------------------------------------------------------------------------

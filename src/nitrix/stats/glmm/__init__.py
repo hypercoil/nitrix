@@ -72,6 +72,7 @@ import numpy as np
 from jaxtyping import Array, Float, Int
 
 from .._family import GAUSSIAN, Family, resolve_family
+from ..lme._blup import PredictLevel, _conditional_eta
 from ._agq import _glmm_agq_slope
 from ._base import _AGQ_MAX_NODES, GLMMResult
 from ._laplace import _glmm_laplace, _glmm_laplace_slope
@@ -82,7 +83,7 @@ from ._pql import (
     _glmm_slope_structured,
 )
 
-__all__ = ['GLMMResult', 'glmm_fit']
+__all__ = ['GLMMResult', 'glmm_fit', 'glmm_predict']
 
 GLMMStructure = Literal['unstructured', 'diagonal']
 GLMMMethod = Literal['pql', 'laplace', 'agq']
@@ -379,3 +380,60 @@ def glmm_fit(
     if n_groups <= few_level_max:
         return _glmm_few_level(*args)
     return _glmm_many_level(*args)
+
+
+def glmm_predict(
+    result: GLMMResult,
+    X: Float[Array, 'N p'],
+    *,
+    z: Optional[Float[Array, 'N r']] = None,
+    group: Optional[Int[Array, 'N']] = None,
+    level: PredictLevel = 'population',
+    type: Literal['response', 'link'] = 'response',
+) -> Float[Array, 'V N']:
+    """Per-element GLMM prediction on a (new) design ``X``.
+
+    The mixed-model apply half: the linear predictor ``eta = X beta_hat``
+    (``level='population'``, the marginal mean) optionally plus the
+    subject-specific random-effect contribution ``Z b_group``
+    (``level='conditional'``, using the BLUPs ``GLMMResult`` always retains),
+    then mapped through the link.  ``type='link'`` returns ``eta``;
+    ``type='response'`` (default) returns ``family.linkinv(eta)`` (the mean
+    response -- a probability / rate / count).
+
+    Parameters
+    ----------
+    result
+        A :class:`GLMMResult` from :func:`glmm_fit`.
+    X
+        ``(N, p)`` fixed-effect design (same columns as the fit).
+    z
+        ``(N, r)`` random-effect design for the new rows (a random-slope fit);
+        ``None`` for a scalar intercept.
+    group
+        ``(N,)`` integer group labels indexing the fitted levels ``0..q-1``;
+        an out-of-range / ``None`` group falls back to the marginal mean.
+    level
+        ``'population'`` (marginal) or ``'conditional'`` (subject-specific).
+    type
+        ``'response'`` (the mean) or ``'link'`` (the linear predictor).
+
+    Returns
+    -------
+    ``(V, N)`` predictions.  Differentiable w.r.t. ``X`` / ``z``.
+    """
+    eta = _conditional_eta(
+        result.beta_hat,
+        jnp.asarray(X, result.beta_hat.dtype),
+        level=level,
+        blups=result.blups,
+        z=z,
+        group=group,
+    )
+    if type == 'link':
+        return eta
+    if type == 'response':
+        return result.family.linkinv(eta)
+    raise ValueError(
+        f"glmm_predict: type={type!r}; expected 'response' or 'link'."
+    )
