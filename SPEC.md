@@ -461,8 +461,9 @@ needs.
 ### 6.3 Upstream contract
 `thrux` wraps nitrix kernels in container-aware raise/lower pairs; `bitsjax`
 packages ops as tensorbids operators / resolver steps; `nimox` wraps primitives
-in Equinox modules and owns scalarisation (§5). `ilex`/`entense` import those, not
-nitrix directly (allowed but discouraged for pure-tensor internals).
+in Equinox modules and owns scalarisation (§5) and the stateful fit/transform
+estimator container (§6.5). `ilex`/`entense` import those, not nitrix directly
+(allowed but discouraged for pure-tensor internals).
 
 ### 6.4 Structural rules (firm)
 - **No new top-level subpackage without a substrate-composition story** (no
@@ -473,6 +474,44 @@ nitrix directly (allowed but discouraged for pure-tensor internals).
 - **No "message-passing" base class.** Graph/mesh ops are reductions over ELL.
 - **No hardware-specific code paths** beyond the `pallas-cuda` / `jax` pair.
 - **Prefer a keyword over forking a function.**
+
+### 6.5 Estimator (fit/apply) seam  [NORMATIVE]
+
+The estimator analogue of the score-kernel ↔ scalarisation boundary (§5).
+`nimox.estimators` is an immutable, sklearn-style `fit`/`transform` façade
+(Equinox PyTree modules). An estimator is, reduced, a `(fitted_state, apply_fn)`
+pair; the seam puts the **container** in nimox and the **numerics + conventions**
+in nitrix:
+
+- **nitrix** exposes the irreducible seam as a **pure function pair** —
+  `fit(reference, …) -> state` and `apply(input, state, …) -> output` — where
+  `state` is plain arrays (a landmark vector, basis coefficients, a transform
+  matrix), never a module. A fitted quantity a consumer would otherwise
+  recompute every call, or a convention a consumer would otherwise replicate, is
+  owned here.
+- **nimox** owns the **stateful immutable container**: it holds `state` in its
+  PyTree, serialises it (`eqx.tree_serialise_leaves`), `vmap`-fits it, and calls
+  nitrix's `apply` in `transform`. The fit/transform lifecycle, registries, and
+  pipeline composition are nimox's.
+
+Invariants:
+1. nitrix never returns or requires a module / estimator object — `fit` returns
+   arrays, `apply` is a pure function of `(input, state)`. (This is §6.4's
+   no-PyTree-modules rule, stated for the estimator pattern.)
+2. The single-call convenience (`op(source, reference, …)`) is retained and
+   **defined as** `apply(source, fit(reference, …))`, so the split is
+   byte-faithful by construction (no second reduction-order / dtype-promotion
+   path to drift).
+3. nitrix **owns any convention that crosses the fit/apply boundary** (a matrix
+   centring convention, a landmark-length invariant, a dtype-promotion rule) and
+   validates it at `apply`; a consumer replicating that convention is a boundary
+   violation, resolved by exposing the seam here rather than in the consumer.
+
+Examples: `bias.histogram_match_fit` / `_apply` (the reference landmark vector is
+the state); `register.register_implicit` returning the self-contained `.matrix`
+(nitrix owns the centring conjugation, not the consumer). See
+`docs/feature-requests/nimox-histogram-match-fit-apply.md` and
+`docs/feature-requests/nimox-differentiable-registration-layer.md`.
 
 ---
 
