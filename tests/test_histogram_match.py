@@ -31,7 +31,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from nitrix.bias import histogram_match
+from nitrix.bias import (
+    histogram_match,
+    histogram_match_apply,
+    histogram_match_fit,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -177,6 +181,90 @@ def test_endpoints_map_to_reference_extrema():
     src_argmax = int(np.argmax(src))
     assert abs(float(out.flat[src_argmin]) - float(ref.min())) < 1e-5
     assert abs(float(out.flat[src_argmax]) - float(ref.max())) < 1e-5
+
+
+# ---------------------------------------------------------------------------
+# fit / apply seam (§6.5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'kwargs',
+    [
+        {},  # ITK default: threshold_at_mean=True, mean landmark inserted
+        {'threshold_at_mean': False},
+        {'n_match_points': 5, 'n_histogram_levels': 256},
+    ],
+)
+def test_convenience_equals_fit_then_apply_byteexact(kwargs):
+    # The convenience IS apply(source, fit(reference)) -- same dtype on both
+    # sides (the norm), so the composition is byte-identical, not merely
+    # close.  This is the §6.5 byte-faithful-by-construction invariant.
+    src, ref = _synth_pair(seed=2, n=24)
+    src_j, ref_j = jnp.asarray(src), jnp.asarray(ref)
+    via_convenience = np.asarray(histogram_match(src_j, ref_j, **kwargs))
+    landmarks = histogram_match_fit(
+        ref_j,
+        reference_weight=None,
+        **{k: v for k, v in kwargs.items() if k != 'source_weight'},
+    )
+    via_split = np.asarray(histogram_match_apply(src_j, landmarks, **kwargs))
+    np.testing.assert_array_equal(via_split, via_convenience)
+
+
+def test_fit_returns_resolved_landmark_vector():
+    # threshold_at_mean=True with no weight inserts the mean landmark
+    # (extrema + mean + n match points = n + 3); False / explicit weight
+    # gives the simpler extrema + n match points = n + 2.
+    _, ref = _synth_pair(seed=7, n=20)
+    ref_j = jnp.asarray(ref)
+    with_mean = histogram_match_fit(ref_j, n_match_points=7)
+    without_mean = histogram_match_fit(
+        ref_j, n_match_points=7, threshold_at_mean=False
+    )
+    assert with_mean.shape == (7 + 3,)
+    assert without_mean.shape == (7 + 2,)
+    # Landmarks are non-decreasing (quantile-ordered intensities).
+    assert np.all(np.diff(np.asarray(with_mean)) >= -1e-5)
+
+
+def test_apply_to_many_sources_reuses_one_fit():
+    # Fit the reference once, apply to several sources -- each result equals
+    # the single-pair convenience (the whole point of the split).
+    _, ref = _synth_pair(seed=9, n=24)
+    ref_j = jnp.asarray(ref)
+    landmarks = histogram_match_fit(ref_j)
+    for s in range(3):
+        src = (
+            np.random.default_rng(100 + s)
+            .uniform(0.0, 1.0, (24, 24, 24))
+            .astype(np.float32)
+        )
+        src_j = jnp.asarray(src)
+        np.testing.assert_array_equal(
+            np.asarray(histogram_match_apply(src_j, landmarks)),
+            np.asarray(histogram_match(src_j, ref_j)),
+        )
+
+
+def test_apply_rejects_landmark_length_mismatch():
+    # Fit with the mean landmark (length n+3) but apply with
+    # threshold_at_mean=False (source length n+2) -> malformed interp,
+    # caught at the apply boundary.
+    src, ref = _synth_pair(seed=10, n=16)
+    landmarks = histogram_match_fit(jnp.asarray(ref))  # has the mean landmark
+    with pytest.raises(ValueError):
+        histogram_match_apply(
+            jnp.asarray(src), landmarks, threshold_at_mean=False
+        )
+
+
+def test_fit_apply_jit_compatible():
+    src, ref = _synth_pair(seed=12, n=20)
+    landmarks = jax.jit(histogram_match_fit)(jnp.asarray(ref))
+    out = jax.jit(histogram_match_apply)(jnp.asarray(src), landmarks)
+    assert out.shape == src.shape
+    assert jnp.isfinite(out).all()
 
 
 # ---------------------------------------------------------------------------

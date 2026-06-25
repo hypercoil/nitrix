@@ -60,7 +60,23 @@ from typing import Optional, Tuple
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-__all__ = ['histogram_match']
+__all__ = [
+    'histogram_match',
+    'histogram_match_fit',
+    'histogram_match_apply',
+]
+
+
+def _validate_hist_params(
+    n_match_points: int, n_histogram_levels: int
+) -> None:
+    """Shared static-argument validation for the fit / apply / convenience."""
+    if n_match_points < 1:
+        raise ValueError(f'n_match_points must be >= 1, got {n_match_points}')
+    if n_histogram_levels < 2:
+        raise ValueError(
+            f'n_histogram_levels must be >= 2, got {n_histogram_levels}'
+        )
 
 
 def _match_points(
@@ -176,6 +192,144 @@ def _landmarks_for(
     return jnp.concatenate([bin_min[None], m, bin_max[None]]), False
 
 
+def histogram_match_fit(
+    reference: Float[Array, '*spatial'],
+    *,
+    reference_weight: Optional[Float[Array, '*spatial']] = None,
+    n_match_points: int = 7,
+    n_histogram_levels: int = 1024,
+    threshold_at_mean: bool = True,
+) -> Float[Array, ' landmarks']:
+    """Fit the reference standard-scale landmarks (the ``apply`` target).
+
+    The *fit* half of the Nyul-Udupa "fit a standard scale once, apply to
+    many subjects" workflow: derive the reference image's landmark
+    intensities -- the outer extrema, the optional mean landmark, and the
+    ``n_match_points`` interior quantile landmarks -- so the same standard
+    scale can be applied to many sources via :func:`histogram_match_apply`
+    without re-deriving them (and without carrying the reference volume).
+
+    Parameters
+    ----------
+    reference
+        Image whose intensity distribution defines the target CDF.
+    reference_weight
+        Optional mask / confidence (see :func:`histogram_match`).  Passing
+        a weight overrides the ITK-style ``threshold_at_mean`` policy.
+    n_match_points, n_histogram_levels, threshold_at_mean
+        As :func:`histogram_match`.  The **same** values must be passed to
+        :func:`histogram_match_apply`, or the source and reference landmark
+        vectors disagree in length (``apply`` validates this).
+
+    Returns
+    -------
+    The resolved reference landmark vector, ``(n_match_points + 2,)`` --
+    or ``(n_match_points + 3,)`` when ``threshold_at_mean`` inserts the
+    mean landmark (``threshold_at_mean=True`` with no ``reference_weight``).
+    The mean landmark, if any, is already folded in, so ``apply`` is
+    unambiguous.
+
+    Notes
+    -----
+    Computed in ``result_type(reference.dtype, float32)`` (the fp32 floor
+    of the scientific core); ``apply`` upcasts to its own working dtype.
+    Not differentiable through the histogram binning (see
+    :func:`histogram_match`).
+    """
+    _validate_hist_params(n_match_points, n_histogram_levels)
+    ref = jnp.asarray(reference)
+    dtype = jnp.result_type(ref.dtype, jnp.float32)
+    landmarks, _ = _landmarks_for(
+        ref,
+        reference_weight,
+        threshold_at_mean,
+        n_bins=n_histogram_levels,
+        n_match_points=n_match_points,
+        dtype=dtype,
+    )
+    return landmarks
+
+
+def histogram_match_apply(
+    source: Float[Array, '*spatial'],
+    landmarks: Float[Array, ' landmarks'],
+    *,
+    source_weight: Optional[Float[Array, '*spatial']] = None,
+    n_match_points: int = 7,
+    n_histogram_levels: int = 1024,
+    threshold_at_mean: bool = True,
+) -> Float[Array, '*spatial']:
+    """Remap ``source`` onto fitted reference ``landmarks``.
+
+    The *apply* half of the two-phase workflow: derive ``source``'s own
+    landmarks (source-specific -- they cannot be precomputed) and map its
+    intensities through the piecewise-linear interpolant from the source
+    landmarks to the fitted reference ``landmarks`` (the output of
+    :func:`histogram_match_fit`).
+
+    Parameters
+    ----------
+    source
+        Image to remap, ``(*spatial)``.
+    landmarks
+        The fitted reference landmark vector from
+        :func:`histogram_match_fit` (the standard scale).
+    source_weight
+        Optional mask / confidence for the source histogram (see
+        :func:`histogram_match`); overrides ``threshold_at_mean`` on the
+        source side.
+    n_match_points, n_histogram_levels, threshold_at_mean
+        Must match the values passed to :func:`histogram_match_fit` (the
+        source landmark structure has to mirror the reference's).
+
+    Returns
+    -------
+    The remapped image, same shape and dtype as ``source``.
+
+    Raises
+    ------
+    ValueError
+        If the source landmark vector's length disagrees with
+        ``landmarks`` -- i.e. the ``threshold_at_mean`` / weight policy
+        resolved to a different landmark structure than the fit did.
+
+    Notes
+    -----
+    Differentiability is unchanged from :func:`histogram_match`: the
+    landmark search is non-differentiable; gradients flow through the
+    ``jnp.interp`` apply via the reference ``landmarks``.
+    """
+    _validate_hist_params(n_match_points, n_histogram_levels)
+    src = jnp.asarray(source)
+    ref_landmarks = jnp.asarray(landmarks)
+    out_dtype = src.dtype
+    dtype = jnp.result_type(src.dtype, ref_landmarks.dtype, jnp.float32)
+    src_landmarks, _ = _landmarks_for(
+        src,
+        source_weight,
+        threshold_at_mean,
+        n_bins=n_histogram_levels,
+        n_match_points=n_match_points,
+        dtype=dtype,
+    )
+    if src_landmarks.shape[-1] != ref_landmarks.shape[-1]:
+        raise ValueError(
+            f'source landmarks ({src_landmarks.shape[-1]}) and reference '
+            f'landmarks ({ref_landmarks.shape[-1]}) differ in length.  The '
+            'source threshold_at_mean / weight policy must resolve to the '
+            'same landmark structure histogram_match_fit used (threshold_at_'
+            'mean with no weight inserts a mean landmark): pass the same '
+            'n_match_points and threshold_at_mean, and a source_weight only '
+            'if the reference was fit with a reference_weight.'
+        )
+    mapped = jnp.interp(
+        src.astype(dtype).reshape(-1),
+        src_landmarks,
+        ref_landmarks.astype(dtype),
+    )
+    return mapped.reshape(src.shape).astype(out_dtype)
+
+
 def histogram_match(
     source: Float[Array, '*spatial'],
     reference: Float[Array, '*spatial'],
@@ -251,18 +405,31 @@ def histogram_match(
     ``source_weight`` but ``reference_weight=None`` -- ``ValueError`` is
     raised.
 
+    Because this composes the public split, the reference landmarks are
+    fit in ``result_type(reference.dtype, float32)``; when ``source`` and
+    ``reference`` have **different** dtypes (e.g. float64 vs float32) this
+    promotes reference-first rather than promoting both together, a
+    sub-ULP shift versus a single shared promotion.  Identical dtypes (the
+    norm) are byte-unchanged.
+
     See Also
     --------
+    histogram_match_fit, histogram_match_apply :
+        The two phases this composes.  ``histogram_match(source,
+        reference)`` is exactly ``histogram_match_apply(source,
+        histogram_match_fit(reference))`` (the §6.5 fit/apply seam) -- use
+        the split when one reference is matched to **many** sources, so the
+        ~9 reference landmarks are derived once instead of per call.
     sharpen_histogram :
         N3 Wiener log-histogram deconvolution -- a different op on a
         single image's histogram (no reference involved).
     """
-    if n_match_points < 1:
-        raise ValueError(f'n_match_points must be >= 1, got {n_match_points}')
-    if n_histogram_levels < 2:
-        raise ValueError(
-            f'n_histogram_levels must be >= 2, got {n_histogram_levels}'
-        )
+    _validate_hist_params(n_match_points, n_histogram_levels)
+    # Keep the precise early error for a mismatched threshold / weight policy
+    # (clearer than the length-mismatch ``apply`` would raise); it only raises
+    # earlier on an invalid combo ``apply`` also rejects, so valid outputs are
+    # unchanged.  The body is then literally apply(source, fit(reference)) -- so
+    # the convenience is byte-faithful to the split by construction (§6.5).
     src_has_mean = threshold_at_mean and source_weight is None
     ref_has_mean = threshold_at_mean and reference_weight is None
     if src_has_mean != ref_has_mean:
@@ -272,32 +439,18 @@ def histogram_match(
             'reference must agree.  Pass weights on both sides or '
             'neither, or set threshold_at_mean=False.'
         )
-
-    src = jnp.asarray(source)
-    ref = jnp.asarray(reference)
-    out_dtype = src.dtype
-    dtype = jnp.result_type(src.dtype, ref.dtype, jnp.float32)
-
-    src_landmarks, _ = _landmarks_for(
-        src,
-        source_weight,
-        threshold_at_mean,
-        n_bins=n_histogram_levels,
+    landmarks = histogram_match_fit(
+        reference,
+        reference_weight=reference_weight,
         n_match_points=n_match_points,
-        dtype=dtype,
+        n_histogram_levels=n_histogram_levels,
+        threshold_at_mean=threshold_at_mean,
     )
-    ref_landmarks, _ = _landmarks_for(
-        ref,
-        reference_weight,
-        threshold_at_mean,
-        n_bins=n_histogram_levels,
+    return histogram_match_apply(
+        source,
+        landmarks,
+        source_weight=source_weight,
         n_match_points=n_match_points,
-        dtype=dtype,
+        n_histogram_levels=n_histogram_levels,
+        threshold_at_mean=threshold_at_mean,
     )
-
-    mapped = jnp.interp(
-        src.astype(dtype).reshape(-1),
-        src_landmarks,
-        ref_landmarks,
-    )
-    return mapped.reshape(src.shape).astype(out_dtype)

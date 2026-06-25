@@ -31,14 +31,22 @@ naturally (``histogram_match``):
   Udupa 1999): remap a source image's intensities so its CDF matches a
   reference image's, ITK-faithful to
   ``HistogramMatchingImageFilter``.  Composes with N4 as an "N4 then
-  match to a reference template" intensity-standardise recipe.
+  match to a reference template" intensity-standardise recipe.  The
+  ``histogram_match_fit`` / ``histogram_match_apply`` split exposes its
+  fit/apply seam (§6.5) -- fit a reference's ~9 standard-scale landmarks
+  once, apply to many sources -- with ``histogram_match`` the convenience
+  composition.
 
 See ``docs/design/bias-field.md`` for the derivation, the parity-vs-
 correctness discussion, and the "no Pallas needed" rationale.
 """
 
 from ._bspline import bspline_approximate
-from ._histogram_match import histogram_match
+from ._histogram_match import (
+    histogram_match,
+    histogram_match_apply,
+    histogram_match_fit,
+)
 from ._sharpen import sharpen_histogram
 from .correction import bias_field_correction
 from .n4 import n4_bias_field_correction
@@ -49,4 +57,6 @@ __all__ = [
     'bspline_approximate',
     'sharpen_histogram',
     'histogram_match',
+    'histogram_match_fit',
+    'histogram_match_apply',
 ]
