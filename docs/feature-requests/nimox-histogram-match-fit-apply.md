@@ -1,6 +1,20 @@
 # Two-phase `histogram_match` (fit reference landmarks once, apply to many)
 
-> **Status (2026-06-25): request (nimox-estimators E2 → nitrix).** A small
+> **Status (2026-06-25): SHIPPED.** `bias.histogram_match_fit(reference, ...)
+> -> landmarks` and `bias.histogram_match_apply(source, landmarks, ...)` are
+> public (`_histogram_match.py`); `histogram_match(source, reference)` is now
+> **literally** `apply(source, fit(reference))`, so the convenience is
+> byte-faithful to the split by construction (the §6.5 estimator-seam
+> invariant), verified **exact** on the shared-dtype path (a mixed src/ref
+> dtype promotes reference-first — a documented sub-ULP shift). `apply`
+> validates the landmark-length agreement at the boundary. nimox
+> `FittedHistogramMatch` can now carry the ~9-float landmark vector and delegate
+> `transform` to `histogram_match_apply`, dropping the stored reference volume.
+> Merged to local main. Tests: byte-exact convenience==compose (parametrized),
+> resolved-landmark length, apply-to-many-sources reuse, length-mismatch raise,
+> fit/apply under `jit`. Acceptance below met.
+>
+> **Original request (2026-06-25): nimox-estimators E2 → nitrix.** A small
 > API-shape refinement to the shipped `nitrix.bias.histogram_match`. The
 > single-pair `histogram_match(source, reference)` re-derives the **reference**
 > landmarks on every call. nimox's new `HistogramMatch` estimator
