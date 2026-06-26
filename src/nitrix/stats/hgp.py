@@ -68,7 +68,7 @@ from ._batching import blocked_vmap
 from ._hsgp import _hsgp_domain, _hsgp_eigen, _hsgp_features
 from ._penreml import mb_fs, mb_quantities, mb_reml_nll
 from ._result import register_result
-from .gp import _parabolic_argmin
+from .gp import _parabolic_argmin_jax
 
 __all__ = [
     'HGPResult',
@@ -388,7 +388,10 @@ def hgp_fit(
     # Validate the label range host-side: jax.nn.one_hot maps any label >= L or
     # < 0 to an all-zero row, so an out-of-range/negative label would silently
     # drop that observation out of the group structure (a wrong-but-finite fit).
-    g_min, g_max = int(jnp.min(group)), int(jnp.max(group))
+    # NumPy (not jnp.min) so the concrete closed-over `group` does not concretise
+    # a tracer under jax.jit -- the grouping is static, like the covariate domain.
+    group_np = np.asarray(group)
+    g_min, g_max = int(group_np.min()), int(group_np.max())
     L = int(n_levels) if n_levels is not None else g_max + 1
     if g_min < 0 or g_max >= L:
         raise ValueError(
@@ -411,7 +414,8 @@ def hgp_fit(
                 f'hgp_fit: group_inner ({group_inner.shape[0]}) must have '
                 f'length N={n}.'
             )
-        gi_min, gi_max = int(jnp.min(group_inner)), int(jnp.max(group_inner))
+        gi_np = np.asarray(group_inner)
+        gi_min, gi_max = int(gi_np.min()), int(gi_np.max())
         L2 = int(n_levels_inner) if n_levels_inner is not None else gi_max + 1
         if gi_min < 0 or gi_max >= L2:
             raise ValueError(
@@ -514,8 +518,12 @@ def hgp_fit(
 
     log_rho_grid_j = jnp.asarray(log_rho_grid, dtype=Y.dtype)
     nll_grid = jax.lax.map(_pooled_nll, log_rho_grid_j)  # (n_rho,) on-device
-    log_rho_hat = _parabolic_argmin(log_rho_grid, np.asarray(nll_grid))
-    rho_hat = float(np.exp(log_rho_hat))
+    # Traceable rho refinement (mirrors gp_fit's HSGP epilogue): the JAX-native
+    # parabolic argmin keeps rho_hat a traced scalar, so the shared Gaussian-HSGP
+    # search runs under jax.jit / jax.vmap with the covariate domain and grouping
+    # closed over (e.g. vmap-fit over datasets sharing a covariate / factor).
+    log_rho_hat = _parabolic_argmin_jax(log_rho_grid_j, nll_grid)
+    rho_hat = jnp.exp(log_rho_hat)
 
     # --- final per-element fit at rho_hat -----------------------------------
     d_blocks, ranks, log_pdets, block_cols = _blocks(rho_hat)
@@ -536,7 +544,7 @@ def hgp_fit(
     sigma_gp2 = [
         sigma_e2 / jnp.clip(lam[:, k], 1e-30, None) for k in range(n_blocks)
     ]
-    log_rho_col = jnp.full_like(sigma_e2, np.log(rho_hat))
+    log_rho_col = jnp.full_like(sigma_e2, jnp.log(rho_hat))
     theta = jnp.stack(
         [jnp.log(jnp.clip(s, 1e-30, None)) for s in sigma_gp2]
         + [jnp.log(jnp.clip(sigma_e2, 1e-30, None)), log_rho_col],
