@@ -221,15 +221,39 @@ def _load_catalogue() -> set[str]:
 
 def _public_ops() -> dict[str, object]:
     """Every callable, non-class public symbol across the subpackages,
-    keyed by ``<subpkg>.<name>``."""
+    keyed by ``<subpkg>.<name>``.
+
+    A *cross-level* re-export -- a parent package re-exporting a subpackage op --
+    is **one** op for the matrix.  The mixed-effects ops live in ``stats.lme`` but
+    are also hoisted into ``stats`` (parity with the sibling fitters ``glm`` /
+    ``gam`` / ``gp`` / ``glmm``, which are all top-level), so the same function
+    object is reachable as both ``stats.lme.lme_fit`` and ``stats.lme_fit``.  Key
+    it once, under its most-specific (home submodule) path, so a single catalogue
+    / EXCLUDE entry covers it -- never two (which would double-count it in the
+    perf-bench join) and never a spurious "uncataloged alias" miss.
+
+    *Same-level* aliases (two names in one subpackage for one object, e.g. the
+    legacy ``geometry.rescale`` -> ``resample``) are **not** collapsed: the
+    EXCLUDE allowlist tracks each individually, so both must stay visible.
+    """
     ops: dict[str, object] = {}
+    canonical: dict[int, str] = {}  # id(obj) -> its most-specific public key
     for sp in SUBPKGS:
         mod = importlib.import_module('nitrix.' + sp)
         for name in getattr(mod, '__all__', []):
             obj = getattr(mod, name, None)
             if obj is None or not callable(obj) or inspect.isclass(obj):
                 continue
-            ops[f'{sp}.{name}'] = obj
+            key = f'{sp}.{name}'
+            prev = canonical.get(id(obj))
+            # Collapse only cross-level re-exports (differing path depth); leave
+            # same-depth aliases (e.g. geometry.rescale / resample) both visible.
+            if prev is not None and prev.count('.') != key.count('.'):
+                if prev.count('.') > key.count('.'):
+                    continue  # already keyed under a more specific path
+                del ops[prev]  # this key is more specific; supersede the alias
+            canonical[id(obj)] = key
+            ops[key] = obj
     return ops
 
 

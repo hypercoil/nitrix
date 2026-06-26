@@ -98,7 +98,33 @@ from .betareg import BetaResult, beta_fit, beta_predict
 from .gaulss import GauLSSResult, gaulss_fit, gaulss_predict
 from .ordinal import OrdinalResult, ordinal_fit, ordinal_predict
 from .glmm import GLMMResult, glmm_fit, glmm_predict
-from .lme import ranef
+from .lme import (
+    CorrLMEResult,
+    CorrSpec,
+    CrossedLMEResult,
+    FLAMEResult,
+    GLSResult,
+    LMEContrast,
+    LMEFContrast,
+    LMEResult,
+    NestedLMEResult,
+    REMLResult,
+    VarFunc,
+    ar1,
+    car1,
+    cs,
+    flame_two_level,
+    gls_fit,
+    iid,
+    lme_f_contrast,
+    lme_fit,
+    lme_predict,
+    lme_t_contrast,
+    ranef,
+    reml_fit,
+    var_ident,
+    var_power,
+)
 from .gaussian import gaussian_nll, kl_diagonal_gaussian
 from .glm import (
     BINOMIAL,
@@ -242,6 +268,32 @@ __all__ = [
     'glmm_fit',
     'glmm_predict',
     'ranef',
+    # lme (mixed-effects: also reachable via nitrix.stats.lme, per the sibling
+    # fitter convention -- glm / gam / gp / glmm are all top-level too)
+    'reml_fit',
+    'lme_fit',
+    'lme_predict',
+    'lme_t_contrast',
+    'lme_f_contrast',
+    'flame_two_level',
+    'gls_fit',
+    'REMLResult',
+    'LMEResult',
+    'NestedLMEResult',
+    'CrossedLMEResult',
+    'CorrLMEResult',
+    'FLAMEResult',
+    'GLSResult',
+    'LMEContrast',
+    'LMEFContrast',
+    'CorrSpec',
+    'VarFunc',
+    'ar1',
+    'car1',
+    'cs',
+    'iid',
+    'var_power',
+    'var_ident',
     # beta regression
     'BetaResult',
     'beta_fit',
