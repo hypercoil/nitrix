@@ -40,6 +40,7 @@ from .._batching import blocked_vmap
 from .._optimise import damped_newton
 from .._result import register_result
 from ._blockwoodbury import _nll_and_beta
+from ._blup import _solve_blup_system
 from ._corr import CorrSpec, resolve_corr
 from ._recov import _param_layout, cov_re_from_chol
 from ._varcomp import VarCompSpec
@@ -436,7 +437,7 @@ def gls_fit(
 
 
 @register_result(
-    children=('beta_hat', 'cov_re', 'sigma_e_sq', 'rho', 'log_lik'),
+    children=('beta_hat', 'cov_re', 'sigma_e_sq', 'rho', 'log_lik', 'blups'),
     aux=('corr', 'tier'),
 )
 @dataclass(frozen=True)
@@ -469,6 +470,11 @@ class CorrLMEResult:
     log_lik: Float[Array, 'V']
     corr: str
     tier: str
+    blups: Optional[Float[Array, 'V q r']] = None
+    """``(V, q, r)`` per-group random-effect modes on the whitened residual, or
+    ``None`` when the fit did not retain them (the default ``retain_blups=False``).
+    Read via :func:`~nitrix.stats.ranef`; used by
+    :func:`~nitrix.stats.lme_predict` at ``level='conditional'``."""
 
     @property
     def re_labels(self) -> Tuple[str, ...]:
@@ -598,6 +604,60 @@ def _fit_one_corr_lme(
     return theta, beta, -(base + half_logdet)
 
 
+def _blups_corr(
+    Y: Float[Array, 'V N'],
+    X: Float[Array, 'N p'],
+    z_pad: Float[Array, 'G T r'],
+    idx: Int[Array, 'G T'],
+    mask_f: Float[Array, 'G T'],
+    layout: GroupLayout,
+    corr: CorrSpec,
+    beta_hat: Float[Array, 'V p'],
+    cov_re: Float[Array, 'V r r'],
+    sigma_e_sq: Float[Array, 'V'],
+    raw_hat: Float[Array, 'V k'],
+    r: int,
+) -> Float[Array, 'V q r']:
+    """Per-group random-effect modes for the R2 + corr tier.
+
+    The standard mixed-model-equation BLUP on **whitened** ``(Z_g, r_g)``: with
+    the per-voxel converged ``rho`` the group whitener ``W_g`` gives ``Z_g^T
+    R_g^{-1} Z_g = (W_g Z_g)^T (W_g Z_g)`` and ``Z_g^T R_g^{-1} r_g = (W_g Z_g)^T
+    (W_g r_g)``, so the Grams are formed on the whitened padded stack (einsum over
+    the within-group time axis) and fed the shared ``r x r`` solve
+    (:func:`._blup._solve_blup_system`).  Whitening uses the per-voxel ``rho``, so
+    -- unlike the homoscedastic R1/R2 paths -- the ``Z^T Z`` Gram is *not* shared
+    across voxels; the whole pass is ``vmap``-ed over voxels.  Returns ``(V, q,
+    r)`` (``q`` = number of groups).
+    """
+
+    def _one(
+        y: Float[Array, 'N'],
+        beta_v: Float[Array, 'p'],
+        g_v: Float[Array, 'r r'],
+        se_v: Float[Array, ''],
+        raw_v: Float[Array, 'k'],
+    ) -> Float[Array, 'q r']:
+        resid_pad = (y - X @ beta_v)[idx] * mask_f  # (G, T)
+        stack = jnp.concatenate(
+            [z_pad, resid_pad[..., None]], axis=-1
+        )  # (G, T, r+1)
+        w, _ = corr.whiten(
+            stack, layout.gaps, layout.nsize, layout.mask, raw_v
+        )
+        wz = w[..., :r]  # (G, T, r)
+        wr = w[..., -1]  # (G, T)
+        ztz = jnp.einsum('gtr,gts->grs', wz, wz)  # (G, r, r)
+        ztr = jnp.einsum('gtr,gt->gr', wz, wr)  # (G, r)
+        g_inv = small_inv_logdet(g_v, r)[0]  # (r, r)
+        inv_s = 1.0 / se_v
+        a = ztz * inv_s + g_inv[None]  # (G, r, r)
+        rhs = ztr * inv_s  # (G, r)
+        return _solve_blup_system(a, rhs, r)  # (G, r)
+
+    return jax.vmap(_one)(Y, beta_hat, cov_re, sigma_e_sq, raw_hat)
+
+
 def fit_corr_lme(
     Y: Float[Array, 'V N'],
     X: Float[Array, 'N p'],
@@ -610,6 +670,7 @@ def fit_corr_lme(
     n_iter: int = 30,
     damping: float = 1e-6,
     block: Optional[int] = None,
+    retain_blups: bool = False,
 ) -> CorrLMEResult:
     """Voxelwise mixed model with a structured within-group residual (R2 + corr).
 
@@ -672,6 +733,24 @@ def fit_corr_lme(
     )  # (V, r, r)
     sigma_e_sq = jnp.exp(theta_hat[:, nt_g])
     rho = jax.vmap(lambda th: corr.to_natural(th[nt_g + 1 :]))(theta_hat)
+    blups = (
+        _blups_corr(
+            Y,
+            X,
+            z_pad,
+            idx,
+            mask_f,
+            layout,
+            corr,
+            beta_hat,
+            cov_re,
+            sigma_e_sq,
+            theta_hat[:, nt_g + 1 :],  # the per-voxel corr raw params
+            r,
+        )
+        if retain_blups
+        else None
+    )
     return CorrLMEResult(
         beta_hat=beta_hat,
         cov_re=cov_re,
@@ -680,4 +759,5 @@ def fit_corr_lme(
         log_lik=log_lik,
         corr=corr.name,
         tier='R2+corr',
+        blups=blups,
     )
