@@ -32,6 +32,45 @@
 > FR asks whether nitrix can lift it, because the blocker looks small and
 > self-contained.
 
+## Follow-on (2026-06-25): `hgp_fit` — the same fix, and the helper already exists
+
+The **hierarchical** GP `hgp_fit` (the GS factor-smooth / multi-site normative
+model) has the **identical** Gaussian-HSGP rho-search and is **still eager-only**:
+
+```python
+# stats/hgp.py:71
+from .gp import _parabolic_argmin                       # <-- the OLD host helper
+
+# stats/hgp.py:515-518
+log_rho_grid_j = jnp.asarray(log_rho_grid, dtype=Y.dtype)
+nll_grid = jax.lax.map(_pooled_nll, log_rho_grid_j)     # (n_rho,)  PURE JAX already
+log_rho_hat = _parabolic_argmin(log_rho_grid, np.asarray(nll_grid))  # <-- host
+rho_hat = float(np.exp(log_rho_hat))                    # <-- host: concretise
+# stats/hgp.py:539
+log_rho_col = jnp.full_like(sigma_e2, np.log(rho_hat))  # <-- np.log on a float
+```
+
+This is **lower-effort than the original Tier-A** because the JAX-native
+`_parabolic_argmin_jax` you shipped for `gp_fit` already exists — `hgp_fit` just
+needs to import/use it instead of the host `_parabolic_argmin`, keep
+`rho_hat = jnp.exp(log_rho_hat)` traced (drop the `float()`), and use `jnp.log`
+at line 539. The downstream `_blocks(rho_hat)` already accepts a traced `rho`
+(that is exactly what `_pooled_nll` passes inside the `lax.map` at hgp.py:501),
+and the domain `(lo, hi)` / `group` factor are read from the **concrete**
+covariate / grouping (lines 427-446), so — as with `gp_fit` — this unblocks
+`jit` / `vmap` whenever `x` and `group` are closed over (the
+vmap-over-datasets-sharing-a-covariate-and-grouping case).
+
+**Concrete consumer.** nimox's `HierarchicalGPRegressor` (E8) ships today on the
+eager `hgp_fit` with an eager-only witness test; lifting this flips it to a
+vmap-fit proof (mirroring what the `gp_fit` fix did for
+`GaussianProcessRegressor`). This is a sharper ask than the original passing
+mention ("`hgp_fit` shares the lengthscale-search shape"): it is the **same
+Gaussian-HSGP path** (not one of the deferred non-Gaussian PQL / exact host
+searches), with the helper already written — so it is the natural next
+increment, not the lower-priority tail. fp-parity bar as before (a tracing
+change, not a numerics change); the existing `hgp_fit` tests must stay green.
+
 ## The diagnosis (Gaussian HSGP path — the common one)
 
 ```python
