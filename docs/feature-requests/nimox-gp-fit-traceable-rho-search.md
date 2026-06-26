@@ -34,6 +34,23 @@
 
 ## Follow-on (2026-06-25): `hgp_fit` — the same fix, and the helper already exists
 
+> **Status (2026-06-26): SHIPPED.** `hgp_fit` (Gaussian HSGP) now imports
+> `_parabolic_argmin_jax`, keeps `rho_hat = jnp.exp(log_rho_hat)` traced, and
+> uses `jnp.log` for the `theta` log-rho column — so the shared Gaussian-HSGP
+> path runs under `jax.jit` / `jax.vmap` with the covariate **and grouping**
+> closed over. One adjacent host concretisation also had to move to NumPy: the
+> label-range **validation** (`int(jnp.min(group))`, hgp.py:391, plus the nested
+> `group_inner` twin) was accidentally device-side — its own comment says
+> "host-side", and gp_fit's analogous domain validation is already NumPy — so it
+> now reads the concrete closed-over `group` via `np.asarray` (static, like the
+> covariate domain). **No numerics change** — the eager result is **byte-identical**
+> to baseline (coef/theta/log_mlik max |Δ| = 0.0). `vmap(lambda Y: hgp_fit(Y, x,
+> group, ...))(Y_stack)` fp-matches a loop of eager fits
+> (`tests/test_hgp_traceable.py`, jit + vmap); the 17 existing `hgp_fit` tests
+> stay green. nimox `HierarchicalGPRegressor` (E8) can flip its eager-only
+> witness to a vmap-fit proof. (The non-Gaussian PQL / exact host searches in
+> `gp_fit` remain eager — same deferred tail as the original Tier-A.)
+
 The **hierarchical** GP `hgp_fit` (the GS factor-smooth / multi-site normative
 model) has the **identical** Gaussian-HSGP rho-search and is **still eager-only**:
 
