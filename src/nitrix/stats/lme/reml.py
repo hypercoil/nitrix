@@ -1156,14 +1156,12 @@ def lme_fit(
     """
     group = jnp.asarray(group)
     n_groups = int(jnp.max(group)) + 1
-    if retain_blups and (
-        cross is not None or inner is not None or corr is not None
-    ):
+    if retain_blups and (cross is not None or inner is not None):
         raise NotImplementedError(
             'lme_fit: retain_blups is currently supported for the single-factor '
-            'R1 (scalar intercept) and R2 (random slope) tiers.  Conditional '
-            'BLUPs for crossed (cross=), nested (inner=) and structured-residual '
-            '(corr=) fits are staged; population-level lme_predict works for '
+            'R1 (scalar intercept), R2 (random slope) and R2 + corr (structured '
+            'residual) tiers.  Conditional BLUPs for crossed (cross=) and nested '
+            '(inner=) fits are staged; population-level lme_predict works for '
             'every tier without retaining modes.'
         )
     if z is not None:
@@ -1232,7 +1230,7 @@ def lme_fit(
             if z is None
             else jnp.asarray(z, dtype=Y.dtype)
         )
-        return fit_corr_lme(
+        result = fit_corr_lme(
             Y,
             X,
             z_design,
@@ -1243,7 +1241,13 @@ def lme_fit(
             n_iter=n_iter,
             damping=damping,
             block=block,
+            retain_blups=retain_blups,
         )
+        if retain_blups and z is None and result.blups is not None:
+            # Scalar intercept -> (V, q) (matches R1); an explicit slope keeps
+            # the (V, q, r) modes for the z-weighted conditional predictor.
+            result = replace(result, blups=result.blups[..., 0])
+        return result
 
     if inner is not None:
         # R3: nested two-level hierarchy (1 | g1/g2).

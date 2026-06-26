@@ -1,26 +1,37 @@
 # Public BLUP `predict` for the mixed-effects fitters (LME / GLMM)
 
-> **Status (2026-06-25): SHIPPED (R1/R2/GLMM); R4/R2+corr/R3 staged.**
+> **Status (2026-06-26): SHIPPED (R1/R2/R2+corr/GLMM); R4/R3 staged.**
 > `stats.lme.lme_predict` / `stats.lme.ranef` + `stats.glmm_predict` /
 > `stats.ranef` are public. **Population** level (`X @ beta_hat`) works for
 > **every** tier. **Conditional** (BLUP) level: GLMM (modes always retained)
-> and the LME **R1** (scalar intercept) + **R2** (random slope) tiers via the
-> opt-in `lme_fit(..., retain_blups=False)` (default off), which runs a post-fit
-> mixed-model-equation BLUP pass (`b_g = (Z_g^T Z_g/σ_e² + G^{-1})^{-1}
-> Z_g^T r_g/σ_e²`) — a **post-pass that never touches the inner REML solver**,
-> so the default fit path is **byte-identical** (verified: R1/R2 default result
-> arrays sha-match baseline; 67 existing lme/glmm tests green) and `retain_blups`
-> is **zero-cost when off**. A uniform `ranef(result)` reads the modes across
-> GLMM + the LME tiers; unseen / `None` groups fall back to the marginal mean.
-> Tests: independent MME-BLUP oracle for R1 + R2, GLMM conditional, unseen-group
-> fallback, opt-in contract (`tests/test_mixed_predict.py`).
+> and the LME **R1** (scalar intercept), **R2** (random slope) and **R2 + corr**
+> (structured within-group residual) tiers via the opt-in
+> `lme_fit(..., retain_blups=False)` (default off), which runs a post-fit
+> mixed-model-equation BLUP pass (`b_g = (Z_g^T Σ_g^{-1} Z_g + G^{-1})^{-1}
+> Z_g^T Σ_g^{-1} r_g`) — a **post-pass that never touches the inner REML
+> solver**, so the default fit path is **byte-identical** (verified: R1/R2 and
+> R2+corr `ar1`/`cs` default result arrays sha-match baseline) and `retain_blups`
+> is **zero-cost when off**.
 >
-> **Staged (not yet conditional):** the **crossed (R4)**, **structured-residual
-> (R2+corr)** and **nested (R3)** tiers — their `V` is not block-diagonal-by-
-> group, so the standard post-pass doesn't apply; `retain_blups=True` there
-> raises a clear `NotImplementedError` (population still works).  See the
-> blast-radius note in the handoff thread (R2+corr ≈ R2 + R(ρ) un-whiten; R4 a
-> joint crossed solve; R3 a per-sublevel mode replay).
+> The **R2 + corr** path reuses the *same* mixed-model equation on **whitened**
+> data: with `Cov(eps_g) = σ_e² R_g(ρ)` and the per-group whitener `W_g`
+> (`W_g R_g W_gᵀ = I` ⟹ `W_gᵀ W_g = R_g^{-1}`), `Z_gᵀ R_g^{-1} Z_g =
+> (W_g Z_g)ᵀ(W_g Z_g)` and likewise for `Z_gᵀ R_g^{-1} r_g`, so the BLUP is the
+> standard one on whitened `(Z_g, r_g)` — the per-group `r×r` solve is shared
+> (`_blup._solve_blup_system`), the whitening (per-voxel ρ) lives with the fit's
+> group layout in `_corrfit._blups_corr`. A uniform `ranef(result)` reads the
+> modes across GLMM + the LME tiers; unseen / `None` groups fall back to the
+> marginal mean. Tests: independent dense-`R(ρ)` MME-BLUP oracle for R2+corr
+> (`ar1` + `cs`, scalar + random-slope), the homoscedastic MME oracle for R1 +
+> R2, GLMM conditional, unseen-group fallback, opt-in contract
+> (`tests/test_mixed_predict.py`).
+>
+> **Staged (not yet conditional):** the **crossed (R4)** and **nested (R3)**
+> tiers — two grouping factors, so `V` is not block-diagonal by *either* factor
+> and the modes are two arrays (a contract extension to `ranef` / `lme_predict`,
+> deferred until a consumer needs crossed/nested *conditional* prediction);
+> `retain_blups=True` there raises a clear `NotImplementedError` (population
+> still works for both).
 >
 > **Original request (2026-06-25): nimox-estimators Tier-3 → nitrix.** The mixed-model
 > sibling of [`nimox-stats-response-predict.md`](nimox-stats-response-predict.md),

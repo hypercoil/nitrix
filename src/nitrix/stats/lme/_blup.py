@@ -19,10 +19,18 @@ and R2 random-slope tiers) is the mixed-model-equation form
 computed once at fit (opt-in ``retain_blups=True``) from the converged
 ``(beta, G, sigma_e^2)`` and the training ``(y, X, Z, group)`` -- a post-fit
 pass that never touches the inner REML solver, so the default fit path is
-byte-identical.  The crossed (R4), structured-residual (R2+corr) and nested
-(R3) tiers do **not** have this block-diagonal-by-group structure and are not
-yet covered (``retain_blups`` raises there); the population level works for
-every tier.
+byte-identical.
+
+The structured-residual (R2 + corr) tier reuses the **same** mixed-model
+equation on **whitened** data: with ``Cov(eps_g) = sigma_e^2 R_g(rho)`` and the
+per-group whitener ``W_g`` (``W_g R_g W_g^T = I``, so ``W_g^T W_g = R_g^{-1}``),
+``Z_g^T R_g^{-1} Z_g = (W_g Z_g)^T (W_g Z_g)`` and ``Z_g^T R_g^{-1} r_g =
+(W_g Z_g)^T (W_g r_g)`` -- the standard BLUP on whitened ``(Z_g, r_g)``.  That
+pass lives in :mod:`._corrfit` (where the group/whitening layout is), sharing
+the cuSOLVER-free per-group solve (:func:`_solve_blup_system`) here.  The
+crossed (R4) and nested (R3) tiers do **not** have this single block-diagonal-
+by-group structure and are not yet covered (``retain_blups`` raises there); the
+population level works for every tier.
 """
 
 from __future__ import annotations
@@ -38,6 +46,26 @@ from ...linalg._smalllinalg import small_inv_logdet
 __all__ = ['ranef', 'lme_predict']
 
 PredictLevel = Literal['population', 'conditional']
+
+
+def _solve_blup_system(
+    a: Float[Array, 'q r r'],
+    rhs: Float[Array, 'q r'],
+    r_dim: int,
+) -> Float[Array, 'q r']:
+    """Per-group mixed-model-equation solve ``b_g = a_g^{-1} rhs_g``.
+
+    The shared cuSOLVER-free atom of every BLUP: ``a_g = Z_g^T Sigma_g^{-1} Z_g +
+    G^{-1}`` and ``rhs_g = Z_g^T Sigma_g^{-1} r_g`` per group, vmapped over the
+    ``q`` groups via the ``r x r`` ``small_inv_logdet`` solve.  ``_blups_standard``
+    (segment-sum Grams, ``Sigma = sigma_e^2 I``) and ``_corrfit._blups_corr``
+    (whitened Grams, ``Sigma = sigma_e^2 R(rho)``) assemble ``a`` / ``rhs`` in
+    their own layout and call this for the solve.
+    """
+    solved = jax.vmap(lambda av, bv: small_inv_logdet(av, r_dim)[0] @ bv)(
+        a, rhs
+    )
+    return cast(Float[Array, 'q r'], solved)
 
 
 def _blups_standard(
@@ -78,11 +106,9 @@ def _blups_standard(
     inv_s = 1.0 / sigma_e_sq  # (V,)
     a = ztz[None] * inv_s[:, None, None, None] + g_inv[:, None, :, :]
     rhs = ztr * inv_s[:, None, None]  # (V, q, r)
-
-    def _solve(a_vg: Float[Array, 'r r'], b_vg: Float[Array, ' r']) -> Array:
-        return small_inv_logdet(a_vg, r_dim)[0] @ b_vg
-
-    return jax.vmap(jax.vmap(_solve))(a, rhs)  # (V, q, r)
+    return jax.vmap(lambda a_v, rhs_v: _solve_blup_system(a_v, rhs_v, r_dim))(
+        a, rhs
+    )  # (V, q, r)
 
 
 def ranef(result: Any) -> Float[Array, 'V q r']:
