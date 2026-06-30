@@ -2,13 +2,18 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-nitrix.register -- pairwise registration recipes.
+nitrix.register -- pairwise alignment recipes (spatial + functional).
 
 Pure-functional registrators that compose the substrate (geometry
 transforms + pyramid, image-similarity metrics, the matrix-free
 nonlinear-least-squares optimiser) into end-to-end alignment.  Outputs
 are ``NamedTuple``s of arrays (the ``reml_fit`` precedent) -- no PyTree
 modules, no atlas data structures, no I/O; ``entense`` wraps these.
+
+Two alignment families: **spatial** registration (rigid/affine/volreg/BBR,
+log-Demons/SyN -- aligning *images* in voxel/world space) and **functional**
+alignment (``functional_align`` -- aligning *representations* in feature space,
+the hyperalignment task; ProMises is its first method).
 
 - ``rigid_register`` -- 6-DOF (3-D) / 3-DOF (2-D) Gauss-Newton / LM
   intensity registration on SE(2)/SE(3) (the 3dvolreg / AIR lineage).
@@ -94,6 +99,14 @@ from ._force import (
     MIForce,
     SumForce,
 )
+from ._functional import (
+    AlignmentMethod,
+    FunctionalAlignment,
+    ProMises,
+    functional_align,
+    functional_align_apply,
+    functional_align_fit,
+)
 from ._implicit import (
     affine_register_implicit,
     register_implicit,
@@ -172,4 +185,11 @@ __all__ = [
     'gradient_smoothness',
     'bending_energy',
     'jacobian_folding_penalty',
+    # functional alignment (representation-space)
+    'functional_align',
+    'functional_align_fit',
+    'functional_align_apply',
+    'FunctionalAlignment',
+    'AlignmentMethod',
+    'ProMises',
 ]
