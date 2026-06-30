@@ -3515,6 +3515,29 @@ register(
     )
 )
 
+register(
+    OpInfo(
+        'nitrix.linalg.orthogonal_procrustes',
+        fixture=lambda: (
+            (
+                jax.random.normal(_key(), (40, 6)),
+                jax.random.normal(_key(1), (40, 6)),
+            ),
+            {},
+        ),
+        diff_arg=0,
+        vmap_arg=None,
+        invariants=(
+            'orthogonal polar factor (Schoenemann 1966)',
+            'eigh-based (no qr/svd); matrix-vMF prior = additive term',
+        ),
+        notes=(
+            'natively batched; jit/vmap/grad on a healthy-eigh backend '
+            '(eager on broken-cuSOLVER stacks, like randomized_svd)'
+        ),
+    )
+)
+
 # --- metrics (intensity / information / overlap / classification / SSL) -----
 
 

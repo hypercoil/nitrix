@@ -62,6 +62,7 @@ from .optimize import (
 )
 from .residual import partial_residualise, residualise
 from .solve import cho_solve, solve
+from .subspace import orthogonal_procrustes
 from .spd import (
     cone_project_spd,
     mean_euclidean,
@@ -103,6 +104,8 @@ __all__ = [
     'implicit_least_squares',
     'implicit_minimize',
     'OptimizeResult',
+    # subspace geometry / orthogonal alignment
+    'orthogonal_procrustes',
     # kernel
     'cosine_kernel',
     'gaussian_kernel',
