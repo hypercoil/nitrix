@@ -1,0 +1,403 @@
+---
+title: "JAX and XLA: levels of representation"
+---
+
+The [previous chapter](hardware.qmd) ended on a promise: most of `nitrix` is plain
+JAX, yet it runs fast on the GPU because the **XLA compiler** rewrites memory-bound
+chains of operations into single kernels that read once and write once — climbing
+the roofline without a line of CUDA. This chapter makes good on that promise, and
+in doing so introduces the idea the whole unit turns on. A `nitrix` function is a
+**pure function**; tracing it produces a small program-as-data called a `jaxpr`;
+and *compiling*, *batching*, and *differentiating* are all **reinterpretations of
+that one trace** ([the index's first thread](index.qmd#sec-thread-trace)). `jit`
+and `grad` are not separate features bolted onto a numerics library — they are the
+same move.
+
+We build it in order: what a pure function and its **trace** are; the **ladder of
+representations** a program descends from Python to GPU assembly; how XLA wins
+through **operator fusion**; the transformations `jit`/`vmap`/`grad` as
+reinterpretations of the trace; the price the approach charges in **control flow**;
+and what all of it means for how `nitrix` is written.
+
+## Pure functions and the trace {#sec-trace}
+
+A **pure function** is one whose output depends only on its inputs, and which
+changes nothing else in the world — no global state mutated, no file written, no
+hidden counter advanced. Given the same arguments it always returns the same value.
+`nitrix` holds to this strictly: a public symbol takes arrays (or PyTrees of
+arrays, perhaps a random key or a static configuration) and returns arrays, with no
+module objects carrying hidden state. That discipline can feel austere, but it buys
+the entire chapter, because a pure function can be **traced**.
+
+Tracing means running the function not on real data but on **abstract stand-ins** —
+*tracer* objects that carry only a shape and a dtype, not values. As the function
+executes, every primitive operation it calls on a tracer is *recorded* rather than
+performed. The result is a transcript of exactly which primitives ran, in which
+order, on which intermediates: a typed, functional little program called a
+**`jaxpr`** (JAX expression). For example, the function
+
+```python
+import jax, jax.numpy as jnp
+
+def f(x, y):
+    return jnp.sum(jnp.tanh(x @ y))
+
+jax.make_jaxpr(f)(jnp.ones((3, 3)), jnp.ones((3, 3)))
+```
+
+traces to a `jaxpr` whose body is a short sequence of primitives — a `dot_general`
+(the matrix multiply), a `tanh`, and a `reduce_sum` — with explicit typed inputs
+and outputs:
+
+```text
+{ lambda ; a:f32[3,3] b:f32[3,3]. let
+    c:f32[3,3] = dot_general[...] a b
+    d:f32[3,3] = tanh c
+    e:f32[] = reduce_sum[axes=(0,1)] d
+  in (e,) }
+```
+
+This is the pivot of the whole approach. The program is now a **data structure**,
+not a black-box Python callable, and a data structure can be inspected, rewritten,
+and re-interpreted. Everything below — compilation, batching, differentiation — is
+a transformation of this object. (Note the cost of admission, which we return to in
+[the control-flow section](#sec-control-flow): the trace records the operations
+that *actually ran* for the given shapes, so it is **static** — it cannot contain a
+branch whose direction depends on a traced *value*.)
+
+## The ladder of representations {#sec-ladder}
+
+A `jaxpr` is still far above the metal. Getting from it to instructions a GPU
+executes is a descent down a **ladder of representations**, each lower rung more
+explicit and closer to hardware, each transition a *lowering* performed by a
+compiler stage (@fig-ladder). The high rungs are portable and readable; the low
+rungs are fast and device-specific; the compiler's job is to bridge them.
+
+::: {#fig-ladder}
+<svg viewBox="0 0 720 400" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A program descends a ladder of representations: pure Python function, then jaxpr, then HLO, then optimised HLO, then GPU PTX or CPU LLVM, with each transition a compiler stage."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="lah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55606b"/>
+    </marker>
+  </defs>
+  <rect x="200" y="20"  width="320" height="48" rx="6" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="360" y="49" text-anchor="middle">pure Python function</text>
+  <rect x="200" y="98" width="320" height="48" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="360" y="121" text-anchor="middle"><tspan font-family="monospace">jaxpr</tspan> — JAX primitives</text>
+  <text x="360" y="138" text-anchor="middle" font-size="11" fill="#444b53">functional, typed, device-agnostic</text>
+  <rect x="200" y="176" width="320" height="48" rx="6" fill="#fbf0d6" stroke="#33373d"/>
+  <text x="360" y="199" text-anchor="middle">StableHLO / HLO</text>
+  <text x="360" y="216" text-anchor="middle" font-size="11" fill="#444b53">XLA's linear-algebra IR</text>
+  <rect x="200" y="254" width="320" height="48" rx="6" fill="#fbf0d6" stroke="#33373d"/>
+  <text x="360" y="277" text-anchor="middle">optimised HLO</text>
+  <text x="360" y="294" text-anchor="middle" font-size="11" fill="#444b53">fused, laid out, buffers assigned</text>
+  <rect x="200" y="332" width="320" height="48" rx="6" fill="#e8ddec" stroke="#33373d"/>
+  <text x="360" y="355" text-anchor="middle">PTX (GPU) · LLVM IR (CPU)</text>
+  <text x="360" y="372" text-anchor="middle" font-size="11" fill="#444b53">device machine code</text>
+  <line x1="360" y1="68"  x2="360" y2="96"  stroke="#55606b" stroke-width="1.4" marker-end="url(#lah)"/>
+  <line x1="360" y1="146" x2="360" y2="174" stroke="#55606b" stroke-width="1.4" marker-end="url(#lah)"/>
+  <line x1="360" y1="224" x2="360" y2="252" stroke="#55606b" stroke-width="1.4" marker-end="url(#lah)"/>
+  <line x1="360" y1="302" x2="360" y2="330" stroke="#55606b" stroke-width="1.4" marker-end="url(#lah)"/>
+  <text x="540" y="87"  font-size="11" font-style="italic" fill="#444b53">trace</text>
+  <text x="540" y="165" font-size="11" font-style="italic" fill="#444b53">lower</text>
+  <text x="540" y="243" font-size="11" font-style="italic" fill="#444b53">XLA optimise</text>
+  <text x="540" y="321" font-size="11" font-style="italic" fill="#444b53">codegen (LLVM)</text>
+  <text x="150" y="49"  text-anchor="end" font-size="11" fill="#888">portable,</text>
+  <text x="150" y="63"  text-anchor="end" font-size="11" fill="#888">readable</text>
+  <text x="150" y="356" text-anchor="end" font-size="11" fill="#888">fast,</text>
+  <text x="150" y="370" text-anchor="end" font-size="11" fill="#888">device-specific</text>
+</svg>
+
+The ladder of representations. A pure function is *traced* to a `jaxpr`, *lowered*
+to XLA's HLO, *optimised* by XLA (the rung where fusion happens), and finally turned
+into device machine code — PTX for an NVIDIA GPU, LLVM IR for a CPU. High rungs are
+portable; low rungs are fast; the compiler bridges them.
+:::
+
+The acronym is literal: **XLA** is *Accelerated Linear Algebra*, a compiler whose
+input is a graph of array operations (HLO — *high-level operations*) and whose
+output is optimised machine code for a target backend. JAX lowers a `jaxpr` to HLO,
+hands it to XLA, and caches the compiled result. You never write HLO; you write
+Python, and the ladder is descended for you on the first call.
+
+## How XLA wins: operator fusion {#sec-fusion}
+
+The single most important thing XLA does — and the reason the roofline chapter was
+a prerequisite — is **operator fusion**. Recall the governing fact of GPU
+performance: arithmetic is cheap, moving data is expensive, and a chain of simple
+operations is **memory-bound** (it sits on the sloped roof). Consider a typical such
+chain, say `z = tanh(a * x + b)`: a multiply, an add, a `tanh`, each elementwise.
+
+Run unfused, each operation is its own kernel: it reads its input array from global
+memory (HBM), does one cheap arithmetic step per element, and writes the result
+*back* to HBM for the next operation to read. Three operations, three round-trips to
+the slowest memory on the device — and almost all the time is that traffic, not the
+arithmetic. **Fused**, XLA emits *one* kernel that reads the input once, keeps each
+element in a register while it runs the multiply, the add, and the `tanh` in
+sequence, and writes the result once. Same arithmetic; a fraction of the memory
+traffic. @fig-fusion contrasts the two.
+
+::: {#fig-fusion}
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Unfused, three elementwise operations each round-trip through HBM; fused, one kernel reads the input once, runs all three operations in registers, and writes once."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="fah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9aa3ab"/>
+    </marker>
+  </defs>
+  <!-- unfused -->
+  <text x="40" y="30" font-weight="bold">unfused: three kernels, three HBM round-trips</text>
+  <rect x="40" y="44" width="680" height="30" rx="4" fill="#f3dede" stroke="#33373d"/>
+  <text x="380" y="64" text-anchor="middle" font-size="12">HBM (global memory)</text>
+  <g fill="#dce9dd" stroke="#33373d">
+    <rect x="120" y="108" width="120" height="40" rx="5"/>
+    <rect x="320" y="108" width="120" height="40" rx="5"/>
+    <rect x="520" y="108" width="120" height="40" rx="5"/>
+  </g>
+  <text x="180" y="133" text-anchor="middle" font-size="12">multiply</text>
+  <text x="380" y="133" text-anchor="middle" font-size="12">add</text>
+  <text x="580" y="133" text-anchor="middle" font-size="12">tanh</text>
+  <g stroke="#9aa3ab" stroke-width="1.2">
+    <line x1="150" y1="74" x2="150" y2="106" marker-end="url(#fah)"/>
+    <line x1="210" y1="106" x2="210" y2="76" marker-end="url(#fah)"/>
+    <line x1="350" y1="74" x2="350" y2="106" marker-end="url(#fah)"/>
+    <line x1="410" y1="106" x2="410" y2="76" marker-end="url(#fah)"/>
+    <line x1="550" y1="74" x2="550" y2="106" marker-end="url(#fah)"/>
+    <line x1="610" y1="106" x2="610" y2="76" marker-end="url(#fah)"/>
+  </g>
+  <text x="380" y="166" text-anchor="middle" font-size="11" fill="#b03b4b">6 HBM transfers (read+write per op)</text>
+  <!-- fused -->
+  <text x="40" y="216" font-weight="bold">fused: one kernel, one read and one write</text>
+  <rect x="40" y="230" width="680" height="30" rx="4" fill="#f3dede" stroke="#33373d"/>
+  <text x="380" y="250" text-anchor="middle" font-size="12">HBM (global memory)</text>
+  <rect x="220" y="280" width="320" height="34" rx="5" fill="#dce9dd" stroke="#33373d"/>
+  <text x="380" y="302" text-anchor="middle" font-size="12">multiply → add → tanh  (in registers)</text>
+  <g stroke="#9aa3ab" stroke-width="1.2">
+    <line x1="300" y1="260" x2="300" y2="278" marker-end="url(#fah)"/>
+    <line x1="460" y1="278" x2="460" y2="262" marker-end="url(#fah)"/>
+  </g>
+  <text x="380" y="280" text-anchor="middle" font-size="11" fill="#2c6a45">2 HBM transfers</text>
+</svg>
+
+Operator fusion. Three elementwise operations run unfused (top) each read their
+input from HBM and write their output back — six transfers across the slowest
+memory. Fused (bottom), one kernel reads once, runs all three in registers, and
+writes once — two transfers. For memory-bound work, the traffic *is* the cost, so
+this is most of the speed-up.
+:::
+
+The win grows with the length of the chain, because the unfused traffic scales with
+the number of operations while the fused traffic stays fixed at one read and one
+write. @fig-fusion-traffic makes that quantitative.
+
+```{python}
+#| label: fig-fusion-traffic
+#| fig-cap: "HBM traffic for a chain of n elementwise operations on one array, in units of the array size. Unfused, each operation reads and writes the array, so traffic grows as 2n; fused into a single kernel, the data is read once and written once regardless of chain length. Because memory-bound work is timed by bytes moved, the fused curve is also (roughly) the run-time curve."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+n = np.arange(1, 9)
+unfused = 2 * n          # read + write per op, in units of one array
+fused = np.full_like(n, 2)   # one read + one write, total
+
+fig, ax = plt.subplots(figsize=(6.6, 3.8))
+ax.plot(n, unfused, "-o", color="#b03b4b", lw=2, label="unfused  (2n)")
+ax.plot(n, fused, "-o", color="#2c6a45", lw=2, label="fused  (2)")
+ax.fill_between(n, fused, unfused, color="#b03b4b", alpha=0.08)
+ax.set_xlabel("operations in the elementwise chain  (n)")
+ax.set_ylabel("HBM traffic  (× array size)")
+ax.set_title("Fusion turns 2n memory round-trips into 2")
+ax.legend()
+ax.set_ylim(0, 17)
+fig.tight_layout()
+plt.show()
+```
+
+Fusion is the headline, but XLA does more on the "optimise" rung: it assigns memory
+**layouts** so tensors are stored in the order kernels want to read them; it
+**reuses buffers** (and, with *donation*, overwrites an input that will not be
+needed again, so a large array can be updated in place); it folds constants and
+schedules independent work concurrently. All of it is invisible from the Python
+source — you write array operations at the top of the ladder, and the compiler
+spends its effort at the bottom.
+
+## The transformations: `jit`, `vmap`, `grad` {#sec-transforms}
+
+Here is where the chapter's thesis becomes concrete. Because the program is a
+traced data structure, JAX offers **function transformations** — each takes a
+function and returns a new function, by reinterpreting the trace. Three matter, and
+they *compose*.
+
+**`jit` — compile.** `jax.jit(f)` traces `f`, lowers the `jaxpr` down the ladder,
+and hands it to XLA; the compiled kernel is **cached**, keyed on the input shapes
+and dtypes (and any values marked static). The first call pays the compile; every
+later call at the same shapes runs the optimised, fused kernel. This is the
+"compile" arrow of [the index's diagram](index.qmd#sec-trace).
+
+```python
+fast = jax.jit(f)        # trace + lower + XLA-compile on first call, then cache
+fast(x, y)               # subsequent calls reuse the compiled, fused kernel
+```
+
+**`vmap` — batch.** `jax.vmap(f)` adds a batch dimension to every primitive in the
+trace, turning a function written for *one* example into one that runs over a whole
+batch — with no Python loop and no rewrite of `f`. A primitive's *batching rule*
+says how it gains an axis (@fig-vmap); the transformation threads that axis through
+the entire `jaxpr`. This is exactly how `nitrix` is **mass-univariate**: write the
+model for one voxel, `vmap` it across $10^5$–$10^6$ voxels, and the batched program
+compiles to one kernel.
+
+```python
+batched = jax.vmap(f)    # f written for one example...
+batched(xs, ys)          # ...now maps over a leading batch axis, no loop
+```
+
+::: {#fig-vmap}
+<svg viewBox="0 0 700 210" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="vmap lifts a function on a single example to a function on a batch by adding a leading batch axis to every array."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="vah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55606b"/>
+    </marker>
+  </defs>
+  <rect x="60" y="80" width="40" height="40" rx="4" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="80" y="105" text-anchor="middle" font-size="12">x</text>
+  <rect x="150" y="80" width="90" height="40" rx="5" fill="#dce9dd" stroke="#33373d"/>
+  <text x="195" y="105" text-anchor="middle" font-size="12">f</text>
+  <rect x="290" y="80" width="40" height="40" rx="4" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="310" y="105" text-anchor="middle" font-size="12">y</text>
+  <line x1="100" y1="100" x2="148" y2="100" stroke="#55606b" stroke-width="1.4" marker-end="url(#vah)"/>
+  <line x1="240" y1="100" x2="288" y2="100" stroke="#55606b" stroke-width="1.4" marker-end="url(#vah)"/>
+  <text x="195" y="150" text-anchor="middle" font-size="11" fill="#444b53">one example</text>
+  <text x="430" y="105" text-anchor="middle" font-size="22" fill="#55606b">⇒</text>
+  <g fill="#dfe7f0" stroke="#33373d">
+    <rect x="500" y="64" width="36" height="36" rx="4"/><rect x="506" y="72" width="36" height="36" rx="4"/><rect x="512" y="80" width="36" height="36" rx="4"/>
+  </g>
+  <rect x="566" y="72" width="80" height="40" rx="5" fill="#dce9dd" stroke="#33373d"/>
+  <text x="606" y="97" text-anchor="middle" font-size="12">vmap(f)</text>
+  <text x="573" y="150" text-anchor="middle" font-size="11" fill="#444b53">a batch (+1 axis)</text>
+</svg>
+
+`vmap` lifts a function written for a single example to one that runs over a whole
+batch, by adding a leading batch axis to every array and threading it through every
+primitive. No loop is written; the batched program compiles to one kernel.
+:::
+
+**`grad` — differentiate.** `jax.grad(f)` (and the lower-level `jvp`/`vjp`)
+reinterpret the trace to compute derivatives — linearising the program and, for
+reverse mode, transposing that linear map. This is the "linearise" and "transpose"
+arrows of the diagram, and it is the whole subject of the
+[next chapter](differentiation.qmd); here we only place it alongside its siblings.
+
+The point is that all three are the *same kind of object* — a transformation of one
+trace — so they **compose** freely. The idiom at the heart of large-scale
+differentiable numerics,
+
+```python
+jax.jit(jax.vmap(jax.grad(loss)))   # compiled, batched, differentiated — one trace
+```
+
+reads right-to-left as: differentiate the per-example loss, batch it over the
+dataset, compile the whole thing. One traced program, three reinterpretations,
+stacked.
+
+## The price of a static graph: control flow {#sec-control-flow}
+
+The power of the trace comes from its being **static** — a fixed graph of
+operations on arrays of known shape — and that is also its one real constraint. The
+trace records the operations that ran for the *abstract* inputs, so it cannot
+contain a decision that depends on a traced **value**. A Python `if x > 0:` on a
+traced `x` has no answer at trace time (there is no value, only a shape), and a
+Python `while` whose iteration count depends on the data would bake in whatever
+count the trace happened to see. Two consequences shape how `nitrix` is written.
+
+**Data-dependent control flow becomes a primitive.** Instead of Python branches and
+loops over traced values, JAX provides *structured* control-flow primitives that
+live inside the trace: `lax.cond` (choose a branch by a traced predicate),
+`lax.while_loop` (loop until a traced condition), `lax.scan` and `lax.fori_loop`
+(a fixed number of iterations, compiled *once* rather than unrolled). These are why
+the statistics unit's solvers run a **fixed iteration budget** wrapped in a
+`lax.scan` — a branch-free, fixed-length loop is what stays `vmap`-clean and
+compiles to one kernel — and why the registration unit rolls its optimiser and its
+scaling-and-squaring with `lax.scan` rather than Python loops. It is the
+software-level echo of the hardware's preference for uniform, non-divergent control
+flow from the [last chapter](hardware.qmd#sec-simt).
+
+**Shapes are part of the cache key.** Because the compiled kernel is specialised to
+the shapes it was traced with, calling a `jit`-ed function with a *new* shape forces
+a re-trace and re-compile. Stable shapes mean you pay the compile once; shapes that
+drift on every call mean you pay it every call. This is why values that must be
+known at trace time — a number of basis functions, an interpolation kernel's
+support, a model's structural configuration — are passed as **static** arguments or
+carried in frozen, hashable configuration records that ride `jit` as static
+operands (the `RegistrationSpec` and `Family` records you meet in the registration
+and statistics units), rather than as traced arrays.
+
+## What this means for `nitrix` {#sec-nitrix}
+
+Step back and the library's design reads straight off this chapter.
+
+- **Purity is the enabling constraint.** Because every public symbol is a pure
+  function over arrays, every one is traceable — and therefore `jit`-able,
+  `vmap`-able, and differentiable, all by the same mechanism. The "no module
+  objects, no hidden state" rule from the [index](index.qmd#sec-library) is not
+  fastidiousness; it is what makes the transformations apply at all.
+- **"Just JAX" is fast because of fusion.** The bulk of `nitrix` is plain JAX
+  precisely because XLA fuses its memory-bound reductions and elementwise chains
+  into single kernels — the [hardware chapter](hardware.qmd#sec-roofline)'s
+  roofline win, obtained by the compiler. Hand-written Pallas kernels appear only
+  where fusion cannot capture enough reuse (the **backend** axis), and even then
+  beside a pure-JAX reference.
+- **The transformations compose across the whole library.** Mass-univariate fitting
+  is `vmap` over voxels; a differentiable registration layer is `grad` through a
+  warp; running either at scale is `jit` over the composition. The same three
+  reinterpretations recur on every page of the domain units.
+- **Static-shape discipline is everywhere.** Fixed iteration counts, frozen
+  configuration records as static arguments, structured `lax` control flow — these
+  are not quirks but the direct consequence of compiling a static trace, and they
+  are why a fit `vmap`-ed across a whole brain compiles once and runs as one kernel.
+  (The same staticness is what lets `nitrix` pin every platform-dependent numerical
+  choice to a reproducible default under `NITRIX_REPRODUCIBLE`, so a traced program
+  gives bit-stable results across machines.)
+
+The thread tying it together is [the index's first one](index.qmd#sec-thread-trace):
+**one trace, many interpretations.** Compilation made the program fast;
+differentiation will make it *learn*. They are the same skill — reinterpreting a
+trace — and the [next chapter](differentiation.qmd) takes up the second half.
+
+## Further reading
+
+- Bradbury, J. et al. (2018). *JAX: composable transformations of Python+NumPy
+  programs.* — the framework and its design around traceable pure functions; see
+  also the [JAX documentation](https://docs.jax.dev) on `jit`, `vmap`, `grad`, and
+  `jaxpr`s.
+- Frostig, R., Johnson, M. J. & Leary, C. (2018). *Compiling machine learning
+  programs via high-level tracing.* MLSys. — tracing to a typed IR and lowering it
+  to XLA.
+- The [XLA documentation](https://openxla.org/xla) on HLO, operator fusion, and
+  layout assignment — the optimisations this chapter attributes to the "optimise"
+  rung of the ladder.
+- The JAX *Control flow and logical operators with JIT* and *Common gotchas* guides
+  — the practical face of the static-trace constraint (`lax.cond`/`scan`/
+  `while_loop`, and shape-driven recompilation).
+
+## See also
+
+- The purity boundary and dispatch axes:
+  [`nitrix`'s architecture](https://github.com/hypercoil/nitrix) (`SPEC.md`), and
+  the backend resolver
+  [`_internal/backend.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_internal/backend.py).
+- Reproducibility under a static trace: the divergent-operations registry
+  [`_internal/_divergent_ops.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_internal/_divergent_ops.py)
+  and `nitrix.reproducible()`.
+- The static-shape discipline in practice: the statistics unit's
+  [fixed-iteration solvers](../statistics/solvers.qmd) and the registration unit's
+  [`lax.scan`-rolled optimisers](../registration/performance.qmd).
+- Previous chapter: [Programming the GPU](hardware.qmd) — the machine XLA compiles
+  for. Next chapter: [Differentiation as linear algebra](differentiation.qmd) — the
+  "linearise" and "transpose" reinterpretations of the trace.

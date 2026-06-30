@@ -1,0 +1,493 @@
+---
+title: "Programming the GPU"
+---
+
+Why open a numerics library's documentation with a chapter on hardware? Because
+`nitrix` is fast for reasons that are invisible in the Python source, and that
+become obvious the moment you can see the machine underneath. Two ideas from this
+chapter — the **memory hierarchy** and the **roofline** — are the whole reason the
+next chapter's compiler optimisations exist, and the reason the geometry and
+registration units each close with a performance chapter about *when a fused kernel
+pays off*. You cannot reason about "fast" on a GPU without them.
+
+The plan is to build the machine up in the order its design decisions cascade. A
+GPU is built for **throughput, not latency**; that single choice forces the
+**SIMT** execution model; that model pays off only if the machine stays fed, which
+forces a steep **memory hierarchy**; and the gap between how fast the arithmetic
+units run and how fast memory can feed them is captured by the **roofline**, the
+mental model you reach for every time you ask "why is this slow?". We close with
+the **tensor cores**, the **generations** of NVIDIA hardware, and what of all this
+`nitrix` actually targets.
+
+## Latency versus throughput: two ways to be fast {#sec-throughput}
+
+There are two different things "a fast processor" can mean, and a CPU and a GPU
+pick opposite answers.
+
+A **CPU** is built to finish *one* task as quickly as possible — to minimise
+**latency**. It spends its transistor budget on a handful of powerful cores, each
+with deep caches, branch prediction, and out-of-order, speculative machinery, all
+devoted to racing a single thread of instructions to the finish line. If your
+problem is "run this mostly-sequential program with unpredictable branches," a CPU
+is the right machine.
+
+A **GPU** is built to finish *an enormous number* of similar tasks per second — to
+maximise **throughput**. It spends the same budget on thousands of small, simple
+arithmetic units and almost nothing on per-thread cleverness. Any individual
+operation is *slower* to complete than on a CPU; the win is having thousands of
+them in flight at once. The GPU's strategy for the long wait on slow memory is not
+to avoid it (caches) or predict around it (speculation) but to **hide** it: when
+one group of threads stalls waiting for data, the scheduler instantly swaps in
+another group that is ready to compute. Keep enough work resident and the
+arithmetic units never idle.
+
+@fig-cpu-gpu draws the contrast. The practical consequence for everything below: a
+GPU is fast only when you give it **massive, regular, data-parallel work** — the
+same operation over millions of array elements — while keeping the memory system
+saturated so latency stays hidden. `nitrix`'s mass-univariate workloads (the same
+small model fit at every one of $10^5$–$10^6$ voxels; the same warp applied at
+every voxel of a volume) are exactly this shape.
+
+::: {#fig-cpu-gpu}
+<svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A CPU spends its area on a few large cores and big caches to minimise the latency of one thread; a GPU spends its area on many small cores to maximise the throughput of many threads."
+     font-family="system-ui, sans-serif" font-size="13">
+  <text x="180" y="26" text-anchor="middle" font-size="15" font-weight="bold">CPU — minimise latency</text>
+  <rect x="30" y="40" width="300" height="222" rx="8" fill="#f4f6f8" stroke="#33373d"/>
+  <rect x="46" y="56" width="120" height="78" rx="5" fill="#dfe7f0" stroke="#33373d"/>
+  <rect x="194" y="56" width="120" height="78" rx="5" fill="#dfe7f0" stroke="#33373d"/>
+  <rect x="46" y="146" width="120" height="40" rx="5" fill="#dfe7f0" stroke="#33373d"/>
+  <rect x="194" y="146" width="120" height="40" rx="5" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="106" y="100" text-anchor="middle">core</text>
+  <text x="254" y="100" text-anchor="middle">core</text>
+  <rect x="46" y="198" width="268" height="48" rx="5" fill="#fbf0d6" stroke="#33373d"/>
+  <text x="180" y="226" text-anchor="middle">large cache</text>
+  <text x="180" y="284" text-anchor="middle" font-size="12" fill="#444b53" font-style="italic">a few powerful cores, deep caches</text>
+  <text x="600" y="26" text-anchor="middle" font-size="15" font-weight="bold">GPU — maximise throughput</text>
+  <rect x="450" y="40" width="320" height="222" rx="8" fill="#f4f6f8" stroke="#33373d"/>
+  <g fill="#dce9dd" stroke="#33373d">
+    <rect x="466" y="56" width="28" height="28" rx="3"/><rect x="500" y="56" width="28" height="28" rx="3"/><rect x="534" y="56" width="28" height="28" rx="3"/><rect x="568" y="56" width="28" height="28" rx="3"/><rect x="602" y="56" width="28" height="28" rx="3"/><rect x="636" y="56" width="28" height="28" rx="3"/><rect x="670" y="56" width="28" height="28" rx="3"/><rect x="704" y="56" width="28" height="28" rx="3"/>
+    <rect x="466" y="92" width="28" height="28" rx="3"/><rect x="500" y="92" width="28" height="28" rx="3"/><rect x="534" y="92" width="28" height="28" rx="3"/><rect x="568" y="92" width="28" height="28" rx="3"/><rect x="602" y="92" width="28" height="28" rx="3"/><rect x="636" y="92" width="28" height="28" rx="3"/><rect x="670" y="92" width="28" height="28" rx="3"/><rect x="704" y="92" width="28" height="28" rx="3"/>
+    <rect x="466" y="128" width="28" height="28" rx="3"/><rect x="500" y="128" width="28" height="28" rx="3"/><rect x="534" y="128" width="28" height="28" rx="3"/><rect x="568" y="128" width="28" height="28" rx="3"/><rect x="602" y="128" width="28" height="28" rx="3"/><rect x="636" y="128" width="28" height="28" rx="3"/><rect x="670" y="128" width="28" height="28" rx="3"/><rect x="704" y="128" width="28" height="28" rx="3"/>
+    <rect x="466" y="164" width="28" height="28" rx="3"/><rect x="500" y="164" width="28" height="28" rx="3"/><rect x="534" y="164" width="28" height="28" rx="3"/><rect x="568" y="164" width="28" height="28" rx="3"/><rect x="602" y="164" width="28" height="28" rx="3"/><rect x="636" y="164" width="28" height="28" rx="3"/><rect x="670" y="164" width="28" height="28" rx="3"/><rect x="704" y="164" width="28" height="28" rx="3"/>
+  </g>
+  <rect x="466" y="200" width="266" height="46" rx="5" fill="#fbf0d6" stroke="#33373d"/>
+  <text x="599" y="227" text-anchor="middle">small caches</text>
+  <text x="600" y="284" text-anchor="middle" font-size="12" fill="#444b53" font-style="italic">thousands of small cores, latency hidden by oversubscription</text>
+</svg>
+
+Two ways to spend a transistor budget. The CPU (left) puts its area
+into a few large cores and big caches to race one thread to the finish; the GPU
+(right) fills its area with many small arithmetic units to keep thousands of
+threads in flight, hiding memory latency by sheer oversubscription.
+:::
+
+## The SIMT execution model {#sec-simt}
+
+Throughput-first hardware needs a programming model that exposes thousands of
+identical, independent units of work. NVIDIA's is **SIMT** — *single instruction,
+multiple threads* — and it has a strict hierarchy worth knowing by name, because it
+shapes how every kernel in `nitrix` is written.
+
+You write a **kernel**: the body of work for *one* thread, as if it were an
+ordinary scalar program. At launch you ask for a **grid** of **thread blocks**, and
+each block holds many **threads**. The hardware then schedules threads in groups of
+**32 called a warp**, and this is the load-bearing detail: the 32 lanes of a warp
+execute *the same instruction at the same time*, each on its own data. One
+instruction, thirty-two results. @fig-simt shows the hierarchy.
+
+Two consequences fall straight out of "32 lanes share one instruction," and both
+recur in `nitrix`'s kernel design.
+
+- **Branch divergence is expensive.** If a conditional sends some lanes of a warp
+  down the `if` and the rest down the `else`, the warp cannot run both at once. It
+  runs the `if` with the `else`-lanes *masked off* (idle), then the `else` with the
+  `if`-lanes masked — the two paths are **serialised**. Data-dependent branching
+  inside a warp throws away the parallelism it was meant to exploit, which is why
+  GPU kernels prefer branch-free, uniform control flow. (It is also why JAX's
+  compiled programs want *static* shapes and fixed iteration counts, the subject of
+  the [next chapter](xla-jax.qmd#sec-control-flow).)
+- **Occupancy hides latency.** A warp waiting on a memory load is not a stall if
+  the scheduler has *other* warps ready to compute. The ratio of resident warps to
+  the maximum the hardware can hold is called **occupancy**, and high occupancy is
+  what lets the GPU paper over the hundreds-of-cycles wait for global memory. This
+  is also why a kernel that uses too many registers or too much shared memory *per
+  thread* can be slow even if its arithmetic is cheap: it limits how many warps fit,
+  and the latency stops being hidden. (You will see this exact trade in the
+  registration unit's Pallas demons kernel, whose tile size is capped precisely so a
+  warp's working set fits in registers.)
+
+::: {#fig-simt}
+<svg viewBox="0 0 800 400" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A launch is a grid of thread blocks; each block is scheduled as warps of 32 threads that execute one instruction in lockstep; a divergent branch serialises the two paths."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="hwah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55606b"/>
+    </marker>
+  </defs>
+  <!-- grid -->
+  <text x="100" y="26" text-anchor="middle" font-weight="bold">grid</text>
+  <rect x="24" y="36" width="152" height="150" rx="6" fill="#f4f6f8" stroke="#33373d"/>
+  <g fill="#dfe7f0" stroke="#33373d">
+    <rect x="36" y="48" width="40" height="40" rx="3"/><rect x="84" y="48" width="40" height="40" rx="3"/><rect x="132" y="48" width="40" height="40" rx="3"/>
+    <rect x="36" y="96" width="40" height="40" rx="3"/><rect x="84" y="96" width="40" height="40" rx="3"/><rect x="132" y="96" width="40" height="40" rx="3"/>
+    <rect x="36" y="144" width="40" height="34" rx="3"/><rect x="84" y="144" width="40" height="34" rx="3"/><rect x="132" y="144" width="40" height="34" rx="3"/>
+  </g>
+  <text x="100" y="200" text-anchor="middle" font-size="11" fill="#444b53">blocks</text>
+  <line x1="176" y1="110" x2="232" y2="110" stroke="#55606b" stroke-width="1.4" marker-end="url(#hwah)"/>
+  <!-- one block -> warps -->
+  <text x="370" y="26" text-anchor="middle" font-weight="bold">one block</text>
+  <rect x="240" y="36" width="260" height="150" rx="6" fill="#f4f6f8" stroke="#33373d"/>
+  <rect x="252" y="52" width="236" height="52" rx="4" fill="#dce9dd" stroke="#33373d"/>
+  <rect x="252" y="116" width="236" height="52" rx="4" fill="#dce9dd" stroke="#33373d"/>
+  <text x="370" y="83" text-anchor="middle" font-size="12">warp (32 threads)</text>
+  <text x="370" y="147" text-anchor="middle" font-size="12">warp (32 threads)</text>
+  <line x1="500" y1="78" x2="556" y2="78" stroke="#55606b" stroke-width="1.4" marker-end="url(#hwah)"/>
+  <!-- one warp = lanes in lockstep -->
+  <text x="650" y="26" text-anchor="middle" font-weight="bold">one warp</text>
+  <text x="650" y="44" text-anchor="middle" font-size="11" fill="#444b53">1 instruction → 32 lanes, lockstep</text>
+  <g fill="#e8ddec" stroke="#33373d">
+    <rect x="560" y="52" width="16" height="26" rx="2"/><rect x="578" y="52" width="16" height="26" rx="2"/><rect x="596" y="52" width="16" height="26" rx="2"/><rect x="614" y="52" width="16" height="26" rx="2"/><rect x="632" y="52" width="16" height="26" rx="2"/><rect x="650" y="52" width="16" height="26" rx="2"/><rect x="668" y="52" width="16" height="26" rx="2"/><rect x="686" y="52" width="16" height="26" rx="2"/><rect x="704" y="52" width="16" height="26" rx="2"/><rect x="722" y="52" width="16" height="26" rx="2"/><rect x="740" y="52" width="16" height="26" rx="2"/>
+    <rect x="560" y="82" width="16" height="26" rx="2"/><rect x="578" y="82" width="16" height="26" rx="2"/><rect x="596" y="82" width="16" height="26" rx="2"/><rect x="614" y="82" width="16" height="26" rx="2"/><rect x="632" y="82" width="16" height="26" rx="2"/><rect x="650" y="82" width="16" height="26" rx="2"/><rect x="668" y="82" width="16" height="26" rx="2"/><rect x="686" y="82" width="16" height="26" rx="2"/><rect x="704" y="82" width="16" height="26" rx="2"/><rect x="722" y="82" width="16" height="26" rx="2"/><rect x="740" y="82" width="16" height="26" rx="2"/>
+  </g>
+  <text x="650" y="128" text-anchor="middle" font-size="11" fill="#444b53">… 32 lanes …</text>
+  <!-- divergence panel -->
+  <text x="400" y="232" text-anchor="middle" font-weight="bold">branch divergence within a warp</text>
+  <rect x="120" y="248" width="560" height="120" rx="6" fill="#fdf6f6" stroke="#33373d"/>
+  <text x="150" y="276" font-size="12">step 1: run the <tspan font-style="italic">if</tspan> path</text>
+  <g>
+    <rect x="150" y="286" width="20" height="22" fill="#dce9dd" stroke="#33373d"/><rect x="172" y="286" width="20" height="22" fill="#dce9dd" stroke="#33373d"/><rect x="194" y="286" width="20" height="22" fill="#cfcfcf" stroke="#33373d"/><rect x="216" y="286" width="20" height="22" fill="#cfcfcf" stroke="#33373d"/><rect x="238" y="286" width="20" height="22" fill="#dce9dd" stroke="#33373d"/><rect x="260" y="286" width="20" height="22" fill="#cfcfcf" stroke="#33373d"/>
+    <text x="296" y="302" font-size="11" fill="#444b53">else-lanes masked (idle)</text>
+  </g>
+  <text x="150" y="338" font-size="12">step 2: run the <tspan font-style="italic">else</tspan> path</text>
+  <g>
+    <rect x="150" y="346" width="20" height="22" fill="#cfcfcf" stroke="#33373d"/><rect x="172" y="346" width="20" height="22" fill="#cfcfcf" stroke="#33373d"/><rect x="194" y="346" width="20" height="22" fill="#e8ddec" stroke="#33373d"/><rect x="216" y="346" width="20" height="22" fill="#e8ddec" stroke="#33373d"/><rect x="238" y="346" width="20" height="22" fill="#cfcfcf" stroke="#33373d"/><rect x="260" y="346" width="20" height="22" fill="#e8ddec" stroke="#33373d"/>
+    <text x="296" y="362" font-size="11" fill="#444b53">if-lanes masked → the two paths are serialised</text>
+  </g>
+</svg>
+
+The SIMT hierarchy. A launch is a *grid* of *blocks*;
+each block is scheduled as *warps* of 32 threads that issue one instruction
+in lockstep. When a branch splits a warp (bottom), the hardware runs the
+*if* path with the other lanes masked, then the *else* path — the two
+sides are serialised, so divergence costs parallelism.
+:::
+
+## The memory hierarchy: where the time actually goes {#sec-memory}
+
+Here is the fact that governs GPU performance more than any other: **arithmetic is
+cheap and moving data is expensive.** A fused-multiply-add costs a cycle or two; a
+read from the GPU's main memory (HBM — high-bandwidth DRAM, the "VRAM" on a card's
+spec sheet) costs *hundreds* of cycles. The whole machine is arranged as a
+**hierarchy** that trades capacity for speed: tiny, blazing storage close to the
+arithmetic units, and large, slow storage far away. @fig-memory is the standard
+picture.
+
+::: {#fig-memory}
+<svg viewBox="0 0 800 380" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The GPU memory hierarchy as a pyramid: registers at the narrow fast top, then shared memory and L1, L2 cache, HBM global memory, and host RAM at the wide slow bottom."
+     font-family="system-ui, sans-serif" font-size="13">
+  <!-- pyramid trapezoids, narrow (fast) top to wide (slow) bottom -->
+  <polygon points="330,40 470,40 450,96 350,96" fill="#dfe7f0" stroke="#33373d"/>
+  <polygon points="350,100 450,100 430,156 370,156" fill="#dfe7f0" stroke="#33373d"/>
+  <polygon points="305,40 330,40 350,96 350,156 370,156 430,156 450,156 450,96 470,40 495,40 520,220 280,220" fill="none" stroke="none"/>
+  <polygon points="296,160 504,160 524,216 276,216" fill="#dce9dd" stroke="#33373d"/>
+  <polygon points="272,220 528,220 548,276 252,276" fill="#fbf0d6" stroke="#33373d"/>
+  <polygon points="248,280 552,280 572,336 228,336" fill="#f3dede" stroke="#33373d"/>
+  <text x="400" y="76" text-anchor="middle" font-size="12">registers</text>
+  <text x="400" y="132" text-anchor="middle" font-size="12">shared mem / L1</text>
+  <text x="400" y="192" text-anchor="middle" font-size="12">L2 cache</text>
+  <text x="400" y="252" text-anchor="middle" font-size="12">HBM — global memory</text>
+  <text x="400" y="312" text-anchor="middle" font-size="12">host RAM (over PCIe / NVLink)</text>
+  <!-- annotations -->
+  <text x="600" y="64" font-size="11" fill="#444b53">per-thread · ~KB · ~1 cycle · fastest</text>
+  <text x="600" y="128" font-size="11" fill="#444b53">per-block · ~100 KB · ~tens of cycles</text>
+  <text x="600" y="190" font-size="11" fill="#444b53">chip-wide · ~tens of MB</text>
+  <text x="600" y="250" font-size="11" fill="#444b53">device · ~tens of GB · ~hundreds of cycles</text>
+  <text x="600" y="310" font-size="11" fill="#444b53">system · ~hundreds of GB · slowest</text>
+  <text x="160" y="64" font-size="11" fill="#444b53" text-anchor="middle">small</text>
+  <text x="160" y="92" font-size="11" fill="#444b53" text-anchor="middle">&amp; fast</text>
+  <text x="140" y="308" font-size="11" fill="#444b53" text-anchor="middle">large &amp; slow</text>
+  <text x="400" y="366" text-anchor="middle" font-size="11" font-style="italic" fill="#444b53">capacities and latencies are representative orders of magnitude, not device-exact</text>
+</svg>
+
+The memory hierarchy. Storage close to the arithmetic units (registers,
+shared memory) is tiny but nearly free to access; storage far away (HBM, host) is
+vast but slow. Performance comes from keeping the working set high in the pyramid
+and touching the bottom as rarely as possible.
+:::
+
+The numbers that matter are not the absolute figures but the *gaps* between levels,
+and they are enormous — global memory is roughly two to three orders of magnitude
+slower to reach than a register, and the host is slower still. @fig-memory-cost
+plots representative latencies and bandwidths per level on a log scale, which is the
+only honest way to show a range this wide.
+
+```{python}
+#| label: fig-memory-cost
+#| fig-cap: "Representative access latency (left, in clock cycles) and bandwidth (right, relative) across the memory hierarchy, on a log scale. The point is the spread, not the exact values: reaching global HBM costs hundreds of times more than a register, so a kernel's speed is usually set by how much data it moves, not how much it computes."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+levels = ["register", "shared/L1", "L2", "HBM\n(global)", "host\n(PCIe)"]
+# Representative orders of magnitude (illustrative, not device-exact).
+latency_cycles = [1, 30, 200, 500, 50000]
+bandwidth_rel = [20000, 12000, 4000, 2000, 25]   # relative units
+colors = ["#3b6fb0", "#3b9f6f", "#d0a02c", "#b03b4b", "#7a5aa0"]
+
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(10, 3.8))
+axL.bar(levels, latency_cycles, color=colors)
+axL.set_yscale("log")
+axL.set_ylabel("access latency (clock cycles, log)")
+axL.set_title("latency: cost of one access")
+for i, v in enumerate(latency_cycles):
+    axL.text(i, v * 1.3, f"~{v:g}", ha="center", fontsize=8)
+
+axR.bar(levels, bandwidth_rel, color=colors)
+axR.set_yscale("log")
+axR.set_ylabel("bandwidth (relative, log)")
+axR.set_title("bandwidth: how fast bulk data flows")
+fig.suptitle("Climbing the memory hierarchy: each step down is hundreds of times slower",
+             fontsize=12)
+fig.tight_layout(rect=(0, 0, 1, 0.95))
+plt.show()
+```
+
+This is the origin of the single most important optimisation in GPU numerics:
+**move data once, reuse it many times.** If an operation reads a value from HBM,
+does one cheap arithmetic step, and writes it back, the arithmetic units sit idle
+waiting on memory — the operation is **memory-bound**, and almost all of its time is
+HBM traffic. Chaining several such operations, each doing its own HBM round-trip, is
+the common pattern the next chapter's **operator fusion** exists to fix: fuse the
+chain into one kernel that reads once, does all the arithmetic while the data is
+hot in registers, and writes once. The roofline makes this precise.
+
+## The roofline: compute-bound or memory-bound? {#sec-roofline}
+
+For any computation, define its **arithmetic intensity** — the number of
+floating-point operations it performs per byte of data it moves to and from main
+memory:
+$$
+I \;=\; \frac{\text{FLOPs}}{\text{bytes moved}}\qquad(\text{FLOP/byte}).
+$$
+A hardware device has two hard ceilings: a peak compute rate $\pi$ (FLOP/s, set by
+the arithmetic units) and a peak memory bandwidth $\beta$ (bytes/s, set by HBM).
+The fastest a computation of intensity $I$ can possibly run is whichever ceiling it
+hits first:
+$$
+\text{attainable FLOP/s} \;=\; \min\bigl(\pi,\; \beta \cdot I\bigr).
+$$
+Plot that on log–log axes and you get the **roofline** (@fig-roofline): a sloped
+line $\beta\cdot I$ on the left (you are **memory-bound** — bandwidth limits you,
+and going faster means moving fewer bytes per FLOP), a flat ceiling $\pi$ on the
+right (you are **compute-bound** — the arithmetic units are saturated), and a
+**ridge point** $I^\star=\pi/\beta$ where they meet. To the left of the ridge,
+more arithmetic intensity buys speed; to the right, only a faster chip does.
+
+```{python}
+#| label: fig-roofline
+#| fig-cap: "The roofline. A computation's attainable performance is min(peak compute, bandwidth × arithmetic intensity). Left of the ridge point it is memory-bound (the sloped roof); right of it, compute-bound (the flat roof). Elementwise maps, reductions, and softmax sit in the memory-bound regime — exactly where fusing operations (so data is read once and reused) buys speed; a large matrix multiply is compute-bound. Axes are representative."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+peak = 20e12    # representative fp32 peak, FLOP/s
+bw = 2e12       # representative HBM bandwidth, byte/s
+ridge = peak / bw   # = 10 FLOP/byte
+
+ai = np.logspace(-2, 3, 500)
+roof = np.minimum(peak, bw * ai)
+
+fig, ax = plt.subplots(figsize=(7.2, 4.6))
+ax.loglog(ai, roof / 1e12, color="#333", lw=2.2, zorder=3)
+ax.axvline(ridge, color="0.6", ls=":", lw=1.2)
+ax.text(ridge * 1.1, 0.05, f"ridge point\nI* = {ridge:g} FLOP/byte",
+        fontsize=8, color="0.3")
+ax.fill_betweenx([1e-2, peak / 1e12], 1e-2, ridge, color="#b03b4b", alpha=0.06)
+ax.fill_betweenx([1e-2, peak / 1e12], ridge, 1e3, color="#3b6fb0", alpha=0.06)
+ax.text(0.03, 13, "memory-bound", color="#b03b4b", fontsize=10)
+ax.text(120, 0.4, "compute-bound", color="#3b6fb0", fontsize=10)
+
+ops = [("elementwise / AXPY", 0.12), ("reduction / norm", 0.25),
+       ("softmax (row)", 1.5), ("stencil / conv", 5.0),
+       ("gemm (large)", 80.0)]
+for name, x in ops:
+    y = min(peak, bw * x)
+    ax.plot(x, y / 1e12, "o", color="#222", ms=6, zorder=4)
+    ax.annotate(name, (x, y / 1e12), textcoords="offset points",
+                xytext=(6, -12), fontsize=8)
+
+ax.set_xlabel("arithmetic intensity  I  (FLOP / byte)")
+ax.set_ylabel("attainable performance (TFLOP/s)")
+ax.set_title("The roofline model")
+ax.set_ylim(1e-2, peak / 1e12 * 2)
+fig.tight_layout()
+plt.show()
+```
+
+The roofline is the lens for nearly every performance question in this book.
+Elementwise maps, reductions, normalisations, and softmax have low arithmetic
+intensity — a few FLOPs per element read — so they live on the sloped roof and are
+**memory-bound**; the way to speed them up is to *move less data*, which is exactly
+what fusion does. A large matrix multiply does $O(n^3)$ work on $O(n^2)$ data, so
+its intensity grows with size and it climbs onto the flat roof to become
+**compute-bound** — the regime where tensor cores (next) earn their keep. When the
+registration unit reports that its diffeomorphic warps are "bandwidth-bound" and a
+fused Pallas kernel wins, or the geometry unit asks whether a sparse matrix-vector
+product is worth a custom kernel, they are reading off this diagram.
+
+## Tensor cores: the matrix-multiply units {#sec-tensorcores}
+
+Because matrix multiplication is the compute-bound workhorse of modern numerics,
+NVIDIA GPUs since 2017 ship dedicated **tensor cores**: units that compute a small
+**matrix multiply-accumulate** $D = A B + C$ in one operation, far faster than
+doing the same multiplies on the general arithmetic units. They achieve this partly
+by operating on **reduced-precision** inputs — 16-bit (`float16` or `bfloat16`), or
+Ampere's 19-bit `TF32`, with newer generations adding 8-bit (`FP8`) and 4-bit
+formats — while **accumulating the sum in `float32`**. That last detail is the one
+that matters for scientific code: the products may be low precision, but the
+running total is not, so a long dot product does not shed precision the way naive
+16-bit accumulation would.
+
+This is exactly the line `nitrix` draws. Its scientific core is `float32`/
+`float64`; reduced precision is **not** admitted there, because for an
+ill-conditioned solve or a curvature estimate it would be a correctness bug.
+Reduced precision is allowed only at a narrow neural-network seam — the `attention`,
+state-space, and normalisation forward passes — and even there under a hard
+invariant that **accumulation stays at least `float32`**. The tensor cores are why
+that seam is fast; the accumulation rule is why it is still correct.
+
+## The generations of NVIDIA architecture {#sec-generations}
+
+GPU capability is versioned by **compute capability**, written `sm_XX`, where the
+leading digits track the architecture generation. A kernel compiled for one
+capability will not necessarily run — or run well — on another, so a library has to
+decide which generations it supports. @fig-generations places the recent
+generations on a timeline, and the table below records what each one added.
+
+::: {#fig-generations}
+<svg viewBox="0 0 820 230" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A timeline of recent NVIDIA architecture generations from Volta to Blackwell, with Ampere and newer highlighted as the range nitrix targets."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="gah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55606b"/>
+    </marker>
+  </defs>
+  <!-- nitrix-supported band -->
+  <rect x="250" y="70" width="540" height="44" fill="#dce9dd" opacity="0.5"/>
+  <text x="520" y="60" text-anchor="middle" font-size="11" fill="#2c6a45" font-style="italic">nitrix targets Ampere and newer (sm_80+)</text>
+  <!-- axis -->
+  <line x1="40" y1="92" x2="800" y2="92" stroke="#55606b" stroke-width="1.6" marker-end="url(#gah)"/>
+  <g text-anchor="middle">
+    <!-- ticks -->
+    <line x1="120" y1="86" x2="120" y2="98" stroke="#33373d"/><text x="120" y="128">Volta</text><text x="120" y="146" font-size="11" fill="#444b53">sm_70 · 2017</text>
+    <line x1="220" y1="86" x2="220" y2="98" stroke="#33373d"/><text x="220" y="128">Turing</text><text x="220" y="146" font-size="11" fill="#444b53">sm_75 · 2018</text>
+    <line x1="360" y1="86" x2="360" y2="98" stroke="#33373d"/><text x="360" y="128">Ampere</text><text x="360" y="146" font-size="11" fill="#444b53">sm_80 · 2020</text>
+    <line x1="500" y1="86" x2="500" y2="98" stroke="#33373d"/><text x="500" y="128">Ada</text><text x="500" y="146" font-size="11" fill="#444b53">sm_89 · 2022</text>
+    <line x1="620" y1="86" x2="620" y2="98" stroke="#33373d"/><text x="620" y="128">Hopper</text><text x="620" y="146" font-size="11" fill="#444b53">sm_90 · 2022</text>
+    <line x1="740" y1="86" x2="740" y2="98" stroke="#33373d"/><text x="740" y="128">Blackwell</text><text x="740" y="146" font-size="11" fill="#444b53">sm_100 · 2024</text>
+  </g>
+  <text x="120" y="180" text-anchor="middle" font-size="10" fill="#888">first tensor cores</text>
+  <text x="360" y="196" text-anchor="middle" font-size="10" fill="#888">TF32, bf16</text>
+  <text x="620" y="180" text-anchor="middle" font-size="10" fill="#888">FP8, TMA, clusters</text>
+  <text x="740" y="196" text-anchor="middle" font-size="10" fill="#888">FP4/FP6</text>
+</svg>
+
+Recent NVIDIA generations. Each adds capability — tensor cores (Volta),
+the `TF32` and `bfloat16` formats and structured sparsity
+(Ampere), `FP8` with the tensor-memory accelerator and thread-block
+clusters (Hopper), and 4/6-bit formats (Blackwell). `nitrix` targets the
+shaded range, Ampere and newer.
+:::
+
+| Generation | Example GPU | Capability | Key additions | `nitrix` |
+|---|---|---|---|---|
+| Volta | V100 | `sm_70` | first tensor cores (fp16) | JAX fallback |
+| Turing | T4 | `sm_75` | int8 tensor cores | JAX fallback |
+| **Ampere** | A100 | `sm_80` | `TF32`, `bfloat16`, structured sparsity | **Pallas-Triton** |
+| **Ada** | L4, RTX 40xx | `sm_89` | Ampere features, consumer-class | **Pallas-Triton** |
+| **Hopper** | H100 | `sm_90` | `FP8`, tensor-memory accelerator, thread-block clusters | Triton; **Mosaic aspirational** |
+| **Blackwell** | B200 | `sm_100` | `FP4`/`FP6`, second-gen transformer engine | Triton |
+
+`nitrix` draws its line at **Ampere** (`sm_80`): the internal gate is literally a
+constant, `_AMPERE_MIN_MAJOR = 8`, and its hand-written kernels are
+[Pallas](https://docs.jax.dev/en/latest/pallas/index.html)-**Triton** programs that
+require it. Pre-Ampere NVIDIA cards, and every non-NVIDIA device (TPU, AMD ROCm,
+Apple Metal, Intel), fall back to the portable pure-JAX path — the correctness
+floor, exercised in CI, where wall-clock speed is explicitly *not* a goal. The
+Hopper-and-newer **Pallas-Mosaic** path (which would exploit `FP8`, the
+tensor-memory accelerator, and distributed shared memory) is *aspirational*:
+the development hardware is an Ada-generation L4, on which the Mosaic GPU backend
+does not run, and the project's stance is not to ship a kernel it cannot test.
+
+## What this all means for `nitrix` {#sec-nitrix}
+
+Pull the chapter together and the design of the library's performance layer reads
+straight off the hardware.
+
+- **Most of `nitrix` is pure JAX, and lets XLA fuse.** The bulk of the library is
+  memory-bound elementwise-and-reduction work — exactly the left side of the
+  roofline — so the win is to *move less data*. The [next chapter](xla-jax.qmd)
+  shows how the compiler fuses chains of such operations into single kernels that
+  read once and write once, climbing the roofline without a line of CUDA.
+- **Custom kernels appear only where fusion is not enough.** A handful of
+  operations are so bandwidth-bound that a hand-written, register-resident kernel —
+  fusing a stencil with its consumer, reusing data the compiler would have spilled
+  to HBM — wins decisively *at scale*. These are the Pallas-Triton kernels
+  (`attention`, `selective_scan`, `norm`, the `semiring` matmuls, and the
+  registration unit's `demons_force` and `lncc_force`), and each fires only when the
+  problem is large enough to clear the overhead, the explicit *when-it-pays-off* gate
+  the performance chapters describe.
+- **Engine selection is explicit and loud.** The **backend** axis from the
+  [index](index.qmd#sec-library) is resolved by `resolve_backend`: `auto` chooses the
+  fused CUDA path only on Ampere-or-newer NVIDIA hardware (probed once at import) and
+  the portable JAX path everywhere else. When a requested fast path cannot run, the
+  fallback to JAX is announced with a deduplicated `NitrixBackendFallback` warning —
+  because a *silent* performance regression is a bug.
+- **The vendor solver is avoided on principle.** cuSOLVER (NVIDIA's dense linear
+  algebra) has proven fragile across deployment environments, so `nitrix` rolls its
+  own small-matrix factorisations from the operations that *do* work reliably
+  (matrix multiply, triangular solve). This recurs throughout the
+  [implicit-differentiation](implicit-differentiation.qmd) chapter and the
+  statistics unit, and it is the reason a hundred-thousand-voxel solve runs on the
+  accelerator at all.
+
+The thread running through every one of these is the one from the
+[index](index.qmd#sec-thread-structure): **structure is leverage.** The structure of
+the machine — its parallelism, its memory hierarchy, its roofline — is not an
+obstacle to work around but a shape to exploit, and a fast library is one whose
+computations are cut to fit it.
+
+## Further reading
+
+- Hennessy, J. L. & Patterson, D. A. (2019). *Computer Architecture: A Quantitative
+  Approach* (6th ed.). Morgan Kaufmann. — the standard reference on latency vs
+  throughput, the memory hierarchy, and data-parallel architectures.
+- Williams, S., Waterman, A. & Patterson, D. (2009). "Roofline: an insightful visual
+  performance model for multicore architectures." *Communications of the ACM* 52(4).
+  — the original roofline paper.
+- NVIDIA, *CUDA C++ Programming Guide* and the per-architecture tuning guides
+  (Volta through Blackwell) — the authoritative description of the SIMT model,
+  warps, occupancy, the memory hierarchy, and tensor cores.
+- The [JAX Pallas documentation](https://docs.jax.dev/en/latest/pallas/index.html)
+  — the kernel language `nitrix` uses for its Triton (and, aspirationally, Mosaic)
+  GPU kernels.
+
+## See also
+
+- Backend resolution and the fallback warning:
+  [`_internal/backend.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_internal/backend.py)
+  (`resolve_backend`, `auto_backend`, `NitrixBackendFallback`, `_AMPERE_MIN_MAJOR`).
+- The custom GPU kernels:
+  [`_kernels/cuda/`](https://github.com/hypercoil/nitrix/tree/main/src/nitrix/_kernels/cuda)
+  (`attention`, `selective_scan`, `norm`, `semiring_matmul`, `demons_force`,
+  `lncc_force`).
+- The roofline in action: the [geometry performance chapter](../geometry/performance.qmd)
+  (fused-vs-composed kernels, the size gate) and the
+  [registration performance chapter](../registration/performance.qmd) (the
+  bandwidth-bound diffeomorphic warps and their Pallas force kernels).
+- Next chapter: [JAX and XLA](xla-jax.qmd) — how a pure Python function becomes a
+  fused kernel on the hardware this chapter described.
