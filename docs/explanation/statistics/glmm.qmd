@@ -2,7 +2,6 @@
 title: "Generalised linear mixed models: non-Gaussian and grouped"
 ---
 
-::: {.callout-tldr title="Fast path"}
 A **GLMM** is the [GLM](glm.qmd) and the [LME](lme.qmd) at once: a non-Gaussian
 response (binary, counts) *and* grouped observations (a random intercept per
 subject). The honest likelihood needs you to **integrate the random effects out**,
@@ -15,7 +14,6 @@ at several clever points). Laplace is AGQ with one node; PQL is a cruder cousin 
 Laplace. The one *scaling* idea, orthogonal to accuracy, is that with many grouping
 levels a block-structured **Schur/Woodbury** trick keeps the cost linear in the
 level count instead of cubic.
-:::
 
 Rung 4 of [the ladder](index.qmd): it stacks rungs 1 and 2, then asks the new
 question those two never had to face — *how do you get a likelihood at all?*
@@ -495,7 +493,7 @@ compile-time and memory.
 Putting the rungs together, `glmm_fit` exposes a small, honest set of choices:
 
 - **`method='pql'`** (default): cheapest, reuses the GLM+GAM+Fellner–Schall stack.
-  Dispatches on level count (§4): few-level dense GAMM, many-level structured Schur.
+  Dispatches on [level count](#sec-manylevels): few-level dense GAMM, many-level structured Schur.
   Documented attenuation for binary/low-count clusters.
 - **`method='laplace'`**: the principled fix for that attenuation — the conditional-mode
   integral with the determinant correction. Scalar intercept, or a random slope when

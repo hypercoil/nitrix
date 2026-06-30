@@ -2,7 +2,6 @@
 title: "Performance: backends, kernels, and cost"
 ---
 
-::: {.callout-tldr title="Fast path"}
 This is the **reference-tier** page of the unit. The narrative chapters taught
 *what* a registration computes — represent a map, apply it
 ([resampling](resampling.qmd#sec-pullback-sampling)), score the mismatch
@@ -14,24 +13,23 @@ everything: **the warp — an interpolation gather — is the hot kernel, and al
 every cost lever is "how many full-field warps (and stencils, and convolutions)
 do I pay, at what size?"**
 
-- **Backends** (@sec-backends): two ops have a platform-dependent engine. The
-  velocity-field **Gaussian smoother** runs the separable FIR shift-sum on GPU
-  and the Young–van Vliet recursive IIR on CPU (whenever σ clears the validity
-  floor) — a *platform* decision, not a σ crossover; the **interpolation
-  gather** runs `jax.scipy.ndimage.map_coordinates` for `Linear`/`NearestNeighbour`
-  and an explicit separable gather for the wide kernels.
-- **Kernels** (@sec-kernels): two custom Pallas/Triton force kernels —
-  `LNCCForce(derivative='center')` and `DemonsForce` — fuse a stencil + force
-  combine to collapse HBM round-trips, *when the problem is large enough* (the
-  when-it-pays-off framing, sibling to the geometry unit's
-  [ELL discussion](../geometry/performance.qmd#sec-backend)).
-- **Batching** (@sec-batching): `vmap` over a frame series with the reference
-  pyramid + steepest-descent images **hoisted out** of the batch; the
-  inverse-compositional constant-template Hessian reuse (~4–7×).
-- **Cost** (@sec-cost): the levers — scaling-and-squaring `n_steps`, pyramid
-  depth, per-level iteration schedules, early-exit — and the one hard rule:
-  **never call a HOST op inside a jitted loop.**
-:::
+The four sections answer that question in turn. **Backends** (@sec-backends)
+covers the two ops with a platform-dependent engine: the velocity-field
+**Gaussian smoother** runs the separable FIR shift-sum on GPU and the Young–van
+Vliet recursive IIR on CPU (whenever σ clears the validity floor) — a *platform*
+decision, not a σ crossover — and the **interpolation gather** runs
+`jax.scipy.ndimage.map_coordinates` for `Linear`/`NearestNeighbour` and an
+explicit separable gather for the wide kernels. **Kernels** (@sec-kernels) covers
+the two custom Pallas/Triton force kernels — `LNCCForce(derivative='center')` and
+`DemonsForce` — that fuse a stencil + force combine to collapse HBM round-trips
+*when the problem is large enough* (the when-it-pays-off framing, sibling to the
+geometry unit's [ELL discussion](../geometry/performance.qmd#sec-backend)).
+**Batching** (@sec-batching) is the `vmap` over a frame series with the reference
+pyramid + steepest-descent images **hoisted out** of the batch, plus the
+inverse-compositional constant-template Hessian reuse (~4–7×). And **Cost**
+(@sec-cost) is the lever menu — scaling-and-squaring `n_steps`, pyramid depth,
+per-level iteration schedules, early-exit — under one hard rule: **never call a
+HOST op inside a jitted loop.**
 
 This page is more engineering-flavoured than its siblings, but the unit's posture
 holds throughout. Validation is **class / correlation, never bit-parity**: a fused

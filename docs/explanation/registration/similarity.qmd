@@ -2,35 +2,34 @@
 title: "Similarity: what makes two images aligned"
 ---
 
-::: {.callout-tldr title="Fast path"}
-This page owns the **data term** — the number that scores how well a candidate
-transform aligns two images, the $\mathcal{S}(I_f,\,I_m\circ\varphi)$ in the
-[registration objective](foundations.qmd#sec-problem). The single idea it adds:
-*"aligned" is not one thing.* What counts as agreement depends on whether the two
-images are the **same modality** (compare intensities directly — sum of squared
-differences) or **different modalities** (intensities are related by an unknown,
-possibly non-monotone map — compare *statistical dependence* instead, via mutual
-information or the correlation ratio). `nitrix` ships four metrics as an
-**algebraic data type** — `SSD`, `LNCC`, `MI`, `CorrelationRatio` — each a frozen
-record carrying its own knobs and two capability flags (`is_least_squares`,
-`is_spatial_mean`) that **dispatch the optimiser** for you. We climb from the
-metric you would invent on day one (least squares) to the cross-modal workhorse
-(mutual information), earning each rung from the way the previous one breaks, and
-end at the front-end that conditions the images before any metric sees them
-(`preprocess_images`).
-:::
+This chapter owns the *data term* - the number that scores how well a candidate transform aligns two
+images, the $\mathcal{S}(I_f,\,I_m\circ\varphi)$ in the
+[registration objective](foundations.qmd#sec-problem). The single idea it adds is that "aligned" is not
+one thing. What counts as agreement depends on whether the two images are the *same modality* (compare
+intensities directly - sum of squared differences) or *different modalities* (intensities are related by
+an unknown, possibly non-monotone map - compare *statistical dependence* instead, via mutual information
+or the correlation ratio). The cleanest way to organise the four metrics is by the *group of intensity
+transformations each one ignores*: a metric is the right choice when the nuisance relationship between
+the two intensity scales lies inside the group it is invariant to. This is the data-term face of the
+unit's symmetry thread - where [foundations](foundations.qmd#sec-ladder) chose the *transform* rung by
+the geometry's nuisance group, here we choose the *metric* by the intensities' nuisance group.
 
-You have read the [registration problem](foundations.qmd#sec-problem): we look for
-a transform $\varphi$ that minimizes a mismatch energy
-$\mathcal{S}(I_f,\,I_m\circ\varphi) + \lambda\,\mathcal{R}(\varphi)$, *similarity*
-plus *regularisation* over a parametrized family. The
-[transforms](transforms.qmd#sec-homogeneous) page built the family and the
-[resampling](resampling.qmd#sec-pullback-sampling) page built the warped image
-$I_m\circ\varphi$ (the moving image pulled back onto the fixed grid). This page
-fills in the one ingredient we waved past: **$\mathcal{S}$ itself** — the data
-term, the metric. It is the part of the objective that decides *what alignment
-means*, and getting it wrong is the single most common way a registration fails
-silently: the optimiser converges happily to the minimum of the wrong score.
+`nitrix` ships four metrics as an *algebraic data type* - `SSD`, `LNCC`, `MI`, `CorrelationRatio` - each
+a frozen record carrying its own knobs and two capability flags (`is_least_squares`, `is_spatial_mean`)
+that *dispatch the optimiser* for you. We climb from the metric you would invent first (least squares)
+to the cross-modal workhorse (mutual information), earning each rung from the way the previous one
+breaks, and end at the front-end that conditions the images before any metric sees them
+(`preprocess_images`).
+
+You have read the [registration problem](foundations.qmd#sec-problem): we look for a transform $\varphi$
+that minimises a mismatch energy $\mathcal{S}(I_f,\,I_m\circ\varphi) + \lambda\,\mathcal{R}(\varphi)$,
+*similarity* plus *regularisation* over a parametrised family. The
+[transforms](transforms.qmd#sec-homogeneous) chapter built the family and the
+[resampling](resampling.qmd#sec-pullback-sampling) chapter built the warped image $I_m\circ\varphi$ (the
+moving image pulled back onto the fixed grid). This chapter fills in the one ingredient we waved past:
+*$\mathcal{S}$ itself* - the data term, the metric. It is the part of the objective that decides *what
+alignment means*, and getting it wrong is the single most common way a registration fails silently: the
+optimiser converges happily to the minimum of the wrong score.
 
 The source is [`register/_metric.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_metric.py)
 (the metric records and the optimiser-facing flags) and
@@ -41,171 +40,168 @@ and [`metrics/information.py`](https://github.com/hypercoil/nitrix/blob/main/src
 
 ## A motivating example: T1↔T1 versus T1↔EPI {#sec-motivation}
 
-Hold two concrete tasks side by side for the whole page.
+Hold two concrete tasks side by side for the whole chapter.
 
-**Task A (same modality).** You acquired two T1-weighted scans of the same
-subject in one session and want to realign the second to the first — a small head
-motion. Both images measure the *same physical quantity* (T1 relaxation contrast),
-so a given tissue has (nearly) the *same intensity* in both. Grey matter is mid-grey
-in both; white matter is bright in both. When the two are aligned, the intensities
-agree voxel-for-voxel up to noise; when they are misaligned, a bright white-matter
-voxel sits over a darker grey-matter voxel and the *difference* is large. So a
-sensible score of agreement is: **add up the squared intensity differences, and
-make it small.** This is least squares, and it is the right instinct here.
+**Task A (same modality).** You acquired two T1-weighted scans of the same subject in one session and
+want to realign the second to the first - a small head motion. Both images measure the *same physical
+quantity* (T1 relaxation contrast), so a given tissue has (nearly) the *same intensity* in both. Grey
+matter is mid-grey in both; white matter is bright in both. When the two are aligned, the intensities
+agree voxel-for-voxel up to noise; when they are misaligned, a bright white-matter voxel sits over a
+darker grey-matter voxel and the *difference* is large. So a sensible score of agreement is: add up the
+squared intensity differences, and make it small. This is least squares, and it is the right instinct
+here.
 
-**Task B (cross modality).** Now you have a subject's **EPI** functional volume (or
-a T2-weighted scan) and want to align it to their **T1** anatomical. These measure
-*different* physical quantities. In T1, white matter is *bright* and CSF is *dark*;
-in T2/EPI the contrast partly **inverts** — CSF is bright, white matter darker. A
-tissue that is bright in one image is dark in the other, and the relationship
-between the two intensity scales is **not** a simple gain-and-offset — it is an
-unknown, *non-monotone* function of tissue type. Now the day-one instinct backfires
-catastrophically: at perfect alignment the squared difference is *large* (bright
-sits over dark), and an optimiser minimizing squared differences will happily
-*mis*-register the images to make bright land on bright — the wrong answer. We will
-watch this happen in @fig-similarity-crossmodal. The cure is a different notion of
-agreement entirely: two images are aligned when knowing the intensity at a voxel in
-one tells you the most it possibly can about the intensity in the other — when they
-are *statistically dependent*, regardless of any intensity relationship. That is
-mutual information, and the correlation ratio is its variance-based cousin.
+**Task B (cross modality).** Now you have a subject's EPI functional volume (or a T2-weighted scan) and
+want to align it to their T1 anatomical. These measure *different* physical quantities. In T1, white
+matter is *bright* and CSF is *dark*; in T2/EPI the contrast partly *inverts* - CSF is bright, white
+matter darker. A tissue that is bright in one image is dark in the other, and the relationship between
+the two intensity scales is *not* a simple gain-and-offset - it is an unknown, *non-monotone* function
+of tissue type. Now the day-one instinct backfires: at perfect alignment the squared difference is
+*large* (bright sits over dark), and an optimiser minimising squared differences will *mis*-register the
+images to make bright land on bright - the wrong answer (@fig-similarity-crossmodal). The cure is a
+different notion of agreement entirely: two images are aligned when knowing the intensity at a voxel in
+one tells you the most it possibly can about the intensity in the other - when they are *statistically
+dependent*, regardless of any intensity relationship. That is mutual information, and the correlation
+ratio is its variance-based cousin.
 
-The whole page is the elaboration of *which score for which task*, and the design
-that lets a recipe carry the right one as a single value.
+The two tasks differ in *which intensity transformations should not change the verdict*. Task A wants a
+metric that treats the identity intensity map as alignment; Task B wants one blind to an arbitrary
+relabelling of intensities. The whole chapter is the elaboration of which score for which task, ordered
+by how large a nuisance group each tolerates, and the design that lets a recipe carry the right one as a
+single value.
 
 ## The metric as an algebraic data type {#sec-adt}
 
-Before the metrics themselves, the shape they share — because that shape is what
-makes the optimiser on the [next page](optimization.qmd#sec-objective) tractable.
+Before the metrics themselves, the shape they share - because that shape is what makes the optimiser on
+the [next chapter](optimization.qmd#sec-objective) tractable.
 
-The obvious way to let a recipe pick a metric is a string: `metric='ssd'`, dispatched
-by an `if`-chain. That is what `nitrix` *used* to do, and it rots: every metric's
-knobs (the LNCC window radius, the MI bin count) get flattened onto one god-config,
-the dispatch raises at trace time on a typo, and adding a metric means touching the
-chain in several places (`docs/feature-requests/registration-typing-metric-adt.md`
-records the migration). The house cure — the same one the geometry unit uses for its
-`Interpolator` — is an **algebraic data type**: a `Metric` *protocol* with one frozen
-`@dataclass` *implementer per metric*, each carrying its own hyper-parameters, each
-exposing the same small interface. The driver then dispatches on a *method*, not a
-string, and a new metric is one new record.
+The obvious way to let a recipe pick a metric is a string: `metric='ssd'`, dispatched by an `if`-chain.
+That is what `nitrix` *used* to do, and it does not scale: every metric's knobs (the LNCC window radius,
+the MI bin count) get flattened onto one god-config, the dispatch raises at trace time on a typo, and
+adding a metric means touching the chain in several places
+(`docs/feature-requests/registration-typing-metric-adt.md` records the migration). The house cure - the
+same one the geometry unit uses for its `Interpolator` - is an *algebraic data type*: a `Metric`
+*protocol* with one frozen `@dataclass` *implementer per metric*, each carrying its own
+hyper-parameters, each exposing the same small interface. The driver then dispatches on a *method*, not
+a string, and a new metric is one new record.
 
 The `Metric` protocol (in `register/_metric.py`) is exactly four members:
 
-- `is_least_squares` (`ClassVar[bool]`) — does this metric admit a **vector
-  residual** $r$ whose half-sum-of-squares $\tfrac12\lVert r\rVert^2$ *is* the cost?
-  Only `SSD` does. This single flag routes the driver to the **Gauss–Newton /
-  Levenberg–Marquardt** least-squares path; everything else takes the scalar **BFGS**
-  path. (We earn why least-squares is special in @sec-ssd.)
-- `is_spatial_mean` (`ClassVar[bool]`) — is the scalar cost a **per-voxel spatial
-  mean** (`SSD`, `LNCC`) rather than a **global histogram statistic** (`MI`,
-  `CorrelationRatio`)? This flag is consumed by the diffeomorphic force machinery
-  (`register._force.MetricForce`): the voxel-count rescale that makes an autodiff
-  force match the closed-form sum-convention gradient is only meaningful for a
-  spatial mean. (A histogram statistic has no per-voxel decomposition to rescale.)
-- `cost(warped, fixed, *, mask=None)` → scalar — the **minimisation objective**,
-  lower-is-better. Where a kernel returns a *similarity* (higher-is-better, like
-  `lncc` or `mutual_information`), the record flips it: `1 - lncc`,
-  `-mutual_information`, `1 - eta**2`.
-- `residual(warped, fixed, *, mask=None)` → vector — the least-squares residual, for
-  the `is_least_squares` members only; the others *raise* `NotImplementedError`.
+- `is_least_squares` (`ClassVar[bool]`) - does this metric admit a *vector residual* $r$ whose
+  half-sum-of-squares $\tfrac12\lVert r\rVert^2$ *is* the cost? Only `SSD` does. This single flag routes
+  the driver to the *Gauss–Newton / Levenberg–Marquardt* least-squares path; everything else takes the
+  scalar *BFGS* path. (We earn why least-squares is special in @sec-ssd.)
+- `is_spatial_mean` (`ClassVar[bool]`) - is the scalar cost a *per-voxel spatial mean* (`SSD`, `LNCC`)
+  rather than a *global histogram statistic* (`MI`, `CorrelationRatio`)? This flag is consumed by the
+  diffeomorphic force machinery (`register._force.MetricForce`): the voxel-count rescale that makes an
+  autodiff force match the closed-form sum-convention gradient is only meaningful for a spatial mean. (A
+  histogram statistic has no per-voxel decomposition to rescale.)
+- `cost(warped, fixed, *, mask=None)` → scalar - the *minimisation objective*, lower-is-better. Where a
+  kernel returns a *similarity* (higher-is-better, like `lncc` or `mutual_information`), the record flips
+  it: `1 - lncc`, `-mutual_information`, `1 - eta**2`.
+- `residual(warped, fixed, *, mask=None)` → vector - the least-squares residual, for the
+  `is_least_squares` members only; the others *raise* `NotImplementedError`.
 
-Both `cost` and `residual` are **DIFF-JAX** — pure array math, jittable and
-differentiable, safe inside the optimiser's `lax.scan`. The flags are `ClassVar`s
-(known at trace time, so the dispatch resolves statically); reading them is **HOST-QA**
-in the sense that the *driver* branches on them on the host before building the loop.
-The metric *math* itself does not live in these records — it stays in `nitrix.metrics`
-(`ssd`, `lncc`, `mutual_information`, `correlation_ratio`); the records are a thin
-**cost-orientation** wrapper. A consumer constructs a spec directly, e.g.
-`RegistrationSpec(metric=LNCC(radius=2))`, and the driver reads
-`spec.metric.is_least_squares` to choose its solver (`register/_core.py`). This is
-the same `NamedTuple`-of-data, dispatch-on-capability discipline as the rest of the
-suite.
+Both `cost` and `residual` are **DIFF-JAX** - pure array math, jittable and differentiable, safe inside
+the optimiser's `lax.scan`. The flags are `ClassVar`s (known at trace time, so the dispatch resolves
+statically); reading them is **HOST-QA** in the sense that the *driver* branches on them on the host
+before building the loop. The metric *math* itself does not live in these records - it stays in
+`nitrix.metrics` (`ssd`, `lncc`, `mutual_information`, `correlation_ratio`); the records are a thin
+*cost-orientation* wrapper. A consumer constructs a spec directly, e.g.
+`RegistrationSpec(metric=LNCC(radius=2))`, and the driver reads `spec.metric.is_least_squares` to choose
+its solver (`register/_core.py`). This is the same `NamedTuple`-of-data, dispatch-on-capability
+discipline as the rest of the suite.
 
 ::: {.callout-note title="Why the flags, not the type, drive dispatch"}
-The driver never asks *"is this an `SSD`?"* — it asks *"does this metric give me a
-residual?"* (`is_least_squares`) and *"is its cost a spatial mean?"*
-(`is_spatial_mean`). Dispatching on **capability flags** rather than the concrete
-class is what lets a future metric — a MIND descriptor, a self-similarity context —
-slot in as one new record with the right two flags, and immediately get the right
-solver, with no change to the driver. The flags *are* the contract.
+The driver never asks *"is this an `SSD`?"* - it asks *"does this metric give me a residual?"*
+(`is_least_squares`) and *"is its cost a spatial mean?"* (`is_spatial_mean`). Dispatching on *capability
+flags* rather than the concrete class is what lets a future metric - a MIND descriptor, a self-similarity
+context - slot in as one new record with the right two flags, and immediately get the right solver, with
+no change to the driver. The flags *are* the contract.
 :::
+
+A second axis classifies the same four records, and it is the unifying thread of the chapter: each
+metric is *invariant* to a group of intensity transformations - the nuisance relationships it refuses to
+see. SSD is invariant to nothing (it reads the intensities literally); NCC to a global affine intensity
+map $I\mapsto aI+b$; LNCC to a *spatially varying* affine map (a local gain and offset); the correlation
+ratio to any deterministic *function* of the fixed intensity; mutual information to an *arbitrary*
+reparametrisation of either image's intensities. Reading down that list is reading up a ladder of ever
+larger invariance groups, and choosing a metric is choosing how much of the intensity relationship to
+quotient away before scoring geometry. The rest of the chapter climbs that ladder.
 
 ## SSD: least squares, and why it is special {#sec-ssd}
 
-Start where Task A leads. Two same-modality images, aligned, agree intensity-for-intensity;
-misaligned, they differ. Score the disagreement by the **sum of squared differences**.
-Per voxel the disagreement is the residual
+Begin where Task A leads. Two same-modality images, aligned, agree intensity-for-intensity; misaligned,
+they differ. Score the disagreement by the *sum of squared differences*. Per voxel the disagreement is
+the residual
 
 $$
 r(x) \;=\; (I_m\circ\varphi)(x) \;-\; I_f(x),
 $$ {#eq-ssd-residual}
 
-the **warped-minus-fixed** intensity gap (note the order: `warped - fixed`, exactly
-as `SSD.residual` computes `diff = warped - fixed`). The cost is the **mean** of its
-square,
+the *warped-minus-fixed* intensity gap (note the order: `warped - fixed`, exactly as `SSD.residual`
+computes `diff = warped - fixed`). The cost is the *mean* of its square,
 
 $$
 \mathcal{S}_{\text{SSD}}(I_f,\,I_m\circ\varphi)
   \;=\; \frac{1}{|\Omega_f|}\sum_{x\in\Omega_f} r(x)^2,
 $$ {#eq-ssd}
 
-which `SSD.cost` evaluates by calling `metrics.ssd(warped, fixed)` (the
-`reduction='mean'` default — the ITK `MeanSquares` metric, verified bit-equal in
-fp64). Each symbol earns its place: $r(x)$ is the residual at voxel $x$, the square
-$r(x)^2$ makes the cost insensitive to the *sign* of the gap and smooth at zero, and
-the mean makes the cost independent of how many voxels are in the domain.
+which `SSD.cost` evaluates by calling `metrics.ssd(warped, fixed)` (the `reduction='mean'` default - the
+ITK `MeanSquares` metric, verified bit-equal in fp64). Each symbol earns its place: $r(x)$ is the
+residual at voxel $x$, the square $r(x)^2$ makes the cost insensitive to the *sign* of the gap and
+smooth at zero, and the mean makes the cost independent of how many voxels are in the domain.
 
-**When is SSD the right score?** Exactly when @eq-ssd-residual is a *meaningful*
-quantity — when the two intensity scales are **comparable**, so that "the warped
-intensity equals the fixed intensity" is what alignment *means*. That is the
-same-modality case (T1↔T1, or a motion-corrected fMRI series, where every frame is
-the same EPI contrast). It is the `3dvolreg` / Lucas–Kanade lineage. Cross-modality
-breaks the premise — @eq-ssd-residual then measures a contrast difference, not a
-misalignment — which is the failure we will see in @fig-similarity-crossmodal.
+**When is SSD the right score?** Exactly when @eq-ssd-residual is a *meaningful* quantity - when the two
+intensity scales are *comparable*, so that "the warped intensity equals the fixed intensity" is what
+alignment *means*. In the invariance language above, SSD tolerates *no* intensity nuisance: it is the
+right metric precisely when the nuisance group is trivial, the identity intensity map. That is the
+same-modality case (T1↔T1, or a motion-corrected fMRI series, where every frame is the same EPI
+contrast). It is the `3dvolreg` / Lucas–Kanade lineage. Cross-modality breaks the premise -
+@eq-ssd-residual then measures a contrast difference, not a misalignment - the failure we will see in
+@fig-similarity-crossmodal.
 
-**The least-squares property is the special one.** Why does `SSD` alone carry
-`is_least_squares = True`? Because its cost is *literally* the half-squared-norm of a
-residual **vector** $r = (r(x))_{x\in\Omega_f}$:
-$\mathcal{S}_{\text{SSD}} \propto \tfrac12\lVert r\rVert^2$ (up to the $1/|\Omega_f|$
-mean factor). That structure is gold for optimisation. The gradient of a sum of
-squares is $J^\top r$ and its Hessian is *approximately* $J^\top J$ — the **Gauss–Newton**
-approximation — where $J = \partial r/\partial\theta$ is the residual Jacobian. $J^\top J$
-is built from first derivatives only (no second derivatives of the warp), is always
-positive semidefinite, and gives a step that converges quadratically near the optimum.
-This is the engine the [optimization page](optimization.qmd#sec-gauss-newton)
-runs for `SSD`, and `SSD.residual` exists precisely to feed it the vector $r$ it
-needs. No other metric here is a sum of squares, so none gives a Gauss–Newton Hessian
-for free; they take the general scalar [BFGS path](optimization.qmd#sec-bfgs) instead.
-This is why the metric carries a `residual` method at all: it is the hand-off to the
-fast least-squares solver. (`SSD.residual` returns the *raw* residual `diff.ravel()`,
-mask-weighted by $\sqrt{\text{mask}}$ when masked — see @sec-masking for why the
+**The least-squares property is the special one.** Why does `SSD` alone carry `is_least_squares = True`?
+Because its cost is *literally* the half-squared-norm of a residual *vector* $r = (r(x))_{x\in\Omega_f}$:
+$\mathcal{S}_{\text{SSD}} \propto \tfrac12\lVert r\rVert^2$ (up to the $1/|\Omega_f|$ mean factor). That
+structure is gold for optimisation. The gradient of a sum of squares is $J^\top r$ and its Hessian is
+*approximately* $J^\top J$ - the *Gauss–Newton* approximation - where $J = \partial r/\partial\theta$ is
+the residual Jacobian. $J^\top J$ is built from first derivatives only (no second derivatives of the
+warp), is always positive semidefinite, and gives a step that converges quadratically near the optimum.
+This is the engine the [optimisation chapter](optimization.qmd#sec-gauss-newton) runs for `SSD`, and
+`SSD.residual` exists precisely to feed it the vector $r$ it needs. No other metric here is a sum of
+squares, so none gives a Gauss–Newton Hessian for free; they take the general scalar
+[BFGS path](optimization.qmd#sec-bfgs) instead. This is why the metric carries a `residual` method at
+all: it is the hand-off to the fast least-squares solver. (`SSD.residual` returns the *raw* residual
+`diff.ravel()`, mask-weighted by $\sqrt{\text{mask}}$ when masked - see @sec-masking for why the
 square-root is exactly right.)
 
-**Execution class.** `SSD` is **DIFF-JAX** throughout — the residual and cost are
-elementwise array math, jittable and differentiable; the recipe differentiates
-through them, or uses `linalg.implicit_least_squares` at convergence.
+**Execution class.** `SSD` is **DIFF-JAX** throughout - the residual and cost are elementwise array
+math, jittable and differentiable; the recipe differentiates through them, or uses
+`linalg.implicit_least_squares` at convergence.
 
 ## LNCC: surviving a smooth intensity bias {#sec-lncc}
 
-SSD assumes the two intensity scales are identical. The first crack in that
-assumption is gentle and ubiquitous: a **bias field**. MR images carry a smooth,
-low-frequency multiplicative shading — the receive-coil profile makes one side of
-the brain systematically brighter than the other. The *tissue contrast* is intact
-everywhere, but $I_m(x) \approx b(x)\,I_f(x)$ for a smooth, spatially varying gain
+SSD assumes the two intensity scales are identical. The first crack in that assumption is gentle and
+ubiquitous: a *bias field*. MR images carry a smooth, low-frequency multiplicative shading - the
+receive-coil profile makes one side of the brain systematically brighter than the other. The *tissue
+contrast* is intact everywhere, but $I_m(x) \approx b(x)\,I_f(x)$ for a smooth, spatially varying gain
 $b(x)$. SSD reads the gain as misalignment and fights it (@fig-similarity-bias).
 
-The obvious fix is to compare *contrast* rather than *intensity* — to ask whether
-the two images **co-vary**, which is insensitive to a constant gain and offset. That
-is **normalized cross-correlation** (Pearson's $r$): subtract each image's mean,
-correlate, normalize by the standard deviations. `metrics.ncc` computes exactly this
-*globally* (and is sign-agnostic as a cost via `1 - ncc**2`, the ITK `Correlation`
-form). But a *global* NCC only removes one *global* gain and offset; a bias field is
-**spatially varying**, so a single global normalization cannot follow it. The cure is
-one idea on top: make the correlation **local**.
+The fix is to compare *contrast* rather than *intensity* - to ask whether the two images *co-vary*,
+which is insensitive to a constant gain and offset. That is *normalised cross-correlation* (Pearson's
+$r$): subtract each image's mean, correlate, normalise by the standard deviations. By construction it is
+exactly invariant to a global affine intensity map $I\mapsto aI+b$ - the first nontrivial rung of the
+invariance ladder. `metrics.ncc` computes this *globally* (and is sign-agnostic as a cost via
+`1 - ncc**2`, the ITK `Correlation` form). But a *global* NCC only removes one *global* gain and offset;
+a bias field is *spatially varying*, so a single global normalisation cannot follow it. The cure is one
+idea on top: make the correlation *local*, which widens the invariance from a global affine intensity
+map to a *spatially varying* one.
 
-`LNCC(radius)` is **local windowed normalized cross-correlation**. Around each voxel
-take a box window of half-width `radius` (so $2r+1$ voxels per axis), and compute the
-*squared* normalized correlation *within that window*. Writing $\tilde m,\tilde f$ for
-the window-mean-subtracted intensities, the per-voxel local correlation is
+`LNCC(radius)` is *local windowed normalised cross-correlation*. Around each voxel take a box window of
+half-width `radius` (so $2r+1$ voxels per axis), and compute the *squared* normalised correlation
+*within that window*. Writing $\tilde m,\tilde f$ for the window-mean-subtracted intensities, the
+per-voxel local correlation is
 
 $$
 \mathrm{cc}(x) \;=\;
@@ -213,58 +209,51 @@ $$
        {\big(\sum_{w} \tilde m^2\big)\big(\sum_{w} \tilde f^2\big)},
 $$ {#eq-lncc}
 
-the sum running over the window $w$ centred at $x$. The numerator is the squared
-local covariance; the denominator is the product of local variances. $\mathrm{cc}\in[0,1]$;
-it is $1$ wherever the two images are *locally* an affine function of one another — a
-local gain and offset are divided out, which is exactly the bias field, *locally*. The
-cost is the complement of the spatial mean, $1 - \overline{\mathrm{cc}}$, which
-`LNCC.cost` computes as `1.0 - lncc(warped, fixed, radius=self.radius)`.
+the sum running over the window $w$ centred at $x$. The numerator is the squared local covariance; the
+denominator is the product of local variances. $\mathrm{cc}\in[0,1]$; it is $1$ wherever the two images
+are *locally* an affine function of one another - a local gain and offset are divided out, which is
+exactly the bias field, *locally*. The cost is the complement of the spatial mean,
+$1 - \overline{\mathrm{cc}}$, which `LNCC.cost` computes as
+`1.0 - lncc(warped, fixed, radius=self.radius)`.
 
-**The window sums are the whole trick — and they are cheap.** Equation @eq-lncc needs
-five windowed sums per voxel: $\sum m$, $\sum f$, $\sum m^2$, $\sum f^2$, $\sum mf$.
-Each is a **uniform box filter**, and a box filter is **separable** — a 3-D box sum is
-three 1-D box sums in sequence — so the cost is independent of the window *area*. The
-implementation (`metrics._common._box_sum`) dispatches on window size: a
-**shifted-slice sum** for the small radii LNCC actually uses (faster, and free of the
-prefix-sum's fp32 cancellation), an **integral image** for large windows. The local
-covariance and variances follow from the sums by the identity
-$\sum \tilde m\tilde f = \sum mf - (\sum m)(\sum f)/n$ (with $n$ the window count), the
-same algebra you would use to compute a variance in one pass. (This is the
-[separable-filter substrate](../geometry/operators.qmd) shared with
-`geometry.spatial_gradient`.)
+**The window sums are the whole computation - and they are cheap.** Equation @eq-lncc needs five
+windowed sums per voxel: $\sum m$, $\sum f$, $\sum m^2$, $\sum f^2$, $\sum mf$. Each is a *uniform box
+filter*, and a box filter is *separable* - a 3-D box sum is three 1-D box sums in sequence - so the cost
+is independent of the window *area*. The implementation (`metrics._common._box_sum`) dispatches on
+window size: a *shifted-slice sum* for the small radii LNCC actually uses (faster, and free of the
+prefix-sum's fp32 cancellation), an *integral image* for large windows. The local covariance and
+variances follow from the sums by the identity $\sum \tilde m\tilde f = \sum mf - (\sum m)(\sum f)/n$
+(with $n$ the window count), the same algebra you would use to compute a variance in one pass. (This is
+the [separable-filter substrate](../geometry/operators.qmd) shared with `geometry.spatial_gradient`.)
 
-**Capability flags.** `LNCC` is `is_least_squares = False` — the squared, normalized,
-windowed ratio in @eq-lncc is *not* a sum of squares of any residual, so there is no
-Gauss–Newton structure; the cost is a single scalar and it takes the
-[BFGS path](optimization.qmd#sec-bfgs) (`LNCC.residual` raises `NotImplementedError`).
-It is `is_spatial_mean = True` — the cost *is* a mean of the per-voxel local CC over
-voxels, so the diffeomorphic force machinery can rescale it by the voxel count. Indeed
-LNCC is the **diffeomorphic-recipe workhorse**, and it has a hand-written analytic
-force (`metrics.lncc_grad`, and the ANTs centre-only `lncc_grad_center`) so the greedy
-SyN recipe never has to differentiate through the box filters — see
-[diffeomorphic forces](diffeomorphic.qmd#sec-forces). Its robustness to smooth
+**Capability flags.** `LNCC` is `is_least_squares = False` - the squared, normalised, windowed ratio in
+@eq-lncc is *not* a sum of squares of any residual, so there is no Gauss–Newton structure; the cost is a
+single scalar and it takes the [BFGS path](optimization.qmd#sec-bfgs) (`LNCC.residual` raises
+`NotImplementedError`). It is `is_spatial_mean = True` - the cost *is* a mean of the per-voxel local CC
+over voxels, so the diffeomorphic force machinery can rescale it by the voxel count. Indeed LNCC is the
+*diffeomorphic-recipe workhorse*, and it has a hand-written analytic force (`metrics.lncc_grad`, and the
+ANTs centre-only `lncc_grad_center`) so the greedy SyN recipe never has to differentiate through the box
+filters - see [diffeomorphic forces](diffeomorphic.qmd#sec-forces). Its robustness to smooth
 inhomogeneity is exactly why it, not SSD, drives that recipe.
 
-**Default radius and the boundary.** `radius` defaults to `4` (a $9^3$ window in 3-D);
-smaller windows track finer local contrast but are noisier. The box sums use a
-`reflect` boundary by default, which keeps the window *count* uniform so the per-window
-normalization is exact at the image edge (ANTs instead trims to valid neighbourhoods;
-the interiors agree to fp64, only the boundary differs). When masked, the mask gates the
-**reduction** — out-of-mask voxels do not count toward the mean — but, by design, the
-windowed sums at an in-mask voxel still draw on its out-of-mask neighbours (a documented,
+**Default radius and the boundary.** `radius` defaults to `4` (a $9^3$ window in 3-D); smaller windows
+track finer local contrast but are noisier. The box sums use a `reflect` boundary by default, which
+keeps the window *count* uniform so the per-window normalisation is exact at the image edge (ANTs
+instead trims to valid neighbourhoods; the interiors agree to fp64, only the boundary differs). When
+masked, the mask gates the *reduction* - out-of-mask voxels do not count toward the mean - but, by
+design, the windowed sums at an in-mask voxel still draw on its out-of-mask neighbours (a documented,
 deliberate approximation; full window-gated sums would be a separate, costlier kernel).
 
-**Execution class.** **DIFF-JAX**: the box sums and the ratio are all jittable,
-differentiable array math.
+**Execution class.** **DIFF-JAX**: the box sums and the ratio are all jittable, differentiable array
+math.
 
-@fig-similarity-bias shows the failure LNCC is built for. A smooth multiplicative
-bias field **depresses** *global* NCC's peak — at perfect alignment the single
-global mean/variance normalization cannot match a spatially varying gain, so the
-score reports disagreement and the peak becomes shallow and broad (poorly
-discriminating) — while the *local* windowed LNCC keeps a **sharp** peak at the true
-alignment, because each window divides out its own local gain. (The point is the
-peak's *sharpness and placement*, not the absolute level: squared local CC runs below
-$1$ on a textured phantom, so its scale is not comparable to global NCC's.)
+@fig-similarity-bias shows the failure LNCC is built for. A smooth multiplicative bias field *depresses*
+*global* NCC's peak - at perfect alignment the single global mean/variance normalisation cannot match a
+spatially varying gain, so the score reports disagreement and the peak becomes shallow and broad (poorly
+discriminating) - while the *local* windowed LNCC keeps a *sharp* peak at the true alignment, because
+each window divides out its own local gain. (The point is the peak's *sharpness and placement*, not the
+absolute level: squared local CC runs below $1$ on a textured phantom, so its scale is not comparable to
+global NCC's.)
 
 ```{python}
 #| label: fig-similarity-bias
@@ -339,97 +328,87 @@ plt.show()
 
 ## MI: the cross-modal workhorse {#sec-mi}
 
-LNCC survives a *multiplicative* gain because a local correlation divides one out. But
-Task B is worse than a gain: T1↔T2 contrast partly **inverts**, and the intensity
-relationship is **non-monotone** — there is no gain, no offset, no even *function* in
-one direction that turns one modality into the other. A correlation (local or global)
-measures *linear* covariation and goes to zero exactly where the relationship is
-strong but non-linear. We need a score that does not assume *any* intensity
-relationship — only that, at alignment, the two images are **statistically dependent**:
-knowing the intensity here in one image tells you a lot about the intensity here in the
-other, whatever the (unknown) correspondence between their scales.
+LNCC survives a *multiplicative* gain because a local correlation divides one out. But Task B is worse
+than a gain: T1↔T2 contrast partly *inverts*, and the intensity relationship is *non-monotone* - there
+is no gain, no offset, no even *function* in one direction that turns one modality into the other. A
+correlation (local or global) measures *linear* covariation and goes to zero exactly where the
+relationship is strong but non-linear. We need a score that does not assume *any* intensity relationship
+- the top of the invariance ladder, invariant to an arbitrary reparametrisation of either image's
+intensities - only that, at alignment, the two images are *statistically dependent*: knowing the
+intensity here in one image tells you a lot about the intensity here in the other, whatever the unknown
+correspondence between their scales.
 
-That quantity is **mutual information**. Build it from the **joint intensity histogram**
-$P(i,j)$ — the fraction of voxels whose moving intensity falls in bin $i$ *and* whose
-fixed intensity falls in bin $j$. @fig-similarity-jointhist shows the key picture: at
-misalignment the joint histogram is a **smeared blob** (a given fixed intensity co-occurs
-with many different moving intensities — little structure); at alignment it **sharpens**
-into a few bright clusters (each tissue's fixed intensity co-occurs with one
-characteristic moving intensity — even though that mapping is non-monotone). Mutual
-information is the number that measures that sharpening:
+That quantity is *mutual information*. Build it from the *joint intensity histogram* $P(i,j)$ - the
+fraction of voxels whose moving intensity falls in bin $i$ *and* whose fixed intensity falls in bin $j$.
+@fig-similarity-jointhist shows the key picture: at misalignment the joint histogram is a *smeared blob*
+(a given fixed intensity co-occurs with many different moving intensities - little structure); at
+alignment it *sharpens* into a few bright clusters (each tissue's fixed intensity co-occurs with one
+characteristic moving intensity - even though that mapping is non-monotone). Mutual information is the
+number that measures that sharpening:
 
 $$
 \mathrm{MI} \;=\; \sum_{i,j} P(i,j)\,
    \log\!\frac{P(i,j)}{P_m(i)\,P_f(j)},
 $$ {#eq-mi}
 
-where $P_m(i) = \sum_j P(i,j)$ and $P_f(j) = \sum_i P(i,j)$ are the **marginal**
-histograms of the moving and fixed images. Read @eq-mi as a comparison: $P_m(i)P_f(j)$
-is the joint histogram you would see if the two images were **independent** (the
-outer product of the marginals); $P(i,j)$ is the one you actually see. MI is the
-average log-ratio of the two — *how far the real joint is from independence*. It is
-zero iff the images are independent (worst alignment) and grows as the joint
-concentrates (better alignment). Equivalently, in entropies,
-$\mathrm{MI} = H(I_m) + H(I_f) - H(I_m, I_f)$: the marginal entropies minus the joint
-entropy — alignment *shrinks* the joint entropy (the sharpening) while the marginals
-stay fixed, so MI *rises*. The crucial property: MI depends **only on the statistical
-dependence**, not on any intensity relationship — which is exactly why it is the
-**cross-modal workhorse**. It does not care that white is dark and dark is white; it
-cares only that the correspondence is *consistent*.
+where $P_m(i) = \sum_j P(i,j)$ and $P_f(j) = \sum_i P(i,j)$ are the *marginal* histograms of the moving
+and fixed images. Read @eq-mi as a comparison: $P_m(i)P_f(j)$ is the joint histogram you would see if the
+two images were *independent* (the outer product of the marginals); $P(i,j)$ is the one you actually
+see. MI is the average log-ratio of the two - *how far the real joint is from independence*. It is zero
+iff the images are independent (worst alignment) and grows as the joint concentrates (better alignment).
+Equivalently, in entropies, $\mathrm{MI} = H(I_m) + H(I_f) - H(I_m, I_f)$: the marginal entropies minus
+the joint entropy - alignment *shrinks* the joint entropy (the sharpening) while the marginals stay
+fixed, so MI *rises*. The crucial property: MI depends *only on the statistical dependence*, not on any
+intensity relationship - exactly why it is the *cross-modal workhorse*. Because relabelling either
+image's intensities only permutes histogram bins, leaving the dependence structure intact, MI is
+invariant to any such reparametrisation; it does not care that white is dark and dark is white, only
+that the correspondence is *consistent*.
 
-`MI(bins, normalized, range_moving, range_fixed)` (`MI.cost` returns
-`-mutual_information(...)`, the negated similarity). The arguments:
+`MI(bins, normalized, range_moving, range_fixed)` (`MI.cost` returns `-mutual_information(...)`, the
+negated similarity). The arguments:
 
-- **`bins`** (default `32`) — histogram bins per axis. The histogram must be
-  *differentiable* to sit inside a gradient-based registration, so it is not a hard
-  count: each voxel contributes its **linear (order-1 B-spline / triangular Parzen)
-  soft weight** to the four surrounding $(i,j)$ bin pairs (`metrics.joint_histogram`
-  via `_soft_bin`). The bin *index* is piecewise-constant (zero gradient), but the
-  gradient flows through the soft *weights*. This puts `nitrix` in the same
-  B-spline-Parzen family as ITK's `MattesMutualInformation` (which uses cubic
-  splines); coarser bins bias MI downward, and all soft/hard variants converge in the
-  fine-bin limit.
-- **`normalized`** (default `False`) — when `True`, return **Studholme's normalized
-  MI**, $\mathrm{NMI} = (H_m + H_f)/H_{mf}$, in $[1,2]$. Plain MI can be inflated just
-  by *more overlap* (a bigger shared field of view raises both joint and marginal
-  counts); NMI divides that out, so it is robust to a changing overlap region as the
-  transform moves — often the better choice when the field of view shifts during
-  alignment.
-- **`range_moving`, `range_fixed`** — the pinned $(\mathrm{lo}, \mathrm{hi})$ intensity
-  ranges that set the histogram's bin edges. This is subtle and important enough to get
-  its own paragraph.
+- **`bins`** (default `32`) - histogram bins per axis. The histogram must be *differentiable* to sit
+  inside a gradient-based registration, so it is not a hard count: each voxel contributes its *linear
+  (order-1 B-spline / triangular Parzen) soft weight* to the four surrounding $(i,j)$ bin pairs
+  (`metrics.joint_histogram` via `_soft_bin`). The bin *index* is piecewise-constant (zero gradient),
+  but the gradient flows through the soft *weights*. This puts `nitrix` in the same B-spline-Parzen
+  family as ITK's `MattesMutualInformation` (which uses cubic splines); coarser bins bias MI downward,
+  and all soft/hard variants converge in the fine-bin limit.
+- **`normalized`** (default `False`) - when `True`, return *Studholme's normalised MI*,
+  $\mathrm{NMI} = (H_m + H_f)/H_{mf}$, in $[1,2]$. Plain MI can be inflated just by *more overlap* (a
+  bigger shared field of view raises both joint and marginal counts); NMI divides that out, so it is
+  robust to a changing overlap region as the transform moves - often the better choice when the field of
+  view shifts during alignment.
+- **`range_moving`, `range_fixed`** - the pinned $(\mathrm{lo}, \mathrm{hi})$ intensity ranges that set
+  the histogram's bin edges. This is subtle and important enough to get its own paragraph.
 
-**Range pinning: keep the bins stationary.** If you leave the ranges as `None`, the
-histogram uses each image's **data min/max** to place its bin edges. That is convenient
-but quietly poisonous *inside an optimisation loop*: as the moving image deforms across
-iterations, its min and max **drift**, so the bin edges drift, so the objective you are
-descending **changes shape from step to step** — a non-stationary objective, and the
-soft-bin assignment (hence the gradient) becomes piecewise-unstable (the design record
-files this as A6). The cure is to **pin** the ranges *once*, before the
-[coarse-to-fine loop](optimization.qmd#sec-coarse-fine), from the full-resolution
-images, and ride them as a frozen constant. That is `pin_metric_ranges(metric, moving,
-fixed)`: for an `MI` (or `CorrelationRatio`) with any `None` range, it resolves the
-range from the full-resolution data and returns a `replace`-d copy with the range filled
-in. The resolution uses `_pin_range`, a `lax.stop_gradient`-ed `jnp.min`/`jnp.max`:
+**Range pinning: keep the bins stationary.** If you leave the ranges as `None`, the histogram uses each
+image's *data min/max* to place its bin edges. That is convenient but quietly poisonous *inside an
+optimisation loop*: as the moving image deforms across iterations, its min and max *drift*, so the bin
+edges drift, so the objective you are descending *changes shape from step to step* - a non-stationary
+objective, and the soft-bin assignment (hence the gradient) becomes piecewise-unstable (the design
+record files this as A6). The cure is to *pin* the ranges *once*, before the
+[coarse-to-fine loop](optimization.qmd#sec-coarse-fine), from the full-resolution images, and ride them
+as a frozen constant. That is `pin_metric_ranges(metric, moving, fixed)`: for an `MI` (or
+`CorrelationRatio`) with any `None` range, it resolves the range from the full-resolution data and
+returns a `replace`-d copy with the range filled in. The resolution uses `_pin_range`, a
+`lax.stop_gradient`-ed `jnp.min`/`jnp.max`:
 
-- the **`stop_gradient`** keeps the bin edges *constant* — the histogram gradient is
-  derived assuming the edges do not move, so a gradient must not flow back into them;
-- using a *traced reduction* (not an eager `float(...)`) makes the pin **jit-safe** —
-  under `jax.jit` the images are tracers and `float(tracer)` cannot run, but
-  `jnp.min(tracer)` can. So `MI(bins=32)` traces with no explicit range even under
-  `jit`, and the pinned value is unchanged.
+- the *`stop_gradient`* keeps the bin edges *constant* - the histogram gradient is derived assuming the
+  edges do not move, so a gradient must not flow back into them;
+- using a *traced reduction* (not an eager `float(...)`) makes the pin *jit-safe* - under `jax.jit` the
+  images are tracers and `float(tracer)` cannot run, but `jnp.min(tracer)` can. So `MI(bins=32)` traces
+  with no explicit range even under `jit`, and the pinned value is unchanged.
 
-This makes range-pinning a **HOST-CTOR**-flavoured step in spirit (resolved once,
-before the loop) that is nonetheless trace-safe — the load-bearing rule from
-[execution classes](foundations.qmd#sec-classes): pin the range *once* on entry, never
-re-derive it inside the jitted loop (precisely so `volreg` can `vmap` the per-frame
-core). `pin_metric_ranges` is a no-op for a least-squares or already-pinned metric.
+This makes range-pinning a **HOST-CTOR**-flavoured step in spirit (resolved once, before the loop) that
+is nonetheless trace-safe - the load-bearing rule from [execution classes](foundations.qmd#sec-classes):
+pin the range *once* on entry, never re-derive it inside the jitted loop (precisely so `volreg` can
+`vmap` the per-frame core). `pin_metric_ranges` is a no-op for a least-squares or already-pinned metric.
 
 **Capability flags.** `MI` is `is_least_squares = False` (no residual; BFGS path) and
-`is_spatial_mean = False` — its cost is a **global joint-histogram scalar**, *not* a
-per-voxel mean, so the spatial-mean force rescale does not apply. (The diffeomorphic
-recipe still gets a fast MI force via the closed-form Mattes gradient
-`metrics.mi_grad` / `nmi_grad`, not the spatial-mean machinery — see
+`is_spatial_mean = False` - its cost is a *global joint-histogram scalar*, *not* a per-voxel mean, so the
+spatial-mean force rescale does not apply. (The diffeomorphic recipe still gets a fast MI force via the
+closed-form Mattes gradient `metrics.mi_grad` / `nmi_grad`, not the spatial-mean machinery - see
 [forces](diffeomorphic.qmd#sec-forces).) **DIFF-JAX** throughout.
 
 ```{python}
@@ -506,50 +485,50 @@ plt.show()
 
 ## CorrelationRatio: functional, not merely linear dependence {#sec-cr}
 
-Mutual information makes the *weakest* assumption — arbitrary statistical dependence —
-and pays for it with a 2-D joint histogram and its bandwidth/bin sensitivity. There is
-a middle rung between "linear" (NCC) and "arbitrary" (MI): assume the moving intensity
-is some **deterministic function** of the fixed intensity — any function, not
-necessarily linear or monotone, but a *function* (one fixed intensity predicts one
-moving intensity). That is the assumption behind the **correlation ratio**, Roche's
-$\eta^2$, the FSL `mcflirt` default.
+Mutual information makes the *weakest* assumption - arbitrary statistical dependence - and pays for it
+with a 2-D joint histogram and its bandwidth/bin sensitivity. There is a middle rung between "linear"
+(NCC) and "arbitrary" (MI): assume the moving intensity is some *deterministic function* of the fixed
+intensity - any function, not necessarily linear or monotone, but a *function* (one fixed intensity
+predicts one moving intensity). In the invariance language, the correlation ratio is invariant to any
+deterministic functional remapping of the fixed intensity, a group strictly between NCC's affine maps
+and MI's arbitrary reparametrisations. That is the assumption behind Roche's $\eta^2$, the FSL
+`mcflirt` default.
 
-The idea is a one-way analysis of variance. Sort the voxels into **groups** by their
-*fixed* intensity (the explanatory variable). If the moving image really is a function
-of the fixed, then within each group the moving intensities should be nearly constant —
-all the moving variance should be *between* groups, none *within*. So measure the
-fraction of the moving image's total variance that is **explained by the group means**:
+The idea is a one-way analysis of variance. Sort the voxels into *groups* by their *fixed* intensity
+(the explanatory variable). If the moving image really is a function of the fixed, then within each
+group the moving intensities should be nearly constant - all the moving variance should be *between*
+groups, none *within*. So measure the fraction of the moving image's total variance that is *explained
+by the group means*:
 
 $$
 \eta^2 \;=\;
   \frac{\sum_k n_k\,(\mu_k - \mu)^2}{\sum_x (I_m(x) - \mu)^2},
 $$ {#eq-cr}
 
-where $k$ indexes the fixed-intensity groups (bins), $n_k$ is the (soft) count in group
-$k$, $\mu_k$ is the **mean moving intensity** in group $k$, and $\mu$ is the global mean
-moving intensity. The numerator is the **between-group** variance (how much the group
-means spread); the denominator is the **total** variance. $\eta^2 \in [0,1]$ is the
-*fraction of moving variance explained* — $1$ when the moving image is a deterministic
-function of the fixed (perfectly grouped), $0$ when unrelated. Equivalently it is
-$1$ minus the *unexplained* (within-group) variance fraction. The cost is its complement,
-$1 - \eta^2$ (`CorrelationRatio.cost` returns `1.0 - correlation_ratio(...)`).
+where $k$ indexes the fixed-intensity groups (bins), $n_k$ is the (soft) count in group $k$, $\mu_k$ is
+the *mean moving intensity* in group $k$, and $\mu$ is the global mean moving intensity. The numerator is
+the *between-group* variance (how much the group means spread); the denominator is the *total* variance.
+$\eta^2 \in [0,1]$ is the *fraction of moving variance explained* - $1$ when the moving image is a
+deterministic function of the fixed (perfectly grouped), $0$ when unrelated. Equivalently it is $1$ minus
+the *unexplained* (within-group) variance fraction. The cost is its complement, $1 - \eta^2$
+(`CorrelationRatio.cost` returns `1.0 - correlation_ratio(...)`).
 
 `CorrelationRatio(bins, range_fixed)`:
 
-- **`bins`** (default `32`) — the number of soft groups for the **explanatory (fixed)**
-  image, using the *same* linear soft-binning as the joint histogram (so $\eta^2$ is
-  differentiable; the per-group sums are soft scatter-adds).
-- **`range_fixed`** — the pinned range for the fixed image's binning. Note there is **no
-  `range_moving`**: CR bins *only* the fixed (explanatory) image, so it needs only the
-  one range, and `pin_metric_ranges` fills just `range_fixed`.
+- **`bins`** (default `32`) - the number of soft groups for the *explanatory (fixed)* image, using the
+  *same* linear soft-binning as the joint histogram (so $\eta^2$ is differentiable; the per-group sums
+  are soft scatter-adds).
+- **`range_fixed`** - the pinned range for the fixed image's binning. Note there is *no `range_moving`*:
+  CR bins *only* the fixed (explanatory) image, so it needs only the one range, and `pin_metric_ranges`
+  fills just `range_fixed`.
 
-CR is **asymmetric** by construction — the fixed image is the explanatory variable, the
-moving is regressed on it. It captures **functional** dependence (more than NCC's linear,
-less than MI's arbitrary), is cheaper than MI (a 1-D binning, not a 2-D histogram), and is
-the classic cross-modal cost in the FSL lineage. Flags: `is_least_squares = False` (BFGS
-path; `residual` raises), `is_spatial_mean = False` (a **global histogram statistic**, like
-MI). **DIFF-JAX**. (Note from source: there is no closed-form CR diffeomorphic force — CR
-drives the diffeomorphic recipes only via the generic autodiff `MetricForce` escape hatch.)
+CR is *asymmetric* by construction - the fixed image is the explanatory variable, the moving is
+regressed on it. It captures *functional* dependence (more than NCC's linear, less than MI's arbitrary),
+is cheaper than MI (a 1-D binning, not a 2-D histogram), and is the classic cross-modal cost in the FSL
+lineage. Flags: `is_least_squares = False` (BFGS path; `residual` raises), `is_spatial_mean = False` (a
+*global histogram statistic*, like MI). **DIFF-JAX**. (Note from source: there is no closed-form CR
+diffeomorphic force - CR drives the diffeomorphic recipes only via the generic autodiff `MetricForce`
+escape hatch.)
 
 ```{python}
 #| label: fig-similarity-crossmodal
@@ -643,162 +622,144 @@ plt.show()
 
 ## Masking: scoring only the region you care about {#sec-masking}
 
-Often you do not want the cost computed over the whole grid — you want it over the
-**brain**, not the skull and the air around it, or over a structure of interest. Every
-metric `cost` (and `SSD.residual`) takes an optional `mask`: a **non-negative per-voxel
-weight on the FIXED grid** (at the current pyramid level's resolution). It restricts the
-cost to a region — but *how* it does so differs by metric kind, and the difference is
-exactly the `is_spatial_mean` flag.
+Often you do not want the cost computed over the whole grid - you want it over the *brain*, not the
+skull and the air around it, or over a structure of interest. Every metric `cost` (and `SSD.residual`)
+takes an optional `mask`: a *non-negative per-voxel weight on the FIXED grid* (at the current pyramid
+level's resolution). It restricts the cost to a region - but *how* it does so differs by metric kind, and
+the difference is exactly the `is_spatial_mean` flag.
 
-**Spatial-mean metrics (`SSD`, `LNCC`) weight by $\sqrt{\text{mask}}$ in the residual.**
-For SSD the masked cost should be the masked sum of squares,
-$\sum_x \text{mask}(x)\,r(x)^2$. To keep the *least-squares* structure intact, you cannot
-weight the *squared* residual — Gauss–Newton consumes the residual *vector*, not its
-square. So `SSD.residual` weights the residual itself by $\sqrt{\text{mask}}$:
+**Spatial-mean metrics (`SSD`, `LNCC`) weight by $\sqrt{\text{mask}}$ in the residual.** For SSD the
+masked cost should be the masked sum of squares, $\sum_x \text{mask}(x)\,r(x)^2$. To keep the
+*least-squares* structure intact, you cannot weight the *squared* residual - Gauss–Newton consumes the
+residual *vector*, not its square. So `SSD.residual` weights the residual itself by $\sqrt{\text{mask}}$:
 $\tilde r(x) = \sqrt{\text{mask}(x)}\,r(x)$, and then $\tfrac12\lVert\tilde r\rVert^2 =
-\tfrac12\sum_x \text{mask}(x)\,r(x)^2$ is the masked sum of squares **automatically**. An
-out-of-mask voxel ($\text{mask}=0$) contributes a **zero row** to the residual, so it
-drops cleanly out of the [Gauss–Newton normal equations](optimization.qmd#sec-gauss-newton)
-$J^\top J\,\delta = -J^\top r$ — it neither pulls the step nor inflates the Hessian. The
-square-root is the unique weighting that makes the masked *vector* norm equal the masked
-*scalar* sum of squares; that is why it, and not the mask itself, is the right factor.
-(The `metrics.ssd` cost path applies the mask as a reduction weight,
-$\sum(\text{mask}\cdot r^2)/\sum\text{mask}$; LNCC's mask gates the *reduction* of the
-local-CC map.)
+\tfrac12\sum_x \text{mask}(x)\,r(x)^2$ is the masked sum of squares *automatically*. An out-of-mask voxel
+($\text{mask}=0$) contributes a *zero row* to the residual, so it drops cleanly out of the
+[Gauss–Newton normal equations](optimization.qmd#sec-gauss-newton) $J^\top J\,\delta = -J^\top r$ - it
+neither pulls the step nor inflates the Hessian. The square-root is the unique weighting that makes the
+masked *vector* norm equal the masked *scalar* sum of squares; that is why it, and not the mask itself,
+is the right factor. (The `metrics.ssd` cost path applies the mask as a reduction weight,
+$\sum(\text{mask}\cdot r^2)/\sum\text{mask}$; LNCC's mask gates the *reduction* of the local-CC map.)
 
-**Histogram metrics (`MI`, `CorrelationRatio`) gate the scatter.** Here masking is not a
-reweighting of a reduction — it is **exclusion from the distribution itself**. An
-out-of-mask voxel must not contribute to the joint histogram $P(i,j)$ (MI) or to the
-per-group sums and the global variance ($\eta^2$, CR) at all — otherwise the air and
-skull voxels would dump a huge, irrelevant cluster into the histogram and dominate the
-statistic. So the mask **gates the scatter-add**: a masked-out voxel contributes nothing
-to $P$, nothing to $n_k$/$\mu_k$, nothing to the total variance (`joint_histogram` and
-`correlation_ratio` thread the mask into their soft scatter, the design's A3). This is
-"the correct masking point for a histogram statistic" — gate the *evidence*, not the
-*reduction*. The `Metric.cost` docstring states this contract directly.
+**Histogram metrics (`MI`, `CorrelationRatio`) gate the scatter.** Here masking is not a reweighting of
+a reduction - it is *exclusion from the distribution itself*. An out-of-mask voxel must not contribute to
+the joint histogram $P(i,j)$ (MI) or to the per-group sums and the global variance ($\eta^2$, CR) at all
+- otherwise the air and skull voxels would dump a huge, irrelevant cluster into the histogram and
+dominate the statistic. So the mask *gates the scatter-add*: a masked-out voxel contributes nothing to
+$P$, nothing to $n_k$/$\mu_k$, nothing to the total variance (`joint_histogram` and `correlation_ratio`
+thread the mask into their soft scatter, the design's A3). This is the correct masking point for a
+histogram statistic - gate the *evidence*, not the *reduction*. The `Metric.cost` docstring states this
+contract directly.
 
-In both cases the mask lives on the **fixed grid** because the cost is computed in fixed
-space (the warped moving has already been pulled back onto it). The recipe threads the
-mask through `MetricObjective` (`register/_objective.py`), and it is re-sampled to each
-pyramid level.
+In both cases the mask lives on the *fixed grid* because the cost is computed in fixed space (the warped
+moving has already been pulled back onto it). The recipe threads the mask through `MetricObjective`
+(`register/_objective.py`), and it is re-sampled to each pyramid level.
 
 ## Preprocessing: conditioning the images before the metric {#sec-preprocess}
 
-There is a step *before* any metric sees the data: **intensity preprocessing**, the
-fMRIPrep / `antsRegistration` front-end, in `register/_preprocess.py`. One honest note
-up front, exactly as the contract demands: the `register.__init__` docstring's "Scope &
-validation" section lists winsorization and histogram matching as **"not yet
-implemented."** **That note is stale — the code implements both.** `preprocess_images`
-exists and is wired into the recipes; trust the code over the docstring.
+There is a step *before* any metric sees the data: *intensity preprocessing*, the fMRIPrep /
+`antsRegistration` front-end, in `register/_preprocess.py`. One honest note up front, exactly as the
+contract demands: the `register.__init__` docstring's "Scope & validation" section lists winsorisation
+and histogram matching as *"not yet implemented."* That note is stale - the code implements both.
+`preprocess_images` exists and is wired into the recipes; trust the code over the docstring.
 
-`preprocess_images(moving, fixed, *, winsorize_range, histogram_match)` applies up to two
-conditioning steps **once** at the recipe's entry — so the conditioned images feed *both*
-the registration the transform is estimated on *and* the returned `warped` output. Both
-arguments are **required keyword-only** (the function has no defaults; the recipe layer
-supplies them, with its *off* values `winsorize_range=None` and `histogram_match=False`,
-so an unconfigured recipe leaves the images byte-unchanged):
+`preprocess_images(moving, fixed, *, winsorize_range, histogram_match)` applies up to two conditioning
+steps *once* at the recipe's entry - so the conditioned images feed *both* the registration the transform
+is estimated on *and* the returned `warped` output. Both arguments are *required keyword-only* (the
+function has no defaults; the recipe layer supplies them, with its *off* values `winsorize_range=None`
+and `histogram_match=False`, so an unconfigured recipe leaves the images byte-unchanged):
 
-- **`winsorize_range`** — a `(lower, upper)` **percentile** pair (or `None` for no
-  winsorization). It calls `metrics.winsorize`, which clips each image to its
-  `[lower, upper]` intensity percentiles (the fMRIPrep `--winsorize-image-intensities
-  [0.005, 0.995]` convention): the bottom and top intensity *tails* are clamped to the
-  percentile values, so a handful of extreme voxels — a hot artifact, a bright skull rim
-  — cannot dominate an SSD residual or a Demons force. (It also relieves the velocity
-  step-normalisation's global-outlier sensitivity: a clipped image has no extreme voxel to
-  blow out the trust-region cap.) Pure and differentiable (a quantile plus a clip).
-- **`histogram_match`** — a `bool`; when `True`, after winsorizing it calls
-  `metrics.match_histogram(moving, fixed)`, which **remaps the moving image's intensity
-  distribution onto the fixed's by CDF / quantile transport** (the fMRIPrep
-  `--use-histogram-matching 1` step). Concretely: estimate `bins=256` quantile knots of
-  each image, then for each moving voxel read its position on the moving quantile curve
-  and look up the fixed intensity at that *same* quantile (`jnp.interp` against the two
-  quantile curves). The two images then share an intensity distribution, so a
-  within-modality SSD / CC metric is not being pulled off by a global gain or offset.
-  Differentiable, $O(N\log N)$ (the quantile sorts), paid once before the pyramid.
+- **`winsorize_range`** - a `(lower, upper)` *percentile* pair (or `None` for no winsorisation). It calls
+  `metrics.winsorize`, which clips each image to its `[lower, upper]` intensity percentiles (the fMRIPrep
+  `--winsorize-image-intensities [0.005, 0.995]` convention): the bottom and top intensity *tails* are
+  clamped to the percentile values, so a handful of extreme voxels - a hot artifact, a bright skull rim -
+  cannot dominate an SSD residual or a Demons force. (It also relieves the velocity step-normalisation's
+  global-outlier sensitivity: a clipped image has no extreme voxel to blow out the trust-region cap.)
+  Pure and differentiable (a quantile plus a clip).
+- **`histogram_match`** - a `bool`; when `True`, after winsorising it calls
+  `metrics.match_histogram(moving, fixed)`, which *remaps the moving image's intensity distribution onto
+  the fixed's by CDF / quantile transport* (the fMRIPrep `--use-histogram-matching 1` step). Concretely:
+  estimate `bins=256` quantile knots of each image, then for each moving voxel read its position on the
+  moving quantile curve and look up the fixed intensity at that *same* quantile (`jnp.interp` against the
+  two quantile curves). The two images then share an intensity distribution, so a within-modality SSD /
+  CC metric is not being pulled off by a global gain or offset. Differentiable, $O(N\log N)$ (the
+  quantile sorts), paid once before the pyramid.
 
-The order matters: **winsorize first, then match** (the matching transports the
-*winsorized* moving onto the *winsorized* fixed). Histogram matching is a within-modality
-tool — it assumes the two distributions *should* coincide, which is false across
-modalities, so pair it with SSD/LNCC, not MI/CR.
+The order matters: *winsorise first, then match* (the matching transports the *winsorised* moving onto
+the *winsorised* fixed). Histogram matching is a within-modality tool - it assumes the two distributions
+*should* coincide, which is false across modalities, so pair it with SSD/LNCC, not MI/CR.
 
 ::: {.callout-important title="The estimate is conditioned; the transform is the deliverable"}
-Preprocessing conditions the *estimate*, not your data. The real output is the estimated
-**transform** (`result.matrix` / `result.displacement`); the returned `warped` is the
-*conditioned* moving resampled. For the original intensities, apply the estimated
-transform to your **original** moving image — do not consume the conditioned `warped` as
-if it were your data.
+Preprocessing conditions the *estimate*, not your data. The real output is the estimated *transform*
+(`result.matrix` / `result.displacement`); the returned `warped` is the *conditioned* moving resampled.
+For the original intensities, apply the estimated transform to your *original* moving image - do not
+consume the conditioned `warped` as if it were your data.
 :::
 
 ## A different kind of similarity: boundary-based registration
 
-Every metric on this page is defined on an **intensity grid** — a scalar field over
-voxels, scored voxel-by-voxel or histogram-by-histogram. There is a wholly different way
-to score alignment, and it is worth flagging because it does *not* fit the
-`Metric.cost(warped, fixed)` shape at all: **boundary-based registration** (BBR,
-Greve–Fischl), the EPI↔T1 method of choice in the [recipes](recipes.qmd#sec-bbr). BBR's
-cost is defined on a **surface** — the white-matter/grey-matter boundary, given as
-**points and normals** — not on an image grid. For each boundary point it samples the
-moving intensity a short distance to either side *along the surface normal* and scores
-the **cross-boundary contrast** $(I_\text{out}-I_\text{in})/\tfrac12(I_\text{in}+I_\text{out})$,
-maximising it: a rigid pose that lands the geometric boundary on a strong, consistently
-oriented intensity edge is the aligned one. Because its signature is `cost(T, moving,
-surface)` — no `fixed` image — BBR is a **sibling objective**, not a `Metric`: it composes
-the optimiser and the rigid [`TransformModel`](transforms.qmd#sec-fit) and a point
-sampler through its own recipe (`register/_bbr.py`, the `BoundaryObjective`). It is the
-clearest illustration that "similarity" is a family of contracts, of which the dense
-image-pair `Metric` here is one constructor; the [optimization page](optimization.qmd#sec-objective)
-unifies them under the `Objective` protocol the driver actually minimizes.
+Every metric in this chapter is defined on an *intensity grid* - a scalar field over voxels, scored
+voxel-by-voxel or histogram-by-histogram. There is a wholly different way to score alignment, and it is
+worth flagging because it does *not* fit the `Metric.cost(warped, fixed)` shape at all: *boundary-based
+registration* (BBR, Greve–Fischl), the EPI↔T1 method of choice in the [recipes](recipes.qmd#sec-bbr).
+BBR's cost is defined on a *surface* - the white-matter/grey-matter boundary, given as *points and
+normals* - not on an image grid. For each boundary point it samples the moving intensity a short distance
+to either side *along the surface normal* and scores the *cross-boundary contrast*
+$(I_\text{out}-I_\text{in})/\tfrac12(I_\text{in}+I_\text{out})$, maximising it: a rigid pose that lands
+the geometric boundary on a strong, consistently oriented intensity edge is the aligned one. Because its
+signature is `cost(T, moving, surface)` - no `fixed` image - BBR is a *sibling objective*, not a
+`Metric`: it composes the optimiser and the rigid [`TransformModel`](transforms.qmd#sec-fit) and a point
+sampler through its own recipe (`register/_bbr.py`, the `BoundaryObjective`). It is the clearest
+illustration that "similarity" is a family of contracts, of which the dense image-pair `Metric` here is
+one constructor; the [optimisation chapter](optimization.qmd#sec-objective) unifies them under the
+`Objective` protocol the driver actually minimises.
 
 ## Choosing a metric (a practitioner's summary)
 
-The decision tree the whole page builds to:
+The decision tree the whole chapter builds to - equivalently, a choice of how large an intensity
+nuisance group to tolerate:
 
-- **Same modality, comparable intensities** (T1↔T1, an fMRI series): **`SSD`**. It alone
-  is least-squares, so it gets the fast Gauss–Newton path. Add `histogram_match=True` if a
-  global gain/offset remains.
-- **Same modality with a smooth multiplicative bias field**: **`LNCC(radius)`**. A local
-  correlation divides out a spatially varying gain; it is also the diffeomorphic-recipe
-  default and has a fast analytic force.
-- **Different modalities, non-monotone contrast** (T1↔T2, EPI↔T1): **`MI`** (use
-  `normalized=True` when the field of view shifts during alignment) — the cross-modal
-  workhorse, depending only on statistical dependence. **`CorrelationRatio`** is the
-  cheaper middle rung when a *functional* (deterministic) relationship is a safe
-  assumption (the FSL lineage).
-- **Aligning EPI to its own T1 via the cortical surface**: not a `Metric` at all — use
+- **Same modality, comparable intensities** (T1↔T1, an fMRI series): *`SSD`* (tolerates no intensity
+  nuisance). It alone is least-squares, so it gets the fast Gauss–Newton path. Add `histogram_match=True`
+  if a global gain/offset remains.
+- **Same modality with a smooth multiplicative bias field**: *`LNCC(radius)`* (tolerates a *spatially
+  varying* affine intensity map). A local correlation divides out a spatially varying gain; it is also
+  the diffeomorphic-recipe default and has a fast analytic force.
+- **Different modalities, non-monotone contrast** (T1↔T2, EPI↔T1): *`MI`* (tolerates an arbitrary
+  intensity reparametrisation; use `normalized=True` when the field of view shifts during alignment) -
+  the cross-modal workhorse. *`CorrelationRatio`* is the cheaper middle rung when a *functional*
+  (deterministic) relationship is a safe assumption (the FSL lineage).
+- **Aligning EPI to its own T1 via the cortical surface**: not a `Metric` at all - use
   [BBR](recipes.qmd#sec-bbr).
 
-Always **pin the histogram ranges** for `MI`/`CR` (`pin_metric_ranges`) before the loop,
-and **mask** to the region of interest (the brain) so air and skull do not dominate the
-score.
+Always *pin the histogram ranges* for `MI`/`CR` (`pin_metric_ranges`) before the loop, and *mask* to the
+region of interest (the brain) so air and skull do not dominate the score.
 
 ## Further reading
 
-- Viola, P., & Wells, W. M. (1997). *Alignment by maximization of mutual information.*
-  International Journal of Computer Vision, 24(2). The paper that introduced MI as a
-  registration metric — the cross-modal foundation of @sec-mi.
-- Maes, F., Collignon, A., Vandermeulen, D., Marchal, G., & Suetens, P. (1997).
-  *Multimodality image registration by maximization of mutual information.* IEEE
-  Transactions on Medical Imaging, 16(2). The companion derivation, with the joint
-  histogram.
-- Mattes, D., Haynor, D. R., Vesselle, H., Lewellen, T. K., & Eubank, W. (2003).
-  *PET-CT image registration in the chest using free-form deformations.* IEEE
-  Transactions on Medical Imaging, 22(1). The B-spline-Parzen soft histogram and the
-  closed-form MI gradient `nitrix` follows (`metrics.mi_grad`).
-- Studholme, C., Hill, D. L. G., & Hawkes, D. J. (1999). *An overlap invariant entropy
-  measure of 3D medical image alignment.* Pattern Recognition, 32(1). Normalized MI —
-  the `normalized=True` variant and why overlap invariance matters.
-- Roche, A., Malandain, G., Pennec, X., & Ayache, N. (1998). *The correlation ratio as a
-  new similarity measure for multimodal image registration.* MICCAI. The $\eta^2$ metric
-  of @sec-cr (the FSL `mcflirt` cost).
-- Avants, B. B., Epstein, C. L., Grossman, M., & Gee, J. C. (2008). *Symmetric
-  diffeomorphic image registration with cross-correlation.* Medical Image Analysis, 12(1).
-  The local (windowed) cross-correlation `LNCC` of @sec-lncc, as the SyN data term.
-- Greve, D. N., & Fischl, B. (2009). *Accurate and robust brain image alignment using
-  boundary-based registration.* NeuroImage, 48(1). BBR — the surface-defined sibling
-  objective.
-- Reuter, M., Rosas, H. D., & Fischl, B. (2010). *Highly accurate inverse consistent
-  registration: A robust approach.* NeuroImage, 53(4). Robust intensity scaling /
-  outlier handling, the motivation for the winsorization front-end of @sec-preprocess.
+- Viola, P., & Wells, W. M. (1997). *Alignment by maximization of mutual information.* International
+  Journal of Computer Vision, 24(2). The paper that introduced MI as a registration metric - the
+  cross-modal foundation of @sec-mi.
+- Maes, F., Collignon, A., Vandermeulen, D., Marchal, G., & Suetens, P. (1997). *Multimodality image
+  registration by maximization of mutual information.* IEEE Transactions on Medical Imaging, 16(2). The
+  companion derivation, with the joint histogram.
+- Mattes, D., Haynor, D. R., Vesselle, H., Lewellen, T. K., & Eubank, W. (2003). *PET-CT image
+  registration in the chest using free-form deformations.* IEEE Transactions on Medical Imaging, 22(1).
+  The B-spline-Parzen soft histogram and the closed-form MI gradient `nitrix` follows (`metrics.mi_grad`).
+- Studholme, C., Hill, D. L. G., & Hawkes, D. J. (1999). *An overlap invariant entropy measure of 3D
+  medical image alignment.* Pattern Recognition, 32(1). Normalised MI - the `normalized=True` variant and
+  why overlap invariance matters.
+- Roche, A., Malandain, G., Pennec, X., & Ayache, N. (1998). *The correlation ratio as a new similarity
+  measure for multimodal image registration.* MICCAI. The $\eta^2$ metric of @sec-cr (the FSL `mcflirt`
+  cost).
+- Avants, B. B., Epstein, C. L., Grossman, M., & Gee, J. C. (2008). *Symmetric diffeomorphic image
+  registration with cross-correlation.* Medical Image Analysis, 12(1). The local (windowed)
+  cross-correlation `LNCC` of @sec-lncc, as the SyN data term.
+- Greve, D. N., & Fischl, B. (2009). *Accurate and robust brain image alignment using boundary-based
+  registration.* NeuroImage, 48(1). BBR - the surface-defined sibling objective.
+- Reuter, M., Rosas, H. D., & Fischl, B. (2010). *Highly accurate inverse consistent registration: A
+  robust approach.* NeuroImage, 53(4). Robust intensity scaling / outlier handling, the motivation for
+  the winsorisation front-end of @sec-preprocess.
 
 ## See also
 
@@ -808,8 +769,8 @@ score.
   [`src/nitrix/register/_preprocess.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_preprocess.py).
 - Source — the metric kernels (`ssd`, `ncc`, `lncc`, `lncc_grad`):
   [`src/nitrix/metrics/intensity.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/metrics/intensity.py).
-- Source — the information-theoretic kernels (`joint_histogram`, `mutual_information`,
-  `mi_grad`, `correlation_ratio`):
+- Source — the information-theoretic kernels (`joint_histogram`, `mutual_information`, `mi_grad`,
+  `correlation_ratio`):
   [`src/nitrix/metrics/information.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/metrics/information.py).
 - Source — the preprocess kernels (`winsorize`, `match_histogram`):
   [`src/nitrix/metrics/preprocess.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/metrics/preprocess.py).
@@ -818,9 +779,9 @@ score.
 - Source — the boundary-based sibling objective (BBR):
   [`src/nitrix/register/_bbr.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_bbr.py).
 - Previous in reading order: [resampling and the warped image](resampling.qmd#sec-pullback-sampling).
-  Next: [optimization — how the metric is minimized](optimization.qmd#sec-objective)
-  (the `is_least_squares` flag dispatches Gauss–Newton vs BFGS there). Then the
-  cross-modal forces in [diffeomorphic registration](diffeomorphic.qmd#sec-forces) and the
-  surface-defined [BBR recipe](recipes.qmd#sec-bbr). Sibling units:
+  Next: [optimization — how the metric is minimized](optimization.qmd#sec-objective) (the
+  `is_least_squares` flag dispatches Gauss–Newton vs BFGS there). Then the cross-modal forces in
+  [diffeomorphic registration](diffeomorphic.qmd#sec-forces) and the surface-defined
+  [BBR recipe](recipes.qmd#sec-bbr). Sibling units:
   [geometry operators](../geometry/operators.qmd) (the shared separable-filter substrate),
   [statistics foundations](../statistics/foundations.qmd).

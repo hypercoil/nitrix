@@ -2,85 +2,86 @@
 title: "Volumes: morphology, distance, and signed-distance fields"
 ---
 
-::: {.callout-tldr title="Fast path"}
-A voxel grid is the discrete stand-in for a region of space, the same way a
-triangle mesh is the discrete stand-in for a surface. This page shows that the
-three workhorses of volumetric geometry — **morphology**, the **Euclidean
-distance transform**, and the **signed-distance field** — are *not three
-algorithms*. They are **one machine**: the same gather-the-neighbourhood,
-then-reduce pattern you already met as mesh smoothing in
-[the operators page](operators.qmd#sec-semiring), with the **algebra swapped**.
+A voxel grid is the discrete stand-in for a region of space, the same way a triangle
+mesh is the discrete stand-in for a surface. This chapter shows that the three
+workhorses of volumetric geometry - morphology, the Euclidean distance transform, and
+the signed-distance field - are not three algorithms but one machine: the same
+gather-the-neighbourhood-then-reduce pattern met as mesh smoothing in
+[the operators chapter](operators.qmd#sec-semiring), with the algebra swapped.
 
-- **Dilation** is that machine under **max-plus** $(\max,+)$.
-- **Erosion** is the same machine under **min-plus** $(\min,+)$.
-- The **exact Euclidean distance transform** is a **min-plus matmul** — a
-  single-hop shortest path against a squared-distance matrix.
-- A **signed-distance field** is two distance transforms differenced.
+- Dilation is that machine under max-plus $(\max,+)$.
+- Erosion is the same machine under min-plus $(\min,+)$.
+- The exact Euclidean distance transform is a min-plus matmul - a single-hop shortest
+  path against a squared-distance matrix.
+- A signed-distance field is two distance transforms differenced.
 
-Change the algebra, not the kernel. That is the whole page in one sentence; the
-rest earns it.
-:::
+"Change the algebra, not the kernel" is the organizing idea, and it is also a statement
+about inductive bias: the gather fixes *which* neighbours interact (a translation-invariant
+local window), and the semiring fixes *how* their evidence combines (diffuse, grow, shrink,
+propagate a shortest path). Selecting the algebra selects the prior on what the operation
+means.
 
-## A motivating question {#sec-motivation}
+## A motivating problem {#sec-motivation}
 
-Here is a concrete neuroimaging task that this page answers end to end.
+Consider a concrete neuroimaging task this chapter answers end to end. A skull-strip on a
+T1-weighted MRI returns a brain mask - a 3-D binary volume, one where there is brain, zero
+elsewhere - and it is not clean. The thresholding left a few stray voxels floating in the
+background (bits of dura, a sliver of eyeball), bridged the brain to the optic nerve
+through a one-voxel-wide neck, and punched small holes where a dark vessel dipped below
+threshold. Four things are needed from it:
 
-You have run a skull-strip on a T1-weighted MRI and the result is a **brain
-mask** — a 3-D binary volume, one where there is brain, zero everywhere else.
-It is not clean. The thresholding left a few stray voxels floating in the
-background (bits of dura, a sliver of eyeball), it bridged the brain to the
-optic nerve through a one-voxel-wide neck, and it punched small holes where a
-dark vessel dipped below threshold. You need four things from it:
-
-1. **Tidy the mask** — drop the floating specks, fill the interior holes,
-   sever the thin spurious neck, and keep only the single largest blob (the
-   brain).
-2. **Measure how deep you are inside** — for every interior voxel, how far is
-   it to the nearest boundary? (Distance maps drive sulcal-depth estimates,
-   erosion-based tissue priors, and watershed seeds.)
-3. **Represent the boundary as a field**, not a set of voxels, so it can be
-   resampled, differentiated, and handed to a surface extractor.
+1. **Tidy the mask** - drop the floating specks, fill the interior holes, sever the thin
+   spurious neck, and keep only the single largest blob (the brain).
+2. **Measure how deep you are inside** - for every interior voxel, how far is it to the
+   nearest boundary? (Distance maps drive sulcal-depth estimates, erosion-based tissue
+   priors, and watershed seeds.)
+3. **Represent the boundary as a field**, not a set of voxels, so it can be resampled,
+   differentiated, and handed to a surface extractor.
 4. **Hand that field to marching cubes** to get a cortical-style surface mesh.
 
-Steps 1–3 live here. Step 4 is the bridge to
-[the volume↔surface page](volume-surface.qmd#sec-marching), and the field we
-build in step 3 is *exactly* the thing it consumes. We will keep returning to
-this mask.
+Steps 1-3 live here. Step 4 is the bridge to
+[the volume-surface chapter](volume-surface.qmd#sec-marching), and the field built in step
+3 is exactly what it consumes. We return to this mask throughout.
 
-A note on coordinates before we start. Everything on this page lives in **index
-space**: a voxel is addressed by its integer grid index, and "distance" is
-measured in **voxels**, not millimetres. That is a deliberate simplification we
-will have to pay for later — real MRI voxels are not cubes (a common spacing is
-$1\times1\times3$ mm), and we flag exactly where that bites in
+A note on coordinates first. Everything here lives in index space: a voxel is addressed by
+its integer grid index, and distance is measured in voxels, not millimetres. That is a
+deliberate simplification we pay for later - real MRI voxels are not cubes (a common
+spacing is $1\times1\times3$ mm) - and we flag exactly where it bites in
 [the EDT section](#sec-edt).
 
 ## Mathematical morphology {#sec-morphology}
 
-### The intuition: slide a probe over the image
+### The structuring element
 
-Mathematical morphology is what you get when you stop thinking about a shape's
-*pixels* and start thinking about a *probe* you slide across it. The probe is
-called the **structuring element** (SE), written $b$ — a little stamp, often a
-$3\times3$ or $3\times3\times3$ box, with one cell marked as its centre. You
-place the probe's centre over each voxel in turn and ask a local question.
-There are two basic questions, and they generate everything else.
+Mathematical morphology is what results from thinking not about a shape's pixels but about
+a probe slid across it. The probe is the structuring element (SE), written $b$ - a little
+stamp, often a $3\times3$ or $3\times3\times3$ box, with one cell marked as its centre.
+Place the probe's centre over each voxel in turn and ask a local question. There are two
+basic questions, and they generate everything else.
 
-**Dilation** asks: *"reaching out through the probe, what is the largest value I
-can grab?"* You stamp the maximum reachable value down at the centre. On a
-binary mask this **grows** the foreground: any background voxel within reach of
-a foreground voxel flips on. Bumps swell, gaps close, the shape fattens.
+Dilation asks: reaching out through the probe, what is the largest value I can grab? It
+stamps the maximum reachable value down at the centre. On a binary mask this grows the
+foreground: any background voxel within reach of a foreground voxel flips on. Bumps swell,
+gaps close, the shape fattens.
 
-**Erosion** asks the mirror question: *"what is the smallest value within
-reach?"* It stamps the minimum down. On a binary mask this **shrinks** the
-foreground: a voxel survives only if its entire probe footprint was foreground.
-Thin protrusions vanish, the shape slims, and — crucially for our skull-strip —
-a one-voxel neck connecting two blobs gets cut.
+Erosion asks the mirror question: what is the smallest value within reach? It stamps the
+minimum down. On a binary mask this shrinks the foreground: a voxel survives only if its
+entire probe footprint was foreground. Thin protrusions vanish, the shape slims, and -
+crucially for the skull-strip - a one-voxel neck connecting two blobs gets cut.
 
-### From intuition to formula
+That the *same probe* is applied at every position is the defining structural commitment of
+morphology, and it is a symmetry: the operator is translation-equivariant, so shifting the
+input shifts the output identically. This is the grid counterpart of the permutation
+equivariance that the mesh Laplacian carries in
+[foundations](foundations.qmd#sec-transformations-bias) - the inductive bias that the same
+local rule holds everywhere, which is exactly what makes a sliding-window operator the right
+prior for translation-homogeneous image content.
 
-Write $x$ for the image, $i$ for an output position, $p$ for an offset ranging
-over the probe's footprint, and $b[p]$ for the SE's value at that offset. The
-two questions become two formulas:
+### From the probe to a formula
+
+Write $x$ for the image, $i$ for an output position, $p$ for an offset ranging over the
+probe's footprint, and $b[p]$ for the SE's value at that offset. The two questions become
+two formulas:
 
 $$
 \operatorname{dilate}(x)[i] \;=\; \max_{p}\,\bigl(x[i+p] + b[p]\bigr),
@@ -88,18 +89,15 @@ $$
 \operatorname{erode}(x)[i] \;=\; \min_{p}\,\bigl(x[i+p] - b[p]\bigr).
 $$ {#eq-dilate-erode}
 
-Read @eq-dilate-erode slowly, because every later result is a rearrangement of
-it. To produce one output voxel we (i) **gather** the neighbourhood
-$\{x[i+p]\}$, (ii) **combine** each neighbour with the SE weight — *add* it for
-dilation, *subtract* it for erosion — and (iii) **reduce** the combined values
-with a $\max$ (dilation) or a $\min$ (erosion). Gather, combine, reduce. Hold
-that shape in mind; it is the machine.
+Every later result is a rearrangement of @eq-dilate-erode. To produce one output voxel we
+(i) gather the neighbourhood $\{x[i+p]\}$, (ii) combine each neighbour with the SE weight -
+*add* it for dilation, *subtract* it for erosion - and (iii) reduce the combined values with
+a $\max$ (dilation) or a $\min$ (erosion). Gather, combine, reduce: this is the machine.
 
-The SE values $b[p]$ let the probe be *non-flat* — a paraboloid SE, for
-instance, gives grayscale morphology that respects intensity. But the
-overwhelmingly common case in neuroimaging is a **flat** SE, $b\equiv 0$, where
-the combine step does nothing and @eq-dilate-erode collapses to a plain sliding-
-window max or min:
+The SE values $b[p]$ let the probe be non-flat - a paraboloid SE, for instance, gives
+grayscale morphology that respects intensity. But the overwhelmingly common case in
+neuroimaging is a flat SE, $b\equiv 0$, where the combine step does nothing and
+@eq-dilate-erode collapses to a plain sliding-window max or min:
 
 $$
 \operatorname{dilate}_{\text{flat}}(x)[i] = \max_{p} x[i+p],
@@ -107,63 +105,57 @@ $$
 \operatorname{erode}_{\text{flat}}(x)[i] = \min_{p} x[i+p].
 $$ {#eq-flat}
 
-This matches the `scipy.ndimage.grey_dilation` / `grey_erosion` convention
-exactly, which is the contract `nitrix` chose so a port from scipy "just works".
+This matches the `scipy.ndimage.grey_dilation` / `grey_erosion` convention exactly, the
+contract `nitrix` chose so a port from scipy works unchanged.
 
 ### The two routines, and the one rule
 
-`dilate` and `erode` (both **DIFF-JAX** — jittable and differentiable) live in
-`morphology/_mm.py`. Their signatures take a single-channel array
-`x: (..., *spatial)` — no explicit channel dimension; the neuroimaging-native
-shape is a 3-D volume or 4-D volume-plus-time, and a multi-channel input is a
-`jax.vmap` away. You choose the probe with **either** `structuring_element=` (an
-explicit array, possibly non-flat) **or** `size=` (an int or per-axis tuple
-giving a flat box, default `3`).
+`dilate` and `erode` (both **DIFF-JAX** - jittable and differentiable) live in
+`morphology/_mm.py`. Their signatures take a single-channel array `x: (..., *spatial)` - no
+explicit channel dimension; the neuroimaging-native shape is a 3-D volume or 4-D
+volume-plus-time, and a multi-channel input is a `jax.vmap` away. The probe is chosen with
+*either* `structuring_element=` (an explicit array, possibly non-flat) *or* `size=` (an int
+or per-axis tuple giving a flat box, default `3`).
 
-There is a genuinely important implementation fork inside these functions, and
-it is worth understanding because it recurs across the library:
+There is an important implementation fork inside these functions, and it recurs across the
+library:
 
-- **Flat box → fused `lax.reduce_window`.** When you pass only `size=`, the SE
-  is flat, and @eq-flat is exactly a pooling operation. `nitrix` routes it to
-  `lax.reduce_window` with `lax.max` / `lax.min`, which XLA lowers to a single
-  fused kernel — no intermediate tensor. On an L4 GPU at $256^2$ this flips
-  `erode`/`dilate` from $\sim\!1.3\times$ *slower* than cupy to $\sim\!1.3\times$
-  *faster*, and drops peak HBM from 72 MB to 0.79 MB.
-- **Explicit SE → `semiring_conv`.** When you pass an actual
-  `structuring_element`, the general @eq-dilate-erode runs through
-  `semiring_conv` (the next section). That path materialises the neighbourhood
-  as an *im2col* patch tensor — the memory cost we forward-reference in
-  [the backend page](performance.qmd#sec-backend) — but it handles arbitrary,
-  non-flat probes.
+- **Flat box** $\to$ **fused `lax.reduce_window`.** When only `size=` is passed, the SE is
+  flat, and @eq-flat is exactly a pooling operation. `nitrix` routes it to
+  `lax.reduce_window` with `lax.max` / `lax.min`, which XLA lowers to a single fused kernel
+  with no intermediate tensor. On an L4 GPU at $256^2$ this flips `erode`/`dilate` from
+  about $1.3\times$ *slower* than cupy to about $1.3\times$ *faster*, and drops peak HBM
+  from 72 MB to 0.79 MB.
+- **Explicit SE** $\to$ **`semiring_conv`.** When an actual `structuring_element` is passed,
+  the general @eq-dilate-erode runs through `semiring_conv` (the next section). That path
+  materialises the neighbourhood as an im2col patch tensor - the memory cost forward-referenced
+  in [the backend chapter](performance.qmd#sec-backend) - but it handles arbitrary, non-flat
+  probes.
 
-A subtle correctness note that the design record calls out: the fast path is
-`jit(grad(...))`-clean **only because the window's identity value is a concrete
-scalar**. `lax.reduce_window` routes a generic `lax.max` reducer to its
-*differentiable* specialised primitive only when JAX sees a concrete init equal
-to the dtype's max identity ($-\infty$). A *traced* init — which a careless
-`jnp.asarray(-inf)` silently becomes under `jit` — defeats that detection and
-breaks `jit(grad)`. `nitrix` sources the identity from the same `Semiring` the
-explicit path uses and passes it through `np.asarray` (which stays concrete), so
-both paths agree on boundary handling *by construction* and both stay
-differentiable. The take-away rule, which you will see again: **a HOST-side,
-data-dependent value must not leak into a jitted, differentiable loop as a
-tracer** — here it would silently disable the gradient.
+A subtle correctness note the design record calls out: the fast path is
+`jit(grad(...))`-clean *only because the window's identity value is a concrete scalar*.
+`lax.reduce_window` routes a generic `lax.max` reducer to its differentiable specialised
+primitive only when JAX sees a concrete init equal to the dtype's max identity ($-\infty$).
+A traced init - which a careless `jnp.asarray(-inf)` silently becomes under `jit` - defeats
+that detection and breaks `jit(grad)`. `nitrix` sources the identity from the same
+`Semiring` the explicit path uses and passes it through `np.asarray` (which stays concrete),
+so both paths agree on boundary handling by construction and both stay differentiable. The
+rule, which recurs: a host-side, data-dependent value must not leak into a jitted,
+differentiable loop as a tracer - here it would silently disable the gradient.
 
-One more shared behaviour: integer and boolean inputs are promoted to `float32`
-at the op boundary (`_to_float`). Grayscale morphology is real-valued, the
-tropical identities $\pm\infty$ are only representable in a float dtype, and
-promoting once keeps the subgradient well defined and avoids a $-\infty\!\to\!$
-int overflow.
+One more shared behaviour: integer and boolean inputs are promoted to `float32` at the op
+boundary (`_to_float`). Grayscale morphology is real-valued, the tropical identities
+$\pm\infty$ are only representable in a float dtype, and promoting once keeps the
+subgradient well defined and avoids a $-\infty\!\to\!$ int overflow.
 
 ### Padding and non-Euclidean boundaries
 
-The default `padding="SAME"` pads with the **algebra identity** — $-\infty$ for
-dilation's max, $+\infty$ for erosion's min — so padded positions are inert
-under the reduction and the output keeps the input's spatial shape. For
-non-Euclidean grids (a periodic/toroidal field, or the equirectangular sphere
-grid that parameterises a cortical surface) the design *deliberately does not*
-add a `padding="periodic"` mode. Instead you pre-pad with the right topology
-helper and call with `padding="VALID"`:
+The default `padding="SAME"` pads with the algebra identity - $-\infty$ for dilation's max,
+$+\infty$ for erosion's min - so padded positions are inert under the reduction and the
+output keeps the input's spatial shape. For non-Euclidean grids (a periodic/toroidal field,
+or the equirectangular sphere grid that parameterises a cortical surface) the design
+deliberately does not add a `padding="periodic"` mode. Instead, pre-pad with the right
+topology helper and call with `padding="VALID"`:
 
 ```python
 from nitrix.geometry import sphere_grid_pad_2d
@@ -172,15 +164,14 @@ padded = sphere_grid_pad_2d(mask, pad=se_radius)
 result = dilate(padded, size=size, padding="VALID")  # consumes exactly the pad
 ```
 
-Composition is more general than a flag (it also handles the pole-flip the
-sphere grid needs, which a toroidal `wrap` cannot) and costs two lines.
+Composition is more general than a flag (it also handles the pole-flip the sphere grid
+needs, which a toroidal `wrap` cannot) and costs two lines.
 
 ### Compositions: opening and closing
 
-Erosion and dilation are *not* inverses — erode-then-dilate does not give you
-back what you started with, and that asymmetry is exactly what makes them
-useful. The two canonical compositions (`open` and `close`, both **DIFF-JAX**,
-each a two-line chain of the primitives) are:
+Erosion and dilation are not inverses - erode-then-dilate does not return the original - and
+that asymmetry is exactly what makes them useful. The two canonical compositions (`open` and
+`close`, both **DIFF-JAX**, each a two-line chain of the primitives) are:
 
 $$
 \operatorname{open}(x) = \operatorname{dilate}(\operatorname{erode}(x)),
@@ -188,25 +179,21 @@ $$
 \operatorname{close}(x) = \operatorname{erode}(\operatorname{dilate}(x)).
 $$ {#eq-open-close}
 
-The intuition for @eq-open-close is worth spelling out. **Opening** erodes
-first: anything thinner than the probe is annihilated and *cannot be brought
-back* by the following dilation, while structures that survived the erosion are
-restored to roughly their original size. Net effect: **remove small bright
-specks, keep the body**. **Closing** is the dual — dilate first to swell across
-small dark gaps, then erode back — so it **fills small dark holes, keeps the
-body**. These are precisely the two cleanups our skull-strip needs: opening
-deletes the floating specks, closing fills the vessel holes.
+Opening erodes first: anything thinner than the probe is annihilated and cannot be brought
+back by the following dilation, while structures that survived the erosion are restored to
+roughly their original size. Net effect: remove small bright specks, keep the body. Closing
+is the dual - dilate first to swell across small dark gaps, then erode back - so it fills
+small dark holes, keeps the body. These are precisely the two cleanups the skull-strip
+needs: opening deletes the floating specks, closing fills the vessel holes.
 
-You can build the rest of the morphological vocabulary from these by hand: the
-**morphological gradient** $\operatorname{dilate}(x)-\operatorname{erode}(x)$
-outlines boundaries; the **white top-hat** $x-\operatorname{open}(x)$ isolates
-the bright specks the opening removed. `nitrix` does not ship these as named
-symbols — they are one-line compositions — but naming the pattern makes the
-public surface (`dilate`, `erode`, `open`, `close`) feel complete rather than
-sparse.
+The rest of the morphological vocabulary follows by hand: the morphological gradient
+$\operatorname{dilate}(x)-\operatorname{erode}(x)$ outlines boundaries; the white top-hat
+$x-\operatorname{open}(x)$ isolates the bright specks the opening removed. `nitrix` does not
+ship these as named symbols - they are one-line compositions - but naming the pattern makes
+the public surface (`dilate`, `erode`, `open`, `close`) complete rather than sparse.
 
-@fig-volumes-morphology shows all four on a 2-D mask with our skull-strip's
-pathologies built in.
+@fig-volumes-morphology shows all four on a 2-D mask with the skull-strip's pathologies built
+in.
 
 ```{python}
 #| label: fig-volumes-morphology
@@ -273,12 +260,11 @@ plt.show()
 
 ### The semiring connection, made literal
 
-We have been using the words *gather*, *combine*, *reduce* on purpose. That is
-the exact shape of a **semiring** contraction from
-[the operators page](operators.qmd#sec-semiring): a `combine` operator $\otimes$
-and a `reduce` operator $\oplus$. Mesh smoothing was the **REAL** semiring,
-$(\oplus,\otimes)=(+,\times)$ — multiply neighbours by weights, sum. Morphology
-is the same `semiring_conv` kernel with the algebra swapped:
+We have used the words gather, combine, reduce deliberately. That is the exact shape of a
+semiring contraction from [the operators chapter](operators.qmd#sec-semiring): a `combine`
+operator $\otimes$ and a `reduce` operator $\oplus$. Mesh smoothing was the REAL semiring,
+$(\oplus,\otimes)=(+,\times)$ - multiply neighbours by weights, sum. Morphology is the same
+`semiring_conv` kernel with the algebra swapped:
 
 | operation | algebra | identity | `combine` $\otimes$ | `reduce` $\oplus$ |
 |---|---|---|---|---|
@@ -286,255 +272,236 @@ is the same `semiring_conv` kernel with the algebra swapped:
 | dilate | `TROPICAL_MAX_PLUS` | $-\infty$ | $+$ | $\max$ |
 | erode | `TROPICAL_MIN_PLUS` | $+\infty$ | $+$ (with $-b$) | $\min$ |
 
-These three algebras are the real module-level instances in
-`semiring/algebras.py`: `REAL`, `TROPICAL_MAX_PLUS`, `TROPICAL_MIN_PLUS` (all
-`StrictSemiring`). `dilate` calls `semiring_conv(..., semiring=TROPICAL_MAX_PLUS)`;
-`erode` calls it with `TROPICAL_MIN_PLUS` *and the negated SE* `-se`, so the
-algebra's native $+$ produces the conventional $-$ of @eq-dilate-erode. The
-$\pm\infty$ identities are not decoration: under $\max$, adding $-\infty$ is a
-no-op, so $-\infty$ is exactly the value padded positions must take to vanish
-from the reduction — the same role $0$ plays for a sum.
+These three algebras are the real module-level instances in `semiring/algebras.py`: `REAL`,
+`TROPICAL_MAX_PLUS`, `TROPICAL_MIN_PLUS` (all `StrictSemiring`). `dilate` calls
+`semiring_conv(..., semiring=TROPICAL_MAX_PLUS)`; `erode` calls it with `TROPICAL_MIN_PLUS`
+*and the negated SE* `-se`, so the algebra's native $+$ produces the conventional $-$ of
+@eq-dilate-erode. The $\pm\infty$ identities are not decoration: under $\max$, adding
+$-\infty$ is a no-op, so $-\infty$ is exactly the value padded positions must take to vanish
+from the reduction - the role $0$ plays for a sum.
 
-The dividend is concrete and is the thesis of the whole module: **morphology
-ships zero new kernels and zero new gradients.** The backward pass comes "for
-free" because the tropical matmul already carries a hand-derived
-`custom_vjp` — for $\max$-plus the subgradient is an **argmax one-hot** (each
-output routes its gradient to the single neighbour that attained the max), and
-for $\min$-plus an **argmin one-hot**. That is precisely what you would derive
-by hand for $\partial \max / \partial x_p$, and it is why `open` and `close`
-differentiate through both passes by the chain rule with no extra code.
+Choosing the algebra is choosing the inductive bias. The neighbourhood is fixed (a
+translation-invariant local window); the semiring decides whether that window *averages*
+evidence (REAL diffusion), takes the *most extreme* evidence that can reach the centre
+(tropical dilation/erosion), or propagates a *shortest path* (the EDT below). One kernel,
+one set of symmetries, a family of priors selected by the algebra.
+
+The dividend is concrete and is the thesis of the whole module: morphology ships zero new
+kernels and zero new gradients. The backward pass comes for free because the tropical matmul
+already carries a hand-derived `custom_vjp` - for max-plus the subgradient is an argmax
+one-hot (each output routes its gradient to the single neighbour that attained the max), and
+for min-plus an argmin one-hot. That is precisely what one would derive by hand for $\partial
+\max / \partial x_p$, and it is why `open` and `close` differentiate through both passes by
+the chain rule with no extra code.
 
 ### Mask cleanup: connected components
 
-Opening and closing fix *local* defects, but our skull-strip still has a global
-one: even after opening removes the specks, what if two genuinely separate blobs
-survive and we want only the brain? That is a **connectivity** question, not a
-morphology one, and it is answered by labelling.
+Opening and closing fix *local* defects, but the skull-strip still has a global one: even
+after opening removes the specks, what if two genuinely separate blobs survive and we want
+only the brain? That is a connectivity question, not a morphology one, and it is answered by
+labelling.
 
-`connected_components(mask, *, connectivity=1)` (**DIFF-JAX** in the weak sense
-that it is fully jittable — its *output* is integer labels, so gradients are not
-the point) returns an integer image: `0` is background, `1..K` are the connected
-foreground regions, contiguously numbered. `connectivity` follows the scipy
-rule: an offset is a neighbour when $\sum|\text{offset}| \le$ `connectivity`, so
-`connectivity=1` is face-adjacency and `connectivity=ndim` includes every
-diagonal.
+`connected_components(mask, *, connectivity=1)` (**DIFF-JAX** in the weak sense that it is
+fully jittable - its *output* is integer labels, so gradients are not the point) returns an
+integer image: `0` is background, `1..K` are the connected foreground regions, contiguously
+numbered. `connectivity` follows the scipy rule: an offset is a neighbour when
+$\sum|\text{offset}| \le$ `connectivity`, so `connectivity=1` is face-adjacency and
+`connectivity=ndim` includes every diagonal.
 
-The algorithm is a small gem worth understanding, because a naïve flood fill is
-inherently sequential and would not jit to a fixed shape. The method is **label
-propagation with pointer jumping**:
+The algorithm is worth understanding, because a naive flood fill is inherently sequential
+and would not jit to a fixed shape. The method is label propagation with pointer jumping:
 
-- **Seed.** Each foreground voxel takes a *unique* label — its flat index plus
-  one.
-- **Flood.** Each pass replaces a voxel's label with the maximum label over
-  itself and its neighbours. Left alone, this is an $O(d)$ flood for a component
-  of diameter $d$: the maximum seed crawls outward one step per pass.
-- **Pointer jumping.** Here is the trick. A label $\ell$ literally *is* a flat
-  index ($\ell-1$) pointing at the seed voxel that minted it — and that voxel is
-  in the same component. So each voxel also adopts the label currently held by
-  the voxel its own label points to. Because that pointed-to voxel has itself
-  been flooding, the reach **doubles** every pass: convergence in $O(\log d)$
-  passes instead of $O(d)$.
+- **Seed.** Each foreground voxel takes a *unique* label - its flat index plus one.
+- **Flood.** Each pass replaces a voxel's label with the maximum label over itself and its
+  neighbours. Left alone, this is an $O(d)$ flood for a component of diameter $d$: the
+  maximum seed crawls outward one step per pass.
+- **Pointer jumping.** A label $\ell$ literally *is* a flat index ($\ell-1$) pointing at the
+  seed voxel that minted it - and that voxel is in the same component. So each voxel also
+  adopts the label currently held by the voxel its own label points to. Because that
+  pointed-to voxel has itself been flooding, the reach doubles every pass: convergence in
+  $O(\log d)$ passes instead of $O(d)$.
 
-A `lax.while_loop` runs to the fixed point (every voxel ends at its component's
-maximum seed; pointer jumping provably never merges distinct components), then a
-final `cumsum`-based renumber makes the labels a contiguous $1..K$. Because the
-label *image* has a fixed, data-independent shape throughout, the whole thing
-jits.
+A `lax.while_loop` runs to the fixed point (every voxel ends at its component's maximum seed;
+pointer jumping provably never merges distinct components), then a final `cumsum`-based
+renumber makes the labels a contiguous $1..K$. Because the label *image* has a fixed,
+data-independent shape throughout, the whole thing jits.
 
-`largest_connected_component(mask, *, connectivity=1)` is the canonical
-skull-strip-tidy on top: label, `bincount` the labels, ignore background, and
-return the boolean mask of the single biggest region (all-`False` if the input
-is empty). That is step 1 of our motivating task, finished:
-`largest_connected_component(close(open(brain_mask)))`.
+`largest_connected_component(mask, *, connectivity=1)` is the canonical skull-strip-tidy on
+top: label, `bincount` the labels, ignore background, and return the boolean mask of the
+single biggest region (all-`False` if the input is empty). That is step 1 of the motivating
+task, finished: `largest_connected_component(close(open(brain_mask)))`.
 
 ### The rest of the module surface: rank filtering and pooling
 
 Two more public routines round out the volumetric toolkit, and both are the same
-gather-the-neighbourhood pattern with a different reducer — so they belong here,
-not as an afterthought.
+gather-the-neighbourhood pattern with a different reducer.
 
-`median_filter(x, *, size=3, structuring_element=None, padding="SAME")`
-(**DIFF-JAX**) is the **rank-order** sibling of `dilate` and `erode`. Where
-dilation reduces a window with $\max$ and erosion with $\min$, the median filter
-reduces it with the *middle* order statistic. That choice is what makes it the
-go-to despeckler for salt-and-pepper noise: a single wild voxel is an extreme
-value, so $\max$ and $\min$ would *propagate* it, but the median discards it
-outright while leaving an edge un-blurred. The reducer is not a semiring
-operation — a median is not associative the way $\max$ or $+$ is — so it cannot
-ride the tropical kernel; instead the implementation gathers the window, sets
-positions excluded by a `structuring_element` to `NaN`, and calls
-`jnp.nanmedian` so boundary and masked-out positions median over only the
-available subset. `padding="SAME"` pads with `NaN` for the same reason. The
-honest performance note from the source: the sort inside `nanmedian` dominates
-the cost (about $5\times$ behind cupy at $256^2$), and the only real lever would
-be a hardcoded sorting network for the fixed small window — not yet landed.
+`median_filter(x, *, size=3, structuring_element=None, padding="SAME")` (**DIFF-JAX**) is
+the rank-order sibling of `dilate` and `erode`. Where dilation reduces a window with $\max$
+and erosion with $\min$, the median filter reduces it with the *middle* order statistic.
+That choice is what makes it the go-to despeckler for salt-and-pepper noise: a single wild
+voxel is an extreme value, so $\max$ and $\min$ would *propagate* it, but the median discards
+it outright while leaving an edge un-blurred. The reducer is not a semiring operation - a
+median is not associative the way $\max$ or $+$ is - so it cannot ride the tropical kernel;
+instead the implementation gathers the window, sets positions excluded by a
+`structuring_element` to `NaN`, and calls `jnp.nanmedian` so boundary and masked-out
+positions median over only the available subset. `padding="SAME"` pads with `NaN` for the
+same reason. The honest performance note from the source: the sort inside `nanmedian`
+dominates the cost (about $5\times$ behind cupy at $256^2$), and the only real lever would be
+a hardcoded sorting network for the fixed small window - not yet landed.
 
-`max_pool_with_indices_nd` and `max_unpool_nd` are the **pooling pair** that
-turns the same window-max into a *resolution* operation, the volumetric analogue
-of graph pooling on the [graph-geometry page](graph-geometry.qmd#sec-pooling).
-`max_pool_with_indices_nd(x, *, pool_size, spatial_rank)` takes a
-channel-first `(*batch, C, *spatial)` array, partitions each spatial axis into
-non-overlapping windows of `pool_size` (the axis must divide evenly — there is
-no internal padding, so pad upstream if needed), and returns **two** arrays: the
-per-window, per-channel maxima `pooled`, and the flattened **argmax indices**
-into the original single-channel spatial grid. Keeping the indices is the whole
-point: `max_unpool_nd(x, indices, *, output_shape, spatial_rank)` scatters
-pooled values back to the higher-resolution grid *at exactly the voxels they came
-from*, zero elsewhere — the unpool that a U-Net-style encoder/decoder needs to
-restore spatial detail without a learned upsampler. Both are **DIFF-JAX**;
-because the max routes its gradient to the recorded argmax, pooling-then-unpooling
-is a gather/scatter pair whose backward pass is the transpose of its forward, the
-same one-hot routing the tropical algebra gave us above.
+`max_pool_with_indices_nd` and `max_unpool_nd` are the pooling pair that turns the same
+window-max into a *resolution* operation, the volumetric analogue of graph pooling on the
+[graph-geometry chapter](graph-geometry.qmd#sec-pooling).
+`max_pool_with_indices_nd(x, *, pool_size, spatial_rank)` takes a channel-first
+`(*batch, C, *spatial)` array, partitions each spatial axis into non-overlapping windows of
+`pool_size` (the axis must divide evenly - there is no internal padding, so pad upstream if
+needed), and returns *two* arrays: the per-window, per-channel maxima `pooled`, and the
+flattened argmax indices into the original single-channel spatial grid. Keeping the indices
+is the point: `max_unpool_nd(x, indices, *, output_shape, spatial_rank)` scatters pooled
+values back to the higher-resolution grid at exactly the voxels they came from, zero
+elsewhere - the unpool a U-Net-style encoder/decoder needs to restore spatial detail without
+a learned upsampler. Both are **DIFF-JAX**; because the max routes its gradient to the
+recorded argmax, pooling-then-unpooling is a gather/scatter pair whose backward pass is the
+transpose of its forward, the same one-hot routing the tropical algebra gave above.
 
 ## The Euclidean distance transform {#sec-edt}
 
-### The first algorithm a reader would reach for, and why it is too slow
+### The naive distance transform
 
-Step 2 of our task: for every interior voxel, how far to the nearest boundary?
-The **distance transform** answers exactly that. Mark every boundary voxel (in
-`nitrix`'s convention, every *zero* of the mask) as a **seed** at distance $0$,
-and ask each remaining voxel for its distance to the nearest seed.
+Step 2 of the task: for every interior voxel, how far to the nearest boundary? The distance
+transform answers exactly that. Mark every boundary voxel (in `nitrix`'s convention, every
+*zero* of the mask) as a seed at distance $0$, and ask each remaining voxel for its distance
+to the nearest seed.
 
-The first algorithm a reader would reach for: for each voxel, loop over all
-seeds and take the minimum distance. Correct, and hopelessly slow — $O(N \cdot S)$ for
-$N$ voxels and $S$ seeds, both of which scale with the volume. We need the same
-answer without the double loop. The route there is a beautiful little chain of
-two ideas.
+The first algorithm one would reach for: for each voxel, loop over all seeds and take the
+minimum distance. Correct, and hopelessly slow - $O(N \cdot S)$ for $N$ voxels and $S$
+seeds, both of which scale with the volume. We need the same answer without the double loop,
+and the route there is a short chain of two ideas.
 
-### The clean formula
+### The distance-transform formula
 
-Encode "seed or not" as a cost field $g$: $g[q]=0$ where $q$ is a seed,
-$g[q]=+\infty$ otherwise. Then the **squared** distance at $p$ is
+Encode "seed or not" as a cost field $g$: $g[q]=0$ where $q$ is a seed, $g[q]=+\infty$
+otherwise. Then the *squared* distance at $p$ is
 
 $$
 d^2(p) \;=\; \min_{q}\,\bigl(g[q] + \lVert q - p\rVert^2\bigr).
 $$ {#eq-edt}
 
-In words: stand at $p$, look at every other position $q$, pay $g[q]$ (free if
-$q$ is a seed, $+\infty$ if not) plus the squared distance to walk there, and
-keep the cheapest. The $+\infty$ on non-seeds means only seeds ever win, so this
-*is* "distance to the nearest seed" — written as a minimisation we can
-restructure. We will take the square root once at the very end (working in
-squared distance is what makes the next idea exact).
+Stand at $p$, look at every other position $q$, pay $g[q]$ (free if $q$ is a seed,
+$+\infty$ if not) plus the squared distance to walk there, and keep the cheapest. The
+$+\infty$ on non-seeds means only seeds ever win, so this *is* distance to the nearest seed,
+written as a minimisation we can restructure. We take the square root once at the very end
+(working in squared distance is what makes the next idea exact).
 
-### Idea one: separability
+### Separability
 
-Euclidean squared distance splits across axes:
-$\lVert q-p\rVert^2 = \sum_a (q_a - p_a)^2$. Because the cost in @eq-edt is a
-*sum* of per-axis terms and the operation outside is a $\min$, the whole ND
-minimisation factors into a **sequence of 1-D passes, one per axis**, with a
-single $\sqrt{}$ at the end. This is the heart of the classic exact-EDT result:
-an ND distance transform is a chain of 1-D distance transforms composed along
-each axis. `_distance_transform_edt` does exactly this — loop `for axis in
-range(ndim)`, transform along that axis, then `sqrt`.
+Euclidean squared distance splits across axes: $\lVert q-p\rVert^2 = \sum_a (q_a - p_a)^2$.
+Because the cost in @eq-edt is a *sum* of per-axis terms and the operation outside is a
+$\min$, the whole ND minimisation factors into a sequence of 1-D passes, one per axis, with a
+single $\sqrt{}$ at the end. This separability is itself a symmetry of the Euclidean metric -
+the metric is invariant under permuting the axes and decomposes as an axiswise sum - and it
+is the heart of the classic exact-EDT result: an ND distance transform is a chain of 1-D
+distance transforms composed along each axis. `_distance_transform_edt` does exactly this -
+loop `for axis in range(ndim)`, transform along that axis, then `sqrt`.
 
-### Idea two: a 1-D pass *is* a min-plus matmul
+### A 1-D pass is a min-plus matmul
 
-Now zoom into one 1-D pass along an axis of length $n$:
+Zoom into one 1-D pass along an axis of length $n$:
 
 $$
 \operatorname{out}[p] \;=\; \min_{q}\,\bigl(g[q] + (q-p)^2\bigr).
 $$ {#eq-edt-1d}
 
-Stare at @eq-edt-1d next to the semiring contraction
-$C[i,j]=\bigoplus_k A[i,k]\otimes B[k,j]$. With $\oplus=\min$ and $\otimes=+$
-(the **min-plus** algebra), it is *identical* to a matrix–vector product
-$g \otimes D^2$ where $D^2[q,p]=(q-p)^2$ is the fixed **squared-distance
-matrix**. Reshape the off-axis dimensions into a batch of independent lines, and
-the entire axis pass is one call:
+Set @eq-edt-1d next to the semiring contraction $C[i,j]=\bigoplus_k A[i,k]\otimes B[k,j]$.
+With $\oplus=\min$ and $\otimes=+$ (the min-plus algebra), it is identical to a matrix-vector
+product $g \otimes D^2$ where $D^2[q,p]=(q-p)^2$ is the fixed squared-distance matrix.
+Reshape the off-axis dimensions into a batch of independent lines, and the entire axis pass
+is one call:
 
 ```python
 out = semiring_matmul(g_lines, D2, semiring=TROPICAL_MIN_PLUS)  # (lines, n) @ (n, n)
 ```
 
-This is the page's deepest point. The EDT is not "like" a shortest path — under
-min-plus, a matmul *is* a single-hop shortest path: from each $p$, the cheapest
-single edge to any $q$, where the edge weight is $g[q]+(q-p)^2$. Distance
-transform, shortest path, and matrix multiplication are the same computation
-seen in three vocabularies, and `nitrix` exploits that to reuse the tuned
-`semiring_matmul` kernel verbatim.
+This is the chapter's deepest identity. The EDT is not merely *like* a shortest path - under
+min-plus, a matmul *is* a single-hop shortest path: from each $p$, the cheapest single edge
+to any $q$, where the edge weight is $g[q]+(q-p)^2$. Distance transform, shortest path, and
+matrix multiplication are the same computation seen in three vocabularies, and `nitrix`
+exploits that to reuse the tuned `semiring_matmul` kernel verbatim.
 
-`_edt_along_axis` does precisely this — `moveaxis` the target axis to the end,
-build `d2 = (pos[:, None] - pos[None, :]) ** 2`, call `semiring_matmul` under
-`TROPICAL_MIN_PLUS`. One implementation subtlety: it seeds non-boundary
-positions with a large **finite** sentinel `_EDT_BIG = 1e10` rather than literal
-`+inf`, so the min-plus accumulation never propagates `inf`; positions still
-above the threshold after all axes (no boundary ever reachable) are mapped to
-`+inf` at the very end. Working in `float32` with a finite sentinel keeps
-`BIG + d^2` exact.
+`_edt_along_axis` does precisely this - `moveaxis` the target axis to the end, build `d2 =
+(pos[:, None] - pos[None, :]) ** 2`, call `semiring_matmul` under `TROPICAL_MIN_PLUS`. One
+implementation subtlety: it seeds non-boundary positions with a large *finite* sentinel
+`_EDT_BIG = 1e10` rather than literal `+inf`, so the min-plus accumulation never propagates
+`inf`; positions still above the threshold after all axes (no boundary ever reachable) are
+mapped to `+inf` at the very end. Working in `float32` with a finite sentinel keeps `BIG +
+d^2` exact.
 
 ### The public surface
 
 Two **DIFF-JAX** entry points expose this:
 
-- `distance_transform(mask, *, metric="euclidean", structuring_element=None,
-  max_iters=None, backend="auto")`. With the default `metric="euclidean"` and no
-  explicit SE, you get the **exact** EDT via the separable min-plus-matmul
-  engine above. This is the metric scipy / cupy / ITK all mean by "distance
-  transform", and the result matches `scipy.ndimage.distance_transform_edt` to
-  floating-point round-off. The return is a distance map of the same shape;
-  `+inf` where the mask is everywhere non-zero (no boundary reachable).
-- `distance_transform_edt(mask, *, backend="auto")` — a thin scipy-named alias
-  for the Euclidean path.
+- `distance_transform(mask, *, metric="euclidean", structuring_element=None, max_iters=None,
+  backend="auto")`. With the default `metric="euclidean"` and no explicit SE, the result is
+  the *exact* EDT via the separable min-plus-matmul engine above. This is the metric scipy /
+  cupy / ITK all mean by "distance transform", and the result matches
+  `scipy.ndimage.distance_transform_edt` to floating-point round-off. The return is a
+  distance map of the same shape; `+inf` where the mask is everywhere non-zero (no boundary
+  reachable).
+- `distance_transform_edt(mask, *, backend="auto")` - a thin scipy-named alias for the
+  Euclidean path.
 
-### The design story: why they dropped Felzenszwalb–Huttenlocher
+### Why nitrix dropped Felzenszwalb--Huttenlocher
 
-This is one of the most instructive decisions in the codebase, and it is the
-"rigour meets practice" moment the unit keeps promising. The textbook exact-EDT
-algorithm is **Felzenszwalb–Huttenlocher** (F–H): each 1-D pass computes the
-**lower envelope of a family of parabolas** (one upward parabola per seed,
-$(q-p)^2 + g[q]$), in $O(n)$ work per line — *lower* asymptotic work than the
-matmul's $O(n^2)$.
+This is one of the most instructive decisions in the codebase, and the "rigour meets
+practice" moment the unit keeps promising. The textbook exact-EDT algorithm is
+Felzenszwalb--Huttenlocher (F--H): each 1-D pass computes the lower envelope of a family of
+parabolas (one upward parabola per seed, $(q-p)^2 + g[q]$), in $O(n)$ work per line - *lower*
+asymptotic work than the matmul's $O(n^2)$.
 
-`nitrix` implemented F–H first. It is correct and exact. Then they **dropped
-it**, and the reason is the central tension of GPU numerics: F–H's lower
-envelope is a **data-dependent stack** — push and pop at a dynamically computed
-index. Rendered in pure JAX (nested `lax.while_loop` plus a dynamic-index
-scatter under `vmap`) it lowers to a swarm of tiny control-flow-bound kernels:
-$\sim\!18$ ms at $64^3$ on the L4, about **80× behind cupy**.
+`nitrix` implemented F--H first. It is correct and exact. Then it was dropped, and the reason
+is the central tension of GPU numerics: F--H's lower envelope is a data-dependent stack -
+push and pop at a dynamically computed index. Rendered in pure JAX (nested `lax.while_loop`
+plus a dynamic-index scatter under `vmap`) it lowers to a swarm of tiny control-flow-bound
+kernels: about $18$ ms at $64^3$ on the L4, roughly $80\times$ behind cupy.
 
-The min-plus matmul does *more* arithmetic ($O(n^2)$ per axis) but it is
-**dense, branch-free, and rides the already-tuned semiring streaming kernel** —
-so the GPU devours it: $0.24$ ms at $64^3$ (parity with cupy), and it *beats*
-scipy on CPU. There is no realistic size where F–H's lower work wins back its
-control-flow constant. The lesson, in miniature, is the morphology thesis again:
-the right move was **not** a bespoke EDT kernel, but expressing the EDT in the
-*existing* algebra, even at a higher FLOP count. On a GPU, dense-and-regular
-beats clever-and-branchy almost every time.
+The min-plus matmul does *more* arithmetic ($O(n^2)$ per axis) but it is dense, branch-free,
+and rides the already-tuned semiring streaming kernel, so the GPU devours it: $0.24$ ms at
+$64^3$ (parity with cupy), and it beats scipy on CPU. There is no realistic size where
+F--H's lower work wins back its control-flow constant. The lesson, in miniature, is the
+morphology thesis again: the right move was not a bespoke EDT kernel, but expressing the EDT
+in the existing algebra, even at a higher FLOP count. On a GPU, dense and regular beats
+clever and branchy almost every time.
 
 ### The chamfer fallback, and a real gap
 
-For non-Euclidean metrics, `distance_transform` keeps an **iterative chamfer**
-engine, selected by `metric="chebyshev"` (chessboard), `metric="city_block"`
-(Manhattan), or a custom `structuring_element` (which selects the chamfer path
-regardless of `metric`). Each iteration is one `TROPICAL_MIN_PLUS`
-`semiring_conv` with a step-cost SE that adds the per-step distance to each
-neighbour and takes the running min. Iterate `max_iters` times (default: the
-longest spatial extent, enough for exact convergence). This is **Bellman–Ford
-relaxation** — propagate the shortest-path estimate one hop per pass until it
-stops changing — and it is the same min-plus algebra as the EDT, applied
-*iteratively* through a small kernel rather than *once* through a dense matrix.
-It is bit-exact with `scipy.ndimage.distance_transform_cdt`.
+For non-Euclidean metrics, `distance_transform` keeps an iterative chamfer engine, selected
+by `metric="chebyshev"` (chessboard), `metric="city_block"` (Manhattan), or a custom
+`structuring_element` (which selects the chamfer path regardless of `metric`). Each iteration
+is one `TROPICAL_MIN_PLUS` `semiring_conv` with a step-cost SE that adds the per-step distance
+to each neighbour and takes the running min. Iterate `max_iters` times (default: the longest
+spatial extent, enough for exact convergence). This is Bellman--Ford relaxation - propagate
+the shortest-path estimate one hop per pass until it stops changing - the same min-plus
+algebra as the EDT, applied *iteratively* through a small kernel rather than *once* through a
+dense matrix. It is bit-exact with `scipy.ndimage.distance_transform_cdt`.
 
 ::: {.callout-warning title="Anisotropic spacing: a known, unlanded gap"}
-The Euclidean engine **bakes unit voxel spacing into the squared-distance
-matrix** $D^2[q,p]=(q-p)^2$. There is no `sampling=` parameter, so it cannot
-compute the EDT on an anisotropic grid — e.g. a $1\times1\times3$ mm MRI, the
-common clinical case. scipy's `distance_transform_edt(input, sampling=(...))`
-and ITK both support this; `nitrix` silently returns the *unit-spacing* answer,
-which is **wrong** on anisotropic data (off by more than a voxel on a
-$1\times1\times3$ grid). The fix is cheap and known — scale each axis's matrix
-to $D^2[q,p]=(s_a(q-p))^2$ — but as of this writing it has **not landed**. Until
-it does, rescale your understanding accordingly, or use the chamfer engine's
-custom-SE escape hatch. (Feature request: `distance-transform-anisotropic-sampling`.)
+The Euclidean engine bakes unit voxel spacing into the squared-distance matrix
+$D^2[q,p]=(q-p)^2$. There is no `sampling=` parameter, so it cannot compute the EDT on an
+anisotropic grid - e.g. a $1\times1\times3$ mm MRI, the common clinical case. scipy's
+`distance_transform_edt(input, sampling=(...))` and ITK both support this; `nitrix` silently
+returns the *unit-spacing* answer, which is wrong on anisotropic data (off by more than a
+voxel on a $1\times1\times3$ grid). The fix is cheap and known - scale each axis's matrix to
+$D^2[q,p]=(s_a(q-p))^2$ - but as of this writing it has not landed. Until it does, account for
+this, or use the chamfer engine's custom-SE escape hatch. (Feature request:
+`distance-transform-anisotropic-sampling`.)
 :::
 
-@fig-volumes-edt validates the engine the way the unit insists — against an
-**analytic oracle**, not a golden file. Inside a disk of radius $R$, the exact
-distance to the boundary is $R - r$ where $r$ is the distance from the centre.
-The computed EDT tracks that line to within a voxel (the residual is pure grid
-discretisation, and it shrinks under refinement — the convergence-under-
-refinement theme made concrete).
+@fig-volumes-edt validates the engine the way the unit insists - against an analytic oracle,
+not a golden file. Inside a disk of radius $R$, the exact distance to the boundary is $R - r$
+where $r$ is the distance from the centre. The computed EDT tracks that line to within a
+voxel (the residual is pure grid discretisation, and it shrinks under refinement - the
+convergence-under-refinement theme made concrete).
 
 ```{python}
 #| label: fig-volumes-edt
@@ -603,53 +570,50 @@ plt.show()
 
 ## Signed-distance fields {#sec-sdf}
 
-### The intuition: a shape as a field, not a set
+### A shape as a field
 
-So far a shape has been a *set* of voxels — on or off. Step 3 of our task wants
-something richer: a **field** defined everywhere, that is **negative inside** the
-shape, **zero on the boundary**, and **positive outside**, with magnitude equal
-to the distance to the boundary. This is the **signed-distance field** (SDF),
-written $s(x)$. (We use $s$, not $\phi$ — $\phi$ is reserved for the eigen-
-functions of [the spectral page](spectral.qmd#sec-eigen).)
+So far a shape has been a *set* of voxels - on or off. Step 3 of the task wants something
+richer: a field defined everywhere, negative inside the shape, zero on the boundary, and
+positive outside, with magnitude equal to the distance to the boundary. This is the
+signed-distance field (SDF), written $s(x)$. (We use $s$, not $\phi$ - $\phi$ is reserved
+for the eigenfunctions of [the spectral chapter](spectral.qmd#sec-eigen).)
 
-Why bother turning a crisp mask into a smooth field? Three reasons that matter
-downstream. A field can be **resampled** to any resolution without the staircase
-artefacts a binary mask suffers. A field is **differentiable** — its zero level
-set moves smoothly as the field changes, which is exactly what learned level-set
-surface models need. And the field's **zero crossing is a sub-voxel boundary**:
-where the mask only knew "this voxel is inside, that one is outside", the SDF
-interpolates the true surface to between voxels — the property the next chapter's
+Why turn a crisp mask into a smooth field? Three reasons that matter downstream. A field can
+be resampled to any resolution without the staircase artefacts a binary mask suffers. A
+field is differentiable - its zero level set moves smoothly as the field changes, which is
+exactly what learned level-set surface models need. And the field's zero crossing is a
+sub-voxel boundary: where the mask only knew "this voxel is inside, that one is outside", the
+SDF interpolates the true surface to between voxels - the property the next chapter's
 marching cubes exploits.
 
-### The composition (there is no single symbol)
+### The composition
 
-The SDF of a mask is built — by you, in two lines — from the distance transform.
-The unsigned distance from the boundary is `distance_transform(mask)` *inside*
-and `distance_transform(~mask)` *outside*; sign one negative and subtract:
+The SDF of a mask is built - in two lines - from the distance transform. The unsigned
+distance from the boundary is `distance_transform(mask)` *inside* and
+`distance_transform(~mask)` *outside*; sign one negative and subtract:
 
 $$
 s \;=\; \operatorname{EDT}(\lnot\text{mask}) \;-\; \operatorname{EDT}(\text{mask}).
 $$ {#eq-sdf}
 
-There is **no `mask_to_sdf` symbol** in `nitrix`; the SDF-from-mask route *is*
-this composition, and that is deliberate — it stays pure-JAX and differentiable
-because both terms are the **DIFF-JAX** `distance_transform`. Read @eq-sdf
-against the convention: an *interior* voxel has $\operatorname{EDT}(\text{mask})>0$
-(it is far from a background seed) and $\operatorname{EDT}(\lnot\text{mask})=0$
-(it is itself foreground), so $s<0$ — **negative inside**, as required. Flip the
-two terms and you would get the opposite sign convention; both appear in the
-literature, so always check which one a downstream consumer wants. Marching cubes
-in `nitrix` treats a corner as "inside" when `volume < level` with `level=0`, so
-**negative-inside** is the convention to feed it.
+There is no `mask_to_sdf` symbol in `nitrix`; the SDF-from-mask route *is* this composition,
+and that is deliberate - it stays pure-JAX and differentiable because both terms are the
+**DIFF-JAX** `distance_transform`. Read @eq-sdf against the convention: an *interior* voxel
+has $\operatorname{EDT}(\text{mask})>0$ (it is far from a background seed) and
+$\operatorname{EDT}(\lnot\text{mask})=0$ (it is itself foreground), so $s<0$ - negative
+inside, as required. Flip the two terms and you get the opposite sign convention; both appear
+in the literature, so always check which one a downstream consumer wants. Marching cubes in
+`nitrix` treats a corner as "inside" when `volume < level` with `level=0`, so negative-inside
+is the convention to feed it.
 
-A precision footnote: away from the boundary, $\operatorname{EDT}(\text{mask})$
-and $\operatorname{EDT}(\lnot\text{mask})$ are each off by up to half a voxel
-because the seeds sit *on* grid voxels, not on the true continuous boundary
-between them. The SDF inherits that half-voxel offset; it is the discrete-
-approximates-smooth tax, and it shrinks under refinement.
+A precision footnote: away from the boundary, $\operatorname{EDT}(\text{mask})$ and
+$\operatorname{EDT}(\lnot\text{mask})$ are each off by up to half a voxel because the seeds
+sit *on* grid voxels, not on the true continuous boundary between them. The SDF inherits that
+half-voxel offset; it is the discrete-approximates-smooth tax, and it shrinks under
+refinement.
 
-@fig-volumes-sdf validates the composition against the analytic SDF of a circle,
-$s = r - R$, and shows the recovered zero contour landing on the true circle.
+@fig-volumes-sdf validates the composition against the analytic SDF of a circle, $s = r - R$,
+and shows the recovered zero contour landing on the true circle.
 
 ```{python}
 #| label: fig-volumes-sdf
@@ -710,31 +674,28 @@ plt.show()
 
 ### The bridge to surfaces
 
-The SDF is where this page hands off to the next. Its **zero level set** is a
-surface — a closed curve in 2-D, a closed surface in 3-D — and extracting that
-surface as a triangle mesh is exactly what **marching cubes** does, the opening
-act of [the volume↔surface page](volume-surface.qmd#sec-marching). Feed the SDF
-we composed above to `geometry.marching_cubes(volume, level=0.0)` (a **HOST-CTOR**
-op: host-side NumPy, data-dependent vertex count, not differentiable) and you
-get the cortical-style mesh of step 4.
+The SDF is where this chapter hands off to the next. Its zero level set is a surface - a
+closed curve in 2-D, a closed surface in 3-D - and extracting that surface as a triangle
+mesh is exactly what marching cubes does, the opening act of
+[the volume-surface chapter](volume-surface.qmd#sec-marching). Feed the SDF composed above to
+`geometry.marching_cubes(volume, level=0.0)` (a **HOST-CTOR** op: host-side NumPy,
+data-dependent vertex count, not differentiable) and you get the cortical-style mesh of step
+4.
 
-There is a second SDF route worth knowing about, and an asymmetry between them.
-The route on this page goes **mask → field**, by differencing two EDTs. The
-route in the next chapter, `geometry.mesh_to_sdf(mesh, shape, *, spacing=...)`,
-goes the other way — **mesh → field** — rasterising a triangle mesh to a signed-
-distance volume (exact point-to-triangle distance, signed by the generalised
-winding number). Note the asymmetry the brief flags: `mesh_to_sdf` **takes a
-`spacing=`** argument and so handles anisotropic grids, whereas the EDT route
-(this page) **does not yet** — the same gap from the warning above. The two
-routes together let you round-trip mask → field → mesh → field and check the
-results agree, which is precisely the field↔mesh validation the next chapter
-builds on.
+There is a second SDF route worth knowing about, and an asymmetry between them. The route on
+this page goes mask $\to$ field, by differencing two EDTs. The route in the next chapter,
+`geometry.mesh_to_sdf(mesh, shape, *, spacing=...)`, goes the other way - mesh $\to$ field -
+rasterising a triangle mesh to a signed-distance volume (exact point-to-triangle distance,
+signed by the generalised winding number). Note the asymmetry: `mesh_to_sdf` takes a
+`spacing=` argument and so handles anisotropic grids, whereas the EDT route (this page) does
+not yet - the same gap from the warning above. The two routes together let you round-trip
+mask $\to$ field $\to$ mesh $\to$ field and check the results agree, which is precisely the
+field-mesh validation the next chapter builds on.
 
 ## One machine, many algebras {#sec-one-machine}
 
-Step back and look at what we built. Every operation on this page was the same
-**gather the neighbourhood, then reduce** — the thesis from
-[the operators page](operators.qmd#sec-semiring) — with only the algebra
+Every operation in this chapter was the same gather the neighbourhood, then reduce - the
+thesis from [the operators chapter](operators.qmd#sec-semiring) - with only the algebra
 changing:
 
 | operation | $\oplus$ (reduce) | $\otimes$ (combine) | identity | what it does |
@@ -745,18 +706,18 @@ changing:
 | EDT (one axis) | $\min$ | $+$ | $+\infty$ | shortest path = matmul |
 | chamfer DT | $\min$ | $+$ | $+\infty$ | iterated shortest path |
 
-Diffusion, dilation, erosion, and distance are not four algorithms with four
-gradients to maintain. They are **one** gather-and-reduce with the kernel swapped
-out, and the gradient follows the algebra automatically (sum-of-products
-transpose for REAL; argmax / argmin one-hot for the tropical pair). That is why
-`nitrix` could ship the entire morphology-and-distance surface as $\sim\!250$
-lines of glue over the semiring substrate, with zero new kernels and zero new
-`custom_vjp` rules.
+Diffusion, dilation, erosion, and distance are not four algorithms with four gradients to
+maintain. They are one gather-and-reduce with the kernel swapped out, and the gradient
+follows the algebra automatically (sum-of-products transpose for REAL; argmax / argmin
+one-hot for the tropical pair). Read alongside the unit's symmetry theme, the gather supplies
+the *invariance* (one translation-equivariant local window) and the semiring supplies the
+*prior* (what the window is for). That separation of symmetry from arithmetic is why `nitrix`
+could ship the entire morphology-and-distance surface as about $250$ lines of glue over the
+semiring substrate, with zero new kernels and zero new `custom_vjp` rules.
 
-A tiny worked example makes the swap visceral. Take a 1-D signal and a flat
-3-tap window; gather the same patches; reduce three ways. Under REAL you get a
-blur, under max-plus a dilation, under min-plus an erosion — three outputs, one
-op (@fig-volumes-onemachine).
+A worked example makes the swap concrete. Take a 1-D signal and a flat 3-tap window; gather
+the same patches; reduce three ways. Under REAL the result is a blur, under max-plus a
+dilation, under min-plus an erosion - three outputs, one op (@fig-volumes-onemachine).
 
 ```{python}
 #| label: fig-volumes-onemachine
@@ -798,26 +759,23 @@ plt.show()
 
 ## Further reading
 
-- Serra, J. (1982). *Image Analysis and Mathematical Morphology.* Academic
-  Press. — The foundational text; sets and structuring elements, openings and
-  closings.
-- Soille, P. (2003). *Morphological Image Analysis: Principles and
-  Applications* (2nd ed.). Springer. — The practitioner's reference; grayscale
-  morphology, geodesic operators, watersheds.
-- Felzenszwalb, P. F., & Huttenlocher, D. P. (2012). *Distance Transforms of
-  Sampled Functions.* Theory of Computing, 8(19), 415–428. — The $O(n)$ lower-
-  envelope-of-parabolas EDT that `nitrix` implemented and then dropped on the
-  GPU.
-- Maurer, C. R., Qi, R., & Raghavan, V. (2003). *A Linear Time Algorithm for
-  Computing Exact Euclidean Distance Transforms of Binary Images in Arbitrary
-  Dimensions.* IEEE TPAMI, 25(2), 265–270. — The exact ND EDT and the
-  separability argument.
-- Maclagan, D., & Sturmfels, B. (2015). *Introduction to Tropical Geometry.*
-  AMS. — The mathematics of the min-plus / max-plus (tropical) semirings that
-  underpin morphology and the distance transform.
-- Rosenfeld, A., & Pfaltz, J. L. (1966). *Sequential Operations in Digital
-  Picture Processing.* JACM, 13(4), 471–494. — The original chamfer / distance-
-  propagation idea behind the iterative engine.
+- Serra, J. (1982). *Image Analysis and Mathematical Morphology.* Academic Press. The
+  foundational text; sets and structuring elements, openings and closings.
+- Soille, P. (2003). *Morphological Image Analysis: Principles and Applications* (2nd ed.).
+  Springer. The practitioner's reference; grayscale morphology, geodesic operators,
+  watersheds.
+- Felzenszwalb, P. F., & Huttenlocher, D. P. (2012). *Distance Transforms of Sampled
+  Functions.* Theory of Computing, 8(19), 415–428. The $O(n)$ lower-envelope-of-parabolas EDT
+  that `nitrix` implemented and then dropped on the GPU.
+- Maurer, C. R., Qi, R., & Raghavan, V. (2003). *A Linear Time Algorithm for Computing Exact
+  Euclidean Distance Transforms of Binary Images in Arbitrary Dimensions.* IEEE TPAMI, 25(2),
+  265–270. The exact ND EDT and the separability argument.
+- Maclagan, D., & Sturmfels, B. (2015). *Introduction to Tropical Geometry.* AMS. The
+  mathematics of the min-plus / max-plus (tropical) semirings that underpin morphology and the
+  distance transform.
+- Rosenfeld, A., & Pfaltz, J. L. (1966). *Sequential Operations in Digital Picture
+  Processing.* JACM, 13(4), 471–494. The original chamfer / distance-propagation idea behind
+  the iterative engine.
 
 ## See also
 

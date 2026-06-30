@@ -2,113 +2,100 @@
 title: "Solvers and numerical methods in geometry"
 ---
 
-::: {.callout-tldr title="Fast path"}
-Almost everything in this unit bottoms out in **three** numerical workhorses, and
-none of them touches a dense factorisation:
+Almost everything in this unit bottoms out in three numerical workhorses, and none of them
+touches a dense factorisation:
 
-- a **matrix-free conjugate-gradient** solve ([`cg`](#sec-cg)) for the
-  symmetric-positive-definite heat-smoothing system,
-- a **shift-invert / spectral-folding eigensolver**
-  ([`eigsolve_top_k`](#sec-eigensolve)) for the smallest Laplace–Beltrami
-  eigenpairs (manifold harmonics, spectral embedding),
-- the **semiring gather-matmul** ([`semiring_ell_matmul` and friends](#sec-kernels))
-  that *is* every local operator — diffusion, morphology, the distance transform,
-  every mesh apply — and carries the differentiability story for the whole unit.
+- a matrix-free conjugate-gradient solve ([`cg`](#sec-cg)) for the symmetric-positive-definite
+  heat-smoothing system,
+- a shift-invert / spectral-folding eigensolver ([`eigsolve_top_k`](#sec-eigensolve)) for the
+  smallest Laplace--Beltrami eigenpairs (manifold harmonics, spectral embedding),
+- the semiring gather-matmul ([`semiring_ell_matmul` and friends](#sec-kernels)) that *is* every
+  local operator - diffusion, morphology, the distance transform, every mesh apply - and carries
+  the differentiability story for the whole unit.
 
-All three are GPU-native and **cuSolver-free**. The dense, factorisation-heavy
-machinery that powers the [stats unit's solvers](../statistics/solvers.qmd) — damped Newton,
-Woodbury, the FaST-LMM spectral trick — mostly *does not appear here*: geometry
-poses different problems. This page says what is used, why, and what is
-deliberately absent. It also tours the load-bearing **host-side construction**
-routines (marching tetrahedra, the broad-phase spatial index, the icosphere
-builder, the priority-flood watershed) and the one rule that governs them: *never
-call a host op inside a jitted loop*.
-:::
+All three are GPU-native and cuSolver-free. The dense, factorisation-heavy machinery that powers
+the [stats unit's solvers](../statistics/solvers.qmd) - damped Newton, Woodbury, the FaST-LMM
+spectral trick - mostly *does not appear here*: geometry poses different problems. This chapter
+says what is used, why, and what is deliberately absent. It also tours the load-bearing host-side
+construction routines (marching tetrahedra, the broad-phase spatial index, the icosphere builder,
+the priority-flood watershed) and the one rule that governs them: never call a host op inside a
+jitted loop.
 
-This is the reference-tier page for numerical methods. The geometric *meaning* of
-the operators lives elsewhere — the [cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent),
-the [manifold harmonics](spectral.qmd#sec-eigen), the
-[ELL storage format](operators.qmd#sec-ell) — and is assumed here. What follows is
-the layer underneath: the arithmetic that makes those operators *run*, *converge*,
-and *differentiate*.
+This is the reference-tier chapter for numerical methods. The geometric *meaning* of the
+operators lives elsewhere - the [cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent), the
+[manifold harmonics](spectral.qmd#sec-eigen), the [ELL storage format](operators.qmd#sec-ell) -
+and is assumed here. What follows is the layer underneath: the arithmetic that makes those
+operators *run*, *converge*, and *differentiate*.
 
 ## A motivating problem: smooth a thickness map along the cortex {#sec-motivation}
 
-Here is a concrete neuroimaging task that exercises every solver on this page.
-You have a cortical surface mesh $(V, F)$ — call it 150 000 vertices — and a
-per-vertex scalar: cortical thickness, or a myelin estimate, or a first-level GLM
-$t$-statistic. You want to **smooth it along the surface**, not through the
-ambient space, so that two banks of a sulcus that happen to be 2 mm apart in $\mathbb{R}^3$
-but 30 mm apart *across the cortical sheet* do not bleed into each other.
+Consider a concrete neuroimaging task that exercises every solver in this chapter. Given a
+cortical surface mesh $(V, F)$ - say 150 000 vertices - and a per-vertex scalar (cortical
+thickness, a myelin estimate, or a first-level GLM $t$-statistic), we want to smooth it along the
+surface, not through the ambient space, so that two banks of a sulcus that happen to be 2 mm apart
+in $\mathbb{R}^3$ but 30 mm apart *across the cortical sheet* do not bleed into each other.
 
-The right tool is **heat diffusion on the manifold**. Diffuse the field for a
-short time $t$ and you get a Gaussian smoother whose notion of distance is
-*geodesic*. Solving that diffusion stably for a finite step means solving one
-symmetric-positive-definite linear system — and that is a job for conjugate
-gradients ([@sec-cg]). If instead you want the *natural modes* of the surface —
-the manifold harmonics that a spectral embedding or a surface registration is
-built on — you want the smallest eigenpairs of the same Laplacian, and that is a
-job for the shift-invert eigensolver ([@sec-eigensolve]). And underneath both, the
-matrix–vector product $L\mathbf{x}$ that they call thousands of times is a single
-templated gather-and-reduce ([@sec-kernels]). We will follow this one example down
-through all three layers.
+The right tool is heat diffusion on the manifold. Diffuse the field for a short time $t$ and you
+get a Gaussian smoother whose notion of distance is geodesic. Solving that diffusion stably for a
+finite step means solving one symmetric-positive-definite linear system - a job for conjugate
+gradients ([@sec-cg]). If instead you want the *natural modes* of the surface - the manifold
+harmonics that a spectral embedding or a surface registration is built on - you want the smallest
+eigenpairs of the same Laplacian, a job for the shift-invert eigensolver ([@sec-eigensolve]). And
+underneath both, the matrix-vector product $L\mathbf{x}$ that they call thousands of times is a
+single templated gather-and-reduce ([@sec-kernels]). We follow this one example down through all
+three layers.
 
-The discipline that ties the page together is the unit's governing idea: the mesh
-is a **discrete approximation of a smooth surface**. A good solver is one whose
-answer *converges to the continuous truth as the mesh is refined*, and that we can
-*validate* against an analytic oracle — a sphere whose harmonics we know in closed
-form, a heat kernel whose total mass is conserved exactly. We check **class and
-correlation**, never bit-for-bit equality, because the discrete operator is only
-ever an approximation of the smooth one it stands in for.
+The discipline that ties the chapter together is the unit's governing idea: the mesh is a discrete
+approximation of a smooth surface. A good solver is one whose answer converges to the continuous
+truth as the mesh is refined, and that we can validate against an analytic oracle - a sphere whose
+harmonics we know in closed form, a heat kernel whose total mass is conserved exactly. We check
+class and correlation, never bit-for-bit equality, because the discrete operator is only ever an
+approximation of the smooth one it stands in for.
 
 ## The semiring kernels: one gather, many operators {#sec-kernels}
 
-Start with the most-used "solver" of all — though it is not a solver in the
-linear-algebra sense, it is the primitive every other routine calls. Almost every
-local geometric operation has the same shape: **for each element, look at its
-neighbours, combine each neighbour's value with an edge weight, then reduce the
-combined values to a single number.** A graph diffusion does it with multiply-and-add.
-A morphological dilation does it with add-and-max. A one-step shortest-path
-relaxation does it with add-and-min. The Euclidean distance transform does it with
-squared-difference-and-min. These look like four different algorithms, but they
-are *one* algorithm with two pluggable operations.
+The most-used "solver" of all is not a solver in the linear-algebra sense; it is the primitive
+every other routine calls. Almost every local geometric operation has the same shape: for each
+element, look at its neighbours, combine each neighbour's value with an edge weight, then reduce
+the combined values to a single number. A graph diffusion does it with multiply-and-add; a
+morphological dilation with add-and-max; a one-step shortest-path relaxation with add-and-min; the
+Euclidean distance transform with squared-difference-and-min. These look like four different
+algorithms, but they are *one* algorithm with two pluggable operations.
 
-### The idea, then the formula
+### The semiring contraction
 
-Name the two operations. Let $\otimes$ be the **combine** (how an edge weight
-acts on a neighbour value) and $\oplus$ be the **reduce** (how the combined
-contributions are accumulated). A pair $(\oplus, \otimes)$ with the right
-algebraic laws — associativity, an identity for each, $\otimes$ distributing over
-$\oplus$ — is a **semiring**. Once you have that vocabulary, the whole family of
-local operators collapses into a single contraction. For a sparse operator $A$
-stored row-by-row and a dense right operand $B$:
+Name the two operations. Let $\otimes$ be the combine (how an edge weight acts on a neighbour
+value) and $\oplus$ be the reduce (how the combined contributions are accumulated). A pair
+$(\oplus, \otimes)$ with the right algebraic laws - associativity, an identity for each, $\otimes$
+distributing over $\oplus$ - is a semiring. With that vocabulary, the whole family of local
+operators collapses into a single contraction. For a sparse operator $A$ stored row-by-row and a
+dense right operand $B$:
 
 $$
 C[i, j] = \bigoplus_{p}\; \Big( \texttt{values}[i, p] \;\otimes\; B[\,\texttt{indices}[i, p],\, j\,] \Big)
 $$ {#eq-semiring-ell}
 
-Read it left to right: row $i$ has a neighbour list $\texttt{indices}[i, :]$ of
-length $k_{\max}$ with weights $\texttt{values}[i, :]$; for each neighbour $p$ we
-**gather** the neighbour's row $B[\texttt{indices}[i,p], :]$, **combine** it with
-the weight via $\otimes$, and **reduce** across the $k_{\max}$ neighbours via
-$\oplus$. Choosing $(\oplus, \otimes) = (+, \times)$ recovers an ordinary
-sparse matrix–vector product; choosing $(\max, +)$ gives a max-plus relaxation;
-$(\min, +)$ gives min-plus. @fig-solvers-semiring shows the same gather producing
-three different operators by the swap alone.
+Read it left to right: row $i$ has a neighbour list $\texttt{indices}[i, :]$ of length $k_{\max}$
+with weights $\texttt{values}[i, :]$; for each neighbour $p$ we gather the neighbour's row
+$B[\texttt{indices}[i,p], :]$, combine it with the weight via $\otimes$, and reduce across the
+$k_{\max}$ neighbours via $\oplus$. Choosing $(\oplus, \otimes) = (+, \times)$ recovers an ordinary
+sparse matrix-vector product; $(\max, +)$ gives a max-plus relaxation; $(\min, +)$ gives min-plus.
+@fig-solvers-semiring shows the same gather producing three different operators by the swap alone.
+This is the computational face of the inductive-bias idea threaded through the unit: the gather
+fixes which neighbours interact (a fixed local symmetry), and the semiring fixes how their evidence
+combines (the prior on what the operation means).
 
-This is the ELL storage format from the [operators page](operators.qmd#sec-ell):
-`values` and `indices` are both $(m, k_{\max})$, padded so that every row has the
-same width. Padding positions point at any valid row of $B$ and carry the
-**semiring identity** in `values` (e.g. $0$ for REAL, $-\infty$ for max-plus), so
-the padded contribution is a no-op under $\oplus$.
+This is the ELL storage format from the [operators chapter](operators.qmd#sec-ell): `values` and
+`indices` are both $(m, k_{\max})$, padded so that every row has the same width. Padding positions
+point at any valid row of $B$ and carry the semiring identity in `values` (e.g. $0$ for REAL,
+$-\infty$ for max-plus), so the padded contribution is a no-op under $\oplus$.
 
 ### The reference kernel: a `fori_loop` over neighbours
 
-The correctness floor for the whole library is the pure-JAX reference in
-`semiring/_reference.py`. `reference_semiring_ell_matmul` walks the neighbour axis
-with `lax.fori_loop`, and at step $p$ it slices column $p$ of `values` and
-`indices`, gathers `B[idx_p]`, combines, and folds into an accumulator with the
-semiring's `monoid.update`:
+The correctness floor for the whole library is the pure-JAX reference in `semiring/_reference.py`.
+`reference_semiring_ell_matmul` walks the neighbour axis with `lax.fori_loop`, and at step $p$ it
+slices column $p$ of `values` and `indices`, gathers `B[idx_p]`, combines, and folds into an
+accumulator with the semiring's `monoid.update`:
 
 ```python
 def body(p, acc):
@@ -121,87 +108,76 @@ acc = lax.fori_loop(0, kmax, body, monoid.init((m, ncol), B.dtype))
 return monoid.finalize(acc)
 ```
 
-Two things matter here. First, the loop streams over neighbours so the
-intermediate stays $(m, n_{\text{cols}})$ — it never materialises the $(m, k_{\max}, n_{\text{cols}})$
-tensor of all gathered contributions. Second, the *same* pytree-state pattern
-(`init` → `update` → `finalize`) is what the Pallas GPU kernel uses, so the
-reference and the accelerated kernel exercise the algebra identically. The
-backend-parity tests pin every Pallas kernel against this reference; if a Pallas
-kernel cannot tile a given shape × algebra it falls back to the reference with a
-`NitrixBackendFallback` warning. This is the validation posture again: not
-bit-parity to a foreign tool, but *class agreement* between two of our own paths.
+Two things matter here. First, the loop streams over neighbours so the intermediate stays $(m,
+n_{\text{cols}})$ - it never materialises the $(m, k_{\max}, n_{\text{cols}})$ tensor of all
+gathered contributions. Second, the *same* pytree-state pattern (`init` $\to$ `update` $\to$
+`finalize`) is what the Pallas GPU kernel uses, so the reference and the accelerated kernel exercise
+the algebra identically. The backend-parity tests pin every Pallas kernel against this reference; if
+a Pallas kernel cannot tile a given shape $\times$ algebra it falls back to the reference with a
+`NitrixBackendFallback` warning. This is the validation posture again: not bit-parity to a foreign
+tool, but class agreement between two of our own paths.
 
-**Public surface.** The user-facing kernels (`DIFF-JAX` — jittable and
-differentiable) are:
+**Public surface.** The user-facing kernels (`DIFF-JAX` - jittable and differentiable) are:
 
-- `semiring_ell_matmul(values, indices, B, *, semiring=REAL, n_cols=None, backend='auto')`
-  — @eq-semiring-ell, the gather-matmul. This is what a mesh `apply_operator`
-  call resolves to.
-- `semiring_ell_rmatvec(values, indices, X, *, semiring=REAL, n_cols)` — the
-  **adjoint**: where the matmul gathers, this *scatters*,
-  $Y[c, j] = \sum_{(i,p):\,\texttt{indices}[i,p]=c} \texttt{values}[i,p]\, X[i, j]$.
-  It is **REAL-only** on purpose — the additive scatter needs linear structure,
-  and a non-zero pad identity would scatter spurious mass, so any other algebra
-  raises `NotImplementedError`. Composing the two gives the symmetric-part matvec
-  $\tfrac12(AX + A^\top X) = \operatorname{sym}(A)X$ that the eigensolvers need when
-  an adjacency's construction did not preserve symmetry (more in [@sec-eigensolve]).
-- `semiring_matmul(A, B, *, semiring=REAL, ...)` — the dense semiring product,
-  $C[i,j] = \bigoplus_k (A[i,k] \otimes B[k,j])$, also `fori_loop`-streamed over $k$.
-- `semiring_conv(x, k, *, semiring=REAL, stride=1, padding='SAME', dilation=1, ...)`
-  — the channels-last semiring convolution; it lowers to patches and then calls
-  the dense `semiring_matmul` so it inherits the same per-algebra backward.
+- `semiring_ell_matmul(values, indices, B, *, semiring=REAL, n_cols=None, backend='auto')` -
+  @eq-semiring-ell, the gather-matmul. This is what a mesh `apply_operator` call resolves to.
+- `semiring_ell_rmatvec(values, indices, X, *, semiring=REAL, n_cols)` - the adjoint: where the
+  matmul gathers, this *scatters*, $Y[c, j] = \sum_{(i,p):\,\texttt{indices}[i,p]=c}
+  \texttt{values}[i,p]\, X[i, j]$. It is REAL-only on purpose - the additive scatter needs linear
+  structure, and a non-zero pad identity would scatter spurious mass, so any other algebra raises
+  `NotImplementedError`. Composing the two gives the symmetric-part matvec $\tfrac12(AX + A^\top X)
+  = \operatorname{sym}(A)X$ that the eigensolvers need when an adjacency's construction did not
+  preserve symmetry (more in [@sec-eigensolve]).
+- `semiring_matmul(A, B, *, semiring=REAL, ...)` - the dense semiring product, $C[i,j] =
+  \bigoplus_k (A[i,k] \otimes B[k,j])$, also `fori_loop`-streamed over $k$.
+- `semiring_conv(x, k, *, semiring=REAL, stride=1, padding='SAME', dilation=1, ...)` - the
+  channels-last semiring convolution; it lowers to patches and then calls the dense
+  `semiring_matmul` so it inherits the same per-algebra backward.
 
-The built-in algebras (`semiring/algebras.py`) are `REAL` $(+,\times)$,
-`LOG` $(\text{logsumexp}, +)$, `TROPICAL_MAX_PLUS` $(\max, +)$,
-`TROPICAL_MIN_PLUS` $(\min, +)$, `EUCLIDEAN` (squared-difference under a
-$\sqrt{\,}$ finalize), and `BOOLEAN` (OR/AND).
+The built-in algebras (`semiring/algebras.py`) are `REAL` $(+,\times)$, `LOG` $(\text{logsumexp},
++)$, `TROPICAL_MAX_PLUS` $(\max, +)$, `TROPICAL_MIN_PLUS` $(\min, +)$, `EUCLIDEAN`
+(squared-difference under a $\sqrt{\,}$ finalize), and `BOOLEAN` (OR/AND).
 
 ### The differentiability story: per-algebra `custom_vjp`
 
-Gradients are where the semiring abstraction earns its keep. You cannot let JAX
-autodiff blindly through the `fori_loop` — for a `max`-reduction that would be
-wrong (the gradient of a max is not a smooth thing), and for the streaming loops
-it would unroll an expensive tape. Instead each public kernel carries a
-`jax.custom_vjp` whose backward dispatches to a **hand-derived rule per algebra**,
-in `semiring/_backward.py`. The contract bar: *state the gradient as an idea,
-then read the formula off it.*
+Gradients are where the semiring abstraction earns its keep. You cannot let JAX autodiff blindly
+through the `fori_loop` - for a `max`-reduction that would be wrong (the gradient of a max is not a
+smooth thing), and for the streaming loops it would unroll an expensive tape. Instead each public
+kernel carries a `jax.custom_vjp` whose backward dispatches to a hand-derived rule per algebra, in
+`semiring/_backward.py`. The contract: state the gradient as an idea, then read the formula off it.
 
-- **REAL** is linear, so its backward is exactly the two transpose-contractions you
-  would write for an ordinary matmul — nothing more is needed, because the forward
-  is itself linear in both arguments. For the ELL form,
-  $\partial L/\partial\texttt{values}[i,p] = \sum_j g_{\text{out}}[i,j]\, B[\texttt{indices}[i,p], j]$
-  (a gather-dot), and the gradient w.r.t. $B$ is exactly the additive adjoint
-  $A^\top g_{\text{out}}$ — implemented by *calling* `reference_semiring_ell_rmatvec`,
-  so the rmatvec is the single source of truth for both the gradient and the
-  symmetric matvec (`real_ell_matmul_vjp`).
-- **LOG** weights each contribution by a softmax,
-  $w[i,p,j] = \exp(\texttt{values}[i,p] + B[\texttt{indices}[i,p],j] - C[i,j])$,
-  bounded in $[0,1]$ because $C$ is the logsumexp; the backward streams over
-  neighbours so intermediates stay $(m, n)$, and $-\infty$ rows propagate cleanly
-  through a guarded `exp`.
-- **TROPICAL_MAX_PLUS / MIN_PLUS** are not differentiable at ties, so the
-  backward is a **subgradient**: route the entire upstream gradient through the
-  one-hot $[p = \arg\max_p(\ldots)]$. The code finds the winning neighbour with a
-  streaming `fori_loop` (`_tropical_argk` for the dense form,
-  `tropical_max_plus_ell_matmul_vjp` for ELL) and breaks ties toward the *first*
-  maximiser, matching `jnp.argmax`. This is the right notion of derivative for a
-  shortest-path or a dilation: an infinitesimal change to the field moves the
-  output only through the edge that is currently winning.
-- **EUCLIDEAN** has a $1/C$ factor (the derivative of $\sqrt{\,}$) that blows up
-  at zero distance; `_safe_div` uses the "double-where with sentinel" trick to
-  return a clean $0$ there instead of a `NaN`.
-- **BOOLEAN** is not differentiable and its backward *raises* — a deliberate
-  type error rather than a silent zero.
+- **REAL** is linear, so its backward is exactly the two transpose-contractions one would write for
+  an ordinary matmul - nothing more is needed, because the forward is itself linear in both
+  arguments. For the ELL form, $\partial L/\partial\texttt{values}[i,p] = \sum_j g_{\text{out}}[i,j]\,
+  B[\texttt{indices}[i,p], j]$ (a gather-dot), and the gradient w.r.t. $B$ is exactly the additive
+  adjoint $A^\top g_{\text{out}}$ - implemented by *calling* `reference_semiring_ell_rmatvec`, so the
+  rmatvec is the single source of truth for both the gradient and the symmetric matvec
+  (`real_ell_matmul_vjp`).
+- **LOG** weights each contribution by a softmax, $w[i,p,j] = \exp(\texttt{values}[i,p] +
+  B[\texttt{indices}[i,p],j] - C[i,j])$, bounded in $[0,1]$ because $C$ is the logsumexp; the
+  backward streams over neighbours so intermediates stay $(m, n)$, and $-\infty$ rows propagate
+  cleanly through a guarded `exp`.
+- **TROPICAL_MAX_PLUS / MIN_PLUS** are not differentiable at ties, so the backward is a
+  subgradient: route the entire upstream gradient through the one-hot $[p = \arg\max_p(\ldots)]$.
+  The code finds the winning neighbour with a streaming `fori_loop` (`_tropical_argk` for the dense
+  form, `tropical_max_plus_ell_matmul_vjp` for ELL) and breaks ties toward the *first* maximiser,
+  matching `jnp.argmax`. This is the right notion of derivative for a shortest-path or a dilation:
+  an infinitesimal change to the field moves the output only through the edge that is currently
+  winning.
+- **EUCLIDEAN** has a $1/C$ factor (the derivative of $\sqrt{\,}$) that blows up at zero distance;
+  `_safe_div` uses the "double-where with sentinel" trick to return a clean $0$ there instead of a
+  `NaN`.
+- **BOOLEAN** is not differentiable and its backward *raises* - a deliberate type error rather than
+  a silent zero.
 
-Two implementation details are load-bearing and easy to miss. First, **`indices`
-cannot ride in `nondiff_argnums`**: JAX ≥ 0.10 refuses tracers there, so `indices`
-is carried as an ordinary array argument and the backward returns a *zero gradient
-of matching shape* for it — consistent with "integer indices are
-non-differentiable". (The dense `semiring_matmul` *can* and does keep its static
-args in `nondiff_argnums`.) Second, this is why morphology, the EDT, and the mesh
-operators all inherit gradients **for free**: they are written as semiring calls,
-so the moment you pick a differentiable algebra you get the hand-derived VJP with
-no extra work. The geometry suite's entire backward story is *this* table.
+Two implementation details are load-bearing and easy to miss. First, `indices` cannot ride in
+`nondiff_argnums`: JAX $\ge$ 0.10 refuses tracers there, so `indices` is carried as an ordinary array
+argument and the backward returns a zero gradient of matching shape for it - consistent with
+"integer indices are non-differentiable". (The dense `semiring_matmul` *can* and does keep its
+static args in `nondiff_argnums`.) Second, this is why morphology, the EDT, and the mesh operators
+all inherit gradients for free: they are written as semiring calls, so the moment you pick a
+differentiable algebra you get the hand-derived VJP with no extra work. The geometry suite's entire
+backward story is *this* table.
 
 ```{python}
 #| label: fig-solvers-semiring
@@ -250,53 +226,46 @@ plt.show()
 
 ## Matrix-free conjugate gradients {#sec-cg}
 
-Now the heat smoother from [@sec-motivation]. Diffusing a field $\mathbf{x}_0$ for
-time $t$ on the surface means evolving $\partial_\tau \mathbf{x} = -\Delta\mathbf{x}$,
-where $\Delta = M^{-1}L$ is the [Laplace–Beltrami operator](laplace-beltrami.qmd#sec-cotangent):
-$M$ the lumped [mass](laplace-beltrami.qmd#sec-mass) (vertex areas $A_i$ on the
-diagonal) and $L$ the cotangent stiffness. A single **backward-Euler** step — the
-stable, unconditionally-convergent implicit scheme — turns that PDE into a linear
-solve.
+Return to the heat smoother from [@sec-motivation]. Diffusing a field $\mathbf{x}_0$ for time $t$ on
+the surface means evolving $\partial_\tau \mathbf{x} = -\Delta\mathbf{x}$, where $\Delta = M^{-1}L$
+is the [Laplace--Beltrami operator](laplace-beltrami.qmd#sec-cotangent): $M$ the lumped
+[mass](laplace-beltrami.qmd#sec-mass) (vertex areas $A_i$ on the diagonal) and $L$ the cotangent
+stiffness. A single backward-Euler step - the stable, unconditionally-convergent implicit scheme -
+turns that PDE into a linear solve.
 
 ### From the diffusion equation to an SPD system
 
-The obvious thing is to step forward explicitly: $\mathbf{x}_{n+1} = \mathbf{x}_n - t\,\Delta\mathbf{x}_n$.
-That fails when $t$ is anything but tiny — the explicit scheme is only stable for
-$t$ below a mesh-dependent threshold, so a real smoothing radius would need
-hundreds of micro-steps. The cure is one *backward* step, which evaluates the
-Laplacian at the *new* time:
-$\mathbf{x}_{n+1} = \mathbf{x}_n - t\,\Delta\mathbf{x}_{n+1}$. Rearranging, and
-multiplying through by $M$ to keep the operator symmetric:
+The explicit step $\mathbf{x}_{n+1} = \mathbf{x}_n - t\,\Delta\mathbf{x}_n$ fails when $t$ is
+anything but tiny - the explicit scheme is only stable for $t$ below a mesh-dependent threshold, so
+a real smoothing radius would need hundreds of micro-steps. The cure is one *backward* step, which
+evaluates the Laplacian at the new time: $\mathbf{x}_{n+1} = \mathbf{x}_n - t\,\Delta\mathbf{x}_{n+1}$.
+Rearranging, and multiplying through by $M$ to keep the operator symmetric:
 
 $$
 (M + t\,L)\,\mathbf{x} = M\,\mathbf{x}_0,
 \qquad t = \frac{\text{FWHM}^2}{16\ln 2}.
 $$ {#eq-backward-euler}
 
-The diffusion time $t$ is tied to the target full-width-at-half-maximum through
-$\sigma^2 = 2t$ and $\text{FWHM} = 2\sqrt{2\ln 2}\,\sigma$, exactly as in
-`surface_smooth`. The matrix on the left is **symmetric positive-definite**: $M$
-is a positive diagonal, $L$ is PSD (it is a [cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent)),
-and $t > 0$. SPD is the magic word — it unlocks the cheapest iterative solver
-there is.
+The diffusion time $t$ is tied to the target full-width-at-half-maximum through $\sigma^2 = 2t$ and
+$\text{FWHM} = 2\sqrt{2\ln 2}\,\sigma$, exactly as in `surface_smooth`. The matrix on the left is
+symmetric positive-definite: $M$ is a positive diagonal, $L$ is PSD (it is a
+[cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent)), and $t > 0$. That SPD structure unlocks
+the cheapest iterative solver there is.
 
-### Why conjugate gradients, in one paragraph
+### Why conjugate gradients
 
-For an SPD system $A\mathbf{x} = \mathbf{b}$, solving the system is *identical* to
-minimising the convex quadratic $f(\mathbf{x}) = \tfrac12\mathbf{x}^\top A\mathbf{x} - \mathbf{b}^\top\mathbf{x}$,
-whose gradient is the residual $\mathbf{r} = \mathbf{b} - A\mathbf{x}$. The naive
-minimiser is steepest descent — step along $-\nabla f = \mathbf{r}$ — but
-successive steepest steps zig-zag and re-undo each other. **Conjugate gradients**
-fixes the zig-zag with one idea: choose search directions that are
-**$A$-conjugate** ($\mathbf{p}_i^\top A\,\mathbf{p}_j = 0$ for $i \neq j$), so that
-minimising along a new direction never spoils the progress made along the old
-ones. Each direction is "used up" exactly once, so in exact arithmetic CG reaches
-the true solution in at most $n$ steps — and, crucially, in *far* fewer when the
-eigenvalues of $A$ are *clustered*, which the heat operator $M + tL$ is. Every step
-costs only **one matrix–vector product and a couple of inner products** — no
-factorisation, ever. @fig-solvers-cg shows the residual dropping below tolerance in
-a handful of steps and the intermediate iterates becoming visibly better smoothed
-fields.
+For an SPD system $A\mathbf{x} = \mathbf{b}$, solving the system is identical to minimising the
+convex quadratic $f(\mathbf{x}) = \tfrac12\mathbf{x}^\top A\mathbf{x} - \mathbf{b}^\top\mathbf{x}$,
+whose gradient is the residual $\mathbf{r} = \mathbf{b} - A\mathbf{x}$. The naive minimiser is
+steepest descent - step along $-\nabla f = \mathbf{r}$ - but successive steepest steps zig-zag and
+re-undo each other. Conjugate gradients fixes the zig-zag by choosing search directions that are
+$A$-conjugate ($\mathbf{p}_i^\top A\,\mathbf{p}_j = 0$ for $i \neq j$), so that minimising along a
+new direction never spoils the progress made along the old ones. Each direction is used up exactly
+once, so in exact arithmetic CG reaches the true solution in at most $n$ steps - and, crucially, in
+*far* fewer when the eigenvalues of $A$ are clustered, which the heat operator $M + tL$ is. Every
+step costs only one matrix-vector product and a couple of inner products - no factorisation, ever.
+@fig-solvers-cg shows the residual dropping below tolerance in a handful of steps and the
+intermediate iterates becoming visibly better smoothed fields.
 
 ### How it is wired here
 
@@ -312,9 +281,9 @@ def cg(a, b, *, x0=None, tol=1e-6, atol=0.0, maxiter=None, l2=0.0):
     return x
 ```
 
-Three design choices are worth naming. First, `a` may be a **callable** — the
-matrix is never materialised. `surface_smooth` passes a closure that applies the
-operator through the [apply seam](operators.qmd#sec-apply):
+Three design choices are worth naming. First, `a` may be a callable - the matrix is never
+materialised. `surface_smooth` passes a closure that applies the operator through the
+[apply seam](operators.qmd#sec-apply):
 
 ```python
 def _matvec(v):
@@ -323,34 +292,32 @@ def _matvec(v):
 return cg(_matvec, area * values, tol=tol, maxiter=maxiter)
 ```
 
-So the heat solve is *built on the semiring kernel of [@sec-kernels]*: every CG
-iteration's matvec is a `semiring_ell_matmul` under REAL. Second, the optional
-`l2` ridge adds $\lambda\mathbf{v}$ to the matvec unconditionally (a no-op at
-$\lambda = 0$) and may be a *traced* scalar, so a Levenberg–Marquardt damping can
-vary inside a `jit`. Third — and this is why CG, not a Cholesky — it is
-**cuSolver-free**: built from matvecs and dot products only, it never touches the
-dense-solver handle pool that wedges on the dev L4 GPU (see [@sec-host] and the
-[`_solver` discussion](#sec-not-used)). It is the device-resilient SPD path.
+So the heat solve is *built on the semiring kernel of [@sec-kernels]*: every CG iteration's matvec
+is a `semiring_ell_matmul` under REAL. Second, the optional `l2` ridge adds $\lambda\mathbf{v}$ to
+the matvec unconditionally (a no-op at $\lambda = 0$) and may be a *traced* scalar, so a
+Levenberg--Marquardt damping can vary inside a `jit`. Third - and this is why CG, not a Cholesky -
+it is cuSolver-free: built from matvecs and dot products only, it never touches the dense-solver
+handle pool that wedges on the dev L4 GPU (see [@sec-host] and the [`_solver`
+discussion](#sec-not-used)). It is the device-resilient SPD path.
 
 ### Gradients through the solve, for free
 
-`surface_smooth` is differentiable w.r.t. the field `values`, and there is no
-unrolling of the CG loop to make that so. `jax.scipy.sparse.linalg.cg` carries its
-own **implicit-differentiation rule**: the gradient of the solution of $A\mathbf{x} = \mathbf{b}$
-satisfies the *adjoint system* $A^\top \boldsymbol\lambda = \mathbf{g}$, which (for
-symmetric $A$) is another CG solve. So the backward pass is one more matrix-free CG,
-not a tape of every forward iteration — constant memory in the iteration count.
+`surface_smooth` is differentiable w.r.t. the field `values`, and there is no unrolling of the CG
+loop to make that so. `jax.scipy.sparse.linalg.cg` carries its own implicit-differentiation rule:
+the gradient of the solution of $A\mathbf{x} = \mathbf{b}$ satisfies the adjoint system $A^\top
+\boldsymbol\lambda = \mathbf{g}$, which (for symmetric $A$) is another CG solve. So the backward
+pass is one more matrix-free CG, not a tape of every forward iteration - constant memory in the
+iteration count.
 
 ### A genuine cross-unit shared solver
 
-This is the *same* `cg` the [stats unit's solvers page](../statistics/solvers.qmd) reaches
-for. There, the Gauss–Newton / Levenberg–Marquardt normal equations
-$(J^\top J + \lambda\,\text{diag})\,\boldsymbol\delta = -J^\top\mathbf{r}$ of the
-registration path are SPD and small, and solving them matrix-free on-device beats a
-host round-trip to a CPU Cholesky. Geometry's heat smoother and stats' LM step are
-*different problems that share one numerical kernel* — the clearest case on this
-page of a solver that recurs across both units. The contrast with everything in
-[@sec-not-used] is the point: this one crosses over; most do not.
+This is the *same* `cg` the [stats unit's solvers chapter](../statistics/solvers.qmd) reaches for.
+There, the Gauss--Newton / Levenberg--Marquardt normal equations $(J^\top J + \lambda\,\text{diag})\,
+\boldsymbol\delta = -J^\top\mathbf{r}$ of the registration path are SPD and small, and solving them
+matrix-free on-device beats a host round-trip to a CPU Cholesky. Geometry's heat smoother and stats'
+LM step are different problems that share one numerical kernel - the clearest case in this chapter
+of a solver that recurs across both units. The contrast with everything in [@sec-not-used] is the
+point: this one crosses over; most do not.
 
 ```{python}
 #| label: fig-solvers-cg
@@ -417,79 +384,70 @@ plt.show()
 
 ## Eigensolving the Laplace–Beltrami operator {#sec-eigensolve}
 
-The other half of the motivating problem: the **manifold harmonics**. The
-eigenfunctions $\phi_k$ of the Laplace–Beltrami operator, solving the generalised
-problem $L\phi_k = \lambda_k M\phi_k$, are the surface's analogue of Fourier modes
-— and the [spectral page](spectral.qmd#sec-eigen) builds [heat kernels](spectral.qmd#sec-heat-kernel)
-and [embeddings](spectral.qmd#sec-embedding) on them. We want the **smallest**
-eigenpairs: $\lambda_0 = 0$ (the constant mode), then the lowest-frequency,
-smoothest, most global modes. This page is the *numerical sibling* of that material
-— spectral [explains what the modes mean](spectral.qmd#sec-eigen); here we explain
-how to *compute* them, and link rather than duplicate.
+The other half of the motivating problem: the manifold harmonics. The eigenfunctions $\phi_k$ of the
+Laplace--Beltrami operator, solving the generalised problem $L\phi_k = \lambda_k M\phi_k$, are the
+surface's analogue of Fourier modes - and the [spectral chapter](spectral.qmd#sec-eigen) builds
+[heat kernels](spectral.qmd#sec-heat-kernel) and [embeddings](spectral.qmd#sec-embedding) on them.
+We want the smallest eigenpairs: $\lambda_0 = 0$ (the constant mode), then the lowest-frequency,
+smoothest, most global modes. This chapter is the *numerical sibling* of that material - spectral
+[explains what the modes mean](spectral.qmd#sec-eigen); here we explain how to *compute* them, and
+link rather than duplicate.
 
-### The obvious approach, and exactly where it breaks
+### Iterative eigensolvers, and where they break
 
-The obvious approach: run an iterative eigensolver. **LOBPCG** (Locally Optimal
-Block Preconditioned Conjugate Gradient) is the natural choice — it is to the
-eigenvalue problem what CG is to the linear one. Its core idea is the **Rayleigh
-quotient**: for a symmetric operator $A$,
+The obvious approach is an iterative eigensolver. **LOBPCG** (Locally Optimal Block Preconditioned
+Conjugate Gradient) is the natural choice - it is to the eigenvalue problem what CG is to the linear
+one. Its core idea is the Rayleigh quotient: for a symmetric operator $A$,
 
 $$
 \rho(\mathbf{x}) = \frac{\mathbf{x}^\top A\, \mathbf{x}}{\mathbf{x}^\top \mathbf{x}},
 $$ {#eq-rayleigh}
 
-is minimised by the smallest eigenvector and *maximised* by the largest, with the
-eigenvalue as the optimal value. LOBPCG maximises $\rho$ over a *block* of vectors
-at once (so you get $k$ pairs together), and at each step it searches the subspace
-spanned by the current block, its $A$-image, and the previous block — a
-CG-flavoured three-term recurrence that uses only matvecs. Pure matvecs, no
+is minimised by the smallest eigenvector and maximised by the largest, with the eigenvalue as the
+optimal value. LOBPCG maximises $\rho$ over a *block* of vectors at once (so you get $k$ pairs
+together), and at each step it searches the subspace spanned by the current block, its $A$-image, and
+the previous block - a CG-flavoured three-term recurrence that uses only matvecs. Pure matvecs, no
 factorisation: exactly the device-resilient discipline we want.
 
-But here is where it breaks, and the brief names the measured failure: iterative
-eigensolvers find the **largest** eigenvalues robustly, and they resolve eigenpairs
-in proportion to the **relative gap** between neighbouring eigenvalues. The
-smallest LBO eigenvalues are the worst possible case on *both* counts — they are at
-the *wrong end*, and they **cluster near zero** (a closed surface has
-$\lambda_0 = 0$ and a tight low cluster above it). The team's own measurement on a
-spherical-parameterisation surface: *a plain reflection + LOBPCG folds ~47% of
-triangles* — nearly half the mesh inverts — because the near-zero modes are not
-resolved cleanly enough to recover the constant-plus-first-three subspace the
+The difficulty, and the measured failure: iterative eigensolvers find the largest eigenvalues
+robustly, and they resolve eigenpairs in proportion to the relative gap between neighbouring
+eigenvalues. The smallest LBO eigenvalues are the worst possible case on both counts - they are at
+the *wrong end*, and they *cluster near zero* (a closed surface has $\lambda_0 = 0$ and a tight low
+cluster above it). The team's own measurement on a spherical-parameterisation surface: a plain
+reflection + LOBPCG folds about 47% of triangles - nearly half the mesh inverts - because the
+near-zero modes are not resolved cleanly enough to recover the constant-plus-first-three subspace the
 embedding needs (`docs/design/geometry-suite.md`).
 
-### Two fixes, stacked: fold, then shift-invert
+### Two fixes: fold, then shift-invert
 
 The cure is two ideas, each motivated by the failure it removes.
 
-**Fix 1 — spectral folding, to put the smallest at the top.** Iterative methods
-want the largest, so *make the smallest the largest* with a monotone map that
-reverses order. The connectopy/geometry path symmetrises the operator to
-$\tilde L = M^{-1/2}LM^{-1/2}$ and forms the **affinity**
+**Fix 1 - spectral folding, to put the smallest at the top.** Iterative methods want the largest, so
+*make the smallest the largest* with a monotone map that reverses order. The connectopy/geometry path
+symmetrises the operator to $\tilde L = M^{-1/2}LM^{-1/2}$ and forms the affinity
 
 $$
 A = I - \tilde L / c,
 $$ {#eq-fold}
 
-with $c$ a spectral-scale constant. Since $\tilde L \succeq 0$, $A$'s eigenvalues
-are $1 - \lambda_k/c$ — *largest where $\lambda_k$ is smallest*. Now a top-$k$
-*largest* solve on $A$ returns the *smallest* harmonics of $L$. This is exactly the
-`L = I - M` shift the code hard-codes. But folding alone does not change the
-*gaps*: a tiny absolute gap near $0$ becomes a tiny *relative* gap at the top of a
-wide spectrum, which is still hard (@fig-solvers-spectral, middle panel — the
-near-0 cluster stays cramped).
+with $c$ a spectral-scale constant. Since $\tilde L \succeq 0$, $A$'s eigenvalues are $1 -
+\lambda_k/c$ - largest where $\lambda_k$ is smallest. Now a top-$k$ *largest* solve on $A$ returns
+the *smallest* harmonics of $L$. This is exactly the `L = I - M` shift the code hard-codes. But
+folding alone does not change the *gaps*: a tiny absolute gap near $0$ becomes a tiny *relative* gap
+at the top of a wide spectrum, which is still hard (@fig-solvers-spectral, middle panel - the near-0
+cluster stays cramped).
 
-**Fix 2 — shift-invert, to blow the near-zero gaps open.** The decisive move is to
-solve eigenpairs of $(L - \sigma I)^{-1}$ instead of $L$. This operator shares
-$L$'s eigenvectors but has eigenvalues $1/(\lambda_k - \sigma)$, which **explode
-for $\lambda_k$ near the shift $\sigma$**. Put $\sigma$ just below the smallest
-eigenvalue (the code's `SolverSpec.shift_invert(sigma=...)` defaults $\sigma = -0.5$;
-the geometry path uses $\sigma = -0.01$, just below $\lambda_0 = 0$) and the
-clustered near-zero modes are mapped to enormous, *well-separated* values. The
-relative gaps the solver actually sees grow by roughly two orders of magnitude
-(@fig-solvers-spectral, right panel, and its caption number). You never form the
-inverse: each application of $(L - \sigma I)^{-1}$ is an **inner CG solve** against
-the shifted operator, which is SPD for $\sigma < 0$. So shift-invert is *LOBPCG on
-the outside, CG on the inside* — both matrix-free, both cuSolver-free, the whole
-edifice built from the matvecs of [@sec-kernels].
+**Fix 2 - shift-invert, to widen the near-zero gaps.** The decisive move is to solve eigenpairs of
+$(L - \sigma I)^{-1}$ instead of $L$. This operator shares $L$'s eigenvectors but has eigenvalues
+$1/(\lambda_k - \sigma)$, which explode for $\lambda_k$ near the shift $\sigma$. Put $\sigma$ just
+below the smallest eigenvalue (the code's `SolverSpec.shift_invert(sigma=...)` defaults $\sigma =
+-0.5$; the geometry path uses $\sigma = -0.01$, just below $\lambda_0 = 0$) and the clustered
+near-zero modes are mapped to enormous, well-separated values. The relative gaps the solver actually
+sees grow by roughly two orders of magnitude (@fig-solvers-spectral, right panel, and its caption
+number). You never form the inverse: each application of $(L - \sigma I)^{-1}$ is an inner CG solve
+against the shifted operator, which is SPD for $\sigma < 0$. So shift-invert is LOBPCG on the
+outside, CG on the inside - both matrix-free, both cuSolver-free, the whole edifice built from the
+matvecs of [@sec-kernels].
 
 In code (`linalg/_eigsolve.py`, `_run_shift_invert_method`):
 
@@ -505,78 +463,68 @@ eigvals = 1.0 - sigma - 1.0 / mu                # un-shift back to the M-eigenva
 
 ### The dispatcher: one forward per method, one backward per format
 
-`eigsolve_top_k(operand, k, *, spec=SolverSpec.auto(), seed=0)` (`DIFF-JAX`,
-returning an `EigPair(values, vectors)` largest-first) is the user-facing entry
-point, and its architecture is the elegant part. The key factoring: **the solver
-forward is orthogonal to the gradient backward.** The forward depends on the
-*method* (which iteration) and is written against an abstract matvec
-`apply: X -> M @ X`, so it is format-independent. The backward depends only on the
-*converged eigenpair* (via the implicit-VJP), so it is method-independent and
-specialised only by operand *format*.
+`eigsolve_top_k(operand, k, *, spec=SolverSpec.auto(), seed=0)` (`DIFF-JAX`, returning an
+`EigPair(values, vectors)` largest-first) is the user-facing entry point. The key factoring is that
+*the solver forward is orthogonal to the gradient backward*. The forward depends on the *method*
+(which iteration) and is written against an abstract matvec `apply: X -> M @ X`, so it is
+format-independent. The backward depends only on the *converged eigenpair* (via the implicit-VJP), so
+it is method-independent and specialised only by operand *format*.
 
-- **`SolverSpec`** is a frozen, hashable dataclass carrying all static config
-  (`method`, `n_iters`, `tol`, `sigma`, `outer_iters`, `cg_iters`, `degree`,
-  `shift`, `eps_clamp`, `promise_symmetry`). Hashability is load-bearing: the whole
-  spec rides the `custom_vjp` `nondiff_argnums` as one argument, so the forward
-  branches on `spec.method` at *trace* time. Build it with the classmethods —
+- **`SolverSpec`** is a frozen, hashable dataclass carrying all static config (`method`, `n_iters`,
+  `tol`, `sigma`, `outer_iters`, `cg_iters`, `degree`, `shift`, `eps_clamp`, `promise_symmetry`).
+  Hashability is load-bearing: the whole spec rides the `custom_vjp` `nondiff_argnums` as one
+  argument, so the forward branches on `spec.method` at *trace* time. Build it with the classmethods -
   `SolverSpec.auto()`, `.eigh()`, `.lobpcg(...)`, `.shift_invert(...)`, `.poly(...)`.
-- **The methods.** `eigh` (dense-only) is a full `safe_eigh` sliced to the top-$k$
-  — folded in only in its *extremal* role, it does not subsume `safe_eigh`'s
-  full-spectrum uses. `lobpcg` is plain LOBPCG. `shift_invert` is the fix above.
-  `poly` applies a shifted-power spectral filter $(M + \text{shift}\,I)^{\text{degree}}$
-  to amplify the wanted end, recovering eigenvalues by the Rayleigh quotient
-  (@eq-rayleigh). `auto` resolves to `eigh` for dense input and `lobpcg` for sparse
-  — a static, format-based choice with no tracer inspection. The matvec-only
-  methods (`lobpcg`, `shift_invert`, `poly`) serve all three operand formats
-  (dense, `ELL`, `SectionedELL`); `eigh` is dense-only.
-- **The shared backward.** All formats compute the same $k\times k$ core
-  $K = \operatorname{diag}(\mathbf{g}_\lambda) + S \odot F$ (`_subspace_vjp_kernel`),
-  where $F[i,j] = 1/(\lambda_j - \lambda_i)$ — *clamped to zero where eigenvalues
-  are within `eps_clamp`*, the standard guard against the singularity of degenerate
-  eigenvalues — and $S$ is the antisymmetric part of the projected eigenvector
-  cotangent. Then a per-format projection: `_project_dense` returns
-  $dM = VKV^\top$; `_project_ell` restricts $VKV^\top$ to the stored sparsity
-  pattern by an `einsum`; `_project_sectioned` does the same per section. The whole
-  scheme is differentiable w.r.t. the operand — dense $M$, ELL/SectionedELL
-  `values` — for *every* method.
+- **The methods.** `eigh` (dense-only) is a full `safe_eigh` sliced to the top-$k$ - folded in only
+  in its *extremal* role, it does not subsume `safe_eigh`'s full-spectrum uses. `lobpcg` is plain
+  LOBPCG. `shift_invert` is the fix above. `poly` applies a shifted-power spectral filter $(M +
+  \text{shift}\,I)^{\text{degree}}$ to amplify the wanted end, recovering eigenvalues by the Rayleigh
+  quotient (@eq-rayleigh). `auto` resolves to `eigh` for dense input and `lobpcg` for sparse - a
+  static, format-based choice with no tracer inspection. The matvec-only methods (`lobpcg`,
+  `shift_invert`, `poly`) serve all three operand formats (dense, `ELL`, `SectionedELL`); `eigh` is
+  dense-only.
+- **The shared backward.** All formats compute the same $k\times k$ core $K =
+  \operatorname{diag}(\mathbf{g}_\lambda) + S \odot F$ (`_subspace_vjp_kernel`), where $F[i,j] =
+  1/(\lambda_j - \lambda_i)$ - *clamped to zero where eigenvalues are within `eps_clamp`*, the
+  standard guard against the singularity of degenerate eigenvalues - and $S$ is the antisymmetric part
+  of the projected eigenvector cotangent. Then a per-format projection: `_project_dense` returns $dM =
+  VKV^\top$; `_project_ell` restricts $VKV^\top$ to the stored sparsity pattern by an `einsum`;
+  `_project_sectioned` does the same per section. The whole scheme is differentiable w.r.t. the
+  operand - dense $M$, ELL/SectionedELL `values` - for *every* method.
 
 ### The symmetry promise and the `safe_*` caveat
 
-Two caveats round out the picture. First, **`promise_symmetry`**. The iterative
-methods (and shift-invert's inner CG) *require* a symmetric operator, but a stored
-adjacency need not be symmetric — a top-$k$-per-row affinity sparsification
-(`ell_from_dense`) generally is not. Set `spec.promise_symmetry=False` and the ELL /
-SectionedELL forward applies the *symmetric part* $\tfrac12(AX + A^\top X)$ —
-using `semiring_ell_rmatvec` from [@sec-kernels] for the $A^\top X$ term — so the
-solver sees the symmetric operator it needs. Beautifully, the backward needs *no*
-change: the implicit-VJP cotangent $G = VKV^\top$ is symmetric, and a stored
-`values[i,p]` enters $\operatorname{sym}(A)$ at both $[i,c]$ and $[c,i]$ with
-$\partial = \tfrac12$ each, so $\partial L/\partial\texttt{values}[i,p] = G[i,c]$ —
-exactly what `_project_ell` already returns. For dense input, symmetry is the
-caller's to enforce (symmetrise $M$ first).
+Two caveats round out the picture. First, `promise_symmetry`. The iterative methods (and
+shift-invert's inner CG) *require* a symmetric operator, but a stored adjacency need not be symmetric
+- a top-$k$-per-row affinity sparsification (`ell_from_dense`) generally is not. Set
+`spec.promise_symmetry=False` and the ELL / SectionedELL forward applies the *symmetric part*
+$\tfrac12(AX + A^\top X)$ - using `semiring_ell_rmatvec` from [@sec-kernels] for the $A^\top X$ term -
+so the solver sees the symmetric operator it needs. The backward needs *no* change: the implicit-VJP
+cotangent $G = VKV^\top$ is symmetric, and a stored `values[i,p]` enters $\operatorname{sym}(A)$ at
+both $[i,c]$ and $[c,i]$ with $\partial = \tfrac12$ each, so $\partial L/\partial\texttt{values}[i,p] =
+G[i,c]$ - exactly what `_project_ell` already returns. For dense input, symmetry is the caller's to
+enforce (symmetrise $M$ first).
 
-Second, the **`safe_*` CPU-fallback**. LOBPCG's internal orthonormalisation calls
-cuSolver-backed QR / Cholesky, which share the dead handle pool on the dev L4. The
-dispatcher routes the solve to a working device via `solver_device()` (which follows
-`eigh_device()`'s verdict — see [@sec-not-used]) and moves the result back. The
-adaptive `safe_*` wrappers in `_solver.py` *latch* to CPU after an observed runtime
-failure, so the verdict, once learned, makes subsequent `jit`/`grad` calls safe.
-This is the price of cuSolver-free resilience: the *iterative* arithmetic stays on
-the GPU, but the small orthonormalisation factor may take a host round-trip on a
-broken stack.
+Second, the `safe_*` CPU-fallback. LOBPCG's internal orthonormalisation calls cuSolver-backed QR /
+Cholesky, which share the dead handle pool on the dev L4. The dispatcher routes the solve to a working
+device via `solver_device()` (which follows `eigh_device()`'s verdict - see [@sec-not-used]) and moves
+the result back. The adaptive `safe_*` wrappers in `_solver.py` *latch* to CPU after an observed
+runtime failure, so the verdict, once learned, makes subsequent `jit`/`grad` calls safe. This is the
+price of cuSolver-free resilience: the *iterative* arithmetic stays on the GPU, but the small
+orthonormalisation factor may take a host round-trip on a broken stack.
 
 ### Validating against an analytic oracle
 
-Per the unit's posture, you do not check eigenvectors bit-for-bit — sign and
-in-subspace rotation are free, and the discrete operator only *approximates* the
-smooth one. You check **the eigenvalues against a closed-form oracle and the
-eigenvectors by correlation**. The unit sphere is the canonical oracle: its
-Laplace–Beltrami eigenvalues are $\ell(\ell+1)$ with multiplicity $2\ell+1$ (the
-spherical harmonics), so the computed $\lambda_k$ on a refined icosphere should
-approach $0, 2, 2, 2, 6, 6, \ldots$ and the recovered eigenfunctions should
-*correlate* with the analytic $Y_\ell^m$ up to rotation within each degenerate
-$\ell$-block. As the mesh is refined, the agreement should improve — *convergence
-under refinement* is the test, not equality at any fixed resolution.
+Per the unit's posture, eigenvectors are not checked bit-for-bit - sign and in-subspace rotation are
+free, the residual symmetry of any eigenproblem (a single eigenvector is defined only up to sign, a
+degenerate eigenspace only up to an orthogonal change of basis), and the discrete operator only
+*approximates* the smooth one. We check the eigenvalues against a closed-form oracle and the
+eigenvectors by correlation. The unit sphere is the canonical oracle: its Laplace--Beltrami
+eigenvalues are $\ell(\ell+1)$ with multiplicity $2\ell+1$ (the spherical harmonics), so the computed
+$\lambda_k$ on a refined icosphere should approach $0, 2, 2, 2, 6, 6, \ldots$ and the recovered
+eigenfunctions should *correlate* with the analytic $Y_\ell^m$ up to rotation within each degenerate
+$\ell$-block. As the mesh is refined, the agreement should improve - convergence under refinement is
+the test, not equality at any fixed resolution.
 
 ```{python}
 #| label: fig-solvers-spectral
@@ -623,144 +571,122 @@ plt.show()
 
 ## What the stats unit uses that geometry does not {#sec-not-used}
 
-A reference page is as useful for what it rules *out*. The [stats solvers
-page](../statistics/solvers.qmd) is dominated by dense, factorisation-heavy numerics for
-fitting statistical models; geometry poses different problems and reaches for
-almost none of it. Being explicit:
+A reference chapter is as useful for what it rules *out*. The [stats solvers
+chapter](../statistics/solvers.qmd) is dominated by dense, factorisation-heavy numerics for fitting
+statistical models; geometry poses different problems and reaches for almost none of it. Being
+explicit:
 
-- **No damped Newton / Fisher scoring / IRLS.** There is no GLM or GLMM here, so
-  the [stats Newton machinery](../statistics/solvers.qmd#sec-newton) — line search, Hessian
-  modification, the trust-region damping — has no consumer in the geometry suite.
-  The one iterative-refinement primitive geometry *does* use is `fixed_point_solve`
-  (`numerics/fixed_point.py`, `DIFF-JAX`), but for a different purpose: inverting a
-  diffeomorphism, $s_{\text{inv}} = -s \circ (\mathrm{id} + s_{\text{inv}})$, in
-  `geometry/deformation.py`. It is a Picard / Anderson contraction with an
-  implicit-function-theorem backward — a fixed-point iteration, not a Newton solve
-  on a likelihood.
+- **No damped Newton / Fisher scoring / IRLS.** There is no GLM or GLMM here, so the [stats Newton
+  machinery](../statistics/solvers.qmd#sec-newton) - line search, Hessian modification, the
+  trust-region damping - has no consumer in the geometry suite. The one iterative-refinement primitive
+  geometry *does* use is `fixed_point_solve` (`numerics/fixed_point.py`, `DIFF-JAX`), but for a
+  different purpose: inverting a diffeomorphism, $s_{\text{inv}} = -s \circ (\mathrm{id} +
+  s_{\text{inv}})$, in `geometry/deformation.py`. It is a Picard / Anderson contraction with an
+  implicit-function-theorem backward - a fixed-point iteration, not a Newton solve on a likelihood.
 - **No Woodbury, no FaST-LMM spectral trick.** The [stats spectral
-  trick](../statistics/solvers.qmd#sec-spectral) and [Woodbury inversion](../statistics/solvers.qmd#sec-woodbury)
-  exist to invert a structured variance-component covariance $V = \sigma^2 I + ZGZ^\top$
-  cheaply. There is no random-effects covariance in geometry, so neither appears.
-  Geometry's "spectral" work is the *operator's own* eigendecomposition
+  trick](../statistics/solvers.qmd#sec-spectral) and [Woodbury
+  inversion](../statistics/solvers.qmd#sec-woodbury) exist to invert a structured variance-component
+  covariance $V = \sigma^2 I + ZGZ^\top$ cheaply. There is no random-effects covariance in geometry, so
+  neither appears. Geometry's "spectral" work is the *operator's own* eigendecomposition
   ([@sec-eigensolve]), a completely different use of the word.
-- **The dense small-SPD solver appears only in tiny per-element places.**
-  `linalg/_smalllinalg.py` provides `small_inv_logdet`, `spd_inv_logdet_chol`,
-  `spd_chol`, and `sym_eig_jacobi` — closed-form algebra for $1\times1$ and
-  $2\times2$, a rolled hand-Cholesky (via `triangular_solve`/cuBLAS `trsm`, no
-  cuSolver) for larger, and a fixed-sweep cyclic Jacobi eigensolver. These are the
-  per-element kernels behind a `vmap` over up to ~1M independent small solves *in
-  the stats path*. In geometry they are largely absent: the principal-curvature
-  problem ([curvature page](curvature.qmd#sec-mean)) needs the eigenvalues of a
-  $2\times2$ shape operator, and those are **hand-coded** from the closed
-  $2\times2$ form, *not* routed through `sym_eig_jacobi` or `eigh`. `sym_eig_jacobi`
-  is in any case **forward-only** (its reverse-mode sweep overflows as the
-  iteration converges) — fine for its sole stats consumer (a Satterthwaite
-  denominator-df) but a trap if differentiated.
-- **`safe_*` is shared, but for resilience, not as a workhorse.**
-  `linalg/_solver.py`'s `safe_eigh`, `safe_inv`, `safe_cholesky`, `safe_cho_solve`,
-  `safe_solve` (and the device pickers `eigh_device`, `inv_device`,
-  `cholesky_device`, `solver_device`, `source_device`, `device_of_concrete`) are
-  the cuSolver-robust wrappers. Stats leans on them heavily for its dense fits;
-  geometry touches `safe_eigh` only through `eigsolve_top_k`'s `eigh` branch and
-  `geometry/affine.py`. The shared dependency is the *device-discipline*, not the
-  dense algebra.
+- **The dense small-SPD solver appears only in tiny per-element places.** `linalg/_smalllinalg.py`
+  provides `small_inv_logdet`, `spd_inv_logdet_chol`, `spd_chol`, and `sym_eig_jacobi` - closed-form
+  algebra for $1\times1$ and $2\times2$, a rolled hand-Cholesky (via `triangular_solve`/cuBLAS `trsm`,
+  no cuSolver) for larger, and a fixed-sweep cyclic Jacobi eigensolver. These are the per-element
+  kernels behind a `vmap` over up to ~1M independent small solves *in the stats path*. In geometry they
+  are largely absent: the principal-curvature problem ([curvature chapter](curvature.qmd#sec-mean))
+  needs the eigenvalues of a $2\times2$ shape operator, and those are *hand-coded* from the closed
+  $2\times2$ form, not routed through `sym_eig_jacobi` or `eigh`. `sym_eig_jacobi` is in any case
+  forward-only (its reverse-mode sweep overflows as the iteration converges) - fine for its sole stats
+  consumer (a Satterthwaite denominator-df) but a trap if differentiated.
+- **`safe_*` is shared, but for resilience, not as a workhorse.** `linalg/_solver.py`'s `safe_eigh`,
+  `safe_inv`, `safe_cholesky`, `safe_cho_solve`, `safe_solve` (and the device pickers `eigh_device`,
+  `inv_device`, `cholesky_device`, `solver_device`, `source_device`, `device_of_concrete`) are the
+  cuSolver-robust wrappers. Stats leans on them heavily for its dense fits; geometry touches
+  `safe_eigh` only through `eigsolve_top_k`'s `eigh` branch and `geometry/affine.py`. The shared
+  dependency is the *device-discipline*, not the dense algebra.
 
-The takeaway: stats and geometry share a **posture** — cuSolver-free, GPU-native,
-differentiable, validated by class/correlation — and one literal solver (`cg`), but
-their numerics are otherwise disjoint, because their mathematics is.
+The takeaway: stats and geometry share a *posture* - cuSolver-free, GPU-native, differentiable,
+validated by class/correlation - and one literal solver (`cg`), but their numerics are otherwise
+disjoint, because their mathematics is.
 
 ## Host-side construction: the algorithms that are not solvers {#sec-host}
 
-Not every load-bearing routine is a numerical solver. Several are **host-side
-construction** (`HOST-CTOR`) or **host queries** (`HOST-QA`): they run serial,
-data-dependent, or table-driven logic in NumPy / Python on the CPU, produce a
-fixed-shape array or a `Mesh`, and *then* hand off to the traced, jittable world.
-The governing rule for all of them: **never call a host op inside a jitted loop.**
-A host op has a data-dependent output shape or a Python control-flow body; calling
-it under `jit` would either re-trace endlessly or fail to compile. The idiom is to
-run the host constructor *once*, on the host, and trace the array-bearing result.
+Not every load-bearing routine is a numerical solver. Several are host-side construction
+(`HOST-CTOR`) or host queries (`HOST-QA`): they run serial, data-dependent, or table-driven logic in
+NumPy / Python on the CPU, produce a fixed-shape array or a `Mesh`, and *then* hand off to the traced,
+jittable world. The governing rule for all of them: never call a host op inside a jitted loop. A host
+op has a data-dependent output shape or a Python control-flow body; calling it under `jit` would
+either re-trace endlessly or fail to compile. The idiom is to run the host constructor *once*, on the
+host, and trace the array-bearing result.
 
-- **Marching tetrahedra** (`geometry/isosurface.py`, `marching_cubes`,
-  `HOST-CTOR`). The level-set extractor splits each grid cube into six tetrahedra
-  (Freudenthal–Kuhn) and extracts the isosurface per tetrahedron via a precomputed
-  **case table** `_TET_TABLE` (built once by `_build_tet_table`, indexed by the
-  sign pattern of the four corners). The tetrahedral decomposition is *crack-free
-  by construction* — unlike the classic Lorensen–Cline cube algorithm, it has no
-  ambiguous face cases — which is the implementation-risk trade the design
-  deliberately takes. The output triangle count is **data-dependent**, so the
-  whole thing is host-side; see the [volume↔surface page](volume-surface.qmd#sec-marching).
-  Its inverse, `mesh_to_sdf` (`HOST-CTOR`), is the training-target generator that
-  voxelises a mesh into a signed-distance field.
-- **The broad-phase spatial index** (`geometry/_triangle_distance.py`,
-  `nearest_surface_distance`, `HOST-QA`; `geometry/intersection.py`,
-  `find_self_intersections`, `HOST-QA`). Computing the nearest surface point for a
-  grid of queries naively is $O(\text{queries}\times\text{faces})$; the cure is a
-  **uniform grid** broad phase that bins faces into cells ~ the median edge length
-  and searches outward in **expanding Chebyshev ($L^\infty$) shells**. The exact
-  finalisation rule (`_grid_nearest_dist2`): a query is final once the nearest hit
-  so far is closer than the inner boundary of the next unsearched shell — *any*
-  triangle binned only at Chebyshev radius $> R$ has every point at least $R$ cells
-  away, so it cannot beat a hit already within radius $R$. This makes the grid path
-  return the **identical exact** distance as brute force, just faster; near queries
-  finalise in a few cells, far queries (SDF-grid corners) fall back to a bounded
-  brute scan. The sphere module has an analogous **spherical-bucket** index
-  (`geometry/sphere.py`, `_spherical_best_face` / `_coarse_level_for`): it bins
-  source faces by their centroid's nearest coarse-icosphere vertex and searches
-  that vertex's $k$-ring, the curved-surface counterpart of the uniform grid.
-- **The priority-flood watershed** (`graph/parcellation.py`, `mesh_watershed`,
-  `HOST-CTOR`). Vertex-wise parcellation by a Barnes-2014 priority flood: a serial
-  heap (`heapq`) pops vertices in order of a boundary field, each joining the basin
-  whose flood reaches it first (the monotone `max(level, field[j])` priority). It is
-  irreducibly serial — a heap pop order, not a vectorisable reduction — so it lives
-  on the host and returns a JAX int label array. (The page mentions it as the
-  representative of the deferred parcellation tier; the [graph-geometry
-  page](graph-geometry.qmd#sec-pooling) covers parcellation operators proper.)
-- **The icosphere hierarchy builder** (`sparse/mesh.py`, `icosphere`,
-  `icosphere_hierarchy`, `icosphere_hierarchy_from_levels`,
-  `icosphere_cross_level_adjacency`, `HOST-CTOR`). `icosphere(n_iterations)`
-  recursively subdivides the icosahedron, using a Python `midpoint_cache` dict so
-  each shared edge midpoint is created exactly once (the cache is the whole reason
-  subdivision is $O(n)$ and not $O(n^2)$). The hierarchy variant keeps the
-  per-level parent tables so cross-level upsampling ELLs can be built in
-  $O(n_{\text{vertices}})$ without re-running subdivision. The design note is
-  explicit that the hierarchy is a *construction artefact*: a consumer uses it once
-  on the host to build the per-level meshes and cross-level ELLs, then traces those
-  array-bearing outputs — *the hierarchy object itself never crosses into a
-  `jit`*. This is the never-in-a-jitted-loop rule stated as an API contract.
+- **Marching tetrahedra** (`geometry/isosurface.py`, `marching_cubes`, `HOST-CTOR`). The level-set
+  extractor splits each grid cube into six tetrahedra (Freudenthal--Kuhn) and extracts the isosurface
+  per tetrahedron via a precomputed case table `_TET_TABLE` (built once by `_build_tet_table`, indexed
+  by the sign pattern of the four corners). The tetrahedral decomposition is *crack-free by
+  construction* - unlike the classic Lorensen--Cline cube algorithm, it has no ambiguous face cases -
+  which is the implementation-risk trade the design deliberately takes. The output triangle count is
+  data-dependent, so the whole thing is host-side; see the
+  [volume-surface chapter](volume-surface.qmd#sec-marching). Its inverse, `mesh_to_sdf` (`HOST-CTOR`),
+  is the training-target generator that voxelises a mesh into a signed-distance field.
+- **The broad-phase spatial index** (`geometry/_triangle_distance.py`, `nearest_surface_distance`,
+  `HOST-QA`; `geometry/intersection.py`, `find_self_intersections`, `HOST-QA`). Computing the nearest
+  surface point for a grid of queries naively is $O(\text{queries}\times\text{faces})$; the cure is a
+  uniform grid broad phase that bins faces into cells about the median edge length and searches outward
+  in expanding Chebyshev ($L^\infty$) shells. The exact finalisation rule (`_grid_nearest_dist2`): a
+  query is final once the nearest hit so far is closer than the inner boundary of the next unsearched
+  shell - any triangle binned only at Chebyshev radius $> R$ has every point at least $R$ cells away,
+  so it cannot beat a hit already within radius $R$. This makes the grid path return the *identical
+  exact* distance as brute force, just faster; near queries finalise in a few cells, far queries
+  (SDF-grid corners) fall back to a bounded brute scan. The sphere module has an analogous
+  spherical-bucket index (`geometry/sphere.py`, `_spherical_best_face` / `_coarse_level_for`): it bins
+  source faces by their centroid's nearest coarse-icosphere vertex and searches that vertex's $k$-ring,
+  the curved-surface counterpart of the uniform grid.
+- **The priority-flood watershed** (`graph/parcellation.py`, `mesh_watershed`, `HOST-CTOR`).
+  Vertex-wise parcellation by a Barnes-2014 priority flood: a serial heap (`heapq`) pops vertices in
+  order of a boundary field, each joining the basin whose flood reaches it first (the monotone
+  `max(level, field[j])` priority). It is irreducibly serial - a heap pop order, not a vectorisable
+  reduction - so it lives on the host and returns a JAX int label array. (It is mentioned here as the
+  representative of the deferred parcellation tier; the
+  [graph-geometry chapter](graph-geometry.qmd#sec-pooling) covers parcellation operators proper.)
+- **The icosphere hierarchy builder** (`sparse/mesh.py`, `icosphere`, `icosphere_hierarchy`,
+  `icosphere_hierarchy_from_levels`, `icosphere_cross_level_adjacency`, `HOST-CTOR`).
+  `icosphere(n_iterations)` recursively subdivides the icosahedron, using a Python `midpoint_cache`
+  dict so each shared edge midpoint is created exactly once (the cache is the whole reason subdivision
+  is $O(n)$ and not $O(n^2)$). The hierarchy variant keeps the per-level parent tables so cross-level
+  upsampling ELLs can be built in $O(n_{\text{vertices}})$ without re-running subdivision. The design
+  note is explicit that the hierarchy is a *construction artefact*: a consumer uses it once on the host
+  to build the per-level meshes and cross-level ELLs, then traces those array-bearing outputs - the
+  hierarchy object itself never crosses into a `jit`. This is the never-in-a-jitted-loop rule stated as
+  an API contract.
 
-In every case the pattern is the same and worth internalising: **host constructor →
-fixed-shape arrays → traced kernel**. The arrays these routines emit are precisely
-the `values`/`indices` that feed the semiring kernels of [@sec-kernels], the ELL
-Laplacian that feeds the CG of [@sec-cg], and the operands that feed the eigensolver
-of [@sec-eigensolve]. The host tier *builds the operator*; the device tier *runs and
-differentiates it*.
+In every case the pattern is the same and worth internalising: host constructor $\to$ fixed-shape
+arrays $\to$ traced kernel. The arrays these routines emit are precisely the `values`/`indices` that
+feed the semiring kernels of [@sec-kernels], the ELL Laplacian that feeds the CG of [@sec-cg], and the
+operands that feed the eigensolver of [@sec-eigensolve]. The host tier *builds the operator*; the
+device tier *runs and differentiates it*.
 
 ## Further reading
 
-- Golub, G. H., & Van Loan, C. F. (2013). *Matrix Computations* (4th ed.). Johns
-  Hopkins University Press. (The standard reference for CG, Krylov methods, and
-  symmetric eigenproblems.)
-- Saad, Y. (2003). *Iterative Methods for Sparse Linear Systems* (2nd ed.). SIAM.
-  (Conjugate gradients, preconditioning, and matrix-free solvers in depth.)
-- Hestenes, M. R., & Stiefel, E. (1952). Methods of conjugate gradients for solving
-  linear systems. *Journal of Research of the National Bureau of Standards*,
-  49(6), 409–436. (The original CG paper.)
-- Knyazev, A. V. (2001). Toward the optimal preconditioned eigensolver: Locally
-  optimal block preconditioned conjugate gradient method. *SIAM Journal on
-  Scientific Computing*, 23(2), 517–541. (LOBPCG.)
-- Saad, Y. (2011). *Numerical Methods for Large Eigenvalue Problems* (2nd ed.).
-  SIAM. (Shift-invert, spectral transformations, and subspace iteration.)
-- Doan, T. T., & others; see also Lehoucq, R. B., Sorensen, D. C., & Yang, C.
-  (1998). *ARPACK Users' Guide*. SIAM. (Shift-invert Arnoldi/Lanczos — the
-  classical implementation of the spectral-transformation idea used here.)
-- Barnes, R., Lehman, C., & Mulla, D. (2014). Priority-flood: An optimal
-  depression-filling and watershed-labeling algorithm for digital elevation models.
-  *Computers & Geosciences*, 62, 117–127. (The watershed flood used by
-  `mesh_watershed`.)
-- Doran, B., & Carmichael, O. (general semiring background): see Mohri, M. (2002).
-  Semiring frameworks and algorithms for shortest-distance problems. *Journal of
-  Automata, Languages and Combinatorics*, 7(3), 321–350. (Why $(\min,+)$, $(\max,+)$
-  and $(+,\times)$ are all instances of one contraction.)
+- Golub, G. H., & Van Loan, C. F. (2013). *Matrix Computations* (4th ed.). Johns Hopkins University
+  Press. The standard reference for CG, Krylov methods, and symmetric eigenproblems.
+- Saad, Y. (2003). *Iterative Methods for Sparse Linear Systems* (2nd ed.). SIAM. Conjugate gradients,
+  preconditioning, and matrix-free solvers in depth.
+- Hestenes, M. R., & Stiefel, E. (1952). Methods of conjugate gradients for solving linear systems.
+  *Journal of Research of the National Bureau of Standards*, 49(6), 409–436. The original CG paper.
+- Knyazev, A. V. (2001). Toward the optimal preconditioned eigensolver: Locally optimal block
+  preconditioned conjugate gradient method. *SIAM Journal on Scientific Computing*, 23(2), 517–541.
+  LOBPCG.
+- Saad, Y. (2011). *Numerical Methods for Large Eigenvalue Problems* (2nd ed.). SIAM. Shift-invert,
+  spectral transformations, and subspace iteration.
+- Lehoucq, R. B., Sorensen, D. C., & Yang, C. (1998). *ARPACK Users' Guide*. SIAM. Shift-invert
+  Arnoldi/Lanczos - the classical implementation of the spectral-transformation idea used here.
+- Barnes, R., Lehman, C., & Mulla, D. (2014). Priority-flood: An optimal depression-filling and
+  watershed-labeling algorithm for digital elevation models. *Computers & Geosciences*, 62, 117–127.
+  The watershed flood used by `mesh_watershed`.
+- Mohri, M. (2002). Semiring frameworks and algorithms for shortest-distance problems. *Journal of
+  Automata, Languages and Combinatorics*, 7(3), 321–350. Why $(\min,+)$, $(\max,+)$ and $(+,\times)$
+  are all instances of one contraction.
 
 ## See also
 

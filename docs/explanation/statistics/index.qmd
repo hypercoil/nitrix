@@ -2,21 +2,32 @@
 title: "The statistical modelling suite"
 ---
 
-::: {.callout-tldr title="Fast path"}
 New here? Read **[Foundations](foundations.qmd)** first (rung 0): it builds the
 three ideas — variance, exponential families, and the penalty = prior = variance
 component = kernel equivalence — that the whole suite rests on.
 
-`nitrix.stats` is one family of models, not a pile of unrelated fitters. Almost
-every model here is solved by the *same two moves*:
+`nitrix.stats` is **one family of models, not a pile of unrelated fitters** — one
+engine seen from several angles. Almost every model here is solved by the *same two
+moves*:
 
 1. **Solve a weighted normal-equations system** $(X^{\top} W X + S)\,\beta = X^{\top} W z$ — a small $p\times p$ linear solve you already understand from least squares.
 2. **Choose the extra parameters** (a noise variance, a smoothing strength, a random-effect variance) by maximising a likelihood with a cheap iteration.
 
-The chapters below climb a ladder — GLM → LME → GAM → GLMM → GAMM → HSGP — and
-at each rung only *one new idea* is added to those two moves. Read GLM first;
+The chapters below climb a ladder — GLM → LME → GAM → GLMM → GAMM → HSGP — and at
+each rung only *one new idea* is added to those two moves. Read GLM first;
 everything else is "GLM plus one thing".
-:::
+
+The single penalty matrix $S$ in move (1) is the thread that ties the suite
+together. A roughness penalty, a Gaussian prior, a random-effect variance, and a
+Gaussian-process kernel turn out to be **four names for that one object** — so a
+GAM, an LME, a GLMM, a GAMM and an HSGP are one engine wearing different hats, not
+five programs. Each $S$ is also an **inductive bias** — an assumption (the truth is
+smooth, groups cluster, nearby inputs behave alike) declared as a prior, the
+statistical cousin of the symmetry assumptions the
+[geometry unit](../geometry/index.qmd) builds into its operators. And move (2) is
+the **empirical-Bayes** step that calibrates each bias's strength from the data
+rather than asking you to set it. Hold those three sentences in mind and the whole
+ladder reads as one argument.
 
 This suite is written for a reader who is **comfortable with linear algebra**
 (matrices, least squares, eigendecomposition) but has **no formal training in
@@ -75,8 +86,9 @@ one design. Two consequences recur throughout:
 
 ## Reading paths
 
-- **Fast path** — read each chapter's TL;DR, plus the GLM chapter in full. That
-  is enough to use the suite and to know which model fits which question.
+- **Fast path** — read [foundations](foundations.qmd) and skim each chapter's
+  opening, plus the GLM chapter in full. That is enough to use the suite and to know
+  which model fits which question.
 - **Thorough path** — read in ladder order. Each chapter assumes the one below
   it and points back to the shared-machinery page when an algorithm recurs.
 
