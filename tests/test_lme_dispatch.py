@@ -77,9 +77,7 @@ def test_varcomp_per_voxel_hlo_is_cusolver_free():
         N, V, K = 40, 256, 2
         Y = jnp.asarray(rng.standard_normal((V, N)))
         X = jnp.asarray(rng.standard_normal((N, p)))
-        B = jnp.asarray(
-            np.stack([np.abs(rng.standard_normal(N)), np.ones(N)])
-        )
+        B = jnp.asarray(np.stack([np.abs(rng.standard_normal(N)), np.ones(N)]))
         init = jnp.zeros((V, K))
         f = jax.jit(
             lambda Y, X, B, init: fit_varcomp_diagonal(
@@ -248,7 +246,9 @@ def test_reml_collinear_design_stays_finite():
     Z = np.zeros((N, g))
     for i in range(g):
         Z[group == i, i] = 1.0
-    result = reml_fit(jnp.asarray(rng.standard_normal((V, N))), X, jnp.asarray(Z), n_iter=20)
+    result = reml_fit(
+        jnp.asarray(rng.standard_normal((V, N))), X, jnp.asarray(Z), n_iter=20
+    )
     assert bool(jnp.all(jnp.isfinite(result.theta_hat)))
     assert bool(jnp.all(jnp.isfinite(result.beta_hat)))
 
@@ -299,9 +299,7 @@ def test_sym_eig_jacobi_matches_numpy():
         )
         # orthonormal eigenvectors and an exact reconstruction
         np.testing.assert_allclose(vecs.T @ vecs, np.eye(n), atol=1e-10)
-        np.testing.assert_allclose(
-            vecs @ np.diag(d) @ vecs.T, a, atol=1e-9
-        )
+        np.testing.assert_allclose(vecs @ np.diag(d) @ vecs.T, a, atol=1e-9)
 
 
 def test_sym_eig_jacobi_handles_diagonal_and_degenerate():
@@ -309,7 +307,9 @@ def test_sym_eig_jacobi_handles_diagonal_and_degenerate():
     eigenvalue both decompose cleanly."""
     # exact diagonal: no rotation should fire, eigenvalues are the diagonal
     d, vecs = sym_eig_jacobi(jnp.asarray(np.diag([5.0, 2.0, 9.0])), 3)
-    np.testing.assert_allclose(np.sort(np.asarray(d)), [2.0, 5.0, 9.0], atol=1e-12)
+    np.testing.assert_allclose(
+        np.sort(np.asarray(d)), [2.0, 5.0, 9.0], atol=1e-12
+    )
     # degenerate (repeated eigenvalue): still orthonormal + reconstructs
     a = np.diag([3.0, 3.0, 7.0]) + 0.0
     d, vecs = sym_eig_jacobi(jnp.asarray(a), 3)
@@ -331,7 +331,9 @@ def test_sym_eig_jacobi_vmaps_and_is_cusolver_free():
     )
     f = jax.jit(jax.vmap(lambda m: sym_eig_jacobi(m, 3)))
     d, vecs = f(jnp.asarray(batch))
-    rec = np.einsum('vij,vj,vkj->vik', np.asarray(vecs), np.asarray(d), np.asarray(vecs))
+    rec = np.einsum(
+        'vij,vj,vkj->vik', np.asarray(vecs), np.asarray(d), np.asarray(vecs)
+    )
     np.testing.assert_allclose(rec, batch, atol=1e-9)
     hlo = f.lower(jnp.asarray(batch)).compile().as_text()
     assert not _cusolver_calls(hlo), (
@@ -346,7 +348,9 @@ def test_reml_general_p_runs_and_is_finite():
     N = g * n_per
     group = np.repeat(np.arange(g), n_per)
     X = jnp.asarray(
-        np.column_stack([np.ones(N)] + [rng.standard_normal(N) for _ in range(4)])
+        np.column_stack(
+            [np.ones(N)] + [rng.standard_normal(N) for _ in range(4)]
+        )
     )
     Z = np.zeros((N, g))
     for i in range(g):
@@ -452,3 +456,126 @@ def test_uniform_re_covariance_accessor_across_tiers():
     # post-processing (`result.coef @ contrast`) works across the whole suite.
     for res in (reml, lme, nested, crossed, corr):
         assert res.coef is res.beta_hat
+
+
+# ---------------------------------------------------------------------------
+# 5. The cuSOLVER-free general small inverse / determinant (small_inv,
+#    small_det) and the safe_* small-matrix fast path that dispatches to them.
+# ---------------------------------------------------------------------------
+
+
+def test_small_det_matches_numpy_batched():
+    """Cofactor-expansion determinant reproduces ``numpy.linalg.det`` for the
+    supported small ranks, batched over leading dimensions."""
+    from nitrix.linalg._smalllinalg import small_det
+
+    rng = np.random.default_rng(0)
+    for n in (1, 2, 3, 4):
+        a = rng.standard_normal((7, n, n))
+        got = np.asarray(small_det(jnp.asarray(a), n))
+        np.testing.assert_allclose(got, np.linalg.det(a), atol=1e-10)
+
+
+def test_small_inv_matches_numpy_batched():
+    """Adjugate inverse reproduces ``numpy.linalg.inv`` (general, non-symmetric)
+    for the supported small ranks, batched -- and ``A @ A^{-1} = I``."""
+    from nitrix.linalg._smalllinalg import small_inv
+
+    rng = np.random.default_rng(1)
+    for n in (1, 2, 3, 4):
+        a = rng.standard_normal((5, n, n)) + n * np.eye(n)  # well-conditioned
+        inv = np.asarray(small_inv(jnp.asarray(a), n))
+        np.testing.assert_allclose(inv, np.linalg.inv(a), atol=1e-9)
+        eye = np.broadcast_to(np.eye(n), (5, n, n))
+        np.testing.assert_allclose(a @ inv, eye, atol=1e-9)
+
+
+def test_small_inv_rejects_oversize_n():
+    """The factorial cofactor graph is gated: ``n > 4`` is a hard error rather
+    than a silent blow-up."""
+    import pytest
+
+    from nitrix.linalg._smalllinalg import small_inv
+
+    with pytest.raises(ValueError, match='small_inv supports'):
+        small_inv(jnp.eye(5), 5)
+
+
+def test_small_inv_differentiable():
+    """The adjugate inverse is grad-clean (pure multiply / add / divide)."""
+    from nitrix.linalg._smalllinalg import small_inv
+
+    rng = np.random.default_rng(2)
+    a = jnp.asarray(rng.standard_normal((3, 3)) + 3 * np.eye(3))
+    g = jax.grad(lambda m: jnp.sum(small_inv(m, 3)))(a)
+    assert bool(jnp.all(jnp.isfinite(g)))
+
+
+def test_safe_fastpath_matches_reference():
+    """The ``safe_*`` small-n fast path agrees with the dense LAPACK reference
+    (inverse / Cholesky / SPD-solve / general-solve), batched."""
+    from nitrix.linalg._solver import (
+        safe_cho_solve,
+        safe_cholesky,
+        safe_inv,
+        safe_solve,
+    )
+
+    rng = np.random.default_rng(3)
+    for n in (2, 3, 4):
+        gen = rng.standard_normal((6, n, n)) + n * np.eye(n)
+        spd = gen @ np.swapaxes(gen, -1, -2) + n * np.eye(n)
+        b = rng.standard_normal((6, n))
+
+        np.testing.assert_allclose(
+            np.asarray(safe_inv(jnp.asarray(gen))),
+            np.linalg.inv(gen),
+            atol=1e-9,
+        )
+        # safe_cholesky uses the modified-Cholesky factor; compare L L^T = A.
+        chol = np.asarray(safe_cholesky(jnp.asarray(spd)))
+        np.testing.assert_allclose(
+            chol @ np.swapaxes(chol, -1, -2), spd, atol=1e-9
+        )
+        np.testing.assert_allclose(
+            np.asarray(safe_cho_solve(jnp.asarray(spd), jnp.asarray(b))),
+            np.linalg.solve(spd, b[..., None])[..., 0],
+            atol=1e-9,
+        )
+        np.testing.assert_allclose(
+            np.asarray(safe_solve(jnp.asarray(gen), jnp.asarray(b))),
+            np.linalg.solve(gen, b[..., None])[..., 0],
+            atol=1e-9,
+        )
+
+
+def test_safe_fastpath_hlo_is_cusolver_free():
+    """The compiled HLO of every ``safe_*`` small-matrix call carries no
+    cuSOLVER custom-call -- the whole point of the fast path."""
+    from nitrix.linalg._solver import (
+        safe_cho_solve,
+        safe_cholesky,
+        safe_inv,
+        safe_solve,
+    )
+
+    rng = np.random.default_rng(4)
+    n = 4
+    gen = jnp.asarray(rng.standard_normal((n, n)) + n * np.eye(n))
+    spd = gen @ gen.T + n * jnp.eye(n)
+    b = jnp.asarray(rng.standard_normal(n))
+
+    cases = {
+        'safe_inv': jax.jit(safe_inv).lower(gen).compile().as_text(),
+        'safe_cholesky': jax.jit(safe_cholesky).lower(spd).compile().as_text(),
+        'safe_cho_solve': jax.jit(safe_cho_solve)
+        .lower(spd, b)
+        .compile()
+        .as_text(),
+        'safe_solve': jax.jit(safe_solve).lower(gen, b).compile().as_text(),
+    }
+    for name, hlo in cases.items():
+        assert not _cusolver_calls(hlo), (
+            f'{name} small-n path must be cuSOLVER-free; '
+            f'found {_cusolver_calls(hlo)}'
+        )

@@ -18,6 +18,18 @@ such stacks) and moves the result back, **adaptively**: each op probes a
 real call fails at runtime (the import-time probe can pass on a stack whose
 handle wedges later or only at larger sizes -- B14 #2).
 
+**Small-matrix fast path.**  For ``n <= _SMALL_N`` the wrappers bypass
+cuSolver entirely and call the hand-rolled, cuSolver-free kernels in
+``_smalllinalg`` (closed-form adjugate inverse / rolled Cholesky).  At this
+size those are jit/vmap/grad-clean and need no probe, latch, or
+host<->device round-trip, so they dominate the adaptive path on every stack:
+a broken-cuSolver GPU (no CPU bounce), a healthy GPU (no per-tiny-matrix
+``getrf``/``potrf`` launch overhead), and a ``vmap`` over many small solves.
+The probe/latch/round-trip machinery below governs only the larger matrices.
+``safe_eigh`` keeps the device path at all sizes -- the Jacobi eigensolver is
+forward-only and tiny-``n`` only, not a faithful drop-in (see
+``_smalllinalg.sym_eig_jacobi``).
+
 Used by ``nitrix.linalg.{spd,_eigsolve}``, ``nitrix.bias``,
 ``nitrix.register``, ``nitrix.stats.pca``, ``nitrix.geometry.affine``.
 
@@ -38,6 +50,17 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float
+
+from ._smalllinalg import small_inv, spd_chol
+
+# Below this size the cuSOLVER-backed ops are replaced outright by the
+# hand-rolled, cuSOLVER-free kernels (closed-form adjugate inverse / rolled
+# Cholesky).  At ``n <= 4`` these are jit/vmap/grad-clean and need no device
+# probe, latch, or host<->device round-trip, so they dominate the probe-and-
+# fall-back path on every stack -- a broken-cuSOLVER GPU (no CPU bounce), a
+# healthy GPU (no per-tiny-matrix ``getrf``/``potrf`` launch), and a vmap over
+# many small solves alike.  Larger matrices keep the adaptive device path.
+_SMALL_N = 4
 
 __all__ = [
     'safe_eigh',
@@ -214,7 +237,14 @@ def safe_eigh(
 def safe_inv(
     A: Float[Array, '... n n'],
 ) -> Float[Array, '... n n']:
-    """``jnp.linalg.inv`` with the cuSolver-robust, adaptive device pick."""
+    """``jnp.linalg.inv`` with the cuSolver-robust, adaptive device pick.
+
+    For ``n <= _SMALL_N`` the closed-form adjugate inverse runs in place (no
+    cuSolver, no device probe / round-trip); larger matrices take the adaptive
+    device path.
+    """
+    if A.shape[-1] <= _SMALL_N:
+        return small_inv(A, A.shape[-1])
     return cast(
         Float[Array, '... n n'],
         _run_safe(
@@ -233,7 +263,15 @@ def safe_cholesky(
 
     ``A`` must be symmetric positive-definite (not symmetrised /
     regularised here).
+
+    For ``n <= _SMALL_N`` the cuSolver-free rolled Cholesky runs in place.
+    Note its modified-Cholesky pivot floor returns a *regularised* factor for
+    a near-singular ``A`` where ``jnp.linalg.cholesky`` would return ``NaN``;
+    the floor sits below any well-conditioned pivot, so a healthy SPD input is
+    unaffected (see ``_smalllinalg.spd_chol``).
     """
+    if A.shape[-1] <= _SMALL_N:
+        return _small_spd_chol(A, A.shape[-1])
     return cast(
         Float[Array, '... n n'],
         _run_safe(
@@ -245,17 +283,14 @@ def safe_cholesky(
     )
 
 
-def _cho_solve_on(a: Array, b: Array, l2: float) -> Array:
-    """SPD solve ``(a + l2 I) x = b`` via Cholesky, co-located on a/b's device.
+def _cho_backsub(chol: Array, b: Array, a_ndim: int) -> Array:
+    """Back-substitute ``x = L^{-T} L^{-1} b`` from a lower Cholesky factor ``L``.
 
-    Only the factorisation hits cuSolver; ``triangular_solve`` (cuBLAS
-    ``trsm``) is unaffected, so the whole solve runs on one device to avoid
-    a cross-device factor / RHS.
+    Two ``triangular_solve``s (cuBLAS ``trsm``, unaffected by the broken
+    cuSolver handle), with the ``jnp.linalg.solve`` convention that a
+    ``b`` of one fewer axis than ``a`` is a single RHS vector.
     """
-    n = a.shape[-1]
-    mat = a if l2 == 0.0 else a + l2 * jnp.eye(n, dtype=a.dtype)
-    chol = jnp.linalg.cholesky(mat)
-    is_vector = b.ndim == a.ndim - 1
+    is_vector = b.ndim == a_ndim - 1
     rhs = b[..., None] if is_vector else b
     z = lax.linalg.triangular_solve(
         chol, rhs, left_side=True, lower=True, transpose_a=False
@@ -266,13 +301,47 @@ def _cho_solve_on(a: Array, b: Array, l2: float) -> Array:
     return x[..., 0] if is_vector else x
 
 
+def _small_spd_chol(A: Float[Array, '... n n'], n: int) -> Array:
+    """Batched cuSolver-free Cholesky factor of a small SPD ``A`` (``n <= _SMALL_N``).
+
+    ``spd_chol`` is a single-matrix kernel; ``jnp.vectorize`` lifts it over the
+    leading (batch) dimensions ``safe_*`` callers pass.
+    """
+    return cast(
+        Array,
+        jnp.vectorize(lambda m: spd_chol(m, n), signature='(n,n)->(n,n)')(A),
+    )
+
+
+def _cho_solve_on(a: Array, b: Array, l2: float) -> Array:
+    """SPD solve ``(a + l2 I) x = b`` via Cholesky, co-located on a/b's device.
+
+    Only the factorisation hits cuSolver; the ``_cho_backsub``
+    ``triangular_solve``s are unaffected, so the whole solve runs on one
+    device to avoid a cross-device factor / RHS.
+    """
+    n = a.shape[-1]
+    mat = a if l2 == 0.0 else a + l2 * jnp.eye(n, dtype=a.dtype)
+    chol = jnp.linalg.cholesky(mat)
+    return _cho_backsub(chol, b, a.ndim)
+
+
 def safe_cho_solve(
     a: Float[Array, '... n n'],
     b: Float[Array, '...'],
     *,
     l2: float = 0.0,
 ) -> Float[Array, '...']:
-    """SPD Cholesky solve ``(a + l2 I) x = b``, cuSolver-robust + adaptive."""
+    """SPD Cholesky solve ``(a + l2 I) x = b``, cuSolver-robust + adaptive.
+
+    For ``n <= _SMALL_N`` the rolled-Cholesky factor (cuSolver-free) backs the
+    solve in place; larger matrices take the adaptive device path.
+    """
+    n = a.shape[-1]
+    if n <= _SMALL_N:
+        mat = a if l2 == 0.0 else a + l2 * jnp.eye(n, dtype=a.dtype)
+        chol = _small_spd_chol(mat, n)
+        return _cho_backsub(chol, b, a.ndim)
     return cast(
         Float[Array, '...'],
         _run_safe(
@@ -290,7 +359,18 @@ def safe_solve(
     a: Float[Array, '... n n'],
     b: Float[Array, '...'],
 ) -> Float[Array, '...']:
-    """``jnp.linalg.solve`` with the cuSolver-robust, adaptive device pick."""
+    """``jnp.linalg.solve`` with the cuSolver-robust, adaptive device pick.
+
+    For ``n <= _SMALL_N`` the closed-form adjugate inverse backs the solve in
+    place (cuSolver-free); larger matrices take the adaptive device path.
+    """
+    n = a.shape[-1]
+    if n <= _SMALL_N:
+        ainv = small_inv(a, n)
+        is_vector = b.ndim == a.ndim - 1
+        rhs = b[..., None] if is_vector else b
+        x = ainv @ rhs
+        return x[..., 0] if is_vector else x
     return cast(
         Float[Array, '...'],
         _run_safe(
