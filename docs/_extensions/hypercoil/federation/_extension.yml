@@ -5,8 +5,8 @@ quarto-required: ">=1.5.0"
 contributes:
   shortcodes:
     - xref.lua
-# This extension is the federation's *distributable* shared surface: the xref
-# shortcode (+ its resolver), the black/$accent theme, shared format metadata,
-# the namespace registry, and the bibliography. The canonical sources live in
-# the umbrella (doc/theme, doc/xref, doc/_bibliography); build/package-extension.sh
-# syncs them here. Libraries pin and install this extension to build standalone.
+# The federation's distributable shared documentation surface: the xref shortcode
+# (+ its pure resolver), the graphite/$accent theme, shared format metadata, the
+# namespace registry, and the bibliography. THIS repo is the single source of
+# truth; libraries install it pinned (quarto add hypercoil/quarto-federation@vX.Y.Z)
+# and refresh with `quarto update`. Bump `version` + tag a release to ship a change.

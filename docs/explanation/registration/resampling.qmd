@@ -2,91 +2,82 @@
 title: "Resampling: differentiable interpolation"
 ---
 
-::: {.callout-tldr title="Fast path"}
-The transform ladder of the last two pages produced a *map* $\varphi$. This page
-is how you **apply** it — turn $\varphi$ into the warped image $I_m\circ\varphi$ —
-and, just as importantly, how gradients flow **back** through that application to
-the transform. One idea organises everything:
+The transform ladder of the last two chapters produced a *map* $\varphi$. This chapter is how you
+*apply* it - turn $\varphi$ into the warped image $I_m\circ\varphi$ - and, just as importantly, how
+gradients flow *back* through that application to the transform. It is where the group action of the
+[foundations chapter](foundations.qmd#sec-pullback) becomes a concrete, differentiable computation: the
+pull-back $\pi(\varphi): I_m\mapsto I_m\circ\varphi$ is the transform group's representation on images,
+and resampling is the gather that evaluates it. One idea organises everything.
 
-- **Resampling is "sample an image at a set of continuous coordinates."** Two
-  questions are *orthogonal*: **where** the coordinates come from (an affine grid,
-  a deformation field, or an align-corners resize), and **how** neighbouring
-  voxels are weighted into each value (the *kernel*). In `nitrix`,
-  `geometry/grid.py` owns the coordinate source (`identity_grid`,
-  `spatial_transform`, `resample`); `geometry/_interpolate.py` owns the kernel (an
-  ADT of `Interpolator` records — `Linear`, `NearestNeighbour`, `Lanczos`,
-  `CubicBSpline`, `MultiLabel`). Adding a kernel never touches the grid code.
-- **Differentiability is a property of the kernel, in two slots.** Each kernel
-  declares `differentiable_in_values` and `differentiable_in_coords`. The second
-  is the one a registration loss needs — a smooth-weight kernel (`Linear`,
-  `Lanczos`, `CubicBSpline`) lets the loss push on $\theta$; a piecewise-constant
-  one (`NearestNeighbour`) or a hard label selection (`MultiLabel`) hands the
-  optimiser a zero coordinate-gradient.
+- **Resampling is "sample an image at a set of continuous coordinates."** Two questions are *orthogonal*:
+  *where* the coordinates come from (an affine grid, a deformation field, or an align-corners resize),
+  and *how* neighbouring voxels are weighted into each value (the *kernel*). In `nitrix`,
+  `geometry/grid.py` owns the coordinate source (`identity_grid`, `spatial_transform`, `resample`);
+  `geometry/_interpolate.py` owns the kernel (an ADT of `Interpolator` records - `Linear`,
+  `NearestNeighbour`, `Lanczos`, `CubicBSpline`, `MultiLabel`). Adding a kernel never touches the grid
+  code.
+- **Differentiability is a property of the kernel, in two slots.** Each kernel declares
+  `differentiable_in_values` and `differentiable_in_coords`. The second is the one a registration loss
+  needs - a smooth-weight kernel (`Linear`, `Lanczos`, `CubicBSpline`) lets the loss push on $\theta$; a
+  piecewise-constant one (`NearestNeighbour`) or a hard label selection (`MultiLabel`) hands the optimiser
+  a zero coordinate-gradient.
 
-The one sentence: *a transform becomes an image by gathering, and the gather is
-differentiable exactly when its weights move smoothly with the coordinates.*
-:::
+In one sentence: a transform becomes an image by gathering, the gather is the group acting on the image,
+and that gather is differentiable in the transform exactly when its weights move smoothly with the
+coordinates.
 
-The reader arrives here with two things in hand. From the
-[foundations page](foundations.qmd#sec-pullback) you know the **pull-back
-convention**: we map $\varphi:\Omega_f\to\Omega_m$ and the warped moving image is
-the *composition* $I_m\circ\varphi$ — for each fixed-grid voxel $x$ we look up
-where it came from in the moving image and read that intensity. From the
-[transforms page](transforms.qmd#sec-fit) you know how a rigid or affine
-$\varphi$ is parametrised and how it acts on coordinates. What neither page said
-is the part that makes $I_m\circ\varphi$ a *number*: $\varphi(x)$ is almost never
-an integer voxel, so "read that intensity" requires **interpolation**. That is
-this page. We own the step from a coordinate map to an image, and the gradient
-that runs the other way.
+The reader arrives here with two things in hand. From the [foundations chapter](foundations.qmd#sec-pullback)
+you know the *pull-back convention*: we map $\varphi:\Omega_f\to\Omega_m$ and the warped moving image is
+the *composition* $I_m\circ\varphi$ - for each fixed-grid voxel $x$ we look up where it came from in the
+moving image and read that intensity. From the [transforms chapter](transforms.qmd#sec-fit) you know how
+a rigid or affine $\varphi$ is parametrised and how it acts on coordinates. What neither chapter said is
+the part that makes $I_m\circ\varphi$ a *number*: $\varphi(x)$ is almost never an integer voxel, so "read
+that intensity" requires *interpolation*. That is this chapter. We own the step from a coordinate map to
+an image, and the gradient that runs the other way.
 
-## A motivating question {#sec-motivation}
+## A motivating problem {#sec-motivation}
 
-Hold the running task from foundations: you have aligned a subject's T1 to MNI and
-the optimiser has converged on a transform $\varphi$. You now need two concrete
-things.
+Hold the running task from foundations: you have aligned a subject's T1 to MNI and the optimiser has
+converged on a transform $\varphi$. You now need two concrete things.
 
-1. **Produce the aligned image.** Apply $\varphi$ to the subject T1 to get the
-   warped volume that actually sits in MNI space — the artefact you save to disk,
-   feed to an atlas, or overlay on the template. This is one forward call.
-2. **Differentiate it.** During the *fitting* that produced $\varphi$, every
-   optimiser step needed the gradient of the mismatch energy with respect to the
-   transform parameters $\theta$. That energy is computed on $I_m\circ\varphi$, so
-   the gradient has to flow *through the resampling* — from the loss, back through
-   the interpolation weights, into $\varphi(x)$, and finally into $\theta$. If the
-   resampler is not differentiable in its coordinates, the whole chain is dead and
-   no gradient-based optimiser can move.
+1. **Produce the aligned image.** Apply $\varphi$ to the subject T1 to get the warped volume that
+   actually sits in MNI space - the artefact you save to disk, feed to an atlas, or overlay on the
+   template. This is one forward call.
+2. **Differentiate it.** During the *fitting* that produced $\varphi$, every optimiser step needed the
+   gradient of the mismatch energy with respect to the transform parameters $\theta$. That energy is
+   computed on $I_m\circ\varphi$, so the gradient has to flow *through the resampling* - from the loss,
+   back through the interpolation weights, into $\varphi(x)$, and finally into $\theta$. If the resampler
+   is not differentiable in its coordinates, the whole chain is dead and no gradient-based optimiser can
+   move.
 
-Both are the same operation run two ways: forward to make a picture, reverse to
-make a gradient. The job of this page is to make that operation exact, fast, and
-differentiable — and to be honest about the one kernel (nearest neighbour) and the
-one routine (multi-label) where the coordinate gradient is *deliberately* zero.
+Both are the same operation run two ways: forward to make a picture, reverse to make a gradient. The job
+of this chapter is to make that operation exact, fast, and differentiable - and to be honest about the
+one kernel (nearest neighbour) and the one routine (multi-label) where the coordinate gradient is
+*deliberately* zero.
 
 ## Pull-back sampling: where the coordinates come from {#sec-pullback-sampling}
 
 ### The identity grid, and absolute vs relative coordinates
 
-Start with the simplest possible map: the one that does nothing. If the warped
-image is "for each output voxel, look up a coordinate in the input," then the
-*no-op* must be "for each output voxel $x$, look up coordinate $x$." That array —
-each cell holding its own index — is the **identity grid**, and it is the seed for
-everything dense.
+Begin with the simplest possible map: the one that does nothing. If the warped image is "for each output
+voxel, look up a coordinate in the input," then the *no-op* must be "for each output voxel $x$, look up
+coordinate $x$." That array - each cell holding its own index - is the *identity grid*, and it is the
+seed for everything dense.
 
-`identity_grid(spatial_shape)` builds it. For a 2-D image of shape $(H, W)$ it
-returns a $(H, W, 2)$ array with `grid[i, j] == (i, j)`; for 3-D $(D, H, W)$ a
-$(D, H, W, 3)$ array with `grid[k, i, j] == (k, i, j)`. The layout is the unit's
-convention throughout: **channels-last**, with the trailing axis of length `ndim`
-holding the coordinate, and multi-axis meshes built with `indexing='ij'` so axis
-order matches array order. **HOST-CTOR** (it materialises a fixed grid from a
-static shape; build it once, outside any jitted loop).
+`identity_grid(spatial_shape)` builds it. For a 2-D image of shape $(H, W)$ it returns a $(H, W, 2)$
+array with `grid[i, j] == (i, j)`; for 3-D $(D, H, W)$ a $(D, H, W, 3)$ array with
+`grid[k, i, j] == (k, i, j)`. The layout is the unit's convention throughout: *channels-last*, with the
+trailing axis of length `ndim` holding the coordinate, and multi-axis meshes built with `indexing='ij'`
+so axis order matches array order. **HOST-CTOR** (it materialises a fixed grid from a static shape; build
+it once, outside any jitted loop).
 
-This sets up the unit's coordinate convention precisely. There are two ways to
-write a deformation, and confusing them is the most common resampling bug:
+This sets up the unit's coordinate convention precisely. There are two ways to write a deformation, and
+confusing them is the most common resampling bug:
 
-- A **displacement field** $u(x)$ is **relative** — it stores the *offset* from
-  each voxel, so the map is $\varphi(x) = x + u(x)$. A learned network or a
-  velocity integration produces $u$.
-- A **deformation / sampling grid** is **absolute** — it stores the *coordinate
-  to sample at* directly. This is what the sampler actually consumes.
+- A *displacement field* $u(x)$ is *relative* - it stores the *offset* from each voxel, so the map is
+  $\varphi(x) = x + u(x)$. A learned network or a velocity integration produces $u$.
+- A *deformation / sampling grid* is *absolute* - it stores the *coordinate to sample at* directly. This
+  is what the sampler actually consumes.
 
 The bridge between them is one addition:
 
@@ -95,114 +86,101 @@ $$
 \;=\; x + u(x).
 $$ {#eq-id-plus-u}
 
-So `identity_grid` is not decoration: it is the operator that converts the
-*relative* thing an optimiser or a network naturally produces into the *absolute*
-thing the sampler reads. Add zero and you sample the input back exactly (the
-identity warp); add $u$ and you sample at $x + u(x)$.
+So `identity_grid` is not decoration: it is the operator that converts the *relative* thing an optimiser
+or a network naturally produces into the *absolute* thing the sampler reads. Add zero and you sample the
+input back exactly (the identity warp - the identity element of the group acting trivially); add $u$ and
+you sample at $x + u(x)$.
 
 ### `spatial_transform`: warp by arbitrary coordinates
 
-`spatial_transform(image, deformation, *, mode, cval, method)` is the general
-warp. For each output position $p$ it returns `image` sampled at
-`deformation[p]` via the kernel `method`. The key word is *absolute*:
-`deformation` is the coordinate map, not a displacement — to warp by a
-displacement $u$ you pass `identity_grid(spatial) + u` per @eq-id-plus-u (the
-docstring spells this out). This is the operation that realises the pull-back
-$I_m\circ\varphi$:
+`spatial_transform(image, deformation, *, mode, cval, method)` is the general warp. For each output
+position $p$ it returns `image` sampled at `deformation[p]` via the kernel `method`. The key word is
+*absolute*: `deformation` is the coordinate map, not a displacement - to warp by a displacement $u$ you
+pass `identity_grid(spatial) + u` per @eq-id-plus-u (the docstring spells this out). This is the
+operation that realises the pull-back $I_m\circ\varphi$:
 
 $$
 (I_m\circ\varphi)(x) \;=\; \texttt{sample}\big(I_m,\ \varphi(x)\big),
 \qquad \varphi(x) = \texttt{deformation}[x].
 $$ {#eq-pullback-sample}
 
-The signature carries the unit's shape discipline. Images are
-$(\ast\text{leading}, \ast\text{spatial}, c)$ — leading batch dims, then `ndim`
-spatial axes, then a trailing channel axis. Deformations are
-$(\ast\text{leading}, \ast\text{spatial}, \text{ndim})$ — the same leading and
-spatial axes, then a trailing coordinate axis of length `ndim`. Leading batch dims
-must **match exactly**; `spatial_transform` deliberately does *not* broadcast a
-shared image or deformation, because the trailing-axis semantics differ between
-the two operands and a silent broadcast there is too error-prone. Internally the
-per-sample core (taking $(\ast\text{spatial}, c)$ and
-$(\ast\text{spatial}, \text{ndim})$) is wrapped in one `jax.vmap` per leading
-axis. **DIFF-JAX** (jittable and differentiable, given a differentiable kernel).
+This is the group's representation made concrete: $\texttt{sample}(\cdot, \varphi(x))$ is *linear* in the
+image (a weighted gather), so $\pi(\varphi)$ is a linear operator on the space of images, and composing
+two warps composes their gathers - the representation property of [foundations](foundations.qmd#sec-pullback).
+The signature carries the unit's shape discipline. Images are $(\ast\text{leading}, \ast\text{spatial},
+c)$ - leading batch dims, then `ndim` spatial axes, then a trailing channel axis. Deformations are
+$(\ast\text{leading}, \ast\text{spatial}, \text{ndim})$ - the same leading and spatial axes, then a
+trailing coordinate axis of length `ndim`. Leading batch dims must *match exactly*; `spatial_transform`
+deliberately does *not* broadcast a shared image or deformation, because the trailing-axis semantics
+differ between the two operands and a silent broadcast there is too error-prone. Internally the per-sample
+core (taking $(\ast\text{spatial}, c)$ and $(\ast\text{spatial}, \text{ndim})$) is wrapped in one
+`jax.vmap` per leading axis. **DIFF-JAX** (jittable and differentiable, given a differentiable kernel).
 
-When the batch axis sits on only *one* operand — a batch of images under a single
-shared warp, or one image under a batch of warps — the exact-match rule forces an
-explicit `jax.vmap` with the right `in_axes`. `spatial_transform_batched` is the
-convenience that picks `in_axes` for you: it maps over **one** leading axis from
-whichever operand carries it, and raises if neither does (call
-`spatial_transform` directly for the unbatched case). To broadcast a shared
-operand across *several* leading dims, broadcast it to the full batch shape and
-call `spatial_transform` (which composes multiple matching leading dims natively).
-This wrapper is small but real — it shipped to save every consuming model one
-`vmap` line and keep the cross-model surface uniform. **DIFF-JAX**.
+When the batch axis sits on only *one* operand - a batch of images under a single shared warp, or one
+image under a batch of warps - the exact-match rule forces an explicit `jax.vmap` with the right
+`in_axes`. `spatial_transform_batched` is the convenience that picks `in_axes` for you: it maps over *one*
+leading axis from whichever operand carries it, and raises if neither does (call `spatial_transform`
+directly for the unbatched case). To broadcast a shared operand across *several* leading dims, broadcast
+it to the full batch shape and call `spatial_transform` (which composes multiple matching leading dims
+natively). This wrapper is small but real - it shipped to save every consuming model one `vmap` line and
+keep the cross-model surface uniform. **DIFF-JAX**.
 
-Two relatives live alongside the grid warp. `sample_at_points(volume, points)` is
-the **scattered-point** complement: instead of a coordinate *grid* it takes an
-arbitrary list of points $(\ast n, \text{ndim})$ in index space and interpolates
-the volume at each (handling both channel-free $(\ast\text{spatial})$ and
-channels-last $(\ast\text{spatial}, c)$ volumes). And
-`integrate_velocity_field` — the diffeomorphic exponential, covered on
-[the diffeomorphic page](diffeomorphic.qmd#sec-svf) — is built *on*
-`spatial_transform`: scaling-and-squaring composes a field with itself by warping
-it through `identity_grid + phi` each doubling step. Resampling is the substrate
-the whole velocity-field machinery stands on. **DIFF-JAX**.
+Two relatives live alongside the grid warp. `sample_at_points(volume, points)` is the *scattered-point*
+complement: instead of a coordinate *grid* it takes an arbitrary list of points $(\ast n, \text{ndim})$
+in index space and interpolates the volume at each (handling both channel-free $(\ast\text{spatial})$ and
+channels-last $(\ast\text{spatial}, c)$ volumes). And `integrate_velocity_field` - the diffeomorphic
+exponential, covered on [the diffeomorphic chapter](diffeomorphic.qmd#sec-svf) - is built *on*
+`spatial_transform`: scaling-and-squaring composes a field with itself by warping it through
+`identity_grid + phi` each doubling step. Resampling is the substrate the whole velocity-field machinery
+stands on. **DIFF-JAX**.
 
 ### `resample`: the align-corners resize grid
 
-`resample(image, target_shape, *, mode, cval, method)` is the *other* coordinate
-source: an axis-aligned **resize**. Same sampler, same kernels — only the
-coordinates differ. Where do the resize coordinates come from? We want the output
-to keep the input's two endpoints pinned (so the corners line up) and spread the
-interior evenly. For an axis of input size $N$ resampled to $M$ points, output
-pixel $i$ samples the input at
+`resample(image, target_shape, *, mode, cval, method)` is the *other* coordinate source: an axis-aligned
+*resize*. Same sampler, same kernels - only the coordinates differ. Where do the resize coordinates come
+from? We want the output to keep the input's two endpoints pinned (so the corners line up) and spread the
+interior evenly. For an axis of input size $N$ resampled to $M$ points, output pixel $i$ samples the
+input at
 
 $$
 c_i \;=\; i\cdot\frac{N-1}{M-1},
 \qquad i = 0,\dots,M-1.
 $$ {#eq-align-corners}
 
-At $i=0$ this is coordinate $0$ (the first input pixel) and at $i=M-1$ it is
-$N-1$ (the last) — the endpoints are exact. This is scipy's
-`align_corners=True` convention; `resample` builds it with `jnp.linspace(0, N-1,
-M)` per axis (and the degenerate $M=1$ case samples coordinate $0$). The grid is
-the *outer product* of those per-axis vectors, which matters for speed
-(@sec-separable). **DIFF-JAX**.
+At $i=0$ this is coordinate $0$ (the first input pixel) and at $i=M-1$ it is $N-1$ (the last) - the
+endpoints are exact. This is scipy's `align_corners=True` convention; `resample` builds it with
+`jnp.linspace(0, N-1, M)` per axis (and the degenerate $M=1$ case samples coordinate $0$). The grid is
+the *outer product* of those per-axis vectors, which matters for speed (@sec-separable). **DIFF-JAX**.
 
-So the two grid functions split cleanly. `spatial_transform` takes coordinates
-**from a deformation field** (an affine grid, a learned displacement, an
-integrated velocity); `resample` takes coordinates **from a resize rule**. They
-call one sampler.
+So the two grid functions split cleanly. `spatial_transform` takes coordinates *from a deformation field*
+(an affine grid, a learned displacement, an integrated velocity); `resample` takes coordinates *from a
+resize rule*. They call one sampler.
 
 ### The unit spine: kernel ⟂ coordinate source
 
-This is the structural idea to carry through the page, and it is worth stating
-once in full. A resampling operation is the composition of two independent
-choices:
+This is the structural idea to carry through the chapter, and it is worth stating once in full. A
+resampling operation is the composition of two independent choices:
 
 | axis | question | owner |
 |---|---|---|
 | **coordinate source** | *where* do we sample? | `geometry/grid.py` (`spatial_transform`, `resample`, `identity_grid`) |
 | **kernel** | *how* are voxels weighted into each value? | `geometry/_interpolate.py` (the `Interpolator` records) |
 
-Neither axis knows about the other. You can resize with `Lanczos` or warp by a
-deformation with `Lanczos`; you can resize with `Linear` or warp with `Linear`.
-The kernel is passed as `method=` and the grid functions never branch on which one
-it is (they dispatch through one shared seam, `_sample_at_coords`). This is the
-same forward-*method* ⟂ backward-*format* factoring the linear-algebra unit uses
-for its eigensolver: the *task* (coordinate source) is orthogonal to the *method*
-(kernel), and — once a Pallas gather lands — to the *backend* (execution engine).
-Adding a kernel is adding one frozen record; the grid functions are untouched.
+Neither axis knows about the other. You can resize with `Lanczos` or warp by a deformation with
+`Lanczos`; you can resize with `Linear` or warp with `Linear`. The kernel is passed as `method=` and the
+grid functions never branch on which one it is (they dispatch through one shared seam,
+`_sample_at_coords`). This is the same forward-*method* ⟂ backward-*format* factoring the linear-algebra
+unit uses for its eigensolver: the *task* (coordinate source) is orthogonal to the *method* (kernel), and
+- once a Pallas gather lands - to the *backend* (execution engine). Adding a kernel is adding one frozen
+record; the grid functions are untouched.
 
 ## The kernels: how voxels are weighted {#sec-kernels}
 
 ### The `Interpolator` protocol
 
-A kernel is "anything that can sample an image at continuous coordinates with a
-fixed rule." `nitrix` encodes that as a `Protocol` — structural conformance, not
-inheritance — so each concrete kernel stays a plain frozen, hashable dataclass
-with no array leaves. The protocol asks for one method and two flags:
+A kernel is "anything that can sample an image at continuous coordinates with a fixed rule." `nitrix`
+encodes that as a `Protocol` - structural conformance, not inheritance - so each concrete kernel stays a
+plain frozen, hashable dataclass with no array leaves. The protocol asks for one method and two flags:
 
 ```python
 def sample(self, image, coords, *, mode, cval) -> sampled    # (*out, c)
@@ -210,84 +188,73 @@ differentiable_in_values: ClassVar[bool]
 differentiable_in_coords: ClassVar[bool]
 ```
 
-`sample` maps an unbatched channels-last image $(\ast\text{spatial}, c)$ and a
-coordinate field $(\ast\text{out}, \text{ndim})$ to sampled values
-$(\ast\text{out}, c)$, where `coords[..., d]` is the position along input axis
-$d$. The two flags are the heart of this page's contribution and we treat them on
-their own below. Because a kernel's configuration (a spline order, a static label
-set) is *structural* rather than a differentiable array, the records are **not**
-registered as pytrees: they ride `jit` static arguments and `custom_vjp`
-non-differentiable slots directly (the `SolverSpec` pattern from the linalg unit).
+`sample` maps an unbatched channels-last image $(\ast\text{spatial}, c)$ and a coordinate field
+$(\ast\text{out}, \text{ndim})$ to sampled values $(\ast\text{out}, c)$, where `coords[..., d]` is the
+position along input axis $d$. The two flags are the heart of this chapter and we treat them on their own
+below. Because a kernel's configuration (a spline order, a static label set) is *structural* rather than
+a differentiable array, the records are *not* registered as pytrees: they ride `jit` static arguments and
+`custom_vjp` non-differentiable slots directly (the `SolverSpec` pattern from the linalg unit).
 
-The records are re-exported from `geometry.grid`, so the public surface is
-`Linear`, `NearestNeighbour`, `Lanczos`, `CubicBSpline`, `MultiLabel`.
+The records are re-exported from `geometry.grid`, so the public surface is `Linear`, `NearestNeighbour`,
+`Lanczos`, `CubicBSpline`, `MultiLabel`.
 
 ### `Linear` — the default
 
-Each sampled value is the multilinear blend of the $2^{\text{ndim}}$ surrounding
-voxels. In 1-D: let $b=\lfloor c\rfloor$ and $f = c - b$; the two taps are
-$\{b, b+1\}$ with weights $\{1-f,\ f\}$. The weights sum to 1 (a partition of
-unity, so constants are preserved) and move *smoothly* with $c$. That smoothness
-is exactly why `Linear` is the default for differentiable registration: the
-sampled value is $C^0$ in the coordinate, with a well-defined gradient
-$\partial/\partial c = \text{(upper voxel)} - \text{(lower voxel)}$ almost
-everywhere. `differentiable_in_values = True`, `differentiable_in_coords = True`.
+Each sampled value is the multilinear blend of the $2^{\text{ndim}}$ surrounding voxels. In 1-D: let
+$b=\lfloor c\rfloor$ and $f = c - b$; the two taps are $\{b, b+1\}$ with weights $\{1-f,\ f\}$. The
+weights sum to 1 (a partition of unity, so constants are preserved) and move *smoothly* with $c$. That
+smoothness is exactly why `Linear` is the default for differentiable registration: the sampled value is
+$C^0$ in the coordinate, with a well-defined gradient $\partial/\partial c = \text{(upper voxel)} -
+\text{(lower voxel)}$ almost everywhere. `differentiable_in_values = True`,
+`differentiable_in_coords = True`.
 
 ### `NearestNeighbour` — exact, but coord-flat
 
-Each sampled value is the single voxel nearest the sample position, with rounding
-$\lfloor c + 0.5\rfloor$ (round half *up*, matching
-`map_coordinates(order=0)` — not round-half-to-even). One tap, weight 1. Because
-the output is restricted to values that already occur in the input, this is the
+Each sampled value is the single voxel nearest the sample position, with rounding $\lfloor c +
+0.5\rfloor$ (round half *up*, matching `map_coordinates(order=0)` - not round-half-to-even). One tap,
+weight 1. Because the output is restricted to values that already occur in the input, this is the
 label-preserving choice when you do *not* want anti-aliasing.
 
-But the round is **piecewise-constant** in $c$: nudge the coordinate and the
-sampled value does not change until you cross a half-integer, where it jumps. So
-the gradient with respect to the *coordinate* is zero almost everywhere and
-undefined on a measure-zero set — useless to an optimiser. Hence
-`differentiable_in_coords = False`. The gather is still a one-hot pick of an image
-value, so `differentiable_in_values = True`. The practical upshot, and the reason
-the flag exists: **you cannot register with `NearestNeighbour`.** Use it to warp a
-label map *after* you have found $\varphi$ with a smooth kernel; never as the
-kernel inside the loss.
+But the round is *piecewise-constant* in $c$: nudge the coordinate and the sampled value does not change
+until you cross a half-integer, where it jumps. So the gradient with respect to the *coordinate* is zero
+almost everywhere and undefined on a measure-zero set - useless to an optimiser. Hence
+`differentiable_in_coords = False`. The gather is still a one-hot pick of an image value, so
+`differentiable_in_values = True`. The practical upshot, and the reason the flag exists: *you cannot
+register with `NearestNeighbour`.* Use it to warp a label map *after* you have found $\varphi$ with a
+smooth kernel; never as the kernel inside the loss.
 
 ### `Lanczos(order)` — windowed sinc
 
-The high-fidelity differentiable kernel. The ideal band-limited interpolator is
-the sinc, but sinc has infinite support; Lanczos windows it with a second, wider
-sinc to get a finite stencil. The kernel of radius $a=\texttt{order}$ is
+The high-fidelity differentiable kernel. The ideal band-limited interpolator is the sinc, but sinc has
+infinite support; Lanczos windows it with a second, wider sinc to get a finite stencil. The kernel of
+radius $a=\texttt{order}$ is
 
 $$
 L_a(x) \;=\; \operatorname{sinc}(x)\,\operatorname{sinc}(x/a),
 \qquad |x| < a,
 $$ {#eq-lanczos}
 
-and zero outside (here $\operatorname{sinc}$ is the *normalised* sinc,
-$\sin(\pi x)/(\pi x)$, equal to 1 at 0 — so $L_a$ is 1 at the sample and 0 at every
-other integer offset, reproducing grid samples exactly). The $2a$ taps per axis
-run $\lfloor c\rfloor - a + 1 \dots \lfloor c\rfloor + a$. Raw Lanczos weights sum
-to *approximately* 1 but not exactly, so `nitrix` **renormalises** them per axis to
-sum to 1 — making the separable outer product a true partition of unity and
-preserving constants exactly. The weights are smooth in $x$, so the kernel is
-differentiable end-to-end in both values and coordinates: it is the high-quality
-alternative to `Linear` for registration and anti-aliased resampling. `order`
-defaults to 3 (the common ANTs/ITK choice); larger is sharper and wider but more
-ringing-prone. This is the ANTs `LanczosWindowedSinc` *algorithm class*, not
-bit-exact ITK (radius/normalisation conventions differ in detail). `order` must be
-a positive integer (validated in `__post_init__`).
+and zero outside (here $\operatorname{sinc}$ is the *normalised* sinc, $\sin(\pi x)/(\pi x)$, equal to 1
+at 0 - so $L_a$ is 1 at the sample and 0 at every other integer offset, reproducing grid samples
+exactly). The $2a$ taps per axis run $\lfloor c\rfloor - a + 1 \dots \lfloor c\rfloor + a$. Raw Lanczos
+weights sum to *approximately* 1 but not exactly, so `nitrix` *renormalises* them per axis to sum to 1 -
+making the separable outer product a true partition of unity and preserving constants exactly. The
+weights are smooth in $x$, so the kernel is differentiable end-to-end in both values and coordinates: it
+is the high-quality alternative to `Linear` for registration and anti-aliased resampling. `order`
+defaults to 3 (the common ANTs/ITK choice); larger is sharper and wider but more ringing-prone. This is
+the ANTs `LanczosWindowedSinc` *algorithm class*, not bit-exact ITK (radius/normalisation conventions
+differ in detail). `order` must be a positive integer (validated in `__post_init__`).
 
-### `CubicBSpline` — the order-3 spline, done right
+### `CubicBSpline` — the order-3 interpolating spline
 
-The path that nnUNet / `hd_bet`-style preprocessing expects (`scipy.ndimage`
-`order=3`). The subtlety: a cubic B-spline interpolator is **not** a plain cubic
-convolution. The cubic B-spline *basis* $\beta^3$ is smooth and a partition of
-unity, but applied directly to the samples it only *approximates* them — it blurs.
-The interpolation property (the curve passes *through* the samples) is recovered by
-a two-step operation:
+The path that nnUNet / `hd_bet`-style preprocessing expects (`scipy.ndimage` `order=3`). The subtlety: a
+cubic B-spline interpolator is *not* a plain cubic convolution. The cubic B-spline *basis* $\beta^3$ is
+smooth and a partition of unity, but applied directly to the samples it only *approximates* them - it
+blurs. The interpolation property (the curve passes *through* the samples) is recovered by a two-step
+operation:
 
-1. a **prefilter** converts the image samples into interpolating B-spline
-   *coefficients*, and
-2. a 4-tap separable **cubic basis** gathers those coefficients.
+1. a *prefilter* converts the image samples into interpolating B-spline *coefficients*, and
+2. a 4-tap separable *cubic basis* gathers those coefficients.
 
 The prefilter is the interesting part. The cubic B-spline has a single real pole
 
@@ -295,74 +262,61 @@ $$
 z_1 \;=\; \sqrt{3} - 2 \;\approx\; -0.2679,
 $$ {#eq-bspline-pole}
 
-and converting samples to coefficients is the **recursive deconvolution** by that
-pole — the Unser / Aldroubi / Eden algorithm. Concretely: scale by the gain
-$(1-z_1)(1-1/z_1) = 6$, run a **causal** first-order recurrence
-$c_k = s_k + z_1 c_{k-1}$ forward, then an **anti-causal** recurrence backward,
-once per spatial axis (the channel axis is left alone). The boundary is handled by
-the closed-form **whole-sample-mirror** initial coefficient (the Thévenaz / ITK
-convention) — computed as a single vectorised dot product, no scan, so it stays
-parallel and differentiable. With the prefilter in place the result passes through
-the samples exactly; the basis itself is $C^2$-smooth, so the kernel is
-differentiable in both the values (prefilter and gather are linear) and the
-coordinates (the basis is smooth).
+and converting samples to coefficients is the *recursive deconvolution* by that pole - the Unser /
+Aldroubi / Eden algorithm. Concretely: scale by the gain $(1-z_1)(1-1/z_1) = 6$, run a *causal*
+first-order recurrence $c_k = s_k + z_1 c_{k-1}$ forward, then an *anti-causal* recurrence backward, once
+per spatial axis (the channel axis is left alone). The boundary is handled by the closed-form
+*whole-sample-mirror* initial coefficient (the Thévenaz / ITK convention) - computed as a single
+vectorised dot product, no scan, so it stays parallel and differentiable. With the prefilter in place the
+result passes through the samples exactly; the basis itself is $C^2$-smooth, so the kernel is
+differentiable in both the values (prefilter and gather are linear) and the coordinates (the basis is
+smooth).
 
-Two engineering notes worth carrying. First, the recurrence is run two ways behind
-one interface — sequentially with `lax.scan` on CPU, and in parallel with
-`lax.associative_scan` ($O(\log n)$ depth) on GPU — because a first-order linear
-recurrence composes associatively. This is the same platform split `signal._iir`
-uses, and both forms are exact (they agree to a ULP). An FFT convolution (the
-*other* `_iir` engine) is deliberately **not** used here: the cubic pole is mild,
-so the prefilter's impulse response is a short (~25-tap) FIR, too short for the
-transform overhead to pay off. Second: the result is **bit-exact** with
-`scipy.ndimage.map_coordinates(order=3, mode='mirror')`, interior and boundary
-(~$10^{-15}$) — the genuine parity the design doc set out to ship (this kernel was
-the resolved request `docs/feature-requests/cubic-resample.md`). There is one
-boundary caveat, important enough to get its own section (@sec-boundary).
-`differentiable_in_values = True`, `differentiable_in_coords = True`.
+Two engineering notes worth carrying. First, the recurrence is run two ways behind one interface -
+sequentially with `lax.scan` on CPU, and in parallel with `lax.associative_scan` ($O(\log n)$ depth) on
+GPU - because a first-order linear recurrence composes associatively. This is the same platform split
+`signal._iir` uses, and both forms are exact (they agree to a ULP). An FFT convolution (the *other*
+`_iir` engine) is deliberately *not* used here: the cubic pole is mild, so the prefilter's impulse
+response is a short (~25-tap) FIR, too short for the transform overhead to pay off. Second: the result is
+*bit-exact* with `scipy.ndimage.map_coordinates(order=3, mode='mirror')`, interior and boundary
+(~$10^{-15}$) - the genuine parity the design doc set out to ship (this kernel was the resolved request
+`docs/feature-requests/cubic-resample.md`). There is one boundary caveat, important enough to get its own
+section (@sec-boundary). `differentiable_in_values = True`, `differentiable_in_coords = True`.
 
 ### `MultiLabel(labels, inner)` — resampling a segmentation
 
-Resampling a *label* map is its own problem. Nearest-neighbour aliases label
-boundaries and drops thin structures; plain `Linear` invents non-label values
-*between* labels (halfway between label 2 and label 5 is not label 3.5 — it is
-nonsense). `MultiLabel` is the ANTs-style cure and it does neither. The idea: treat
-each label as a binary indicator mask, resample *that* smoothly, and take the
-winner.
+Resampling a *label* map is its own problem. Nearest-neighbour aliases label boundaries and drops thin
+structures; plain `Linear` invents non-label values *between* labels (halfway between label 2 and label 5
+is not label 3.5 - it is nonsense). `MultiLabel` is the ANTs-style cure and it does neither. The idea:
+treat each label as a binary indicator mask, resample *that* smoothly, and take the winner.
 
 $$
 \text{out}(x) \;=\; \operatorname*{arg\,max}_{\ell\,\in\,\texttt{labels}}\
 \big(\text{inner.sample}(\mathbb{1}[I = \ell])\big)(x).
 $$ {#eq-multilabel}
 
-Each label's indicator is resampled with the `inner` kernel (default `Linear`);
-the per-voxel **arg-max** over those resampled scores is the output label.
-Boundaries are anti-aliased (the inner kernel smooths each mask) yet the output is
-restricted to the input label set — no invented values. The implementation is a
-memory-bounded **running arg-max** fold over the label set: $O(K)$ inner resamples
-carrying just two output-shaped arrays (best score, best label), never a
-$K$-channel stack.
+Each label's indicator is resampled with the `inner` kernel (default `Linear`); the per-voxel *arg-max*
+over those resampled scores is the output label. Boundaries are anti-aliased (the inner kernel smooths
+each mask) yet the output is restricted to the input label set - no invented values. The implementation
+is a memory-bounded *running arg-max* fold over the label set: $O(K)$ inner resamples carrying just two
+output-shaped arrays (best score, best label), never a $K$-channel stack.
 
-Two contract details. The label set is a **static** constructor tuple, not
-discovered at runtime: `jnp.unique` is dynamically shaped and would break `jit`,
-so you pass `labels=tuple(...)` (contiguous labels are `tuple(range(K))`).
-**Earlier labels win ties**, and a sample with no label support (e.g. fully out of
-bounds under `mode='constant'`) resolves to `labels[0]` — so **list the background
-label first**. The `inner` kernel's *support width* sets how much anti-aliasing
-happens: `Linear` (2-tap) is a cheap sub-voxel area weighting that refines nearest
-neighbour at junctions but, being narrow, still drops sub-pixel structure under
-heavy downsampling (it coincides with `NN` on a 2× decimation); a wider inner —
-`Lanczos` — area-weights over a larger neighbourhood and preserves thin structures
-(the stronger anti-aliasing ANTs `MultiLabel`, a Gaussian, is known for), at higher
-cost. The arg-max is a hard selection, so `MultiLabel` is **non-differentiable** in
-both values and coordinates (`grad` returns zeros, it does not error); `cval` is
-ignored. **DIFF-JAX** in execution class (jittable) but with a zero gradient — fine
-for warping a final segmentation, never inside a loss.
+Two contract details. The label set is a *static* constructor tuple, not discovered at runtime:
+`jnp.unique` is dynamically shaped and would break `jit`, so you pass `labels=tuple(...)` (contiguous
+labels are `tuple(range(K))`). *Earlier labels win ties*, and a sample with no label support (e.g. fully
+out of bounds under `mode='constant'`) resolves to `labels[0]` - so *list the background label first*.
+The `inner` kernel's *support width* sets how much anti-aliasing happens: `Linear` (2-tap) is a cheap
+sub-voxel area weighting that refines nearest neighbour at junctions but, being narrow, still drops
+sub-pixel structure under heavy downsampling (it coincides with `NN` on a 2× decimation); a wider inner -
+`Lanczos` - area-weights over a larger neighbourhood and preserves thin structures (the stronger
+anti-aliasing ANTs `MultiLabel`, a Gaussian, is known for), at higher cost. The arg-max is a hard
+selection, so `MultiLabel` is *non-differentiable* in both values and coordinates (`grad` returns zeros,
+it does not error); `cval` is ignored. **DIFF-JAX** in execution class (jittable) but with a zero
+gradient - fine for warping a final segmentation, never inside a loss.
 
 ### What the two flags mean for backprop
 
-Pulling the thread together, here is the differentiability table the loss cares
-about:
+Pulling the thread together, here is the differentiability table the loss cares about:
 
 | kernel | `…_in_values` | `…_in_coords` | usable in a registration loss? |
 |---|---|---|---|
@@ -372,12 +326,10 @@ about:
 | `NearestNeighbour` | ✓ | ✗ | **no** (coord-flat) |
 | `MultiLabel` | ✗ | ✗ | **no** (hard arg-max) |
 
-`differentiable_in_values` is whether the output has a gradient with respect to
-the input *intensities* — relevant if you are optimising the image (a generative
-model, an atlas). `differentiable_in_coords` is whether it has a gradient with
-respect to the *sample coordinates* — and since the loss reaches $\theta$ only
-through $\varphi(x)$, this is the flag a coordinate-driven registration needs. The
-chain is
+`differentiable_in_values` is whether the output has a gradient with respect to the input *intensities* -
+relevant if you are optimising the image (a generative model, an atlas). `differentiable_in_coords` is
+whether it has a gradient with respect to the *sample coordinates* - and since the loss reaches $\theta$
+only through $\varphi(x)$, this is the flag a coordinate-driven registration needs. The chain is
 
 $$
 \frac{\partial \mathcal{S}}{\partial \theta}
@@ -386,15 +338,13 @@ $$
 \frac{\partial \varphi(x)}{\partial \theta}.
 $$ {#eq-chain}
 
-If the middle factor is zero — `NearestNeighbour`, `MultiLabel` — the sum is zero
-and the optimiser cannot move, no matter how good the metric or the transform
-parametrisation. That is the single most important consequence of this page for
-anyone building a registration: **the kernel you fit with must be smooth in its
-coordinates.** Fit with `Linear` (or `Lanczos`/`CubicBSpline`); apply the result
-to a label map with `MultiLabel` or `NearestNeighbour`.
+If the middle factor is zero - `NearestNeighbour`, `MultiLabel` - the sum is zero and the optimiser
+cannot move, no matter how good the metric or the transform parametrisation. That is the single most
+important consequence of this chapter for anyone building a registration: *the kernel you fit with must
+be smooth in its coordinates.* Fit with `Linear` (or `Lanczos`/`CubicBSpline`); apply the result to a
+label map with `MultiLabel` or `NearestNeighbour`.
 
-@fig-resampling-kernels shows the kernels side by side and what they do to a hard
-edge.
+@fig-resampling-kernels shows the kernels side by side and what they do to a hard edge.
 
 ```{python}
 #| label: fig-resampling-kernels
@@ -486,8 +436,8 @@ fig.tight_layout()
 plt.show()
 ```
 
-And @fig-resampling-warp is the page's motivating artefact: a transform applied to
-an image to produce the warped result, the forward direction of @eq-pullback-sample.
+And @fig-resampling-warp is the chapter's motivating artefact: a transform applied to an image to produce
+the warped result, the forward direction of @eq-pullback-sample.
 
 ```{python}
 #| label: fig-resampling-warp
@@ -549,13 +499,11 @@ plt.show()
 
 ## Boundary handling: what happens at the edge {#sec-boundary}
 
-A sample coordinate near the edge asks for voxels that do not exist — taps at
-index $-1$ or $N$. Every kernel inherits one boundary policy, applied **once**, at
-the moment integer taps are folded to legal gather indices (`_boundary_index`).
-Boundary is a property of the *call*, not the kernel, so it stays a keyword
-(`mode` / `cval`) on `sample` / `resample` / `spatial_transform` rather than a
-field on the record. There are five modes, matching
-`jax.scipy.ndimage.map_coordinates` exactly at the integer-tap level. For an axis
+A sample coordinate near the edge asks for voxels that do not exist - taps at index $-1$ or $N$. Every
+kernel inherits one boundary policy, applied *once*, at the moment integer taps are folded to legal gather
+indices (`_boundary_index`). Boundary is a property of the *call*, not the kernel, so it stays a keyword
+(`mode` / `cval`) on `sample` / `resample` / `spatial_transform` rather than a field on the record. There
+are five modes, matching `jax.scipy.ndimage.map_coordinates` exactly at the integer-tap level. For an axis
 of length $n$ and an out-of-range tap $t$:
 
 | mode | rule | meaning |
@@ -566,39 +514,33 @@ of length $n$ and an out-of-range tap $t$:
 | `mirror` | fold with period $2(n-1)$, **no** edge repeat | reflect $\dots c\,b\,a\,b\,c\dots$ |
 | `reflect` | fold with period $2n$, **edge repeat** | reflect $\dots b\,a\,a\,b\dots$ |
 
-`constant` is the only mode that uses `cval`: an originally-out-of-range tap is
-marked invalid and its contribution replaced by `cval` (the clamp is just so the
-gather itself never reads out of bounds). The other four always produce a legal
-in-range neighbour, so their validity mask is all-ones and `cval` is ignored. The
-distinction between `mirror` (period $2(n-1)$) and `reflect` (period $2n$) is
-whether the edge sample is repeated at the fold — a one-cell difference that
-nonetheless changes which neighbour a boundary tap lands on.
+`constant` is the only mode that uses `cval`: an originally-out-of-range tap is marked invalid and its
+contribution replaced by `cval` (the clamp is just so the gather itself never reads out of bounds). The
+other four always produce a legal in-range neighbour, so their validity mask is all-ones and `cval` is
+ignored. The distinction between `mirror` (period $2(n-1)$) and `reflect` (period $2n$) is whether the
+edge sample is repeated at the fold - a one-cell difference that nonetheless changes which neighbour a
+boundary tap lands on.
 
-The defaults are chosen per call site for a reason. `spatial_transform` and
-`resample` default to `constant` (with `cval=0`) — the safe "outside the image is
-black" choice for image sampling. But `integrate_velocity_field` defaults to
-`nearest` (edge-replicate), because that is the voxelmorph convention and the
-*only* mode that yields a numerically sensible integrated flow at the boundary;
-`constant` there silently miscomputes the flow within ~`n_steps` voxels of every
-edge. The lesson generalises: when you warp a *flow field* (as opposed to an
-*image*) the right boundary is usually `nearest`, because a displacement does not
-"end" at the edge the way intensity does.
+The defaults are chosen per call site for a reason. `spatial_transform` and `resample` default to
+`constant` (with `cval=0`) - the safe "outside the image is black" choice for image sampling. But
+`integrate_velocity_field` defaults to `nearest` (edge-replicate), because that is the voxelmorph
+convention and the *only* mode that yields a numerically sensible integrated flow at the boundary;
+`constant` there silently miscomputes the flow within ~`n_steps` voxels of every edge. The lesson
+generalises: when you warp a *flow field* (as opposed to an *image*) the right boundary is usually
+`nearest`, because a displacement does not "end" at the edge the way intensity does.
 
 ### The `CubicBSpline` caveat
 
-`CubicBSpline` is the one kernel that does **not** honour an arbitrary `mode`. Its
-prefilter only implements the mirror (whole-sample-symmetric) boundary
-initialisation, and a B-spline is only self-consistent — the interpolation
-property, reproducing the samples, only holds — when the **prefilter and the
-gather share a boundary**. So `CubicBSpline` *always* uses mirror for both and
-ignores the `mode` / `cval` you pass. Per the suite's "loud fallbacks" tenet, that
-override is **announced, not silent**: supplying an explicit non-mirror `mode` (or
-a non-zero `cval`) raises a `CubicBSplineBoundaryWarning`. The bare default
-`mode='constant', cval=0` is treated as *unspecified* and stays silent (so you are
-not warned for simply not passing a mode). Pass `mode='mirror'` to silence it
-deliberately. A mode-aware prefilter (matching scipy for `nearest`/`reflect`/…) is
-a planned extension; today, mirror parity is the contract, and that is exactly the
-mode scipy's order-3 default uses.
+`CubicBSpline` is the one kernel that does *not* honour an arbitrary `mode`. Its prefilter only implements
+the mirror (whole-sample-symmetric) boundary initialisation, and a B-spline is only self-consistent - the
+interpolation property, reproducing the samples, only holds - when the *prefilter and the gather share a
+boundary*. So `CubicBSpline` *always* uses mirror for both and ignores the `mode` / `cval` you pass. Per
+the suite's "loud fallbacks" tenet, that override is *announced, not silent*: supplying an explicit
+non-mirror `mode` (or a non-zero `cval`) raises a `CubicBSplineBoundaryWarning`. The bare default
+`mode='constant', cval=0` is treated as *unspecified* and stays silent (so you are not warned for simply
+not passing a mode). Pass `mode='mirror'` to silence it deliberately. A mode-aware prefilter (matching
+scipy for `nearest`/`reflect`/…) is a planned extension; today, mirror parity is the contract, and that
+is exactly the mode scipy's order-3 default uses.
 
 @fig-resampling-boundary shows the five folds on a short 1-D signal.
 
@@ -660,44 +602,37 @@ plt.show()
 
 ## Two gather engines, and the separable resize {#sec-separable}
 
-Under the kernels sit two gather *engines*. Which one runs is an internal perf
-choice; the numerics are identical to a ULP either way, so the page treats it as a
-performance story, not a correctness one.
+Under the kernels sit two gather *engines*. Which one runs is an internal perf choice; the numerics are
+identical to a ULP either way, so the chapter treats it as a performance story, not a correctness one.
 
-**`_map_coordinates_sample` (Linear / NearestNeighbour).** For the orders scipy's
-`map_coordinates` supports natively (0 nearest, 1 linear), the kernel lowers onto
-`jax.scipy.ndimage.map_coordinates`, mapped over channels with `jax.vmap`. This is
-the XLA-native gather and, re-measured on the pinned JAX `cuda12==0.10.1`, it is
-**faster than the explicit corner gather on the GPU too** — 1.1–1.5× for any image
-$\ge 48^3$, across coherent and random coordinates and 1 or 3 channels (the
-explicit gather only ties it, in noise, on tiny $\le 64^3$ single-channel volumes).
-An earlier "GPU prefers the explicit gather" dispatch was stale; newer XLA
-tightened the lowering. So `_map_coordinates_sample` is both the runtime engine for
-Linear/NN *and* the parity **oracle** the tests pin the explicit gather against.
-(The same backend is the subject of the CPU/GPU characterisation in
-`docs/feature-requests/interpolation-backend-cpu-gpu-gap.md`: it is GPU-strong when
-fused into a larger graph, but XLA-CPU's per-call overhead loses ~5–9× to scipy's
-tight C loop on the iterated small-grid `integrate_velocity_field` — a narrow,
-known gap, not a correctness issue.)
+**`_map_coordinates_sample` (Linear / NearestNeighbour).** For the orders scipy's `map_coordinates`
+supports natively (0 nearest, 1 linear), the kernel lowers onto `jax.scipy.ndimage.map_coordinates`,
+mapped over channels with `jax.vmap`. This is the XLA-native gather and, re-measured on the pinned JAX
+`cuda12==0.10.1`, it is *faster than the explicit corner gather on the GPU too* - 1.1–1.5× for any image
+$\ge 48^3$, across coherent and random coordinates and 1 or 3 channels (the explicit gather only ties it,
+in noise, on tiny $\le 64^3$ single-channel volumes). An earlier "GPU prefers the explicit gather"
+dispatch was stale; newer XLA tightened the lowering. So `_map_coordinates_sample` is both the runtime
+engine for Linear/NN *and* the parity *oracle* the tests pin the explicit gather against. (The same
+backend is the subject of the CPU/GPU characterisation in
+`docs/feature-requests/interpolation-backend-cpu-gpu-gap.md`: it is GPU-strong when fused into a larger
+graph, but XLA-CPU's per-call overhead loses ~5–9× to scipy's tight C loop on the iterated small-grid
+`integrate_velocity_field` - a narrow, known gap, not a correctness issue.)
 
-**`_separable_gather` (Lanczos, CubicBSpline).** Lanczos has no `map_coordinates`
-equivalent, so it uses the explicit separable gather — and so does the cubic
-B-spline basis. Each of the `ndim` axes contributes $T$ integer taps and per-tap
-weights; the boundary mode folds the taps; the $T^{\text{ndim}}$ corner values are
-gathered and contracted against the **outer product** of the per-axis weights.
-This is the pure-JAX "explicit 8-corner gather" (in 3-D) and the algorithmic shape
-a future Pallas pointer-load kernel ports onto. It is differentiable in the image
-values (the gather) and — whenever the tap rule makes the weights depend smoothly
-on the coordinate — in the coordinates.
+**`_separable_gather` (Lanczos, CubicBSpline).** Lanczos has no `map_coordinates` equivalent, so it uses
+the explicit separable gather - and so does the cubic B-spline basis. Each of the `ndim` axes contributes
+$T$ integer taps and per-tap weights; the boundary mode folds the taps; the $T^{\text{ndim}}$ corner
+values are gathered and contracted against the *outer product* of the per-axis weights. This is the
+pure-JAX "explicit 8-corner gather" (in 3-D) and the algorithmic shape a future Pallas pointer-load kernel
+ports onto. It is differentiable in the image values (the gather) and - whenever the tap rule makes the
+weights depend smoothly on the coordinate - in the coordinates.
 
 ### The separable-resize optimisation
 
-For an *arbitrary* warp the corner count is unavoidable: the deformation
-coordinates are not separable, so you must evaluate the full $T^{\text{ndim}}$
-stencil per output voxel. But a `resample` grid **is** separable — it is the outer
-product of the per-axis coordinate vectors of @eq-align-corners. That structure
-lets you resample one axis at a time: a single $T$-tap weighted gather along axis
-0, then along axis 1, then axis 2. The cost drops from the dense
+For an *arbitrary* warp the corner count is unavoidable: the deformation coordinates are not separable, so
+you must evaluate the full $T^{\text{ndim}}$ stencil per output voxel. But a `resample` grid *is*
+separable - it is the outer product of the per-axis coordinate vectors of @eq-align-corners. That
+structure lets you resample one axis at a time: a single $T$-tap weighted gather along axis 0, then along
+axis 1, then axis 2. The cost drops from the dense
 
 $$
 O\big(N_{\text{out}}\cdot T^{\text{ndim}}\big)
@@ -705,81 +640,70 @@ O\big(N_{\text{out}}\cdot T^{\text{ndim}}\big)
 O\big(N_{\text{out}}\cdot T\cdot \text{ndim}\big),
 $$ {#eq-separable-cost}
 
-and the two agree to a ULP. The difference is dramatic for a **wide** kernel:
-`Lanczos(3)` has $T = 2a = 6$ taps, so in 3-D the dense path is $6^3 = 216$ corners
-per voxel against $6\times3 = 18$ for the 1-D passes — an order of magnitude. This
-is `_separable_resample`, selected by the kernel's `prefers_separable_resample`
-flag. `Lanczos` and `CubicBSpline` set it `True` (they *need* it to stay tractable
-in 3-D); `Linear` and `NearestNeighbour` set it `False`, keeping their resize on
-the dense per-coordinate `map_coordinates` path (the 1-D passes are a mild
-regression on the throughput-sensitive CPU interpolation path for those low-tap
-kernels). There is a known curiosity here: because of that flag, a `Linear` resize
-currently runs the dense corner gather and can be *slower* than `Lanczos` for the
-same resize — counter-intuitive, since linear has the fewest taps — and routing
-`Linear` resize onto the separable path is an open optimisation
-(`docs/feature-requests/linear-resample-separable-path.md`). For `CubicBSpline` the
-separable resize first applies the prefilter once to the whole image, then runs the
-per-axis passes on the coefficients (forcing mirror, per @sec-boundary).
-`MultiLabel` is *not* separable (its output is a per-voxel arg-max, not a separable
-weighted sum), so a `MultiLabel` resize falls back to the dense meshgrid gather.
+and the two agree to a ULP. The difference is dramatic for a *wide* kernel: `Lanczos(3)` has $T = 2a = 6$
+taps, so in 3-D the dense path is $6^3 = 216$ corners per voxel against $6\times3 = 18$ for the 1-D passes
+- an order of magnitude. This is `_separable_resample`, selected by the kernel's
+`prefers_separable_resample` flag. `Lanczos` and `CubicBSpline` set it `True` (they *need* it to stay
+tractable in 3-D); `Linear` and `NearestNeighbour` set it `False`, keeping their resize on the dense
+per-coordinate `map_coordinates` path (the 1-D passes are a mild regression on the throughput-sensitive
+CPU interpolation path for those low-tap kernels). There is a known curiosity here: because of that flag,
+a `Linear` resize currently runs the dense corner gather and can be *slower* than `Lanczos` for the same
+resize - counter-intuitive, since linear has the fewest taps - and routing `Linear` resize onto the
+separable path is an open optimisation (`docs/feature-requests/linear-resample-separable-path.md`). For
+`CubicBSpline` the separable resize first applies the prefilter once to the whole image, then runs the
+per-axis passes on the coefficients (forcing mirror, per @sec-boundary). `MultiLabel` is *not* separable
+(its output is a per-voxel arg-max, not a separable weighted sum), so a `MultiLabel` resize falls back to
+the dense meshgrid gather.
 
 ## The Gaussian pyramid: setup for coarse-to-fine {#sec-pyramid}
 
-The transform ladder told you *what* family $\varphi$ lives in; it did not tell you
-how to avoid the optimiser falling into a local minimum on a high-resolution image
-full of fine detail and competing matches. The standard cure — developed fully on
-[the optimization page](optimization.qmd#sec-coarse-fine) — is **coarse-to-fine**:
-solve a blurred, shrunken version of the problem first (few minima, easy basin),
-then warm-start each finer resolution from the coarser solution above it. The
-image stack that makes this possible is the **Gaussian pyramid**, and `nitrix`
-builds it by *composition only* — no new kernel, just the resampling and smoothing
-you already have.
+The transform ladder told you *what* family $\varphi$ lives in; it did not tell you how to avoid the
+optimiser falling into a local minimum on a high-resolution image full of fine detail and competing
+matches. The standard cure - developed fully on [the optimization chapter](optimization.qmd#sec-coarse-fine)
+- is *coarse-to-fine*: solve a blurred, shrunken version of the problem first (few minima, easy basin),
+then warm-start each finer resolution from the coarser solution above it. The image stack that makes this
+possible is the *Gaussian pyramid*, and `nitrix` builds it by *composition only* - no new kernel, just the
+resampling and smoothing you already have.
 
-`gaussian_pyramid(image, *, levels, factor=2.0, sigma=None, mode='reflect',
-method=Linear())` returns a tuple of `levels` images, **finest first**: `out[0]`
-is the full-resolution image and `out[levels-1]` is the coarsest. (Coarse-to-fine
-iterates `reversed(out)`.) Each step down is `downsample`. **HOST-CTOR / DIFF-JAX**
-(it builds a fixed-length tuple of arrays; jittable once `levels` is fixed).
+`gaussian_pyramid(image, *, levels, factor=2.0, sigma=None, mode='reflect', method=Linear())` returns a
+tuple of `levels` images, *finest first*: `out[0]` is the full-resolution image and `out[levels-1]` is
+the coarsest. (Coarse-to-fine iterates `reversed(out)`.) Each step down is `downsample`. **HOST-CTOR /
+DIFF-JAX** (it builds a fixed-length tuple of arrays; jittable once `levels` is fixed).
 
-`downsample(image, *, factor=2.0, sigma=None, mode='reflect', method=Linear())` is
-two operations in sequence:
+`downsample(image, *, factor=2.0, sigma=None, mode='reflect', method=Linear())` is two operations in
+sequence:
 
-1. an **anti-alias Gaussian** with $\sigma = \texttt{factor}/2$ per axis (the
-   default heuristic: the cutoff that suppresses frequencies the coarser grid
-   cannot represent — skip it and you alias high-frequency texture into spurious
-   low-frequency structure), then
-2. an **align-corners `resample`** to `round(spatial / factor)` (floored at 1 per
-   axis).
+1. an *anti-alias Gaussian* with $\sigma = \texttt{factor}/2$ per axis (the default heuristic: the cutoff
+   that suppresses frequencies the coarser grid cannot represent - skip it and you alias high-frequency
+   texture into spurious low-frequency structure), then
+2. an *align-corners `resample`* to `round(spatial / factor)` (floored at 1 per axis).
 
-`upsample(image, target_shape, *, method=Linear())` is the prolongation: a thin
-`resample` to a *larger* shape, with **no anti-alias** (you are not creating new
-high frequencies going up, so there is nothing to pre-filter).
+`upsample(image, target_shape, *, method=Linear())` is the prolongation: a thin `resample` to a *larger*
+shape, with *no anti-alias* (you are not creating new high frequencies going up, so there is nothing to
+pre-filter).
 
 ### The critical caveat: rescale field values on resize
 
-Here is the trap that bites everyone once. A displacement or velocity **field**
-stores values that are *voxel offsets* — a number measured in the grid's own units.
-When you resize the field, the grid's units change, so the stored offsets become
-wrong: an offset of "2 voxels" on a $128$-wide grid is a *different physical
-distance* than "2 voxels" on a $64$-wide grid. Resizing the array does **not** fix
-this. After an `upsample`/`downsample` of a *field* you must additionally rescale
-the field **values** per axis by the size ratio:
+Here is the trap that bites everyone once. A displacement or velocity *field* stores values that are
+*voxel offsets* - a number measured in the grid's own units. When you resize the field, the grid's units
+change, so the stored offsets become wrong: an offset of "2 voxels" on a $128$-wide grid is a *different
+physical distance* than "2 voxels" on a $64$-wide grid. Resizing the array does *not* fix this. After an
+`upsample`/`downsample` of a *field* you must additionally rescale the field *values* per axis by the
+size ratio:
 
 $$
 u'_{d} \;=\; u_{d}\cdot\frac{\texttt{target}[d]}{\texttt{spatial}[d]}.
 $$ {#eq-field-rescale}
 
-This is **semantic**, a property of what the field *means*, not of the resampler —
-so `upsample` deliberately resizes only the array and leaves the value rescaling to
-the caller (the registration driver applies it explicitly when it lifts a coarse
-warp to the next pyramid level). For an *image* there is nothing to rescale
-(intensities are not lengths); for a *field* @eq-field-rescale is mandatory. Get it
-wrong and your coarse-to-fine warp will be off by exactly the pyramid factor at
-every level — a bug that looks like "the registration almost works."
+This is *semantic*, a property of what the field *means*, not of the resampler - so `upsample`
+deliberately resizes only the array and leaves the value rescaling to the caller (the registration driver
+applies it explicitly when it lifts a coarse warp to the next pyramid level). For an *image* there is
+nothing to rescale (intensities are not lengths); for a *field* @eq-field-rescale is mandatory. Get it
+wrong and your coarse-to-fine warp will be off by exactly the pyramid factor at every level - a bug that
+looks like "the registration almost works."
 
-@fig-resampling-pyramid shows a synthetic phantom's pyramid; note how the
-anti-alias suppresses the fine checker texture in the interior as the grid coarsens
-(it cannot be represented, so it should not survive).
+@fig-resampling-pyramid shows a synthetic phantom's pyramid; note how the anti-alias suppresses the fine
+checker texture in the interior as the grid coarsens (it cannot be represented, so it should not survive).
 
 ```{python}
 #| label: fig-resampling-pyramid
@@ -857,65 +781,54 @@ plt.show()
 
 ## The 1-D temporal cousin {#sec-temporal}
 
-Everything above samples a *spatial* grid. There is a one-dimensional sibling in
-the signal domain worth knowing about, because it is the same idea — linear
-interpolation, made differentiable and parallel — on the time axis.
-`signal.interpolate.linear_interpolate(data, mask)` fills *censored* frames of an
-fMRI time series: given `data` with the observation axis last and a boolean `mask`
-(`True` = observed, `False` = missing, e.g. a high-motion frame to drop), it
-replaces each missing frame with the piecewise-linear interpolation between the
-nearest observed frames on either side (leading/trailing gaps are edge-replicated).
-The implementation is neat: rather than a sequential scan, it runs **two
-associative scans** — a forward prefix-max to find the nearest observed frame
-at-or-before each position and a reverse prefix-min for the nearest at-or-after —
-then interpolates elementwise, giving $O(\log n)$ parallel depth on GPU (a ~3–5×
-wall-time win over the legacy sequential code at typical fMRI lengths).
-Differentiable through `data`, not through `mask` (a boolean dispatcher). It is the
-1-D temporal counterpart of `Linear`; for spectrum-preserving interpolation under
-the Power-2014 censoring protocol the signal unit offers `lomb_scargle_interpolate`
-instead. We do not expand it further here — it belongs to the signal domain, and
-this page mentions it only to place the spatial resamplers in the wider family.
+Everything above samples a *spatial* grid. There is a one-dimensional sibling in the signal domain worth
+knowing about, because it is the same idea - linear interpolation, made differentiable and parallel - on
+the time axis. `signal.interpolate.linear_interpolate(data, mask)` fills *censored* frames of an fMRI time
+series: given `data` with the observation axis last and a boolean `mask` (`True` = observed, `False` =
+missing, e.g. a high-motion frame to drop), it replaces each missing frame with the piecewise-linear
+interpolation between the nearest observed frames on either side (leading/trailing gaps are
+edge-replicated). The implementation is neat: rather than a sequential scan, it runs *two associative
+scans* - a forward prefix-max to find the nearest observed frame at-or-before each position and a reverse
+prefix-min for the nearest at-or-after - then interpolates elementwise, giving $O(\log n)$ parallel depth
+on GPU (a ~3–5× wall-time win over the legacy sequential code at typical fMRI lengths). Differentiable
+through `data`, not through `mask` (a boolean dispatcher). It is the 1-D temporal counterpart of `Linear`;
+for spectrum-preserving interpolation under the Power-2014 censoring protocol the signal unit offers
+`lomb_scargle_interpolate` instead. We do not expand it further here - it belongs to the signal domain,
+and this chapter mentions it only to place the spatial resamplers in the wider family.
 
 ## Further reading
 
-- Thévenaz, P., Blu, T., and Unser, M. (2000). "Interpolation Revisited." *IEEE
-  Transactions on Medical Imaging*, 19(7), 739–758. — The reference treatment of
-  interpolation quality for medical images; the B-spline interpolation property and
-  why a prefilter is needed.
-- Unser, M., Aldroubi, A., and Eden, M. (1991). "Fast B-Spline Transforms for
-  Continuous Image Representation and Interpolation." *IEEE TPAMI*, 13(3), 277–285.
-  — The recursive prefilter and the cubic pole $\sqrt{3}-2$ implemented here.
-- Unser, M. (1999). "Splines: A Perfect Fit for Signal and Image Processing." *IEEE
-  Signal Processing Magazine*, 16(6), 22–38. — A readable overview of the whole
-  B-spline-interpolation machinery.
-- Duchon, C. E. (1979). "Lanczos Filtering in One and Two Dimensions." *Journal of
-  Applied Meteorology*, 18(8), 1016–1022. — The windowed-sinc (Lanczos) kernel and
-  its ringing/sharpness trade-off.
-- Dalca, A. V., Balakrishnan, G., Guttag, J., and Sabuncu, M. R. (2019).
-  "Unsupervised Learning of Probabilistic Diffeomorphic Registration for Images and
-  Surfaces." *Medical Image Analysis*, 57, 226–236. — The voxelmorph spatial
-  transformer and velocity integration; the edge-replicate boundary convention for
-  flow warps.
-- Jaderberg, M., Simonyan, K., Zisserman, A., and Kavukcuoglu, K. (2015). "Spatial
-  Transformer Networks." *NeurIPS 2015*. — The differentiable bilinear sampler that
-  made coordinate-driven gradients standard in deep models.
-- Avants, B. B., Tustison, N. J., Song, G., et al. (2011). "A Reproducible
-  Evaluation of ANTs Similarity Metric Performance in Brain Image Registration."
-  *NeuroImage*, 54(3), 2033–2044. — The ANTs lineage these kernels (LanczosWindowedSinc,
-  MultiLabel) follow in behaviour.
-- Power, J. D., Mitra, A., Laumann, T. O., et al. (2014). "Methods to Detect,
-  Characterize, and Remove Motion Artifact in Resting State fMRI." *NeuroImage*, 84,
-  320–341. — The motion-censoring protocol behind `linear_interpolate` /
-  `lomb_scargle_interpolate`.
+- Thévenaz, P., Blu, T., and Unser, M. (2000). "Interpolation Revisited." *IEEE Transactions on Medical
+  Imaging*, 19(7), 739–758. The reference treatment of interpolation quality for medical images; the
+  B-spline interpolation property and why a prefilter is needed.
+- Unser, M., Aldroubi, A., and Eden, M. (1991). "Fast B-Spline Transforms for Continuous Image
+  Representation and Interpolation." *IEEE TPAMI*, 13(3), 277–285. The recursive prefilter and the cubic
+  pole $\sqrt{3}-2$ implemented here.
+- Unser, M. (1999). "Splines: A Perfect Fit for Signal and Image Processing." *IEEE Signal Processing
+  Magazine*, 16(6), 22–38. A readable overview of the whole B-spline-interpolation machinery.
+- Duchon, C. E. (1979). "Lanczos Filtering in One and Two Dimensions." *Journal of Applied Meteorology*,
+  18(8), 1016–1022. The windowed-sinc (Lanczos) kernel and its ringing/sharpness trade-off.
+- Dalca, A. V., Balakrishnan, G., Guttag, J., and Sabuncu, M. R. (2019). "Unsupervised Learning of
+  Probabilistic Diffeomorphic Registration for Images and Surfaces." *Medical Image Analysis*, 57,
+  226–236. The voxelmorph spatial transformer and velocity integration; the edge-replicate boundary
+  convention for flow warps.
+- Jaderberg, M., Simonyan, K., Zisserman, A., and Kavukcuoglu, K. (2015). "Spatial Transformer Networks."
+  *NeurIPS 2015*. The differentiable bilinear sampler that made coordinate-driven gradients standard in
+  deep models.
+- Avants, B. B., Tustison, N. J., Song, G., et al. (2011). "A Reproducible Evaluation of ANTs Similarity
+  Metric Performance in Brain Image Registration." *NeuroImage*, 54(3), 2033–2044. The ANTs lineage these
+  kernels (LanczosWindowedSinc, MultiLabel) follow in behaviour.
+- Power, J. D., Mitra, A., Laumann, T. O., et al. (2014). "Methods to Detect, Characterize, and Remove
+  Motion Artifact in Resting State fMRI." *NeuroImage*, 84, 320–341. The motion-censoring protocol behind
+  `linear_interpolate` / `lomb_scargle_interpolate`.
 
 ## See also
 
-- The coordinate sources — `identity_grid`, `spatial_transform`,
-  `spatial_transform_batched`, `resample`, `sample_at_points`,
-  `integrate_velocity_field` —
+- The coordinate sources — `identity_grid`, `spatial_transform`, `spatial_transform_batched`, `resample`,
+  `sample_at_points`, `integrate_velocity_field` —
   [`src/nitrix/geometry/grid.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/grid.py).
-- The kernel ADT — `Interpolator`, `Linear`, `NearestNeighbour`, `Lanczos`,
-  `CubicBSpline`, `MultiLabel`, the boundary folds, and both gather engines —
+- The kernel ADT — `Interpolator`, `Linear`, `NearestNeighbour`, `Lanczos`, `CubicBSpline`, `MultiLabel`,
+  the boundary folds, and both gather engines —
   [`src/nitrix/geometry/_interpolate.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/_interpolate.py).
 - The Gaussian pyramid — `gaussian_pyramid`, `downsample`, `upsample` —
   [`src/nitrix/geometry/pyramid.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/pyramid.py).
@@ -924,10 +837,8 @@ this page mentions it only to place the spatial resamplers in the wider family.
 - The 1-D temporal cousin — `linear_interpolate` —
   [`src/nitrix/signal/interpolate.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/signal/interpolate.py).
 - Neighbouring pages: the pull-back convention these samplers realise
-  ([Foundations](foundations.qmd#sec-pullback)); how a parametrised transform
-  produces the deformation grid ([Transforms](transforms.qmd#sec-fit)); the
-  coarse-to-fine schedule the pyramid feeds
-  ([Optimization](optimization.qmd#sec-coarse-fine)); the similarity metrics
-  computed on the warped image ([Similarity](similarity.qmd#sec-ssd)); and the
-  velocity integration built on `spatial_transform`
+  ([Foundations](foundations.qmd#sec-pullback)); how a parametrised transform produces the deformation
+  grid ([Transforms](transforms.qmd#sec-fit)); the coarse-to-fine schedule the pyramid feeds
+  ([Optimization](optimization.qmd#sec-coarse-fine)); the similarity metrics computed on the warped image
+  ([Similarity](similarity.qmd#sec-ssd)); and the velocity integration built on `spatial_transform`
   ([Diffeomorphic](diffeomorphic.qmd#sec-svf)).

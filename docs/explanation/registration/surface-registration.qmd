@@ -2,106 +2,94 @@
 title: "Surface registration: the sphere as a common frame"
 ---
 
-::: {.callout-tldr title="Fast path"}
-The top rung of the [transform ladder](foundations.qmd#sec-ladder) does not move
-voxels — it moves **vertices on a surface**. The cortex is a crumpled sheet, and
-two subjects' crumples never line up; we cannot align them in the volume. The fix
-is to send each cortex to the **one shape they all share**: the round sphere. This
-page owns that machinery in `nitrix.geometry.sphere`:
+The top rung of the [transform ladder](foundations.qmd#sec-ladder) does not move voxels - it moves
+*vertices on a surface*. The cortex is a crumpled sheet, and two subjects' crumples never line up; we
+cannot align them in the volume. The fix is to send each cortex to the *one shape they all share*: the
+round sphere. The transform family is therefore the diffeomorphisms of the sphere, $\mathrm{Diff}(S^2)$,
+with the rotation group $SO(3)$ as its rigid core - the group thread of the unit, now playing out on a
+2-manifold. This chapter owns that machinery in `nitrix.geometry.sphere`:
 
-- [`spherical_parameterize`](#sec-parameterize) — flatten a genus-0 cortical mesh
-  onto $S^2$ by **Riemannian gradient descent** on $(S^2)^n$, minimising a
-  conformal + areal **distortion energy**, with a **fold-safe line-search** that
-  makes bijectivity an invariant of every step.
-- [`surface_resample`](#sec-resample) — once two cortices live on the sphere, carry
-  a field from one to the other by **barycentric resampling**; the default mode
-  **conserves the area-weighted integral**, so label fractions and scalar means
-  survive the transfer.
-- [`spherical_conv`](#sec-spherical-conv) and `spherical_geodesic_distance` —
-  Gaussian smoothing and great-circle distance on the sphere, built on the
-  geometry unit's sparse-operator substrate.
+- [`spherical_parameterize`](#sec-parameterize) - flatten a genus-0 cortical mesh onto $S^2$ by
+  *Riemannian gradient descent* on $(S^2)^n$, minimising a conformal + areal *distortion energy*, with a
+  *fold-safe line-search* that makes bijectivity an invariant of every step.
+- [`surface_resample`](#sec-resample) - once two cortices live on the sphere, carry a field from one to
+  the other by *barycentric resampling*; the default mode *conserves the area-weighted integral*, so
+  label fractions and scalar means survive the transfer.
+- [`spherical_conv`](#sec-spherical-conv) and `spherical_geodesic_distance` - Gaussian smoothing and
+  great-circle distance on the sphere, built on the geometry unit's sparse-operator substrate.
 
-The single new idea: a surface registration is *still* "minimise a mismatch energy
-over a parametrised family of maps" — but the family is **maps of a sphere to
-itself**, and the regulariser that keeps the map physical is "**no triangle may
-fold**."
-:::
+The single new idea: a surface registration is *still* "minimise a mismatch energy over a parametrised
+family of maps" - but the family is *maps of a sphere to itself*, and the regulariser that keeps the map
+physical (its membership in $\mathrm{Diff}(S^2)$) is "*no triangle may fold*."
 
-This unit is written for a reader fluent in **linear algebra** who has read the
-geometry unit (meshes and grids as discrete stand-ins for smooth manifolds) but has
-had **no formal training in image registration, graphics, or surface processing**.
-The earlier pages built the governing idea — *a registration is a map between two
-geometries, found by minimising a mismatch energy over a parametrised family of
-transforms* — and climbed the ladder from rigid through affine
-([Transforms](transforms.qmd#sec-homogeneous)) to dense diffeomorphisms
-([Diffeomorphic](diffeomorphic.qmd#sec-svf)). Every rung so far has lived in the
-**volume**: the domain was a grid $\Omega_f$, the map was $\varphi:\Omega_f\to\Omega_m$,
-and the physicality constraint was $\det J>0$ (no folding of the deformation field).
+This chapter is written for a reader fluent in linear algebra who has read the geometry unit (meshes and
+grids as discrete stand-ins for smooth manifolds) but has had no formal training in image registration,
+graphics, or surface processing. The earlier chapters built the governing idea - *a registration is a map
+between two geometries, found by minimising a mismatch energy over a parametrised family of transforms* -
+and climbed the ladder from rigid through affine ([Transforms](transforms.qmd#sec-homogeneous)) to dense
+diffeomorphisms ([Diffeomorphic](diffeomorphic.qmd#sec-svf)). Every rung so far has lived in the *volume*:
+the domain was a grid $\Omega_f$, the map was $\varphi:\Omega_f\to\Omega_m$, and the physicality
+constraint was $\det J>0$ (no folding of the deformation field).
 
-This page is the ladder's summit and its one genuine change of setting. The data is
-no longer an image on a grid; it is a **scalar field on a folded 2-D sheet** — the
-cerebral cortex — embedded in 3-D. The same four questions return — how is the map
-*represented*, *applied*, *scored*, and *found*, while staying *physical* — but every
-answer is re-derived for the surface. We lean hard on the geometry unit, which already
-owns the spherical embedding theory: we will **build on it, not re-derive it**.
+This chapter is the ladder's summit and its one genuine change of setting. The data is no longer an image
+on a grid; it is a *scalar field on a folded 2-D sheet* - the cerebral cortex - embedded in 3-D. The same
+four questions return - how is the map *represented*, *applied*, *scored*, and *found*, while staying
+*physical* - but every answer is re-derived for the surface. We lean hard on the geometry unit, which
+already owns the spherical embedding theory: we *build on it, not re-derive it*.
 
-## A motivating question {#sec-motivation}
+## A motivating problem {#sec-motivation}
 
-You have T1 scans from two subjects. You run a surface pipeline and recover, for each,
-a triangle mesh of the white-matter surface — the boundary between grey and white
-matter, a highly folded genus-0 sheet of roughly 150,000 vertices — plus a scalar map
-on it, say cortical thickness or a task activation $z$-statistic. You want to ask a
-group question: *is thickness greater in subject A than subject B at the same patch of
-cortex?*
+You have T1 scans from two subjects. You run a surface pipeline and recover, for each, a triangle mesh of
+the white-matter surface - the boundary between grey and white matter, a highly folded genus-0 sheet of
+roughly 150,000 vertices - plus a scalar map on it, say cortical thickness or a task activation
+$z$-statistic. You want to ask a group question: *is thickness greater in subject A than subject B at the
+same patch of cortex?*
 
-That question is ill-posed as stated, because **subject A's vertex 90,210 is not
-subject B's vertex 90,210.** The two meshes have different vertex counts, different
-tessellations, and — fatally — different folding patterns: A's central sulcus sits
-where B's precentral gyrus does. There is no volume transform $\varphi$ that lines up
-their cortices, because the cortex is a 2-D manifold crumpled into 3-D, and the
-crumpling is individual. Aligning the *folds* in 3-D space is the wrong target; what
-we want to align is **position along the cortical sheet**, intrinsic to the surface.
+That question is ill-posed as stated, because subject A's vertex 90,210 is not subject B's vertex 90,210.
+The two meshes have different vertex counts, different tessellations, and - fatally - different folding
+patterns: A's central sulcus sits where B's precentral gyrus does. There is no volume transform $\varphi$
+that lines up their cortices, because the cortex is a 2-D manifold crumpled into 3-D, and the crumpling is
+individual. Aligning the *folds* in 3-D space is the wrong target; what we want to align is *position
+along the cortical sheet*, intrinsic to the surface.
 
-The strategy, which this page makes concrete, has two moves:
+The strategy, which this chapter makes concrete, has two moves:
 
-1. **Find a common frame.** Every genus-0 surface is topologically — and, by the
-   uniformisation theorem, conformally — a sphere. So map each subject's cortex onto
-   the unit sphere $S^2$, as undistorted as possible. The sphere is the **canonical
-   common coordinate system** for the cortex: a point on it is "this much anterior,
-   this much dorsal," independent of any one brain's folds. That is
+1. **Find a common frame.** Every genus-0 surface is topologically - and, by the uniformisation theorem,
+   conformally - a sphere. So map each subject's cortex onto the unit sphere $S^2$, as undistorted as
+   possible. The sphere is the *canonical common coordinate system* for the cortex: a point on it is "this
+   much anterior, this much dorsal," independent of any one brain's folds. That is
    [`spherical_parameterize`](#sec-parameterize).
-2. **Transfer fields across the frame.** With both cortices on the sphere (and, in a
-   real pipeline, rotationally *registered* so anatomy aligns — see the closing
-   note), resample subject A's thickness onto subject B's spherical mesh — or onto a
-   shared template mesh like `fsaverage`. That is [`surface_resample`](#sec-resample).
-   Now "the same patch of cortex" *means* "the same spherical coordinate," and the
-   group question is well-posed.
+2. **Transfer fields across the frame.** With both cortices on the sphere (and, in a real pipeline,
+   rotationally *registered* so anatomy aligns - see the closing note), resample subject A's thickness
+   onto subject B's spherical mesh - or onto a shared template mesh like `fsaverage`. That is
+   [`surface_resample`](#sec-resample). Now "the same patch of cortex" *means* "the same spherical
+   coordinate," and the group question is well-posed.
 
-`spherical_conv` and `spherical_geodesic_distance` are the supporting metric tools you
-need once you live on the sphere — to smooth a noisy map respecting the surface, and to
-measure distance along it. We take the three in turn, intuition to rigour.
+`spherical_conv` and `spherical_geodesic_distance` are the supporting metric tools you need once you live
+on the sphere - to smooth a noisy map respecting the surface, and to measure distance along it. We take
+the three in turn, intuition to rigour.
 
 ## Why a sphere, and how to get there {#sec-parameterize}
 
 ### The sphere is the cortex's natural chart
 
-Start from the topology. The cortex, taken as the white-matter or pial surface of one
-hemisphere with the midline cut filled, is a **genus-0** closed surface — a sphere with
-no handles (the [geometry foundations](../geometry/foundations.qmd#sec-discretization)
-page sets out the mesh-as-manifold picture; the genus / Euler-characteristic
-machinery is owned there and in
-[`signed_spherical_areas` / `is_bijective_sphere_map`](../geometry/spectral.qmd#sec-embedding)).
-A genus-0 surface can be continuously deformed onto a sphere without cutting or gluing.
-Better than topology, the **uniformisation theorem** promises a deformation that is
-*conformal* — angle-preserving — and essentially unique. So the sphere is not an
-arbitrary choice; it is the cortex's natural global chart, the one surface that every
-genus-0 cortex shares and onto which each maps almost-rigidly-in-spirit.
+Start from the topology. The cortex, taken as the white-matter or pial surface of one hemisphere with the
+midline cut filled, is a *genus-0* closed surface - a sphere with no handles (the
+[geometry foundations](../geometry/foundations.qmd#sec-discretization) page sets out the
+mesh-as-manifold picture; the genus / Euler-characteristic machinery is owned there and in
+[`signed_spherical_areas` / `is_bijective_sphere_map`](../geometry/spectral.qmd#sec-embedding)). A genus-0
+surface can be continuously deformed onto a sphere without cutting or gluing. Better than topology, the
+*uniformisation theorem* promises a deformation that is *conformal* - angle-preserving - and essentially
+unique. So the sphere is not an arbitrary choice; it is the cortex's natural global chart, the one surface
+that every genus-0 cortex shares and onto which each maps almost-rigidly-in-spirit.
 
-We want the vertex positions $\Phi=\{\phi_i\}\subset S^2$ such that the piecewise-linear
-map (original vertex $v_i \mapsto$ spherical vertex $\phi_i$, **same faces**) is a
-**bijection** (every spherical triangle keeps positive oriented area — no folds) and
-distorts the surface's geometry as little as possible. @fig-surface-parameterize shows
-the target: a bumpy genus-0 blob and its spherical image carrying the same field.
+We want the vertex positions $\Phi=\{\phi_i\}\subset S^2$ such that the piecewise-linear map (original
+vertex $v_i \mapsto$ spherical vertex $\phi_i$, *same faces*) is a *bijection* (every spherical triangle
+keeps positive oriented area - no folds) and distorts the surface's geometry as little as possible.
+Bijectivity is exactly the statement that the map is a genuine element of $\mathrm{Diff}(S^2)$ rather than
+a self-overlapping fold; it is the surface counterpart of the volume rungs' $\det J>0$.
+@fig-surface-parameterize shows the target: a bumpy genus-0 blob and its spherical image carrying the same
+field.
 
 ```{python}
 #| label: fig-surface-parameterize
@@ -189,173 +177,156 @@ fig.tight_layout()
 plt.show()
 ```
 
-### The simplest thing, and where it breaks
+### Radial projection, and where it breaks
 
-The obvious first attempt: push each vertex straight out from the surface's centroid
-onto the sphere — **radial projection**, $\phi_i = r\,(v_i-c)/\lVert v_i-c\rVert$. This
-is exactly `init='radial'` in the code. For a nearly-convex inflated blob it works and
-costs nothing. It breaks the moment the surface is non-convex: a sulcal bank that folds
-back past the centroid projects *on top of* the gyrus next to it, and two triangles land
-on the same patch of sphere with **opposite orientation** — a fold. A folded map is not
-a bijection; vertex correspondence is destroyed silently.
+The obvious first attempt: push each vertex straight out from the surface's centroid onto the sphere -
+*radial projection*, $\phi_i = r\,(v_i-c)/\lVert v_i-c\rVert$. This is exactly `init='radial'` in the
+code. For a nearly-convex inflated blob it works and costs nothing. It breaks the moment the surface is
+non-convex: a sulcal bank that folds back past the centroid projects *on top of* the gyrus next to it, and
+two triangles land on the same patch of sphere with *opposite orientation* - a fold. A folded map is not a
+bijection (not an element of $\mathrm{Diff}(S^2)$); vertex correspondence is destroyed silently.
 
-So radial projection fails when the surface is folded — which a cortex emphatically is.
-We need two things radial projection lacks: a **better starting point** that is already
-nearly fold-free, and an **iterative refinement** that drives distortion down *while
-provably never folding*. `spherical_parameterize` supplies both.
+So radial projection fails when the surface is folded - which a cortex emphatically is. We need two things
+radial projection lacks: a *better starting point* that is already nearly fold-free, and an *iterative
+refinement* that drives distortion down *while provably never folding*. `spherical_parameterize` supplies
+both.
 
 ### A better start: the spectral embedding (owned by the geometry unit)
 
-The default `init='spectral'` is the FastSurfer / recon-surf one-shot map, and it is
-**owned, derived, and figured by the geometry unit** — see
-[spectral embedding: a sphere in one eigensolve](../geometry/spectral.qmd#sec-embedding).
-We do not re-derive it here; we use its result. In one sentence: solve the
-Laplace–Beltrami generalised eigenproblem $L\phi=\lambda M\phi$ on the mesh, take the
-**first three non-constant eigenfunctions** $(\phi_1,\phi_2,\phi_3)$ — which on a round
-sphere *are* the coordinate fields $x,y,z$ — and normalise each vertex's triple to the
-sphere. For an inflated cortex (already near-spherical), this lands almost on the sphere
-in a single eigensolve, with no iteration. `spherical_parameterize` calls
-`spectral_sphere_embedding` to obtain $\Phi^{(0)}$, reusing the cotangent operator it
-will need anyway (it builds `mesh_cotangent_laplacian` once and threads it in via
-`laplacian=`).
+The default `init='spectral'` is the FastSurfer / recon-surf one-shot map, and it is *owned, derived, and
+figured by the geometry unit* - see
+[spectral embedding: a sphere in one eigensolve](../geometry/spectral.qmd#sec-embedding). We do not
+re-derive it here; we use its result. In one sentence: solve the Laplace–Beltrami generalised eigenproblem
+$L\phi=\lambda M\phi$ on the mesh, take the *first three non-constant eigenfunctions* $(\phi_1,\phi_2,
+\phi_3)$ - which on a round sphere *are* the coordinate fields $x,y,z$ - and normalise each vertex's triple
+to the sphere. For an inflated cortex (already near-spherical), this lands almost on the sphere in a single
+eigensolve, with no iteration. `spherical_parameterize` calls `spectral_sphere_embedding` to obtain
+$\Phi^{(0)}$, reusing the cotangent operator it will need anyway (it builds `mesh_cotangent_laplacian` once
+and threads it in via `laplacian=`).
 
-The spectral map is fast but only **quality-gated** bijective: recon-surf tolerates a
-tiny flipped-area fraction rather than proving zero folds. The fold *gate* itself —
-[`is_bijective_sphere_map`](../geometry/spectral.qmd#sec-embedding) (a degree-1 cover
-test: signed solid angles sum to $\pm4\pi$ and no triangle flips against the dominant
-orientation) and the [`signed_spherical_areas`](../geometry/spectral.qmd#sec-embedding)
-it is built on — also live in the geometry unit. We **build on them**: they are the
-fold-detector the refinement uses on every step. The other inexpensive start,
-`init='radial'`, is there for near-convex inputs and falls through the same gate.
+The spectral map is fast but only *quality-gated* bijective: recon-surf tolerates a tiny flipped-area
+fraction rather than proving zero folds. The fold *gate* itself -
+[`is_bijective_sphere_map`](../geometry/spectral.qmd#sec-embedding) (a degree-1 cover test: signed solid
+angles sum to $\pm4\pi$ and no triangle flips against the dominant orientation) and the
+[`signed_spherical_areas`](../geometry/spectral.qmd#sec-embedding) it is built on - also live in the
+geometry unit. We *build on them*: they are the fold-detector the refinement uses on every step. The other
+inexpensive start, `init='radial'`, is there for near-convex inputs and falls through the same gate.
 
-One detail `spherical_parameterize` fixes before refining: the spectral eigenfunctions
-carry an arbitrary **sign gauge**, so the embedding may come out inside-out (all signed
-areas negative). The code measures the total signed area and mirrors one axis if it is
-negative — `sign = jnp.where(jnp.sum(signed_spherical_areas(phi, faces)) < 0, -1, 1)`,
-then `phi = phi.at[:, 0].multiply(sign)` — so a bijective map always has positive
-orientation. This is done with `jnp.where`, not a host branch, so it composes under
-`jit`/`grad`. With `n_iterations=0` the function returns this gauge-fixed init alone —
-the recon-surf-grade one-shot map.
+One detail `spherical_parameterize` fixes before refining: the spectral eigenfunctions carry an arbitrary
+*sign gauge* (the eigenvector-sign symmetry of [the spectral chapter](../geometry/spectral.qmd#sec-embedding)),
+so the embedding may come out inside-out (all signed areas negative). The code measures the total signed
+area and mirrors one axis if it is negative - `sign = jnp.where(jnp.sum(signed_spherical_areas(phi, faces))
+< 0, -1, 1)`, then `phi = phi.at[:, 0].multiply(sign)` - so a bijective map always has positive
+orientation. This is done with `jnp.where`, not a host branch, so it composes under `jit`/`grad`. With
+`n_iterations=0` the function returns this gauge-fixed init alone - the recon-surf-grade one-shot map.
 
 ### The energy: conformal core, areal barrier, and the collapse trap
 
-Now the refinement. We need a scalar **distortion energy** $E(\Phi)$ that is small when
-the map is faithful and that we can differentiate. The reader's instinct — and the right
-core — is the **Dirichlet / conformal energy**, the surface analogue of $\int\lVert\nabla
-\varphi\rVert^2$:
+Now the refinement. We need a scalar *distortion energy* $E(\Phi)$ that is small when the map is faithful
+and that we can differentiate. The right core is the *Dirichlet / conformal energy*, the surface analogue
+of $\int\lVert\nabla\varphi\rVert^2$:
 
 $$
 E_{\text{conf}}(\Phi) \;=\; \tfrac12 \sum_{(i,j)} w_{ij}\,\lVert \phi_i - \phi_j \rVert^2
 \;=\; \tfrac12\,\Phi^\top L\,\Phi,
 $$ {#eq-conformal}
 
-where $L$ is the **cotangent Laplacian** of the *original* mesh (the geometry unit's
-[cotangent Laplace–Beltrami operator](../geometry/laplace-beltrami.qmd#sec-cotangent))
-and $w_{ij}$ are its cotangent edge weights. In the code this is exactly
-`0.5 * jnp.sum(p * apply_operator(lap, p))` — a quadratic form applied through the sparse
-[apply seam](../geometry/operators.qmd#sec-apply). Minimising $E_{\text{conf}}$ over maps
-to the sphere yields the harmonic, angle-preserving map: the conformal core.
+where $L$ is the *cotangent Laplacian* of the *original* mesh (the geometry unit's
+[cotangent Laplace–Beltrami operator](../geometry/laplace-beltrami.qmd#sec-cotangent)) and $w_{ij}$ are its
+cotangent edge weights. In the code this is exactly `0.5 * jnp.sum(p * apply_operator(lap, p))` - a
+quadratic form applied through the sparse [apply seam](../geometry/operators.qmd#sec-apply). Minimising
+$E_{\text{conf}}$ over maps to the sphere yields the harmonic, angle-preserving map: the conformal core.
 
-Here is the load-bearing subtlety. $E_{\text{conf}}$ has a **trivial global minimiser**:
-collapse *every* vertex to a single point on the sphere. Then every $\phi_i-\phi_j=0$ and
-the energy is exactly zero. Pure conformal descent will happily slide toward this useless
-"all of cortex maps to the north pole" solution. Avoiding collapse is not a nicety; it is
-the whole game. The cure has two parts, both present in the code.
+Here is the load-bearing subtlety. $E_{\text{conf}}$ has a *trivial global minimiser*: collapse *every*
+vertex to a single point on the sphere. Then every $\phi_i-\phi_j=0$ and the energy is exactly zero. Pure
+conformal descent will slide toward this useless "all of cortex maps to the north pole" solution. Avoiding
+collapse is the whole problem. The cure has two parts, both present in the code.
 
-**Part one: an areal term that explodes as any triangle shrinks.** Let $a_f(\Phi)$ be the
-signed spherical area (`signed_spherical_areas`) of face $f$, and let the **target** area
-be the original face's share of the total, scaled so the targets sum to $4\pi$:
-$\text{target}_f = 4\pi\,A^0_f/\sum_g A^0_g$ (in code, `target = 4*pi*a0/sum(a0)` with
-`a0 = face_areas(mesh)`). Define the relative area $s_f = a_f/\text{target}_f$ (so a
-perfectly area-true face has $s_f=1$). The energy uses the symmetric **ratio barrier**
+**Part one: an areal term that explodes as any triangle shrinks.** Let $a_f(\Phi)$ be the signed spherical
+area (`signed_spherical_areas`) of face $f$, and let the *target* area be the original face's share of the
+total, scaled so the targets sum to $4\pi$: $\text{target}_f = 4\pi\,A^0_f/\sum_g A^0_g$ (in code,
+`target = 4*pi*a0/sum(a0)` with `a0 = face_areas(mesh)`). Define the relative area $s_f =
+a_f/\text{target}_f$ (so a perfectly area-true face has $s_f=1$). The energy uses the symmetric *ratio
+barrier*
 
 $$
 E_{\text{area}}(\Phi) \;=\; \sum_f \Big( s_f + \tfrac{1}{s_f} - 2 \Big)
 \;+\; 10^3 \sum_f \max\!\big(10^{-3} - s_f,\; 0\big),
 $$ {#eq-area}
 
-with $s_f$ floored at $10^{-3}$ inside the barrier for numerical safety. The first term
-$s+1/s-2$ is zero at $s=1$, grows whether the face is too big *or* too small, and
-$\to\infty$ as $s\to0^+$ — so any global shrink is infinitely penalised, killing the
-collapse minimiser. The second term is a **hinge** that activates only on tiny or
-*negative* (flipped) areas; unlike a hard clamp it keeps a live *gradient* pushing a
-folded triangle back toward positive area. The total energy the optimiser sees is
+with $s_f$ floored at $10^{-3}$ inside the barrier for numerical safety. The first term $s+1/s-2$ is zero
+at $s=1$, grows whether the face is too big *or* too small, and $\to\infty$ as $s\to0^+$ - so any global
+shrink is infinitely penalised, killing the collapse minimiser. The second term is a *hinge* that activates
+only on tiny or *negative* (flipped) areas; unlike a hard clamp it keeps a live *gradient* pushing a folded
+triangle back toward positive area. The total energy the optimiser sees is
 
 $$
 E(\Phi) \;=\; \lambda_{\text{conf}}\,E_{\text{conf}}(\Phi)
 \;+\; \lambda_{\text{area}}\,E_{\text{area}}(\Phi),
 $$ {#eq-total}
 
-with weights `conformal_weight` and `area_weight` (default $1$ each). The
-collapse-free conformal map is the Choi–Lam–Lui (2015) insight — $E_{\text{conf}}$ minus
-an area reward has no collapse minimiser — realised here through the explicit area
-barrier so the same machinery also serves the area-controlled objective FreeSurfer's
-`mris_sphere` wants.
+with weights `conformal_weight` and `area_weight` (default $1$ each). The collapse-free conformal map is
+the Choi–Lam–Lui (2015) insight - $E_{\text{conf}}$ minus an area reward has no collapse minimiser -
+realised here through the explicit area barrier so the same machinery also serves the area-controlled
+objective FreeSurfer's `mris_sphere` wants.
 
-**Part two: centroid (Möbius) normalisation each step**, described next — it removes the
-gauge direction along which collapse drifts.
+**Part two: centroid (Möbius) normalisation each step**, described next - it removes the gauge direction
+along which collapse drifts.
 
 ### Finding the map: Riemannian descent with a fold-safe line-search
 
-The vertices are **constrained** to the sphere: $\Phi\in(S^2)^n$, not free in $\mathbb
-R^{3n}$. Naively stepping $\Phi - \alpha\nabla E$ walks off the sphere. The clean way to
-optimise on a constraint manifold is **Riemannian gradient descent**, in three moves the
-reader can reconstruct:
+The vertices are *constrained* to the sphere: $\Phi\in(S^2)^n$, not free in $\mathbb R^{3n}$. Naively
+stepping $\Phi - \alpha\nabla E$ walks off the sphere. The clean way to optimise on a constraint manifold
+is *Riemannian gradient descent* - the same posture that put the optimiser on the Lie chart for the matrix
+rungs, here on the product manifold $(S^2)^n$ - in three moves:
 
-1. **Euclidean gradient.** $g=\nabla_\Phi E$ — and because the whole energy is pure JAX,
-   this is just `jax.grad(_energy)`. No hand-derived gradient.
-2. **Tangent projection.** At a point $\phi_i$ on a sphere of radius $r$, the only
-   admissible motions are *tangent* to the sphere; the radial part of the gradient would
-   push off it. Remove it:
+1. **Euclidean gradient.** $g=\nabla_\Phi E$ - and because the whole energy is pure JAX, this is just
+   `jax.grad(_energy)`. No hand-derived gradient.
+2. **Tangent projection.** At a point $\phi_i$ on a sphere of radius $r$, the only admissible motions are
+   *tangent* to the sphere; the radial part of the gradient would push off it. Remove it:
    $$
    g^\perp_i \;=\; g_i \;-\; \frac{\langle g_i,\phi_i\rangle}{r^2}\,\phi_i.
    $$ {#eq-tangent}
-   In code, `grad_t = g - jnp.sum(g * p, axis=-1, keepdims=True) / r2 * p`. The
-   stiff fold barrier can make the raw gradient enormous at a near-flipped triangle, so
-   the code then **normalises by the largest per-vertex tangent gradient**
-   (`grad_t / (gmax + 1e-12)`), so the step size $\alpha$ bounds the largest vertex move
-   and one bad triangle cannot make the whole step overshoot.
-3. **Retraction.** A tangent step leaves the sphere slightly; pull it back by
-   renormalising to radius $r$: $\phi_i \leftarrow r\,(\phi_i-\alpha g^\perp_i)/
-   \lVert\cdot\rVert$. This is the `_retract` helper — and it is also where the **centroid
-   (Möbius) normalisation** lives: after renormalising, subtract the mean
-   (`q - jnp.mean(q, axis=0)`) and renormalise again. Spherical conformal maps are unique
-   only up to a Möbius transform; recentring the cloud at the origin each step fixes the
-   translational gauge and is the concrete mechanism — together with @eq-area — that
-   blocks the collapse.
+   In code, `grad_t = g - jnp.sum(g * p, axis=-1, keepdims=True) / r2 * p`. The stiff fold barrier can make
+   the raw gradient enormous at a near-flipped triangle, so the code then *normalises by the largest
+   per-vertex tangent gradient* (`grad_t / (gmax + 1e-12)`), so the step size $\alpha$ bounds the largest
+   vertex move and one bad triangle cannot make the whole step overshoot.
+3. **Retraction.** A tangent step leaves the sphere slightly; pull it back by renormalising to radius $r$:
+   $\phi_i \leftarrow r\,(\phi_i-\alpha g^\perp_i)/\lVert\cdot\rVert$. This is the `_retract` helper - and
+   it is also where the *centroid (Möbius) normalisation* lives: after renormalising, subtract the mean
+   (`q - jnp.mean(q, axis=0)`) and renormalise again. Spherical conformal maps are unique only up to a
+   Möbius transform; recentring the cloud at the origin each step fixes the translational gauge and is the
+   concrete mechanism - together with @eq-area - that blocks the collapse.
 
-The physicality constraint — the analogue of $\det J>0$ from the volume rungs — is **no
-fold**: every $a_f>0$. We enforce it not by hoping the optimum is fold-free but by making
-it an **invariant of the iteration**, via a **fold-safe backtracking line-search**. Each
-outer step:
+The physicality constraint - the analogue of $\det J>0$ from the volume rungs, here the condition that the
+map stay in $\mathrm{Diff}(S^2)$ - is *no fold*: every $a_f>0$. We enforce it not by hoping the optimum is
+fold-free but by making it an *invariant of the iteration*, via a *fold-safe backtracking line-search*.
+Each outer step:
 
-- record the current energy $e_0$ and current flip count
-  $n_{\text{flip}}^0=\#\{f: a_f\le0\}$;
+- record the current energy $e_0$ and current flip count $n_{\text{flip}}^0=\#\{f: a_f\le0\}$;
 - propose the retracted candidate at step $\alpha$;
-- **accept** it only if it both *lowers the energy* ($E(\text{cand})<e_0$) **and** does
-  not increase the flip count ($n_{\text{flip}}\le n_{\text{flip}}^0$); otherwise **halve
-  $\alpha$ and retry**, down to a floor $\alpha>10^{-5}$.
+- *accept* it only if it both *lowers the energy* ($E(\text{cand})<e_0$) *and* does not increase the flip
+  count ($n_{\text{flip}}\le n_{\text{flip}}^0$); otherwise *halve $\alpha$ and retry*, down to a floor
+  $\alpha>10^{-5}$.
 
-This is a `jax.lax.while_loop` inside the body, the outer loop a `jax.lax.fori_loop` over
-`n_iterations`. The acceptance test is the heart of it: a step that would flip a triangle
-is rejected and the move shrunk, so the iterate **can never leave the fold-free region**.
-Bijectivity is driven to strict (no flipped triangles) and *held* there — exactly the
-"a diffeomorphism does not tear or fold" posture, transcribed to the surface.
+This is a `jax.lax.while_loop` inside the body, the outer loop a `jax.lax.fori_loop` over `n_iterations`.
+The acceptance test is the heart of it: a step that would flip a triangle is rejected and the move shrunk,
+so the iterate *can never leave the fold-free region*. Bijectivity is driven to strict (no flipped
+triangles) and *held* there - exactly the "a diffeomorphism does not tear or fold" posture, transcribed to
+the surface.
 
 ### Execution class and how to call it
 
-`spherical_parameterize` is **host-orchestrated**, *not* a jittable kernel — the one place
-on this page where you must not reach for `jax.jit`. It builds the cotangent operator
-host-side (NumPy assembly) once, and for `init='spectral'` runs a host eigensolve; the
-per-iteration *body* (energy, tangent gradient, fold-safe search) is pure JAX and runs on
-device, but the function **as a whole is neither jittable nor differentiable w.r.t.
-`mesh.vertices`** (the operator weights are NumPy constants). Differentiating *through* the
-parameterisation (e.g. a learned consumer needing $\partial\Phi/\partial V$) is out of
-scope; the principled route would be implicit differentiation at the energy minimiser, a
-documented follow-up. The contract from the
-[execution-class taxonomy](../geometry/foundations.qmd#sec-classes) holds: **never call a
-host op inside a jitted loop** — call `spherical_parameterize` to *produce* a spherical map,
-then jit the downstream numerics. Its full signature, with the defaults that matter:
+`spherical_parameterize` is *host-orchestrated*, *not* a jittable kernel - the one place in this chapter
+where you must not reach for `jax.jit`. It builds the cotangent operator host-side (NumPy assembly) once,
+and for `init='spectral'` runs a host eigensolve; the per-iteration *body* (energy, tangent gradient,
+fold-safe search) is pure JAX and runs on device, but the function *as a whole is neither jittable nor
+differentiable w.r.t. `mesh.vertices`* (the operator weights are NumPy constants). Differentiating
+*through* the parameterisation (e.g. a learned consumer needing $\partial\Phi/\partial V$) is out of scope;
+the principled route would be implicit differentiation at the energy minimiser, a documented follow-up. The
+contract from the [execution-class taxonomy](../geometry/foundations.qmd#sec-classes) holds: *never call a
+host op inside a jitted loop* - call `spherical_parameterize` to *produce* a spherical map, then jit the
+downstream numerics. Its full signature, with the defaults that matter:
 
 ```python
 phi = spherical_parameterize(
@@ -369,33 +340,30 @@ phi = spherical_parameterize(
 )                               # -> (n_vertices, 3) vertices on S^2
 ```
 
-The return is vertex positions on the sphere; the faces are **unchanged**, so vertex
-correspondence to the input is preserved exactly. That is what makes the next step — moving
-a field *between* spheres — possible.
+The return is vertex positions on the sphere; the faces are *unchanged*, so vertex correspondence to the
+input is preserved exactly. That is what makes the next step - moving a field *between* spheres - possible.
 
 ## Transferring a field across spheres: barycentric resampling {#sec-resample}
 
-Two cortices now live on the sphere, and — assuming a prior spherical *registration* has
-rotated/warped one onto the other so anatomy aligns (the MSM/`sugar`/`josa` step of
-[Connecting outward](#sec-connections), a literature pipeline stage, **not** a `nitrix.geometry.sphere`
-symbol) — a point at a given spherical coordinate means the same anatomical location in both. They
-still have **different tessellations** — different vertex counts and triangulations of the same sphere.
-To compare subject A's thickness with subject B's at the same location, we must put both on
-*one* mesh: resample A's field onto B's vertices (or both onto a shared template like
-`fsaverage`). This is the `wb_command -metric-resample` analogue,
-[`surface_resample`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/sphere.py),
-and it is the operation that makes cross-subject comparison concrete.
+Two cortices now live on the sphere, and - assuming a prior spherical *registration* has rotated/warped one
+onto the other so anatomy aligns (the MSM/`sugar`/`josa` step of [Connecting outward](#sec-connections), a
+literature pipeline stage that applies an element of $SO(3)$ or $\mathrm{Diff}(S^2)$ to one sphere, *not* a
+`nitrix.geometry.sphere` symbol) - a point at a given spherical coordinate means the same anatomical
+location in both. They still have *different tessellations* - different vertex counts and triangulations of
+the same sphere. To compare subject A's thickness with subject B's at the same location, we must put both
+on *one* mesh: resample A's field onto B's vertices (or both onto a shared template like `fsaverage`). This
+is the `wb_command -metric-resample` analogue,
+[`surface_resample`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/sphere.py), and it
+is the operation that makes cross-subject comparison concrete.
 
-### The idea: locate, then blend
+### Locate, then blend
 
-For each **target** vertex, ask: which **source** triangle does it fall inside, and where
-inside it? Answer with a single number per source vertex — the **barycentric weight** — and
-the target value is the weighted blend of that triangle's three source values. A planar
-triangle with corners $v_a,v_b,v_c$ and an interior point $p$ has a unique decomposition
-$p = w_a v_a + w_b v_b + w_c v_c$ with $w_a+w_b+w_c=1$ and each $w\ge0$; geometrically each
-$w$ is the area of the sub-triangle *opposite* its corner, divided by the whole.
-@fig-surface-bary shows both the global correspondence and a single located vertex with its
-weights.
+For each *target* vertex, ask: which *source* triangle does it fall inside, and where inside it? Answer
+with a single number per source vertex - the *barycentric weight* - and the target value is the weighted
+blend of that triangle's three source values. A planar triangle with corners $v_a,v_b,v_c$ and an interior
+point $p$ has a unique decomposition $p = w_a v_a + w_b v_b + w_c v_c$ with $w_a+w_b+w_c=1$ and each
+$w\ge0$; geometrically each $w$ is the area of the sub-triangle *opposite* its corner, divided by the
+whole. @fig-surface-bary shows both the global correspondence and a single located vertex with its weights.
 
 ```{python}
 #| label: fig-surface-bary
@@ -468,64 +436,57 @@ plt.show()
 
 ### The spherical search, done robustly
 
-On the sphere the "containing triangle" is found radially: a target unit vector $t$ falls in
-the source triangle whose three great-circle edges all keep $t$ on their interior side. The
-code scores each face by the **minimum signed great-circle-edge distance** — for edge
-$a\!\to\!b$, the sign of $\langle t, a\times b\rangle$ — and takes the face with the largest
-minimum score (`_spherical_best_face`). On a closed sphere a point lies in exactly one
-triangle, the only one with a non-negative score, so a non-negative best *is* the true
-container. For large meshes the search is accelerated by a coarse-icosphere spatial index
-(bin faces by their centroid's nearest coarse vertex plus its one-ring, search only the
-query's bucket); any query whose bucketed best comes out negative — a container that fell
-outside the searched buckets — falls back to the exact brute $O(Q\cdot F)$ argmax, so the
-result is **identical to brute force**, just faster (`method='auto'` switches on automatically
-for large $F$). This is clean-room: no `scipy.spatial`.
+On the sphere the "containing triangle" is found radially: a target unit vector $t$ falls in the source
+triangle whose three great-circle edges all keep $t$ on their interior side. The code scores each face by
+the *minimum signed great-circle-edge distance* - for edge $a\!\to\!b$, the sign of $\langle t, a\times
+b\rangle$ - and takes the face with the largest minimum score (`_spherical_best_face`). On a closed sphere
+a point lies in exactly one triangle, the only one with a non-negative score, so a non-negative best *is*
+the true container. For large meshes the search is accelerated by a coarse-icosphere spatial index (bin
+faces by their centroid's nearest coarse vertex plus its one-ring, search only the query's bucket); any
+query whose bucketed best comes out negative - a container that fell outside the searched buckets - falls
+back to the exact brute $O(Q\cdot F)$ argmax, so the result is *identical to brute force*, just faster
+(`method='auto'` switches on automatically for large $F$). This is clean-room: no `scipy.spatial`.
 
-With the container known, the weights are the **planar barycentric coordinates of the
-target's radial projection onto that triangle's plane** (`_spherical_barycentric`): intersect
-the ray along $t$ with the plane through $(a,b,c)$, then solve the $2\times2$ barycentric
-system. The weights are **clipped non-negative and renormalised** to a partition of unity, so
-a target that lands fractionally outside every triangle (a near-degenerate edge case) projects
-onto the nearest edge/vertex and constants are still reproduced exactly.
+With the container known, the weights are the *planar barycentric coordinates of the target's radial
+projection onto that triangle's plane* (`_spherical_barycentric`): intersect the ray along $t$ with the
+plane through $(a,b,c)$, then solve the $2\times2$ barycentric system. The weights are *clipped
+non-negative and renormalised* to a partition of unity, so a target that lands fractionally outside every
+triangle (a near-degenerate edge case) projects onto the nearest edge/vertex and constants are still
+reproduced exactly.
 
 ### Two modes, and the conservation property that matters
 
-`surface_resample` returns a **pair** `(operator, resampled)`: the resampling
-[`ELL`](../geometry/operators.qmd#sec-ell) operator (an $(n_{\text{target}}\times
-n_{\text{source}})$ sparse map, host-side construction) *and* the field after applying it.
-Construction is the **HOST-CTOR** class; the *application* is pure-JAX and differentiable
-w.r.t. the field, through `apply_operator` over the
-[REAL semiring](../geometry/operators.qmd#sec-semiring). Reuse the operator for every further
-field of the same `(source, target)` pair — you pay the search once. Two methods mirror the
-two Workbench modes:
+`surface_resample` returns a *pair* `(operator, resampled)`: the resampling
+[`ELL`](../geometry/operators.qmd#sec-ell) operator (an $(n_{\text{target}}\times n_{\text{source}})$
+sparse map, host-side construction) *and* the field after applying it. Construction is the **HOST-CTOR**
+class; the *application* is pure-JAX and differentiable w.r.t. the field, through `apply_operator` over the
+[REAL semiring](../geometry/operators.qmd#sec-semiring). Reuse the operator for every further field of the
+same `(source, target)` pair - you pay the search once. Two methods mirror the two Workbench modes:
 
-- **`method='barycentric'`** — a **forward gather**: each target vertex takes the barycentric
-  blend of the source triangle it falls in. The operator is **row-stochastic** (each target
-  row sums to 1), so **constants are preserved exactly**. Best for smooth features and
-  up-sampling.
-- **`method='adap_bary_area'`** (the default) — *adaptive barycentric, area-weighted*. Here
-  the goal is not just smooth interpolation but **conservation of the area-weighted
-  integral**. Each *source* vertex scatters its anatomical vertex area into the corners of the
-  target triangle it falls in (a reverse barycentric scatter, `_spherical_barycentric(target,
-  source)`), and each target row is normalised by the target vertex area. The result conserves
+- **`method='barycentric'`** - a *forward gather*: each target vertex takes the barycentric blend of the
+  source triangle it falls in. The operator is *row-stochastic* (each target row sums to 1), so *constants
+  are preserved exactly*. Best for smooth features and up-sampling.
+- **`method='adap_bary_area'`** (the default) - *adaptive barycentric, area-weighted*. Here the goal is not
+  just smooth interpolation but *conservation of the area-weighted integral*. Each *source* vertex scatters
+  its anatomical vertex area into the corners of the target triangle it falls in (a reverse barycentric
+  scatter, `_spherical_barycentric(target, source)`), and each target row is normalised by the target
+  vertex area. The result conserves
   $$
   \sum_t A^{\text{target}}_t \,\text{out}_t \;=\; \sum_s A^{\text{source}}_s \,\text{in}_s,
   $$ {#eq-conservation}
-  exactly, whenever every target vertex receives source mass (the down-sampling / matched
-  regime). Target vertices that receive none — up-sampling **holes** — fall back to the forward
-  barycentric gather, where conservation becomes approximate. This is the faithful Workbench
-  behaviour and the documented divergence between the modes: pick `'barycentric'` when exact
-  constant-preservation matters more than the integral, `'adap_bary_area'` when the integral
-  must be conserved.
+  exactly, whenever every target vertex receives source mass (the down-sampling / matched regime). Target
+  vertices that receive none - up-sampling *holes* - fall back to the forward barycentric gather, where
+  conservation becomes approximate. This is the faithful Workbench behaviour and the documented divergence
+  between the modes: pick `'barycentric'` when exact constant-preservation matters more than the integral,
+  `'adap_bary_area'` when the integral must be conserved.
 
-Why @eq-conservation is the property you want: a parcellation label occupies some fraction of
-cortical area, and a scalar like thickness has a meaningful surface mean. Conserving the
-area-weighted integral means **label area fractions and area-weighted means survive the
-resample** — you are not silently inflating or deflating how much cortex a region covers when
-you change tessellation. The `*_area` arguments let you supply the **anatomical** vertex areas
-(the Workbench `-area-metrics`); they default to the spheres' own `vertex_areas`, which conserve
-the *sphere*-area-weighted integral. The conserved inner product is always w.r.t. the *supplied*
-areas — if you override them, measure conservation against the same arrays.
+Why @eq-conservation is the property you want: a parcellation label occupies some fraction of cortical
+area, and a scalar like thickness has a meaningful surface mean. Conserving the area-weighted integral
+means *label area fractions and area-weighted means survive the resample* - you are not silently inflating
+or deflating how much cortex a region covers when you change tessellation. The `*_area` arguments let you
+supply the *anatomical* vertex areas (the Workbench `-area-metrics`); they default to the spheres' own
+`vertex_areas`, which conserve the *sphere*-area-weighted integral. The conserved inner product is always
+w.r.t. the *supplied* areas - if you override them, measure conservation against the same arrays.
 
 ```python
 op, b_on_a = surface_resample(
@@ -534,53 +495,56 @@ op, b_on_a = surface_resample(
 )                                             # op is reusable for B's other maps
 ```
 
-Up-sampling (a few thousand source vertices onto `fsaverage`'s ~160k) leans on the
-`barycentric` smoothness; down-sampling or matched-resolution transfer leans on the
-`adap_bary_area` conservation. The same operator handles a multi-channel field
-(`source_vals` shaped `(n_source, c)`); a 1-D field is squeezed and restored automatically.
+Up-sampling (a few thousand source vertices onto `fsaverage`'s ~160k) leans on the `barycentric`
+smoothness; down-sampling or matched-resolution transfer leans on the `adap_bary_area` conservation. The
+same operator handles a multi-channel field (`source_vals` shaped `(n_source, c)`); a 1-D field is squeezed
+and restored automatically.
 
 ## Metric tools on the sphere {#sec-spherical-conv}
 
-Once your data lives on the sphere, two operations recur: **smoothing** a noisy map while
-respecting the surface, and **measuring distance** along it. Both are owned here.
+Once your data lives on the sphere, two operations recur: *smoothing* a noisy map while respecting the
+surface, and *measuring distance* along it. Both are owned here.
 
 ### Great-circle distance: `spherical_geodesic_distance`
 
-The geodesic between two points on a sphere is the **great-circle arc**; its length is $r$
-times the angle $\angle(x,y)$ between the unit vectors. The naive formula
-$\theta=\arccos(\langle x,y\rangle)$ is numerically poor for nearly-parallel or
-nearly-antipodal points, where $\arccos$ has vanishing derivative and loses precision. The
-code uses the **`arctan2` form** instead, which is well-conditioned across the whole range:
+The geodesic between two points on a sphere is the *great-circle arc*; its length is $r$ times the angle
+$\angle(x,y)$ between the unit vectors. The naive formula $\theta=\arccos(\langle x,y\rangle)$ is
+numerically poor for nearly-parallel or nearly-antipodal points, where $\arccos$ has vanishing derivative
+and loses precision. The code uses the *`arctan2` form* instead, which is well-conditioned across the whole
+range:
 
 $$
 d(x,y) \;=\; r\,\operatorname{arctan2}\!\big(\lVert x\times y\rVert,\; \langle x,y\rangle\big).
 $$ {#eq-geodesic}
 
-The cross-product magnitude is $\lVert x\rVert\lVert y\rVert\sin\theta\ge0$ and the dot
-product is $\lVert x\rVert\lVert y\rVert\cos\theta$, so `arctan2` recovers the unsigned angle
-in $[0,\pi]$ and handles the antipodal case via the sign of the denominator — no catastrophic
-cancellation (`_geodesic_pair` in source). `spherical_geodesic_distance(X, Y=None, r=1.0)`
-returns the **all-pairs** matrix $(\dots,n,m)$ (or pairwise within `X` when `Y is None`),
-broadcasting leading batch dims. It is pure JAX with no host branch — jittable and
-differentiable (**DIFF-JAX**); it is the inner kernel `spherical_conv` calls to build its
-neighbour distances, so the two share the exact same numerics. Note the **radius enters only
-as a multiplicative scale** — the *angle* is radius-independent, so distances on a radius-100
-sphere are just $100\times$ those on the unit sphere; choose `r` to match the units you report
-in. (The page works throughout in the Cartesian unit-vector convention the module takes as
-canonical; if your coordinates arrive as latitude/longitude — the form @fig-surface-conv uses
-purely to *display* a sphere flat — convert once with `latlong_to_cartesian` / its inverse
-`cartesian_to_latlong` before any of these routines.)
+The cross-product magnitude is $\lVert x\rVert\lVert y\rVert\sin\theta\ge0$ and the dot product is
+$\lVert x\rVert\lVert y\rVert\cos\theta$, so `arctan2` recovers the unsigned angle in $[0,\pi]$ and handles
+the antipodal case via the sign of the denominator - no catastrophic cancellation (`_geodesic_pair` in
+source). `spherical_geodesic_distance(X, Y=None, r=1.0)` returns the *all-pairs* matrix $(\dots,n,m)$ (or
+pairwise within `X` when `Y is None`), broadcasting leading batch dims. It is pure JAX with no host branch
+- jittable and differentiable (**DIFF-JAX**); it is the inner kernel `spherical_conv` calls to build its
+neighbour distances, so the two share the exact same numerics. Note the *radius enters only as a
+multiplicative scale* - the *angle* is radius-independent, so distances on a radius-100 sphere are just
+$100\times$ those on the unit sphere; choose `r` to match the units you report in. (The chapter works
+throughout in the Cartesian unit-vector convention the module takes as canonical; if your coordinates
+arrive as latitude/longitude - the form @fig-surface-conv uses purely to *display* a sphere flat - convert
+once with `latlong_to_cartesian` / its inverse `cartesian_to_latlong` before any of these routines.)
 
 ### Spherical Gaussian smoothing: `spherical_conv`
 
-To smooth a field on the sphere — denoise a thickness map, blur an activation before a group
-test — convolve it with a Gaussian over **geodesic** distance. The naive implementation forms
-the full $n\times n$ geodesic matrix, Gaussian-weights it, and reduces: $O(n^2)$ memory and
-compute, fatal at cortical scale. The cure is to notice that a Gaussian is **effectively
-local**: a neighbour many $\sigma$ away contributes nothing. So restrict each point to its
-$k$ **nearest neighbours** by geodesic distance, and the operator becomes sparse —
-$O(n\cdot k)$. @fig-surface-conv shows the effect: noise on the sphere collapses onto the
+To smooth a field on the sphere - denoise a thickness map, blur an activation before a group test -
+convolve it with a Gaussian over *geodesic* distance. The naive implementation forms the full $n\times n$
+geodesic matrix, Gaussian-weights it, and reduces: $O(n^2)$ memory and compute, fatal at cortical scale.
+The cure is to notice that a Gaussian is *effectively local*: a neighbour many $\sigma$ away contributes
+nothing. So restrict each point to its $k$ *nearest neighbours* by geodesic distance, and the operator
+becomes sparse - $O(n\cdot k)$. @fig-surface-conv shows the effect: noise on the sphere collapses onto the
 underlying smooth field.
+
+Because the kernel depends only on the geodesic distance between points - an $SO(3)$-invariant - the
+smoother is *rotation-equivariant*: rotate the sphere and the smoothed field rotates with it, the surface
+analogue of the geometry unit's equivariant operators. That is exactly the property a group-level analysis
+needs: smoothing commutes with the spherical registration that aligned the subjects, so it does not depend
+on how each cortex happens to be oriented on the sphere.
 
 ```{python}
 #| label: fig-surface-conv
@@ -651,11 +615,10 @@ fig.tight_layout()
 plt.show()
 ```
 
-The real value of `spherical_conv` is that it is *not* a bespoke loop: it **specialises onto
-the geometry unit's sparse substrate**. The k-NN indices form a per-point neighbour list — an
-[ELL adjacency](../geometry/operators.qmd#sec-ell), the $(n,k)$ index/value layout — and the
-reduction is one call to `semiring_ell_matmul` over the
-[REAL semiring](../geometry/operators.qmd#sec-semiring):
+The real value of `spherical_conv` is that it is *not* a bespoke loop: it *specialises onto the geometry
+unit's sparse substrate*. The k-NN indices form a per-point neighbour list - an
+[ELL adjacency](../geometry/operators.qmd#sec-ell), the $(n,k)$ index/value layout - and the reduction is
+one call to `semiring_ell_matmul` over the [REAL semiring](../geometry/operators.qmd#sec-semiring):
 
 $$
 \text{out}_{i,c} \;=\; \sum_{p=1}^{k} W_{i,p}\,\text{data}_{\,\text{idx}_{i,p},\,c},
@@ -663,10 +626,10 @@ $$
 W_{i,p} \;=\; \frac{\exp\!\big(-\tfrac12 (d_{i,p}/\sigma)^2\big)}{\sum_{q} \exp\!\big(-\tfrac12 (d_{i,q}/\sigma)^2\big)}.
 $$ {#eq-sphconv}
 
-Here $d_{i,p}$ is the geodesic distance (@eq-geodesic) from point $i$ to its $p$-th neighbour,
-$W$ are the row-normalised Gaussian weights, and the sum is the semiring matmul. The
-**row-normalisation is load-bearing**: each row sums to 1, so a constant field is preserved and
-the smoother injects no energy. The call is
+Here $d_{i,p}$ is the geodesic distance (@eq-geodesic) from point $i$ to its $p$-th neighbour, $W$ are the
+row-normalised Gaussian weights, and the sum is the semiring matmul. The *row-normalisation is
+load-bearing*: each row sums to 1, so a constant field is preserved and the smoother injects no energy. The
+call is
 
 ```python
 out = spherical_conv(
@@ -679,83 +642,76 @@ out = spherical_conv(
 )
 ```
 
-Two practical knobs. First, `neighbourhood`: passing an `int` computes the k-NN on the fly,
-which is $O(n^2)$ *memory* (the row-by-row `lax.map` keeps peak memory $O(n)$ but compute is
-still $O(n^2)$) — fine for an icosphere, but for a real cortical mesh ($n\gtrsim10^4$) you
-should **precompute the adjacency** (e.g. the icosphere's natural $k$-ring) and pass the
-explicit `(n, k)` index array, dropping the construction to $O(n\cdot k)$. Second, `truncate`
-sets a hard geodesic cutoff so a $k$-NN that happens to reach a far point gives it zero weight.
-Multi-channel data is smoothed depthwise — the same spatial kernel per channel; for a
-per-channel $\sigma$, call repeatedly. The whole reduction is jittable and differentiable
-(DIFF-JAX) once the adjacency is in hand.
+Two practical knobs. First, `neighbourhood`: passing an `int` computes the k-NN on the fly, which is
+$O(n^2)$ *memory* (the row-by-row `lax.map` keeps peak memory $O(n)$ but compute is still $O(n^2)$) - fine
+for an icosphere, but for a real cortical mesh ($n\gtrsim10^4$) you should *precompute the adjacency* (e.g.
+the icosphere's natural $k$-ring) and pass the explicit `(n, k)` index array, dropping the construction to
+$O(n\cdot k)$. Second, `truncate` sets a hard geodesic cutoff so a $k$-NN that happens to reach a far point
+gives it zero weight. Multi-channel data is smoothed depthwise - the same spatial kernel per channel; for a
+per-channel $\sigma$, call repeatedly. The whole reduction is jittable and differentiable (DIFF-JAX) once
+the adjacency is in hand.
 
 ## Connecting outward {#sec-connections}
 
-**Averaging spherical maps — building a surface template.** A surface template like
-`fsaverage` is, in spirit, an *average* of many subjects' spherical maps. Averaging maps is the
-same Riemannian-manifold problem the linear rungs already solved: you cannot take an entrywise
-mean of points on a curved space and expect to land back on it. The
-[transform manifold](transforms.qmd#sec-transform-manifold) page gives the general recipe — the
-Karcher / Fréchet mean via `log`/`exp` on the manifold — and the same idea governs averaging
-on $(S^2)^n$: iterate a tangent-space mean and retract, exactly the geometry this page's
-`_retract` already uses. Building and refining a surface template (the `josa`/`sugar`
-registration lineage) composes `spherical_parameterize` to put each subject on the sphere, a
-spherical registration to align anatomy, and a manifold mean to fuse them.
+**Averaging spherical maps - building a surface template.** A surface template like `fsaverage` is, in
+spirit, an *average* of many subjects' spherical maps. Averaging maps is the same Riemannian-manifold
+problem the linear rungs already solved: you cannot take an entrywise mean of points on a curved space and
+expect to land back on it. The [transform manifold](transforms.qmd#sec-transform-manifold) page gives the
+general recipe - the Karcher / Fréchet mean via `log`/`exp` on the manifold - and the same idea governs
+averaging on $(S^2)^n$: iterate a tangent-space mean and retract, exactly the geometry this chapter's
+`_retract` already uses. Building and refining a surface template (the `josa`/`sugar` registration lineage)
+composes `spherical_parameterize` to put each subject on the sphere, a spherical registration to align
+anatomy, and a manifold mean to fuse them.
 
-**Forward to parcellation transfer.** The headline consumer of `surface_resample` — moving an
-atlas *parcellation* (a per-vertex label field) from a template onto a subject, or pooling a
-connectivity feature within parcels — lives in a future **connectivity / labels** unit and is
-out of scope here. What this page guarantees is the substrate that unit will stand on:
-`adap_bary_area` conservation (@eq-conservation) is precisely what keeps a label's area fraction
-honest under resampling, and the reusable `ELL` operator is what makes transferring a whole atlas
-(many label channels, one search) cheap.
+**Forward to parcellation transfer.** The headline consumer of `surface_resample` - moving an atlas
+*parcellation* (a per-vertex label field) from a template onto a subject, or pooling a connectivity feature
+within parcels - lives in a future *connectivity / labels* unit and is out of scope here. What this chapter
+guarantees is the substrate that unit will stand on: `adap_bary_area` conservation (@eq-conservation) is
+precisely what keeps a label's area fraction honest under resampling, and the reusable `ELL` operator is
+what makes transferring a whole atlas (many label channels, one search) cheap.
 
 ## Further reading
 
-- Fischl, B., Sereno, M. I., and Dale, A. M. (1999). "Cortical surface-based analysis. II:
-  Inflation, flattening, and a surface-based coordinate system." *NeuroImage*, 9(2), 195–207. —
-  FreeSurfer's `mris_sphere`: the metric/area-distortion relaxation onto the sphere this page's
-  iterative refinement follows.
-- Henschel, L., Conjeti, S., Estrada, S., Diers, K., Fischl, B., and Reuter, M. (2020).
-  "FastSurfer — A fast and accurate deep learning based neuroimaging pipeline." *NeuroImage*,
-  219, 117012. — The spectral one-shot embedding (`recon_surf/spherically_project.py`): the
-  first three non-constant Laplace–Beltrami eigenfunctions as a spherical map, with a
-  flipped-area quality gate.
-- Gu, X., Wang, Y., Chan, T. F., Thompson, P. M., and Yau, S.-T. (2004). "Genus zero surface
-  conformal mapping and its application to brain surface mapping." *IEEE TMI*, 23(8), 949–958. —
-  The discrete uniformisation view: a genus-0 cortex is conformally a sphere.
-- Choi, P. T., Lam, K. C., and Lui, L. M. (2015). "FLASH: Fast landmark aligned spherical
-  harmonic parameterization for genus-0 closed brain surfaces." *SIAM J. Imaging Sciences*,
-  8(1), 67–94. — Conformal-energy minimisation: why $E_{\text{conf}}$ collapses and how the area
-  term + Möbius normalisation prevent it (the basis for @eq-area).
-- Robinson, E. C., et al. (2014). "MSM: A new flexible framework for multimodal surface
-  matching." *NeuroImage*, 100, 414–426. — Multimodal surface matching on the sphere (`MSMSulc`,
-  `MSMAll`); the registration that aligns two parameterised spheres before resampling.
-- Glasser, M. F., et al. (2013). "The minimal preprocessing pipelines for the Human Connectome
-  Project." *NeuroImage*, 80, 105–124. — The `fs_LR`/`fsaverage` and Connectome Workbench
-  `-metric-resample` (`ADAP_BARY_AREA`) ecosystem that `surface_resample` mirrors.
-- Tutte, W. T. (1963). "How to draw a graph." *Proc. London Math. Soc.*, 3(1), 743–767. — The
-  fold-free barycentric-embedding guarantee underlying the bijective-init theory.
+- Fischl, B., Sereno, M. I., and Dale, A. M. (1999). "Cortical surface-based analysis. II: Inflation,
+  flattening, and a surface-based coordinate system." *NeuroImage*, 9(2), 195–207. FreeSurfer's
+  `mris_sphere`: the metric/area-distortion relaxation onto the sphere this chapter's iterative refinement
+  follows.
+- Henschel, L., Conjeti, S., Estrada, S., Diers, K., Fischl, B., and Reuter, M. (2020). "FastSurfer — A
+  fast and accurate deep learning based neuroimaging pipeline." *NeuroImage*, 219, 117012. The spectral
+  one-shot embedding (`recon_surf/spherically_project.py`): the first three non-constant Laplace–Beltrami
+  eigenfunctions as a spherical map, with a flipped-area quality gate.
+- Gu, X., Wang, Y., Chan, T. F., Thompson, P. M., and Yau, S.-T. (2004). "Genus zero surface conformal
+  mapping and its application to brain surface mapping." *IEEE TMI*, 23(8), 949–958. The discrete
+  uniformisation view: a genus-0 cortex is conformally a sphere.
+- Choi, P. T., Lam, K. C., and Lui, L. M. (2015). "FLASH: Fast landmark aligned spherical harmonic
+  parameterization for genus-0 closed brain surfaces." *SIAM J. Imaging Sciences*, 8(1), 67–94.
+  Conformal-energy minimisation: why $E_{\text{conf}}$ collapses and how the area term + Möbius
+  normalisation prevent it (the basis for @eq-area).
+- Robinson, E. C., et al. (2014). "MSM: A new flexible framework for multimodal surface matching."
+  *NeuroImage*, 100, 414–426. Multimodal surface matching on the sphere (`MSMSulc`, `MSMAll`); the
+  registration that aligns two parameterised spheres before resampling.
+- Glasser, M. F., et al. (2013). "The minimal preprocessing pipelines for the Human Connectome Project."
+  *NeuroImage*, 80, 105–124. The `fs_LR`/`fsaverage` and Connectome Workbench `-metric-resample`
+  (`ADAP_BARY_AREA`) ecosystem that `surface_resample` mirrors.
+- Tutte, W. T. (1963). "How to draw a graph." *Proc. London Math. Soc.*, 3(1), 743–767. The fold-free
+  barycentric-embedding guarantee underlying the bijective-init theory.
 
 ## See also
 
-- The spherical primitives on this page —
+- The spherical primitives in this chapter —
   [`src/nitrix/geometry/sphere.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/sphere.py)
-  (`spherical_parameterize`, `surface_resample`, `spherical_conv`,
-  `spherical_geodesic_distance`, and the spectral / bijectivity helpers).
+  (`spherical_parameterize`, `surface_resample`, `spherical_conv`, `spherical_geodesic_distance`, and the
+  spectral / bijectivity helpers).
 - The sparse-operator substrate the conv and resample stand on —
-  [`src/nitrix/sparse/`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse)
-  (`ELL`, `apply_operator`, `vertex_areas`, `face_areas`, `mesh_cotangent_laplacian`,
-  `icosphere`) and
+  [`src/nitrix/sparse/`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse) (`ELL`,
+  `apply_operator`, `vertex_areas`, `face_areas`, `mesh_cotangent_laplacian`, `icosphere`) and
   [`src/nitrix/semiring/`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/semiring)
   (`semiring_ell_matmul`, `REAL`).
-- Geometry unit — the spectral embedding, signed spherical areas and bijectivity test this page
-  builds on ([spectral embedding](../geometry/spectral.qmd#sec-embedding)); the cotangent
-  Laplace–Beltrami operator behind @eq-conformal
-  ([Laplace–Beltrami](../geometry/laplace-beltrami.qmd#sec-cotangent)); the ELL / semiring
-  substrate ([operators](../geometry/operators.qmd#sec-ell)); and the execution-class taxonomy
-  ([foundations](../geometry/foundations.qmd#sec-classes)).
-- Neighbouring registration pages: the [transform ladder](foundations.qmd#sec-ladder) this page
-  tops out; the [transform manifold](transforms.qmd#sec-transform-manifold) for averaging
-  spherical maps into a template; and the dense-field rung below this one
-  ([Diffeomorphic](diffeomorphic.qmd#sec-svf)).
+- Geometry unit — the spectral embedding, signed spherical areas and bijectivity test this chapter builds
+  on ([spectral embedding](../geometry/spectral.qmd#sec-embedding)); the cotangent Laplace–Beltrami
+  operator behind @eq-conformal ([Laplace–Beltrami](../geometry/laplace-beltrami.qmd#sec-cotangent)); the
+  ELL / semiring substrate ([operators](../geometry/operators.qmd#sec-ell)); and the execution-class
+  taxonomy ([foundations](../geometry/foundations.qmd#sec-classes)).
+- Neighbouring registration pages: the [transform ladder](foundations.qmd#sec-ladder) this chapter tops
+  out; the [transform manifold](transforms.qmd#sec-transform-manifold) for averaging spherical maps into a
+  template; and the dense-field rung below this one ([Diffeomorphic](diffeomorphic.qmd#sec-svf)).

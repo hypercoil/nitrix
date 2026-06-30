@@ -2,12 +2,11 @@
 title: "Choosing smoothing parameters: the Fellner–Schall method"
 ---
 
-::: {.callout-tldr title="Fast path"}
 Several rungs of [the ladder](index.qmd) add a **penalty** to the weighted
-least-squares solve from the [GLM chapter](glm.qmd): a smooth's wiggliness
-penalty (GAM), a random effect's variance (LME), a kernel prior (HSGP). Each
-penalty carries a strength $\lambda$ that must be *chosen*, not guessed.
-**Fellner–Schall** is the cheap update that chooses it:
+least-squares solve from the [GLM chapter](glm.qmd): a smooth's wiggliness penalty
+(GAM), a random effect's variance (LME), a kernel prior (HSGP). Each penalty
+carries a strength $\lambda$ that must be *chosen*, not guessed. **Fellner–Schall**
+is the cheap update that chooses it:
 
 $$
 \lambda_k \;\leftarrow\; \lambda_k \,
@@ -16,14 +15,14 @@ $$
 $$
 
 It is **multiplicative** (so $\lambda$ stays positive), it **increases the
-restricted marginal likelihood every step**, and — because a roughness penalty
-*is* a random-effect variance (the [equivalence](#equivalence) shown below) —
-the *same* update selects smoothing parameters and estimates variance
-components. That reuse is why it recurs across the suite. The single new idea
-this page adds: the update above is the **REML score equation for $\lambda$,
-rearranged into a fixed point**. Code:
-[`nitrix/stats/gam.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/gam.py).
-:::
+restricted marginal likelihood every step**, and — because a roughness penalty *is*
+a random-effect variance (the [equivalence](#equivalence) shown below) — the *same*
+update selects smoothing parameters and estimates variance components. That reuse
+is why it recurs across the suite. The idea that makes the page is that the update
+above is the **REML score equation for $\lambda$, rearranged into a fixed point**;
+choosing each penalty's strength by maximising the marginal likelihood this way is
+the suite's **empirical Bayes** step — the data setting the strength of its own
+prior.
 
 This is a **shared-machinery** chapter, not a model of its own: Fellner–Schall is
 one algorithm the suite reuses. It sits directly on top of the [GLM](glm.qmd)

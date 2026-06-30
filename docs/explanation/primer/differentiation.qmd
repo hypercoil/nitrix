@@ -1,0 +1,436 @@
+---
+title: "Differentiation as linear algebra"
+---
+
+The [last chapter](xla-jax.qmd) showed one reinterpretation of a traced program —
+compiling it for speed. This chapter takes up the other one: **differentiating**
+it. The aim is to dispel the idea that automatic differentiation is a bag of
+symbol-pushing rules. It is linear algebra. The derivative of a function at a point
+is the **best linear map** approximating it there; the two operations every autodiff
+engine is built from — the **Jacobian–vector product** (JVP) and the
+**vector–Jacobian product** (VJP) — are just *applying that linear map* and
+*applying its transpose*; and reverse-mode differentiation, the engine behind all of
+deep learning, is the single slogan **you only linearise once**.
+
+We will need almost nothing you do not already have: vectors, matrices, the
+transpose, the inner product, and partial derivatives. We will *not* need tangent
+bundles or differential geometry — where those words usually appear, we substitute
+the plain ideas "a small perturbation of the input" and "a way of weighting the
+output," which is all they mean here. **Einstein index notation** does the
+bookkeeping, and it is what makes the multivariate chain rule obvious rather than
+fearsome.
+
+## The derivative is a linear map {#sec-linear-map}
+
+Begin with the scalar case you already know. For a function $f:\mathbb{R}\to
+\mathbb{R}$, the derivative $f'(x)$ is the slope of the straight line that best
+approximates $f$ near $x$:
+$$
+f(x + \delta) \;\approx\; f(x) + f'(x)\,\delta .
+$$
+Read $f'(x)$ not as "a number" but as "the linear function $\delta \mapsto f'(x)\,
+\delta$ that turns a small input change into the resulting output change." That
+shift in emphasis is the whole generalisation, because it survives intact in many
+dimensions.
+
+For a vector-valued function of several variables, $f:\mathbb{R}^n\to\mathbb{R}^m$,
+the derivative *at a point* $x$ is again the linear map that best approximates $f$
+near $x$:
+$$
+f(x + \delta) \;\approx\; f(x) + J\,\delta ,
+$$
+where $\delta\in\mathbb{R}^n$ is a small input perturbation and $J$ is an
+$m\times n$ matrix — the **Jacobian** — whose entries are the partial derivatives.
+Each output coordinate gets a row; each input coordinate gets a column. @fig-linear
+draws the picture in the simplest non-trivial case.
+
+```{python}
+#| label: fig-linear
+#| fig-cap: "The derivative as the best linear map. Left: for a scalar function, the derivative is the slope of the tangent line — the linear map δ ↦ f'(x)δ that predicts the output change from a small input change. Right: a perturbation δ of the input is sent to the output change J δ; near the point this linear prediction (arrow) matches the true change (dot) closely, and the approximation degrades smoothly as δ grows."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(10, 4.0))
+
+# Left: tangent line to a scalar function.
+x = np.linspace(-2, 2, 400)
+f = lambda t: np.sin(1.4 * t) + 0.3 * t**2
+fp = lambda t: 1.4 * np.cos(1.4 * t) + 0.6 * t
+x0 = 0.6
+axL.plot(x, f(x), color="#33373d", lw=2, label="f(x)")
+axL.plot(x, f(x0) + fp(x0) * (x - x0), color="#b03b4b", lw=2, ls="--",
+         label="best linear map at $x_0$")
+axL.plot([x0], [f(x0)], "o", color="#b03b4b", ms=7)
+axL.set_title("scalar: derivative = slope of the tangent")
+axL.set_xlabel("x"); axL.legend(fontsize=8)
+
+# Right: a 1-D->1-D "true vs linear predicted" change for growing delta.
+deltas = np.linspace(0, 1.2, 200)
+true_change = f(x0 + deltas) - f(x0)
+lin_change = fp(x0) * deltas
+axR.plot(deltas, true_change, color="#33373d", lw=2, label=r"true $f(x_0+\delta)-f(x_0)$")
+axR.plot(deltas, lin_change, color="#b03b4b", lw=2, ls="--", label=r"linear $J\,\delta$")
+axR.fill_between(deltas, lin_change, true_change, color="#b03b4b", alpha=0.08)
+axR.set_title("the linear map predicts the output change")
+axR.set_xlabel(r"perturbation size $\delta$"); axR.legend(fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+This reframing is the key to everything that follows. "Differentiate $f$ at $x$"
+produces a *linear map* — and linear maps are objects we can apply to vectors,
+transpose, and compose, all without ever thinking about $f$'s formula again.
+
+## Einstein notation: the bookkeeping {#sec-einstein}
+
+Multivariate calculus drowns in indices and transposes unless we adopt a notation
+that tracks them automatically. The convention is simple and worth the small
+investment. Write the components of a vector as $x_j$ and of a matrix as $A_{ij}$,
+and adopt the **summation convention**: *an index repeated in a product is summed
+over*. Then a matrix–vector product is
+$$
+(A x)_i \;=\; \sum_j A_{ij}\,x_j \;=\; A_{ij}\,x_j ,
+$$
+with the sum over the repeated $j$ left implicit. The Jacobian's entries are
+$$
+J_{ij} \;=\; \frac{\partial f_i}{\partial x_j}\qquad(\text{output } i,\ \text{input } j),
+$$
+so the linear approximation $f(x+\delta)\approx f(x)+J\delta$ reads, componentwise,
+$\delta f_i = J_{ij}\,\delta_j$.
+
+The reason to bother is the **chain rule**. For a composition $h = g\circ f$ (first
+$f:\mathbb{R}^n\to\mathbb{R}^p$, then $g:\mathbb{R}^p\to\mathbb{R}^m$), the
+single-variable rule $h' = g'\,f'$ becomes, with indices,
+$$
+J^{h}_{ik} \;=\; J^{g}_{ij}\,J^{f}_{jk},
+$$
+summed over the shared index $j$. This is *exactly* matrix multiplication
+$J^h = J^g J^f$ — the chain rule for many variables is the statement that the
+Jacobian of a composition is the product of the Jacobians (@fig-contraction). The
+index that is summed is the one the two maps share — $f$'s outputs are $g$'s inputs
+— and reading off which index sums against which is all the bookkeeping JVP and VJP
+will require.
+
+::: {#fig-contraction}
+<svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The chain rule for a composition is a contraction over the shared index: the Jacobian of g times the Jacobian of f, summed over the intermediate index j."
+     font-family="system-ui, sans-serif" font-size="13">
+  <rect x="80"  y="70" width="150" height="60" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="155" y="96" text-anchor="middle">Jᵍ (i, j)</text>
+  <text x="155" y="116" text-anchor="middle" font-size="11" fill="#444b53">outer index i</text>
+  <rect x="360" y="70" width="150" height="60" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="435" y="96" text-anchor="middle">Jᶠ (j, k)</text>
+  <text x="435" y="116" text-anchor="middle" font-size="11" fill="#444b53">outer index k</text>
+  <line x1="230" y1="100" x2="360" y2="100" stroke="#b03b4b" stroke-width="2"/>
+  <text x="295" y="90" text-anchor="middle" fill="#b03b4b">j</text>
+  <text x="295" y="135" text-anchor="middle" font-size="11" fill="#b03b4b">shared → summed</text>
+  <text x="585" y="96" font-size="15">= Jʰ (i, k)</text>
+  <text x="585" y="118" font-size="11" fill="#444b53">the composition</text>
+</svg>
+
+The chain rule is a contraction. Composing $g\circ f$ multiplies their Jacobians,
+summing over the shared index $j$ (the intermediate variables that are $f$'s outputs
+and $g$'s inputs). The surviving indices $i$ and $k$ are the outputs and inputs of
+the whole composition.
+:::
+
+## Pushforward: the Jacobian–vector product {#sec-jvp}
+
+Now we use the linear map, but *without ever building the matrix $J$*. Suppose we
+perturb the input in some direction — add a small vector $\dot x\in\mathbb{R}^n$ to
+$x$. (Call $\dot x$ a **tangent vector**; for our purposes that phrase means nothing
+more than "a direction of perturbation in the input space.") The resulting first-order
+change in the output is the linear map applied to $\dot x$:
+$$
+\dot y \;=\; J\,\dot x,\qquad \dot y_i = J_{ij}\,\dot x_j .
+$$
+This is the **Jacobian–vector product** (JVP), also called the **pushforward**,
+because it *pushes a perturbation forward* through the function: feed in "the input
+wiggled this way," read out "the output wiggles that way." In code it is
+`jax.jvp(f, (x,), (xdot,))`, which returns both $y=f(x)$ and $\dot y = J\dot x$.
+
+The crucial point — the reason this is efficient — is that you compute $J\dot x$
+**without forming $J$.** Carry the pair $(x,\dot x)$ through the program: at each
+primitive, apply that primitive's local Jacobian to the incoming tangent and pass
+the result on. By the chain rule (@fig-contraction), composing these local
+pushforwards gives the pushforward of the whole program,
+$$
+\dot y = J^g\bigl(J^f \dot x\bigr),
+$$
+applied in *forward* order — $f$'s pushforward first, then $g$'s. This is exactly
+**forward-mode** automatic differentiation: one sweep through the program, primals
+and tangents travelling together, no Jacobian matrix ever materialised. For an
+elementwise operation the local Jacobian is diagonal, so its pushforward is just a
+componentwise multiply — a vivid case of why the matrix is never needed.
+
+@fig-pushpull (top arrow) is the picture: a perturbation of the input is carried
+forward to a perturbation of the output.
+
+## Pullback: the vector–Jacobian product {#sec-vjp}
+
+Forward mode answers "if the input wiggles, how does the output wiggle?" The
+opposite question is the one machine learning actually asks: "to change the output
+in a certain way, how should the input change?" — or, most often, "how sensitive is
+a downstream *score* to each input?" That requires propagating information
+**backward**, and it is built on the *transpose* of the same linear map.
+
+Introduce a vector $\bar y\in\mathbb{R}^m$ that measures *how much we care about each
+output coordinate*. (Call it a **cotangent**, or a **sensitivity**. Formally it is a
+linear functional on the output space — a row vector whose action on a perturbation
+$\dot y$ is the inner product $\bar y^\top \dot y$, "the weighted total change we
+care about." No more machinery than that is needed.) The **vector–Jacobian product**
+(VJP), or **pullback**, sends this output sensitivity back to an input sensitivity:
+$$
+\bar x \;=\; J^\top \bar y,\qquad \bar x_j = J_{ij}\,\bar y_i .
+$$
+Look hard at the indices: it is the *same* $J_{ij}$ as the JVP, but now summed over
+the **output** index $i$ instead of the input index $j$ — that is precisely what the
+transpose does. The JVP contracts $J$ on its input leg; the VJP contracts it on its
+output leg. Two reads of one matrix.
+
+"Pullback" is apt: it *pulls a sensitivity back* from outputs to inputs. And again it
+is computed **matrix-free**, by composing the local transposes in *reverse* order:
+$$
+\bar x = (J^f)^\top\bigl((J^g)^\top \bar z\bigr),
+$$
+$g$'s transpose first, then $f$'s. The reversal is the reason the backward pass runs
+backward — the very shape of backpropagation. In code it is `jax.vjp(f, x)`, which
+returns $y$ and a function $\bar y \mapsto \bar x$. @fig-pushpull (bottom arrow)
+completes the duality: perturbations flow forward, sensitivities flow back.
+
+::: {#fig-pushpull}
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The pushforward carries an input perturbation forward to an output perturbation via J; the pullback carries an output sensitivity backward to an input sensitivity via J-transpose."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="dfwd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2c6a45"/>
+    </marker>
+    <marker id="dbwd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a3ffc"/>
+    </marker>
+  </defs>
+  <!-- input / output spaces -->
+  <ellipse cx="140" cy="150" rx="100" ry="70" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="140" y="232" text-anchor="middle" font-size="12">input space ℝⁿ</text>
+  <ellipse cx="620" cy="150" rx="100" ry="70" fill="#fbf0d6" stroke="#33373d"/>
+  <text x="620" y="232" text-anchor="middle" font-size="12">output space ℝᵐ</text>
+  <text x="140" y="150" text-anchor="middle">x</text>
+  <text x="620" y="150" text-anchor="middle">y = f(x)</text>
+  <!-- f label in middle -->
+  <text x="380" y="40" text-anchor="middle" font-weight="bold">f, linearised at x → J</text>
+  <!-- pushforward arrow (top, forward) -->
+  <path d="M 200,120 C 330,70 430,70 560,120" fill="none" stroke="#2c6a45" stroke-width="2" marker-end="url(#dfwd)"/>
+  <text x="380" y="78" text-anchor="middle" fill="#2c6a45">pushforward (JVP):  ẏ = J ẋ</text>
+  <text x="380" y="96" text-anchor="middle" font-size="11" fill="#2c6a45">a perturbation, carried forward</text>
+  <!-- pullback arrow (bottom, backward) -->
+  <path d="M 560,190 C 430,240 330,240 200,190" fill="none" stroke="#8a3ffc" stroke-width="2" marker-end="url(#dbwd)"/>
+  <text x="380" y="212" text-anchor="middle" fill="#8a3ffc">pullback (VJP):  x̄ = Jᵀ ȳ</text>
+  <text x="380" y="262" text-anchor="middle" font-size="11" fill="#8a3ffc">a sensitivity, carried backward</text>
+</svg>
+
+The duality. The **pushforward** (JVP, green) sends an input perturbation $\dot x$
+forward to the output perturbation $J\dot x$. The **pullback** (VJP, purple) sends an
+output sensitivity $\bar y$ backward to the input sensitivity $J^\top\bar y$. Same
+linear map $J$, contracted on opposite legs.
+:::
+
+## The gradient is a VJP with seed 1 {#sec-gradient}
+
+The case that dominates machine learning falls straight out. A loss function
+$\ell:\mathbb{R}^n\to\mathbb{R}$ has a *scalar* output ($m=1$), so its Jacobian is a
+single row, $J\in\mathbb{R}^{1\times n}$, and the **gradient** is that row read as a
+column vector. It is exactly the VJP with the cotangent **seeded to 1**:
+$$
+\nabla\ell \;=\; J^\top\cdot 1,\qquad (\nabla\ell)_j = J_{1j} .
+$$
+The seed $\bar y = 1$ says "we care about the one output, with unit weight"; pulling
+it back through the program yields the sensitivity of the loss to every input at
+once. This is `jax.grad(f)`, and it is why a single backward pass produces the full
+gradient of a loss with respect to millions of parameters. The next section explains
+why that is the efficient direction.
+
+## Forward or reverse: which way to sweep? {#sec-cost}
+
+The Jacobian of $f:\mathbb{R}^n\to\mathbb{R}^m$ is $m\times n$. If you genuinely
+wanted the whole matrix, you would build it one vector at a time:
+
+- **Forward mode** recovers one *column* per JVP: feed the tangent $\dot x = e_j$
+  (the $j$-th unit vector) and you get column $j$ of $J$. The full Jacobian costs
+  $n$ JVPs.
+- **Reverse mode** recovers one *row* per VJP: feed the cotangent $\bar y = e_i$ and
+  you get row $i$ of $J$. The full Jacobian costs $m$ VJPs.
+
+So the cheaper direction is set by the *shape* of the problem: forward mode wins when
+inputs are few and outputs many ($n\ll m$, a "tall" map), reverse mode wins when
+outputs are few and inputs many ($m\ll n$, a "wide" map). Machine learning is the
+extreme wide case — a scalar loss ($m=1$) of millions of parameters — so **one**
+reverse pass yields the entire gradient, whereas forward mode would need one pass per
+parameter. @fig-cost plots the gap.
+
+```{python}
+#| label: fig-cost
+#| fig-cap: "Cost of obtaining the full gradient of a scalar loss (m = 1) with n parameters, in units of program evaluations. Reverse mode needs one VJP regardless of n (flat); forward mode needs one JVP per parameter (n, diagonal). At the parameter counts of real models the gap is millions-fold — the reason reverse-mode backpropagation is universal in deep learning. (For the opposite shape — few inputs, many outputs — the advantage flips to forward mode.)"
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+n = np.logspace(0, 7, 200)   # number of parameters
+forward = n                  # one JVP per input
+reverse = np.ones_like(n)    # one VJP total (m = 1)
+
+fig, ax = plt.subplots(figsize=(6.8, 4.0))
+ax.loglog(n, forward, color="#b03b4b", lw=2, label="forward mode  (n passes)")
+ax.loglog(n, reverse, color="#2c6a45", lw=2, label="reverse mode  (1 pass)")
+ax.fill_between(n, reverse, forward, color="#b03b4b", alpha=0.07)
+for nm in [1e3, 1e6]:
+    ax.axvline(nm, color="0.7", ls=":", lw=1)
+ax.text(1.2e6, 5, "a model with\n$10^6$ parameters", fontsize=8, color="0.3")
+ax.set_xlabel("number of inputs / parameters  n   (scalar loss, m = 1)")
+ax.set_ylabel("passes to get the full gradient")
+ax.set_title("Why reverse mode wins for a scalar loss")
+ax.legend()
+fig.tight_layout()
+plt.show()
+```
+
+## You only linearise once {#sec-yolo}
+
+Here is the idea that ties the chapter to the [last one](xla-jax.qmd#sec-trace) and
+explains how JAX actually builds reverse mode — and it is more elegant than "apply a
+table of backprop rules."
+
+Differentiating a program happens in two stages, and only the **first** depends on
+the function.
+
+1. **Linearise (once).** Pushing forward through the program at a point $x$ produces
+   the JVP — but the JVP, regarded as a function of the tangent, *is a linear map*:
+   $\mathcal{L}:\dot x\mapsto J\dot x$. JAX builds this object directly with
+   `jax.linearize(f, x)`, which returns the primal $y=f(x)$ together with the linear
+   function $\mathcal{L}$. This is the work that "knows about $f$": it walks the
+   program once, recording the local linearisations. After it, $f$'s nonlinearity is
+   spent — what remains, $\mathcal{L}$, is *purely linear*.
+2. **Transpose (mechanically).** The VJP is nothing but the **transpose** of that
+   linear map: $\mathcal{L}^\top:\bar y\mapsto J^\top\bar y$. Transposing a linear
+   program is a mechanical operation — reverse the graph and replace each linear
+   primitive by its transpose (a sum becomes a copy, a copy becomes a sum, a matrix
+   multiply by $A$ becomes a multiply by $A^\top$). JAX does exactly this with a
+   `transpose` interpreter over the linear trace; `jax.linear_transpose` exposes it.
+
+So `jax.vjp` is, in essence, *linearise then transpose*, and `jax.grad` is that with
+the seed $1$. You **linearise once** — the expensive, function-specific step — and
+obtain the backward pass for free by transposing the resulting linear map. @fig-yolo
+is the whole construction on one line. Reverse mode is not a separate algorithm
+bolted onto forward mode; it is forward-mode linearisation followed by a transpose,
+and the transpose is *itself* one of the trace reinterpretations from the
+[previous chapter](xla-jax.qmd#sec-transforms).
+
+::: {#fig-yolo}
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A nonlinear function is linearised once at x to a linear map L; applying L forward is the JVP, transposing L and applying it backward is the VJP."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="yah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55606b"/>
+    </marker>
+  </defs>
+  <rect x="40" y="100" width="170" height="56" rx="6" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="125" y="124" text-anchor="middle">f (nonlinear)</text>
+  <text x="125" y="143" text-anchor="middle" font-size="11" fill="#444b53">at the point x</text>
+  <line x1="210" y1="128" x2="290" y2="128" stroke="#55606b" stroke-width="1.4" marker-end="url(#yah)"/>
+  <text x="250" y="116" text-anchor="middle" font-size="11" font-style="italic" fill="#444b53">linearise</text>
+  <text x="250" y="150" text-anchor="middle" font-size="10" fill="#b03b4b">ONCE</text>
+  <rect x="290" y="100" width="180" height="56" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="380" y="124" text-anchor="middle">L = J</text>
+  <text x="380" y="143" text-anchor="middle" font-size="11" fill="#444b53">a linear map</text>
+  <!-- forward apply = JVP -->
+  <line x1="470" y1="112" x2="600" y2="60" stroke="#2c6a45" stroke-width="1.6" marker-end="url(#yah)"/>
+  <rect x="600" y="36" width="150" height="48" rx="6" fill="#eef5ef" stroke="#2c6a45"/>
+  <text x="675" y="58" text-anchor="middle" font-size="12" fill="#2c6a45">JVP:  ẋ ↦ J ẋ</text>
+  <text x="675" y="74" text-anchor="middle" font-size="10" fill="#2c6a45">apply forward</text>
+  <!-- transpose -> VJP -->
+  <line x1="470" y1="144" x2="600" y2="190" stroke="#8a3ffc" stroke-width="1.6" marker-end="url(#yah)"/>
+  <text x="540" y="182" text-anchor="middle" font-size="11" font-style="italic" fill="#8a3ffc">transpose</text>
+  <rect x="600" y="172" width="150" height="56" rx="6" fill="#f3eefb" stroke="#8a3ffc"/>
+  <text x="675" y="194" text-anchor="middle" font-size="12" fill="#8a3ffc">VJP:  ȳ ↦ Jᵀ ȳ</text>
+  <text x="675" y="212" text-anchor="middle" font-size="10" fill="#8a3ffc">apply backward (= grad)</text>
+</svg>
+
+You only linearise once. Linearising $f$ at $x$ yields a single linear map
+$\mathcal{L}=J$. Applying it forward is the JVP; *transposing* it and applying it
+backward is the VJP — and the gradient is the VJP with seed $1$. The costly,
+function-specific step is the one linearisation; the backward pass is a mechanical
+transpose of its result.
+:::
+
+## Matrix-free, always {#sec-matrix-free}
+
+The recurring discipline is worth stating on its own: **you never build the Jacobian.**
+For $f:\mathbb{R}^n\to\mathbb{R}^m$ the matrix $J$ has $mn$ entries — for a layer
+mapping a million activations to a million activations that is $10^{12}$ numbers, an
+absurdity. JVP and VJP sidestep it entirely: each propagates a *single vector*
+through the (linearised) program, costing roughly what one evaluation of $f$ costs,
+with no $m\times n$ object anywhere. Materialising $J$ is only ever done deliberately
+(`jax.jacfwd` = $n$ JVPs, `jax.jacrev` = $m$ VJPs) when the small dense matrix is
+actually wanted — for instance the tiny per-element Hessians and Jacobians of the
+statistics unit's solvers.
+
+Where a primitive's Jacobian *has* structure, the matrix-free product exploits it
+for free: elementwise maps have diagonal Jacobians (a componentwise multiply), a
+matrix multiply's pushforward and pullback are themselves matrix multiplies, and a
+softmax's Jacobian — a diagonal minus a rank-one term — never needs to be formed to
+apply. Those three cases are the subject of the [next chapter](three-kernels.qmd).
+
+## What this means for `nitrix`
+
+Every differentiable primitive in `nitrix` lives or dies by this chapter.
+
+- **The whole library is one big linear-map-and-transpose.** Because every public
+  function is a pure, traceable composition of primitives ([previous
+  chapter](xla-jax.qmd)), `jax.grad` flows through all of it by linearise-then-
+  transpose — a registration warp, a spectral embedding, a penalised fit are all
+  differentiable end-to-end with no special handling.
+- **Custom kernels supply their own JVP/VJP.** A hand-written Pallas kernel is opaque
+  to the tracer, so each registers a `custom_vjp`: a matrix-free pullback that tells
+  the engine how to transpose it. The fused force kernels of the registration unit
+  and the `semiring` kernels pair a forward kernel with exactly such a backward rule,
+  so the fast path stays differentiable.
+- **Sometimes the honest linear map is the wrong one to transpose.** When a value is
+  defined by a *condition* rather than a formula — the solution of a linear system, a
+  fixed point, an optimum — differentiating the *solver's* unrolled trace is wasteful
+  and unstable. The fix is to linearise the *condition* instead and transpose that,
+  which is the [implicit function theorem](implicit-differentiation.qmd) — the same
+  linearise-then-transpose idea, applied to an equation rather than a program. That is
+  the subject two chapters on.
+
+The thread is [the index's second one](index.qmd#sec-thread-linear): **linearisation
+is the universal tool.** The derivative is a linear map; JVP applies it, VJP
+transposes it, the gradient seeds it with $1$, and the implicit function theorem
+applies it to a constraint. Everything differentiable in the book is built from these
+moves.
+
+## Further reading
+
+- Baydin, A. G., Pearlmutter, B. A., Radul, A. A. & Siskind, J. M. (2018).
+  "Automatic differentiation in machine learning: a survey." *JMLR* 18. — the
+  standard survey of forward/reverse mode, JVP/VJP, and the cost asymmetry.
+- Griewank, A. & Walther, A. (2008). *Evaluating Derivatives* (2nd ed.). SIAM. — the
+  reference text; the matrix-free, transpose-based view of reverse mode.
+- The [JAX autodiff documentation](https://docs.jax.dev/en/latest/notebooks/autodiff_cookbook.html)
+  and the *Autodiff Cookbook* — `jvp`, `vjp`, `grad`, `linearize`,
+  `linear_transpose`, and the linearise-then-transpose construction made concrete.
+- Blondel, M. & Roulet, V. (2024). *The Elements of Differentiable Programming.* — a
+  modern, balanced textbook treatment of the same material.
+
+## See also
+
+- Custom differentiation rules in practice: the `custom_vjp`-bearing kernels in
+  [`_kernels/cuda/`](https://github.com/hypercoil/nitrix/tree/main/src/nitrix/_kernels/cuda)
+  (each fused forward paired with a matrix-free backward).
+- Where small dense Jacobians/Hessians *are* materialised: the statistics unit's
+  [solvers](../statistics/solvers.qmd) (`jacfwd`/`jacrev` on tiny per-element maps).
+- Previous chapter: [JAX and XLA](xla-jax.qmd) — the trace that this chapter
+  linearises and transposes. Next chapter: [three kernels](three-kernels.qmd) —
+  gemm, softmax, and the semiring product, each with its JVP and VJP worked out in
+  the index notation of this chapter.

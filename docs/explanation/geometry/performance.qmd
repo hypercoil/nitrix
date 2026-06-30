@@ -2,106 +2,93 @@
 title: "Representation and performance: when ELL pays off"
 ---
 
-::: {.callout-tldr title="Fast path"}
-ELL turns a sparse mesh operator into a **dense rectangular loop**: two `(n, k_max)`
-arrays, every row the same width, the gather-and-reduce XLA loves. That trade is a
-win when rows are *uniform-length* — the icosphere, where every valence is 5 or 6 —
-and a waste when they are not, because **every row pays for the worst row's
-padding**. This page is the decision guide:
+ELL turns a sparse mesh operator into a dense rectangular loop: two `(n, k_max)` arrays, every row
+the same width, the gather-and-reduce XLA handles well. That trade is a win when rows are
+uniform-length - the icosphere, where every valence is 5 or 6 - and a waste when they are not,
+because every row pays for the worst row's padding. This chapter is the decision guide:
 
-- **Dense vs ELL vs SectionedELL.** The cost model is $O(n\cdot k_{\max})$; ELL pays
-  off when $k_{\max}$ is close to the typical degree, and falls off the *padding
-  cliff* when a few high-valence vertices inflate $k_{\max}$.
-- **The cliff's cure** is `SectionedELL`: bucket rows by degree, pad each bucket to
-  its own small $k_{\max}$, so memory tracks the *largest bucket*, not the worst row.
-- **Why this whole tier is XLA, not Pallas.** The ELL matvec needs a per-row gather,
-  which the pinned JAX's Triton backend cannot lower — so `backend='jax'` is the GA
-  path, and `'pallas-cuda'`/`'auto'` resolve then fall back with one warning.
+- **Dense vs ELL vs SectionedELL.** The cost model is $O(n\cdot k_{\max})$; ELL pays off when
+  $k_{\max}$ is close to the typical degree, and falls off the *padding cliff* when a few
+  high-valence vertices inflate $k_{\max}$.
+- **The cliff's cure** is `SectionedELL`: bucket rows by degree, pad each bucket to its own small
+  $k_{\max}$, so memory tracks the *largest bucket*, not the worst row.
+- **Why this whole tier is XLA, not Pallas.** The ELL matvec needs a per-row gather, which the
+  pinned JAX's Triton backend cannot lower - so `backend='jax'` is the GA path, and
+  `'pallas-cuda'`/`'auto'` resolve then fall back with one warning.
 
-The sibling story in volumes is the **flat-box fast path** (`lax.reduce_window`, no
-patch tensor) versus the **im2col path** for explicit structuring elements, whose
-memory scales with the window's *volume*.
-:::
+The sibling story in volumes is the flat-box fast path (`lax.reduce_window`, no patch tensor)
+versus the im2col path for explicit structuring elements, whose memory scales with the window's
+*volume*.
 
-This is a **reference-tier** page. The narrative chapters
-([operators](operators.qmd), [Laplace–Beltrami](laplace-beltrami.qmd),
-[volumes](volumes.qmd)) teach *what* the operators compute and *why* they converge
-to the smooth truth; this page is about *how they are stored and dispatched* so the
-computation is fast and fits in memory. It is more engineering-flavoured than its
-siblings, but the same posture holds throughout: a discrete mesh or grid is a
-**finite approximation** of a smooth object, and we want the representation of that
-approximation to scale with the geometry's real structure — near-uniform valence,
-short voxel windows — rather than its worst case. It assumes the
-[foundations](foundations.qmd) page's **execution classes**
+This is a reference-tier chapter. The narrative chapters ([operators](operators.qmd),
+[Laplace--Beltrami](laplace-beltrami.qmd), [volumes](volumes.qmd)) teach *what* the operators
+compute and *why* they converge to the smooth truth; this chapter is about *how they are stored and
+dispatched* so the computation is fast and fits in memory. It is more engineering-flavoured than its
+siblings, but the same posture holds: a discrete mesh or grid is a finite approximation of a smooth
+object, and we want the representation of that approximation to scale with the geometry's real
+structure - near-uniform valence, short voxel windows - rather than its worst case. It assumes the
+[foundations](foundations.qmd) chapter's execution classes
 ([DIFF-JAX / HOST-CTOR / HOST-QA](foundations.qmd#sec-classes)) and the
 [ELL matvec](operators.qmd#sec-ell) from the operator layer.
 
 ## A motivating decision {#sec-motivation}
 
-You have two surfaces on your desk. One is an **fsaverage icosphere** — a cortical
-template at FreeSurfer's `ico6`/`ico7` resolution, built by recursive subdivision of
-an icosahedron. Its valences are *boringly uniform*: every one of the original 12
-vertices has degree 5, every vertex added by subdivision has degree 6, so
-$\min\deg = 5$, $\max\deg = 6$, full stop (this is the topological signature the mesh
-tests assert — see the [sparse-specialisations design note][spec-doc]). The other is
-a **subject-native white-matter surface reconstructed by marching cubes**: mostly
-well-meshed, but with a scatter of high-valence vertices where the isosurface
-extractor stitched together an awkward neighbourhood, so its degree distribution has
-a *long tail*.
+Consider two surfaces. One is an **fsaverage icosphere** - a cortical template at FreeSurfer's
+`ico6`/`ico7` resolution, built by recursive subdivision of an icosahedron. Its valences are
+uniform: every one of the original 12 vertices has degree 5, every vertex added by subdivision has
+degree 6, so $\min\deg = 5$, $\max\deg = 6$ (this is the topological signature the mesh tests
+assert - see the [sparse-specialisations design note][spec-doc]). The other is a **subject-native
+white-matter surface reconstructed by marching cubes**: mostly well-meshed, but with a scatter of
+high-valence vertices where the isosurface extractor stitched together an awkward neighbourhood, so
+its degree distribution has a long tail.
 
-Both surfaces support the same operation — say, smoothing a thickness map along the
-surface with the [cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent). The
-question this page answers: **should the operator for each surface be stored as a
-flat `ELL`, or as a `SectionedELL`?** And if you write `format='auto'`, what does
-`nitrix` decide, and why? The answer falls out of one cost model.
+Both surfaces support the same operation - say, smoothing a thickness map along the surface with the
+[cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent). The question this chapter answers: should
+the operator for each surface be stored as a flat `ELL`, or as a `SectionedELL`? And if you write
+`format='auto'`, what does `nitrix` decide, and why? The answer falls out of one cost model.
 
 [spec-doc]: https://github.com/hypercoil/nitrix/blob/main/docs/design/sparse-specialisations.md
 
 ## When ELL pays off {#sec-storage}
 
-### The cost model in one line
+### The cost model
 
-Recall the [ELL layout](operators.qmd#sec-ell): an operator is two dense arrays,
-`values` and `indices`, each of shape $(n, k_{\max})$, where row $i$ holds the
-weights and column-indices of vertex $i$'s neighbours, and rows shorter than
-$k_{\max}$ are **padded** with a semiring-identity value (a no-op) at an in-range
-sentinel index. The matvec is a fixed double loop: for each row, for each of the
-$k_{\max}$ slots, gather one entry of the operand and combine it into the reduction.
-
-So both the storage and the compute are exactly
+Recall the [ELL layout](operators.qmd#sec-ell): an operator is two dense arrays, `values` and
+`indices`, each of shape $(n, k_{\max})$, where row $i$ holds the weights and column-indices of
+vertex $i$'s neighbours, and rows shorter than $k_{\max}$ are padded with a semiring-identity value
+(a no-op) at an in-range sentinel index. The matvec is a fixed double loop: for each row, for each of
+the $k_{\max}$ slots, gather one entry of the operand and combine it into the reduction. So both the
+storage and the compute are exactly
 
 $$
 \text{cost} \;=\; O(n \cdot k_{\max}),
 $$ {#eq-ell-cost}
 
-where $n$ is the number of rows (vertices) and $k_{\max}$ is the padded row width.
-There is no per-row branching, no ragged dimension — that uniformity is *the entire
-reason* ELL is fast on XLA. But it is also where the trap is: $k_{\max}$ is set by
-the **single longest row**, and every other row pays for it. The useful work is only
-$\sum_i \deg_i$ (the real non-pad entries); everything beyond that is padding the
-hardware still streams through.
+where $n$ is the number of rows (vertices) and $k_{\max}$ is the padded row width. There is no
+per-row branching, no ragged dimension - that uniformity is the entire reason ELL is fast on XLA. But
+it is also where the trap is: $k_{\max}$ is set by the single longest row, and every other row pays
+for it. The useful work is only $\sum_i \deg_i$ (the real non-pad entries); everything beyond that is
+padding the hardware still streams through.
 
-### Where the work actually goes: the waste fraction
+### The waste fraction
 
-Put a number on the waste. Of the $n\cdot k_{\max}$ slots ELL stores and visits,
-only $\sum_i \deg_i$ carry signal; the rest are pad. So the **wasted fraction** is
+Put a number on the waste. Of the $n\cdot k_{\max}$ slots ELL stores and visits, only $\sum_i \deg_i$
+carry signal; the rest are pad. So the wasted fraction is
 
 $$
 \text{waste} \;=\; \frac{n\,k_{\max} - \sum_i \deg_i}{n\,k_{\max}}
             \;=\; 1 - \frac{\bar{\deg}}{k_{\max}},
 $$ {#eq-waste}
 
-where $\bar{\deg} = \tfrac1n\sum_i \deg_i$ is the mean degree. Read off the two
-limits. When every row is the same length, $k_{\max} = \bar{\deg}$ and the waste is
-**zero** — ELL is a perfect fit. When one hub vertex pushes $k_{\max}$ far above the
-mean, $\bar{\deg}/k_{\max}\to 0$ and the waste approaches **100%** — you are storing
-and streaming a mostly-empty rectangle.
+where $\bar{\deg} = \tfrac1n\sum_i \deg_i$ is the mean degree. The two limits: when every row is the
+same length, $k_{\max} = \bar{\deg}$ and the waste is zero - ELL is a perfect fit. When one hub vertex
+pushes $k_{\max}$ far above the mean, $\bar{\deg}/k_{\max}\to 0$ and the waste approaches 100% - you
+are storing and streaming a mostly-empty rectangle.
 
-This is exactly the difference between the two surfaces from
-[the motivating decision](#sec-motivation). @fig-perf-valence shows it: the
-icosphere's degrees pile up at 5 and 6, so $k_{\max}=6\approx\bar{\deg}$ and the
-waste is small. The irregular mesh has the same *typical* degree but a long tail, so
-its $k_{\max}$ is several times the mean and most of the flat-ELL rectangle is pad.
+This is exactly the difference between the two surfaces from [the motivating decision](#sec-motivation).
+@fig-perf-valence shows it: the icosphere's degrees pile up at 5 and 6, so
+$k_{\max}=6\approx\bar{\deg}$ and the waste is small. The irregular mesh has the same *typical* degree
+but a long tail, so its $k_{\max}$ is several times the mean and most of the flat-ELL rectangle is pad.
 
 ```{python}
 #| label: fig-perf-valence
@@ -205,37 +192,34 @@ plt.show()
 
 With @eq-ell-cost and @eq-waste in hand the decision is mechanical.
 
-- **Dense $n\times n$.** Costs $O(n^2)$ storage and compute regardless of structure.
-  Only competitive when the operator is *tiny* (so $n^2$ is small) or *genuinely
-  dense* (so $k_{\max}\approx n$ and ELL saves nothing). For a cortical mesh with
-  $n\approx 3\times10^5$ and $\deg\approx 6$ it is hopeless — hundreds of gigabytes
-  of mostly zeros, as the [operators page](operators.qmd#sec-neighbours) spells out.
-- **Flat ELL.** Costs $O(n\,k_{\max})$ with the waste of @eq-waste. The right choice
-  when $k_{\max}\approx\bar{\deg}$: the icosphere, the fsaverage family, regular
-  voxel-grid stencils (where every voxel uses the *same* offset pattern, so the row
-  width is fixed by construction). This is the default, `format='ell'`.
-- **SectionedELL.** Costs the sum of per-bucket $O(n_b\,k_{\max,b})$ — pays the cliff
-  off when the degree spread is wide. The next section.
+- **Dense $n\times n$.** Costs $O(n^2)$ storage and compute regardless of structure. Only competitive
+  when the operator is *tiny* (so $n^2$ is small) or *genuinely dense* (so $k_{\max}\approx n$ and ELL
+  saves nothing). For a cortical mesh with $n\approx 3\times10^5$ and $\deg\approx 6$ it is hopeless -
+  hundreds of gigabytes of mostly zeros, as the [operators chapter](operators.qmd#sec-neighbours)
+  spells out.
+- **Flat ELL.** Costs $O(n\,k_{\max})$ with the waste of @eq-waste. The right choice when
+  $k_{\max}\approx\bar{\deg}$: the icosphere, the fsaverage family, regular voxel-grid stencils (where
+  every voxel uses the *same* offset pattern, so the row width is fixed by construction). This is the
+  default, `format='ell'`.
+- **SectionedELL.** Costs the sum of per-bucket $O(n_b\,k_{\max,b})$ - pays the cliff off when the
+  degree spread is wide. The next section.
 
-The headline: **ELL pays off precisely when the geometry's valence is near-uniform.**
-That is not an accident of the format — it is the format *designed for* the meshes
-neuroimaging actually uses most (templated spheres), with `SectionedELL` as the
-escape hatch for the irregular case.
+The headline: ELL pays off precisely when the geometry's valence is near-uniform. That is not an
+accident of the format - it is the format *designed for* the meshes neuroimaging uses most (templated
+spheres), with `SectionedELL` as the escape hatch for the irregular case.
 
 ## The padding cliff and its cure: SectionedELL {#sec-padding}
 
-### The idea: bucket rows by degree
+### Bucketing rows by degree
 
-The flat ELL's flaw is that one long row sets the width for all $n$ rows. The cure
-is the simplest thing that could possibly work: **group rows of similar degree, and
-pad each group only to its own modest $k_{\max}$.** A row of degree 6 then sits in a
-bucket whose width is ~8, not a global width of 60 dragged up by some degree-58 hub.
+The flat ELL's flaw is that one long row sets the width for all $n$ rows. The cure is to group rows of
+similar degree and pad each group only to its own modest $k_{\max}$. A row of degree 6 then sits in a
+bucket whose width is about 8, not a global width of 60 dragged up by some degree-58 hub.
 
-This is `SectionedELL` (`sparse/ell_sectioned.py`). It is, deliberately, a
-*Python-level wrapper* around the existing [ELL matvec](operators.qmd#sec-ell) — **no
-new kernel**. Construction partitions the rows into buckets, builds one ordinary
-`ELL` per bucket at the bucket's local width, runs the kernel once per bucket, and
-scatters the results back into the original row order.
+This is `SectionedELL` (`sparse/ell_sectioned.py`). It is, deliberately, a *Python-level wrapper*
+around the existing [ELL matvec](operators.qmd#sec-ell) - no new kernel. Construction partitions the
+rows into buckets, builds one ordinary `ELL` per bucket at the bucket's local width, runs the kernel
+once per bucket, and scatters the results back into the original row order.
 
 The default bucketing function (`_default_bucket`) is
 
@@ -243,38 +227,35 @@ $$
 b(\deg) \;=\; \big\lceil \log_2 \max(\deg, 1)\big\rceil,
 $$ {#eq-bucket}
 
-with each bucket's aligned width set to $k_{\max,b} = 2^{b}$ (and $k_{\max,0}=1$).
-So degree 1 lands in bucket 0 (width 1); degree 2 in bucket 1 (width 2); degrees 3–4
-in bucket 2 (width 4); degrees 5–8 in bucket 3 (width 8); and so on. The log scale
-is the point: it keeps the *number* of buckets small ($\sim\log_2 k_{\max}$) while
-guaranteeing that no row is padded to more than **twice** its own degree. Why align
-each bucket to the next power of two rather than to its largest member? Because then a
-`SectionedELL` reused across many calls — the common case, since the operator is
-built once and applied repeatedly — compiles each bucket's matvec **once**: the
-shapes are stable across calls, so XLA's trace cache hits.
+with each bucket's aligned width set to $k_{\max,b} = 2^{b}$ (and $k_{\max,0}=1$). So degree 1 lands
+in bucket 0 (width 1); degree 2 in bucket 1 (width 2); degrees 3-4 in bucket 2 (width 4); degrees 5-8
+in bucket 3 (width 8); and so on. The log scale is the point: it keeps the *number* of buckets small
+($\sim\log_2 k_{\max}$) while guaranteeing that no row is padded to more than *twice* its own degree.
+Aligning each bucket to the next power of two rather than to its largest member matters for reuse:
+when a `SectionedELL` is reused across many calls - the common case, since the operator is built once
+and applied repeatedly - each bucket's matvec compiles *once*, because the shapes are stable across
+calls and XLA's trace cache hits.
 
 ### The memory win
 
-Now compare storage. Flat ELL stores $n\cdot k_{\max}$ slots. SectionedELL stores
+Compare storage. Flat ELL stores $n\cdot k_{\max}$ slots. SectionedELL stores
 
 $$
 \text{slots}_{\text{sectioned}} \;=\; \sum_b n_b\, k_{\max,b},
 $$ {#eq-sectioned-cost}
 
-where $n_b$ is the number of rows in bucket $b$. The decisive fact is that this sum
-is dominated by the **largest bucket**, not by the worst-case row. On a long-tailed
-distribution — distance-thresholded neighbourhoods in irregular point clouds, where
-$k_{\max}$ can be 10–100× the median, or atlas-parcel adjacencies whose parcel sizes
-span one to two orders of magnitude (both noted in the
-[`ell_sectioned` module docstring][ellsec-src]) — the handful of hub rows live alone
-in a high-numbered bucket and pay their own width, while the millions of typical rows
-pay only ~8. @fig-perf-sectioned shows the total stored slots collapse by roughly an
-order of magnitude on such a distribution.
+where $n_b$ is the number of rows in bucket $b$. The decisive fact is that this sum is dominated by
+the largest bucket, not by the worst-case row. On a long-tailed distribution - distance-thresholded
+neighbourhoods in irregular point clouds, where $k_{\max}$ can be 10-100$\times$ the median, or
+atlas-parcel adjacencies whose parcel sizes span one to two orders of magnitude (both noted in the
+[`ell_sectioned` module docstring][ellsec-src]) - the handful of hub rows live alone in a high-numbered
+bucket and pay their own width, while the millions of typical rows pay only about 8.
+@fig-perf-sectioned shows the total stored slots collapse by roughly an order of magnitude on such a
+distribution.
 
-`SectionedELL` exposes this directly: `.total_storage` returns
-$\sum_b n_b\,k_{\max,b}$ so you can verify the win against a flat ELL's
-$n\cdot\max_b k_{\max,b}$, and `.n_buckets` reports how many sections were emitted
-(empty buckets are skipped).
+`SectionedELL` exposes this directly: `.total_storage` returns $\sum_b n_b\,k_{\max,b}$ so you can
+verify the win against a flat ELL's $n\cdot\max_b k_{\max,b}$, and `.n_buckets` reports how many
+sections were emitted (empty buckets are skipped).
 
 [ellsec-src]: https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/ell_sectioned.py
 
@@ -335,163 +316,142 @@ plt.show()
 
 ### The real surface: `format={'ell','sectioned','auto'}`
 
-You rarely call `sectioned_ell_from_ragged` by hand. The mesh constructors —
-`mesh_k_ring_adjacency` and `mesh_cotangent_laplacian` in `sparse/mesh.py` — take a
-`format` argument with three settings:
+You rarely call `sectioned_ell_from_ragged` by hand. The mesh constructors - `mesh_k_ring_adjacency`
+and `mesh_cotangent_laplacian` in `sparse/mesh.py` - take a `format` argument with three settings:
 
-- **`format='ell'`** (the default) — a flat `ELL` padded to the global max degree,
-  byte-identical to the format's original behaviour.
-- **`format='sectioned'`** — always a degree-bucketed `SectionedELL`.
-- **`format='auto'`** — section *only when it is worth it.*
+- **`format='ell'`** (the default) - a flat `ELL` padded to the global max degree, byte-identical to
+  the format's original behaviour.
+- **`format='sectioned'`** - always a degree-bucketed `SectionedELL`.
+- **`format='auto'`** - section *only when it is worth it.*
 
-The `'auto'` rule is the one to internalise, because it operationalises this whole
-page. It is in `_resolve_format`: compute the **ratio of the max degree to the median
-degree**, and section when that ratio exceeds a threshold:
+The `'auto'` rule operationalises this whole chapter. It is in `_resolve_format`: compute the ratio of
+the max degree to the median degree, and section when that ratio exceeds a threshold:
 
 $$
 \text{section} \iff \frac{\max_i \deg_i}{\operatorname{median}_i \deg_i} > 2.
 $$ {#eq-auto}
 
-The threshold is `_AUTO_SECTION_RATIO = 2.0`. Why max-over-median rather than, say,
-max-over-mean? The median is robust to exactly the long tail we care about: a handful
-of degree-58 hubs barely move the median but blow up the mean, so a max/median ratio
-cleanly separates "near-uniform" from "long-tailed." For the icosphere /
-fsaverage families the ratio is $6/6=1$ — comfortably under 2 — so `'auto'` keeps
-them flat; marching-cubes output with a high-valence tail trips the threshold and
-sections. (This is the same surface pairing from
-[the motivating decision](#sec-motivation), now decided automatically.)
+The threshold is `_AUTO_SECTION_RATIO = 2.0`. Max-over-median, rather than max-over-mean, because the
+median is robust to exactly the long tail we care about: a handful of degree-58 hubs barely move the
+median but blow up the mean, so a max/median ratio cleanly separates "near-uniform" from "long-tailed."
+For the icosphere / fsaverage families the ratio is $6/6=1$ - comfortably under 2 - so `'auto'` keeps
+them flat; marching-cubes output with a high-valence tail trips the threshold and sections. (This is
+the same surface pairing from [the motivating decision](#sec-motivation), now decided automatically.)
 
-One detail worth stressing because it is *not* guessed: the design's bucket
-boundaries and the choice of threshold are calibrated against the **measured**
-valence histograms of real cortical surfaces, not chosen by intuition — the
-[`ell_sectioned` rationale][ellsec-src] points specifically at distance-thresholded
-point-cloud neighbourhoods and atlas-parcel adjacencies as the motivating
+One detail worth stressing because it is *not* guessed: the design's bucket boundaries and the choice
+of threshold are calibrated against the *measured* valence histograms of real cortical surfaces, not
+chosen by intuition - the [`ell_sectioned` rationale][ellsec-src] points specifically at
+distance-thresholded point-cloud neighbourhoods and atlas-parcel adjacencies as the motivating
 distributions. The cost model decides; the data sets the constants.
 
 ### The public surface of the sectioned tier
 
-For completeness, the format's full public API (`__all__` in the two modules), tagged
-by execution class:
+For completeness, the format's full public API (`__all__` in the two modules), tagged by execution
+class:
 
-- **`ELL`** — the dataclass: `values`, `indices`, `n_cols`, `identity`, with
-  `n_rows`/`k_max`/`shape`/`dtype` properties. Registered as a JAX pytree, so an
-  `ELL` flows through `jit`/`vmap`/`grad` as a first-class operand. **DIFF-JAX** as an
-  operand (the `values` are a differentiable leaf; `indices` is integer and carries
-  an inert `float0` cotangent).
-- **`ell_pad`** (**HOST-CTOR**) — pad ragged per-row lists to a fixed `k_max`,
-  filling `values` with `identity` and `indices` with an in-range `pad_index`.
-- **`ell_from_dense`** (**HOST-CTOR**) — convert a dense matrix to ELL by keeping the
-  top-`k_max`-by-magnitude entries per row. Note its documented hazard: top-$k$
-  selection is **not symmetry-preserving**, so the stored pattern is generally
-  asymmetric even when the input is symmetric; the remedies are `symmetrize=True`
-  (which can densify hub rows entirely — its storage is *not* bounded by a small
-  multiple of `k_max`, exactly the cliff this page is about) or the storage-free
-  matvec symmetrisation $\tfrac12(Ax + A^\top x)$ on the spectral consumers.
-- **`ell_mask`** (**DIFF-JAX**) — mask edges out by rewriting their value to the
-  algebra's **annihilator** (prefer `semiring=`; the `identity=` form is deprecated).
-  The medial-wall / grey-matter case: edges into a masked region contribute the
-  identity to every reduction. `EUCLIDEAN` has no annihilator, so masking by value is
-  impossible there — drop the columns instead.
-- **`ell_add_self_loops`** (**DIFF-JAX**) — append an $(i,i)$ edge per row (the GCN
-  $\hat A = A + I$ trick / attention's self-attention), growing `k_max` by one;
-  optional per-edge attribute fill `'mean'`/`'add'`/`'zero'`.
-- **`ell_to_dense`** (**DIFF-JAX**) — scatter back to a dense matrix, for tests and
-  fallback paths.
-- **`SectionedELL`** — the bucketed dataclass: `sections` (one `ELL` per bucket),
-  `row_groups` (the original-row indices per bucket, stored as host `np.ndarray` so
-  the dispatch loop can use them as static scatter indices), plus `total_storage` and
-  `n_buckets`. Also a JAX pytree; the *number* of buckets is structural (encoded in
-  the treedef) so the static Python dispatch length survives a trace.
-- **`sectioned_ell_from_ragged`** (**HOST-CTOR**) — build a `SectionedELL` from ragged
-  per-row lists; accepts a custom `bucket_by`. Construction is host-side and *not*
-  JIT-compatible (the per-bucket shapes are data-dependent).
-- **`sectioned_semiring_ell_matmul`** (**DIFF-JAX**) — the forward matvec: per-bucket
-  `semiring_ell_matmul` then scatter-set back to original row order. Empty (degree-0)
-  rows live in bucket 0 with all-identity values, so their output is the algebra
-  identity — the algebra-correct "no neighbours, no contribution."
-- **`sectioned_semiring_ell_rmatvec`** (**DIFF-JAX**) — the adjoint $Y = A^\top X$,
-  **REAL only** (the additive scatter adjoint); composing forward + adjoint gives the
-  symmetric-part matvec for spectral solvers on bucketed adjacencies whose
-  construction did not preserve symmetry.
+- **`ELL`** - the dataclass: `values`, `indices`, `n_cols`, `identity`, with
+  `n_rows`/`k_max`/`shape`/`dtype` properties. Registered as a JAX pytree, so an `ELL` flows through
+  `jit`/`vmap`/`grad` as a first-class operand. **DIFF-JAX** as an operand (the `values` are a
+  differentiable leaf; `indices` is integer and carries an inert `float0` cotangent).
+- **`ell_pad`** (**HOST-CTOR**) - pad ragged per-row lists to a fixed `k_max`, filling `values` with
+  `identity` and `indices` with an in-range `pad_index`.
+- **`ell_from_dense`** (**HOST-CTOR**) - convert a dense matrix to ELL by keeping the
+  top-`k_max`-by-magnitude entries per row. Note its documented hazard: top-$k$ selection is *not
+  symmetry-preserving*, so the stored pattern is generally asymmetric even when the input is
+  symmetric; the remedies are `symmetrize=True` (which can densify hub rows entirely - its storage is
+  *not* bounded by a small multiple of `k_max`, exactly the cliff this chapter is about) or the
+  storage-free matvec symmetrisation $\tfrac12(Ax + A^\top x)$ on the spectral consumers.
+- **`ell_mask`** (**DIFF-JAX**) - mask edges out by rewriting their value to the algebra's
+  *annihilator* (prefer `semiring=`; the `identity=` form is deprecated). The medial-wall /
+  grey-matter case: edges into a masked region contribute the identity to every reduction. `EUCLIDEAN`
+  has no annihilator, so masking by value is impossible there - drop the columns instead.
+- **`ell_add_self_loops`** (**DIFF-JAX**) - append an $(i,i)$ edge per row (the GCN $\hat A = A + I$
+  trick / attention's self-attention), growing `k_max` by one; optional per-edge attribute fill
+  `'mean'`/`'add'`/`'zero'`.
+- **`ell_to_dense`** (**DIFF-JAX**) - scatter back to a dense matrix, for tests and fallback paths.
+- **`SectionedELL`** - the bucketed dataclass: `sections` (one `ELL` per bucket), `row_groups` (the
+  original-row indices per bucket, stored as host `np.ndarray` so the dispatch loop can use them as
+  static scatter indices), plus `total_storage` and `n_buckets`. Also a JAX pytree; the *number* of
+  buckets is structural (encoded in the treedef) so the static Python dispatch length survives a
+  trace.
+- **`sectioned_ell_from_ragged`** (**HOST-CTOR**) - build a `SectionedELL` from ragged per-row lists;
+  accepts a custom `bucket_by`. Construction is host-side and *not* JIT-compatible (the per-bucket
+  shapes are data-dependent).
+- **`sectioned_semiring_ell_matmul`** (**DIFF-JAX**) - the forward matvec: per-bucket
+  `semiring_ell_matmul` then scatter-set back to original row order. Empty (degree-0) rows live in
+  bucket 0 with all-identity values, so their output is the algebra identity - the algebra-correct "no
+  neighbours, no contribution."
+- **`sectioned_semiring_ell_rmatvec`** (**DIFF-JAX**) - the adjoint $Y = A^\top X$, *REAL only* (the
+  additive scatter adjoint); composing forward + adjoint gives the symmetric-part matvec for spectral
+  solvers on bucketed adjacencies whose construction did not preserve symmetry.
 
 The format-agnostic seam over all of this is [`apply_operator`](operators.qmd#sec-apply)
-(`sparse/_apply.py`): it runs `op @ x` whether `op` is a flat `ELL` or a
-`SectionedELL`, vmapping leading batch axes over the 2-D core, so your algorithm code
-never branches on the storage choice.
+(`sparse/_apply.py`): it runs `op @ x` whether `op` is a flat `ELL` or a `SectionedELL`, vmapping
+leading batch axes over the 2-D core, so your algorithm code never branches on the storage choice.
 
 ## XLA, not Pallas {#sec-backend}
 
 ### Why there is no custom kernel for the ELL matvec
 
-A reader who has met Triton might ask: this gather-and-reduce is a textbook GPU
-kernel — why not write a fused Pallas/Triton version and skip XLA's overhead? The
-[`ell-on-triton` decision record][triton-doc] answers this, and the answer is
-**structural, not a tuning regret.**
+A reader who has met Triton might ask: this gather-and-reduce is a textbook GPU kernel - why not write
+a fused Pallas/Triton version and skip XLA's overhead? The [`ell-on-triton` decision record][triton-doc]
+answers this, and the answer is structural, not a tuning regret.
 
-Look at what one step of the ELL K-loop needs. For a tile of output rows and columns,
-on every step $p$ it reads `values[i, p]` (contiguous — fine) and
-`B[indices[i, p], j]` — a **per-row gather of the dense operand**, a different row
-index per output row $i$. That second access lowers, in JAX, to `lax.gather`. And the
-pinned JAX's **Pallas Triton backend cannot lower `gather`**: it raises
-`NotImplementedError: Unimplemented primitive in Pallas GPU lowering: gather`. The
-record documents three attempted workarounds — advanced indexing `B_blk[idx_p]`,
-`jnp.take(..., axis=0)`, and Python-unrolled per-row loads with an axis-0
-`jnp.stack` — and all three hit the same wall (the last because Triton lowers
-`concatenate` only along the *last* axis). So the format whose whole purpose is the
-per-row gather cannot, today, be expressed in this Pallas backend.
+Look at what one step of the ELL K-loop needs. For a tile of output rows and columns, on every step
+$p$ it reads `values[i, p]` (contiguous - fine) and `B[indices[i, p], j]` - a per-row gather of the
+dense operand, a different row index per output row $i$. That second access lowers, in JAX, to
+`lax.gather`. And the pinned JAX's Pallas Triton backend cannot lower `gather`: it raises
+`NotImplementedError: Unimplemented primitive in Pallas GPU lowering: gather`. The record documents
+three attempted workarounds - advanced indexing `B_blk[idx_p]`, `jnp.take(..., axis=0)`, and
+Python-unrolled per-row loads with an axis-0 `jnp.stack` - and all three hit the same wall (the last
+because Triton lowers `concatenate` only along the *last* axis). So the format whose whole purpose is
+the per-row gather cannot, today, be expressed in this Pallas backend.
 
 [triton-doc]: https://github.com/hypercoil/nitrix/blob/main/docs/design/ell-on-triton.md
 
 ### The policy: resolve, fall back, warn, re-probe
 
-The consequence is a clean, honest dispatch policy (the same `backend` knob threads
-through `semiring_ell_matmul`, `sectioned_semiring_ell_matmul`, and `apply_operator`):
+The consequence is a clean, honest dispatch policy (the same `backend` knob threads through
+`semiring_ell_matmul`, `sectioned_semiring_ell_matmul`, and `apply_operator`):
 
-- **`backend='jax'`** — works. This is the GA path. The reference walks the K-dim
-  with `lax.fori_loop` and `B[idx_p]`; it is correct, **differentiable** (the
-  backward composes the per-algebra rule with `scatter_add` for the operand
-  gradient), and reasonably fast on Ampere.
-- **`backend='pallas-cuda'`** — resolved by the dispatcher, then *immediately falls
-  back* to JAX with one `NitrixBackendFallback` warning per `(shape, dtype, algebra)`
-  (deduplicated so a vmapped batch warns once, not once per element).
-- **`backend='auto'`** — on Ampere+ resolves to `pallas-cuda`, then falls back, same
-  as above. This is *intended*: the warning surfaces the policy rather than silently
-  doing the slow-or-fast thing.
+- **`backend='jax'`** - works. This is the GA path. The reference walks the K-dim with `lax.fori_loop`
+  and `B[idx_p]`; it is correct, differentiable (the backward composes the per-algebra rule with
+  `scatter_add` for the operand gradient), and reasonably fast on Ampere.
+- **`backend='pallas-cuda'`** - resolved by the dispatcher, then *immediately falls back* to JAX with
+  one `NitrixBackendFallback` warning per `(shape, dtype, algebra)` (deduplicated so a vmapped batch
+  warns once, not once per element).
+- **`backend='auto'`** - on Ampere+ resolves to `pallas-cuda`, then falls back, same as above. This is
+  *intended*: the warning surfaces the policy rather than silently doing the slow-or-fast thing.
 
-A `confirm_pallas_falls_back()` probe in the G0 bench re-checks the structural
-fallback on each run; if a future JAX release lands `gather` lowering, the probe
-flips and the team knows to swap the stub for a real kernel. The public dispatcher
-does not change either way.
+A `confirm_pallas_falls_back()` probe in the G0 bench re-checks the structural fallback on each run; if
+a future JAX release lands `gather` lowering, the probe flips and the team knows to swap the stub for a
+real kernel. The public dispatcher does not change either way.
 
-For a sense of scale, the frozen G0 baseline (A10G, fp32, mesh-adjacency
-$m=4096$, $k_{\max}=32$, $n_{\text{col}}=32$) records, on the JAX path: REAL
-$\approx 346\,\mu s$, LOG $\approx 466\,\mu s$, max-plus $\approx 356\,\mu s$ — the
-numbers downstream consumers should plan around (see the [decision record][triton-doc]
-for the full table).
+For a sense of scale, the frozen G0 baseline (A10G, fp32, mesh-adjacency $m=4096$, $k_{\max}=32$,
+$n_{\text{col}}=32$) records, on the JAX path: REAL $\approx 346\,\mu s$, LOG $\approx 466\,\mu s$,
+max-plus $\approx 356\,\mu s$ - the numbers downstream consumers should plan around (see the
+[decision record][triton-doc] for the full table).
 
 ### The morphology counterpart: the im2col cliff
 
-The volume operators have the same shape of story — a fast fused path and a
-materialising slow path — but the trigger is the *structuring element*, not the
-valence. From `morphology/_mm.py` (and the measured [B21 cost FR][b21]):
+The volume operators have the same shape of story - a fast fused path and a materialising slow path -
+but the trigger is the *structuring element*, not the valence. From `morphology/_mm.py` (and the
+measured [B21 cost FR][b21]):
 
-- **Flat box** (`structuring_element=None`) → `_windowed_reduce`, a single fused
-  `lax.reduce_window`. Dilation becomes a sliding-window max, erosion a sliding-window
-  min; XLA lowers it like a pooling op. **No patch tensor**, HBM tracks the image,
-  and it *beats cupy* (~0.56–0.76× on the L4 box cases). This is the common case and
-  the page-representative point.
-- **Explicit structuring element** (a disk, ball, cross, ring) →
-  `_conv_wrap → semiring_conv`, the **im2col path**: it gathers a
-  `(*spatial, prod(window))` **patch tensor** before the tropical matmul. That tensor
-  scales with the window's *volume*, and it is the memory blow-up: a 64³ ball of
-  radius 2 peaks at **~336 MB** of HBM and runs **~9–11× slower** than cupy (versus
-  cupy's ~0.26–1.05 MB across the board). The disk/ball footprint is the *default* in
-  skimage and the common scipy choice, so this is the path real users hit.
+- **Flat box** (`structuring_element=None`) $\to$ `_windowed_reduce`, a single fused
+  `lax.reduce_window`. Dilation becomes a sliding-window max, erosion a sliding-window min; XLA lowers
+  it like a pooling op. No patch tensor, HBM tracks the image, and it *beats cupy* (~0.56-0.76$\times$
+  on the L4 box cases). This is the common case and the chapter-representative point.
+- **Explicit structuring element** (a disk, ball, cross, ring) $\to$ `_conv_wrap → semiring_conv`, the
+  im2col path: it gathers a `(*spatial, prod(window))` patch tensor before the tropical matmul. That
+  tensor scales with the window's *volume*, and it is the memory blow-up: a 64³ ball of radius 2 peaks
+  at ~336 MB of HBM and runs ~9-11$\times$ slower than cupy (versus cupy's ~0.26-1.05 MB across the
+  board). The disk/ball footprint is the *default* in skimage and the common scipy choice, so this is
+  the path real users hit.
 
-@fig-perf-morphology plots both: the measured peak-HBM bars (fused vs im2col) and the
-cost law — the im2col patch tensor is $\text{image voxels}\times\text{window volume}$
-elements, so it climbs steeply with the SE edge length while the fused path stays
-flat at roughly the image size.
+@fig-perf-morphology plots both: the measured peak-HBM bars (fused vs im2col) and the cost law - the
+im2col patch tensor is $\text{image voxels}\times\text{window volume}$ elements, so it climbs steeply
+with the SE edge length while the fused path stays flat at roughly the image size.
 
 [b21]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/morphology-explicit-se-im2col-cost.md
 
@@ -548,96 +508,85 @@ plt.show()
 
 ### A subtlety: `jit(grad)` and the concrete identity
 
-There is a numerical-engineering trap in the fast path worth knowing, because it
-explains a curious line in `_windowed_reduce`. `lax.reduce_window` only routes a
-generic reducer (`lax.max` / `lax.min`) to its **differentiable specialised
-primitive** (`reduce_window_max_p` / `reduce_window_min_p`) when JAX's monoid
-detection sees a *concrete* identity equal to the dtype's max/min identity. If the
-window-init scalar is a *traced* value — which `jnp.asarray(...)` becomes under
-`jit` — detection fails, falls back to the generic `reduce_window_p`, and that
-primitive's **missing transpose rule breaks `jit(grad(...))`**. The fix is to pass
-the init as a NumPy-concrete scalar (`np.asarray(identity, x.dtype)`, *not*
-`jnp.asarray`). The lesson generalises: on this tier, *how* you construct a constant
-can decide whether the op is differentiable — concrete identities route to the
-diff-friendly primitive.
+There is a numerical-engineering trap in the fast path worth knowing, because it explains a curious
+line in `_windowed_reduce`. `lax.reduce_window` only routes a generic reducer (`lax.max` / `lax.min`)
+to its differentiable specialised primitive (`reduce_window_max_p` / `reduce_window_min_p`) when JAX's
+monoid detection sees a *concrete* identity equal to the dtype's max/min identity. If the window-init
+scalar is a *traced* value - which `jnp.asarray(...)` becomes under `jit` - detection fails, falls back
+to the generic `reduce_window_p`, and that primitive's missing transpose rule breaks `jit(grad(...))`.
+The fix is to pass the init as a NumPy-concrete scalar (`np.asarray(identity, x.dtype)`, *not*
+`jnp.asarray`). The lesson generalises: on this tier, *how* you construct a constant can decide whether
+the op is differentiable - concrete identities route to the diff-friendly primitive.
 
 ## Execution-class cost implications {#sec-classes-cost}
 
-Everything above ties back to the [execution-class taxonomy](foundations.qmd#sec-classes).
-The governing rule is **never call a HOST op inside a jitted loop** — and the
-performance reason is now concrete.
+Everything above ties back to the [execution-class taxonomy](foundations.qmd#sec-classes). The
+governing rule is never call a HOST op inside a jitted loop - and the performance reason is now
+concrete.
 
-The expensive *construction* steps are all **HOST-CTOR**: sectioning a ragged
-adjacency (`sectioned_ell_from_ragged`, data-dependent per-bucket shapes), building a
-mesh's k-ring or cotangent operator (host-side BFS over faces), [marching
-cubes](volume-surface.qmd#sec-marching), and the spatial **broad-phase index** for
-point-to-triangle queries. These are designed to be **amortised**: built *once* per
-mesh or per atlas, then reused across every subsequent matvec — and across a vmapped
-batch of images that share the topology. The per-iteration work that *does* run
-inside `jit`/`vmap`/`grad` stays **DIFF-JAX**: the ELL/SectionedELL matvec, `ell_mask`,
-`apply_operator`. Get this boundary wrong — call a HOST-CTOR like
-`sectioned_ell_from_ragged` *inside* a jitted training loop — and you re-pay the
-host-side construction on every iteration (and likely retrace, since its output
-shapes are data-dependent), turning a build-once cost into a per-step cost. That is
-the single most expensive mistake this tier invites.
+The expensive *construction* steps are all **HOST-CTOR**: sectioning a ragged adjacency
+(`sectioned_ell_from_ragged`, data-dependent per-bucket shapes), building a mesh's k-ring or cotangent
+operator (host-side BFS over faces), [marching cubes](volume-surface.qmd#sec-marching), and the spatial
+broad-phase index for point-to-triangle queries. These are designed to be *amortised*: built once per
+mesh or per atlas, then reused across every subsequent matvec - and across a vmapped batch of images
+that share the topology. The per-iteration work that *does* run inside `jit`/`vmap`/`grad` stays
+**DIFF-JAX**: the ELL/SectionedELL matvec, `ell_mask`, `apply_operator`. Get this boundary wrong - call
+a HOST-CTOR like `sectioned_ell_from_ragged` *inside* a jitted training loop - and you re-pay the
+host-side construction on every iteration (and likely retrace, since its output shapes are
+data-dependent), turning a build-once cost into a per-step cost. That is the single most expensive
+mistake this tier invites.
 
-Two scale crossovers the feature-requests quantify, so you can choose the right tool
-rather than discovering the wall in production:
+Two scale crossovers the feature-requests quantify, so you can choose the right tool rather than
+discovering the wall in production:
 
-- **Connected components.** The pointer-jumping label propagation
-  (`morphology/_label.py`: a `lax.while_loop` of neighbour-max hops + pointer jumps,
-  $O(\log d)$ passes for diameter $d$) is correct and jittable, but its per-pass cost
-  is $O(N)$ over the whole label image and it does **not** amortise the way
-  `cupyx.scipy.ndimage.label` does: nitrix's `connected_components` grows from
-  ~1.30 ms at $48^3$ to **~15.7 ms at $160^3$** while cupyx stays roughly flat
-  (~0.6–0.85 ms), a gap widening from ~2× to **~18×** ([morphology GPU-scaling
-  FR][gpuscale]). At brain scale this is a known kernel/algorithm candidate, not a
-  free lunch.
-- **Euclidean distance transform.** `distance_transform_edt` is the separable
-  **min-plus semiring** EDT — it searches *all* parabolas rather than the
-  Felzenszwalb–Huttenlocher lower envelope. That is shallow and high-FLOP, so it
-  **wins at small scale and loses at large scale** on a parallel GPU: ~2.4× ahead of
-  cupyx at $48^3$, roughly par through $128^3$, ~2.2× behind by $160^3$, with the
-  crossover near $96^3$ ([same FR][gpuscale]). This is the deliberate semiring
-  trade-off, not a regression — and exactly the kind of *class/correlation*
-  reasoning (where does this discrete method's cost curve cross the reference's?)
-  this unit favours over chasing a single headline number.
+- **Connected components.** The pointer-jumping label propagation (`morphology/_label.py`: a
+  `lax.while_loop` of neighbour-max hops + pointer jumps, $O(\log d)$ passes for diameter $d$) is
+  correct and jittable, but its per-pass cost is $O(N)$ over the whole label image and it does *not*
+  amortise the way `cupyx.scipy.ndimage.label` does: nitrix's `connected_components` grows from
+  ~1.30 ms at $48^3$ to ~15.7 ms at $160^3$ while cupyx stays roughly flat (~0.6-0.85 ms), a gap
+  widening from ~2$\times$ to ~18$\times$ ([morphology GPU-scaling FR][gpuscale]). At brain scale this
+  is a known kernel/algorithm candidate, not a free lunch.
+- **Euclidean distance transform.** `distance_transform_edt` is the separable min-plus semiring EDT -
+  it searches *all* parabolas rather than the Felzenszwalb--Huttenlocher lower envelope. That is
+  shallow and high-FLOP, so it *wins at small scale and loses at large scale* on a parallel GPU:
+  ~2.4$\times$ ahead of cupyx at $48^3$, roughly par through $128^3$, ~2.2$\times$ behind by $160^3$,
+  with the crossover near $96^3$ ([same FR][gpuscale]). This is the deliberate semiring trade-off, not
+  a regression - and exactly the kind of class/correlation reasoning (where does this discrete method's
+  cost curve cross the reference's?) this unit favours over chasing a single headline number.
 
 [gpuscale]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/morphology-gpu-scaling.md
 
 The broad-phase spatial index for nearest-triangle / point-location queries
-([mesh-spatial-acceleration][meshacc]) is the cleanest illustration of the amortise
-discipline *and* of this unit's validation posture. It replaces a brute-force
-$O(n_{\text{query}}\cdot n_{\text{faces}})$ scan with a uniform-grid candidate prune,
-host-side and **HOST-CTOR** (dynamic ragged candidate gathering does not lower
-cleanly to XLA — the mesh tier's host-construct-then-array pattern again). Its
-correctness is not asserted by a tolerance: the accelerated path is validated by
-**bit-exact parity** (`np.array_equal`) against the brute-force reference on the
-icosphere, an analytic sphere SDF, and real fsaverage white/pial pairs, with an
-unconditional brute-force fallback for any query the index cannot resolve. This is
-the unit's two-pronged validation in one place — an **analytic oracle** (the sphere
-SDF matches $\lVert x\rVert - r$) for the *physics*, and parity-vs-reference for the
-*acceleration* — never trading correctness for speed.
+([mesh-spatial-acceleration][meshacc]) is the cleanest illustration of the amortise discipline *and* of
+this unit's validation posture. It replaces a brute-force
+$O(n_{\text{query}}\cdot n_{\text{faces}})$ scan with a uniform-grid candidate prune, host-side and
+**HOST-CTOR** (dynamic ragged candidate gathering does not lower cleanly to XLA - the mesh tier's
+host-construct-then-array pattern again). Its correctness is not asserted by a tolerance: the
+accelerated path is validated by *bit-exact parity* (`np.array_equal`) against the brute-force
+reference on the icosphere, an analytic sphere SDF, and real fsaverage white/pial pairs, with an
+unconditional brute-force fallback for any query the index cannot resolve. This is the unit's
+two-pronged validation in one place - an analytic oracle (the sphere SDF matches $\lVert x\rVert - r$)
+for the *physics*, and parity-vs-reference for the *acceleration* - never trading correctness for
+speed.
 
 [meshacc]: https://github.com/hypercoil/nitrix/blob/main/docs/feature-requests/mesh-spatial-acceleration.md
 
 ## Further reading
 
-- Bell, N. & Garland, M. (2009). *Implementing sparse matrix-vector multiplication
-  on throughput-oriented processors.* Proceedings of the Conference on High
-  Performance Computing Networking, Storage and Analysis (SC '09). — the origin of
-  the ELL and hybrid (HYB) formats and the padding-cliff analysis this page rests on.
-- Saad, Y. (2003). *Iterative Methods for Sparse Linear Systems* (2nd ed.). SIAM. —
-  background on sparse storage formats (CSR, ELLPACK/ITPACK) and sparse matvec.
-- Felzenszwalb, P. F. & Huttenlocher, D. P. (2012). *Distance transforms of sampled
-  functions.* Theory of Computing, 8(19), 415–428. — the lower-envelope EDT the
-  semiring brute-force trades against at large scale.
-- The JAX documentation on `lax.gather` / `lax.scatter` and Pallas GPU lowering, and
-  on `lax.reduce_window` and its differentiable specialisations — the primitives
-  whose lowering behaviour sets this tier's backend policy.
-- Pinkall, U. & Polthier, K. (1993). *Computing discrete minimal surfaces and their
-  conjugates.* Experimental Mathematics, 2(1), 15–36. — the cotangent operator whose
-  bucketed storage motivates `format='auto'`.
+- Bell, N. & Garland, M. (2009). *Implementing sparse matrix-vector multiplication on
+  throughput-oriented processors.* Proceedings of SC '09. The origin of the ELL and hybrid (HYB)
+  formats and the padding-cliff analysis this chapter rests on.
+- Saad, Y. (2003). *Iterative Methods for Sparse Linear Systems* (2nd ed.). SIAM. Background on sparse
+  storage formats (CSR, ELLPACK/ITPACK) and sparse matvec.
+- Felzenszwalb, P. F. & Huttenlocher, D. P. (2012). *Distance transforms of sampled functions.* Theory
+  of Computing, 8(19), 415–428. The lower-envelope EDT the semiring brute-force trades against at large
+  scale.
+- The JAX documentation on `lax.gather` / `lax.scatter` and Pallas GPU lowering, and on
+  `lax.reduce_window` and its differentiable specialisations - the primitives whose lowering behaviour
+  sets this tier's backend policy.
+- Pinkall, U. & Polthier, K. (1993). *Computing discrete minimal surfaces and their conjugates.*
+  Experimental Mathematics, 2(1), 15–36. The cotangent operator whose bucketed storage motivates
+  `format='auto'`.
 
 ## See also
 

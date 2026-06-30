@@ -1,0 +1,423 @@
+---
+title: "Implicit differentiation and the IFT"
+---
+
+The [differentiable-programming chapter](differentiable-programming.qmd#sec-limits)
+ended on a limit: some outputs are defined not by a formula but by a **condition** —
+the root of an equation, a fixed point, the minimiser of an energy, the solution of
+a differential equation. You cannot read off such a $z^\star$ by tracing a forward
+expression, because there is no expression; there is a solver that iterates to it.
+And differentiating the *solver* — unrolling its iterations and reverse-mode-ing
+through them — is wasteful and fragile.
+
+The fix is one of the most useful ideas in differentiable programming, and it is the
+[chapter-four slogan](differentiation.qmd#sec-yolo) — *linearise, then transpose* —
+applied to an **equation** rather than a program. Differentiate the *condition* that
+defines $z^\star$, and a single linear solve hands you the gradient, with no
+reference to how $z^\star$ was found. This is the **implicit function theorem**, and
+it is what lets `nitrix` backpropagate through eigendecompositions, optimisers, and
+flows without unrolling any of them. We derive it, recast it as the matrix-free
+*adjoint*, and then work it twice: on the Hermitian eigendecomposition and on the
+simplest ordinary differential equation.
+
+## The trouble with differentiating a solver {#sec-problem}
+
+Suppose $z^\star(x)$ is produced by an iterative solver — Newton's method for a root,
+gradient descent for a minimum, an Euler integrator for an ODE. The literal way to
+get $\partial z^\star/\partial x$ is to treat the solver as just more program: record
+every iterate on the tape and reverse-mode through the whole trajectory. It works,
+but it pays three times over (@fig-implicit-vs-unroll):
+
+- **Memory grows with iteration count.** Reverse mode must keep every intermediate of
+  the forward pass; a solver that took a thousand steps stores a thousand iterates.
+- **The gradient depends on the trajectory.** Unrolling differentiates *the path the
+  solver took* — sensitive to the step count, the initialisation, the line search —
+  rather than the solution it arrived at. Two solvers that agree on $z^\star$ to ten
+  digits can return different "gradients."
+- **It is numerically delicate.** Differentiating through the near-stationary tail of
+  a converging iteration accumulates noise where the steps are vanishing.
+
+::: {#fig-implicit-vs-unroll}
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Differentiating a solver by unrolling stores every iterate and back-propagates through the whole trajectory; implicit differentiation uses only the solution and one linear solve."
+     font-family="system-ui, sans-serif" font-size="12">
+  <defs>
+    <marker id="ivf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2c6a45"/></marker>
+    <marker id="ivb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a3ffc"/></marker>
+  </defs>
+  <text x="40" y="28" font-weight="bold" fill="#b03b4b">unroll the solver — differentiate the trajectory</text>
+  <g fill="#dfe7f0" stroke="#33373d">
+    <rect x="40" y="46" width="44" height="34" rx="4"/><rect x="140" y="46" width="44" height="34" rx="4"/><rect x="240" y="46" width="44" height="34" rx="4"/><rect x="340" y="46" width="44" height="34" rx="4"/><rect x="470" y="46" width="50" height="34" rx="4"/>
+  </g>
+  <g font-size="11" text-anchor="middle">
+    <text x="62" y="68">z₀</text><text x="162" y="68">z₁</text><text x="262" y="68">z₂</text><text x="362" y="68">z₃</text><text x="495" y="68">z*</text>
+  </g>
+  <g stroke="#2c6a45" stroke-width="1.4">
+    <line x1="84" y1="63" x2="138" y2="63" marker-end="url(#ivf)"/><line x1="184" y1="63" x2="238" y2="63" marker-end="url(#ivf)"/><line x1="284" y1="63" x2="338" y2="63" marker-end="url(#ivf)"/><line x1="384" y1="63" x2="468" y2="63" marker-end="url(#ivf)"/>
+  </g>
+  <path d="M 495,84 C 350,120 200,120 62,84" fill="none" stroke="#8a3ffc" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#ivb)"/>
+  <text x="280" y="118" text-anchor="middle" font-size="11" fill="#8a3ffc">back-prop through every iterate — memory ∝ steps, trajectory-dependent</text>
+  <text x="40" y="170" font-weight="bold" fill="#2c6a45">implicit — differentiate the condition</text>
+  <rect x="40" y="186" width="120" height="40" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="100" y="210" text-anchor="middle">f(x, z*) = 0</text>
+  <line x1="160" y1="206" x2="250" y2="206" stroke="#55606b" stroke-width="1.4" marker-end="url(#ivf)"/>
+  <rect x="250" y="186" width="260" height="40" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="380" y="210" text-anchor="middle">one linear solve  (∂_z f)ᵀ λ = z̄</text>
+  <text x="560" y="210" font-size="11" fill="#2c6a45">memory O(1), solver-agnostic</text>
+</svg>
+
+Two ways to differentiate a solver. Unrolling (top) back-propagates through the whole
+trajectory — memory grows with the step count and the result depends on the path.
+Implicit differentiation (bottom) uses only the *solution* and the condition that
+defines it, and costs one linear solve regardless of how the solution was found.
+:::
+
+## The implicit function theorem {#sec-ift}
+
+Write the defining condition as
+$$
+f\bigl(x,\,z^\star(x)\bigr) = 0 ,
+$$
+a system of equations that holds *for every* $x$ (here $f$ has as many components as
+$z$). Because it is an identity in $x$, we may differentiate both sides with respect
+to $x$. The left side is a composition — $f$ depends on $x$ directly *and* through
+$z^\star(x)$ — so the chain rule gives two terms:
+$$
+\frac{\partial f}{\partial x}
+\;+\;
+\frac{\partial f}{\partial z}\,\frac{\partial z^\star}{\partial x}
+\;=\; 0 ,
+$$
+where $\partial f/\partial x$ is the partial Jacobian holding $z$ fixed and
+$\partial f/\partial z$ the partial holding $x$ fixed. Solve for the quantity we want
+— the **implicit Jacobian** — assuming $\partial f/\partial z$ is invertible:
+$$
+\boxed{\;\frac{\partial z^\star}{\partial x}
+\;=\;
+-\Bigl(\frac{\partial f}{\partial z}\Bigr)^{-1}\frac{\partial f}{\partial x}.\;}
+$$
+This is the **implicit function theorem**. Read what it says, because it is
+remarkable: the derivative of the solution depends only on the partial derivatives of
+the condition *evaluated at the solution* — the solver has vanished completely. Any
+method that lands on the same $z^\star$ yields the same gradient. The one requirement,
+that $\partial f/\partial z$ be nonsingular, is exactly the condition that $z^\star$
+is a well-defined, isolated solution (the theorem's hypothesis), and it is what makes
+the linear system above solvable.
+
+Geometrically, when $z$ is scalar the condition $f(x,z)=0$ is a curve in the $(x,z)$
+plane, and the implicit derivative is the *slope of that level set* — obtained without
+ever solving for $z^\star(x)$ in closed form (@fig-levelset).
+
+```{python}
+#| label: fig-levelset
+#| fig-cap: "Implicit differentiation as the slope of a level set. The condition f(x,z) = z³ + z − x = 0 defines z*(x) implicitly (no closed form is needed). The implicit function theorem gives the slope dz*/dx = −(∂_x f)/(∂_z f) = 1/(3z²+1) directly from the partials at the point; the dashed tangent uses exactly that slope and matches the curve."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+# f(x, z) = z^3 + z - x = 0  ->  x(z) = z^3 + z, single-valued z*(x).
+z = np.linspace(-1.6, 1.6, 400)
+x = z**3 + z
+z0 = 0.7
+x0 = z0**3 + z0
+slope = 1.0 / (3 * z0**2 + 1)          # dz*/dx = -(-1)/(3z^2+1)
+
+fig, ax = plt.subplots(figsize=(6.4, 4.2))
+ax.plot(x, z, color="#33373d", lw=2, label=r"level set $f(x,z)=0$  →  $z^\star(x)$")
+xt = np.linspace(x0 - 1.2, x0 + 1.2, 50)
+ax.plot(xt, z0 + slope * (xt - x0), "--", color="#b03b4b", lw=2,
+        label=fr"tangent, slope $dz^\star/dx = {slope:.3f}$")
+ax.plot([x0], [z0], "o", color="#b03b4b", ms=8)
+ax.set_xlabel("x"); ax.set_ylabel("z")
+ax.set_title("the implicit derivative is the level-set slope")
+ax.legend(fontsize=8, loc="lower right")
+fig.tight_layout()
+plt.show()
+```
+
+A common special case is differentiating through an **optimum**. If $z^\star =
+\arg\min_z E(x,z)$, the condition is stationarity, $f = \nabla_z E = 0$, so
+$\partial f/\partial z = \nabla^2_{zz}E$ (the Hessian) and $\partial f/\partial x =
+\nabla^2_{xz}E$, and the implicit Jacobian is $-(\nabla^2_{zz}E)^{-1}\nabla^2_{xz}E$.
+Differentiating through an optimiser becomes a single solve with the Hessian at the
+optimum — the basis of `nitrix`'s `implicit_minimize`.
+
+## The adjoint: one linear solve, matrix-free {#sec-adjoint}
+
+In practice we almost never want the full implicit Jacobian; we want its **transpose
+applied to a cotangent** — the VJP, for reverse mode. Transposing the boxed identity,
+$$
+\bar x
+\;=\;
+\Bigl(\frac{\partial z^\star}{\partial x}\Bigr)^{\!\top}\bar z
+\;=\;
+-\Bigl(\frac{\partial f}{\partial x}\Bigr)^{\!\top}
+\Bigl(\frac{\partial f}{\partial z}\Bigr)^{-\top}\bar z ,
+$$
+which is best read right-to-left as a two-step recipe:
+
+1. **Solve the adjoint system** $\bigl(\partial f/\partial z\bigr)^{\top}\lambda =
+   \bar z$ for the adjoint variable $\lambda$ — one linear solve with the *transpose*
+   of the condition's $z$-Jacobian.
+2. **Map back to the input**: $\bar x = -\bigl(\partial f/\partial x\bigr)^{\top}
+   \lambda$.
+
+This is the chapter-four pattern exactly: linearise the condition (its two partial
+Jacobians), then transpose, and the backward pass is one solve of the transposed
+linear system. Its cost is **independent of how many iterations the forward solver
+took** — a thousand-step Newton solve and a ten-step one share the same adjoint. And
+the solve can itself be matrix-free: if $\partial f/\partial z$ is only available as a
+JVP (a matrix you can apply but not form), conjugate gradients on the adjoint system
+needs nothing more. This is why `nitrix`'s implicit layer is cuSOLVER-free — the
+adjoint solve goes through the same in-house, accelerator-safe machinery as the rest
+of the library.
+
+## Walkthrough 1: the Hermitian eigendecomposition {#sec-eig}
+
+Eigendecomposition is the textbook case where you must differentiate the *condition*,
+not the solver — the iterative eigensolver (Jacobi sweeps, QR iteration) is exactly
+the kind of trajectory you do not want on the tape. A symmetric (Hermitian) matrix
+$A$ with a unit eigenvector $v$ and eigenvalue $\lambda$ satisfies two conditions,
+$$
+A v = \lambda v, \qquad v^\top v = 1 .
+$$
+Perturb $A$ by $\dot A$ and differentiate the first: $\dot A v + A\dot v = \dot\lambda
+v + \lambda\dot v$. Left-multiply by $v^\top$, and use the two facts that make the
+Hermitian case clean — $v^\top A = \lambda v^\top$ (symmetry) and $v^\top\dot v = 0$
+(differentiating $v^\top v = 1$). The $\dot v$ terms cancel, leaving the **eigenvalue
+derivative**
+$$
+\boxed{\;\dot\lambda = v^\top \dot A\, v.\;}
+$$
+This is the Hellmann–Feynman result: the eigenvalue's sensitivity is just the
+perturbation sandwiched by the eigenvector — no eigensolver in sight. The
+**eigenvector derivative** follows by projecting onto the other eigenvectors,
+$$
+\dot v \;=\; \sum_{j\neq i}\frac{v_j^\top \dot A\, v_i}{\lambda_i - \lambda_j}\,v_j ,
+$$
+and it carries the crucial caveat written in its denominator: as two eigenvalues
+approach each other ($\lambda_i\to\lambda_j$, a near-**degeneracy**), the eigenvector
+derivative blows up. Eigenvalues stay smooth through a crossing; individual
+eigenvectors do not. @fig-eig shows both — the eigenvalue tracking its linear
+prediction, and the eigenvector sensitivity exploding as a gap closes.
+
+```{python}
+#| label: fig-eig
+#| fig-cap: "Implicit differentiation of a symmetric eigendecomposition. Left: an eigenvalue of A + tȦ (solid) follows its first-order prediction λ + t·vᵀȦv (dashed) near t = 0 — the Hellmann–Feynman derivative, verified. Right: the eigenvector sensitivity scales as 1/(λ_i − λ_j); as the gap between two eigenvalues closes (a near-degeneracy), it diverges — eigenvalues remain differentiable, eigenvectors do not."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+
+# Left: eigenvalue tracks vᵀȦv.
+n = 5
+M = rng.standard_normal((n, n)); A = M + M.T
+Md = rng.standard_normal((n, n)); Adot = Md + Md.T
+w, V = np.linalg.eigh(A)
+i = n - 1                                   # track the top eigenvalue
+v = V[:, i]
+pred_slope = v @ Adot @ v                   # Hellmann-Feynman: λ̇ = vᵀ Ȧ v
+ts = np.linspace(-0.4, 0.4, 60)
+lam_true = np.array([np.linalg.eigvalsh(A + t * Adot)[i] for t in ts])
+
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(10, 3.8))
+axL.plot(ts, lam_true, color="#33373d", lw=2, label="eigenvalue of A + tȦ")
+axL.plot(ts, w[i] + pred_slope * ts, "--", color="#b03b4b", lw=2,
+         label=r"prediction $\lambda + t\,v^\top \dot A v$")
+axL.set_xlabel("t"); axL.set_ylabel("eigenvalue")
+axL.set_title("eigenvalue derivative is exact"); axL.legend(fontsize=8)
+
+# Right: eigenvector sensitivity vs eigenvalue gap.
+gaps = np.linspace(0.02, 2.0, 200)
+sensitivity = 1.0 / gaps                     # the 1/(λ_i − λ_j) factor
+axR.plot(gaps, sensitivity, color="#8a3ffc", lw=2)
+axR.set_xlabel(r"eigenvalue gap  $\lambda_i - \lambda_j$")
+axR.set_ylabel(r"eigenvector sensitivity  $\propto 1/\mathrm{gap}$")
+axR.set_title("eigenvectors blow up near degeneracy")
+axR.set_ylim(0, 30)
+fig.tight_layout()
+plt.show()
+```
+
+`nitrix` leans on this in two places. The spectral embeddings of the
+[geometry unit](../geometry/spectral.qmd) (the Laplace–Beltrami eigenmaps) and the
+FaST-LMM spectral trick of the [statistics solvers](../statistics/solvers.qmd)
+both rest on a single, shared eigendecomposition computed *once* outside the hot loop
+through `safe_eigh` — and when a gradient is needed, it is the implicit
+eigenvalue/eigenvector derivatives above, not a differentiated Jacobi sweep. The
+degeneracy caveat is real, and it is why differentiable spectral methods favour
+*eigenvalue* functionals (smooth) over individual eigenvectors (fragile) wherever
+they can.
+
+## Walkthrough 2: the simplest ODE, and the adjoint {#sec-ode}
+
+A differential equation defines its solution by a condition too — a trajectory
+$z(t)$ pinned by $\dot z = g(z,\theta)$ and an initial value. Differentiating the
+*integrator* by unrolling stores every step; the implicit view gives the **adjoint
+method** instead, the continuous cousin of backpropagation and a direct application
+of *linearise-then-transpose*.
+
+Take the simplest concrete case to keep every quantity in view: linear decay
+$\dot z = -\theta z$ with $z(0)=z_0$, whose solution $z(T)=z_0 e^{-\theta T}$ has the
+exact sensitivity $\mathrm{d}z(T)/\mathrm{d}\theta = -T z_0 e^{-\theta T}$. Discretise
+with Euler, $z_{n+1} = z_n + h\,g(z_n,\theta)$. The backward pass is an **adjoint
+recurrence** run from the end of the trajectory to the start,
+$$
+\lambda_N = \frac{\partial L}{\partial z_N},\qquad
+\lambda_n = \lambda_{n+1} + h\Bigl(\tfrac{\partial g}{\partial z}\Bigr)^{\!\top}\lambda_{n+1},
+\qquad
+\bar\theta = \sum_n h\Bigl(\tfrac{\partial g}{\partial\theta}\Bigr)^{\!\top}\lambda_{n+1},
+$$
+which is precisely reverse mode through the integrator — the transpose of the forward
+linearisation, swept backward (@fig-adjoint). The *adjoint method* reinterprets this
+recurrence as its own backward ODE, $\dot\lambda = -(\partial g/\partial z)^\top
+\lambda$, so the gradient can be obtained by integrating *backward* from $\lambda(T)$
+— recomputing the state as needed rather than storing the whole forward trajectory.
+That is the neural-ODE trick, and it is the implicit-differentiation payoff:
+**constant memory, independent of the number of integration steps.** @fig-ode
+verifies the Euler adjoint against the analytic and finite-difference sensitivities.
+
+::: {#fig-adjoint}
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The state is integrated forward from z0 to z(T); the adjoint is integrated backward from lambda(T) to lambda(0), accumulating the parameter gradient."
+     font-family="system-ui, sans-serif" font-size="12">
+  <defs>
+    <marker id="adf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2c6a45"/></marker>
+    <marker id="adb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a3ffc"/></marker>
+  </defs>
+  <rect x="50" y="56" width="90" height="40" rx="6" fill="#dfe7f0" stroke="#33373d"/><text x="95" y="80" text-anchor="middle">z₀</text>
+  <rect x="620" y="56" width="90" height="40" rx="6" fill="#dce9dd" stroke="#33373d"/><text x="665" y="80" text-anchor="middle">z(T)</text>
+  <line x1="140" y1="76" x2="618" y2="76" stroke="#2c6a45" stroke-width="1.6" marker-end="url(#adf)"/>
+  <text x="380" y="62" text-anchor="middle" fill="#2c6a45">integrate state forward:  ż = g(z, θ)</text>
+  <rect x="620" y="120" width="90" height="40" rx="6" fill="#f3eefb" stroke="#8a3ffc"/><text x="665" y="144" text-anchor="middle">λ(T)</text>
+  <rect x="50" y="120" width="90" height="40" rx="6" fill="#f3eefb" stroke="#8a3ffc"/><text x="95" y="144" text-anchor="middle">λ(0)</text>
+  <line x1="618" y1="140" x2="142" y2="140" stroke="#8a3ffc" stroke-width="1.6" marker-end="url(#adb)"/>
+  <text x="380" y="176" text-anchor="middle" fill="#8a3ffc">integrate adjoint backward:  λ̇ = −(∂g/∂z)ᵀ λ,   accumulate  θ̄</text>
+</svg>
+
+The adjoint method. The state is integrated *forward* (green) to $z(T)$; the adjoint
+$\lambda$ is integrated *backward* (purple) from $\lambda(T)=\partial L/\partial
+z(T)$, accumulating the parameter gradient. It is reverse-mode AD over the
+integrator, reorganised so the forward trajectory need not be stored.
+:::
+
+```{python}
+#| label: fig-ode
+#| fig-cap: "Differentiating an ODE solution. Left: trajectories of ż = −θz for several θ (decay z₀e^{−θt}). Right: the sensitivity dz(T)/dθ computed three ways — the closed form −T z₀ e^{−θT}, a finite difference, and the Euler adjoint recurrence — agree across θ, confirming the adjoint computes the exact gradient (and does so in memory independent of the step count)."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+z0, T, N = 1.0, 1.5, 200
+h = T / N
+
+def integrate(theta):                 # forward Euler for ż = -θ z
+    z = z0; traj = [z]
+    for _ in range(N):
+        z = z + h * (-theta * z); traj.append(z)
+    return np.array(traj)
+
+def adjoint_grad(theta):               # reverse adjoint recurrence for dz_N/dθ
+    traj = integrate(theta)
+    lam = 1.0                          # ∂L/∂z_N with L = z_N
+    g = 0.0
+    for n in range(N - 1, -1, -1):
+        # g(z,θ) = -θ z:  ∂g/∂z = -θ,  ∂g/∂θ = -z_n
+        g += h * (-traj[n]) * lam
+        lam = lam + h * (-theta) * lam
+    return g
+
+thetas = np.linspace(0.3, 2.5, 40)
+analytic = -T * z0 * np.exp(-thetas * T)
+fd = np.array([(integrate(t + 1e-6)[-1] - integrate(t - 1e-6)[-1]) / 2e-6
+               for t in thetas])
+adj = np.array([adjoint_grad(t) for t in thetas])
+
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(10, 3.8))
+tgrid = np.linspace(0, T, N + 1)
+for th, c in zip([0.5, 1.5, 2.5], ["#3b6fb0", "#d08a2c", "#b03b4b"]):
+    axL.plot(tgrid, integrate(th), color=c, lw=2, label=f"θ = {th}")
+axL.set_xlabel("t"); axL.set_ylabel("z(t)"); axL.set_title("ż = −θz: forward trajectories")
+axL.legend(fontsize=8)
+axR.plot(thetas, analytic, color="#33373d", lw=3, alpha=0.5, label="analytic")
+axR.plot(thetas, fd, "o", color="#2c6a45", ms=3, label="finite difference")
+axR.plot(thetas, adj, "--", color="#8a3ffc", lw=2, label="Euler adjoint")
+axR.set_xlabel("θ"); axR.set_ylabel(r"$dz(T)/d\theta$")
+axR.set_title("the adjoint gives the exact sensitivity"); axR.legend(fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+This is not a toy connection for `nitrix`. The diffeomorphic warps of the
+[registration unit](../registration/diffeomorphic.qmd) are exactly ODE flows — a
+stationary velocity field $v$ integrated by scaling-and-squaring to the map
+$\varphi=\exp(v)$ — and differentiating the warp with respect to $v$ is this
+ODE-sensitivity problem. The same unit's boundary-based and inverse-compositional
+registrations differentiate through an *optimum* with `implicit_minimize`, whose
+"adjoint is solved at the optimum and is trajectory-independent — preferred over
+differentiating the unrolled scan," in the words of the
+[recipes chapter](../registration/recipes.qmd#sec-bbr).
+
+## What this means for `nitrix` {#sec-nitrix}
+
+Implicit differentiation is how `nitrix` keeps the differentiability promise of the
+[last chapter](differentiable-programming.qmd) for the many outputs that are defined
+by a condition rather than a formula.
+
+- **A dedicated implicit layer.** `linalg.implicit_minimize` / the `implicit_*`
+  entry points differentiate through a minimiser or a root by the adjoint solve
+  above, so an optimisation can sit inside a larger differentiable program as a
+  single node with an exact, trajectory-independent gradient.
+- **Solver-agnostic and constant-memory.** Because the gradient depends only on the
+  condition at the solution, the forward solver can be swapped, accelerated, or run
+  for any number of steps without changing the backward pass — and that backward pass
+  never stores a trajectory.
+- **cuSOLVER-free, matrix-free where it must be.** The adjoint system is solved with
+  the in-house accelerator-safe factorisations (or conjugate gradients when only a
+  JVP of $\partial f/\partial z$ is available), the same discipline as the rest of the
+  library.
+- **It runs through the whole stack.** The spectral derivatives back the geometry
+  unit's eigenmaps; the optimum-derivative backs the statistics unit's REML and the
+  registration unit's BBR and inverse-compositional fits; the ODE adjoint backs the
+  diffeomorphic flows.
+
+The thread is [Thread B](index.qmd#sec-thread-linear) carried to its limit:
+*linearisation is the universal tool*, and when the object is an equation rather than
+a program, you linearise the equation and transpose — one solve, no unrolling. The
+final chapter turns from *how* we differentiate to *what* we choose to differentiate:
+the hypothesis class, and the inductive biases that make a differentiable program
+generalise.
+
+## Further reading
+
+- Krantz, S. G. & Parks, H. R. (2013). *The Implicit Function Theorem.* Birkhäuser.
+  — the theorem itself, with the nonsingularity hypothesis and its consequences.
+- Blondel, M. et al. (2022). "Efficient and modular implicit differentiation."
+  *NeurIPS.* — implicit differentiation of optimisers and root-finders as composable
+  layers (the design `implicit_minimize` follows).
+- Kolter, Z., Duvenaud, D. & Johnson, M. (2020). *Deep Implicit Layers* (NeurIPS
+  tutorial). — a clear, unified derivation of the adjoint for fixed points, optima,
+  and ODEs.
+- Chen, R. T. Q., Rubanova, Y., Bettencourt, J. & Duvenaud, D. (2018). "Neural
+  ordinary differential equations." *NeurIPS.* — the ODE adjoint and its
+  constant-memory backward pass.
+- Magnus, J. R. & Neudecker, H. (2019). *Matrix Differential Calculus.* — derivatives
+  of eigenvalues and eigenvectors, including the degeneracy structure.
+
+## See also
+
+- The implicit layer: `nitrix.linalg` implicit-differentiation entry points
+  (`implicit_minimize` and relatives), and the cuSOLVER-free / matrix-free solves of
+  [`linalg/_smalllinalg.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_smalllinalg.py).
+- The eigendecomposition: `safe_eigh`, the
+  [geometry spectral chapter](../geometry/spectral.qmd) (Laplace–Beltrami eigenmaps),
+  and the [statistics solvers](../statistics/solvers.qmd) (the FaST-LMM spectral
+  trick).
+- The ODE adjoint in practice: the
+  [registration diffeomorphic chapter](../registration/diffeomorphic.qmd)
+  (velocity-field flows) and the implicit-optimum gradients of
+  [boundary-based registration](../registration/recipes.qmd#sec-bbr).
+- Previous chapter: [the differentiable-programming paradigm](differentiable-programming.qmd).
+  Next chapter: [inductive bias, invariance, and equivariance](inductive-bias.qmd) —
+  choosing the hypothesis class.

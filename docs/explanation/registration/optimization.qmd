@@ -2,71 +2,65 @@
 title: "Optimization: finding the transform"
 ---
 
-::: {.callout-tldr title="Fast path"}
-A registration is a minimisation: pick the transform parameters $\theta$ that
-make the warped moving image look most like the fixed image. This page owns the
-machinery that *finds* $\theta$ for the **linear** transforms (rigid, affine)
-and the coarse-to-fine / convergence scaffolding every recipe shares. The one
-idea it adds: **the structure of the objective dictates the solver.** A
-sum-of-squares cost exposes a residual *vector*, which earns you a cheap
-second-order step (Gauss–Newton / Levenberg–Marquardt, matrix-free on the GPU);
-a scalar similarity (LNCC / MI / correlation-ratio) has no residual, so you fall
-back to first-order BFGS. Wrap either in a Gaussian-pyramid continuation (coarse,
-smooth levels for capture range; fine levels to sharpen), warm-start each finer
-level from the coarser solution, and — when the template is fixed — linearise it
-*once* and reuse that linearisation every iteration (the inverse-compositional
-fast path, ~4–7× faster).
-:::
+A registration is a minimisation: pick the transform parameters $\theta$ that make the warped moving
+image look most like the fixed image. This chapter owns the machinery that *finds* $\theta$ for the
+*linear* transforms (rigid, affine) and the coarse-to-fine / convergence scaffolding every recipe
+shares. The one idea it adds is that the structure of the objective dictates the solver. A
+sum-of-squares cost exposes a residual *vector*, which earns a cheap second-order step (Gauss–Newton /
+Levenberg–Marquardt, matrix-free on the GPU); a scalar similarity (LNCC / MI / correlation-ratio) has no
+residual, so the solver falls back to first-order BFGS. Either is wrapped in a Gaussian-pyramid
+continuation (coarse, smooth levels for capture range; fine levels to sharpen), each finer level
+warm-started from the coarser solution, and - when the template is fixed - the template is linearised
+*once* and that linearisation reused every iteration (the inverse-compositional fast path, about 4–7×
+faster).
 
-Everything in the unit so far has set up the *ingredients* of a registration: a
-parametrised family of transforms (a [chart on the transform
-manifold](transforms.qmd#sec-transform-manifold)), a way to [apply
-one](resampling.qmd#sec-pullback-sampling) (resampling the moving image at the
-mapped grid), and a [similarity score](similarity.qmd#sec-ssd) for the result.
-This page is where they meet the optimiser. The governing idea of the unit —
-*a registration is a map between two geometries, found by minimising a mismatch
-energy over a parametrised family of transforms* — becomes, here, a concrete
+A second thread runs underneath: the optimiser does not move on the curved transform group, it moves on
+the flat *Lie algebra* parameters $\theta$ that the [transforms chapter](transforms.qmd#sec-lie-exp)
+charted by $\exp$. Every step is a vector in that tangent space, the warp Jacobian differentiates the
+$\exp$ chart, and the inverse-compositional update composes the increment back onto the group. The
+unit's group-theoretic framing is what makes the search unconstrained and well-conditioned.
+
+Everything in the unit so far has set up the *ingredients* of a registration: a parametrised family of
+transforms (a [chart on the transform manifold](transforms.qmd#sec-transform-manifold)), a way to
+[apply one](resampling.qmd#sec-pullback-sampling) (resampling the moving image at the mapped grid), and
+a [similarity score](similarity.qmd#sec-ssd) for the result. This chapter is where they meet the
+optimiser. The governing idea of the unit - *a registration is a map between two geometries, found by
+minimising a mismatch energy over a parametrised family of transforms* - becomes, here, a concrete
 numerical loop.
 
-**Motivating example.** You call `rigid_register(moving, fixed)` to realign one
-fMRI volume to a reference, or to align a subject's T1 to an atlas. Six numbers
-come back (three rotations, three translations) and a beautifully aligned image.
-How? The obvious recipe — *write down the cost as a function of those six
-numbers and run gradient descent* — works, eventually, but it is slow and
-fragile: the cost surface is full of local minima far from the answer, and even
-near the answer the rotation and translation directions have wildly different
-curvature, so a single step size either crawls or diverges. This page builds the
-real solver one fix at a time, motivating each rung.
+**A motivating example.** You call `rigid_register(moving, fixed)` to realign one fMRI volume to a
+reference, or to align a subject's T1 to an atlas. Six numbers come back (three rotations, three
+translations) and an aligned image. How? The obvious recipe - write down the cost as a function of those
+six numbers and run gradient descent - works, eventually, but it is slow and fragile: the cost surface
+is full of local minima far from the answer, and even near the answer the rotation and translation
+directions have wildly different curvature, so a single step size either crawls or diverges. This
+chapter builds the real solver one fix at a time, motivating each rung.
 
-The code lives in `register/_core.py` (the driver), `register/_objective.py`
-(the objective protocol), `register/_inverse_compositional.py` (the fast path),
-`register/_converge.py` (the iteration scaffolding), and `linalg/optimize.py`
-(the generic least-squares solvers).
+The code lives in `register/_core.py` (the driver), `register/_objective.py` (the objective protocol),
+`register/_inverse_compositional.py` (the fast path), `register/_converge.py` (the iteration
+scaffolding), and `linalg/optimize.py` (the generic least-squares solvers).
 
 ## The objective: $\theta \mapsto \text{cost}$ {#sec-objective}
 
-The first thing to nail down is *what* we minimise. The optimiser does not know
-or care that $\theta$ is a transform — it sees a function from a parameter vector
-to a number. So we wrap the registration in exactly that interface. In
-`register/_objective.py` it is the `Objective` protocol (a `runtime_checkable`
-`Protocol`):
+The first thing to nail down is *what* we minimise. The optimiser does not know or care that $\theta$ is
+a transform - it sees a function from a parameter vector to a number. So we wrap the registration in
+exactly that interface. In `register/_objective.py` it is the `Objective` protocol (a
+`runtime_checkable` `Protocol`):
 
-- `cost(params) -> scalar` — the dissimilarity at these parameters, lower is
-  better;
-- `residual(params) -> vector` — the per-voxel residual $r(\theta)$ whose
-  $\tfrac12\lVert r\rVert^2$ *is* the cost, when one exists;
-- `is_least_squares` (a property) — whether `residual` is available.
+- `cost(params) -> scalar` - the dissimilarity at these parameters, lower is better;
+- `residual(params) -> vector` - the per-voxel residual $r(\theta)$ whose $\tfrac12\lVert r\rVert^2$ *is*
+  the cost, when one exists;
+- `is_least_squares` (a property) - whether `residual` is available.
 
-That last flag is the hinge of the whole page. **The structure of the objective
-routes the solver.** If the cost is a sum of squares, `residual` returns the
-vector being squared, and we can take a second-order-ish step almost for free
-(@sec-gauss-newton). If it is a scalar with no natural residual vector
-(LNCC / MI / correlation-ratio), we fall back to first-order BFGS
-(@sec-bfgs). The optimiser dispatch is written *once* against `Objective`, so a
-brand-new objective is a single record, not a new branch in the driver.
+That last flag is the hinge of the whole chapter. *The structure of the objective routes the solver.* If
+the cost is a sum of squares, `residual` returns the vector being squared, and we can take a
+second-order-ish step almost for free (@sec-gauss-newton). If it is a scalar with no natural residual
+vector (LNCC / MI / correlation-ratio), we fall back to first-order BFGS (@sec-bfgs). The optimiser
+dispatch is written *once* against `Objective`, so a brand-new objective is a single record, not a new
+branch in the driver.
 
-The image-pair workhorse is `MetricObjective` (a `@dataclass(frozen=True)`),
-which closes over four things:
+The image-pair workhorse is `MetricObjective` (a `@dataclass(frozen=True)`), which closes over four
+things:
 
 ```text
 MetricObjective(metric, warp, fixed, mask)
@@ -75,25 +69,21 @@ MetricObjective(metric, warp, fixed, mask)
     is_least_squares = metric.is_least_squares
 ```
 
-`warp` is the level's closure `params -> warped` (build the sampling grid from
-$\theta$, resample `moving`); `fixed` is the reference at this resolution;
-`mask` (optional) is a per-voxel weight on the fixed grid. The metric's own
-`is_least_squares` flag (`True` for [`SSD`](similarity.qmd#sec-ssd), `False`
-for [`LNCC`/`MI`/`CR`](similarity.qmd#sec-lncc)) is what `MetricObjective`
-re-exposes — so SSD routes to Gauss–Newton and the rest to BFGS, automatically.
-The objective abstraction earns its keep elsewhere too: the boundary-based
-registration cost (BBR; `_bbr.BoundaryObjective`) is a *sibling* `Objective`
-with **no fixed image** — it scores $\theta$ directly over surface-point samples
-— and reuses the very same optimiser dispatch.
+`warp` is the level's closure `params -> warped` (build the sampling grid from $\theta$ through the
+`model.exp` chart, resample `moving`); `fixed` is the reference at this resolution; `mask` (optional) is
+a per-voxel weight on the fixed grid. The metric's own `is_least_squares` flag (`True` for
+[`SSD`](similarity.qmd#sec-ssd), `False` for [`LNCC`/`MI`/`CR`](similarity.qmd#sec-lncc)) is what
+`MetricObjective` re-exposes - so SSD routes to Gauss–Newton and the rest to BFGS, automatically. The
+objective abstraction earns its keep elsewhere too: the boundary-based registration cost (BBR;
+`_bbr.BoundaryObjective`) is a *sibling* `Objective` with *no fixed image* - it scores $\theta$ directly
+over surface-point samples - and reuses the very same optimiser dispatch.
 
 ### The driver and its configuration
 
-The objective is built and minimised per pyramid level by
-`multi_resolution_register` (`register/_core.py`), the coarse-to-fine driver
-shared by `rigid_register` / `affine_register`. Its static configuration is the
-`RegistrationSpec` (a frozen, hashable dataclass, so it rides `jit` static
-arguments — the [`Interpolator`](resampling.qmd#sec-kernels) precedent). The
-fields you will set:
+The objective is built and minimised per pyramid level by `multi_resolution_register`
+(`register/_core.py`), the coarse-to-fine driver shared by `rigid_register` / `affine_register`. Its
+static configuration is the `RegistrationSpec` (a frozen, hashable dataclass, so it rides `jit` static
+arguments - the [`Interpolator`](resampling.qmd#sec-kernels) precedent). The fields you will set:
 
 | field | what it controls |
 |---|---|
@@ -109,54 +99,45 @@ fields you will set:
 | `convergence` | the `Convergence(threshold, window)` parameterising `mode='early_exit'` (inert under `'fixed'`) |
 | `ic_line_search` | the opt-in cost-decrease guard on the inverse-compositional step (@sec-inverse-comp) |
 
-The result is a `RegistrationResult` `NamedTuple` with four fields. `matrix` is
-the estimated homogeneous transform, **self-contained** — the centre the warp
-applies it about is baked in, so `apply_affine(coords, matrix)` reproduces the
-warp and the matrix composes with another result. (In `IndexSpace` it is the
-full-resolution fixed-voxel → moving-voxel index map; in `WorldSpace` the
-fixed-world → moving-world transform in mm.) `params` holds the raw *about-origin*
-Lie parameters at full resolution; `warped` is `moving` resampled onto the fixed
-grid; `cost_history` is the concatenated per-level optimiser cost traces.
+The result is a `RegistrationResult` `NamedTuple` with four fields. `matrix` is the estimated homogeneous
+transform, *self-contained* - the centre the warp applies it about is baked in, so
+`apply_affine(coords, matrix)` reproduces the warp and the matrix composes with another result. (In
+`IndexSpace` it is the full-resolution fixed-voxel → moving-voxel index map; in `WorldSpace` the
+fixed-world → moving-world transform in mm.) `params` holds the raw *about-origin* Lie parameters at full
+resolution; `warped` is `moving` resampled onto the fixed grid; `cost_history` is the concatenated
+per-level optimiser cost traces.
 
-One small but load-bearing helper is `resolve_iterations(iterations, levels)`
-(**HOST-CTOR** — it runs on the host, returning a Python list). It expands the
-schedule to one count per level, *finest first*: an `int` becomes
-`[n] * levels`; a length-`levels` sequence is taken in the natural
-**coarse-to-fine** order the user writes it and **reversed**, because the driver
-loops the pyramid finest-index-0. This lets you front-load the cheap coarse
-levels and starve the expensive finest one — a second-order solver converges in
-a handful of finest-level steps, so a schedule like `iterations=(40, 20, 5)`
-(coarse → fine) is both faster and just as accurate as a flat `30`.
+One small but load-bearing helper is `resolve_iterations(iterations, levels)` (**HOST-CTOR** - it runs
+on the host, returning a Python list). It expands the schedule to one count per level, *finest first*: an
+`int` becomes `[n] * levels`; a length-`levels` sequence is taken in the natural *coarse-to-fine* order
+the user writes it and *reversed*, because the driver loops the pyramid finest-index-0. This lets you
+front-load the cheap coarse levels and starve the expensive finest one - a second-order solver converges
+in a handful of finest-level steps, so a schedule like `iterations=(40, 20, 5)` (coarse → fine) is both
+faster and just as accurate as a flat `30`.
 
 ## Coarse-to-fine: the pyramid as a continuation method {#sec-coarse-fine}
 
-Here is where naive gradient descent first breaks. Run the optimiser directly on
-the full-resolution cost and it will, more often than not, settle into a *local*
-minimum: a texture ridge in the fixed image lines up with a different texture
-ridge in the moving image, the cost is locally minimal, and the iterate is
-stuck far from the true alignment. The cost surface over $\theta$ is bumpy, and
-the bumps are precisely the fine image detail.
+This is where naive gradient descent first breaks. Run the optimiser directly on the full-resolution
+cost and it will, more often than not, settle into a *local* minimum: a texture ridge in the fixed image
+lines up with a different texture ridge in the moving image, the cost is locally minimal, and the iterate
+is stuck far from the true alignment. The cost surface over $\theta$ is bumpy, and the bumps are
+precisely the fine image detail.
 
-The cure is a **continuation method**: instead of optimising the hard problem
-directly, solve a sequence of progressively harder problems, each warm-started
-from the last. We get the sequence for free from the [Gaussian
-pyramid](resampling.qmd#sec-pyramid). At a coarse level the image is heavily
-blurred and downsampled, which *erases the fine detail* — and with it the local
-minima. The coarse cost surface is smooth and has one wide basin around the true
-answer (the **capture range** is large), so even a poor starting guess slides
-into it. We optimise there, then move to the next finer level, *warm-starting it
-from the coarse solution*. The finer level adds detail back — the basin narrows
-and grows local wiggles — but we now start near the bottom of the right basin,
-so the optimiser only has to sharpen, not search.
+The cure is a *continuation method*: instead of optimising the hard problem directly, solve a sequence
+of progressively harder problems, each warm-started from the last. We get the sequence for free from the
+[Gaussian pyramid](resampling.qmd#sec-pyramid). At a coarse level the image is heavily blurred and
+downsampled, which *erases the fine detail* - and with it the local minima. The coarse cost surface is
+smooth and has one wide basin around the true answer (the *capture range* is large), so even a poor
+starting guess slides into it. We optimise there, then move to the next finer level, *warm-starting it
+from the coarse solution*. The finer level adds detail back - the basin narrows and grows local wiggles -
+but we now start near the bottom of the right basin, so the optimiser only has to sharpen, not search.
 
-@fig-optimization-basins makes this concrete. The same SSD-versus-translation
-cost is plotted at three pyramid levels. The coarse level (blue) is smooth: its
-flanks are wiggle-free, so an optimiser anywhere on them rolls cleanly toward
-the true displacement. The finer levels keep the high-frequency texture, which
-shows up as local bumps on the flanks — minima a gradient method would get
-trapped in *if it started there cold*. All three share the same global minimum,
-which is the whole point: the coarse level finds the basin, the fine level
-pinpoints the bottom.
+@fig-optimization-basins makes this concrete. The same SSD-versus-translation cost is plotted at three
+pyramid levels. The coarse level (blue) is smooth: its flanks are wiggle-free, so an optimiser anywhere
+on them rolls cleanly toward the true displacement. The finer levels keep the high-frequency texture,
+which shows up as local bumps on the flanks - minima a gradient method would get trapped in *if it
+started there cold*. All three share the same global minimum, which is the whole point: the coarse level
+finds the basin, the fine level pinpoints the bottom.
 
 ```{python}
 #| label: fig-optimization-basins
@@ -216,62 +197,52 @@ fig.tight_layout()
 plt.show()
 ```
 
-The driver loops the pyramid from the coarsest level (highest index) to the
-finest (index 0), rebuilding the `MetricObjective` at each resolution and
-warm-starting $\theta$ from the previous level's optimum.
+The driver loops the pyramid from the coarsest level (highest index) to the finest (index 0),
+rebuilding the `MetricObjective` at each resolution and warm-starting $\theta$ from the previous level's
+optimum.
 
 ### Rescaling parameters across levels
 
-Warm-starting hides a subtlety: a parameter that means "move 3 voxels" at a
-coarse 16-voxel grid means "move 6 voxels" at the 32-voxel grid below it. So the
-warm-start must **rescale**, and *which* parameters scale depends on the
-coordinate space.
+Warm-starting hides a subtlety: a parameter that means "move 3 voxels" at a coarse 16-voxel grid means
+"move 6 voxels" at the 32-voxel grid below it. So the warm-start must *rescale*, and *which* parameters
+scale depends on the coordinate space.
 
 This is the responsibility of `model.rescale_to_grid(params, ratio)` on the
-[`TransformModel`](transforms.qmd#sec-fit) (`Rigid` / `Affine`), where `ratio`
-is the per-axis $\text{finer\_shape} / \text{coarser\_shape}$. Both `Rigid` and
-`Affine` lay the parameter vector out as *linear-block-first, translation-last*,
-so the shared rescale (`_rescale_translation_last`) scales **only the trailing
-translation entries** by `ratio` and leaves the rotation / linear block
-untouched. The reason is dimensional:
+[`TransformModel`](transforms.qmd#sec-fit) (`Rigid` / `Affine`), where `ratio` is the per-axis
+$\text{finer\_shape} / \text{coarser\_shape}$. Both `Rigid` and `Affine` lay the parameter vector out as
+*linear-block-first, translation-last*, so the shared rescale (`_rescale_translation_last`) scales *only
+the trailing translation entries* by `ratio` and leaves the rotation / linear block untouched. The reason
+is dimensional, and it is the same split the Lie algebra makes:
 
 - **translations** are in voxel units, so they scale with the grid ratio;
-- **the linear block** (rotation, scale, shear) is *dimensionless* — a rotation
-  by $\omega$ is the same physical rotation at any resolution — so it is
-  grid-independent and carries over unchanged.
+- **the linear block** (rotation, scale, shear) is *dimensionless* - a rotation by $\omega$ is the same
+  physical rotation at any resolution - so it is grid-independent and carries over unchanged.
 
-The driver only applies this when the space asks for it. `IndexSpace`
-(`requires_grid_rescale = True`) reads $\theta$ in voxel units and so must
-rescale; [`WorldSpace`](resampling.qmd#sec-pyramid)
-(`requires_grid_rescale = False`) reads $\theta$ in physical millimetres, which
-are grid-independent by construction, so its parameters carry over verbatim with
-no rescale at all. (The pyramid level mapping itself is `align-corners`: a
-level-$\ell$ voxel index maps to the full grid by the pure scale
-$(\text{full}-1)/(\text{level}-1)$, computed on host as a NumPy constant in
-`_grid_scale`.)
+The driver only applies this when the space asks for it. `IndexSpace` (`requires_grid_rescale = True`)
+reads $\theta$ in voxel units and so must rescale; [`WorldSpace`](resampling.qmd#sec-pyramid)
+(`requires_grid_rescale = False`) reads $\theta$ in physical millimetres, which are grid-independent by
+construction, so its parameters carry over verbatim with no rescale at all. (The pyramid level mapping
+itself is `align-corners`: a level-$\ell$ voxel index maps to the full grid by the pure scale
+$(\text{full}-1)/(\text{level}-1)$, computed on host as a NumPy constant in `_grid_scale`.)
 
 ### Do not coarsen below ~16 voxels per axis
 
-There is a floor on how coarse you can usefully go. The second-order step
-(@sec-gauss-newton) estimates curvature from an image Hessian; on a grid of only
-a few voxels per axis that estimate degrades — there simply are not enough
-voxels to pin down a 12-parameter affine reliably, and the step can overshoot
-into a wrong, *anti-correlated* minimum (the parameters blow up and the warped
-image ends up negatively correlated with the fixed). The recipes guard this with
-`_MIN_COARSE_AXIS = 16` (`register/recipes.py`): `_cap_levels` shortens the
-**affine** pyramid (loudly, via an `AffinePyramidDepthWarning`) so the coarsest
-level keeps $\ge 16$ voxels per axis. For example a 28³ image at the default 3
-levels would drop its coarsest level to $\approx 14^3$ and diverge; capping it to
-fewer levels keeps the coarsest grid reliable. This is a targeted fix — it needs
-no extra damping, so the well-conditioned path is untouched — and it is
-affine-only: the 6-DOF rigid Hessian is robust even at small coarse grids. See
-`register-affine-small-grid-divergence.md` for the full diagnosis (the
-inverse-compositional path takes a complementary trust-region cure, @sec-inverse-comp).
+There is a floor on how coarse you can usefully go. The second-order step (@sec-gauss-newton) estimates
+curvature from an image Hessian; on a grid of only a few voxels per axis that estimate degrades - there
+simply are not enough voxels to pin down a 12-parameter affine reliably, and the step can overshoot into
+a wrong, *anti-correlated* minimum (the parameters blow up and the warped image ends up negatively
+correlated with the fixed). The recipes guard this with `_MIN_COARSE_AXIS = 16` (`register/recipes.py`):
+`_cap_levels` shortens the *affine* pyramid (loudly, via an `AffinePyramidDepthWarning`) so the coarsest
+level keeps $\ge 16$ voxels per axis. For example a 28³ image at the default 3 levels would drop its
+coarsest level to $\approx 14^3$ and diverge; capping it to fewer levels keeps the coarsest grid
+reliable. This is a targeted fix - it needs no extra damping, so the well-conditioned path is untouched -
+and it is affine-only: the 6-DOF rigid Hessian is robust even at small coarse grids. See
+`register-affine-small-grid-divergence.md` for the full diagnosis (the inverse-compositional path takes a
+complementary trust-region cure, @sec-inverse-comp).
 
 ## Gauss–Newton: earning a second-order step from a residual {#sec-gauss-newton}
 
-Now the core solver for the SSD case. Start from the obvious thing and improve
-it. We want to minimise
+Now the core solver for the SSD case. Start from the obvious thing and improve it. We want to minimise
 
 $$
 C(\theta) = \tfrac12 \big\lVert r(\theta) \big\rVert^2,
@@ -279,45 +250,40 @@ C(\theta) = \tfrac12 \big\lVert r(\theta) \big\rVert^2,
 r(\theta) = I_m\!\circ\!\varphi_\theta - I_f
 $$ {#eq-ssd-cost}
 
-— the SSD cost is half the squared norm of the **residual vector** $r$, the
-per-voxel intensity difference between the warped moving image and the fixed
-image. The gradient of @eq-ssd-cost is $\nabla C = J^\top r$, where
-$J = \partial r / \partial \theta$ is the $M \times P$ Jacobian ($M$ voxels, $P$
-parameters). The obvious move — **gradient descent**, $\theta \leftarrow \theta -
-\alpha J^\top r$ — is the first rung, and it is slow: it ignores curvature, so on
-a cost surface where one parameter direction is far stiffer than another (rotation
-vs translation, exactly our case) it zig-zags down the soft direction and crawls
+- the SSD cost is half the squared norm of the *residual vector* $r$, the per-voxel intensity difference
+between the warped moving image and the fixed image. The gradient of @eq-ssd-cost is $\nabla C = J^\top
+r$, where $J = \partial r / \partial \theta$ is the $M \times P$ Jacobian ($M$ voxels, $P$ parameters).
+The obvious move - *gradient descent*, $\theta \leftarrow \theta - \alpha J^\top r$ - is the first rung,
+and it is slow: it ignores curvature, so on a cost surface where one parameter direction is far stiffer
+than another (rotation vs translation, exactly our case) it zig-zags down the soft direction and crawls
 along the stiff one.
 
-The fix uses the *structure* of @eq-ssd-cost. Because the cost is a sum of
-squares, we can **linearise the residual** rather than the cost. Near the current
-$\theta$,
+The fix uses the *structure* of @eq-ssd-cost. Because the cost is a sum of squares, we can *linearise the
+residual* rather than the cost. Near the current $\theta$,
 
 $$
 r(\theta + \delta) \approx r(\theta) + J\,\delta .
 $$ {#eq-linearise}
 
-Substitute that linear model into the cost and minimise over the step $\delta$:
-$\tfrac12 \lVert r + J\delta\rVert^2$ is a *quadratic* in $\delta$, and setting
-its gradient to zero gives the **Gauss–Newton normal equations**
+Substitute that linear model into the cost and minimise over the step $\delta$: $\tfrac12 \lVert r +
+J\delta\rVert^2$ is a *quadratic* in $\delta$, and setting its gradient to zero gives the *Gauss–Newton
+normal equations*
 
 $$
 \big(J^\top J\big)\,\delta = -\,J^\top r .
 $$ {#eq-normal}
 
-This is the step a reader could have derived: it is just least squares on the
-linearised residual. The matrix $J^\top J$ is the **Gauss–Newton approximation to
-the Hessian** — it discards the second-derivative-of-residual term that the true
-Hessian carries, which is exactly the term that is small when the residuals are
-small (near alignment) or the model is near-linear. So Gauss–Newton is
-"second-order for free": it captures the dominant curvature using only the
-first-order Jacobian, and near the solution it converges *quadratically* where
-gradient descent crawls.
+The step $\delta$ is a vector in the Lie-algebra parameters, applied to the running transform through the
+$\exp$ chart - so each Gauss–Newton iteration is a move in the flat tangent space, exactly the
+unconstrained search the chart was built for. The matrix $J^\top J$ is the *Gauss–Newton approximation to
+the Hessian* - it discards the second-derivative-of-residual term that the true Hessian carries, which is
+exactly the term that is small when the residuals are small (near alignment) or the model is near-linear.
+So Gauss–Newton is "second-order for free": it captures the dominant curvature using only the first-order
+Jacobian, and near the solution it converges *quadratically* where gradient descent crawls.
 
-@fig-optimization-gn shows the payoff on a registration-like stiff quadratic
-bowl. Gradient descent (with the best stable constant step) zig-zags and crawls;
-Gauss–Newton, which solves @eq-normal exactly, jumps to the minimiser of the
-local quadratic — one step on a quadratic, a handful on a real registration.
+@fig-optimization-gn shows the payoff on a registration-like stiff quadratic bowl. Gradient descent (with
+the best stable constant step) zig-zags and crawls; Gauss–Newton, which solves @eq-normal exactly, jumps
+to the minimiser of the local quadratic - one step on a quadratic, a handful on a real registration.
 
 ```{python}
 #| label: fig-optimization-gn
@@ -381,57 +347,47 @@ plt.show()
 
 ### Levenberg–Marquardt: damping the step
 
-Gauss–Newton's confidence is misplaced when the start is poor: the linear model
-@eq-linearise is only local, and a full Gauss–Newton step can overshoot. The
-classical cure is one extra idea — **interpolate between Gauss–Newton and
-gradient descent** by adding a diagonal ridge $\lambda$:
+Gauss–Newton's confidence is misplaced when the start is poor: the linear model @eq-linearise is only
+local, and a full Gauss–Newton step can overshoot. The classical cure is one extra idea - *interpolate
+between Gauss–Newton and gradient descent* by adding a diagonal ridge $\lambda$:
 
 $$
 \big(J^\top J + \lambda I\big)\,\delta = -\,J^\top r .
 $$ {#eq-lm}
 
-When $\lambda \to 0$ this is Gauss–Newton (full, fast steps near the solution);
-when $\lambda$ is large the step shrinks toward $-\tfrac1\lambda J^\top r$, a
-short, safe gradient-descent step. **Levenberg–Marquardt** adapts $\lambda$: try
-the step, *accept* it only if the cost decreased, and shrink $\lambda$ toward
-Gauss–Newton on accept or grow it toward gradient descent on reject. The
-accept/reject keeps the cost trace monotone — a robustness guarantee
-Gauss–Newton lacks.
+When $\lambda \to 0$ this is Gauss–Newton (full, fast steps near the solution); when $\lambda$ is large
+the step shrinks toward $-\tfrac1\lambda J^\top r$, a short, safe gradient-descent step.
+*Levenberg–Marquardt* adapts $\lambda$: try the step, *accept* it only if the cost decreased, and shrink
+$\lambda$ toward Gauss–Newton on accept or grow it toward gradient descent on reject. The accept/reject
+keeps the cost trace monotone - a robustness guarantee Gauss–Newton lacks.
 
 ### The solvers in `linalg.optimize`
 
-`gauss_newton` and `levenberg_marquardt` (`linalg/optimize.py`) implement
-exactly @eq-normal / @eq-lm. Both are **DIFF-JAX** (jittable and
-reverse-differentiable). Two design choices make them GPU-native:
+`gauss_newton` and `levenberg_marquardt` (`linalg/optimize.py`) implement exactly @eq-normal / @eq-lm.
+Both are **DIFF-JAX** (jittable and reverse-differentiable). Two design choices make them GPU-native:
 
-- **The fixed loop is rolled with `lax.scan`,** not Python-unrolled, so
-  cold-compile time is roughly *constant* in `n_iters` (one iteration is
-  compiled, not `n_iters` copies). It stays differentiable, so `jax.grad`
-  through a registration works out of the box.
-- **The normal-equation solve is matrix-free conjugate gradients** (`linalg.cg`,
-  wrapping `jax.scipy.sparse.linalg.cg`). CG needs only matrix–vector products
-  and inner products — no factorisation — so it never touches the cuSolver
-  handle pool and stays on the GPU on stacks where a Cholesky / `solve` would
-  wedge and force a host round-trip.
+- **The fixed loop is rolled with `lax.scan`,** not Python-unrolled, so cold-compile time is roughly
+  *constant* in `n_iters` (one iteration is compiled, not `n_iters` copies). It stays differentiable, so
+  `jax.grad` through a registration works out of the box.
+- **The normal-equation solve is matrix-free conjugate gradients** (`linalg.cg`, wrapping
+  `jax.scipy.sparse.linalg.cg`). CG needs only matrix-vector products and inner products - no
+  factorisation - so it never touches the cuSolver handle pool and stays on the GPU on stacks where a
+  Cholesky / `solve` would wedge and force a host round-trip.
 
-The Jacobian itself has two strategies, resolved by parameter count $P$
-(`_resolve_jacobian`, threshold `_ASSEMBLE_MAX_P = 64`). For the small $P$ of the
-rigid/affine regime ($P \le 12$) it **assembles** the explicit $P \times P$ Gram
-matrix $J^\top J$ and runs CG on that tiny dense system (cheaper than a
-matrix-free matvec there). For a large $P$ it goes **matrix-free**: the operator
-$v \mapsto J^\top(Jv)$ is built from a cached `jax.linearize` (for $Jv$) and its
-`jax.linear_transpose` (for $J^\top u$), so the $M \times P$ Jacobian is never
-materialised.
+The Jacobian itself has two strategies, resolved by parameter count $P$ (`_resolve_jacobian`, threshold
+`_ASSEMBLE_MAX_P = 64`). For the small $P$ of the rigid/affine regime ($P \le 12$) it *assembles* the
+explicit $P \times P$ Gram matrix $J^\top J$ and runs CG on that tiny dense system (cheaper than a
+matrix-free matvec there). For a large $P$ it goes *matrix-free*: the operator $v \mapsto J^\top(Jv)$ is
+built from a cached `jax.linearize` (for $Jv$) and its `jax.linear_transpose` (for $J^\top u$), so the
+$M \times P$ Jacobian is never materialised.
 
 ### The warp Jacobian: the chain-rule factorisation
 
-Forming the Jacobian $J = \partial r / \partial \theta$ naively with
-`jax.jacfwd` means one forward-mode pass *per parameter* — and each pass gathers
-a full warp tangent (an interpolation of the moving image). That is $P$ gathers,
-the expensive part. `register/_core.py`'s `_warp_jacobian` computes the same
-Jacobian **exactly** but with far fewer gathers, by factoring the chain rule.
-The warp is "build a sampling grid from $\theta$, then resample the moving image
-at that grid", so
+Forming the Jacobian $J = \partial r / \partial \theta$ naively with `jax.jacfwd` means one forward-mode
+pass *per parameter* - and each pass gathers a full warp tangent (an interpolation of the moving image).
+That is $P$ gathers, the expensive part. `register/_core.py`'s `_warp_jacobian` computes the same
+Jacobian *exactly* but with far fewer gathers, by factoring the chain rule. The warp is "build a sampling
+grid from $\theta$, then resample the moving image at that grid", so
 
 $$
 J[x, j]
@@ -441,22 +397,19 @@ J[x, j]
 \underbrace{\frac{\partial\,\text{grid}(x;\theta)}{\partial \theta_j}}_{\text{grid Jacobian}} .
 $$ {#eq-warp-jac}
 
-The two factors have completely different cost (@fig-optimization-chain). The
-left factor $\partial\,\text{warp}/\partial\,\text{grid}$ is the **image
-gradient resampled** — it touches the image, but it is an $M \times d$ object
-($d = \text{ndim}$ grid axes), computed with *one* JVP per axis: **`ndim`
-gathers, not `P`**. The right factor $\partial\,\text{grid}/\partial\theta$ is
-the derivative of the grid *construction* — pure matmul, no gather — taken one
-parameter-column at a time and contracted into the left factor immediately, so
-the dense $(*\text{spatial}, d, P)$ grid tangent `jacfwd` would materialise
-never exists. Peak memory is the $(M, P)$ Jacobian itself plus one
-$(*\text{spatial}, d)$ column at a time. The result is **byte-identical** to
-`jax.jacfwd` of the SSD residual (it is the exact interpolation derivative, not
-a finite difference) — just faster, with the gather cut from $O(P)$ to
-$O(\text{ndim})$. The driver passes this as `jacobian_fn`; `None` falls back to
-`jacfwd` as a parity oracle. (`_mask_jacobian` then row-scales it by
-$\sqrt{\text{mask}}$ so an out-of-mask voxel contributes a zero row and drops
-out of the normal equations, matching `SSD.residual`'s masked form.)
+The two factors have completely different cost (@fig-optimization-chain). The left factor
+$\partial\,\text{warp}/\partial\,\text{grid}$ is the *image gradient resampled* - it touches the image,
+but it is an $M \times d$ object ($d = \text{ndim}$ grid axes), computed with *one* JVP per axis: *`ndim`
+gathers, not `P`*. The right factor $\partial\,\text{grid}/\partial\theta$ is the derivative of the grid
+*construction* - it is the derivative of the $\exp$ chart composed with the centred-affine grid, pure
+matmul, no gather - taken one parameter-column at a time and contracted into the left factor immediately,
+so the dense $(*\text{spatial}, d, P)$ grid tangent `jacfwd` would materialise never exists. Peak memory
+is the $(M, P)$ Jacobian itself plus one $(*\text{spatial}, d)$ column at a time. The result is
+*byte-identical* to `jax.jacfwd` of the SSD residual (it is the exact interpolation derivative, not a
+finite difference) - just faster, with the gather cut from $O(P)$ to $O(\text{ndim})$. The driver passes
+this as `jacobian_fn`; `None` falls back to `jacfwd` as a parity oracle. (`_mask_jacobian` then row-scales
+it by $\sqrt{\text{mask}}$ so an out-of-mask voxel contributes a zero row and drops out of the normal
+equations, matching `SSD.residual`'s masked form.)
 
 ```{python}
 #| label: fig-optimization-chain
@@ -504,230 +457,193 @@ plt.show()
 
 ### Differentiating *through* the registration
 
-Sometimes you want a gradient of a downstream loss with respect to the *images*
-being registered (registration as a differentiable layer). Two routes exist.
-The fixed `lax.scan` loop is already reverse-differentiable, so `jax.grad`
-through an unrolled solve works — at the memory cost of storing every iterate.
-The better route is `implicit_least_squares` (and its scalar-objective sibling
-`implicit_minimize`), both **DIFF-JAX**, which differentiate at the *converged*
-optimum via the implicit-function theorem rather than through the trajectory. At
-the optimum the stationarity $J^\top r = 0$ gives $\partial x^* / \partial
-\text{data} = -(J^\top J)^{-1} \partial_{\text{data}} g$; the backward solves
-$(J^\top J)\,w = \bar x$ with the same matrix-free CG. Memory is $O(1)$ in the
-iteration count and $O(M + P)$ overall — neither the $M \times P$ Jacobian nor
-the $P \times P$ normal matrix is materialised. This is the path to use when you
-need gradients and the early-exit loop (@sec-convergence) would otherwise refuse
-them.
+Sometimes you want a gradient of a downstream loss with respect to the *images* being registered
+(registration as a differentiable layer). Two routes exist. The fixed `lax.scan` loop is already
+reverse-differentiable, so `jax.grad` through an unrolled solve works - at the memory cost of storing
+every iterate. The better route is `implicit_least_squares` (and its scalar-objective sibling
+`implicit_minimize`), both **DIFF-JAX**, which differentiate at the *converged* optimum via the
+implicit-function theorem rather than through the trajectory. At the optimum the stationarity $J^\top r =
+0$ gives $\partial x^* / \partial \text{data} = -(J^\top J)^{-1} \partial_{\text{data}} g$; the backward
+solves $(J^\top J)\,w = \bar x$ with the same matrix-free CG. Memory is $O(1)$ in the iteration count and
+$O(M + P)$ overall - neither the $M \times P$ Jacobian nor the $P \times P$ normal matrix is
+materialised. This is the path to use when you need gradients and the early-exit loop (@sec-convergence)
+would otherwise refuse them.
 
 ## BFGS: when there is no residual {#sec-bfgs}
 
-The Gauss–Newton machinery rests entirely on the residual vector — it *is* the
-thing $J$ differentiates. A scalar metric has none. [LNCC](similarity.qmd#sec-lncc)
-normalises by local windows, [MI](similarity.qmd#sec-mi) and
-[correlation-ratio](similarity.qmd#sec-cr) are functionals of a joint histogram;
-none of them is $\tfrac12\lVert r\rVert^2$ for any natural $r$. So `is_least_squares`
-is `False`, and the dispatch in `optimize_objective` (`register/_core.py`) routes
-to **BFGS** via `jax.scipy.optimize.minimize(method='BFGS')`.
+The Gauss–Newton machinery rests entirely on the residual vector - it *is* the thing $J$ differentiates.
+A scalar metric has none. [LNCC](similarity.qmd#sec-lncc) normalises by local windows,
+[MI](similarity.qmd#sec-mi) and [correlation-ratio](similarity.qmd#sec-cr) are functionals of a joint
+histogram; none of them is $\tfrac12\lVert r\rVert^2$ for any natural $r$. So `is_least_squares` is
+`False`, and the dispatch in `optimize_objective` (`register/_core.py`) routes to *BFGS* via
+`jax.scipy.optimize.minimize(method='BFGS')`.
 
-BFGS is a first-order quasi-Newton method: it builds an *estimate* of the inverse
-Hessian from the history of gradients and steps, so it captures curvature (and so
-handles the rotation/translation scaling sensibly) without ever forming a
-Hessian or needing a residual. Contrast it with Gauss–Newton: when you *have* a
-residual, Gauss–Newton hands you the curvature ($J^\top J$) directly and exactly
-— second-order-ish for free, in a handful of steps — whereas BFGS must *learn*
-the curvature over many iterations from gradient differences. That is the price
-of the scalar metrics' generality, and the reason SSD is the fast default.
+BFGS is a first-order quasi-Newton method: it builds an *estimate* of the inverse Hessian from the
+history of gradients and steps, so it captures curvature (and so handles the rotation/translation scaling
+sensibly) without ever forming a Hessian or needing a residual. Contrast it with Gauss–Newton: when you
+*have* a residual, Gauss–Newton hands you the curvature ($J^\top J$) directly and exactly -
+second-order-ish for free, in a handful of steps - whereas BFGS must *learn* the curvature over many
+iterations from gradient differences. That is the price of the scalar metrics' generality, and the reason
+SSD is the fast default.
 
 The BFGS path is also why `mode='early_exit'` is rejected on the scalar metrics:
-`jax.scipy.optimize.minimize` is monolithic — there is no exposed single step to
-gate — so the convergence machinery (@sec-convergence) has nothing to hook into.
-The `optimize_objective` dispatch carries a defensive guard, but the real
-gate lives upstream in `resolve_convergence_mode`.
+`jax.scipy.optimize.minimize` is monolithic - there is no exposed single step to gate - so the
+convergence machinery (@sec-convergence) has nothing to hook into. The `optimize_objective` dispatch
+carries a defensive guard, but the real gate lives upstream in `resolve_convergence_mode`.
 
 ## The inverse-compositional fast path {#sec-inverse-comp}
 
-Even with Gauss–Newton, the forward path re-linearises the **warped moving**
-image every iteration: each step needs $J$, and $J$ depends on $\theta$ (the
-moving image is resampled at the current grid, then differentiated). For a
-3-D affine that is $\approx 14$ tangent warps *per iteration*. The
-**inverse-compositional** scheme (Baker–Matthews, 2004), in
-`register/_inverse_compositional.py`, removes almost all of that cost with one
-beautiful observation.
+Even with Gauss–Newton, the forward path re-linearises the *warped moving* image every iteration: each
+step needs $J$, and $J$ depends on $\theta$ (the moving image is resampled at the current grid, then
+differentiated). For a 3-D affine that is $\approx 14$ tangent warps *per iteration*. The
+*inverse-compositional* scheme (Baker–Matthews, 2004), in `register/_inverse_compositional.py`, removes
+almost all of that cost with one observation.
 
-The forward residual is $r = I_m\!\circ\!W(\theta) - I_f$, and its sensitivity
-sits on the *moving* side, which moves every iteration. Instead, **linearise the
-template (fixed image) and absorb the update on the moving side compositionally.**
-The steepest-descent images
+The forward residual is $r = I_m\!\circ\!W(\theta) - I_f$, and its sensitivity sits on the *moving* side,
+which moves every iteration. Instead, *linearise the template (fixed image) and absorb the update on the
+moving side compositionally.* The steepest-descent images
 
 $$
 \mathrm{SD}[x, j] = \nabla I_f(x) \cdot \frac{\partial W(x;\theta)}{\partial \theta_j}\bigg|_{\theta=0}
 $$ {#eq-sd}
 
-are evaluated *at the identity, on the fixed image* — so they do **not** depend
-on the current iterate, and neither does the Gauss–Newton Hessian
-$H = \mathrm{SD}^\top \mathrm{SD}$. Both are computed **once** per pyramid level
-and **reused every iteration** (`_steepest_descent` / `_affine_steepest_descent`
-build the SD columns; `_hessian_inv` builds $H^{-1}$; `ic_reference` precomputes
-them all). Per iteration only the cheap part runs: one warp, the error
-$e = I_m\!\circ\!T - I_f$, the projection $\mathrm{SD}^\top e$, an
-$H^{-1}$ matvec, and a matrix update. One warp per iteration vs the forward
-path's many — **~4–7× faster**.
+are evaluated *at the identity, on the fixed image* - so they do *not* depend on the current iterate, and
+neither does the Gauss–Newton Hessian $H = \mathrm{SD}^\top \mathrm{SD}$. Both are computed *once* per
+pyramid level and *reused every iteration* (`_steepest_descent` / `_affine_steepest_descent` build the SD
+columns; `_hessian_inv` builds $H^{-1}$; `ic_reference` precomputes them all). Per iteration only the
+cheap part runs: one warp, the error $e = I_m\!\circ\!T - I_f$, the projection $\mathrm{SD}^\top e$, an
+$H^{-1}$ matvec, and a matrix update. One warp per iteration vs the forward path's many - about 4–7×
+faster.
 
-The update is where "inverse-compositional" earns its name. Because we
-linearised the template, the increment $\Delta\theta$ describes a warp of the
-*template*, so it is composed onto the running transform **inverted**:
+The update is where "inverse-compositional" earns its name, and it is a group operation in the precise
+sense of the [transforms chapter](transforms.qmd#sec-transform-manifold). Because we linearised the
+template, the increment $\Delta\theta$ describes a warp of the *template*, so it is composed onto the
+running transform *inverted*:
 
 $$
 T \leftarrow T \cdot W(\Delta\theta)^{-1}.
 $$ {#eq-ic-update}
 
-The recovered warp is carried as the homogeneous matrix $T$ (fixed-voxel →
-moving-voxel) throughout, never re-parametrised. The inverse is closed-form, so
-it stays GPU-native: for rigid, $W(\Delta\theta)^{-1}$ uses the rigid transpose
-rule $R^{-1} = R^\top$ (`_rigid_inverse`, no solve); for affine, the linear-block
-inverse is $\text{matrix\_exp}(-A)$ (`_affine_compositional_update`, pure matmul).
+The recovered warp is carried as the homogeneous matrix $T$ (fixed-voxel → moving-voxel) throughout,
+never re-parametrised - the iteration walks the group directly by right-multiplication. The inverse is
+the group inverse, and because the group has a closed-form one it stays GPU-native: for rigid,
+$W(\Delta\theta)^{-1}$ uses the rotation-transpose rule $R^{-1} = R^\top$ (`_rigid_inverse`, no solve);
+for affine, the linear-block inverse is $\text{matrix\_exp}(-A)$ (`_affine_compositional_update`, pure
+matmul, since $\exp(A)^{-1}=\exp(-A)$ in the group). The Lie structure is doing real work here: the
+inverse of a group element is free precisely because the chart is the exponential.
 
-A clean efficiency detail: the per-iteration projection $\mathrm{SD}^\top e$ is
-*not* read from a stored $(M, P)$ steepest-descent buffer (that would keep $P$
-copies of the image resident). It is reconstructed from the **moments** of the
-fixed-image gradient — $m_{ij} = \sum_x \nabla I_f{}_i\,(x-c)_j\,e$ and
-$g_i = \sum_x \nabla I_f{}_i\,e$ — and `project_moments` assembles the model's
-$\mathrm{SD}^\top e$ from them (rigid contracts $m$ against the $\mathfrak{so}(n)$
-generators; affine flattens it). So `ic_reference` keeps only $\nabla I_f$
-resident, a $P/\text{ndim}$ memory saving (4× at 3-D affine).
+A clean efficiency detail: the per-iteration projection $\mathrm{SD}^\top e$ is *not* read from a stored
+$(M, P)$ steepest-descent buffer (that would keep $P$ copies of the image resident). It is reconstructed
+from the *moments* of the fixed-image gradient - $m_{ij} = \sum_x \nabla I_f{}_i\,(x-c)_j\,e$ and
+$g_i = \sum_x \nabla I_f{}_i\,e$ - and `project_moments` assembles the model's $\mathrm{SD}^\top e$ from
+them (rigid contracts $m$ against the $\mathfrak{so}(n)$ generators; affine flattens it). So
+`ic_reference` keeps only $\nabla I_f$ resident, a $P/\text{ndim}$ memory saving (4× at 3-D affine).
 
 ### Trust region and the line-search guard
 
-The constant-template Hessian is the source of the speed *and* of a hazard: it
-is built once from the whole reference, so on a few-voxel coarse grid or a
-low-gradient image it can be unreliable, and the raw Gauss–Newton step can
-overshoot until `matrix_exp` explodes (parameters → thousands, the warp
-anti-correlates — the same small-grid failure mode as @sec-coarse-fine). Rather
-than damp *every* step (which would slow the well-conditioned path and throttle
-early-exit), the kernel clamps only the pathological step. `_trust_scale`
-computes the step's **induced grid displacement** — how far the worst grid corner
-moves under $T \to T\,W(\Delta\theta)$ — and shortens the step if that exceeds
-the grid's own extent (`_TRUST_EXTENT_FACTOR = 1.0` × the grid extent). The
-rationale is physical: you cannot align two images by moving the sampling grid
-farther than the image is wide, so such a step is meaningless and is bounded. A
-normal step (displacement $\le$ extent) is left **byte-unchanged**, so the
-well-conditioned path keeps its single-step Gauss–Newton convergence and the
-Hessian ridge stays tiny (a Jacobi-preconditioned relative ridge `_RIDGE = 1e-4`,
-which `_hessian_inv` applies to a unit-diagonal-scaled Hessian so the affine
-block's order-of-magnitude column spread does not mis-damp the translation
-directions).
+The constant-template Hessian is the source of the speed *and* of a hazard: it is built once from the
+whole reference, so on a few-voxel coarse grid or a low-gradient image it can be unreliable, and the raw
+Gauss–Newton step can overshoot until `matrix_exp` explodes (parameters → thousands, the warp
+anti-correlates - the same small-grid failure mode as @sec-coarse-fine). Rather than damp *every* step
+(which would slow the well-conditioned path and throttle early-exit), the kernel clamps only the
+pathological step. `_trust_scale` computes the step's *induced grid displacement* - how far the worst grid
+corner moves under $T \to T\,W(\Delta\theta)$ - and shortens the step if that exceeds the grid's own extent
+(`_TRUST_EXTENT_FACTOR = 1.0` × the grid extent). The rationale is physical: you cannot align two images
+by moving the sampling grid farther than the image is wide, so such a step is meaningless and is bounded.
+A normal step (displacement $\le$ extent) is left *byte-unchanged*, so the well-conditioned path keeps its
+single-step Gauss–Newton convergence and the Hessian ridge stays tiny (a Jacobi-preconditioned relative
+ridge `_RIDGE = 1e-4`, which `_hessian_inv` applies to a unit-diagonal-scaled Hessian so the affine
+block's order-of-magnitude column spread does not mis-damp the translation directions).
 
-The opt-in `ic_line_search` (`RegistrationSpec.ic_line_search`, default `False`)
-adds a second guard: even a trust-clamped step from the constant-template Hessian
-can point in a slightly *wrong direction* and increase the SSD on a hard case.
-With the guard on, the step is **F1-backtracked** along the clamped direction
-over the fractions `_BACKTRACK_ALPHAS = (1.0, 0.5, 0.25)`, accepting the largest
-that decreases the cost; if none does, the iterate is left unmoved — so the
-per-level cost is **monotone non-increasing**. A step that already decreases at
-full length (the well-conditioned case) is taken byte-unchanged at $\alpha = 1$.
-The guard costs extra candidate warps (~3× the IC step), so it is off by default
-and enabled for robustness on pathological data.
+The opt-in `ic_line_search` (`RegistrationSpec.ic_line_search`, default `False`) adds a second guard:
+even a trust-clamped step from the constant-template Hessian can point in a slightly *wrong direction*
+and increase the SSD on a hard case. With the guard on, the step is *backtracked* along the clamped
+direction over the fractions `_BACKTRACK_ALPHAS = (1.0, 0.5, 0.25)`, accepting the largest that decreases
+the cost; if none does, the iterate is left unmoved - so the per-level cost is *monotone non-increasing*.
+A step that already decreases at full length (the well-conditioned case) is taken byte-unchanged at
+$\alpha = 1$. The guard costs extra candidate warps (~3× the IC step), so it is off by default and
+enabled for robustness on pathological data.
 
 ### Where the fast path applies
 
-The public entry points are `ic_rigid_register` and `ic_affine_register`
-(single-pair), built on the shared `ic_reference` (precompute the per-level
-reference data) and `ic_register_core` (run the coarse-to-fine IC iterations,
-carrying the matrix). The transform group enters as three small callables passed
-to `ic_register_core` — `compositional_update` ($W(\Delta\theta)^{-1}$),
-`params_from_matrix`, and `project_moments` — rigid by default, affine for the
-affine recipe. The constraints are firm and follow from the construction:
-**SSD only** (it is a least-squares scheme — there is a residual to linearise) and
-**`IndexSpace` only** (the template is linearised in voxel coordinates, with no
-conjugating change-of-basis). `rigid_register` / `affine_register` dispatch here
-automatically under `method='auto'` when those preconditions hold (and an unmasked
-cost — a mask needs a per-voxel reduction the full-grid Hessian cannot honour); the
-forward Gauss–Newton path is the parity oracle the fast path is validated against,
-so the two are interchangeable.
+The public entry points are `ic_rigid_register` and `ic_affine_register` (single-pair), built on the
+shared `ic_reference` (precompute the per-level reference data) and `ic_register_core` (run the
+coarse-to-fine IC iterations, carrying the matrix). The transform group enters as three small callables
+passed to `ic_register_core` - `compositional_update` ($W(\Delta\theta)^{-1}$), `params_from_matrix`,
+and `project_moments` - rigid by default, affine for the affine recipe. The constraints are firm and
+follow from the construction: *SSD only* (it is a least-squares scheme - there is a residual to
+linearise) and *`IndexSpace` only* (the template is linearised in voxel coordinates, with no conjugating
+change-of-basis). `rigid_register` / `affine_register` dispatch here automatically under `method='auto'`
+when those preconditions hold (and an unmasked cost - a mask needs a per-voxel reduction the full-grid
+Hessian cannot honour); the forward Gauss–Newton path is the parity oracle the fast path is validated
+against, so the two are interchangeable.
 
 ## Convergence: fixed scan vs early-exit while-loop {#sec-convergence}
 
-The last shared piece is *how many iterations to run*, factored into
-`register/_converge.py` and consumed by both the matrix IC path and the
-dense-field SVF drivers. There are two strategies, and they trade off
+The last shared piece is *how many iterations to run*, factored into `register/_converge.py` and consumed
+by both the matrix IC path and the dense-field SVF drivers. There are two strategies, and they trade off
 reproducibility/differentiability against speed.
 
-The strategy is `RegistrationSpec.mode`, a `ConvergenceMode` (`'fixed'` or
-`'early_exit'`), and `run_iterations(step_fn, init_state, …, convergence)` is the
-one function that runs either:
+The strategy is `RegistrationSpec.mode`, a `ConvergenceMode` (`'fixed'` or `'early_exit'`), and
+`run_iterations(step_fn, init_state, …, convergence)` is the one function that runs either:
 
-- **`mode='fixed'`** (the spec default on every recipe) runs a fixed-length
-  `lax.scan` over the level's iteration count. It is **reproducible**,
-  `vmap`-batchable (so `volreg` can register a whole series at once), and
-  **reverse-differentiable**. The scan body is wrapped in `jax.checkpoint`, so
-  reverse-mode through the unrolled trajectory *rematerialises* each step on the
-  backward pass instead of storing every iterate — `grad` memory is $O(\text{state})$
-  + recompute rather than $O(\text{iterations} \times \text{state})$ (the
-  dense-field SVF carry is large). `checkpoint` is a no-op on the forward pass,
-  so the common grad-free forward result and its compile are byte-unchanged.
+- **`mode='fixed'`** (the spec default on every recipe) runs a fixed-length `lax.scan` over the level's
+  iteration count. It is *reproducible*, `vmap`-batchable (so `volreg` can register a whole series at
+  once), and *reverse-differentiable*. The scan body is wrapped in `jax.checkpoint`, so reverse-mode
+  through the unrolled trajectory *rematerialises* each step on the backward pass instead of storing every
+  iterate - `grad` memory is $O(\text{state})$ + recompute rather than $O(\text{iterations} \times
+  \text{state})$ (the dense-field SVF carry is large). `checkpoint` is a no-op on the forward pass, so the
+  common grad-free forward result and its compile are byte-unchanged.
 
-- **`mode='early_exit'`** runs a `lax.while_loop` that stops once the cost has
-  plateaued — an ANTs-style criterion: fit a least-squares line over the last
-  `window` per-iteration costs, normalise its slope by the mean cost, and stop
-  when $|\text{slope}| / |\text{mean}| < \text{threshold}$ (the `Convergence`
-  record's `threshold` / `window`). The iteration count is the hard cap. The cost
-  trace is padded to that cap with the final cost, so `cost_history` keeps a
-  **path-independent shape** either way. On a hard rigid warp this converges in
-  ~18 of 90 iterations (≈1.7× faster) with identical recovery — single-pair
+- **`mode='early_exit'`** runs a `lax.while_loop` that stops once the cost has plateaued - an ANTs-style
+  criterion: fit a least-squares line over the last `window` per-iteration costs, normalise its slope by
+  the mean cost, and stop when $|\text{slope}| / |\text{mean}| < \text{threshold}$ (the `Convergence`
+  record's `threshold` / `window`). The iteration count is the hard cap. The cost trace is padded to that
+  cap with the final cost, so `cost_history` keeps a *path-independent shape* either way. On a hard rigid
+  warp this converges in ~18 of 90 iterations (≈1.7× faster) with identical recovery - single-pair
   inverse-compositional is the recipe class it is shipped for.
 
 ### The caveat: no reverse rule through `while_loop`
 
-There is a hard constraint on the early-exit path, and the code raises it loudly.
-**A `lax.while_loop` has no reverse-mode rule** — the data-dependent trip count
-cannot be back-propagated. So reverse-mode (`jax.grad`) through an `early_exit`
-registration is unsupported. The code does not let this fail obscurely: the
-while-loop output passes through `_early_exit_barrier`, a `jax.custom_vjp`
-identity on the forward pass whose backward rule *raises a registration-specific,
-actionable error* pointing you to the fix — use `mode='fixed'` (the
-reverse-differentiable scan) or the implicit-function layer
-([`implicit_least_squares` / `implicit_minimize`](#sec-gauss-newton)), whose
-adjoint is solved at the optimum and is trajectory-independent. The
-`convergence=None` (fixed-scan) path never touches the barrier, so it stays
-differentiable.
+There is a hard constraint on the early-exit path, and the code raises it loudly. *A `lax.while_loop` has
+no reverse-mode rule* - the data-dependent trip count cannot be back-propagated. So reverse-mode
+(`jax.grad`) through an `early_exit` registration is unsupported. The code does not let this fail
+obscurely: the while-loop output passes through `_early_exit_barrier`, a `jax.custom_vjp` identity on the
+forward pass whose backward rule *raises a registration-specific, actionable error* pointing you to the
+fix - use `mode='fixed'` (the reverse-differentiable scan) or the implicit-function layer
+([`implicit_least_squares` / `implicit_minimize`](#sec-gauss-newton)), whose adjoint is solved at the
+optimum and is trajectory-independent. The `convergence=None` (fixed-scan) path never touches the
+barrier, so it stays differentiable.
 
-Two more behavioural notes. The B2 eligibility gate `resolve_convergence_mode`
-is the single place the mode decision is resolved: it returns `None` for the
-fixed scan, or the concrete `Convergence` for early-exit, and **raises** if
-`mode='early_exit'` is asked of a path that cannot honour a data-dependent trip
-count (the scalar/BFGS forward optimiser, which is monolithic). And a `vmap`-ed
-`while_loop` *does* batch — but it runs until the **slowest lane** exits (the
-all-lanes condition), so the per-pair early-exit advantage degrades to the
-cohort's slowest pair. That is why `volreg` uses the fixed scan: its
-batched-GPU throughput is the structural win, not per-frame early exit.
+Two more behavioural notes. The eligibility gate `resolve_convergence_mode` is the single place the mode
+decision is resolved: it returns `None` for the fixed scan, or the concrete `Convergence` for early-exit,
+and *raises* if `mode='early_exit'` is asked of a path that cannot honour a data-dependent trip count (the
+scalar/BFGS forward optimiser, which is monolithic). And a `vmap`-ed `while_loop` *does* batch - but it
+runs until the *slowest lane* exits (the all-lanes condition), so the per-pair early-exit advantage
+degrades to the cohort's slowest pair. That is why `volreg` uses the fixed scan: its batched-GPU
+throughput is the structural win, not per-frame early exit.
 
 ## Further reading
 
-- B. D. Lucas and T. Kanade (1981). *An iterative image registration technique
-  with an application to stereo vision.* IJCAI. — the forward additive scheme the
-  SSD path descends from.
-- S. Baker and I. Matthews (2004). *Lucas–Kanade 20 years on: a unifying
-  framework.* International Journal of Computer Vision 56(3):221–255. — the
-  inverse-compositional algorithm of @sec-inverse-comp, with the
+- B. D. Lucas and T. Kanade (1981). *An iterative image registration technique with an application to
+  stereo vision.* IJCAI. The forward additive scheme the SSD path descends from.
+- S. Baker and I. Matthews (2004). *Lucas–Kanade 20 years on: a unifying framework.* International Journal
+  of Computer Vision 56(3):221–255. The inverse-compositional algorithm of @sec-inverse-comp, with the
   constant-template Hessian and the compositional inverse update.
-- J. Nocedal and S. J. Wright (2006). *Numerical Optimization*, 2nd ed.,
-  Springer. — Gauss–Newton, Levenberg–Marquardt (Ch. 10), BFGS (Ch. 6), and
-  trust regions (Ch. 4).
-- K. Levenberg (1944) and D. W. Marquardt (1963). — the damped least-squares
-  step of @eq-lm.
-- M. Jaderberg, K. Simonyan, A. Zisserman, K. Kavukcuoglu (2015). *Spatial
-  Transformer Networks.* NeurIPS. — differentiable resampling, the substrate
-  the analytic warp Jacobian and the implicit-differentiation layer rest on.
-- S. Gould et al. (2016/2021) and A. Agrawal et al. (2019). *Differentiating
-  through argmin / implicit layers.* — the implicit-function-theorem path of
-  `implicit_least_squares` / `implicit_minimize`.
-- B. B. Avants, N. J. Tustison, et al. (2011). *A reproducible evaluation of
-  ANTs similarity metric performance in brain image registration.* NeuroImage
-  54(3):2033–2044. — the multi-resolution + windowed-convergence lineage nitrix
-  matches in behaviour.
-- R. W. Cox and A. Jesmanowicz (1999). *Real-time 3D image registration for
-  functional MRI.* Magnetic Resonance in Medicine 42:1014–1018. — AFNI
-  `3dvolreg`, the realignment lineage of the SSD / inverse-compositional path.
+- J. Nocedal and S. J. Wright (2006). *Numerical Optimization*, 2nd ed., Springer. Gauss–Newton,
+  Levenberg–Marquardt (Ch. 10), BFGS (Ch. 6), and trust regions (Ch. 4).
+- K. Levenberg (1944) and D. W. Marquardt (1963). The damped least-squares step of @eq-lm.
+- M. Jaderberg, K. Simonyan, A. Zisserman, K. Kavukcuoglu (2015). *Spatial Transformer Networks.* NeurIPS.
+  Differentiable resampling, the substrate the analytic warp Jacobian and the implicit-differentiation
+  layer rest on.
+- S. Gould et al. (2016/2021) and A. Agrawal et al. (2019). *Differentiating through argmin / implicit
+  layers.* The implicit-function-theorem path of `implicit_least_squares` / `implicit_minimize`.
+- B. B. Avants, N. J. Tustison, et al. (2011). *A reproducible evaluation of ANTs similarity metric
+  performance in brain image registration.* NeuroImage 54(3):2033–2044. The multi-resolution +
+  windowed-convergence lineage nitrix matches in behaviour.
+- R. W. Cox and A. Jesmanowicz (1999). *Real-time 3D image registration for functional MRI.* Magnetic
+  Resonance in Medicine 42:1014–1018. AFNI `3dvolreg`, the realignment lineage of the SSD /
+  inverse-compositional path.
 
 ## See also
 
@@ -745,5 +661,5 @@ batched-GPU throughput is the structural win, not per-frame early exit.
 - Neighbouring pages: [the transform charts and Lie exponential](transforms.qmd#sec-lie-exp),
   [resampling and the Gaussian pyramid](resampling.qmd#sec-pyramid),
   [the similarity metrics](similarity.qmd#sec-ssd),
-  [the diffeomorphic / SVF solvers](diffeomorphic.qmd#sec-svf) (which share this
-  convergence scaffolding), and [the recipes and specs](recipes.qmd#sec-specs).
+  [the diffeomorphic / SVF solvers](diffeomorphic.qmd#sec-svf) (which share this convergence
+  scaffolding), and [the recipes and specs](recipes.qmd#sec-specs).

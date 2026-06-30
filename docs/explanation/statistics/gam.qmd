@@ -2,19 +2,18 @@
 title: "Generalised additive models: learning smooth shapes"
 ---
 
-::: {.callout-tldr title="Fast path"}
-Sometimes a covariate's effect isn't a straight line — think age, or a motion
+Sometimes a covariate's effect is not a straight line — think age, or a motion
 nuisance. A **smooth term** $f(x)$ captures the shape without you specifying it.
 The trick is to write the smooth as a linear combination of fixed wiggly building
 blocks, $f(x) = B(x)\gamma$ — now it is **linear in $\gamma$** and drops straight
-into the [GLM](glm.qmd) solve. To stop it overfitting, add a **roughness
-penalty** $\lambda\,\gamma^{\top}S\gamma$, turning the solve into
+into the [GLM](glm.qmd) solve. To stop it overfitting, add a **roughness penalty**
+$\lambda\,\gamma^{\top}S\gamma$, turning the solve into
 $(X^{\top}WX + \lambda S)\beta = X^{\top}Wz$ — the GLM normal equations with one
 extra term. The penalty strength $\lambda$ is chosen by
-[Fellner–Schall](fellner-schall.qmd). And the punchline: **that penalty is a
+[Fellner–Schall](fellner-schall.qmd). And the payoff: **that penalty is a
 random-effect variance in disguise**, so a GAM *is* an [LME](lme.qmd), and the two
-chapters are one method.
-:::
+chapters are one method. This is the rung where the suite's organising equivalence
+stops being a promise and becomes a derivation.
 
 Rung 3 of [the ladder](index.qmd). It builds on the [GLM](glm.qmd) (the penalised
 solve) and pays off the [LME](lme.qmd) connection.
@@ -180,10 +179,11 @@ effects). All of them are real and grounded in source:
 - **Tensor-product interaction** (`tensor_product_basis`): a 2-D (or higher)
   smooth $f(x_1, x_2)$ built from marginal bases by the row-wise Kronecker
   product of their designs, with one smoothing parameter *per margin*. We return
-  to it in §8.
+  to it in [tensor-product smooths](#sec-tensor).
 
-Every constructor takes `center=True` by default — the identifiability fix of
-§4 — and conforms to the `SmoothBasis` protocol, so `gam_fit` dispatches through
+Every constructor takes `center=True` by default — the
+[identifiability fix](#sec-identifiability) — and conforms to the `SmoothBasis`
+protocol, so `gam_fit` dispatches through
 `design` / `dim` / `penalty_blocks()` / `eval_design()` and a new basis type
 needs no edit to `gam.py`.
 
@@ -290,7 +290,7 @@ fig.colorbar(im1, ax=axs[1], fraction=0.046)
 fig.tight_layout(); plt.show()
 ```
 
-## Identifiability: the smooth that fights the intercept
+## Identifiability: the smooth that fights the intercept {#sec-identifiability}
 
 A smooth has a hidden redundancy with the model intercept. You can add a constant
 $c$ to every value of $f(x)$ and subtract $c$ from the intercept and the fitted
@@ -350,7 +350,8 @@ Why does Fellner–Schall — a *variance-component* estimator from the
 thing. The roughness penalty $\lambda\gamma^{\top}S\gamma$ is exactly the
 negative log-density of a Gaussian prior $\gamma \sim \mathcal{N}(0,\,\sigma_b^2 S^{-})$
 (with $S^{-}$ a generalised inverse, since $S$ is rank-deficient — the
-unpenalised null space of §3.1 is the *flat* prior on the constant/linear part),
+unpenalised null space [described above](#sec-penalty) is the *flat* prior on the
+constant/linear part),
 and the smoothing parameter is a ratio of variances:
 
 $$
@@ -365,6 +366,15 @@ the equivalence derived in full on the
 the [Fellner–Schall page](fellner-schall.qmd#equivalence); it is the single
 reason the whole suite shares one engine instead of being a pile of separate
 fitters. (We keep it crisp here — the derivation lives in foundations.)
+
+The prior reading also says what kind of assumption a smooth makes. The penalty
+declares an **inductive bias** — *the truth is smooth* — exactly as the prior
+$\gamma\sim\mathcal N(0,\sigma_b^2 S^{-})$ concentrates probability on gently
+curving functions; it is the statistical cousin of the symmetry assumptions the
+[geometry unit](../geometry/index.qmd) builds into its operators. The bias is
+declared in the *form* of $S$ (second differences ⇒ penalise curvature) and
+*calibrated* in its scale $\lambda$ by Fellner–Schall maximising the marginal
+likelihood — empirical Bayes, the data setting the strength of its own prior.
 
 Concretely, this is why `re_smooth` in `basis.py` works: a random-effect block
 is nothing but a smooth whose penalty is the **identity** ($S=I$, a ridge), and the
@@ -461,7 +471,7 @@ divides by $N - \text{EDF}$, not $N - p$) and the approximate significance tests
 (`smooth_significance` implements Wood's 2013 `summary.gam` test, with the
 smooth's rounded EDF as its reference degrees of freedom).
 
-## Beyond one dimension: tensor-product smooths
+## Beyond one dimension: tensor-product smooths {#sec-tensor}
 
 What if the effect depends on *two* covariates jointly — say a thickness surface
 over (age, a regional coordinate) that is not separable into a sum of 1-D
@@ -526,8 +536,8 @@ fig.tight_layout(); plt.show()
 - Keep a **non-Gaussian family** and it is still a GAM — the inner loop already
   handles it (counts, binary).
 - Add explicit **random-effect blocks** alongside the smooths and you get a
-  [GAMM](gamm.qmd) — and since a smooth already *is* a random effect (§6), that
-  is barely a new model at all.
+  [GAMM](gamm.qmd) — and since a smooth already *is* a random effect
+  ([the hinge](#sec-hinge)), that is barely a new model at all.
 - Swap the difference penalty for a **kernel** penalty $S = K^{-1}$ and the smooth
   becomes a [Gaussian process](hsgp.qmd).
 

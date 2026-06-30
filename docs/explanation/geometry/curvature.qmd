@@ -2,120 +2,128 @@
 title: "Curvature and distortion: differential geometry on meshes"
 ---
 
-::: {.callout-tldr title="Fast path"}
-**Curvature** measures how a surface bends; **distortion** measures how a warp
-stretches it. Both fall out of machinery you already have:
+Curvature measures how a single surface bends; distortion measures how a warp
+between two surfaces stretches one onto the other. Both quantities fall out of the
+operators built in the preceding chapters, and both are governed by the symmetry
+theme of this unit: a good curvature estimate depends only on the *shape* of the
+surface, not on how it is positioned or triangulated, and the deepest fact about
+curvature - the Theorema Egregium - is itself a statement about which
+transformations leave it unchanged.
 
-- **Mean curvature** $H$ is the *Laplacian of the coordinate field*. The same
-  $\Delta = M^{-1}L$ from [the previous page](laplace-beltrami.qmd#sec-cotangent),
+This chapter develops four routines, all in
+[`nitrix.geometry.surface`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/surface.py)
+and built on the operators of
+[`nitrix.sparse.mesh`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py):
+
+- **mean curvature** $H$, the Laplacian of the coordinate field. The same
+  $\Delta = M^{-1}L$ from [the Laplace--Beltrami chapter](laplace-beltrami.qmd#sec-cotangent),
   applied to the vertex positions $v$ rather than to a scalar, returns a vector
-  that points along the surface normal with length $\propto H$ — so
+  along the surface normal with length proportional to $H$, so
   $H_{\text{vec}}=\tfrac12 M^{-1}L\,v$ and $H=\operatorname{sign}(H_{\text{vec}}\!\cdot
-  n_i)\,\lVert H_{\text{vec}}\rVert$.
-- **Gaussian curvature** $K$ is an *angle defect*: flatten the triangles around a
-  vertex and the angles fail to close up by $2\pi$; that gap, per unit area, is $K$.
-- **Distortion** compares two meshes in correspondence: **areal**
-  $\log_2(A_{\text{warped}}/A_{\text{source}})$ per vertex (the surface analogue of
-  a Jacobian determinant), and **strain** — the per-face principal stretches from
-  the deformation gradient.
+  n_i)\,\lVert H_{\text{vec}}\rVert$;
+- **Gaussian curvature** $K$, an angle defect: flatten the triangles around a vertex
+  and the angles fail to close by $2\pi$; that gap, per unit area, is $K$;
+- **distortion** between two meshes in correspondence: areal,
+  $\log_2(A_{\text{warped}}/A_{\text{source}})$ per vertex (the surface analogue of a
+  Jacobian determinant), and strain, the per-face principal stretches from the
+  deformation gradient.
 
-Everything here is **per-vertex or per-face, pure JAX, and differentiable** w.r.t.
-the vertices, and is validated not by bit-parity but against analytic oracles — the
-sphere's exact $H=1/r$, $K=1/r^2$ — and the global **Gauss–Bonnet** check
+Everything is per-vertex or per-face, pure JAX, and differentiable with respect to
+the vertices, and is validated not by bit-parity but against analytic oracles - the
+sphere's exact $H=1/r$, $K=1/r^2$ - and the global Gauss--Bonnet identity
 $\sum_i K_i A_i = 2\pi\chi = 4\pi$ for a genus-0 surface.
-:::
 
-This page sits on the fifth rung of the unit, after
-[foundations](foundations.qmd#sec-discretization),
+The chapter follows [foundations](foundations.qmd#sec-discretization),
 [the sparse operator substrate](operators.qmd#sec-ell),
-[the Laplace–Beltrami operator](laplace-beltrami.qmd#sec-cotangent), and
-[the surface spectrum](spectral.qmd#sec-eigen). It assumes you are comfortable with
-**linear algebra** — eigenvalues of a $2\times2$ matrix, the determinant and trace,
-quadratic forms — but have had **no formal training in differential geometry**.
-Every quantity is built from a picture first and a formula second. All the routines
-described here live in
-[`nitrix.geometry.surface`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/surface.py),
-built on the operators of
-[`nitrix.sparse.mesh`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py).
+[the Laplace--Beltrami operator](laplace-beltrami.qmd#sec-cotangent), and
+[the surface spectrum](spectral.qmd#sec-eigen). It assumes linear algebra -
+eigenvalues of a $2\times2$ matrix, determinant and trace, quadratic forms - but no
+prior differential geometry; each quantity is built from a picture first and a
+formula second.
 
-## A motivating question {#sec-motivation}
+## A motivating problem {#sec-motivation}
 
-You have a reconstructed **cortical surface** — a triangle mesh of one hemisphere —
-and three things you want to know about it. *Where are the gyral crowns and the
-sulcal fundi?* That is curvature: the crowns bulge outward, the fundi curl inward,
-and the sign and magnitude of how the sheet bends distinguishes them. This is the
-geometry behind FreeSurfer's `?h.curv` map, the feature that surface registrars
-align on. *Is my reconstruction topologically a sphere, or did the segmentation
-punch a handle through it?* That is Gaussian curvature integrated over the whole
-surface — a single number, $4\pi$, that holds for any genus-0 surface no matter how
-folded, and deviates the moment a handle appears. *And after I warp this surface to
-a template, how badly did the warp stretch the cortex?* That is distortion — the
-quantity a registration's areal regulariser penalises and the `?h.jacobian` QA
-readout reports.
+A reconstructed cortical surface - a triangle mesh of one hemisphere - raises three
+questions. *Where are the gyral crowns and the sulcal fundi?* That is curvature: the
+crowns bulge outward, the fundi curl inward, and the sign and magnitude of the
+bending distinguish them. This is the geometry behind FreeSurfer's `?h.curv` map, the
+feature surface registrars align on. *Is the reconstruction topologically a sphere, or
+did the segmentation punch a handle through it?* That is Gaussian curvature integrated
+over the whole surface - a single number, $4\pi$, that holds for any genus-0 surface
+no matter how folded, and that deviates the moment a handle appears. *After warping
+the surface to a template, how badly did the warp stretch the cortex?* That is
+distortion - the quantity a registration's areal regulariser penalises and the
+`?h.jacobian` QA readout reports.
 
-All three are *differential-geometry* questions, and all three reduce — as the rest
-of this page shows — to operators you already met. Mean curvature is the
-Laplace–Beltrami operator applied to the coordinate field. Gaussian curvature is a
-sum of triangle angles. Distortion is a ratio of vertex areas, or the eigenvalues
-of a tiny $2\times2$ matrix per triangle. Keep the cortical surface in mind; we
-return to it in @sec-validation.
+All three are differential-geometry questions, and all three reduce to operators
+already in hand. Mean curvature is the Laplace--Beltrami operator applied to the
+coordinate field; Gaussian curvature is a sum of triangle angles; distortion is a
+ratio of vertex areas, or the eigenvalues of a tiny $2\times2$ matrix per triangle. We
+return to the cortical surface in @sec-validation.
 
-The governing idea of the whole unit is in force here. A triangle mesh is a
-**discrete approximation of a smooth surface**, and the craft is to define these
-curvatures on the discrete mesh so they **converge to the smooth truth as the mesh
-is refined** — and to *check* that convergence against cases where we know the
-answer. Curvature is where that discipline pays off most visibly, because curvature
-is a *second-order* quantity (it depends on how normals change, not only on
-positions), and second-order quantities on a piecewise-flat mesh — which has
-literally zero curvature on the interior of every flat triangle — are subtle. The
-trick, twice over, is to push the curvature onto the *vertices and edges* where the
-mesh is not flat, and to integrate it against the right area measure.
+The governing idea of the unit is in force. A triangle mesh is a discrete
+approximation of a smooth surface, and the craft is to define curvature on the mesh so
+that it converges to the smooth truth under refinement, and to check that convergence
+against cases where the answer is known. Curvature is where the discipline pays off
+most visibly, because curvature is a *second-order* quantity - it depends on how
+normals change, not only on positions - and second-order quantities on a
+piecewise-flat mesh, which has literally zero curvature on the interior of every flat
+triangle, are subtle. The resolution, in both the mean and Gaussian cases, is to push
+the curvature onto the *vertices and edges*, where the mesh is not flat, and to
+integrate it against the right area measure.
 
 ## Mean curvature {#sec-mean}
 
-### The idea: bending is the Laplacian of position
+### Mean curvature as the Laplacian of position
 
-Start with the one-dimensional picture you already own. Take a curve in the plane
-and look at a point on it. If the curve is straight there, a small step left and a
-small step right land symmetrically about the point — the average of the two
-neighbours *is* the point. If the curve bends, the average of the neighbours pulls
-off to one side, toward the centre of the circle the curve is hugging. The vector
-*from the point to the average of its neighbours* points along the inward normal,
-and its length grows with how tightly the curve bends. That displacement-to-the-
-neighbour-average is exactly what a Laplacian computes — and the curvature of the
-curve is, up to a constant, the Laplacian of the curve's *position*.
+Begin with the one-dimensional picture. Take a curve in the plane and a point on it.
+If the curve is straight there, a small step left and a small step right land
+symmetrically about the point - the average of the two neighbours *is* the point. If
+the curve bends, the average of the neighbours pulls off to one side, toward the
+centre of the circle the curve is hugging. The vector from the point to the average of
+its neighbours points along the inward normal, and its length grows with how tightly
+the curve bends. That displacement-to-the-neighbour-average is exactly what a Laplacian
+computes, so the curvature of the curve is, up to a constant, the Laplacian of the
+curve's *position*.
 
-Now lift this to a surface in 3-D. The role of "average of the neighbours minus the
-point" is played by the **Laplace–Beltrami operator** $\Delta = M^{-1}L$ from the
-[previous page](laplace-beltrami.qmd#sec-cotangent) — except we apply it not to a
-scalar field painted on the surface but to the **coordinate field** $v$ itself: the
-three functions $x(p), y(p), z(p)$ that say where each surface point sits in space.
-The result $\Delta v$ is a *vector* at each vertex. A classical theorem of
-differential geometry says this vector is normal to the surface and its length is
-twice the mean curvature:
+Lift this to a surface in three dimensions. The role of "neighbour average minus
+point" is played by the Laplace--Beltrami operator $\Delta = M^{-1}L$ from the
+[previous chapter](laplace-beltrami.qmd#sec-cotangent), applied not to a scalar field
+painted on the surface but to the coordinate field $v$ itself - the three functions
+$x(p), y(p), z(p)$ that say where each surface point sits in space. The result $\Delta
+v$ is a *vector* at each vertex. A classical theorem of differential geometry says this
+vector is normal to the surface and its length is twice the mean curvature:
 
 $$
 \Delta v \;=\; -2\,H\,n,
 \qquad H = \tfrac12(\kappa_1 + \kappa_2),
 $$ {#eq-mc-continuous}
 
-where $n$ is the unit surface normal and $\kappa_1, \kappa_2$ are the two
-**principal curvatures** — the most and least bent directions at the point (think:
-the radii of the tightest and loosest circles you can fit tangent to the surface
-there, inverted and signed). The *mean* curvature $H$ is their average, and it
-controls the magnitude of $\Delta v$. The reason this is "could have written it
-myself": $\Delta v$ is position-minus-neighbour-average, the neighbour-average sits
-toward the bulk of the surface, so the vector points along the normal, and a more
-sharply bent surface has its neighbours pulling harder — exactly a curvature.
+where $n$ is the unit surface normal and $\kappa_1, \kappa_2$ are the principal
+curvatures - the most and least bent directions at the point (the radii of the
+tightest and loosest tangent circles, inverted and signed). The mean curvature $H$ is
+their average and controls the magnitude of $\Delta v$. The intuition is the same as in
+one dimension: $\Delta v$ is position minus neighbour average, the neighbour average
+sits toward the bulk of the surface, so the vector points along the normal, and a more
+sharply bent surface pulls its neighbours harder.
+
+A word on what kind of quantity $H$ is, because it sets up the symmetry story of this
+chapter. Mean curvature is *extrinsic*: it is defined through the surface normal $n$,
+which is information about how the surface sits in the ambient space. It is invariant to
+rigid motion of the embedding - translate or rotate the surface and $H$ at each
+material point is unchanged - and equivariant to vertex relabelling, but it is *not*
+invariant under bending. Roll a flat sheet of paper into a cylinder and you have changed
+$H$ from $0$ to $1/(2r)$ without stretching anything. Hold this contrast in mind: it is
+exactly what distinguishes $H$ from the Gaussian curvature of @sec-gaussian, which *is*
+invariant under bending.
 
 ### From the smooth statement to the discrete formula
 
-On a mesh, $\Delta = M^{-1}L$ is the cotangent stiffness $L$ divided row-wise by
-the lumped mass $M=\operatorname{diag}(A_i)$ (the
-[vertex areas](laplace-beltrami.qmd#sec-mass)). Writing
-@eq-mc-continuous out per vertex with the cotangent weights
-$w_{ij}=\tfrac12(\cot\alpha_{ij}+\cot\beta_{ij})$ gives the discrete
-**mean-curvature normal** of Meyer et al. (2003):
+On a mesh, $\Delta = M^{-1}L$ is the cotangent stiffness $L$ divided row-wise by the
+lumped mass $M=\operatorname{diag}(A_i)$ (the
+[vertex areas](laplace-beltrami.qmd#sec-mass)). Writing @eq-mc-continuous per vertex
+with the cotangent weights $w_{ij}=\tfrac12(\cot\alpha_{ij}+\cot\beta_{ij})$ gives the
+discrete mean-curvature normal of Meyer et al. (2003):
 
 $$
 H_{\text{vec}}(v_i) \;=\; \frac{1}{2}\,(M^{-1}L\,v)[i]
@@ -126,75 +134,74 @@ $$ {#eq-mc-discrete}
 Read the right-hand side as a force balance. Each neighbour $v_j$ pulls $v_i$ toward
 itself with a stiffness $w_{ij}$ set by the *shape* of the two triangles on edge
 $(i,j)$; the net pull, divided by the vertex's area $A_i$, is the mean-curvature
-vector. On a flat patch the pulls cancel and $H_{\text{vec}}=0$ — flat means no
-curvature, as it must.
+vector. On a flat patch the pulls cancel and $H_{\text{vec}}=0$, as they must.
 
-The vector $H_{\text{vec}}$ carries both the magnitude and the direction of
-bending. To get a *signed scalar* we project it onto the outward vertex normal
-$n_i$ and take the magnitude:
+The vector $H_{\text{vec}}$ carries both the magnitude and the direction of bending. To
+obtain a signed scalar, project it onto the outward vertex normal $n_i$ and take the
+magnitude:
 
 $$
 H_i \;=\; \operatorname{sign}\!\big(H_{\text{vec}}(v_i)\cdot n_i\big)\,
 \big\lVert H_{\text{vec}}(v_i)\big\rVert.
 $$ {#eq-mc-sign}
 
-This is exactly what `mean_curvature(mesh, *, area_scheme='voronoi')` computes
-**(DIFF-JAX)**. Internally it (1) applies the cotangent stiffness to the vertex
-positions — `_cotangent_apply(mesh.vertices, mesh.faces, mesh.vertices)` — to get
-$Lv$; (2) divides by `vertex_areas(mesh, scheme=area_scheme)` (clamped below at
-`1e-12` to avoid a divide-by-zero on degenerate vertices) and halves to form
-$H_{\text{vec}}$; (3) gets $n_i$ from `compute_vertex_normals`; and (4) returns the
-signed magnitude of @eq-mc-sign. It refuses an empty/faceless mesh up front (the
-internal `_require_faces` guard), because a `marching_cubes` call that found no
-level set can legitimately return an empty `Mesh`, and feeding that to a curvature
-op would silently produce all-zero garbage rather than an error.
+This is what `mean_curvature(mesh, *, area_scheme='voronoi')` computes **(DIFF-JAX)**.
+Internally it (1) applies the cotangent stiffness to the vertex positions,
+`_cotangent_apply(mesh.vertices, mesh.faces, mesh.vertices)`, to get $Lv$; (2) divides
+by `vertex_areas(mesh, scheme=area_scheme)` (clamped below at `1e-12` to avoid a
+divide-by-zero on degenerate vertices) and halves to form $H_{\text{vec}}$; (3) gets
+$n_i$ from `compute_vertex_normals`; and (4) returns the signed magnitude of
+@eq-mc-sign. It refuses an empty, faceless mesh up front (the internal `_require_faces`
+guard), because a `marching_cubes` call that found no level set can legitimately return
+an empty `Mesh`, and feeding that to a curvature op would silently produce all-zero
+garbage rather than an error.
 
-### Why a JAX-native cotangent apply, not the host-built ELL
+### A JAX-native cotangent apply, not the host-built ELL
 
-Here is an as-built subtlety worth teaching, because it is the kind of decision the
-rest of the unit turns on. The [previous page](laplace-beltrami.qmd#sec-cotangent)
-built the cotangent Laplacian as an **ELL operator** via
-`mesh_cotangent_laplacian` **(HOST-CTOR)** — a sparse matrix assembled host-side in
-NumPy, with the cotangent weights *baked in as constants*. That is the right tool
-when you apply a *fixed* operator to many fields, as in smoothing: build $L$ once,
-reuse it.
+The [previous chapter](laplace-beltrami.qmd#sec-cotangent) built the cotangent
+Laplacian as an ELL operator via `mesh_cotangent_laplacian` **(HOST-CTOR)** - a sparse
+matrix assembled host-side in NumPy, with the cotangent weights baked in as constants.
+That is the right tool when a *fixed* operator is applied to many fields, as in
+smoothing: build $L$ once, reuse it.
 
-But mean curvature applies $L$ to the vertices *themselves*, and we want the result
-**differentiable w.r.t. those vertices** — for surface optimisation, learned
-refinement, any gradient that flows back to the geometry. If the weights $w_{ij}$
-are frozen NumPy constants, the gradient $\partial H/\partial v$ misses the fact
-that *moving a vertex changes the cotangent weights too* (the weights are a function
-of the geometry). So `mean_curvature` does not call the host ELL. It calls a private
-**JAX-native per-face cotangent apply**, `_cotangent_apply`, which recomputes the
+Mean curvature applies $L$ to the vertices *themselves*, and we want the result
+differentiable with respect to those vertices - for surface optimisation, learned
+refinement, or any gradient that flows back to the geometry. If the weights $w_{ij}$
+are frozen NumPy constants, the gradient $\partial H/\partial v$ misses the fact that
+moving a vertex changes the cotangent weights too, since the weights are themselves a
+function of the geometry. So `mean_curvature` does not call the host ELL. It calls a
+private JAX-native per-face cotangent apply, `_cotangent_apply`, which recomputes the
 half-cotangent of each triangle angle from the live vertex positions
 ($\cot\theta = (u\cdot w)/\lVert u\times w\rVert$, floored at `1e-12` in the
 denominator) and scatters the per-face contributions onto the vertices with
 `.at[...].add(...)`. Every weight is now a differentiable function of $v$, so the
 gradient is exact.
 
-This is a recurring pattern in the suite — *differentiate through the geometry, not
-only through the field* — and it has a cost: the two paths must agree. The
-host-built ELL and the JAX-native apply compute the **same operator** by **different
-code**, and they are regression-tested to agree to about **`1e-4`** (a float32
-assembly-order tolerance, not bit-parity — the
-[class/correlation posture](foundations.qmd#sec-validation) again). The rule of
-thumb from [foundations](foundations.qmd#sec-classes) applies: **never call a
-HOST-CTOR op inside a jitted loop**. `_cotangent_apply` is pure JAX and jits/vmaps
-freely; `mesh_cotangent_laplacian` builds on the host and must be hoisted out.
+This is a recurring pattern in the suite - differentiate through the geometry, not only
+through the field - and it carries a cost: the two paths must agree. The host-built ELL
+and the JAX-native apply compute the *same operator* by *different code*, and they are
+regression-tested to agree to about `1e-4` (a float32 assembly-order tolerance, not
+bit-parity - the [class/correlation posture](foundations.qmd#sec-validation) again). The
+rule from [foundations](foundations.qmd#sec-classes) applies: never call a HOST-CTOR op
+inside a jitted loop. `_cotangent_apply` is pure JAX and jits and vmaps freely;
+`mesh_cotangent_laplacian` builds on the host and must be hoisted out.
 
-### The sign convention (and why it is the opposite of FreeSurfer)
+### The sign convention, and why it is the opposite of FreeSurfer
 
-The sign in @eq-mc-sign is a *choice*, and `nitrix` makes the
-**convex-positive** one: $H_i$ is **positive where the surface is convex with
-respect to its outward normal** — a sphere, a gyral crown — and **negative in
-concave regions** — a sulcal fundus. This follows directly from the outward-normal /
-mean-curvature-vector definition with no extra flip, which is why it was chosen.
+The sign in @eq-mc-sign is a choice, and `nitrix` makes the convex-positive one: $H_i$
+is positive where the surface is convex with respect to its outward normal - a sphere,
+a gyral crown - and negative in concave regions, such as a sulcal fundus. This follows
+directly from the outward-normal / mean-curvature-vector definition with no extra flip,
+which is why it was chosen. It is also exactly the orientation-dependence flagged in
+[foundations](foundations.qmd#sec-transformations-bias): mean curvature is invariant
+under proper rigid motions but sign-flips under a reflection, so a sign convention must
+be fixed by naming the normal's orientation.
 
-It is, deliberately, the **opposite sign to FreeSurfer's `?h.curv`**, which is
-*positive in sulci*. There is no contradiction and no bug — it is a convention.
-Consumers who need the FreeSurfer sign negate $H$. We return to the empirical
-consequences of this in @sec-validation, where the anti-correlation with `?h.curv`
-turns out to be a feature, fully accounted for, not a defect.
+It is, deliberately, the opposite sign to FreeSurfer's `?h.curv`, which is positive in
+sulci. There is no contradiction and no bug; it is a convention, and consumers who need
+the FreeSurfer sign negate $H$. We return to the empirical consequences in
+@sec-validation, where the anti-correlation with `?h.curv` turns out to be a feature,
+fully accounted for, not a defect.
 
 ```{python}
 #| label: fig-curvature-mean
@@ -327,98 +334,108 @@ plt.show()
 ```
 
 In @fig-curvature-mean the icosphere comes back uniformly positive at very nearly
-$1/r=1$ — the **analytic oracle** the implementation is tested against, where
-`mean_curvature` returns `H = 1.0000` to plotting precision. (The figure uses the
-cheap barycentric area for brevity; the shipped default is the obtuse-safe Voronoi
-area of @sec-distortion-areas, which matters on real cortex but not on these
-near-regular meshes.) The torus shows both signs: convex on the outer equator,
-concave on the inner ring where the surface curls back on itself — a first taste of
-the saddle geometry we quantify exactly with $K$ next.
+$1/r=1$ - the analytic oracle the implementation is tested against, where
+`mean_curvature` returns `H = 1.0000` to plotting precision. (The figure uses the cheap
+barycentric area for brevity; the shipped default is the obtuse-safe Voronoi area of
+@sec-distortion-areas, which matters on real cortex but not on these near-regular
+meshes.) The torus shows both signs: convex on the outer equator, concave on the inner
+ring where the surface curls back on itself - a first taste of the saddle geometry
+quantified exactly with $K$ next.
 
-## Gaussian curvature and Gauss–Bonnet {#sec-gaussian}
+## Gaussian curvature and Gauss--Bonnet {#sec-gaussian}
 
-### The idea: curvature as the angle that fails to close
+### Curvature as the angle that fails to close
 
-Mean curvature measures *how much* the surface bends; Gaussian curvature measures
-*how it bends in two directions at once* — and it has a beautiful purely-intrinsic
-characterisation that needs no normal vector at all. Cut a paper cone along a
-straight line from tip to rim and flatten it onto a table. It lies flat, but there
-is a **wedge of missing angle**: the flattened cone does not sweep a full $360°$
-around the (former) tip. A flat sheet of paper sweeps exactly $360°$; a cone sweeps
-less; a saddle-shaped chip sweeps *more* (it buckles, having too much angle to lie
-flat). That surplus-or-deficit of angle, concentrated at the tip, *is* the Gaussian
-curvature gathered up at that point.
+Mean curvature measures how much the surface bends; Gaussian curvature measures how it
+bends in two directions at once, and it has a purely intrinsic characterisation that
+needs no normal vector at all. Cut a paper cone along a straight line from tip to rim
+and flatten it onto a table. It lies flat, but there is a wedge of missing angle: the
+flattened cone does not sweep a full $360°$ around the former tip. A flat sheet sweeps
+exactly $360°$; a cone sweeps less; a saddle-shaped chip sweeps more, buckling because
+it has too much angle to lie flat. That surplus or deficit of angle, concentrated at
+the tip, *is* the Gaussian curvature gathered up at that point.
 
 Make it precise on a mesh. Around an interior vertex $v_i$ sit some triangles, each
-contributing an interior angle $\theta_{ij}$ at $v_i$. If the surface were flat
-there, those angles would tile the plane around $v_i$ and sum to exactly $2\pi$. The
-amount by which they **fail** to reach $2\pi$ is the **angle defect** — and the
-angle defect is the *integrated* Gaussian curvature in the neighbourhood of $v_i$.
-Dividing by the vertex's area $A_i$ turns the integrated quantity into a pointwise
-density:
+contributing an interior angle $\theta_{ij}$ at $v_i$. If the surface were flat there,
+those angles would tile the plane around $v_i$ and sum to exactly $2\pi$. The amount by
+which they fail to reach $2\pi$ is the angle defect, and the angle defect is the
+integrated Gaussian curvature in the neighbourhood of $v_i$. Dividing by the vertex's
+area $A_i$ turns the integrated quantity into a pointwise density:
 
 $$
 K(v_i) \;=\; \frac{2\pi - \sum_{j} \theta_{ij}}{A_i}.
 $$ {#eq-gauss-defect}
 
 The numerator is the angle defect; the denominator is the vertex area. A flat vertex
-has $\sum\theta_{ij}=2\pi$ and $K=0$. A convex bulge (a cone tip, a sphere) has
-$\sum\theta_{ij}<2\pi$ and $K>0$. A saddle has $\sum\theta_{ij}>2\pi$ and $K<0$.
-This is *exactly* the cone-flattening picture, and it is what
-`gaussian_curvature(mesh, *, area_scheme='voronoi')` computes **(DIFF-JAX)**.
+has $\sum\theta_{ij}=2\pi$ and $K=0$; a convex bulge (a cone tip, a sphere) has
+$\sum\theta_{ij}<2\pi$ and $K>0$; a saddle has $\sum\theta_{ij}>2\pi$ and $K<0$. This is
+exactly the cone-flattening picture, and it is what `gaussian_curvature(mesh, *,
+area_scheme='voronoi')` computes **(DIFF-JAX)**.
+
+The defining feature of @eq-gauss-defect is that it is built entirely from angles and
+areas - lengths measured *within* the surface - and never refers to the normal or the
+embedding. Gaussian curvature is therefore *intrinsic*, and this is the content of
+Gauss's Theorema Egregium ("remarkable theorem"): $K$ is invariant under any isometry,
+any bending of the surface that preserves distances measured along it. A flat sheet has
+$K=0$; roll it into a cylinder and, although the mean curvature jumps, $K$ stays $0$
+everywhere, which is why a cylinder can be cut and unrolled flat without stretching but
+a sphere ($K=1/r^2>0$) cannot - the root cause of every map projection's distortion.
+This is the strongest invariance in the chapter: where mean curvature is invariant only
+to rigid motion, Gaussian curvature is invariant to the entire group of isometric
+deformations, and a computation built on $K$ inherits that invariance for free.
 
 ### Why `arctan2`, not `arccos`
 
 A detail in the as-built code repays attention. The interior angle between two edges
-$u$ and $w$ is the angle of a triangle, and the textbook way to get it is
-$\theta = \arccos\!\big((u\cdot w)/(\lVert u\rVert\,\lVert w\rVert)\big)$. `nitrix`
-does *not* use `arccos`. It uses
+$u$ and $w$ is the angle of a triangle, and the textbook formula is
+$\theta = \arccos\!\big((u\cdot w)/(\lVert u\rVert\,\lVert w\rVert)\big)$. `nitrix` does
+not use `arccos`. It uses
 
 $$
 \theta \;=\; \operatorname{atan2}\!\big(\lVert u\times w\rVert,\; u\cdot w\big),
 $$ {#eq-angle-atan2}
 
 the two-argument arctangent of the cross-product magnitude against the dot product.
-Algebraically the two agree. Numerically they do not: $\arccos$ has *infinite
-derivative* at its endpoints $\pm 1$, and after the argument is clipped into
-$[-1,1]$ (which it must be, to survive float rounding) the gradient there is
-*zeroed* instead. Real cortical surfaces — and especially the sliver triangles that
-marching-tetrahedra output produces, see
-[the volume→surface page](volume-surface.qmd#sec-marching) — routinely have
-near-collinear edges that sit right at those endpoints. The `atan2` form is smooth
-and well-conditioned across the whole range, so the curvature stays
-**differentiable** even on degenerate triangles. This is the same robustness instinct
-as the discriminant flooring in @sec-distortion-strain: keep the gradient finite
-exactly where the naive formula would blow up.
+Algebraically the two agree; numerically they do not. $\arccos$ has infinite derivative
+at its endpoints $\pm 1$, and after the argument is clipped into $[-1,1]$ (which it must
+be, to survive float rounding) the gradient there is *zeroed* instead. Real cortical
+surfaces - especially the sliver triangles that marching-tetrahedra output produces,
+see [the volume-surface chapter](volume-surface.qmd#sec-marching) - routinely have
+near-collinear edges sitting right at those endpoints. The `atan2` form is smooth and
+well-conditioned across the whole range, so the curvature stays differentiable even on
+degenerate triangles. This is the same robustness instinct as the discriminant flooring
+in @sec-distortion-strain: keep the gradient finite exactly where the naive formula
+would blow up.
 
-### Gauss–Bonnet: geometry meets topology
+### Gauss--Bonnet: geometry meets topology
 
-Now the payoff that makes Gaussian curvature special. Because the *numerator* of
-@eq-gauss-defect is the **integrated** $K$ (an angle defect, not a density),
-summing $K_i A_i$ over the mesh reduces to summing the angle defects — and a classical
-theorem says that total angle defect depends only on the surface's **topology**, not
-its shape:
+Because the numerator of @eq-gauss-defect is the integrated $K$ (an angle defect, not a
+density), summing $K_i A_i$ over the mesh reduces to summing the angle defects, and a
+classical theorem says that total angle defect depends only on the surface's topology,
+not its shape:
 
 $$
 \sum_i K_i A_i \;=\; 2\pi\,\chi \;=\; 4\pi \quad(\text{genus-0}),
 $$ {#eq-gauss-bonnet}
 
-where $\chi = V - E + F$ is the **Euler characteristic** ($\chi = 2$ for any
-surface topologically a sphere, $\chi=0$ for a torus, $\chi=2-2g$ for genus $g$).
-This is the **discrete Gauss–Bonnet theorem**, and on a mesh it holds *exactly* —
-not in the limit, not approximately, but to floating-point at every refinement level
-— precisely because the angle-defect numerator is integrated, and the sum of all
-interior angles over all triangles is a combinatorial constant. (Continuous
-Gauss–Bonnet is $\int_S K\,dA = 2\pi\chi$; the discrete version is its faithful
-finite shadow.)
+where $\chi = V - E + F$ is the Euler characteristic ($\chi = 2$ for any surface
+topologically a sphere, $\chi=0$ for a torus, $\chi=2-2g$ for genus $g$). This is the
+discrete Gauss--Bonnet theorem, and on a mesh it holds exactly - not in the limit, not
+approximately, but to floating-point at every refinement level - precisely because the
+angle-defect numerator is integrated and the sum of all interior angles over all
+triangles is a combinatorial constant. (Continuous Gauss--Bonnet is $\int_S K\,dA =
+2\pi\chi$; the discrete version is its faithful finite shadow.)
 
-This is the single most satisfying validation in the unit, because it ties a
-*geometric* computation to a *topological* invariant. Compute $\sum_i K_i A_i$ on a
-genus-0 cortical surface and you must get $4\pi$; get something else and either your
-mesh is not genus-0 (a handle from a segmentation error) or your areas and angles
-are inconsistent. The Euler characteristic and genus themselves are computed on
-[the volume→surface page](volume-surface.qmd#sec-topology); here Gauss–Bonnet gives
-us a way to *cross-check* topology purely from geometry.
+Read through the lens of symmetry, Gauss--Bonnet is the most extreme invariance in the
+unit. Pointwise Gaussian curvature is invariant under isometries; its integral is
+invariant under *all* homeomorphisms - any continuous deformation whatever, isometric
+or not - because it equals a topological invariant. This is why the check is so
+powerful in practice. Compute $\sum_i K_i A_i$ on a genus-0 cortical surface and the
+answer must be $4\pi$; anything else means either the mesh is not genus-0 (a handle
+from a segmentation error) or the areas and angles are inconsistent. The Euler
+characteristic and genus themselves are computed on
+[the volume-surface chapter](volume-surface.qmd#sec-topology); here Gauss--Bonnet lets
+us cross-check topology purely from geometry.
 
 ```{python}
 #| label: fig-curvature-gaussbonnet
@@ -505,130 +522,127 @@ fig.tight_layout()
 plt.show()
 ```
 
-@fig-curvature-gaussbonnet shows the residual $\sum_i K_i A_i - 4\pi$ staying at the
-$10^{-6}$–$10^{-5}$ level — pure float round-off — across two-and-a-half orders of
-magnitude in vertex count. This is *not* convergence-under-refinement in the usual
-sense (where a discrete quantity creeps toward its continuous target as the mesh
-fines); it is the rarer and stronger statement that the discrete identity is *exactly
-true* at every level, because Gauss–Bonnet is combinatorial. Pointwise $K_i$ on a
-coarse mesh is a rough estimate of the smooth $K$; their area-weighted *sum* is
-nailed.
+@fig-curvature-gaussbonnet shows the residual $\sum_i K_i A_i - 4\pi$ holding at the
+$10^{-6}$ to $10^{-5}$ level - pure float round-off - across two and a half orders of
+magnitude in vertex count. This is not convergence-under-refinement in the usual sense,
+where a discrete quantity creeps toward its continuous target as the mesh fines; it is
+the rarer and stronger statement that the discrete identity is exactly true at every
+level, because Gauss--Bonnet is combinatorial. Pointwise $K_i$ on a coarse mesh is a
+rough estimate of the smooth $K$; their area-weighted sum is nailed.
 
 ### Principal curvatures from $H$ and $K$
 
 The two principal curvatures $\kappa_1\ge\kappa_2$ are the most- and least-bent
-directions, and you do not need a separate eigen-analysis to recover them — mean and
-Gaussian curvature already determine the pair. By definition $H=\tfrac12(\kappa_1 +
-\kappa_2)$ is their average and $K=\kappa_1\kappa_2$ is their product. Two numbers
-known by sum and product are the roots of a quadratic, so
+directions, and they need no separate eigen-analysis: mean and Gaussian curvature
+already determine the pair. By definition $H=\tfrac12(\kappa_1 + \kappa_2)$ is their
+average and $K=\kappa_1\kappa_2$ is their product, and two numbers known by sum and
+product are the roots of a quadratic, so
 
 $$
 \kappa_{1,2} \;=\; H \pm \sqrt{\max(H^2 - K,\,0)}.
 $$ {#eq-principal}
 
-`principal_curvatures(mesh, *, area_scheme='voronoi')` **(DIFF-JAX)** computes
-exactly this: it calls `mean_curvature` and `gaussian_curvature`, forms the
-discriminant $H^2-K$, and returns the stacked pair `(kappa_1, kappa_2)` with column
-0 the larger. The discriminant is **clamped at zero** before the square root because
-on a discrete mesh $H^2-K$ can dip slightly negative from estimation error (the
-exact relation $H^2\ge K$ holds for the *smooth* surface; the two discrete
-estimators do not enforce it pointwise). Clamping keeps the output real and the
-gradient finite, at the cost of collapsing the pair to $\kappa_1=\kappa_2=H$ exactly
-where the estimate would have been complex — a sensible, conservative choice. The
-sign convention is inherited from `mean_curvature` (convex-positive).
+`principal_curvatures(mesh, *, area_scheme='voronoi')` **(DIFF-JAX)** computes exactly
+this: it calls `mean_curvature` and `gaussian_curvature`, forms the discriminant
+$H^2-K$, and returns the stacked pair `(kappa_1, kappa_2)` with column 0 the larger.
+The discriminant is clamped at zero before the square root because on a discrete mesh
+$H^2-K$ can dip slightly negative from estimation error (the exact relation $H^2\ge K$
+holds for the smooth surface; the two discrete estimators do not enforce it pointwise).
+Clamping keeps the output real and the gradient finite, at the cost of collapsing the
+pair to $\kappa_1=\kappa_2=H$ exactly where the estimate would have been complex - a
+conservative choice. The sign convention is inherited from `mean_curvature`
+(convex-positive).
 
-A torus makes the geometry vivid if you want to extend @fig-curvature-mean: on the
-*outer* equator both principal curvatures bend the same way and $K>0$; on the
-*inner* ring the surface saddles, the two principal curvatures have opposite signs,
-and $K<0$ — exactly the angle surplus of the cone picture, now read off the sign of
-the product.
+A torus makes the geometry vivid if you extend @fig-curvature-mean: on the outer equator
+both principal curvatures bend the same way and $K>0$; on the inner ring the surface
+saddles, the two principal curvatures have opposite signs, and $K<0$ - exactly the angle
+surplus of the cone picture, now read off the sign of the product.
 
 ## Distortion: what a warp does to a surface {#sec-distortion}
 
-Curvature is a property of *one* surface. **Distortion** compares *two* meshes in
-**vertex correspondence** — the same mesh before and after a warp — and asks how the
-warp stretched the cortex. This is the bridge from differential geometry to
-**registration QA**: when you align a subject's surface to a template, a good warp
-distorts the surface as little as possible, and distortion is both the thing a
-registration's areal regulariser *penalises* and the thing a `?h.jacobian` overlay
-*reports*. Two flavours, at two granularities: an **areal** measure per vertex, and
-a **strain** measure per face.
+Curvature is a property of one surface. Distortion compares *two* meshes in vertex
+correspondence - the same mesh before and after a warp - and asks how the warp stretched
+the cortex. This is the bridge from differential geometry to registration QA: when a
+subject's surface is aligned to a template, a good warp distorts the surface as little
+as possible, and distortion is both the quantity a registration's areal regulariser
+penalises and the quantity a `?h.jacobian` overlay reports. There are two flavours, at
+two granularities: an areal measure per vertex and a strain measure per face.
 
-Both require the two meshes to **share topology** — identical `faces`, with vertex
-$i$ of `source` corresponding to vertex $i$ of `warped`. This holds exactly when
-`warped` is `source` after a warp that moves vertices but never re-tessellates, e.g.
-a spherical or inflation warp, or the output of
+Both require the two meshes to share topology - identical `faces`, with vertex $i$ of
+`source` corresponding to vertex $i$ of `warped`. This holds exactly when `warped` is
+`source` after a warp that moves vertices but never re-tessellates, such as a spherical
+or inflation warp, or the output of
 [`deform_to_sdf`](volume-surface.qmd#sec-mesh-sdf). Both routines validate it by
-comparing `faces.shape` and raise `ValueError` on a mismatch.
+comparing `faces.shape` and raise `ValueError` on a mismatch. Both measures are
+invariant to a rigid motion applied to either mesh - they depend only on relative
+lengths and areas, not on pose - which is the inductive bias a distortion regulariser
+should have: it must penalise stretching, never the arbitrary placement of source or
+target in space.
 
 ### Areal distortion: the surface Jacobian determinant {#sec-distortion-areas}
 
-The simplest question: did the warp *expand* or *shrink* the surface near each
-vertex? Compare the vertex area before and after. The natural scale is *logarithmic*
-— a doubling and a halving should be equal-and-opposite, not lopsided — and base-2
-gives readable units (one unit = one doubling). So
+The simplest question is whether the warp expanded or shrank the surface near each
+vertex. Compare the vertex area before and after. The natural scale is logarithmic - a
+doubling and a halving should be equal and opposite, not lopsided - and base-2 gives
+readable units, one unit per doubling, so
 
 $$
 D_{\text{areal}}(v_i) \;=\; \log_2\!\frac{A_{\text{warped}}(v_i)}
 {A_{\text{source}}(v_i)},
 $$ {#eq-areal}
 
-which is `0` for an isometry (areas unchanged), positive where the warp expands
-area, negative where it contracts. This is the **surface analogue of a Jacobian
-determinant** — the volumetric `jacobian_det_displacement` and the MSM areal
-regulariser report the same thing in their own domains. `areal_distortion(source,
-warped, *, area_scheme='voronoi')` **(DIFF-JAX)** computes it directly:
-`vertex_areas` on each mesh (clamped below at `1e-12`), the log2 ratio, done.
-Differentiable w.r.t. *both* meshes' vertices, so it can sit inside a registration
-loss.
+which is $0$ for an isometry (areas unchanged), positive where the warp expands area,
+negative where it contracts. This is the surface analogue of a Jacobian determinant -
+the volumetric `jacobian_det_displacement` and the MSM areal regulariser report the same
+thing in their own domains. `areal_distortion(source, warped, *,
+area_scheme='voronoi')` **(DIFF-JAX)** computes it directly: `vertex_areas` on each mesh
+(clamped below at `1e-12`), the log2 ratio, done. It is differentiable with respect to
+*both* meshes' vertices, so it can sit inside a registration loss.
 
-This is also the moment to teach the area measure properly, because it is
-load-bearing. `vertex_areas(mesh, *, scheme='voronoi')` **(DIFF-JAX)** partitions
-each triangle's area among its three vertices, and offers two schemes that *both*
-sum to the total surface area:
+This is also the moment to treat the area measure properly, because it is load-bearing.
+`vertex_areas(mesh, *, scheme='voronoi')` **(DIFF-JAX)** partitions each triangle's area
+among its three vertices, and offers two schemes that both sum to the total surface
+area:
 
-- **`'barycentric'`** gives each vertex one-third of every incident triangle's
-  area. Cheap, always non-negative, the safe fallback.
-- **`'voronoi'`** (the default) uses the **mixed Voronoi rule** of Meyer et al.
-  (2003): for a non-obtuse triangle, vertex $i$ receives the circumcentric-dual
-  area $\tfrac18\big(\cot\theta_k\,\lVert x_i-x_j\rVert^2 + \cot\theta_j\,\lVert
-  x_i-x_k\rVert^2\big)$ — the region of the triangle genuinely closest to $v_i$. For
-  an **obtuse** triangle the circumcentre falls *outside* the triangle, so the
-  Voronoi area would be wrong; the mixed rule instead assigns half the triangle area
-  to the obtuse vertex and a quarter to each of the others.
+- **`'barycentric'`** gives each vertex one-third of every incident triangle's area.
+  Cheap, always non-negative, the safe fallback.
+- **`'voronoi'`** (the default) uses the mixed Voronoi rule of Meyer et al. (2003): for
+  a non-obtuse triangle, vertex $i$ receives the circumcentric-dual area
+  $\tfrac18\big(\cot\theta_k\,\lVert x_i-x_j\rVert^2 + \cot\theta_j\,\lVert
+  x_i-x_k\rVert^2\big)$ - the region of the triangle genuinely closest to $v_i$. For an
+  obtuse triangle the circumcentre falls outside the triangle, so the Voronoi area would
+  be wrong, and the mixed rule instead assigns half the triangle area to the obtuse
+  vertex and a quarter to each of the others.
 
-That obtuse branch is **load-bearing on real cortical surfaces** (where obtuse
-triangles are common) and is exactly what makes Voronoi the right default; the
-icosphere never exercises it, which is why @fig-curvature-mean could get away with
-the barycentric area. The same `vertex_areas` is the lumped **mass** $M$ behind mean
-curvature, geodesic smoothing, and the spectrum — one area measure threaded through
-the whole unit. For completeness, the *per-face* area
-$\tfrac12\lVert(v_1-v_0)\times(v_2-v_0)\rVert$ is available directly as
+That obtuse branch is load-bearing on real cortical surfaces, where obtuse triangles
+are common, and is exactly what makes Voronoi the right default; the icosphere never
+exercises it, which is why @fig-curvature-mean could use the barycentric area. The same
+`vertex_areas` is the lumped mass $M$ behind mean curvature, geodesic smoothing, and the
+spectrum - one area measure threaded through the whole unit. For completeness, the
+per-face area $\tfrac12\lVert(v_1-v_0)\times(v_2-v_0)\rVert$ is available directly as
 `face_areas(mesh)` **(DIFF-JAX)**, and the diagonal mass operator itself as
-`mesh_mass_matrix(mesh, *, scheme='voronoi', lumped=True)` **(HOST-CTOR)** — a
-width-1 ELL wrapping the same `vertex_areas` vector so $M$ can flow through the
-`apply_operator` seam; `lumped=False` (the consistent FEM mass) raises
-`NotImplementedError`.
+`mesh_mass_matrix(mesh, *, scheme='voronoi', lumped=True)` **(HOST-CTOR)** - a width-1
+ELL wrapping the same `vertex_areas` vector so $M$ can flow through the `apply_operator`
+seam; `lumped=False` (the consistent FEM mass) raises `NotImplementedError`.
 
 ### Strain distortion: principal stretches from the deformation gradient {#sec-distortion-strain}
 
-Areal distortion sees only the *determinant* of the warp's local action — total area
-change. It cannot tell a uniform stretch from an anisotropic shear that preserves
-area. For that you need the full *shape* change, and the right object is the
-per-triangle **deformation gradient**: the linear map that carries the source
-triangle onto the warped one. Its singular values are the **principal stretches**
-$\lambda_1\ge\lambda_2$ — how much the triangle is stretched along its two principal
-directions. An isometry gives $(1,1)$; a uniform scale $s$ gives $(s,s)$; an
-anisotropic scale $\operatorname{diag}(a,b)$ gives $(\max(a,b),\min(a,b))$.
+Areal distortion sees only the determinant of the warp's local action - total area
+change. It cannot tell a uniform stretch from an anisotropic shear that preserves area.
+For the full shape change the right object is the per-triangle deformation gradient: the
+linear map that carries the source triangle onto the warped one. Its singular values are
+the principal stretches $\lambda_1\ge\lambda_2$ - how much the triangle is stretched
+along its two principal directions. An isometry gives $(1,1)$; a uniform scale $s$ gives
+$(s,s)$; an anisotropic scale $\operatorname{diag}(a,b)$ gives
+$(\max(a,b),\min(a,b))$.
 
-The clean way to get these without ever building a $3\times3\to2\times2$ basis is
-through the **first fundamental forms** of the two triangles. For a triangle with
-edge vectors $e_1, e_2$ from its first vertex, the first fundamental form is the
-$2\times2$ Gram matrix $G = \begin{pmatrix} e_1\!\cdot e_1 & e_1\!\cdot e_2 \\
-e_1\!\cdot e_2 & e_2\!\cdot e_2 \end{pmatrix}$ — it encodes all intrinsic
-lengths and angles of the triangle. The **right Cauchy–Green tensor** $C = G_s^{-1}
-G_w$ relates the source and warped forms, and its eigenvalues are the **squared**
-principal stretches. So
+The clean way to obtain these without ever building a $3\times3\to2\times2$ basis is
+through the first fundamental forms of the two triangles. For a triangle with edge
+vectors $e_1, e_2$ from its first vertex, the first fundamental form is the $2\times2$
+Gram matrix $G = \begin{pmatrix} e_1\!\cdot e_1 & e_1\!\cdot e_2 \\ e_1\!\cdot e_2 &
+e_2\!\cdot e_2 \end{pmatrix}$, which encodes all intrinsic lengths and angles of the
+triangle. The right Cauchy--Green tensor $C = G_s^{-1} G_w$ relates the source and
+warped forms, and its eigenvalues are the squared principal stretches, so
 
 $$
 \lambda^2 \;=\; \frac{\operatorname{tr}C \pm
@@ -636,30 +650,30 @@ $$
 \qquad C = G_s^{-1} G_w.
 $$ {#eq-strain}
 
-This is the standard $2\times2$ eigenvalue closed form — sum and product of
-eigenvalues are $\operatorname{tr}C$ and $\det C$, the quadratic-formula again, the
-same move as @eq-principal. `strain_distortion(source, warped)` **(DIFF-JAX)**
-computes it without ever calling `eigh`: it forms the six Gram entries
-$g_{11},g_{12},g_{22}$ (source) and $w_{11},w_{12},w_{22}$ (warped) directly from
-edge dot products, then evaluates $\operatorname{tr}C$ and $\det C$ in closed form
-from those entries and $\det G_s$, and finally takes square roots to return the
-stretches $(\lambda_1,\lambda_2)$. Two robustness details earn their place:
+This is the standard $2\times2$ eigenvalue closed form - sum and product of eigenvalues
+are $\operatorname{tr}C$ and $\det C$, the quadratic formula again, the same move as
+@eq-principal. Because the construction uses only the Gram matrices, which are built
+from edge dot products, the stretches are automatically invariant to a rotation of
+either triangle in space; they measure shape change, not pose. `strain_distortion(source,
+warped)` **(DIFF-JAX)** computes it without ever calling `eigh`: it forms the six Gram
+entries $g_{11},g_{12},g_{22}$ (source) and $w_{11},w_{12},w_{22}$ (warped) directly
+from edge dot products, evaluates $\operatorname{tr}C$ and $\det C$ in closed form from
+those entries and $\det G_s$, and takes square roots to return the stretches
+$(\lambda_1,\lambda_2)$. Two robustness details earn their place:
 
-- **No `eigh`.** Using the closed form rather than a $2\times2$ eigensolver
-  **bypasses the cuSolver wedge** — the host-synchronising eigendecomposition path
-  that `nitrix` works hard to avoid on GPU (see
-  [the solvers page](solvers.qmd#sec-eigensolve)). A per-face $2\times2$ eigenvalue
-  is a handful of arithmetic operations; routing it through `eigh` would force a
-  device→host round trip
-  per call.
-- **Floored discriminant.** $(\operatorname{tr}C)^2-4\det C$ is floored at
-  `1e-12` before the square root. At the crossing $\lambda_1=\lambda_2$ the
-  discriminant is genuinely zero and $\sqrt{\,\cdot\,}$ is non-differentiable there;
-  flooring keeps the gradient finite, at the cost of splitting *genuinely* equal
-  stretches by about `1e-6`. So an isometry comes back as $(1,1)$ only to `1e-6` —
-  far below the `~5e-4` float32 cancellation noise that near-degenerate stretches
-  already carry, and the same defensive instinct as the `atan2` angle in
-  @sec-gaussian. Distinct stretches are well-conditioned and unaffected.
+- **No `eigh`.** Using the closed form rather than a $2\times2$ eigensolver bypasses the
+  cuSolver wedge - the host-synchronising eigendecomposition path that `nitrix` works
+  hard to avoid on GPU (see [the solvers chapter](solvers.qmd#sec-eigensolve)). A
+  per-face $2\times2$ eigenvalue is a handful of arithmetic operations; routing it
+  through `eigh` would force a device-to-host round trip per call.
+- **Floored discriminant.** $(\operatorname{tr}C)^2-4\det C$ is floored at `1e-12`
+  before the square root. At the crossing $\lambda_1=\lambda_2$ the discriminant is
+  genuinely zero and $\sqrt{\,\cdot\,}$ is non-differentiable there; flooring keeps the
+  gradient finite, at the cost of splitting genuinely equal stretches by about `1e-6`.
+  So an isometry comes back as $(1,1)$ only to `1e-6` - far below the `~5e-4` float32
+  cancellation noise that near-degenerate stretches already carry, and the same
+  defensive instinct as the `atan2` angle in @sec-gaussian. Distinct stretches are
+  well-conditioned and unaffected.
 
 ```{python}
 #| label: fig-curvature-distortion
@@ -753,92 +767,89 @@ fig.tight_layout()
 plt.show()
 ```
 
-@fig-curvature-distortion is the distortion analogue of the sphere oracle: a *known*
-warp with a *known* answer, used to pin the formulas. The uniform scale returns
-$\log_2 s^2$ areal and $(s,s)$ strain to plotting precision; the anisotropic warp
-returns $(2,\tfrac12)$ strain even though its areal distortion is *zero* (the
-product of the stretches is 1, so area is preserved). That last panel is the whole
-case for strain: a warp can preserve area while ruining shape, and only the
-principal stretches catch it.
+@fig-curvature-distortion is the distortion analogue of the sphere oracle: a known warp
+with a known answer, used to pin the formulas. The uniform scale returns $\log_2 s^2$
+areal and $(s,s)$ strain to plotting precision; the anisotropic warp returns
+$(2,\tfrac12)$ strain even though its areal distortion is zero (the product of the
+stretches is $1$, so area is preserved). That last panel is the whole case for strain: a
+warp can preserve area while ruining shape, and only the principal stretches catch it.
 
 ## Validation, and the FreeSurfer `?h.curv` story {#sec-validation}
 
 The unit's [validation posture](foundations.qmd#sec-validation) is
-**class-and-correlation, not bit-parity**, and curvature is its cleanest case study.
-There are three tiers of check, in increasing order of how much they tell you.
+class-and-correlation, not bit-parity, and curvature is its cleanest case study. There
+are three tiers of check, in increasing order of how much they tell you.
 
-**The analytic oracle.** A unit sphere has $H=1/r=1$ and $K=1/r^2=1$ *exactly*, and
-the implementation reproduces both to about `1.0000` — a closed-form ground truth
-with no reference tool in the loop. This is the gold standard: where an exact answer
-exists, demand it.
+**The analytic oracle.** A unit sphere has $H=1/r=1$ and $K=1/r^2=1$ exactly, and the
+implementation reproduces both to about `1.0000` - a closed-form ground truth with no
+reference tool in the loop. This is the gold standard: where an exact answer exists,
+demand it.
 
-**The global topological check.** On a real genus-0 cortical surface,
-$\sum_i K_i A_i = 4\pi$ by discrete Gauss–Bonnet (@eq-gauss-bonnet) — a check that
-needs no oracle at all, only the surface's own geometry and topology, and that flags
-a handle-puncturing reconstruction error instantly.
+**The global topological check.** On a real genus-0 cortical surface, $\sum_i K_i A_i =
+4\pi$ by discrete Gauss--Bonnet (@eq-gauss-bonnet) - a check that needs no oracle at
+all, only the surface's own geometry and topology, and that flags a handle-puncturing
+reconstruction error instantly.
 
 **The correlation against a reference tool.** Comparing nitrix mean curvature to
 FreeSurfer's `?h.curv` on `fsaverage5` white surfaces gives a Pearson correlation of
-about **$-0.90$**. The sign is negative *by construction* — recall the
-convex-positive convention of @sec-mean is the opposite of FreeSurfer's. The
-interesting number is the *magnitude*: why $0.90$ and not $1.0$? The gap is **fully
-decomposed**, measured rather than assumed:
+about $-0.90$. The sign is negative by construction - the convex-positive convention of
+@sec-mean is the opposite of FreeSurfer's. The informative number is the magnitude: why
+$0.90$ and not $1.0$? The gap is fully decomposed, measured rather than assumed:
 
-1. **FreeSurfer smooths `curv`.** `mris_curvature` averages by default, so `?h.curv`
-   is a *lightly smoothed* curvature. Applying matched light smoothing (about two
-   one-ring passes) to the nitrix $H$ lifts the correlation to **$-0.95$**, and then
-   it *decays* with further smoothing — the characteristic peak-then-decay signature
-   of "the reference is a smoothed version of what we compute."
-2. **Different discrete estimators.** nitrix uses the cotangent / Meyer
-   mean-curvature normal (@eq-mc-discrete); FreeSurfer fits a local quadric (the
-   second fundamental form). Both converge to the continuous $H$ under refinement;
-   they differ *pointwise* on a finite mesh.
-3. **The overlay is group-averaged and resolution-resampled.** The `fsaverage5`
-   `curv` is a cross-subject average carried down to ico5, not a curvature computed
-   on that exact 10,242-vertex tessellation — the same artefact class as the
-   `fsaverage5` `area` overlay summing to $0.75\times$ the geometric area.
-4. **It is white-surface-specific.** Measuring $H$ on the *pial* surface drops the
-   correlation to $-0.74$, confirming that `?h.curv` is specifically the *white*
-   surface's curvature.
+1. **FreeSurfer smooths `curv`.** `mris_curvature` averages by default, so `?h.curv` is
+   a lightly smoothed curvature. Applying matched light smoothing (about two one-ring
+   passes) to the nitrix $H$ lifts the correlation to $-0.95$, and then it decays with
+   further smoothing - the characteristic peak-then-decay signature of "the reference is
+   a smoothed version of what we compute."
+2. **Different discrete estimators.** nitrix uses the cotangent / Meyer mean-curvature
+   normal (@eq-mc-discrete); FreeSurfer fits a local quadric (the second fundamental
+   form). Both converge to the continuous $H$ under refinement; they differ pointwise on
+   a finite mesh.
+3. **The overlay is group-averaged and resolution-resampled.** The `fsaverage5` `curv`
+   is a cross-subject average carried down to ico5, not a curvature computed on that
+   exact 10,242-vertex tessellation - the same artefact class as the `fsaverage5` `area`
+   overlay summing to $0.75\times$ the geometric area.
+4. **It is white-surface-specific.** Measuring $H$ on the pial surface drops the
+   correlation to $-0.74$, confirming that `?h.curv` is specifically the white surface's
+   curvature.
 
-Each line is an *understood* source of disagreement, not a bug. This is what
-class/correlation validation buys: instead of a brittle bit-parity test that breaks
-when FreeSurfer changes its smoothing default, you get a *model* of the discrepancy
-that explains every part of the gap from unity. The cortical surface of
-@sec-motivation, then, has a curvature map that agrees with FreeSurfer in every way
-that geometry demands and differs in exactly the ways the two pipelines' choices
-predict.
+Each line is an understood source of disagreement, not a bug. This is what
+class/correlation validation buys: instead of a brittle bit-parity test that breaks when
+FreeSurfer changes its smoothing default, you get a *model* of the discrepancy that
+explains every part of the gap from unity. The cortical surface of @sec-motivation,
+then, has a curvature map that agrees with FreeSurfer in every way that geometry demands
+and differs in exactly the ways the two pipelines' choices predict.
 
 ## Further reading
 
 - Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). *Discrete
-  Differential-Geometry Operators for Triangulated 2-Manifolds.* In Visualization
-  and Mathematics III (Springer). — the source of the cotangent mean-curvature
-  normal and the mixed-Voronoi area used throughout this page.
-- Crane, K. (2018). *Discrete Differential Geometry: An Applied Introduction.*
-  (Lecture notes, CMU.) — the clearest modern treatment of the angle defect,
-  discrete Gauss–Bonnet, and the discrete-approximates-smooth philosophy.
-- do Carmo, M. P. (1976). *Differential Geometry of Curves and Surfaces.*
-  Prentice-Hall. — the classical smooth theory: first/second fundamental forms,
-  principal curvatures, the Gauss–Bonnet theorem.
+  Differential-Geometry Operators for Triangulated 2-Manifolds.* In Visualization and
+  Mathematics III (Springer). The source of the cotangent mean-curvature normal and the
+  mixed-Voronoi area used throughout this chapter.
+- Crane, K. (2018). *Discrete Differential Geometry: An Applied Introduction.* (Lecture
+  notes, CMU.) The clearest modern treatment of the angle defect, discrete
+  Gauss--Bonnet, and the discrete-approximates-smooth philosophy.
+- do Carmo, M. P. (1976). *Differential Geometry of Curves and Surfaces.* Prentice-Hall.
+  The classical smooth theory: first and second fundamental forms, principal curvatures,
+  the Theorema Egregium, and the Gauss--Bonnet theorem.
 - Botsch, M., Kobbelt, L., Pauly, M., Alliez, P., & Lévy, B. (2010). *Polygon Mesh
-  Processing.* A K Peters. — discrete curvature estimators and mesh-processing
-  practice, including the practical pitfalls of curvature on irregular meshes.
+  Processing.* A K Peters. Discrete curvature estimators and mesh-processing practice,
+  including the practical pitfalls of curvature on irregular meshes.
 
 ## See also
 
 - Source:
   [`geometry/surface.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/surface.py)
-  (`mean_curvature`, `gaussian_curvature`, `principal_curvatures`,
-  `areal_distortion`, `strain_distortion`) and
+  (`mean_curvature`, `gaussian_curvature`, `principal_curvatures`, `areal_distortion`,
+  `strain_distortion`) and
   [`sparse/mesh.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py)
   (`vertex_areas`, `face_areas`, `compute_vertex_normals`, `mesh_mass_matrix`).
-- Previous page: [the Laplace–Beltrami operator](laplace-beltrami.qmd#sec-cotangent)
-  — the $M^{-1}L$ that mean curvature is built on.
-- Next: [volumes ↔ surfaces](volume-surface.qmd#sec-topology) — the Euler
-  characteristic and genus that Gauss–Bonnet cross-checks, and the
-  [marching-tetrahedra](volume-surface.qmd#sec-marching) meshes whose slivers
-  motivate the `atan2` angle.
-- Sideways: [the surface spectrum](spectral.qmd#sec-eigen) — the same operator's
-  eigenfunctions; [the solvers page](solvers.qmd#sec-eigensolve) — the cuSolver
-  wedge that the closed-form $2\times2$ strain eigenvalue avoids.
+- Previous chapter: [the Laplace–Beltrami operator](laplace-beltrami.qmd#sec-cotangent),
+  the $M^{-1}L$ that mean curvature is built on.
+- Next: [volumes and surfaces](volume-surface.qmd#sec-topology), the Euler
+  characteristic and genus that Gauss--Bonnet cross-checks, and the
+  [marching-tetrahedra](volume-surface.qmd#sec-marching) meshes whose slivers motivate
+  the `atan2` angle.
+- Sideways: [the surface spectrum](spectral.qmd#sec-eigen), the same operator's
+  eigenfunctions; [the solvers chapter](solvers.qmd#sec-eigensolve), the cuSolver wedge
+  the closed-form $2\times2$ strain eigenvalue avoids.

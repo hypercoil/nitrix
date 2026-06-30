@@ -2,187 +2,184 @@
 title: "Volume ↔ surface: isosurfaces, distance, and topology"
 ---
 
-::: {.callout-tldr title="Fast path"}
-A signed-distance **volume** and a triangle **mesh** are two views of the same
-surface. `marching_cubes` goes field → mesh (extract the level set); `mesh_to_sdf`
-goes mesh → field (rasterise the surface back to distances); and `euler_characteristic`
-/ `genus` tell you whether the result has the topology you expected. The one idea
-this page adds: the conversion is a *round-trip*, and you validate it by closing the
-loop (field → mesh → field) against an analytic oracle and by checking a cheap
-combinatorial invariant — never by demanding bit-identical output from a reference
-tool. Almost everything here is **host-side** construction or QA (data-dependent
-shape, serial dedup), so the governing rule is *never call these inside a jitted
-loop*.
-:::
+A signed-distance volume and a triangle mesh are two views of the same surface.
+`marching_cubes` goes field $\to$ mesh (extract the level set); `mesh_to_sdf` goes mesh
+$\to$ field (rasterise the surface back to distances); and `euler_characteristic` /
+`genus` report whether the result has the topology that was expected. The unifying
+discipline of this chapter is that the conversion is a *round-trip*, validated by
+closing the loop (field $\to$ mesh $\to$ field) against an analytic oracle and by
+checking a cheap combinatorial invariant - never by demanding bit-identical output from
+a reference tool. Almost everything here is host-side construction or QA
+(data-dependent shape, serial dedup), so the governing rule from
+[foundations](foundations.qmd#sec-classes) is in force: never call these inside a jitted
+loop.
 
-The previous chapter, [Volumes: morphology, distance, and signed fields](volumes.qmd),
-left us holding a **signed-distance field** $s(x)$: a voxel grid whose value at each
-point is the distance to a surface, negative inside. That is a complete description
-of a region of space — but it is the *wrong* description for most of what we want to
-do next. To smooth cortical thickness along the sheet, to diffuse a label across a
-fold, to compute curvature, we need the surface as a **triangle mesh** $(V,F)$, the
-object every other page in this unit operates on. Conversely, a learned surface model
-or a quality check often needs to turn a mesh *back* into a field. This page is the
+The [previous chapter](volumes.qmd) left us holding a signed-distance field $s(x)$: a
+voxel grid whose value at each point is the distance to a surface, negative inside. That
+is a complete description of a region of space, but it is the wrong description for most
+of what follows. To smooth cortical thickness along the sheet, to diffuse a label across
+a fold, or to compute curvature, we need the surface as a triangle mesh $(V,F)$, the
+object every other chapter in this unit operates on. Conversely, a learned surface model
+or a quality check often needs to turn a mesh back into a field. This chapter is the
 bridge that closes that loop, and the tools that tell you the bridge did not quietly
 break.
 
-The motivating example runs throughout. A clinical pipeline produces a brain mask or
-a tissue probability map; we threshold and distance-transform it into an SDF, then
-extract the cortical surface as a mesh. Two questions immediately follow. *Is the
-geometry right* — does the mesh sit where the field's zero-level set is? And *is the
-topology right* — is the cortex a single sheet with no handles, a topological sphere,
-or did a touching gyrus weld two banks together into a doughnut? The first question
-is answered by a field↔mesh round-trip; the second by the Euler characteristic. Both
-are the subject of this page.
+A motivating example runs throughout. A clinical pipeline produces a brain mask or a
+tissue probability map; we threshold and distance-transform it into an SDF, then extract
+the cortical surface as a mesh. Two questions immediately follow. *Is the geometry
+right* - does the mesh sit where the field's zero-level set is? And *is the topology
+right* - is the cortex a single sheet with no handles, a topological sphere, or did a
+touching gyrus weld two banks together into a doughnut? The first question is answered by
+a field-mesh round-trip; the second by the Euler characteristic.
 
-The recurring theme of the unit applies here with full force. A mesh is a **discrete
-approximation** of a smooth surface; the field is a discrete approximation of a smooth
-scalar function. The conversion routines are *correct* not because they reproduce some
-canonical bit pattern, but because they **converge to the continuous truth under
-refinement** (finer grid → mesh closer to the true level set; finer mesh → recovered
-field closer to the true SDF) and because they **pass analytic oracles** (a sphere's
-SDF is $\lVert x\rVert - r$; a sphere mesh has $\chi = 2$). Keep that lens on as we go.
+The unit's themes apply with full force. A mesh is a discrete approximation of a smooth
+surface; the field is a discrete approximation of a smooth scalar function. The
+conversion routines are correct not because they reproduce a canonical bit pattern, but
+because they converge to the continuous truth under refinement (finer grid $\to$ mesh
+closer to the true level set; finer mesh $\to$ recovered field closer to the true SDF)
+and because they pass analytic oracles (a sphere's SDF is $\lVert x\rVert - r$; a sphere
+mesh has $\chi = 2$). The topological quantities of @sec-topology carry the symmetry
+theme to its extreme: $\chi$ and the genus are invariant not merely under rigid motion or
+isometry but under *any* homeomorphism, including arbitrary retriangulation.
 
 ## Isosurfaces: marching tetrahedra {#sec-marching}
 
-`marching_cubes` (geometry/isosurface.py) — **HOST-CTOR**.
+`marching_cubes` (geometry/isosurface.py) - **HOST-CTOR**.
 
-### The idea you would invent first
+### The construction
 
-You have a scalar field $v$ on a grid and a threshold `level`. The surface you want
-is the set where $v = \text{level}$: the boundary between "inside" ($v < \text{level}$)
-and "outside". The obvious thing to do is classify every grid corner inside or
-outside, then look at each little cube of eight corners. If all eight are on the same
-side, the surface misses this cube entirely. If they straddle, the surface passes
-*through* the cube, and we should stitch a small patch of triangles across it.
+Given a scalar field $v$ on a grid and a threshold `level`, the surface we want is the
+set where $v = \text{level}$: the boundary between "inside" ($v < \text{level}$) and
+"outside". Classify every grid corner inside or outside, then examine each little cube of
+eight corners. If all eight lie on the same side, the surface misses this cube. If they
+straddle, the surface passes through the cube, and a small patch of triangles should be
+stitched across it.
 
-Where exactly does the surface cross? Along any cube edge whose two endpoints
-disagree, the field changes sign, so somewhere along that edge it equals `level`.
-Treating the field as **linear along the edge** — the simplest possible model — gives
-the crossing point exactly. If edge endpoints $p_a, p_b$ carry values $v_a, v_b$, the
-zero-crossing of the linear interpolant sits at
+Where does the surface cross? Along any cube edge whose two endpoints disagree, the field
+changes sign, so somewhere along that edge it equals `level`. Treating the field as
+linear along the edge - the simplest possible model - gives the crossing point. If edge
+endpoints $p_a, p_b$ carry values $v_a, v_b$, the zero-crossing of the linear interpolant
+sits at
 
 $$
 p(t) = p_a + t\,(p_b - p_a), \qquad
 t = \frac{\text{level} - v_a}{v_b - v_a}.
 $$ {#eq-edge-crossing}
 
-In words: $t$ is the fraction of the way from $a$ to $b$ at which the straight-line
-value hits `level`. When the field is genuinely smooth and the grid is fine, this
-linear guess is close to the true crossing, and it gets closer as the grid refines —
-the convergence-under-refinement property we keep returning to. The triangle patch
-for a cube is then drawn through these per-edge crossing points.
+Here $t$ is the fraction of the way from $a$ to $b$ at which the straight-line value hits
+`level`. When the field is smooth and the grid is fine, this linear estimate is close to
+the true crossing, and it improves as the grid refines - the convergence-under-refinement
+property again. The triangle patch for a cube is drawn through these per-edge crossing
+points.
 
-### Where the obvious thing breaks: ambiguity
+### The ambiguity problem
 
-The trouble is *which* triangles to draw. A cube has 8 corners, so $2^8 = 256$
-inside/outside patterns. The classic Marching Cubes algorithm (Lorensen & Cline,
-1987) reduces these to 15 cases by symmetry and reads the triangulation from a
-lookup table. But several cases are genuinely **ambiguous**: consider a cube face
-whose two diagonally-opposite corners are inside and the other two outside. The
-surface can connect those crossings *two different ways* across that face. If the
-cube on one side of the face picks one way and its neighbour picks the other, the two
-patches do not meet — you get a **crack**, a hole in a surface that should be closed.
-This is not a rare pathology; it is the central difficulty of the algorithm, and the
-reason the literature grew a full **33-case asymptotic-decider** table (Chernyaev's
-extension) whose entire job is to resolve face and interior ambiguities consistently.
+The difficulty is *which* triangles to draw. A cube has 8 corners, so $2^8 = 256$
+inside/outside patterns. The classic Marching Cubes algorithm (Lorensen & Cline, 1987)
+reduces these to 15 cases by symmetry and reads the triangulation from a lookup table.
+But several cases are genuinely ambiguous. Consider a cube face whose two
+diagonally-opposite corners are inside and the other two outside: the surface can connect
+those crossings two different ways across that face. If the cube on one side of the face
+picks one way and its neighbour picks the other, the two patches do not meet, and the
+result is a crack - a hole in a surface that should be closed. This is not a rare
+pathology; it is the central difficulty of the algorithm, and the reason the literature
+grew a full 33-case asymptotic-decider table (Chernyaev's extension) whose entire job is
+to resolve face and interior ambiguities consistently.
 
-A hole is catastrophic for us. The whole point of extracting a cortical surface is to
-get a **watertight, genus-0** sheet; a single crack changes the topology and poisons
-every downstream operator (the Laplacian, curvature, the eigenbasis). We need a
-method that *cannot* produce a crack.
+A hole is catastrophic here. The whole point of extracting a cortical surface is a
+watertight, genus-0 sheet; a single crack changes the topology and poisons every
+downstream operator (the Laplacian, curvature, the eigenbasis). We need a method that
+*cannot* produce a crack.
 
-### The fix: split each cube into simplices
+### Splitting each cube into simplices
 
-Here is the one idea that dissolves the ambiguity. A cube is ambiguous because a
-square face has two ways to be triangulated. So **do not work with cubes** — work with
-**tetrahedra**. A tetrahedron has 4 corners, hence $2^4 = 16$ patterns, and *none of
-them is ambiguous*: with 0 or 4 corners inside there is no surface; with 1 inside (or
-1 outside) the three crossed edges define exactly **one** triangle; with 2 inside the
-four crossed edges define a **quad**, split into two triangles one canonical way. There
-is no saddle, no choice, no table of special cases.
+A cube is ambiguous because a square face has two ways to be triangulated. The resolution
+is to not work with cubes but with tetrahedra. A tetrahedron has 4 corners, hence $2^4 =
+16$ patterns, and none of them is ambiguous: with 0 or 4 corners inside there is no
+surface; with 1 inside (or 1 outside) the three crossed edges define exactly one
+triangle; with 2 inside the four crossed edges define a quad, split into two triangles one
+canonical way. There is no saddle, no choice, no table of special cases.
 
-`marching_cubes` therefore splits every grid cube into **6 tetrahedra** by the
-**Freudenthal–Kuhn decomposition**, all six sharing the cube's main diagonal from
-corner $0=(0,0,0)$ to corner $7=(1,1,1)$ (`_TETS` in the source). The crucial
-property is that this split is *consistent across cube boundaries*: adjacent cubes
-share the same diagonal direction on their shared face, so the tetrahedra on either
-side agree on how that face is cut. Because each tet's triangulation is unambiguous
-*and* neighbours agree on shared faces, the assembled surface is **crack-free and
-manifold by construction** — the watertight, genus-0 guarantee with no decider table.
-@fig-vs-marching shows the 2-D analogue (marching *squares*, where each cell is split
-into two triangles) alongside the 6-tet decomposition of a cube.
+`marching_cubes` therefore splits every grid cube into 6 tetrahedra by the
+Freudenthal--Kuhn decomposition, all six sharing the cube's main diagonal from corner
+$0=(0,0,0)$ to corner $7=(1,1,1)$ (`_TETS` in the source). The crucial property is that
+this split is consistent across cube boundaries: adjacent cubes share the same diagonal
+direction on their shared face, so the tetrahedra on either side agree on how that face is
+cut. This consistency is itself a symmetry of the tessellation - the decomposition
+commutes with translation by a grid cell, so neighbouring cells cannot disagree. Because
+each tet's triangulation is unambiguous *and* neighbours agree on shared faces, the
+assembled surface is crack-free and manifold by construction - the watertight, genus-0
+guarantee with no decider table. @fig-vs-marching shows the 2-D analogue (marching
+*squares*, where each cell is split into two triangles) alongside the 6-tet decomposition
+of a cube.
 
 ::: {.callout-note}
 The shipped engine is marching *tetrahedra* despite the public name `marching_cubes`
-(the name follows the field's convention for "extract an isosurface from a voxel
-grid"). The design record (`docs/design/geometry-suite.md`, P2.2 as-built) states the
-rationale explicitly: same watertight/genus-0 guarantee as a full asymptotic-decider
-cube table, at much lower implementation risk, because the simplex split *cannot*
-produce the face-saddle ambiguity in the first place.
+(the name follows the field's convention for "extract an isosurface from a voxel grid").
+The design record (`docs/design/geometry-suite.md`, P2.2 as-built) states the rationale:
+the same watertight/genus-0 guarantee as a full asymptotic-decider cube table, at much
+lower implementation risk, because the simplex split cannot produce the face-saddle
+ambiguity in the first place.
 :::
 
 ### From crossings to a closed mesh
 
-Walking the source: the per-corner inside test `inside = v_tet < level` becomes a
-4-bit `code` per tetrahedron, indexing `_TET_TABLE` (built once by `_build_tet_table`)
-for the list of crossed-edge triples to emit. Each emitted triangle vertex is a
-**grid edge**, recorded as a pair of global corner indices $(g_a, g_b)$.
+Following the source: the per-corner inside test `inside = v_tet < level` becomes a 4-bit
+`code` per tetrahedron, indexing `_TET_TABLE` (built once by `_build_tet_table`) for the
+list of crossed-edge triples to emit. Each emitted triangle vertex is a grid edge,
+recorded as a pair of global corner indices $(g_a, g_b)$.
 
-The step that actually *closes* the mesh is **deduplication by grid-edge key**. The
-same grid edge is shared by many tetrahedra across many cubes; @eq-edge-crossing
-interpolates to the *same* point every time, so every reference to that edge must
-collapse to one shared vertex. The code forms an integer key `lo * n_corners + hi`
-from the sorted endpoint indices and runs `np.unique(..., return_inverse=True)`. That
-single combinatorial dedup is what stitches independent per-tet triangles into one
-connected, watertight surface; the comment notes it replaces a slower lexicographic
-`np.unique(axis=0)` with an identical-ordering integer key (audit AI-C7). Only after
-deduplication does the code interpolate each *unique* edge once to get the vertex
-positions `verts`.
+The step that actually closes the mesh is deduplication by grid-edge key. The same grid
+edge is shared by many tetrahedra across many cubes; @eq-edge-crossing interpolates to the
+*same* point every time, so every reference to that edge must collapse to one shared
+vertex. The code forms an integer key `lo * n_corners + hi` from the sorted endpoint
+indices and runs `np.unique(..., return_inverse=True)`. That single combinatorial dedup
+is what stitches independent per-tet triangles into one connected, watertight surface; the
+comment notes it replaces a slower lexicographic `np.unique(axis=0)` with an
+identical-ordering integer key (audit AI-C7). Only after deduplication does the code
+interpolate each unique edge once to get the vertex positions `verts`.
 
-Orientation is fixed, not guessed. Within a single tetrahedron the linear interpolant
-has a **constant gradient**, computed exactly as `grad = grad_rhs @ minv.T` where
-`minv` is the per-tet inverse edge matrix (constant across all cubes because every tet
-has the same shape). That gradient points toward *increasing* field value — outward for
-a signed-distance field, which is negative inside. Each triangle is then flipped if
-needed so its face normal aligns with this gradient (`flip = (nrm * d).sum(...) < 0`).
-The result: per-vertex normals consistently point outward, which is exactly what the
-winding-number sign test of the next section relies on.
+Orientation is fixed, not guessed. Within a single tetrahedron the linear interpolant has
+a constant gradient, computed exactly as `grad = grad_rhs @ minv.T` where `minv` is the
+per-tet inverse edge matrix (constant across all cubes because every tet has the same
+shape). That gradient points toward increasing field value - outward for a signed-distance
+field, which is negative inside. Each triangle is then flipped if needed so its face
+normal aligns with this gradient (`flip = (nrm * d).sum(...) < 0`). The result: per-vertex
+normals consistently point outward, which is exactly what the winding-number sign test of
+the next section relies on.
 
-Two robustness details round out the routine. First, an **exact level-on-corner tie**
-(a grid value precisely equal to `level`) would make crossings collapse onto that
-corner and create a non-manifold pinch; the code nudges `level` by a negligible
-epsilon relative to the value scale only when such a tie exists, leaving generic SDFs
-untouched. Second, **degenerate (zero-area) faces** that can still arise are dropped,
-unreferenced vertices are pruned, and the faces are reindexed — so the Euler
-characteristic (next section) counts correctly. If the level set does not intersect
-the volume at all, the function returns an empty `Mesh` (0 vertices, 0 faces) rather
-than raising.
+Two robustness details round out the routine. First, an exact level-on-corner tie (a grid
+value precisely equal to `level`) would make crossings collapse onto that corner and
+create a non-manifold pinch; the code nudges `level` by a negligible epsilon relative to
+the value scale only when such a tie exists, leaving generic SDFs untouched. Second,
+degenerate (zero-area) faces that can still arise are dropped, unreferenced vertices are
+pruned, and the faces are reindexed - so the Euler characteristic (next section) counts
+correctly. If the level set does not intersect the volume at all, the function returns an
+empty `Mesh` (0 vertices, 0 faces) rather than raising.
 
-### The tradeoff, stated plainly
+### The tradeoff
 
-Marching tets is not free. It emits roughly **6× more triangles** than an
-asymptotic-decider cube method, and those triangles are more **sliver-prone** (long,
-thin), because cutting tetrahedra produces less regular pieces than cutting cubes.
-Slivers inject large cotangent weights into the [Laplacian](laplace-beltrami.qmd#sec-cotangent)
-and noisy [curvature](curvature.qmd#sec-mean) estimates — which is precisely why those
-downstream operators use the `arctan2`-based angle formulation that stays stable on
-degenerate triangles (design note AI-A5). The honest summary, recorded in the design
-doc: you trade mesh regularity and any hope of matching a reference tool's triangle
-count for an *unconditional* watertight/manifold guarantee. For a pipeline whose first
-requirement is correct topology, that is the right trade.
+Marching tets is not free. It emits roughly 6$\times$ more triangles than an
+asymptotic-decider cube method, and those triangles are more sliver-prone (long, thin),
+because cutting tetrahedra produces less regular pieces than cutting cubes. Slivers inject
+large cotangent weights into the [Laplacian](laplace-beltrami.qmd#sec-cotangent) and noisy
+[curvature](curvature.qmd#sec-mean) estimates - which is precisely why those downstream
+operators use the `arctan2`-based angle formulation that stays stable on degenerate
+triangles (design note AI-A5). The honest summary, recorded in the design doc: one trades
+mesh regularity and any hope of matching a reference tool's triangle count for an
+*unconditional* watertight/manifold guarantee. For a pipeline whose first requirement is
+correct topology, that is the right trade.
 
 ### Why this is HOST-CTOR
 
-The output triangle count depends on the *data* — how the level set threads the grid —
-so the shapes are not known at trace time. That makes `marching_cubes` a **host-side
-NumPy constructor** (like the icosphere builder), not a fixed-shape JAX kernel, and
-**not differentiable**. It emits a `Mesh` of JAX arrays you then feed to the jittable
-operators, but you must run it *outside* any `jit`/`lax.fori_loop` — calling a
-data-dependent-shape host op inside a traced loop is the cardinal error this unit
-keeps flagging. (For an in-loop surface mover that *is* differentiable, see
-`deform_to_sdf` in geometry/surface.py, which marches an existing fixed-topology mesh
-along a field rather than extracting a new one.)
+The output triangle count depends on the data - how the level set threads the grid - so
+the shapes are not known at trace time. That makes `marching_cubes` a host-side NumPy
+constructor (like the icosphere builder), not a fixed-shape JAX kernel, and not
+differentiable. It emits a `Mesh` of JAX arrays for the jittable operators, but it must
+run outside any `jit`/`lax.fori_loop` - calling a data-dependent-shape host op inside a
+traced loop is the cardinal error this unit keeps flagging. (For an in-loop surface mover
+that *is* differentiable, see `deform_to_sdf` in geometry/surface.py, which marches an
+existing fixed-topology mesh along a field rather than extracting a new one.)
 
 ```{python}
 #| label: fig-vs-marching
@@ -274,61 +271,63 @@ plt.show()
 ## Mesh → SDF: the inverse rasteriser {#sec-mesh-sdf}
 
 `mesh_to_sdf` (geometry/isosurface.py), `nearest_surface_distance` /
-`_closest_point_dist2` (geometry/_triangle_distance.py) — **HOST-CTOR / HOST-QA**.
+`_closest_point_dist2` (geometry/_triangle_distance.py) - **HOST-CTOR / HOST-QA**.
 
-### Why go backwards
+### Why invert the conversion
 
-`mesh_to_sdf` turns a triangle mesh back into a signed-distance volume. Why would you?
-Two reasons drive the design. It is the **training-target generator** behind learned
-level-set surface models — the network predicts a field, and you need ground-truth
-fields rasterised from meshes to train against. And it is the **round-trip validator**:
-take an analytic SDF, extract a mesh with `marching_cubes`, rasterise it back with
-`mesh_to_sdf`, and the recovered field should match the original to within a voxel
-tolerance (design doc P2.3 names exactly this test). The round-trip is how you gain
-confidence the two converters agree without ever demanding bit-parity.
+`mesh_to_sdf` turns a triangle mesh back into a signed-distance volume. Two reasons drive
+the design. It is the training-target generator behind learned level-set surface models -
+the network predicts a field, and ground-truth fields rasterised from meshes are needed to
+train against. And it is the round-trip validator: take an analytic SDF, extract a mesh
+with `marching_cubes`, rasterise it back with `mesh_to_sdf`, and the recovered field
+should match the original to within a voxel tolerance (design doc P2.3 names exactly this
+test). The round-trip is how confidence in the two converters' agreement is gained without
+ever demanding bit-parity.
 
-The value at a grid point splits cleanly into **how far** and **which side** — magnitude
-and sign — and the routine computes them *independently*, which is what makes it robust.
+The value at a grid point splits cleanly into how far and which side - magnitude and sign -
+and the routine computes them independently, which is what makes it robust.
 
 ### Magnitude: exact point-to-triangle distance
 
 The unsigned distance from a grid point to the surface is its distance to the nearest
-*triangle*. The naive "distance to the nearest face plane" is wrong: the closest point
-on a finite triangle might be on an edge or at a vertex, not on the plane's interior.
-The exact answer requires asking *where on the triangle* the closest point lies.
+triangle. The naive "distance to the nearest face plane" is wrong: the closest point on a
+finite triangle might be on an edge or at a vertex, not in the plane's interior. The exact
+answer requires asking *where on the triangle* the closest point lies.
 
-A triangle partitions all of space into **seven Voronoi regions**: the prism over the
+A triangle partitions all of space into seven Voronoi regions: the prism over the
 triangle's interior (closest point is inside the face), three regions over the edges
 (closest point is on an edge), and three regions over the vertices (closest point is a
-vertex). `_closest_point_dist2` implements Ericson's classic branch-free version of
-this test (Ericson, 2004): it computes a handful of dot products (`d1`…`d6`) and the
-barycentric sub-areas (`va`, `vb`, `vc`), then uses `np.select` over the six boundary
-conditions to pick the closest point — defaulting to the interior projection. It is
-vectorised over `(query, face)` pairs and returns *squared* distance (cheaper; the
-square root is taken once at the end). `mesh_to_sdf` then takes
-`np.sqrt(_closest_point_dist2(p, a, b, c).min(axis=1))` — the distance to the closest
-face, minimised over all faces — and chunks the voxel loop (`chunk = max(1, 1_000_000
-// n_faces)`) to bound the `(chunk, F, 3)` working memory.
+vertex). `_closest_point_dist2` implements Ericson's branch-free version of this test
+(Ericson, 2004): it computes a handful of dot products (`d1`…`d6`) and the barycentric
+sub-areas (`va`, `vb`, `vc`), then uses `np.select` over the six boundary conditions to
+pick the closest point, defaulting to the interior projection. It is vectorised over
+`(query, face)` pairs and returns *squared* distance (cheaper; the square root is taken
+once at the end). `mesh_to_sdf` then takes `np.sqrt(_closest_point_dist2(p, a, b,
+c).min(axis=1))` - the distance to the closest face, minimised over all faces - and chunks
+the voxel loop (`chunk = max(1, 1_000_000 // n_faces)`) to bound the `(chunk, F, 3)`
+working memory.
 
-`spacing` enters here. The grid point $(i,j,k)$ is placed at `(i, j, k) * spacing` in
-the mesh's coordinate frame, so **anisotropic** voxels are handled natively, in
-physical units. This is a genuine advantage over the EDT route of the
+`spacing` enters here. The grid point $(i,j,k)$ is placed at `(i, j, k) * spacing` in the
+mesh's coordinate frame, so anisotropic voxels are handled natively, in physical units.
+This is a genuine advantage over the EDT route of the
 [previous chapter](volumes.qmd#sec-edt): the Euclidean distance transform measures
 distance in *voxels* on a uniform grid, whereas `mesh_to_sdf` measures true physical
-distance to the actual surface and respects per-axis voxel size directly.
+distance to the actual surface and respects per-axis voxel size directly. The distance
+itself is intrinsic to the surface's placement: rigidly moving mesh and query grid together
+leaves it unchanged, as a metric quantity should.
 
 ### Sign: the generalised winding number
 
-How do we decide inside from outside? The tempting answer — shoot a ray and count
-crossings, or test against the nearest face's normal — is fragile: a ray can graze an
+How is inside distinguished from outside? The tempting answer - shoot a ray and count
+crossings, or test against the nearest face's normal - is fragile: a ray can graze an
 edge, and a single normal test fails wherever face orientations are inconsistent. The
-robust answer is the **generalised winding number** (Jacobson et al., 2013).
+robust answer is the generalised winding number (Jacobson et al., 2013).
 
 Build the intuition in 2-D first. Stand at a point and watch the boundary curve sweep
 around you; the total turning angle, divided by $2\pi$, counts how many times the curve
-wraps you — $1$ if you are inside a simple loop, $0$ if outside. In 3-D the angle
-becomes **solid angle**: each triangle subtends a signed solid angle at the query
-point, and the sum over all faces, divided by $4\pi$, is
+wraps you - $1$ if you are inside a simple loop, $0$ if outside. In 3-D the angle becomes
+solid angle: each triangle subtends a signed solid angle at the query point, and the sum
+over all faces, divided by $4\pi$, is
 
 $$
 w(p) = \frac{1}{4\pi}\sum_{f\in F}\Omega_f(p),
@@ -341,59 +340,60 @@ w(p) \approx
 $$ {#eq-winding}
 
 Here $\Omega_f(p)$ is the signed solid angle that face $f$ subtends at $p$. The code
-computes it with the **Van Oosterom–Strackee** formula in `_solid_angle`: with
-$p_a,p_b,p_c$ the vertex offsets from the query, the solid angle is
-`2 * arctan2(num, den)` where `num = (pa · (pb × pc))` is the signed scalar triple
-product and `den` combines the edge lengths and pairwise dot products. The beauty of
-@eq-winding is that it is a **smooth, robust field**, not a brittle predicate: it
-degrades gracefully near the surface and, crucially, gives the right answer **regardless
-of global face orientation** — flip half the faces and the magnitude $\lvert w\rvert$
-is unchanged. `mesh_to_sdf` decides `inside = np.abs(winding) > 0.5` and writes
-`np.where(inside, -dist, dist)`. That single robustness property is why winding number
-beats ray-casting on the imperfect meshes real pipelines produce. (It does assume a
-*watertight* mesh — hence the topology gate below.)
+computes it with the Van Oosterom--Strackee formula in `_solid_angle`: with $p_a,p_b,p_c$
+the vertex offsets from the query, the solid angle is `2 * arctan2(num, den)` where `num =
+(pa · (pb × pc))` is the signed scalar triple product and `den` combines the edge lengths
+and pairwise dot products. The value of @eq-winding is that it is a smooth, robust field,
+not a brittle predicate: it degrades gracefully near the surface and gives the right
+answer regardless of global face orientation. This last property is a genuine invariance:
+flip half the faces and the magnitude $\lvert w\rvert$ is unchanged, because each flip
+negates one $\Omega_f$ and the inside/outside decision reads $\lvert w\rvert$, not its
+sign. `mesh_to_sdf` decides `inside = np.abs(winding) > 0.5` and writes `np.where(inside,
+-dist, dist)`. That orientation-robustness is why the winding number beats ray-casting on
+the imperfect meshes real pipelines produce. (It does assume a *watertight* mesh - hence
+the topology gate below.)
 
 ### The broad-phase / narrow-phase pattern
 
-`mesh_to_sdf` as shipped is brute force: it tests **every** grid point against **every**
-face, $O(n_{\text{voxels}}\cdot n_{\text{faces}})$, chunked for memory. That is exact and
-fine for moderate sizes, and the source is honest that a spatial-hash broad phase is a
-*future* acceleration.
+`mesh_to_sdf` as shipped is brute force: it tests every grid point against every face,
+$O(n_{\text{voxels}}\cdot n_{\text{faces}})$, chunked for memory. That is exact and fine
+for moderate sizes, and the source is honest that a spatial-hash broad phase is a future
+acceleration.
 
 The companion routine `nearest_surface_distance` already implements the acceleration
 pattern, and it is worth teaching once because it recurs throughout collision and
-nearest-neighbour code. The idea is **broad phase + narrow phase**:
+nearest-neighbour code. The idea is broad phase plus narrow phase:
 
-- **Broad phase** — a cheap, conservative filter that *prunes* candidates. Here a uniform
+- **Broad phase** - a cheap, conservative filter that *prunes* candidates. Here a uniform
   grid: bin each triangle into every cell its bounding box overlaps, then for a query,
-  search outward in **Chebyshev (L∞) shells** of cells (`_shell_offsets(r)` enumerates
+  search outward in Chebyshev ($L^\infty$) shells of cells (`_shell_offsets(r)` enumerates
   the cells at exactly Chebyshev radius $r$).
-- **Narrow phase** — the exact, expensive test (`_closest_point_dist2`) applied only to
-  the surviving candidates.
+- **Narrow phase** - the exact, expensive test (`_closest_point_dist2`) applied only to the
+  surviving candidates.
 
 The subtle part is knowing *when to stop* without losing the true nearest. The
-finalisation rule (`_grid_nearest_dist2`): a query is **finalised** once its running
-minimum distance is $\le (R\cdot\text{cell})^2$ after searching all cells within
-Chebyshev radius $R$. The justification is a clean geometric bound — any triangle binned
-only into cells at Chebyshev distance $> R$ has every point at L∞ (hence Euclidean)
-distance $\ge R\cdot\text{cell}$ from the query, so it *cannot* beat the current minimum.
-This is the exactness guarantee the design doc (`mesh-spatial-acceleration.md`, AI-C5)
-insists on: a pruning index that ever drops the true nearest triangle returns a
-*silently wrong* distance, so acceleration is gated behind proving the prune is safe.
+finalisation rule (`_grid_nearest_dist2`): a query is finalised once its running minimum
+distance is $\le (R\cdot\text{cell})^2$ after searching all cells within Chebyshev radius
+$R$. The justification is a clean geometric bound - any triangle binned only into cells at
+Chebyshev distance $> R$ has every point at $L^\infty$ (hence Euclidean) distance $\ge
+R\cdot\text{cell}$ from the query, so it cannot beat the current minimum. This is the
+exactness guarantee the design doc (`mesh-spatial-acceleration.md`, AI-C5) insists on: a
+pruning index that ever drops the true nearest triangle returns a silently wrong distance,
+so acceleration is gated behind proving the prune is safe.
 
-And the safety net: any query not finalised within `r_max` shells (default 8) falls back
-to the **exact brute scan** (`_brute_nearest_dist2`). The result is that the accelerated
-`method='grid'` path returns the **identical** distance to brute force — fast where it can
+And the safety net: any query not finalised within `r_max` shells (default 8) falls back to
+the exact brute scan (`_brute_nearest_dist2`). The result is that the accelerated
+`method='grid'` path returns the *identical* distance to brute force - fast where it can
 prune, exact everywhere. The public `method='auto'` chooses the grid path only when the
 brute work $n_{\text{query}}\cdot n_{\text{faces}}$ is large enough to amortise the index.
 This is the unit's validation posture in microcosm: not "the fast path matches a golden
 file" but "the fast path is provably equal to the exact path."
 
 `nearest_surface_distance` is the shared primitive behind `surface.cortical_thickness`
-(symmetric white↔pial distance); it lives in `_triangle_distance.py` and is imported by
+(symmetric white-pial distance); it lives in `_triangle_distance.py` and is imported by
 geometry/surface.py rather than re-exported at the `geometry` package top level. Both it
-and `mesh_to_sdf` are **HOST-QA / HOST-CTOR** (host-side NumPy, serial chunked loops,
-not differentiable) — again, never inside a jitted loop.
+and `mesh_to_sdf` are **HOST-QA / HOST-CTOR** (host-side NumPy, serial chunked loops, not
+differentiable) - again, never inside a jitted loop.
 
 ```{python}
 #| label: fig-vs-sdf-roundtrip
@@ -478,122 +478,133 @@ plt.show()
 ## Topology as a correctness gate {#sec-topology}
 
 `euler_characteristic`, `genus` (geometry/topology.py); `find_self_intersections`,
-`remove_self_intersections` (geometry/intersection.py) — **HOST-QA** (and a HOST cleanup).
+`remove_self_intersections` (geometry/intersection.py) - **HOST-QA** (and a HOST cleanup).
 
-### The cheapest possible correctness check
+### The Euler characteristic
 
-We have a mesh. Is it the *right kind* of object? For a cortical hemisphere the answer
-should be "a topological sphere" — one closed sheet, no handles, no holes. Remarkably,
-you can verify this with pure counting, no geometry at all.
-
-Count the vertices $V$, edges $E$, and faces $F$, and form the **Euler characteristic**:
+We have a mesh. Is it the right kind of object? For a cortical hemisphere the answer should
+be "a topological sphere" - one closed sheet, no handles, no holes. This can be verified
+with pure counting, no geometry at all. Count the vertices $V$, edges $E$, and faces $F$,
+and form the Euler characteristic:
 
 $$
 \chi = V - E + F.
 $$ {#eq-euler}
 
-The astonishing fact (Euler's theorem) is that $\chi$ does not depend on *how* you
-triangulate the surface — refine it, retriangulate it, $\chi$ is unchanged. It depends
-only on the surface's **topology**. A closed orientable surface with $g$ handles has
+Euler's theorem is that $\chi$ does not depend on *how* the surface is triangulated -
+refine it, retriangulate it, $\chi$ is unchanged. It depends only on the surface's
+topology. This is the strongest invariance principle in the unit, and the natural endpoint
+of its symmetry theme. Where the cotangent Laplacian was invariant to rigid motion and
+isometric bending, and the Laplacian spectrum was invariant to isometry, $\chi$ is
+invariant to *any* homeomorphism: it does not change under stretching, bending, or
+arbitrary re-meshing. A closed orientable surface with $g$ handles has
 
 $$
 \chi = 2 - 2g \quad\Longleftrightarrow\quad g = \frac{2 - \chi}{2}.
 $$ {#eq-genus}
 
-So a **sphere** ($g=0$) has $\chi = 2$; a **torus** ($g=1$) has $\chi = 0$; a
-two-handled surface has $\chi = -2$. @fig-vs-topology confirms this on the platonic
-solids (all $\chi = 2$, genus 0, regardless of how finely subdivided) versus a torus
-mesh ($\chi = 0$, genus 1).
+So a sphere ($g=0$) has $\chi = 2$; a torus ($g=1$) has $\chi = 0$; a two-handled surface
+has $\chi = -2$. @fig-vs-topology confirms this on the platonic solids (all $\chi = 2$,
+genus 0, regardless of how finely subdivided) versus a torus mesh ($\chi = 0$, genus 1).
 
 `euler_characteristic(mesh)` implements @eq-euler directly: `mesh.n_vertices - _n_edges(mesh)
 + mesh.n_faces`, where `_n_edges` builds all directed edges from the faces, sorts each
-pair, and counts the **unique undirected** edges with `np.unique(axis=0)`. `genus(mesh)`
+pair, and counts the unique undirected edges with `np.unique(axis=0)`. `genus(mesh)`
 implements @eq-genus as `(2 - chi) // 2`. Both return plain Python `int`s (host-side
-integer combinatorics, not traced arrays, not differentiable) — **HOST-QA**.
+integer combinatorics, not traced arrays, not differentiable) - **HOST-QA**.
 
 ### Why it gates correctness
 
-This is the **defect gate** of the entire field → mesh route. After `marching_cubes`,
-a consumer checks `euler_characteristic(mesh) == 2` (equivalently `genus(mesh) == 0`)
-to decide whether the extraction produced the expected spherical topology. If a gyral
-crown touched an adjacent bank in the source field, the level set welds them and the
-extracted mesh acquires a handle: $\chi \ne 2$, $g \ge 1$, and the gate fires. It is a
-near-free check (one pass over the faces) that catches a class of error no smoothing or
-curvature computation would reveal.
+This is the defect gate of the entire field $\to$ mesh route. After `marching_cubes`, a
+consumer checks `euler_characteristic(mesh) == 2` (equivalently `genus(mesh) == 0`) to
+decide whether the extraction produced the expected spherical topology. If a gyral crown
+touched an adjacent bank in the source field, the level set welds them and the extracted
+mesh acquires a handle: $\chi \ne 2$, $g \ge 1$, and the gate fires. It is a near-free
+check (one pass over the faces) that catches a class of error no smoothing or curvature
+computation would reveal - precisely because $\chi$ is a topological invariant, it is blind
+to the geometric wiggles those operators see and sensitive only to the handle.
 
-`genus` carries a sharper signal still. The formula $g = (2-\chi)/2$ only makes sense
-for a *closed orientable* surface. If $2 - \chi$ is **odd**, `genus` does not silently
-return a wrong number — it **raises** `ValueError`, because an odd $2-\chi$ is a
-definitive sign the mesh has a **boundary** (an open disk has $\chi = 1$) or
-**non-manifold** edges. That raise is itself a defect detector: a closed marching-tets
-mesh should never trigger it, so if it does, something upstream is broken.
+`genus` carries a sharper signal still. The formula $g = (2-\chi)/2$ only makes sense for a
+closed orientable surface. If $2 - \chi$ is odd, `genus` does not silently return a wrong
+number - it raises `ValueError`, because an odd $2-\chi$ is a definitive sign the mesh has
+a boundary (an open disk has $\chi = 1$) or non-manifold edges. That raise is itself a
+defect detector: a closed marching-tets mesh should never trigger it, so if it does,
+something upstream is broken.
 
 ::: {.callout-important}
-This is a **gate, not a corrector.** `nitrix` detects bad topology; it does not (yet)
-repair it. The full FreeSurfer-style topology corrector (`mris_fix_topology`) is
-deliberately deferred to a research track (`docs/design/geometry-suite.md`, decision
-D1). Consequently raw `marching_cubes` output is *gate-only*: if `genus` reports $> 0$
-the suite can flag it but not fix it. The supported route to a guaranteed genus-0
-cortical surface is **template-correspondence** (a model like `topofit`/`synthdist`)
-followed by `deform_to_sdf`, which **inherits** genus-0 from the template by construction
-and never needs correction. A marching-tets mesh with handles must be repaired by an
-external tool until the corrector lands.
+This is a gate, not a corrector. `nitrix` detects bad topology; it does not (yet) repair
+it. The full FreeSurfer-style topology corrector (`mris_fix_topology`) is deliberately
+deferred to a research track (`docs/design/geometry-suite.md`, decision D1). Consequently
+raw `marching_cubes` output is gate-only: if `genus` reports $> 0$ the suite can flag it
+but not fix it. The supported route to a guaranteed genus-0 cortical surface is
+template-correspondence (a model like `topofit`/`synthdist`) followed by `deform_to_sdf`,
+which inherits genus-0 from the template by construction and never needs correction. A
+marching-tets mesh with handles must be repaired by an external tool until the corrector
+lands.
 :::
 
-### The capstone: Gauss–Bonnet
+The template-correspondence route is itself an instance of the unit's inductive-bias
+theme, applied to topology. Rather than hoping a data-driven extraction lands the right
+$\chi$ and correcting it when it does not, `deform_to_sdf` *imposes* the template's genus-0
+topology as a hard prior - the warp moves vertices but never changes connectivity, so the
+output is genus-0 by construction. The correct topology is built into the operator, exactly
+as permutation equivariance was built into the mesh Laplacian; it is not something the
+data must supply.
 
-Here is where this page closes a loop with the [curvature](curvature.qmd#sec-gaussian)
-page, and it is genuinely beautiful. The Euler characteristic is a *topological*
-invariant — pure counting. Gaussian curvature is a *geometric* quantity — angles and
-areas. The **Gauss–Bonnet theorem** says they are the same number:
+### The capstone: Gauss--Bonnet
+
+This is where the chapter closes a loop with the [curvature](curvature.qmd#sec-gaussian)
+chapter. The Euler characteristic is a topological invariant - pure counting. Gaussian
+curvature is a geometric quantity - angles and areas. The Gauss--Bonnet theorem says they
+are the same number:
 
 $$
 \sum_i K_i A_i = 2\pi\,\chi.
 $$ {#eq-gauss-bonnet}
 
-The total integrated Gaussian curvature of a closed surface equals $2\pi$ times its
-Euler characteristic — independent of the surface's shape. For a sphere ($\chi=2$) the
-right side is $4\pi$, exactly as the curvature page's discrete angle-defect $K_i$
-deliver. You can compute the left side by *bending* (curvature) and the right side by
-*counting* (topology) and they must agree. That cross-check is one of the strongest
-analytic oracles in the whole unit: it ties the geometric and topological invariants
-together and validates both at once. (The curvature page's `gaussian_curvature` is
-built precisely so the angle-defect sums to $2\pi\chi$ on the nose.)
+The total integrated Gaussian curvature of a closed surface equals $2\pi$ times its Euler
+characteristic, independent of the surface's shape. For a sphere ($\chi=2$) the right side
+is $4\pi$, exactly as the curvature chapter's discrete angle-defect $K_i$ deliver. One can
+compute the left side by bending (curvature) and the right side by counting (topology) and
+they must agree. That cross-check is one of the strongest analytic oracles in the unit: it
+ties the geometric and topological invariants together and validates both at once. (The
+curvature chapter's `gaussian_curvature` is built precisely so the angle-defect sums to
+$2\pi\chi$ on the nose.)
 
 ### Self-intersection QA
 
 Correct topology in the combinatorial sense ($\chi=2$) does not guarantee the mesh is
-**geometrically embedded** — a deformed surface can pass *through itself* while keeping
-its face connectivity intact. `find_self_intersections` detects this, and again uses
-**broad phase + narrow phase**:
+geometrically embedded - a deformed surface can pass through itself while keeping its face
+connectivity intact. `find_self_intersections` detects this, and again uses broad phase
+plus narrow phase:
 
 - **Broad phase** (`_candidate_pairs`): a uniform grid at roughly the median edge length;
   faces whose bounding boxes share a cell become candidate pairs. The enumeration is
   vectorised (per-(face,cell) membership in numpy, within-cell pairing via
-  `np.triu_indices`; audit AI-C4), and pairs that **share a vertex** are dropped —
-  adjacent faces always meet at their shared edge and are not self-intersections.
-- **Narrow phase** (`_seg_tri_hit`): the **Möller–Trumbore** segment-triangle test, run
-  for all three edges of each face against the other and vice versa, confirms a genuine
+  `np.triu_indices`; audit AI-C4), and pairs that share a vertex are dropped - adjacent
+  faces always meet at their shared edge and are not self-intersections.
+- **Narrow phase** (`_seg_tri_hit`): the Möller--Trumbore segment-triangle test, run for
+  all three edges of each face against the other and vice versa, confirms a genuine
   transversal crossing.
 
 It returns the `(n_pairs, 2)` array of truly intersecting face-index pairs (empty if
-clean). A documented limitation: it catches transversal (edge-pierces-face) crossings —
-the kind a deforming surface actually produces — but not exactly-**coplanar** overlaps.
+clean). A documented limitation: it catches transversal (edge-pierces-face) crossings - the
+kind a deforming surface actually produces - but not exactly-coplanar overlaps.
 
-`remove_self_intersections` is the **post-hoc cleanup**: each iteration finds the
-offending pairs and applies one pass of **Laplacian smoothing restricted to the vertices
-of those faces** (`mesh_laplacian_smooth`, blended in with `jnp.where` over a mask),
-repeating until clean or `n_iterations` is reached. The **topology (`faces`) is
-preserved**; only vertex positions move.
+`remove_self_intersections` is the post-hoc cleanup: each iteration finds the offending
+pairs and applies one pass of Laplacian smoothing restricted to the vertices of those faces
+(`mesh_laplacian_smooth`, blended in with `jnp.where` over a mask), repeating until clean
+or `n_iterations` is reached. The topology (`faces`) is preserved; only vertex positions
+move.
 
 The execution-class point is the whole reason this lives on its own page: the detection
-loop is **host-side NumPy** (the grid hash and pairing cannot run under `lax.fori_loop`),
-so this is **HOST-QA / HOST cleanup** — **never inside a jitted loop**. The contrast is
-deliberate and instructive: an in-loop surface mover like `deform_to_sdf` regularises
-*during* the march with the **jittable** Laplacian fraction (a fixed-shape JAX op), and
-calls `remove_self_intersections` only afterward, on the host, as a final guard. That is
-the canonical division of labour this unit teaches: differentiable fixed-shape work
-inside the loop; data-dependent host construction and QA outside it.
+loop is host-side NumPy (the grid hash and pairing cannot run under `lax.fori_loop`), so
+this is **HOST-QA / HOST cleanup** - never inside a jitted loop. The contrast is deliberate:
+an in-loop surface mover like `deform_to_sdf` regularises *during* the march with the
+jittable Laplacian fraction (a fixed-shape JAX op), and calls `remove_self_intersections`
+only afterward, on the host, as a final guard. That is the canonical division of labour
+this unit teaches: differentiable fixed-shape work inside the loop; data-dependent host
+construction and QA outside it.
 
 ```{python}
 #| label: fig-vs-topology
@@ -706,32 +717,32 @@ plt.show()
 
 ## Further reading
 
-- Lorensen, W. E., & Cline, H. E. (1987). *Marching Cubes: A High Resolution 3D
-  Surface Construction Algorithm.* SIGGRAPH Computer Graphics, 21(4), 163–169. — the
-  original isosurface algorithm and the ambiguity problem.
+- Lorensen, W. E., & Cline, H. E. (1987). *Marching Cubes: A High Resolution 3D Surface
+  Construction Algorithm.* SIGGRAPH Computer Graphics, 21(4), 163–169. The original
+  isosurface algorithm and the ambiguity problem.
 - Chernyaev, E. V. (1995). *Marching Cubes 33: Construction of Topologically Correct
-  Isosurfaces.* Technical report CN/95-17, CERN. — the 33-case asymptotic-decider table
-  that resolves the face/interior ambiguity (the alternative `nitrix` declines).
-- Doi, A., & Koide, A. (1991). *An Efficient Method of Triangulating Equi-valued
-  Surfaces by Using Tetrahedral Cells.* IEICE Transactions, E74-D(1), 214–224. — the
+  Isosurfaces.* Technical report CN/95-17, CERN. The 33-case asymptotic-decider table that
+  resolves the face/interior ambiguity (the alternative `nitrix` declines).
+- Doi, A., & Koide, A. (1991). *An Efficient Method of Triangulating Equi-valued Surfaces
+  by Using Tetrahedral Cells.* IEICE Transactions, E74-D(1), 214–224. The
   marching-tetrahedra family.
 - Treece, G. M., Prager, R. W., & Gee, A. H. (1999). *Regularised marching tetrahedra:
   improved iso-surface extraction.* Computers & Graphics, 23(4), 583–598.
-- Ericson, C. (2004). *Real-Time Collision Detection.* Morgan Kaufmann. — the
+- Ericson, C. (2004). *Real-Time Collision Detection.* Morgan Kaufmann. The
   closest-point-on-triangle test (the seven Voronoi regions) used for unsigned distance.
-- Möller, T., & Trumbore, B. (1997). *Fast, Minimum Storage Ray/Triangle
-  Intersection.* Journal of Graphics Tools, 2(1), 21–28. — the narrow-phase
-  segment–triangle test for self-intersection.
+- Möller, T., & Trumbore, B. (1997). *Fast, Minimum Storage Ray/Triangle Intersection.*
+  Journal of Graphics Tools, 2(1), 21–28. The narrow-phase segment-triangle test for
+  self-intersection.
 - Jacobson, A., Kavan, L., & Sorkine-Hornung, O. (2013). *Robust Inside-Outside
-  Segmentation using Generalized Winding Numbers.* ACM Transactions on Graphics, 32(4),
-  33. — the orientation-robust sign test for `mesh_to_sdf`.
+  Segmentation using Generalized Winding Numbers.* ACM Transactions on Graphics, 32(4), 33.
+  The orientation-robust sign test for `mesh_to_sdf`.
 - Van Oosterom, A., & Strackee, J. (1983). *The Solid Angle of a Plane Triangle.* IEEE
-  Transactions on Biomedical Engineering, BME-30(2), 125–126. — the per-face solid-angle
+  Transactions on Biomedical Engineering, BME-30(2), 125–126. The per-face solid-angle
   formula behind the winding number.
-- Armstrong, M. A. (1983). *Basic Topology.* Springer. — Euler characteristic, genus,
-  and the classification of surfaces for the topology gate.
-- do Carmo, M. P. (1976). *Differential Geometry of Curves and Surfaces.* Prentice
-  Hall. — the Gauss–Bonnet theorem connecting curvature and topology.
+- Armstrong, M. A. (1983). *Basic Topology.* Springer. Euler characteristic, genus, and the
+  classification of surfaces for the topology gate.
+- do Carmo, M. P. (1976). *Differential Geometry of Curves and Surfaces.* Prentice Hall.
+  The Gauss--Bonnet theorem connecting curvature and topology.
 
 ## See also
 
@@ -744,11 +755,11 @@ plt.show()
   (`euler_characteristic`, `genus`),
   [`geometry/intersection.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/intersection.py)
   (`find_self_intersections`, `remove_self_intersections`).
-- Design: `docs/feature-requests/mesh-spatial-acceleration.md` (the exact broad-phase
-  and its exactness guarantee); `docs/design/geometry-suite.md` (P2.2/P2.3, decision D1
-  on the deferred topology corrector).
+- Design: `docs/feature-requests/mesh-spatial-acceleration.md` (the exact broad-phase and
+  its exactness guarantee); `docs/design/geometry-suite.md` (P2.2/P2.3, decision D1 on the
+  deferred topology corrector).
 - Neighbouring pages: [Volumes: morphology, distance, and signed fields](volumes.qmd#sec-sdf)
-  (where the SDF comes from), [Curvature](curvature.qmd#sec-gaussian) (Gauss–Bonnet, the
-  other half of @eq-gauss-bonnet), [The Laplace–Beltrami operator](laplace-beltrami.qmd#sec-cotangent)
+  (where the SDF comes from), [Curvature](curvature.qmd#sec-gaussian) (Gauss--Bonnet, the
+  other half of @eq-gauss-bonnet), [The Laplace--Beltrami operator](laplace-beltrami.qmd#sec-cotangent)
   (what the extracted mesh feeds), and [Foundations](foundations.qmd#sec-classes) (the
   DIFF-JAX / HOST-CTOR / HOST-QA execution classes).

@@ -1,0 +1,347 @@
+---
+title: "Three kernels, forward and back"
+---
+
+The [previous chapter](differentiation.qmd) argued that differentiation is linear
+algebra: the derivative is a linear map, the JVP applies it, the VJP transposes it,
+and nothing is ever materialised that does not have to be. This chapter cashes that
+in on three workhorse kernels, chosen because each teaches a distinct lesson and
+each is load-bearing in `nitrix`.
+
+- **gemm** — the matrix multiply — shows the happiest case: its backward pass is
+  *two more matrix multiplies*, the same compute-bound primitive the
+  [hardware chapter](hardware.qmd#sec-tensorcores) said the tensor cores exist for.
+  This is why deep networks of linear layers are cheap to train.
+- **softmax** shows a *structured* Jacobian — a diagonal minus a rank-one term —
+  that you must never form, only apply, and that demands numerical care.
+- the **semiring** matrix product shows that the kernel itself generalises:
+  replace $(+,\times)$ with another algebra and you get shortest paths, or
+  log-space marginalisation, from the *same* contraction — and what
+  "differentiate" then *means* generalises with it, connecting directly back to
+  softmax and forward to the [inductive-bias chapter](inductive-bias.qmd).
+
+Throughout we work in the [index notation](differentiation.qmd#sec-einstein) of the
+last chapter, and we keep to its discipline: derive the JVP (pushforward), then the
+VJP (pullback) as its transpose, never building a Jacobian.
+
+## gemm: the matrix multiply {#sec-gemm}
+
+The forward operation is the ordinary product $C = AB$ of $A\in\mathbb{R}^{m\times
+k}$ and $B\in\mathbb{R}^{k\times n}$, which in index notation is a single
+contraction over the shared dimension,
+$$
+C_{ij} \;=\; A_{ik}\,B_{kj}\qquad(\text{sum over } k),
+$$
+the work the tensor cores accelerate (@fig-gemm). It is *bilinear* — linear in $A$
+for fixed $B$, and linear in $B$ for fixed $A$ — and that is the only fact we need
+to differentiate it.
+
+::: {#fig-gemm}
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The matrix product C = A B contracts over the shared index k; its backward pass is two more matrix products."
+     font-family="system-ui, sans-serif" font-size="13">
+  <rect x="40"  y="40" width="130" height="90" rx="6" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="105" y="88" text-anchor="middle">A  (m×k)</text>
+  <rect x="210" y="40" width="130" height="90" rx="6" fill="#fbf0d6" stroke="#33373d"/>
+  <text x="275" y="88" text-anchor="middle">B  (k×n)</text>
+  <text x="372" y="90" font-size="16">=</text>
+  <rect x="400" y="40" width="130" height="90" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="465" y="88" text-anchor="middle">C  (m×n)</text>
+  <text x="620" y="74" text-anchor="middle">forward: 1 gemm</text>
+  <text x="620" y="98" text-anchor="middle" font-size="12" fill="#444b53">Cᵢⱼ = Σₖ Aᵢₖ Bₖⱼ</text>
+  <rect x="40" y="168" width="680" height="62" rx="6" fill="#f4f6f8" stroke="#33373d"/>
+  <text x="60" y="192" font-weight="bold">backward: two more gemms</text>
+  <text x="60" y="216">Ā = C̄ Bᵀ          B̄ = Aᵀ C̄</text>
+  <text x="470" y="216" font-size="11" fill="#444b53">(same compute-bound primitive, run twice)</text>
+</svg>
+
+The matrix product contracts over the shared index $k$. Because it is bilinear, its
+pushforward is the product rule and its pullback is two more products of the same
+kind — so a layer's forward and backward passes are all matrix multiplies, the
+operation the tensor cores are built for.
+:::
+
+**JVP (pushforward).** Linearising a bilinear map is the product rule: perturb $A$ by
+$\dot A$ and $B$ by $\dot B$ and the first-order change in $C$ is the sum of the two
+one-sided changes,
+$$
+\dot C \;=\; \dot A\,B \;+\; A\,\dot B,\qquad
+\dot C_{ij} = \dot A_{ik}B_{kj} + A_{ik}\dot B_{kj}.
+$$
+Two matrix products, no Jacobian.
+
+**VJP (pullback).** We want the transpose: given a cotangent $\bar C$ on the output
+(same shape as $C$), find the sensitivities $\bar A,\bar B$ on the inputs. By
+definition the pullback satisfies $\langle\bar C,\dot C\rangle = \langle\bar A,\dot
+A\rangle + \langle\bar B,\dot B\rangle$ for every perturbation, where
+$\langle U,V\rangle=\operatorname{tr}(U^\top V)$ is the elementwise inner product.
+Substitute the JVP and regroup each term onto its perturbation:
+$$
+\langle\bar C,\dot A B\rangle = \langle \bar C B^\top,\dot A\rangle,
+\qquad
+\langle\bar C, A\dot B\rangle = \langle A^\top\bar C,\dot B\rangle,
+$$
+(each step is the cyclic property of the trace), and read off the sensitivities:
+$$
+\boxed{\;\bar A = \bar C\,B^\top,\qquad \bar B = A^\top\,\bar C.\;}
+$$
+In index notation $\bar A_{ik}=\bar C_{ij}B_{kj}$ and $\bar B_{kj}=A_{ik}\bar
+C_{ij}$ — the *same* indices as the forward contraction, summed on the other leg,
+exactly as the [transpose rule](differentiation.qmd#sec-vjp) demanded. The lesson is
+the one in the figure: **the backward pass of a matmul is two matmuls.** A linear
+layer therefore costs about three times its forward pass to train, all of it the
+compute-bound, tensor-core-friendly primitive — the single fact that makes deep
+learning affordable.
+
+@fig-gemm-check confirms the formulas against finite differences, in pure NumPy.
+
+```{python}
+#| label: fig-gemm-check
+#| fig-cap: "The gemm JVP and VJP, verified against finite differences. The pushforward Ċ = ȦB + AḂ and the pullback Ā = C̄Bᵀ, B̄ = AᵀC̄ each match a numerical reference to roughly machine precision (the bars are the max absolute error, ~1e-9 in float64), confirming the boxed formulas are exact, not approximate."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+m, k, n = 4, 5, 3
+A = rng.standard_normal((m, k)); B = rng.standard_normal((k, n))
+dA = rng.standard_normal((m, k)); dB = rng.standard_normal((k, n))
+Cbar = rng.standard_normal((m, n))
+
+# JVP (analytic) vs finite difference of C(A,B) = A @ B.
+jvp = dA @ B + A @ dB
+eps = 1e-6
+jvp_fd = ((A + eps * dA) @ (B + eps * dB) - A @ B) / eps
+err_jvp = np.max(np.abs(jvp - jvp_fd))
+
+# VJP (analytic): Abar = Cbar Bᵀ, Bbar = Aᵀ Cbar. Check the adjoint identity
+# <Cbar, JVP> == <Abar, dA> + <Bbar, dB> to machine precision.
+Abar, Bbar = Cbar @ B.T, A.T @ Cbar
+lhs = np.sum(Cbar * (dA @ B + A @ dB))
+rhs = np.sum(Abar * dA) + np.sum(Bbar * dB)
+err_vjp = abs(lhs - rhs)
+
+fig, ax = plt.subplots(figsize=(5.6, 3.4))
+ax.bar(["JVP vs\nfinite diff", "VJP adjoint\nidentity"], [err_jvp, err_vjp],
+       color=["#2c6a45", "#8a3ffc"])
+ax.set_yscale("log"); ax.set_ylabel("max absolute error (log)")
+ax.set_title("gemm forward/backward formulas are exact")
+ax.set_ylim(1e-16, 1e-4)
+for i, v in enumerate([err_jvp, err_vjp]):
+    ax.text(i, v * 2, f"{v:.1e}", ha="center", fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+## softmax: a structured Jacobian {#sec-softmax}
+
+The softmax turns a vector of scores into a probability distribution,
+$$
+s_i \;=\; \frac{e^{x_i}}{\sum_k e^{x_k}} .
+$$
+In practice it is computed in the numerically stable form $s_i = e^{x_i-c}/\sum_k
+e^{x_k-c}$ with $c=\max_k x_k$: subtracting the max changes nothing mathematically
+(the constant cancels) but keeps every exponential in $[0,1]$, avoiding overflow.
+This **log-sum-exp** trick recurs across `nitrix` — in attention, and in the LOG
+semiring below — and is the standard way to keep exponentials honest.
+
+The Jacobian has a clean closed form. Differentiating the quotient,
+$$
+J_{ij} \;=\; \frac{\partial s_i}{\partial x_j} \;=\; s_i(\delta_{ij}-s_j)
+\;=\; \operatorname{diag}(s) - s\,s^\top ,
+$$
+a **diagonal minus a rank-one outer product** ($\delta_{ij}$ is 1 when $i=j$, else
+0). @fig-softmax-jac shows the structure for a small example. Two features matter.
+First, it is *dense* — $m\times m$ — so for a length-$1000$ softmax the explicit
+Jacobian is a million entries you never want to store. Second, it is *symmetric*
+($\operatorname{diag}(s)$ and $ss^\top$ both are), which will make the pushforward
+and pullback identical.
+
+```{python}
+#| label: fig-softmax-jac
+#| fig-cap: "The softmax Jacobian J = diag(s) − s sᵀ for a length-8 input, as a heatmap. It is dense and symmetric: a positive diagonal s_i(1−s_i) and negative off-diagonals −s_i s_j (raising one logit lowers the others' probabilities). You never build this m×m matrix — the JVP and VJP apply it in O(m) from s and a single weighted sum."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(1)
+x = rng.standard_normal(8)
+s = np.exp(x - x.max()); s /= s.sum()
+J = np.diag(s) - np.outer(s, s)
+
+fig, ax = plt.subplots(figsize=(4.8, 4.0))
+im = ax.imshow(J, cmap="RdBu_r", vmin=-np.abs(J).max(), vmax=np.abs(J).max())
+ax.set_title(r"softmax Jacobian  $J = \mathrm{diag}(s) - s\,s^\top$")
+ax.set_xlabel("input index j"); ax.set_ylabel("output index i")
+fig.colorbar(im, ax=ax, shrink=0.85, label=r"$\partial s_i/\partial x_j$")
+fig.tight_layout()
+plt.show()
+```
+
+**JVP (pushforward).** Apply $J$ to a perturbation $\dot x$ without forming it:
+$$
+\dot s = J\dot x = s\odot\dot x - s\,(s^\top\dot x),\qquad
+\dot s_i = s_i\Bigl(\dot x_i - \textstyle\sum_k s_k\dot x_k\Bigr),
+$$
+where $\odot$ is the elementwise product. Read it as: scale the perturbation by the
+probabilities, then subtract the probability-weighted *mean* perturbation — a
+"centre, then reweight" that costs $O(m)$, not $O(m^2)$. The single scalar
+$\sum_k s_k\dot x_k$ is the only thing that couples the coordinates.
+
+**VJP (pullback).** Because $J$ is symmetric, $J^\top=J$, so the pullback is the
+*same* operation applied to the cotangent $\bar y$:
+$$
+\bar x = J\bar y = s\odot\bar y - s\,(s^\top\bar y),\qquad
+\bar x_i = s_i\Bigl(\bar y_i - \textstyle\sum_k s_k\bar y_k\Bigr).
+$$
+One subtracted weighted-mean, one elementwise scale — again $O(m)$. The symmetry of
+the structured Jacobian is a small gift the chapter's discipline hands you for free:
+forward and backward are one routine. This matrix-free, stable softmax is the
+core of `nitrix`'s `nn.attention`, where an explicit per-row $m\times m$ Jacobian
+would be ruinous.
+
+## The semiring matrix product {#sec-semiring}
+
+The third kernel generalises the *operation itself*. A matrix product does two
+things — it **multiplies** pairs of entries and **sums** the results — and there is
+nothing sacred about $(\times,+)$. Replace them with any pair $(\otimes,\oplus)$ that
+behaves enough like multiply-and-add (a **semiring**) and the same contraction
+$$
+C_{ij} \;=\; \bigoplus_k\bigl(A_{ik}\otimes B_{kj}\bigr)
+$$
+computes something new. This is not a curiosity: it is `nitrix`'s **core
+substrate**. Mesh and graph operators, morphology, and smoothing are all semiring
+reductions over the sparse ELL storage of the geometry unit — "there is no
+message-passing base class," only this product over a chosen algebra. The kernel is
+`semiring_matmul`, and it ships with the algebras in the table below.
+
+| Semiring | $\oplus$ (combine) | $\otimes$ (extend) | computes | backward pass |
+|---|---|---|---|---|
+| **REAL** | $+$ | $\times$ | ordinary matrix product | two gemms (above) |
+| **LOG** | $\log\!\sum e$ | $+$ | log-space sum-of-products (marginals) | **softmax**-weighted routing |
+| **TROPICAL** | $\min$ (or $\max$) | $+$ | shortest / longest paths | **argmin** selection (a backtrace) |
+| **BOOLEAN** | $\lor$ | $\land$ | reachability / connectivity | (non-differentiable) |
+
+The striking part is what happens when we ask for the *derivative* of a semiring
+product. The matrix-free pushforward/pullback machinery of the
+[last chapter](differentiation.qmd) still applies — but **what the local
+linearisation is depends on the algebra**, and the three differentiable cases are
+exactly the previous two kernels in disguise.
+
+- **REAL** is the gemm of [the first section](#sec-gemm): product rule forward, two
+  gemms backward.
+- **LOG** uses $a\oplus b=\log(e^a+e^b)$ and $a\otimes b=a+b$, so $C_{ij}=
+  \operatorname{logsumexp}_k(A_{ik}+B_{kj})$. Its derivative is governed by the
+  identity from the softmax section — *the gradient of log-sum-exp is the softmax*:
+  $$
+  \frac{\partial}{\partial u_k}\operatorname{logsumexp}(u) \;=\;
+  \frac{e^{u_k}}{\sum_{k'} e^{u_{k'}}} \;=\; \operatorname{softmax}(u)_k .
+  $$
+  So the backward pass of a LOG-semiring product **routes the output cotangent back
+  to the inputs weighted by a softmax** over the combined terms $A_{ik}+B_{kj}$ —
+  the forward pass sums in log space, the backward pass distributes by the
+  responsibilities. (This is the gradient of the forward algorithm, and of any
+  log-partition.)
+- **TROPICAL** uses $a\oplus b=\min(a,b)$, so $C_{ij}=\min_k(A_{ik}+B_{kj})$ — a
+  Bellman shortest-path step. The minimum is piecewise linear; its (sub)gradient is a
+  hard *selection* of the winning $k$, so the backward pass sends the cotangent
+  entirely to the term that achieved the minimum. That is precisely **backtracking
+  the optimal path** (the Viterbi/shortest-path traceback).
+
+These last two are the same object at two temperatures, which is the punchline that
+links this chapter to the next. Log-sum-exp is a **smooth relaxation of the
+maximum** (equivalently softmin of the minimum): with an inverse-temperature
+$\beta$,
+$$
+\tfrac{1}{\beta}\operatorname{logsumexp}(\beta\,u) \;\xrightarrow{\ \beta\to\infty\ }\;
+\max_k u_k ,
+$$
+and the softmax weights sharpen to a one-hot argmax. So the **LOG semiring is the
+differentiable relaxation of the TROPICAL one**: smoothing the hard $\min$/$\max$
+into a soft, temperature-controlled average turns a combinatorial operation with a
+selection "gradient" into a genuinely smooth one whose gradient is a softmax.
+@fig-semiring shows the relaxation.
+
+```{python}
+#| label: fig-semiring
+#| fig-cap: "The LOG semiring as a smooth relaxation of the TROPICAL one. Two candidate path-costs cross as a parameter t varies; the tropical min (black, a kink) is non-differentiable at the crossing, while the log-semiring soft-min −(1/β)·logsumexp(−β·costs) (coloured) is smooth everywhere and approaches the hard min as the inverse-temperature β grows. Its gradient is a softmax over the candidates — the differentiable stand-in for the argmin backtrace."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+t = np.linspace(-2, 2, 400)
+cost_a = 0.5 * t + 1.0          # candidate path A cost
+cost_b = -0.7 * t + 1.2         # candidate path B cost
+costs = np.stack([cost_a, cost_b], axis=0)
+
+hard_min = costs.min(axis=0)
+def soft_min(beta):
+    return -1.0 / beta * np.logaddexp(-beta * costs[0], -beta * costs[1])
+
+fig, ax = plt.subplots(figsize=(6.8, 3.8))
+ax.plot(t, cost_a, "--", color="0.7", lw=1, label="path A cost")
+ax.plot(t, cost_b, ":", color="0.7", lw=1, label="path B cost")
+for beta, col in [(1.0, "#3b6fb0"), (3.0, "#d08a2c"), (12.0, "#b03b4b")]:
+    ax.plot(t, soft_min(beta), color=col, lw=2, label=fr"soft-min (β={beta:g})")
+ax.plot(t, hard_min, color="k", lw=2.2, label="tropical min (hard)")
+ax.set_xlabel("parameter t"); ax.set_ylabel("combined cost")
+ax.set_title("LOG semiring smoothly relaxes the TROPICAL min")
+ax.legend(fontsize=8, ncol=2, loc="upper center")
+fig.tight_layout()
+plt.show()
+```
+
+## What this means for `nitrix`
+
+The three kernels are a tour of the chapter's one discipline — *exploit the
+Jacobian's structure, never build it* — across the operations the library is made
+of.
+
+- **gemm's two-matmul backward** is why every dense layer, attention projection, and
+  linear readout in `nitrix`'s `nn` seam backpropagates at the cost of a couple of
+  forward passes, on the tensor cores the [hardware chapter](hardware.qmd) described.
+- **softmax's structured, symmetric, matrix-free Jacobian** is what makes attention
+  differentiable without a per-row $m\times m$ matrix, and its log-sum-exp form is
+  the numerical-stability pattern reused wherever exponentials appear.
+- **the semiring product** is the substrate beneath the geometry, graph, morphology,
+  and smoothing units, and its differentiation is the unifying thread: the REAL
+  backward is two gemms, the LOG backward is a softmax-weighted routing, the
+  TROPICAL backward is an argmin backtrace, and the first two are one operation at
+  two temperatures. The fused `semiring_matmul` kernels register exactly these as
+  their `custom_vjp`, so the substrate stays differentiable.
+
+The through-line is [Thread B](index.qmd#sec-thread-linear) meeting
+[Thread C](index.qmd#sec-thread-structure): the derivative is a linear map you apply
+matrix-free by exploiting its structure (diagonal, rank-one, bilinear, semiring),
+and the *algebra* you choose — the structure you build in — determines both what the
+kernel computes and what its gradient is. The relaxation that made the TROPICAL
+semiring differentiable is the first glimpse of the [inductive-bias
+chapter](inductive-bias.qmd): smoothing a discrete operation into a differentiable
+one is how hard, combinatorial structure is admitted into a differentiable program.
+
+## Further reading
+
+- Giles, M. B. (2008). *Collected matrix derivative results for forward and reverse
+  mode algorithmic differentiation.* — the matrix calculus behind the gemm JVP/VJP
+  (and many other linear-algebra primitives).
+- Blondel, M., Mensch, A. & Vert, J.-P. (2020). "Differentiable dynamic
+  programming for structured prediction and attention." *ICML*. — the LOG-semiring
+  smoothing of $\min$/$\max$ and its softmax/softargmax gradients.
+- Mensch, A. & Blondel, M. (2018). "Differentiable dynamic programming." — the
+  smoothed shortest-path / Viterbi view of the tropical-vs-log relaxation.
+- Goodfellow, I., Bengio, Y. & Courville, A. (2016). *Deep Learning*, ch. 6. — the
+  softmax, log-sum-exp stability, and the backward pass of linear layers.
+
+## See also
+
+- The semiring substrate: [`nitrix.semiring`](https://github.com/hypercoil/nitrix/tree/main/src/nitrix/semiring)
+  and the fused kernel
+  [`_kernels/cuda/semiring_matmul.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_kernels/cuda/semiring_matmul.py)
+  (with its `custom_vjp`), used across the
+  [geometry operator algebra](../geometry/operators.qmd).
+- The softmax in action: the attention kernel
+  [`_kernels/cuda/attention.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/_kernels/cuda/attention.py).
+- Previous chapter: [differentiation as linear algebra](differentiation.qmd) — the
+  JVP/VJP machinery these kernels instantiate. Next chapter:
+  [the differentiable-programming paradigm](differentiable-programming.qmd) — how
+  kernels like these compose into a program you can optimise.

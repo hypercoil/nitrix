@@ -2,18 +2,17 @@
 title: "Generalised linear models: the foundation"
 ---
 
-::: {.callout-tldr title="Fast path"}
 A **linear model** $y = X\beta + \varepsilon$ is solved by projecting $y$ onto the
-columns of $X$ — i.e. by solving the **normal equations** $X^{\top}X\,\beta = X^{\top}y$.
+columns of $X$ — by solving the **normal equations** $X^{\top}X\,\beta = X^{\top}y$.
 A **generalised** linear model lets the response be counts, probabilities, or
-positive values instead of Gaussian. We fit it by **IRLS**: repeatedly turn the
+positive values instead of Gaussian, and we fit it by **IRLS**: repeatedly turn the
 non-Gaussian problem into a *weighted* least-squares problem
-$X^{\top} W X\,\beta = X^{\top} W z$ and re-solve, until it stops moving. The one
-new idea this page adds is that IRLS is not a trick — it is **Fisher scoring**,
-and the weights $W$ and working response $z$ are *forced* by the exponential
-family's mean–variance identity. That single $p\times p$ solve — plus $W$ and $z$
-— is the machinery the entire suite is built on.
-:::
+$X^{\top} W X\,\beta = X^{\top} W z$ and re-solve until it stops moving. The one new
+idea this page adds is that IRLS is not a trick — it is **Fisher scoring**, and the
+weights $W$ and working response $z$ are *forced* by the exponential family's
+mean–variance identity, not chosen. That single $p\times p$ solve — plus $W$ and
+$z$ — is the machinery the entire suite is built on; every rung above adds exactly
+one ingredient beside it.
 
 This is the bottom rung of [the ladder](index.qmd). Read it carefully: every
 later model is this chapter plus one new idea. It sits directly on top of
@@ -107,7 +106,7 @@ $\mu(1-\mu)$ for binary, $\mu$ for Poisson counts).
 
 These two objects — the link and the variance function — are exactly the two
 fields that matter to fitting in a `nitrix` `Family` (the frozen record described
-in [foundations §4](foundations.qmd#sec-expfam)). And they are not independent
+in [foundations](foundations.qmd#sec-expfam)). And they are not independent
 free choices: the variance function is *forced* by the distribution through the
 mean–variance identity $\operatorname{Var}[y]=\phi\,V(\mu)$ derived in
 [foundations](foundations.qmd#sec-expfam). That identity is what makes the next
@@ -262,7 +261,8 @@ fig.tight_layout(); plt.show()
 
 ## IRLS, rigorously: it *is* Fisher scoring {#sec-irls}
 
-Section 4 did the heavy lifting; here is the loop it justifies, stated cleanly.
+[The previous section](#sec-working) did the heavy lifting; here is the loop it
+justifies, stated cleanly.
 Given a current $\beta$ with $\eta=X\beta$ and $\mu=g^{-1}(\eta)$:
 
 1. compute the working weights $W$ and working response $z$ of @eq-working;
@@ -297,8 +297,9 @@ direction but a safe fraction of its length, equivalently add a small ridge
 $\lambda I$ to the curvature $X^{\top}WX$ before solving (large $\lambda$ → a
 short, gradient-like step; small $\lambda$ → the full Newton step near the
 optimum). The full story — line search, the Levenberg ridge, why the small dense
-solve stays SPD — lives in [solvers §3](solvers.qmd#sec-newton), and the small
-$p\times p$ solve itself in [solvers §2](solvers.qmd#sec-cholesky). `nitrix` runs
+solve stays SPD — lives in [solvers](solvers.qmd#sec-newton), and the small
+$p\times p$ solve itself in [the Cholesky section](solvers.qmd#sec-cholesky).
+`nitrix` runs
 a **fixed** budget of IRLS iterations (`n_iter`, default 25) so the whole fit is
 `vmap`-clean and JIT-compiled across the image, and it evaluates the final
 covariance $V=(X^{\top}WX + S + \text{ridge})^{-1}$ *at the converged* $\beta$ —
@@ -394,7 +395,8 @@ print(f"converged β ≈ {beta.round(3)}   (true {beta_true})")
 ```
 
 For the logistic family $W=\mu(1-\mu)$ and the bracketed update is exactly
-@eq-wls — the same `z`/`W` you derived in §4, now in five lines of NumPy. The
+@eq-wls — the same `z`/`W` you derived in
+[the working-weights section](#sec-working), now in five lines of NumPy. The
 log-likelihood rises and flattens within a few steps: this is the fast Fisher-
 scoring convergence that lets `glm_fit` run a fixed iteration budget over a whole
 brain.
@@ -409,7 +411,7 @@ inverse and the log-determinant in one pass. Crucially it makes **no `cuSOLVER`
 custom call**. On the GPU stacks where the vendor solver is broken, the textbook
 `jnp.linalg.solve` would fail; this hand-rolled path keeps the entire suite
 running on the accelerator. The full derivation of that routine — and why it is
-numerically sound — is [solvers §2](solvers.qmd#sec-cholesky); the point to carry
+numerically sound — is [the Cholesky section of solvers](solvers.qmd#sec-cholesky); the point to carry
 forward is that GLM, GAM, contrasts and the family zoo all funnel through this one
 solve.
 
@@ -430,7 +432,8 @@ $$
 \qquad V = \hat\phi\,(X^{\top}WX)^{-1} .
 $$ {#eq-contrast-var}
 
-Read $V$ straight off the inverse Fisher information from §4: the curvature *is*
+Read $V$ straight off the inverse Fisher information derived
+[above](#sec-working): the curvature *is*
 the precision of $\hat\beta$, so its inverse is the covariance, scaled by the
 dispersion $\hat\phi$. In `glm.py` the unscaled $(X^{\top}WX)^{-1}$ is stored as
 `cov_unscaled` and `t_contrast` forms `dispersion * einsum('...ij,i,j->...',
@@ -520,8 +523,8 @@ each grounded in real source:
   $P(y\le k)=F(\theta_k - x^{\top}\beta)$ with $F$ the logistic or normal CDF. The
   thresholds are kept ordered by the unconstrained reparameterisation
   $\theta=\theta_1+\text{cumsum}([0,e^{\delta}])$ and the concave log-likelihood is
-  maximised by the shared damped Newton — the same [solvers
-  §3](solvers.qmd#sec-newton) routine.
+  maximised by the shared damped Newton — the same
+  [damped-Newton](solvers.qmd#sec-newton) routine.
 
 - **Gaussian location-scale** (`gaulss.py`, `gaulss_fit`) — the bridge toward
   GAMLSS. The ordinary GLM gives the *mean* a linear predictor and treats the
@@ -551,6 +554,14 @@ Everything above recurs:
 The working response, the working weights, the small cuSOLVER-free solve, and
 damped Newton are the constants; each later chapter changes only what sits inside
 or beside the $p\times p$ system.
+
+Seen through the suite's organising idea, the GLM is the one rung that carries **no
+penalty**: it passes $S=0$ to the shared solve, so it imposes no prior on $\beta$
+beyond the linear form itself — no inductive bias, no shrinkage. Every model above
+adds a non-zero $S$ — the same matrix read as a roughness penalty, a Gaussian
+prior, a random-effect variance, or a kernel ([foundations](foundations.qmd#sec-equivalence))
+— and then must *choose its strength*. The GLM is the engine stripped to its frame;
+the rest of the suite bolts one inductive bias at a time onto exactly this solve.
 
 ## Further reading
 

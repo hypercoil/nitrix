@@ -2,22 +2,18 @@
 title: "Foundations: variance, families, and penalties"
 ---
 
-::: {.callout-tldr title="Fast path"}
 This is rung 0 — the page that turns "I know linear algebra" into "I can read the
-rest of this book as one story." Three ideas underpin the whole suite:
-
-1. **We model variance, not just the mean.** Spread is the quantity of interest,
-   and when data come in groups it *splits* into named buckets — the
-   *variance components* that mixed models estimate.
-2. **One exponential-family template** covers Gaussian, binary, count and positive
-   responses, and it dictates exactly how each observation is weighted: the *mean
-   determines the variance*.
-3. **A smoothing penalty, a Gaussian prior, a random-effect variance, and a GP
-   kernel are four names for one object.** That single equivalence is why six
-   models share one engine instead of being six separate programs.
-
-If you read only one page before the ladder, read this one.
-:::
+rest of this suite as one story." Three ideas underpin everything that follows.
+First, **we model variance, not just the mean**: spread is the quantity of
+interest, and when data come in groups it *splits* into named buckets — the
+*variance components* that mixed models estimate. Second, **one exponential-family
+template** covers Gaussian, binary, count and positive responses, and it dictates
+exactly how each observation is weighted: the *mean determines the variance*.
+Third — and this is the spine of the whole suite — **a smoothing penalty, a
+Gaussian prior, a random-effect variance, and a GP kernel are four names for one
+object.** That single equivalence is why six models share one engine instead of
+being six separate programs. If you read only one page before the ladder, read
+this one.
 
 This suite is written for a reader who is comfortable with **linear algebra** —
 matrices, least squares, eigendecomposition, rank, transposes — but who has had
@@ -47,15 +43,17 @@ noise shape; an LME adds correlated noise from grouping; a GAM adds a roughness
 penalty; a GLMM combines two of those; a GAMM combines all of them; an HSGP writes
 a kernel as one more penalty. The ladder is therefore not six topics but one
 object, viewed at six levels of structural richness — and three planks support all
-six. This page builds those three planks: **variance** (§3), the
-**exponential family** (§4), and the **grand equivalence** (§5). With them in hand
-the rest of the book reads as one argument.
+six. This page builds those three planks: [**variance**](#sec-variance), the
+[**exponential family**](#sec-expfam), and the
+[**grand equivalence**](#sec-equivalence). With them in hand the rest of the suite
+reads as one argument.
 
 A note on what "fitting" even means here. `nitrix.stats` is **mass-univariate**:
 the same design $X$ is applied to *every* element of an image — every voxel,
 vertex, or fixel — at once, hundreds of thousands of tiny regressions sharing one
-design. That shapes the numerics (more in §6), but conceptually nothing changes:
-each element is one instance of the three-part object.
+design. That shapes the numerics (more in [the shared substrate](#sec-substrate)),
+but conceptually nothing changes: each element is one instance of the three-part
+object.
 
 ## A motivating question {#sec-motivation}
 
@@ -69,16 +67,16 @@ about this data are not captured by "fit a line":
 
 - The measurements **cluster by subject** — two scans of the same person are more
   alike than two scans of different people. The scatter is not one homogeneous
-  cloud; it has structure we must name and model. (This is §3, and the seed of
-  mixed models.)
+  cloud; it has structure we must name and model. (This is
+  [variance](#sec-variance), and the seed of mixed models.)
 - If instead of thickness we measured a **count** (number of lesions) or a
   **probability** (is this voxel "activated", yes/no), the spread would no longer
   be constant — it would *depend on the mean*. We need a noise model that adapts.
-  (This is §4, and the engine of GLMs.)
+  (This is [exponential families](#sec-expfam), and the engine of GLMs.)
 - The age effect might not be a straight line but a **smooth curve**, and we must
   decide *how wiggly* to let it be without overfitting. The knob that controls
   wiggliness turns out to be the same knob as "how much do subjects vary." (This
-  is §5, and the spine of the whole suite.)
+  is [the grand equivalence](#sec-equivalence), and the spine of the whole suite.)
 
 Each plank answers one of these, and the planks turn out to be deeply connected.
 
@@ -426,8 +424,8 @@ and the semicontinuous `TWEEDIE` ($V=\mu^p$), each a point on the same template.
 This is the conceptual payoff of the whole book, and it is worth slowing down for.
 Our third motivating wrinkle was the wiggliness knob: how smooth should the
 age-trajectory be? We will show that this knob is *the same object* as the
-between-subjects variance from §3 — and as a Bayesian prior, and as a Gaussian-process
-kernel. Four vocabularies, one matrix.
+between-subjects variance from [the variance section](#sec-variance) — and as a
+Bayesian prior, and as a Gaussian-process kernel. Four vocabularies, one matrix.
 
 ### Start with a penalty you would invent yourself
 
@@ -485,7 +483,7 @@ small $\tau$ (a tight prior that insists the coefficients be small).
 
 ### …and a tight prior is a small random-effect variance
 
-One more rename closes the loop back to §3. "Treat the coefficients as random,
+One more rename closes the loop back to [variance](#sec-variance). "Treat the coefficients as random,
 drawn from $N(0,\tau^2 S^{-1})$" is the *definition* of a **random effect** with
 variance component $\tau^2$. So:
 
@@ -593,14 +591,30 @@ HSGP are one engine, not five programs: each fits a penalised weighted normal-eq
 system and chooses the scale parameter by a (restricted) likelihood. The next section
 names that shared machinery.
 
+It is worth reading the equivalence once more as a statement about **inductive
+bias**. A penalty $\beta^{\top} S\beta$ is not a numerical convenience; it is an
+*assumption* — that the truth is smooth, or small, or varies little between
+subjects — imposed on the fit before the data speak. That is the same role symmetry
+plays in the [geometry unit](../geometry/index.qmd): a constraint we build in so
+that finite, noisy data can identify an answer. The Bayesian reading makes the bias
+explicit (it *is* the prior $N(0,\tau^2 S^{-1})$), and the frequentist reading hides
+it inside a penalty, but they are the same commitment. The one difference from a
+fixed prior is that we do not pick the scale $\lambda$ (equivalently $\tau$) by hand:
+we let the data choose it, by maximising the **marginal** (data) likelihood with the
+coefficients integrated out. Choosing the strength of a prior from the data this way
+is *empirical Bayes*, and it is exactly what REML and the Fellner–Schall update do
+throughout the suite — the inductive bias is declared in the *form* of $S$ and
+*calibrated* in its scale.
+
 ## The shared computational substrate {#sec-substrate}
 
 Everything above reduces, computationally, to two moves repeated across the suite:
 
 1. **Solve a (penalised) weighted normal-equations system.** Every model ends at
    $(X^{\top} W X + S)\,\beta = X^{\top} W z$ — a small $p\times p$ linear solve you
-   recognise from least squares, with weights $W$ from the family (§4) and a penalty
-   $S$ from the equivalence (§5). The numerics of doing this stably — Cholesky,
+   recognise from least squares, with weights $W$ from the
+   [exponential family](#sec-expfam) and a penalty $S$ from
+   [the equivalence](#sec-equivalence). The numerics of doing this stably — Cholesky,
    damped Newton, the cuSOLVER-free dense inverse `small_inv_logdet`, block-Woodbury
    for many groups — live in [the solvers page](solvers.qmd).
 2. **Choose the variance/smoothing parameters** $\theta,\lambda$ by maximising a
@@ -642,7 +656,7 @@ nearby on a first read.
 
 Three paths, matched to the novice → practitioner → developer arc:
 
-- **Novice (fast path).** Read this page, then each chapter's TL;DR callout, plus the
+- **Novice (fast path).** Read this page, then skim each chapter's opening, plus the
   GLM chapter in full. That is enough to choose the right model for a question and to
   use the fitters.
 - **Practitioner (ladder order).** Read in ladder order — foundations → glm → lme →
@@ -678,7 +692,7 @@ Three paths, matched to the novice → practitioner → developer arc:
 
 - Source: [`_family.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_family.py)
   — the `Family` record, the built-in families, links, variance functions and
-  deviances described in §4.
+  deviances described in [the exponential-family section](#sec-expfam).
 - Source: [`_irls.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/stats/_irls.py)
   — the penalised IRLS core that performs the shared $(X^{\top}WX+S)\beta=X^{\top}Wz$
   solve.

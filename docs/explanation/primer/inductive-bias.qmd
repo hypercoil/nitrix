@@ -1,0 +1,331 @@
+---
+title: "Inductive bias, invariance, and equivariance"
+---
+
+The unit so far has built the means to train a differentiable program: the
+[machine](hardware.qmd) it runs on, the [compiler](xla-jax.qmd) that makes it fast,
+the [calculus](differentiation.qmd) of its gradients, the [paradigm](differentiable-programming.qmd)
+that uses them, and the [implicit trick](implicit-differentiation.qmd) for the
+outputs no formula defines. But all of that is *machinery for searching* — it does
+not say *what to search*. The [paradigm chapter](differentiable-programming.qmd#sec-limits)
+named this the real problem: choosing the hypothesis class, the family of functions
+the optimiser is allowed to pick from. Get it wrong and no amount of compute or
+clever differentiation helps.
+
+This closing chapter is about that choice, and it is deliberately a **teaser** — a
+map of ideas the rest of the book develops, not a treatise. The organising notion is
+**inductive bias**: the structure you build into a hypothesis class to steer it
+toward good solutions. Its most principled form comes from **symmetry** — the
+programme of *geometric deep learning* — and the two properties it turns on,
+**invariance** and **equivariance**, are the running themes of the three units that
+follow. By the end you will see why each of geometry, registration, and statistics is,
+at heart, the study of a particular inductive bias.
+
+## Hypothesis classes and generalisation {#sec-hypothesis}
+
+Frame the task precisely. There is an unknown process — call it the **referent**
+$f^\star$ — that we want to recover from data: a true input–output relationship, or a
+distribution. We choose a **hypothesis class** $\mathcal{F}$, a family of
+differentiable functions, and search it for an approximation. Two failure modes bound
+the choice (@fig-hypothesis).
+
+- **Too narrow.** If $\mathcal{F}$ is too small, it may contain *no* good
+  approximation to $f^\star$; the best member $\hat f$ is still far from the truth.
+  This is **bias** (underfitting) — the class cannot express what is needed.
+- **Too broad.** If $\mathcal{F}$ is too large, *many* of its members fit the
+  available (noisy, finite) data equally well, and the one the optimiser lands on,
+  $\tilde f$, is likely to have chased the noise. This is **variance**
+  (overfitting) — the class expresses too much, and generalises badly.
+
+::: {#fig-hypothesis}
+<svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The space of all functions contains the hypothesis class as a region; the true process may lie outside it (bias), and noisy fits scatter around the best-in-class member (variance)."
+     font-family="system-ui, sans-serif" font-size="13">
+  <rect x="30" y="30" width="660" height="200" rx="8" fill="#f4f6f8" stroke="#cfd4d9"/>
+  <text x="50" y="52" font-size="12" fill="#888">space of all functions</text>
+  <ellipse cx="430" cy="140" rx="200" ry="80" fill="#dce9dd" stroke="#33373d"/>
+  <text x="430" y="80" text-anchor="middle" font-size="13">hypothesis class  ℱ</text>
+  <!-- truth outside -->
+  <text x="150" y="120" text-anchor="middle" font-size="18" fill="#b03b4b">★</text>
+  <text x="150" y="104" text-anchor="middle" font-size="12" fill="#b03b4b">f*  (truth)</text>
+  <!-- best in class -->
+  <circle cx="300" cy="150" r="5" fill="#33373d"/>
+  <text x="300" y="172" text-anchor="middle" font-size="12">f̂  (best in ℱ)</text>
+  <line x1="162" y1="123" x2="293" y2="148" stroke="#b03b4b" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="215" y="128" font-size="11" fill="#b03b4b">bias</text>
+  <!-- noisy fits scatter -->
+  <g fill="#8a3ffc">
+    <circle cx="470" cy="120" r="4"/><circle cx="510" cy="160" r="4"/><circle cx="450" cy="175" r="4"/><circle cx="520" cy="115" r="4"/><circle cx="490" cy="145" r="4"/>
+  </g>
+  <text x="540" y="150" font-size="12" fill="#8a3ffc">f̃  (noisy fits)</text>
+  <text x="490" y="200" text-anchor="middle" font-size="11" fill="#8a3ffc">variance = their spread</text>
+</svg>
+
+Hypothesis classes and generalisation. The class $\mathcal{F}$ is a region of
+function space. If the truth $f^\star$ lies outside it, even the best member $\hat
+f$ is biased; if $\mathcal{F}$ is large, the fits $\tilde f$ obtained from noisy data
+scatter widely (variance). A good inductive bias makes $\mathcal{F}$ small enough to
+pin the fit yet large enough to contain the truth.
+:::
+
+@fig-fit makes the trade concrete on the oldest example there is — fitting a curve
+to noisy points with polynomials of growing degree.
+
+```{python}
+#| label: fig-fit
+#| fig-cap: "Bias and variance, concretely. Noisy samples (grey) of a smooth function (black) fit by polynomials of degree 1 (too narrow a class — underfits, high bias), degree 4 (about right — recovers the shape), and degree 15 (too broad — interpolates the noise, high variance). The hypothesis class is the polynomial degree; choosing it well is choosing an inductive bias."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+truth = lambda t: np.sin(2 * np.pi * t) + 0.3 * t
+x = np.sort(rng.uniform(0, 1, 18))
+y = truth(x) + rng.normal(0, 0.18, x.size)
+xx = np.linspace(0, 1, 400)
+
+fig, ax = plt.subplots(figsize=(7.2, 4.0))
+ax.plot(xx, truth(xx), color="k", lw=2, label="truth $f^\\star$")
+ax.scatter(x, y, s=22, color="0.6", zorder=3, label="noisy data")
+for deg, col, name in [(1, "#b03b4b", "degree 1 (underfit)"),
+                       (4, "#2c6a45", "degree 4 (about right)"),
+                       (15, "#8a3ffc", "degree 15 (overfit)")]:
+    coef = np.polyfit(x, y, deg)
+    ax.plot(xx, np.polyval(coef, xx), color=col, lw=2, label=name)
+ax.set_ylim(-1.8, 1.8); ax.set_xlabel("x"); ax.set_ylabel("y")
+ax.set_title("hypothesis class too small / right / too large")
+ax.legend(fontsize=8, loc="lower center", ncol=2)
+fig.tight_layout()
+plt.show()
+```
+
+The lesson is that *more flexibility is not better*. Especially in the small-data
+regime, learning succeeds only when the class is the right shape — and shaping it is
+the job of inductive bias.
+
+## Inductive bias {#sec-inductive-bias}
+
+The **inductive bias** of a hypothesis class is the set of structural propensities
+built into it — the assumptions, explicit or implicit, that make some solutions
+easier to reach than others. A useful taxonomy:
+
+- **Implicit vs explicit.** An *implicit* bias is inherent to the architecture or the
+  learning algorithm: a linear model is biased toward hyperplane boundaries; a
+  convolutional network toward local, translation-respecting features; gradient
+  descent itself prefers small-norm solutions. An *explicit* bias is written into the
+  objective or the model: a regularisation penalty, a parameter initialisation, a
+  hard architectural constraint.
+- **Hard vs soft.** A *hard* bias bounds the hypothesis space outright (the class
+  simply cannot express certain functions); a *soft* bias merely *prefers* some
+  region (a penalty that discourages, but does not forbid).
+
+The most common explicit bias is **regularisation**: augment the objective with a
+complexity criterion $c(f)$ and prefer the simplest fit that explains the data. This
+is precisely the bridge to the [statistics unit](../statistics/index.qmd), whose
+running idea is that **a penalty is a prior is an inductive bias** — a smoothing
+penalty $\lambda\,\beta^\top S\beta$ *is* a statement that the truth is smooth, and
+the strength $\lambda$ is calibrated from the data by empirical Bayes. It is also the
+reading the [three-kernels chapter](three-kernels.qmd#sec-semiring) hinted at:
+smoothing a hard, combinatorial operation into a differentiable one is itself a soft
+inductive bias, trading exactness for a usable gradient.
+
+But the deepest source of inductive bias is not a penalty. It is **symmetry**.
+
+## Geometric deep learning: symmetry as the principle {#sec-gdl}
+
+A celebrated nineteenth-century idea — Felix Klein's *Erlangen programme* — holds
+that a geometry is characterised by its **symmetries**: the transformations that
+leave its essential structure unchanged. Euclidean geometry is the study of what
+rotations, translations, and reflections preserve; other geometries, other
+symmetries. **Geometric deep learning** applies this idea to the design of
+differentiable programs: read off the symmetries of the data, and build them into the
+hypothesis class as *geometric priors*. If you know that the answer to a question
+*cannot* depend on some transformation of the input, you can carve that knowledge
+into the model, shrinking the hypothesis class along exactly the directions that do
+not matter — a strong, principled, and free inductive bias.
+
+The formal language is **groups** and **representations**. A symmetry of an object is
+a transformation that preserves its relevant structure, and the collection of all
+such transformations forms a **group** $\mathfrak{G}$ — closed under composition,
+with an identity and inverses. The group *acts* on the data; a **representation**
+$\rho(g)$ realises the action of a group element $g$ as a concrete (usually linear)
+operator on the signal. With that vocabulary, two properties capture almost
+everything we want from a symmetry-respecting program.
+
+## Invariance and equivariance {#sec-invariance}
+
+Let $x$ be a signal and $g$ a symmetry acting on it as $\rho(g)x$. A function $f$ is
+
+- **invariant** if the symmetry leaves its output unchanged,
+  $$
+  f(\rho(g)x) = f(x)\qquad\text{for all }g,
+  $$
+  and
+- **equivariant** if the output transforms *in step* with the input,
+  $$
+  f(\rho(g)x) = \rho'(g)\,f(x)\qquad\text{for all }g,
+  $$
+  where $\rho'$ is the representation on the output space.
+
+@fig-inv-equiv draws the distinction. Invariance is what you want of a *decision*:
+an image classifier should call a cat a cat wherever it sits in the frame —
+translation must not change the label. Equivariance is what you want of a
+*feature map*: shift the input image and a good feature map should shift with it, not
+scramble. The two compose into the canonical architecture: **convolution is
+translation-equivariant** (the convolution of a shifted image is the shifted
+convolution of the image), so a stack of convolutions produces features that track
+the input, and a final *invariant* pooling collapses them into a translation-invariant
+prediction. @fig-conv shows both on a concrete signal.
+
+::: {#fig-inv-equiv}
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Invariance: applying the symmetry before f leaves the output unchanged. Equivariance: applying the symmetry before f equals applying the output representation after f."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="iea" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#55606b"/></marker>
+  </defs>
+  <text x="190" y="28" text-anchor="middle" font-weight="bold">invariance</text>
+  <text x="60" y="80" text-anchor="middle">x</text>
+  <text x="60" y="160" text-anchor="middle">g·x</text>
+  <text x="300" y="80" text-anchor="middle">f(x)</text>
+  <text x="300" y="160" text-anchor="middle">f(g·x) = f(x)</text>
+  <line x1="80" y1="76" x2="250" y2="76" stroke="#55606b" stroke-width="1.4" marker-end="url(#iea)"/><text x="165" y="68" text-anchor="middle" font-size="11" fill="#444b53">f</text>
+  <line x1="80" y1="156" x2="210" y2="156" stroke="#55606b" stroke-width="1.4" marker-end="url(#iea)"/><text x="145" y="148" text-anchor="middle" font-size="11" fill="#444b53">f</text>
+  <line x1="60" y1="90" x2="60" y2="146" stroke="#55606b" stroke-width="1.4" marker-end="url(#iea)"/><text x="48" y="120" text-anchor="end" font-size="11" fill="#444b53">g·</text>
+  <text x="190" y="200" text-anchor="middle" font-size="11" fill="#2c6a45">output does not move</text>
+  <line x1="430" y1="20" x2="430" y2="210" stroke="#cfd4d9"/>
+  <text x="590" y="28" text-anchor="middle" font-weight="bold">equivariance</text>
+  <text x="470" y="80" text-anchor="middle">x</text>
+  <text x="470" y="160" text-anchor="middle">g·x</text>
+  <text x="700" y="80" text-anchor="middle">f(x)</text>
+  <text x="700" y="160" text-anchor="middle">f(g·x) = ρ(g) f(x)</text>
+  <line x1="490" y1="76" x2="660" y2="76" stroke="#55606b" stroke-width="1.4" marker-end="url(#iea)"/><text x="575" y="68" text-anchor="middle" font-size="11" fill="#444b53">f</text>
+  <line x1="490" y1="156" x2="615" y2="156" stroke="#55606b" stroke-width="1.4" marker-end="url(#iea)"/><text x="550" y="148" text-anchor="middle" font-size="11" fill="#444b53">f</text>
+  <line x1="470" y1="90" x2="470" y2="146" stroke="#55606b" stroke-width="1.4" marker-end="url(#iea)"/><text x="458" y="120" text-anchor="end" font-size="11" fill="#444b53">g·</text>
+  <line x1="700" y1="90" x2="700" y2="146" stroke="#55606b" stroke-width="1.4" marker-end="url(#iea)"/><text x="712" y="120" font-size="11" fill="#444b53">ρ(g)·</text>
+  <text x="595" y="200" text-anchor="middle" font-size="11" fill="#2c6a45">output moves in step</text>
+</svg>
+
+Invariance vs equivariance. For an **invariant** $f$ (left), transforming the input
+by $g$ leaves the output fixed — the right-hand nodes coincide. For an
+**equivariant** $f$ (right), transforming the input is the same as transforming the
+*output* by the corresponding representation $\rho(g)$ — the square commutes.
+:::
+
+```{python}
+#| label: fig-conv
+#| fig-cap: "Convolution is translation-equivariant; a global pool of it is translation-invariant. Top: a localized input pattern and a shifted copy. Middle: the convolution feature map shifts by exactly the same amount (equivariance) — the operation commutes with translation. Bottom: a global sum of the feature map is (essentially) unchanged by the shift (invariance). Stacking equivariant layers then pooling is how a CNN bakes in 'the answer must not depend on position'."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+n = 120
+t = np.arange(n)
+def pattern(center):                      # a localized bump-and-dip pattern
+    s = np.zeros(n)
+    s += np.exp(-0.5 * ((t - center) / 4.0) ** 2)
+    s -= 0.6 * np.exp(-0.5 * ((t - center - 10) / 3.0) ** 2)
+    return s
+
+kernel = np.array([-1.0, -2.0, 0.0, 2.0, 1.0])   # an edge-detecting filter
+conv = lambda s: np.convolve(s, kernel, mode="same")
+
+x1, x2 = pattern(40), pattern(75)          # input and its translation
+y1, y2 = conv(x1), conv(x2)
+
+fig, axes = plt.subplots(3, 1, figsize=(7.4, 5.2), sharex=True)
+axes[0].plot(t, x1, color="#3b6fb0", lw=2, label="input")
+axes[0].plot(t, x2, color="#d08a2c", lw=2, label="input, shifted +35")
+axes[0].set_ylabel("input"); axes[0].legend(fontsize=8, loc="upper right")
+axes[0].set_title("equivariance: the feature map shifts with the input")
+axes[1].plot(t, y1, color="#3b6fb0", lw=2)
+axes[1].plot(t, y2, color="#d08a2c", lw=2)
+axes[1].set_ylabel("conv feature")
+axes[2].bar(["pool(input)", "pool(shifted)"], [y1.sum(), y2.sum()],
+            color=["#3b6fb0", "#d08a2c"])
+axes[2].set_ylabel("Σ feature")
+axes[2].set_title("invariance: a global pool is (almost) unchanged by the shift")
+fig.tight_layout()
+plt.show()
+```
+
+Why is this such a good inductive bias? Because it removes a whole dimension of
+spurious freedom. Without it, a model must *learn* from data that a pattern means the
+same thing at every position — burning samples to discover a symmetry you already
+know. Building the symmetry in shrinks the effective hypothesis class to functions
+that respect it, *without* excluding the truth (which respects it too), so the model
+generalises from far less data. That is the central promise of geometric deep
+learning, and the reason it matters most exactly where data are scarce.
+
+## How this organises the rest of the book {#sec-units}
+
+Each of the three domain units is, read through this chapter, the study of a
+particular symmetry and the inductive bias it licenses. They are not three unrelated
+topics; they are three instances of one principle.
+
+| unit | the structure / group | the inductive bias |
+|---|---|---|
+| [Geometry](../geometry/index.qmd) | **permutation** (vertex relabelling); intrinsic isometry | mesh and graph operators are permutation-**equivariant** — the answer cannot depend on how vertices are numbered; *intrinsic* quantities are **invariant** to the embedding (Theorema Egregium, Gauss–Bonnet) |
+| [Registration](../registration/index.qmd) | the nested Lie groups $SE(d)\subset\mathrm{Aff}(d)\subset\mathrm{Diff}(\Omega)$ | transforms are parameterised in the **Lie algebra** and act on images by **pull-back** — the group's representation; surface alignment is $SO(3)$-**equivariant** |
+| [Statistics](../statistics/index.qmd) | smoothness / shrinkage (and metric reparametrisation groups) | a penalty *is* a prior *is* an inductive bias; its strength is calibrated by empirical Bayes — regularisation as the soft bias of the whole suite |
+
+The geometry unit opens on the Erlangen programme outright; the registration unit's
+whole ladder is a tower of symmetry groups and their representations on images; the
+statistics unit's organising equivalence — penalty = prior = variance component =
+kernel — *is* the inductive-bias idea, calibrated from data. And every one of them
+runs on the primer's machinery: the [hardware](hardware.qmd) it executes on, the
+[traced, compiled program](xla-jax.qmd), the [gradients](differentiation.qmd) that
+fit it, and the [implicit differentiation](implicit-differentiation.qmd) for its
+solver-defined parts.
+
+## What this means for `nitrix`, and where to go next {#sec-nitrix}
+
+`nitrix` is built so that symmetry-respecting differentiable programs are the natural
+thing to write. Its mesh and graph reductions are permutation-equivariant by
+construction; its registration transforms are parameterised in the Lie algebra of
+their group; its statistical fitters carry penalties that *are* priors; and its
+relaxations (the [semiring substrate](three-kernels.qmd#sec-semiring)) admit
+structured, discrete operations into the differentiable world. The library supplies
+primitives that *have the right inductive biases already*, so the programs built on
+it inherit them.
+
+This is where the two halves of the whole unit meet, in [its third
+thread](index.qmd#sec-thread-structure): **structure is leverage.** Structure in the
+*computation* — the memory hierarchy, fusion, sparsity, the choice of semiring — buys
+performance; structure in the *data* — the symmetries a model respects — buys
+generalisation. They are the same discipline of building known structure into a
+program, pointed at speed in the first case and at learning in the second, and the
+gradient is what ties them together. With the machinery and the principle both in
+hand, the three domain units are where it is put to work — start with whichever
+geometry your problem lives in: [discrete geometry](../geometry/index.qmd),
+[image registration](../registration/index.qmd), or
+[statistical modelling](../statistics/index.qmd).
+
+## Further reading
+
+- Bronstein, M. M., Bruna, J., Cohen, T. & Veličković, P. (2021). "Geometric deep
+  learning: grids, groups, graphs, geodesics, and gauges." — the unifying framework
+  for symmetry-based inductive bias; the source of the invariance/equivariance
+  formalism used here.
+- Cohen, T. & Welling, M. (2016). "Group equivariant convolutional networks." *ICML.*
+  — equivariance beyond translation, made architectural.
+- Goodfellow, I., Bengio, Y. & Courville, A. (2016). *Deep Learning*, ch. 5 & 9. —
+  the bias–variance trade, capacity, and convolution as an inductive bias.
+- Baxter, J. (2000). "A model of inductive bias learning." *JAIR* 12. — a formal
+  account of inductive bias and the hypothesis-class picture.
+- Mitchell, T. M. (1980). "The need for biases in learning generalizations." — the
+  classic argument that learning is impossible without inductive bias.
+
+## See also
+
+- The units this chapter opens, each a study of one inductive bias:
+  [discrete geometry](../geometry/index.qmd) (permutation equivariance, intrinsic
+  invariance), [image registration](../registration/index.qmd) (Lie-group transforms
+  and representations), [statistical modelling](../statistics/index.qmd) (penalty =
+  prior = inductive bias).
+- The structure-as-leverage thread in the computation: the
+  [hardware](hardware.qmd#sec-nitrix) and [XLA/JAX](xla-jax.qmd#sec-nitrix) chapters
+  (performance from structure), and the [semiring relaxation](three-kernels.qmd#sec-semiring)
+  (admitting discrete structure differentiably).
+- Previous chapter: [implicit differentiation](implicit-differentiation.qmd). This is
+  the last chapter of the primer; from here, the domain units.
