@@ -24,7 +24,13 @@ Conventions:
   ``y = mat[..., :, :-1] @ x + mat[..., :, -1]``.
 - Rotations: 2-D is a single planar angle; 3-D is right-handed
   **intrinsic** ``R = X @ Y @ Z`` (rotate about x, then y, then z); angles
-  in degrees by default.
+  in degrees by default.  The left-to-right axis order reads the same as the
+  matrix product because intrinsic rotations post-multiply: ``X @ Y @ Z`` is
+  equivalently the *extrinsic* sequence z-then-y-then-x (rightmost factor
+  applied first), the same rightmost-applied-first convention as the
+  ``T @ R @ S @ E`` factor composition above. (Intrinsic rotations
+  are about the object axes, which move with the object; extrinsic rotations
+  are about the fixed world axes.)
 - The rotation / parameter chart supports ``ndim`` in ``{2, 3}`` (the
   Euler convention is dimension-specific, but both are covered);
   ``params_to_affine_matrix`` takes an explicit ``ndim`` because a
@@ -47,6 +53,7 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float
 
+from ..linalg._smalllinalg import small_det
 from ..linalg._solver import safe_cho_solve, safe_cholesky, safe_inv
 
 __all__ = [
@@ -64,38 +71,6 @@ __all__ = [
 def _diag(v: Float[Array, '... n']) -> Float[Array, '... n n']:
     """Batched ``diag``: ``(..., N)`` -> ``(..., N, N)``."""
     return v[..., None] * jnp.eye(v.shape[-1], dtype=v.dtype)
-
-
-def _det3x3(m: Float[Array, '... 3 3']) -> Float[Array, '...']:
-    """Analytic batched determinant of a ``(..., 3, 3)`` matrix.
-
-    Closed form (cofactor expansion) -- avoids the LU factorisation
-    ``jnp.linalg.det`` would use, which is unavailable on the
-    cuSolver-affected GPU stacks.
-    """
-    return (
-        m[..., 0, 0]
-        * (m[..., 1, 1] * m[..., 2, 2] - m[..., 1, 2] * m[..., 2, 1])
-        - m[..., 0, 1]
-        * (m[..., 1, 0] * m[..., 2, 2] - m[..., 1, 2] * m[..., 2, 0])
-        + m[..., 0, 2]
-        * (m[..., 1, 0] * m[..., 2, 1] - m[..., 1, 1] * m[..., 2, 0])
-    )
-
-
-def _det2x2(m: Float[Array, '... 2 2']) -> Float[Array, '...']:
-    """Analytic batched determinant of a ``(..., 2, 2)`` matrix."""
-    return m[..., 0, 0] * m[..., 1, 1] - m[..., 0, 1] * m[..., 1, 0]
-
-
-def _small_det(m: Float[Array, '... d d']) -> Float[Array, '...']:
-    """Analytic determinant for the supported ranks (``d`` in ``{2, 3}``)."""
-    d = m.shape[-1]
-    if d == 2:
-        return _det2x2(m)
-    if d == 3:
-        return _det3x3(m)
-    raise ValueError(f'unsupported affine rank d={d}; expected 2 or 3.')
 
 
 def _shear_matrix(
@@ -212,8 +187,11 @@ def angles_to_rotation_matrix(
 
     2-D: a single angle ``(..., 1)`` -> ``(..., 2, 2)`` planar rotation.
     3-D: three angles ``(..., 3)`` -> ``(..., 3, 3)``, right-handed
-    intrinsic ``R = X @ Y @ Z`` (rotate about x, then y, then z).  Angles
-    in degrees by default (``deg=False`` for radians).
+    intrinsic ``R = X @ Y @ Z`` (rotate about object's x, then y, then z;
+    the axis order reads with the matrix product because intrinsic rotations
+    post-multiply -- equivalently the extrinsic sequence z-then-y-then-x,
+    rightmost factor applied first).  Angles in degrees by default
+    (``deg=False`` for radians).
     """
     ang = jnp.asarray(ang)
     n_ang = ang.shape[-1]
@@ -366,7 +344,7 @@ def affine_matrix_to_params(
     m = mat[..., :d, :d]
     lower = safe_cholesky(jnp.swapaxes(m, -1, -2) @ m)
     scale = jnp.diagonal(lower, axis1=-2, axis2=-1)
-    sign = jnp.sign(_small_det(m))
+    sign = jnp.sign(small_det(m, d))
     scale = jnp.concatenate(
         [(scale[..., 0] * sign)[..., None], scale[..., 1:]], axis=-1
     )

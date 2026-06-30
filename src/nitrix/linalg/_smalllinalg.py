@@ -60,11 +60,18 @@ from jax import lax
 from jaxtyping import Array, Float
 
 __all__ = [
+    'small_det',
+    'small_inv',
     'small_inv_logdet',
     'spd_inv_logdet_chol',
     'spd_chol',
     'sym_eig_jacobi',
 ]
+
+# Largest matrix the closed-form adjugate inverse covers: the cofactor graph
+# grows factorially, so it is reserved for the small general blocks (affine /
+# triangular, n in {2, 3, 4}) the callers actually pass.
+_ADJ_INV_MAX_N = 4
 
 # Relative pivot-floor multiplier (modified Cholesky), ~1e2 x the dtype's
 # machine epsilon.
@@ -87,7 +94,7 @@ def _pivot_rel_floor(dtype: jnp.dtype) -> Float[Array, '']:
     could never rescue an fp32 pivot that had already gone negative -- and only
     ever did anything in fp64.
     """
-    return _PIVOT_REL_EPS_MULT * jnp.finfo(dtype).eps
+    return jnp.asarray(_PIVOT_REL_EPS_MULT * jnp.finfo(dtype).eps)
 
 
 def spd_inv_logdet_chol(
@@ -188,6 +195,82 @@ def small_inv_logdet(
         inv = jnp.array([[c, -b], [-b, a]], dtype=A.dtype) / det
         return inv, jnp.log(det)
     return spd_inv_logdet_chol(A, n)
+
+
+def _delete_row_col(
+    A: Float[Array, '... n n'], i: int, j: int, n: int
+) -> Float[Array, '... m m']:
+    """The ``(n-1, n-1)`` minor of ``A`` with row ``i`` and column ``j`` removed.
+
+    ``i`` / ``j`` / ``n`` are Python ints (compile-time), so the kept-index
+    lists are static and the gather is a plain advanced index -- traceable and
+    differentiable.
+    """
+    rows = [r for r in range(n) if r != i]
+    cols = [c for c in range(n) if c != j]
+    return A[..., rows, :][..., :, cols]
+
+
+def small_det(A: Float[Array, '... n n'], n: int) -> Float[Array, '...']:
+    """Determinant of a small general ``(..., n, n)`` matrix by cofactor
+    (Laplace) expansion -- cuSOLVER-free, batched, differentiable.
+
+    ``n`` is a Python int (compile-time), so the expansion unrolls into pure
+    multiply / add (no ``getrf`` LU custom-call); reserved for small ``n`` as
+    the term count grows factorially.  Closed forms for ``n in {1, 2}``.
+    """
+    if n == 1:
+        return A[..., 0, 0]
+    if n == 2:
+        return A[..., 0, 0] * A[..., 1, 1] - A[..., 0, 1] * A[..., 1, 0]
+    acc = None
+    for j in range(n):
+        term = A[..., 0, j] * small_det(_delete_row_col(A, 0, j, n), n - 1)
+        signed = term if j % 2 == 0 else -term
+        acc = signed if acc is None else acc + signed
+    return cast(Float[Array, '...'], acc)
+
+
+def _adjugate(A: Float[Array, '... n n'], n: int) -> Float[Array, '... n n']:
+    """Adjugate (transpose of the cofactor matrix) of a small general ``A``.
+
+    ``adj(A)[i, j] = (-1)^{i+j} det(minor_{j,i})``, so ``A^{-1} = adj(A) /
+    det(A)`` (Cramer).  All arithmetic, hence batched and differentiable.
+    """
+    if n == 1:
+        return jnp.ones_like(A)
+    rows_out = []
+    for i in range(n):
+        row = []
+        for j in range(n):
+            cof = small_det(_delete_row_col(A, j, i, n), n - 1)
+            row.append(cof if (i + j) % 2 == 0 else -cof)
+        rows_out.append(jnp.stack(row, axis=-1))
+    return jnp.stack(rows_out, axis=-2)
+
+
+def small_inv(A: Float[Array, '... n n'], n: int) -> Float[Array, '... n n']:
+    """General (non-symmetric) inverse of a small ``(..., n, n)`` matrix.
+
+    The cuSOLVER-free counterpart to :func:`small_inv_logdet` for the case the
+    caller's matrix is a *general* small block (an affine, a triangular
+    scale/shear factor) rather than an SPD Gram.  Closed-form adjugate inverse
+    ``A^{-1} = adj(A) / det(A)`` for ``n <= 4``: pure multiply / add / divide,
+    so it is batched over the leading dimensions, differentiable, and issues no
+    cuSOLVER custom-call (unlike ``jnp.linalg.inv``'s ``getrf``).
+
+    Unlike the SPD kernels this does **not** regularise -- a singular ``A``
+    yields a non-finite result, matching ``jnp.linalg.inv`` (callers supply an
+    invertible matrix: an affine, or a ridged system).  Cramer's rule is exact
+    to roundoff for the well-conditioned tiny matrices this serves; prefer x64
+    for an ill-conditioned input (see the module docstring).
+    """
+    if n > _ADJ_INV_MAX_N:
+        raise ValueError(
+            f'small_inv supports n <= {_ADJ_INV_MAX_N}; got n={n}.'
+        )
+    det = small_det(A, n)
+    return _adjugate(A, n) / det[..., None, None]
 
 
 def sym_eig_jacobi(
