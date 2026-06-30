@@ -2,22 +2,20 @@
 title: "Linear mixed-effects models: structured noise"
 ---
 
-::: {.callout-tldr title="Fast path"}
-When observations come in groups (many scans per subject, many subjects per
-site), they are **not independent**, and pretending they are gives wrong error
-bars. A **mixed model** adds *random effects* $Zb$ that absorb the group
-structure, leaving the per-observation noise white again. The price: the response
-now has a **structured covariance** $V_y = \sigma_b^2 ZZ^{\top} + \sigma_e^2 I$
-with unknown **variance components** $\theta$ to estimate. The clean way to
-estimate them is **REML**, which corrects the same downward bias that makes you
-divide a sample variance by $n-1$ instead of $n$. Estimating them naively costs
-an $N\times N$ solve per element — hopeless at brain scale — so `nitrix` uses the
-**FaST-LMM spectral trick**: eigendecompose the random-effect structure *once*,
-rotate into a basis where $V_y$ is **diagonal**, and the per-element fit becomes
-elementwise-cheap, with the variances found by a few **average-information Newton**
-steps. Those variances are the same object as the
-[smoothing penalties](fellner-schall.qmd) of the next chapter.
-:::
+When observations come in groups (many scans per subject, many subjects per site),
+they are **not independent**, and pretending they are gives wrong error bars. A
+**mixed model** adds *random effects* $Zb$ that absorb the group structure, leaving
+the per-observation noise white again. The price is that the response now has a
+**structured covariance** $V_y = \sigma_b^2 ZZ^{\top} + \sigma_e^2 I$ with unknown
+**variance components** $\theta$ to estimate. The clean way to estimate them is
+**REML**, which corrects the same downward bias that makes you divide a sample
+variance by $n-1$ instead of $n$. Estimating them naively costs an $N\times N$
+solve per element — hopeless at brain scale — so `nitrix` uses the **FaST-LMM
+spectral trick**: eigendecompose the random-effect structure *once*, rotate into a
+basis where $V_y$ is **diagonal**, and the per-element fit becomes elementwise-cheap,
+with the variances found by a few **average-information Newton** steps. Those
+variances are the same object as the [smoothing penalties](fellner-schall.qmd) of
+the next chapter — the suite's one engine, here wearing its random-effect hat.
 
 This is rung 2 of [the ladder](index.qmd). It assumes the [GLM chapter](glm.qmd):
 the linear model, least squares, and the small shared solve. It builds directly on
@@ -582,6 +580,15 @@ penalty matrix $S$ of a [GAM](gam.qmd#sec-penalty) plays the role of $G^{-1}$ he
 Which is why the GAM machinery and this LME machinery are two faces of one method,
 and why the [Fellner–Schall](fellner-schall.qmd#sec-fs-update) update can estimate
 both with the same step.
+
+Read the other way, partial pooling is **empirical Bayes** in action. The
+random-effect distribution $b\sim\mathcal N(0,\sigma_b^2)$ is a prior that pulls
+each group toward the population mean — an inductive bias, the same role smoothness
+plays for a curve or symmetry plays in the [geometry unit](../geometry/index.qmd).
+What makes it *empirical* rather than fixed is that REML reads the prior's strength
+$\sigma_b^2$ off the data instead of asking you to set it. Estimate that one number
+and the bias calibrates itself: tight when groups truly cluster, loose when they do
+not.
 
 ## Further reading
 

@@ -10,9 +10,11 @@ JAX/XLA so they run — differentiably, batched, JIT-compiled — on a hardware
 accelerator.
 
 ::: {.callout-tldr title="Fast path"}
-Three textbook units for readers who know linear algebra but not the domain: [the
-statistical modelling suite](explanation/statistics/index.qmd) — climbing from
-generalised linear models up to Gaussian processes — [discrete
+New to GPUs, JAX/XLA, or automatic differentiation? Start with [the
+primer](explanation/primer/index.qmd) — the foundations the rest of the book leans
+on. Then three textbook units for readers who know linear algebra but not the
+domain: [the statistical modelling suite](explanation/statistics/index.qmd) —
+climbing from generalised linear models up to Gaussian processes — [discrete
 geometry](explanation/geometry/index.qmd) — meshes, volumes, and the operators on
 them — and [registration](explanation/registration/index.qmd) — the maps between
 those geometries. For statistics, read the [GLM
@@ -23,6 +25,12 @@ for registration, the [foundations](explanation/registration/foundations.qmd).
 
 ## Explanation (the textbook layer)
 
+- [The primer](explanation/primer/index.qmd) — the foundations the rest of the book
+  leans on: programming the GPU, the JAX/XLA compiler and its levels of
+  representation, the calculus of automatic differentiation, and the inductive
+  biases that tie the units together.
+  - [Programming the GPU](explanation/primer/hardware.qmd)
+  - [JAX and XLA: levels of representation](explanation/primer/xla-jax.qmd)
 - [The statistical modelling suite](explanation/statistics/index.qmd) — the model
   ladder (GLM → LME → GAM → GLMM → GAMM → HSGP) and the shared algorithms behind it.
   - [Generalised linear models: the foundation](explanation/statistics/glm.qmd)

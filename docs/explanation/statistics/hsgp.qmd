@@ -2,21 +2,19 @@
 title: "Hilbert-space Gaussian processes: smoothing with kernels"
 ---
 
-::: {.callout-tldr title="Fast path"}
 A **Gaussian-process** smooth asks for smoothness a different way: instead of
 "penalise the second difference", you say "function values at nearby inputs are
 correlated, with the correlation decaying over a **lengthscale** $\rho$" — a
-kernel. Evaluated at the data, that prior is a random effect with covariance
-$K$, so a *fixed-kernel* GP is already an [LME](lme.qmd) (penalty $S=K^{-1}$). The
-hard part is **estimating $\rho$**, because changing it changes $K$ and its
+kernel. Evaluated at the data, that prior is a random effect with covariance $K$,
+so a *fixed-kernel* GP is already an [LME](lme.qmd) (penalty $S=K^{-1}$). The hard
+part is **estimating $\rho$**, because changing it changes $K$ and its
 eigenvectors. **HSGP** (Hilbert-space approximate GP) fixes that: expand the GP in
 a fixed basis of **Laplace eigenfunctions** (sines), into which the kernel enters
 *only* as a **diagonal reweighting** of the columns by the kernel's *spectral
-density*. Then the basis never moves, $\rho$ becomes a cheap parameter to
-estimate, the amplitude is the [Fellner–Schall](fellner-schall.qmd) smoothing
-parameter, and a GP is one more [penalty block](gamm.qmd) you hand to
-`gam_fit` — or, with the lengthscale estimated for you, to `gp_fit`.
-:::
+density*. Then the basis never moves, $\rho$ becomes a cheap parameter to estimate,
+the amplitude is the [Fellner–Schall](fellner-schall.qmd) smoothing parameter, and a
+GP is one more [penalty block](gamm.qmd) you hand to `gam_fit` — or, with the
+lengthscale estimated for you, to `gp_fit`.
 
 Rung 6 — the top of [the ladder](index.qmd). It builds on the
 [GAM](gam.qmd)/[LME](lme.qmd) equivalence and the spectral idea from the
@@ -450,7 +448,7 @@ features $\Phi = U\Lambda^{1/2}$; it is the full-rank GP when `rank == N` and th
 eigen-truncated (Nyström) approximation otherwise — equivalent to `lme.reml_fit`
 by the penalty↔variance-component identity, useful as a ground-truth check on the
 HSGP approximation. You can also regularise $\rho$ with a prior via `map_rho=`
-(see §9.1).
+(see [lengthscale priors](#sec-priors)).
 
 ### Lengthscale priors (`map_rho`) {#sec-priors}
 

@@ -2,20 +2,17 @@
 title: "The shared solvers: small systems, safe steps, and big covariances"
 ---
 
-::: {.callout-tldr title="Fast path"}
 Strip away the statistics and every fit in this suite reduces to a handful of
 numerical jobs. Two of them recur in *every* chapter: **solve a small dense
-system** $A\beta = c$ where $A$ is $p\times p$ (the normal equations), and
-**choose a few scalars** — variances, smoothing strengths — by a cheap **Newton**
-iteration. Two further tricks keep the *big* $N\times N$ observation covariance
-from ever being formed: the **Woodbury identity** (correct a cheap inverse with a
-small rank-$q$ fix) and **spectral diagonalisation** (one eigendecomposition turns
-the problem into independent 1-D coordinates). The single new idea of this page:
-*all four are hand-rolled in `nitrix`* — no vendor GPU solver is ever called —
-because the cuSOLVER custom call is broken on the target accelerators. This page
-is the shared substrate the model chapters link to instead of re-deriving the
-numerics each time.
-:::
+system** $A\beta = c$ where $A$ is $p\times p$ (the normal equations), and **choose
+a few scalars** — variances, smoothing strengths — by a cheap **Newton** iteration.
+Two further tricks keep the *big* $N\times N$ observation covariance from ever being
+formed: the **Woodbury identity** (correct a cheap inverse with a small rank-$q$
+fix) and **spectral diagonalisation** (one eigendecomposition turns the problem into
+independent 1-D coordinates). The single idea that organises the page is that *all
+four are hand-rolled in `nitrix`* — no vendor GPU solver is ever called — because
+the cuSOLVER custom call is broken on the target accelerators. This is the shared
+substrate the model chapters link to instead of re-deriving the numerics each time.
 
 This is a *machinery* page, not a rung on [the ladder](index.qmd). The model
 chapters — [GLM](glm.qmd), [LME](lme.qmd), [GAM](gam.qmd), [GLMM](glmm.qmd) — each
@@ -33,13 +30,13 @@ one of exactly four things:
 
 1. **Solve a small dense SPD system** $A\beta = c$, with $A$ a $p\times p$
    symmetric positive-definite matrix (the normal equations, possibly weighted
-   and penalised). Section [§2](#sec-cholesky).
+   and penalised) — [the small dense solve](#sec-cholesky).
 2. **Minimise a small smooth objective** in a few scalars (log-variances,
-   smoothing parameters) by Newton's method. Section [§3](#sec-newton).
+   smoothing parameters) by Newton's method — [Newton, and how to trust it](#sec-newton).
 3. **Invert a giant $N\times N$ covariance** $V_y = ZGZ^{\top}+R$ without ever
-   forming it — by the Woodbury identity. Section [§4](#sec-woodbury).
+   forming it, by the Woodbury identity — [inverting a giant covariance](#sec-woodbury).
 4. **Diagonalise once** so a whole sweep of trial variances is cheap — the
-   spectral / FaST-LMM trick. Section [§5](#sec-spectral).
+   [spectral / FaST-LMM trick](#sec-spectral).
 
 A word on the hardware constraint that shapes all four, because it is unusual and
 it explains design choices that would otherwise look perverse. The natural way to
@@ -59,9 +56,9 @@ or eig, `nitrix` ships a hand-rolled version built from matmul, `sqrt`, division
 and `triangular_solve` — all of which *do* work, and all of which are
 differentiable (so the whole fit can be run under `jax.grad`, `jit`, and `vmap`
 across a million voxels at once). The one exception is the *single, shared*
-eigendecomposition of [§5](#sec-spectral), which is computed once per dataset
-through a robust `safe_eigh` that falls back to the CPU if cuSOLVER is unavailable
-— it is outside the per-voxel hot path, so it can afford to.
+eigendecomposition of [the spectral trick](#sec-spectral), which is computed once
+per dataset through a robust `safe_eigh` that falls back to the CPU if cuSOLVER is
+unavailable — it is outside the per-voxel hot path, so it can afford to.
 
 A motivating example to carry through. Picture a voxelwise fMRI analysis: at each
 of $V\approx 10^5$–$10^6$ voxels you have $N$ observations and want to fit the
@@ -325,7 +322,7 @@ valley and shrinking it across the steep walls — precisely the correction grad
 descent lacked. If $f$ *is* a quadratic, one Newton step lands exactly on the
 minimum. For a smooth $f$ near its optimum, convergence is quadratic — the number
 of correct digits roughly doubles each step. (Solving $H\delta = -\nabla$ is, of
-course, the small dense SPD solve of [§2](#sec-cholesky) — when $H$ is SPD.)
+course, [the small dense SPD solve](#sec-cholesky) — when $H$ is SPD.)
 
 ### Fisher scoring is IRLS
 
@@ -387,7 +384,8 @@ numerical insurance: a positive $\lambda$ keeps $H+\lambda I$ invertible even wh
 $H$ itself is near-singular. This is the **Levenberg** step, and `_optimise.py`
 offers it as `step='damped'` (solved through `small_inv_logdet`) for the cases
 where $H$ is PSD by construction — for instance the **average-information** REML
-curvature, which is PSD by design (see [§4](#sec-woodbury) and the LME chapter).
+curvature, which is PSD by design (see [inverting a giant covariance](#sec-woodbury)
+and the LME chapter).
 
 For the saddle-prone case the source goes one better. Its default,
 `step='saddle_free'`, eigendecomposes $H$ (via the cuSOLVER-free Jacobi routine of
@@ -626,8 +624,8 @@ function `group_grams` precomputes the data-independent per-group Grams
 ($Z_i^{\top}Z_i$, $X_i^{\top}Z_i$, $X_i^{\top}X_i$) once and shares them across all
 voxels; `bw_score_and_ai` then assembles the analytic REML score and
 average-information curvature from them — feeding the **analytic-curvature** fork of
-`damped_newton` from [§3](#sec-newton), with `step='damped'` because that AI
-curvature is PSD by construction.
+`damped_newton` from [the Newton section](#sec-newton), with `step='damped'` because
+that AI curvature is PSD by construction.
 
 @fig-solvers-woodbury shows the block structure of $ZZ^{\top}$ for grouped data —
 the sparsity Woodbury exploits.
@@ -735,7 +733,7 @@ $$
 
 There is no matrix to factor any more. Each trial value of the variances costs
 $O(N p^2 + N)$ — *elementwise* work on the vector $d$ — instead of an $O(N^3)$
-refactorisation of $V$. The Newton iteration of [§3](#sec-newton) over $\theta =
+refactorisation of $V$. The [Newton iteration](#sec-newton) over $\theta =
 (\log\sigma_b^2, \log\sigma_e^2)$ runs entirely on the diagonal $d$.
 
 ### Computed once, reused across the whole image
@@ -847,7 +845,7 @@ search the variances for almost free.
 - Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M., Davidson, R. I., &
   Heckerman, D. (2011). FaST linear mixed models for genome-wide association
   studies. *Nature Methods*, 8. — The spectral diagonalisation trick of
-  [§5](#sec-spectral).
+  [the spectral section](#sec-spectral).
 - Lindstrom, M. J., & Bates, D. M. (1990). Newton–Raphson and EM algorithms for
   linear mixed-effects models. *JASA*, 83. — Newton-scoring for variance components.
 
@@ -869,10 +867,10 @@ Source for the routines on this page (GitHub):
 
 Where these solvers are used:
 
-- [GLM](glm.qmd#sec-irls) — IRLS is Fisher scoring; every step is the small dense
-  solve of [§2](#sec-cholesky).
-- [LME](lme.qmd#sec-reml) — REML by Newton ([§3](#sec-newton)) over variances,
-  with the spectral trick of [§5](#sec-spectral).
-- [GLMM](glmm.qmd) — the block-Woodbury structure of [§4](#sec-woodbury).
+- [GLM](glm.qmd#sec-irls) — IRLS is Fisher scoring; every step is
+  [the small dense solve](#sec-cholesky).
+- [LME](lme.qmd#sec-reml) — REML by [Newton](#sec-newton) over variances,
+  with [the spectral trick](#sec-spectral).
+- [GLMM](glmm.qmd) — the [block-Woodbury structure](#sec-woodbury).
 - [GAM](gam.qmd#sec-penalty) and [Fellner–Schall](fellner-schall.qmd#the-update) —
   the penalised normal equations @eq-normal and the small Newton step.

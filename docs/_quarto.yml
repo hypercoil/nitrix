@@ -6,6 +6,7 @@ project:
   # part of the rendered site (RECON: treat as signal, verify before lifting).
   render:
     - index.qmd
+    - explanation/primer/*.qmd
     - explanation/statistics/*.qmd
     - explanation/geometry/*.qmd
     - explanation/registration/*.qmd
@@ -19,6 +20,17 @@ website:
     left:
       - href: index.qmd
         text: Home
+      - text: Primer
+        menu:
+          - explanation/primer/index.qmd
+          - text: "---"
+          - explanation/primer/hardware.qmd
+          - explanation/primer/xla-jax.qmd
+          - explanation/primer/differentiation.qmd
+          - explanation/primer/three-kernels.qmd
+          - explanation/primer/differentiable-programming.qmd
+          - explanation/primer/implicit-differentiation.qmd
+          - explanation/primer/inductive-bias.qmd
       - text: Statistics
         menu:
           - explanation/statistics/index.qmd

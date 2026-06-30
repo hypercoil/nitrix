@@ -2,7 +2,6 @@
 title: "Registration: maps between geometries"
 ---
 
-::: {.callout-tldr title="Fast path"}
 **Registration is the act of finding a map between two geometries.** Given a
 *fixed* image $I_f$ and a *moving* image $I_m$, we search for a transform
 $\varphi$ that pulls the moving image onto the fixed grid so the two agree — and
@@ -18,7 +17,6 @@ four questions: how is the transform **represented**, how is it **applied**
 (resampling), how is mismatch **scored** (a similarity metric), and how is it
 **found** (optimisation), all while keeping the map **physical** (a diffeomorphism
 does not tear or fold). A page-per-topic ladder follows; this page is the map.
-:::
 
 This unit is written for a reader **fluent in linear algebra** — matrices, least
 squares, gradients, the chain rule — who has read the
@@ -67,9 +65,14 @@ there. [Foundations](foundations.qmd#sec-pullback) earns this convention in full
 
 ## The transform ladder {#sec-ladder}
 
-The choice of transform family is the choice that organises everything else. The
-families form a ladder of increasing flexibility, each a strict superset of the one
-below, each trading degrees of freedom for the need to regularise:
+The choice of transform family is the choice that organises everything else. Each
+family is a **group** — closed under composition and inverse, with the identity as
+the do-nothing map — and the families nest as a chain of subgroups,
+$SE(3)\subset\mathrm{Aff}(3)\subset\mathrm{Diff}(\Omega)$, each a strict superset of
+the one below, each trading degrees of freedom for the need to regularise. The
+group *acts* on images by the pull-back $I\mapsto I\circ\varphi$ — that action is
+the representation every similarity metric actually sees, and it is the through-line
+of [foundations](foundations.qmd#sec-pullback). The rungs:
 
 - **Rigid** ($SE(3)$, 6 DOF in 3-D): rotation + translation. The right family for
   *within-subject, same-session* alignment — realigning the volumes of an fMRI
@@ -310,9 +313,9 @@ them without re-deriving them. Two boundaries to keep in mind:
 
 ## Reading paths {#sec-paths}
 
-- **Fast path** — read each chapter's TL;DR plus [foundations](foundations.qmd) in
-  full and the [recipes](recipes.qmd) catalogue. That is enough to register images
-  and to know which recipe answers which question.
+- **Fast path** — read [foundations](foundations.qmd) in full, skim each chapter's
+  opening motivation, and keep the [recipes](recipes.qmd) catalogue open. That is
+  enough to register images and to know which recipe answers which question.
 - **Thorough path** — read in chapter order. Each chapter motivates its piece of the
   energy $\mathcal E(\varphi)$, earns the equation from intuition, and grounds it in
   the real `nitrix` routine.

@@ -2,133 +2,136 @@
 title: "Graph geometry: meshes, graph Laplacians, and spectra"
 ---
 
-::: {.callout-tldr title="Fast path"}
-A triangle mesh is also a *graph* — vertices are nodes, mesh edges are graph
-edges — and a surprising amount of surface geometry has an exact graph-theory
-twin. This page draws those correspondences. The **graph (combinatorial)
-Laplacian** $L_{\text{graph}}=D-A$ uses only *who-neighbours-whom*; the
-[**cotangent Laplacian**](laplace-beltrami.qmd#sec-cotangent) adds the *metric*
-(triangle shapes) and is the one that converges to the smooth
-Laplace–Beltrami operator. Same sparsity pattern, different weights. From there
-the eigenvectors of one are the **graph-Fourier basis** (spectral clustering,
-Laplacian eigenmaps) and the eigenfunctions of the other are
-[**manifold harmonics**](spectral.qmd#sec-eigen) — same machinery, different
-operator. We then read the [k-ring adjacency](operators.qmd#sec-adjacency) as a
-graph signal-processing operator, cover **mesh pooling / hierarchies** for
-surface encoder–decoders (which turn out to be nothing more than [semiring matmuls](operators.qmd#sec-semiring)
-across resolution levels), and point onward to the federation's connectivity and
-parcellation work. This is a reference/bridge page: it connects the geometry unit
-to graph theory rather than re-deriving either.
-:::
+A triangle mesh is also a graph - vertices are nodes, mesh edges are graph edges - and a
+surprising amount of surface geometry has an exact graph-theory twin. This chapter draws
+those correspondences. The graph (combinatorial) Laplacian $L_{\text{graph}}=D-A$ uses only
+who-neighbours-whom; the [cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent) adds the
+metric (triangle shapes) and is the one that converges to the smooth Laplace--Beltrami
+operator. Same sparsity pattern, different weights. From there the eigenvectors of one are
+the graph-Fourier basis (spectral clustering, Laplacian eigenmaps) and the eigenfunctions of
+the other are [manifold harmonics](spectral.qmd#sec-eigen) - same machinery, different
+operator. We then read the [k-ring adjacency](operators.qmd#sec-adjacency) as a graph
+signal-processing operator, cover mesh pooling and hierarchies for surface
+encoder-decoders (which turn out to be [semiring matmuls](operators.qmd#sec-semiring) across
+resolution levels), and point onward to the federation's connectivity and parcellation work.
+This is a reference and bridge chapter: it connects the geometry unit to graph theory rather
+than re-deriving either.
 
-## A motivating question: is this a surface or a network?
+The chapter is also where the unit's symmetry theme reaches its most operational form.
+Every operator here is *permutation equivariant* - it commutes with relabelling the vertices -
+and that single invariance is the defining inductive bias of graph computation. The
+distinction between the graph and cotangent Laplacians, developed below, is best read as a
+difference in *which group* each is invariant to.
 
-Take a cortical surface mesh — the white-matter boundary of one hemisphere,
-roughly $n \approx 164{,}000$ vertices for FreeSurfer's `ico7`. You can ask two
-families of question about it, and they *look* identical but are not:
+## A motivating problem: surface or network?
 
-- **Geometric.** How curved is the cortex here? How far apart, *along the
-  surface*, are two points? What does the surface's vibration spectrum look
-  like? These depend on the *metric* — actual lengths, angles, areas.
-- **Combinatorial.** Which vertices are connected to which? How many hops from
-  here to there? What communities of densely-interconnected vertices exist?
-  These depend only on the *connectivity* — the graph, with no notion of length.
+Take a cortical surface mesh - the white-matter boundary of one hemisphere, roughly $n
+\approx 164{,}000$ vertices for FreeSurfer's `ico7`. Two families of question can be asked
+about it, and they *look* identical but are not:
 
-The mesh carries both. The face list $F$ defines a graph $(V,E)$: an edge $(i,j)$
-exists whenever some triangle contains both $i$ and $j$. The vertex coordinates
-$V\in\mathbb{R}^{n\times3}$ add the metric on top. Almost every operator in this
-unit lives at one of these two altitudes, and the single most useful thing this
-page can teach you is **how to tell which altitude an operator is at** — because
-choosing the metric-blind tool for a metric question is the most common way to
-get a plausible-looking but geometrically wrong answer.
+- **Geometric.** How curved is the cortex here? How far apart, *along the surface*, are two
+  points? What does the surface's vibration spectrum look like? These depend on the metric -
+  actual lengths, angles, areas.
+- **Combinatorial.** Which vertices are connected to which? How many hops from here to there?
+  What communities of densely-interconnected vertices exist? These depend only on the
+  connectivity - the graph, with no notion of length.
 
-The unit's governing idea applies here in a sharpened form. A discrete mesh
-approximates a smooth surface; the *metric-aware* discrete operators (cotangent
-Laplacian, Voronoi mass) are built precisely so that they **converge to the
-continuous truth under refinement** and pass analytic-oracle checks (a unit
-sphere's mean curvature $H=1/r=1$). The *metric-blind* graph operators do not
-converge to anything geometric — and that is not a bug, it is the point: they
-answer connectivity questions, which have no continuous-geometry limit to
-converge to.
+The mesh carries both. The face list $F$ defines a graph $(V,E)$: an edge $(i,j)$ exists
+whenever some triangle contains both $i$ and $j$. The vertex coordinates
+$V\in\mathbb{R}^{n\times3}$ add the metric on top. Almost every operator in this unit lives
+at one of these two altitudes, and the most useful skill this chapter teaches is how to tell
+which altitude an operator is at - because choosing the metric-blind tool for a metric
+question is the most common way to get a plausible-looking but geometrically wrong answer.
 
----
+The unit's governing idea applies in a sharpened form. A discrete mesh approximates a smooth
+surface; the *metric-aware* discrete operators (cotangent Laplacian, Voronoi mass) are built
+precisely so that they converge to the continuous truth under refinement and pass
+analytic-oracle checks (a unit sphere's mean curvature $H=1/r=1$). The *metric-blind* graph
+operators do not converge to anything geometric - and that is not a defect, it is the point:
+they answer connectivity questions, which have no continuous-geometry limit to converge to.
 
 ## Mesh = graph + metric {#sec-graph-laplacian}
 
 ### The graph Laplacian: connectivity only
 
-Start with the simplest Laplacian a reader fluent in linear algebra would
-invent. You have an adjacency matrix $A$, with $A_{ij}=1$ when $i$ and $j$ are
-neighbours and $0$ otherwise, and a diagonal **degree** matrix
-$D=\operatorname{diag}(d_i)$ with $d_i=\sum_j A_{ij}$ the number of neighbours of
-vertex $i$. The **combinatorial graph Laplacian** is
+Begin with the simplest Laplacian linear algebra suggests. Given an adjacency matrix $A$,
+with $A_{ij}=1$ when $i$ and $j$ are neighbours and $0$ otherwise, and a diagonal degree
+matrix $D=\operatorname{diag}(d_i)$ with $d_i=\sum_j A_{ij}$ the number of neighbours of
+vertex $i$, the combinatorial graph Laplacian is
 
 $$
 L_{\text{graph}} = D - A,
 \qquad (L_{\text{graph}}\,u)_i = \sum_{j\in\mathcal{N}(i)} \bigl(u_i - u_j\bigr).
 $$ {#eq-graph-laplacian}
 
-Read the right-hand form aloud: *at every vertex, sum the differences between my
-value and each neighbour's value.* That is a discrete "how much do I stick out
-from my neighbourhood" operator. It is symmetric and positive-semidefinite, its
-smallest eigenvalue is $0$ (with the constant eigenvector — a flat signal sticks
-out from nobody), and its row sums are zero. This is exactly the structure of a
-Laplacian, built from connectivity alone. Crucially, **every neighbour counts
-equally**: the operator never looks at where the vertices actually are.
+The right-hand form reads: at every vertex, sum the differences between my value and each
+neighbour's. That is a discrete "how much do I stick out from my neighbourhood" operator. It
+is symmetric and positive-semidefinite, its smallest eigenvalue is $0$ (with the constant
+eigenvector - a flat signal sticks out from nobody), and its row sums are zero. This is
+exactly the structure of a Laplacian, built from connectivity alone. Crucially, *every
+neighbour counts equally*: the operator never looks at where the vertices actually are.
 
-`nitrix` builds this in `nitrix.graph.laplacian.laplacian(A, normalisation=...)`,
-a **dense** constructor (**HOST-CTOR**: it materialises an $(n,n)$ matrix; the
-symmetric variant's diagonal is generally non-zero so it does not fit the sparse
-pattern of the input). Three normalisations are offered, and each is one rung up
-from the last:
+That equal weighting fixes the operator's symmetry group, and it is worth stating precisely
+because it is the through-line of the chapter. $L_{\text{graph}}$ is permutation equivariant
+(relabel by $P$ and $L_{\text{graph}}\mapsto PL_{\text{graph}}P^\top$, like every operator
+here), but it is *also* invariant to any change of the vertex coordinates whatsoever - move,
+stretch, or arbitrarily deform the surface and, so long as the connectivity is unchanged, the
+operator is unchanged. Its invariance group is therefore enormous: not just the isometries,
+but all coordinate changes. A large invariance group is a strong prior, and a strong prior is
+useful exactly when its invariances match the question. For a connectivity question
+(communities, reachability, fold pattern), invariance to the metric is precisely what you
+want. For a geometry question it is fatal - an operator blind to lengths and angles cannot
+report them.
 
-- `'combinatorial'`: $L = D - A$ exactly as above. Eigenvalues are unbounded
-  (they scale with degree).
-- `'symmetric'`: $L_{\text{sym}} = I - D^{-1/2} A D^{-1/2}$. The obvious problem
-  with the combinatorial form is that high-degree vertices dominate; the cure is
-  to divide out degree symmetrically. The result is symmetric, PSD, with
-  eigenvalues in $[0,2]$ — the canonical *normalised Laplacian* used in
+`nitrix` builds this in `nitrix.graph.laplacian.laplacian(A, normalisation=...)`, a dense
+constructor (**HOST-CTOR**: it materialises an $(n,n)$ matrix; the symmetric variant's
+diagonal is generally non-zero so it does not fit the sparse pattern of the input). Three
+normalisations are offered, each one rung up from the last:
+
+- `'combinatorial'`: $L = D - A$ exactly as above. Eigenvalues are unbounded (they scale with
+  degree).
+- `'symmetric'`: $L_{\text{sym}} = I - D^{-1/2} A D^{-1/2}$. High-degree vertices dominate the
+  combinatorial form; dividing out degree symmetrically cures it. The result is symmetric,
+  PSD, with eigenvalues in $[0,2]$ - the canonical *normalised Laplacian* used in
   Laplacian-eigenmap embeddings.
-- `'random_walk'`: $L_{\text{rw}} = I - D^{-1} A$. Here $D^{-1}A$ is the
-  row-stochastic transition matrix of a random walk on the graph, so this
-  Laplacian is the *generator* of that walk. It is not symmetric in general but
-  shares the spectrum of $L_{\text{sym}}$.
+- `'random_walk'`: $L_{\text{rw}} = I - D^{-1} A$. Here $D^{-1}A$ is the row-stochastic
+  transition matrix of a random walk on the graph, so this Laplacian is the *generator* of
+  that walk. It is not symmetric in general but shares the spectrum of $L_{\text{sym}}$.
 
-For graphs too large for a dense $(n,n)$ matrix, the page you want is the
-**matrix-free** sibling `laplacian_matvec(A, x, normalisation=..., promise_symmetry=...)`
-(**DIFF-JAX**): it applies $L\,x$ without ever forming $L$, accepting dense, `ELL`,
-or `SectionedELL` adjacency (see [the ELL formats](operators.qmd#sec-ell)). This
-is the operator handed to the iterative eigensolvers in [solvers](solvers.qmd#sec-eigensolve).
-The `promise_symmetry` flag is the same opt-in you meet throughout the sparse
-stack: with it `False` (safe for asymmetric stored patterns such as a top-$k$
-sparsified affinity) the matvec applies the symmetric part $\tfrac12(Ax+A^{\!\top}x)$;
-with it `True` it applies the bare $Ax$ and skips the adjoint pass.
+For graphs too large for a dense $(n,n)$ matrix, the matrix-free sibling
+`laplacian_matvec(A, x, normalisation=..., promise_symmetry=...)` (**DIFF-JAX**) applies
+$L\,x$ without ever forming $L$, accepting dense, `ELL`, or `SectionedELL` adjacency (see
+[the ELL formats](operators.qmd#sec-ell)). This is the operator handed to the iterative
+eigensolvers in [solvers](solvers.qmd#sec-eigensolve). The `promise_symmetry` flag is the same
+opt-in met throughout the sparse stack: with it `False` (safe for asymmetric stored patterns
+such as a top-$k$ sparsified affinity) the matvec applies the symmetric part
+$\tfrac12(Ax+A^{\!\top}x)$; with it `True` it applies the bare $Ax$ and skips the adjoint
+pass.
 
-The supporting degree machinery is public and worth knowing by name, because the
-distinction it encodes is exactly the "symmetrise the adjacency, not the
-Laplacian" trap that bites people building affinities:
+The supporting degree machinery is public and worth knowing by name, because the distinction
+it encodes is exactly the "symmetrise the adjacency, not the Laplacian" trap that bites people
+building affinities:
 
-- `degree_vector(A)` — the **out-degree** (row sum) $\sum_j A_{ij}$. For ELL it
-  is `A.values.sum(-1)`; for `SectionedELL` it sums each bucket and scatters back
-  to row order. (**DIFF-JAX**.)
-- `in_degree_vector(A)` — the **in-degree** (column sum) $\sum_i A_{ij}$, the
-  adjoint of the above, computed without materialising $A^{\!\top}$ (dense
-  `A.sum(-2)`; sparse via the additive ELL adjoint $A^{\!\top}\mathbf{1}$). Equal
-  to the out-degree iff $A$ is symmetric. (**DIFF-JAX**.)
-- `symmetric_degree_vector(A)` — the degree of the *symmetrised* adjacency
-  $W=\tfrac12(A+A^{\!\top})$, i.e. $d_i=\tfrac12(\text{out}_i+\text{in}_i)$. This
-  is the degree you must normalise by when $A$ is not symmetric; using the bare
-  out-degree there normalises by the wrong diagonal and drifts the trivial
-  (constant) eigenvalue off $1$. (**DIFF-JAX**.)
+- `degree_vector(A)` - the out-degree (row sum) $\sum_j A_{ij}$. For ELL it is
+  `A.values.sum(-1)`; for `SectionedELL` it sums each bucket and scatters back to row order.
+  (**DIFF-JAX**.)
+- `in_degree_vector(A)` - the in-degree (column sum) $\sum_i A_{ij}$, the adjoint of the
+  above, computed without materialising $A^{\!\top}$ (dense `A.sum(-2)`; sparse via the
+  additive ELL adjoint $A^{\!\top}\mathbf{1}$). Equal to the out-degree iff $A$ is symmetric.
+  (**DIFF-JAX**.)
+- `symmetric_degree_vector(A)` - the degree of the *symmetrised* adjacency
+  $W=\tfrac12(A+A^{\!\top})$, i.e. $d_i=\tfrac12(\text{out}_i+\text{in}_i)$. This is the degree
+  to normalise by when $A$ is not symmetric; using the bare out-degree there normalises by the
+  wrong diagonal and drifts the trivial (constant) eigenvalue off $1$. (**DIFF-JAX**.)
 
 ### The cotangent Laplacian: connectivity plus metric
 
-Now climb one rung. The graph Laplacian's flaw, *for a geometry question*, is
-that two meshes with identical connectivity but wildly different vertex positions
-get identical operators — it cannot tell a sphere from a crumpled version of the
-same triangulation. The cure is to weight each edge by the *shape* of the
-triangles around it. That is exactly the
-[**cotangent Laplacian**](laplace-beltrami.qmd#sec-cotangent), built by
+Now climb one rung. The graph Laplacian's flaw, *for a geometry question*, is precisely its
+metric invariance: two meshes with identical connectivity but wildly different vertex
+positions get identical operators, so it cannot tell a sphere from a crumpled version of the
+same triangulation. The cure is to weight each edge by the *shape* of the triangles around
+it - to shrink the invariance group from "all coordinate changes" down to "isometries only."
+That is exactly the [cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent), built by
 `mesh_cotangent_laplacian(mesh, format=...)` (**HOST-CTOR**, returns `ELL`/`SectionedELL`):
 
 $$
@@ -136,20 +139,23 @@ $$
 \qquad w_{ij} = \tfrac12\bigl(\cot\alpha_{ij} + \cot\beta_{ij}\bigr),
 $$ {#eq-cotangent}
 
-where $\alpha_{ij},\beta_{ij}$ are the two angles *opposite* the edge $(i,j)$ in
-the triangles sharing it (one cotangent for a boundary edge in an open mesh). The
-sparsity pattern of @eq-cotangent is **identical** to that of @eq-graph-laplacian
-— same neighbour set $\mathcal{N}(i)$, same nonzeros — but the weights now encode
-the metric. Set every $w_{ij}=1$ and you recover the graph Laplacian (the
-"umbrella" / uniform operator). Let the cotangents vary with triangle shape and
-you get the operator that, divided by the [Voronoi mass](laplace-beltrami.qmd#sec-mass)
-$M=\operatorname{diag}(A_i)$, gives the discrete Laplace–Beltrami operator
-$\Delta = M^{-1}L$ that converges to the smooth one under refinement.
+where $\alpha_{ij},\beta_{ij}$ are the two angles *opposite* the edge $(i,j)$ in the triangles
+sharing it (one cotangent for a boundary edge in an open mesh). The sparsity pattern of
+@eq-cotangent is *identical* to that of @eq-graph-laplacian - same neighbour set
+$\mathcal{N}(i)$, same nonzeros - but the weights now encode the metric. Set every $w_{ij}=1$
+and you recover the graph Laplacian (the "umbrella" / uniform operator); let the cotangents
+vary with triangle shape and you get the operator that, divided by the
+[Voronoi mass](laplace-beltrami.qmd#sec-mass) $M=\operatorname{diag}(A_i)$, gives the discrete
+Laplace--Beltrami operator $\Delta = M^{-1}L$ that converges to the smooth one under
+refinement. The two Laplacians thus sit at two levels of the same invariance ladder: still
+permutation-equivariant, but the cotangent operator is invariant to *isometries* rather than
+to all deformations - exactly the right group for geometry, as the intrinsic-operator
+discussion in [foundations](foundations.qmd#sec-transformations-bias) anticipated.
 
-@fig-graph-geometry-weights makes the difference concrete on an analytic
-triangle fan: the graph Laplacian assigns weight $1$ to every spoke regardless of
-geometry, while the cotangent weights respond to triangle shape — collapsing
-toward zero (and even going negative) as a triangle becomes obtuse and skinny.
+@fig-graph-geometry-weights makes the difference concrete on an analytic triangle fan: the
+graph Laplacian assigns weight $1$ to every spoke regardless of geometry, while the cotangent
+weights respond to triangle shape - collapsing toward zero (and even going negative) as a
+triangle becomes obtuse and skinny.
 
 ```{python}
 #| label: fig-graph-geometry-weights
@@ -220,7 +226,8 @@ plt.show()
 
 ### Which one, when
 
-The choice is not a matter of taste; it follows from the question:
+The choice is not a matter of taste; it follows from the question, and equivalently from which
+invariances the answer must respect:
 
 | Use the **graph** Laplacian when… | Use the **cotangent** Laplacian when… |
 |---|---|
@@ -230,228 +237,210 @@ The choice is not a matter of taste; it follows from the question:
 | e.g. uniform vertex smoothing, fold detection, GSP filters | e.g. mean curvature, geodesic smoothing, manifold harmonics |
 
 The pure-connectivity workhorse is `mesh_laplacian_smooth(vertices, faces, lam=, iterations=)`
-(**DIFF-JAX**): one *uniform-Laplacian* (umbrella) smoothing pass moves every
-vertex a fraction $\lambda$ toward the **unweighted mean of its 1-ring**,
-$v \leftarrow (1-\lambda)v + \lambda\,\overline{\mathcal{N}(v)}$, iterated inside a
-`jax.lax.fori_loop`. It is metric-blind by design — it shrinks and regularises a
-mesh using connectivity only, and because it never calls a host constructor in
-the loop body it is safe to jit (it builds the edge index arrays once, outside
-the loop). Contrast it with the metric-aware backward-Euler geodesic smoothing
-$(M + tL)x = Mx_0$ in [smoothing](laplace-beltrami.qmd#sec-smoothing), which uses
-the cotangent $L$ and Voronoi mass $M$ and therefore *does* respect surface
-distances.
+(**DIFF-JAX**): one *uniform-Laplacian* (umbrella) smoothing pass moves every vertex a fraction
+$\lambda$ toward the *unweighted mean of its 1-ring*, $v \leftarrow (1-\lambda)v +
+\lambda\,\overline{\mathcal{N}(v)}$, iterated inside a `jax.lax.fori_loop`. It is metric-blind
+by design - it shrinks and regularises a mesh using connectivity only, and because it never
+calls a host constructor in the loop body it is safe to jit (it builds the edge index arrays
+once, outside the loop). Contrast it with the metric-aware backward-Euler geodesic smoothing
+$(M + tL)x = Mx_0$ in [smoothing](laplace-beltrami.qmd#sec-smoothing), which uses the cotangent
+$L$ and Voronoi mass $M$ and therefore *does* respect surface distances.
 
-A note on the **random-walk / normalised** form at the mesh level: the k-ring
-adjacency constructor (next section) can return a **row-stochastic** operator
-directly (`binary=False`), giving you $D^{-1}A$ — neighbourhood *averaging*
-rather than summing — without a separate normalisation step. That is the discrete
-random walk on the mesh graph, and the natural diffusion / smoothing kernel when
-you want a metric-blind low-pass filter.
-
----
+A note on the random-walk / normalised form at the mesh level: the k-ring adjacency constructor
+(next section) can return a row-stochastic operator directly (`binary=False`), giving you
+$D^{-1}A$ - neighbourhood *averaging* rather than summing - without a separate normalisation
+step. That is the discrete random walk on the mesh graph, and the natural diffusion / smoothing
+kernel when a metric-blind low-pass filter is wanted.
 
 ## Spectral graph theory ↔ manifold harmonics {#sec-spectral-graph}
 
-Here the twin structure pays off most. Eigendecompose either Laplacian and the
-eigenvectors form an orthogonal basis ordered by "frequency" (eigenvalue): low
-eigenvalues are smooth, slowly-varying patterns; high eigenvalues are wiggly. For
-the **graph** Laplacian this basis is the **graph-Fourier basis** — the
-foundation of spectral clustering, Laplacian eigenmaps (Belkin & Niyogi 2003),
-and graph signal processing. For the **cotangent** Laplacian it is the basis of
-**manifold harmonics** — the discrete analogue of the vibration modes (spherical
-harmonics on a sphere) covered in [spectral](spectral.qmd#sec-eigen). *Same
-machinery, different operator.* The generalised eigenproblem $L\phi_k=\lambda_k M\phi_k$
-is solved the same way regardless of which $L,M$ you feed it; what makes the
-result geometric is the operator, not the solver.
+Eigendecompose either Laplacian and the eigenvectors form an orthogonal basis ordered by
+"frequency" (eigenvalue): low eigenvalues are smooth, slowly-varying patterns; high eigenvalues
+are wiggly. For the graph Laplacian this basis is the graph-Fourier basis - the foundation of
+spectral clustering, Laplacian eigenmaps (Belkin & Niyogi 2003), and graph signal processing.
+For the cotangent Laplacian it is the basis of manifold harmonics - the discrete analogue of
+the vibration modes (spherical harmonics on a sphere) covered in
+[spectral](spectral.qmd#sec-eigen). Same machinery, different operator: the generalised
+eigenproblem $L\phi_k=\lambda_k M\phi_k$ is solved the same way regardless of which $L,M$ you
+feed it; what makes the result geometric is the operator, not the solver. The same gauge
+freedom carries over too - eigenvectors are defined only up to sign, and a repeated eigenvalue
+leaves its eigenspace defined only up to rotation, the symmetry of the eigenproblem flagged in
+[the spectral chapter](spectral.qmd#sec-embedding).
 
 ### Laplacian eigenmaps in `nitrix.graph.connectopy`
 
-`nitrix` ships the graph-spectral side as `laplacian_eigenmap` (**DIFF-JAX** — the
-solver carries an implicit-VJP, see below) in `nitrix.graph.connectopy`. It embeds
-nodes in the **bottom-$k$ non-trivial** eigenspace of the **symmetric normalised**
-Laplacian $L = I - D^{-1/2}AD^{-1/2}$. Two implementation choices in the real
-source are worth teaching because they are easy to get wrong:
+`nitrix` ships the graph-spectral side as `laplacian_eigenmap` (**DIFF-JAX** - the solver
+carries an implicit-VJP, see below) in `nitrix.graph.connectopy`. It embeds nodes in the
+*bottom-$k$ non-trivial* eigenspace of the *symmetric normalised* Laplacian $L = I -
+D^{-1/2}AD^{-1/2}$. Two implementation choices in the real source are worth teaching because
+they are easy to get wrong:
 
-1. **It chases the *largest* eigenvalues of the affinity, not the smallest of the
-   Laplacian.** The interesting eigenvectors of $L$ are at the *bottom* of its
-   spectrum (smoothest), but iterative solvers are far happier chasing the *top*.
-   The code uses the identity $L = I - M$ with $M = D^{-1/2}AD^{-1/2}$ the
-   normalised affinity, so $\lambda_L = 1-\lambda_M$: the bottom of $L$ is the top
-   of $M$. It eigendecomposes $M$ for its largest eigenpairs (via
-   `eigsolve_top_k` in `nitrix.linalg._eigsolve` — the same dispatcher the
-   geometry suite's sphere eigensolve uses), drops the trivial leading constant
-   eigenvector (`skip_trivial=True`), maps $\lambda_L = 1-\lambda_M$, and re-sorts
-   smallest-first.
-2. **It symmetrises correctly.** Affinities from top-$k$-per-row sparsification
-   are generally *not* symmetric. With `promise_symmetry=False` (default) the
-   operator is symmetrised at the matvec to $\tfrac12(Ax+A^{\!\top}x)$ *and* the
-   normalisation uses `symmetric_degree_vector` $d_W=\tfrac12(\text{out}+\text{in})$,
-   so the trivial eigenvalue stays exactly at $1$. Set `promise_symmetry=True`
-   only when the adjacency is genuinely symmetric (regular meshes / grids), which
-   skips the adjoint passes (~2× cheaper).
+1. **It chases the *largest* eigenvalues of the affinity, not the smallest of the Laplacian.**
+   The interesting eigenvectors of $L$ are at the *bottom* of its spectrum (smoothest), but
+   iterative solvers are far happier chasing the *top*. The code uses the identity $L = I - M$
+   with $M = D^{-1/2}AD^{-1/2}$ the normalised affinity, so $\lambda_L = 1-\lambda_M$: the
+   bottom of $L$ is the top of $M$. It eigendecomposes $M$ for its largest eigenpairs (via
+   `eigsolve_top_k` in `nitrix.linalg._eigsolve` - the same dispatcher the geometry suite's
+   sphere eigensolve uses), drops the trivial leading constant eigenvector
+   (`skip_trivial=True`), maps $\lambda_L = 1-\lambda_M$, and re-sorts smallest-first.
+2. **It symmetrises correctly.** Affinities from top-$k$-per-row sparsification are generally
+   *not* symmetric. With `promise_symmetry=False` (default) the operator is symmetrised at the
+   matvec to $\tfrac12(Ax+A^{\!\top}x)$ *and* the normalisation uses `symmetric_degree_vector`
+   $d_W=\tfrac12(\text{out}+\text{in})$, so the trivial eigenvalue stays exactly at $1$. Set
+   `promise_symmetry=True` only when the adjacency is genuinely symmetric (regular meshes /
+   grids), which skips the adjoint passes (about $2\times$ cheaper).
 
-The solver is selected by `solver=` (`'auto'`, `'eigh'`, `'lobpcg'`,
-`'shift_invert'`) and `preconditioner=` (`'none'`, `'polynomial'`), which map onto
-a `SolverSpec` for the [eigensolve dispatcher](solvers.qmd#sec-eigensolve);
-`'auto'` resolves to dense `eigh` for dense input and `lobpcg` for sparse.
-Differentiability comes from `jnp.linalg.eigh`'s registered VJP (dense `eigh`
-path) or the implicit-VJP in `linalg._eigsolve` (iterative paths). Inputs may be
-dense, `ELL`, or `SectionedELL`. The companion `diffusion_embedding`
-(Coifman–Lafon 2006, **DIFF-JAX**) reuses the same affinity-eigensolve plumbing
-with a density-normalisation parameter `alpha` and a diffusion-time scaling
-$\lambda^t$, recovering the random-walk right eigenvectors $\psi = D^{-1/2}\phi$.
+The solver is selected by `solver=` (`'auto'`, `'eigh'`, `'lobpcg'`, `'shift_invert'`) and
+`preconditioner=` (`'none'`, `'polynomial'`), which map onto a `SolverSpec` for the
+[eigensolve dispatcher](solvers.qmd#sec-eigensolve); `'auto'` resolves to dense `eigh` for dense
+input and `lobpcg` for sparse. Differentiability comes from `jnp.linalg.eigh`'s registered VJP
+(dense `eigh` path) or the implicit-VJP in `linalg._eigsolve` (iterative paths). Inputs may be
+dense, `ELL`, or `SectionedELL`. The companion `diffusion_embedding` (Coifman--Lafon 2006,
+**DIFF-JAX**) reuses the same affinity-eigensolve plumbing with a density-normalisation
+parameter `alpha` and a diffusion-time scaling $\lambda^t$, recovering the random-walk right
+eigenvectors $\psi = D^{-1/2}\phi$.
 
-### The as-built caveat: eigenmaps are the *wrong* operator for a geometric sphere embedding
+### Why eigenmaps are the wrong operator for a geometric sphere embedding
 
-This is the load-bearing lesson of the page, and it is a real design decision in
-the source, not a hypothetical. `laplacian_eigenmap` builds a **degree-normalised
-graph Laplacian** $I - D^{-1/2}AD^{-1/2}$. That is a *graph* operator: it knows
-who-neighbours-whom and how many, but it does **not** know triangle areas or
-angles. It is therefore the **wrong** operator if what you want is a *geometric*
-spectral embedding of a surface — the kind that should reproduce a sphere's
-low-order spherical harmonics. The geometry-correct object is the cotangent-mass
-generalised eigenproblem $L\phi_k = \lambda_k M\phi_k$ with the **cotangent**
-stiffness and the **Voronoi mass** — not the degree-normalised graph Laplacian.
+This is the load-bearing lesson of the chapter, and a real design decision in the source, not a
+hypothetical. `laplacian_eigenmap` builds a degree-normalised graph Laplacian $I -
+D^{-1/2}AD^{-1/2}$. That is a *graph* operator: it knows who-neighbours-whom and how many, but
+it does *not* know triangle areas or angles. It is therefore the wrong operator for a
+*geometric* spectral embedding of a surface - the kind that should reproduce a sphere's
+low-order spherical harmonics. The geometry-correct object is the cotangent-mass generalised
+eigenproblem $L\phi_k = \lambda_k M\phi_k$ with the cotangent stiffness and the Voronoi mass,
+not the degree-normalised graph Laplacian. Said in the invariance language of this chapter: the
+graph eigenmap is invariant to too much - it cannot see the metric it is being asked to
+reproduce.
 
-That is exactly why the surface spectral embedding in the geometry suite does
-**not** route through `laplacian_eigenmap`: the [spectral](spectral.qmd#sec-embedding)
-path goes through the lower-level eigensolve on the actual $(L, M)$ pair. If you
-hand a cortical mesh's k-ring adjacency to `laplacian_eigenmap`, you get a
-perfectly valid *graph* embedding — useful for connectivity-style analyses — but
-its coordinates are metric-blind, so they will not match the analytic manifold
-harmonics and will drift with triangulation density. Use the graph eigenmap for
-graph questions; use the cotangent-mass eigensolve for geometry.
+That is exactly why the surface spectral embedding in the geometry suite does *not* route
+through `laplacian_eigenmap`: the [spectral](spectral.qmd#sec-embedding) path goes through the
+lower-level eigensolve on the actual $(L, M)$ pair. Hand a cortical mesh's k-ring adjacency to
+`laplacian_eigenmap` and you get a perfectly valid *graph* embedding - useful for
+connectivity-style analyses - but its coordinates are metric-blind, so they will not match the
+analytic manifold harmonics and will drift with triangulation density. Use the graph eigenmap
+for graph questions; use the cotangent-mass eigensolve for geometry.
 
-(`nitrix.graph` also exposes a `community` submodule — `modularity_matrix`,
-`modularity_matrix_matvec`, `relaxed_modularity`, `coaffiliation`,
-`girvan_newman_null` — whose operators are algebraically Laplacian-shaped but
-serve *community detection*; they live apart from `laplacian.py` precisely to keep
-the Laplacian import graph free of community-detection concerns. They are
-mentioned here for completeness; their home is the connectivity unit named at the
-end of this page.)
-
----
+(`nitrix.graph` also exposes a `community` submodule - `modularity_matrix`,
+`modularity_matrix_matvec`, `relaxed_modularity`, `coaffiliation`, `girvan_newman_null` - whose
+operators are algebraically Laplacian-shaped but serve *community detection*; they live apart
+from `laplacian.py` precisely to keep the Laplacian import graph free of community-detection
+concerns. They are mentioned here for completeness; their home is the connectivity unit named at
+the end.)
 
 ## k-ring operators and graph signal processing {#sec-gsp}
 
-The bridge from "adjacency matrix" to "filter on a graph" is short. The k-ring
-adjacency from [operators](operators.qmd#sec-adjacency) is built by
-`mesh_k_ring_adjacency(mesh, k=, binary=, include_self=, format=)`
-(**HOST-CTOR**, returns `ELL`/`SectionedELL`): a host-side BFS expands each
-vertex's 1-ring to depth $k$, then packs the result into the chosen sparse format.
-The two flags are the whole graph-operator vocabulary:
+The bridge from "adjacency matrix" to "filter on a graph" is short. The k-ring adjacency from
+[operators](operators.qmd#sec-adjacency) is built by `mesh_k_ring_adjacency(mesh, k=, binary=,
+include_self=, format=)` (**HOST-CTOR**, returns `ELL`/`SectionedELL`): a host-side BFS expands
+each vertex's 1-ring to depth $k$, then packs the result into the chosen sparse format. The two
+flags are the whole graph-operator vocabulary:
 
-- `binary=True` (default): entries are $1$ for neighbours, $0$ (the ELL identity)
-  for padding — **binary reachability**, the unweighted adjacency $A$.
-- `binary=False`: entries are $1/|\mathcal{N}|$, **row-normalised** so the
-  operator is row-stochastic — the **diffusion / averaging** operator $D^{-1}A$,
-  the discrete random walk on the k-ring graph.
-- `include_self=True` adds a self-loop (the vertex in its own neighbour list),
-  turning a pure-neighbour aggregate into a "self + neighbours" aggregate (the
-  GCN-style renormalisation trick).
+- `binary=True` (default): entries are $1$ for neighbours, $0$ (the ELL identity) for padding -
+  binary reachability, the unweighted adjacency $A$.
+- `binary=False`: entries are $1/|\mathcal{N}|$, row-normalised so the operator is
+  row-stochastic - the diffusion / averaging operator $D^{-1}A$, the discrete random walk on the
+  k-ring graph.
+- `include_self=True` adds a self-loop (the vertex in its own neighbour list), turning a
+  pure-neighbour aggregate into a "self + neighbours" aggregate (the GCN-style renormalisation
+  trick).
 
-Once you have such an operator, **mesh smoothing and boundary detection are graph
-signal processing**: a per-vertex signal $u$ is a graph signal, and applying the
-adjacency operator is a graph filter. Multiplying by the row-stochastic $D^{-1}A$
-is a one-step **low-pass** filter (local averaging blurs high-frequency detail);
-applying the graph Laplacian $L_{\text{graph}}=D-A$ is a **high-pass** filter that
-amplifies where a signal disagrees with its neighbourhood — which is precisely a
-discrete edge/boundary detector. Stacking these is "filtering on a graph": a
-polynomial $p(L)$ in the Laplacian is a spectral filter (the ChebNet idea), and
-the [semiring matvec](operators.qmd#sec-apply) is the engine that applies it. We
-keep this a bridge, not a course; the GSP references at the end go deeper.
+Once you have such an operator, mesh smoothing and boundary detection are graph signal
+processing: a per-vertex signal $u$ is a graph signal, and applying the adjacency operator is a
+graph filter. Multiplying by the row-stochastic $D^{-1}A$ is a one-step low-pass filter (local
+averaging blurs high-frequency detail); applying the graph Laplacian $L_{\text{graph}}=D-A$ is a
+high-pass filter that amplifies where a signal disagrees with its neighbourhood - precisely a
+discrete edge/boundary detector. Stacking these is "filtering on a graph": a polynomial $p(L)$
+in the Laplacian is a spectral filter (the ChebNet idea), and the
+[semiring matvec](operators.qmd#sec-apply) is the engine that applies it. Because $L$ is
+permutation-equivariant, so is any polynomial in it: a graph filter treats every vertex by the
+same rule regardless of labelling, which is the property that lets one set of filter
+coefficients generalise across graphs of different size and ordering. We keep this a bridge, not
+a course; the GSP references at the end go deeper.
 
-The deepest payoff of reading these operators as graph filters is that the
-**same ELL substrate** carries all of them. The edge-functional primitive
-`semiring_ell_edge_aggregate(edge_fn, ell, x, *, semiring)` (in
-`nitrix.semiring`) runs a user callable $\varphi(h_i,h_j,w,(i,j))$ at every
+The deepest payoff of reading these operators as graph filters is that the *same ELL substrate*
+carries all of them. The edge-functional primitive `semiring_ell_edge_aggregate(edge_fn, ell,
+x, *, semiring)` (in `nitrix.semiring`) runs a user callable $\varphi(h_i,h_j,w,(i,j))$ at every
 (vertex, neighbour) pair and reduces per row under a chosen
-[semiring](operators.qmd#sec-semiring) — REAL $(+,\times)$ for sum-aggregation
-(GCN/EdgeConv/GAT), max-plus for symmetric pooling, min-plus for morphological
-erosion. One primitive, the whole modern graph-conv family, no separate
-message-passing API.
-
----
+[semiring](operators.qmd#sec-semiring) - REAL $(+,\times)$ for sum-aggregation
+(GCN/EdgeConv/GAT), max-plus for symmetric pooling, min-plus for morphological erosion. One
+primitive, the whole modern graph-conv family, no separate message-passing API - and because
+the reduction is over an unordered neighbour set, every such layer is permutation-equivariant by
+construction, the symmetry the geometric-deep-learning blueprint (Bronstein et al. 2021) places
+at the centre of graph learning.
 
 ## Mesh pooling and hierarchies {#sec-pooling}
 
-Surface-domain encoder–decoders (Topofit-, SUGAR-style networks on the cortex)
-need **multi-resolution** representations: pool a fine mesh down to a coarse one,
-process, then upsample back. On a regular grid that is ordinary CNN
-pooling/unpooling; on a mesh the natural multi-resolution scaffold is the
-**icosphere hierarchy**, because each subdivision step quadruples the faces in a
-perfectly nested way.
+Surface-domain encoder-decoders (Topofit-, SUGAR-style networks on the cortex) need
+multi-resolution representations: pool a fine mesh down to a coarse one, process, then upsample
+back. On a regular grid that is ordinary CNN pooling/unpooling; on a mesh the natural
+multi-resolution scaffold is the icosphere hierarchy, because each subdivision step quadruples
+the faces in a perfectly nested way.
 
 ### The icosphere hierarchy
 
-`icosphere(n_iterations)` (**HOST-CTOR**) builds a geodesic sphere by recursively
-subdividing an icosahedron: $0$ iterations gives the 12-vertex base, and each
-subdivision takes a mesh with $n$ vertices to one with
+`icosphere(n_iterations)` (**HOST-CTOR**) builds a geodesic sphere by recursively subdividing an
+icosahedron: $0$ iterations gives the 12-vertex base, and each subdivision takes a mesh with $n$
+vertices to one with
 
 $$
 n_L = 10\cdot 4^{L} + 2
 $$ {#eq-icosphere-count}
 
-vertices at level $L$ — $12, 42, 162, 642, \dots$, with level $7$ matching
-FreeSurfer's `ico7` at $163{,}842$ vertices. The geometric growth in
-@eq-icosphere-count is the left panel of @fig-graph-geometry-hierarchy.
+vertices at level $L$ - $12, 42, 162, 642, \dots$, with level $7$ matching FreeSurfer's `ico7`
+at $163{,}842$ vertices. The geometric growth in @eq-icosphere-count is the left panel of
+@fig-graph-geometry-hierarchy.
 
-`icosphere_hierarchy(max_level)` (**HOST-CTOR**) returns an `IcosphereHierarchy`
-dataclass holding `meshes[0..max_level]` *plus the parent-child bookkeeping*
-needed to build cross-level operators in $O(n)$ without re-running subdivision.
-The `parents[L]` table records, for each fine vertex, whether it is a
-**coarse-original** (preserved in place: `parents[L][v] == (v, v)`) or the
-**midpoint** of a coarse edge `(a, b)` (`parents[L][v] == (a, b)`). One important
-as-built fact: `IcosphereHierarchy` is **deliberately not a JAX pytree** — its
-parent tables are host-side construction metadata, and the object is a
-*construction artefact* used once on the host to emit array-bearing meshes and
-ELLs that *then* cross the jit/grad/vmap boundary. `icosphere_hierarchy_from_levels`
-(**HOST-CTOR**) is the escape hatch: wrap your own (non-icosphere) meshes plus
-parent tables into the same structure so every cross-level operator below works
-unchanged.
+`icosphere_hierarchy(max_level)` (**HOST-CTOR**) returns an `IcosphereHierarchy` dataclass
+holding `meshes[0..max_level]` *plus the parent-child bookkeeping* needed to build cross-level
+operators in $O(n)$ without re-running subdivision. The `parents[L]` table records, for each
+fine vertex, whether it is a coarse-original (preserved in place: `parents[L][v] == (v, v)`) or
+the midpoint of a coarse edge `(a, b)` (`parents[L][v] == (a, b)`). One important as-built fact:
+`IcosphereHierarchy` is *deliberately not a JAX pytree* - its parent tables are host-side
+construction metadata, and the object is a construction artefact used once on the host to emit
+array-bearing meshes and ELLs that *then* cross the jit/grad/vmap boundary.
+`icosphere_hierarchy_from_levels` (**HOST-CTOR**) is the escape hatch: wrap your own
+(non-icosphere) meshes plus parent tables into the same structure so every cross-level operator
+below works unchanged.
 
-### Cross-level operators are semiring matmuls in disguise
+### Cross-level operators are semiring matmuls
 
 The hierarchy emits two cross-level ELLs:
 
-- `icosphere_cross_level_adjacency(hierarchy, coarse_level, fine_level)`
-  (**HOST-CTOR**, consecutive levels): row $i$ (coarse vertex) lists the fine
-  vertices descending from it — the coarse-original child plus every edge-midpoint
-  on an incident edge. Stored `values` are a $1/0$ validity indicator that serves
-  both pooling consumers without a rebuild.
-- `icosphere_bary_upsampler(hierarchy, coarse_level, fine_level)`
-  (**HOST-CTOR**): row $i$ (fine vertex) lists its coarse sources with
-  **barycentric weights** — weight $1$ on itself for a coarse-original, weights
-  $(\tfrac12,\tfrac12)$ on the two endpoints for an edge-midpoint.
+- `icosphere_cross_level_adjacency(hierarchy, coarse_level, fine_level)` (**HOST-CTOR**,
+  consecutive levels): row $i$ (coarse vertex) lists the fine vertices descending from it - the
+  coarse-original child plus every edge-midpoint on an incident edge. Stored `values` are a
+  $1/0$ validity indicator that serves both pooling consumers without a rebuild.
+- `icosphere_bary_upsampler(hierarchy, coarse_level, fine_level)` (**HOST-CTOR**): row $i$ (fine
+  vertex) lists its coarse sources with *barycentric weights* - weight $1$ on itself for a
+  coarse-original, weights $(\tfrac12,\tfrac12)$ on the two endpoints for an edge-midpoint.
 
-The actual pooling/upsampling routines are **DIFF-JAX** and — this is the payoff
-of [operators](operators.qmd#sec-semiring) — *each is no more than a semiring matmul across
-levels*, packaged as a named wrapper for discoverability:
+The actual pooling/upsampling routines are **DIFF-JAX** and - this is the payoff of
+[operators](operators.qmd#sec-semiring) - each is no more than a semiring matmul across levels,
+packaged as a named wrapper for discoverability:
 
-- `mesh_pool_max(cross_level_adjacency, fine_features)` — **max-plus** pool. For
-  each coarse vertex, the max of its fine children's features. It is a
-  `semiring_ell_matmul` under `TROPICAL_MAX_PLUS` with the stored values replaced
-  by the max-plus identity (zeros), so the reduction degenerates to a plain `max`.
-- `mesh_coarsen_meanpool(coarsen_ell, fine_features)` — **REAL** pool. The
-  `values`-weighted mean of each coarse vertex's children:
-  $\text{out}_i = \bigl(\sum_p \text{values}_{ip}\,\text{fine}_{\text{idx}_{ip}}\bigr) / \sum_p \text{values}_{ip}$.
-  With the $1/0$ indicator this is a plain row-mean (padding drops out of both
-  sum and count; an all-padding row returns zeros, not `NaN`). This is the
-  scatter-mean-with-self-loop coarsening used by surface encoders such as SUGAR's
-  `IcosahedronPooling`.
-- `mesh_unpool_max(cross_level_adjacency, coarse_features)` — the max-plus
-  *unpool*, symmetric to `mesh_pool_max` with the levels swapped; usually
-  single-source per fine vertex, so the "max" reduces to a gather.
-- `mesh_bary_upsample(bary_ell, coarse_coords)` — **REAL** matmul that
-  barycentrically interpolates per-vertex coordinates/features from coarse to
-  fine.
+- `mesh_pool_max(cross_level_adjacency, fine_features)` - max-plus pool. For each coarse vertex,
+  the max of its fine children's features. It is a `semiring_ell_matmul` under
+  `TROPICAL_MAX_PLUS` with the stored values replaced by the max-plus identity (zeros), so the
+  reduction degenerates to a plain `max`.
+- `mesh_coarsen_meanpool(coarsen_ell, fine_features)` - REAL pool. The `values`-weighted mean of
+  each coarse vertex's children: $\text{out}_i = \bigl(\sum_p
+  \text{values}_{ip}\,\text{fine}_{\text{idx}_{ip}}\bigr) / \sum_p \text{values}_{ip}$. With the
+  $1/0$ indicator this is a plain row-mean (padding drops out of both sum and count; an
+  all-padding row returns zeros, not `NaN`). This is the scatter-mean-with-self-loop coarsening
+  used by surface encoders such as SUGAR's `IcosahedronPooling`.
+- `mesh_unpool_max(cross_level_adjacency, coarse_features)` - the max-plus *unpool*, symmetric to
+  `mesh_pool_max` with the levels swapped; usually single-source per fine vertex, so the "max"
+  reduces to a gather.
+- `mesh_bary_upsample(bary_ell, coarse_coords)` - REAL matmul that barycentrically interpolates
+  per-vertex coordinates/features from coarse to fine.
 
-Because these share the `_apply_shared_ell` core, a single un-batched 2-D ELL
-(one per level pair) broadcasts across batch/channel axes via `jax.vmap` without
-materialising a batched copy of the operator. @fig-graph-geometry-hierarchy (right
-panel) shows a signal max-pooled up a small hierarchy — the coarse levels keep the
-*extremes* of the fine signal, which is the defining behaviour of max-pooling and
-the reason it preserves salient features through a surface encoder.
+Because these share the `_apply_shared_ell` core, a single un-batched 2-D ELL (one per level
+pair) broadcasts across batch/channel axes via `jax.vmap` without materialising a batched copy
+of the operator. @fig-graph-geometry-hierarchy (right panel) shows a signal max-pooled up a
+small hierarchy - the coarse levels keep the *extremes* of the fine signal, which is the
+defining behaviour of max-pooling and the reason it preserves salient features through a surface
+encoder.
 
 ```{python}
 #| label: fig-graph-geometry-hierarchy
@@ -520,75 +509,63 @@ plt.show()
 
 ### The volumetric counterpart
 
-For volumes the analogue is SegNet-style **indexed** pooling, in
-`nitrix.morphology.pooling`:
+For volumes the analogue is SegNet-style indexed pooling, in `nitrix.morphology.pooling`:
 
-- `max_pool_with_indices_nd(x, pool_size=, spatial_rank=)` (**DIFF-JAX**):
-  channel-first N-D max pooling that returns both the pooled values *and* the
-  flattened argmax index of each window's max in the original grid. The
-  implementation "unfolds" each spatial axis into (window-count, window-size),
-  takes `jnp.argmax` over the flattened window axes, and combines the
-  within-window coordinate with the window's anchor to get a global flat index —
-  $O(N)$ in voxels, no per-window scan. Spatial dims must be divisible by
-  `pool_size` (the caller pre-pads).
-- `max_unpool_nd(x, indices, output_shape=, spatial_rank=)` (**DIFF-JAX**):
-  scatters pooled values back to a higher-resolution grid *at the stored argmax
-  positions*, zeros elsewhere — the exact inverse-routing SegNet's decoder uses to
-  place each pooled value where it came from.
+- `max_pool_with_indices_nd(x, pool_size=, spatial_rank=)` (**DIFF-JAX**): channel-first N-D max
+  pooling that returns both the pooled values *and* the flattened argmax index of each window's
+  max in the original grid. The implementation "unfolds" each spatial axis into (window-count,
+  window-size), takes `jnp.argmax` over the flattened window axes, and combines the within-window
+  coordinate with the window's anchor to get a global flat index - $O(N)$ in voxels, no per-window
+  scan. Spatial dims must be divisible by `pool_size` (the caller pre-pads).
+- `max_unpool_nd(x, indices, output_shape=, spatial_rank=)` (**DIFF-JAX**): scatters pooled values
+  back to a higher-resolution grid *at the stored argmax positions*, zeros elsewhere - the exact
+  inverse-routing SegNet's decoder uses to place each pooled value where it came from.
 
-Ties resolve to the first argmax (lowest within-window flat index), matching
-`jnp.argmax`; cross-framework consumers should expect tie-breaking to differ —
-the unit's "validate by class/correlation, not bit-parity" posture again.
+Ties resolve to the first argmax (lowest within-window flat index), matching `jnp.argmax`;
+cross-framework consumers should expect tie-breaking to differ - the unit's "validate by
+class/correlation, not bit-parity" posture again.
 
-Together — the cross-level mesh wrappers, the icosphere hierarchy that builds
-their ELLs, the edge-functional aggregate, and the indexed volumetric pooling —
-these close the loop for **geometric deep learning on surfaces**: a coherent
-encoder–decoder stack expressed entirely in the semiring/ELL substrate.
-
----
+Together - the cross-level mesh wrappers, the icosphere hierarchy that builds their ELLs, the
+edge-functional aggregate, and the indexed volumetric pooling - these close the loop for
+geometric deep learning on surfaces: a coherent, permutation-equivariant encoder-decoder stack
+expressed entirely in the semiring/ELL substrate.
 
 ## Pointers onward
 
-This page is where the geometry unit hands off to the federation's
-**connectivity, parcellation, and labels** work, which builds directly on the
-graph view above but is a *separate unit*. `nitrix.graph.parcellation` already
-ships the functional-parcellation pipeline — `surface_boundary_map`
-(connectivity-profile boundary detection composing
-`semiring_ell_edge_aggregate`), `eta_squared` similarity, and `mesh_watershed`
-(host-side priority-flood basins on a per-vertex field) — and `nitrix.graph.community`
-the modularity operators. Documenting connectopy (`laplacian_eigenmap` /
-`diffusion_embedding` as connectivity *gradients*), parcellation (boundary-map →
-watershed), and community detection in full is the job of that unit; here we only
-needed the graph-Laplacian / spectral / pooling machinery they stand on. See the
-package at [`nitrix.graph`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/graph/).
-
----
+This chapter is where the geometry unit hands off to the federation's connectivity,
+parcellation, and labels work, which builds directly on the graph view above but is a *separate
+unit*. `nitrix.graph.parcellation` already ships the functional-parcellation pipeline -
+`surface_boundary_map` (connectivity-profile boundary detection composing
+`semiring_ell_edge_aggregate`), `eta_squared` similarity, and `mesh_watershed` (host-side
+priority-flood basins on a per-vertex field) - and `nitrix.graph.community` the modularity
+operators. Documenting connectopy (`laplacian_eigenmap` / `diffusion_embedding` as connectivity
+*gradients*), parcellation (boundary-map then watershed), and community detection in full is the
+job of that unit; here we only needed the graph-Laplacian / spectral / pooling machinery they
+stand on. See the package at
+[`nitrix.graph`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/graph/).
 
 ## Further reading
 
-- Chung, F. R. K. (1997). *Spectral Graph Theory*. CBMS Regional Conference
-  Series in Mathematics 92, American Mathematical Society. (The canonical
-  treatment of the graph Laplacian and its spectrum.)
-- Belkin, M., & Niyogi, P. (2003). "Laplacian Eigenmaps for Dimensionality
-  Reduction and Data Representation." *Neural Computation*, 15(6), 1373–1396.
-  (The eigenmap embedding `laplacian_eigenmap` implements.)
-- Coifman, R. R., & Lafon, S. (2006). "Diffusion maps." *Applied and
-  Computational Harmonic Analysis*, 21(1), 5–30. (The basis of
-  `diffusion_embedding`.)
-- Ortega, A., Frossard, P., Kovačević, J., Moura, J. M. F., & Vandergheynst, P.
-  (2018). "Graph Signal Processing: Overview, Challenges, and Applications."
-  *Proceedings of the IEEE*, 106(5), 808–828.
-- Bronstein, M. M., Bruna, J., Cohen, T., & Veličković, P. (2021). *Geometric
-  Deep Learning: Grids, Groups, Graphs, Geodesics, and Gauges*. arXiv:2104.13478.
-- Defferrard, M., Bresson, X., & Vandergheynst, P. (2016). "Convolutional Neural
-  Networks on Graphs with Fast Localized Spectral Filtering" (ChebNet).
-  *Advances in Neural Information Processing Systems* 29. (Polynomial spectral
-  filters $p(L)$.)
-- Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). "Discrete
-  Differential-Geometry Operators for Triangulated 2-Manifolds." In *Visualization
-  and Mathematics III*, 35–57. (The cotangent Laplacian and mixed-Voronoi mass.)
-
----
+- Chung, F. R. K. (1997). *Spectral Graph Theory*. CBMS Regional Conference Series in
+  Mathematics 92, American Mathematical Society. The canonical treatment of the graph Laplacian
+  and its spectrum.
+- Belkin, M., & Niyogi, P. (2003). "Laplacian Eigenmaps for Dimensionality Reduction and Data
+  Representation." *Neural Computation*, 15(6), 1373–1396. The eigenmap embedding
+  `laplacian_eigenmap` implements.
+- Coifman, R. R., & Lafon, S. (2006). "Diffusion maps." *Applied and Computational Harmonic
+  Analysis*, 21(1), 5–30. The basis of `diffusion_embedding`.
+- Ortega, A., Frossard, P., Kovačević, J., Moura, J. M. F., & Vandergheynst, P. (2018). "Graph
+  Signal Processing: Overview, Challenges, and Applications." *Proceedings of the IEEE*, 106(5),
+  808–828.
+- Bronstein, M. M., Bruna, J., Cohen, T., & Veličković, P. (2021). *Geometric Deep Learning:
+  Grids, Groups, Graphs, Geodesics, and Gauges*. arXiv:2104.13478. The equivariance-first view of
+  graph and mesh learning this chapter's symmetry framing follows.
+- Defferrard, M., Bresson, X., & Vandergheynst, P. (2016). "Convolutional Neural Networks on
+  Graphs with Fast Localized Spectral Filtering" (ChebNet). *Advances in Neural Information
+  Processing Systems* 29. Polynomial spectral filters $p(L)$.
+- Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). "Discrete Differential-Geometry
+  Operators for Triangulated 2-Manifolds." In *Visualization and Mathematics III*, 35–57. The
+  cotangent Laplacian and mixed-Voronoi mass.
 
 ## See also
 

@@ -1,177 +1,105 @@
 ---
-title: "Foundations: discretization, devices, and contracts"
+title: "Foundations: discrete geometric computation"
 ---
 
-::: {.callout-tldr title="Fast path"}
-This is rung 0 of the geometry unit — the page that turns "I know linear algebra"
-into "I can read the rest of this book as one story." Three ideas hold up
-everything that follows:
+This chapter introduces the viewpoint that governs `nitrix.geometry` and the
+mesh-oriented parts of `nitrix.sparse`: geometric computation in neuroimaging is
+usually computation on a finite representation of a smooth object. A cortical
+surface is stored as vertices and triangles, not as a differentiable manifold. A
+brain image is stored as samples on a lattice, not as a function on
+$\mathbb{R}^3$. Nevertheless, the quantities we want to compute - curvature,
+area, gradients, Laplacians, deformations, and distances - are most naturally
+defined in the continuous setting.
 
-1. **A discrete object approximates a smooth one.** A triangle mesh stands in for
-   a smooth surface; a voxel grid stands in for a region of space and the fields on
-   it. A good *discrete operator* (a graph Laplacian, an angle defect, a finite
-   difference) is a stand-in for a *continuous* one ($\Delta$, curvature,
-   $\nabla$), and the quality bar is **convergence under refinement**: as the mesh
-   subdivides or the grid fines, the discrete answer approaches the smooth truth.
-   We check that against **analytic oracles** (a sphere's $H=1/r$; Gauss–Bonnet
-   $\sum K A = 4\pi$) and real data by **class and correlation, never bit-parity**.
-2. **Every routine carries an execution class** — **DIFF-JAX**, **HOST-CTOR**, or
-   **HOST-QA** — and one load-bearing rule keeps the differentiable pipeline
-   correct: *a HOST op must never be called inside a jitted loop*.
-3. **The whole tier is cuSolver-free and XLA-lowered.** Closed-form small inverses,
-   matrix-free conjugate gradient, a CPU-fallback solver seam, and `lax.gather` /
-   `scatter` + `fori_loop` instead of custom kernels — these are not incidental,
-   they shape the entire design.
+The central question is therefore not whether the discrete object is "the same"
+as the continuous object. It is not. The question is whether the discrete
+operation has been chosen so that, under refinement and under the assumptions of
+the model, it approaches the continuous operation it claims to represent.
 
-If you read only one page before the ladder, read this one.
-:::
+The reader is assumed to know linear algebra and basic multivariate calculus. No
+formal background in differential geometry is required. We will use the language
+of tangent planes, curvature, and Laplace--Beltrami operators, but each will be
+introduced through finite-dimensional approximations: matrices, sparse
+operators, local least-squares fits, and quadratic energies. A second theme runs
+underneath the first: every good discrete operator is built to respect the
+*transformations* under which the geometry is meant to be invariant. That theme,
+developed in @sec-transformations-bias, is what connects this chapter to the
+modern language of inductive bias and geometric learning.
 
-This unit is written for a reader who is comfortable with **linear algebra** —
-matrices, least squares, eigendecomposition, rank, transposes — but who has had
-**no formal training in differential geometry, numerical methods, or graphics**.
-Everything here is built up from the linear algebra you already own. Our aim across
-the book is to carry you from *novice* (you can call a routine and pick the right
-one) to *practitioner* (you understand why each answer converges and what each
-argument means) to *developer* (you could implement it yourself). This page lays
-the three planks the whole climb rests on. It is the sibling of the
-[`nitrix.stats` foundations page](../statistics/foundations.qmd); the two units share one
-house style.
+## The Running Example: Curvature of Cortex {#sec-running-example}
 
-## A motivating question {#sec-motivation}
-
-Hold one concrete question in mind for the entire page. You have a reconstructed
-**cortical surface** — a triangle mesh of roughly 150,000 vertices wrapping one
-hemisphere — and you want to know, at every vertex, *how curved is the cortex
-here?* Curvature separates the **gyral crowns** (the outward-bulging ridges) from
-the **sulcal fundi** (the inward-folding valleys); it is the raw signal behind
-folding-pattern registration, cortical-thickness sampling, and a dozen
-morphometric features.
-
-"Curvature" is a quantity from smooth differential geometry — it is defined for a
-surface you can differentiate twice. But your surface is not smooth: it is a
-finite list of vertices and triangles, with corners and flat faces and nothing to
-differentiate. So the question splits into two:
-
-1. What is the *continuous* thing we mean (mean curvature $H$ of a smooth
-   surface)?
-2. How do we compute a *discrete* number on the mesh that approaches it — and how
-   do we know it does?
-
-That gap, between a smooth quantity we can define and a discrete quantity we can
-actually compute, is the subject of this entire unit. This page sets up the
-framing; the later pages fill in the operators
-([the cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent),
-[curvature](curvature.qmd#sec-mean)) and prove they land.
-
-## Discrete objects approximate smooth ones {#sec-discretization}
-
-Here is the single idea the rest of the book elaborates. **A discrete geometric
-object is an approximation of a smooth continuous one, and a discrete operator is
-an approximation of a continuous operator.**
-
-Two kinds of discrete object recur throughout `nitrix`:
-
-- A **triangle mesh** $(V, F)$ — vertices $V \in \mathbb{R}^{n\times 3}$ (the rows
-  are points $v_i$) and faces $F \in \mathbb{Z}^{m\times 3}$ (each row lists the
-  three vertex indices of a triangle) — approximates a smooth **2-manifold**: a
-  surface, like the cortical sheet or a sphere. The mesh is a piecewise-flat
-  membrane stretched over the smooth surface; refine it and the membrane hugs the
-  surface ever more tightly.
-- A **voxel grid** approximates a region of $\mathbb{R}^3$ and the scalar or
-  vector **fields** defined on it — an image intensity, a tissue probability, a
-  distance to a boundary. The grid is a sampling of a continuous field; refine the
-  sampling and you recover the field.
-
-The discrete object is never the smooth object. The craft of discrete geometry is
-computing on the discrete object so that the geometric quantities you care about —
-a Laplacian, a curvature, a distance — **converge to the continuous truth** as the
-discretisation refines.
-
-### Build by climbing: how a discrete operator gets earned
-
-Take the gradient of a field, the simplest continuous operator. In the continuum,
-the derivative of $f$ at a point is the limit of a difference quotient,
-$f'(x) = \lim_{h\to 0}\big(f(x+h) - f(x)\big)/h$. The most obvious discrete
-stand-in drops the limit and keeps a finite $h$ equal to the grid spacing:
-
+Suppose we have reconstructed a cortical surface as a triangle mesh
 $$
-(\partial f)_i \;\approx\; \frac{f_{i+1} - f_i}{h}.
-$$ {#eq-forward}
-
-This is the **forward difference**. It is the first thing a reader would invent,
-and it works — but it converges *slowly*. Where it "breaks" is in accuracy: its
-error shrinks only like $h$ (first order), so to halve the error you must double
-the grid resolution, which in 3-D is eight times the memory. The cure is one idea:
-make the stencil **symmetric** about the point, so the two leading error terms
-cancel,
-
+  \mathcal{M}_h = (V,F), \qquad
+  V \in \mathbb{R}^{n\times 3}, \quad
+  F \in \{0,\ldots,n-1\}^{m\times 3}.
 $$
-(\partial f)_i \;\approx\; \frac{f_{i+1} - f_{i-1}}{2h}.
-$$ {#eq-central}
+The rows of $V$ are vertex coordinates and the rows of $F$ are triples of
+indices specifying triangular faces. The subscript $h$ is a reminder that this
+mesh has a resolution: on a nearly uniform mesh, $h$ can be read as a typical
+edge length.
 
-This is the **central difference**: the same operator, one symmetry better, and
-now the error shrinks like $h^2$ (second order). That climb — *the obvious thing is
-X; X is too crude in way Y; the cure is X plus one idea* — is exactly how every
-operator in this unit is built. `nitrix.geometry.spatial_gradient` implements
-@eq-central as its default (`scheme='central'`), with `'sobel'` and `'scharr'`
-variants that additionally smooth across the off-axes for noise robustness, and a
-`spacing` argument that puts the $2h$ denominator in physical units. It is the grid
-analogue of the cotangent Laplacian for meshes.
+We would like to compute a number at each vertex that says how the surface bends
+there. On a smooth surface $S \subset \mathbb{R}^3$, the mean curvature $H$
+and Gaussian curvature $K$ are differential quantities. Their definitions use
+how a tangent plane changes from point to point. But a triangle mesh has flat
+faces and sharp edges, so there is no classical tangent plane at an edge and no
+second derivative at a vertex.
 
-The same story plays out on a mesh. The Laplacian of a smooth function measures how
-much its value at a point departs from the average of its surroundings. The
-simplest discrete stand-in averages over the **1-ring** $\mathcal{N}(i)$ — the
-immediate neighbours of vertex $i$ — with equal weights (the *graph* or *umbrella*
-Laplacian, what `mesh_laplacian_smooth` uses). That works on a perfectly regular
-mesh but **breaks** on an irregular one: long thin triangles get the same vote as
-fat ones, so the operator depends on how you happened to triangulate, not on the
-underlying surface. The cure, again one idea, is to weight each neighbour by the
-geometry of the triangles around the shared edge — the **cotangent weights** of
-[the next page](laplace-beltrami.qmd#sec-cotangent). With them, two *different*
-triangulations of the same smooth surface give *nearly the same* operator, and both
-converge to the continuous Laplace–Beltrami operator under refinement.
+This is not a defect of the data structure. It is the problem. A useful mesh
+curvature is a discrete quantity whose value on $\mathcal{M}_h$ converges to
+the smooth curvature on $S$ as $h\to 0$, provided $\mathcal{M}_h$ is a
+reasonable refinement of $S$. The same pattern recurs throughout the geometry
+unit:
 
-### The icosphere: the canonical analytic test object
+- define the continuous object;
+- choose a finite representation;
+- construct a discrete operator on that representation;
+- state what convergence, invariance, or equivariance makes the construction
+  meaningful;
+- implement the operator with clear execution and differentiability contracts.
 
-To say "converges to the truth" you need a discrete object whose smooth truth you
-know exactly. The unit's workhorse is the **icosphere**: start from a regular
-icosahedron (12 vertices, 20 faces) and repeatedly **subdivide** — split every
-triangle into four by inserting edge midpoints, then project the new vertices back
-onto the unit sphere. `nitrix.sparse.mesh.icosphere(n_iterations)` does exactly
-this; the vertex count is $10\cdot 4^n + 2$, so `n=0` is the bare icosahedron and
-`n=7` reaches 163,842 vertices (FreeSurfer's "ico7"). The companion
-`icosphere_hierarchy(max_level)` returns the whole sequence of levels together with
-the parent-child tables that record, for each fine vertex, which coarse edge it
-midpoints — bookkeeping the cross-level pooling operators consume.
+This is the geometry analogue of the modelling discipline used in the statistics
+unit. A formula is not just a formula; it is also a claim about the data it is
+allowed to act on, and about the transformations under which that claim is
+supposed to hold.
 
-The icosphere is the test object because the smooth surface it approximates is the
-**unit sphere**, whose geometry is closed-form: surface area $4\pi r^2$, mean
-curvature $H = 1/r$ everywhere, Gaussian curvature $K = 1/r^2$, and the global
-identity $\sum_i K A_i = 4\pi$ (a special case of Gauss–Bonnet for a genus-0
-surface). These oracles come in two flavours, and the distinction matters. Most are
-**metric** quantities — area, mean curvature — that the discrete object only
-*approaches*: it gets them a little wrong on a coarse mesh and ever more right as
-you refine, so the right thing to watch is a convergence march. But $\sum_i K A_i =
-4\pi$ is special: it is **topological**, an integer invariant ($2\pi\chi$ with Euler
-characteristic $\chi=2$ for a sphere) that the discrete angle-defect sum reproduces
-*exactly*, to machine precision, at **every** refinement level — there is no march
-to watch, which is itself the lesson (the discrete Gauss–Bonnet theorem is a
-combinatorial identity, not an approximation). So @fig-foundations-convergence plots
-the two quantities that genuinely converge — the surface area toward $4\pi r^2$ and
-the cotangent mean-curvature estimate toward $H=1/r$ — and leaves the exact
-topological identity to the prose.
+## Discrete Objects and Continuous Claims {#sec-discretization}
+
+Two representation families occur repeatedly in `nitrix`.
+
+A **regular grid** represents samples of a scalar or vector field. For example, a
+3-D image is an array $I[i,j,k]$ that samples some underlying intensity field
+$I(x)$. The array alone does not know physical distance; routines such as
+`spatial_gradient`, `marching_cubes`, `mesh_to_sdf`, and `ribbon_map` take an
+explicit `spacing` argument when physical units matter.
+
+A **triangle mesh** represents a surface. The finite-dimensional data are
+vertices and faces. The implicit continuous claim is that these triangles are a
+piecewise-flat approximation of a smooth surface. The mesh may come from an
+icosphere, a cortical reconstruction, a marching-cubes extraction, or a template
+deformation. The source affects what should be trusted: an icosphere is an
+analytic test object, while a real cortical mesh carries reconstruction error,
+topology constraints, and anatomical conventions.
+
+The canonical test object is the **icosphere**: begin with a regular
+icosahedron and repeatedly subdivide each triangle into four, projecting every
+new edge midpoint back onto the unit sphere. Each round of subdivision is a
+finer discrete stand-in for the *same* smooth surface, so the icosphere makes
+"converges under refinement" something we can watch numerically. We use it as the
+analytic oracle in @sec-validation; @fig-foundations-icosphere shows the first
+few levels and the piecewise-flat membrane tightening onto the sphere.
 
 ```{python}
-#| label: fig-foundations-convergence
-#| fig-cap: "Left: a level-2 icosphere — a piecewise-flat mesh standing in for the smooth unit sphere. Right: two discrete quantities (total surface area, and the cotangent mean-curvature estimate) converge to their analytic values $4\\pi r^2$ and $H=1/r$ as the mesh is subdivided. Both ride a clean second-order (slope-2) trend on the log–log plot: halving the edge length quarters the error. (The level-0 icosahedron is vertex-transitive, so its mean-curvature mean is already exact by symmetry; the genuine march begins one level in.)"
+#| label: fig-foundations-icosphere
+#| fig-cap: "A discrete object approximating a smooth one. Each panel is an icosphere at a different subdivision level - a piecewise-flat triangle mesh standing in for the smooth unit sphere. From left to right the mesh refines (12, 42, and 162 vertices); the flat membrane hugs the sphere ever more tightly. The craft of discrete geometry is to compute on the mesh so that geometric quantities converge to their values on the sphere as the mesh refines."
 #| code-fold: true
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-# --- build an icosphere by hand (pure numpy: the same midpoint-subdivide rule
-#     as nitrix.sparse.mesh.icosphere, reproduced here so the figure is
-#     self-contained) -------------------------------------------------------
+# Build an icosphere by hand (the same midpoint-subdivide rule as
+# nitrix.sparse.mesh.icosphere, reproduced so the figure is self-contained).
 def icosahedron():
     phi = (1.0 + np.sqrt(5.0)) / 2.0
     v = np.array([
@@ -181,10 +109,10 @@ def icosahedron():
     ], dtype=np.float64)
     v /= np.linalg.norm(v, axis=1, keepdims=True)
     f = np.array([
-        [0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],
-        [1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],
-        [3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],
-        [4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1],
+        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+        [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+        [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
     ], dtype=np.int64)
     return v, f
 
@@ -204,12 +132,449 @@ def subdivide(v, f):
         nf += [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]]
     return np.asarray(verts), np.asarray(nf, dtype=np.int64)
 
+fig = plt.figure(figsize=(11, 3.8))
+v, f = icosahedron()
+for level in range(3):
+    ax = fig.add_subplot(1, 3, level + 1, projection='3d')
+    ax.add_collection3d(Poly3DCollection(
+        v[f], facecolor='#9ecae1', edgecolor='#3182bd',
+        linewidths=0.3, alpha=0.9))
+    ax.set_xlim(-1, 1); ax.set_ylim(-1, 1); ax.set_zlim(-1, 1)
+    ax.set_box_aspect((1, 1, 1)); ax.set_axis_off()
+    ax.set_title(f"level {level}: {v.shape[0]} vertices", fontsize=10)
+    v, f = subdivide(v, f)
+fig.tight_layout()
+plt.show()
+```
+
+We will use the following abstract notation. Let $A$ be a continuous operator,
+such as a derivative or a Laplace--Beltrami operator, and let $A_h$ be its
+discrete approximation at resolution $h$. Let $P_h f$ denote the samples of a
+smooth function $f$ on the discrete object. A basic consistency statement has
+the form
+$$
+  A_h(P_h f) \longrightarrow P_h(Af)
+  \qquad \text{as } h\to 0.
+$$
+This equation is not meant as a formal theorem for every routine in the package.
+It is the standard by which the routines should be understood. The left-hand
+side is what the program computes. The right-hand side is the continuous quantity
+the program claims to approximate.
+
+The rate of convergence matters. If the error is $O(h)$, halving the grid
+spacing roughly halves the error. If the error is $O(h^2)$, halving the grid
+spacing roughly quarters the error. In three dimensions, changing $h$ is
+expensive: halving the voxel spacing multiplies the number of voxels by about
+eight. A second-order approximation can therefore be the difference between a
+useful algorithm and an impractical one.
+
+## Transformations and Inductive Bias {#sec-transformations-bias}
+
+A useful way to recognize the geometry of a problem is to ask which
+transformations should preserve its meaning. If a surface is translated or
+rotated in $\mathbb{R}^3$, its area and curvature should not change. Its
+normal vectors should change, but in a controlled way: rotate the surface and
+the normals rotate with it. If a mesh is stored with a different vertex order,
+the numerical values should be permuted in the same way, not changed. If an
+image is shifted by one voxel away from the boundary, a local finite-difference
+operator should shift with it.
+
+This is, in essence, Felix Klein's organizing idea: a geometry is determined by
+the group of transformations under which its meaningful quantities are
+unchanged. Euclidean geometry is what survives rigid motion; the geometry of a
+graph or mesh is what survives relabelling its nodes; the geometry of the sphere
+is what survives rotation. Choosing *which group acts* is choosing the geometry,
+and - as we will see - choosing the inductive bias of any algorithm built on it.
+
+Two precise definitions make this operational. Let a group $G$ act on inputs by
+$x \mapsto g\cdot x$. A quantity $q$ is **invariant** to $G$ if it is unchanged
+by the action,
+$$
+  q(g\cdot x) = q(x),
+$$
+and a map $F$ is **equivariant** if transforming the input transforms the output
+the corresponding way,
+$$
+  F(g\cdot x) = \rho(g)\, F(x),
+$$
+where $\rho(g)$ is how the same group element acts on the *output* space.
+Invariance is the special case $\rho(g)=\mathrm{id}$: the output does not move at
+all. Equivariance is the more fundamental notion, and the one most discrete
+operators are built to satisfy.
+
+Three examples fix the ideas, and the third carries a subtlety worth stating
+precisely.
+
+- A **scalar field on a surface**, such as a curvature map, is *invariant* to
+  rigid motion of the embedding: move the surface in space and the value at each
+  material point is unchanged. The same field is *equivariant* to vertex
+  relabelling: permute the vertices with a permutation $P$ and the curvature
+  vector is permuted, $q(P\cdot \mathcal{M}) = P\,q(\mathcal{M})$.
+- A **normal field** is *equivariant* to rotation: rotate the surface by $R$ and
+  every normal rotates, $n \mapsto Rn$. It is *invariant* to translation.
+- **Mean curvature** $H$ illustrates that the acting group must be named with
+  care. $H$ is invariant under *orientation-preserving* rigid motions (the proper
+  group $SE(3)$), but it carries a sign relative to a chosen normal, so under a
+  *reflection* it flips, $H \mapsto -H$: it is equivariant, not invariant, under
+  the full group $O(3)$ that includes reflections. Gaussian curvature $K$, a
+  product of two signed principal curvatures, is invariant even under reflection.
+  This is exactly why `geometry.mean_curvature` must fix a sign convention
+  (positive = convex with respect to the outward normal) while
+  `geometry.gaussian_curvature` need not.
+
+These properties are not decorative. They determine what an algorithm is allowed
+to learn or compute. A local stencil on a regular grid assumes that the same
+operation should be reused at every spatial location - it is *translation
+equivariant* by construction. A mesh operator built from adjacency, edge lengths,
+angles, and areas assumes that storage order is irrelevant - it is *permutation
+equivariant*. A spherical convolution whose weights depend on geodesic distance
+assumes that nearby points on the sphere should interact in a way that does not
+privilege the latitude-longitude grid - it respects the rotation group of the
+sphere.
+
+This is the bridge from geometry to inductive bias, and to what is now called
+geometric (deep) learning. A model that uses `spherical_conv`, a cotangent
+Laplacian, or `apply_operator` over an `ELL` adjacency does not have to *learn*
+from data that vertex labels are arbitrary, that neighbourhoods matter, or that
+smoothness should be measured along the surface rather than through the ambient
+volume. Those commitments are built into the operator as equivariances. They
+shrink the hypothesis space and rule out many functions that would be easy for a
+generic array model to represent but meaningless for the geometry at hand. The
+payoff is the usual one for a well-chosen prior: fewer parameters, less data, and
+predictions that transform correctly on inputs never seen during fitting.
+
+The same principle appears outside learned models. A registration regularizer is
+an inductive bias over deformations: it says which transformations are plausible
+before seeing the image evidence. A curvature estimator is an inductive bias over
+local surface shape: it says which finite measurements are allowed to stand in
+for a second derivative. The craft is not to avoid bias. The craft is to choose
+the bias that matches the geometry of the object.
+
+## A First Operator: Finite Differences {#sec-finite-differences}
+
+The derivative of a one-dimensional function is the limit
+$$
+  f'(x) = \lim_{h\to 0} \frac{f(x+h)-f(x)}{h}.
+$$
+The most direct discrete approximation is the forward difference
+$$
+  (D_h^+ f)(x) = \frac{f(x+h)-f(x)}{h}.
+$$
+A Taylor expansion gives
+$$
+  f(x+h)
+    = f(x) + h f'(x) + \frac{h^2}{2} f''(x) + O(h^3),
+$$
+and therefore
+$$
+  (D_h^+ f)(x)
+    = f'(x) + \frac{h}{2}f''(x) + O(h^2).
+$$
+The leading error is proportional to $h$, so the method is first-order
+accurate.
+
+A small change improves the situation. The central difference is
+$$
+  (D_h^0 f)(x) = \frac{f(x+h)-f(x-h)}{2h}.
+$$
+Expanding both $f(x+h)$ and $f(x-h)$, the even-order terms cancel:
+$$
+  (D_h^0 f)(x)
+    = f'(x) + \frac{h^2}{6}f'''(x) + O(h^4).
+$$
+The approximation is now second-order accurate. The improvement came from a
+*symmetry*: centring the stencil makes the operator odd about the point, which
+kills the even-order error term. This is the simplest instance of the theme of
+@sec-transformations-bias - a transformation property of the operator (here,
+symmetry under $h\mapsto -h$) is what buys the accuracy. Symmetry, conservation,
+and equivariance are not aesthetic preferences; they remove leading error terms
+and determine which functions the operator can represent.
+
+In `nitrix`, `geometry.spatial_gradient` implements this idea for scalar fields
+on regular grids. Its default scheme is the central difference. The `sobel` and
+`scharr` schemes use the same derivative idea but add smoothing across the
+off-axes, improving robustness to noise while preserving a differentiable array
+operator. The output appends a final derivative-direction axis, so an input of
+shape `(..., *spatial)` produces `(..., *spatial, ndim)`.
+
+```{python}
+#| label: fig-finite-difference-orders
+#| fig-cap: "Forward and central finite differences approximate the same derivative but converge at different rates. The plot shows the error in approximating d/dx sin(x) at x=1. The central difference cancels the leading error term and follows a second-order trend."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+x0 = 1.0
+truth = np.cos(x0)
+hs = np.logspace(-0.25, -3.0, 16)
+
+forward = np.array([
+    abs((np.sin(x0 + h) - np.sin(x0)) / h - truth)
+    for h in hs
+])
+central = np.array([
+    abs((np.sin(x0 + h) - np.sin(x0 - h)) / (2 * h) - truth)
+    for h in hs
+])
+
+fig, ax = plt.subplots(figsize=(6.5, 4.2))
+ax.loglog(hs, forward, "o-", label="forward difference")
+ax.loglog(hs, central, "s-", label="central difference")
+ax.loglog(hs, forward[0] * (hs / hs[0]), "k:", lw=1, label="slope 1")
+ax.loglog(hs, central[0] * (hs / hs[0]) ** 2, "k--", lw=1, label="slope 2")
+ax.set_xlabel("grid spacing h")
+ax.set_ylabel("absolute error")
+ax.invert_xaxis()
+ax.grid(True, which="both", alpha=0.3)
+ax.legend()
+plt.show()
+```
+
+The point of this figure is not that all geometry algorithms reduce to finite
+differences. They do not. The point is that a discrete formula should be read as
+a convergence claim. Once that habit is in place, mesh Laplacians and curvature
+operators become less mysterious.
+
+## Mesh Operators as Matrices, Energies, and Geometry {#sec-mesh-operators}
+
+Let $f \in \mathbb{R}^n$ be a scalar value at each mesh vertex. A mesh operator
+is often a sparse matrix acting on $f$. The same object can be understood from
+several complementary views, and a builder gains the most by holding all of them
+at once.
+
+First, the **linear algebra view**: an operator $L\in\mathbb{R}^{n\times n}$
+maps a per-vertex field to another per-vertex field. If $X\in\mathbb{R}^{n\times
+3}$ is the vertex-coordinate matrix, the same operator can be applied to each
+coordinate column.
+
+Second, the **local averaging view**: the value $(Lf)_i$ compares $f_i$ with
+the values around vertex $i$. A Laplacian should be zero on constant fields and
+large where $f_i$ differs from its neighbourhood.
+
+Third, the **energy view**: for the positive semidefinite stiffness form used in
+`mesh_cotangent_laplacian`,
+$$
+  f^\top L f
+    = \frac{1}{2}\sum_{(i,j)} w_{ij}(f_i-f_j)^2
+$$
+when the weights are symmetric. This says that $L$ measures roughness. Smooth
+fields have small energy; oscillatory fields have large energy.
+
+These are not different subjects. They are different lenses on the same sparse
+matrix, and the point of naming them together is that a result proven in one view
+holds in the others. A fourth lens makes the connection to
+@sec-transformations-bias explicit - the **symmetry view**: a valid mesh operator
+must not depend on the accidental ordering of vertices and faces. If a
+permutation matrix $P$ relabels the vertices, the relabelled operator is
+$PLP^\top$, and applying it to the relabelled field gives
+$$
+  (PLP^\top)(Pf)=P(Lf).
+$$
+This is the algebraic statement that $L$ is **permutation equivariant**: it is
+the same operator no matter how its rows are stored. The mesh is geometry; the
+row order in an array is storage.
+
+The simplest mesh Laplacian uses equal weights over the one-ring neighbourhood
+$\mathcal{N}(i)$. This is the umbrella or graph Laplacian. It is useful for
+some smoothing operations, but it is not sufficiently geometric: it treats a long
+thin triangle and a nearly equilateral triangle as if they contributed the same
+local information.
+
+The standard geometric improvement is the cotangent Laplacian. For an interior
+edge $(i,j)$, let $\alpha_{ij}$ and $\beta_{ij}$ be the two angles opposite
+that edge in the adjacent triangles. Define
+$$
+  w_{ij} = \frac{1}{2}
+    \left(\cot \alpha_{ij} + \cot \beta_{ij}\right).
+$$
+The positive stiffness form is then
+$$
+  (Lf)_i = \sum_{j\in\mathcal{N}(i)}
+    w_{ij}(f_i - f_j).
+$$
+This construction uses the geometry of the triangles, not only their
+connectivity. It is the finite-element/discrete-exterior-calculus operator used
+by `sparse.mesh_cotangent_laplacian`. The operator is assembled on the host,
+because the neighbourhood structure and maximum row degree are data-dependent;
+once assembled as `ELL` or `SectionedELL`, its matrix-vector application is a
+JAX operation through `sparse.apply_operator`. The cotangent weights also encode
+the intended transformation behaviour: rigidly moving the surface leaves them
+unchanged; uniformly scaling the surface leaves the angles, and therefore the
+stiffness weights, unchanged, while the mass matrix scales like area. The
+mass-normalized quantities then acquire the expected physical units, such as
+curvature scaling like inverse length.
+
+The mass matrix is the companion of the stiffness matrix. In continuous
+geometry, many formulas integrate over area:
+$$
+  \int_S f(x)\,dA.
+$$
+On a mesh, `vertex_areas(mesh)` assigns an area $A_i$ to each vertex, yielding
+a diagonal lumped mass matrix $M=\operatorname{diag}(A_i)$. The barycentric
+area rule gives each triangle's area equally to its three vertices. The default
+mixed-Voronoi rule is more accurate on well-shaped triangles and has an
+obtuse-triangle branch that is important for real cortical meshes.
+
+Together, stiffness and mass form the discrete analogue of many continuous
+operators. For example, the generalized eigenproblem
+$$
+  L\phi = \lambda M\phi
+$$
+is the mesh analogue of the Laplace--Beltrami eigenproblem. The same pair also
+appears in implicit smoothing, curvature, and spectral surface analysis.
+
+## Curvature from the Laplacian {#sec-curvature-from-laplacian}
+
+We can now return to the running example. Let $X\in\mathbb{R}^{n\times 3}$ be
+the vertex-coordinate matrix. Applying the cotangent stiffness to $X$ produces
+a vector at each vertex:
+$$
+  (LX)_i
+    = \sum_{j\in\mathcal{N}(i)}
+      w_{ij}(x_i-x_j).
+$$
+After division by vertex area, this approximates the mean-curvature normal:
+$$
+  M^{-1}LX \approx 2H n,
+$$
+where $n$ is the outward unit normal and $H$ is the scalar mean curvature.
+Consequently `geometry.mean_curvature` computes, in effect,
+$$
+  H_i
+    = \frac{1}{2}\,
+      \operatorname{sign}\!\left(
+        (M^{-1}LX)_i \cdot n_i
+      \right)
+      \left\|(M^{-1}LX)_i\right\|.
+$$
+The sign convention is documented in the implementation: positive curvature is
+convex with respect to the outward vertex normal, so a sphere is positive and
+sulcal fundi are negative under the usual cortical orientation. (This is the sign
+choice forced by the $O(3)$ subtlety of @sec-transformations-bias.) FreeSurfer's
+`?h.curv` uses the opposite sign convention, so comparisons require a sign flip.
+
+Gaussian curvature has a different discrete origin. At a vertex $i$, add the
+interior angles of all incident triangles. The angle defect
+$$
+  \Omega_i = 2\pi - \sum_{\text{faces incident to } i}\theta_{if}
+$$
+is the integrated Gaussian curvature concentrated at that vertex. Dividing by
+the vertex area gives
+$$
+  K_i = \frac{\Omega_i}{A_i}.
+$$
+This is implemented by `geometry.gaussian_curvature`. The integrated identity
+$$
+  \sum_i K_i A_i = 2\pi\chi
+$$
+is the discrete Gauss--Bonnet theorem. For a closed genus-zero mesh,
+$\chi=2$, so the sum is $4\pi$. This is not merely a numerical target; for
+the angle-defect construction it is a combinatorial identity, up to floating
+point arithmetic. It therefore holds *exactly* at every refinement level - there
+is no convergence march to watch, which is itself the lesson: a topological
+invariant is reproduced exactly, while metric quantities like area and mean
+curvature only converge.
+
+The principal curvatures are then recovered from
+$$
+  H = \frac{\kappa_1+\kappa_2}{2}, \qquad
+  K = \kappa_1\kappa_2,
+$$
+so
+$$
+  \kappa_{1,2}
+    = H \pm \sqrt{\max(H^2-K,0)}.
+$$
+This closed form is why `geometry.principal_curvatures` does not need an
+eigensolver at each vertex - a point we return to in @sec-devices, since avoiding
+the eigensolver is also what keeps the routine off the fragile dense-GPU solver
+path.
+
+## Oracles and Validation {#sec-validation}
+
+A geometry library should not be validated by bit-for-bit agreement with another
+library. Two implementations can make different legitimate discretization
+choices and still converge to the same continuous object. The correct validation
+question is: which oracle is appropriate?
+
+An **analytic oracle** is available when the smooth answer is known. The unit
+sphere is the most useful example. For a sphere of radius $r$,
+$$
+  \operatorname{area}=4\pi r^2,\qquad
+  H=\frac{1}{r},\qquad
+  K=\frac{1}{r^2},\qquad
+  \int_S K\,dA=4\pi.
+$$
+The `sparse.icosphere(n_iterations)` constructor supplies a controlled sequence
+of mesh refinements, with vertex count $10\cdot 4^n+2$. It is therefore a
+natural object for convergence tests: area should approach $4\pi r^2$, mean
+curvature should approach $1/r$, and the angle-defect integral should satisfy
+Gauss--Bonnet.
+
+A **real-data oracle** is different. On an empirical cortical surface there is no
+closed-form curvature. Comparisons against tools such as FreeSurfer should use
+class, sign, and correlation checks, not equality. A high but imperfect
+correlation can be the expected result when the reference uses smoothing, a
+different curvature estimator, a different resampling path, or a different sign
+convention. The residual should be explained, not hidden; but demanding bit
+parity would test an arbitrary implementation choice rather than the underlying
+geometry.
+
+@fig-foundations-validation shows both postures side by side: the analytic-oracle
+convergence on the icosphere (left), where the right thing to watch is the error
+marching to zero under refinement, and the real-data gate (right), where the
+right thing to watch is correlation and matched sign across many cases, not the
+unattainable $y=x$ bit-parity line.
+
+```{python}
+#| label: fig-foundations-validation
+#| fig-cap: "The two-oracle posture. Left: against the analytic oracle (the unit sphere), two metric quantities computed on the icosphere - total surface area and the cotangent mean-curvature estimate - converge to $4\\pi r^2$ and $H=1/r$ under refinement, both riding a second-order (slope-2) trend; halving the edge length quarters the error. (The bare icosahedron is vertex-transitive, so its mean-curvature mean is already exact by symmetry; the genuine march begins one level in.) Right: against a reference tool there is no closed form, so the acceptance gate is high correlation and matched sign across many test cases, not the unattainable $y=x$ bit-parity line."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+rng = np.random.default_rng(0)
+
+# --- Analytic oracle: convergence on the icosphere --------------------------
+def icosahedron():
+    phi = (1.0 + np.sqrt(5.0)) / 2.0
+    v = np.array([
+        [-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0],
+        [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
+        [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1],
+    ], dtype=np.float64)
+    v /= np.linalg.norm(v, axis=1, keepdims=True)
+    f = np.array([
+        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+        [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+        [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    ], dtype=np.int64)
+    return v, f
+
+def subdivide(v, f):
+    cache, verts = {}, v.tolist()
+    def mid(i, j):
+        key = (min(i, j), max(i, j))
+        if key in cache:
+            return cache[key]
+        m = (v[i] + v[j]) / 2.0
+        m /= np.linalg.norm(m)
+        cache[key] = len(verts); verts.append(m.tolist())
+        return cache[key]
+    nf = []
+    for a, b, c in f:
+        ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+        nf += [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]]
+    return np.asarray(verts), np.asarray(nf, dtype=np.int64)
+
 def total_area(v, f):
     a, b, c = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
     return 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1).sum()
 
 def mean_curvature_error(v, f):
-    # cotangent mean-curvature-normal: H_i = |Lv|_i / (4 A_i), the discrete
+    # cotangent mean-curvature normal: H_i = |Lv|_i / (4 A_i), the discrete
     # estimator nitrix.geometry.mean_curvature uses. Analytic truth on the
     # unit sphere is H = 1/r = 1, so we track |mean(H) - 1|.
     n = v.shape[0]
@@ -227,377 +592,236 @@ def mean_curvature_error(v, f):
     return abs(H.mean() - 1.0)
 
 v, f = icosahedron()
-h, area_err, curv_err, meshes = [], [], [], []
+h, area_err, curv_err = [], [], []
 for _ in range(6):
     h.append(np.linalg.norm(v[f[:, 0]] - v[f[:, 1]], axis=1).mean())
     area_err.append(abs(total_area(v, f) - 4 * np.pi) / (4 * np.pi))
     curv_err.append(mean_curvature_error(v, f))
-    meshes.append((v.copy(), f.copy()))
     v, f = subdivide(v, f)
 h, area_err, curv_err = map(np.array, (h, area_err, curv_err))
 
-fig = plt.figure(figsize=(11, 4.4))
-ax0 = fig.add_subplot(1, 2, 1, projection='3d')
-vv, ff = meshes[2]
-ax0.add_collection3d(Poly3DCollection(
-    vv[ff], facecolor='#9ecae1', edgecolor='#3182bd', linewidths=0.3, alpha=0.9))
-ax0.set_xlim(-1, 1); ax0.set_ylim(-1, 1); ax0.set_zlim(-1, 1)
-ax0.set_box_aspect((1, 1, 1)); ax0.set_axis_off()
-ax0.set_title("icosphere (level 2): a mesh standing in\nfor the smooth unit sphere", fontsize=10)
-
-ax1 = fig.add_subplot(1, 2, 2)
-ax1.loglog(h, area_err, 'o-', color='#3182bd', label=r'surface area $\to 4\pi r^2$')
-# the level-0 icosahedron is vertex-transitive, so its mean curvature is exact
-# by symmetry (machine zero); plot the genuine march from level 1 on.
-ax1.loglog(h[1:], curv_err[1:], 's-', color='#e6550d', label=r'mean curvature $\to H = 1/r$')
-ax1.loglog(h, area_err[0] * (h / h[0]) ** 2, 'k--', lw=1, alpha=0.6, label='slope 2')
-ax1.set_xlabel('mean edge length $h$  (coarse -> fine)')
-ax1.set_ylabel('error vs the analytic truth')
-ax1.set_title('discrete quantities converge under refinement', fontsize=10)
-ax1.legend(fontsize=8, loc='lower right'); ax1.grid(True, which='both', alpha=0.3)
-fig.tight_layout()
-plt.show()
-```
-
-The curve falling to the lower-left *is* the governing idea made visible. Every
-later page returns to it: when we claim curvature, the heat kernel, or a distance
-transform "is correct," we mean a curve like this one.
-
-## Validation philosophy: oracles, not bit-parity {#sec-validation}
-
-If two correct programs computed the same geometric quantity, would their outputs
-be equal to the last bit? No — and *expecting* them to be is the most common way to
-mis-judge a geometry library. This section says why, because it frames every
-"validation" claim in the unit.
-
-The reason is exactly the discrete-approximates-smooth idea. There is no single
-"correct" discrete Laplacian or discrete curvature; there are *many* valid
-discretisations, each making different but legitimate choices (cotangent weights
-vs. a fitted quadric; marching tetrahedra vs. marching cubes; a forward vs. a
-central difference). They are different functions of the mesh — they will *not*
-agree bit-for-bit — yet they all converge to the *same continuum*. Bit-parity
-demands agreement on the part that is an arbitrary modelling choice; convergence
-demands agreement only on the part that is real. The right target is the latter.
-
-So `nitrix` validates geometry against **two oracles**, and never against another
-implementation's bits.
-
-**1. The analytic oracle.** On a shape with closed-form geometry — the unit sphere,
-an analytic signed-distance field — the continuous answer is known exactly, so the
-test is "does the discrete answer approach it?" Concretely: a sphere mesh's mean
-curvature should approach $H = 1/r$ and its Gaussian curvature $K = 1/r^2$; the
-summed angle defect should approach Gauss–Bonnet's $\sum_i K A_i = 4\pi$ for a
-genus-0 surface; a mesh extracted from the SDF of a sphere of radius $r$ should
-have area approaching $4\pi r^2$; a rigid motion should produce *zero* distortion.
-These are crisp because the icosphere's uniform valence makes the discrete sums
-clean. The shipped curvature suite, for instance, hits $H = 1.0000$ and
-Gauss–Bonnet $= 4\pi$ on the sphere oracle exactly.
-
-**2. Real-data class and correlation** — the "metrics↔ITK" posture. On a real
-cortical surface there is no closed form, so we compare against an established tool
-(FreeSurfer overlays) by **sign and correlation**, not equality. Mean curvature
-should be *negative in sulci and positive on gyri* (a sign/class check) and should
-*correlate strongly* with FreeSurfer's `?h.curv` — and when it does not reach
-correlation $1.0$, the gap is *measured and accounted for*, not waved away. In the
-shipped suite the anti-correlation with `?h.curv` on fsaverage5 is $-0.90$, and the
-gap from unity is fully explained: FreeSurfer smooths `curv` by default (matched
-light smoothing lifts the agreement to $-0.95$, then it decays under
-over-smoothing — the tell-tale signature of "the reference is a lightly-smoothed
-version of what we compute"); the two use different discrete estimators (cotangent
-mean-curvature normal vs. a fitted quadric); and the overlay is itself
-group-averaged and resampled. Each of these is a legitimate reason for two correct
-programs to differ — exactly the reason bit-parity is the wrong gate.
-
-@fig-foundations-validation shows both halves: the analytic-oracle convergence of
-two valid estimators, and the correlation (not identity) gate against a reference.
-
-```{python}
-#| label: fig-foundations-validation
-#| fig-cap: "The two-oracle posture. Left: two different-but-valid discretisations of the same derivative (forward, first order; central, second order) both converge to the analytic oracle $\\cos x$, at different rates — they never agree with each other bit-for-bit, yet both are correct. Right: against a reference tool the right acceptance gate is high correlation and matched sign across many test cases, not the unattainable $y=x$ bit-parity line."
-#| code-fold: true
-import numpy as np
-import matplotlib.pyplot as plt
-
-rng = np.random.default_rng(0)
-
-# --- analytic oracle: d/dx sin(x) = cos(x), two valid discretisations -------
-x0, truth = 1.0, np.cos(1.0)
-hs = np.logspace(-0.3, -3.0, 14)
-err_central = np.array([abs((np.sin(x0 + h) - np.sin(x0 - h)) / (2 * h) - truth) for h in hs])
-err_forward = np.array([abs((np.sin(x0 + h) - np.sin(x0)) / h - truth) for h in hs])
-
 fig, (axL, axR) = plt.subplots(1, 2, figsize=(11, 4.4))
-axL.loglog(hs, err_forward, 'o-', color='#e6550d', label='forward diff (1st order)')
-axL.loglog(hs, err_central, 's-', color='#3182bd', label='central diff (2nd order)')
-axL.loglog(hs, err_forward[0] * (hs / hs[0]),    'k:',  lw=1, alpha=.6, label='slope 1')
-axL.loglog(hs, err_central[0] * (hs / hs[0])**2, 'k--', lw=1, alpha=.6, label='slope 2')
-axL.set_xlabel('grid spacing $h$  (coarse -> fine)')
-axL.set_ylabel(r'$|$discrete $-$ analytic oracle$|$')
-axL.set_title('two valid discretisations,\none continuum truth', fontsize=10)
-axL.legend(fontsize=8); axL.grid(True, which='both', alpha=.3)
+axL.loglog(h, area_err, 'o-', color='#3182bd', label=r'surface area $\to 4\pi r^2$')
+# the level-0 icosahedron is vertex-transitive: its mean curvature is exact by
+# symmetry (machine zero), so plot the genuine march from level 1 on.
+axL.loglog(h[1:], curv_err[1:], 's-', color='#e6550d', label=r'mean curvature $\to H=1/r$')
+axL.loglog(h, area_err[0] * (h / h[0]) ** 2, 'k--', lw=1, alpha=0.6, label='slope 2')
+axL.set_xlabel('mean edge length $h$  (coarse -> fine)')
+axL.set_ylabel('error vs the analytic truth')
+axL.set_title('analytic oracle: convergence under refinement', fontsize=10)
+axL.legend(fontsize=8, loc='lower right'); axL.grid(True, which='both', alpha=0.3)
 
-# --- real-data posture: correlation + sign, not bit-parity ------------------
+# --- Real-data oracle: correlation + sign, not bit-parity -------------------
 n = 200
 latent = rng.normal(size=n)                       # the continuum quantity
 ours = latent + 0.06 * rng.normal(size=n)         # our estimator
-ref  = latent + 0.06 * rng.normal(size=n)         # a reference tool
+ref = latent + 0.06 * rng.normal(size=n)          # a reference tool
 r = np.corrcoef(ours, ref)[0, 1]
-axR.scatter(ours, ref, s=14, alpha=.6, color='#31a354', edgecolor='none')
+axR.scatter(ours, ref, s=14, alpha=0.6, color='#31a354', edgecolor='none')
 lim = [min(ours.min(), ref.min()), max(ours.max(), ref.max())]
-axR.plot(lim, lim, 'k--', lw=1, alpha=.5, label='$y=x$ (bit-parity, unattainable)')
+axR.plot(lim, lim, 'k--', lw=1, alpha=0.5, label='$y=x$ (bit-parity, unattainable)')
 axR.set_xlabel('nitrix estimate (per test case)')
 axR.set_ylabel('reference tool estimate')
-axR.set_title(f'class / correlation gate (r = {r:.2f}),\nnot bit-parity', fontsize=10)
-axR.legend(fontsize=8, loc='upper left'); axR.grid(True, alpha=.3)
+axR.set_title(f'real-data oracle: class / correlation (r = {r:.2f})', fontsize=10)
+axR.legend(fontsize=8, loc='upper left'); axR.grid(True, alpha=0.3)
 axR.set_aspect('equal', 'box')
 fig.tight_layout()
 plt.show()
 ```
 
-A practical corollary closes this section. When you write or read a test in this
-unit, ask "which oracle?" — an exact analytic identity (assert closeness to the
-closed form, tightening with refinement) or a real-data class/correlation (assert
-the sign pattern and a correlation floor, with the residual gap explained). If a
-test demands bit-parity with another tool, it is testing the wrong thing.
+This distinction is a useful guardrail for contributors. If a test uses an
+analytic oracle, it should usually become sharper under refinement. If a test
+uses real data, it should state the accepted qualitative property or correlation
+floor and explain the remaining discrepancy. If a test demands bit-parity with
+another tool, it is almost always testing the wrong thing.
 
-## Execution classes: the taxonomy that governs the code {#sec-classes}
+## Execution Classes {#sec-classes}
 
-Every public symbol in the geometry suite is tagged, in its docstring, with one of
-**three execution classes**. The classification is not bureaucratic — it tells you
-the single most important operational fact about a routine: *can you call it inside
-a jitted, differentiated optimisation loop, or not?* Get this wrong and your
-optimiser either fails to compile or silently stops being differentiable.
+The mathematical distinction between construction and application becomes an
+engineering distinction in JAX. Some work can live inside `jit`, `vmap`, and
+`grad`; some work must happen on the host before or after the traced computation.
+The single operational fact a routine's class tells you is whether you may call
+it inside a jitted, differentiated optimization loop. The geometry documentation
+uses three execution labels.
 
-The classes:
+| Class | Meaning | Examples |
+|---|---|---|
+| `DIFF-JAX` | Fixed-shape, differentiable array computation. Safe in the traced hot path. | `spatial_gradient`, `vertex_areas`, `mean_curvature`, `gaussian_curvature`, `surface_smooth`, `deform_to_sdf`, `apply_operator` |
+| `HOST-CTOR` | Host-side construction whose output shape or topology depends on the data. It may produce arrays later consumed by JAX. | `icosphere`, `icosphere_hierarchy`, `mesh_k_ring_adjacency`, `mesh_cotangent_laplacian`, `marching_cubes`, `mesh_to_sdf` |
+| `HOST-QA` | Host-side query or quality-assurance step, usually not part of a differentiable objective. | `euler_characteristic`, `genus`, `find_self_intersections`, `remove_self_intersections` |
 
-- **DIFF-JAX** — a jittable *and* differentiable kernel. Pure array math with
-  shapes fixed at trace time; safe to `jit`, `vmap`, `grad`, and to place inside a
-  `lax.fori_loop`. These are the workhorses of any surface optimiser: `face_areas`,
-  `vertex_areas`, `mesh_mass_matrix`, `compute_vertex_normals`, `mean_curvature`,
-  `gaussian_curvature`, `principal_curvatures`, `areal_distortion`,
-  `strain_distortion`, `surface_smooth`, `deform_to_sdf`, `inflate_surface`,
-  `ribbon_map`, `spatial_gradient`, and the apply-seam `apply_operator`.
-- **HOST-CTOR** — host-side *construction* that emits a `Mesh` or `ELL` whose shape
-  is **data-dependent**. The output size cannot be known until the data is
-  inspected (how many vertices does a level set have? how many neighbours does a
-  vertex have?), so the work runs in NumPy on the host, *outside* any trace, and
-  hands JAX a concrete array. Examples: `icosphere` and the icosphere-hierarchy
-  constructors, `mesh_k_ring_adjacency`, `mesh_cotangent_laplacian`,
-  `mesh_mass_matrix` *assembly*, the `SectionedELL` emission, `marching_cubes`,
-  `mesh_to_sdf`, `euler_characteristic`, `genus`.
-- **HOST-QA** — host-side *analysis or query* that is not on a differentiable path:
-  combinatorial questions answered with spatial-acceleration structures.
-  `find_self_intersections` (a uniform-hash broad-phase plus a Möller narrow-phase)
-  and `remove_self_intersections` are the canonical pair.
+The boundary that decides `DIFF-JAX` from `HOST` is **shape**. JAX traces a
+function to a fixed computation graph, so every array shape must be known at
+trace time. A curvature value has the same shape as the vertex set - known - so
+curvature is `DIFF-JAX`. A level set has as many vertices as the volume happens
+to produce - unknown until you look - so marching cubes must be `HOST-CTOR`. The
+rule is simple and load-bearing:
 
-The boundary that decides DIFF-JAX vs. HOST is **shape**. JAX traces a function to
-a fixed computation graph, so every array shape must be known at trace time. A
-curvature value has the same shape as the vertex set — known — so curvature is
-DIFF-JAX. A level set has as many vertices as the volume happens to produce —
-*unknown until you look* — so marching cubes must be HOST-CTOR.
+> A `HOST-CTOR` or `HOST-QA` operation must not be called inside a jitted loop.
 
-::: {.callout-important title="The load-bearing rule"}
-**A HOST op (CTOR or QA) must never be called inside a jitted `fori_loop`.** Inside
-a trace there is no host, no Python list-building, no data-dependent shape; calling
-one there either fails to compile or, worse, silently bakes in a stale value. The
-discipline: optimisers regularise *inside* the loop with **DIFF-JAX ops only**
-(Laplacian smoothing, area penalties, normal steps), and any **HOST** construction
-or cleanup (building the operator, extracting a mesh, removing
-self-intersections) runs **before or after** the loop — never within it. When an
-algorithm genuinely needs periodic host cleanup, it confines that cleanup to
-*between* jitted chunks, not inside them.
-:::
+For example, constructing a cotangent operator from mesh topology is host-side
+work. Applying the already-constructed operator to a per-vertex field is
+differentiable JAX work. In an optimizer, build the sparse operator before the
+loop, then apply it inside the loop. If an algorithm must rebuild topology or
+perform host cleanup, it should do so between traced chunks, not inside a
+`lax.fori_loop`.
 
-@fig-foundations-classes is the decision tree in one picture: ask of any op whether
-its output shape is data-dependent, then whether it is pure array math, and read
-off the class and the "callable inside jit?" verdict.
+There is one subtle case worth keeping in mind. A host-built cotangent operator
+contains weights that are constants with respect to the traced computation. This
+is correct when applying a fixed operator to many fields. It is not correct when
+the loss must differentiate through the dependence of the cotangent weights on
+the vertex positions. For that case, `geometry.mean_curvature` uses a JAX-native
+per-face cotangent apply internally, so the weights remain differentiable with
+respect to `mesh.vertices` (the two paths agreeing to about $10^{-4}$).
 
-```{python}
-#| label: fig-foundations-classes
-#| fig-cap: "The execution-class decision tree. The first question — does the output shape depend on the data? — separates the differentiable DIFF-JAX kernels (jittable, the body of any surface optimiser) from the host-side HOST-CTOR builders (data-dependent shape) and HOST-QA queries. The banner is the one rule that keeps a differentiable pipeline correct: HOST ops live outside the jitted loop."
-#| code-fold: true
-import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+## Sparse Storage and Pytrees {#sec-storage-pytrees}
 
-fig, ax = plt.subplots(figsize=(11, 5.6))
-ax.set_xlim(0, 12); ax.set_ylim(0, 10); ax.axis('off')
+`nitrix` separates sparse storage from sparse algebra. The principal storage
+format is `ELL`: each row stores up to a fixed number of column indices and
+values. This is efficient for near-uniform degree structures such as icospheres.
+For irregular valence, `SectionedELL` groups rows by degree so that high-degree
+rows do not force every row to carry the same padding. The common entry point
+`sparse.apply_operator(op, x)` accepts either representation and applies it to a
+per-vertex field of shape `(..., n, d)`. The full development of both formats and
+the semiring algebra they carry is the subject of the
+[next chapter](operators.qmd#sec-ell).
 
-def box(x, y, w, h, text, fc, ec='#333333', fs=9, weight='normal'):
-    ax.add_patch(FancyBboxPatch((x, y), w, h,
-        boxstyle="round,pad=0.08,rounding_size=0.15", fc=fc, ec=ec, lw=1.3))
-    ax.text(x + w / 2, y + h / 2, text, ha='center', va='center', fontsize=fs, weight=weight)
+`Mesh`, `ELL`, and `SectionedELL` are registered JAX pytrees. This means they can
+cross `jit`, `vmap`, and `grad` boundaries as structured operands rather than as
+opaque Python objects. For `Mesh(vertices, faces)`, both leaves are arrays.
+Gradients flow through `vertices`; the integer `faces` array is topology and has
+a zero/`float0` cotangent. This design avoids treating large face arrays as
+static metadata, which would be unhashable and would cause unnecessary
+recompilation for every topology. Differentiating through the whole mesh (rather
+than only the vertices) requires `jax.grad(f, allow_int=True)` so JAX admits the
+integer `faces` leaf.
 
-def arrow(x0, y0, x1, y1, label=None, lx=0, ly=0):
-    ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle='-|>',
-        mutation_scale=14, lw=1.2, color='#555555'))
-    if label:
-        ax.text((x0 + x1) / 2 + lx, (y0 + y1) / 2 + ly, label,
-                fontsize=8.5, ha='center', va='center', style='italic')
+`IcosphereHierarchy` is deliberately not a pytree. It is host-side construction
+metadata: a sequence of meshes plus parent tables used to build cross-level
+pooling and upsampling operators. It should be consumed to produce concrete
+operators, not carried through traced numerical code.
 
-box(4.0, 8.6, 4.0, 1.0, "Does the op's OUTPUT SHAPE\ndepend on the data?", '#fff2cc', fs=9.5, weight='bold')
-arrow(4.0, 9.1, 1.8, 7.4, 'no', lx=-0.5, ly=0.3)
-box(0.2, 6.4, 3.2, 1.0, "Pure array math,\nstatic shapes?", '#fff2cc', fs=9)
-arrow(8.0, 9.1, 10.2, 7.4, 'yes', lx=0.5, ly=0.3)
-box(8.4, 6.0, 3.4, 1.4, "HOST-CTOR\nhost build emits Mesh/ELL\n(marching_cubes, genus,\nSectionedELL emission)", '#fde0dd', fs=8.5, weight='bold')
-arrow(1.8, 6.4, 1.0, 4.6, 'yes', lx=-0.45, ly=0.2)
-box(0.0, 3.4, 3.4, 1.2, "DIFF-JAX\njittable + differentiable\n(curvature, areas, mass,\nsmoothing, deform_to_sdf)", '#d5efd5', fs=8.5, weight='bold')
-arrow(2.6, 6.4, 5.1, 4.6, 'no -- a host query', lx=0.9, ly=0.2)
-box(4.0, 3.4, 3.6, 1.2, "HOST-QA\nhost analysis, not in a\ndiff path (self-intersection,\nBVH / hash queries)", '#dbeaf6', fs=8.5, weight='bold')
-box(0.2, 0.7, 11.6, 1.4,
-    "THE LOAD-BEARING RULE:  a HOST op (CTOR or QA) must NEVER be called inside a jitted fori_loop.\n"
-    "Optimisers regularise with DIFF-JAX ops only;  HOST construction / cleanup runs BEFORE or AFTER the loop.",
-    '#f0f0f0', ec='#990000', fs=9.5, weight='bold')
-ax.text(1.7, 3.25, "callable inside jit  YES", fontsize=8, ha='center', color='#1a7a1a')
-ax.text(5.8, 3.25, "callable inside jit  NO", fontsize=8, ha='center', color='#a33')
-ax.text(10.1, 5.85, "callable inside jit  NO", fontsize=8, ha='center', color='#a33')
-fig.tight_layout()
-plt.show()
-```
+## Device and Numerical Discipline {#sec-devices}
 
-One subtlety worth naming now. An operator like the cotangent Laplacian is
-**built** on the host (HOST-CTOR — the neighbour structure and the per-edge weights
-need data-dependent assembly) but **applied** in pure JAX: the resulting `ELL`
-flows through `apply_operator` as a DIFF-JAX matvec. So the *construction* sits
-outside the loop and the *application* sits inside it — the two halves naturally
-land on the right side of the rule. (One consequence: the host-built ELL's weights
-are NumPy constants, so they do not carry a gradient with respect to vertex
-positions. Where an algorithm needs to differentiate *through* the cotangent
-weights — `mean_curvature` does — it uses a JAX-native per-face cotangent apply
-instead of the host-built ELL, the two agreeing to about $10^{-4}$.)
+The geometry tier makes three device-level bets that shape its whole design, and
+they are worth understanding before reading any routine because they explain why
+the code looks the way it does.
 
-## Device discipline: cuSolver-free, XLA, differentiable {#sec-devices}
+First, **cuSolver-free by construction**. On real hardware the dense GPU LAPACK
+stack (cuSolver) is not always trustworthy: certain CUDA/JAX combinations ship a
+broken solver handle in which `eigh`, `qr`, `cholesky`, `solve`, `inv`, and `svd`
+all fail at runtime while the rest of the device works. The suite therefore
+avoids it. Small formulas are written in closed form - principal curvatures use
+the quadratic formula $\kappa = H \pm \sqrt{H^2-K}$ of @sec-curvature-from-laplacian,
+never an eigensolver. Large smoothing systems use matrix-free conjugate gradient
+(`linalg.krylov.cg`), which needs only matrix-vector products, never a
+factorization; the backward-Euler smoothing solve $(M + tL)x = Mx_0$ rides it.
+Where a dense factorization is genuinely unavoidable elsewhere in the library, it
+passes through the `safe_*` solver seam, which probes a tiny GPU call once and
+falls back to CPU - announced, never silent - the first time the GPU solver
+fails, moving the result back to the originating device.
 
-The geometry tier makes three device-level bets that shape its whole design. They
-are worth understanding before you read any routine, because they explain *why* the
-code looks the way it does.
+Second, **XLA, not custom kernels, for the mesh/semiring tier**. The mesh layer
+lowers onto a gather-and-reduce (`semiring_ell_matmul`): for each output row,
+read the feature rows of that row's neighbours and reduce them under a semiring.
+XLA lowers this `gather`/`scatter` + `fori_loop` pattern efficiently. The pinned
+Pallas GPU backend does not lower the `gather` primitive at all, so the substrate
+bet is XLA and the tier ships no custom kernels. The full rationale, and the
+conditions under which that might change, live in
+[the backend page](performance.qmd#sec-backend).
 
-**1. cuSolver-free by construction.** On real hardware the dense GPU LAPACK stack
-(cuSolver) is not always trustworthy: certain CUDA / JAX combinations ship a broken
-solver handle in which `eigh` / `qr` / `cholesky` / `solve` / `inv` / `svd` all
-fail at runtime while the rest of the device works fine. Rather than depend on it,
-the suite avoids it: small linear algebra uses **closed-form** small inverses and
-determinants and **2×2 eigenvalues** (principal curvatures are
-$\kappa = H \pm \sqrt{H^2 - K}$, a closed form, never a call to an eigensolver);
-large systems use **matrix-free conjugate gradient** (`linalg.krylov.cg`), which
-needs only matrix–vector products, never a factorisation — the backward-Euler
-smoothing solve $(M + tL)x = M x_0$ rides it. Where a dense factorisation is truly
-unavoidable, it goes through the **`safe_*` seam** (`safe_eigh`, `safe_inv`,
-`safe_cholesky`, `safe_cho_solve`, `safe_solve` in `linalg._solver`): each probes a
-tiny GPU call once, and *latches to CPU* the first time the GPU call actually fails,
-moving the result back to the originating device. The fallback is announced, never
-silent — a wedged solver pool degrades to a correct CPU computation instead of a
-crash.
+Third, **everything stays differentiable**. The data containers are registered
+pytrees, so a `Mesh` flows through `jit`/`vmap`/`grad` as a first-class operand
+and `jax.grad` of a loss over a `Mesh` returns a `Mesh`-structured cotangent. The
+few routines built around an inner solve or fixed point expose a correct gradient
+through implicit differentiation - a `custom_vjp` that differentiates the
+*solution* of the system rather than unrolling the iteration. Together these mean
+a discrete-geometry computation can sit inside a loss and the underlying surface
+can be optimized by gradient descent. These three bets interlock with the
+execution classes: the `DIFF-JAX` kernels are exactly the ones written to be
+cuSolver-free and XLA-lowerable, and pytree registration is what lets a `Mesh` be
+a `DIFF-JAX` operand at all.
 
-**2. XLA, not Pallas — there are no custom kernels for this tier.** The mesh and
-semiring layer lowers onto `semiring_ell_matmul`, whose core operation is a
-**gather**: for each output row, read the feature rows of that row's neighbours
-(`lax.gather`) and reduce them under a semiring. XLA lowers this gather/scatter +
-`fori_loop` pattern efficiently on GPU. A custom Triton (Pallas) kernel cannot — in
-the pinned JAX version the Pallas GPU backend does not lower the `gather` primitive
-at all (it raises `Unimplemented primitive in Pallas GPU lowering: gather`). So the
-substrate bet is **XLA**, and the suite deliberately ships **no** custom kernels for
-the mesh/semiring tier. (The full rationale, and the conditions under which that
-might change, live in [the backend page](performance.qmd#sec-backend).)
+## Conventions {#sec-conventions}
 
-**3. Everything stays differentiable.** Two mechanisms make the discrete pipeline
-end-to-end differentiable. First, the data containers are **registered pytrees**:
-`Mesh`, `ELL`, and `SectionedELL` flatten into their array children, so a `Mesh`
-flows through `jit` / `vmap` / `grad` as a first-class operand — `jax.grad` of a
-loss over a `Mesh` returns a `Mesh`-structured cotangent, with the gradient
-populating `vertices` (the `faces` integer topology takes a zero cotangent). One
-type is *consciously not* registered: `IcosphereHierarchy`, whose parent tables are
-host-side construction metadata that never legitimately crosses a trace boundary.
-Second, the few routines built around an inner solve or fixed point expose a
-correct gradient through **implicit differentiation** — a `custom_vjp` that
-differentiates the *solution* of the system rather than unrolling the iteration
-(the eigensolver and the fixed-point solver both do this). Together these mean you
-can put a discrete-geometry computation inside a loss and optimise the underlying
-surface by gradient descent.
+Several representation conventions are fixed throughout the unit.
 
-These three bets interlock with the execution classes of the previous section: the
-DIFF-JAX kernels are exactly the ones written to be cuSolver-free and XLA-lowerable,
-and the pytree registration is what lets a `Mesh` be a DIFF-JAX operand at all.
+**Index space.** Grid coordinates are index coordinates unless an explicit
+`spacing` or affine transform is supplied. The physical position of index $i$
+is determined by the calling convention, not by a hidden affine.
 
-## Conventions: the small print that prevents large bugs {#sec-conventions}
+**Channels last.** Per-vertex fields use shape `(..., n, d)`, where `d` is the
+feature dimension and leading axes are batch axes. A scalar field should use a
+trailing singleton feature axis when passed to `apply_operator`. For
+`spatial_gradient`, the trailing axes are spatial, so multi-channel images should
+move channels into a leading batch axis before the call.
 
-A handful of representation choices run through the entire unit. They are easy to
-state and expensive to get wrong, so we fix them once here and use them everywhere.
+**Matrix indexing for grids.** Multi-axis grids use `indexing='ij'`, matching
+array axis order. The alternative `xy` convention silently swaps the first two
+axes and is a common source of transposed volumes.
 
-**Index space.** Grid coordinates are **index space**: the position of grid cell
-$i$ *is* $i$ (physical position is `index * spacing`). Routines that care about
-physical units take an explicit `spacing` argument — `spatial_gradient`,
-`marching_cubes`, `mesh_to_sdf`, `ribbon_map` all do — and apply it as a scale on
-top of the index grid. There is no hidden affine; what you index is where you are.
+**High-precision assembly where it matters.** Numerically sensitive host
+construction, especially cotangent weights on nearly degenerate triangles, is
+assembled in float64 and then cast back to the working dtype for device
+application. This spends precision where conditioning is worst while keeping the
+bulk computation in the requested dtype.
 
-**Channels-last.** Multi-channel arrays put the feature axis **last**. A per-vertex
-field is `(..., n, d)` with the $d$ features trailing and any leading axes treated
-as batch; a scalar field uses a trailing singleton `(..., n, 1)`. The apply-seam
-`apply_operator(op, x)` follows this exactly, vmapping over the leading batch axes
-and contracting the `(n, d)` core. (`spatial_gradient` is the one place you move a
-channel axis to the *front* before calling, because there every trailing axis is
-spatial.)
+**Topology is not geometry.** Faces specify which vertices are connected.
+Vertices specify where they are in space. Many algorithms require both, but they
+are not interchangeable. Changing vertex positions with fixed faces deforms a
+surface. Changing faces changes the discrete topology and usually changes the
+operator shape.
 
-**`indexing='ij'` for multi-axis grids.** Every `meshgrid` over a multi-axis grid
-uses matrix indexing, so axis 0 is the first spatial dimension, matching the array
-layout — the volume code (`marching_cubes`, `mesh_to_sdf`) and the interpolators
-all build their coordinate grids this way. The alternative (`'xy'`) silently
-transposes the first two axes and is a classic source of flipped volumes.
+## Reading Forward {#sec-reading-forward}
 
-**fp64 host assembly, then cast back.** Numerically sensitive *construction* — most
-of all the cotangent weights, where a near-degenerate triangle can blow up a
-$\cot$ — is computed in **float64 on the host**, then cast back to the working
-dtype (typically fp32) for the JAX matvec. `mesh_cotangent_laplacian` does exactly
-this: it assembles `values` in float64 and returns them in `mesh.vertices.dtype`.
-The principle is to spend the precision where the conditioning is worst (assembly)
-and run the bulk arithmetic at the cheaper working precision.
+The next chapters refine the abstractions introduced here.
 
-**The `Mesh` pytree.** A mesh is `Mesh(vertices, faces)` — both are array
-*children* of the pytree (not static aux). `vertices` is float and carries the
-gradient; `faces` is integer topology and carries through with a zero cotangent.
-Making `faces` a child (rather than static metadata) is deliberate: a large integer
-array as static aux would be unhashable and would force a recompile for every
-distinct topology. The usual optimiser pattern grads with respect to `vertices`
-directly and rebuilds the `Mesh` inside the loss; differentiating the *whole* mesh
-needs `jax.grad(f, allow_int=True)` to admit the integer `faces` leaf.
+- [The operator layer](operators.qmd) develops ELL, SectionedELL, semirings, and
+  mesh adjacency construction.
+- [The Laplace--Beltrami operator](laplace-beltrami.qmd) studies the cotangent
+  stiffness, the mass matrix, and smoothing in detail.
+- [Curvature and distortion](curvature.qmd) derives the mean, Gaussian, and
+  principal curvature routines and the surface-distortion measures used in
+  cortical workflows.
+- [Volume-surface conversion](volume-surface.qmd) explains marching cubes,
+  signed-distance fields, topology checks, and the boundary between host
+  construction and differentiable surface motion.
 
-With index space, channels-last, `'ij'`, the fp64-assembly rule, and the `Mesh`
-pytree in hand, the rest of the unit reads without surprises. The next page picks up
-the operator layer in earnest: [ELL storage and the semiring
-matvec](operators.qmd#sec-ell) that every mesh computation rides on.
-
-## Further reading
+## Further Reading
 
 - Crane, K. (2018). *Discrete Differential Geometry: An Applied Introduction.*
-  Course notes, Carnegie Mellon University. The single best entry point for the
-  discrete-approximates-smooth viewpoint and the cotangent/angle-defect operators.
-- Botsch, M., Kobbelt, L., Pauly, M., Alliez, P., & Lévy, B. (2010). *Polygon Mesh
-  Processing.* A K Peters. The practitioner's reference for mesh representations,
-  smoothing, and remeshing.
+  A geometric entry point to cotangent Laplacians, angle defect, and curvature.
 - Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). *Discrete
-  Differential-Geometry Operators for Triangulated 2-Manifolds.* In Visualization
-  and Mathematics III, Springer. The source of the mixed-Voronoi area and the
-  cotangent mean-curvature normal used in `vertex_areas` and `mean_curvature`.
-- do Carmo, M. P. (1976). *Differential Geometry of Curves and Surfaces.*
-  Prentice-Hall. The smooth theory the discrete operators approximate — mean and
-  Gaussian curvature, the Gauss–Bonnet theorem.
+  Differential-Geometry Operators for Triangulated 2-Manifolds.* The source for
+  the mixed-Voronoi area and cotangent mean-curvature normal used throughout the
+  surface routines.
+- Botsch, M., Kobbelt, L., Pauly, M., Alliez, P., & Lévy, B. (2010). *Polygon
+  Mesh Processing.* A practical reference for mesh representations and
+  algorithms.
+- do Carmo, M. P. (1976). *Differential Geometry of Curves and Surfaces.* The
+  smooth theory the discrete operators approximate - mean and Gaussian curvature,
+  and the Gauss--Bonnet theorem.
 - LeVeque, R. J. (2007). *Finite Difference Methods for Ordinary and Partial
-  Differential Equations.* SIAM. Background on the order-of-accuracy / convergence
-  ideas behind the finite-difference figure.
+  Differential Equations.* Background on consistency, order of accuracy, and
+  convergence for grid operators.
+- Bronstein, M. M., Bruna, J., Cohen, T., & Veličković, P. (2021). *Geometric
+  Deep Learning: Grids, Groups, Graphs, Geodesics, and Gauges.* The modern,
+  Erlangen-programme view of invariance and equivariance as the organizing
+  principle of geometric models - the framing of @sec-transformations-bias.
 
 ## See also
 
-- The geometry suite's own design contracts (execution classes in §2.5; the device
-  posture in §2.6):
-  [`docs/design/geometry-suite.md`](https://github.com/hypercoil/nitrix/blob/main/docs/design/geometry-suite.md).
-- Source — the `Mesh` pytree, the icosphere, and the mesh operator/measure layer:
+- Source - the `Mesh` pytree, the icosphere, and the mesh operator/measure layer:
   [`src/nitrix/sparse/mesh.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/mesh.py).
-- Source — the geometry package surface (the full public API this page surveys):
+- Source - the geometry package surface (the full public API this page surveys):
   [`src/nitrix/geometry/__init__.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/__init__.py).
-- Source — the cuSolver-robust `safe_*` device seam:
+- Source - the cuSolver-robust `safe_*` device seam:
   [`src/nitrix/linalg/_solver.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/linalg/_solver.py).
-- Source — the format-agnostic apply-seam:
+- Source - the format-agnostic apply seam:
   [`src/nitrix/sparse/_apply.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/sparse/_apply.py).
+- Design contracts (execution classes, device posture):
+  [`docs/design/geometry-suite.md`](https://github.com/hypercoil/nitrix/blob/main/docs/design/geometry-suite.md).
 - Next in reading order: [the operator layer](operators.qmd#sec-ell), then
-  [the cotangent Laplacian](laplace-beltrami.qmd#sec-cotangent) and
-  [curvature](curvature.qmd#sec-mean). Sibling unit:
+  [the cotangent Laplacian](laplace-beltrami.qmd) and
+  [curvature](curvature.qmd). Sibling unit:
   [the `nitrix.stats` foundations page](../statistics/foundations.qmd).

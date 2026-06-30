@@ -1,0 +1,237 @@
+---
+title: "A primer: programs, gradients, and the machines that run them"
+---
+
+`nitrix` is a library of *differentiable* numerical primitives: every public
+function is a pure map over arrays that you can not only **run**, but also
+**compile** to a GPU and **differentiate** — automatically, exactly, and at scale.
+The other three units of this book (geometry, registration, statistics) use those
+three capabilities on every page without dwelling on them. This unit is where we
+earn them. It answers four questions a reader meeting differentiable numerics for
+the first time should have: *what is the machine underneath, how does a
+high-level Python function become fast code on it, what does it mean to
+differentiate a program, and why does any of this help a model learn?*
+
+You need linear algebra (matrices, transposes, rank, the inner product) and basic
+multivariate calculus (partial derivatives, the chain rule). You do **not** need
+differential geometry, tangent bundles, Lie theory, or a background in numerical
+methods or GPU programming — each of those ideas is built here from what you
+already own, the first time it is needed. The register is the same as the rest of
+the book: intuition first, then the earned equation, then the real `nitrix`
+routine.
+
+## The three threads {#sec-threads}
+
+Three ideas recur on nearly every page of this unit, and they are worth meeting
+once, up front. Everything else hangs on them.
+
+### Thread 1 — one trace, many interpretations {#sec-thread-trace}
+
+A `nitrix` function is a **pure function**: same inputs, same outputs, no hidden
+state. That restraint buys something large. A pure function can be *traced* once —
+run symbolically on stand-in values — into a small data structure (JAX calls it a
+`jaxpr`) that records exactly which primitive operations happen in which order.
+Once you hold the program as data, you can **reinterpret** it. Run it as written.
+Hand it to the **XLA compiler**, which fuses and schedules it into fast GPU code.
+**Linearise** it, to get the map that propagates a small input perturbation
+forward. **Transpose** that linear map, to get the one that propagates a
+sensitivity backward — which is exactly the gradient. `jit` (compile) and `grad`
+(differentiate) are not two unrelated features; they are two *interpretations of
+the same trace*, and this unit treats them as such.
+
+### Thread 2 — linearisation is the universal tool {#sec-thread-linear}
+
+The derivative of a function is the **best linear map** that approximates it near a
+point — nothing more exotic than that, even when the function maps thousands of
+numbers to thousands of numbers. Every differentiation idea in this unit is linear
+algebra on these local linear maps: the **Jacobian** is the matrix of the linear
+map; the **Jacobian–vector product** (JVP) applies it to a perturbation; the
+**vector–Jacobian product** (VJP) applies its *transpose* to a sensitivity; "**you
+only linearise once**" is the observation that reverse-mode autodiff is just *the
+transpose of the forward linear map*; and the **implicit function theorem** lets us
+differentiate things defined by a condition (a root, an optimum, an ODE solution)
+by linearising that condition and solving one linear system. We use **Einstein
+index notation** throughout, because it makes the multivariate bookkeeping —
+which index sums against which — visible and routine.
+
+### Thread 3 — structure is leverage {#sec-thread-structure}
+
+The same word, **inductive bias**, names two payoffs that look unrelated until you
+hold them together. Structure in the *computation* buys **performance**: a fused
+kernel that respects the memory hierarchy, a sparse operator that skips the zeros,
+a *semiring* that replaces $(+,\times)$ with $(\max,+)$ to turn a matrix product
+into a shortest-path solve. Structure in the *data* buys **generalisation**: a
+model that is told the answer cannot depend on where an object sits in an image, or
+on how the nodes of a graph are numbered, needs far less data to learn. Both are
+the deliberate exploitation of known structure, and both are what the rest of the
+book is about — the geometry unit's symmetry-respecting operators, the registration
+unit's Lie-group transforms, the statistics unit's penalties-as-priors. This unit's
+final chapter is the bridge to them.
+
+## What `nitrix` is {#sec-library}
+
+`nitrix` is the **lowest-level numerical layer** of the *diffprog* neuroimaging
+stack — a pure-[JAX](https://docs.jax.dev) library of differentiable primitives
+that higher-level libraries (`hypercoil`, `entense`, and others) build on. Three
+commitments shape everything in it, and each is a concrete instance of the threads
+above.
+
+- **Everything is a pure function over arrays.** No module objects, no hidden
+  state, no I/O — a public symbol takes arrays (or PyTrees of arrays, optionally a
+  random key or a static shape/configuration) and returns arrays. This is what
+  makes the whole library traceable, hence `jit`-able, `vmap`-able, and
+  differentiable end-to-end (Thread 1).
+- **Precision and correctness come first.** The scientific core is `float32`/
+  `float64`; reduced precision is admitted only at a narrow neural-network seam,
+  under a hard rule that accumulation stays at least `float32`. A fused GPU kernel
+  always ships beside a plain-JAX **reference** that is certified equal to it within
+  a published tolerance, so the fast path can never silently diverge from the
+  honest one.
+- **Performance is hardware-aware but portable.** `nitrix` targets Ampere-and-newer
+  NVIDIA GPUs through hand-written kernels, with a pure-JAX CPU fallback as the
+  correctness floor. Crucially, it is designed to run *without* the vendor GPU
+  solver (cuSOLVER), which is fragile across deployment environments — a recurring
+  motivation you will see paid off in the [implicit-differentiation](implicit-differentiation.qmd)
+  chapter and throughout the statistics unit.
+
+A `nitrix` call chooses its behaviour along four *orthogonal* axes, a vocabulary
+worth having early because it recurs: the **backend** (which execution engine —
+a fused CUDA kernel or portable JAX), the **driver** (which numerically-distinct
+recipe of the same maths), the **method** (which algorithm family), and the
+**dtype** (which precision). Keeping these separate is what lets one function serve
+a laptop CPU and a datacentre GPU from the same source.
+
+## How a program becomes fast *and* differentiable {#sec-trace}
+
+The unifying picture of the unit is @fig-trace: a single pure function, traced
+once into a `jaxpr`, then sent down four different paths. The left two are about
+*speed* (the [hardware](hardware.qmd) and [XLA/JAX](xla-jax.qmd) chapters); the
+right two are about *gradients* (the [differentiation](differentiation.qmd) and
+[differentiable-programming](differentiable-programming.qmd) chapters). The whole
+unit is an elaboration of this diagram.
+
+::: {#fig-trace}
+<svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A pure function is traced once into a jaxpr, which is then reinterpreted four ways: evaluate, compile, linearise, and transpose."
+     font-family="system-ui, sans-serif" font-size="14">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55606b"/>
+    </marker>
+  </defs>
+  <!-- pure function -->
+  <rect x="20" y="120" width="150" height="60" rx="6" fill="#dfe7f0"
+        stroke="#33373d"/>
+  <text x="95" y="145" text-anchor="middle">pure function</text>
+  <text x="95" y="165" text-anchor="middle" font-style="italic">f(x) → y</text>
+  <!-- trace arrow -->
+  <line x1="170" y1="150" x2="250" y2="150" stroke="#55606b" stroke-width="1.4"
+        marker-end="url(#ah)"/>
+  <text x="210" y="142" text-anchor="middle" font-size="12" font-style="italic"
+        fill="#444b53">trace</text>
+  <!-- jaxpr -->
+  <rect x="250" y="120" width="150" height="60" rx="6" fill="#fbf0d6"
+        stroke="#33373d"/>
+  <text x="325" y="145" text-anchor="middle">the trace</text>
+  <text x="325" y="165" text-anchor="middle" font-style="italic">(a jaxpr)</text>
+  <!-- four interpretations -->
+  <g>
+    <rect x="500" y="20" width="280" height="46" rx="6" fill="#dce9dd"
+          stroke="#33373d"/>
+    <text x="512" y="40">evaluate</text>
+    <text x="512" y="58" font-size="12" fill="#444b53">run it as written</text>
+    <rect x="500" y="86" width="280" height="46" rx="6" fill="#dce9dd"
+          stroke="#33373d"/>
+    <text x="512" y="106">compile — jit → XLA → GPU</text>
+    <text x="512" y="124" font-size="12" fill="#444b53">fuse &amp; schedule for speed</text>
+    <rect x="500" y="168" width="280" height="46" rx="6" fill="#e8ddec"
+          stroke="#33373d"/>
+    <text x="512" y="188">linearise — jvp (pushforward)</text>
+    <text x="512" y="206" font-size="12" fill="#444b53">perturbation → forward</text>
+    <rect x="500" y="234" width="280" height="46" rx="6" fill="#e8ddec"
+          stroke="#33373d"/>
+    <text x="512" y="254">transpose — vjp (pullback)</text>
+    <text x="512" y="272" font-size="12" fill="#444b53">sensitivity → backward = grad</text>
+  </g>
+  <!-- fan-out arrows from jaxpr -->
+  <line x1="400" y1="150" x2="500" y2="43"  stroke="#55606b" stroke-width="1.4" marker-end="url(#ah)"/>
+  <line x1="400" y1="150" x2="500" y2="109" stroke="#55606b" stroke-width="1.4" marker-end="url(#ah)"/>
+  <line x1="400" y1="150" x2="500" y2="191" stroke="#55606b" stroke-width="1.4" marker-end="url(#ah)"/>
+  <line x1="400" y1="150" x2="500" y2="257" stroke="#55606b" stroke-width="1.4" marker-end="url(#ah)"/>
+</svg>
+
+One trace, four interpretations. A pure function is traced once into a
+`jaxpr`; evaluating, compiling, linearising, and transposing are all
+reinterpretations of that single object. The two upper paths are this unit's
+"speed" story; the two lower paths are its "gradient" story — and the fourth is
+literally the transpose of the third.
+:::
+
+@fig-trace also previews the unit's most useful single sentence, made precise in
+[the differentiation chapter](differentiation.qmd#sec-yolo): **you only linearise
+once.** Reverse-mode automatic differentiation — the engine behind essentially all
+deep learning — does not re-derive anything. It linearises the program once to get
+a forward linear map, and then *transposes* that map. Speed and gradients turn out
+to be the same skill — reinterpreting a trace — applied with different intent.
+
+## Chapters {#sec-chapters}
+
+The unit climbs from the silicon up to the ideas, then hands off to the rest of the
+book. Read in order for the full ascent; each chapter assumes the ones before it.
+
+1. [**Programming the GPU**](hardware.qmd) — what a GPU is and why it is fast
+   (throughput over latency, the SIMT execution model, the memory hierarchy), the
+   **roofline** model of when a computation is compute- or memory-bound, and the
+   generations of NVIDIA architecture (Volta → Ampere → Hopper → Blackwell) and
+   which of them `nitrix` targets.
+2. [**JAX and XLA: levels of representation**](xla-jax.qmd) — pure functions and the
+   trace; the ladder of representations a program descends (`jaxpr` → HLO →
+   optimised HLO → GPU assembly); how the XLA compiler wins through **operator
+   fusion**; and `jit`/`vmap`/`grad` as transformations of one trace.
+3. [**Differentiation as linear algebra**](differentiation.qmd) — the derivative as
+   the best linear map; **Einstein notation**; the Jacobian, the **JVP**
+   (pushforward) and the **VJP** (pullback = transpose); when forward beats reverse
+   and vice versa; and "you only linearise once".
+4. [**Three kernels, forward and back**](three-kernels.qmd) — the previous chapter
+   made concrete on three workhorses: matrix multiply (**gemm**), **softmax**, and
+   the **semiring** matrix product, each with its forward pass, its JVP, and its VJP
+   worked out in index notation.
+5. [**The differentiable-programming paradigm**](differentiable-programming.qmd) —
+   the three-step loop (hypothesis class → objective → optimise by autodiff);
+   automatic differentiation contrasted with the numerical and symbolic
+   alternatives; forward versus reverse mode at program scale; and how real
+   frameworks implement it.
+6. [**Implicit differentiation and the IFT**](implicit-differentiation.qmd) —
+   differentiating through things defined by a *condition* rather than a formula,
+   via the implicit function theorem, with two worked examples: the Hermitian
+   eigendecomposition and the simplest ordinary differential equation.
+7. [**Inductive bias, invariance, and equivariance**](inductive-bias.qmd) — a
+   teaser for the rest of the book: hypothesis classes and generalisation, inductive
+   bias, and the geometric-deep-learning notions of **invariance** and
+   **equivariance** that organise the geometry, registration, and statistics units.
+
+## Reading paths {#sec-paths}
+
+- **Just here to use the library.** Read this page and skim
+  [JAX and XLA](xla-jax.qmd) for the `pure function → jit/vmap/grad` workflow and
+  its control-flow constraints. That is enough to call `nitrix` correctly and fast.
+- **Here for the gradients.** Read [differentiation](differentiation.qmd) and
+  [three kernels](three-kernels.qmd) in full, then
+  [implicit differentiation](implicit-differentiation.qmd). This is the
+  mathematical core, and it is self-contained.
+- **Here for the whole picture.** Read in chapter order. The unit is built so that
+  the speed story (chapters 1–2) and the gradient story (chapters 3–6) converge on
+  the single idea of reinterpreting a trace, and the final chapter (7) opens the
+  door to the rest of the book.
+
+## See also
+
+- The library surface: [`nitrix`](https://github.com/hypercoil/nitrix) and its
+  architectural record, `SPEC.md`.
+- The framework this unit explains: the
+  [JAX documentation](https://docs.jax.dev) (transformations, autodiff, and the
+  `jaxpr`/XLA pipeline).
+- The units this one feeds: [discrete geometry](../geometry/index.qmd),
+  [image registration](../registration/index.qmd), and
+  [statistical modelling](../statistics/index.qmd).

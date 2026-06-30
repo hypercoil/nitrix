@@ -2,121 +2,101 @@
 title: "Foundations: the registration problem"
 ---
 
-::: {.callout-tldr title="Fast path"}
-This is rung 0 of the registration unit — the page that turns "I know linear
-algebra and I have read the geometry unit" into "I can read the rest of this book
-as one story." Three ideas hold up everything that follows:
+Registration is the problem of finding a map between two geometries by minimising a mismatch
+energy. Given a fixed image $I_f$ and a moving image $I_m$, we search for a transform $\varphi$
+minimising
 
-1. **A registration is a map between two geometries, found by minimizing a
-   mismatch energy.** Given a fixed image $I_f$ and a moving image $I_m$, we look
-   for a transform $\varphi$ minimizing
-   $\mathcal{S}(I_f,\, I_m\circ\varphi) + \lambda\,\mathcal{R}(\varphi)$ —
-   *similarity* plus *regularisation* over a *parametrized family of transforms*.
-   Those three ingredients are the three things the rest of the unit fills in.
-2. **We pull the moving image *back* onto the fixed grid.** The map runs
-   $\varphi:\Omega_f\to\Omega_m$, and the warped image is the *composition*
-   $I_m\circ\varphi$. This single convention — backward warping, not forward
-   splatting — is the most important one in the unit.
-3. **The whole engine is pure-functional, on-device, and differentiable
-   end-to-end.** Every routine carries an execution class (**DIFF-JAX**,
-   **HOST-CTOR**, **HOST-QA**) under one rule (*never a HOST op inside a jitted
-   loop*), outputs are `NamedTuple`s of arrays, and a whole registration is
-   reverse-differentiable — you can backprop a downstream loss to the moving image
-   or to the transform parameters.
+$$
+\mathcal{S}\big(I_f,\; I_m\circ\varphi\big) + \lambda\,\mathcal{R}(\varphi),
+$$
 
-If you read only one page before the transform ladder, read this one.
-:::
+a *similarity* term plus a *regularisation* term, over a parametrised family of transforms. Those
+three ingredients - the family, the similarity, the regulariser - are what the rest of the unit
+fills in, and this chapter sets up the framing that holds them together.
 
-This unit is written for a reader who is comfortable with **linear algebra** —
-matrices, least squares, eigendecomposition, gradients, the chain rule — and who
-has read the [geometry unit](../geometry/foundations.qmd), so a voxel grid is
-already a familiar object: a discrete sampling of a continuous field, with cell
-$i$ sitting at position $i$ in **index space**. But the reader has had **no formal
-training in image registration, Lie theory, numerical optimization, or
-graphics**. Everything here is built up from what you already own. Our aim across
-the book is to carry you from *novice* (you can call a recipe and pick the right
-one) to *practitioner* (you understand why each answer converges and what each
-argument does) to *developer* (you could implement it yourself). This page lays
-the four planks the whole climb rests on: the problem, the pull-back convention,
-the transform ladder, and the coordinate spaces — plus the execution-class and
-validation postures the suite shares with its
-[statistics](../statistics/foundations.qmd) and
-[geometry](../geometry/foundations.qmd) siblings.
+Two further commitments run underneath everything. First, **we pull the moving image back onto the
+fixed grid**: the transform runs $\varphi:\Omega_f\to\Omega_m$ and the warped image is the
+composition $I_m\circ\varphi$ (backward warping, not forward splatting). Second, the families we
+search are not arbitrary sets of maps but **groups** - rigid motions, affine maps, diffeomorphisms -
+and the group acts on images by that very composition. Reading registration through its groups is
+the unit's organizing lens: each transform family is a Lie group charted through its Lie algebra by
+the exponential map, the warp $I\mapsto I\circ\varphi$ is a *representation* of the group on the
+space of images, and the climb from rigid to diffeomorphic is a climb up a tower of nested groups.
+This is the dual of the geometry unit's symmetry theme: there we built operators *invariant* to a
+group; here we *search* a group for the element that best aligns two images.
 
-## A motivating question {#sec-motivation}
+This unit is written for a reader comfortable with linear algebra - matrices, least squares,
+eigendecomposition, gradients, the chain rule - who has read the
+[geometry unit](../geometry/foundations.qmd), so a voxel grid is already familiar: a discrete
+sampling of a continuous field, with cell $i$ at position $i$ in index space. No prior background in
+image registration, Lie theory, numerical optimisation, or graphics is assumed; group-theoretic
+ideas are introduced the first time they appear, and a "group" here means no more than a set of
+transforms closed under composition and inverse, containing the identity. The chapter lays the four
+planks the climb rests on - the problem, the pull-back convention, the transform ladder, and the
+coordinate spaces - plus the execution-class and validation postures shared with the
+[statistics](../statistics/foundations.qmd) and [geometry](../geometry/foundations.qmd) siblings.
 
-Hold one concrete task in mind for the entire page. You have a subject's
-**T1-weighted anatomical scan** — a 3-D volume of the brain on the scanner's voxel
-grid — and you want to put it into **MNI space**, the standard template
-coordinate frame that lets you compare this subject to every other subject and to
-an atlas. Concretely: you have the subject T1 (call it the **moving** image, the
-one we will move) and the MNI template (the **fixed** image, the frame we move
-*into*), and you want a transform that, applied to the subject, lands their brain
-on top of the template's.
+## A motivating problem {#sec-motivation}
 
-What does "lands on top of" mean, operationally? It means we need three things,
-and the whole unit is the elaboration of these three:
+Hold one concrete task in mind. We have a subject's T1-weighted anatomical scan - a 3-D volume of
+the brain on the scanner's voxel grid - and we want to put it into MNI space, the standard template
+coordinate frame that lets us compare this subject to every other and to an atlas. We have the
+subject T1 (the *moving* image, the one we will move) and the MNI template (the *fixed* image, the
+frame we move *into*), and we want a transform that, applied to the subject, lands their brain on top
+of the template's.
 
-- a **family of transforms** rich enough to express the misalignment (a rigid
-  pose difference? a global size and shear? a fine, subject-specific folding
-  pattern?),
-- a way to **score how well** a candidate transform aligns the two images (when
-  do two brains "match" — same intensities? same local texture? same information
-  content, across modalities?), and
-- a way to keep the transform **physical** (a real brain does not tear or fold
-  inside-out), and a way to **search** the family for the best-scoring transform.
+What does "lands on top of" mean operationally? It means three things, and the whole unit is their
+elaboration:
 
-We will meet all three on this page in outline and devote a later page to each. By
-the end you will see that aligning a T1 to MNI is one instance of a single
-template: *minimize a mismatch energy over a parametrized family of maps between
-two geometries.*
+- a *family of transforms* rich enough to express the misalignment (a rigid pose difference? a global
+  size and shear? a fine, subject-specific folding pattern?),
+- a way to *score how well* a candidate transform aligns the two images (when do two brains match -
+  same intensities? same local texture? same information content, across modalities?), and
+- a way to keep the transform *physical* (a real brain does not tear or fold inside-out), and a way
+  to *search* the family for the best-scoring transform.
+
+We meet all three here in outline and devote a later chapter to each. By the end, aligning a T1 to
+MNI is one instance of a single template: minimise a mismatch energy over a parametrised family of
+maps between two geometries.
 
 ## The registration problem {#sec-problem}
 
-Let us write the question down. We are given a **fixed** image $I_f$ (the MNI
-template) defined over a grid $\Omega_f$, and a **moving** image $I_m$ (the subject
-T1) defined over a grid $\Omega_m$. Both are just intensities over voxels — real
-numbers indexed by integer coordinates. We want a transform $\varphi$ that brings
-the moving image into agreement with the fixed one.
+Write the question down. We are given a fixed image $I_f$ (the MNI template) over a grid $\Omega_f$,
+and a moving image $I_m$ (the subject T1) over a grid $\Omega_m$. Both are intensities over voxels -
+real numbers indexed by integer coordinates. We want a transform $\varphi$ that brings the moving
+image into agreement with the fixed one.
 
-The obvious first thing to ask is: *agreement, measured how?* Suppose for a moment
-the two images are the same modality (both T1) and have the same intensity scale.
-Then the most direct measure of disagreement is the **sum of squared differences**
-between the fixed image and the moving image *after we have applied $\varphi$* —
-add up, over every voxel, the squared gap between what the fixed image shows there
-and what the warped moving image shows there. The smaller that sum, the better the
-alignment. Call this number the **similarity** (really a *dis*similarity — lower is
-better):
+The first question is: agreement, measured how? Suppose for a moment the two images are the same
+modality (both T1) on the same intensity scale. Then the most direct measure of disagreement is the
+*sum of squared differences* between the fixed image and the moving image *after applying $\varphi$*:
+add up, over every voxel, the squared gap between what the fixed image shows there and what the
+warped moving image shows there. The smaller that sum, the better the alignment. Call this number the
+similarity (really a *dis*similarity - lower is better):
 
 $$
 \mathcal{S}\big(I_f,\; I_m\circ\varphi\big)
   \;=\; \sum_{x\in\Omega_f} \big(I_f(x) - (I_m\circ\varphi)(x)\big)^2 .
 $$ {#eq-ssd}
 
-Here $x$ ranges over the fixed grid, $I_f(x)$ is the fixed intensity at voxel $x$,
-and $(I_m\circ\varphi)(x)$ is the **warped moving** image — the moving image
-*resampled* at the transformed coordinate $\varphi(x)$ (the next section earns the
-composition $I_m\circ\varphi$ in full). @eq-ssd is the **SSD** metric, the
-within-modality workhorse; `nitrix` ships it as `register.SSD`, and three more —
-`LNCC` (local normalized cross-correlation, robust to a smooth intensity bias),
-`MI` (mutual information) and `CorrelationRatio` (both cross-modal) — for the cases
-where intensities do not match voxel-for-voxel. They are all
-[similarity metrics](similarity.qmd#sec-ssd); the choice is *what counts as
-agreement*, and it is the subject of an entire page.
+Here $x$ ranges over the fixed grid, $I_f(x)$ is the fixed intensity at voxel $x$, and
+$(I_m\circ\varphi)(x)$ is the *warped moving* image - the moving image resampled at the transformed
+coordinate $\varphi(x)$ (the next section earns the composition $I_m\circ\varphi$ in full). @eq-ssd
+is the SSD metric, the within-modality workhorse; `nitrix` ships it as `register.SSD`, and three more
+- `LNCC` (local normalised cross-correlation, robust to a smooth intensity bias), `MI` (mutual
+information) and `CorrelationRatio` (both cross-modal) - for cases where intensities do not match
+voxel-for-voxel. They are all [similarity metrics](similarity.qmd#sec-ssd); the choice is *what
+counts as agreement*, and it is the subject of an entire chapter.
 
-So a first attempt at the registration problem is: *find the $\varphi$ that
-minimizes @eq-ssd.* This is the right idea, and it breaks in two ways that motivate
-the other two ingredients.
+A first attempt at the registration problem is therefore: find the $\varphi$ that minimises @eq-ssd.
+This is the right idea, and it breaks in two ways that motivate the other two ingredients.
 
-**It breaks if the family of transforms is too free.** If we let $\varphi$ be
-*any* map from grid to grid — an arbitrary displacement at every voxel — then we
-can drive @eq-ssd to zero by tearing the moving image into confetti and pasting
-each fixed voxel's exact intensity wherever it happens to occur. That "perfect"
-alignment is physical nonsense: a brain does not fold inside-out or tear. The cure
-is one idea: add a **regulariser** $\mathcal{R}(\varphi)$ that scores how *physical*
-the transform is — large when $\varphi$ is jagged, folded, or non-smooth, small
-when it is the kind of smooth, invertible deformation a real anatomy could undergo.
-We then minimize the *sum*
+**It breaks if the family of transforms is too free.** If we let $\varphi$ be *any* map from grid to
+grid - an arbitrary displacement at every voxel - we can drive @eq-ssd to zero by tearing the moving
+image into confetti and pasting each fixed voxel's exact intensity wherever it occurs. That "perfect"
+alignment is physical nonsense: a brain does not fold inside-out or tear. The cure is to add a
+regulariser $\mathcal{R}(\varphi)$ that scores how *physical* the transform is - large when $\varphi$
+is jagged, folded, or non-smooth, small when it is the kind of smooth, invertible deformation a real
+anatomy could undergo. We minimise the sum
 
 $$
 \mathcal{E}(\varphi)
@@ -124,29 +104,36 @@ $$
   \;+\; \lambda\,\underbrace{\mathcal{R}(\varphi)}_{\text{regulariser: keep it physical}} ,
 $$ {#eq-energy}
 
-where $\lambda\ge 0$ trades the two off: $\lambda=0$ chases the data at any cost,
-large $\lambda$ insists on smoothness even at the price of a worse intensity match.
-@eq-energy is the **governing equation of the entire unit** — every page is one
-choice of $\mathcal{S}$, one family for $\varphi$, one $\mathcal{R}$, and one way to
-do the minimization. `nitrix` ships the regularisers the
-[diffeomorphic page](diffeomorphic.qmd#sec-regularisers) consumes —
-`gradient_smoothness` (penalize the displacement's first derivatives),
-`bending_energy` (penalize its second derivatives, the thin-plate energy), and
-`jacobian_folding_penalty` (punish a Jacobian determinant that drops toward zero,
-i.e. an incipient fold) — all in `register.regulariser`.
+where $\lambda\ge 0$ trades the two off: $\lambda=0$ chases the data at any cost, large $\lambda$
+insists on smoothness even at the price of a worse intensity match. @eq-energy is the governing
+equation of the entire unit - every chapter is one choice of $\mathcal{S}$, one family for
+$\varphi$, one $\mathcal{R}$, and one way to do the minimisation. `nitrix` ships the regularisers the
+[diffeomorphic chapter](diffeomorphic.qmd#sec-regularisers) consumes - `gradient_smoothness`
+(penalise the displacement's first derivatives), `bending_energy` (penalise its second derivatives,
+the thin-plate energy), and `jacobian_folding_penalty` (punish a Jacobian determinant that drops
+toward zero, an incipient fold) - all in `register.regulariser`.
 
-**It breaks if the family is too restricted *and* we look for $\varphi$ naïvely.**
-Even a rich-enough family does not hand you the optimum: @eq-energy is a
-*non-convex* function of $\varphi$'s parameters, with one good basin around the true
-alignment and false basins beside it. @fig-foundations-objective makes this
-concrete with the simplest possible family — a single translation. Slide the moving
-profile left/right and plot the SSD: there is a deep **capture-range basin** around
-the true shift, flanked by **local minima** where a structure has slid one feature
-over and locked onto the wrong neighbour. An optimiser started outside the central
-basin rolls into a trap. This is why registration is *optimization*, not a formula,
-and why the [optimization page](optimization.qmd#sec-coarse-fine) leans on a
-coarse-to-fine pyramid (blur away the side basins first) and a good starting guess
-to keep the search inside the right basin.
+The restriction that keeps $\varphi$ physical has a structural reading worth stating now, because it
+recurs at every rung. The families we search are *groups*: the rigid motions, the affine maps, the
+diffeomorphisms are each closed under composition and inverse and contain the identity. Restricting
+$\varphi$ to a group is itself a regulariser - membership in $SE(3)$ already forbids tearing, which is
+why the rigid and affine rungs need no explicit $\mathcal{R}$ - and the larger the group, the more it
+can express and the more an explicit $\mathcal{R}$ must do to hold it physical. The warped image
+$I_m\circ\varphi$ is the group acting on the image: composition with $\varphi$ is a linear map on the
+space of images, so this action is a *representation* of the transform group, and registration is the
+search for the group element whose representation carries $I_m$ onto $I_f$. We make the action precise
+in the next section and the group structure precise in @sec-ladder.
+
+**It breaks if the family is too restricted *and* we search naïvely.** Even a rich-enough family does
+not hand you the optimum: @eq-energy is a *non-convex* function of $\varphi$'s parameters, with one
+good basin around the true alignment and false basins beside it. @fig-foundations-objective makes this
+concrete with the simplest possible family - a single translation. Slide the moving profile
+left/right and plot the SSD: there is a deep *capture-range basin* around the true shift, flanked by
+*local minima* where a structure has slid one feature over and locked onto the wrong neighbour. An
+optimiser started outside the central basin rolls into a trap. This is why registration is
+*optimisation*, not a formula, and why the [optimisation chapter](optimization.qmd#sec-coarse-fine)
+leans on a coarse-to-fine pyramid (blur away the side basins first) and a good starting guess to keep
+the search inside the right basin.
 
 ```{python}
 #| label: fig-foundations-objective
@@ -205,95 +192,88 @@ fig.tight_layout()
 plt.show()
 ```
 
-**The three ingredients, named.** Pulling the strands together, every registration
-in `nitrix` is built from exactly three things, and the architecture mirrors them:
+**The three ingredients, named.** Pulling the strands together, every registration in `nitrix` is
+built from exactly three things, and the architecture mirrors them:
 
 | Ingredient | What it is | Where it lives |
 |---|---|---|
-| **Transform family** | the parametrized set $\varphi$ ranges over (rigid, affine, a velocity field, a sphere map) | a `TransformModel` (`Rigid` / `Affine`) for the matrix recipes; a velocity/displacement field for the diffeomorphic ones |
+| **Transform family** | the group $\varphi$ ranges over (rigid, affine, a velocity field, a sphere map) | a `TransformModel` (`Rigid` / `Affine`) for the matrix recipes; a velocity/displacement field for the diffeomorphic ones |
 | **Similarity** $\mathcal{S}$ | what counts as agreement | a `Metric` (`SSD` / `LNCC` / `MI` / `CorrelationRatio`) |
 | **Regulariser** $\mathcal{R}$ | what keeps $\varphi$ physical | `gradient_smoothness` / `bending_energy` / `jacobian_folding_penalty` (and the implicit smoothness of a constrained family) |
 
-These three plug into a shared **driver** — `register.multi_resolution_register`,
-configured by a `RegistrationSpec` (pyramid depth `levels`, per-level `iterations`,
-the `metric`, the `interpolation` kernel) — that does the coarse-to-fine
-optimization once and is reused by every matrix recipe. The output is a
-`RegistrationResult`: the recovered `matrix`, its raw `params`, the `warped` moving
-image, and the optimiser `cost_history`. For the T1→MNI task, the call is
-`affine_register(subject_t1, mni_template, spec=RegistrationSpec(levels=3))`, and
-`result.warped` is the subject's brain resampled onto the template grid.
+These three plug into a shared *driver* - `register.multi_resolution_register`, configured by a
+`RegistrationSpec` (pyramid depth `levels`, per-level `iterations`, the `metric`, the `interpolation`
+kernel) - that does the coarse-to-fine optimisation once and is reused by every matrix recipe. The
+output is a `RegistrationResult`: the recovered `matrix`, its raw `params`, the `warped` moving image,
+and the optimiser `cost_history`. For the T1→MNI task, the call is
+`affine_register(subject_t1, mni_template, spec=RegistrationSpec(levels=3))`, and `result.warped` is
+the subject's brain resampled onto the template grid.
 
 ## Pull-back: why we warp backward, not forward {#sec-pullback}
 
-Now we earn the composition $I_m\circ\varphi$ — the single most important
-convention in the unit, and the one most worth slowing down for.
+Now we earn the composition $I_m\circ\varphi$ - the single most important convention in the unit, and
+the one most worth slowing down for.
 
-We have a transform $\varphi$ and a moving image $I_m$, and we want the **warped**
-image: $I_m$ "moved" by $\varphi$, sitting on the fixed grid so we can compare it to
-$I_f$ voxel-by-voxel. There are two ways a newcomer might compute this, and only one
-of them works.
+We have a transform $\varphi$ and a moving image $I_m$, and we want the *warped* image: $I_m$ "moved"
+by $\varphi$, sitting on the fixed grid so we can compare it to $I_f$ voxel-by-voxel. There are two
+ways a newcomer might compute this, and only one of them works.
 
-**The obvious thing (forward splatting), and where it breaks.** The intuitive
-picture is: *take each pixel of the moving image, figure out where it goes, and
-paint it there.* For moving pixel at position $p$, compute its destination
-$\psi(p)$, round to the nearest fixed-grid cell, and write the intensity. This is
-**forward splatting** (or *scattering*). It seems natural — it is how you would move
-furniture — and it fails on a grid. The destinations $\psi(p)$ are real-valued and
-almost never land exactly on a fixed-grid cell; worse, when $\varphi$ magnifies a
-region, adjacent moving pixels land *more than one cell apart*, so the warped image
-is riddled with **holes** — fixed-grid cells that no moving pixel happened to hit.
-And where $\varphi$ shrinks a region, several moving pixels pile into one cell and
-you have to decide how to combine them. @fig-foundations-pullback (middle panel)
-shows the carnage: a clean disk and square, splatted forward under a modest
-rotation-and-magnification, come out as a red lattice of cracks. You could patch the
-holes with a scatter-and-normalize or a painter's pass, but it is fragile, it is
-not differentiable in a clean way, and there is a better idea.
+**Forward splatting, and where it breaks.** The intuitive picture is: take each pixel of the moving
+image, figure out where it goes, and paint it there. For a moving pixel at position $p$, compute its
+destination $\psi(p)$, round to the nearest fixed-grid cell, and write the intensity. This is forward
+splatting (or *scattering*). It is how you would move furniture, and it fails on a grid. The
+destinations $\psi(p)$ are real-valued and almost never land exactly on a fixed-grid cell; worse, when
+$\varphi$ magnifies a region, adjacent moving pixels land *more than one cell apart*, so the warped
+image is riddled with holes - fixed-grid cells that no moving pixel happened to hit. And where
+$\varphi$ shrinks a region, several moving pixels pile into one cell and you must decide how to combine
+them. @fig-foundations-pullback (middle panel) shows this directly: a clean disk and square, splatted
+forward under a modest rotation-and-magnification, come out as a lattice of cracks. You could patch the
+holes with a scatter-and-normalise or a painter's pass, but it is fragile, not cleanly differentiable,
+and there is a better idea.
 
-**The cure (backward pull-back), and why it is dense.** Turn the question around.
-Instead of asking *where does each moving pixel go?*, ask, for each **fixed-grid**
-cell $x$, *where did it come from in the moving image?* — and read the value there.
-That destination-to-source map is exactly $\varphi$: it takes a fixed coordinate
-$x\in\Omega_f$ and returns the moving coordinate $\varphi(x)\in\Omega_m$ it should be
-filled from. We then sample $I_m$ at $\varphi(x)$ — interpolating between the
-moving image's voxels, since $\varphi(x)$ is real-valued — and that interpolated
-value is the warped intensity. Because we *visit every fixed cell* and *always find
-a source*, the result is **dense**: no holes, ever (@fig-foundations-pullback, right
-panel). This is **backward warping**, and writing it as function composition makes
-the whole thing one line:
+**Backward pull-back, and why it is dense.** Turn the question around. Instead of asking *where does
+each moving pixel go?*, ask, for each *fixed-grid* cell $x$, *where did it come from in the moving
+image?* - and read the value there. That destination-to-source map is exactly $\varphi$: it takes a
+fixed coordinate $x\in\Omega_f$ and returns the moving coordinate $\varphi(x)\in\Omega_m$ it should be
+filled from. We then sample $I_m$ at $\varphi(x)$ - interpolating between the moving image's voxels,
+since $\varphi(x)$ is real-valued - and that interpolated value is the warped intensity. Because we
+*visit every fixed cell* and *always find a source*, the result is dense: no holes, ever
+(@fig-foundations-pullback, right panel). This is backward warping, and writing it as function
+composition makes the whole thing one line:
 
 $$
 (I_m\circ\varphi)(x) \;=\; I_m\big(\varphi(x)\big),
 \qquad \varphi:\Omega_f \to \Omega_m .
 $$ {#eq-pullback}
 
-Read @eq-pullback aloud: *the warped image at the fixed cell $x$ is the moving image
-sampled at $\varphi(x)$.* The map direction is the crux — and it is **the
-convention for the whole unit**:
+Read @eq-pullback aloud: the warped image at the fixed cell $x$ is the moving image sampled at
+$\varphi(x)$. This composition is precisely the *action of the transform group on images*, the
+representation announced in @sec-problem: the map $\pi(\varphi): I_m \mapsto I_m\circ\varphi$ is linear
+in the image, and because $\varphi$ runs fixed→moving it composes the right way round -
+$\pi(\varphi)\pi(\psi) = \pi(\psi\circ\varphi)$, a (right) representation, so chaining a rigid then an
+affine warp is one matrix product, with no sign to get wrong. The map direction is the crux, and it is
+the convention for the whole unit:
 
 ::: {.callout-important title="The map-direction convention"}
-$\varphi$ maps the **fixed** grid to the **moving** grid: $\varphi:\Omega_f\to
-\Omega_m$. It tells each fixed-grid cell where to *pull from* in the moving image.
-The warped moving image is the composition $I_m\circ\varphi$. We register by
-**pulling the moving image back onto the fixed grid**, never by splatting it
-forward. Everything downstream — the sign of the recovered matrix, the way warps
-compose, the resampling kernels — follows from this one choice.
+$\varphi$ maps the *fixed* grid to the *moving* grid: $\varphi:\Omega_f\to \Omega_m$. It tells each
+fixed-grid cell where to *pull from* in the moving image. The warped moving image is the composition
+$I_m\circ\varphi$. We register by *pulling the moving image back onto the fixed grid*, never by
+splatting it forward. Everything downstream - the sign of the recovered matrix, the way warps compose,
+the resampling kernels - follows from this one choice.
 :::
 
-In `nitrix`, @eq-pullback is `geometry.spatial_transform(image, deformation)`: it
-takes the moving `image` and an **absolute coordinate grid** `deformation` (the
-array of $\varphi(x)$ values, one per fixed cell) and returns the pulled-back image,
-interpolating with a chosen `Interpolator` (linear by default). The coordinate grid
-itself is built by `geometry.affine_grid(matrix, fixed_shape)` for a matrix
-transform, or as `geometry.identity_grid(fixed_shape) + u` for a displacement field
-$u$ (note the convention: a *displacement* $u$ is **relative**, $\varphi(x)=x+u(x)$;
-the array `spatial_transform` consumes is the **absolute** grid `identity_grid + u`).
-The mechanics of that interpolation — the kernels, the out-of-bounds boundary modes,
-the separable fast paths — are the subject of the
-[resampling page](resampling.qmd#sec-pullback-sampling); here the only thing to
-carry forward is the *direction*. **DIFF-JAX:** `spatial_transform`, `affine_grid`,
-and `apply_affine` are all jittable and differentiable in both the image and the
-coordinates (with the linear-interpolation kernel), which is what later lets a whole
-registration carry a gradient.
+In `nitrix`, @eq-pullback is `geometry.spatial_transform(image, deformation)`: it takes the moving
+`image` and an *absolute coordinate grid* `deformation` (the array of $\varphi(x)$ values, one per
+fixed cell) and returns the pulled-back image, interpolating with a chosen `Interpolator` (linear by
+default). The coordinate grid is built by `geometry.affine_grid(matrix, fixed_shape)` for a matrix
+transform, or as `geometry.identity_grid(fixed_shape) + u` for a displacement field $u$ (note the
+convention: a *displacement* $u$ is relative, $\varphi(x)=x+u(x)$; the array `spatial_transform`
+consumes is the absolute grid `identity_grid + u`). The mechanics of that interpolation - the kernels,
+the out-of-bounds boundary modes, the separable fast paths - are the subject of the
+[resampling chapter](resampling.qmd#sec-pullback-sampling); here the only thing to carry forward is the
+*direction*. **DIFF-JAX:** `spatial_transform`, `affine_grid`, and `apply_affine` are all jittable and
+differentiable in both the image and the coordinates (with the linear-interpolation kernel), which is
+what later lets a whole registration carry a gradient.
 
 ```{python}
 #| label: fig-foundations-pullback
@@ -370,128 +350,128 @@ fig.tight_layout()
 plt.show()
 ```
 
-One corollary worth stating now, because it surprises people: the matrix a recipe
-*recovers* maps fixed→moving, not moving→fixed. `result.matrix` from
-`rigid_register` / `affine_register` is the **fixed-voxel → moving-voxel** map — the
-$\varphi$ of @eq-pullback as a homogeneous matrix — precisely so that
-`apply_transform(image, result)` can pull any moving-frame image (a second contrast,
-a label map, an atlas ROI) straight onto the fixed grid by the same composition. It
-feels backward until you remember we resample by pulling back.
+One corollary worth stating now, because it surprises people: the matrix a recipe *recovers* maps
+fixed→moving, not moving→fixed. `result.matrix` from `rigid_register` / `affine_register` is the
+*fixed-voxel → moving-voxel* map - the $\varphi$ of @eq-pullback as a homogeneous matrix - precisely so
+that `apply_transform(image, result)` can pull any moving-frame image (a second contrast, a label map,
+an atlas ROI) straight onto the fixed grid by the same composition. It feels backward until you
+remember we resample by pulling back.
 
 ## The transform ladder {#sec-ladder}
 
-We said the first ingredient is a *family* of transforms. There is not one family;
-there is a **ladder** of them, from rigid at the bottom to dense diffeomorphic and
-surface maps at the top, and the unit climbs it rung by rung. Each rung answers the
-same four questions — how is the transform *represented*, *applied*, *scored*, and
-*found* — but trades off three quantities: **degrees of freedom** (how many numbers
-parametrize $\varphi$), **flexibility** (how much misalignment it can express), and
-**regularisation need** (how badly it overfits without a $\mathcal{R}$ to hold it
-back). More freedom buys more flexibility *and* more ways to go wrong.
+The first ingredient is a *family* of transforms. There is not one family; there is a *ladder* of
+them, from rigid at the bottom to dense diffeomorphic and surface maps at the top, and the unit climbs
+it rung by rung. The ladder is, precisely, a tower of nested groups,
+$$
+SE(d)\;\subset\;\mathrm{Aff}(d)\;\subset\;\mathrm{Diff}(\Omega),
+$$
+each a subgroup of the next, and a richer rung is a larger group. Each rung answers the same four
+questions - how is the transform *represented*, *applied*, *scored*, and *found* - while trading three
+quantities: *degrees of freedom* (how many numbers parametrise $\varphi$, which is the dimension of the
+group), *flexibility* (how much misalignment it can express), and *regularisation need* (how badly it
+overfits without an $\mathcal{R}$). More freedom buys more flexibility *and* more ways to go wrong.
 
-The obvious place to start is the most constrained transform that could possibly
-align two brains, and to add freedom only when it fails:
+Every matrix rung shares one representation, developed in full in
+[the transforms chapter](transforms.qmd#sec-lie-exp): the group is charted through its *Lie algebra*
+by the matrix exponential. The Lie algebra is the tangent space at the identity - the space of
+infinitesimal transforms - and `model.exp(params)` maps a parameter vector in that flat vector space to
+a group element. This is why the parameter count equals the group's dimension, why composing about the
+identity is well-behaved, and why a fitted transform can be smoothly interpolated or averaged. Start
+from the most constrained transform that could align two brains and add freedom only when it fails:
 
-- **Rigid** — rotation plus translation, nothing else. The transform is an element
-  of the special Euclidean group $SE(d)$, with **6 DOF** in 3-D (three rotation
-  angles, three translations) and **3 DOF** in 2-D. It preserves all distances and
-  angles: a rigid map can reposition a brain but cannot stretch it. This is the
-  right rung for **within-subject** alignment, where the object truly is the same
-  size and shape and only its *pose* differs — realigning the frames of an fMRI
-  series to correct head motion, or aligning two scans of the same person from
-  different sessions. `nitrix` parametrizes it as `register.Rigid`
-  ($n_\text{params} = 6$ in 3-D), with the recipe `rigid_register` and the batched
-  motion-correction recipe `volreg`. Six numbers cannot overfit a brain's worth of
-  voxels, so a rigid fit needs *no* explicit regulariser — the constraint *is* the
-  regulariser.
+- **Rigid** - rotation plus translation, nothing else. The transform is an element of the special
+  Euclidean group $SE(d)$, with **6 DOF** in 3-D (three rotation angles, three translations) and **3
+  DOF** in 2-D; its Lie algebra $\mathfrak{se}(d)$ is spanned by the infinitesimal rotations and
+  translations. It preserves all distances and angles: a rigid map can reposition a brain but cannot
+  stretch it. This is the right rung for *within-subject* alignment, where the object truly is the same
+  size and shape and only its *pose* differs - realigning the frames of an fMRI series to correct head
+  motion, or aligning two scans of the same person from different sessions. `nitrix` parametrises it as
+  `register.Rigid` ($n_\text{params} = 6$ in 3-D), with the recipe `rigid_register` and the batched
+  motion-correction recipe `volreg`. Six numbers cannot overfit a brain's worth of voxels, so a rigid
+  fit needs *no* explicit regulariser - membership in the group *is* the regulariser.
 
-- **Affine** — a general linear map plus translation: rotation, but now also
-  anisotropic scale and shear. The transform lives in $\mathrm{Aff}(d)$, with
-  **12 DOF** in 3-D (a $3\times3$ linear block plus a 3-vector) and **6 DOF** in
-  2-D. It can resize and skew, which is exactly what you need for **cross-subject
-  global normalization**: different people's brains differ in overall size and
-  proportion, and an affine soaks up that gross difference before any fine warping.
-  This is the workhorse first stage of T1→MNI. `nitrix` ships it as
-  `register.Affine` ($n_\text{params}=12$ in 3-D) and `affine_register`. Twelve
-  numbers still cannot overfit, so affine too is self-regularising; the standard
-  recipe warm-starts affine from a rigid fit (a staged pipeline,
+- **Affine** - a general linear map plus translation: rotation, but now also anisotropic scale and
+  shear. The transform lives in the affine group $\mathrm{Aff}(d)$, with **12 DOF** in 3-D (a
+  $3\times3$ linear block plus a 3-vector) and **6 DOF** in 2-D. It can resize and skew, which is
+  exactly what cross-subject *global normalisation* needs: different people's brains differ in overall
+  size and proportion, and an affine soaks up that gross difference before any fine warping. This is the
+  workhorse first stage of T1→MNI. `nitrix` ships it as `register.Affine` ($n_\text{params}=12$ in 3-D)
+  and `affine_register`. Twelve numbers still cannot overfit, so affine too is self-regularising; the
+  standard recipe warm-starts affine from a rigid fit (a staged pipeline,
   [`syn_pipeline`](recipes.qmd#sec-specs)).
 
-- **Diffeomorphic** — a smooth, invertible, fold-free deformation with a
-  *per-voxel* displacement. This is where the DOF count explodes: the transform is
-  represented by a **velocity field** $v(x)$ (one vector per voxel) whose flow
-  exponential $\varphi=\exp(v)$ guarantees invertibility, so the parameter count is
-  *millions* — three numbers per voxel over a whole volume. That freedom is what
-  captures **subject-specific folding** (the part of cross-subject alignment an
-  affine cannot reach: this person's central sulcus onto the template's), and it is
-  also what makes the regulariser non-negotiable: with three numbers per voxel you
-  *can* tear the brain, so $\mathcal{R}(\varphi)$ — smoothness of the field, a
-  positive Jacobian determinant — is the only thing keeping the map physical.
-  `nitrix` ships two recipes here, `diffeomorphic_demons_register` (log-domain
-  Demons, a stationary velocity field) and `greedy_syn_register` (symmetric,
-  LNCC-driven, SyN-style), both detailed on the
-  [diffeomorphic page](diffeomorphic.qmd#sec-svf).
+- **Diffeomorphic** - a smooth, invertible, fold-free deformation with a *per-voxel* displacement. This
+  is the infinite-dimensional group $\mathrm{Diff}(\Omega)$ at the top of the tower, and the DOF count
+  explodes: the transform is represented by a *velocity field* $v(x)$ (one vector per voxel) whose flow
+  exponential $\varphi=\exp(v)$ guarantees invertibility. The exponential here is the same Lie-theoretic
+  idea as the matrix `exp`, taken to the diffeomorphism group: a stationary velocity field generates a
+  *one-parameter subgroup* $t\mapsto\exp(tv)$ of the flow, and evaluating it at $t=1$ gives the
+  diffeomorphism - so a single field encodes an invertible warp *and* its inverse $\exp(-v)$. The
+  parameter count is *millions* - three numbers per voxel over a whole volume - and that freedom is what
+  captures *subject-specific folding* (the part of cross-subject alignment an affine cannot reach: this
+  person's central sulcus onto the template's). It is also what makes the regulariser non-negotiable:
+  with three numbers per voxel you *can* tear the brain, so $\mathcal{R}(\varphi)$ - smoothness of the
+  field, a positive Jacobian determinant - is the only thing keeping the map physical. `nitrix` ships
+  two recipes here, `diffeomorphic_demons_register` (log-domain Demons, a stationary velocity field) and
+  `greedy_syn_register` (symmetric, LNCC-driven, SyN-style), both detailed on the
+  [diffeomorphic chapter](diffeomorphic.qmd#sec-svf).
 
-- **Surface** — a map between *cortical sheets*, parametrized on the **sphere**.
-  When the object is the cortex represented as a triangle mesh (from the geometry
-  unit), the natural domain is not a volume grid at all but the unit sphere onto
-  which the cortex inflates, and "registration" means rotating/warping one
-  subject's spherical folding pattern onto a template sphere (fsaverage). The
-  representation, resampling, and convolution all move onto the sphere; this is the
-  top of the ladder, on the [surface page](surface-registration.qmd#sec-parameterize).
+- **Surface** - a map between *cortical sheets*, parametrised on the *sphere*. When the object is the
+  cortex represented as a triangle mesh (from the geometry unit), the natural domain is not a volume
+  grid at all but the unit sphere onto which the cortex inflates, and "registration" means
+  rotating/warping one subject's spherical folding pattern onto a template sphere (fsaverage) - the
+  group in play becomes the rotation group $SO(3)$ and the diffeomorphisms of the sphere. The
+  representation, resampling, and convolution all move onto the sphere; this is the top of the ladder,
+  on the [surface chapter](surface-registration.qmd#sec-parameterize).
 
-The shape of the trade-off is worth keeping in a single mental image, summarized
-here:
+The trade-off is worth keeping in a single image:
 
-| Rung | Family | DOF (3-D) | Suits | Regulariser |
+| Rung | Group | DOF (3-D) | Suits | Regulariser |
 |---|---|---|---|---|
-| Rigid | $SE(3)$ | 6 | within-subject pose (motion, sessions) | none needed (constraint *is* the regulariser) |
+| Rigid | $SE(3)$ | 6 | within-subject pose (motion, sessions) | none needed (the group *is* the regulariser) |
 | Affine | $\mathrm{Aff}(3)$ | 12 | cross-subject *global* size/shape | none needed |
-| Diffeomorphic | velocity field $v$ | $\sim$ millions | cross-subject *local* folding | essential (smoothness + $\det J>0$) |
-| Surface | sphere map | many | cortex onto fsaverage | essential (spherical smoothness) |
+| Diffeomorphic | $\mathrm{Diff}(\Omega)$ via velocity field $v$ | $\sim$ millions | cross-subject *local* folding | essential (smoothness + $\det J>0$) |
+| Surface | $\mathrm{Diff}(S^2)$ | many | cortex onto fsaverage | essential (spherical smoothness) |
 
-The cross-modal axis is orthogonal to the ladder: aligning an EPI to its own T1
-(same subject, different *modality*) is usually a **rigid** problem (same head,
-different contrast) — what changes is not the rung but the *similarity*, swapping
-SSD for `MI` or `CorrelationRatio`, since the two images do not share an intensity
-scale. So the rung is chosen by *how the geometry differs* (pose vs size vs
-folding), and the metric by *how the intensities relate* (same modality vs cross).
-The [transforms page](transforms.qmd#sec-homogeneous) opens the matrix rungs in
-full; this page only asks you to hold the ladder in mind.
+The cross-modal axis is orthogonal to the ladder: aligning an EPI to its own T1 (same subject,
+different *modality*) is usually a *rigid* problem (same head, different contrast) - what changes is not
+the rung but the *similarity*, swapping SSD for `MI` or `CorrelationRatio`, since the two images do not
+share an intensity scale. The choice of metric is itself a symmetry statement: a cross-modal metric must
+be *invariant* to the nuisance group of intensity reparametrisations, the registration analogue of the
+geometry unit's invariant operators. So the rung is chosen by *how the geometry differs* (pose vs size
+vs folding), and the metric by *how the intensities relate* (same modality vs cross). The
+[transforms chapter](transforms.qmd#sec-homogeneous) opens the matrix rungs in full; this chapter only
+asks you to hold the ladder in mind.
 
 ## Coordinate spaces: index vs world {#sec-spaces}
 
-We have been loose about *what coordinates $\varphi$ acts on*. There are two honest
-answers, and the choice between them is the one axis that separates a fast,
-shared-grid registration from a physically correct one. `nitrix` factors it behind a
-small abstraction — the `CoordinateSpace` (in `register._space`), a `Protocol` with
-two implementers, `IndexSpace` and `WorldSpace` — so that the driver, the pyramid,
-and the per-level optimise are written *once* and only this one axis varies.
+We have been loose about *what coordinates $\varphi$ acts on*. There are two honest answers, and the
+choice between them is the one axis that separates a fast, shared-grid registration from a physically
+correct one. `nitrix` factors it behind a small abstraction - the `CoordinateSpace` (in
+`register._space`), a `Protocol` with two implementers, `IndexSpace` and `WorldSpace` - so the driver,
+the pyramid, and the per-level optimise are written *once* and only this one axis varies.
 
-**`IndexSpace` — the shared voxel grid.** The simplest answer is that $\varphi$ acts
-directly in **voxel-index coordinates**: voxel $i$ is at position $i$, and the
-transform maps fixed indices to moving indices with no detour. This is fast — the
-sampling matrix is just `model.exp(params)`, no general matrix inverse is taken, so
-the whole path stays **on-device** (no fallback to a host linear solver) — and it is
-correct *when the two images share a voxel grid*, the norm for within-modality work
-like motion correction. `IndexSpace` is the default. Its one assumption is the
-shared grid: under it, the parameter vector is in *voxel units*, so when the
-coarse-to-fine driver warm-starts a finer pyramid level it must rescale the
-translation block to the new grid (`requires_grid_rescale = True`).
-**Execution class:** a `dataclass(frozen=True)`, hashable, riding `jit` static args;
-its samplers are pure DIFF-JAX matrix builders.
+**`IndexSpace` - the shared voxel grid.** The simplest answer is that $\varphi$ acts directly in
+*voxel-index coordinates*: voxel $i$ is at position $i$, and the transform maps fixed indices to moving
+indices with no detour. This is fast - the sampling matrix is just `model.exp(params)`, no general
+matrix inverse is taken, so the whole path stays *on-device* (no fallback to a host linear solver) - and
+it is correct *when the two images share a voxel grid*, the norm for within-modality work like motion
+correction. `IndexSpace` is the default. Its one assumption is the shared grid: under it, the parameter
+vector is in *voxel units*, so when the coarse-to-fine driver warm-starts a finer pyramid level it must
+rescale the translation block to the new grid (`requires_grid_rescale = True`). **Execution class:** a
+`dataclass(frozen=True)`, hashable, riding `jit` static args; its samplers are pure DIFF-JAX matrix
+builders.
 
-**`WorldSpace` — physical millimetres.** The shared-grid assumption breaks for real
-inter-image registration. A subject T1 and the MNI template live on *different*
-grids with *different* voxel sizes, and clinical scans have **anisotropic** voxels
-(say $0.9\times0.9\times4$ mm). A rotation expressed in index space on an
-anisotropic grid is *not* a rotation in physical space — it *shears* — so an
-index-space "rigid" fit returns a physically wrong transform, silently. The cure is
-to carry, for each image, its **voxel→world affine** ($A_f$ for fixed, $A_m$ for
-moving) — the matrix the scanner records (a NIfTI `sform`) that maps voxel indices
-to physical millimetres — and to do the optimization in world coordinates. The
-sampling map that pulls a fixed voxel back to a moving voxel then composes three
-steps:
+**`WorldSpace` - physical millimetres.** The shared-grid assumption breaks for real inter-image
+registration. A subject T1 and the MNI template live on *different* grids with *different* voxel sizes,
+and clinical scans have *anisotropic* voxels (say $0.9\times0.9\times4$ mm). A rotation expressed in
+index space on an anisotropic grid is *not* a rotation in physical space - it *shears* - so an
+index-space "rigid" fit returns a physically wrong transform, silently. (In group terms: the conjugation
+by an anisotropic voxel→world affine carries $SE(3)$ outside itself unless the optimisation is done in
+the physical frame.) The cure is to carry, for each image, its *voxel→world affine* ($A_f$ for fixed,
+$A_m$ for moving) - the matrix the scanner records (a NIfTI `sform`) that maps voxel indices to physical
+millimetres - and to do the optimisation in world coordinates. The sampling map that pulls a fixed voxel
+back to a moving voxel then composes three steps:
 
 $$
 \underbrace{A_m^{-1}}_{\text{world}\to\text{moving voxel}}
@@ -501,217 +481,192 @@ $$
 \underbrace{A_f}_{\text{fixed voxel}\to\text{world}} .
 $$ {#eq-worldcompose}
 
-Read @eq-worldcompose right-to-left, following a fixed voxel: $A_f$ lifts it to
-physical space, the fitted transform $T_\text{world}$ moves it, and $A_m^{-1}$ drops
-it onto the moving voxel grid. This is correct under anisotropy and across differing
-grids. It costs exactly **one** matrix inverse — a single `safe_inv` of the $4\times4$
-moving affine, taken *once* per registration, not in the hot loop. Because the world
-parameters are physical quantities independent of any grid, no inter-level rescale is
-needed (`requires_grid_rescale = False`). For the T1→MNI task with real anisotropic
-data, this is the correct space:
-`affine_register(t1, mni, space=WorldSpace(fixed_affine=A_mni, moving_affine=A_t1))`.
-**Execution class:** `WorldSpace` is a `dataclass(frozen=True)` carrying the two
-affines, but binding it to a registration is **HOST-CTOR** — its `sampler(...)` takes
-the `safe_inv` of the moving affine (which may fall back to a host solver), so that
-inverse is resolved *once*, before the jitted loop, into a concrete matrix the
-DIFF-JAX samplers reuse at every level.
+Read @eq-worldcompose right-to-left, following a fixed voxel: $A_f$ lifts it to physical space, the
+fitted transform $T_\text{world}$ moves it, and $A_m^{-1}$ drops it onto the moving voxel grid - a
+conjugation of the world transform into voxel coordinates, the group acting by change of frame. This is
+correct under anisotropy and across differing grids. It costs exactly *one* matrix inverse - a single
+`safe_inv` of the $4\times4$ moving affine, taken *once* per registration, not in the hot loop. Because
+the world parameters are physical quantities independent of any grid, no inter-level rescale is needed
+(`requires_grid_rescale = False`). For the T1→MNI task with real anisotropic data, this is the correct
+space: `affine_register(t1, mni, space=WorldSpace(fixed_affine=A_mni, moving_affine=A_t1))`. **Execution
+class:** `WorldSpace` is a `dataclass(frozen=True)` carrying the two affines, but binding it to a
+registration is **HOST-CTOR** - its `sampler(...)` takes the `safe_inv` of the moving affine (which may
+fall back to a host solver), so that inverse is resolved *once*, before the jitted loop, into a concrete
+matrix the DIFF-JAX samplers reuse at every level.
 
-**Centering: transforms act about the image centre.** Both spaces share a subtle but
-load-bearing choice: the rotation/scaling is applied **about the image centre, not
-the voxel origin** (the corner). The reason is *conditioning*. If you rotate about a
-far corner, a one-degree rotation moves the opposite side of the brain by a huge
-distance, so the rotation and translation parameters become wildly different in
-scale and the optimiser's job is ill-conditioned. Rotating about the centre keeps
-the parameters comparable and the basin well-shaped. Concretely, `affine_grid`
-defaults its `center` to the grid centre $(\text{shape}-1)/2$, and applies the
-transform as `apply_affine`'s $\,M\,(x-c) + t + c\,$ — subtract the centre, transform,
-add it back.
+**Centering: transforms act about the image centre.** Both spaces share a subtle but load-bearing
+choice: the rotation/scaling is applied *about the image centre, not the voxel origin* (the corner). The
+reason is *conditioning*. If you rotate about a far corner, a one-degree rotation moves the opposite side
+of the brain by a huge distance, so the rotation and translation parameters become wildly different in
+scale and the optimiser's job is ill-conditioned. Rotating about the centre keeps the parameters
+comparable and the basin well-shaped. Concretely, `affine_grid` defaults its `center` to the grid centre
+$(\text{shape}-1)/2$, and applies the transform as `apply_affine`'s $\,M\,(x-c) + t + c\,$ - subtract the
+centre, transform, add it back.
 
-**Self-contained result matrices: the centre is baked in.** Here is the elegant part.
-The optimiser works with a transform *about the origin* (`model.exp(params)`), but
-the warp applies it *about the centre*. If the returned matrix carried only the
-about-origin parameters, every consumer would have to re-derive the centre to use it.
-Instead, both spaces return a **self-contained** `result.matrix`: the centre is baked
-in by the conjugation $\,\mathrm{Tr}(c)\cdot \mathbf{A}\cdot\mathrm{Tr}(-c)\,$ (the
-internal `_conjugate_about`), so that `apply_affine(coords, result.matrix)` reproduces
-the warp *directly*, about the origin, with the centring already folded in — and two
-such matrices **compose** by plain multiplication without re-deriving anything. (The
-raw about-origin Lie coordinates remain available on `result.params` for anyone who
-needs them.) This is what lets an `IndexSpace` rigid result and an affine result
-multiply cleanly in a staged pipeline, and what makes `result.matrix` a portable
-artifact you can save and reapply. In `IndexSpace` the self-contained matrix is the
-full-resolution fixed-voxel→moving-voxel index map; in `WorldSpace` it is the
-fixed-world→moving-world transform in millimetres.
+**Self-contained result matrices: the centre is baked in.** The optimiser works with a transform *about
+the origin* (`model.exp(params)`), but the warp applies it *about the centre*. If the returned matrix
+carried only the about-origin parameters, every consumer would have to re-derive the centre to use it.
+Instead, both spaces return a *self-contained* `result.matrix`: the centre is baked in by the conjugation
+$\,\mathrm{Tr}(c)\cdot \mathbf{A}\cdot\mathrm{Tr}(-c)\,$ (the internal `_conjugate_about`) - again the
+group acting on itself by conjugation - so that `apply_affine(coords, result.matrix)` reproduces the warp
+*directly*, about the origin, with the centring already folded in, and two such matrices *compose* by
+plain multiplication without re-deriving anything. (The raw about-origin Lie coordinates remain available
+on `result.params` for anyone who needs them.) This is what lets an `IndexSpace` rigid result and an
+affine result multiply cleanly in a staged pipeline, and what makes `result.matrix` a portable artifact
+you can save and reapply. In `IndexSpace` the self-contained matrix is the full-resolution
+fixed-voxel→moving-voxel index map; in `WorldSpace` it is the fixed-world→moving-world transform in
+millimetres.
 
 ## Execution classes and transparent differentiability {#sec-classes}
 
-The registration suite shares the geometry unit's **execution-class** discipline.
-Every public routine is one of three kinds, and the classification is operational,
-not bureaucratic: it tells you *whether you can call the routine inside a jitted,
-differentiated optimisation loop.*
+The registration suite shares the geometry unit's *execution-class* discipline. Every public routine is
+one of three kinds, and the classification is operational, not bureaucratic: it tells you *whether you
+can call the routine inside a jitted, differentiated optimisation loop.*
 
-- **DIFF-JAX** — jittable *and* differentiable, pure array math with shapes fixed at
-  trace time; safe inside a `jit` / `vmap` / `grad` / `lax.scan`. The hot path of
-  every recipe is DIFF-JAX: `spatial_transform`, `affine_grid`, `apply_affine`,
-  `rigid_exp` / `affine_exp` (the transform charts), the metric `cost` / `residual`
-  evaluations, the matrix-free Gauss–Newton / LM / BFGS optimiser steps, the
-  scaling-and-squaring velocity exponential. These are exactly the routines written
-  to stay on-device (closed-form small matrix work, matrix-free solves) so the loop
-  never touches a fragile dense GPU solver.
-- **HOST-CTOR** — host-side *construction* whose output shape is data-dependent and
-  so cannot be traced: building a `WorldSpace` sampler from a pair of affines (it
-  takes a `safe_inv` that may fall back to the host), pinning a histogram metric's
-  intensity range from the full-resolution images, resolving a moment-based initial
-  transform. These run *before* the jitted loop, producing concrete arrays the loop
+- **DIFF-JAX** - jittable *and* differentiable, pure array math with shapes fixed at trace time; safe
+  inside a `jit` / `vmap` / `grad` / `lax.scan`. The hot path of every recipe is DIFF-JAX:
+  `spatial_transform`, `affine_grid`, `apply_affine`, `rigid_exp` / `affine_exp` (the transform charts),
+  the metric `cost` / `residual` evaluations, the matrix-free Gauss–Newton / LM / BFGS optimiser steps,
+  the scaling-and-squaring velocity exponential. These are exactly the routines written to stay on-device
+  (closed-form small matrix work, matrix-free solves) so the loop never touches a fragile dense GPU
+  solver.
+- **HOST-CTOR** - host-side *construction* whose output shape is data-dependent and so cannot be traced:
+  building a `WorldSpace` sampler from a pair of affines (it takes a `safe_inv` that may fall back to the
+  host), pinning a histogram metric's intensity range from the full-resolution images, resolving a
+  moment-based initial transform. These run *before* the jitted loop, producing concrete arrays the loop
   consumes.
-- **HOST-QA** — host-side *query* returning a Python scalar/bool, off the
-  differentiable path: a folding check `float(result.jacobian_det.min()) > 0`, a
-  convergence test on a returned cost history. These run *after* the loop.
+- **HOST-QA** - host-side *query* returning a Python scalar/bool, off the differentiable path: a folding
+  check `float(result.jacobian_det.min()) > 0`, a convergence test on a returned cost history. These run
+  *after* the loop.
 
 ::: {.callout-important title="The load-bearing rule"}
-**A HOST op (CTOR or QA) must never be called inside a jitted loop.** The metric
-range is pinned *once* on the host before the coarse-to-fine loop (precisely so that
-`volreg` can `vmap` the per-frame core, where an eager `float(moving.min())` cannot
-run); the `WorldSpace` inverse is taken *once* before the loop; the diffeomorphism QA
-runs *after* it. The discipline is the same one the geometry unit states: construction
-and query bracket the loop; only DIFF-JAX lives inside it.
+**A HOST op (CTOR or QA) must never be called inside a jitted loop.** The metric range is pinned *once*
+on the host before the coarse-to-fine loop (precisely so that `volreg` can `vmap` the per-frame core,
+where an eager `float(moving.min())` cannot run); the `WorldSpace` inverse is taken *once* before the
+loop; the diffeomorphism QA runs *after* it. The discipline is the same one the geometry unit states:
+construction and query bracket the loop; only DIFF-JAX lives inside it.
 :::
 
-**Pure-functional outputs.** The recipes are *pure functions* of `(moving, fixed)`
-with a `jit`-static `spec`; they return `NamedTuple`s of plain arrays
-(`RegistrationResult`, `DiffeomorphicResult`, `SyNResult`, `VolregResult`,
-`BBRResult`) — *no* PyTree modules, no stateful objects, no I/O. This is the
-`reml_fit` precedent from the statistics unit: a result is data, not an object with
-methods. It is what lets you `jit` a whole registration, `vmap` it over a cohort, and
-reason about it as a mathematical function.
+**Pure-functional outputs.** The recipes are *pure functions* of `(moving, fixed)` with a `jit`-static
+`spec`; they return `NamedTuple`s of plain arrays (`RegistrationResult`, `DiffeomorphicResult`,
+`SyNResult`, `VolregResult`, `BBRResult`) - *no* PyTree modules, no stateful objects, no I/O. This is the
+`reml_fit` precedent from the statistics unit: a result is data, not an object with methods. It is what
+lets you `jit` a whole registration, `vmap` it over a cohort, and reason about it as a mathematical
+function.
 
-**The transparent-differentiability story.** Because the entire hot path is DIFF-JAX
-and the outputs are plain arrays, a whole registration is **differentiable
-end-to-end**. With the default fixed-iteration mode (`mode='fixed'`, a reproducible
-`lax.scan`), `jax.grad` through a recipe "just works" out of the box: every primitive
-— the warp, the metric, the optimiser step — is differentiable, so you can place a
-registration inside a loss and backpropagate a downstream objective all the way to
-the **moving image**, the **fixed image**, or the **transform parameters**. (`mode`
-is a field on the `RegistrationSpec`, defaulting to `'fixed'`, so out of the box every
-recipe takes this reproducible, reverse-differentiable scan path.) That is
-exactly what a differentiable-imaging backend needs: a registrator as a layer, not a
-black box. For efficiency at convergence the suite also offers an *implicit* gradient
-— `linalg.implicit_least_squares` (the Gauss–Newton-Hessian adjoint, for the
-least-squares SSD path) and `linalg.implicit_minimize` (the exact-Hessian adjoint, for
-the BFGS metric path) — which differentiate the *optimum* directly, in $O(1)$ memory in
-the iteration count, rather than unrolling the trajectory.
+**The transparent-differentiability story.** Because the entire hot path is DIFF-JAX and the outputs are
+plain arrays, a whole registration is *differentiable end-to-end*. With the default fixed-iteration mode
+(`mode='fixed'`, a reproducible `lax.scan`), `jax.grad` through a recipe works out of the box: every
+primitive - the warp, the metric, the optimiser step - is differentiable, so you can place a registration
+inside a loss and backpropagate a downstream objective all the way to the *moving image*, the *fixed
+image*, or the *transform parameters*. (`mode` is a field on the `RegistrationSpec`, defaulting to
+`'fixed'`, so out of the box every recipe takes this reproducible, reverse-differentiable scan path.)
+That is exactly what a differentiable-imaging backend needs: a registrator as a layer, not a black box.
+For efficiency at convergence the suite also offers an *implicit* gradient - `linalg.implicit_least_squares`
+(the Gauss–Newton-Hessian adjoint, for the least-squares SSD path) and `linalg.implicit_minimize` (the
+exact-Hessian adjoint, for the BFGS metric path) - which differentiate the *optimum* directly, in $O(1)$
+memory in the iteration count, rather than unrolling the trajectory.
 
-One honest caveat, verified in the code. The recipes also offer an **early-exit** mode
-(`mode='early_exit'`, a data-dependent `lax.while_loop` that stops when the cost slope
-flattens). That mode is **not** reverse-differentiable — a data-dependent trip count
-cannot be back-propagated — and `jax.grad` through it raises a *loud, actionable* error
-(`register._converge`) pointing you at the implicit entry points or the fixed-scan mode.
-The default on every recipe is `mode='fixed'`, so differentiability is the out-of-box
-behaviour; early-exit is an opt-in for speed where you do not need a gradient. (A
-proposed `custom_vjp` wrapper that would make even the early-exit forward transparently
-differentiable via the at-convergence adjoint is *filed but not yet implemented* — see
-`docs/feature-requests/registration-recipe-transparent-differentiability.md`; today the
-two honest options are fixed-mode autodiff or the explicit implicit combinators.)
+One honest caveat, verified in the code. The recipes also offer an *early-exit* mode
+(`mode='early_exit'`, a data-dependent `lax.while_loop` that stops when the cost slope flattens). That
+mode is *not* reverse-differentiable - a data-dependent trip count cannot be back-propagated - and
+`jax.grad` through it raises a loud, actionable error (`register._converge`) pointing you at the implicit
+entry points or the fixed-scan mode. The default on every recipe is `mode='fixed'`, so differentiability
+is the out-of-box behaviour; early-exit is an opt-in for speed where you do not need a gradient. (A
+proposed `custom_vjp` wrapper that would make even the early-exit forward transparently differentiable via
+the at-convergence adjoint is filed but not yet implemented - see
+`docs/feature-requests/registration-recipe-transparent-differentiability.md`; today the two honest options
+are fixed-mode autodiff or the explicit implicit combinators.)
 
 ## Validation posture: synthetic recovery, not bit-parity {#sec-validation}
 
 How do we know a registration is *correct*? The unit takes the same stance its
-[geometry](../geometry/foundations.qmd#sec-validation) and statistics siblings do:
-validate by **class and correlation against an oracle, never by bit-parity against
-another tool.** This frames every "validated" claim in the unit, so it is worth being
-precise — and the brief asks us to verify the scope claims against the code, because
-some of the package's own notes are stale.
+[geometry](../geometry/foundations.qmd#sec-validation) and statistics siblings do: validate by *class and
+correlation against an oracle, never by bit-parity against another tool.* This frames every "validated"
+claim in the unit, so it is worth being precise - and the brief asks us to verify the scope claims against
+the code, because some of the package's own notes are stale.
 
-**ANTs-*style*, not an ANTs clone.** The algorithms are the established lineage — the
-`3dvolreg`/`mcflirt` rigid realignment, the AIR-style affine, log-domain Demons,
-greedy SyN, boundary-based registration (Greve–Fischl) — and the suite reproduces their
-*behaviour*, not their bytes. There is no expectation that `nitrix` and
-`antsRegistration` produce the same transform to the last bit: they make different but
-legitimate modelling choices (different interpolation, different optimiser, different
-regulariser discretisation), so two correct programs will *not* agree bit-for-bit.
-Demanding that they do would be testing the arbitrary part, not the real part.
+**ANTs-*style*, not an ANTs clone.** The algorithms are the established lineage - the `3dvolreg`/`mcflirt`
+rigid realignment, the AIR-style affine, log-domain Demons, greedy SyN, boundary-based registration
+(Greve–Fischl) - and the suite reproduces their *behaviour*, not their bytes. There is no expectation that
+`nitrix` and `antsRegistration` produce the same transform to the last bit: they make different but
+legitimate modelling choices (different interpolation, different optimiser, different regulariser
+discretisation), so two correct programs will *not* agree bit-for-bit. Demanding that they do would test
+the arbitrary part, not the real part.
 
-**Synthetic-recovery-validated.** The real part is: *can the recipe recover a known
-transform?* The test plants a synthetic warp on an image — a known rigid pose, a known
-affine, a known smooth diffeomorphic field — registers the warped image back to the
-original, and checks that the recovered transform *undoes* the planted one. The
-acceptance gates are quantitative and behavioural: a high similarity after alignment
-(normalized cross-correlation $\gtrsim 0.97$–$0.99$ for the rigid/affine recipes, MI
-for cross-modal plants), and for the diffeomorphic recipes a **positive Jacobian
-determinant everywhere** ($\det J > 0$, i.e. the recovered map does not fold) — the
-defining property of a diffeomorphism. There are also internal *parity oracles* that
-are exact by construction: a closed-form analytic warp Jacobian checked against
-`jax.jacfwd` (same computation, two ways), and the fast inverse-compositional path
-checked against the slower forward path it is meant to match. Those are bit-level
-checks of *one routine against another routine in the same library* — a different thing
-from cross-tool bit-parity.
+**Synthetic-recovery-validated.** The real part is: *can the recipe recover a known transform?* The test
+plants a synthetic warp on an image - a known rigid pose, a known affine, a known smooth diffeomorphic
+field - registers the warped image back to the original, and checks that the recovered transform *undoes*
+the planted one. The acceptance gates are quantitative and behavioural: a high similarity after alignment
+(normalised cross-correlation $\gtrsim 0.97$–$0.99$ for the rigid/affine recipes, MI for cross-modal
+plants), and for the diffeomorphic recipes a *positive Jacobian determinant everywhere* ($\det J > 0$, the
+recovered map does not fold) - the defining property of a diffeomorphism, and a group-membership check:
+$\det J>0$ everywhere certifies that the result is genuinely an element of $\mathrm{Diff}(\Omega)$. There
+are also internal *parity oracles* that are exact by construction: a closed-form analytic warp Jacobian
+checked against `jax.jacfwd` (same computation, two ways), and the fast inverse-compositional path checked
+against the slower forward path it is meant to match. Those are bit-level checks of *one routine against
+another routine in the same library* - a different thing from cross-tool bit-parity.
 
-**Be honest about scope — and check the code, because the docstring is stale.** The
-`register.__init__` docstring's "Scope & validation" section lists features as "not yet
-implemented." The contract warns that these notes drift, and the code confirms it. The
-following are listed as missing but **do in fact ship** (verified in source):
+**Be honest about scope - and check the code, because the docstring is stale.** The `register.__init__`
+docstring's "Scope & validation" section lists features as "not yet implemented." The contract warns that
+these notes drift, and the code confirms it. The following are listed as missing but *do in fact ship*
+(verified in source):
 
-- **Intensity winsorization and histogram matching** — the docstring says "not yet
-  implemented," but `register._preprocess.preprocess_images` implements both, and
-  `rigid_register` / `affine_register` expose them as the `winsorize=(lo, hi)` and
-  `histogram_match=True` arguments (the fMRIPrep front-end). They condition the
-  *estimate*, so `warped` is the conditioned moving image; reapply `result.matrix` to
+- **Intensity winsorisation and histogram matching** - the docstring says "not yet implemented," but
+  `register._preprocess.preprocess_images` implements both, and `rigid_register` / `affine_register`
+  expose them as the `winsorize=(lo, hi)` and `histogram_match=True` arguments (the fMRIPrep front-end).
+  They condition the *estimate*, so `warped` is the conditioned moving image; reapply `result.matrix` to
   the original for original intensities.
-- **Multi-metric summation (`SumForce`)** — listed as a "not yet" item, but `SumForce`
-  *is* exported from `register` and implemented in `register._force`.
-- **The closed-form Mattes MI force (`MIForce`)** — the docstring itself notes (and the
-  code confirms) that this *is* shipped, as the fast cross-modal diffeomorphic path; the
-  correlation-ratio fast force is the one that is genuinely deferred (CR drives the
-  diffeomorphic recipes only via the generic autodiff `MetricForce` escape hatch).
+- **Multi-metric summation (`SumForce`)** - listed as a "not yet" item, but `SumForce` *is* exported from
+  `register` and implemented in `register._force`.
+- **The closed-form Mattes MI force (`MIForce`)** - the docstring itself notes (and the code confirms)
+  that this *is* shipped, as the fast cross-modal diffeomorphic path; the correlation-ratio fast force is
+  the one genuinely deferred (CR drives the diffeomorphic recipes only via the generic autodiff
+  `MetricForce` escape hatch).
 
-What is *genuinely* still open, per both the code and the design record
-(`docs/design/registration.md`): **real-data parity vs AFNI/FSL/ANTs on actual volumes**
-and the iso-accuracy wall-clock comparison are **delegated to a separate perf-bench
-agent** and are not asserted in this repository. So the posture, stated cleanly: the
-suite is synthetic-recovery-validated against analytic oracles and internal parity
-checks; it is ANTs-*style* in lineage; it is *not* a bit-for-bit `antsRegistration`
-clone, and the cross-tool real-data comparison lives elsewhere. When you read or write a
-test in this unit, ask *which oracle* — a planted synthetic warp it must recover (assert
-high NCC/MI and $\det J>0$), or an internal parity check (assert two routes agree) —
-never bit-parity with an external tool.
+What is *genuinely* still open, per both the code and the design record (`docs/design/registration.md`):
+*real-data parity vs AFNI/FSL/ANTs on actual volumes* and the iso-accuracy wall-clock comparison are
+*delegated to a separate perf-bench agent* and are not asserted in this repository. So the posture, stated
+cleanly: the suite is synthetic-recovery-validated against analytic oracles and internal parity checks; it
+is ANTs-*style* in lineage; it is *not* a bit-for-bit `antsRegistration` clone, and the cross-tool
+real-data comparison lives elsewhere. When you read or write a test in this unit, ask *which oracle* - a
+planted synthetic warp it must recover (assert high NCC/MI and $\det J>0$), or an internal parity check
+(assert two routes agree) - never bit-parity with an external tool.
 
 ## Further reading
 
-- Modersitzki, J. (2004). *Numerical Methods for Image Registration.* Oxford
-  University Press. The variational formulation behind @eq-energy — data term plus
-  regulariser — and the optimisation viewpoint.
-- Sotiras, A., Davatzikos, C., & Paragios, N. (2013). *Deformable Medical Image
-  Registration: A Survey.* IEEE Transactions on Medical Imaging, 32(7). The map of the
-  whole field — the transform ladder, similarity metrics, and regularisers in one place.
-- Cox, R. W., & Jesmanowicz, A. (1999). *Real-time 3D image registration for functional
-  MRI.* Magnetic Resonance in Medicine, 42(6). The `3dvolreg` rigid/affine
-  Gauss–Newton lineage the matrix recipes follow.
-- Avants, B. B., Epstein, C. L., Grossman, M., & Gee, J. C. (2008). *Symmetric
-  diffeomorphic image registration with cross-correlation.* Medical Image Analysis,
-  12(1). SyN — the diffeomorphic quality benchmark the greedy recipe approaches.
-- Vercauteren, T., Pennec, X., Perchant, A., & Ayache, N. (2009). *Diffeomorphic demons:
-  efficient non-parametric image registration.* NeuroImage, 45(1, Supp. 1). Log-domain
-  Demons — the stationary-velocity-field recipe this unit ships.
-- Baker, S., & Matthews, I. (2004). *Lucas–Kanade 20 years on: a unifying framework.*
-  International Journal of Computer Vision, 56(3). The inverse-compositional fast path
-  and the constant-template Hessian behind the rigid/affine optimiser.
+- Modersitzki, J. (2004). *Numerical Methods for Image Registration.* Oxford University Press. The
+  variational formulation behind @eq-energy - data term plus regulariser - and the optimisation viewpoint.
+- Sotiras, A., Davatzikos, C., & Paragios, N. (2013). *Deformable Medical Image Registration: A Survey.*
+  IEEE Transactions on Medical Imaging, 32(7). The map of the whole field - the transform ladder,
+  similarity metrics, and regularisers in one place.
+- Cox, R. W., & Jesmanowicz, A. (1999). *Real-time 3D image registration for functional MRI.* Magnetic
+  Resonance in Medicine, 42(6). The `3dvolreg` rigid/affine Gauss–Newton lineage the matrix recipes follow.
+- Avants, B. B., Epstein, C. L., Grossman, M., & Gee, J. C. (2008). *Symmetric diffeomorphic image
+  registration with cross-correlation.* Medical Image Analysis, 12(1). SyN - the diffeomorphic quality
+  benchmark the greedy recipe approaches.
+- Vercauteren, T., Pennec, X., Perchant, A., & Ayache, N. (2009). *Diffeomorphic demons: efficient
+  non-parametric image registration.* NeuroImage, 45(1, Supp. 1). Log-domain Demons - the
+  stationary-velocity-field recipe this unit ships.
+- Baker, S., & Matthews, I. (2004). *Lucas–Kanade 20 years on: a unifying framework.* International Journal
+  of Computer Vision, 56(3). The inverse-compositional fast path and the constant-template Hessian behind
+  the rigid/affine optimiser.
 
 ## See also
 
-- Source — the coordinate spaces (`IndexSpace` / `WorldSpace`, centering, the
-  self-contained result matrix):
+- Source — the coordinate spaces (`IndexSpace` / `WorldSpace`, centering, the self-contained result
+  matrix):
   [`src/nitrix/register/_space.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_space.py).
 - Source — the registration package surface (the public API this page surveys):
   [`src/nitrix/register/__init__.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/__init__.py).
 - Source — the coarse-to-fine driver, `RegistrationSpec`, and `RegistrationResult`:
   [`src/nitrix/register/_core.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/register/_core.py).
-- Source — the transform charts and the pull-back grid builders (`rigid_exp` /
-  `affine_exp` / `apply_affine` / `affine_grid`):
+- Source — the transform charts and the pull-back grid builders (`rigid_exp` / `affine_exp` /
+  `apply_affine` / `affine_grid`):
   [`src/nitrix/geometry/transform.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/transform.py).
 - Source — the backward warp itself (`spatial_transform`):
   [`src/nitrix/geometry/grid.py`](https://github.com/hypercoil/nitrix/blob/main/src/nitrix/geometry/grid.py).
-- Next in reading order: [the transform ladder in matrix form](transforms.qmd#sec-homogeneous),
-  then [resampling / pull-back](resampling.qmd#sec-pullback-sampling) and
+- Next in reading order: [the transform ladder in matrix form](transforms.qmd#sec-homogeneous), then
+  [resampling / pull-back](resampling.qmd#sec-pullback-sampling) and
   [similarity metrics](similarity.qmd#sec-ssd). Sibling units:
-  [geometry foundations](../geometry/foundations.qmd),
-  [statistics foundations](../statistics/foundations.qmd).
+  [geometry foundations](../geometry/foundations.qmd), [statistics foundations](../statistics/foundations.qmd).

@@ -2,22 +2,22 @@
 title: "Recipes: choosing and composing movers"
 ---
 
-::: {.callout-tldr title="Fast path"}
 The narrative pages built the machinery — representations, pull-back resampling,
 similarity metrics, optimisers, the diffeomorphic stack. This page is the
 **catalogue**: the public functions in `nitrix.register` that assemble that
 machinery into end-to-end alignments, the knobs that steer each, and a decision
-table from *problem* to *recipe*. The one idea it adds is that every recipe is a
-**thin, pure function** `(moving, fixed) -> NamedTuple` over a **frozen
-configuration record** (a `*Spec`): the spec is static config that rides `jit`,
-the output is plain arrays. Read it as reference — keep it open beside your code.
-:::
+table from *problem* to *recipe*. Read it as reference — keep it open beside your
+code.
 
 The transform ladder of the earlier pages — rigid, affine, diffeomorphic,
 surface — is a ladder of *representations*. The recipes are the ladder of
 *entry points*: the functions you actually call. Each one fixes a representation,
 a similarity, and an optimiser, and exposes the handful of decisions left to you
-as keyword arguments and spec fields. They share a contract worth stating once:
+as keyword arguments and spec fields. The single idea that organises every one of
+them is that a recipe is a **thin, pure function** `(moving, fixed) -> NamedTuple`
+over a **frozen configuration record** (a `*Spec`): the spec is static config that
+rides `jit`, the output is plain arrays. That contract is worth stating once in
+full:
 
 - **Inputs** are single-channel arrays `(*spatial,)` (2-D or 3-D), *not* PyTree
   modules. `moving` is the image you move; `fixed` is the target you align it to.

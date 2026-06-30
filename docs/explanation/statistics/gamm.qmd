@@ -2,18 +2,16 @@
 title: "Generalised additive mixed models: closing the loop"
 ---
 
-::: {.callout-tldr title="Fast path"}
 A **GAMM** has smooth terms *and* random effects in one model. But the
-[GAM chapter](gam.qmd#sec-hinge) already showed that a
-smooth **is** a random effect — both are a quadratic penalty block
-$\gamma_k^{\top}S\gamma_k$ on a slice of the coefficients. A GAM already fits a
-*sum* of penalty blocks. So a GAMM is "a GAM with one more kind of block", needs
-**no new solver**, and the single [Fellner–Schall](fellner-schall.qmd) loop
-estimates every smoothing parameter *and* every variance component together. The
-one new idea here: a single penalised smooth, looked at the right way, already
-*contains* a fixed effect and a random effect — so the GAM and the LME were never
-two models. This is where the ladder folds shut.
-:::
+[GAM chapter](gam.qmd#sec-hinge) already showed that a smooth **is** a random
+effect — both are a quadratic penalty block $\gamma_k^{\top}S\gamma_k$ on a slice
+of the coefficients. A GAM already fits a *sum* of penalty blocks. So a GAMM is "a
+GAM with one more kind of block", needs **no new solver**, and the single
+[Fellner–Schall](fellner-schall.qmd) loop estimates every smoothing parameter *and*
+every variance component together. The one new idea here: a single penalised
+smooth, looked at the right way, already *contains* a fixed effect and a random
+effect — so the GAM and the LME were never two models. This is where the ladder
+folds shut.
 
 Rung 5 of [the ladder](index.qmd). This chapter does not add machinery; it
 removes a distinction. Everything you need has already been built — by the end you
@@ -171,7 +169,7 @@ $$ {#eq-blockdiag}
 
 with the unpenalised parametric head contributing a zero block (it pays no
 penalty, so it sits in the null space of $S(\lambda)$ — a fixed effect, exactly as
-in §2). @fig-gamm-blocks shows this matrix for our example: two smooths and a
+[above](#sec-unification)). @fig-gamm-blocks shows this matrix for our example: two smooths and a
 random intercept, each a labelled block, the parametric head a dark zero block.
 The "everything is a penalty block" slogan is now something you can literally look
 at.
@@ -269,7 +267,7 @@ builds the term $z\cdot f(x)$ — a coefficient on `z` that varies smoothly with
 penalty unchanged. In every case the output is another `(design, penalty)` block
 the same machinery consumes.
 
-## One loop selects them all
+## One loop selects them all {#sec-oneloop}
 
 We now have $K$ tuning parameters — one $\lambda_k$ per smooth, one $1/\sigma_b^2$
 per random effect — and they must be chosen *together*, because they trade off
@@ -320,8 +318,12 @@ Stand back and the whole suite is one statement:
 > **Fit $(X^{\top}WX + S(\lambda))\,\gamma = X^{\top}Wz$ by penalised IRLS, and
 > choose the $\lambda_k$ by Fellner–Schall.**
 
-Every rung is a choice of what goes in $S(\lambda)$, and each contributed exactly
-one part of the machinery that makes the GAMM work:
+Every rung is a choice of what goes in $S(\lambda)$ — and each block is one
+**inductive bias** declared as a prior: a roughness block says *smooth*, an
+identity ridge says *groups cluster*, a kernel block says *nearby inputs behave
+alike*. Fellner–Schall then calibrates each bias's strength from the data
+(empirical Bayes). Each rung contributed exactly one part of the machinery that
+makes the GAMM work:
 
 | rung | what goes in $S(\lambda)$ | what it contributed |
 |---|---|---|
@@ -348,15 +350,16 @@ and the kernel is a Gaussian process. The loop never changes.
 
 - Ruppert, D., Wand, M. P. & Carroll, R. J. (2003). *Semiparametric Regression*.
   Cambridge University Press. The foundational treatment of penalised splines as
-  mixed models — the null-space/range-space decomposition of §2 is theirs, and it
-  is the cleanest route into this chapter.
+  mixed models — the null-space/range-space decomposition of
+  [the unification section](#sec-unification) is theirs, and it is the cleanest
+  route into this chapter.
 - Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R* (2nd
   ed.). Chapman & Hall/CRC. The GAMM chapters; the practical reference for
   assembling smooths and random effects in one penalised model.
 - Wood, S. N. (2004). Stable and efficient multiple smoothing parameter estimation
   for generalized additive models. *Journal of the American Statistical
   Association*, 99(467), 673–686. How to select many smoothing/variance parameters
-  jointly and stably — the problem §4's one loop solves.
+  jointly and stably — the problem the [single selection loop](#sec-oneloop) solves.
 - Wood, S. N. (2011). Fast stable restricted maximum likelihood and marginal
   likelihood estimation of semiparametric generalized linear models. *Journal of
   the Royal Statistical Society: Series B*, 73(1), 3–36. The REML view that ties

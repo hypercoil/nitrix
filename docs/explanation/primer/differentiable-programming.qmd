@@ -1,0 +1,380 @@
+---
+title: "The differentiable-programming paradigm"
+---
+
+The last two chapters were about mechanism: a derivative is a linear map
+([differentiation](differentiation.qmd)), and you apply it matrix-free, exploiting
+its structure, on real kernels ([three kernels](three-kernels.qmd)). This chapter
+steps back to ask what the mechanism is *for*. The answer is a way of writing
+programs — **differentiable programming** — in which you do not spell out the steps
+that solve a problem; you specify a *family* of candidate solutions and an
+*objective*, and let automatic differentiation and an optimiser *find* the solution.
+Deep learning is the famous instance, but the idea is more general, and it is the
+reason `nitrix` exists: a library of differentiable primitives turns a scientific
+computation into a program you can optimise.
+
+This chapter is deliberately balanced. Differentiable programming is powerful and it
+is constrained, and an honest account states both. We cover the paradigm and its
+three-step loop; the program-as-graph that underlies it; why *automatic*
+differentiation beats the numerical and symbolic alternatives; the differentiability
+constraint and the standard ways to bend it; how real frameworks implement all this;
+and where the approach runs out of road — which is exactly what the final two
+chapters take up.
+
+## From writing instructions to specifying objectives {#sec-paradigm}
+
+In ordinary programming you write explicit instructions: a sequence of steps that, if
+correct, computes the answer. Differentiable programming — sometimes called "software
+2.0" — replaces the *hardest-to-specify* steps with a different contract, in three
+parts:
+
+1. **A hypothesis class.** Choose a *family* of differentiable functions
+   $f(\,\cdot\,;\theta)$ parameterised by $\theta$, rich enough to contain a good
+   solution to the problem. (In deep learning the family is a neural-network
+   architecture; in `nitrix` it might be a parameterised registration warp, a
+   smoothing operator with a learnable scale, or a whole processing workflow with
+   tunable knobs.)
+2. **An objective.** Write a differentiable scalar $\mathcal{L}(\theta)$ that scores
+   how well a given $\theta$ meets the goal — small when the program does what you
+   want.
+3. **Optimise by differentiation.** Use automatic differentiation to get
+   $\nabla_\theta\mathcal{L}$ and hand it to an optimiser, which adjusts $\theta$ to
+   reduce the objective. Repeat until satisfied.
+
+The work shifts from *how* to *what*: instead of programming the solution, you
+program a measure of success and a space to search, and gradients do the searching.
+@fig-dp-loop is the loop this produces — the training loop of deep learning, but
+drawn generically.
+
+::: {#fig-dp-loop}
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The differentiable-programming loop: parameters feed a model that makes a prediction, an objective scores it, reverse-mode AD computes the gradient of the objective with respect to the parameters, and an optimiser updates them; repeat."
+     font-family="system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="dpf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2c6a45"/>
+    </marker>
+    <marker id="dpb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a3ffc"/>
+    </marker>
+  </defs>
+  <rect x="40"  y="40" width="150" height="56" rx="6" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="115" y="64" text-anchor="middle">parameters θ</text>
+  <text x="115" y="82" text-anchor="middle" font-size="11" fill="#444b53">the hypothesis class</text>
+  <rect x="300" y="40" width="160" height="56" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="380" y="64" text-anchor="middle">model f(x; θ)</text>
+  <text x="380" y="82" text-anchor="middle" font-size="11" fill="#444b53">prediction</text>
+  <rect x="570" y="40" width="150" height="56" rx="6" fill="#fbf0d6" stroke="#33373d"/>
+  <text x="645" y="64" text-anchor="middle">objective ℒ(θ)</text>
+  <text x="645" y="82" text-anchor="middle" font-size="11" fill="#444b53">a scalar score</text>
+  <line x1="190" y1="68" x2="298" y2="68" stroke="#2c6a45" stroke-width="1.6" marker-end="url(#dpf)"/>
+  <line x1="460" y1="68" x2="568" y2="68" stroke="#2c6a45" stroke-width="1.6" marker-end="url(#dpf)"/>
+  <text x="380" y="30" text-anchor="middle" font-size="11" fill="#2c6a45">forward pass</text>
+  <!-- backward -->
+  <rect x="300" y="160" width="160" height="56" rx="6" fill="#f3eefb" stroke="#8a3ffc"/>
+  <text x="380" y="184" text-anchor="middle" font-size="12">∇θ ℒ  (reverse-mode AD)</text>
+  <text x="380" y="202" text-anchor="middle" font-size="11" fill="#8a3ffc">the gradient</text>
+  <line x1="600" y1="96" x2="445" y2="158" stroke="#8a3ffc" stroke-width="1.6" marker-end="url(#dpb)"/>
+  <text x="540" y="135" text-anchor="middle" font-size="11" fill="#8a3ffc">backward pass</text>
+  <line x1="300" y1="188" x2="150" y2="98" stroke="#55606b" stroke-width="1.6" marker-end="url(#dpf)"/>
+  <text x="190" y="150" text-anchor="middle" font-size="11" fill="#444b53">optimiser updates θ</text>
+</svg>
+
+The differentiable-programming loop. Parameters drive a model to a prediction; an
+objective scores it (forward, green); reverse-mode AD computes the gradient of the
+objective with respect to the parameters (backward, purple); an optimiser nudges
+$\theta$ downhill; repeat. It is the deep-learning training loop, but nothing in it
+is special to neural networks — any differentiable family and objective fit.
+:::
+
+## The program is a graph {#sec-graph}
+
+What makes step 3 possible is the object from the [JAX/XLA chapter](xla-jax.qmd#sec-trace):
+the traced program, viewed as a **computational graph**. Its nodes are primitive
+operations and its edges are the tensors that flow between them; the *sources* are
+the parameters and inputs, and the *sink* is the objective (@fig-dp-graph). The same
+trace JAX compiles for speed is the one it differentiates — recorded once, as a
+sequence of primitive assignments (a *Wengert list*), each with a known local
+derivative.
+
+This view makes the one hard rule precise: the **differentiability constraint**.
+For a gradient to flow from the objective back to a parameter, *every node on a path
+between them must be differentiable*. A single non-differentiable operation on that
+path — a hard threshold, an `argmax`, a draw from a random distribution — severs the
+gradient, and the optimiser goes blind to whatever lies upstream. Much of the craft
+of differentiable programming is keeping those paths intact, the subject of
+[the relaxation section](#sec-relaxation).
+
+::: {#fig-dp-graph}
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A computational graph: parameter and input tensors at the sources flow rightward through primitive operations to a scalar loss at the sink; the gradient flows leftward back along the same graph."
+     font-family="system-ui, sans-serif" font-size="12">
+  <defs>
+    <marker id="gf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2c6a45"/>
+    </marker>
+    <marker id="gb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a3ffc"/>
+    </marker>
+  </defs>
+  <!-- sources (tensors = diamonds) -->
+  <g font-size="11">
+    <polygon points="40,70 70,55 100,70 70,85" fill="#dfe7f0" stroke="#33373d"/><text x="70" y="74" text-anchor="middle">x</text>
+    <polygon points="40,130 70,115 100,130 70,145" fill="#dfe7f0" stroke="#33373d"/><text x="70" y="134" text-anchor="middle">W</text>
+    <polygon points="40,185 70,170 100,185 70,200" fill="#dfe7f0" stroke="#33373d"/><text x="70" y="189" text-anchor="middle">b</text>
+  </g>
+  <!-- primitives (circles) -->
+  <circle cx="210" cy="105" r="28" fill="#dce9dd" stroke="#33373d"/><text x="210" y="109" text-anchor="middle">matmul</text>
+  <circle cx="350" cy="120" r="26" fill="#dce9dd" stroke="#33373d"/><text x="350" y="124" text-anchor="middle">+ b</text>
+  <circle cx="480" cy="120" r="26" fill="#dce9dd" stroke="#33373d"/><text x="480" y="124" text-anchor="middle">relu</text>
+  <circle cx="610" cy="120" r="30" fill="#fbf0d6" stroke="#33373d"/><text x="610" y="124" text-anchor="middle">loss ℒ</text>
+  <!-- forward edges -->
+  <g stroke="#2c6a45" stroke-width="1.4">
+    <line x1="100" y1="70"  x2="184" y2="98"  marker-end="url(#gf)"/>
+    <line x1="100" y1="130" x2="184" y2="112" marker-end="url(#gf)"/>
+    <line x1="238" y1="108" x2="326" y2="118" marker-end="url(#gf)"/>
+    <line x1="100" y1="185" x2="326" y2="130" marker-end="url(#gf)"/>
+    <line x1="376" y1="120" x2="452" y2="120" marker-end="url(#gf)"/>
+    <line x1="506" y1="120" x2="580" y2="120" marker-end="url(#gf)"/>
+  </g>
+  <!-- backward sweep -->
+  <path d="M 610,150 C 400,230 250,230 70,205" fill="none" stroke="#8a3ffc" stroke-width="1.6" stroke-dasharray="5,4" marker-end="url(#gb)"/>
+  <text x="380" y="228" text-anchor="middle" font-size="11" fill="#8a3ffc">gradient flows back along the same graph</text>
+  <text x="70" y="40" text-anchor="middle" font-size="11" fill="#444b53">sources: params + input</text>
+  <text x="610" y="70" text-anchor="middle" font-size="11" fill="#444b53">sink: scalar objective</text>
+</svg>
+
+The computational graph. Diamonds are tensors, circles are primitive operations;
+the forward pass (green) flows from parameter and input sources to the scalar loss,
+and the gradient (purple, dashed) flows back along the very same graph. Every node
+on a source-to-sink path must be differentiable for the gradient to reach the
+parameter.
+:::
+
+## Why automatic — not numerical or symbolic {#sec-vs}
+
+There are three ways to get a derivative from a program, and it is worth seeing why
+the paradigm settled on the third.
+
+**Numerical differentiation** perturbs an input and measures the response:
+$\partial f/\partial x_j \approx [f(x+he_j)-f(x)]/h$. It is trivial to implement and
+useful for *spot-checking* a hand-derived gradient (we used it on the
+[gemm formulas](three-kernels.qmd#sec-gemm)). But it is unfit for training, for two
+reasons. It costs one full re-evaluation of the program *per parameter* — hopeless
+when $\theta$ has millions of entries. And it is inherently **inexact**: too large a
+step $h$ incurs truncation error, too small a step incurs floating-point rounding
+error, and the two cannot be minimised at once. @fig-dp-finitediff is the classic
+picture of that bind.
+
+```{python}
+#| label: fig-dp-finitediff
+#| fig-cap: "Why numerical differentiation is fragile. The error of a forward finite-difference estimate of d/dx sin(x), as a function of step size h (log–log). Large h is dominated by truncation error (∝ h, the right slope); small h by floating-point rounding error (∝ ε/h, the left slope). The best achievable error sits at the valley near h ≈ √ε ≈ 10⁻⁸ and is far from machine precision — whereas automatic differentiation is exact to rounding at any scale."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+x0 = 1.0
+exact = np.cos(x0)                      # d/dx sin(x) = cos(x)
+h = np.logspace(-16, 0, 300)
+fd = (np.sin(x0 + h) - np.sin(x0)) / h  # forward finite difference
+err = np.abs(fd - exact)
+
+fig, ax = plt.subplots(figsize=(6.8, 4.0))
+ax.loglog(h, err, color="#b03b4b", lw=2)
+ax.axvline(np.sqrt(np.finfo(float).eps), color="0.6", ls=":", lw=1.2)
+ax.text(2e-8, 1e-3, r"valley at $h\approx\sqrt{\varepsilon}$", fontsize=9, color="0.3")
+ax.text(1e-5, 3e-6, "truncation\n∝ h", fontsize=8, color="#7a2b36", ha="left")
+ax.text(1e-13, 3e-4, "rounding\n∝ ε/h", fontsize=8, color="#7a2b36", ha="left")
+ax.set_xlabel("finite-difference step  h")
+ax.set_ylabel("error  |estimate − cos(1)|")
+ax.set_title("Numerical differentiation: truncation vs rounding")
+fig.tight_layout()
+plt.show()
+```
+
+**Symbolic differentiation** manipulates the *expression* to produce a closed-form
+derivative — exact, but prone to **expression swell**: rules like the product rule
+duplicate subexpressions, so the derivative formula can grow far faster than the
+original program, and it returns a formula rather than efficiently-evaluated numbers.
+
+**Automatic differentiation** is the synthesis. It works on the *trace* of the
+program, applying each primitive's known derivative and reusing the intermediates
+already computed (the graph shares subexpressions, so there is no swell). It is exact
+to floating point, like symbolic differentiation, and — for a scalar objective — it
+delivers the entire gradient in a single reverse pass, regardless of the number of
+parameters, as the [differentiation chapter](differentiation.qmd#sec-cost)
+established. The table summarises the trade.
+
+| | numerical | symbolic | **automatic** |
+|---|---|---|---|
+| exactness | approximate (step-dependent) | exact | exact (to rounding) |
+| cost for a scalar loss of $n$ params | $O(n)$ re-evaluations | — (a formula) | **one reverse pass** |
+| failure mode | truncation vs rounding | expression swell | (memory of the tape) |
+| returns | numbers | a formula | numbers |
+
+That AD is the same *trace reinterpretation* as compilation — [Thread A](index.qmd#sec-thread-trace)
+— is why a single framework can both `jit` and `grad` a program.
+
+## The differentiability constraint, and how to bend it {#sec-relaxation}
+
+Many useful operations are not differentiable: choosing the largest element
+(`argmax`), sampling from a distribution, sorting, rounding, a hard `if`. Each
+severs the gradient. The paradigm has three standard ways to keep a path open, and
+two of them you have already met.
+
+- **Smooth relaxation.** Replace the hard operation with a smooth surrogate that
+  approaches it in a limit. The `softmax` is the smooth `argmax`; the
+  [LOG semiring](three-kernels.qmd#sec-semiring) is the smooth `min`/`max`; there are
+  soft sorts and soft top-$k$. The relaxation has a temperature that trades
+  faithfulness against gradient quality — sharper is closer to the hard op but has
+  flatter, less useful gradients.
+- **Reparameterisation.** When the non-differentiable step is *sampling*, move the
+  randomness into a fixed, parameter-free noise input, so the parameters enter only
+  through differentiable arithmetic. To sample $z\sim\mathcal{N}(\mu,\sigma^2)$,
+  write $z=\mu+\sigma\,\varepsilon$ with $\varepsilon\sim\mathcal{N}(0,1)$ drawn
+  *outside* the gradient path; now $\partial z/\partial\mu$ and
+  $\partial z/\partial\sigma$ exist (@fig-dp-reparam). This is the trick that makes
+  variational autoencoders trainable, and it sits naturally in `nitrix`, where
+  randomness is already an explicit `jax.random` key passed in, not hidden state.
+- **Surrogate gradients.** Use the hard operation on the forward pass but substitute
+  a chosen smooth gradient on the backward pass (the "straight-through" estimator).
+  Pragmatic, and deliberately inconsistent — the backward pass differentiates a
+  *different* function than the forward computes — so it is a tool of last resort.
+
+::: {#fig-dp-reparam}
+<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Reparameterisation: sampling z from N(mu, sigma squared) blocks the gradient, but writing z as mu plus sigma times a fixed standard-normal noise lets the gradient flow to mu and sigma."
+     font-family="system-ui, sans-serif" font-size="12">
+  <defs>
+    <marker id="rpf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55606b"/>
+    </marker>
+  </defs>
+  <text x="190" y="30" text-anchor="middle" font-weight="bold">blocked</text>
+  <rect x="60" y="50" width="120" height="44" rx="6" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="120" y="76" text-anchor="middle">μ, σ</text>
+  <rect x="240" y="50" width="130" height="44" rx="6" fill="#f3dede" stroke="#33373d"/>
+  <text x="305" y="70" text-anchor="middle">z ~ N(μ, σ²)</text>
+  <text x="305" y="86" text-anchor="middle" font-size="10" fill="#b03b4b">sampling</text>
+  <line x1="180" y1="72" x2="238" y2="72" stroke="#55606b" stroke-width="1.4" marker-end="url(#rpf)"/>
+  <text x="305" y="120" text-anchor="middle" font-size="11" fill="#b03b4b">✗ gradient cannot flow through the draw</text>
+  <text x="600" y="30" text-anchor="middle" font-weight="bold">reparameterised</text>
+  <rect x="470" y="50" width="90" height="44" rx="6" fill="#dfe7f0" stroke="#33373d"/>
+  <text x="515" y="76" text-anchor="middle">μ, σ</text>
+  <rect x="470" y="120" width="90" height="40" rx="6" fill="#eef0f2" stroke="#33373d"/>
+  <text x="515" y="145" text-anchor="middle" font-size="11">ε ~ N(0,1)</text>
+  <rect x="620" y="74" width="120" height="44" rx="6" fill="#dce9dd" stroke="#33373d"/>
+  <text x="680" y="100" text-anchor="middle">z = μ + σ·ε</text>
+  <line x1="560" y1="72" x2="618" y2="88" stroke="#55606b" stroke-width="1.4" marker-end="url(#rpf)"/>
+  <line x1="560" y1="140" x2="618" y2="108" stroke="#55606b" stroke-width="1.4" marker-end="url(#rpf)"/>
+  <text x="600" y="185" text-anchor="middle" font-size="11" fill="#2c6a45">✓ gradient flows to μ, σ; randomness isolated in ε</text>
+</svg>
+
+Reparameterisation. A draw $z\sim\mathcal{N}(\mu,\sigma^2)$ (left) blocks the
+gradient. Rewriting it as $z=\mu+\sigma\,\varepsilon$ with a fixed standard-normal
+$\varepsilon$ (right) isolates the randomness in a parameter-free input, so the
+parameters $\mu,\sigma$ enter only through differentiable arithmetic and the
+gradient flows.
+:::
+
+## How frameworks implement it {#sec-implementations}
+
+Two implementation strategies dominate, and the difference is exactly the
+[trace question](xla-jax.qmd#sec-trace) from earlier.
+
+**Operator overloading** (PyTorch). Tensors carry a flag; when it is set, every
+operation on them is overloaded to *also* record itself, its inputs, and the material
+needed for its backward rule onto a tape, building the computational graph
+*dynamically* along the exact path the Python code takes. The backward pass then
+walks that tape. This **eager** style is flexible — ordinary Python control flow just
+works, because the graph is whatever ran — but the dynamism limits whole-program
+optimisation, since there is no static graph to analyse ahead of time.
+
+**Trace / source transformation** (JAX, TensorFlow 1). Trace the pure function once
+to a static graph (`jaxpr`), then *transform* it — to differentiate (`grad`), to
+batch (`vmap`), to compile (`jit` → XLA). Because the whole graph is known up front,
+the compiler can fuse and schedule it aggressively (the [fusion win](xla-jax.qmd#sec-fusion)).
+The cost is the [static-trace constraint](xla-jax.qmd#sec-control-flow): control flow
+must go through structured primitives, and shapes drive recompilation. `nitrix` lives
+on this side — pure functions, traced and transformed — which is why its differentiability
+and its speed come from the same place.
+
+Neither is strictly better; eager flexibility and compiled performance are a genuine
+trade. (The frameworks have converged somewhat — PyTorch can compile, JAX is
+interactive — but the underlying split is real.)
+
+## Where the paradigm runs out of road {#sec-limits}
+
+A balanced account names the limits, and they motivate the rest of the book.
+
+- **Everything on the gradient path must be (made) differentiable.** The relaxations
+  above are approximations, with their own temperatures and biases; some problems
+  resist them.
+- **Gradients find *local* optima.** Outside the convex case, gradient descent
+  reaches a stationary point near where it started, not a global optimum; the result
+  depends on initialisation and on the optimiser.
+- **Choosing the hypothesis class is the real problem.** Too small a family contains
+  no good solution; too large a family fits the noise (overfits) and generalises
+  badly. Steering between them — building in the right *inductive bias* — is the
+  hardest and most consequential decision, and it is the subject of the
+  [final chapter](inductive-bias.qmd).
+- **Reverse mode is memory-hungry.** The backward pass needs intermediates from the
+  forward pass, so memory grows with depth; gradient checkpointing trades compute to
+  bound it.
+- **Some outputs are defined by a condition, not a formula.** When a value is the
+  solution of an equation, a fixed point, or an optimisation — common in scientific
+  computing — differentiating the *solver's* unrolled trace is wasteful and unstable.
+  The fix is to differentiate the *condition* instead, via the implicit function
+  theorem, which is the [next chapter](implicit-differentiation.qmd).
+
+## What this means for `nitrix`
+
+`nitrix` is, in this language, a library of **hypothesis-class building blocks**: pure,
+differentiable primitives from which a scientific computation can be assembled as a
+differentiable program and then optimised end-to-end.
+
+- **Composable into a program you can optimise.** Because every primitive is pure and
+  traceable, an entire workflow — register, resample, reduce, score — composes into
+  one graph that `grad` and `jit` flow through, exactly the loop of @fig-dp-loop.
+- **Opaque kernels still participate.** A fused Pallas kernel is not transparent to
+  the tracer, so it carries a hand-written `custom_vjp` — its node in the graph
+  supplies its own backward rule, keeping the differentiability constraint satisfied.
+- **Relaxations are first-class.** The [semiring substrate](three-kernels.qmd#sec-semiring)
+  is precisely a knob between a hard combinatorial operation (TROPICAL) and its smooth,
+  differentiable relaxation (LOG), and randomness enters through an explicit
+  `jax.random` key, the reparameterised form by construction.
+- **The two hard limits are the next two chapters.** Solver-defined outputs are
+  handled by [implicit differentiation](implicit-differentiation.qmd); the
+  hypothesis-class / inductive-bias problem is the [teaser](inductive-bias.qmd) that
+  closes the unit and opens the rest of the book.
+
+The thread is [Thread A](index.qmd#sec-thread-trace): differentiable programming is
+what you *do* once you can reinterpret a trace. Compilation made the program fast;
+differentiation lets it learn; the paradigm is the discipline of writing programs so
+that both are possible.
+
+## Further reading
+
+- Baydin, A. G., Pearlmutter, B. A., Radul, A. A. & Siskind, J. M. (2018).
+  "Automatic differentiation in machine learning: a survey." *JMLR* 18. — the
+  reference contrast of numerical, symbolic, and automatic differentiation, and the
+  computational-graph / Wengert-list view.
+- Blondel, M. & Roulet, V. (2024). *The Elements of Differentiable Programming.* — a
+  balanced, modern textbook on the paradigm as a whole.
+- Kingma, D. P. & Welling, M. (2014). "Auto-encoding variational Bayes." *ICLR.* —
+  the reparameterisation trick.
+- Bengio, Y., Léonard, N. & Courville, A. (2013). "Estimating or propagating
+  gradients through stochastic neurons." — straight-through / surrogate gradients.
+- Karpathy, A. (2017). "Software 2.0." — the essay that popularised the
+  "specify an objective, learn the program" framing.
+
+## See also
+
+- The trace and its transformations: [JAX and XLA](xla-jax.qmd) (`jit`/`vmap`/`grad`
+  as reinterpretations, operator-overloading vs trace-transformation).
+- Custom backward rules for opaque kernels: the `custom_vjp`-bearing
+  [`_kernels/cuda/`](https://github.com/hypercoil/nitrix/tree/main/src/nitrix/_kernels/cuda).
+- Relaxations in the substrate: the [semiring product](three-kernels.qmd#sec-semiring).
+- Previous chapter: [three kernels](three-kernels.qmd). Next chapters:
+  [implicit differentiation](implicit-differentiation.qmd) (solver-defined outputs)
+  and [inductive bias](inductive-bias.qmd) (choosing the hypothesis class).

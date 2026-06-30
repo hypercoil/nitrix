@@ -2,143 +2,145 @@
 title: "Surfaces as discrete manifolds: the Laplace–Beltrami operator"
 ---
 
-::: {.callout-tldr title="Fast path"}
-The **Laplace–Beltrami operator** $\Delta = M^{-1}L$ is the surface version of the
-flat Laplacian $\nabla^2$ you already know — *how much a field at a point differs
-from its local average*, but measured **along a curved surface** rather than across
-flat space. On a triangle mesh it factors into two separate pieces:
+The Laplace--Beltrami operator $\Delta = M^{-1}L$ is the central object of the
+surface half of this unit. It is the curved-surface analogue of the flat
+Laplacian $\nabla^2$: at each point it reports how much a field there departs
+from the average of the field in an infinitesimal neighbourhood, but with
+"neighbourhood" and "average" measured *along a curved surface* rather than
+across flat space. On a triangle mesh it factors cleanly into two pieces, and the
+factorisation is the reason one operator serves so many tasks:
 
-- a **cotangent stiffness** $L$ — a sparse, symmetric, positive-semidefinite matrix
+- a **cotangent stiffness** $L$, a sparse symmetric positive-semidefinite matrix
   whose weights $w_{ij}=\tfrac12(\cot\alpha_{ij}+\cot\beta_{ij})$ encode the
-  *shape* of the triangles (the metric), and
-- a **lumped mass** $M=\operatorname{diag}(A_i)$ — the per-vertex area that turns
-  $L$ into a true differential operator.
+  *shape* of the triangles - the local metric; and
+- a **lumped mass** $M=\operatorname{diag}(A_i)$, the per-vertex area that
+  converts the area-weighted stiffness into a true differential operator.
 
-This one object is the engine behind **geodesic smoothing** (this page),
-**curvature** ([next page](curvature.qmd#sec-mean)), and the **surface spectrum**
-([the page after](spectral.qmd#sec-eigen)). Learn $L$ and $M$ once and the rest of
-the unit is application. In `nitrix` they are deliberately *two symbols* —
-`mesh_cotangent_laplacian` and `mesh_mass_matrix` / `vertex_areas` — that
-algorithms combine ($M^{-1}L$ for curvature, $M+tL$ for smoothing) at the
-algorithm layer, never a normalisation flag.
-:::
+This single operator drives geodesic smoothing (this chapter), curvature
+([next chapter](curvature.qmd#sec-mean)), and the surface spectrum
+([the chapter after](spectral.qmd#sec-eigen)). In `nitrix` the stiffness and the
+mass are deliberately *two symbols*, `mesh_cotangent_laplacian` and
+`mesh_mass_matrix` / `vertex_areas`, that algorithms combine at the call site
+($M^{-1}L$ for curvature, $M+tL$ for smoothing, the pencil $(L,M)$ for the
+spectrum) rather than a single operator with a normalisation flag. We will see
+why that separation is the right design.
 
-This page sits on the third rung of the unit, after
-[foundations](foundations.qmd#sec-discretization) and
-[the sparse operator substrate](operators.qmd#sec-ell). It assumes you are
-comfortable with **linear algebra** — sparse matrices, symmetry,
-positive-(semi)definiteness, solving $Ax=b$ — but have had **no formal training in
-differential geometry**. Everything is built from the flat Laplacian outward.
+The chapter follows [foundations](foundations.qmd#sec-discretization) and
+[the sparse operator substrate](operators.qmd#sec-ell). It assumes linear algebra
+- sparse matrices, symmetry, positive-(semi)definiteness, solving $Ax=b$ - but no
+prior differential geometry; everything is built from the flat Laplacian outward.
 
-## A motivating question {#sec-motivation}
+## A motivating problem {#sec-motivation}
 
-You have a reconstructed **cortical surface** — a triangle mesh of roughly 150,000
-vertices wrapping one hemisphere — and a noisy per-vertex scalar painted on it: a
-`sulc` map, a myelin estimate, a cortical-thickness measurement, or the input to a
-surface GLM. You want to **smooth it**. Not through the surrounding 3-D space (that
-would blur signal across the bank of a sulcus into the gyrus on the other side,
-millimetres away in space but centimetres away *along the cortex*) but **along the
-surface itself**, so that two points only share signal if they are close as a
-geodesic walker measures it.
+Consider a reconstructed cortical surface, a triangle mesh of roughly $150{,}000$
+vertices wrapping one hemisphere, carrying a noisy per-vertex scalar: a `sulc`
+map, a myelin estimate, a cortical-thickness measurement, or the input to a
+surface GLM. We wish to smooth it. The smoothing must run *along the surface*,
+not through the surrounding three-dimensional space. Diffusion through space would
+blur signal across the bank of a sulcus into the gyrus on the opposite bank -
+points millimetres apart in $\mathbb{R}^3$ but centimetres apart as a geodesic
+walker measures distance along the cortex. We want two points to share signal only
+when they are close *along the sheet*.
 
-That is a geometric operation. To smooth along a surface you need a notion of *the
-local average of a field on a curved sheet*, and the difference between a value and
-its local average is exactly what a Laplacian computes. So the question "how do I
-smooth on a surface?" is really "what is the Laplacian of a triangle mesh?" — and
-answering it hands us, for free, the operator behind curvature and the spectrum too.
-
-Keep this picture in mind: a scalar field living on the cortical mesh, and the wish
-to diffuse it a controlled amount *along the cortex*. We return to it in
-@sec-smoothing once the operator is built.
+This is intrinsically a geometric operation, and it exposes the operator we need.
+To smooth along a surface one needs a notion of the local average of a field on a
+curved sheet, and the discrepancy between a value and its local average is exactly
+what a Laplacian reports. The question "how do I smooth on a surface?" is therefore
+the question "what is the Laplacian of a triangle mesh?" Answering it yields, at no
+extra cost, the operator behind curvature and the surface spectrum. We return to
+the smoothing problem in @sec-smoothing once the operator is in hand.
 
 ## From the flat Laplacian to a curved surface {#sec-from-flat}
 
-Start with what you already own. In flat space the Laplacian of a scalar field $f$
-is $\nabla^2 f = \partial^2_x f + \partial^2_y f + \cdots$. The number it returns
-at a point has a plain meaning that survives into every generalisation:
+Begin with the familiar case. In flat space the Laplacian of a scalar field $f$ is
+$\nabla^2 f = \partial^2_x f + \partial^2_y f + \cdots$. The value it returns at a
+point has a meaning that survives every generalisation: $\nabla^2 f$ measures how
+much $f$ at the point exceeds the average of $f$ over an infinitesimal
+neighbourhood. At a local peak the neighbours are lower, the average sits below
+$f$, and $\nabla^2 f < 0$; in a valley $\nabla^2 f > 0$; on a flat ramp the
+surpluses and deficits cancel and $\nabla^2 f = 0$.
 
-> $\nabla^2 f$ at a point measures **how much $f$ there exceeds the average of $f$
-> in an infinitesimal neighbourhood**. Where $f$ is a local *peak*, the neighbours
-> are lower, the average is below $f$, and $\nabla^2 f < 0$; in a *valley*,
-> $\nabla^2 f > 0$; on a flat ramp, the deficits and surpluses cancel and
-> $\nabla^2 f = 0$.
+On a regular two-dimensional grid this "value minus neighbour average" is the
+five-point stencil: a vertex, its four axis neighbours, weights $(-4,1,1,1,1)$.
+The centre weight is minus the sum of the neighbour weights, so a constant field
+returns exactly zero - the stencil sees only differences, never the absolute
+level. This is the discrete echo of $\nabla^2\,\text{const}=0$, and we will require
+it of every Laplacian we construct.
 
-On a regular 2-D grid that "point minus neighbour average" picture is the famous
-**five-point stencil**: a vertex, its four axis neighbours, weights
-$(-4, 1, 1, 1, 1)$ (or $(4,-1,-1,-1,-1)$, depending on sign convention). The centre
-weight is minus the sum of the neighbour weights, so a *constant* field returns
-exactly zero — the stencil only sees *differences*, never the absolute level. That
-last property is not a coincidence; it is the discrete echo of $\nabla^2\,\text{const}=0$,
-and we will demand it of every Laplacian we build.
-
-Now move onto a triangle mesh. Two things change, and only two:
+Moving onto a triangle mesh changes two things, and only two.
 
 1. **The neighbourhood is irregular.** A vertex $i$ no longer has four tidy axis
-   neighbours; it has its **1-ring** $\mathcal{N}(i)$ — whatever vertices share an
-   edge with it (typically five or six on a cortical mesh, sometimes three,
-   sometimes nine). The Laplacian must be a per-vertex sum over $\mathcal{N}(i)$,
-   not a fixed stencil.
+   neighbours; it has its 1-ring $\mathcal{N}(i)$, the vertices sharing an edge
+   with it - typically five or six on a cortical mesh, sometimes three, sometimes
+   nine. The Laplacian must be a per-vertex sum over $\mathcal{N}(i)$, not a fixed
+   stencil.
 2. **The weights must encode shape.** On the grid every neighbour was the same
-   distance away and weight $1$ was right. On a mesh the triangles are stretched,
-   sheared, and bent; a neighbour across a long thin sliver should *not* count the
-   same as a neighbour across a fat well-shaped triangle. The weights have to carry
-   the **metric** — the local notion of length and angle that tells the discrete
-   operator what the smooth surface underneath actually looks like.
+   distance away and unit weights were correct. On a mesh the triangles are
+   stretched, sheared, and bent, and a neighbour across a long thin sliver should
+   not count the same as a neighbour across a fat, well-shaped triangle. The
+   weights must carry the *metric* - the local notion of length and angle that
+   tells the discrete operator what the smooth surface underneath actually looks
+   like.
 
-The simplest thing a reader would invent is to ignore point 2 — keep the uniform
-weights and sum over whatever neighbours exist:
+The minimal construction ignores the second point: keep uniform weights and sum
+over whatever neighbours exist,
 
 $$
 (L_{\text{unif}} f)[i] \;=\; \sum_{j\in\mathcal{N}(i)} \bigl(f[i]-f[j]\bigr).
 $$ {#eq-uniform}
 
-This is the **uniform** (or *combinatorial*, or *graph*) Laplacian. It is genuinely
-useful — it is exactly the operator behind `mesh_laplacian_smooth` (page
-[operators](operators.qmd#sec-adjacency) and revisited under
+This is the uniform (combinatorial, or graph) Laplacian. It is genuinely useful:
+it is the operator behind `mesh_laplacian_smooth`
+([operators](operators.qmd#sec-adjacency), revisited under
 [graph geometry](graph-geometry.qmd#sec-graph-laplacian)), which smooths *vertex
 positions* by repeatedly nudging each vertex toward its neighbour mean. It depends
-only on **connectivity**, never on coordinates, so it is cheap and robust.
+only on connectivity, never on coordinates, so it is cheap and robust.
 
-But @eq-uniform fails the convergence test that the whole unit is built around
-([foundations](foundations.qmd#sec-discretization)): refine the mesh, and
-$L_{\text{unif}}$ does **not** approach the smooth $\nabla^2$ unless every triangle
-is equilateral. It treats a stretched mesh as if it were regular, so it bakes in the
-*sampling pattern* rather than the *surface*. Two meshes of the *same* smooth
-surface with different triangulations give different answers — the hallmark of an
-operator that has confused the discretisation with the geometry. The cure is to put
-the geometry back into the weights. That cure is the cotangent Laplacian.
+It is also the first place the language of symmetry pays off. Both Laplacians we
+will consider are **permutation equivariant**: relabel the vertices by a
+permutation $P$ and the operator transforms as $L\mapsto PLP^\top$, so the
+computed field is simply relabelled (the symmetry view of
+[foundations](foundations.qmd#sec-transformations-bias)). That is the right
+behaviour, and it holds for the uniform Laplacian too. What the uniform Laplacian
+*lacks* is the second invariance we actually need. It depends on the mesh only
+through its connectivity, so two different triangulations of the *same* smooth
+surface produce *different* operators, and refining the mesh does not make
+$L_{\text{unif}}$ approach the smooth $\nabla^2$ unless every triangle is
+equilateral. It has confused the sampling pattern with the surface. The fix is to
+make the weights depend on the metric, so that the operator becomes invariant to
+the choice of triangulation and to rigid motion of the surface in space, changing
+only when the *shape* changes. That operator is the cotangent Laplacian.
 
 ## The cotangent Laplacian {#sec-cotangent}
 
-### The weight, from intuition
+### The cotangent edge weight
 
-Here is the question the weights must answer: *across the edge $(i,j)$, how strongly
-should $f[i]$ and $f[j]$ be coupled?* Intuition says the coupling should be large
-when the two vertices are "well connected" by the triangles between them — a fat,
-near-equilateral triangle conducts a field smoothly from one vertex to the other —
-and small (even zero) when they are joined only across a long, skinny sliver.
+The weight must answer one question: across the edge $(i,j)$, how strongly should
+$f[i]$ and $f[j]$ be coupled? The coupling should be large when the two vertices
+are well connected by the triangles between them - a fat, near-equilateral
+triangle conducts a field smoothly from one vertex to the other - and small, even
+zero, when they are joined only across a long, skinny sliver.
 
-The quantity that captures exactly this is the **cotangent of the angle opposite the
-edge**. Picture the edge $(i,j)$ as the base of a triangle and the third vertex as
-the apex with interior angle $\alpha$ opposite the base. When the apex angle is wide
-(a fat triangle, $\alpha$ near $90^\circ$ or more), $\cot\alpha$ is small or
-negative — weak coupling. When the apex angle is narrow (a sliver: the apex is far
-away and the triangle is a splinter), $\cot\alpha$ blows up toward $+\infty$ —
-strong coupling. An interior edge belongs to *two* triangles, contributing two
-opposite angles $\alpha_{ij}$ and $\beta_{ij}$, so the symmetric edge weight is
-their average:
+The quantity that captures this is the cotangent of the angle opposite the edge.
+Picture the edge $(i,j)$ as the base of a triangle and the third vertex as the
+apex with interior angle $\alpha$ opposite the base. When the apex angle is wide (a
+fat triangle, $\alpha$ near $90^\circ$ or more) $\cot\alpha$ is small or negative,
+giving weak coupling; when the apex angle is narrow (a sliver, the apex far from
+the base) $\cot\alpha$ diverges toward $+\infty$, giving strong coupling. An
+interior edge belongs to *two* triangles, contributing two opposite angles
+$\alpha_{ij}$ and $\beta_{ij}$, so the symmetric edge weight is their average,
 
 $$
 w_{ij} \;=\; \tfrac12\bigl(\cot\alpha_{ij} + \cot\beta_{ij}\bigr).
 $$ {#eq-cotweight}
 
-Here $\alpha_{ij}$ and $\beta_{ij}$ are the angles **opposite** the edge $(i,j)$ in
-the two triangles that share it (a boundary edge has only one, so a single cotangent
-— relevant for an open patch, never for a closed cortical sphere). @fig-lbo-cotangent
-shows the geometry and what happens as a triangle degenerates.
+A boundary edge has only one incident triangle and therefore a single cotangent -
+relevant for an open patch, never for a closed cortical sphere.
+@fig-lbo-cotangent shows the geometry and the behaviour of the weight as a triangle
+degenerates.
 
-With the weight in hand the operator is the same "point minus neighbour average"
-idea as @eq-uniform, but weighted:
+The operator is then the same "value minus neighbour average" as @eq-uniform, now
+weighted:
 
 $$
 (L f)[i] \;=\; \sum_{j\in\mathcal{N}(i)} w_{ij}\,\bigl(f[i]-f[j]\bigr),
@@ -146,14 +148,12 @@ $$
 L_{ii} \;=\; \sum_{j\in\mathcal{N}(i)} w_{ij}.
 $$ {#eq-cotlap}
 
-Read the symbols: $w_{ij}$ is the cotangent edge weight from @eq-cotweight;
-$\mathcal{N}(i)$ is the 1-ring of vertex $i$; the off-diagonal entry at $(i,j)$ is
-$-w_{ij}$ and the diagonal $L_{ii}$ is the sum of all the edge weights on that row.
-Because the diagonal is exactly the sum of the off-diagonals, **every row sums to
-zero** — so $L\mathbf{1}=0$: constants are in the null space, $\Delta\,\text{const}=0$,
-the surface analogue of the grid stencil's centre-minus-neighbours bookkeeping. This
-is the same zero-row-sum property we insisted on in @sec-from-flat, now carried onto
-the curved mesh.
+The off-diagonal entry at $(i,j)$ is $-w_{ij}$ and the diagonal $L_{ii}$ is the sum
+of the row's edge weights. Because the diagonal equals the sum of the
+off-diagonals, every row sums to zero, so $L\mathbf{1}=0$: constants lie in the null
+space, $\Delta\,\text{const}=0$, the surface analogue of the grid stencil's
+centre-minus-neighbours bookkeeping and the same zero-row-sum property required in
+@sec-from-flat.
 
 ```{python}
 #| label: fig-lbo-cotangent
@@ -215,80 +215,92 @@ plt.tight_layout()
 plt.show()
 ```
 
-### Why *cotangents*, of all things
+### Why the cotangent: the finite-element derivation
 
-The cotangent weight is not a clever heuristic that happens to behave well — it is
-the **exact** coefficient you get if you do the principled thing. Cover the smooth
-surface with the piecewise-linear "hat" basis functions $\varphi_i$ (one per vertex,
-equal to $1$ at vertex $i$, $0$ at every other vertex, linear on each triangle) and
-ask for the finite-element **stiffness matrix** of the Laplacian, whose entries are
+The cotangent weight is not a heuristic that happens to behave well; it is the
+exact coefficient that the principled construction produces. Cover the smooth
+surface with the piecewise-linear hat basis functions $\varphi_i$ - one per vertex,
+equal to $1$ at vertex $i$, $0$ at every other vertex, linear on each triangle -
+and ask for the finite-element stiffness matrix of the Laplacian, whose entries are
 
 $$
 L_{ij} \;=\; \int_{\text{surface}} \nabla\varphi_i \cdot \nabla\varphi_j \; \mathrm{d}A.
 $$ {#eq-fem}
 
-Carry out that integral over the (flat) triangles and the algebra collapses to
-exactly $-\tfrac12(\cot\alpha_{ij}+\cot\beta_{ij})$ off the diagonal. So @eq-cotweight
-*is* @eq-fem evaluated by hand. This is why the cotangent Laplacian, unlike the
-uniform one, **converges to the smooth $\Delta$ under refinement** — it is the
-Galerkin discretisation of the true operator, and the convergence theory of finite
-elements applies (tie back to
-[the discretisation argument in foundations](foundations.qmd#sec-discretization)).
-It is the single most-validated operator in discrete differential geometry.
+Carrying out that integral over the flat triangles collapses the algebra to exactly
+$-\tfrac12(\cot\alpha_{ij}+\cot\beta_{ij})$ off the diagonal. Equation
+@eq-cotweight *is* @eq-fem evaluated by hand. This is why the cotangent Laplacian,
+unlike the uniform one, converges to the smooth $\Delta$ under refinement: it is the
+Galerkin discretisation of the true operator, so the convergence theory of finite
+elements applies (the discretisation argument of
+[foundations](foundations.qmd#sec-discretization)).
+
+The derivation also makes the operator's symmetries transparent, and these are the
+inductive bias that recommends $\Delta$ for surface analysis. The integrand
+$\nabla\varphi_i\cdot\nabla\varphi_j\,\mathrm{d}A$ is built from gradients and an
+area element, both of which depend only on the *intrinsic metric* - the edge
+lengths and angles of the triangulation - and not on how the surface is positioned
+in space. Consequently $L$ is invariant to rigid motion of the embedding and, more
+strikingly, to any *isometric* bending that preserves the metric: flatten a cortical
+patch without stretching it and the cotangent weights are unchanged. The operator is
+intrinsic. A model whose only access to a surface is through $\Delta$ therefore
+cannot depend on the surface's pose, on its embedding, or on the arbitrary choice of
+triangulation - those degrees of freedom have been quotiented away before any
+learning or estimation begins. This is the geometric counterpart of building
+translation equivariance into a grid convolution: the symmetry is in the operator,
+not something a downstream model must rediscover from data.
 
 ### Sign, definiteness, and what `nitrix` returns
 
-Two conventions worth pinning down, because they trip up everyone once:
+Two conventions are worth pinning down.
 
-- **Sign.** The continuous Laplacian is *negative*-semidefinite ($\nabla^2$ of a
-  bump is negative at the peak). The form in @eq-cotlap, with positive diagonal, is
-  the **negation** $-\Delta$, which is **positive-semidefinite**: all eigenvalues
-  $\ge 0$, the smallest exactly $0$ on the constants. `mesh_cotangent_laplacian`
-  returns this **PSD** form (its docstring is explicit: "returns the
-  positive-semidefinite form $-\Delta$; for the negative form, negate the output's
-  `values`"). PSD is the convention you want, because every solver that touches it
-  — conjugate gradients, eigensolvers — wants a PSD/SPD matrix.
-- **Storage.** $L$ is sparse: one nonzero per 1-ring neighbour plus the diagonal.
-  `nitrix` stores it as an **ELL** operator (or a degree-bucketed `SectionedELL` for
-  irregular-valence meshes), the padded sparse format from
-  [the operators page](operators.qmd#sec-ell). The flat ELL uses a *diagonal-first*
-  column layout (column 0 is always $L_{ii}$), which the Neumann-ROI restriction in
-  @sec-smoothing relies on.
+- **Sign.** The continuous Laplacian is negative-semidefinite ($\nabla^2$ of a bump
+  is negative at the peak). The form in @eq-cotlap, with positive diagonal, is its
+  negation $-\Delta$, which is positive-semidefinite: all eigenvalues $\ge 0$, the
+  smallest exactly $0$ on the constants. `mesh_cotangent_laplacian` returns this PSD
+  form (its docstring is explicit: it returns $-\Delta$; negate the `values` for the
+  negative form). PSD is the convention every solver that touches it - conjugate
+  gradients, eigensolvers - expects.
+- **Storage.** $L$ is sparse, with one nonzero per 1-ring neighbour plus the
+  diagonal. `nitrix` stores it as an ELL operator, or a degree-bucketed
+  `SectionedELL` for irregular-valence meshes, the padded sparse format from
+  [the operators chapter](operators.qmd#sec-ell). The flat ELL uses a diagonal-first
+  column layout (column 0 is always $L_{ii}$), a detail the Neumann-ROI restriction
+  of @sec-smoothing relies on.
 
-### `mesh_cotangent_laplacian` — execution class and the assembly
+### `mesh_cotangent_laplacian`: execution class and assembly
 
-`mesh_cotangent_laplacian(mesh, *, format='ell')` is **HOST-CTOR**: it is
-*data-dependent construction* that runs on the host in NumPy and emits a plain-JAX
-ELL. Concretely, it casts `mesh.vertices` to **float64** for the angle arithmetic
-(cotangents of near-degenerate triangles are numerically delicate, so the assembly
-is done in double precision and the result cast back to the mesh dtype), computes a
+`mesh_cotangent_laplacian(mesh, *, format='ell')` is **HOST-CTOR**:
+data-dependent construction that runs on the host in NumPy and emits a plain-JAX
+ELL. It casts `mesh.vertices` to float64 for the angle arithmetic (cotangents of
+near-degenerate triangles are numerically delicate, so assembly is done in double
+precision and the result cast back to the mesh dtype), computes a
 per-`(face, opposite-vertex)` cotangent via `_cotangent_weights`, then assembles the
-sparse rows by a fully vectorised scatter: it builds the six directed
-$(i,j,w)$ contributions (both orientations of each of a face's three opposite
-edges), folds duplicate edges together with a single integer key
-$\text{key}=i\cdot n + j$ and `np.add.at`, accumulates the diagonal as the row sum,
-and lays the off-diagonals into the ELL slots. No Python per-face loop, no dict.
+sparse rows by a fully vectorised scatter. It builds the six directed $(i,j,w)$
+contributions - both orientations of each of a face's three opposite edges - folds
+duplicate edges together with a single integer key $\text{key}=i\cdot n + j$ and
+`np.add.at`, accumulates the diagonal as the row sum, and lays the off-diagonals into
+the ELL slots. There is no Python per-face loop and no dictionary.
 
-Because the weights are baked in as **constant** array values, the resulting ELL is
-the right tool for applying a **fixed** operator to **many** fields — exactly the
-smoothing case (one operator, possibly many maps). It is **not** differentiable with
-respect to the vertex positions, because the host construction is outside the JAX
-trace. The load-bearing rule from [foundations](foundations.qmd#sec-classes) applies
-in full force here:
+Because the weights are baked in as constant array values, the resulting ELL is the
+right tool for applying a *fixed* operator to *many* fields - precisely the smoothing
+case. It is not differentiable with respect to the vertex positions, because the host
+construction lies outside the JAX trace. The rule from
+[foundations](foundations.qmd#sec-classes) applies directly:
 
-> **Never call a HOST op inside a jitted loop.** Build `mesh_cotangent_laplacian`
-> **once**, on the host, and reuse the ELL across every smoothing solve or matvec.
+> Never call a HOST op inside a jitted loop. Build `mesh_cotangent_laplacian` once,
+> on the host, and reuse the ELL across every smoothing solve or matvec.
 > Re-assembling it inside a `jit`/`fori_loop` would either fail to trace or silently
 > recompile every step.
 
-When you instead need the Laplacian's action to be **differentiable through the
-geometry** — i.e. you are optimising the vertices and the weights must move with
-them — there is a separate JAX-native path, `_cotangent_apply(vertices, faces,
-field)`, in `geometry.surface`. It computes the *same* $(Lf)[i]=\sum_j w_{ij}(f[i]-f[j])$
-by per-face assembly **entirely in JAX**, so it is **DIFF-JAX** (jittable and
-differentiable w.r.t. `vertices`), at the cost of recomputing the weights on every
-call. The two agree numerically; you pick the one whose execution class matches your
-task. `_cotangent_apply` is the engine of mean curvature on the
+When instead the Laplacian's action must be differentiable through the geometry -
+when the vertices are being optimised and the weights must move with them - there is
+a separate JAX-native path, `_cotangent_apply(vertices, faces, field)`, in
+`geometry.surface`. It computes the same $(Lf)[i]=\sum_j w_{ij}(f[i]-f[j])$ by
+per-face assembly entirely in JAX, so it is **DIFF-JAX** (jittable and differentiable
+with respect to `vertices`), at the cost of recomputing the weights on every call.
+The two paths agree numerically; one chooses the path whose execution class matches
+the task. `_cotangent_apply` is the engine of mean curvature on the
 [next page](curvature.qmd#sec-mean); `mesh_cotangent_laplacian` is the engine of
 smoothing here.
 
@@ -296,71 +308,76 @@ smoothing here.
 
 ### Why $L$ alone is not the operator
 
-There is a subtlety hiding in @eq-fem. The stiffness $L$ is an *integral over the
-surface* — its rows carry units of area. It is the **unnormalised** operator: it
-tells you the total, area-weighted imbalance of $f$ around each vertex, but it has
-not divided by how much surface each vertex actually represents. A vertex sitting in
-a region of large triangles "owns" more surface than a vertex in a finely-tessellated
-patch, and the true differential operator must account for that.
+There is a subtlety in @eq-fem. The stiffness $L$ is an integral over the surface, so
+its rows carry units of area; it is the *unnormalised* operator. It reports the
+total, area-weighted imbalance of $f$ around each vertex, but it has not divided by
+how much surface each vertex represents. A vertex in a region of large triangles owns
+more surface than a vertex in a finely tessellated patch, and the true differential
+operator must account for this.
 
-The accountant is the **mass matrix** $M$ — the discrete inner product on fields.
-For two per-vertex fields $f,g$ the surface integral $\int f\,g\,\mathrm{d}A$ is
-approximated by $f^\top M g$, so $M$ encodes "how much area does each vertex stand
-in for." The genuine **Laplace–Beltrami operator** is then
+The accountant is the mass matrix $M$, the discrete inner product on fields. For two
+per-vertex fields $f,g$ the surface integral $\int f\,g\,\mathrm{d}A$ is approximated
+by $f^\top M g$, so $M$ encodes how much area each vertex stands in for. The genuine
+Laplace--Beltrami operator is then
 
 $$
 \Delta \;=\; M^{-1}L,
 $$ {#eq-lbo}
 
-stiffness divided by mass. Read it as: $L f$ is the area-weighted imbalance,
-$M^{-1}$ converts that back to a *per-unit-area* rate of change — a true second
-derivative along the surface. The generalised eigenproblem of the operator is
-correspondingly $L\phi_k=\lambda_k M\phi_k$ (the subject of
-[the spectral page](spectral.qmd#sec-eigen)); the smoothing solve is $(M+tL)x=Mx_0$
-(@sec-smoothing). In both, $M$ and $L$ appear as **separate** matrices that the
-algorithm combines — which is exactly how `nitrix` ships them.
+stiffness divided by mass: $L f$ is the area-weighted imbalance, and $M^{-1}$ converts
+it back to a per-unit-area rate of change, a true second derivative along the surface.
+The generalised eigenproblem of the operator is $L\phi_k=\lambda_k M\phi_k$ (the
+subject of [the spectral chapter](spectral.qmd#sec-eigen)); the smoothing solve is
+$(M+tL)x=Mx_0$ (@sec-smoothing). In both, $M$ and $L$ appear as separate matrices the
+algorithm combines, which is how `nitrix` ships them.
+
+The split also exposes a scale symmetry worth naming. Under a uniform scaling of the
+surface by a factor $s$, angles are unchanged, so the cotangent weights and $L$ are
+*invariant*; areas scale by $s^2$, so $M$ scales by $s^2$. Hence $\Delta=M^{-1}L$
+scales by $s^{-2}$, the correct equivariance for an operator with units of inverse
+length squared - the same scaling that gives mass-normalised curvature its units of
+inverse length. The operator transforms the way the geometry demands, automatically,
+because stiffness and mass carry their units separately.
 
 ### Lumped mass and the two area schemes
 
-The fully consistent FEM mass matrix has off-diagonal entries (neighbouring hat
-functions overlap). `nitrix` ships the **lumped** approximation: collapse each row
-onto its diagonal, giving a diagonal matrix $M=\operatorname{diag}(A_i)$ where $A_i$
-is the surface area attributed to vertex $i$. Lumping costs a little accuracy but
-buys an enormous practical advantage — $M^{-1}$ is the elementwise reciprocal
-$1/A_i$, invertible at a glance, which is precisely what $M^{-1}L$ curvature and the
-$(M+tL)$ smoothing solve need. (`mesh_mass_matrix(mesh, *, scheme='voronoi', lumped=True)` raises
+The fully consistent FEM mass matrix has off-diagonal entries, since neighbouring hat
+functions overlap. `nitrix` ships the lumped approximation: collapse each row onto its
+diagonal, giving a diagonal matrix $M=\operatorname{diag}(A_i)$ where $A_i$ is the
+surface area attributed to vertex $i$. Lumping costs a little accuracy but makes
+$M^{-1}$ the elementwise reciprocal $1/A_i$, invertible at a glance, which is exactly
+what the $M^{-1}L$ curvature and the $(M+tL)$ smoothing solve need.
+(`mesh_mass_matrix(mesh, *, scheme='voronoi', lumped=True)` raises
 `NotImplementedError` for `lumped=False`: the consistent mass is a documented
 follow-up, not yet built.)
 
-The only real question is **how to split each triangle's area among its three
-vertices**. `nitrix` offers two schemes through `vertex_areas(mesh, *,
-scheme=...)`, both of which **partition** the triangle exactly — so for either
-scheme $\sum_i A_i = \sum_f \text{area}_f$, the total surface area, with no area lost
-or double-counted:
+The remaining question is how to split each triangle's area among its three vertices.
+`nitrix` offers two schemes through `vertex_areas(mesh, *, scheme=...)`, both of which
+*partition* the triangle exactly, so for either scheme $\sum_i A_i = \sum_f
+\text{area}_f$, the total surface area, with no area lost or double-counted.
 
-- **`scheme='barycentric'`** — each face donates $\text{area}/3$ to each of its three
-  vertices. Cheap, always non-negative, never pathological. The safe fallback.
-- **`scheme='voronoi'`** (the default) — the **mixed-Voronoi** rule of Meyer et al.
-  (2003). For a **non-obtuse** triangle, vertex $i$ receives its
-  *circumcentric-dual* (Voronoi) area,
+- **`scheme='barycentric'`** donates $\text{area}/3$ from each face to each of its
+  three vertices. Cheap, always non-negative, never pathological - the safe fallback.
+- **`scheme='voronoi'`** (the default) is the mixed-Voronoi rule of Meyer et al.
+  (2003). For a non-obtuse triangle, vertex $i$ receives its circumcentric-dual
+  (Voronoi) area,
   $$
   A_i^{\triangle} \;=\; \tfrac18\bigl(\cot\theta_k\,\lVert x_i-x_j\rVert^2
   + \cot\theta_j\,\lVert x_i-x_k\rVert^2\bigr),
   $$ {#eq-voronoi}
-  the portion of the triangle closer to $x_i$ than to the other two vertices
-  ($\theta_j,\theta_k$ are the angles at the *other* two vertices). This is the
-  geometrically faithful partition. But for an **obtuse** triangle the circumcenter
-  falls *outside* the triangle, @eq-voronoi can go negative, and the Voronoi cell is
-  no longer contained in the triangle — so Meyer's rule switches to a safe fallback:
-  the **obtuse** vertex gets $\text{area}/2$ and the other two get $\text{area}/4$
-  each.
+  the portion of the triangle closer to $x_i$ than to the other two vertices, with
+  $\theta_j,\theta_k$ the angles at those other two vertices. This is the
+  geometrically faithful partition. For an obtuse triangle the circumcenter falls
+  outside the triangle, @eq-voronoi can go negative, and the Voronoi cell is no longer
+  contained in the triangle, so Meyer's rule switches to a safe fallback: the obtuse
+  vertex receives $\text{area}/2$ and the other two receive $\text{area}/4$ each.
 
-@fig-lbo-voronoi draws all three cases. The obtuse branch is not academic: it is
-**load-bearing on real cortical surfaces**, which are riddled with obtuse triangles,
-and it is exactly the case the barycentric scheme silently mishandles. The
-icosphere, being near-equilateral everywhere, **never exercises the obtuse branch** —
-which is precisely why an icosphere oracle, useful as it is for the *convergence*
-checks, cannot validate this code path; that needs a real mesh.
+@fig-lbo-voronoi draws all three cases. The obtuse branch is not academic. It is
+load-bearing on real cortical surfaces, which are riddled with obtuse triangles, and
+it is exactly the case the barycentric scheme silently mishandles. The icosphere,
+near-equilateral everywhere, never exercises the obtuse branch - which is precisely
+why an icosphere oracle, useful as it is for *convergence* checks, cannot validate
+this code path; that requires a real mesh.
 
 ```{python}
 #| label: fig-lbo-voronoi
@@ -452,165 +469,162 @@ plt.tight_layout()
 plt.show()
 ```
 
-### The supporting cast: `face_areas`, `vertex_areas`, `mesh_mass_matrix`
+### The supporting routines: `face_areas`, `vertex_areas`, `mesh_mass_matrix`
 
-Three public symbols build the mass, all **DIFF-JAX** (pure JAX, differentiable
-w.r.t. `mesh.vertices`):
+Three public symbols build the mass, all **DIFF-JAX** (pure JAX, differentiable with
+respect to `mesh.vertices`):
 
-- `face_areas(mesh)` → `(n_faces,)`. Half the magnitude of the face cross product,
-  $\text{area}_f=\tfrac12\lVert(v_1-v_0)\times(v_2-v_0)\rVert$. The atom the other two
-  build on.
-- `vertex_areas(mesh, *, scheme='voronoi')` → `(n_vertices,)`. The lumped-mass
+- `face_areas(mesh)` $\to$ `(n_faces,)`. Half the magnitude of the face cross
+  product, $\text{area}_f=\tfrac12\lVert(v_1-v_0)\times(v_2-v_0)\rVert$. The atom the
+  other two build on.
+- `vertex_areas(mesh, *, scheme='voronoi')` $\to$ `(n_vertices,)`. The lumped-mass
   diagonal $A_i$, by the two schemes above. This is the object nearly every shipped
-  algorithm actually consumes: `mean_curvature` forms $\tfrac12 Lv/A$,
-  `surface_smooth` forms $A\,v+t\,Lv$, the spectral embedding uses $1/\sqrt{A}$.
-- `mesh_mass_matrix(mesh, *, scheme='voronoi', lumped=True)` → a width-1 diagonal
-  **ELL**, $M_{ii}=A_i$, so that $M$ can flow through the same
-  [`apply_operator`](operators.qmd#sec-apply) seam as $L$ ($M x = A_i\,x$). A useful
-  symmetry, but — as the source docstring is careful to note — *not* a load-bearing
-  seam: the shipped algorithms take the `vertex_areas` **vector** directly rather
-  than going through this ELL. Reach for `vertex_areas` in your own code; reach for
-  `mesh_mass_matrix` only when you genuinely want $M$ as an operator alongside $L$.
+  algorithm consumes: `mean_curvature` forms $\tfrac12 Lv/A$, `surface_smooth` forms
+  $A\,v+t\,Lv$, the spectral embedding uses $1/\sqrt{A}$.
+- `mesh_mass_matrix(mesh, *, scheme='voronoi', lumped=True)` $\to$ a width-1 diagonal
+  ELL, $M_{ii}=A_i$, so $M$ can flow through the same
+  [`apply_operator`](operators.qmd#sec-apply) seam as $L$ ($Mx=A_i x$). This is a
+  convenient symmetry but not a load-bearing seam: as the source docstring notes, the
+  shipped algorithms take the `vertex_areas` *vector* directly. Reach for
+  `vertex_areas` in ordinary code; reach for `mesh_mass_matrix` only when you genuinely
+  want $M$ as an operator alongside $L$.
 
-The architectural point bears repeating because it shapes the whole API: $L$ and $M$
-are **separate symbols**. There is no `normalize=True` flag on the Laplacian. The
-algorithm that needs $\Delta$ forms $M^{-1}L$; the algorithm that needs a heat step
-forms $M+tL$; the eigensolver forms the pencil $(L,M)$. Keeping them apart is what
-lets one stiffness and one mass serve curvature, smoothing, and the spectrum without
-a combinatorial explosion of normalisation options.
+The architectural point bears repeating, because it shapes the whole API: $L$ and $M$
+are separate symbols. There is no `normalize=True` flag on the Laplacian. The algorithm
+that needs $\Delta$ forms $M^{-1}L$; the algorithm that needs a heat step forms $M+tL$;
+the eigensolver forms the pencil $(L,M)$. Keeping them apart is what lets one stiffness
+and one mass serve curvature, smoothing, and the spectrum without a combinatorial
+explosion of normalisation options.
 
-## First application — geodesic (heat) smoothing {#sec-smoothing}
+## First application: geodesic (heat) smoothing {#sec-smoothing}
 
-Return to the motivating question: smooth a noisy scalar **along the cortex**. We
-can now answer it, and the answer uses $L$ and $M$ together for the first time.
+We can now answer the motivating problem, using $L$ and $M$ together for the first
+time.
 
-### Smoothing *is* heat diffusion
+### Smoothing as heat diffusion
 
-The bridge is a fact from physics: **Gaussian smoothing and heat diffusion are the
-same operation.** If you let a field diffuse (obey the heat equation
-$\partial_t u = -\Delta u$, with our PSD sign) for a time $t$, the result is the
-field convolved with a Gaussian of variance $\sigma^2=2t$. On a flat domain that is
-the ordinary blur; on a *surface*, "diffuse along the surface" with the
-Laplace–Beltrami $\Delta$ gives exactly the geodesic smoothing we want — heat flows
-along the cortex, not across the space between folds. So to smooth a map by a target
-**FWHM**, we diffuse it for the matching time. The Gaussian relation
-$\text{FWHM}=2\sqrt{2\ln 2}\,\sigma$ with $\sigma^2=2t$ inverts to the calibration
+The bridge is a fact from physics: Gaussian smoothing and heat diffusion are the same
+operation. Let a field diffuse - obey the heat equation $\partial_t u = -\Delta u$,
+with our PSD sign - for a time $t$, and the result is the field convolved with a
+Gaussian of variance $\sigma^2=2t$. On a flat domain this is the ordinary blur; on a
+surface, diffusing with the Laplace--Beltrami $\Delta$ produces exactly the geodesic
+smoothing we want, with heat flowing along the cortex rather than across the space
+between folds. So to smooth a map by a target FWHM, we diffuse it for the matching
+time. The Gaussian relation $\text{FWHM}=2\sqrt{2\ln 2}\,\sigma$ with $\sigma^2=2t$
+inverts to the calibration
 
 $$
 t \;=\; \frac{\text{FWHM}^2}{16\ln 2}.
 $$ {#eq-fwhm}
 
-That is the one knob the user sets, in the mesh's coordinate units; everything else
-is solving for the diffused field.
+That is the one knob the user sets, in the mesh's coordinate units; everything else is
+solving for the diffused field.
 
-### One stable step beats many timid ones
+### Explicit versus implicit time stepping
 
-How do we actually evolve the field for time $t$? The naive recipe is *explicit*
-(forward Euler): $x \leftarrow x - \tau M^{-1}L x$ in small time-steps $\tau$. The
-obvious approach, and it works — until it doesn't: explicit diffusion is only
-**conditionally stable**, blowing up if $\tau$ is larger than a limit set by the
-smallest triangle, so a mesh with a few slivers forces thousands of microscopic
-steps. The cure is one idea: go **implicit** (backward Euler). Evaluate the
-diffusion at the *end* of the step instead of the start,
-$x \leftarrow x - \tau M^{-1}L x_{\text{new}}$, rearrange to
-$(M + \tau L)x_{\text{new}} = M x$, and the scheme becomes **unconditionally
-stable** — *any* step size is allowed. So a single backward-Euler step of the full
-time $t$ realises the whole diffusion at once:
+How do we evolve the field for time $t$? The explicit (forward-Euler) recipe is
+$x \leftarrow x - \tau M^{-1}L x$ in small time-steps $\tau$. It works, but only
+conditionally: explicit diffusion is stable only for $\tau$ below a limit set by the
+smallest triangle, so a mesh with a few slivers forces thousands of microscopic steps.
+The implicit (backward-Euler) scheme removes the restriction. Evaluate the diffusion at
+the *end* of the step, $x \leftarrow x - \tau M^{-1}L x_{\text{new}}$, rearrange to
+$(M + \tau L)x_{\text{new}} = M x$, and the scheme becomes unconditionally stable - any
+step size is allowed. A single backward-Euler step of the full time $t$ therefore
+realises the whole diffusion at once,
 
 $$
-(M + tL)\,x \;=\; M\,x_0.
+(M + tL)\,x \;=\; M\,x_0,
 $$ {#eq-backeuler}
 
-Here $x_0$ is the input field, $x$ the smoothed output, $M=\operatorname{diag}(A_i)$
-the lumped mass, $L$ the cotangent stiffness, $t$ from @eq-fwhm. The system matrix
-$M+tL$ is **symmetric positive-definite** (mass is positive, stiffness is PSD, the
-sum is SPD), which is exactly the class of system the next ingredient solves.
+with $x_0$ the input field, $x$ the smoothed output, $M=\operatorname{diag}(A_i)$ the
+lumped mass, $L$ the cotangent stiffness, and $t$ from @eq-fwhm. The system matrix
+$M+tL$ is symmetric positive-definite (mass is positive, stiffness is PSD, the sum is
+SPD), exactly the class the next ingredient solves.
 
-A caveat the source is candid about, and so are we: backward Euler is
-*unconditionally stable* but only **first-order accurate** in $t$. One giant step is
-a Padé approximation $(I+tM^{-1}L)^{-1}$ to the true heat propagator
-$\exp(-tM^{-1}L)$; for the smooth maps it is built for, the difference is negligible,
-but for a perfectly sharp delta the single step under-spreads. Splitting the time
-into $K$ sub-steps, $(I+\tfrac{t}{K}M^{-1}L)^{-K}$, converges to the exact Gaussian
-as $K$ grows — a clean instance of the unit's *convergence-under-refinement* theme,
-demonstrated in @fig-lbo-smoothing. `surface_smooth` takes the single-step path,
-which is the right trade for real (already band-limited) cortical maps.
+One caveat, which the source is candid about: backward Euler is unconditionally stable
+but only first-order accurate in $t$. A single giant step is a Padé approximation
+$(I+tM^{-1}L)^{-1}$ to the true heat propagator $\exp(-tM^{-1}L)$; for the smooth maps
+it is built for, the difference is negligible, but for a perfectly sharp delta the
+single step under-spreads. Splitting the time into $K$ sub-steps,
+$(I+\tfrac{t}{K}M^{-1}L)^{-K}$, converges to the exact Gaussian as $K$ grows - a clean
+instance of the unit's convergence-under-refinement theme, demonstrated in
+@fig-lbo-smoothing. `surface_smooth` takes the single-step path, the right trade for
+real, already band-limited cortical maps.
 
-### Solving it matrix-free: `cg`
+### Solving it matrix-free with `cg`
 
-We need to solve @eq-backeuler. We **do not** want to factorise $M+tL$: on the GPU
-that means a Cholesky through the cuSolver handle pool, exactly the path
+We must solve @eq-backeuler. We do not want to factorise $M+tL$: on the GPU that means
+a Cholesky through the cuSolver handle pool, the path
 [foundations](foundations.qmd#sec-devices) flags as wedge-prone, and it would force
-materialising the matrix. Because $M+tL$ is SPD and we only ever need its *action*
-on a vector — $v\mapsto M v + t\,Lv = A_i v + t\,(Lv)$ — the right solver is
-**conjugate gradients**, which is built from matvecs and inner products alone, no
-factorisation, no cuSolver.
+materialising the matrix. Because $M+tL$ is SPD and we only ever need its *action* on a
+vector - $v\mapsto M v + t\,Lv = A_i v + t\,(Lv)$ - the natural solver is conjugate
+gradients, built from matvecs and inner products alone, with no factorisation and no
+cuSolver.
 
-`linalg.krylov.cg(a, b, *, x0=None, tol=1e-6, atol=0.0, maxiter=None, l2=0.0)` is
-that solver (**DIFF-JAX**). Its first argument `a` is *either* a dense SPD matrix
-*or* a **callable** computing the matvec $v\mapsto Av$ — and the matrix-free,
-callable form is the one `surface_smooth` uses, so $M+tL$ is never materialised. It
-wraps `jax.scipy.sparse.linalg.cg`, which carries its own **implicit
-differentiation** rule: gradients flow through the solve without unrolling the
-iterations, so `surface_smooth` is differentiable w.r.t. the field `values`. The
-`l2` argument adds a Tikhonov ridge $\lVert\cdot\rVert$ to the diagonal (matrix-free,
-$Av+\ell_2 v$) and may be a *traced* scalar so the damping can vary inside a `jit` —
-the seam the registration normal-equations solve reuses, though smoothing leaves it
-at $0$. CG converges in at most $n$ exact steps for an $n\times n$ SPD system;
-`maxiter` defaults to JAX's $10n$, `tol` to a relative residual of $10^{-6}$.
+`linalg.krylov.cg(a, b, *, x0=None, tol=1e-6, atol=0.0, maxiter=None, l2=0.0)` is that
+solver (**DIFF-JAX**). Its first argument `a` is either a dense SPD matrix or a callable
+computing the matvec $v\mapsto Av$, and the matrix-free callable form is the one
+`surface_smooth` uses, so $M+tL$ is never materialised. It wraps
+`jax.scipy.sparse.linalg.cg`, which carries its own implicit-differentiation rule:
+gradients flow through the solve without unrolling the iterations, so `surface_smooth`
+is differentiable with respect to the field `values`. The `l2` argument adds a Tikhonov
+ridge to the diagonal (matrix-free, $Av+\ell_2 v$) and may be a *traced* scalar so the
+damping can vary inside a `jit` - the seam the registration normal-equations solve
+reuses, though smoothing leaves it at $0$. CG converges in at most $n$ exact steps for
+an $n\times n$ SPD system; `maxiter` defaults to JAX's $10n$, `tol` to a relative
+residual of $10^{-6}$.
 
-### `surface_smooth` — putting it together
+### `surface_smooth`: putting it together
 
 `surface_smooth(mesh, values, *, fwhm, area_scheme='voronoi', roi=None, tol=1e-6,
-maxiter=None)` is the public geodesic smoother. Its body is the whole story of this
-page in a dozen lines:
+maxiter=None)` is the public geodesic smoother, and its body is the whole chapter in a
+dozen lines.
 
-1. `area = vertex_areas(mesh, scheme=area_scheme)` — the lumped mass diagonal $M$
+1. `area = vertex_areas(mesh, scheme=area_scheme)` - the lumped mass diagonal $M$
    (@sec-mass).
-2. `lap = mesh_cotangent_laplacian(mesh)` — the stiffness $L$, built **once** on the
-   host (HOST-CTOR, @sec-cotangent).
-3. `t = fwhm**2 / (16 * log 2)` — the FWHM→time calibration, @eq-fwhm.
+2. `lap = mesh_cotangent_laplacian(mesh)` - the stiffness $L$, built once on the host
+   (HOST-CTOR, @sec-cotangent).
+3. `t = fwhm**2 / (16 * log 2)` - the FWHM-to-time calibration, @eq-fwhm.
 4. Define the matvec `_matvec(v) = area * v + t * apply_operator(lap, v)`, i.e.
    $v\mapsto(M+tL)v$, threading $L$ through the format-agnostic
-   [`apply_operator`](operators.qmd#sec-apply) seam so the same code serves a flat
-   ELL or a sectioned one.
-5. `return cg(_matvec, area * values, ...)` — solve @eq-backeuler with the
-   right-hand side $M x_0$, matrix-free.
+   [`apply_operator`](operators.qmd#sec-apply) seam so the same code serves a flat or
+   sectioned ELL.
+5. `return cg(_matvec, area * values, ...)` - solve @eq-backeuler with right-hand side
+   $M x_0$, matrix-free.
 
-It accepts a batched `values` of shape `(..., n_vertices)` (vertex axis last), so
-many maps smooth at once. `fwhm=0` is the identity. And because $\mathbf{1}^\top L=0$
-(every column of $L$ sums to zero, the transpose of the zero-row-sum property), the
-smoother **conserves the area-weighted integral** $\sum_i A_i x_i$ — no signal is
-created or destroyed, only redistributed — and it fixes constants exactly. That
-conservation is a free correctness oracle you can assert in a test, the smoothing
-analogue of "the row sums are zero."
+It accepts a batched `values` of shape `(..., n_vertices)` (vertex axis last), so many
+maps smooth at once, and `fwhm=0` is the identity. Because $\mathbf{1}^\top L=0$ (every
+column of $L$ sums to zero, the transpose of the zero-row-sum property), the smoother
+conserves the area-weighted integral $\sum_i A_i x_i$: no signal is created or
+destroyed, only redistributed, and constants are fixed exactly. That conservation law
+is a free correctness oracle to assert in a test - the smoothing analogue of "the row
+sums are zero," and itself a symmetry statement (the smoother commutes with adding a
+constant and preserves total mass).
 
 ### The medial-wall guard: `_roi_neumann_laplacian`
 
-Real cortical maps come with a **medial wall** — the non-cortical patch where the
-hemisphere surfaces meet — whose vertex values are meaningless (often huge, or NaN).
-Smooth naively and that junk bleeds across the boundary into good cortex. The fix is
-a **Neumann (no-flux) boundary** at the ROI edge: heat is not allowed to flow across
-it.
+Real cortical maps carry a medial wall - the non-cortical patch where the hemisphere
+surfaces meet - whose vertex values are meaningless and often huge or NaN. Smoothing
+naively lets that junk bleed across the boundary into good cortex. The fix is a Neumann
+(no-flux) boundary at the ROI edge: heat is not permitted to flow across it.
 
-`_roi_neumann_laplacian(lap, roi)` implements this by editing the stiffness ELL.
-Intuitively: *drop every edge that crosses the boundary, then repair the diagonal so
-each surviving row still sums to zero* — because a zero-row-sum row passes no net
-flux, dropping the cross-boundary couplings and rebuilding the diagonal as the sum of
-only the *surviving* in-ROI weights gives a no-flux wall for free. Concretely it
-keeps an off-diagonal entry only when both endpoints are in the ROI (`roi[i] &
-roi[idx] & is_offdiag`, where `is_offdiag` masks out column 0 — this is why the ELL's
-diagonal-first layout matters), sets each in-ROI diagonal to minus the sum of its
-surviving off-diagonals, and zeroes out-of-ROI rows entirely so the mass term alone
-holds those vertices at their input. (`surface_smooth` requires a flat `ELL` for ROI
-masking — it raises on a `SectionedELL` — and it also drives the CG solve from the
-ROI data alone, restoring out-of-ROI vertices afterward, so meaningless medial-wall
-magnitudes never pollute $\lVert b\rVert$ and starve the ROI of precision.) This is
-the `wb_command -metric-smoothing -roi` guard, native to JAX. A documented
-divergence worth flagging: `surface_smooth` is the *heat-diffusion* geodesic
-smoother, **not** byte-identical to Connectome Workbench's geodesic-*distance*-weighted
-Gaussian — same intent, different kernel, validated by class and correlation rather
-than bit-parity (`docs/design/geometry-suite.md`).
+`_roi_neumann_laplacian(lap, roi)` implements this by editing the stiffness ELL. The
+idea is to drop every edge that crosses the boundary and then repair the diagonal so
+each surviving row still sums to zero - because a zero-row-sum row passes no net flux,
+dropping the cross-boundary couplings and rebuilding the diagonal from only the
+surviving in-ROI weights produces a no-flux wall. Concretely it keeps an off-diagonal
+entry only when both endpoints lie in the ROI (`roi[i] & roi[idx] & is_offdiag`, where
+`is_offdiag` masks out column 0 - this is why the diagonal-first ELL layout matters),
+sets each in-ROI diagonal to minus the sum of its surviving off-diagonals, and zeroes
+out-of-ROI rows entirely so the mass term alone holds those vertices at their input.
+(`surface_smooth` requires a flat `ELL` for ROI masking - it raises on a `SectionedELL`
+- and drives the CG solve from the ROI data alone, restoring out-of-ROI vertices
+afterward, so meaningless medial-wall magnitudes never inflate $\lVert b\rVert$ and
+starve the ROI of precision.) This is the `wb_command -metric-smoothing -roi` guard,
+native to JAX. One documented divergence: `surface_smooth` is the heat-diffusion
+geodesic smoother, not byte-identical to Connectome Workbench's
+geodesic-*distance*-weighted Gaussian - the same intent, a different kernel, validated
+by class and correlation rather than bit-parity (`docs/design/geometry-suite.md`).
 
 ```{python}
 #| label: fig-lbo-smoothing
@@ -718,45 +732,46 @@ plt.tight_layout()
 plt.show()
 ```
 
-## What you now hold
+## Summary and what follows
 
-You have the central object of the whole unit. The cotangent stiffness $L$
-(@sec-cotangent) and the lumped mass $M$ (@sec-mass) compose into the discrete
-Laplace–Beltrami operator $\Delta=M^{-1}L$, and you have seen them combine two ways:
-$M^{-1}L$ for differential quantities and $M+tL$ for diffusion. The very same pieces
-power the next two pages — **curvature** reads $\tfrac12 M^{-1}L$ applied to the
-vertex *positions* ([the mean-curvature page](curvature.qmd#sec-mean), where the
-differentiable `_cotangent_apply` path is the engine), and the **surface spectrum**
-solves the generalised eigenproblem $L\phi_k=\lambda_k M\phi_k$
-([the spectral page](spectral.qmd#sec-eigen)). The full uniform-vs-cotangent,
-graph-vs-metric contrast — when the connectivity-only graph Laplacian is the *right*
-choice and when it is not — is taken up on
-[the graph-geometry page](graph-geometry.qmd#sec-graph-laplacian). For the solver
-machinery behind the smoothing step, see
-[the conjugate-gradient section of the solvers page](solvers.qmd#sec-cg).
+The cotangent stiffness $L$ (@sec-cotangent) and the lumped mass $M$ (@sec-mass)
+compose into the discrete Laplace--Beltrami operator $\Delta=M^{-1}L$, and we have seen
+them combine in two ways: $M^{-1}L$ for differential quantities and $M+tL$ for
+diffusion. Both are intrinsic - determined by the metric, invariant to rigid motion and
+to the choice of triangulation, equivariant under scaling and under vertex relabelling -
+which is exactly the inductive bias that makes $\Delta$ the natural operator for surface
+analysis. The same two pieces drive the next two chapters: curvature reads $\tfrac12
+M^{-1}L$ applied to the vertex *positions* ([the mean-curvature chapter](curvature.qmd#sec-mean),
+where the differentiable `_cotangent_apply` path is the engine), and the surface
+spectrum solves the generalised eigenproblem $L\phi_k=\lambda_k M\phi_k$
+([the spectral chapter](spectral.qmd#sec-eigen)). The full uniform-versus-cotangent,
+graph-versus-metric contrast - when the connectivity-only graph Laplacian is the right
+choice and when it is not - is taken up under
+[graph geometry](graph-geometry.qmd#sec-graph-laplacian). For the solver machinery behind
+the smoothing step, see [the conjugate-gradient section of the solvers chapter](solvers.qmd#sec-cg).
 
 ## Further reading
 
 - Pinkall, U., & Polthier, K. (1993). *Computing discrete minimal surfaces and their
-  conjugates*. **Experimental Mathematics**, 2(1), 15–36. — The origin of the
-  cotangent weight as a discrete Dirichlet-energy / minimal-surface coefficient.
+  conjugates*. **Experimental Mathematics**, 2(1), 15–36. The origin of the cotangent
+  weight as a discrete Dirichlet-energy / minimal-surface coefficient.
 - Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). *Discrete
-  differential-geometry operators for triangulated 2-manifolds*. In **Visualization
-  and Mathematics III** (pp. 35–57). Springer. — The mixed-Voronoi mass and the
+  differential-geometry operators for triangulated 2-manifolds*. In **Visualization and
+  Mathematics III** (pp. 35–57). Springer. The mixed-Voronoi mass and the
   curvature-normal operator nitrix implements.
 - Desbrun, M., Meyer, M., Schröder, P., & Barr, A. H. (1999). *Implicit fairing of
   irregular meshes using diffusion and curvature flow*. In **SIGGRAPH '99**
-  (pp. 317–324). — The backward-Euler heat-smoothing scheme of @sec-smoothing.
-- Crane, K. (2018). *Discrete Differential Geometry: An Applied Introduction*.
-  Lecture notes, Carnegie Mellon University. — The most accessible modern derivation
-  of $L$, $M$, and $\Delta=M^{-1}L$ from first principles.
+  (pp. 317–324). The backward-Euler heat-smoothing scheme of @sec-smoothing.
+- Crane, K. (2018). *Discrete Differential Geometry: An Applied Introduction*. Lecture
+  notes, Carnegie Mellon University. The most accessible modern derivation of $L$, $M$,
+  and $\Delta=M^{-1}L$ from first principles.
 - Botsch, M., Kobbelt, L., Pauly, M., Alliez, P., & Lévy, B. (2010). *Polygon Mesh
-  Processing*. A K Peters / CRC Press. — Standard reference for the FEM view of mesh
+  Processing*. A K Peters / CRC Press. Standard reference for the FEM view of mesh
   operators and the smoothing/fairing pipeline.
 - Reuter, M., Wolter, F.-E., & Peinecke, N. (2006). *Laplace–Beltrami spectra as
-  "Shape-DNA" of surfaces and solids*. **Computer-Aided Design**, 38(4), 342–366. —
-  The generalised eigenproblem $L\phi=\lambda M\phi$ that the
-  [spectral page](spectral.qmd#sec-eigen) builds on.
+  "Shape-DNA" of surfaces and solids*. **Computer-Aided Design**, 38(4), 342–366. The
+  generalised eigenproblem $L\phi=\lambda M\phi$ the
+  [spectral chapter](spectral.qmd#sec-eigen) builds on.
 
 ## See also
 
