@@ -42,6 +42,9 @@ def _coarse_random_field(
     upsamples to ``spatial_shape``.  With ``channels`` it generates a
     vector field with that trailing channel count (channels-last);
     otherwise a scalar field.
+
+    Note: This is an upsampling of i.i.d. Gaussian noise, not a true Gaussian
+    random field.
     """
     coarse = tuple(
         max(2, int(round(s * grid_fraction))) for s in spatial_shape

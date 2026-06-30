@@ -1,14 +1,12 @@
 # nitrix — Specification (v1, consolidated)
 
 > **Status.** Architectural specification, consolidated against the shipped
-> code (2026-06-24). This single document supersedes and folds in the former
-> `SPEC_UPDATE.md` / `SPEC_UPDATE_v0.2…v0.5.md` (their binding content is now
-> inline; see the **Provenance map**, §11, which maps old section numbers here
-> so existing in-code `SPEC_UPDATE §x` citations still resolve).
+> code (2026-06-24).
 > **Scope.** *What* nitrix is, what belongs in it, what does not, and the
-> contract it offers upstream libraries (`thrux`, `bitsjax`, `nimox`) and
-> downstream consumers (`ilex`, `entense`). The firm concern boundaries (§1
-> non-goals, §6) are load-bearing and take precedence over any convenience.
+> contract it offers downstream libraries (`thrux`, `bitsjax`, `nimox`) and
+> their downstream consumers (`ilex`, `entense`). The firm concern boundaries
+> (§1 non-goals, §6) are load-bearing invariants and take precedence over any
+> convenience.
 
 ---
 
@@ -19,25 +17,22 @@ ecosystem: a pure-numeric, all-JAX library where every public symbol takes JAX
 arrays (and, where relevant, a `jax.random` key or a static shape/param spec) and
 returns JAX arrays. nitrix has no knowledge of image containers, sidecar
 metadata, BIDS, filesystems, training loops, or PyTree modules. Those concerns
-belong to libraries that *depend on* nitrix.
-
-The long-term vision is a substrate of differentiable numerical primitives
-sufficient to build software in the class of FSL / FreeSurfer / ANTs / AFNI on
-GPU-accelerated hardware. In practice the surface has grown consumer-first
-(ilex / JOSA ports surface a primitive → it lands here), and that is expected to
-continue — governed not by "declared in advance" but by the separation-of-
-concerns invariant (§6, §9).
+belong to libraries that *depend on* nitrix. The long-term vision is a substrate
+of differentiable numerical primitives sufficient to build performant software
+in the class of FSL / FreeSurfer / ANTs / AFNI on GPU-accelerated hardware.
 
 ### 1.1 Hardware scope
 
 - **In scope:** NVIDIA GPUs of **Ampere generation and newer** (A100, A40, RTX
   30/40/50xx, L4/L40, H100/H200, B100/B200) via the **Pallas Triton** backend,
-  and a **pure-JAX CPU fallback** (functionally correct; CPU performance is not a
-  goal, but is exercised in CI as the correctness floor).
+  and a **pure-JAX CPU fallback** (CPU performance
+  parity with community baselines is secondary as a goal, and GPU performance
+  degradation must always be a guardrail when developing to improve CPU perf).
 - **Out of scope at GA:** TPU / `pallas-tpu` (no dev access; the streaming-kernel
   design is architecturally compatible — revisit post-1.0 if access appears),
-  AMD ROCm, Apple Metal, Intel GPUs (all fall back to JAX-CPU), and the
-  Mosaic-GPU backend (Hopper-only would exclude most academic-lab hardware).
+  AMD ROCm, Apple Metal, Intel GPUs (all fall back to JAX-CPU)
+- The Mosaic-GPU backend is deferred but aspirational, as it would exclude many
+  academic practitioners (Hopper or newer).
 - **Accepted risk:** Pallas Triton is maintained best-effort by JAX, not as the
   primary Pallas target. The JAX fallback is the contractual floor; the §3.2
   fallback machinery covers Triton regressions, and releases pin a minimum JAX
@@ -47,8 +42,8 @@ concerns invariant (§6, §9).
 
 - No NIfTI / GIfTI / CIfTI I/O — that is `thrux`.
 - No transform / pipeline / dataset abstractions — that is `bitsjax` / `entense`.
-- No Equinox / PyTree modules — those are `nimox`. nitrix returns `NamedTuple`s
-  or frozen dataclasses of arrays, never module objects.
+- No Equinox / PyTree modules — those are `nimox`. nitrix returns `NamedTuple`s,
+  frozen dataclasses of arrays, or containers registered as PyTrees, never module objects.
 - No template / atlas registration as user-facing API (low-level primitives only;
   atlas data structures live in `thrux`).
 - No `loss` namespace and no objective scalarisation — that is `nimox` (§5).
@@ -57,21 +52,23 @@ concerns invariant (§6, §9).
 
 ## 2. Design tenets
 
-1. **Pure functional.** Every public symbol is a function over arrays. *Clarified
-   (formerly "(Array,…)→Array"):* a symbol may also be a **keyed pure generator**
-   — `(shape | params, key) -> Array`, where the `jax.random` key is itself a
-   typed `Array` — so `augment.*` generators and randomized solvers
-   (`stats.pca(solver='randomized')`) are in scope. Pure in the JAX sense:
-   deterministic given `(inputs, key)`, no hidden state. RNG *policy* (which key,
-   how to split, schedules) stays with the caller. No PyTrees-as-modules in the
-   public API; PyTree-shaped *config* records are acceptable keyword args.
+1. **Pure functional.** Every public symbol is a pure function without side
+   effects or I/O / disk operations. A small family of host-side constructor
+   operations is permitted for functions on dynamically sized arrays.
+   Pure in the JAX sense: deterministic given `(inputs, key)`, no hidden
+   state. RNG *policy* (which key, how to split, schedules) stays with the
+   caller. No PyTrees-as-modules in the public API; PyTree-shaped config
+   records or result containers are acceptable.
 2. **All differentiable.** Subgradients are explicit where appropriate; custom
    VJPs are registered where numerical stability or efficiency requires it.
    Non-differentiable outputs (hard labels, arg-max) are documented as such.
+   The `nitrix` op matrix tracks transform compatibility (differentiability,
+   JIT-compatibility, etc.) of operations; aspirationally, the matrix is fully
+   green or documented as an intentional deviation.
 3. **JAX + Pallas-Triton on NVIDIA, with JAX fallback.** Hardware-aware Pallas
-   Triton kernels for the marquee ops on Ampere+; a pure-JAX fallback is always
+   Triton kernels for marquee ops on Ampere+; a pure-JAX fallback is always
    present and exercised in CI. Backend selection is deterministic and
-   user-overridable (§3). CPU is functionally supported; CPU perf is not a goal.
+   user-overridable (§3). CPU is functionally supported.
 4. **Typed at boundaries.** `jaxtyping` annotations on all public functions. No
    bare `Array | NDArray` unions.
 5. **No transitive heavyweight deps.** nitrix may import only `jax`, `jaxtyping`,
@@ -140,10 +137,11 @@ concerns invariant (§6, §9).
 
 - **`backend=`** — the *execution engine*: `'pallas-cuda'` vs `'jax'`. Resolves
   via `nitrix._internal.backend.resolve_backend`.
-- **`driver=`** — the *numerical variant* of the same math (the scipy/torch
-  convention). Resolves via `nitrix._internal.config.resolve_driver`. Distinct
-  from `backend=` (engine), `method=` (algorithm *family*, e.g. interpolator or
-  eigensolver), and `representation=` (e.g. registration group/algebra).
+- **`driver=`** — the *numerical variant* of the same math. Resolves via
+  `nitrix._internal.config.resolve_driver`. Distinct from:
+  - `backend=` (engine)
+  - `method=` (algorithm *family*, e.g. interpolator or eigensolver)
+  - `representation=` (e.g. registration group/algebra).
 
 Keep them distinct: `backend` picks *where/which kernel* runs; `driver` picks
 *which numerically-divergent recipe*.
@@ -151,8 +149,8 @@ Keep them distinct: `backend` picks *where/which kernel* runs; `driver` picks
 **`dtype` is a further distinct axis** — the *precision of the data*, governed by
 the precision policy (§2 tenet 11), **not** by `driver`. `driver` selects an
 algorithm at a *fixed* precision; `dtype` selects the precision itself. Reduced
-precision is admitted only at the NN-forward seam under a ≥float32 accumulation
-floor, and is never a divergent-op entry.
+precision is currently admitted only at the NN-forward seam under a ≥float32
+accumulation floor, and is never a divergent-op entry.
 
 ### 3.2 Backend resolution (§7.2) + fallback observability
 
@@ -169,23 +167,21 @@ silent disable) if a Triton change breaks a kernel between pins.
 
 ### 3.3 Driver resolution + reproducibility mode
 
-`resolve_driver(driver, *, op, fast)` returns the concrete variant: an explicit
-`driver` wins; else the registered **canonical** under reproducibility mode; else
-`fast()` (the hardware-/shape-aware pick, evaluated lazily). Reproducibility mode
-is a trace-time `contextvars` flag seeded from `NITRIX_REPRODUCIBLE`, toggled by
-`nitrix.reproducible()` (context manager, nestable; `reproducible(False)` carves
-a fast region) / `set_reproducible()`. Every divergent op is registered in the
-central manifest (`nitrix._internal._divergent_ops`, eager-imported so
-`nitrix.divergent_ops()` is complete at `import nitrix`) with
-`{op, canonical, fast, driver_values, tolerance}`. Public surface at the package
-root: `reproducible`, `reproducible_enabled`, `set_reproducible`, `divergent_ops`,
-`DivergentOp`. **Registered divergent ops (5):** `signal.iir` (fft/scan/
-associative; canon `scan`), `nn.ssm.selective_scan` (sequential/associative/
-chunked; canon `sequential`), `geometry.cubic_bspline_prefilter` (sequential/
-associative; canon `sequential`), `register.field_smooth` (fir/recursive; canon
-`fir`), `metrics.joint_histogram` (onehot/scatter — the determinism case; canon
-`onehot`). A completeness guard (§8) fails CI if a new platform-flip is added
-ungoverned.
+`resolve_driver(driver, *, op, fast)` returns the concrete variant under these
+rules:
+- An explicit `driver` wins;
+- else the registered **canonical** under reproducibility mode;
+- else `fast()` (the hardware-/shape-aware pick, evaluated lazily).
+
+Reproducibility mode is a trace-time `contextvars` flag seeded from
+`NITRIX_REPRODUCIBLE`, toggled by `nitrix.reproducible()` (context manager,
+nestable; `reproducible(False)` carves a fast region) / `set_reproducible()`.
+Every divergent op is registered in the central manifest (`nitrix._internal.
+_divergent_ops`, eager-imported so `nitrix.divergent_ops()` is complete at
+`import nitrix`) with `{op, canonical, fast, driver_values, tolerance}`.
+Public surface at the package root:
+`reproducible`, `reproducible_enabled`, `set_reproducible`, `divergent_ops`,
+A completeness guard (§8) fails CI if a new platform-flip is added ungoverned.
 
 ### 3.4 Pallas surface
 
@@ -204,7 +200,7 @@ nitrix's concern — it is delegated to the sibling perf suite (`bench/`,
 The code is the surface-of-record; this section states each subsystem's intent,
 its key surface, and any contract/boundary. "[CORE]" marks the marquee substrate.
 
-### 4.1 `nitrix.semiring` — KeOps-style streaming reductions  [CORE]
+### 4.1 `nitrix.semiring` — KeOps-style streaming reductions
 
 Arbitrary-algebra reductions over matmul, convolution, and ELL-sparse adjacency
 contraction, with the K-loop folding rank-1 combines into the accumulator (the
@@ -217,16 +213,17 @@ requirement. **Built-ins:** `REAL`, `LOG`, `TROPICAL_MAX_PLUS`,
 **Surface:** `semiring_matmul`, `semiring_conv`, `semiring_ell_matmul`,
 `semiring_ell_rmatvec`, `semiring_ell_edge_aggregate` (user `edge_fn` per
 (vertex, neighbour) reduced under REAL/TROPICAL_*), `ell_row_softmax`, each with a
-`reference_*` JAX oracle. No tensor-core `dot` (the algebra is general); no BCOO.
+`reference_*` JAX oracle. No tensor-core `dot` (the algebra is general).
 User-defined algebras are forward-only by default (wrap in `custom_vjp` to
 differentiate).
 
-### 4.2 `nitrix.sparse` — geometry-aware sparsity  [CORE]
+### 4.2 `nitrix.sparse` — geometry-aware sparsity
 
 **ELL is the primary format** (`ELL`: `(values, indices)` + row count +
-algebra-identity padding) — brain adjacencies are naturally fixed-degree.
-**`SectionedELL`** (CORE, not stretch) buckets variable-degree rows by
-`ceil(log2(k))` and scatters back, preventing silent OOM on ragged graphs
+algebra-identity padding) — regular geometries (e.g., volumetric lattice,
+icosphere mesh) are naturally fixed-degree.
+**`SectionedELL`** buckets variable-degree rows by `ceil(log2(k))` and
+scatters back, preventing silent OOM on ragged graphs
 (`sectioned_ell_from_ragged`, `sectioned_semiring_ell_matmul/_rmatvec`). Plus
 regular-grid sparsity (`grid_identity`, `grid_laplacian`, `regular_grid_stencil`)
 and a mesh layer atop ELL: `Mesh`, `icosphere`, `IcosphereHierarchy`
@@ -235,9 +232,16 @@ and a mesh layer atop ELL: `Mesh`, `icosphere`, `IcosphereHierarchy`
 are ELLs), `mesh_cotangent_laplacian`, `mesh_k_ring_adjacency`,
 `mesh_laplacian_smooth`, `mesh_mass_matrix`, `mesh_pool_max`/`mesh_unpool_max`,
 `mesh_bary_upsample`, `mesh_coarsen_meanpool`, `vertex_areas`, `face_areas`,
-`compute_vertex_normals`. No `jax.experimental.sparse` BCOO.
+`compute_vertex_normals`. `ELL` matrices are permitted to lower interally to
+`jax.experimental.sparse` BCOO when 3 criteria are all satisfied:
+- lowering takes advantage of a cuSPARSE backend or other performant routine
+  not otherwise accessible by a naive XLA compiler, and that lowering
+  demonstrably and empirically improves performance
+- it can be guaranteed that no memory explosion occurs in intermediates
+  (e.g., dense materialisation in spspmm)
+- no BCOO value leaks out of the function's internals into the return values
 
-### 4.3 `nitrix.morphology` — built atop semiring  [CORE]
+### 4.3 `nitrix.morphology`
 
 Binary/grayscale `dilate`/`erode`/`open`/`close` and `distance_transform`(`_edt`)
 as TROPICAL_MIN/MAX_PLUS specialisations of the semiring conv; plus gather-backed
@@ -247,7 +251,7 @@ ops outside the semiring (state unbounded in the K-loop): `median_filter`
 (strided argmax variant of dilate; cross-framework parity is argmax-of-output,
 not raw-logit).
 
-### 4.4 `nitrix.smoothing` — edge-preserving / baseline  [CORE]
+### 4.4 `nitrix.smoothing` — edge-preserving / baseline
 
 - `gaussian` — separable Gaussian, the unconditional baseline (the FIR vs
   Young–van Vliet recursive engine is the `driver` axis, §3.3).
@@ -265,10 +269,6 @@ not raw-logit).
 - `susan_emulator` — `bilateral_gaussian` + `median_filter` composition
   (documents its deltas from FSL SUSAN); `brute_force_knn`,
   `spatial_cube_neighbourhood` helpers.
-- **`permutohedral_lattice` is RETIRED** (not deferred): bounded support dissolves
-  the lattice/hash/splat-blur-slice machinery and its gradient discontinuity.
-  Bounded bilateral supersedes its role; the symbol does not exist and the
-  namespace is not reserved.
 
 ### 4.5 `nitrix.linalg`
 
@@ -276,7 +276,8 @@ Matrix utilities (`sym2vec`/`vec2sym`/`squareform`/`symmetric`/`toeplitz`(`_2d`)
 `delete_diagonal`/`fill_diagonal`/`recondition_eigenspaces`); confound regression
 (`residualise`, `partial_residualise`); solvers (`solve`, `cho_solve`, `cg`, and
 the cuSolver-safe `safe_*` family that probe-and-latch to CPU on a dead solver
-pool); `matrix_exp`/`matrix_log`; `randomized_svd`; nonlinear least squares /
+pool: recommend phasing these out in favour of hand-rolled cuSolver-free GPU
+fallbacks); `matrix_exp`/`matrix_log`; `randomized_svd`; nonlinear least squares /
 optimisation (`gauss_newton`, `levenberg_marquardt`, `implicit_least_squares`,
 `implicit_minimize`, `OptimizeResult`); parameterised kernels (`gaussian_kernel`,
 `rbf_kernel`, `linear_kernel`, `polynomial_kernel`, `cosine_kernel`,
@@ -297,10 +298,10 @@ mixed models (`glmm_fit`); non-Gaussian GLMs (`beta_fit`, `gaulss_fit`,
 `solver='randomized'`); bases (`bspline_basis`, `hsgp_basis`, `gp_basis`,
 `gp_factor_smooth`); shrinkage / sparse precision (`ledoit_wolf`, `oas`, `glasso`,
 `glasso_path`); effect size (`confidence_interval`, `standardized_effect`).
-Submodules: **`stats.lme`** [CORE, promoted from STRETCH] — voxelwise `reml_fit`
-(FaST-LMM spectral rotation, vmap over voxels with no `V·N²` intermediate; ~5e-3
-vs statsmodels), `lme_fit`, `flame_two_level` (FSL FLAME); **`stats.inference`** —
-`permutation_test`, `tfce`, `cluster_size_map`, `fdr`, `bonferroni`;
+Submodules: **`stats.lme`** — voxelwise `reml_fit` (FaST-LMM spectral rotation,
+vmap over voxels with no `V·N²` intermediate; ~5e-3 vs statsmodels), `lme_fit`,
+`flame_two_level` (FSL FLAME); **`stats.inference`** — `permutation_test`,
+`tfce`, `cluster_size_map`, `fdr`, `bonferroni`;
 **`stats.gaussian`** — distributional score kernels (`gaussian_nll`,
 `kl_diagonal_gaussian`, §5). All return `NamedTuple`s of arrays, never modules.
 
@@ -322,7 +323,7 @@ Grids & warps (`identity_grid`, `spatial_transform`(`_batched`), `resample`,
 `sample_at_points`, `integrate_velocity_field`, `jacobian_displacement`/`_det`,
 `spatial_gradient`, `downsample`/`upsample`/`gaussian_pyramid`); the `Interpolator`
 ADT (`Linear`, `NearestNeighbour`, `Lanczos`, `CubicBSpline` — whose recursive
-prefilter is the `driver` axis, §3.3 — `CatmullRomCubic`, `MultiLabel`) dispatched
+prefilter is the `driver` axis (§3.3), `CatmullRomCubic`, `MultiLabel`) dispatched
 by `method=`; affine/Lie chart (`rigid_exp`/`rigid_log`, `affine_exp`,
 `params_to_affine_matrix`/`affine_matrix_to_params`, `angles_to_rotation_matrix`/
 inverse, `fit_affine`, `apply_affine`, `affine_grid`, `make_square_affine`,
@@ -467,13 +468,14 @@ estimator container (§6.5). `ilex`/`entense` import those, not nitrix directly
 
 ### 6.4 Structural rules (firm)
 - **No new top-level subpackage without a substrate-composition story** (no
-  classifiers, no models, no application packages). `augment` qualifies as a
-  numeric category (§4.14); it is not a precedent for model packages.
-- **No PyTree-of-arrays / module classes** — `NamedTuple` or frozen dataclass
+  deep models, no dataset utilities, no application packages). `augment`
+  qualifies as a numeric category (§4.14) and `nn` as specific fused
+  operations; these are not a precedent for model namespaces.
+- **No module classes** — `NamedTuple`, frozen dataclass, registered PyTrees
   only.
 - **No "message-passing" base class.** Graph/mesh ops are reductions over ELL.
-- **No hardware-specific code paths** beyond the `pallas-cuda` / `jax` pair.
-- **Prefer a keyword over forking a function.**
+- **Prefer a keyword over forking a function.** If the function must be
+  forked, common routines should be hoisted into abstract helpers.
 
 ### 6.5 Estimator (fit/apply) seam  [NORMATIVE]
 
@@ -562,9 +564,8 @@ and the `augment.geometric` family stay in.
 hold: (1) a concrete named consumer is
 blocked/workaround-laden without it; (2) substrate composition is verified (no new
 kernel, no parallel API); (3) the separation-of-concerns invariant holds; (4)
-effort fits the time budget (XS/S rides a consumer sprint; M needs a slot; L needs
-SPEC review). Shipped deviations are logged with consumer + composition story; the
-acceptance test is the invariant, not advance declaration.
+a plan adequate to the anticipated effort is prepared (L or XL require a dedicated
+implementation plan document).
 
 ---
 
@@ -581,12 +582,6 @@ acceptance test is the invariant, not advance declaration.
    specialisation worth maintaining, or stay pure-Pallas?
 5. **SPEC §2 tenet text** — the reproducible-dispatch tenet (tenet 9) is drafted
    here; fold the final wording into any downstream SPEC mirror as needed.
-
-**Resolved** (historical, see git history): semiring representation (Monoid +
-Semigroup, pytree carry); sparse format (ELL + SectionedELL, no BCOO); permutohedral
-(retired for bounded bilateral); morphology placement (own subpackage); LME scope
-(voxelwise CORE); the score-kernel ↔ scalarisation boundary (§5); `augment`
-ratification; backwards compat (no legacy users — break freely).
 
 ---
 
