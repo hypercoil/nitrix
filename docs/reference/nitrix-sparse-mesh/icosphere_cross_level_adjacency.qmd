@@ -1,0 +1,49 @@
+---
+title: "icosphere_cross_level_adjacency"
+generated: true
+description: "Coarse-to-fine adjacency ELL for icosphere pooling."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:icosphere_cross_level_adjacency -->
+```python
+icosphere_cross_level_adjacency(hierarchy: IcosphereHierarchy, coarse_level: int, fine_level: int) -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:icosphere_cross_level_adjacency -->
+Coarse-to-fine adjacency ELL for icosphere pooling.
+
+Row `i` (coarse vertex at level `coarse_level`) carries the
+fine vertices at level `fine_level` that descend from it under
+the subdivision rule:
+
+- The coarse-original fine vertex (same index `i`), and
+- Every fine vertex that is a midpoint of an edge `(i, j)`
+  incident to `i` in the coarse mesh.
+
+The stored `values` are a `1.0 / 0.0` validity indicator: `1`
+at real (vertex, child) entries and `0` at padding.  This serves
+both downstream consumers without a per-consumer rebuild:
+
+- [`mesh_pool_max`](../nitrix-sparse-mesh/mesh_pool_max.qmd) ignores the values (it
+  substitutes the `TROPICAL_MAX_PLUS` identity internally), so the
+  indicator is harmless there.
+- [`mesh_coarsen_meanpool`](../nitrix-sparse-mesh/mesh_coarsen_meanpool.qmd) reads the indicator
+  directly as the per-edge weight and as the per-row count, so a
+  row-mean over the real children falls out for free.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:icosphere_cross_level_adjacency -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `hierarchy` | `IcosphereHierarchy` | — | — | An [`IcosphereHierarchy`](../nitrix-sparse-mesh/IcosphereHierarchy.qmd) produced by [`icosphere_hierarchy`](../nitrix-sparse-mesh/icosphere_hierarchy.qmd). |
+| `coarse_level` | `int` | — | — | Must be consecutive: `fine_level == coarse_level + 1`. Multi-level pooling is composed by the consumer. |
+| `fine_level` | `int` | — | — | Must be consecutive: `fine_level == coarse_level + 1`. Multi-level pooling is composed by the consumer. |
+
+**Returns** `ELL`. An [`ELL`](../nitrix-sparse-ell/ELL.qmd) of shape `(n_coarse, n_fine)` with `k_max = 1 + max_coarse_degree` (6 for the base icosahedron, 7 for every subdivided level). `values` carry a `1.0 / 0.0` validity indicator (real entries / padding); `identity` is the `REAL` identity `0.0`.
+<!-- nitrix:/gen -->
+

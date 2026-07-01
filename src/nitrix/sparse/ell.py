@@ -4,15 +4,15 @@
 """
 ELL sparse format primitives.
 
-ELL is the primary format in nitrix.sparse (SPEC §4.2): the per-row
+ELL is the primary sparse format in :mod:`nitrix.sparse`: the per-row
 neighbour list is stored as two arrays, ``values: (m, k_max)`` and
 ``indices: (m, k_max)``.  Rows with fewer than ``k_max`` neighbours
 have the trailing entries padded with the semiring identity in
 ``values`` and a fixed (in-range) sentinel index in ``indices``.
 
 The format is intentionally a thin pair of dense arrays: no BCOO, no
-``jax.experimental.sparse`` import.  Sectioned ELL (variable-degree;
-SPEC §4.2) will live in ``nitrix.sparse.ell_sectioned``.
+``jax.experimental.sparse`` import.  Sectioned ELL (variable-degree)
+will live in ``nitrix.sparse.ell_sectioned``.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class ELL:
     indices
         Per-row neighbour indices, shape ``(m, k_max)``.  Pad positions
         must point to a valid row of the dense operand so a stray
-        ``gather`` does not OOB; ``ell_pad`` enforces this.
+        ``gather`` does not OOB; :func:`ell_pad` enforces this.
     n_cols
         The implicit ``n``-dim of the sparse matrix (i.e., the outer
         dim of the dense operand it will be contracted with).
@@ -109,7 +109,19 @@ class ELL:
         Tuple[Num[Array, 'm k_max'], Int[Array, 'm k_max']],
         Tuple[int, Any],
     ]:
-        """Children: ``(values, indices)``; aux: ``(n_cols, identity)``."""
+        """Flatten the :class:`ELL` into pytree children and static aux.
+
+        Returns
+        -------
+        children : tuple of Array
+            The array leaves ``(values, indices)``, each of shape
+            ``(m, k_max)``, which flow through ``jit`` / ``vmap`` /
+            ``grad``.
+        aux : tuple
+            The static auxiliary data ``(n_cols, identity)``: the
+            implicit column count and the semiring identity that pad
+            entries carry.
+        """
         return (self.values, self.indices), (self.n_cols, self.identity)
 
     @classmethod
@@ -136,7 +148,7 @@ def ell_pad(
 ) -> ELL:
     """Pad ragged neighbour lists to a fixed ``k_max``.
 
-    Use this when constructing an ``ELL`` from per-row lists whose
+    Use this when constructing an :class:`ELL` from per-row lists whose
     lengths vary up to ``k_max``: ``values[i, k_i:]`` is filled with
     ``identity`` and ``indices[i, k_i:]`` is filled with ``pad_index``.
     ``pad_index`` must be a valid row of the dense operand the ELL
@@ -162,7 +174,9 @@ def ell_pad(
 
     Returns
     -------
-    The padded ``ELL``.
+    ELL
+        The padded matrix, with ``values`` and ``indices`` of shape
+        ``(m, k_max)`` and ``n_cols`` / ``identity`` recorded.
     """
     if values.shape != indices.shape:
         raise ValueError(
@@ -202,26 +216,28 @@ def ell_from_dense(
     identity: Any = 0.0,
     symmetrize: bool = False,
 ) -> ELL:
-    """Convert a dense matrix to ELL by selecting top-``k_max`` non-pad entries
-    per row.
+    """Convert a dense matrix to ELL by keeping the largest entries per row.
 
+    Each row of ``dense`` is reduced to at most ``k_max`` stored entries.
     Entries with absolute value ``<= threshold`` are treated as
     structural zeros.  If a row has more than ``k_max`` non-zero
     entries, the largest-by-magnitude ``k_max`` are kept.  If ``k_max``
     is ``None``, it is chosen as the maximum row degree present.
 
-    .. warning::
-
-       Top-``k_max``-per-row selection is **not** symmetry-preserving: row
-       ``i`` may keep edge ``(i, j)`` while row ``j`` drops ``(j, i)``, so
-       the stored pattern is generally **asymmetric** even when ``dense``
-       is symmetric.  This matters for the spectral consumers
-       (``laplacian_eigenmap`` / ``diffusion_embedding`` and
-       ``eigsolve_top_k``), whose iterative solvers assume a symmetric
-       operator.  Two remedies: pass the result with the connectopy
-       default ``promise_symmetry=False`` (the operator is symmetrised at
-       the matvec, storage-free, ``½(A x + Aᵀ x)``); or build a symmetric
-       ELL here with ``symmetrize=True`` (below).
+    Warnings
+    --------
+    Top-``k_max``-per-row selection is **not** symmetry-preserving: row
+    ``i`` may keep edge ``(i, j)`` while row ``j`` drops ``(j, i)``, so
+    the stored pattern is generally **asymmetric** even when ``dense``
+    is symmetric.  This matters for the spectral consumers
+    (:func:`~nitrix.graph.laplacian_eigenmap` /
+    :func:`~nitrix.graph.diffusion_embedding` and
+    ``eigsolve_top_k``), whose iterative solvers
+    assume a symmetric operator.  Two remedies: pass the result with the
+    connectopy default ``promise_symmetry=False`` (the operator is
+    symmetrised at the matvec, storage-free, as
+    :math:`\\tfrac{1}{2}(A x + A^{\\top} x)`); or build a symmetric ELL
+    here with ``symmetrize=True`` (below).
 
     Parameters
     ----------
@@ -237,26 +253,28 @@ def ell_from_dense(
         Pad fill in ``values``.
     symmetrize
         When ``True``, return the symmetric kNN graph of the selection:
-        take the top-``k_max`` pattern ``P``, then store ``½(S + Sᵀ)`` over
-        the closure ``P ∪ Pᵀ`` where ``S = dense ⊙ P``.  The result is an
-        exactly-symmetric ELL (``ell_to_dense`` is symmetric); ``m`` must
-        equal ``n``.  Default ``False`` (the historical asymmetric top-k
-        behaviour).
+        take the top-``k_max`` pattern :math:`P`, then store
+        :math:`\\tfrac{1}{2}(S + S^{\\top})` over the closure
+        :math:`P \\cup P^{\\top}` where :math:`S = \\mathrm{dense} \\odot P`.
+        The result is an exactly-symmetric ELL (:func:`ell_to_dense` is
+        symmetric); ``m`` must equal ``n``.  Default ``False`` (the
+        historical asymmetric top-k behaviour).
 
         **Storage is not bounded by a small multiple of** ``k_max``.  The
-        effective column count is ``max_i |row_i(P) ∪ col_i(P)|`` --
-        i.e. ``k_max`` plus the largest top-k *in-degree* (how many rows
-        selected a given column).  In-degree is **not** limited by
-        ``k_max``: a hub/star (one column selected by every row) drives the
-        closure of that row to the full ``n``, so ``symmetrize=True`` can
-        densify hub rows entirely.  For hub-heavy or unknown-degree graphs
-        prefer the storage-free matvec symmetrisation
-        (``promise_symmetry=False`` on the spectral consumers), which never
-        materialises ``P ∪ Pᵀ``.
+        effective column count is :math:`\\max_i |\\mathrm{row}_i(P) \\cup
+        \\mathrm{col}_i(P)|` -- i.e. ``k_max`` plus the largest top-k
+        *in-degree* (how many rows selected a given column).  In-degree is
+        **not** limited by ``k_max``: a hub/star (one column selected by
+        every row) drives the closure of that row to the full ``n``, so
+        ``symmetrize=True`` can densify hub rows entirely.  For hub-heavy
+        or unknown-degree graphs prefer the storage-free matvec
+        symmetrisation (``promise_symmetry=False`` on the spectral
+        consumers), which never materialises :math:`P \\cup P^{\\top}`.
 
     Returns
     -------
-    ``ELL`` of shape ``(m, n)``.
+    ELL
+        Sparse matrix of shape ``(m, n)`` holding the selected entries.
 
     Notes
     -----
@@ -347,7 +365,8 @@ def ell_mask(
     This helper rewrites the masked positions of ``ell.values`` to the
     algebra's ``(*)``-annihilator and stamps that value onto the
     returned ELL's ``identity`` field, so the result is a drop-in
-    operand for ``semiring_ell_matmul`` / ``semiring_ell_edge_aggregate``.
+    operand for :func:`~nitrix.semiring.semiring_ell_matmul` /
+    :func:`~nitrix.semiring.semiring_ell_edge_aggregate`.
 
     **Why this is a true no-op (and the one algebra where it is not).**
     An edge with value ``z`` is a no-op iff ``z`` is the ``(*)``
@@ -480,11 +499,13 @@ def ell_add_self_loops(
     Returns a new ELL with one extra neighbour slot per row whose index
     is the row itself (``indices[i, -1] = i``) and whose ``values`` entry
     is ``self_value`` -- a non-identity marker so the slot reads as a real
-    edge (e.g. it survives ``ell_row_softmax``'s padding mask), not as a
-    pad.  ``k_max`` grows by one.
+    edge (e.g. it survives the padding mask of
+    :func:`~nitrix.semiring.ell_row_softmax`), not as a pad.  ``k_max``
+    grows by one.
 
     Self-loops are a graph-convolution construct, not part of the geometric
-    mesh adjacency: ``mesh_k_ring_adjacency`` and friends are self-loop-free.
+    mesh adjacency: :func:`~nitrix.sparse.mesh_k_ring_adjacency` and friends
+    are self-loop-free.
     Graph attention attends each vertex to its own features -- the
     neighbourhood in Velickovic et al. (2018) explicitly *includes* node
     ``i`` -- and the GCN renormalisation trick (Kipf & Welling 2017) adds
@@ -496,7 +517,8 @@ def ell_add_self_loops(
     Per-edge attributes
     -------------------
     When ``edge_attr`` is supplied (the per-edge vector tensor consumed by
-    ``semiring_ell_edge_aggregate``), the synthesised self-edge needs an
+    :func:`~nitrix.semiring.semiring_ell_edge_aggregate`), the synthesised
+    self-edge needs an
     attribute.  Lacking an intrinsic self-feature, ``fill`` derives one
     from the row's existing **valid** (non-pad) edges:
 
@@ -590,6 +612,18 @@ def ell_to_dense(ell: ELL) -> Num[Array, 'm n']:
     the identity, which is a no-op for ``REAL``; callers using
     non-additive semirings should not rely on this for round-trip
     correctness.
+
+    Parameters
+    ----------
+    ell
+        Sparse matrix in ELL format, with ``values`` and ``indices`` of
+        shape ``(m, k_max)`` and an implicit column count ``n_cols``.
+
+    Returns
+    -------
+    Num[Array, 'm n']
+        Dense matrix of shape ``(m, n_cols)`` formed by scatter-adding
+        each stored value into its ``(row, indices[row, p])`` position.
     """
     m, k_max = ell.values.shape
     dense = jnp.zeros((m, ell.n_cols), dtype=ell.values.dtype)

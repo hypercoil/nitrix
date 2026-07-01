@@ -1,0 +1,65 @@
+---
+title: "Mesh"
+generated: true
+description: "Triangle mesh: vertex coordinates plus face indices."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:Mesh -->
+```python
+class Mesh
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Mesh -->
+Triangle mesh: vertex coordinates plus face indices.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Mesh.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Float[Array, 'n_vertices 3'], Int[Array, 'n_faces 3']], None]
+```
+<!-- nitrix:/gen -->
+
+Flatten the mesh into its pytree children and auxiliary data.
+
+<!-- nitrix:gen sig:Mesh.tree_unflatten -->
+```python
+tree_unflatten(_aux: None, children: Tuple[Float[Array, 'n_vertices 3'], Int[Array, 'n_faces 3']]) -> 'Mesh'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:Mesh.__init__ -->
+```python
+__init__(vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3']) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:Mesh -->
+::: {.callout-note}
+Registered as a JAX pytree: `vertices` and `faces` are both array
+children, so a `Mesh` flows through `jit` / `vmap` / `grad` as a
+first-class operand (the surface optimisers grad through `vertices`;
+`faces` is integer topology and takes a `float0` / zero cotangent).
+`faces` is a *child* rather than static aux so a large integer array is
+never forced into an unhashable treedef key (which would also recompile
+per distinct topology).  Differentiating the *whole* `Mesh` needs
+`jax.grad(f, allow_int=True)` (the `faces` integer leaf); the usual
+surface-optimiser pattern instead grads w.r.t. `vertices` directly and
+rebuilds the `Mesh` inside the loss.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:Mesh -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

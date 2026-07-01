@@ -1,0 +1,61 @@
+---
+title: "ell_row_softmax"
+generated: true
+description: "Row-wise softmax over the ELL neighbour slots, masking padding."
+---
+
+[‹ back to `nitrix.semiring.ell_edge`](../nitrix-semiring-ell_edge.qmd)
+
+<!-- nitrix:gen sig:ell_row_softmax -->
+```python
+ell_row_softmax(scores: Float[Array, '... n k_max'], ell: ELL) -> Float[Array, '... n k_max']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ell_row_softmax -->
+Row-wise softmax over the ELL neighbour slots, masking padding.
+
+Normalises `scores` along the `k_max` (neighbour) axis so each
+row sums to 1, with the ELL's padding positions excluded from both
+the numerator and the denominator.  This is the attention
+pre-pass for GAT / GATv2-style aggregation: compute per-edge
+scores, [`ell_row_softmax`](../nitrix-semiring-ell_edge/ell_row_softmax.qmd) them into attention weights, then
+feed the weights as the ELL `values` (or multiply them into the
+message) of a [`semiring_ell_edge_aggregate`](../nitrix-semiring-ell_edge/semiring_ell_edge_aggregate.qmd) under the real
+semiring.
+
+Padding is identified from the ELL convention: pad slots carry
+`ell.values == ell.identity`.  Those positions are forced to
+$-\infty$ before the softmax (so they contribute $0$
+after the exponential) and contribute $0$ to the denominator.
+A row that is entirely padding (an isolated vertex) returns all-zero
+weights rather than `NaN`.
+
+Unlike the rest of this module, [`ell_row_softmax`](../nitrix-semiring-ell_edge/ell_row_softmax.qmd) takes the
+whole [`ELL`](../nitrix-sparse.qmd) rather than a bare `indices`
+array: it needs `ell.values` / `ell.identity` to build the
+padding mask.  When `ell.identity` is `None` (sentinels handled
+by the caller) no masking is applied and every slot participates.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ell_row_softmax -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `scores` | `Float` | `...` × `n` × `k_max` | — | Per-edge attention logits aligned with the ELL pattern, `(..., n, k_max)`. `scores[..., i, p]` is the score of the edge from `i` to `ell.indices[i, p]`. |
+| `ell` | `ELL` | — | — | The adjacency whose padding structure defines which slots are real edges. |
+
+**Returns** `Float` — shape `...` × `n` × `k_max`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ell_row_softmax -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k_max` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

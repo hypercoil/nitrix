@@ -1,0 +1,48 @@
+---
+title: "mesh_laplacian_smooth"
+generated: true
+description: "Uniform (combinatorial) Laplacian smoothing of vertex positions."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_laplacian_smooth -->
+```python
+mesh_laplacian_smooth(vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3'], *, lam: float = 0.5, iterations: int = 1) -> Float[Array, 'n_vertices 3']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_laplacian_smooth -->
+Uniform (combinatorial) Laplacian smoothing of vertex positions.
+
+Each iteration moves every vertex a fraction `lam` toward the
+average of its 1-ring neighbours:
+`v <- (1 - lam) v + lam * mean(neighbours(v))`.  Neighbours come
+from the triangle edges; on a closed manifold every neighbour is
+counted by an equal number of incident faces, so the unweighted mean
+is exact without de-duplicating shared edges.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_laplacian_smooth -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `vertices` | `Float` | `n_vertices` × `3` | — | `(n_vertices, 3)` coordinates. |
+| `faces` | `Int` | `n_faces` × `3` | — | `(n_faces, 3)` vertex indices. |
+| `lam` | `float` | — | `0.5` | Step size in `[0, 1]` (`0` = no-op). |
+| `iterations` | `int` | — | `1` | Number of smoothing passes (static). |
+
+**Returns** `Float` — shape `n_vertices` × `3`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mesh_laplacian_smooth -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

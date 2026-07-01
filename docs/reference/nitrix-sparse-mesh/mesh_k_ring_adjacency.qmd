@@ -1,0 +1,40 @@
+---
+title: "mesh_k_ring_adjacency"
+generated: true
+description: "Build the k-ring adjacency of a mesh as an ELL."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_k_ring_adjacency -->
+```python
+mesh_k_ring_adjacency(mesh: Mesh, *, k: int = 1, binary: bool = True, include_self: bool = False, format: Literal['ell', 'sectioned', 'auto'] = 'ell') -> ELL | SectionedELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_k_ring_adjacency -->
+Build the k-ring adjacency of a mesh as an ELL.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_k_ring_adjacency -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh. |
+| `k` | `int` | — | `1` | Ring depth. `k=1` is the immediate neighbours; `k=2` adds their neighbours; etc. |
+| `binary` | `bool` | — | `True` | `True` (default) -- adjacency entries are `1` for neighbours and `0` (the ELL identity) for the pad. `False` -- entries are `1 / \|neighbour_set\|`, normalised per row so the adjacency is row-stochastic (useful for smoothing / random-walk operators). |
+| `include_self` | `bool` | — | `False` | If `True`, every vertex's neighbour list includes itself. Default `False` (strict adjacency). |
+| `format` | `Literal['ell', 'sectioned', 'auto']` | — | `'ell'` | `'ell'` (default) returns a flat [`ELL`](../nitrix-sparse-ell/ELL.qmd) padded to the global max degree -- byte-identical to the prior behaviour. `'sectioned'` returns a degree-bucketed [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) (avoids the flat-padding cliff on irregular-valence meshes). `'auto'` picks `'sectioned'` only when the max/median degree ratio exceeds ~2 (near-uniform meshes such as the icosphere / fsaverage stay flat). |
+
+**Returns** `ELL | SectionedELL`. An [`ELL`](../nitrix-sparse-ell/ELL.qmd) (`format='ell'`) or [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) (`'sectioned'`) of shape `(n_vertices, n_vertices)`; both feed `sparse.apply_operator`. The flat `ELL` has `k_max = max neighbour-set size` (pad rows below `k_max` use the ELL identity).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:mesh_k_ring_adjacency -->
+::: {.callout-note}
+Construction is host-side NumPy (BFS per vertex); the resulting
+operator is plain JAX.  For repeated k-ring queries on the same
+mesh, build the operator once and reuse.
+:::
+<!-- nitrix:/gen -->
+

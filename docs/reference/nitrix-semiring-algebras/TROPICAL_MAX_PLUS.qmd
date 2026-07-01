@@ -1,0 +1,23 @@
+---
+title: "TROPICAL_MAX_PLUS"
+generated: true
+description: "The max-plus tropical algebra :math:`( max, +)`."
+---
+
+[‹ back to `nitrix.semiring.algebras`](../nitrix-semiring-algebras.qmd)
+
+<!-- nitrix:gen sig:TROPICAL_MAX_PLUS -->
+```python
+TROPICAL_MAX_PLUS: StrictSemiring[Any] = StrictSemiring(monoid=(_MaxMonoid()), binary_op=(_SumSemigroup()), identity=(-jnp.inf), annihilator=(-jnp.inf), name='tropical_max_plus', matmul_vjp=tropical_max_plus_matmul_vjp, ell_matmul_vjp=tropical_max_plus_ell_matmul_vjp)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:TROPICAL_MAX_PLUS -->
+The max-plus tropical algebra $(\max, +)$.
+
+The monoid is maximisation and the binary operation is addition, with
+identity and annihilator $-\infty$. Contractions compute
+longest-path / best-score quantities; the backward pass gathers the
+subgradient at the maximising index.
+<!-- nitrix:/gen -->
+

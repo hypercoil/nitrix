@@ -1,0 +1,44 @@
+---
+title: "compute_vertex_normals"
+generated: true
+description: "Unit per-vertex normals from a triangle mesh."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:compute_vertex_normals -->
+```python
+compute_vertex_normals(vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3']) -> Float[Array, 'n_vertices 3']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:compute_vertex_normals -->
+Unit per-vertex normals from a triangle mesh.
+
+Each face contributes its (un-normalised) cross-product normal
+`(v1 - v0) x (v2 - v0)` -- whose magnitude is twice the triangle
+area, so larger faces weight more -- scattered onto its three
+vertices; the per-vertex sum is then L2-normalised.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:compute_vertex_normals -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `vertices` | `Float` | `n_vertices` × `3` | — | `(n_vertices, 3)` coordinates. |
+| `faces` | `Int` | `n_faces` × `3` | — | `(n_faces, 3)` vertex indices. |
+
+**Returns** `Float` — shape `n_vertices` × `3`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:compute_vertex_normals -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

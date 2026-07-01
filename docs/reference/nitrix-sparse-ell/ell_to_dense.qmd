@@ -1,0 +1,43 @@
+---
+title: "ell_to_dense"
+generated: true
+description: "Scatter an ELL back to a dense `(m, n_cols)` matrix."
+---
+
+[‹ back to `nitrix.sparse.ell`](../nitrix-sparse-ell.qmd)
+
+<!-- nitrix:gen sig:ell_to_dense -->
+```python
+ell_to_dense(ell: ELL) -> Num[Array, 'm n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ell_to_dense -->
+Scatter an ELL back to a dense `(m, n_cols)` matrix.
+
+Useful in tests and in fallback paths.  Pad entries (assumed to
+carry the algebra's identity) are written via `scatter_add` with
+the identity, which is a no-op for `REAL`; callers using
+non-additive semirings should not rely on this for round-trip
+correctness.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ell_to_dense -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `ell` | `ELL` | — | — | Sparse matrix in ELL format, with `values` and `indices` of shape `(m, k_max)` and an implicit column count `n_cols`. |
+
+**Returns** `Num` — shape `m` × `n`. Dense matrix of shape `(m, n_cols)` formed by scatter-adding each stored value into its `(row, indices[row, p])` position.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ell_to_dense -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

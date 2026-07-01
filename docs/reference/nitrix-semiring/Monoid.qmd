@@ -1,0 +1,92 @@
+---
+title: "Monoid"
+generated: true
+description: "Associative reduction with identity, carrying optional pytree state."
+---
+
+[‹ back to `nitrix.semiring`](../nitrix-semiring.qmd)
+
+*Re-exported here; defined in `nitrix.semiring._types`.*
+
+<!-- nitrix:gen sig:Monoid -->
+```python
+class Monoid(Protocol[S])
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Monoid -->
+Associative reduction with identity, carrying optional pytree state.
+
+A monoid supplies the additive `(+)` structure of a semiring: an
+identity element and an associative combine over an accumulator that
+may itself be an arbitrary pytree of auxiliary state.
+
+Required (informal) properties:
+
+- `init` returns the identity element broadcast to `shape`.
+  The returned object is the same pytree shape used by `update`
+  and `merge`.
+- `update` folds a single value into the accumulator. Used
+  inside the K loop of the streaming kernels.
+- `merge` is associative and has `init` as identity. Used
+  between fully-reduced sub-blocks (e.g. when joining results across
+  Pallas blocks, or in cross-device tree reductions). `merge`
+  and `update` must agree: `update(acc, v)` must equal
+  `merge(acc, update(init, v))`.
+- `finalize` projects the (possibly auxiliary) state to the
+  user-facing array. Applied once at the end of the contraction.
+
+The state `S` may be any pytree; this is what enables online
+numerically-stable reductions such as the `(running_max, sum_exp)`
+state used by a log-sum-exp monoid.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Monoid.init -->
+```python
+init(shape: tuple[int, ...], dtype: jnp.dtype[Any]) -> S
+```
+<!-- nitrix:/gen -->
+
+Return the identity element broadcast to `shape`.
+
+<!-- nitrix:gen sig:Monoid.update -->
+```python
+update(acc: S, value: Num[Array, '*shape']) -> S
+```
+<!-- nitrix:/gen -->
+
+Fold a single value into the accumulator.
+
+<!-- nitrix:gen sig:Monoid.merge -->
+```python
+merge(a: S, b: S) -> S
+```
+<!-- nitrix:/gen -->
+
+Combine two fully-reduced accumulator states.
+
+Associative, with `init` as identity, so that partially
+reduced sub-blocks may be recombined in any order.
+
+<!-- nitrix:gen sig:Monoid.finalize -->
+```python
+finalize(acc: S) -> Num[Array, '*shape']
+```
+<!-- nitrix:/gen -->
+
+Project the accumulator state to the user-facing array.
+
+Applied once at the end of the contraction to discard any
+auxiliary state (such as a running maximum) and return the
+reduced value.
+
+
+<!-- nitrix:gen dims:Monoid -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*shape` | a variadic group of axes (`shape`) |
+<!-- nitrix:/gen -->

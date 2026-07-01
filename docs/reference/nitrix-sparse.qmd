@@ -1,0 +1,45 @@
+---
+title: "nitrix.sparse"
+generated: true
+signature-hash: 8f9239f94858a980
+description: "nitrix.sparse -- geometry-aware sparse formats."
+listing:
+  id: nitrix-sparse-symbols
+  contents: "nitrix-sparse/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.sparse`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+nitrix.sparse -- geometry-aware sparse formats.
+
+ELL is the primary format. The submodule `nitrix.sparse.ell` exports
+the construction / gather / scatter / pad primitives; the section
+implementation lives in `nitrix.sparse.ell_sectioned` (Phase 2.A.8).
+
+No `jax.experimental.sparse` dependency anywhere.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-sparse-symbols}
+:::

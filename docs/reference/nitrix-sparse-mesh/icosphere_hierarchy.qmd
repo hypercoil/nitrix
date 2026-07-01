@@ -1,0 +1,36 @@
+---
+title: "icosphere_hierarchy"
+generated: true
+description: "Construct a sequence of icospheres from level 0 to `max_level`."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:icosphere_hierarchy -->
+```python
+icosphere_hierarchy(max_level: int) -> IcosphereHierarchy
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:icosphere_hierarchy -->
+Construct a sequence of icospheres from level 0 to `max_level`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:icosphere_hierarchy -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `max_level` | `int` | — | — | Inclusive upper bound on the subdivision level. The hierarchy contains `max_level + 1` meshes, `[ico_0, ico_1, ..., ico_max_level]`. `max_level = 0` returns the base icosahedron alone. |
+
+**Returns** `IcosphereHierarchy`. An [`IcosphereHierarchy`](../nitrix-sparse-mesh/IcosphereHierarchy.qmd) with `meshes` and `parents` tables populated (`parents[0] is None`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:icosphere_hierarchy -->
+::: {.callout-note}
+Subdivision is deterministic (the midpoint cache assigns indices
+by a fixed traversal order over faces), so the cross-level
+helpers below depend only on the stored parent tables.
+:::
+<!-- nitrix:/gen -->
+

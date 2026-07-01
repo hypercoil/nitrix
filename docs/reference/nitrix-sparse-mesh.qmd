@@ -1,0 +1,77 @@
+---
+title: "nitrix.sparse.mesh"
+generated: true
+signature-hash: 452b0dd6a73ead76
+description: "Triangle-mesh sparse adjacency constructors."
+listing:
+  id: nitrix-sparse-mesh-symbols
+  contents: "nitrix-sparse-mesh/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.sparse.mesh`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Triangle-mesh sparse adjacency constructors.
+
+Supports two mesh families with the same [`Mesh`](nitrix-sparse-mesh/Mesh.qmd) representation:
+
+- **Arbitrary triangulations**: [`Mesh`](nitrix-sparse-mesh/Mesh.qmd) from
+  user-supplied tensors.  The k-ring adjacency, edge incidence,
+  and cotangent Laplacian are all derived combinatorially from
+  `faces`.
+- **Icosphere**: [`icosphere`](nitrix-sparse-mesh/icosphere.qmd) builds the canonical
+  spherical mesh via recursive subdivision of the icosahedron.
+  The vertex count follows $10 \cdot 4^{n} + 2$: $n=0$
+  gives 12 (the icosahedron), $n=7$ gives 163842 (FreeSurfer's
+  "ico7").
+
+Operators are returned as an [`ELL`](nitrix-sparse-ell/ELL.qmd) for
+[`semiring_ell_matmul`](nitrix-semiring.qmd) compatibility.
+
+The construction is host-side NumPy -- the BFS for k-ring
+adjacency and the icosphere midpoint table are not natural in
+pure JAX (they need dynamic-shape intermediates).  The resulting
+[`ELL`](nitrix-sparse-ell/ELL.qmd) is plain JAX from there.
+
+Use cases:
+
+- **Cortical surface analysis**: FreeSurfer-style icospheres for
+  cross-subject registration.  [`mesh_k_ring_adjacency`](nitrix-sparse-mesh/mesh_k_ring_adjacency.qmd) gives
+  the neighbourhood structure for smoothing / atlas alignment.
+- **Surface-based convolutional networks**: the k-ring adjacency
+  is the natural support for `spherical_conv` (already in
+  `nitrix.geometry.sphere`); this module gives the underlying
+  ELL constructor.
+- **Cotangent Laplacian**: the discrete Laplace-Beltrami operator
+  for surface processing.  Used in spectral surface analysis,
+  smoothing, harmonic-coordinate maps.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_adjacent_pairs` | *(undocumented — add to `_dimensions.yml`)* |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+| `...` | anonymous leading (batch) axes |
+| `n_coarse` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n_fine` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-sparse-mesh-symbols}
+:::

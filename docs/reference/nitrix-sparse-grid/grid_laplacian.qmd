@@ -1,0 +1,37 @@
+---
+title: "grid_laplacian"
+generated: true
+description: "The standard (2n+1)-point n-D Laplacian stencil on a regular grid."
+---
+
+[‹ back to `nitrix.sparse.grid`](../nitrix-sparse-grid.qmd)
+
+<!-- nitrix:gen sig:grid_laplacian -->
+```python
+grid_laplacian(grid_shape: Sequence[int], *, boundary: BoundaryMode = 'replicate', spacing: Union[float, Sequence[float]] = 1.0, sign: Literal['positive', 'negative'] = 'negative') -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:grid_laplacian -->
+The standard (2n+1)-point n-D Laplacian stencil on a regular grid.
+
+This builds the classic second-order finite-difference Laplacian: the
+5-point stencil in 2-D, the 7-point stencil in 3-D, and so on. In 1-D the
+stencil is $\Delta u(i) = u(i-1) - 2\,u(i) + u(i+1)$; in 2-D each
+voxel is coupled to its four axis-aligned neighbours with a centre weight
+of $-4$ (for unit spacing).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:grid_laplacian -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `grid_shape` | `Sequence[int]` | — | — | Spatial grid dimensions, with voxels linearised in C order. |
+| `boundary` | `BoundaryMode` | — | `'replicate'` | Boundary handling. `'replicate'` is the standard free-boundary convention (zero flux); `'periodic'` gives a toroidal Laplacian; `'reflect'` gives a Neumann-like condition with the boundary mirrored. Default `'replicate'`. |
+| `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | Voxel spacing. A `float` is isotropic; a sequence gives per-axis spacing for anisotropic grids (e.g., fMRI `(3, 3, 4)`). The Laplacian weight along each axis is scaled by $1/h^2$, where $h$ is that axis's spacing. Default `1.0`. |
+| `sign` | `Literal['positive', 'negative']` | — | `'negative'` | `'negative'` (default) gives the standard discrete Laplacian $\Delta u$, whose eigenvalues are $\le 0$ on a finite grid (matching the continuous Laplacian sign). `'positive'` gives $-\Delta u$, the positive-definite form used in spectral graph theory. |
+
+**Returns** `ELL`. An [`ELL`](../nitrix-sparse.qmd) operator of shape `(prod(grid_shape), prod(grid_shape))` with $2\,n + 1$ taps per row, representing the Laplacian.
+<!-- nitrix:/gen -->
+

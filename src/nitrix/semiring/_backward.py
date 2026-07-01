@@ -4,22 +4,24 @@
 """
 JAX-side backward rules for the built-in semiring algebras.
 
-Per SPEC §4.1 (differentiability vocabulary), each built-in
-ships with a hand-derived backward in the same algebra family.
-Per IMPLEMENTATION_PLAN §5.2 (Phase 2.A.5 — SERIAL for G1), backward
-is JAX-only at first GA; per-algebra Pallas backwards (2.A.7) come
-after the forward Pallas path lands.
+Each built-in algebra ships with a hand-derived backward rule in the same
+algebra family, so that gradients respect the semiring's own arithmetic.
+These rules are pure JAX; there is currently no per-algebra fused
+(Pallas) backward, so the reverse pass falls back to JAX even where the
+forward pass has a fused kernel.
 
 Returned shapes
 ---------------
 
-For ``semiring_matmul`` with ``A: (m, k)`` and ``B: (k, n)``:
+For :func:`~nitrix.semiring.semiring_matmul` with :math:`A` of shape
+``(m, k)`` and :math:`B` of shape ``(k, n)``:
 
     grad_A: (m, k)
     grad_B: (k, n)
 
-For ``semiring_ell_matmul`` with ``values: (m, k_max)``,
-``indices: (m, k_max)``, ``B: (n_cols, ncol)``:
+For :func:`~nitrix.semiring.semiring_ell_matmul` with ``values`` of shape
+``(m, k_max)``, ``indices`` of shape ``(m, k_max)``, and :math:`B` of
+shape ``(n_cols, ncol)``:
 
     grad_values: (m, k_max)
     grad_B:      (n_cols, ncol)
@@ -27,22 +29,23 @@ For ``semiring_ell_matmul`` with ``values: (m, k_max)``,
 Numerical-stability notes per algebra
 -------------------------------------
 
-- **REAL**  - linear; backward is two transpose-matmuls and is as
+- **REAL** — linear; the backward is two transpose-matmuls and is as
   well-conditioned as the forward.
-- **LOG**   - the softmax weight
-  ``w[i, k, j] = exp(A[i, k] + B[k, j] - C[i, j])`` is bounded in
-  ``[0, 1]`` whenever ``C`` is the true logsumexp; the streaming K
-  loop keeps every intermediate at ``(M, N)``.  ``-inf`` rows
-  propagate through ``_safe_exp_diff`` from ``algebras.py``.
-- **TROPICAL_MAX/MIN_PLUS**  - subgradient; we route the upstream
-  gradient through the argmax / argmin one-hot.  Ties are broken in
+- **LOG** — the softmax weight
+  :math:`w_{ikj} = \\exp(A_{ik} + B_{kj} - C_{ij})` is bounded in
+  :math:`[0, 1]` whenever :math:`C` is the true log-sum-exp; the
+  streaming K loop keeps every intermediate at shape ``(M, N)``.
+  Rows containing :math:`-\\infty` propagate cleanly through
+  :func:`_safe_exp_diff`.
+- **TROPICAL_MAX/MIN_PLUS** — subgradient; the upstream gradient is
+  routed through the argmax / argmin one-hot.  Ties are broken in
   favour of the *first* maximiser encountered (consistent with
   ``jnp.argmax`` default behaviour).
-- **EUCLIDEAN**  - the gradient has a ``1 / C[i, j]`` factor that
-  is undefined at ``C = 0``.  We use ``where(C > eps, ..., 0)`` so
-  the backward sees a clean zero at the singularity rather than a
-  ``nan``.  ``eps`` is the dtype-aware square-root sentinel.
-- **BOOLEAN** - not differentiable; backward raises.
+- **EUCLIDEAN** — the gradient carries a :math:`1 / C_{ij}` factor that
+  is undefined at :math:`C = 0`.  A masked division sets the
+  contribution to zero at the singularity rather than producing a
+  ``nan``; the guard threshold is a dtype-aware small sentinel.
+- **BOOLEAN** — not differentiable; the backward raises.
 """
 
 from __future__ import annotations
@@ -81,11 +84,30 @@ def _safe_div(
     den: Num[Array, '*shape'],
     eps: Optional[float] = None,
 ) -> Num[Array, '*shape']:
-    """``num / den`` defined to be 0 wherever ``|den| <= eps``.
+    """Elementwise division defined to be zero wherever the denominator vanishes.
 
-    Uses the "double-where with sentinel" trick to keep both forward
-    and reverse-mode AD NaN-free.  ``eps`` defaults to a dtype-aware
-    small constant.
+    Computes ``num / den`` but returns zero wherever
+    :math:`|\\mathrm{den}| \\le \\mathrm{eps}`.  Uses the
+    "double-where with sentinel" trick — replacing the denominator with
+    ones on the masked-out entries before dividing — to keep both the
+    forward value and its reverse-mode gradient free of ``nan``.
+
+    Parameters
+    ----------
+    num : Num[Array, '*shape']
+        Numerator array.
+    den : Num[Array, '*shape']
+        Denominator array, broadcast-compatible with ``num``.
+    eps : float, optional
+        Magnitude below which a denominator entry is treated as zero.
+        When ``None`` (the default), a dtype-aware small constant
+        (``jnp.finfo(den.dtype).tiny * 4``) is used.
+
+    Returns
+    -------
+    Num[Array, '*shape']
+        The elementwise quotient, with zeros wherever
+        :math:`|\\mathrm{den}| \\le \\mathrm{eps}`.
     """
     if eps is None:
         eps = jnp.finfo(den.dtype).tiny * 4
@@ -97,11 +119,27 @@ def _safe_div(
 def _safe_exp_diff(
     x: Float[Array, '*shape'], m: Float[Array, '*shape']
 ) -> Float[Array, '*shape']:
-    """``exp(x - m)``, with ``-inf`` rows propagating cleanly to 0.
+    """Compute :math:`\\exp(x - m)`, mapping non-finite entries cleanly to zero.
 
-    A copy of the ``algebras._safe_exp_diff`` helper, kept local so
-    the backward module doesn't import from the forward algebra
-    module (which would form a small cycle).
+    Evaluates :math:`\\exp(x - m)` elementwise, but returns zero wherever
+    ``x`` is not finite, so that :math:`-\\infty` entries (empty log-space
+    rows) propagate to a hard zero rather than a ``nan``.  This is a local
+    copy of the forward algebra module's helper of the same name, kept here
+    so the backward module does not import from the forward module and
+    thereby form an import cycle.
+
+    Parameters
+    ----------
+    x : Float[Array, '*shape']
+        Log-space values to exponentiate after subtracting ``m``.
+    m : Float[Array, '*shape']
+        Log-space offset (typically the per-entry maximum or the
+        log-sum-exp), broadcast-compatible with ``x``.
+
+    Returns
+    -------
+    Float[Array, '*shape']
+        :math:`\\exp(x - m)` where ``x`` is finite, and zero elsewhere.
     """
     finite = jnp.isfinite(x)
     safe_diff = jnp.where(finite, x - m, jnp.zeros_like(x))
@@ -116,12 +154,30 @@ def _safe_exp_diff(
 def real_matmul_vjp(
     residuals: _DenseResiduals, g_out: Num[Array, 'm n']
 ) -> _DenseGrads:
-    """Backward of ``C = A @ B`` under the real semiring (2-D).
+    """Backward of the real-semiring matmul :math:`C = A B` (2-D core).
 
-    Two transpose-matmuls; reuses ``jnp.matmul`` for the heavy lift
-    (Pallas backward kernels are 2.A.7).  Batched inputs are handled
-    upstream via ``jax.vmap``; this function operates on the 2-D
-    core ``A: (m, k)``, ``B: (k, n)`` directly.
+    The real semiring is ordinary matrix multiplication, so the reverse
+    rule is two transpose-matmuls,
+    :math:`g_A = g_{\\mathrm{out}} B^{\\top}` and
+    :math:`g_B = A^{\\top} g_{\\mathrm{out}}`, delegated to ``jnp.matmul``.
+    Batched inputs are handled upstream via ``jax.vmap``; this function
+    operates directly on the 2-D core.
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(A, B, C)``: the left operand :math:`A`
+        of shape ``(m, k)``, the right operand :math:`B` of shape
+        ``(k, n)``, and the (here unused) forward output :math:`C` of
+        shape ``(m, n)``.
+    g_out : Num[Array, 'm n']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_A, grad_B)`` of cotangents, of shapes ``(m, k)``
+        and ``(k, n)`` respectively.
     """
     A, B, _C = residuals
     g_A = jnp.matmul(g_out, B.T, preferred_element_type=A.dtype)
@@ -137,18 +193,37 @@ def real_matmul_vjp(
 def log_matmul_vjp(
     residuals: _DenseResiduals, g_out: Num[Array, 'm n']
 ) -> _DenseGrads:
-    """Backward of ``C[i,j] = lse_k (A[i,k] + B[k,j])`` under the log semiring.
+    """Backward of the log-semiring matmul :math:`C_{ij} = \\log\\sum_k \\exp(A_{ik} + B_{kj})`.
 
-    The softmax weight ``w[i, k, j] = exp(A[i, k] + B[k, j] - C[i, j])``
-    is bounded in ``[0, 1]`` because ``C`` is the logsumexp.  We
-    stream over K so the per-step intermediate is only ``(M, N)``:
+    The gradient routes the upstream cotangent through the softmax weight
+    :math:`w_{ikj} = \\exp(A_{ik} + B_{kj} - C_{ij})`, which is bounded in
+    :math:`[0, 1]` because :math:`C` is the log-sum-exp over ``k``.  The
+    computation streams over the contraction axis ``k`` so that each
+    per-step intermediate is only ``(M, N)`` rather than materialising the
+    full ``(M, K, N)`` weight tensor::
 
         for k:
             log_w_k = A[:, k:k+1] + B[k:k+1, :] - C            # (M, N)
             w_k     = safe_exp(log_w_k)
-            contrib = g_out * w_k                                # (M, N)
+            contrib = g_out * w_k                              # (M, N)
             grad_A[:, k] = contrib.sum(axis=1)
             grad_B[k, :] = contrib.sum(axis=0)
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(A, B, C)``: the left operand :math:`A`
+        of shape ``(m, k)``, the right operand :math:`B` of shape
+        ``(k, n)``, and the forward output :math:`C` of shape ``(m, n)``
+        (the log-sum-exp, reused as the softmax normaliser).
+    g_out : Num[Array, 'm n']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_A, grad_B)`` of cotangents, of shapes ``(m, k)``
+        and ``(k, n)`` respectively.
     """
     A, B, C = residuals
     M, K = A.shape
@@ -195,12 +270,33 @@ def _tropical_argk(
         [Num[Array, 'm n'], Num[Array, 'm n']], Bool[Array, 'm n']
     ],
 ) -> Int[Array, 'm n']:
-    """Compute the per-(i, j) optimal k via a streaming K loop.
+    """Find, for each output entry :math:`(i, j)`, the optimal contraction index k.
 
-    ``monoid_init`` is the initial ``best_val`` (-inf for max, +inf
-    for min).  ``better(cur, best)`` returns a boolean mask of where
-    ``cur`` is strictly better than ``best``.  Ties are broken in
-    favour of the smaller k (consistent with ``jnp.argmax``).
+    Sweeps the contraction axis ``k`` in a streaming loop, tracking the
+    running best value :math:`A_{ik} + B_{kj}` and the index ``k`` that
+    achieved it.  Ties are broken in favour of the smaller ``k``, since a
+    later index only replaces the incumbent when it is *strictly* better
+    (consistent with ``jnp.argmax`` default behaviour).
+
+    Parameters
+    ----------
+    A : Num[Array, 'm k']
+        Left operand.
+    B : Num[Array, 'k n']
+        Right operand.
+    monoid_init : float
+        Initial value of the running best: :math:`-\\infty` for a max
+        (argmax) sweep, :math:`+\\infty` for a min (argmin) sweep.
+    better : callable
+        Predicate ``better(cur, best)`` returning a boolean mask of the
+        entries where the candidate ``cur`` is strictly better than the
+        incumbent ``best`` (``cur > best`` for max, ``cur < best`` for
+        min).
+
+    Returns
+    -------
+    Int[Array, 'm n']
+        The optimal contraction index ``k`` per output entry, as int32.
     """
     M, K = A.shape
     _, N = B.shape
@@ -228,11 +324,31 @@ def _tropical_argk(
 def _tropical_route(
     g_out: Num[Array, 'm n'], best_k: Int[Array, 'm n'], K: int
 ) -> _DenseGrads:
-    """Route ``g_out`` through the one-hot ``[k == best_k[i, j]]``.
+    """Route the upstream gradient through the tropical argmax/argmin one-hot.
 
-    Returns ``(gA, gB)`` of shapes ``(M, K)`` and ``(K, N)``
-    respectively.  Implemented as a streaming K loop so we don't
-    materialise the ``(M, K, N)`` one-hot mask.
+    For each output entry :math:`(i, j)`, the whole upstream gradient
+    ``g_out[i, j]`` is sent to the single contraction index
+    ``best_k[i, j]`` that achieved the optimum, and to zero elsewhere —
+    this is the subgradient of the tropical (max-plus / min-plus) matmul.
+    Implemented as a streaming loop over ``k`` so the ``(M, K, N)``
+    one-hot mask is never materialised.
+
+    Parameters
+    ----------
+    g_out : Num[Array, 'm n']
+        Upstream cotangent with respect to the output.
+    best_k : Int[Array, 'm n']
+        Per-entry winning contraction index, as returned by
+        :func:`_tropical_argk`.
+    K : int
+        Size of the contraction axis (number of columns of :math:`A` /
+        rows of :math:`B`).
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(gA, gB)`` of cotangents, of shapes ``(M, K)`` and
+        ``(K, N)`` respectively.
     """
     M, N = g_out.shape
 
@@ -263,11 +379,31 @@ def _tropical_route(
 def tropical_max_plus_matmul_vjp(
     residuals: _DenseResiduals, g_out: Num[Array, 'm n']
 ) -> _DenseGrads:
-    """Argmax-gather subgradient for max-plus.
+    """Argmax-gather subgradient for the dense max-plus matmul.
 
-    ``∂C[i,j]/∂A[i,k] = 1 iff k = argmax_k (A[i,k] + B[k,j])``;
-    same for ``B`` by symmetry.  Subgradient because the max is not
-    differentiable at ties.
+    Under the max-plus semiring, :math:`C_{ij} = \\max_k (A_{ik} + B_{kj})`,
+    so :math:`\\partial C_{ij} / \\partial A_{ik} = 1` exactly when
+    :math:`k = \\arg\\max_k (A_{ik} + B_{kj})`, and analogously for
+    :math:`B`.  This is a subgradient because the maximum is not
+    differentiable at ties; the winning ``k`` is found by
+    :func:`_tropical_argk` and the gradient routed by
+    :func:`_tropical_route`.
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(A, B, C)``: the left operand :math:`A`
+        of shape ``(m, k)``, the right operand :math:`B` of shape
+        ``(k, n)``, and the (here unused) forward output :math:`C` of
+        shape ``(m, n)``.
+    g_out : Num[Array, 'm n']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_A, grad_B)`` of cotangents, of shapes ``(m, k)``
+        and ``(k, n)`` respectively.
     """
     A, B, _C = residuals
     best_k = _tropical_argk(
@@ -282,7 +418,30 @@ def tropical_max_plus_matmul_vjp(
 def tropical_min_plus_matmul_vjp(
     residuals: _DenseResiduals, g_out: Num[Array, 'm n']
 ) -> _DenseGrads:
-    """Argmin-gather subgradient for min-plus."""
+    """Argmin-gather subgradient for the dense min-plus matmul.
+
+    Under the min-plus semiring, :math:`C_{ij} = \\min_k (A_{ik} + B_{kj})`,
+    so the upstream gradient is routed to the contraction index that
+    achieved the minimum (found by :func:`_tropical_argk`, routed by
+    :func:`_tropical_route`).  This is a subgradient because the minimum
+    is not differentiable at ties.
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(A, B, C)``: the left operand :math:`A`
+        of shape ``(m, k)``, the right operand :math:`B` of shape
+        ``(k, n)``, and the (here unused) forward output :math:`C` of
+        shape ``(m, n)``.
+    g_out : Num[Array, 'm n']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_A, grad_B)`` of cotangents, of shapes ``(m, k)``
+        and ``(k, n)`` respectively.
+    """
     A, B, _C = residuals
     best_k = _tropical_argk(
         A,
@@ -301,12 +460,30 @@ def tropical_min_plus_matmul_vjp(
 def euclidean_matmul_vjp(
     residuals: _DenseResiduals, g_out: Num[Array, 'm n']
 ) -> _DenseGrads:
-    """Backward of ``C[i,j] = sqrt(sum_k (A[i,k] - B[k,j])**2)``.
+    """Backward of the Euclidean matmul :math:`C_{ij} = \\sqrt{\\sum_k (A_{ik} - B_{kj})^2}`.
 
-    Closed-form gradient with a ``1 / C`` factor; we guard at
-    ``C[i, j] <= eps`` and set the contribution to 0 there (the
-    function has a corner at zero distance, where the gradient is
-    not defined; zero is the conventional choice).
+    Uses the closed-form gradient of the pairwise Euclidean distance,
+    which carries a :math:`1 / C_{ij}` factor.  Where
+    :math:`C_{ij} \\le \\mathrm{eps}` the division is guarded (via
+    :func:`_safe_div`) and the contribution set to zero: the distance
+    has a corner at zero, where the gradient is undefined, and zero is
+    the conventional subgradient choice.
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(A, B, C)``: the left operand :math:`A`
+        of shape ``(m, k)``, the right operand :math:`B` of shape
+        ``(k, n)``, and the forward output :math:`C` of shape ``(m, n)``
+        (the distance, reused in the :math:`1 / C` factor).
+    g_out : Num[Array, 'm n']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_A, grad_B)`` of cotangents, of shapes ``(m, k)``
+        and ``(k, n)`` respectively.
     """
     A, B, C = residuals
     # h[i, j] = g_out[i, j] / C[i, j], safe at C ≈ 0
@@ -344,20 +521,42 @@ def boolean_matmul_vjp(
 def real_ell_matmul_vjp(
     residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
 ) -> _ELLGrads:
-    """Backward of ``C[i,j] = sum_p values[i, p] * B[indices[i, p], j]``.
+    """Backward of the real-semiring ELL matmul :math:`C_{ij} = \\sum_p v_{ip}\\, B_{\\mathrm{idx}(i, p), j}`.
 
-    Returns ``(grad_values, grad_B)``; ``indices`` is non-diff (passed
-    through ``custom_vjp`` ``nondiff_argnums``).
+    The forward contracts a sparse ELL operand (per-row ``values`` and
+    column ``indices``) against the dense operand :math:`B`.  The reverse
+    rule is
 
-    Gradient w.r.t. ``values``:
+    .. code-block::
+
         grad_values[i, p] = sum_j g_out[i, j] * B[indices[i, p], j]
+        grad_B[k, j]      = sum_{(i, p): indices[i, p] == k}
+                                values[i, p] * g_out[i, j]
 
-    Gradient w.r.t. ``B`` (scatter-add over the indices):
-        grad_B[k, j]
-            = sum_{(i, p) : indices[i, p] == k} values[i, p] * g_out[i, j]
+    i.e. a per-edge gather-dot for ``grad_values`` and a scatter-add for
+    ``grad_B``.  The ``grad_B`` term is the additive ELL adjoint
+    :math:`A^{\\top} g_{\\mathrm{out}}`, computed by
+    :func:`~nitrix.semiring._reference.reference_semiring_ell_rmatvec` so
+    the matmul and the symmetric matvec share a single source of truth.
+    The ``grad_values`` loop streams over ``p`` so intermediates are
+    ``(M, N)`` rather than ``(M, k_max, N)``.  ``indices`` is
+    non-differentiable and receives no cotangent.
 
-    Implemented as a fori over p so the intermediates are ``(M, N)``
-    rather than ``(M, k_max, N)``.
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(values, indices, B, n_cols)``: the ELL
+        ``values`` of shape ``(m, kmax)``, the column ``indices`` of
+        shape ``(m, kmax)``, the dense operand :math:`B` of shape
+        ``(n_cols, ncol)``, and the row count ``n_cols`` (unused here).
+    g_out : Num[Array, 'm ncol']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_values, grad_B)`` of cotangents, of shapes
+        ``(m, kmax)`` and ``(n_cols, ncol)`` respectively.
     """
     # REAL needed only as a call-time value (the gather/scatter is plain
     # arithmetic); the local import sidesteps the algebras -> _backward
@@ -368,9 +567,9 @@ def real_ell_matmul_vjp(
     _, kmax = values.shape
     n_cols, _ = B.shape
 
-    def body(p: Int[Array, ''], g_values: Num[Array, 'm kmax']) -> Num[
-        Array, 'm kmax'
-    ]:
+    def body(
+        p: Int[Array, ''], g_values: Num[Array, 'm kmax']
+    ) -> Num[Array, 'm kmax']:
         idx_p = lax.dynamic_slice_in_dim(indices, p, 1, axis=1)[:, 0]  # (M,)
         gathered = B[idx_p]  # (M, N)
         # g_values[i, p] = (g_out[i, :] * gathered[i, :]).sum()
@@ -394,15 +593,41 @@ def real_ell_rmatvec_vjp(
     ],
     g_out: Num[Array, 'n_cols ncol'],
 ) -> Tuple[Num[Array, 'm kmax'], Num[Array, 'm ncol']]:
-    """Backward of ``Y = Aᵀ X`` (``reference_semiring_ell_rmatvec``, REAL).
+    """Backward of the real-semiring ELL rmatvec :math:`Y = A^{\\top} X`.
 
-    Returns ``(grad_values, grad_X)``; ``indices`` is non-diff (the public
-    ``semiring_ell_rmatvec`` returns a zero for it).  The rmatvec is the
-    adjoint of the gather matmul, so its own backward is the *matmul*
-    forward plus the same gather-dot used for ``grad_values`` above:
+    The forward
+    (:func:`~nitrix.semiring._reference.reference_semiring_ell_rmatvec`
+    under the real semiring) applies the transpose of the ELL operator to
+    the dense input :math:`X`.  Because the rmatvec is the adjoint of the
+    gather matmul, its own reverse rule is the *matmul* forward for the
+    ``X`` cotangent, plus the same per-edge gather-dot used for the
+    ``values`` cotangent:
 
-        grad_X[i, j]      = Σ_p values[i, p] · g_out[indices[i, p], j]   (= A @ g_out)
-        grad_values[i, p] = Σ_j X[i, j] · g_out[indices[i, p], j]
+    .. code-block::
+
+        grad_X[i, j]      = sum_p values[i, p] * g_out[indices[i, p], j]
+        grad_values[i, p] = sum_j X[i, j] * g_out[indices[i, p], j]
+
+    where the ``grad_X`` term equals :math:`A\\, g_{\\mathrm{out}}`.
+    ``indices`` is non-differentiable; the public
+    :func:`~nitrix.semiring.semiring_ell_rmatvec` returns a zero cotangent
+    for it.
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(values, indices, X)``: the ELL
+        ``values`` of shape ``(m, kmax)``, the column ``indices`` of
+        shape ``(m, kmax)``, and the dense input :math:`X` of shape
+        ``(m, ncol)``.
+    g_out : Num[Array, 'n_cols ncol']
+        Upstream cotangent with respect to the output :math:`Y`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_values, grad_X)`` of cotangents, of shapes
+        ``(m, kmax)`` and ``(m, ncol)`` respectively.
     """
     values, indices, X = residuals
     _, kmax = values.shape
@@ -431,17 +656,38 @@ def real_ell_rmatvec_vjp(
 def log_ell_matmul_vjp(
     residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
 ) -> _ELLGrads:
-    """Backward of ``C[i,j] = lse_p (values[i, p] + B[indices[i, p], j])``.
+    """Backward of the log-semiring ELL matmul :math:`C_{ij} = \\log\\sum_p \\exp(v_{ip} + B_{\\mathrm{idx}(i, p), j})`.
 
-    Softmax weight per ``(i, p, j)``::
+    The gradient routes the upstream cotangent through the softmax weight
+    per edge :math:`(i, p, j)`,
+
+    .. code-block::
 
         w[i, p, j] = exp(values[i, p] + B[indices[i, p], j] - C[i, j])
 
-    Bounded in ``[0, 1]`` because ``C`` is the logsumexp.  Streamed
-    over ``p`` so intermediates stay at ``(M, N)``.
+    which is bounded in :math:`[0, 1]` because :math:`C` is the
+    log-sum-exp over ``p``.  The ``values`` cotangent is the sum over
+    ``j`` of ``g_out * w``, and the :math:`B` cotangent is a scatter-add
+    of ``g_out * w`` over the column indices.  The loop streams over
+    ``p`` so intermediates stay at ``(M, N)``.
 
-    Gradient w.r.t. ``values``: sum over j of g_out * w
-    Gradient w.r.t. ``B``: scatter-add over indices of g_out * w
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(values, indices, B, C)``: the ELL
+        ``values`` of shape ``(m, kmax)``, the column ``indices`` of
+        shape ``(m, kmax)``, the dense operand :math:`B` of shape
+        ``(n_cols, ncol)``, and the forward output :math:`C` of shape
+        ``(m, ncol)`` (the log-sum-exp, reused as the softmax
+        normaliser).
+    g_out : Num[Array, 'm ncol']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_values, grad_B)`` of cotangents, of shapes
+        ``(m, kmax)`` and ``(n_cols, ncol)`` respectively.
     """
     values, indices, B, C = residuals
     m, kmax = values.shape
@@ -474,12 +720,33 @@ def log_ell_matmul_vjp(
 def tropical_max_plus_ell_matmul_vjp(
     residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
 ) -> _ELLGrads:
-    """Argmax-gather subgradient for ELL max-plus.
+    """Argmax-gather subgradient for the max-plus ELL matmul.
 
-    Per output ``(i, j)``, the upstream gradient is routed entirely
-    to the column ``p*[i, j]`` that achieved the maximum.  Same
-    streaming pattern as the dense case but with per-row gather of
-    ``B[indices[i, p], j]`` inside the K loop.
+    Under the max-plus semiring,
+    :math:`C_{ij} = \\max_p (v_{ip} + B_{\\mathrm{idx}(i, p), j})`.  For
+    each output entry :math:`(i, j)` the whole upstream gradient is routed
+    to the single ELL column :math:`p^{*}(i, j)` that achieved the
+    maximum, and scatter-added into :math:`B` at that column's index.
+    This follows the same streaming pattern as the dense case, but with a
+    per-row gather of ``B[indices[i, p], j]`` inside the sweep over ``p``.
+    It is a subgradient because the maximum is not differentiable at ties.
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(values, indices, B, C)``: the ELL
+        ``values`` of shape ``(m, kmax)``, the column ``indices`` of
+        shape ``(m, kmax)``, the dense operand :math:`B` of shape
+        ``(n_cols, ncol)``, and the (here unused) forward output
+        :math:`C` of shape ``(m, ncol)``.
+    g_out : Num[Array, 'm ncol']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_values, grad_B)`` of cotangents, of shapes
+        ``(m, kmax)`` and ``(n_cols, ncol)`` respectively.
     """
     values, indices, B, _C = residuals
     m, kmax = values.shape
@@ -573,10 +840,32 @@ def tropical_min_plus_ell_matmul_vjp(
 def euclidean_ell_matmul_vjp(
     residuals: _ELLResiduals, g_out: Num[Array, 'm ncol']
 ) -> _ELLGrads:
-    """Backward of ``C[i,j] = sqrt(sum_p (values[i, p] - B[indices[i, p], j])**2)``.
+    """Backward of the Euclidean ELL matmul :math:`C_{ij} = \\sqrt{\\sum_p (v_{ip} - B_{\\mathrm{idx}(i, p), j})^2}`.
 
-    Streamed over p; per-step intermediate is ``(M, N)``.  Same
-    sqrt-singularity guard as the dense case.
+    Uses the closed-form gradient of the sparse pairwise Euclidean
+    distance, carrying a :math:`1 / C_{ij}` factor guarded by
+    :func:`_safe_div` (the same square-root singularity guard as the
+    dense case; the contribution is set to zero where the distance
+    vanishes).  The loop streams over ``p`` so the per-step intermediate
+    is ``(M, N)``; the ``values`` cotangent accumulates a per-edge
+    gather-dot and the :math:`B` cotangent a scatter-add.
+
+    Parameters
+    ----------
+    residuals : tuple
+        The forward residuals ``(values, indices, B, C)``: the ELL
+        ``values`` of shape ``(m, kmax)``, the column ``indices`` of
+        shape ``(m, kmax)``, the dense operand :math:`B` of shape
+        ``(n_cols, ncol)``, and the forward output :math:`C` of shape
+        ``(m, ncol)`` (the distance, reused in the :math:`1 / C` factor).
+    g_out : Num[Array, 'm ncol']
+        Upstream cotangent with respect to the output :math:`C`.
+
+    Returns
+    -------
+    tuple of Array
+        The pair ``(grad_values, grad_B)`` of cotangents, of shapes
+        ``(m, kmax)`` and ``(n_cols, ncol)`` respectively.
     """
     values, indices, B, C = residuals
     m, kmax = values.shape

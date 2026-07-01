@@ -1,0 +1,53 @@
+---
+title: "StrictSemiring"
+generated: true
+description: "A semiring whose `binary_op` is associative and distributive."
+---
+
+[‹ back to `nitrix.semiring`](../nitrix-semiring.qmd)
+
+*Re-exported here; defined in `nitrix.semiring._types`.*
+
+<!-- nitrix:gen sig:StrictSemiring -->
+```python
+class StrictSemiring(Semiring[S])
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:StrictSemiring -->
+A semiring whose `binary_op` is associative and distributive.
+
+This is the strict variant of [`Semiring`](../nitrix-semiring/Semiring.qmd): it additionally
+asserts that `binary_op` is associative and distributes over
+`monoid.merge`. The strict subtype unlocks reduction reorderings
+that are unsafe in general: tree reductions, sub-block recombination,
+cross-device reduce-scatter. Functions whose correctness depends on
+those transforms annotate their argument as [`StrictSemiring`](../nitrix-semiring/StrictSemiring.qmd)
+so the type-checker rejects callers passing a relaxed
+[`Semiring`](../nitrix-semiring/Semiring.qmd).
+
+The Pallas streaming kernels accept either type: they fix the
+reduction order, so they do not rely on associativity. Annotating
+them with [`Semiring`](../nitrix-semiring/Semiring.qmd) (rather than [`StrictSemiring`](../nitrix-semiring/StrictSemiring.qmd))
+reflects this.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:StrictSemiring.as_relaxed -->
+```python
+as_relaxed() -> 'Semiring[S]'
+```
+<!-- nitrix:/gen -->
+
+Re-tag this strict semiring as a relaxed [`Semiring`](../nitrix-semiring/Semiring.qmd).
+
+Drops the associativity/distributivity obligation, yielding a
+plain [`Semiring`](../nitrix-semiring/Semiring.qmd) carrying the same fields.
+
+<!-- nitrix:gen sig:StrictSemiring.__init__ -->
+```python
+__init__(monoid: Monoid[S], binary_op: Semigroup, identity: Any = None, annihilator: Any = None, name: str = 'semiring', matmul_vjp: Optional[SemiringMatmulVJP] = None, ell_matmul_vjp: Optional[SemiringELLMatmulVJP] = None) -> None
+```
+<!-- nitrix:/gen -->
+

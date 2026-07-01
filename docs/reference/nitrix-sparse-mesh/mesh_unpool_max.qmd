@@ -1,0 +1,48 @@
+---
+title: "mesh_unpool_max"
+generated: true
+description: "Max-unpool coarse-level features back to a fine level."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_unpool_max -->
+```python
+mesh_unpool_max(cross_level_adjacency: ELL, coarse_features: Float[Array, '... n_coarse d']) -> Float[Array, '... n_fine d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_unpool_max -->
+Max-unpool coarse-level features back to a fine level.
+
+Symmetric to [`mesh_pool_max`](../nitrix-sparse-mesh/mesh_pool_max.qmd): the cross-level adjacency is
+interpreted as fine-to-coarse (each row is a fine vertex,
+listing the coarse vertex / vertices it maps from), and the
+max-plus reduction produces a per-fine-vertex output.  In
+practice the cross-level adjacency is usually single-source
+per fine vertex (each fine vertex has one parent coarse
+vertex), in which case "max" reduces to the trivial gather.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_unpool_max -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `cross_level_adjacency` | `ELL` | — | — | An [`ELL`](../nitrix-sparse-ell/ELL.qmd) of shape `(n_fine, n_coarse)`; row `i` (fine vertex) indexes the coarse vertices it maps from. Stored `values` are ignored (replaced internally by zeros for the max-plus identity). |
+| `coarse_features` | `Float` | `...` × `n_coarse` × `d` | — | `(..., n_coarse, d)` per-vertex coarse-level features. |
+
+**Returns** `Float` — shape `...` × `n_fine` × `d`. Per-vertex fine-level features.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mesh_unpool_max -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_coarse` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n_fine` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

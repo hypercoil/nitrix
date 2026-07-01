@@ -1,0 +1,54 @@
+---
+title: "mesh_cotangent_laplacian"
+generated: true
+description: "Discrete Laplace-Beltrami operator (cotangent Laplacian) as ELL."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_cotangent_laplacian -->
+```python
+mesh_cotangent_laplacian(mesh: Mesh, *, format: Literal['ell', 'sectioned', 'auto'] = 'ell') -> ELL | SectionedELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_cotangent_laplacian -->
+Discrete Laplace-Beltrami operator (cotangent Laplacian) as ELL.
+
+The standard finite-element / discrete-exterior-calculus
+Laplacian on a triangle mesh:
+
+$(L u)_i = \sum_{j \in N(i)} w_{ij} (u_j - u_i)$
+
+where $w_{ij} = (\cot \alpha_{ij} + \cot \beta_{ij}) / 2$
+with $\alpha_{ij}$ and $\beta_{ij}$ the angles
+opposite edge $(i, j)$ in the two triangles sharing that edge
+(or only one cotangent for boundary edges in an open mesh).
+
+The diagonal entry is $L_{ii} = -\sum_j w_{ij}$, so each row
+sums to zero (the Laplacian sends constants to zero).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_cotangent_laplacian -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh. |
+| `format` | `Literal['ell', 'sectioned', 'auto']` | — | `'ell'` | `'ell'` (default) flat [`ELL`](../nitrix-sparse-ell/ELL.qmd); `'sectioned'` degree-bucketed [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd); `'auto'` sections only when the degree spread is wide (icosphere / fsaverage stay flat). Both feed `sparse.apply_operator`. The diagonal-first column layout (below) holds only for the flat `ELL`. |
+
+**Returns** `ELL | SectionedELL`. An [`ELL`](../nitrix-sparse-ell/ELL.qmd) or [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) of shape `(n_vertices, n_vertices)`. For the flat `ELL`, `k_max` is the 1-ring max degree plus 1 (the diagonal entry).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:mesh_cotangent_laplacian -->
+::: {.callout-note}
+Construction is host-side; the matvec via
+[`semiring_ell_matmul`](../nitrix-semiring.qmd) is pure JAX.
+
+Sign convention: returns the **positive-semidefinite** form
+$-\Delta$ (eigenvalues $\geq 0$).  For the
+negative-semidefinite form (matching the continuous Laplacian
+sign), negate the output's `values`.
+:::
+<!-- nitrix:/gen -->
+

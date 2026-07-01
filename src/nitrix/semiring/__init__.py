@@ -3,20 +3,31 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.semiring -- KeOps-style streaming reductions over arbitrary algebras.
+KeOps-style streaming reductions over arbitrary algebras.
 
-Public surface:
+This subpackage provides matrix and graph reductions that run over a
+user-selected algebraic structure rather than the fixed
+(add, multiply) ring of ordinary linear algebra. The same streaming
+kernels back the max-plus, min-plus, log-sum-exp, boolean and Euclidean
+reductions used throughout the wider library, so that morphology,
+smoothing and mesh aggregation can all be expressed as reductions over a
+chosen semiring.
 
-- ``Semiring`` (relaxed) / ``StrictSemiring`` (asserts associativity)
-- ``Semigroup``, ``Monoid`` Protocols
-- Built-in algebras: ``REAL``, ``LOG``, ``TROPICAL_MAX_PLUS``,
-  ``TROPICAL_MIN_PLUS``, ``BOOLEAN``, ``EUCLIDEAN``
-- ``semiring_matmul``, ``semiring_ell_matmul``
-- ``semiring_ell_edge_aggregate`` (edge-functional aggregation;
-  optional per-edge ``edge_attr``) + ``ell_row_softmax`` (GAT attention
-  pre-pass)
+The public surface is organised as follows.
 
-See ``nitrix/SPEC.md`` §3.1 and ``SPEC.md`` §3.1.
+- :class:`Semiring` (relaxed) and :class:`StrictSemiring`
+  (which asserts associativity) describe the algebraic structure supplied
+  to a reduction, built on the :class:`Semigroup` and :class:`Monoid`
+  protocols.
+- The built-in algebras :data:`REAL`, :data:`LOG`,
+  :data:`TROPICAL_MAX_PLUS`, :data:`TROPICAL_MIN_PLUS`, :data:`BOOLEAN`
+  and :data:`EUCLIDEAN` cover the common cases.
+- :func:`semiring_matmul` and :func:`semiring_ell_matmul` perform dense
+  and ELL-sparse matrix products over a chosen semiring.
+- :func:`semiring_ell_edge_aggregate` performs edge-functional
+  aggregation over an ELL adjacency structure, with optional per-edge
+  ``edge_attr``, and :func:`ell_row_softmax` provides the row-normalising
+  attention pre-pass used by graph-attention aggregation.
 """
 
 from ._types import (
