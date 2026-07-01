@@ -25,7 +25,7 @@ Equivalent to `scipy`'s natural `CubicSpline` interpolation at the knots.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate values. |
 | `n_basis` | `int` | — | `10` | Number of knots / basis coefficients `k` (>= 4). |
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Unused for `cr` (knots come from the data quantiles); accepted for a uniform smooth-constructor signature. |

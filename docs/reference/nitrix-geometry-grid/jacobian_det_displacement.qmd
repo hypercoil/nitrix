@@ -35,7 +35,7 @@ there).  The standard QA threshold is "no voxels with
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `u` | `Float` | `...` × `*spatial` × `d` | — | — |
 | `boundary_mode` | `Literal['nearest', 'wrap', 'mirror']` | — | `'nearest'` | — |
 | `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | — |

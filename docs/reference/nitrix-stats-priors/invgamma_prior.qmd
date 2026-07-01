@@ -27,7 +27,7 @@ sparse or short series).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `a` | `float` | — | — | Shape and scale (`a, b > 0`). The prior mode is `b / (a + 1)`; pick `a, b` so that is a plausibly-small lengthscale. |
 | `b` | `float` | — | — | Shape and scale (`a, b > 0`). The prior mode is `b / (a + 1)`; pick `a, b` so that is a plausibly-small lengthscale. |
 

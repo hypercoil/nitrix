@@ -20,7 +20,7 @@ Build a random-effect smooth block (mgcv `bs="re"`).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `g` | `Int` | `n` | — | `(n,)` integer group labels in `0 .. q-1` (the factor levels) -- one per observation. |
 | `by` | `Optional[Float[Array, ' n']]` | — | `None` | Optional `(n,)` covariate for a random **slope** `(by \| g)`; `None` gives a random **intercept** `(1 \| g)`. The design is then `one_hot(g) * by[:, None]`. |
 | `n_levels` | `Optional[int]` | — | `None` | Number of levels `q` (defaults to `int(g.max()) + 1`). Pass it when some levels are absent from this sample so the block width is stable. |

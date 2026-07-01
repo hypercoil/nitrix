@@ -31,8 +31,8 @@ per `type`:
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `OrdinalResult` | — | — | An :class:`OrdinalResult` from :func:`ordinal_fit`. |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `OrdinalResult` | — | — | An `OrdinalResult` from `ordinal_fit`. |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` design (no intercept column, as at fit -- the thresholds absorb it). |
 | `type` | `Literal['class_prob', 'cum_prob', 'class']` | — | `'class_prob'` | Output kind (see above). |
 

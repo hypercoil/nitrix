@@ -22,7 +22,7 @@ Analytic-shrinkage covariance via `method` (the cov only).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Float` | `n` × `p` | — | — |
 | `method` | `ShrinkageMethod` | — | `'ledoit_wolf'` | — |
 | `assume_centered` | `bool` | — | `False` | — |

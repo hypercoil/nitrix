@@ -26,7 +26,7 @@ lengthscale, a product kernel) -- selected by `rho`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Float` | `n` × `D` | — | `(n, D)` covariates (`D >= 1` columns). |
 | `n_basis` | `Any` | — | `8` | Per-dimension rank: an int (the same `m` for every dimension) or a length-`D` sequence `[m_1, ..., m_D]`. The total rank is the product `M = prod_d m_d` (it grows fast with `D` -- keep `m` modest for `D >= 2`). |
 | `kernel` | `str` | — | `'matern52'` | Stationary kernel: `'matern52'` (default) / `'matern32'` / `'matern12'` / `'rbf'`. |

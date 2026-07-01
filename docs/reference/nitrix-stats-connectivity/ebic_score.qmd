@@ -28,7 +28,7 @@ path point with the **smallest** EBIC.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `theta` | `Float` | `p` × `p` | — | — |
 | `S` | `Float` | `p` × `p` | — | — |
 | `n` | `int | Float[Array, '']` | — | — | — |

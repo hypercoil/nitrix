@@ -24,7 +24,7 @@ enforced monotone non-decreasing in rank) and the rejection mask
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `p_values` | `Float` | `n` | — | — |
 | `alpha` | `float` | — | `0.05` | — |
 

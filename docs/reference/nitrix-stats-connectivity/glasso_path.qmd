@@ -20,14 +20,14 @@ Sweeps the penalties in the **given order**, carrying the working covariance
 solve starts warm (far cheaper than a cold restart and the usual way to
 trace a glasso path -- pass `lambdas` descending, dense -> sparse, or
 ascending; either direction warm-starts).  Returns the stacked precisions
-aligned with `lambdas`; pair with :func:`ebic_score` for model selection.
+aligned with `lambdas`; pair with `ebic_score` for model selection.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:glasso_path -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `S` | `Float` | `p` × `p` | — | — |
 | `lambdas` | `Float` | `L` | — | — |
 | `n_outer` | `int` | — | `100` | — |

@@ -36,7 +36,7 @@ dims natively.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `image` | `Float` | `...` | — | `(*spatial, c)` or `(B, *spatial, c)`. |
 | `deformation` | `Float` | `...` | — | `(*spatial, ndim)` or `(B, *spatial, ndim)`. At least one of `image` / `deformation` must carry the leading batch axis. |
 | `mode` | `BoundaryMode` | — | `'constant'` | Forwarded to `spatial_transform`. |

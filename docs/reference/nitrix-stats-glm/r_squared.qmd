@@ -24,7 +24,7 @@ For the Gaussian family `deviance` is the residual sum of squares and
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 
 **Returns** `Float` — shape `V`.

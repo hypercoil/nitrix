@@ -38,7 +38,7 @@ comparison; the exact Dunn-Smyth series is the follow-up.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `p` | `float` | — | `1.5` | — |
 
 **Returns** `Family`.

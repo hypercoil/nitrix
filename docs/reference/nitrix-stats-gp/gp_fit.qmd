@@ -21,7 +21,7 @@ lengthscale (Gaussian responses).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | `(V, N)` responses (one row per element). |
 | `x` | `Union[Float[Array, ' N'], Float[Array, 'N D']]` | — | — | `(N,)` covariate, or `(N, D)` for a **multi-dimensional** GP (a spatial smooth / smooth interaction; HSGP tensor-product engine). This is a single covariate the GP smooths *over* -- **not** the full design matrix `X` of `glm_fit` / `gam_fit`; linear covariates go to `parametric=`. |
 | `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (covariates entering linearly alongside the intercept). |
@@ -34,7 +34,7 @@ lengthscale (Gaussian responses).
 | `ard` | `bool` | — | `False` | Multi-D only: `False` (default) estimates one **isotropic** lengthscale (a radial kernel of `\|\|x - x'\|\|`); `True` estimates a **per-axis** lengthscale (ARD / separable kernel) by coordinate descent over the axes. |
 | `rho_bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(rho_lo, rho_hi)` search range. Defaults to `(0.05, 2.0) * (hi - lo)`. |
 | `n_rho` | `int` | — | `24` | Number of log-spaced grid points for the `rho` search. |
-| `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Optional callable `rho -> -log p(rho)` adding a lengthscale prior to the pooled objective (a MAP / prior-regularised `rho`); `None` is pure REML. Use a builder from :mod:`nitrix.stats.priors` (`halfnormal_prior` / `invgamma_prior` / `lognormal_prior`) or any pure-JAX callable. |
+| `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Optional callable `rho -> -log p(rho)` adding a lengthscale prior to the pooled objective (a MAP / prior-regularised `rho`); `None` is pure REML. Use a builder from `nitrix.stats.priors` (`halfnormal_prior` / `invgamma_prior` / `lognormal_prior`) or any pure-JAX callable. |
 | `corr` | `Optional[Any]` | — | `None` | Within-group residual-correlation structure: `'ar1'` (discrete AR(1)), `'car1'` (continuous-time AR(1); pass `time`), `'cs'` (compound symmetry), or a `lme.CorrSpec`. `None` (default) is the i.i.d. residual. When set, `group` is required; the residual is `sigma_e^2 R(rho_c)` block-diagonal across `group`, with `rho_c` estimated jointly with the lengthscale. |
 | `group` | `Optional[Any]` | — | `None` | `(N,)` integer grouping factor for `corr` (the residual is correlated *within* groups, independent across them). Required when `corr` is set. |
 | `time` | `Optional[Float[Array, ' N']]` | — | `None` | `(N,)` observation times for `corr='car1'` (and to order `ar1` when rows are not in within-group time order). |

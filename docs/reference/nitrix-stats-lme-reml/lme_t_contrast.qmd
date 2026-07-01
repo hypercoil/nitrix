@@ -30,15 +30,15 @@ the adjusted covariance `Phi_A` (inflated for variance-component
 uncertainty) and the scaled-`F` denominator df, with `t = sign(effect)
 sqrt(F_KR)` on `df = m`.  KR rebuilds the rotated basis, so the original
 design must be re-passed as `X=` / `Z=` (the compressed `REMLResult`
-does not retain it); see :mod:`._kr`.
+does not retain it); see `._kr`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:lme_t_contrast -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A :class:`REMLResult` (`reml_fit` / R1) **or** the R2 :class:`LMEResult` (`lme_fit` with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields the Satterthwaite df consumes (audit D3-R2). `dof='kr'` is R1-only. |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A `REMLResult` (`reml_fit` / R1) **or** the R2 `LMEResult` (`lme_fit` with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields the Satterthwaite df consumes (audit D3-R2). `dof='kr'` is R1-only. |
 | `contrast` | `Float` | `p` | — | `(p,)` contrast vector `c` over the fixed effects. |
 | `dof` | `ContrastDof` | — | `'satterthwaite'` | `'satterthwaite'` (default) or `'kr'` (Kenward-Roger, R1-only; pass `X` / `Z`). |
 | `X` | `Optional[Float[Array, 'N p']]` | — | `None` | The original fixed / random design -- required for `dof='kr'`. |

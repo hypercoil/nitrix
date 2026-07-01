@@ -20,7 +20,7 @@ A link function as a record of its three IRLS primitives.
 `link` = `g(mu)`, `linkinv` = `g^{-1}(eta)`, `mu_eta` = `d mu /
 d eta` (as a function of `eta`); `eta_bound` is the IRLS linear-predictor
 clamp (`inf` unless the inverse link can overflow).  Compose onto a
-distribution with :meth:`Family.with_link`.
+distribution with `Family.with_link`.
 <!-- nitrix:/gen -->
 
 ### Methods

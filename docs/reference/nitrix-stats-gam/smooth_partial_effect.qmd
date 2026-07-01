@@ -29,7 +29,7 @@ random-slope coefficient) at those levels.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GAMResult` | — | — | — |
 | `smooth_index` | `int` | — | — | — |
 | `basis` | `Smooth` | — | — | — |

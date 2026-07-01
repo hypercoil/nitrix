@@ -28,7 +28,7 @@ broken GPU).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate values. |
 | `n_basis` | `int` | — | `10` | Retained basis dimension `k` (the leading kriging components). |
 | `rho` | `Optional[float]` | — | `None` | Kernel range (correlation length). Defaults to the data range / 2. |

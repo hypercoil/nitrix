@@ -24,7 +24,7 @@ position sharing its block label).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `n` | `int` | — | — | — |
 | `n_perm` | `int` | — | — | — |
 | `key` | `Array` | — | — | — |

@@ -27,7 +27,7 @@ deformation field consumable by `spatial_transform`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `spatial_shape` | `Sequence[int]` | — | — | Per-axis sizes of the grid; the result has rank `len(spatial_shape) + 1` with the trailing dim of size `len(spatial_shape)`. |
 | `dtype` | `DTypeLike` | — | `jnp.float32` | Floating-point dtype of the returned coordinates. |
 

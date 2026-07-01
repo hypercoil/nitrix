@@ -15,7 +15,7 @@ beta_predict(result: BetaResult, X: Float[Array, 'N p'], *, type: Literal['respo
 <!-- nitrix:gen overview:beta_predict -->
 Per-element beta-regression prediction on a (new) design `X`.
 
-The :func:`beta_fit` analogue of :func:`nitrix.stats.predict`: the mean
+The `beta_fit` analogue of `nitrix.stats.predict`: the mean
 model is the logit link, so `type='link'` returns the linear predictor
 `eta = X beta` and `type='response'` (default) returns the fitted mean
 `mu = expit(eta)` in `(0, 1)`.
@@ -25,8 +25,8 @@ model is the logit link, so `type='link'` returns the linear predictor
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `BetaResult` | — | — | A :class:`BetaResult` from :func:`beta_fit`. |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `BetaResult` | — | — | A `BetaResult` from `beta_fit`. |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` design (same columns as the fit). |
 | `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean `mu`) or `'link'` (the linear predictor `eta`). |
 

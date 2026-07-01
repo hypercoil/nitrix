@@ -20,7 +20,7 @@ Inverse covariance (precision) matrix.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | See `cov`. |
 | `require_nonsingular` | `bool` | — | `True` | `True` (default) -- a dense inverse (fails on singular sigma). `False` -- the symmetric Moore-Penrose pseudoinverse (eigen-truncated). Pass `l2 > 0` to `kwargs` to regularise rather than rely on the pseudoinverse for rank-deficient cases. |
 | `**kwargs` | `Any` | — | `{}` | — |

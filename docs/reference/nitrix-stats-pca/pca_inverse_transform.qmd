@@ -16,14 +16,14 @@ pca_inverse_transform(Z: Float[Array, 'n k'], components: Float[Array, 'k d'], m
 Reconstruct from PCA coordinates: `Z @ components + mean`.
 
 Exact (up to the discarded components) inverse of
-:func:`pca_transform`.
+`pca_transform`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pca_inverse_transform -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Z` | `Float` | `n` × `k` | — | — |
 | `components` | `Float` | `k` × `d` | — | — |
 | `mean` | `Float` | `d` | — | — |

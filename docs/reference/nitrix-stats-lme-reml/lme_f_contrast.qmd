@@ -45,15 +45,15 @@ the adjusted covariance `Phi_A` and the moment-matched scaled-`F` (their
 KR2), referred to `F(L, m)`.  It rebuilds the rotated basis, so re-pass the
 original design as `X=` / `Z=` (the compressed `REMLResult` does not
 retain it); `F = t^2` consistency with `lme_t_contrast(dof='kr')` holds
-for `L = 1`.  See :mod:`._kr`.
+for `L = 1`.  See `._kr`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:lme_f_contrast -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A :class:`REMLResult` (`reml_fit` / R1) **or** the R2 :class:`LMEResult` (`lme_fit` with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields (audit D3-R2). `dof='kr'` is R1-only. |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A `REMLResult` (`reml_fit` / R1) **or** the R2 `LMEResult` (`lme_fit` with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields (audit D3-R2). `dof='kr'` is R1-only. |
 | `contrast` | `Float` | `L` × `p` | — | `(L, p)` contrast matrix (or a `(p,)` single-row contrast). |
 | `dof` | `ContrastDof` | — | `'satterthwaite'` | `'satterthwaite'` (default) or `'kr'` (Kenward-Roger; pass `X` / `Z`). |
 | `X` | `Optional[Float[Array, 'N p']]` | — | `None` | The original fixed / random design -- required for `dof='kr'`. |

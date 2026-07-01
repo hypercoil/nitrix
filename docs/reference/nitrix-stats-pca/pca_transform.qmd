@@ -16,16 +16,16 @@ pca_transform(X: Float[Array, 'n d'], components: Float[Array, 'k d'], mean: Flo
 Project `X` onto a PCA basis: `(X - mean) @ components.T`.
 
 Takes `components` / `mean` explicitly (rather than a
-:class:`PCAResult`) so a *pre-fitted* basis -- e.g. components
+`PCAResult`) so a *pre-fitted* basis -- e.g. components
 loaded from elsewhere -- can be applied without a local
-:func:`pca_fit`.
+`pca_fit`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pca_transform -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Float` | `n` × `d` | — | — |
 | `components` | `Float` | `k` × `d` | — | — |
 | `mean` | `Float` | `d` | — | — |

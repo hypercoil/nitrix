@@ -25,7 +25,7 @@ Returns `(rejected, p_adjusted)`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `p_values` | `Float` | `n` | — | — |
 | `method` | `FDRMethod` | — | `'bh'` | — |
 | `alpha` | `float` | — | `0.05` | — |

@@ -20,7 +20,7 @@ Alias for `corr` (numpy convention).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `*args` | `Any` | — | `()` | — |
 | `**kwargs` | `Any` | — | `{}` | — |
 

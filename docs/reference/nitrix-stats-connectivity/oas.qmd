@@ -23,7 +23,7 @@ different closed-form `alpha`.  Matches `sklearn.covariance.oas`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Float` | `n` × `p` | — | — |
 | `assume_centered` | `bool` | — | `False` | — |
 

@@ -20,7 +20,7 @@ Nearest-neighbour interpolation (`order=0`).
 Each sampled value is the single voxel nearest the sample position.
 The output is restricted to values that occur in the input, so this
 is the label-preserving choice when an anti-aliased boundary is *not*
-wanted (cf. :class:`MultiLabel`).  The round-to-nearest is
+wanted (cf. `MultiLabel`).  The round-to-nearest is
 piecewise-constant in the coordinates, so the gradient w.r.t.
 coordinates is zero almost everywhere
 (`differentiable_in_coords = False`); the gather is still

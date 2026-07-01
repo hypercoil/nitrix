@@ -20,7 +20,7 @@ Per-element Akaike information criterion `-2 ll + 2 k`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 
 **Returns** `Float` — shape `V`.

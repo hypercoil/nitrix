@@ -27,7 +27,7 @@ built-in registry (`'gaussian'` / `'binomial'` / `'poisson'` /
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `family` | `Union[str, Family]` | — | — | — |
 
 **Returns** `Family`.

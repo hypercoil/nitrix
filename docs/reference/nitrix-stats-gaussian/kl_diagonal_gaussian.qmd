@@ -28,7 +28,7 @@ which is non-negative and zero exactly at `mean = 0`,
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `mean` | `Float` | `...` | — | The Gaussian's mean and log-variance, identical shape. |
 | `log_var` | `Float` | `...` | — | The Gaussian's mean and log-variance, identical shape. |
 | `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce. Default `None` (all). The latent KL is conventionally *summed* over the latent dimension, so pass the latent axis with `reduction="sum"` for a per-sample KL. |

@@ -30,7 +30,7 @@ Pass the result as `cov=` to `t_contrast` / `f_contrast`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | The fitted `GLMResult` and the data it was fit on (`X` shared, `Y` the `(V, N)` responses). |
 | `Y` | `Float` | `V` × `N` | — | The fitted `GLMResult` and the data it was fit on (`X` shared, `Y` the `(V, N)` responses). |
 | `X` | `Float` | `N` × `p` | — | The fitted `GLMResult` and the data it was fit on (`X` shared, `Y` the `(V, N)` responses). |

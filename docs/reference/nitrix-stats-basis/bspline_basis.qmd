@@ -20,7 +20,7 @@ Build a P-spline smooth basis for covariate `x`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate values. |
 | `n_basis` | `int` | — | `10` | Number of B-spline basis functions `k` (`mgcv`'s `k`; default `10`). |
 | `degree` | `int` | — | `3` | B-spline degree (default `3`, cubic). |

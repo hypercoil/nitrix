@@ -1,7 +1,7 @@
 ---
 title: "gp_bic"
 generated: true
-description: "Per-element Bayesian information criterion `-2 l_R + k log N` for a GP / HGP fit (lower is better); see :func:`gp_aic` for the comparability caveat."
+description: "Per-element Bayesian information criterion `-2 l_R + k log N` for a GP / HGP fit (lower is better); see `gp_aic` for the comparability caveat."
 ---
 
 [‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
@@ -14,14 +14,14 @@ gp_bic(result: _ICResult) -> Float[Array, 'V']
 
 <!-- nitrix:gen overview:gp_bic -->
 Per-element Bayesian information criterion `-2 l_R + k log N` for a GP /
-HGP fit (lower is better); see :func:`gp_aic` for the comparability caveat.
+HGP fit (lower is better); see `gp_aic` for the comparability caveat.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_bic -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `_ICResult` | — | — | — |
 
 **Returns** `Float` — shape `V`.

@@ -20,7 +20,7 @@ Threshold-free cluster enhancement of a statistic image.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `stat` | `Float` | `*spatial` | — | Statistic image (e.g. a t-map), arbitrary spatial dimensionality. |
 | `E` | `float` | — | `0.5` | Extent and height exponents (defaults `0.5` / `2.0` -- 3-D volume). |
 | `H` | `float` | — | `2.0` | Extent and height exponents (defaults `0.5` / `2.0` -- 3-D volume). |

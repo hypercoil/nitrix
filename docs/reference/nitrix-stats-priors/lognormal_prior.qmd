@@ -25,7 +25,7 @@ multiplicative spread `sd`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `mu` | `float` | — | — | Prior mean of `log rho` (so `exp(mu)` is the prior median lengthscale). |
 | `sd` | `float` | — | — | Prior standard deviation of `log rho` (`> 0`). |
 

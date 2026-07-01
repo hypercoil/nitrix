@@ -22,7 +22,7 @@ Normalised version of `conditionalcov`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | — |
 | `Y` | `Num` | `...` × `d` × `obs` | — | — |
 | `**kwargs` | `Any` | — | `{}` | — |

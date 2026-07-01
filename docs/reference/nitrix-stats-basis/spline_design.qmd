@@ -23,7 +23,7 @@ feature map and sum-to-zero constraint as the original construction.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `basis` | `SplineBasis` | — | — | — |
 | `x` | `Float` | `m` | — | — |
 

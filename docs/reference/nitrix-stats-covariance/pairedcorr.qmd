@@ -24,7 +24,7 @@ the geometric mean of the corresponding diagonal entries of
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | — |
 | `Y` | `Num` | `...` × `d` × `obs` | — | — |
 | `**kwargs` | `Any` | — | `{}` | — |
