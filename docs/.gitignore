@@ -3,3 +3,7 @@
 **/*.quarto_ipynb_*
 _site/
 **/*_files/
+# Stray Quarto render artefacts that can land next to sources when rendering
+# individual pages/listings (the real site builds to _site/).
+reference/**/*.html
+reference/**/*-listing.json
