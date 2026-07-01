@@ -1,0 +1,49 @@
+---
+title: "random_svf_displacement"
+generated: true
+description: "Sample a smooth diffeomorphic displacement field (channels-last)."
+---
+
+[‹ back to `nitrix.augment.geometric`](../nitrix-augment-geometric.qmd)
+
+<!-- nitrix:gen sig:random_svf_displacement -->
+```python
+random_svf_displacement(spatial_shape: Sequence[int], key: Array, *, max_std: float = 3.0, grid_fraction: float = 0.0625, n_steps: int = 5, dtype: Optional[DTypeLike] = None) -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:random_svf_displacement -->
+Sample a smooth diffeomorphic displacement field (channels-last).
+
+Draws a low-resolution stationary velocity field with standard
+deviation $\sim \mathcal{U}(0, \text{max\_std})$, linearly
+upsamples it to `spatial_shape`, and integrates it by
+scaling-and-squaring ([`integrate_velocity_field`](../nitrix-geometry.qmd))
+into a smooth, invertible displacement.  `max_std == 0` gives a zero
+field.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:random_svf_displacement -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `spatial_shape` | `Sequence[int]` | — | — | Spatial extent of the output field along each axis; the spatial rank `ndim` is `len(spatial_shape)`. |
+| `key` | `Array` | — | — | PRNG key. |
+| `max_std` | `float` | — | `3.0` | Upper bound of the uniform range from which the velocity field's standard deviation is drawn. |
+| `grid_fraction` | `float` | — | `0.0625` | Fraction of each spatial extent used for the coarse velocity grid; smaller values yield a smoother, lower-frequency field. |
+| `n_steps` | `int` | — | `5` | Number of scaling-and-squaring steps used to integrate the velocity field into a displacement. |
+| `dtype` | `Optional[DTypeLike]` | — | `None` | Floating dtype of the field. `None` (default) selects the x64-aware default float, avoiding a silent float32 downcast. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`. The channels-last displacement field, of shape `(*spatial_shape, ndim)` and dtype `dtype`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:random_svf_displacement -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

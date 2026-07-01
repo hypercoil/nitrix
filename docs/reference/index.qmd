@@ -22,6 +22,7 @@ final publication as-is (SPEC §6.5).
 <!-- nitrix:gen index-tree -->
 ## `nitrix`
 
+- [`bias`](nitrix-bias.qmd) — Intensity bias-field correction.
 - [`geometry`](nitrix-geometry.qmd) — Geometric primitives for neuroimaging.
 - [`graph`](nitrix-graph.qmd) — Graph-theoretic primitives.
 - [`linalg`](nitrix-linalg.qmd) — nitrix.linalg -- linear-algebra primitives.
@@ -33,6 +34,17 @@ final publication as-is (SPEC §6.5).
 - [`smoothing`](nitrix-smoothing.qmd) — Edge-preserving and non-edge-preserving smoothing.
 - [`sparse`](nitrix-sparse.qmd) — nitrix.sparse -- geometry-aware sparse formats.
 - [`stats`](nitrix-stats.qmd) — Mass-univariate statistical modelling for neuroimaging.
+
+### `nitrix.augment`
+
+- [`geometric`](nitrix-augment-geometric.qmd) — Spatial augmentation transforms (N-D, channels-last).
+- [`intensity`](nitrix-augment-intensity.qmd) — Intensity-domain augmentation transforms.
+- [`synthesis`](nitrix-augment-synthesis.qmd) — Generative augmentation: synthesise images from label maps and bias fields.
+
+### `nitrix.bias`
+
+- [`correction`](nitrix-bias-correction.qmd) — Unified bias-field-correction dispatcher.
+- [`n4`](nitrix-bias-n4.qmd) — N4 bias-field correction, GPU-accelerated in pure JAX.
 
 ### `nitrix.geometry`
 

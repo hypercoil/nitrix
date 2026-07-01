@@ -2,40 +2,50 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-N4 bias-field correction (Tustison 2010), GPU-accelerated in pure JAX.
+N4 bias-field correction, GPU-accelerated in pure JAX.
 
 N4 estimates and removes the smooth, low-frequency multiplicative
 intensity inhomogeneity ("bias field") that corrupts MRI.  It is the
-improved ("N4ITK") successor to N3 (Sled 1998); the improvements over N3
-are (a) a B-spline *approximation* of the field instead of N3's smoothing
-spline and (b) a multi-resolution fitting hierarchy.  This module follows
-the ITK / ANTs ``N4BiasFieldCorrectionImageFilter`` algorithm and default
-parameters, reformulated for the accelerator:
+improved ("N4ITK") successor to N3; the improvements over N3 are (a) a
+B-spline *approximation* of the field instead of N3's smoothing spline and
+(b) a multi-resolution fitting hierarchy.  This module follows the ITK /
+ANTs ``N4BiasFieldCorrectionImageFilter`` algorithm and default parameters,
+reformulated for the accelerator:
 
 - The per-iteration histogram **sharpening** is the N3 Wiener
-  deconvolution (``_sharpen.sharpen_histogram``) -- 1-D FFTs, cheap.
+  deconvolution (:func:`sharpen_histogram`) -- 1-D FFTs, cheap.
 - The field **smoothing** is the Lee--Wolberg--Shin multilevel B-spline
   approximation, specialised to the regular image grid so it becomes
-  separable dense per-axis contractions (``_bspline``) -- no gather, no
-  scatter, lowers to XLA ``dot`` / tensor cores.
+  separable dense per-axis contractions -- no gather, no scatter, lowers to
+  XLA ``dot`` / tensor cores.
 - The **iteration** is a ``lax.while_loop`` with ITK's coefficient-of-
   variation convergence test; the **multi-resolution** hierarchy is a
   static outer loop doubling the B-spline mesh per level.
 
-``n4_bias_field_correction`` is, deliberately, *exactly N4* -- the MBA fit,
-validated to ITK/ANTs parity (``docs/design/bias-field.md``).  Higher-
-accuracy field estimators (least-squares, P-splines) are a *different*
-algorithm and live behind ``nitrix.bias.bias_field_correction(method=...)``,
-not here; conflating them with the N4 name would mislabel non-N4 output.
+:func:`n4_bias_field_correction` is, deliberately, *exactly N4* -- the MBA
+fit, validated to ITK/ANTs parity.  Higher-accuracy field estimators
+(least-squares, P-splines) are a *different* algorithm and live behind
+:func:`bias_field_correction` (via its ``method`` argument), not here;
+conflating them with the N4 name would mislabel non-N4 output.
 
-Why no Pallas: the heavy ops are dense small-matrix contractions and 1-D
-FFTs, which XLA already schedules near-optimally on GPU/TPU.  Per the house
-"benchmark-first, don't build Pallas speculatively" policy
-(docs/feature-requests/internal-backlog.md B6/B7), N4 ships pure-JAX.
+Why no fused accelerator kernel: the heavy ops are dense small-matrix
+contractions and 1-D FFTs, which XLA already schedules near-optimally on
+GPU/TPU, so N4 ships pure-JAX.
 
 Differentiability: the B-spline smoothing is differentiable; the histogram
-sharpening is not (piecewise-constant binning).  Per the consumer ask,
-efficient end-to-end differentiability is a plus, not a requirement.
+sharpening is not (piecewise-constant binning).  Efficient end-to-end
+differentiability is a plus, not a requirement.
+
+References
+----------
+.. [Tustison2010] N. J. Tustison, B. B. Avants, P. A. Cook, Y. Zheng,
+   A. Egan, P. A. Yushkevich, and J. C. Gee (2010). N4ITK: improved N3 bias
+   correction. *IEEE Transactions on Medical Imaging*, 29(6), 1310-1320.
+   :doi:`10.1109/TMI.2010.2046908`
+.. [Sled1998] J. G. Sled, A. P. Zijdenbos, and A. C. Evans (1998). A
+   nonparametric method for automatic correction of intensity nonuniformity
+   in MRI data. *IEEE Transactions on Medical Imaging*, 17(1), 87-97.
+   :doi:`10.1109/42.668698`
 """
 
 from __future__ import annotations
@@ -73,12 +83,12 @@ def n4_bias_field_correction(
     Estimates the smooth multiplicative bias field corrupting ``image`` and
     returns the corrected image (``image / bias``).  Follows the ITK / ANTs
     ``N4BiasFieldCorrectionImageFilter`` algorithm and defaults; see the
-    module docstring and ``docs/design/bias-field.md`` for the accelerator
-    reformulation and the parity validation.
+    module docstring for the accelerator reformulation and the parity
+    validation.
 
     This function is N4 specifically (the Lee--Wolberg--Shin MBA field
     fit).  For the higher-accuracy least-squares / P-spline estimators, use
-    ``nitrix.bias.bias_field_correction(method=...)`` -- they are a
+    :func:`bias_field_correction` (via its ``method`` argument) -- they are a
     different algorithm and are kept off the N4 name on purpose.
 
     The entire input (modulo leading batch dims) is treated as one volume.
@@ -115,8 +125,8 @@ def n4_bias_field_correction(
         Stop a level early when the coefficient of variation of the field
         update drops below this.  Default ``1e-3`` (ITK default).
     n_histogram_bins, fwhm, wiener_noise
-        Histogram-sharpening parameters; see ``sharpen_histogram``.  Defaults
-        ``200`` / ``0.15`` / ``0.01`` (ITK defaults).
+        Histogram-sharpening parameters; see :func:`sharpen_histogram`.
+        Defaults ``200`` / ``0.15`` / ``0.01`` (ITK defaults).
     spatial_rank
         Number of trailing dims that are spatial.  ``None`` infers it from
         ``n_control_points`` (if a sequence) or treats every dim as spatial
@@ -129,8 +139,14 @@ def n4_bias_field_correction(
 
     Returns
     -------
-    ``corrected`` (default), or ``(corrected, bias_field)`` if
-    ``return_bias_field`` -- both with the same shape as ``image``.
+    corrected : Float[Array, '... *spatial']
+        The bias-corrected image (``image / bias``), same shape as
+        ``image``.  Returned on its own when ``return_bias_field`` is
+        ``False`` (the default).
+    bias_field : Float[Array, '... *spatial']
+        The estimated multiplicative bias field, same shape as ``image``.
+        Returned as the second element of a tuple only when
+        ``return_bias_field`` is ``True``.
 
     Notes
     -----

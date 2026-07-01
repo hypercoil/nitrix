@@ -1,0 +1,98 @@
+---
+title: "n4_bias_field_correction"
+generated: true
+description: "N4 (Tustison) bias-field correction."
+---
+
+[‹ back to `nitrix.bias.n4`](../nitrix-bias-n4.qmd)
+
+<!-- nitrix:gen sig:n4_bias_field_correction -->
+```python
+n4_bias_field_correction(image: Float[Array, '... *spatial'], *, mask: Optional[Float[Array, '... *spatial']] = None, spline_order: int = 3, n_control_points: Union[int, Sequence[int]] = 4, n_fitting_levels: int = 4, max_iterations: Union[int, Sequence[int]] = 50, convergence_threshold: float = 0.001, n_histogram_bins: int = 200, fwhm: float = 0.15, wiener_noise: float = 0.01, spatial_rank: Optional[int] = None, return_bias_field: bool = False, eps: float = 1e-08) -> Union[Float[Array, '... *spatial'], Tuple[Float[Array, '... *spatial'], Float[Array, '... *spatial']]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:n4_bias_field_correction -->
+N4 (Tustison) bias-field correction.
+
+Estimates the smooth multiplicative bias field corrupting `image` and
+returns the corrected image (`image / bias`).  Follows the ITK / ANTs
+`N4BiasFieldCorrectionImageFilter` algorithm and defaults; see the
+module docstring for the accelerator reformulation and the parity
+validation.
+
+This function is N4 specifically (the Lee--Wolberg--Shin MBA field
+fit).  For the higher-accuracy least-squares / P-spline estimators, use
+[`bias_field_correction`](../nitrix-bias-correction/bias_field_correction.qmd) (via its `method` argument) -- they are a
+different algorithm and are kept off the N4 name on purpose.
+
+The entire input (modulo leading batch dims) is treated as one volume.
+For a batch of volumes -- distinct leading dims with `spatial_rank`
+set -- each volume is corrected independently (its own histogram,
+field, and convergence) via an internal `vmap`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:n4_bias_field_correction -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `...` × `*spatial` | — | Positive intensities, `(..., *spatial)`. Non-positive voxels are clamped for the log transform; keep them out of the mask. |
+| `mask` | `Optional[Float[Array, '... *spatial']]` | — | `None` | Region over which the field is estimated (the histogram and B-spline fit are confined to it; the field is still reconstructed -- and the correction applied -- everywhere). `None` (default) uses `image > 0`. Float masks act as per-voxel confidence weights. |
+| `spline_order` | `int` | — | `3` | B-spline order for the field. Default `3` (cubic; the N4 default and the parity-validated path). |
+| `n_control_points` | `Union[int, Sequence[int]]` | — | `4` | Control points per spatial axis at the **coarsest** fitting level (ITK `NumberOfControlPoints`). `int` -- isotropic; sequence -- per-axis. Must be `>= spline_order + 1`. The mesh doubles each level. Default `4` (-> mesh size 1 at the coarsest level). |
+| `n_fitting_levels` | `int` | — | `4` | Number of multi-resolution levels; the B-spline mesh doubles per level. Default `4`. |
+| `max_iterations` | `Union[int, Sequence[int]]` | — | `50` | Maximum sharpen/fit iterations per level. `int` -- same cap every level; sequence -- per-level (length `n_fitting_levels`). Default `50` (ITK default is `(50, 50, 50, 50)`). |
+| `convergence_threshold` | `float` | — | `0.001` | Stop a level early when the coefficient of variation of the field update drops below this. Default `1e-3` (ITK default). |
+| `n_histogram_bins` | `int` | — | `200` | Histogram-sharpening parameters; see [`sharpen_histogram`](../nitrix-bias/sharpen_histogram.qmd). Defaults `200` / `0.15` / `0.01` (ITK defaults). |
+| `fwhm` | `float` | — | `0.15` | Histogram-sharpening parameters; see [`sharpen_histogram`](../nitrix-bias/sharpen_histogram.qmd). Defaults `200` / `0.15` / `0.01` (ITK defaults). |
+| `wiener_noise` | `float` | — | `0.01` | Histogram-sharpening parameters; see [`sharpen_histogram`](../nitrix-bias/sharpen_histogram.qmd). Defaults `200` / `0.15` / `0.01` (ITK defaults). |
+| `spatial_rank` | `Optional[int]` | — | `None` | Number of trailing dims that are spatial. `None` infers it from `n_control_points` (if a sequence) or treats every dim as spatial (single volume). Set it to mark leading batch dims. |
+| `return_bias_field` | `bool` | — | `False` | If `True`, also return the estimated multiplicative bias field (same shape as `image`), e.g. for QC or to apply to another image. |
+| `eps` | `float` | — | `1e-08` | Numerical floor for the log transform and the B-spline denominators. |
+
+**Returns** `Union[Float[Array, '... *spatial'], Tuple[Float[Array, '... *spatial'], Float[Array, '... *spatial']]]`. The bias-corrected image (`image / bias`), same shape as `image`. Returned on its own when `return_bias_field` is `False` (the default). The estimated multiplicative bias field, same shape as `image`. Returned as the second element of a tuple only when `return_bias_field` is `True`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:n4_bias_field_correction -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **16.15 ms** (median, L4); up to **224.24× faster** than `simpleitk.N4`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_N4_BIAS_FIELD_CORRECTION.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| n4_bias_field_correction | jax-cpu | s=32 | `nitrix-jax` | ok | 50.64 ms / 52.89 ms | 1.175 s | 715 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| n4_bias_field_correction | jax-cpu | s=32 | `simpleitk.N4` | ok | 1.677 s / 2.054 s | 1.999 s | 715 MB (rss) | n/a (no oracle) | 33.11x vs nitrix-jax |
+| n4_bias_field_correction | jax-cuda12 | s=32 | `nitrix-jax` | ok | 16.06 ms / 16.15 ms | 3.619 s | 168.30 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| n4_bias_field_correction | jax-cuda12 | s=32 | `simpleitk.N4` | ok | 1.589 s / 2.073 s | 2.114 s | 0.26 MB (hbm) | n/a (no oracle) | 98.95x vs nitrix-jax |
+| n4_bias_field_correction | jax-cpu | s=48 | `nitrix-jax` | ok | 161.33 ms / 169.47 ms | 1.594 s | 715 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| n4_bias_field_correction | jax-cpu | s=48 | `simpleitk.N4` | ok | 6.276 s / 6.353 s | 5.173 s | 715 MB (rss) | n/a (no oracle) | 38.90x vs nitrix-jax |
+| n4_bias_field_correction | jax-cuda12 | s=48 | `nitrix-jax` | ok | 33.01 ms / 33.09 ms | 4.140 s | 73.40 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| n4_bias_field_correction | jax-cuda12 | s=48 | `simpleitk.N4` | ok | 4.986 s / 6.339 s | 6.453 s | 0.88 MB (hbm) | n/a (no oracle) | 151.05x vs nitrix-jax |
+| n4_bias_field_correction | jax-cpu | s=64 | `nitrix-jax` | ok | 369.19 ms / 392.46 ms | 2.059 s | 715 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| n4_bias_field_correction | jax-cpu | s=64 | `simpleitk.N4` | ok | 14.597 s / 14.713 s | 12.085 s | 715 MB (rss) | n/a (no oracle) | 39.54x vs nitrix-jax |
+| n4_bias_field_correction | jax-cuda12 | s=64 | `nitrix-jax` | ok | 65.08 ms / 65.23 ms | 4.326 s | 75.50 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| n4_bias_field_correction | jax-cuda12 | s=64 | `simpleitk.N4` | ok | 14.594 s / 14.744 s | 14.959 s | 2.10 MB (hbm) | n/a (no oracle) | 224.24x vs nitrix-jax |
+:::
+
+*source: bench `8d7c2e44` · nitrix `be140323`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:n4_bias_field_correction -->
+::: {.callout-note}
+The B-spline field smoothing is differentiable; the histogram sharpening
+is not (piecewise-constant binning).  The op JITs cleanly (static FFT
+and control-lattice shapes; `lax.while_loop` iteration).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:n4_bias_field_correction -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

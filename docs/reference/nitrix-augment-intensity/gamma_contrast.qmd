@@ -1,0 +1,46 @@
+---
+title: "gamma_contrast"
+generated: true
+description: "Apply a gamma tone curve within a normalised intensity bracket."
+---
+
+[‹ back to `nitrix.augment.intensity`](../nitrix-augment-intensity.qmd)
+
+<!-- nitrix:gen sig:gamma_contrast -->
+```python
+gamma_contrast(x: Float[Array, '...'], gamma: Float[Array, '...'], *, value_range: Optional[Tuple[float, float]] = None) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gamma_contrast -->
+Apply a gamma tone curve within a normalised intensity bracket.
+
+Normalises `x` to `[0, 1]` over the bracket, raises it to
+`gamma`, then maps back to the bracket:
+    normed = clip((x - lo) / (hi - lo), 0, 1)
+    out    = normed ** gamma * (hi - lo) + lo
+
+`gamma < 1` expands the dynamic range of dark values (higher
+contrast); `gamma > 1` compresses it.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gamma_contrast -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Intensity tensor. |
+| `gamma` | `Float` | `...` | — | Exponent (scalar or broadcastable to `x`). Drawing it randomly is the caller's concern (a single `jax.random.uniform`). |
+| `value_range` | `Optional[Tuple[float, float]]` | — | `None` | The `(lo, hi)` bracket to normalise within. `None` (default) uses the per-tensor `min` / `max`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gamma_contrast -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

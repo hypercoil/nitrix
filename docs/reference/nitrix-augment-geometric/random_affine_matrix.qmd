@@ -1,0 +1,52 @@
+---
+title: "random_affine_matrix"
+generated: true
+description: "Sample a random affine `(ndim, ndim+1)` in geometric parameters."
+---
+
+[‹ back to `nitrix.augment.geometric`](../nitrix-augment-geometric.qmd)
+
+<!-- nitrix:gen sig:random_affine_matrix -->
+```python
+random_affine_matrix(key: Array, *, ndim: int = 3, max_rotation: float = 15.0, max_scale: float = 0.15, max_shear: float = 0.012, max_translation: float = 0.0) -> Float[Array, 'd d1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:random_affine_matrix -->
+Sample a random affine `(ndim, ndim+1)` in geometric parameters.
+
+Supports `ndim` in `{2, 3}` (returns `(2, 3)` or `(3, 4)`).
+Rotation $\sim \mathcal{U}(-\text{max\_rotation},
+\text{max\_rotation})$ degrees (a single angle in 2-D, three in 3-D),
+scale $\sim \mathcal{U}(1 - \text{max\_scale}, 1 +
+\text{max\_scale})$, and shear / translation drawn from their
+symmetric ranges, then assembled as a translation, rotation, scale
+and shear composition via
+[`params_to_affine_matrix`](../nitrix-geometry.qmd).  All-zero bounds
+give the identity.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:random_affine_matrix -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `key` | `Array` | — | — | PRNG key. |
+| `ndim` | `int` | — | `3` | Spatial dimensionality; either `2` or `3`. |
+| `max_rotation` | `float` | — | `15.0` | Half-width, in degrees, of the symmetric uniform range from which each rotation angle is drawn. One angle is sampled in 2-D and three in 3-D. |
+| `max_scale` | `float` | — | `0.15` | Half-width of the per-axis scale range; the scale of each axis is drawn from `(1 - max_scale, 1 + max_scale)`. |
+| `max_shear` | `float` | — | `0.012` | Half-width of the symmetric uniform range from which each shear parameter is drawn. |
+| `max_translation` | `float` | — | `0.0` | Half-width of the symmetric uniform range from which each per-axis translation is drawn. |
+
+**Returns** `Float` — shape `d` × `d1`. The sampled affine matrix, of shape `(ndim, ndim + 1)` (i.e. `(2, 3)` or `(3, 4)`), mapping homogeneous coordinates.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:random_affine_matrix -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `d` | spatial dimension (2 or 3) |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

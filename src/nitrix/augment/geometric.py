@@ -4,22 +4,23 @@
 """
 Spatial augmentation transforms (N-D, channels-last).
 
-- ``random_flip`` -- independent per-axis Bernoulli reflection.
-- ``random_crop`` -- random-offset, fixed-size crop (a pure index slice).
-- ``random_resized_crop`` -- a random sub-window resampled to a fixed
+- :func:`random_flip` -- independent per-axis Bernoulli reflection.
+- :func:`random_crop` -- random-offset, fixed-size crop (a pure index
+  slice).
+- :func:`random_resized_crop` -- a random sub-window resampled to a fixed
   output shape (the "zoom" augmentation), built on the
-  ``geometry.spatial_transform`` resampler.
-- ``random_affine_matrix`` -- a random affine, drawn in geometric
+  :func:`~nitrix.geometry.spatial_transform` resampler.
+- :func:`random_affine_matrix` -- a random affine, drawn in geometric
   parameters (rotation / scale / shear / translation) and assembled with
-  ``geometry.params_to_affine_matrix``.
-- ``random_svf_displacement`` -- a random smooth diffeomorphic
+  :func:`~nitrix.geometry.params_to_affine_matrix`.
+- :func:`random_svf_displacement` -- a random smooth diffeomorphic
   displacement field, from a low-resolution stationary velocity field
-  integrated by ``geometry.integrate_velocity_field``.
+  integrated by :func:`~nitrix.geometry.integrate_velocity_field`.
 
 The matrix / field generators return the *transform*; apply it with the
-``geometry`` warp primitives (``affine_grid`` + ``spatial_transform``).
-Coordinates and fields follow the nitrix channels-last convention
-(``(*spatial, ndim)``).
+geometry warp primitives (an affine grid plus
+:func:`~nitrix.geometry.spatial_transform`).  Coordinates and fields
+follow the nitrix channels-last convention (``(*spatial, ndim)``).
 """
 
 from __future__ import annotations
@@ -70,6 +71,12 @@ def random_flip(
         channel axis is never reflected.
     p
         Per-axis reflection probability.
+
+    Returns
+    -------
+    Float[Array, '...']
+        A tensor with the same shape and dtype as ``x``, reflected along
+        each eligible axis for which the per-axis coin came up heads.
     """
     flip_axes = tuple(range(x.ndim)) if axes is None else tuple(axes)
     if not flip_axes:
@@ -93,6 +100,23 @@ def random_crop(
     axis's full length to leave it uncropped).  A uniform random offset
     is drawn per axis and the window extracted with ``lax.dynamic_slice``
     (static size, traced offset -> jit-clean).
+
+    Parameters
+    ----------
+    x
+        Input tensor of arbitrary rank.
+    key
+        PRNG key.
+    size
+        Per-axis output extent, one entry for each axis of ``x``.  Each
+        entry must not exceed the corresponding axis length; use an
+        axis's full length to leave it uncropped.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The cropped window, of shape ``tuple(size)`` and the same dtype
+        as ``x``.
 
     Raises
     ------
@@ -124,12 +148,12 @@ def random_resized_crop(
 ) -> Float[Array, '*size c']:
     """Random sub-window resampled to a fixed output shape (zoom crop).
 
-    Samples a per-axis crop extent ``~ U(scale_range) * input_extent`` and
-    a uniform offset within the remaining slack, builds the output grid of
-    coordinates mapped into that window, and resamples with
-    ``geometry.spatial_transform``.  The output is always ``(*size, c)``
-    regardless of the sampled window, so it composes into a fixed-shape
-    batch.
+    Samples a per-axis crop extent :math:`\\sim \\mathcal{U}(\\text{scale\\_range})
+    \\cdot \\text{input\\_extent}` and a uniform offset within the remaining
+    slack, builds the output grid of coordinates mapped into that window,
+    and resamples with :func:`~nitrix.geometry.spatial_transform`.  The
+    output is always ``(*size, c)`` regardless of the sampled window, so
+    it composes into a fixed-shape batch.
 
     Parameters
     ----------
@@ -139,12 +163,22 @@ def random_resized_crop(
     key
         PRNG key.
     size
-        Output spatial shape.
+        Output spatial shape, one entry per spatial axis.
     scale_range
-        Per-axis window extent as a fraction of the input axis length.
+        ``(low, high)`` bounds on the per-axis window extent, expressed
+        as a fraction of the input axis length; the extent is drawn
+        uniformly from this range independently for each axis.
     method
-        Interpolation kernel (``geometry`` ``Interpolator``; ``Linear``
-        by default, ``NearestNeighbour`` for label maps).
+        Interpolation kernel (a :class:`~nitrix.geometry.Interpolator`;
+        :class:`~nitrix.geometry.Linear` by default,
+        :class:`~nitrix.geometry.NearestNeighbour` for label maps).
+
+    Returns
+    -------
+    Float[Array, '*size c']
+        The resampled window, of shape ``(*size, c)`` with the same
+        channel count as ``x``.  Coordinates falling outside the input
+        are filled with zero.
     """
     ndim = len(size)
     spatial = x.shape[:ndim]
@@ -185,11 +219,40 @@ def random_affine_matrix(
     """Sample a random affine ``(ndim, ndim+1)`` in geometric parameters.
 
     Supports ``ndim`` in ``{2, 3}`` (returns ``(2, 3)`` or ``(3, 4)``).
-    Rotation ``~ U(-max_rotation, max_rotation)`` degrees (a single angle
-    in 2-D, three in 3-D), scale ``~ U(1 - max_scale, 1 + max_scale)``,
-    shear / translation drawn from their symmetric ranges, then assembled
-    as ``T @ R @ S @ E`` via ``geometry.params_to_affine_matrix``.
-    All-zero bounds give the identity.
+    Rotation :math:`\\sim \\mathcal{U}(-\\text{max\\_rotation},
+    \\text{max\\_rotation})` degrees (a single angle in 2-D, three in 3-D),
+    scale :math:`\\sim \\mathcal{U}(1 - \\text{max\\_scale}, 1 +
+    \\text{max\\_scale})`, and shear / translation drawn from their
+    symmetric ranges, then assembled as a translation, rotation, scale
+    and shear composition via
+    :func:`~nitrix.geometry.params_to_affine_matrix`.  All-zero bounds
+    give the identity.
+
+    Parameters
+    ----------
+    key
+        PRNG key.
+    ndim
+        Spatial dimensionality; either ``2`` or ``3``.
+    max_rotation
+        Half-width, in degrees, of the symmetric uniform range from
+        which each rotation angle is drawn.  One angle is sampled in 2-D
+        and three in 3-D.
+    max_scale
+        Half-width of the per-axis scale range; the scale of each axis is
+        drawn from ``(1 - max_scale, 1 + max_scale)``.
+    max_shear
+        Half-width of the symmetric uniform range from which each shear
+        parameter is drawn.
+    max_translation
+        Half-width of the symmetric uniform range from which each
+        per-axis translation is drawn.
+
+    Returns
+    -------
+    Float[Array, 'd d1']
+        The sampled affine matrix, of shape ``(ndim, ndim + 1)`` (i.e.
+        ``(2, 3)`` or ``(3, 4)``), mapping homogeneous coordinates.
     """
     rot_count = ndim * (ndim - 1) // 2
     k_r, k_s, k_sh, k_t = jax.random.split(key, 4)
@@ -220,13 +283,38 @@ def random_svf_displacement(
 ) -> Float[Array, '*spatial ndim']:
     """Sample a smooth diffeomorphic displacement field (channels-last).
 
-    Draws a low-resolution stationary velocity field (std ``~ U(0,
-    max_std)``), linearly upsamples it to ``spatial_shape``, and
-    integrates it by scaling-and-squaring
-    (``geometry.integrate_velocity_field``) into a smooth, invertible
-    displacement.  ``max_std == 0`` gives a zero field.  ``dtype`` defaults
-    to the x64-aware float (no silent float32 downcast).  Returns
-    ``(*spatial, ndim)``.
+    Draws a low-resolution stationary velocity field with standard
+    deviation :math:`\\sim \\mathcal{U}(0, \\text{max\\_std})`, linearly
+    upsamples it to ``spatial_shape``, and integrates it by
+    scaling-and-squaring (:func:`~nitrix.geometry.integrate_velocity_field`)
+    into a smooth, invertible displacement.  ``max_std == 0`` gives a zero
+    field.
+
+    Parameters
+    ----------
+    spatial_shape
+        Spatial extent of the output field along each axis; the spatial
+        rank ``ndim`` is ``len(spatial_shape)``.
+    key
+        PRNG key.
+    max_std
+        Upper bound of the uniform range from which the velocity field's
+        standard deviation is drawn.
+    grid_fraction
+        Fraction of each spatial extent used for the coarse velocity
+        grid; smaller values yield a smoother, lower-frequency field.
+    n_steps
+        Number of scaling-and-squaring steps used to integrate the
+        velocity field into a displacement.
+    dtype
+        Floating dtype of the field.  ``None`` (default) selects the
+        x64-aware default float, avoiding a silent float32 downcast.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The channels-last displacement field, of shape
+        ``(*spatial_shape, ndim)`` and dtype ``dtype``.
     """
     ndim = len(spatial_shape)
     dt = _default_float() if dtype is None else dtype

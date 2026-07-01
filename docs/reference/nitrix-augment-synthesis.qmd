@@ -1,0 +1,55 @@
+---
+title: "nitrix.augment.synthesis"
+generated: true
+signature-hash: 802d495d051140db
+description: "Generative augmentation: synthesise images from label maps and bias fields."
+listing:
+  id: nitrix-augment-synthesis-symbols
+  contents: "nitrix-augment-synthesis/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.augment.synthesis`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Generative augmentation: synthesise images from label maps and bias fields.
+
+- [`gmm_label_to_image`](nitrix-augment-synthesis/gmm_label_to_image.qmd) renders an intensity image from an integer
+  label map by a per-label Gaussian mixture: each voxel takes its label's
+  mean plus that label's standard deviation times unit Gaussian noise.
+  This is the domain-randomisation synthesis behind contrast-agnostic
+  training (synthesise an image from anatomy rather than perturbing a real
+  one).
+- [`simulate_bias_field`](nitrix-augment-synthesis/simulate_bias_field.qmd) produces a smooth, low-frequency,
+  multiplicative intensity non-uniformity (INU / "bias") field, generated
+  by exponentiating an upsampled low-resolution Gaussian field.  This is
+  the *forward* (simulation) counterpart to the *corrective* bias-field
+  estimators in [`nitrix.bias`](nitrix-bias.qmd).
+
+Both are pure functions of an explicit PRNG key.  [`gmm_label_to_image`](nitrix-augment-synthesis/gmm_label_to_image.qmd)
+takes explicit per-label statistics so it serves both fixed intensities
+and randomised contrast (draw the per-label means and standard deviations
+in the caller); [`simulate_bias_field`](nitrix-augment-synthesis/simulate_bias_field.qmd) is a generator parameterised by
+a magnitude bound.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n_labels` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-augment-synthesis-symbols}
+:::
