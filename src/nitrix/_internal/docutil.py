@@ -36,9 +36,14 @@ def form_docstring(
 
 class DocTemplateFormat(UserDict[str, str]):
     """
-    Enable multiple documentation decorators to be applied to a single
-    function, with each pass leaving intact any cells that are not specified
-    in the current decorator.
+    Format mapping that leaves unspecified placeholders untouched.
+
+    This mapping is used with :meth:`str.format_map` so that multiple
+    documentation decorators may be applied to a single function in
+    succession. Any placeholder that is not supplied by the current
+    decorator is left intact for a later pass, because a missing key is
+    rendered back into its original ``{key}`` form rather than raising a
+    :class:`KeyError`.
     """
 
     def __missing__(self, key: str) -> str:

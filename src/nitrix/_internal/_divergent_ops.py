@@ -4,21 +4,26 @@
 """
 Central manifest of numerically-divergent dispatch sites (the ``driver`` axis).
 
-Registered **eagerly** (imported by ``nitrix.__init__``) so that:
+An operation is *divergent* when it auto-selects among numerically-different
+implementations of the same mathematics -- for example a sequential versus a
+parallel associative scan, which reassociate a recurrence differently. This
+module records every such site in one place and registers each one eagerly, so
+the registration happens as soon as ``import nitrix`` runs.
 
-- ``nitrix.divergent_ops()`` is complete the moment ``import nitrix`` runs --
-  a parity-sensitive consumer can audit every divergent op without importing
-  each subpackage that owns one; and
-- the P4 completeness guard has a single source of truth to check the
-  ``resolve_driver(op=...)`` call sites against.
+Eager registration means:
 
-Each entry is the cross-variant **contract**: the ``canonical`` variant
-reproducibility mode forces, the hardware-``fast`` pick (descriptive), the
-accepted ``driver`` values, and the per-dtype tolerance the golden corpus pins
-``variant ~= canonical`` against (suite P3).  The site code (in its own module)
-only references the op by name via ``resolve_driver``; the contract lives here.
+- :func:`divergent_ops` is complete the moment ``import nitrix`` runs -- a
+  parity-sensitive consumer can audit every divergent op without importing each
+  subpackage that owns one; and
+- the completeness guard has a single source of truth to check the
+  :func:`resolve_driver` call sites against.
 
-See ``docs/feature-requests/reproducible-dispatch.md``.
+Each entry is the cross-variant contract registered via
+:func:`register_divergent_op`: the ``canonical`` variant that reproducibility
+mode forces, the hardware-``fast`` pick (descriptive only), the accepted
+``driver`` values, and the per-dtype tolerance that the golden corpus pins each
+variant against its canonical form. The site code (in its own module) only
+references the op by name via :func:`resolve_driver`; the contract lives here.
 """
 
 from __future__ import annotations

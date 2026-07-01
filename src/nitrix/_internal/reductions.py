@@ -4,26 +4,26 @@
 """
 The one reduction surface for nitrix score kernels.
 
-Per ``SPEC §5`` (the score-kernel ↔ scalarisation boundary):
-a nitrix score kernel returns the **unreduced** tensor by default and may
+A nitrix score kernel returns the **unreduced** tensor by default and may
 expose a *flat, non-compositional* reduction as a leaf convenience. This is
-that leaf -- the single ``Reduction`` literal and ``reduce`` helper shared
-by ``metrics``, ``stats``, and ``register.regulariser`` (collapsing three
-divergent private ``_reduce`` copies into one).
+that leaf: the single :data:`Reduction` literal and :func:`reduce` helper
+shared by the ``metrics``, ``stats``, and ``register.regulariser``
+subsystems (collapsing three divergent private copies into one).
 
 It is deliberately **not** the scalarisation system. nimox's ``scalarise``
 is a higher-order combinator (``mean_scalarise(inner=…)``,
 function → function) that composes, weights whole terms, and combines
-objectives; ``reduce`` here is the innermost value → value leaf that such a
-composition bottoms out at. Read this as "the minimal subset of
+objectives; :func:`reduce` here is the innermost value → value leaf that
+such a composition bottoms out at. Read this as "the minimal subset of
 ``scalarise``," not a rival.
 
 The one weighted reduction nitrix owns is the **domain-mask weighted mean**
-``Σ(w·x) / Σw`` (``reduction='mean'`` with a ``weight``): a per-element
-foreground / validity mask is part of the *measurement* (an LNCC / Dice /
-masked-token CE over background is numerically meaningless), distinct from
-the per-term *objective* weighting that belongs to nimox. ``weight`` here is
-a domain mask, never an objective weight.
+:math:`\\sum_i (w_i \\cdot x_i) / \\sum_i w_i` (``reduction='mean'`` with a
+``weight``): a per-element foreground / validity mask is part of the
+*measurement* (an LNCC / Dice / masked-token cross-entropy over background is
+numerically meaningless), distinct from the per-term *objective* weighting
+that belongs to nimox. ``weight`` here is a domain mask, never an objective
+weight.
 """
 
 from __future__ import annotations
@@ -57,7 +57,8 @@ def reduce(
     weight
         Optional per-element non-negative **domain mask** (same shape as
         ``values`` or broadcastable). When given, it multiplies ``values``,
-        and ``reduction='mean'`` becomes the weighted mean ``Σ(w·x)/Σw``.
+        and ``reduction='mean'`` becomes the weighted mean
+        :math:`\\sum_i (w_i \\cdot x_i) / \\sum_i w_i`.
     reduction
         ``'none'`` (return the -- optionally masked -- tensor), ``'sum'``,
         or ``'mean'``.

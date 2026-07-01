@@ -76,6 +76,25 @@ def _seq_pad(
 def atleast_4d(
     *pparams: Shaped[Array, '...'],
 ) -> Union[Shaped[Array, '...'], Sequence[Shaped[Array, '...']]]:
+    """
+    Promote each input tensor to at least four dimensions.
+
+    Any tensor with fewer than four axes has singleton axes prepended until
+    it is four-dimensional; tensors that are already at least rank four are
+    returned unchanged.  (Note this prepends leading axes, unlike
+    :func:`numpy.atleast_3d`, which appends/centres a trailing axis.)
+
+    Parameters
+    ----------
+    *pparams : tensor
+        One or more tensors of arbitrary shape.
+
+    Returns
+    -------
+    tensor or tuple of tensor
+        The promoted tensor if a single argument was passed, otherwise a tuple
+        containing the promoted form of each input in argument order.
+    """
     res = []
     for p in pparams:
         if p.ndim == 0:
@@ -99,7 +118,24 @@ def axis_complement(
     axis: Union[int, Sequence[int]],
 ) -> Tuple[int, ...]:
     """
-    Return the complement of the axis or axes for a tensor of dimension ndim.
+    Return the axes not named in a selection.
+
+    Given the rank of a tensor and a selection of one or more axes, this
+    returns the standard (nonnegative) axis numbers of every remaining axis,
+    in ascending order.
+
+    Parameters
+    ----------
+    ndim : int
+        Total number of axes in the tensor.
+    axis : int or sequence of int
+        Axis or axes to exclude from the complement. These are indexed
+        positively from the start of the tensor.
+
+    Returns
+    -------
+    tuple of int
+        The axis numbers not present in ``axis``, in ascending order.
     """
     if isinstance(axis, int):
         axis = (axis,)
@@ -114,7 +150,28 @@ def axis_complement(
 # We should figure out if there's a better way to do this with mypy.
 def standard_axis_number_strict(axis: int, ndim: int) -> int:
     """
-    Convert an axis number to a standard axis number.
+    Convert an axis number to a standard (nonnegative) axis number.
+
+    A negative axis is rewritten as its equivalent counted from the start of
+    the tensor. An axis that falls outside the valid range for a tensor of
+    rank ``ndim`` raises an error.
+
+    Parameters
+    ----------
+    axis : int
+        Axis number to convert. May be negative to index from the end.
+    ndim : int
+        Total number of axes in the tensor.
+
+    Returns
+    -------
+    int
+        The equivalent nonnegative axis number in the range ``[0, ndim)``.
+
+    Raises
+    ------
+    ValueError
+        If ``axis`` does not name a valid axis of a rank-``ndim`` tensor.
     """
     if axis < 0 and axis >= -ndim:
         axis += ndim
@@ -125,7 +182,25 @@ def standard_axis_number_strict(axis: int, ndim: int) -> int:
 
 def standard_axis_number(axis: int, ndim: int) -> Optional[int]:
     """
-    Convert an axis number to a standard axis number.
+    Convert an axis number to a standard (nonnegative) axis number.
+
+    A negative axis is rewritten as its equivalent counted from the start of
+    the tensor. This is the non-raising counterpart of
+    :func:`standard_axis_number_strict`.
+
+    Parameters
+    ----------
+    axis : int
+        Axis number to convert. May be negative to index from the end.
+    ndim : int
+        Total number of axes in the tensor.
+
+    Returns
+    -------
+    int or None
+        The equivalent nonnegative axis number in the range ``[0, ndim)``, or
+        ``None`` if ``axis`` does not name a valid axis of a rank-``ndim``
+        tensor.
     """
     if axis < 0 and axis >= -ndim:
         axis += ndim
@@ -136,7 +211,28 @@ def standard_axis_number(axis: int, ndim: int) -> Optional[int]:
 
 def negative_axis_number_strict(axis: int, ndim: int) -> int:
     """
-    Convert a standard axis number to a negative axis number.
+    Convert an axis number to a negative axis number.
+
+    A nonnegative axis is rewritten as its equivalent counted from the end of
+    the tensor. An axis that falls outside the valid range for a tensor of
+    rank ``ndim`` raises an error.
+
+    Parameters
+    ----------
+    axis : int
+        Axis number to convert. May already be negative.
+    ndim : int
+        Total number of axes in the tensor.
+
+    Returns
+    -------
+    int
+        The equivalent negative axis number in the range ``[-ndim, 0)``.
+
+    Raises
+    ------
+    ValueError
+        If ``axis`` does not name a valid axis of a rank-``ndim`` tensor.
     """
     if axis >= 0:
         axis -= ndim
@@ -147,7 +243,25 @@ def negative_axis_number_strict(axis: int, ndim: int) -> int:
 
 def negative_axis_number(axis: int, ndim: int) -> Optional[int]:
     """
-    Convert a standard axis number to a negative axis number.
+    Convert an axis number to a negative axis number.
+
+    A nonnegative axis is rewritten as its equivalent counted from the end of
+    the tensor. This is the non-raising counterpart of
+    :func:`negative_axis_number_strict`.
+
+    Parameters
+    ----------
+    axis : int
+        Axis number to convert. May already be negative.
+    ndim : int
+        Total number of axes in the tensor.
+
+    Returns
+    -------
+    int or None
+        The equivalent negative axis number in the range ``[-ndim, 0)``, or
+        ``None`` if ``axis`` does not name a valid axis of a rank-``ndim``
+        tensor.
     """
     if axis >= 0:
         axis -= ndim
@@ -161,8 +275,25 @@ def promote_axis(
     axis: Union[int, Tuple[int, ...]],
 ) -> Tuple[int, ...]:
     """
-    Promote an axis or axes to the outermost dimension.
-    This operation might not work as expected if the axes are not sorted.
+    Build a permutation that moves selected axes to the front.
+
+    The returned tuple is a permutation of ``range(ndim)`` suitable for use
+    as the argument to a transpose: the selected axes are placed first, in the
+    order given, followed by the remaining axes in ascending order. This
+    operation might not work as expected if the selected axes are not sorted.
+
+    Parameters
+    ----------
+    ndim : int
+        Total number of axes in the tensor.
+    axis : int or tuple of int
+        Axis or axes to promote to the outermost positions. These may be
+        negative and are standardised internally.
+
+    Returns
+    -------
+    tuple of int
+        A length-``ndim`` permutation placing the promoted axes first.
     """
     if isinstance(axis, int):
         axis = (axis,)
@@ -174,7 +305,27 @@ def _demote_axis(
     ndim: int,
     axis: Sequence[int],
 ) -> Iterator[int]:
-    """Helper function for axis demotion."""
+    """
+    Yield the inverse permutation used for axis demotion.
+
+    This is the helper behind :func:`demote_axis`. It walks the axes of a
+    rank-``ndim`` tensor in order and, for each, yields the destination
+    position: axes named in ``axis`` are assigned the leading positions (in
+    the order they appear), while the remaining axes fill the trailing
+    positions.
+
+    Parameters
+    ----------
+    ndim : int
+        Total number of axes in the tensor.
+    axis : sequence of int
+        Standardised axis numbers to demote from the leading positions.
+
+    Yields
+    ------
+    int
+        The destination position for each axis, in axis order.
+    """
     compl = range(len(axis), ndim).__iter__()
     src = range(len(axis)).__iter__()
     for ax in range(ndim):
@@ -188,6 +339,28 @@ def demote_axis(
     ndim: int,
     axis: Union[int, Tuple[int, ...]],
 ) -> Tuple[int, ...]:
+    """
+    Build a permutation that moves leading axes back to selected positions.
+
+    The returned tuple is a permutation of ``range(ndim)`` suitable for use
+    as the argument to a transpose. It is the inverse of the permutation
+    produced by :func:`promote_axis`: axes currently at the front are routed
+    to the positions named in ``axis``, and the remaining axes fill the gaps
+    in ascending order.
+
+    Parameters
+    ----------
+    ndim : int
+        Total number of axes in the tensor.
+    axis : int or tuple of int
+        Target position or positions to which the leading axes are demoted.
+        These may be negative and are standardised internally.
+
+    Returns
+    -------
+    tuple of int
+        A length-``ndim`` permutation demoting the leading axes.
+    """
     if isinstance(axis, int):
         axis = (axis,)
     axis = [standard_axis_number_strict(ax, ndim) for ax in axis]
@@ -199,7 +372,27 @@ def fold_axis(
     tensor: Shaped[Array, '...'], axis: int, n_folds: int
 ) -> Shaped[Array, '...']:
     """
-    Fold the specified axis into the specified number of folds.
+    Split an axis into two by folding it into a given number of folds.
+
+    The chosen axis of length ``L`` is reshaped into two consecutive axes of
+    sizes ``L // n_folds`` and ``n_folds``. The axis length must be divisible
+    by ``n_folds``.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Input tensor.
+    axis : int
+        Axis to fold. May be negative and is standardised internally.
+    n_folds : int
+        Number of folds; becomes the size of the newly inserted trailing
+        axis.
+
+    Returns
+    -------
+    tensor
+        The reshaped tensor, whose rank is one greater than that of the
+        input.
     """
     axis = standard_axis_number_strict(axis, tensor.ndim)
     shape = tensor.shape
@@ -219,9 +412,25 @@ def unfold_axes(
     tensor: Shaped[Array, '...'], axes: Union[int, Tuple[int, ...]]
 ) -> Shaped[Array, '...']:
     """
-    Unfold the specified consecutive axes into a single new axis.
+    Merge consecutive axes into a single new axis.
 
-    This function will fail if the specified axes are not consecutive.
+    The named axes are collapsed into one axis whose length is the product of
+    their sizes; the surrounding axes are preserved. This function will fail
+    if the specified axes are not consecutive. If a single axis is given, the
+    tensor is returned unchanged.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Input tensor.
+    axes : int or tuple of int
+        Consecutive axes to merge. These may be negative and are standardised
+        internally. A single integer is a no-op.
+
+    Returns
+    -------
+    tensor
+        The reshaped tensor, whose rank is reduced by ``len(axes) - 1``.
     """
 
     def _prod(x: int, y: int) -> int:
@@ -248,8 +457,26 @@ def fold_and_promote(
     tensor: Shaped[Array, '...'], axis: int, n_folds: int
 ) -> Shaped[Array, '...']:
     """
-    Fold the specified axis into the specified number of folds, and promote
-    the new axis across the number of folds to the outermost dimension.
+    Fold an axis and move the new fold axis to the front.
+
+    The chosen axis is first split via :func:`fold_axis` into a pair of axes,
+    and the newly created fold axis (of size ``n_folds``) is then promoted to
+    the outermost position via a transpose.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Input tensor.
+    axis : int
+        Axis to fold. May be negative and is standardised internally.
+    n_folds : int
+        Number of folds; becomes the size of the promoted leading axis.
+
+    Returns
+    -------
+    tensor
+        The folded and transposed tensor, whose rank is one greater than that
+        of the input.
     """
     axis = standard_axis_number_strict(axis, tensor.ndim)
     folded = fold_axis(tensor, axis, n_folds)
@@ -262,6 +489,28 @@ def demote_and_unfold(
     target_address: int,
     axes: Union[int, Tuple[int, ...]] | None = None,
 ) -> Shaped[Array, '...']:
+    """
+    Demote the leading axis to a target position and merge it there.
+
+    This is the approximate inverse of :func:`fold_and_promote`. The leading
+    axis is first demoted to ``target_address`` via a transpose, then merged
+    with its neighbours via :func:`unfold_axes`.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Input tensor.
+    target_address : int
+        Position to which the leading axis is demoted before merging.
+    axes : int or tuple of int or None
+        Consecutive axes to merge after demotion. When ``None``, the pair
+        ``(target_address - 1, target_address)`` is used.
+
+    Returns
+    -------
+    tensor
+        The transposed and merged tensor.
+    """
     if axes is None:
         axes = (target_address - 1, target_address)
     demoted = jnp.transpose(tensor, demote_axis(tensor.ndim, target_address))
@@ -276,10 +525,31 @@ def broadcast_ignoring(
     axis: Union[int, Tuple[int, ...]],
 ) -> Tuple[Shaped[Array, '...'], Shaped[Array, '...']]:
     """
-    Broadcast two tensors, ignoring the axis or axes specified.
+    Broadcast two tensors together while leaving specified axes untouched.
 
-    This can be useful, for instance, when concatenating tensors along
-    the ignored axis.
+    The two tensors are broadcast against one another as usual, except that
+    the sizes along the ignored axes are excluded from the broadcasting rules
+    and each tensor retains its own size there. This can be useful, for
+    instance, when concatenating tensors along the ignored axis.
+
+    Parameters
+    ----------
+    x : tensor
+        First tensor.
+    y : tensor
+        Second tensor.
+    axis : int or tuple of int
+        Axis or axes to exclude from broadcasting. These may be negative and
+        are standardised internally.
+
+    Returns
+    -------
+    x : tensor
+        First tensor broadcast to the common shape, retaining its own sizes
+        along the ignored axes.
+    y : tensor
+        Second tensor broadcast to the common shape, retaining its own sizes
+        along the ignored axes.
     """
 
     def _form_reduced_shape(
@@ -350,11 +620,36 @@ def apply_vmap_over_outer(
     # structuring_arg: Optional[Union[Callable, int]] = None,
 ) -> PyTree:
     """
-    Apply a function across the outer dimensions of a tensor.
+    Apply a function across the outer axes of one or more tensors.
 
-    This is intended to be a QoL feature for handling the common case of
-    applying a function across the outer dimensions of a tensor. The goal is
-    to eliminate the need for nested calls to ``jax.vmap``.
+    This is intended as a quality-of-life feature for the common case of
+    applying a function across the outer axes of a tensor, eliminating the
+    need to write nested calls to :func:`jax.vmap`. The number of outer axes
+    is inferred per input from its rank and the corresponding entry of
+    ``f_dim``, and the maximum across inputs determines how many vectorising
+    maps are stacked.
+
+    Parameters
+    ----------
+    x : PyTree
+        The positional arguments to ``f``, arranged as a PyTree of tensors;
+        the leaves are unpacked and passed to ``f`` in order.
+    f : callable
+        Function to apply over the inner (core) axes of each input.
+    f_dim : int
+        Number of inner axes that ``f`` itself consumes. A single integer is
+        broadcast across every leaf of ``x``; all remaining axes are treated
+        as outer axes and mapped over.
+    align_outer : bool, optional (default: ``False``)
+        Whether the outer axes of inputs of differing rank are aligned from
+        the outermost axis (``True``) or from the innermost outer axis
+        (``False``). Broadcast across every leaf of ``x``.
+
+    Returns
+    -------
+    PyTree
+        The result of applying ``f`` over the inner axes and mapping over the
+        outer axes, with the outer axes reconstituted in the output.
     """
     if isinstance(f_dim, int):
         f_dim = tree_map(lambda _: f_dim, x)
@@ -419,7 +714,31 @@ def vmap_over_outer(
     # structuring_arg: Optional[Union[Callable, int]] = None,
 ) -> Callable[..., Any]:
     """
-    Transform a function to apply to the outer dimensions of a tensor.
+    Transform a function so that it applies across outer axes.
+
+    This is the transform-returning counterpart of
+    :func:`apply_vmap_over_outer`: it returns a new callable that, when
+    invoked with the tensor arguments, maps ``f`` over their outer axes. It
+    partially applies ``f``, ``f_dim`` and ``align_outer`` so the resulting
+    function need only be passed the data.
+
+    Parameters
+    ----------
+    f : callable
+        Function to apply over the inner (core) axes of each input.
+    f_dim : int
+        Number of inner axes that ``f`` itself consumes; all remaining axes
+        are mapped over.
+    align_outer : bool, optional (default: ``False``)
+        Whether the outer axes of inputs of differing rank are aligned from
+        the outermost axis (``True``) or from the innermost outer axis
+        (``False``).
+
+    Returns
+    -------
+    callable
+        A function that applies ``f`` across the outer axes of its tensor
+        arguments.
     """
     return partial(
         apply_vmap_over_outer,
@@ -446,13 +765,15 @@ def orient_and_conform(
     dim: Optional[int] = None,
 ) -> Shaped[Array, '...']:
     """
-    Orient an input tensor along a set of axes, and conform its overall
-    dimension to equal that of a reference.
+    Reorient a tensor along chosen axes and pad its rank to match a reference.
 
-    .. warning::
+    The input's existing axes are routed to the positions named in ``axis``
+    (transposing first if they are given out of order), and singleton axes are
+    then inserted so that the result has the same total number of axes as a
+    reference tensor or as an explicit target rank.
 
-        If both ``reference`` and ``dim`` are provided, then ``dim`` takes
-        precedence.
+    **Note:** If both ``reference`` and ``dim`` are provided, then ``dim``
+    takes precedence.
 
     Parameters
     ----------
@@ -503,8 +824,23 @@ def promote_to_rank(
     tensor: Shaped[Array, '...'], rank: int
 ) -> Shaped[Array, '...']:
     """
-    Promote a tensor to a rank-``rank`` tensor by prepending singleton
-    dimensions. If the tensor is already rank-``rank``, this is a no-op.
+    Promote a tensor to a given rank by prepending singleton axes.
+
+    Leading singleton axes are inserted until the tensor has ``rank`` axes.
+    If the tensor already has at least ``rank`` axes, it is returned
+    unchanged.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Input tensor.
+    rank : int
+        Target number of axes.
+
+    Returns
+    -------
+    tensor
+        The input with leading singleton axes prepended as needed.
     """
     ndim = tensor.ndim
     if ndim >= rank:
@@ -518,9 +854,26 @@ def extend_to_size(
     fill: float = float('nan'),
 ) -> Shaped[Array, '...']:
     """
-    Extend a tensor in the positive direction until its size matches the
-    specification. Any new entries created via extension are populated with
-    ``fill``.
+    Pad a tensor up to a target shape, filling new entries.
+
+    The tensor is first promoted to the rank of ``shape`` and then embedded in
+    the upper-left corner of an array of the requested shape, so that its
+    existing entries retain their positions. Any new entries created by this
+    extension are populated with ``fill``.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Input tensor. Must be no larger than ``shape`` along any axis.
+    shape : sequence of int
+        Target shape.
+    fill : float, optional (default: ``float('nan')``)
+        Value with which to populate newly created entries.
+
+    Returns
+    -------
+    tensor
+        A tensor of shape ``shape`` with the input embedded at the origin.
     """
     tensor = promote_to_rank(tensor, len(shape))
     out = jnp.full(shape, fill, dtype=tensor.dtype)
@@ -532,9 +885,25 @@ def extend_to_max_size(
     fill: float = float('nan'),
 ) -> Tuple[Shaped[Array, '...'], ...]:
     """
-    Extend all tensors in a sequence until their sizes are equal to the size
-    of the largest tensor along each axis. Any new entries created via
-    extension are populated with ``fill``.
+    Pad every tensor in a sequence up to a common maximal shape.
+
+    All tensors are promoted to the maximum rank present in the sequence, and
+    each is then extended so that its size along every axis equals the
+    greatest size found among the inputs along that axis. Any new entries
+    created by this extension are populated with ``fill``.
+
+    Parameters
+    ----------
+    tensors : sequence of tensor
+        Tensors to extend to a common shape.
+    fill : float, optional (default: ``float('nan')``)
+        Value with which to populate newly created entries.
+
+    Returns
+    -------
+    tuple of tensor
+        The input tensors, each extended to the common maximal shape, in the
+        original order.
     """
     ndim_max = max(t.ndim for t in tensors)
     tensors = tuple(promote_to_rank(t, ndim_max) for t in tensors)
@@ -582,8 +951,7 @@ def complex_recompose(
     ampl: Float[Array, '...'], phase: Float[Array, '...']
 ) -> Complex[Array, '...']:
     """
-    Reconstitute a complex-valued tensor from real-valued tensors denoting its
-    amplitude and its phase.
+    Reconstitute a complex-valued tensor from its amplitude and phase.
 
     Together with
     [complex_decompose](nitrix._internal.util.complex_decompose.html), this
@@ -618,8 +986,24 @@ def amplitude_apply(
     func: Callable[[Float[Array, '...']], Float[Array, '...']],
 ) -> Callable[[Complex[Array, '...']], Complex[Array, '...']]:
     """
-    Decorator for applying a function to the amplitude component of a complex
-    tensor.
+    Lift a real-valued function to act on complex amplitudes only.
+
+    The returned wrapper decomposes a complex tensor into amplitude and phase
+    via :func:`complex_decompose`, applies ``func`` to the amplitude, and
+    recombines the transformed amplitude with the unchanged phase via
+    :func:`complex_recompose`.
+
+    Parameters
+    ----------
+    func : callable
+        A function mapping a real-valued amplitude tensor to a real-valued
+        amplitude tensor of the same shape.
+
+    Returns
+    -------
+    callable
+        A function that applies ``func`` to the amplitude of a complex tensor
+        while leaving its phase unchanged.
     """
 
     def wrapper(complex: Complex[Array, '...']) -> Complex[Array, '...']:
@@ -635,9 +1019,27 @@ def conform_mask(
     axis: Sequence[int],
 ) -> Shaped[Array, '...']:
     """
-    Conform a mask or weight for elementwise applying to a tensor.
+    Broadcast a mask so that it can be applied elementwise to a tensor.
 
-    There is almost certainly a better way to do this.
+    The mask is oriented so that its axes align with the named axes of the
+    tensor and is then tiled along all remaining axes, yielding an array of
+    the same shape as the tensor that can be applied elementwise as a mask or
+    weight.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Tensor the mask is to be conformed to.
+    mask : boolean tensor
+        Mask whose axes correspond, in order, to the axes named in ``axis``.
+    axis : sequence of int
+        Axes of ``tensor`` along which the mask varies. These may be negative
+        and are standardised internally.
+
+    Returns
+    -------
+    tensor
+        The mask tiled to the full shape of ``tensor``.
 
     See also
     --------
@@ -660,17 +1062,33 @@ def apply_mask(
     axis: int,
 ) -> Shaped[Array, '...']:
     """
-    Mask a tensor along an axis.
+    Select entries of a tensor along an axis using a one-dimensional mask.
 
-    .. warning::
+    Unlike :func:`mask_tensor`, which zeroes out masked entries in place, this
+    function removes the masked-out positions, so the size of the tensor along
+    the chosen axis shrinks to the number of ``True`` entries in the mask.
 
-        This function will only work if the mask is one-dimensional. For
-        multi-dimensional masks, use :func:`conform_mask`.
+    **Note:** This function will only work if the mask is one-dimensional. For
+    multi-dimensional masks, use :func:`conform_mask`.
 
-    .. warning::
+    **Note:** Use of this function is strongly discouraged. It is incompatible
+    with :func:`jax.jit` because the output shape depends on the mask
+    contents.
 
-        Use of this function is strongly discouraged. It is incompatible with
-        `jax.jit`.
+    Parameters
+    ----------
+    tensor : tensor
+        Tensor to be masked.
+    msk : boolean tensor
+        One-dimensional mask selecting entries along ``axis``.
+    axis : int
+        Axis of ``tensor`` along which the mask is applied.
+
+    Returns
+    -------
+    tensor
+        The tensor with masked-out positions removed along ``axis``; that axis
+        is resized to the number of ``True`` entries in ``msk``.
 
     See also
     --------
@@ -693,6 +1111,37 @@ def mask_tensor(
     axis: Sequence[int],
     fill_value: Union[float, Shaped[Array, '...']] = 0,
 ) -> Shaped[Array, '...']:
+    """
+    Replace masked-out entries of a tensor with a fill value.
+
+    The mask is first conformed to the tensor via :func:`conform_mask`, and
+    entries where the mask is ``False`` are then replaced by ``fill_value``.
+    Unlike :func:`apply_mask`, the shape of the tensor is preserved, making
+    this variant compatible with :func:`jax.jit`.
+
+    Parameters
+    ----------
+    tensor : tensor
+        Tensor to be masked.
+    mask : boolean tensor
+        Mask whose axes correspond, in order, to the axes named in ``axis``.
+    axis : sequence of int
+        Axes of ``tensor`` along which the mask varies.
+    fill_value : float or tensor, optional (default: ``0``)
+        Value substituted wherever the conformed mask is ``False``. May be a
+        scalar or an array broadcastable against ``tensor``.
+
+    Returns
+    -------
+    tensor
+        The input tensor with masked-out entries replaced by ``fill_value``,
+        of the same shape as ``tensor``.
+
+    See also
+    --------
+    :func:`conform_mask`
+    :func:`apply_mask`
+    """
     mask = conform_mask(tensor=tensor, mask=mask, axis=axis)
     return jnp.where(mask, tensor, fill_value)
 
@@ -703,20 +1152,51 @@ def masker(
     output_axis: int | None = None,
 ) -> Callable[[Shaped[Array, '...']], Shaped[Array, '...']]:
     """
-    Create a JIT-compatible function that applies a mask to a tensor.
+    Build a JIT-compatible function that extracts masked entries of a tensor.
 
-    .. warning::
+    The mask is materialised once, at construction time, into the coordinates
+    of its ``True`` entries; the returned function then uses these coordinates
+    to index the masked entries out of any input tensor of compatible shape.
+    Because the number of selected entries is fixed when the closure is built,
+    the resulting function has a static output shape and is compatible with
+    :func:`jax.jit`.
 
-        This function comes with some memory overhead. Specifically, it
-        closes over an integer array of the same size as the number of
-        ``True`` elements in the mask. When applying a very large mask to
-        a tensor, it is important to consider the trade-off between memory
-        and potential performance gains of JIT compilation.
+    **Note:** This function comes with some memory overhead. Specifically, it
+    closes over an integer array of the same size as the number of ``True``
+    elements in the mask. When applying a very large mask to a tensor, it is
+    important to consider the trade-off between memory and the potential
+    performance gains of JIT compilation.
 
-    .. warning::
+    **Note:** Just like any JIT-compiled function, the resulting function must
+    be recompiled when the shape of the input tensor changes.
 
-        Just like any JIT-compiled function, the resulting function must be
-        recompiled when the shape of the input tensor changes.
+    Parameters
+    ----------
+    mask : boolean tensor
+        Mask selecting the entries to extract. Its axes correspond, in order,
+        to the axes named in ``axis``. Must contain at least one ``True``
+        entry.
+    axis : int or sequence of int
+        Axis or axes of the input tensor over which the mask is applied. All
+        entries must share the same sign: either all negative (indexing from
+        the end) or all nonnegative (indexing from the start); mixing signs
+        raises an error.
+    output_axis : int or None, optional (default: ``None``)
+        If given, the axis to which the selected entries are moved in the
+        output. If ``None``, the selected entries remain at the position
+        determined by the masked axes.
+
+    Returns
+    -------
+    callable
+        A JIT-compiled function mapping a tensor to the tensor of its masked
+        entries.
+
+    Raises
+    ------
+    ValueError
+        If the axis entries mix signs, or if the mask contains no ``True``
+        entries.
     """
     if isinstance(axis, int):
         axis = (axis,)
