@@ -25,6 +25,8 @@ final publication as-is (SPEC §6.5).
 - [`geometry`](nitrix-geometry.qmd) — Geometric primitives for neuroimaging.
 - [`linalg`](nitrix-linalg.qmd) — nitrix.linalg -- linear-algebra primitives.
 - [`register`](nitrix-register.qmd) — nitrix.register -- pairwise registration recipes.
+- [`signal`](nitrix-signal.qmd) — nitrix.signal -- 1D signal-processing primitives.
+- [`smoothing`](nitrix-smoothing.qmd) — Edge-preserving and non-edge-preserving smoothing.
 - [`stats`](nitrix-stats.qmd) — Mass-univariate statistical modelling for neuroimaging.
 
 ### `nitrix.geometry`
@@ -69,6 +71,22 @@ final publication as-is (SPEC §6.5).
 - [`diffeomorphic`](nitrix-register-diffeomorphic.qmd) — Diffeomorphic registration recipe: log-domain Demons.
 - [`recipes`](nitrix-register-recipes.qmd) — Pairwise rigid / affine registration recipes.
 - [`regulariser`](nitrix-register-regulariser.qmd) — Explicit penalties on a displacement / velocity field.
+
+### `nitrix.signal`
+
+- [`filter`](nitrix-signal-filter.qmd) — Linear filtering: polynomial detrend and frequency-domain band-pass.
+- [`fourier`](nitrix-signal-fourier.qmd) — Spectral / analytic-signal utilities.
+- [`interpolate`](nitrix-signal-interpolate.qmd) — Linear interpolation of masked time series.
+- [`lomb_scargle`](nitrix-signal-lomb_scargle.qmd) — Lomb-Scargle spectral methods for irregularly-sampled time series.
+- [`tsconv`](nitrix-signal-tsconv.qmd) — 1-D time-series convolution along the trailing axis.
+- [`window`](nitrix-signal-window.qmd) — Windowed-sample extraction.
+
+### `nitrix.smoothing`
+
+- [`bilateral`](nitrix-smoothing-bilateral.qmd) — Bounded bilateral smoothing via the semiring substrate.
+- [`gaussian`](nitrix-smoothing-gaussian.qmd) — Separable n-D Gaussian filter.
+- [`metric`](nitrix-smoothing-metric.qmd) — Feature-space metrics for the bounded bilateral filter.
+- [`susan`](nitrix-smoothing-susan.qmd) — SUSAN-style edge-preserving smoothing.
 
 ### `nitrix.stats`
 

@@ -1,0 +1,119 @@
+---
+title: "nitrix.signal.lomb_scargle"
+generated: true
+signature-hash: 2085da8460ad8d26
+description: "Lomb-Scargle spectral methods for irregularly-sampled time series."
+listing:
+  id: nitrix-signal-lomb_scargle-symbols
+  contents: "nitrix-signal-lomb_scargle/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.signal.lomb_scargle`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Lomb-Scargle spectral methods for irregularly-sampled time series.
+
+Two distinct primitives that share the underlying sine / cosine
+basis but solve different problems:
+
+- [`lomb_scargle_periodogram`](nitrix-signal-lomb_scargle/lomb_scargle_periodogram.qmd) -- canonical Press-Rybicki /
+  Scargle periodogram for **spectral analysis** of
+  irregularly-sampled data.  Each (cosine, sine) amplitude pair is
+  estimated independently per trial frequency after the
+  $\tau$-orthogonalisation that makes the per-frequency
+  least-squares closed-form.  Fast; the *reconstruction* implied
+  by summing the per-frequency components does **not** pass through
+  the observed samples exactly -- if used for interpolation, it
+  produces **visible boundary discontinuities** at observed /
+  censored transitions.  This is the wrong primitive for
+  interpolation.
+
+- [`lomb_scargle_interpolate`](nitrix-signal-lomb_scargle/lomb_scargle_interpolate.qmd) -- **interpolation** primitive
+  for fMRI motion-censoring (the Power 2014 protocol).  Solves a
+  **joint** least-squares regression of the observed samples on the
+  entire sine / cosine basis (plus DC),
+  $\min \lVert M (B \beta - y) \rVert^2$, where $M$
+  is the observed-sample mask, $B$ is the basis, $y$ is
+  the data, and $\beta$ are the spectral coefficients.  The
+  joint fit guarantees $B[\mathrm{obs}] \, \beta =
+  y[\mathrm{obs}]$ (modulo rank deficiency handled by a Tikhonov
+  ridge), so the spliced output has **no boundary discontinuity**.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Memory regime
+
+The dominant cost is the basis matrix $B$ of shape
+`(n_obs, K)` where $K = 1 + 2 \, n_{\mathrm{freq}}$.  At a
+typical fMRI `n_obs = 500` and `K = 499`, $B$ is ~1 MB at
+fp32 -- shared across channels.
+
+For **shared-mask** input (the mask is broadcast-compatible with
+the data along the leading dims; the typical fMRI case where one
+motion-censor mask applies to all voxels), we compute the Gram
+matrix $G = B^{\top} \operatorname{diag}(M) B$ of shape
+`(K, K)` and factor it **once** via a symmetric
+eigendecomposition (`safe_eigh`), then apply a threshold-
+truncated pseudo-inverse (eigenvalues below `rcond * max` are
+dropped) to solve the right-hand sides for all channels at once.
+The eigendecomposition-plus-pseudo-inverse path -- rather than a
+Cholesky factor plus triangular solve -- is deliberate: the masked
+Gram is rank-deficient whenever
+$2 \, n_{\mathrm{freq}} + 1 > n_{\mathrm{valid}}$, and a
+singular Gram has no Cholesky factor; the truncated pseudo-inverse
+absorbs the rank deficiency without an arbitrary ridge.  Total
+memory at $V = 10^6$ voxels, $T = 500$, $K = 499$:
+
+- Shared basis: $T \, K \times 4 = 1$ MB.
+- Shared Gram / eigenvectors: $2 K^2 \times 4 = 2$ MB.
+- Per-channel right-hand side / $\beta$ / reconstruction:
+  $3 V K \times 4 = 6$ GB.
+- Output / data: $2 V T \times 4 = 4$ GB.
+
+Total ~10 GB -- fits on an A100 80 GB or H100 with room.  For
+**per-channel-mask** input (the mask shape matches the data shape;
+each channel has its own censoring pattern), a per-channel solve
+would create a per-channel Gram of size `(V, K, K)` -- 1 TB at
+$V = 10^6$.  In that case the function raises a clear error
+pointing at the shared-mask path.
+
+### References
+
+.. [1] Lomb, N. R. (1976).  Least-squares frequency analysis of
+   unequally spaced data.  Astrophysics and Space Science, 39,
+   447-462.  https://doi.org/10.1007/BF00648343
+.. [2] Scargle, J. D. (1982).  Studies in astronomical time series
+   analysis. II.  Statistical aspects of spectral analysis of
+   unevenly spaced data.  The Astrophysical Journal, 263, 835-853.
+   https://doi.org/10.1086/160554
+.. [3] Press, W. H. & Rybicki, G. B. (1989).  Fast algorithm for
+   spectral analysis of unevenly sampled data.  The Astrophysical
+   Journal, 338, 277-280.  https://doi.org/10.1086/167197
+.. [4] Power, J. D., Mitra, A., Laumann, T. O., Snyder, A. Z.,
+   Schlaggar, B. L., & Petersen, S. E. (2014).  Methods to detect,
+   characterize, and remove motion artifact in resting state fMRI.
+   NeuroImage, 84, 320-341.
+   https://doi.org/10.1016/j.neuroimage.2013.08.048
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-signal-lomb_scargle-symbols}
+:::

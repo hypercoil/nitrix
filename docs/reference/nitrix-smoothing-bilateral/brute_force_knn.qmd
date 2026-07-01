@@ -1,0 +1,47 @@
+---
+title: "brute_force_knn"
+generated: true
+description: "Brute-force k-nearest-neighbour search in (optionally projected) feature space."
+---
+
+[‹ back to `nitrix.smoothing.bilateral`](../nitrix-smoothing-bilateral.qmd)
+
+<!-- nitrix:gen sig:brute_force_knn -->
+```python
+brute_force_knn(features: Float[Array, 'n d_f'], k: int, *, metric: Optional[FeatureMetric] = None) -> Int[Array, 'n k']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:brute_force_knn -->
+Brute-force k-nearest-neighbour search in (optionally projected) feature space.
+
+Materialises the $(n, n)$ distance matrix; quadratic in
+memory.  Practical for $n \lesssim 10\mathrm{k}$.  For larger
+$n$, the caller should pre-compute the adjacency with a
+spatial-index data structure (KD-tree, grid hashing, mesh k-ring,
+etc.) and pass it as `neighbourhood=` to
+[`bilateral_gaussian`](../nitrix-smoothing-bilateral/bilateral_gaussian.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:brute_force_knn -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `features` | `Float` | `n` × `d_f` | — | Per-point feature vectors, `(n, d_f)`. |
+| `k` | `int` | — | — | Number of neighbours per query point. The point itself is included in its own `k` (so `k=1` returns self-only). |
+| `metric` | `Optional[FeatureMetric]` | — | `None` | Optional [`FeatureMetric`](../nitrix-smoothing-metric/FeatureMetric.qmd). `None` ranks by raw Euclidean distance; when supplied, the search ranks by `sum(metric.project(diff)**2, -1)` -- the same quadratic form [`bilateral_gaussian`](../nitrix-smoothing-bilateral/bilateral_gaussian.qmd) uses for its weights, so the k-NN adjacency matches the weight metric. |
+
+**Returns** `Int` — shape `n` × `k`. Indices of the `k` nearest neighbours for each query point, shape `(n, k)`, sorted by ascending distance.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:brute_force_knn -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

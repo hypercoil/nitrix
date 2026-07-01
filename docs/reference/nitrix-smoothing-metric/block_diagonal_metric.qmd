@@ -1,0 +1,38 @@
+---
+title: "block_diagonal_metric"
+generated: true
+description: "Assemble a block-diagonal factor from per-modality factor blocks."
+---
+
+[‹ back to `nitrix.smoothing.metric`](../nitrix-smoothing-metric.qmd)
+
+<!-- nitrix:gen sig:block_diagonal_metric -->
+```python
+block_diagonal_metric(blocks: Sequence[Float[Array, 'd_b k_b']]) -> FactorMetric
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:block_diagonal_metric -->
+Assemble a block-diagonal factor from per-modality factor blocks.
+
+Each modality (e.g. a tissue-intensity channel set, a
+network-correlation channel set) contributes its own factor block
+$L_b$ of shape $(d_b, k_b)$; the assembled factor is the
+block-diagonal $L = \operatorname{blkdiag}(L_0, L_1, \dots)$
+of shape $(\sum_b d_b, \sum_b k_b)$.  Because the blocks share
+no rows or columns, the resulting metric weights each modality's
+similarity independently -- no cross-modality coupling -- which is the
+recommended default when feature channels group into distinct
+modalities.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:block_diagonal_metric -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `blocks` | `Sequence[Float[Array, 'd_b k_b']]` | — | — | Per-modality factor blocks, each a 2-D array of shape $(d_b, k_b)$. A diagonal block is just `jnp.diag(1 / sigma_b)`; a dense anisotropic block is $\operatorname{chol}(M_b)$ (see [`metric_from_spd`](../nitrix-smoothing-metric/metric_from_spd.qmd)). |
+
+**Returns** `FactorMetric`. A [`FactorMetric`](../nitrix-smoothing-metric/FactorMetric.qmd) whose `factor` is the block-diagonal assembly, shape $(\sum_b d_b, \sum_b k_b)$.
+<!-- nitrix:/gen -->
+

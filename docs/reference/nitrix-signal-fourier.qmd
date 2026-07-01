@@ -1,0 +1,60 @@
+---
+title: "nitrix.signal.fourier"
+generated: true
+signature-hash: f744c6620a572b34
+description: "Spectral / analytic-signal utilities."
+listing:
+  id: nitrix-signal-fourier-symbols
+  contents: "nitrix-signal-fourier/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.signal.fourier`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Spectral / analytic-signal utilities.
+
+The bread-and-butter primitives for working with bandpass /
+analytic-signal representations of time series:
+
+- [`product_filter`](nitrix-signal-fourier/product_filter.qmd) / [`product_filtfilt`](nitrix-signal-fourier/product_filtfilt.qmd) --
+  frequency-domain convolution via `rfft` multiplication.
+  Forward and zero-phase forward-backward variants.
+- [`analytic_signal`](nitrix-signal-fourier/analytic_signal.qmd) -- compute the complex analytic signal
+  $x + i\,\operatorname{Hilbert}(x)$ whose real part is
+  $x$ and whose imaginary part is the Hilbert transform of
+  $x$.
+- [`hilbert_transform`](nitrix-signal-fourier/hilbert_transform.qmd) -- the imaginary part of the analytic
+  signal.
+- [`envelope`](nitrix-signal-fourier/envelope.qmd) -- magnitude of the analytic signal.
+- [`instantaneous_phase`](nitrix-signal-fourier/instantaneous_phase.qmd) / [`instantaneous_frequency`](nitrix-signal-fourier/instantaneous_frequency.qmd)
+  -- unwrapped phase and its time derivative.
+- [`env_inst`](nitrix-signal-fourier/env_inst.qmd) -- compute envelope, frequency, and phase from
+  one [`analytic_signal`](nitrix-signal-fourier/analytic_signal.qmd) call.
+
+All functions are reverse-mode differentiable and JIT-friendly.
+The Hilbert mask construction is vectorised; the FFT shape comes
+from `axis` and (optionally) an explicit `n`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs_freq` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-signal-fourier-symbols}
+:::

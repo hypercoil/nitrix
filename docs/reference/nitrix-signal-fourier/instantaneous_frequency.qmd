@@ -1,0 +1,46 @@
+---
+title: "instantaneous_frequency"
+generated: true
+description: "Instantaneous frequency of the analytic signal."
+---
+
+[‹ back to `nitrix.signal.fourier`](../nitrix-signal-fourier.qmd)
+
+<!-- nitrix:gen sig:instantaneous_frequency -->
+```python
+instantaneous_frequency(X: Float[Array, '...'], *, axis: int = -1, n: Optional[int] = None, fs: float = 1.0, period: float = 2 * math.pi) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:instantaneous_frequency -->
+Instantaneous frequency of the analytic signal.
+
+The discrete time derivative of the unwrapped instantaneous
+phase, scaled to physical units:
+$f_s \, \operatorname{diff}(\operatorname{unwrap}(
+\arg(X_a))) / \mathrm{period}$.  The output `axis` is one
+element shorter than the input (a first difference).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:instantaneous_frequency -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `...` | — | Real-valued signal. |
+| `axis` | `int` | — | `-1` | Axis along which the frequency is computed. Default `-1`. |
+| `n` | `Optional[int]` | — | `None` | FFT length. `None` (default) uses `X.shape[axis]`; a larger `n` zero-pads. |
+| `fs` | `float` | — | `1.0` | Sampling frequency, used to scale the phase difference into physical frequency units. Default `1.0`. |
+| `period` | `float` | — | `2 * math.pi` | Size of the phase-wrapping range, both for unwrapping and for normalising the phase difference. Default $2\pi$. |
+
+**Returns** `Float` — shape `...`. Instantaneous frequency of `X`. Same shape as `X` except the `axis` is one element shorter.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:instantaneous_frequency -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

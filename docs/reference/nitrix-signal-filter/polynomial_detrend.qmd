@@ -1,0 +1,87 @@
+---
+title: "polynomial_detrend"
+generated: true
+description: "Subtract a polynomial fit of the named `degree` from each observation channel."
+---
+
+[‹ back to `nitrix.signal.filter`](../nitrix-signal-filter.qmd)
+
+<!-- nitrix:gen sig:polynomial_detrend -->
+```python
+polynomial_detrend(X: Num[Array, '... obs'], *, degree: int = 1, rowvar: bool = True) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:polynomial_detrend -->
+Subtract a polynomial fit of the named `degree` from each
+observation channel.
+
+Equivalent to [`residualise`](../nitrix-linalg-residual/residualise.qmd) against a rescaled Vandermonde basis
+with rows $[1, t, t^2, \ldots, t^{degree}]$, which regresses the
+polynomial trend out of every channel and returns the residual.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:polynomial_detrend -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `obs` | — | Time series, observation axis is last (`rowvar=True`, default). |
+| `degree` | `int` | — | `1` | Polynomial degree. `0` -- demean only. `1` -- linear detrend. `2` -- quadratic. `3` -- cubic. |
+| `rowvar` | `bool` | — | `True` | `True` (default): observation axis is the *last* axis. |
+
+**Returns** `Num` — shape `...` × `obs`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:polynomial_detrend -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **386.2 µs** (median, L4); up to **1463.54× faster** than `nilearn.signal_clean`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_POLYNOMIAL_DETREND.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| polynomial_detrend | jax-cpu | c=1024,obs=4096,degree=3 | `cupy.lstsq_detrend` | skipped | — | — | — | — | — |
+| polynomial_detrend | jax-cpu | c=1024,obs=4096,degree=3 | `nilearn.signal_clean` | ok | 518.90 ms / 526.87 ms | 677.85 ms | 1406 MB (rss) | ✓ 0.00092×tol | 32.15x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=1024,obs=4096,degree=3 | `nitrix-jax` | ok | 16.14 ms / 34.43 ms | 444.55 ms | 1406 MB (rss) | ✓ 0.33×tol | 1.00x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=1024,obs=4096,degree=3 | `numpy.lstsq_detrend` | ok | 178.76 ms / 202.19 ms | 212.60 ms | 1406 MB (rss) | ✓ 0.00092×tol | 11.08x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=1024,obs=4096,degree=3 | `cupy.lstsq_detrend` | ok | 4.32 ms / 4.34 ms | 311.55 ms | 16.78 MB (hbm) | ✓ 0.00092×tol | 11.33x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=1024,obs=4096,degree=3 | `nilearn.signal_clean` | ok | 557.81 ms / 622.15 ms | 991.95 ms | 16.78 MB (hbm) | ✓ 0.00092×tol | 1463.54x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=1024,obs=4096,degree=3 | `nitrix-jax` | ok | 381.1 µs / 386.2 µs | 995.36 ms | 121.90 MB (hbm) | ✓ 0.024×tol | 1.00x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=1024,obs=4096,degree=3 | `numpy.lstsq_detrend` | ok | 162.73 ms / 163.57 ms | 162.57 ms | 16.78 MB (hbm) | ✓ 0.00092×tol | 426.96x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=256,obs=2048,degree=3 | `cupy.lstsq_detrend` | skipped | — | — | — | — | — |
+| polynomial_detrend | jax-cpu | c=256,obs=2048,degree=3 | `nilearn.signal_clean` | ok | 54.98 ms / 55.27 ms | 196.83 ms | 1406 MB (rss) | ✓ 0.0032×tol | 79.05x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=256,obs=2048,degree=3 | `nitrix-jax` | ok | 695.5 µs / 874.3 µs | 221.83 ms | 1406 MB (rss) | ✓ 0.19×tol | 1.00x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=256,obs=2048,degree=3 | `numpy.lstsq_detrend` | ok | 11.88 ms / 15.77 ms | 10.80 ms | 1406 MB (rss) | ✓ 0.0032×tol | 17.07x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=256,obs=2048,degree=3 | `cupy.lstsq_detrend` | ok | 1.68 ms / 1.71 ms | 561.12 ms | 2.10 MB (hbm) | ✓ 0.0032×tol | 10.65x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=256,obs=2048,degree=3 | `nilearn.signal_clean` | ok | 55.46 ms / 76.16 ms | 194.11 ms | 2.10 MB (hbm) | ✓ 0.0032×tol | 351.80x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=256,obs=2048,degree=3 | `nitrix-jax` | ok | 157.6 µs / 167.7 µs | 657.81 ms | 77.59 MB (hbm) | ✓ 0.025×tol | 1.00x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=256,obs=2048,degree=3 | `numpy.lstsq_detrend` | ok | 10.61 ms / 13.44 ms | 42.72 ms | 2.10 MB (hbm) | ✓ 0.0032×tol | 67.32x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=4096,obs=4096,degree=3 | `cupy.lstsq_detrend` | skipped | — | — | — | — | — |
+| polynomial_detrend | jax-cpu | c=4096,obs=4096,degree=3 | `nilearn.signal_clean` | ok | 2.079 s / 2.487 s | 2.410 s | 1406 MB (rss) | ✓ 0.00092×tol | 14.32x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=4096,obs=4096,degree=3 | `nitrix-jax` | ok | 145.19 ms / 176.45 ms | 508.87 ms | 1406 MB (rss) | ✓ 0.31×tol | 1.00x vs nitrix-jax |
+| polynomial_detrend | jax-cpu | c=4096,obs=4096,degree=3 | `numpy.lstsq_detrend` | ok | 713.08 ms / 716.14 ms | 709.28 ms | 1406 MB (rss) | ✓ 0.00092×tol | 4.91x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=4096,obs=4096,degree=3 | `cupy.lstsq_detrend` | ok | 14.28 ms / 14.34 ms | 332.33 ms | 67.11 MB (hbm) | ✓ 0.00092×tol | 6.84x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=4096,obs=4096,degree=3 | `nilearn.signal_clean` | ok | 1.768 s / 1.775 s | 1.953 s | 67.11 MB (hbm) | ✓ 0.00092×tol | 847.60x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=4096,obs=4096,degree=3 | `nitrix-jax` | ok | 2.09 ms / 2.10 ms | 1.068 s | 268.83 MB (hbm) | ✓ 0.03×tol | 1.00x vs nitrix-jax |
+| polynomial_detrend | jax-cuda12 | c=4096,obs=4096,degree=3 | `numpy.lstsq_detrend` | ok | 907.56 ms / 1.075 s | 1.411 s | 67.11 MB (hbm) | ✓ 0.00092×tol | 435.01x vs nitrix-jax |
+:::
+
+*source: bench `5e5d31ee` · nitrix `8259a204`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:polynomial_detrend -->
+::: {.callout-note}
+Differentiable through `X`; `degree` is static.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:polynomial_detrend -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -1,0 +1,41 @@
+---
+title: "butterworth_sos"
+generated: true
+description: "Design a digital Butterworth filter as second-order sections."
+---
+
+[‹ back to `nitrix.signal.filter`](../nitrix-signal-filter.qmd)
+
+*Re-exported here; defined in `nitrix.signal._iir`.*
+
+<!-- nitrix:gen sig:butterworth_sos -->
+```python
+butterworth_sos(*, order: int, fs: float = 1.0, btype: _BType, lo: Optional[float] = None, hi: Optional[float] = None) -> np.ndarray
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:butterworth_sos -->
+Design a digital Butterworth filter as second-order sections.
+
+Returns the `(n_sections, 6)` SOS array with `[b0, b1, b2, a0, a1, a2]`
+per row -- the same layout as `scipy.signal.butter(output='sos')` (and
+matching its transfer function to machine precision), implemented in
+pure NumPy.  `order`, `fs` and the cut-offs are static, so the result
+is a host (NumPy) constant -- the *design* is not traced; only the
+*application* ([`sosfilt`](../nitrix-signal-filter/sosfilt.qmd) / [`sosfiltfilt`](../nitrix-signal-filter/sosfiltfilt.qmd)) runs in JAX.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:butterworth_sos -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `order` | `int` | — | — | Butterworth order. `'bandpass'` / `'bandstop'` produce `order` sections (`2 * order` poles); `'lowpass'` / `'highpass'` produce `ceil(order / 2)`. |
+| `fs` | `float` | — | `1.0` | Sampling frequency in Hz (`1 / TR`). |
+| `btype` | `_BType` | — | — | `'lowpass'` / `'highpass'` / `'bandpass'` / `'bandstop'`. |
+| `lo` | `Optional[float]` | — | `None` | Cut-offs in Hz (`0 < f < fs/2`). `'lowpass'` uses `hi`; `'highpass'` uses `lo`; band types use both (`lo < hi`). |
+| `hi` | `Optional[float]` | — | `None` | Cut-offs in Hz (`0 < f < fs/2`). `'lowpass'` uses `hi`; `'highpass'` uses `lo`; band types use both (`lo < hi`). |
+
+**Returns** `np.ndarray`. The `(n_sections, 6)` second-order-section coefficient array, each row laid out as `[b0, b1, b2, a0, a1, a2]`, as a host NumPy constant.
+<!-- nitrix:/gen -->
+

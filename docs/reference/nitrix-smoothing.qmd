@@ -1,0 +1,45 @@
+---
+title: "nitrix.smoothing"
+generated: true
+signature-hash: 13195ee2925f8c58
+description: "Edge-preserving and non-edge-preserving smoothing."
+listing:
+  id: nitrix-smoothing-symbols
+  contents: "nitrix-smoothing/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.smoothing`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Edge-preserving and non-edge-preserving smoothing.
+
+This subpackage provides two tiers of smoothing.
+
+- `gaussian` -- separable n-D Gaussian; the unconditional baseline
+  for cases where edge preservation is not wanted.
+- [`bilateral_gaussian`](nitrix-smoothing-bilateral/bilateral_gaussian.qmd) -- the marquee edge-preserving capability: a
+  bounded high-dimensional bilateral filter over a feature-space metric
+  (a [`FeatureMetric`](nitrix-smoothing-metric/FeatureMetric.qmd)) and a bounded neighbourhood (grid box, mesh
+  k-ring, geodesic ball, or feature-space k-NN). It is built on the
+  semiring ELL matrix-multiply primitive as one gather plus one weighted
+  reduction, and is clean under `jit` / `vmap` / `grad`. It
+  supersedes the retired permutohedral lattice for the feature
+  dimensionalities targeted here (and, via a low-rank metric, beyond).
+
+[`susan_emulator`](nitrix-smoothing-susan/susan_emulator.qmd) is a convenience wrapper composing
+[`bilateral_gaussian`](nitrix-smoothing-bilateral/bilateral_gaussian.qmd) with the median filter from the `morphology`
+subpackage.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-smoothing-symbols}
+:::

@@ -1,0 +1,42 @@
+---
+title: "instantaneous_phase"
+generated: true
+description: "Unwrapped instantaneous phase of the analytic signal."
+---
+
+[‹ back to `nitrix.signal.fourier`](../nitrix-signal-fourier.qmd)
+
+<!-- nitrix:gen sig:instantaneous_phase -->
+```python
+instantaneous_phase(X: Float[Array, '...'], *, axis: int = -1, n: Optional[int] = None, period: float = 2 * math.pi) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:instantaneous_phase -->
+Unwrapped instantaneous phase of the analytic signal.
+
+Computed as the unwrapped argument of the analytic signal,
+$\operatorname{unwrap}(\arg(X_a))$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:instantaneous_phase -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `...` | — | Real-valued signal. |
+| `axis` | `int` | — | `-1` | Axis along which the phase is taken and unwrapped. Default `-1`. |
+| `n` | `Optional[int]` | — | `None` | FFT length. `None` (default) uses `X.shape[axis]`; a larger `n` zero-pads. |
+| `period` | `float` | — | `2 * math.pi` | Size of the range over which the phase wraps, passed to the unwrapping step. Default $2\pi$. |
+
+**Returns** `Float` — shape `...`. Unwrapped phase of `X`, same shape as `X` (or with the `axis` resized to `n`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:instantaneous_phase -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

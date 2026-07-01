@@ -9,7 +9,7 @@ with optional overlap.  Used for time-series augmentation (random
 crops, multi-window bootstrap), per-window covariance estimation,
 and sliding-window analysis.
 
-The single public symbol is ``sample_windows``; behaviour is
+The single public symbol is :func:`sample_windows`; behaviour is
 parameterised by two flags:
 
 - ``allow_overlap``: ``True`` -- sample starts uniformly from
@@ -53,7 +53,31 @@ def _select_overlapping_starts(
     num_windows: int,
     key: jax.Array,
 ) -> Array:
-    """Pick ``num_windows`` distinct starts uniformly from the valid range."""
+    """Pick ``num_windows`` distinct starts uniformly from the valid range.
+
+    Sample ``num_windows`` starting indices without replacement from the
+    integers :math:`[0, \\text{input\\_size} - \\text{window\\_size}]`, so
+    that every window fits fully within the input. Because the draw is
+    without replacement, the starts are distinct but the resulting windows
+    may still overlap.
+
+    Parameters
+    ----------
+    input_size : int
+        Length of the input along the windowing axis.
+    window_size : int
+        Length of each window.
+    num_windows : int
+        Number of window starts to draw.
+    key : jax.Array
+        PRNG key controlling the random draw.
+
+    Returns
+    -------
+    Array
+        Integer array of shape ``(num_windows,)`` giving the distinct
+        window start indices.
+    """
     return jax.random.choice(
         key,
         a=(input_size - window_size + 1),
@@ -70,10 +94,35 @@ def _select_nonoverlapping_starts(
 ) -> Array:
     """Choose non-overlapping window starts.
 
-    Distribute the ``unused = input_size - num_windows * window_size``
-    free slots across the ``num_windows + 1`` gaps via a uniform
-    multinomial draw; the cumulative gap sizes plus window-offsets
-    give the starts.
+    Distribute the :math:`\\text{unused} = \\text{input\\_size} -
+    \\text{num\\_windows} \\cdot \\text{window\\_size}` free slots across
+    the :math:`\\text{num\\_windows} + 1` gaps (before, between, and after
+    the windows) via a uniform multinomial draw. The cumulative gap sizes
+    plus the fixed window offsets then give the window starts, guaranteeing
+    that the windows do not overlap.
+
+    Parameters
+    ----------
+    input_size : int
+        Length of the input along the windowing axis.
+    window_size : int
+        Length of each window.
+    num_windows : int
+        Number of window starts to draw.
+    key : jax.Array
+        PRNG key controlling the random distribution of the free slots.
+
+    Returns
+    -------
+    Array
+        Integer array of shape ``(num_windows,)`` giving the
+        non-overlapping window start indices, sorted in increasing order.
+
+    Raises
+    ------
+    ValueError
+        If ``num_windows`` windows of ``window_size`` cannot fit within
+        ``input_size`` without overlap.
     """
     unused_size = input_size - window_size * num_windows
     if unused_size < 0:

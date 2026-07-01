@@ -1,0 +1,46 @@
+---
+title: "product_filtfilt"
+generated: true
+description: "Zero-phase forward-backward frequency-domain filter."
+---
+
+[‹ back to `nitrix.signal.fourier`](../nitrix-signal-fourier.qmd)
+
+<!-- nitrix:gen sig:product_filtfilt -->
+```python
+product_filtfilt(X: Num[Array, '... obs'], weight: Num[Array, '... obs_freq'], **fft_params) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:product_filtfilt -->
+Zero-phase forward-backward frequency-domain filter.
+
+Filter forward, reverse the signal, filter again, then reverse
+back.  The net effect is zero phase delay even when `weight`
+is complex; the amplitude response is the square of the filter
+weight's amplitude response.  For real `weight`,
+[`product_filter`](../nitrix-signal-fourier/product_filter.qmd) already has zero phase.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:product_filtfilt -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `obs` | — | Multi-channel signal; the trailing axis indexes observations. |
+| `weight` | `Num` | `...` × `obs_freq` | — | Frequency-domain weights; the trailing axis is the rfft frequency axis (length `obs // 2 + 1`). |
+| `**fft_params` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `obs`. Zero-phase filtered signal, same shape as `X`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:product_filtfilt -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `obs_freq` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

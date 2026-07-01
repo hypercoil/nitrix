@@ -1,0 +1,73 @@
+---
+title: "envelope"
+generated: true
+description: "Magnitude of the analytic signal, $|X_a|$."
+---
+
+[‹ back to `nitrix.signal.fourier`](../nitrix-signal-fourier.qmd)
+
+<!-- nitrix:gen sig:envelope -->
+```python
+envelope(X: Float[Array, '...'], *, axis: int = -1, n: Optional[int] = None) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:envelope -->
+Magnitude of the analytic signal, $|X_a|$.
+
+If you also need [`instantaneous_phase`](../nitrix-signal-fourier/instantaneous_phase.qmd) or
+[`instantaneous_frequency`](../nitrix-signal-fourier/instantaneous_frequency.qmd), use [`env_inst`](../nitrix-signal-fourier/env_inst.qmd) to
+compute all three from a single analytic-signal call.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:envelope -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `...` | — | Real-valued signal. |
+| `axis` | `int` | — | `-1` | Axis along which the analytic signal is taken. Default `-1`. |
+| `n` | `Optional[int]` | — | `None` | FFT length. `None` (default) uses `X.shape[axis]`; a larger `n` zero-pads. |
+
+**Returns** `Float` — shape `...`. Envelope of `X`, same shape as `X` (or with the `axis` resized to `n`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:envelope -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **780.6 µs** (median, L4); up to **74.87× faster** than `scipy.signal.hilbert`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_ENVELOPE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| envelope | jax-cpu | n_sig=2048,t=2048 | `cupyx.scipy.signal.hilbert` | skipped | — | — | — | — | — |
+| envelope | jax-cpu | n_sig=2048,t=2048 | `nitrix-jax` | ok | 26.18 ms / 36.96 ms | 125.81 ms | 1332 MB (rss) | ✓ 0.005×tol | 1.00x vs nitrix-jax |
+| envelope | jax-cpu | n_sig=2048,t=2048 | `scipy.signal.hilbert` | ok | 58.88 ms / 63.88 ms | 64.82 ms | 1332 MB (rss) | ✓ 0.0046×tol | 2.25x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=2048,t=2048 | `cupyx.scipy.signal.hilbert` | ok | 864.8 µs / 868.8 µs | 392.49 ms | 16.78 MB (hbm) | ✓ 0.0077×tol | 1.13x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=2048,t=2048 | `nitrix-jax` | ok | 765.7 µs / 780.6 µs | 180.85 ms | 117.44 MB (hbm) | ✓ 0.0077×tol | 1.00x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=2048,t=2048 | `scipy.signal.hilbert` | ok | 57.33 ms / 58.71 ms | 67.35 ms | 16.78 MB (hbm) | ✓ 0.0046×tol | 74.87x vs nitrix-jax |
+| envelope | jax-cpu | n_sig=4096,t=4096 | `cupyx.scipy.signal.hilbert` | skipped | — | — | — | — | — |
+| envelope | jax-cpu | n_sig=4096,t=4096 | `nitrix-jax` | ok | 147.90 ms / 217.26 ms | 292.56 ms | 1332 MB (rss) | ✓ 0.0053×tol | 1.00x vs nitrix-jax |
+| envelope | jax-cpu | n_sig=4096,t=4096 | `scipy.signal.hilbert` | ok | 278.88 ms / 309.08 ms | 275.24 ms | 1332 MB (rss) | ✓ 0.0061×tol | 1.89x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=4096,t=4096 | `cupyx.scipy.signal.hilbert` | ok | 6.22 ms / 6.24 ms | 375.56 ms | 67.11 MB (hbm) | ✓ 0.0085×tol | 0.98x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=4096,t=4096 | `nitrix-jax` | ok | 6.34 ms / 6.37 ms | 191.81 ms | 469.76 MB (hbm) | ✓ 0.0085×tol | 1.00x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=4096,t=4096 | `scipy.signal.hilbert` | ok | 275.28 ms / 280.27 ms | 276.95 ms | 67.11 MB (hbm) | ✓ 0.0061×tol | 43.39x vs nitrix-jax |
+| envelope | jax-cpu | n_sig=512,t=1024 | `cupyx.scipy.signal.hilbert` | skipped | — | — | — | — | — |
+| envelope | jax-cpu | n_sig=512,t=1024 | `nitrix-jax` | ok | 1.31 ms / 2.63 ms | 90.24 ms | 1332 MB (rss) | ✓ 0.0037×tol | 1.00x vs nitrix-jax |
+| envelope | jax-cpu | n_sig=512,t=1024 | `scipy.signal.hilbert` | ok | 3.25 ms / 3.31 ms | 6.53 ms | 1332 MB (rss) | ✓ 0.0036×tol | 2.48x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=512,t=1024 | `cupyx.scipy.signal.hilbert` | ok | 181.6 µs / 188.4 µs | 629.68 ms | 2.10 MB (hbm) | ✓ 0.0063×tol | 1.45x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=512,t=1024 | `nitrix-jax` | ok | 125.2 µs / 128.2 µs | 167.93 ms | 14.68 MB (hbm) | ✓ 0.0063×tol | 1.00x vs nitrix-jax |
+| envelope | jax-cuda12 | n_sig=512,t=1024 | `scipy.signal.hilbert` | ok | 3.20 ms / 3.66 ms | 6.29 ms | 2.10 MB (hbm) | ✓ 0.0036×tol | 25.54x vs nitrix-jax |
+:::
+
+*source: bench `5229f3d4` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:envelope -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

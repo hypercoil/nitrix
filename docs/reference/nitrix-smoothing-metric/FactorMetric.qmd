@@ -1,0 +1,69 @@
+---
+title: "FactorMetric"
+generated: true
+description: "Factored metric $M = L L^{ top}$ with factor $L$ of shape $(d_f, k)$."
+---
+
+[‹ back to `nitrix.smoothing.metric`](../nitrix-smoothing-metric.qmd)
+
+<!-- nitrix:gen sig:FactorMetric -->
+```python
+class FactorMetric
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:FactorMetric -->
+Factored metric $M = L L^{\top}$ with factor $L$ of shape $(d_f, k)$.
+
+`project` computes `deltas @ L`, mapping each
+$(\dots, d_f)$ feature difference to a $(\dots, k)$
+projection, and the bilateral weight uses
+$q = \sum (\text{deltas} \cdot L)^2 = \text{deltas}^{\top} (L L^{\top}) \,\text{deltas}$.
+
+- $k = d_f$ -- a general anisotropic metric (cross-channel
+  coupling, e.g. $L = \operatorname{chol}(M)$ from
+  [`metric_from_spd`](../nitrix-smoothing-metric/metric_from_spd.qmd)).
+- $k < d_f$ -- a **low-rank** metric: correlated channels are
+  projected into a $k$-dimensional subspace before the norm, so
+  the per-neighbour weight costs $O(k)$ rather than
+  $O(d_f)$.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:FactorMetric.project -->
+```python
+project(deltas: Float[Array, '... d_f']) -> Float[Array, '... k']
+```
+<!-- nitrix:/gen -->
+
+Project feature differences through the factor $L$.
+
+<!-- nitrix:gen sig:FactorMetric.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Float[Array, 'd_f k']], None]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:FactorMetric.tree_unflatten -->
+```python
+tree_unflatten(_aux: None, children: Tuple[Any, ...]) -> 'FactorMetric'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:FactorMetric.__init__ -->
+```python
+__init__(factor: Float[Array, 'd_f k']) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:FactorMetric -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
