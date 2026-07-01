@@ -1,0 +1,53 @@
+---
+title: "mesh_to_sdf"
+generated: true
+description: "Rasterise a triangle mesh to a signed-distance volume (negative inside)."
+---
+
+[‹ back to `nitrix.geometry.isosurface`](../nitrix-geometry-isosurface.qmd)
+
+<!-- nitrix:gen sig:mesh_to_sdf -->
+```python
+mesh_to_sdf(mesh: Mesh, shape: Tuple[int, int, int], *, spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)) -> Float[Array, 'x y z']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_to_sdf -->
+Rasterise a triangle mesh to a signed-distance volume (negative inside).
+
+The inverse of [`marching_cubes`](../nitrix-geometry-isosurface/marching_cubes.qmd): the training-target generator behind
+learned level-set surface models and a field<->mesh round-trip validator.
+
+Unsigned distance is the exact point-to-triangle distance (Ericson's
+closest-point, the seven Voronoi regions), minimised over faces.  The sign
+is from the **generalised winding number** (the summed solid angle divided
+by $4\pi$): robust on a watertight mesh regardless of global face
+orientation ($|w| \approx 1$ inside, $\approx 0$ outside).
+
+Cost is `O(n_voxels * n_faces)` (host-side NumPy, chunked over voxels to
+bound memory) -- practical for moderate volumes / meshes; a spatial-hash
+broad phase is a future acceleration.  Not differentiable.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_to_sdf -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh (watertight, for a meaningful sign). |
+| `shape` | `Tuple[int, int, int]` | — | — | Output volume shape `(X, Y, Z)`. |
+| `spacing` | `Tuple[float, float, float]` | — | `(1.0, 1.0, 1.0)` | Per-axis voxel size; grid point `(i, j, k)` is at `(i, j, k) * spacing` in the mesh's coordinate frame. |
+
+**Returns** `Float` — shape `x` × `y` × `z`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mesh_to_sdf -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `x` | *(undocumented — add to `_dimensions.yml`)* |
+| `y` | *(undocumented — add to `_dimensions.yml`)* |
+| `z` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

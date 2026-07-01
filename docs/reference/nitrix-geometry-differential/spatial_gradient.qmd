@@ -1,0 +1,52 @@
+---
+title: "spatial_gradient"
+generated: true
+description: "Spatial gradient of a scalar field along each spatial axis."
+---
+
+[‹ back to `nitrix.geometry.differential`](../nitrix-geometry-differential.qmd)
+
+<!-- nitrix:gen sig:spatial_gradient -->
+```python
+spatial_gradient(image: Float[Array, '... *spatial'], *, spatial_rank: int | None = None, scheme: GradientScheme = 'central', mode: BoundaryMode = 'nearest', spacing: Union[float, Sequence[float]] = 1.0) -> Float[Array, '... *spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spatial_gradient -->
+Spatial gradient of a scalar field along each spatial axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spatial_gradient -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `...` × `*spatial` | — | Scalar field, `(..., *spatial)`. All trailing axes are spatial unless `spatial_rank` (or a sequence `spacing`) pins the rank; any leading axes are batch. For a multi-channel image move the channel axis to the front (a leading batch axis) before calling. |
+| `spatial_rank` | `int | None` | — | `None` | Number of trailing axes to treat as spatial. `None` (default) infers from `spacing` (if a sequence) else assumes `image.ndim`. |
+| `scheme` | `GradientScheme` | — | `'central'` | Derivative scheme: `"central"` (default), `"sobel"`, or `"scharr"`. `"central"` is the bare central difference; the others smooth along the off-axes for noise robustness. |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Boundary handling: `"nearest"` (default, edge-replicate -- the voxelmorph / QA convention, matching [`jacobian_displacement`](../nitrix-geometry-grid/jacobian_displacement.qmd)), `"reflect"`, `"mirror"`, `"wrap"`, or `"constant"` (zero-pad). |
+| `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | Voxel spacing per spatial axis (physical units). `float` -> isotropic; sequence -> per-axis (length `spatial_rank`). The central-difference denominator is `2 * spacing[axis]`. |
+
+**Returns** `Float` — shape `...` × `*spatial` × `ndim`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:spatial_gradient -->
+::: {.callout-note}
+Exact on affine intensity ramps (central differences reproduce the
+analytic slope on a linear field, interior and -- under
+`"nearest"` -- boundary).  Differentiable w.r.t. `image` (the
+operator is linear), which is what lets it sit inside a
+registration loss.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:spatial_gradient -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

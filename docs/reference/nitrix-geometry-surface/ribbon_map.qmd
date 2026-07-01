@@ -1,0 +1,76 @@
+---
+title: "ribbon_map"
+generated: true
+description: "Map a volume onto the surface by integrating the cortical ribbon."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:ribbon_map -->
+```python
+ribbon_map(volume: Float[Array, 'x y z'], white: Mesh, pial: Mesh, *, n_samples: int = 10, weighting: Literal['pv', 'gaussian'] = 'pv', sigma: float = 0.25, spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0), mode: BoundaryMode = 'constant') -> Float[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ribbon_map -->
+Map a volume onto the surface by integrating the cortical ribbon.
+
+The `wb_command -volume-to-surface-mapping -ribbon-constrained` analogue
+and the basis of HCP **myelin maps** (T1w/T2w sampled on the surface).
+`white` and `pial` must be in **vertex correspondence** (equal counts,
+`white[i]` paired with `pial[i]` -- as [`deform_to_sdf`](../nitrix-geometry-surface/deform_to_sdf.qmd) produces);
+each vertex's value is a weighted reduction over `n_samples` points taken
+along its white-to-pial column
+$v(t) = \mathrm{white} + t \, (\mathrm{pial} - \mathrm{white})$,
+sampled with the **midpoint rule** $t = (k + 1/2) / n_{\mathrm{s}}$
+(symmetric about the mid-thickness; never lands exactly on either surface).
+
+- `weighting='pv'` (default) -- uniform mean over the column samples (the
+  partial-volume column average).
+- `weighting='gaussian'` -- Gaussian weighting toward the mid-thickness
+  `t = 1/2` with std `sigma` (in units of the white->pial fraction).
+
+Both weightings sum to 1 (constants are preserved) and are symmetric about
+the mid-thickness (a field varying linearly along the column reduces to its
+mid-thickness value exactly).  Pure JAX ([`sample_at_points`](../nitrix-geometry-grid/sample_at_points.qmd) + a
+weighted sum), so **differentiable** with respect to `volume` and both
+surfaces.
+
+This is a **column mean** (midpoint quadrature), not an endpoint-inclusive /
+Simpson integral, and is midpoint-accurate
+($O(1 / n_{\mathrm{s}}^2)$ in the number of samples) for a field
+with curvature along the column.  It also does **not** do the
+`-ribbon-constrained` per-voxel ribbon-membership masking (it samples the
+white-to-pial line directly), so near thin/curved cortex a sample can dip
+into adjacent WM/CSF; supply your own ribbon/GM-probability mask upstream if
+that matters for HCP parity.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ribbon_map -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `volume` | `Float` | `x` × `y` × `z` | — | Scalar volume `(X, Y, Z)` (or channels-last `(X, Y, Z, c)`), in the same physical frame as the meshes (sampled at `v / spacing`). |
+| `white` | `Mesh` | — | — | Surfaces in vertex correspondence (equal vertex counts). |
+| `pial` | `Mesh` | — | — | Surfaces in vertex correspondence (equal vertex counts). |
+| `n_samples` | `int` | — | `10` | Number of column samples (static). |
+| `weighting` | `Literal['pv', 'gaussian']` | — | `'pv'` | `'pv'` (default) or `'gaussian'`. |
+| `sigma` | `float` | — | `0.25` | Gaussian std as a fraction of the white->pial distance (`'gaussian'` only). |
+| `spacing` | `Tuple[float, float, float]` | — | `(1.0, 1.0, 1.0)` | Per-axis voxel size relating vertex physical coordinates to `volume` index space. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds boundary mode forwarded to `sample_at_points` (`'constant'` zero-fill default, `'nearest'` edge-clamp). |
+
+**Returns** `Float` — shape `n_vertices`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ribbon_map -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `x` | *(undocumented — add to `_dimensions.yml`)* |
+| `y` | *(undocumented — add to `_dimensions.yml`)* |
+| `z` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

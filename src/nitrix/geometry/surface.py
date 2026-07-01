@@ -56,16 +56,32 @@ def _cotangent_apply(
     faces: Int[Array, 'n_faces 3'],
     field: Float[Array, 'n_vertices d'],
 ) -> Float[Array, 'n_vertices d']:
-    """Apply the cotangent stiffness ``L`` to ``field``, JAX-native.
+    """Apply the cotangent stiffness :math:`L` to ``field``, JAX-native.
 
-    Computes ``(L f)[i] = sum_j w_ij (f_i - f_j)`` with
-    ``w_ij = (cot a_ij + cot b_ij) / 2`` by per-face assembly entirely in JAX,
-    so it is **differentiable w.r.t. ``vertices``** (the cotangent weights are
-    a function of geometry).  This is the differentiate-through-geometry
-    companion to the host-side ``sparse.mesh.mesh_cotangent_laplacian`` (which
-    bakes fixed weights into an ELL -- correct for applying a *fixed* operator
-    to many fields, e.g. smoothing, but not differentiable w.r.t. vertices).
-    The two agree numerically.
+    Computes :math:`(L f)_i = \\sum_j w_{ij} (f_i - f_j)` with
+    :math:`w_{ij} = (\\cot \\alpha_{ij} + \\cot \\beta_{ij}) / 2` by per-face
+    assembly entirely in JAX, so it is differentiable with respect to
+    ``vertices`` (the cotangent weights are a function of geometry).  This is
+    the differentiate-through-geometry companion to the host-side
+    :func:`mesh_cotangent_laplacian` (which bakes fixed weights into an
+    :class:`ELL` -- correct for applying a *fixed* operator to many fields,
+    e.g. smoothing, but not differentiable with respect to vertices).  The two
+    agree numerically.
+
+    Parameters
+    ----------
+    vertices : Float[Array, 'n_vertices 3']
+        Mesh vertex coordinates; the cotangent weights are derived from these.
+    faces : Int[Array, 'n_faces 3']
+        Triangle vertex indices.
+    field : Float[Array, 'n_vertices d']
+        Per-vertex field(s) to which the stiffness operator is applied.
+
+    Returns
+    -------
+    Float[Array, 'n_vertices d']
+        The field :math:`L f`, i.e. the stiffness operator applied to
+        ``field``, with the same shape as the input field.
     """
     f = faces
     a, b, c = vertices[f[:, 0]], vertices[f[:, 1]], vertices[f[:, 2]]
@@ -96,9 +112,21 @@ def _cotangent_apply(
 def _require_faces(mesh: Mesh, fn: str) -> None:
     """Reject empty / faceless meshes that would yield meaningless output.
 
-    ``marching_cubes`` can legitimately return an empty ``Mesh`` (no level set);
-    feeding that to a curvature/area op would silently produce all-zero garbage
-    instead of an error.
+    :func:`marching_cubes` can legitimately return an empty :class:`Mesh` (no
+    level set); feeding that to a curvature/area op would silently produce
+    all-zero garbage instead of an error.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        Triangle mesh to validate.
+    fn : str
+        Name of the calling function, used in the error message.
+
+    Raises
+    ------
+    ValueError
+        If the mesh has no vertices or no faces.
     """
     if mesh.n_vertices == 0 or mesh.faces.shape[0] == 0:
         raise ValueError(
@@ -113,32 +141,42 @@ def mean_curvature(
     *,
     area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
 ) -> Float[Array, 'n_vertices']:
-    """Per-vertex mean curvature ``H`` via the cotangent / mass operator.
+    """Per-vertex mean curvature :math:`H` via the cotangent / mass operator.
 
     The discrete mean-curvature *normal* (Meyer et al. 2003) is
-    ``K(v_i) = (1 / 2 A_i) sum_j (cot a_ij + cot b_ij)(v_i - v_j)``, which is
-    exactly ``(M^{-1} L v)[i]`` for the shipped cotangent stiffness ``L``
-    (``mesh_cotangent_laplacian``) and lumped mass ``M`` (``vertex_areas``),
-    and equals ``2 H n``.  So the mean-curvature vector is
-    ``H_vec = 1/2 M^{-1} L v`` and ``H = sign(H_vec . n) ||H_vec||``.
+    :math:`K(v_i) = \\frac{1}{2 A_i} \\sum_j
+    (\\cot \\alpha_{ij} + \\cot \\beta_{ij})(v_i - v_j)`, which is exactly
+    :math:`(M^{-1} L v)_i` for the shipped cotangent stiffness :math:`L`
+    (:func:`mesh_cotangent_laplacian`) and lumped mass :math:`M`
+    (:func:`vertex_areas`), and equals :math:`2 H n`.  So the mean-curvature
+    vector is :math:`H_{\\mathrm{vec}} = \\tfrac{1}{2} M^{-1} L v` and
+    :math:`H = \\operatorname{sign}(H_{\\mathrm{vec}} \\cdot n)
+    \\lVert H_{\\mathrm{vec}} \\rVert`.
 
-    Sign convention: **positive where the surface is convex w.r.t. the outward
-    vertex normal** (a sphere, gyral crowns), negative in concave regions
+    Sign convention: positive where the surface is convex with respect to the
+    outward vertex normal (a sphere, gyral crowns), negative in concave regions
     (sulcal fundi).  This is the *opposite* sign to FreeSurfer ``?h.curv``
     (which is positive in sulci); flip the sign to compare.
 
     Parameters
     ----------
-    mesh
+    mesh : Mesh
         Triangle mesh.
-    area_scheme
-        Vertex-area scheme for the mass ``M`` (``'voronoi'`` default;
-        ``'barycentric'``).
+    area_scheme : {'voronoi', 'barycentric'}, optional
+        Vertex-area scheme for the mass :math:`M` (``'voronoi'`` default).
 
     Returns
     -------
-    ``(n_vertices,)`` mean curvature.  Pure JAX; differentiable w.r.t.
-    ``mesh.vertices``.
+    Float[Array, 'n_vertices']
+        Per-vertex mean curvature, shape ``(n_vertices,)``.  Pure JAX;
+        differentiable with respect to ``mesh.vertices``.
+
+    References
+    ----------
+    Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). Discrete
+    differential-geometry operators for triangulated 2-manifolds. In
+    *Visualization and Mathematics III* (pp. 35-57). Springer.
+    :doi:`10.1007/978-3-662-05105-4_2`
     """
     _require_faces(mesh, 'mean_curvature')
     lv = _cotangent_apply(mesh.vertices, mesh.faces, mesh.vertices)  # L v
@@ -155,28 +193,32 @@ def gaussian_curvature(
     *,
     area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
 ) -> Float[Array, 'n_vertices']:
-    """Per-vertex Gaussian curvature ``K`` via the angle-defect formula.
+    """Per-vertex Gaussian curvature :math:`K` via the angle-defect formula.
 
-    ``K(v_i) = (2 pi - sum_j theta_ij) / A_i`` where ``theta_ij`` are the
-    interior triangle angles incident at ``v_i`` and ``A_i`` the vertex area.
-    The numerator (the angle defect) is the *integrated* Gaussian curvature,
-    so ``sum_i K_i A_i = 2 pi chi`` exactly (discrete Gauss-Bonnet) -- ``4 pi``
-    for a genus-0 surface.
+    :math:`K(v_i) = (2 \\pi - \\sum_j \\theta_{ij}) / A_i` where
+    :math:`\\theta_{ij}` are the interior triangle angles incident at
+    :math:`v_i` and :math:`A_i` the vertex area.  The numerator (the angle
+    defect) is the *integrated* Gaussian curvature, so
+    :math:`\\sum_i K_i A_i = 2 \\pi \\chi` exactly (discrete Gauss-Bonnet) --
+    :math:`4 \\pi` for a genus-0 surface.
 
-    Assumes a **closed** mesh (the ``2 pi`` term); for a surface with boundary
-    the boundary vertices would need the ``pi`` defect instead.  The geometry
-    suite's targets (icosphere, genus-0 cortical surfaces) are closed.
+    Assumes a **closed** mesh (the :math:`2 \\pi` term); for a surface with
+    boundary the boundary vertices would need the :math:`\\pi` defect instead.
+    The geometry suite's targets (icosphere, genus-0 cortical surfaces) are
+    closed.
 
     Parameters
     ----------
-    mesh
+    mesh : Mesh
         Triangle mesh (closed).
-    area_scheme
-        Vertex-area scheme for ``A_i`` (``'voronoi'`` default).
+    area_scheme : {'voronoi', 'barycentric'}, optional
+        Vertex-area scheme for :math:`A_i` (``'voronoi'`` default).
 
     Returns
     -------
-    ``(n_vertices,)`` Gaussian curvature.  Pure JAX; differentiable.
+    Float[Array, 'n_vertices']
+        Per-vertex Gaussian curvature, shape ``(n_vertices,)``.  Pure JAX;
+        differentiable.
     """
     _require_faces(mesh, 'gaussian_curvature')
     v = mesh.vertices
@@ -211,24 +253,27 @@ def principal_curvatures(
     *,
     area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi',
 ) -> Float[Array, 'n_vertices 2']:
-    """Per-vertex principal curvatures ``(kappa_1, kappa_2)``, ``kappa_1 >= kappa_2``.
+    """Per-vertex principal curvatures :math:`(\\kappa_1, \\kappa_2)`.
 
-    From the mean and Gaussian curvatures via
-    ``kappa = H +/- sqrt(max(H^2 - K, 0))`` (the discriminant is clamped at
-    zero, where it can dip slightly negative from discretisation).  Inherits
-    ``mean_curvature``'s sign convention.
+    The two principal curvatures are ordered :math:`\\kappa_1 \\geq \\kappa_2`.
+    They follow from the mean and Gaussian curvatures via
+    :math:`\\kappa = H \\pm \\sqrt{\\max(H^2 - K, 0)}` (the discriminant is
+    clamped at zero, where it can dip slightly negative from discretisation).
+    Inherits the sign convention of :func:`mean_curvature`.
 
     Parameters
     ----------
-    mesh
+    mesh : Mesh
         Triangle mesh (closed).
-    area_scheme
+    area_scheme : {'voronoi', 'barycentric'}, optional
         Vertex-area scheme (``'voronoi'`` default).
 
     Returns
     -------
-    ``(n_vertices, 2)`` -- column 0 is ``kappa_1`` (larger), column 1 is
-    ``kappa_2``.  Pure JAX; differentiable.
+    Float[Array, 'n_vertices 2']
+        Per-vertex principal curvatures, shape ``(n_vertices, 2)``: column 0 is
+        :math:`\\kappa_1` (larger), column 1 is :math:`\\kappa_2`.  Pure JAX;
+        differentiable.
     """
     h = mean_curvature(mesh, area_scheme=area_scheme)
     k = gaussian_curvature(mesh, area_scheme=area_scheme)
@@ -244,7 +289,7 @@ def areal_distortion(
 ) -> Float[Array, 'n_vertices']:
     """Per-vertex areal distortion ``log2(A_warped / A_source)``.
 
-    The surface analogue of ``jacobian_det_displacement`` and the MSM areal
+    The surface analogue of :func:`jacobian_det_displacement` and the MSM areal
     regulariser / ``?h.jacobian`` QA readout: positive where the warp expands
     area, negative where it contracts, zero for an isometry.  ``source`` and
     ``warped`` **must share topology** (identical ``faces`` and corresponding
@@ -282,31 +327,36 @@ def strain_distortion(
     source: Mesh,
     warped: Mesh,
 ) -> Float[Array, 'n_faces 2']:
-    """Per-face principal stretches ``(lambda_1, lambda_2)``, ``lambda_1 >= lambda_2``.
+    """Per-face principal stretches :math:`(\\lambda_1, \\lambda_2)`.
 
-    The eigenvalues of the right Cauchy-Green tensor ``C = G_s^{-1} G_w`` are
-    the squared principal stretches of the per-triangle deformation from
-    ``source`` to ``warped``, where ``G_s`` / ``G_w`` are the 2x2 first
-    fundamental forms (edge Gram matrices) of the source / warped triangle.
-    Computed via the 2x2 eigenvalue closed form (no ``eigh``, so it bypasses
-    the cuSolver wedge): ``lambda^2 = (tr C +/- sqrt(tr C^2 - 4 det C)) / 2``.
+    The two principal stretches are ordered :math:`\\lambda_1 \\geq \\lambda_2`.
+    The eigenvalues of the right Cauchy-Green tensor
+    :math:`C = G_s^{-1} G_w` are the squared principal stretches of the
+    per-triangle deformation from ``source`` to ``warped``, where :math:`G_s`
+    and :math:`G_w` are the 2x2 first fundamental forms (edge Gram matrices) of
+    the source / warped triangle.  Computed via the 2x2 eigenvalue closed form
+    (no ``eigh``, so it bypasses the cuSolver wedge):
+    :math:`\\lambda^2 = (\\operatorname{tr} C \\pm
+    \\sqrt{(\\operatorname{tr} C)^2 - 4 \\det C}) / 2`.
 
-    An isometry gives ``(1, 1)``; a uniform scale ``s`` gives ``(s, s)``; an
-    anisotropic scale ``diag(a, b)`` gives ``(max(a,b), min(a,b))``.  (The
-    discriminant is floored at ``1e-12`` for a finite gradient at the
-    ``lambda_1 == lambda_2`` crossing, so genuinely equal stretches come back
-    split by ~``1e-6`` -- an isometry is ``(1, 1)`` only to ~``1e-6``.)
-    ``source`` and ``warped`` **must share topology**.
+    An isometry gives :math:`(1, 1)`; a uniform scale :math:`s` gives
+    :math:`(s, s)`; an anisotropic scale :math:`\\operatorname{diag}(a, b)`
+    gives :math:`(\\max(a, b), \\min(a, b))`.  (The discriminant is floored at
+    ``1e-12`` for a finite gradient at the :math:`\\lambda_1 = \\lambda_2`
+    crossing, so genuinely equal stretches come back split by ~``1e-6`` -- an
+    isometry is :math:`(1, 1)` only to ~``1e-6``.)  ``source`` and ``warped``
+    **must share topology**.
 
     Parameters
     ----------
-    source, warped
+    source, warped : Mesh
         Triangle meshes with the same topology, before / after the warp.
 
     Returns
     -------
-    ``(n_faces, 2)`` -- column 0 is ``lambda_1`` (larger stretch).  Pure JAX;
-    differentiable.
+    Float[Array, 'n_faces 2']
+        Per-face principal stretches, shape ``(n_faces, 2)``: column 0 is
+        :math:`\\lambda_1` (larger stretch).  Pure JAX; differentiable.
 
     Raises
     ------
@@ -349,9 +399,24 @@ def _roi_neumann_laplacian(lap: ELL, roi: Bool[Array, 'n_vertices']) -> ELL:
 
     Drops every off-diagonal coupling that crosses the ROI boundary and rebuilds
     each in-ROI row's diagonal as the sum of its surviving weights (so the row
-    still sums to zero -> no flux across the medial wall, constants/integral
+    still sums to zero -- no flux across the medial wall, constants/integral
     preserved within the ROI).  Out-of-ROI rows are zeroed entirely, so under
-    ``(M + tL)`` the mass term alone holds them at their input value.
+    :math:`(M + t L)` the mass term alone holds them at their input value.
+
+    Parameters
+    ----------
+    lap : ELL
+        Cotangent stiffness Laplacian in flat ELL format, with the diagonal in
+        column 0 of each row.
+    roi : Bool[Array, 'n_vertices']
+        Boolean mask selecting the region of interest; ``True`` vertices are
+        retained, ``False`` vertices are the medial wall.
+
+    Returns
+    -------
+    ELL
+        The Laplacian restricted to the ROI with a Neumann (no-flux) boundary
+        at the ROI edge and out-of-ROI rows zeroed.
     """
     idx = lap.indices
     vals = lap.values
@@ -381,44 +446,55 @@ def surface_smooth(
     Smooths a per-vertex scalar *along the surface* (not through Euclidean
     space) -- the correct smoother for ``sulc`` / ``curv`` / myelin / thickness
     maps and surface-GLM inputs.  One **backward-Euler** heat step solves the
-    SPD system ``(M + t L) x = M x_0`` for the lumped mass ``M``
-    (``vertex_areas``) and cotangent stiffness ``L`` (``mesh_cotangent_laplacian``),
-    with diffusion time ``t = fwhm^2 / (16 ln 2)`` (the Gaussian variance
-    ``sigma^2 = 2t``, ``FWHM = 2 sqrt(2 ln 2) sigma``).  The solve is
-    matrix-free conjugate gradients (``linalg.krylov.cg``) -- GPU-native and
-    cuSolver-free.
+    SPD system :math:`(M + t L) x = M x_0` for the lumped mass :math:`M`
+    (:func:`vertex_areas`) and cotangent stiffness :math:`L`
+    (:func:`mesh_cotangent_laplacian`), with diffusion time
+    :math:`t = \\mathrm{fwhm}^2 / (16 \\ln 2)` (the Gaussian variance
+    :math:`\\sigma^2 = 2t`, :math:`\\mathrm{FWHM} = 2 \\sqrt{2 \\ln 2}\\,
+    \\sigma`).  The solve is matrix-free conjugate gradients (:func:`cg`) --
+    GPU-native and cuSolver-free.
 
     This is the nitrix-native geodesic smoother; it is **not** identical to
     Connectome Workbench's ``-metric-smoothing`` (a geodesic-distance-weighted
-    Gaussian) -- a documented divergence, see ``docs/design/geometry-suite.md``.
+    Gaussian) -- a documented divergence.
 
-    Conserves the area-weighted integral ``sum_i A_i x_i`` (since ``1^T L = 0``)
-    and fixes constants; ``fwhm = 0`` is the identity.
+    Conserves the area-weighted integral :math:`\\sum_i A_i x_i` (since
+    :math:`\\mathbf{1}^{\\top} L = 0`) and fixes constants; ``fwhm = 0`` is the
+    identity.
 
     Parameters
     ----------
-    mesh
+    mesh : Mesh
         Triangle mesh (concrete -- the operator is built host-side once).
-    values
+    values : Float[Array, '... n_vertices']
         Per-vertex field(s), shape ``(..., n_vertices)`` (vertex axis last).
-    fwhm
+    fwhm : float
         Target full-width-at-half-maximum of the smoothing kernel, in the
         mesh's coordinate units.
-    area_scheme
+    area_scheme : {'voronoi', 'barycentric'}, optional
         Vertex-area / mass scheme (``'voronoi'`` default).
-    roi
+    roi : Bool[Array, 'n_vertices'], optional
         Optional ``(n_vertices,)`` boolean cortex mask.  Diffusion is given a
         **Neumann boundary** at the ROI edge (no flux across it), so values do
         not bleed across the medial wall (whose data are meaningless); out-of-ROI
         vertices are returned unchanged.  This is the ``wb_command
-        -metric-smoothing -roi`` guard.
-    tol, maxiter
-        Conjugate-gradient tolerance / iteration cap.
+        -metric-smoothing -roi`` guard.  Requires a flat ELL Laplacian.
+    tol : float, optional
+        Conjugate-gradient convergence tolerance.
+    maxiter : int, optional
+        Conjugate-gradient iteration cap.
 
     Returns
     -------
-    Smoothed field(s), same shape as ``values``.  Differentiable w.r.t.
-    ``values`` (implicit CG rule).
+    Float[Array, '... n_vertices']
+        Smoothed field(s), same shape as ``values``.  Differentiable with
+        respect to ``values`` (implicit CG rule).
+
+    Raises
+    ------
+    ValueError
+        If ``roi`` is given but the cotangent Laplacian is not a flat ELL (the
+        sectioned operator is not supported for ROI masking).
     """
     area = vertex_areas(mesh, scheme=area_scheme)  # (n,) lumped mass diagonal
     lap = mesh_cotangent_laplacian(mesh)
@@ -468,18 +544,19 @@ def deform_to_sdf(
     The recommended *geometry-light* surface mover: each iteration samples the
     signed-distance field at the current vertices, steps every vertex a
     fraction ``step`` of its local SDF value back along its (outward) normal
-    -- ``v <- v - step * sdf(v) * n`` -- then applies a Laplacian-smoothing
-    fraction.  Deforming e.g. a white surface outward onto a pial SDF this way
-    **preserves vertex correspondence and inherits genus-0** (the topology /
-    ``faces`` never change -- no re-tessellation, no topology correction), and
-    correspondence cortical thickness falls out for free.
+    -- :math:`v \\leftarrow v - \\mathrm{step} \\cdot \\mathrm{sdf}(v) \\cdot n`
+    -- then applies a Laplacian-smoothing fraction.  Deforming e.g. a white
+    surface outward onto a pial SDF this way **preserves vertex correspondence
+    and inherits genus-0** (the topology / ``faces`` never change -- no
+    re-tessellation, no topology correction), and correspondence cortical
+    thickness falls out for free.
 
-    A jitted ``lax.fori_loop`` of pure-JAX ops (``sample_at_points`` +
-    ``compute_vertex_normals`` + ``mesh_laplacian_smooth``), so it is **fully
-    differentiable** w.r.t. both the ``sdf`` and the initial vertices -- usable
-    inside a learned-refinement loss.  Regularisation is in-loop and jittable
-    only: no host-side self-intersection guard (run ``remove_self_intersections``
-    as a post-hoc cleanup if needed).
+    A jitted ``lax.fori_loop`` of pure-JAX ops (:func:`sample_at_points` +
+    :func:`compute_vertex_normals` + :func:`mesh_laplacian_smooth`), so it is
+    **fully differentiable** with respect to both the ``sdf`` and the initial
+    vertices -- usable inside a learned-refinement loss.  Regularisation is
+    in-loop and jittable only: no host-side self-intersection guard (run
+    :func:`remove_self_intersections` as a post-hoc cleanup if needed).
 
     Parameters
     ----------
@@ -541,31 +618,40 @@ def cortical_thickness(
 
     Requires the two surfaces to be in **vertex correspondence** (equal vertex
     counts, ``white[i]`` paired with ``pial[i]`` -- as produced by
-    ``deform_to_sdf`` marching a white surface to a pial SDF).
+    :func:`deform_to_sdf` marching a white surface to a pial SDF).
 
-    - ``'correspondence'`` -- ``||pial[i] - white[i]||`` per vertex.  Exact when
-      the pial was deformed from the white; pure JAX and **differentiable**
-      w.r.t. both meshes' vertices.
+    - ``'correspondence'`` -- :math:`\\lVert \\mathrm{pial}_i -
+      \\mathrm{white}_i \\rVert` per vertex.  Exact when the pial was deformed
+      from the white; pure JAX and **differentiable** with respect to both
+      meshes' vertices.
     - ``'symmetric'`` (default, Fischl & Dale 2000) -- the average of the
-      nearest white[i]->pial-surface and pial[i]->white-surface distances.
+      nearest white-to-pial-surface and pial-to-white-surface distances.
       Host-side nearest-point queries (not differentiable); more robust when
       the normal-correspondence is imperfect.
 
     Parameters
     ----------
-    white, pial
+    white, pial : Mesh
         Surfaces in vertex correspondence (equal vertex counts).
-    method
+    method : {'symmetric', 'correspondence'}, optional
         ``'symmetric'`` (default) or ``'correspondence'``.
 
     Returns
     -------
-    ``(n_vertices,)`` thickness.
+    Float[Array, 'n_vertices']
+        Per-vertex cortical thickness, shape ``(n_vertices,)``.
 
     Raises
     ------
     ValueError
         If the surfaces have different vertex counts, or ``method`` is unknown.
+
+    References
+    ----------
+    Fischl, B., & Dale, A. M. (2000). Measuring the thickness of the human
+    cerebral cortex from magnetic resonance images. *Proceedings of the
+    National Academy of Sciences*, 97(20), 11050-11055.
+    :doi:`10.1073/pnas.200033797`
     """
     if white.n_vertices != pial.n_vertices:
         raise ValueError(
@@ -686,11 +772,12 @@ def ribbon_map(
     The ``wb_command -volume-to-surface-mapping -ribbon-constrained`` analogue
     and the basis of HCP **myelin maps** (T1w/T2w sampled on the surface).
     ``white`` and ``pial`` must be in **vertex correspondence** (equal counts,
-    ``white[i]`` paired with ``pial[i]`` -- as ``deform_to_sdf`` produces); each
-    vertex's value is a weighted reduction over ``n_samples`` points taken along
-    its white->pial column ``v(t) = white + t * (pial - white)``, sampled with
-    the **midpoint rule** ``t = (k + 1/2) / n_samples`` (symmetric about the
-    mid-thickness; never lands exactly on either surface).
+    ``white[i]`` paired with ``pial[i]`` -- as :func:`deform_to_sdf` produces);
+    each vertex's value is a weighted reduction over ``n_samples`` points taken
+    along its white-to-pial column
+    :math:`v(t) = \\mathrm{white} + t \\, (\\mathrm{pial} - \\mathrm{white})`,
+    sampled with the **midpoint rule** :math:`t = (k + 1/2) / n_{\\mathrm{s}}`
+    (symmetric about the mid-thickness; never lands exactly on either surface).
 
     - ``weighting='pv'`` (default) -- uniform mean over the column samples (the
       partial-volume column average).
@@ -699,16 +786,18 @@ def ribbon_map(
 
     Both weightings sum to 1 (constants are preserved) and are symmetric about
     the mid-thickness (a field varying linearly along the column reduces to its
-    mid-thickness value exactly).  Pure JAX (``sample_at_points`` + a weighted
-    sum), so **differentiable** w.r.t. ``volume`` and both surfaces.
+    mid-thickness value exactly).  Pure JAX (:func:`sample_at_points` + a
+    weighted sum), so **differentiable** with respect to ``volume`` and both
+    surfaces.
 
     This is a **column mean** (midpoint quadrature), not an endpoint-inclusive /
-    Simpson integral, and is midpoint-accurate (``O(1/n_samples^2)``) for a field
+    Simpson integral, and is midpoint-accurate
+    (:math:`O(1 / n_{\\mathrm{s}}^2)` in the number of samples) for a field
     with curvature along the column.  It also does **not** do the
     ``-ribbon-constrained`` per-voxel ribbon-membership masking (it samples the
-    white->pial line directly), so near thin/curved cortex a sample can dip into
-    adjacent WM/CSF; supply your own ribbon/GM-probability mask upstream if that
-    matters for HCP parity.
+    white-to-pial line directly), so near thin/curved cortex a sample can dip
+    into adjacent WM/CSF; supply your own ribbon/GM-probability mask upstream if
+    that matters for HCP parity.
 
     Parameters
     ----------
@@ -749,7 +838,9 @@ def ribbon_map(
         )
     dtype = white.vertices.dtype
     spacing_arr = jnp.asarray(spacing, dtype=dtype)
-    t = (jnp.arange(n_samples, dtype=dtype) + 0.5) / n_samples  # (S,) midpoints
+    t = (
+        jnp.arange(n_samples, dtype=dtype) + 0.5
+    ) / n_samples  # (S,) midpoints
     seg = pial.vertices - white.vertices  # (n, 3)
     # Column sample points: (S, n, 3) -> index space.
     points = white.vertices[None] + t[:, None, None] * seg[None]

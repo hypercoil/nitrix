@@ -15,20 +15,20 @@ jacobian_det_displacement(u: Float[Array, '... *spatial d'], *, boundary_mode: L
 <!-- nitrix:gen overview:jacobian_det_displacement -->
 Per-point determinant of the deformation Jacobian.
 
-Computes $det(I + \nabla u)$ at each spatial location.  For
+Computes $\det(I + \nabla u)$ at each spatial location.  For
 `d <= 3` uses the explicit closed-form determinant (avoiding
 LU factorisation noise and $O(d^3)$ cost); for `d > 3`
-falls back to `jnp.linalg.det`.
+falls back to `jnp.linalg.det`.  The Jacobian itself is obtained
+from [`jacobian_displacement`](../nitrix-geometry-grid/jacobian_displacement.qmd), whose `boundary_mode` and
+`spacing` semantics are shared.
 
-Parameters and `boundary_mode` / `spacing` semantics match
-`jacobian_displacement`.
-
-Folding interpretation: `det(J) > 0` means the deformation
-is locally orientation-preserving; `det(J) <= 0` indicates
+Folding interpretation: $\det(J) > 0$ means the deformation
+is locally orientation-preserving; $\det(J) \leq 0$ indicates
 the warp folds at this voxel (and is not a diffeomorphism
 there).  The standard QA threshold is "no voxels with
-`det <= 0`"; the soft regulariser is
-$mean(max(0, ε - det)^2)$ for some `ε > 0`.
+$\det \leq 0$"; the soft regulariser is
+$\operatorname{mean}(\max(0, \varepsilon - \det)^2)$ for
+some $\varepsilon > 0$.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:jacobian_det_displacement -->
@@ -36,11 +36,11 @@ $mean(max(0, ε - det)^2)$ for some `ε > 0`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `u` | `Float` | `...` × `*spatial` × `d` | — | — |
-| `boundary_mode` | `Literal['nearest', 'wrap', 'mirror']` | — | `'nearest'` | — |
-| `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | — |
+| `u` | `Float` | `...` × `*spatial` × `d` | — | Displacement field, channel-last, `(*leading, *spatial, d)` with `len(spatial) == d`. |
+| `boundary_mode` | `Literal['nearest', 'wrap', 'mirror']` | — | `'nearest'` | Boundary handling for the central difference. `"nearest"` (default) clamps to the edge cell; `"wrap"` is periodic; `"mirror"` is non-repeating mirror. |
+| `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | Voxel spacing along each spatial axis. `float` -> isotropic; sequence -> per-axis (length `d`). |
 
-**Returns** `Float` — shape `...` × `*spatial`.
+**Returns** `Float` — shape `...` × `*spatial`. Per-point Jacobian determinant, `(*leading, *spatial)` (the trailing displacement-component axis of `u` reduced away).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:jacobian_det_displacement -->

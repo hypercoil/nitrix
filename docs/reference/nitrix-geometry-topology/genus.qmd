@@ -1,0 +1,32 @@
+---
+title: "genus"
+generated: true
+description: "Genus $g = (2 -  chi) / 2$ of a closed orientable surface."
+---
+
+[‹ back to `nitrix.geometry.topology`](../nitrix-geometry-topology.qmd)
+
+<!-- nitrix:gen sig:genus -->
+```python
+genus(mesh: Mesh) -> int
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:genus -->
+Genus $g = (2 - \chi) / 2$ of a closed orientable surface.
+
+Derives the genus (the number of handles) from the Euler characteristic
+$\chi$ returned by [`euler_characteristic`](../nitrix-geometry-topology/euler_characteristic.qmd).  A topological
+sphere has $g = 0$, a torus $g = 1$, and so on.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:genus -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh, assumed **closed, connected, and orientable** (the genus formula does not apply to a surface with boundary or to a non-manifold mesh). |
+
+**Returns** `int`. The integer genus $g$. Host-side; not differentiable.
+<!-- nitrix:/gen -->
+

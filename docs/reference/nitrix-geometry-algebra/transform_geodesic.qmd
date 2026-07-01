@@ -1,0 +1,44 @@
+---
+title: "transform_geodesic"
+generated: true
+description: "Point at fraction `t` along the geodesic from identity to `transform`."
+---
+
+[‹ back to `nitrix.geometry.algebra`](../nitrix-geometry-algebra.qmd)
+
+<!-- nitrix:gen sig:transform_geodesic -->
+```python
+transform_geodesic(transform: Float[Array, 'd1 d1'], t: float) -> Float[Array, 'd1 d1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:transform_geodesic -->
+Point at fraction `t` along the geodesic from identity to `transform`.
+
+Evaluates $\exp(t \cdot \log \mathrm{transform})$ in the true matrix
+chart: `t = 0` gives the identity, `t = 1` gives `transform`, and the
+half-way point squares back to the whole, $T_{1/2} \, T_{1/2} = T$.
+Interpolate between two transforms `A` and `B` as
+`A @ transform_geodesic(invert(A) @ B, t)`.  This is an offline op (it
+uses `matrix_log`); see [`transform_mean`](../nitrix-geometry-algebra/transform_mean.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:transform_geodesic -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `transform` | `Float` | `d1` × `d1` | — | `(ndim+1, ndim+1)` homogeneous transform whose geodesic from the identity is traced (its linear block needs positive determinant). |
+| `t` | `float` | — | — | Scalar fraction along the geodesic; `0` is the identity and `1` is `transform`. Values outside `[0, 1]` extrapolate along the same geodesic. |
+
+**Returns** `Float` — shape `d1` × `d1`. The interpolated homogeneous transform, of shape `(ndim+1, ndim+1)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:transform_geodesic -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

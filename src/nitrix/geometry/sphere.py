@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 2-sphere primitives.
 
 Coordinate conventions
@@ -10,17 +10,18 @@ Coordinate conventions
 We use *Cartesian* normal-vector format ``(x, y, z)`` as the
 canonical representation: every coordinate on the sphere is a
 unit 3-vector (or an ``r``-scaled 3-vector for a radius-``r``
-sphere).  This is the format consumed by ``spherical_geodesic_distance``,
-``spherical_conv``, and the icosphere generation utilities.
+sphere).  This is the format consumed by
+:func:`spherical_geodesic_distance`, :func:`spherical_conv`, and the
+icosphere generation utilities.
 
 For lat/long inputs (e.g. data digitised from a globe), convert
-once via ``latlong_to_cartesian``.  All downstream operations assume
-the Cartesian representation.
+once via :func:`latlong_to_cartesian`.  All downstream operations
+assume the Cartesian representation.
 
-``spherical_conv`` re-backs the legacy O(N²) all-pairs convolution
-on ``semiring_ell_matmul`` over a k-NN adjacency for O(N · k) cost
--- the marquee Phase 3 task per SPEC §6.1 ``3.2`` ("validates the
-§3.1 design bet end-to-end").
+:func:`spherical_conv` re-backs the legacy all-pairs convolution on
+:func:`~nitrix.semiring.semiring_ell_matmul` over a k-nearest-neighbour
+adjacency, reducing the per-call cost from :math:`O(n^2)` to
+:math:`O(n \cdot k)`.
 """
 
 from __future__ import annotations
@@ -96,7 +97,7 @@ def cartesian_to_latlong(
 ) -> Float[Array, '... 2']:
     """Cartesian ``(x, y, z)`` -> ``(latitude, longitude)`` in radians.
 
-    Inverse of ``latlong_to_cartesian``.  ``xyz`` need not be a unit
+    Inverse of :func:`latlong_to_cartesian`.  ``xyz`` need not be a unit
     vector; the returned angles are scale-invariant.
 
     Parameters
@@ -126,11 +127,26 @@ def _geodesic_pair(
     Y: Float[Array, '... 3'],
     r: float,
 ) -> Float[Array, '...']:
-    """Per-pair geodesic on already-aligned points.
+    """Great-circle (geodesic) distance between already-aligned point pairs.
 
-    ``X`` and ``Y`` must have matching shapes ``(..., 3)``; output is
-    ``(...,)``.  Used by both the all-pairs entry point and the
-    inline distance computation inside ``spherical_conv``.
+    ``X`` and ``Y`` must have matching, broadcastable shapes ``(..., 3)``;
+    each trailing 3-vector pair yields one scalar distance.  Used by both
+    the all-pairs entry point and the inline distance computation inside
+    :func:`spherical_conv`.
+
+    Parameters
+    ----------
+    X
+        First set of Cartesian points, ``(..., 3)``.
+    Y
+        Second set of Cartesian points, ``(..., 3)``, matching ``X``.
+    r
+        Sphere radius.  The returned distance is ``r`` times the
+        great-circle angle.
+
+    Returns
+    -------
+    Per-pair geodesic distances, ``(...,)``, in the same units as ``r``.
     """
     cross = jnp.cross(X, Y, axis=-1)
     num = jnp.sqrt((cross**2).sum(-1))
@@ -186,14 +202,29 @@ def _spherical_knn_indices(
     k: int,
     r: float,
 ) -> Int[Array, 'n k']:
-    """Top-k nearest neighbours by spherical geodesic distance.
+    """Top-``k`` nearest neighbours of each point by spherical geodesic distance.
 
-    Tiled row-by-row with ``lax.map`` (Tier C / audit AI-C8): peak memory is
-    ``O(n)`` (one query's distances at a time), not the ``O(n^2)`` full distance
-    matrix -- so the int-``k`` path degrades gracefully instead of OOMing on a
-    large mesh.  Still ``O(n^2)`` *compute*; for very large meshes pre-compute
-    the adjacency (e.g. the icosphere's natural k-ring) and pass it as
-    ``neighbourhood=indices``.  Results are identical to the dense path.
+    Tiled row-by-row with ``lax.map``: peak memory is :math:`O(n)` (one query's
+    distances at a time), not the :math:`O(n^2)` full distance matrix -- so the
+    integer-``k`` path degrades gracefully instead of running out of memory on a
+    large mesh.  Compute cost is still :math:`O(n^2)`; for very large meshes
+    pre-compute the adjacency (e.g. the icosphere's natural k-ring) and pass it
+    as ``neighbourhood=indices``.  Results are identical to the dense path.
+
+    Parameters
+    ----------
+    coor
+        Per-point Cartesian coordinates on the sphere, ``(n, 3)``.
+    k
+        Number of nearest neighbours to return per point (includes the point
+        itself, at distance zero).
+    r
+        Sphere radius, passed through to the geodesic distance.
+
+    Returns
+    -------
+    Neighbour indices, ``(n, k)``, one row of ``k`` source indices per point,
+    ordered from nearest to farthest.
     """
 
     def _knn_row(x: Float[Array, '3']) -> Int[Array, 'k']:
@@ -213,13 +244,14 @@ def spherical_conv(
     r: float = 1.0,
     truncate: Optional[float] = None,
 ) -> Float[Array, '... n c']:
-    """Convolve data on a 2-sphere with an isotropic Gaussian kernel.
+    r"""Convolve data on a 2-sphere with an isotropic Gaussian kernel.
 
-    Specialises onto ``semiring_ell_matmul``: build a per-point k-NN
-    adjacency by spherical geodesic distance, weight neighbours by a
-    Gaussian over the geodesic distance, normalise, reduce.  Cost is
-    ``O(n * k * c)`` per call once the adjacency is in hand --
-    *not* the legacy ``O(n^2 * c)`` of the all-pairs implementation.
+    Specialises onto :func:`~nitrix.semiring.semiring_ell_matmul`: build a
+    per-point k-nearest-neighbour adjacency by spherical geodesic distance,
+    weight neighbours by a Gaussian over the geodesic distance, normalise,
+    and reduce.  Cost is :math:`O(n \cdot k \cdot c)` per call once the
+    adjacency is in hand -- *not* the legacy :math:`O(n^2 \cdot c)` of the
+    all-pairs implementation.
 
     Parameters
     ----------
@@ -377,10 +409,11 @@ def is_bijective_sphere_map(
     flip_area_tol: float = 0.0,
     total_tol: float = 1e-2,
 ) -> bool:
-    """Whether (vertices-on-sphere, faces) is a (near-)bijective spherical map.
+    r"""Whether (vertices-on-sphere, faces) is a (near-)bijective spherical map.
 
-    ``True`` iff the signed solid angles (``signed_spherical_areas``) form a
-    **degree-1 cover** -- their sum is within ``total_tol`` of ``+/- 4 pi`` --
+    ``True`` iff the signed solid angles (:func:`signed_spherical_areas`) form
+    a **degree-1 cover** -- their sum is within ``total_tol`` of
+    :math:`\pm 4\pi` --
     **and** the fraction of solid angle in triangles flipped against the
     dominant orientation is ``<= flip_area_tol``.  ``flip_area_tol = 0`` is the
     strict fold-free test; a small tolerance (e.g. ``8e-4``) mirrors the
@@ -428,31 +461,35 @@ def spectral_sphere_embedding(
     eig_iters: int = 50,
     laplacian: Optional['ELL'] = None,
 ) -> Float[Array, 'n_vertices 3']:
-    """One-shot spherical map from the Laplace-Beltrami eigenfunctions.
+    r"""One-shot spherical map from the Laplace-Beltrami eigenfunctions.
 
     The FastSurfer / recon-surf method (verified against
     ``Deep-MI/FastSurfer recon_surf/spherically_project.py``): solve the
-    **generalised** LBO eigenproblem ``L phi = lambda M phi`` -- cotangent
-    stiffness ``L`` (``mesh_cotangent_laplacian``), lumped mass ``M``
-    (``vertex_areas``) -- for the **first three non-constant eigenfunctions**
-    (smallest eigenvalues), and scale each vertex's ``(phi_1, phi_2, phi_3)`` to
-    ``radius``.  On the round sphere these eigenfunctions are the degree-1
-    harmonics ``x, y, z``, so a near-spherical input maps to the sphere in one
-    eigensolve, no iteration.
+    **generalised** Laplace-Beltrami eigenproblem
+    :math:`L \phi = \lambda M \phi` -- cotangent stiffness :math:`L`
+    (:func:`~nitrix.sparse.mesh_cotangent_laplacian`), lumped mass :math:`M`
+    (:func:`~nitrix.sparse.vertex_areas`) -- for the **first three
+    non-constant eigenfunctions** (smallest eigenvalues), and scale each
+    vertex's :math:`(\phi_1, \phi_2, \phi_3)` to ``radius``.  On the round
+    sphere these eigenfunctions are the degree-1 harmonics :math:`x, y, z`, so
+    a near-spherical input maps to the sphere in one eigensolve, no iteration.
 
-    The diagonal mass makes ``L tilde = M^{-1/2} L M^{-1/2}`` symmetric.  We form
-    the affinity ``A = I - L tilde / c`` (``c`` a Gershgorin bound on the
-    spectrum), whose *largest* eigenpairs are ``L tilde``'s *smallest*, and find
-    them with **shift-invert** LOBPCG (``eigsolve_top_k`` + a tight negative
-    ``sigma``) -- the cuSolver-free path.  Shift-invert (not a plain reflection)
-    is essential: the smallest LBO eigenvalues are tightly clustered near 0, and
-    shift-invert is what amplifies their gaps enough to resolve the constant +
-    first-three eigenfunctions; ``n_eig`` over-samples to aid convergence.
+    The diagonal mass makes
+    :math:`\tilde{L} = M^{-1/2} L M^{-1/2}` symmetric.  We form the affinity
+    :math:`A = I - \tilde{L} / c` (:math:`c` a Gershgorin bound on the
+    spectrum), whose *largest* eigenpairs are :math:`\tilde{L}`'s *smallest*,
+    and find them with **shift-invert** LOBPCG
+    (:func:`~nitrix.linalg.eigsolve_top_k` + a tight negative ``sigma``) -- the
+    cuSolver-free path.  Shift-invert (not a plain reflection) is essential:
+    the smallest eigenvalues are tightly clustered near 0, and shift-invert is
+    what amplifies their gaps enough to resolve the constant + first-three
+    eigenfunctions; ``n_eig`` over-samples to aid convergence.
 
     **Not guaranteed bijective** -- it is the recon-surf-grade one-shot map
-    (a tiny flipped fraction may remain).  Gate with ``is_bijective_sphere_map``
-    and fall back to a guaranteed-bijective init, or refine with the iterative
-    optimiser, for a strictly fold-free result.  The eigenfunction
+    (a tiny flipped fraction may remain).  Gate with
+    :func:`is_bijective_sphere_map` and fall back to a guaranteed-bijective
+    init, or refine with the iterative optimiser, for a strictly fold-free
+    result.  The eigenfunction
     **sign/ordering gauge** is *not* resolved here (nitrix is
     orientation-agnostic; recon-surf's anatomical sign/swap alignment is a
     consumer step).
@@ -460,8 +497,8 @@ def spectral_sphere_embedding(
     Host-side cotangent construction + JAX eigensolve; not differentiable w.r.t.
     ``mesh.vertices`` (the cotangent weights are built host-side) -- this is an
     init / preprocessing artefact.  Pass ``laplacian=`` to reuse an
-    already-assembled cotangent operator (``spherical_parameterize`` does this so
-    the operator is built once per call, not twice).
+    already-assembled cotangent operator (:func:`spherical_parameterize` does
+    this so the operator is built once per call, not twice).
 
     Note on a wedged dense-solver stack: the shift-invert LOBPCG core is
     matrix-free / cuSolver-free, but its orthonormalisation shares the dense
@@ -480,6 +517,11 @@ def spectral_sphere_embedding(
         constant + 3 used aids LOBPCG convergence on the clustered low spectrum.
     eig_iters
         LOBPCG outer / inner-CG iteration budget for the shift-invert solve.
+    laplacian
+        Optional pre-assembled cotangent stiffness operator (the flat ``ELL``
+        from :func:`~nitrix.sparse.mesh_cotangent_laplacian`, with its diagonal
+        stored at column 0).  If ``None``, it is assembled from ``mesh``; pass
+        it to avoid rebuilding the operator when it is already in hand.
 
     Returns
     -------
@@ -560,10 +602,12 @@ def spherical_parameterize(
     (no flipped triangles) and held.
 
     ``n_iterations = 0`` returns the init alone -- with ``init='spectral'`` that
-    is the recon-surf-grade one-shot map (``spectral_sphere_embedding``).
+    is the recon-surf-grade one-shot map
+    (:func:`spectral_sphere_embedding`).
 
     Execution class: **host-orchestrated**, not a jittable kernel.  It builds the
-    cotangent operator host-side (``mesh_cotangent_laplacian``, NumPy) once and,
+    cotangent operator host-side
+    (:func:`~nitrix.sparse.mesh_cotangent_laplacian`, NumPy) once and,
     for ``init='spectral'``, runs the host eigensolve; the per-iteration refine
     *body* (energy, tangent-projected gradient, fold-safe line-search) is pure
     JAX and runs on device, but the function as a whole is **not** jittable nor
@@ -574,7 +618,8 @@ def spherical_parameterize(
     Parameters
     ----------
     mesh
-        Inflated genus-0 mesh (e.g. ``inflate_surface`` output).
+        Inflated genus-0 mesh (e.g. :func:`~nitrix.geometry.inflate_surface`
+        output).
     init
         ``'spectral'`` (default, the recon-surf LBO embedding) or ``'radial'``
         (centroid projection -- only for near-convex inputs).
@@ -620,7 +665,9 @@ def spherical_parameterize(
     # (the spectral embedding's eigenfunction-sign gauge is otherwise arbitrary).
     # jit-safe: select the sign via jnp.where rather than a host branch, so the
     # 'radial' init + refinement compose under jit/grad without a device sync.
-    sign = jnp.where(jnp.sum(signed_spherical_areas(phi, faces)) < 0.0, -1.0, 1.0)
+    sign = jnp.where(
+        jnp.sum(signed_spherical_areas(phi, faces)) < 0.0, -1.0, 1.0
+    )
     phi = phi.at[:, 0].multiply(sign)
     if n_iterations <= 0:
         return phi
@@ -698,8 +745,21 @@ def spherical_parameterize(
 
 
 def _coarse_level_for(n_faces: int) -> int:
-    """Pick an icosphere bucketing level coarse enough to keep the per-bucket
-    candidate set small without an enormous per-bucket Python loop."""
+    """Choose an icosphere subdivision level for spatial bucketing.
+
+    Picks a level coarse enough to keep each bucket's candidate set small
+    without incurring an enormous per-bucket Python loop, scaling the number
+    of buckets up as the face count grows.
+
+    Parameters
+    ----------
+    n_faces
+        Number of faces in the source mesh being bucketed.
+
+    Returns
+    -------
+    Icosphere subdivision level (2, 3, or 4) whose vertices index the buckets.
+    """
     if n_faces < 8192:
         return 2  # 162 buckets
     if n_faces < 131072:
@@ -718,18 +778,43 @@ def _spherical_best_face(
     method: str,
     chunk: int,
 ) -> NDArray[Any]:
-    """Index of the (radially) containing source triangle per query.
+    r"""Index of the (radially) containing source triangle per query point.
 
-    ``method='brute'`` is the exact ``O(Q*F)`` argmax of the min-signed-edge
-    score.  ``method='bucket'`` (Tier C / audit AI-C5b) prunes candidates with a
-    coarse-icosphere-vertex spatial index: bin source faces by their centroid's
-    nearest coarse vertex, gather each query's coarse vertex + its 1-ring of
-    coarse neighbours, and argmax over only those candidates.  Exactness: on a
-    closed sphere mesh a query lies in exactly one triangle, the *only* one with
-    score >= 0, so a non-negative bucketed best IS that global argmax; any query
-    whose bucketed best is negative (the container fell outside the searched
-    buckets) falls back to the exact brute argmax.  ``'auto'`` buckets only when
-    ``F`` is large enough to amortise the index.
+    ``method='brute'`` is the exact :math:`O(Q \cdot F)` argmax of the
+    minimum signed-edge score.  ``method='bucket'`` prunes candidates with a
+    coarse-icosphere-vertex spatial index: bin source faces by their
+    centroid's nearest coarse vertex, gather each query's coarse vertex plus
+    its 1-ring of coarse neighbours, and argmax over only those candidates.
+    Exactness: on a closed sphere mesh a query lies in exactly one triangle,
+    the *only* one with score :math:`\geq 0`, so a non-negative bucketed best
+    is that global argmax; any query whose bucketed best is negative (the
+    container fell outside the searched buckets) falls back to the exact brute
+    argmax.  ``'auto'`` buckets only when the face count is large enough to
+    amortise building the index.
+
+    Parameters
+    ----------
+    verts
+        Source-mesh vertex coordinates on the unit sphere, ``(n_source, 3)``.
+    faces
+        Source-mesh triangle vertex indices, ``(n_faces, 3)``.
+    query
+        Query points (unit vectors) to locate, ``(n_query, 3)``.
+    n_ab, n_bc, n_ca
+        Per-face edge-plane normals (cross products of consecutive triangle
+        vertices), each ``(n_faces, 3)``; a query's containment score is the
+        minimum of its dot products against the three edge normals.
+    method
+        ``'brute'`` (exact all-pairs), ``'bucket'`` (coarse-icosphere spatial
+        index with brute fallback), or ``'auto'`` (bucket only for large
+        meshes).
+    chunk
+        Number of query points processed per brute-force block, to bound peak
+        memory.
+
+    Returns
+    -------
+    Best-face index per query, ``(n_query,)`` int64.
     """
 
     def brute(q: NDArray[Any]) -> NDArray[Any]:
@@ -757,7 +842,9 @@ def _spherical_best_face(
     cverts = np.asarray(coarse.vertices)  # unit sphere; dot-argmax = nearest
     n_c = cverts.shape[0]
     centroid = verts[faces[:, 0]] + verts[faces[:, 1]] + verts[faces[:, 2]]
-    cf = np.argmax(centroid @ cverts.T, axis=1)  # face -> nearest coarse vertex
+    cf = np.argmax(
+        centroid @ cverts.T, axis=1
+    )  # face -> nearest coarse vertex
     cq = np.argmax(query @ cverts.T, axis=1)  # query -> nearest coarse vertex
     # Extended bucket: face f belongs to coarse bucket cf[f] AND every 1-ring
     # neighbour of cf[f] (so a query near a coarse-cell boundary still sees it).
@@ -811,7 +898,7 @@ def _spherical_barycentric(
     chunk: int = 256,
     method: str = 'auto',
 ) -> tuple[NDArray[Any], NDArray[Any]]:
-    """Host-side spherical point-in-triangle search + barycentric weights.
+    r"""Host-side spherical point-in-triangle search + barycentric weights.
 
     For each ``query`` point (unit vector) find the ``verts``/``faces`` triangle
     that (radially) contains it and return its three source-vertex indices and
@@ -821,14 +908,37 @@ def _spherical_barycentric(
     fp; a query on a shared edge / vertex ties to an incident triangle, which
     interpolates consistently).
 
-    The containing-triangle search is ``method='auto'`` -- a coarse-icosphere
-    spatial index (``_spherical_best_face``) for large meshes, exact-equal to
-    the brute ``O(n_query * n_faces)`` argmax via the container/brute-fallback.
+    The containing-triangle search is dispatched via :func:`_spherical_best_face`
+    -- a coarse-icosphere spatial index for large meshes, exactly equal to the
+    brute :math:`O(n_{\mathrm{query}} \cdot n_{\mathrm{faces}})` argmax through
+    the container / brute-fallback.
 
-    Returns ``(idx (Q, 3) int32, weights (Q, 3) float32)`` -- weights are
-    clipped non-negative and renormalised to a partition of unity (so a query
-    fractionally outside every triangle projects to the nearest edge / vertex
-    and constants are still preserved).
+    Parameters
+    ----------
+    verts
+        Source-mesh vertex coordinates on the unit sphere, ``(n_source, 3)``.
+    faces
+        Source-mesh triangle vertex indices, ``(n_faces, 3)``.
+    query
+        Query points (unit vectors) to interpolate at, ``(n_query, 3)``.
+    chunk
+        Number of query points processed per brute-force block (passed
+        through to the containing-triangle search).
+    method
+        Containing-triangle search strategy: ``'auto'`` (default), ``'brute'``,
+        or ``'bucket'`` (see :func:`_spherical_best_face`).
+
+    Returns
+    -------
+    idx : NDArray
+        Source-vertex indices of the containing triangle per query,
+        ``(n_query, 3)`` int32.
+    weights : NDArray
+        Planar barycentric weights of the query's radial projection onto the
+        triangle plane, ``(n_query, 3)`` float32.  Weights are clipped
+        non-negative and renormalised to a partition of unity (so a query
+        fractionally outside every triangle projects to the nearest edge /
+        vertex and constants are still preserved).
     """
     a = verts[faces[:, 0]]
     b = verts[faces[:, 1]]
@@ -877,10 +987,29 @@ def _ell_from_triples(
 ) -> 'ELL':
     """Pack coordinate ``(row, col, value)`` triples into a padded ``ELL``.
 
-    Vectorised (Tier C / audit AI-C2): sort the triples by row and scatter each
-    into its row's next free slot -- no Python per-row loop.  Caller must have
-    aggregated any duplicate ``(row, col)`` pairs; padding slots keep index 0 /
-    value 0 (zero weight -> no contribution).
+    Vectorised: sort the triples by row and scatter each into its row's next
+    free slot -- no Python per-row loop.  Caller must have aggregated any
+    duplicate ``(row, col)`` pairs; padding slots keep index 0 / value 0
+    (zero weight, hence no contribution).
+
+    Parameters
+    ----------
+    rows
+        Row (target) index of each triple, ``(nnz,)``.
+    cols
+        Column (source) index of each triple, ``(nnz,)``.
+    vals
+        Value of each triple, ``(nnz,)``.
+    n_rows
+        Number of rows in the resulting operator.
+    n_cols
+        Number of columns in the resulting operator.
+
+    Returns
+    -------
+    A padded :class:`~nitrix.sparse.ELL` operator with row count ``n_rows``
+    and column count ``n_cols``, its per-row width set to the maximum row
+    degree.
     """
     from ..sparse import ELL
 
@@ -914,16 +1043,16 @@ def surface_resample(
     target_area: Optional[Float[Array, 'n_target']] = None,
     semiring: Any = None,
 ) -> tuple['ELL', Array]:
-    """Resample a per-vertex field between two registered spherical meshes.
+    r"""Resample a per-vertex field between two registered spherical meshes.
 
     The ``wb_command -metric-resample`` analogue and the fsaverage<->fs_LR (or
     cross-resolution) bridge: ``source_sphere`` and ``target_sphere`` are two
     tessellations of the **same** registered sphere (radius-independent -- both
     are normalised to unit vectors for the search), and ``source_vals`` is
     carried to the target tessellation.  Returns ``(operator, resampled)`` --
-    the resampling ``ELL`` (host-side construction) **and** the field after
-    applying it through the differentiable apply-seam; reuse the operator for
-    further fields of the same (source, target) pair.
+    the resampling :class:`~nitrix.sparse.ELL` (host-side construction) **and**
+    the field after applying it through the differentiable apply-seam; reuse
+    the operator for further fields of the same (source, target) pair.
 
     Two methods, matching the two Workbench modes:
 
@@ -935,7 +1064,8 @@ def surface_resample(
       weighted*: each source vertex scatters its (anatomical) vertex area into
       the target triangle it falls in, and each target row is normalised by the
       target vertex area.  This **conserves the area-weighted integral exactly**
-      (``sum_t A_target[t] * out[t] == sum_s A_source[s] * in[s]``) whenever
+      (:math:`\sum_t A^{\mathrm{target}}_t \, \mathrm{out}_t = \sum_s
+      A^{\mathrm{source}}_s \, \mathrm{in}_s`) whenever
       every target vertex receives source mass (the down-sampling / matched
       regime); target vertices that receive none (up-sampling holes) fall back
       to the barycentric gather, where conservation becomes approximate.  This
@@ -945,11 +1075,13 @@ def surface_resample(
 
     The ``*_area`` arrays are the **anatomical** vertex areas to weight by
     (the Workbench ``-area-metrics``); default to the spheres' own vertex areas
-    (``vertex_areas``), which conserve the *sphere*-area-weighted integral.  The
-    conserved inner product is always w.r.t. the **supplied** ``source_area`` /
-    ``target_area`` (i.e. ``sum_t target_area[t]*out[t] == sum_s
-    source_area[s]*in[s]``): if you override them, measure conservation against
-    the same arrays, not the sphere ``vertex_areas``.
+    (:func:`~nitrix.sparse.vertex_areas`), which conserve the
+    *sphere*-area-weighted integral.  The conserved inner product is always
+    w.r.t. the **supplied** ``source_area`` / ``target_area`` (i.e.
+    :math:`\sum_t \mathrm{target\_area}_t \, \mathrm{out}_t = \sum_s
+    \mathrm{source\_area}_s \, \mathrm{in}_s`): if you override them, measure
+    conservation against the same arrays, not the sphere
+    :func:`~nitrix.sparse.vertex_areas`.
 
     Host-side construction (the spherical search emits a plain ``ELL``, the
     HOST-CTOR class); the *application* is pure-JAX and differentiable w.r.t.
@@ -958,22 +1090,27 @@ def surface_resample(
 
     Parameters
     ----------
-    source_sphere, target_sphere
-        Registered spherical meshes (any radius; normalised internally).
+    source_sphere
+        Source spherical mesh (any radius; normalised internally).
     source_vals
         Per-source-vertex field, ``(n_source,)`` or ``(n_source, c)``.
+    target_sphere
+        Target spherical mesh, registered to ``source_sphere`` (any radius;
+        normalised internally).
     method
         ``'adap_bary_area'`` (default) or ``'barycentric'``.
     source_area, target_area
         Optional anatomical vertex areas (``adap_bary_area`` only); default to
-        the spheres' ``vertex_areas``.
+        the spheres' :func:`~nitrix.sparse.vertex_areas`.
     semiring
-        Optional semiring for the apply (default ``REAL``).
+        Optional semiring for the apply (default
+        :data:`~nitrix.semiring.REAL`).
 
     Returns
     -------
-    ``(operator, resampled)`` -- the resampling ``ELL`` ``(n_target, n_source)``
-    and the resampled field (``(n_target,)`` or ``(n_target, c)``).
+    ``(operator, resampled)`` -- the resampling
+    :class:`~nitrix.sparse.ELL` ``(n_target, n_source)`` and the resampled
+    field (``(n_target,)`` or ``(n_target, c)``).
 
     Raises
     ------

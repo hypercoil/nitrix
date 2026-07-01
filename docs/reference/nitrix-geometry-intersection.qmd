@@ -1,0 +1,51 @@
+---
+title: "nitrix.geometry.intersection"
+generated: true
+signature-hash: be630a4f98371bdf
+description: "Triangle-mesh self-intersection detection and removal."
+listing:
+  id: nitrix-geometry-intersection-symbols
+  contents: "nitrix-geometry-intersection/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.intersection`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Triangle-mesh self-intersection detection and removal.
+
+A **host-side QA / cleanup** tool, not a differentiable kernel: a uniform-grid
+broad phase finds candidate face pairs, a segment-triangle (Moller-Trumbore)
+narrow phase confirms genuine crossings, and [`remove_self_intersections`](nitrix-geometry-intersection/remove_self_intersections.qmd)
+relaxes the offending vertices with Laplacian smoothing.
+
+**Use as a post-hoc cleanup, never inside a jitted loop.**  The broad/narrow
+phase is host-side NumPy and cannot run under `lax.fori_loop`; surface movers
+like [`deform_to_sdf`](nitrix-geometry-surface/deform_to_sdf.qmd) regularise in-loop with the jittable Laplacian
+fraction instead, and call this afterwards if a guard is wanted.
+
+Limitation: the narrow phase detects transversal (edge-pierces-face) crossings
+-- the self-intersections a deformed surface actually produces -- but not
+exactly-coplanar overlaps (a documented, rare case).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_pairs` | *(undocumented — add to `_dimensions.yml`)* |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-intersection-symbols}
+:::

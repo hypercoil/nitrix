@@ -39,6 +39,8 @@ sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndi
 ```
 <!-- nitrix:/gen -->
 
+Sample the image at `coords` by nearest-neighbour selection.
+
 <!-- nitrix:gen sig:NearestNeighbour.__init__ -->
 ```python
 __init__() -> None

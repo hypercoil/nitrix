@@ -20,7 +20,7 @@ where `grid[i, j] == (i, j)`.  For 3D `(D, H, W)` returns
 `(D, H, W, 3)` with `grid[k, i, j] == (k, i, j)`.
 
 Adding a displacement `delta` to this grid yields a
-deformation field consumable by `spatial_transform`.
+deformation field consumable by [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:identity_grid -->

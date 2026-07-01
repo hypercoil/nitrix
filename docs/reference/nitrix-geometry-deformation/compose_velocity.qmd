@@ -1,0 +1,47 @@
+---
+title: "compose_velocity"
+generated: true
+description: "Baker-Campbell-Hausdorff composition of stationary velocity fields."
+---
+
+[‹ back to `nitrix.geometry.deformation`](../nitrix-geometry-deformation.qmd)
+
+<!-- nitrix:gen sig:compose_velocity -->
+```python
+compose_velocity(v: Float[Array, '*spatial ndim'], u: Float[Array, '*spatial ndim'], *, order: int = 1) -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:compose_velocity -->
+Baker-Campbell-Hausdorff composition of stationary velocity fields.
+
+Approximates the velocity $z$ for which
+$\exp(z) \approx \exp(v) \circ \exp(u)$:
+
+- `order == 1` -- $z = v + u$ (the standard additive log-domain
+  update; exact when the fields commute).
+- `order == 2` -- $z = v + u + \tfrac{1}{2} [v, u]$ (the first
+  Baker-Campbell-Hausdorff correction).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:compose_velocity -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `v` | `Float` | `*spatial` × `ndim` | — | Stationary velocity fields to compose, `(*spatial, ndim)`. The result approximates the velocity of the exponential $\exp(v) \circ \exp(u)$. |
+| `u` | `Float` | `*spatial` × `ndim` | — | Stationary velocity fields to compose, `(*spatial, ndim)`. The result approximates the velocity of the exponential $\exp(v) \circ \exp(u)$. |
+| `order` | `int` | — | `1` | Order of the Baker-Campbell-Hausdorff expansion: `1` (default) for the plain additive update most diffeomorphic-demons implementations use, or `2` to add half the Lie bracket. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`. The composed stationary velocity field $z$, `(*spatial, ndim)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:compose_velocity -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

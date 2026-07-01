@@ -1,0 +1,76 @@
+---
+title: "displacement_from_reference_grid"
+generated: true
+description: "Displacement of a centre of mass (regular grid) from a reference."
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:displacement_from_reference_grid -->
+```python
+displacement_from_reference_grid(weight: Float[Array, '...'], reference: Float[Array, '... ndim'], *, axes: Optional[Sequence[int]] = None, na_value: Optional[float] = None) -> Float[Array, '... ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:displacement_from_reference_grid -->
+Displacement of a centre of mass (regular grid) from a reference.
+
+Equivalent to `center_of_mass_grid(weight, axes=...) - reference`;
+a convenience wrapper for the common regularisation pattern in
+which a weight tensor is encouraged to have its centre of mass
+near a fixed location.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:displacement_from_reference_grid -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `weight` | `Float` | `...` | — | Weight tensor whose grid centre of mass is taken. Forwarded to [`center_of_mass_grid`](../nitrix-geometry-grid/center_of_mass_grid.qmd). |
+| `reference` | `Float` | `...` × `ndim` | — | Reference coordinates `(..., ndim)`, broadcastable to the centre-of-mass result. |
+| `axes` | `Optional[Sequence[int]]` | — | `None` | Grid axes over which the centre of mass is computed. Forwarded to [`center_of_mass_grid`](../nitrix-geometry-grid/center_of_mass_grid.qmd). |
+| `na_value` | `Optional[float]` | — | `None` | Value to fill into the output where a grid slice has zero total weight (the centre-of-mass is undefined there; `None` produces `NaN`). Forwarded to [`center_of_mass_grid`](../nitrix-geometry-grid/center_of_mass_grid.qmd). |
+
+**Returns** `Float` — shape `...` × `ndim`. The displacement vector `cm - reference`, where `cm` is the grid centre of mass of `weight`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:displacement_from_reference_grid -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **118.4 µs** (median, L4); up to **18.8× faster** than `scipy.ndimage.center_of_mass`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_DISPLACEMENT_FROM_REFERENCE_GRID.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| displacement_from_reference_grid | jax-cpu | d=32 | `cupy.displacement_from_reference_grid` | skipped | — | — | — | — | — |
+| displacement_from_reference_grid | jax-cpu | d=32 | `nitrix-jax` | ok | 48.9 µs / 62.1 µs | 131.25 ms | 721 MB (rss) | ✓ 0.15×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cpu | d=32 | `scipy.ndimage.center_of_mass` | ok | 139.2 µs / 186.7 µs | 281.4 µs | 721 MB (rss) | ✓ 0.00094×tol | 2.85x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=32 | `cupy.displacement_from_reference_grid` | ok | 372.7 µs / 387.2 µs | 361.66 ms | 0.13 MB (hbm) | ✓ 0.0049×tol | 3.27x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=32 | `nitrix-jax` | ok | 114.1 µs / 118.4 µs | 338.72 ms | 33.69 MB (hbm) | ✓ 0.0089×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=32 | `scipy.ndimage.center_of_mass` | ok | 209.4 µs / 220.7 µs | 283.2 µs | 0.13 MB (hbm) | ✓ 0.00094×tol | 1.84x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cpu | d=64 | `cupy.displacement_from_reference_grid` | skipped | — | — | — | — | — |
+| displacement_from_reference_grid | jax-cpu | d=64 | `nitrix-jax` | ok | 357.3 µs / 398.7 µs | 177.10 ms | 721 MB (rss) | ✓ 0.1×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cpu | d=64 | `scipy.ndimage.center_of_mass` | ok | 809.9 µs / 860.8 µs | 1.77 ms | 721 MB (rss) | ✓ 0.00079×tol | 2.27x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=64 | `cupy.displacement_from_reference_grid` | ok | 361.3 µs / 373.5 µs | 72.34 ms | 1.05 MB (hbm) | ✓ 0.011×tol | 3.39x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=64 | `nitrix-jax` | ok | 106.7 µs / 110.2 µs | 360.47 ms | 34.60 MB (hbm) | ✓ 0.011×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=64 | `scipy.ndimage.center_of_mass` | ok | 738.8 µs / 1.04 ms | 2.09 ms | 1.05 MB (hbm) | ✓ 0.00079×tol | 6.93x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cpu | d=96 | `cupy.displacement_from_reference_grid` | skipped | — | — | — | — | — |
+| displacement_from_reference_grid | jax-cpu | d=96 | `nitrix-jax` | ok | 675.8 µs / 875.1 µs | 183.64 ms | 721 MB (rss) | ✓ 0.33×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cpu | d=96 | `scipy.ndimage.center_of_mass` | ok | 2.21 ms / 2.38 ms | 5.63 ms | 721 MB (rss) | ✓ 0.0041×tol | 3.28x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=96 | `cupy.displacement_from_reference_grid` | ok | 369.6 µs / 383.3 µs | 71.26 ms | 4.19 MB (hbm) | ✓ 0.041×tol | 3.29x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=96 | `nitrix-jax` | ok | 112.4 µs / 114.7 µs | 387.36 ms | 37.75 MB (hbm) | ✓ 0.045×tol | 1.00x vs nitrix-jax |
+| displacement_from_reference_grid | jax-cuda12 | d=96 | `scipy.ndimage.center_of_mass` | ok | 2.11 ms / 2.16 ms | 5.89 ms | 4.19 MB (hbm) | ✓ 0.0041×tol | 18.80x vs nitrix-jax |
+:::
+
+*source: bench `2a974f27` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:displacement_from_reference_grid -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

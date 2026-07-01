@@ -1,0 +1,53 @@
+---
+title: "inflate_surface"
+generated: true
+description: "Inflate a folded genus-0 surface, returning `(inflated, sulcal_depth)`."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:inflate_surface -->
+```python
+inflate_surface(mesh: Mesh, *, n_iterations: int = 100, spring_weight: float = 0.5, metric_weight: float = 1.0, step: float = 0.5) -> Tuple[Float[Array, 'n_vertices 3'], Float[Array, 'n_vertices']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:inflate_surface -->
+Inflate a folded genus-0 surface, returning `(inflated, sulcal_depth)`.
+
+The `mris_inflate` analogue and the **sole source of `?h.sulc`** -- the
+sulcal-depth feature the learned surface registrars (`sugar`/`josa`) consume
+and the mandatory precursor to spherical parameterisation (GS-2).
+
+Each iteration moves every vertex by a fraction `step` of two bounded
+forces:
+
+- a **spring (smoothing) force** toward the 1-ring neighbour mean
+  (weight `spring_weight`) -- unfolds the cortex; and
+- a **metric-restoring force** that pulls each 1-ring edge back toward its
+  *original* length (weight `metric_weight`) -- preserves size/distances
+  so the surface inflates rather than collapses.
+
+**Sulcal depth** is the integral over the inflation of each vertex's
+displacement along its (outward) normal: buried sulcal vertices are pushed
+outward (positive), gyral crowns inward (negative) -- the FreeSurfer
+`?h.sulc` convention (positive in sulci).
+
+A jitted `lax.fori_loop` of pure-JAX bounded-force steps (no host-side
+construction); differentiable w.r.t. `mesh.vertices`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:inflate_surface -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Folded genus-0 triangle mesh (e.g. a white surface). |
+| `n_iterations` | `int` | — | `100` | Number of inflation steps (static). |
+| `spring_weight` | `float` | — | `0.5` | Weight of the neighbour-mean smoothing force. |
+| `metric_weight` | `float` | — | `1.0` | Weight of the edge-length-restoring force (prevents collapse). |
+| `step` | `float` | — | `0.5` | Per-iteration step fraction in `(0, 1]`. |
+
+**Returns** `Tuple[Float[Array, 'n_vertices 3'], Float[Array, 'n_vertices']]`.
+<!-- nitrix:/gen -->
+

@@ -3,35 +3,41 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.geometry -- geometric primitives for neuroimaging.
+Geometric primitives for neuroimaging.
 
-Submodules:
+This subpackage collects the differentiable geometry primitives that
+underpin spatial registration, resampling, and surface/mesh analysis. It
+spans both regular-grid (voxel/volume) and mesh/graph representations of
+spatial data.
 
-- ``grid``   -- regular-grid deformable-registration primitives:
-  ``identity_grid``, ``spatial_transform``, ``integrate_velocity_field``,
-  ``resample``, ``center_of_mass_grid``.  ``resample`` /
-  ``spatial_transform`` dispatch over an ``Interpolator`` kernel
-  (``Linear`` default, ``NearestNeighbour``, ``Lanczos``, ``CubicBSpline``,
-  ``CatmullRomCubic``, ``MultiLabel``) -- see ``geometry._interpolate``.
-- ``sphere`` -- 2-sphere **mesh** primitives: coordinate
-  conversions, geodesic distance, and ``spherical_conv`` re-backed
-  on ``semiring_ell_matmul`` for ``O(n · k)`` instead of ``O(n²)``.
+Submodules
+----------
+- ``grid`` -- regular-grid deformable-registration primitives:
+  :func:`identity_grid`, :func:`spatial_transform`,
+  :func:`integrate_velocity_field`, :func:`resample`, and
+  :func:`center_of_mass_grid`. :func:`resample` and
+  :func:`spatial_transform` dispatch over an :class:`Interpolator` kernel
+  (:class:`Linear` default, :class:`NearestNeighbour`, :class:`Lanczos`,
+  :class:`CubicBSpline`, :class:`CatmullRomCubic`, :class:`MultiLabel`).
+- ``sphere`` -- 2-sphere **mesh** primitives: coordinate conversions,
+  geodesic distance, and :func:`spherical_conv` re-backed on the sparse
+  semiring matmul for :math:`O(n \\cdot k)` cost (with :math:`n` vertices
+  and :math:`k` neighbours) instead of :math:`O(n^2)`.
 - ``sphere_grid`` -- 2-sphere **regular-grid** topology helpers
-  (parameterised equirectangular sphere): ``sphere_grid_pad_2d``
-  / ``sphere_grid_unpad_2d`` with pole-flip + longitudinal-wrap
-  padding.  Distinct from ``sphere`` because the parameterised-
-  grid case and the mesh case have different storage and adjacency
-  models.
-- ``coords`` -- coordinate utilities: ``center_of_mass_points``,
-  ``displacement_from_reference_*``, ``compactness_penalty``.
-- ``transform`` -- the Lie-group chart (``rigid_exp`` / ``affine_exp``)
-  + ``apply_affine`` / ``affine_grid``.
-- ``affine``  -- the geometric-parameter affine algebra (Euler-angle /
-  scale / shear ``T @ R @ S @ E`` compose / decompose) and the
-  closed-form least-squares ``fit_affine`` between point sets;
-  complementary to the ``transform`` exponential chart.
-
-See SPEC §4.8, SPEC §6.1, and IMPLEMENTATION_PLAN §6.
+  (parameterised equirectangular sphere): :func:`sphere_grid_pad_2d` and
+  :func:`sphere_grid_unpad_2d` with pole-flip and longitudinal-wrap
+  padding. Distinct from ``sphere`` because the parameterised-grid case
+  and the mesh case have different storage and adjacency models.
+- ``coords`` -- coordinate utilities: :func:`center_of_mass_points`,
+  the displacement-from-reference helpers, and
+  :func:`compactness_penalty`.
+- ``transform`` -- the Lie-group chart (:func:`rigid_exp` /
+  :func:`affine_exp`) together with :func:`apply_affine` and
+  :func:`affine_grid`.
+- ``affine`` -- the geometric-parameter affine algebra (Euler-angle /
+  scale / shear :math:`T R S E` compose / decompose) and the closed-form
+  least-squares :func:`fit_affine` between point sets; complementary to
+  the ``transform`` exponential chart.
 """
 
 from ._interpolate import (

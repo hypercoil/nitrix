@@ -5,15 +5,15 @@
 Multi-resolution Gaussian pyramid.
 
 Coarse-to-fine registration warm-starts each resolution from the
-solution of the coarser one above it.  ``gaussian_pyramid`` builds the
-image stack; ``downsample`` / ``upsample`` are the single-step
+solution of the coarser one above it.  :func:`gaussian_pyramid` builds the
+image stack; :func:`downsample` and :func:`upsample` are the single-step
 anti-aliased resize and the (interpolating) prolongation.
 
-Composition only -- no new kernel: ``downsample`` is
-``smoothing.gaussian`` (anti-alias) followed by ``geometry.resample``
-(align-corners resize); ``upsample`` is ``geometry.resample`` to a
+Composition only -- no new kernel: :func:`downsample` is
+:func:`gaussian` (anti-alias) followed by :func:`resample`
+(align-corners resize); :func:`upsample` is :func:`resample` to a
 larger shape.  Channel-last image layout ``(*spatial, c)`` matches
-``resample`` / ``spatial_transform``.
+:func:`resample` and :func:`spatial_transform`.
 """
 
 from __future__ import annotations
@@ -37,9 +37,24 @@ def _smooth_spatial(
 ) -> Float[Array, '*spatial c']:
     """Separable Gaussian over the spatial axes of a channel-last image.
 
-    ``smoothing.gaussian`` treats trailing axes as spatial, so the
+    :func:`gaussian` treats trailing axes as spatial, so the
     channel axis is moved to the front (a leading batch axis), smoothed,
     and moved back.
+
+    Parameters
+    ----------
+    image
+        Channel-last image, ``(*spatial, c)``.
+    sigma
+        Standard deviation of the smoothing Gaussian, in voxels. A scalar
+        applies isotropically; a sequence gives one value per spatial axis.
+    mode
+        Boundary mode passed through to :func:`gaussian`.
+
+    Returns
+    -------
+    Float[Array, '*spatial c']
+        The smoothed image, same shape as ``image``.
     """
     spatial_rank = image.ndim - 1
     moved = jnp.moveaxis(image, -1, 0)
@@ -63,7 +78,7 @@ def downsample(
     """Anti-aliased downsample of a channel-last image by ``factor``.
 
     Smooths with a Gaussian (anti-alias) then resamples to
-    ``round(spatial / factor)`` via the align-corners ``resample``
+    ``round(spatial / factor)`` via the align-corners :func:`resample`
     grid.
 
     Parameters
@@ -73,21 +88,22 @@ def downsample(
     factor
         Per-axis downscale factor (> 1 shrinks).  Default ``2``.
     sigma
-        Anti-alias Gaussian sigma.  ``None`` (default) uses
-        ``factor / 2`` per axis (a standard heuristic: the cutoff that
+        Anti-alias Gaussian standard deviation.  ``None`` (default) uses
+        :math:`factor / 2` per axis (a standard heuristic: the cutoff that
         suppresses the frequencies the coarser grid cannot represent).
-        Pass a float / sequence to override.
+        Pass a float or sequence to override.
     mode
-        Boundary mode for the anti-alias Gaussian (``smoothing.gaussian``
-        vocabulary); default ``"reflect"``.
+        Boundary mode for the anti-alias Gaussian (:func:`gaussian`
+        vocabulary); default ``'reflect'``.
     method
-        Interpolation kernel for the resize (an ``Interpolator``).
-        Default ``Linear()``.
+        Interpolation kernel for the resize (an :class:`Interpolator`).
+        Default :class:`Linear`.
 
     Returns
     -------
-    Downsampled image, ``(*target, c)`` with ``target[d] = max(1,
-    round(spatial[d] / factor))``.
+    Float[Array, '*target c']
+        Downsampled image, ``(*target, c)`` with
+        ``target[d] = max(1, round(spatial[d] / factor))``.
     """
     if factor <= 0:
         raise ValueError(f'factor must be positive; got {factor!r}.')
@@ -110,8 +126,30 @@ def upsample(
 ) -> Float[Array, '*target c']:
     """Resample a channel-last image up to ``target_shape``.
 
-    A thin wrapper over ``geometry.resample`` (align-corners) for the
+    A thin wrapper over :func:`resample` (align-corners) for the
     coarse-to-fine prolongation step.  No anti-alias is needed going up.
+
+    Parameters
+    ----------
+    image
+        Channel-last image, ``(*spatial, c)``.
+    target_shape
+        Desired spatial shape ``(*target,)`` -- one size per spatial axis.
+        The channel axis is left unchanged.
+    method
+        Interpolation kernel for the resize (an :class:`Interpolator`).
+        Default :class:`Linear`.
+    mode
+        Boundary mode for out-of-bounds samples, passed through to
+        :func:`resample`; default ``'constant'``.
+    cval
+        Fill value used where ``mode='constant'`` samples outside the
+        image.  Default ``0.0``.
+
+    Returns
+    -------
+    Float[Array, '*target c']
+        The resized image, ``(*target, c)``.
 
     Notes
     -----
@@ -150,7 +188,7 @@ def gaussian_pyramid(
     levels
         Number of levels including the original (``>= 1``).
     factor, sigma, mode, method
-        Forwarded to ``downsample`` for each coarsening step.
+        Forwarded to :func:`downsample` for each coarsening step.
 
     Returns
     -------

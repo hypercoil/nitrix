@@ -4,26 +4,28 @@
 """
 Image spatial-gradient operators.
 
-The directional derivatives ``∂I/∂x_d`` of a scalar field along each of
-its spatial axes -- the ``∇M`` that drives both registration recipes
-(the rigid Gauss-Newton steepest-descent images ``∇M · (G_j x)`` and the
-diffeomorphic-Demons symmetric force ``½(∇F + ∇(M∘φ))``).
+The directional derivatives :math:`\\partial I / \\partial x_d` of a
+scalar field along each of its spatial axes -- the gradient
+:math:`\\nabla M` that drives both registration recipes (the rigid
+Gauss-Newton steepest-descent images :math:`\\nabla M \\cdot (G_j x)`
+and the diffeomorphic-Demons symmetric force
+:math:`\\tfrac{1}{2}(\\nabla F + \\nabla(M \\circ \\varphi))`).
 
 Three separable schemes, all differentiable and all reusing one
 cross-correlation engine:
 
 - ``"central"`` (default) -- the bare central difference
-  ``(I[+1] − I[−1]) / (2 h)``.  Generalises the private
-  ``grid._central_diff_along_axis`` used by ``jacobian_displacement``.
+  :math:`(I[+1] - I[-1]) / (2 h)`.  Generalises the private
+  central-difference helper used by :func:`jacobian_displacement`.
 - ``"sobel"`` -- central difference along the derivative axis,
-  ``[1, 2, 1] / 4`` smoothing along every other spatial axis (noise-
-  robust).
-- ``"scharr"`` -- as Sobel with ``[3, 10, 3] / 16`` smoothing (better
-  rotational symmetry).
+  :math:`[1, 2, 1] / 4` smoothing along every other spatial axis
+  (noise-robust).
+- ``"scharr"`` -- as Sobel with :math:`[3, 10, 3] / 16` smoothing
+  (better rotational symmetry).
 
-Layout follows ``smoothing.gaussian``: ``(..., *spatial)`` with the
-trailing ``spatial_rank`` axes spatial.  The result appends a trailing
-derivative-direction axis: ``(..., *spatial, ndim)``.
+Layout follows the Gaussian smoothing operators: ``(..., *spatial)``
+with the trailing ``spatial_rank`` axes spatial.  The result appends a
+trailing derivative-direction axis: ``(..., *spatial, ndim)``.
 """
 
 from __future__ import annotations
@@ -95,7 +97,7 @@ def spatial_gradient(
     mode
         Boundary handling: ``"nearest"`` (default, edge-replicate --
         the voxelmorph / QA convention, matching
-        ``jacobian_displacement``), ``"reflect"``, ``"mirror"``,
+        :func:`jacobian_displacement`), ``"reflect"``, ``"mirror"``,
         ``"wrap"``, or ``"constant"`` (zero-pad).
     spacing
         Voxel spacing per spatial axis (physical units).  ``float`` ->
@@ -106,7 +108,8 @@ def spatial_gradient(
     -------
     Gradient field, ``(..., *spatial, ndim)`` with ``ndim ==
     spatial_rank``.  The trailing axis indexes the derivative
-    direction; ``out[..., d] == ∂ image / ∂ x_d``.
+    direction; ``out[..., d]`` is
+    :math:`\\partial\\,\\mathrm{image} / \\partial x_d`.
 
     Notes
     -----

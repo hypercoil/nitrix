@@ -1,0 +1,47 @@
+---
+title: "signed_spherical_areas"
+generated: true
+description: "Signed solid angle (steradians) per triangle, subtended at the origin."
+---
+
+[‹ back to `nitrix.geometry.sphere`](../nitrix-geometry-sphere.qmd)
+
+<!-- nitrix:gen sig:signed_spherical_areas -->
+```python
+signed_spherical_areas(vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3']) -> Float[Array, 'n_faces']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:signed_spherical_areas -->
+Signed solid angle (steradians) per triangle, subtended at the origin.
+
+For triangle vertices on a sphere centred at the origin this is the signed
+spherical-triangle area (the unit-sphere area; **radius-independent** -- the
+solid angle does not depend on the sphere radius).  The **sign** is the
+triangle's orientation (the triple product `a . (b x c)`): a flipped /
+folded triangle is negative.  For a bijective degree-1 cover the values sum
+to `+/- 4 pi` and every triangle shares the dominant sign.  Computed by the
+Van Oosterom-Strackee formula; pure JAX, differentiable.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:signed_spherical_areas -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `vertices` | `Float` | `n_vertices` × `3` | — | `(n_vertices, 3)` positions (assumed on a sphere about the origin). |
+| `faces` | `Int` | `n_faces` × `3` | — | `(n_faces, 3)` triangle vertex indices. |
+
+**Returns** `Float` — shape `n_faces`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:signed_spherical_areas -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

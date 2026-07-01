@@ -1,0 +1,12 @@
+---
+title: "cmass_coor"
+generated: true
+description: "Alias for center_of_mass_points."
+---
+
+[‹ back to `nitrix.geometry.coords`](../nitrix-geometry-coords.qmd)
+
+<!-- nitrix:gen sig:cmass_coor -->
+`cmass_coor` is an alias for [`center_of_mass_points`](center_of_mass_points.qmd).
+<!-- nitrix:/gen -->
+

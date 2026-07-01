@@ -1,0 +1,94 @@
+---
+title: "spherical_conv"
+generated: true
+description: "Convolve data on a 2-sphere with an isotropic Gaussian kernel."
+---
+
+[‹ back to `nitrix.geometry.sphere`](../nitrix-geometry-sphere.qmd)
+
+<!-- nitrix:gen sig:spherical_conv -->
+```python
+spherical_conv(data: Float[Array, '... n c'], coor: Float[Array, 'n 3'], *, sigma: float, neighbourhood: Union[int, Int[Array, 'n k']], r: float = 1.0, truncate: Optional[float] = None) -> Float[Array, '... n c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spherical_conv -->
+Convolve data on a 2-sphere with an isotropic Gaussian kernel.
+
+Specialises onto `semiring_ell_matmul`: build a
+per-point k-nearest-neighbour adjacency by spherical geodesic distance,
+weight neighbours by a Gaussian over the geodesic distance, normalise,
+and reduce.  Cost is $O(n \cdot k \cdot c)$ per call once the
+adjacency is in hand -- *not* the legacy $O(n^2 \cdot c)$ of the
+all-pairs implementation.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spherical_conv -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `data` | `Float` | `...` × `n` × `c` | — | Per-point feature vectors, `(..., n, c)`. Leading batch dims are passed through. |
+| `coor` | `Float` | `n` × `3` | — | Per-point Cartesian coordinates on the sphere, `(n, 3)`. Currently single-batch (no leading dims); `vmap` for per-subject coordinate sets. |
+| `sigma` | `float` | — | — | Standard deviation of the Gaussian kernel, in the same units as `r` (radians × `r`). |
+| `neighbourhood` | `Union[int, Int[Array, 'n k']]` | — | — | Either an `int` `k` (compute k-NN by spherical geodesic on the fly; O(n²) memory) or an explicit `(n, k)` index array. For large `n` (>~10k) provide the adjacency explicitly, e.g. from the icosphere's natural k-ring. |
+| `r` | `float` | — | `1.0` | Sphere radius. |
+| `truncate` | `Optional[float]` | — | `None` | Optional hard distance cutoff: neighbours beyond `truncate` get weight zero. `None` (default) means Gaussian weighting only. Useful when the k-NN includes far-away points that should not contribute. |
+
+**Returns** `Float` — shape `...` × `n` × `c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:spherical_conv -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **382.3 µs** (median, L4); up to **230.68× faster** than `numpy.spherical_conv`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SPHERICAL_CONV.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| spherical_conv | jax-cpu | n=1024 | `cupy.spherical_conv` | skipped | — | — | — | — | — |
+| spherical_conv | jax-cpu | n=1024 | `nitrix-jax` | ok | 16.56 ms / 19.04 ms | 326.23 ms | 767 MB (rss) | ✓ 0.00073×tol | 1.00x vs nitrix-jax |
+| spherical_conv | jax-cpu | n=1024 | `numpy.spherical_conv` | ok | 87.48 ms / 96.39 ms | 105.40 ms | 767 MB (rss) | ✓ 0.0011×tol | 5.28x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=1024 | `cupy.spherical_conv` | ok | 4.48 ms / 4.55 ms | 180.06 ms | 0.08 MB (hbm) | ✓ 0.00082×tol | 12.17x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=1024 | `nitrix-jax` | ok | 367.8 µs / 382.3 µs | 665.98 ms | 84.16 MB (hbm) | ✓ 0.001×tol | 1.00x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=1024 | `numpy.spherical_conv` | ok | 84.84 ms / 86.07 ms | 86.31 ms | 0.08 MB (hbm) | ✓ 0.0011×tol | 230.68x vs nitrix-jax |
+| spherical_conv | jax-cpu | n=256 | `cupy.spherical_conv` | skipped | — | — | — | — | — |
+| spherical_conv | jax-cpu | n=256 | `nitrix-jax` | ok | 1.25 ms / 1.32 ms | 272.08 ms | 767 MB (rss) | ✓ 0.0011×tol | 1.00x vs nitrix-jax |
+| spherical_conv | jax-cpu | n=256 | `numpy.spherical_conv` | ok | 5.90 ms / 5.96 ms | 6.12 ms | 767 MB (rss) | ✓ 0.001×tol | 4.73x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=256 | `cupy.spherical_conv` | ok | 950.8 µs / 987.3 µs | 16.855 s | 0.02 MB (hbm) | ✓ 0.0015×tol | 5.50x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=256 | `nitrix-jax` | ok | 172.7 µs / 190.1 µs | 695.99 ms | 67.16 MB (hbm) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=256 | `numpy.spherical_conv` | ok | 7.87 ms / 8.01 ms | 7.42 ms | 0.02 MB (hbm) | ✓ 0.001×tol | 45.57x vs nitrix-jax |
+| spherical_conv | jax-cpu | n=512 | `cupy.spherical_conv` | skipped | — | — | — | — | — |
+| spherical_conv | jax-cpu | n=512 | `nitrix-jax` | ok | 4.85 ms / 5.58 ms | 366.02 ms | 767 MB (rss) | ✓ 0.001×tol | 1.00x vs nitrix-jax |
+| spherical_conv | jax-cpu | n=512 | `numpy.spherical_conv` | ok | 21.73 ms / 25.47 ms | 23.61 ms | 767 MB (rss) | ✓ 0.00079×tol | 4.48x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=512 | `cupy.spherical_conv` | ok | 1.67 ms / 1.69 ms | 192.38 ms | 0.04 MB (hbm) | ✓ 0.001×tol | 8.49x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=512 | `nitrix-jax` | ok | 196.5 µs / 200.2 µs | 896.86 ms | 85.11 MB (hbm) | ✓ 0.00092×tol | 1.00x vs nitrix-jax |
+| spherical_conv | jax-cuda12 | n=512 | `numpy.spherical_conv` | ok | 21.47 ms / 26.02 ms | 29.21 ms | 0.04 MB (hbm) | ✓ 0.00079×tol | 109.29x vs nitrix-jax |
+:::
+
+*source: bench `ddc528b5` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:spherical_conv -->
+::: {.callout-note}
+The weights are normalised so each row sums to 1.  Constant data
+is therefore preserved.
+
+For `data` with multiple channels, every channel is smoothed
+by the same spatial kernel (the standard "depthwise" semantics).
+Per-channel sigma is not currently supported via this function;
+call multiple times if needed.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:spherical_conv -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `c` | feature channels (channels-last) |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

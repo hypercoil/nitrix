@@ -1,0 +1,84 @@
+---
+title: "spectral_sphere_embedding"
+generated: true
+description: "One-shot spherical map from the Laplace-Beltrami eigenfunctions."
+---
+
+[‹ back to `nitrix.geometry.sphere`](../nitrix-geometry-sphere.qmd)
+
+<!-- nitrix:gen sig:spectral_sphere_embedding -->
+```python
+spectral_sphere_embedding(mesh: 'Mesh', *, radius: float = 1.0, n_eig: int = 10, eig_iters: int = 50, laplacian: Optional['ELL'] = None) -> Float[Array, 'n_vertices 3']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spectral_sphere_embedding -->
+One-shot spherical map from the Laplace-Beltrami eigenfunctions.
+
+The FastSurfer / recon-surf method (verified against
+`Deep-MI/FastSurfer recon_surf/spherically_project.py`): solve the
+**generalised** Laplace-Beltrami eigenproblem
+$L \phi = \lambda M \phi$ -- cotangent stiffness $L$
+(`mesh_cotangent_laplacian`), lumped mass $M$
+(`vertex_areas`) -- for the **first three
+non-constant eigenfunctions** (smallest eigenvalues), and scale each
+vertex's $(\phi_1, \phi_2, \phi_3)$ to `radius`.  On the round
+sphere these eigenfunctions are the degree-1 harmonics $x, y, z$, so
+a near-spherical input maps to the sphere in one eigensolve, no iteration.
+
+The diagonal mass makes
+$\tilde{L} = M^{-1/2} L M^{-1/2}$ symmetric.  We form the affinity
+$A = I - \tilde{L} / c$ ($c$ a Gershgorin bound on the
+spectrum), whose *largest* eigenpairs are $\tilde{L}$'s *smallest*,
+and find them with **shift-invert** LOBPCG
+(`eigsolve_top_k` + a tight negative `sigma`) -- the
+cuSolver-free path.  Shift-invert (not a plain reflection) is essential:
+the smallest eigenvalues are tightly clustered near 0, and shift-invert is
+what amplifies their gaps enough to resolve the constant + first-three
+eigenfunctions; `n_eig` over-samples to aid convergence.
+
+**Not guaranteed bijective** -- it is the recon-surf-grade one-shot map
+(a tiny flipped fraction may remain).  Gate with
+[`is_bijective_sphere_map`](../nitrix-geometry-sphere/is_bijective_sphere_map.qmd) and fall back to a guaranteed-bijective
+init, or refine with the iterative optimiser, for a strictly fold-free
+result.  The eigenfunction
+**sign/ordering gauge** is *not* resolved here (nitrix is
+orientation-agnostic; recon-surf's anatomical sign/swap alignment is a
+consumer step).
+
+Host-side cotangent construction + JAX eigensolve; not differentiable w.r.t.
+`mesh.vertices` (the cotangent weights are built host-side) -- this is an
+init / preprocessing artefact.  Pass `laplacian=` to reuse an
+already-assembled cotangent operator ([`spherical_parameterize`](../nitrix-geometry-sphere/spherical_parameterize.qmd) does
+this so the operator is built once per call, not twice).
+
+Note on a wedged dense-solver stack: the shift-invert LOBPCG core is
+matrix-free / cuSolver-free, but its orthonormalisation shares the dense
+solver-handle pool, so on a box whose pool is dead the eigensolve (and hence
+this embedding) executes on the solver-device fallback (CPU), incurring a
+host round-trip -- correct, just not GPU-resident there.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spectral_sphere_embedding -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `'Mesh'` | — | — | Genus-0 triangle mesh (ideally inflated / near-spherical). |
+| `radius` | `float` | — | `1.0` | Output sphere radius. |
+| `n_eig` | `int` | — | `10` | Number of eigenpairs to request (>= 4); over-sampling beyond the constant + 3 used aids LOBPCG convergence on the clustered low spectrum. |
+| `eig_iters` | `int` | — | `50` | LOBPCG outer / inner-CG iteration budget for the shift-invert solve. |
+| `laplacian` | `Optional['ELL']` | — | `None` | Optional pre-assembled cotangent stiffness operator (the flat `ELL` from `mesh_cotangent_laplacian`, with its diagonal stored at column 0). If `None`, it is assembled from `mesh`; pass it to avoid rebuilding the operator when it is already in hand. |
+
+**Returns** `Float` — shape `n_vertices` × `3`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:spectral_sphere_embedding -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

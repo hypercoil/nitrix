@@ -1,0 +1,71 @@
+---
+title: "nitrix.geometry.algebra"
+generated: true
+signature-hash: 5f07bf3ac91ea182
+description: "Transform algebra: Lie-group barycentre, geodesic interpolation, fusion."
+listing:
+  id: nitrix-geometry-algebra-symbols
+  contents: "nitrix-geometry-algebra/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.algebra`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Transform algebra: Lie-group barycentre, geodesic interpolation, fusion.
+
+Beyond the exp/log chart and the pairwise compose / invert operations,
+registration needs to *average* and *interpolate* transforms on their manifold
+and to *fuse* a multi-stage chain into a single resampling.  The averaging is
+the substrate for groupwise / template construction (a template is the Fréchet
+mean of the subject transforms), motion summary, and temporal regularisation.
+
+- [`transform_mean`](nitrix-geometry-algebra/transform_mean.qmd) -- the Fréchet (Karcher) mean of homogeneous
+  transforms (rigid $SE(n) \subset$ affine), the Riemannian barycentre
+  via the log/exp fixed point in the true matrix chart (`matrix_log` /
+  `matrix_exp`).
+- [`transform_geodesic`](nitrix-geometry-algebra/transform_geodesic.qmd) -- the point at fraction $t$ along the
+  geodesic from identity to a transform ($\exp(t \cdot \log T)$; the
+  $\tfrac{1}{2}$-point squares to $T$).
+- [`velocity_mean`](nitrix-geometry-algebra/velocity_mean.qmd) -- the Fréchet mean of stationary velocity fields, which
+  is the (weighted) arithmetic mean (a stationary velocity field *is* its own
+  Lie-algebra element).
+- [`fuse_transforms`](nitrix-geometry-algebra/fuse_transforms.qmd) -- collapse a multi-stage chain (matrices +
+  displacement fields) into one displacement, so the moving image is resampled
+  **once** (no compounded interpolation blur; one gather).
+
+The matrix chart (not the closed-form [`rigid_exp`](nitrix-geometry-transform/rigid_exp.qmd) / [`rigid_log`](nitrix-geometry-transform/rigid_log.qmd)) is
+used so the mean / geodesic are the *true* group operations: no
+$\mathfrak{so}(n)$ log singularity at identity (which the Karcher init
+hits), and a genuine geodesic (so that composing the half-way transform with
+itself recovers the whole, $T_{1/2} \, T_{1/2} = T$).  Because
+`matrix_log` routes through `safe_inv`, the mean and geodesic are
+**offline** barycentre / interpolation ops: a healthy GPU runs them jit- and
+grad-clean, whereas a machine with a wedged cuSOLVER runs the forward pass
+eagerly via the CPU fallback (hence the Python loop, not a scan).
+[`fuse_transforms`](nitrix-geometry-algebra/fuse_transforms.qmd) is pure resampling (no `safe_inv`), so it is
+GPU-native.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `k` | kernel or basis components |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-algebra-symbols}
+:::

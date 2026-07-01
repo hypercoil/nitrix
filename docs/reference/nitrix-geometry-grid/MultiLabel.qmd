@@ -40,6 +40,12 @@ sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndi
 ```
 <!-- nitrix:/gen -->
 
+Sample the label map at `coords` by per-label arg-max.
+
+Resamples each label's indicator mask with the `inner` kernel
+and returns, per voxel, the label with the highest resampled
+score, keeping the output inside the input label set.
+
 <!-- nitrix:gen sig:MultiLabel.__init__ -->
 ```python
 __init__(labels: Tuple[int, ...], inner: Interpolator = Linear()) -> None
@@ -49,9 +55,10 @@ __init__(labels: Tuple[int, ...], inner: Interpolator = Linear()) -> None
 <!-- nitrix:gen sections:MultiLabel -->
 ::: {.callout-note}
 Not differentiable: the arg-max is a hard selection, so the gradient
-w.r.t. both the image values and the coordinates is zero (the call
-does not error under `jax.grad` -- it returns zeros).  `cval` is
-ignored; out-of-support samples resolve to `labels[0]` as above.
+with respect to both the image values and the coordinates is zero
+(the call does not error under `jax.grad` -- it returns zeros).
+`cval` is ignored; out-of-support samples resolve to `labels[0]`
+as above.
 :::
 <!-- nitrix:/gen -->
 

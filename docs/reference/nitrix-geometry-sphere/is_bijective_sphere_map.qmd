@@ -1,0 +1,52 @@
+---
+title: "is_bijective_sphere_map"
+generated: true
+description: "Whether (vertices-on-sphere, faces) is a (near-)bijective spherical map."
+---
+
+[‹ back to `nitrix.geometry.sphere`](../nitrix-geometry-sphere.qmd)
+
+<!-- nitrix:gen sig:is_bijective_sphere_map -->
+```python
+is_bijective_sphere_map(vertices: Float[Array, 'n_vertices 3'], faces: Int[Array, 'n_faces 3'], *, flip_area_tol: float = 0.0, total_tol: float = 0.01) -> bool
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:is_bijective_sphere_map -->
+Whether (vertices-on-sphere, faces) is a (near-)bijective spherical map.
+
+`True` iff the signed solid angles ([`signed_spherical_areas`](../nitrix-geometry-sphere/signed_spherical_areas.qmd)) form
+a **degree-1 cover** -- their sum is within `total_tol` of
+$\pm 4\pi$ --
+**and** the fraction of solid angle in triangles flipped against the
+dominant orientation is `<= flip_area_tol`.  `flip_area_tol = 0` is the
+strict fold-free test; a small tolerance (e.g. `8e-4`) mirrors the
+FastSurfer/recon-surf quality gate, which tolerates a tiny flipped fraction.
+
+Host-side boolean (a decision, not a traced value) -- used to gate the
+spherical-parameterisation init fallback chain.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:is_bijective_sphere_map -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `vertices` | `Float` | `n_vertices` × `3` | — | The candidate spherical map. |
+| `faces` | `Int` | `n_faces` × `3` | — | The candidate spherical map. |
+| `flip_area_tol` | `float` | — | `0.0` | Maximum tolerated flipped solid-angle fraction (`0` = strict). |
+| `total_tol` | `float` | — | `0.01` | Relative tolerance on `\|sum\| == 4 pi` (the cover test). |
+
+**Returns** `bool`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:is_bijective_sphere_map -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

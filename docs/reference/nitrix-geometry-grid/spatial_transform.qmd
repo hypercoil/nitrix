@@ -20,7 +20,7 @@ For each output pixel at coordinate `p`, the result is
 `method` ((multi-)linear by default).  `deformation` is
 therefore an *absolute* coordinate map, not a relative
 displacement.  To use a displacement field `delta`, add
-`identity_grid` first:
+[`identity_grid`](../nitrix-geometry-grid/identity_grid.qmd) first:
     warped = spatial_transform(image, identity_grid(spatial) + delta)
 <!-- nitrix:/gen -->
 
@@ -31,9 +31,9 @@ displacement.  To use a displacement field `delta`, add
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `image` | `Float` | `*leading` × `*spatial` × `c` | — | Channel-last image, `(*leading, *spatial, c)`. Leading batch dims are broadcast-compatible with `deformation`. |
 | `deformation` | `Float` | `*leading` × `*spatial` × `ndim` | — | Absolute sample coordinates, `(*leading, *spatial, ndim)` with `ndim` matching the spatial rank of `image`. The spatial shape need not match `image`'s spatial shape -- for resampling-like ops, `deformation` indexes anywhere in `image`. |
-| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Default `"constant"` (preserves the prior contract for image-sampling). Set `mode="nearest"` for edge-replicate (voxelmorph convention for flow-warp); see `integrate_velocity_field` which defaults to `"nearest"` for the same reason. Other valid values: `"wrap"`, `"mirror"`, `"reflect"`. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Default `"constant"` (preserves the prior contract for image-sampling). Set `mode="nearest"` for edge-replicate (voxelmorph convention for flow-warp); see [`integrate_velocity_field`](../nitrix-geometry-grid/integrate_velocity_field.qmd) which defaults to `"nearest"` for the same reason. Other valid values: `"wrap"`, `"mirror"`, `"reflect"`. |
 | `cval` | `float` | — | `0.0` | Constant fill value when `mode="constant"`. Ignored otherwise. Default `0`. |
-| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel -- an `Interpolator` record. Default `Linear()` ((multi-)linear, the prior behaviour). `NearestNeighbour()` is the label-preserving choice but is not differentiable w.r.t. the deformation (so it cannot drive a registration loss); see `geometry._interpolate` for the full method set and their differentiability contracts. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel -- an [`Interpolator`](../nitrix-geometry-grid/Interpolator.qmd) record. Default [`Linear`](../nitrix-geometry-grid/Linear.qmd) ((multi-)linear, the prior behaviour). [`NearestNeighbour`](../nitrix-geometry-grid/NearestNeighbour.qmd) is the label-preserving choice but is not differentiable with respect to the deformation (so it cannot drive a registration loss). |
 
 **Returns** `Float` — shape `*leading` × `*spatial` × `c`.
 <!-- nitrix:/gen -->
@@ -72,11 +72,10 @@ appear in both inputs must match exactly -- broadcast of
 leading axes is *not* attempted (the asymmetry between image
 and deformation shape semantics makes silent broadcast
 error-prone).  For a leading-batch convenience that broadcasts
-a shared image or deformation, see `spatial_transform_batched`.
+a shared image or deformation, see [`spatial_transform_batched`](../nitrix-geometry-grid/spatial_transform_batched.qmd).
 
-No cubic (`order=3`) B-spline path exists yet (tracked in
-`docs/feature-requests/cubic-resample.md`).  See `resample`
-Notes for the parity implication.
+No cubic (`order=3`) B-spline path exists yet.  See
+[`resample`](../nitrix-geometry-grid/resample.qmd) Notes for the parity implication.
 :::
 <!-- nitrix:/gen -->
 

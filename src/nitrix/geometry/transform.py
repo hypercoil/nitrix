@@ -7,27 +7,29 @@ Lie-group parametrisation of rigid and affine transforms.
 Registration is optimisation on a transform group; this module supplies
 the chart between a flat parameter vector (what the Gauss-Newton /
 Levenberg-Marquardt optimiser moves) and a homogeneous transform matrix
-(what ``affine_grid`` + ``spatial_transform`` apply).
+(what :func:`affine_grid` + :func:`spatial_transform` apply).
 
-- **Rigid** (``rigid_exp`` / ``rigid_log``) -- rotation from the
-  axis-angle (``so(n)``) exponential in **closed form** (Rodrigues in 3-D,
-  the planar rotation in 2-D) plus a **direct** translation.  Closed-form
-  rotation is GPU-native (no cuSolver), so the rigid optimiser's hot loop
-  stays on-device.  Parameter order: 3-D ``(ω_x, ω_y, ω_z, t_x, t_y,
-  t_z)`` (6); 2-D ``(θ, t_x, t_y)`` (3).
-- **Affine** (``affine_exp``) -- the linear block is ``matrix_exp(A)`` of
-  a general ``gl(n)`` generator (guaranteeing an invertible,
-  orientation-preserving ``det > 0`` map) plus a direct translation.
-  Parameter order: ``n²`` linear entries (row-major ``A``) then ``n``
-  translation.  Uses ``linalg.matrix_exp`` (the §12.2 graduation).
+- **Rigid** (:func:`rigid_exp` / :func:`rigid_log`) -- rotation from the
+  axis-angle (:math:`\\mathfrak{so}(n)`) exponential in **closed form**
+  (Rodrigues in 3-D, the planar rotation in 2-D) plus a **direct**
+  translation.  Closed-form rotation is GPU-native (no cuSolver), so the
+  rigid optimiser's hot loop stays on-device.  Parameter order: 3-D
+  :math:`(\\omega_x, \\omega_y, \\omega_z, t_x, t_y, t_z)` (6); 2-D
+  :math:`(\\theta, t_x, t_y)` (3).
+- **Affine** (:func:`affine_exp`) -- the linear block is
+  :math:`\\exp(A)` of a general :math:`\\mathfrak{gl}(n)` generator
+  (guaranteeing an invertible, orientation-preserving :math:`\\det > 0`
+  map) plus a direct translation.  Parameter order: :math:`n^2` linear
+  entries (row-major :math:`A`) then :math:`n` translation.  Uses
+  :func:`matrix_exp`.
 
-``apply_affine`` / ``affine_grid`` turn a homogeneous matrix into the
-absolute sample coordinates ``spatial_transform`` consumes, with an
-optional rotation/scaling ``center`` (registration rotates about the
+:func:`apply_affine` / :func:`affine_grid` turn a homogeneous matrix into
+the absolute sample coordinates :func:`spatial_transform` consumes, with
+an optional rotation/scaling ``center`` (registration rotates about the
 image centre, not the voxel origin).
 
-Coordinates are in index space, matching ``identity_grid`` (``grid[i] ==
-i``).  Supported spatial ranks: 2 and 3.
+Coordinates are in index space, matching :func:`identity_grid`
+(``grid[i] == i``).  Supported spatial ranks: 2 and 3.
 """
 
 from __future__ import annotations
@@ -52,7 +54,22 @@ _SMALL = 1e-6
 
 
 def _skew3(omega: Float[Array, '... 3']) -> Float[Array, '... 3 3']:
-    """Skew-symmetric matrix ``[ω]_×`` of a 3-vector (batched)."""
+    """Skew-symmetric matrix :math:`[\\omega]_\\times` of a 3-vector.
+
+    Batched over any leading dimensions.
+
+    Parameters
+    ----------
+    omega
+        ``(..., 3)`` axis vector whose components populate the
+        skew-symmetric cross-product operator.
+
+    Returns
+    -------
+    Float[Array, '... 3 3']
+        The skew-symmetric matrix :math:`[\\omega]_\\times` such that
+        :math:`[\\omega]_\\times v = \\omega \\times v`.
+    """
     ox = omega[..., 0]
     oy = omega[..., 1]
     oz = omega[..., 2]
@@ -64,13 +81,25 @@ def _skew3(omega: Float[Array, '... 3']) -> Float[Array, '... 3 3']:
 
 
 def _so3_exp(omega: Float[Array, '... 3']) -> Float[Array, '... 3 3']:
-    """Rodrigues' rotation: ``exp([ω]_×)``, small-angle safe.
+    """Rodrigues' rotation :math:`\\exp([\\omega]_\\times)`, small-angle safe.
 
     The ``sqrt`` is taken on a guarded ``theta2`` (1.0 inside the
-    small-angle region) so its derivative is finite at ``ω = 0``;
-    otherwise ``sqrt'(0) = inf`` in the *unselected* ``where`` branch
-    poisons reverse-mode with ``0·inf = nan`` (forward-mode is unaffected,
-    so the bug only surfaces through ``grad`` / ``linear_transpose``).
+    small-angle region) so its derivative is finite at :math:`\\omega = 0`;
+    otherwise :math:`\\mathrm{sqrt}'(0) = \\infty` in the *unselected*
+    ``where`` branch poisons reverse-mode with :math:`0 \\cdot \\infty =
+    \\mathrm{nan}` (forward-mode is unaffected, so the bug only surfaces
+    through ``grad`` / ``linear_transpose``).
+
+    Parameters
+    ----------
+    omega
+        ``(..., 3)`` axis-angle rotation vector; its norm is the rotation
+        angle and its direction the rotation axis.
+
+    Returns
+    -------
+    Float[Array, '... 3 3']
+        The proper rotation matrix :math:`\\exp([\\omega]_\\times)`.
     """
     theta2 = jnp.sum(omega * omega, axis=-1)
     small = theta2 < _SMALL * _SMALL
@@ -87,10 +116,23 @@ def _so3_exp(omega: Float[Array, '... 3']) -> Float[Array, '... 3 3']:
 
 
 def _so3_log(r: Float[Array, '... 3 3']) -> Float[Array, '... 3']:
-    """Axis-angle ``ω`` with ``exp([ω]_×) = R``, small-angle safe.
+    """Axis-angle :math:`\\omega` with :math:`\\exp([\\omega]_\\times) = R`,
+    small-angle safe.
 
-    Valid for rotations away from ``θ = π`` (the registration regime,
-    where rotations are small); the antipodal case is not handled.
+    Inverse of :func:`_so3_exp`.  Valid for rotations away from
+    :math:`\\theta = \\pi` (the registration regime, where rotations are
+    small); the antipodal case is not handled.
+
+    Parameters
+    ----------
+    r
+        ``(..., 3, 3)`` proper rotation matrix.
+
+    Returns
+    -------
+    Float[Array, '... 3']
+        The axis-angle vector :math:`\\omega` whose exponential recovers
+        ``r``.
     """
     trace = r[..., 0, 0] + r[..., 1, 1] + r[..., 2, 2]
     cos_theta = jnp.clip((trace - 1.0) / 2.0, -1.0, 1.0)
@@ -127,8 +169,24 @@ def _homogeneous(
     linear: Float[Array, '... d d'],
     translation: Float[Array, '... d'],
 ) -> Float[Array, '... d1 d1']:
-    """Assemble a homogeneous ``(d+1, d+1)`` matrix from a linear block
-    and a translation (batched over leading dims)."""
+    """Assemble a homogeneous transform matrix from a linear block.
+
+    Stacks the ``(d, d)`` linear block and the ``d``-vector translation
+    into a homogeneous :math:`(d+1, d+1)` matrix with bottom row
+    :math:`(0, \\ldots, 0, 1)`, batched over any leading dimensions.
+
+    Parameters
+    ----------
+    linear
+        ``(..., d, d)`` linear block of the transform.
+    translation
+        ``(..., d)`` translation vector, placed in the final column.
+
+    Returns
+    -------
+    Float[Array, '... d1 d1']
+        Homogeneous transform matrix, ``(..., d + 1, d + 1)``.
+    """
     d = linear.shape[-1]
     batch = linear.shape[:-2]
     top = jnp.concatenate([linear, translation[..., None]], axis=-1)
@@ -147,16 +205,18 @@ def rigid_exp(
     Parameters
     ----------
     params
-        ``(..., p)`` with ``p = 3`` for ``ndim == 2`` (``θ, t_x, t_y``)
-        or ``p = 6`` for ``ndim == 3`` (``ω_x, ω_y, ω_z, t_x, t_y,
-        t_z``).  ``ω`` is the axis-angle rotation vector; the
+        ``(..., p)`` with ``p = 3`` for ``ndim == 2``
+        (:math:`\\theta, t_x, t_y`) or ``p = 6`` for ``ndim == 3``
+        (:math:`\\omega_x, \\omega_y, \\omega_z, t_x, t_y, t_z`).
+        :math:`\\omega` is the axis-angle rotation vector; the
         translation is applied directly.
     ndim
         Spatial dimensionality (2 or 3).
 
     Returns
     -------
-    Homogeneous matrix, ``(..., ndim + 1, ndim + 1)``.
+    Float[Array, '... d1 d1']
+        Homogeneous matrix, ``(..., ndim + 1, ndim + 1)``.
     """
     if ndim == 3:
         rot = _so3_exp(params[..., :3])
@@ -174,8 +234,26 @@ def rigid_log(
     *,
     ndim: int,
 ) -> Float[Array, '... p']:
-    """Inverse of ``rigid_exp``: recover the Lie parameters of a rigid
-    homogeneous matrix (the rotation block must be a proper rotation)."""
+    """Recover the Lie parameters of a rigid homogeneous matrix.
+
+    Inverse of :func:`rigid_exp`.  The rotation block must be a proper
+    rotation.
+
+    Parameters
+    ----------
+    matrix
+        ``(..., ndim + 1, ndim + 1)`` homogeneous rigid transform.
+    ndim
+        Spatial dimensionality (2 or 3).
+
+    Returns
+    -------
+    Float[Array, '... p']
+        Lie parameter vector, ``(..., p)`` with ``p = 3`` for
+        ``ndim == 2`` (:math:`\\theta, t_x, t_y`) or ``p = 6`` for
+        ``ndim == 3`` (:math:`\\omega_x, \\omega_y, \\omega_z, t_x, t_y,
+        t_z`).
+    """
     if ndim == 3:
         omega = _so3_log(matrix[..., :3, :3])
         trans = matrix[..., :3, 3]
@@ -194,12 +272,25 @@ def affine_exp(
 ) -> Float[Array, '... d1 d1']:
     """Homogeneous affine transform from its Lie parameters.
 
-    The linear block is ``matrix_exp(A)`` of the ``ndim x ndim``
-    generator ``A`` (row-major in the first ``ndim²`` parameters),
-    guaranteeing an invertible, orientation-preserving map; the
-    remaining ``ndim`` parameters are the translation, applied
-    directly.  ``params`` has length ``ndim² + ndim`` (12 in 3-D, 6 in
-    2-D).
+    The linear block is :func:`matrix_exp` of the ``ndim x ndim``
+    generator :math:`A` (row-major in the first :math:`n^2` parameters,
+    where :math:`n` is ``ndim``), guaranteeing an invertible,
+    orientation-preserving map; the remaining ``ndim`` parameters are the
+    translation, applied directly.
+
+    Parameters
+    ----------
+    params
+        ``(..., p)`` Lie parameter vector of length :math:`p = n^2 + n`
+        (12 in 3-D, 6 in 2-D): the first :math:`n^2` entries are the
+        row-major generator :math:`A`, the final ``ndim`` the translation.
+    ndim
+        Spatial dimensionality (2 or 3).
+
+    Returns
+    -------
+    Float[Array, '... d1 d1']
+        Homogeneous affine matrix, ``(..., ndim + 1, ndim + 1)``.
     """
     if ndim not in (2, 3):
         raise ValueError(f'ndim must be 2 or 3; got {ndim}.')
@@ -219,9 +310,24 @@ def apply_affine(
 ) -> Float[Array, '... d']:
     """Apply a homogeneous transform to a field of coordinates.
 
-    ``out = M (p - c) + t + c`` for the linear block ``M`` and
-    translation ``t`` of ``matrix``, with optional rotation/scaling
-    ``center`` ``c`` (default origin).  ``coords`` is ``(..., ndim)``.
+    Computes :math:`\\mathrm{out} = M (p - c) + t + c` for the linear
+    block :math:`M` and translation :math:`t` of ``matrix``, with optional
+    rotation/scaling centre :math:`c`.
+
+    Parameters
+    ----------
+    coords
+        ``(..., ndim)`` field of input coordinates in index space.
+    matrix
+        ``(ndim + 1, ndim + 1)`` homogeneous transform matrix.
+    center
+        Optional ``(ndim,)`` rotation/scaling centre :math:`c`.  ``None``
+        (default) uses the origin.
+
+    Returns
+    -------
+    Float[Array, '... d']
+        The transformed coordinates, ``(..., ndim)``.
     """
     ndim = matrix.shape[-1] - 1
     linear = matrix[:ndim, :ndim]
@@ -241,8 +347,8 @@ def affine_grid(
 ) -> Float[Array, '*spatial d']:
     """Absolute sample coordinates of a homogeneous transform on a grid.
 
-    Maps each output voxel ``i`` to ``M (i - c) + t + c`` -- the
-    coordinate ``spatial_transform`` samples the moving image at.
+    Maps each output voxel :math:`i` to :math:`M (i - c) + t + c` -- the
+    coordinate :func:`spatial_transform` samples the moving image at.
 
     Parameters
     ----------

@@ -1,0 +1,64 @@
+---
+title: "nitrix.geometry.sphere"
+generated: true
+signature-hash: 754646b69c249c54
+description: "2-sphere primitives."
+listing:
+  id: nitrix-geometry-sphere-symbols
+  contents: "nitrix-geometry-sphere/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.sphere`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+2-sphere primitives.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Coordinate conventions
+
+We use *Cartesian* normal-vector format `(x, y, z)` as the
+canonical representation: every coordinate on the sphere is a
+unit 3-vector (or an `r`-scaled 3-vector for a radius-`r`
+sphere).  This is the format consumed by
+[`spherical_geodesic_distance`](nitrix-geometry-sphere/spherical_geodesic_distance.qmd), [`spherical_conv`](nitrix-geometry-sphere/spherical_conv.qmd), and the
+icosphere generation utilities.
+
+For lat/long inputs (e.g. data digitised from a globe), convert
+once via [`latlong_to_cartesian`](nitrix-geometry-sphere/latlong_to_cartesian.qmd).  All downstream operations
+assume the Cartesian representation.
+
+[`spherical_conv`](nitrix-geometry-sphere/spherical_conv.qmd) re-backs the legacy all-pairs convolution on
+`semiring_ell_matmul` over a k-nearest-neighbour
+adjacency, reducing the per-call cost from $O(n^2)$ to
+$O(n \cdot k)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `m` | rows of a multi-row contrast |
+| `c` | feature channels (channels-last) |
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_source` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-sphere-symbols}
+:::
