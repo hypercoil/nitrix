@@ -1,0 +1,30 @@
+---
+title: "CoordinateSpace"
+generated: true
+description: "Relation between the parameter transform and the two voxel grids."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._space`.*
+
+<!-- nitrix:gen sig:CoordinateSpace -->
+```python
+class CoordinateSpace(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CoordinateSpace -->
+Relation between the parameter transform and the two voxel grids.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:CoordinateSpace.sampler -->
+```python
+sampler(*, ndim: int, full_fixed_shape: tuple[int, ...], full_moving_shape: tuple[int, ...], dtype: jnp.dtype) -> _Sampler
+```
+<!-- nitrix:/gen -->
+
+Bind the space to one registration's full-resolution shapes.
+

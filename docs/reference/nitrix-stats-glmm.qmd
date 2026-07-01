@@ -1,0 +1,105 @@
+---
+title: "nitrix.stats.glmm"
+generated: true
+signature-hash: 8e34668d301dfb66
+description: "Mass-univariate generalised **linear mixed** models (GLMM) via PQL."
+listing:
+  id: nitrix-stats-glmm-symbols
+  contents: "nitrix-stats-glmm/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.glmm`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Mass-univariate generalised **linear mixed** models (GLMM) via PQL.
+
+[`glmm_fit`](nitrix-stats-glmm/glmm_fit.qmd) fits, per element (voxel / vertex / fixel), a random-intercept
+GLMM under a non-Gaussian [`Family`](nitrix-stats-glm/Family.qmd):
+
+`$text
+g(E[y | b]) = X \beta + b[group],   b_j ~ N(0, \sigma_b^2),   j = 1 .. q$`
+
+by **penalised quasi-likelihood** (PQL; Breslow & Clayton, 1993): an outer IRLS
+loop forms the working response $z$ and weights $W$ from the current
+fit, then a single variance-component (Fellner-Schall) step updates the
+random-effect precision $\lambda = \phi / \sigma_b^2$ -- the "penalised GLM
+= variance-components REML" identity, here under a GLM family.  This is the
+estimator `mgcv::gam(family=, s(g, bs="re"))` / `glmmPQL` (with the documented
+PQL attenuation for binary / low-count responses; a Laplace approximation is the
+more accurate follow-up).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Performance preserving dispatch
+
+A random effect widens the per-voxel system by $q$ = #levels, so the dense
+penalised solve is $O((p + q)^3)$ per voxel.  That is **cheap for few-level
+factors** (site / scanner / batch, $q \sim 10\text{--}50$) but a latency
+cliff for **many-level** factors (random intercept per *subject*,
+$q \sim 100\text{--}1000$).  [`glmm_fit`](nitrix-stats-glmm/glmm_fit.qmd) therefore dispatches on the
+level count:
+
+- **few-level** (`q <= few_level_max`): the dense GAMM path --
+  [`gam_fit`](nitrix-stats-gam/gam_fit.qmd) with a
+  [`re_smooth`](nitrix-stats-basis/re_smooth.qmd) block and the GLM family.  This *is* the
+  optimal solver in this regime (no cheaper exact route), and reuses the shipped
+  GAM machinery verbatim.
+- **many-level** (`q > few_level_max`): a **structured** PQL that never forms
+  the $(p + q) \times (p + q)$ system.  Because a single grouping factor
+  makes the random-effect block of the normal equations **diagonal across
+  groups**, the Schur complement onto the $p$-dimensional fixed block costs
+  $O(N p^2 + q)$ per voxel (the block-Woodbury structure, weighted by the
+  IRLS $W$ and wrapped in the PQL loop) -- linear in the level count, and
+  free of cuSOLVER.
+
+The two paths run the *same* PQL iteration (same working response, same
+Fellner-Schall update, same iteration budget), so they agree to the iterative
+tolerance; the dispatch only changes the linear-algebra cost, never the answer.
+
+Scope.  Beyond the **scalar random intercept** `(1 | g)` (binary outcomes /
+lesion counts per subject with random intercepts), [`glmm_fit`](nitrix-stats-glmm/glmm_fit.qmd) also fits
+non-Gaussian random **slopes** via the `z` / `structure` arguments: diagonal
+`(x || g)` as independent [`re_smooth`](nitrix-stats-basis/re_smooth.qmd) blocks through
+[`gam_fit`](nitrix-stats-gam/gam_fit.qmd), and correlated `(1 + x | g)` via the
+block-Woodbury REML wrapped in the PQL loop (the penalised-IRLS =
+iteratively-reweighted-REML identity).  The Gaussian-family slope fit is the same
+REML estimator as [`lme_fit`](nitrix-stats-lme.qmd) (block-Woodbury), to the
+iterative (optimiser) tolerance.  Random slopes are also served under the
+**Laplace** marginal likelihood (`method='laplace'`, the $r$-dimensional
+conditional-mode integral + $r \times r$ determinant correction), which
+corrects the PQL attenuation for binary / low-count slopes.
+
+### References
+
+- Breslow, N. E. & Clayton, D. G. (1993). Approximate inference in generalised
+  linear mixed models.  Journal of the American Statistical Association, 88,
+  9-25.  `10.2307/2290687`
+- Wood, S. N. & Fasiolo, M. (2017). A generalised Fellner-Schall method for
+  smoothing parameter optimisation with application to Tweedie location, scale
+  and shape models.  Biometrics, 73, 1071-1081.  `10.1111/biom.12666`
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `q` | random-effect columns |
+| `r` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-glmm-symbols}
+:::

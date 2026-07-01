@@ -56,7 +56,7 @@ mode='mirror')`.  A mode-aware prefilter (matching `scipy` for
 
 Per the "loud fallbacks" tenet, the override is **announced**: an
 explicit non-mirror `mode` (or a non-zero `cval`) raises a
-`CubicBSplineBoundaryWarning` (the bare default
+[`CubicBSplineBoundaryWarning`](../nitrix-geometry/CubicBSplineBoundaryWarning.qmd) (the bare default
 `mode='constant', cval=0` is treated as unspecified and is silent).
 
 Reproducibility: the prefilter is a recursive IIR filter, so its engine is
@@ -82,7 +82,7 @@ Sample the image at `coords` by cubic B-spline interpolation.
 Prefilters the image to interpolating coefficients and gathers
 them with the 4-tap cubic basis.  The mirror boundary is forced
 on both steps, so a non-mirror `mode` (or non-zero `cval`) is
-ignored and announced via `CubicBSplineBoundaryWarning`.
+ignored and announced via [`CubicBSplineBoundaryWarning`](../nitrix-geometry/CubicBSplineBoundaryWarning.qmd).
 
 <!-- nitrix:gen sig:CubicBSpline.__init__ -->
 ```python

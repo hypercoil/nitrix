@@ -1,0 +1,33 @@
+---
+title: "RegistrationSpec"
+generated: true
+description: "Static configuration for a registration recipe."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._core`.*
+
+<!-- nitrix:gen sig:RegistrationSpec -->
+```python
+class RegistrationSpec
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:RegistrationSpec -->
+Static configuration for a registration recipe.
+
+Frozen and hashable so it rides `jit` static arguments.  The
+per-image voxel->world geometry is **not** here (it is array data, not
+static config): it travels on the `space` argument of the recipes
+(`IndexSpace` / `WorldSpace`).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:RegistrationSpec.__init__ -->
+```python
+__init__(levels: int = 3, iterations: Union[int, tuple[int, ...]] = 30, metric: Metric = SSD(), optimizer: str = 'auto', interpolation: Interpolator = Linear(), boundary_mode: BoundaryMode = 'constant', cval: float = 0.0, pyramid_factor: float = 2.0, pyramid_sigma: Optional[float] = None, cg_tol: float = 1e-06, mode: ConvergenceMode = 'fixed', convergence: Convergence = Convergence(), ic_line_search: bool = False) -> None
+```
+<!-- nitrix:/gen -->
+

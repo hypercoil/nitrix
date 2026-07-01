@@ -1,0 +1,20 @@
+---
+title: "VolregResult"
+generated: true
+description: "Output of [`volreg`](../nitrix-register/volreg.qmd)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._volreg`.*
+
+<!-- nitrix:gen sig:VolregResult -->
+```python
+class VolregResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:VolregResult -->
+Output of [`volreg`](../nitrix-register/volreg.qmd).
+<!-- nitrix:/gen -->
+

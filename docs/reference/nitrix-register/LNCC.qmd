@@ -1,0 +1,76 @@
+---
+title: "LNCC"
+generated: true
+description: "Local (windowed) normalised cross-correlation cost `1 - lncc`."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._metric`.*
+
+<!-- nitrix:gen sig:LNCC -->
+```python
+class LNCC
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:LNCC -->
+Local (windowed) normalised cross-correlation cost `1 - lncc`.
+
+Robust to smooth intensity inhomogeneity; the diffeomorphic-class
+workhorse.  Scalar (BFGS) path.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:LNCC.cost -->
+```python
+cost(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Local normalised cross-correlation cost $1 - \mathrm{lncc}$.
+
+<!-- nitrix:gen sig:LNCC.residual -->
+```python
+residual(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Not defined: [`LNCC`](../nitrix-register/LNCC.qmd) is not a least-squares metric.
+
+<!-- nitrix:gen sig:LNCC.__init__ -->
+```python
+__init__(radius: int = 4) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:LNCC -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.65 ms** (median, L4); up to **2529.57× faster** than `simpleitk.ANTSNeighborhoodCorrelation`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_LNCC.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `cupy.lncc` | ok | 5.64 ms / 5.82 ms | 268.83 ms | 16.78 MB (hbm) | ✓ 1e-13×tol | 3.49x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `nitrix-jax` | ok | 1.61 ms / 1.65 ms | 1.538 s | 8758.24 MB (hbm) | ✓ 4.3e-05×tol | 1.00x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `numpy.lncc` | ok | 315.69 ms / 319.77 ms | 320.23 ms | 16.78 MB (hbm) | ✓ 0×tol | 195.63x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[128, 128, 128] | `simpleitk.ANTSNeighborhoodCorrelation` | ok | 4.082 s / 4.112 s | 4.597 s | 16.78 MB (hbm) | ≈ 1.8e+03×tol | 2529.57x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `cupy.lncc` | ok | 892.9 µs / 905.6 µs | 12.062 s | 2.10 MB (hbm) | ✓ 0×tol | 2.77x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `nitrix-jax` | ok | 322.8 µs / 332.0 µs | 5.614 s | 616.70 MB (hbm) | ✓ 7e-06×tol | 1.00x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `numpy.lncc` | ok | 32.04 ms / 32.63 ms | 32.36 ms | 2.10 MB (hbm) | ✓ 0×tol | 99.25x vs nitrix-jax |
+| lncc | jax-cuda12 | shape=[64, 64, 64] | `simpleitk.ANTSNeighborhoodCorrelation` | ok | 501.89 ms / 506.00 ms | 572.38 ms | 2.10 MB (hbm) | ≈ 1.8e+03×tol | 1554.62x vs nitrix-jax |
+:::
+
+*source: bench `02d1a5d9` · nitrix `a0769766`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:LNCC -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

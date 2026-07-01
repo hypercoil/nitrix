@@ -23,8 +23,8 @@ Lengthscale priors as REML regularisers (the `map_rho=` penalties).
 
 A small, curated set of priors on the Gaussian-process lengthscale
 $\rho$, each returned as a callable $\rho \mapsto -\log p(\rho)$
-suitable for the `map_rho=` argument of [`nitrix.stats.gp_fit`](nitrix-stats-gp/gp_fit.qmd) and
-[`nitrix.stats.hgp_fit`](nitrix-stats-hgp/hgp_fit.qmd).  This is the lightweight *penalised / maximum a
+suitable for the `map_rho=` argument of [`nitrix.stats.gp_fit`](nitrix-stats.qmd) and
+[`nitrix.stats.hgp_fit`](nitrix-stats.qmd).  This is the lightweight *penalised / maximum a
 posteriori* lengthscale: the REML objective $-2 l_R(\rho)$ gains
 $-2 \log p(\rho)$, so the selected $\rho$ is the *maximum a
 posteriori* value rather than the pure REML maximiser.  (A full posterior over

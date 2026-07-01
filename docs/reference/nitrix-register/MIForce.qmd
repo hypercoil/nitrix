@@ -1,0 +1,65 @@
+---
+title: "MIForce"
+generated: true
+description: "Closed-form Mattes mutual-information force (the cross-modal fast path)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._force`.*
+
+<!-- nitrix:gen sig:MIForce -->
+```python
+class MIForce
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:MIForce -->
+Closed-form Mattes mutual-information force (the cross-modal fast path).
+
+The Tier-1 analogue of [`MetricForce`](../nitrix-register/MetricForce.qmd) wrapping a mutual-information
+metric: drives a dense-field recipe by $\text{mi\_grad} \cdot
+\nabla\,\text{warped}$ (the closed-form `metrics.mi_grad`, i.e.
+$\partial\,\mathrm{MI} / \partial\,\text{warped}$) instead of a full
+`jax.grad` of the soft-histogram cost every iteration -- the fast
+cross-modal deformable path, with the histogram-scatter autodiff tape
+removed.
+
+Like [`MetricForce`](../nitrix-register/MetricForce.qmd) for a histogram metric (and for the same reason --
+mutual information is not a spatial mean, so its raw $1/N$ gradient is
+an arbitrary, metric-scale-dependent magnitude), the force is normalised to
+a controlled per-voxel RMS `magnitude`: this is what makes it a true
+*drop-in* fast replacement (the same controlled step the clamped SyN and
+unclamped Demons drivers need), and it agrees with the autodiff
+[`MetricForce`](../nitrix-register/MetricForce.qmd) in **direction** to the empty-bin tolerance and in
+**magnitude** by construction (the parity oracle).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:MIForce.bind -->
+```python
+bind(fixed: Float[Array, '*spatial'], *, ndim: int, rel_spacing: RelSpacing = None) -> _BoundMI
+```
+<!-- nitrix:/gen -->
+
+Bind to `fixed`, carrying the histogram and sampling settings.
+
+The joint histogram depends on both images at the current warp, so no
+image-dependent state is hoisted here; the binding simply captures the
+fixed image alongside the configured binning.
+
+<!-- nitrix:gen sig:MIForce.__init__ -->
+```python
+__init__(bins: int = 32, range_moving: Optional[tuple[float, float]] = None, range_fixed: Optional[tuple[float, float]] = None, magnitude: float = 0.5, sample_stride: int = 1, normalized: bool = False) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:MIForce -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

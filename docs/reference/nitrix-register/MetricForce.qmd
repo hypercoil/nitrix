@@ -1,0 +1,80 @@
+---
+title: "MetricForce"
+generated: true
+description: "Generic force from any [`Metric`](../nitrix-register/Metric.qmd) -- the escape hatch."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._force`.*
+
+<!-- nitrix:gen sig:MetricForce -->
+```python
+class MetricForce
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:MetricForce -->
+Generic force from any [`Metric`](../nitrix-register/Metric.qmd) -- the escape hatch.
+
+Drives a dense-field recipe by $-\partial(\text{metric.cost}) /
+\partial\,\text{warped} \cdot \nabla\,\text{warped}$ (the cost gradient via
+`jax.grad`), so a cross-modal metric (mutual information, correlation
+ratio) or a custom descriptor can register diffeomorphically with **no**
+hand-written force.  *No performance guarantee* -- the autodiff cost is the
+price of generality; ship a closed-form [`Force`](../nitrix-register/Force.qmd) for a metric that
+earns one.
+
+**Two magnitude regimes, keyed on** `metric.is_spatial_mean`:
+
+- **Spatial-mean cost** (sum-of-squared-differences or local
+  cross-correlation): the cost reduces by a per-voxel mean, so rescaling the
+  gradient by the voxel count undoes the $1/N$ and recovers the
+  *sum-convention* gradient the closed forms use -- [`MetricForce`](../nitrix-register/MetricForce.qmd)
+  wrapping a local-CC metric is then numerically identical to the closed
+  [`LNCCForce`](../nitrix-register/LNCCForce.qmd) (the parity oracle, in magnitude not only direction),
+  and the magnitude shrinks naturally as the gradient does.  The
+  sum-of-squared-differences metric has **no** normalised closed form here
+  -- wrapping it gives the *raw* optical-flow gradient $(\text{warped}
+  - \text{fixed}) \cdot \nabla\,\text{warped}$, not the Thirion-normalised
+  Demons force, and recovers markedly worse on a monomodal warp (it is
+  unscaled by $|\nabla|^2 + (m - f)^2$, so the regulariser or
+  trust-region clamp dominates and the field under-recovers); for monomodal
+  SSD-type registration prefer [`DemonsForce`](../nitrix-register/DemonsForce.qmd) (the diffeomorphic
+  Demons recipe default).
+- **Global histogram scalar** (mutual information, correlation ratio, or any
+  metric that does not declare `is_spatial_mean`): there is no $1/N$
+  to undo, so multiplying by the voxel count would be an arbitrary,
+  metric-scale-dependent constant -- under the **unclamped** Demons driver
+  (`step=None`) that feeds a magnitude no one has tuned straight into the
+  velocity.  Instead the force is normalised to a target per-voxel RMS
+  `magnitude` (via `_normalise_rms`), a controlled,
+  metric-scale-invariant step.  Under the clamped SyN driver the subsequent
+  trust-region clamp only sharpens this; the direction (the parity that
+  matters for a metric with no closed form) is untouched either way.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:MetricForce.bind -->
+```python
+bind(fixed: Float[Array, '*spatial'], *, ndim: int, rel_spacing: RelSpacing = None) -> _BoundMetric
+```
+<!-- nitrix:/gen -->
+
+Bind to `fixed`, carrying the metric and magnitude settings.
+
+<!-- nitrix:gen sig:MetricForce.__init__ -->
+```python
+__init__(metric: Metric, magnitude: float = 0.5) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:MetricForce -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

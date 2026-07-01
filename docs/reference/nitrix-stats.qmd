@@ -1,0 +1,78 @@
+---
+title: "nitrix.stats"
+generated: true
+signature-hash: 218e37945b62b960
+description: "Mass-univariate statistical modelling for neuroimaging."
+listing:
+  id: nitrix-stats-symbols
+  contents: "nitrix-stats/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Mass-univariate statistical modelling for neuroimaging.
+
+A collection of differentiable estimators for fitting statistical models
+independently at every vertex, voxel, or edge of an image or connectome, spanning
+covariance and correlation, (generalised, additive, mixed) linear models,
+Gaussian-process smooths, regularised connectivity, and permutation inference.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Submodules
+
+- `covariance` -- (partial) (paired) (conditional) covariance
+  / correlation over time series, with JIT-friendly batch handling.
+- `gaussian` -- closed-form diagonal-Gaussian KL divergence and
+  negative log-likelihood (log-variance parameterised).
+- `glm` -- mass-univariate generalised linear models (OLS / WLS /
+  exponential-family IRLS) with t / F contrasts and goodness-of-fit.
+- `betareg` / `ordinal` / `gaulss` -- additional response models: beta
+  regression (rates / proportions), ordinal (cumulative-link), and the Gaussian
+  location-scale (mean + variance) GAMLSS fit.
+- `basis` -- penalised spline bases (P-splines) for additive models,
+  plus the [`hsgp_basis`](nitrix-stats-basis/hsgp_basis.qmd) Hilbert-space approximate-GP smooth (reduced-rank
+  Gaussian process) and the kriging [`gp_basis`](nitrix-stats-basis/gp_basis.qmd).
+- `gam` -- mass-univariate generalised additive (mixed) models with
+  REML / Fellner-Schall smoothing-parameter selection.
+- `gp` -- mass-univariate Gaussian-process regression (HSGP or exact
+  engine) with REML-estimated kernel lengthscale and optional `corr=`
+  structured residual ([`gp_fit`](nitrix-stats-gp/gp_fit.qmd) / [`gp_predict`](nitrix-stats-gp/gp_predict.qmd)).
+- `hgp` -- hierarchical / multi-level GP: a population smooth plus
+  group-level smooth deviations sharing a kernel
+  ([`hgp_fit`](nitrix-stats-hgp/hgp_fit.qmd) / [`hgp_predict`](nitrix-stats-hgp/hgp_predict.qmd)).
+- `priors` -- lengthscale MAP-rho regularisers (half-normal / inverse-gamma
+  / log-normal) for the [`gp_fit`](nitrix-stats-gp/gp_fit.qmd) / [`hgp_fit`](nitrix-stats-hgp/hgp_fit.qmd) kernel-range search.
+- `connectivity` -- regularised connectome estimators: analytic-shrinkage
+  covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
+  small-sample regime.
+- `lme` -- voxelwise linear mixed-effects (REML / FLAME).
+- `glmm` -- generalised linear mixed models (PQL / Laplace / adaptive
+  Gauss-Hermite) for non-Gaussian responses with random effects.
+- `inference` -- permutation / TFCE cluster inference (the on-device FSL
+  `randomise` engine) plus FDR / Bonferroni.
+- `pca` -- principal-component analysis (fit / transform /
+  inverse) via the covariance eigendecomposition.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-symbols}
+:::

@@ -1,0 +1,64 @@
+---
+title: "bbr_cost"
+generated: true
+description: "Boundary-based (Greve-Fischl) contrast cost at rigid parameters."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._bbr`.*
+
+<!-- nitrix:gen sig:bbr_cost -->
+```python
+bbr_cost(moving: Float[Array, '*spatial'], points: Float[Array, ' n d'], normals: Float[Array, ' n d'], params: Float[Array, ' p'], *, model: TransformModel, ndim: int, moving_affine_inv: Float[Array, ' d1 d1'], step: float, slope: float, q0: float, method: Interpolator, mode: BoundaryMode, cval: float, eps: float) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bbr_cost -->
+Boundary-based (Greve-Fischl) contrast cost at rigid parameters.
+
+Evaluate the boundary cost for the rigid transform encoded by `params`.
+Each boundary point is mapped through the transform into the moving voxel
+frame, sampled a distance `step` either side of the boundary along the
+transformed normal, and the normalised cross-boundary contrast is formed;
+the cost is low where the boundary sits on a strong, consistently-oriented
+intensity edge.  This is a pure function, differentiable with respect to
+both `moving` and `params`, and is the core that both
+[`BoundaryObjective`](../nitrix-register/BoundaryObjective.qmd) and the implicit-differentiation layer call.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bbr_cost -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `*spatial` | — | Single-channel volume being registered, of spatial shape `*spatial` (2-D or 3-D). |
+| `points` | `Float` | `n` × `d` | — | `(n, d)` boundary sample coordinates, in the moving world frame (or voxel frame when the affine is the identity). |
+| `normals` | `Float` | `n` × `d` | — | `(n, d)` outward boundary normals, one per point. |
+| `params` | `Float` | `p` | — | `(p,)` rigid Lie parameters passed to `model.exp`. |
+| `model` | `TransformModel` | — | — | Transform model producing a homogeneous matrix from `params` via `model.exp(params, ndim=ndim)`. |
+| `ndim` | `int` | — | — | Spatial dimensionality (2 or 3). |
+| `moving_affine_inv` | `Float` | `d1` × `d1` | — | `(d1, d1)` world-to-voxel affine of the moving image (the inverse of its voxel-to-world affine, with `d1 = ndim + 1`). |
+| `step` | `float` | — | — | Half-distance sampled either side of the boundary along the normal, in the units of the moving affine (mm with a physical affine, else voxels). |
+| `slope` | `float` | — | — | Sharpness of the $\tanh$ contrast cost. |
+| `q0` | `float` | — | — | Contrast offset (the cost's inflection point). |
+| `method` | `Interpolator` | — | — | Interpolator used to sample the moving volume at the offset points. |
+| `mode` | `BoundaryMode` | — | — | Out-of-bounds boundary handling for the samples. |
+| `cval` | `float` | — | — | Constant fill value used with a constant boundary mode. |
+| `eps` | `float` | — | — | Guard added to the contrast denominator to avoid division by zero. |
+
+**Returns** `Float` — shape —. The scalar mean boundary cost over all points.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bbr_cost -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -1,0 +1,51 @@
+---
+title: "IndexSpace"
+generated: true
+description: "Register in voxel/index space (shared-grid, on-device fast path)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._space`.*
+
+<!-- nitrix:gen sig:IndexSpace -->
+```python
+class IndexSpace
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:IndexSpace -->
+Register in voxel/index space (shared-grid, on-device fast path).
+
+The parameter transform is read directly in voxel coordinates, about
+the fixed-image centre; the sampling matrix is the exponentiated
+parameter transform with no change-of-basis.  Assumes `moving` and
+`fixed` share a voxel grid (the within-modality / motion-correction
+norm); under **anisotropic** voxels a rigid parametrisation is not
+physically rigid -- use [`WorldSpace`](../nitrix-register/WorldSpace.qmd) there.
+
+No general matrix inverse is taken, so the path stays fully on-device
+(no cuSolver fallback).  The result matrix is the **self-contained**
+`fixed-voxel -> moving-voxel` homogeneous index map -- the
+exponentiated parameter transform re-centred at the fixed grid centre
+via `_conjugate_about`, so applying it to coordinates reproduces
+the warp directly and it composes with a [`WorldSpace`](../nitrix-register/WorldSpace.qmd) result.
+The result's `params` hold the raw about-origin Lie coordinates.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:IndexSpace.sampler -->
+```python
+sampler(*, ndim: int, full_fixed_shape: tuple[int, ...], full_moving_shape: tuple[int, ...], dtype: jnp.dtype) -> _IndexSampler
+```
+<!-- nitrix:/gen -->
+
+Bind the index space to one registration's full-resolution shapes.
+
+<!-- nitrix:gen sig:IndexSpace.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+

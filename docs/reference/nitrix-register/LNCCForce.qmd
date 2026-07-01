@@ -1,0 +1,48 @@
+---
+title: "LNCCForce"
+generated: true
+description: "Analytic local-cross-correlation force (the greedy-SyN default)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._force`.*
+
+<!-- nitrix:gen sig:LNCCForce -->
+```python
+class LNCCForce
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:LNCCForce -->
+Analytic local-cross-correlation force (the greedy-SyN default).
+
+The closed-form $\text{lncc\_grad}(\text{warped}, \text{fixed}) \cdot
+\nabla\,\text{warped}$ (via `metrics.lncc_grad`) -- ascends the
+windowed cross-correlation; robust to smooth intensity inhomogeneity.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:LNCCForce.bind -->
+```python
+bind(fixed: Float[Array, '*spatial'], *, ndim: int, rel_spacing: RelSpacing = None) -> _BoundLNCC
+```
+<!-- nitrix:/gen -->
+
+Bind to `fixed`, carrying the window radius and backend settings.
+
+<!-- nitrix:gen sig:LNCCForce.__init__ -->
+```python
+__init__(radius: int = 2, derivative: Literal['exact', 'center'] = 'exact', backend: Backend = 'jax') -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:LNCCForce -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

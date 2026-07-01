@@ -18,7 +18,7 @@ By-variable factor smooths `s(x, by=f)` -- one smooth of `x` per level.
 mgcv's `s(x, by=f)` for a **factor** `f`: a *separate* penalised smooth
 of `x` for each level of `f`, each with its **own** smoothing parameter.
 Returns a tuple of `len == n_levels` [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) blocks; splat it
-into the `smooths=` argument of [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) (each block
+into the `smooths=` argument of [`gam_fit`](../nitrix-stats.qmd) (each block
 is an independent smooth, so the Fellner-Schall loop selects a per-level
 smoothing parameter).
 

@@ -44,7 +44,7 @@ constants).  Call it to *produce* a spherical map; do not wrap it in
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `mesh` | `'Mesh'` | — | — | Inflated genus-0 mesh (e.g. [`inflate_surface`](../nitrix-geometry-surface/inflate_surface.qmd) output). |
+| `mesh` | `'Mesh'` | — | — | Inflated genus-0 mesh (e.g. [`inflate_surface`](../nitrix-geometry.qmd) output). |
 | `init` | `Literal['spectral', 'radial']` | — | `'spectral'` | `'spectral'` (default, the recon-surf LBO embedding) or `'radial'` (centroid projection -- only for near-convex inputs). |
 | `n_iterations` | `int` | — | `200` | Refinement iterations (`0` -> init only). |
 | `conformal_weight` | `float` | — | `1.0` | Energy weights (Dirichlet/conformal core + areal log-ratio term). |

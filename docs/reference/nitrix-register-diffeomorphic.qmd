@@ -24,7 +24,7 @@ Diffeomorphic registration recipe: log-domain Demons.
 The representative diffeomorphic algorithm of Vercauteren, Pennec, Perchant
 and Ayache (2009), parametrised by a *stationary velocity field* $v$
 whose exponential $\varphi = \exp(v)$ (scaling-and-squaring, via
-[`integrate_velocity_field`](nitrix-geometry-grid/integrate_velocity_field.qmd)) is a diffeomorphism by
+[`integrate_velocity_field`](nitrix-geometry.qmd)) is a diffeomorphism by
 construction.  Each iteration is an operator splitting:
 
 1. **ESM demons force** -- a closed-form per-voxel velocity update
@@ -51,7 +51,7 @@ The default `representation='group'` ([`DemonsSpec`](nitrix-register-diffeomorph
 *displacement* and uses the greedy compositive update (warp directly, compose
 the regularised increment -- no per-iteration exponential, roughly two gathers
 per iteration versus seven), recovering the velocity once at finalisation via
-[`field_log`](nitrix-geometry-deformation/field_log.qmd).  The greedy update is not the SVF fixed
+[`field_log`](nitrix-geometry.qmd).  The greedy update is not the SVF fixed
 point, so the two representations agree on synthetic recovery to tolerance, not
 field-wise.
 <!-- nitrix:/gen -->

@@ -1,0 +1,66 @@
+---
+title: "TransformModel"
+generated: true
+description: "Chart between Lie parameters and a homogeneous transform."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._model`.*
+
+<!-- nitrix:gen sig:TransformModel -->
+```python
+class TransformModel(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:TransformModel -->
+Chart between Lie parameters and a homogeneous transform.
+
+An implementer exposes the exponential map (parameters -> matrix),
+the parameter count for a given spatial rank, and the inter-level
+translation rescale the coarse-to-fine driver applies when it
+warm-starts a finer pyramid level.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:TransformModel.n_params -->
+```python
+n_params(ndim: int) -> int
+```
+<!-- nitrix:/gen -->
+
+Length of the parameter vector for an `ndim`-D transform.
+
+<!-- nitrix:gen sig:TransformModel.exp -->
+```python
+exp(params: Float[Array, '... p'], *, ndim: int) -> Float[Array, '... d1 d1']
+```
+<!-- nitrix:/gen -->
+
+Exponential map from parameters to a homogeneous matrix.
+
+<!-- nitrix:gen sig:TransformModel.rescale_to_grid -->
+```python
+rescale_to_grid(params: Float[Array, ' p'], ratio: Float[Array, ' d']) -> Float[Array, ' p']
+```
+<!-- nitrix:/gen -->
+
+Rescale the parameters from one voxel grid to a finer one.
+
+Used by the coarse-to-fine driver when it warm-starts a finer
+pyramid level: the returned parameters reproduce the same
+physical transform on the finer grid, since translations are
+expressed in voxel units and so scale with the grid.
+
+
+<!-- nitrix:gen dims:TransformModel -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

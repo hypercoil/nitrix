@@ -16,7 +16,7 @@ affine_register(moving: Float[Array, '*mspatial'], fixed: Float[Array, '*fspatia
 Estimate the affine transform aligning `moving` to `fixed`.
 
 Optimises the 12-DOF (3-D) / 6-DOF (2-D) affine Lie parameters
-([`affine_exp`](../nitrix-geometry-transform/affine_exp.qmd) -- linear block via
+([`affine_exp`](../nitrix-geometry.qmd) -- linear block via
 `matrix_exp`, guaranteeing an invertible map)
 coarse-to-fine.  For a robust result on a large initial misalignment, run
 [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd) first and pass its parameters (extended with a zero
@@ -25,7 +25,7 @@ linear-generator block) as a warm start, or compose the two transforms.
 The `space` and `method` arguments behave as in [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd);
 the inverse-compositional fast path -- where affine's large parameter count
 makes the forward `jacfwd` costliest -- engages under `method="auto"` for
-`IndexSpace` and an SSD metric.
+[`IndexSpace`](../nitrix-register/IndexSpace.qmd) and an SSD metric.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:affine_register -->
@@ -38,14 +38,14 @@ makes the forward `jacfwd` costliest -- engages under `method="auto"` for
 | `spec` | `RegistrationSpec` | — | `RegistrationSpec()` | Registration spec (pyramid, iterations, metric, ...); see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd). |
 | `space` | `CoordinateSpace` | — | `IndexSpace()` | Coordinate space to optimise in; see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd). |
 | `method` | `str` | — | `'auto'` | Solver dispatch (`"auto"` / `"inverse_compositional"` / `"forward"`); see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd). |
-| `init` | `Literal['identity', 'moment']` | — | `'identity'` | Starting transform: `"identity"` (default) or the **moment** start (centroid plus per-axis scale), worth more here than for rigid -- the affine basin is narrow and a single zero start fails silently on a large misalignment. `IndexSpace` only. |
-| `init_transform` | `Optional[Float[Array, ' d1 d1']]` | — | `None` | A self-contained warm-start matrix (a prior recipe's `result.matrix`), taking precedence over `init` -- e.g. affine warm-started from rigid (see [`syn_pipeline`](../nitrix-register-recipes/syn_pipeline.qmd)). `IndexSpace` only. |
+| `init` | `Literal['identity', 'moment']` | — | `'identity'` | Starting transform: `"identity"` (default) or the **moment** start (centroid plus per-axis scale), worth more here than for rigid -- the affine basin is narrow and a single zero start fails silently on a large misalignment. [`IndexSpace`](../nitrix-register/IndexSpace.qmd) only. |
+| `init_transform` | `Optional[Float[Array, ' d1 d1']]` | — | `None` | A self-contained warm-start matrix (a prior recipe's `result.matrix`), taking precedence over `init` -- e.g. affine warm-started from rigid (see [`syn_pipeline`](../nitrix-register-recipes/syn_pipeline.qmd)). [`IndexSpace`](../nitrix-register/IndexSpace.qmd) only. |
 | `mask` | `Optional[Float[Array, '*fspatial']]` | — | `None` | Optional per-voxel cost weight on the `fixed` grid (see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd)); restricts the cost to a region and routes to the forward path. |
 | `winsorize` | `Optional[tuple[float, float]]` | — | `None` | Intensity conditioning before registration (see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd)). |
 | `histogram_match` | `bool` | — | `False` | Intensity conditioning before registration (see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd)). |
-| `restarts` | `int` | — | `1` | Number of diversified forward solves (default `1`), keeping the lowest-cost result -- a pure basin-of-attraction lever. It **no longer** doubles as the GPU MI determinism fix: the joint histogram now takes a deterministic one-hot-matmul path on GPU at affine pyramid sizes (at most roughly 200k voxels per level), so `MI` / `CorrelationRatio` recover reproducibly at `restarts=1`. (Historically the GPU joint-histogram scatter-add was non-deterministic and the 12-DOF affine BFGS occasionally amplified that noise into a catastrophic divergence, so `restarts` of 4-6 was the mitigation; that is retired for sizes under the gate. `SSD` is exact and takes the inverse-compositional path, which ignores `restarts`.) Above the gate (the finest full-resolution level), or for a genuinely multi-basin start, `restarts > 1` still helps. |
+| `restarts` | `int` | — | `1` | Number of diversified forward solves (default `1`), keeping the lowest-cost result -- a pure basin-of-attraction lever. It **no longer** doubles as the GPU MI determinism fix: the joint histogram now takes a deterministic one-hot-matmul path on GPU at affine pyramid sizes (at most roughly 200k voxels per level), so [`MI`](../nitrix-register/MI.qmd) / [`CorrelationRatio`](../nitrix-register/CorrelationRatio.qmd) recover reproducibly at `restarts=1`. (Historically the GPU joint-histogram scatter-add was non-deterministic and the 12-DOF affine BFGS occasionally amplified that noise into a catastrophic divergence, so `restarts` of 4-6 was the mitigation; that is retired for sizes under the gate. [`SSD`](../nitrix-register/SSD.qmd) is exact and takes the inverse-compositional path, which ignores `restarts`.) Above the gate (the finest full-resolution level), or for a genuinely multi-basin start, `restarts > 1` still helps. |
 
-**Returns** `RegistrationResult`. A `RegistrationResult`; see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd) for the fields and conventions.
+**Returns** `RegistrationResult`. A [`RegistrationResult`](../nitrix-register/RegistrationResult.qmd); see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd) for the fields and conventions.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:affine_register -->

@@ -1,0 +1,38 @@
+---
+title: "Force"
+generated: true
+description: "Driving force for a dense-field (SVF) registration driver."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._force`.*
+
+<!-- nitrix:gen sig:Force -->
+```python
+class Force(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Force -->
+Driving force for a dense-field (SVF) registration driver.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Force.bind -->
+```python
+bind(fixed: Float[Array, '*spatial'], *, ndim: int, rel_spacing: RelSpacing = None) -> BoundForce
+```
+<!-- nitrix:/gen -->
+
+Bind to `fixed`, hoisting fixed-dependent state once.
+
+
+<!-- nitrix:gen dims:Force -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

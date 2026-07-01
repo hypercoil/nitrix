@@ -1,0 +1,20 @@
+---
+title: "SyNResult"
+generated: true
+description: "Output of the greedy-SyN recipe."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._syn`.*
+
+<!-- nitrix:gen sig:SyNResult -->
+```python
+class SyNResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SyNResult -->
+Output of the greedy-SyN recipe.
+<!-- nitrix:/gen -->
+
