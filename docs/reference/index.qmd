@@ -1,23 +1,13 @@
 ---
 title: "API reference"
-toc: false
-listing:
-  id: reference-modules
-  contents:
-    - "*.qmd"
-  type: table
-  fields: [title, description]
-  field-display-names:
-    title: "Module"
-    description: "Summary"
-  sort: "title"
-  filter-ui: true
-  page-size: 100
+toc: true
 ---
 
-Per-module API documentation: signatures, named tensor dimensions (shapes +
-glossary), and — where the sibling `nitrix-perf-bench` has measured a kernel — a
-benchmark headline and table.
+Per-module API documentation, organised by import path: signatures, named
+tensor dimensions (shapes + glossary), and — where the sibling
+`nitrix-perf-bench` has measured a kernel — a benchmark headline and table.
+Each module links to its own page, which in turn lists one page per public
+symbol.
 
 ::: {.callout-important title="Work in progress"}
 These pages are **auto-generated** by `gen_reference_stubs.py` (static, from
@@ -27,5 +17,39 @@ still being filled**, and coverage is expanding beyond `nitrix.stats`. Not for
 final publication as-is (SPEC §6.5).
 :::
 
-::: {#reference-modules}
-:::
+## Modules
+
+<!-- nitrix:gen index-tree -->
+### `nitrix.geometry`
+
+- [`grid`](nitrix-geometry-grid.qmd) — Regular-grid deformable-registration primitives.
+
+### `nitrix.stats`
+
+- [`basis`](nitrix-stats-basis.qmd) — Penalised spline bases for additive models.
+- [`betareg`](nitrix-stats-betareg.qmd) — Beta regression for proportions in `(0, 1)` (v3 §4).
+- [`connectivity`](nitrix-stats-connectivity.qmd) — Regularised covariance / sparse-precision estimators for connectivity.
+- [`covariance`](nitrix-stats-covariance.qmd) — Empirical covariance / correlation / partial / conditional measures.
+- [`gam`](nitrix-stats-gam.qmd) — Mass-univariate generalised additive (mixed) models.
+- [`gaulss`](nitrix-stats-gaulss.qmd) — Gaussian location-scale regression (`gaulss`, v3 §4 distributional).
+- [`gaussian`](nitrix-stats-gaussian.qmd) — Closed-form diagonal-Gaussian quantities.
+- [`glm`](nitrix-stats-glm.qmd) — Mass-univariate generalised linear models.
+- [`gp`](nitrix-stats-gp.qmd) — Mass-univariate Gaussian-process regression with lengthscale estimation.
+- [`hgp`](nitrix-stats-hgp.qmd) — Mass-univariate **hierarchical** Gaussian-process regression (multi-level GP).
+- [`ordinal`](nitrix-stats-ordinal.qmd) — Ordinal regression -- the cumulative-link (proportional-odds) model (v3 §4).
+- [`pca`](nitrix-stats-pca.qmd) — Principal-component analysis.
+- [`priors`](nitrix-stats-priors.qmd) — Lengthscale priors as REML regularisers (the `map_rho=` penalties).
+
+#### `nitrix.stats.inference`
+
+- [`cluster`](nitrix-stats-inference-cluster.qmd) — Cluster maps for threshold-based enhancement and inference.
+- [`multiple_comparisons`](nitrix-stats-inference-multiple_comparisons.qmd) — Multiple-comparison corrections + multi-contrast combination for mass-univariate p-value / statistic maps.
+- [`permutation`](nitrix-stats-inference-permutation.qmd) — Exchangeability operators for permutation inference.
+- [`randomise`](nitrix-stats-inference-randomise.qmd) — Permutation inference for the GLM -- the on-device `randomise` engine.
+- [`tfce`](nitrix-stats-inference-tfce.qmd) — Threshold-Free Cluster Enhancement (Smith & Nichols 2009).
+
+#### `nitrix.stats.lme`
+
+- [`flame`](nitrix-stats-lme-flame.qmd) — FLAME-style two-level mixed-effects model for fMRI group analysis.
+- [`reml`](nitrix-stats-lme-reml.qmd) — Variance-components REML for voxelwise LMEs.
+<!-- nitrix:/gen -->
