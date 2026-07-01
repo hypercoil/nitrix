@@ -1,0 +1,57 @@
+---
+title: "modularity_matrix_matvec"
+generated: true
+description: "Apply the modularity matrix to a stack of vectors."
+---
+
+[‹ back to `nitrix.graph`](../nitrix-graph.qmd)
+
+*Re-exported here; defined in `nitrix.graph.community`.*
+
+<!-- nitrix:gen sig:modularity_matrix_matvec -->
+```python
+modularity_matrix_matvec(A: _GraphInput, x: Num[Array, '... n k'], *, gamma: float = 1.0, normalise: bool = True) -> Num[Array, '... n k']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:modularity_matrix_matvec -->
+Apply the modularity matrix to a stack of vectors.
+
+Computes the matrix-vector product
+
+$$
+B x = (A - \gamma\, k k^{\top} / 2m)\, x
+    = A x - \frac{\gamma}{2m}\, k\,(k^{\top} x)
+$$
+
+*without* materialising the rank-1 outer product $k k^{\top}$.
+Works for dense, [`ELL`](../nitrix-sparse.qmd), and
+[`SectionedELL`](../nitrix-sparse.qmd) adjacencies.  This is the
+operator that spectral community detection eigendecomposes; passing
+it directly to a matrix-free eigensolver (such as `lobpcg`) enables
+spectral community detection on million-node graphs.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:modularity_matrix_matvec -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `_GraphInput` | — | — | (Weighted) adjacency, dense or sparse, batched over leading axes. |
+| `x` | `Num` | `...` × `n` × `k` | — | Stack of `k` column vectors to which $B$ is applied. |
+| `gamma` | `float` | — | `1.0` | Resolution parameter scaling the rank-1 null-model correction. Default `1.0`. |
+| `normalise` | `bool` | — | `True` | If `True` (default), divide the result by the total edge weight $2m$. |
+
+**Returns** `Num` — shape `...` × `n` × `k`. The product $B x$, one column per input column of `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:modularity_matrix_matvec -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

@@ -1,0 +1,81 @@
+---
+title: "modularity_matrix"
+generated: true
+description: "Modularity matrix $B = A -  gamma , mathrm{null}(A)$, optionally normalised."
+---
+
+[‹ back to `nitrix.graph.community`](../nitrix-graph-community.qmd)
+
+<!-- nitrix:gen sig:modularity_matrix -->
+```python
+modularity_matrix(A: Num[Array, '... n n'], *, gamma: float = 1.0, null: _NullModel = girvan_newman_null, normalise: bool = True, sign: Optional[Literal['+', '-']] = '+') -> Num[Array, '... n n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:modularity_matrix -->
+Modularity matrix $B = A - \gamma\,\mathrm{null}(A)$, optionally normalised.
+
+The operator whose leading eigenvectors reveal Newman-style community
+structure: the observed adjacency minus a resolution-scaled null model
+of the expected adjacency.
+
+The output is a dense $n \times n$ matrix.  For large sparse
+graphs prefer [`relaxed_modularity`](../nitrix-graph-community/relaxed_modularity.qmd) directly (which does not
+materialise this intermediate) or build a matrix-vector product via
+[`modularity_matrix_matvec`](../nitrix-graph/modularity_matrix_matvec.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:modularity_matrix -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Num` | `...` × `n` × `n` | — | Dense (weighted) adjacency matrix, batched over leading axes. |
+| `gamma` | `float` | — | `1.0` | Resolution parameter. Larger values favour smaller communities. Default `1.0`. |
+| `null` | `_NullModel` | — | `girvan_newman_null` | Null-model factory mapping a dense adjacency to a dense expected adjacency. Default [`girvan_newman_null`](../nitrix-graph-community/girvan_newman_null.qmd). |
+| `normalise` | `bool` | — | `True` | If `True` (default), divide $B$ by the total edge weight $2m$, placing the resulting modularity in $[-1/2, 1]$. |
+| `sign` | `Optional[Literal['+', '-']]` | — | `'+'` | Weight handling before forming the matrix. `'+'` (default) clips negative weights to zero; `'-'` clips positive weights to zero and negates, computing the anti-modularity on the negative subgraph; `None` uses the raw input. |
+
+**Returns** `Num` — shape `...` × `n` × `n`. The (optionally normalised) modularity matrix $B$, one per batch element.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:modularity_matrix -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **110.7 µs** (median, L4); up to **481.47× faster** than `networkx.modularity_matrix`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_MODULARITY_MATRIX.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| modularity_matrix | jax-cpu | n=128 | `cupy.modularity_matrix` | skipped | — | — | — | — | — |
+| modularity_matrix | jax-cpu | n=128 | `networkx.modularity_matrix` | ok | 3.09 ms / 3.24 ms | 654.23 ms | 707 MB (rss) | ✓ 0×tol | 88.28x vs nitrix-jax |
+| modularity_matrix | jax-cpu | n=128 | `nitrix-jax` | ok | 35.0 µs / 37.1 µs | 115.16 ms | 707 MB (rss) | ✓ 0.00017×tol | 1.00x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=128 | `cupy.modularity_matrix` | ok | 163.1 µs / 191.6 µs | 835.14 ms | 0.07 MB (hbm) | ✓ 0.00013×tol | 1.54x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=128 | `networkx.modularity_matrix` | ok | 2.96 ms / 3.20 ms | 386.13 ms | 0.07 MB (hbm) | ✓ 0×tol | 27.93x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=128 | `nitrix-jax` | ok | 106.1 µs / 110.7 µs | 356.35 ms | 33.75 MB (hbm) | ✓ 0.00016×tol | 1.00x vs nitrix-jax |
+| modularity_matrix | jax-cpu | n=256 | `cupy.modularity_matrix` | skipped | — | — | — | — | — |
+| modularity_matrix | jax-cpu | n=256 | `networkx.modularity_matrix` | ok | 12.60 ms / 18.38 ms | 445.99 ms | 707 MB (rss) | ✓ 0×tol | 142.72x vs nitrix-jax |
+| modularity_matrix | jax-cpu | n=256 | `nitrix-jax` | ok | 88.3 µs / 140.6 µs | 86.51 ms | 707 MB (rss) | ✓ 0.00026×tol | 1.00x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=256 | `cupy.modularity_matrix` | ok | 127.6 µs / 133.8 µs | 137.13 ms | 0.26 MB (hbm) | ✓ 0.0002×tol | 1.18x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=256 | `networkx.modularity_matrix` | ok | 12.97 ms / 15.77 ms | 412.99 ms | 0.26 MB (hbm) | ✓ 0×tol | 119.54x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=256 | `nitrix-jax` | ok | 108.5 µs / 124.9 µs | 390.58 ms | 33.82 MB (hbm) | ✓ 0.00015×tol | 1.00x vs nitrix-jax |
+| modularity_matrix | jax-cpu | n=512 | `cupy.modularity_matrix` | skipped | — | — | — | — | — |
+| modularity_matrix | jax-cpu | n=512 | `networkx.modularity_matrix` | ok | 52.14 ms / 63.58 ms | 480.82 ms | 707 MB (rss) | ✓ 0×tol | 340.95x vs nitrix-jax |
+| modularity_matrix | jax-cpu | n=512 | `nitrix-jax` | ok | 152.9 µs / 205.5 µs | 106.73 ms | 707 MB (rss) | ✓ 0.00026×tol | 1.00x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=512 | `cupy.modularity_matrix` | ok | 125.0 µs / 131.2 µs | 152.10 ms | 1.05 MB (hbm) | ✓ 0.00023×tol | 1.18x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=512 | `networkx.modularity_matrix` | ok | 50.81 ms / 53.73 ms | 486.99 ms | 1.05 MB (hbm) | ✓ 0×tol | 481.47x vs nitrix-jax |
+| modularity_matrix | jax-cuda12 | n=512 | `nitrix-jax` | ok | 105.5 µs / 114.9 µs | 381.59 ms | 34.61 MB (hbm) | ✓ 0.00019×tol | 1.00x vs nitrix-jax |
+:::
+
+*source: bench `698e0cc7` · nitrix `88a23053`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:modularity_matrix -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

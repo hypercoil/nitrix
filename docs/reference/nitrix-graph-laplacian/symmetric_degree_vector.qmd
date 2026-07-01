@@ -1,0 +1,49 @@
+---
+title: "symmetric_degree_vector"
+generated: true
+description: "Degree of the symmetrised adjacency $W =  tfrac{1}{2}(A + A^{ top})$."
+---
+
+[‹ back to `nitrix.graph.laplacian`](../nitrix-graph-laplacian.qmd)
+
+<!-- nitrix:gen sig:symmetric_degree_vector -->
+```python
+symmetric_degree_vector(A: _GraphInput) -> Num[Array, '... n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:symmetric_degree_vector -->
+Degree of the symmetrised adjacency $W = \tfrac{1}{2}(A + A^{\top})$.
+
+The per-node degree is
+$d_i = \tfrac{1}{2}(\sum_j A_{ij} + \sum_j A_{ji}) =
+\tfrac{1}{2}(\text{out-degree} + \text{in-degree})$ -- the degree the
+symmetric normalised Laplacian / affinity must normalise by when `A`
+is **not** symmetric (e.g. a top-k-per-row sparsified affinity).
+Normalising by the bare row-sum out-degree instead uses the wrong
+diagonal, so $\tfrac{1}{2}(D^{-1/2} A D^{-1/2} + (\cdot)^{\top})$
+is no longer $D_W^{-1/2} W D_W^{-1/2}$ and its trivial (constant)
+eigenvalue drifts off $1$ -- the implicit "symmetrise the
+Laplacian, not the adjacency" error.  Equals [`degree_vector`](../nitrix-graph-laplacian/degree_vector.qmd)
+exactly for symmetric `A`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:symmetric_degree_vector -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `_GraphInput` | — | — | Adjacency operator: dense `(..., n, n)`, [`ELL`](../nitrix-sparse.qmd), or [`SectionedELL`](../nitrix-sparse.qmd). |
+
+**Returns** `Num` — shape `...` × `n`. Per-node degree of the symmetrised adjacency, shape `(..., n)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:symmetric_degree_vector -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

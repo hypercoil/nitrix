@@ -2,59 +2,76 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Connectopy: low-dim embeddings of graph nodes from spectral
-decompositions of (modified) Laplacians.
+Low-dimensional embeddings of graph nodes from spectral decompositions
+of (modified) Laplacians.
 
-Two embeddings:
+This module provides two node embeddings built on the spectrum of a
+normalised graph affinity operator.  Both map each node to a point in a
+low-dimensional Euclidean space whose coordinates are the leading
+non-trivial eigenvectors of that operator, so that proximity in the
+embedding reflects connectivity on the graph.
 
-- ``laplacian_eigenmap`` -- Belkin & Niyogi 2003.  Embed nodes in
-  the bottom-``k`` non-trivial eigenspace of the symmetric
-  normalised Laplacian.
-- ``diffusion_embedding`` -- Coifman & Lafon 2006.  Embed nodes in
-  the top-``k`` non-trivial eigenspace of the density-normalised
-  diffusion operator, scaled by ``lambda^t``.
+- :func:`laplacian_eigenmap` -- the Laplacian eigenmap of Belkin and
+  Niyogi.  Embeds nodes in the bottom-``k`` non-trivial eigenspace of
+  the symmetric normalised Laplacian.
+- :func:`diffusion_embedding` -- the diffusion map of Coifman and Lafon.
+  Embeds nodes in the top-``k`` non-trivial eigenspace of the
+  density-normalised diffusion operator, scaled by :math:`\\lambda^{t}`.
 
-Both build the symmetric affinity operator ``M`` (dense / ELL /
-SectionedELL) and hand the extremal top-k eigendecomposition to the
-dedicated dispatcher ``nitrix.linalg.eigsolve`` (``eigsolve_top_k``).
-The connectopy-specific spectral conventions -- skip the trivial
-constant eigenvector, map ``lambda_L = 1 - lambda_M`` for the
-Laplacian, recover the random-walk right eigenvectors and scale by
-``lambda^t`` for diffusion -- are applied here, uniformly, on the
-dispatcher's largest-first return; the solver choice no longer changes
-that post-processing.
+Both build the symmetric affinity operator :math:`M` (dense,
+:class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`) and
+hand the extremal top-``k`` eigendecomposition to the dedicated
+dispatcher :func:`~nitrix.linalg._eigsolve.eigsolve_top_k`.  The
+embedding-specific spectral conventions -- skipping the trivial constant
+eigenvector, mapping :math:`\\lambda_L = 1 - \\lambda_M` for the
+Laplacian, recovering the random-walk right eigenvectors, and scaling by
+:math:`\\lambda^{t}` for the diffusion map -- are applied here,
+uniformly, on the dispatcher's largest-first return; the solver choice
+does not change that post-processing.
 
-Solver methods (``solver=`` / ``preconditioner=``) map onto the
-dispatcher's ``SolverSpec``:
+The solver knobs (``solver`` / ``preconditioner``) map onto the
+dispatcher's :class:`~nitrix.linalg._eigsolve.SolverSpec`:
 
-- ``"eigh"``         -- dense full spectrum, sliced to the top-k.
-  Required for dense; not available for ELL / SectionedELL.
-- ``"lobpcg"``       -- iterative top-k; the default for sparse, scales
-  to ``n ~ 1M+``.
+- ``"eigh"`` -- dense full spectrum, sliced to the top-``k``.  Required
+  for dense input; not available for
+  :class:`~nitrix.sparse.ELL` / :class:`~nitrix.sparse.SectionedELL`.
+- ``"lobpcg"`` -- iterative top-``k``; the default for sparse input,
+  scaling to ``n ~ 1M+``.
 - ``"shift_invert"`` -- matrix-free shift-invert (far fewer outer
-  iterations on clustered low-Laplacian spectra; dense / ELL /
-  SectionedELL).
+  iterations on clustered low-Laplacian spectra; dense,
+  :class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`).
 - ``preconditioner="polynomial"`` -- the matvec-only shifted-power
-  spectral filter (dense / ELL / SectionedELL).
+  spectral filter (dense,
+  :class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`).
 - ``"auto"`` (default) -- ``eigh`` for dense, ``lobpcg`` for sparse.
-  (Shift-invert / polynomial on sparse are served only on explicit
-  request, not auto-selected.)
+  (Shift-invert and polynomial on sparse input are served only on
+  explicit request, not auto-selected.)
 
 Differentiability
 -----------------
 
-- ``"eigh"``: differentiable via ``jnp.linalg.eigh``'s registered VJP.
-- ``"lobpcg"`` / ``"shift_invert"`` / ``"polynomial"`` with **dense,
-  ELL, or SectionedELL** input: differentiable via the implicit-VJP in
-  ``linalg._eigsolve`` (Hellmann-Feynman eigenvalue gradient + the
-  F-matrix subspace projector for the eigenvector gradient; exact for
-  in-subspace losses, biased for losses on the orthogonal complement of
-  the returned top-``k`` subspace; near-degenerate denominators clamped
-  by ``eps_clamp``).  For ELL the gradient is projected onto the
-  sparsity pattern; for SectionedELL onto each section's ``values``.
+- ``"eigh"``: differentiable via the registered VJP of ``jnp.linalg.eigh``.
+- ``"lobpcg"`` / ``"shift_invert"`` / ``"polynomial"`` with dense,
+  :class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`
+  input: differentiable via the implicit VJP of the eigensolver (a
+  Hellmann-Feynman eigenvalue gradient plus the F-matrix subspace
+  projector for the eigenvector gradient; exact for in-subspace losses,
+  biased for losses on the orthogonal complement of the returned
+  top-``k`` subspace; near-degenerate denominators are clamped).  For
+  :class:`~nitrix.sparse.ELL` the gradient is projected onto the sparsity
+  pattern; for :class:`~nitrix.sparse.SectionedELL` onto each section's
+  ``values``.
 
-The brainspace dependency from the legacy code is dropped: every
-required step is expressible in plain JAX.
+Every required step is expressible in plain JAX.
+
+References
+----------
+.. [1] Belkin M, Niyogi P (2003). Laplacian eigenmaps for dimensionality
+       reduction and data representation. Neural Computation 15(6),
+       1373-1396. https://doi.org/10.1162/089976603321780317
+.. [2] Coifman RR, Lafon S (2006). Diffusion maps. Applied and
+       Computational Harmonic Analysis 21(1), 5-30.
+       https://doi.org/10.1016/j.acha.2006.04.006
 """
 
 from __future__ import annotations
@@ -119,19 +136,45 @@ def _spec_from(
     lobpcg_tol: Optional[float],
     promise_symmetry: bool,
 ) -> SolverSpec:
-    """Map the connectopy ``(solver, preconditioner)`` vocabulary to a
-    ``SolverSpec`` for ``eigsolve_top_k``.
+    """Map the ``(solver, preconditioner)`` vocabulary to a solver spec.
+
+    Translates this module's ``(solver, preconditioner)`` selection into a
+    :class:`~nitrix.linalg._eigsolve.SolverSpec` for
+    :func:`~nitrix.linalg._eigsolve.eigsolve_top_k`.
 
     ``preconditioner='polynomial'`` selects the matvec-only spectral filter
     in place of plain LOBPCG -- it overrides ``'auto'`` / ``'eigh'`` /
-    ``'lobpcg'`` but not an explicit ``'shift_invert'`` (the historical
-    behaviour: the shift-invert path ignored the preconditioner).  ``'auto'``
-    is deferred to the dispatcher's format-based policy (dense -> ``eigh``,
-    sparse -> ``lobpcg``), carrying the LOBPCG knobs in case it resolves to
+    ``'lobpcg'`` but not an explicit ``'shift_invert'`` (the shift-invert
+    path ignores the preconditioner).  ``'auto'`` is deferred to the
+    dispatcher's format-based policy (dense to ``eigh``, sparse to
+    ``lobpcg``), carrying the LOBPCG knobs in case it resolves to
     ``lobpcg``.
 
-    ``promise_symmetry`` is forwarded to every iterative spec (it is a
-    no-op for dense ``eigh``, whose operator is symmetrised when built).
+    Parameters
+    ----------
+    solver
+        Requested solver family: ``'auto'``, ``'eigh'``, ``'lobpcg'``, or
+        ``'shift_invert'``.
+    preconditioner
+        LOBPCG acceleration: ``'none'`` or ``'polynomial'``.  When
+        ``'polynomial'`` and ``solver`` is not ``'shift_invert'``, the
+        polynomial-filter spec is returned regardless of ``solver``.
+    lobpcg_iters
+        Maximum LOBPCG iterations, forwarded to the ``lobpcg`` and
+        ``auto`` specs.
+    lobpcg_tol
+        LOBPCG residual tolerance (or ``None`` for the JAX default),
+        forwarded to the ``lobpcg`` and ``auto`` specs.
+    promise_symmetry
+        Whether the caller guarantees the operator is symmetric.  Forwarded
+        to every iterative spec; a no-op for dense ``eigh``, whose operator
+        is symmetrised when built.
+
+    Returns
+    -------
+    SolverSpec
+        The solver specification passed to
+        :func:`~nitrix.linalg._eigsolve.eigsolve_top_k`.
     """
     if preconditioner == 'polynomial' and solver != 'shift_invert':
         return SolverSpec.poly(
@@ -172,12 +215,28 @@ def _scale_by_outer(
     left: Float[Array, '... n'],
     right: Float[Array, '... n'],
 ) -> _GraphInput:
-    """Scale ``A_{ij}`` by ``left[i] * right[j]`` over dense / ELL /
-    SectionedELL.
+    """Scale entry :math:`A_{ij}` by ``left[i] * right[j]``.
 
-    The sparsity pattern is preserved (diagonal scaling on both sides
-    is structure-preserving).  Returns a new operand of the same
-    type; values are scaled.
+    Applies a two-sided diagonal scaling to a dense,
+    :class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`
+    operand.  The sparsity pattern is preserved (diagonal scaling on both
+    sides is structure-preserving); a new operand of the same type is
+    returned with only its values scaled.
+
+    Parameters
+    ----------
+    A
+        The operator to scale: dense ``(..., n, n)``,
+        :class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`.
+    left
+        Left (row) scaling vector, shape ``(..., n)``.
+    right
+        Right (column) scaling vector, shape ``(..., n)``.
+
+    Returns
+    -------
+    _GraphInput
+        The scaled operator, same type and sparsity pattern as ``A``.
     """
     if isinstance(A, ELL):
         right_at_idx = right[A.indices]
@@ -217,30 +276,55 @@ def _build_affinity_operator(
     eps: float = 1e-12,
     promise_symmetry: bool = False,
 ) -> Tuple[_GraphInput, Float[Array, '... n']]:
-    """Return ``(M, inv_sqrt_d2)`` for the normalised affinity operator.
+    """Build the normalised affinity operator and its inverse-sqrt degree.
 
-    The graph is treated as the symmetrised adjacency ``W = ½(A + Aᵀ)`` (``A``
-    need not be symmetric), so every degree below is the **symmetric** degree
-    ``½(out + in)`` of ``W`` -- not the row-sum out-degree of ``A`` (which
-    would normalise by the wrong diagonal and shift the trivial eigenvalue off
-    ``1``).
+    The graph is treated as the symmetrised adjacency
+    :math:`W = \\tfrac{1}{2}(A + A^{\\top})` (``A`` need not be symmetric),
+    so every degree below is the *symmetric* degree
+    :math:`\\tfrac{1}{2}(\\mathrm{out} + \\mathrm{in})` of :math:`W` -- not
+    the row-sum out-degree of :math:`A` (which would normalise by the wrong
+    diagonal and shift the trivial eigenvalue off :math:`1`).
 
     For ``alpha == 0`` the operator is
-    ``M = D^(-1/2) A D^(-1/2)`` symmetrised to ``D_W^(-1/2) W D_W^(-1/2)`` (the
-    affinity matrix of the symmetric normalised Laplacian of ``W``).  For
-    ``alpha > 0`` the operator is the Coifman-Lafon diffusion operator
-    ``M_alpha = D_2^(-1/2) K_alpha D_2^(-1/2)`` where
-    ``K_alpha = A / (d^alpha d^alpha.T)`` is the density-normalised
-    affinity and ``d_2`` is its row sums.
+    :math:`M = D^{-1/2} A D^{-1/2}`, symmetrised to
+    :math:`D_W^{-1/2} W D_W^{-1/2}` (the affinity matrix of the symmetric
+    normalised Laplacian of :math:`W`).  For ``alpha > 0`` the operator is
+    the Coifman-Lafon diffusion operator
+    :math:`M_\\alpha = D_2^{-1/2} K_\\alpha D_2^{-1/2}`, where
+    :math:`K_\\alpha = A / (d^{\\alpha} (d^{\\alpha})^{\\top})` is the
+    density-normalised affinity and :math:`d_2` is its row sums.
 
-    Returns the *concrete* operator (dense or ELL / SectionedELL,
-    matching the input format), not a closure.  The returned operator
-    is passed directly to ``eigsolve_top_k``.
+    Parameters
+    ----------
+    A
+        Adjacency / affinity matrix: dense ``(..., n, n)``,
+        :class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`.
+    alpha
+        Density-normalisation exponent.  ``0`` yields the plain symmetric
+        normalised affinity; ``> 0`` yields the density-normalised diffusion
+        operator.  Default ``0``.
+    eps
+        Degree floor, so that isolated nodes do not divide by zero.
+        Default ``1e-12``.
+    promise_symmetry
+        Sparse inputs only.  When ``True`` the adjacency is asserted
+        symmetric, so the plain out-degree is used and the adjoint
+        (in-degree) pass is skipped; when ``False`` (default) the symmetric
+        degree is used, matching the matvec symmetrisation applied by the
+        solver.  Ignored for dense ``A`` (always symmetrised).
 
-    ``inv_sqrt_d2`` is what one multiplies the eigenvectors of
-    ``M_alpha`` by to recover the right eigenvectors of the
-    random-walk diffusion operator ``P``.  For the Laplacian-
-    eigenmap path (``alpha = 0``) the caller ignores it.
+    Returns
+    -------
+    M : _GraphInput
+        The concrete normalised affinity operator (same format as ``A``,
+        not a closure), passed directly to
+        :func:`~nitrix.linalg._eigsolve.eigsolve_top_k`.
+    inv_sqrt_d2 : Float[Array, '... n']
+        The inverse square root of the (density-normalised) degree, shape
+        ``(..., n)``.  Multiplying the eigenvectors of :math:`M_\\alpha` by
+        it recovers the right eigenvectors of the random-walk diffusion
+        operator :math:`P`.  Ignored on the Laplacian-eigenmap path
+        (``alpha = 0``).
     """
     # The normalisation degree MUST match the operator symmetrisation, and both
     # are governed by the same ``promise_symmetry`` opt-in:
@@ -301,15 +385,49 @@ def _affinity_top_k(
     Float[Array, 'n n_components'],
     Float[Array, '... n'],
 ]:
-    """Build the affinity operator and return its top non-trivial
-    eigenpairs (largest-first) plus ``inv_sqrt_d2``.
+    """Build the affinity operator and return its top non-trivial eigenpairs.
 
-    Drops the trivial leading eigenpair (the constant eigenvector, the
-    *largest* affinity eigenvalue) when ``skip_trivial``.  The
-    convention-specific transforms (``1 - mu`` / ``lambda^t`` / right-
-    eigenvector recovery) are applied by the caller.  ``promise_symmetry``
-    selects the normalisation degree (symmetric vs out-degree) to match the
-    solver's matvec.
+    Constructs the normalised affinity operator, solves for its
+    largest-first extremal eigenpairs, and drops the trivial leading
+    eigenpair (the constant eigenvector, the *largest* affinity eigenvalue)
+    when ``skip_trivial`` is set.  The convention-specific transforms
+    (:math:`1 - \\mu`, :math:`\\lambda^{t}`, right-eigenvector recovery) are
+    left to the caller.
+
+    Parameters
+    ----------
+    A
+        Adjacency / affinity matrix: dense ``(..., n, n)``,
+        :class:`~nitrix.sparse.ELL`, or :class:`~nitrix.sparse.SectionedELL`.
+    alpha
+        Density-normalisation exponent passed to the affinity operator.
+    n_components
+        Number of non-trivial eigenpairs to return.
+    skip_trivial
+        Drop the trivial leading eigenpair before returning.  When set, one
+        extra eigenpair is solved for and discarded.
+    eps
+        Degree floor for the normalisation.
+    spec
+        The eigensolver specification
+        (:class:`~nitrix.linalg._eigsolve.SolverSpec`).
+    seed
+        PRNG seed for the iterative solver's initial guess.
+    promise_symmetry
+        Whether to assume the adjacency is symmetric; selects the
+        normalisation degree (symmetric vs out-degree) to match the solver's
+        matvec.
+
+    Returns
+    -------
+    vals : Float[Array, 'n_components']
+        The non-trivial eigenvalues of the affinity operator, largest-first,
+        shape ``(n_components,)``.
+    vecs : Float[Array, 'n n_components']
+        The corresponding eigenvectors, shape ``(n, n_components)``.
+    inv_sqrt_d2 : Float[Array, '... n']
+        The inverse square root of the (density-normalised) degree, shape
+        ``(..., n)``, for random-walk right-eigenvector recovery.
     """
     M, inv_sqrt_d2 = _build_affinity_operator(
         A, alpha=alpha, eps=eps, promise_symmetry=promise_symmetry
@@ -347,20 +465,21 @@ def laplacian_eigenmap(
 ]:
     """Laplacian-eigenmap embedding of graph nodes.
 
-    Embeds nodes in the bottom-``n_components`` non-trivial
-    eigenspace of the symmetric normalised Laplacian
-    ``L = I - D^(-1/2) A D^(-1/2)``.  The smallest eigenvalue is the
-    trivial zero (constant eigenvector); ``skip_trivial=True``
-    (default) discards it.
+    Embeds nodes in the bottom-``n_components`` non-trivial eigenspace of
+    the symmetric normalised Laplacian
+    :math:`L = I - D^{-1/2} A D^{-1/2}`.  The smallest eigenvalue is the
+    trivial zero (constant eigenvector); ``skip_trivial=True`` (default)
+    discards it.
 
     Parameters
     ----------
     A
-        Adjacency matrix: dense ``(n, n)``, ``ELL``, or
-        ``SectionedELL``.  Non-negative.  Treated as symmetric: dense is
-        symmetrised when the operator is built, and sparse inputs are
-        symmetrised at the matvec by default (``promise_symmetry=False``),
-        so a top-k-sparsified affinity needs no pre-symmetrisation.
+        Adjacency matrix: dense ``(n, n)``, :class:`~nitrix.sparse.ELL`, or
+        :class:`~nitrix.sparse.SectionedELL`.  Non-negative.  Treated as
+        symmetric: dense is symmetrised when the operator is built, and
+        sparse inputs are symmetrised at the matvec by default
+        (``promise_symmetry=False``), so a top-``k``-sparsified affinity
+        needs no pre-symmetrisation.
     n_components
         Embedding dimensionality.
     solver
@@ -380,20 +499,23 @@ def laplacian_eigenmap(
         / ELL / SectionedELL.  Requesting it routes the solve to the
         polynomial-filter method so the preconditioner is honoured.
     promise_symmetry
-        Sparse (ELL / SectionedELL) inputs only.  ``False`` (default)
-        symmetrises the operator at the matvec level -- the solver applies
-        ``½(A x + Aᵀ x) = D_W^{-1/2} sym(A) D_W^{-1/2} x``, matching the dense
-        path exactly -- and normalises by the **symmetric degree**
-        ``d_W = ½(out + in)`` of ``W = ½(A + Aᵀ)``.  This is the **safe** choice
-        for affinities built by top-k-per-row sparsification
-        (``ell_from_dense``), whose stored pattern is generally **not**
-        symmetric.  Set ``True`` only when the adjacency is known symmetric
-        (regular meshes / grids): the solver applies the bare ``A x`` and the
-        normalisation uses the plain out-degree -- skipping both adjoint passes
-        (~2x cheaper).  Because ``A == Aᵀ`` is then promised, out-degree ==
-        ``d_W``, so the result is identical to the default path for a genuinely
-        symmetric input; on an asymmetric input it is the caller's contract
-        violation (as before).  Ignored for dense ``A`` (always symmetrised,
+        Sparse (:class:`~nitrix.sparse.ELL` /
+        :class:`~nitrix.sparse.SectionedELL`) inputs only.  ``False``
+        (default) symmetrises the operator at the matvec level -- the solver
+        applies
+        :math:`\\tfrac{1}{2}(A x + A^{\\top} x) = D_W^{-1/2}\\,\\operatorname{sym}(A)\\,D_W^{-1/2} x`,
+        matching the dense path exactly -- and normalises by the *symmetric
+        degree* :math:`d_W = \\tfrac{1}{2}(\\mathrm{out} + \\mathrm{in})` of
+        :math:`W = \\tfrac{1}{2}(A + A^{\\top})`.  This is the safe choice for
+        affinities built by top-``k``-per-row sparsification, whose stored
+        pattern is generally *not* symmetric.  Set ``True`` only when the
+        adjacency is known symmetric (regular meshes / grids): the solver
+        applies the bare :math:`A x` and the normalisation uses the plain
+        out-degree, skipping both adjoint passes (roughly twice as cheap).
+        Because :math:`A = A^{\\top}` is then promised, out-degree equals
+        :math:`d_W`, so the result is identical to the default path for a
+        genuinely symmetric input; on an asymmetric input it is the caller's
+        contract violation.  Ignored for dense ``A`` (always symmetrised,
         always the symmetric degree).
     skip_trivial
         Drop the trivial zero eigenvalue and the corresponding
@@ -421,14 +543,13 @@ def laplacian_eigenmap(
 
     Notes
     -----
-    - The Laplacian's smallest eigenvalues are computed via the
-      *largest* eigenvalues of the affinity operator
-      ``M = D^(-1/2) A D^(-1/2)`` (using the identity ``L = I - M``,
-      so ``lambda_L = 1 - lambda_M``).  This lets the iterative
-      solvers chase the *largest* eigenvalues of ``M`` -- a much
-      better fit than chasing the smallest with shift-and-invert
-      iterations.
-    - ``lobpcg`` requires ``5 * (n_components + 1) < n`` (a JAX
+    - The Laplacian's smallest eigenvalues are computed via the *largest*
+      eigenvalues of the affinity operator
+      :math:`M = D^{-1/2} A D^{-1/2}` (using the identity :math:`L = I - M`,
+      so :math:`\\lambda_L = 1 - \\lambda_M`).  This lets the iterative
+      solvers chase the *largest* eigenvalues of :math:`M` -- a much better
+      fit than chasing the smallest with shift-and-invert iterations.
+    - The ``lobpcg`` solver requires ``5 * (n_components + 1) < n`` (a JAX
       constraint on the search subspace).  For tiny graphs, use
       ``solver="eigh"`` instead.
     """
@@ -479,18 +600,18 @@ def diffusion_embedding(
 ]:
     """Coifman-Lafon diffusion-map embedding.
 
-    Eigendecomposes the symmetric companion of the diffusion
-    operator and scales by ``lambda^t``.  Returns the top
-    ``n_components`` largest eigenpairs (the diffusion-map
-    convention: largest eigenvalue first, descending).
+    Eigendecomposes the symmetric companion of the diffusion operator and
+    scales each eigenvector by :math:`\\lambda^{t}`.  Returns the top
+    ``n_components`` largest eigenpairs (the diffusion-map convention:
+    largest eigenvalue first, descending).
 
     Parameters
     ----------
     A
-        Affinity / adjacency matrix: dense, ``ELL``, or
-        ``SectionedELL``.  Non-negative.  Treated as symmetric (see
-        ``promise_symmetry``); a top-k-sparsified affinity needs no
-        pre-symmetrisation.
+        Affinity / adjacency matrix: dense, :class:`~nitrix.sparse.ELL`, or
+        :class:`~nitrix.sparse.SectionedELL`.  Non-negative.  Treated as
+        symmetric (see ``promise_symmetry``); a top-``k``-sparsified affinity
+        needs no pre-symmetrisation.
     n_components
         Embedding dimensionality.
     alpha
@@ -501,7 +622,7 @@ def diffusion_embedding(
         Diffusion time (real).  ``0`` returns raw eigenvectors;
         ``t > 0`` emphasises low-frequency components.
     solver, preconditioner, promise_symmetry, skip_trivial, eps, lobpcg_iters, lobpcg_tol, seed
-        See ``laplacian_eigenmap``.
+        See :func:`laplacian_eigenmap`.
 
     Returns
     -------
@@ -541,11 +662,27 @@ def _scale_by_lambda_t(
     vals: Float[Array, 'k'],
     t: float,
 ) -> Float[Array, 'n k']:
-    """Scale each eigenvector by ``|lambda|^t * sign(lambda)``.
+    """Scale each eigenvector by :math:`|\\lambda|^{t}\\,\\operatorname{sign}(\\lambda)`.
 
-    Used for the diffusion-map ``t > 0`` case.  Negative eigenvalues
-    are guarded via ``|.|`` to avoid complex powers; sign is
+    Used for the diffusion-map ``t > 0`` case.  Negative eigenvalues are
+    guarded via the absolute value to avoid complex powers; the sign is
     preserved so the eigenvector retains its parity.
+
+    Parameters
+    ----------
+    vecs
+        Eigenvectors to scale, shape ``(n, k)`` (one column per eigenpair).
+    vals
+        Corresponding eigenvalues, shape ``(k,)``.
+    t
+        Diffusion time; the exponent applied to each eigenvalue's magnitude.
+
+    Returns
+    -------
+    Float[Array, 'n k']
+        The eigenvectors scaled column-wise by
+        :math:`|\\lambda|^{t}\\,\\operatorname{sign}(\\lambda)`, shape
+        ``(n, k)``.
     """
     scale = jnp.where(
         vals >= 0,

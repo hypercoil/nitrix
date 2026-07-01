@@ -1,0 +1,78 @@
+---
+title: "coaffiliation"
+generated: true
+description: "Coaffiliation matrix from a (soft) community-assignment."
+---
+
+[‹ back to `nitrix.graph.community`](../nitrix-graph-community.qmd)
+
+<!-- nitrix:gen sig:coaffiliation -->
+```python
+coaffiliation(C: Num[Array, '... n k'], C_other: Optional[Num[Array, '... n k']] = None, *, bridge: Optional[Num[Array, '... k k']] = None, exclude_diag: bool = True, normalise: bool = False) -> Num[Array, '... n n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:coaffiliation -->
+Coaffiliation matrix from a (soft) community-assignment.
+
+For a hard partition with one-hot rows in `C`, the result is
+`1` where nodes share a community and `0` otherwise.  For
+soft / overlapping assignments the result is the inner product
+of the assignment vectors.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:coaffiliation -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `C` | `Num` | `...` × `n` × `k` | — | Community-assignment matrix, `(..., n, k)`. |
+| `C_other` | `Optional[Num[Array, '... n k']]` | — | `None` | Optional second assignment (asymmetric / bipartite cases). |
+| `bridge` | `Optional[Num[Array, '... k k']]` | — | `None` | Optional `(k, k)` mapping between community indices. Result is `C @ bridge @ C_other.T`. |
+| `exclude_diag` | `bool` | — | `True` | Zero the diagonal of the result. Default `True`: a node is trivially co-affiliated with itself and including that contribution biases modularity-like scores. |
+| `normalise` | `bool` | — | `False` | Normalise `C` and `C_other` by their maximum value before the outer product. Useful when assignments are unnormalised logits. |
+
+**Returns** `Num` — shape `...` × `n` × `n`. The coaffiliation matrix $C\,C_{\mathrm{other}}^{\top}$ (or $C\,\mathrm{bridge}\,C_{\mathrm{other}}^{\top}$ when `bridge` is given), with the diagonal zeroed when `exclude_diag` is `True`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:coaffiliation -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **106.8 µs** (median, L4); up to **4.37× faster** than `numpy.coaffiliation`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_COAFFILIATION.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| coaffiliation | jax-cpu | n=128 | `cupy.coaffiliation` | skipped | — | — | — | — | — |
+| coaffiliation | jax-cpu | n=128 | `nitrix-jax` | ok | 32.4 µs / 34.7 µs | 70.33 ms | 706 MB (rss) | ✓ 0.00025×tol | 1.00x vs nitrix-jax |
+| coaffiliation | jax-cpu | n=128 | `numpy.coaffiliation` | ok | 27.4 µs / 29.0 µs | 76.9 µs | 706 MB (rss) | ✓ 0.00025×tol | 0.85x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=128 | `cupy.coaffiliation` | ok | 113.1 µs / 116.5 µs | 126.01 ms | 0.01 MB (hbm) | ✓ 0.00017×tol | 1.08x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=128 | `nitrix-jax` | ok | 104.7 µs / 106.8 µs | 209.49 ms | 71.44 MB (hbm) | ✓ 0.00016×tol | 1.00x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=128 | `numpy.coaffiliation` | ok | 30.4 µs / 31.0 µs | 77.8 µs | 0.01 MB (hbm) | ✓ 0.00025×tol | 0.29x vs nitrix-jax |
+| coaffiliation | jax-cpu | n=256 | `cupy.coaffiliation` | skipped | — | — | — | — | — |
+| coaffiliation | jax-cpu | n=256 | `nitrix-jax` | ok | 93.8 µs / 98.5 µs | 98.72 ms | 706 MB (rss) | ✓ 0.00025×tol | 1.00x vs nitrix-jax |
+| coaffiliation | jax-cpu | n=256 | `numpy.coaffiliation` | ok | 132.2 µs / 132.8 µs | 206.6 µs | 706 MB (rss) | ✓ 0.00025×tol | 1.41x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=256 | `cupy.coaffiliation` | ok | 112.0 µs / 116.2 µs | 121.48 ms | 0.02 MB (hbm) | ✓ 0.00018×tol | 1.02x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=256 | `nitrix-jax` | ok | 109.7 µs / 117.7 µs | 251.45 ms | 71.84 MB (hbm) | ✓ 0.00025×tol | 1.00x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=256 | `numpy.coaffiliation` | ok | 132.3 µs / 134.1 µs | 203.8 µs | 0.02 MB (hbm) | ✓ 0.00025×tol | 1.21x vs nitrix-jax |
+| coaffiliation | jax-cpu | n=512 | `cupy.coaffiliation` | skipped | — | — | — | — | — |
+| coaffiliation | jax-cpu | n=512 | `nitrix-jax` | ok | 222.7 µs / 297.0 µs | 109.96 ms | 706 MB (rss) | ✓ 0.00028×tol | 1.00x vs nitrix-jax |
+| coaffiliation | jax-cpu | n=512 | `numpy.coaffiliation` | ok | 474.0 µs / 475.4 µs | 1.65 ms | 706 MB (rss) | ✓ 0.00028×tol | 2.13x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=512 | `cupy.coaffiliation` | ok | 113.7 µs / 120.0 µs | 108.84 ms | 0.03 MB (hbm) | ✓ 0.00021×tol | 1.06x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=512 | `nitrix-jax` | ok | 107.3 µs / 110.6 µs | 239.80 ms | 74.45 MB (hbm) | ✓ 0.00028×tol | 1.00x vs nitrix-jax |
+| coaffiliation | jax-cuda12 | n=512 | `numpy.coaffiliation` | ok | 468.7 µs / 471.2 µs | 600.6 µs | 0.03 MB (hbm) | ✓ 0.00028×tol | 4.37x vs nitrix-jax |
+:::
+
+*source: bench `8157e508` · nitrix `32fd5ab9`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:coaffiliation -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

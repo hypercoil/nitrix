@@ -4,21 +4,21 @@
 """
 Encoder-decoder pooling primitives with index-bookkeeping.
 
-``max_pool_with_indices_nd`` records the per-window argmax position
-during the pool, returning *both* the pooled values and the
-per-output integer indices.  ``max_unpool_nd`` scatters values
-back into a higher-resolution grid at those same positions.  The
-pair is what an "indices-aware" U-Net / V-Net encoder-decoder uses
-to preserve spatial localisation across the bottleneck.
+:func:`max_pool_with_indices_nd` records the per-window argmax
+position during the pool, returning *both* the pooled values and
+the per-output integer indices.  :func:`max_unpool_nd` scatters
+values back into a higher-resolution grid at those same positions.
+The pair is what an "indices-aware" U-Net / V-Net encoder-decoder
+uses to preserve spatial localisation across the bottleneck.
 
 Family
 ------
 
-These belong with ``dilate`` and ``erode`` in
-``nitrix.morphology``: both ``max_pool_with_indices_nd`` and
-``dilate`` are max-window reductions; the only difference is that
-pooling **strides** the window (one output per stride'd position)
-while dilation keeps the spatial shape.
+These belong with :func:`dilate` and :func:`erode` in
+``nitrix.morphology``: both :func:`max_pool_with_indices_nd` and
+:func:`dilate` are max-window reductions; the only difference is
+that pooling **strides** the window (one output per stride'd
+position) while dilation keeps the spatial shape.
 
 Channel-first layout
 --------------------
@@ -36,8 +36,9 @@ explicitly: argmax-based pooling is **fragile to cross-framework
 float noise**.  When the encoder accumulates ~1e-3 max abs
 difference between JAX and torch (typical for a 4-level Conv3D
 cascade), the per-window argmax can flip at ~0.02-0.03% of voxels
-where two neighbours are nearly equal.  The matching unpool then
-scatters values to slightly different positions, producing O(10)
+where two neighbours are nearly equal.  The matching
+:func:`max_unpool_nd` then scatters values to slightly different
+positions, producing O(10)
 per-voxel raw-logit differences.  At the semantic level (per-voxel
 class via argmax over channel axis) this is harmless -- the
 inter-class ordering is preserved.
@@ -126,7 +127,7 @@ def max_pool_with_indices_nd(
     - ``indices``: same shape as ``pooled``.  Each entry is the
       flattened C-order index (into the *unbatched, single-channel*
       spatial grid) of the argmax voxel for that output position.
-      ``max_unpool_nd`` consumes this directly.
+      :func:`max_unpool_nd` consumes this directly.
 
     Notes
     -----
@@ -253,8 +254,8 @@ def max_unpool_nd(
         Pooled values, ``(..., C, *pooled_spatial)``.
     indices
         Flat indices (per-channel, in C-order over the unbatched
-        spatial grid) as produced by ``max_pool_with_indices_nd``.
-        Same shape as ``x``.
+        spatial grid) as produced by
+        :func:`max_pool_with_indices_nd`.  Same shape as ``x``.
     output_shape
         Target spatial shape (length ``spatial_rank``).  Determines
         the resolution we're unpooling into.

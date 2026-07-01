@@ -3,25 +3,36 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.graph -- graph-theoretic primitives.
+Graph-theoretic primitives.
 
-Submodules:
+Differentiable operators over graphs and meshes, spanning graph Laplacians,
+modularity and community structure, spectral embeddings, and functional
+parcellation. Operators are multi-format (dense, ELL, and SectionedELL sparse
+storage) wherever the underlying mathematics admits it.
 
-- ``laplacian``  -- ``laplacian``, ``laplacian_matvec``,
-  ``degree_vector``.  Multi-format (dense, ELL, SectionedELL) where
-  the math admits.
-- ``community``  -- modularity-related operators: ``girvan_newman_null``,
-  ``modularity_matrix`` (dense), ``modularity_matrix_matvec``
-  (sparse-friendly), ``coaffiliation``, ``relaxed_modularity``
-  (dense + sparse-aware factored path).
-- ``connectopy`` -- ``laplacian_eigenmap`` and ``diffusion_embedding``
-  with both dense (``eigh``) and sparse (``lobpcg``) solver paths.
-- ``parcellation`` -- functional-parcellation steps: ``surface_boundary_map``
-  (connectivity-profile boundary detection, composing
-  ``semiring_ell_edge_aggregate``) + ``eta_squared`` similarity, and
-  ``mesh_watershed`` (host-side priority-flood basins on a vertex field).
+The subsystem is organised into four groups of operators.
 
-See SPEC §4.9, SPEC §6.1, and IMPLEMENTATION_PLAN §6.1 tasks 3.5-3.7.
+Laplacian
+    :func:`laplacian`, :func:`laplacian_matvec`, and the degree vectors
+    :func:`degree_vector`, :func:`in_degree_vector`, and
+    :func:`symmetric_degree_vector`.
+
+Community structure
+    Modularity-related operators: :func:`girvan_newman_null`,
+    :func:`modularity_matrix` (dense), :func:`modularity_matrix_matvec`
+    (sparse-friendly), :func:`coaffiliation`, and :func:`relaxed_modularity`
+    (dense plus a sparse-aware factored path).
+
+Connectopy
+    Spectral embeddings: :func:`laplacian_eigenmap` and
+    :func:`diffusion_embedding`, each with both a dense (``eigh``) and a
+    sparse (``lobpcg``) solver path.
+
+Parcellation
+    Functional-parcellation steps: :func:`surface_boundary_map`
+    (connectivity-profile boundary detection) and :func:`eta_squared`
+    similarity, together with :func:`mesh_watershed` (host-side
+    priority-flood basins on a vertex field).
 """
 
 from .laplacian import (

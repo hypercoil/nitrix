@@ -4,17 +4,17 @@
 """
 Median filter -- a gather-based op, deliberately *not* a semiring op.
 
-Per SPEC §4.3, the true median requires materialising the
-full neighbourhood at each output position because the state size
-for a streaming reduction is unbounded in K.  For the small
-neighbourhoods morphology targets (3×3 = 9 voxels, 3×3×3 = 27 voxels,
-mesh k-rings of O(10s)) the materialisation is fine: implement as
-``gather → jnp.nanmedian``, no streaming kernel.
+The true median requires materialising the full neighbourhood at each
+output position, because the state size for a streaming reduction is
+unbounded in the window size.  For the small neighbourhoods morphology
+targets (3x3 = 9 voxels, 3x3x3 = 27 voxels, mesh k-rings of tens of
+neighbours) the materialisation is fine: the op gathers each window and
+applies :func:`jax.numpy.nanmedian`, with no streaming kernel.
 
-NaN-safe boundary handling: we pad the spatial dims with NaN before
-the gather and compute ``jnp.nanmedian`` over the kspatial axes.
-This is the morphological analogue of "ignore boundary positions"
-without needing an algebra identity (median has no identity in the
+NaN-safe boundary handling: the spatial dims are padded with NaN before
+the gather and :func:`jax.numpy.nanmedian` is computed over the window
+axes.  This is the morphological analogue of "ignore boundary positions"
+without needing an algebra identity (the median has no identity in the
 semiring sense).
 """
 
@@ -43,7 +43,24 @@ def _normalise_size(
 
 
 def _pad_lo_hi(kspatial: Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
-    """SAME-style ``(lo, hi)`` per spatial dim for an odd-size kernel."""
+    """Compute SAME-style ``(lo, hi)`` padding per spatial dim.
+
+    For each window extent the low and high pad widths sum to the extent
+    minus one, splitting evenly for odd-size kernels so that the output
+    retains the input spatial shape.
+
+    Parameters
+    ----------
+    kspatial
+        Window extent along each spatial dimension, one entry per
+        spatial axis.
+
+    Returns
+    -------
+    tuple of tuple of int
+        A ``(lo, hi)`` pad-width pair for each spatial dimension, in the
+        same order as ``kspatial``.
+    """
     return tuple(((d - 1) // 2, d - 1 - (d - 1) // 2) for d in kspatial)
 
 
@@ -54,46 +71,53 @@ def median_filter(
     structuring_element: Optional[Num[Array, '*kspatial']] = None,
     padding: str = 'SAME',
 ) -> Num[Array, '... *spatial']:
-    """Median filter via NaN-safe gather + ``jnp.nanmedian``.
+    """Apply a median filter via a NaN-safe gather and :func:`jax.numpy.nanmedian`.
+
+    Each output position takes the median over its local window.  The
+    window is materialised by gathering neighbouring positions along the
+    spatial axes; excluded and out-of-bounds positions are set to ``NaN``
+    so that :func:`jax.numpy.nanmedian` ignores them.
 
     Parameters
     ----------
     x
-        Single-channel input, ``(..., *spatial)``.  *All* dims of
-        ``x`` are treated as spatial unless ``size`` / ``structuring_element``
-        pin a lower rank (see ``dilate`` for the same convention).
+        Single-channel input of shape ``(..., *spatial)``.  All dims of
+        ``x`` are treated as spatial unless ``size`` or
+        ``structuring_element`` pins a lower rank (see :func:`dilate`
+        for the same convention).
     size
-        Per-spatial-dim window size, ``int`` (broadcast) or a tuple
-        matching the spatial rank.  Default ``3``.
+        Per-spatial-dim window size: an ``int`` (broadcast across all
+        spatial dims) or a sequence matching the spatial rank.  Ignored
+        when ``structuring_element`` is given, which sets the window from
+        its own shape.  ``None`` (the default) resolves to ``3``.
     structuring_element
-        Boolean / 0-1 mask selecting which positions of the window
-        contribute to the median.  Excluded positions are filled
-        with ``NaN`` so ``nanmedian`` skips them.  Shape
-        ``(*kspatial,)``.  ``None`` means "use every position in the
-        ``size``-cube".
+        Boolean or 0-1 mask of shape ``(*kspatial,)`` selecting which
+        positions of the window contribute to the median.  Excluded
+        positions are set to ``NaN`` so that :func:`jax.numpy.nanmedian`
+        skips them.  ``None`` uses every position in the ``size``-cube.
     padding
-        ``"SAME"`` (default) pads with ``NaN`` along the spatial
-        dims so boundary positions median over the available subset.
-        ``"VALID"`` returns the shrunken interior.
+        ``"SAME"`` (the default) pads the spatial dims with ``NaN`` so
+        that boundary positions take the median over the available
+        subset and the output keeps the input spatial shape.
+        ``"VALID"`` computes only over full windows and returns the
+        shrunken interior.
 
     Returns
     -------
-    Array of the same spatial shape as ``x`` when ``padding="SAME"``.
+    Num[Array, '... *spatial']
+        The filtered array.  Its spatial shape matches ``x`` when
+        ``padding="SAME"`` and is reduced by ``kspatial - 1`` along each
+        spatial dim when ``padding="VALID"``.  The result is promoted to
+        at least float32.
 
     Notes
     -----
-    Perf (profiled on the L4, 256² / size-3, ~5x behind cupy): the cost splits
-    ~90 µs gather + ~210 µs ``nanmedian``, i.e. **the sort dominates** -- and a
-    manual ``jnp.sort`` + valid-count index is no faster (the sort is the same).
-    The only real lever is a *hardcoded sorting network* for the fixed small
-    window (a median-of-K network is ~K compare-exchanges, far fewer than a
-    general sort), but it is non-trivial here: NaN-padded borders make the
-    median index depend on the per-window valid count, so the network is exact
-    only on the all-valid interior and borders need a separate path.  Deferred
-    -- and gated on first giving this case a fidelity oracle in
-    ``nitrix-perf-bench`` (it is currently perf-only; see
-    ``docs/feature-requests/perf-bench-case-hardening.md``), since there is no
-    bench guard against a sorting-network correctness regression.
+    The cost is dominated by the median sort rather than the gather, so a
+    manual sort with a valid-count index is no faster.  A hardcoded
+    sorting network for the fixed small window could reduce the number of
+    compare-exchanges, but NaN-padded borders make the median index depend
+    on the per-window valid count, so such a network would be exact only
+    on the all-valid interior and borders would need a separate path.
     """
     if structuring_element is not None:
         se = jnp.asarray(structuring_element)

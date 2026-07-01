@@ -1,0 +1,47 @@
+---
+title: "in_degree_vector"
+generated: true
+description: "Per-node in-degree (column sum) -- the adjoint of [`degree_vector`](../nitrix-graph-laplacian/degree_vector.qmd)."
+---
+
+[‹ back to `nitrix.graph.laplacian`](../nitrix-graph-laplacian.qmd)
+
+<!-- nitrix:gen sig:in_degree_vector -->
+```python
+in_degree_vector(A: _GraphInput) -> Num[Array, '... n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:in_degree_vector -->
+Per-node in-degree (column sum) -- the adjoint of [`degree_vector`](../nitrix-graph-laplacian/degree_vector.qmd).
+
+For an asymmetric `A` this is the column sum
+$\sum_i A_{ij}$; it equals the (row-sum) out-degree if and only
+if `A` is symmetric.  Computed without materialising
+$A^{\top}$: dense `A.sum(-2)`;
+[`ELL`](../nitrix-sparse.qmd) / [`SectionedELL`](../nitrix-sparse.qmd) via
+the additive adjoint matvec applied to the ones vector
+($A^{\top} \mathbf{1}$) -- one `O(nnz)` pass over the stored
+sparsity pattern (the same adjoint the spectral solvers use for the
+$\tfrac{1}{2}(A x + A^{\top} x)$ symmetric matvec).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:in_degree_vector -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `_GraphInput` | — | — | Adjacency operator: dense `(..., n, n)`, [`ELL`](../nitrix-sparse.qmd), or [`SectionedELL`](../nitrix-sparse.qmd). |
+
+**Returns** `Num` — shape `...` × `n`. Per-node in-degree, shape `(..., n)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:in_degree_vector -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

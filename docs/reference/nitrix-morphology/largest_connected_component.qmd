@@ -1,0 +1,44 @@
+---
+title: "largest_connected_component"
+generated: true
+description: "Boolean mask of the single largest connected foreground region."
+---
+
+[‹ back to `nitrix.morphology`](../nitrix-morphology.qmd)
+
+*Re-exported here; defined in `nitrix.morphology._label`.*
+
+<!-- nitrix:gen sig:largest_connected_component -->
+```python
+largest_connected_component(mask: Bool[Array, '*spatial'], *, connectivity: int = 1) -> Bool[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:largest_connected_component -->
+Boolean mask of the single largest connected foreground region.
+
+Labels the connected foreground regions of `mask` (via
+[`connected_components`](../nitrix-morphology/connected_components.qmd)) and keeps only the component with the
+most voxels; ties are broken towards the lowest label.  An empty input
+(no foreground) yields an all-`False` mask.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:largest_connected_component -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mask` | `Bool` | `*spatial` | — | Boolean (or 0/1) array of shape `(*spatial)`; non-zero entries are foreground. |
+| `connectivity` | `int` | — | `1` | Neighbourhood order in $[1, \mathrm{ndim}]$: `1` selects face neighbours only, while `ndim` includes every diagonal. Follows scipy's $\sum \|\mathrm{offset}\| \leq \mathrm{connectivity}$ rule. |
+
+**Returns** `Bool` — shape `*spatial`. Boolean array of the same shape as `mask` that is `True` only on the single largest connected foreground component, and `False` everywhere else (including everywhere when `mask` has no foreground).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:largest_connected_component -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
