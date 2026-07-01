@@ -88,6 +88,24 @@ see the measurements below.  [full report](https://github.com/hypercoil/nitrix-p
 ::::
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:flame_two_level -->
+::: {.callout-note}
+Single-parameter REML: only $\sigma_b^2$ is estimated;
+`var_within` is fixed at the user-supplied values.  This
+avoids the identifiability problem of the two-parameter
+relaxation (where the model can absorb a free scaling of
+`var_within` into $\sigma_b^2$).  It is implemented as the shared
+diagonalised-REML fit with one free (all-ones) component and a fixed
+per-voxel offset equal to `var_within` -- no per-voxel cuSOLVER call,
+so it runs on the broken-cuSOLVER GPU.
+:::
+
+### References
+
+Woolrich, M. (2008).  Robust group analysis using outlier inference.
+NeuroImage 41, 286-301.  `10.1016/j.neuroimage.2008.02.042`
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:flame_two_level -->
 **Tensor dimensions**

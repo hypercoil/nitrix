@@ -66,6 +66,23 @@ __init__() -> None
 ```
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:CatmullRomCubic -->
+::: {.callout-note}
+The cardinal-cubic basis **is** a partition of unity -- the four weights
+sum to exactly 1 for every `t` (the $t^3$/$t^2$/$t^1$ coefficients
+cancel across the taps) -- so it reproduces constants *and* linear ramps
+exactly (the Keys `a = -1/2` kernel has third-order accuracy).  No
+renormalisation is applied (none is needed -- and the raw cardinal weights
+are what the parity-locked consumers pin against).  The kernel is *not*,
+however, a **convex** combination: the outer taps carry small negative
+weights (the `w_{-1}` / `w_{+2}` lobes reach `~-0.07`), so the output
+can overshoot the local sample range (ringing near sharp edges) -- unlike
+`Linear` (non-negative weights), whose output is bounded by its
+neighbours.  This overshoot is the price of the higher-order fit; where a
+strictly bounded, non-ringing resample is required, prefer `Linear`.
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:CatmullRomCubic -->
 **Tensor dimensions**

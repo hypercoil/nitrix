@@ -47,6 +47,13 @@ __init__(order: int = 3) -> None
 ```
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:Lanczos -->
+::: {.callout-note}
+This is the ANTs *algorithm class*, not bit-exact ITK parity (ITK's
+windowed-sinc radius / normalisation conventions differ in detail).
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:Lanczos -->
 **Tensor dimensions**

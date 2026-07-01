@@ -39,6 +39,14 @@ per-trace, and avoids the cuSOLVER `syevd` on the broken GPU.
 **Returns** `SplineBasis`. The `SplineBasis` for the thin-plate smooth (`kind='tprs'`).
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:thinplate_regression_basis -->
+### References
+
+Wood, S. N. (2003). Thin plate regression splines. *Journal of the Royal
+Statistical Society: Series B (Statistical Methodology)*, 65(1), 95-114.
+https://doi.org/10.1111/1467-9868.00374
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:thinplate_regression_basis -->
 **Tensor dimensions**

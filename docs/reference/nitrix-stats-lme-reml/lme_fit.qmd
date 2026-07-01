@@ -45,6 +45,48 @@ realised path for the cases they already serve.
 **Returns** `Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]`. The fit for the selected tier: a `REMLResult` (R1), an `LMEResult` (R2), a `NestedLMEResult` (R3), a `CorrLMEResult` (R2 + corr), or a `CrossedLMEResult` (R4 crossed).
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:lme_fit -->
+### Dispatch ladder
+
+- **R1** -- one **scalar** random effect (`z` is `None` or a single
+  column): the FaST-LMM spectral `reml_fit` (dense, or q-rank via
+  `low_rank=`).  Returns a `REMLResult` (with the fixed-effect
+  inference fields).  *Bit-for-bit the shipped path.*
+- **R2** -- one **correlated / diagonal** random effect (`z` has `r >= 2`
+  columns, e.g. `[1, x]` for `(1 + x | g)`): the block-Woodbury REML
+  (`_blockwoodbury`) -- per-group `r x r` Woodbury, no `N x N`
+  intermediate, cuSOLVER-free.  Returns an `LMEResult`.
+  `structure='unstructured'` fits a full `r x r` `G`;
+  `structure='diagonal'` constrains `G` to be diagonal -- the
+  uncorrelated `(x || g)` random effect (independent intercept and slope),
+  fitting only the `r` variances (`nt = r + 1` parameters).
+
+- **R3** -- a **nested** two-level hierarchy `(1 | g1/g2)` (pass the inner
+  factor as `inner`; `z` must be `None`): the telescoping-Woodbury
+  nested solver (`_nested`) over the three variance components
+  $[\sigma_1^2, \sigma_2^2, \sigma_e^2]$ -- block-diagonal across
+  `g1`, Sherman-Morrison at each nested level, no $N \times N$
+  intermediate, cuSOLVER-free.  Returns a `NestedLMEResult`.
+- **R2 + corr** -- a random effect **and** a structured within-group residual
+  $\operatorname{Cov}(\epsilon) = \sigma_e^2 R(\rho)$ (pass
+  `corr=` and, for `car1`, `time=`).  Whitening by
+  $R$ reduces each group to a standard block-Woodbury, so the per-group
+  Woodbury algebra is reused with $\rho$ joining the REML
+  $\theta$; cuSOLVER-free.  Returns a `CorrLMEResult`.
+  `z=None` is the random intercept; `z` a random slope
+  (`structure='diagonal'` for `(x || g)`).
+- **R4** -- two **crossed** scalar random intercepts `(1 | group) +
+  (1 | cross)` (pass the second factor as `cross`; `z` / `inner` /
+  `corr` must be unset).  $V$ is not block-diagonal across either
+  factor, so this is the sparse mixed-model-equations regime: a Woodbury with
+  the combined design, whose inner matrix has diagonal blocks (the level
+  counts) and an off-diagonal incidence, so a diagonal Schur eliminates the
+  larger factor and leaves a single dense
+  $\min(q_{\mathrm{group}}, q_{\mathrm{cross}})^3$ solve per Newton
+  step (`_crossed`).  cuSOLVER-free; **cheap when one factor is small,
+  expensive when both are large.**  Returns a `CrossedLMEResult`.
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:lme_fit -->
 **Tensor dimensions**

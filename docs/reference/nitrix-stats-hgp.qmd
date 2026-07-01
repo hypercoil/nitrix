@@ -44,6 +44,53 @@ trend -- partial pooling).  This is the multi-level scope of the GP feature: a
 hierarchical GP in the mixed-model sense.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### Construction (hsgp, the penalty variance component identity)
+
+Both the population and the group smooths use the **fixed** Hilbert-space
+eigenbasis $\Phi$ (see `nitrix.stats.gp.gp_fit`); the kernel enters
+only as the diagonal spectral reweighting $s_j(\rho)$.  Stacking the
+population columns and the group factor-smooth columns ($\Phi$ masked to
+each group's rows) gives a single penalised design with a **block-diagonal, fully
+diagonal** penalty -- one smoothing-parameter block per variance component:
+
+$$
+\begin{aligned}
+X &= [\, \mathbf{1} \mid \Phi(x) \mid \Phi(x) \otimes
+    \operatorname{onehot}(g) \,] \\
+\text{penalty} &= \operatorname{blkdiag}\!\big(
+    \lambda_{\mathrm{pop}} \operatorname{diag}(1/s),\;
+    \lambda_{\mathrm{grp}} \operatorname{diag}(1/s) \otimes I_L \big)
+\end{aligned}
+$$
+
+$\lambda_{\mathrm{pop}} = \sigma_e^2 / \sigma_{\mathrm{pop}}^2$ and
+$\lambda_{\mathrm{grp}} = \sigma_e^2 / \sigma_{\mathrm{grp}}^2$ are the
+two smoothing parameters (the inverse GP amplitudes), selected by the generalised
+Fellner-Schall step exactly as a multi-smooth GAM; the shared $\rho$ is
+profiled by the same pooled-REML grid as `nitrix.stats.gp.gp_fit`.
+Because every penalty block is diagonal with **disjoint** columns, the
+Fellner-Schall penalty trace is the closed form
+$\operatorname{rank}_k / \lambda_k$ and the REML log-pseudo-determinant is
+a per-block sum -- no eigendecomposition.
+
+The fit reuses the `nitrix.stats.gp.gp_fit` HSGP eigenstructure and is
+cuSOLVER-free and `vmap` clean; the working size is
+$O(V (M_0 + (1 + L) m)^2)$ -- the factor-smooth interaction is $L$
+times wider than a plain GP, the inherent cost of per-group curves (bound it with
+`block` on brain-scale $V$).
+
+### References
+
+- Pedersen, E. J., Miller, D. L., Simpson, G. L. & Ross, N. (2019). Hierarchical
+  generalized additive models in ecology: an introduction with mgcv. PeerJ 7,
+  e6876. https://doi.org/10.7717/peerj.6876
+- Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
+  smoothing parameter optimization with application to Tweedie location, scale
+  and shape models. Biometrics 73(4), 1071-1081.
+  https://doi.org/10.1111/biom.12666
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

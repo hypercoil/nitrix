@@ -37,6 +37,55 @@ more penalty components (a random effect is a ridge penalty), so the same
 machinery covers both.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### Two nested loops, one per element
+
+- **Inner** (fixed $\lambda$): penalised iteratively reweighted least
+  squares -- the same solver-free weighted normal-equations solve as the
+  generalised linear model, with the block penalty
+  $S(\lambda) = \sum_k \lambda_k S_k$ added.  Ordinary and weighted least
+  squares and the exponential family all reduce to it.
+- **Outer** (select $\lambda$): the generalised Fellner-Schall update
+  (Wood & Fasiolo, 2017) -- a multiplicative, positivity-preserving
+  generalised-REML step
+
+  $$
+\lambda_k \leftarrow \lambda_k\,
+  \frac{\operatorname{tr}(S_\lambda^{-} S_k) - \operatorname{tr}(V S_k)}
+       {\gamma_k^{\top} S_k\,\gamma_k / \phi}
+  $$
+
+  that increases the (Laplace) marginal likelihood each iteration.  Because GAM
+  smooths occupy disjoint coefficient blocks,
+  $\operatorname{tr}(S_\lambda^{-} S_k) = \operatorname{rank}(S_k)/\lambda_k$
+  -- no generalised inverse of the summed penalty is needed.  This is the
+  operational form of the penalty / variance-component REML equivalence (the GAM
+  smoothing parameter is the ratio $\phi / \sigma_b^2$ of a mixed model).
+
+Both loops run a fixed number of iterations (clean under
+`jax.vmap` over elements) and every solve avoids the vendor dense
+eigensolver, so the whole fit runs on hardware where that solver is unreliable.
+
+### Outputs (modelarray ``gam`` parity)
+
+`GAMResult` carries per-element coefficients, selected $\lambda$,
+per-smooth **effective degrees of freedom** (the trace of the smooth's influence
+block) and total effective degrees of freedom, dispersion, deviance, and the
+Bayesian coefficient covariance $V = (X^{\top} W X + S_\lambda)^{-1}$ (for
+smooth-term confidence bands and the approximate $F$ / $\chi^2$
+tests).  Partial effects are rendered with `smooth_partial_effect`.
+
+### References
+
+Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
+smoothing parameter optimization with application to Tweedie location, scale
+and shape models. Biometrics, 73(4), 1071-1081.
+https://doi.org/10.1111/biom.12666
+
+Wood, S. N. (2017). Generalized Additive Models: An Introduction with R,
+2nd ed. Chapman and Hall/CRC.
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

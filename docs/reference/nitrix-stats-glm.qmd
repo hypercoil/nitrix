@@ -28,6 +28,39 @@ the parametric backbone of GAM (`gam.py`) and the permutation engine
 (`inference/randomise`).
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### Two paths, one surface
+
+The fit is **IRLS-shaped**: a weighted-least-squares solve
+$(X^{\top} W X + S) \beta = X^{\top} W z$ over a working response `z` and
+working weights `W`.  OLS, WLS, and the full exponential family are then the
+same machinery at different `(W, z)`:
+
+- **Gaussian identity, no penalty** -- the dominant `lm` case -- takes a
+  vectorised fast path: $X^{\top} X$ is *shared* across elements, so a single
+  `(p, p)` inverse and a couple of matmuls fit all `V` elements at once
+  (no per-element factorisation).
+- **Any other family** runs Penalised IRLS per element (`vmap`), reusing the
+  same cuSOLVER-free `(p, p)` solve.  `gam.py` calls the same inner solve
+  with a non-zero penalty `S`; here `S = 0`.
+
+Every `(p, p)` solve goes through `linalg._smalllinalg.small_inv_logdet`
+(closed-form for `p <= 2`, hand-Cholesky + `trsm` for `p > 2`) -- no
+cuSOLVER custom-call, so the fit runs on the broken-cuSOLVER GPU.
+
+### Inference
+
+`t_contrast` / `f_contrast` return the per-element effect, standard
+error, t / F statistic, and the (Student-t / F) p-value -- the ModelArray `lm`
+output columns.  p-values use the regularised incomplete beta
+(`jax.scipy.special.betainc`), so they are exact and cuSOLVER-free.
+`r_squared` / `deviance_explained` use the stored null-model deviance.
+
+The exponential family is a frozen `Family` value (a small record of pure
+link / variance / deviance functions); `GAUSSIAN` / `BINOMIAL` /
+`POISSON` ship, and a custom family is just another `Family(...)`.
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

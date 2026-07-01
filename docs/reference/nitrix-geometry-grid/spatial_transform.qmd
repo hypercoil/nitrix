@@ -63,6 +63,23 @@ GPU steady-state **98.5 µs** (median, L4); up to **20.66× faster** than `scipy
 ::::
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:spatial_transform -->
+::: {.callout-note}
+Leading batch dims are composed via `jax.vmap` internally;
+the per-sample core takes `(*spatial, c)` / `(*spatial,
+ndim)` and returns `(*spatial, c)`.  All leading axes that
+appear in both inputs must match exactly -- broadcast of
+leading axes is *not* attempted (the asymmetry between image
+and deformation shape semantics makes silent broadcast
+error-prone).  For a leading-batch convenience that broadcasts
+a shared image or deformation, see `spatial_transform_batched`.
+
+No cubic (`order=3`) B-spline path exists yet (tracked in
+`docs/feature-requests/cubic-resample.md`).  See `resample`
+Notes for the parity implication.
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:spatial_transform -->
 **Tensor dimensions**

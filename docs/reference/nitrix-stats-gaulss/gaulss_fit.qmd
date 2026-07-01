@@ -36,6 +36,12 @@ and log-scale designs are shared across elements; only the responses vary.
 **Returns** `GauLSSResult`. Fit output holding the mean coefficients `coef_mu`, the log-scale coefficients `coef_scale`, the block information inverses `cov_mu` and `cov_scale`, and the maximised log-likelihood `log_lik`. A mean contrast is $c^{\top} \mathrm{coef\_mu}$ with standard error $\sqrt{c^{\top} \mathrm{cov\_mu}\, c}$; a scale contrast is the analogous read-out on `coef_scale`.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:gaulss_fit -->
+### See also
+
+gaulss_predict : Evaluate the fitted mean and scale on a (new) design.
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:gaulss_fit -->
 **Tensor dimensions**

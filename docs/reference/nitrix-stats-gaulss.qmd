@@ -54,6 +54,17 @@ and $\operatorname{Cov}(\beta_{\sigma}) = (2 Z^{\top} Z)^{-1}$.  Every
 solve uses the cuSOLVER-free `small_inv_logdet`.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+- Rigby, R. A. & Stasinopoulos, D. M. (2005). Generalized additive models for
+  location, scale and shape.  J. R. Statist. Soc. C 54, 507-554.
+  `10.1111/j.1467-9876.2005.00510.x`
+- Wood, S. N., Pya, N. & Saefken, B. (2016). Smoothing parameter and model
+  selection for general smooth models.  JASA 111, 1548-1563 (`mgcv` `gaulss`).
+  `10.1080/01621459.2016.1180986`
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

@@ -40,6 +40,20 @@ The penalties are pure JAX (they ride the jitted $\rho$-search),
 elementwise on a scalar $\rho$.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### Which prior?
+
+- `halfnormal_prior` -- shrinks large $\rho$ (keeps the GP from
+  going near-linear); a soft upper scale.
+- `invgamma_prior` -- penalises small $\rho$ (the usual
+  penalised-complexity-style regulariser that stops the lengthscale collapsing
+  into noise-fitting); the practical default when $\rho$ is weakly
+  identified.
+- `lognormal_prior` -- centres $\rho$ on a prior median
+  $\exp(\mu)$ with multiplicative spread; symmetric in
+  $\log \rho$.
+<!-- nitrix:/gen -->
+
 ## Symbols
 
 ::: {#nitrix-stats-priors-symbols}
