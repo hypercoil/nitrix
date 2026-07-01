@@ -15,7 +15,7 @@ gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Opti
 <!-- nitrix:gen overview:gaulss_fit -->
 Mass-univariate Gaussian location-scale regression (`gaulss`).
 
-Fits, per element, `y_v ~ N(mu, sigma^2)` with `mu = X beta_mu` and
+Fits, per element, $y_v ~ N(\mu, \sigma^2)$ with `mu = X beta_mu` and
 `log sigma = Z beta_scale` -- modelling heteroscedasticity directly -- by
 joint Fisher scoring.
 <!-- nitrix:/gen -->

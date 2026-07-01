@@ -1,7 +1,7 @@
 ---
 title: "lme_t_contrast"
 generated: true
-description: "Per-voxel t-test of a mixed-model fixed-effect contrast `c^T beta = 0`."
+description: "Per-voxel t-test of a mixed-model fixed-effect contrast $c^T  beta = 0$."
 ---
 
 [‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
@@ -13,9 +13,9 @@ lme_t_contrast(result: 'Union[REMLResult, LMEResult]', contrast: Float[Array, 'p
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:lme_t_contrast -->
-Per-voxel t-test of a mixed-model fixed-effect contrast `c^T beta = 0`.
+Per-voxel t-test of a mixed-model fixed-effect contrast $c^T \beta = 0$.
 
-The standard error is `sqrt(c^T (X^T V^{-1} X)^{-1} c)` from the fitted
+The standard error is $sqrt(c^T (X^T V^{-1} X)^{-1} c)$ from the fitted
 `result.fixed_cov`; the denominator degrees of freedom are
 **Satterthwaite** (the default, `dof='satterthwaite'`):
 

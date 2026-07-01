@@ -26,7 +26,7 @@ Fit a mass-univariate GAM: shared smooth bases, per-element responses.
 | `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (covariates entering linearly). The intercept is added separately (see `intercept`). |
 | `intercept` | `bool` | — | `True` | Prepend an intercept column (default `True`). |
 | `family` | `Union[str, Family]` | — | `GAUSSIAN` | Exponential family (default `GAUSSIAN`). |
-| `lambda_mode` | `Literal['per_element', 'shared']` | — | `'per_element'` | `'per_element'` (default) selects a smoothing parameter per element (ModelArray parity). `'shared'` selects **one** smoothing parameter across all elements via a pooled Fellner-Schall update on sufficient statistics -- an `O(n_outer p^3)`, `V`-independent outer loop (much faster when smoothness is homogeneous across the brain). Gaussian only. |
+| `lambda_mode` | `Literal['per_element', 'shared']` | — | `'per_element'` | `'per_element'` (default) selects a smoothing parameter per element (ModelArray parity). `'shared'` selects **one** smoothing parameter across all elements via a pooled Fellner-Schall update on sufficient statistics -- an $O(n_{outer} p^3)$, `V`-independent outer loop (much faster when smoothness is homogeneous across the brain). Gaussian only. |
 | `n_outer` | `int` | — | `20` | Fellner-Schall outer iterations and penalised-IRLS inner iterations. |
 | `n_inner` | `int` | — | `10` | Fellner-Schall outer iterations and penalised-IRLS inner iterations. |
 | `ridge` | `float` | — | `1e-08` | Small stabiliser on the penalised normal equations. |

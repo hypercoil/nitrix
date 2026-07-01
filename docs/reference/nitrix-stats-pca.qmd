@@ -35,10 +35,10 @@ Solvers (`solver=`):
 
 - `"full"` -- exact: `eigh` of the `(d, d)` covariance.
 - `"gram"` -- exact, but via the `(n, n)` Gram matrix
-  `Xc Xcᵀ` instead of the `(d, d)` covariance; far cheaper when
+  $Xc Xc^{\mathsf{T}}$ instead of the `(d, d)` covariance; far cheaper when
   `n << d` (many features, few samples -- e.g. component-correlation
   / CompCor on a voxel-by-time matrix).  The components are recovered
-  from the Gram eigenvectors as `V = Xcᵀ U / Σ`.  Bit-identical to
+  from the Gram eigenvectors as $V = Xc^{\mathsf{T}} U / \Sigma$.  Bit-identical to
   `"full"` (same spectrum, same sign convention).
 - `"randomized"` -- approximate: a randomised range finder that
   recovers the top `k` components in `O(n d (k + p))` matmuls, for

@@ -22,7 +22,7 @@ Returns `(statistic, p_value)`:
   squares F-test, `F = ((D_r - D_f) / (k_f - k_r)) / (D_f / dof_f)` on
   `(k_f - k_r, dof_f)` degrees of freedom.
 - `test='LRT'` (or `'auto'` otherwise) -- the likelihood-ratio test,
-  `2 (ll_f - ll_r) ~ chi^2(k_f - k_r)`.
+  $2 (ll_f - ll_r) ~ \chi^2(k_f - k_r)$.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:compare_models -->

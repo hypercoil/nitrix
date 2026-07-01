@@ -31,7 +31,7 @@ over a grouping factor -- the GP analogue of a random-slope mixed model, and the
     e_ij   ~ N(0, sigma_e^2)
 
 The group curves are *random deviations* around the population curve, sharing one
-amplitude `sigma_grp^2` and the kernel lengthscale `rho` (so a group with few
+amplitude $\sigma_{grp}^2$ and the kernel lengthscale `rho` (so a group with few
 observations is shrunk toward the population trend -- partial pooling).  This is
 the multi-level / "(a)" scope of the GP feature: a hierarchical GP in the mixed-
 model sense.

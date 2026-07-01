@@ -16,7 +16,7 @@ sandwich_cov(result: GLMResult, Y: Float[Array, 'V N'], X: Float[Array, 'N p'], 
 Robust (sandwich) coefficient covariance for a fitted GLM.
 
 Returns the per-element `(V, p, p)` covariance
-`A^{-1} B A^{-1}` with bread `A^{-1} = (X^T W X)^{-1}` (the fit's
+$A^{-1} B A^{-1}$ with bread $A^{-1} = (X^T W X)^{-1}$ (the fit's
 `cov_unscaled`) and a robust meat `B` built from the per-observation
 score contributions `u_i = x_i g_i`, `g_i = (y_i - mu_i) (dmu_i/deta_i) /
 V(mu_i)` (for OLS, `g_i` is the raw residual `y_i - mu_i` -- the
@@ -34,8 +34,8 @@ Pass the result as `cov=` to `t_contrast` / `f_contrast`.
 | `result` | `GLMResult` | — | — | The fitted `GLMResult` and the data it was fit on (`X` shared, `Y` the `(V, N)` responses). |
 | `Y` | `Float` | `V` × `N` | — | The fitted `GLMResult` and the data it was fit on (`X` shared, `Y` the `(V, N)` responses). |
 | `X` | `Float` | `N` × `p` | — | The fitted `GLMResult` and the data it was fit on (`X` shared, `Y` the `(V, N)` responses). |
-| `kind` | `HCKind` | — | `'HC3'` | Heteroscedasticity-consistent variant when `groups` is `None`: `'HC0'` (raw), `'HC1'` (`n/(n-p)` correction), `'HC2'` (`/(1 - h_i)`), `'HC3'` (`/(1 - h_i)^2`); `h_i` the GLM hat diagonal. Ignored when `groups` is given. |
-| `groups` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` cluster labels for a **cluster-robust** covariance (one-way): `B = sum_g s_g s_g^T`, `s_g = sum_{i in g} x_i g_i`, with the `G/(G-1) * (N-1)/(N-p)` small-sample factor. This is **one-way** clustering -- FSL `randomise`'s `-e` exchangeability-block analogue (audit N6). It is **not** a variance-group model (FSL `-g` / PALM `-vg`): a separate residual *variance* per group (heteroscedastic two-sample / FLAME-style grouped variance) is a different estimator and is not provided here -- the cluster-robust meat assumes a common model, only correlating scores *within* a cluster. The cluster path is **eager-only** by default: the distinct-cluster count is found with `jnp.unique` (a data-dependent shape). To trace the whole estimator under `jax.jit`, pre-densify `groups` to contiguous `0..n_groups-1` labels and pass `n_groups`. |
+| `kind` | `HCKind` | — | `'HC3'` | Heteroscedasticity-consistent variant when `groups` is `None`: `'HC0'` (raw), `'HC1'` (`n/(n-p)` correction), `'HC2'` (`/(1 - h_i)`), `'HC3'` ($/(1 - h_i)^2$); `h_i` the GLM hat diagonal. Ignored when `groups` is given. |
+| `groups` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` cluster labels for a **cluster-robust** covariance (one-way): $B = sum_g s_g s_g^T$, `s_g = sum_{i in g} x_i g_i`, with the `G/(G-1) * (N-1)/(N-p)` small-sample factor. This is **one-way** clustering -- FSL `randomise`'s `-e` exchangeability-block analogue (audit N6). It is **not** a variance-group model (FSL `-g` / PALM `-vg`): a separate residual *variance* per group (heteroscedastic two-sample / FLAME-style grouped variance) is a different estimator and is not provided here -- the cluster-robust meat assumes a common model, only correlating scores *within* a cluster. The cluster path is **eager-only** by default: the distinct-cluster count is found with `jnp.unique` (a data-dependent shape). To trace the whole estimator under `jax.jit`, pre-densify `groups` to contiguous `0..n_groups-1` labels and pass `n_groups`. |
 | `n_groups` | `Optional[int]` | — | `None` | Optional distinct-cluster count. `None` (default) densifies `groups` host-side; supplying it (with contiguous labels) keeps `sandwich_cov` jit-traceable. Ignored when `groups` is `None`. |
 | `weights` | `Optional[Float[Array, 'N']]` | — | `None` | Optional `(N,)` prior weights matching the fit's `weights=`. |
 

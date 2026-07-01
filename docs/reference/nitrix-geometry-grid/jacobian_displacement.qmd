@@ -16,7 +16,7 @@ jacobian_displacement(u: Float[Array, '... *spatial d'], *, boundary_mode: Liter
 Per-point Jacobian of the deformation φ = id + u.
 
 For a channel-last displacement field `u` with `d` spatial
-axes, returns `J[..., i, j] = δ_{i,j} + ∂ u_i / ∂ x_j`,
+axes, returns $J[..., i, j] = δ_{i,j} + \partial  u_i / \partial  x_j$,
 computed via central differences along each spatial axis.
 <!-- nitrix:/gen -->
 

@@ -23,9 +23,9 @@ Beta regression for proportions in `(0, 1)` (v3 §4).
 
 Bounded continuous responses -- tissue fractions, fMRI fractional occupancy,
 any proportion -- are modelled as `y ~ Beta(mu phi, (1 - mu) phi)` with mean
-`mu = logit^{-1}(X beta)` and a **precision** `phi` (larger `phi` = less
+$\mu = logit^{-1}(X \beta)$ and a **precision** `phi` (larger `phi` = less
 dispersion).  This is *not* a standard exponential-family GLM: the score is
-**digamma**-based, not the `mu_eta^2 / V` IRLS weight, and the precision is a
+**digamma**-based, not the $\mu_\eta^2 / V$ IRLS weight, and the precision is a
 second parameter estimated jointly with the mean -- so it gets its own fitter
 rather than slotting into the `Family` / `glm_fit`
 core.

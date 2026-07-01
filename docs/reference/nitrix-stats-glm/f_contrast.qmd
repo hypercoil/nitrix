@@ -19,9 +19,9 @@ Returns `(F, p_value, df1, df2)` with `df1 = m` (contrast rank) and
 `df2 = dof_resid`.
 
 `cov` overrides the coefficient covariance (e.g. the robust
-`sandwich_cov` output): the Wald quadratic form uses `C cov C^T` directly
+`sandwich_cov` output): the Wald quadratic form uses $C cov C^T$ directly
 and the statistic is `quad / m` (no dispersion rescale).  The default
-(`None`) is the model-based `dispersion * (X^T W X)^{-1}` (unchanged).
+(`None`) is the model-based $dispersion * (X^T W X)^{-1}$ (unchanged).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:f_contrast -->

@@ -24,7 +24,7 @@ Fits the LME
 
 independently for each voxel, sharing the fixed-effect design
 `X` and the random-effect design `Z` across voxels.  Uses
-the FaST-LMM spectral trick: eigendecompose `ZZ^T` once,
+the FaST-LMM spectral trick: eigendecompose $ZZ^T$ once,
 rotate `y` and `X` into the diagonalising basis, then
 Newton-score on the variance components in log-space.
 <!-- nitrix:/gen -->
@@ -36,12 +36,12 @@ Newton-score on the variance components in log-space.
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | Response tensor, `(V, N)` -- `V` voxels, `N` subjects (or observations). |
 | `X` | `Float` | `N` × `p` | — | Fixed-effect design, `(N, p)`. Shared across voxels; carries its own intercept column (no intercept is added). |
-| `Z` | `Float` | `N` × `q` | — | Random-effect design, `(N, q)`. Shared across voxels. The random-effect covariance is `sigma_b^2 I_q` (single variance component); pass each component's design matrix column to `Z` to model multiple random effects (currently all share `sigma_b^2`; for separate variance components per random effect, the lower-level `_varcomp` core accepts a general `(K, N)` basis). |
+| `Z` | `Float` | `N` × `q` | — | Random-effect design, `(N, q)`. Shared across voxels. The random-effect covariance is $\sigma_b^2 I_q$ (single variance component); pass each component's design matrix column to `Z` to model multiple random effects (currently all share $\sigma_b^2$; for separate variance components per random effect, the lower-level `_varcomp` core accepts a general `(K, N)` basis). |
 | `theta_init` | `Optional[Float[Array, 'V 2']]` | — | `None` | Per-voxel initial log-variances, `(V, 2)`. Defaults to a heuristic split of empirical variance. |
 | `n_iter` | `int` | — | `20` | Fixed Newton-scoring iteration count. Default `20` -- typically converges in 5-10 for well-conditioned data. |
 | `damping` | `float` | — | `1e-06` | Levenberg-Marquardt-style damping on the average-information matrix. Default `1e-6`; raise if Newton steps are unstable near boundaries. |
 | `block` | `Optional[int]` | — | `None` | Optional voxel-block size: cap the number of voxels whose per-Newton intermediates are live at once, bounding peak memory on brain-scale `V`. `None` (default) is a single `vmap` over all voxels (identical numerics and HLO to before). |
-| `low_rank` | `Optional[bool]` | — | `None` | Use the FaST-LMM **low-rank** decomposition: a `q x q` eig of `Z^T Z` (`O(N q^2 + q^3)`) instead of the dense `N x N` eig of `ZZ^T` (`O(N^3)`). Requires `q <= N` (the usual tall random-effect design); the `N - q` null directions enter only through per-voxel Gram aggregates, and a rank-deficient `Z` (e.g. phantom one-hot columns from gappy labels) is absorbed by that null space. **Default `None`** auto-selects: low-rank when `q < N` (the brain-scale case), dense otherwise. Pass `True` / `False` to force; the two match to the iterative tolerance. |
+| `low_rank` | `Optional[bool]` | — | `None` | Use the FaST-LMM **low-rank** decomposition: a `q x q` eig of $Z^T Z$ ($O(N q^2 + q^3)$) instead of the dense `N x N` eig of $ZZ^T$ ($O(N^3)$). Requires `q <= N` (the usual tall random-effect design); the `N - q` null directions enter only through per-voxel Gram aggregates, and a rank-deficient `Z` (e.g. phantom one-hot columns from gappy labels) is absorbed by that null space. **Default `None`** auto-selects: low-rank when `q < N` (the brain-scale case), dense otherwise. Pass `True` / `False` to force; the two match to the iterative tolerance. |
 
 **Returns** `REMLResult`.
 <!-- nitrix:/gen -->

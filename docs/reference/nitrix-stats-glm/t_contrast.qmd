@@ -1,7 +1,7 @@
 ---
 title: "t_contrast"
 generated: true
-description: "Per-element t-test of a linear contrast `c^T beta`."
+description: "Per-element t-test of a linear contrast $c^T  beta$."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -13,7 +13,7 @@ t_contrast(result: GLMResult, contrast: Float[Array, 'p'], *, cov: Optional[Floa
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:t_contrast -->
-Per-element t-test of a linear contrast `c^T beta`.
+Per-element t-test of a linear contrast $c^T \beta$.
 
 Returns `(effect, se, t, p_value)`: the contrast estimate, its standard
 error, the t statistic, and the two-sided p-value at `dof_resid` degrees
@@ -22,8 +22,8 @@ of freedom (ModelArray `lm` columns `estimate` / `std.error` /
 
 `cov` overrides the coefficient covariance: pass a `(V, p, p)` (or shared
 `(p, p)`) matrix -- e.g. the robust `sandwich_cov` output -- to use
-`c^T cov c` directly (already on the variance scale).  The default
-(`None`) is the model-based `dispersion * (X^T W X)^{-1}` (unchanged).
+$c^T cov c$ directly (already on the variance scale).  The default
+(`None`) is the model-based $dispersion * (X^T W X)^{-1}$ (unchanged).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:t_contrast -->

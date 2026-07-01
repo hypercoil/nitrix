@@ -37,7 +37,7 @@ interpolation property.
 
 Distinct from the other cubics: `CubicBSpline` is *approximating*
 (it needs the recursive prefilter to interpolate, and that prefilter is
-backend-dependent), and is `C^2`-smooth with a partition-of-unity basis;
+backend-dependent), and is $C^2$-smooth with a partition-of-unity basis;
 `Lanczos` is a windowed sinc.  Catmull-Rom is the cardinal cubic of
 OpenCV `INTER_CUBIC` / Keras image `cubic` / the Keras
 "BilinearInterpolation" STN (a misnomer -- it evaluates a 4x4 Catmull-Rom
@@ -45,7 +45,7 @@ stencil), so a consumer parity-locked to that family (e.g. ilex
 `fd_net`'s spatial transformer) reproduces the upstream bit-for-bit.
 
 Smooth in both the image values and the sample coordinates (the basis is
-`C^1` -- piecewise cubic, continuous with continuous first derivative
+$C^1$ -- piecewise cubic, continuous with continuous first derivative
 across knots), so it is differentiable end-to-end and usable for
 coordinate-driven registration losses.  Having no `map_coordinates`
 equivalent, it always uses the explicit separable gather (no platform

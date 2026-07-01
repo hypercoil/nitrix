@@ -32,7 +32,7 @@ penalty_blocks() -> list
 
 Penalty blocks `[(S, eig)]` (audit D8): the `(k, k)` roughness
 penalty and its eigenvalues, the unpenalised null space floored to
-zero.  `eig` drives only the basis-invariant `tr(S_lambda^+ S_k)`.
+zero.  `eig` drives only the basis-invariant $\operatorname{tr}(S_\lambda^+ S_k)$.
 
 <!-- nitrix:gen sig:SplineBasis.eval_design -->
 ```python

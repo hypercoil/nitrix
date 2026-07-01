@@ -25,7 +25,7 @@ Mass-univariate generalised additive (mixed) models.
     g(E[y]) = X_parametric beta + sum_k f_k(x_k),   f_k = B_k(x_k) gamma_k
 
 with each smooth `f_k` a penalised spline (`stats.basis`) carrying a
-roughness penalty `lambda_k gamma_k^T S_k gamma_k`.  This is ModelArray's
+roughness penalty $\lambda_k \gamma_k^T S_k \gamma_k$.  This is ModelArray's
 `gam` / `mgcv`-style fit; a **GAMM** adds explicit random-effect blocks,
 which enter as just more penalty components (a random effect is a ridge
 penalty), so the same machinery covers both.

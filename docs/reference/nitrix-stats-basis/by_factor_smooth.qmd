@@ -25,7 +25,7 @@ Construction: a single marginal P-spline of `x` (shared knots / penalty /
 centering), then level `l`'s design is that marginal design with the rows
 where `f != l` zeroed -- so level `l`'s coefficients load only on its own
 observations.  Because the per-level designs have disjoint nonzero rows, the
-blocks are orthogonal in `X^T W X` (each level is fit on its own data).
+blocks are orthogonal in $X^T W X$ (each level is fit on its own data).
 Pair with a parametric factor main effect to carry the per-level mean (the
 smooths are sum-to-zero when `center=True`, as in mgcv).
 <!-- nitrix:/gen -->
