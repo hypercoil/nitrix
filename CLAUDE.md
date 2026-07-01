@@ -20,6 +20,18 @@ resolves into `SPEC.md` via its §11 provenance map). Aspirationally, not curren
 
 Use rigorous typing, using protocols where appropriate, favour immutable objects and containers with pure functions, and adhere to the style prescribed by ruff. Enums are preferred over bare strings, match/case statements over repeated conditionals, explicit over implicit, hackability not magic. Comments should be used sparingly, for example to provide an explanation when a counterintuitive or suboptimal-looking routine was implemented for a principled reason. Code should be self-documenting. Docstrings should not contain opaque references to enumerated spec sections, FR headings, implementation plan codes, etc. (i.e., `SPEC §x` does not belong in any public-facing documentation surface unless specifically targeting developers). British English in comments and docstrings and internal variables, USAmerican English for public API function names and arguments.
 
+### Docstring conventions
+
+Docstrings are **NumPy-style reStructuredText** and are transcluded verbatim into the Quarto API reference (`hypercoil/doc/build/gen_reference_stubs.py`; audited by `inventory_docstrings.py`). Write them accordingly, not as ad-hoc plaintext:
+
+- **Maths uses roles, never code spans.** Inline maths is `` :math:`…` ``; multi-line/display maths is a `.. math::` block. Use real LaTeX (`\top`, `\mu`, `\sum`, `\lambda`, `\operatorname{tr}`) — *not* informal ASCII/Unicode inside `` `` `` literals (`` ``X^T W X`` `` renders as monospace code, not maths). Reserve double-backtick literals for actual code: identifiers, arguments, dtypes.
+- **A docstring containing any LaTeX backslash MUST be a raw string** (`r"""…"""`). Otherwise `\t`, `\r`, `\b`, `\v`, `\f` are *valid* escapes (tab, CR, …) that silently corrupt the string with **no** `SyntaxWarning` — e.g. `\top` becomes a literal tab. (Doubling the backslashes, `\\top`, also works but raw is preferred.)
+- **Reference other API with cross-reference roles**, not bare code spans, so the generator links them: `` :func:`name` ``, `` :class:`Name` ``, `` :meth:`Class.method` ``, `` :attr:`field` ``, `` :mod:`pkg.mod` ``, `` :data:`CONST` ``.
+- **Document every parameter and return** in `Parameters` / `Returns` sections, giving array shapes in the tensor-dimension vocabulary (`(V, p)`, `Float[Array, '*spatial ndim']`); document tuple returns element by element.
+- **Public constants get a docstring too** — a PEP 224 attribute docstring (a string literal on the line after the assignment: `GAUSSIAN = Family(...)` then `"""The Gaussian family: identity link, unit variance."""`).
+- **Cite sources with a DOI or stable URL**, not just author-year.
+- First line is a one-sentence summary, then a blank line, then any extended description; prefer a clear 2–3 sentence summary over a cryptic one-liner.
+
 ## Status and imperatives
 
 This is a prerelease, prealpha library. Backward compatibility is not a concern; do not bloat the code base with compat shims. Your imperatives are:

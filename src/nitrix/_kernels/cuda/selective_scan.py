@@ -7,27 +7,31 @@ Pallas Triton fused selective state-space scan (Mamba / S6) -- forward + backwar
 Clean-room kernel.  Triton-Pallas lowers neither ``cumprod`` /
 ``associative_scan`` nor element / ``slice`` indexing of register tiles -- only
 whole-tile ops and ``cumsum``.  The linear recurrence
-``h_t = exp(Δ_t A) h_{t-1} + Δ_t B_t x_t`` is therefore evaluated as a **chunked
-cumsum closed form**: with ``logP_t = A · cumsum(Δ)_t`` over a chunk,
-``h_t = exp(logP_t) · (cumsum(Δ_i B_i x_i · exp(-logP_i)) + h_start)``.  The
-chunk size keeps ``exp(±logP)`` bounded; the chunk-final state is carried to the
-next chunk via whole-tile sums (no indexing).  The ``(l, d, n)`` state trajectory
-is never materialised in HBM -- only ``y (l, d)`` and the per-chunk start states.
+:math:`h_t = \\exp(\\Delta_t A)\\, h_{t-1} + \\Delta_t B_t x_t` is therefore
+evaluated as a **chunked cumsum closed form**: with
+:math:`\\log P_t = A \\cdot \\operatorname{cumsum}(\\Delta)_t` over a chunk,
+:math:`h_t = \\exp(\\log P_t) \\cdot \\bigl(\\operatorname{cumsum}(\\Delta_i B_i x_i \\exp(-\\log P_i)) + h_{\\mathrm{start}}\\bigr)`.
+The chunk size keeps :math:`\\exp(\\pm \\log P)` bounded; the chunk-final state
+is carried to the next chunk via whole-tile sums (no indexing).  The
+:math:`(l, d, n)` state trajectory is never materialised in HBM -- only
+:math:`y\\,(l, d)` and the per-chunk start states.
 
 Backward is the fully-fused recompute-adjoint (the *training*-memory win: no
-``(l, d, n)`` trajectory in HBM in either pass).  The reverse linear recurrence
-``a_t = dy_t C_t + dA_{t+1} a_{t+1}`` is the same chunked cumsum form run in
-reverse (``rev_cumsum(z) = sum(z) - cumsum(z) + z``, no flip); the forward
-states ``h_{t-1}`` are recomputed from the saved per-chunk start states as
-``(h_t - Δ_t B_t x_t) / exp(Δ_t A)``.  ``dx`` / ``dΔ`` are per-channel direct
-writes; the grid-shared gradients ``dB`` / ``dC`` (summed over channels) use
-``plgpu.atomic_add`` with zero-init via ``input_output_aliases``, and ``dA`` /
-``dD`` (summed over batch) are emitted as per-program partials reduced in JAX.
+:math:`(l, d, n)` trajectory in HBM in either pass).  The reverse linear
+recurrence :math:`a_t = dy_t C_t + dA_{t+1} a_{t+1}` is the same chunked cumsum
+form run in reverse (:math:`\\operatorname{rev\\_cumsum}(z) = \\sum z - \\operatorname{cumsum}(z) + z`,
+no flip); the forward states :math:`h_{t-1}` are recomputed from the saved
+per-chunk start states as :math:`(h_t - \\Delta_t B_t x_t) / \\exp(\\Delta_t A)`.
+:math:`dx` / :math:`d\\Delta` are per-channel direct writes; the grid-shared
+gradients :math:`dB` / :math:`dC` (summed over channels) use
+``plgpu.atomic_add`` with zero-init via ``input_output_aliases``, and
+:math:`dA` / :math:`dD` (summed over batch) are emitted as per-program partials
+reduced in JAX.
 
-Scope (else ``PallasNotTileable`` -> loud JAX fallback): NVIDIA Ampere+, float32,
-sequence length divisible by the chunk size.  The sibling perf suite owns the
-at-scale wall-clock-vs-reference certification (the reference's parallel
-``associative_scan`` is already the GPU throughput path).
+Scope (else :class:`PallasNotTileable` -> loud JAX fallback): NVIDIA Ampere+,
+float32, sequence length divisible by the chunk size.  The sibling perf suite
+owns the at-scale wall-clock-vs-reference certification (the reference's
+parallel ``associative_scan`` is already the GPU throughput path).
 
 Implementation detail: never import from ``nitrix._kernels.cuda`` directly.  Use
 ``nitrix.nn.ssm.selective_scan`` which handles dispatch and fallback.
@@ -60,7 +64,7 @@ class PallasNotTileable(RuntimeError):
     """The Pallas kernel rejected the requested shape / host.
 
     Caught by the dispatcher in ``nitrix.nn.ssm`` and translated into a
-    ``NitrixBackendFallback`` warning (the JAX reference runs instead).
+    :class:`NitrixBackendFallback` warning (the JAX reference runs instead).
     """
 
 
@@ -122,7 +126,43 @@ def _mha_like_forward(
     *,
     chunk: int,
 ) -> tuple[Float[Array, 'b l d'], Float[Array, 'b nc d n']]:
-    """Pallas driver; returns (y, chunk-start states) on the (b, l, d) layout."""
+    """Pallas driver for the fused forward scan on the ``(b, l, d)`` layout.
+
+    Launches the forward kernel on a ``(b, d)`` grid -- one program per
+    (batch, channel) pair -- and returns both the output sequence and the
+    per-chunk start states needed to recompute the state trajectory in the
+    backward pass.
+
+    Parameters
+    ----------
+    x : Float[Array, 'b l d']
+        Input sequence: ``b`` batch elements, sequence length ``l``, ``d``
+        channels.
+    delta : Float[Array, 'b l d']
+        Per-step, per-channel discretisation step :math:`\\Delta` (already
+        post-softplus), same shape as ``x``.
+    A : Float[Array, 'd n']
+        State transition parameter over the ``n``-dimensional state, one row
+        per channel.
+    B : Float[Array, 'b l n']
+        Input projection into the state, shared across channels.
+    C : Float[Array, 'b l n']
+        Output projection from the state, shared across channels.
+    D : Float[Array, 'd'] or None
+        Optional per-channel skip (feed-through) term added to the output. If
+        ``None`` no skip term is applied.
+    chunk : int
+        Length of each cumsum chunk; ``l`` must be divisible by ``chunk``.
+
+    Returns
+    -------
+    y : Float[Array, 'b l d']
+        Output sequence, same shape and dtype as ``x``.
+    hstart : Float[Array, 'b nc d n']
+        Per-chunk start states (``nc = l // chunk`` chunks), always float32.
+        ``hstart[j, c, dd, :]`` is the state entering chunk ``c`` for batch
+        ``j`` and channel ``dd``; consumed by the backward pass.
+    """
     b, length, d = x.shape
     n = A.shape[1]
     nc = length // chunk
@@ -464,11 +504,45 @@ def selective_scan_pallas(
 ) -> Float[Array, '... l d']:
     """Fused selective scan (NVIDIA Ampere+); differentiable via ``custom_vjp``.
 
+    Evaluates the selective state-space recurrence
+    :math:`h_t = \\exp(\\Delta_t A)\\, h_{t-1} + \\Delta_t B_t x_t`,
+    :math:`y_t = C_t h_t + D x_t`, using the fused chunked-cumsum Pallas kernel
+    (see the module docstring). The leading batch axes are arbitrary and are
+    flattened before dispatch.
+
+    Parameters
+    ----------
+    x : Float[Array, '... l d']
+        Input sequence with arbitrary leading batch axes, sequence length
+        ``l``, and ``d`` channels.
+    delta : Float[Array, '... l d']
+        Per-step, per-channel discretisation step :math:`\\Delta` (already
+        post-softplus), same shape as ``x``.
+    A : Float[Array, 'd n']
+        State transition parameter over the ``n``-dimensional state, one row
+        per channel. ``n`` must be a power of two.
+    B : Float[Array, '... l n']
+        Input projection into the state, shared across channels.
+    C : Float[Array, '... l n']
+        Output projection from the state, shared across channels.
+    D : Float[Array, 'd'] or None, optional
+        Optional per-channel skip (feed-through) term added to the output. If
+        ``None`` (default) no skip term is applied and its cotangent is
+        omitted.
+
+    Returns
+    -------
+    Float[Array, '... l d']
+        Output sequence ``y``, same shape and dtype as ``x``.
+
     Raises
     ------
     PallasNotTileable
-        If the shape is outside the kernel's supported set; the dispatcher
-        catches this and runs the JAX reference with a loud fallback.
+        If the shape is outside the kernel's supported set (non-float32 input,
+        a state dim ``n`` that is not a power of two, or a sequence length not
+        divisible by the chunk size into a power-of-two chunk count); the
+        dispatcher catches this and runs the JAX reference with a loud
+        fallback.
     """
     _check_tileable(x, A)
     chunk = _resolve_chunk(x.shape[-2])

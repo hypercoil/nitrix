@@ -2,34 +2,35 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Pallas Triton **sliding-window** center-only LNCC force (v4 Phase 5b / L2b).
+Pallas Triton sliding-window centre-only LNCC force (3-D).
 
-The ANTs / ITK ``ANTSNeighborhoodCorrelation`` force
-(:func:`metrics.lncc_grad_center`) is single-pass -- the local-CC derivative is
-attributed to the window centre, so it needs only the five windowed sums and no
-second box-sum pass.  This kernel evaluates it with ITK's **scanning window**: a
-program owns a ``(Ty, Tz)`` column of the volume and **scans x**, carrying the
-five window sums (``Σm, Σf, Σm², Σf², Σmf``) as running state -- at each step it
-**drops the trailing x-plane and adds the leading one** (O(1) in x), each plane
-being the ``(2r+1)²`` ``(y, z)`` sum via ``pl.ds`` ref-slices.  This is O(window
-area) per voxel, not O(window volume): unlike a direct ``(2r+1)³`` accumulation
-(which merely ties the JAX integral image), it **beats** it -- the win grows
-with volume (single streamed pass vs the integral image's many cumsum passes:
-~1.5x @128³, ~2.2x @192³, ~3x @256³ for one box sum).
+The ANTs / ITK ``ANTSNeighborhoodCorrelation`` force is single-pass: the
+local-correlation derivative is attributed to the window centre, so it needs
+only the five windowed sums and no second box-sum pass.  This kernel evaluates
+it with ITK's scanning window -- a program owns a :math:`(T_y, T_z)` column of
+the volume and scans along :math:`x`, carrying the five window sums
+(:math:`\\sum m`, :math:`\\sum f`, :math:`\\sum m^2`, :math:`\\sum f^2`,
+:math:`\\sum m f`) as running state.  At each step it drops the trailing
+:math:`x`-plane and adds the leading one (:math:`O(1)` in :math:`x`), each plane
+being the :math:`(2r+1)^2` :math:`(y, z)` sum via ``pl.ds`` ref-slices.  This is
+:math:`O(\\text{window area})` per voxel, not :math:`O(\\text{window volume})`:
+unlike a direct :math:`(2r+1)^3` accumulation (which merely ties the JAX
+integral image), it beats it, and the advantage grows with volume (a single
+streamed pass versus the integral image's many cumulative-sum passes).
 
-Per output voxel it then forms the centre-only scalar and multiplies by
-``∇warped`` (central difference; the x-derivative reuses the scan neighbours,
-``y``/``z`` use ref-slices).  **One symmetric pad serves window and gradient**
-(a width-1 symmetric pad equals the edge pad ``∇warped`` wants), so it is
-tolerance-equal to ``LNCCForce(derivative='center').update`` including the
-boundary.
+Per output voxel it then forms the centre-only scalar and multiplies by the
+gradient of the warped image (central difference; the :math:`x`-derivative
+reuses the scan neighbours, while :math:`y` and :math:`z` use ref-slices).  One
+symmetric pad serves both the window and the gradient (a width-1 symmetric pad
+equals the edge pad the warped gradient wants), so the result is tolerance-equal
+to the centre-derivative LNCC force update, boundary included.
 
-Scope: **3-D** isotropic single-pair GPU, radius ``≤`` :data:`_MAX_RADIUS`.
-Anything else falls back to the JAX path via ``register._force`` (loud
-fallback).
+Scope: 3-D isotropic single-pair GPU, radius no greater than
+:data:`_MAX_RADIUS`.  Anything else falls back to the JAX path with a loud
+fallback warning.
 
-Implementation detail: never import directly; use
-``register.LNCCForce(derivative='center', backend=...)``.
+Implementation detail: never import this module directly; use the public LNCC
+force estimator with the centre derivative and an explicit backend selector.
 """
 
 from __future__ import annotations
@@ -64,21 +65,37 @@ def _pick_tile(extent: int) -> int:
     for c in _TILE_CANDIDATES:
         if extent % c == 0:
             return c
-    return _TILE_CANDIDATES[-1]  # a multiple of the smallest tile always divides
+    return _TILE_CANDIDATES[
+        -1
+    ]  # a multiple of the smallest tile always divides
 
 
 def _next_tileable(extent: int, r: int) -> int:
     """Round ``extent`` up to a tileable size with a boundary-safe pad.
 
-    Any size then tiles (the scanned x-axis is never tiled, so only ``y``/``z``
-    are padded -- a small symmetric pad, cropped back), so the kernel handles
-    arbitrary volumes (e.g. ``220³``) and the win still holds (the pad is a
-    couple of percent on two axes).  **The pad must be ``0`` or ``≥ r``:** a
-    smaller pad would let an original boundary voxel's window reach *past* the
-    (correct, symmetric) tileability pad into the kernel's own r-halo, which
-    reflects the padded -- not the original -- array (a boundary error).  When
-    the next multiple of the tile would pad by ``1..r-1``, round up one more
-    tile so the symmetric tileability pad fully covers the window's reach.
+    Any size then tiles (the scanned :math:`x`-axis is never tiled, so only
+    :math:`y` and :math:`z` are padded -- a small symmetric pad, cropped back),
+    so the kernel handles arbitrary volumes (e.g. :math:`220^3`) and the speed
+    advantage still holds (the pad is a couple of percent on two axes).  The pad
+    must be :math:`0` or at least :math:`r`: a smaller pad would let an original
+    boundary voxel's window reach past the (correct, symmetric) tileability pad
+    into the kernel's own :math:`r`-halo, which reflects the padded -- not the
+    original -- array (a boundary error).  When the next multiple of the tile
+    would pad by :math:`1` to :math:`r-1`, round up one more tile so the
+    symmetric tileability pad fully covers the window's reach.
+
+    Parameters
+    ----------
+    extent : int
+        Size of the axis (:math:`y` or :math:`z`) to be rounded up.
+    r : int
+        Window radius, so the sliding window spans :math:`2r+1` voxels per axis.
+
+    Returns
+    -------
+    int
+        The smallest tileable extent that is at least ``extent`` and whose pad
+        over ``extent`` is either zero or at least ``r``.
     """
     base = _TILE_CANDIDATES[-1]
     target = ((extent + base - 1) // base) * base
@@ -121,7 +138,9 @@ def _build_sliding_center_kernel(
             'tuple[Any, ...]', lax.fori_loop(0, win, over_z, (z, z, z, z, z))
         )
 
-    def emit(w_ref: Any, f_ref: Any, ox: Any, s: tuple[Any, ...], o_ref: Any) -> None:
+    def emit(
+        w_ref: Any, f_ref: Any, ox: Any, s: tuple[Any, ...], o_ref: Any
+    ) -> None:
         sm, sf, smm, sff, smf = s
         cen = (pl.ds(ox + r, 1), pl.ds(r, ty), pl.ds(r, tz))
         wc = w_ref[cen]
@@ -184,13 +203,38 @@ def lncc_center_force_pallas(
 ) -> Float[Array, '*spatial ndim']:
     """Fused sliding-window centre-only LNCC force (3-D, isotropic).
 
-    Tolerance-equal to ``LNCCForce(derivative='center').update``, boundary
-    included.
+    Computes the local-normalised-cross-correlation registration force with the
+    derivative attributed to the window centre, over an isotropic cubic window
+    of side :math:`2r+1`.  The volume is padded symmetrically (once for both the
+    windowed sums and the central-difference gradient), scanned along :math:`x`
+    with running window sums, and the result is tolerance-equal to the
+    centre-derivative LNCC force update, boundary included.
+
+    Parameters
+    ----------
+    warped : Float[Array, '*spatial']
+        The moving image resampled into the fixed frame, a 3-D volume of shape
+        ``(nx, ny, nz)``.
+    fixed : Float[Array, '*spatial']
+        The fixed (target) image, the same shape as ``warped``.
+    radius : int
+        Window radius; the sliding window spans :math:`2r+1` voxels per axis.
+        Must lie in ``[1, _MAX_RADIUS]``.
+    eps : float
+        Variance floor; window voxels whose warped or fixed local variance does
+        not exceed ``eps`` contribute a zero force.
+
+    Returns
+    -------
+    Float[Array, '*spatial ndim']
+        The per-voxel force, shape ``(nx, ny, nz, 3)``, the centre-only LNCC
+        scalar times the central-difference gradient of ``warped`` along each of
+        the three spatial axes.
 
     Raises
     ------
     PallasNotTileable
-        Not 3-D, radius out of range, or no tile divides the ``(y, z)`` extents.
+        Not 3-D, radius out of range, or the warped and fixed shapes differ.
     """
     if warped.ndim != 3:
         raise PallasNotTileable(
@@ -228,7 +272,10 @@ def lncc_center_force_pallas(
     u = pl.pallas_call(
         _build_sliding_center_kernel(nx, ty, tz, r, float(eps), n),
         grid=(nyp // ty, nzp // tz),
-        in_specs=[pl.BlockSpec(in_block, in_map), pl.BlockSpec(in_block, in_map)],
+        in_specs=[
+            pl.BlockSpec(in_block, in_map),
+            pl.BlockSpec(in_block, in_map),
+        ],
         out_specs=pl.BlockSpec((nx, ty, tz, 3), lambda j, k: (0, j, k, 0)),
         out_shape=jax.ShapeDtypeStruct((nx, nyp, nzp, 3), warped.dtype),
         compiler_params=plgpu.CompilerParams(),

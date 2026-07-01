@@ -31,8 +31,32 @@ def gaussian_profile_1d(
     *,
     center: Union[float, Float[Array, '...']] = 0.0,
 ) -> Float[Array, '...']:
-    """Unnormalised Gaussian ``exp(-0.5 * ((coords - center) / sigma) ** 2)``.
+    """Evaluate the unnormalised 1-D Gaussian profile at given coordinates.
 
-    Peak 1 at ``coords == center``.  ``coords`` carries the dtype.
+    Computes the bare Gaussian functional form
+    :math:`\\exp\\!\\left(-\\tfrac{1}{2}\\left(\\frac{x - c}{\\sigma}\\right)^2\\right)`
+    at each coordinate :math:`x`, with peak value 1 attained where
+    ``coords`` equals ``center``. No normalisation is applied; callers
+    supply whatever normalisation (sum- or peak-normalisation) they
+    require. The result carries the dtype of ``coords``.
+
+    Parameters
+    ----------
+    coords : Float[Array, '...']
+        Coordinates at which to evaluate the profile, of arbitrary shape.
+        The output dtype follows this array.
+    sigma : float
+        Standard deviation :math:`\\sigma` of the Gaussian, controlling its
+        width.
+    center : float or Float[Array, '...'], optional
+        Location :math:`c` of the peak, broadcast against ``coords``.
+        Defaults to ``0.0``.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The Gaussian profile evaluated at ``coords``, of the same shape as
+        the broadcast of ``coords`` and ``center``, with peak value 1 where
+        ``coords`` equals ``center``.
     """
     return jnp.exp(-0.5 * ((coords - center) / sigma) ** 2)

@@ -1,34 +1,37 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
-Pallas Triton fused scaled-dot-product (flash) attention -- forward + backward.
+r"""
+Pallas-Triton fused scaled-dot-product (flash) attention -- forward + backward.
 
 Forked from ``jax.experimental.pallas.ops.gpu.attention`` (the Triton ``mha``)
-and extended with the two capability gaps the stock kernel lacks: an **additive
-bias** tile (Swin relative-position table) threaded into the online softmax, and
-an explicit **boolean mask** tile (SAM-style padding / cross-attention), in
-addition to ``causal``.  The score matrix ``(s, t)`` is never materialised --
-the forward streams a running ``(max, sum_exp)`` state (the same pattern as
-nitrix's ``LOG`` semiring monoid), and the backward recomputes the score tiles
-in-SRAM rather than reading a stored ``(s, t)`` activation.
+and extended with the two capability gaps the stock kernel lacks: an *additive
+bias* tile (e.g. a Swin relative-position table) threaded into the online
+softmax, and an explicit *boolean mask* tile (e.g. SAM-style padding /
+cross-attention), in addition to ``causal``.  The :math:`(s, t)` score matrix is
+never materialised: the forward streams a running :math:`(\max, \sum \exp)`
+state (the same pattern as the log-domain semiring monoid), and the backward
+recomputes the score tiles in shared memory rather than reading a stored
+:math:`(s, t)` activation.
 
-The backward is two kernels (no ``q_blocks == k_blocks`` constraint): one
-accumulates ``dk`` / ``dv`` and, when a bias is supplied, writes the
-**learnable-bias gradient** ``d_bias`` tile-by-tile; the other accumulates
-``dq``.  Both recompute ``p = exp2(scores + bias - lse)`` from the forward's
-``lse`` residual, so no per-step softmax state is stored.  The wrapper's
-``custom_vjp`` reduces ``d_bias`` over the broadcast axes to the user's bias
-shape.
+The backward pass is two kernels (with no ``q_blocks == k_blocks`` constraint):
+one accumulates :math:`dk` / :math:`dv` and, when a bias is supplied, writes the
+learnable-bias gradient :math:`d_{bias}` tile-by-tile; the other accumulates
+:math:`dq`.  Both recompute :math:`p = \exp_2(\text{scores} + \text{bias} -
+\text{lse})` from the forward pass's ``lse`` residual, so no per-step softmax
+state is stored.  The wrapper's :func:`jax.custom_vjp` reduces :math:`d_{bias}`
+over the broadcast axes back to the caller's bias shape.
 
-Scope (else ``PallasNotTileable`` -> loud JAX fallback): NVIDIA Ampere+, float32,
-power-of-two head dim >= 16 with ``d_v == d``, and query / key lengths divisible
-by the block size.  Anisotropic / awkward shapes fall back; pad-to-multiple is a
-later refinement, and the at-scale wall-clock-vs-reference certification is the
-sibling perf suite's job.
+The supported shapes (anything else raises :class:`PallasNotTileable`, which the
+dispatcher turns into a loud JAX fallback) are: NVIDIA Ampere+ hardware, float32
+data, a power-of-two head dimension :math:`\geq 16` with ``d_v == d``, and query
+/ key lengths divisible by the block size.  Anisotropic or awkward shapes fall
+back; pad-to-multiple is a later refinement, and the at-scale
+wall-clock-versus-reference certification is the sibling perf suite's job.
 
-Implementation detail: never import from ``nitrix._kernels.cuda`` directly.  Use
-``nitrix.nn.attention.scaled_dot_product_attention`` which handles backend
+This is a private implementation detail: never import from
+``nitrix._kernels.cuda`` directly.  Use
+:func:`nitrix.nn.attention.scaled_dot_product_attention`, which handles backend
 dispatch and fallback observability.
 """
 
@@ -68,8 +71,9 @@ _BLOCK = 32
 class PallasNotTileable(RuntimeError):
     """The Pallas kernel rejected the requested shape / host.
 
-    Caught by the dispatcher in ``nitrix.nn.attention`` and translated into a
-    ``NitrixBackendFallback`` warning (the JAX reference runs instead).
+    Caught by the dispatcher in :mod:`nitrix.nn.attention` and translated into a
+    ``NitrixBackendFallback`` warning, after which the JAX reference runs
+    instead.
     """
 
 
@@ -164,7 +168,51 @@ def _mha_forward(
     block_q: int,
     block_k: int,
 ) -> tuple[Float[Array, 'b s h d'], Float[Array, 'b h s']]:
-    """Pallas driver on the stock ``(b, s, h, d)`` layout; returns (out, lse)."""
+    """Run the fused forward attention kernel on the ``(b, s, h, d)`` layout.
+
+    Launches the flash-attention forward Pallas kernel over a grid of one
+    query-row tile per program, streaming the key axis and accumulating the
+    online-softmax output plus the log-sum-exp residual needed by the backward
+    pass.
+
+    Parameters
+    ----------
+    q : Float[Array, 'b s h d']
+        Query activations, laid out as ``(batch, query length, heads, head
+        dim)``.
+    k : Float[Array, 'b t h d']
+        Key activations, laid out as ``(batch, key length, heads, head dim)``.
+    v : Float[Array, 'b t h d']
+        Value activations, laid out as ``(batch, key length, heads, head dim)``.
+    bias : Float[Array, 'b h s t'] or None
+        Optional additive attention bias, broadcast to ``(batch, heads, query
+        length, key length)`` and added to the logits before the softmax.  When
+        ``None`` no bias tile is threaded through the kernel.
+    mask : Bool[Array, 'b h s t'] or None
+        Optional boolean keep-mask over ``(batch, heads, query length, key
+        length)``; positions that are ``False`` are driven to a large negative
+        sentinel before the softmax.  When ``None`` no mask tile is used.
+    sm_scale : float
+        Softmax scale applied to the raw query-key dot products.
+    causal : bool
+        If ``True``, apply a lower-triangular causal mask so each query attends
+        only to keys at or before its own position, and skip key blocks that lie
+        wholly past the diagonal.
+    block_q : int
+        Query-tile height (rows per program).
+    block_k : int
+        Key-tile width (columns streamed per inner-loop step).
+
+    Returns
+    -------
+    out : Float[Array, 'b s h d']
+        Attention output in the same ``(batch, query length, heads, head dim)``
+        layout as ``q``.
+    lse : Float[Array, 'b h s']
+        Per-query base-2 log-sum-exp residual, in float32, retained so the
+        backward pass can recompute the softmax weights without storing the
+        score matrix.
+    """
     b, s, h, d = q.shape
     t = k.shape[1]
     grid = (pl.cdiv(s, block_q), b, h)
@@ -467,7 +515,25 @@ def _from_bshd(
 
 
 def _unbroadcast(g: Array, shape: tuple[int, ...]) -> Array:
-    """Reduce a broadcasted cotangent ``g`` down to ``shape`` (VJP of broadcast)."""
+    """Reduce a broadcast cotangent down to a target shape.
+
+    Implements the vector-Jacobian product of a broadcast: leading axes that
+    were introduced by the broadcast are summed away, then any axis that the
+    target shape holds at size one (but which the cotangent expanded) is summed
+    with the dimension kept, and finally the result is reshaped to ``shape``.
+
+    Parameters
+    ----------
+    g : Array
+        The cotangent to reduce, whose shape is a broadcast of ``shape``.
+    shape : tuple of int
+        The target shape (the original, pre-broadcast shape of the operand).
+
+    Returns
+    -------
+    Array
+        The cotangent summed and reshaped to exactly ``shape``.
+    """
     while g.ndim > len(shape):
         g = g.sum(axis=0)
     axes = tuple(
@@ -644,7 +710,29 @@ def _check_tileable(
     k: Float[Array, '... h t d'],
     v: Float[Array, '... h t d_v'],
 ) -> None:
-    """Static rejection (-> loud JAX fallback) of shapes the kernel can't run."""
+    """Reject, at trace time, shapes the fused kernel cannot run.
+
+    Raises :class:`PallasNotTileable` (which the dispatcher turns into a loud JAX
+    fallback) unless the inputs satisfy every kernel requirement: float32 dtype,
+    ``d_v == d``, a power-of-two head dimension of at least 16, and query / key
+    lengths divisible by the block size.
+
+    Parameters
+    ----------
+    q : Float[Array, '... h s d']
+        Query activations; supplies the head dimension :math:`d`, the query
+        length :math:`s`, and the checked dtype.
+    k : Float[Array, '... h t d']
+        Key activations; supplies the key length :math:`t`.
+    v : Float[Array, '... h t d_v']
+        Value activations; supplies the value head dimension :math:`d_v`, which
+        must equal :math:`d`.
+
+    Raises
+    ------
+    PallasNotTileable
+        If any requirement above is violated.
+    """
     d = q.shape[-1]
     d_v = v.shape[-1]
     s = q.shape[-2]
@@ -682,7 +770,44 @@ def scaled_dot_product_attention_pallas(
     mask: Optional[Bool[Array, '... h s t']] = None,
     causal: bool = False,
 ) -> Float[Array, '... h s d_v']:
-    """Fused flash attention (NVIDIA Ampere+); differentiable via ``custom_vjp``.
+    """Compute fused flash attention on NVIDIA Ampere+ hardware.
+
+    Runs the Pallas-Triton fused scaled-dot-product attention kernel, which
+    streams the online softmax without materialising the score matrix and is
+    differentiable via :func:`jax.custom_vjp`.  The supported shape set is
+    checked first (see :func:`_check_tileable`); shapes outside it raise
+    :class:`PallasNotTileable` so the caller can fall back to the JAX reference.
+
+    Parameters
+    ----------
+    q : Float[Array, '... h s d']
+        Query activations, with leading batch axes, then ``(heads, query
+        length, head dim)``.
+    k : Float[Array, '... h t d']
+        Key activations, with the same leading batch axes and ``(heads, key
+        length, head dim)``.
+    v : Float[Array, '... h t d_v']
+        Value activations, with ``(heads, key length, value head dim)``; the
+        kernel requires ``d_v == d``.
+    scale : float
+        Softmax scale applied to the query-key dot products.
+    bias : Float[Array, '... h s t'] or None, optional
+        Additive attention bias over ``(heads, query length, key length)``,
+        broadcast against the batch axes and added to the logits before the
+        softmax.  Defaults to ``None`` (no bias).
+    mask : Bool[Array, '... h s t'] or None, optional
+        Boolean keep-mask over ``(heads, query length, key length)``; ``False``
+        positions are excluded from the softmax.  Defaults to ``None`` (no
+        mask).
+    causal : bool, optional
+        If ``True``, apply a causal mask so each query attends only to keys at
+        or before its own position.  Defaults to ``False``.
+
+    Returns
+    -------
+    Float[Array, '... h s d_v']
+        Attention output with the same leading batch axes as the inputs and
+        trailing shape ``(heads, query length, value head dim)``.
 
     Raises
     ------

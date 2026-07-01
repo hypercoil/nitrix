@@ -24,14 +24,14 @@ The contract, in brief:
   cross-run stability up to each site's documented tolerance.
 - Every divergent site is a **registered contract**
   (:func:`register_divergent_op`); :func:`divergent_ops` lists them and the
-  completeness guard (suite P4) fails CI if a site is unregistered.
+  completeness guard fails CI if a site is unregistered.
 
-Resolution precedence (mirrors ``resolve_backend``)::
+Resolution precedence (mirrors :func:`resolve_backend`)::
 
     driver= (per-call, not 'auto')  >  reproducible mode  >  hardware-auto
 
 The reproducibility flag is read at **trace** time (a ``contextvars.ContextVar``,
-like ``jax.config`` flags and ``default_backend_is_gpu``): a function traced
+like ``jax.config`` flags and :func:`default_backend_is_gpu`): a function traced
 outside ``reproducible()`` and called inside (from the ``jit`` cache) keeps its
 traced variant.  Set the mode before first trace -- the deployment env var is the
 robust path.
@@ -82,7 +82,19 @@ _REPRODUCIBLE: contextvars.ContextVar[bool] = contextvars.ContextVar(
 
 
 def reproducible_enabled() -> bool:
-    """Whether reproducibility mode is currently active (trace-time signal)."""
+    """Report whether reproducibility mode is currently active.
+
+    This is the trace-time signal that divergent dispatch sites consult:
+    it reads the context-scoped reproducibility flag as seen at the point of
+    the call, so a function that is traced inside a :func:`reproducible` block
+    observes ``True``.
+
+    Returns
+    -------
+    bool
+        ``True`` if reproducibility mode is active in the current context,
+        ``False`` otherwise.
+    """
     return _REPRODUCIBLE.get()
 
 
@@ -91,6 +103,13 @@ def set_reproducible(enabled: bool = True) -> None:
 
     Prefer :func:`reproducible` (the context manager) where the scope is
     known; this is the imperative form for notebook / session-level use.
+
+    Parameters
+    ----------
+    enabled
+        Whether to activate reproducibility mode. When ``True`` (the default),
+        subsequent divergent dispatch sites resolve to their canonical
+        variant; when ``False``, they resolve to the hardware-optimal pick.
     """
     _REPRODUCIBLE.set(bool(enabled))
 
@@ -107,6 +126,21 @@ def reproducible(enabled: bool = True) -> Iterator[None]:
     fast region out of an otherwise-reproducible deployment.
 
     Must wrap the *trace* (see the module docstring's ``jit`` note).
+
+    Parameters
+    ----------
+    enabled
+        Whether the block runs with reproducibility mode active. ``True``
+        (the default) forces canonical variants within the block; ``False``
+        forces the hardware-optimal picks, carving a fast region out of an
+        otherwise-reproducible deployment.
+
+    Yields
+    ------
+    None
+        The context manager yields no value; it exists for its scoped effect
+        on the reproducibility flag, which is restored to its previous state
+        on exit.
     """
     token = _REPRODUCIBLE.set(bool(enabled))
     try:
@@ -172,6 +206,42 @@ def register_divergent_op(
     ``'auto'`` is added to ``driver_values`` if absent.  ``canonical`` and
     every ``fast`` value must be in ``driver_values`` (a registration-time
     invariant, so :func:`resolve_driver` never returns an unlisted variant).
+    Registering the same ``op`` again overwrites the previous entry.
+
+    Parameters
+    ----------
+    op
+        Dotted public name of the site, e.g. ``'nn.ssm.selective_scan'``.
+        Used as the registry key.
+    canonical
+        The reference variant that reproducibility mode forces. Must be a
+        concrete value present in ``driver_values`` (never ``'auto'``).
+    fast
+        Descriptive map from platform label (e.g. ``'gpu'``, ``'cpu'``) to
+        the variant the hardware-auto default picks there. Every value must
+        be a concrete member of ``driver_values`` (never ``'auto'``). This
+        is a description for introspection, not the runtime selector.
+    driver_values
+        The accepted ``driver=`` values for this site. ``'auto'`` is prepended
+        automatically if not already present.
+    tolerance
+        Per-dtype cross-variant budget mapping a dtype name to a numerical
+        tolerance, e.g. ``{'float32': 2e-3}``.
+    summary
+        One-line human-readable description of the divergence. Defaults to an
+        empty string.
+
+    Returns
+    -------
+    DivergentOp
+        The frozen registry entry that was created and stored, with ``'auto'``
+        normalised into ``driver_values`` and the mappings made read-only.
+
+    Raises
+    ------
+    ValueError
+        If ``canonical`` is ``'auto'`` or absent from ``driver_values``, or if
+        any ``fast`` value is ``'auto'`` or absent from ``driver_values``.
     """
     values = tuple(driver_values)
     if 'auto' not in values:
@@ -206,6 +276,11 @@ def divergent_ops() -> tuple[DivergentOp, ...]:
     (correct) default path, nitrix lets a parity-sensitive consumer enumerate
     exactly which operations diverge across platforms and within what
     tolerance, and pin them via ``driver=`` or :func:`reproducible`.
+
+    Returns
+    -------
+    tuple of DivergentOp
+        Every registered dispatch site, ordered by dotted op name.
     """
     return tuple(_REGISTRY[name] for name in sorted(_REGISTRY))
 
