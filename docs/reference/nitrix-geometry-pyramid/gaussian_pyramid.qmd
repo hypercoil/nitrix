@@ -1,0 +1,42 @@
+---
+title: "gaussian_pyramid"
+generated: true
+description: "Build a `levels`-deep anti-aliased Gaussian pyramid."
+---
+
+[‹ back to `nitrix.geometry.pyramid`](../nitrix-geometry-pyramid.qmd)
+
+<!-- nitrix:gen sig:gaussian_pyramid -->
+```python
+gaussian_pyramid(image: Float[Array, '*spatial c'], *, levels: int, factor: float = 2.0, sigma: Union[None, float, Sequence[float]] = None, mode: str = 'reflect', method: Interpolator = Linear()) -> tuple[Float[Array, '*spatial c'], ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaussian_pyramid -->
+Build a `levels`-deep anti-aliased Gaussian pyramid.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaussian_pyramid -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `*spatial` × `c` | — | Channel-last image, `(*spatial, c)` -- the finest level. |
+| `levels` | `int` | — | — | Number of levels including the original (`>= 1`). |
+| `factor` | `float` | — | `2.0` | Forwarded to [`downsample`](../nitrix-geometry-pyramid/downsample.qmd) for each coarsening step. |
+| `sigma` | `Union[None, float, Sequence[float]]` | — | `None` | Forwarded to [`downsample`](../nitrix-geometry-pyramid/downsample.qmd) for each coarsening step. |
+| `mode` | `str` | — | `'reflect'` | Forwarded to [`downsample`](../nitrix-geometry-pyramid/downsample.qmd) for each coarsening step. |
+| `method` | `Interpolator` | — | `Linear()` | Forwarded to [`downsample`](../nitrix-geometry-pyramid/downsample.qmd) for each coarsening step. |
+
+**Returns** `tuple[Float[Array, '*spatial c'], ...]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaussian_pyramid -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+<!-- nitrix:/gen -->

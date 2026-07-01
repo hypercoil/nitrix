@@ -1,0 +1,68 @@
+---
+title: "nitrix.geometry.deformation"
+generated: true
+signature-hash: f712fc46cad8efeb
+description: "Deformation- and velocity-field algebra."
+listing:
+  id: nitrix-geometry-deformation-symbols
+  contents: "nitrix-geometry-deformation/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.deformation`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Deformation- and velocity-field algebra.
+
+The operations the diffeomorphic (log-Demons) recipe needs on top of the
+stationary-velocity-field stack ([`integrate_velocity_field`](nitrix-geometry-grid/integrate_velocity_field.qmd)
+is the exponential $\exp(v)$):
+
+- [`compose_displacement`](nitrix-geometry-deformation/compose_displacement.qmd) -- compose two displacement fields,
+  $(\mathrm{id} + u) \circ (\mathrm{id} + v)$, the warp-by-then-warp
+  operation.
+- [`compose_velocity`](nitrix-geometry-deformation/compose_velocity.qmd) -- the Baker-Campbell-Hausdorff approximation of
+  the velocity whose exponential is $\exp(v) \circ \exp(u)$ (the
+  log-domain update); first order is plain addition, second order adds half
+  the Lie bracket.
+- [`invert_displacement`](nitrix-geometry-deformation/invert_displacement.qmd) -- the inverse displacement, as the fixed
+  point $s_{\mathrm{inv}} = -s \circ (\mathrm{id} + s_{\mathrm{inv}})$
+  (via `fixed_point_solve`, so it is differentiable).
+- [`field_log`](nitrix-geometry-deformation/field_log.qmd) -- the stationary-velocity *logarithm* of a deformation
+  (the inverse of [`integrate_velocity_field`](nitrix-geometry-grid/integrate_velocity_field.qmd)), by
+  inverse scaling-and-squaring; the dense analogue of
+  `matrix_log`.  Recovers a stationary-velocity-field
+  parameterisation of a deformation solved directly in the group (the greedy
+  registration path).  The exponential is not surjective -- a general
+  diffeomorphism (e.g. a greedy composition of many non-commuting warps) is
+  *not* $\exp(v)$ for any single stationary $v$ -- so
+  [`field_log`](nitrix-geometry-deformation/field_log.qmd) returns the *best stationary-velocity-field fit*: the
+  round-trip $\exp(\mathrm{field\_log}(\varphi)) = \varphi$ is exact
+  by construction, but [`field_log`](nitrix-geometry-deformation/field_log.qmd) is a true inverse of the exponential
+  only on the stationary-velocity-field submanifold (a nonzero fit residual
+  off it).
+
+Channel-last fields `(*spatial, ndim)`; coordinates are in index space
+(the [`identity_grid`](nitrix-geometry-grid/identity_grid.qmd) convention).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-deformation-symbols}
+:::

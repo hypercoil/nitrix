@@ -1,0 +1,44 @@
+---
+title: "apply_affine"
+generated: true
+description: "Apply a homogeneous transform to a field of coordinates."
+---
+
+[‹ back to `nitrix.geometry.transform`](../nitrix-geometry-transform.qmd)
+
+<!-- nitrix:gen sig:apply_affine -->
+```python
+apply_affine(coords: Float[Array, '... d'], matrix: Float[Array, 'd1 d1'], *, center: Optional[Float[Array, 'd']] = None) -> Float[Array, '... d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:apply_affine -->
+Apply a homogeneous transform to a field of coordinates.
+
+Computes $\mathrm{out} = M (p - c) + t + c$ for the linear
+block $M$ and translation $t$ of `matrix`, with optional
+rotation/scaling centre $c$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:apply_affine -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `coords` | `Float` | `...` × `d` | — | `(..., ndim)` field of input coordinates in index space. |
+| `matrix` | `Float` | `d1` × `d1` | — | `(ndim + 1, ndim + 1)` homogeneous transform matrix. |
+| `center` | `Optional[Float[Array, 'd']]` | — | `None` | Optional `(ndim,)` rotation/scaling centre $c$. `None` (default) uses the origin. |
+
+**Returns** `Float` — shape `...` × `d`. The transformed coordinates, `(..., ndim)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:apply_affine -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

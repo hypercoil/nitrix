@@ -17,39 +17,44 @@ class CatmullRomCubic
 <!-- nitrix:gen overview:CatmullRomCubic -->
 Catmull-Rom cubic-Hermite interpolation -- the cardinal cubic spline.
 
-The *interpolating* C^1 cubic Hermite spline whose tangents are centred
-finite differences (tension `a = -1/2`): the curve passes through the
-samples, so -- unlike [`CubicBSpline`](../nitrix-geometry-grid/CubicBSpline.qmd) -- it needs **no prefilter**.
-The gather is a direct 4-tap separable cubic applied to the raw samples;
-at integer positions it reproduces them exactly.
+The *interpolating* $C^1$ cubic Hermite spline whose tangents
+are centred finite differences (tension $a = -1/2$): the curve
+passes through the samples, so -- unlike [`CubicBSpline`](../nitrix-geometry-grid/CubicBSpline.qmd) -- it
+needs **no prefilter**.  The gather is a direct 4-tap separable cubic
+applied to the raw samples; at integer positions it reproduces them
+exactly.
 
 Coefficients for the 4 taps
-`{floor(x) - 1, floor(x), floor(x) + 1, floor(x) + 2}` at fractional
-position `t = x - floor(x)`:
+$\{\lfloor x\rfloor - 1, \lfloor x\rfloor,
+\lfloor x\rfloor + 1, \lfloor x\rfloor + 2\}$ at fractional
+position $t = x - \lfloor x\rfloor$:
     w_{-1}(t) = -0.5 t^3 +     t^2 - 0.5 t
     w_{ 0}(t) =  1.5 t^3 - 2.5 t^2       + 1
     w_{+1}(t) = -1.5 t^3 + 2.0 t^2 + 0.5 t
     w_{+2}(t) =  0.5 t^3 - 0.5 t^2
 
-At `t = 0` the weights are `(0, 1, 0, 0)` (the sample at `floor(x)`)
-and at `t = 1` they are `(0, 0, 1, 0)` (`floor(x) + 1`) -- the
+At $t = 0$ the weights are `(0, 1, 0, 0)` (the sample at
+$\lfloor x\rfloor$) and at $t = 1$ they are
+`(0, 0, 1, 0)` ($\lfloor x\rfloor + 1$) -- the
 interpolation property.
 
-Distinct from the other cubics: [`CubicBSpline`](../nitrix-geometry-grid/CubicBSpline.qmd) is *approximating*
-(it needs the recursive prefilter to interpolate, and that prefilter is
-backend-dependent), and is $C^2$-smooth with a partition-of-unity basis;
-[`Lanczos`](../nitrix-geometry-grid/Lanczos.qmd) is a windowed sinc.  Catmull-Rom is the cardinal cubic of
+Distinct from the other cubics: [`CubicBSpline`](../nitrix-geometry-grid/CubicBSpline.qmd) is
+*approximating* (it needs the recursive prefilter to interpolate, and
+that prefilter is backend-dependent), and is $C^2$-smooth with a
+partition-of-unity basis; [`Lanczos`](../nitrix-geometry-grid/Lanczos.qmd) is a windowed sinc.
+Catmull-Rom is the cardinal cubic of
 OpenCV `INTER_CUBIC` / Keras image `cubic` / the Keras
 "BilinearInterpolation" STN (a misnomer -- it evaluates a 4x4 Catmull-Rom
 stencil), so a consumer parity-locked to that family (e.g. ilex
 `fd_net`'s spatial transformer) reproduces the upstream bit-for-bit.
 
-Smooth in both the image values and the sample coordinates (the basis is
-$C^1$ -- piecewise cubic, continuous with continuous first derivative
-across knots), so it is differentiable end-to-end and usable for
-coordinate-driven registration losses.  Having no `map_coordinates`
-equivalent, it always uses the explicit separable gather (no platform
-branch) -- and, with no prefilter, no backend-dependent scan either.
+Smooth in both the image values and the sample coordinates (the basis
+is $C^1$ -- piecewise cubic, continuous with continuous first
+derivative across knots), so it is differentiable end-to-end and
+usable for coordinate-driven registration losses.  Having no
+`map_coordinates` equivalent, it always uses the explicit separable
+gather (no platform branch) -- and, with no prefilter, no
+backend-dependent scan either.
 <!-- nitrix:/gen -->
 
 ### Methods
@@ -60,6 +65,8 @@ sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndi
 ```
 <!-- nitrix:/gen -->
 
+Sample the image at `coords` by cardinal-cubic interpolation.
+
 <!-- nitrix:gen sig:CatmullRomCubic.__init__ -->
 ```python
 __init__() -> None
@@ -68,9 +75,10 @@ __init__() -> None
 
 <!-- nitrix:gen sections:CatmullRomCubic -->
 ::: {.callout-note}
-The cardinal-cubic basis **is** a partition of unity -- the four weights
-sum to exactly 1 for every `t` (the $t^3$/$t^2$/$t^1$ coefficients
-cancel across the taps) -- so it reproduces constants *and* linear ramps
+The cardinal-cubic basis **is** a partition of unity -- the four
+weights sum to exactly 1 for every $t$ (the
+$t^3$/$t^2$/$t^1$ coefficients cancel across the
+taps) -- so it reproduces constants *and* linear ramps
 exactly (the Keys `a = -1/2` kernel has third-order accuracy).  No
 renormalisation is applied (none is needed -- and the raw cardinal weights
 are what the parity-locked consumers pin against).  The kernel is *not*,

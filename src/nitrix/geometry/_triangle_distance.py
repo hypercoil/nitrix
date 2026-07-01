@@ -29,10 +29,30 @@ __all__ = ['nearest_surface_distance']
 def _closest_point_dist2(
     p: NDArray[Any], a: NDArray[Any], b: NDArray[Any], c: NDArray[Any]
 ) -> NDArray[Any]:
-    """Squared distance from points ``p`` (m,1,3) to triangles (a,b,c) (1,F,3).
+    """Squared distance from a set of points to a set of triangles.
 
-    Vectorised Ericson closest-point-on-triangle (the seven Voronoi regions:
-    the interior, three edges, three vertices).
+    Vectorised closest-point-on-triangle after Ericson: for each
+    point-triangle pair the closest point is located in one of the seven
+    Voronoi regions of the triangle (the interior face, the three edges, and
+    the three vertices), and the squared distance to that closest point is
+    returned.
+
+    Parameters
+    ----------
+    p : NDArray
+        ``(m, 1, 3)`` query points, broadcast against the triangles.
+    a : NDArray
+        ``(1, F, 3)`` first vertex of each of the :math:`F` triangles.
+    b : NDArray
+        ``(1, F, 3)`` second vertex of each triangle.
+    c : NDArray
+        ``(1, F, 3)`` third vertex of each triangle.
+
+    Returns
+    -------
+    NDArray
+        ``(m, F)`` squared Euclidean distance from each point to the closest
+        point on each triangle.
     """
     ab, ac = b - a, c - a
     ap = p - a
@@ -79,7 +99,29 @@ def _closest_point_dist2(
 def _brute_nearest_dist2(
     q: NDArray[Any], tri: NDArray[Any], chunk_target: int
 ) -> NDArray[Any]:
-    """Exact squared nearest distance by testing every triangle (chunked)."""
+    """Exact squared nearest distance by testing every triangle.
+
+    Brute-force broad phase: every query is compared against every triangle
+    and the minimum squared distance retained. Queries are processed in chunks
+    so that the intermediate ``(chunk, F)`` distance array stays within a
+    bounded memory budget.
+
+    Parameters
+    ----------
+    q : NDArray
+        ``(n, 3)`` query points.
+    tri : NDArray
+        ``(F, 3, 3)`` triangles, stacked as ``(face, vertex, coordinate)``.
+    chunk_target : int
+        Approximate ``chunk * F`` work per block; the query chunk size is
+        derived from this so that the transient distance array is capped.
+
+    Returns
+    -------
+    NDArray
+        ``(n,)`` squared Euclidean distance from each query to the nearest
+        point on the mesh surface.
+    """
     a = tri[:, 0][None]  # (1, F, 3)
     b = tri[:, 1][None]
     c = tri[:, 2][None]
@@ -96,26 +138,74 @@ def _brute_nearest_dist2(
 
 
 def _shell_offsets(r: int) -> NDArray[Any]:
-    """Integer cell offsets at Chebyshev (L-infinity) distance exactly ``r``."""
+    """Integer cell offsets at Chebyshev distance exactly ``r``.
+
+    Enumerates the integer 3-vectors whose Chebyshev (:math:`L_\\infty`) norm
+    equals ``r`` -- that is, the surface of the cubic shell at radius ``r``.
+    For ``r == 0`` the single zero offset is returned.
+
+    Parameters
+    ----------
+    r : int
+        Chebyshev shell radius.
+
+    Returns
+    -------
+    NDArray
+        ``(k, 3)`` integer cell offsets lying exactly on the shell, where
+        :math:`k = (2r + 1)^3 - (2r - 1)^3` for ``r >= 1`` and ``k == 1`` for
+        ``r == 0``.
+    """
     if r == 0:
         return np.zeros((1, 3), dtype=np.int64)
     rng = np.arange(-r, r + 1)
     gx, gy, gz = np.meshgrid(rng, rng, rng, indexing='ij')
     pts = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
-    return cast(NDArray[Any], pts[np.abs(pts).max(axis=1) == r].astype(np.int64))
+    return cast(
+        NDArray[Any], pts[np.abs(pts).max(axis=1) == r].astype(np.int64)
+    )
 
 
 def _grid_nearest_dist2(
     q: NDArray[Any], tri: NDArray[Any], cell: float, r_max: int
 ) -> tuple[NDArray[Any], NDArray[Any]]:
-    """Squared nearest distance via a uniform grid + expanding-shell search.
+    """Squared nearest distance via a uniform grid and expanding-shell search.
 
-    Returns ``(d2, finalised)``.  A query is **finalised** (its ``d2`` is the
-    *exact* nearest squared distance) once the running minimum is ``<= (R*cell)^2``
-    after searching all cells within Chebyshev radius ``R`` -- because any
-    triangle binned only into cells at Chebyshev ``> R`` has every point at
-    ``L-infinity`` (hence Euclidean) distance ``>= R*cell`` from the query.
-    Queries not finalised within ``r_max`` are left for the brute fallback.
+    Triangles are binned into a uniform grid (each triangle registered in
+    every cell its axis-aligned bounding box overlaps), and each query then
+    searches outward shell by shell in Chebyshev radius, testing only the
+    triangles in the visited cells.
+
+    A query is *finalised* -- its squared distance is the exact nearest value
+    -- once the running minimum is :math:`\\leq (R \\cdot \\mathrm{cell})^2`
+    after searching all cells within Chebyshev radius :math:`R`, because any
+    triangle binned only into cells at Chebyshev radius greater than :math:`R`
+    has every point at :math:`L_\\infty` (hence Euclidean) distance
+    :math:`\\geq R \\cdot \\mathrm{cell}` from the query. Queries not finalised
+    within ``r_max`` shells are flagged so the caller can resolve them with the
+    exact brute scan.
+
+    Parameters
+    ----------
+    q : NDArray
+        ``(n, 3)`` query points.
+    tri : NDArray
+        ``(F, 3, 3)`` triangles, stacked as ``(face, vertex, coordinate)``.
+    cell : float
+        Edge length of a grid cell, in the same units as the coordinates.
+    r_max : int
+        Maximum Chebyshev shell radius searched before a query is left
+        unfinalised.
+
+    Returns
+    -------
+    d2 : NDArray
+        ``(n,)`` squared nearest distance; exact where ``finalised`` is
+        ``True`` and an upper bound (the running minimum over the searched
+        shells) otherwise.
+    finalised : NDArray
+        ``(n,)`` boolean mask; ``True`` where ``d2`` is the exact nearest
+        squared distance.
     """
     n = q.shape[0]
     n_faces = tri.shape[0]
@@ -159,7 +249,9 @@ def _grid_nearest_dist2(
     ny = int(gmax[1] - gmin[1] + 1)
     nz = int(gmax[2] - gmin[2] + 1)
 
-    def enc(cx: NDArray[Any], cy: NDArray[Any], cz: NDArray[Any]) -> NDArray[Any]:
+    def enc(
+        cx: NDArray[Any], cy: NDArray[Any], cz: NDArray[Any]
+    ) -> NDArray[Any]:
         out: NDArray[Any] = ((cx - gmin[0]) * ny + (cy - gmin[1])) * nz + (
             cz - gmin[2]
         )
@@ -181,9 +273,13 @@ def _grid_nearest_dist2(
         qidx = np.where(live)[0]
         qcl = qc[qidx]
         for off in _shell_offsets(r):
-            keys = enc(qcl[:, 0] + off[0], qcl[:, 1] + off[1], qcl[:, 2] + off[2])
+            keys = enc(
+                qcl[:, 0] + off[0], qcl[:, 1] + off[1], qcl[:, 2] + off[2]
+            )
             pos = np.searchsorted(ukey, keys)
-            hit = (pos < ukey.shape[0]) & (ukey[np.minimum(pos, ukey.shape[0] - 1)] == keys)
+            hit = (pos < ukey.shape[0]) & (
+                ukey[np.minimum(pos, ukey.shape[0] - 1)] == keys
+            )
             if not hit.any():
                 continue
             hq = qidx[hit]
@@ -231,8 +327,7 @@ def nearest_surface_distance(
         ``'grid'``, or ``'brute'``.  All three return the **identical exact**
         nearest distance -- the grid path finalises a query only once no
         unsearched cell can hold a closer triangle, and any query not resolved
-        within ``r_max`` cells falls back to the exact brute scan (Tier C /
-        audit AI-C5).
+        within ``r_max`` cells falls back to the exact brute scan.
     cell
         Grid cell size (``'grid'``/``'auto'``).  Defaults to the median edge
         length -- roughly one triangle per cell.
@@ -257,9 +352,7 @@ def nearest_surface_distance(
         return np.zeros(0, dtype=np.float64)
 
     use_grid = method == 'grid' or (
-        method == 'auto'
-        and n_faces >= 64
-        and n_q * n_faces > 5_000_000
+        method == 'auto' and n_faces >= 64 and n_q * n_faces > 5_000_000
     )
     if not use_grid or n_faces == 0:
         if method == 'grid' and n_faces == 0:

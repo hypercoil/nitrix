@@ -1,0 +1,120 @@
+---
+title: "sphere_grid_pad_2d"
+generated: true
+description: "Pad a 2D parameterised-sphere image with the sphere topology."
+---
+
+[‹ back to `nitrix.geometry.sphere_grid`](../nitrix-geometry-sphere_grid.qmd)
+
+<!-- nitrix:gen sig:sphere_grid_pad_2d -->
+```python
+sphere_grid_pad_2d(image: Num[Array, '... H W ...'], pad: PadSpec, *, height_axis: int = -2, width_axis: int = -1, pole_negate_channel: Optional[int] = None, pole_negate_axis: int = -1) -> Num[Array, '... H_padded W_padded ...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sphere_grid_pad_2d -->
+Pad a 2D parameterised-sphere image with the sphere topology.
+
+The padding scheme:
+
+- **Longitudinal** axis (`width_axis`) is treated as a
+  circular wrap: the first `w_pad` columns are taken from
+  the rightmost `w_pad` of the input, and vice versa.
+- **Latitudinal** axis (`height_axis`) is pole-bounded:
+  the top `h_pad` rows are built from the rows just inside
+  the north pole (rows `1 : h_pad + 1`), *flipped vertically*
+  and *rolled horizontally by* `W // 2`.  The bottom
+  `h_pad` rows are symmetric: rows `H - h_pad - 1 : H - 1`,
+  flipped and rolled.  The pole rows themselves (`row 0` and
+  `row H - 1`) are NOT used for reflection -- a pole row is
+  a (compressed) point on the sphere, and reflecting it would
+  duplicate it.
+
+For 2D flow / vector fields, the longitudinal component of the
+flow reverses sign across each pole (because longitude reverses
+on pole crossing).  Pass `pole_negate_channel` to identify
+which channel-axis entry to negate in the pole-padded rows.
+The latitudinal flow component does NOT reverse and should be
+left alone.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sphere_grid_pad_2d -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Num` | `...` × `H` × `W` × `...` | — | Channel-last image, `(..., H, W, ...)`. `H` and `W` are at `height_axis` and `width_axis`; everything else is preserved. |
+| `pad` | `PadSpec` | — | — | Pad amount. `int` -> symmetric `h_pad = w_pad = pad`; `(h_pad, w_pad)` -> per-axis. After padding the height becomes `H + 2 * h_pad` and the width `W + 2 * w_pad`. |
+| `height_axis` | `int` | — | `-2` | Axis index for the latitudinal axis. Default `-2` assumes a trailing channel axis (or scalar 2D image with no trailing channel; either works -- the axis selection is explicit). |
+| `width_axis` | `int` | — | `-1` | Axis index for the longitudinal axis. Default `-1` (last axis). Note: if you pass channel-last images `(*, H, W, C)`, set `height_axis=-3`, `width_axis=-2`. |
+| `pole_negate_channel` | `Optional[int]` | — | `None` | If not `None`, index along `pole_negate_axis` whose entries should be sign-flipped in the pole-padded rows. Used for the longitudinal-flow component of 2D flow fields. |
+| `pole_negate_axis` | `int` | — | `-1` | Axis along which `pole_negate_channel` indexes. Default `-1` (last axis). Only consulted when `pole_negate_channel` is not `None`. |
+
+**Returns** `Num` — shape `...` × `H_padded` × `W_padded` × `...`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:sphere_grid_pad_2d -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **94.0 µs** (median, L4); up to **2.45× faster** than `cupy.sphere_grid_pad_2d`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SPHERE_GRID_PAD_2D.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| sphere_grid_pad_2d | jax-cpu | h=128 | `cupy.sphere_grid_pad_2d` | skipped | — | — | — | — | — |
+| sphere_grid_pad_2d | jax-cpu | h=128 | `nitrix-jax` | ok | 31.7 µs / 34.2 µs | 142.05 ms | 701 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cpu | h=128 | `numpy.sphere_grid_pad` | ok | 30.2 µs / 32.1 µs | 59.9 µs | 701 MB (rss) | ✓ 0×tol | 0.95x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=128 | `cupy.sphere_grid_pad_2d` | ok | 218.6 µs / 228.0 µs | 42.24 ms | 0.13 MB (hbm) | ✓ 0×tol | 2.40x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=128 | `nitrix-jax` | ok | 91.0 µs / 94.0 µs | 130.11 ms | 0.42 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=128 | `numpy.sphere_grid_pad` | ok | 28.9 µs / 29.5 µs | 51.5 µs | 0.13 MB (hbm) | ✓ 0×tol | 0.32x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cpu | h=256 | `cupy.sphere_grid_pad_2d` | skipped | — | — | — | — | — |
+| sphere_grid_pad_2d | jax-cpu | h=256 | `nitrix-jax` | ok | 104.3 µs / 129.2 µs | 124.46 ms | 701 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cpu | h=256 | `numpy.sphere_grid_pad` | ok | 62.4 µs / 68.8 µs | 92.3 µs | 701 MB (rss) | ✓ 0×tol | 0.60x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=256 | `cupy.sphere_grid_pad_2d` | ok | 224.0 µs / 231.2 µs | 59.49 ms | 0.52 MB (hbm) | ✓ 0×tol | 2.45x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=256 | `nitrix-jax` | ok | 91.6 µs / 97.0 µs | 154.09 ms | 2.10 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=256 | `numpy.sphere_grid_pad` | ok | 60.9 µs / 62.0 µs | 82.7 µs | 0.52 MB (hbm) | ✓ 0×tol | 0.66x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cpu | h=64 | `cupy.sphere_grid_pad_2d` | skipped | — | — | — | — | — |
+| sphere_grid_pad_2d | jax-cpu | h=64 | `nitrix-jax` | ok | 14.9 µs / 15.2 µs | 136.22 ms | 701 MB (rss) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cpu | h=64 | `numpy.sphere_grid_pad` | ok | 34.6 µs / 36.8 µs | 67.2 µs | 701 MB (rss) | ✓ 0×tol | 2.32x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=64 | `cupy.sphere_grid_pad_2d` | ok | 219.9 µs / 234.9 µs | 73.44 ms | 0.03 MB (hbm) | ✓ 0×tol | 1.93x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=64 | `nitrix-jax` | ok | 113.8 µs / 119.8 µs | 140.91 ms | 0.11 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| sphere_grid_pad_2d | jax-cuda12 | h=64 | `numpy.sphere_grid_pad` | ok | 20.7 µs / 21.7 µs | 40.7 µs | 0.03 MB (hbm) | ✓ 0×tol | 0.18x vs nitrix-jax |
+:::
+
+*source: bench `da5314ba` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:sphere_grid_pad_2d -->
+::: {.callout-note}
+This is the right padding scheme for 2D conv / morphology /
+smoothing on equirectangular-parameterised spherical images
+(FreeSurfer surface registration, surface-based saliency, etc.)
+The pole flip + W/2 roll is the natural "go over the pole"
+topology of an equirectangular grid.
+
+For a spherical-diffeomorphism warp this composes directly with
+the existing sampler -- no sphere-aware sampler is needed: pad the
+stationary velocity field here (with `pole_negate_channel` for
+the longitudinal flow component), integrate it with
+[`integrate_velocity_field`](../nitrix-geometry-grid/integrate_velocity_field.qmd), then
+resample with
+[`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) using
+`mode='nearest'`.  The longitudinal seam is handled by this
+padding (equivalent to `mode='wrap'`) and the over-the-pole halo
+by the flip + roll; `mode='nearest'` then edge-replicates the
+(already topology-correct) padded borders.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sphere_grid_pad_2d -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `H` | *(undocumented — add to `_dimensions.yml`)* |
+| `W` | *(undocumented — add to `_dimensions.yml`)* |
+| `H_padded` | *(undocumented — add to `_dimensions.yml`)* |
+| `W_padded` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

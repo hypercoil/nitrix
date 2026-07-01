@@ -1,0 +1,61 @@
+---
+title: "mean_curvature"
+generated: true
+description: "Per-vertex mean curvature $H$ via the cotangent / mass operator."
+---
+
+[‹ back to `nitrix.geometry.surface`](../nitrix-geometry-surface.qmd)
+
+<!-- nitrix:gen sig:mean_curvature -->
+```python
+mean_curvature(mesh: Mesh, *, area_scheme: Literal['voronoi', 'barycentric'] = 'voronoi') -> Float[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mean_curvature -->
+Per-vertex mean curvature $H$ via the cotangent / mass operator.
+
+The discrete mean-curvature *normal* (Meyer et al. 2003) is
+$K(v_i) = \frac{1}{2 A_i} \sum_j
+(\cot \alpha_{ij} + \cot \beta_{ij})(v_i - v_j)$, which is exactly
+$(M^{-1} L v)_i$ for the shipped cotangent stiffness $L$
+(`mesh_cotangent_laplacian`) and lumped mass $M$
+(`vertex_areas`), and equals $2 H n$.  So the mean-curvature
+vector is $H_{\mathrm{vec}} = \tfrac{1}{2} M^{-1} L v$ and
+$H = \operatorname{sign}(H_{\mathrm{vec}} \cdot n)
+\lVert H_{\mathrm{vec}} \rVert$.
+
+Sign convention: positive where the surface is convex with respect to the
+outward vertex normal (a sphere, gyral crowns), negative in concave regions
+(sulcal fundi).  This is the *opposite* sign to FreeSurfer `?h.curv`
+(which is positive in sulci); flip the sign to compare.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mean_curvature -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh. |
+| `area_scheme` | `Literal['voronoi', 'barycentric']` | — | `'voronoi'` | Vertex-area scheme for the mass $M$ (`'voronoi'` default). |
+
+**Returns** `Float` — shape `n_vertices`. Per-vertex mean curvature, shape `(n_vertices,)`. Pure JAX; differentiable with respect to `mesh.vertices`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:mean_curvature -->
+### References
+
+Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003). Discrete
+differential-geometry operators for triangulated 2-manifolds. In
+*Visualization and Mathematics III* (pp. 35-57). Springer.
+`10.1007/978-3-662-05105-4_2`
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mean_curvature -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

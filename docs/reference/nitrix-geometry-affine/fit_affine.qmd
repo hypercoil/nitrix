@@ -1,0 +1,53 @@
+---
+title: "fit_affine"
+generated: true
+description: "Closed-form (weighted) least-squares affine between point sets."
+---
+
+[‹ back to `nitrix.geometry.affine`](../nitrix-geometry-affine.qmd)
+
+<!-- nitrix:gen sig:fit_affine -->
+```python
+fit_affine(source: Float[Array, '... m n'], target: Float[Array, '... m n'], weights: Optional[Float[Array, '... m']] = None) -> Float[Array, '... n np1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fit_affine -->
+Closed-form (weighted) least-squares affine between point sets.
+
+Fits an affine `mat` in `(..., N, N+1)` form so that `mat` maps
+`target` onto `source`, i.e.
+$\mathtt{source} \approx \mathtt{mat}[\ldots, :, :-1]\,
+\mathtt{target} + \mathtt{mat}[\ldots, :, -1]$, minimising the
+(weighted) squared residual over the `M` corresponding points.
+
+The fit solves the normal equations
+$(X^{\top} W X)\,\beta = X^{\top} W y$ (with $X$ the
+homogeneous `target`, $y$ the `source`, and $W$ the
+diagonal weight matrix) via a symmetric-positive-definite Cholesky
+solve.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fit_affine -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `source` | `Float` | `...` × `m` × `n` | — | Batched target coordinates of the fit: `M` points in `N` dimensions that the affine should map onto. |
+| `target` | `Float` | `...` × `m` × `n` | — | Batched source coordinates of the fit: the `M` points in `N` dimensions that are mapped by the affine. |
+| `weights` | `Optional[Float[Array, '... m']]` | — | `None` | Per-point non-negative weights, `(..., M)` or `(..., M, 1)`. If omitted, all points are weighted equally. |
+
+**Returns** `Float` — shape `...` × `n` × `np1`. The fitted affine in `(..., N, N+1)` form.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fit_affine -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `m` | rows of a multi-row contrast |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `np1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

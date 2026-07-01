@@ -33,7 +33,7 @@ pixels exactly.  The interpolation *kernel* is selected by
 | `target_shape` | `Sequence[int]` | — | — | Per-axis target sizes; must match the spatial rank of `image`. |
 | `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Sample positions are nominally within the input extent (rounded up to the endpoint), but floating-point drift can push them out by an ULP; `mode` selects the fill. Default `"constant"`; `"nearest"` is the safer default for general downsampling but `"constant"` + `cval=0` matches the prior contract. |
 | `cval` | `float` | — | `0.0` | Constant fill value when `mode="constant"`. Default `0`. |
-| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel -- an `Interpolator` record. Default `Linear()` ((multi-)linear, the prior behaviour). `NearestNeighbour()` preserves label values exactly (the choice for integer segmentations when anti-aliasing is *not* wanted). See `geometry._interpolate` for the method set and their differentiability contracts. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel -- an [`Interpolator`](../nitrix-geometry-grid/Interpolator.qmd) record. Default [`Linear`](../nitrix-geometry-grid/Linear.qmd) ((multi-)linear, the prior behaviour). [`NearestNeighbour`](../nitrix-geometry-grid/NearestNeighbour.qmd) preserves label values exactly (the choice for integer segmentations when anti-aliasing is *not* wanted). |
 
 **Returns** `Float` — shape `*target` × `c`.
 <!-- nitrix:/gen -->

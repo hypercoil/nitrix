@@ -1,0 +1,61 @@
+---
+title: "nitrix.geometry.differential"
+generated: true
+signature-hash: b81a51a07746818b
+description: "Image spatial-gradient operators."
+listing:
+  id: nitrix-geometry-differential-symbols
+  contents: "nitrix-geometry-differential/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.differential`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Image spatial-gradient operators.
+
+The directional derivatives $\partial I / \partial x_d$ of a
+scalar field along each of its spatial axes -- the gradient
+$\nabla M$ that drives both registration recipes (the rigid
+Gauss-Newton steepest-descent images $\nabla M \cdot (G_j x)$
+and the diffeomorphic-Demons symmetric force
+$\tfrac{1}{2}(\nabla F + \nabla(M \circ \varphi))$).
+
+Three separable schemes, all differentiable and all reusing one
+cross-correlation engine:
+
+- `"central"` (default) -- the bare central difference
+  $(I[+1] - I[-1]) / (2 h)$.  Generalises the private
+  central-difference helper used by [`jacobian_displacement`](nitrix-geometry-grid/jacobian_displacement.qmd).
+- `"sobel"` -- central difference along the derivative axis,
+  $[1, 2, 1] / 4$ smoothing along every other spatial axis
+  (noise-robust).
+- `"scharr"` -- as Sobel with $[3, 10, 3] / 16$ smoothing
+  (better rotational symmetry).
+
+Layout follows the Gaussian smoothing operators: `(..., *spatial)`
+with the trailing `spatial_rank` axes spatial.  The result appends a
+trailing derivative-direction axis: `(..., *spatial, ndim)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-differential-symbols}
+:::

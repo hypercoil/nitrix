@@ -22,7 +22,20 @@ final publication as-is (SPEC §6.5).
 <!-- nitrix:gen index-tree -->
 ### `nitrix.geometry`
 
+- [`affine`](nitrix-geometry-affine.qmd) — Geometric-parameter affine algebra (batched, differentiable).
+- [`algebra`](nitrix-geometry-algebra.qmd) — Transform algebra: Lie-group barycentre, geodesic interpolation, fusion.
+- [`coords`](nitrix-geometry-coords.qmd) — Coordinate utilities.
+- [`deformation`](nitrix-geometry-deformation.qmd) — Deformation- and velocity-field algebra.
+- [`differential`](nitrix-geometry-differential.qmd) — Image spatial-gradient operators.
 - [`grid`](nitrix-geometry-grid.qmd) — Regular-grid deformable-registration primitives.
+- [`intersection`](nitrix-geometry-intersection.qmd) — Triangle-mesh self-intersection detection and removal.
+- [`isosurface`](nitrix-geometry-isosurface.qmd) — Volume <-> surface conversion.
+- [`pyramid`](nitrix-geometry-pyramid.qmd) — Multi-resolution Gaussian pyramid.
+- [`sphere`](nitrix-geometry-sphere.qmd) — 2-sphere primitives.
+- [`sphere_grid`](nitrix-geometry-sphere_grid.qmd) — Parameterised-sphere (regular-grid) topology helpers.
+- [`surface`](nitrix-geometry-surface.qmd) — Surface algorithms on triangle meshes.
+- [`topology`](nitrix-geometry-topology.qmd) — Mesh topology invariants -- the genus-0 defect gate.
+- [`transform`](nitrix-geometry-transform.qmd) — Lie-group parametrisation of rigid and affine transforms.
 
 ### `nitrix.stats`
 

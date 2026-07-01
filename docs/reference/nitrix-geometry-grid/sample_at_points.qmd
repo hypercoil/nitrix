@@ -15,11 +15,11 @@ sample_at_points(volume: Float[Array, '...'], points: Float[Array, '*n ndim'], *
 <!-- nitrix:gen overview:sample_at_points -->
 Sample a volume at an arbitrary list of continuous points.
 
-The scattered-point complement to `spatial_transform` (which samples
-on a coordinate *grid*): given `points` of shape `(*n, ndim)` in
-**index/voxel coordinates** (coordinate `c` maps to array index
-`c` -- the `align_corners` convention, matching `identity_grid`),
-interpolate `volume` at each point.
+The scattered-point complement to [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) (which
+samples on a coordinate *grid*): given `points` of shape
+`(*n, ndim)` in **index/voxel coordinates** (coordinate `c` maps
+to array index `c` -- the `align_corners` convention, matching
+[`identity_grid`](../nitrix-geometry-grid/identity_grid.qmd)), interpolate `volume` at each point.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:sample_at_points -->
@@ -29,7 +29,7 @@ interpolate `volume` at each point.
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `volume` | `Float` | `...` | — | Either channel-free `(*spatial)` or channels-last `(*spatial, c)`; the spatial rank is `ndim = points.shape[-1]`. |
 | `points` | `Float` | `*n` × `ndim` | — | `(*n, ndim)` sample coordinates in index space. |
-| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel (`Linear` default; `NearestNeighbour` for label volumes; any `geometry` `Interpolator`). |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel ([`Linear`](../nitrix-geometry-grid/Linear.qmd) default; [`NearestNeighbour`](../nitrix-geometry-grid/NearestNeighbour.qmd) for label volumes; any [`Interpolator`](../nitrix-geometry-grid/Interpolator.qmd)). |
 | `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds boundary mode: `"constant"` (zero-/`cval`-fill, the default) or `"nearest"` (edge-clamp / border), etc. |
 | `cval` | `float` | — | `0.0` | Fill value for `mode="constant"`. |
 

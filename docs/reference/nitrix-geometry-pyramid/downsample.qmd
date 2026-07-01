@@ -1,0 +1,46 @@
+---
+title: "downsample"
+generated: true
+description: "Anti-aliased downsample of a channel-last image by `factor`."
+---
+
+[‹ back to `nitrix.geometry.pyramid`](../nitrix-geometry-pyramid.qmd)
+
+<!-- nitrix:gen sig:downsample -->
+```python
+downsample(image: Float[Array, '*spatial c'], *, factor: float = 2.0, sigma: Union[None, float, Sequence[float]] = None, mode: str = 'reflect', method: Interpolator = Linear()) -> Float[Array, '*target c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:downsample -->
+Anti-aliased downsample of a channel-last image by `factor`.
+
+Smooths with a Gaussian (anti-alias) then resamples to
+`round(spatial / factor)` via the align-corners [`resample`](../nitrix-geometry-grid/resample.qmd)
+grid.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:downsample -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `*spatial` × `c` | — | Channel-last image, `(*spatial, c)`. |
+| `factor` | `float` | — | `2.0` | Per-axis downscale factor (> 1 shrinks). Default `2`. |
+| `sigma` | `Union[None, float, Sequence[float]]` | — | `None` | Anti-alias Gaussian standard deviation. `None` (default) uses $factor / 2$ per axis (a standard heuristic: the cutoff that suppresses the frequencies the coarser grid cannot represent). Pass a float or sequence to override. |
+| `mode` | `str` | — | `'reflect'` | Boundary mode for the anti-alias Gaussian (`gaussian` vocabulary); default `'reflect'`. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel for the resize (an [`Interpolator`](../nitrix-geometry-grid/Interpolator.qmd)). Default [`Linear`](../nitrix-geometry-grid/Linear.qmd). |
+
+**Returns** `Float` — shape `*target` × `c`. Downsampled image, `(*target, c)` with `target[d] = max(1, round(spatial[d] / factor))`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:downsample -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*target` | the target grid's spatial axes (variadic) |
+<!-- nitrix:/gen -->

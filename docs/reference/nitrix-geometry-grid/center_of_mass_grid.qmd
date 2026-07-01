@@ -16,7 +16,7 @@ center_of_mass_grid(weight: Float[Array, '...'], *, axes: Optional[Sequence[int]
 Centre of mass over a regular grid of unit-spaced coordinates.
 
 For a tensor `weight`, computes the centre of mass treating
-each cell's coordinate along axis `d` as its index `i_d`
+each cell's coordinate along axis `d` as its index $i_d$
 (zero-based).  `axes` selects which axes to reduce over; the
 reduction is over those axes per slice spanned by the
 *remaining* axes.

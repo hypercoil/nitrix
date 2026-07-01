@@ -1,0 +1,61 @@
+---
+title: "nitrix.geometry.isosurface"
+generated: true
+signature-hash: e4c2495610529ebb
+description: "Volume <-> surface conversion."
+listing:
+  id: nitrix-geometry-isosurface-symbols
+  contents: "nitrix-geometry-isosurface/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.isosurface`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Volume <-> surface conversion.
+
+[`marching_cubes`](nitrix-geometry-isosurface/marching_cubes.qmd) extracts the level-set of a scalar volume as a
+`Mesh`; [`mesh_to_sdf`](nitrix-geometry-isosurface/mesh_to_sdf.qmd) is the inverse -- it rasterises a triangle
+mesh to a signed-distance volume.  Both are host-side NumPy builders
+(data-dependent work) co-located here as the field<->mesh pair.
+
+**Engine: marching tetrahedra.**  Each grid cube is split into six tetrahedra
+by the Freudenthal-Kuhn decomposition (all sharing the cube's main diagonal),
+and the isosurface is extracted per tetrahedron.  Unlike the classic
+Lorensen-Cline cube algorithm, the tetrahedral decomposition has **no face /
+internal ambiguity**, so the surface is **watertight and manifold by
+construction** -- no holes that would fight the genus-0 goal of the
+field->mesh route (the alternative, a full asymptotic-decider 33-case cube
+table, achieves the same guarantee at much higher implementation risk).
+Vertices on shared grid edges are deduplicated, so the mesh is closed.
+
+The output triangle count is data-dependent, so -- like the icosphere
+construction -- this is a **host-side NumPy** builder that emits a
+`Mesh` of JAX arrays; it is not a fixed-shape JAX kernel and is not
+differentiable.
+
+Faces are oriented so per-vertex normals point toward *increasing* scalar value
+(outward for a signed-distance field, which is negative inside).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `x` | *(undocumented — add to `_dimensions.yml`)* |
+| `y` | *(undocumented — add to `_dimensions.yml`)* |
+| `z` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-isosurface-symbols}
+:::

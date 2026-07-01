@@ -1,0 +1,51 @@
+---
+title: "nitrix.geometry.surface"
+generated: true
+signature-hash: 000c56233009cc1c
+description: "Surface algorithms on triangle meshes."
+listing:
+  id: nitrix-geometry-surface-symbols
+  contents: "nitrix-geometry-surface/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.surface`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Surface algorithms on triangle meshes.
+
+The *algorithm* layer of the geometry suite: differential-geometry quantities
+(curvature, ...) that compose the *operator / measure* layer in
+`nitrix.sparse.mesh` -- the cotangent Laplace-Beltrami stiffness, the
+vertex-area mass, and per-vertex normals -- through the format-agnostic
+`sparse.apply_operator` seam.  `geometry` depends on `sparse`, never the
+reverse.
+
+Everything here is pure JAX and differentiable w.r.t. `mesh.vertices`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+| `n_faces` | *(undocumented — add to `_dimensions.yml`)* |
+| `...` | anonymous leading (batch) axes |
+| `x` | *(undocumented — add to `_dimensions.yml`)* |
+| `y` | *(undocumented — add to `_dimensions.yml`)* |
+| `z` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-surface-symbols}
+:::

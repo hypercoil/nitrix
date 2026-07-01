@@ -17,11 +17,11 @@ class Linear
 <!-- nitrix:gen overview:Linear -->
 (Multi-)linear interpolation (`order=1`).
 
-The default kernel and the prior `resample` / `spatial_transform`
-behaviour: each sampled value is the multilinear blend of its
-`2**ndim` surrounding voxels.  Smooth in both the image values and
-the sample coordinates, so it is the kernel for differentiable
-registration losses.
+The default kernel and the prior [`resample`](../nitrix-geometry-grid/resample.qmd) /
+[`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) behaviour: each sampled value is the
+multilinear blend of its $2^{\mathrm{ndim}}$ surrounding
+voxels.  Smooth in both the image values and the sample coordinates,
+so it is the kernel for differentiable registration losses.
 <!-- nitrix:/gen -->
 
 ### Methods
@@ -31,6 +31,8 @@ registration losses.
 sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
 ```
 <!-- nitrix:/gen -->
+
+Sample the image at `coords` by multilinear interpolation.
 
 <!-- nitrix:gen sig:Linear.__init__ -->
 ```python

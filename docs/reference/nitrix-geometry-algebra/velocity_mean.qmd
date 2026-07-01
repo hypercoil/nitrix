@@ -1,0 +1,43 @@
+---
+title: "velocity_mean"
+generated: true
+description: "Fréchet mean of stationary velocity fields (the SVF barycentre)."
+---
+
+[‹ back to `nitrix.geometry.algebra`](../nitrix-geometry-algebra.qmd)
+
+<!-- nitrix:gen sig:velocity_mean -->
+```python
+velocity_mean(velocities: Float[Array, 'k *spatial ndim'], *, weights: Optional[Float[Array, ' k']] = None) -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:velocity_mean -->
+Fréchet mean of stationary velocity fields (the SVF barycentre).
+
+A stationary velocity field *is* its own Lie-algebra element, so its
+Fréchet barycentre is just the (weighted) arithmetic mean -- the deformable
+template centre.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:velocity_mean -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `velocities` | `Float` | `k` × `*spatial` × `ndim` | — | `(K, *spatial, ndim)` stack of `K` stationary velocity fields over a shared spatial grid, each with `ndim` vector components per voxel. |
+| `weights` | `Optional[Float[Array, ' k']]` | — | `None` | Optional `(K,)` array of non-negative weights (normalised internally to sum to one); `None` gives uniform weights. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`. The mean velocity field, of shape `(*spatial, ndim)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:velocity_mean -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `k` | kernel or basis components |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

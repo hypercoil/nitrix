@@ -1,0 +1,57 @@
+---
+title: "upsample"
+generated: true
+description: "Resample a channel-last image up to `target_shape`."
+---
+
+[‹ back to `nitrix.geometry.pyramid`](../nitrix-geometry-pyramid.qmd)
+
+<!-- nitrix:gen sig:upsample -->
+```python
+upsample(image: Float[Array, '*spatial c'], target_shape: Sequence[int], *, method: Interpolator = Linear(), mode: str = 'constant', cval: float = 0.0) -> Float[Array, '*target c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:upsample -->
+Resample a channel-last image up to `target_shape`.
+
+A thin wrapper over [`resample`](../nitrix-geometry-grid/resample.qmd) (align-corners) for the
+coarse-to-fine prolongation step.  No anti-alias is needed going up.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:upsample -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `*spatial` × `c` | — | Channel-last image, `(*spatial, c)`. |
+| `target_shape` | `Sequence[int]` | — | — | Desired spatial shape `(*target,)` -- one size per spatial axis. The channel axis is left unchanged. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel for the resize (an [`Interpolator`](../nitrix-geometry-grid/Interpolator.qmd)). Default [`Linear`](../nitrix-geometry-grid/Linear.qmd). |
+| `mode` | `str` | — | `'constant'` | Boundary mode for out-of-bounds samples, passed through to [`resample`](../nitrix-geometry-grid/resample.qmd); default `'constant'`. |
+| `cval` | `float` | — | `0.0` | Fill value used where `mode='constant'` samples outside the image. Default `0.0`. |
+
+**Returns** `Float` — shape `*target` × `c`. The resized image, `(*target, c)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:upsample -->
+::: {.callout-note}
+When the image being upsampled is a *displacement / velocity field*
+(channels are spatial offsets in voxel units), the resize changes
+the voxel scale, so the field **values** must additionally be scaled
+by the per-axis size ratio `target[d] / spatial[d]`.  `upsample`
+only resizes the array; the registration driver applies that scaling
+explicitly (it is a property of the field semantics, not of the
+resampler).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:upsample -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*target` | the target grid's spatial axes (variadic) |
+<!-- nitrix:/gen -->

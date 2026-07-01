@@ -1,7 +1,7 @@
 ---
 title: "spatial_transform_batched"
 generated: true
-description: "Map `spatial_transform` over a single leading batch axis."
+description: "Map [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) over a single leading batch axis."
 ---
 
 [‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
@@ -13,12 +13,12 @@ spatial_transform_batched(image: Float[Array, '...'], deformation: Float[Array, 
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:spatial_transform_batched -->
-Map `spatial_transform` over a single leading batch axis.
+Map [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) over a single leading batch axis.
 
 Convenience wrapper for the common case where the batch axis is
 carried by only one operand: a batch of images warped by a
 single shared deformation (or a single image under a batch of
-deformations).  `spatial_transform` itself requires the
+deformations).  [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) itself requires the
 leading batch dims of `image` and `deformation` to match
 exactly -- it deliberately does not broadcast -- so this case
 otherwise needs an explicit `jax.vmap` with the right
@@ -39,9 +39,9 @@ dims natively.
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `image` | `Float` | `...` | — | `(*spatial, c)` or `(B, *spatial, c)`. |
 | `deformation` | `Float` | `...` | — | `(*spatial, ndim)` or `(B, *spatial, ndim)`. At least one of `image` / `deformation` must carry the leading batch axis. |
-| `mode` | `BoundaryMode` | — | `'constant'` | Forwarded to `spatial_transform`. |
-| `cval` | `float` | — | `0.0` | Forwarded to `spatial_transform`. |
-| `method` | `Interpolator` | — | `Linear()` | Forwarded to `spatial_transform`. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Forwarded to [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd). |
+| `cval` | `float` | — | `0.0` | Forwarded to [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd). |
+| `method` | `Interpolator` | — | `Linear()` | Forwarded to [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd). |
 
 **Returns** `Float` — shape `...`.
 <!-- nitrix:/gen -->
@@ -50,7 +50,7 @@ dims natively.
 ::: {.callout-note}
 Maps over exactly **one** leading axis.  To broadcast a shared
 operand across *several* leading batch dims, broadcast it to the
-full batch shape and call `spatial_transform` directly (which
+full batch shape and call [`spatial_transform`](../nitrix-geometry-grid/spatial_transform.qmd) directly (which
 handles multiple matching leading dims natively).
 :::
 <!-- nitrix:/gen -->

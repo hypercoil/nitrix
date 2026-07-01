@@ -1,0 +1,76 @@
+---
+title: "field_log"
+generated: true
+description: "Stationary-velocity logarithm of the deformation $ varphi =  mathrm{id} +  mathrm{displacement}$."
+---
+
+[‹ back to `nitrix.geometry.deformation`](../nitrix-geometry-deformation.qmd)
+
+<!-- nitrix:gen sig:field_log -->
+```python
+field_log(displacement: Float[Array, '*spatial ndim'], *, n_sqrt: int = 6, sqrt_tol: float = 1e-06, sqrt_max_iter: int = 50, correction: Literal['first_order', 'bch'] = 'first_order', mode: BoundaryMode = 'nearest') -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:field_log -->
+Stationary-velocity logarithm of the deformation
+$\varphi = \mathrm{id} + \mathrm{displacement}$.
+
+The inverse of [`integrate_velocity_field`](../nitrix-geometry-grid/integrate_velocity_field.qmd) by
+*inverse scaling-and-squaring* (the dense analogue of
+`matrix_log`): take `n_sqrt` diffeomorphism square
+roots until near identity, then $v \approx 2^{n_{\mathrm{sqrt}}} \cdot w$
+where $w$ is the `n_sqrt`-times square root.
+
+The exponential is not surjective, so the recovered $v$ is a best
+fit.  A general diffeomorphism (a greedy composition of non-commuting
+warps) is *not* $\exp(v)$ for any single stationary $v$, so
+this function returns the *best stationary-velocity-field
+parameterisation*, not a true inverse of an exponential that does not
+exist there.  Concretely, two distinct accuracy notions:
+
+- **Round-trip fidelity** -- reintegrating the result reproduces the
+  input, `integrate_velocity_field(field_log(s), n_steps=n_sqrt)` equals
+  $\mathrm{id} + s$ *exactly* (to `sqrt_tol`) and
+  unconditionally, because $v / 2^{n_{\mathrm{sqrt}}}$ *is* the
+  square-root displacement by construction.  This is what reproduces the
+  given warp -- what most consumers need.
+- **Generating-velocity fidelity** -- if $\varphi = \exp(v_{\mathrm{true}})$
+  then the returned velocity is
+  $v = v_{\mathrm{true}} + O(\lVert v \rVert^2 / 2^{n_{\mathrm{sqrt}}})$
+  (the logarithm approximation); on a deformation that is not a
+  stationary velocity field there is no $v_{\mathrm{true}}$ and the
+  fit carries a nonzero residual $\lVert \exp(v) - \varphi \rVert$
+  (measure it via the round-trip if needed).
+
+The recovered velocity feeds the velocity-barycentre / template machinery
+([`velocity_mean`](../nitrix-geometry-algebra/velocity_mean.qmd) /
+[`transform_mean`](../nitrix-geometry-algebra/transform_mean.qmd)).  It is differentiable (via the
+implicit-function theorem through the fixed points) and GPU-native (no
+dense inverse, unlike `matrix_log`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:field_log -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `displacement` | `Float` | `*spatial` × `ndim` | — | The deformation as a displacement field $s$ ($\varphi = \mathrm{id} + s$), `(*spatial, ndim)`. |
+| `n_sqrt` | `int` | — | `6` | Number of inverse-squaring (diffeomorphism square-root) steps. Matches the default `n_steps` of [`integrate_velocity_field`](../nitrix-geometry-grid/integrate_velocity_field.qmd) so the exponential and logarithm charts are consistent; the generating-velocity error halves with each extra root. |
+| `sqrt_tol` | `float` | — | `1e-06` | Convergence controls for each square-root fixed point: the residual tolerance and the iteration cap. |
+| `sqrt_max_iter` | `int` | — | `50` | Convergence controls for each square-root fixed point: the residual tolerance and the iteration cap. |
+| `correction` | `Literal['first_order', 'bch']` | — | `'first_order'` | `'first_order'` (default) -- $v = 2^{n_{\mathrm{sqrt}}} \cdot w$ (using $\log(\mathrm{id} + w) \approx w$); this *preserves the exact round-trip*. `'bch'` -- the one-term correction $v = 2^{n_{\mathrm{sqrt}}} \cdot (w - \tfrac{1}{2}(w \cdot \nabla) w)$, more accurate as the *generating* velocity but it *breaks the exact round-trip* (use only when the velocity is interpreted as the true generator, e.g. geodesic / momentum analysis). |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Boundary mode for the inner compositions (edge-replicate by default, the flow-field convention). |
+
+**Returns** `Float` — shape `*spatial` × `ndim`. The stationary velocity field $v$, `(*spatial, ndim)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:field_log -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

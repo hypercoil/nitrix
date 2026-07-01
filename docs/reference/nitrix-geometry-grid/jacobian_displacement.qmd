@@ -1,7 +1,7 @@
 ---
 title: "jacobian_displacement"
 generated: true
-description: "Per-point Jacobian of the deformation φ = id + u."
+description: "Per-point Jacobian of the deformation $ varphi =  mathrm{id} + u$."
 ---
 
 [‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
@@ -13,10 +13,12 @@ jacobian_displacement(u: Float[Array, '... *spatial d'], *, boundary_mode: Liter
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:jacobian_displacement -->
-Per-point Jacobian of the deformation φ = id + u.
+Per-point Jacobian of the deformation $\varphi = \mathrm{id} + u$.
 
+Here $\varphi$ is the deformation and `u` the displacement.
 For a channel-last displacement field `u` with `d` spatial
-axes, returns $J[..., i, j] = δ_{i,j} + \partial  u_i / \partial  x_j$,
+axes, returns
+$J[\dots, i, j] = \delta_{i,j} + \partial u_i / \partial x_j$,
 computed via central differences along each spatial axis.
 <!-- nitrix:/gen -->
 
@@ -65,7 +67,7 @@ GPU steady-state **94.8 µs** (median, L4); up to **39.58× faster** than `numpy
 
 <!-- nitrix:gen sections:jacobian_displacement -->
 ::: {.callout-note}
-For folding detection use `jacobian_det_displacement` which
+For folding detection use [`jacobian_det_displacement`](../nitrix-geometry-grid/jacobian_det_displacement.qmd) which
 avoids materialising the full Jacobian when only the
 determinant is needed.
 :::

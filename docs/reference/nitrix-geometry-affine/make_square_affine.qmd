@@ -1,0 +1,43 @@
+---
+title: "make_square_affine"
+generated: true
+description: "Promote an affine to homogeneous square form."
+---
+
+[‹ back to `nitrix.geometry.affine`](../nitrix-geometry-affine.qmd)
+
+<!-- nitrix:gen sig:make_square_affine -->
+```python
+make_square_affine(mat: Float[Array, '... n np1']) -> Float[Array, '... np1 np1']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:make_square_affine -->
+Promote an affine to homogeneous square form.
+
+Appends the implied bottom row $(0, \ldots, 0, 1)$ so an
+`(..., N, N+1)` affine becomes an `(..., N+1, N+1)` matrix suitable
+for matrix multiplication and inversion.  A no-op if `mat` is already
+square.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:make_square_affine -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mat` | `Float` | `...` × `n` × `np1` | — | Batched affine matrices in `(..., N, N+1)` form (or already square `(..., N+1, N+1)`). |
+
+**Returns** `Float` — shape `...` × `np1` × `np1`. Batched square homogeneous matrices `(..., N+1, N+1)`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:make_square_affine -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `np1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

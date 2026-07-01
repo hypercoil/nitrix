@@ -23,7 +23,7 @@ preprocessing in some ilex pipelines use.  Unlike a plain cubic
 
 1. a **prefilter** converts the image samples to interpolating
    B-spline coefficients (a separable recursive filter with the cubic
-   pole `sqrt(3) - 2`; `_bspline_prefilter`), and
+   pole $\sqrt{3} - 2$; `_bspline_prefilter`), and
 2. a 4-tap separable **cubic B-spline basis** gathers those
    coefficients.
 
@@ -44,7 +44,7 @@ short FIR, too short for the transform overhead to amortise.)
 
 Boundary: this kernel **always uses the mirror (whole-sample-
 symmetric) boundary** for *both* the prefilter and the gather, and
-**ignores the `mode` / `cval` call arguments** (like
+**ignores the `mode` / `cval` call arguments** (as
 [`MultiLabel`](../nitrix-geometry-grid/MultiLabel.qmd) ignores `cval`).  This is deliberate: a B-spline
 is only self-consistent -- the interpolation property (reproducing the
 samples) only holds -- when the prefilter and the gather share a
@@ -76,6 +76,13 @@ cross-platform-stable result; `nitrix.divergent_ops()` reports the budget.
 sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
 ```
 <!-- nitrix:/gen -->
+
+Sample the image at `coords` by cubic B-spline interpolation.
+
+Prefilters the image to interpolating coefficients and gathers
+them with the 4-tap cubic basis.  The mirror boundary is forced
+on both steps, so a non-mirror `mode` (or non-zero `cval`) is
+ignored and announced via `CubicBSplineBoundaryWarning`.
 
 <!-- nitrix:gen sig:CubicBSpline.__init__ -->
 ```python
