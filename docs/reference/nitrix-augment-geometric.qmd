@@ -1,0 +1,60 @@
+---
+title: "nitrix.augment.geometric"
+generated: true
+signature-hash: 7ad728cc02ffc799
+description: "Spatial augmentation transforms (N-D, channels-last)."
+listing:
+  id: nitrix-augment-geometric-symbols
+  contents: "nitrix-augment-geometric/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.augment.geometric`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Spatial augmentation transforms (N-D, channels-last).
+
+- [`random_flip`](nitrix-augment-geometric/random_flip.qmd) -- independent per-axis Bernoulli reflection.
+- [`random_crop`](nitrix-augment-geometric/random_crop.qmd) -- random-offset, fixed-size crop (a pure index
+  slice).
+- [`random_resized_crop`](nitrix-augment-geometric/random_resized_crop.qmd) -- a random sub-window resampled to a fixed
+  output shape (the "zoom" augmentation), built on the
+  [`spatial_transform`](nitrix-geometry.qmd) resampler.
+- [`random_affine_matrix`](nitrix-augment-geometric/random_affine_matrix.qmd) -- a random affine, drawn in geometric
+  parameters (rotation / scale / shear / translation) and assembled with
+  [`params_to_affine_matrix`](nitrix-geometry.qmd).
+- [`random_svf_displacement`](nitrix-augment-geometric/random_svf_displacement.qmd) -- a random smooth diffeomorphic
+  displacement field, from a low-resolution stationary velocity field
+  integrated by [`integrate_velocity_field`](nitrix-geometry.qmd).
+
+The matrix / field generators return the *transform*; apply it with the
+geometry warp primitives (an affine grid plus
+[`spatial_transform`](nitrix-geometry.qmd)).  Coordinates and fields
+follow the nitrix channels-last convention (`(*spatial, ndim)`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*size` | a variadic group of axes (`size`) |
+| `d` | spatial dimension (2 or 3) |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-augment-geometric-symbols}
+:::

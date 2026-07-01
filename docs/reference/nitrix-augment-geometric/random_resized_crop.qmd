@@ -1,0 +1,49 @@
+---
+title: "random_resized_crop"
+generated: true
+description: "Random sub-window resampled to a fixed output shape (zoom crop)."
+---
+
+[‹ back to `nitrix.augment.geometric`](../nitrix-augment-geometric.qmd)
+
+<!-- nitrix:gen sig:random_resized_crop -->
+```python
+random_resized_crop(x: Float[Array, '*spatial c'], key: Array, *, size: Sequence[int], scale_range: Tuple[float, float] = (0.5, 1.0), method: Interpolator = Linear()) -> Float[Array, '*size c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:random_resized_crop -->
+Random sub-window resampled to a fixed output shape (zoom crop).
+
+Samples a per-axis crop extent $\sim \mathcal{U}(\text{scale\_range})
+\cdot \text{input\_extent}$ and a uniform offset within the remaining
+slack, builds the output grid of coordinates mapped into that window,
+and resamples with [`spatial_transform`](../nitrix-geometry.qmd).  The
+output is always `(*size, c)` regardless of the sampled window, so
+it composes into a fixed-shape batch.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:random_resized_crop -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `*spatial` × `c` | — | Channels-last input `(*spatial, c)`; the spatial rank is `len(size)`. |
+| `key` | `Array` | — | — | PRNG key. |
+| `size` | `Sequence[int]` | — | — | Output spatial shape, one entry per spatial axis. |
+| `scale_range` | `Tuple[float, float]` | — | `(0.5, 1.0)` | `(low, high)` bounds on the per-axis window extent, expressed as a fraction of the input axis length; the extent is drawn uniformly from this range independently for each axis. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel (a [`Interpolator`](../nitrix-geometry.qmd); [`Linear`](../nitrix-geometry.qmd) by default, [`NearestNeighbour`](../nitrix-geometry.qmd) for label maps). |
+
+**Returns** `Float` — shape `*size` × `c`. The resampled window, of shape `(*size, c)` with the same channel count as `x`. Coordinates falling outside the input are filled with zero.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:random_resized_crop -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*size` | a variadic group of axes (`size`) |
+<!-- nitrix:/gen -->

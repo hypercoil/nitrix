@@ -1,0 +1,69 @@
+---
+title: "nitrix.bias.correction"
+generated: true
+signature-hash: 6b8b174001c6743a
+description: "Unified bias-field-correction dispatcher."
+listing:
+  id: nitrix-bias-correction-symbols
+  contents: "nitrix-bias-correction/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.bias.correction`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Unified bias-field-correction dispatcher.
+
+[`bias_field_correction`](nitrix-bias-correction/bias_field_correction.qmd) selects the field-fitting algorithm through
+its `method` argument.  All methods share the N3/N4 iterative loop
+(log-transform, histogram sharpen, residual, B-spline smooth, accumulate,
+with the ITK coefficient-of-variation convergence test); they differ only
+in how the per-iteration residual field is smoothed:
+
+- `'n4'` -- the Lee--Wolberg--Shin multilevel B-spline approximation
+  (MBA), i.e. exactly N4 / ANTs.  The parity path: reproduces the ITK
+  `N4BiasFieldCorrection` routine to roughly $10^{-4}$.  Use this
+  for compatibility with legacy or published pipelines.  Identical to
+  [`n4_bias_field_correction`](nitrix-bias-n4/n4_bias_field_correction.qmd).
+- `'least_squares'` -- a regularised weighted least-squares B-spline fit.
+  Unbiased (no MBA scaling bias), with the `ridge` term supplying the
+  noise-robustness that MBA gets for free from its $w^2$ local
+  averaging.  Competitive with N4: better on some phantoms (lower scaled
+  RMSE / residual coefficient of variation), modestly worse on others with
+  many tissue boundaries, where MBA's local averaging is more robust.  The
+  optimal `ridge` is data-dependent.
+- `'psplines'` -- penalised least-squares (Eilers--Marx P-splines): adds
+  a difference-penalty roughness term on top of `ridge`, giving an extra
+  smoothness knob (`penalty`) independent of grid resolution.
+
+All three use the same multi-resolution coarse-to-fine schedule; it is
+load-bearing, not optional: a single fine-grid fit captures non-bias
+structure from the residual and fails.  The crucial point is that the
+regularisation (`ridge` for least-squares and P-splines, the implicit
+$w^2$ averaging for MBA) is what makes the fit denoise the noisy
+per-iteration residual; an unregularised least-squares fit overfits it.
+Only `'n4'` is ITK-parity; `'least_squares'` and `'psplines'` are the
+best-available estimators for use where ANTs bit-compatibility is not
+required.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-bias-correction-symbols}
+:::

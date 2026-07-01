@@ -1,0 +1,90 @@
+---
+title: "nitrix.bias"
+generated: true
+signature-hash: c5154f7fbd6bc2b5
+description: "Intensity bias-field correction."
+listing:
+  id: nitrix-bias-symbols
+  contents: "nitrix-bias/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.bias`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Intensity bias-field correction.
+
+Differentiable, pure-JAX estimation and removal of the slowly varying
+multiplicative intensity inhomogeneity ("bias field") that corrupts MR
+images, together with the reusable histogram and B-spline primitives the
+correction algorithms are built from.
+
+There are two public entry points for correction:
+
+- [`n4_bias_field_correction`](nitrix-bias-n4/n4_bias_field_correction.qmd) -- the N4 algorithm, the improved
+  successor to N3, GPU-accelerated in pure JAX and validated to ITK / ANTs
+  parity. This is *specifically* N4 (the Lee--Wolberg--Shin multilevel
+  B-spline field fit).
+- [`bias_field_correction`](nitrix-bias-correction/bias_field_correction.qmd) -- a dispatcher over the same N3/N4
+  iteration with a selectable field estimator: `method='n4'` (parity,
+  identical to the above), `'least_squares'` and `'psplines'`
+  (unbiased, higher-accuracy estimators for new or internal pipelines where
+  bit-for-bit ANTs compatibility is not required).
+
+Alongside these are three reusable substrate primitives that the
+correction algorithms are built from ([`bspline_approximate`](nitrix-bias/bspline_approximate.qmd),
+[`sharpen_histogram`](nitrix-bias/sharpen_histogram.qmd)) or compose with naturally
+([`histogram_match`](nitrix-bias/histogram_match.qmd)):
+
+- [`bspline_approximate`](nitrix-bias/bspline_approximate.qmd) -- separable cubic B-spline scattered-data
+  approximation on a regular grid (multilevel B-spline, least-squares, or
+  P-spline fit); a fast differentiable smoother for any "fit a smooth
+  low-degree-of-freedom surface to a noisy grid" task, such as registration
+  fields or surface fitting.
+- [`sharpen_histogram`](nitrix-bias/sharpen_histogram.qmd) -- the N3 / N4 Wiener log-histogram
+  deconvolution (single-image histogram de-blurring).
+- [`histogram_match`](nitrix-bias/histogram_match.qmd) -- Nyul--Udupa landmark histogram matching: remap
+  a source image's intensities so that its cumulative distribution matches
+  a reference image's, faithful to ITK's
+  `HistogramMatchingImageFilter`. It composes with N4 as an "N4 then
+  match to a reference template" intensity-standardisation recipe. The
+  [`histogram_match_fit`](nitrix-bias/histogram_match_fit.qmd) / [`histogram_match_apply`](nitrix-bias/histogram_match_apply.qmd) split exposes
+  the fit/apply seam -- fit a reference's standard-scale landmarks once and
+  apply them to many sources -- with [`histogram_match`](nitrix-bias/histogram_match.qmd) the
+  single-call convenience composition.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+Tustison, N. J., Avants, B. B., Cook, P. A., Zheng, Y., Egan, A.,
+Yushkevich, P. A., & Gee, J. C. (2010). N4ITK: improved N3 bias
+correction. *IEEE Transactions on Medical Imaging*, 29(6), 1310--1320.
+`10.1109/TMI.2010.2046908`
+
+Nyul, L. G., & Udupa, J. K. (1999). On standardizing the MR image
+intensity scale. *Magnetic Resonance in Medicine*, 42(6), 1072--1081.
+`10.1002/(SICI)1522-2594(199912)42:6<1072::AID-MRM11>3.0.CO;2-M`
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `landmarks` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-bias-symbols}
+:::

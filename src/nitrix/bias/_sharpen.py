@@ -4,34 +4,49 @@
 """
 N3 / N4 intensity-histogram sharpening (Wiener log-histogram deconvolution).
 
-This is the deconvolution half of N4 (Tustison 2010), inherited essentially
-unchanged from N3 (Sled 1998).  The generative model is that a bias field
-acts, in the log domain, as additive low-frequency noise -- which blurs the
-*intensity histogram* by an (approximately Gaussian) point-spread.  The
-sharpening step undoes that blur:
+This is the deconvolution half of N4, inherited essentially unchanged from
+N3.  The generative model is that a bias field acts, in the log domain, as
+additive low-frequency noise -- which blurs the *intensity histogram* by an
+(approximately Gaussian) point-spread.  The sharpening step undoes that
+blur:
 
 1. Build a 1-D histogram of the (log) intensities over the masked region,
    with triangular (Parzen) windowing between adjacent bins.
-2. Treat the histogram ``V`` as the true intensity density ``U`` convolved
-   with a Gaussian ``G`` of the given full-width-at-half-maximum.  Recover
-   ``U`` by **Wiener deconvolution**: ``Uf = Vf * conj(Gf) / (|Gf|^2 + Z)``.
-3. Form the conditional expectation map ``E[u | v] = ((c U) * G)(v) /
-   ((U) * G)(v)`` -- the expected true intensity given an observed one --
-   where ``c`` is the bin-centre intensity.
-4. Remap every voxel through ``E`` by linear interpolation.
+2. Treat the histogram :math:`V` as the true intensity density :math:`U`
+   convolved with a Gaussian :math:`G` of the given full-width-at-half-
+   maximum.  Recover :math:`U` by **Wiener deconvolution**:
+   :math:`\\hat{U} = \\hat{V}\\,\\overline{\\hat{G}} / (|\\hat{G}|^2 + Z)`,
+   where :math:`\\hat{\\cdot}` denotes the discrete Fourier transform,
+   :math:`\\overline{\\cdot}` the complex conjugate, and :math:`Z` the
+   Wiener noise floor.
+3. Form the conditional expectation map
+   :math:`E[u \\mid v] = ((c\\,U) * G)(v) / ((U) * G)(v)` -- the expected
+   true intensity given an observed one -- where :math:`c` is the
+   bin-centre intensity and :math:`*` denotes convolution.
+4. Remap every voxel through :math:`E` by linear interpolation.
 
 The result is an image whose intensity histogram is sharper (tissue peaks
 de-blurred); the *difference* between the input and this sharpened image is
-the bias-field residual that N4 then smooths with a B-spline (see
-``_bspline.bspline_approximate`` and ``n4.n4_bias_field_correction``).
+the bias-field residual that N4 then smooths with a B-spline.
 
 The FFT sizes are static (a power of two derived from ``n_bins``), so the
 op JITs cleanly.  The histogram binning is piecewise-constant, so this op
 is **not** differentiable through the bin assignment (the bias-field
-*smoothing* is differentiable; the sharpening is not -- see
-``docs/design/bias-field.md``).  Conventions (bin count, FWHM, Wiener
-noise, the power-of-two zero-pad, the Parzen split) mirror ITK's
-``N4BiasFieldCorrectionImageFilter::SharpenImage`` for reference parity.
+*smoothing* is differentiable; the sharpening is not).  Conventions (bin
+count, FWHM, Wiener noise, the power-of-two zero-pad, the Parzen split)
+mirror ITK's ``N4BiasFieldCorrectionImageFilter::SharpenImage`` for
+reference parity.
+
+References
+----------
+.. [Sled1998] Sled JG, Zijdenbos AP, Evans AC (1998). A nonparametric
+   method for automatic correction of intensity nonuniformity in MRI data.
+   *IEEE Transactions on Medical Imaging*, 17(1), 87-97.
+   :doi:`10.1109/42.668698`
+.. [Tustison2010] Tustison NJ, Avants BB, Cook PA, Zheng Y, Egan A,
+   Yushkevich PA, Gee JC (2010). N4ITK: improved N3 bias correction.
+   *IEEE Transactions on Medical Imaging*, 29(6), 1310-1320.
+   :doi:`10.1109/TMI.2010.2046908`
 """
 
 from __future__ import annotations
@@ -48,8 +63,23 @@ __all__ = ['sharpen_histogram']
 def _padded_fft_size(n_bins: int) -> tuple[int, int]:
     """Power-of-two FFT length and the centring offset (ITK convention).
 
-    ``exponent = ceil(log2(n_bins)) + 1``; the histogram is centred in the
-    padded buffer with ``offset = floor((padded - n_bins) / 2)``.
+    The padded length is :math:`2^{\\lceil \\log_2 n \\rceil + 1}` for
+    ``n_bins`` :math:`= n`; the histogram is then centred in the padded
+    buffer with offset :math:`\\lfloor (\\text{padded} - n) / 2 \\rfloor`.
+
+    Parameters
+    ----------
+    n_bins : int
+        Number of histogram bins to be embedded in the padded FFT buffer.
+
+    Returns
+    -------
+    padded : int
+        Zero-padded FFT length: twice the smallest power of two that is at
+        least ``n_bins`` (an extra doubling for wrap-around headroom).
+    offset : int
+        Index at which the ``n_bins``-long histogram is placed within the
+        padded buffer so that it sits centred.
     """
     exponent = math.ceil(math.log2(n_bins)) + 1
     padded = int(2**exponent)

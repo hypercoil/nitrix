@@ -1,0 +1,43 @@
+---
+title: "random_crop"
+generated: true
+description: "Random-offset fixed-size crop (a pure index slice)."
+---
+
+[‹ back to `nitrix.augment.geometric`](../nitrix-augment-geometric.qmd)
+
+<!-- nitrix:gen sig:random_crop -->
+```python
+random_crop(x: Float[Array, '...'], key: Array, *, size: Sequence[int]) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:random_crop -->
+Random-offset fixed-size crop (a pure index slice).
+
+`size` gives the output extent on **every** axis of `x` (pass an
+axis's full length to leave it uncropped).  A uniform random offset
+is drawn per axis and the window extracted with `lax.dynamic_slice`
+(static size, traced offset -> jit-clean).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:random_crop -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Input tensor of arbitrary rank. |
+| `key` | `Array` | — | — | PRNG key. |
+| `size` | `Sequence[int]` | — | — | Per-axis output extent, one entry for each axis of `x`. Each entry must not exceed the corresponding axis length; use an axis's full length to leave it uncropped. |
+
+**Returns** `Float` — shape `...`. The cropped window, of shape `tuple(size)` and the same dtype as `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:random_crop -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

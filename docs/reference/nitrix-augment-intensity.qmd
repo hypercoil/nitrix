@@ -1,0 +1,56 @@
+---
+title: "nitrix.augment.intensity"
+generated: true
+signature-hash: b247d7c2f778368f
+description: "Intensity-domain augmentation transforms."
+listing:
+  id: nitrix-augment-intensity-symbols
+  contents: "nitrix-augment-intensity/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.augment.intensity`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Intensity-domain augmentation transforms.
+
+Image-only perturbations of the intensity histogram -- the building
+blocks of contrast / appearance augmentation:
+
+- [`gamma_contrast`](nitrix-augment-intensity/gamma_contrast.qmd) -- a gamma (power-law) tone curve applied inside
+  a normalised intensity bracket.  Deterministic in the gamma (draw the
+  exponent in the caller); `gamma < 1` raises contrast, `gamma > 1`
+  lowers it.
+- [`random_histogram_shift`](nitrix-augment-intensity/random_histogram_shift.qmd) -- a random, monotone, piecewise-linear
+  remap of the intensity range through perturbed control points.
+- [`gibbs_ringing`](nitrix-augment-intensity/gibbs_ringing.qmd) -- Gibbs (truncation) ringing from high-frequency
+  k-space truncation, the artefact of a finitely-sampled acquisition.
+  Deterministic in the truncation strength (draw it in the caller).
+- [`gaussian_noise`](nitrix-augment-intensity/gaussian_noise.qmd) / [`rician_noise`](nitrix-augment-intensity/rician_noise.qmd) -- additive Gaussian
+  noise and the Rician magnitude-noise model.
+
+The noise generators take an explicit `sigma` (and a PRNG key, which
+the draw is intrinsic to); a randomly-drawn `sigma` is one
+`jax.random.uniform` in the caller.  Everything is a pure function of
+its inputs (and key), shape-agnostic, and differentiable in the image.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-augment-intensity-symbols}
+:::

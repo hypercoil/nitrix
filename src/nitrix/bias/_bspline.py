@@ -4,10 +4,9 @@
 """
 Separable cubic B-spline scattered-data approximation on a regular grid.
 
-This is the field-smoothing engine of N4 (SPEC charter: "software in the
-class of ANTs").  N4 (Tustison 2010) replaced N3's smoothing spline with
-the Lee--Wolberg--Shin (1997) *multilevel B-spline approximation* (MBA),
-which is what ANTs / ITK use via
+This is the field-smoothing engine of N4 bias correction.  N4 replaced
+N3's smoothing spline with the *multilevel B-spline approximation* (MBA)
+of Lee, Wolberg and Shin, which is what ANTs / ITK use via
 ``BSplineScatteredDataPointSetToImageFilter``.
 
 The general MBA is a scatter over arbitrary point positions.  But N4's
@@ -21,14 +20,12 @@ banded matrices.  We exploit this:
   dense matrix contractions, one per spatial axis -- a separable
   transposed interpolation.  No gather, no scatter.
 - **fit** (voxel grid -> control lattice) is the exact adjoint of the
-  reconstruction *with the Lee--Wolberg--Shin* ``w^2`` *weighting*,
+  reconstruction with the Lee--Wolberg--Shin :math:`w^2` weighting,
   likewise a sequence of per-axis contractions.
 
 Both are dense, XLA-friendly (the contractions lower to ``dot`` /
-tensor cores), differentiable, and free of the ``jax.experimental.sparse``
-/ scatter friction the SPEC §4.2 warns against.  See
-``docs/design/bias-field.md`` for the derivation and the equivalence to
-ITK's control-point-lattice accumulation.
+tensor cores), differentiable, and free of the sparse-gather / scatter
+friction of general scattered-data interpolation.
 
 Mathematics (per spatial axis, control lattice value :math:`\\phi`):
 
@@ -46,6 +43,16 @@ Because the weights are separable, :math:`w_{c\\to k} = \\prod_d R_d[i_d, k_d]`
 and :math:`\\sum_j w_{c\\to j}^2 = \\prod_d (\\sum_a R_d[i_d, a]^2)`, so both
 sums become per-axis contractions with :math:`R_d^2` (denominator) and
 :math:`R_d^3` (numerator).
+
+References
+----------
+.. [1] Tustison NJ, Avants BB, Cook PA, Zheng Y, Egan A, Yushkevich PA,
+       Gee JC (2010). N4ITK: improved N3 bias correction. IEEE
+       Transactions on Medical Imaging, 29(6), 1310--1320.
+       :doi:`10.1109/TMI.2010.2046908`
+.. [2] Lee S, Wolberg G, Shin SY (1997). Scattered data interpolation
+       with multilevel B-splines. IEEE Transactions on Visualization and
+       Computer Graphics, 3(3), 228--244. :doi:`10.1109/2945.620490`
 """
 
 from __future__ import annotations
@@ -91,16 +98,35 @@ def _reconstruction_matrix(
     order: int,
     dtype: jnp.dtype,
 ) -> Float[Array, 'n_vox n_control']:
-    """Banded control-lattice -> voxel-grid interpolation matrix ``R``.
+    """Banded control-lattice -> voxel-grid interpolation matrix :math:`R`.
 
-    ``R[i, a]`` is the tensor-product-axis B-spline weight of control
+    Entry :math:`R_{ia}` is the single-axis B-spline weight of control
     point ``a`` at voxel ``i``.  Each row has ``order + 1`` non-zeros.
 
     The parametric mapping matches ITK's ``BSplineScatteredData``
     convention: voxel ``i`` of ``n_vox`` maps to parametric coordinate
-    ``i / (n_vox - 1)`` in ``[0, 1]``, scaled by the number of B-spline
-    spans (``n_control - order``).  The span index is clamped to the last
-    valid span at the closed-domain endpoint.
+    :math:`i / (\\mathrm{n\\_vox} - 1)` in :math:`[0, 1]`, scaled by the
+    number of B-spline spans (``n_control - order``).  The span index is
+    clamped to the last valid span at the closed-domain endpoint.
+
+    Parameters
+    ----------
+    n_vox : int
+        Number of voxels along this spatial axis.  Must be at least 2.
+    n_control : int
+        Number of B-spline control points along this axis.  Must be at
+        least ``order + 1`` (one B-spline span).
+    order : int
+        B-spline order (3 for cubic).
+    dtype : jnp.dtype
+        Floating dtype of the returned matrix.
+
+    Returns
+    -------
+    Float[Array, 'n_vox n_control']
+        The banded interpolation matrix :math:`R`; row ``i`` holds the
+        ``order + 1`` non-zero B-spline weights of the control points
+        supporting voxel ``i``, scattered into their lattice columns.
     """
     n_spans = n_control - order
     if n_spans < 1:
@@ -142,9 +168,25 @@ def _contract_axis(
 ) -> Array:
     """Contract ``matrix`` (out, in) against ``x`` along ``axis``.
 
-    The named ``axis`` of ``x`` (size == ``matrix.shape[1]``) is replaced
-    by an axis of size ``matrix.shape[0]``.  All other dims -- including
+    The named ``axis`` of ``x`` (size ``matrix.shape[1]``) is replaced by
+    an axis of size ``matrix.shape[0]``.  All other dims -- including
     arbitrary leading batch dims -- broadcast through unchanged.
+
+    Parameters
+    ----------
+    x : Array
+        Input tensor; its ``axis`` dimension must match the input size
+        ``matrix.shape[1]``.
+    matrix : Array
+        A ``(out, in)`` contraction matrix.
+    axis : int
+        The axis of ``x`` to contract and replace.
+
+    Returns
+    -------
+    Array
+        ``x`` with its ``axis`` dimension replaced by one of size
+        ``matrix.shape[0]``; all other dimensions unchanged.
     """
     out = jnp.tensordot(x, matrix, axes=([axis], [1]))  # new axis last
     return jnp.moveaxis(out, -1, axis)
@@ -155,7 +197,29 @@ def _reconstruct(
     matrices: Sequence[Array],
     spatial_axes: Sequence[int],
 ) -> Array:
-    """Reconstruct the voxel-grid field from the control lattice ``phi``."""
+    """Reconstruct the voxel-grid field from the control lattice ``phi``.
+
+    Applies the per-axis interpolation matrices in turn, expanding each
+    control-lattice axis up to its voxel-grid size (a separable transposed
+    interpolation).
+
+    Parameters
+    ----------
+    phi : Array
+        Control-lattice coefficients; the ``spatial_axes`` dimensions size
+        the control lattice, any other dimensions broadcast through.
+    matrices : Sequence[Array]
+        Per-axis interpolation matrices :math:`R_d` of shape
+        ``(n_vox_d, n_control_d)``, one per entry of ``spatial_axes``.
+    spatial_axes : Sequence[int]
+        Axes of ``phi`` to expand, paired positionally with ``matrices``.
+
+    Returns
+    -------
+    Array
+        The reconstructed field with each spatial axis grown to its
+        voxel-grid size.
+    """
     out = phi
     for axis, R in zip(spatial_axes, matrices):
         out = _contract_axis(out, R, axis)
@@ -171,9 +235,31 @@ def _fit(
 ) -> Array:
     """Fit the control lattice (Lee--Wolberg--Shin MBA) from grid data.
 
-    ``matrices`` are the per-axis reconstruction matrices ``R_d``; the fit
-    is their adjoint with the ``w^2`` weighting.  ``values`` and ``weight``
-    share the (broadcastable) voxel-grid shape.
+    ``matrices`` are the per-axis reconstruction matrices :math:`R_d`; the
+    fit is their adjoint with the :math:`w^2` weighting.  ``values`` and
+    ``weight`` share the (broadcastable) voxel-grid shape.
+
+    Parameters
+    ----------
+    values : Array
+        Voxel-grid data to approximate.
+    weight : Array
+        Per-voxel confidence weights, broadcastable to ``values``.
+    matrices : Sequence[Array]
+        Per-axis interpolation matrices :math:`R_d` of shape
+        ``(n_vox_d, n_control_d)``, one per entry of ``spatial_axes``.
+    spatial_axes : Sequence[int]
+        Axes of ``values`` that are spatial, paired with ``matrices``.
+    eps : float
+        Small stabiliser added to the per-point normaliser and to the
+        control-point denominator to guard against division by zero for
+        control points with negligible support.
+
+    Returns
+    -------
+    Array
+        The fitted control-lattice coefficients; each spatial axis is
+        reduced to its control-lattice size.
     """
     # Per-axis sum-of-squared-weights profile: sumsq_d[i] = sum_a R_d[i, a]^2.
     # The per-point normaliser sum_j w_j^2 factorises as the product of these.
@@ -219,11 +305,27 @@ def _adjoint_to_control(
     matrices: Sequence[Array],
     spatial_axes: Sequence[int],
 ) -> Array:
-    """Plain separable adjoint ``R^T`` of grid data onto the control lattice.
+    """Plain separable adjoint :math:`R^{\\top}` of grid data onto the lattice.
 
-    Unlike ``_fit`` (which carries the MBA ``w^2`` weighting), this is the
-    bare transpose of the reconstruction -- the right-hand side ``R^T(W z)``
-    of the least-squares normal equations.
+    Unlike ``_fit`` (which carries the MBA :math:`w^2` weighting), this is
+    the bare transpose of the reconstruction -- the right-hand side
+    :math:`R^{\\top}(W z)` of the least-squares normal equations.
+
+    Parameters
+    ----------
+    grid : Array
+        Voxel-grid data (typically the weighted values :math:`W z`).
+    matrices : Sequence[Array]
+        Per-axis interpolation matrices :math:`R_d` of shape
+        ``(n_vox_d, n_control_d)``, one per entry of ``spatial_axes``.
+    spatial_axes : Sequence[int]
+        Axes of ``grid`` that are spatial, paired with ``matrices``.
+
+    Returns
+    -------
+    Array
+        The adjoint result on the control lattice; each spatial axis is
+        reduced to its control-lattice size.
     """
     out = grid
     for axis, R in zip(spatial_axes, matrices):
@@ -236,13 +338,31 @@ def _weighted_gram(
     matrices: Sequence[Array],
     spatial_axes: Sequence[int],
 ) -> Array:
-    """Dense weighted Gram ``R^T diag(weight) R`` over the control lattice.
+    """Dense weighted Gram :math:`R^{\\top}\\operatorname{diag}(w)\\,R`.
 
-    Assembled without materialising the (huge) tensor-product ``R``: the
-    Gram entry ``G[k, l] = sum_v weight_v R[v, k] R[v, l]`` factorises over
-    axes, so it is a per-axis contraction of ``weight`` with the basis
-    outer-products ``Q_d[i, k, l] = R_d[i, k] R_d[i, l]``.  ``weight`` must
-    be exactly the spatial grid (no batch dims).
+    The Gram is over the flattened control lattice.  It is assembled
+    without materialising the (huge) tensor-product :math:`R`: the entry
+    :math:`G_{kl} = \\sum_v w_v R_{vk} R_{vl}` factorises over axes, so it
+    is a per-axis contraction of ``weight`` with the basis outer-products
+    :math:`Q_d[i, k, l] = R_d[i, k]\\, R_d[i, l]`.  ``weight`` must be
+    exactly the spatial grid (no batch dims).
+
+    Parameters
+    ----------
+    weight : Array
+        Per-voxel confidence weights on the spatial grid (no batch dims).
+    matrices : Sequence[Array]
+        Per-axis interpolation matrices :math:`R_d` of shape
+        ``(n_vox_d, n_control_d)``, one per entry of ``spatial_axes``.
+    spatial_axes : Sequence[int]
+        Axes of ``weight`` that are spatial, paired with ``matrices``.
+
+    Returns
+    -------
+    Array
+        The dense ``(n_control, n_control)`` weighted Gram matrix over the
+        flattened control lattice, where ``n_control`` is the product of
+        the per-axis control sizes.
     """
     g = weight
     csizes = []
@@ -267,10 +387,29 @@ def _difference_penalty(
 ) -> Array:
     """Tensor-product difference (P-spline) penalty over the control grid.
 
-    ``P = sum_d (I (x) ... (x) D_d^T D_d (x) ... (x) I)`` where ``D_d`` is
-    the ``order``-th finite-difference operator on axis ``d``'s control
-    points.  Penalises roughness along each axis independently (the
-    Eilers--Marx multidimensional P-spline penalty).
+    Builds :math:`P = \\sum_d (I \\otimes \\cdots \\otimes D_d^{\\top} D_d
+    \\otimes \\cdots \\otimes I)`, where :math:`D_d` is the ``order``-th
+    finite-difference operator on axis :math:`d`'s control points.
+    Penalises roughness along each axis independently (the Eilers--Marx
+    multidimensional P-spline penalty).
+
+    Parameters
+    ----------
+    control_sizes : Sequence[int]
+        Number of control points along each spatial axis.
+    order : int
+        Order of the finite-difference operator :math:`D_d` (2 penalises
+        curvature).  Axes with fewer than ``order + 1`` control points
+        contribute no penalty term.
+    dtype : jnp.dtype
+        Floating dtype of the returned matrix.
+
+    Returns
+    -------
+    Array
+        The dense ``(n_control, n_control)`` penalty matrix over the
+        flattened control lattice, where ``n_control`` is the product of
+        ``control_sizes``.
     """
     n = int(np.prod(control_sizes))
     P = jnp.zeros((n, n), dtype=dtype)
@@ -299,12 +438,43 @@ def _control_inverse_gram(
     penalty_order: int,
     dtype: jnp.dtype,
 ) -> Array:
-    """Regularised inverse Gram ``(R^T W R + reg)^{-1}`` for the lattice.
+    """Regularised inverse Gram :math:`(R^{\\top} W R + \\mathrm{reg})^{-1}`.
 
-    The Gram depends only on ``weight`` and the level's control grid -- not
-    on the data -- so N4 computes this once per fitting level and reuses it
-    across every sharpening iteration.  The control lattice is small, so the
-    explicit (well-conditioned, regularised) inverse is cheap.
+    The Gram is over the control lattice.  It depends only on ``weight``
+    and the level's control grid -- not on the data -- so N4 computes this
+    once per fitting level and reuses it across every sharpening iteration.
+    The control lattice is small, so the explicit (well-conditioned,
+    regularised) inverse is cheap.  The regulariser is a Tikhonov ridge
+    plus an optional difference penalty, each scaled by the mean Gram
+    diagonal.
+
+    Parameters
+    ----------
+    weight : Array
+        Per-voxel confidence weights on the spatial grid (no batch dims).
+    matrices : Sequence[Array]
+        Per-axis interpolation matrices :math:`R_d` of shape
+        ``(n_vox_d, n_control_d)``, one per entry of ``spatial_axes``.
+    spatial_axes : Sequence[int]
+        Axes of ``weight`` that are spatial, paired with ``matrices``.
+    control_sizes : Sequence[int]
+        Number of control points along each spatial axis.
+    ridge : float
+        Tikhonov ridge strength relative to the mean Gram diagonal (a
+        small SPD jitter is always added on top).
+    penalty : float
+        Weight of the difference penalty relative to the mean Gram
+        diagonal.  A non-positive value omits the penalty term.
+    penalty_order : int
+        Order of the difference penalty operator.
+    dtype : jnp.dtype
+        Floating dtype for the assembled matrices and the inverse.
+
+    Returns
+    -------
+    Array
+        The dense ``(n_control, n_control)`` inverse of the regularised
+        Gram over the flattened control lattice.
     """
     G = _weighted_gram(weight, matrices, spatial_axes)
     n = G.shape[0]
@@ -324,7 +494,36 @@ def _solve_field(
     spatial_axes: Sequence[int],
     control_sizes: Sequence[int],
 ) -> Array:
-    """Least-squares control lattice (via the precomputed inverse) -> field."""
+    """Least-squares control lattice (via the precomputed inverse) -> field.
+
+    Forms the right-hand side :math:`R^{\\top}(W z)`, applies the
+    precomputed regularised inverse Gram to obtain the control-lattice
+    coefficients, and reconstructs the smooth field on the voxel grid.
+
+    Parameters
+    ----------
+    values : Array
+        Voxel-grid data to approximate (spatial grid, no batch dims).
+    weight : Array
+        Per-voxel confidence weights, same shape as ``values``.
+    inv_gram : Array
+        Precomputed ``(n_control, n_control)`` inverse regularised Gram
+        over the flattened control lattice.
+    matrices : Sequence[Array]
+        Per-axis interpolation matrices :math:`R_d` of shape
+        ``(n_vox_d, n_control_d)``, one per entry of ``spatial_axes``.
+    spatial_axes : Sequence[int]
+        Axes of ``values`` that are spatial, paired with ``matrices``.
+    control_sizes : Sequence[int]
+        Number of control points along each spatial axis; used to reshape
+        the solved coefficients back into the control lattice.
+
+    Returns
+    -------
+    Array
+        The reconstructed smooth field on the voxel grid, same shape as
+        ``values``.
+    """
     rhs = _adjoint_to_control(weight * values, matrices, spatial_axes)
     n = inv_gram.shape[0]
     phi = (inv_gram @ rhs.reshape(n)).reshape(tuple(control_sizes))
@@ -343,7 +542,41 @@ def _fit_regularised(
     penalty_order: int,
     dtype: jnp.dtype,
 ) -> Array:
-    """One-shot least-squares / P-spline fit-and-reconstruct."""
+    """One-shot least-squares / P-spline fit-and-reconstruct.
+
+    Convenience wrapper that assembles the regularised inverse Gram and
+    then solves for and reconstructs the smooth field in a single call
+    (used when the inverse is not reused across iterations).
+
+    Parameters
+    ----------
+    values : Array
+        Voxel-grid data to approximate (spatial grid, no batch dims).
+    weight : Array
+        Per-voxel confidence weights, same shape as ``values``.
+    matrices : Sequence[Array]
+        Per-axis interpolation matrices :math:`R_d` of shape
+        ``(n_vox_d, n_control_d)``, one per entry of ``spatial_axes``.
+    spatial_axes : Sequence[int]
+        Axes of ``values`` that are spatial, paired with ``matrices``.
+    control_sizes : Sequence[int]
+        Number of control points along each spatial axis.
+    ridge : float
+        Tikhonov ridge strength relative to the mean Gram diagonal.
+    penalty : float
+        Weight of the difference penalty relative to the mean Gram
+        diagonal (non-positive omits it).
+    penalty_order : int
+        Order of the difference penalty operator.
+    dtype : jnp.dtype
+        Floating dtype for the assembled matrices and the solve.
+
+    Returns
+    -------
+    Array
+        The reconstructed smooth field on the voxel grid, same shape as
+        ``values``.
+    """
     inv_gram = _control_inverse_gram(
         weight,
         matrices,
@@ -456,17 +689,19 @@ def bspline_approximate(
         Fitting estimator:
 
         - ``'mba'`` (default) -- Lee--Wolberg--Shin multilevel B-spline
-          approximation, the ``w^2``-weighted scatter ITK / ANTs N4 uses.
-          Biased on dense data at a single level (the bias is removed by
-          *iterated* refitting on a doubling grid); the **parity** path.
+          approximation, the :math:`w^2`-weighted scatter ITK / ANTs N4
+          uses.  Biased on dense data at a single level (the bias is
+          removed by *iterated* refitting on a doubling grid); the
+          **parity** path.
         - ``'least_squares'`` -- weighted least-squares fit
-          (``min ||R phi - z||^2_W``); reproduces smooth fields exactly,
-          no MBA bias, converges in fewer levels.  Uses ``ridge``.
+          (:math:`\\min \\lVert R\\phi - z \\rVert_W^2`); reproduces smooth
+          fields exactly, no MBA bias, converges in fewer levels.  Uses
+          ``ridge``.
         - ``'psplines'`` -- penalised least-squares (Eilers--Marx
-          P-splines): adds a difference penalty ``penalty * ||D phi||^2``
-          for a single smooth fit on a *fine* control grid without the
-          multi-resolution hierarchy.  Uses ``penalty`` + ``penalty_order``
-          (and ``ridge``).
+          P-splines): adds a difference penalty
+          :math:`\\lambda \\lVert D\\phi \\rVert^2` for a single smooth fit
+          on a *fine* control grid without the multi-resolution hierarchy.
+          Uses ``penalty`` + ``penalty_order`` (and ``ridge``).
     ridge
         Tikhonov regularisation for the LS / P-spline normal equations,
         relative to the mean Gram diagonal.  Default ``1e-4`` -- near-exact,
@@ -474,8 +709,8 @@ def bspline_approximate(
         poorly supported by the mask.  For **noisy** data, ``ridge`` is the
         denoising strength (the bias-variance knob): increase it (e.g.
         ``1e-1``) to trade exactness for noise rejection.  This is why the
-        ``bias_field_correction`` loop defaults ``ridge`` higher.  Ignored
-        by ``'mba'``.
+        :func:`bias_field_correction` loop defaults ``ridge`` higher.
+        Ignored by ``'mba'``.
     penalty
         P-spline roughness penalty weight (relative to the mean Gram
         diagonal); larger -> smoother.  Only used by ``'psplines'``.
@@ -491,18 +726,19 @@ def bspline_approximate(
 
     Returns
     -------
-    The smooth B-spline field sampled on the voxel grid, same shape as
-    ``values``.
+    Float[Array, '... *spatial']
+        The smooth B-spline field sampled on the voxel grid, same shape as
+        ``values``.
 
     Notes
     -----
     On a regular grid the B-spline weights factorise across axes, so the
-    scattered-data fit collapses to per-axis banded matrices ``R_d`` of
-    shape ``(n_vox_d, n_control_d)``.  ``'mba'`` applies the adjoint with
-    the Lee--Wolberg--Shin ``w^2`` weighting; ``'least_squares'`` /
-    ``'psplines'`` solve the normal equations ``(R^T W R + P) phi = R^T W z``
-    with the Gram assembled without materialising ``R``.  See
-    ``docs/design/bias-field.md`` for the parity-vs-correctness discussion.
+    scattered-data fit collapses to per-axis banded matrices :math:`R_d`
+    of shape ``(n_vox_d, n_control_d)``.  ``'mba'`` applies the adjoint
+    with the Lee--Wolberg--Shin :math:`w^2` weighting; ``'least_squares'``
+    / ``'psplines'`` solve the normal equations
+    :math:`(R^{\\top} W R + P)\\,\\phi = R^{\\top} W z` with the Gram
+    assembled without materialising :math:`R`.
     """
     if method not in ('mba', 'least_squares', 'psplines'):
         raise ValueError(
