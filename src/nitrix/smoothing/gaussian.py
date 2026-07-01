@@ -4,10 +4,10 @@
 """
 Separable n-D Gaussian filter.
 
-Per SPEC §4.4, the unconditional baseline smoother.  Pure
-JAX -- uses ``lax.conv_general_dilated`` for the underlying 1D
-convolutions (since the algebra is REAL and we want the tensor-core
-fast path for free).  The n-D Gaussian factors exactly as a product
+The unconditional baseline smoother.  Pure JAX -- uses
+``lax.conv_general_dilated`` for the underlying 1D convolutions
+(the algebra is real-valued, so the tensor-core fast path is
+available for free).  The n-D Gaussian factors exactly as a product
 of 1D Gaussians, so we convolve along each spatial axis serially.
 
 Padding modes match ``scipy.ndimage.gaussian_filter``: default
@@ -66,6 +66,30 @@ def _gaussian_1d_kernel(
 
     Values are normalised so the kernel sums to 1 -- a constant
     input is preserved.
+
+    Parameters
+    ----------
+    sigma : float
+        Standard deviation of the Gaussian, in samples.  Must be
+        positive.
+    truncate : float
+        Kernel half-width factor, used only when ``kernel_size`` is
+        ``None``: the half-width is :math:`\\lfloor` ``truncate *
+        sigma`` :math:`+ 0.5\\rfloor` samples.
+    dtype : DTypeLike
+        Floating dtype of the returned kernel (and of the tap grid
+        used to evaluate the Gaussian profile).
+    kernel_size : int, optional
+        Explicit tap count.  ``None`` (default) uses the
+        ``truncate * sigma`` heuristic.  Must be ``>= 1`` when given;
+        odd values give a centred kernel, even values a half-pixel
+        offset kernel.
+
+    Returns
+    -------
+    Array
+        1D kernel of shape ``(kernel_size,)`` (or ``(2 * half + 1,)``
+        under the heuristic), normalised to sum to 1.
     """
     if sigma <= 0:
         raise ValueError(f'sigma must be positive; got {sigma!r}.')
@@ -113,6 +137,31 @@ def _conv_1d_along_axis(
     minimum same-size pad.  The output is half-pixel-shifted
     relative to a centred-kernel convolution; this is the price
     of an even-tap Gaussian and is documented at the public API.
+
+    Small kernels (at or below ``_FIR_SHIFT_MAX_TAPS`` taps) are
+    evaluated as a shifted-slice weighted sum, which is exactly
+    equal to the convolution but faster below that crossover;
+    larger kernels use ``lax.conv_general_dilated``.
+
+    Parameters
+    ----------
+    x : Array
+        Input array of arbitrary rank.
+    kernel : Array
+        1D kernel of shape ``(K,)`` to convolve along ``axis``.
+    axis : int
+        Axis of ``x`` along which to convolve.
+    mode : str
+        Boundary handling applied by padding before the VALID
+        convolution: one of ``"reflect"`` (scipy convention, i.e.
+        numpy's ``"symmetric"``), ``"mirror"`` (numpy's ``"reflect"``
+        semantic), ``"constant"`` (zero-pad), or ``"edge"``
+        (replicate the boundary sample).
+
+    Returns
+    -------
+    Array
+        Filtered array of the same shape as ``x``.
     """
     K = kernel.size
     if K % 2 == 1:
@@ -179,13 +228,38 @@ def _conv_1d_along_axis(
 
 
 def _yvv_coeffs(sigma: float) -> tuple[float, float, float, float]:
-    """Young-van Vliet (2002) 3rd-order recursive-Gaussian coefficients.
+    """Young-van Vliet 3rd-order recursive-Gaussian coefficients.
 
-    Returns ``(B, a1, a2, a3)`` for the causal recurrence
-    ``w[n] = B·x[n] + a1·w[n-1] + a2·w[n-2] + a3·w[n-3]`` (applied forward then
-    backward for a zero-phase, symmetric Gaussian approximation).  ``B`` is fixed
-    so the DC gain is exactly 1 (``B + a1 + a2 + a3 = 1`` -> a constant input is
-    preserved).  Host (static) floats -- the design is not traced.
+    Returns the coefficients of the causal recurrence
+
+    .. math::
+
+        w[n] = B \\cdot x[n] + a_1 w[n-1] + a_2 w[n-2] + a_3 w[n-3]
+
+    which is applied forward and then backward for a zero-phase,
+    symmetric Gaussian approximation.  :math:`B` is fixed so the DC
+    gain is exactly 1 (:math:`B + a_1 + a_2 + a_3 = 1`, so a constant
+    input is preserved).  The design uses host (static) floats -- it
+    is not traced.
+
+    Parameters
+    ----------
+    sigma : float
+        Standard deviation of the target Gaussian, in samples.  Must
+        be at least ``_YVV_MIN_SIGMA`` (0.5); the pole fit degrades
+        below this and a ``ValueError`` is raised.
+
+    Returns
+    -------
+    tuple of float
+        The four coefficients :math:`(B, a_1, a_2, a_3)`.
+
+    References
+    ----------
+    Young, I.T., van Vliet, L.J., and van Ginkel, M. (2002).
+    Recursive Gabor filtering.  IEEE Transactions on Signal
+    Processing, 50(11), 2798-2805.
+    https://doi.org/10.1109/TSP.2002.804095
     """
     if sigma < _YVV_MIN_SIGMA:
         raise ValueError(
@@ -215,6 +289,21 @@ def _recursive_gaussian_1d(x: Array, axis: int, sigma: float) -> Array:
     Edge-extension boundary (the natural recursive condition; the constant
     extension preserves DC at the boundary) -- so it differs from the FIR
     ``mode`` only within a few sigma of the edge.
+
+    Parameters
+    ----------
+    x : Array
+        Input array of arbitrary rank.
+    axis : int
+        Axis of ``x`` along which to smooth.
+    sigma : float
+        Standard deviation of the target Gaussian, in samples.  Must
+        be at least 0.5 (see :func:`_yvv_coeffs`).
+
+    Returns
+    -------
+    Array
+        Smoothed array of the same shape as ``x``.
     """
     b, a1, a2, a3 = _yvv_coeffs(sigma)
     xm = jnp.moveaxis(x, axis, 0)
@@ -320,21 +409,6 @@ def gaussian(
         even-tap Gaussian-weighted average (e.g. the
         spheremorph / JOSA NegativeJacobianFiltering 2×2 kernel
         at ``sigma=0.7``); otherwise prefer the default heuristic.
-    driver
-        Numerical variant (the ``driver`` axis).  ``"fir"`` (default) -- the
-        truncated separable convolution above.  ``"recursive"`` -- the
-        **Young-van Vliet** 3rd-order recursive Gaussian: O(N) per axis,
-        **independent of sigma** (no kernel growth), so it wins for **large**
-        sigma where the FIR kernel would be many taps.  Approximate (a 3rd-order
-        pole fit; ~1% interior error vs the FIR Gaussian), needs ``sigma >=
-        0.5``, uses an **edge-extension** boundary (it ignores ``mode`` /
-        ``kernel_size`` / ``truncate``), and runs as a sequential ``lax.scan``
-        (O(N) depth -- great for a one-off smooth, but at the small sigmas of,
-        e.g., a deformable-registration regulariser the parallel FIR conv is
-        faster on GPU, so it is **not** the registration default).  The two
-        variants differ by ~1-2% near edges (see the divergent op
-        ``register.field_smooth``, which auto-selects between them); ``"fir"`` is
-        the canonical / more faithful path.
     mode
         Boundary handling: ``"reflect"`` (default), ``"constant"``
         (zero-pad), or ``"edge"`` (replicate boundary).  ``driver="recursive"``
@@ -348,6 +422,21 @@ def gaussian(
         cells -- typically by ~0.7 logit-space units per pixel,
         which becomes ~6x magnitude differences after a downstream
         ``exp()`` (e.g., ExVivoNorm's multiplicative bias field).
+    driver
+        Numerical variant (the ``driver`` axis).  ``"fir"`` (default) -- the
+        truncated separable convolution above.  ``"recursive"`` -- the
+        **Young-van Vliet** 3rd-order recursive Gaussian: O(N) per axis,
+        **independent of sigma** (no kernel growth), so it wins for **large**
+        sigma where the FIR kernel would be many taps.  Approximate (a 3rd-order
+        pole fit; ~1% interior error vs the FIR Gaussian), needs ``sigma >=
+        0.5``, uses an **edge-extension** boundary (it ignores ``mode`` /
+        ``kernel_size`` / ``truncate``), and runs as a sequential ``lax.scan``
+        (O(N) depth -- great for a one-off smooth, but at the small sigmas of,
+        e.g., a deformable-registration regulariser the parallel FIR conv is
+        faster on GPU, so it is **not** the registration default).  The two
+        variants differ by ~1-2% near edges (the smoother underlying the
+        auto-selecting field-smoothing op in :mod:`nitrix.register`);
+        ``"fir"`` is the canonical / more faithful path.
     spatial_rank
         Explicit number of trailing dims to treat as spatial.  If
         ``None`` (default), inferred from ``sigma`` (if sequence)

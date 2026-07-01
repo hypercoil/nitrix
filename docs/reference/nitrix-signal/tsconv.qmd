@@ -1,0 +1,11 @@
+---
+title: "tsconv"
+generated: true
+---
+
+[‹ back to `nitrix.signal`](../nitrix-signal.qmd)
+
+::: {.callout-warning title="TODO — could not introspect"}
+Re-exported submodule — see its own page.
+:::
+

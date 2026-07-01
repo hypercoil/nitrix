@@ -1,0 +1,84 @@
+---
+title: "bilateral_gaussian"
+generated: true
+description: "Bounded bilateral smoothing over a feature-space metric."
+---
+
+[‹ back to `nitrix.smoothing.bilateral`](../nitrix-smoothing-bilateral.qmd)
+
+<!-- nitrix:gen sig:bilateral_gaussian -->
+```python
+bilateral_gaussian(values: Float[Array, 'n d_v'], features: Float[Array, 'n d_f'], *, metric: FeatureMetric, neighbourhood: Union[int, Int[Array, 'n k_max'], ELL], mask: Optional[Bool[Array, 'n k_max']] = None, n_iters: int = 1, backend: Backend = 'auto') -> Float[Array, 'n d_v']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bilateral_gaussian -->
+Bounded bilateral smoothing over a feature-space metric.
+
+For each output position `i`, the result is the
+metric-distance-weighted average of `values` over the bounded
+neighbourhood of `i` (see the module docstring for the
+formulation).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bilateral_gaussian -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `values` | `Float` | `n` × `d_v` | — | Per-point values to smooth, `(n, d_v)`. Any signal: image intensity, a BOLD time series, multi-channel features, segmentation logits, etc. Independent of `features`. |
+| `features` | `Float` | `n` × `d_f` | — | Per-point feature vectors, `(n, d_f)`. Typically spatial coordinates concatenated with intensity / modality / functional channels. The bilateral metric is over these, not over the values being smoothed. |
+| `metric` | `FeatureMetric` | — | — | A [`FeatureMetric`](../nitrix-smoothing-metric/FeatureMetric.qmd) defining $M = L L^{\top}$. The weight falls off as $\exp\!\left(-\tfrac{1}{2}\sum_c (\mathrm{metric.project}(f_i - f_j))_c^2\right)$. |
+| `neighbourhood` | `Union[int, Int[Array, 'n k_max'], ELL]` | — | — | The bounded neighbour source, one of: - `int` `k` -- brute-force k-NN in feature space (quadratic memory in `n`); the metric is applied to the ranking. - `(n, k_max)` index array -- explicit pre-computed neighbours. - `ELL` -- an adjacency operator (grid box, mesh k-ring, geodesic ball). Its `indices` are used; when `mask` is not given, the validity mask is derived from its padding (`values != identity`). |
+| `mask` | `Optional[Bool[Array, 'n k_max']]` | — | `None` | Optional boolean validity mask `(n, k_max)`: `True` for real neighbours, `False` for padding. Masked positions contribute nothing to the weighted average. Defaults to "all valid" for the `int` and explicit-index paths, and to the ELL's padding validity for the `ELL` path. Supplying it explicitly always overrides the derived mask. |
+| `n_iters` | `int` | — | `1` | Number of bilateral passes. The affinity (features, neighbours, weights) is held fixed; only the values diffuse, so the weights are computed once and re-applied. `n_iters` applications of a radius-`r` filter give ~radius-`(r * n_iters)` support at `O(n_iters)` cost. Default `1`. |
+| `backend` | `Backend` | — | `'auto'` | `"auto"`, `"pallas-cuda"`, or `"jax"`. Passed to the underlying `semiring_ell_matmul`. |
+
+**Returns** `Float` — shape `n` × `d_v`. Smoothed values, `(n, d_v)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:bilateral_gaussian -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **677.6 µs** (median, L4); up to **15.61× faster** than `simpleitk.Bilateral`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_BILATERAL_GAUSSIAN.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| bilateral_gaussian | jax-cpu | shape=[128, 128],sigma_d=2.0,sigma_r=0.2 | `nitrix-jax` | ok | 11.08 ms / 13.17 ms | 408.41 ms | 1025 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bilateral_gaussian | jax-cpu | shape=[128, 128],sigma_d=2.0,sigma_r=0.2 | `simpleitk.Bilateral` | ok | 7.25 ms / 10.81 ms | 64.87 ms | 1025 MB (rss) | n/a (no oracle) | 0.65x vs nitrix-jax |
+| bilateral_gaussian | jax-cuda12 | shape=[128, 128],sigma_d=2.0,sigma_r=0.2 | `nitrix-jax` | ok | 673.5 µs / 677.6 µs | 692.74 ms | 124.72 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bilateral_gaussian | jax-cuda12 | shape=[128, 128],sigma_d=2.0,sigma_r=0.2 | `simpleitk.Bilateral` | ok | 10.51 ms / 10.65 ms | 75.42 ms | 17.04 MB (hbm) | n/a (no oracle) | 15.61x vs nitrix-jax |
+| bilateral_gaussian | jax-cpu | shape=[256, 256],sigma_d=2.0,sigma_r=0.2 | `nitrix-jax` | ok | 29.38 ms / 33.96 ms | 1.411 s | 1083 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bilateral_gaussian | jax-cpu | shape=[256, 256],sigma_d=2.0,sigma_r=0.2 | `simpleitk.Bilateral` | ok | 30.92 ms / 35.57 ms | 104.51 ms | 1025 MB (rss) | n/a (no oracle) | 1.05x vs nitrix-jax |
+| bilateral_gaussian | jax-cuda12 | shape=[256, 256],sigma_d=2.0,sigma_r=0.2 | `nitrix-jax` | ok | 1.66 ms / 1.72 ms | 1.867 s | 215.48 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bilateral_gaussian | jax-cuda12 | shape=[256, 256],sigma_d=2.0,sigma_r=0.2 | `simpleitk.Bilateral` | ok | 22.36 ms / 23.75 ms | 75.01 ms | 68.16 MB (hbm) | n/a (no oracle) | 13.48x vs nitrix-jax |
+| bilateral_gaussian | jax-cpu | shape=[64, 64],sigma_d=2.0,sigma_r=0.2 | `nitrix-jax` | ok | 1.57 ms / 1.60 ms | 170.48 ms | 1025 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bilateral_gaussian | jax-cpu | shape=[64, 64],sigma_d=2.0,sigma_r=0.2 | `simpleitk.Bilateral` | ok | 3.53 ms / 3.93 ms | 57.98 ms | 1025 MB (rss) | n/a (no oracle) | 2.25x vs nitrix-jax |
+| bilateral_gaussian | jax-cuda12 | shape=[64, 64],sigma_d=2.0,sigma_r=0.2 | `nitrix-jax` | ok | 612.7 µs / 702.7 µs | 634.86 ms | 94.14 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bilateral_gaussian | jax-cuda12 | shape=[64, 64],sigma_d=2.0,sigma_r=0.2 | `simpleitk.Bilateral` | ok | 3.85 ms / 4.44 ms | 57.50 ms | 4.14 MB (hbm) | n/a (no oracle) | 6.28x vs nitrix-jax |
+:::
+
+*source: bench `b2dfe3ad` · nitrix `7a601d42`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:bilateral_gaussian -->
+::: {.callout-note}
+The implementation is a direct N-body reduction: the inner sum has
+`k_max` terms, each an explicit Gaussian weight over the metric.
+Correct by construction; cost
+$O(n \cdot k_{\max} \cdot (k + d_v))$ per pass, where
+$k$ is the metric's projected dimension ($\leq d_f$).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bilateral_gaussian -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d_v` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

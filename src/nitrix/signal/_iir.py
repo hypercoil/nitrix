@@ -11,9 +11,9 @@ digital domain by the bilinear transform, realised as a cascade of
 second-order sections (biquads).
 
 The design is implemented from scratch in NumPy -- ``scipy`` is a test-only
-dependency (SPEC §6.2), so ``butterworth_sos`` reproduces the math of
+dependency, so :func:`butterworth_sos` reproduces the mathematics of
 ``scipy.signal.butter(output='sos')`` (validated to machine precision in
-``tests/test_iir.py``) without importing it.  Cut-offs / order are static
+the test suite) without importing it.  Cut-offs and order are static
 (constant-folded into the trace); the design is not differentiated.
 
 Application is the recurrence ``y[n] = b0 x[n] + b1 x[n-1] + b2 x[n-2]
@@ -27,9 +27,9 @@ Application is the recurrence ``y[n] = b0 x[n] + b1 x[n-1] + b2 x[n-2]
   ``signal.linear_interpolate``); ``O(log T)`` depth, for latency-bound
   long single series.  Forward filtering only.
 
-``sosfiltfilt`` is the zero-phase forward-backward filter, with scipy-exact
-steady-state initial conditions (``lfilter_zi``-equivalent) and odd
-padding; it matches ``scipy.signal.sosfiltfilt`` to machine precision.
+:func:`sosfiltfilt` is the zero-phase forward-backward filter, with
+scipy-exact steady-state initial conditions (``lfilter_zi``-equivalent) and
+odd padding; it matches ``scipy.signal.sosfiltfilt`` to machine precision.
 
 Everything is reverse-mode differentiable through the signal.
 """
@@ -66,11 +66,23 @@ _Driver = str  # 'auto' | 'fft' | 'scan' | 'associative'
 def _resolve_iir_driver(driver: _Driver) -> _Driver:
     """Resolve the IIR ``driver`` to a concrete engine.
 
-    ``'auto'`` -> the platform-fast engine (``'fft'`` on GPU -- the recursion is
-    latency-bound there and the parallel FFT convolution beats cupy on the L4;
-    sequential ``'scan'`` on CPU).  Reproducibility mode forces the canonical
-    ``'scan'``.  Explicit ``'fft'`` / ``'scan'`` / ``'associative'`` pass
-    through (validated against the registered set).
+    ``'auto'`` resolves to the platform-fast engine (``'fft'`` on GPU -- the
+    recursion is latency-bound there and the parallel FFT convolution beats
+    cupy on the L4; sequential ``'scan'`` on CPU).  Reproducibility mode forces
+    the canonical ``'scan'``.  Explicit ``'fft'`` / ``'scan'`` /
+    ``'associative'`` pass through (validated against the registered set).
+
+    Parameters
+    ----------
+    driver
+        Requested driver: ``'auto'``, ``'fft'``, ``'scan'`` or
+        ``'associative'``.
+
+    Returns
+    -------
+    str
+        The concrete engine name (``'fft'``, ``'scan'`` or ``'associative'``)
+        that the requested driver resolves to on the current platform.
     """
     return resolve_driver(
         driver,
@@ -86,7 +98,23 @@ def _resolve_iir_driver(driver: _Driver) -> _Driver:
 
 
 def _buttap(order: int) -> Tuple[np.ndarray, np.ndarray, float]:
-    """Analog Butterworth low-pass prototype (zeros, poles, gain)."""
+    """Analog Butterworth low-pass prototype (zeros, poles, gain).
+
+    Parameters
+    ----------
+    order
+        Butterworth filter order (number of prototype poles).
+
+    Returns
+    -------
+    zeros : numpy.ndarray
+        Empty complex array -- the analog prototype has no finite zeros.
+    poles : numpy.ndarray
+        The ``order`` complex prototype poles, evenly spaced on the left half
+        of the unit circle.
+    gain : float
+        The prototype gain, always ``1.0``.
+    """
     m = np.arange(-order + 1, order, 2)
     poles = -np.exp(1j * np.pi * m / (2 * order))
     return np.array([], dtype=complex), poles, 1.0
@@ -163,7 +191,26 @@ def _bilinear(
 def _group_conjugates(
     roots: np.ndarray, tol: float = 1e-6
 ) -> list[np.ndarray]:
-    """Group roots into conjugate pairs / real pairs (each <= 2 roots)."""
+    """Group roots into conjugate pairs and real pairs (each at most two roots).
+
+    Complex roots are matched with their conjugates; remaining real roots are
+    paired two at a time.  Each group holds at most two roots, ready to form a
+    real second-order section.
+
+    Parameters
+    ----------
+    roots
+        The complex roots (poles or zeros) to group.
+    tol
+        Absolute tolerance for deciding whether a root is real (small
+        imaginary part) and for matching a root to its conjugate.
+
+    Returns
+    -------
+    list of numpy.ndarray
+        Groups of roots, each of length at most two: first the
+        conjugate pairs, then the real pairs.
+    """
     roots = list(roots)
     used = [False] * len(roots)
     cpairs, reals = [], []
@@ -184,7 +231,24 @@ def _group_conjugates(
 
 
 def _section_poly(group: np.ndarray) -> np.ndarray:
-    """Real length-3 polynomial coefficients from a <=2 root group."""
+    """Real length-3 polynomial coefficients from a root group of size at most 2.
+
+    Expands the group into a monic polynomial, takes the real part (conjugate
+    pairs and real pairs give real coefficients) and right-pads with zeros to a
+    fixed length of three.
+
+    Parameters
+    ----------
+    group
+        A root group of length at most two (from :func:`_group_conjugates`).
+
+    Returns
+    -------
+    numpy.ndarray
+        The three real polynomial coefficients ``[c0, c1, c2]`` (highest degree
+        first), zero-padded on the right when the group has fewer than two
+        roots.
+    """
     coeffs = np.real(np.poly(group))
     return np.concatenate([coeffs, np.zeros(3 - len(coeffs))])
 
@@ -196,6 +260,21 @@ def _zpk2sos(z: np.ndarray, p: np.ndarray, k: float) -> np.ndarray:
     for the modest orders here this simple pairing is well-conditioned (and
     parity is checked against scipy via the *frequency response*, which is
     grouping-invariant).
+
+    Parameters
+    ----------
+    z
+        Complex zeros of the digital filter.
+    p
+        Complex poles of the digital filter.
+    k
+        Overall filter gain, applied to the numerator of the first section.
+
+    Returns
+    -------
+    numpy.ndarray
+        The ``(n_sections, 6)`` second-order-section array, each row laid out
+        as ``[b0, b1, b2, a0, a1, a2]``.
     """
     pg = _group_conjugates(p)
     zg = _group_conjugates(z)
@@ -213,7 +292,30 @@ def _zpk2sos(z: np.ndarray, p: np.ndarray, k: float) -> np.ndarray:
 def _normalise_band(
     btype: _BType, fs: float, lo: Optional[float], hi: Optional[float]
 ) -> np.ndarray:
-    """Validate edges and return them normalised to (0, 1) over Nyquist."""
+    """Validate band edges and return them normalised to (0, 1) over Nyquist.
+
+    Checks that the required cut-offs are supplied for the requested band type
+    and that they lie strictly within ``(0, fs/2)`` (with ``lo < hi`` for band
+    types), then divides each by the Nyquist frequency.
+
+    Parameters
+    ----------
+    btype
+        Band type: ``'lowpass'``, ``'highpass'``, ``'bandpass'`` or
+        ``'bandstop'``.
+    fs
+        Sampling frequency in Hz; the Nyquist frequency is ``fs / 2``.
+    lo, hi
+        Cut-offs in Hz.  ``'lowpass'`` uses ``hi``; ``'highpass'`` uses ``lo``;
+        band types use both.  Unused edges may be ``None``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The Nyquist-normalised cut-off(s) in ``(0, 1)``: a length-one array for
+        ``'lowpass'`` / ``'highpass'`` and a length-two ``[lo, hi]`` array for
+        the band types.
+    """
     nyq = 0.5 * fs
 
     def norm(c: float, name: str) -> float:
@@ -251,12 +353,12 @@ def butterworth_sos(
 ) -> np.ndarray:
     """Design a digital Butterworth filter as second-order sections.
 
-    Returns the ``(n_sections, 6)`` SOS array ``[b0, b1, b2, a0, a1, a2]``
+    Returns the ``(n_sections, 6)`` SOS array with ``[b0, b1, b2, a0, a1, a2]``
     per row -- the same layout as ``scipy.signal.butter(output='sos')`` (and
     matching its transfer function to machine precision), implemented in
     pure NumPy.  ``order``, ``fs`` and the cut-offs are static, so the result
     is a host (NumPy) constant -- the *design* is not traced; only the
-    *application* (``sosfilt`` / ``sosfiltfilt``) runs in JAX.
+    *application* (:func:`sosfilt` / :func:`sosfiltfilt`) runs in JAX.
 
     Parameters
     ----------
@@ -271,6 +373,12 @@ def butterworth_sos(
     lo, hi
         Cut-offs in Hz (``0 < f < fs/2``).  ``'lowpass'`` uses ``hi``;
         ``'highpass'`` uses ``lo``; band types use both (``lo < hi``).
+
+    Returns
+    -------
+    numpy.ndarray
+        The ``(n_sections, 6)`` second-order-section coefficient array, each
+        row laid out as ``[b0, b1, b2, a0, a1, a2]``, as a host NumPy constant.
     """
     wn = _normalise_band(btype, fs, lo, hi)
     # Bilinear pre-warp at the scipy fs = 2 convention.
@@ -299,9 +407,21 @@ def _sos_zi(sos: np.ndarray) -> np.ndarray:
     """Per-section steady-state delay state, scaled along the cascade.
 
     For each biquad, the transposed-DF2 state that makes a step input
-    produce no startup transient: ``zi = (I - A^T)^{-1} B`` with
-    ``A`` the companion matrix.  Scaled by the running DC gain so the
+    produce no startup transient: :math:`z_i = (I - A^{\\top})^{-1} B` with
+    :math:`A` the companion matrix.  Scaled by the running DC gain so the
     cascade is consistent (scipy ``sosfilt_zi``).
+
+    Parameters
+    ----------
+    sos
+        The ``(n_sections, 6)`` second-order-section coefficient array.
+
+    Returns
+    -------
+    numpy.ndarray
+        The ``(n_sections, 2)`` per-section steady-state delay state for a
+        unit-amplitude step input, scaled by the running DC gain along the
+        cascade.
     """
     zi = np.empty((sos.shape[0], 2))
     scale = 1.0
@@ -328,7 +448,7 @@ def _sos_responses(
     """Host (NumPy, fp64) impulse and zero-input responses of the cascade.
 
     Runs the transposed-DF2 cascade recurrence -- the same one
-    ``_sosfilt_scan`` realises -- for ``n`` samples:
+    :func:`_sosfilt_scan` realises -- for ``n`` samples:
 
     - ``h`` -- the cascade **impulse response** (unit impulse, zero state).  A
       fixed-coefficient IIR filter is LTI, so its zero-state output is exactly
@@ -336,11 +456,31 @@ def _sos_responses(
       circle), so an ``n``-tap truncation has a geometrically bounded error.
     - ``g`` -- the cascade **zero-input response** to the per-section initial
       state ``zi`` (zero input).  That response is linear in the ``x[0]``
-      scaling applied to ``zi``, so ``sosfilt`` with ``zi`` is
+      scaling applied to ``zi``, so :func:`sosfilt` with ``zi`` is
       ``conv(x, h) + x[0] * g``.
 
     Both are host constants (``sos`` / ``zi`` are static) and fold into the
     trace; the device side only runs the FFT convolution.
+
+    Parameters
+    ----------
+    sos
+        The ``(n_sections, 6)`` second-order-section coefficient array.
+    n
+        Number of samples to run the recurrence for (the response length).
+    zi
+        Optional ``(n_sections, 2)`` per-section initial delay state driving
+        the zero-input response ``g``.  When ``None`` the zero-input response
+        is identically zero.
+
+    Returns
+    -------
+    h : numpy.ndarray
+        Length-``n`` fp64 impulse response of the cascade (unit impulse, zero
+        initial state).
+    g : numpy.ndarray
+        Length-``n`` fp64 zero-input response of the cascade to the initial
+        state ``zi`` (zero input).
     """
     b0, b1, b2 = (
         sos[:, 0] / sos[:, 3],
@@ -378,8 +518,31 @@ def _sos_impulse_taps(
     atol: float,
     cap: int = _IIR_FFT_MAX_TAPS,
 ) -> Optional[int]:
-    """Smallest tap count after which ``|h| <= atol`` (or ``None`` if the
-    impulse response has not decayed within ``cap`` -- a too-sharp filter)."""
+    """Find the smallest tap count after which the impulse response has decayed.
+
+    Doubles a trial length (starting near 512 samples) until the impulse
+    response ``h`` stays below ``atol`` beyond some tap, returning that tap
+    count.  Returns ``None`` if the response has not decayed within ``cap``
+    taps -- a filter too sharp (poles hugging the unit circle) for a cheap FFT
+    convolution.
+
+    Parameters
+    ----------
+    sos
+        The ``(n_sections, 6)`` second-order-section coefficient array.
+    atol
+        Absolute tolerance; the impulse response is deemed to have decayed once
+        every later tap satisfies ``|h| <= atol``.
+    cap
+        Hard upper bound on the tap count to search (default
+        ``_IIR_FFT_MAX_TAPS``).
+
+    Returns
+    -------
+    int or None
+        The smallest number of taps after which ``|h| <= atol``, or ``None`` if
+        the response has not decayed within ``cap`` taps.
+    """
     n = min(512, cap)
     while True:
         h, _ = _sos_responses(sos, n)
@@ -393,7 +556,22 @@ def _sos_impulse_taps(
 
 
 def _expand_freq(arr: Array, ndim: int) -> Array:
-    """Reshape a length-F frequency vector to broadcast over ``(F, *channels)``."""
+    """Reshape a length-F frequency vector to broadcast over ``(F, *channels)``.
+
+    Parameters
+    ----------
+    arr
+        A one-dimensional length-F frequency-domain vector.
+    ndim
+        Target number of dimensions (the rank of the array it must broadcast
+        against).
+
+    Returns
+    -------
+    Array
+        ``arr`` reshaped to ``(F, 1, ..., 1)`` with ``ndim`` axes, so it
+        broadcasts along the leading frequency axis over trailing channel axes.
+    """
     return arr.reshape((-1,) + (1,) * (ndim - 1))
 
 
@@ -410,6 +588,26 @@ def _sosfilt_fft(
     with ``zi`` the steady-state transient ``x[0] * g`` is added back over the
     first ``n_taps`` samples so the edges stay scipy-exact.  ``O(T log T)``,
     no recurrence, fully parallel.
+
+    Parameters
+    ----------
+    sos
+        The ``(n_sections, 6)`` second-order-section coefficient array.
+    x
+        Time-major signal ``(T, *channels)`` to filter along the leading axis.
+    zi
+        Optional ``(n_sections, 2)`` per-section steady-state delay state; when
+        given, its transient ``x[0] * g`` is added over the first ``n_taps``
+        samples.  ``None`` for a zero-state (pure convolution) filter.
+    n_taps
+        Truncation length of the impulse response used as the convolution
+        kernel.
+
+    Returns
+    -------
+    Array
+        The filtered signal, time-major ``(T, *channels)`` with the same dtype
+        as ``x``.
     """
     h, g = _sos_responses(sos, n_taps, zi=zi)
     n_t = x.shape[0]
@@ -445,6 +643,21 @@ def _sosfilt_scan(
 
     ``x`` is time-major ``(T, *channels)``.  ``zi`` (per-section delay
     state for unit input) is scaled by ``x[0]`` when provided.
+
+    Parameters
+    ----------
+    sos
+        The ``(n_sections, 6)`` second-order-section coefficient array.
+    x
+        Time-major signal ``(T, *channels)`` filtered along the leading axis.
+    zi
+        Optional ``(n_sections, 2)`` per-section delay state for a unit input,
+        scaled by ``x[0]``.  ``None`` starts each section from zero state.
+
+    Returns
+    -------
+    Array
+        The filtered signal, time-major ``(T, *channels)``.
     """
     y = x
     x0 = x[0]
@@ -481,7 +694,7 @@ def _sosfilt_associative(
     """Cascade of biquads via parallel ``lax.associative_scan``.
 
     The transposed-DF2 state ``s = (z1, z2)`` -- the *same* state
-    ``_sosfilt_scan`` carries -- evolves as a first-order linear recurrence
+    :func:`_sosfilt_scan` carries -- evolves as a first-order linear recurrence
     ``s[n+1] = M s[n] + c u[n]`` with constant ``M = [[-a1, 1], [-a2, 0]]`` and
     ``c = [b1 - a1 b0, b2 - a2 b0]``, and the output is
     ``y[n] = s[n][0] + b0 u[n]``.  A constant-coefficient linear recurrence
@@ -489,12 +702,28 @@ def _sosfilt_associative(
     ``O(log T)`` depth.
 
     ``zi`` (per-section steady-state delay, scaled by ``x[0]``) sets the
-    initial state ``s[0]``; its homogeneous response ``M^n s[0]`` is read off
-    the same scan's cumulative transition ``a_cum``.  With ``zi=None`` the
+    initial state ``s[0]``; its homogeneous response :math:`M^n s_0` is read
+    off the same scan's cumulative transition ``a_cum``.  With ``zi=None`` the
     initial state is zero (the homogeneous term vanishes and ``a_cum`` is not
-    materialised).  This is the engine that makes ``sosfilt`` /
-    ``sosfiltfilt`` competitive on the GPU; it matches ``_sosfilt_scan`` (and
-    ``scipy.signal``) to round-off.
+    materialised).  This is the engine that makes :func:`sosfilt` /
+    :func:`sosfiltfilt` competitive on the GPU; it matches :func:`_sosfilt_scan`
+    (and ``scipy.signal``) to round-off.
+
+    Parameters
+    ----------
+    sos
+        The ``(n_sections, 6)`` second-order-section coefficient array.
+    x
+        Time-major signal ``(T, *channels)`` filtered along the leading axis.
+    zi
+        Optional ``(n_sections, 2)`` per-section steady-state delay state,
+        scaled by ``x[0]`` to set the initial state.  ``None`` starts each
+        section from zero state.
+
+    Returns
+    -------
+    Array
+        The filtered signal, time-major ``(T, *channels)``.
     """
     y = x
     n_t = x.shape[0]
@@ -548,8 +777,30 @@ def _sosfilt_apply(
     """Apply the cascade with the resolved engine (the ``driver`` axis).
 
     ``'fft'`` truncates the impulse response at ``impulse_atol`` and convolves;
-    if the filter has not decayed within ``_IIR_FFT_MAX_TAPS`` it falls back to
-    a recurrence (``associative`` on GPU, ``scan`` on CPU) with a warning.
+    if the filter has not decayed within :data:`_IIR_FFT_MAX_TAPS` it falls
+    back to a recurrence (``'associative'`` on GPU, ``'scan'`` on CPU) with a
+    warning.
+
+    Parameters
+    ----------
+    sos
+        The ``(n_sections, 6)`` second-order-section coefficient array.
+    x
+        Time-major signal ``(T, *channels)`` filtered along the leading axis.
+    zi
+        Optional ``(n_sections, 2)`` per-section steady-state delay state, or
+        ``None`` for a zero-state filter.
+    driver
+        Requested engine (``'auto'``, ``'fft'``, ``'scan'`` or
+        ``'associative'``), resolved to a concrete engine per platform.
+    impulse_atol
+        FFT engine only: absolute tolerance for truncating the impulse
+        response.
+
+    Returns
+    -------
+    Array
+        The filtered signal, time-major ``(T, *channels)``.
     """
     driver = _resolve_iir_driver(driver)
     if driver == 'fft':
@@ -589,8 +840,11 @@ def sosfilt(
         Signal; filtered along ``axis`` (default trailing).
     sos
         ``(n_sections, 6)`` second-order sections (e.g. from
-        ``butterworth_sos``).  Static host coefficients (NumPy); they are
+        :func:`butterworth_sos`).  Static host coefficients (NumPy); they are
         baked into the engine, not traced.
+    axis
+        Axis of ``X`` along which to filter (default ``-1``, the trailing
+        axis).
     driver
         Numerical variant (the ``driver`` axis).  ``'auto'`` (default) picks the
         engine by platform: ``'fft'`` on GPU, ``'scan'`` on CPU.  The recursion
@@ -609,6 +863,12 @@ def sosfilt(
         Larger values give shorter kernels / smaller FFTs at the cost of a
         (geometrically bounded) edge error; a filter too sharp to decay within
         ``2**15`` taps falls back to a recurrence with a warning.
+
+    Returns
+    -------
+    Num[Array, '... obs']
+        The causally filtered signal, same shape and dtype as ``X``.
+        Differentiable through ``X``.
     """
     sos_np = np.asarray(sos)
     x = jnp.moveaxis(jnp.asarray(X), axis, 0)
@@ -640,10 +900,41 @@ def sosfiltfilt(
 
     Both passes thread the steady-state ``zi`` initial conditions through the
     resolved engine (``driver='auto'`` -> ``'fft'`` on GPU, ``'scan'`` on CPU;
-    see ``sosfilt``).  The FFT engine adds the ``zi`` transient
+    see :func:`sosfilt`).  The FFT engine adds the ``zi`` transient
     ``x[0] * g`` (the cascade's zero-input response) over the first ``n_taps``
     samples, so the edges stay scipy-exact -- the zero-phase path is no longer
-    scan-only.  ``impulse_atol`` controls the FFT truncation (see ``sosfilt``).
+    scan-only.  ``impulse_atol`` controls the FFT truncation (see
+    :func:`sosfilt`).
+
+    Parameters
+    ----------
+    X
+        Signal; filtered along ``axis`` (default trailing).
+    sos
+        ``(n_sections, 6)`` second-order sections (e.g. from
+        :func:`butterworth_sos`).  Static host coefficients (NumPy).
+    axis
+        Axis of ``X`` along which to filter (default ``-1``, the trailing
+        axis).
+    padtype
+        Edge-padding scheme applied before the forward-backward passes.  Only
+        ``'odd'`` padding is supported.
+    padlen
+        Number of samples reflected at each edge.  ``None`` (default) uses the
+        scipy convention (``3 * (2 * n_sections + 1 - n_trivial)``, where
+        ``n_trivial`` counts first-order sections); must be less than the
+        signal length along ``axis``.
+    driver
+        Numerical variant for both passes (see :func:`sosfilt`): ``'auto'``
+        (default), or a forced ``'fft'`` / ``'scan'`` / ``'associative'``.
+    impulse_atol
+        FFT-engine impulse-response truncation tolerance (see :func:`sosfilt`).
+
+    Returns
+    -------
+    Num[Array, '... obs']
+        The zero-phase filtered signal, same shape and dtype as ``X``.
+        Differentiable through ``X``.
     """
     sos_np = np.asarray(sos)
     n_sections = sos_np.shape[0]
@@ -708,8 +999,8 @@ def iir_filter(
 ) -> Num[Array, '... obs']:
     """Recursive Butterworth IIR filter (design + apply).
 
-    Convenience wrapper: designs a Butterworth ``sos`` (``butterworth_sos``)
-    and applies it.
+    Convenience wrapper: designs a Butterworth ``sos``
+    (:func:`butterworth_sos`) and applies it.
 
     Parameters
     ----------
@@ -725,17 +1016,20 @@ def iir_filter(
     order
         Butterworth order.
     zero_phase
-        ``True`` (default) -- forward-backward ``sosfiltfilt`` (zero phase,
+        ``True`` (default) -- forward-backward :func:`sosfiltfilt` (zero phase,
         squared magnitude, the fMRI default).  ``False`` -- single causal
-        forward pass (``sosfilt``); preserves causality but imposes the
+        forward pass (:func:`sosfilt`); preserves causality but imposes the
         Butterworth phase delay.
     driver
         Numerical variant for both the causal (``zero_phase=False``) and
         zero-phase (``zero_phase=True``) paths: ``'auto'`` (default; ``'fft'``
-        on GPU, ``'scan'`` on CPU -- see ``sosfilt``) or a forced ``'fft'`` /
-        ``'scan'`` / ``'associative'``.
+        on GPU, ``'scan'`` on CPU -- see :func:`sosfilt`) or a forced ``'fft'``
+        / ``'scan'`` / ``'associative'``.
     impulse_atol
-        FFT-engine impulse-response truncation tolerance (see ``sosfilt``).
+        FFT-engine impulse-response truncation tolerance (see :func:`sosfilt`).
+    axis
+        Axis of ``X`` along which to filter (default ``-1``, the trailing time
+        axis).
 
     Returns
     -------

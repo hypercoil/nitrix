@@ -1,0 +1,148 @@
+---
+title: "lomb_scargle_interpolate"
+generated: true
+description: "Fill censored time-series frames by joint Lomb-Scargle spectral reconstruction."
+---
+
+[‹ back to `nitrix.signal.lomb_scargle`](../nitrix-signal-lomb_scargle.qmd)
+
+<!-- nitrix:gen sig:lomb_scargle_interpolate -->
+```python
+lomb_scargle_interpolate(data: Num[Array, '... obs'], mask: Bool[Array, '... obs'], *, dt: float = 1.0, oversampling: float = 4.0, high_factor: float = 1.0, rcond: float = 1e-06, censoring_budget: float = 0.4) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lomb_scargle_interpolate -->
+Fill censored time-series frames by joint Lomb-Scargle
+spectral reconstruction.
+
+Solves a masked least-squares regression of the observed
+samples on a $[\mathrm{DC},\ \cos(\omega_k t),\
+\sin(\omega_k t)]$ basis -- **joint** over all trial
+frequencies, not the independent per-frequency form of
+[`lomb_scargle_periodogram`](../nitrix-signal-lomb_scargle/lomb_scargle_periodogram.qmd).  The joint fit ensures the
+reconstruction passes through the observed samples (modulo a
+small Tikhonov ridge), so the spliced output has **no boundary
+discontinuity** between observed and interpolated frames.
+
+This is the Power 2014 protocol for motion-censored fMRI.
+Recommended over [`linear_interpolate`](../nitrix-signal-interpolate/linear_interpolate.qmd) because:
+
+1. It preserves the spectral content -- linear interpolation
+   injects low-frequency artefacts at bridges across long
+   censored runs.
+2. The reconstruction is smooth at observed boundaries.
+
+Memory: shared-mask path uses `(K, K)` Gram / eigenvector
+intermediates regardless of leading-dim count, so V = 1M
+voxels fits in ~10 GB at fMRI shapes.  See the module
+docstring for the breakdown.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lomb_scargle_interpolate -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `data` | `Num` | `...` × `obs` | — | Time series, observation axis is last. Leading axes index channels. |
+| `mask` | `Bool` | `...` × `obs` | — | Boolean validity mask. Must be **broadcast-compatible** with `data` (a single `(obs,)` mask broadcasts over all leading dims, which is the canonical fMRI case -- one motion-censoring mask per scan, applied across all voxels). Same-shape masks (per-channel censoring) are rejected -- they require a separate per-channel solve whose memory scales as $V K^2$, which runs out of memory at fMRI scale. Use [`linear_interpolate`](../nitrix-signal-interpolate/linear_interpolate.qmd) for per-channel masks, or explicitly `jax.vmap` this function over the channel axis if you really need it (and have the HBM). |
+| `dt` | `float` | — | `1.0` | Sampling interval (fMRI TR in seconds). Default `1.0`. |
+| `oversampling` | `float` | — | `4.0` | Frequency-grid oversampling factor. Default `4` (Press-Rybicki convention). |
+| `high_factor` | `float` | — | `1.0` | Multiplier of Nyquist for the highest trial frequency. Default `1.0`. |
+| `rcond` | `float` | — | `1e-06` | Relative threshold for eigenvalue truncation in the pseudo-inverse of the Gram matrix. Eigenvalues below `rcond * max(eigval)` are zeroed in the solve. Default `1e-6`; tighten (smaller value) to keep more near-zero modes (risky at fp32), loosen to be more regularised. |
+| `censoring_budget` | `float` | — | `0.4` | Static estimate of the maximum fraction of frames that may be censored. Used at trace time to choose the trial-frequency count so the basis stays rank-sufficient under the worst-case censoring; lower values (e.g. `0.1`) give more trial frequencies and better spectral resolution at the cost of robustness to heavy censoring. Default `0.4` -- accommodates up to 40% censored frames without truncation kicking in. |
+
+**Returns** `Num` — shape `...` × `obs`. Filled time series of the same shape as `data`: observed frames are returned unchanged, censored frames are replaced by the joint spectral reconstruction.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:lomb_scargle_interpolate -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **7.77 ms** (median, L4); up to **36.46× faster** than `numpy.joint_glm`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_LOMB_SCARGLE_INTERPOLATE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=1024 | `cupy.joint_glm` | skipped | — | — | — | — | — |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=1024 | `nitrix-jax` | ok | 152.69 ms / 186.50 ms | 2.616 s | 832 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=1024 | `numpy.joint_glm` | ok | 194.09 ms / 224.28 ms | 319.90 ms | 644 MB (rss) | n/a (no oracle) | 1.27x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=1024 | `cupy.joint_glm` | ok | 6.80 ms / 6.81 ms | 281.15 ms | 16.78 MB (hbm) | n/a (no oracle) | 1.07x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=1024 | `nitrix-jax` | ok | 6.33 ms / 7.77 ms | 1.304 s | 121.64 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=1024 | `numpy.joint_glm` | ok | 136.27 ms / 140.36 ms | 171.89 ms | 16.78 MB (hbm) | n/a (no oracle) | 21.52x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=256 | `cupy.joint_glm` | skipped | — | — | — | — | — |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=256 | `nitrix-jax` | ok | 18.87 ms / 22.83 ms | 214.87 ms | 659 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=256 | `numpy.joint_glm` | ok | 12.50 ms / 18.36 ms | 18.14 ms | 619 MB (rss) | n/a (no oracle) | 0.66x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=256 | `cupy.joint_glm` | ok | 1.44 ms / 1.46 ms | 2.921 s | 4.19 MB (hbm) | n/a (no oracle) | 1.22x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=256 | `nitrix-jax` | ok | 1.18 ms / 1.18 ms | 553.76 ms | 83.89 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=256 | `numpy.joint_glm` | ok | 11.90 ms / 167.25 ms | 717.80 ms | 4.19 MB (hbm) | n/a (no oracle) | 10.09x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=512 | `cupy.joint_glm` | skipped | — | — | — | — | — |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=512 | `nitrix-jax` | ok | 67.97 ms / 130.94 ms | 247.30 ms | 722 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cpu | V=4096,obs=512 | `numpy.joint_glm` | ok | 49.26 ms / 56.71 ms | 61.13 ms | 619 MB (rss) | n/a (no oracle) | 0.72x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=512 | `cupy.joint_glm` | ok | 2.86 ms / 2.88 ms | 240.90 ms | 8.39 MB (hbm) | n/a (no oracle) | 1.10x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=512 | `nitrix-jax` | ok | 2.60 ms / 2.62 ms | 705.71 ms | 100.66 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| lomb_scargle_interpolate | jax-cuda12 | V=4096,obs=512 | `numpy.joint_glm` | ok | 94.92 ms / 2.315 s | 1.667 s | 8.39 MB (hbm) | n/a (no oracle) | 36.46x vs nitrix-jax |
+:::
+
+*source: bench `32d06bc3` · nitrix `e0b2ff20`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:lomb_scargle_interpolate -->
+::: {.callout-note}
+Differentiable through `data`; `mask` is static.
+
+**Intended use: a spectral bridge, not durable imputation.**
+The Power 2014 procedure exists to produce a
+*spectrally-consistent* fill so that downstream autoregressive /
+IIR temporal filters (band-pass, high-pass) run across the gaps
+without ringing or spectral leakage; the censored frames are
+typically dropped again after filtering.  Treat the filled
+values as a transient means to that end, **not** as durable
+per-frame imputations for direct analysis.  Only two things are
+well-defined: the observed-frame splice-through
+(`recon[obs] == data[obs]` exactly) and the band-limited
+spectral content.  The reconstruction *at censored frames* is
+the regularised solution of an ill-conditioned masked Gram
+(condition number $\sim 10^{32}$); which near-null-space
+modes survive the
+`rcond`-truncated pseudo-inverse differs between fp32 and
+fp64, so the censored-frame values are **not bit-reproducible
+across precisions** (two valid regularised solutions can differ
+by O(1) on O(1) signals at the worst frame).  This sensitivity
+lives in high-frequency directions the irregular observed grid
+cannot pin down -- benign for the intended low/band-pass use,
+but a correctness trap if the fills are used durably.  If you
+need durable per-frame values, compute in fp64 and treat the
+high-frequency content as undetermined.
+
+**Device placement.**  The shared-Gram factorisation uses
+`safe_eigh` (`nitrix.linalg._solver`), which routes the
+eigendecomposition to a device where dense cuSolver `eigh`
+works.  On stacks where GPU `eigh` is broken (some
+CUDA/driver combinations -- `gpusolverDnCreate failed`), the
+Gram solve is placed on the **host (CPU)** with GPU->CPU->GPU
+transfers: results are correct but the solve is not
+GPU-resident, and the K x K Gram (K up to `2*n_freq+1` ~ 499
+at fMRI `n_obs`) is exactly in the affected size range.
+Contrast the matrix-function ops (`symlog` / `symsqrt` /
+`sympower`), which consume a raw `eigh` that XLA lowers off
+cuSolver and so stay GPU-resident.
+:::
+
+### References
+
+.. [1] Power, J. D., Mitra, A., Laumann, T. O., Snyder, A. Z.,
+   Schlaggar, B. L., & Petersen, S. E. (2014).  Methods to
+   detect, characterize, and remove motion artifact in resting
+   state fMRI.  NeuroImage, 84, 320-341.
+   https://doi.org/10.1016/j.neuroimage.2013.08.048
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lomb_scargle_interpolate -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

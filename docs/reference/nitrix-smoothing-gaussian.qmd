@@ -1,0 +1,47 @@
+---
+title: "nitrix.smoothing.gaussian"
+generated: true
+signature-hash: 10676c6312686b68
+description: "Separable n-D Gaussian filter."
+listing:
+  id: nitrix-smoothing-gaussian-symbols
+  contents: "nitrix-smoothing-gaussian/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.smoothing.gaussian`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Separable n-D Gaussian filter.
+
+The unconditional baseline smoother.  Pure JAX -- uses
+`lax.conv_general_dilated` for the underlying 1D convolutions
+(the algebra is real-valued, so the tensor-core fast path is
+available for free).  The n-D Gaussian factors exactly as a product
+of 1D Gaussians, so we convolve along each spatial axis serially.
+
+Padding modes match `scipy.ndimage.gaussian_filter`: default
+`"reflect"` (the medical-imaging convention -- preserves boundary
+intensities), with `"constant"` and `"edge"` also supported.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-smoothing-gaussian-symbols}
+:::

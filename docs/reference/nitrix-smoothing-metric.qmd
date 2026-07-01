@@ -1,0 +1,82 @@
+---
+title: "nitrix.smoothing.metric"
+generated: true
+signature-hash: a5c90736ba8d9ff8
+description: "Feature-space metrics for the bounded bilateral filter."
+listing:
+  id: nitrix-smoothing-metric-symbols
+  contents: "nitrix-smoothing-metric/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.smoothing.metric`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Feature-space metrics for the bounded bilateral filter.
+
+[`bilateral_gaussian`](nitrix-smoothing-bilateral/bilateral_gaussian.qmd) weights neighbours by a Gaussian over a metric
+on feature space,
+
+$$
+w_{ij} = \exp\left(
+    -\tfrac{1}{2}\,(f_i - f_j)^{\top} M (f_i - f_j)
+\right)
+$$
+
+where $M \succeq 0$ is supplied **factored** as $M = L L^{\top}$
+with $L$ of shape $(d_f, k)$, $k \le d_f$.  The kernel
+never needs $M$ itself: every weight depends on the feature
+difference only through the projection $z = L^{\top} (f_i - f_j)$ and
+the squared norm $q = z^{\top} z = (f_i - f_j)^{\top} M (f_i - f_j)$.
+This module supplies that projection as a small algebraic data type.
+
+Three tiers, all feeding the identical kernel (only the shape and source
+of the factor changes):
+
+- [`DiagonalMetric`](nitrix-smoothing-metric/DiagonalMetric.qmd) -- one bandwidth per feature; $M$ is
+  $\operatorname{diag}(1 / \sigma^2)$.  The cheap, interpretable
+  default; recovers the classic per-channel bilateral.
+- [`FactorMetric`](nitrix-smoothing-metric/FactorMetric.qmd) -- a general factor $L$ of shape
+  $(d_f, k)$.  $k < d_f$ gives a **low-rank** metric that
+  projects correlated feature channels into a $k$-dimensional
+  discriminative subspace before the norm (cost $O(k)$ per neighbour
+  rather than $O(d_f)$); $k = d_f$ gives a general anisotropic
+  metric.
+
+Constructors compose the tiers without leaving the substrate:
+[`block_diagonal_metric`](nitrix-smoothing-metric/block_diagonal_metric.qmd) assembles a block-diagonal $L$
+(independent per-modality bandwidths -- e.g. a tissue-intensity block
+weighted separately from a functional-correlation block), and
+[`metric_from_spd`](nitrix-smoothing-metric/metric_from_spd.qmd) factors an explicit SPD $M$ via Cholesky.
+
+Both metric types are registered JAX pytrees whose array field is the
+single leaf, so a metric flows through `jit` / `vmap` and is
+differentiable end-to-end: the factor $L$ is a learnable parameter
+if the consumer wants one.  Data-driven *fitting* of $L$ (population
+PCA, supervised metric learning) is deliberately out of scope -- that is a
+modelling concern for a consumer, built from [`nitrix.stats`](nitrix-stats.qmd) covariance
+tools and [`nitrix.linalg`](nitrix-linalg.qmd); this module supplies only the pure
+mechanism.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-smoothing-metric-symbols}
+:::

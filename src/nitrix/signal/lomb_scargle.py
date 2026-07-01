@@ -4,71 +4,86 @@
 """
 Lomb-Scargle spectral methods for irregularly-sampled time series.
 
-Two distinct primitives that share the underlying sin / cos basis
-but solve different problems:
+Two distinct primitives that share the underlying sine / cosine
+basis but solve different problems:
 
-- ``lomb_scargle_periodogram`` -- canonical Press-Rybicki / Scargle
-  1982 periodogram for **spectral analysis** of irregularly-sampled
-  data.  Each (cosine, sine) amplitude pair is estimated
-  independently per trial frequency after the
-  ``tau``-orthogonalisation that makes the per-frequency
+- :func:`lomb_scargle_periodogram` -- canonical Press-Rybicki /
+  Scargle periodogram for **spectral analysis** of
+  irregularly-sampled data.  Each (cosine, sine) amplitude pair is
+  estimated independently per trial frequency after the
+  :math:`\\tau`-orthogonalisation that makes the per-frequency
   least-squares closed-form.  Fast; the *reconstruction* implied
   by summing the per-frequency components does **not** pass through
-  the observed samples exactly -- if used for interpolation,
+  the observed samples exactly -- if used for interpolation, it
   produces **visible boundary discontinuities** at observed /
-  censored transitions.  Wrong primitive for interpolation.
+  censored transitions.  This is the wrong primitive for
+  interpolation.
 
-- ``lomb_scargle_interpolate`` -- **interpolation** primitive for
-  fMRI motion-censoring (Power 2014 protocol).  Solves a **joint**
-  least-squares regression of the observed samples on the entire
-  sin / cos basis (plus DC):
-  ``min ||M (B beta - y)||^2`` where ``M`` is the observed-sample
-  mask, ``B`` is the basis, ``y`` is the data, ``beta`` are the
-  spectral coefficients.  Joint fit guarantees
-  ``B[obs] @ beta == y[obs]`` (modulo rank deficiency handled
-  by a Tikhonov ridge), so the spliced output has **no boundary
-  discontinuity**.
+- :func:`lomb_scargle_interpolate` -- **interpolation** primitive
+  for fMRI motion-censoring (the Power 2014 protocol).  Solves a
+  **joint** least-squares regression of the observed samples on the
+  entire sine / cosine basis (plus DC),
+  :math:`\\min \\lVert M (B \\beta - y) \\rVert^2`, where :math:`M`
+  is the observed-sample mask, :math:`B` is the basis, :math:`y` is
+  the data, and :math:`\\beta` are the spectral coefficients.  The
+  joint fit guarantees :math:`B[\\mathrm{obs}] \\, \\beta =
+  y[\\mathrm{obs}]` (modulo rank deficiency handled by a Tikhonov
+  ridge), so the spliced output has **no boundary discontinuity**.
 
 Memory regime
 -------------
 
-The dominant cost is the basis matrix ``B`` of shape
-``(n_obs, K)`` where ``K = 1 + 2 * n_freq``.  At fMRI typical
-``n_obs = 500`` and ``K = 499``, ``B`` is ~1 MB at fp32 -- shared
-across channels.
+The dominant cost is the basis matrix :math:`B` of shape
+``(n_obs, K)`` where :math:`K = 1 + 2 \\, n_{\\mathrm{freq}}`.  At a
+typical fMRI ``n_obs = 500`` and ``K = 499``, :math:`B` is ~1 MB at
+fp32 -- shared across channels.
 
-For **shared-mask** input (mask is broadcast-compatible with data
-along the leading dims; the typical fMRI case where one
+For **shared-mask** input (the mask is broadcast-compatible with
+the data along the leading dims; the typical fMRI case where one
 motion-censor mask applies to all voxels), we compute the Gram
-matrix ``G = B^T diag(mask) B`` of shape ``(K, K)`` and factor it
-**once** via a symmetric eigendecomposition (``safe_eigh``), then
-apply a threshold-truncated pseudo-inverse (eigenvalues below
-``rcond * max`` are dropped) to solve the right-hand sides for all
-channels at once.  The eigh-plus-pseudo-inverse path -- rather than
-a Cholesky factor + triangular solve -- is deliberate: the masked
-Gram is rank-deficient whenever ``2 * n_freq + 1 > n_valid``, and a
+matrix :math:`G = B^{\\top} \\operatorname{diag}(M) B` of shape
+``(K, K)`` and factor it **once** via a symmetric
+eigendecomposition (``safe_eigh``), then apply a threshold-
+truncated pseudo-inverse (eigenvalues below ``rcond * max`` are
+dropped) to solve the right-hand sides for all channels at once.
+The eigendecomposition-plus-pseudo-inverse path -- rather than a
+Cholesky factor plus triangular solve -- is deliberate: the masked
+Gram is rank-deficient whenever
+:math:`2 \\, n_{\\mathrm{freq}} + 1 > n_{\\mathrm{valid}}`, and a
 singular Gram has no Cholesky factor; the truncated pseudo-inverse
 absorbs the rank deficiency without an arbitrary ridge.  Total
-memory at V=1M voxels, T=500, K=499:
+memory at :math:`V = 10^6` voxels, :math:`T = 500`, :math:`K = 499`:
 
-- Shared basis: ``T * K * 4 = 1 MB``.
-- Shared Gram / eigenvectors: ``2 * K^2 * 4 = 2 MB``.
-- Per-channel rhs / beta / recon: ``3 * V * K * 4 = 6 GB``.
-- Output / data: ``2 * V * T * 4 = 4 GB``.
+- Shared basis: :math:`T \\, K \\times 4 = 1` MB.
+- Shared Gram / eigenvectors: :math:`2 K^2 \\times 4 = 2` MB.
+- Per-channel right-hand side / :math:`\\beta` / reconstruction:
+  :math:`3 V K \\times 4 = 6` GB.
+- Output / data: :math:`2 V T \\times 4 = 4` GB.
 
-Total ~10 GB -- fits on an A100 80GB or H100 with room.  For
-**per-channel-mask** input (mask shape matches data shape; each
-channel has its own censoring pattern), we fall back to a
-``vmap`` over channels which creates a per-channel Gram of size
-``(V, K, K)`` -- 1 TB at V=1M.  In that case the function raises
-a clear error pointing at the shared-mask path.
+Total ~10 GB -- fits on an A100 80 GB or H100 with room.  For
+**per-channel-mask** input (the mask shape matches the data shape;
+each channel has its own censoring pattern), a per-channel solve
+would create a per-channel Gram of size ``(V, K, K)`` -- 1 TB at
+:math:`V = 10^6`.  In that case the function raises a clear error
+pointing at the shared-mask path.
 
 References
 ----------
-Lomb, N. R. (1976).  Astrophys. Space Sci. 39, 447-462.
-Scargle, J. D. (1982).  Astrophys. J. 263, 835-853.
-Press, W. H. & Rybicki, G. B. (1989).  Astrophys. J. 338, 277-280.
-Power, J. D. et al. (2014).  NeuroImage 84, 320-341.
+.. [1] Lomb, N. R. (1976).  Least-squares frequency analysis of
+   unequally spaced data.  Astrophysics and Space Science, 39,
+   447-462.  https://doi.org/10.1007/BF00648343
+.. [2] Scargle, J. D. (1982).  Studies in astronomical time series
+   analysis. II.  Statistical aspects of spectral analysis of
+   unevenly spaced data.  The Astrophysical Journal, 263, 835-853.
+   https://doi.org/10.1086/160554
+.. [3] Press, W. H. & Rybicki, G. B. (1989).  Fast algorithm for
+   spectral analysis of unevenly sampled data.  The Astrophysical
+   Journal, 338, 277-280.  https://doi.org/10.1086/167197
+.. [4] Power, J. D., Mitra, A., Laumann, T. O., Snyder, A. Z.,
+   Schlaggar, B. L., & Petersen, S. E. (2014).  Methods to detect,
+   characterize, and remove motion artifact in resting state fMRI.
+   NeuroImage, 84, 320-341.
+   https://doi.org/10.1016/j.neuroimage.2013.08.048
 """
 
 from __future__ import annotations
@@ -100,15 +115,45 @@ def _trial_frequencies(
 ) -> Float[Array, 'n_freq']:
     """Choose trial angular frequencies (Press-Rybicki convention).
 
-    Min: ``2 pi df`` with ``df = 1 / (T * oversampling)``.
-    Max: ``2 pi f_max`` with ``f_max = high_factor * Nyquist``.
-    Count: bounded so ``2 * n_freq + 1 <= n_obs * (1 - censoring_budget)``
-    -- i.e., we assume up to ``censoring_budget * n_obs`` frames may
-    be censored and leave the basis with enough column slack to
-    stay rank-sufficient.  Default ``censoring_budget = 0.4`` (40%
-    censoring tolerated without rank deficiency); raise the budget
-    or pass a smaller ``oversampling`` if you expect heavier
-    censoring.
+    The grid runs from a minimum angular frequency
+    :math:`2 \\pi \\, df`, with :math:`df = 1 / (T \\cdot
+    \\mathrm{oversampling})`, up to a maximum :math:`2 \\pi \\,
+    f_{\\max}`, with :math:`f_{\\max} = \\mathrm{high\\_factor}
+    \\cdot f_{\\mathrm{Nyquist}}`.  The frequency count is bounded so
+    that :math:`2 \\, n_{\\mathrm{freq}} + 1 \\le n_{\\mathrm{obs}}
+    (1 - \\mathrm{censoring\\_budget})` -- i.e. up to
+    :math:`\\mathrm{censoring\\_budget} \\cdot n_{\\mathrm{obs}}`
+    frames are assumed censorable, leaving the basis with enough
+    column slack to stay rank-sufficient.
+
+    Parameters
+    ----------
+    n_obs
+        Number of time samples.
+    dt
+        Sampling interval, so the record length is
+        :math:`T = n_{\\mathrm{obs}} \\cdot dt`.
+    oversampling
+        Frequency-grid oversampling factor; larger values give a
+        finer frequency spacing :math:`df`.
+    high_factor
+        Multiplier of the Nyquist frequency setting the highest
+        trial frequency.
+    dtype
+        Floating dtype of the returned array.
+    censoring_budget
+        Assumed maximum fraction of frames that may be censored,
+        used to cap the frequency count so the basis stays
+        rank-sufficient under worst-case censoring.  Default
+        ``0.4`` (40% censoring tolerated without rank deficiency);
+        raise the budget or pass a smaller ``oversampling`` if you
+        expect heavier censoring.
+
+    Returns
+    -------
+    Float[Array, 'n_freq']
+        The trial angular frequencies :math:`\\omega`, in ascending
+        order.
     """
     T = n_obs * dt
     df = 1.0 / (T * oversampling)
@@ -128,10 +173,32 @@ def _lomb_scargle_basis(
     omega: Float[Array, 'n_freq'],
     dtype: DTypeLike,
 ) -> Float[Array, 'n_obs n_basis']:
-    """Joint regression basis ``[DC | cos | sin]``.
+    """Build the joint regression basis :math:`[\\mathrm{DC} \\mid
+    \\cos \\mid \\sin]`.
 
-    Returns a ``(n_obs, 1 + 2 * n_freq)`` matrix; rows index time,
-    columns index basis component.  Shared across channels.
+    Stacks a constant (DC) column, the cosine columns
+    :math:`\\cos(\\omega_k t)`, and the sine columns
+    :math:`\\sin(\\omega_k t)` for every trial frequency, evaluated
+    on the regular time grid :math:`t = dt \\cdot [0, 1, \\dots,
+    n_{\\mathrm{obs}} - 1]`.  Shared across channels.
+
+    Parameters
+    ----------
+    n_obs
+        Number of time samples (rows).
+    dt
+        Sampling interval defining the time grid.
+    omega
+        Trial angular frequencies, shape ``(n_freq,)``.
+    dtype
+        Floating dtype of the returned matrix.
+
+    Returns
+    -------
+    Float[Array, 'n_obs n_basis']
+        Basis matrix of shape ``(n_obs, 1 + 2 * n_freq)``; rows
+        index time, columns index basis component (DC first, then
+        cosines, then sines).
     """
     t = jnp.arange(n_obs, dtype=dtype) * dt
     arg = omega[None, :] * t[:, None]
@@ -154,42 +221,55 @@ def lomb_scargle_periodogram(
     oversampling: float = 4.0,
     high_factor: float = 1.0,
 ) -> Tuple[Float[Array, 'n_freq'], Float[Array, '... n_freq']]:
-    """Scargle 1982 normalised Lomb-Scargle periodogram.
+    """Normalised Lomb-Scargle periodogram (Scargle convention).
 
-    Per-frequency power computed from the observed (non-masked)
+    Computes per-frequency power from the observed (non-masked)
     samples, normalised by the observed-sample variance -- the
-    classic Scargle 1982 convention ``P = P_raw / var``.  Equals
+    classic Scargle convention :math:`P = P_{\\mathrm{raw}} /
+    \\operatorname{var}`.  Equals
     ``scipy.signal.lombscargle(..., normalize=False)`` divided by
-    the observed-sample variance (population ``var``, ``ddof=0``).
+    the observed-sample variance (population variance,
+    ``ddof=0``).
 
-    .. note::
-
-       This is **not** ``scipy.signal.lombscargle(normalize=True)``.
-       scipy's ``normalize=True`` (as of 1.17.1) returns
-       ``2 * P_raw / (N * var)``, so it differs from this output by
-       a constant factor of ``N / 2`` (``N`` = number of observed
-       samples).  scipy's ``normalize`` convention has drifted
-       across versions, so the math above -- not a scipy flag name
-       -- is the stable definition to compare against.
-
-    For **interpolation** use ``lomb_scargle_interpolate`` -- the
-    implied reconstruction from per-frequency LS coefficients
-    does not pass through observed samples exactly.
+    For **interpolation** use :func:`lomb_scargle_interpolate` --
+    the reconstruction implied by these per-frequency least-squares
+    coefficients does not pass through the observed samples exactly.
 
     Parameters
     ----------
-    data, mask
-        Observation tensor (last axis = time) and boolean
-        validity mask.
+    data
+        Observation tensor of shape ``(..., obs)``; the last axis
+        is time and leading axes index channels.
+    mask
+        Boolean validity mask of the same shape as ``data``; ``True``
+        marks observed (non-censored) samples.
     dt
         Sampling interval.  Default ``1.0``.
-    oversampling, high_factor
-        Frequency-grid parameters.
+    oversampling
+        Frequency-grid oversampling factor.  Default ``4.0``
+        (Press-Rybicki convention).
+    high_factor
+        Multiplier of the Nyquist frequency for the highest trial
+        frequency.  Default ``1.0``.
 
     Returns
     -------
-    ``(freqs, power)`` -- cyclic frequencies and per-channel
-    normalised power.
+    freqs : Float[Array, 'n_freq']
+        Cyclic (not angular) trial frequencies, in ascending order.
+    power : Float[Array, '... n_freq']
+        Per-channel normalised power at each trial frequency, with
+        the same leading (channel) axes as ``data``.
+
+    Notes
+    -----
+    This is **not** ``scipy.signal.lombscargle(normalize=True)``.
+    scipy's ``normalize=True`` (as of 1.17.1) returns
+    :math:`2 P_{\\mathrm{raw}} / (N \\operatorname{var})`, so it
+    differs from this output by a constant factor of :math:`N / 2`,
+    where :math:`N` is the number of observed samples.  scipy's
+    ``normalize`` convention has drifted across versions, so the
+    expression above -- not a scipy flag name -- is the stable
+    definition to compare against.
     """
     n_obs = data.shape[-1]
     # Periodogram doesn't have a Gram-rank concern (per-frequency
@@ -245,25 +325,46 @@ def _lomb_scargle_solve_shared_mask(
     basis: Float[Array, 'n_obs K'],
     rcond: float,
 ) -> Float[Array, 'n_chan n_obs']:
-    """Joint LS interpolation with a shared (channel-invariant) mask.
+    """Joint least-squares interpolation with a shared mask.
 
-    Robust solver: factor the Gram via ``eigh`` (symmetric
-    eigendecomposition) and apply a thresholded pseudo-inverse.
-    Truncating eigenvalues below ``rcond * max(eigval)`` handles
-    rank-deficient Gram matrices (which arise whenever
-    ``2 * n_freq + 1 > n_valid``) without arbitrary ridge
-    parameters.
+    Solves the masked joint regression for a single
+    channel-invariant mask via a robust factorisation: form the
+    Gram matrix, factor it with a symmetric eigendecomposition, and
+    apply a thresholded pseudo-inverse.  Truncating eigenvalues
+    below :math:`\\mathrm{rcond} \\cdot \\max(\\mathrm{eigval})`
+    handles rank-deficient Gram matrices (which arise whenever
+    :math:`2 \\, n_{\\mathrm{freq}} + 1 > n_{\\mathrm{valid}}`)
+    without arbitrary ridge parameters.  Because the mask is shared,
+    the Gram and its eigendecomposition are computed **once** and
+    reused across every channel; there is no ``(n_chan, K, K)``
+    intermediate.  The mask-weighted basis :math:`B_w`, Gram
+    :math:`G`, and eigenvectors are all ``(K, K)`` or smaller
+    (~1 MB at fMRI scale), while the right-hand sides and
+    reconstruction scale only linearly in the channel count.
 
-    Memory:
+    Parameters
+    ----------
+    data
+        Time series of shape ``(n_chan, n_obs)``; rows index
+        channels, columns index time.
+    mask
+        Shared boolean validity mask of shape ``(n_obs,)``; ``True``
+        marks observed samples that the reconstruction is pinned to.
+    basis
+        Joint regression basis of shape ``(n_obs, K)`` with
+        ``K = 1 + 2 * n_freq``, as returned by
+        :func:`_lomb_scargle_basis`.
+    rcond
+        Relative eigenvalue-truncation threshold for the
+        pseudo-inverse; eigenvalues below ``rcond * max(eigval)``
+        are dropped from the solve.
 
-    - ``B_w``: ``(n_obs, K)``  (1 MB at fMRI scale).
-    - ``G``, eigvecs ``V``: ``(K, K)`` each (1 MB each).
-    - ``rhs``: ``(n_chan, K)``.
-    - ``recon``: ``(n_chan, n_obs)``.
-
-    No ``(n_chan, K, K)`` intermediate -- the Gram and its
-    eigendecomposition are shared across all channels and
-    computed once.
+    Returns
+    -------
+    Float[Array, 'n_chan n_obs']
+        Filled time series of shape ``(n_chan, n_obs)``: observed
+        frames are the original data, censored frames are the joint
+        spectral reconstruction.
     """
     mf = mask.astype(data.dtype)
     B_w = basis * mf[:, None]  # (n_obs, K)
@@ -293,21 +394,20 @@ def lomb_scargle_interpolate(
     rcond: float = 1e-6,
     censoring_budget: float = 0.4,
 ) -> Num[Array, '... obs']:
-    """Fill censored time-series frames via joint Lomb-Scargle GLM
+    """Fill censored time-series frames by joint Lomb-Scargle
     spectral reconstruction.
 
     Solves a masked least-squares regression of the observed
-    samples on a ``[DC, cos(omega_k t), sin(omega_k t)]`` basis --
-    **joint** over all trial frequencies, not the independent
-    per-frequency form of ``lomb_scargle_periodogram``.  The
-    joint fit ensures the reconstruction passes through the
-    observed samples (modulo a small Tikhonov ridge), so the
-    spliced output has **no boundary discontinuity** between
-    observed and interpolated frames.
+    samples on a :math:`[\\mathrm{DC},\\ \\cos(\\omega_k t),\\
+    \\sin(\\omega_k t)]` basis -- **joint** over all trial
+    frequencies, not the independent per-frequency form of
+    :func:`lomb_scargle_periodogram`.  The joint fit ensures the
+    reconstruction passes through the observed samples (modulo a
+    small Tikhonov ridge), so the spliced output has **no boundary
+    discontinuity** between observed and interpolated frames.
 
-    This is the **Power 2014** (NeuroImage 84:320-341) protocol
-    for motion-censored fMRI.  Recommended over
-    ``linear_interpolate`` because:
+    This is the Power 2014 protocol for motion-censored fMRI.
+    Recommended over :func:`linear_interpolate` because:
 
     1. It preserves the spectral content -- linear interpolation
        injects low-frequency artefacts at bridges across long
@@ -331,9 +431,10 @@ def lomb_scargle_interpolate(
         one motion-censoring mask per scan, applied across all
         voxels).  Same-shape masks (per-channel censoring) are
         rejected -- they require a separate per-channel solve
-        whose memory scales as ``V * K^2``, OOM at fMRI scale.
-        Use ``linear_interpolate`` for per-channel masks, or
-        explicitly ``jax.vmap`` this function over the channel
+        whose memory scales as :math:`V K^2`, which runs out of
+        memory at fMRI scale.  Use :func:`linear_interpolate` for
+        per-channel masks, or explicitly ``jax.vmap`` this function
+        over the channel
         axis if you really need it (and have the HBM).
     dt
         Sampling interval (fMRI TR in seconds).  Default ``1.0``.
@@ -362,7 +463,10 @@ def lomb_scargle_interpolate(
 
     Returns
     -------
-    Filled time series, same shape as ``data``.
+    Num[Array, '... obs']
+        Filled time series of the same shape as ``data``: observed
+        frames are returned unchanged, censored frames are replaced
+        by the joint spectral reconstruction.
 
     Raises
     ------
@@ -387,7 +491,8 @@ def lomb_scargle_interpolate(
     (``recon[obs] == data[obs]`` exactly) and the band-limited
     spectral content.  The reconstruction *at censored frames* is
     the regularised solution of an ill-conditioned masked Gram
-    (cond ~1e32); which near-null-space modes survive the
+    (condition number :math:`\\sim 10^{32}`); which near-null-space
+    modes survive the
     ``rcond``-truncated pseudo-inverse differs between fp32 and
     fp64, so the censored-frame values are **not bit-reproducible
     across precisions** (two valid regularised solutions can differ
@@ -413,7 +518,11 @@ def lomb_scargle_interpolate(
 
     References
     ----------
-    Power, J. D. et al. (2014).  NeuroImage 84, 320-341.
+    .. [1] Power, J. D., Mitra, A., Laumann, T. O., Snyder, A. Z.,
+       Schlaggar, B. L., & Petersen, S. E. (2014).  Methods to
+       detect, characterize, and remove motion artifact in resting
+       state fMRI.  NeuroImage, 84, 320-341.
+       https://doi.org/10.1016/j.neuroimage.2013.08.048
     """
     n_obs = data.shape[-1]
 

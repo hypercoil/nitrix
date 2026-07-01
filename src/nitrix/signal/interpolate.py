@@ -21,12 +21,18 @@ Use cases:
 - fMRI motion-censoring: high-motion frames marked invalid, then
   interpolated for spectral analysis or for downstream modelling
   that assumes a regular time grid.  Consider
-  ``lomb_scargle_interpolate`` instead for spectrum-preserving
-  interpolation (per the Power 2014 fMRI protocol).
+  :func:`lomb_scargle_interpolate` instead for spectrum-preserving
+  interpolation (per the Power et al. 2014 fMRI protocol).
 - Sensor dropout in time series.
 
 Edge handling: leading / trailing missing frames are filled with
 the nearest observed value (edge replication).
+
+References
+----------
+Power, J. D. et al. (2014).  Methods to detect, characterize, and
+remove motion artifact in resting state fMRI.  NeuroImage 84,
+320-341.  https://doi.org/10.1016/j.neuroimage.2013.08.048
 """
 
 from __future__ import annotations
@@ -57,6 +63,25 @@ def _linear_interpolate_1d(
     Both are associative reductions (``max`` / ``min``) so they
     parallelise via ``lax.associative_scan``.  The interpolation
     itself is then per-frame elementwise.
+
+    Parameters
+    ----------
+    data
+        One-dimensional time series of length ``n``.
+    mask
+        Boolean array of length ``n`` aligned with ``data``;
+        ``True`` marks an observed frame, ``False`` a missing one to
+        be interpolated.
+
+    Returns
+    -------
+    Num[Array, 'n']
+        Time series of length ``n`` in which observed frames retain
+        their original values and missing frames are replaced by the
+        piecewise-linear interpolation between the nearest observed
+        frames on either side.  Missing frames before the first (or
+        after the last) observed frame are filled by edge
+        replication; if no frame is observed the output is zero.
     """
     n = data.shape[0]
     indices = jnp.arange(n, dtype=jnp.int32)

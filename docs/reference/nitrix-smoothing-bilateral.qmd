@@ -1,0 +1,102 @@
+---
+title: "nitrix.smoothing.bilateral"
+generated: true
+signature-hash: 2367da8b5fefda70
+description: "Bounded bilateral smoothing via the semiring substrate."
+listing:
+  id: nitrix-smoothing-bilateral-symbols
+  contents: "nitrix-smoothing-bilateral/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.smoothing.bilateral`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Bounded bilateral smoothing via the semiring substrate.
+
+A true high-dimensional bilateral filter over a **bounded**
+neighbourhood.  For each output position, gather the feature-space
+neighbourhood, weight by a Gaussian over a metric on feature space,
+normalise, and reduce via `semiring_ell_matmul`
+with the REAL semiring:
+
+$$
+\begin{aligned}
+\mathrm{out}_{i,:} &= \frac{1}{Z_i} \sum_p w_{i,p}\,
+    \mathrm{values}_{\mathrm{neighbours}_{i,p},\,:} \\
+w_{i,p} &= \exp\!\left(-\tfrac{1}{2}\,
+    (f_i - f_j)^{\top} M (f_i - f_j)\right)
+    \quad [\,j = \text{neighbour } p\,] \\
+Z_i &= \sum_p w_{i,p}
+\end{aligned}
+$$
+
+The whole filter is one gather plus one weighted reduction: statically
+shaped, `jit` / `vmap` / `grad` clean, and GPU-native.  The
+weight is a smooth $\exp$ of a quadratic form over a *fixed*
+bounded neighbourhood, so the gradient is smooth everywhere (no sort,
+no scatter, no simplex-identity branch).  This is a bounded-support
+filter for moderate feature dimensionalities and, via a low-rank
+metric, well beyond.
+
+Three independent choices parameterise a call:
+
+- **Values vs. features are decoupled.** `values` (e.g. a BOLD time
+  series, $d_v$ frames) and `features` (the multimodal
+  signature set, $d_f$ channels) are separate arguments with
+  separate column counts.  The common "filter the features by
+  themselves" case is just `values is features` at the call site.
+- **The metric** $M = L L^{\top}$ is supplied as a
+  [`FeatureMetric`](nitrix-smoothing-metric/FeatureMetric.qmd): diagonal per-channel
+  bandwidths, a low-rank projection of correlated channels, or a full
+  anisotropic factor.  In the limit of a large bandwidth on a channel,
+  that channel drops out and the filter degrades gracefully toward a
+  spatial-only Gaussian.
+- **The neighbourhood** is bounded: an `int` `k` (brute-force k-NN
+  in feature space), an explicit `(n, k_max)` index array, or an
+  `ELL` adjacency (grid box, mesh k-ring,
+  geodesic ball).  Padded / ragged neighbourhoods carry a validity
+  `mask` so padding contributes nothing -- which also removes the
+  double-counting a naive padded gather would incur at boundaries and
+  at low-degree mesh vertices.
+
+`n_iters > 1` grows the effective support cheaply: the affinity graph
+(features, neighbours, weights) is fixed across iterations and only the
+values diffuse, so the normalised weights are built once and re-applied
+`n_iters` times -- `n_iters` mean-field updates of a bounded dense
+CRF at $O(n_{\mathrm{iters}} \cdot n \cdot k_{\max} \cdot d_v)$
+for the diffusion on top of a single
+$O(n \cdot k_{\max} \cdot k)$ weight build.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+.. [1] Krähenbühl, P., & Koltun, V. (2011). Efficient inference in
+   fully connected CRFs with Gaussian edge potentials. *Advances in
+   Neural Information Processing Systems*, 24.
+   https://arxiv.org/abs/1210.5644
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d_v` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_f` | *(undocumented — add to `_dimensions.yml`)* |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-smoothing-bilateral-symbols}
+:::

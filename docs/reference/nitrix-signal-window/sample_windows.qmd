@@ -1,0 +1,52 @@
+---
+title: "sample_windows"
+generated: true
+description: "Sample fixed-size windows from a tensor along one axis."
+---
+
+[‹ back to `nitrix.signal.window`](../nitrix-signal-window.qmd)
+
+<!-- nitrix:gen sig:sample_windows -->
+```python
+sample_windows(tensor: Num[Array, '...'], *, window_size: int, num_windows: int = 1, allow_overlap: bool = False, create_new_axis: bool = False, windowing_axis: int = -1, multiplying_axis: int = 0, key: jax.Array) -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sample_windows -->
+Sample fixed-size windows from a tensor along one axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sample_windows -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Num` | `...` | — | Input from which to draw windows. |
+| `window_size` | `int` | — | — | Length of each window along `windowing_axis`. |
+| `num_windows` | `int` | — | `1` | Number of windows to sample. Default `1`. |
+| `allow_overlap` | `bool` | — | `False` | `True` -- windows may overlap (random distinct starts). `False` (default) -- windows are guaranteed non- overlapping; the spacing is randomised via a multinomial over the unused indices. |
+| `create_new_axis` | `bool` | — | `False` | `True` -- stack windows along a freshly-inserted axis (`multiplying_axis` is interpreted in the output rank). `False` (default) -- concatenate windows along an existing axis (`multiplying_axis` indexes the input rank). |
+| `windowing_axis` | `int` | — | `-1` | Axis along which to sample windows. Default `-1`. |
+| `multiplying_axis` | `int` | — | `0` | Axis along which to concatenate / insert the windows. Default `0`. |
+| `key` | `jax.Array` | — | — | PRNG key for the random window starts. Required (no implicit `key=0` default -- caller is responsible for randomness). |
+
+**Returns** `Num` — shape `...`. `multiplying_axis` grows by `num_windows`. a new axis of length `num_windows` is inserted at `multiplying_axis` in the output rank.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:sample_windows -->
+::: {.callout-note}
+The window starts depend on `key` but the slicing itself is
+deterministic; gradients flow through the sliced values but
+not through the random key.  For reproducibility, pin
+`key`.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sample_windows -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

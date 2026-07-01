@@ -1,0 +1,48 @@
+---
+title: "highpass"
+generated: true
+description: "Zero-phase frequency-domain high-pass: keep frequencies above `cutoff`."
+---
+
+[‹ back to `nitrix.signal.filter`](../nitrix-signal-filter.qmd)
+
+<!-- nitrix:gen sig:highpass -->
+```python
+highpass(X: Num[Array, '... obs'], *, fs: float = 1.0, cutoff: float, ftype: _FilterType = 'maxflat', order: int = 2, transition: Optional[float] = None, axis: int = -1, padding: int = 0) -> Num[Array, '... obs']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:highpass -->
+Zero-phase frequency-domain high-pass: keep frequencies above `cutoff`.
+
+Passes frequencies above `cutoff` and attenuates those below (the DC
+bin is always rejected), applied zero-phase as a real magnitude weight
+over the rfft grid.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:highpass -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` × `obs` | — | Signal; the filtered axis is last by default (`axis`). |
+| `fs` | `float` | — | `1.0` | Sampling frequency in Hz. Pass `fs = 1 / TR` for fMRI. |
+| `cutoff` | `float` | — | — | Pass-band edge in Hz (`0 < cutoff < fs / 2`). |
+| `ftype` | `_FilterType` | — | `'maxflat'` | Magnitude-window design: `'maxflat'` (default; the Butterworth magnitude *shape*, applied zero-phase -- a frequency-sampled FIR, not a recursive IIR Butterworth -- see [`iir_filter`](../nitrix-signal-filter/iir_filter.qmd) for that), `'ideal'` (brick wall), or `'cosine'` (raised-cosine edges). |
+| `order` | `int` | — | `2` | Steepness of the `'maxflat'` roll-off (the exponent of the Butterworth magnitude shape). Ignored for the other designs. Default `2`. |
+| `transition` | `Optional[float]` | — | `None` | Raised-cosine transition width in Hz (`'cosine'` only); defaults to 10 % of Nyquist. |
+| `axis` | `int` | — | `-1` | Axis to filter. Default `-1` (trailing time/observation axis). |
+| `padding` | `int` | — | `0` | Reflect-pad this many samples on each end before filtering, then crop -- reduces the circular-convolution wrap-around at the edges. Default `0` (pure FFT). |
+
+**Returns** `Num` — shape `...` × `obs`. Filtered signal, same shape as `X`. Differentiable through `X`; `fs` / `cutoff` / `order` are static.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:highpass -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

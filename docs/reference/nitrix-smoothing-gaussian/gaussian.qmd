@@ -1,0 +1,89 @@
+---
+title: "gaussian"
+generated: true
+description: "Separable n-D Gaussian smoothing."
+---
+
+[‹ back to `nitrix.smoothing.gaussian`](../nitrix-smoothing-gaussian.qmd)
+
+<!-- nitrix:gen sig:gaussian -->
+```python
+gaussian(x: Float[Array, '... *spatial'], *, sigma: Union[float, Sequence[float]], truncate: float = 4.0, kernel_size: Union[None, int, Sequence[Optional[int]]] = None, mode: str = 'reflect', driver: Literal['fir', 'recursive'] = 'fir', spatial_rank: Optional[int] = None) -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaussian -->
+Separable n-D Gaussian smoothing.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaussian -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` × `*spatial` | — | Single-channel input, `(..., *spatial)`. *All* dims are treated as spatial unless `spatial_rank` is given or `sigma` is a sequence pinning the rank. |
+| `sigma` | `Union[float, Sequence[float]]` | — | — | Standard deviation of the Gaussian. `float` -- same sigma along every spatial axis. Sequence -- per-axis sigma, for anisotropic Gaussians (e.g. fMRI with anisotropic voxel spacing). |
+| `truncate` | `float` | — | `4.0` | Kernel half-width factor when `kernel_size` is `None`: kernel is `2 * int(truncate * sigma + 0.5) + 1` taps (scipy convention). Default `4`. Ignored if `kernel_size` is given. **Framework cross-references**: `truncate=4` matches `scipy.ndimage.gaussian_filter` (the scientific-computing default). The **neurite / SynthMorph / SynthSeg / FreeSurfer-augmentation lineage** uses `windowsize = round(sigma * 3) * 2 + 1` taps, which corresponds to `truncate=3`. Pass `truncate=3` when porting any model from that lineage; otherwise the kernel bandwidth differs by 1 tap per axis at typical sigmas and the boundary cells silently disagree. |
+| `kernel_size` | `Union[None, int, Sequence[Optional[int]]]` | — | `None` | Explicit per-axis kernel size override. `None` (default) uses the `truncate * sigma` heuristic. `int` -- same size on every spatial axis. Sequence -- per-axis; `None` entries fall back to the heuristic. **Odd** kernel size: symmetric, centred on the pixel grid. Output is on the same pixel grid as the input. **Even** kernel size: off-centre Gaussian with taps at half-integer offsets (e.g. `kernel_size=2` -> taps at `-0.5, 0.5`); **output is half-pixel-shifted along that axis**. Use this only when you specifically want an even-tap Gaussian-weighted average (e.g. the spheremorph / JOSA NegativeJacobianFiltering 2×2 kernel at `sigma=0.7`); otherwise prefer the default heuristic. |
+| `mode` | `str` | — | `'reflect'` | Boundary handling: `"reflect"` (default), `"constant"` (zero-pad), or `"edge"` (replicate boundary). `driver="recursive"` ignores this (it uses edge extension). **Framework cross-references**: `mode='reflect'` matches `scipy.ndimage.gaussian_filter`. Use `mode='constant'` to match **TF Conv2D / Conv3D `padding='SAME'`** semantics (zero-pad at the boundary). Without this override, neurite-lineage models silently disagree at the boundary cells -- typically by ~0.7 logit-space units per pixel, which becomes ~6x magnitude differences after a downstream `exp()` (e.g., ExVivoNorm's multiplicative bias field). |
+| `driver` | `Literal['fir', 'recursive']` | — | `'fir'` | Numerical variant (the `driver` axis). `"fir"` (default) -- the truncated separable convolution above. `"recursive"` -- the **Young-van Vliet** 3rd-order recursive Gaussian: O(N) per axis, **independent of sigma** (no kernel growth), so it wins for **large** sigma where the FIR kernel would be many taps. Approximate (a 3rd-order pole fit; ~1% interior error vs the FIR Gaussian), needs `sigma >= 0.5`, uses an **edge-extension** boundary (it ignores `mode` / `kernel_size` / `truncate`), and runs as a sequential `lax.scan` (O(N) depth -- great for a one-off smooth, but at the small sigmas of, e.g., a deformable-registration regulariser the parallel FIR conv is faster on GPU, so it is **not** the registration default). The two variants differ by ~1-2% near edges (the smoother underlying the auto-selecting field-smoothing op in [`nitrix.register`](../nitrix-register.qmd)); `"fir"` is the canonical / more faithful path. |
+| `spatial_rank` | `Optional[int]` | — | `None` | Explicit number of trailing dims to treat as spatial. If `None` (default), inferred from `sigma` (if sequence) or assumed to be `x.ndim` (if scalar). |
+
+**Returns** `Float` — shape `...` × `*spatial`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:gaussian -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **127.3 µs** (median, L4); up to **28.08× faster** than `scipy.ndimage.gaussian_filter`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_GAUSSIAN.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| gaussian | jax-cpu | shape=[256, 256],sigma=1.5 | `cupyx.scipy.ndimage.gaussian_filter` | skipped | — | — | — | — | — |
+| gaussian | jax-cpu | shape=[256, 256],sigma=1.5 | `nitrix-jax` | ok | 2.98 ms / 3.77 ms | 163.45 ms | 530 MB (rss) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
+| gaussian | jax-cpu | shape=[256, 256],sigma=1.5 | `scipy.ndimage.gaussian_filter` | ok | 704.0 µs / 709.4 µs | 752.2 µs | 454 MB (rss) | ✓ 0.00021×tol | 0.24x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[256, 256],sigma=1.5 | `cupyx.scipy.ndimage.gaussian_filter` | ok | 254.8 µs / 258.4 µs | 263.55 ms | 0.26 MB (hbm) | ✓ 0.00078×tol | 2.03x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[256, 256],sigma=1.5 | `nitrix-jax` | ok | 125.8 µs / 127.3 µs | 564.22 ms | 69.21 MB (hbm) | ✓ 0.00072×tol | 1.00x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[256, 256],sigma=1.5 | `scipy.ndimage.gaussian_filter` | ok | 1.05 ms / 1.06 ms | 1.13 ms | 0.26 MB (hbm) | ✓ 0.00021×tol | 8.33x vs nitrix-jax |
+| gaussian | jax-cpu | shape=[64, 64, 64],sigma=1.5 | `cupyx.scipy.ndimage.gaussian_filter` | skipped | — | — | — | — | — |
+| gaussian | jax-cpu | shape=[64, 64, 64],sigma=1.5 | `nitrix-jax` | ok | 16.24 ms / 18.27 ms | 162.86 ms | 597 MB (rss) | ✓ 0.00056×tol | 1.00x vs nitrix-jax |
+| gaussian | jax-cpu | shape=[64, 64, 64],sigma=1.5 | `scipy.ndimage.gaussian_filter` | ok | 4.61 ms / 4.66 ms | 4.73 ms | 454 MB (rss) | ✓ 0.00016×tol | 0.28x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[64, 64, 64],sigma=1.5 | `cupyx.scipy.ndimage.gaussian_filter` | ok | 361.1 µs / 370.6 µs | 7.125 s | 1.05 MB (hbm) | ✓ 0.00053×tol | 2.20x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[64, 64, 64],sigma=1.5 | `nitrix-jax` | ok | 164.4 µs / 166.3 µs | 699.67 ms | 615.65 MB (hbm) | ✓ 0.00055×tol | 1.00x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[64, 64, 64],sigma=1.5 | `scipy.ndimage.gaussian_filter` | ok | 4.62 ms / 4.67 ms | 4.79 ms | 1.05 MB (hbm) | ✓ 0.00016×tol | 28.08x vs nitrix-jax |
+| gaussian | jax-cpu | shape=[64, 64],sigma=1.5 | `cupyx.scipy.ndimage.gaussian_filter` | skipped | — | — | — | — | — |
+| gaussian | jax-cpu | shape=[64, 64],sigma=1.5 | `nitrix-jax` | ok | 364.2 µs / 367.4 µs | 122.70 ms | 506 MB (rss) | ✓ 0.00047×tol | 1.00x vs nitrix-jax |
+| gaussian | jax-cpu | shape=[64, 64],sigma=1.5 | `scipy.ndimage.gaussian_filter` | ok | 61.0 µs / 63.4 µs | 105.9 µs | 454 MB (rss) | ✓ 0.00019×tol | 0.17x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[64, 64],sigma=1.5 | `cupyx.scipy.ndimage.gaussian_filter` | ok | 256.9 µs / 264.6 µs | 5.692 s | 0.02 MB (hbm) | ✓ 0.00052×tol | 2.15x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[64, 64],sigma=1.5 | `nitrix-jax` | ok | 119.7 µs / 125.0 µs | 1.369 s | 75.81 MB (hbm) | ✓ 0.00042×tol | 1.00x vs nitrix-jax |
+| gaussian | jax-cuda12 | shape=[64, 64],sigma=1.5 | `scipy.ndimage.gaussian_filter` | ok | 98.6 µs / 102.5 µs | 145.8 µs | 0.02 MB (hbm) | ✓ 0.00019×tol | 0.82x vs nitrix-jax |
+:::
+
+*source: bench `74c2a463` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:gaussian -->
+::: {.callout-note}
+The Gaussian kernel is normalised to sum to 1 per axis, so the
+overall n-D kernel sums to 1 and a constant input is preserved.
+For per-axis sigma = 0 the spec is undefined; we raise.  If you
+want to skip smoothing along an axis, omit it from `spatial_rank`
+or use a tiny sigma plus large `truncate`.
+
+The implementation uses `lax.conv_general_dilated` for each 1D
+pass, so on Ampere+ tensor cores accelerate the REAL convolution.
+No tensor-core gap to recover here -- gaussian is not a semiring
+op.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaussian -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
