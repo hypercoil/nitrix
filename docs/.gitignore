@@ -7,6 +7,8 @@ _site/
 # individual pages/listings (the real site builds to _site/).
 reference/**/*.html
 reference/**/*-listing.json
+site_libs/
+search.json
 # Large machine-readable docstring-inventory manifest (regenerated on demand;
 # the reviewable .md snapshot is versioned).
 _docstring_inventory.json

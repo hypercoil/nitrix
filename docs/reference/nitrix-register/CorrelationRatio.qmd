@@ -1,0 +1,54 @@
+---
+title: "CorrelationRatio"
+generated: true
+description: "Correlation-ratio cost $1 -  eta^2$ (cross-modal; FSL lineage)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._metric`.*
+
+<!-- nitrix:gen sig:CorrelationRatio -->
+```python
+class CorrelationRatio
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CorrelationRatio -->
+Correlation-ratio cost $1 - \eta^2$ (cross-modal; FSL lineage).
+
+Scalar (BFGS) path.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:CorrelationRatio.cost -->
+```python
+cost(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Correlation-ratio cost $1 - \eta^2$.
+
+<!-- nitrix:gen sig:CorrelationRatio.residual -->
+```python
+residual(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Not defined: [`CorrelationRatio`](../nitrix-register/CorrelationRatio.qmd) is not least-squares.
+
+<!-- nitrix:gen sig:CorrelationRatio.__init__ -->
+```python
+__init__(bins: int = 32, range_fixed: Optional[tuple[float, float]] = None) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:CorrelationRatio -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

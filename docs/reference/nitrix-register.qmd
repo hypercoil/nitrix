@@ -1,0 +1,114 @@
+---
+title: "nitrix.register"
+generated: true
+signature-hash: 5bfe20c997172e6d
+description: "nitrix.register -- pairwise registration recipes."
+listing:
+  id: nitrix-register-symbols
+  contents: "nitrix-register/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.register`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+nitrix.register -- pairwise registration recipes.
+
+Pure-functional registrators that compose the substrate (geometry
+transforms + pyramid, image-similarity metrics, the matrix-free
+nonlinear-least-squares optimiser) into end-to-end alignment.  Outputs
+are `NamedTuple`s of arrays (the [`reml_fit`](nitrix-stats-lme-reml/reml_fit.qmd) precedent) -- no PyTree
+modules, no atlas data structures, no I/O; `entense` wraps these.
+
+- [`rigid_register`](nitrix-register-recipes/rigid_register.qmd) -- 6-DOF (3-D) / 3-DOF (2-D) Gauss-Newton / LM
+  intensity registration on SE(2)/SE(3) (the 3dvolreg / AIR lineage).
+- [`affine_register`](nitrix-register-recipes/affine_register.qmd) -- 12-DOF (3-D) / 6-DOF (2-D), linear block via
+  `matrix_exp`.
+- `volreg` -- batched rigid motion realignment of a `(T, *spatial)`
+  series to a common reference (the `3dvolreg` / `mcflirt` task);
+  `vmap`-ed over frames with the reference work hoisted out of the
+  batch.  Returns `VolregResult`.
+- `bbr_register` -- volumetric boundary-based registration (Greve-Fischl):
+  rigid alignment to a tissue boundary (points + normals), maximising the
+  cross-boundary contrast.  Returns `BBRResult`.
+- `Objective` -- the objective ADT ($\theta \mapsto \mathrm{cost}$)
+  the optimiser minimises; `MetricObjective` (an image pair) and
+  `BoundaryObjective` (BBR) are its implementers.
+- `RegistrationSpec` -- static config (pyramid, iterations, metric,
+  interpolation); `RegistrationResult` -- the output record.
+- `Metric` -- the similarity objective ADT (`SSD` / `LNCC` / `MI`
+  / `CorrelationRatio`), each carrying its own hyper-parameters.
+- `TransformModel` -- the chart a matrix-transform recipe optimises
+  over (`Rigid` / `Affine`): the `exp` map plus the parameter-layout
+  knowledge the coarse-to-fine driver needs.
+- `CoordinateSpace` -- the space a recipe optimises in (`IndexSpace`,
+  the default voxel-space shared-grid fast path; `WorldSpace`, the
+  physical-space path correct under anisotropic voxels / different grids).
+- `diffeomorphic_demons_register` -- log-domain diffeomorphic Demons
+  (stationary velocity field; ESM force; fluid+diffusion Gaussian
+  regularisation; scaling-and-squaring exp), with `DemonsSpec` /
+  `DiffeomorphicResult`.
+- `greedy_syn_register` -- greedy symmetric diffeomorphic registration
+  (SyN-style): symmetric forward/inverse velocity fields driven to a
+  midpoint by the analytic LNCC force (`metrics.lncc_grad`); robust to
+  smooth intensity inhomogeneity.  `SyNSpec` / `SyNResult`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Scope & validation
+
+**ANTs-*style*, synthetic-recovery-validated** -- the algorithms are the
+ANTs / FSL / AFNI lineage (3dvolreg / mcflirt rigid, AIR affine, log-Demons,
+greedy SyN, BBR), and the test suite validates *recovery of a known synthetic
+warp* (high NCC / MI, positive Jacobian) plus the closed-form-vs-autodiff
+force parity oracles.  It is **not** a drop-in `antsRegistration`: the
+following ANTs / fMRIPrep features are **not yet implemented** --
+
+- intensity **winsorization** (`--winsorize-image-intensities`) and
+  **histogram matching** (`--use-histogram-matching`);
+- **multi-metric summation** within a stage (`-m MI -m CC`; a `SumForce`);
+- **restrict-deformation** (per-axis deformation masking);
+- a closed-form **correlation-ratio** fast-force -- CR drives the diffeomorphic
+  recipes only via the generic autodiff `MetricForce` escape hatch (the
+  closed-form **(Mattes) MI** force, `MIForce`, *is* shipped -- the fast
+  cross-modal path; CR's `cr_grad` is the same machinery, built when a
+  consumer asks);
+- **early-exit** (windowed cost-slope convergence): every recipe carries the
+  orthogonal `mode` (`'fixed'` default / `'early_exit'`) + `convergence`
+  (threshold / window) spec fields (B2); `'early_exit'` runs the
+  `lax.while_loop` where the path supports it (the matrix inverse-compositional
+  recipes recommend it).
+
+**Real-data and ANTs-reference parity** (comparing nitrix transforms / warps
+to an `antsRegistration` reference on real volumes, and the iso-accuracy
+wall-clock comparison) are **delegated to the nitrix-perf-bench agent**, which
+owns the cross-tool harness; they are not asserted in this repo.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*mspatial` | a variadic group of axes (`mspatial`) |
+| `*fspatial` | a variadic group of axes (`fspatial`) |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-register-symbols}
+:::

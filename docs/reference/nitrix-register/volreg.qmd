@@ -1,0 +1,168 @@
+---
+title: "volreg"
+generated: true
+description: "Rigid motion realignment of a 4-D (or 3-D) series."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._volreg`.*
+
+<!-- nitrix:gen sig:volreg -->
+```python
+volreg(series: Float[Array, 't *spatial'], *, reference: Union[int, str, Float[Array, '*spatial']] = 'mean', passes: int = 1, spec: RegistrationSpec = RegistrationSpec(), space: CoordinateSpace = IndexSpace(), method: str = 'auto') -> VolregResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:volreg -->
+Rigid motion realignment of a 4-D (or 3-D) series.
+
+Registers every frame of `series` to a common reference and returns
+the per-frame rigid transforms and the realigned series.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:volreg -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `series` | `Float` | `t` × `*spatial` | — | `(T, *spatial)` -- `T` frames of a 2-D or 3-D single-channel image sharing one voxel grid. |
+| `reference` | `Union[int, str, Float[Array, '*spatial']]` | — | `'mean'` | `"mean"` (default; the per-voxel mean over frames), a frame index (`int`), or an explicit reference image `(*spatial,)`. |
+| `passes` | `int` | — | `1` | Number of realignment passes. `2` re-references to the mean of the first-pass realignment and warm-starts from its parameters (robust when the initial reference is a blurred mean). |
+| `spec` | `RegistrationSpec` | — | `RegistrationSpec()` | [`RegistrationSpec`](../nitrix-register/RegistrationSpec.qmd) for the per-frame registration. The metric must be least-squares ([`SSD`](../nitrix-register/SSD.qmd), the default) -- the batched LM path does not use the scalar BFGS metrics. **Schedule:** motion realignment is a *small*-displacement problem and the second-order per-frame solver converges in a handful of steps, so a **tight** `iterations` (e.g. `(4, 2, 1)` over a 3-level pyramid) realigns as well as a loose one for a fraction of the cost -- the default 30/level over-iterates motion correction by ~25x (measured: a 20-frame MNI-2mm series realigns identically at `(4,2,1)` for ~1/8 the time). `spec.mode`: `'fixed'` (default) runs the fixed `scan` (reproducible, reverse-differentiable); `'early_exit'` opts into a **batch-aggregate early-exit** (inverse-compositional path only) -- the per-frame `while_loop` runs under `vmap` until *all* frames have converged, so the cohort adapts to the actual motion (a looser `convergence.threshold` ~1e-3 gives ~2-3x at identical realignment; not reverse-differentiable). Rejected on the forward (Gauss-Newton) path, which threads only the scan. |
+| `space` | `CoordinateSpace` | — | `IndexSpace()` | Coordinate space ([`IndexSpace`](../nitrix-register/IndexSpace.qmd) default, or [`WorldSpace`](../nitrix-register/WorldSpace.qmd) for physically-rigid motion on anisotropic grids). |
+| `method` | `str` | — | `'auto'` | Per-frame solver: `"auto"` (default; the inverse-compositional constant-template Hessian in [`IndexSpace`](../nitrix-register/IndexSpace.qmd) -- the reference's steepest-descent images and Hessian are built **once** for the whole series; the forward Gauss-Newton path otherwise), `"inverse_compositional"` (force IC; [`IndexSpace`](../nitrix-register/IndexSpace.qmd) only), or `"forward"`. |
+
+**Returns** `VolregResult`. The per-frame transforms and realigned series: `matrices`, `params`, `realigned`, `reference`, and `cost_history`. See [`VolregResult`](../nitrix-register/VolregResult.qmd) for the full field descriptions.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:volreg -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.53 ms** (median, L4).  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_VOLREG.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| volreg | jax-cpu | shape=[32, 32, 32],T=16,levels=1,iters=10 | `afni.3dvolreg` | ok | 796.65 ms / 978.09 ms | 1.388 s | 1633 MB (rss) | n/a (no oracle) | 2.82x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=16,levels=1,iters=10 | `afni.iofloor` | ok | 307.03 ms / 307.67 ms | 444.67 ms | 1633 MB (rss) | n/a (no oracle) | 1.09x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=16,levels=1,iters=10 | `ants.motion_correction` | ok | 11.586 s / 11.849 s | 15.865 s | 1633 MB (rss) | n/a (no oracle) | 40.98x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=16,levels=1,iters=10 | `fsl.iofloor` | ok | 337.80 ms / 340.61 ms | 446.78 ms | 1633 MB (rss) | n/a (no oracle) | 1.19x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=16,levels=1,iters=10 | `fsl.mcflirt` | ok | 482.21 ms / 486.09 ms | 594.81 ms | 1633 MB (rss) | n/a (no oracle) | 1.71x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=16,levels=1,iters=10 | `nitrix-jax` | ok | 282.74 ms / 291.88 ms | 1.520 s | 1633 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=16,levels=1,iters=10 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=16,levels=1,iters=10 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=16,levels=1,iters=10 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=16,levels=1,iters=10 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=16,levels=1,iters=10 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=16,levels=1,iters=10 | `nitrix-jax` | ok | 1.45 ms / 1.53 ms | 4.694 s | 136.32 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=32,levels=1,iters=10 | `afni.3dvolreg` | ok | 1.462 s / 1.470 s | 1.611 s | 1633 MB (rss) | n/a (no oracle) | 1.89x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=32,levels=1,iters=10 | `afni.iofloor` | ok | 485.83 ms / 506.31 ms | 618.64 ms | 1633 MB (rss) | n/a (no oracle) | 0.63x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=32,levels=1,iters=10 | `ants.motion_correction` | ok | 26.510 s / 27.821 s | 29.392 s | 1633 MB (rss) | n/a (no oracle) | 34.20x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=32,levels=1,iters=10 | `fsl.iofloor` | ok | 543.22 ms / 553.06 ms | 628.62 ms | 1633 MB (rss) | n/a (no oracle) | 0.70x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=32,levels=1,iters=10 | `fsl.mcflirt` | ok | 801.49 ms / 812.29 ms | 911.59 ms | 1633 MB (rss) | n/a (no oracle) | 1.03x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=32,levels=1,iters=10 | `nitrix-jax` | ok | 775.07 ms / 935.23 ms | 1.867 s | 1633 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=32,levels=1,iters=10 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=32,levels=1,iters=10 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=32,levels=1,iters=10 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=32,levels=1,iters=10 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=32,levels=1,iters=10 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=32,levels=1,iters=10 | `nitrix-jax` | ok | 2.25 ms / 2.28 ms | 5.839 s | 138.41 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=8,levels=1,iters=10 | `afni.3dvolreg` | ok | 689.91 ms / 737.00 ms | 713.25 ms | 1633 MB (rss) | n/a (no oracle) | 5.66x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=8,levels=1,iters=10 | `afni.iofloor` | ok | 192.41 ms / 192.89 ms | 393.31 ms | 1633 MB (rss) | n/a (no oracle) | 1.58x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=8,levels=1,iters=10 | `ants.motion_correction` | ok | 6.030 s / 6.051 s | 16.857 s | 1633 MB (rss) | n/a (no oracle) | 49.51x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=8,levels=1,iters=10 | `fsl.iofloor` | ok | 244.40 ms / 265.65 ms | 331.58 ms | 1633 MB (rss) | n/a (no oracle) | 2.01x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=8,levels=1,iters=10 | `fsl.mcflirt` | ok | 307.83 ms / 309.24 ms | 1.083 s | 1633 MB (rss) | n/a (no oracle) | 2.53x vs nitrix-jax |
+| volreg | jax-cpu | shape=[32, 32, 32],T=8,levels=1,iters=10 | `nitrix-jax` | ok | 121.80 ms / 124.55 ms | 1.116 s | 1633 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=8,levels=1,iters=10 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=8,levels=1,iters=10 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=8,levels=1,iters=10 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=8,levels=1,iters=10 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=8,levels=1,iters=10 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[32, 32, 32],T=8,levels=1,iters=10 | `nitrix-jax` | ok | 1.06 ms / 1.14 ms | 5.592 s | 135.53 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=100,levels=2,iters=20 | `afni.3dvolreg` | ok | 9.410 s / 9.439 s | 13.262 s | 1633 MB (rss) | n/a (no oracle) | 0.54x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=100,levels=2,iters=20 | `afni.iofloor` | ok | 3.957 s / 3.985 s | 4.065 s | 1633 MB (rss) | n/a (no oracle) | 0.23x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=100,levels=2,iters=20 | `ants.motion_correction` | ok | 80.877 s / 87.393 s | 95.039 s | 1633 MB (rss) | n/a (no oracle) | 4.62x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=100,levels=2,iters=20 | `fsl.iofloor` | ok | 4.201 s / 4.219 s | 4.324 s | 1633 MB (rss) | n/a (no oracle) | 0.24x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=100,levels=2,iters=20 | `fsl.mcflirt` | ok | 8.067 s / 8.421 s | 8.368 s | 1633 MB (rss) | n/a (no oracle) | 0.46x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=100,levels=2,iters=20 | `nitrix-jax` | ok | 17.492 s / 17.613 s | 22.916 s | 1633 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=100,levels=2,iters=20 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=100,levels=2,iters=20 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=100,levels=2,iters=20 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=100,levels=2,iters=20 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=100,levels=2,iters=20 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=100,levels=2,iters=20 | `nitrix-jax` | ok | 157.10 ms / 157.13 ms | 16.592 s | 625.34 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=200,levels=2,iters=20 | `afni.3dvolreg` | ok | 18.764 s / 19.088 s | 19.738 s | 1633 MB (rss) | n/a (no oracle) | 0.50x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=200,levels=2,iters=20 | `afni.iofloor` | ok | 7.347 s / 7.390 s | 7.559 s | 1633 MB (rss) | n/a (no oracle) | 0.20x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=200,levels=2,iters=20 | `ants.motion_correction` | ok | 165.783 s / 167.453 s | 194.288 s | 1633 MB (rss) | n/a (no oracle) | 4.45x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=200,levels=2,iters=20 | `fsl.iofloor` | ok | 7.988 s / 8.027 s | 8.130 s | 1633 MB (rss) | n/a (no oracle) | 0.21x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=200,levels=2,iters=20 | `fsl.mcflirt` | ok | 11.897 s / 11.974 s | 12.201 s | 1633 MB (rss) | n/a (no oracle) | 0.32x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=200,levels=2,iters=20 | `nitrix-jax` | ok | 37.257 s / 37.407 s | 43.991 s | 2530 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=200,levels=2,iters=20 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=200,levels=2,iters=20 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=200,levels=2,iters=20 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=200,levels=2,iters=20 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=200,levels=2,iters=20 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=200,levels=2,iters=20 | `nitrix-jax` | ok | 338.05 ms / 340.86 ms | 18.071 s | 1070.73 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=50,levels=2,iters=20 | `afni.3dvolreg` | ok | 5.424 s / 5.540 s | 5.298 s | 1633 MB (rss) | n/a (no oracle) | 0.70x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=50,levels=2,iters=20 | `afni.iofloor` | ok | 2.011 s / 2.033 s | 2.177 s | 1633 MB (rss) | n/a (no oracle) | 0.26x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=50,levels=2,iters=20 | `ants.motion_correction` | ok | 40.022 s / 40.187 s | 43.463 s | 1633 MB (rss) | n/a (no oracle) | 5.13x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=50,levels=2,iters=20 | `fsl.iofloor` | ok | 2.166 s / 2.187 s | 2.333 s | 1633 MB (rss) | n/a (no oracle) | 0.28x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=50,levels=2,iters=20 | `fsl.mcflirt` | ok | 3.198 s / 3.209 s | 3.343 s | 1633 MB (rss) | n/a (no oracle) | 0.41x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=50,levels=2,iters=20 | `nitrix-jax` | ok | 7.800 s / 7.875 s | 10.937 s | 1633 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=50,levels=2,iters=20 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=50,levels=2,iters=20 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=50,levels=2,iters=20 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=50,levels=2,iters=20 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=50,levels=2,iters=20 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=50,levels=2,iters=20 | `nitrix-jax` | ok | 74.52 ms / 74.53 ms | 11.015 s | 334.79 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=500,levels=2,iters=20 | `afni.3dvolreg` | ok | 46.450 s / 46.895 s | 56.129 s | 1818 MB (rss) | n/a (no oracle) | 0.41x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=500,levels=2,iters=20 | `afni.iofloor` | ok | 17.892 s / 17.905 s | 18.113 s | 1819 MB (rss) | n/a (no oracle) | 0.16x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=500,levels=2,iters=20 | `ants.motion_correction` | timeout | — | — | — | — | — |
+| volreg | jax-cpu | shape=[48, 48, 48],T=500,levels=2,iters=20 | `fsl.iofloor` | ok | 19.212 s / 19.364 s | 19.986 s | 1789 MB (rss) | n/a (no oracle) | 0.17x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=500,levels=2,iters=20 | `fsl.mcflirt` | ok | 29.128 s / 29.694 s | 29.709 s | 1818 MB (rss) | n/a (no oracle) | 0.26x vs nitrix-jax |
+| volreg | jax-cpu | shape=[48, 48, 48],T=500,levels=2,iters=20 | `nitrix-jax` | ok | 112.484 s / 114.020 s | 111.228 s | 5078 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=500,levels=2,iters=20 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=500,levels=2,iters=20 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=500,levels=2,iters=20 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=500,levels=2,iters=20 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=500,levels=2,iters=20 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[48, 48, 48],T=500,levels=2,iters=20 | `nitrix-jax` | ok | 885.55 ms / 886.08 ms | 15.913 s | 2483.44 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[64, 64, 64],T=100,levels=2,iters=20 | `afni.3dvolreg` | ok | 19.111 s / 19.326 s | 19.808 s | 1633 MB (rss) | n/a (no oracle) | 0.42x vs nitrix-jax |
+| volreg | jax-cpu | shape=[64, 64, 64],T=100,levels=2,iters=20 | `afni.iofloor` | ok | 9.147 s / 9.170 s | 9.371 s | 1633 MB (rss) | n/a (no oracle) | 0.20x vs nitrix-jax |
+| volreg | jax-cpu | shape=[64, 64, 64],T=100,levels=2,iters=20 | `ants.motion_correction` | ok | 92.376 s / 113.327 s | 119.508 s | 1633 MB (rss) | n/a (no oracle) | 2.04x vs nitrix-jax |
+| volreg | jax-cpu | shape=[64, 64, 64],T=100,levels=2,iters=20 | `fsl.iofloor` | ok | 9.723 s / 9.760 s | 9.967 s | 1633 MB (rss) | n/a (no oracle) | 0.21x vs nitrix-jax |
+| volreg | jax-cpu | shape=[64, 64, 64],T=100,levels=2,iters=20 | `fsl.mcflirt` | ok | 14.284 s / 14.316 s | 14.473 s | 1633 MB (rss) | n/a (no oracle) | 0.31x vs nitrix-jax |
+| volreg | jax-cpu | shape=[64, 64, 64],T=100,levels=2,iters=20 | `nitrix-jax` | ok | 45.349 s / 45.388 s | 50.177 s | 2859 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[64, 64, 64],T=100,levels=2,iters=20 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[64, 64, 64],T=100,levels=2,iters=20 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[64, 64, 64],T=100,levels=2,iters=20 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[64, 64, 64],T=100,levels=2,iters=20 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[64, 64, 64],T=100,levels=2,iters=20 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[64, 64, 64],T=100,levels=2,iters=20 | `nitrix-jax` | ok | 423.46 ms / 423.88 ms | 17.614 s | 1283.46 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cpu | shape=[80, 80, 80],T=100,levels=2,iters=20 | `afni.3dvolreg` | ok | 32.709 s / 32.896 s | 33.476 s | 1839 MB (rss) | n/a (no oracle) | 0.33x vs nitrix-jax |
+| volreg | jax-cpu | shape=[80, 80, 80],T=100,levels=2,iters=20 | `afni.iofloor` | ok | 16.926 s / 17.214 s | 17.295 s | 1648 MB (rss) | n/a (no oracle) | 0.17x vs nitrix-jax |
+| volreg | jax-cpu | shape=[80, 80, 80],T=100,levels=2,iters=20 | `ants.motion_correction` | ok | 100.127 s / 105.084 s | 107.065 s | 2000 MB (rss) | n/a (no oracle) | 1.02x vs nitrix-jax |
+| volreg | jax-cpu | shape=[80, 80, 80],T=100,levels=2,iters=20 | `fsl.iofloor` | ok | 18.426 s / 18.688 s | 18.593 s | 1649 MB (rss) | n/a (no oracle) | 0.19x vs nitrix-jax |
+| volreg | jax-cpu | shape=[80, 80, 80],T=100,levels=2,iters=20 | `fsl.mcflirt` | ok | 26.892 s / 26.919 s | 27.593 s | 1838 MB (rss) | n/a (no oracle) | 0.27x vs nitrix-jax |
+| volreg | jax-cpu | shape=[80, 80, 80],T=100,levels=2,iters=20 | `nitrix-jax` | ok | 98.606 s / 101.705 s | 100.266 s | 4691 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| volreg | jax-cuda12 | shape=[80, 80, 80],T=100,levels=2,iters=20 | `afni.3dvolreg` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[80, 80, 80],T=100,levels=2,iters=20 | `afni.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[80, 80, 80],T=100,levels=2,iters=20 | `ants.motion_correction` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[80, 80, 80],T=100,levels=2,iters=20 | `fsl.iofloor` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[80, 80, 80],T=100,levels=2,iters=20 | `fsl.mcflirt` | skipped | — | — | — | — | — |
+| volreg | jax-cuda12 | shape=[80, 80, 80],T=100,levels=2,iters=20 | `nitrix-jax` | ok | 1.048 s / 1.049 s | 18.293 s | 2415.92 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+:::
+
+*source: bench `a7bf787e` · nitrix `4496be2e`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:volreg -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

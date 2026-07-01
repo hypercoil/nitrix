@@ -1,0 +1,60 @@
+---
+title: "VarFunc"
+generated: true
+description: "A within-group residual variance function, as a record of pure functions."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._varfunc`.*
+
+<!-- nitrix:gen sig:VarFunc -->
+```python
+class VarFunc
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:VarFunc -->
+A within-group residual variance function, as a record of pure functions.
+
+Frozen and hashable so it rides as a static config (a `vmap` nondiff
+argument), like [`CorrSpec`](../nitrix-stats-lme/CorrSpec.qmd).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:VarFunc.__init__ -->
+```python
+__init__(name: str, n_params: int, covariate: Float[Array, 'N'], log_g: Callable[[Float[Array, 'G T'], Bool[Array, 'G T'], Float[Array, 'n']], Float[Array, 'G T']], init_raw: Callable[[Any], Float[Array, 'n']]) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:VarFunc -->
+### Fields
+
+name
+    Structure name (`'varPower'` / `'varIdent'`).
+n_params
+    Number of variance-function parameters (`1` for `varPower`;
+    `S - 1` for `varIdent` over `S` strata).
+covariate
+    The `(N,)` variance covariate: the continuous $v$ for
+    `varPower`, or the integer stratum index `0 .. S-1` for
+    `varIdent`.  It rides through the same `(G, T)` padded group layout
+    as the design.
+log_g
+    `(cov_pad, mask, raw) -> log_g_pad`: the per-observation
+    $\log g_i$ on the `(G, T)` padded grid given the padded
+    covariate and the `(n_params,)` unconstrained parameter.
+init_raw
+    A reasonable unconstrained start (homoscedastic, $g = 1$).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:VarFunc -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

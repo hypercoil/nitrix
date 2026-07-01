@@ -1,0 +1,33 @@
+---
+title: "ar1"
+generated: true
+description: "Discrete AR(1) within-group correlation (`nlme` `corAR1`)."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._corr`.*
+
+<!-- nitrix:gen sig:ar1 -->
+```python
+ar1() -> CorrSpec
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ar1 -->
+Discrete AR(1) within-group correlation (`nlme` `corAR1`).
+
+The correlation matrix is $R_{ij} = \rho^{|i - j|}$ over the
+time-ordered observations.  Here $\rho$ may be negative (an
+oscillating process), so it is parameterised as
+$\rho = \tanh(\text{raw}) \in (-1, 1)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ar1 -->
+**Parameters**
+
+*No parameters.*
+
+**Returns** `CorrSpec`. A correlation structure whose whitener applies the innovations recurrence with the constant coefficient $\phi_t = \rho$.
+<!-- nitrix:/gen -->
+

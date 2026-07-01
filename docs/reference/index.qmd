@@ -20,6 +20,12 @@ final publication as-is (SPEC §6.5).
 ## Modules
 
 <!-- nitrix:gen index-tree -->
+## `nitrix`
+
+- [`geometry`](nitrix-geometry.qmd) — Geometric primitives for neuroimaging.
+- [`register`](nitrix-register.qmd) — nitrix.register -- pairwise registration recipes.
+- [`stats`](nitrix-stats.qmd) — Mass-univariate statistical modelling for neuroimaging.
+
 ### `nitrix.geometry`
 
 - [`affine`](nitrix-geometry-affine.qmd) — Geometric-parameter affine algebra (batched, differentiable).
@@ -53,8 +59,11 @@ final publication as-is (SPEC §6.5).
 - [`gaulss`](nitrix-stats-gaulss.qmd) — Gaussian location-scale regression (`gaulss`).
 - [`gaussian`](nitrix-stats-gaussian.qmd) — Closed-form diagonal-Gaussian quantities.
 - [`glm`](nitrix-stats-glm.qmd) — Mass-univariate generalised linear models.
+- [`glmm`](nitrix-stats-glmm.qmd) — Mass-univariate generalised **linear mixed** models (GLMM) via PQL.
 - [`gp`](nitrix-stats-gp.qmd) — Mass-univariate Gaussian-process regression with lengthscale estimation.
 - [`hgp`](nitrix-stats-hgp.qmd) — Mass-univariate **hierarchical** Gaussian-process regression (multi-level GP).
+- [`inference`](nitrix-stats-inference.qmd) — nitrix.stats.inference -- permutation / cluster inference.
+- [`lme`](nitrix-stats-lme.qmd) — Voxelwise linear mixed-effects models.
 - [`ordinal`](nitrix-stats-ordinal.qmd) — Ordinal regression -- the cumulative-link (proportional-odds) model.
 - [`pca`](nitrix-stats-pca.qmd) — Principal-component analysis.
 - [`priors`](nitrix-stats-priors.qmd) — Lengthscale priors as REML regularisers (the `map_rho=` penalties).

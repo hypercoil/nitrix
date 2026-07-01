@@ -1,0 +1,52 @@
+---
+title: "glmm_predict"
+generated: true
+description: "Per-element GLMM prediction on a (new) design `X`."
+---
+
+[‹ back to `nitrix.stats.glmm`](../nitrix-stats-glmm.qmd)
+
+<!-- nitrix:gen sig:glmm_predict -->
+```python
+glmm_predict(result: GLMMResult, X: Float[Array, 'N p'], *, z: Optional[Float[Array, 'N r']] = None, group: Optional[Int[Array, 'N']] = None, level: PredictLevel = 'population', type: Literal['response', 'link'] = 'response') -> Float[Array, 'V N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:glmm_predict -->
+Per-element GLMM prediction on a (new) design `X`.
+
+The mixed-model apply half: the linear predictor $\eta = X \hat\beta$
+(`level='population'`, the marginal mean) optionally plus the
+subject-specific random-effect contribution $Z b_{\text{group}}$
+(`level='conditional'`, using the BLUPs a
+[`GLMMResult`](../nitrix-stats-glmm/GLMMResult.qmd) always retains), then mapped
+through the link.  `type='link'` returns $\eta$; `type='response'`
+(default) returns `family.linkinv(eta)` (the mean response -- a probability
+/ rate / count).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:glmm_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GLMMResult` | — | — | A [`GLMMResult`](../nitrix-stats-glmm/GLMMResult.qmd) from [`glmm_fit`](../nitrix-stats-glmm/glmm_fit.qmd). |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` fixed-effect design (same columns as the fit). |
+| `z` | `Optional[Float[Array, 'N r']]` | — | `None` | `(N, r)` random-effect design for the new rows (a random-slope fit); `None` for a scalar intercept. |
+| `group` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` integer group labels indexing the fitted levels `0..q-1`; an out-of-range / `None` group falls back to the marginal mean. |
+| `level` | `PredictLevel` | — | `'population'` | `'population'` (marginal) or `'conditional'` (subject-specific). |
+| `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean) or `'link'` (the linear predictor). |
+
+**Returns** `Float` — shape `V` × `N`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:glmm_predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

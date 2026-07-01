@@ -1,0 +1,38 @@
+---
+title: "cs"
+generated: true
+description: "Compound symmetry (exchangeable) within-group correlation."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._corr`.*
+
+<!-- nitrix:gen sig:cs -->
+```python
+cs() -> CorrSpec
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cs -->
+Compound symmetry (exchangeable) within-group correlation.
+
+Every pair of within-group observations shares one constant off-diagonal
+correlation $\rho$, giving
+$R = (1 - \rho) I + \rho\, 1 1^{\top}$ (the `nlme` `corCompSymm`
+structure).  It is whitened by the rank-one transform
+$w = a z + (b - a)\, \operatorname{mean}(z)\, 1$ with
+$a = (1 - \rho)^{-1/2}$ and $b = (1 + (n_i - 1)\rho)^{-1/2}$.
+Here $\rho \in (0, 1)$ via $\operatorname{sigmoid}$ (the common
+positive-correlation regime; the small negative range admissible for finite
+`n` is not exposed).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cs -->
+**Parameters**
+
+*No parameters.*
+
+**Returns** `CorrSpec`. A correlation structure whose whitener applies the rank-one compound symmetry transform, with $\log|R_i| = (n_i - 1)\log(1 - \rho) + \log(1 + (n_i - 1)\rho)$ per group.
+<!-- nitrix:/gen -->
+

@@ -17,7 +17,7 @@ Structural interface of a GAM smooth term.
 
 A smooth carries a `design` matrix and a coefficient count `dim`, knows
 its own penalty blocks, and can re-evaluate its design on a covariate grid.
-[`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) dispatches through these members instead of an
+[`gam_fit`](../nitrix-stats.qmd) dispatches through these members instead of an
 `isinstance` chain, so a **new** basis type (implementing this Protocol)
 needs no edit to the fitting routine.
 

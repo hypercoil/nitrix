@@ -1,0 +1,65 @@
+---
+title: "BoundaryObjective"
+generated: true
+description: "The BBR cost packaged as an [`Objective`](../nitrix-register/Objective.qmd) (with no fixed image)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._bbr`.*
+
+<!-- nitrix:gen sig:BoundaryObjective -->
+```python
+class BoundaryObjective
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:BoundaryObjective -->
+The BBR cost packaged as an [`Objective`](../nitrix-register/Objective.qmd) (with no fixed image).
+
+Closes over the moving image, the boundary points and normals, and the
+sampling configuration; `cost` evaluates [`bbr_cost`](../nitrix-register/bbr_cost.qmd) at the
+given parameters.  This is not a least-squares objective (the
+$\tanh$ cost is not a sum of squares), so `is_least_squares`
+is `False` and `residual` raises.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:BoundaryObjective.cost -->
+```python
+cost(params: Float[Array, ' p']) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Boundary cost at the rigid parameters `params`.
+
+<!-- nitrix:gen sig:BoundaryObjective.residual -->
+```python
+residual(params: Float[Array, ' p']) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Not defined for the BBR objective.
+
+The boundary cost is not a sum of squares, so it has no residual
+vector.  This method always raises `NotImplementedError`.
+
+<!-- nitrix:gen sig:BoundaryObjective.__init__ -->
+```python
+__init__(moving: Float[Array, '*spatial'], points: Float[Array, ' n d'], normals: Float[Array, ' n d'], moving_affine_inv: Float[Array, ' d1 d1'], model: TransformModel, ndim: int, step: float, slope: float, q0: float, method: Interpolator, mode: BoundaryMode, cval: float, eps: float) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:BoundaryObjective -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `d1` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

@@ -1,0 +1,20 @@
+---
+title: "BBRResult"
+generated: true
+description: "Output of [`bbr_register`](../nitrix-register/bbr_register.qmd)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._bbr`.*
+
+<!-- nitrix:gen sig:BBRResult -->
+```python
+class BBRResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:BBRResult -->
+Output of [`bbr_register`](../nitrix-register/bbr_register.qmd).
+<!-- nitrix:/gen -->
+

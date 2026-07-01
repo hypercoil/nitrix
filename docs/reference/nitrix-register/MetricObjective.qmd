@@ -1,0 +1,64 @@
+---
+title: "MetricObjective"
+generated: true
+description: "An image-pair [`Metric`](../nitrix-register/Metric.qmd) as an [`Objective`](../nitrix-register/Objective.qmd)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._objective`.*
+
+<!-- nitrix:gen sig:MetricObjective -->
+```python
+class MetricObjective
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:MetricObjective -->
+An image-pair [`Metric`](../nitrix-register/Metric.qmd) as an [`Objective`](../nitrix-register/Objective.qmd).
+
+Pairs a metric with the level's warp closure (`params -> warped`)
+and the `fixed` image, so `cost(params) = metric.cost(warp(params),
+fixed)` -- the form the coarse-to-fine driver optimises.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:MetricObjective.cost -->
+```python
+cost(params: Float[Array, ' p']) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Scalar cost of the warped moving image against `fixed`.
+
+Warps the moving image with `warp(params)` and scores it against the
+`fixed` image under `metric`, restricted by `mask` where given.
+
+<!-- nitrix:gen sig:MetricObjective.residual -->
+```python
+residual(params: Float[Array, ' p']) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Least-squares residual of the warped image against `fixed`.
+
+Warps the moving image with `warp(params)` and returns the metric's
+residual vector against the `fixed` image, restricted by `mask`
+where given. Defined only when the metric is least-squares.
+
+<!-- nitrix:gen sig:MetricObjective.__init__ -->
+```python
+__init__(metric: Metric, warp: Callable[[Float[Array, ' p']], Float[Array, '*spatial']], fixed: Float[Array, '*spatial'], mask: Optional[Float[Array, '*spatial']] = None) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:MetricObjective -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

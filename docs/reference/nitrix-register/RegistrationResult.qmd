@@ -1,0 +1,20 @@
+---
+title: "RegistrationResult"
+generated: true
+description: "Output of a registration recipe."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._core`.*
+
+<!-- nitrix:gen sig:RegistrationResult -->
+```python
+class RegistrationResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:RegistrationResult -->
+Output of a registration recipe.
+<!-- nitrix:/gen -->
+

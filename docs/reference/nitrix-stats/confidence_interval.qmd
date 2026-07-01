@@ -1,0 +1,48 @@
+---
+title: "confidence_interval"
+generated: true
+description: "Two-sided confidence interval $[ mathrm{lo},  mathrm{hi}]$."
+---
+
+[‹ back to `nitrix.stats`](../nitrix-stats.qmd)
+
+*Re-exported here; defined in `nitrix.stats._effect`.*
+
+<!-- nitrix:gen sig:confidence_interval -->
+```python
+confidence_interval(effect: Float[Array, '...'], se: Float[Array, '...'], dof: Float[Array, '...'], *, level: float = 0.95) -> Tuple[Float[Array, '...'], Float[Array, '...']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:confidence_interval -->
+Two-sided confidence interval $[\mathrm{lo}, \mathrm{hi}]$.
+
+Forms the interval $[\text{effect} - t_{\mathrm{crit}}\,\text{se},
+\ \text{effect} + t_{\mathrm{crit}}\,\text{se}]$ with
+$t_{\mathrm{crit}}$ the $(1 + \text{level}) / 2$ quantile of
+Student's t on `dof` degrees of freedom.  Evaluated per element and
+broadcasting -- `dof` may vary per element (e.g. a per-voxel Satterthwaite
+degrees-of-freedom estimate).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:confidence_interval -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `effect` | `Float` | `...` | — | The contrast estimate, e.g. from [`t_contrast`](../nitrix-stats-glm/t_contrast.qmd) or [`lme_t_contrast`](../nitrix-stats-lme-reml/lme_t_contrast.qmd). |
+| `se` | `Float` | `...` | — | The standard error of `effect`, broadcast against it. |
+| `dof` | `Float` | `...` | — | Denominator degrees of freedom, broadcast against `effect` -- e.g. the residual degrees of freedom from [`t_contrast`](../nitrix-stats-glm/t_contrast.qmd) or the Satterthwaite degrees of freedom from [`lme_t_contrast`](../nitrix-stats-lme-reml/lme_t_contrast.qmd). |
+| `level` | `float` | — | `0.95` | Two-sided coverage in $(0, 1)$ (default `0.95`). |
+
+**Returns** `Tuple[Float[Array, '...'], Float[Array, '...']]`. Lower interval bound, with the same shape as `effect`. Upper interval bound, with the same shape as `effect`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:confidence_interval -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

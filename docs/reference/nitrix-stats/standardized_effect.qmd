@@ -1,0 +1,45 @@
+---
+title: "standardized_effect"
+generated: true
+description: "Standardised effect size $ text{effect} /  text{scale}$."
+---
+
+[‹ back to `nitrix.stats`](../nitrix-stats.qmd)
+
+*Re-exported here; defined in `nitrix.stats._effect`.*
+
+<!-- nitrix:gen sig:standardized_effect -->
+```python
+standardized_effect(effect: Float[Array, '...'], scale: Float[Array, '...']) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:standardized_effect -->
+Standardised effect size $\text{effect} / \text{scale}$.
+
+A Cohen's-d-style ratio that expresses the contrast on the residual
+standard-deviation scale: pass `scale = sqrt(result.dispersion)` (the
+residual standard deviation) for a GLM or LME fit, so the result is the
+effect in standard-deviation units.  The denominator is clipped away from
+zero for numerical safety.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:standardized_effect -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `effect` | `Float` | `...` | — | The contrast estimate to standardise. |
+| `scale` | `Float` | `...` | — | The scale (typically a residual standard deviation) by which to divide `effect`, broadcast against it. |
+
+**Returns** `Float` — shape `...`. The standardised effect `effect / scale`, with the broadcast shape of the two inputs.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:standardized_effect -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

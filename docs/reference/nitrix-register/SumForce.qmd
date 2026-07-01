@@ -1,0 +1,53 @@
+---
+title: "SumForce"
+generated: true
+description: "Weighted sum of forces -- multi-metric within one stage."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._force`.*
+
+<!-- nitrix:gen sig:SumForce -->
+```python
+class SumForce
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SumForce -->
+Weighted sum of forces -- multi-metric within one stage.
+
+The dense-field analogue of combining several metrics in a single
+registration stage: `update` is $\sum_i w_i \cdot
+\text{force}_i.\text{update}$ and `cost` the matching weighted sum, so
+a *combination* of metrics drives one recipe with **no** driver change -- a
+[`SumForce`](../nitrix-register/SumForce.qmd) is itself just another [`Force`](../nitrix-register/Force.qmd).  Each term is bound
+once (its fixed-state hoisted) by `bind`; the terms may mix tiers
+freely (e.g. a closed-form [`LNCCForce`](../nitrix-register/LNCCForce.qmd) plus a [`MIForce`](../nitrix-register/MIForce.qmd) for a
+cross-modal-plus-structural drive).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:SumForce.bind -->
+```python
+bind(fixed: Float[Array, '*spatial'], *, ndim: int, rel_spacing: RelSpacing = None) -> _BoundSum
+```
+<!-- nitrix:/gen -->
+
+Bind every term to `fixed`, hoisting each term's fixed-state.
+
+<!-- nitrix:gen sig:SumForce.__init__ -->
+```python
+__init__(terms: tuple[tuple[float, Force], ...]) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:SumForce -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

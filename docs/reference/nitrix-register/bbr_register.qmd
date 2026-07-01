@@ -1,0 +1,75 @@
+---
+title: "bbr_register"
+generated: true
+description: "Boundary-based rigid registration of `moving` to a surface."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._bbr`.*
+
+<!-- nitrix:gen sig:bbr_register -->
+```python
+bbr_register(moving: Float[Array, '*spatial'], points: Float[Array, ' n d'], normals: Float[Array, ' n d'], *, moving_affine: Optional[Float[Array, ' d1 d1']] = None, init_params: Optional[Float[Array, ' p']] = None, spec: BBRSpec = BBRSpec()) -> BBRResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bbr_register -->
+Boundary-based rigid registration of `moving` to a surface.
+
+Estimates the rigid transform that places the boundary `points` (with
+outward `normals`) on a strong, consistently-oriented intensity edge
+of `moving` (the Greve-Fischl cost).  BBR is a *local refinement* of a
+prior affine; the default grid multistart + step annealing widen the
+capture range to a few mm / degrees (see [`BBRSpec`](../nitrix-register/BBRSpec.qmd)).  Pass
+`init_params` from a prior affine for a larger initial misalignment.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bbr_register -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `*spatial` | — | Single-channel volume (2-D or 3-D) being registered. |
+| `points` | `Float` | `n` × `d` | — | `(n, d)` boundary sample coordinates and unit outward normals, in the moving world frame (or voxel frame when `moving_affine` is `None`). Normals oriented so the interior (the $-$\ `normal` side) is the brighter tissue. |
+| `normals` | `Float` | `n` × `d` | — | `(n, d)` boundary sample coordinates and unit outward normals, in the moving world frame (or voxel frame when `moving_affine` is `None`). Normals oriented so the interior (the $-$\ `normal` side) is the brighter tissue. |
+| `moving_affine` | `Optional[Float[Array, ' d1 d1']]` | — | `None` | `(d1, d1)` voxel-to-world affine of `moving` (with `d1 = ndim + 1`); `None` uses the identity (voxel frame). Makes `step` physical and the normals physical directions. |
+| `init_params` | `Optional[Float[Array, ' p']]` | — | `None` | `(p,)` rigid Lie-parameter warm start (default identity); the grid search, when enabled, seeds *around* it. |
+| `spec` | `BBRSpec` | — | `BBRSpec()` | The [`BBRSpec`](../nitrix-register/BBRSpec.qmd) static configuration (sampling distance, cost shape, annealing schedule, grid multistart, and optimiser knobs). |
+
+**Returns** `BBRResult`. The recovered transform `matrix`, its rigid `params`, the final `cost`, and the concatenated per-stage `cost_history`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:bbr_register -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **6.37 ms** (median, L4).  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_BBR_REGISTER.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| bbr_register | jax-cpu | shape=[48, 48, 48],N=2000,iters=100 | `nitrix-jax` | ok | 3.72 ms / 3.75 ms | 3.232 s | 694 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cuda12 | shape=[48, 48, 48],N=2000,iters=100 | `nitrix-jax` | ok | 6.32 ms / 6.37 ms | 7.337 s | 336.04 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cpu | shape=[48, 48, 48],N=2000,iters=50 | `nitrix-jax` | ok | 3.65 ms / 3.75 ms | 3.715 s | 683 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cuda12 | shape=[48, 48, 48],N=2000,iters=50 | `nitrix-jax` | ok | 6.08 ms / 6.27 ms | 9.121 s | 336.04 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cpu | shape=[64, 64, 64],N=20000,iters=100 | `nitrix-jax` | ok | 43.77 ms / 44.65 ms | 3.129 s | 700 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cuda12 | shape=[64, 64, 64],N=20000,iters=100 | `nitrix-jax` | ok | 3.44 ms / 3.48 ms | 7.802 s | 337.08 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cpu | shape=[64, 64, 64],N=5000,iters=100 | `nitrix-jax` | ok | 22.96 ms / 24.32 ms | 3.110 s | 697 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cuda12 | shape=[64, 64, 64],N=5000,iters=100 | `nitrix-jax` | ok | 9.63 ms / 9.66 ms | 7.638 s | 336.72 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cpu | shape=[64, 64, 64],N=80000,iters=100 | `nitrix-jax` | ok | 174.33 ms / 176.75 ms | 3.265 s | 731 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| bbr_register | jax-cuda12 | shape=[64, 64, 64],N=80000,iters=100 | `nitrix-jax` | ok | 5.86 ms / 5.96 ms | 6.155 s | 338.61 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+:::
+
+*source: bench `7be15116` · nitrix `c54bc818`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bbr_register -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

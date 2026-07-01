@@ -22,7 +22,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 Pairwise rigid / affine registration recipes.
 
 Pure functions `(moving, fixed) -> RegistrationResult`, following the same
-convention as [`nitrix.stats.reml_fit`](nitrix-stats-lme-reml/reml_fit.qmd) (a `NamedTuple` of
+convention as [`nitrix.stats.reml_fit`](nitrix-stats.qmd) (a `NamedTuple` of
 arrays, no PyTree module, no atlas or file I/O).  They compose the shared
 registration substrate -- the resolution pyramid, the similarity metric, the
 transform parametrisation, and the matrix-free optimiser -- with the
@@ -32,10 +32,10 @@ without re-deriving it.
 The representative algorithm is intensity-based Gauss-Newton /
 Levenberg-Marquardt on the rigid / affine Lie groups (the `3dvolreg` / AIR
 lineage): coarse-to-fine, second-order, and differentiable.  The similarity
-metric (`SSD` by default;
-`LNCC` / `MI` /
-`CorrelationRatio` for intensity-robust or cross-modal
-cases) and the schedule are set on the `RegistrationSpec`.
+metric ([`SSD`](nitrix-register/SSD.qmd) by default;
+[`LNCC`](nitrix-register/LNCC.qmd) / [`MI`](nitrix-register/MI.qmd) /
+[`CorrelationRatio`](nitrix-register/CorrelationRatio.qmd) for intensity-robust or cross-modal
+cases) and the schedule are set on the [`RegistrationSpec`](nitrix-register/RegistrationSpec.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

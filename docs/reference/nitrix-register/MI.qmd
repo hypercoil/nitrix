@@ -1,0 +1,54 @@
+---
+title: "MI"
+generated: true
+description: "Mutual-information cost `-mutual_information` (cross-modal)."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._metric`.*
+
+<!-- nitrix:gen sig:MI -->
+```python
+class MI
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:MI -->
+Mutual-information cost `-mutual_information` (cross-modal).
+
+Scalar (BFGS) path.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:MI.cost -->
+```python
+cost(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+Mutual-information cost $-I$ (negated for minimisation).
+
+<!-- nitrix:gen sig:MI.residual -->
+```python
+residual(warped: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, mask: Optional[Float[Array, '*spatial']] = None) -> Float[Array, ' m']
+```
+<!-- nitrix:/gen -->
+
+Not defined: [`MI`](../nitrix-register/MI.qmd) is not a least-squares metric.
+
+<!-- nitrix:gen sig:MI.__init__ -->
+```python
+__init__(bins: int = 32, normalized: bool = False, range_moving: Optional[tuple[float, float]] = None, range_fixed: Optional[tuple[float, float]] = None) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:MI -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

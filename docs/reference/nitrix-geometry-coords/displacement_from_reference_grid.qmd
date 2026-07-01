@@ -26,10 +26,10 @@ near a fixed location.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `weight` | `Float` | `...` | — | Weight tensor whose grid centre of mass is taken. Forwarded to [`center_of_mass_grid`](../nitrix-geometry-grid/center_of_mass_grid.qmd). |
+| `weight` | `Float` | `...` | — | Weight tensor whose grid centre of mass is taken. Forwarded to [`center_of_mass_grid`](../nitrix-geometry.qmd). |
 | `reference` | `Float` | `...` × `ndim` | — | Reference coordinates `(..., ndim)`, broadcastable to the centre-of-mass result. |
-| `axes` | `Optional[Sequence[int]]` | — | `None` | Grid axes over which the centre of mass is computed. Forwarded to [`center_of_mass_grid`](../nitrix-geometry-grid/center_of_mass_grid.qmd). |
-| `na_value` | `Optional[float]` | — | `None` | Value to fill into the output where a grid slice has zero total weight (the centre-of-mass is undefined there; `None` produces `NaN`). Forwarded to [`center_of_mass_grid`](../nitrix-geometry-grid/center_of_mass_grid.qmd). |
+| `axes` | `Optional[Sequence[int]]` | — | `None` | Grid axes over which the centre of mass is computed. Forwarded to [`center_of_mass_grid`](../nitrix-geometry.qmd). |
+| `na_value` | `Optional[float]` | — | `None` | Value to fill into the output where a grid slice has zero total weight (the centre-of-mass is undefined there; `None` produces `NaN`). Forwarded to [`center_of_mass_grid`](../nitrix-geometry.qmd). |
 
 **Returns** `Float` — shape `...` × `ndim`. The displacement vector `cm - reference`, where `cm` is the grid centre of mass of `weight`.
 <!-- nitrix:/gen -->

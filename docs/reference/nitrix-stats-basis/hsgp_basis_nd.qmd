@@ -31,11 +31,11 @@ lengthscale, a product kernel) -- selected by `rho`.
 | `n_basis` | `Any` | — | `8` | Per-dimension rank: an int (the same `m` for every dimension) or a length-`D` sequence $[m_1, \ldots, m_D]$. The total rank is the product $M = \prod_d m_d$ (it grows fast with `D` -- keep `m` modest for `D >= 2`). |
 | `kernel` | `str` | — | `'matern52'` | Stationary kernel: `'matern52'` (default) / `'matern32'` / `'matern12'` / `'rbf'`. |
 | `rho` | `Any` | — | `None` | Lengthscale. A scalar gives an **isotropic** GP (the `D`-dimensional spectral density of `\|\|w\|\|`); a length-`D` sequence gives a **separable / ARD** GP (the product of per-dimension 1-D densities). `None` (default) is isotropic with `rho` the mean per-dimension half-range. |
-| `amplitude` | `float` | — | `1.0` | Kernel amplitude folded into the weights; keep `1.0` for [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd). |
+| `amplitude` | `float` | — | `1.0` | Kernel amplitude folded into the weights; keep `1.0` for [`gam_fit`](../nitrix-stats.qmd). |
 | `boundary` | `float` | — | `1.5` | Domain-extension factor $L_d / \text{half-range}_d$ (`>= 1`; default `1.5`). |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `_HSGPndBasis`. A multi-dimensional HSGP basis (a [`SmoothBasis`](../nitrix-stats-basis/SmoothBasis.qmd)) for [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd); its `eval_design` takes new `(g, D)` points.
+**Returns** `_HSGPndBasis`. A multi-dimensional HSGP basis (a [`SmoothBasis`](../nitrix-stats-basis/SmoothBasis.qmd)) for [`gam_fit`](../nitrix-stats.qmd); its `eval_design` takes new `(g, D)` points.
 <!-- nitrix:/gen -->
 
 

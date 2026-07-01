@@ -1,0 +1,28 @@
+---
+title: "CubicBSplineBoundaryWarning"
+generated: true
+description: "Emitted when `CubicBSpline` is given a boundary it cannot honour."
+---
+
+[‹ back to `nitrix.geometry`](../nitrix-geometry.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:CubicBSplineBoundaryWarning -->
+```python
+class CubicBSplineBoundaryWarning(UserWarning)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CubicBSplineBoundaryWarning -->
+Emitted when `CubicBSpline` is given a boundary it cannot honour.
+
+[`CubicBSpline`](../nitrix-geometry-grid/CubicBSpline.qmd) always uses the mirror boundary (the only one
+its prefilter implements), so an explicit non-mirror `mode` -- or a
+non-zero `cval` -- is ignored.  So that this override is not silent,
+it is announced with this warning.  Pass `mode='mirror'` (or leave
+`mode` at its default) to silence it, or filter this category.  The
+default `mode='constant'` with `cval=0` is treated as
+"unspecified" and does *not* warn.
+<!-- nitrix:/gen -->
+

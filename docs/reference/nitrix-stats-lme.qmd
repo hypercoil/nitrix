@@ -1,0 +1,73 @@
+---
+title: "nitrix.stats.lme"
+generated: true
+signature-hash: 300758ae20bd7572
+description: "Voxelwise linear mixed-effects models."
+listing:
+  id: nitrix-stats-lme-symbols
+  contents: "nitrix-stats-lme/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.stats.lme`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Voxelwise linear mixed-effects models.
+
+Two layered primitives are exposed:
+
+- [`reml_fit`](nitrix-stats-lme-reml/reml_fit.qmd) -- general variance-components REML via the
+  FaST-LMM spectral trick.  For a model
+  $V = \sigma_b^2 ZZ^{\top} + \sigma_e^2 I$, the term
+  $ZZ^{\top}$ is eigendecomposed once (shared across
+  voxels); `y` and `X` are rotated into the diagonalising
+  basis, so the per-voxel inner loop becomes $O(N)$ per
+  Newton step instead of the naive $O(N^3)$.  The fit is
+  vmap-batched over voxels with a shared design.
+- [`flame_two_level`](nitrix-stats-lme-flame/flame_two_level.qmd) -- the FSL FLAME equivalent: the
+  per-subject within-variance is known (from a level-1 GLM) and
+  the between-subject variance is estimated.  Here $V$ is
+  naturally diagonal, so the spectral trick is trivial.  This is
+  built on top of the general REML inner solver.
+
+Both fits use Newton scoring on the log-parameterised variance
+components, which makes positivity automatic and gives quadratic
+local convergence.  A fixed-iteration scan (default 20) is used
+for clean vmap composition; the caller can tune this via the
+`n_iter` argument.  The output statistics are differentiable
+via an implicit-function-theorem VJP.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+.. [1] Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M.,
+   Davidson, R. I., & Heckerman, D. (2011). FaST linear mixed
+   models for genome-wide association studies. Nature Methods,
+   8(10), 833-835. https://doi.org/10.1038/nmeth.1681
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `n_v` | *(undocumented — add to `_dimensions.yml`)* |
+| `r` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+| `q` | random-effect columns |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-stats-lme-symbols}
+:::

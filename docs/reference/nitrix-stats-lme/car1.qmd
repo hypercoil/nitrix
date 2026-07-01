@@ -1,0 +1,35 @@
+---
+title: "car1"
+generated: true
+description: "Continuous-time AR(1) for unequally-spaced times (`nlme` `corCAR1`)."
+---
+
+[‹ back to `nitrix.stats.lme`](../nitrix-stats-lme.qmd)
+
+*Re-exported here; defined in `nitrix.stats.lme._corr`.*
+
+<!-- nitrix:gen sig:car1 -->
+```python
+car1() -> CorrSpec
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:car1 -->
+Continuous-time AR(1) for unequally-spaced times (`nlme` `corCAR1`).
+
+The correlation matrix is $R_{ij} = \rho^{|t_i - t_j|}$ with
+$\rho \in (0, 1)$ (a positive decay), parameterised as
+$\rho = \operatorname{sigmoid}(\text{raw})$.  The innovations
+coefficient $\phi_t = \rho^{\Delta t_t}$ is the decay over the time gap
+to the previous in-group observation; discrete AR(1) is the unit-gap special
+case.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:car1 -->
+**Parameters**
+
+*No parameters.*
+
+**Returns** `CorrSpec`. A correlation structure whose whitener applies the innovations recurrence with the gap-dependent coefficient $\phi_t = \rho^{\Delta t_t}$.
+<!-- nitrix:/gen -->
+

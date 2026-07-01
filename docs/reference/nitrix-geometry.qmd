@@ -1,0 +1,76 @@
+---
+title: "nitrix.geometry"
+generated: true
+signature-hash: 21cd0e5fa6010a4c
+description: "Geometric primitives for neuroimaging."
+listing:
+  id: nitrix-geometry-symbols
+  contents: "nitrix-geometry/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Geometric primitives for neuroimaging.
+
+This subpackage collects the differentiable geometry primitives that
+underpin spatial registration, resampling, and surface/mesh analysis. It
+spans both regular-grid (voxel/volume) and mesh/graph representations of
+spatial data.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Submodules
+
+- `grid` -- regular-grid deformable-registration primitives:
+  [`identity_grid`](nitrix-geometry-grid/identity_grid.qmd), [`spatial_transform`](nitrix-geometry-grid/spatial_transform.qmd),
+  [`integrate_velocity_field`](nitrix-geometry-grid/integrate_velocity_field.qmd), [`resample`](nitrix-geometry-grid/resample.qmd), and
+  [`center_of_mass_grid`](nitrix-geometry-grid/center_of_mass_grid.qmd). [`resample`](nitrix-geometry-grid/resample.qmd) and
+  [`spatial_transform`](nitrix-geometry-grid/spatial_transform.qmd) dispatch over an [`Interpolator`](nitrix-geometry-grid/Interpolator.qmd) kernel
+  ([`Linear`](nitrix-geometry-grid/Linear.qmd) default, [`NearestNeighbour`](nitrix-geometry-grid/NearestNeighbour.qmd), [`Lanczos`](nitrix-geometry-grid/Lanczos.qmd),
+  [`CubicBSpline`](nitrix-geometry-grid/CubicBSpline.qmd), [`CatmullRomCubic`](nitrix-geometry-grid/CatmullRomCubic.qmd), [`MultiLabel`](nitrix-geometry-grid/MultiLabel.qmd)).
+- `sphere` -- 2-sphere **mesh** primitives: coordinate conversions,
+  geodesic distance, and [`spherical_conv`](nitrix-geometry-sphere/spherical_conv.qmd) re-backed on the sparse
+  semiring matmul for $O(n \cdot k)$ cost (with $n$ vertices
+  and $k$ neighbours) instead of $O(n^2)$.
+- `sphere_grid` -- 2-sphere **regular-grid** topology helpers
+  (parameterised equirectangular sphere): [`sphere_grid_pad_2d`](nitrix-geometry-sphere_grid/sphere_grid_pad_2d.qmd) and
+  [`sphere_grid_unpad_2d`](nitrix-geometry-sphere_grid/sphere_grid_unpad_2d.qmd) with pole-flip and longitudinal-wrap
+  padding. Distinct from `sphere` because the parameterised-grid case
+  and the mesh case have different storage and adjacency models.
+- `coords` -- coordinate utilities: [`center_of_mass_points`](nitrix-geometry-coords/center_of_mass_points.qmd),
+  the displacement-from-reference helpers, and
+  [`compactness_penalty`](nitrix-geometry-coords/compactness_penalty.qmd).
+- `transform` -- the Lie-group chart ([`rigid_exp`](nitrix-geometry-transform/rigid_exp.qmd) /
+  [`affine_exp`](nitrix-geometry-transform/affine_exp.qmd)) together with [`apply_affine`](nitrix-geometry-transform/apply_affine.qmd) and
+  [`affine_grid`](nitrix-geometry-transform/affine_grid.qmd).
+- `affine` -- the geometric-parameter affine algebra (Euler-angle /
+  scale / shear $T R S E$ compose / decompose) and the closed-form
+  least-squares [`fit_affine`](nitrix-geometry-affine/fit_affine.qmd) between point sets; complementary to
+  the `transform` exponential chart.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*batch` | leading batch axes (variadic) |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-geometry-symbols}
+:::

@@ -19,7 +19,7 @@ mgcv's `s(x, by=z)` with a numeric `by`: the smooth term is
 $z\, f(x)$ -- a coefficient on `z` that varies smoothly with `x`.
 The design is the marginal P-spline of `x` scaled row-wise by `z`; the
 penalty is unchanged.  A single [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for
-[`gam_fit`](../nitrix-stats-gam/gam_fit.qmd).
+[`gam_fit`](../nitrix-stats.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:varying_coefficient_smooth -->

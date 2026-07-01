@@ -16,7 +16,7 @@ field_log(displacement: Float[Array, '*spatial ndim'], *, n_sqrt: int = 6, sqrt_
 Stationary-velocity logarithm of the deformation
 $\varphi = \mathrm{id} + \mathrm{displacement}$.
 
-The inverse of [`integrate_velocity_field`](../nitrix-geometry-grid/integrate_velocity_field.qmd) by
+The inverse of [`integrate_velocity_field`](../nitrix-geometry.qmd) by
 *inverse scaling-and-squaring* (the dense analogue of
 `matrix_log`): take `n_sqrt` diffeomorphism square
 roots until near identity, then $v \approx 2^{n_{\mathrm{sqrt}}} \cdot w$
@@ -44,8 +44,8 @@ exist there.  Concretely, two distinct accuracy notions:
   (measure it via the round-trip if needed).
 
 The recovered velocity feeds the velocity-barycentre / template machinery
-([`velocity_mean`](../nitrix-geometry-algebra/velocity_mean.qmd) /
-[`transform_mean`](../nitrix-geometry-algebra/transform_mean.qmd)).  It is differentiable (via the
+([`velocity_mean`](../nitrix-geometry.qmd) /
+[`transform_mean`](../nitrix-geometry.qmd)).  It is differentiable (via the
 implicit-function theorem through the fixed points) and GPU-native (no
 dense inverse, unlike `matrix_log`).
 <!-- nitrix:/gen -->
@@ -56,7 +56,7 @@ dense inverse, unlike `matrix_log`).
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `displacement` | `Float` | `*spatial` × `ndim` | — | The deformation as a displacement field $s$ ($\varphi = \mathrm{id} + s$), `(*spatial, ndim)`. |
-| `n_sqrt` | `int` | — | `6` | Number of inverse-squaring (diffeomorphism square-root) steps. Matches the default `n_steps` of [`integrate_velocity_field`](../nitrix-geometry-grid/integrate_velocity_field.qmd) so the exponential and logarithm charts are consistent; the generating-velocity error halves with each extra root. |
+| `n_sqrt` | `int` | — | `6` | Number of inverse-squaring (diffeomorphism square-root) steps. Matches the default `n_steps` of [`integrate_velocity_field`](../nitrix-geometry.qmd) so the exponential and logarithm charts are consistent; the generating-velocity error halves with each extra root. |
 | `sqrt_tol` | `float` | — | `1e-06` | Convergence controls for each square-root fixed point: the residual tolerance and the iteration cap. |
 | `sqrt_max_iter` | `int` | — | `50` | Convergence controls for each square-root fixed point: the residual tolerance and the iteration cap. |
 | `correction` | `Literal['first_order', 'bch']` | — | `'first_order'` | `'first_order'` (default) -- $v = 2^{n_{\mathrm{sqrt}}} \cdot w$ (using $\log(\mathrm{id} + w) \approx w$); this *preserves the exact round-trip*. `'bch'` -- the one-term correction $v = 2^{n_{\mathrm{sqrt}}} \cdot (w - \tfrac{1}{2}(w \cdot \nabla) w)$, more accurate as the *generating* velocity but it *breaks the exact round-trip* (use only when the velocity is interpreted as the true generator, e.g. geodesic / momentum analysis). |

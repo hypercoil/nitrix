@@ -1,0 +1,27 @@
+---
+title: "ConvergenceMode"
+generated: true
+description: "The iteration strategy selecting how :func:`run_iterations` loops."
+---
+
+[‹ back to `nitrix.register`](../nitrix-register.qmd)
+
+*Re-exported here; defined in `nitrix.register._converge`.*
+
+<!-- nitrix:gen sig:ConvergenceMode -->
+```python
+ConvergenceMode = Literal['fixed', 'early_exit']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ConvergenceMode -->
+The iteration strategy selecting how `run_iterations` loops.
+
+`'fixed'` runs a fixed-length `lax.scan`: reproducible,
+reverse-differentiable, and `vmap`-batchable.  `'early_exit'` runs a
+windowed cost-slope `lax.while_loop` (see [`Convergence`](../nitrix-register/Convergence.qmd)) that stops
+once the cost has plateaued; it is offered single-pair and is not
+reverse-differentiable.  This mode is orthogonal to the [`Convergence`](../nitrix-register/Convergence.qmd)
+threshold/window pair, which is consulted only when `'early_exit'` is chosen.
+<!-- nitrix:/gen -->
+
