@@ -1,0 +1,55 @@
+---
+title: "surface_dice"
+generated: true
+description: "Normalised surface Dice at a boundary `tolerance`."
+---
+
+[‹ back to `nitrix.metrics.surface`](../nitrix-metrics-surface.qmd)
+
+<!-- nitrix:gen sig:surface_dice -->
+```python
+surface_dice(pred: Bool[Array, '*spatial'], target: Bool[Array, '*spatial'], *, tolerance: float, spacing: _Spacing = None, backend: Backend = 'auto') -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:surface_dice -->
+Normalised surface Dice at a boundary `tolerance`.
+
+The fraction of both surfaces lying within `tolerance` of the other:
+$(|\{S_{\text{pred}} : d \le \tau\}| +
+|\{S_{\text{target}} : d \le \tau\}|) /
+(|S_{\text{pred}}| + |S_{\text{target}}|)$.  This is the count form of the
+metric (surface voxels counted, not areas), following MONAI's
+`compute_surface_dice` with `use_subvoxels=False`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:surface_dice -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `pred` | `Bool` | `*spatial` | — | Binary masks (any non-zero is foreground), of the same spatial shape. |
+| `target` | `Bool` | `*spatial` | — | Binary masks (any non-zero is foreground), of the same spatial shape. |
+| `tolerance` | `float` | — | — | Boundary tolerance $\tau$ in `spacing` units. |
+| `spacing` | `_Spacing` | — | `None` | Per-axis voxel size (scalar or one per axis); `None` uses unit spacing. |
+| `backend` | `Backend` | — | `'auto'` | Execution engine for the underlying [`erode`](../nitrix-morphology/erode.qmd) and Euclidean distance transform. |
+
+**Returns** `Float` — shape —. Scalar normalised surface Dice in $[0, 1]$; `1` for identical masks, `0` when a class is present in only one mask, and `nan` when both surfaces are empty (matching MONAI). Non-differentiable (a reporting metric).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:surface_dice -->
+### References
+
+Nikolov S, Blackwell S, Zverovitch A, et al. (2018). Deep learning to
+achieve clinically applicable segmentation of head and neck anatomy for
+radiotherapy. arXiv:1809.04430. https://doi.org/10.48550/arXiv.1809.04430
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:surface_dice -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

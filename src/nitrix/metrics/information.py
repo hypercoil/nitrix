@@ -1,28 +1,29 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
-Information-theoretic & variance-ratio image-similarity metrics.
+r"""
+Information-theoretic and variance-ratio image-similarity metrics.
 
-The cross-modal workhorses (T1<->T2, EPI<->T1, ...), where intensities
+The cross-modal workhorses (T1 <-> T2, EPI <-> T1, ...), where intensities
 are related by an unknown -- possibly non-monotonic -- mapping:
 
-- ``joint_histogram`` -- a differentiable (Parzen / linear soft-binned)
+- :func:`joint_histogram` -- a differentiable (Parzen / linear soft-binned)
   joint intensity histogram.
-- ``mutual_information`` -- MI (and normalised MI) from the joint
-  histogram.
-- ``mi_grad`` -- the closed-form Mattes ``∂MI/∂moving`` (the analytic
-  gradient that backs a Tier-1 ``register.MIForce``, replacing the
-  ``jax.grad(mutual_information)`` autodiff tape).
-- ``correlation_ratio`` -- Roche's η² between-group variance ratio
-  (the FSL ``mcflirt`` default), which assumes only a *functional*
-  (not affine) intensity relationship.
+- :func:`mutual_information` -- mutual information (and normalised mutual
+  information) from the joint histogram.
+- :func:`mi_grad` -- the closed-form Mattes gradient
+  :math:`\partial\mathrm{MI}/\partial\mathrm{moving}`, an analytic gradient
+  that replaces the ``jax.grad(mutual_information)`` autodiff tape.
+- :func:`correlation_ratio` -- Roche's :math:`\eta^2` between-group variance
+  ratio, which assumes only a *functional* (not affine) intensity
+  relationship.
 
-Differentiability is via the smooth soft-binning weights (the bin
-*index* is piecewise-constant, but its gradient is zero almost
-everywhere; the gradient flows through the interpolation weights).  All
-return a scalar.  Convention: MI / NMI / CR are *similarities*
-(maximise, or minimise the negative / the ``1 - CR`` complement).
+Differentiability is via the smooth soft-binning weights (the bin *index* is
+piecewise-constant, but its gradient is zero almost everywhere; the gradient
+flows through the interpolation weights).  All return a scalar.  By
+convention, mutual information, normalised mutual information, and the
+correlation ratio are *similarities* -- maximise them, or minimise the
+negative (or the :math:`1 - \eta^2` complement of the correlation ratio).
 """
 
 from __future__ import annotations
@@ -80,31 +81,57 @@ def _joint_hist_from_softbins(
     weight: Optional[Array] = None,
     driver: str = 'auto',
 ) -> Float[Array, 'bins bins']:
-    """Accumulate pre-computed soft bins into the normalised joint histogram.
+    r"""Accumulate pre-computed soft bins into the normalised joint histogram.
 
-    Factored out of :func:`joint_histogram` so the cost (``mutual_information``)
-    and the closed-form gradient (:func:`mi_grad`) share one accumulation and
-    one normalisation -- the gradient is then exactly the derivative of the table
-    the cost sees.
+    Factored out of :func:`joint_histogram` so that the cost
+    (:func:`mutual_information`) and the closed-form gradient (:func:`mi_grad`)
+    share one accumulation and one normalisation -- the gradient is then
+    exactly the derivative of the table the cost sees.
 
-    Two equivalent accumulations, selected by the ``driver`` axis (the divergent
-    op ``metrics.joint_histogram``): ``'onehot'`` turns the soft bins into two
-    ``(N, bins)`` soft one-hot matrices and forms the histogram as their product
-    ``ohₘᵀ @ ohf`` -- a matmul (**deterministic**); ``'scatter'`` is the
-    ``.at[].add`` accumulation (a non-associative atomic add on GPU -- the
-    **run-to-run** MI non-determinism source that ``affine_register(restarts=)``
-    otherwise papers over; deterministic on CPU).  ``driver='auto'`` picks
-    ``'onehot'`` on GPU below ``_ONEHOT_HIST_MAX_VOXELS`` voxels (above which the
-    one-hots would dominate memory, so the scatter takes over) and ``'scatter'``
-    on CPU (already deterministic and faster there).  ``nitrix.reproducible()``
-    forces the canonical ``'onehot'`` for determinism on **any** size -- note
-    this is ``O(N·bins)`` memory, the cost of reproducibility at scale.  Both the
-    platform and ``N`` are static under ``jit``, so the branch is resolved at
-    trace time.
+    Two equivalent accumulations are available, selected by the ``driver``
+    axis. ``'onehot'`` turns the soft bins into two ``(N, bins)`` soft one-hot
+    matrices and forms the histogram as their product
+    :math:`\mathrm{oh}_m^{\top} \, \mathrm{oh}_f` -- a matmul, which is
+    deterministic on GPU. ``'scatter'`` is the ``.at[].add`` accumulation, a
+    non-associative atomic add whose float result varies run-to-run on GPU
+    (the source of affine mutual-information non-determinism there) but is
+    deterministic on CPU. ``driver='auto'`` picks ``'onehot'`` on GPU below
+    ``_ONEHOT_HIST_MAX_VOXELS`` voxels (above which the one-hots would dominate
+    memory, so the scatter takes over) and ``'scatter'`` on CPU (already
+    deterministic and faster there). :func:`nitrix.reproducible` forces the
+    canonical ``'onehot'`` for determinism at any size -- note this costs
+    :math:`O(N \cdot \mathrm{bins})` memory. Both the platform and ``N`` are
+    static under ``jit``, so the branch is resolved at trace time.
 
-    ``weight`` (optional, the per-voxel domain mask, same length as the soft-bin
-    index vectors) gates the accumulation: a masked-out voxel contributes nothing
-    to the histogram (A3).  ``None`` is the unweighted form.
+    Parameters
+    ----------
+    lower_m, frac_m
+        Lower bin index and fractional weight for each moving-image sample,
+        as returned by the soft-binning routine. ``lower_m`` has shape
+        ``(N,)`` (integer bin) and ``frac_m`` has shape ``(N,)`` (weight in
+        ``[0, 1]`` toward ``lower_m + 1``).
+    lower_f, frac_f
+        The corresponding lower bin index and fractional weight for the fixed
+        image, each of shape ``(N,)``.
+    bins
+        Number of bins per axis; the returned histogram is ``(bins, bins)``.
+    dtype
+        Floating dtype of the accumulated histogram.
+    weight
+        Optional per-voxel non-negative weight (the domain mask), same length
+        ``(N,)`` as the soft-bin index vectors, gating the accumulation: a
+        masked-out voxel contributes nothing to the histogram. ``None``
+        (default) is the unweighted form.
+    driver
+        Accumulation recipe: ``'onehot'`` (deterministic matmul),
+        ``'scatter'`` (atomic add), or ``'auto'`` (default; resolved from the
+        platform and voxel count as described above).
+
+    Returns
+    -------
+    Float[Array, 'bins bins']
+        Joint probability table, normalised to sum to 1, with rows indexing
+        the moving image and columns the fixed image.
     """
     n = lower_m.shape[0]
     resolved = resolve_driver(
@@ -208,28 +235,52 @@ def mutual_information(
     eps: float = 1e-10,
     mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, '']:
-    """Mutual information (or normalised MI) of two images.
+    r"""Mutual information (or normalised mutual information) of two images.
 
-    ``MI = Σ P(i,j) log( P(i,j) / (P_m(i) P_f(j)) )`` over the soft
-    joint histogram.  With ``normalized=True`` returns Studholme's NMI
-    ``(H_m + H_f) / H_mf`` (in ``[1, 2]``; invariant to overlap size).
-    Higher is more similar; use ``-mutual_information`` as a cost.
+    Computes
+    :math:`\mathrm{MI} = \sum_{i,j} P(i,j) \log\!\left(P(i,j) / (P_m(i)\,P_f(j))\right)`
+    over the soft joint histogram. With ``normalized=True`` returns
+    Studholme's normalised mutual information
+    :math:`(H_m + H_f) / H_{mf}` (in ``[1, 2]``; invariant to overlap size).
+    Higher is more similar; use the negation as a cost.
 
-    ``bins`` / ``range_*`` are forwarded to ``joint_histogram``;
-    ``eps`` guards the logs.  ``mask`` (optional per-voxel weight) gates the
-    joint-histogram scatter (an out-of-mask voxel is excluded from the
-    distribution -- the correct masking point for a histogram statistic).
+    Parameters
+    ----------
+    moving, fixed
+        Images of identical shape.
+    bins
+        Number of bins per axis (default 32), forwarded to
+        :func:`joint_histogram`.
+    range_moving, range_fixed
+        Optional ``(lo, hi)`` intensity range per image, forwarded to
+        :func:`joint_histogram`. ``None`` (default) uses the per-image data
+        min / max.
+    normalized
+        If ``True``, return Studholme's normalised mutual information
+        :math:`(H_m + H_f) / H_{mf}` instead of the raw mutual information.
+    eps
+        Small constant guarding the logarithms and quotient (default
+        ``1e-10``).
+    mask
+        Optional non-negative per-voxel weight (same shape as the images)
+        gating the joint-histogram scatter: an out-of-mask voxel is excluded
+        from the distribution.
+
+    Returns
+    -------
+    Float[Array, '']
+        Scalar mutual information (or normalised mutual information).
 
     Notes
     -----
     Built on the linear (order-1 B-spline) Parzen histogram, so it is
-    differentiable and in the **same B-spline-Parzen family** as ITK
-    ``MattesMutualInformation`` (order-3 cubic) -- distinct from the
-    hard (order-0) binning of ``sklearn.mutual_info_score``.  At a
-    fixed ``bins`` the three give different numbers (Parzen smoothing
-    biases MI downward at coarse bins); all converge to the true
-    continuous MI in the fine-bin limit.  The domain tools are
-    *divergent references*, not bit-oracles, here.
+    differentiable and in the same B-spline-Parzen family as ITK
+    ``MattesMutualInformation`` (order-3 cubic) -- distinct from the hard
+    (order-0) binning of ``sklearn.mutual_info_score``. At a fixed ``bins``
+    the three give different numbers (Parzen smoothing biases mutual
+    information downward at coarse bins); all converge to the true continuous
+    mutual information in the fine-bin limit. The domain tools are divergent
+    references, not bit-exact oracles, here.
     """
     hist = joint_histogram(
         moving,
@@ -260,55 +311,73 @@ def mi_grad(
     range_fixed: Optional[tuple[float, float]] = None,
     sample_stride: int = 1,
 ) -> Float[Array, '...']:
-    """Closed-form ``∂MI/∂moving`` -- the Mattes mutual-information gradient.
+    r"""Closed-form Mattes mutual-information gradient.
 
     The analytic per-voxel derivative of :func:`mutual_information`
-    (unnormalised) w.r.t. the moving intensities, replacing the autodiff tape
-    (``jax.grad(mutual_information)``).  Differentiating ``MI = Σ P log(P /
-    (P_m P_f))`` through **only** the moving soft-bin weights, the ``+1`` and
-    ``log P_f`` terms cancel (the soft weights sum to one, so ``Σ_a ∂β_m/∂m =
-    0``), leaving the Mattes (2003) form
+    (unnormalised) with respect to the moving intensities,
+    :math:`\partial\mathrm{MI}/\partial\mathrm{moving}`, replacing the autodiff
+    tape ``jax.grad(mutual_information)``. Differentiating
+    :math:`\mathrm{MI} = \sum P \log(P / (P_m P_f))` through only the moving
+    soft-bin weights, the :math:`+1` and :math:`\log P_f` terms cancel (the
+    soft weights sum to one, so :math:`\sum_a \partial\beta_m/\partial m = 0`),
+    leaving the Mattes (2003) form
 
-    ``∂MI/∂m(x) = (s_m / N) · [(1−t_f)·D[k,l] + t_f·D[k,l+1]]``
+    .. math::
 
-    where ``s_m = (bins−1)/span_m``, ``k``/``l`` are the moving/fixed lower
-    bins, ``t_f`` the fixed fractional weight, and ``D[a,b] = W[a+1,b] − W[a,b]``
-    is the forward difference (along the moving axis) of the reduced table
-    ``W[a,b] = log(P[a,b]) − log(P_m[a])``.  A two-value gather into the tiny
-    ``(bins−1, bins)`` ``D`` table per voxel -- no autodiff scatter tape.
+        \frac{\partial\mathrm{MI}}{\partial m}(x)
+        = \frac{s_m}{N}\left[(1 - t_f)\, D[k,l] + t_f\, D[k,l+1]\right]
+
+    where :math:`s_m = (\mathrm{bins} - 1) / \mathrm{span}_m`, :math:`k` and
+    :math:`l` are the moving and fixed lower bins, :math:`t_f` the fixed
+    fractional weight, and :math:`D[a,b] = W[a+1,b] - W[a,b]` is the forward
+    difference (along the moving axis) of the reduced table
+    :math:`W[a,b] = \log P[a,b] - \log P_m[a]`. This is a two-value gather into
+    the tiny :math:`(\mathrm{bins} - 1, \mathrm{bins})` table :math:`D` per
+    voxel -- no autodiff scatter tape.
 
     Parameters
     ----------
     moving, fixed
         Images of identical shape.
     bins
-        Bins per axis (must match the cost).
+        Bins per axis (must match the cost; default 32).
     range_moving, range_fixed
-        Intensity ranges.  **Pin** them (the recipe does so once from the
-        full-resolution images): a data ``min/max`` range drifts as the moving
-        image deforms (a non-stationary objective) and truncates the force at
-        the clip boundary.
+        Optional ``(lo, hi)`` intensity ranges. **Pin** them (the recipe does
+        so once from the full-resolution images): a data ``min/max`` range
+        drifts as the moving image deforms (a non-stationary objective) and
+        truncates the force at the clip boundary. ``None`` (default) uses the
+        per-image data min / max.
     sample_stride
         Estimate the joint PDF from every ``sample_stride``-th voxel (ITK
-        "Regular" sampling); the gradient is still applied densely.  ``1``
+        "Regular" sampling); the gradient is still applied densely. ``1``
         (default) is the exact full histogram; ``> 1`` trades a noisier PDF for
-        a cheaper scatter (the histogram is the cost) -- ~0.98 cos-aligned at
-        stride 4 (~25 %) on real cross-modal data.  Jit-static (a Python int).
+        a cheaper scatter -- about 0.98 cosine-aligned at stride 4 (~25 %) on
+        real cross-modal data. Jit-static (a Python int).
 
     Returns
     -------
-    ``∂MI/∂moving``, same shape as ``moving``.
+    Float[Array, '...']
+        The gradient :math:`\partial\mathrm{MI}/\partial\mathrm{moving}`, same
+        shape as ``moving``.
 
     Notes
     -----
-    The empty-bin masking (``where(P > 0, …)``) is deliberately identical to
-    :func:`mutual_information`'s, so ``mi_grad == jax.grad(mutual_information)``
-    to tolerance on populated bins (the parity oracle); the derivative at an
-    exactly-empty bin is a documented divergence (the mask is non-smooth there
-    -- the analogue of ``lncc_grad``'s boundary divergence).  Voxels outside
-    ``[lo_m, hi_m]`` get zero force (the soft bin is clipped, so its derivative
-    vanishes).  **Unnormalised** Mattes MI only -- the normalised (Studholme) NMI
-    gradient is :func:`nmi_grad` (the quotient-rule form).
+    The empty-bin masking (``where(P > 0, ...)``) is deliberately identical to
+    that of :func:`mutual_information`, so :func:`mi_grad` matches
+    ``jax.grad(mutual_information)`` to tolerance on populated bins (the parity
+    oracle); the derivative at an exactly-empty bin is a documented divergence
+    (the mask is non-smooth there -- the analogue of :func:`lncc_grad`'s
+    boundary divergence). Voxels outside ``[lo_m, hi_m]`` get zero force (the
+    soft bin is clipped, so its derivative vanishes). This is the
+    **unnormalised** Mattes mutual information only -- the normalised
+    (Studholme) gradient is :func:`nmi_grad` (the quotient-rule form).
+
+    References
+    ----------
+    Mattes, D., Haynor, D. R., Vesselle, H., Lewellen, T. K., & Eubank, W.
+    (2003). PET-CT image registration in the chest using free-form
+    deformations. *IEEE Transactions on Medical Imaging*, 22(1), 120-128.
+    https://doi.org/10.1109/TMI.2003.809072
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)
@@ -350,38 +419,69 @@ def nmi_grad(
     sample_stride: int = 1,
     eps: float = 1e-10,
 ) -> Float[Array, '...']:
-    """Closed-form ``∂NMI/∂moving`` -- the normalised-MI (Studholme) gradient.
+    r"""Closed-form normalised-mutual-information (Studholme) gradient.
 
     The analytic per-voxel derivative of :func:`mutual_information` with
-    ``normalized=True`` (``NMI = (H_m + H_f) / H_mf``) w.r.t. the moving
-    intensities, the NMI analogue of :func:`mi_grad` (the deferred quotient-rule
-    form, now shipped).  As in the Mattes derivation the gradient flows through
-    **only** the moving soft-bin weights, so the fixed marginal entropy ``H_f`` is
-    invariant (``Σ_a ∂β_m/∂m = 0``).  The quotient rule over ``H_m`` (varies) and
-    ``H_mf`` then gives
+    ``normalized=True`` (:math:`\mathrm{NMI} = (H_m + H_f) / H_{mf}`) with
+    respect to the moving intensities,
+    :math:`\partial\mathrm{NMI}/\partial\mathrm{moving}`, the normalised
+    analogue of :func:`mi_grad` (the quotient-rule form). As in the Mattes
+    derivation, the gradient flows through only the moving soft-bin weights, so
+    the fixed marginal entropy :math:`H_f` is invariant
+    (:math:`\sum_a \partial\beta_m/\partial m = 0`). The quotient rule over
+    :math:`H_m` (which varies) and :math:`H_{mf}` then gives
 
-    ``∂NMI/∂m(x) = −(s_m / (N·H_mf)) · [ Dₘ[k] − NMI·((1−t_f)·D_mf[k,l]
-                  + t_f·D_mf[k,l+1]) ]``
+    .. math::
 
-    with ``s_m = (bins−1)/span_m``; ``k``/``l`` the moving/fixed lower bins; ``t_f``
-    the fixed fractional weight; ``Dₘ[a] = log P_m[a+1] − log P_m[a]`` the
-    moving-marginal forward difference; and ``D_mf[a,b] = log P[a+1,b] − log P[a,b]``
-    the joint forward difference (along the moving axis).  (Setting ``NMI -> 1`` and
-    the prefactor ``-1/(N·H_mf) -> 1/N`` recovers the same ``Dₘ`` / ``D_mf``
-    structure :func:`mi_grad` reduces ``MI = H_m + H_f − H_mf`` to.)
+        \frac{\partial\mathrm{NMI}}{\partial m}(x)
+        = -\frac{s_m}{N\,H_{mf}}\left[D_m[k]
+          - \mathrm{NMI}\left((1 - t_f)\, D_{mf}[k,l]
+          + t_f\, D_{mf}[k,l+1]\right)\right]
 
-    Parameters mirror :func:`mi_grad` (``bins`` / ``range_*`` / ``sample_stride``;
-    pin the ranges).  Returns ``∂NMI/∂moving`` (an **ascent** direction -- NMI is
-    a similarity), same shape as ``moving``.
+    with :math:`s_m = (\mathrm{bins} - 1) / \mathrm{span}_m`; :math:`k` and
+    :math:`l` the moving and fixed lower bins; :math:`t_f` the fixed fractional
+    weight; :math:`D_m[a] = \log P_m[a+1] - \log P_m[a]` the moving-marginal
+    forward difference; and :math:`D_{mf}[a,b] = \log P[a+1,b] - \log P[a,b]`
+    the joint forward difference (along the moving axis). Setting
+    :math:`\mathrm{NMI} \to 1` and the prefactor
+    :math:`-1/(N\,H_{mf}) \to 1/N` recovers the same :math:`D_m` / :math:`D_{mf}`
+    structure to which :func:`mi_grad` reduces
+    :math:`\mathrm{MI} = H_m + H_f - H_{mf}`.
+
+    Parameters
+    ----------
+    moving, fixed
+        Images of identical shape.
+    bins
+        Bins per axis (must match the cost; default 32).
+    range_moving, range_fixed
+        Optional ``(lo, hi)`` intensity ranges. **Pin** them for a stationary
+        objective, as for :func:`mi_grad`. ``None`` (default) uses the
+        per-image data min / max.
+    sample_stride
+        Estimate the joint PDF from every ``sample_stride``-th voxel (ITK
+        "Regular" sampling); the gradient is still applied densely. ``1``
+        (default) is the exact full histogram. Jit-static (a Python int).
+    eps
+        Small constant guarding the logarithms and the :math:`H_{mf}`
+        denominators (default ``1e-10``).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The gradient :math:`\partial\mathrm{NMI}/\partial\mathrm{moving}` (an
+        ascent direction, as normalised mutual information is a similarity),
+        same shape as ``moving``.
 
     Notes
     -----
-    The empty-bin ``where(· > 0, …)`` masking matches
-    :func:`mutual_information`'s ``normalized=True`` branch, so
-    ``nmi_grad == jax.grad(mutual_information(normalized=True))`` to tolerance on
-    populated bins (the parity oracle); the boundary divergence at an exactly-empty
-    bin is the same documented non-smoothness as :func:`mi_grad`.  Voxels outside
-    ``[lo_m, hi_m]`` get zero force.
+    The empty-bin ``where(... > 0, ...)`` masking matches the
+    ``normalized=True`` branch of :func:`mutual_information`, so
+    :func:`nmi_grad` matches ``jax.grad`` of ``mutual_information`` with
+    ``normalized=True`` to tolerance on populated bins (the parity oracle); the
+    boundary divergence at an exactly-empty bin is the same documented
+    non-smoothness as :func:`mi_grad`. Voxels outside ``[lo_m, hi_m]`` get zero
+    force.
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)
@@ -424,28 +524,49 @@ def correlation_ratio(
     eps: float = 1e-10,
     mask: Optional[Float[Array, '...']] = None,
 ) -> Float[Array, '']:
-    """Roche's correlation ratio ``η²(moving | fixed)``.
+    r"""Roche's correlation ratio :math:`\eta^2(\mathrm{moving} \mid \mathrm{fixed})`.
 
-    Soft-bins ``fixed`` into ``bins`` groups and measures how much of
-    ``moving``'s variance is explained by the (soft) group means:
+    Soft-bins ``fixed`` into ``bins`` groups and measures how much of the
+    variance of ``moving`` is explained by the (soft) group means:
 
-    ``η² = Σ_k n_k (μ_k − μ)² / Σ (m − μ)²``.
+    .. math::
 
-    Lies in ``[0, 1]``: ``1`` when ``moving`` is a deterministic
-    function of ``fixed`` (any functional relationship, not just
-    affine), ``0`` when unrelated.  The FSL ``mcflirt`` cost is
-    ``1 − η²``.  Asymmetric by construction (``fixed`` is the
-    explanatory variable); ``bins`` / ``range_fixed`` control its
-    binning.
+        \eta^2 = \frac{\sum_k n_k (\mu_k - \mu)^2}{\sum (m - \mu)^2}.
+
+    Lies in ``[0, 1]``: it is ``1`` when ``moving`` is a deterministic function
+    of ``fixed`` (any functional relationship, not just affine), and ``0`` when
+    the two are unrelated. The FSL ``mcflirt`` cost is :math:`1 - \eta^2`. It is
+    asymmetric by construction (``fixed`` is the explanatory variable).
+
+    Parameters
+    ----------
+    moving, fixed
+        Images of identical shape. ``moving`` is the response and ``fixed`` the
+        explanatory variable partitioned into groups.
+    bins
+        Number of groups into which ``fixed`` is soft-binned (default 32).
+    range_fixed
+        Optional ``(lo, hi)`` intensity range for ``fixed``, controlling its
+        binning. ``None`` (default) uses the data min / max.
+    eps
+        Small constant guarding the group-count and total-variance
+        denominators (default ``1e-10``).
+    mask
+        Optional non-negative per-voxel weight (same shape as the images)
+        gating the per-group scatter **and** the global mean / total variance,
+        so an out-of-mask voxel is excluded from :math:`\eta^2`.
+
+    Returns
+    -------
+    Float[Array, '']
+        Scalar correlation ratio :math:`\eta^2` in ``[0, 1]``.
 
     Notes
     -----
     FSL / Roche lineage; SimpleITK's registration framework ships no
-    correlation-ratio metric, so there is no domain co-oracle (a numpy
-    fp64 reimplementation is the only reference).  Uses the same linear
-    soft binning as :func:`joint_histogram` (differentiable).  ``mask``
-    (optional per-voxel weight) gates the per-group scatter **and** the global
-    mean / total variance, so an out-of-mask voxel is excluded from η².
+    correlation-ratio metric, so there is no domain co-oracle (a NumPy fp64
+    reimplementation is the only reference). Uses the same linear soft binning
+    as :func:`joint_histogram` (differentiable).
     """
     m = moving.reshape(-1)
     f = fixed.reshape(-1)

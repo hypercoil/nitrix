@@ -1,0 +1,76 @@
+---
+title: "ncc"
+generated: true
+description: "Global normalised cross-correlation (Pearson correlation)."
+---
+
+[‹ back to `nitrix.metrics.intensity`](../nitrix-metrics-intensity.qmd)
+
+<!-- nitrix:gen sig:ncc -->
+```python
+ncc(x: Float[Array, '...'], y: Float[Array, '...'], *, mask: Optional[Float[Array, '...']] = None, eps: float = 1e-08) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ncc -->
+Global normalised cross-correlation (Pearson correlation).
+
+Computed over *all* elements (flattened).  Returns a scalar in
+$[-1, 1]$: $1$ for identical-up-to-positive-affine
+images, $-1$ for negated.  Use `-ncc` (or `1 - ncc`) as a
+cost.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ncc -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Images of identical shape. All elements are flattened together before the correlation is formed. |
+| `y` | `Float` | `...` | — | Images of identical shape. All elements are flattened together before the correlation is formed. |
+| `mask` | `Optional[Float[Array, '...']]` | — | `None` | Optional non-negative weight of the same shape. Both means and the correlation are computed as weighted quantities under these weights, so an out-of-mask element (zero weight) does not contribute. `None` (default) weights every element equally. |
+| `eps` | `float` | — | `1e-08` | Small positive floor guarding the zero-variance denominator (and the sum of weights), avoiding division by zero on a flat image. |
+
+**Returns** `Float` — shape —. The scalar signed Pearson correlation coefficient in $[-1, 1]$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:ncc -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **147.7 µs** (median, L4); up to **2343.71× faster** than `simpleitk.Correlation`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_NCC.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| ncc | jax-cuda12 | shape=[128, 128, 128] | `cupy.ncc` | ok | 236.2 µs / 252.6 µs | 169.66 ms | 16.78 MB (hbm) | ✓ 1.5e-05×tol | 2.03x vs nitrix-jax |
+| ncc | jax-cuda12 | shape=[128, 128, 128] | `nitrix-jax` | ok | 116.1 µs / 147.7 µs | 338.55 ms | 50.33 MB (hbm) | ✓ 9.4e-05×tol | 1.00x vs nitrix-jax |
+| ncc | jax-cuda12 | shape=[128, 128, 128] | `numpy.ncc` | ok | 24.99 ms / 25.13 ms | 25.09 ms | 16.78 MB (hbm) | ✓ 0×tol | 215.17x vs nitrix-jax |
+| ncc | jax-cuda12 | shape=[128, 128, 128] | `simpleitk.Correlation` | ok | 272.16 ms / 299.52 ms | 358.20 ms | 16.78 MB (hbm) | ≈ 1.8e+03×tol | 2343.71x vs nitrix-jax |
+| ncc | jax-cuda12 | shape=[64, 64, 64] | `cupy.ncc` | ok | 243.3 µs / 252.0 µs | 2.031 s | 2.10 MB (hbm) | ✓ 9.7e-05×tol | 2.02x vs nitrix-jax |
+| ncc | jax-cuda12 | shape=[64, 64, 64] | `nitrix-jax` | ok | 120.4 µs / 126.0 µs | 312.14 ms | 35.65 MB (hbm) | ✓ 4.3e-05×tol | 1.00x vs nitrix-jax |
+| ncc | jax-cuda12 | shape=[64, 64, 64] | `numpy.ncc` | ok | 2.37 ms / 2.40 ms | 2.46 ms | 2.10 MB (hbm) | ✓ 0×tol | 19.66x vs nitrix-jax |
+| ncc | jax-cuda12 | shape=[64, 64, 64] | `simpleitk.Correlation` | ok | 31.46 ms / 34.49 ms | 101.58 ms | 2.10 MB (hbm) | ≈ 1.8e+03×tol | 261.30x vs nitrix-jax |
+:::
+
+*source: bench `02d1a5d9` · nitrix `a0769766`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:ncc -->
+::: {.callout-note}
+This is the *signed* Pearson correlation.  ITK's `Correlation`
+metric (`CorrelationImageToImageMetricv4`) is the same
+mean-subtracted correlation returned as `-r**2` (squared and
+negated for minimisation), so it is sign-insensitive where this is
+not.  Recover it as `-ncc(...)**2`; the sign-agnostic cost is
+`1 - ncc(...)**2` (not `1 - ncc`).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ncc -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

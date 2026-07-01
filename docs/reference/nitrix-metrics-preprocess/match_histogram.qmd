@@ -1,0 +1,50 @@
+---
+title: "match_histogram"
+generated: true
+description: "Match the intensity histogram of `moving` to that of `reference`."
+---
+
+[‹ back to `nitrix.metrics.preprocess`](../nitrix-metrics-preprocess.qmd)
+
+<!-- nitrix:gen sig:match_histogram -->
+```python
+match_histogram(moving: Float[Array, '...'], reference: Float[Array, '...'], *, bins: int = 256) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:match_histogram -->
+Match the intensity histogram of `moving` to that of `reference`.
+
+Remaps the intensities of `moving` by quantile transport so that its
+distribution matches `reference`'s.
+
+The fMRIPrep `--use-histogram-matching 1` step for within-modality stages:
+each moving intensity is mapped to the reference intensity at the same
+quantile (CDF transport), so the two images share an intensity distribution
+and an SSD / CC metric is not pulled off by a global gain / offset.
+
+Implemented by interpolating `moving` against the two images' quantile
+curves (`bins` quantiles each) -- differentiable, `O(N log N)` (the
+quantile sorts), paid once before the pyramid.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:match_histogram -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` | — | Image to remap. |
+| `reference` | `Float` | `...` | — | Image whose distribution is matched (the registration `fixed`). |
+| `bins` | `int` | — | `256` | Number of quantile knots in the transport map (default `256`). |
+
+**Returns** `Float` — shape `...`. The remapped moving image, with the same shape as `moving`, whose intensity distribution matches that of `reference`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:match_histogram -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

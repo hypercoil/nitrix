@@ -1,0 +1,61 @@
+---
+title: "nitrix.metrics.surface"
+generated: true
+signature-hash: a5e98962925d588d
+description: "Surface-distance metrics: [`hausdorff95`](nitrix-metrics-surface/hausdorff95.qmd) and [`surface_dice`](nitrix-metrics-surface/surface_dice.qmd)."
+listing:
+  id: nitrix-metrics-surface-symbols
+  contents: "nitrix-metrics-surface/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.metrics.surface`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Surface-distance metrics: [`hausdorff95`](nitrix-metrics-surface/hausdorff95.qmd) and [`surface_dice`](nitrix-metrics-surface/surface_dice.qmd).
+
+The boundary-overlap reporting set for segmentation (BraTS / KiTS / MSD score
+Dice **+ HD95 + surface-Dice**).  Both are built from one pipeline over the
+morphology substrate:
+
+1. **surface** voxels = $\text{mask} \wedge \neg\,\text{erode(mask)}$
+   with a connectivity-1 (face) structuring element -- the boundary voxels
+   (those with at least one background face-neighbour).  The mask is padded with
+   background first, so a foreground voxel on the volume border counts as
+   surface (scipy `binary_erosion` `border_value=0` semantics).
+2. **distance field** to the other surface = exact (anisotropic) Euclidean
+   distance transform of the surface's complement
+   ([`distance_transform_edt`](nitrix-morphology/distance_transform_edt.qmd)), so distances are in
+   `spacing` units.
+3. **reduce**: HD95 = the max over directions of the 95th-percentile directed
+   surface distance; surface-Dice = the fraction of both surfaces within a
+   tolerance of the other.
+
+Convention is pinned to **MONAI** (the lineage of the consuming ports):
+`compute_hausdorff_distance(percentile=95)` and `compute_surface_dice`
+(`use_subvoxels=False`, the count -- not area -- form).  These are
+**reporting metrics, not training objectives**: they are non-differentiable
+(boundary extraction, the Euclidean distance transform, the percentile, and the
+counting are all piecewise-constant), and so are admitted as hard-output
+diagnostics rather than as gradients.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-metrics-surface-symbols}
+:::

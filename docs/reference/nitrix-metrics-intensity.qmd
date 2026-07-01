@@ -1,0 +1,50 @@
+---
+title: "nitrix.metrics.intensity"
+generated: true
+signature-hash: 601b61d42d8c2290
+description: "Intensity-based image-similarity metrics."
+listing:
+  id: nitrix-metrics-intensity-symbols
+  contents: "nitrix-metrics-intensity/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.metrics.intensity`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Intensity-based image-similarity metrics.
+
+- [`ssd`](nitrix-metrics-intensity/ssd.qmd) -- sum / mean of squared differences (within-modality;
+  motion correction).
+- [`ncc`](nitrix-metrics-intensity/ncc.qmd) -- global normalised cross-correlation (Pearson over all
+  voxels; within-modality, robust to linear intensity change).
+- [`lncc`](nitrix-metrics-intensity/lncc.qmd) -- local (windowed) normalised cross-correlation, the
+  ANTs squared form -- the diffeomorphic workhorse, robust to smooth
+  intensity inhomogeneity.
+
+All are differentiable with respect to both arguments (they sit inside a
+registration loss).  Convention: [`ssd`](nitrix-metrics-intensity/ssd.qmd) is a *cost* (minimise);
+[`ncc`](nitrix-metrics-intensity/ncc.qmd) / [`lncc`](nitrix-metrics-intensity/lncc.qmd) are *similarities* in (roughly)
+$[0, 1]$ (maximise, or minimise `1 - metric`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-metrics-intensity-symbols}
+:::

@@ -1,0 +1,76 @@
+---
+title: "nitrix.metrics.classification"
+generated: true
+signature-hash: 26d886bcc6597993
+description: "Classification / segmentation comparison kernels."
+listing:
+  id: nitrix-metrics-classification-symbols
+  contents: "nitrix-metrics-classification/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.metrics.classification`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Classification / segmentation comparison kernels.
+
+*Cross-entropy losses* (costs, minimise; `reduction` selects
+`"mean"` / `"sum"` / `"none"`):
+
+- [`bce_with_logits`](nitrix-metrics-classification/bce_with_logits.qmd) -- binary cross-entropy from logits, in the
+  numerically stable $\max(x, 0) - x t + \log(1 + e^{-|x|})$ form
+  (no intermediate `sigmoid` / `log` that overflows for large
+  $|x|$).
+- [`cross_entropy_with_logits`](nitrix-metrics-classification/cross_entropy_with_logits.qmd) -- categorical cross-entropy from
+  logits against integer class targets (`log_softmax` + gather).
+- [`focal_loss`](nitrix-metrics-classification/focal_loss.qmd) -- the focal loss of Lin et al. (2017): binary
+  cross-entropy down-weighted by $(1 - p_t)^{\gamma}$ so easy,
+  well-classified examples contribute little, with an optional
+  class-balancing $\alpha$.  Shares the stable
+  binary-cross-entropy core with [`bce_with_logits`](nitrix-metrics-classification/bce_with_logits.qmd).
+
+*Evaluation metrics* (reporting, not training objectives; **not
+differentiable** -- they ride argsort / bincount / top-`k` operations,
+which are piecewise-constant and so carry no useful gradient):
+
+- [`roc_auc`](nitrix-metrics-classification/roc_auc.qmd) -- area under the ROC curve via the rank
+  (Mann-Whitney $U$) form, so ties are tie-corrected by average
+  ranks.  A **global** statistic: score it on the *gathered*
+  `(scores, labels)`, never as a per-batch mean (averaging AUCs is not
+  the AUC).
+- [`confusion_matrix`](nitrix-metrics-classification/confusion_matrix.qmd) -- integer count matrix, `row = true` /
+  `col = predicted` (the sklearn orientation).
+- [`topk_accuracy`](nitrix-metrics-classification/topk_accuracy.qmd) -- fraction of rows whose top-`k` predictions
+  contain the true label.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+.. [1] Lin, T.-Y., Goyal, P., Girshick, R., He, K., & Dollár, P. (2017).
+   Focal loss for dense object detection. *Proceedings of the IEEE
+   International Conference on Computer Vision (ICCV)*, 2980-2988.
+   `10.1109/ICCV.2017.324`
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `N` | observations — time points, subjects, or sampled points |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-metrics-classification-symbols}
+:::

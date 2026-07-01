@@ -1,0 +1,61 @@
+---
+title: "lncc_grad"
+generated: true
+description: "Analytic gradient of the (summed) [`lncc`](../nitrix-metrics-intensity/lncc.qmd) with respect to `moving`."
+---
+
+[‹ back to `nitrix.metrics.intensity`](../nitrix-metrics-intensity.qmd)
+
+<!-- nitrix:gen sig:lncc_grad -->
+```python
+lncc_grad(moving: Float[Array, '... *spatial'], fixed: Float[Array, '... *spatial'], *, radius: Union[int, Sequence[int]] = 4, spatial_rank: Optional[int] = None, mode: BoundaryMode = 'reflect', eps: float = 1e-05) -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lncc_grad -->
+Analytic gradient of the (summed) [`lncc`](../nitrix-metrics-intensity/lncc.qmd) with respect to `moving`.
+
+The closed-form $\partial(\sum cc)/\partial\,\mathrm{moving}$ --
+the local cross-correlation *force* that drives a greedy-SyN / Demons
+velocity update (multiply by the spatial gradient of `moving` for
+the deformation gradient).  Derived from the same windowed box sums
+[`lncc`](../nitrix-metrics-intensity/lncc.qmd) already forms, plus a second box-sum pass over the
+per-window coefficients
+
+`$text
+P = 2\cdot cross / D,   Q = -2\cdot cross^2\cdot var_f / D^2,   D = var_m\cdot var_f + eps
+grad = fixed\cdot B(P) - B(P\cdot f_{bar}) + moving\cdot B(Q) - B(Q\cdot m_{bar})$`
+
+with $B$ the box sum and $\bar{m} = \sum m / n$ /
+$\bar{f} = \sum f / n$ the window means.  Interior-identical
+(fp64) to `jax.grad` of `lncc(..., reduction="sum")` -- but
+without differentiating through the convolutions, so it is cheaper
+and materialises no autodiff tape.  (The boundary differs by the box
+filter's non-self-adjoint reflect pad, as ANTs' valid-neighbourhood
+trim does; the interior is what drives the registration.)
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lncc_grad -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` × `*spatial` | — | Images of identical shape, `(..., *spatial)`. Leading axes are treated as batch; the gradient is taken with respect to `moving`. |
+| `fixed` | `Float` | `...` × `*spatial` | — | Images of identical shape, `(..., *spatial)`. Leading axes are treated as batch; the gradient is taken with respect to `moving`. |
+| `radius` | `Union[int, Sequence[int]]` | — | `4` | Window half-width $r$, giving a box of size $2r + 1$ per axis. An `int` gives an isotropic window; a sequence gives one radius per spatial axis. |
+| `spatial_rank` | `Optional[int]` | — | `None` | Number of trailing axes to treat as spatial. `None` (default) infers from `radius` (if a sequence) else assumes all of `moving.ndim`. |
+| `mode` | `BoundaryMode` | — | `'reflect'` | Boundary mode for the windowed sums. Default `"reflect"`, which keeps the window count uniform. |
+| `eps` | `float` | — | `1e-05` | Denominator guard for flat (zero-variance) windows. |
+
+**Returns** `Float` — shape `...` × `*spatial`. The per-voxel local cross-correlation force, of the same shape as `moving`. This is the gradient of the `"sum"` reduction of [`lncc`](../nitrix-metrics-intensity/lncc.qmd) (the natural per-voxel force magnitude); there is no `reduction` argument.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lncc_grad -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

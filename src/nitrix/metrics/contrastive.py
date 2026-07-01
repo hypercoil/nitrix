@@ -4,22 +4,21 @@
 """
 Contrastive / self-supervised representation kernels.
 
-- ``info_nce`` -- the InfoNCE / NT-Xent objective between two aligned view
+- :func:`info_nce` -- the InfoNCE / NT-Xent objective between two aligned view
   batches: pull the matched pair together and push every other sample apart
   on the unit sphere.
-- ``dino_cross_entropy`` -- the self-distillation cross-entropy between a
+- :func:`dino_cross_entropy` -- the self-distillation cross-entropy between a
   sharpened, centred teacher distribution (stop-gradient) and a student.
-- ``ibot_cross_entropy`` -- the masked-token variant of the above, averaged
-  over the masked positions of each sample.
-- ``koleo`` -- the Kozachenko--Leonenko differential-entropy regulariser:
+- :func:`ibot_cross_entropy` -- the masked-token variant of the above,
+  averaged over the masked positions of each sample.
+- :func:`koleo` -- the Kozachenko--Leonenko differential-entropy regulariser:
   spread features out by penalising small nearest-neighbour distances.
 
-Per ``SPEC §5`` these are *score kernels*: they take the
-**objective structure** (the view pairing, the masked-token selection, the
-teacher ``center`` and its EMA) as explicit arguments rather than baking a
-recipe in, and they reduce through the shared leaf reduction. The EMA /
-centre bookkeeping and the view-stacking layout are recipes and stay with
-the nimox / ilex caller.
+These are *score kernels*: they take the **objective structure** (the view
+pairing, the masked-token selection, the teacher ``center`` and its EMA) as
+explicit arguments rather than baking a recipe in, and they reduce through the
+shared leaf reduction. The EMA / centre bookkeeping and the view-stacking
+layout are recipes and stay with the caller.
 """
 
 from __future__ import annotations
@@ -46,11 +45,12 @@ def info_nce(
     temperature: float = 0.5,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """InfoNCE / NT-Xent loss between two aligned view batches.
+    r"""InfoNCE / NT-Xent loss between two aligned view batches.
 
     ``za[i]`` and ``zb[i]`` are the two views of sample ``i`` (the positive
     pair); all other samples are negatives.  Both batches are L2-normalised,
-    and the scaled cross-view cosine-similarity ``za zbᵀ / τ`` is the logits:
+    and the scaled cross-view cosine similarity
+    :math:`z_a z_b^{\top} / \tau` provides the logits:
     row ``i`` is classified against the ``n`` keys in ``zb`` with the true
     class ``i`` (and symmetrically for ``zb`` against ``za``).  The loss is
     the average of the two directional cross-entropies.
@@ -68,9 +68,16 @@ def info_nce(
     za, zb
         ``(n, d)`` embeddings; ``za[i]``/``zb[i]`` are a positive pair.
     temperature
-        Softmax temperature ``τ``.
+        Softmax temperature :math:`\tau`.
     reduction
         ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-sample loss).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The InfoNCE loss. With ``reduction="none"`` this is the per-sample
+        loss of shape ``(n,)``; with ``"mean"`` or ``"sum"`` it is a scalar
+        reducing over the ``n`` samples.
     """
     za = l2_normalize(za, axis=-1)
     zb = l2_normalize(zb, axis=-1)
@@ -91,11 +98,32 @@ def _distill_ce(
     student_temp: float,
     teacher_temp: float,
 ) -> Float[Array, '...']:
-    """Centred / sharpened teacher cross-entropy, per sample (unreduced).
+    r"""Centred / sharpened teacher cross-entropy, per sample (unreduced).
 
-    ``H(softmax((teacher - center)/τ_t)  [stop-grad],  log_softmax(student/τ_s))``
-    summed over the ``k`` prototypes.  The shared core of
-    :func:`dino_cross_entropy` and :func:`ibot_cross_entropy`.
+    The cross-entropy of the detached, centred and sharpened teacher
+    distribution :math:`\operatorname{softmax}((\text{teacher} -
+    \text{center}) / \tau_t)` against the student's
+    :math:`\operatorname{log\_softmax}(\text{student} / \tau_s)`, summed over
+    the ``k`` prototypes.  The shared core of :func:`dino_cross_entropy` and
+    :func:`ibot_cross_entropy`.
+
+    Parameters
+    ----------
+    student_logits, teacher_logits
+        Prototype scores ``(..., k)`` for the student and teacher networks.
+    center
+        Teacher centring vector ``(k,)`` subtracted from the teacher logits.
+    student_temp
+        Softmax temperature :math:`\tau_s` for the student distribution.
+    teacher_temp
+        Softmax temperature :math:`\tau_t` for the teacher distribution
+        (typically smaller, i.e. sharper).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The per-sample cross-entropy of shape ``(...)``, with the ``k``
+        prototype axis summed out and no batch reduction applied.
     """
     teacher = jax.nn.softmax((teacher_logits - center) / teacher_temp, axis=-1)
     teacher = jax.lax.stop_gradient(teacher)
@@ -112,14 +140,15 @@ def dino_cross_entropy(
     teacher_temp: float = 0.04,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Self-distillation cross-entropy (DINO).
+    r"""Self-distillation cross-entropy (DINO).
 
     The teacher distribution is centred and sharpened
-    (``softmax((teacher - center) / teacher_temp)``) and detached; the loss
-    is its cross-entropy against the student's
-    ``log_softmax(student / student_temp)``, summed over the ``k`` prototypes
-    and reduced over the batch.  Centring (subtracting a running mean) plus a
-    low teacher temperature is what prevents collapse.
+    (:math:`\operatorname{softmax}((\text{teacher} - \text{center}) /
+    \tau_t)`) and detached; the loss is its cross-entropy against the
+    student's :math:`\operatorname{log\_softmax}(\text{student} / \tau_s)`,
+    summed over the ``k`` prototypes and reduced over the batch.  Centring
+    (subtracting a running mean) plus a low teacher temperature is what
+    prevents collapse.
 
     Parameters
     ----------
@@ -131,6 +160,13 @@ def dino_cross_entropy(
         Softmax temperatures (teacher sharper, i.e. smaller).
     reduction
         ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-sample CE).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The self-distillation cross-entropy. With ``reduction="none"`` this is
+        the per-sample cross-entropy retaining the leading batch axes; with
+        ``"mean"`` or ``"sum"`` it is a scalar reducing over the batch.
     """
     ce = _distill_ce(
         student_logits,
@@ -152,14 +188,15 @@ def ibot_cross_entropy(
     teacher_temp: float = 0.04,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Masked-token self-distillation cross-entropy (iBOT).
+    r"""Masked-token self-distillation cross-entropy (iBOT).
 
     Exactly :func:`dino_cross_entropy`'s centred/sharpened cross-entropy
     evaluated per patch token, then **domain-mask reduced** over the masked
     tokens of each sample: the per-sample score is the
-    ``Σ(mask·ce)/Σ(mask)`` weighted mean over the token axis (the masked
-    token is the measurement domain), and the result is reduced over the
-    batch.  An all-unmasked sample contributes 0.
+    :math:`\sum(\text{mask} \cdot \text{ce}) / \sum(\text{mask})` weighted
+    mean over the token axis (the masked token is the measurement domain), and
+    the result is reduced over the batch.  An all-unmasked sample contributes
+    0.
 
     Parameters
     ----------
@@ -174,6 +211,14 @@ def ibot_cross_entropy(
         Softmax temperatures.
     reduction
         ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-sample CE).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The masked-token self-distillation cross-entropy. With
+        ``reduction="none"`` this is the per-sample mask-weighted mean of
+        shape ``(batch,)``; with ``"mean"`` or ``"sum"`` it is a scalar
+        reducing over the batch.
     """
     ce = _distill_ce(
         student_logits,
@@ -194,14 +239,14 @@ def koleo(
     eps: float = 1e-8,
     reduction: Reduction = 'mean',
 ) -> Float[Array, '...']:
-    """Kozachenko--Leonenko entropy (feature-spread) regulariser.
+    r"""Kozachenko--Leonenko entropy (feature-spread) regulariser.
 
     Penalises features clumping together: for each (L2-normalised) point it
     finds the nearest neighbour via the maximum cosine similarity (self
     excluded by a ``-2`` diagonal, below the ``[-1, 1]`` range), converts to
-    the Euclidean distance ``sqrt(2 - 2 cos)``, and returns
-    ``-log(distance + eps)`` -- large when points collapse together, small
-    when they are well spread.
+    the Euclidean distance :math:`\sqrt{2 - 2\cos}`, and returns
+    :math:`-\log(\text{distance} + \text{eps})` -- large when points collapse
+    together, small when they are well spread.
 
     The dense self-excluded cosine nearest-neighbour is exact and right at
     embedding-batch sizes; the EUCLIDEAN-semiring ELL k-NN is the at-scale
@@ -215,6 +260,13 @@ def koleo(
         Guards ``log`` of a zero nearest-neighbour distance.
     reduction
         ``"mean"`` (default), ``"sum"``, or ``"none"`` (per-point value).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The Kozachenko--Leonenko regulariser. With ``reduction="none"`` this
+        is the per-point value of shape ``(n,)``; with ``"mean"`` or ``"sum"``
+        it is a scalar reducing over the ``n`` points.
     """
     n = z.shape[0]
     zn = l2_normalize(z, axis=-1)

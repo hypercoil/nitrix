@@ -1,0 +1,43 @@
+---
+title: "winsorize"
+generated: true
+description: "Clip `image` to its `[lower, upper]` intensity percentiles."
+---
+
+[‹ back to `nitrix.metrics.preprocess`](../nitrix-metrics-preprocess.qmd)
+
+<!-- nitrix:gen sig:winsorize -->
+```python
+winsorize(image: Float[Array, '...'], *, lower: float = 0.005, upper: float = 0.995) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:winsorize -->
+Clip `image` to its `[lower, upper]` intensity percentiles.
+
+The fMRIPrep `--winsorize-image-intensities [0.005, 0.995]` step: the
+bottom / top tails are clamped to the percentile values, so a handful of
+extreme voxels cannot dominate the intensity-based cost.  Pure and
+differentiable.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:winsorize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `image` | `Float` | `...` | — | Any-shape intensity array (the percentiles are over **all** elements). |
+| `lower` | `float` | — | `0.005` | Lower / upper clip percentiles in `[0, 1]` (default `0.005` / `0.995`, the ANTs / fMRIPrep convention). |
+| `upper` | `float` | — | `0.995` | Lower / upper clip percentiles in `[0, 1]` (default `0.005` / `0.995`, the ANTs / fMRIPrep convention). |
+
+**Returns** `Float` — shape `...`. The intensity array with the same shape as `image`, its values clamped to lie within the `lower` and `upper` intensity percentiles.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:winsorize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

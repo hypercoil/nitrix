@@ -1,0 +1,49 @@
+---
+title: "nitrix.nn.ssm"
+generated: true
+signature-hash: a1a268f49b22e180
+description: "Selective state-space scan (Mamba / S6)."
+listing:
+  id: nitrix-nn-ssm-symbols
+  contents: "nitrix-nn-ssm/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.nn.ssm`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Selective state-space scan (Mamba / S6).
+
+This subpackage exposes [`selective_scan`](nitrix-nn-ssm/selective_scan.qmd), the discretised selective
+recurrence at the heart of the Mamba / S6 state-space model, with three-level
+backend selection.  The `'jax'` reference is the bit-faithful oracle (and
+auto-selects the parallel associative scan on GPU); `'pallas-cuda'` is the
+fused chunked-scan fast path, certified equivalent to the `'jax'` reference
+only within the nitrix tolerance.  Until the fused kernel lands, a
+`'pallas-cuda'` request falls back to the reference and emits a loud
+`NitrixBackendFallback` warning (the GPU parallel-scan speedup still applies
+via the reference).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `l` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-nn-ssm-symbols}
+:::

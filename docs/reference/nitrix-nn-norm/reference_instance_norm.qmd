@@ -1,0 +1,49 @@
+---
+title: "reference_instance_norm"
+generated: true
+description: "Instance normalisation per sample and channel (reference oracle)."
+---
+
+[‹ back to `nitrix.nn.norm`](../nitrix-nn-norm.qmd)
+
+*Re-exported here; defined in `nitrix.nn.norm._reference`.*
+
+<!-- nitrix:gen sig:reference_instance_norm -->
+```python
+reference_instance_norm(x: Float[Array, 'n c *spatial'], weight: Optional[Float[Array, 'c']] = None, bias: Optional[Float[Array, 'c']] = None, *, eps: float = 1e-05, out_scale: float = 1.0) -> Float[Array, 'n c *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_instance_norm -->
+Instance normalisation per sample and channel (reference oracle).
+
+Normalise each channel of a channels-first input independently over its
+spatial axes, per sample. This is exactly group normalisation with one group
+per channel, so the call delegates to [`reference_group_norm`](../nitrix-nn-norm/reference_group_norm.qmd) with
+`num_groups` equal to the number of channels.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_instance_norm -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `n` × `c` × `*spatial` | — | Channels-first input tensor: leading sample axis `n`, channel axis `c`, then zero or more spatial axes. |
+| `weight` | `Optional[Float[Array, 'c']]` | — | `None` | Per-channel affine scale. If `None`, no multiplicative scaling is applied. |
+| `bias` | `Optional[Float[Array, 'c']]` | — | `None` | Per-channel affine shift. If `None`, no additive shift is applied. |
+| `eps` | `float` | — | `1e-05` | Small constant added to the variance before taking the reciprocal square root, for numerical stability. |
+| `out_scale` | `float` | — | `1.0` | Constant post-normalisation scale applied to the affine output, implementing the depth-scaling hook $\mathrm{out} = \mathrm{out\_scale}\cdot(\hat{x}\cdot w + b)$. |
+
+**Returns** `Float` — shape `n` × `c` × `*spatial`. The normalised, affine-transformed and scaled tensor, with the same shape and dtype as `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_instance_norm -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `c` | feature channels (channels-last) |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

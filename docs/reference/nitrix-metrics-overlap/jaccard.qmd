@@ -1,0 +1,54 @@
+---
+title: "jaccard"
+generated: true
+description: "Soft Jaccard index / intersection-over-union (IoU)."
+---
+
+[‹ back to `nitrix.metrics.overlap`](../nitrix-metrics-overlap.qmd)
+
+<!-- nitrix:gen sig:jaccard -->
+```python
+jaccard(pred: Float[Array, '...'], target: Float[Array, '...'], *, axis: Optional[_AxisArg] = None, smooth: float = 1e-07, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:jaccard -->
+Soft Jaccard index / intersection-over-union (IoU).
+
+For soft masks `p` (`pred`) and `t` (`target`) the index
+over the summed region is
+
+$(\sum p\, t + s) / (\sum p + \sum t - \sum p\, t + s)$
+
+-- the intersection over the union, with $s$ the value of
+`smooth`.  Values lie in $[0, 1]$; $1$ is a perfect
+overlap.  Use $1 - \mathrm{jaccard}$ as a loss (the "soft
+IoU" / Lovász-free IoU loss).
+
+Like [`dice`](../nitrix-metrics-overlap/dice.qmd), the inputs are soft masks and are not activated
+here.  The two metrics differ only in the denominator (Dice sums the
+magnitudes, Jaccard takes their union).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:jaccard -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `pred` | `Float` | `...` | — | Soft masks of identical shape. |
+| `target` | `Float` | `...` | — | Soft masks of identical shape. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes that span a single overlap region (summed in the numerator and denominator). `None` (default) sums over the whole tensor for one global index; pass the spatial axes (e.g. `axis=(-3, -2, -1)` on a `(batch, class, *spatial)` volume) for a per-`(batch, class)` index. |
+| `smooth` | `float` | — | `1e-07` | Laplace smoothing added to both numerator and denominator. Besides guarding the empty-mask denominator, adding it to the numerator makes an empty prediction against an empty target score exactly $1$ (vacuously perfect) rather than $0/0$. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"` applied to the per-region index array. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:jaccard -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

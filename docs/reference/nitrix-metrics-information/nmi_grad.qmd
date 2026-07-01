@@ -1,0 +1,81 @@
+---
+title: "nmi_grad"
+generated: true
+description: "Closed-form normalised-mutual-information (Studholme) gradient."
+---
+
+[‹ back to `nitrix.metrics.information`](../nitrix-metrics-information.qmd)
+
+<!-- nitrix:gen sig:nmi_grad -->
+```python
+nmi_grad(moving: Float[Array, '...'], fixed: Float[Array, '...'], *, bins: int = 32, range_moving: Optional[tuple[float, float]] = None, range_fixed: Optional[tuple[float, float]] = None, sample_stride: int = 1, eps: float = 1e-10) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:nmi_grad -->
+Closed-form normalised-mutual-information (Studholme) gradient.
+
+The analytic per-voxel derivative of [`mutual_information`](../nitrix-metrics-information/mutual_information.qmd) with
+`normalized=True` ($\mathrm{NMI} = (H_m + H_f) / H_{mf}$) with
+respect to the moving intensities,
+$\partial\mathrm{NMI}/\partial\mathrm{moving}$, the normalised
+analogue of [`mi_grad`](../nitrix-metrics-information/mi_grad.qmd) (the quotient-rule form). As in the Mattes
+derivation, the gradient flows through only the moving soft-bin weights, so
+the fixed marginal entropy $H_f$ is invariant
+($\sum_a \partial\beta_m/\partial m = 0$). The quotient rule over
+$H_m$ (which varies) and $H_{mf}$ then gives
+
+$$
+\frac{\partial\mathrm{NMI}}{\partial m}(x)
+= -\frac{s_m}{N\,H_{mf}}\left[D_m[k]
+  - \mathrm{NMI}\left((1 - t_f)\, D_{mf}[k,l]
+  + t_f\, D_{mf}[k,l+1]\right)\right]
+$$
+
+with $s_m = (\mathrm{bins} - 1) / \mathrm{span}_m$; $k$ and
+$l$ the moving and fixed lower bins; $t_f$ the fixed fractional
+weight; $D_m[a] = \log P_m[a+1] - \log P_m[a]$ the moving-marginal
+forward difference; and $D_{mf}[a,b] = \log P[a+1,b] - \log P[a,b]$
+the joint forward difference (along the moving axis). Setting
+$\mathrm{NMI} \to 1$ and the prefactor
+$-1/(N\,H_{mf}) \to 1/N$ recovers the same $D_m$ / $D_{mf}$
+structure to which [`mi_grad`](../nitrix-metrics-information/mi_grad.qmd) reduces
+$\mathrm{MI} = H_m + H_f - H_{mf}$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:nmi_grad -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` | — | Images of identical shape. |
+| `fixed` | `Float` | `...` | — | Images of identical shape. |
+| `bins` | `int` | — | `32` | Bins per axis (must match the cost; default 32). |
+| `range_moving` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity ranges. **Pin** them for a stationary objective, as for [`mi_grad`](../nitrix-metrics-information/mi_grad.qmd). `None` (default) uses the per-image data min / max. |
+| `range_fixed` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity ranges. **Pin** them for a stationary objective, as for [`mi_grad`](../nitrix-metrics-information/mi_grad.qmd). `None` (default) uses the per-image data min / max. |
+| `sample_stride` | `int` | — | `1` | Estimate the joint PDF from every `sample_stride`-th voxel (ITK "Regular" sampling); the gradient is still applied densely. `1` (default) is the exact full histogram. Jit-static (a Python int). |
+| `eps` | `float` | — | `1e-10` | Small constant guarding the logarithms and the $H_{mf}$ denominators (default `1e-10`). |
+
+**Returns** `Float` — shape `...`. The gradient $\partial\mathrm{NMI}/\partial\mathrm{moving}$ (an ascent direction, as normalised mutual information is a similarity), same shape as `moving`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:nmi_grad -->
+::: {.callout-note}
+The empty-bin `where(... > 0, ...)` masking matches the
+`normalized=True` branch of [`mutual_information`](../nitrix-metrics-information/mutual_information.qmd), so
+[`nmi_grad`](../nitrix-metrics-information/nmi_grad.qmd) matches `jax.grad` of `mutual_information` with
+`normalized=True` to tolerance on populated bins (the parity oracle); the
+boundary divergence at an exactly-empty bin is the same documented
+non-smoothness as [`mi_grad`](../nitrix-metrics-information/mi_grad.qmd). Voxels outside `[lo_m, hi_m]` get zero
+force.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:nmi_grad -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
