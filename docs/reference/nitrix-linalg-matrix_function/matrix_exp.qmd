@@ -1,0 +1,82 @@
+---
+title: "matrix_exp"
+generated: true
+description: "Matrix exponential $e^{A}$ of a general square matrix."
+---
+
+[‹ back to `nitrix.linalg.matrix_function`](../nitrix-linalg-matrix_function.qmd)
+
+<!-- nitrix:gen sig:matrix_exp -->
+```python
+matrix_exp(a: Float[Array, '... n n'], *, n_squarings: int = 8, taylor_order: int = 12) -> Float[Array, '... n n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:matrix_exp -->
+Matrix exponential $e^{A}$ of a general square matrix.
+
+Uses scaling-and-squaring with a truncated Taylor series: $A$ is
+scaled by $2^{-s}$, the Taylor series of $e^{A/2^{s}}$ is
+summed, and the result is squared $s$ times, so that
+$e^{A} = (e^{A/2^{s}})^{2^{s}}$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:matrix_exp -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `a` | `Float` | `...` × `n` × `n` | — | Square matrix, `(..., n, n)`. Need not be symmetric. Batches over leading dimensions. |
+| `n_squarings` | `int` | — | `8` | Scaling-and-squaring doublings $s$: $A$ is exponentiated as $(e^{A/2^{s}})^{2^{s}}$. The default `8` keeps the scaled norm small for any registration generator. |
+| `taylor_order` | `int` | — | `12` | Number of Taylor terms for $e^{A/2^{s}}$. Default `12`. |
+
+**Returns** `Float` — shape `...` × `n` × `n`. The matrix exponential $e^{A}$, same shape as `a`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:matrix_exp -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **3.54 ms** (median, L4); up to **73.38× faster** than `scipy.linalg.expm`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_MATRIX_EXP.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| matrix_exp | jax-cuda12 | n=1024 | `jax.scipy.linalg.expm` | ok | 4.76 ms / 4.77 ms | 709.21 ms | 83.89 MB (hbm) | ✓ 0.01×tol | 1.39x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=1024 | `nitrix-jax` | ok | 3.42 ms / 3.54 ms | 316.73 ms | 104.86 MB (hbm) | ✓ 0.17×tol | 1.00x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=1024 | `scipy.linalg.expm` | ok | 89.16 ms / 93.14 ms | 169.65 ms | 4.19 MB (hbm) | ✓ 0.00092×tol | 26.07x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=16 | `jax.scipy.linalg.expm` | ok | 497.5 µs / 503.4 µs | 1.211 s | 71.31 MB (hbm) | ✓ 0.00075×tol | 3.14x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=16 | `nitrix-jax` | ok | 158.4 µs / 170.8 µs | 429.58 ms | 88.08 MB (hbm) | ✓ 0.029×tol | 1.00x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=16 | `scipy.linalg.expm` | ok | 25.1 µs / 27.8 µs | 105.4 µs | 0.00 MB (hbm) | ✓ 0.00099×tol | 0.16x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=256 | `jax.scipy.linalg.expm` | ok | 934.5 µs / 960.1 µs | 678.28 ms | 72.09 MB (hbm) | ✓ 0.0036×tol | 3.43x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=256 | `nitrix-jax` | ok | 272.2 µs / 273.7 µs | 325.46 ms | 89.13 MB (hbm) | ✓ 0.061×tol | 1.00x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=256 | `scipy.linalg.expm` | ok | 19.97 ms / 90.08 ms | 157.16 ms | 0.26 MB (hbm) | ✓ 0.0019×tol | 73.38x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=512 | `jax.scipy.linalg.expm` | ok | 1.91 ms / 1.92 ms | 836.51 ms | 74.45 MB (hbm) | ✓ 0.011×tol | 2.84x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=512 | `nitrix-jax` | ok | 671.6 µs / 684.5 µs | 319.46 ms | 92.27 MB (hbm) | ✓ 0.1×tol | 1.00x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=512 | `scipy.linalg.expm` | ok | 14.37 ms / 15.28 ms | 92.53 ms | 1.05 MB (hbm) | ✓ 0.001×tol | 21.40x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=64 | `jax.scipy.linalg.expm` | ok | 579.6 µs / 673.9 µs | 773.50 ms | 71.35 MB (hbm) | ✓ 0.002×tol | 3.09x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=64 | `nitrix-jax` | ok | 187.3 µs / 189.3 µs | 303.06 ms | 88.15 MB (hbm) | ✓ 0.049×tol | 1.00x vs nitrix-jax |
+| matrix_exp | jax-cuda12 | n=64 | `scipy.linalg.expm` | ok | 169.4 µs / 177.9 µs | 12.59 ms | 0.02 MB (hbm) | ✓ 0.00079×tol | 0.90x vs nitrix-jax |
+:::
+
+*source: bench `6898ed03` · nitrix `3938db4e`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:matrix_exp -->
+::: {.callout-note}
+Pure matmul (no factorisation), so it is GPU-native and differentiable
+by autodiff.  Identities used as correctness anchors in the tests:
+$e^{0} = I$; $\det(e^{A}) = e^{\operatorname{tr} A}$; for a
+skew-symmetric $A$, $e^{A}$ is a rotation (orthogonal,
+$\det = +1$).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:matrix_exp -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

@@ -1,0 +1,35 @@
+---
+title: "broadcast_ignoring"
+generated: true
+description: "Broadcast two tensors, ignoring the axis or axes specified."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:broadcast_ignoring -->
+```python
+broadcast_ignoring(x: Shaped[Array, ...], y: Shaped[Array, ...], axis: Union[int, Tuple[int, ...]]) -> Tuple[Shaped[Array, ...], Shaped[Array, ...]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:broadcast_ignoring -->
+Broadcast two tensors, ignoring the axis or axes specified.
+
+This can be useful, for instance, when concatenating tensors along
+the ignored axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:broadcast_ignoring -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Shaped[Array, ...]` | — | — | — |
+| `y` | `Shaped[Array, ...]` | — | — | — |
+| `axis` | `Union[int, Tuple[int, ...]]` | — | — | — |
+
+**Returns** `Tuple[Shaped[Array, ...], Shaped[Array, ...]]`.
+<!-- nitrix:/gen -->
+

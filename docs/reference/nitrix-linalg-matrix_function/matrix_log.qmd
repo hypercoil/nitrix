@@ -1,0 +1,77 @@
+---
+title: "matrix_log"
+generated: true
+description: "Matrix logarithm $ log A$ of a general square matrix."
+---
+
+[‹ back to `nitrix.linalg.matrix_function`](../nitrix-linalg-matrix_function.qmd)
+
+<!-- nitrix:gen sig:matrix_log -->
+```python
+matrix_log(a: Float[Array, '... n n'], *, n_sqrt: int = 6, db_iters: int = 8, taylor_order: int = 12) -> Float[Array, '... n n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:matrix_log -->
+Matrix logarithm $\log A$ of a general square matrix.
+
+This is the inverse of [`matrix_exp`](../nitrix-linalg-matrix_function/matrix_exp.qmd), computed by inverse
+scaling-and-squaring: $\log A = 2^{s} \cdot \log(A^{1/2^{s}})$.
+Take $s$ Denman--Beavers square roots to drive $A$ toward
+$I$, sum the Taylor series of $\log(I + X)$ on the small
+remainder $X = A^{1/2^{s}} - I$, and scale back by $2^{s}$.
+
+$A$ must have no eigenvalue on the closed negative real axis (a
+positive-determinant registration affine / its relative transform
+qualifies).  Outside that domain -- a reflection ($\det < 0$) or a
+180-degree rotation (eigenvalue $-1$) -- the principal log does not
+exist, and rather than the **finite garbage** the bare series would return
+(a reflection NaNs naturally in the square root; a 180-degree rotation
+returns a huge, non-reconstructing matrix), this returns **NaN** so the
+failure is loud.  The test is the round-trip residual itself
+($\lVert e^{\log A} - A \rVert$, pure matmul -- no
+eigendecomposition, no $\det$, so it survives the dev box): a *valid*
+large-translation / ill-scaled affine whose Frobenius
+$\lVert A - I \rVert$ is large but whose **spectrum** the square
+roots still drive to $I$ round-trips at $\sim 10^{-10}$ and is
+untouched; only genuine garbage trips the guard.  A NaN therefore means
+"raise `n_sqrt` first (the input may merely exceed the Taylor radius); if
+still NaN, the input is out of domain."  **No balancing step is applied** --
+the inverse scaling-and-squaring already equilibrates the spectrum for the
+transforms registration produces (verified to $\sim 10^{-12}$ on a
+180-voxel-translation, 6x-anisotropic, sheared affine), so `n_sqrt` is the
+lever, not a diagonal balance.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:matrix_log -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `a` | `Float` | `...` × `n` × `n` | — | Square matrix, `(..., n, n)` with no eigenvalue on the closed negative real axis (above). Batches over leading dimensions. |
+| `n_sqrt` | `int` | — | `6` | Number of square-root steps $s$. The default `6` brings a registration affine (rotation + $\lesssim 60$ voxel translation) within the Taylor radius; raise it for larger transforms (the lever before concluding an input is out of domain). |
+| `db_iters` | `int` | — | `8` | Denman--Beavers iterations per square root (quadratic convergence). Default `8`. |
+| `taylor_order` | `int` | — | `12` | Number of terms of the $\log(I + X)$ series. Default `12`. |
+
+**Returns** `Float` — shape `...` × `n` × `n`. The matrix logarithm $\log A$, same shape as `a` -- or **NaN** (same shape) when `a` is outside the convergence domain (above).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:matrix_log -->
+::: {.callout-note}
+Routes its inverses through `safe_inv`
+(GPU-native on a healthy stack, CPU-fallback otherwise).  Correctness
+anchor: [`matrix_log`](../nitrix-linalg-matrix_function/matrix_log.qmd) is the inverse of [`matrix_exp`](../nitrix-linalg-matrix_function/matrix_exp.qmd) (round-trips
+to machine precision in the registration regime); $\log(I) = 0$;
+$\operatorname{tr}(\log A) = \log(\det A)$.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:matrix_log -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

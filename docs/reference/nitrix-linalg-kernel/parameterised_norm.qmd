@@ -1,0 +1,45 @@
+---
+title: "parameterised_norm"
+generated: true
+description: "Per-row Mahalanobis-style normalisation."
+---
+
+[‹ back to `nitrix.linalg.kernel`](../nitrix-linalg-kernel.qmd)
+
+<!-- nitrix:gen sig:parameterised_norm -->
+```python
+parameterised_norm(X: Float[Array, '... n d'], *, theta: Optional[Num[Array, '... d']] = None, squared: bool = False) -> Float[Array, '... n d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:parameterised_norm -->
+Per-row Mahalanobis-style normalisation.
+
+Returns $X / \mathrm{norm}$ (or $X / \mathrm{norm}^2$
+with `squared=True`), where $\mathrm{norm}$ is the per-row
+Mahalanobis norm under `theta`.  For `theta = None` this is L2
+normalisation along the last axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:parameterised_norm -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Float` | `...` × `n` × `d` | — | Sample tensor of shape $(\dots, n, d)$. |
+| `theta` | `Optional[Num[Array, '... d']]` | — | `None` | Optional metric tensor. Same shape conventions as the `theta` argument of [`linear_kernel`](../nitrix-linalg-kernel/linear_kernel.qmd). |
+| `squared` | `bool` | — | `False` | If `True`, divide by $\mathrm{norm}^2$ instead of $\mathrm{norm}$. |
+
+**Returns** `Float` — shape `...` × `n` × `d`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:parameterised_norm -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

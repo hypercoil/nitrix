@@ -1,0 +1,47 @@
+---
+title: "l2_normalize"
+generated: true
+description: "Project `x` onto the unit $L_2$ sphere along `axis`."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:l2_normalize -->
+```python
+l2_normalize(x: Float[Array, '...'], *, axis: _AxisArg = -1, eps: float = 1e-12) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:l2_normalize -->
+Project `x` onto the unit $L_2$ sphere along `axis`.
+
+The $p = 2$ specialisation of [`lp_normalize`](../nitrix-numerics-normalize/lp_normalize.qmd),
+computed directly from the sum of squares (avoiding the general
+$|x|^p$ power and its root) and clamping the denominator
+at `eps` (the `torch.nn.functional.normalize` convention
+$x / \max(\|x\|_2, \epsilon)$).  Once rows are unit-norm
+their inner product *is* the cosine of the angle between them,
+so this is the projection that turns a dot product into a
+cosine similarity / angular distance.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:l2_normalize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Input tensor. |
+| `axis` | `_AxisArg` | — | `-1` | Axis (or axes) over which the $L_2$ norm is taken. Default `-1` (the trailing feature axis). |
+| `eps` | `float` | — | `1e-12` | Lower clamp on the norm denominator. |
+
+**Returns** `Float` — shape `...`. Tensor of the same shape as `x`, unit-$L_2$ along `axis` (except where the input norm is below `eps`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:l2_normalize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

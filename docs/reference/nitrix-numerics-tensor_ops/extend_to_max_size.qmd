@@ -1,0 +1,33 @@
+---
+title: "extend_to_max_size"
+generated: true
+description: "Extend all tensors in a sequence until their sizes are equal to the size of the largest tensor along each axis. Any new entries created via extension are populated with `fill`."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:extend_to_max_size -->
+```python
+extend_to_max_size(tensors: Sequence[Shaped[Array, ...]], fill: float = float('nan')) -> Tuple[Shaped[Array, ...], ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:extend_to_max_size -->
+Extend all tensors in a sequence until their sizes are equal to the size
+of the largest tensor along each axis. Any new entries created via
+extension are populated with `fill`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:extend_to_max_size -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensors` | `Sequence[Shaped[Array, ...]]` | — | — | — |
+| `fill` | `float` | — | `float('nan')` | — |
+
+**Returns** `Tuple[Shaped[Array, ...], ...]`.
+<!-- nitrix:/gen -->
+

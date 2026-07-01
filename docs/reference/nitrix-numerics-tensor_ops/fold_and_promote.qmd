@@ -1,0 +1,35 @@
+---
+title: "fold_and_promote"
+generated: true
+description: "Fold the specified axis into the specified number of folds, and promote the new axis across the number of folds to the outermost dimension."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+*decorated:* `@partial(jax.jit, static_argnames=('axis', 'n_folds'))`
+
+<!-- nitrix:gen sig:fold_and_promote -->
+```python
+fold_and_promote(tensor: Shaped[Array, ...], axis: int, n_folds: int) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fold_and_promote -->
+Fold the specified axis into the specified number of folds, and promote
+the new axis across the number of folds to the outermost dimension.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fold_and_promote -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `axis` | `int` | — | — | — |
+| `n_folds` | `int` | — | — | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+

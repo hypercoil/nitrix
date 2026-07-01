@@ -1,0 +1,71 @@
+---
+title: "implicit_least_squares"
+generated: true
+description: "Differentiable argmin of a least-squares residual by the implicit theorem."
+---
+
+[‹ back to `nitrix.linalg.optimize`](../nitrix-linalg-optimize.qmd)
+
+<!-- nitrix:gen sig:implicit_least_squares -->
+```python
+implicit_least_squares(residual_fn: DataResidualFn, data: Any, x0: Float[Array, ' p'], *, n_iters: int = 20, init_lambda: float = 0.001, cg_tol: float = 1e-06, cg_maxiter: Optional[int] = None) -> Float[Array, ' p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:implicit_least_squares -->
+Differentiable argmin of a least-squares residual by the implicit
+theorem.
+
+Compute the argmin of $\tfrac{1}{2}\lVert r(\mathrm{data}, x)
+\rVert^2$, differentiable with respect to `data` by the
+**implicit-function theorem** rather than by unrolling the solver.
+
+The forward solve is Levenberg-Marquardt; the backward differentiates
+through the *converged* $x^*$ directly.  At the optimum the
+stationarity $g(\mathrm{data}, x^*) = J^{\top}r = 0$ gives, by the
+implicit-function theorem,
+$\partial x^* / \partial \mathrm{data} = -(J^{\top}J)^{-1}
+\partial_{\mathrm{data}} g$ (Gauss-Newton Hessian -- exact when the
+residual is small or the model is linear, the standard least-squares
+implicit-diff approximation).  The backward solves
+$(J^{\top}J)\, w = \bar{x}$ with [`cg`](../nitrix-linalg-krylov/cg.qmd) (SPD, matrix-free --
+stays on-device) and pushes $-w$ back through
+$\partial_{\mathrm{data}} g$.  Memory is $O(1)$ in the
+iteration count (vs unrolling's $O(n\_iters)$) and
+$O(M + P)$ per call: neither the $M \times P$ Jacobian nor the
+$P \times P$ normal matrix is materialised -- [`cg`](../nitrix-linalg-krylov/cg.qmd) holds
+$O(P)$ iterates and the linearisation caches one residual evaluation
+($O(M)$ voxels), independent of $P^2$.
+
+This is the differentiable-layer entry point: a registration whose
+residual is
+$r(\mathrm{images}, \theta) = \mathrm{warp}(\mathrm{moving},
+\theta) - \mathrm{fixed}$ becomes differentiable with respect to the
+images by calling this with `data = (moving, fixed)` (the unrolled
+recipe is the always-available alternative).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:implicit_least_squares -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `residual_fn` | `DataResidualFn` | — | — | Map `(data, x) -> r` (`data` is the differentiable argument, an array or pytree; `x` is the optimisation variable, `(P,)`, mapping to a residual `(M,)`). |
+| `data` | `Any` | — | — | The differentiable parameters / inputs (an array or pytree). |
+| `x0` | `Float` | `p` | — | Initial guess for `x`, `(P,)`. |
+| `n_iters` | `int` | — | `20` | Forward Levenberg-Marquardt controls. |
+| `init_lambda` | `float` | — | `0.001` | Forward Levenberg-Marquardt controls. |
+| `cg_tol` | `float` | — | `1e-06` | Backward adjoint-solve ([`cg`](../nitrix-linalg-krylov/cg.qmd)) controls. |
+| `cg_maxiter` | `Optional[int]` | — | `None` | Backward adjoint-solve ([`cg`](../nitrix-linalg-krylov/cg.qmd)) controls. |
+
+**Returns** `Float` — shape `p`. The minimiser $x^*$, `(P,)`. $\mathrm{d}x^* / \mathrm{d}x_0 = 0$ (the initial guess does not affect the gradient).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:implicit_least_squares -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

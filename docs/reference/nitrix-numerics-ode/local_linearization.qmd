@@ -1,0 +1,62 @@
+---
+title: "local_linearization"
+generated: true
+description: "Integrate $dy/dt = f(t, y)$ by exponential / local linearisation."
+---
+
+[‹ back to `nitrix.numerics.ode`](../nitrix-numerics-ode.qmd)
+
+<!-- nitrix:gen sig:local_linearization -->
+```python
+local_linearization(f: VectorField, y0: Float[Array, 'n'], t: Float[Array, 't']) -> Float[Array, 't n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:local_linearization -->
+Integrate $dy/dt = f(t, y)$ by exponential / local linearisation.
+
+The Ozaki local-linearisation scheme (the integrator behind SPM's
+`spm_int`): each step linearises $f$ about the current state and
+advances the linear part *exactly* with a matrix exponential.  Unlike the
+explicit [`euler`](../nitrix-numerics-ode/euler.qmd) / [`midpoint`](../nitrix-numerics-ode/midpoint.qmd) / [`rk4`](../nitrix-numerics-ode/rk4.qmd) steppers it is
+**A-stable**, so it integrates **stiff** systems -- such as the
+Balloon--Windkessel haemodynamic model -- at a step size where an explicit
+method would need a far finer grid or diverge outright.  It is
+**exact (to round-off)** for an affine-autonomous field
+$f(y) = A y + b$.
+
+Same `f(t, y)` / close-over-args contract as [`euler`](../nitrix-numerics-ode/euler.qmd), with two
+differences from the explicit steppers:
+
+- `y0` must be a **flat 1-D** state $(n,)$ -- the step forms the
+  $(n, n)$ Jacobian $df/dy$.  For a batched / multi-region
+  system, `jax.vmap` this integrator over the batch axis.
+- the input is held constant across each step (piecewise-constant /
+  frozen-input linearisation), so accuracy on a fast-varying drive is
+  controlled, as for the explicit methods, by how densely `t` is sampled.
+
+Differentiable straight through the `scan` (the matrix exponential is
+pure matmul); composes with the shipped [`nitrix.linalg.matrix_exp`](../nitrix-linalg.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:local_linearization -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `f` | `VectorField` | — | — | Vector field `f(t, y) -> dy/dt` (`t` scalar, `y` the flat 1-D state of shape `(n,)`). |
+| `y0` | `Float` | `n` | — | Initial state at `t[0]`, a flat 1-D array of shape `(n,)`. |
+| `t` | `Float` | `t` | — | Strictly monotone time points of shape `(t,)`; one linearised step is taken per interval. |
+
+**Returns** `Float` — shape `t` × `n`. States at each time point, shape `(len(t), n)` (`ys[0]` is `y0`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:local_linearization -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

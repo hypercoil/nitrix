@@ -12,13 +12,15 @@ explained by confounds).
 Two solver paths, both differentiable:
 
 - ``method="cholesky"`` (**default**): normal-equations OLS via a
-  **cuSOLVER-free** rolled Cholesky (``_smalllinalg.spd_chol``) + cuBLAS triangular
+  **cuSOLVER-free** rolled Cholesky (:func:`spd_chol`) + cuBLAS triangular
   solves, so it runs on the cuSOLVER-affected GPU stacks (where
   ``jnp.linalg.cholesky`` / ``svd`` fail to create a handle).  Tall-and-skinny
-  optimised -- for ``X: (obs, k)`` with ``obs >> k`` (typical fMRI: 400 TRs ×
-  24 confounds), the heavy step is ``X^T X`` (``O(obs * k^2)``,
-  bandwidth-limited) followed by a ``k × k`` Cholesky and two triangular solves
-  (``O(k^3)``).  ``X^T X`` is numerically squared in condition number, so this
+  optimised -- for ``X`` of shape :math:`(\\mathrm{obs}, k)` with
+  :math:`\\mathrm{obs} \\gg k` (typical fMRI: 400 TRs :math:`\\times`
+  24 confounds), the heavy step is :math:`X^{\\top} X`
+  (:math:`O(\\mathrm{obs} \\cdot k^2)`, bandwidth-limited) followed by a
+  :math:`k \\times k` Cholesky and two triangular solves (:math:`O(k^3)`).
+  :math:`X^{\\top} X` is numerically squared in condition number, so this
   path wants a well-conditioned ``X`` or an ``l2 > 0`` ridge; a rank-deficient
   Gram is regularised by the modified-Cholesky pivot floor (a finite result,
   not ``NaN`` -- but prefer ``l2 > 0`` for a controlled treatment).
@@ -36,8 +38,8 @@ Per-observation weights (heteroscedastic regression) are
 supported via ``weights``: a length-``obs`` vector defining the
 diagonal of the weight matrix.  Implementation note: we
 *pre-scale* rows by ``sqrt(weights)`` rather than form
-``X^T diag(w) X`` explicitly -- preserves the QR / SVD structure
-and is numerically equivalent.
+:math:`X^{\\top} \\operatorname{diag}(w) X` explicitly -- preserves the
+QR / SVD structure and is numerically equivalent.
 
 Differentiability: both solver paths are reverse-mode
 differentiable (JAX ships VJPs for ``qr``, ``lstsq``, and
@@ -87,19 +89,41 @@ def _james_stein_shrink(
 ) -> Float[Array, 'n m']:
     """Positive-part James-Stein shrinkage of the per-channel nuisance projection.
 
-    Scales each target channel's projection by ``c = (1 - (k - 2) sigma^2 /
-    ||proj||^2)_+`` -- the soft / shrunk confound removal of the v3 FR (5.2).
-    ``sigma^2`` is the per-channel residual-variance estimate (from ``resid``,
-    ``n - k`` d.o.f.); ``k`` is the number of nuisance regressors.  When the
-    confounds explain a channel only weakly (small ``||proj||`` relative to the
-    noise) the removal is shrunk toward zero, so a high-dimensional / collinear
-    confound set does not strip real signal variance it merely captured by chance.
+    Scales each target channel's projection by the factor
+    :math:`c = \\left(1 - (k - 2)\\,\\sigma^2 / \\lVert \\mathrm{proj} \\rVert^2
+    \\right)_+` -- the soft / shrunk confound removal.  Here :math:`\\sigma^2`
+    is the per-channel residual-variance estimate (from ``resid``, with
+    :math:`n - k` degrees of freedom) and :math:`k` is the number of nuisance
+    regressors.  When the confounds explain a channel only weakly (small
+    :math:`\\lVert \\mathrm{proj} \\rVert` relative to the noise) the removal is
+    shrunk toward zero, so a high-dimensional / collinear confound set does not
+    strip real signal variance it merely captured by chance.
+
     This is the positive-part James-Stein *heuristic*: the strict dominance
-    theorem (lower total MSE for ``k >= 3``) holds for the canonical
+    theorem (lower total MSE for :math:`k \\geq 3`) holds for the canonical
     known-variance Gaussian-mean problem; here it is a sound plug-in analogue
-    (estimated per-channel ``sigma^2``, applied to the projection), not that exact
-    result.  For ``k <= 2`` the factor is ``>= 1`` and clamps to ``1`` (no
-    shrinkage); the per-channel ``c`` is likewise clamped to ``[0, 1]``.
+    (estimated per-channel :math:`\\sigma^2`, applied to the projection), not
+    that exact result.  For :math:`k \\leq 2` the factor is :math:`\\geq 1` and
+    clamps to :math:`1` (no shrinkage); the per-channel :math:`c` is likewise
+    clamped to :math:`[0, 1]`.
+
+    Parameters
+    ----------
+    resid
+        Per-channel regression residual, shape ``(n, m)`` (observations by
+        target channels), used to estimate the per-channel noise variance
+        :math:`\\sigma^2`.
+    proj
+        Per-channel nuisance projection to shrink, shape ``(n, m)``.
+    k
+        Number of nuisance regressors, entering both the degrees-of-freedom
+        correction and the shrinkage numerator.
+
+    Returns
+    -------
+    Float[Array, 'n m']
+        The projection ``proj`` scaled per target channel by the clamped
+        James-Stein factor :math:`c`, same shape ``(n, m)``.
     """
     n = resid.shape[-2]
     dof = max(n - k, 1)
@@ -109,21 +133,39 @@ def _james_stein_shrink(
     c = jnp.clip(c, 0.0, 1.0)
     return c[..., None, :] * proj
 
+
 def _solve_cholesky(
     X: Float[Array, 'n k'],
     Y: Float[Array, 'n m'],
     l2: float,
 ) -> Float[Array, 'k m']:
-    """Normal-equations OLS via Cholesky of ``X^T X + l2 I``.
+    """Normal-equations OLS via Cholesky of :math:`X^{\\top} X + l_2 I`.
 
-    Heavy step: ``X^T X`` of shape ``(k, k)``.  Cheap when ``n
-    >> k``; the Cholesky and two triangular solves are ``O(k^3)``.
+    Heavy step: :math:`X^{\\top} X` of shape ``(k, k)``.  Cheap when
+    :math:`n \\gg k`; the Cholesky and two triangular solves are :math:`O(k^3)`.
 
     The L2 ridge is added *to the normal-equation matrix*, not to
     the data; this is equivalent to the augmented-system view but
     avoids materialising the ``(n + k, k)`` augmented matrix.
     Numerically more stable than the augmented form when ``l2``
     is very small.
+
+    Parameters
+    ----------
+    X
+        Regressor / design matrix, shape ``(n, k)`` (observations by
+        regressors).
+    Y
+        Target matrix, shape ``(n, m)`` (observations by target channels).
+    l2
+        Ridge regularisation strength.  When ``> 0``, ``l2 * I`` is added to
+        the Gram matrix :math:`X^{\\top} X`; ``0`` gives plain OLS.
+
+    Returns
+    -------
+    Float[Array, 'k m']
+        The regression coefficients :math:`\\beta`, shape ``(k, m)``, solving
+        the (ridge) normal equations.
     """
     k = X.shape[-1]
     XtX = X.T @ X
@@ -145,6 +187,25 @@ def _solve_svd(
     When ``l2 > 0``, we use the augmented-system view (stack
     ``sqrt(l2) I`` below ``X`` and zeros below ``Y``) so the
     same ``lstsq`` call handles the ridge.
+
+    Parameters
+    ----------
+    X
+        Regressor / design matrix, shape ``(n, k)`` (observations by
+        regressors).
+    Y
+        Target matrix, shape ``(n, m)`` (observations by target channels).
+    l2
+        Ridge regularisation strength.  When ``> 0``, the system is augmented
+        with ``sqrt(l2) * I`` (and matching zero rows in ``Y``) before the
+        least-squares solve; ``0`` gives plain least squares.
+
+    Returns
+    -------
+    Float[Array, 'k m']
+        The least-squares regression coefficients :math:`\\beta`, shape
+        ``(k, m)``.  Under rank deficiency with ``l2 == 0`` this is the
+        minimum-norm solution.
     """
     if l2 > 0.0:
         k = X.shape[-1]
@@ -168,7 +229,48 @@ def _residualise_core(
     method: Method,
     shrinkage: Shrinkage,
 ) -> Float[Array, 'n m']:
-    """Unbatched core; callers compose batch via ``jax.vmap``."""
+    """Unbatched residualisation core; callers compose batch via ``jax.vmap``.
+
+    Solve the (optionally weighted, optionally ridged) least-squares fit of
+    ``Y`` on ``X``, form the projection ``X @ betas``, optionally shrink it,
+    and return either that projection or the residual ``Y - proj``.
+
+    Parameters
+    ----------
+    Y
+        Target matrix, shape ``(n, m)`` (observations by target channels).
+    X
+        Regressor / design matrix, shape ``(n, k)`` (observations by
+        regressors).
+    weights
+        Optional per-observation weights, shape ``(n,)``.  When given, rows of
+        ``X`` and ``Y`` are pre-scaled by ``sqrt(weights)`` (weighted least
+        squares); ``None`` is unweighted.  Weights affect the fitted
+        coefficients only, not the projection geometry (the projection is
+        reconstructed on the unweighted ``X``).
+    l2
+        Ridge regularisation strength passed to the chosen solver; ``0`` is
+        ordinary least squares.
+    return_mode
+        ``"residual"`` returns ``Y - proj``; ``"projection"`` returns the
+        (possibly shrunk) fitted projection.
+    method
+        ``"cholesky"`` or ``"svd"`` -- selects the least-squares solver.
+    shrinkage
+        ``"none"`` for the raw projection, or ``"james-stein"`` for
+        positive-part James-Stein shrinkage of the projection.
+
+    Returns
+    -------
+    Float[Array, 'n m']
+        The residual or projection, shape ``(n, m)``, per ``return_mode``.
+
+    Raises
+    ------
+    ValueError
+        If ``method``, ``shrinkage``, or ``return_mode`` is not a recognised
+        value.
+    """
     if weights is not None:
         sqrt_w = jnp.sqrt(weights)[:, None]
         X_w = X * sqrt_w
@@ -237,26 +339,10 @@ def residualise(
         Ridge regularisation strength.  ``0`` (default) is OLS;
         ``l2 > 0`` adds an ``l2 * I`` to the normal-equation
         matrix.  Bounds the condition number of the augmented
-        system at ``1 / sqrt(l2)``; recommended whenever ``X``
+        system at :math:`1 / \\sqrt{l_2}`; recommended whenever ``X``
         might be near-collinear.  This *is* the **ridge-shrunk
-        ("soft") residualisation** of the v3 FR (5.2): a shrunk
-        nuisance fit for an ill-conditioned confound set.
-    shrinkage
-        ``"none"`` (default) -- the raw projection is removed.
-        ``"james-stein"`` -- positive-part James-Stein shrinkage
-        of the per-channel nuisance projection toward zero (the
-        other "soft" variant of FR 5.2): the projection is scaled
-        by ``c = (1 - (k-2) sigma^2 / ||proj||^2)_+`` before being
-        subtracted, so confounds that explain a channel only
-        weakly remove correspondingly less -- protecting real
-        signal variance a high-dimensional / collinear confound
-        set would otherwise strip.  A James-Stein shrinkage
-        heuristic (a plug-in analogue of the ``k >= 3`` dominance
-        result, not the strict theorem); a no-op for ``k <= 2``.
-        Composes with ``l2`` (shrinks whatever ridge / OLS
-        projection was fit).  Note the residual is then no longer
-        exactly orthogonal to ``X`` -- the intended bias-variance
-        trade of a soft removal.
+        ("soft") residualisation**: a shrunk nuisance fit for an
+        ill-conditioned confound set.
     rowvar
         ``True`` (default): observation axis is the *last* axis
         of ``Y`` / ``X``.  ``False``: observation axis is the
@@ -266,7 +352,8 @@ def residualise(
         ``"projection"`` -- the OLS prediction ``X @ betas``.
     method
         ``"cholesky"`` (default) -- fast normal-equations path via a
-        rolled, cuSOLVER-free Cholesky of ``X^T X + l2 I`` (~2x faster
+        rolled, cuSOLVER-free Cholesky of :math:`X^{\\top} X + l_2 I`
+        (~2x faster
         on tall systems; runs on the broken-cuSOLVER GPU).  Recommended
         for well-conditioned ``X`` or whenever ``l2 > 0``.  For
         rank-deficient ``X`` -- more regressors than observations
@@ -298,10 +385,28 @@ def residualise(
         ``l2 > 0`` (which makes the system full-rank, so the solve is
         the unique ridge estimate rather than a min-norm truncation)
         over relying on the SVD cutoff.
+    shrinkage
+        ``"none"`` (default) -- the raw projection is removed.
+        ``"james-stein"`` -- positive-part James-Stein shrinkage
+        of the per-channel nuisance projection toward zero (the
+        other "soft" variant): the projection is scaled by
+        :math:`c = \\left(1 - (k-2)\\,\\sigma^2 /
+        \\lVert \\mathrm{proj} \\rVert^2 \\right)_+` before being
+        subtracted, so confounds that explain a channel only
+        weakly remove correspondingly less -- protecting real
+        signal variance a high-dimensional / collinear confound
+        set would otherwise strip.  A James-Stein shrinkage
+        heuristic (a plug-in analogue of the :math:`k \\geq 3`
+        dominance result, not the strict theorem); a no-op for
+        :math:`k \\leq 2`.  Composes with ``l2`` (shrinks whatever
+        ridge / OLS projection was fit).  Note the residual is then
+        no longer exactly orthogonal to ``X`` -- the intended
+        bias-variance trade of a soft removal.
 
     Returns
     -------
-    Residual or projection, same shape as ``Y``.
+    Num[Array, '... C_Y obs']
+        Residual or projection (per ``return_mode``), same shape as ``Y``.
 
     Notes
     -----
@@ -394,8 +499,38 @@ def _partial_core(
     contribution ``noise @ beta_noise``.  Because the betas come from the joint
     fit, variance *shared* between signal and noise stays with the (retained)
     signal -- the ICA-AROMA "non-aggressive" denoising, in contrast to the
-    aggressive ``residualise(Y, noise)`` which removes the marginal noise
-    projection (shared variance included).
+    aggressive :func:`residualise` (``residualise(Y, noise)``) which removes
+    the marginal noise projection (shared variance included).
+
+    Parameters
+    ----------
+    Y
+        Target matrix, shape ``(n, m)`` (observations by target channels).
+    signal
+        Regressors to retain, shape ``(n, ks)`` (observations by signal
+        regressors).
+    noise
+        Regressors to remove, shape ``(n, kn)`` (observations by noise
+        regressors).
+    l2
+        Ridge regularisation strength added to the joint Gram; ``0`` is OLS.
+    method
+        ``"cholesky"`` or ``"svd"`` -- selects the least-squares solver.
+    shrinkage
+        ``"none"`` for the raw noise projection, or ``"james-stein"`` for
+        positive-part James-Stein shrinkage of the (joint-fit) noise
+        projection before removal.
+
+    Returns
+    -------
+    Float[Array, 'n m']
+        The denoised target ``Y - noise_proj``, shape ``(n, m)``, with only
+        the (possibly shrunk) noise-unique projection removed.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` or ``shrinkage`` is not a recognised value.
     """
     X = jnp.concatenate([signal, noise], axis=-1)  # (n, ks + kn)
     if method == 'cholesky':
@@ -453,7 +588,7 @@ def partial_residualise(
     l2
         Ridge added to the joint Gram (``0`` = OLS).  Recommended if
         ``[signal | noise]`` may be near-collinear -- the ridge-shrunk ("soft")
-        partial residualisation of FR 5.2.
+        partial residualisation.
     rowvar
         ``True`` (default): observation axis is the last axis; ``False``: the
         penultimate axis.
@@ -464,16 +599,17 @@ def partial_residualise(
         ``"none"`` (default) or ``"james-stein"`` -- positive-part James-Stein
         shrinkage of the (joint-fit) **noise** projection toward zero before it
         is removed, as in :func:`residualise`; the soft variant for a large /
-        collinear noise set (``sigma^2`` taken from the full-fit residual,
-        ``k`` = number of noise regressors).
+        collinear noise set (:math:`\\sigma^2` taken from the full-fit residual,
+        :math:`k` = number of noise regressors).
 
     Returns
     -------
-    Denoised tensor, same shape as ``Y``.
+    Num[Array, '... C_Y obs']
+        Denoised tensor, same shape as ``Y``.
 
     Notes
     -----
-    With an empty ``signal`` (``C_S = 0``) this reduces exactly to
+    With an empty ``signal`` (:math:`C_S = 0`) this reduces exactly to
     ``residualise(Y, noise)`` (aggressive); with an empty ``noise`` it returns
     ``Y`` unchanged.
     """

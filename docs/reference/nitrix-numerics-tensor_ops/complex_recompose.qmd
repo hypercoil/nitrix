@@ -1,0 +1,45 @@
+---
+title: "complex_recompose"
+generated: true
+description: "Reconstitute a complex-valued tensor from real-valued tensors denoting its amplitude and its phase."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:complex_recompose -->
+```python
+complex_recompose(ampl: Float[Array, ...], phase: Float[Array, ...]) -> Complex[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:complex_recompose -->
+Reconstitute a complex-valued tensor from real-valued tensors denoting its
+amplitude and its phase.
+
+Together with
+[complex_decompose](nitrix._internal.util.complex_decompose.html), this
+function provides a uniform interface for switching between complex and
+polar representations of complex numbers. This enables us to change the
+implementation of these operations in one place when we find the most
+efficient and stable method.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:complex_recompose -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `ampl` | `Float[Array, ...]` | — | — | Real-valued array storing complex number amplitudes. |
+| `phase` | `Float[Array, ...]` | — | — | Real-valued array storing complex number phases in radians. |
+
+**Returns** `Complex[Array, ...]`. Complex numbers formed from the specified amplitudes and phases.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:complex_recompose -->
+### See also
+
+[`complex_decompose`](../nitrix-numerics-tensor_ops/complex_decompose.qmd)
+<!-- nitrix:/gen -->
+

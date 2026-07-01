@@ -1,0 +1,59 @@
+---
+title: "cg"
+generated: true
+description: "Solve the symmetric positive-definite system by conjugate gradients."
+---
+
+[‹ back to `nitrix.linalg.krylov`](../nitrix-linalg-krylov.qmd)
+
+<!-- nitrix:gen sig:cg -->
+```python
+cg(a: MatvecOrMatrix, b: Float[Array, '... n'], *, x0: Optional[Float[Array, '... n']] = None, tol: float = 1e-06, atol: float = 0.0, maxiter: Optional[int] = None, l2: Union[float, Array] = 0.0) -> Float[Array, '... n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cg -->
+Solve the symmetric positive-definite system by conjugate gradients.
+
+Solves $(A + \lambda I) x = b$ for a symmetric positive-definite
+operator $A$, using only matrix-vector products and inner
+products.  No factorisation is formed, so the solve stays on the GPU
+and is resilient to the cuSolver wedge that can affect the direct
+dense solvers.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cg -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `a` | `MatvecOrMatrix` | — | — | The symmetric positive-definite operator: either a dense matrix of shape `(..., n, n)` or a callable computing the matrix-vector product $v \mapsto A v$ (the matrix is never materialised in the callable case). |
+| `b` | `Float` | `...` × `n` | — | Right-hand side of shape `(..., n)`. |
+| `x0` | `Optional[Float[Array, '... n']]` | — | `None` | Optional initial guess of shape `(..., n)` (default zeros). |
+| `tol` | `float` | — | `1e-06` | Relative and absolute convergence tolerances. The iteration stops when $\lVert r \rVert \le \max(\mathtt{tol} \cdot \lVert b \rVert, \mathtt{atol})$, where $r$ is the residual. Defaults `1e-6` and `0.0`. |
+| `atol` | `float` | — | `0.0` | Relative and absolute convergence tolerances. The iteration stops when $\lVert r \rVert \le \max(\mathtt{tol} \cdot \lVert b \rVert, \mathtt{atol})$, where $r$ is the residual. Defaults `1e-6` and `0.0`. |
+| `maxiter` | `Optional[int]` | — | `None` | Maximum number of iterations. The default defers to the underlying solver (`10 * n`); a positive-definite system converges in at most $n$ exact steps. |
+| `l2` | `Union[float, Array]` | — | `0.0` | Non-negative Tikhonov / Levenberg-Marquardt ridge $\lambda$ added to the diagonal (in matrix-free form, $A v + \lambda v$). Default `0`. May be a traced scalar (so the Levenberg-Marquardt damping $\lambda$ can vary inside a `jit`); the $\lambda v$ term is added unconditionally, a no-op at $\lambda = 0$. |
+
+**Returns** `Float` — shape `...` × `n`. The solution $x$, of shape `(..., n)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:cg -->
+::: {.callout-note}
+GPU-native and resilient to the cuSolver wedge, as it uses
+matrix-vector and dot products only.  Requires $A$ to be
+symmetric positive-definite; for a general system use `solve`,
+and for a direct positive-definite factorisation use
+[`cho_solve`](../nitrix-linalg-solve/cho_solve.qmd).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cg -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

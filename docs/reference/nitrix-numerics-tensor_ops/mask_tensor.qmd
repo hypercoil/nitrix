@@ -1,0 +1,32 @@
+---
+title: "mask_tensor"
+generated: true
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:mask_tensor -->
+```python
+mask_tensor(tensor: Shaped[Array, ...], mask: Bool[Array, ...], axis: Sequence[int], fill_value: Union[float, Shaped[Array, ...]] = 0) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mask_tensor -->
+*TODO: write an overview.*
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mask_tensor -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `mask` | `Bool[Array, ...]` | — | — | — |
+| `axis` | `Sequence[int]` | — | — | — |
+| `fill_value` | `Union[float, Shaped[Array, ...]]` | — | `0` | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+

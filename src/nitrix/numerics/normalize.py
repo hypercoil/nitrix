@@ -1,34 +1,33 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Per-tensor / per-channel intensity normalisation.
 
-Four canonical normalisations used across neuroimaging
-pipelines:
+Canonical normalisations used across neuroimaging pipelines:
 
-- ``zscore_normalize``: subtract mean, divide by std (the
+- :func:`zscore_normalize`: subtract mean, divide by std (the
   standard z-score).
-- ``psc_normalize``: percent-signal-change relative to the mean
-  (the fMRI BOLD convention).
-- ``robust_zscore_normalize``: median + MAD instead of mean + std
-  (robust to outliers; useful for raw intensity images with
-  bright artefacts).
-- ``intensity_normalize``: percentile-clip then rescale to
-  ``[0, 1]`` (the synthstrip / SynthSeg pre-training
+- :func:`psc_normalize`: percent-signal-change relative to the
+  mean (the fMRI BOLD convention).
+- :func:`robust_zscore_normalize`: median + MAD instead of
+  mean + std (robust to outliers; useful for raw intensity images
+  with bright artefacts).
+- :func:`intensity_normalize`: percentile-clip then rescale to
+  :math:`[0, 1]` (the synthstrip / SynthSeg pre-training
   convention).
-- ``percentile_rescale``: shift by a low percentile, scale by a
-  high percentile, then clip -- the strict min--p99--clip recipe
+- :func:`percentile_rescale`: shift by a low percentile, scale by
+  a high percentile, then clip -- the strict min--p99--clip recipe
   used by the Synth* pipelines (distinct from
-  ``intensity_normalize``; see its docstring).
-- ``l2_normalize`` / ``lp_normalize``: project onto the unit
-  ``L2`` / ``Lp`` sphere along an axis, using the
-  clamp-denominator convention ``x / max(||x||, eps)`` (matches
-  ``torch.nn.functional.normalize``).
-- ``instance_norm``: per-sample / per-channel centre-and-scale by
-  the *statistics* over a configurable set of axes (the reduction
-  underneath an instance-normalisation layer, without the
-  trainable affine).
+  :func:`intensity_normalize`; see its docstring).
+- :func:`l2_normalize` / :func:`lp_normalize`: project onto the
+  unit :math:`L_2` / :math:`L_p` sphere along an axis, using the
+  clamp-denominator convention :math:`x / \max(\|x\|, \epsilon)`
+  (matches ``torch.nn.functional.normalize``).
+- :func:`instance_norm`: per-sample / per-channel centre-and-scale
+  by the *statistics* over a configurable set of axes (the
+  reduction underneath an instance-normalisation layer, without
+  the trainable affine).
 
 The z-score path additionally supports ``nonzero_mask=True`` for
 the per-channel BraTS / nnUNet convention (statistics over the
@@ -77,12 +76,35 @@ def _weighted_mean_std(
     axis: _AxisArg,
     weights: Optional[Num[Array, '...']] = None,
 ) -> Tuple[Float[Array, '...'], Float[Array, '...']]:
-    """Weighted mean and std along ``axis``.
+    r"""Weighted mean and standard deviation along ``axis``.
 
-    For ``weights=None``, equivalent to ``mean`` / ``std`` over
-    ``axis``.  ``ddof = 0`` (population, not sample), since
-    normalisation is per-cell and the Bessel correction is
-    inappropriate for centering / scaling.
+    For ``weights=None`` this is equivalent to :obj:`jax.numpy.mean`
+    / :obj:`jax.numpy.std` over ``axis``.  The standard deviation
+    uses ``ddof = 0`` (population, not sample), since normalisation
+    is per-cell and the Bessel correction is inappropriate for
+    centring / scaling.
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    axis
+        Axis (or axes) over which the mean and standard deviation
+        are reduced.
+    weights
+        Optional non-negative weights broadcastable against ``x``.
+        When given, the mean is :math:`\sum_i w_i x_i / \sum_i w_i`
+        and the variance is the weighted second central moment about
+        that mean.  When ``None``, unweighted reductions are used.
+
+    Returns
+    -------
+    mean : Float[Array, '...']
+        Weighted mean along ``axis``, with the reduced axis retained
+        (``keepdims=True``) for broadcasting.
+    std : Float[Array, '...']
+        Weighted population standard deviation along ``axis``, same
+        broadcast shape as ``mean``.
     """
     if weights is None:
         mean = jnp.mean(x, axis=axis, keepdims=True)
@@ -100,7 +122,29 @@ def demean(
     axis: _AxisArg = -1,
     weights: Optional[Num[Array, '...']] = None,
 ) -> Num[Array, '...']:
-    """Subtract the (weighted) mean along ``axis``."""
+    """Subtract the (weighted) mean along ``axis``.
+
+    Centres ``x`` so that its (optionally weighted) mean along
+    ``axis`` is zero, leaving the scale unchanged.
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    axis
+        Axis (or axes) over which the mean is reduced.  Default
+        ``-1`` (the trailing observation axis).
+    weights
+        Optional non-negative weights broadcastable against ``x``.
+        When given, a weighted mean is subtracted; when ``None``,
+        the unweighted mean is used.
+
+    Returns
+    -------
+    Num[Array, '...']
+        ``x`` with the (weighted) mean removed along ``axis``, same
+        shape as ``x``.
+    """
     mean, _ = _weighted_mean_std(x, axis=axis, weights=weights)
     return x - mean
 
@@ -173,11 +217,31 @@ def psc_normalize(
     weights: Optional[Num[Array, '...']] = None,
     eps: float = 1e-12,
 ) -> Num[Array, '...']:
-    """Percent signal change: ``100 * (x - mean) / (mean + eps)``.
+    r"""Percent signal change: :math:`100 (x - \mu) / (\mu + \epsilon)`.
 
-    The fMRI BOLD convention.  Per-cell normalisation;
-    interpretable as "deviation from baseline as a percent of
-    baseline".
+    The fMRI BOLD convention, where :math:`\mu` is the (optionally
+    weighted) mean along ``axis``.  This is a per-cell
+    normalisation, interpretable as "deviation from baseline as a
+    percent of baseline".
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    axis
+        Axis (or axes) over which the baseline mean is reduced.
+        Default ``-1`` (the trailing observation axis).
+    weights
+        Optional non-negative weights broadcastable against ``x``,
+        used when computing the baseline mean.  When ``None``, the
+        unweighted mean is used.
+    eps
+        Denominator stabiliser guarding a zero baseline mean.
+
+    Returns
+    -------
+    Num[Array, '...']
+        Percent-signal-change tensor, same shape as ``x``.
     """
     mean, _ = _weighted_mean_std(x, axis=axis, weights=weights)
     return 100.0 * (x - mean) / (mean + eps)
@@ -188,7 +252,29 @@ def _median_mad(
     *,
     axis: _AxisArg,
 ) -> Tuple[Float[Array, '...'], Float[Array, '...']]:
-    """Median and median-absolute-deviation along ``axis``."""
+    r"""Median and median-absolute-deviation along ``axis``.
+
+    The median-absolute-deviation is
+    :math:`\operatorname{median}(|x - \operatorname{median}(x)|)`,
+    a robust dispersion estimate.
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    axis
+        Axis (or axes) over which the median and median-absolute-
+        deviation are reduced.
+
+    Returns
+    -------
+    median : Float[Array, '...']
+        Median along ``axis``, with the reduced axis retained
+        (``keepdims=True``) for broadcasting.
+    mad : Float[Array, '...']
+        Median absolute deviation about that median, same broadcast
+        shape as ``median``.
+    """
     median = jnp.median(x, axis=axis, keepdims=True)
     mad = jnp.median(jnp.abs(x - median), axis=axis, keepdims=True)
     return median, mad
@@ -200,11 +286,30 @@ def robust_zscore_normalize(
     axis: _AxisArg = -1,
     eps: float = 1e-12,
 ) -> Num[Array, '...']:
-    """Median / MAD-based robust z-score normalisation.
+    r"""Median / MAD-based robust z-score normalisation.
 
-    Less sensitive to outliers than the mean / std version.
-    The factor 1.4826 makes the MAD a consistent estimator of
-    the standard deviation for Gaussian inputs.
+    Computes :math:`(x - \operatorname{median}) /
+    (1.4826 \operatorname{MAD} + \epsilon)` along ``axis``, using
+    the median and median-absolute-deviation in place of the mean
+    and standard deviation.  This is less sensitive to outliers
+    than :func:`zscore_normalize`.  The factor 1.4826 makes the MAD
+    a consistent estimator of the standard deviation for Gaussian
+    inputs.
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    axis
+        Axis (or axes) over which the median and MAD are reduced.
+        Default ``-1`` (the trailing observation axis).
+    eps
+        Denominator stabiliser guarding a zero MAD.
+
+    Returns
+    -------
+    Num[Array, '...']
+        Robustly z-scored tensor, same shape as ``x``.
     """
     median, mad = _median_mad(x, axis=axis)
     return (x - median) / (1.4826 * mad + eps)
@@ -218,12 +323,13 @@ def intensity_normalize(
     axis: Optional[_AxisArg] = None,
     eps: float = 1e-12,
 ) -> Num[Array, '...']:
-    """Percentile clip then rescale to ``[0, 1]``.
+    r"""Percentile clip then rescale to :math:`[0, 1]`.
 
     The synthstrip / SynthSeg pre-training convention: clip the
     intensity histogram to the ``[low_percentile, high_percentile]``
     range to suppress outliers (motion artefacts, bias-field
-    inhomogeneity), then rescale the clipped range to ``[0, 1]``.
+    inhomogeneity), then rescale the clipped range to
+    :math:`[0, 1]`.
 
     Parameters
     ----------
@@ -240,6 +346,12 @@ def intensity_normalize(
         normalisation).
     eps
         Stabiliser for the division when ``high == low``.
+
+    Returns
+    -------
+    Num[Array, '...']
+        Clipped-and-rescaled tensor, same shape as ``x``, with the
+        clipped intensity range mapped into :math:`[0, 1]`.
 
     Notes
     -----
@@ -270,27 +382,28 @@ def percentile_rescale(
     eps: float = 1e-12,
     mask: Optional[Num[Array, '...']] = None,
 ) -> Num[Array, '...']:
-    """Shift by the ``lo``-percentile, scale by the ``hi``-percentile,
-    then optionally clip to ``[0, 1]``.
+    r"""Shift by the ``lo``-percentile then scale by the ``hi``-percentile.
 
-    Computes ``(x - p_lo) / p_hi`` where ``p_lo`` / ``p_hi`` are the
-    ``lo`` / ``hi`` percentiles of ``x``, then clips to ``[0, 1]``
-    when ``clip`` is set.  With the defaults ``lo=0`` (the minimum)
-    and ``hi=99`` this is the **min--p99--clip** recipe used by
-    SynthStrip / SynthDist / SynthSR (and SynthSR after its CT
-    intensity clip): ``clip((x - min) / p99, 0, 1)``.
+    Computes :math:`(x - p_{lo}) / p_{hi}` where :math:`p_{lo}` /
+    :math:`p_{hi}` are the ``lo`` / ``hi`` percentiles of ``x``,
+    then optionally clips the result to :math:`[0, 1]` when ``clip``
+    is set.  With the defaults ``lo=0`` (the minimum) and ``hi=99``
+    this is the **min--p99--clip** recipe used by SynthStrip /
+    SynthDist / SynthSR (and SynthSR after its CT intensity clip):
+    :math:`\operatorname{clip}((x - \min) / p_{99}, 0, 1)`.
 
-    Distinct from ``intensity_normalize`` in two ways, both
+    Distinct from :func:`intensity_normalize` in two ways, both
     deliberate:
 
-    1. The scale is the **raw high percentile** ``p_hi`` (not the
-       inter-percentile width ``p_hi - p_lo``), so the upper
-       reference is an absolute intensity, not a range endpoint.
-    2. It rescales **then** clips (``intensity_normalize`` clips
-       then rescales), so values above ``p_hi`` saturate at ``1``
-       rather than defining the top of the range.
+    1. The scale is the **raw high percentile** :math:`p_{hi}` (not
+       the inter-percentile width :math:`p_{hi} - p_{lo}`), so the
+       upper reference is an absolute intensity, not a range
+       endpoint.
+    2. It rescales **then** clips (:func:`intensity_normalize` clips
+       then rescales), so values above :math:`p_{hi}` saturate at
+       ``1`` rather than defining the top of the range.
 
-    Use ``intensity_normalize`` for symmetric two-sided
+    Use :func:`intensity_normalize` for symmetric two-sided
     percentile-window rescaling; use this for the strict
     min/high-percentile convention the Synth* pipelines expect.
 
@@ -392,14 +505,32 @@ def l2_normalize(
     axis: _AxisArg = -1,
     eps: float = 1e-12,
 ) -> Float[Array, '...']:
-    """Project ``x`` onto the unit ``L2`` sphere along ``axis``.
+    r"""Project ``x`` onto the unit :math:`L_2` sphere along ``axis``.
 
-    The ``p = 2`` specialisation of :func:`lp_normalize`, computed
-    directly from the sum of squares (avoiding the general
-    ``|x| ** p`` power and its root).  Once rows are unit-``L2``
+    The :math:`p = 2` specialisation of :func:`lp_normalize`,
+    computed directly from the sum of squares (avoiding the general
+    :math:`|x|^p` power and its root) and clamping the denominator
+    at ``eps`` (the ``torch.nn.functional.normalize`` convention
+    :math:`x / \max(\|x\|_2, \epsilon)`).  Once rows are unit-norm
     their inner product *is* the cosine of the angle between them,
     so this is the projection that turns a dot product into a
     cosine similarity / angular distance.
+
+    Parameters
+    ----------
+    x
+        Input tensor.
+    axis
+        Axis (or axes) over which the :math:`L_2` norm is taken.
+        Default ``-1`` (the trailing feature axis).
+    eps
+        Lower clamp on the norm denominator.
+
+    Returns
+    -------
+    Float[Array, '...']
+        Tensor of the same shape as ``x``, unit-:math:`L_2` along
+        ``axis`` (except where the input norm is below ``eps``).
     """
     norm = jnp.sqrt(jnp.sum(x * x, axis=axis, keepdims=True))
     return x / jnp.maximum(norm, eps)

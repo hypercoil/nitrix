@@ -1,0 +1,44 @@
+---
+title: "lp_normalize"
+generated: true
+description: "Project `x` onto the unit `Lp` sphere along `axis`."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:lp_normalize -->
+```python
+lp_normalize(x: Float[Array, '...'], *, p: float = 2.0, axis: _AxisArg = -1, eps: float = 1e-12) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lp_normalize -->
+Project `x` onto the unit `Lp` sphere along `axis`.
+
+Divides by the `Lp` norm, clamping the denominator at `eps`
+(the `torch.nn.functional.normalize` convention:
+`x / max(||x||_p, eps)`, *not* `x / (||x||_p + eps)`), so a
+zero vector maps to zero rather than blowing up.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lp_normalize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` | — | Input tensor. |
+| `p` | `float` | — | `2.0` | Order of the norm. Default `2` (Euclidean). |
+| `axis` | `_AxisArg` | — | `-1` | Axis (or axes) over which the norm is taken. Default `-1` (the trailing feature axis). |
+| `eps` | `float` | — | `1e-12` | Lower clamp on the norm denominator. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:lp_normalize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

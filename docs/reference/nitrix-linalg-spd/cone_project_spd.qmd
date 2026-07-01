@@ -1,0 +1,45 @@
+---
+title: "cone_project_spd"
+generated: true
+description: "Map tangent-space matrices back into the SPD cone at `reference`."
+---
+
+[‹ back to `nitrix.linalg.spd`](../nitrix-linalg-spd.qmd)
+
+<!-- nitrix:gen sig:cone_project_spd -->
+```python
+cone_project_spd(input: Float[Array, '... d d'], reference: Float[Array, '... d d'], *, psi: float = 0.0, key: Optional[jax.Array] = None, eigvalue_clip: EigvalueClip = 'auto') -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cone_project_spd -->
+Map tangent-space matrices back into the SPD cone at `reference`.
+
+Computes $R^{1/2} \exp(X) R^{1/2}$, where $R$ is the reference
+and $X$ the tangent-space input.  This is the inverse of
+[`tangent_project_spd`](../nitrix-linalg-spd/tangent_project_spd.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cone_project_spd -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Float` | `...` × `d` × `d` | — | Symmetric tangent-space matrix batch to map back into the SPD cone. |
+| `reference` | `Float` | `...` × `d` × `d` | — | Symmetric (assumed SPD) reference point defining the cone, the same one used for the forward projection, broadcastable against `input`. |
+| `psi` | `float` | — | `0.0` | Reconditioning strength forwarded to [`symsqrt`](../nitrix-linalg-spd/symsqrt.qmd) and [`symexp`](../nitrix-linalg-spd/symexp.qmd). |
+| `key` | `Optional[jax.Array]` | — | `None` | PRNG key, required when `psi > 0`. |
+| `eigvalue_clip` | `EigvalueClip` | — | `'auto'` | Eigenvalue clipping policy forwarded to [`symsqrt`](../nitrix-linalg-spd/symsqrt.qmd). |
+
+**Returns** `Float` — shape `...` × `d` × `d`. The reconstructed SPD matrix batch at `reference`; same shape as `input`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cone_project_spd -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

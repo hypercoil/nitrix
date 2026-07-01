@@ -1,0 +1,44 @@
+---
+title: "gaussian_window"
+generated: true
+description: "Separable Gaussian patch-weight window, peak 1 at the centre."
+---
+
+[‹ back to `nitrix.numerics.spatial`](../nitrix-numerics-spatial.qmd)
+
+<!-- nitrix:gen sig:gaussian_window -->
+```python
+gaussian_window(shape: Sequence[int], *, sigma_scale: float = 0.125, dtype: jnp.dtype = jnp.float32) -> Float[Array, '*shape']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaussian_window -->
+Separable Gaussian patch-weight window, peak 1 at the centre.
+
+Builds an `len(shape)`-dimensional window as the outer product of
+per-axis unnormalised Gaussian profiles, each centred on its axis and
+peaking at 1. Used to down-weight patch borders when blending
+overlapping sliding-window predictions, so seams between tiles are
+smooth.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaussian_window -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `shape` | `Sequence[int]` | — | — | Per-axis window size; the returned array has this shape. |
+| `sigma_scale` | `float` | — | `0.125` | Per-axis standard deviation as a fraction of the axis size: the standard deviation for an axis of length `size` is $\sigma_{\mathrm{scale}} \cdot \mathrm{size}$ (floored at a small positive value). Defaults to `0.125`. |
+| `dtype` | `jnp.dtype` | — | `jnp.float32` | Floating-point dtype of the returned window. Defaults to `jnp.float32`. |
+
+**Returns** `Float` — shape `*shape`. The separable Gaussian window with the requested `shape`, valued 1 at the centre and decaying towards the borders.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaussian_window -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*shape` | a variadic group of axes (`shape`) |
+<!-- nitrix:/gen -->

@@ -1,0 +1,34 @@
+---
+title: "extend_to_size"
+generated: true
+description: "Extend a tensor in the positive direction until its size matches the specification. Any new entries created via extension are populated with `fill`."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:extend_to_size -->
+```python
+extend_to_size(tensor: Shaped[Array, ...], shape: Sequence[int], fill: float = float('nan')) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:extend_to_size -->
+Extend a tensor in the positive direction until its size matches the
+specification. Any new entries created via extension are populated with
+`fill`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:extend_to_size -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `shape` | `Sequence[int]` | — | — | — |
+| `fill` | `float` | — | `float('nan')` | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+

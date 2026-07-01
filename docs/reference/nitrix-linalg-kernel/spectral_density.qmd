@@ -1,0 +1,46 @@
+---
+title: "spectral_density"
+generated: true
+description: "Dispatch a stationary-kernel spectral density (in `dim` dimensions)."
+---
+
+[‹ back to `nitrix.linalg.kernel`](../nitrix-linalg-kernel.qmd)
+
+<!-- nitrix:gen sig:spectral_density -->
+```python
+spectral_density(omega: Float[Array, '...'], *, kernel: str, rho: Union[float, Float[Array, '']], amplitude: float = 1.0, dim: int = 1) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spectral_density -->
+Dispatch a stationary-kernel spectral density (in `dim` dimensions).
+
+Selects and evaluates a spectral density by name, routing to
+[`se_spectral_density`](../nitrix-linalg-kernel/se_spectral_density.qmd) for the squared-exponential family and
+to [`matern_spectral_density`](../nitrix-linalg-kernel/matern_spectral_density.qmd) for the Matern families.  The
+`kernel` string is matched case-insensitively after stripping
+`/`, `-`, and `_`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spectral_density -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `omega` | `Float` | `...` | — | Frequency magnitude $\\|w\\|$, of arbitrary shape. |
+| `kernel` | `str` | — | — | Kernel name. Squared-exponential: `'rbf'`, `'se'`, `'sqexp'`, `'squaredexponential'`, `'gaussian'`. Matern: `'matern12'` / `'exp'` / `'exponential'` ($\nu = 1/2$), `'matern32'` ($\nu = 3/2$), `'matern52'` ($\nu = 5/2$). An unknown name raises `ValueError`. |
+| `rho` | `Union[float, Float[Array, '']]` | — | — | Length scale $\rho$ (scalar or scalar array). |
+| `amplitude` | `float` | — | `1.0` | Kernel amplitude $a$; the density scales as $a^2$. |
+| `dim` | `int` | — | `1` | Input dimension $D$ (`1` for the one-dimensional case). |
+
+**Returns** `Float` — shape `...`. Spectral density evaluated elementwise at `omega`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:spectral_density -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

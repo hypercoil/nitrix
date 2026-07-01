@@ -1,0 +1,83 @@
+---
+title: "nitrix.linalg.kernel"
+generated: true
+signature-hash: 765bbf9263a347d5
+description: "Pairwise kernel and distance functions."
+listing:
+  id: nitrix-linalg-kernel-symbols
+  contents: "nitrix-linalg-kernel/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.kernel`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Pairwise kernel and distance functions.
+
+The bread-and-butter primitives for kernel methods: linear,
+polynomial, sigmoid, RBF / Gaussian, cosine; plus the underlying
+squared-L2 distance [`linear_distance`](nitrix-linalg-kernel/linear_distance.qmd).
+
+All accept a `theta` argument for parameterised (Mahalanobis-style)
+inner products:
+
+- `theta is None` -- the standard inner product / distance.
+- `theta` a **vector** $(\dots, d)$ -- diagonal Mahalanobis;
+  the kernel acts as $\sum_d \theta_d x_d y_d$.
+- `theta` a **matrix** $(\dots, d, d)$ -- full Mahalanobis;
+  the kernel acts as $x^{\top} \theta y$.
+
+The squared-distance path uses the identity
+$\|x - y\|^2 = \|x\|^2 + \|y\|^2 - 2\, x \cdot y$, which needs
+only $(\dots, n, m)$ memory rather than materialising an
+$(\dots, n, m, d)$ pairwise-difference intermediate -- a
+$d$-fold reduction.  For $d$ in the thousands (covariance
+vectors, voxelwise features) this is the difference between OOM and
+fitting in device memory.
+
+What we ship:
+
+- [`linear_kernel`](nitrix-linalg-kernel/linear_kernel.qmd) -- $X_0 X_1^{\top}$, optionally
+  Mahalanobis-weighted.
+- [`linear_distance`](nitrix-linalg-kernel/linear_distance.qmd) -- squared L2 distance (or Mahalanobis-
+  weighted squared distance), computed via the BLAS-friendly
+  identity.
+- [`parameterised_norm`](nitrix-linalg-kernel/parameterised_norm.qmd) -- per-row norm, optionally Mahalanobis-
+  weighted.
+- [`rbf_kernel`](nitrix-linalg-kernel/rbf_kernel.qmd) / [`gaussian_kernel`](nitrix-linalg-kernel/gaussian_kernel.qmd) --
+  $\exp(-\gamma \|x - y\|^2)$; the two are aliases up to the
+  $\gamma = \sigma^{-2}$ substitution.
+- [`polynomial_kernel`](nitrix-linalg-kernel/polynomial_kernel.qmd) -- $(\gamma\, x^{\top} y + r)^{\mathrm{order}}$.
+- [`sigmoid_kernel`](nitrix-linalg-kernel/sigmoid_kernel.qmd) -- $\tanh(\gamma\, x^{\top} y + r)$.
+- [`cosine_kernel`](nitrix-linalg-kernel/cosine_kernel.qmd) -- linear kernel on row-normalised inputs.
+
+For covariance / correlation kernels, use
+[`nitrix.stats.pairedcov`](nitrix-stats.qmd) and [`nitrix.stats.pairedcorr`](nitrix-stats.qmd)
+directly.  There are no sparse-tensor overloads here; ELL and
+SectionedELL are the project's sparse formats, so build a sparse
+kernel matrix via `nitrix.semiring.semiring_ell_matmul` with the
+`EUCLIDEAN` semiring on a pre-thresholded adjacency.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-kernel-symbols}
+:::

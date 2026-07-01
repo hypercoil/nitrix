@@ -1,0 +1,82 @@
+---
+title: "tangent_project_spd"
+generated: true
+description: "Map SPD matrices into the tangent space at `reference`."
+---
+
+[‹ back to `nitrix.linalg.spd`](../nitrix-linalg-spd.qmd)
+
+<!-- nitrix:gen sig:tangent_project_spd -->
+```python
+tangent_project_spd(input: Float[Array, '... d d'], reference: Float[Array, '... d d'], *, psi: float = 0.0, key: Optional[jax.Array] = None, eigvalue_clip: EigvalueClip = 'auto') -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:tangent_project_spd -->
+Map SPD matrices into the tangent space at `reference`.
+
+Computes $\log(R^{-1/2} X R^{-1/2})$, where $R$ is the
+reference and $X$ the input.  This is the affine-invariant
+Riemannian log map at the reference point; the log-Euclidean
+approximation $\log(X) - \log(R)$ is *not* what this returns.
+
+Use this to convert a batch of SPD matrices (e.g. subject covariance
+matrices) into a flat tangent-space representation suitable for
+downstream linear-model fitting.  [`cone_project_spd`](../nitrix-linalg-spd/cone_project_spd.qmd) inverts the
+map.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:tangent_project_spd -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Float` | `...` × `d` × `d` | — | Symmetric (assumed SPD) matrix batch to project into the tangent space. |
+| `reference` | `Float` | `...` × `d` × `d` | — | Symmetric (assumed SPD) reference point at which the tangent space is taken, broadcastable against `input`. |
+| `psi` | `float` | — | `0.0` | Reconditioning strength forwarded to [`sympower`](../nitrix-linalg-spd/sympower.qmd) and [`symlog`](../nitrix-linalg-spd/symlog.qmd). |
+| `key` | `Optional[jax.Array]` | — | `None` | PRNG key, required when `psi > 0`. |
+| `eigvalue_clip` | `EigvalueClip` | — | `'auto'` | Eigenvalue clipping policy forwarded to [`sympower`](../nitrix-linalg-spd/sympower.qmd) and [`symlog`](../nitrix-linalg-spd/symlog.qmd). |
+
+**Returns** `Float` — shape `...` × `d` × `d`. The symmetric tangent-space representation of each input matrix at `reference`; same shape as `input`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:tangent_project_spd -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **9.01 ms** (median, L4); up to **32.08× faster** than `nilearn.tangent`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_TANGENT_PROJECT_SPD.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| tangent_project_spd | jax-cpu | b=32,d=256 | `cupy.eigh_tangent` | skipped | — | — | — | — | — |
+| tangent_project_spd | jax-cpu | b=32,d=256 | `nilearn.tangent` | ok | 241.97 ms / 246.21 ms | 1.177 s | 768 MB (rss) | ✓ 0.0042×tol | 1.09x vs nitrix-jax |
+| tangent_project_spd | jax-cpu | b=32,d=256 | `nitrix-jax` | ok | 222.53 ms / 332.85 ms | 743.70 ms | 771 MB (rss) | ✓ 0.00097×tol | 1.00x vs nitrix-jax |
+| tangent_project_spd | jax-cuda12 | b=32,d=256 | `cupy.eigh_tangent` | skipped | — | — | — | — | — |
+| tangent_project_spd | jax-cuda12 | b=32,d=256 | `nilearn.tangent` | ok | 229.31 ms / 231.23 ms | 795.14 ms | 8.65 MB (hbm) | ✓ 0.0042×tol | 25.49x vs nitrix-jax |
+| tangent_project_spd | jax-cuda12 | b=32,d=256 | `nitrix-jax` | ok | 9.00 ms / 9.01 ms | 1.048 s | 126.09 MB (hbm) | ✓ 0.0009×tol | 1.00x vs nitrix-jax |
+| tangent_project_spd | jax-cpu | b=64,d=128 | `cupy.eigh_tangent` | skipped | — | — | — | — | — |
+| tangent_project_spd | jax-cpu | b=64,d=128 | `nilearn.tangent` | ok | 108.22 ms / 130.10 ms | 730.79 ms | 768 MB (rss) | ✓ 0.0038×tol | 1.03x vs nitrix-jax |
+| tangent_project_spd | jax-cpu | b=64,d=128 | `nitrix-jax` | ok | 104.83 ms / 154.46 ms | 393.66 ms | 768 MB (rss) | ✓ 0.00074×tol | 1.00x vs nitrix-jax |
+| tangent_project_spd | jax-cuda12 | b=64,d=128 | `cupy.eigh_tangent` | compile_error | — | — | — | — | — |
+| tangent_project_spd | jax-cuda12 | b=64,d=128 | `nilearn.tangent` | ok | 149.98 ms / 186.28 ms | 1.010 s | 4.26 MB (hbm) | ✓ 0.0038×tol | 32.08x vs nitrix-jax |
+| tangent_project_spd | jax-cuda12 | b=64,d=128 | `nitrix-jax` | ok | 4.68 ms / 4.73 ms | 1.291 s | 104.92 MB (hbm) | ✓ 0.00063×tol | 1.00x vs nitrix-jax |
+| tangent_project_spd | jax-cpu | b=64,d=64 | `cupy.eigh_tangent` | skipped | — | — | — | — | — |
+| tangent_project_spd | jax-cpu | b=64,d=64 | `nilearn.tangent` | ok | 27.38 ms / 31.34 ms | 3.141 s | 768 MB (rss) | ✓ 0.0016×tol | 1.35x vs nitrix-jax |
+| tangent_project_spd | jax-cpu | b=64,d=64 | `nitrix-jax` | ok | 20.35 ms / 25.18 ms | 340.98 ms | 768 MB (rss) | ✓ 0.0006×tol | 1.00x vs nitrix-jax |
+| tangent_project_spd | jax-cuda12 | b=64,d=64 | `cupy.eigh_tangent` | compile_error | — | — | — | — | — |
+| tangent_project_spd | jax-cuda12 | b=64,d=64 | `nilearn.tangent` | ok | 26.44 ms / 27.02 ms | 601.61 ms | 1.06 MB (hbm) | ✓ 0.0016×tol | 15.04x vs nitrix-jax |
+| tangent_project_spd | jax-cuda12 | b=64,d=64 | `nitrix-jax` | ok | 1.76 ms / 1.82 ms | 1.165 s | 74.47 MB (hbm) | ✓ 0.00064×tol | 1.00x vs nitrix-jax |
+:::
+
+*source: bench `f8a8b86b` · nitrix `f04ec509`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:tangent_project_spd -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

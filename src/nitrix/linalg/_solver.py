@@ -16,7 +16,7 @@ This module routes the affected ops to a device where they work (CPU on
 such stacks) and moves the result back, **adaptively**: each op probes a
 2x2 GPU call once (cached); ``safe_*`` additionally *latches* to CPU if a
 real call fails at runtime (the import-time probe can pass on a stack whose
-handle wedges later or only at larger sizes -- B14 #2).
+handle wedges later or only at larger sizes).
 
 **Small-matrix fast path.**  For ``n <= _SMALL_N`` the wrappers bypass
 cuSolver entirely and call the hand-rolled, cuSolver-free kernels in
@@ -83,7 +83,25 @@ def _cpu_device() -> jax.Device:
 
 
 def _is_cusolver_failure(exc: BaseException) -> bool:
-    """Whether ``exc`` is the broken-cuSolver-handle failure (vs a real error)."""
+    """Classify an exception as a broken cuSolver handle (vs a real error).
+
+    The broken-handle failure is recognised heuristically from the exception
+    message: any of the tokens ``cusolver``, ``gpusolverdn``,
+    ``solver_handle``, or ``jclapack`` (case-insensitive) marks it as a
+    cuSolver-handle failure that is safe to retry on CPU, rather than a
+    genuine numerical error that should propagate.
+
+    Parameters
+    ----------
+    exc : BaseException
+        The exception raised by a cuSolver-backed op.
+
+    Returns
+    -------
+    bool
+        ``True`` if the exception looks like a broken cuSolver handle,
+        ``False`` otherwise.
+    """
     msg = str(exc).lower()
     return any(
         tok in msg
@@ -98,11 +116,28 @@ def _probed_device_pair(
 ) -> Tuple[Callable[[], jax.Device], Callable[[], None]]:
     """Build a ``(device, latch)`` pair for a cuSolver-backed op.
 
-    ``device()`` returns ``jax.devices()[0]`` if a cached 2x2 GPU probe of
-    ``probe_op`` succeeds, else the first CPU device; once ``latch()`` is
-    called (after an observed runtime failure) it returns CPU permanently.
-    The latch is a per-op process-global, so both eager and (subsequent)
-    traced callers become GPU-safe after the first failure.
+    ``device()`` returns the default device (``jax.devices()[0]``) if a
+    cached 2x2 GPU probe of ``probe_op`` succeeds, else the first CPU device;
+    once ``latch()`` is called (after an observed runtime failure) it returns
+    CPU permanently. The latch is a per-op process-global, so both eager and
+    (subsequent) traced callers become GPU-safe after the first failure.
+
+    Parameters
+    ----------
+    probe_op : callable
+        The op to exercise on a 2x2 ``float32`` identity matrix as the
+        one-off device probe (for example ``jnp.linalg.eigh``).
+    doc : str
+        Docstring attached to the returned ``device`` accessor.
+
+    Returns
+    -------
+    device : callable
+        Zero-argument accessor returning the ``jax.Device`` on which the op
+        should run given the current probe / latch state.
+    latch : callable
+        Zero-argument callback that latches the op to CPU permanently and
+        clears the cached probe.
     """
     latched: List[bool] = [False]
 
@@ -144,6 +179,12 @@ def solver_device() -> jax.Device:
 
     They call cuSolver-backed QR / Cholesky internally, which share the
     handle pool with ``eigh``, so this follows ``eigh_device()``'s verdict.
+
+    Returns
+    -------
+    jax.Device
+        The device on which such solvers should run (CPU on stacks with a
+        broken cuSolver handle, the default device otherwise).
     """
     return eigh_device()
 
@@ -154,6 +195,19 @@ def device_of_concrete(arr: Any) -> Optional[jax.Device]:
     ``arr.devices()`` raises ``ConcretizationTypeError`` inside a JAX
     trace; we treat tracers as "no fixed device" so the caller can let JAX
     abstract evaluation handle dispatch.
+
+    Parameters
+    ----------
+    arr : Any
+        A candidate array. Objects without a ``devices()`` method (and
+        tracers, whose ``devices()`` raises under trace) are treated as
+        having no fixed device.
+
+    Returns
+    -------
+    jax.Device or None
+        The first device backing ``arr``, or ``None`` if ``arr`` is a tracer
+        or is not a concrete array.
     """
     if not hasattr(arr, 'devices'):
         return None
@@ -165,7 +219,23 @@ def device_of_concrete(arr: Any) -> Optional[jax.Device]:
 
 
 def source_device(tree: Any) -> Optional[jax.Device]:
-    """The "originating" device for a tree of arrays (first found, or None)."""
+    """Return the originating device for a PyTree of arrays.
+
+    Traverses the leaves of ``tree`` and returns the first concrete device
+    encountered. Tracer leaves (whose ``devices()`` raises under trace) and
+    non-array leaves are skipped.
+
+    Parameters
+    ----------
+    tree : Any
+        A PyTree whose leaves may be concrete arrays, tracers, or scalars.
+
+    Returns
+    -------
+    jax.Device or None
+        The first device found across the leaves, or ``None`` if no leaf has
+        a concrete device.
+    """
     leaves = jax.tree_util.tree_leaves(tree)
     devs = set()
     for leaf in leaves:
@@ -189,15 +259,37 @@ def _run_safe(
     """Run ``compute(target)`` on a working device, with adaptive fallback.
 
     ``compute`` takes the target device and returns the result (it is
-    responsible for ``device_put``-ing its operands there).  For a concrete
+    responsible for ``device_put``-ing its operands there). For a concrete
     input on a GPU the call is forced so a late cuSolver-handle failure
     surfaces here; on such a failure the op's device is latched to CPU and
-    the call retried there.  A genuine numerical error is re-raised.  When
+    the call retried there. A genuine numerical error is re-raised. When
     the input was concrete and on another device, the result is moved back.
     Under trace (``source is None``) a runtime failure is uncatchable, but
     the latched verdict from any prior eager failure routes the
     ``device_put`` to CPU -- so grad / jit become safe after the first
     observed failure.
+
+    Parameters
+    ----------
+    compute : callable
+        Takes a target ``jax.Device`` and returns the op's result, having
+        placed its operands on that device.
+    source : jax.Device or None
+        The originating device of the concrete input(s), or ``None`` when the
+        caller is under a JAX trace (so no runtime failure can be caught and
+        no result must be moved back).
+    device_fn : callable
+        Zero-argument accessor for the current target device (probe / latch
+        aware), e.g. the ``device`` accessor from ``_probed_device_pair``.
+    latch_fn : callable
+        Zero-argument callback that latches the op to CPU permanently,
+        invoked once a runtime cuSolver-handle failure is observed.
+
+    Returns
+    -------
+    Any
+        The result of ``compute`` on the working device, moved back to
+        ``source`` when the input was concrete and computed elsewhere.
     """
     target = device_fn()
     try:
@@ -220,8 +312,21 @@ def safe_eigh(
 ) -> Tuple[Float[Array, '... n'], Float[Array, '... n n']]:
     """``jnp.linalg.eigh`` with the cuSolver-robust, adaptive device pick.
 
-    ``A`` is taken as symmetric (not symmetrised here).  Returns
-    ``(eigenvalues, eigenvectors)``; see ``_run_safe`` for the fallback.
+    ``A`` is taken as symmetric (it is not symmetrised here). The eigen-
+    decomposition is routed to a device on which dense ``eigh`` works, with
+    the adaptive CPU fallback described in ``_run_safe``.
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        A batch of symmetric matrices to decompose.
+
+    Returns
+    -------
+    eigenvalues : Float[Array, '... n']
+        The eigenvalues in ascending order.
+    eigenvectors : Float[Array, '... n n']
+        The corresponding orthonormal eigenvectors as columns.
     """
     return cast(
         Tuple[Float[Array, '... n'], Float[Array, '... n n']],
@@ -242,6 +347,16 @@ def safe_inv(
     For ``n <= _SMALL_N`` the closed-form adjugate inverse runs in place (no
     cuSolver, no device probe / round-trip); larger matrices take the adaptive
     device path.
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        A batch of square matrices to invert.
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The batch of matrix inverses.
     """
     if A.shape[-1] <= _SMALL_N:
         return small_inv(A, A.shape[-1])
@@ -269,6 +384,16 @@ def safe_cholesky(
     a near-singular ``A`` where ``jnp.linalg.cholesky`` would return ``NaN``;
     the floor sits below any well-conditioned pivot, so a healthy SPD input is
     unaffected (see ``_smalllinalg.spd_chol``).
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        A batch of symmetric positive-definite matrices.
+
+    Returns
+    -------
+    Float[Array, '... n n']
+        The lower-triangular Cholesky factors.
     """
     if A.shape[-1] <= _SMALL_N:
         return _small_spd_chol(A, A.shape[-1])
@@ -284,11 +409,30 @@ def safe_cholesky(
 
 
 def _cho_backsub(chol: Array, b: Array, a_ndim: int) -> Array:
-    """Back-substitute ``x = L^{-T} L^{-1} b`` from a lower Cholesky factor ``L``.
+    """Back-substitute :math:`x = L^{-\\top} L^{-1} b` from a lower factor.
 
-    Two ``triangular_solve``s (cuBLAS ``trsm``, unaffected by the broken
-    cuSolver handle), with the ``jnp.linalg.solve`` convention that a
-    ``b`` of one fewer axis than ``a`` is a single RHS vector.
+    Given the lower-triangular Cholesky factor :math:`L` of a symmetric
+    positive-definite matrix, solves for :math:`x` with two
+    ``triangular_solve``s (cuBLAS ``trsm``, unaffected by the broken cuSolver
+    handle), following the ``jnp.linalg.solve`` convention that a ``b`` of one
+    fewer axis than ``a`` is a single right-hand-side vector.
+
+    Parameters
+    ----------
+    chol : Array
+        The lower-triangular Cholesky factor :math:`L`, of shape
+        ``(..., n, n)``.
+    b : Array
+        The right-hand side, of shape ``(..., n, k)`` for ``k`` columns or
+        ``(..., n)`` for a single vector.
+    a_ndim : int
+        The number of dimensions of the original matrix ``a``, used to decide
+        whether ``b`` is a single vector (``b.ndim == a_ndim - 1``).
+
+    Returns
+    -------
+    Array
+        The solution :math:`x`, matching the shape convention of ``b``.
     """
     is_vector = b.ndim == a_ndim - 1
     rhs = b[..., None] if is_vector else b
@@ -302,10 +446,24 @@ def _cho_backsub(chol: Array, b: Array, a_ndim: int) -> Array:
 
 
 def _small_spd_chol(A: Float[Array, '... n n'], n: int) -> Array:
-    """Batched cuSolver-free Cholesky factor of a small SPD ``A`` (``n <= _SMALL_N``).
+    """Batched cuSolver-free Cholesky factor of a small SPD ``A``.
 
-    ``spd_chol`` is a single-matrix kernel; ``jnp.vectorize`` lifts it over the
-    leading (batch) dimensions ``safe_*`` callers pass.
+    Applies only for ``n <= _SMALL_N``. ``spd_chol`` is a single-matrix
+    kernel; ``jnp.vectorize`` lifts it over the leading (batch) dimensions
+    that ``safe_*`` callers pass.
+
+    Parameters
+    ----------
+    A : Float[Array, '... n n']
+        A batch of small symmetric positive-definite matrices.
+    n : int
+        The trailing matrix dimension (``A.shape[-1]``), passed statically to
+        the rolled Cholesky kernel.
+
+    Returns
+    -------
+    Array
+        The lower-triangular Cholesky factors, of shape ``(..., n, n)``.
     """
     return cast(
         Array,
@@ -314,11 +472,27 @@ def _small_spd_chol(A: Float[Array, '... n n'], n: int) -> Array:
 
 
 def _cho_solve_on(a: Array, b: Array, l2: float) -> Array:
-    """SPD solve ``(a + l2 I) x = b`` via Cholesky, co-located on a/b's device.
+    """SPD solve :math:`(a + l_2 I) x = b` via Cholesky, on a/b's device.
 
     Only the factorisation hits cuSolver; the ``_cho_backsub``
-    ``triangular_solve``s are unaffected, so the whole solve runs on one
-    device to avoid a cross-device factor / RHS.
+    ``triangular_solve``s are unaffected, so the whole solve runs co-located
+    on one device to avoid a cross-device factor / right-hand side.
+
+    Parameters
+    ----------
+    a : Array
+        A batch of symmetric positive-definite matrices, of shape
+        ``(..., n, n)``.
+    b : Array
+        The right-hand side, of shape ``(..., n, k)`` or ``(..., n)``.
+    l2 : float
+        Non-negative Tikhonov (ridge) regularisation added along the diagonal
+        as :math:`l_2 I` before factorisation; ``0.0`` skips the addition.
+
+    Returns
+    -------
+    Array
+        The solution :math:`x`, matching the shape convention of ``b``.
     """
     n = a.shape[-1]
     mat = a if l2 == 0.0 else a + l2 * jnp.eye(n, dtype=a.dtype)
@@ -332,10 +506,28 @@ def safe_cho_solve(
     *,
     l2: float = 0.0,
 ) -> Float[Array, '...']:
-    """SPD Cholesky solve ``(a + l2 I) x = b``, cuSolver-robust + adaptive.
+    """SPD Cholesky solve :math:`(a + l_2 I) x = b`, cuSolver-robust.
 
-    For ``n <= _SMALL_N`` the rolled-Cholesky factor (cuSolver-free) backs the
-    solve in place; larger matrices take the adaptive device path.
+    Solves a symmetric positive-definite system via a Cholesky factorisation
+    with the adaptive device pick. For ``n <= _SMALL_N`` the rolled-Cholesky
+    factor (cuSolver-free) backs the solve in place; larger matrices take the
+    adaptive device path.
+
+    Parameters
+    ----------
+    a : Float[Array, '... n n']
+        A batch of symmetric positive-definite matrices.
+    b : Float[Array, '...']
+        The right-hand side, of shape ``(..., n, k)`` for ``k`` columns or
+        ``(..., n)`` for a single vector.
+    l2 : float, optional
+        Non-negative Tikhonov (ridge) regularisation added along the diagonal
+        as :math:`l_2 I` before factorisation. Defaults to ``0.0``.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The solution :math:`x`, matching the shape convention of ``b``.
     """
     n = a.shape[-1]
     if n <= _SMALL_N:
@@ -361,8 +553,23 @@ def safe_solve(
 ) -> Float[Array, '...']:
     """``jnp.linalg.solve`` with the cuSolver-robust, adaptive device pick.
 
-    For ``n <= _SMALL_N`` the closed-form adjugate inverse backs the solve in
-    place (cuSolver-free); larger matrices take the adaptive device path.
+    Solves the linear system :math:`a x = b`. For ``n <= _SMALL_N`` the
+    closed-form adjugate inverse backs the solve in place (cuSolver-free);
+    larger matrices take the adaptive device path.
+
+    Parameters
+    ----------
+    a : Float[Array, '... n n']
+        A batch of square coefficient matrices.
+    b : Float[Array, '...']
+        The right-hand side, of shape ``(..., n, k)`` for ``k`` columns or
+        ``(..., n)`` for a single vector (following the ``jnp.linalg.solve``
+        convention).
+
+    Returns
+    -------
+    Float[Array, '...']
+        The solution :math:`x`, matching the shape convention of ``b``.
     """
     n = a.shape[-1]
     if n <= _SMALL_N:

@@ -1,0 +1,77 @@
+---
+title: "rbf_kernel"
+generated: true
+description: "RBF (Gaussian) kernel $ exp(- gamma  |x - y |^2)$."
+---
+
+[‹ back to `nitrix.linalg.kernel`](../nitrix-linalg-kernel.qmd)
+
+<!-- nitrix:gen sig:rbf_kernel -->
+```python
+rbf_kernel(X0: Float[Array, '... n d'], X1: Optional[Float[Array, '... m d']] = None, *, theta: Optional[Num[Array, '... d']] = None, gamma: Optional[float] = None) -> Float[Array, '... n m']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:rbf_kernel -->
+RBF (Gaussian) kernel $\exp(-\gamma \|x - y\|^2)$.
+
+The squared distance is the (optionally Mahalanobis-weighted)
+squared L2 distance from [`linear_distance`](../nitrix-linalg-kernel/linear_distance.qmd).  The default
+bandwidth $\gamma = 1 / d$ matches scikit-learn.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:rbf_kernel -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X0` | `Float` | `...` × `n` × `d` | — | Sample tensors of shape $(\dots, n, d)$ and $(\dots, m, d)$. If `X1 is None`, uses `X0` (self- kernel; the result is $(\dots, n, n)$). |
+| `X1` | `Optional[Float[Array, '... m d']]` | — | `None` | Sample tensors of shape $(\dots, n, d)$ and $(\dots, m, d)$. If `X1 is None`, uses `X0` (self- kernel; the result is $(\dots, n, n)$). |
+| `theta` | `Optional[Num[Array, '... d']]` | — | `None` | Optional metric tensor for the distance. Same shape conventions as the `theta` argument of [`linear_kernel`](../nitrix-linalg-kernel/linear_kernel.qmd). |
+| `gamma` | `Optional[float]` | — | `None` | Optional bandwidth. `None` uses $\gamma = 1 / d$. |
+
+**Returns** `Float` — shape `...` × `n` × `m`. Kernel matrix of shape $(\dots, n, m)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:rbf_kernel -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **186.2 µs** (median, L4); up to **296.54× faster** than `sklearn.rbf_kernel`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_RBF_KERNEL.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| rbf_kernel | jax-cpu | n=2048,d=64 | `cupy.rbf_kernel` | skipped | — | — | — | — | — |
+| rbf_kernel | jax-cpu | n=2048,d=64 | `nitrix-jax` | ok | 7.87 ms / 15.99 ms | 179.40 ms | 927 MB (rss) | ✓ 0.00087×tol | 1.00x vs nitrix-jax |
+| rbf_kernel | jax-cpu | n=2048,d=64 | `sklearn.rbf_kernel` | ok | 32.88 ms / 50.61 ms | 52.13 ms | 927 MB (rss) | ✓ 0.00017×tol | 4.18x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=2048,d=64 | `cupy.rbf_kernel` | ok | 587.3 µs / 598.1 µs | 111.65 ms | 0.52 MB (hbm) | ✓ 0.00068×tol | 3.20x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=2048,d=64 | `nitrix-jax` | ok | 183.6 µs / 186.2 µs | 567.79 ms | 105.38 MB (hbm) | ✓ 0.00087×tol | 1.00x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=2048,d=64 | `sklearn.rbf_kernel` | ok | 54.44 ms / 92.22 ms | 112.46 ms | 0.52 MB (hbm) | ✓ 0.00017×tol | 296.54x vs nitrix-jax |
+| rbf_kernel | jax-cpu | n=4096,d=64 | `cupy.rbf_kernel` | skipped | — | — | — | — | — |
+| rbf_kernel | jax-cpu | n=4096,d=64 | `nitrix-jax` | ok | 34.14 ms / 65.05 ms | 436.02 ms | 927 MB (rss) | ✓ 0.00087×tol | 1.00x vs nitrix-jax |
+| rbf_kernel | jax-cpu | n=4096,d=64 | `sklearn.rbf_kernel` | ok | 199.74 ms / 270.64 ms | 232.16 ms | 927 MB (rss) | ✓ 0.00017×tol | 5.85x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=4096,d=64 | `cupy.rbf_kernel` | ok | 3.86 ms / 3.88 ms | 140.67 ms | 1.05 MB (hbm) | ✓ 0.00072×tol | 4.09x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=4096,d=64 | `nitrix-jax` | ok | 942.4 µs / 949.6 µs | 740.19 ms | 206.57 MB (hbm) | ✓ 0.00087×tol | 1.00x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=4096,d=64 | `sklearn.rbf_kernel` | ok | 174.44 ms / 175.75 ms | 179.65 ms | 1.05 MB (hbm) | ✓ 0.00017×tol | 185.10x vs nitrix-jax |
+| rbf_kernel | jax-cpu | n=512,d=64 | `cupy.rbf_kernel` | skipped | — | — | — | — | — |
+| rbf_kernel | jax-cpu | n=512,d=64 | `nitrix-jax` | ok | 404.3 µs / 768.4 µs | 146.23 ms | 927 MB (rss) | ✓ 0.00065×tol | 1.00x vs nitrix-jax |
+| rbf_kernel | jax-cpu | n=512,d=64 | `sklearn.rbf_kernel` | ok | 2.14 ms / 3.54 ms | 5.28 ms | 927 MB (rss) | ✓ 0.00015×tol | 5.29x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=512,d=64 | `cupy.rbf_kernel` | ok | 124.7 µs / 135.1 µs | 219.19 ms | 0.13 MB (hbm) | ✓ 0.0005×tol | 1.07x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=512,d=64 | `nitrix-jax` | ok | 116.9 µs / 121.7 µs | 344.78 ms | 74.45 MB (hbm) | ✓ 0.0006×tol | 1.00x vs nitrix-jax |
+| rbf_kernel | jax-cuda12 | n=512,d=64 | `sklearn.rbf_kernel` | ok | 1.91 ms / 5.18 ms | 19.33 ms | 0.13 MB (hbm) | ✓ 0.00015×tol | 16.34x vs nitrix-jax |
+:::
+
+*source: bench `7159b33d` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:rbf_kernel -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

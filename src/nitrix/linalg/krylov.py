@@ -4,23 +4,22 @@
 """
 Matrix-free Krylov solvers.
 
-``cg`` -- conjugate gradients for a **symmetric positive-definite**
-system ``A x = b``, where ``A`` is supplied either as a dense matrix or
-as a matrix-vector-product callable.  Because CG is built from matvecs
-and inner products only -- no factorisation -- it never touches the
-cuSolver handle pool, so it stays on the GPU on the stacks where
-``cholesky`` / ``solve`` wedge (see ``_solver``).  That makes it the
-device-resilient SPD path: the registration Gauss-Newton /
-Levenberg-Marquardt normal equations ``(JᵀJ + λ·diag) δ = -Jᵀr`` are SPD
-and small, so their per-iteration solve runs matrix-free on-device
-instead of paying a host round-trip to a CPU Cholesky.
+The :func:`cg` routine implements conjugate gradients for a symmetric
+positive-definite system :math:`A x = b`, where :math:`A` is supplied
+either as a dense matrix or as a matrix-vector-product callable.  Because
+conjugate gradients is built from matrix-vector products and inner
+products only -- with no factorisation -- it never touches the cuSolver
+handle pool, so it stays on the GPU on the stacks where the direct dense
+solvers wedge.  That makes it the device-resilient positive-definite
+path: the registration Gauss-Newton / Levenberg-Marquardt normal
+equations :math:`(J^{\\top} J + \\lambda \\operatorname{diag}) \\delta =
+-J^{\\top} r` are symmetric positive-definite and small, so their
+per-iteration solve runs matrix-free on-device instead of paying a host
+round-trip to a CPU Cholesky.
 
-Differentiable: ``jax.scipy.sparse.linalg.cg`` carries its own
-(implicit) differentiation rule, so gradients flow through the solve.
-
-This is the first member of the §12.1 ``linalg.krylov`` family
-(``minres`` / ``lsqr`` / ``bicgstab`` to follow); registration is the
-named consumer that graduates it.
+The solve is differentiable: the underlying conjugate-gradient routine
+carries its own (implicit) differentiation rule, so gradients flow
+through the solve.
 """
 
 from __future__ import annotations
@@ -45,40 +44,54 @@ def cg(
     maxiter: Optional[int] = None,
     l2: Union[float, Array] = 0.0,
 ) -> Float[Array, '... n']:
-    """Solve the SPD system ``(A + l2 I) x = b`` by conjugate gradients.
+    """Solve the symmetric positive-definite system by conjugate gradients.
+
+    Solves :math:`(A + \\lambda I) x = b` for a symmetric positive-definite
+    operator :math:`A`, using only matrix-vector products and inner
+    products.  No factorisation is formed, so the solve stays on the GPU
+    and is resilient to the cuSolver wedge that can affect the direct
+    dense solvers.
 
     Parameters
     ----------
     a
-        The SPD operator: either a dense matrix ``(..., n, n)`` or a
-        callable computing the matrix-vector product ``v -> A @ v`` (the
-        matrix is never materialised in the callable case).
+        The symmetric positive-definite operator: either a dense matrix
+        of shape ``(..., n, n)`` or a callable computing the
+        matrix-vector product :math:`v \\mapsto A v` (the matrix is never
+        materialised in the callable case).
     b
-        Right-hand side, ``(..., n)``.
+        Right-hand side of shape ``(..., n)``.
     x0
-        Optional initial guess (default zeros).
+        Optional initial guess of shape ``(..., n)`` (default zeros).
     tol, atol
-        Convergence tolerances; CG stops when
-        ``norm(residual) <= max(tol * norm(b), atol)``.
+        Relative and absolute convergence tolerances.  The iteration
+        stops when :math:`\\lVert r \\rVert \\le \\max(\\mathtt{tol}
+        \\cdot \\lVert b \\rVert, \\mathtt{atol})`, where :math:`r` is the
+        residual.  Defaults ``1e-6`` and ``0.0``.
     maxiter
-        Maximum iterations (default: CG's own, ``10 * n``).  An SPD
-        system converges in at most ``n`` exact steps.
+        Maximum number of iterations.  The default defers to the
+        underlying solver (``10 * n``); a positive-definite system
+        converges in at most :math:`n` exact steps.
     l2
-        Non-negative Tikhonov / Levenberg-Marquardt ridge added to the
-        diagonal (in matrix-free form, ``A v + l2 v``).  Default ``0``.
-        May be a traced scalar (so the LM damping ``λ`` can vary inside
-        a ``jit``); the ``l2 v`` term is added unconditionally, a no-op
-        at ``l2 = 0``.
+        Non-negative Tikhonov / Levenberg-Marquardt ridge :math:`\\lambda`
+        added to the diagonal (in matrix-free form, :math:`A v +
+        \\lambda v`).  Default ``0``.  May be a traced scalar (so the
+        Levenberg-Marquardt damping :math:`\\lambda` can vary inside a
+        ``jit``); the :math:`\\lambda v` term is added unconditionally, a
+        no-op at :math:`\\lambda = 0`.
 
     Returns
     -------
-    The solution ``x``, ``(..., n)``.
+    Float[Array, '... n']
+        The solution :math:`x`, of shape ``(..., n)``.
 
     Notes
     -----
-    GPU-native and resilient to the cuSolver wedge (matvecs + dot
-    products only).  Requires ``A`` to be SPD; for a general system use
-    ``solve``, for a direct SPD factorisation use ``cho_solve``.
+    GPU-native and resilient to the cuSolver wedge, as it uses
+    matrix-vector and dot products only.  Requires :math:`A` to be
+    symmetric positive-definite; for a general system use :func:`solve`,
+    and for a direct positive-definite factorisation use
+    :func:`cho_solve`.
     """
     op: Callable[[Array], Array]
     if callable(a):

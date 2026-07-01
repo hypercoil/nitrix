@@ -1,0 +1,78 @@
+---
+title: "nitrix.numerics.normalize"
+generated: true
+signature-hash: 91c2f877855ea0b0
+description: "Per-tensor / per-channel intensity normalisation."
+listing:
+  id: nitrix-numerics-normalize-symbols
+  contents: "nitrix-numerics-normalize/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.numerics.normalize`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Per-tensor / per-channel intensity normalisation.
+
+Canonical normalisations used across neuroimaging pipelines:
+
+- [`zscore_normalize`](nitrix-numerics-normalize/zscore_normalize.qmd): subtract mean, divide by std (the
+  standard z-score).
+- [`psc_normalize`](nitrix-numerics-normalize/psc_normalize.qmd): percent-signal-change relative to the
+  mean (the fMRI BOLD convention).
+- [`robust_zscore_normalize`](nitrix-numerics-normalize/robust_zscore_normalize.qmd): median + MAD instead of
+  mean + std (robust to outliers; useful for raw intensity images
+  with bright artefacts).
+- [`intensity_normalize`](nitrix-numerics-normalize/intensity_normalize.qmd): percentile-clip then rescale to
+  $[0, 1]$ (the synthstrip / SynthSeg pre-training
+  convention).
+- [`percentile_rescale`](nitrix-numerics-normalize/percentile_rescale.qmd): shift by a low percentile, scale by
+  a high percentile, then clip -- the strict min--p99--clip recipe
+  used by the Synth* pipelines (distinct from
+  [`intensity_normalize`](nitrix-numerics-normalize/intensity_normalize.qmd); see its docstring).
+- [`l2_normalize`](nitrix-numerics-normalize/l2_normalize.qmd) / [`lp_normalize`](nitrix-numerics-normalize/lp_normalize.qmd): project onto the
+  unit $L_2$ / $L_p$ sphere along an axis, using the
+  clamp-denominator convention $x / \max(\|x\|, \epsilon)$
+  (matches `torch.nn.functional.normalize`).
+- [`instance_norm`](nitrix-numerics-normalize/instance_norm.qmd): per-sample / per-channel centre-and-scale
+  by the *statistics* over a configurable set of axes (the
+  reduction underneath an instance-normalisation layer, without
+  the trainable affine).
+
+The z-score path additionally supports `nonzero_mask=True` for
+the per-channel BraTS / nnUNet convention (statistics over the
+nonzero foreground; background left at `0`).
+
+All are differentiable and support per-axis reduction via
+the `axis` argument; the default is to reduce over the
+trailing axis (the observation / time axis convention).
+
+The optional `weight` argument enables weighted normalisation:
+the mean / std / median are computed using the named weights.
+For unit weights this matches the unweighted normalisation
+exactly.
+
+The legacy `hypercoil.functional.linear`'s normalisation
+helpers were tightly coupled to the compartmentalised-linear
+layer; this module pulls them out as standalone primitives.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-numerics-normalize-symbols}
+:::

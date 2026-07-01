@@ -1,0 +1,31 @@
+---
+title: "negative_axis_number_strict"
+generated: true
+description: "Convert a standard axis number to a negative axis number."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:negative_axis_number_strict -->
+```python
+negative_axis_number_strict(axis: int, ndim: int) -> int
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:negative_axis_number_strict -->
+Convert a standard axis number to a negative axis number.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:negative_axis_number_strict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `axis` | `int` | — | — | — |
+| `ndim` | `int` | — | — | — |
+
+**Returns** `int`.
+<!-- nitrix:/gen -->
+

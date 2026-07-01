@@ -1,0 +1,49 @@
+---
+title: "squareform"
+generated: true
+description: "Toggle between vec and square forms of a symmetric matrix."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+<!-- nitrix:gen sig:squareform -->
+```python
+squareform(X: Num[Array, '...']) -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:squareform -->
+Toggle between vec and square forms of a symmetric matrix.
+
+A convenience wrapper: if `X` looks square and symmetric (up to a
+rough tolerance), return `sym2vec(X, offset=1)`; otherwise treat it
+as a vector and return `vec2sym(X, offset=1)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:squareform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X` | `Num` | `...` | — | Either a square symmetric matrix block to vectorise, or the vectorised strict upper triangle to expand into a matrix. |
+
+**Returns** `Num` — shape `...`. The complementary form: the vectorised strict upper triangle if `X` was a symmetric matrix, otherwise the reconstructed symmetric matrix.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:squareform -->
+::: {.callout-note}
+Unlike `scipy.spatial.distance.squareform`, this does not verify
+that the input is a strictly conforming form.  When in doubt, call
+[`sym2vec`](../nitrix-linalg-matrix/sym2vec.qmd) / [`vec2sym`](../nitrix-linalg-matrix/vec2sym.qmd) directly with the explicit
+`offset`.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:squareform -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

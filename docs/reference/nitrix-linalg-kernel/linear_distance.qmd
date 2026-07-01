@@ -1,0 +1,87 @@
+---
+title: "linear_distance"
+generated: true
+description: "Pairwise squared L2 (or Mahalanobis) distance $ |x - y |^2$."
+---
+
+[‹ back to `nitrix.linalg.kernel`](../nitrix-linalg-kernel.qmd)
+
+<!-- nitrix:gen sig:linear_distance -->
+```python
+linear_distance(X0: Float[Array, '... n d'], X1: Optional[Float[Array, '... m d']] = None, *, theta: Optional[Num[Array, '... d']] = None) -> Float[Array, '... n m']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:linear_distance -->
+Pairwise squared L2 (or Mahalanobis) distance $\|x - y\|^2$.
+
+Computed via the identity
+$\|x\|^2 + \|y\|^2 - 2\, x \cdot y$, avoiding the
+$(n, m, d)$ intermediate that a naive subtract-then-square
+would materialise.  At $d = 1000$ this is a thousand-fold
+memory reduction.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:linear_distance -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X0` | `Float` | `...` × `n` × `d` | — | Sample tensors of shape $(\dots, n, d)$ and $(\dots, m, d)$. If `X1 is None`, uses `X0` (self- distance; the result is $(\dots, n, n)$). |
+| `X1` | `Optional[Float[Array, '... m d']]` | — | `None` | Sample tensors of shape $(\dots, n, d)$ and $(\dots, m, d)$. If `X1 is None`, uses `X0` (self- distance; the result is $(\dots, n, n)$). |
+| `theta` | `Optional[Num[Array, '... d']]` | — | `None` | Optional metric tensor. `None` gives the standard squared L2 distance; a vector $(\dots, d)$ gives the diagonal Mahalanobis distance $\sum_d \theta_d (x_d - y_d)^2$; a matrix $(\dots, d, d)$ gives the full Mahalanobis distance $(x - y)^{\top} \theta (x - y)$. The matrix form is exact only for a **symmetric** `theta` (the identity-form expansion uses one cross term $2\, x^{\top} \theta y$); pass $\tfrac{1}{2}(\theta + \theta^{\top})$ for an asymmetric input. |
+
+**Returns** `Float` — shape `...` × `n` × `m`. Squared-distance matrix of shape $(\dots, n, m)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:linear_distance -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **190.0 µs** (median, L4); up to **165.12× faster** than `sklearn.euclidean_distances`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_LINEAR_DISTANCE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| linear_distance | jax-cpu | n=2048,d=64 | `cupy.linear_distance` | skipped | — | — | — | — | — |
+| linear_distance | jax-cpu | n=2048,d=64 | `nitrix-jax` | ok | 4.35 ms / 10.40 ms | 164.16 ms | 708 MB (rss) | ✓ 0.61×tol | 1.00x vs nitrix-jax |
+| linear_distance | jax-cpu | n=2048,d=64 | `sklearn.euclidean_distances` | ok | 21.46 ms / 36.44 ms | 40.83 ms | 667 MB (rss) | ✓ 6e-05×tol | 4.93x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=2048,d=64 | `cupy.linear_distance` | ok | 476.5 µs / 490.9 µs | 109.81 ms | 0.52 MB (hbm) | ✓ 0.00066×tol | 2.58x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=2048,d=64 | `nitrix-jax` | ok | 184.4 µs / 190.0 µs | 419.44 ms | 105.38 MB (hbm) | ✓ 0.61×tol | 1.00x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=2048,d=64 | `sklearn.euclidean_distances` | ok | 30.45 ms / 54.58 ms | 90.17 ms | 0.52 MB (hbm) | ✓ 6e-05×tol | 165.12x vs nitrix-jax |
+| linear_distance | jax-cpu | n=4096,d=64 | `cupy.linear_distance` | skipped | — | — | — | — | — |
+| linear_distance | jax-cpu | n=4096,d=64 | `nitrix-jax` | ok | 32.11 ms / 42.18 ms | 415.16 ms | 883 MB (rss) | ✓ 0.61×tol | 1.00x vs nitrix-jax |
+| linear_distance | jax-cpu | n=4096,d=64 | `sklearn.euclidean_distances` | ok | 169.55 ms / 202.62 ms | 179.42 ms | 821 MB (rss) | ✓ 6e-05×tol | 5.28x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=4096,d=64 | `cupy.linear_distance` | ok | 2.72 ms / 2.75 ms | 123.57 ms | 1.05 MB (hbm) | ✓ 0.00068×tol | 2.86x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=4096,d=64 | `nitrix-jax` | ok | 953.3 µs / 967.9 µs | 757.37 ms | 206.57 MB (hbm) | ✓ 0.61×tol | 1.00x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=4096,d=64 | `sklearn.euclidean_distances` | ok | 134.56 ms / 141.56 ms | 141.99 ms | 1.05 MB (hbm) | ✓ 6e-05×tol | 141.15x vs nitrix-jax |
+| linear_distance | jax-cpu | n=512,d=64 | `cupy.linear_distance` | skipped | — | — | — | — | — |
+| linear_distance | jax-cpu | n=512,d=64 | `nitrix-jax` | ok | 295.8 µs / 312.6 µs | 135.11 ms | 667 MB (rss) | ✓ 0.46×tol | 1.00x vs nitrix-jax |
+| linear_distance | jax-cpu | n=512,d=64 | `sklearn.euclidean_distances` | ok | 1.58 ms / 2.18 ms | 3.47 ms | 667 MB (rss) | ✓ 5.9e-05×tol | 5.33x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=512,d=64 | `cupy.linear_distance` | ok | 100.9 µs / 104.1 µs | 112.50 ms | 0.13 MB (hbm) | ✓ 0.00052×tol | 0.89x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=512,d=64 | `nitrix-jax` | ok | 112.9 µs / 114.0 µs | 360.93 ms | 74.45 MB (hbm) | ✓ 0.46×tol | 1.00x vs nitrix-jax |
+| linear_distance | jax-cuda12 | n=512,d=64 | `sklearn.euclidean_distances` | ok | 1.63 ms / 2.72 ms | 11.43 ms | 0.13 MB (hbm) | ✓ 5.9e-05×tol | 14.48x vs nitrix-jax |
+:::
+
+*source: bench `7159b33d` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:linear_distance -->
+::: {.callout-note}
+The result is clipped to `>= 0` to suppress catastrophic
+cancellation when `X0` ~ `X1` (the identity-form
+computation can produce small negative entries via roundoff;
+a true squared distance is always non-negative).
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:linear_distance -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

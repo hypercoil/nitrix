@@ -1,0 +1,31 @@
+---
+title: "amplitude_apply"
+generated: true
+description: "Decorator for applying a function to the amplitude component of a complex tensor."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:amplitude_apply -->
+```python
+amplitude_apply(func: Callable[[Float[Array, ...]], Float[Array, ...]]) -> Callable[[Complex[Array, ...]], Complex[Array, ...]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:amplitude_apply -->
+Decorator for applying a function to the amplitude component of a complex
+tensor.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:amplitude_apply -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `func` | `Callable[[Float[Array, ...]], Float[Array, ...]]` | — | — | — |
+
+**Returns** `Callable[[Complex[Array, ...]], Complex[Array, ...]]`.
+<!-- nitrix:/gen -->
+

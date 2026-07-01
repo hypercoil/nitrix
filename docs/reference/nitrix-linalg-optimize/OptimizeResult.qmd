@@ -1,0 +1,18 @@
+---
+title: "OptimizeResult"
+generated: true
+description: "Result of a nonlinear-least-squares solve."
+---
+
+[‹ back to `nitrix.linalg.optimize`](../nitrix-linalg-optimize.qmd)
+
+<!-- nitrix:gen sig:OptimizeResult -->
+```python
+class OptimizeResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:OptimizeResult -->
+Result of a nonlinear-least-squares solve.
+<!-- nitrix:/gen -->
+

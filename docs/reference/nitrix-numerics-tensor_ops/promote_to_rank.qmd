@@ -1,0 +1,32 @@
+---
+title: "promote_to_rank"
+generated: true
+description: "Promote a tensor to a rank-`rank` tensor by prepending singleton dimensions. If the tensor is already rank-`rank`, this is a no-op."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:promote_to_rank -->
+```python
+promote_to_rank(tensor: Shaped[Array, ...], rank: int) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:promote_to_rank -->
+Promote a tensor to a rank-`rank` tensor by prepending singleton
+dimensions. If the tensor is already rank-`rank`, this is a no-op.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:promote_to_rank -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `rank` | `int` | — | — | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+

@@ -1,0 +1,51 @@
+---
+title: "toeplitz_2d"
+generated: true
+description: "Construct a 2-D Toeplitz matrix from a first column and first row."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+<!-- nitrix:gen sig:toeplitz_2d -->
+```python
+toeplitz_2d(c: Float[Array, 'mc'], r: Optional[Float[Array, 'nr']] = None, *, shape: Optional[Tuple[int, int]] = None, fill_value: float = 0.0) -> Float[Array, 'm n']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:toeplitz_2d -->
+Construct a 2-D Toeplitz matrix from a first column and first row.
+
+Based on the recipe in
+https://github.com/google/jax/issues/1646#issuecomment-1139044324
+(the @mattjj / @blakehechtman "vmap-over-roll" pattern).  This
+underperforms on TPU but is the fastest approach on GPU.
+
+Unlike `scipy.linalg.toeplitz`, when `c[0] != r[0]` the
+*column*-leading element wins (`r[0]` is ignored).  The
+output supports rectangular shapes and a fill value for cells
+outside the originally-specified support.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:toeplitz_2d -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `c` | `Float` | `mc` | — | First column. Length `mc`; extended to `m` with `fill_value` if needed. |
+| `r` | `Optional[Float[Array, 'nr']]` | — | `None` | First row. Length `nr`; extended to `n` with `fill_value` if needed. If `None`, defaults to `c` (symmetric Toeplitz). |
+| `shape` | `Optional[Tuple[int, int]]` | — | `None` | Output `(m, n)`. Defaults to `(len(c), len(r))`. |
+| `fill_value` | `float` | — | `0.0` | Fill for cells outside the support of `c` / `r`. |
+
+**Returns** `Float` — shape `m` × `n`. The `(m, n)` Toeplitz matrix whose first column is `c` and whose first row is `r`, with cells beyond the support of `c` and `r` set to `fill_value`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:toeplitz_2d -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `mc` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

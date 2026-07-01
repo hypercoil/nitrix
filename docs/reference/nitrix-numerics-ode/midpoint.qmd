@@ -1,0 +1,46 @@
+---
+title: "midpoint"
+generated: true
+description: "Integrate $dy/dt = f(t, y)$ with the explicit midpoint method (RK2)."
+---
+
+[‹ back to `nitrix.numerics.ode`](../nitrix-numerics-ode.qmd)
+
+<!-- nitrix:gen sig:midpoint -->
+```python
+midpoint(f: VectorField, y0: Float[Array, '...'], t: Float[Array, 't']) -> Float[Array, 't ...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:midpoint -->
+Integrate $dy/dt = f(t, y)$ with the explicit midpoint method (RK2).
+
+Same interface as [`euler`](../nitrix-numerics-ode/euler.qmd); second-order local error -- a step takes
+two field evaluations (`f` at the start and at the half-step) for an
+extra order of accuracy.  This is the explicit RK2 stepper, *not* the
+symplectic implicit-midpoint method (which requires a per-step solve);
+it completes the [`euler`](../nitrix-numerics-ode/euler.qmd) / [`midpoint`](../nitrix-numerics-ode/midpoint.qmd) / [`rk4`](../nitrix-numerics-ode/rk4.qmd) method set
+of the surface neural-ODE consumers.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:midpoint -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `f` | `VectorField` | — | — | Vector field `f(t, y) -> dy/dt` (`t` scalar, `y` the state). |
+| `y0` | `Float` | `...` | — | Initial state at `t[0]`. |
+| `t` | `Float` | `t` | — | Strictly monotone time points of shape `(t,)`; one midpoint step is taken per interval. |
+
+**Returns** `Float` — shape `t` × `...`. States at each time point, shape `(len(t), *y0.shape)` (`ys[0]` is `y0`).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:midpoint -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

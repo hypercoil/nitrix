@@ -1,0 +1,53 @@
+---
+title: "nitrix.numerics.tensor_ops"
+generated: true
+signature-hash: 75dcfa32cbdcf5e1
+description: "Tensor shape and layout utilities."
+listing:
+  id: nitrix-numerics-tensor_ops-symbols
+  contents: "nitrix-numerics-tensor_ops/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.numerics.tensor_ops`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Tensor shape and layout utilities.
+
+The low-level building blocks that downstream consumers compose, grouped by
+the kind of manipulation they perform:
+
+- **Axis normalisation**: [`standard_axis_number`](nitrix-numerics-tensor_ops/standard_axis_number.qmd) and
+  [`negative_axis_number`](nitrix-numerics-tensor_ops/negative_axis_number.qmd) turn negative or out-of-range axis indices
+  into canonical positive indices.
+- **Reshape helpers**: [`fold_axis`](nitrix-numerics-tensor_ops/fold_axis.qmd) splits one axis into two,
+  [`unfold_axes`](nitrix-numerics-tensor_ops/unfold_axes.qmd) merges several axes into one, and
+  [`fold_and_promote`](nitrix-numerics-tensor_ops/fold_and_promote.qmd) and [`demote_and_unfold`](nitrix-numerics-tensor_ops/demote_and_unfold.qmd) are the
+  corresponding composite operations.
+- **Broadcasting helpers**: [`orient_and_conform`](nitrix-numerics-tensor_ops/orient_and_conform.qmd) pads a vector with
+  singleton axes so that it broadcasts against a reference tensor,
+  [`broadcast_ignoring`](nitrix-numerics-tensor_ops/broadcast_ignoring.qmd) broadcasts every axis except a named one, and
+  [`promote_to_rank`](nitrix-numerics-tensor_ops/promote_to_rank.qmd) raises a tensor to a target rank.
+- **Complex utilities**: [`complex_decompose`](nitrix-numerics-tensor_ops/complex_decompose.qmd) splits a complex tensor
+  into amplitude and phase, [`complex_recompose`](nitrix-numerics-tensor_ops/complex_recompose.qmd) reconstructs it, and
+  [`amplitude_apply`](nitrix-numerics-tensor_ops/amplitude_apply.qmd) applies a real-valued function to a complex tensor
+  via its amplitude.
+- **Masking helpers**: [`conform_mask`](nitrix-numerics-tensor_ops/conform_mask.qmd), [`apply_mask`](nitrix-numerics-tensor_ops/apply_mask.qmd) and
+  [`mask_tensor`](nitrix-numerics-tensor_ops/mask_tensor.qmd) restrict or reshape tensors according to a mask.
+
+This module gathers the externally useful subset of these utilities into a
+public namespace, re-exporting the shared implementations with documentation
+aimed at consumers.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-numerics-tensor_ops-symbols}
+:::
