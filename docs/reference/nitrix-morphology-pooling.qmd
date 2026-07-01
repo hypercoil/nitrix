@@ -1,0 +1,89 @@
+---
+title: "nitrix.morphology.pooling"
+generated: true
+signature-hash: 86893c62e59f2d0a
+description: "Encoder-decoder pooling primitives with index-bookkeeping."
+listing:
+  id: nitrix-morphology-pooling-symbols
+  contents: "nitrix-morphology-pooling/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.morphology.pooling`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Encoder-decoder pooling primitives with index-bookkeeping.
+
+[`max_pool_with_indices_nd`](nitrix-morphology-pooling/max_pool_with_indices_nd.qmd) records the per-window argmax
+position during the pool, returning *both* the pooled values and
+the per-output integer indices.  [`max_unpool_nd`](nitrix-morphology-pooling/max_unpool_nd.qmd) scatters
+values back into a higher-resolution grid at those same positions.
+The pair is what an "indices-aware" U-Net / V-Net encoder-decoder
+uses to preserve spatial localisation across the bottleneck.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### Family
+
+These belong with [`dilate`](nitrix-morphology/dilate.qmd) and [`erode`](nitrix-morphology/erode.qmd) in
+`nitrix.morphology`: both [`max_pool_with_indices_nd`](nitrix-morphology-pooling/max_pool_with_indices_nd.qmd) and
+[`dilate`](nitrix-morphology/dilate.qmd) are max-window reductions; the only difference is
+that pooling **strides** the window (one output per stride'd
+position) while dilation keeps the spatial shape.
+
+### Channel first layout
+
+PyTorch / FreeSurfer-Keras / Flax-LayerNorm convention; channel
+axis precedes the spatial axes (`(*batch, C, *spatial)`).  The
+caller specifies the spatial rank explicitly via `spatial_rank`
+to disambiguate batch vs channel; we don't infer.
+
+### Cross framework parity caveat
+
+The PGlandsSeg port flagged this and the docstring repeats it
+explicitly: argmax-based pooling is **fragile to cross-framework
+float noise**.  When the encoder accumulates ~1e-3 max abs
+difference between JAX and torch (typical for a 4-level Conv3D
+cascade), the per-window argmax can flip at ~0.02-0.03% of voxels
+where two neighbours are nearly equal.  The matching
+[`max_unpool_nd`](nitrix-morphology-pooling/max_unpool_nd.qmd) then scatters values to slightly different
+positions, producing O(10)
+per-voxel raw-logit differences.  At the semantic level (per-voxel
+class via argmax over channel axis) this is harmless -- the
+inter-class ordering is preserved.
+
+**The load-bearing parity check is argmax-of-output agreement,
+not raw-logit allclose.**  When validating against a torch or TF
+reference, compare `argmax(out, channel_axis)`, not
+`allclose(out, ref)`.
+
+### Reference
+
+Badrinarayanan, V., Kendall, A. & Cipolla, R. (2017).  *SegNet: A
+deep convolutional encoder-decoder architecture for image
+segmentation.*  IEEE TPAMI 39(12), 2481-2495.  The original
+indices-based encoder-decoder pattern.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*batch` | leading batch axes (variadic) |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `*pooled` | a variadic group of axes (`pooled`) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-morphology-pooling-symbols}
+:::

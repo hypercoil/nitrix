@@ -3,46 +3,47 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.morphology -- mathematical morphology built atop the semiring substrate.
+Mathematical morphology built atop the semiring substrate.
 
-Per SPEC §4.3 / SPEC §4.3 the user-facing API takes
-single-channel arrays ``(..., *spatial)`` -- no explicit channel
-dim.  Users with multi-channel inputs should ``jax.vmap`` over the
-channel axis.
+The user-facing API takes single-channel arrays ``(..., *spatial)`` with
+no explicit channel dimension. Callers with multi-channel inputs should
+``jax.vmap`` over the channel axis.
 
-Semiring-backed (specialisations of ``semiring_conv``):
+Semiring-backed (specialisations of :func:`semiring_conv`):
 
-- ``dilate`` -- ``TROPICAL_MAX_PLUS`` conv.
-- ``erode``  -- ``TROPICAL_MIN_PLUS`` conv (with the structuring
-  element reflected per the standard mathematical-morphology
+- :func:`dilate` -- a :data:`TROPICAL_MAX_PLUS` convolution.
+- :func:`erode` -- a :data:`TROPICAL_MIN_PLUS` convolution (with the
+  structuring element reflected per the standard mathematical-morphology
   convention).
-- ``open``   -- erode then dilate.
-- ``close``  -- dilate then erode.
-- ``distance_transform`` -- **exact Euclidean** DT by default (separable,
-  each axis a ``TROPICAL_MIN_PLUS`` matmul against the squared-distance
-  matrix -- reuses the semiring Pallas-CUDA kernel), with an opt-in chamfer
-  engine (``metric="chebyshev"`` / ``"city_block"`` / custom structuring
-  element) on the iterative ``TROPICAL_MIN_PLUS`` conv substrate.
-- ``distance_transform_edt`` -- the exact-Euclidean path as a scipy-named
-  alias.
+- :func:`open` -- erode then dilate.
+- :func:`close` -- dilate then erode.
+- :func:`distance_transform` -- an exact Euclidean distance transform by
+  default (separable, each axis a :data:`TROPICAL_MIN_PLUS` matmul against
+  the squared-distance matrix, reusing the semiring Pallas-CUDA kernel),
+  with an opt-in chamfer engine (``metric="chebyshev"`` /
+  ``"city_block"`` / a custom structuring element) on the iterative
+  :data:`TROPICAL_MIN_PLUS` convolution substrate.
+- :func:`distance_transform_edt` -- the exact-Euclidean path exposed under
+  the scipy-compatible name.
 
 Gather-backed:
 
-- ``median_filter`` -- gather → ``jnp.median``.  Explicitly *not* a
-  semiring op (state size is unbounded in the K loop); see
-  SPEC §4.3.
+- :func:`median_filter` -- a gather followed by ``jnp.median``. Explicitly
+  not a semiring op, because the state size is unbounded in the kernel
+  loop.
 
 Labelling:
 
-- ``connected_components`` / ``largest_connected_component`` -- N-D
-  connected-components labelling by jit-able fixed-point label
-  propagation (the recurring mask clean-up / largest-region step).
+- :func:`connected_components` / :func:`largest_connected_component` --
+  N-dimensional connected-components labelling by a jit-able fixed-point
+  label-propagation scheme (the recurring mask clean-up and
+  largest-region step).
 
 Convenience:
 
-- ``susan_emulator`` -- composes ``bilateral_gaussian`` + ``median_filter``
-  (raises ``NotImplementedError`` until ``smoothing.bilateral_gaussian``
-  lands -- this is the documented deferral).
+- ``susan_emulator`` -- composes ``bilateral_gaussian`` and
+  :func:`median_filter`. It raises ``NotImplementedError`` until
+  ``smoothing.bilateral_gaussian`` lands; this is a deliberate deferral.
 """
 
 from ._mm import (

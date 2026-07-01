@@ -23,7 +23,9 @@ final publication as-is (SPEC §6.5).
 ## `nitrix`
 
 - [`geometry`](nitrix-geometry.qmd) — Geometric primitives for neuroimaging.
+- [`graph`](nitrix-graph.qmd) — Graph-theoretic primitives.
 - [`linalg`](nitrix-linalg.qmd) — nitrix.linalg -- linear-algebra primitives.
+- [`morphology`](nitrix-morphology.qmd) — Mathematical morphology built atop the semiring substrate.
 - [`register`](nitrix-register.qmd) — nitrix.register -- pairwise registration recipes.
 - [`semiring`](nitrix-semiring.qmd) — KeOps-style streaming reductions over arbitrary algebras.
 - [`signal`](nitrix-signal.qmd) — nitrix.signal -- 1D signal-processing primitives.
@@ -48,6 +50,13 @@ final publication as-is (SPEC §6.5).
 - [`topology`](nitrix-geometry-topology.qmd) — Mesh topology invariants -- the genus-0 defect gate.
 - [`transform`](nitrix-geometry-transform.qmd) — Lie-group parametrisation of rigid and affine transforms.
 
+### `nitrix.graph`
+
+- [`community`](nitrix-graph-community.qmd) — Community-detection primitives.
+- [`connectopy`](nitrix-graph-connectopy.qmd) — Low-dimensional embeddings of graph nodes from spectral decompositions of (modified) Laplacians.
+- [`laplacian`](nitrix-graph-laplacian.qmd) — Graph Laplacian variants and the shared sparse-matvec machinery.
+- [`parcellation`](nitrix-graph-parcellation.qmd) — Surface functional parcellation: boundary mapping and watershed.
+
 ### `nitrix.linalg`
 
 - [`decompose`](nitrix-linalg-decompose.qmd) — Randomized (sketch) low-rank SVD.
@@ -59,6 +68,10 @@ final publication as-is (SPEC §6.5).
 - [`residual`](nitrix-linalg-residual.qmd) — Residualisation via linear least squares.
 - [`solve`](nitrix-linalg-solve.qmd) — Dense linear solves: general and SPD-Cholesky.
 - [`spd`](nitrix-linalg-spd.qmd) — Symmetric positive-definite manifold operations.
+
+### `nitrix.morphology`
+
+- [`pooling`](nitrix-morphology-pooling.qmd) — Encoder-decoder pooling primitives with index-bookkeeping.
 
 ### `nitrix.numerics`
 

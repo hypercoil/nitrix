@@ -1,0 +1,46 @@
+---
+title: "distance_transform_edt"
+generated: true
+description: "Exact Euclidean distance transform (scipy `distance_transform_edt`)."
+---
+
+[‹ back to `nitrix.morphology`](../nitrix-morphology.qmd)
+
+*Re-exported here; defined in `nitrix.morphology._mm`.*
+
+<!-- nitrix:gen sig:distance_transform_edt -->
+```python
+distance_transform_edt(mask: Num[Array, '... *spatial'], *, sampling: Optional[Union[float, Sequence[float]]] = None, backend: Backend = 'auto') -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:distance_transform_edt -->
+Exact Euclidean distance transform (scipy `distance_transform_edt`).
+
+Thin alias for [`distance_transform`](../nitrix-morphology/distance_transform.qmd) with `metric="euclidean"` --
+the separable min-plus-matmul engine (semiring Pallas-CUDA kernel + JAX
+fallback).  Computes the distance from each non-zero voxel to the nearest
+zero voxel.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:distance_transform_edt -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mask` | `Num` | `...` × `*spatial` | — | Input array, `(..., *spatial)`. Zero positions are the boundary; every axis is treated as spatial. |
+| `sampling` | `Optional[Union[float, Sequence[float]]]` | — | `None` | Per-axis voxel spacing for anisotropic grids: `None` (unit spacing), a scalar (isotropic), or one value per axis (scipy semantics). |
+| `backend` | `Backend` | — | `'auto'` | Execution backend forwarded to the underlying [`semiring_matmul`](../nitrix-semiring.qmd) (`"auto"`, `"pallas-cuda"`, or `"jax"`). |
+
+**Returns** `Float` — shape `...` × `*spatial`. Euclidean distance map of the same spatial shape as `mask`; $+\infty$ where `mask` is everywhere non-zero (no boundary reachable).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:distance_transform_edt -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

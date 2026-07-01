@@ -1,0 +1,77 @@
+---
+title: "nitrix.morphology"
+generated: true
+signature-hash: f7e03b2547d67319
+description: "Mathematical morphology built atop the semiring substrate."
+listing:
+  id: nitrix-morphology-symbols
+  contents: "nitrix-morphology/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.morphology`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Mathematical morphology built atop the semiring substrate.
+
+The user-facing API takes single-channel arrays `(..., *spatial)` with
+no explicit channel dimension. Callers with multi-channel inputs should
+`jax.vmap` over the channel axis.
+
+Semiring-backed (specialisations of [`semiring_conv`](nitrix-semiring-conv/semiring_conv.qmd)):
+
+- [`dilate`](nitrix-morphology/dilate.qmd) -- a [`TROPICAL_MAX_PLUS`](nitrix-semiring-algebras/TROPICAL_MAX_PLUS.qmd) convolution.
+- [`erode`](nitrix-morphology/erode.qmd) -- a [`TROPICAL_MIN_PLUS`](nitrix-semiring-algebras/TROPICAL_MIN_PLUS.qmd) convolution (with the
+  structuring element reflected per the standard mathematical-morphology
+  convention).
+- [`open`](nitrix-morphology/open.qmd) -- erode then dilate.
+- [`close`](nitrix-morphology/close.qmd) -- dilate then erode.
+- [`distance_transform`](nitrix-morphology/distance_transform.qmd) -- an exact Euclidean distance transform by
+  default (separable, each axis a [`TROPICAL_MIN_PLUS`](nitrix-semiring-algebras/TROPICAL_MIN_PLUS.qmd) matmul against
+  the squared-distance matrix, reusing the semiring Pallas-CUDA kernel),
+  with an opt-in chamfer engine (`metric="chebyshev"` /
+  `"city_block"` / a custom structuring element) on the iterative
+  [`TROPICAL_MIN_PLUS`](nitrix-semiring-algebras/TROPICAL_MIN_PLUS.qmd) convolution substrate.
+- [`distance_transform_edt`](nitrix-morphology/distance_transform_edt.qmd) -- the exact-Euclidean path exposed under
+  the scipy-compatible name.
+
+Gather-backed:
+
+- [`median_filter`](nitrix-morphology/median_filter.qmd) -- a gather followed by `jnp.median`. Explicitly
+  not a semiring op, because the state size is unbounded in the kernel
+  loop.
+
+Labelling:
+
+- [`connected_components`](nitrix-morphology/connected_components.qmd) / [`largest_connected_component`](nitrix-morphology/largest_connected_component.qmd) --
+  N-dimensional connected-components labelling by a jit-able fixed-point
+  label-propagation scheme (the recurring mask clean-up and
+  largest-region step).
+
+Convenience:
+
+- `susan_emulator` -- composes `bilateral_gaussian` and
+  [`median_filter`](nitrix-morphology/median_filter.qmd). It raises `NotImplementedError` until
+  `smoothing.bilateral_gaussian` lands; this is a deliberate deferral.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-morphology-symbols}
+:::

@@ -1,0 +1,63 @@
+---
+title: "nitrix.graph.laplacian"
+generated: true
+signature-hash: c70a260991f9a2cd
+description: "Graph Laplacian variants and the shared sparse-matvec machinery."
+listing:
+  id: nitrix-graph-laplacian-symbols
+  contents: "nitrix-graph-laplacian/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.graph.laplacian`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Graph Laplacian variants and the shared sparse-matvec machinery.
+
+This module is intentionally pure "graph Laplacians": the
+modularity-related operators live in `community.py` because their
+*role* is community detection even though their algebraic shape
+overlaps with Laplacians.  The split keeps the Laplacian import
+graph free of community-detection concerns.
+
+Three Laplacian variants exposed via `laplacian`
+(selected by `normalisation=...`):
+
+- `"combinatorial"` -- $L = D - A$.  Eigenvalues unbounded.
+- `"symmetric"` -- $L = I - D^{-1/2} A D^{-1/2}$.  Symmetric,
+  positive semidefinite, eigenvalues in $[0, 2]$; the canonical
+  "normalised Laplacian" used in Laplacian-eigenmap embeddings.
+- `"random_walk"` -- $L = I - D^{-1} A$.  Not symmetric in
+  general but shares the spectrum of `"symmetric"` and is the
+  generator of the random walk on the graph.
+
+Multi-format support: [`degree_vector`](nitrix-graph-laplacian/degree_vector.qmd) and [`laplacian_matvec`](nitrix-graph-laplacian/laplacian_matvec.qmd)
+accept dense `(..., n, n)`, [`ELL`](nitrix-sparse.qmd), or
+[`SectionedELL`](nitrix-sparse.qmd) inputs.  The explicit
+`laplacian` returns dense -- by definition, since the symmetric
+Laplacian's diagonal is generally non-zero and does not fit the ELL
+pattern of the input.  For *operator* use (eigenvalue solvers, etc.)
+call [`laplacian_matvec`](nitrix-graph-laplacian/laplacian_matvec.qmd), which never materialises the dense matrix.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-graph-laplacian-symbols}
+:::

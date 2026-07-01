@@ -1,0 +1,39 @@
+---
+title: "connected_components"
+generated: true
+description: "Label connected foreground regions of `mask`."
+---
+
+[‹ back to `nitrix.morphology`](../nitrix-morphology.qmd)
+
+*Re-exported here; defined in `nitrix.morphology._label`.*
+
+<!-- nitrix:gen sig:connected_components -->
+```python
+connected_components(mask: Bool[Array, '*spatial'], *, connectivity: int = 1) -> Int[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:connected_components -->
+Label connected foreground regions of `mask`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:connected_components -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mask` | `Bool` | `*spatial` | — | Boolean (or 0/1) array; non-zero entries are foreground. |
+| `connectivity` | `int` | — | `1` | Neighbourhood order in `[1, ndim]`: `1` = face neighbours only, `ndim` = full (including diagonals). Follows scipy's `sum(abs(offset)) <= connectivity` rule. |
+
+**Returns** `Int` — shape `*spatial`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:connected_components -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

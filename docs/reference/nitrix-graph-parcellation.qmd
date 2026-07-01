@@ -1,0 +1,79 @@
+---
+title: "nitrix.graph.parcellation"
+generated: true
+signature-hash: d733e9ec197791c7
+description: "Surface functional parcellation: boundary mapping and watershed."
+listing:
+  id: nitrix-graph-parcellation-symbols
+  contents: "nitrix-graph-parcellation/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.graph.parcellation`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Surface functional parcellation: boundary mapping and watershed.
+
+The Cohen / Wig / Gordon / Schaefer boundary-detection lineage, in two
+composable steps:
+
+- [`surface_boundary_map`](nitrix-graph-parcellation/surface_boundary_map.qmd) -- per-vertex connectivity profiles ->
+  adjacent-profile dissimilarity -> a per-vertex boundary map.  A named
+  wrapper on [`semiring_ell_edge_aggregate`](nitrix-semiring-ell_edge/semiring_ell_edge_aggregate.qmd) (no new kernel): the edge
+  function is the profile dissimilarity $1 - \operatorname{sim}(h_i,
+  h_j)$, aggregated per row by mean (over the [`REAL`](nitrix-semiring-algebras/REAL.qmd) semiring) or max
+  (over the [`TROPICAL_MAX_PLUS`](nitrix-semiring-algebras/TROPICAL_MAX_PLUS.qmd) semiring).  [`eta_squared`](nitrix-graph-parcellation/eta_squared.qmd) is the
+  companion similarity of Cohen et al. (2008).
+- [`mesh_watershed`](nitrix-graph-parcellation/mesh_watershed.qmd) -- priority-flood watershed on a vertex-valued field
+  over an arbitrary mesh adjacency: every vertex is labelled by its catchment
+  basin (the basins of the boundary map's minima are the parcels).  Runs
+  host-side (the flood is serial), returning a JAX integer array.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+Cohen, A. L., Fair, D. A., Dosenbach, N. U. F., Miezin, F. M., Dierker, D.,
+Van Essen, D. C., Schlaggar, B. L., & Petersen, S. E. (2008). Defining
+functional areas in individual human brains using resting functional
+connectivity MRI. NeuroImage, 41(1), 45-57.
+https://doi.org/10.1016/j.neuroimage.2008.01.066
+
+Wig, G. S., Laumann, T. O., & Petersen, S. E. (2014). An approach for
+parcellating human cortical areas using resting-state correlations.
+NeuroImage, 93, 276-291.
+https://doi.org/10.1016/j.neuroimage.2013.07.035
+
+Gordon, E. M., Laumann, T. O., Adeyemo, B., Huckins, J. F., Kelley, W. M., &
+Petersen, S. E. (2016). Generation and evaluation of a cortical area
+parcellation from resting-state correlations. Cerebral Cortex, 26(1),
+288-303. https://doi.org/10.1093/cercor/bhu239
+
+Schaefer, A., Kong, R., Gordon, E. M., Laumann, T. O., Zuo, X.-N., Holmes,
+A. J., Eickhoff, S. B., & Yeo, B. T. T. (2018). Local-global parcellation of
+the human cerebral cortex from intrinsic functional connectivity MRI.
+Cerebral Cortex, 28(9), 3095-3114. https://doi.org/10.1093/cercor/bhx179
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_profile` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-graph-parcellation-symbols}
+:::
