@@ -26,6 +26,7 @@ final publication as-is (SPEC §6.5).
 - [`graph`](nitrix-graph.qmd) — Graph-theoretic primitives.
 - [`linalg`](nitrix-linalg.qmd) — nitrix.linalg -- linear-algebra primitives.
 - [`morphology`](nitrix-morphology.qmd) — Mathematical morphology built atop the semiring substrate.
+- [`nn`](nitrix-nn.qmd) — Functional neural-network forward-block kernels.
 - [`register`](nitrix-register.qmd) — nitrix.register -- pairwise registration recipes.
 - [`semiring`](nitrix-semiring.qmd) — KeOps-style streaming reductions over arbitrary algebras.
 - [`signal`](nitrix-signal.qmd) — nitrix.signal -- 1D signal-processing primitives.
@@ -69,9 +70,25 @@ final publication as-is (SPEC §6.5).
 - [`solve`](nitrix-linalg-solve.qmd) — Dense linear solves: general and SPD-Cholesky.
 - [`spd`](nitrix-linalg-spd.qmd) — Symmetric positive-definite manifold operations.
 
+### `nitrix.metrics`
+
+- [`classification`](nitrix-metrics-classification.qmd) — Classification / segmentation comparison kernels.
+- [`contrastive`](nitrix-metrics-contrastive.qmd) — Contrastive / self-supervised representation kernels.
+- [`information`](nitrix-metrics-information.qmd) — Information-theoretic and variance-ratio image-similarity metrics.
+- [`intensity`](nitrix-metrics-intensity.qmd) — Intensity-based image-similarity metrics.
+- [`overlap`](nitrix-metrics-overlap.qmd) — Region-overlap segmentation metrics.
+- [`preprocess`](nitrix-metrics-preprocess.qmd) — Intensity preprocessing for registration (the fMRIPrep front-end).
+- [`surface`](nitrix-metrics-surface.qmd) — Surface-distance metrics: [`hausdorff95`](nitrix-metrics-surface/hausdorff95.qmd) and [`surface_dice`](nitrix-metrics-surface/surface_dice.qmd).
+
 ### `nitrix.morphology`
 
 - [`pooling`](nitrix-morphology-pooling.qmd) — Encoder-decoder pooling primitives with index-bookkeeping.
+
+### `nitrix.nn`
+
+- [`attention`](nitrix-nn-attention.qmd) — Scaled-dot-product / flash attention.
+- [`norm`](nitrix-nn-norm.qmd) — Fused LayerNorm / GroupNorm / InstanceNorm.
+- [`ssm`](nitrix-nn-ssm.qmd) — Selective state-space scan (Mamba / S6).
 
 ### `nitrix.numerics`
 

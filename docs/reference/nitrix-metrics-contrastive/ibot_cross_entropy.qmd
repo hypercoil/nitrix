@@ -1,0 +1,53 @@
+---
+title: "ibot_cross_entropy"
+generated: true
+description: "Masked-token self-distillation cross-entropy (iBOT)."
+---
+
+[‹ back to `nitrix.metrics.contrastive`](../nitrix-metrics-contrastive.qmd)
+
+<!-- nitrix:gen sig:ibot_cross_entropy -->
+```python
+ibot_cross_entropy(student_logits: Float[Array, 'b t k'], teacher_logits: Float[Array, 'b t k'], center: Float[Array, 'k'], mask: Bool[Array, 'b t'], *, student_temp: float = 0.1, teacher_temp: float = 0.04, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ibot_cross_entropy -->
+Masked-token self-distillation cross-entropy (iBOT).
+
+Exactly [`dino_cross_entropy`](../nitrix-metrics-contrastive/dino_cross_entropy.qmd)'s centred/sharpened cross-entropy
+evaluated per patch token, then **domain-mask reduced** over the masked
+tokens of each sample: the per-sample score is the
+$\sum(\text{mask} \cdot \text{ce}) / \sum(\text{mask})$ weighted
+mean over the token axis (the masked token is the measurement domain), and
+the result is reduced over the batch.  An all-unmasked sample contributes
+0.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ibot_cross_entropy -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `student_logits` | `Float` | `b` × `t` × `k` | — | Per-token prototype scores `(batch, tokens, k)`. |
+| `teacher_logits` | `Float` | `b` × `t` × `k` | — | Per-token prototype scores `(batch, tokens, k)`. |
+| `center` | `Float` | `k` | — | Teacher centring vector `(k,)`. |
+| `mask` | `Bool` | `b` × `t` | — | Boolean `(batch, tokens)`; `True` marks the masked tokens the loss is computed on. |
+| `student_temp` | `float` | — | `0.1` | Softmax temperatures. |
+| `teacher_temp` | `float` | — | `0.04` | Softmax temperatures. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"` (per-sample CE). |
+
+**Returns** `Float` — shape `...`. The masked-token self-distillation cross-entropy. With `reduction="none"` this is the per-sample mask-weighted mean of shape `(batch,)`; with `"mean"` or `"sum"` it is a scalar reducing over the batch.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ibot_cross_entropy -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `b` | *(undocumented — add to `_dimensions.yml`)* |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+| `k` | kernel or basis components |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

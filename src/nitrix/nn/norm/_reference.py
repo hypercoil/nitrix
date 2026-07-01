@@ -4,20 +4,24 @@
 """
 Pure-JAX references for the fused normalisations.
 
-- ``layer_norm`` -- normalise over the trailing feature axis ``c`` (transformer
-  convention); affine ``(c,)``.
-- ``group_norm`` -- channels-first n-D ``(N, C, *spatial)``; split ``C`` into
-  ``num_groups`` groups and normalise over ``(C/num_groups, *spatial)`` per
-  sample/group; affine per-channel ``(C,)``.
-- ``instance_norm`` -- channels-first n-D; normalise over ``*spatial`` per
-  sample/channel (== ``group_norm`` with ``num_groups == C``).
+- :func:`reference_layer_norm` -- normalise over the trailing feature axis
+  ``c`` (transformer convention); per-feature affine of shape ``(c,)``.
+- :func:`reference_group_norm` -- channels-first n-D input ``(N, C, *spatial)``;
+  split ``C`` into ``num_groups`` groups and normalise over
+  ``(C/num_groups, *spatial)`` per sample and group; per-channel affine of shape
+  ``(C,)``.
+- :func:`reference_instance_norm` -- channels-first n-D input; normalise over
+  ``*spatial`` per sample and channel (equivalently, group normalisation with
+  one group per channel, ``num_groups == C``).
 
-All use biased variance (``/n``), the ``equinox`` / ``rsqrt`` convention, and
-the **curse-of-depth `out_scale`** hook: ``out = out_scale·(x̂·w + b)``, which
-folds the constant depth-scaling family (LayerNorm Scaling ``1/√l``, residual
-``1/√(2N)``, DeepNorm-α, ReZero) in at zero marginal cost.  Autodiff-native --
-the fused-kernel custom VJP lives in ``_kernels/cuda/norm.py``.  See
-``docs/feature-requests/nn-forward-kernels-suite.md`` §7.3.
+All three use the biased variance estimator (division by :math:`n`) and the
+reciprocal-square-root normalisation convention, and all expose the depth-scaling
+``out_scale`` hook :math:`\\mathrm{out} = \\mathrm{out\\_scale}\\cdot
+(\\hat{x}\\cdot w + b)`. That constant post-scaling folds in the family of
+depth-scaling schemes -- LayerNorm Scaling :math:`1/\\sqrt{l}`, residual scaling
+:math:`1/\\sqrt{2N}`, DeepNorm-:math:`\\alpha`, and ReZero -- at zero marginal
+cost. These references are autodiff-native; the fused-kernel custom VJP lives
+alongside them in the CUDA kernel module.
 """
 
 from __future__ import annotations
@@ -43,11 +47,40 @@ def reference_layer_norm(
     eps: float = 1e-5,
     out_scale: float = 1.0,
 ) -> Float[Array, '... c']:
-    """LayerNorm over the trailing axis (oracle).
+    """Layer normalisation over the trailing axis (reference oracle).
 
-    Reductions (mean / variance) and the affine run in at least float32: a
-    float16/bfloat16 input is upcast and the result cast back (the
-    fp32-accumulation invariant, SPEC §2 tenet 11); float32 / float64 unchanged.
+    Normalise ``x`` over its trailing feature axis ``c`` using the mean and
+    biased variance computed over that axis, apply the optional per-feature
+    affine transform, and scale the result by ``out_scale``.
+
+    The reductions (mean and variance) and the affine transform run in at least
+    single precision: a ``float16`` / ``bfloat16`` input is upcast to
+    ``float32`` and the result cast back to the input dtype, while ``float32``
+    and ``float64`` inputs are left unchanged.
+
+    Parameters
+    ----------
+    x : Float[Array, '... c']
+        Input tensor. Normalisation is performed independently over the trailing
+        feature axis ``c`` for every entry of the leading axes.
+    weight : Float[Array, 'c'], optional
+        Per-feature affine scale. If ``None``, no multiplicative scaling is
+        applied.
+    bias : Float[Array, 'c'], optional
+        Per-feature affine shift. If ``None``, no additive shift is applied.
+    eps : float, optional
+        Small constant added to the variance before taking the reciprocal square
+        root, for numerical stability.
+    out_scale : float, optional
+        Constant post-normalisation scale applied to the affine output,
+        implementing the depth-scaling hook :math:`\\mathrm{out} =
+        \\mathrm{out\\_scale}\\cdot(\\hat{x}\\cdot w + b)`.
+
+    Returns
+    -------
+    Float[Array, '... c']
+        The normalised, affine-transformed and scaled tensor, with the same
+        shape and dtype as ``x``.
     """
     io_dtype = x.dtype
     acc_dtype = jnp.promote_types(io_dtype, jnp.float32)
@@ -74,10 +107,45 @@ def reference_group_norm(
     eps: float = 1e-5,
     out_scale: float = 1.0,
 ) -> Float[Array, 'n c *spatial']:
-    """GroupNorm over ``(C/num_groups, *spatial)`` per sample/group (oracle).
+    """Group normalisation per sample and group (reference oracle).
 
-    Reductions (mean / variance) and the affine run in at least float32 (the
-    fp32-accumulation invariant, SPEC §2 tenet 11); float32 / float64 unchanged.
+    Split the ``C`` channels of a channels-first input into ``num_groups``
+    contiguous groups, then normalise over each group's channels together with
+    all spatial axes, independently per sample and group, using the mean and
+    biased variance. The optional per-channel affine transform is applied
+    channel-wise, and the result is scaled by ``out_scale``.
+
+    The reductions (mean and variance) and the affine transform run in at least
+    single precision: a ``float16`` / ``bfloat16`` input is upcast to
+    ``float32`` and the result cast back to the input dtype, while ``float32``
+    and ``float64`` inputs are left unchanged.
+
+    Parameters
+    ----------
+    x : Float[Array, 'n c *spatial']
+        Channels-first input tensor: leading sample axis ``n``, channel axis
+        ``c``, then zero or more spatial axes.
+    num_groups : int
+        Number of groups into which the ``c`` channels are partitioned.
+        ``c`` must be divisible by ``num_groups``.
+    weight : Float[Array, 'c'], optional
+        Per-channel affine scale. If ``None``, no multiplicative scaling is
+        applied.
+    bias : Float[Array, 'c'], optional
+        Per-channel affine shift. If ``None``, no additive shift is applied.
+    eps : float, optional
+        Small constant added to the variance before taking the reciprocal square
+        root, for numerical stability.
+    out_scale : float, optional
+        Constant post-normalisation scale applied to the affine output,
+        implementing the depth-scaling hook :math:`\\mathrm{out} =
+        \\mathrm{out\\_scale}\\cdot(\\hat{x}\\cdot w + b)`.
+
+    Returns
+    -------
+    Float[Array, 'n c *spatial']
+        The normalised, affine-transformed and scaled tensor, with the same
+        shape and dtype as ``x``.
     """
     io_dtype = x.dtype
     acc_dtype = jnp.promote_types(io_dtype, jnp.float32)
@@ -110,7 +178,37 @@ def reference_instance_norm(
     eps: float = 1e-5,
     out_scale: float = 1.0,
 ) -> Float[Array, 'n c *spatial']:
-    """InstanceNorm == GroupNorm with one group per channel (oracle)."""
+    """Instance normalisation per sample and channel (reference oracle).
+
+    Normalise each channel of a channels-first input independently over its
+    spatial axes, per sample. This is exactly group normalisation with one group
+    per channel, so the call delegates to :func:`reference_group_norm` with
+    ``num_groups`` equal to the number of channels.
+
+    Parameters
+    ----------
+    x : Float[Array, 'n c *spatial']
+        Channels-first input tensor: leading sample axis ``n``, channel axis
+        ``c``, then zero or more spatial axes.
+    weight : Float[Array, 'c'], optional
+        Per-channel affine scale. If ``None``, no multiplicative scaling is
+        applied.
+    bias : Float[Array, 'c'], optional
+        Per-channel affine shift. If ``None``, no additive shift is applied.
+    eps : float, optional
+        Small constant added to the variance before taking the reciprocal square
+        root, for numerical stability.
+    out_scale : float, optional
+        Constant post-normalisation scale applied to the affine output,
+        implementing the depth-scaling hook :math:`\\mathrm{out} =
+        \\mathrm{out\\_scale}\\cdot(\\hat{x}\\cdot w + b)`.
+
+    Returns
+    -------
+    Float[Array, 'n c *spatial']
+        The normalised, affine-transformed and scaled tensor, with the same
+        shape and dtype as ``x``.
+    """
     return reference_group_norm(
         x, x.shape[1], weight, bias, eps=eps, out_scale=out_scale
     )

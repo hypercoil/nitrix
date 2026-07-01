@@ -1,0 +1,84 @@
+---
+title: "mi_grad"
+generated: true
+description: "Closed-form Mattes mutual-information gradient."
+---
+
+[‹ back to `nitrix.metrics.information`](../nitrix-metrics-information.qmd)
+
+<!-- nitrix:gen sig:mi_grad -->
+```python
+mi_grad(moving: Float[Array, '...'], fixed: Float[Array, '...'], *, bins: int = 32, range_moving: Optional[tuple[float, float]] = None, range_fixed: Optional[tuple[float, float]] = None, sample_stride: int = 1) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mi_grad -->
+Closed-form Mattes mutual-information gradient.
+
+The analytic per-voxel derivative of [`mutual_information`](../nitrix-metrics-information/mutual_information.qmd)
+(unnormalised) with respect to the moving intensities,
+$\partial\mathrm{MI}/\partial\mathrm{moving}$, replacing the autodiff
+tape `jax.grad(mutual_information)`. Differentiating
+$\mathrm{MI} = \sum P \log(P / (P_m P_f))$ through only the moving
+soft-bin weights, the $+1$ and $\log P_f$ terms cancel (the
+soft weights sum to one, so $\sum_a \partial\beta_m/\partial m = 0$),
+leaving the Mattes (2003) form
+
+$$
+\frac{\partial\mathrm{MI}}{\partial m}(x)
+= \frac{s_m}{N}\left[(1 - t_f)\, D[k,l] + t_f\, D[k,l+1]\right]
+$$
+
+where $s_m = (\mathrm{bins} - 1) / \mathrm{span}_m$, $k$ and
+$l$ are the moving and fixed lower bins, $t_f$ the fixed
+fractional weight, and $D[a,b] = W[a+1,b] - W[a,b]$ is the forward
+difference (along the moving axis) of the reduced table
+$W[a,b] = \log P[a,b] - \log P_m[a]$. This is a two-value gather into
+the tiny $(\mathrm{bins} - 1, \mathrm{bins})$ table $D$ per
+voxel -- no autodiff scatter tape.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mi_grad -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `...` | — | Images of identical shape. |
+| `fixed` | `Float` | `...` | — | Images of identical shape. |
+| `bins` | `int` | — | `32` | Bins per axis (must match the cost; default 32). |
+| `range_moving` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity ranges. **Pin** them (the recipe does so once from the full-resolution images): a data `min/max` range drifts as the moving image deforms (a non-stationary objective) and truncates the force at the clip boundary. `None` (default) uses the per-image data min / max. |
+| `range_fixed` | `Optional[tuple[float, float]]` | — | `None` | Optional `(lo, hi)` intensity ranges. **Pin** them (the recipe does so once from the full-resolution images): a data `min/max` range drifts as the moving image deforms (a non-stationary objective) and truncates the force at the clip boundary. `None` (default) uses the per-image data min / max. |
+| `sample_stride` | `int` | — | `1` | Estimate the joint PDF from every `sample_stride`-th voxel (ITK "Regular" sampling); the gradient is still applied densely. `1` (default) is the exact full histogram; `> 1` trades a noisier PDF for a cheaper scatter -- about 0.98 cosine-aligned at stride 4 (~25 %) on real cross-modal data. Jit-static (a Python int). |
+
+**Returns** `Float` — shape `...`. The gradient $\partial\mathrm{MI}/\partial\mathrm{moving}$, same shape as `moving`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:mi_grad -->
+::: {.callout-note}
+The empty-bin masking (`where(P > 0, ...)`) is deliberately identical to
+that of [`mutual_information`](../nitrix-metrics-information/mutual_information.qmd), so [`mi_grad`](../nitrix-metrics-information/mi_grad.qmd) matches
+`jax.grad(mutual_information)` to tolerance on populated bins (the parity
+oracle); the derivative at an exactly-empty bin is a documented divergence
+(the mask is non-smooth there -- the analogue of [`lncc_grad`](../nitrix-metrics-intensity/lncc_grad.qmd)'s
+boundary divergence). Voxels outside `[lo_m, hi_m]` get zero force (the
+soft bin is clipped, so its derivative vanishes). This is the
+**unnormalised** Mattes mutual information only -- the normalised
+(Studholme) gradient is [`nmi_grad`](../nitrix-metrics-information/nmi_grad.qmd) (the quotient-rule form).
+:::
+
+### References
+
+Mattes, D., Haynor, D. R., Vesselle, H., Lewellen, T. K., & Eubank, W.
+(2003). PET-CT image registration in the chest using free-form
+deformations. *IEEE Transactions on Medical Imaging*, 22(1), 120-128.
+https://doi.org/10.1109/TMI.2003.809072
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mi_grad -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

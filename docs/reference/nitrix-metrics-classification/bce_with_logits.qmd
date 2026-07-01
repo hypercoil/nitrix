@@ -1,0 +1,38 @@
+---
+title: "bce_with_logits"
+generated: true
+description: "Binary cross-entropy from logits (numerically stable)."
+---
+
+[‹ back to `nitrix.metrics.classification`](../nitrix-metrics-classification.qmd)
+
+<!-- nitrix:gen sig:bce_with_logits -->
+```python
+bce_with_logits(logits: Float[Array, '...'], targets: Float[Array, '...'], *, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bce_with_logits -->
+Binary cross-entropy from logits (numerically stable).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bce_with_logits -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `logits` | `Float` | `...` | — | Pre-sigmoid scores. |
+| `targets` | `Float` | `...` | — | Soft or hard targets in `[0, 1]`, same shape as `logits`. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bce_with_logits -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

@@ -1,0 +1,44 @@
+---
+title: "confusion_matrix"
+generated: true
+description: "Confusion matrix, `row = true` / `col = predicted` (sklearn form)."
+---
+
+[‹ back to `nitrix.metrics.classification`](../nitrix-metrics-classification.qmd)
+
+<!-- nitrix:gen sig:confusion_matrix -->
+```python
+confusion_matrix(pred: Int[Array, 'N'], target: Int[Array, 'N'], *, num_classes: int) -> Int[Array, 'C C']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:confusion_matrix -->
+Confusion matrix, `row = true` / `col = predicted` (sklearn form).
+
+`cm[i, j]` counts samples of true class `i` predicted as class `j`,
+via `bincount(target * C + pred)`.  `num_classes` is static (it fixes
+the `(C, C)` output shape, so the op is `jit`-clean).  Non-differentiable
+(integer counts).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:confusion_matrix -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `pred` | `Int` | `N` | — | Integer predicted / true class indices `(N,)` in `[0, num_classes)`. |
+| `target` | `Int` | `N` | — | Integer predicted / true class indices `(N,)` in `[0, num_classes)`. |
+| `num_classes` | `int` | — | — | Number of classes `C` (static). |
+
+**Returns** `Int` — shape `C` × `C`. The `(C, C)` integer count matrix, where entry `[i, j]` is the number of samples of true class `i` predicted as class `j`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:confusion_matrix -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `C` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

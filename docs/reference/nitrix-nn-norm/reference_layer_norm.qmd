@@ -1,0 +1,52 @@
+---
+title: "reference_layer_norm"
+generated: true
+description: "Layer normalisation over the trailing axis (reference oracle)."
+---
+
+[‹ back to `nitrix.nn.norm`](../nitrix-nn-norm.qmd)
+
+*Re-exported here; defined in `nitrix.nn.norm._reference`.*
+
+<!-- nitrix:gen sig:reference_layer_norm -->
+```python
+reference_layer_norm(x: Float[Array, '... c'], weight: Optional[Float[Array, 'c']] = None, bias: Optional[Float[Array, 'c']] = None, *, eps: float = 1e-05, out_scale: float = 1.0) -> Float[Array, '... c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reference_layer_norm -->
+Layer normalisation over the trailing axis (reference oracle).
+
+Normalise `x` over its trailing feature axis `c` using the mean and
+biased variance computed over that axis, apply the optional per-feature
+affine transform, and scale the result by `out_scale`.
+
+The reductions (mean and variance) and the affine transform run in at least
+single precision: a `float16` / `bfloat16` input is upcast to
+`float32` and the result cast back to the input dtype, while `float32`
+and `float64` inputs are left unchanged.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reference_layer_norm -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Float` | `...` × `c` | — | Input tensor. Normalisation is performed independently over the trailing feature axis `c` for every entry of the leading axes. |
+| `weight` | `Optional[Float[Array, 'c']]` | — | `None` | Per-feature affine scale. If `None`, no multiplicative scaling is applied. |
+| `bias` | `Optional[Float[Array, 'c']]` | — | `None` | Per-feature affine shift. If `None`, no additive shift is applied. |
+| `eps` | `float` | — | `1e-05` | Small constant added to the variance before taking the reciprocal square root, for numerical stability. |
+| `out_scale` | `float` | — | `1.0` | Constant post-normalisation scale applied to the affine output, implementing the depth-scaling hook $\mathrm{out} = \mathrm{out\_scale}\cdot(\hat{x}\cdot w + b)$. |
+
+**Returns** `Float` — shape `...` × `c`. The normalised, affine-transformed and scaled tensor, with the same shape and dtype as `x`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reference_layer_norm -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+<!-- nitrix:/gen -->

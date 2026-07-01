@@ -1,0 +1,56 @@
+---
+title: "focal_loss"
+generated: true
+description: "Binary focal loss of Lin et al. (2017) [1]_."
+---
+
+[‹ back to `nitrix.metrics.classification`](../nitrix-metrics-classification.qmd)
+
+<!-- nitrix:gen sig:focal_loss -->
+```python
+focal_loss(logits: Float[Array, '...'], targets: Float[Array, '...'], *, gamma: float = 2.0, alpha: float = 0.25, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:focal_loss -->
+Binary focal loss of Lin et al. (2017) [1]_.
+
+The stable binary cross-entropy scaled by the focusing factor
+$(1 - p_t)^{\gamma}$, where $p_t$ is the probability
+assigned to the true class.  `gamma = 0` recovers the
+(alpha-weighted) binary cross-entropy; larger `gamma` more
+aggressively suppresses the loss of easy, confidently-correct
+examples.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:focal_loss -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `logits` | `Float` | `...` | — | Pre-sigmoid scores. |
+| `targets` | `Float` | `...` | — | Targets in `[0, 1]`, same shape as `logits`. |
+| `gamma` | `float` | — | `2.0` | Focusing exponent (`>= 0`). Default `2`. |
+| `alpha` | `float` | — | `0.25` | Class-balancing weight in `[0, 1]` applied to the positive class (`1 - alpha` to the negative). A negative value disables alpha-weighting (the unbalanced focal loss). Default `0.25`. |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"`. |
+
+**Returns** `Float` — shape `...`. Scalar loss (`"mean"` / `"sum"`) or the per-element loss with the shape of `logits` (`"none"`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:focal_loss -->
+### References
+
+.. [1] Lin, T.-Y., Goyal, P., Girshick, R., He, K., & Dollár, P.
+   (2017). Focal loss for dense object detection. *Proceedings of the
+   IEEE International Conference on Computer Vision (ICCV)*, 2980-2988.
+   `10.1109/ICCV.2017.324`
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:focal_loss -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

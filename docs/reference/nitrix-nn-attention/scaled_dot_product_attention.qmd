@@ -1,0 +1,70 @@
+---
+title: "scaled_dot_product_attention"
+generated: true
+description: "Scaled-dot-product attention with backend dispatch."
+---
+
+[‹ back to `nitrix.nn.attention`](../nitrix-nn-attention.qmd)
+
+<!-- nitrix:gen sig:scaled_dot_product_attention -->
+```python
+scaled_dot_product_attention(q: Float[Array, '... h s d'], k: Float[Array, '... h t d'], v: Float[Array, '... h t d_v'], *, bias: Optional[Float[Array, '... h s t']] = None, mask: Optional[Bool[Array, '... h s t']] = None, scale: Optional[float] = None, causal: bool = False, qk_norm: bool = False, backend: Backend = 'auto') -> Float[Array, '... h s d_v']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:scaled_dot_product_attention -->
+Scaled-dot-product attention with backend dispatch.
+
+Computes $\operatorname{softmax}(\text{scale} \cdot q k^{\top} +
+\text{bias}\ [\text{masked}])\, v$ over the key axis `t` (see
+[`reference_scaled_dot_product_attention`](../nitrix-nn-attention/reference_scaled_dot_product_attention.qmd) for the full definition).
+The `backend` argument selects the implementation:
+
+- `'jax'` -- the pure-JAX reference (the bit-faithful oracle).
+- `'pallas-cuda'` -- the fused flash path on Ampere+; currently falls
+  back to the reference with a loud warning until the kernel lands.
+- `'auto'` (default) -- `'pallas-cuda'` on Ampere+ NVIDIA hardware,
+  else `'jax'`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:scaled_dot_product_attention -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `q` | `Float` | `...` × `h` × `s` × `d` | — | Query / key / value, layout `(..., h, s, d)` / `(..., h, t, d)` / `(..., h, t, d_v)`. Head partitioning and windowing are the caller's responsibility; this function sees already-partitioned `q` / `k` / `v`. `q` and `k` share head dim `d`; `k` and `v` share key length `t`. Query length `s` may differ from `t` (cross-attention). |
+| `k` | `Float` | `...` × `h` × `t` × `d` | — | Query / key / value, layout `(..., h, s, d)` / `(..., h, t, d)` / `(..., h, t, d_v)`. Head partitioning and windowing are the caller's responsibility; this function sees already-partitioned `q` / `k` / `v`. `q` and `k` share head dim `d`; `k` and `v` share key length `t`. Query length `s` may differ from `t` (cross-attention). |
+| `v` | `Float` | `...` × `h` × `t` × `d_v` | — | Query / key / value, layout `(..., h, s, d)` / `(..., h, t, d)` / `(..., h, t, d_v)`. Head partitioning and windowing are the caller's responsibility; this function sees already-partitioned `q` / `k` / `v`. `q` and `k` share head dim `d`; `k` and `v` share key length `t`. Query length `s` may differ from `t` (cross-attention). |
+| `bias` | `Optional[Float[Array, '... h s t']]` | — | `None` | Optional additive logit bias (e.g. a relative-position table), broadcast to `(..., h, s, t)`. |
+| `mask` | `Optional[Bool[Array, '... h s t']]` | — | `None` | Optional boolean keep-mask (`True` keeps an entry), broadcast to `(..., h, s, t)` and combined with `causal` by logical-and. |
+| `scale` | `Optional[float]` | — | `None` | Softmax temperature; defaults to $1 / \sqrt{d}$. |
+| `causal` | `bool` | — | `False` | If `True`, query `i` attends only to keys `j <= i` (indices aligned at 0, the standard self-attention convention). |
+| `qk_norm` | `bool` | — | `False` | If `True`, RMS-normalise `q` and `k` over the head dim before the dot product (QK-norm; logit-growth control at depth / scale). |
+| `backend` | `Backend` | — | `'auto'` | Execution engine: `'auto'`, `'pallas-cuda'` or `'jax'`. |
+
+**Returns** `Float` — shape `...` × `h` × `s` × `d_v`. Attention output of shape `(..., h, s, d_v)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:scaled_dot_product_attention -->
+::: {.callout-note}
+The reference path is autodiff-native.  On the fused path, `qk_norm` is
+a pure-elementwise RMS pre-op applied *outside* the kernel's custom VJP,
+so autodiff chains its VJP onto the unchanged fused forward / backward
+(in-kernel tile-fusion of the norm is a later bandwidth-only
+optimisation).  `qk_norm=False` is byte-identical to the no-norm path.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:scaled_dot_product_attention -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `h` | *(undocumented — add to `_dimensions.yml`)* |
+| `s` | flattened spatial sample positions |
+| `d` | spatial dimension (2 or 3) |
+| `t` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_v` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

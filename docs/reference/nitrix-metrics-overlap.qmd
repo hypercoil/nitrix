@@ -1,0 +1,55 @@
+---
+title: "nitrix.metrics.overlap"
+generated: true
+signature-hash: e2b8d4fcf5288519
+description: "Region-overlap segmentation metrics."
+listing:
+  id: nitrix-metrics-overlap-symbols
+  contents: "nitrix-metrics-overlap/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.metrics.overlap`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Region-overlap segmentation metrics.
+
+- [`dice`](nitrix-metrics-overlap/dice.qmd) -- the soft Sørensen--Dice overlap coefficient: twice the
+  intersection over the sum of magnitudes,
+  $2 |A \cap B| / (|A| + |B|)$.
+- [`jaccard`](nitrix-metrics-overlap/jaccard.qmd) -- the soft Jaccard index / intersection-over-union
+  (IoU): the intersection over the union,
+  $|A \cap B| / |A \cup B|$.
+
+Both are evaluated on soft (probabilistic) masks rather than hard
+labels, so they are differentiable and double as losses
+($1 - \mathrm{metric}$).  They are monotonically related --
+$\mathrm{jaccard} = \mathrm{dice} / (2 - \mathrm{dice})$ -- so
+they rank a set of predictions identically, but report different
+operating points (Jaccard is the stricter of the two for any imperfect
+overlap); pipelines commonly track both.
+
+Convention (shared with the intensity and information metrics): the
+function returns the *similarity* (the coefficient, in $[0, 1]$);
+form the cost as $1 - \mathrm{metric}$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-metrics-overlap-symbols}
+:::
