@@ -34,11 +34,39 @@ def preprocess_images(
     winsorize_range: Optional[Tuple[float, float]],
     histogram_match: bool,
 ) -> Tuple[Array, Array]:
-    """Winsorize both images, then (optionally) histogram-match moving -> fixed.
+    """Condition an image pair before registration.
 
-    ``winsorize_range`` is a ``(lower, upper)`` percentile pair (``None`` -> no
-    winsorisation); ``histogram_match`` remaps the (winsorised) moving onto the
-    (winsorised) fixed distribution.  A no-op when both are off.
+    Winsorise both images to a shared intensity percentile range, then
+    optionally remap the moving image's intensity distribution onto the fixed
+    image's by cumulative-distribution transport. When both steps are disabled
+    the pair is returned byte-unchanged.
+
+    Winsorisation uses :func:`~nitrix.metrics.winsorize` and histogram matching
+    uses :func:`~nitrix.metrics.match_histogram`.
+
+    Parameters
+    ----------
+    moving : Array
+        The moving image, whose intensities are conditioned and (when histogram
+        matching is enabled) mapped onto the fixed distribution.
+    fixed : Array
+        The fixed (reference) image. It is winsorised alongside the moving image
+        and, when histogram matching is enabled, serves as the target
+        distribution.
+    winsorize_range : tuple of float or None
+        A ``(lower, upper)`` pair of intensity percentiles to clip both images
+        to. ``None`` disables winsorisation, leaving both images unchanged.
+    histogram_match : bool
+        If ``True``, remap the (winsorised) moving image onto the (winsorised)
+        fixed distribution. If ``False``, the moving image is left as is.
+
+    Returns
+    -------
+    moving : Array
+        The conditioned moving image (winsorised, then optionally
+        histogram-matched to ``fixed``).
+    fixed : Array
+        The conditioned fixed image (winsorised only).
     """
     if winsorize_range is not None:
         lo, hi = winsorize_range

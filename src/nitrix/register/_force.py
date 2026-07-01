@@ -1,50 +1,55 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
-Dense-field driving forces -- the velocity-update analogue of ``Objective``.
+r"""
+Dense-field driving forces -- the velocity-update analogue of an objective.
 
-Where ``Objective`` is what the *matrix*-transform optimiser minimises over a
-parameter vector, a ``Force`` is what the *dense-field* (SVF) drivers
-(log-Demons, greedy SyN) ascend over a velocity field: per iteration it turns
-``(warped, fixed)`` into a raw per-voxel velocity update.  Holding it behind a
-protocol decouples the metric from the algorithm -- the same single-sided /
-symmetric driver runs under any force -- exactly as ``Objective`` decoupled the
-metric from the matrix driver.
+Where a matrix-transform objective is what the *matrix*-transform optimiser
+minimises over a parameter vector, a :class:`Force` is what the *dense-field*
+(stationary velocity field) drivers (log-Demons, greedy SyN) ascend over a
+velocity field: per iteration it turns a ``(warped, fixed)`` pair into a raw
+per-voxel velocity update.  Holding it behind a protocol decouples the metric
+from the algorithm -- the same single-sided / symmetric driver runs under any
+force.
 
-Two tiers, the suite-wide perf-vs-composability discipline:
+Two tiers balance performance against composability:
 
 - **Tier 1 (performant, the named recipes' defaults):** :class:`LNCCForce`
-  (the analytic local-CC force, ``metrics.lncc_grad``), :class:`DemonsForce`
-  (the closed-form ESM force), and :class:`MIForce` (the closed-form Mattes
-  mutual-information force, ``metrics.mi_grad`` -- the fast cross-modal path
-  replacing the ``MetricForce(MI())`` autodiff tape) -- closed-form forces
-  behind the protocol.
+  (the analytic local-cross-correlation force, :func:`metrics.lncc_grad`),
+  :class:`DemonsForce` (the closed-form efficient-symmetric force), and
+  :class:`MIForce` (the closed-form Mattes mutual-information force,
+  :func:`metrics.mi_grad` -- the fast cross-modal path replacing the
+  :class:`MetricForce` autodiff tape) -- closed-form forces behind the protocol.
 - **Tier 2 (escape hatch, *no* performance guarantee):** :class:`MetricForce`
-  -- ``jax.grad`` of *any* :class:`Metric`'s cost, so MI / correlation-ratio /
-  a custom descriptor can drive a diffeomorphic recipe (multimodal deformable
-  registration) without a hand-written force.
+  -- :func:`jax.grad` of *any* :class:`Metric`'s cost, so mutual information,
+  correlation ratio, or a custom descriptor can drive a diffeomorphic recipe
+  (multimodal deformable registration) without a hand-written force.
 
 :class:`SumForce` is the **combinator** -- a weighted sum of other forces
-(multi-metric within one stage, ANTs ``-m … -m …``), itself a :class:`Force`, so
-it composes any of the above with no driver change.
+(multi-metric within one stage), itself a :class:`Force`, so it composes any of
+the above with no driver change.
 
-**The force direction.**  With a minimisation cost ``c(warped, fixed)`` the
-gradient-descent direction on the moving deformation is, by the chain rule
-``∂c/∂(deformation) = ∂c/∂warped · ∇warped``, the field
-``u = −(∂c/∂warped) · ∇warped``.  The closed forms are this up to the
-metric-specific structure: LNCC's ``∂(sim)/∂warped`` is ``lncc_grad``; Demons'
-is the symmetric ESM variant ``(F−warped)·J/denom``.  So
-``MetricForce(LNCC)`` and :class:`LNCCForce` agree in *direction*
-(machine-precision; the magnitude is fixed by the driver's step-normalisation),
-which is the parity oracle for the closed form.
+Notes
+-----
+**The force direction.**  With a minimisation cost :math:`c(\text{warped},
+\text{fixed})` the gradient-descent direction on the moving deformation is, by
+the chain rule :math:`\partial c / \partial(\text{deformation}) = \partial c /
+\partial\,\text{warped} \cdot \nabla\,\text{warped}`, the field :math:`u =
+-(\partial c / \partial\,\text{warped}) \cdot \nabla\,\text{warped}`.  The
+closed forms are this up to the metric-specific structure: the local-CC term
+:math:`\partial(\mathrm{sim}) / \partial\,\text{warped}` is
+:func:`metrics.lncc_grad`; the Demons term is the symmetric efficient-symmetric
+variant :math:`(F - \text{warped}) \cdot J / \text{denom}`.  So
+:class:`MetricForce` wrapping the local-CC metric and :class:`LNCCForce` agree
+in *direction* (machine precision; the magnitude is fixed by the driver's
+step-normalisation), which is the parity oracle for the closed form.
 
-**The ``bind`` hoist.**  ``Force.bind(fixed)`` returns a :class:`BoundForce`
-that has precomputed everything fixed-dependent (Demons' ``∇fixed``), so the
-single-sided driver binds **once per level** and reuses it across iterations;
-the symmetric driver binds **per step** (its "fixed" is the other image warped
-to the midpoint, which changes every iteration) -- the same hoisting discipline
-as ``ic_reference`` / ``MetricObjective``, paid only where it is recoverable.
+**The bind hoist.**  :meth:`Force.bind` returns a :class:`BoundForce` that has
+precomputed everything fixed-dependent (the Demons force's :math:`\nabla F`), so
+the single-sided driver binds **once per level** and reuses it across
+iterations; the symmetric driver binds **per step** (its ``fixed`` is the other
+image warped to the midpoint, which changes every iteration) -- the same
+hoisting discipline paid only where it is recoverable.
 """
 
 from __future__ import annotations
@@ -99,12 +104,36 @@ def resolve_force_schedule(
 ) -> list[Force]:
     """Resolve the recipe ``force`` argument to a per-pyramid-level list.
 
-    ``None`` -> the ``default`` closed-form force at every level; a single
-    :class:`Force` -> that force at every level; a length-``levels`` sequence
-    (**coarse-to-fine**, the natural schedule order -- e.g. a cheap force at
-    the coarse levels, a high-signal one at the finest) -> one force per level,
-    reversed to the finest-first pyramid indexing the driver uses.  The result
-    is indexed by pyramid level (``[0]`` = finest).
+    ``None`` yields the ``default`` closed-form force at every level; a single
+    :class:`Force` yields that force at every level; a length-``levels``
+    sequence (**coarse-to-fine**, the natural schedule order -- e.g. a cheap
+    force at the coarse levels, a high-signal one at the finest) yields one
+    force per level, reversed to the finest-first pyramid indexing the driver
+    uses.  The result is indexed by pyramid level (index ``0`` is the finest).
+
+    Parameters
+    ----------
+    force
+        The recipe force argument: ``None`` for the recipe's closed-form
+        default, a single :class:`Force` applied at every level, or a
+        coarse-to-fine sequence of one :class:`Force` per pyramid level.
+    default
+        The closed-form :class:`Force` used at every level when ``force`` is
+        ``None``.
+    levels
+        Number of pyramid levels; a sequence ``force`` must have exactly this
+        length.
+
+    Returns
+    -------
+    list of Force
+        One :class:`Force` per pyramid level, indexed finest-first (index ``0``
+        is the finest level).
+
+    Raises
+    ------
+    ValueError
+        If ``force`` is a sequence whose length differs from ``levels``.
     """
     if force is None:
         return [default] * levels
@@ -140,28 +169,70 @@ _DEMONS_DENOM_EPS = 1e-8
 def _grad_spacing(
     rel_spacing: RelSpacing,
 ) -> Union[float, tuple[float, ...]]:
-    """Spacing argument for ``spatial_gradient`` (1.0 when isotropic)."""
+    """Build the spacing argument for :func:`spatial_gradient`.
+
+    Parameters
+    ----------
+    rel_spacing
+        Per-axis relative spacing ratio, or ``None`` for an isotropic grid.
+
+    Returns
+    -------
+    float or tuple of float
+        ``1.0`` when ``rel_spacing`` is ``None`` (isotropic), otherwise the
+        per-axis spacing tuple passed straight through.
+    """
     return 1.0 if rel_spacing is None else rel_spacing
 
 
 def _to_voxel(u: Array, rel_spacing: RelSpacing) -> Array:
-    """Convert a physical (mm) force to the voxel-native velocity field."""
+    """Convert a physical (mm) force to the voxel-native velocity field.
+
+    Parameters
+    ----------
+    u
+        Force field in physical (mm) units.
+    rel_spacing
+        Per-axis relative spacing ratio, or ``None`` for an isotropic grid (in
+        which case ``u`` is already voxel-native and returned unchanged).
+
+    Returns
+    -------
+    Array
+        The velocity field in voxel units: ``u`` divided per axis by
+        ``rel_spacing`` when anisotropic, otherwise ``u`` unchanged.
+    """
     if rel_spacing is None:
         return u
     return u / jnp.asarray(rel_spacing, dtype=u.dtype)
 
 
 def _normalise_rms(u: Float[Array, '*spatial ndim'], target: float) -> Array:
-    """Scale a force field to a target per-voxel RMS magnitude.
+    r"""Scale a force field to a target per-voxel RMS magnitude.
 
-    RMS over the spatial voxels of the per-voxel vector norm ``‖u_x‖`` (not the
-    global max -- robust to a single outlier voxel setting the scale, the same
-    discipline ``_svf._normalise_step`` adopts).  Scaling *to* a fixed target
-    makes the step **metric-scale-invariant**: independent of the metric's
-    intrinsic units (MI in nats, CR in ``[0,1]``) and of the voxel count, so an
-    unclamped driver (Demons) gets a controlled magnitude instead of the
-    arbitrary ``·size`` constant.  A genuinely-zero field (no signal) is left at
-    zero, with the double-``where`` keeping the gradient finite there too.
+    The scale is the root-mean-square over the spatial voxels of the per-voxel
+    vector norm :math:`\|u_x\|` (not the global max -- robust to a single
+    outlier voxel setting the scale).  Scaling *to* a fixed target makes the
+    step **metric-scale-invariant**: independent of the metric's intrinsic units
+    (mutual information in nats, correlation ratio in :math:`[0, 1]`) and of the
+    voxel count, so an unclamped driver (Demons) gets a controlled magnitude
+    instead of an arbitrary constant proportional to the voxel count.  A
+    genuinely-zero field (no signal) is left at zero, with the double-``where``
+    keeping the gradient finite there too.
+
+    Parameters
+    ----------
+    u
+        Force field of shape ``(*spatial, ndim)`` -- a per-voxel vector.
+    target
+        Desired per-voxel RMS magnitude of the returned field.
+
+    Returns
+    -------
+    Array
+        ``u`` rescaled so its per-voxel RMS vector norm equals ``target``, or a
+        field of zeros if the input RMS is indistinguishable from zero at the
+        working precision.
     """
     rms = jnp.sqrt(jnp.mean(jnp.sum(u * u, axis=-1)))
     safe = rms > jnp.finfo(u.dtype).eps
@@ -176,11 +247,36 @@ class BoundForce(Protocol):
     def update(
         self, warped: Float[Array, '*spatial']
     ) -> Float[Array, '*spatial ndim']:
-        """Raw per-voxel velocity update (voxel units, pre-regularisation)."""
+        """Raw per-voxel velocity update (voxel units, pre-regularisation).
+
+        Parameters
+        ----------
+        warped
+            The moving image resampled through the current deformation, shape
+            ``(*spatial,)``.
+
+        Returns
+        -------
+        Float[Array, '*spatial ndim']
+            The per-voxel velocity update in voxel units, before any
+            regularisation, one vector per spatial voxel.
+        """
         ...
 
     def cost(self, warped: Float[Array, '*spatial']) -> Float[Array, '']:
-        """Scalar similarity cost (lower is a better match)."""
+        """Scalar similarity cost (lower is a better match).
+
+        Parameters
+        ----------
+        warped
+            The moving image resampled through the current deformation, shape
+            ``(*spatial,)``.
+
+        Returns
+        -------
+        Float[Array, '']
+            The scalar similarity cost; lower values indicate a better match.
+        """
         ...
 
 
@@ -195,7 +291,24 @@ class Force(Protocol):
         ndim: int,
         rel_spacing: RelSpacing = None,
     ) -> BoundForce:
-        """Bind to ``fixed``, hoisting fixed-dependent state once."""
+        """Bind to ``fixed``, hoisting fixed-dependent state once.
+
+        Parameters
+        ----------
+        fixed
+            The fixed (reference) image, shape ``(*spatial,)``.
+        ndim
+            Number of spatial dimensions of the velocity field.
+        rel_spacing
+            Per-axis relative spacing ratio for an anisotropic grid, or ``None``
+            for isotropic voxels.
+
+        Returns
+        -------
+        BoundForce
+            A force bound to ``fixed`` with all fixed-dependent state
+            precomputed, ready to produce per-iteration velocity updates.
+        """
         ...
 
 
@@ -222,9 +335,28 @@ def _lncc_center_dispatch(
 
     Returns the Pallas-kernel force (3-D isotropic single-pair GPU, large
     enough to win) or ``None`` to signal the caller to run the JAX path.  A
-    too-small volume / non-3-D input defers to JAX (the size gate is silent;
-    a non-tileable shape is a loud ``NitrixBackendFallback``).  ``backend='jax'``
-    (the default) resolves straight to ``None`` and never warns.
+    too-small volume or non-3-D input defers to JAX (the size gate is silent; a
+    non-tileable shape is a loud :class:`NitrixBackendFallback`).
+    ``backend='jax'`` (the default) resolves straight to ``None`` and never
+    warns.
+
+    Parameters
+    ----------
+    warped
+        The moving image resampled through the current deformation.
+    fixed
+        The fixed (reference) image, same shape as ``warped``.
+    radius
+        Centre-window radius in voxels.
+    backend
+        Requested compute backend; only ``'pallas-cuda'`` (or ``'auto'``
+        resolving to it) engages the kernel.
+
+    Returns
+    -------
+    Array or None
+        The fused-kernel centre force with the shape of the velocity field, or
+        ``None`` when the caller should fall back to the JAX path.
     """
     if resolve_backend(backend) != 'pallas-cuda':
         return None
@@ -250,15 +382,17 @@ def _lncc_center_dispatch(
 
 @dataclass(frozen=True)
 class LNCCForce:
-    """Analytic local-cross-correlation force (the greedy-SyN default).
+    r"""Analytic local-cross-correlation force (the greedy-SyN default).
 
-    The closed-form ``lncc_grad(warped, fixed) · ∇warped`` -- ascends the
-    windowed CC; robust to smooth intensity inhomogeneity.
+    The closed-form :math:`\text{lncc\_grad}(\text{warped}, \text{fixed}) \cdot
+    \nabla\,\text{warped}` (via :func:`metrics.lncc_grad`) -- ascends the
+    windowed cross-correlation; robust to smooth intensity inhomogeneity.
 
     Attributes
     ----------
     radius
-        LNCC box-window radius (size ``2·radius + 1`` per axis).  On an
+        Local-CC box-window radius (size :math:`2 \cdot \text{radius} + 1` per
+        axis).  On an
         anisotropic grid (``rel_spacing`` passed by the recipe) the window is
         made **physically isotropic**: the per-axis voxel radius is scaled by
         ``1 / rel_spacing`` so every axis spans the same mm extent (the same
@@ -268,10 +402,11 @@ class LNCCForce:
         :func:`metrics.lncc_grad` -- the exact gradient of the summed CC (nine
         box sums).  ``'center'`` is :func:`metrics.lncc_grad_center`, the
         ANTs / ITK centre-only convention (five box sums, ~1.5-1.75x faster on
-        both GPU and CPU): a *different*, cheaper force, not ``lncc_grad``'s
-        gradient.  Default is ``'exact'`` so recipe output is byte-identical.
+        both GPU and CPU): a *different*, cheaper force, not the gradient of
+        :func:`metrics.lncc_grad`.  Default is ``'exact'`` so recipe output is
+        byte-identical.
     backend
-        Compute backend for the ``'center'`` force (v4 L2b).  ``'jax'``
+        Compute backend for the ``'center'`` force.  ``'jax'``
         (default) is the pure-JAX path; ``'pallas-cuda'`` / ``'auto'`` use the
         fused **sliding-window** Triton kernel on a supported GPU (3-D isotropic
         single-pair -- otherwise it falls back to JAX, tolerance-equal).  The
@@ -291,6 +426,24 @@ class LNCCForce:
         ndim: int,
         rel_spacing: RelSpacing = None,
     ) -> _BoundLNCC:
+        """Bind to ``fixed``, carrying the window radius and backend settings.
+
+        Parameters
+        ----------
+        fixed
+            The fixed (reference) image, shape ``(*spatial,)``.
+        ndim
+            Number of spatial dimensions of the velocity field.
+        rel_spacing
+            Per-axis relative spacing ratio for an anisotropic grid, or ``None``
+            for isotropic voxels; used to make the window physically isotropic.
+
+        Returns
+        -------
+        _BoundLNCC
+            The bound local-CC force, ready to produce per-iteration velocity
+            updates for the given ``fixed`` image.
+        """
         return _BoundLNCC(
             fixed=fixed,
             radius=self.radius,
@@ -353,7 +506,33 @@ def _demons_update_jax(
     alpha: float,
     rel_spacing: RelSpacing,
 ) -> Array:
-    """The pure-JAX ESM force -- the parity oracle and the fallback path."""
+    """The pure-JAX efficient-symmetric Demons force.
+
+    This is both the parity oracle and the fallback path for the fused kernel.
+
+    Parameters
+    ----------
+    warped
+        The moving image resampled through the current deformation, shape
+        ``(*spatial,)``.
+    fixed
+        The fixed (reference) image, same shape as ``warped``.
+    grad_fixed
+        The precomputed spatial gradient of ``fixed``, shape
+        ``(*spatial, ndim)``.
+    alpha
+        Force-normalisation coefficient: larger values damp the step where the
+        intensity difference is large.
+    rel_spacing
+        Per-axis relative spacing ratio for an anisotropic grid, or ``None`` for
+        isotropic voxels.
+
+    Returns
+    -------
+    Array
+        The efficient-symmetric velocity update in voxel units, shape
+        ``(*spatial, ndim)``, zeroed on matched uniform regions.
+    """
     diff = fixed - warped
     grad = spatial_gradient(warped, spacing=_grad_spacing(rel_spacing))
     j = 0.5 * (grad_fixed + grad)
@@ -377,12 +556,39 @@ def _demons_force_dispatch(
     rel_spacing: RelSpacing,
     backend: Backend,
 ) -> Array:
-    """Pallas-fused ESM force where eligible, else the JAX path (5a).
+    r"""Pallas-fused efficient-symmetric force where eligible, else JAX.
 
-    The fused kernel (``∇warped`` stencil + the force in one tiled pass) is
-    isotropic single-pair GPU only; an anisotropic spacing or an untileable
-    shape falls back to :func:`_demons_update_jax` with a loud, deduped
-    ``NitrixBackendFallback`` (``backend='jax'``, the default, never warns).
+    The fused kernel (the :math:`\nabla\,\text{warped}` stencil plus the force
+    in one tiled pass) is isotropic single-pair GPU only; an anisotropic spacing
+    or an untileable shape falls back to :func:`_demons_update_jax` with a loud,
+    deduplicated :class:`NitrixBackendFallback` warning (``backend='jax'``, the
+    default, never warns).
+
+    Parameters
+    ----------
+    warped
+        The moving image resampled through the current deformation, shape
+        ``(*spatial,)``.
+    fixed
+        The fixed (reference) image, same shape as ``warped``.
+    grad_fixed
+        The precomputed spatial gradient of ``fixed``, shape
+        ``(*spatial, ndim)``.
+    alpha
+        Force-normalisation coefficient: larger values damp the step where the
+        intensity difference is large.
+    rel_spacing
+        Per-axis relative spacing ratio for an anisotropic grid, or ``None`` for
+        isotropic voxels; a non-``None`` value forces the JAX path.
+    backend
+        Requested compute backend; only ``'pallas-cuda'`` (or ``'auto'``
+        resolving to it) engages the fused kernel.
+
+    Returns
+    -------
+    Array
+        The efficient-symmetric velocity update in voxel units, shape
+        ``(*spatial, ndim)``.
     """
     resolved = resolve_backend(backend)
     if resolved == 'pallas-cuda':
@@ -422,23 +628,25 @@ def _demons_force_dispatch(
 
 @dataclass(frozen=True)
 class DemonsForce:
-    """Closed-form efficient-symmetric (ESM) Demons force (the Demons default).
+    r"""Closed-form efficient-symmetric (ESM) Demons force (the Demons default).
 
-    ``u = (F − warped) · J / (|J|² + α²(F − warped)²)`` with the symmetric
-    gradient ``J = ½(∇F + ∇warped)``.  The fixed gradient ``∇F`` is hoisted by
-    :meth:`bind` (constant across the single-sided iterations).
+    The velocity update is :math:`u = (F - \text{warped}) \cdot J / (|J|^2 +
+    \alpha^2 (F - \text{warped})^2)` with the symmetric gradient :math:`J =
+    \tfrac{1}{2}(\nabla F + \nabla\,\text{warped})`, where :math:`F` is the
+    fixed image.  The fixed gradient :math:`\nabla F` is hoisted by :meth:`bind`
+    (constant across the single-sided iterations).
 
     Attributes
     ----------
     alpha
-        Force normalisation: larger ``α`` damps the step where the intensity
-        difference is large.
+        Force normalisation: larger :math:`\alpha` damps the step where the
+        intensity difference is large.
     backend
-        Compute backend (v4 Phase 5a).  ``'jax'`` (default) is the pure-JAX
-        path; ``'pallas-cuda'`` / ``'auto'`` use the fused ESM Triton kernel on
-        a supported GPU (isotropic single-pair only -- otherwise it falls back
-        to JAX, ULP-equal either way).  The default is ``'jax'`` so recipe
-        output is byte-identical until a profile justifies the kernel.
+        Compute backend.  ``'jax'`` (default) is the pure-JAX path;
+        ``'pallas-cuda'`` / ``'auto'`` use the fused efficient-symmetric Triton
+        kernel on a supported GPU (isotropic single-pair only -- otherwise it
+        falls back to JAX, ULP-equal either way).  The default is ``'jax'`` so
+        recipe output is byte-identical until a profile justifies the kernel.
     """
 
     alpha: float = 0.4
@@ -451,6 +659,24 @@ class DemonsForce:
         ndim: int,
         rel_spacing: RelSpacing = None,
     ) -> _BoundDemons:
+        """Bind to ``fixed``, precomputing its spatial gradient.
+
+        Parameters
+        ----------
+        fixed
+            The fixed (reference) image, shape ``(*spatial,)``.
+        ndim
+            Number of spatial dimensions of the velocity field.
+        rel_spacing
+            Per-axis relative spacing ratio for an anisotropic grid, or ``None``
+            for isotropic voxels.
+
+        Returns
+        -------
+        _BoundDemons
+            The bound Demons force with the fixed gradient hoisted, ready to
+            produce per-iteration velocity updates.
+        """
         grad_fixed = spatial_gradient(
             fixed, spacing=_grad_spacing(rel_spacing)
         )
@@ -492,22 +718,24 @@ class _BoundDemons:
 
 @dataclass(frozen=True)
 class MIForce:
-    """Closed-form Mattes mutual-information force (the cross-modal fast path).
+    r"""Closed-form Mattes mutual-information force (the cross-modal fast path).
 
-    The Tier-1 analogue of ``MetricForce(MI())``: drives a dense-field recipe by
-    ``mi_grad · ∇warped`` (the closed-form ``metrics.mi_grad``, ``∂MI/∂warped``)
-    instead of a full ``jax.grad`` of the soft-histogram cost every iteration --
-    the fast cross-modal deformable path (the fMRIPrep metric), with the
-    histogram-scatter autodiff tape removed.
+    The Tier-1 analogue of :class:`MetricForce` wrapping a mutual-information
+    metric: drives a dense-field recipe by :math:`\text{mi\_grad} \cdot
+    \nabla\,\text{warped}` (the closed-form :func:`metrics.mi_grad`, i.e.
+    :math:`\partial\,\mathrm{MI} / \partial\,\text{warped}`) instead of a full
+    :func:`jax.grad` of the soft-histogram cost every iteration -- the fast
+    cross-modal deformable path, with the histogram-scatter autodiff tape
+    removed.
 
-    Like ``MetricForce`` for a histogram metric (and for the same reason -- MI is
-    not a spatial mean, so its raw ``(1/N)`` gradient is an arbitrary,
-    metric-scale-dependent magnitude), the force is normalised to a controlled
-    per-voxel RMS ``magnitude``: this is what makes it a true *drop-in* fast
-    replacement (same controlled step the clamped SyN / unclamped Demons drivers
-    need), and it agrees with ``MetricForce(MI())`` in **direction** to the
-    empty-bin tolerance and in **magnitude** by construction (the §3 parity
-    oracle).
+    Like :class:`MetricForce` for a histogram metric (and for the same reason --
+    mutual information is not a spatial mean, so its raw :math:`1/N` gradient is
+    an arbitrary, metric-scale-dependent magnitude), the force is normalised to
+    a controlled per-voxel RMS ``magnitude``: this is what makes it a true
+    *drop-in* fast replacement (the same controlled step the clamped SyN and
+    unclamped Demons drivers need), and it agrees with the autodiff
+    :class:`MetricForce` in **direction** to the empty-bin tolerance and in
+    **magnitude** by construction (the parity oracle).
 
     Attributes
     ----------
@@ -523,14 +751,16 @@ class MIForce:
         an explicit range only to fix a binning other than the data min/max.
     magnitude
         Target per-voxel RMS magnitude (voxels); ``0.5`` matches
-        ``MetricForce``.
+        :class:`MetricForce`.
     normalized
-        Use Studholme's normalised MI (``NMI = (H_m + H_f) / H_mf``, the ANTs
-        cross-modal default), routing the force through the closed-form
-        ``metrics.nmi_grad`` (the quotient-rule ``∂NMI/∂warped``, C1) instead of
-        ``mi_grad``.  ``False`` (default) is unnormalised Mattes MI.  The cost
-        (``BoundForce.cost``) follows the same flag.  The RMS-``magnitude``
-        normalisation makes NMI and MI interchangeable as drop-in forces (the
+        Use Studholme's normalised mutual information (:math:`\mathrm{NMI} =
+        (H_m + H_f) / H_{mf}`, the ANTs cross-modal default), routing the force
+        through the closed-form :func:`metrics.nmi_grad` (the quotient-rule
+        :math:`\partial\,\mathrm{NMI} / \partial\,\text{warped}`) instead of
+        :func:`metrics.mi_grad`.  ``False`` (default) is unnormalised Mattes
+        mutual information.  The cost (:meth:`BoundForce.cost`) follows the same
+        flag.  The RMS ``magnitude`` normalisation makes normalised and
+        unnormalised mutual information interchangeable as drop-in forces (the
         scale difference between the two raw gradients is absorbed).
     sample_stride
         Estimate the joint histogram from every ``sample_stride``-th voxel (ITK
@@ -562,6 +792,28 @@ class MIForce:
         ndim: int,
         rel_spacing: RelSpacing = None,
     ) -> _BoundMI:
+        """Bind to ``fixed``, carrying the histogram and sampling settings.
+
+        The joint histogram depends on both images at the current warp, so no
+        image-dependent state is hoisted here; the binding simply captures the
+        fixed image alongside the configured binning.
+
+        Parameters
+        ----------
+        fixed
+            The fixed (reference) image, shape ``(*spatial,)``.
+        ndim
+            Number of spatial dimensions of the velocity field.
+        rel_spacing
+            Per-axis relative spacing ratio for an anisotropic grid, or ``None``
+            for isotropic voxels.
+
+        Returns
+        -------
+        _BoundMI
+            The bound mutual-information force, ready to produce per-iteration
+            velocity updates.
+        """
         return _BoundMI(
             bins=self.bins,
             range_moving=self.range_moving,
@@ -626,47 +878,54 @@ class _BoundMI:
 
 @dataclass(frozen=True)
 class MetricForce:
-    """Generic force from any :class:`Metric` -- the escape hatch.
+    r"""Generic force from any :class:`Metric` -- the escape hatch.
 
-    Drives a dense-field recipe by ``−∂(metric.cost)/∂warped · ∇warped`` (the
-    cost gradient via ``jax.grad``), so a cross-modal metric (MI, correlation
+    Drives a dense-field recipe by :math:`-\partial(\text{metric.cost}) /
+    \partial\,\text{warped} \cdot \nabla\,\text{warped}` (the cost gradient via
+    :func:`jax.grad`), so a cross-modal metric (mutual information, correlation
     ratio) or a custom descriptor can register diffeomorphically with **no**
     hand-written force.  *No performance guarantee* -- the autodiff cost is the
     price of generality; ship a closed-form :class:`Force` for a metric that
     earns one.
 
-    **Two magnitude regimes, keyed on ``metric.is_spatial_mean``:**
+    **Two magnitude regimes, keyed on** ``metric.is_spatial_mean``:
 
-    - **Spatial-mean cost** (``SSD`` / ``LNCC``): the cost reduces by a
-      per-voxel mean, so rescaling the gradient by the voxel count undoes the
-      ``1/N`` and recovers the *sum-convention* gradient the closed forms use --
-      ``MetricForce(LNCC(r))`` is then numerically identical to ``LNCCForce(r)``
-      (the parity oracle, in magnitude not only direction), and the magnitude
-      shrinks naturally as the gradient does.  ``SSD`` has **no** normalised
-      closed form here -- ``MetricForce(SSD)`` is the *raw* optical-flow
-      gradient ``(warped − fixed)·∇warped``, not the Thirion-normalised demons
-      force, and recovers markedly worse on a monomodal warp (it is unscaled by
-      ``|∇|² + (m−f)²``, so the regulariser / trust-region clamp dominates and
-      the field under-recovers); for monomodal SSD-type registration prefer
-      :class:`DemonsForce` (the ``diffeomorphic_demons_register`` default).
-    - **Global histogram scalar** (``MI`` / ``CorrelationRatio``, or any metric
-      that does not declare ``is_spatial_mean``): there is no ``1/N`` to undo,
-      so ``·N`` would be an arbitrary, metric-scale-dependent constant -- under
-      the **unclamped** Demons driver (``step=None``) that feeds a magnitude no
-      one has tuned straight into the velocity.  Instead the force is normalised
-      to a target per-voxel RMS ``magnitude`` (``_normalise_rms``), a
-      controlled, metric-scale-invariant step.  Under the clamped SyN driver the
-      subsequent trust-region clamp only sharpens this; the direction (the parity
-      that matters for a metric with no closed form) is untouched either way.
+    - **Spatial-mean cost** (sum-of-squared-differences or local
+      cross-correlation): the cost reduces by a per-voxel mean, so rescaling the
+      gradient by the voxel count undoes the :math:`1/N` and recovers the
+      *sum-convention* gradient the closed forms use -- :class:`MetricForce`
+      wrapping a local-CC metric is then numerically identical to the closed
+      :class:`LNCCForce` (the parity oracle, in magnitude not only direction),
+      and the magnitude shrinks naturally as the gradient does.  The
+      sum-of-squared-differences metric has **no** normalised closed form here
+      -- wrapping it gives the *raw* optical-flow gradient :math:`(\text{warped}
+      - \text{fixed}) \cdot \nabla\,\text{warped}`, not the Thirion-normalised
+      Demons force, and recovers markedly worse on a monomodal warp (it is
+      unscaled by :math:`|\nabla|^2 + (m - f)^2`, so the regulariser or
+      trust-region clamp dominates and the field under-recovers); for monomodal
+      SSD-type registration prefer :class:`DemonsForce` (the diffeomorphic
+      Demons recipe default).
+    - **Global histogram scalar** (mutual information, correlation ratio, or any
+      metric that does not declare ``is_spatial_mean``): there is no :math:`1/N`
+      to undo, so multiplying by the voxel count would be an arbitrary,
+      metric-scale-dependent constant -- under the **unclamped** Demons driver
+      (``step=None``) that feeds a magnitude no one has tuned straight into the
+      velocity.  Instead the force is normalised to a target per-voxel RMS
+      ``magnitude`` (via :func:`_normalise_rms`), a controlled,
+      metric-scale-invariant step.  Under the clamped SyN driver the subsequent
+      trust-region clamp only sharpens this; the direction (the parity that
+      matters for a metric with no closed form) is untouched either way.
 
     Attributes
     ----------
     metric
-        The :class:`Metric` whose cost is descended (``MI()``,
-        ``CorrelationRatio()``, ``LNCC()``, ``SSD()``, ...).
+        The :class:`Metric` whose cost is descended (mutual information,
+        correlation ratio, local cross-correlation, sum of squared differences,
+        and so on).
     magnitude
         Target per-voxel RMS magnitude (voxels) for a **non**-spatial-mean
-        metric (ignored for ``SSD`` / ``LNCC``, which take the parity rescale).
+        metric (ignored for the spatial-mean metrics, which take the parity
+        rescale).
         The controlled step the unclamped driver applies per iteration; the
         ``0.5`` default is conservative -- larger over-steps the gateless
         Demons accumulation (weaker recovery, Jacobian toward folding), while
@@ -684,6 +943,24 @@ class MetricForce:
         ndim: int,
         rel_spacing: RelSpacing = None,
     ) -> _BoundMetric:
+        """Bind to ``fixed``, carrying the metric and magnitude settings.
+
+        Parameters
+        ----------
+        fixed
+            The fixed (reference) image, shape ``(*spatial,)``.
+        ndim
+            Number of spatial dimensions of the velocity field.
+        rel_spacing
+            Per-axis relative spacing ratio for an anisotropic grid, or ``None``
+            for isotropic voxels.
+
+        Returns
+        -------
+        _BoundMetric
+            The bound generic force, ready to produce per-iteration velocity
+            updates by differentiating the metric's cost.
+        """
         return _BoundMetric(
             metric=self.metric,
             fixed=fixed,
@@ -735,15 +1012,16 @@ class _BoundMetric:
 
 @dataclass(frozen=True)
 class SumForce:
-    """Weighted sum of forces -- multi-metric within one stage (A5).
+    r"""Weighted sum of forces -- multi-metric within one stage.
 
-    The dense-field analogue of ANTs ``-m MI[...] -m CC[...]`` in a single stage:
-    :meth:`update` is ``Σ wᵢ · forceᵢ.update`` and :meth:`cost` the matching
-    weighted sum, so a *combination* of metrics drives one recipe with **no**
-    driver change -- a ``SumForce`` is itself just another :class:`Force`.  Each
-    term is bound once (its fixed-state hoisted) by :meth:`bind`; the terms may
-    mix tiers freely (e.g. a closed-form :class:`LNCCForce` plus a
-    :class:`MIForce` for a cross-modal-plus-structural drive).
+    The dense-field analogue of combining several metrics in a single
+    registration stage: :meth:`update` is :math:`\sum_i w_i \cdot
+    \text{force}_i.\text{update}` and :meth:`cost` the matching weighted sum, so
+    a *combination* of metrics drives one recipe with **no** driver change -- a
+    :class:`SumForce` is itself just another :class:`Force`.  Each term is bound
+    once (its fixed-state hoisted) by :meth:`bind`; the terms may mix tiers
+    freely (e.g. a closed-form :class:`LNCCForce` plus a :class:`MIForce` for a
+    cross-modal-plus-structural drive).
 
     Attributes
     ----------
@@ -766,6 +1044,24 @@ class SumForce:
         ndim: int,
         rel_spacing: RelSpacing = None,
     ) -> _BoundSum:
+        """Bind every term to ``fixed``, hoisting each term's fixed-state.
+
+        Parameters
+        ----------
+        fixed
+            The fixed (reference) image, shape ``(*spatial,)``.
+        ndim
+            Number of spatial dimensions of the velocity field.
+        rel_spacing
+            Per-axis relative spacing ratio for an anisotropic grid, or ``None``
+            for isotropic voxels.
+
+        Returns
+        -------
+        _BoundSum
+            The bound weighted-sum force, with every term bound to ``fixed`` and
+            ready to produce the combined per-iteration velocity update.
+        """
         return _BoundSum(
             terms=tuple(
                 (float(w), f.bind(fixed, ndim=ndim, rel_spacing=rel_spacing))

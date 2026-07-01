@@ -4,19 +4,20 @@
 """
 Core machinery for the registration recipes.
 
-The pieces shared by ``rigid_register`` / ``affine_register``: the
-``RegistrationSpec`` static-config record (the ``SolverSpec`` /
-``Interpolator`` ADT precedent -- a frozen, hashable dataclass that rides
-``jit`` static args), the ``RegistrationResult`` ``NamedTuple`` output,
-and the coarse-to-fine driver.
+The pieces shared by :func:`rigid_register` / :func:`affine_register`: the
+:class:`RegistrationSpec` static-config record (following the
+:class:`SolverSpec` / :class:`Interpolator` precedent -- a frozen, hashable
+dataclass that rides ``jit`` static args), the :class:`RegistrationResult`
+``NamedTuple`` output, and the coarse-to-fine driver.
 
-The driver is written **once** against a ``CoordinateSpace`` (``_space``):
-the only axis that separates an index-space, shared-grid registration from
-a physically correct one is *how* the parameter transform relates the two
-voxel grids, and that axis is the space's responsibility.  ``IndexSpace``
-(default) is the leaner, fully-on-device, voxel-unit path; ``WorldSpace``
-is anisotropy- and different-grid-correct.  Everything else -- the
-pyramid, the level loop, the optimise, the result -- is identical.
+The driver is written **once** against a :class:`CoordinateSpace`: the only
+axis that separates an index-space, shared-grid registration from a
+physically correct one is *how* the parameter transform relates the two
+voxel grids, and that axis is the space's responsibility.
+:class:`IndexSpace` (default) is the leaner, fully-on-device, voxel-unit
+path; :class:`WorldSpace` is anisotropy- and different-grid-correct.
+Everything else -- the pyramid, the level loop, the optimise, the result
+-- is identical.
 
 Per pyramid level the driver minimises a similarity cost over the
 transform's Lie parameters ``θ`` and warm-starts the next finer level
@@ -25,12 +26,12 @@ rescaled to the finer grid; in ``WorldSpace`` the physical parameters are
 grid-independent and carry over unchanged).  Two optimisation paths:
 
 - **SSD** -> Gauss-Newton / Levenberg-Marquardt on the *vector* residual
-  ``warp(θ) - fixed`` (``linalg.optimize``).  Matrix-free, GPU-native,
+  :math:`\\mathrm{warp}(\\theta) - \\mathrm{fixed}`.  Matrix-free, GPU-native,
   second-order -- the 3dvolreg / Lucas-Kanade lineage.
 - **LNCC / MI / CR** -> BFGS on the *scalar* cost
   (``jax.scipy.optimize.minimize``), which handles the non-least-squares
   metric and the rotation/translation scaling via its Hessian estimate.
-  Also matrix-free, so it too survives the cuSolver wedge.
+  Also matrix-free, so it too avoids cuSolver.
 
 Images are single-channel ``(*spatial,)`` (the registration norm); the
 channel axis is added internally for ``spatial_transform`` / pyramids.
@@ -103,7 +104,7 @@ class RegistrationSpec:
         cheap coarse levels, starve the expensive finest one -- a second-order
         solver converges in a handful of finest-level steps).
     metric
-        Similarity objective, a ``Metric`` record carrying its own
+        Similarity objective, a :class:`Metric` record carrying its own
         hyper-parameters: ``SSD()`` (within-modality; the GN/LM
         least-squares path), ``LNCC(radius=...)`` (local cross-correlation;
         intensity-robust), ``MI(bins=...)`` / ``CorrelationRatio(bins=...)``
@@ -112,7 +113,7 @@ class RegistrationSpec:
         ``"auto"`` (least-squares metric -> ``"lm"``, else -> ``"bfgs"``),
         or force ``"lm"`` / ``"gn"`` (least-squares only) / ``"bfgs"``.
     interpolation
-        Sampling kernel for the warp (an ``Interpolator``).
+        Sampling kernel for the warp (an :class:`Interpolator`).
     boundary_mode, cval
         Out-of-bounds handling for the warp (default zero-fill).
     pyramid_factor, pyramid_sigma
@@ -120,28 +121,28 @@ class RegistrationSpec:
     cg_tol
         Inner-CG tolerance for the GN/LM path.
     mode
-        Iteration strategy (B2), orthogonal to ``convergence``.  ``'fixed'``
-        (the spec default) runs the fixed ``lax.scan`` -- reproducible,
-        reverse-differentiable, and ``vmap``-batchable (``volreg``).
+        Iteration strategy, orthogonal to ``convergence``.  ``'fixed'``
+        (the default) runs the fixed ``lax.scan`` -- reproducible,
+        reverse-differentiable, and ``vmap``-batchable (:func:`volreg`).
         ``'early_exit'`` runs the windowed-slope ``lax.while_loop`` with
         ``iterations`` as the hard cap; it is single-pair (a ``vmap``-ed
         ``while_loop`` exits only when *all* lanes converge) and **not**
         reverse-differentiable (``jax.grad`` through it raises a loud, actionable
         error -- use ``mode='fixed'`` or the implicit-function path).  Rejected
         on the scalar/BFGS forward path (a non-least-squares metric), which is
-        monolithic.  The spec default is ``'fixed'`` on **every** recipe
+        monolithic.  The default is ``'fixed'`` on **every** recipe
         (reproducible + differentiable out of the box); ``'early_exit'`` is the
         recommended opt-in for the single-pair inverse-compositional recipes
-        (``rigid_register`` / ``affine_register``), which converge in a few of
-        their iterations.
+        (:func:`rigid_register` / :func:`affine_register`), which converge in a
+        few of their iterations.
     convergence
         The :class:`Convergence` (threshold / window) parameterising
-        ``mode='early_exit'``; **inert** under ``mode='fixed'``.  **cost_history
-        (C6):** on the early-exit path the per-level trace is padded to the
-        ``iterations`` cap with the final cost (so the shape is path-independent;
-        the value is constant past the stop iteration).
+        ``mode='early_exit'``; **inert** under ``mode='fixed'``.  On the
+        early-exit path the per-level cost trace is padded to the ``iterations``
+        cap with the final cost (so the shape is path-independent; the value is
+        constant past the stop iteration).
     ic_line_search
-        Opt-in cost-decrease guard for the inverse-compositional step (F1).
+        Opt-in cost-decrease guard for the inverse-compositional step.
         ``False`` (default) takes the trust-region-clamped Gauss-Newton step
         directly -- the fast path (its single warp/iter is the IC speed win).
         ``True`` backtracks along the clamped direction and accepts the largest
@@ -178,13 +179,14 @@ class RegistrationResult(NamedTuple):
         The estimated homogeneous transform, ``(ndim + 1, ndim + 1)``,
         **self-contained**: the centre the warp applies it about is baked in, so
         ``apply_affine(coords, matrix)`` reproduces the warp and it composes
-        with another result.  In ``IndexSpace`` it is the full-resolution
-        fixed-voxel -> moving-voxel index map; in ``WorldSpace`` the
+        with another result.  In :class:`IndexSpace` it is the full-resolution
+        fixed-voxel -> moving-voxel index map; in :class:`WorldSpace` the
         fixed-world -> moving-world transform (mm).  (The raw about-origin
         ``model.exp(params)`` is recovered from ``params``.)
     params
         The transform's raw **about-origin** Lie parameters at full resolution
-        (voxel units in ``IndexSpace``; physical units in ``WorldSpace``).
+        (voxel units in :class:`IndexSpace`; physical units in
+        :class:`WorldSpace`).
     warped
         ``moving`` resampled onto the ``fixed`` grid by the recovered
         transform.
@@ -201,13 +203,32 @@ class RegistrationResult(NamedTuple):
 def resolve_iterations(
     iterations: Union[int, Sequence[int]], levels: int
 ) -> list[int]:
-    """Per-pyramid-level iteration counts (finest first).
+    """Expand an iteration schedule into per-pyramid-level counts (finest first).
 
-    ``int`` -> the same count at every level; a length-``levels`` sequence
-    (**coarse-to-fine**, the natural schedule order) -> one count per level,
-    reversed to the finest-first pyramid indexing the coarse-to-fine drivers
-    use.  Shared by the forward (``register_core``) and inverse-compositional
-    (``ic_register_core``) paths.
+    Shared by the forward (:func:`register_core`) and inverse-compositional
+    (:func:`ic_register_core`) paths, which both index the pyramid from finest
+    (level 0) to coarsest.
+
+    Parameters
+    ----------
+    iterations
+        Either a single ``int`` (the same count at every level) or a
+        length-``levels`` sequence in **coarse-to-fine** order (the natural
+        schedule order), one count per level.
+    levels
+        Number of pyramid resolutions.
+
+    Returns
+    -------
+    list[int]
+        Length-``levels`` list of iteration counts in **finest-first** order
+        (the ordering the drivers index the pyramid with).  A sequence input is
+        reversed from coarse-to-fine to finest-first; an ``int`` is broadcast.
+
+    Raises
+    ------
+    ValueError
+        If a sequence is passed whose length differs from ``levels``.
     """
     if isinstance(iterations, int):
         return [iterations] * levels
@@ -229,12 +250,35 @@ def _warp(
     moving_shape: tuple[int, ...],
     spec: RegistrationSpec,
 ) -> Array:
-    """Warp a single-channel ``moving`` onto ``fixed_shape``.
+    """Warp a single-channel ``moving`` image onto ``fixed_shape``.
 
-    Shared by both coordinate spaces: the space resolves the parameter
-    ``transform`` into the ``fixed-voxel -> moving-voxel`` sampling matrix
-    and grid centre; the sampling itself (boundary, interpolation) is the
-    same.
+    Shared by both coordinate spaces: the sampler resolves the parameter
+    ``transform`` into the fixed-voxel -> moving-voxel sampling matrix and grid
+    centre; the sampling itself (boundary, interpolation) is the same.
+
+    Parameters
+    ----------
+    sampler
+        The space-bound sampler that maps the parameter transform into the
+        fixed-voxel -> moving-voxel sampling matrix and grid centre.
+    moving
+        Single-channel moving image, shape ``(*moving_shape)``.
+    transform
+        The homogeneous transform matrix produced by ``model.exp``, shape
+        ``(ndim + 1, ndim + 1)``.
+    fixed_shape
+        Spatial shape of the fixed grid the warp is sampled onto.
+    moving_shape
+        Spatial shape of the moving image.
+    spec
+        Registration configuration; supplies the boundary mode, fill value, and
+        interpolation kernel for the resample.
+
+    Returns
+    -------
+    Array
+        The moving image resampled onto the fixed grid, shape ``(*fixed_shape)``
+        (single-channel, the internal channel axis removed).
     """
     matrix, center = sampler.index_sampling(
         transform, fixed_shape=fixed_shape, moving_shape=moving_shape
@@ -253,12 +297,28 @@ def _warp(
 def _mask_jacobian(
     base: Callable[[Array], Array], sqrt_w: Array
 ) -> Callable[[Array], Array]:
-    """Row-scale a residual Jacobian by ``sqrt(mask)`` (A3, the masked LSQ path).
+    """Row-scale a residual Jacobian by :math:`\\sqrt{\\mathrm{mask}}`.
 
-    The masked SSD residual is ``sqrt(mask) * (warped - fixed)`` (see
-    ``SSD.residual``); its Jacobian is therefore the unmasked Jacobian with each
-    voxel row multiplied by ``sqrt(mask)``, so an out-of-mask voxel (weight 0)
+    Wraps a base residual Jacobian for the masked least-squares path.  The
+    masked SSD residual is :math:`\\sqrt{\\mathrm{mask}} \\cdot
+    (\\mathrm{warped} - \\mathrm{fixed})` (see :meth:`SSD.residual`); its
+    Jacobian is therefore the unmasked Jacobian with each voxel row multiplied
+    by :math:`\\sqrt{\\mathrm{mask}}`, so an out-of-mask voxel (weight 0)
     contributes a zero row and drops out of the Gauss-Newton normal equations.
+
+    Parameters
+    ----------
+    base
+        The unmasked residual Jacobian, mapping ``params -> (M, P)``.
+    sqrt_w
+        Per-voxel square-root weights, shape ``(M,)`` (one entry per residual
+        row).
+
+    Returns
+    -------
+    Callable[[Array], Array]
+        A Jacobian closure ``params -> (M, P)`` whose rows are the base
+        Jacobian's rows scaled by ``sqrt_w``.
     """
     rows = sqrt_w[:, None]
 
@@ -278,23 +338,55 @@ def _warp_jacobian(
     moving_shape: tuple[int, ...],
     spec: RegistrationSpec,
 ) -> Callable[[Array], Array]:
-    """Closed-form Jacobian of the warp residual w.r.t. the transform params.
+    """Closed-form Jacobian of the warp residual w.r.t. the transform parameters.
 
-    ``J[x, j] = ∂warp(x)/∂grid · ∂grid(x;θ)/∂θ_j`` by the chain rule, factored so
-    the expensive **gather** runs ``ndim`` times (the interpolation derivative
-    ``∂warp/∂grid``, one JVP per grid axis) rather than ``jax.jacfwd``'s ``P``
-    times (one warp-tangent gather per parameter); ``∂grid/∂θ`` is taken one
+    By the chain rule,
+    :math:`J[x, j] = \\partial\\,\\mathrm{warp}(x)/\\partial\\,\\mathrm{grid}
+    \\cdot \\partial\\,\\mathrm{grid}(x;\\theta)/\\partial\\,\\theta_j`, factored
+    so the expensive **gather** runs ``ndim`` times (the interpolation
+    derivative :math:`\\partial\\,\\mathrm{warp}/\\partial\\,\\mathrm{grid}`, one
+    JVP per grid axis) rather than ``jax.jacfwd``'s ``P`` times (one warp-tangent
+    gather per parameter);
+    :math:`\\partial\\,\\mathrm{grid}/\\partial\\,\\theta` is taken one
     parameter-column at a time (a JVP of the grid *construction* -- matmul only,
-    no gather) and contracted against ``∂warp/∂grid`` immediately, so the dense
-    ``(*spatial, ndim, P)`` grid tangent that ``jax.jacfwd`` would materialise
-    (``ndim×`` the warp's memory) never exists -- peak memory is the ``(M, P)``
-    Jacobian itself plus one ``(*spatial, ndim)`` column at a time.  This is
-    **exact** -- equal to ``jax.jacfwd`` of the SSD residual (the interpolation
-    derivative, not a central-difference approximation), so the forward path is
-    byte-unchanged, just faster, with the gather cut from ``O(P)`` to
-    ``O(ndim)``.  It speeds the cases the inverse-compositional kernel cannot
-    cover (the WorldSpace / forced-forward forward path).  Returns
-    ``params -> (M, P)``.
+    no gather) and contracted against
+    :math:`\\partial\\,\\mathrm{warp}/\\partial\\,\\mathrm{grid}` immediately, so
+    the dense ``(*spatial, ndim, P)`` grid tangent that ``jax.jacfwd`` would
+    materialise (``ndim`` times the warp's memory) never exists -- peak memory is
+    the ``(M, P)`` Jacobian itself plus one ``(*spatial, ndim)`` column at a
+    time.  This is **exact** -- equal to ``jax.jacfwd`` of the SSD residual (the
+    interpolation derivative, not a central-difference approximation), so the
+    forward path is byte-unchanged, just faster, with the gather cut from
+    :math:`O(P)` to :math:`O(\\mathrm{ndim})`.  It speeds the cases the
+    inverse-compositional kernel cannot cover (the :class:`WorldSpace` /
+    forced-forward forward path).
+
+    Parameters
+    ----------
+    sampler
+        The space-bound sampler that maps the parameter transform into the
+        fixed-voxel -> moving-voxel sampling matrix and grid centre.
+    moving
+        Single-channel moving image, shape ``(*moving_shape)``.
+    model
+        The transform model; ``model.exp(params, ndim=ndim)`` maps the raw Lie
+        parameters to the homogeneous transform matrix.
+    ndim
+        Spatial dimensionality of the images (number of grid axes).
+    fixed_shape
+        Spatial shape of the fixed grid the warp is sampled onto.
+    moving_shape
+        Spatial shape of the moving image.
+    spec
+        Registration configuration; supplies the boundary mode, fill value, and
+        interpolation kernel for the warp.
+
+    Returns
+    -------
+    Callable[[Array], Array]
+        A closure mapping the length-``P`` parameter vector to the ``(M, P)``
+        residual Jacobian, where ``M`` is the number of fixed-grid voxels and
+        ``P`` the number of transform parameters.
     """
 
     def grid_of(params: Array) -> Array:
@@ -349,23 +441,55 @@ def optimize_objective(
     jacobian_fn: Optional[Callable[[Array], Array]] = None,
     convergence: Optional[Convergence] = None,
 ) -> tuple[Array, Array]:
-    """Minimise an ``Objective`` over ``params``; return ``(params, history)``.
+    """Minimise an :class:`Objective` over ``params``; return ``(params, history)``.
 
     The optimiser dispatch shared by every recipe and coordinate space: a
     least-squares objective routes to the matrix-free Gauss-Newton /
     Levenberg-Marquardt path; any other to BFGS on the scalar cost.  The
     objective closes over its own data (an image pair + warp, boundary
-    samples, ...), so this function is objective-agnostic.  ``jacobian_fn``
-    (optional) supplies the residual's ``M×P`` Jacobian in closed form for the
-    least-squares path (the analytic warp Jacobian -- far fewer gathers than
-    ``jax.jacfwd``); ``None`` falls back to ``jacfwd`` (the parity oracle).
+    samples, ...), so this function is objective-agnostic.
 
-    ``convergence`` (the resolved :class:`Convergence`, or ``None`` for the fixed
-    scan) early-exits the least-squares loop once the windowed cost slope flattens
-    (the GN/LM ``early_stop``).  The caller's ``resolve_convergence_mode`` gate
-    already rejects ``mode='early_exit'`` on the scalar/BFGS path (monolithic --
-    no single-step), so ``convergence`` is always ``None`` there; the guard below
-    is a defensive internal invariant.
+    Parameters
+    ----------
+    objective
+        The similarity objective to minimise; carries the ``residual`` (for the
+        least-squares path), ``cost`` (for the scalar path), and the
+        ``is_least_squares`` flag.
+    params
+        Initial parameter vector, shape ``(P,)``.
+    optimizer
+        Optimiser selector: ``'auto'`` / ``'lm'`` / ``'gn'`` route to the
+        least-squares path (only when the objective is least-squares); anything
+        else, or a non-least-squares objective, routes to BFGS.
+    iterations
+        Maximum optimiser iterations.
+    cg_tol
+        Inner conjugate-gradient tolerance for the Gauss-Newton / LM path.
+    jacobian_fn
+        Optional closure supplying the residual's :math:`M \\times P` Jacobian in
+        closed form for the least-squares path (the analytic warp Jacobian --
+        far fewer gathers than ``jax.jacfwd``); ``None`` falls back to
+        ``jacfwd`` (the parity oracle).
+    convergence
+        The resolved :class:`Convergence`, or ``None`` for the fixed scan.  When
+        set, it early-exits the least-squares loop once the windowed cost slope
+        flattens.  The caller's :func:`resolve_convergence_mode` gate already
+        rejects ``mode='early_exit'`` on the scalar/BFGS path (monolithic -- no
+        single-step), so ``convergence`` is always ``None`` there; the guard in
+        the body is a defensive internal invariant.
+
+    Returns
+    -------
+    params : Array
+        The optimised parameter vector, shape ``(P,)``.
+    history : Array
+        The per-iteration cost trace for this solve.
+
+    Raises
+    ------
+    ValueError
+        If ``convergence`` is non-``None`` on the scalar/BFGS path (the
+        defensive guard for the upstream gate).
     """
     use_lsq = objective.is_least_squares and optimizer in ('auto', 'lm', 'gn')
     early_stop = (
@@ -408,16 +532,16 @@ def optimize_objective(
 
 
 class LevelSolver(Protocol):
-    """Per-pyramid-level solve, the one axis the forward and implicit drivers
-    differ on.
+    """Callback that minimises a single pyramid level.
 
-    The coarse-to-fine driver (:func:`register_core`) owns the pyramid, the
+    This is the one axis on which the forward and implicit drivers differ.  The
+    coarse-to-fine driver (:func:`register_core`) owns the pyramid, the
     inter-level warm-start rescale, and the result assembly identically either
     way; *how a single level is minimised* is this callback -- the forward
     Gauss-Newton / LM / BFGS optimise (:func:`_forward_level_solve`) or the
     implicit-function solve (:func:`_implicit_level_solve`).  Both take the
-    bound ``sampler`` + level images + the current parameters and return
-    ``(params, cost_trace)``.
+    bound ``sampler`` plus the level images plus the current parameters and
+    return ``(params, cost_trace)``.
     """
 
     def __call__(
@@ -453,11 +577,55 @@ def _forward_level_solve(
     iterations: int,
     convergence: Optional[Convergence],
 ) -> tuple[Array, Array]:
-    """One level of the forward GN / LM / BFGS optimise (the default solver).
+    """Solve one pyramid level by the forward GN / LM / BFGS optimise.
 
-    The exact per-level body the coarse-to-fine driver has always run, lifted
-    behind :class:`LevelSolver` so the implicit path can swap in
-    :func:`_implicit_level_solve` without duplicating the orchestration.
+    The default :class:`LevelSolver`: the per-level body the coarse-to-fine
+    driver has always run, lifted behind the protocol so the implicit path can
+    swap in :func:`_implicit_level_solve` without duplicating the orchestration.
+    Builds the level's :class:`MetricObjective` (and, on the least-squares path,
+    the closed-form warp Jacobian, mask-scaled when a mask is present) and hands
+    it to :func:`optimize_objective`.
+
+    Parameters
+    ----------
+    sampler
+        The space-bound sampler mapping the parameter transform to the
+        fixed-voxel -> moving-voxel sampling matrix and grid centre.
+    moving_level
+        Single-channel moving image at this pyramid level, shape
+        ``(*moving_shape)``.
+    fixed_level
+        Single-channel fixed image at this pyramid level, shape
+        ``(*fixed_shape)``.
+    mask_level
+        Optional per-voxel weight on the fixed grid at this level, shape
+        ``(*fixed_shape)``; ``None`` for an unmasked solve.
+    params
+        Current parameter vector (warm-started from the coarser level), shape
+        ``(P,)``.
+    model
+        The transform model; ``model.exp(params, ndim=ndim)`` maps the raw Lie
+        parameters to the homogeneous transform matrix.
+    ndim
+        Spatial dimensionality of the images.
+    spec
+        Registration configuration (metric, optimiser, interpolation, tolerances).
+    fixed_shape
+        Spatial shape of the fixed grid at this level.
+    moving_shape
+        Spatial shape of the moving image at this level.
+    iterations
+        Maximum optimiser iterations for this level.
+    convergence
+        Resolved :class:`Convergence` for the early-exit least-squares loop, or
+        ``None`` for the fixed scan.
+
+    Returns
+    -------
+    params : Array
+        The optimised parameter vector for this level, shape ``(P,)``.
+    cost_trace : Array
+        The per-iteration cost trace for this level.
     """
 
     def warp_fn(p: Array) -> Array:
@@ -517,19 +685,63 @@ def _implicit_level_solve(
     iterations: int,
     convergence: Optional[Convergence],
 ) -> tuple[Array, Array]:
-    """One level solved by the implicit-function theorem (the differentiable
-    layer).
+    """Solve one pyramid level by the implicit-function theorem.
 
-    Differentiates the level's optimum w.r.t. the (level) images directly --
-    ``implicit_least_squares`` for a least-squares (SSD) metric (Gauss-Newton
-    Hessian), ``implicit_minimize`` for a general metric (LNCC / MI / CR --
-    exact Hessian via BFGS forward).  ``data = (moving_level, fixed_level)`` is
-    the differentiable argument, so the gradient flows through the pyramid back
-    to the originals; the ``mask`` is closed over as a constant.  ``convergence``
-    is inert here (the implicit solve runs its own fixed forward iteration);
-    ``dtheta*/dparams = 0`` (IFT), so on a multi-level run the coarse levels act
-    as a gradient-stopped initialiser and the finest level carries the
-    IFT-exact gradient.
+    The differentiable :class:`LevelSolver`.  Differentiates the level's optimum
+    w.r.t. the (level) images directly -- :func:`implicit_least_squares` for a
+    least-squares (SSD) metric (Gauss-Newton Hessian),
+    :func:`implicit_minimize` for a general metric (LNCC / MI / CR -- exact
+    Hessian via BFGS forward).  ``data = (moving_level, fixed_level)`` is the
+    differentiable argument, so the gradient flows through the pyramid back to
+    the originals; the ``mask`` is closed over as a constant.  ``convergence``
+    is inert here (the implicit solve runs its own fixed forward iteration).
+    Because the optimum's derivative w.r.t. the incoming parameters is zero
+    under the implicit-function theorem, on a multi-level run the coarse levels
+    act as a gradient-stopped initialiser and the finest level carries the
+    exact implicit-function gradient.
+
+    Parameters
+    ----------
+    sampler
+        The space-bound sampler mapping the parameter transform to the
+        fixed-voxel -> moving-voxel sampling matrix and grid centre.
+    moving_level
+        Single-channel moving image at this pyramid level, shape
+        ``(*moving_shape)``.
+    fixed_level
+        Single-channel fixed image at this pyramid level, shape
+        ``(*fixed_shape)``.
+    mask_level
+        Optional per-voxel weight on the fixed grid at this level, shape
+        ``(*fixed_shape)``; closed over as a constant, so it does not carry a
+        gradient.
+    params
+        Current parameter vector (warm-started from the coarser level), shape
+        ``(P,)``.
+    model
+        The transform model; ``model.exp(params, ndim=ndim)`` maps the raw Lie
+        parameters to the homogeneous transform matrix.
+    ndim
+        Spatial dimensionality of the images.
+    spec
+        Registration configuration (metric, tolerances).
+    fixed_shape
+        Spatial shape of the fixed grid at this level.
+    moving_shape
+        Spatial shape of the moving image at this level.
+    iterations
+        Number of forward solver iterations for the implicit solve.
+    convergence
+        Accepted for protocol compatibility but ignored; the implicit solve runs
+        its own fixed forward iteration.
+
+    Returns
+    -------
+    theta : Array
+        The optimised parameter vector for this level, shape ``(P,)``.
+    hist : Array
+        Length-2 cost trace: the cost at the incoming parameters and at the
+        converged optimum.
     """
     del convergence  # the implicit solve has its own (fixed) forward iteration
     metric = spec.metric
@@ -590,14 +802,52 @@ def register_core(
 
     The per-image core of the driver: the **reference** pyramid ``pyr_f``
     and the ``sampler`` are built once by the caller and passed in, so a
-    batched recipe (``volreg``) can compute the shared reference work once
-    and ``vmap`` only this core over a series of moving images.  Builds
-    the moving pyramid, runs the coarse-to-fine optimise, and finalises.
+    batched recipe (:func:`volreg`) can compute the shared reference work once
+    and ``vmap`` only this core over a series of moving images.  Builds the
+    moving pyramid, runs the coarse-to-fine optimise, and finalises.
 
-    ``pyr_mask`` (optional, A3) is the ``fixed``-grid weight pyramidised to
-    match ``pyr_f`` -- threaded into the metric cost (every level) and, on the
-    least-squares path, into the residual Jacobian (``sqrt(mask)`` row-scaling,
-    so out-of-mask voxels drop from the Gauss-Newton normal equations).
+    Parameters
+    ----------
+    moving
+        Single-channel moving image, shape ``(*mspatial)``.
+    pyr_f
+        The precomputed **fixed** (reference) Gaussian pyramid, a tuple of
+        single-channel levels ``(*fspatial, 1)`` finest first.
+    model
+        The transform model; ``model.exp`` maps raw Lie parameters to the
+        homogeneous transform, ``model.rescale_to_grid`` warm-starts between
+        levels.
+    ndim
+        Spatial dimensionality of the images.
+    spec
+        Registration configuration (levels, iterations, metric, optimiser, ...).
+    space
+        The :class:`CoordinateSpace` governing how the parameter transform
+        relates the two voxel grids (and whether translations rescale between
+        levels).
+    sampler
+        The space-bound sampler, built once by the caller.
+    init_params
+        Initial parameter vector, shape ``(p,)``.
+    convergence
+        Resolved :class:`Convergence` for the early-exit least-squares loop, or
+        ``None`` for the fixed scan.
+    pyr_mask
+        Optional weight pyramid on the ``fixed`` grid, matching ``pyr_f`` -- a
+        tuple of levels ``(*fspatial, 1)``.  Threaded into the metric cost at
+        every level and, on the least-squares path, into the residual Jacobian
+        (:math:`\\sqrt{\\mathrm{mask}}` row-scaling, so out-of-mask voxels drop
+        from the Gauss-Newton normal equations).
+    solve_level
+        The per-level minimiser (:class:`LevelSolver`); defaults to
+        :func:`_forward_level_solve`.
+
+    Returns
+    -------
+    RegistrationResult
+        The estimated transform (``matrix`` and raw ``params``), the ``moving``
+        image ``warped`` onto the full-resolution fixed grid, and the
+        concatenated per-level ``cost_history``.
     """
     dtype = moving.dtype
     pyr_m = gaussian_pyramid(
@@ -674,16 +924,54 @@ def multi_resolution_register(
 ) -> RegistrationResult:
     """Coarse-to-fine registration driver shared by the recipes.
 
-    ``mask`` (optional, A3) is a non-negative per-voxel weight on the ``fixed``
-    grid; it is pyramidised alongside ``fixed`` and threaded into the per-level
-    metric cost (and the least-squares Jacobian) so the registration ignores
-    out-of-mask voxels.
+    Builds both image pyramids (and the mask pyramid, if any), pins any
+    histogram-metric ranges from the full-resolution images, constructs the
+    space-bound sampler, and hands off to :func:`register_core`.
 
-    ``solve_level`` is the per-level minimiser (:class:`LevelSolver`):
-    :func:`_forward_level_solve` (default; GN / LM / BFGS) or
-    :func:`_implicit_level_solve` (the implicit-function differentiable layer).
-    The driver is otherwise identical -- the pyramid, the warm-start rescale,
-    and the result assembly do not depend on which one runs.
+    Parameters
+    ----------
+    moving
+        Single-channel moving image, shape ``(*mspatial)`` (``ndim`` axes).
+    fixed
+        Single-channel fixed (reference) image, shape ``(*fspatial)`` (``ndim``
+        axes).
+    model
+        The transform model whose Lie parameters are optimised.
+    ndim
+        Spatial dimensionality; both images must be ``ndim``-D.
+    spec
+        Registration configuration (levels, iterations, metric, optimiser, ...).
+    init_params
+        Optional initial parameter vector, shape ``(p,)``; defaults to zeros
+        (the identity transform).
+    space
+        The :class:`CoordinateSpace` relating the two voxel grids; defaults to
+        :class:`IndexSpace`.
+    mask
+        Optional non-negative per-voxel weight on the ``fixed`` grid, shape
+        ``(*fspatial)``; pyramidised alongside ``fixed`` (a hard mask softens to
+        fractional weights at coarse boundaries) and threaded into the per-level
+        metric cost (and the least-squares Jacobian) so the registration ignores
+        out-of-mask voxels.
+    solve_level
+        The per-level minimiser (:class:`LevelSolver`):
+        :func:`_forward_level_solve` (default; GN / LM / BFGS) or
+        :func:`_implicit_level_solve` (the implicit-function differentiable
+        layer).  The driver is otherwise identical -- the pyramid, the
+        warm-start rescale, and the result assembly do not depend on which one
+        runs.
+
+    Returns
+    -------
+    RegistrationResult
+        The estimated transform, the warped ``moving`` image, and the
+        concatenated per-level cost history (see :class:`RegistrationResult`).
+
+    Raises
+    ------
+    ValueError
+        If ``moving`` or ``fixed`` is not ``ndim``-D, or if ``mask`` is given
+        and its shape does not match ``fixed``.
     """
     if moving.ndim != ndim or fixed.ndim != ndim:
         raise ValueError(

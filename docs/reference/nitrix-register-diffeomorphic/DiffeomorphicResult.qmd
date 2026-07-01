@@ -1,0 +1,18 @@
+---
+title: "DiffeomorphicResult"
+generated: true
+description: "Output of the diffeomorphic Demons recipe."
+---
+
+[‹ back to `nitrix.register.diffeomorphic`](../nitrix-register-diffeomorphic.qmd)
+
+<!-- nitrix:gen sig:DiffeomorphicResult -->
+```python
+class DiffeomorphicResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:DiffeomorphicResult -->
+Output of the diffeomorphic Demons recipe.
+<!-- nitrix:/gen -->
+

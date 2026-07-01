@@ -1,0 +1,60 @@
+---
+title: "nitrix.register.regulariser"
+generated: true
+signature-hash: bceb91046cfbd312
+description: "Explicit penalties on a displacement / velocity field."
+listing:
+  id: nitrix-register-regulariser-symbols
+  contents: "nitrix-register-regulariser/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.register.regulariser`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Explicit penalties on a displacement / velocity field.
+
+The diffeomorphic Demons recipe regularises *implicitly*, by
+Gaussian-smoothing the update (the Green's function of the
+fluid/diffusion operator). These are the *explicit* penalties a learned
+or directly-optimised warp adds to its objective:
+
+- [`gradient_smoothness`](nitrix-register-regulariser/gradient_smoothness.qmd) -- the diffusion (first-order) penalty
+  $\|\nabla u\|^2$ per voxel, summed over components: the
+  squared Frobenius norm of the displacement Jacobian. Penalises sharp or
+  incoherent flow.
+- [`bending_energy`](nitrix-register-regulariser/bending_energy.qmd) -- the thin-plate (second-order) penalty
+  $\|\nabla^2 u\|^2$: the squared Frobenius norm of the
+  per-voxel Hessian. Penalises curvature rather than slope (an affine
+  flow is free).
+- [`jacobian_folding_penalty`](nitrix-register-regulariser/jacobian_folding_penalty.qmd) -- penalises folding (loss of
+  invertibility) via $\operatorname{relu}(-\det J)$ of the
+  deformation Jacobian $J = I + \nabla u$: zero where the map is
+  locally orientation-preserving ($\det J > 0$), growing with the
+  degree of fold ($\det J \le 0$).
+
+All take a channels-last field `(*spatial, ndim)`, build on the shipped
+`geometry` differential operators, and are differentiable.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-register-regulariser-symbols}
+:::

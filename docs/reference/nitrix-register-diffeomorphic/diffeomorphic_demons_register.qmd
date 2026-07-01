@@ -1,0 +1,74 @@
+---
+title: "diffeomorphic_demons_register"
+generated: true
+description: "Diffeomorphic registration of `moving` to `fixed` (log-Demons)."
+---
+
+[‹ back to `nitrix.register.diffeomorphic`](../nitrix-register-diffeomorphic.qmd)
+
+<!-- nitrix:gen sig:diffeomorphic_demons_register -->
+```python
+diffeomorphic_demons_register(moving: Float[Array, '*spatial'], fixed: Float[Array, '*spatial'], *, spec: DemonsSpec = DemonsSpec(), force: Optional[Union[Force, Sequence[Force]]] = None, init_affine: Optional[Float[Array, ' d1 d1']] = None, init_displacement: Optional[Float[Array, '*spatial ndim']] = None, mask: Optional[Float[Array, '*spatial']] = None, restrict: Optional[tuple[float, ...]] = None, winsorize: Optional[tuple[float, float]] = None, histogram_match: bool = False, smoothing_sigma: Optional[Union[float, Sequence[float]]] = None) -> DiffeomorphicResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:diffeomorphic_demons_register -->
+Diffeomorphic registration of `moving` to `fixed` (log-Demons).
+
+Estimates a stationary velocity field $v$ (coarse-to-fine) whose
+exponential warps `moving` onto `fixed`.  The result is a
+diffeomorphism by construction; `jacobian_det` lets the caller
+assert no folding (all positive).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:diffeomorphic_demons_register -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `*spatial` | — | Single-channel images (2-D or 3-D), each of shape `(*spatial,)`. Identical shape unless an init (below) resamples `moving` onto the `fixed` grid. |
+| `fixed` | `Float` | `*spatial` | — | Single-channel images (2-D or 3-D), each of shape `(*spatial,)`. Identical shape unless an init (below) resamples `moving` onto the `fixed` grid. |
+| `spec` | `DemonsSpec` | — | `DemonsSpec()` | A [`DemonsSpec`](../nitrix-register-diffeomorphic/DemonsSpec.qmd) controlling the schedule and regularisation. |
+| `force` | `Optional[Union[Force, Sequence[Force]]]` | — | `None` | The driving force (see `Force`). `None` (default) uses the closed-form ESM `DemonsForce` with `spec.alpha`; a single `Force` overrides it at every level (e.g. `MetricForce` wrapping `MI` for cross-modal deformable registration); a length-`spec.levels` **coarse-to-fine** sequence sets a per-level schedule (a cheap force coarse, a high-signal one at the finest level). |
+| `init_affine` | `Optional[Float[Array, ' d1 d1']]` | — | `None` | Optional warm-start / multi-stage init (at most one). `init_affine` is a fixed-to-moving index matrix (as [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd) / [`affine_register`](../nitrix-register-recipes/affine_register.qmd) return), shape `(d1, d1)`; `init_displacement` is a fixed-grid displacement field (e.g. a SynthMorph network output), shape `(*spatial, ndim)`. `moving` is pre-warped by it onto the `fixed` grid and the **residual** is registered; the returned `displacement` / `warped` / `jacobian_det` are the **total** (init then residual) map, while `velocity` is the residual SVF. |
+| `init_displacement` | `Optional[Float[Array, '*spatial ndim']]` | — | `None` | Optional warm-start / multi-stage init (at most one). `init_affine` is a fixed-to-moving index matrix (as [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd) / [`affine_register`](../nitrix-register-recipes/affine_register.qmd) return), shape `(d1, d1)`; `init_displacement` is a fixed-grid displacement field (e.g. a SynthMorph network output), shape `(*spatial, ndim)`. `moving` is pre-warped by it onto the `fixed` grid and the **residual** is registered; the returned `displacement` / `warped` / `jacobian_det` are the **total** (init then residual) map, while `velocity` is the residual SVF. |
+| `mask` | `Optional[Float[Array, '*spatial']]` | — | `None` | Optional fixed-grid weight field (`(*spatial,)`, e.g. a brain mask) gating the force to a region: the masked area drives the deformation, the rest follows by regularisation. |
+| `restrict` | `Optional[tuple[float, ...]]` | — | `None` | Optional length-`ndim` per-axis weight on the deformation (ANTs `--restrict-deformation`): a `0` suppresses deformation along that axis (e.g. `(1, 1, 0)` for in-plane-only). |
+| `winsorize` | `Optional[tuple[float, float]]` | — | `None` | Intensity conditioning before registration (the fMRIPrep front-end; see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd)). `winsorize` clips intensities to a `(low, high)` quantile pair; `histogram_match` matches the moving histogram to the fixed one. Both default off. |
+| `histogram_match` | `bool` | — | `False` | Intensity conditioning before registration (the fMRIPrep front-end; see [`rigid_register`](../nitrix-register-recipes/rigid_register.qmd)). `winsorize` clips intensities to a `(low, high)` quantile pair; `histogram_match` matches the moving histogram to the fixed one. Both default off. |
+| `smoothing_sigma` | `Optional[Union[float, Sequence[float]]]` | — | `None` | Optional per-level smoothing applied to each pyramid level **independent of the shrink** (ANTs `-s`, decoupled from `-f`): a scalar (all levels) or a length-`levels` **coarse-to-fine** sequence (e.g. `2x1x0` -> `(2, 1, 0)`). `None` (default) leaves the pyramid's own anti-alias as the only smoothing (byte-unchanged). |
+
+**Returns** `DiffeomorphicResult`. A named tuple carrying `velocity`, `displacement`, `warped`, `jacobian_det` and `cost_history` (see [`DiffeomorphicResult`](../nitrix-register-diffeomorphic/DiffeomorphicResult.qmd)). `velocity` is `None` unless `spec.compute_velocity` is set (the default skips its [`field_log`](../nitrix-geometry-deformation/field_log.qmd) recovery).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:diffeomorphic_demons_register -->
+::: {.callout-note}
+**Cohort registration.**  This is a pure `(moving, fixed) -> result`
+function, so register a *cohort* to a shared reference with `jax.vmap`:
+    jax.vmap(lambda m: diffeomorphic_demons_register(m, fixed, spec=spec))(moving_stack)
+
+The batch-aggregate early-exit comes for free: under `mode='early_exit'` the
+per-subject `lax.while_loop` runs (via `vmap`) to the **all-lanes** exit,
+the slowest subject setting the trip count -- the same pattern
+`volreg` uses for its frames.  No dedicated cohort
+driver is needed.
+:::
+
+::: {.callout-warning}
+The Gaussian regulariser dispatches engines per backend (parallel FIR on
+GPU, recursive Young-van Vliet on CPU), which differ by ~1-2 % near the
+edges -- so a pair can yield slightly different deformations on GPU vs CPU
+(recovery accuracy is unaffected).  For a reproducible study, register every
+subject of a cohort on the **same backend**; do not mix CPU- and GPU-computed
+warps in one analysis.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:diffeomorphic_demons_register -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

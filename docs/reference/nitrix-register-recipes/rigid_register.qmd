@@ -1,0 +1,123 @@
+---
+title: "rigid_register"
+generated: true
+description: "Estimate the rigid transform aligning `moving` to `fixed`."
+---
+
+[‹ back to `nitrix.register.recipes`](../nitrix-register-recipes.qmd)
+
+<!-- nitrix:gen sig:rigid_register -->
+```python
+rigid_register(moving: Float[Array, '*mspatial'], fixed: Float[Array, '*fspatial'], *, spec: RegistrationSpec = RegistrationSpec(), space: CoordinateSpace = IndexSpace(), method: str = 'auto', init: Literal['identity', 'moment'] = 'identity', init_transform: Optional[Float[Array, ' d1 d1']] = None, mask: Optional[Float[Array, '*fspatial']] = None, winsorize: Optional[tuple[float, float]] = None, histogram_match: bool = False) -> RegistrationResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:rigid_register -->
+Estimate the rigid transform aligning `moving` to `fixed`.
+
+Optimises the 6-DOF (3-D) / 3-DOF (2-D) rigid Lie parameters
+([`rigid_exp`](../nitrix-geometry-transform/rigid_exp.qmd)) coarse-to-fine so that `moving`
+resampled by the result matches `fixed` under `spec.metric`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:rigid_register -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `moving` | `Float` | `*mspatial` | — | Single-channel images (2-D or 3-D). Shapes need not match (the warp is built on the `fixed` grid); the default `IndexSpace` additionally assumes a shared voxel grid. |
+| `fixed` | `Float` | `*fspatial` | — | Single-channel images (2-D or 3-D). Shapes need not match (the warp is built on the `fixed` grid); the default `IndexSpace` additionally assumes a shared voxel grid. |
+| `spec` | `RegistrationSpec` | — | `RegistrationSpec()` | The `RegistrationSpec` (pyramid depth, iterations, metric, ...). **Metric choice:** `SSD` (default) within-modality -- the fast inverse-compositional path; `MI` / `CorrelationRatio` cross-modal; `LNCC` under a smooth intensity bias. **Grid:** the default `IndexSpace` assumes `moving` and `fixed` share a (roughly isotropic) voxel grid -- use `WorldSpace` for anisotropic voxels or differing grids (a rigid in index space shears in physical space). |
+| `space` | `CoordinateSpace` | — | `IndexSpace()` | Coordinate space to optimise in: `IndexSpace` (default; voxel-space, shared-grid, on-device) or `WorldSpace(fixed_affine=..., moving_affine=...)` (physical space -- correct under anisotropic voxels and different grids). |
+| `method` | `str` | — | `'auto'` | Solver: `"auto"` (default; the inverse-compositional fast path -- roughly 4-7x the forward throughput -- when its preconditions hold: `IndexSpace` and a least-squares / SSD metric; the forward Gauss-Newton / LM path otherwise), `"inverse_compositional"` (force it; validates), or `"forward"`. The forward path is the parity oracle the fast path is tested against. |
+| `init` | `Literal['identity', 'moment']` | — | `'identity'` | Starting transform: `"identity"` (default) or `"moment"` -- a centre-of-mass start (intensity-weighted centroids, plus a per-axis diagonal scale for affine) that lands inside the optimiser's basin on a large misalignment a single zero start would miss. `IndexSpace` only. |
+| `init_transform` | `Optional[Float[Array, ' d1 d1']]` | — | `None` | A self-contained warm-start matrix (a prior recipe's `result.matrix`), taking precedence over `init` -- the staged-pipeline hook (e.g. affine warm-started from rigid; see [`syn_pipeline`](../nitrix-register-recipes/syn_pipeline.qmd)). `IndexSpace` only. |
+| `mask` | `Optional[Float[Array, '*fspatial']]` | — | `None` | Optional non-negative per-voxel weight on the `fixed` grid: the cost is restricted to / weighted by it (a brain mask, lesion exclusion, FoV), with out-of-mask voxels ignored -- for `MI` / `CorrelationRatio` it gates the joint-histogram scatter, not just the reduction. A mask routes to the **forward** path (the inverse-compositional constant-template Hessian assumes the full grid); `method='inverse_compositional'` with a mask raises. |
+| `winsorize` | `Optional[tuple[float, float]]` | — | `None` | Intensity conditioning before registration (the fMRIPrep front-end): `winsorize=(0.005, 0.995)` clips each image to those percentiles (outlier-robust); `histogram_match=True` remaps `moving` onto `fixed`'s distribution (within-modality). Both default off (byte-unchanged). They condition the *estimate*, so `warped` is the conditioned moving -- apply `matrix` to the original for the original intensities. |
+| `histogram_match` | `bool` | — | `False` | Intensity conditioning before registration (the fMRIPrep front-end): `winsorize=(0.005, 0.995)` clips each image to those percentiles (outlier-robust); `histogram_match=True` remaps `moving` onto `fixed`'s distribution (within-modality). Both default off (byte-unchanged). They condition the *estimate*, so `warped` is the conditioned moving -- apply `matrix` to the original for the original intensities. |
+
+**Returns** `RegistrationResult`. A `RegistrationResult` carrying `matrix`, `params`, `warped`, and `cost_history`. `matrix` maps `fixed` to `moving` (index coordinates in `IndexSpace`, world coordinates in `WorldSpace`); `warped` is `moving` resampled on the `fixed` grid.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:rigid_register -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **29.27 ms** (median, L4).  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_RIGID_REGISTER.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| rigid_register | jax-cpu | data=mni152,resolution=2,levels=2,iters=20 | `ants.registration` | ok | 252.80 ms / 257.14 ms | 3.549 s | 857 MB (rss) | n/a (no oracle) | 0.39x vs nitrix-jax |
+| rigid_register | jax-cpu | data=mni152,resolution=2,levels=2,iters=20 | `dipy.registration` | ok | 10.941 s / 10.942 s | 12.689 s | 857 MB (rss) | n/a (no oracle) | 16.84x vs nitrix-jax |
+| rigid_register | jax-cpu | data=mni152,resolution=2,levels=2,iters=20 | `nitrix-jax` | ok | 649.58 ms / 652.58 ms | 2.582 s | 857 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | data=mni152,resolution=2,levels=2,iters=20 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | data=mni152,resolution=2,levels=2,iters=20 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | data=mni152,resolution=2,levels=2,iters=20 | `nitrix-jax` | ok | 29.22 ms / 29.27 ms | 7.189 s | 1605.97 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[128, 128, 128],levels=2,iters=20 | `ants.registration` | ok | 381.37 ms / 381.97 ms | 3.522 s | 857 MB (rss) | n/a (no oracle) | 0.29x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[128, 128, 128],levels=2,iters=20 | `dipy.registration` | ok | 35.034 s / 35.067 s | 35.892 s | 857 MB (rss) | n/a (no oracle) | 26.63x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[128, 128, 128],levels=2,iters=20 | `nitrix-jax` | ok | 1.315 s / 1.356 s | 3.057 s | 906 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[128, 128, 128],levels=2,iters=20 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[128, 128, 128],levels=2,iters=20 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[128, 128, 128],levels=2,iters=20 | `nitrix-jax` | ok | 61.33 ms / 61.35 ms | 7.812 s | 8733.60 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[128, 128, 128],moving_shape=[112, 128, 144],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `ants.registration` | ok | 429.28 ms / 630.29 ms | 6.880 s | 857 MB (rss) | n/a (no oracle) | 0.07x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[128, 128, 128],moving_shape=[112, 128, 144],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `dipy.registration` | ok | 21.274 s / 21.297 s | 22.250 s | 857 MB (rss) | n/a (no oracle) | 3.49x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[128, 128, 128],moving_shape=[112, 128, 144],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `nitrix-jax` | ok | 6.089 s / 6.319 s | 11.469 s | 1493 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[128, 128, 128],moving_shape=[112, 128, 144],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[128, 128, 128],moving_shape=[112, 128, 144],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[128, 128, 128],moving_shape=[112, 128, 144],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `nitrix-jax` | ok | 137.27 ms / 137.37 ms | 17.295 s | 8758.24 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[160, 160, 160],levels=2,iters=20 | `ants.registration` | ok | 731.80 ms / 745.28 ms | 6.683 s | 857 MB (rss) | n/a (no oracle) | 0.38x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[160, 160, 160],levels=2,iters=20 | `dipy.registration` | ok | 40.586 s / 40.628 s | 41.946 s | 857 MB (rss) | n/a (no oracle) | 20.87x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[160, 160, 160],levels=2,iters=20 | `nitrix-jax` | ok | 1.945 s / 1.947 s | 3.437 s | 1173 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[160, 160, 160],levels=2,iters=20 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[160, 160, 160],levels=2,iters=20 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[160, 160, 160],levels=2,iters=20 | `nitrix-jax` | ok | 125.17 ms / 125.21 ms | 8.542 s | 13694.15 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[192, 192, 192],levels=2,iters=20 | `ants.registration` | ok | 965.37 ms / 971.30 ms | 4.773 s | 871 MB (rss) | n/a (no oracle) | 0.28x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[192, 192, 192],levels=2,iters=20 | `dipy.registration` | ok | 72.178 s / 72.391 s | 73.291 s | 1054 MB (rss) | n/a (no oracle) | 21.27x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[192, 192, 192],levels=2,iters=20 | `nitrix-jax` | ok | 3.394 s / 3.398 s | 5.171 s | 1519 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[192, 192, 192],levels=2,iters=20 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[192, 192, 192],levels=2,iters=20 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[192, 192, 192],levels=2,iters=20 | `nitrix-jax` | ok | 225.81 ms / 227.15 ms | 26.615 s | 1366.63 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=1,iters=10 | `ants.registration` | ok | 139.67 ms / 142.28 ms | 4.593 s | 857 MB (rss) | n/a (no oracle) | 7.47x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=1,iters=10 | `dipy.registration` | ok | 546.70 ms / 557.76 ms | 1.524 s | 857 MB (rss) | n/a (no oracle) | 29.25x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=1,iters=10 | `nitrix-jax` | ok | 18.69 ms / 21.21 ms | 654.90 ms | 857 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=1,iters=10 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=1,iters=10 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=1,iters=10 | `nitrix-jax` | ok | 1.39 ms / 1.41 ms | 2.618 s | 203.42 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=2,iters=20 | `ants.registration` | ok | 137.33 ms / 144.13 ms | 3.216 s | 857 MB (rss) | n/a (no oracle) | 2.96x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=2,iters=20 | `dipy.registration` | ok | 1.389 s / 1.400 s | 2.125 s | 857 MB (rss) | n/a (no oracle) | 29.95x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=2,iters=20 | `nitrix-jax` | ok | 46.37 ms / 47.81 ms | 1.887 s | 857 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=2,iters=20 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=2,iters=20 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=2,iters=20 | `nitrix-jax` | ok | 3.58 ms / 3.84 ms | 5.700 s | 203.42 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=3,iters=30 | `ants.registration` | ok | 749.39 ms / 768.43 ms | 5.245 s | 857 MB (rss) | n/a (no oracle) | 11.83x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=3,iters=30 | `dipy.registration` | ok | 1.208 s / 1.213 s | 1.979 s | 857 MB (rss) | n/a (no oracle) | 19.07x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[48, 48, 48],levels=3,iters=30 | `nitrix-jax` | ok | 63.37 ms / 64.14 ms | 2.928 s | 857 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=3,iters=30 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=3,iters=30 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[48, 48, 48],levels=3,iters=30 | `nitrix-jax` | ok | 5.47 ms / 5.88 ms | 10.469 s | 203.42 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[96, 96, 96],levels=2,iters=20 | `ants.registration` | ok | 330.65 ms / 391.88 ms | 4.761 s | 857 MB (rss) | n/a (no oracle) | 0.86x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[96, 96, 96],levels=2,iters=20 | `dipy.registration` | ok | 15.676 s / 15.679 s | 16.440 s | 857 MB (rss) | n/a (no oracle) | 40.59x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[96, 96, 96],levels=2,iters=20 | `nitrix-jax` | ok | 386.22 ms / 387.97 ms | 1.868 s | 857 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[96, 96, 96],levels=2,iters=20 | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[96, 96, 96],levels=2,iters=20 | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[96, 96, 96],levels=2,iters=20 | `nitrix-jax` | ok | 20.24 ms / 20.25 ms | 5.606 s | 1279.82 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[96, 96, 96],moving_shape=[80, 96, 112],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `ants.registration` | ok | 260.37 ms / 498.29 ms | 5.656 s | 857 MB (rss) | n/a (no oracle) | 0.09x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[96, 96, 96],moving_shape=[80, 96, 112],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `dipy.registration` | ok | 15.310 s / 15.326 s | 16.174 s | 857 MB (rss) | n/a (no oracle) | 5.51x vs nitrix-jax |
+| rigid_register | jax-cpu | shape=[96, 96, 96],moving_shape=[80, 96, 112],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `nitrix-jax` | ok | 2.779 s / 2.835 s | 8.443 s | 1042 MB (rss) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| rigid_register | jax-cuda12 | shape=[96, 96, 96],moving_shape=[80, 96, 112],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `ants.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[96, 96, 96],moving_shape=[80, 96, 112],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `dipy.registration` | skipped | — | — | — | — | — |
+| rigid_register | jax-cuda12 | shape=[96, 96, 96],moving_shape=[80, 96, 112],levels=2,iters=20,space=world,fixed_spacing=[1, 1, 1],moving_spacing=[1.2, 1.0, 0.9] | `nitrix-jax` | ok | 49.24 ms / 49.46 ms | 13.308 s | 1514.57 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+:::
+
+*source: bench `7be15116` · nitrix `c54bc818`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:rigid_register -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*mspatial` | a variadic group of axes (`mspatial`) |
+| `*fspatial` | a variadic group of axes (`fspatial`) |
+<!-- nitrix:/gen -->

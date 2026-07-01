@@ -37,6 +37,12 @@ final publication as-is (SPEC §6.5).
 - [`topology`](nitrix-geometry-topology.qmd) — Mesh topology invariants -- the genus-0 defect gate.
 - [`transform`](nitrix-geometry-transform.qmd) — Lie-group parametrisation of rigid and affine transforms.
 
+### `nitrix.register`
+
+- [`diffeomorphic`](nitrix-register-diffeomorphic.qmd) — Diffeomorphic registration recipe: log-domain Demons.
+- [`recipes`](nitrix-register-recipes.qmd) — Pairwise rigid / affine registration recipes.
+- [`regulariser`](nitrix-register-regulariser.qmd) — Explicit penalties on a displacement / velocity field.
+
 ### `nitrix.stats`
 
 - [`basis`](nitrix-stats-basis.qmd) — Penalised spline bases for additive models.

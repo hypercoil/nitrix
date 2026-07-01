@@ -1,23 +1,25 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Volumetric boundary-based registration (BBR).
 
-Greve & Fischl (2009): align a volume to a tissue boundary (the WM/GM
+Align a volume to a tissue boundary (the white-matter / grey-matter
 surface) by maximising the image contrast *across* that boundary.  Where
 the intensity recipes match an image pair, BBR has **no fixed image** --
 its cost is over boundary-point samples, so it is a *sibling* objective
-(:class:`._objective.Objective`), not a ``Metric``, reusing the rigid
-``TransformModel`` and the point sampler.
+(:class:`Objective`), not a :class:`Metric`, reusing the rigid
+:class:`TransformModel` and the point sampler.
 
 For each boundary point the moving intensity is sampled a short distance
-``±step`` along the (transformed) surface normal -- one sample each side of
-the boundary -- and the normalised cross-boundary contrast ``Q = (I_out −
-I_in) / (½(I_in + I_out))`` is formed.  The cost ``mean(1 + tanh(slope·(Q −
-q0)))`` is low where the boundary sits on a strong, consistently-oriented
-intensity edge.  ``Q`` is a *ratio* (invariant to a global intensity scale),
-so the recovery is image-amplitude independent.
+:math:`\pm\text{step}` along the (transformed) surface normal -- one sample
+each side of the boundary -- and the normalised cross-boundary contrast
+:math:`Q = (I_{\text{out}} - I_{\text{in}}) / (\tfrac{1}{2}(I_{\text{in}} +
+I_{\text{out}}))` is formed.  The cost :math:`\operatorname{mean}(1 +
+\tanh(\text{slope} \cdot (Q - q_0)))` is low where the boundary sits on a
+strong, consistently-oriented intensity edge.  :math:`Q` is a *ratio*
+(invariant to a global intensity scale), so the recovery is image-amplitude
+independent.
 
 **Recovery (the BBR basin is narrow and non-convex).**  Two ingredients,
 mirroring FSL ``flirt --bbr`` (``gridmeasurecost`` + annealed ``bbrstep``),
@@ -44,17 +46,23 @@ toggle as every other path: ``'fixed'`` (the default) is the fixed ``lax.scan``
 ``lax.while_loop`` (opt in, a little faster, **not** reverse-differentiable),
 parameterised by ``BBRSpec.convergence``.
 
-A reverse-mode gradient of the *optimum* w.r.t. the moving image is best taken
-through the implicit-function layer (``linalg.implicit_minimize`` on
-:func:`bbr_cost`), whose adjoint is solved at the optimum and is independent of
-the unrolled trajectory -- preferred over differentiating the fixed-scan
-trajectory.
+A reverse-mode gradient of the *optimum* with respect to the moving image is
+best taken through the implicit-function layer
+(:func:`~nitrix.linalg.implicit_minimize` on :func:`bbr_cost`), whose adjoint
+is solved at the optimum and is independent of the unrolled trajectory --
+preferred over differentiating the fixed-scan trajectory.
 
-Surfaces as a *data structure* are out of scope (a ``thrux`` / surface-
-features concern): BBR consumes the boundary **points** and **normals** as
-arrays, in the moving image's world frame (or voxel frame when no affine is
-given).  ``moving_affine`` (voxel->world) makes ``step`` a physical (mm)
-distance and the normals physical directions -- correct under anisotropy.
+Surfaces as a *data structure* are out of scope: BBR consumes the boundary
+**points** and **normals** as arrays, in the moving image's world frame (or
+voxel frame when no affine is given).  ``moving_affine`` (voxel-to-world) makes
+``step`` a physical (mm) distance and the normals physical directions --
+correct under anisotropy.
+
+References
+----------
+Greve, D. N., & Fischl, B. (2009). Accurate and robust brain image alignment
+using boundary-based registration. *NeuroImage*, 48(1), 63-72.
+https://doi.org/10.1016/j.neuroimage.2009.06.060
 """
 
 from __future__ import annotations
@@ -105,10 +113,57 @@ def bbr_cost(
     cval: float,
     eps: float,
 ) -> Float[Array, '']:
-    """Greve-Fischl boundary cost at the rigid parameters ``params``.
+    r"""Boundary-based (Greve-Fischl) contrast cost at rigid parameters.
 
-    Pure function (differentiable w.r.t. ``moving`` and ``params``): the
-    core both :class:`BoundaryObjective` and the implicit-diff layer call.
+    Evaluate the boundary cost for the rigid transform encoded by ``params``.
+    Each boundary point is mapped through the transform into the moving voxel
+    frame, sampled a distance ``step`` either side of the boundary along the
+    transformed normal, and the normalised cross-boundary contrast is formed;
+    the cost is low where the boundary sits on a strong, consistently-oriented
+    intensity edge.  This is a pure function, differentiable with respect to
+    both ``moving`` and ``params``, and is the core that both
+    :class:`BoundaryObjective` and the implicit-differentiation layer call.
+
+    Parameters
+    ----------
+    moving
+        Single-channel volume being registered, of spatial shape ``*spatial``
+        (2-D or 3-D).
+    points
+        ``(n, d)`` boundary sample coordinates, in the moving world frame (or
+        voxel frame when the affine is the identity).
+    normals
+        ``(n, d)`` outward boundary normals, one per point.
+    params
+        ``(p,)`` rigid Lie parameters passed to ``model.exp``.
+    model
+        Transform model producing a homogeneous matrix from ``params`` via
+        ``model.exp(params, ndim=ndim)``.
+    ndim
+        Spatial dimensionality (2 or 3).
+    moving_affine_inv
+        ``(d1, d1)`` world-to-voxel affine of the moving image (the inverse of
+        its voxel-to-world affine, with ``d1 = ndim + 1``).
+    step
+        Half-distance sampled either side of the boundary along the normal, in
+        the units of the moving affine (mm with a physical affine, else voxels).
+    slope
+        Sharpness of the :math:`\tanh` contrast cost.
+    q0
+        Contrast offset (the cost's inflection point).
+    method
+        Interpolator used to sample the moving volume at the offset points.
+    mode
+        Out-of-bounds boundary handling for the samples.
+    cval
+        Constant fill value used with a constant boundary mode.
+    eps
+        Guard added to the contrast denominator to avoid division by zero.
+
+    Returns
+    -------
+    Float[Array, '']
+        The scalar mean boundary cost over all points.
     """
     transform = model.exp(params, ndim=ndim)
     # Rotate about the boundary centroid (not the origin), so the rotation
@@ -136,11 +191,13 @@ def bbr_cost(
 
 @dataclass(frozen=True)
 class BoundaryObjective:
-    """The BBR cost as an :class:`._objective.Objective` (no ``fixed``).
+    r"""The BBR cost packaged as an :class:`Objective` (with no fixed image).
 
-    Closes over the moving image, the boundary points / normals, and the
-    sampling configuration; ``cost(params)`` is :func:`bbr_cost`.  Not a
-    least-squares objective (the tanh cost is not a sum of squares).
+    Closes over the moving image, the boundary points and normals, and the
+    sampling configuration; :meth:`cost` evaluates :func:`bbr_cost` at the
+    given parameters.  This is not a least-squares objective (the
+    :math:`\tanh` cost is not a sum of squares), so :attr:`is_least_squares`
+    is ``False`` and :meth:`residual` raises.
     """
 
     moving: Float[Array, '*spatial']
@@ -160,6 +217,19 @@ class BoundaryObjective:
     is_least_squares: ClassVar[bool] = False
 
     def cost(self, params: Float[Array, ' p']) -> Float[Array, '']:
+        """Boundary cost at the rigid parameters ``params``.
+
+        Parameters
+        ----------
+        params
+            ``(p,)`` rigid Lie parameters.
+
+        Returns
+        -------
+        Float[Array, '']
+            The scalar boundary cost, as computed by :func:`bbr_cost` with
+            this objective's closed-over image and configuration.
+        """
         return bbr_cost(
             self.moving,
             self.points,
@@ -178,20 +248,36 @@ class BoundaryObjective:
         )
 
     def residual(self, params: Float[Array, ' p']) -> Float[Array, ' m']:
+        """Not defined for the BBR objective.
+
+        The boundary cost is not a sum of squares, so it has no residual
+        vector.  This method always raises :class:`NotImplementedError`.
+
+        Parameters
+        ----------
+        params
+            ``(p,)`` rigid Lie parameters (unused).
+
+        Raises
+        ------
+        NotImplementedError
+            Always, since BBR is not a least-squares objective.
+        """
         raise NotImplementedError('BBR is not a least-squares objective.')
 
 
 @dataclass(frozen=True)
 class BBRSearch:
-    """Coarse grid multistart for the BBR basin (FSL ``gridmeasurecost``).
+    r"""Coarse grid multistart for the BBR basin (FSL ``gridmeasurecost``).
 
     BBR's cost is markedly non-convex; a local solve from a single start can
     latch a *wrong* boundary alignment (and, with the wide-basin coarse
     ``step``, descend confidently into it).  Before the local refine, the cost
     is evaluated on a grid of rigid seeds around ``init_params`` -- a
     Cartesian product of ``steps`` offsets per degree of freedom over
-    ``±rotation`` (rad) on each rotation DOF and ``±translation`` (mm /
-    voxels) on each translation DOF -- and the lowest-cost seed initialises the
+    :math:`\pm` ``rotation`` (rad) on each rotation DOF and :math:`\pm`
+    ``translation`` (mm / voxels) on each translation DOF -- and the
+    lowest-cost seed initialises the
     optimise.  The capture range widens to roughly ``rotation`` / ``translation``
     per axis (a few mm / degrees -- BBR remains a *local* refinement of a prior
     affine, not a global search).
@@ -246,7 +332,7 @@ class BBRSpec:
         pure local refine from ``init_params`` (use when a prior affine has
         already brought the boundary within the fine basin).
     mode
-        Iteration strategy (B2), the same toggle as the other recipes.
+        Iteration strategy, the same toggle as the other recipes.
         ``'fixed'`` (default) runs the fixed ``lax.scan`` (reproducible and
         reverse-differentiable); ``'early_exit'`` runs the windowed-slope
         ``lax.while_loop`` (opt in, a little faster on easy alignments, **not**
@@ -264,7 +350,8 @@ class BBRSpec:
         Geometric per-iteration decay of the step lengths (``< 1``); shrinks the
         step as the stage converges.
     interpolation
-        Sampling kernel (differentiable in the coordinate -- ``Linear`` default).
+        Sampling kernel (differentiable in the coordinate -- :class:`Linear`
+        default).
     boundary_mode, cval
         Out-of-bounds handling for the samples (``"nearest"`` default, so an
         off-edge sample clamps rather than reads spurious zero contrast).
@@ -316,7 +403,24 @@ class BBRResult(NamedTuple):
 
 
 def _grid_axis(extent: float, steps: int, dtype: Any) -> Array:
-    """``steps`` offsets in ``[-extent, extent]`` (``[0]`` when ``steps<=1``)."""
+    """Evenly-spaced grid offsets along a single degree of freedom.
+
+    Parameters
+    ----------
+    extent
+        Half-extent of the axis: offsets span ``[-extent, extent]``.
+    steps
+        Number of offsets. ``steps <= 1`` collapses the axis to a single
+        zero offset (disabling it).
+    dtype
+        Dtype of the returned offsets.
+
+    Returns
+    -------
+    Array
+        ``(steps,)`` offsets linearly spaced in ``[-extent, extent]``, or a
+        single ``(1,)`` zero offset when ``steps <= 1``.
+    """
     if steps <= 1:
         return jnp.zeros((1,), dtype=dtype)
     return jnp.linspace(-extent, extent, steps, dtype=dtype)
@@ -330,7 +434,34 @@ def _grid_seed(
     ndim: int,
     search: BBRSearch,
 ) -> Array:
-    """Lowest-cost rigid seed on a coarse grid around ``init`` (vmap-ed)."""
+    """Lowest-cost rigid seed on a coarse grid around ``init``.
+
+    Builds a Cartesian grid of parameter offsets around ``init`` (rotation
+    offsets on the rotation degrees of freedom, translation offsets on the
+    translation ones), evaluates the objective cost at every seed under a
+    single ``vmap``, and returns the seed with the lowest (non-NaN) cost. The
+    returned seed is detached from the gradient, since it only initialises the
+    subsequent local solve.
+
+    Parameters
+    ----------
+    objective
+        Boundary objective whose ``cost`` is evaluated at each seed.
+    init
+        ``(p,)`` centre of the grid (the warm-start rigid parameters).
+    n_rot
+        Number of rotation degrees of freedom (1 in 2-D, 3 in 3-D).
+    ndim
+        Spatial dimensionality (2 or 3); the number of translation degrees of
+        freedom.
+    search
+        Grid configuration (extents and number of steps per axis).
+
+    Returns
+    -------
+    Array
+        ``(p,)`` lowest-cost rigid seed, with the gradient stopped.
+    """
     rot = _grid_axis(search.rotation, search.steps, init.dtype)
     tr = _grid_axis(search.translation, search.steps, init.dtype)
     axes = [rot] * n_rot + [tr] * ndim
@@ -358,12 +489,44 @@ def _gd_stage(
     decay: float,
     dtype: Any,
 ) -> tuple[Array, Array]:
-    """One annealing stage: normalised-block GD via :func:`run_iterations`.
+    """One annealing stage: normalised-block gradient descent.
 
-    Each step unit-normalises the rotation / translation gradient blocks and
-    moves by ``rotation_step`` / ``translation_step`` (physical rad / mm),
-    geometrically decayed -- amplitude- and unit-robust.  ``convergence``
-    selects the fixed scan (``None``) or the windowed early-exit while-loop.
+    Runs a single sampling-distance stage of the BBR solve through
+    :func:`run_iterations`.  Each step unit-normalises the rotation and
+    translation gradient blocks separately and moves by ``rotation_step`` /
+    ``translation_step`` (physical rad / mm), geometrically decayed by
+    ``decay`` -- decoupling the step from the image amplitude and from the
+    rad-vs-mm unit mismatch.
+
+    Parameters
+    ----------
+    objective
+        Boundary objective for this stage (fixes the sampling distance).
+    init_params
+        ``(p,)`` warm-start rigid parameters for the stage.
+    n_rot
+        Number of rotation degrees of freedom, used to split the gradient into
+        its rotation and translation blocks.
+    iterations
+        Maximum gradient-descent iterations for the stage.
+    convergence
+        Early-exit criterion (threshold / window) for the windowed
+        ``lax.while_loop``, or ``None`` to run the fixed ``lax.scan``.
+    rotation_step
+        Per-iteration step length for the rotation block (radians).
+    translation_step
+        Per-iteration step length for the translation block (mm / voxels).
+    decay
+        Geometric per-iteration decay factor applied to both step lengths.
+    dtype
+        Working dtype of the parameters and cost history.
+
+    Returns
+    -------
+    params : Array
+        ``(p,)`` refined rigid parameters after the stage.
+    history : Array
+        The per-iteration cost trace for the stage.
     """
     cost = objective.cost
     grad_cost = jax.grad(cost)
@@ -403,7 +566,7 @@ def bbr_register(
     init_params: Optional[Float[Array, ' p']] = None,
     spec: BBRSpec = BBRSpec(),
 ) -> BBRResult:
-    """Boundary-based rigid registration of ``moving`` to a surface.
+    r"""Boundary-based rigid registration of ``moving`` to a surface.
 
     Estimates the rigid transform that places the boundary ``points`` (with
     outward ``normals``) on a strong, consistently-oriented intensity edge
@@ -417,23 +580,26 @@ def bbr_register(
     moving
         Single-channel volume (2-D or 3-D) being registered.
     points, normals
-        ``(N, ndim)`` boundary sample coordinates and unit outward normals,
+        ``(n, d)`` boundary sample coordinates and unit outward normals,
         in the moving world frame (or voxel frame when ``moving_affine`` is
-        ``None``).  Normals oriented so the interior (``−normal``) side is
-        the brighter tissue.
+        ``None``).  Normals oriented so the interior (the :math:`-`\ ``normal``
+        side) is the brighter tissue.
     moving_affine
-        Voxel->world affine of ``moving`` ``(ndim+1, ndim+1)``; ``None``
-        -> identity (voxel frame).  Makes ``step`` physical and the normals
-        physical directions.
+        ``(d1, d1)`` voxel-to-world affine of ``moving`` (with
+        ``d1 = ndim + 1``); ``None`` uses the identity (voxel frame).  Makes
+        ``step`` physical and the normals physical directions.
     init_params
-        Rigid Lie-parameter warm start (default identity); the grid search,
-        when enabled, seeds *around* it.
+        ``(p,)`` rigid Lie-parameter warm start (default identity); the grid
+        search, when enabled, seeds *around* it.
     spec
-        ``BBRSpec``.
+        The :class:`BBRSpec` static configuration (sampling distance, cost
+        shape, annealing schedule, grid multistart, and optimiser knobs).
 
     Returns
     -------
-    ``BBRResult`` (``matrix``, ``params``, ``cost``, ``cost_history``).
+    BBRResult
+        The recovered transform ``matrix``, its rigid ``params``, the final
+        ``cost``, and the concatenated per-stage ``cost_history``.
     """
     ndim = points.shape[-1]
     if ndim not in (2, 3):
