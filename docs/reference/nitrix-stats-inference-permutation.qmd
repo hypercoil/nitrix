@@ -1,37 +1,77 @@
 ---
 title: "nitrix.stats.inference.permutation"
 generated: true
-signature-hash: f7ecf581fdc5e717
+signature-hash: 230d3a269fbf9c71
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.inference.permutation` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.inference.permutation`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_perm` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
 
 ## `sign_flips` {#sign_flips}
 
+<!-- nitrix:gen sig:sign_flips -->
 ```python
-sign_flips(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']]=None) -> Float[Array, 'n_perm N']
+sign_flips(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']] = None) -> Float[Array, 'n_perm N']
 ```
+<!-- nitrix:/gen -->
 
-``(n_perm, n)`` matrix of ``+/-1`` sign flips (row 0 = identity).
+<!-- nitrix:gen overview:sign_flips -->
+`(n_perm, n)` matrix of `+/-1` sign flips (row 0 = identity).
 
-**Parameters** — *TODO: document each parameter.*
+Without `blocks` each observation flips independently; with `blocks`
+every observation in a block shares the block's sign (whole-block flip).
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:sign_flips -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `n` | `int` | — | — | — |
+| `n_perm` | `int` | — | — | — |
+| `key` | `Array` | — | — | — |
+| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | — |
+
+**Returns** `Float` — shape `n_perm` × `N`.
+<!-- nitrix:/gen -->
 
 ## `permutations` {#permutations}
 
+<!-- nitrix:gen sig:permutations -->
 ```python
-permutations(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']]=None) -> Int[Array, 'n_perm N']
+permutations(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']] = None) -> Int[Array, 'n_perm N']
 ```
+<!-- nitrix:/gen -->
 
-``(n_perm, n)`` permutation-index matrix (row 0 = identity).
+<!-- nitrix:gen overview:permutations -->
+`(n_perm, n)` permutation-index matrix (row 0 = identity).
 
-**Parameters** — *TODO: document each parameter.*
+Without `blocks` rows are free permutations of `0..n-1`; with `blocks`
+each row is a *within-block* permutation (observation `i` maps only to a
+position sharing its block label).
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:permutations -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `n` | `int` | — | — | — |
+| `n_perm` | `int` | — | — | — |
+| `key` | `Array` | — | — | — |
+| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | — |
+
+**Returns** `Int` — shape `n_perm` × `N`.
+<!-- nitrix:/gen -->
 

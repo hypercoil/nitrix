@@ -10,6 +10,7 @@ project:
     - explanation/statistics/*.qmd
     - explanation/geometry/*.qmd
     - explanation/registration/*.qmd
+    - reference/*.qmd
 
 website:
   title: "nitrix"
@@ -74,6 +75,8 @@ website:
           - text: "---"
           - explanation/registration/recipes.qmd
           - explanation/registration/performance.qmd
+      - text: Reference
+        href: reference/index.qmd
       - href: ../
         text: Federation
 

@@ -1,37 +1,101 @@
 ---
 title: "nitrix.stats.gaulss"
 generated: true
-signature-hash: 8d36ef45eb999afc
+signature-hash: 7d872a2e15dece35
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.gaulss` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.gaulss`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `q` | random-effect columns |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
 
 ## `GauLSSResult` {#GauLSSResult}
 
-*decorated:* `@register_result(children=('coef_mu', 'coef_scale', 'cov_mu', 'cov_scale', 'log_lik'), aux=('n_obs',))`, `@dataclass(frozen=True)`
-
+<!-- nitrix:gen sig:GauLSSResult -->
 ```python
 class GauLSSResult
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:GauLSSResult -->
 Per-element Gaussian location-scale fit output.
+<!-- nitrix:/gen -->
 
-*TODO: class overview.*
+### Methods
+
+<!-- nitrix:gen sig:GauLSSResult.__init__ -->
+```python
+__init__(coef_mu: Float[Array, 'V p'], coef_scale: Float[Array, 'V q'], cov_mu: Float[Array, 'V p p'], cov_scale: Float[Array, 'V q q'], log_lik: Float[Array, 'V'], n_obs: int) -> None
+```
+<!-- nitrix:/gen -->
 
 ## `gaulss_fit` {#gaulss_fit}
 
+<!-- nitrix:gen sig:gaulss_fit -->
 ```python
-gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']]=None, n_iter: int=50, ridge: float=1e-08, block: Optional[int]=None) -> GauLSSResult
+gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']] = None, n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> GauLSSResult
 ```
+<!-- nitrix:/gen -->
 
-Mass-univariate Gaussian location-scale regression (``gaulss``).
+<!-- nitrix:gen overview:gaulss_fit -->
+Mass-univariate Gaussian location-scale regression (`gaulss`).
 
-**Parameters** — *TODO: document each parameter.*
+Fits, per element, `y_v ~ N(mu, sigma^2)` with `mu = X beta_mu` and
+`log sigma = Z beta_scale` -- modelling heteroscedasticity directly -- by
+joint Fisher scoring.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:gaulss_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (shared; carries its own intercept). |
+| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` log-scale design `Z` (shared). Defaults to an intercept-only column -- a constant variance (the homoscedastic Gaussian, recovering OLS for the mean); pass a design to model the variance. |
+| `n_iter` | `int` | — | `50` | Fisher-scoring iterations (default `50`). |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser on the normal equations. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
+
+**Returns** `GauLSSResult`.
+<!-- nitrix:/gen -->
+
+## `gaulss_predict` {#gaulss_predict}
+
+<!-- nitrix:gen sig:gaulss_predict -->
+```python
+gaulss_predict(result: GauLSSResult, X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']] = None) -> Tuple[Float[Array, 'V N'], Float[Array, 'V N']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaulss_predict -->
+Per-element Gaussian location-scale prediction on a (new) design.
+
+Returns the **pair** `(mean, scale)` -- the heteroscedastic point of the
+model -- on the new covariates: the mean `mu = X beta_mu` (identity link)
+and the standard deviation `sigma = exp(Z beta_scale)` (log link).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaulss_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `GauLSSResult` | — | — | A :class:`GauLSSResult` from :func:`gaulss_fit`. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (same columns as the fit). |
+| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` scale-model design; `None` (default) uses an intercept column `(N, 1)` -- the homoscedastic default matching `gaulss_fit`. Must have the same column count `q` the fit's scale model used. |
+
+**Returns** `Tuple[Float[Array, 'V N'], Float[Array, 'V N']]`.
+<!-- nitrix:/gen -->
 

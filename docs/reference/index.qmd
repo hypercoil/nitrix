@@ -1,0 +1,30 @@
+---
+title: "API reference"
+toc: false
+listing:
+  id: reference-modules
+  contents:
+    - "*.qmd"
+  type: table
+  fields: [title]
+  field-display-names:
+    title: "Module"
+  sort: "title"
+  filter-ui: true
+  page-size: 100
+---
+
+Per-module API documentation: signatures, named tensor dimensions (shapes +
+glossary), and — where the sibling `nitrix-perf-bench` has measured a kernel — a
+benchmark headline and table.
+
+::: {.callout-important title="Work in progress"}
+These pages are **auto-generated** by `gen_reference_stubs.py` (static, from
+source `__all__` + jaxtyping annotations + perf-bench reports). Signatures,
+shapes, and benchmark figures are real; the per-parameter and overview **prose is
+still being filled**, and coverage is expanding beyond `nitrix.stats`. Not for
+final publication as-is (SPEC §6.5).
+:::
+
+::: {#reference-modules}
+:::

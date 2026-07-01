@@ -1,0 +1,889 @@
+---
+title: "nitrix.geometry.grid"
+generated: true
+signature-hash: 3f24b347babe1909
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.geometry.grid`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+| `*leading` | leading batch axes preceding the spatial grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `...` | anonymous leading (batch) axes |
+| `*n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `*target` | the target grid's spatial axes (variadic) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+<!-- nitrix:/gen -->
+
+## `identity_grid` {#identity_grid}
+
+<!-- nitrix:gen sig:identity_grid -->
+```python
+identity_grid(spatial_shape: Sequence[int], *, dtype: DTypeLike = jnp.float32) -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:identity_grid -->
+The identity deformation: per-pixel its own coordinate.
+
+For a 2D image of shape `(H, W)` returns a `(H, W, 2)` grid
+where `grid[i, j] == (i, j)`.  For 3D `(D, H, W)` returns
+`(D, H, W, 3)` with `grid[k, i, j] == (k, i, j)`.
+
+Adding a displacement `delta` to this grid yields a
+deformation field consumable by `spatial_transform`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:identity_grid -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `spatial_shape` | `Sequence[int]` | — | — | Per-axis sizes of the grid; the result has rank `len(spatial_shape) + 1` with the trailing dim of size `len(spatial_shape)`. |
+| `dtype` | `DTypeLike` | — | `jnp.float32` | Floating-point dtype of the returned coordinates. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`.
+<!-- nitrix:/gen -->
+
+## `spatial_transform` {#spatial_transform}
+
+<!-- nitrix:gen sig:spatial_transform -->
+```python
+spatial_transform(image: Float[Array, '*leading *spatial c'], deformation: Float[Array, '*leading *spatial ndim'], *, mode: BoundaryMode = 'constant', cval: float = 0.0, method: Interpolator = Linear()) -> Float[Array, '*leading *spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spatial_transform -->
+Warp an image by a per-pixel deformation field.
+
+For each output pixel at coordinate `p`, the result is
+`image` sampled at `deformation[p]` via the interpolation
+`method` ((multi-)linear by default).  `deformation` is
+therefore an *absolute* coordinate map, not a relative
+displacement.  To use a displacement field `delta`, add
+`identity_grid` first:
+    warped = spatial_transform(image, identity_grid(spatial) + delta)
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spatial_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `image` | `Float` | `*leading` × `*spatial` × `c` | — | Channel-last image, `(*leading, *spatial, c)`. Leading batch dims are broadcast-compatible with `deformation`. |
+| `deformation` | `Float` | `*leading` × `*spatial` × `ndim` | — | Absolute sample coordinates, `(*leading, *spatial, ndim)` with `ndim` matching the spatial rank of `image`. The spatial shape need not match `image`'s spatial shape -- for resampling-like ops, `deformation` indexes anywhere in `image`. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Default `"constant"` (preserves the prior contract for image-sampling). Set `mode="nearest"` for edge-replicate (voxelmorph convention for flow-warp); see `integrate_velocity_field` which defaults to `"nearest"` for the same reason. Other valid values: `"wrap"`, `"mirror"`, `"reflect"`. |
+| `cval` | `float` | — | `0.0` | Constant fill value when `mode="constant"`. Ignored otherwise. Default `0`. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel -- an `Interpolator` record. Default `Linear()` ((multi-)linear, the prior behaviour). `NearestNeighbour()` is the label-preserving choice but is not differentiable w.r.t. the deformation (so it cannot drive a registration loss); see `geometry._interpolate` for the full method set and their differentiability contracts. |
+
+**Returns** `Float` — shape `*leading` × `*spatial` × `c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:spatial_transform -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **98.5 µs** (median, L4); up to **20.66× faster** than `scipy.ndimage.map_coordinates`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SPATIAL_TRANSFORM.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| spatial_transform | jax-cpu | shape=[256, 256] | `cupyx.scipy.ndimage.map_coordinates` | skipped | — | — | — | — | — |
+| spatial_transform | jax-cpu | shape=[256, 256] | `nitrix-jax` | ok | 376.7 µs / 447.3 µs | 137.27 ms | 493 MB (rss) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cpu | shape=[256, 256] | `scipy.ndimage.map_coordinates` | ok | 1.86 ms / 1.87 ms | 3.54 ms | 453 MB (rss) | ✓ 5.5e-05×tol | 4.93x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[256, 256] | `cupyx.scipy.ndimage.map_coordinates` | ok | 52.7 µs / 55.4 µs | 328.89 ms | 0.79 MB (hbm) | ✓ 0.00075×tol | 0.56x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[256, 256] | `nitrix-jax` | ok | 94.5 µs / 98.5 µs | 180.28 ms | 1.31 MB (hbm) | ✓ 0.00098×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[256, 256] | `scipy.ndimage.map_coordinates` | ok | 1.95 ms / 1.97 ms | 1.98 ms | 0.79 MB (hbm) | ✓ 5.5e-05×tol | 20.66x vs nitrix-jax |
+| spatial_transform | jax-cpu | shape=[64, 64] | `cupyx.scipy.ndimage.map_coordinates` | skipped | — | — | — | — | — |
+| spatial_transform | jax-cpu | shape=[64, 64] | `nitrix-jax` | ok | 62.6 µs / 69.9 µs | 131.48 ms | 493 MB (rss) | ✓ 0.00042×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cpu | shape=[64, 64] | `scipy.ndimage.map_coordinates` | ok | 120.6 µs / 122.3 µs | 142.7 µs | 453 MB (rss) | ✓ 5.2e-05×tol | 1.93x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[64, 64] | `cupyx.scipy.ndimage.map_coordinates` | ok | 53.7 µs / 60.3 µs | 516.37 ms | 0.05 MB (hbm) | ✓ 0.00051×tol | 0.56x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[64, 64] | `nitrix-jax` | ok | 96.4 µs / 99.0 µs | 181.00 ms | 0.08 MB (hbm) | ✓ 0.00043×tol | 1.00x vs nitrix-jax |
+| spatial_transform | jax-cuda12 | shape=[64, 64] | `scipy.ndimage.map_coordinates` | ok | 126.5 µs / 127.9 µs | 154.1 µs | 0.05 MB (hbm) | ✓ 5.2e-05×tol | 1.31x vs nitrix-jax |
+:::
+
+*source: bench `74c2a463` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+## `spatial_transform_batched` {#spatial_transform_batched}
+
+<!-- nitrix:gen sig:spatial_transform_batched -->
+```python
+spatial_transform_batched(image: Float[Array, '...'], deformation: Float[Array, '...'], *, mode: BoundaryMode = 'constant', cval: float = 0.0, method: Interpolator = Linear()) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:spatial_transform_batched -->
+Map `spatial_transform` over a single leading batch axis.
+
+Convenience wrapper for the common case where the batch axis is
+carried by only one operand: a batch of images warped by a
+single shared deformation (or a single image under a batch of
+deformations).  `spatial_transform` itself requires the
+leading batch dims of `image` and `deformation` to match
+exactly -- it deliberately does not broadcast -- so this case
+otherwise needs an explicit `jax.vmap` with the right
+`in_axes`.  This picks `in_axes` from whichever operand
+carries the leading axis and saves the per-model wrapper line.
+
+The batch axis is identified as a leading axis beyond the
+`ndim + 1` "core" rank (`*spatial` plus the trailing
+channel / `ndim` axis).  If both operands carry it, this maps
+one axis and `spatial_transform` composes any further leading
+dims natively.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:spatial_transform_batched -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `image` | `Float` | `...` | — | `(*spatial, c)` or `(B, *spatial, c)`. |
+| `deformation` | `Float` | `...` | — | `(*spatial, ndim)` or `(B, *spatial, ndim)`. At least one of `image` / `deformation` must carry the leading batch axis. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Forwarded to `spatial_transform`. |
+| `cval` | `float` | — | `0.0` | Forwarded to `spatial_transform`. |
+| `method` | `Interpolator` | — | `Linear()` | Forwarded to `spatial_transform`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+## `sample_at_points` {#sample_at_points}
+
+<!-- nitrix:gen sig:sample_at_points -->
+```python
+sample_at_points(volume: Float[Array, '...'], points: Float[Array, '*n ndim'], *, method: Interpolator = Linear(), mode: BoundaryMode = 'constant', cval: float = 0.0) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sample_at_points -->
+Sample a volume at an arbitrary list of continuous points.
+
+The scattered-point complement to `spatial_transform` (which samples
+on a coordinate *grid*): given `points` of shape `(*n, ndim)` in
+**index/voxel coordinates** (coordinate `c` maps to array index
+`c` -- the `align_corners` convention, matching `identity_grid`),
+interpolate `volume` at each point.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sample_at_points -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `volume` | `Float` | `...` | — | Either channel-free `(*spatial)` or channels-last `(*spatial, c)`; the spatial rank is `ndim = points.shape[-1]`. |
+| `points` | `Float` | `*n` × `ndim` | — | `(*n, ndim)` sample coordinates in index space. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel (`Linear` default; `NearestNeighbour` for label volumes; any `geometry` `Interpolator`). |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds boundary mode: `"constant"` (zero-/`cval`-fill, the default) or `"nearest"` (edge-clamp / border), etc. |
+| `cval` | `float` | — | `0.0` | Fill value for `mode="constant"`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+## `integrate_velocity_field` {#integrate_velocity_field}
+
+<!-- nitrix:gen sig:integrate_velocity_field -->
+```python
+integrate_velocity_field(velocity: Float[Array, '*spatial ndim'], *, n_steps: Union[int, Literal['auto']] = 7, mode: BoundaryMode = 'nearest', cval: float = 0.0) -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:integrate_velocity_field -->
+Diffeomorphic exponential map via scaling-and-squaring.
+
+Integrates a *stationary* velocity field `v` to obtain a
+displacement field `phi` such that `phi ~= exp(v)` (in the
+Lie-group sense, with composition rather than addition).  The
+standard voxelmorph trick:
+
+1. Scale `v` by `1 / 2**n_steps` (small enough that the
+   first-order approximation `id + v` is itself approximately
+   diffeomorphic).
+2. Repeatedly compose the field with itself `n_steps` times:
+       phi_0 = v / 2**n_steps
+       phi_{i+1} = phi_i + phi_i o (id + phi_i)
+
+   (where `o` denotes function composition via
+   `spatial_transform`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:integrate_velocity_field -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `velocity` | `Float` | `*spatial` × `ndim` | — | Stationary velocity field, channel-last, `(*spatial, ndim)`. |
+| `n_steps` | `Union[int, Literal['auto']]` | — | `7` | Number of doublings. Default `7` (i.e., 128× scaling). Larger `n_steps` -> more accurate but more compute (the per-step accuracy roughly halves with each doubling). Scaling-and-squaring is diffeomorphic only while the first sub-step `max\|v\| / 2**n_steps` is within the `~0.5`-voxel regime where `id + v/2**n` is itself invertible -- below that the flow can **fold**, so `n_steps` should cover the velocity magnitude (`>= ceil(log2(2*max\|v\|))`). `'auto'` picks exactly that (F2) from the velocity, but reads `max\|v\|` as a concrete value, so it is **eager-only** (unavailable under `jax.jit` -- the scan length must be static; pass an explicit `int` there). Note a warp larger than the grid can resolve folds at *any* `n_steps` (a resolution limit, not an integration one). |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Boundary behaviour for the per-step `spatial_transform(phi, id + phi)` call. Default `"nearest"` (edge-replicate) -- this is the voxelmorph convention and the *only* mode that yields a numerically sensible integrated flow at the boundary. `"constant"` (with `cval=0`) silently miscomputes the flow within ~`n_steps` voxels of every edge; do not use unless you understand exactly what your boundary should be. |
+| `cval` | `float` | — | `0.0` | Constant fill value when `mode="constant"`. Ignored otherwise. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:integrate_velocity_field -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **119.6 µs** (median, L4); up to **220.43× faster** than `scipy.ndimage.map_coordinates`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_INTEGRATE_VELOCITY_FIELD.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| integrate_velocity_field | jax-cpu | d=16 | `cupy.integrate_velocity_field` | skipped | — | — | — | — | — |
+| integrate_velocity_field | jax-cpu | d=16 | `nitrix-jax` | ok | 42.52 ms / 47.00 ms | 2.633 s | 733 MB (rss) | ✓ 0.002×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=16 | `scipy.ndimage.map_coordinates` | ok | 4.98 ms / 5.34 ms | 5.10 ms | 704 MB (rss) | ✓ 0.002×tol | 0.12x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=16 | `cupy.integrate_velocity_field` | ok | 1.89 ms / 1.92 ms | 680.93 ms | 0.05 MB (hbm) | ✓ 0.002×tol | 15.96x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=16 | `nitrix-jax` | ok | 118.3 µs / 119.6 µs | 585.93 ms | 0.25 MB (hbm) | ✓ 0.002×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=16 | `scipy.ndimage.map_coordinates` | ok | 9.79 ms / 9.92 ms | 10.19 ms | 0.05 MB (hbm) | ✓ 0.002×tol | 82.77x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=24 | `cupy.integrate_velocity_field` | skipped | — | — | — | — | — |
+| integrate_velocity_field | jax-cpu | d=24 | `nitrix-jax` | ok | 69.55 ms / 78.08 ms | 3.368 s | 769 MB (rss) | ✓ 0.0041×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=24 | `scipy.ndimage.map_coordinates` | ok | 14.52 ms / 16.48 ms | 20.21 ms | 704 MB (rss) | ✓ 0.0041×tol | 0.21x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=24 | `cupy.integrate_velocity_field` | ok | 1.81 ms / 1.85 ms | 173.13 ms | 0.17 MB (hbm) | ✓ 0.0041×tol | 12.84x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=24 | `nitrix-jax` | ok | 141.3 µs / 165.1 µs | 661.69 ms | 0.83 MB (hbm) | ✓ 0.004×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=24 | `scipy.ndimage.map_coordinates` | ok | 14.47 ms / 14.55 ms | 14.78 ms | 0.17 MB (hbm) | ✓ 0.0041×tol | 102.41x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=32 | `cupy.integrate_velocity_field` | skipped | — | — | — | — | — |
+| integrate_velocity_field | jax-cpu | d=32 | `nitrix-jax` | ok | 351.34 ms / 392.65 ms | 3.090 s | 779 MB (rss) | ✓ 0.0055×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=32 | `scipy.ndimage.map_coordinates` | ok | 33.18 ms / 48.00 ms | 39.28 ms | 704 MB (rss) | ✓ 0.0055×tol | 0.09x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=32 | `cupy.integrate_velocity_field` | ok | 1.96 ms / 1.99 ms | 182.83 ms | 0.39 MB (hbm) | ✓ 0.0055×tol | 13.08x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=32 | `nitrix-jax` | ok | 149.6 µs / 153.8 µs | 790.36 ms | 2.10 MB (hbm) | ✓ 0.0055×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=32 | `scipy.ndimage.map_coordinates` | ok | 32.97 ms / 33.24 ms | 33.35 ms | 0.39 MB (hbm) | ✓ 0.0055×tol | 220.43x vs nitrix-jax |
+:::
+
+*source: bench `361141e2` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+## `jacobian_displacement` {#jacobian_displacement}
+
+<!-- nitrix:gen sig:jacobian_displacement -->
+```python
+jacobian_displacement(u: Float[Array, '... *spatial d'], *, boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest', spacing: Union[float, Sequence[float]] = 1.0) -> Float[Array, '... *spatial d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:jacobian_displacement -->
+Per-point Jacobian of the deformation φ = id + u.
+
+For a channel-last displacement field `u` with `d` spatial
+axes, returns `J[..., i, j] = δ_{i,j} + ∂ u_i / ∂ x_j`,
+computed via central differences along each spatial axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:jacobian_displacement -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `u` | `Float` | `...` × `*spatial` × `d` | — | Displacement field, channel-last, `(*leading, *spatial, d)` with `len(spatial) == d`. |
+| `boundary_mode` | `Literal['nearest', 'wrap', 'mirror']` | — | `'nearest'` | Boundary handling for the central difference. `"nearest"` (default) clamps to the edge cell -- this is what voxelmorph uses for QA on learned warps. `"wrap"` is periodic. `"mirror"` is non-repeating mirror. |
+| `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | Voxel spacing along each spatial axis. `float` -> isotropic; sequence -> per-axis (length `d`). For non-isotropic fMRI / MRI grids the spacing should be in the same physical units as `u`; the central-difference denominator is `2 * spacing[axis]`. |
+
+**Returns** `Float` — shape `...` × `*spatial` × `d` × `d`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:jacobian_displacement -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **94.8 µs** (median, L4); up to **39.58× faster** than `numpy.jacobian`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_JACOBIAN_DISPLACEMENT.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| jacobian_displacement | jax-cpu | d=32 | `cupy.jacobian_displacement` | skipped | — | — | — | — | — |
+| jacobian_displacement | jax-cpu | d=32 | `nitrix-jax` | ok | 125.4 µs / 134.8 µs | 409.67 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=32 | `numpy.jacobian` | ok | 598.0 µs / 665.2 µs | 886.9 µs | 787 MB (rss) | ✓ 5.5e-05×tol | 4.77x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=32 | `cupy.jacobian_displacement` | ok | 714.5 µs / 732.3 µs | 5.681 s | 0.39 MB (hbm) | ✓ 5.5e-05×tol | 7.82x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=32 | `nitrix-jax` | ok | 91.4 µs / 94.8 µs | 525.23 ms | 3.28 MB (hbm) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=32 | `numpy.jacobian` | ok | 595.1 µs / 608.0 µs | 2.25 ms | 0.39 MB (hbm) | ✓ 5.5e-05×tol | 6.51x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=48 | `cupy.jacobian_displacement` | skipped | — | — | — | — | — |
+| jacobian_displacement | jax-cpu | d=48 | `nitrix-jax` | ok | 275.2 µs / 277.9 µs | 304.99 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=48 | `numpy.jacobian` | ok | 2.05 ms / 2.32 ms | 8.75 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 7.47x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=48 | `cupy.jacobian_displacement` | ok | 678.0 µs / 715.2 µs | 1.923 s | 2.10 MB (hbm) | ✓ 5.5e-05×tol | 7.05x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=48 | `nitrix-jax` | ok | 96.2 µs / 104.1 µs | 563.25 ms | 10.27 MB (hbm) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=48 | `numpy.jacobian` | ok | 1.83 ms / 1.90 ms | 7.13 ms | 2.10 MB (hbm) | ✓ 5.5e-05×tol | 19.06x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=64 | `cupy.jacobian_displacement` | skipped | — | — | — | — | — |
+| jacobian_displacement | jax-cpu | d=64 | `nitrix-jax` | ok | 756.2 µs / 795.8 µs | 175.74 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=64 | `numpy.jacobian` | ok | 5.15 ms / 5.48 ms | 16.60 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 6.81x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=64 | `cupy.jacobian_displacement` | ok | 660.4 µs / 685.8 µs | 145.96 ms | 4.19 MB (hbm) | ✓ 5.5e-05×tol | 5.56x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=64 | `nitrix-jax` | ok | 118.8 µs / 138.7 µs | 170.45 ms | 37.75 MB (hbm) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=64 | `numpy.jacobian` | ok | 4.70 ms / 5.03 ms | 15.47 ms | 4.19 MB (hbm) | ✓ 5.5e-05×tol | 39.58x vs nitrix-jax |
+:::
+
+*source: bench `361141e2` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+## `jacobian_det_displacement` {#jacobian_det_displacement}
+
+<!-- nitrix:gen sig:jacobian_det_displacement -->
+```python
+jacobian_det_displacement(u: Float[Array, '... *spatial d'], *, boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest', spacing: Union[float, Sequence[float]] = 1.0) -> Float[Array, '... *spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:jacobian_det_displacement -->
+Per-point determinant of the deformation Jacobian.
+
+Computes `det(I + ∇u)` at each spatial location.  For
+`d <= 3` uses the explicit closed-form determinant (avoiding
+LU factorisation noise and `O(d^3)` cost); for `d > 3`
+falls back to `jnp.linalg.det`.
+
+Parameters and `boundary_mode` / `spacing` semantics match
+`jacobian_displacement`.
+
+Folding interpretation: `det(J) > 0` means the deformation
+is locally orientation-preserving; `det(J) <= 0` indicates
+the warp folds at this voxel (and is not a diffeomorphism
+there).  The standard QA threshold is "no voxels with
+`det <= 0`"; the soft regulariser is
+`mean(max(0, ε - det)^2)` for some `ε > 0`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:jacobian_det_displacement -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `u` | `Float` | `...` × `*spatial` × `d` | — | — |
+| `boundary_mode` | `Literal['nearest', 'wrap', 'mirror']` | — | `'nearest'` | — |
+| `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | — |
+
+**Returns** `Float` — shape `...` × `*spatial`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:jacobian_det_displacement -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **118.8 µs** (median, L4); up to **44.66× faster** than `numpy.jacobian_det`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_JACOBIAN_DET_DISPLACEMENT.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| jacobian_det_displacement | jax-cpu | d=32 | `cupy.jacobian_det_displacement` | skipped | — | — | — | — | — |
+| jacobian_det_displacement | jax-cpu | d=32 | `nitrix-jax` | ok | 178.4 µs / 181.8 µs | 168.81 ms | 782 MB (rss) | ✓ 0.00025×tol | 1.00x vs nitrix-jax |
+| jacobian_det_displacement | jax-cpu | d=32 | `numpy.jacobian_det` | ok | 890.0 µs / 910.5 µs | 2.43 ms | 782 MB (rss) | ✓ 0.00033×tol | 4.99x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=32 | `cupy.jacobian_det_displacement` | ok | 842.5 µs / 918.2 µs | 164.36 ms | 0.39 MB (hbm) | ✓ 0.00033×tol | 8.06x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=32 | `nitrix-jax` | ok | 104.5 µs / 118.8 µs | 622.01 ms | 38.80 MB (hbm) | ✓ 0.00033×tol | 1.00x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=32 | `numpy.jacobian_det` | ok | 812.5 µs / 823.2 µs | 2.23 ms | 0.39 MB (hbm) | ✓ 0.00033×tol | 7.77x vs nitrix-jax |
+| jacobian_det_displacement | jax-cpu | d=48 | `cupy.jacobian_det_displacement` | skipped | — | — | — | — | — |
+| jacobian_det_displacement | jax-cpu | d=48 | `nitrix-jax` | ok | 369.1 µs / 382.9 µs | 196.76 ms | 782 MB (rss) | ✓ 0.00025×tol | 1.00x vs nitrix-jax |
+| jacobian_det_displacement | jax-cpu | d=48 | `numpy.jacobian_det` | ok | 2.48 ms / 2.56 ms | 3.88 ms | 782 MB (rss) | ✓ 0.0003×tol | 6.72x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=48 | `cupy.jacobian_det_displacement` | ok | 826.8 µs / 831.5 µs | 142.08 ms | 2.10 MB (hbm) | ✓ 0.0003×tol | 7.07x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=48 | `nitrix-jax` | ok | 117.0 µs / 127.3 µs | 714.57 ms | 51.58 MB (hbm) | ✓ 0.0003×tol | 1.00x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=48 | `numpy.jacobian_det` | ok | 2.42 ms / 3.11 ms | 4.20 ms | 2.10 MB (hbm) | ✓ 0.0003×tol | 20.71x vs nitrix-jax |
+| jacobian_det_displacement | jax-cpu | d=64 | `cupy.jacobian_det_displacement` | skipped | — | — | — | — | — |
+| jacobian_det_displacement | jax-cpu | d=64 | `nitrix-jax` | ok | 854.6 µs / 864.9 µs | 190.74 ms | 782 MB (rss) | ✓ 0.00027×tol | 1.00x vs nitrix-jax |
+| jacobian_det_displacement | jax-cpu | d=64 | `numpy.jacobian_det` | ok | 7.30 ms / 7.79 ms | 9.53 ms | 782 MB (rss) | ✓ 0.00033×tol | 8.54x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=64 | `cupy.jacobian_det_displacement` | ok | 828.3 µs / 844.8 µs | 366.65 ms | 4.19 MB (hbm) | ✓ 0.00033×tol | 5.43x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=64 | `nitrix-jax` | ok | 152.5 µs / 154.8 µs | 640.50 ms | 77.59 MB (hbm) | ✓ 0.00033×tol | 1.00x vs nitrix-jax |
+| jacobian_det_displacement | jax-cuda12 | d=64 | `numpy.jacobian_det` | ok | 6.81 ms / 6.93 ms | 9.22 ms | 4.19 MB (hbm) | ✓ 0.00033×tol | 44.66x vs nitrix-jax |
+:::
+
+*source: bench `361141e2` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+## `resample` {#resample}
+
+<!-- nitrix:gen sig:resample -->
+```python
+resample(image: Float[Array, '*spatial c'], target_shape: Sequence[int], *, mode: BoundaryMode = 'constant', cval: float = 0.0, method: Interpolator = Linear()) -> Float[Array, '*target c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:resample -->
+Resize a channel-last image to `target_shape`.
+
+The common dispatcher over the available interpolation methods.
+Sample positions are evenly distributed: output pixel `i` along
+each axis samples the input at coordinate
+`i * (in_size - 1) / (out_size - 1)`.  This matches scipy's
+`align_corners=True` convention and preserves the boundary
+pixels exactly.  The interpolation *kernel* is selected by
+`method`; the align-corners grid above is the same regardless.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:resample -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `image` | `Float` | `*spatial` × `c` | — | Channel-last image, `(*spatial, c)`. |
+| `target_shape` | `Sequence[int]` | — | — | Per-axis target sizes; must match the spatial rank of `image`. |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Sample positions are nominally within the input extent (rounded up to the endpoint), but floating-point drift can push them out by an ULP; `mode` selects the fill. Default `"constant"`; `"nearest"` is the safer default for general downsampling but `"constant"` + `cval=0` matches the prior contract. |
+| `cval` | `float` | — | `0.0` | Constant fill value when `mode="constant"`. Default `0`. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel -- an `Interpolator` record. Default `Linear()` ((multi-)linear, the prior behaviour). `NearestNeighbour()` preserves label values exactly (the choice for integer segmentations when anti-aliasing is *not* wanted). See `geometry._interpolate` for the method set and their differentiability contracts. |
+
+**Returns** `Float` — shape `*target` × `c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:resample -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **109.4 µs** (median, L4); up to **790.65× faster** than `scipy.ndimage.map_coordinates`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_RESAMPLE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| resample | jax-cpu | shape=[128, 128],out=[256, 256] | `ants.resample_image` | ok | 1.35 ms / 1.41 ms | 2.152 s | 802 MB (rss) | ✓ 5.5e-05×tol | 4.39x vs nitrix-jax |
+| resample | jax-cpu | shape=[128, 128],out=[256, 256] | `cupyx.scipy.ndimage.map_coordinates` | skipped | — | — | — | — | — |
+| resample | jax-cpu | shape=[128, 128],out=[256, 256] | `nitrix-jax` | ok | 307.5 µs / 318.0 µs | 165.51 ms | 802 MB (rss) | ✓ 0.25×tol | 1.00x vs nitrix-jax |
+| resample | jax-cpu | shape=[128, 128],out=[256, 256] | `scipy.ndimage.map_coordinates` | ok | 1.71 ms / 1.79 ms | 1.74 ms | 802 MB (rss) | ✓ 5.5e-05×tol | 5.56x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256] | `ants.resample_image` | skipped | — | — | — | — | — |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256] | `cupyx.scipy.ndimage.map_coordinates` | ok | 166.6 µs / 181.7 µs | 233.03 ms | 0.07 MB (hbm) | ✓ 0.00071×tol | 1.61x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256] | `nitrix-jax` | ok | 103.2 µs / 109.4 µs | 234.99 ms | 0.85 MB (hbm) | ✓ 0.25×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256] | `scipy.ndimage.map_coordinates` | ok | 1.72 ms / 1.75 ms | 1.78 ms | 0.07 MB (hbm) | ✓ 5.5e-05×tol | 16.64x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256],kernel=linear | `ants.resample_image` | skipped | — | — | — | — | — |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256],kernel=linear | `cupyx.scipy.ndimage.map_coordinates` | ok | 167.9 µs / 175.3 µs | 855.70 ms | 0.07 MB (hbm) | ✓ 0.00071×tol | 1.59x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256],kernel=linear | `nitrix-jax` | ok | 105.5 µs / 107.9 µs | 280.57 ms | 2.10 MB (hbm) | ✓ 0.25×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[128, 128],out=[256, 256],kernel=linear | `scipy.ndimage.map_coordinates` | ok | 1.71 ms / 1.73 ms | 1.90 ms | 0.07 MB (hbm) | ✓ 5.5e-05×tol | 16.22x vs nitrix-jax |
+| resample | jax-cpu | shape=[256, 256],out=[512, 512] | `ants.resample_image` | ok | 3.95 ms / 3.99 ms | 1.384 s | 802 MB (rss) | ✓ 5.6e-05×tol | 3.55x vs nitrix-jax |
+| resample | jax-cpu | shape=[256, 256],out=[512, 512] | `cupyx.scipy.ndimage.map_coordinates` | skipped | — | — | — | — | — |
+| resample | jax-cpu | shape=[256, 256],out=[512, 512] | `nitrix-jax` | ok | 1.11 ms / 1.59 ms | 179.86 ms | 802 MB (rss) | ✓ 0.33×tol | 1.00x vs nitrix-jax |
+| resample | jax-cpu | shape=[256, 256],out=[512, 512] | `scipy.ndimage.map_coordinates` | ok | 7.03 ms / 9.41 ms | 9.20 ms | 802 MB (rss) | ✓ 5.6e-05×tol | 6.32x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512] | `ants.resample_image` | skipped | — | — | — | — | — |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512] | `cupyx.scipy.ndimage.map_coordinates` | ok | 505.7 µs / 516.6 µs | 160.89 ms | 0.26 MB (hbm) | ✓ 0.00078×tol | 4.90x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512] | `nitrix-jax` | ok | 103.1 µs / 107.3 µs | 278.22 ms | 4.20 MB (hbm) | ✓ 0.33×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512] | `scipy.ndimage.map_coordinates` | ok | 6.81 ms / 7.00 ms | 7.23 ms | 0.26 MB (hbm) | ✓ 5.6e-05×tol | 66.03x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512],kernel=linear | `ants.resample_image` | skipped | — | — | — | — | — |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512],kernel=linear | `cupyx.scipy.ndimage.map_coordinates` | ok | 510.6 µs / 531.4 µs | 191.51 ms | 0.26 MB (hbm) | ✓ 0.00078×tol | 4.18x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512],kernel=linear | `nitrix-jax` | ok | 122.2 µs / 123.0 µs | 287.81 ms | 10.49 MB (hbm) | ✓ 0.33×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[256, 256],out=[512, 512],kernel=linear | `scipy.ndimage.map_coordinates` | ok | 6.89 ms / 6.99 ms | 7.36 ms | 0.26 MB (hbm) | ✓ 5.6e-05×tol | 56.39x vs nitrix-jax |
+| resample | jax-cpu | shape=[64, 64, 64],out=[128, 128, 128] | `ants.resample_image` | ok | 32.30 ms / 35.60 ms | 1.515 s | 802 MB (rss) | ✓ 5.6e-05×tol | 0.95x vs nitrix-jax |
+| resample | jax-cpu | shape=[64, 64, 64],out=[128, 128, 128] | `cupyx.scipy.ndimage.map_coordinates` | skipped | — | — | — | — | — |
+| resample | jax-cpu | shape=[64, 64, 64],out=[128, 128, 128] | `nitrix-jax` | ok | 34.07 ms / 35.83 ms | 313.15 ms | 802 MB (rss) | ✓ 0.074×tol | 1.00x vs nitrix-jax |
+| resample | jax-cpu | shape=[64, 64, 64],out=[128, 128, 128] | `scipy.ndimage.map_coordinates` | ok | 91.77 ms / 92.37 ms | 102.36 ms | 802 MB (rss) | ✓ 5.6e-05×tol | 2.69x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128] | `ants.resample_image` | skipped | — | — | — | — | — |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128] | `cupyx.scipy.ndimage.map_coordinates` | ok | 6.70 ms / 6.78 ms | 198.07 ms | 1.05 MB (hbm) | ✓ 0.0012×tol | 12.67x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128] | `nitrix-jax` | ok | 528.9 µs / 539.9 µs | 379.09 ms | 76.55 MB (hbm) | ✓ 0.074×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128] | `scipy.ndimage.map_coordinates` | ok | 95.21 ms / 95.74 ms | 100.40 ms | 1.05 MB (hbm) | ✓ 5.6e-05×tol | 180.02x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=cubic | `cupyx.scipy.ndimage.map_coordinates` | ok | 9.89 ms / 9.95 ms | 2.010 s | 1.05 MB (hbm) | ✓ 0.01×tol | 16.15x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=cubic | `nitrix-jax` | ok | 612.6 µs / 619.6 µs | 6.844 s | 489.55 MB (hbm) | ✓ 0.13×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=cubic | `scipy.ndimage.map_coordinates` | ok | 484.36 ms / 488.01 ms | 488.11 ms | 1.05 MB (hbm) | ✓ 5.7e-05×tol | 790.65x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=lanczos | `nitrix-jax` | ok | 150.6 µs / 152.6 µs | 1.196 s | 152.04 MB (hbm) | n/a (no oracle) | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=linear | `ants.resample_image` | skipped | — | — | — | — | — |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=linear | `cupyx.scipy.ndimage.map_coordinates` | ok | 6.75 ms / 6.81 ms | 500.39 ms | 1.05 MB (hbm) | ✓ 0.0012×tol | 6.64x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=linear | `nitrix-jax` | ok | 1.02 ms / 1.03 ms | 424.35 ms | 143.65 MB (hbm) | ✓ 0.074×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=linear | `scipy.ndimage.map_coordinates` | ok | 91.54 ms / 92.26 ms | 98.81 ms | 1.05 MB (hbm) | ✓ 5.6e-05×tol | 90.09x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=nearest | `cupyx.scipy.ndimage.map_coordinates` | ok | 6.38 ms / 6.47 ms | 573.30 ms | 1.05 MB (hbm) | ✓ 0×tol | 61.38x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=nearest | `nitrix-jax` | ok | 104.0 µs / 110.6 µs | 187.69 ms | 17.83 MB (hbm) | ✓ 0×tol | 1.00x vs nitrix-jax |
+| resample | jax-cuda12 | shape=[64, 64, 64],out=[128, 128, 128],kernel=nearest | `scipy.ndimage.map_coordinates` | ok | 36.03 ms / 36.99 ms | 39.41 ms | 1.05 MB (hbm) | ✓ 0×tol | 346.58x vs nitrix-jax |
+:::
+
+*source: bench `906b0c06` · nitrix `645ce27d`*
+::::
+<!-- nitrix:/gen -->
+
+## `center_of_mass_grid` {#center_of_mass_grid}
+
+<!-- nitrix:gen sig:center_of_mass_grid -->
+```python
+center_of_mass_grid(weight: Float[Array, '...'], *, axes: Optional[Sequence[int]] = None, na_value: Optional[float] = None) -> Float[Array, '... ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:center_of_mass_grid -->
+Centre of mass over a regular grid of unit-spaced coordinates.
+
+For a tensor `weight`, computes the centre of mass treating
+each cell's coordinate along axis `d` as its index `i_d`
+(zero-based).  `axes` selects which axes to reduce over; the
+reduction is over those axes per slice spanned by the
+*remaining* axes.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:center_of_mass_grid -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `weight` | `Float` | `...` | — | Non-negative weight tensor. |
+| `axes` | `Optional[Sequence[int]]` | — | `None` | Axes to reduce over. `None` (default) means all axes. With `axes=[-3, -2, -1]` on a `(B, D, H, W)` tensor, a separate centre-of-mass vector is produced per batch element over the trailing three axes. |
+| `na_value` | `Optional[float]` | — | `None` | Value to substitute when a slice has zero total weight (the centre-of-mass is undefined there; default behaviour produces `NaN`). Set to a float to fill with that value. |
+
+**Returns** `Float` — shape `...` × `ndim`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:center_of_mass_grid -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **113.3 µs** (median, L4); up to **16.11× faster** than `scipy.ndimage.center_of_mass`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_CENTER_OF_MASS_GRID.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| center_of_mass_grid | jax-cpu | d=32 | `cupy.center_of_mass_grid` | skipped | — | — | — | — | — |
+| center_of_mass_grid | jax-cpu | d=32 | `nitrix-jax` | ok | 53.7 µs / 55.5 µs | 139.15 ms | 722 MB (rss) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
+| center_of_mass_grid | jax-cpu | d=32 | `scipy.ndimage.center_of_mass` | ok | 125.5 µs / 134.6 µs | 199.2 µs | 722 MB (rss) | ✓ 6.7e-06×tol | 2.34x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=32 | `cupy.center_of_mass_grid` | ok | 286.0 µs / 293.9 µs | 1.038 s | 0.13 MB (hbm) | ✓ 3.8e-05×tol | 2.59x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=32 | `nitrix-jax` | ok | 110.3 µs / 113.3 µs | 317.58 ms | 33.69 MB (hbm) | ✓ 0.0001×tol | 1.00x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=32 | `scipy.ndimage.center_of_mass` | ok | 193.1 µs / 229.3 µs | 309.8 µs | 0.13 MB (hbm) | ✓ 6.7e-06×tol | 1.75x vs nitrix-jax |
+| center_of_mass_grid | jax-cpu | d=64 | `cupy.center_of_mass_grid` | skipped | — | — | — | — | — |
+| center_of_mass_grid | jax-cpu | d=64 | `nitrix-jax` | ok | 249.2 µs / 316.1 µs | 188.33 ms | 722 MB (rss) | ✓ 0.00033×tol | 1.00x vs nitrix-jax |
+| center_of_mass_grid | jax-cpu | d=64 | `scipy.ndimage.center_of_mass` | ok | 752.1 µs / 791.2 µs | 1.59 ms | 722 MB (rss) | ✓ 2.6e-06×tol | 3.02x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=64 | `cupy.center_of_mass_grid` | ok | 287.6 µs / 307.2 µs | 81.08 ms | 1.05 MB (hbm) | ✓ 3.7e-05×tol | 2.63x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=64 | `nitrix-jax` | ok | 109.2 µs / 112.3 µs | 363.93 ms | 34.60 MB (hbm) | ✓ 3.7e-05×tol | 1.00x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=64 | `scipy.ndimage.center_of_mass` | ok | 989.5 µs / 1.03 ms | 2.04 ms | 1.05 MB (hbm) | ✓ 2.6e-06×tol | 9.06x vs nitrix-jax |
+| center_of_mass_grid | jax-cpu | d=96 | `cupy.center_of_mass_grid` | skipped | — | — | — | — | — |
+| center_of_mass_grid | jax-cpu | d=96 | `nitrix-jax` | ok | 737.1 µs / 1.23 ms | 208.98 ms | 722 MB (rss) | ✓ 0.00078×tol | 1.00x vs nitrix-jax |
+| center_of_mass_grid | jax-cpu | d=96 | `scipy.ndimage.center_of_mass` | ok | 2.04 ms / 2.14 ms | 4.75 ms | 722 MB (rss) | ✓ 8.6e-06×tol | 2.76x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=96 | `cupy.center_of_mass_grid` | ok | 293.7 µs / 307.8 µs | 69.12 ms | 4.19 MB (hbm) | ✓ 8.6e-05×tol | 2.35x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=96 | `nitrix-jax` | ok | 125.2 µs / 138.2 µs | 383.74 ms | 37.75 MB (hbm) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| center_of_mass_grid | jax-cuda12 | d=96 | `scipy.ndimage.center_of_mass` | ok | 2.02 ms / 2.05 ms | 4.84 ms | 4.19 MB (hbm) | ✓ 8.6e-06×tol | 16.11x vs nitrix-jax |
+:::
+
+*source: bench `2a974f27` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+## `Interpolator` {#Interpolator}
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:Interpolator -->
+```python
+class Interpolator(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Interpolator -->
+Sample an image at continuous coordinates with a fixed kernel.
+
+A method maps an unbatched channel-last image `(*spatial, c)` and
+a coordinate field `(*out_spatial, ndim)` to the sampled values
+`(*out_spatial, c)`.  `coords[..., d]` is the floating-point
+position along input axis `d`.  Leading batch axes are composed by
+callers (`spatial_transform` vmaps the core); a method only sees
+the unbatched core shapes.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Interpolator.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+## `Linear` {#Linear}
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:Linear -->
+```python
+class Linear
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Linear -->
+(Multi-)linear interpolation (`order=1`).
+
+The default kernel and the prior `resample` / `spatial_transform`
+behaviour: each sampled value is the multilinear blend of its
+`2**ndim` surrounding voxels.  Smooth in both the image values and
+the sample coordinates, so it is the kernel for differentiable
+registration losses.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Linear.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:Linear.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+## `NearestNeighbour` {#NearestNeighbour}
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:NearestNeighbour -->
+```python
+class NearestNeighbour
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:NearestNeighbour -->
+Nearest-neighbour interpolation (`order=0`).
+
+Each sampled value is the single voxel nearest the sample position.
+The output is restricted to values that occur in the input, so this
+is the label-preserving choice when an anti-aliased boundary is *not*
+wanted (cf. :class:`MultiLabel`).  The round-to-nearest is
+piecewise-constant in the coordinates, so the gradient w.r.t.
+coordinates is zero almost everywhere
+(`differentiable_in_coords = False`); the gather is still
+differentiable w.r.t. the image values.
+
+The rounding is `floor(coord + 0.5)` (round half up), matching
+`jax.scipy.ndimage.map_coordinates(order=0)` -- *not* round
+half-to-even.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:NearestNeighbour.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:NearestNeighbour.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+## `Lanczos` {#Lanczos}
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:Lanczos -->
+```python
+class Lanczos
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Lanczos -->
+Lanczos windowed-sinc interpolation of order `order` (radius `a`).
+
+A separable `2a`-tap kernel
+`L_a(x) = sinc(x) sinc(x / a)` (`a = order`), the high-fidelity
+resampler of the ANTs `LanczosWindowedSinc` class.  The `2a` taps
+per axis are `floor(coord) - a + 1 ... floor(coord) + a`; the
+per-axis weights are **renormalised to sum to 1**, so the separable
+outer product is a partition of unity and constants are preserved
+exactly (raw Lanczos weights sum to ~1 but not exactly).
+
+Smooth in both the image values and the sample coordinates, so it is
+differentiable end-to-end -- the high-quality differentiable
+alternative to :class:`Linear` for registration and anti-aliased
+resampling.  Unlike :class:`Linear` / :class:`NearestNeighbour` it
+has no `map_coordinates` equivalent, so it always uses the explicit
+separable gather (no platform branch).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Lanczos.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:Lanczos.__init__ -->
+```python
+__init__(order: int = 3) -> None
+```
+<!-- nitrix:/gen -->
+
+## `CubicBSpline` {#CubicBSpline}
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:CubicBSpline -->
+```python
+class CubicBSpline
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CubicBSpline -->
+Cubic (order-3) B-spline interpolation -- `scipy.ndimage` `order=3`.
+
+The order-3 spline path consumers like the nnUNet / `hd_bet`
+preprocessing in some ilex pipelines use.  Unlike a plain cubic
+*convolution*, a B-spline interpolator is a two-step operation:
+
+1. a **prefilter** converts the image samples to interpolating
+   B-spline coefficients (a separable recursive filter with the cubic
+   pole `sqrt(3) - 2`; :func:`_bspline_prefilter`), and
+2. a 4-tap separable **cubic B-spline basis** gathers those
+   coefficients.
+
+Without the prefilter the cubic basis only *approximates* (blurs) the
+samples; with it the result passes through the samples exactly -- the
+interpolation property.  The basis is a partition of unity (weights
+sum to 1; no renormalisation), `C^2`-smooth, so the kernel is
+differentiable in both the values (the prefilter and gather are
+linear) and the coordinates (the basis is smooth).
+
+Engine note: the prefilter is a first-order linear recurrence, run
+sequentially (`lax.scan`) on CPU and in parallel
+(`lax.associative_scan`, `O(log n)` depth) on GPU -- the same
+platform split as `signal._iir`.  Both are exact.  (An FFT
+convolution -- the other `signal._iir` engine -- is *not* used: the
+cubic pole is mild, so the prefilter's impulse response is a ~25-tap
+short FIR, too short for the transform overhead to amortise.)
+
+Boundary: this kernel **always uses the mirror (whole-sample-
+symmetric) boundary** for *both* the prefilter and the gather, and
+**ignores the `mode` / `cval` call arguments** (like
+:class:`MultiLabel` ignores `cval`).  This is deliberate: a B-spline
+is only self-consistent -- the interpolation property (reproducing the
+samples) only holds -- when the prefilter and the gather share a
+boundary, and only the mirror initialisation is implemented.  The
+result is bit-exact with `scipy.ndimage.map_coordinates(order=3,
+mode='mirror')`.  A mode-aware prefilter (matching `scipy` for
+`nearest` / `reflect` / ... ) is a future extension (cf.
+`docs/feature-requests/boundary-mode-parity.md`).
+
+Per the "loud fallbacks" tenet, the override is **announced**: an
+explicit non-mirror `mode` (or a non-zero `cval`) raises a
+:class:`CubicBSplineBoundaryWarning` (the bare default
+`mode='constant', cval=0` is treated as unspecified and is silent).
+
+Reproducibility: the prefilter is a recursive IIR filter, so its engine is
+the `driver` axis (the divergent op `geometry.cubic_bspline_prefilter`).
+`driver='auto'` (default) runs the parallel `associative_scan` on GPU /
+sequential `scan` on CPU, which **reassociate the long pole filter
+differently** -- so a cubic resample can differ CPU-vs-GPU beyond a ULP
+(unlike the `order`-0/1 kernels, which are bit-identical across backends).
+Force `driver='sequential'` (or wrap in `nitrix.reproducible()`) for a
+cross-platform-stable result; `nitrix.divergent_ops()` reports the budget.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:CubicBSpline.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:CubicBSpline.__init__ -->
+```python
+__init__(driver: str = 'auto') -> None
+```
+<!-- nitrix:/gen -->
+
+## `CatmullRomCubic` {#CatmullRomCubic}
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:CatmullRomCubic -->
+```python
+class CatmullRomCubic
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CatmullRomCubic -->
+Catmull-Rom cubic-Hermite interpolation -- the cardinal cubic spline.
+
+The *interpolating* C^1 cubic Hermite spline whose tangents are centred
+finite differences (tension `a = -1/2`): the curve passes through the
+samples, so -- unlike :class:`CubicBSpline` -- it needs **no prefilter**.
+The gather is a direct 4-tap separable cubic applied to the raw samples;
+at integer positions it reproduces them exactly.
+
+Coefficients for the 4 taps
+`{floor(x) - 1, floor(x), floor(x) + 1, floor(x) + 2}` at fractional
+position `t = x - floor(x)`:
+    w_{-1}(t) = -0.5 t^3 +     t^2 - 0.5 t
+    w_{ 0}(t) =  1.5 t^3 - 2.5 t^2       + 1
+    w_{+1}(t) = -1.5 t^3 + 2.0 t^2 + 0.5 t
+    w_{+2}(t) =  0.5 t^3 - 0.5 t^2
+
+At `t = 0` the weights are `(0, 1, 0, 0)` (the sample at `floor(x)`)
+and at `t = 1` they are `(0, 0, 1, 0)` (`floor(x) + 1`) -- the
+interpolation property.
+
+Distinct from the other cubics: :class:`CubicBSpline` is *approximating*
+(it needs the recursive prefilter to interpolate, and that prefilter is
+backend-dependent), and is `C^2`-smooth with a partition-of-unity basis;
+:class:`Lanczos` is a windowed sinc.  Catmull-Rom is the cardinal cubic of
+OpenCV `INTER_CUBIC` / Keras image `cubic` / the Keras
+"BilinearInterpolation" STN (a misnomer -- it evaluates a 4x4 Catmull-Rom
+stencil), so a consumer parity-locked to that family (e.g. ilex
+`fd_net`'s spatial transformer) reproduces the upstream bit-for-bit.
+
+Smooth in both the image values and the sample coordinates (the basis is
+`C^1` -- piecewise cubic, continuous with continuous first derivative
+across knots), so it is differentiable end-to-end and usable for
+coordinate-driven registration losses.  Having no `map_coordinates`
+equivalent, it always uses the explicit separable gather (no platform
+branch) -- and, with no prefilter, no backend-dependent scan either.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:CatmullRomCubic.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:CatmullRomCubic.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+## `MultiLabel` {#MultiLabel}
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:MultiLabel -->
+```python
+class MultiLabel
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:MultiLabel -->
+ANTs-style multi-label interpolation for label / segmentation maps.
+
+Naive nearest-neighbour resampling of a segmentation aliases label
+boundaries and drops thin structures; plain linear interpolation
+invents non-label values between labels.  `MultiLabel` (ANTs
+`MultiLabel` / ITK label interpolators) does neither: each label's
+binary indicator mask is resampled with a smooth `inner` kernel,
+and the output at each voxel is the **arg-max** label over those
+resampled scores.  Boundaries are anti-aliased (the inner kernel
+smooths each mask), yet the output is restricted to the input label
+set (no invented values).
+
+The implementation is a memory-bounded running arg-max fold over the
+static label set -- `O(K)` inner resamples carrying two
+output-shaped arrays, never a `K`-channel stack.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:MultiLabel.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:MultiLabel.__init__ -->
+```python
+__init__(labels: Tuple[int, ...], inner: Interpolator = Linear()) -> None
+```
+<!-- nitrix:/gen -->
+
+## `cmass_regular_grid` {#cmass_regular_grid}
+
+<!-- nitrix:gen sig:cmass_regular_grid -->
+`cmass_regular_grid` is an alias for [`center_of_mass_grid`](#center_of_mass_grid).
+<!-- nitrix:/gen -->
+
+## `vec_int` {#vec_int}
+
+<!-- nitrix:gen sig:vec_int -->
+`vec_int` is an alias for [`integrate_velocity_field`](#integrate_velocity_field).
+<!-- nitrix:/gen -->
+
+## `rescale` {#rescale}
+
+<!-- nitrix:gen sig:rescale -->
+`rescale` is an alias for [`resample`](#resample).
+<!-- nitrix:/gen -->
+

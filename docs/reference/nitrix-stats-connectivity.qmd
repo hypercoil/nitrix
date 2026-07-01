@@ -1,85 +1,202 @@
 ---
 title: "nitrix.stats.connectivity"
 generated: true
-signature-hash: b00307a2abe072c7
+signature-hash: 79f42479388d09ad
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.connectivity` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.connectivity`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `L` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
 
 ## `ebic_score` {#ebic_score}
 
+<!-- nitrix:gen sig:ebic_score -->
 ```python
-ebic_score(theta: Float[Array, 'p p'], S: Float[Array, 'p p'], n: int | Float[Array, ''], *, gamma: float=0.5, edge_tol: float=1e-08) -> Float[Array, '']
+ebic_score(theta: Float[Array, 'p p'], S: Float[Array, 'p p'], n: int | Float[Array, ''], *, gamma: float = 0.5, edge_tol: float = 1e-08) -> Float[Array, '']
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:ebic_score -->
 Extended Bayesian Information Criterion of a precision estimate.
 
-**Parameters** — *TODO: document each parameter.*
+`EBIC_gamma = n (tr(S Theta) - log det Theta) + E log n + 4 gamma E log p`
+(Foygel & Drton 2010), where `E` is the number of off-diagonal edges
+(upper-triangle entries with `|theta| > edge_tol`, counted once).  The
+Gaussian-graphical-model term `-2 loglik = n (tr(S Theta) - log det Theta)`
+uses the cuSOLVER-free rolled-Cholesky `log det`.  `gamma in [0, 1]`
+tunes the extra sparsity prior (`gamma = 0` recovers plain BIC); pick the
+path point with the **smallest** EBIC.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:ebic_score -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `theta` | `Float` | `p` × `p` | — | — |
+| `S` | `Float` | `p` × `p` | — | — |
+| `n` | `int | Float[Array, '']` | — | — | — |
+| `gamma` | `float` | — | `0.5` | — |
+| `edge_tol` | `float` | — | `1e-08` | — |
+
+**Returns** `Float` — shape —.
+<!-- nitrix:/gen -->
 
 ## `glasso` {#glasso}
 
+<!-- nitrix:gen sig:glasso -->
 ```python
-glasso(S: Float[Array, 'p p'], lam: float | Float[Array, ''], *, n_outer: int=100, n_inner: int=50) -> Float[Array, 'p p']
+glasso(S: Float[Array, 'p p'], lam: float | Float[Array, ''], *, n_outer: int = 100, n_inner: int = 50) -> Float[Array, 'p p']
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:glasso -->
 Graphical-LASSO sparse precision (inverse covariance).
 
-**Parameters** — *TODO: document each parameter.*
+Solves `argmin_Theta <S, Theta> - log det Theta + lam ||Theta||_{1,off}`
+(off-diagonal-only L1 penalty -- the standard / nilearn convention) by
+Friedman/Hastie/Tibshirani (2008) block-coordinate descent: an outer sweep
+over columns, each an inner lasso on the working covariance `W`, with the
+precision recovered from the converged per-column coefficients.  No
+factorisation, no cuSOLVER; all loops rolled (`O(p^2)` graph), so it is
+differentiable through the fixed iteration budget and compiles flat in `p`
+(fine for connectome `p = 100-400`).
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:glasso -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `S` | `Float` | `p` × `p` | — | `(p, p)` sample covariance (e.g. `stats.covariance.cov` or a shrinkage estimate). Off-diagonal-only penalty fixes `W_jj = S_jj`. |
+| `lam` | `float | Float[Array, '']` | — | — | Non-negative L1 penalty. Larger `lam` -> sparser `Theta`. |
+| `n_outer` | `int` | — | `100` | Outer column sweeps and inner lasso sweeps per column (fixed budget; the defaults reach KKT stationarity to machine precision on well-scaled connectome covariances and can be reduced for speed). |
+| `n_inner` | `int` | — | `50` | Outer column sweeps and inner lasso sweeps per column (fixed budget; the defaults reach KKT stationarity to machine precision on well-scaled connectome covariances and can be reduced for speed). |
+
+**Returns** `Float` — shape `p` × `p`. `(p, p)` symmetric sparse precision; the inactive off-diagonals are exactly zero (the conditional-independence graph).
+<!-- nitrix:/gen -->
 
 ## `glasso_path` {#glasso_path}
 
+<!-- nitrix:gen sig:glasso_path -->
 ```python
-glasso_path(S: Float[Array, 'p p'], lambdas: Float[Array, 'L'], *, n_outer: int=100, n_inner: int=50) -> Float[Array, 'L p p']
+glasso_path(S: Float[Array, 'p p'], lambdas: Float[Array, 'L'], *, n_outer: int = 100, n_inner: int = 50) -> Float[Array, 'L p p']
 ```
+<!-- nitrix:/gen -->
 
-Warm-started graphical-LASSO regularisation path over ``lambdas``.
+<!-- nitrix:gen overview:glasso_path -->
+Warm-started graphical-LASSO regularisation path over `lambdas`.
 
-**Parameters** — *TODO: document each parameter.*
+Sweeps the penalties in the **given order**, carrying the working covariance
+`W` and the lasso coefficients `B` from one `lam` to the next so each
+solve starts warm (far cheaper than a cold restart and the usual way to
+trace a glasso path -- pass `lambdas` descending, dense -> sparse, or
+ascending; either direction warm-starts).  Returns the stacked precisions
+aligned with `lambdas`; pair with :func:`ebic_score` for model selection.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:glasso_path -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `S` | `Float` | `p` × `p` | — | — |
+| `lambdas` | `Float` | `L` | — | — |
+| `n_outer` | `int` | — | `100` | — |
+| `n_inner` | `int` | — | `50` | — |
+
+**Returns** `Float` — shape `L` × `p` × `p`.
+<!-- nitrix:/gen -->
 
 ## `ledoit_wolf` {#ledoit_wolf}
 
+<!-- nitrix:gen sig:ledoit_wolf -->
 ```python
-ledoit_wolf(X: Float[Array, 'n p'], *, assume_centered: bool=False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
+ledoit_wolf(X: Float[Array, 'n p'], *, assume_centered: bool = False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:ledoit_wolf -->
 Ledoit-Wolf analytic-shrinkage covariance.
 
-**Parameters** — *TODO: document each parameter.*
+Returns `(cov, shrinkage)`.  The shrinkage intensity is
+`alpha = beta^2 / delta^2` with `delta^2 = ||S - mu I||_F^2` and
+`beta^2 = (1/n^2) sum_k ||x_k||^4 - (1/n) ||S||_F^2` clipped to
+`[0, delta^2]` (Ledoit & Wolf 2004).  Matches
+`sklearn.covariance.ledoit_wolf`.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:ledoit_wolf -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `p` | — | — |
+| `assume_centered` | `bool` | — | `False` | — |
+
+**Returns** `Tuple[Float[Array, 'p p'], Float[Array, '']]`.
+<!-- nitrix:/gen -->
 
 ## `oas` {#oas}
 
+<!-- nitrix:gen sig:oas -->
 ```python
-oas(X: Float[Array, 'n p'], *, assume_centered: bool=False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
+oas(X: Float[Array, 'n p'], *, assume_centered: bool = False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:oas -->
 Oracle-Approximating-Shrinkage covariance (Chen et al. 2010).
 
-**Parameters** — *TODO: document each parameter.*
+Returns `(cov, shrinkage)`.  Same convex blend as Ledoit-Wolf, a
+different closed-form `alpha`.  Matches `sklearn.covariance.oas`.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:oas -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `p` | — | — |
+| `assume_centered` | `bool` | — | `False` | — |
+
+**Returns** `Tuple[Float[Array, 'p p'], Float[Array, '']]`.
+<!-- nitrix:/gen -->
 
 ## `shrunk_covariance` {#shrunk_covariance}
 
+<!-- nitrix:gen sig:shrunk_covariance -->
 ```python
-shrunk_covariance(X: Float[Array, 'n p'], *, method: ShrinkageMethod='ledoit_wolf', assume_centered: bool=False) -> Float[Array, 'p p']
+shrunk_covariance(X: Float[Array, 'n p'], *, method: ShrinkageMethod = 'ledoit_wolf', assume_centered: bool = False) -> Float[Array, 'p p']
 ```
+<!-- nitrix:/gen -->
 
-Analytic-shrinkage covariance via ``method`` (the cov only).
+<!-- nitrix:gen overview:shrunk_covariance -->
+Analytic-shrinkage covariance via `method` (the cov only).
 
-**Parameters** — *TODO: document each parameter.*
+`'ledoit_wolf'` (default, nilearn's connectome default) or `'oas'`.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:shrunk_covariance -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `p` | — | — |
+| `method` | `ShrinkageMethod` | — | `'ledoit_wolf'` | — |
+| `assume_centered` | `bool` | — | `False` | — |
+
+**Returns** `Float` — shape `p` × `p`.
+<!-- nitrix:/gen -->
 

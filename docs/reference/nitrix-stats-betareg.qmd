@@ -1,37 +1,101 @@
 ---
 title: "nitrix.stats.betareg"
 generated: true
-signature-hash: 55c7148fb8ea016a
+signature-hash: e1bbec463cd8d264
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.betareg` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.betareg`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->
 
 ## `BetaResult` {#BetaResult}
 
-*decorated:* `@register_result(children=('coef', 'precision', 'cov_unscaled', 'log_lik'), aux=('n_obs',))`, `@dataclass(frozen=True)`
-
+<!-- nitrix:gen sig:BetaResult -->
 ```python
 class BetaResult
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:BetaResult -->
 Per-element beta-regression fit output.
+<!-- nitrix:/gen -->
 
-*TODO: class overview.*
+### Methods
+
+<!-- nitrix:gen sig:BetaResult.__init__ -->
+```python
+__init__(coef: Float[Array, 'V p'], precision: Float[Array, 'V'], cov_unscaled: Float[Array, 'V p p'], log_lik: Float[Array, 'V'], n_obs: int) -> None
+```
+<!-- nitrix:/gen -->
 
 ## `beta_fit` {#beta_fit}
 
+<!-- nitrix:gen sig:beta_fit -->
 ```python
-beta_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, n_iter: int=50, ridge: float=1e-08, block: Optional[int]=None) -> BetaResult
+beta_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> BetaResult
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:beta_fit -->
 Mass-univariate beta regression (logit link, estimated precision).
 
-**Parameters** — *TODO: document each parameter.*
+Fits, per element, `y_v ~ Beta(mu phi, (1 - mu) phi)` with `mu =
+logit^{-1}(X beta_v)` and a per-element precision `phi_v`, by
+Ferrari-Cribari-Neto Fisher scoring.  Responses must lie strictly in
+`(0, 1)` (values are clipped off the boundary by `1e-8`).
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:beta_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses in `(0, 1)`. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` shared design (include your own intercept). |
+| `n_iter` | `int` | — | `50` | Fisher-scoring iterations (default `50`). |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser on the normal equations. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
+
+**Returns** `BetaResult`.
+<!-- nitrix:/gen -->
+
+## `beta_predict` {#beta_predict}
+
+<!-- nitrix:gen sig:beta_predict -->
+```python
+beta_predict(result: BetaResult, X: Float[Array, 'N p'], *, type: Literal['response', 'link'] = 'response') -> Float[Array, 'V N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:beta_predict -->
+Per-element beta-regression prediction on a (new) design `X`.
+
+The :func:`beta_fit` analogue of :func:`nitrix.stats.predict`: the mean
+model is the logit link, so `type='link'` returns the linear predictor
+`eta = X beta` and `type='response'` (default) returns the fitted mean
+`mu = expit(eta)` in `(0, 1)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:beta_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `BetaResult` | — | — | A :class:`BetaResult` from :func:`beta_fit`. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` design (same columns as the fit). |
+| `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean `mu`) or `'link'` (the linear predictor `eta`). |
+
+**Returns** `Float` — shape `V` × `N`.
+<!-- nitrix:/gen -->
 

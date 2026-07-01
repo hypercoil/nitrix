@@ -1,61 +1,247 @@
 ---
 title: "nitrix.stats.inference.multiple_comparisons"
 generated: true
-signature-hash: 6eb5eee5c25a0f9b
+signature-hash: 44a788242deb6fb4
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.inference.multiple_comparisons` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.inference.multiple_comparisons`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->
+
+## `fdr` {#fdr}
+
+<!-- nitrix:gen sig:fdr -->
+```python
+fdr(p_values: Float[Array, 'n'], *, method: FDRMethod = 'bh', alpha: float = 0.05, lam: float = 0.5) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fdr -->
+Unified false-discovery-rate correction.
+
+`method`: `'bh'` (default -- Benjamini-Hochberg, valid under independence
+/ PRDS), `'by'` (Benjamini-Yekutieli, valid under arbitrary dependence), or
+`'storey'` (pi0-adaptive, higher power; `lam` tunes the `pi0` estimate).
+Returns `(rejected, p_adjusted)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fdr -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `method` | `FDRMethod` | — | `'bh'` | — |
+| `alpha` | `float` | — | `0.05` | — |
+| `lam` | `float` | — | `0.5` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
 
 ## `fdr_bh` {#fdr_bh}
 
+<!-- nitrix:gen sig:fdr_bh -->
 ```python
-fdr_bh(p_values: Float[Array, 'n'], *, alpha: float=0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+fdr_bh(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
 ```
+<!-- nitrix:/gen -->
 
-Benjamini-Hochberg FDR correction.
+<!-- nitrix:gen overview:fdr_bh -->
+Benjamini-Hochberg FDR correction (valid under independence / PRDS).
 
-**Parameters** — *TODO: document each parameter.*
+Returns `(rejected, p_adjusted)`: the BH-adjusted p-values (q-values,
+enforced monotone non-decreasing in rank) and the rejection mask
+`p_adjusted <= alpha`.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:fdr_bh -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `alpha` | `float` | — | `0.05` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
+
+## `fdr_by` {#fdr_by}
+
+<!-- nitrix:gen sig:fdr_by -->
+```python
+fdr_by(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fdr_by -->
+Benjamini-Yekutieli FDR correction -- valid under **arbitrary** dependence.
+
+The BH step-up at level `alpha / c(m)` with the harmonic number
+`c(m) = sum_{k=1}^m 1/k` (equivalently, the BH q-values scaled by `c(m)`).
+Use when the p-values may be arbitrarily (e.g. negatively) dependent and BH's
+positive-dependence assumption is unsafe -- the price is a `~log(m)` factor
+more conservative.  Returns `(rejected, p_adjusted)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fdr_by -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `alpha` | `float` | — | `0.05` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
+
+## `fdr_storey` {#fdr_storey}
+
+<!-- nitrix:gen sig:fdr_storey -->
+```python
+fdr_storey(p_values: Float[Array, 'n'], *, alpha: float = 0.05, lam: float = 0.5) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fdr_storey -->
+Storey's pi0-adaptive FDR / q-values (higher power; independence / PRDS).
+
+Benjamini-Hochberg with the count `m` replaced by the estimated number of
+true nulls `m * pi0` (see :func:`storey_pi0`): uniformly less conservative
+than BH when a non-trivial fraction of effects are real, and identical to BH
+when `pi0 = 1`.  Returns `(rejected, p_adjusted)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fdr_storey -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `alpha` | `float` | — | `0.05` | — |
+| `lam` | `float` | — | `0.5` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
+
+## `storey_pi0` {#storey_pi0}
+
+<!-- nitrix:gen sig:storey_pi0 -->
+```python
+storey_pi0(p_values: Float[Array, 'n'], *, lam: float = 0.5) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:storey_pi0 -->
+Storey's estimate of the true-null proportion `pi0` (Storey 2002).
+
+`pi0(lambda) = #{p_i > lambda} / (m (1 - lambda))`, clipped to
+`[1/m, 1]`.  The tuning `lambda in (0, 1)` (default `0.5`) trades bias
+for variance; `pi0 = 1` recovers Benjamini-Hochberg, and a smaller `pi0`
+(more alternatives present) yields a less conservative, higher-power adaptive
+FDR.  The `1/m` floor guards the degenerate "no null" estimate.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:storey_pi0 -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `lam` | `float` | — | `0.5` | — |
+
+**Returns** `Float` — shape —.
+<!-- nitrix:/gen -->
 
 ## `bonferroni` {#bonferroni}
 
+<!-- nitrix:gen sig:bonferroni -->
 ```python
-bonferroni(p_values: Float[Array, 'n'], *, alpha: float=0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+bonferroni(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:bonferroni -->
 Bonferroni family-wise correction.
 
-**Parameters** — *TODO: document each parameter.*
+Returns `(rejected, p_adjusted)` with `p_adjusted = min(p * n, 1)`.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:bonferroni -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `alpha` | `float` | — | `0.05` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
 
 ## `conjunction` {#conjunction}
 
+<!-- nitrix:gen sig:conjunction -->
 ```python
 conjunction(stats: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
 ```
+<!-- nitrix:/gen -->
 
-Minimum-statistic conjunction across ``k`` contrasts (Nichols et al. 2005).
+<!-- nitrix:gen overview:conjunction -->
+Minimum-statistic conjunction across `k` contrasts (Nichols et al. 2005).
 
-**Parameters** — *TODO: document each parameter.*
+`stats` stacks the `k` per-contrast statistic maps on the leading axis.
+Returns the per-element **minimum** over contrasts -- the valid statistic for
+the conjunction null *"at least one of the `k` effects is null"*: a voxel
+survives a threshold only where **every** contrast clears it (the minimum
+does).  This is the correct conjunction; the common
+"all-effects-null" intersection of separately-thresholded maps tests a
+*different* (global) null and does not control the conjunction error.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:conjunction -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `stats` | `Float` | `k` × `*spatial` | — | — |
+
+**Returns** `Float` — shape `*spatial`.
+<!-- nitrix:/gen -->
 
 ## `conjunction_pvalue` {#conjunction_pvalue}
 
+<!-- nitrix:gen sig:conjunction_pvalue -->
 ```python
 conjunction_pvalue(p_values: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
 ```
+<!-- nitrix:/gen -->
 
-Conjunction p-value: the **maximum** per-contrast p-value over ``k``
+<!-- nitrix:gen overview:conjunction_pvalue -->
+Conjunction p-value: the **maximum** per-contrast p-value over `k`
+contrasts (the p-scale dual of :func:`conjunction`).
 
-**Parameters** — *TODO: document each parameter.*
+The minimum-statistic conjunction is significant at `alpha` iff every
+contrast's p-value is below `alpha` iff their maximum is -- so `max p` is
+the valid conjunction p-value (Nichols et al. 2005).
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:conjunction_pvalue -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `k` × `*spatial` | — | — |
+
+**Returns** `Float` — shape `*spatial`.
+<!-- nitrix:/gen -->
 

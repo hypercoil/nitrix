@@ -1,59 +1,117 @@
 ---
 title: "nitrix.stats.pca"
 generated: true
-signature-hash: 64a7d840ab3da177
+signature-hash: 773c0daab6d00582
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.pca` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.pca`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->
 
 ## `PCAResult` {#PCAResult}
 
+<!-- nitrix:gen sig:PCAResult -->
 ```python
-class PCAResult
+class PCAResult(NamedTuple)
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:PCAResult -->
 Fitted PCA basis (a NamedTuple of arrays, not a module).
-
-*TODO: class overview.*
+<!-- nitrix:/gen -->
 
 ## `pca_fit` {#pca_fit}
 
+<!-- nitrix:gen sig:pca_fit -->
 ```python
-pca_fit(X: Float[Array, 'n d'], *, n_components: Optional[int]=None, center: bool=True, solver: Solver='full', n_oversamples: int=10, n_power_iterations: int=2, key: Optional[Array]=None) -> PCAResult
+pca_fit(X: Float[Array, 'n d'], *, n_components: Optional[int] = None, center: bool = True, solver: Solver = 'full', n_oversamples: int = 10, n_power_iterations: int = 2, key: Optional[Array] = None) -> PCAResult
 ```
+<!-- nitrix:/gen -->
 
-Fit a PCA basis to ``X`` (rows = samples, columns = features).
+<!-- nitrix:gen overview:pca_fit -->
+Fit a PCA basis to `X` (rows = samples, columns = features).
+<!-- nitrix:/gen -->
 
-**Parameters** — *TODO: document each parameter.*
+<!-- nitrix:gen params:pca_fit -->
+**Parameters**
 
-**Returns** — *TODO.*
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `d` | — | Data matrix `(n_samples, n_features)`. |
+| `n_components` | `Optional[int]` | — | `None` | Number of components to keep. `None` (default) keeps `min(n_samples, n_features)` -- the components with potentially non-zero variance. Must be a static (Python) `int` so the output shape is known at trace time. |
+| `center` | `bool` | — | `True` | Subtract the feature mean before fitting (default `True`). When `False` the returned `mean` is zeros and the decomposition is of the uncentred second-moment matrix. |
+| `solver` | `Solver` | — | `'full'` | `"full"` (default) -- exact covariance eigendecomposition; `"gram"` -- exact, via the `(n, n)` Gram (cheap when `n < d`); `"randomized"` -- randomised range finder (top `k` only, cheap when `k << d`); `"auto"` -- `"gram"` if `n < d` else `"full"`. |
+| `n_oversamples` | `int` | — | `10` | Randomised-solver controls: the oversampling `p` (sketch width `k + p`) and the number of power iterations `q` (more `q` sharpens the spectral separation, improving accuracy on slowly decaying spectra). Ignored for `solver="full"`. |
+| `n_power_iterations` | `int` | — | `2` | Randomised-solver controls: the oversampling `p` (sketch width `k + p`) and the number of power iterations `q` (more `q` sharpens the spectral separation, improving accuracy on slowly decaying spectra). Ignored for `solver="full"`. |
+| `key` | `Optional[Array]` | — | `None` | PRNG key. Required for `solver="randomized"`; ignored otherwise. |
+
+**Returns** `PCAResult`. `components` `(k, d)`, `mean` `(d,)`, `explained_variance` `(k,)`.
+<!-- nitrix:/gen -->
 
 ## `pca_transform` {#pca_transform}
 
+<!-- nitrix:gen sig:pca_transform -->
 ```python
 pca_transform(X: Float[Array, 'n d'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n k']
 ```
+<!-- nitrix:/gen -->
 
-Project ``X`` onto a PCA basis: ``(X - mean) @ components.T``.
+<!-- nitrix:gen overview:pca_transform -->
+Project `X` onto a PCA basis: `(X - mean) @ components.T`.
 
-**Parameters** — *TODO: document each parameter.*
+Takes `components` / `mean` explicitly (rather than a
+:class:`PCAResult`) so a *pre-fitted* basis -- e.g. components
+loaded from elsewhere -- can be applied without a local
+:func:`pca_fit`.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:pca_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `d` | — | — |
+| `components` | `Float` | `k` × `d` | — | — |
+| `mean` | `Float` | `d` | — | — |
+
+**Returns** `Float` — shape `n` × `k`.
+<!-- nitrix:/gen -->
 
 ## `pca_inverse_transform` {#pca_inverse_transform}
 
+<!-- nitrix:gen sig:pca_inverse_transform -->
 ```python
 pca_inverse_transform(Z: Float[Array, 'n k'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n d']
 ```
+<!-- nitrix:/gen -->
 
-Reconstruct from PCA coordinates: ``Z @ components + mean``.
+<!-- nitrix:gen overview:pca_inverse_transform -->
+Reconstruct from PCA coordinates: `Z @ components + mean`.
 
-**Parameters** — *TODO: document each parameter.*
+Exact (up to the discarded components) inverse of
+:func:`pca_transform`.
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:pca_inverse_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Z` | `Float` | `n` × `k` | — | — |
+| `components` | `Float` | `k` × `d` | — | — |
+| `mean` | `Float` | `d` | — | — |
+
+**Returns** `Float` — shape `n` × `d`.
+<!-- nitrix:/gen -->
 

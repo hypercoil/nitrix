@@ -63,9 +63,10 @@ More units (signal, connectivity and labels) will follow the same pattern.
 *Information-oriented — precise, complete API documentation for every public
 function and type.*
 
-**In progress, not yet published.** Auto-generated signature stubs currently cover
-`nitrix.stats`; the rest of the public surface, and the authored prose that turns a
-signature into usable documentation, are forthcoming.
+**Draft — [browse the API reference](reference/index.qmd).** The pages are
+auto-generated with signatures, named tensor dimensions, and benchmark figures;
+the authored prose is still being filled and coverage is expanding beyond
+`nitrix.stats`, so treat them as work in progress.
 :::
 
 :::

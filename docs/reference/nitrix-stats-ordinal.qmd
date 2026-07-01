@@ -1,37 +1,111 @@
 ---
 title: "nitrix.stats.ordinal"
 generated: true
-signature-hash: 8d6d7830ecd2f024
+signature-hash: 9c9758d25e8dcbc1
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
-Auto-generated scaffold for `nitrix.stats.ordinal` (signatures only). Replace the
-skeletons with authored prose; do **not** ship as-is (SPEC §6.5).
-`check_reference_staleness.py` flags this page if the underlying
-signatures drift from this stub.
+Auto-generated scaffold for `nitrix.stats.ordinal`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `Km1` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->
 
 ## `OrdinalResult` {#OrdinalResult}
 
-*decorated:* `@register_result(children=('coef', 'thresholds', 'cov_coef', 'log_lik'), aux=('n_obs', 'n_classes'))`, `@dataclass(frozen=True)`
-
+<!-- nitrix:gen sig:OrdinalResult -->
 ```python
 class OrdinalResult
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:OrdinalResult -->
 Per-element ordinal (cumulative-link) fit output.
+<!-- nitrix:/gen -->
 
-*TODO: class overview.*
+### Methods
+
+<!-- nitrix:gen sig:OrdinalResult.__init__ -->
+```python
+__init__(coef: Float[Array, 'V p'], thresholds: Float[Array, 'V Km1'], cov_coef: Float[Array, 'V p p'], log_lik: Float[Array, 'V'], n_obs: int, n_classes: int, link: str) -> None
+```
+<!-- nitrix:/gen -->
 
 ## `ordinal_fit` {#ordinal_fit}
 
+<!-- nitrix:gen sig:ordinal_fit -->
 ```python
-ordinal_fit(Y: Int[Array, 'V N'], X: Float[Array, 'N p'], *, n_classes: int, link: str='logit', n_iter: int=50, ridge: float=1e-08, block: Optional[int]=None) -> OrdinalResult
+ordinal_fit(Y: Int[Array, 'V N'], X: Float[Array, 'N p'], *, n_classes: int, link: str = 'logit', n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> OrdinalResult
 ```
+<!-- nitrix:/gen -->
 
+<!-- nitrix:gen overview:ordinal_fit -->
 Mass-univariate ordinal regression (cumulative-link / proportional odds).
 
-**Parameters** — *TODO: document each parameter.*
+Fits, per element, the ordered-categorical model `P(y_v <= k) =
+F(theta_k - X beta_v)` for `y_v in {0, .., K-1}`, with `F` the logistic
+(`link='logit'`) or normal (`link='probit'`) CDF.  `X` carries **no**
+intercept (the `K - 1` thresholds absorb it).
+<!-- nitrix:/gen -->
 
-**Returns** — *TODO.*
+<!-- nitrix:gen params:ordinal_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Y` | `Int` | `V` × `N` | — | `(V, N)` ordered class labels in `{0, .., n_classes-1}`. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` shared design (no intercept column). |
+| `n_classes` | `int` | — | — | Number of ordered classes `K` (`>= 2`). |
+| `link` | `str` | — | `'logit'` | `'logit'` (proportional odds, default) or `'probit'` (ordered probit). |
+| `n_iter` | `int` | — | `50` | Newton iterations (default `50`). |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser on the Newton / information solves. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
+
+**Returns** `OrdinalResult`.
+<!-- nitrix:/gen -->
+
+## `ordinal_predict` {#ordinal_predict}
+
+<!-- nitrix:gen sig:ordinal_predict -->
+```python
+ordinal_predict(result: OrdinalResult, X: Float[Array, 'N p'], *, type: Literal['class_prob', 'cum_prob', 'class'] = 'class_prob') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ordinal_predict -->
+Per-element ordinal prediction on a (new) design `X`.
+
+Applies the fitted cumulative-link model `P(y <= j) = F(theta_j - X beta)`
+(`F` the stored `result.link` CDF) at the new design and returns,
+per `type`:
+
+- `'class_prob'` (default): the per-class simplex `P(y = k)`, shape
+  `(V, N, K)` -- the diff of the cumulative probabilities.
+- `'cum_prob'`: the cumulative probabilities `P(y <= j)` for the
+  `K - 1` interior thresholds, shape `(V, N, K - 1)`.
+- `'class'`: the arg-max class label, shape `(V, N)` (**non**
+  -differentiable -- a hard label).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ordinal_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `OrdinalResult` | — | — | An :class:`OrdinalResult` from :func:`ordinal_fit`. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` design (no intercept column, as at fit -- the thresholds absorb it). |
+| `type` | `Literal['class_prob', 'cum_prob', 'class']` | — | `'class_prob'` | Output kind (see above). |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
 
