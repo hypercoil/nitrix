@@ -94,6 +94,17 @@ GPU steady-state **109.4 µs** (median, L4); up to **790.65× faster** than `sci
 ::::
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:resample -->
+::: {.callout-note}
+No cubic (`order=3`) B-spline path exists yet, so bit-parity
+with resamplers that default to order-3 splines (e.g. nnUNet /
+`hd_bet` preprocessing, `scipy.ndimage.zoom(order=3)`) is
+**not** achieved; `Linear` is adequate for most consumers.  A
+separable B-spline prefilter + cubic sampling is tracked as a
+future enhancement (`docs/feature-requests/cubic-resample.md`).
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:resample -->
 **Tensor dimensions**

@@ -72,6 +72,16 @@ GPU steady-state **11.52 ms** (median, L4).  [full report](https://github.com/hy
 ::::
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:reml_fit -->
+::: {.callout-note}
+Eigendecomposition of $Z Z^{\top}$ uses `safe_eigh` (a
+cuSOLVER-robust fallback) -- the one shared, one-off solver call.  The
+per-voxel inner loop (`_varcomp`) makes no cuSOLVER call: the fixed-effect
+algebra is closed-form for $p \le 2$ and `LU`-based for
+$p > 2$, and the REML derivatives are analytic.
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:reml_fit -->
 **Tensor dimensions**

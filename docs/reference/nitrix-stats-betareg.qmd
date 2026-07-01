@@ -69,6 +69,14 @@ inverse; $\psi$ (digamma) and its derivatives (polygamma) come from
 `jax.scipy.special`.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+- Ferrari, S. & Cribari-Neto, F. (2004). Beta regression for modelling rates and
+  proportions.  Journal of Applied Statistics, 31(7), 799-815.
+  https://doi.org/10.1080/0266476042000214501
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

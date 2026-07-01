@@ -33,6 +33,14 @@ tests a different (global) null and does not control the conjunction error.
 **Returns** `Float` — shape `*spatial`. The per-element minimum statistic over the `k` contrasts.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:conjunction -->
+### References
+
+Nichols, T., Brett, M., Andersson, J., Wager, T., & Poline, J.-B. (2005).
+Valid conjunction inference with the minimum statistic. NeuroImage, 25(3),
+653-660. https://doi.org/10.1016/j.neuroimage.2004.12.005
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:conjunction -->
 **Tensor dimensions**

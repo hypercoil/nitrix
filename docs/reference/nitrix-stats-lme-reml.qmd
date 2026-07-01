@@ -22,6 +22,117 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 Variance-components REML for voxelwise linear mixed-effects models.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### The model
+
+For each voxel $v$, the linear mixed-effects model is
+
+``
+y_v = X beta_v + Z b_v + eps_v
+``
+
+with $b_v \sim \mathcal{N}(0, \sigma_b^2 I_q)$,
+$\epsilon_v \sim \mathcal{N}(0, \sigma_e^2 I_N)$, so the marginal
+covariance of the response is
+$V = \sigma_b^2 Z Z^{\top} + \sigma_e^2 I_N$.
+
+The fixed-effect design `X` and random-effect design `Z` are
+**shared** across voxels (the typical fMRI / dMRI case: one
+group-level design, applied to every voxel's response).  Only the
+per-voxel response $y_v$ varies.
+
+The profile REML (Restricted Maximum Likelihood) negative log-
+likelihood, after profiling out $\beta$, is
+
+$$
+\mathrm{nll}(\theta) = \tfrac{1}{2}
+    \bigl[\log|V| + \log|X^{\top} V^{-1} X|
+    + r^{\top} V^{-1} r\bigr]
+$$
+
+where $r = y - X \hat{\beta}$ and
+$\hat{\beta} = (X^{\top} V^{-1} X)^{-1} X^{\top} V^{-1} y$.  The
+variance components are parameterised as $\theta = \log(\sigma^2)$
+(log-space) so optimisation is unconstrained.
+
+### The fast lmm spectral trick
+
+Following Lippert et al. (2011), eigendecompose
+$Z Z^{\top} = U \Lambda U^{\top}$.  In the rotated basis
+$y_{\mathrm{rot}} = U^{\top} y$,
+$X_{\mathrm{rot}} = U^{\top} X$, the total covariance is diagonal:
+
+$$
+V_{\mathrm{rot}} = \sigma_b^2 \Lambda + \sigma_e^2 I
+    = \operatorname{diag}(d), \qquad
+d_i = \sigma_b^2 \lambda_i + \sigma_e^2 .
+$$
+
+Every operation in the Newton iteration becomes elementwise on
+$d$: $\log|V| = \sum_i \log d_i$; $V^{-1}$ is
+$\operatorname{diag}(1/d)$;
+$X^{\top} V^{-1} X = \sum_i x_i x_i^{\top} / d_i$.  Per-iteration
+cost drops from $O(N^3)$ (naive) to $O(N p^2 + N)$ (rotated).
+
+The eigendecomposition of $Z Z^{\top}$ is computed **once** at the
+outer call -- shared across all voxels via a vmap closure.
+
+### Memory regime
+
+For `V` voxels, `N` subjects, `p` fixed-effect coefficients:
+
+- Shared (computed once):
+  - `U`, $\Lambda$: `(N, N)` + `(N,)`  --  $\sim 4 N^2$
+    bytes.
+  - `X_rot`: `(N, p)`.
+- Per-voxel (vmap):
+  - `y_rot`: `(N,)`.
+  - `XtVinvX`: `(p, p)`.  Tiny.
+  - `beta`: `(p,)`.
+- Per-Newton-step intermediates: `(N,)` arrays.
+
+Total HBM at `V = 100k`, `N = 30`, `p = 5`:
+
+- `Y`: `100k * 30 * 4 = 12 MB`.
+- Per-voxel results: `100k * (2 + 5 + 1) * 4 = ~3 MB`.
+- Newton-step intermediates (vmapped): `100k * 30 * 4 = 12 MB` peak.
+
+Total ~30 MB.  Fits trivially.  At `V = 1M`, `N = 100`,
+`p = 10`: `~500 MB` -- still comfortable on a 24 GB GPU.
+
+### Solver
+
+The per-voxel inner loop is the shared `_varcomp` AI-REML engine:
+size-dispatched fixed-effect algebra (closed-form for $p \le 2$,
+`LU` for $p > 2$ -- no per-voxel cuSOLVER `potrf` / `syevd`)
+and *analytic* REML score + average-information curvature (no
+second-order autodiff through a Cholesky).  See `_varcomp` for
+the derivation.  The $Z Z^{\top}$ eigendecomposition that supplies
+the diagonalising basis is the one shared, one-off `safe_eigh` call.
+
+### Differentiability
+
+Implementation uses `jax.lax.scan` over a fixed number of
+Newton steps; each step is fully differentiable, so backward-
+mode AD through the fit works (unrolled gradient through the
+scan).  At `n_iter = 20` the unrolled grad has ~20 stacked
+sub-graphs -- a real memory cost.  For applications that
+differentiate through the fit (e.g., differentiable model
+selection), pass a smaller `n_iter` or wait for the implicit-
+function-theorem VJP follow-up.
+
+### References
+
+- Lindstrom, M. J., & Bates, D. M. (1988). Newton-Raphson and
+  EM algorithms for linear mixed-effects models for repeated-measures
+  data.  Journal of the American Statistical Association, 83(404),
+  1014-1022.  https://doi.org/10.1080/01621459.1988.10478693
+- Lippert, C., Listgarten, J., Liu, Y., Kadie, C. M., Davidson, R. I.,
+  & Heckerman, D. (2011). FaST linear mixed models for genome-wide
+  association studies.  Nature Methods, 8(10), 833-835.
+  https://doi.org/10.1038/nmeth.1681
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

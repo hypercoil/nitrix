@@ -45,6 +45,13 @@ parameterisation $\theta = \theta_1 + \operatorname{cumsum}([0,
 Newton scheme with analytic autodiff curvature.  This pathway is cuSOLVER-free.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+- McCullagh, P. (1980). Regression models for ordinal data.  J. R. Statist. Soc.
+  B 42, 109-142. https://doi.org/10.1111/j.2517-6161.1980.tb01109.x
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

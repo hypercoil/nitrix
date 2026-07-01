@@ -75,6 +75,18 @@ GPU steady-state **119.6 µs** (median, L4); up to **220.43× faster** than `sci
 ::::
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:integrate_velocity_field -->
+::: {.callout-note}
+The default `mode` was flipped from `"constant"` (the
+naive choice) to `"nearest"` to match voxelmorph's
+`VecInt(method='ss', int_steps=...)`.  This is the *only*
+semantics-changing behaviour change in the JOSA-feedback
+sprint; downstream code that relied on the old default needs
+to pass `mode="constant"` explicitly.  See
+`docs/design/geometry.md` for the rationale.
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:integrate_velocity_field -->
 **Tensor dimensions**

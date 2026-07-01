@@ -36,6 +36,14 @@ higher-power adaptive FDR. The $1/m$ floor guards against the degenerate
 **Returns** `Float` — shape —. The estimated true-null proportion $\pi_0$, a scalar clipped to $[1/m, 1]$.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:storey_pi0 -->
+### References
+
+Storey, J. D. (2002). A direct approach to false discovery rates. Journal of
+the Royal Statistical Society: Series B (Statistical Methodology), 64(3),
+479-498. https://doi.org/10.1111/1467-9868.00346
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:storey_pi0 -->
 **Tensor dimensions**

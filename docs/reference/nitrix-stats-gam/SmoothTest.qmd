@@ -24,3 +24,11 @@ otherwise), and `edf` the smooth's effective degrees of freedom (the
 `mgcv::summary.gam` "edf" column).
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:SmoothTest -->
+### References
+
+Wood, S. N. (2013). On p-values for smooth components of an extended
+generalized additive model. Biometrika, 100(1), 221-228.
+https://doi.org/10.1093/biomet/ass048
+<!-- nitrix:/gen -->
+

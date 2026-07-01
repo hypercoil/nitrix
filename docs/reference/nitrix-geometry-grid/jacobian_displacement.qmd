@@ -63,6 +63,14 @@ GPU steady-state **94.8 µs** (median, L4); up to **39.58× faster** than `numpy
 ::::
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:jacobian_displacement -->
+::: {.callout-note}
+For folding detection use `jacobian_det_displacement` which
+avoids materialising the full Jacobian when only the
+determinant is needed.
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:jacobian_displacement -->
 **Tensor dimensions**

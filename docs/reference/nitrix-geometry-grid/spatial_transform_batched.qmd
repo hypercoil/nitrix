@@ -46,6 +46,15 @@ dims natively.
 **Returns** `Float` — shape `...`.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:spatial_transform_batched -->
+::: {.callout-note}
+Maps over exactly **one** leading axis.  To broadcast a shared
+operand across *several* leading batch dims, broadcast it to the
+full batch shape and call `spatial_transform` directly (which
+handles multiple matching leading dims natively).
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:spatial_transform_batched -->
 **Tensor dimensions**

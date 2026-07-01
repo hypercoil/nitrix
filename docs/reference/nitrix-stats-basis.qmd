@@ -34,6 +34,20 @@ the uniform-B-spline machinery already validated for N4 and gives an exact
 reference to test against.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### Identifiability
+
+A smooth competes with the model intercept unless it is constrained to sum to
+zero over the data ($\sum_i f(x_i) = 0$, i.e.
+$(1^{\top} B) \beta = 0$).  We absorb that single constraint by
+reparameterising $\beta = Z \alpha$ with $Z$ an orthonormal basis
+of the constraint's null space, computed by a **single Householder reflection**
+-- no `qr` (cuSOLVER) -- so the construction runs on the broken-cuSOLVER GPU
+and stays differentiable.
+
+Everything is value -> value and cuSOLVER-free.
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

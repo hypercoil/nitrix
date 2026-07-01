@@ -45,3 +45,11 @@ documented follow-up; the integer-rank test reproduces
 **Returns** `SmoothTest`. The per-smooth test statistic, effective degrees of freedom, reference rank, and p-value, each a `(V, m)` array.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:smooth_significance -->
+### References
+
+Wood, S. N. (2013). On p-values for smooth components of an extended
+generalized additive model. Biometrika, 100(1), 221-228.
+https://doi.org/10.1093/biomet/ass048
+<!-- nitrix:/gen -->
+

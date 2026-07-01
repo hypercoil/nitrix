@@ -27,6 +27,41 @@ from the parts in this subpackage.  It is an on-device analogue of the FSL
 `randomise` tool.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### The procedure
+
+For data $Y$ (one response per observation per voxel), design $X$,
+and a contrast -- a `(p,)` t-contrast $c$ or a `(m, p)` F-contrast
+$C$:
+
+1. Fit ordinary least squares and form the observed statistic image (t / F, or
+   a variance-smoothed pseudo-t), then **enhance** it (TFCE / cluster / raw
+   voxel).
+2. For each of `n_perm` relabellings (sign flips or permutations, honouring
+   exchangeability blocks), refit and re-enhance.  Nuisance regressors are
+   handled by **Freedman-Lane**: permute the residuals of the reduced
+   (nuisance-only) model and add the nuisance fit back, so only the tested
+   effect is exchanged.
+3. Accumulate, without storing every permutation: the **uncorrected** p-map
+   (fraction of permutations whose voxel statistic $\geq$ the observed)
+   and the **FWE** p-map (fraction whose *spatial maximum* enhanced statistic
+   $\geq$ the observed enhanced value).  The first permutation is the
+   identity, so the observed is included and $p \geq 1 / n_{perm}$.
+   Optionally (`pvalue_method='gpd'`) the FWE p-value is read instead from a
+   generalised-Pareto fit to the null-max tail, resolving below the
+   $1 / n_{perm}$ floor at fewer permutations (see `gpd_pvalue`).
+
+The only linear solve is a shared `(p, p)` inverse, so no dense factorisation
+library is required.  The enhancement is a non-differentiable inference kernel
+(it forms discrete clusters); the returned maps are plain arrays.
+
+### References
+
+.. [1] Winkler AM, Ridgway GR, Douaud G, Nichols TE, Smith SM (2016). Faster
+   permutation inference in brain imaging. *NeuroImage*, 141, 502-516.
+   `10.1016/j.neuroimage.2016.05.068`
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

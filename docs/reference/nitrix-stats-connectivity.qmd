@@ -68,6 +68,23 @@ Batch over subjects or edges with `vmap`.  The data matrix `X` is
 `glasso` consumes a `(p, p)` sample covariance `S` directly.
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:__module__ -->
+### References
+
+.. [LW2004] Ledoit, O. and Wolf, M. (2004). A well-conditioned estimator for
+   large-dimensional covariance matrices. *Journal of Multivariate Analysis*,
+   88(2), 365-411. `10.1016/S0047-259X(03)00096-4`
+.. [Chen2010] Chen, Y., Wiesel, A., Eldar, Y. C. and Hero, A. O. (2010).
+   Shrinkage algorithms for MMSE covariance estimation. *IEEE Transactions on
+   Signal Processing*, 58(10), 5016-5029. `10.1109/TSP.2010.2053029`
+.. [FHT2008] Friedman, J., Hastie, T. and Tibshirani, R. (2008). Sparse inverse
+   covariance estimation with the graphical lasso. *Biostatistics*, 9(3),
+   432-441. `10.1093/biostatistics/kxm045`
+.. [FD2010] Foygel, R. and Drton, M. (2010). Extended Bayesian information
+   criteria for Gaussian graphical models. *Advances in Neural Information
+   Processing Systems*, 23, 604-612.
+<!-- nitrix:/gen -->
+
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
 

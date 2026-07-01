@@ -46,6 +46,15 @@ __init__(labels: Tuple[int, ...], inner: Interpolator = Linear()) -> None
 ```
 <!-- nitrix:/gen -->
 
+<!-- nitrix:gen sections:MultiLabel -->
+::: {.callout-note}
+Not differentiable: the arg-max is a hard selection, so the gradient
+w.r.t. both the image values and the coordinates is zero (the call
+does not error under `jax.grad` -- it returns zeros).  `cval` is
+ignored; out-of-support samples resolve to `labels[0]` as above.
+:::
+<!-- nitrix:/gen -->
+
 
 <!-- nitrix:gen dims:MultiLabel -->
 **Tensor dimensions**
