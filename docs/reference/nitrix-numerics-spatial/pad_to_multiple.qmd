@@ -1,0 +1,46 @@
+---
+title: "pad_to_multiple"
+generated: true
+description: "Pad the leading `spatial_rank` axes up to a multiple."
+---
+
+[‹ back to `nitrix.numerics.spatial`](../nitrix-numerics-spatial.qmd)
+
+<!-- nitrix:gen sig:pad_to_multiple -->
+```python
+pad_to_multiple(x: Num[Array, '...'], multiple: _IntArg, *, spatial_rank: int, mode: str = 'constant', cval: float = 0.0) -> Tuple[Num[Array, '...'], Tuple[Tuple[int, int], ...]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:pad_to_multiple -->
+Pad the leading `spatial_rank` axes up to a multiple.
+
+Each spatial axis is symmetrically padded so that its length becomes
+the next multiple of `multiple` (a per-axis sequence is allowed).
+When the required padding is odd, the extra element is placed on the
+high side of the axis. Trailing axes (e.g. channels) are left
+untouched.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:pad_to_multiple -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` | — | Input array whose first `spatial_rank` axes are spatial. |
+| `multiple` | `_IntArg` | — | — | Target multiple for each spatial axis. A single integer is broadcast to every spatial axis; a sequence must have length `spatial_rank`. |
+| `spatial_rank` | `int` | — | — | Number of leading axes treated as spatial. |
+| `mode` | `str` | — | `'constant'` | Padding mode forwarded to `jax.numpy.pad`. Defaults to `'constant'`. |
+| `cval` | `float` | — | `0.0` | Constant value used when `mode == 'constant'`. Defaults to `0.0`. |
+
+**Returns** `Tuple[Num[Array, '...'], Tuple[Tuple[int, int], ...]]`. The padded array. The per-spatial-axis `(lo, hi)` padding applied -- enough to crop back and, for the container layer, to shift the affine origin.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:pad_to_multiple -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

@@ -1,0 +1,55 @@
+---
+title: "levenberg_marquardt"
+generated: true
+description: "Levenberg-Marquardt minimisation of $ tfrac{1}{2} lVert r(x) rVert^2$."
+---
+
+[‹ back to `nitrix.linalg.optimize`](../nitrix-linalg-optimize.qmd)
+
+<!-- nitrix:gen sig:levenberg_marquardt -->
+```python
+levenberg_marquardt(residual_fn: ResidualFn, x0: Float[Array, ' p'], *, n_iters: int = 20, init_lambda: float = 0.001, lambda_up: float = 10.0, lambda_down: float = 0.1, cg_tol: float = 1e-06, cg_maxiter: Optional[int] = None, jacobian: JacobianStrategy = 'auto', jacobian_fn: Optional[ResidualFn] = None, early_stop: Optional[tuple[float, int]] = None) -> OptimizeResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:levenberg_marquardt -->
+Levenberg-Marquardt minimisation of
+$\tfrac{1}{2}\lVert r(x)\rVert^2$.
+
+Each step solves the damped normal equations
+$(J^{\top}J + \lambda I)\,\delta = -J^{\top}r$ and accepts
+$x + \delta$ only if the objective decreases; $\lambda$
+shrinks on accept (toward Gauss-Newton) and grows on reject (toward
+gradient descent).  The accept/reject branch is a `jnp.where` and the
+iteration is a `lax.scan`, so the whole solve stays `jit` /
+`grad`-friendly and compiles in roughly constant time in `n_iters`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:levenberg_marquardt -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `residual_fn` | `ResidualFn` | — | — | As [`gauss_newton`](../nitrix-linalg-optimize/gauss_newton.qmd). |
+| `x0` | `Float` | `p` | — | As [`gauss_newton`](../nitrix-linalg-optimize/gauss_newton.qmd). |
+| `n_iters` | `int` | — | `20` | Number of LM steps (each is one trial step + accept/reject). |
+| `init_lambda` | `float` | — | `0.001` | Initial damping $\lambda$. |
+| `lambda_up` | `float` | — | `10.0` | Multiplicative $\lambda$ adjustment on reject / accept. |
+| `lambda_down` | `float` | — | `0.1` | Multiplicative $\lambda$ adjustment on reject / accept. |
+| `cg_tol` | `float` | — | `1e-06` | As [`gauss_newton`](../nitrix-linalg-optimize/gauss_newton.qmd). |
+| `cg_maxiter` | `Optional[int]` | — | `None` | As [`gauss_newton`](../nitrix-linalg-optimize/gauss_newton.qmd). |
+| `jacobian` | `JacobianStrategy` | — | `'auto'` | As [`gauss_newton`](../nitrix-linalg-optimize/gauss_newton.qmd). |
+| `jacobian_fn` | `Optional[ResidualFn]` | — | `None` | As [`gauss_newton`](../nitrix-linalg-optimize/gauss_newton.qmd). |
+| `early_stop` | `Optional[tuple[float, int]]` | — | `None` | Opt-in early-exit `(threshold, window)` -- as [`gauss_newton`](../nitrix-linalg-optimize/gauss_newton.qmd) (default `None` keeps the fixed `lax.scan`). |
+
+**Returns** `OptimizeResult`. The minimiser and its cost trace; the `cost_history` is monotone-decreasing (guaranteed by the accept/reject rule).
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:levenberg_marquardt -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

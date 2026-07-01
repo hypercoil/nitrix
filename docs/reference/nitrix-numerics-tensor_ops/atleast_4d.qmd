@@ -1,0 +1,29 @@
+---
+title: "atleast_4d"
+generated: true
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:atleast_4d -->
+```python
+atleast_4d(*pparams) -> Union[Shaped[Array, ...], Sequence[Shaped[Array, ...]]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:atleast_4d -->
+*TODO: write an overview.*
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:atleast_4d -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `*pparams` | `Shaped[Array, ...]` | — | `()` | — |
+
+**Returns** `Union[Shaped[Array, ...], Sequence[Shaped[Array, ...]]]`.
+<!-- nitrix:/gen -->
+

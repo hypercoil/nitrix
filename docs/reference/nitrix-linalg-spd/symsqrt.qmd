@@ -1,0 +1,77 @@
+---
+title: "symsqrt"
+generated: true
+description: "Matrix square root of an SPD batch."
+---
+
+[‹ back to `nitrix.linalg.spd`](../nitrix-linalg-spd.qmd)
+
+<!-- nitrix:gen sig:symsqrt -->
+```python
+symsqrt(input: Float[Array, '... d d'], *, psi: float = 0.0, key: Optional[jax.Array] = None, eigvalue_clip: EigvalueClip = 'auto') -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:symsqrt -->
+Matrix square root of an SPD batch.
+
+Applies $\sqrt{\cdot}$ to the eigenvalues via [`symmap`](../nitrix-linalg-spd/symmap.qmd).  The
+scalar square root is undefined for negative reals; the default clipping
+handles the boundary by flooring near-zero eigenvalues.  For genuinely
+indefinite input the result is mathematically undefined and the negative
+eigenvalues surface as `NaN`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:symsqrt -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Float` | `...` × `d` × `d` | — | Symmetric (assumed SPD) matrix batch. |
+| `psi` | `float` | — | `0.0` | Reconditioning strength forwarded to [`symmap`](../nitrix-linalg-spd/symmap.qmd). |
+| `key` | `Optional[jax.Array]` | — | `None` | PRNG key, required when `psi > 0`. |
+| `eigvalue_clip` | `EigvalueClip` | — | `'auto'` | Eigenvalue clipping policy forwarded to [`symmap`](../nitrix-linalg-spd/symmap.qmd). |
+
+**Returns** `Float` — shape `...` × `d` × `d`. The matrix square root of each input matrix; same shape as `input`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:symsqrt -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.99 ms** (median, L4); up to **28.1× faster** than `scipy.linalg.sqrtm`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_SYMSQRT.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| symsqrt | jax-cpu | d=256 | `cupy.eigh_sqrtm` | skipped | — | — | — | — | — |
+| symsqrt | jax-cpu | d=256 | `nitrix-jax` | ok | 5.11 ms / 6.29 ms | 199.96 ms | 527 MB (rss) | ✓ 0.00044×tol | 1.00x vs nitrix-jax |
+| symsqrt | jax-cpu | d=256 | `scipy.linalg.sqrtm` | ok | 19.98 ms / 47.16 ms | 131.27 ms | 471 MB (rss) | ✓ 0.0011×tol | 3.91x vs nitrix-jax |
+| symsqrt | jax-cuda12 | d=256 | `cupy.eigh_sqrtm` | skipped | — | — | — | — | — |
+| symsqrt | jax-cuda12 | d=256 | `nitrix-jax` | ok | 1.97 ms / 1.99 ms | 820.95 ms | 72.09 MB (hbm) | ✓ 0.00042×tol | 1.00x vs nitrix-jax |
+| symsqrt | jax-cuda12 | d=256 | `scipy.linalg.sqrtm` | ok | 44.54 ms / 180.83 ms | 3.892 s | 0.26 MB (hbm) | ✓ 0.0011×tol | 22.63x vs nitrix-jax |
+| symsqrt | jax-cpu | d=512 | `cupy.eigh_sqrtm` | skipped | — | — | — | — | — |
+| symsqrt | jax-cpu | d=512 | `nitrix-jax` | ok | 21.82 ms / 167.38 ms | 948.52 ms | 545 MB (rss) | ✓ 0.00068×tol | 1.00x vs nitrix-jax |
+| symsqrt | jax-cpu | d=512 | `scipy.linalg.sqrtm` | ok | 169.20 ms / 216.27 ms | 292.35 ms | 473 MB (rss) | ✓ 0.0014×tol | 7.75x vs nitrix-jax |
+| symsqrt | jax-cuda12 | d=512 | `cupy.eigh_sqrtm` | skipped | — | — | — | — | — |
+| symsqrt | jax-cuda12 | d=512 | `nitrix-jax` | ok | 4.30 ms / 4.32 ms | 1.072 s | 74.45 MB (hbm) | ✓ 0.00049×tol | 1.00x vs nitrix-jax |
+| symsqrt | jax-cuda12 | d=512 | `scipy.linalg.sqrtm` | ok | 120.89 ms / 121.39 ms | 221.63 ms | 1.05 MB (hbm) | ✓ 0.0014×tol | 28.10x vs nitrix-jax |
+| symsqrt | jax-cpu | d=64 | `cupy.eigh_sqrtm` | skipped | — | — | — | — | — |
+| symsqrt | jax-cpu | d=64 | `nitrix-jax` | ok | 322.1 µs / 328.7 µs | 173.23 ms | 517 MB (rss) | ✓ 0.00044×tol | 1.00x vs nitrix-jax |
+| symsqrt | jax-cpu | d=64 | `scipy.linalg.sqrtm` | ok | 1.06 ms / 1.09 ms | 1.25 ms | 471 MB (rss) | ✓ 0.0011×tol | 3.30x vs nitrix-jax |
+| symsqrt | jax-cuda12 | d=64 | `cupy.eigh_sqrtm` | ok | 704.3 µs / 706.2 µs | 553.56 ms | 0.02 MB (hbm) | ✓ 0.00049×tol | 0.94x vs nitrix-jax |
+| symsqrt | jax-cuda12 | d=64 | `nitrix-jax` | ok | 751.6 µs / 755.6 µs | 526.15 ms | 71.35 MB (hbm) | ✓ 0.00047×tol | 1.00x vs nitrix-jax |
+| symsqrt | jax-cuda12 | d=64 | `scipy.linalg.sqrtm` | ok | 1.07 ms / 1.08 ms | 1.24 ms | 0.02 MB (hbm) | ✓ 0.0011×tol | 1.42x vs nitrix-jax |
+:::
+
+*source: bench `daec36e9` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:symsqrt -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

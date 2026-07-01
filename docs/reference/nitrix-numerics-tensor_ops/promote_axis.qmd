@@ -1,0 +1,32 @@
+---
+title: "promote_axis"
+generated: true
+description: "Promote an axis or axes to the outermost dimension. This operation might not work as expected if the axes are not sorted."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:promote_axis -->
+```python
+promote_axis(ndim: int, axis: Union[int, Tuple[int, ...]]) -> Tuple[int, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:promote_axis -->
+Promote an axis or axes to the outermost dimension.
+This operation might not work as expected if the axes are not sorted.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:promote_axis -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `ndim` | `int` | — | — | — |
+| `axis` | `Union[int, Tuple[int, ...]]` | — | — | — |
+
+**Returns** `Tuple[int, ...]`.
+<!-- nitrix:/gen -->
+

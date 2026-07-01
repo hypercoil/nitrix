@@ -23,6 +23,7 @@ final publication as-is (SPEC §6.5).
 ## `nitrix`
 
 - [`geometry`](nitrix-geometry.qmd) — Geometric primitives for neuroimaging.
+- [`linalg`](nitrix-linalg.qmd) — nitrix.linalg -- linear-algebra primitives.
 - [`register`](nitrix-register.qmd) — nitrix.register -- pairwise registration recipes.
 - [`stats`](nitrix-stats.qmd) — Mass-univariate statistical modelling for neuroimaging.
 
@@ -42,6 +43,26 @@ final publication as-is (SPEC §6.5).
 - [`surface`](nitrix-geometry-surface.qmd) — Surface algorithms on triangle meshes.
 - [`topology`](nitrix-geometry-topology.qmd) — Mesh topology invariants -- the genus-0 defect gate.
 - [`transform`](nitrix-geometry-transform.qmd) — Lie-group parametrisation of rigid and affine transforms.
+
+### `nitrix.linalg`
+
+- [`decompose`](nitrix-linalg-decompose.qmd) — Randomized (sketch) low-rank SVD.
+- [`kernel`](nitrix-linalg-kernel.qmd) — Pairwise kernel and distance functions.
+- [`krylov`](nitrix-linalg-krylov.qmd) — Matrix-free Krylov solvers.
+- [`matrix`](nitrix-linalg-matrix.qmd) — Matrix utilities for symmetric matrices, diagonals, and Toeplitz structure.
+- [`matrix_function`](nitrix-linalg-matrix_function.qmd) — Matrix functions of a *general* (non-symmetric) matrix.
+- [`optimize`](nitrix-linalg-optimize.qmd) — Small-residual nonlinear least squares: Gauss-Newton & Levenberg-Marquardt.
+- [`residual`](nitrix-linalg-residual.qmd) — Residualisation via linear least squares.
+- [`solve`](nitrix-linalg-solve.qmd) — Dense linear solves: general and SPD-Cholesky.
+- [`spd`](nitrix-linalg-spd.qmd) — Symmetric positive-definite manifold operations.
+
+### `nitrix.numerics`
+
+- [`fixed_point`](nitrix-numerics-fixed_point.qmd) — Fixed-point solver with implicit differentiation.
+- [`normalize`](nitrix-numerics-normalize.qmd) — Per-tensor / per-channel intensity normalisation.
+- [`ode`](nitrix-numerics-ode.qmd) — Fixed-step ODE integrators.
+- [`spatial`](nitrix-numerics-spatial.qmd) — Volumetric shape and windowing utilities.
+- [`tensor_ops`](nitrix-numerics-tensor_ops.qmd) — Tensor shape and layout utilities.
 
 ### `nitrix.register`
 

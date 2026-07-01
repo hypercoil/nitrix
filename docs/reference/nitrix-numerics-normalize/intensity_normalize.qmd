@@ -1,0 +1,92 @@
+---
+title: "intensity_normalize"
+generated: true
+description: "Percentile clip then rescale to $[0, 1]$."
+---
+
+[‹ back to `nitrix.numerics.normalize`](../nitrix-numerics-normalize.qmd)
+
+<!-- nitrix:gen sig:intensity_normalize -->
+```python
+intensity_normalize(x: Num[Array, '...'], *, low_percentile: float = 1.0, high_percentile: float = 99.0, axis: Optional[_AxisArg] = None, eps: float = 1e-12) -> Num[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:intensity_normalize -->
+Percentile clip then rescale to $[0, 1]$.
+
+The synthstrip / SynthSeg pre-training convention: clip the
+intensity histogram to the `[low_percentile, high_percentile]`
+range to suppress outliers (motion artefacts, bias-field
+inhomogeneity), then rescale the clipped range to
+$[0, 1]$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:intensity_normalize -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `x` | `Num` | `...` | — | Intensity tensor. |
+| `low_percentile` | `float` | — | `1.0` | Clipping percentiles. Default `(1, 99)`. |
+| `high_percentile` | `float` | — | `99.0` | Clipping percentiles. Default `(1, 99)`. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes over which to compute the percentiles. `None` (default) computes over the entire tensor (one pair of percentiles for the whole input). Pass an axis tuple for per-slice normalisation (e.g. `axis=(-3, -2, -1)` on a `(B, H, W, D)` volume gives per-batch normalisation). |
+| `eps` | `float` | — | `1e-12` | Stabiliser for the division when `high == low`. |
+
+**Returns** `Num` — shape `...`. Clipped-and-rescaled tensor, same shape as `x`, with the clipped intensity range mapped into $[0, 1]$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:intensity_normalize -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **1.36 ms** (median, L4); up to **69.07× faster** than `numpy.intensity`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_INTENSITY_NORMALIZE.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| intensity_normalize | jax-cpu | n=2048 | `cupy.intensity_normalize` | skipped | — | — | — | — | — |
+| intensity_normalize | jax-cpu | n=2048 | `nitrix-jax` | ok | 1.178 s / 1.180 s | 1.508 s | 1151 MB (rss) | ✓ 9.8e-05×tol | 1.00x vs nitrix-jax |
+| intensity_normalize | jax-cpu | n=2048 | `numpy.intensity` | ok | 94.99 ms / 98.04 ms | 120.34 ms | 1151 MB (rss) | ✓ 9.8e-05×tol | 0.08x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=2048 | `cupy.intensity_normalize` | ok | 862.6 µs / 870.7 µs | 217.82 ms | 16.78 MB (hbm) | ✓ 9.8e-05×tol | 0.64x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=2048 | `nitrix-jax` | ok | 1.35 ms / 1.36 ms | 469.79 ms | 184.55 MB (hbm) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=2048 | `numpy.intensity` | ok | 93.58 ms / 93.92 ms | 109.60 ms | 16.78 MB (hbm) | ✓ 9.8e-05×tol | 69.07x vs nitrix-jax |
+| intensity_normalize | jax-cpu | n=4096 | `cupy.intensity_normalize` | skipped | — | — | — | — | — |
+| intensity_normalize | jax-cpu | n=4096 | `nitrix-jax` | ok | 5.149 s / 5.157 s | 5.441 s | 1254 MB (rss) | ✓ 0.0001×tol | 1.00x vs nitrix-jax |
+| intensity_normalize | jax-cpu | n=4096 | `numpy.intensity` | ok | 402.94 ms / 418.94 ms | 411.07 ms | 1151 MB (rss) | ✓ 0.0001×tol | 0.08x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=4096 | `cupy.intensity_normalize` | ok | 7.90 ms / 7.92 ms | 241.03 ms | 67.11 MB (hbm) | ✓ 0.0001×tol | 1.18x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=4096 | `nitrix-jax` | ok | 6.70 ms / 6.72 ms | 400.61 ms | 539.51 MB (hbm) | ✓ 0.00012×tol | 1.00x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=4096 | `numpy.intensity` | ok | 398.42 ms / 399.75 ms | 400.62 ms | 67.11 MB (hbm) | ✓ 0.0001×tol | 59.44x vs nitrix-jax |
+| intensity_normalize | jax-cpu | n=512 | `cupy.intensity_normalize` | skipped | — | — | — | — | — |
+| intensity_normalize | jax-cpu | n=512 | `nitrix-jax` | ok | 58.94 ms / 59.50 ms | 267.81 ms | 1151 MB (rss) | ✓ 0.00011×tol | 1.00x vs nitrix-jax |
+| intensity_normalize | jax-cpu | n=512 | `numpy.intensity` | ok | 5.06 ms / 5.10 ms | 5.13 ms | 1151 MB (rss) | ✓ 0.00011×tol | 0.09x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=512 | `cupy.intensity_normalize` | ok | 417.7 µs / 425.0 µs | 1.412 s | 1.05 MB (hbm) | ✓ 0.00011×tol | 2.21x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=512 | `nitrix-jax` | ok | 189.4 µs / 197.7 µs | 501.96 ms | 34.60 MB (hbm) | ✓ 0.00015×tol | 1.00x vs nitrix-jax |
+| intensity_normalize | jax-cuda12 | n=512 | `numpy.intensity` | ok | 5.55 ms / 5.67 ms | 5.78 ms | 1.05 MB (hbm) | ✓ 0.00011×tol | 29.28x vs nitrix-jax |
+:::
+
+*source: bench `3ebfa0ef` · nitrix `f42e7ff8`*
+::::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:intensity_normalize -->
+::: {.callout-note}
+The two `jnp.percentile` calls *look* like two sorts that should
+be fused into a single length-2 quantile call
+(`jnp.percentile(x, [low, high])`) to halve the work.  They are
+not: both calls reduce the *same* `x` along the *same* axis, so
+XLA common-subexpression-eliminates them to a **single** `lax.sort`
+-- the batched form compiles to identical HLO and benchmarks
+perf-neutral (measured on the L4: GPU steady and peak HBM unchanged;
+see `docs/feature-requests/median-percentile-cpu-sort-cliff.md`).
+The cost here is that one unavoidable full sort, not a double sort,
+so the two-call form is kept for readability.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:intensity_normalize -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

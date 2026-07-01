@@ -1,0 +1,52 @@
+---
+title: "solve"
+generated: true
+description: "Solve the general linear system $a x = b$."
+---
+
+[‹ back to `nitrix.linalg.solve`](../nitrix-linalg-solve.qmd)
+
+<!-- nitrix:gen sig:solve -->
+```python
+solve(a: Float[Array, '... n n'], b: Float[Array, '...']) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:solve -->
+Solve the general linear system $a x = b$.
+
+Batches over any leading dimensions and is reverse-mode
+differentiable.  The right-hand side may be a single vector or a
+stack of column vectors; the trailing shape of the solution matches
+that of `b`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:solve -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `a` | `Float` | `...` × `n` × `n` | — | Square coefficient matrix, `(..., n, n)`. |
+| `b` | `Float` | `...` | — | Right-hand side: `(..., n)` (vector) or `(..., n, m)` (matrix of columns). |
+
+**Returns** `Float` — shape `...`. Solution $x$ with the same trailing shape as `b`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:solve -->
+::: {.callout-note}
+For symmetric-positive-definite `a` prefer [`cho_solve`](../nitrix-linalg-solve/cho_solve.qmd) -- it
+is roughly twice as fast (one Cholesky plus two triangular solves
+versus a full LU) and numerically better-behaved on the normal
+equations.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:solve -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

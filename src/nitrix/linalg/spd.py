@@ -4,49 +4,43 @@
 """
 Symmetric positive-definite manifold operations.
 
-The numerical-stability story: applying ``log`` / ``sqrt`` / fractional
-power to the eigenvalues of an SPD matrix is unstable when *any*
-eigenvalue is at or below the machine precision floor of the
-input's dtype.  The legacy ``hypercoil.functional.symmap`` had two
-loosely-coupled knobs (``fill_nans`` + ``truncate_eigenvalues``) that
-masked the issue rather than fixing it.
+Applying :math:`\\log` / :math:`\\sqrt{\\cdot}` / a fractional power to the
+eigenvalues of a symmetric positive-definite (SPD) matrix is numerically
+unstable when *any* eigenvalue is at or below the machine-precision floor of
+the input's dtype.
 
-The green-field rewrite:
+This module handles that instability through three design choices:
 
 1. **Eigenvalue clipping is on by default.**  ``eigvalue_clip='auto'``
-   clips at ``max(L) * D * eps(L.dtype)``, the standard rank-truncation
-   threshold (matches ``numpy.linalg.matrix_rank``).  Below the
-   threshold, eigenvalues are set to the threshold itself (not to
-   zero -- ``log(threshold)`` is finite; ``log(0)`` is ``-inf``,
-   contaminating downstream).
-2. **No ``fill_nans``.**  If the input is genuinely indefinite,
-   the operation is mathematically undefined; we surface the
-   ``NaN`` rather than silently replacing it with ``0``.
-3. **Differentiability hook is explicit.**  Pass ``psi > 0`` to
-   recondition the input before ``eigh`` (perturbing degenerate
-   eigenvalues so the eigh-VJP F-matrix doesn't blow up).  This
-   is a *backward-only* concern; the forward result is the same
-   either way for well-conditioned input.
+   clips at :math:`\\max_i |\\lambda_i| \\cdot d \\cdot \\varepsilon`, the
+   standard rank-truncation threshold (matching
+   :func:`numpy.linalg.matrix_rank`), where :math:`d` is the matrix
+   dimension and :math:`\\varepsilon` is the dtype's machine epsilon.
+   Eigenvalues below the threshold are set to the threshold itself rather
+   than to zero -- :math:`\\log(\\mathrm{threshold})` is finite, whereas
+   :math:`\\log(0)` is :math:`-\\infty` and would contaminate everything
+   downstream.
+2. **No silent NaN filling.**  If the input is genuinely indefinite the
+   operation is mathematically undefined, so the ``NaN`` is surfaced rather
+   than silently replaced with ``0``.
+3. **The differentiability hook is explicit.**  Pass ``psi > 0`` to
+   recondition the input before the eigendecomposition (perturbing
+   degenerate eigenvalues so the eigendecomposition VJP does not blow up).
+   This is a backward-only concern; for well-conditioned input the forward
+   result is the same either way.
 
-What we ship:
+Public surface:
 
-- ``symmap`` -- generic eigenvalue-function map.
-- ``symlog``, ``symexp``, ``symsqrt`` -- the common cases.
-- ``sympower`` -- arbitrary real power of an SPD matrix.
-- ``tangent_project_spd`` / ``cone_project_spd`` -- log-Euclidean
-  tangent-space projection used in the riemannian mean / connectivity
+- :func:`symmap` -- generic eigenvalue-function map.
+- :func:`symlog`, :func:`symexp`, :func:`symsqrt` -- the common cases.
+- :func:`sympower` -- arbitrary real power of an SPD matrix.
+- :func:`tangent_project_spd` / :func:`cone_project_spd` -- log-Euclidean
+  tangent-space projection used in the Riemannian mean / connectivity
   embedding literature.
-- ``mean_log_euclidean`` -- closed-form Fréchet mean on the
-  log-Euclidean metric: ``exp(mean(log(X_i)))``.  Closed form;
-  cheap.
-- ``mean_euclidean`` -- the trivial Euclidean mean (provided for
-  symmetry with the SPD mean family).
-
-What we don't ship at first GA (carried over from the legacy):
-
-- ``mean_kullback`` (Kullback-Leibler mean) -- iterative;
-  defer until a consumer needs it.
-- The affine-invariant mean (also iterative) -- same reason.
+- :func:`mean_log_euclidean` -- closed-form Fréchet mean under the
+  log-Euclidean metric, :math:`\\exp(\\operatorname{mean}_i \\log X_i)`.
+- :func:`mean_euclidean` -- the trivial Euclidean mean, provided for
+  symmetry with the SPD mean family.
 """
 
 from __future__ import annotations
@@ -82,13 +76,26 @@ def _clip_eigvals(
 ) -> Float[Array, '... d']:
     """Clip eigenvalues to a floor defined by ``clip``.
 
-    JIT-safe: never calls ``float()`` on a tracer; threshold is
-    a JAX scalar derived from ``L``.
+    JIT-safe: never calls ``float()`` on a tracer; the threshold is a JAX
+    scalar derived from ``L``.
 
-    ``'auto'`` -> ``max(|L|) * d * eps(L.dtype)`` (rank-truncation
-    threshold matching ``numpy.linalg.matrix_rank``).
-    ``'none'`` -> no clipping (eigvals passed through).
-    ``float`` -> explicit Python-float threshold.
+    Parameters
+    ----------
+    L : Float[Array, '... d']
+        Eigenvalues to clip, batched over any leading axes with the
+        eigenvalue index on the trailing axis of length ``d``.
+    clip : {'auto', 'none'} or float
+        Clipping policy.  ``'auto'`` floors eigenvalues at the
+        rank-truncation threshold
+        :math:`\\max_i |\\lambda_i| \\cdot d \\cdot \\varepsilon` (matching
+        :func:`numpy.linalg.matrix_rank`).  ``'none'`` passes eigenvalues
+        through unchanged.  A ``float`` sets an explicit threshold.
+
+    Returns
+    -------
+    Float[Array, '... d']
+        Eigenvalues with every entry below the threshold replaced by the
+        threshold; same shape and dtype as ``L``.
     """
     if clip == 'none':
         return L
@@ -109,21 +116,43 @@ def _eigh_with_clip(
     key: Optional[jax.Array],
     eigvalue_clip: EigvalueClip,
 ) -> tuple[Float[Array, '... d'], Float[Array, '... d d']]:
-    """Symmetrised eigendecomposition with optional clipping.
+    """Symmetrised eigendecomposition with optional eigenvalue clipping.
 
-    Returns ``(eigvals_clipped, eigvecs)``.  Clipped eigvals are
-    guaranteed nonzero and non-negative -- safe for log / sqrt /
-    fractional power downstream.
+    The input is symmetrised and eigendecomposed, then the eigenvalues are
+    clipped according to ``eigvalue_clip``.  When clipping is active the
+    returned eigenvalues are guaranteed non-negative and nonzero, so they
+    are safe for logarithm, square-root and fractional-power maps
+    downstream.
 
-    ``psi > 0`` reconditions the input before ``eigh`` so the
-    eigh-VJP F-matrix doesn't blow up at degenerate eigenvalues.
-    A small forward perturbation is the price (typically ~``psi``
-    in absolute eigenvalue shift).
+    Parameters
+    ----------
+    input : Float[Array, '... d d']
+        Symmetric (assumed SPD) matrix batch, with the two trailing axes
+        forming each ``d`` by ``d`` matrix.
+    psi : float
+        Reconditioning strength.  When ``psi > 0`` the input is perturbed
+        via :func:`recondition_eigenspaces` before the eigendecomposition so
+        that its VJP does not blow up at degenerate eigenvalues; the price is
+        a small forward perturbation (roughly ``psi`` in absolute eigenvalue
+        shift).
+    key : jax.Array or None
+        PRNG key forwarded to :func:`recondition_eigenspaces`; required when
+        ``psi > 0``.
+    eigvalue_clip : {'auto', 'none'} or float
+        Clipping policy passed through to :func:`_clip_eigvals`.
 
-    Routes ``eigh`` through ``_safe_eigh`` to handle the cuSolver
-    ABI mismatch on the test runner (GPU eigh broken, CPU eigh
-    fine; ``_safe_eigh`` falls back transparently and restores
-    the source device).
+    Returns
+    -------
+    L : Float[Array, '... d']
+        Clipped eigenvalues, ascending along the trailing axis.
+    Q : Float[Array, '... d d']
+        Corresponding orthonormal eigenvectors as matrix columns.
+
+    Notes
+    -----
+    The eigendecomposition is routed through :func:`safe_eigh`, which falls
+    back to CPU transparently and restores the source device to work around
+    a flaky GPU eigensolver ABI mismatch.
     """
     if psi > 0:
         input = recondition_eigenspaces(input, psi=psi, xi=psi, key=key)
@@ -135,7 +164,23 @@ def _recompose(
     L: Float[Array, '... d'],
     Q: Float[Array, '... d d'],
 ) -> Float[Array, '... d d']:
-    """Reassemble ``Q diag(L) Q.T`` then symmetrise against drift."""
+    """Reassemble :math:`Q \\operatorname{diag}(L) Q^{\\top}` and symmetrise.
+
+    A final symmetrisation guards against small numerical drift away from
+    exact symmetry introduced by the matrix products.
+
+    Parameters
+    ----------
+    L : Float[Array, '... d']
+        Eigenvalues to place on the reconstructed diagonal.
+    Q : Float[Array, '... d d']
+        Orthonormal eigenvectors as matrix columns.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The symmetric matrix batch reconstructed from ``L`` and ``Q``.
+    """
     return symmetric(Q @ (L[..., None] * Q.swapaxes(-1, -2)))
 
 
@@ -152,41 +197,50 @@ def symmap(
     key: Optional[jax.Array] = None,
     eigvalue_clip: EigvalueClip = 'auto',
 ) -> Float[Array, '... d d']:
-    """Apply an elementwise function ``fn`` to the eigenvalues of an SPD batch.
+    r"""Apply an elementwise function to the eigenvalues of an SPD batch.
 
-    Computes ``Q diag(fn(L)) Q.T`` where ``(L, Q) = eigh(input)``.
+    Eigendecomposes each matrix and returns
+    :math:`Q \operatorname{diag}(\mathrm{fn}(\lambda)) Q^{\top}`, where
+    :math:`\lambda` and :math:`Q` are the eigenvalues and eigenvectors of the
+    (symmetrised) input.  This is the workhorse behind :func:`symlog`,
+    :func:`symexp`, :func:`symsqrt` and :func:`sympower`.
 
     Parameters
     ----------
-    input
-        Symmetric (assumed SPD) matrix batch.
-    fn
-        Elementwise function applied to the eigenvalues.  Must be
-        well-defined on positive reals; if ``fn`` produces ``NaN``
-        for any eigenvalue, the result will contain ``NaN`` --
-        we do NOT silently replace ``NaN`` with ``0`` (this was
-        the legacy ``fill_nans`` footgun).
-    psi
-        Reconditioning strength.  ``0`` (default) leaves the
-        input untouched.  ``psi > 0`` perturbs the input via
-        ``recondition_eigenspaces`` before ``eigh`` -- useful
-        when the eigh-VJP must be stable under near-degenerate
-        spectra (training-style use).
-    key
+    input : Float[Array, '... d d']
+        Symmetric (assumed SPD) matrix batch, with the two trailing axes
+        forming each ``d`` by ``d`` matrix.
+    fn : Callable[[Array], Array]
+        Elementwise function applied to the eigenvalues.  It must be
+        well-defined on the (clipped) eigenvalues; if ``fn`` produces a
+        ``NaN`` for any eigenvalue, that ``NaN`` propagates to the result
+        rather than being silently replaced with ``0``.
+    psi : float, optional
+        Reconditioning strength.  ``0`` (default) leaves the input untouched.
+        ``psi > 0`` perturbs the input via :func:`recondition_eigenspaces`
+        before the eigendecomposition, stabilising the gradient under
+        near-degenerate spectra.
+    key : jax.Array or None, optional
         PRNG key, required when ``psi > 0``.
-    eigvalue_clip
-        ``'auto'`` (default) -- clip at the rank-truncation
-        threshold ``max(|L|) * d * eps``.  ``'none'`` -- no
-        clipping (use only when you've verified the input is
-        strictly positive definite).  ``float`` -- explicit
-        threshold.
+    eigvalue_clip : {'auto', 'none'} or float, optional
+        Eigenvalue clipping policy.  ``'auto'`` (default) clips at the
+        rank-truncation threshold
+        :math:`\max_i |\lambda_i| \cdot d \cdot \varepsilon`.  ``'none'``
+        disables clipping (use only when the input is verified strictly
+        positive definite).  A ``float`` sets an explicit threshold.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The symmetric matrix batch obtained by mapping ``fn`` over the
+        eigenvalues; same shape and dtype as ``input``.
 
     Notes
     -----
-    Differentiability: reverse-mode through ``eigh`` is supported
-    by JAX but degrades to NaN-grads at degenerate eigenvalues.
-    Use ``psi > 0`` to stabilise the gradient at the cost of a
-    small forward perturbation.
+    Reverse-mode differentiation through the eigendecomposition is supported
+    by JAX but degrades to NaN gradients at degenerate eigenvalues.  Use
+    ``psi > 0`` to stabilise the gradient at the cost of a small forward
+    perturbation.
     """
     L, Q = _eigh_with_clip(
         input,
@@ -209,11 +263,28 @@ def symlog(
     key: Optional[jax.Array] = None,
     eigvalue_clip: EigvalueClip = 'auto',
 ) -> Float[Array, '... d d']:
-    """Matrix logarithm of an SPD batch.
+    r"""Matrix logarithm of an SPD batch.
 
-    With ``eigvalue_clip='auto'`` (default), eigenvalues below the
-    rank-truncation threshold are floored to that threshold before
-    ``log``, producing a finite negative entry rather than ``-inf``.
+    Applies :math:`\log` to the eigenvalues via :func:`symmap`.  With
+    ``eigvalue_clip='auto'`` (default), eigenvalues below the rank-truncation
+    threshold are floored to that threshold before the logarithm, producing a
+    finite negative entry rather than :math:`-\infty`.
+
+    Parameters
+    ----------
+    input : Float[Array, '... d d']
+        Symmetric (assumed SPD) matrix batch.
+    psi : float, optional
+        Reconditioning strength forwarded to :func:`symmap`.
+    key : jax.Array or None, optional
+        PRNG key, required when ``psi > 0``.
+    eigvalue_clip : {'auto', 'none'} or float, optional
+        Eigenvalue clipping policy forwarded to :func:`symmap`.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The matrix logarithm of each input matrix; same shape as ``input``.
     """
     return symmap(
         input,
@@ -230,11 +301,27 @@ def symexp(
     psi: float = 0.0,
     key: Optional[jax.Array] = None,
 ) -> Float[Array, '... d d']:
-    """Matrix exponential of a symmetric batch.
+    r"""Matrix exponential of a symmetric batch.
 
-    ``exp`` is well-defined for any real eigenvalue (no underflow
-    floor needed), so we skip the clip step.  No
+    Applies :math:`\exp` to the eigenvalues via :func:`symmap`.  The scalar
+    exponential is well-defined for any real eigenvalue (no underflow floor
+    is needed), so the clipping step is skipped and there is no
     ``eigvalue_clip`` knob.
+
+    Parameters
+    ----------
+    input : Float[Array, '... d d']
+        Symmetric matrix batch.
+    psi : float, optional
+        Reconditioning strength forwarded to :func:`symmap`.
+    key : jax.Array or None, optional
+        PRNG key, required when ``psi > 0``.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The matrix exponential of each input matrix; same shape as
+        ``input``.
     """
     return symmap(
         input,
@@ -252,11 +339,30 @@ def symsqrt(
     key: Optional[jax.Array] = None,
     eigvalue_clip: EigvalueClip = 'auto',
 ) -> Float[Array, '... d d']:
-    """Matrix square root of an SPD batch.
+    r"""Matrix square root of an SPD batch.
 
-    Sqrt is undefined for negative reals; clipping handles the
-    boundary.  For genuinely indefinite input the result is
-    undefined and we raise via the eigvalue check.
+    Applies :math:`\sqrt{\cdot}` to the eigenvalues via :func:`symmap`.  The
+    scalar square root is undefined for negative reals; the default clipping
+    handles the boundary by flooring near-zero eigenvalues.  For genuinely
+    indefinite input the result is mathematically undefined and the negative
+    eigenvalues surface as ``NaN``.
+
+    Parameters
+    ----------
+    input : Float[Array, '... d d']
+        Symmetric (assumed SPD) matrix batch.
+    psi : float, optional
+        Reconditioning strength forwarded to :func:`symmap`.
+    key : jax.Array or None, optional
+        PRNG key, required when ``psi > 0``.
+    eigvalue_clip : {'auto', 'none'} or float, optional
+        Eigenvalue clipping policy forwarded to :func:`symmap`.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The matrix square root of each input matrix; same shape as
+        ``input``.
     """
     return symmap(
         input,
@@ -275,18 +381,36 @@ def sympower(
     key: Optional[jax.Array] = None,
     eigvalue_clip: EigvalueClip = 'auto',
 ) -> Float[Array, '... d d']:
-    """Arbitrary real power of an SPD batch.
+    r"""Arbitrary real power of an SPD batch.
 
-    For ``power > 0`` and SPD input the result is well-defined.
-    For ``power < 0`` you get the inverse (negative-power) variant;
-    eigenvalue clipping prevents division by zero.
+    Raises the eigenvalues to ``power`` via :func:`symmap`, computing
+    :math:`Q \operatorname{diag}(\lambda^{p}) Q^{\top}`.  For ``power > 0``
+    and SPD input the result is well-defined.  For ``power < 0`` this returns
+    the inverse (negative-power) variant, and eigenvalue clipping prevents
+    division by zero.
 
-    Common use cases:
-    - ``power = -0.5`` -- inverse square root, for tangent-space
-      projection.
-    - ``power = 2`` -- self-multiplication (equivalent to
-      ``input @ input`` for SPD; the eigh path is more stable for
-      ill-conditioned inputs but slower).
+    Parameters
+    ----------
+    input : Float[Array, '... d d']
+        Symmetric (assumed SPD) matrix batch.
+    power : float
+        Real exponent applied to each eigenvalue.  Common cases:
+        ``-0.5`` gives the inverse square root used in tangent-space
+        projection, and ``2`` gives self-multiplication (equivalent to
+        ``input @ input`` for SPD input; the eigendecomposition path is more
+        stable for ill-conditioned inputs but slower).
+    psi : float, optional
+        Reconditioning strength forwarded to :func:`symmap`.
+    key : jax.Array or None, optional
+        PRNG key, required when ``psi > 0``.
+    eigvalue_clip : {'auto', 'none'} or float, optional
+        Eigenvalue clipping policy forwarded to :func:`symmap`.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        Each input matrix raised to the given real power; same shape as
+        ``input``.
     """
     return symmap(
         input,
@@ -312,18 +436,38 @@ def tangent_project_spd(
 ) -> Float[Array, '... d d']:
     r"""Map SPD matrices into the tangent space at ``reference``.
 
-    Computes ``log(R^{-1/2} X R^{-1/2})`` where ``R = reference``.
-    This is the affine-invariant Riemannian log map at the
-    reference point; the legacy log-Euclidean approximation
-    (``log(X) - log(R)``) is *not* what this returns.
+    Computes :math:`\log(R^{-1/2} X R^{-1/2})`, where :math:`R` is the
+    reference and :math:`X` the input.  This is the affine-invariant
+    Riemannian log map at the reference point; the log-Euclidean
+    approximation :math:`\log(X) - \log(R)` is *not* what this returns.
 
-    Use this to convert a batch of SPD matrices (e.g., subject
-    covariance matrices) into a flat tangent-space representation
-    suitable for downstream linear-model fitting.
+    Use this to convert a batch of SPD matrices (e.g. subject covariance
+    matrices) into a flat tangent-space representation suitable for
+    downstream linear-model fitting.  :func:`cone_project_spd` inverts the
+    map.
 
-    Parameters / Returns
-    --------------------
-    See ``symmap`` for the shared knobs.
+    Parameters
+    ----------
+    input : Float[Array, '... d d']
+        Symmetric (assumed SPD) matrix batch to project into the tangent
+        space.
+    reference : Float[Array, '... d d']
+        Symmetric (assumed SPD) reference point at which the tangent space is
+        taken, broadcastable against ``input``.
+    psi : float, optional
+        Reconditioning strength forwarded to :func:`sympower` and
+        :func:`symlog`.
+    key : jax.Array or None, optional
+        PRNG key, required when ``psi > 0``.
+    eigvalue_clip : {'auto', 'none'} or float, optional
+        Eigenvalue clipping policy forwarded to :func:`sympower` and
+        :func:`symlog`.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The symmetric tangent-space representation of each input matrix at
+        ``reference``; same shape as ``input``.
     """
     R_inv_sqrt = sympower(
         reference,
@@ -348,10 +492,32 @@ def cone_project_spd(
     key: Optional[jax.Array] = None,
     eigvalue_clip: EigvalueClip = 'auto',
 ) -> Float[Array, '... d d']:
-    """Map tangent-space matrices back into the SPD cone at ``reference``.
+    r"""Map tangent-space matrices back into the SPD cone at ``reference``.
 
-    Computes ``R^{1/2} exp(X) R^{1/2}`` -- the inverse of
-    ``tangent_project_spd``.
+    Computes :math:`R^{1/2} \exp(X) R^{1/2}`, where :math:`R` is the reference
+    and :math:`X` the tangent-space input.  This is the inverse of
+    :func:`tangent_project_spd`.
+
+    Parameters
+    ----------
+    input : Float[Array, '... d d']
+        Symmetric tangent-space matrix batch to map back into the SPD cone.
+    reference : Float[Array, '... d d']
+        Symmetric (assumed SPD) reference point defining the cone, the same
+        one used for the forward projection, broadcastable against ``input``.
+    psi : float, optional
+        Reconditioning strength forwarded to :func:`symsqrt` and
+        :func:`symexp`.
+    key : jax.Array or None, optional
+        PRNG key, required when ``psi > 0``.
+    eigvalue_clip : {'auto', 'none'} or float, optional
+        Eigenvalue clipping policy forwarded to :func:`symsqrt`.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The reconstructed SPD matrix batch at ``reference``; same shape as
+        ``input``.
     """
     R_sqrt = symsqrt(
         reference,
@@ -372,12 +538,24 @@ def mean_euclidean(
     *,
     axis: Union[int, Sequence[int]] = 0,
 ) -> Float[Array, '... d d']:
-    """Euclidean mean: plain element-wise average.
+    """Euclidean mean: the plain element-wise average.
 
-    Provided for symmetry with the SPD-specific means.  Note: the
-    Euclidean mean of SPD matrices is SPD (the cone is convex),
-    so this is geometrically valid; it is just *not* the
-    geodesic mean.
+    Provided for symmetry with the SPD-specific means.  The Euclidean mean of
+    SPD matrices is itself SPD (the cone is convex), so this is geometrically
+    valid; it is simply *not* the geodesic mean.
+
+    Parameters
+    ----------
+    input : Float[Array, '... batch d d']
+        Batch of symmetric matrices, with each ``d`` by ``d`` matrix on the
+        two trailing axes and one or more batch axes to average over.
+    axis : int or sequence of int, optional
+        Axis or axes over which to average (default ``0``).
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The element-wise mean matrix, with the averaged axes removed.
     """
     return jnp.mean(input, axis=axis)
 
@@ -390,17 +568,40 @@ def mean_log_euclidean(
     key: Optional[jax.Array] = None,
     eigvalue_clip: EigvalueClip = 'auto',
 ) -> Float[Array, '... d d']:
-    r"""Log-Euclidean Fréchet mean: ``exp(mean(log(X_i)))``.
+    r"""Log-Euclidean Fréchet mean, :math:`\exp(\operatorname{mean}_i \log X_i)`.
 
-    Closed-form geodesic mean on the SPD manifold under the
-    log-Euclidean metric.  Cheap (one ``symlog`` per matrix in
-    the batch + one ``symexp`` at the end); cheaper than the
-    affine-invariant Fréchet mean which requires an iterative
+    Closed-form geodesic mean on the SPD manifold under the log-Euclidean
+    metric: each matrix is mapped through :func:`symlog`, the results are
+    averaged, and the mean is mapped back with :func:`symexp`.  This is cheap
+    (one logarithm per matrix in the batch plus one final exponential),
+    unlike the affine-invariant Fréchet mean, which requires an iterative
     fixed-point computation.
 
-    For practical fMRI / dMRI use, the log-Euclidean mean is a
-    near-perfect proxy for the affine-invariant mean when the
-    spread of the input batch is moderate.
+    For practical fMRI / dMRI use the log-Euclidean mean is a near-perfect
+    proxy for the affine-invariant mean when the spread of the input batch is
+    moderate.
+
+    Parameters
+    ----------
+    input : Float[Array, '... batch d d']
+        Batch of symmetric (assumed SPD) matrices, with each ``d`` by ``d``
+        matrix on the two trailing axes and one or more batch axes to average
+        over.
+    axis : int or sequence of int, optional
+        Axis or axes over which to average the matrix logarithms
+        (default ``0``).
+    psi : float, optional
+        Reconditioning strength forwarded to :func:`symlog` and
+        :func:`symexp`.
+    key : jax.Array or None, optional
+        PRNG key, required when ``psi > 0``.
+    eigvalue_clip : {'auto', 'none'} or float, optional
+        Eigenvalue clipping policy forwarded to :func:`symlog`.
+
+    Returns
+    -------
+    Float[Array, '... d d']
+        The log-Euclidean mean matrix, with the averaged axes removed.
     """
     logs = symlog(input, psi=psi, key=key, eigvalue_clip=eigvalue_clip)
     mean_log = jnp.mean(logs, axis=axis)

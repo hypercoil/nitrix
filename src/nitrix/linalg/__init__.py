@@ -14,7 +14,8 @@ Four submodules:
   point clouds; specialises onto ``semiring_ell_matmul`` for
   ``O(n * k)`` scaling at scale.
 - ``spd``      -- symmetric positive-definite manifold ops
-  (matrix exp/log/sqrt/power) with the SPEC §4.5 stability fix.
+  (matrix exp/log/sqrt/power) with a stabilised eigenspace
+  reconditioning step.
 
 Re-exports the most commonly imported public symbols.  See the
 submodule docstrings for the full surface.

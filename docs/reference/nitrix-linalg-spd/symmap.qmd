@@ -1,0 +1,56 @@
+---
+title: "symmap"
+generated: true
+description: "Apply an elementwise function to the eigenvalues of an SPD batch."
+---
+
+[‹ back to `nitrix.linalg.spd`](../nitrix-linalg-spd.qmd)
+
+<!-- nitrix:gen sig:symmap -->
+```python
+symmap(input: Float[Array, '... d d'], *, fn: Callable[[Array], Array], psi: float = 0.0, key: Optional[jax.Array] = None, eigvalue_clip: EigvalueClip = 'auto') -> Float[Array, '... d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:symmap -->
+Apply an elementwise function to the eigenvalues of an SPD batch.
+
+Eigendecomposes each matrix and returns
+$Q \operatorname{diag}(\mathrm{fn}(\lambda)) Q^{\top}$, where
+$\lambda$ and $Q$ are the eigenvalues and eigenvectors of the
+(symmetrised) input.  This is the workhorse behind [`symlog`](../nitrix-linalg-spd/symlog.qmd),
+[`symexp`](../nitrix-linalg-spd/symexp.qmd), [`symsqrt`](../nitrix-linalg-spd/symsqrt.qmd) and [`sympower`](../nitrix-linalg-spd/sympower.qmd).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:symmap -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `input` | `Float` | `...` × `d` × `d` | — | Symmetric (assumed SPD) matrix batch, with the two trailing axes forming each `d` by `d` matrix. |
+| `fn` | `Callable[[Array], Array]` | — | — | Elementwise function applied to the eigenvalues. It must be well-defined on the (clipped) eigenvalues; if `fn` produces a `NaN` for any eigenvalue, that `NaN` propagates to the result rather than being silently replaced with `0`. |
+| `psi` | `float` | — | `0.0` | Reconditioning strength. `0` (default) leaves the input untouched. `psi > 0` perturbs the input via [`recondition_eigenspaces`](../nitrix-linalg-matrix/recondition_eigenspaces.qmd) before the eigendecomposition, stabilising the gradient under near-degenerate spectra. |
+| `key` | `Optional[jax.Array]` | — | `None` | PRNG key, required when `psi > 0`. |
+| `eigvalue_clip` | `EigvalueClip` | — | `'auto'` | Eigenvalue clipping policy. `'auto'` (default) clips at the rank-truncation threshold $\max_i \|\lambda_i\| \cdot d \cdot \varepsilon$. `'none'` disables clipping (use only when the input is verified strictly positive definite). A `float` sets an explicit threshold. |
+
+**Returns** `Float` — shape `...` × `d` × `d`. The symmetric matrix batch obtained by mapping `fn` over the eigenvalues; same shape and dtype as `input`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:symmap -->
+::: {.callout-note}
+Reverse-mode differentiation through the eigendecomposition is supported
+by JAX but degrades to NaN gradients at degenerate eigenvalues.  Use
+`psi > 0` to stabilise the gradient at the cost of a small forward
+perturbation.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:symmap -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

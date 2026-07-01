@@ -1,0 +1,41 @@
+---
+title: "randomized_svd"
+generated: true
+description: "Top-`k` randomised SVD $A  approx U  operatorname{diag}(s) V^{ top}$."
+---
+
+[‹ back to `nitrix.linalg.decompose`](../nitrix-linalg-decompose.qmd)
+
+<!-- nitrix:gen sig:randomized_svd -->
+```python
+randomized_svd(A: Float[Array, 'm n'], k: int, *, key: Array, n_oversample: int = 10, n_power: int = 2) -> Tuple[Float[Array, 'm k'], Float[Array, 'k'], Float[Array, 'k n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:randomized_svd -->
+Top-`k` randomised SVD $A \approx U \operatorname{diag}(s) V^{\top}$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:randomized_svd -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Float` | `m` × `n` | — | `(m, n)` matrix to decompose. |
+| `k` | `int` | — | — | Number of singular triplets to return (`k <= min(m, n)`). |
+| `key` | `Array` | — | — | `jax.random` key for the Gaussian sketch (required -- the algorithm is randomized; the same key reproduces the result). |
+| `n_oversample` | `int` | — | `10` | Oversampling $p$; the sketch width is $l = k + p$ (clamped to $\min(m, n)$). Larger $p$ improves accuracy at more cost. |
+| `n_power` | `int` | — | `2` | Subspace (power) iterations $q$. Each reapplies $A A^{\top}$ (with re-orthonormalisation) to sharpen the spectral gap -- raise it for slowly decaying spectra; `0` is the plain one-pass sketch. |
+
+**Returns** `Tuple[Float[Array, 'm k'], Float[Array, 'k'], Float[Array, 'k n']]`. `(m, k)` orthonormal left singular vectors. `(k,)` singular values, descending and non-negative. `(k, n)` right singular vectors. `U @ jnp.diag(s) @ Vt` is the rank-`k` approximation of `A`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:randomized_svd -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

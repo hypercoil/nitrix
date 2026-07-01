@@ -1,0 +1,44 @@
+---
+title: "masker"
+generated: true
+description: "Create a JIT-compatible function that applies a mask to a tensor."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:masker -->
+```python
+masker(mask: Bool[Array, ...], axis: int | Sequence[int], output_axis: int | None = None) -> Callable[[Shaped[Array, ...]], Shaped[Array, ...]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:masker -->
+Create a JIT-compatible function that applies a mask to a tensor.
+
+::: {.callout-warning}
+This function comes with some memory overhead. Specifically, it
+closes over an integer array of the same size as the number of
+`True` elements in the mask. When applying a very large mask to
+a tensor, it is important to consider the trade-off between memory
+and potential performance gains of JIT compilation.
+::
+::: {.callout-warning}
+Just like any JIT-compiled function, the resulting function must be
+recompiled when the shape of the input tensor changes.
+::
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:masker -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mask` | `Bool[Array, ...]` | — | — | — |
+| `axis` | `int | Sequence[int]` | — | — | — |
+| `output_axis` | `int | None` | — | `None` | — |
+
+**Returns** `Callable[[Shaped[Array, ...]], Shaped[Array, ...]]`.
+<!-- nitrix:/gen -->
+

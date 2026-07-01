@@ -1,0 +1,48 @@
+---
+title: "fixed_point_solve"
+generated: true
+description: "Solve $x = f( mathrm{params}, x)$ for $x$, differentiably."
+---
+
+[‹ back to `nitrix.numerics.fixed_point`](../nitrix-numerics-fixed_point.qmd)
+
+<!-- nitrix:gen sig:fixed_point_solve -->
+```python
+fixed_point_solve(f: FixedPointFn, params: Float[Array, '...'], x0: Float[Array, '...'], *, tol: float = 1e-06, max_iter: int = 100, acceleration: Acceleration = 'picard', depth: int = 4, beta: float = 1.0, reg: float = 1e-08) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fixed_point_solve -->
+Solve $x = f(\mathrm{params}, x)$ for $x$, differentiably.
+
+Iterates the update map `f` to a fixed point and differentiates
+through the solution by the implicit-function theorem, so gradients
+with respect to `params` flow without unrolling the iteration.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fixed_point_solve -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `f` | `FixedPointFn` | — | — | The update map `(params, x) -> x`. Must be a contraction near the solution for both the forward iteration and the implicit backward to converge. |
+| `params` | `Float` | `...` | — | The differentiable parameters `f` depends on (gradients flow here via the implicit-function theorem). |
+| `x0` | `Float` | `...` | — | Initial guess (same structure as the solution; its value does not affect the gradient -- `dx*/dx0 = 0`). |
+| `tol` | `float` | — | `1e-06` | Relative convergence tolerance on the residual $\\|f(x) - x\\|$. |
+| `max_iter` | `int` | — | `100` | Iteration cap (forward and adjoint). |
+| `acceleration` | `Acceleration` | — | `'picard'` | `'picard'` (default) -- plain $x \leftarrow f(x)$. `'anderson'` -- windowed Anderson acceleration of the given depth, for the stiff $\\|\partial_x f\\| \to 1$ regime (a solve-free quasi-Newton mixing; runs in the traced loop on every backend). |
+| `depth` | `int` | — | `4` | Anderson window (number of past residuals mixed). Larger converges in fewer steps but holds roughly $2 \cdot \mathrm{depth}$ extra iterate-shaped buffers -- lower it for a brain-scale field where memory is tight. Ignored for `'picard'`. |
+| `beta` | `float` | — | `1.0` | Anderson mixing (relaxation) factor; `1.0` is the standard choice. Ignored for `'picard'`. |
+| `reg` | `float` | — | `1e-08` | Relative Tikhonov ridge on the Anderson least-squares (keeps it well-posed when the residual history is near-collinear). Ignored for `'picard'`. |
+
+**Returns** `Float` — shape `...`. The fixed point $x^\ast$, with the same shape as `x0`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fixed_point_solve -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

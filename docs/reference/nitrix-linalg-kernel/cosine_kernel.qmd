@@ -1,0 +1,77 @@
+---
+title: "cosine_kernel"
+generated: true
+description: "Cosine kernel: the linear kernel on row-normalised inputs."
+---
+
+[‹ back to `nitrix.linalg.kernel`](../nitrix-linalg-kernel.qmd)
+
+<!-- nitrix:gen sig:cosine_kernel -->
+```python
+cosine_kernel(X0: Float[Array, '... n d'], X1: Optional[Float[Array, '... m d']] = None, *, theta: Optional[Num[Array, '... d']] = None) -> Float[Array, '... n m']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cosine_kernel -->
+Cosine kernel: the linear kernel on row-normalised inputs.
+
+Equivalent to `linear_kernel(unit(X0), unit(X1), theta=theta)`,
+where each row of `X` is normalised to unit (optionally
+Mahalanobis) norm via [`parameterised_norm`](../nitrix-linalg-kernel/parameterised_norm.qmd) before the linear
+kernel of [`linear_kernel`](../nitrix-linalg-kernel/linear_kernel.qmd) is applied.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cosine_kernel -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `X0` | `Float` | `...` × `n` × `d` | — | Sample tensors of shape $(\dots, n, d)$ and $(\dots, m, d)$. If `X1 is None`, uses the normalised `X0` (self-kernel; the result is $(\dots, n, n)$). |
+| `X1` | `Optional[Float[Array, '... m d']]` | — | `None` | Sample tensors of shape $(\dots, n, d)$ and $(\dots, m, d)$. If `X1 is None`, uses the normalised `X0` (self-kernel; the result is $(\dots, n, n)$). |
+| `theta` | `Optional[Num[Array, '... d']]` | — | `None` | Optional metric tensor for both the normalisation and the linear kernel. Same shape conventions as the `theta` argument of [`linear_kernel`](../nitrix-linalg-kernel/linear_kernel.qmd). |
+
+**Returns** `Float` — shape `...` × `n` × `m`. Kernel matrix of shape $(\dots, n, m)$.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:cosine_kernel -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **185.8 µs** (median, L4); up to **163.58× faster** than `sklearn.cosine_similarity`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_COSINE_KERNEL.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| cosine_kernel | jax-cpu | n=2048,d=64 | `cupy.cosine_kernel` | skipped | — | — | — | — | — |
+| cosine_kernel | jax-cpu | n=2048,d=64 | `nitrix-jax` | ok | 3.99 ms / 8.40 ms | 166.95 ms | 865 MB (rss) | ✓ 0.00089×tol | 1.00x vs nitrix-jax |
+| cosine_kernel | jax-cpu | n=2048,d=64 | `sklearn.cosine_similarity` | ok | 11.94 ms / 14.00 ms | 17.69 ms | 865 MB (rss) | ✓ 0.00089×tol | 2.99x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=2048,d=64 | `cupy.cosine_kernel` | ok | 232.3 µs / 238.1 µs | 104.42 ms | 0.52 MB (hbm) | ✓ 0.00078×tol | 1.34x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=2048,d=64 | `nitrix-jax` | ok | 173.6 µs / 185.8 µs | 258.33 ms | 105.38 MB (hbm) | ✓ 0.00084×tol | 1.00x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=2048,d=64 | `sklearn.cosine_similarity` | ok | 25.19 ms / 35.81 ms | 71.42 ms | 0.52 MB (hbm) | ✓ 0.00089×tol | 145.12x vs nitrix-jax |
+| cosine_kernel | jax-cpu | n=4096,d=64 | `cupy.cosine_kernel` | skipped | — | — | — | — | — |
+| cosine_kernel | jax-cpu | n=4096,d=64 | `nitrix-jax` | ok | 36.00 ms / 46.22 ms | 200.05 ms | 924 MB (rss) | ✓ 0.0011×tol | 1.00x vs nitrix-jax |
+| cosine_kernel | jax-cpu | n=4096,d=64 | `sklearn.cosine_similarity` | ok | 78.57 ms / 98.29 ms | 73.88 ms | 865 MB (rss) | ✓ 0.0011×tol | 2.18x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=4096,d=64 | `cupy.cosine_kernel` | ok | 1.44 ms / 1.45 ms | 104.13 ms | 1.05 MB (hbm) | ✓ 0.0011×tol | 3.45x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=4096,d=64 | `nitrix-jax` | ok | 417.1 µs / 421.2 µs | 509.53 ms | 206.57 MB (hbm) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=4096,d=64 | `sklearn.cosine_similarity` | ok | 68.23 ms / 70.32 ms | 63.12 ms | 1.05 MB (hbm) | ✓ 0.0011×tol | 163.58x vs nitrix-jax |
+| cosine_kernel | jax-cpu | n=512,d=64 | `cupy.cosine_kernel` | skipped | — | — | — | — | — |
+| cosine_kernel | jax-cpu | n=512,d=64 | `nitrix-jax` | ok | 271.7 µs / 275.3 µs | 124.63 ms | 865 MB (rss) | ✓ 0.00074×tol | 1.00x vs nitrix-jax |
+| cosine_kernel | jax-cpu | n=512,d=64 | `sklearn.cosine_similarity` | ok | 705.7 µs / 8.00 ms | 1.06 ms | 865 MB (rss) | ✓ 0.00067×tol | 2.60x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=512,d=64 | `cupy.cosine_kernel` | ok | 82.8 µs / 84.9 µs | 394.71 ms | 0.13 MB (hbm) | ✓ 0.00066×tol | 0.70x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=512,d=64 | `nitrix-jax` | ok | 118.3 µs / 133.3 µs | 323.41 ms | 74.45 MB (hbm) | ✓ 0.00069×tol | 1.00x vs nitrix-jax |
+| cosine_kernel | jax-cuda12 | n=512,d=64 | `sklearn.cosine_similarity` | ok | 679.0 µs / 684.6 µs | 1.30 ms | 0.13 MB (hbm) | ✓ 0.00067×tol | 5.74x vs nitrix-jax |
+:::
+
+*source: bench `126d3c00` · nitrix `645ce27d`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cosine_kernel -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

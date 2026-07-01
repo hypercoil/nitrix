@@ -1,0 +1,50 @@
+---
+title: "gauss_newton"
+generated: true
+description: "Gauss-Newton minimisation of $ tfrac{1}{2} lVert r(x) rVert^2$."
+---
+
+[‹ back to `nitrix.linalg.optimize`](../nitrix-linalg-optimize.qmd)
+
+<!-- nitrix:gen sig:gauss_newton -->
+```python
+gauss_newton(residual_fn: ResidualFn, x0: Float[Array, ' p'], *, n_iters: int = 10, damping: float = 0.0, cg_tol: float = 1e-06, cg_maxiter: Optional[int] = None, jacobian: JacobianStrategy = 'auto', jacobian_fn: Optional[ResidualFn] = None, early_stop: Optional[tuple[float, int]] = None) -> OptimizeResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gauss_newton -->
+Gauss-Newton minimisation of $\tfrac{1}{2}\lVert r(x)\rVert^2$.
+
+Full undamped steps
+$\delta = -(J^{\top}J + \mathrm{damping} \cdot I)^{-1} J^{\top}r$
+(set `damping > 0` for a fixed Tikhonov ridge if $J^{\top}J$ is
+near-singular).  Use [`levenberg_marquardt`](../nitrix-linalg-optimize/levenberg_marquardt.qmd) when robustness to a poor
+starting point matters.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gauss_newton -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `residual_fn` | `ResidualFn` | — | — | Map $x \mapsto r(x)$ (`(P,) -> (M,)`). |
+| `x0` | `Float` | `p` | — | Initial parameters, `(P,)`. |
+| `n_iters` | `int` | — | `10` | Number of Gauss-Newton steps. The loop is rolled with `lax.scan`, so compile time is roughly constant in `n_iters`. |
+| `damping` | `float` | — | `0.0` | Fixed diagonal ridge added to $J^{\top}J$ (default `0`). |
+| `cg_tol` | `float` | — | `1e-06` | Convergence tolerance for the inner [`cg`](../nitrix-linalg-krylov/cg.qmd) solve. |
+| `cg_maxiter` | `Optional[int]` | — | `None` | Iteration cap for the inner [`cg`](../nitrix-linalg-krylov/cg.qmd) solve; `None` uses the solver default. |
+| `jacobian` | `JacobianStrategy` | — | `'auto'` | Normal-operator strategy: `'assembled'` (materialise $J^{\top}J$, for a small $P$), `'matrix_free'` (matvec only, for a large $P$), or `'auto'` (default; assembled when $P$ is small). |
+| `jacobian_fn` | `Optional[ResidualFn]` | — | `None` | Optional closed-form Jacobian used only by the `'assembled'` path; its result must equal `jax.jacfwd(residual_fn)(x)`. If `None` (default), the Jacobian is obtained by forward-mode differentiation. |
+| `early_stop` | `Optional[tuple[float, int]]` | — | `None` | Opt-in early-exit `(threshold, window)`: stop once the windowed normalised cost slope drops below `threshold` (else run all `n_iters`). `None` (default) keeps the fixed `lax.scan` -- reproducible, `vmap`-batchable, reverse-differentiable. An `early_stop` runs a `lax.while_loop` (single-instance only; **not** reverse-differentiable -- a `while_loop` has no reverse rule). |
+
+**Returns** `OptimizeResult`. The minimiser and its cost trace.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gauss_newton -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

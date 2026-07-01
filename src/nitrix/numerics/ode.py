@@ -4,24 +4,24 @@
 """
 Fixed-step ODE integrators.
 
-Pure-JAX explicit integrators for ``dy/dt = f(t, y)``, returning the state
+Pure-JAX explicit integrators for :math:`dy/dt = f(t, y)`, returning the state
 at each requested time point.  These are the substrate for continuous-time
 ("neural-ODE") models -- a portable, differentiable alternative to a
 third-party ODE library (the integration is a ``lax.scan``, so reverse-mode
 ``grad`` differentiates straight through the solver).
 
-- ``euler`` -- the first-order explicit step (cheap, low accuracy).
-- ``midpoint`` -- the second-order explicit-midpoint step (RK2).
-- ``rk4`` -- the classic fourth-order Runge--Kutta step (the default).
-- ``local_linearization`` -- the exponential / local-linearization step
-  (Ozaki; the scheme behind SPM's ``spm_int``): linearize ``f`` about the
+- :func:`euler` -- the first-order explicit step (cheap, low accuracy).
+- :func:`midpoint` -- the second-order explicit-midpoint step (RK2).
+- :func:`rk4` -- the classic fourth-order Runge--Kutta step (the default).
+- :func:`local_linearization` -- the exponential / local-linearisation step
+  (Ozaki; the scheme behind SPM's ``spm_int``): linearise :math:`f` about the
   current state and integrate the linear part *exactly* via a matrix
   exponential.  A-stable -- the method for *stiff* systems (e.g. the
   Balloon--Windkessel haemodynamic model) where an explicit step needs a
   punishingly small ``dt``.  Exact (to round-off) for affine-autonomous
-  ``f(y) = A y + b``.  Requires a flat 1-D state (it builds the Jacobian);
+  :math:`f(y) = A y + b`.  Requires a flat 1-D state (it builds the Jacobian);
   ``vmap`` it for batched / multi-region integration.
-- ``odeint`` -- dispatch over ``method``.
+- :func:`odeint` -- dispatch over ``method``.
 
 One step is taken per consecutive pair of time points, so granularity is
 controlled by how densely ``t`` is sampled.  The vector field takes
@@ -37,7 +37,7 @@ were trained or evaluated against that arithmetic reproduces here -- the
 bring-your-own-weights parity requirement of the surface neural-ODE backend
 swap (see ``docs/feature-requests/ode-integrators.md``).
 
-Roadmap (per the §12.11 catalogue entry and ``dynamics-suite.md``): *adaptive*
+Roadmap: *adaptive*
 steppers (the embedded Dormand--Prince ``dopri5`` / ``dopri8`` and ``tsit5``
 pairs -- a ``while_loop`` + step-size controller, a different control-flow
 shape from this static ``scan``), *symplectic* steppers (leapfrog /
@@ -129,7 +129,7 @@ def euler(
     y0: Float[Array, '...'],
     t: Float[Array, 't'],
 ) -> Float[Array, 't ...']:
-    """Integrate ``dy/dt = f(t, y)`` with the explicit Euler method.
+    """Integrate :math:`dy/dt = f(t, y)` with the explicit Euler method.
 
     Parameters
     ----------
@@ -138,13 +138,14 @@ def euler(
     y0
         Initial state at ``t[0]``.
     t
-        Strictly increasing (or decreasing) time points; one Euler step is
-        taken per interval.
+        Strictly increasing (or decreasing) time points of shape ``(t,)``; one
+        Euler step is taken per interval.
 
     Returns
     -------
-    States at each time point, shape ``(len(t), *y0.shape)`` (``ys[0]`` is
-    ``y0``).
+    Float[Array, 't ...']
+        States at each time point, shape ``(len(t), *y0.shape)`` (``ys[0]`` is
+        ``y0``).
     """
     return _integrate(_euler_step, f, y0, t)
 
@@ -154,14 +155,30 @@ def midpoint(
     y0: Float[Array, '...'],
     t: Float[Array, 't'],
 ) -> Float[Array, 't ...']:
-    """Integrate ``dy/dt = f(t, y)`` with the explicit midpoint method (RK2).
+    """Integrate :math:`dy/dt = f(t, y)` with the explicit midpoint method (RK2).
 
     Same interface as :func:`euler`; second-order local error -- a step takes
     two field evaluations (``f`` at the start and at the half-step) for an
     extra order of accuracy.  This is the explicit RK2 stepper, *not* the
     symplectic implicit-midpoint method (which requires a per-step solve);
-    it completes the ``[euler, midpoint, rk4]`` method set of the surface
-    neural-ODE consumers.
+    it completes the :func:`euler` / :func:`midpoint` / :func:`rk4` method set
+    of the surface neural-ODE consumers.
+
+    Parameters
+    ----------
+    f
+        Vector field ``f(t, y) -> dy/dt`` (``t`` scalar, ``y`` the state).
+    y0
+        Initial state at ``t[0]``.
+    t
+        Strictly monotone time points of shape ``(t,)``; one midpoint step is
+        taken per interval.
+
+    Returns
+    -------
+    Float[Array, 't ...']
+        States at each time point, shape ``(len(t), *y0.shape)`` (``ys[0]`` is
+        ``y0``).
     """
     return _integrate(_midpoint_step, f, y0, t)
 
@@ -171,10 +188,26 @@ def rk4(
     y0: Float[Array, '...'],
     t: Float[Array, 't'],
 ) -> Float[Array, 't ...']:
-    """Integrate ``dy/dt = f(t, y)`` with classic 4th-order Runge--Kutta.
+    """Integrate :math:`dy/dt = f(t, y)` with classic 4th-order Runge--Kutta.
 
     Same interface as :func:`euler`; far more accurate per step (4th-order
     local error), the sensible default for smooth vector fields.
+
+    Parameters
+    ----------
+    f
+        Vector field ``f(t, y) -> dy/dt`` (``t`` scalar, ``y`` the state).
+    y0
+        Initial state at ``t[0]``.
+    t
+        Strictly monotone time points of shape ``(t,)``; one RK4 step is
+        taken per interval.
+
+    Returns
+    -------
+    Float[Array, 't ...']
+        States at each time point, shape ``(len(t), *y0.shape)`` (``ys[0]`` is
+        ``y0``).
     """
     return _integrate(_rk4_step, f, y0, t)
 
@@ -184,29 +217,46 @@ def local_linearization(
     y0: Float[Array, 'n'],
     t: Float[Array, 't'],
 ) -> Float[Array, 't n']:
-    """Integrate ``dy/dt = f(t, y)`` by exponential / local linearization.
+    """Integrate :math:`dy/dt = f(t, y)` by exponential / local linearisation.
 
-    The Ozaki local-linearization scheme (the integrator behind SPM's
-    ``spm_int``): each step linearizes ``f`` about the current state and
+    The Ozaki local-linearisation scheme (the integrator behind SPM's
+    ``spm_int``): each step linearises :math:`f` about the current state and
     advances the linear part *exactly* with a matrix exponential.  Unlike the
-    explicit ``euler`` / ``midpoint`` / ``rk4`` steppers it is **A-stable**, so
-    it integrates **stiff** systems -- such as the Balloon--Windkessel
-    haemodynamic model -- at a step size where an explicit method would need a
-    far finer grid or diverge outright.  It is **exact (to round-off)** for an
-    affine-autonomous field ``f(y) = A y + b``.
+    explicit :func:`euler` / :func:`midpoint` / :func:`rk4` steppers it is
+    **A-stable**, so it integrates **stiff** systems -- such as the
+    Balloon--Windkessel haemodynamic model -- at a step size where an explicit
+    method would need a far finer grid or diverge outright.  It is
+    **exact (to round-off)** for an affine-autonomous field
+    :math:`f(y) = A y + b`.
 
     Same ``f(t, y)`` / close-over-args contract as :func:`euler`, with two
     differences from the explicit steppers:
 
-    - ``y0`` must be a **flat 1-D** state ``(n,)`` -- the step forms the
-      ``(n, n)`` Jacobian ``df/dy``.  For a batched / multi-region system,
-      ``jax.vmap`` this integrator over the batch axis.
+    - ``y0`` must be a **flat 1-D** state :math:`(n,)` -- the step forms the
+      :math:`(n, n)` Jacobian :math:`df/dy`.  For a batched / multi-region
+      system, ``jax.vmap`` this integrator over the batch axis.
     - the input is held constant across each step (piecewise-constant /
-      frozen-input linearization), so accuracy on a fast-varying drive is
+      frozen-input linearisation), so accuracy on a fast-varying drive is
       controlled, as for the explicit methods, by how densely ``t`` is sampled.
 
     Differentiable straight through the ``scan`` (the matrix exponential is
     pure matmul); composes with the shipped :func:`nitrix.linalg.matrix_exp`.
+
+    Parameters
+    ----------
+    f
+        Vector field ``f(t, y) -> dy/dt`` (``t`` scalar, ``y`` the flat 1-D
+        state of shape ``(n,)``).
+    y0
+        Initial state at ``t[0]``, a flat 1-D array of shape ``(n,)``.
+    t
+        Strictly monotone time points of shape ``(t,)``; one linearised step
+        is taken per interval.
+
+    Returns
+    -------
+    Float[Array, 't n']
+        States at each time point, shape ``(len(t), n)`` (``ys[0]`` is ``y0``).
     """
     return _integrate(_local_linearization_step, f, y0, t)
 
@@ -218,13 +268,40 @@ def odeint(
     *,
     method: Method = 'rk4',
 ) -> Float[Array, 't ...']:
-    """Integrate ``dy/dt = f(t, y)`` with the chosen ``method``.
+    """Integrate :math:`dy/dt = f(t, y)` with the chosen ``method``.
 
-    ``method`` is one of ``"rk4"`` (default), ``"midpoint"``, ``"euler"``, or
-    ``"local_linearization"`` (the A-stable exponential integrator for stiff
-    systems; requires a flat 1-D state).  The adaptive methods (``dopri5`` /
-    ``dopri8`` / ``tsit5``) are not part of this set; passing one raises with a
-    pointer to that gap.
+    Dispatches to the fixed-step stepper named by ``method``.  The adaptive
+    methods (``dopri5`` / ``dopri8`` / ``tsit5``) are not part of this set;
+    passing one raises with a pointer to that gap.
+
+    Parameters
+    ----------
+    f
+        Vector field ``f(t, y) -> dy/dt`` (``t`` scalar, ``y`` the state).
+    y0
+        Initial state at ``t[0]``.  For ``"local_linearization"`` this must be
+        a flat 1-D state of shape ``(n,)``.
+    t
+        Strictly monotone time points of shape ``(t,)``; one step is taken per
+        interval.
+    method
+        Which fixed-step stepper to use: ``"rk4"`` (default, dispatching to
+        :func:`rk4`), ``"midpoint"`` (:func:`midpoint`), ``"euler"``
+        (:func:`euler`), or ``"local_linearization"`` (:func:`local_linearization`,
+        the A-stable exponential integrator for stiff systems; requires a flat
+        1-D state).
+
+    Returns
+    -------
+    Float[Array, 't ...']
+        States at each time point, shape ``(len(t), *y0.shape)`` (``ys[0]`` is
+        ``y0``).
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is an adaptive stepper (``"dopri5"`` / ``"dopri8"`` /
+        ``"tsit5"``) or an unrecognised name.
     """
     if method == 'rk4':
         return rk4(f, y0, t)

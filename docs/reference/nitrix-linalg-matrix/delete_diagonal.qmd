@@ -1,0 +1,37 @@
+---
+title: "delete_diagonal"
+generated: true
+description: "Zero out the main diagonal of a square matrix block."
+---
+
+[‹ back to `nitrix.linalg.matrix`](../nitrix-linalg-matrix.qmd)
+
+<!-- nitrix:gen sig:delete_diagonal -->
+```python
+delete_diagonal(A: Num[Array, '... i i']) -> Num[Array, '... i i']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:delete_diagonal -->
+Zero out the main diagonal of a square matrix block.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:delete_diagonal -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `A` | `Num` | `...` × `i` × `i` | — | Square matrix block. |
+
+**Returns** `Num` — shape `...` × `i` × `i`. A copy of `A` with its main diagonal set to zero and all off-diagonal entries unchanged.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:delete_diagonal -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `i` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

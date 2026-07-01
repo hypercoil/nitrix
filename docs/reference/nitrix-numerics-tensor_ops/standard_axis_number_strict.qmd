@@ -1,0 +1,31 @@
+---
+title: "standard_axis_number_strict"
+generated: true
+description: "Convert an axis number to a standard axis number."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+<!-- nitrix:gen sig:standard_axis_number_strict -->
+```python
+standard_axis_number_strict(axis: int, ndim: int) -> int
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:standard_axis_number_strict -->
+Convert an axis number to a standard axis number.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:standard_axis_number_strict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `axis` | `int` | — | — | — |
+| `ndim` | `int` | — | — | — |
+
+**Returns** `int`.
+<!-- nitrix:/gen -->
+

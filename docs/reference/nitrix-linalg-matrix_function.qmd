@@ -1,0 +1,73 @@
+---
+title: "nitrix.linalg.matrix_function"
+generated: true
+signature-hash: d9a094c56391f1b5
+description: "Matrix functions of a *general* (non-symmetric) matrix."
+listing:
+  id: nitrix-linalg-matrix_function-symbols
+  contents: "nitrix-linalg-matrix_function/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.matrix_function`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Matrix functions of a *general* (non-symmetric) matrix.
+
+The symmetric family ([`symexp`](nitrix-linalg-spd/symexp.qmd) /
+[`symlog`](nitrix-linalg-spd/symlog.qmd) / [`symsqrt`](nitrix-linalg-spd/symsqrt.qmd) /
+[`sympower`](nitrix-linalg-spd/sympower.qmd)) applies a scalar function to the
+eigenvalues of a symmetric matrix.  [`matrix_exp`](nitrix-linalg-matrix_function/matrix_exp.qmd) is the general-matrix
+counterpart: the true matrix exponential $e^{A}$ for an arbitrary square
+$A$, needed to exponentiate a non-symmetric Lie-algebra element --
+specifically the affine generator $[[A, b], [0, 0]]$ whose exponential is
+the affine transform [`affine_exp`](nitrix-geometry-transform/affine_exp.qmd) applies (a
+rigid generator's rotation block is skew-symmetric, also non-symmetric).
+[`matrix_log`](nitrix-linalg-matrix_function/matrix_log.qmd) is the inverse, warranted by the affine Fréchet/Karcher mean
+[`transform_mean`](nitrix-geometry-algebra/transform_mean.qmd).
+
+[`matrix_exp`](nitrix-linalg-matrix_function/matrix_exp.qmd) uses **scaling-and-squaring with a truncated Taylor
+series**.  Unlike `jax.scipy.linalg.expm` (Padé, which needs a linear solve
+and so wedges / falls back to CPU on the affected cuSolver stacks), this path is
+**pure matmul** -- GPU-native, `jit` / `grad`-clean, and never mixes
+devices inside a traced optimiser.  $A$ is scaled by $2^{-s}$, the
+Taylor series of $e^{A/2^{s}}$ is summed, and the result is squared
+$s$ times.  With the defaults ($s = 8$, order 12) the scaled norm is
+tiny for any $\lVert A \rVert$ that arises from a registration generator,
+so the result matches a reference `expm` to machine precision; raise them for
+very large $\lVert A \rVert$.
+
+[`matrix_log`](nitrix-linalg-matrix_function/matrix_log.qmd) is the inverse: **inverse scaling-and-squaring** -- take
+$s$ matrix square roots (Denman--Beavers) to drive $A$ toward
+$I$, sum the Taylor series of $\log(I + X)$ on the small remainder,
+and multiply by $2^{s}$.  Registration affines carry large translations
+($\lVert A - I \rVert \gg 1$), which rules out a pure-matmul (binomial)
+square root, so the Denman--Beavers step routes its inverse through
+`safe_inv` (GPU-native on a healthy stack;
+CPU-fallback on the wedged-cuSolver dev box).  Unlike [`matrix_exp`](nitrix-linalg-matrix_function/matrix_exp.qmd) this is
+**not** for an optimiser hot loop -- it backs the offline Karcher mean -- so the
+fallback is acceptable.  An out-of-domain input (an eigenvalue on the negative
+real axis) returns **NaN**, not finite garbage, caught by a cuSolver-free
+round-trip-through-[`matrix_exp`](nitrix-linalg-matrix_function/matrix_exp.qmd) guard (see [`matrix_log`](nitrix-linalg-matrix_function/matrix_log.qmd)).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-matrix_function-symbols}
+:::

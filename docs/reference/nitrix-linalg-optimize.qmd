@@ -1,0 +1,72 @@
+---
+title: "nitrix.linalg.optimize"
+generated: true
+signature-hash: a40a7656c39f1195
+description: "Small-residual nonlinear least squares: Gauss-Newton & Levenberg-Marquardt."
+listing:
+  id: nitrix-linalg-optimize-symbols
+  contents: "nitrix-linalg-optimize/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg.optimize`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+Small-residual nonlinear least squares: Gauss-Newton & Levenberg-Marquardt.
+
+Minimise $\tfrac{1}{2}\lVert r(x)\rVert^2$ for a residual map
+$r: \mathbb{R}^P \to \mathbb{R}^M$.  The registration recipes are
+the driving consumer ($r$ = warped-moving minus fixed, $x$ =
+the transform's Lie parameters), but the optimiser is generic.
+
+**Two Jacobian strategies, both GPU-native.**  Each step solves the
+Gauss-Newton normal equations
+$(J^{\top}J + \lambda I)\,\delta = -J^{\top}r$.
+
+- `jacobian='assembled'` -- the `'auto'` default when the parameter
+  count $P$ is small (the rigid/affine regime).  The
+  $M \times P$ Jacobian is materialised in $P$ forward-mode
+  passes (`jax.jacfwd`), the explicit $P \times P$ Gram matrix
+  $J^{\top}J$ is formed, and the tiny SPD system is solved by
+  [`cg`](nitrix-linalg-krylov/cg.qmd) on that explicit matrix.  Cheaper than the matrix-free matvec
+  for small $P$: [`cg`](nitrix-linalg-krylov/cg.qmd) then costs $P \times P$ matmuls,
+  not a full warp tangent + transpose per inner iteration.
+- `jacobian='matrix_free'` -- for a large $P$.  The operator
+  $v \mapsto J^{\top}(Jv)$ is assembled from a cached linearisation
+  (`jax.linearize` for $Jv$, its `jax.linear_transpose` for
+  $J^{\top}u$) -- so the $M \times P$ Jacobian is **never
+  materialised** -- and the SPD system is solved with [`cg`](nitrix-linalg-krylov/cg.qmd) (matvecs
+  only).
+
+Both keep the hot loop on the GPU through the cuSolver wedge: no
+factorisation, no host round-trip.
+
+**The fixed-iteration loop is rolled with `lax.scan`** (not
+Python-unrolled), so cold-compile time is roughly constant in `n_iters`
+rather than linear -- one iteration is compiled, not `n_iters` copies.
+It stays differentiable (`scan` is), so `jax.grad` through a
+registration works out of the box.  [`implicit_least_squares`](nitrix-linalg-optimize/implicit_least_squares.qmd) adds the
+implicit-function-theorem path: exact gradients at the optimum without
+unrolling ($O(1)$ memory in the iteration count), the
+differentiable-layer entry point for consumers like `entense`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen dims:__page__ -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-optimize-symbols}
+:::

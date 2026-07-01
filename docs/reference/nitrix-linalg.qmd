@@ -1,0 +1,49 @@
+---
+title: "nitrix.linalg"
+generated: true
+signature-hash: d14eefa69fe9eefc
+description: "nitrix.linalg -- linear-algebra primitives."
+listing:
+  id: nitrix-linalg-symbols
+  contents: "nitrix-linalg/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
+---
+
+::: {.callout-important title="Generated reference stub — fill me"}
+Auto-generated scaffold for `nitrix.linalg`. Fill the prose *outside* the
+generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
+:::
+
+<!-- nitrix:gen overview:__module__ -->
+nitrix.linalg -- linear-algebra primitives.
+
+Four submodules:
+
+- `matrix`   -- symmetric / vec triangular conversions, diagonal
+  utilities, Toeplitz, eigenspace reconditioning.
+- `residual` -- residualisation (confound regression) numerics.
+- `kernel`   -- kernel functions (RBF, polynomial, ...) over
+  point clouds; specialises onto `semiring_ell_matmul` for
+  `O(n * k)` scaling at scale.
+- `spd`      -- symmetric positive-definite manifold ops
+  (matrix exp/log/sqrt/power) with a stabilised eigenspace
+  reconditioning step.
+
+Re-exports the most commonly imported public symbols.  See the
+submodule docstrings for the full surface.
+
+This subpackage replaces the legacy `nitrix.functional.matrix`
+and `nitrix.functional.residual` modules; the green-field
+rewrite leverages the substrate (`semiring_matmul`,
+`semiring_ell_matmul`) where applicable and drops the
+backward-compatible naming the legacy code was constrained by.
+<!-- nitrix:/gen -->
+
+## Symbols
+
+::: {#nitrix-linalg-symbols}
+:::

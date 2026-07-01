@@ -1,0 +1,35 @@
+---
+title: "unfold_axes"
+generated: true
+description: "Unfold the specified consecutive axes into a single new axis."
+---
+
+[‹ back to `nitrix.numerics.tensor_ops`](../nitrix-numerics-tensor_ops.qmd)
+
+*Re-exported here; defined in `nitrix._internal.util`.*
+
+*decorated:* `@partial(jax.jit, static_argnames=('axes',))`
+
+<!-- nitrix:gen sig:unfold_axes -->
+```python
+unfold_axes(tensor: Shaped[Array, ...], axes: Union[int, Tuple[int, ...]]) -> Shaped[Array, ...]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:unfold_axes -->
+Unfold the specified consecutive axes into a single new axis.
+
+This function will fail if the specified axes are not consecutive.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:unfold_axes -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `tensor` | `Shaped[Array, ...]` | — | — | — |
+| `axes` | `Union[int, Tuple[int, ...]]` | — | — | — |
+
+**Returns** `Shaped[Array, ...]`.
+<!-- nitrix:/gen -->
+
