@@ -1,0 +1,35 @@
+---
+title: "DemonsSpec"
+generated: true
+description: "Static configuration for the log-Demons recipe (jit-static)."
+---
+
+[‹ back to `nitrix.register.diffeomorphic`](../nitrix-register-diffeomorphic.qmd)
+
+<!-- nitrix:gen sig:DemonsSpec -->
+```python
+class DemonsSpec(SVFSpec)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:DemonsSpec -->
+Static configuration for the log-Demons recipe (jit-static).
+
+Embeds the shared stationary-velocity-field spec for the schedule /
+regularisation / convergence fields (`levels`, `iterations`,
+`sigma_fluid` / `sigma_diffusion`, `spacing`, `pyramid_factor` /
+`pyramid_sigma`, `boundary_mode`, `representation`, `mode` /
+`convergence`, `compute_velocity`); Demons carries a single displacement
+/ velocity, so its `representation` / `compute_velocity` recover the one
+`velocity` field (`DiffeomorphicResult.velocity`).  The
+Demons-specific force knobs:
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:DemonsSpec.__init__ -->
+```python
+__init__(levels: int = 3, iterations: Union[int, tuple[int, ...]] = 80, sigma_fluid: float = 1.0, sigma_diffusion: float = 1.5, spacing: Optional[Union[float, tuple[float, ...]]] = None, pyramid_factor: float = 2.0, pyramid_sigma: Optional[float] = None, boundary_mode: BoundaryMode = 'nearest', representation: Literal['group', 'algebra'] = 'group', mode: ConvergenceMode = 'fixed', convergence: Convergence = Convergence(), compute_velocity: bool = False, n_steps: int = 6, alpha: float = 0.4, bch_order: int = 1) -> None
+```
+<!-- nitrix:/gen -->
+

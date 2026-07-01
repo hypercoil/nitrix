@@ -4,27 +4,37 @@
 """
 Inverse-compositional rigid registration (constant-template Hessian).
 
-The Baker-Matthews (2004) inverse-compositional Lucas-Kanade scheme,
-specialised to the centred rigid warp in **index space** -- the lean,
-on-device frame ``IndexSpace`` was set up to host.  Where the forward
-Gauss-Newton path re-linearises the warped *moving* image every iteration,
-the inverse-compositional scheme linearises the **reference** (template)
-instead, so the steepest-descent images ``∂F·∂W/∂θ|₀`` and the Gauss-Newton
-Hessian ``H = SDᵀSD`` are evaluated **once** on the reference and reused
-across every iteration -- the 3dvolreg lineage's speed.
+The Baker-Matthews inverse-compositional Lucas-Kanade scheme, specialised to
+the centred rigid warp in **index space** -- the lean, on-device frame that
+:class:`IndexSpace` was set up to host.  Where the forward Gauss-Newton path
+re-linearises the warped *moving* image every iteration, the
+inverse-compositional scheme linearises the **reference** (template) instead,
+so the steepest-descent images
+:math:`\\partial F \\cdot \\partial W / \\partial\\theta|_0` and the
+Gauss-Newton Hessian :math:`H = \\mathrm{SD}^{\\top}\\mathrm{SD}` are evaluated
+**once** on the reference and reused across every iteration -- the same
+constant-template speed as the classic ``3dvolreg`` lineage.
 
-For ``volreg`` the reference is shared across the whole series, so the
-per-level ``SD`` / ``H⁻¹`` are computed a single time for *all* frames and
-*all* iterations (``_ic_reference``), and only the per-frame update
-(warp -> error -> ``SDᵀe`` -> ``H⁻¹`` matvec -> compositional matrix
-update) is ``vmap``-ed.  Memory is ``O(M·P)`` for the shared steepest-
-descent plus ``O(M)`` per frame -- not the forward path's ``O(T·M·P)``.
+For a motion-correction series the reference is shared across the whole
+series, so the per-level :math:`\\mathrm{SD}` / :math:`H^{-1}` are computed a
+single time for *all* frames and *all* iterations (see :func:`ic_reference`),
+and only the per-frame update (warp, then error, then
+:math:`\\mathrm{SD}^{\\top}e`, then the :math:`H^{-1}` mat-vec, then the
+compositional matrix update) is vmapped.  Memory is :math:`O(M \\cdot P)` for
+the shared steepest-descent plus :math:`O(M)` per frame -- not the forward
+path's :math:`O(T \\cdot M \\cdot P)`.
 
-The recovered warp is carried as the homogeneous matrix ``T``
-(fixed-voxel -> moving-voxel), updated by the inverse-compositional rule
-``T ← T · W(Δθ)⁻¹`` with the closed-form rigid inverse (no general solve).
-SSD only (it is a least-squares scheme); ``IndexSpace`` only (the template
-linearisation is in voxel coordinates).
+The recovered warp is carried as the homogeneous matrix :math:`T`
+(fixed-voxel to moving-voxel), updated by the inverse-compositional rule
+:math:`T \\leftarrow T \\cdot W(\\Delta\\theta)^{-1}` with the closed-form
+rigid inverse (no general solve).  SSD only (it is a least-squares scheme);
+index-space only (the template linearisation is in voxel coordinates).
+
+References
+----------
+Baker, S. and Matthews, I. (2004). Lucas-Kanade 20 years on: a unifying
+framework. *International Journal of Computer Vision*, 56, 221-255.
+doi:10.1023/B:VISI.0000011205.11775.fd
 """
 
 from __future__ import annotations
@@ -104,8 +114,27 @@ _BACKTRACK_ALPHAS = (1.0, 0.5, 0.25)
 
 
 def _grid_corners(shape: tuple[int, ...], center: Array, dtype: Any) -> Array:
-    """Homogeneous, centred grid corners ``(2**ndim, ndim+1)`` -- where an affine
-    step's induced displacement is extremal."""
+    """Homogeneous, centred coordinates of the sampling grid's corners.
+
+    The corners are where an affine step's induced grid displacement is
+    extremal, so they suffice to bound the step's maximum motion.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Spatial shape of the sampling grid; one axis per dimension.
+    center : Array
+        Grid centre, shape ``(ndim,)``, subtracted from every corner so the
+        corners are expressed relative to the rotation/scaling centre.
+    dtype
+        Floating dtype of the returned corner coordinates.
+
+    Returns
+    -------
+    Array
+        Corner coordinates in homogeneous form, shape ``(2 ** ndim, ndim + 1)``
+        (a trailing column of ones).
+    """
     axes = [
         jnp.asarray([0.0, s - 1.0], dtype=dtype) - center[i]
         for i, s in enumerate(shape)
@@ -125,10 +154,32 @@ def _trust_scale(
 ) -> Array:
     """Scale factor in ``(0, 1]`` capping the step's induced grid displacement.
 
-    The step ``matrix -> matrix @ update`` moves grid corner ``x`` by
-    ``matrix @ (update − I) @ x``; the largest such corner motion is clamped to
-    ``step_max``.  Model-generic (reads the homogeneous ``update`` matrix, so it
-    serves rigid and affine alike).
+    The step ``matrix -> matrix @ update`` moves grid corner :math:`x` by
+    :math:`\\mathrm{matrix} \\cdot (\\mathrm{update} - I) \\cdot x`; the largest
+    such corner motion is clamped to ``step_max``.  Model-generic (reads the
+    homogeneous ``update`` matrix, so it serves rigid and affine alike).
+
+    Parameters
+    ----------
+    matrix : Array
+        Current warp as a homogeneous matrix, shape ``(ndim + 1, ndim + 1)``.
+    update : Array
+        Candidate compositional update as a homogeneous matrix, shape
+        ``(ndim + 1, ndim + 1)``; the proposed step is ``matrix @ update``.
+    corners : Array
+        Homogeneous, centred grid corners, shape ``(2 ** ndim, ndim + 1)``,
+        as returned by :func:`_grid_corners`.
+    ndim : int
+        Number of spatial dimensions.
+    step_max : float
+        Maximum permitted corner displacement (in voxels).
+
+    Returns
+    -------
+    Array
+        Scalar scale factor in ``(0, 1]`` by which to shorten the step so the
+        largest corner motion does not exceed ``step_max`` (``1`` when the raw
+        step is already within the bound).
     """
     m_du = matrix @ (update - jnp.eye(ndim + 1, dtype=matrix.dtype))
     disp = (corners @ m_du.T)[:, :ndim]
@@ -144,10 +195,24 @@ def _trust_scale(
 
 
 def _rotation_generators(ndim: int, dtype: Any) -> Array:
-    """``so(n)`` generators: ``(n_rot, ndim, ndim)`` skew bases.
+    """Skew-symmetric generators of the rotation group :math:`so(n)`.
 
-    ``∂R(ω)/∂ω_k|₀`` for the ``rigid_exp`` rotation -- one matrix in 2-D,
+    These are the derivatives :math:`\\partial R(\\omega)/\\partial\\omega_k|_0`
+    of the :func:`rigid_exp` rotation at identity -- a single matrix in 2-D and
     the three skew bases in 3-D (matching ``geometry.transform._skew3``).
+
+    Parameters
+    ----------
+    ndim : int
+        Number of spatial dimensions (2 or 3).
+    dtype
+        Floating dtype of the returned generators.
+
+    Returns
+    -------
+    Array
+        Stacked skew bases, shape ``(n_rot, ndim, ndim)`` where ``n_rot`` is 1
+        for ``ndim == 2`` and 3 for ``ndim == 3``.
     """
     if ndim == 2:
         return jnp.asarray([[[0.0, -1.0], [1.0, 0.0]]], dtype=dtype)
@@ -164,10 +229,26 @@ def _steepest_descent(
 ) -> Float[Array, ' m p']:
     """Steepest-descent images of the centred rigid warp at identity.
 
-    ``SD[x, j] = ∇F(x) · ∂W(x;θ)/∂θ_j|₀``.  Rotation columns use the
-    generator fields ``G_k·(x − c)``; translation columns are the gradient
-    components.  Order matches ``rigid_exp`` (rotation params then
-    translation).  Returns ``(M, P)`` (M voxels, P parameters).
+    Each column is
+    :math:`\\mathrm{SD}[x, j] = \\nabla F(x) \\cdot \\partial W(x;\\theta)/\\partial\\theta_j|_0`.
+    Rotation columns use the generator fields :math:`G_k \\cdot (x - c)`;
+    translation columns are the gradient components.  Column order matches
+    :func:`rigid_exp` (rotation parameters then translation).
+
+    Parameters
+    ----------
+    fixed : Float[Array, '*spatial']
+        Reference (template) image over the spatial grid.
+    center : Float[Array, ' d']
+        Grid centre, shape ``(ndim,)``, about which the rigid warp rotates.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Float[Array, ' m p']
+        Steepest-descent images, shape ``(M, P)`` for ``M`` voxels and ``P``
+        rigid parameters (rotation columns then translation columns).
     """
     grad = spatial_gradient(fixed)
     grid_c = identity_grid(fixed.shape, dtype=fixed.dtype) - center
@@ -186,10 +267,27 @@ def _affine_steepest_descent(
     """Steepest-descent images of the centred affine warp at identity.
 
     The 12-DOF (3-D) / 6-DOF (2-D) affine: the linear-block generators are the
-    full ``gl(n)`` basis ``E_ij`` (``∂ matrix_exp(A)/∂A_ij|₀ = E_ij``), so
-    ``SD[x, (i,j)] = ∇F(x)_i · (x − c)_j`` (``n²`` columns, row-major to match
-    ``affine_exp``); the translation columns are ``∇F`` (``n`` columns).
-    Returns ``(M, P)`` with ``P = n² + n``.
+    full :math:`gl(n)` basis :math:`E_{ij}`
+    (:math:`\\partial\\,\\mathrm{matrix\\_exp}(A)/\\partial A_{ij}|_0 = E_{ij}`),
+    so
+    :math:`\\mathrm{SD}[x, (i,j)] = \\nabla F(x)_i \\cdot (x - c)_j`
+    (:math:`n^2` columns, row-major to match :func:`affine_exp`); the
+    translation columns are :math:`\\nabla F` (:math:`n` columns).
+
+    Parameters
+    ----------
+    fixed : Float[Array, '*spatial']
+        Reference (template) image over the spatial grid.
+    center : Float[Array, ' d']
+        Grid centre, shape ``(ndim,)``, relative to which the linear block acts.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Float[Array, ' m p']
+        Steepest-descent images, shape ``(M, P)`` with ``P = ndim ** 2 + ndim``
+        (linear-block columns row-major, then translation columns).
     """
     grad = spatial_gradient(fixed)
     grid_c = identity_grid(fixed.shape, dtype=fixed.dtype) - center
@@ -202,43 +300,111 @@ def _affine_steepest_descent(
 
 
 def _rigid_project_moments(m: Array, g: Array, ndim: int) -> Array:
-    """Rigid ``SDᵀe`` from the shared moments (3a).
+    """Rigid steepest-descent projection from the shared moments.
 
-    The rotation columns of ``SDᵀe`` are a fixed contraction of the moment
-    tensor ``m_ij = Σ_x ∇F_i·(x−c)_j·e`` against the ``so(n)`` generators
-    (``(SDᵀe)_k = Σ_ij G[k,i,j]·m_ij``); the translation columns are ``g_i =
-    Σ_x ∇F_i·e``.  Order (rotation then translation) matches ``_steepest_descent``.
+    The rotation entries of the projection :math:`\\mathrm{SD}^{\\top}e` are a
+    fixed contraction of the moment tensor
+    :math:`m_{ij} = \\sum_x \\nabla F_i \\cdot (x - c)_j \\cdot e` against the
+    :math:`so(n)` generators
+    (:math:`(\\mathrm{SD}^{\\top}e)_k = \\sum_{ij} G[k,i,j] \\cdot m_{ij}`); the
+    translation entries are :math:`g_i = \\sum_x \\nabla F_i \\cdot e`.  Order
+    (rotation then translation) matches :func:`_steepest_descent`.
+
+    Parameters
+    ----------
+    m : Array
+        Moment tensor of the gradient against the centred grid and error, shape
+        ``(ndim, ndim)``.
+    g : Array
+        Translation moments (gradient against the error), shape ``(ndim,)``.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Array
+        The rigid steepest-descent projection, shape ``(P,)`` with
+        ``P = n_rot + ndim`` (rotation entries then translation entries).
     """
     gens = _rotation_generators(ndim, m.dtype)
     return jnp.concatenate([jnp.einsum('kij,ij->k', gens, m), g])
 
 
 def _affine_project_moments(m: Array, g: Array, ndim: int) -> Array:
-    """Affine ``SDᵀe`` from the shared moments (3a).
+    """Affine steepest-descent projection from the shared moments.
 
-    The linear-block columns are the moment tensor itself, row-major
-    (``(SDᵀe)_{(i,j)} = m_ij = Σ_x ∇F_i·(x−c)_j·e``); the translation columns are
-    ``g``.  Order matches ``_affine_steepest_descent``.
+    The linear-block entries of :math:`\\mathrm{SD}^{\\top}e` are the moment
+    tensor itself, flattened row-major
+    (:math:`(\\mathrm{SD}^{\\top}e)_{(i,j)} = m_{ij} = \\sum_x \\nabla F_i \\cdot (x - c)_j \\cdot e`);
+    the translation entries are :math:`g`.  Order matches
+    :func:`_affine_steepest_descent`.
+
+    Parameters
+    ----------
+    m : Array
+        Moment tensor of the gradient against the centred grid and error, shape
+        ``(ndim, ndim)``.
+    g : Array
+        Translation moments (gradient against the error), shape ``(ndim,)``.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Array
+        The affine steepest-descent projection, shape ``(P,)`` with
+        ``P = ndim ** 2 + ndim`` (flattened linear block then translation).
     """
     return jnp.concatenate([m.reshape(-1), g])
 
 
 def _rigid_compositional_update(delta: Array, ndim: int) -> Array:
-    """Inverse-compositional warp update ``W(Δθ)⁻¹`` for a rigid step.
+    """Inverse-compositional warp update :math:`W(\\Delta\\theta)^{-1}` for a rigid step.
 
-    Closed-form: ``W(Δθ) = rigid_exp(Δθ)``, inverted by the rigid transpose
-    rule (no solve).
+    Closed-form: :math:`W(\\Delta\\theta) = \\mathrm{rigid\\_exp}(\\Delta\\theta)`,
+    inverted by the rigid transpose rule (no solve).
+
+    Parameters
+    ----------
+    delta : Array
+        Rigid Lie-algebra increment, shape ``(P,)`` (rotation parameters then
+        translation), as returned by the projection/Hessian solve.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Array
+        The inverse warp update as a homogeneous matrix, shape
+        ``(ndim + 1, ndim + 1)``.
     """
     return _rigid_inverse(rigid_exp(delta, ndim=ndim), ndim)
 
 
 def _affine_compositional_update(delta: Array, ndim: int) -> Array:
-    """Inverse-compositional warp update ``W(Δθ)⁻¹`` for an affine step.
+    """Inverse-compositional warp update :math:`W(\\Delta\\theta)^{-1}` for an affine step.
 
-    ``W(Δθ) = [[matrix_exp(A), t], [0, 1]]`` (``affine_exp``), whose inverse is
-    ``[[matrix_exp(−A), −matrix_exp(−A)·t], [0, 1]]`` -- the linear-block
-    inverse is ``matrix_exp(A)⁻¹ = matrix_exp(−A)``, so it stays **GPU-native**
-    (pure matmul, no solve).
+    The forward warp is
+    :math:`W(\\Delta\\theta) = \\begin{bmatrix} \\mathrm{matrix\\_exp}(A) & t \\\\ 0 & 1 \\end{bmatrix}`
+    (as built by :func:`affine_exp`), whose inverse is
+    :math:`\\begin{bmatrix} \\mathrm{matrix\\_exp}(-A) & -\\mathrm{matrix\\_exp}(-A) \\cdot t \\\\ 0 & 1 \\end{bmatrix}`
+    -- the linear-block inverse is
+    :math:`\\mathrm{matrix\\_exp}(A)^{-1} = \\mathrm{matrix\\_exp}(-A)`, so it
+    stays **GPU-native** (pure matmul, no solve).
+
+    Parameters
+    ----------
+    delta : Array
+        Affine Lie-algebra increment, shape ``(P,)`` with ``P = ndim ** 2 + ndim``
+        (flattened linear block :math:`A` then translation :math:`t`).
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Array
+        The inverse warp update as a homogeneous matrix, shape
+        ``(ndim + 1, ndim + 1)``.
     """
     a = delta[: ndim * ndim].reshape(ndim, ndim)
     t = delta[ndim * ndim :]
@@ -249,17 +415,47 @@ def _affine_compositional_update(delta: Array, ndim: int) -> Array:
 
 
 def _rigid_params_from_matrix(matrix: Array, ndim: int) -> Array:
-    """Rigid Lie parameters of a recovered rigid homogeneous matrix."""
+    """Rigid Lie parameters of a recovered rigid homogeneous matrix.
+
+    Parameters
+    ----------
+    matrix : Array
+        Recovered rigid warp as a homogeneous matrix, shape
+        ``(ndim + 1, ndim + 1)``.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Array
+        Rigid Lie coordinates, shape ``(P,)`` (rotation parameters then
+        translation), matching :func:`rigid_exp`'s layout.
+    """
     return rigid_log(matrix, ndim=ndim)
 
 
 def _affine_params_from_matrix(matrix: Array, ndim: int) -> Array:
     """Affine Lie parameters of a recovered affine homogeneous matrix.
 
-    The linear params are ``matrix_log`` of the linear block (the ``gl(n)``
-    generator, row-major); the translation params are the literal translation
-    (``affine_exp`` uses a direct translation) -- matching ``affine_exp``'s
-    layout.  Uses ``matrix_log`` (offline, not in the iteration loop).
+    The linear parameters are :func:`matrix_log` of the linear block (the
+    :math:`gl(n)` generator, flattened row-major); the translation parameters
+    are the literal translation (:func:`affine_exp` uses a direct translation)
+    -- matching :func:`affine_exp`'s layout.  This uses :func:`matrix_log` and
+    runs offline (not inside the iteration loop).
+
+    Parameters
+    ----------
+    matrix : Array
+        Recovered affine warp as a homogeneous matrix, shape
+        ``(ndim + 1, ndim + 1)``.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Array
+        Affine Lie coordinates, shape ``(P,)`` with ``P = ndim ** 2 + ndim``
+        (flattened linear-block generator then translation).
     """
     linear = matrix_log(matrix[:ndim, :ndim]).reshape(-1)
     return jnp.concatenate([linear, matrix[:ndim, ndim]])
@@ -269,17 +465,31 @@ def _hessian_inv(sd: Float[Array, ' m p']) -> Float[Array, ' p p']:
     """Inverse Gauss-Newton Hessian (Jacobi-preconditioned, computed once).
 
     The affine steepest-descent columns span orders of magnitude -- the
-    linear-block columns scale with the voxel coordinate ``x − c`` (``O(n)`` for
-    an ``n``-voxel axis), the translation columns are ``O(1)`` -- so ``H = SDᵀSD``
-    is badly conditioned and a single scalar Levenberg ridge mis-damps the
-    small-diagonal (translation) directions.  Precondition by the diagonal
-    (Jacobi / Marquardt's relative ridge): scale ``H`` to a unit diagonal
-    ``Ĥ = D⁻¹ H D⁻¹`` with ``D = diag(√Hᵢᵢ)``, ridge the *conditioned* matrix,
-    and unscale the inverse, i.e. ``H⁻¹ = D⁻¹ (Ĥ + λI)⁻¹ D⁻¹``.  This is exactly
-    ``(H + λ·diag(Hᵢᵢ))⁻¹`` -- a scale-invariant per-direction ridge -- and the
-    solved system is well-conditioned regardless of the column scaling.  The
-    rigid path (balanced columns) is essentially unchanged; the affine path
-    becomes robust.
+    linear-block columns scale with the voxel coordinate :math:`x - c`
+    (:math:`O(n)` for an :math:`n`-voxel axis), the translation columns are
+    :math:`O(1)` -- so :math:`H = \\mathrm{SD}^{\\top}\\mathrm{SD}` is badly
+    conditioned and a single scalar Levenberg ridge mis-damps the small-diagonal
+    (translation) directions.  Precondition by the diagonal (Jacobi /
+    Marquardt's relative ridge): scale :math:`H` to a unit diagonal
+    :math:`\\hat{H} = D^{-1} H D^{-1}` with
+    :math:`D = \\operatorname{diag}(\\sqrt{H_{ii}})`, ridge the *conditioned*
+    matrix, and unscale the inverse, i.e.
+    :math:`H^{-1} = D^{-1} (\\hat{H} + \\lambda I)^{-1} D^{-1}`.  This is exactly
+    :math:`(H + \\lambda \\cdot \\operatorname{diag}(H_{ii}))^{-1}` -- a
+    scale-invariant per-direction ridge -- and the solved system is
+    well-conditioned regardless of the column scaling.  The rigid path (balanced
+    columns) is essentially unchanged; the affine path becomes robust.
+
+    Parameters
+    ----------
+    sd : Float[Array, ' m p']
+        Steepest-descent images, shape ``(M, P)`` for ``M`` voxels and ``P``
+        parameters.
+
+    Returns
+    -------
+    Float[Array, ' p p']
+        The preconditioned inverse Gauss-Newton Hessian, shape ``(P, P)``.
     """
     h = sd.T @ sd
     p = h.shape[0]
@@ -291,7 +501,24 @@ def _hessian_inv(sd: Float[Array, ' m p']) -> Float[Array, ' p p']:
 
 
 def _rigid_inverse(matrix: Array, ndim: int) -> Array:
-    """Closed-form inverse of a rigid homogeneous matrix (no solve)."""
+    """Closed-form inverse of a rigid homogeneous matrix (no solve).
+
+    Exploits orthogonality of the rotation block (its inverse is its transpose),
+    so no linear solve is required.
+
+    Parameters
+    ----------
+    matrix : Array
+        Rigid warp as a homogeneous matrix, shape ``(ndim + 1, ndim + 1)``.
+    ndim : int
+        Number of spatial dimensions.
+
+    Returns
+    -------
+    Array
+        The inverse rigid warp as a homogeneous matrix, shape
+        ``(ndim + 1, ndim + 1)``.
+    """
     r = matrix[:ndim, :ndim]
     t = matrix[:ndim, ndim]
     rt = r.T
@@ -314,17 +541,53 @@ def _ic_level(
 ) -> tuple[Array, Array]:
     """Run the inverse-compositional iterations on one resolution.
 
-    The per-iteration projection ``SDᵀe`` is reconstructed from the moments of
-    ``∇F`` (3a) -- ``m_ij = Σ_x ∇F_i·(x−c)_j·e`` and ``g_i = Σ_x ∇F_i·e``, a
-    fused reduction over only ``∇F`` rather than a re-read of the ``(M, P)``
-    steepest-descent buffer -- then ``project_moments`` assembles the model's
-    ``SDᵀe`` (rigid contracts ``m``, affine flattens it) and ``H⁻¹`` solves.
+    The per-iteration projection :math:`\\mathrm{SD}^{\\top}e` is reconstructed
+    from the moments of :math:`\\nabla F` --
+    :math:`m_{ij} = \\sum_x \\nabla F_i \\cdot (x - c)_j \\cdot e` and
+    :math:`g_i = \\sum_x \\nabla F_i \\cdot e`, a fused reduction over only
+    :math:`\\nabla F` rather than a re-read of the ``(M, P)`` steepest-descent
+    buffer -- then ``project_moments`` assembles the model's
+    :math:`\\mathrm{SD}^{\\top}e` (rigid contracts :math:`m`, affine flattens
+    it) and the inverse Hessian solves.
 
-    The Gauss-Newton step is **geometric-trust-region-clamped** (``_trust_scale``):
-    a step whose induced grid motion would exceed the grid extent is shortened, so
-    the unreliable few-voxel / low-gradient Hessian cannot drive ``matrix_exp`` to
-    explode; a normal step is left unchanged.  ``convergence`` (default ``None``)
-    selects the fixed ``scan`` or the windowed-slope early-exit (``run_iterations``).
+    The Gauss-Newton step is **geometric-trust-region-clamped**
+    (:func:`_trust_scale`): a step whose induced grid motion would exceed the
+    grid extent is shortened, so the unreliable few-voxel / low-gradient Hessian
+    cannot drive :func:`matrix_exp` to explode; a normal step is left unchanged.
+    ``convergence`` (default ``None``) selects the fixed scan or the
+    windowed-slope early-exit (see :func:`run_iterations`).
+
+    Parameters
+    ----------
+    moving : Array
+        Moving image at this pyramid resolution.
+    ref : ReferenceLevel
+        Precomputed reference data for this level: the tuple
+        ``(fixed, grad, h_inv, center)`` from :func:`ic_reference`.
+    matrix : Array
+        Current warp as a homogeneous matrix, shape ``(ndim + 1, ndim + 1)``,
+        carried into this level.
+    spec : RegistrationSpec
+        Registration configuration (boundary mode, fill value, interpolation,
+        and the optional inverse-compositional line search).
+    ndim : int
+        Number of spatial dimensions.
+    iterations : int
+        Number of iterations to run at this level.
+    compositional_update : CompositionalUpdate
+        Maps a Lie-algebra increment to the inverse warp update
+        :math:`W(\\Delta\\theta)^{-1}` for the transform group.
+    project_moments : ProjectMoments
+        Assembles the model's steepest-descent projection from the shared
+        moments.
+    convergence : Convergence, optional
+        Early-exit policy; ``None`` (default) runs a fixed-length scan.
+
+    Returns
+    -------
+    tuple of Array
+        The updated warp matrix, shape ``(ndim + 1, ndim + 1)``, and the
+        per-iteration cost history for this level.
     """
     fixed, grad, h_inv, center = ref
     grid_c = (identity_grid(fixed.shape, dtype=moving.dtype) - center).reshape(
@@ -400,6 +663,24 @@ def ic_reference(
     (``steepest_descent``; rigid by default, affine for the affine recipe) and
     the inverse Hessian on every reference pyramid level.  Computed once; reused
     across all frames and all iterations.
+
+    Parameters
+    ----------
+    pyr_f : tuple of Float[Array, '*spatial 1']
+        Reference (fixed) Gaussian pyramid, finest level first, each with a
+        trailing singleton channel axis.
+    ndim : int
+        Number of spatial dimensions.
+    steepest_descent : SteepestDescent, optional
+        Function computing the steepest-descent images for the transform group;
+        :func:`_steepest_descent` (rigid) by default.
+
+    Returns
+    -------
+    list of ReferenceLevel
+        One tuple per pyramid level (finest first), each holding the fixed
+        image, the flattened gradient ``(M, ndim)``, the inverse Hessian
+        ``(P, P)``, and the grid centre ``(ndim,)``.
     """
     levels = []
     for level in pyr_f:
@@ -426,14 +707,46 @@ def ic_register_core(
     params_from_matrix: ParamsFromMatrix = _rigid_params_from_matrix,
     project_moments: ProjectMoments = _rigid_project_moments,
 ) -> RegistrationResult:
-    """Inverse-compositional register ``moving`` against a precomputed ref.
+    """Inverse-compositional register ``moving`` against a precomputed reference.
 
-    ``ref_levels`` (from :func:`ic_reference`) is built once by the caller
-    and ``vmap``-ed over a series, so the steepest-descent / Hessian work
-    is shared.  Builds the moving pyramid, runs the coarse-to-fine IC
+    ``ref_levels`` (from :func:`ic_reference`) is built once by the caller and
+    vmapped over a series, so the steepest-descent / Hessian work is shared.
+    Builds the moving pyramid, runs the coarse-to-fine inverse-compositional
     iterations carrying the warp matrix, and finalises.  The transform group is
-    the ``compositional_update`` (``W(Δθ)⁻¹``) + ``params_from_matrix`` pair
-    (rigid by default; affine for ``affine_register``).
+    determined by the ``compositional_update``
+    (:math:`W(\\Delta\\theta)^{-1}`) and ``params_from_matrix`` pair (rigid by
+    default; affine for :func:`affine_register`).
+
+    Parameters
+    ----------
+    moving : Float[Array, '*spatial']
+        Moving image to align to the reference.
+    ref_levels : list of ReferenceLevel
+        Precomputed per-level reference data from :func:`ic_reference`
+        (finest first).
+    ndim : int
+        Number of spatial dimensions.
+    spec : RegistrationSpec
+        Registration configuration (pyramid, iteration, convergence, and
+        sampling settings).
+    init_matrix : Array
+        Initial warp as a homogeneous matrix, shape ``(ndim + 1, ndim + 1)``.
+    compositional_update : CompositionalUpdate, optional
+        Inverse warp update for the transform group;
+        :func:`_rigid_compositional_update` by default.
+    params_from_matrix : ParamsFromMatrix, optional
+        Recovers the Lie parameters from the final warp matrix;
+        :func:`_rigid_params_from_matrix` by default.
+    project_moments : ProjectMoments, optional
+        Assembles the steepest-descent projection from the shared moments;
+        :func:`_rigid_project_moments` by default.
+
+    Returns
+    -------
+    RegistrationResult
+        The recovered warp matrix (centred about the grid centre), the Lie
+        parameters of the un-centred matrix, the warped moving image, and the
+        concatenated per-level cost history.
     """
     dtype = moving.dtype
     pyr_m = gaussian_pyramid(
@@ -510,14 +823,35 @@ def ic_rigid_register(
 ) -> RegistrationResult:
     """Single-pair inverse-compositional rigid registration.
 
-    The fast path ``rigid_register`` dispatches to when its preconditions hold
-    (``IndexSpace`` + a least-squares / SSD metric + a Rigid model): builds the
-    reference steepest-descent / Hessian **once** (:func:`ic_reference`) and
-    runs the constant-template iterations (:func:`ic_register_core`) -- the
-    3dvolreg lineage's per-iteration speed (one warp + one projection per step
-    vs the forward path's ``jacfwd`` over the warp).  Returns the same
-    ``RegistrationResult`` as the forward driver, so the two are interchangeable
-    (the forward path is the parity oracle).
+    The fast path that :func:`rigid_register` dispatches to when its
+    preconditions hold (an :class:`IndexSpace` frame, a least-squares / SSD
+    metric, and a rigid model): builds the reference steepest-descent / Hessian
+    **once** (:func:`ic_reference`) and runs the constant-template iterations
+    (:func:`ic_register_core`) -- the classic ``3dvolreg`` per-iteration speed
+    (one warp plus one projection per step versus the forward path's ``jacfwd``
+    over the warp).  Returns the same :class:`RegistrationResult` as the forward
+    driver, so the two are interchangeable (the forward path is the parity
+    oracle).
+
+    Parameters
+    ----------
+    moving : Float[Array, '*mspatial']
+        Moving image to align to ``fixed``.
+    fixed : Float[Array, '*fspatial']
+        Reference (template) image.
+    ndim : int
+        Number of spatial dimensions.
+    spec : RegistrationSpec
+        Registration configuration.
+    init_matrix : Array, optional
+        Initial warp as a homogeneous matrix, shape ``(ndim + 1, ndim + 1)``;
+        the identity when omitted.
+
+    Returns
+    -------
+    RegistrationResult
+        The recovered rigid warp, its parameters, the warped moving image, and
+        the cost history.
     """
     pyr_f = gaussian_pyramid(
         fixed[..., None],
@@ -543,13 +877,35 @@ def ic_affine_register(
 ) -> RegistrationResult:
     """Single-pair inverse-compositional **affine** registration.
 
-    The affine analogue of :func:`ic_rigid_register` (lever A′): the reference
-    steepest-descent uses the full ``gl(n)`` generators (12-DOF 3-D / 6-DOF
-    2-D), the compositional update inverts ``affine_exp(Δθ)`` GPU-natively via
-    ``matrix_exp(−A)``, and the params are recovered with ``matrix_log`` of the
-    linear block.  Affine has the largest parameter count, so the forward
-    path's per-iteration ``jacfwd`` (≈ 14 tangent warps) is the costliest --
-    the constant-template Hessian saves the most here.
+    The affine analogue of :func:`ic_rigid_register`: the reference
+    steepest-descent uses the full :math:`gl(n)` generators (12-DOF in 3-D,
+    6-DOF in 2-D), the compositional update inverts
+    :math:`\\mathrm{affine\\_exp}(\\Delta\\theta)` GPU-natively via
+    :math:`\\mathrm{matrix\\_exp}(-A)`, and the parameters are recovered with
+    :func:`matrix_log` of the linear block.  Affine has the largest parameter
+    count, so the forward path's per-iteration ``jacfwd`` (roughly 14 tangent
+    warps) is the costliest -- the constant-template Hessian saves the most
+    here.
+
+    Parameters
+    ----------
+    moving : Float[Array, '*mspatial']
+        Moving image to align to ``fixed``.
+    fixed : Float[Array, '*fspatial']
+        Reference (template) image.
+    ndim : int
+        Number of spatial dimensions.
+    spec : RegistrationSpec
+        Registration configuration.
+    init_matrix : Array, optional
+        Initial warp as a homogeneous matrix, shape ``(ndim + 1, ndim + 1)``;
+        the identity when omitted.
+
+    Returns
+    -------
+    RegistrationResult
+        The recovered affine warp, its parameters, the warped moving image, and
+        the cost history.
     """
     pyr_f = gaussian_pyramid(
         fixed[..., None],

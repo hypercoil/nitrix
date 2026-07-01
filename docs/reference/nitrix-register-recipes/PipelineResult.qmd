@@ -1,0 +1,18 @@
+---
+title: "PipelineResult"
+generated: true
+description: "Output of [`syn_pipeline`](../nitrix-register-recipes/syn_pipeline.qmd) -- the composed staged transform."
+---
+
+[‹ back to `nitrix.register.recipes`](../nitrix-register-recipes.qmd)
+
+<!-- nitrix:gen sig:PipelineResult -->
+```python
+class PipelineResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:PipelineResult -->
+Output of [`syn_pipeline`](../nitrix-register-recipes/syn_pipeline.qmd) -- the composed staged transform.
+<!-- nitrix:/gen -->
+

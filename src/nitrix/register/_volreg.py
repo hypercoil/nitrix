@@ -4,22 +4,22 @@
 """
 Batched volume registration -- motion realignment of a 4-D series.
 
-``volreg`` rigidly registers every frame of a ``(T, *spatial)`` series to
-a common reference, returning the per-frame transform stack and the
+:func:`volreg` rigidly registers every frame of a ``(T, *spatial)`` series
+to a common reference, returning the per-frame transform stack and the
 realigned series (the ``3dvolreg`` / ``mcflirt`` task).  The reference is
-registered against **once**: its Gaussian pyramid (and, in a future
-inverse-compositional path, its steepest-descent images + Hessian) are
-computed a single time and the per-frame core (:func:`._core.register_core`)
-is ``vmap``-ed over the series -- the shared reference work is hoisted out
-of the batch, and the whole series compiles once.
+registered against **once**: its Gaussian pyramid (and, on the
+inverse-compositional path, its steepest-descent images and Hessian) is
+computed a single time and the per-frame core is ``vmap``-ed over the
+series -- the shared reference work is hoisted out of the batch, and the
+whole series compiles once.
 
 The per-frame solve is the same matrix-free Gauss-Newton / Levenberg-
 Marquardt path the single-pair recipes use (so it ``vmap``-s cleanly over
-the frame axis); ``volreg`` therefore requires a least-squares metric
-(``SSD``, the default).  The ``space`` argument carries the per-image
-voxel->world geometry, so motion that is rigid in **physical** space is
-recovered correctly on anisotropic grids (``WorldSpace``) -- the same
-foundation as the single-pair recipes (``_space``).
+the frame axis); :func:`volreg` therefore requires a least-squares metric
+(:class:`SSD`, the default).  The ``space`` argument carries the per-image
+voxel-to-world geometry, so motion that is rigid in **physical** space is
+recovered correctly on anisotropic grids (:class:`WorldSpace`) -- the same
+coordinate-space foundation as the single-pair recipes.
 
 A two-pass schedule (``passes=2``) re-references to the mean of the
 first-pass realignment and warm-starts from the first-pass parameters --
@@ -56,8 +56,9 @@ class VolregResult(NamedTuple):
     ----------
     matrices
         Per-frame homogeneous transforms, ``(T, ndim + 1, ndim + 1)`` --
-        index-space (``IndexSpace``) or world-space (``WorldSpace``), each
-        mapping the reference grid to that frame.
+        index-space (:class:`IndexSpace`) or world-space
+        (:class:`WorldSpace`), each mapping the reference grid to that
+        frame.
     params
         Per-frame rigid Lie parameters, ``(T, p)``.
     realigned
@@ -80,7 +81,32 @@ def _resolve_reference(
     series: Float[Array, 't *spatial'],
     reference: Union[int, str, Float[Array, '*spatial']],
 ) -> Array:
-    """Reference image from a frame index, ``"mean"``, or an explicit array."""
+    """Resolve the reference image against which the series is registered.
+
+    Selects the reference from one of three specifications: the per-voxel
+    mean over frames (``"mean"``), a single frame chosen by index, or an
+    explicit image whose shape must match a single frame.
+
+    Parameters
+    ----------
+    series
+        ``(T, *spatial)`` -- the full series, with the frame axis first.
+    reference
+        The reference specification.  ``"mean"`` returns the per-voxel mean
+        over the frame axis; an ``int`` returns that frame; an array of
+        shape ``(*spatial,)`` is used directly.
+
+    Returns
+    -------
+    Array
+        The reference image, shape ``(*spatial,)``.
+
+    Raises
+    ------
+    ValueError
+        If a string other than ``"mean"`` is given, or if an explicit
+        reference array does not match the per-frame shape.
+    """
     if isinstance(reference, str):
         if reference != 'mean':
             raise ValueError(
@@ -125,9 +151,10 @@ def volreg(
         the first-pass realignment and warm-starts from its parameters
         (robust when the initial reference is a blurred mean).
     spec
-        ``RegistrationSpec`` for the per-frame registration.  The metric
-        must be least-squares (``SSD``, the default) -- the batched LM
-        path does not use the scalar BFGS metrics.  **Schedule:** motion
+        :class:`RegistrationSpec` for the per-frame registration.  The
+        metric must be least-squares (:class:`SSD`, the default) -- the
+        batched LM path does not use the scalar BFGS metrics.
+        **Schedule:** motion
         realignment is a *small*-displacement problem and the second-order
         per-frame solver converges in a handful of steps, so a **tight**
         ``iterations`` (e.g. ``(4, 2, 1)`` over a 3-level pyramid) realigns as
@@ -143,20 +170,23 @@ def volreg(
         ~1e-3 gives ~2-3x at identical realignment; not reverse-differentiable).
         Rejected on the forward (Gauss-Newton) path, which threads only the scan.
     space
-        Coordinate space (``IndexSpace`` default, or ``WorldSpace`` for
-        physically-rigid motion on anisotropic grids).
+        Coordinate space (:class:`IndexSpace` default, or
+        :class:`WorldSpace` for physically-rigid motion on anisotropic
+        grids).
     method
         Per-frame solver: ``"auto"`` (default; the inverse-compositional
-        constant-template Hessian in ``IndexSpace`` -- the reference's
-        steepest-descent + Hessian are built **once** for the whole
-        series; the forward Gauss-Newton path otherwise),
-        ``"inverse_compositional"`` (force IC; ``IndexSpace`` only), or
-        ``"forward"``.
+        constant-template Hessian in :class:`IndexSpace` -- the reference's
+        steepest-descent images and Hessian are built **once** for the
+        whole series; the forward Gauss-Newton path otherwise),
+        ``"inverse_compositional"`` (force IC; :class:`IndexSpace` only),
+        or ``"forward"``.
 
     Returns
     -------
-    ``VolregResult`` (``matrices``, ``params``, ``realigned``,
-    ``reference``, ``cost_history``).
+    VolregResult
+        The per-frame transforms and realigned series: ``matrices``,
+        ``params``, ``realigned``, ``reference``, and ``cost_history``.
+        See :class:`VolregResult` for the full field descriptions.
     """
     if series.ndim not in (3, 4):
         raise ValueError(

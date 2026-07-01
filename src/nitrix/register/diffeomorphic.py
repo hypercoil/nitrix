@@ -4,34 +4,45 @@
 """
 Diffeomorphic registration recipe: log-domain Demons.
 
-The representative diffeomorphic algorithm (Vercauteren et al. 2009),
-parametrised by a **stationary velocity field** ``v`` whose exponential
-``φ = exp(v)`` (scaling-and-squaring, ``integrate_velocity_field``) is a
-diffeomorphism by construction.  Each iteration is operator splitting:
+The representative diffeomorphic algorithm of Vercauteren, Pennec, Perchant
+and Ayache (2009), parametrised by a *stationary velocity field* :math:`v`
+whose exponential :math:`\\varphi = \\exp(v)` (scaling-and-squaring, via
+:func:`~nitrix.geometry.integrate_velocity_field`) is a diffeomorphism by
+construction.  Each iteration is an operator splitting:
 
 1. **ESM demons force** -- a closed-form per-voxel velocity update
-   ``u = (F − M∘φ) · J / (|J|² + α²(F − M∘φ)²)`` with the symmetric
-   gradient ``J = ½(∇F + ∇(M∘φ))`` (efficient symmetric forces).  No
-   inner solve -- this is what makes the diffeomorphic recipe as
-   GPU-clean as it is.
-2. **Fluid regularisation** -- Gaussian-smooth the update ``u``.
-3. **Log update** -- ``v ← v + u`` (additive; BCH ``+ ½[v,u]`` optional).
-4. **Diffusion regularisation** -- Gaussian-smooth the velocity ``v``.
+   :math:`u = (F - M \\circ \\varphi)\\, J / (|J|^2 + \\alpha^2 (F - M \\circ \\varphi)^2)`
+   with the symmetric gradient
+   :math:`J = \\tfrac{1}{2}(\\nabla F + \\nabla (M \\circ \\varphi))`
+   (efficient symmetric forces).  There is no inner solve -- this is what
+   makes the diffeomorphic recipe as GPU-clean as it is.
+2. **Fluid regularisation** -- Gaussian-smooth the update :math:`u`.
+3. **Log update** -- :math:`v \\leftarrow v + u` (additive; the
+   Baker-Campbell-Hausdorff term :math:`+ \\tfrac{1}{2}[v, u]` is optional).
+4. **Diffusion regularisation** -- Gaussian-smooth the velocity :math:`v`.
 
-Coarse-to-fine over a Gaussian pyramid.  The Gaussian smoothings are the
-Green's functions of the fluid/diffusion regularisers; ``α`` normalises
-the force.  Pure composition of the substrate (SVF exp, warp, gradient,
-Gaussian, velocity algebra) -- the only metric-specific piece is the
-closed-form force.  An LNCC-driven (SyN-style) force and a symmetric
-forward+inverse variant are the documented upgrade paths.
+The recipe proceeds coarse-to-fine over a Gaussian pyramid.  The Gaussian
+smoothings are the Green's functions of the fluid/diffusion regularisers;
+:math:`\\alpha` normalises the force.  The recipe is a pure composition of the
+substrate (SVF exponential, warp, gradient, Gaussian, velocity algebra) -- the
+only metric-specific piece is the closed-form force.  An LNCC-driven
+(SyN-style) force and a symmetric forward-plus-inverse variant are the
+documented upgrade paths.
 
-The above is the **algebra** (log-domain SVF) representation -- the exact
-oracle.  The default ``representation='group'`` (``DemonsSpec``) instead carries
-the *displacement* and uses the greedy compositive update (warp directly,
-compose the regularised increment -- no per-iteration ``exp``, ~2 gathers/iter
-vs ~7), recovering the velocity once at finalisation via ``geometry.field_log``.
-Greedy is not the SVF fixed point, so the two agree on synthetic recovery to
-tolerance, not field-wise.
+The above is the *algebra* (log-domain SVF) representation -- the exact oracle.
+The default ``representation='group'`` (:class:`DemonsSpec`) instead carries the
+*displacement* and uses the greedy compositive update (warp directly, compose
+the regularised increment -- no per-iteration exponential, roughly two gathers
+per iteration versus seven), recovering the velocity once at finalisation via
+:func:`~nitrix.geometry.field_log`.  The greedy update is not the SVF fixed
+point, so the two representations agree on synthetic recovery to tolerance, not
+field-wise.
+
+References
+----------
+Vercauteren, T., Pennec, X., Perchant, A., & Ayache, N. (2009). Diffeomorphic
+demons: efficient non-parametric image registration. NeuroImage, 45(1),
+S61-S72. https://doi.org/10.1016/j.neuroimage.2008.10.040
 """
 
 from __future__ import annotations
@@ -77,24 +88,27 @@ __all__ = [
 class DemonsSpec(SVFSpec):
     """Static configuration for the log-Demons recipe (jit-static).
 
-    Embeds :class:`._svf.SVFSpec` (G1) for the shared schedule / regularisation /
-    convergence fields (``levels``, ``iterations``, ``sigma_fluid`` /
-    ``sigma_diffusion``, ``spacing``, ``pyramid_factor`` / ``pyramid_sigma``,
-    ``boundary_mode``, ``representation``, ``mode`` / ``convergence``,
-    ``compute_velocity``); Demons carries a single displacement / velocity, so
-    its ``representation`` / ``compute_velocity`` recover the one ``velocity``
-    field (``DiffeomorphicResult.velocity``).  The Demons-specific force knobs:
+    Embeds the shared stationary-velocity-field spec for the schedule /
+    regularisation / convergence fields (``levels``, ``iterations``,
+    ``sigma_fluid`` / ``sigma_diffusion``, ``spacing``, ``pyramid_factor`` /
+    ``pyramid_sigma``, ``boundary_mode``, ``representation``, ``mode`` /
+    ``convergence``, ``compute_velocity``); Demons carries a single displacement
+    / velocity, so its ``representation`` / ``compute_velocity`` recover the one
+    ``velocity`` field (:attr:`DiffeomorphicResult.velocity`).  The
+    Demons-specific force knobs:
 
     Attributes
     ----------
     n_steps
-        Scaling-and-squaring steps for ``exp(v)`` (the algebra path; ``'auto'``
-        is not used here -- the count is jit-static).
+        Scaling-and-squaring steps for :math:`\\exp(v)` (the algebra path;
+        ``'auto'`` is not used here -- the count is jit-static).
     alpha
-        Force normalisation: ``denom = |J|² + α²(F − M∘φ)²``.  Larger ``α`` damps
-        the step where the intensity difference is large.
+        Force normalisation, entering the denominator
+        :math:`|J|^2 + \\alpha^2 (F - M \\circ \\varphi)^2`.  Larger
+        :math:`\\alpha` damps the step where the intensity difference is large.
     bch_order
-        Log-update order: ``1`` additive (default), ``2`` adds ½[v,u].
+        Log-update order: ``1`` additive (default), ``2`` adds the
+        Baker-Campbell-Hausdorff term :math:`\\tfrac{1}{2}[v, u]`.
     """
 
     n_steps: int = 6
@@ -108,19 +122,23 @@ class DiffeomorphicResult(NamedTuple):
     Attributes
     ----------
     velocity
-        The stationary velocity field, ``(*spatial, ndim)``, or ``None`` when
-        ``DemonsSpec.compute_velocity`` is ``False`` (the default -- see that
-        flag; the velocity recovery is skipped to save compile + runtime).
+        The stationary velocity field, shape ``(*spatial, ndim)``, or ``None``
+        when :attr:`DemonsSpec.compute_velocity` is ``False`` (the default;
+        the velocity recovery is skipped to save compile and runtime).
     displacement
-        ``exp(velocity)`` as a displacement field (add ``identity_grid``
-        for the absolute deformation).
+        :math:`\\exp(v)` as a displacement field, shape ``(*spatial, ndim)``
+        (add :func:`~nitrix.geometry.identity_grid` for the absolute
+        deformation).
     warped
-        ``moving`` resampled by the deformation onto the ``fixed`` grid.
+        ``moving`` resampled by the deformation onto the ``fixed`` grid, shape
+        ``(*spatial,)``.
     jacobian_det
-        ``det J`` of the displacement -- the diffeomorphism QA map (all
-        positive ⇒ no folding).
+        The determinant :math:`\\det J` of the displacement's Jacobian, shape
+        ``(*spatial,)`` -- the diffeomorphism quality-assurance map (all
+        positive implies no folding).
     cost_history
-        Concatenated per-iteration SSD trace.
+        Concatenated per-iteration sum-of-squared-differences trace, shape
+        ``(h,)``.
     """
 
     velocity: Optional[Float[Array, '*spatial ndim']]
@@ -143,19 +161,54 @@ def _demons_level(
     mask: Optional[Array] = None,
     restrict: Optional[tuple[float, ...]] = None,
 ) -> tuple[Array, Array]:
-    """Run the Demons iterations on one resolution; return ``(v, costs)``.
+    """Run the Demons iterations on one pyramid resolution.
 
-    Thin wrapper over the metric-generic single-sided SVF driver
-    (``_svf.single_sided_level``) with the level's ``force`` (the closed-form
-    ESM :class:`DemonsForce` by default, or any :class:`Force` the caller
-    supplies).  The driver hoists ``∇fixed`` out of the iteration, rolls it
-    with ``lax.scan`` (so the level compiles one iteration), and stays
-    differentiable for the unrolled gradient path.
+    A thin wrapper over the metric-generic single-sided SVF driver with the
+    level's ``force`` (the closed-form ESM :class:`~nitrix.register.DemonsForce`
+    by default, or any :class:`~nitrix.register.Force` the caller supplies).
+    The driver hoists :math:`\\nabla F` (the fixed-image gradient) out of the
+    iteration, rolls the iterations with ``lax.scan`` (so the level compiles a
+    single iteration), and stays differentiable for the unrolled gradient path.
 
-    ``rel_spacing`` (anisotropy-only; ``None`` for isotropic) makes the physics
-    axis-correct: the gradient is taken in physical units, the ESM force is
-    converted back to the voxel-native field, and the fluid/diffusion sigmas
-    become per-axis -- all reducing to the voxel behaviour when ``None``.
+    Parameters
+    ----------
+    moving
+        Moving image at this resolution, shape ``(*spatial,)``.
+    fixed
+        Fixed (reference) image at this resolution, shape ``(*spatial,)``.
+    v
+        Current velocity (algebra) field to warm-start the level, shape
+        ``(*spatial, ndim)``.
+    force
+        The driving force for this level (see
+        :class:`~nitrix.register.Force`).
+    spec
+        The :class:`DemonsSpec` supplying the regularisation and integration
+        knobs (``n_steps``, ``boundary_mode``, ``sigma_fluid``,
+        ``sigma_diffusion``, ``bch_order``, ``mode`` / ``convergence``).
+    ndim
+        Spatial dimensionality (2 or 3).
+    iterations
+        Maximum number of Demons iterations to run at this level.
+    rel_spacing
+        Per-axis relative voxel spacing (anisotropy-only; ``None`` for
+        isotropic).  When supplied, the gradient is taken in physical units,
+        the ESM force is converted back to the voxel-native field, and the
+        fluid/diffusion sigmas become per-axis -- all reducing to the voxel
+        behaviour when ``None``.
+    mask
+        Optional fixed-grid weight field gating the force to a region, shape
+        ``(*spatial,)``, or ``None``.
+    restrict
+        Optional per-axis deformation weight of length ``ndim`` (a ``0``
+        suppresses deformation along that axis), or ``None``.
+
+    Returns
+    -------
+    v : Array
+        The updated velocity field, shape ``(*spatial, ndim)``.
+    costs : Array
+        The per-iteration cost trace for this level, shape ``(iterations,)``.
     """
     return single_sided_level(
         moving,
@@ -198,7 +251,7 @@ def diffeomorphic_demons_register(
 ) -> DiffeomorphicResult:
     """Diffeomorphic registration of ``moving`` to ``fixed`` (log-Demons).
 
-    Estimates a stationary velocity field ``v`` (coarse-to-fine) whose
+    Estimates a stationary velocity field :math:`v` (coarse-to-fine) whose
     exponential warps ``moving`` onto ``fixed``.  The result is a
     diffeomorphism by construction; ``jacobian_det`` lets the caller
     assert no folding (all positive).
@@ -206,25 +259,29 @@ def diffeomorphic_demons_register(
     Parameters
     ----------
     moving, fixed
-        Single-channel images (2-D or 3-D).  Identical shape unless an init
-        (below) resamples ``moving`` onto the ``fixed`` grid.
+        Single-channel images (2-D or 3-D), each of shape ``(*spatial,)``.
+        Identical shape unless an init (below) resamples ``moving`` onto the
+        ``fixed`` grid.
     spec
-        ``DemonsSpec`` controlling the schedule and regularisation.
+        A :class:`DemonsSpec` controlling the schedule and regularisation.
     force
-        The driving :class:`Force` (``_force``).  ``None`` (default) uses the
-        closed-form ESM ``DemonsForce(spec.alpha)``; a single ``Force``
-        overrides it at every level (e.g. ``MetricForce(MI())`` for cross-modal
-        deformable registration); a length-``spec.levels`` **coarse-to-fine**
-        sequence sets a per-level schedule (a cheap force coarse, a high-signal
-        one at the finest level).
+        The driving force (see :class:`~nitrix.register.Force`).  ``None``
+        (default) uses the closed-form ESM
+        :class:`~nitrix.register.DemonsForce` with ``spec.alpha``; a single
+        :class:`~nitrix.register.Force` overrides it at every level (e.g.
+        :class:`~nitrix.register.MetricForce` wrapping
+        :class:`~nitrix.register.MI` for cross-modal deformable registration);
+        a length-``spec.levels`` **coarse-to-fine** sequence sets a per-level
+        schedule (a cheap force coarse, a high-signal one at the finest level).
     init_affine, init_displacement
         Optional warm-start / multi-stage init (at most one).  ``init_affine``
-        is a fixed->moving index matrix (as ``rigid_register`` /
-        ``affine_register`` return); ``init_displacement`` is a fixed-grid
-        displacement field (e.g. a SynthMorph network output).  ``moving`` is
-        pre-warped by it onto the ``fixed`` grid and the **residual** is
-        registered; the returned ``displacement`` / ``warped`` /
-        ``jacobian_det`` are the **total** (init then residual) map, while
+        is a fixed-to-moving index matrix (as :func:`~nitrix.register.rigid_register`
+        / :func:`~nitrix.register.affine_register` return), shape
+        ``(d1, d1)``; ``init_displacement`` is a fixed-grid displacement field
+        (e.g. a SynthMorph network output), shape ``(*spatial, ndim)``.
+        ``moving`` is pre-warped by it onto the ``fixed`` grid and the
+        **residual** is registered; the returned ``displacement`` / ``warped``
+        / ``jacobian_det`` are the **total** (init then residual) map, while
         ``velocity`` is the residual SVF.
     mask
         Optional fixed-grid weight field (``(*spatial,)``, e.g. a brain mask)
@@ -236,7 +293,9 @@ def diffeomorphic_demons_register(
         axis (e.g. ``(1, 1, 0)`` for in-plane-only).
     winsorize, histogram_match
         Intensity conditioning before registration (the fMRIPrep front-end; see
-        ``register.rigid_register``).  Both default off.
+        :func:`~nitrix.register.rigid_register`).  ``winsorize`` clips
+        intensities to a ``(low, high)`` quantile pair; ``histogram_match``
+        matches the moving histogram to the fixed one.  Both default off.
     smoothing_sigma
         Optional per-level smoothing applied to each pyramid level **independent
         of the shrink** (ANTs ``-s``, decoupled from ``-f``): a scalar (all
@@ -246,21 +305,24 @@ def diffeomorphic_demons_register(
 
     Returns
     -------
-    ``DiffeomorphicResult`` (``velocity``, ``displacement``, ``warped``,
-    ``jacobian_det``, ``cost_history``).  ``velocity`` is ``None`` unless
-    ``spec.compute_velocity`` (the default skips its ``field_log`` recovery).
+    DiffeomorphicResult
+        A named tuple carrying ``velocity``, ``displacement``, ``warped``,
+        ``jacobian_det`` and ``cost_history`` (see :class:`DiffeomorphicResult`).
+        ``velocity`` is ``None`` unless ``spec.compute_velocity`` is set (the
+        default skips its :func:`~nitrix.geometry.field_log` recovery).
 
     Notes
     -----
-    **Cohort registration (D4).**  This is a pure ``(moving, fixed) -> result``
+    **Cohort registration.**  This is a pure ``(moving, fixed) -> result``
     function, so register a *cohort* to a shared reference with ``jax.vmap``::
 
         jax.vmap(lambda m: diffeomorphic_demons_register(m, fixed, spec=spec))(moving_stack)
 
     The batch-aggregate early-exit comes for free: under ``mode='early_exit'`` the
     per-subject ``lax.while_loop`` runs (via ``vmap``) to the **all-lanes** exit,
-    the slowest subject setting the trip count -- the same pattern ``volreg`` uses
-    for its frames.  No dedicated cohort driver is needed.
+    the slowest subject setting the trip count -- the same pattern
+    :func:`~nitrix.register.volreg` uses for its frames.  No dedicated cohort
+    driver is needed.
 
     Warning
     -------
