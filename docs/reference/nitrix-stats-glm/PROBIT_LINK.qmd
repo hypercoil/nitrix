@@ -1,6 +1,7 @@
 ---
 title: "PROBIT_LINK"
 generated: true
+description: "The probit link :math:`g( mu) =  Phi^{-1}( mu)`."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ PROBIT_LINK = Link(name='probit', link=(lambda mu: _norm.ppf(jnp.clip(mu, _EPS, 
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:PROBIT_LINK -->
-*TODO: describe this type alias / constant.*
+The probit link $g(\mu) = \Phi^{-1}(\mu)$.
 <!-- nitrix:/gen -->
 

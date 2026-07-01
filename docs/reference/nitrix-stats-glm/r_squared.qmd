@@ -18,7 +18,7 @@ Per-element $R^2$ (Gaussian) or deviance explained (general).
 For the Gaussian family the deviance is the residual sum of squares and the
 null deviance the total sum of squares, so this is the ordinary coefficient
 of determination $R^2$; for other families it is the fraction of
-deviance explained, i.e. `deviance_explained`.
+deviance explained, i.e. [`deviance_explained`](../nitrix-stats-glm/deviance_explained.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:r_squared -->
@@ -26,7 +26,7 @@ deviance explained, i.e. `deviance_explained`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the model and null deviances. |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the model and null deviances. |
 
 **Returns** `Float` — shape `V`. `(V,)` $R^2$ (or deviance explained), one per element.
 <!-- nitrix:/gen -->

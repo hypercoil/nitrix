@@ -1,7 +1,7 @@
 ---
 title: "resolve_link"
 generated: true
-description: "Resolve a `str` name or a `Link` instance to a `Link`."
+description: "Resolve a `str` name or a [`Link`](../nitrix-stats-glm/Link.qmd) instance to a [`Link`](../nitrix-stats-glm/Link.qmd)."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -15,10 +15,10 @@ resolve_link(link: Union[str, Link]) -> Link
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:resolve_link -->
-Resolve a `str` name or a `Link` instance to a `Link`.
+Resolve a `str` name or a [`Link`](../nitrix-stats-glm/Link.qmd) instance to a [`Link`](../nitrix-stats-glm/Link.qmd).
 
 Built-ins: `'identity'` / `'log'` / `'logit'` / `'probit'` /
-`'cloglog'` / `'sqrt'` / `'inverse'`; or pass a `Link` directly.
+`'cloglog'` / `'sqrt'` / `'inverse'`; or pass a [`Link`](../nitrix-stats-glm/Link.qmd) directly.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:resolve_link -->
@@ -26,7 +26,7 @@ Built-ins: `'identity'` / `'log'` / `'logit'` / `'probit'` /
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `link` | `Union[str, Link]` | — | — | A built-in link name or a `Link` instance. A `Link` is returned unchanged. |
+| `link` | `Union[str, Link]` | — | — | A built-in link name or a [`Link`](../nitrix-stats-glm/Link.qmd) instance. A [`Link`](../nitrix-stats-glm/Link.qmd) is returned unchanged. |
 
 **Returns** `Link`. The resolved link.
 <!-- nitrix:/gen -->

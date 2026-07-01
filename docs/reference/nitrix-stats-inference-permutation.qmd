@@ -24,10 +24,10 @@ Exchangeability operators for permutation inference.
 Keyed pure generators that build the set of relabellings used by
 `randomise`-style permutation tests:
 
-- `sign_flips` -- the $\pm 1$ sign-flip matrix for symmetric /
+- [`sign_flips`](nitrix-stats-inference-permutation/sign_flips.qmd) -- the $\pm 1$ sign-flip matrix for symmetric /
   one-sample tests (the null is invariant to flipping an exchangeable
   observation's sign).
-- `permutations` -- the row-permutation index matrix for shuffle-based
+- [`permutations`](nitrix-stats-inference-permutation/permutations.qmd) -- the row-permutation index matrix for shuffle-based
   tests (two-sample, regression).
 
 Both honour **exchangeability blocks**: with a per-observation `blocks` label,

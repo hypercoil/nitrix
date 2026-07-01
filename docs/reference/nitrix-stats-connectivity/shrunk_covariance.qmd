@@ -15,7 +15,7 @@ shrunk_covariance(X: Float[Array, 'n p'], *, method: ShrinkageMethod = 'ledoit_w
 <!-- nitrix:gen overview:shrunk_covariance -->
 Analytic-shrinkage covariance, returning the covariance only.
 
-Thin wrapper over `ledoit_wolf` and `oas` that returns just the
+Thin wrapper over [`ledoit_wolf`](../nitrix-stats-connectivity/ledoit_wolf.qmd) and [`oas`](../nitrix-stats-connectivity/oas.qmd) that returns just the
 shrunk covariance, discarding the shrinkage intensity.
 <!-- nitrix:/gen -->
 

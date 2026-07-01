@@ -67,7 +67,7 @@ fit makes **no per-voxel cuSOLVER call**:
 the fixed-effect algebra is closed-form for the dominant $p \in
 \{1, 2\}$ designs (the intercept $p = 1$ is a scalar) and the REML
 score / curvature are analytic (no second-order autodiff through a
-Cholesky).  That is what unblocks `flame_two_level` on the
+Cholesky).  That is what unblocks [`flame_two_level`](nitrix-stats-lme-flame/flame_two_level.qmd) on the
 broken-cuSOLVER GPU and flattens its compile time, which would otherwise
 grow linearly in the voxel count.
 

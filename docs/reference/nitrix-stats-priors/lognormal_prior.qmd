@@ -32,6 +32,6 @@ multiplicative spread $\sigma$.
 | `mu` | `float` | — | — | Prior mean $\mu$ of $\log \rho$ (so $\exp(\mu)$ is the prior median lengthscale). |
 | `sd` | `float` | — | — | Prior standard deviation $\sigma$ of $\log \rho$ (must be positive). |
 
-**Returns** `PriorFn`. A callable mapping a scalar lengthscale $\rho$ (shape `()`) to the scalar negative log-density $-\log p(\rho)$ (shape `()`), suitable for the `map_rho=` argument of `nitrix.stats.gp_fit` and `nitrix.stats.hgp_fit`.
+**Returns** `PriorFn`. A callable mapping a scalar lengthscale $\rho$ (shape `()`) to the scalar negative log-density $-\log p(\rho)$ (shape `()`), suitable for the `map_rho=` argument of [`nitrix.stats.gp_fit`](../nitrix-stats-gp/gp_fit.qmd) and [`nitrix.stats.hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd).
 <!-- nitrix:/gen -->
 

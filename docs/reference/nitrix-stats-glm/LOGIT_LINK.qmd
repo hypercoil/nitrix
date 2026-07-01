@@ -1,6 +1,7 @@
 ---
 title: "LOGIT_LINK"
 generated: true
+description: "The logit link :math:`g( mu) =  log( mu / (1 -  mu))`."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ LOGIT_LINK = Link(name='logit', link=_logit, linkinv=_expit, mu_eta=_binomial_mu
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:LOGIT_LINK -->
-*TODO: describe this type alias / constant.*
+The logit link $g(\mu) = \log(\mu / (1 - \mu))$.
 <!-- nitrix:/gen -->
 

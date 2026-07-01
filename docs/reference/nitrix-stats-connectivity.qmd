@@ -53,8 +53,8 @@ $$
 
 solved by Friedman, Hastie and Tibshirani (2008) coordinate descent on the
 working covariance $W = \Theta^{-1}$ directly (no per-iteration
-factorisation).  `glasso_path` performs a warm-started $\lambda$
-sweep and `ebic_score` provides extended-BIC model selection (Foygel and
+factorisation).  [`glasso_path`](nitrix-stats-connectivity/glasso_path.qmd) performs a warm-started $\lambda$
+sweep and [`ebic_score`](nitrix-stats-connectivity/ebic_score.qmd) provides extended-BIC model selection (Foygel and
 Drton, 2010).
 
 The implementation is pure JAX.  The shrinkage path is a handful of trace and
@@ -65,7 +65,7 @@ Everything is differentiable and GPU-resident, and cuSOLVER-free (the
 $\log\det$ used by the extended BIC goes through a rolled Cholesky).
 Batch over subjects or edges with `vmap`.  The data matrix `X` is
 `(n_samples, n_features)` (the `sklearn.covariance` convention), whereas
-`glasso` consumes a `(p, p)` sample covariance `S` directly.
+[`glasso`](nitrix-stats-connectivity/glasso.qmd) consumes a `(p, p)` sample covariance `S` directly.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen sections:__module__ -->

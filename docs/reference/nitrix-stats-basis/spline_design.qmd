@@ -1,7 +1,7 @@
 ---
 title: "spline_design"
 generated: true
-description: "Re-evaluate a `SplineBasis` design at new covariate values."
+description: "Re-evaluate a [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) design at new covariate values."
 ---
 
 [‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
@@ -13,7 +13,7 @@ spline_design(basis: SplineBasis, x: Float[Array, ' m']) -> Float[Array, 'm k']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:spline_design -->
-Re-evaluate a `SplineBasis` design at new covariate values.
+Re-evaluate a [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) design at new covariate values.
 
 Used to render a smooth's partial effect on a fresh grid.  Applies the same
 feature map and sum-to-zero constraint as the original construction.
@@ -24,7 +24,7 @@ feature map and sum-to-zero constraint as the original construction.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `basis` | `SplineBasis` | — | — | The `SplineBasis` to re-evaluate. |
+| `basis` | `SplineBasis` | — | — | The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) to re-evaluate. |
 | `x` | `Float` | `m` | — | `(m,)` covariate values. |
 
 **Returns** `Float` — shape `m` × `k`. The `(m, k)` design matrix at `x` (post-constraint).

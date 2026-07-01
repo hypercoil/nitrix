@@ -21,7 +21,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Mass-univariate generalised linear models.
 
-`glm_fit` fits the same design `X` (`N, p`) to every element (voxel /
+[`glm_fit`](nitrix-stats-glm/glm_fit.qmd) fits the same design `X` (`N, p`) to every element (voxel /
 vertex / fixel) of a response tensor `Y` (`V, N`) -- the mass-univariate
 "one model per element, shared design" workload behind ModelArray's `lm` and
 the parametric backbone of GAM (`gam.py`) and the permutation engine
@@ -50,15 +50,15 @@ cuSOLVER custom-call, so the fit runs on the broken-cuSOLVER GPU.
 
 ### Inference
 
-`t_contrast` / `f_contrast` return the per-element effect, standard
+[`t_contrast`](nitrix-stats-glm/t_contrast.qmd) / [`f_contrast`](nitrix-stats-glm/f_contrast.qmd) return the per-element effect, standard
 error, t / F statistic, and the (Student-t / F) p-value -- the ModelArray `lm`
 output columns.  p-values use the regularised incomplete beta
 (`jax.scipy.special.betainc`), so they are exact and cuSOLVER-free.
-`r_squared` / `deviance_explained` use the stored null-model deviance.
+[`r_squared`](nitrix-stats-glm/r_squared.qmd) / [`deviance_explained`](nitrix-stats-glm/deviance_explained.qmd) use the stored null-model deviance.
 
-The exponential family is a frozen `Family` value (a small record of pure
-link / variance / deviance functions); `GAUSSIAN` / `BINOMIAL` /
-`POISSON` ship, and a custom family is just another `Family(...)`.
+The exponential family is a frozen [`Family`](nitrix-stats-glm/Family.qmd) value (a small record of pure
+link / variance / deviance functions); [`GAUSSIAN`](nitrix-stats-glm/GAUSSIAN.qmd) / [`BINOMIAL`](nitrix-stats-glm/BINOMIAL.qmd) /
+[`POISSON`](nitrix-stats-glm/POISSON.qmd) ship, and a custom family is just another `Family(...)`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

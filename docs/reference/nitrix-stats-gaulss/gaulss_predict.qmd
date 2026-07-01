@@ -26,9 +26,9 @@ $\sigma = \exp(Z \beta_{\sigma})$ (log link).
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GauLSSResult` | — | — | Fit output from `gaulss_fit`. |
+| `result` | `GauLSSResult` | — | — | Fit output from [`gaulss_fit`](../nitrix-stats-gaulss/gaulss_fit.qmd). |
 | `X` | `Float` | `N` × `p` | — | Mean-model design matrix, with the same columns as the fit. |
-| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | Scale-model design matrix; `None` (default) uses an intercept column of shape `(N, 1)` -- the homoscedastic default matching `gaulss_fit`. Must have the same column count `q` that the fit's scale model used. |
+| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | Scale-model design matrix; `None` (default) uses an intercept column of shape `(N, 1)` -- the homoscedastic default matching [`gaulss_fit`](../nitrix-stats-gaulss/gaulss_fit.qmd). Must have the same column count `q` that the fit's scale model used. |
 
 **Returns** `Tuple[Float[Array, 'V N'], Float[Array, 'V N']]`. Predicted mean for each element and observation. Predicted standard deviation for each element and observation. Both outputs are differentiable with respect to their designs and the fitted coefficients.
 <!-- nitrix:/gen -->

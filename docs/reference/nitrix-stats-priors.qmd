@@ -23,8 +23,8 @@ Lengthscale priors as REML regularisers (the `map_rho=` penalties).
 
 A small, curated set of priors on the Gaussian-process lengthscale
 $\rho$, each returned as a callable $\rho \mapsto -\log p(\rho)$
-suitable for the `map_rho=` argument of `nitrix.stats.gp_fit` and
-`nitrix.stats.hgp_fit`.  This is the lightweight *penalised / maximum a
+suitable for the `map_rho=` argument of [`nitrix.stats.gp_fit`](nitrix-stats-gp/gp_fit.qmd) and
+[`nitrix.stats.hgp_fit`](nitrix-stats-hgp/hgp_fit.qmd).  This is the lightweight *penalised / maximum a
 posteriori* lengthscale: the REML objective $-2 l_R(\rho)$ gains
 $-2 \log p(\rho)$, so the selected $\rho$ is the *maximum a
 posteriori* value rather than the pure REML maximiser.  (A full posterior over
@@ -43,13 +43,13 @@ elementwise on a scalar $\rho$.
 <!-- nitrix:gen sections:__module__ -->
 ### Which prior?
 
-- `halfnormal_prior` -- shrinks large $\rho$ (keeps the GP from
+- [`halfnormal_prior`](nitrix-stats-priors/halfnormal_prior.qmd) -- shrinks large $\rho$ (keeps the GP from
   going near-linear); a soft upper scale.
-- `invgamma_prior` -- penalises small $\rho$ (the usual
+- [`invgamma_prior`](nitrix-stats-priors/invgamma_prior.qmd) -- penalises small $\rho$ (the usual
   penalised-complexity-style regulariser that stops the lengthscale collapsing
   into noise-fitting); the practical default when $\rho$ is weakly
   identified.
-- `lognormal_prior` -- centres $\rho$ on a prior median
+- [`lognormal_prior`](nitrix-stats-priors/lognormal_prior.qmd) -- centres $\rho$ on a prior median
   $\exp(\mu)$ with multiplicative spread; symmetric in
   $\log \rho$.
 <!-- nitrix:/gen -->

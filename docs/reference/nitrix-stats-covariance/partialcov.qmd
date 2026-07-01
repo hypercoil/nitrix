@@ -15,7 +15,7 @@ partialcov(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **kw
 <!-- nitrix:gen overview:partialcov -->
 Partial covariance: conditioning each pair on all others.
 
-Computed from the precision matrix (see `precision`) by
+Computed from the precision matrix (see [`precision`](../nitrix-stats-covariance/precision.qmd)) by
 negating its off-diagonal entries while leaving the diagonal
 unchanged.  Each off-diagonal entry then expresses the direct
 relationship between a pair of variables after conditioning on all
@@ -27,8 +27,8 @@ the remaining variables.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor; see `cov`. |
-| `require_nonsingular` | `bool` | — | `True` | Forwarded to `precision`: use a dense inverse (`True`, default) or the eigen-truncated pseudoinverse (`False`). |
+| `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `require_nonsingular` | `bool` | — | `True` | Forwarded to [`precision`](../nitrix-stats-covariance/precision.qmd): use a dense inverse (`True`, default) or the eigen-truncated pseudoinverse (`False`). |
 | `**kwargs` | `Any` | — | `{}` | — |
 
 **Returns** `Num` — shape `...` × `c` × `c`. Partial covariance matrix, `(..., c, c)`.

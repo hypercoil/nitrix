@@ -25,7 +25,7 @@ Build a random-effect smooth block (mgcv `bs="re"`).
 | `by` | `Optional[Float[Array, ' n']]` | — | `None` | Optional `(n,)` covariate for a random **slope** `(by \| g)`; `None` gives a random **intercept** `(1 \| g)`. The design is then `one_hot(g) * by[:, None]`. |
 | `n_levels` | `Optional[int]` | — | `None` | Number of levels `q` (defaults to `int(g.max()) + 1`). Pass it when some levels are absent from this sample so the block width is stable. |
 
-**Returns** `REBasis`. The `REBasis` smooth-term block for `gam_fit`. The Fellner-Schall smoothing parameter on this block is the random-effect precision $1 / \sigma_b^2$; the fitted block coefficients are the BLUPs.
+**Returns** `REBasis`. The [`REBasis`](../nitrix-stats-basis/REBasis.qmd) smooth-term block for [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd). The Fellner-Schall smoothing parameter on this block is the random-effect precision $1 / \sigma_b^2$; the fitted block coefficients are the BLUPs.
 <!-- nitrix:/gen -->
 
 

@@ -27,8 +27,8 @@ exactly (raw Lanczos weights sum to ~1 but not exactly).
 
 Smooth in both the image values and the sample coordinates, so it is
 differentiable end-to-end -- the high-quality differentiable
-alternative to `Linear` for registration and anti-aliased
-resampling.  Unlike `Linear` / `NearestNeighbour` it
+alternative to [`Linear`](../nitrix-geometry-grid/Linear.qmd) for registration and anti-aliased
+resampling.  Unlike [`Linear`](../nitrix-geometry-grid/Linear.qmd) / [`NearestNeighbour`](../nitrix-geometry-grid/NearestNeighbour.qmd) it
 has no `map_coordinates` equivalent, so it always uses the explicit
 separable gather (no platform branch).
 <!-- nitrix:/gen -->

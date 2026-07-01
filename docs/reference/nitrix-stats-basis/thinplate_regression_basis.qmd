@@ -36,7 +36,7 @@ per-trace, and avoids the cuSOLVER `syevd` on the broken GPU.
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` for the polynomial rescaling (defaults to the data range). |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `SplineBasis`. The `SplineBasis` for the thin-plate smooth (`kind='tprs'`).
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the thin-plate smooth (`kind='tprs'`).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen sections:thinplate_regression_basis -->

@@ -15,7 +15,7 @@ pairedcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: boo
 <!-- nitrix:gen overview:pairedcov -->
 Cross-covariance between two sets of variables.
 
-Same semantics as `cov` but with two separate variable
+Same semantics as [`cov`](../nitrix-stats-covariance/cov.qmd) but with two separate variable
 blocks `X` and `Y` sharing the same observation axis.  The
 result is the rectangular block of covariances between every
 variable of `X` and every variable of `Y`.

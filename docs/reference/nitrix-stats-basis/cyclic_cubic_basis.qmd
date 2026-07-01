@@ -32,7 +32,7 @@ cyclic B-spline design (the basis wraps at the period ends, matching `f`,
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` = the period; `hi` is identified with `lo`. Defaults to the data range (pass the true period for a partial-cycle sample). |
 | `center` | `bool` | — | `True` | Sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `SplineBasis`. The `SplineBasis` for the cyclic smooth (`kind='cyclic'`).
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the cyclic smooth (`kind='cyclic'`).
 <!-- nitrix:/gen -->
 
 

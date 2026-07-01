@@ -37,7 +37,7 @@ cuSOLVER-free on the broken GPU).
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` recorded for re-evaluation (defaults to the data range). |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `SplineBasis`. The `SplineBasis` for the kriging GP smooth (`kind='gp'`).
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the kriging GP smooth (`kind='gp'`).
 <!-- nitrix:/gen -->
 
 

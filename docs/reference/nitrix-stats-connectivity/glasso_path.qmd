@@ -20,7 +20,7 @@ Sweeps the penalties in the given order, carrying the working covariance
 each solve starts warm.  This is far cheaper than a cold restart at every
 penalty and is the usual way to trace a graphical-LASSO path; either sweep
 direction (descending, dense to sparse, or ascending) warm-starts.  Pair the
-returned precisions with `ebic_score` for model selection.
+returned precisions with [`ebic_score`](../nitrix-stats-connectivity/ebic_score.qmd) for model selection.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:glasso_path -->

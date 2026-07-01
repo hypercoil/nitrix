@@ -1,6 +1,7 @@
 ---
 title: "GAUSSIAN"
 generated: true
+description: "The Gaussian family: identity link, constant unit variance -- ordinary least squares."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ GAUSSIAN = Family(name='gaussian', has_fixed_dispersion=False, link=_identity, l
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:GAUSSIAN -->
-*TODO: describe this type alias / constant.*
+The Gaussian family: identity link, constant unit variance -- ordinary least squares.
 <!-- nitrix:/gen -->
 

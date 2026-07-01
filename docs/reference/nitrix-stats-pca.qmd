@@ -21,8 +21,8 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Principal-component analysis.
 
-`pca_fit` learns an orthonormal basis ordered by explained
-variance; `pca_transform` and `pca_inverse_transform`
+[`pca_fit`](nitrix-stats-pca/pca_fit.qmd) learns an orthonormal basis ordered by explained
+variance; [`pca_transform`](nitrix-stats-pca/pca_transform.qmd) and [`pca_inverse_transform`](nitrix-stats-pca/pca_inverse_transform.qmd)
 project to and from that basis.  The basis is the eigendecomposition of
 the (sample) covariance
 

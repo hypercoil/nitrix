@@ -36,7 +36,7 @@ uncertainty) and the scaled-$F$ denominator df, with
 $t = \operatorname{sign}(\mathrm{effect}) \sqrt{F_{\mathrm{KR}}}$
 on $\mathrm{df} = m$.  The Kenward-Roger path rebuilds the rotated
 basis, so the original design must be re-passed as `X=` / `Z=` (the
-compressed `REMLResult` does not retain it).
+compressed [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) does not retain it).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:lme_t_contrast -->
@@ -44,13 +44,13 @@ compressed `REMLResult` does not retain it).
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A `REMLResult` (`reml_fit`, the scalar-intercept tier) **or** an `LMEResult` (`lme_fit` with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields the Satterthwaite df consumes. `dof='kr'` accepts only a `REMLResult`. |
+| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) ([`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd), the scalar-intercept tier) **or** an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd) ([`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields the Satterthwaite df consumes. `dof='kr'` accepts only a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd). |
 | `contrast` | `Float` | `p` | — | `(p,)` contrast vector $c$ over the fixed effects. |
-| `dof` | `ContrastDof` | — | `'satterthwaite'` | `'satterthwaite'` (default) or `'kr'` (Kenward-Roger, accepts only a `REMLResult`; pass `X` / `Z`). |
+| `dof` | `ContrastDof` | — | `'satterthwaite'` | `'satterthwaite'` (default) or `'kr'` (Kenward-Roger, accepts only a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd); pass `X` / `Z`). |
 | `X` | `Optional[Float[Array, 'N p']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
 | `Z` | `Optional[Float[Array, 'N q']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
 
-**Returns** `LMEContrast`. The per-voxel contrast record `LMEContrast` `(effect, se, t, df, p_value)`.
+**Returns** `LMEContrast`. The per-voxel contrast record [`LMEContrast`](../nitrix-stats-lme-reml/LMEContrast.qmd) `(effect, se, t, df, p_value)`.
 <!-- nitrix:/gen -->
 
 

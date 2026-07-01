@@ -1,7 +1,7 @@
 ---
 title: "ccov"
 generated: true
-description: "Alias for `conditionalcov`."
+description: "Alias for [`conditionalcov`](../nitrix-stats-covariance/conditionalcov.qmd)."
 ---
 
 [‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
@@ -13,7 +13,7 @@ ccov(*args, **kwargs) -> Num[Array, '... c c']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:ccov -->
-Alias for `conditionalcov`.
+Alias for [`conditionalcov`](../nitrix-stats-covariance/conditionalcov.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:ccov -->

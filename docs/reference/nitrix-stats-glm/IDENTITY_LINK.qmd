@@ -1,6 +1,7 @@
 ---
 title: "IDENTITY_LINK"
 generated: true
+description: "The identity link :math:`g( mu) =  mu`."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ IDENTITY_LINK = Link(name='identity', link=_identity, linkinv=_identity, mu_eta=
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:IDENTITY_LINK -->
-*TODO: describe this type alias / constant.*
+The identity link $g(\mu) = \mu$.
 <!-- nitrix:/gen -->
 

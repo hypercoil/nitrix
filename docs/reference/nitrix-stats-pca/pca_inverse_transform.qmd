@@ -16,7 +16,7 @@ pca_inverse_transform(Z: Float[Array, 'n k'], components: Float[Array, 'k d'], m
 Reconstruct from PCA coordinates: `Z @ components + mean`.
 
 Maps principal-component coordinates back to feature space, the
-exact inverse of `pca_transform` up to the components that were
+exact inverse of [`pca_transform`](../nitrix-stats-pca/pca_transform.qmd) up to the components that were
 discarded when the basis was truncated.
 <!-- nitrix:/gen -->
 

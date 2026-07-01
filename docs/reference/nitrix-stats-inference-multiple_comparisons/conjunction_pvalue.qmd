@@ -16,7 +16,7 @@ conjunction_pvalue(p_values: Float[Array, 'k *spatial']) -> Float[Array, '*spati
 Conjunction p-value across `k` contrasts.
 
 Returns the per-element maximum of the per-contrast p-values, the p-scale
-dual of `conjunction`. The minimum-statistic conjunction is significant
+dual of [`conjunction`](../nitrix-stats-inference-multiple_comparisons/conjunction.qmd). The minimum-statistic conjunction is significant
 at level $\alpha$ if and only if every contrast's p-value is below
 $\alpha$, equivalently if and only if their maximum is, so the maximum
 p-value is the valid conjunction p-value.

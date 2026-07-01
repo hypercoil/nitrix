@@ -24,7 +24,7 @@ estimated parameters, and $N$ the number of observations.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the log-likelihood, parameter count, and observation count. |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the log-likelihood, parameter count, and observation count. |
 
 **Returns** `Float` — shape `V`. `(V,)` Bayesian information criterion, one per element.
 <!-- nitrix:/gen -->

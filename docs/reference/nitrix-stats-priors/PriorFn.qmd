@@ -1,6 +1,7 @@
 ---
 title: "PriorFn"
 generated: true
+description: "A module-level constant."
 ---
 
 [‹ back to `nitrix.stats.priors`](../nitrix-stats-priors.qmd)

@@ -1,6 +1,7 @@
 ---
 title: "POISSON"
 generated: true
+description: "The Poisson family: log link, variance :math:` mu` -- log-linear counts."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ POISSON = Family(name='poisson', has_fixed_dispersion=True, link=(lambda mu: jnp
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:POISSON -->
-*TODO: describe this type alias / constant.*
+The Poisson family: log link, variance $\mu$ -- log-linear counts.
 <!-- nitrix:/gen -->
 

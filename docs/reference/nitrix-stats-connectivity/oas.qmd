@@ -16,7 +16,7 @@ oas(X: Float[Array, 'n p'], *, assume_centered: bool = False) -> Tuple[Float[Arr
 Oracle-approximating-shrinkage (OAS) covariance estimator.
 
 Uses the same convex blend of the sample covariance toward a scaled
-identity as `ledoit_wolf`, but with the different closed-form
+identity as [`ledoit_wolf`](../nitrix-stats-connectivity/ledoit_wolf.qmd), but with the different closed-form
 shrinkage intensity of Chen, Wiesel, Eldar and Hero (2010).  This matches
 `sklearn.covariance.oas`.
 <!-- nitrix:/gen -->

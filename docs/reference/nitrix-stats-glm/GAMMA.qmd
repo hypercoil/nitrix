@@ -1,6 +1,7 @@
 ---
 title: "GAMMA"
 generated: true
+description: "The gamma family: log link, variance :math:` mu^2` -- positive continuous responses."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ GAMMA = Family(name='gamma', has_fixed_dispersion=False, link=_log_link, linkinv
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:GAMMA -->
-*TODO: describe this type alias / constant.*
+The gamma family: log link, variance $\mu^2$ -- positive continuous responses.
 <!-- nitrix:/gen -->
 

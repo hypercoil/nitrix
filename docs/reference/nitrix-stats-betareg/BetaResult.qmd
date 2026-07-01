@@ -19,7 +19,7 @@ Frozen container of the fitted mean-model coefficients, precision,
 coefficient covariance, and maximised log-likelihood for every element of a
 mass-univariate beta regression, together with the observation count.  Each
 of the `V` elements (voxels, vertices, ...) is fitted independently and
-shares the single design matrix passed to `beta_fit`.
+shares the single design matrix passed to [`beta_fit`](../nitrix-stats-betareg/beta_fit.qmd).
 <!-- nitrix:/gen -->
 
 ### Methods

@@ -227,6 +227,7 @@ GAUSSIAN = Family(
     init_mu=_identity,
     loglik=_gaussian_loglik,
 )
+r"""The Gaussian family: identity link, constant unit variance -- ordinary least squares."""
 
 
 def _logit(mu: Array) -> Array:
@@ -264,6 +265,7 @@ BINOMIAL = Family(
     init_mu=lambda y: (y + 0.5) / 2.0,
     loglik=_binomial_loglik,
 )
+r"""The binomial family: logit link, variance :math:`\mu(1 - \mu)` -- logistic regression."""
 
 
 def _poisson_deviance(y: Array, mu: Array) -> Array:
@@ -288,6 +290,7 @@ POISSON = Family(
     loglik=_poisson_loglik,
     eta_bound=_ETA_MAX,
 )
+r"""The Poisson family: log link, variance :math:`\mu` -- log-linear counts."""
 
 
 def _log_link(mu: Array) -> Array:
@@ -330,6 +333,7 @@ GAMMA = Family(
     loglik=_gamma_loglik,
     eta_bound=_ETA_MAX,
 )
+r"""The gamma family: log link, variance :math:`\mu^2` -- positive continuous responses."""
 
 
 def negbinomial(alpha: float = 1.0) -> Family:
@@ -397,6 +401,7 @@ def negbinomial(alpha: float = 1.0) -> Family:
 
 # Default NB2 (alpha = 1); for another dispersion pass ``negbinomial(alpha)``.
 NEGBINOMIAL = negbinomial(1.0)
+r"""The negative-binomial family at dispersion ``1.0`` (log link) -- a default for overdispersed counts; build others with ``negbinomial(theta)``."""
 
 
 def tweedie(p: float = 1.5) -> Family:
@@ -480,6 +485,7 @@ def tweedie(p: float = 1.5) -> Family:
 
 # Default Tweedie (p = 1.5); for another power pass ``tweedie(p)``.
 TWEEDIE = tweedie(1.5)
+r"""The Tweedie family at power ``1.5`` (log link) -- compound Poisson-gamma responses; build others with ``tweedie(p)``."""
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +495,7 @@ TWEEDIE = tweedie(1.5)
 IDENTITY_LINK = Link(
     name='identity', link=_identity, linkinv=_identity, mu_eta=_ones_like
 )
+r"""The identity link :math:`g(\mu) = \mu`."""
 
 LOG_LINK = Link(
     name='log',
@@ -497,10 +504,12 @@ LOG_LINK = Link(
     mu_eta=_safe_exp,
     eta_bound=_ETA_MAX,
 )
+r"""The log link :math:`g(\mu) = \log \mu`."""
 
 LOGIT_LINK = Link(
     name='logit', link=_logit, linkinv=_expit, mu_eta=_binomial_mu_eta
 )
+r"""The logit link :math:`g(\mu) = \log(\mu / (1 - \mu))`."""
 
 
 def _probit_linkinv(eta: Array) -> Array:
@@ -517,6 +526,7 @@ PROBIT_LINK = Link(
     linkinv=_probit_linkinv,
     mu_eta=_probit_mu_eta,
 )
+r"""The probit link :math:`g(\mu) = \Phi^{-1}(\mu)`."""
 
 
 def _cloglog_link(mu: Array) -> Array:
@@ -541,6 +551,7 @@ CLOGLOG_LINK = Link(
     mu_eta=_cloglog_mu_eta,
     eta_bound=_ETA_MAX,
 )
+r"""The complementary log-log link :math:`g(\mu) = \log(-\log(1 - \mu))`."""
 
 SQRT_LINK = Link(
     name='sqrt',
@@ -548,6 +559,7 @@ SQRT_LINK = Link(
     linkinv=lambda eta: eta * eta,
     mu_eta=lambda eta: 2.0 * eta,
 )
+r"""The square-root link :math:`g(\mu) = \sqrt{\mu}`."""
 
 
 def _inverse_mu_eta(eta: Array) -> Array:
@@ -565,6 +577,7 @@ INVERSE_LINK = Link(
     mu_eta=_inverse_mu_eta,
     eta_bound=float('inf'),
 )
+r"""The inverse link :math:`g(\mu) = 1 / \mu`."""
 
 
 _LINKS: Mapping[str, Link] = {

@@ -1,7 +1,7 @@
 ---
 title: "NestedLMEResult"
 generated: true
-description: "Nested two-level mixed-model fit output (the `lme_fit` R3 path)."
+description: "Nested two-level mixed-model fit output (the [`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) R3 path)."
 ---
 
 [‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
@@ -13,7 +13,7 @@ class NestedLMEResult
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:NestedLMEResult -->
-Nested two-level mixed-model fit output (the `lme_fit` R3 path).
+Nested two-level mixed-model fit output (the [`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) R3 path).
 <!-- nitrix:/gen -->
 
 ### Methods

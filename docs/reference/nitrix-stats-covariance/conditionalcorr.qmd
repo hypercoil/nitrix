@@ -15,7 +15,7 @@ conditionalcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs
 <!-- nitrix:gen overview:conditionalcorr -->
 Correlation of `X` conditioned on the variables in `Y`.
 
-Normalised version of `conditionalcov`: the conditional
+Normalised version of [`conditionalcov`](../nitrix-stats-covariance/conditionalcov.qmd): the conditional
 covariance is divided by the outer product of the residual
 standard deviations, yielding conditional correlations with unit
 diagonal.

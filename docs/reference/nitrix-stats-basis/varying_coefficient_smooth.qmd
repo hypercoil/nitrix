@@ -18,8 +18,8 @@ Varying-coefficient smooth `s(x, by=z)` for a **continuous** `z`.
 mgcv's `s(x, by=z)` with a numeric `by`: the smooth term is
 $z\, f(x)$ -- a coefficient on `z` that varies smoothly with `x`.
 The design is the marginal P-spline of `x` scaled row-wise by `z`; the
-penalty is unchanged.  A single `SplineBasis` for
-`gam_fit`.
+penalty is unchanged.  A single [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for
+[`gam_fit`](../nitrix-stats-gam/gam_fit.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:varying_coefficient_smooth -->
@@ -29,13 +29,13 @@ penalty is unchanged.  A single `SplineBasis` for
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate that the coefficient varies over. |
 | `by` | `Float` | `n` | — | `(n,)` continuous covariate the smooth multiplies. |
-| `n_basis` | `int` | — | `10` | Marginal P-spline parameters (see `bspline_basis`). |
-| `degree` | `int` | — | `3` | Marginal P-spline parameters (see `bspline_basis`). |
-| `penalty_order` | `int` | — | `2` | Marginal P-spline parameters (see `bspline_basis`). |
-| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see `bspline_basis`). |
-| `center` | `bool` | — | `True` | Marginal P-spline parameters (see `bspline_basis`). |
+| `n_basis` | `int` | — | `10` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `degree` | `int` | — | `3` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `penalty_order` | `int` | — | `2` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `center` | `bool` | — | `True` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
 
-**Returns** `SplineBasis`. The `SplineBasis` whose design is the marginal P-spline scaled row-wise by `by`.
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) whose design is the marginal P-spline scaled row-wise by `by`.
 <!-- nitrix:/gen -->
 
 

@@ -18,8 +18,8 @@ Project `X` onto a PCA basis: `(X - mean) @ components.T`.
 Centres `X` by `mean` and projects onto the rows of
 `components` to obtain the principal-component coordinates.  Takes
 `components` and `mean` explicitly (rather than a
-`PCAResult`) so a pre-fitted basis -- e.g. components loaded
-from elsewhere -- can be applied without a local `pca_fit`.
+[`PCAResult`](../nitrix-stats-pca/PCAResult.qmd)) so a pre-fitted basis -- e.g. components loaded
+from elsewhere -- can be applied without a local [`pca_fit`](../nitrix-stats-pca/pca_fit.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pca_transform -->

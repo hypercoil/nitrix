@@ -22,7 +22,7 @@ amplitudes on the same data) and the effective degrees of freedom $k$
 Like any REML criterion it is valid for models with the same fixed-effect
 structure (a different `parametric` design changes the restriction); within
 that, it is immediate for GP-vs-GP and GP-vs-spline (an
-`hsgp_basis` / kernel choice) selection.
+[`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd) / kernel choice) selection.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_aic -->

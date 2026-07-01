@@ -21,7 +21,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Permutation inference for the general linear model.
 
-`permutation_test` is a non-parametric, family-wise-error-controlling
+[`permutation_test`](nitrix-stats-inference-randomise/permutation_test.qmd) is a non-parametric, family-wise-error-controlling
 test of a general linear model (GLM) contrast over a statistic image, built
 from the parts in this subpackage.  It is an on-device analogue of the FSL
 `randomise` tool.
@@ -49,7 +49,7 @@ $C$:
    identity, so the observed is included and $p \geq 1 / n_{perm}$.
    Optionally (`pvalue_method='gpd'`) the FWE p-value is read instead from a
    generalised-Pareto fit to the null-max tail, resolving below the
-   $1 / n_{perm}$ floor at fewer permutations (see `gpd_pvalue`).
+   $1 / n_{perm}$ floor at fewer permutations (see [`gpd_pvalue`](nitrix-stats-inference-randomise/gpd_pvalue.qmd)).
 
 The only linear solve is a shared `(p, p)` inverse, so no dense factorisation
 library is required.  The enhancement is a non-differentiable inference kernel

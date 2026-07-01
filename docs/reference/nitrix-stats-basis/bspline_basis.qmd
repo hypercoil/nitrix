@@ -28,7 +28,7 @@ Build a P-spline smooth basis for covariate `x`.
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` knot range. Defaults to a small margin around the data range so the boundary knots are not exactly at the extreme points. |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`); the returned basis then has `k - 1` columns. |
 
-**Returns** `SplineBasis`. The `SplineBasis` holding the design, penalty, and re-evaluation parameters (`kind='bspline'`).
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) holding the design, penalty, and re-evaluation parameters (`kind='bspline'`).
 <!-- nitrix:/gen -->
 
 

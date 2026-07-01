@@ -1,7 +1,7 @@
 ---
 title: "pcorr"
 generated: true
-description: "Alias for `partialcorr`."
+description: "Alias for [`partialcorr`](../nitrix-stats-covariance/partialcorr.qmd)."
 ---
 
 [‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
@@ -13,7 +13,7 @@ pcorr(*args, **kwargs) -> Num[Array, '... c c']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:pcorr -->
-Alias for `partialcorr`.
+Alias for [`partialcorr`](../nitrix-stats-covariance/partialcorr.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pcorr -->

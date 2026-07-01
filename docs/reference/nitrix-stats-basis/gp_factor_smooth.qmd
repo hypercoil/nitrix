@@ -19,10 +19,10 @@ A separate Hilbert-space GP curve of `x` for each level of `group`, all
 sharing **one** smoothing parameter (so the per-group curves are random
 deviations with a common amplitude -- partial pooling).  This is the
 **fixed-`rho`** building block of the hierarchical GP: drop it into
-`gam_fit` alongside a population `hsgp_basis` of
+[`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) alongside a population [`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd) of
 the same `rho` (and the intercept) for the "GS" hierarchical GP.  For
 *estimated* `rho` and the full variance-component report, use
-`hgp_fit`.
+[`hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_factor_smooth -->
@@ -32,16 +32,16 @@ the same `rho` (and the intercept) for the "GS" hierarchical GP.  For
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate. |
 | `group` | `Int` | `n` | — | `(n,)` integer factor labels `0 .. L-1`. |
-| `n_basis` | `int` | — | `10` | Per-group HSGP rank `m` (default `10`; the design is `L` times this wide, so a smaller rank than `hsgp_basis` is usual). |
-| `kernel` | `str` | — | `'matern52'` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `rho` | `Optional[float]` | — | `None` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `amplitude` | `float` | — | `1.0` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `boundary` | `float` | — | `1.5` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
+| `n_basis` | `int` | — | `10` | Per-group HSGP rank `m` (default `10`; the design is `L` times this wide, so a smaller rank than [`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd) is usual). |
+| `kernel` | `str` | — | `'matern52'` | HSGP marginal parameters (see [`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd)); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is [`hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd)). |
+| `rho` | `Optional[float]` | — | `None` | HSGP marginal parameters (see [`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd)); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is [`hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd)). |
+| `amplitude` | `float` | — | `1.0` | HSGP marginal parameters (see [`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd)); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is [`hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd)). |
+| `boundary` | `float` | — | `1.5` | HSGP marginal parameters (see [`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd)); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is [`hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd)). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | HSGP marginal parameters (see [`hsgp_basis`](../nitrix-stats-basis/hsgp_basis.qmd)); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is [`hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd)). |
 | `center` | `bool` | — | `False` | Sum-to-zero each group's smooth (default `False` -- the group curves carry their own level, the usual factor-smooth; set `True` to pair with an explicit per-group mean). |
 | `n_levels` | `Optional[int]` | — | `None` | Number of levels `L` (defaults to `int(group.max()) + 1`); pass it when a level is absent so the block width is stable. |
 
-**Returns** `_FactorGPBasis`. A factor-smooth GP basis (a `SmoothBasis`) for `gam_fit`; the single Fellner-Schall smoothing parameter on this block is the shared group precision $1 / \sigma_{grp}^2$.
+**Returns** `_FactorGPBasis`. A factor-smooth GP basis (a [`SmoothBasis`](../nitrix-stats-basis/SmoothBasis.qmd)) for [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd); the single Fellner-Schall smoothing parameter on this block is the shared group precision $1 / \sigma_{grp}^2$.
 <!-- nitrix:/gen -->
 
 

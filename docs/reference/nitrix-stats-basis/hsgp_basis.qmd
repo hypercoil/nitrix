@@ -24,14 +24,14 @@ through the spectral density weights
 $s_j = S_\theta(\sqrt{\lambda_j})$
 (`spectral_density`): the whitened design is
 $\Psi = [\sqrt{s_j}\, \phi_j(x)]$ with an **identity penalty**, so
-the basis is a drop-in smooth for `gam_fit` and the
+the basis is a drop-in smooth for [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) and the
 Fellner-Schall smoothing parameter $\lambda = 1 / \sigma_f^2$ is the
 GP amplitude.
 
-Unlike the kriging `gp_basis`, the eigenfunctions are independent of
+Unlike the kriging [`gp_basis`](../nitrix-stats-basis/gp_basis.qmd), the eigenfunctions are independent of
 the kernel hyperparameters, so the lengthscale `rho` enters as a diagonal
 reweighting of a fixed design -- the basis for eigendecomposition-free
-lengthscale estimation (the standalone `gp_fit`; not
+lengthscale estimation (the standalone [`gp_fit`](../nitrix-stats-gp/gp_fit.qmd); not
 this constructor, which fixes `rho`).
 <!-- nitrix:/gen -->
 
@@ -43,13 +43,13 @@ this constructor, which fixes `rho`).
 | `x` | `Float` | `n` | — | `(n,)` covariate values. |
 | `n_basis` | `int` | — | `20` | Number of retained eigenfunctions `m` (the reduced rank). |
 | `kernel` | `str` | — | `'matern52'` | Stationary kernel: `'matern12'` / `'matern32'` / `'matern52'` / `'rbf'` (squared-exponential). See `spectral_density`. |
-| `rho` | `Optional[float]` | — | `None` | Kernel lengthscale. Defaults to the data half-range (a sane fixed value; lengthscale *estimation* is the standalone `gp_fit`). |
-| `amplitude` | `float` | — | `1.0` | Kernel amplitude folded into the weights; keep `1.0` when fitting via `gam_fit` (the smoothing parameter carries the amplitude). |
+| `rho` | `Optional[float]` | — | `None` | Kernel lengthscale. Defaults to the data half-range (a sane fixed value; lengthscale *estimation* is the standalone [`gp_fit`](../nitrix-stats-gp/gp_fit.qmd)). |
+| `amplitude` | `float` | — | `1.0` | Kernel amplitude folded into the weights; keep `1.0` when fitting via [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) (the smoothing parameter carries the amplitude). |
 | `boundary` | `float` | — | `1.5` | Domain-extension factor `L / half-range` (`>= 1`; default `1.5`). Larger values reduce boundary bias; small `rho` needs larger `n_basis`. |
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` data range override (defaults to the data min/max). |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `SplineBasis`. The `SplineBasis` for the HSGP smooth (`kind='hsgp'`).
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the HSGP smooth (`kind='hsgp'`).
 <!-- nitrix:/gen -->
 
 

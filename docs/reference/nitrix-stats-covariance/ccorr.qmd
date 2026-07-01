@@ -1,7 +1,7 @@
 ---
 title: "ccorr"
 generated: true
-description: "Alias for `conditionalcorr`."
+description: "Alias for [`conditionalcorr`](../nitrix-stats-covariance/conditionalcorr.qmd)."
 ---
 
 [‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
@@ -13,7 +13,7 @@ ccorr(*args, **kwargs) -> Num[Array, '... c c']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:ccorr -->
-Alias for `conditionalcorr`.
+Alias for [`conditionalcorr`](../nitrix-stats-covariance/conditionalcorr.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:ccorr -->

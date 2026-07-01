@@ -1,7 +1,7 @@
 ---
 title: "CrossedLMEResult"
 generated: true
-description: "Crossed two-factor mixed-model fit output (the `lme_fit` R4 path)."
+description: "Crossed two-factor mixed-model fit output (the [`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) R4 path)."
 ---
 
 [‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
@@ -13,7 +13,7 @@ class CrossedLMEResult
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:CrossedLMEResult -->
-Crossed two-factor mixed-model fit output (the `lme_fit` R4 path).
+Crossed two-factor mixed-model fit output (the [`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) R4 path).
 <!-- nitrix:/gen -->
 
 ### Methods

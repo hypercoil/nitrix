@@ -1,6 +1,7 @@
 ---
 title: "BINOMIAL"
 generated: true
+description: "The binomial family: logit link, variance :math:` mu(1 -  mu)` -- logistic regression."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ BINOMIAL = Family(name='binomial', has_fixed_dispersion=True, link=_logit, linki
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:BINOMIAL -->
-*TODO: describe this type alias / constant.*
+The binomial family: logit link, variance $\mu(1 - \mu)$ -- logistic regression.
 <!-- nitrix:/gen -->
 

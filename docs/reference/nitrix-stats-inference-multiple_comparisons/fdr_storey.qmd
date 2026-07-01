@@ -18,7 +18,7 @@ Storey's $\pi_0$-adaptive false-discovery-rate correction.
 Yields higher power, valid under independence or positive regression
 dependence. This is Benjamini-Hochberg with the count $m$ replaced by
 the estimated number of true nulls $m\,\pi_0$ (see
-`storey_pi0`): uniformly less conservative than Benjamini-Hochberg when
+[`storey_pi0`](../nitrix-stats-inference-multiple_comparisons/storey_pi0.qmd)): uniformly less conservative than Benjamini-Hochberg when
 a non-trivial fraction of effects are real, and identical to it when
 $\pi_0 = 1$.
 <!-- nitrix:/gen -->
@@ -30,7 +30,7 @@ $\pi_0 = 1$.
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `p_values` | `Float` | `n` | — | Flat vector of `n` per-element p-values. |
 | `alpha` | `float` | — | `0.05` | Target false-discovery rate defining the rejection mask. Default `0.05`. |
-| `lam` | `float` | — | `0.5` | Tuning parameter $\lambda \in (0, 1)$ passed to `storey_pi0` for the $\pi_0$ estimate. Default `0.5`. |
+| `lam` | `float` | — | `0.5` | Tuning parameter $\lambda \in (0, 1)$ passed to [`storey_pi0`](../nitrix-stats-inference-multiple_comparisons/storey_pi0.qmd) for the $\pi_0$ estimate. Default `0.5`. |
 
 **Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`. The rejection mask `p_adjusted <= alpha`. The adaptive adjusted p-values (q-values), enforced monotone non-decreasing in rank.
 <!-- nitrix:/gen -->
