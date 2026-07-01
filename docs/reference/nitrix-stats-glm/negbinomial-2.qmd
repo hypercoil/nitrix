@@ -1,0 +1,36 @@
+---
+title: "negbinomial"
+generated: true
+description: "A negative-binomial (NB2) family with **known** dispersion `alpha`."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:negbinomial -->
+```python
+negbinomial(alpha: float = 1.0) -> Family
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:negbinomial -->
+A negative-binomial (NB2) family with **known** dispersion `alpha`.
+
+NB2 parameterisation: `V(mu) = mu + alpha * mu^2` (overdispersed counts),
+log link.  `alpha` is fixed at construction -- with it known, NB2 is a
+proper one-parameter family (GLM dispersion 1), so the shared IRLS core fits
+it directly.  Jointly *estimating* `alpha` (the profile-MLE outer loop) is
+a documented follow-up.  `alpha -> 0` recovers Poisson.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:negbinomial -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `alpha` | `float` | — | `1.0` | — |
+
+**Returns** `Family`.
+<!-- nitrix:/gen -->
+

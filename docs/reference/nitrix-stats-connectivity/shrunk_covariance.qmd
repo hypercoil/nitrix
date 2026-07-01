@@ -1,0 +1,41 @@
+---
+title: "shrunk_covariance"
+generated: true
+description: "Analytic-shrinkage covariance via `method` (the cov only)."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:shrunk_covariance -->
+```python
+shrunk_covariance(X: Float[Array, 'n p'], *, method: ShrinkageMethod = 'ledoit_wolf', assume_centered: bool = False) -> Float[Array, 'p p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:shrunk_covariance -->
+Analytic-shrinkage covariance via `method` (the cov only).
+
+`'ledoit_wolf'` (default, nilearn's connectome default) or `'oas'`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:shrunk_covariance -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `p` | — | — |
+| `method` | `ShrinkageMethod` | — | `'ledoit_wolf'` | — |
+| `assume_centered` | `bool` | — | `False` | — |
+
+**Returns** `Float` — shape `p` × `p`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:shrunk_covariance -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

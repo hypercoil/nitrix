@@ -1,0 +1,49 @@
+---
+title: "gp_predict"
+generated: true
+description: "Per-element posterior mean and standard deviation of the GP at `x_new`."
+---
+
+[‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
+
+<!-- nitrix:gen sig:gp_predict -->
+```python
+gp_predict(result: GPResult, x_new: Float[Array, ' g'], *, parametric: Optional[Float[Array, 'g q']] = None, x_train: Optional[Float[Array, ' N']] = None, type: Literal['link', 'response'] = 'link') -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gp_predict -->
+Per-element posterior mean and standard deviation of the GP at `x_new`.
+
+Evaluates `mean = X_new beta` and the predictive variance
+`sigma_e^2 diag(X_new V X_new^T)`, where the smooth columns of `X_new` are
+the basis re-evaluated at `x_new`: for `engine='hsgp'` the (`rho`-
+independent) eigenfunctions, reconstructed from the recorded domain
+`(lo, hi, boundary)` and `rank` (self-contained); for `engine='exact'`
+the Nystrom kernel features `K(x_new, x_train) U Lambda^{-1/2}`, which need
+the original `x_train` (the result does not store the shared training grid
+among its per-element fields).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gp_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `GPResult` | — | — | A :class:`GPResult` from :func:`gp_fit`. |
+| `x_new` | `Float` | `g` | — | `(g,)` covariate grid to predict on. |
+| `parametric` | `Optional[Float[Array, 'g q']]` | — | `None` | `(g, q)` parametric covariates matching `gp_fit`'s `parametric` (must be supplied when the fit used parametric columns). |
+| `x_train` | `Optional[Float[Array, ' N']]` | — | `None` | `(N,)` original training covariate -- **required for `engine='exact'`** (ignored for `'hsgp'`). |
+| `type` | `Literal['link', 'response']` | — | `'link'` | `'link'` (default) returns the latent linear-predictor `eta`; for a non-Gaussian fit, `'response'` maps the mean through `family.linkinv` (the mean response, e.g. a probability / rate) and scales `std` by the delta-method factor `\|d mu / d eta\|` (a point-estimate response-scale SD). A no-op for the Gaussian (identity-link) fit. |
+
+**Returns** `Tuple[Float[Array, 'V g'], Float[Array, 'V g']]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gp_predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `g` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

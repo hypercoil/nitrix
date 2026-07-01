@@ -1,0 +1,49 @@
+---
+title: "pairedcov"
+generated: true
+description: "Cross-covariance between two sets of variables."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:pairedcov -->
+```python
+pairedcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool = True, bias: bool = False, ddof: Optional[int] = None, weights: Optional[Num[Array, '... obs']] = None, weight_matrix: Optional[Num[Array, '... obs obs']] = None, l2: float = 0.0) -> Num[Array, '... c d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:pairedcov -->
+Cross-covariance between two sets of variables.
+
+Same semantics as `cov` but with two separate variable
+blocks.  Returns `(..., c, d)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:pairedcov -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Num` | `...` × `c` × `obs` | — | — |
+| `Y` | `Num` | `...` × `d` × `obs` | — | — |
+| `rowvar` | `bool` | — | `True` | — |
+| `bias` | `bool` | — | `False` | — |
+| `ddof` | `Optional[int]` | — | `None` | — |
+| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | — |
+| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | — |
+| `l2` | `float` | — | `0.0` | — |
+
+**Returns** `Num` — shape `...` × `c` × `d`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:pairedcov -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

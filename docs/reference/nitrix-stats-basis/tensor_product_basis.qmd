@@ -1,0 +1,29 @@
+---
+title: "tensor_product_basis"
+generated: true
+description: "Build an anisotropic tensor-product interaction smooth from marginals."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:tensor_product_basis -->
+```python
+tensor_product_basis(margins: Tuple[SplineBasis, ...], *, eig_rtol: float = 1e-10) -> TensorBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:tensor_product_basis -->
+Build an anisotropic tensor-product interaction smooth from marginals.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:tensor_product_basis -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `margins` | `Tuple[SplineBasis, ...]` | — | — | Two or more :class:`SplineBasis` on the **matched** covariates (same number of rows `n`), each typically sum-to-zero constrained (`center=True`). Mixed kinds are allowed (e.g. a P-spline crossed with a cyclic margin). |
+| `eig_rtol` | `float` | — | `1e-10` | Relative tolerance below which a marginal-penalty eigenvalue is floored to exact zero (its unpenalised null space), so the smoothing-parameter trace counts the correct penalty rank. |
+
+**Returns** `TensorBasis`.
+<!-- nitrix:/gen -->
+

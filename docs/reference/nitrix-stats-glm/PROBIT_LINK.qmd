@@ -1,0 +1,19 @@
+---
+title: "PROBIT_LINK"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:PROBIT_LINK -->
+```python
+PROBIT_LINK = Link(name='probit', link=(lambda mu: _norm.ppf(jnp.clip(mu, _EPS, 1.0 - _EPS))), linkinv=_probit_linkinv, mu_eta=_probit_mu_eta)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:PROBIT_LINK -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

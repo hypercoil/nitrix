@@ -1,0 +1,41 @@
+---
+title: "oas"
+generated: true
+description: "Oracle-Approximating-Shrinkage covariance (Chen et al. 2010)."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:oas -->
+```python
+oas(X: Float[Array, 'n p'], *, assume_centered: bool = False) -> Tuple[Float[Array, 'p p'], Float[Array, '']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:oas -->
+Oracle-Approximating-Shrinkage covariance (Chen et al. 2010).
+
+Returns `(cov, shrinkage)`.  Same convex blend as Ledoit-Wolf, a
+different closed-form `alpha`.  Matches `sklearn.covariance.oas`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:oas -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `p` | — | — |
+| `assume_centered` | `bool` | — | `False` | — |
+
+**Returns** `Tuple[Float[Array, 'p p'], Float[Array, '']]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:oas -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

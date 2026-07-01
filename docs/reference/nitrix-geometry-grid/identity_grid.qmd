@@ -1,0 +1,45 @@
+---
+title: "identity_grid"
+generated: true
+description: "The identity deformation: per-pixel its own coordinate."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:identity_grid -->
+```python
+identity_grid(spatial_shape: Sequence[int], *, dtype: DTypeLike = jnp.float32) -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:identity_grid -->
+The identity deformation: per-pixel its own coordinate.
+
+For a 2D image of shape `(H, W)` returns a `(H, W, 2)` grid
+where `grid[i, j] == (i, j)`.  For 3D `(D, H, W)` returns
+`(D, H, W, 3)` with `grid[k, i, j] == (k, i, j)`.
+
+Adding a displacement `delta` to this grid yields a
+deformation field consumable by `spatial_transform`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:identity_grid -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `spatial_shape` | `Sequence[int]` | — | — | Per-axis sizes of the grid; the result has rank `len(spatial_shape) + 1` with the trailing dim of size `len(spatial_shape)`. |
+| `dtype` | `DTypeLike` | — | `jnp.float32` | Floating-point dtype of the returned coordinates. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:identity_grid -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

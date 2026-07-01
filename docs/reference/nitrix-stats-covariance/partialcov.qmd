@@ -1,0 +1,75 @@
+---
+title: "partialcov"
+generated: true
+description: "Partial covariance: conditioning each pair on all others."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:partialcov -->
+```python
+partialcov(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **kwargs) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:partialcov -->
+Partial covariance: conditioning each pair on all others.
+
+Computed from the precision matrix by negating off-diagonal
+entries.  Interpretation: direct (conditional on the rest)
+relationships between variable pairs.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:partialcov -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Num` | `...` × `c` × `obs` | — | — |
+| `require_nonsingular` | `bool` | — | `True` | — |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:partialcov -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **340.2 µs** (median, L4); up to **15.04× faster** than `numpy.partialcov`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_PARTIALCOV.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| partialcov | jax-cpu | c=128,obs=1024 | `cupy.partialcov` | skipped | — | — | — | — | — |
+| partialcov | jax-cpu | c=128,obs=1024 | `nitrix-jax` | ok | 579.0 µs / 742.9 µs | 244.60 ms | 576 MB (rss) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
+| partialcov | jax-cpu | c=128,obs=1024 | `numpy.partialcov` | ok | 781.4 µs / 798.5 µs | 887.7 µs | 567 MB (rss) | ✓ 9.9e-05×tol | 1.35x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=128,obs=1024 | `cupy.partialcov` | ok | 723.5 µs / 728.1 µs | 701.10 ms | 0.52 MB (hbm) | ✓ 0.00072×tol | 2.17x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=128,obs=1024 | `nitrix-jax` | ok | 334.2 µs / 340.2 µs | 582.10 ms | 72.88 MB (hbm) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=128,obs=1024 | `numpy.partialcov` | ok | 767.6 µs / 778.9 µs | 7.61 ms | 0.52 MB (hbm) | ✓ 9.9e-05×tol | 2.30x vs nitrix-jax |
+| partialcov | jax-cpu | c=256,obs=2048 | `cupy.partialcov` | skipped | — | — | — | — | — |
+| partialcov | jax-cpu | c=256,obs=2048 | `nitrix-jax` | ok | 3.99 ms / 13.38 ms | 393.56 ms | 595 MB (rss) | ✓ 0.0017×tol | 1.00x vs nitrix-jax |
+| partialcov | jax-cpu | c=256,obs=2048 | `numpy.partialcov` | ok | 3.96 ms / 4.61 ms | 4.03 ms | 567 MB (rss) | ✓ 0.0001×tol | 0.99x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=256,obs=2048 | `cupy.partialcov` | ok | 1.37 ms / 1.38 ms | 270.41 ms | 2.10 MB (hbm) | ✓ 0.00077×tol | 2.29x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=256,obs=2048 | `nitrix-jax` | ok | 600.0 µs / 603.9 µs | 628.87 ms | 77.59 MB (hbm) | ✓ 0.00091×tol | 1.00x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=256,obs=2048 | `numpy.partialcov` | ok | 3.85 ms / 82.14 ms | 4.25 ms | 2.10 MB (hbm) | ✓ 0.0001×tol | 6.42x vs nitrix-jax |
+| partialcov | jax-cpu | c=512,obs=4096 | `cupy.partialcov` | skipped | — | — | — | — | — |
+| partialcov | jax-cpu | c=512,obs=4096 | `nitrix-jax` | ok | 18.90 ms / 28.51 ms | 2.428 s | 663 MB (rss) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
+| partialcov | jax-cpu | c=512,obs=4096 | `numpy.partialcov` | ok | 29.64 ms / 43.30 ms | 29.93 ms | 567 MB (rss) | ✓ 0.00011×tol | 1.57x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=512,obs=4096 | `cupy.partialcov` | ok | 6.80 ms / 6.82 ms | 270.16 ms | 8.39 MB (hbm) | ✓ 0.0011×tol | 4.29x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=512,obs=4096 | `nitrix-jax` | ok | 1.58 ms / 1.62 ms | 792.77 ms | 88.08 MB (hbm) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
+| partialcov | jax-cuda12 | c=512,obs=4096 | `numpy.partialcov` | ok | 23.84 ms / 24.43 ms | 24.39 ms | 8.39 MB (hbm) | ✓ 0.00011×tol | 15.04x vs nitrix-jax |
+:::
+
+*source: bench `c8c5b503` · nitrix `ff2bf24d`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:partialcov -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

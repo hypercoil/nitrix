@@ -1,0 +1,42 @@
+---
+title: "conjunction_pvalue"
+generated: true
+description: "Conjunction p-value: the **maximum** per-contrast p-value over `k` contrasts (the p-scale dual of :func:`conjunction`)."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:conjunction_pvalue -->
+```python
+conjunction_pvalue(p_values: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:conjunction_pvalue -->
+Conjunction p-value: the **maximum** per-contrast p-value over `k`
+contrasts (the p-scale dual of :func:`conjunction`).
+
+The minimum-statistic conjunction is significant at `alpha` iff every
+contrast's p-value is below `alpha` iff their maximum is -- so `max p` is
+the valid conjunction p-value (Nichols et al. 2005).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:conjunction_pvalue -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `k` × `*spatial` | — | — |
+
+**Returns** `Float` — shape `*spatial`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:conjunction_pvalue -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `k` | kernel or basis components |
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

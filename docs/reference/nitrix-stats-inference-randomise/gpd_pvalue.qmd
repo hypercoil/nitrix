@@ -1,0 +1,55 @@
+---
+title: "gpd_pvalue"
+generated: true
+description: "Tail-accelerated exceedance p-value via a generalized Pareto fit."
+---
+
+[‹ back to `nitrix.stats.inference.randomise`](../nitrix-stats-inference-randomise.qmd)
+
+<!-- nitrix:gen sig:gpd_pvalue -->
+```python
+gpd_pvalue(stat: Float[Array, '...'], null_dist: Float[Array, 'n'], *, n_exceedances: int = 250) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gpd_pvalue -->
+Tail-accelerated exceedance p-value via a generalized Pareto fit.
+
+The permutation FWE p-value of an observed statistic `T` is the survival
+fraction `P(max_null >= T)`.  Estimated empirically it is discrete and
+floored at `1 / n` -- so resolving a small p-value needs a large `n`.
+Following Winkler et al. (2016, *Faster permutation inference*), the upper
+tail of `null_dist` above a threshold `u` (the `(k+1)`-th largest of
+`n`, `k = n_exceedances`) is modelled by a **generalized Pareto
+distribution** fitted by the method of moments, giving a smooth p-value that
+can fall below `1 / n` at a fraction of the permutations:
+    P(T) = (k / n) * S_GPD(T - u),   T > u   (tail, GPD survival)
+    P(T) = #{null >= T} / n,         T <= u  (body, empirical)
+
+With GPD shape `xi` and scale `sigma` from the exceedance mean / variance
+(`xi = (1 - mean^2 / var) / 2`, `sigma = mean (1 - xi)`).  `stat` is a
+scalar or an array of observed statistics (e.g. an enhanced FWE map); the
+return has the same shape.  Pure / differentiable / cuSOLVER-free.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gpd_pvalue -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `stat` | `Float` | `...` | — | — |
+| `null_dist` | `Float` | `n` | — | — |
+| `n_exceedances` | `int` | — | `250` | — |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gpd_pvalue -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

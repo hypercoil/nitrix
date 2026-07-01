@@ -1,0 +1,43 @@
+---
+title: "conditionalcorr"
+generated: true
+description: "Correlation of `X` conditioned on the variables in `Y`."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:conditionalcorr -->
+```python
+conditionalcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:conditionalcorr -->
+Correlation of `X` conditioned on the variables in `Y`.
+
+Normalised version of `conditionalcov`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:conditionalcorr -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Num` | `...` × `c` × `obs` | — | — |
+| `Y` | `Num` | `...` × `d` × `obs` | — | — |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `c`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:conditionalcorr -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

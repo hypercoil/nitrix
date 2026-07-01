@@ -1,0 +1,48 @@
+---
+title: "sample_at_points"
+generated: true
+description: "Sample a volume at an arbitrary list of continuous points."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:sample_at_points -->
+```python
+sample_at_points(volume: Float[Array, '...'], points: Float[Array, '*n ndim'], *, method: Interpolator = Linear(), mode: BoundaryMode = 'constant', cval: float = 0.0) -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sample_at_points -->
+Sample a volume at an arbitrary list of continuous points.
+
+The scattered-point complement to `spatial_transform` (which samples
+on a coordinate *grid*): given `points` of shape `(*n, ndim)` in
+**index/voxel coordinates** (coordinate `c` maps to array index
+`c` -- the `align_corners` convention, matching `identity_grid`),
+interpolate `volume` at each point.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sample_at_points -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `volume` | `Float` | `...` | — | Either channel-free `(*spatial)` or channels-last `(*spatial, c)`; the spatial rank is `ndim = points.shape[-1]`. |
+| `points` | `Float` | `*n` × `ndim` | — | `(*n, ndim)` sample coordinates in index space. |
+| `method` | `Interpolator` | — | `Linear()` | Interpolation kernel (`Linear` default; `NearestNeighbour` for label volumes; any `geometry` `Interpolator`). |
+| `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds boundary mode: `"constant"` (zero-/`cval`-fill, the default) or `"nearest"` (edge-clamp / border), etc. |
+| `cval` | `float` | — | `0.0` | Fill value for `mode="constant"`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sample_at_points -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

@@ -1,0 +1,36 @@
+---
+title: "REMLResult"
+generated: true
+description: "Per-voxel REML fit output."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:REMLResult -->
+```python
+class REMLResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:REMLResult -->
+Per-voxel REML fit output.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:REMLResult.__init__ -->
+```python
+__init__(theta_hat: Float[Array, 'V 2'], beta_hat: Float[Array, 'V p'], log_lik: Float[Array, 'V'], fixed_cov: Float[Array, 'V p p'], theta_cov: Float[Array, 'V 2 2'], grad_m: Float[Array, 'V 2 p p'], blups: Optional[Float[Array, 'V q']] = None) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:REMLResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `2` | *(undocumented — add to `_dimensions.yml`)* |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

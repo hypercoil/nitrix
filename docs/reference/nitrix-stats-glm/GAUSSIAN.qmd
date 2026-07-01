@@ -1,0 +1,19 @@
+---
+title: "GAUSSIAN"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:GAUSSIAN -->
+```python
+GAUSSIAN = Family(name='gaussian', has_fixed_dispersion=False, link=_identity, linkinv=_identity, mu_eta=_ones_like, variance=_ones_like, unit_deviance=(lambda y, mu: (y - mu) ** 2), init_mu=_identity, loglik=_gaussian_loglik)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:GAUSSIAN -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

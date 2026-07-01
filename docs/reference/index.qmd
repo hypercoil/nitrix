@@ -6,9 +6,10 @@ listing:
   contents:
     - "*.qmd"
   type: table
-  fields: [title]
+  fields: [title, description]
   field-display-names:
     title: "Module"
+    description: "Summary"
   sort: "title"
   filter-ui: true
   page-size: 100

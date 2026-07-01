@@ -1,0 +1,86 @@
+---
+title: "integrate_velocity_field"
+generated: true
+description: "Diffeomorphic exponential map via scaling-and-squaring."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:integrate_velocity_field -->
+```python
+integrate_velocity_field(velocity: Float[Array, '*spatial ndim'], *, n_steps: Union[int, Literal['auto']] = 7, mode: BoundaryMode = 'nearest', cval: float = 0.0) -> Float[Array, '*spatial ndim']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:integrate_velocity_field -->
+Diffeomorphic exponential map via scaling-and-squaring.
+
+Integrates a *stationary* velocity field `v` to obtain a
+displacement field `phi` such that `phi ~= exp(v)` (in the
+Lie-group sense, with composition rather than addition).  The
+standard voxelmorph trick:
+
+1. Scale `v` by `1 / 2**n_steps` (small enough that the
+   first-order approximation `id + v` is itself approximately
+   diffeomorphic).
+2. Repeatedly compose the field with itself `n_steps` times:
+       phi_0 = v / 2**n_steps
+       phi_{i+1} = phi_i + phi_i o (id + phi_i)
+
+   (where `o` denotes function composition via
+   `spatial_transform`).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:integrate_velocity_field -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `velocity` | `Float` | `*spatial` × `ndim` | — | Stationary velocity field, channel-last, `(*spatial, ndim)`. |
+| `n_steps` | `Union[int, Literal['auto']]` | — | `7` | Number of doublings. Default `7` (i.e., 128× scaling). Larger `n_steps` -> more accurate but more compute (the per-step accuracy roughly halves with each doubling). Scaling-and-squaring is diffeomorphic only while the first sub-step `max\|v\| / 2**n_steps` is within the `~0.5`-voxel regime where `id + v/2**n` is itself invertible -- below that the flow can **fold**, so `n_steps` should cover the velocity magnitude (`>= ceil(log2(2*max\|v\|))`). `'auto'` picks exactly that (F2) from the velocity, but reads `max\|v\|` as a concrete value, so it is **eager-only** (unavailable under `jax.jit` -- the scan length must be static; pass an explicit `int` there). Note a warp larger than the grid can resolve folds at *any* `n_steps` (a resolution limit, not an integration one). |
+| `mode` | `BoundaryMode` | — | `'nearest'` | Boundary behaviour for the per-step `spatial_transform(phi, id + phi)` call. Default `"nearest"` (edge-replicate) -- this is the voxelmorph convention and the *only* mode that yields a numerically sensible integrated flow at the boundary. `"constant"` (with `cval=0`) silently miscomputes the flow within ~`n_steps` voxels of every edge; do not use unless you understand exactly what your boundary should be. |
+| `cval` | `float` | — | `0.0` | Constant fill value when `mode="constant"`. Ignored otherwise. |
+
+**Returns** `Float` — shape `*spatial` × `ndim`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:integrate_velocity_field -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **119.6 µs** (median, L4); up to **220.43× faster** than `scipy.ndimage.map_coordinates`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_INTEGRATE_VELOCITY_FIELD.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| integrate_velocity_field | jax-cpu | d=16 | `cupy.integrate_velocity_field` | skipped | — | — | — | — | — |
+| integrate_velocity_field | jax-cpu | d=16 | `nitrix-jax` | ok | 42.52 ms / 47.00 ms | 2.633 s | 733 MB (rss) | ✓ 0.002×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=16 | `scipy.ndimage.map_coordinates` | ok | 4.98 ms / 5.34 ms | 5.10 ms | 704 MB (rss) | ✓ 0.002×tol | 0.12x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=16 | `cupy.integrate_velocity_field` | ok | 1.89 ms / 1.92 ms | 680.93 ms | 0.05 MB (hbm) | ✓ 0.002×tol | 15.96x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=16 | `nitrix-jax` | ok | 118.3 µs / 119.6 µs | 585.93 ms | 0.25 MB (hbm) | ✓ 0.002×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=16 | `scipy.ndimage.map_coordinates` | ok | 9.79 ms / 9.92 ms | 10.19 ms | 0.05 MB (hbm) | ✓ 0.002×tol | 82.77x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=24 | `cupy.integrate_velocity_field` | skipped | — | — | — | — | — |
+| integrate_velocity_field | jax-cpu | d=24 | `nitrix-jax` | ok | 69.55 ms / 78.08 ms | 3.368 s | 769 MB (rss) | ✓ 0.0041×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=24 | `scipy.ndimage.map_coordinates` | ok | 14.52 ms / 16.48 ms | 20.21 ms | 704 MB (rss) | ✓ 0.0041×tol | 0.21x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=24 | `cupy.integrate_velocity_field` | ok | 1.81 ms / 1.85 ms | 173.13 ms | 0.17 MB (hbm) | ✓ 0.0041×tol | 12.84x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=24 | `nitrix-jax` | ok | 141.3 µs / 165.1 µs | 661.69 ms | 0.83 MB (hbm) | ✓ 0.004×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=24 | `scipy.ndimage.map_coordinates` | ok | 14.47 ms / 14.55 ms | 14.78 ms | 0.17 MB (hbm) | ✓ 0.0041×tol | 102.41x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=32 | `cupy.integrate_velocity_field` | skipped | — | — | — | — | — |
+| integrate_velocity_field | jax-cpu | d=32 | `nitrix-jax` | ok | 351.34 ms / 392.65 ms | 3.090 s | 779 MB (rss) | ✓ 0.0055×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cpu | d=32 | `scipy.ndimage.map_coordinates` | ok | 33.18 ms / 48.00 ms | 39.28 ms | 704 MB (rss) | ✓ 0.0055×tol | 0.09x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=32 | `cupy.integrate_velocity_field` | ok | 1.96 ms / 1.99 ms | 182.83 ms | 0.39 MB (hbm) | ✓ 0.0055×tol | 13.08x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=32 | `nitrix-jax` | ok | 149.6 µs / 153.8 µs | 790.36 ms | 2.10 MB (hbm) | ✓ 0.0055×tol | 1.00x vs nitrix-jax |
+| integrate_velocity_field | jax-cuda12 | d=32 | `scipy.ndimage.map_coordinates` | ok | 32.97 ms / 33.24 ms | 33.35 ms | 0.39 MB (hbm) | ✓ 0.0055×tol | 220.43x vs nitrix-jax |
+:::
+
+*source: bench `361141e2` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:integrate_velocity_field -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

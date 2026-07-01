@@ -2,12 +2,49 @@
 title: "nitrix.stats.gaulss"
 generated: true
 signature-hash: 7d872a2e15dece35
+description: "Gaussian location-scale regression (`gaulss`, v3 §4 distributional)."
+listing:
+  id: nitrix-stats-gaulss-symbols
+  contents: "nitrix-stats-gaulss/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
 Auto-generated scaffold for `nitrix.stats.gaulss`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen overview:__module__ -->
+Gaussian location-scale regression (`gaulss`, v3 §4 distributional).
+
+The standard GLM has **one** linear predictor (the mean); the residual scale is a
+single nuisance dispersion.  A *distributional* model gives the scale its own
+linear predictor -- here `y_i ~ N(mu_i, sigma_i^2)` with
+
+    mu_i      = x_i^T beta_mu           (identity link, the mean model)
+    log sigma_i = z_i^T beta_sigma      (log link, the scale model)
+
+so heteroscedasticity is modelled directly (`mgcv`'s `gaulss` family / the
+`nwx` reserved `sigma ~ …` predictor).  This is **not** the scalar IRLS core
+(one predictor, fixed dispersion), so it gets its own fitter.
+
+Estimator.  Joint maximum likelihood by Fisher scoring.  The Gaussian
+location-scale **expected** information is block-diagonal between `beta_mu` and
+`beta_sigma` (`E[y - mu] = 0` kills the cross term), so each scoring step is
+two decoupled solves:
+
+    beta_mu    <- (X^T W X)^{-1} X^T W y,        W = diag(1 / sigma_i^2)   (WLS)
+    beta_sigma <- beta_sigma + (2 Z^T Z)^{-1} Z^T u,  u_i = -1 + (y_i - mu_i)^2 / sigma_i^2
+
+iterated to a fixed budget (`vmap`-clean over voxels).  The coefficient
+covariances are the two information blocks' inverses: `Cov(beta_mu) = (X^T
+diag(1/sigma^2) X)^{-1}` and `Cov(beta_sigma) = (2 Z^T Z)^{-1}`.  Every solve is
+the cuSOLVER-free `small_inv_logdet`.
+<!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
@@ -20,82 +57,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 | `N` | observations — time points, subjects, or sampled points |
 <!-- nitrix:/gen -->
 
-## `GauLSSResult` {#GauLSSResult}
+## Symbols
 
-<!-- nitrix:gen sig:GauLSSResult -->
-```python
-class GauLSSResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:GauLSSResult -->
-Per-element Gaussian location-scale fit output.
-<!-- nitrix:/gen -->
-
-### Methods
-
-<!-- nitrix:gen sig:GauLSSResult.__init__ -->
-```python
-__init__(coef_mu: Float[Array, 'V p'], coef_scale: Float[Array, 'V q'], cov_mu: Float[Array, 'V p p'], cov_scale: Float[Array, 'V q q'], log_lik: Float[Array, 'V'], n_obs: int) -> None
-```
-<!-- nitrix:/gen -->
-
-## `gaulss_fit` {#gaulss_fit}
-
-<!-- nitrix:gen sig:gaulss_fit -->
-```python
-gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']] = None, n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> GauLSSResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gaulss_fit -->
-Mass-univariate Gaussian location-scale regression (`gaulss`).
-
-Fits, per element, `y_v ~ N(mu, sigma^2)` with `mu = X beta_mu` and
-`log sigma = Z beta_scale` -- modelling heteroscedasticity directly -- by
-joint Fisher scoring.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gaulss_fit -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
-| `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (shared; carries its own intercept). |
-| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` log-scale design `Z` (shared). Defaults to an intercept-only column -- a constant variance (the homoscedastic Gaussian, recovering OLS for the mean); pass a design to model the variance. |
-| `n_iter` | `int` | — | `50` | Fisher-scoring iterations (default `50`). |
-| `ridge` | `float` | — | `1e-08` | Small stabiliser on the normal equations. |
-| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
-
-**Returns** `GauLSSResult`.
-<!-- nitrix:/gen -->
-
-## `gaulss_predict` {#gaulss_predict}
-
-<!-- nitrix:gen sig:gaulss_predict -->
-```python
-gaulss_predict(result: GauLSSResult, X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']] = None) -> Tuple[Float[Array, 'V N'], Float[Array, 'V N']]
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gaulss_predict -->
-Per-element Gaussian location-scale prediction on a (new) design.
-
-Returns the **pair** `(mean, scale)` -- the heteroscedastic point of the
-model -- on the new covariates: the mean `mu = X beta_mu` (identity link)
-and the standard deviation `sigma = exp(Z beta_scale)` (log link).
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gaulss_predict -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `GauLSSResult` | — | — | A :class:`GauLSSResult` from :func:`gaulss_fit`. |
-| `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (same columns as the fit). |
-| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` scale-model design; `None` (default) uses an intercept column `(N, 1)` -- the homoscedastic default matching `gaulss_fit`. Must have the same column count `q` the fit's scale model used. |
-
-**Returns** `Tuple[Float[Array, 'V N'], Float[Array, 'V N']]`.
-<!-- nitrix:/gen -->
-
+::: {#nitrix-stats-gaulss-symbols}
+:::

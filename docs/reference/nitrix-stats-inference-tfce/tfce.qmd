@@ -1,0 +1,42 @@
+---
+title: "tfce"
+generated: true
+description: "Threshold-free cluster enhancement of a statistic image."
+---
+
+[‹ back to `nitrix.stats.inference.tfce`](../nitrix-stats-inference-tfce.qmd)
+
+<!-- nitrix:gen sig:tfce -->
+```python
+tfce(stat: Float[Array, '*spatial'], *, E: float = 0.5, H: float = 2.0, n_steps: int = 100, connectivity: int = 1, two_sided: bool = True, mask: Optional[Bool[Array, '*spatial']] = None) -> Float[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:tfce -->
+Threshold-free cluster enhancement of a statistic image.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:tfce -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `stat` | `Float` | `*spatial` | — | Statistic image (e.g. a t-map), arbitrary spatial dimensionality. |
+| `E` | `float` | — | `0.5` | Extent and height exponents (defaults `0.5` / `2.0` -- 3-D volume). |
+| `H` | `float` | — | `2.0` | Extent and height exponents (defaults `0.5` / `2.0` -- 3-D volume). |
+| `n_steps` | `int` | — | `100` | Number of threshold steps in the Riemann sum (FSL default ~100). |
+| `connectivity` | `int` | — | `1` | Neighbourhood order for cluster forming (`1` = faces; `ndim` = full, incl. diagonals -- the scipy convention). |
+| `two_sided` | `bool` | — | `True` | Enhance the negative side as well (default `True`); the result is the non-negative magnitude map used for two-sided max-statistic FWE. |
+| `mask` | `Optional[Bool[Array, '*spatial']]` | — | `None` | Optional spatial mask; out-of-mask voxels are zeroed before enhancement. |
+
+**Returns** `Float` — shape `*spatial`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:tfce -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

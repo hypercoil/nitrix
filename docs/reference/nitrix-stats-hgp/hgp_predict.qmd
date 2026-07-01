@@ -1,0 +1,45 @@
+---
+title: "hgp_predict"
+generated: true
+description: "Posterior population (or per-group) curves at `x_new`."
+---
+
+[‹ back to `nitrix.stats.hgp`](../nitrix-stats-hgp.qmd)
+
+<!-- nitrix:gen sig:hgp_predict -->
+```python
+hgp_predict(result: HGPResult, x_new: Float[Array, ' g'], *, levels: Optional[Int[Array, ' L']] = None, parametric: Optional[Float[Array, 'g q']] = None) -> Tuple[Float[Array, '...'], Float[Array, '...']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:hgp_predict -->
+Posterior population (or per-group) curves at `x_new`.
+
+With `levels=None` (default) returns the **population** smooth
+`(mean, std)` -- each `(V, g)` -- the fixed effects plus `Phi(x_new)
+beta_pop`.  With `levels` a sequence of group indices, returns the
+**group** curves (population + that group's deviation) shaped
+`(V, len(levels), g)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:hgp_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `HGPResult` | — | — | An :class:`HGPResult` from :func:`hgp_fit`. |
+| `x_new` | `Float` | `g` | — | `(g,)` covariate grid. |
+| `levels` | `Optional[Int[Array, ' L']]` | — | `None` | Optional group indices to render; `None` gives the population curve. |
+| `parametric` | `Optional[Float[Array, 'g q']]` | — | `None` | `(g, q)` parametric covariates (required if the fit used them). |
+
+**Returns** `Tuple[Float[Array, '...'], Float[Array, '...']]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:hgp_predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `g` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

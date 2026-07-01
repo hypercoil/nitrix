@@ -1,0 +1,96 @@
+---
+title: "CubicBSpline"
+generated: true
+description: "Cubic (order-3) B-spline interpolation -- `scipy.ndimage` `order=3`."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:CubicBSpline -->
+```python
+class CubicBSpline
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CubicBSpline -->
+Cubic (order-3) B-spline interpolation -- `scipy.ndimage` `order=3`.
+
+The order-3 spline path consumers like the nnUNet / `hd_bet`
+preprocessing in some ilex pipelines use.  Unlike a plain cubic
+*convolution*, a B-spline interpolator is a two-step operation:
+
+1. a **prefilter** converts the image samples to interpolating
+   B-spline coefficients (a separable recursive filter with the cubic
+   pole `sqrt(3) - 2`; :func:`_bspline_prefilter`), and
+2. a 4-tap separable **cubic B-spline basis** gathers those
+   coefficients.
+
+Without the prefilter the cubic basis only *approximates* (blurs) the
+samples; with it the result passes through the samples exactly -- the
+interpolation property.  The basis is a partition of unity (weights
+sum to 1; no renormalisation), `C^2`-smooth, so the kernel is
+differentiable in both the values (the prefilter and gather are
+linear) and the coordinates (the basis is smooth).
+
+Engine note: the prefilter is a first-order linear recurrence, run
+sequentially (`lax.scan`) on CPU and in parallel
+(`lax.associative_scan`, `O(log n)` depth) on GPU -- the same
+platform split as `signal._iir`.  Both are exact.  (An FFT
+convolution -- the other `signal._iir` engine -- is *not* used: the
+cubic pole is mild, so the prefilter's impulse response is a ~25-tap
+short FIR, too short for the transform overhead to amortise.)
+
+Boundary: this kernel **always uses the mirror (whole-sample-
+symmetric) boundary** for *both* the prefilter and the gather, and
+**ignores the `mode` / `cval` call arguments** (like
+:class:`MultiLabel` ignores `cval`).  This is deliberate: a B-spline
+is only self-consistent -- the interpolation property (reproducing the
+samples) only holds -- when the prefilter and the gather share a
+boundary, and only the mirror initialisation is implemented.  The
+result is bit-exact with `scipy.ndimage.map_coordinates(order=3,
+mode='mirror')`.  A mode-aware prefilter (matching `scipy` for
+`nearest` / `reflect` / ... ) is a future extension (cf.
+`docs/feature-requests/boundary-mode-parity.md`).
+
+Per the "loud fallbacks" tenet, the override is **announced**: an
+explicit non-mirror `mode` (or a non-zero `cval`) raises a
+:class:`CubicBSplineBoundaryWarning` (the bare default
+`mode='constant', cval=0` is treated as unspecified and is silent).
+
+Reproducibility: the prefilter is a recursive IIR filter, so its engine is
+the `driver` axis (the divergent op `geometry.cubic_bspline_prefilter`).
+`driver='auto'` (default) runs the parallel `associative_scan` on GPU /
+sequential `scan` on CPU, which **reassociate the long pole filter
+differently** -- so a cubic resample can differ CPU-vs-GPU beyond a ULP
+(unlike the `order`-0/1 kernels, which are bit-identical across backends).
+Force `driver='sequential'` (or wrap in `nitrix.reproducible()`) for a
+cross-platform-stable result; `nitrix.divergent_ops()` reports the budget.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:CubicBSpline.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:CubicBSpline.__init__ -->
+```python
+__init__(driver: str = 'auto') -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:CubicBSpline -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

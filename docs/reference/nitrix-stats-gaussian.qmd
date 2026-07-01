@@ -2,12 +2,36 @@
 title: "nitrix.stats.gaussian"
 generated: true
 signature-hash: 5d07409157d10136
+description: "Closed-form diagonal-Gaussian quantities."
+listing:
+  id: nitrix-stats-gaussian-symbols
+  contents: "nitrix-stats-gaussian/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
 Auto-generated scaffold for `nitrix.stats.gaussian`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen overview:__module__ -->
+Closed-form diagonal-Gaussian quantities.
+
+- `kl_diagonal_gaussian` -- KL divergence of a diagonal Gaussian
+  `N(mean, diag exp(log_var))` from the standard normal `N(0, I)`,
+  in closed form.
+- `gaussian_nll` -- negative log-likelihood of observations under a
+  diagonal Gaussian.
+
+Both are parameterised by `log_var` (the log of the variance) rather
+than the variance or standard deviation: this keeps the variance
+positive without a clamp and turns the `1 / var` and `log var` terms
+into a numerically benign `exp(-log_var)` / `log_var`.
+<!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
@@ -17,70 +41,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 | `...` | anonymous leading (batch) axes |
 <!-- nitrix:/gen -->
 
-## `kl_diagonal_gaussian` {#kl_diagonal_gaussian}
+## Symbols
 
-<!-- nitrix:gen sig:kl_diagonal_gaussian -->
-```python
-kl_diagonal_gaussian(mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg] = None, reduction: Reduction = 'sum') -> Float[Array, '...']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:kl_diagonal_gaussian -->
-KL divergence of `N(mean, diag exp(log_var))` from `N(0, I)`.
-
-The closed form for a diagonal Gaussian against the standard
-normal, per dimension:
-
-`0.5 * (mean**2 + exp(log_var) - 1 - log_var)`
-
-which is non-negative and zero exactly at `mean = 0`,
-`log_var = 0`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:kl_diagonal_gaussian -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `mean` | `Float` | `...` | — | The Gaussian's mean and log-variance, identical shape. |
-| `log_var` | `Float` | `...` | — | The Gaussian's mean and log-variance, identical shape. |
-| `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce. Default `None` (all). The latent KL is conventionally *summed* over the latent dimension, so pass the latent axis with `reduction="sum"` for a per-sample KL. |
-| `reduction` | `Reduction` | — | `'sum'` | `"sum"` (default -- the per-dimension KL is additive), `"mean"`, or `"none"`. |
-
-**Returns** `Float` — shape `...`.
-<!-- nitrix:/gen -->
-
-## `gaussian_nll` {#gaussian_nll}
-
-<!-- nitrix:gen sig:gaussian_nll -->
-```python
-gaussian_nll(x: Float[Array, '...'], mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg] = None, reduction: Reduction = 'mean') -> Float[Array, '...']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gaussian_nll -->
-Negative log-likelihood of `x` under `N(mean, exp(log_var))`.
-
-Per element:
-
-`0.5 * (log(2 pi) + log_var + (x - mean)**2 * exp(-log_var))`
-
-The `exp(-log_var)` precision and the additive `log_var`
-normaliser are the log-variance rewrite of the `1 / (2 var)` and
-`0.5 log var` terms of the Gaussian density.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gaussian_nll -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `x` | `Float` | `...` | — | Observations. |
-| `mean` | `Float` | `...` | — | Predicted mean and log-variance, broadcastable to `x`. |
-| `log_var` | `Float` | `...` | — | Predicted mean and log-variance, broadcastable to `x`. |
-| `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce. Default `None` (all). |
-| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"`. |
-
-**Returns** `Float` — shape `...`.
-<!-- nitrix:/gen -->
-
+::: {#nitrix-stats-gaussian-symbols}
+:::

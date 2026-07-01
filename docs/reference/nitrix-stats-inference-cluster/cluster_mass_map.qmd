@@ -1,0 +1,41 @@
+---
+title: "cluster_mass_map"
+generated: true
+description: "Per-voxel cluster *mass*: the component's summed `stat - threshold`."
+---
+
+[‹ back to `nitrix.stats.inference.cluster`](../nitrix-stats-inference-cluster.qmd)
+
+<!-- nitrix:gen sig:cluster_mass_map -->
+```python
+cluster_mass_map(labels: Int[Array, '*spatial'], stat: Float[Array, '*spatial'], threshold: float) -> Float[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cluster_mass_map -->
+Per-voxel cluster *mass*: the component's summed `stat - threshold`.
+
+The excess statistic `max(stat - threshold, 0)` is summed over each
+supra-threshold component; background voxels map to `0`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cluster_mass_map -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `labels` | `Int` | `*spatial` | — | — |
+| `stat` | `Float` | `*spatial` | — | — |
+| `threshold` | `float` | — | — | — |
+
+**Returns** `Float` — shape `*spatial`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cluster_mass_map -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

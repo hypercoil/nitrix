@@ -1,0 +1,40 @@
+---
+title: "smooth_partial_effect"
+generated: true
+description: "Per-element partial effect of one smooth on a covariate grid `x`."
+---
+
+[‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
+
+<!-- nitrix:gen sig:smooth_partial_effect -->
+```python
+smooth_partial_effect(result: GAMResult, smooth_index: int, basis: Smooth, x: Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:smooth_partial_effect -->
+Per-element partial effect of one smooth on a covariate grid `x`.
+
+Returns `(effect, se)`: the fitted smooth `B(x) gamma_k` and its
+pointwise standard error from the Bayesian covariance block (for a
+credible band).  `basis` is the smooth used to build the term; for a
+`TensorBasis` pass `x` as a tuple of matched per-margin grids (all
+length `g`) and the effect is the interaction surface along that path.
+For a `REBasis` pass `x` as the integer level indices to read off -- the
+effect is then the per-level random effect (the BLUP intercept, or the
+random-slope coefficient) at those levels.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:smooth_partial_effect -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `GAMResult` | — | — | — |
+| `smooth_index` | `int` | — | — | — |
+| `basis` | `Smooth` | — | — | — |
+| `x` | `Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]` | — | — | — |
+
+**Returns** `Tuple[Float[Array, 'V g'], Float[Array, 'V g']]`.
+<!-- nitrix:/gen -->
+

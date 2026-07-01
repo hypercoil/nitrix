@@ -2,12 +2,29 @@
 title: "nitrix.stats.inference.randomise"
 generated: true
 signature-hash: 899c56b61523b583
+description: "Permutation inference for the GLM -- the on-device `randomise` engine."
+listing:
+  id: nitrix-stats-inference-randomise-symbols
+  contents: "nitrix-stats-inference-randomise/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
 Auto-generated scaffold for `nitrix.stats.inference.randomise`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen overview:__module__ -->
+Permutation inference for the GLM -- the on-device `randomise` engine.
+
+`permutation_test` is the kernel `niffi` needs in place of FSL
+`randomise`: a non-parametric, family-wise-error-controlling test of a GLM
+contrast over a statistic image, built from the parts in this subpackage.
+<!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
@@ -23,103 +40,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 | `m` | rows of a multi-row contrast |
 <!-- nitrix:/gen -->
 
-## `PermResult` {#PermResult}
+## Symbols
 
-<!-- nitrix:gen sig:PermResult -->
-```python
-class PermResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:PermResult -->
-Permutation-test output (all maps in the input spatial shape).
-<!-- nitrix:/gen -->
-
-### Methods
-
-<!-- nitrix:gen sig:PermResult.__init__ -->
-```python
-__init__(stat: Float[Array, '*spatial'], enhanced: Float[Array, '*spatial'], p_fwe: Float[Array, '*spatial'], p_uncorrected: Float[Array, '*spatial'], null_max: Float[Array, 'n_perm']) -> None
-```
-<!-- nitrix:/gen -->
-
-## `gpd_pvalue` {#gpd_pvalue}
-
-<!-- nitrix:gen sig:gpd_pvalue -->
-```python
-gpd_pvalue(stat: Float[Array, '...'], null_dist: Float[Array, 'n'], *, n_exceedances: int = 250) -> Float[Array, '...']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gpd_pvalue -->
-Tail-accelerated exceedance p-value via a generalized Pareto fit.
-
-The permutation FWE p-value of an observed statistic `T` is the survival
-fraction `P(max_null >= T)`.  Estimated empirically it is discrete and
-floored at `1 / n` -- so resolving a small p-value needs a large `n`.
-Following Winkler et al. (2016, *Faster permutation inference*), the upper
-tail of `null_dist` above a threshold `u` (the `(k+1)`-th largest of
-`n`, `k = n_exceedances`) is modelled by a **generalized Pareto
-distribution** fitted by the method of moments, giving a smooth p-value that
-can fall below `1 / n` at a fraction of the permutations:
-    P(T) = (k / n) * S_GPD(T - u),   T > u   (tail, GPD survival)
-    P(T) = #{null >= T} / n,         T <= u  (body, empirical)
-
-With GPD shape `xi` and scale `sigma` from the exceedance mean / variance
-(`xi = (1 - mean^2 / var) / 2`, `sigma = mean (1 - xi)`).  `stat` is a
-scalar or an array of observed statistics (e.g. an enhanced FWE map); the
-return has the same shape.  Pure / differentiable / cuSOLVER-free.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gpd_pvalue -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `stat` | `Float` | `...` | — | — |
-| `null_dist` | `Float` | `n` | — | — |
-| `n_exceedances` | `int` | — | `250` | — |
-
-**Returns** `Float` — shape `...`.
-<!-- nitrix:/gen -->
-
-## `permutation_test` {#permutation_test}
-
-<!-- nitrix:gen sig:permutation_test -->
-```python
-permutation_test(data: Float[Array, '*spatial N'], design: Float[Array, 'N p'], contrast: Float[Array, 'p'] | Float[Array, 'm p'], *, key: Array, n_perm: int = 500, enhancement: Enhancement = 'tfce', exchange: Exchange = 'sign', nuisance: Optional[Float[Array, 'N q']] = None, blocks: Optional[Int[Array, 'N']] = None, mask: Optional[Bool[Array, '*spatial']] = None, two_sided: bool = True, var_smooth: Optional[float] = None, connectivity: int = 1, cluster_thresh: Optional[float] = None, tfce_E: float = 0.5, tfce_H: float = 2.0, tfce_steps: int = 100, pvalue_method: PValueMethod = 'empirical', gpd_n_exceedances: int = 250) -> PermResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:permutation_test -->
-Permutation test of a GLM t- or F-contrast with FWE control.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:permutation_test -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `data` | `Float` | `*spatial` × `N` | — | `(*spatial, N)` responses (the observation axis is last). |
-| `design` | `Float` | `N` × `p` | — | `(N, p)` GLM design (includes the effect and any nuisance columns). |
-| `contrast` | `Float` | `m` × `p` | — | The tested contrast. A `(p,)` vector `c` is a **t-contrast** (signed, two-sided by default); a `(m, p)` matrix `C` (`m > 1`) is an **F-contrast** -- the joint test `C beta = 0` reported as the non-negative F-statistic (`two_sided` is then irrelevant and ignored, the F already captures both directions). |
-| `key` | `Array` | — | — | `jax.random` key (RNG policy is the caller's). |
-| `n_perm` | `int` | — | `500` | Number of permutations incl. the identity (default `500`). |
-| `enhancement` | `Enhancement` | — | `'tfce'` | `'tfce'` (default), `'voxel'` (raw statistic, voxelwise FWE), or `'cluster_extent'` / `'cluster_mass'` (cluster-forming at `cluster_thresh`). |
-| `exchange` | `Exchange` | — | `'sign'` | `'sign'` (sign-flipping; symmetric / one-sample) or `'perm'` (row permutation; two-sample / regression). |
-| `nuisance` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` nuisance design for Freedman-Lane. `None` permutes the data directly (exact for designs with no nuisance). |
-| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | Optional per-observation exchangeability-block labels. |
-| `mask` | `Optional[Bool[Array, '*spatial']]` | — | `None` | Optional spatial mask; out-of-mask voxels do not contribute to clusters or the maximum. |
-| `two_sided` | `bool` | — | `True` | Two-sided test (default `True`). Ignored for an F-contrast. |
-| `var_smooth` | `Optional[float]` | — | `None` | Optional Gaussian sigma for variance smoothing (pseudo-t, FSL `-v`). |
-| `connectivity` | `int` | — | `1` | Cluster / TFCE parameters. |
-| `cluster_thresh` | `Optional[float]` | — | `None` | Cluster-forming statistic threshold; **required** for `enhancement='cluster_extent'` / `'cluster_mass'` (the classic FSL cluster-extent / cluster-mass FWE -- one threshold, ~100x cheaper per permutation than TFCE). |
-| `tfce_E` | `float` | — | `0.5` | Cluster / TFCE parameters. |
-| `tfce_H` | `float` | — | `2.0` | Cluster / TFCE parameters. |
-| `tfce_steps` | `int` | — | `100` | Cluster / TFCE parameters. |
-| `pvalue_method` | `PValueMethod` | — | `'empirical'` | `'empirical'` (default) -- the FWE p-map is the discrete fraction of permutations whose null max `>=` the observed (floored at `1/n_perm`). `'gpd'` -- fit a generalized Pareto distribution to the upper tail of the null-max distribution (Winkler et al. 2016) so FWE p-values resolve **below** the `1/n_perm` floor, letting `n_perm` drop. Only the FWE map is GPD-smoothed; the uncorrected map stays empirical. |
-| `gpd_n_exceedances` | `int` | — | `250` | Number of upper-tail null-max exceedances used for the GPD fit when `pvalue_method='gpd'` (default `250`; clamped to `n_perm - 1`). |
-
-**Returns** `PermResult`.
-<!-- nitrix:/gen -->
-
+::: {#nitrix-stats-inference-randomise-symbols}
+:::

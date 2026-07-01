@@ -1,0 +1,51 @@
+---
+title: "conditionalcov"
+generated: true
+description: "Covariance of `X` conditioned on the variables in `Y`."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:conditionalcov -->
+```python
+conditionalcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool = True, bias: bool = False, ddof: Optional[int] = None, weights: Optional[Num[Array, '... obs']] = None, weight_matrix: Optional[Num[Array, '... obs obs']] = None, l2: float = 0.0, residualise_l2: float = 0.0) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:conditionalcov -->
+Covariance of `X` conditioned on the variables in `Y`.
+
+Operationally: residualise `X` against `Y`, then take the
+covariance of the residuals.  This is the "explained out the
+Y subspace, look at what's left" view.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:conditionalcov -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Num` | `...` × `c` × `obs` | — | Variable / conditioning tensors. |
+| `Y` | `Num` | `...` × `d` × `obs` | — | Variable / conditioning tensors. |
+| `rowvar` | `bool` | — | `True` | See `cov`. |
+| `bias` | `bool` | — | `False` | See `cov`. |
+| `ddof` | `Optional[int]` | — | `None` | See `cov`. |
+| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | See `cov`. |
+| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | See `cov`. |
+| `l2` | `float` | — | `0.0` | See `cov`. |
+| `residualise_l2` | `float` | — | `0.0` | Ridge for the residualisation step (passed to `residualise`). Typically left at `0`; raise if `Y` is near-collinear. |
+
+**Returns** `Num` — shape `...` × `c` × `c`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:conditionalcov -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

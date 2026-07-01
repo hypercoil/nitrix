@@ -1,0 +1,37 @@
+---
+title: "HGPResult"
+generated: true
+description: "Per-element hierarchical-GP fit output (HSGP engine, `'GS'` model)."
+---
+
+[‹ back to `nitrix.stats.hgp`](../nitrix-stats-hgp.qmd)
+
+<!-- nitrix:gen sig:HGPResult -->
+```python
+class HGPResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:HGPResult -->
+Per-element hierarchical-GP fit output (HSGP engine, `'GS'` model).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:HGPResult.__init__ -->
+```python
+__init__(coef: Float[Array, 'V p'], cov_unscaled: Float[Array, 'V p p'], theta: Float[Array, 'V K2'], log_mlik: Float[Array, 'V'], edf: Float[Array, 'V K'], dispersion: Float[Array, 'V'], kernel: str, engine: str, model: str, n_levels: Any, n_obs: int, rank: int, n_fixed: int, lo: float, hi: float, boundary: float) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:HGPResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `K2` | *(undocumented — add to `_dimensions.yml`)* |
+| `K` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

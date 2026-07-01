@@ -11,6 +11,7 @@ project:
     - explanation/geometry/*.qmd
     - explanation/registration/*.qmd
     - reference/*.qmd
+    - reference/*/*.qmd
 
 website:
   title: "nitrix"

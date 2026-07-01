@@ -2,6 +2,15 @@
 title: "nitrix.stats.priors"
 generated: true
 signature-hash: 0606f7bc556deec9
+description: "Lengthscale priors as REML regularisers (the `map_rho=` penalties)."
+listing:
+  id: nitrix-stats-priors-symbols
+  contents: "nitrix-stats-priors/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
@@ -9,99 +18,27 @@ Auto-generated scaffold for `nitrix.stats.priors`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
 
-## `PriorFn` {#PriorFn}
+<!-- nitrix:gen overview:__module__ -->
+Lengthscale priors as REML regularisers (the `map_rho=` penalties).
 
-<!-- nitrix:gen sig:PriorFn -->
-```python
-PriorFn = Callable[[Float[Array, '']], Float[Array, '']]
-```
+A small, curated set of priors on the GP lengthscale `rho`, each returned as a
+callable `rho -> -log p(rho)` suitable for the `map_rho=` argument of
+:func:`nitrix.stats.gp_fit` and :func:`nitrix.stats.hgp_fit`.  This is the
+lightweight **penalised / MAP** lengthscale within scope (a): the REML objective
+`-2 l_R(rho)` gains `-2 log p(rho)`, so the selected `rho` is the *maximum a
+posteriori* value rather than the pure REML maximiser.  (A full *posterior* over
+`rho` is scope (b) -- Stan / `brms` territory.)
+
+Each builder returns `-log p(rho)` **up to an additive constant** (the
+normaliser is irrelevant to the argmin), so they compose directly:
+    from nitrix.stats import gp_fit, invgamma_prior
+    res = gp_fit(Y, x, map_rho=invgamma_prior(a=3.0, b=0.5))
+
+The penalties are pure JAX (they ride the jitted `rho`-search), elementwise on a
+scalar `rho`.
 <!-- nitrix:/gen -->
 
-<!-- nitrix:gen overview:PriorFn -->
-*TODO: describe this type alias / constant.*
-<!-- nitrix:/gen -->
+## Symbols
 
-## `halfnormal_prior` {#halfnormal_prior}
-
-<!-- nitrix:gen sig:halfnormal_prior -->
-```python
-halfnormal_prior(sd: float) -> PriorFn
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:halfnormal_prior -->
-Half-normal prior on the lengthscale `rho` (penalises large `rho`).
-
-`p(rho) ~ exp(-rho**2 / (2 sd**2))` on `rho > 0`, so
-`-log p(rho) = rho**2 / (2 sd**2)` (up to a constant): a soft cap that pulls
-the estimate **down**, away from over-smooth (near-linear) fits.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:halfnormal_prior -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `sd` | `float` | — | — | The half-normal scale. Smaller `sd` is a stronger pull toward small `rho`; a sensible value is on the order of the covariate range. |
-
-**Returns** `PriorFn`.
-<!-- nitrix:/gen -->
-
-## `invgamma_prior` {#invgamma_prior}
-
-<!-- nitrix:gen sig:invgamma_prior -->
-```python
-invgamma_prior(a: float, b: float) -> PriorFn
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:invgamma_prior -->
-Inverse-gamma prior on the lengthscale `rho` (penalises small `rho`).
-
-`p(rho) ~ rho**(-a-1) exp(-b / rho)` on `rho > 0`, so
-`-log p(rho) = (a + 1) log rho + b / rho` (up to a constant).  The `b/rho`
-term diverges as `rho -> 0`, so this pulls the estimate **up**, away from a
-lengthscale that collapses into noise-fitting -- the usual
-penalised-complexity-style regulariser for a weakly-identified `rho` (e.g.
-sparse or short series).
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:invgamma_prior -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `a` | `float` | — | — | Shape and scale (`a, b > 0`). The prior mode is `b / (a + 1)`; pick `a, b` so that is a plausibly-small lengthscale. |
-| `b` | `float` | — | — | Shape and scale (`a, b > 0`). The prior mode is `b / (a + 1)`; pick `a, b` so that is a plausibly-small lengthscale. |
-
-**Returns** `PriorFn`.
-<!-- nitrix:/gen -->
-
-## `lognormal_prior` {#lognormal_prior}
-
-<!-- nitrix:gen sig:lognormal_prior -->
-```python
-lognormal_prior(mu: float, sd: float) -> PriorFn
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:lognormal_prior -->
-Log-normal prior on the lengthscale `rho` (median `exp(mu)`).
-
-`p(rho) ~ (1/rho) exp(-(log rho - mu)**2 / (2 sd**2))` on `rho > 0`, so
-`-log p(rho) = (log rho - mu)**2 / (2 sd**2) + log rho` (up to a constant):
-a symmetric-in-`log rho` pull toward the prior median `exp(mu)` with
-multiplicative spread `sd`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:lognormal_prior -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `mu` | `float` | — | — | Prior mean of `log rho` (so `exp(mu)` is the prior median lengthscale). |
-| `sd` | `float` | — | — | Prior standard deviation of `log rho` (`> 0`). |
-
-**Returns** `PriorFn`.
-<!-- nitrix:/gen -->
-
+::: {#nitrix-stats-priors-symbols}
+:::

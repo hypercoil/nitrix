@@ -1,0 +1,43 @@
+---
+title: "fdr_by"
+generated: true
+description: "Benjamini-Yekutieli FDR correction -- valid under **arbitrary** dependence."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:fdr_by -->
+```python
+fdr_by(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fdr_by -->
+Benjamini-Yekutieli FDR correction -- valid under **arbitrary** dependence.
+
+The BH step-up at level `alpha / c(m)` with the harmonic number
+`c(m) = sum_{k=1}^m 1/k` (equivalently, the BH q-values scaled by `c(m)`).
+Use when the p-values may be arbitrarily (e.g. negatively) dependent and BH's
+positive-dependence assumption is unsafe -- the price is a `~log(m)` factor
+more conservative.  Returns `(rejected, p_adjusted)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fdr_by -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `alpha` | `float` | — | `0.05` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fdr_by -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

@@ -2,12 +2,32 @@
 title: "nitrix.stats.inference.cluster"
 generated: true
 signature-hash: 11c00af41870b927
+description: "Cluster maps for threshold-based enhancement and inference."
+listing:
+  id: nitrix-stats-inference-cluster-symbols
+  contents: "nitrix-stats-inference-cluster/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
 Auto-generated scaffold for `nitrix.stats.inference.cluster`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen overview:__module__ -->
+Cluster maps for threshold-based enhancement and inference.
+
+Given a statistic image and a height threshold, the supra-threshold voxels form
+spatial clusters (via `morphology.connected_components`).  `cluster_size_map`
+labels every voxel with the *size* (voxel count) of its cluster;
+`cluster_mass_map` with the integrated supra-threshold statistic of its
+cluster.  These are the per-threshold ingredients of TFCE (`tfce`) and the
+cluster-extent / cluster-mass thresholding modes of `randomise`.
+<!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
@@ -17,54 +37,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 | `*spatial` | the spatial axes of a grid (variadic) |
 <!-- nitrix:/gen -->
 
-## `cluster_size_map` {#cluster_size_map}
+## Symbols
 
-<!-- nitrix:gen sig:cluster_size_map -->
-```python
-cluster_size_map(labels: Int[Array, '*spatial']) -> Float[Array, '*spatial']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:cluster_size_map -->
-Per-voxel size (voxel count) of the connected component it belongs to.
-
-Background voxels (label `0`) map to `0`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:cluster_size_map -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `labels` | `Int` | `*spatial` | — | — |
-
-**Returns** `Float` — shape `*spatial`.
-<!-- nitrix:/gen -->
-
-## `cluster_mass_map` {#cluster_mass_map}
-
-<!-- nitrix:gen sig:cluster_mass_map -->
-```python
-cluster_mass_map(labels: Int[Array, '*spatial'], stat: Float[Array, '*spatial'], threshold: float) -> Float[Array, '*spatial']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:cluster_mass_map -->
-Per-voxel cluster *mass*: the component's summed `stat - threshold`.
-
-The excess statistic `max(stat - threshold, 0)` is summed over each
-supra-threshold component; background voxels map to `0`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:cluster_mass_map -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `labels` | `Int` | `*spatial` | — | — |
-| `stat` | `Float` | `*spatial` | — | — |
-| `threshold` | `float` | — | — | — |
-
-**Returns** `Float` — shape `*spatial`.
-<!-- nitrix:/gen -->
-
+::: {#nitrix-stats-inference-cluster-symbols}
+:::

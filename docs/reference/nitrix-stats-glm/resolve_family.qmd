@@ -1,0 +1,35 @@
+---
+title: "resolve_family"
+generated: true
+description: "Resolve a `str` name (a built-in) or a `Family` instance to a family."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:resolve_family -->
+```python
+resolve_family(family: Union[str, Family]) -> Family
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:resolve_family -->
+Resolve a `str` name (a built-in) or a `Family` instance to a family.
+
+`glm_fit` / `gam_fit` accept either; a string is looked up in the
+built-in registry (`'gaussian'` / `'binomial'` / `'poisson'` /
+`'gamma'` / `'negbinomial'`).  `'negbinomial'` resolves to the default
+`alpha = 1`; for another dispersion pass `negbinomial(alpha)` directly.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:resolve_family -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `family` | `Union[str, Family]` | — | — | — |
+
+**Returns** `Family`.
+<!-- nitrix:/gen -->
+

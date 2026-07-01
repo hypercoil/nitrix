@@ -1,0 +1,47 @@
+---
+title: "LMEResult"
+generated: true
+description: "Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal random slope `(1 + x | g)` / `(x || g)`."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:LMEResult -->
+```python
+class LMEResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:LMEResult -->
+Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal
+random slope `(1 + x | g)` / `(x || g)`.
+
+The `lme_fit` dispatcher returns this for the R2 tier; the scalar-intercept
+R1 tier returns a :class:`REMLResult` (the FaST-LMM path), and the nested /
+crossed / structured-residual tiers their own result types.
+
+Carries the fixed-effect contrast-inference tensors (`fixed_cov` /
+`theta_cov` / `grad_m`, audit D3-R2), so `lme_t_contrast` /
+`lme_f_contrast` accept it with the **same** Satterthwaite / Kenward-Roger
+df machinery as R1.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:LMEResult.__init__ -->
+```python
+__init__(beta_hat: Float[Array, 'V p'], cov_re: Float[Array, 'V r r'], sigma_e_sq: Float[Array, 'V'], log_lik: Float[Array, 'V'], fixed_cov: Float[Array, 'V p p'], theta_cov: Float[Array, 'V nt nt'], grad_m: Float[Array, 'V nt p p'], tier: str, blups: Optional[Float[Array, 'V q r']] = None) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:LMEResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `r` | *(undocumented — add to `_dimensions.yml`)* |
+| `nt` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

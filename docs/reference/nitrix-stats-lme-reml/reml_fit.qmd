@@ -1,0 +1,84 @@
+---
+title: "reml_fit"
+generated: true
+description: "Voxelwise variance-components REML fit."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:reml_fit -->
+```python
+reml_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], Z: Float[Array, 'N q'], *, theta_init: Optional[Float[Array, 'V 2']] = None, n_iter: int = 20, damping: float = 1e-06, block: Optional[int] = None, low_rank: Optional[bool] = None) -> REMLResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:reml_fit -->
+Voxelwise variance-components REML fit.
+
+Fits the LME
+
+.. code:
+    y_v = X beta_v + Z b_v + eps_v
+    b_v ~ N(0, sigma_b^2 I_q)
+    eps_v ~ N(0, sigma_e^2 I_N)
+
+independently for each voxel, sharing the fixed-effect design
+`X` and the random-effect design `Z` across voxels.  Uses
+the FaST-LMM spectral trick: eigendecompose `ZZ^T` once,
+rotate `y` and `X` into the diagonalising basis, then
+Newton-score on the variance components in log-space.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:reml_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Y` | `Float` | `V` × `N` | — | Response tensor, `(V, N)` -- `V` voxels, `N` subjects (or observations). |
+| `X` | `Float` | `N` × `p` | — | Fixed-effect design, `(N, p)`. Shared across voxels; carries its own intercept column (no intercept is added). |
+| `Z` | `Float` | `N` × `q` | — | Random-effect design, `(N, q)`. Shared across voxels. The random-effect covariance is `sigma_b^2 I_q` (single variance component); pass each component's design matrix column to `Z` to model multiple random effects (currently all share `sigma_b^2`; for separate variance components per random effect, the lower-level `_varcomp` core accepts a general `(K, N)` basis). |
+| `theta_init` | `Optional[Float[Array, 'V 2']]` | — | `None` | Per-voxel initial log-variances, `(V, 2)`. Defaults to a heuristic split of empirical variance. |
+| `n_iter` | `int` | — | `20` | Fixed Newton-scoring iteration count. Default `20` -- typically converges in 5-10 for well-conditioned data. |
+| `damping` | `float` | — | `1e-06` | Levenberg-Marquardt-style damping on the average-information matrix. Default `1e-6`; raise if Newton steps are unstable near boundaries. |
+| `block` | `Optional[int]` | — | `None` | Optional voxel-block size: cap the number of voxels whose per-Newton intermediates are live at once, bounding peak memory on brain-scale `V`. `None` (default) is a single `vmap` over all voxels (identical numerics and HLO to before). |
+| `low_rank` | `Optional[bool]` | — | `None` | Use the FaST-LMM **low-rank** decomposition: a `q x q` eig of `Z^T Z` (`O(N q^2 + q^3)`) instead of the dense `N x N` eig of `ZZ^T` (`O(N^3)`). Requires `q <= N` (the usual tall random-effect design); the `N - q` null directions enter only through per-voxel Gram aggregates, and a rank-deficient `Z` (e.g. phantom one-hot columns from gappy labels) is absorbed by that null space. **Default `None`** auto-selects: low-rank when `q < N` (the brain-scale case), dense otherwise. Pass `True` / `False` to force; the two match to the iterative tolerance. |
+
+**Returns** `REMLResult`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:reml_fit -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **11.52 ms** (median, L4).  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_REML_FIT.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| reml_fit | jax-cpu | V=1024,k=8,n=24 | `nitrix-jax` | ok | 150.62 ms / 155.65 ms | 1.290 s | 693 MB (rss) | ✓ 0.31×tol | 1.00x vs nitrix-jax |
+| reml_fit | jax-cpu | V=1024,k=8,n=24 | `statsmodels.MixedLM` | ok | 11.268 s / 11.432 s | 12.844 s | 559 MB (rss) | ✓ 0.057×tol | 74.81x vs nitrix-jax |
+| reml_fit | jax-cuda12 | V=1024,k=8,n=24 | `nitrix-jax` | ok | 11.29 ms / 11.52 ms | 2.001 s | 135.03 MB (hbm) | ✓ 0.12×tol | 1.00x vs nitrix-jax |
+| reml_fit | jax-cuda12 | V=1024,k=8,n=24 | `statsmodels.MixedLM` | skipped | — | — | — | — | — |
+| reml_fit | jax-cpu | V=256,k=8,n=24 | `nitrix-jax` | ok | 49.98 ms / 82.08 ms | 1.752 s | 674 MB (rss) | ✓ 0.29×tol | 1.00x vs nitrix-jax |
+| reml_fit | jax-cpu | V=256,k=8,n=24 | `statsmodels.MixedLM` | ok | 2.920 s / 2.925 s | 3.526 s | 558 MB (rss) | ✓ 0.055×tol | 58.41x vs nitrix-jax |
+| reml_fit | jax-cuda12 | V=256,k=8,n=24 | `nitrix-jax` | ok | 11.35 ms / 11.50 ms | 2.193 s | 151.20 MB (hbm) | ✓ 0.11×tol | 1.00x vs nitrix-jax |
+| reml_fit | jax-cuda12 | V=256,k=8,n=24 | `statsmodels.MixedLM` | skipped | — | — | — | — | — |
+| reml_fit | jax-cpu | V=64,k=8,n=24 | `nitrix-jax` | ok | 12.80 ms / 14.67 ms | 1.172 s | 673 MB (rss) | ✓ 0.16×tol | 1.00x vs nitrix-jax |
+| reml_fit | jax-cpu | V=64,k=8,n=24 | `statsmodels.MixedLM` | ok | 703.84 ms / 723.15 ms | 2.069 s | 557 MB (rss) | ✓ 0.04×tol | 55.01x vs nitrix-jax |
+| reml_fit | jax-cuda12 | V=64,k=8,n=24 | `nitrix-jax` | ok | 11.30 ms / 11.64 ms | 3.041 s | 151.05 MB (hbm) | ✓ 0.065×tol | 1.00x vs nitrix-jax |
+| reml_fit | jax-cuda12 | V=64,k=8,n=24 | `statsmodels.MixedLM` | skipped | — | — | — | — | — |
+:::
+
+*source: bench `d7e2dfb8` · nitrix `039cf43e`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:reml_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `q` | random-effect columns |
+<!-- nitrix:/gen -->

@@ -1,0 +1,58 @@
+---
+title: "hgp_fit"
+generated: true
+description: "Fit a mass-univariate hierarchical GP: a population smooth plus group-level smooth deviations sharing a kernel (the 'GS' hierarchical GAM; HSGP engine)."
+---
+
+[‹ back to `nitrix.stats.hgp`](../nitrix-stats-hgp.qmd)
+
+<!-- nitrix:gen sig:hgp_fit -->
+```python
+hgp_fit(Y: Float[Array, 'V N'], x: Float[Array, ' N'], group: Int[Array, ' N'], *, group_inner: Optional[Int[Array, ' N']] = None, parametric: Optional[Float[Array, 'N q']] = None, kernel: str = 'matern52', rank: int = 12, model: str = 'GS', boundary: float = 1.5, bounds: Optional[Tuple[float, float]] = None, rho_bounds: Optional[Tuple[float, float]] = None, n_rho: int = 24, map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]] = None, n_levels: Optional[int] = None, n_levels_inner: Optional[int] = None, n_outer: int = 30, n_search: int = 15, ridge: float = 1e-08, lam_floor: float = 1e-06, lam_ceil: float = 100000000.0, block: Optional[int] = None) -> HGPResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:hgp_fit -->
+Fit a mass-univariate hierarchical GP: a population smooth plus group-level
+smooth deviations sharing a kernel (the "GS" hierarchical GAM; HSGP engine).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:hgp_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
+| `x` | `Float` | `N` | — | `(N,)` covariate the GP smooths *over* (a single covariate, **not** the full design matrix `X`; linear covariates go to `parametric=`). |
+| `group` | `Int` | `N` | — | `(N,)` integer factor labels `0 .. L-1` (the grouping the smooth varies over -- subjects, sites, ...). For `model='nested'` this is the **outer** factor. |
+| `group_inner` | `Optional[Int[Array, ' N']]` | — | `None` | `(N,)` integer labels of the **inner** factor (nested within `group`), `0 .. L2-1` globally. Required for `model='nested'`. |
+| `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (with the intercept). |
+| `kernel` | `str` | — | `'matern52'` | HSGP basis parameters (see :func:`nitrix.stats.gp.gp_fit`); `rank` is the per-smooth eigenfunction count (default `12` -- the design is `1 + L` smooths wide, so a smaller rank than `gp_fit` is usual). |
+| `rank` | `int` | — | `12` | HSGP basis parameters (see :func:`nitrix.stats.gp.gp_fit`); `rank` is the per-smooth eigenfunction count (default `12` -- the design is `1 + L` smooths wide, so a smaller rank than `gp_fit` is usual). |
+| `model` | `str` | — | `'GS'` | Hierarchical structure. `'GS'` (default): a global smoother plus group-level smoothers with one shared group wiggliness `sigma_grp^2`. `'nested'`: a two-level hierarchy `(gp \| g1/g2)` -- population + outer-group + inner-group(nested) GP deviations, three variance components (`sigma_pop^2`, `sigma_outer^2`, `sigma_inner^2`) sharing `rho`. |
+| `boundary` | `float` | — | `1.5` | HSGP basis parameters (see :func:`nitrix.stats.gp.gp_fit`); `rank` is the per-smooth eigenfunction count (default `12` -- the design is `1 + L` smooths wide, so a smaller rank than `gp_fit` is usual). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | HSGP basis parameters (see :func:`nitrix.stats.gp.gp_fit`); `rank` is the per-smooth eigenfunction count (default `12` -- the design is `1 + L` smooths wide, so a smaller rank than `gp_fit` is usual). |
+| `rho_bounds` | `Optional[Tuple[float, float]]` | — | `None` | Shared-lengthscale search (as :func:`~nitrix.stats.gp.gp_fit`); `map_rho` is an optional `rho -> -log p(rho)` lengthscale prior (e.g. a builder from :mod:`nitrix.stats.priors`). |
+| `n_rho` | `int` | — | `24` | Shared-lengthscale search (as :func:`~nitrix.stats.gp.gp_fit`); `map_rho` is an optional `rho -> -log p(rho)` lengthscale prior (e.g. a builder from :mod:`nitrix.stats.priors`). |
+| `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Shared-lengthscale search (as :func:`~nitrix.stats.gp.gp_fit`); `map_rho` is an optional `rho -> -log p(rho)` lengthscale prior (e.g. a builder from :mod:`nitrix.stats.priors`). |
+| `n_levels` | `Optional[int]` | — | `None` | Outer / inner factor-level counts (default to `max + 1`); pass when a level is absent so the block widths are stable. |
+| `n_levels_inner` | `Optional[int]` | — | `None` | Outer / inner factor-level counts (default to `max + 1`); pass when a level is absent so the block widths are stable. |
+| `n_outer` | `int` | — | `30` | Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`). |
+| `n_search` | `int` | — | `15` | Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`). |
+| `ridge` | `float` | — | `1e-08` | Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`). |
+| `lam_floor` | `float` | — | `1e-06` | Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`). |
+| `lam_ceil` | `float` | — | `100000000.0` | Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`). |
+| `block` | `Optional[int]` | — | `None` | Fellner-Schall / solver controls (as :func:`~nitrix.stats.gp.gp_fit`). |
+
+**Returns** `HGPResult`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:hgp_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

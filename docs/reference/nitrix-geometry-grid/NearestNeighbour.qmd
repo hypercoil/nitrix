@@ -1,0 +1,58 @@
+---
+title: "NearestNeighbour"
+generated: true
+description: "Nearest-neighbour interpolation (`order=0`)."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:NearestNeighbour -->
+```python
+class NearestNeighbour
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:NearestNeighbour -->
+Nearest-neighbour interpolation (`order=0`).
+
+Each sampled value is the single voxel nearest the sample position.
+The output is restricted to values that occur in the input, so this
+is the label-preserving choice when an anti-aliased boundary is *not*
+wanted (cf. :class:`MultiLabel`).  The round-to-nearest is
+piecewise-constant in the coordinates, so the gradient w.r.t.
+coordinates is zero almost everywhere
+(`differentiable_in_coords = False`); the gather is still
+differentiable w.r.t. the image values.
+
+The rounding is `floor(coord + 0.5)` (round half up), matching
+`jax.scipy.ndimage.map_coordinates(order=0)` -- *not* round
+half-to-even.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:NearestNeighbour.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:NearestNeighbour.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:NearestNeighbour -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

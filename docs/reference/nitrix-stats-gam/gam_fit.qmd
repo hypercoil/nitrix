@@ -1,0 +1,48 @@
+---
+title: "gam_fit"
+generated: true
+description: "Fit a mass-univariate GAM: shared smooth bases, per-element responses."
+---
+
+[‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
+
+<!-- nitrix:gen sig:gam_fit -->
+```python
+gam_fit(Y: Float[Array, 'V N'], smooths: Sequence[Smooth], *, parametric: Optional[Float[Array, 'N q']] = None, intercept: bool = True, family: Union[str, Family] = GAUSSIAN, lambda_mode: Literal['per_element', 'shared'] = 'per_element', n_outer: int = 20, n_inner: int = 10, ridge: float = 1e-08, lam_floor: float = 1e-06, lam_ceil: float = 100000000.0, block: Optional[int] = None) -> GAMResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gam_fit -->
+Fit a mass-univariate GAM: shared smooth bases, per-element responses.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gam_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
+| `smooths` | `Sequence[Smooth]` | — | — | Penalised smooth bases (one per smooth term): a `SplineBasis` (`bspline_basis` / `thinplate_regression_basis` / `cyclic_cubic_basis`) or a `TensorBasis` (`tensor_product_basis`) for an anisotropic interaction. A tensor smooth carries one smoothing parameter per margin, all selected by the same Fellner-Schall loop. |
+| `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (covariates entering linearly). The intercept is added separately (see `intercept`). |
+| `intercept` | `bool` | — | `True` | Prepend an intercept column (default `True`). |
+| `family` | `Union[str, Family]` | — | `GAUSSIAN` | Exponential family (default `GAUSSIAN`). |
+| `lambda_mode` | `Literal['per_element', 'shared']` | — | `'per_element'` | `'per_element'` (default) selects a smoothing parameter per element (ModelArray parity). `'shared'` selects **one** smoothing parameter across all elements via a pooled Fellner-Schall update on sufficient statistics -- an `O(n_outer p^3)`, `V`-independent outer loop (much faster when smoothness is homogeneous across the brain). Gaussian only. |
+| `n_outer` | `int` | — | `20` | Fellner-Schall outer iterations and penalised-IRLS inner iterations. |
+| `n_inner` | `int` | — | `10` | Fellner-Schall outer iterations and penalised-IRLS inner iterations. |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser on the penalised normal equations. |
+| `lam_floor` | `float` | — | `1e-06` | Clamp on each smoothing parameter. |
+| `lam_ceil` | `float` | — | `100000000.0` | Clamp on each smoothing parameter. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory (the per-element `(V, p, p)` covariances) on brain-scale `V`. `None` (default) is a single `vmap`. |
+
+**Returns** `GAMResult`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gam_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

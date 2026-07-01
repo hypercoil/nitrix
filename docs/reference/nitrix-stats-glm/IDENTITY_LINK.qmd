@@ -1,0 +1,19 @@
+---
+title: "IDENTITY_LINK"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:IDENTITY_LINK -->
+```python
+IDENTITY_LINK = Link(name='identity', link=_identity, linkinv=_identity, mu_eta=_ones_like)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:IDENTITY_LINK -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

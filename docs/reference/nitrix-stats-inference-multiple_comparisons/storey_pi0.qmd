@@ -1,0 +1,43 @@
+---
+title: "storey_pi0"
+generated: true
+description: "Storey's estimate of the true-null proportion `pi0` (Storey 2002)."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:storey_pi0 -->
+```python
+storey_pi0(p_values: Float[Array, 'n'], *, lam: float = 0.5) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:storey_pi0 -->
+Storey's estimate of the true-null proportion `pi0` (Storey 2002).
+
+`pi0(lambda) = #{p_i > lambda} / (m (1 - lambda))`, clipped to
+`[1/m, 1]`.  The tuning `lambda in (0, 1)` (default `0.5`) trades bias
+for variance; `pi0 = 1` recovers Benjamini-Hochberg, and a smaller `pi0`
+(more alternatives present) yields a less conservative, higher-power adaptive
+FDR.  The `1/m` floor guards the degenerate "no null" estimate.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:storey_pi0 -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `lam` | `float` | — | `0.5` | — |
+
+**Returns** `Float` — shape —.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:storey_pi0 -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

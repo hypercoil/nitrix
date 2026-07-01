@@ -1,0 +1,35 @@
+---
+title: "PermResult"
+generated: true
+description: "Permutation-test output (all maps in the input spatial shape)."
+---
+
+[‹ back to `nitrix.stats.inference.randomise`](../nitrix-stats-inference-randomise.qmd)
+
+<!-- nitrix:gen sig:PermResult -->
+```python
+class PermResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:PermResult -->
+Permutation-test output (all maps in the input spatial shape).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:PermResult.__init__ -->
+```python
+__init__(stat: Float[Array, '*spatial'], enhanced: Float[Array, '*spatial'], p_fwe: Float[Array, '*spatial'], p_uncorrected: Float[Array, '*spatial'], null_max: Float[Array, 'n_perm']) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:PermResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `n_perm` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

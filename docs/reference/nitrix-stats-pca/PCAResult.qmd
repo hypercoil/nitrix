@@ -1,0 +1,18 @@
+---
+title: "PCAResult"
+generated: true
+description: "Fitted PCA basis (a NamedTuple of arrays, not a module)."
+---
+
+[‹ back to `nitrix.stats.pca`](../nitrix-stats-pca.qmd)
+
+<!-- nitrix:gen sig:PCAResult -->
+```python
+class PCAResult(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:PCAResult -->
+Fitted PCA basis (a NamedTuple of arrays, not a module).
+<!-- nitrix:/gen -->
+

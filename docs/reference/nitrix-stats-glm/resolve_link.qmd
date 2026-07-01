@@ -1,0 +1,33 @@
+---
+title: "resolve_link"
+generated: true
+description: "Resolve a `str` name or a :class:`Link` instance to a :class:`Link`."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:resolve_link -->
+```python
+resolve_link(link: Union[str, Link]) -> Link
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:resolve_link -->
+Resolve a `str` name or a :class:`Link` instance to a :class:`Link`.
+
+Built-ins: `'identity'` / `'log'` / `'logit'` / `'probit'` /
+`'cloglog'` / `'sqrt'` / `'inverse'`; or pass a :class:`Link` directly.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:resolve_link -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `link` | `Union[str, Link]` | — | — | — |
+
+**Returns** `Link`.
+<!-- nitrix:/gen -->
+

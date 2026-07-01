@@ -1,0 +1,43 @@
+---
+title: "sign_flips"
+generated: true
+description: "`(n_perm, n)` matrix of `+/-1` sign flips (row 0 = identity)."
+---
+
+[‹ back to `nitrix.stats.inference.permutation`](../nitrix-stats-inference-permutation.qmd)
+
+<!-- nitrix:gen sig:sign_flips -->
+```python
+sign_flips(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']] = None) -> Float[Array, 'n_perm N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sign_flips -->
+`(n_perm, n)` matrix of `+/-1` sign flips (row 0 = identity).
+
+Without `blocks` each observation flips independently; with `blocks`
+every observation in a block shares the block's sign (whole-block flip).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sign_flips -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `n` | `int` | — | — | — |
+| `n_perm` | `int` | — | — | — |
+| `key` | `Array` | — | — | — |
+| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | — |
+
+**Returns** `Float` — shape `n_perm` × `N`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sign_flips -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_perm` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

@@ -1,0 +1,44 @@
+---
+title: "fdr"
+generated: true
+description: "Unified false-discovery-rate correction."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:fdr -->
+```python
+fdr(p_values: Float[Array, 'n'], *, method: FDRMethod = 'bh', alpha: float = 0.05, lam: float = 0.5) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:fdr -->
+Unified false-discovery-rate correction.
+
+`method`: `'bh'` (default -- Benjamini-Hochberg, valid under independence
+/ PRDS), `'by'` (Benjamini-Yekutieli, valid under arbitrary dependence), or
+`'storey'` (pi0-adaptive, higher power; `lam` tunes the `pi0` estimate).
+Returns `(rejected, p_adjusted)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:fdr -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `method` | `FDRMethod` | — | `'bh'` | — |
+| `alpha` | `float` | — | `0.05` | — |
+| `lam` | `float` | — | `0.5` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:fdr -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

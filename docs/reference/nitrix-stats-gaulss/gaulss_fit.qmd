@@ -1,0 +1,47 @@
+---
+title: "gaulss_fit"
+generated: true
+description: "Mass-univariate Gaussian location-scale regression (`gaulss`)."
+---
+
+[‹ back to `nitrix.stats.gaulss`](../nitrix-stats-gaulss.qmd)
+
+<!-- nitrix:gen sig:gaulss_fit -->
+```python
+gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Optional[Float[Array, 'N q']] = None, n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> GauLSSResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaulss_fit -->
+Mass-univariate Gaussian location-scale regression (`gaulss`).
+
+Fits, per element, `y_v ~ N(mu, sigma^2)` with `mu = X beta_mu` and
+`log sigma = Z beta_scale` -- modelling heteroscedasticity directly -- by
+joint Fisher scoring.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaulss_fit -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (shared; carries its own intercept). |
+| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` log-scale design `Z` (shared). Defaults to an intercept-only column -- a constant variance (the homoscedastic Gaussian, recovering OLS for the mean); pass a design to model the variance. |
+| `n_iter` | `int` | — | `50` | Fisher-scoring iterations (default `50`). |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser on the normal equations. |
+| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
+
+**Returns** `GauLSSResult`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaulss_fit -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->
