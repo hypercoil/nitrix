@@ -17,11 +17,12 @@ negbinomial(alpha: float = 1.0) -> Family
 <!-- nitrix:gen overview:negbinomial -->
 A negative-binomial (NB2) family with **known** dispersion `alpha`.
 
-NB2 parameterisation: $V(\mu) = \mu + \alpha * \mu^2$ (overdispersed counts),
-log link.  `alpha` is fixed at construction -- with it known, NB2 is a
-proper one-parameter family (GLM dispersion 1), so the shared IRLS core fits
-it directly.  Jointly *estimating* `alpha` (the profile-MLE outer loop) is
-a documented follow-up.  `alpha -> 0` recovers Poisson.
+NB2 parameterisation: variance $V(\mu) = \mu + \alpha \mu^2$
+(overdispersed counts), log link.  `alpha` is fixed at construction --
+with it known, NB2 is a proper one-parameter family (GLM dispersion 1), so
+the shared IRLS core fits it directly.  Jointly *estimating* `alpha` (the
+profile-MLE outer loop) is a follow-up.  The limit
+$\alpha \to 0$ recovers the Poisson family.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:negbinomial -->
@@ -29,8 +30,8 @@ a documented follow-up.  `alpha -> 0` recovers Poisson.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `alpha` | `float` | — | `1.0` | — |
+| `alpha` | `float` | — | `1.0` | The known NB2 dispersion $\alpha$, entering the variance as $\mu + \alpha \mu^2$. Must be strictly positive. |
 
-**Returns** `Family`.
+**Returns** `Family`. A negative-binomial family with the given fixed dispersion and a log link.
 <!-- nitrix:/gen -->
 

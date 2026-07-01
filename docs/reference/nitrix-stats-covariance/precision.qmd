@@ -14,6 +14,14 @@ precision(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **kwa
 
 <!-- nitrix:gen overview:precision -->
 Inverse covariance (precision) matrix.
+
+Estimates the covariance via `cov`, then inverts it.  Both
+inversion routes go through the robust `safe_*` linear-algebra
+wrappers (with an adaptive CPU fallback on GPU stacks where the
+vendor solver is broken) rather than a raw `jnp.linalg.inv` /
+`jnp.linalg.pinv`.  For the per-element / sparse-precision route
+see `glasso`; this function is
+the dense, once-per-matrix estimator.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:precision -->
@@ -21,11 +29,11 @@ Inverse covariance (precision) matrix.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | See `cov`. |
-| `require_nonsingular` | `bool` | — | `True` | `True` (default) -- a dense inverse (fails on singular sigma). `False` -- the symmetric Moore-Penrose pseudoinverse (eigen-truncated). Pass `l2 > 0` to `kwargs` to regularise rather than rely on the pseudoinverse for rank-deficient cases. |
+| `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor; see `cov`. |
+| `require_nonsingular` | `bool` | — | `True` | If `True` (default), use a dense matrix inverse, which fails on a singular covariance. If `False`, use the symmetric eigen-truncated Moore-Penrose pseudoinverse. Pass `l2 > 0` via `kwargs` to regularise rather than rely on the pseudoinverse for rank-deficient cases. |
 | `**kwargs` | `Any` | — | `{}` | — |
 
-**Returns** `Num` — shape `...` × `c` × `c`.
+**Returns** `Num` — shape `...` × `c` × `c`. Precision (inverse covariance) matrix, `(..., c, c)`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:precision -->

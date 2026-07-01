@@ -2,7 +2,7 @@
 title: "nitrix.stats.betareg"
 generated: true
 signature-hash: e1bbec463cd8d264
-description: "Beta regression for proportions in `(0, 1)` (v3 §4)."
+description: "Beta regression for proportions in $(0, 1)$."
 listing:
   id: nitrix-stats-betareg-symbols
   contents: "nitrix-stats-betareg/*.qmd"
@@ -19,35 +19,53 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 :::
 
 <!-- nitrix:gen overview:__module__ -->
-Beta regression for proportions in `(0, 1)` (v3 §4).
+Beta regression for proportions in $(0, 1)$.
 
 Bounded continuous responses -- tissue fractions, fMRI fractional occupancy,
-any proportion -- are modelled as `y ~ Beta(mu phi, (1 - mu) phi)` with mean
-$\mu = logit^{-1}(X \beta)$ and a **precision** `phi` (larger `phi` = less
-dispersion).  This is *not* a standard exponential-family GLM: the score is
-**digamma**-based, not the $\mu_\eta^2 / V$ IRLS weight, and the precision is a
-second parameter estimated jointly with the mean -- so it gets its own fitter
-rather than slotting into the `Family` / `glm_fit`
-core.
+any proportion -- are modelled as
+$y \sim \operatorname{Beta}(\mu\phi,\, (1 - \mu)\phi)$ with mean
+$\mu = \operatorname{logit}^{-1}(X\beta)$ and a **precision**
+$\phi$ (larger $\phi$ = less dispersion).  This is *not* a
+standard exponential-family GLM: the score is **digamma**-based, not the
+$\mu_\eta^2 / V$ IRLS weight, and the precision is a second parameter
+estimated jointly with the mean -- so it gets its own fitter rather than
+slotting into a standard GLM core.
 
-Estimator (Ferrari & Cribari-Neto 2004).  Fisher scoring alternates a
-reweighted-least-squares step for `beta` and a Newton step for `log phi`,
-to a fixed iteration budget (`vmap`-clean over voxels):
+The estimator is the Ferrari & Cribari-Neto Fisher-scoring scheme, which
+alternates a reweighted-least-squares step for $\beta$ and a Newton step
+for $\log\phi$, to a fixed iteration budget (`vmap`-clean over
+voxels):
 
-    y*   = logit(y),   mu*  = psi(mu phi) - psi((1 - mu) phi)
-    nu   = psi'(mu phi) + psi'((1 - mu) phi)          # trigamma sum
-    W    = diag(phi^2 (dmu/deta)^2 nu),   z = eta + (y* - mu*) / (phi (dmu/deta) nu)
-    beta <- (X^T W X)^{-1} X^T W z
+$$
+\begin{aligned}
+y^{*} &= \operatorname{logit}(y), \quad
+\mu^{*} = \psi(\mu\phi) - \psi((1 - \mu)\phi) \\
+\nu &= \psi'(\mu\phi) + \psi'((1 - \mu)\phi) \\
+W &= \operatorname{diag}\!\left(\phi^2
+    (\mathrm{d}\mu / \mathrm{d}\eta)^2 \nu\right), \quad
+z = \eta + \frac{y^{*} - \mu^{*}}
+    {\phi \, (\mathrm{d}\mu / \mathrm{d}\eta) \, \nu} \\
+\beta &\leftarrow (X^{\top} W X)^{-1} X^{\top} W z
+\end{aligned}
+$$
 
 with the precision score / information
 
-    U_phi = sum mu(y* - mu*) + log(1 - y) - psi((1-mu)phi) + psi(phi)
-    K_phi = sum mu^2 psi'(mu phi) + (1-mu)^2 psi'((1-mu)phi) - psi'(phi),
+$$
+\begin{aligned}
+U_\phi &= \sum \mu(y^{*} - \mu^{*}) + \log(1 - y)
+    - \psi((1 - \mu)\phi) + \psi(\phi) \\
+K_\phi &= \sum \mu^2 \psi'(\mu\phi)
+    + (1 - \mu)^2 \psi'((1 - \mu)\phi) - \psi'(\phi),
+\end{aligned}
+$$
 
-stepped as `log phi <- log phi + U_phi / (phi K_phi)`.  The fixed-effect
-covariance is the `beta` block of the **joint** `(beta, phi)` Fisher
-information inverse (so standard errors account for estimating `phi`).  Every
-solve is the cuSOLVER-free `small_inv_logdet`; `digamma` / `polygamma` are
+stepped as
+$\log\phi \leftarrow \log\phi + U_\phi / (\phi K_\phi)$.  The
+fixed-effect covariance is the $\beta$ block of the **joint**
+$(\beta, \phi)$ Fisher information inverse (so standard errors account
+for estimating $\phi$).  Every solve is a cuSOLVER-free small dense
+inverse; $\psi$ (digamma) and its derivatives (polygamma) come from
 `jax.scipy.special`.
 <!-- nitrix:/gen -->
 

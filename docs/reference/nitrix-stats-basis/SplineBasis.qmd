@@ -30,9 +30,12 @@ penalty_blocks() -> list
 ```
 <!-- nitrix:/gen -->
 
-Penalty blocks `[(S, eig)]` (audit D8): the `(k, k)` roughness
-penalty and its eigenvalues, the unpenalised null space floored to
-zero.  `eig` drives only the basis-invariant $\operatorname{tr}(S_\lambda^+ S_k)$.
+Return the single roughness-penalty block of this spline smooth.
+
+The block is the `(k, k)` roughness penalty and its eigenvalues, with
+the unpenalised null space floored to zero.  The eigenvalues drive only
+the basis-invariant trace $\operatorname{tr}(S_\lambda^{+} S_k)$
+used to select the smoothing parameter.
 
 <!-- nitrix:gen sig:SplineBasis.eval_design -->
 ```python
@@ -40,7 +43,7 @@ eval_design(x: Float[Array, ' g']) -> Float[Array, 'g k']
 ```
 <!-- nitrix:/gen -->
 
-Re-evaluate the spline design on a covariate grid `x` (audit D8).
+Re-evaluate the spline design on a covariate grid.
 
 <!-- nitrix:gen sig:SplineBasis.tree_flatten -->
 ```python

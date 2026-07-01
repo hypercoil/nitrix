@@ -1,43 +1,53 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Block-Woodbury REML for a single grouping factor with a correlated random
-effect (v3 §1.1, tier R2).
+effect.
 
-``reml_fit`` (tier R1) is the FaST-LMM path for one *scalar* random effect
-``(1 | g)``: a single rotation diagonalises ``V`` and the per-voxel work is
-``O(N)``.  That trick does **not** extend to a correlated ``(1 + x | g)`` (an
-``r x r`` unstructured within-group covariance ``G``) -- but for a *single*
-grouping factor ``V`` is still **block-diagonal across groups**, so a per-group
-Woodbury keeps the heavy algebra at the ``r x r`` (``r <= 3``) and ``(p, p)``
-scale.  This is the tier-R2 solver the dispatcher (``lme_fit``) routes a
-correlated / diagonal random slope onto; it never forms an ``N x N`` matrix and
-is cuSOLVER-free (every solve is a tiny ``small_inv_logdet``).
+The FaST-LMM path is the fastest route for one *scalar* random effect
+``(1 | g)``: a single rotation diagonalises :math:`V` and the per-voxel work is
+:math:`O(N)`.  That trick does **not** extend to a correlated ``(1 + x | g)``
+(an :math:`r \times r` unstructured within-group covariance :math:`G`) -- but
+for a *single* grouping factor :math:`V` is still **block-diagonal across
+groups**, so a per-group Woodbury identity keeps the heavy algebra at the
+:math:`r \times r` (:math:`r \leq 3`) and :math:`(p, p)` scale.  This is the
+solver the dispatcher routes a correlated or diagonal random slope onto; it
+never forms an :math:`N \times N` matrix and avoids cuSOLVER entirely (every
+solve is a tiny :func:`~nitrix.linalg._smalllinalg.small_inv_logdet`).
 
-The model, per voxel, with ``M`` groups (group ``i`` has ``n_i`` rows, its
-random covariates ``Z_i`` are ``(n_i, r)`` -- e.g. ``[1, x]`` for ``(1 + x)``)::
+The model, per voxel, with :math:`M` groups (group :math:`i` has :math:`n_i`
+rows, and its random covariates :math:`Z_i` are :math:`(n_i, r)` -- e.g.
+``[1, x]`` for ``(1 + x)``) is
 
-    V = blockdiag_i ( sigma_e^2 I_{n_i} + Z_i G Z_i^T ),   b_i ~ N(0, G)
+.. math::
 
-Per-group Woodbury with ``K_i = sigma_e^2 G^{-1} + Z_i^T Z_i`` (``r x r``)::
+    V = \operatorname{blockdiag}_i (\sigma_e^2 I_{n_i} + Z_i G Z_i^{\top}),
+    \quad b_i \sim N(0, G).
 
-    X_i^T V_i^{-1} X_i = sigma_e^{-2} (X_i^T X_i - (X_i^T Z_i) K_i^{-1} (Z_i^T X_i))
-    log|V_i|           = (n_i - r) log sigma_e^2 + log|G| + log|K_i|
+The per-group Woodbury identity with :math:`K_i = \sigma_e^2 G^{-1} +
+Z_i^{\top} Z_i` (:math:`r \times r`) gives
+
+.. math::
+
+    X_i^{\top} V_i^{-1} X_i &= \sigma_e^{-2}
+        (X_i^{\top} X_i - (X_i^{\top} Z_i) K_i^{-1} (Z_i^{\top} X_i)) \\
+    \log|V_i| &= (n_i - r) \log \sigma_e^2 + \log|G| + \log|K_i|,
 
 so the whole REML objective is assembled from per-group Gram reductions
-(``Z_i^T Z_i``, ``X_i^T Z_i``, ``X_i^T X_i`` -- shared across voxels; ``Z_i^T
-y_i``, ``X_i^T y_i``, ``y_i^T y_i`` -- per voxel) and the ``(p, p)`` fixed-effect
-solve.  ``G`` is carried in **log-Cholesky** coordinates (``G = L L^T``, ``log``
-diagonal) so it stays positive-definite under an unconstrained Newton step.
+(:math:`Z_i^{\top} Z_i`, :math:`X_i^{\top} Z_i`, :math:`X_i^{\top} X_i` --
+shared across voxels; :math:`Z_i^{\top} y_i`, :math:`X_i^{\top} y_i`,
+:math:`y_i^{\top} y_i` -- per voxel) and the :math:`(p, p)` fixed-effect solve.
+:math:`G` is carried in **log-Cholesky** coordinates (:math:`G = L L^{\top}`,
+log diagonal) so it stays positive-definite under an unconstrained Newton step.
 
-The per-voxel Newton uses the shared ``_optimise.damped_newton`` through its
-**analytic-curvature** fork (``bw_score_and_ai``): the closed-form REML score and
-the *average-information* (Gilmour-Thompson-Cullis) curvature, both assembled
-from the same per-group Woodbury quantities -- no autodiff Hessian.  The AI is
-PSD, so ``step='damped'`` is correct (unlike the raw autodiff Hessian, which is
-indefinite away from the optimum and needs the saddle-free guard) and the fit
-converges in ~8-10 iterations, like the dense ``_varcomp`` R1.
+The per-voxel Newton iteration uses the shared damped-Newton optimiser through
+its **analytic-curvature** fork (:func:`bw_score_and_ai`): the closed-form REML
+score and the *average-information* (Gilmour-Thompson-Cullis) curvature, both
+assembled from the same per-group Woodbury quantities -- no autodiff Hessian.
+The average information is positive semi-definite, so a damped step is correct
+(unlike the raw autodiff Hessian, which is indefinite away from the optimum and
+needs a saddle-free guard) and the fit converges in roughly 8-10 iterations.
 """
 
 from __future__ import annotations
@@ -72,25 +82,74 @@ def bw_score_and_ai(
     ridge: float,
     diagonal: bool,
 ) -> Tuple[Float[Array, 'nt'], Float[Array, 'nt nt']]:
-    """Analytic REML **score** and **average-information** curvature at ``theta``.
+    r"""Analytic REML score and average-information curvature at ``theta``.
 
     The closed-form alternative to autodiffing the profile-REML objective -- the
-    analytic-curvature fork of ``_optimise.damped_newton``.  All quantities are
-    per-group ``r x r`` / ``p x p`` reductions built from the Woodbury inverse
-    ``V_i^{-1} = sigma_e^{-2}(I - Z_i M_i Z_i^T)``, ``M_i = (sigma_e^2 G^{-1} +
-    Z_i^T Z_i)^{-1}`` -- no ``N x N`` factor, cuSOLVER-free.  ``theta = [chol(G)
-    params, log sigma_e^2]``; the chain rule through the log-Cholesky / log-scale
-    parameterisation enters via ``dG/dtheta_k`` (a tiny forward-mode jacobian of
-    ``cp -> L L^T`` -- *not* the objective Hessian).
+    analytic-curvature fork consumed by the damped-Newton optimiser.  All
+    quantities are per-group :math:`r \times r` / :math:`p \times p` reductions
+    built from the Woodbury inverse :math:`V_i^{-1} = \sigma_e^{-2}
+    (I - Z_i M_i Z_i^{\top})`, with :math:`M_i = (\sigma_e^2 G^{-1} +
+    Z_i^{\top} Z_i)^{-1}` -- no :math:`N \times N` factor, and no cuSOLVER.  The
+    parameter vector is :math:`\theta = [\operatorname{chol}(G)\ \text{params},
+    \log \sigma_e^2]`; the chain rule through the log-Cholesky / log-scale
+    parameterisation enters via :math:`dG/d\theta_k` (a tiny forward-mode
+    Jacobian of the map :math:`cp \mapsto L L^{\top}` -- *not* the objective
+    Hessian).
 
     The score is
 
-        s_k = 0.5 [ tr(P V_k) - (Py)^T V_k (Py) ],   V_k = dV/dtheta_k
+    .. math::
 
-    (matches ``jax.grad`` of the objective to ~1e-9); the average information is
-    ``AI_{kl} = 0.5 u_k^T P u_l``, ``u_k = V_k Py`` -- the PSD Gilmour-Thompson-
-    Cullis curvature, so ``damped_newton(..., step='damped')`` is correct (no
-    saddle-free guard needed) and converges fast.  Returns ``(score, AI)``.
+        s_k = \tfrac{1}{2}
+            [\operatorname{tr}(P V_k) - (Py)^{\top} V_k (Py)],
+        \quad V_k = dV/d\theta_k,
+
+    which matches the automatic gradient of the objective to about
+    :math:`10^{-9}`; the average information is :math:`AI_{kl} =
+    \tfrac{1}{2} u_k^{\top} P u_l` with :math:`u_k = V_k Py` -- the positive
+    semi-definite Gilmour-Thompson-Cullis curvature, so a damped Newton step is
+    correct (no saddle-free guard needed) and converges fast.
+
+    Parameters
+    ----------
+    theta : Float[Array, 'nt']
+        Unconstrained parameter vector :math:`[\operatorname{chol}(G)\
+        \text{params}, \log \sigma_e^2]`, of length ``nt``.
+    ztz : Float[Array, 'M r r']
+        Per-group random-covariate Gram matrices :math:`Z_i^{\top} Z_i`.
+    xtz : Float[Array, 'M p r']
+        Per-group cross-Gram matrices :math:`X_i^{\top} Z_i`.
+    xtx : Float[Array, 'p p']
+        Total fixed-effect Gram matrix :math:`X^{\top} X`.
+    xtx_g : Float[Array, 'M p p']
+        Per-group fixed-effect Gram matrices :math:`X_i^{\top} X_i`.
+    zty : Float[Array, 'M r']
+        Per-group random-covariate moments :math:`Z_i^{\top} y_i` for this
+        voxel.
+    xty_g : Float[Array, 'M p']
+        Per-group fixed-effect moments :math:`X_i^{\top} y_i` for this voxel.
+    yty_g : Float[Array, 'M']
+        Per-group response sums of squares :math:`y_i^{\top} y_i` for this
+        voxel.
+    nvec : Float[Array, 'M']
+        Group sizes :math:`n_i`.
+    r : int
+        Number of random-effect covariates (columns of :math:`Z`).
+    p : int
+        Number of fixed-effect covariates (columns of :math:`X`).
+    ridge : float
+        Ridge added to the diagonal of the :math:`(p, p)` fixed-effect matrix
+        before inversion, for numerical stability.
+    diagonal : bool
+        If ``True``, :math:`G` is constrained to be diagonal (uncorrelated
+        random slopes); otherwise it is unstructured.
+
+    Returns
+    -------
+    score : Float[Array, 'nt']
+        The REML score (gradient of the profile objective) at ``theta``.
+    ai : Float[Array, 'nt nt']
+        The average-information curvature matrix at ``theta``.
     """
     se2 = jnp.exp(theta[-1])
     chol = theta[:-1]
@@ -217,26 +276,77 @@ def bw_inference(
     diagonal: bool,
     damping: float,
 ) -> Tuple[Float[Array, 'p p'], Float[Array, 'nt nt'], Float[Array, 'nt p p']]:
-    """Fixed-effect contrast inference at the converged ``theta`` (audit D3-R2).
+    r"""Fixed-effect contrast inference at the converged ``theta``.
 
-    The block-Woodbury analogue of ``_varcomp.varcomp_inference`` -- the three
-    contrast-independent tensors the Satterthwaite / Kenward-Roger denominator-df
-    machinery in ``lme_t_contrast`` / ``lme_f_contrast`` consumes:
+    The block-Woodbury analogue of the dense variance-component inference
+    routine -- the three contrast-independent tensors the Satterthwaite /
+    Kenward-Roger denominator-df machinery for :math:`t` and :math:`F`
+    contrasts consumes:
 
-    - ``fixed_cov = (X^T V^{-1} X)^{-1}`` -- ``Cov(beta_hat)`` (the Woodbury
-      ``a_inv``).
-    - ``theta_cov = (AI + damping I)^{-1}`` -- ``Cov(theta_hat)``, from the same
-      average-information ``bw_score_and_ai`` already forms (so identical to the
-      curvature the fit converged on).
-    - ``grad_m[k] = M_k = X^T V^{-1} (dV/dtheta_k) V^{-1} X`` -- with
-      ``dV_g/dtheta_k = Z_g (dG/dtheta_k) Z_g^T`` for the ``G`` (Cholesky)
-      parameters, so ``M_k = sum_g C_g (dG/dtheta_k) C_g^T`` with ``C_g = X_g^T
-      V_g^{-1} Z_g``; and ``dV/d(log sigma_e^2) = sigma_e^2 I``, so the residual
-      coordinate is ``M_last = sigma_e^2 (X^T V^{-2} X)``.
+    - ``fixed_cov`` :math:`= (X^{\top} V^{-1} X)^{-1}`, the estimated
+      :math:`\operatorname{Cov}(\hat{\beta})` (the Woodbury ``a_inv``).
+    - ``theta_cov`` :math:`= (AI + \text{damping}\, I)^{-1}`, the estimated
+      :math:`\operatorname{Cov}(\hat{\theta})`, from the same average
+      information :func:`bw_score_and_ai` forms (so identical to the curvature
+      the fit converged on).
+    - ``grad_m[k]`` :math:`= M_k = X^{\top} V^{-1} (dV/d\theta_k) V^{-1} X` --
+      with :math:`dV_g/d\theta_k = Z_g (dG/d\theta_k) Z_g^{\top}` for the
+      :math:`G` (Cholesky) parameters, so :math:`M_k = \sum_g C_g
+      (dG/d\theta_k) C_g^{\top}` with :math:`C_g = X_g^{\top} V_g^{-1} Z_g`;
+      and :math:`dV/d(\log \sigma_e^2) = \sigma_e^2 I`, so the residual
+      coordinate is :math:`M_{\text{last}} = \sigma_e^2 (X^{\top} V^{-2} X)`.
 
     Runs **once** per voxel after the fit (not in the Newton loop), so it
     recomputes the per-group Woodbury pieces it needs rather than threading them
     out of the hot path.
+
+    Parameters
+    ----------
+    theta : Float[Array, 'nt']
+        Converged parameter vector :math:`[\operatorname{chol}(G)\
+        \text{params}, \log \sigma_e^2]`.
+    ztz : Float[Array, 'M r r']
+        Per-group random-covariate Gram matrices :math:`Z_i^{\top} Z_i`.
+    xtz : Float[Array, 'M p r']
+        Per-group cross-Gram matrices :math:`X_i^{\top} Z_i`.
+    xtx : Float[Array, 'p p']
+        Total fixed-effect Gram matrix :math:`X^{\top} X`.
+    xtx_g : Float[Array, 'M p p']
+        Per-group fixed-effect Gram matrices :math:`X_i^{\top} X_i`.
+    zty : Float[Array, 'M r']
+        Per-group random-covariate moments :math:`Z_i^{\top} y_i` for this
+        voxel.
+    xty_g : Float[Array, 'M p']
+        Per-group fixed-effect moments :math:`X_i^{\top} y_i` for this voxel.
+    yty_g : Float[Array, 'M']
+        Per-group response sums of squares :math:`y_i^{\top} y_i` for this
+        voxel.
+    nvec : Float[Array, 'M']
+        Group sizes :math:`n_i`.
+    r : int
+        Number of random-effect covariates (columns of :math:`Z`).
+    p : int
+        Number of fixed-effect covariates (columns of :math:`X`).
+    ridge : float
+        Ridge added to the diagonal of the :math:`(p, p)` fixed-effect matrix
+        before inversion.
+    diagonal : bool
+        If ``True``, :math:`G` is constrained to be diagonal; otherwise it is
+        unstructured.
+    damping : float
+        Ridge added to the diagonal of the average information before inverting
+        it to form ``theta_cov``.
+
+    Returns
+    -------
+    fixed_cov : Float[Array, 'p p']
+        The fixed-effect covariance :math:`(X^{\top} V^{-1} X)^{-1}`.
+    theta_cov : Float[Array, 'nt nt']
+        The variance-component covariance :math:`(AI + \text{damping}\,
+        I)^{-1}`.
+    grad_m : Float[Array, 'nt p p']
+        The stacked matrices :math:`M_k = X^{\top} V^{-1} (dV/d\theta_k)
+        V^{-1} X`, one :math:`(p, p)` slice per variance-component coordinate.
     """
     # theta_cov from the same average information the fit used.
     _, ai = bw_score_and_ai(
@@ -312,14 +422,41 @@ def group_grams(
     Float[Array, 'M'],
     int,
 ]:
-    """Per-group Gram reductions shared across voxels (data-independent of ``y``).
+    r"""Per-group Gram reductions shared across voxels (independent of ``y``).
 
-    Returns ``(ztz, xtz, xtx, xtx_g, nvec, n_minus_Mr)`` with ``ztz[i] = Z_i^T
-    Z_i`` (``M, r, r``), ``xtz[i] = X_i^T Z_i`` (``M, p, r``), ``xtx = X^T X``
-    (``p, p``), the **per-group** ``xtx_g[i] = X_i^T X_i`` (``M, p, p``) and group
-    sizes ``nvec`` (``M``) -- the extra reductions the analytic AI-REML
-    derivatives need -- and the scalar ``N - M r`` (the residual multiplicity in
-    ``log|V|``).
+    Reduces the fixed-effect design :math:`X`, the random-effect design
+    :math:`Z`, and the group labels into the per-group second-moment matrices
+    that every per-voxel fit reuses.  Because these depend only on the design
+    and not on any response, they are computed once and broadcast across all
+    voxels.
+
+    Parameters
+    ----------
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix, ``N`` observations by ``p`` covariates.
+    Z : Float[Array, 'N r']
+        Random-effect design matrix, ``N`` observations by ``r`` covariates.
+    group : Int[Array, 'N']
+        Group label in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of groups :math:`M`.
+
+    Returns
+    -------
+    ztz : Float[Array, 'M r r']
+        Per-group random-covariate Gram matrices :math:`Z_i^{\top} Z_i`.
+    xtz : Float[Array, 'M p r']
+        Per-group cross-Gram matrices :math:`X_i^{\top} Z_i`.
+    xtx : Float[Array, 'p p']
+        Total fixed-effect Gram matrix :math:`X^{\top} X`.
+    xtx_g : Float[Array, 'M p p']
+        Per-group fixed-effect Gram matrices :math:`X_i^{\top} X_i` -- the
+        extra reductions the analytic average-information REML derivatives need.
+    nvec : Float[Array, 'M']
+        Group sizes :math:`n_i`.
+    n_minus_mr : int
+        The scalar :math:`N - M r`, the residual multiplicity that appears in
+        :math:`\log|V|`.
     """
     r = Z.shape[-1]
     zz = Z[:, :, None] * Z[:, None, :]  # (N, r, r)
@@ -350,7 +487,51 @@ def _nll_and_beta(
     ridge: float,
     diagonal: bool,
 ) -> Tuple[Float[Array, ''], Float[Array, 'p']]:
-    """Profile REML negative log-likelihood (and ``beta_hat``) at ``theta``."""
+    r"""Profile REML negative log-likelihood and ``beta_hat`` at ``theta``.
+
+    Assembles the per-group Woodbury pieces from the shared Gram reductions and
+    the per-voxel response moments, then forms the profile-REML objective
+    (with the fixed effects profiled out) together with the corresponding
+    generalised-least-squares estimate of the fixed effects.
+
+    Parameters
+    ----------
+    theta : Float[Array, 'nt']
+        Parameter vector :math:`[\operatorname{chol}(G)\ \text{params},
+        \log \sigma_e^2]`.
+    ztz : Float[Array, 'M r r']
+        Per-group random-covariate Gram matrices :math:`Z_i^{\top} Z_i`.
+    xtz : Float[Array, 'M p r']
+        Per-group cross-Gram matrices :math:`X_i^{\top} Z_i`.
+    xtx : Float[Array, 'p p']
+        Total fixed-effect Gram matrix :math:`X^{\top} X`.
+    zty : Float[Array, 'M r']
+        Per-group random-covariate moments :math:`Z_i^{\top} y_i`.
+    xty : Float[Array, 'p']
+        Total fixed-effect moment :math:`X^{\top} y`.
+    yty : Float[Array, '']
+        Total response sum of squares :math:`y^{\top} y`.
+    n_minus_mr : int
+        The residual multiplicity :math:`N - M r`.
+    r : int
+        Number of random-effect covariates.
+    p : int
+        Number of fixed-effect covariates.
+    ridge : float
+        Ridge added to the diagonal of the :math:`(p, p)` fixed-effect matrix
+        before inversion.
+    diagonal : bool
+        If ``True``, :math:`G` is constrained to be diagonal; otherwise it is
+        unstructured.
+
+    Returns
+    -------
+    nll : Float[Array, '']
+        The profile REML negative log-likelihood at ``theta``.
+    beta : Float[Array, 'p']
+        The generalised-least-squares fixed-effect estimate :math:`\hat{\beta}`
+        at ``theta``.
+    """
     se2 = jnp.exp(theta[-1])
     L = _build_chol(theta[:-1], r, diagonal)
     g_cov = L @ L.T
@@ -394,10 +575,60 @@ def _fit_one(
     spec: VarCompSpec,
     diagonal: bool,
 ) -> Tuple[Float[Array, 'nt'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel block-Woodbury REML fit via the shared optimiser's
-    **analytic-curvature** fork (``bw_score_and_ai``: closed-form score +
-    average-information, ``step='damped'`` -- the AI is PSD, so no saddle-free
-    guard is needed and convergence is fast, like the dense ``_varcomp`` R1)."""
+    r"""Single-voxel block-Woodbury REML fit via the analytic-curvature Newton.
+
+    Drives the shared damped-Newton optimiser on the profile-REML objective,
+    supplying the closed-form score and average-information curvature from
+    :func:`bw_score_and_ai` rather than an autodiff Hessian.  Because the
+    average information is positive semi-definite, a damped step is correct (no
+    saddle-free guard is needed) and convergence is fast.
+
+    Parameters
+    ----------
+    zty : Float[Array, 'M r']
+        Per-group random-covariate moments :math:`Z_i^{\top} y_i`.
+    xty : Float[Array, 'p']
+        Total fixed-effect moment :math:`X^{\top} y`.
+    yty : Float[Array, '']
+        Total response sum of squares :math:`y^{\top} y`.
+    xty_g : Float[Array, 'M p']
+        Per-group fixed-effect moments :math:`X_i^{\top} y_i`.
+    yty_g : Float[Array, 'M']
+        Per-group response sums of squares :math:`y_i^{\top} y_i`.
+    theta_init : Float[Array, 'nt']
+        Initial parameter vector for the Newton iteration.
+    ztz : Float[Array, 'M r r']
+        Per-group random-covariate Gram matrices :math:`Z_i^{\top} Z_i`.
+    xtz : Float[Array, 'M p r']
+        Per-group cross-Gram matrices :math:`X_i^{\top} Z_i`.
+    xtx : Float[Array, 'p p']
+        Total fixed-effect Gram matrix :math:`X^{\top} X`.
+    xtx_g : Float[Array, 'M p p']
+        Per-group fixed-effect Gram matrices :math:`X_i^{\top} X_i`.
+    nvec : Float[Array, 'M']
+        Group sizes :math:`n_i`.
+    n_minus_mr : int
+        The residual multiplicity :math:`N - M r`.
+    r : int
+        Number of random-effect covariates.
+    p : int
+        Number of fixed-effect covariates.
+    spec : VarCompSpec
+        Fit configuration: supplies the ridge, the Newton keyword arguments,
+        and (for inference) the damping.
+    diagonal : bool
+        If ``True``, :math:`G` is constrained to be diagonal; otherwise it is
+        unstructured.
+
+    Returns
+    -------
+    theta : Float[Array, 'nt']
+        The converged parameter vector.
+    beta : Float[Array, 'p']
+        The fixed-effect estimate :math:`\hat{\beta}` at the optimum.
+    log_lik : Float[Array, '']
+        The maximised profile REML log-likelihood (the negated final objective).
+    """
 
     def nll(theta: Float[Array, 'nt']) -> Float[Array, '']:
         return _nll_and_beta(
@@ -471,21 +702,53 @@ def fit_blockwoodbury_reml(
     diagonal: bool = False,
     inference: bool = False,
 ) -> Tuple[Float[Array, 'V nt'], ...]:
-    """Batched block-Woodbury REML over ``V`` voxels (single grouping factor).
+    r"""Batched block-Woodbury REML over ``V`` voxels (single grouping factor).
 
-    ``Z`` is the ``(N, r)`` per-observation random-covariate design (e.g.
-    ``[1, x]`` for ``(1 + x | g)``); ``group`` is the ``(N,)`` group label.
-    ``theta`` is ``[chol(G) params, log sigma_e^2]``: ``nt = r(r+1)/2 + 1`` for
-    an unstructured ``G`` (``diagonal=False``), or ``nt = r + 1`` for a diagonal
-    ``G`` (``diagonal=True``, the uncorrelated ``(x || g)`` random effect).
-    Returns ``(theta_hat, beta_hat, log_lik)``; recover ``G = L L^T`` from the
-    Cholesky params (via ``_build_chol(..., diagonal)``) and ``sigma_e^2 =
-    exp(theta[-1])``.
+    Precomputes the design-only Gram reductions once with :func:`group_grams`,
+    then runs a per-voxel block-Woodbury REML fit (:func:`_fit_one`) across all
+    ``V`` voxels via a blocked vmap.  The parameter vector ``theta`` is
+    :math:`[\operatorname{chol}(G)\ \text{params}, \log \sigma_e^2]`, with
+    :math:`nt = r(r+1)/2 + 1` for an unstructured :math:`G` (``diagonal=False``)
+    or :math:`nt = r + 1` for a diagonal :math:`G` (``diagonal=True``, the
+    uncorrelated ``(x || g)`` random effect).  Recover :math:`G = L L^{\top}`
+    from the Cholesky parameters and :math:`\sigma_e^2 = \exp(\theta[-1])`.
 
-    With ``inference=True`` also returns the per-voxel contrast tensors
-    ``(fixed_cov, theta_cov, grad_m)`` from :func:`bw_inference` (audit D3-R2),
-    so the result is the 6-tuple ``(theta_hat, beta_hat, log_lik, fixed_cov,
-    theta_cov, grad_m)``.
+    Parameters
+    ----------
+    Y : Float[Array, 'V N']
+        The response for each of ``V`` voxels over ``N`` observations.
+    X : Float[Array, 'N p']
+        Fixed-effect design matrix, shared across voxels.
+    Z : Float[Array, 'N r']
+        Per-observation random-covariate design (e.g. ``[1, x]`` for
+        ``(1 + x | g)``), shared across voxels.
+    group : Int[Array, 'N']
+        Group label in ``[0, n_groups)`` for each observation.
+    n_groups : int
+        Number of groups :math:`M`.
+    theta_init : Float[Array, 'V nt']
+        Per-voxel initial parameter vectors for the Newton iteration.
+    spec : VarCompSpec, optional
+        Fit configuration (ridge, Newton keyword arguments, damping).
+    block : int or None, optional
+        Voxel block size for the blocked vmap; ``None`` processes all voxels in
+        a single block.
+    diagonal : bool, optional
+        If ``True``, constrain :math:`G` to be diagonal (uncorrelated random
+        slopes); otherwise fit an unstructured :math:`G`.
+    inference : bool, optional
+        If ``True``, additionally return the per-voxel contrast inference
+        tensors from :func:`bw_inference`.
+
+    Returns
+    -------
+    tuple of Array
+        By default the 3-tuple ``(theta_hat, beta_hat, log_lik)`` with shapes
+        ``(V, nt)``, ``(V, p)`` and ``(V,)``.  With ``inference=True`` the
+        6-tuple ``(theta_hat, beta_hat, log_lik, fixed_cov, theta_cov,
+        grad_m)``, where ``fixed_cov`` is ``(V, p, p)``, ``theta_cov`` is
+        ``(V, nt, nt)`` and ``grad_m`` is ``(V, nt, p, p)`` (see
+        :func:`bw_inference`).
     """
     p = X.shape[-1]
     r = Z.shape[-1]

@@ -15,10 +15,11 @@ pca_transform(X: Float[Array, 'n d'], components: Float[Array, 'k d'], mean: Flo
 <!-- nitrix:gen overview:pca_transform -->
 Project `X` onto a PCA basis: `(X - mean) @ components.T`.
 
-Takes `components` / `mean` explicitly (rather than a
-`PCAResult`) so a *pre-fitted* basis -- e.g. components
-loaded from elsewhere -- can be applied without a local
-`pca_fit`.
+Centres `X` by `mean` and projects onto the rows of
+`components` to obtain the principal-component coordinates.  Takes
+`components` and `mean` explicitly (rather than a
+`PCAResult`) so a pre-fitted basis -- e.g. components loaded
+from elsewhere -- can be applied without a local `pca_fit`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pca_transform -->
@@ -26,11 +27,11 @@ loaded from elsewhere -- can be applied without a local
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Float` | `n` × `d` | — | — |
-| `components` | `Float` | `k` × `d` | — | — |
-| `mean` | `Float` | `d` | — | — |
+| `X` | `Float` | `n` × `d` | — | `(n, d)` data matrix (rows = samples, columns = features). |
+| `components` | `Float` | `k` × `d` | — | `(k, d)` orthonormal basis, row `i` the `i`-th principal axis. |
+| `mean` | `Float` | `d` | — | `(d,)` feature mean subtracted before projection. |
 
-**Returns** `Float` — shape `n` × `k`.
+**Returns** `Float` — shape `n` × `k`. `(n, k)` coordinates of each sample in the principal-component basis.
 <!-- nitrix:/gen -->
 
 

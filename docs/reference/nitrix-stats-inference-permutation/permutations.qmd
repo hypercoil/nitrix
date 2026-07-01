@@ -1,7 +1,7 @@
 ---
 title: "permutations"
 generated: true
-description: "`(n_perm, n)` permutation-index matrix (row 0 = identity)."
+description: "Build a permutation-index matrix for shuffle-based permutation tests."
 ---
 
 [‹ back to `nitrix.stats.inference.permutation`](../nitrix-stats-inference-permutation.qmd)
@@ -13,11 +13,14 @@ permutations(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N'
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:permutations -->
-`(n_perm, n)` permutation-index matrix (row 0 = identity).
+Build a permutation-index matrix for shuffle-based permutation tests.
 
-Without `blocks` rows are free permutations of `0..n-1`; with `blocks`
-each row is a *within-block* permutation (observation `i` maps only to a
-position sharing its block label).
+Each row of the returned `(n_perm, n)` matrix is a permutation of the
+observation indices, suitable for two-sample or regression tests. Row 0 is
+always the identity `0, 1, ..., n - 1` (the unpermuted data). Without
+`blocks` the rows are free permutations of `0 .. n - 1`; with
+`blocks` each row is a *within-block* permutation, so observation `i`
+maps only to a position sharing its block label.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:permutations -->
@@ -25,12 +28,12 @@ position sharing its block label).
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `n` | `int` | — | — | — |
-| `n_perm` | `int` | — | — | — |
-| `key` | `Array` | — | — | — |
-| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | — |
+| `n` | `int` | — | — | Number of observations (columns of the output). |
+| `n_perm` | `int` | — | — | Number of permutations to generate, including the identity row. |
+| `key` | `Array` | — | — | A `jax.random` key; it is split into `n_perm` subkeys, one per row, seeding the uniform noise that orders observations within each block. |
+| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | Per-observation integer exchangeability-block labels of shape `(n,)`. Permutations are confined within each block: an observation can only move to a position sharing its block label. Labels are used only as a sort key, so any distinct integer labels are valid. If `None` (the default), all observations form a single block (free permutation). |
 
-**Returns** `Int` — shape `n_perm` × `N`.
+**Returns** `Int` — shape `n_perm` × `N`. A `(n_perm, n)` matrix of `int32` indices. Row 0 is the identity; each remaining row is a within-block (or free) permutation of the observation indices.
 <!-- nitrix:/gen -->
 
 

@@ -19,9 +19,10 @@ A separate Hilbert-space GP curve of `x` for each level of `group`, all
 sharing **one** smoothing parameter (so the per-group curves are random
 deviations with a common amplitude -- partial pooling).  This is the
 **fixed-`rho`** building block of the hierarchical GP: drop it into
-`gam_fit` alongside a population `hsgp_basis` of the same `rho` (and
-the intercept) for the "GS" hierarchical GP.  For *estimated* `rho` and the
-full variance-component report, use `hgp_fit`.
+`gam_fit` alongside a population `hsgp_basis` of
+the same `rho` (and the intercept) for the "GS" hierarchical GP.  For
+*estimated* `rho` and the full variance-component report, use
+`hgp_fit`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_factor_smooth -->
@@ -40,7 +41,7 @@ full variance-component report, use `hgp_fit`.
 | `center` | `bool` | — | `False` | Sum-to-zero each group's smooth (default `False` -- the group curves carry their own level, the usual factor-smooth; set `True` to pair with an explicit per-group mean). |
 | `n_levels` | `Optional[int]` | — | `None` | Number of levels `L` (defaults to `int(group.max()) + 1`); pass it when a level is absent so the block width is stable. |
 
-**Returns** `_FactorGPBasis`.
+**Returns** `_FactorGPBasis`. A factor-smooth GP basis (a `SmoothBasis`) for `gam_fit`; the single Fellner-Schall smoothing parameter on this block is the shared group precision $1 / \sigma_{grp}^2$.
 <!-- nitrix:/gen -->
 
 

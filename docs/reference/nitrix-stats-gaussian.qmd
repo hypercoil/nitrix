@@ -22,15 +22,17 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 Closed-form diagonal-Gaussian quantities.
 
 - `kl_diagonal_gaussian` -- KL divergence of a diagonal Gaussian
-  `N(mean, diag exp(log_var))` from the standard normal `N(0, I)`,
-  in closed form.
+  $\mathcal{N}(\mu, \operatorname{diag} e^{\ell})$ from the
+  standard normal $\mathcal{N}(0, I)$, in closed form.
 - `gaussian_nll` -- negative log-likelihood of observations under a
   diagonal Gaussian.
 
-Both are parameterised by `log_var` (the log of the variance) rather
-than the variance or standard deviation: this keeps the variance
-positive without a clamp and turns the `1 / var` and `log var` terms
-into a numerically benign `exp(-log_var)` / `log_var`.
+Both are parameterised by the log-variance `log_var` (the log of the
+variance) rather than the variance or standard deviation: this keeps the
+variance positive without a clamp and turns the $1 / \sigma^2$ and
+$\log \sigma^2$ terms into a numerically benign
+$e^{-\ell}$ / $\ell$, where $\ell$ denotes the
+log-variance.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

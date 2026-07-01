@@ -1,7 +1,7 @@
 ---
 title: "fdr"
 generated: true
-description: "Unified false-discovery-rate correction."
+description: "Unified false-discovery-rate correction dispatcher."
 ---
 
 [‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
@@ -13,12 +13,10 @@ fdr(p_values: Float[Array, 'n'], *, method: FDRMethod = 'bh', alpha: float = 0.0
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:fdr -->
-Unified false-discovery-rate correction.
+Unified false-discovery-rate correction dispatcher.
 
-`method`: `'bh'` (default -- Benjamini-Hochberg, valid under independence
-/ PRDS), `'by'` (Benjamini-Yekutieli, valid under arbitrary dependence), or
-`'storey'` (pi0-adaptive, higher power; `lam` tunes the `pi0` estimate).
-Returns `(rejected, p_adjusted)`.
+Dispatches to one of the false-discovery-rate procedures according to
+`method`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:fdr -->
@@ -26,12 +24,12 @@ Returns `(rejected, p_adjusted)`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `p_values` | `Float` | `n` | — | — |
-| `method` | `FDRMethod` | — | `'bh'` | — |
-| `alpha` | `float` | — | `0.05` | — |
-| `lam` | `float` | — | `0.5` | — |
+| `p_values` | `Float` | `n` | — | Flat vector of `n` per-element p-values. |
+| `method` | `FDRMethod` | — | `'bh'` | The correction procedure: `'bh'` (default, Benjamini-Hochberg via `fdr_bh`, valid under independence or positive regression dependence), `'by'` (Benjamini-Yekutieli via `fdr_by`, valid under arbitrary dependence), or `'storey'` ($\pi_0$-adaptive via `fdr_storey`, higher power). |
+| `alpha` | `float` | — | `0.05` | Target false-discovery rate defining the rejection mask. Default `0.05`. |
+| `lam` | `float` | — | `0.5` | Tuning parameter $\lambda \in (0, 1)$ for the $\pi_0$ estimate; used only when `method='storey'`. Default `0.5`. |
 
-**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`. The rejection mask `p_adjusted <= alpha`. The adjusted p-values (q-values) of the selected procedure.
 <!-- nitrix:/gen -->
 
 

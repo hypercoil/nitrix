@@ -24,6 +24,6 @@ Build an anisotropic tensor-product interaction smooth from marginals.
 | `margins` | `Tuple[SplineBasis, ...]` | — | — | Two or more `SplineBasis` on the **matched** covariates (same number of rows `n`), each typically sum-to-zero constrained (`center=True`). Mixed kinds are allowed (e.g. a P-spline crossed with a cyclic margin). |
 | `eig_rtol` | `float` | — | `1e-10` | Relative tolerance below which a marginal-penalty eigenvalue is floored to exact zero (its unpenalised null space), so the smoothing-parameter trace counts the correct penalty rank. |
 
-**Returns** `TensorBasis`.
+**Returns** `TensorBasis`. The `TensorBasis` with the `(n, prod_j k_j)` design and the per-margin penalties.
 <!-- nitrix:/gen -->
 

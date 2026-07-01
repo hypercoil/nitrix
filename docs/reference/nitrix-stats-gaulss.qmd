@@ -2,7 +2,7 @@
 title: "nitrix.stats.gaulss"
 generated: true
 signature-hash: 7d872a2e15dece35
-description: "Gaussian location-scale regression (`gaulss`, v3 §4 distributional)."
+description: "Gaussian location-scale regression (`gaulss`)."
 listing:
   id: nitrix-stats-gaulss-symbols
   contents: "nitrix-stats-gaulss/*.qmd"
@@ -19,31 +19,39 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 :::
 
 <!-- nitrix:gen overview:__module__ -->
-Gaussian location-scale regression (`gaulss`, v3 §4 distributional).
+Gaussian location-scale regression (`gaulss`).
 
-The standard GLM has **one** linear predictor (the mean); the residual scale is a
-single nuisance dispersion.  A *distributional* model gives the scale its own
-linear predictor -- here $y_i ~ N(\mu_i, \sigma_i^2)$ with
+The standard generalised linear model has a single linear predictor (the mean);
+the residual scale is a single nuisance dispersion.  A *distributional* model
+gives the scale its own linear predictor -- here
+$y_i \sim \mathcal{N}(\mu_i, \sigma_i^2)$ with
 
-    mu_i      = x_i^T beta_mu           (identity link, the mean model)
-    log sigma_i = z_i^T beta_sigma      (log link, the scale model)
+$$
+\mu_i = x_i^{\top} \beta_{\mu} \quad \text{(identity link, the mean model)}
 
-so heteroscedasticity is modelled directly (`mgcv`'s `gaulss` family / the
-`nwx` reserved `sigma ~ …` predictor).  This is **not** the scalar IRLS core
-(one predictor, fixed dispersion), so it gets its own fitter.
+\log \sigma_i = z_i^{\top} \beta_{\sigma} \quad \text{(log link, the scale model)}
+$$
 
-Estimator.  Joint maximum likelihood by Fisher scoring.  The Gaussian
-location-scale **expected** information is block-diagonal between `beta_mu` and
-`beta_sigma` (`E[y - mu] = 0` kills the cross term), so each scoring step is
-two decoupled solves:
+so heteroscedasticity is modelled directly (as in `mgcv`'s `gaulss` family).
+This is not the scalar IRLS core (one predictor, fixed dispersion), so it gets
+its own fitter.
 
-    beta_mu    <- (X^T W X)^{-1} X^T W y,        W = diag(1 / sigma_i^2)   (WLS)
-    beta_sigma <- beta_sigma + (2 Z^T Z)^{-1} Z^T u,  u_i = -1 + (y_i - mu_i)^2 / sigma_i^2
+The estimator is joint maximum likelihood by Fisher scoring.  The Gaussian
+location-scale expected information is block-diagonal between $\beta_{\mu}$
+and $\beta_{\sigma}$ (since $\mathbb{E}[y - \mu] = 0$ kills the
+cross term), so each scoring step is two decoupled solves:
 
-iterated to a fixed budget (`vmap`-clean over voxels).  The coefficient
-covariances are the two information blocks' inverses: $Cov(\beta_\mu) = (X^T
-\operatorname{diag}(1/\sigma^2) X)^{-1}$ and $Cov(\beta_\sigma) = (2 Z^T Z)^{-1}$.  Every solve is
-the cuSOLVER-free `small_inv_logdet`.
+$$
+\beta_{\mu} \leftarrow (X^{\top} W X)^{-1} X^{\top} W y, \quad W = \operatorname{diag}(1 / \sigma_i^2) \quad \text{(WLS)}
+
+\beta_{\sigma} \leftarrow \beta_{\sigma} + (2 Z^{\top} Z)^{-1} Z^{\top} u, \quad u_i = -1 + (y_i - \mu_i)^2 / \sigma_i^2
+$$
+
+iterated to a fixed budget (cleanly vectorised over elements).  The coefficient
+covariances are the two information blocks' inverses:
+$\operatorname{Cov}(\beta_{\mu}) = (X^{\top} \operatorname{diag}(1/\sigma^2) X)^{-1}$
+and $\operatorname{Cov}(\beta_{\sigma}) = (2 Z^{\top} Z)^{-1}$.  Every
+solve uses the cuSOLVER-free `small_inv_logdet`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

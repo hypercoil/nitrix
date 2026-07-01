@@ -2,29 +2,44 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Threshold-Free Cluster Enhancement (Smith & Nichols 2009).
+Threshold-free cluster enhancement.
 
-TFCE replaces an arbitrary cluster-forming threshold with an integral over all
-thresholds, weighting each voxel by its supra-threshold cluster extent::
+Threshold-free cluster enhancement (TFCE) replaces an arbitrary cluster-forming
+threshold with an integral over all thresholds, weighting each voxel by its
+supra-threshold cluster extent:
 
-    TFCE(v) = integral_{h=0}^{stat(v)} extent(v, h)^E * h^H dh
+.. math::
 
-where ``extent(v, h)`` is the size of the connected component containing ``v``
-when the image is thresholded at ``h``.  Defaults ``E = 0.5``, ``H = 2.0`` are
-the 3-D volume settings; surface / 1-D maps use different exponents and
-``connectivity``.
+    \\operatorname{TFCE}(v)
+        = \\int_{h=0}^{\\operatorname{stat}(v)}
+          \\operatorname{extent}(v, h)^{E}\\, h^{H}\\, \\mathrm{d}h
 
-The integral is a fixed ``n_steps`` Riemann sum over ``h in (0, max]`` (so the
-step adapts to each map's range, as in FSL -- and the *shape* is fixed, hence
-``vmap`` / ``scan`` friendly across permutations).  Each step is a
-``connected_components`` call (jit-able, fixed-shape).  Two-sided enhancement
-adds the TFCE of the negative part (disjoint support), giving a non-negative
-magnitude map for the max-statistic FWE.
+where :math:`\\operatorname{extent}(v, h)` is the size of the connected
+component containing voxel :math:`v` when the image is thresholded at height
+:math:`h`. The defaults :math:`E = 0.5`, :math:`H = 2.0` are the 3-D volume
+settings; surface and 1-D maps use different exponents and ``connectivity``.
 
-Built on ``morphology.connected_components`` and ``cluster.cluster_size_map``;
-no cuSOLVER, no float-only restriction -- a pure spatial-statistics kernel.  It
-is **not** differentiable through the discrete cluster forming (an inference
-kernel, like ``connected_components`` itself).
+The integral is a fixed ``n_steps`` Riemann sum over :math:`h \\in (0, \\max]`,
+so the step adapts to each map's range (as in FSL) while the *shape* stays
+fixed, making the kernel friendly to :func:`jax.vmap` / :func:`jax.lax.scan`
+across permutations. Each step is a single
+:func:`~nitrix.morphology.connected_components` call (jit-able, fixed-shape).
+Two-sided enhancement adds the TFCE of the negative part on its disjoint
+support, giving a non-negative magnitude map suitable for two-sided
+max-statistic family-wise error control.
+
+Built on :func:`~nitrix.morphology.connected_components` and
+:func:`~nitrix.stats.inference.cluster.cluster_size_map`. It is *not*
+differentiable through the discrete cluster forming; like
+:func:`~nitrix.morphology.connected_components` itself it is an inference
+kernel rather than a smooth score.
+
+References
+----------
+Smith, S. M., & Nichols, T. E. (2009). Threshold-free cluster enhancement:
+addressing problems of smoothing, threshold dependence and localisation in
+cluster inference. *NeuroImage*, 44(1), 83-98.
+https://doi.org/10.1016/j.neuroimage.2008.03.061
 """
 
 from __future__ import annotations
@@ -48,7 +63,37 @@ def _tfce_one_sided(
     n_steps: int,
     connectivity: int,
 ) -> Float[Array, '*spatial']:
-    """TFCE of a non-negative map ``pos`` (the positive side)."""
+    """
+    Threshold-free cluster enhancement of a single non-negative map.
+
+    Accumulates the TFCE integral for one side of a statistic image by summing
+    the extent- and height-weighted contributions over a fixed grid of
+    threshold heights. The heights are ``n_steps`` equal steps spanning
+    :math:`(0, \\max]`, where :math:`\\max` is the largest value of ``pos``, so
+    the step size adapts to the map's range while the loop shape stays fixed.
+
+    Parameters
+    ----------
+    pos : Float[Array, '*spatial']
+        Non-negative statistic map (the positive side of a statistic image),
+        of arbitrary spatial dimensionality.
+    e : float
+        Extent exponent :math:`E` applied to the cluster size at each height.
+    h_exp : float
+        Height exponent :math:`H` applied to the threshold at each step.
+    n_steps : int
+        Number of threshold steps in the Riemann sum.
+    connectivity : int
+        Neighbourhood order used to form connected components at each
+        threshold (``1`` = faces only; ``ndim`` = full connectivity including
+        diagonals, following the scipy convention).
+
+    Returns
+    -------
+    Float[Array, '*spatial']
+        The enhanced map, same shape as ``pos``: at each voxel, the accumulated
+        integral of extent :sup:`E` times height :sup:`H` over all thresholds.
+    """
     max_h = jnp.max(pos)
     dh = max_h / n_steps
     heights = jnp.arange(1, n_steps + 1, dtype=pos.dtype) * dh

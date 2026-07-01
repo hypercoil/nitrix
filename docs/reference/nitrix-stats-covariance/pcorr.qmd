@@ -24,7 +24,7 @@ Alias for `partialcorr`.
 | `*args` | `Any` | — | `()` | — |
 | `**kwargs` | `Any` | — | `{}` | — |
 
-**Returns** `Num` — shape `...` × `c` × `c`.
+**Returns** `Num` — shape `...` × `c` × `c`. Partial correlation matrix, `(..., c, c)`.
 <!-- nitrix:/gen -->
 
 

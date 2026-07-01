@@ -1,7 +1,7 @@
 ---
 title: "gaussian_nll"
 generated: true
-description: "Negative log-likelihood of `x` under `N(mean, exp(log_var))`."
+description: "Negative log-likelihood of observations under a diagonal Gaussian."
 ---
 
 [‹ back to `nitrix.stats.gaussian`](../nitrix-stats-gaussian.qmd)
@@ -13,15 +13,24 @@ gaussian_nll(x: Float[Array, '...'], mean: Float[Array, '...'], log_var: Float[A
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:gaussian_nll -->
-Negative log-likelihood of `x` under `N(mean, exp(log_var))`.
+Negative log-likelihood of observations under a diagonal Gaussian.
 
-Per element:
+Evaluates the negative log-likelihood of the observations `x` under
+the diagonal Gaussian $\mathcal{N}(\mu, e^{\ell})$, where
+$\mu$ is `mean` and $\ell$ is the log-variance
+`log_var`.
 
-`0.5 * (log(2 pi) + log_var + (x - mean)**2 * exp(-log_var))`
+Per element, this is
 
-The `exp(-log_var)` precision and the additive `log_var`
-normaliser are the log-variance rewrite of the `1 / (2 var)` and
-`0.5 log var` terms of the Gaussian density.
+$$
+\tfrac{1}{2}\left(\log(2\pi) + \ell
++ (x - \mu)^2\, e^{-\ell}\right).
+$$
+
+The $e^{-\ell}$ precision and the additive $\ell$
+normaliser are the log-variance rewrite of the
+$1 / (2\sigma^2)$ and $\tfrac{1}{2}\log \sigma^2$
+terms of the Gaussian density.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gaussian_nll -->
@@ -29,13 +38,13 @@ normaliser are the log-variance rewrite of the `1 / (2 var)` and
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `x` | `Float` | `...` | — | Observations. |
-| `mean` | `Float` | `...` | — | Predicted mean and log-variance, broadcastable to `x`. |
-| `log_var` | `Float` | `...` | — | Predicted mean and log-variance, broadcastable to `x`. |
-| `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce. Default `None` (all). |
-| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"`. |
+| `x` | `Float` | `...` | — | Observations, of arbitrary shape. |
+| `mean` | `Float` | `...` | — | Predicted mean $\mu$, broadcastable to `x`. |
+| `log_var` | `Float` | `...` | — | Predicted log-variance $\ell$, broadcastable to `x`. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce over. Default `None` reduces over all axes. |
+| `reduction` | `Reduction` | — | `'mean'` | How to reduce the per-element NLL over `axis`. `"mean"` (the default), `"sum"`, or `"none"` to leave it unreduced. |
 
-**Returns** `Float` — shape `...`.
+**Returns** `Float` — shape `...`. The reduced negative log-likelihood: a scalar when `axis` is `None`, otherwise the reduction over `axis`; or the per-element NLL (the broadcast shape of `x`, `mean` and `log_var`) when `reduction="none"`.
 <!-- nitrix:/gen -->
 
 

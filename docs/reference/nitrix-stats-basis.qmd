@@ -21,17 +21,17 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Penalised spline bases for additive models.
 
-A GAM smooth term `s(x)` is a spline basis expansion `f(x) = B(x) beta`
-with a roughness penalty $\beta^T S \beta$; the smoothing parameter trades the
-penalty off against fit (chosen by REML in `gam.py`).  This module builds the
-`(design, penalty)` pair for a covariate vector and re-evaluates the design
-at new covariate values (for plotting partial effects).
+A GAM smooth term $s(x)$ is a spline basis expansion
+$f(x) = B(x) \beta$ with a roughness penalty
+$\beta^{\top} S \beta$; the smoothing parameter trades the penalty
+off against fit (chosen by REML in `gam_fit`).  This module
+builds the `(design, penalty)` pair for a covariate vector and re-evaluates
+the design at new covariate values (for plotting partial effects).
 
 We ship the **P-spline** (Eilers & Marx): a uniform cubic B-spline design with
 a discrete difference penalty -- `mgcv`'s `bs='ps'` -- because it reuses
-the uniform-B-spline machinery already validated for N4 (the closed-form weight
-evaluator here mirrors `bias._bspline._uniform_bspline_weights`) and gives an
-exact reference to test against.
+the uniform-B-spline machinery already validated for N4 and gives an exact
+reference to test against.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

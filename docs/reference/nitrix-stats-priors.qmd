@@ -21,21 +21,23 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Lengthscale priors as REML regularisers (the `map_rho=` penalties).
 
-A small, curated set of priors on the GP lengthscale `rho`, each returned as a
-callable `rho -> -log p(rho)` suitable for the `map_rho=` argument of
-`nitrix.stats.gp_fit` and `nitrix.stats.hgp_fit`.  This is the
-lightweight **penalised / MAP** lengthscale within scope (a): the REML objective
-`-2 l_R(rho)` gains `-2 log p(rho)`, so the selected `rho` is the *maximum a
-posteriori* value rather than the pure REML maximiser.  (A full *posterior* over
-`rho` is scope (b) -- Stan / `brms` territory.)
+A small, curated set of priors on the Gaussian-process lengthscale
+$\rho$, each returned as a callable $\rho \mapsto -\log p(\rho)$
+suitable for the `map_rho=` argument of `nitrix.stats.gp_fit` and
+`nitrix.stats.hgp_fit`.  This is the lightweight *penalised / maximum a
+posteriori* lengthscale: the REML objective $-2 l_R(\rho)$ gains
+$-2 \log p(\rho)$, so the selected $\rho$ is the *maximum a
+posteriori* value rather than the pure REML maximiser.  (A full posterior over
+$\rho$ is a separate concern, addressed by dedicated probabilistic
+programming tools such as Stan or `brms`.)
 
-Each builder returns `-log p(rho)` **up to an additive constant** (the
+Each builder returns $-\log p(\rho)$ up to an additive constant (the
 normaliser is irrelevant to the argmin), so they compose directly:
     from nitrix.stats import gp_fit, invgamma_prior
     res = gp_fit(Y, x, map_rho=invgamma_prior(a=3.0, b=0.5))
 
-The penalties are pure JAX (they ride the jitted `rho`-search), elementwise on a
-scalar `rho`.
+The penalties are pure JAX (they ride the jitted $\rho$-search),
+elementwise on a scalar $\rho$.
 <!-- nitrix:/gen -->
 
 ## Symbols

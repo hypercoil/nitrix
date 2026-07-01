@@ -2,7 +2,7 @@
 title: "nitrix.stats.inference.randomise"
 generated: true
 signature-hash: 899c56b61523b583
-description: "Permutation inference for the GLM -- the on-device `randomise` engine."
+description: "Permutation inference for the general linear model."
 listing:
   id: nitrix-stats-inference-randomise-symbols
   contents: "nitrix-stats-inference-randomise/*.qmd"
@@ -19,11 +19,12 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 :::
 
 <!-- nitrix:gen overview:__module__ -->
-Permutation inference for the GLM -- the on-device `randomise` engine.
+Permutation inference for the general linear model.
 
-`permutation_test` is the kernel `niffi` needs in place of FSL
-`randomise`: a non-parametric, family-wise-error-controlling test of a GLM
-contrast over a statistic image, built from the parts in this subpackage.
+`permutation_test` is a non-parametric, family-wise-error-controlling
+test of a general linear model (GLM) contrast over a statistic image, built
+from the parts in this subpackage.  It is an on-device analogue of the FSL
+`randomise` tool.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

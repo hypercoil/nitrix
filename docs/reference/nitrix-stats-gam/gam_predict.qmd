@@ -30,7 +30,7 @@ machinery `smooth_partial_effect` uses for one block) and the stored
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GAMResult` | — | — | A `GAMResult` from `gam_fit`. |
-| `smooths` | `Sequence[Smooth]` | — | — | The same `Smooth` terms passed to `gam_fit`, in the same order (used here only to evaluate the basis at the new covariates). |
+| `smooths` | `Sequence[Smooth]` | — | — | The same `SmoothBasis` terms passed to `gam_fit`, in the same order (used here only to evaluate the basis at the new covariates). |
 | `x_smooths` | `Sequence[Any]` | — | — | New covariate(s) per smooth (one entry per `smooths` term, each in the form that `smooth.eval_design` accepts -- an `(N,)` grid, a tuple of per-margin grids for a tensor smooth, or integer level indices for a random-effect basis). All terms must evaluate to the same row count `N`. |
 | `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` parametric design at the new covariates; `None` if the fit had none. Must match the fit's parametric column count. |
 | `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean, via the link inverse) or `'link'` (the linear predictor `eta`). |

@@ -1,7 +1,7 @@
 ---
 title: "storey_pi0"
 generated: true
-description: "Storey's estimate of the true-null proportion `pi0` (Storey 2002)."
+description: "Storey's estimate of the true-null proportion $ pi_0$."
 ---
 
 [‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
@@ -13,13 +13,16 @@ storey_pi0(p_values: Float[Array, 'n'], *, lam: float = 0.5) -> Float[Array, '']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:storey_pi0 -->
-Storey's estimate of the true-null proportion `pi0` (Storey 2002).
+Storey's estimate of the true-null proportion $\pi_0$.
 
-`pi0(lambda) = #{p_i > lambda} / (m (1 - lambda))`, clipped to
-`[1/m, 1]`.  The tuning `lambda in (0, 1)` (default `0.5`) trades bias
-for variance; `pi0 = 1` recovers Benjamini-Hochberg, and a smaller `pi0`
-(more alternatives present) yields a less conservative, higher-power adaptive
-FDR.  The `1/m` floor guards the degenerate "no null" estimate.
+Computes
+$\hat{\pi}_0(\lambda) = \#\{p_i > \lambda\} / (m (1 - \lambda))$,
+clipped to $[1/m, 1]$, where $m$ is the number of p-values. The
+tuning parameter $\lambda \in (0, 1)$ (default `0.5`) trades bias
+for variance. A value $\pi_0 = 1$ recovers Benjamini-Hochberg, and a
+smaller $\pi_0$ (more alternatives present) yields a less conservative,
+higher-power adaptive FDR. The $1/m$ floor guards against the degenerate
+"no null" estimate.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:storey_pi0 -->
@@ -27,10 +30,10 @@ FDR.  The `1/m` floor guards the degenerate "no null" estimate.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `p_values` | `Float` | `n` | — | — |
-| `lam` | `float` | — | `0.5` | — |
+| `p_values` | `Float` | `n` | — | Flat vector of `n` per-element p-values. |
+| `lam` | `float` | — | `0.5` | Tuning parameter $\lambda \in (0, 1)$ at which the null proportion is estimated. Must lie strictly within `(0, 1)`. Default `0.5`. |
 
-**Returns** `Float` — shape —.
+**Returns** `Float` — shape —. The estimated true-null proportion $\pi_0$, a scalar clipped to $[1/m, 1]$.
 <!-- nitrix:/gen -->
 
 

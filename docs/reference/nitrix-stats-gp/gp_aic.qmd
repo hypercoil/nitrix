@@ -1,7 +1,7 @@
 ---
 title: "gp_aic"
 generated: true
-description: "Per-element Akaike information criterion `-2 l_R + 2 k` for a GP / HGP fit (lower is better)."
+description: "Per-element Akaike information criterion for a GP / HGP fit."
 ---
 
 [‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
@@ -13,16 +13,16 @@ gp_aic(result: _ICResult) -> Float[Array, 'V']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:gp_aic -->
-Per-element Akaike information criterion `-2 l_R + 2 k` for a GP / HGP
-fit (lower is better).
+Per-element Akaike information criterion for a GP / HGP fit.
 
-Uses the **REML log marginal likelihood** `log_mlik` (so it is comparable
-across kernels / ranks / amplitudes on the same data) and the effective
-degrees of freedom `k` (`_total_edf`) as the model complexity -- the
-mgcv-style marginal AIC.  Like any REML criterion it is valid for models with
-the **same fixed-effect structure** (a different `parametric` design changes
-the restriction); within that, it is immediate for GP-vs-GP and GP-vs-spline
-(an `hsgp_basis` / kernel choice) selection.
+The marginal AIC $-2 l_R + 2 k$ (lower is better).  Uses the REML log
+marginal likelihood `log_mlik` (so it is comparable across kernels / ranks /
+amplitudes on the same data) and the effective degrees of freedom $k$
+(`_total_edf`) as the model complexity -- the mgcv-style marginal AIC.
+Like any REML criterion it is valid for models with the same fixed-effect
+structure (a different `parametric` design changes the restriction); within
+that, it is immediate for GP-vs-GP and GP-vs-spline (an
+`hsgp_basis` / kernel choice) selection.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_aic -->
@@ -30,9 +30,9 @@ the restriction); within that, it is immediate for GP-vs-GP and GP-vs-spline
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `_ICResult` | — | — | — |
+| `result` | `_ICResult` | — | — | A GP / HGP fit conforming to `_ICResult`. |
 
-**Returns** `Float` — shape `V`.
+**Returns** `Float` — shape `V`. The per-element AIC.
 <!-- nitrix:/gen -->
 
 

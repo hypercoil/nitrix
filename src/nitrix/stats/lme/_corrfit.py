@@ -2,26 +2,34 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Generalised-least-squares REML with a structured within-group residual (§1.4).
+Generalised-least-squares REML with a structured within-group residual.
 
-This is the **R0 + corr** path: no random effect, a structured residual
-``Cov(y_v) = sigma_e^2 R(rho)`` block-diagonal across a grouping factor, with
-``R`` one of the :mod:`._corr` structures (``ar1`` / ``car1`` / ``cs``).  It is
-the ``nlme::gls(correlation=corAR1 / corCAR1 / corCompSymm)`` fit, mass-
-univariate over voxels with a shared design.
+This is the residual-only path: no random effect, a structured residual
+:math:`\\operatorname{Cov}(y_v) = \\sigma_e^2 R(\\rho)` block-diagonal across a
+grouping factor, with :math:`R` one of the correlation structures (``'ar1'`` /
+``'car1'`` / ``'cs'``).  It matches the
+``nlme::gls(correlation=corAR1 / corCAR1 / corCompSymm)`` fit, mass-univariate
+over voxels with a shared design.
 
-Method.  Each structure whitens per group (``W_i R_i W_i^T = I``), so on whitened
-data the residual is i.i.d. and the profile REML criterion is the ordinary GLS
-one plus the whitening Jacobian ``sum_i 0.5 log|R_i|``:
+Method.  Each structure whitens per group
+(:math:`W_i R_i W_i^{\\top} = I`), so on whitened data the residual is i.i.d.
+and the profile REML criterion is the ordinary GLS one plus the whitening
+Jacobian :math:`\\sum_i \\tfrac{1}{2} \\log|R_i|`:
 
-    -2 l_R(rho) = (N - p) log(rss(rho)) + log|R(rho)| + log|X~^T X~(rho)| + const
+.. math::
 
-with ``X~`` / ``r~`` the whitened design / residual, ``beta_hat = (X~^T X~)^{-1}
-X~^T y~`` and ``sigma_e^2 = rss / (N - p)`` profiled out.  Newton (damped,
-backtracked, autodiff grad/Hessian) optimises the unconstrained ``raw`` (one
-parameter for ar1/car1/cs); every solve is the cuSOLVER-free ``small_inv_logdet``
-on the ``(p, p)`` whitened Gram.  Groups ride in a left-packed, time-sorted
-``(G, T)`` padded layout so ragged sizes need no dynamic shapes.
+    -2\\,l_R(\\rho) = (N - p) \\log(\\mathrm{rss}(\\rho)) + \\log|R(\\rho)|
+    + \\log|\\tilde{X}^{\\top} \\tilde{X}(\\rho)| + \\mathrm{const}
+
+with :math:`\\tilde{X}` / :math:`\\tilde{r}` the whitened design / residual,
+:math:`\\hat{\\beta} = (\\tilde{X}^{\\top} \\tilde{X})^{-1} \\tilde{X}^{\\top}
+\\tilde{y}` and :math:`\\sigma_e^2 = \\mathrm{rss} / (N - p)` profiled out.
+Newton (damped, backtracked, autodiff gradient/Hessian) optimises the
+unconstrained ``raw`` correlation parameter (one parameter for each of the
+``'ar1'`` / ``'car1'`` / ``'cs'`` structures); every solve is the cuSOLVER-free
+``small_inv_logdet`` on the :math:`(p, p)` whitened Gram.  Groups ride in a
+left-packed, time-sorted :math:`(G, T)` padded layout so ragged sizes need no
+dynamic shapes.
 """
 
 from __future__ import annotations
@@ -57,8 +65,25 @@ __all__ = [
 
 
 class GroupLayout(NamedTuple):
-    """Left-packed, time-sorted ``(G, T)`` padded group layout (shared across
-    voxels; data-independent of ``y``)."""
+    """Left-packed, time-sorted padded group layout.
+
+    A :math:`(G, T)` grid describing how the :math:`N` observations distribute
+    over ``G`` groups (``T`` the maximum group size).  The layout is shared
+    across voxels and data-independent of the responses ``y``.
+
+    Attributes
+    ----------
+    idx
+        ``(G, T)`` original row index of each packed observation (pad entries
+        map to ``0``).
+    gaps
+        ``(G, T)`` time gap to the previous in-group observation (``0`` at
+        column ``0`` and on the pad).
+    nsize
+        ``(G,)`` real (unpadded) group sizes.
+    mask
+        ``(G, T)`` boolean validity mask (``True`` for real observations).
+    """
 
     idx: Int[Array, 'G T']  # original row index (pad -> 0)
     gaps: Float[Array, 'G T']  # time gap to previous in-group obs (t>=1)
@@ -72,19 +97,32 @@ def build_group_layout(
 ) -> GroupLayout:
     """Build the padded, time-sorted group layout from labels (and times).
 
-    ``group`` is the ``(N,)`` integer grouping factor; ``time`` the ``(N,)``
-    observation time (defaults to the within-group appearance order -- unit gaps,
-    the AR(1) case).  Observations are sorted by ``time`` within each group and
-    left-packed into a ``(G, T)`` grid (``T`` = max group size); ``gaps[g, t]`` is
-    the time delta to the previous in-group observation (``0`` at ``t = 0`` and
-    on the pad).  Host-side (NumPy) -- ``group`` / ``time`` are static across the
-    mass axis.
+    Observations are sorted by ``time`` within each group and left-packed into a
+    :math:`(G, T)` grid (``T`` the maximum group size).  The computation is
+    host-side (NumPy) because ``group`` / ``time`` are static across the mass
+    (voxel) axis.
 
     With ``time=None`` the within-group **appearance order** is taken as the time
-    order (consecutive rows one lag apart).  For the order-dependent ``ar1`` /
-    ``car1`` structures this is a real assumption: pass ``time=`` when the rows are
-    not already time-ordered, or the correlation is estimated over the wrong
-    adjacencies (``fit_corr_gls`` / ``gp_fit`` warn in this case -- MC6).
+    order (consecutive rows one lag apart).  For the order-dependent ``'ar1'`` /
+    ``'car1'`` structures this is a real assumption: pass ``time=`` when the rows
+    are not already time-ordered, or the correlation is estimated over the wrong
+    adjacencies (the fitting routines warn in this case).
+
+    Parameters
+    ----------
+    group
+        ``(N,)`` integer grouping factor assigning each observation to a group.
+    time
+        ``(N,)`` observation times, used to order and space observations within
+        each group.  Defaults to the within-group appearance order (unit gaps,
+        the discrete AR(1) case).
+
+    Returns
+    -------
+    GroupLayout
+        The left-packed, time-sorted :math:`(G, T)` layout: original row
+        indices, previous-observation time gaps, real group sizes, and the
+        validity mask.
     """
     g_np = np.asarray(group)
     n = g_np.shape[0]
@@ -155,22 +193,26 @@ class GLSResult:
     beta_hat
         ``(V, p)`` fixed-effect estimates.
     sigma_e_sq
-        ``(V,)`` residual variance ``sigma_e^2``.
+        ``(V,)`` residual variance :math:`\\sigma_e^2`.
     rho
-        ``(V,)`` natural correlation parameter ``rho`` (the structure's bounded
-        parameter; the lag-1 / decay / exchangeable correlation).  ``0`` for the
-        ``iid`` (no-correlation) structure.
+        ``(V,)`` natural correlation parameter :math:`\\rho` (the structure's
+        bounded parameter; the lag-1 / decay / exchangeable correlation).  ``0``
+        for the ``'iid'`` (no-correlation) structure.
     var_params
-        ``(V, n_v)`` estimated variance-function parameters (``delta`` for
-        ``varPower``; the ``S - 1`` log-ratios ``tau`` for ``varIdent``).  Empty
-        ``(V, 0)`` when no ``weights`` variance function was given.
+        :math:`(V, n_v)` estimated variance-function parameters
+        (:math:`\\delta` for ``'varPower'``; the :math:`S - 1` log-ratios
+        :math:`\\tau` for ``'varIdent'``).  Empty :math:`(V, 0)` when no
+        ``weights`` variance function was given.
     log_lik
         ``(V,)`` profile REML log-likelihood at the fit.
     fixed_cov
-        ``(V, p, p)`` ``Cov(beta_hat) = sigma_e^2 (X~^T X~)^{-1}`` (the GLS
-        covariance) for a fixed-effect contrast on ``df = N - p``.
+        :math:`(V, p, p)` GLS covariance
+        :math:`\\operatorname{Cov}(\\hat{\\beta}) = \\sigma_e^2
+        (\\tilde{X}^{\\top} \\tilde{X})^{-1}` for a fixed-effect contrast on
+        :math:`\\mathrm{df} = N - p`.
     df_resid
-        Residual degrees of freedom ``N - p`` (scalar; for a t / F contrast).
+        Residual degrees of freedom :math:`N - p` (scalar; for a t / F
+        contrast).
     corr
         The correlation structure name.
     weights
@@ -200,11 +242,54 @@ def _whitened_grams(
 ) -> Tuple[
     Float[Array, 'p p'], Float[Array, 'p'], Float[Array, ''], Float[Array, '']
 ]:
-    """Whitened cross-products ``(X~^T X~, X~^T y~, y~^T y~, half_logdet)``.
+    """Whitened cross-products of the design and response.
+
+    Whitens ``X`` and ``y`` jointly per group under the correlation structure and
+    forms the whitened Grams :math:`\\tilde{X}^{\\top} \\tilde{X}`,
+    :math:`\\tilde{X}^{\\top} \\tilde{y}`, :math:`\\tilde{y}^{\\top} \\tilde{y}`,
+    together with the half-log-determinant Jacobian of the whitening.
 
     The Newton vector is ``raw = [corr_raw, var_raw]``; the variance function (if
-    any) pre-scales the joint stack by ``1 / g`` and contributes ``sum_i log g_i``
-    to the half-log-det before the correlation whitener runs.
+    any) pre-scales the joint stack by :math:`1 / g` and contributes
+    :math:`\\sum_i \\log g_i` to the half-log-determinant before the correlation
+    whitener runs.
+
+    Parameters
+    ----------
+    raw
+        ``(k,)`` unconstrained Newton vector ``[corr_raw, var_raw]``: the first
+        ``n_corr`` entries parameterise the correlation structure, the remainder
+        the variance function.
+    y_pad
+        ``(G, T)`` left-packed, mask-zeroed response.
+    x_pad
+        ``(G, T, p)`` left-packed, mask-zeroed fixed-effect design.
+    layout
+        The :class:`GroupLayout` supplying gaps, group sizes, and the validity
+        mask for the whitening recurrence.
+    corr
+        The correlation structure providing the per-group whitener.
+    varfunc
+        Optional residual variance function (heteroscedasticity), or ``None``.
+    cov_pad
+        ``(G, T)`` left-packed variance-function covariate; required (non-``None``)
+        when ``varfunc`` is given, otherwise unused.
+    n_corr
+        Number of leading correlation parameters in ``raw``.
+
+    Returns
+    -------
+    xtx
+        :math:`(p, p)` whitened cross-product :math:`\\tilde{X}^{\\top}
+        \\tilde{X}`.
+    xty
+        :math:`(p,)` whitened cross-product :math:`\\tilde{X}^{\\top}
+        \\tilde{y}`.
+    yty
+        Scalar whitened cross-product :math:`\\tilde{y}^{\\top} \\tilde{y}`.
+    half_logdet
+        Scalar half-log-determinant Jacobian of the joint whitening (correlation
+        plus variance-function contributions).
     """
     # Whiten y and X jointly (stack as the channel axis) so the recurrence runs
     # once over the shared (G, T) structure.
@@ -246,8 +331,55 @@ def _fit_one(
     Float[Array, ''],
     Float[Array, 'p p'],
 ]:
-    """Single-voxel GLS-REML fit via the shared saddle-free Newton
-    (``_optimise.damped_newton``)."""
+    """Single-voxel GLS-REML fit.
+
+    Minimises the profile REML criterion in the unconstrained ``raw`` vector via
+    the shared saddle-free damped Newton, then re-evaluates the whitened Grams at
+    the optimum to recover the fixed effects, residual variance, natural
+    correlation parameter, and reporting log-likelihood.
+
+    Parameters
+    ----------
+    y_pad
+        ``(G, T)`` left-packed, mask-zeroed response for this voxel.
+    x_pad
+        ``(G, T, p)`` left-packed, mask-zeroed fixed-effect design.
+    layout
+        The :class:`GroupLayout` for the whitening recurrence.
+    corr
+        The correlation structure.
+    varfunc
+        Optional residual variance function, or ``None``.
+    cov_pad
+        ``(G, T)`` left-packed variance-function covariate, or ``None``.
+    n_corr
+        Number of leading correlation parameters in the Newton vector.
+    raw0
+        ``(k,)`` initial unconstrained Newton vector.
+    n
+        Total number of observations :math:`N`.
+    p
+        Number of fixed-effect columns.
+    spec
+        Newton/variance-component specification supplying the ridge and
+        Newton keyword arguments.
+
+    Returns
+    -------
+    beta
+        :math:`(p,)` fixed-effect estimates.
+    sigma2
+        Scalar residual variance :math:`\\sigma_e^2`.
+    rho
+        Scalar natural correlation parameter :math:`\\rho`.
+    var_params
+        ``(n_v,)`` estimated variance-function parameters (empty when no
+        variance function was given).
+    log_lik
+        Scalar profile REML log-likelihood at the fit.
+    fixed_cov
+        :math:`(p, p)` GLS covariance of the fixed effects.
+    """
     dof = float(n - p)
     ridge = spec.ridge
 
@@ -300,10 +432,43 @@ def fit_corr_gls(
 ) -> GLSResult:
     """Voxelwise GLS-REML with a structured within-group residual.
 
-    Fits ``y_v = X beta_v + eps_v``, ``Cov(eps_v) = sigma_e^2 diag(g) R(rho)
-    diag(g)`` block-diagonal across ``group``, with ``R`` the ``corr`` structure
-    and ``g`` the optional ``weights`` variance function.  ``X`` is shared across
-    voxels; only ``y_v`` varies.  Returns a :class:`GLSResult`.
+    Fits, per voxel, :math:`y_v = X \\beta_v + \\varepsilon_v` with
+    :math:`\\operatorname{Cov}(\\varepsilon_v) = \\sigma_e^2
+    \\operatorname{diag}(g) R(\\rho) \\operatorname{diag}(g)` block-diagonal
+    across ``group``, with :math:`R` the ``corr`` structure and :math:`g` the
+    optional ``weights`` variance function.  ``X`` is shared across voxels; only
+    :math:`y_v` varies.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per voxel).
+    X
+        ``(N, p)`` shared fixed-effect design.
+    group
+        ``(N,)`` integer grouping factor; the residual is correlated within
+        groups and independent across them.
+    corr
+        The within-group correlation structure (a :class:`CorrSpec`).
+    time
+        ``(N,)`` observation times for the continuous-time structure and to
+        order the discrete structure when the rows are not already in
+        within-group time order.  Defaults to the within-group appearance order.
+    weights
+        Optional residual variance function (heteroscedasticity), or ``None``.
+    n_iter
+        Number of Newton iterations.
+    damping
+        Newton damping factor.
+    block
+        Optional voxel-block size for the batched vmap over ``Y``.
+
+    Returns
+    -------
+    GLSResult
+        The per-voxel fit: fixed effects, residual variance, correlation
+        parameter, variance-function parameters, log-likelihood, GLS covariance,
+        and residual degrees of freedom.
     """
     n, p = X.shape
     n_corr = corr.n_params
@@ -346,7 +511,17 @@ def fit_corr_gls(
     ) -> Tuple[Array, Array, Array, Array, Array, Array]:
         y_pad = y[idx] * mask_f
         return _fit_one(
-            y_pad, x_pad, layout, corr, weights, cov_pad, n_corr, raw0, n, p, spec
+            y_pad,
+            x_pad,
+            layout,
+            corr,
+            weights,
+            cov_pad,
+            n_corr,
+            raw0,
+            n,
+            p,
+            spec,
         )
 
     beta, sigma2, rho, var_params, log_lik, fixed_cov = cast(
@@ -378,15 +553,16 @@ def gls_fit(
     damping: float = 1e-6,
     block: Optional[int] = None,
 ) -> GLSResult:
-    """Voxelwise generalised least squares with a structured residual (§1.4).
+    """Voxelwise generalised least squares with a structured residual.
 
-    Fits, per voxel, ``y_v = X beta_v + eps_v`` with a within-group structured
-    residual ``Cov(eps_v) = sigma_e^2 diag(g) R(rho) diag(g)`` -- ``nlme``'s
+    Fits, per voxel, :math:`y_v = X \\beta_v + \\varepsilon_v` with a
+    within-group structured residual
+    :math:`\\operatorname{Cov}(\\varepsilon_v) = \\sigma_e^2
+    \\operatorname{diag}(g) R(\\rho) \\operatorname{diag}(g)` -- ``nlme``'s
     ``gls(correlation=corAR1 / corCAR1 / corCompSymm, weights=varPower /
-    varIdent)``.  ``R`` is the correlation structure; ``g`` the optional variance
-    function (heteroscedasticity).  No random effect (the R0 + corr path); for a
-    random effect *plus* a structured residual, the composition with the R2
-    block-Woodbury is the follow-up.
+    varIdent)``.  :math:`R` is the correlation structure; :math:`g` the optional
+    variance function (heteroscedasticity).  There is no random effect here; for
+    a random effect *plus* a structured residual, use :func:`fit_corr_lme`.
 
     Parameters
     ----------
@@ -402,21 +578,22 @@ def gls_fit(
         ``'iid'`` (no correlation -- the default, for a pure variance-function
         fit), or a :class:`CorrSpec`.
     time
-        ``(N,)`` observation times for ``car1`` (and to order ``ar1`` when the
-        rows are not already in within-group time order).  Defaults to the
+        ``(N,)`` observation times for ``'car1'`` (and to order ``'ar1'`` when
+        the rows are not already in within-group time order).  Defaults to the
         within-group appearance order (unit gaps).
     weights
         Optional residual **variance function** (heteroscedasticity):
-        ``var_power(v)`` (``Var ~ |v|^{2 delta}``) or ``var_ident(strata)``
-        (a separate variance per stratum).  Composes with any ``corr``; with
-        ``corr='iid'`` it is a pure heteroscedastic GLS.
+        :func:`var_power` (:math:`\\operatorname{Var} \\sim |v|^{2\\delta}`) or
+        :func:`var_ident` (a separate variance per stratum).  Composes with any
+        ``corr``; with ``corr='iid'`` it is a pure heteroscedastic GLS.
     n_iter, damping, block
-        Newton iterations, AI/LM damping, and the optional voxel-block size.
+        Newton iterations, damping factor, and the optional voxel-block size.
 
     Returns
     -------
-    ``GLSResult`` -- ``beta_hat``, ``sigma_e_sq``, ``rho``, ``var_params``,
-    ``log_lik``, the GLS ``fixed_cov``, and ``df_resid = N - p``.
+    GLSResult
+        The per-voxel fit: ``beta_hat``, ``sigma_e_sq``, ``rho``, ``var_params``,
+        ``log_lik``, the GLS ``fixed_cov``, and ``df_resid = N - p``.
     """
     return fit_corr_gls(
         Y,
@@ -449,10 +626,10 @@ class CorrLMEResult:
     beta_hat
         ``(V, p)`` fixed-effect estimates.
     cov_re
-        ``(V, r, r)`` random-effect covariance ``G``.
+        ``(V, r, r)`` random-effect covariance :math:`G`.
     sigma_e_sq
-        ``(V,)`` residual *scale* ``sigma_e^2`` (the residual is
-        ``sigma_e^2 R(rho)``).
+        ``(V,)`` residual *scale* :math:`\\sigma_e^2` (the residual covariance
+        is :math:`\\sigma_e^2 R(\\rho)`).
     rho
         ``(V,)`` natural correlation parameter of the residual structure.
     log_lik
@@ -509,11 +686,49 @@ def _corr_lme_grams(
 ]:
     """Whiten ``X`` / ``Z`` / ``y`` per group and form the block-Woodbury Grams.
 
-    On whitened data the residual is i.i.d., so ``Sigma_e = sigma_e^2 R`` reduces
-    to ``sigma_e^2 I`` and the per-group ``(Z^T Z, X^T Z, Z^T y)`` / total
-    ``(X^T X, X^T y, y^T y)`` Grams feed ``_blockwoodbury._nll_and_beta``
-    verbatim; the whitening adds ``half_logdet = 0.5 sum_i log|R_i|`` to the
+    On whitened data the residual is i.i.d., so :math:`\\Sigma_e = \\sigma_e^2 R`
+    reduces to :math:`\\sigma_e^2 I` and the per-group
+    (:math:`Z^{\\top} Z`, :math:`X^{\\top} Z`, :math:`Z^{\\top} y`) / total
+    (:math:`X^{\\top} X`, :math:`X^{\\top} y`, :math:`y^{\\top} y`) Grams feed
+    the block-Woodbury objective verbatim; the whitening adds
+    :math:`\\mathrm{half\\_logdet} = \\tfrac{1}{2} \\sum_i \\log|R_i|` to the
     REML objective.
+
+    Parameters
+    ----------
+    raw
+        ``(k,)`` unconstrained correlation parameters.
+    x_pad
+        ``(G, T, p)`` left-packed, mask-zeroed fixed-effect design.
+    z_pad
+        ``(G, T, r)`` left-packed, mask-zeroed random-effect design.
+    y_pad
+        ``(G, T)`` left-packed, mask-zeroed response.
+    layout
+        The :class:`GroupLayout` for the whitening recurrence.
+    corr
+        The correlation structure providing the per-group whitener.
+    p
+        Number of fixed-effect columns.
+    r
+        Number of random-effect columns.
+
+    Returns
+    -------
+    ztz
+        :math:`(G, r, r)` per-group whitened :math:`Z^{\\top} Z` blocks.
+    xtz
+        :math:`(G, p, r)` per-group whitened :math:`X^{\\top} Z` blocks.
+    xtx
+        :math:`(p, p)` total whitened :math:`X^{\\top} X`.
+    zty
+        :math:`(G, r)` per-group whitened :math:`Z^{\\top} y`.
+    xty
+        :math:`(p,)` total whitened :math:`X^{\\top} y`.
+    yty
+        Scalar total whitened :math:`y^{\\top} y`.
+    half_logdet
+        Scalar half-log-determinant Jacobian of the whitening.
     """
     stack = jnp.concatenate(
         [x_pad, z_pad, y_pad[..., None]], axis=-1
@@ -548,12 +763,58 @@ def _fit_one_corr_lme(
     diagonal: bool,
     spec: VarCompSpec,
 ) -> Tuple[Float[Array, 'nt'], Float[Array, 'p'], Float[Array, '']]:
-    """Single-voxel R2 + corr fit via the shared saddle-free Newton over
-    ``[chol(G), log sigma_e^2, corr_raw]`` (``_optimise.damped_newton``).
+    """Single-voxel mixed-model fit with a structured residual.
+
+    Minimises the joint REML objective over the parameter vector
+    :math:`[\\operatorname{chol}(G),\\ \\log \\sigma_e^2,\\ \\mathrm{corr\\_raw}]`
+    via the shared saddle-free damped Newton, then re-evaluates at the optimum
+    to recover the fixed effects and log-likelihood.
 
     The joint objective is non-convex away from the optimum (an indefinite
-    Hessian at the start), so the saddle-free step rule is load-bearing here --
-    it lives once in ``_optimise``.
+    Hessian at the start), so the saddle-free step rule is load-bearing here.
+
+    Parameters
+    ----------
+    y_pad
+        ``(G, T)`` left-packed, mask-zeroed response for this voxel.
+    x_pad
+        ``(G, T, p)`` left-packed, mask-zeroed fixed-effect design.
+    z_pad
+        ``(G, T, r)`` left-packed, mask-zeroed random-effect design.
+    layout
+        The :class:`GroupLayout` for the whitening recurrence.
+    corr
+        The correlation structure.
+    theta_init
+        ``(nt,)`` initial parameter vector
+        :math:`[\\operatorname{chol}(G),\\ \\log \\sigma_e^2,\\
+        \\mathrm{corr\\_raw}]`.
+    n
+        Total number of observations :math:`N`.
+    p
+        Number of fixed-effect columns.
+    r
+        Number of random-effect columns.
+    nt_g
+        Number of Cholesky parameters of :math:`G` (the leading block of
+        ``theta``).
+    n_minus_mr
+        Residual degrees-of-freedom term :math:`N - G r` used by the REML
+        objective.
+    diagonal
+        Whether the random-effect covariance :math:`G` is constrained diagonal.
+    spec
+        Newton/variance-component specification supplying the ridge and Newton
+        keyword arguments.
+
+    Returns
+    -------
+    theta
+        ``(nt,)`` converged parameter vector.
+    beta
+        :math:`(p,)` fixed-effect estimates at the optimum.
+    log_lik
+        Scalar REML log-likelihood at the fit.
     """
 
     def split(
@@ -618,17 +879,49 @@ def _blups_corr(
     raw_hat: Float[Array, 'V k'],
     r: int,
 ) -> Float[Array, 'V q r']:
-    """Per-group random-effect modes for the R2 + corr tier.
+    """Per-group random-effect modes (BLUPs) for the mixed-model + corr tier.
 
-    The standard mixed-model-equation BLUP on **whitened** ``(Z_g, r_g)``: with
-    the per-voxel converged ``rho`` the group whitener ``W_g`` gives ``Z_g^T
-    R_g^{-1} Z_g = (W_g Z_g)^T (W_g Z_g)`` and ``Z_g^T R_g^{-1} r_g = (W_g Z_g)^T
-    (W_g r_g)``, so the Grams are formed on the whitened padded stack (einsum over
-    the within-group time axis) and fed the shared ``r x r`` solve
-    (:func:`._blup._solve_blup_system`).  Whitening uses the per-voxel ``rho``, so
-    -- unlike the homoscedastic R1/R2 paths -- the ``Z^T Z`` Gram is *not* shared
-    across voxels; the whole pass is ``vmap``-ed over voxels.  Returns ``(V, q,
-    r)`` (``q`` = number of groups).
+    The standard mixed-model-equation BLUP on **whitened**
+    :math:`(Z_g, r_g)`: with the per-voxel converged :math:`\\rho` the group
+    whitener :math:`W_g` gives :math:`Z_g^{\\top} R_g^{-1} Z_g = (W_g Z_g)^{\\top}
+    (W_g Z_g)` and :math:`Z_g^{\\top} R_g^{-1} r_g = (W_g Z_g)^{\\top} (W_g r_g)`,
+    so the Grams are formed on the whitened padded stack (einsum over the
+    within-group time axis) and fed the shared :math:`r \\times r` solve.
+    Whitening uses the per-voxel :math:`\\rho`, so -- unlike the homoscedastic
+    residual-only paths -- the :math:`Z^{\\top} Z` Gram is *not* shared across
+    voxels; the whole pass is mapped over voxels.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per voxel).
+    X
+        ``(N, p)`` shared fixed-effect design.
+    z_pad
+        ``(G, T, r)`` left-packed, mask-zeroed random-effect design.
+    idx
+        ``(G, T)`` original row indices from the group layout.
+    mask_f
+        ``(G, T)`` validity mask cast to the working float dtype.
+    layout
+        The :class:`GroupLayout` for the whitening recurrence.
+    corr
+        The correlation structure providing the per-group whitener.
+    beta_hat
+        ``(V, p)`` per-voxel fixed-effect estimates.
+    cov_re
+        ``(V, r, r)`` per-voxel random-effect covariance :math:`G`.
+    sigma_e_sq
+        ``(V,)`` per-voxel residual scale :math:`\\sigma_e^2`.
+    raw_hat
+        ``(V, k)`` per-voxel converged unconstrained correlation parameters.
+    r
+        Number of random-effect columns.
+
+    Returns
+    -------
+    Float[Array, 'V q r']
+        Per-group random-effect modes, where ``q`` is the number of groups.
     """
 
     def _one(
@@ -672,14 +965,53 @@ def fit_corr_lme(
     block: Optional[int] = None,
     retain_blups: bool = False,
 ) -> CorrLMEResult:
-    """Voxelwise mixed model with a structured within-group residual (R2 + corr).
+    """Voxelwise mixed model with a structured within-group residual.
 
-    Fits ``y_v = X beta_v + Z b_v + eps_v`` with ``b_v ~ N(0, G)`` and
-    ``Cov(eps_v) = sigma_e^2 R(rho)`` block-diagonal across ``group`` -- the
-    ``nlme::lme(random=~Z|g, correlation=corAR1/…)`` model.  Whitening by ``R``
-    reduces each group to a standard block-Woodbury, so the per-group ``r x r``
-    Woodbury algebra is reused verbatim with ``rho`` joining the REML
-    ``theta``-vector; cuSOLVER-free.
+    Fits, per voxel, :math:`y_v = X \\beta_v + Z b_v + \\varepsilon_v` with
+    :math:`b_v \\sim N(0, G)` and
+    :math:`\\operatorname{Cov}(\\varepsilon_v) = \\sigma_e^2 R(\\rho)`
+    block-diagonal across ``group`` -- the
+    ``nlme::lme(random=~Z|g, correlation=corAR1/…)`` model.  Whitening by
+    :math:`R` reduces each group to a standard block-Woodbury, so the per-group
+    :math:`r \\times r` Woodbury algebra is reused verbatim with :math:`\\rho`
+    joining the REML ``theta``-vector; cuSOLVER-free.
+
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per voxel).
+    X
+        ``(N, p)`` shared fixed-effect design.
+    Z
+        ``(N, r)`` shared random-effect design.
+    group
+        ``(N,)`` integer grouping factor; the random effect and the residual
+        correlation act within groups.
+    corr
+        The within-group residual correlation structure (a :class:`CorrSpec`).
+    time
+        ``(N,)`` observation times for the continuous-time structure and to
+        order the discrete structure when the rows are not already in
+        within-group time order.  Defaults to the within-group appearance order.
+    diagonal
+        Whether to constrain the random-effect covariance :math:`G` to be
+        diagonal.
+    n_iter
+        Number of Newton iterations.
+    damping
+        Newton damping factor.
+    block
+        Optional voxel-block size for the batched vmap over ``Y``.
+    retain_blups
+        Whether to compute and retain the per-group random-effect modes (BLUPs)
+        in the result.  Off by default.
+
+    Returns
+    -------
+    CorrLMEResult
+        The per-voxel fit: fixed effects, random-effect covariance, residual
+        scale, correlation parameter, log-likelihood, and (optionally) the
+        retained BLUPs.
     """
     n, p = X.shape
     r = Z.shape[-1]

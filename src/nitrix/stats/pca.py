@@ -4,51 +4,53 @@
 """
 Principal-component analysis.
 
-``pca_fit`` learns an orthonormal basis ordered by explained variance;
-``pca_transform`` / ``pca_inverse_transform`` project to and from that
-basis.  The basis is the eigendecomposition of the (sample) covariance:
+:func:`pca_fit` learns an orthonormal basis ordered by explained
+variance; :func:`pca_transform` and :func:`pca_inverse_transform`
+project to and from that basis.  The basis is the eigendecomposition of
+the (sample) covariance
 
-    C = Xc.T Xc / (n - 1),   C v_i = lambda_i v_i
+.. math::
 
-with ``Xc`` the centred data.  The ``i``-th component is the
-eigenvector with the ``i``-th largest eigenvalue, and ``lambda_i`` is
-the variance captured along it.
+    C = X_c^{\\top} X_c / (n - 1), \\qquad C v_i = \\lambda_i v_i
+
+with ``xc`` the centred data.  The :math:`i`-th component is the
+eigenvector with the :math:`i`-th largest eigenvalue, and
+:math:`\\lambda_i` is the variance captured along it.
 
 Solvers (``solver=``):
 
-- ``"full"`` -- exact: ``eigh`` of the ``(d, d)`` covariance.
-- ``"gram"`` -- exact, but via the ``(n, n)`` Gram matrix
-  ``Xc Xcᵀ`` instead of the ``(d, d)`` covariance; far cheaper when
-  ``n << d`` (many features, few samples -- e.g. component-correlation
-  / CompCor on a voxel-by-time matrix).  The components are recovered
-  from the Gram eigenvectors as ``V = Xcᵀ U / Σ``.  Bit-identical to
-  ``"full"`` (same spectrum, same sign convention).
+- ``"full"`` -- exact: eigendecomposition of the :math:`(d, d)`
+  covariance.
+- ``"gram"`` -- exact, but via the :math:`(n, n)` Gram matrix
+  :math:`X_c X_c^{\\top}` instead of the :math:`(d, d)` covariance; far
+  cheaper when :math:`n \\ll d` (many features, few samples -- e.g.
+  component-correlation / CompCor on a voxel-by-time matrix).  The
+  components are recovered from the Gram eigenvectors as
+  :math:`V = X_c^{\\top} U / \\Sigma`.  Bit-identical to ``"full"``
+  (same spectrum, same sign convention).
 - ``"randomized"`` -- approximate: a randomised range finder that
-  recovers the top ``k`` components in ``O(n d (k + p))`` matmuls, for
-  ``k`` much smaller than ``d`` (the regime where forming / factoring
-  the full covariance is wasteful).  Keyed (needs a PRNG key).
+  recovers the top :math:`k` components in :math:`O(n d (k + p))`
+  matmuls, for :math:`k` much smaller than :math:`d` (the regime where
+  forming / factoring the full covariance is wasteful).  Keyed (needs a
+  PRNG key).
 - ``"auto"`` -- pick the cheaper exact solver: ``"gram"`` when
-  ``n < d``, else ``"full"``.
+  :math:`n < d`, else ``"full"``.
 
 Implementation notes:
 
-- Every factorisation goes through ``eigh`` (``nitrix.linalg._solver.
-  safe_eigh``), *never* ``svd`` or ``qr``.  This is deliberate: on the
-  cuSolver-affected GPU stacks ``svd`` / ``qr`` are broken while the
-  routed ``eigh`` falls back to a device where it works.  The
-  randomised solver in particular uses the eigh-based range finder
-  (orthonormalise via the eigendecomposition of the small Gram matrix)
-  rather than the textbook QR + small-SVD, so it too stays portable;
-  its only solver calls are on tiny ``(k + p) x (k + p)`` matrices, the
-  rest is matmuls.
-- Eigenvector signs are arbitrary; we fix them deterministically
+- Every factorisation goes through the symmetric eigensolver
+  (``safe_eigh``), never SVD or QR.  This is deliberate: on the
+  cuSolver-affected GPU stacks SVD and QR are broken while the routed
+  eigendecomposition falls back to a device where it works.  The
+  randomised solver in particular uses the eigendecomposition-based
+  range finder (orthonormalise via the eigendecomposition of the small
+  Gram matrix) rather than the textbook QR + small-SVD, so it too stays
+  portable; its only solver calls are on tiny
+  :math:`(k + p) \\times (k + p)` matrices, the rest is matmuls.
+- Eigenvector signs are arbitrary; they are fixed deterministically
   (largest-magnitude entry of each component made positive, the
   ``svd_flip`` convention) so a fit is reproducible across runs and
   devices.
-
-Roadmap (the family will grow along the ``solver=`` seam, mirroring the
-extremal-eigensolver dispatcher): a sparse-``X`` path routed to the
-sparse eig solvers.
 """
 
 from __future__ import annotations
@@ -92,7 +94,24 @@ class PCAResult(NamedTuple):
 
 
 def _svd_flip_sign(components: Float[Array, 'k d']) -> Float[Array, 'k d']:
-    """Deterministic sign: make each row's largest-|.| entry positive."""
+    """Fix each component's sign deterministically.
+
+    Applies the ``svd_flip`` convention: the entry of largest absolute
+    value in each row is made positive, resolving the arbitrary sign of
+    each eigenvector so that a fit is reproducible across runs and
+    devices.
+
+    Parameters
+    ----------
+    components
+        ``(k, d)`` array whose rows are the principal axes.
+
+    Returns
+    -------
+    Float[Array, 'k d']
+        The same ``(k, d)`` array with each row scaled by
+        :math:`\\pm 1` so that its largest-magnitude entry is positive.
+    """
     max_abs = jnp.argmax(jnp.abs(components), axis=1)
     picked = jnp.take_along_axis(components, max_abs[:, None], axis=1)[:, 0]
     signs = jnp.where(picked < 0, -1.0, 1.0)
@@ -102,9 +121,22 @@ def _svd_flip_sign(components: Float[Array, 'k d']) -> Float[Array, 'k d']:
 def _orthonormalize(g: Float[Array, 'd l']) -> Float[Array, 'd l']:
     """Orthonormalise the columns of ``g`` via the Gram eigendecomposition.
 
-    ``Q = g V Λ^{-1/2}`` from ``gᵀ g = V Λ Vᵀ`` -- an ``eigh``-based
-    substitute for QR (unavailable on the cuSolver-affected GPU stacks).
-    The eigh is on the small ``(l, l)`` Gram matrix.
+    Forms :math:`Q = g V \\Lambda^{-1/2}` from the eigendecomposition
+    :math:`g^{\\top} g = V \\Lambda V^{\\top}` -- an
+    eigendecomposition-based substitute for QR (unavailable on the
+    cuSolver-affected GPU stacks).  The factorisation acts on the small
+    :math:`(l, l)` Gram matrix.
+
+    Parameters
+    ----------
+    g
+        ``(d, l)`` matrix whose columns are to be orthonormalised.
+
+    Returns
+    -------
+    Float[Array, 'd l']
+        ``(d, l)`` matrix with orthonormal columns spanning the same
+        column space as ``g``.
     """
     w, v = safe_eigh(g.T @ g)
     w = jnp.maximum(w, 1e-12)
@@ -114,7 +146,31 @@ def _orthonormalize(g: Float[Array, 'd l']) -> Float[Array, 'd l']:
 def _pca_full(
     xc: Float[Array, 'n d'], k: int, denom: int
 ) -> tuple[Float[Array, 'k d'], Float[Array, 'k']]:
-    """Exact PCA: ``eigh`` of the ``(d, d)`` covariance."""
+    """Exact PCA via eigendecomposition of the covariance matrix.
+
+    Forms the :math:`(d, d)` covariance ``xc.T @ xc / denom``,
+    eigendecomposes it with ``safe_eigh``, and returns the top ``k``
+    eigenvectors and eigenvalues in descending order of variance.
+
+    Parameters
+    ----------
+    xc
+        ``(n, d)`` centred data matrix.
+    k
+        Number of leading components to return.
+    denom
+        Divisor applied to the second-moment matrix (typically
+        :math:`n - 1`) to yield the covariance.
+
+    Returns
+    -------
+    components : Float[Array, 'k d']
+        ``(k, d)`` orthonormal basis, row ``i`` the ``i``-th principal
+        axis.
+    explained_variance : Float[Array, 'k']
+        ``(k,)`` covariance eigenvalues (variance captured per
+        component), descending.
+    """
     cov = (xc.T @ xc) / denom
     eigvals, eigvecs = safe_eigh(cov)
     order = jnp.argsort(eigvals)[::-1]
@@ -126,12 +182,33 @@ def _pca_full(
 def _pca_gram(
     xc: Float[Array, 'n d'], k: int, denom: int
 ) -> tuple[Float[Array, 'k d'], Float[Array, 'k']]:
-    """Exact PCA via the ``(n, n)`` Gram matrix (cheap when ``n << d``).
+    """Exact PCA via the Gram matrix (cheap when :math:`n \\ll d`).
 
-    ``eigh`` of ``Xc Xcᵀ / (n - 1)`` gives the left singular structure
-    ``(U, λ)`` with ``λ`` the same variances as the covariance
-    eigenvalues; the components (right singular vectors) are recovered
-    as ``V = Xcᵀ U / Σ`` with ``Σ = sqrt(λ (n - 1))``.
+    Eigendecomposition of the :math:`(n, n)` Gram matrix
+    :math:`X_c X_c^{\\top} / (n - 1)` gives the left singular structure
+    :math:`(U, \\lambda)`, with :math:`\\lambda` the same variances as
+    the covariance eigenvalues; the components (right singular vectors)
+    are recovered as :math:`V = X_c^{\\top} U / \\Sigma` with
+    :math:`\\Sigma = \\sqrt{\\lambda (n - 1)}`.  Yields results identical
+    to :func:`_pca_full` while avoiding the :math:`(d, d)` covariance.
+
+    Parameters
+    ----------
+    xc
+        ``(n, d)`` centred data matrix.
+    k
+        Number of leading components to return.
+    denom
+        Divisor applied to the Gram matrix (typically :math:`n - 1`);
+        also used to rescale the eigenvalues into singular values.
+
+    Returns
+    -------
+    components : Float[Array, 'k d']
+        ``(k, d)`` orthonormal basis, row ``i`` the ``i``-th principal
+        axis.
+    explained_variance : Float[Array, 'k']
+        ``(k,)`` variance captured per component, descending.
     """
     gram = (xc @ xc.T) / denom
     eigvals, u = safe_eigh(gram)
@@ -151,13 +228,42 @@ def _pca_randomized(
     n_oversamples: int,
     n_power_iterations: int,
 ) -> tuple[Float[Array, 'k d'], Float[Array, 'k']]:
-    """Randomised PCA via the eigh-based range finder (no QR / SVD).
+    """Randomised PCA via the eigendecomposition-based range finder.
 
-    Sketches the row space with a random ``(n, l)`` projection
-    (``l = k + n_oversamples``), refines it with power iterations,
-    orthonormalises through the small Gram eigh, then solves the
-    projected ``(l, l)`` eigenproblem.  All large operations are
-    matmuls; the only solver calls are on ``(l, l)`` matrices.
+    Uses neither QR nor SVD.  Sketches the row space with a random
+    :math:`(n, l)` projection (:math:`l = k + p`, ``p = n_oversamples``),
+    refines it with ``n_power_iterations`` power iterations,
+    orthonormalises through the small Gram eigendecomposition
+    (:func:`_orthonormalize`), then solves the projected :math:`(l, l)`
+    eigenproblem.  All large operations are matmuls; the only solver
+    calls are on :math:`(l, l)` matrices.
+
+    Parameters
+    ----------
+    xc
+        ``(n, d)`` centred data matrix.
+    k
+        Number of leading components to return.
+    denom
+        Divisor applied to the recovered eigenvalues (typically
+        :math:`n - 1`) to yield explained variances.
+    key
+        PRNG key seeding the random :math:`(n, l)` sketch.
+    n_oversamples
+        Oversampling :math:`p`; the sketch width is :math:`k + p`
+        (clamped to :math:`\\min(n, d)`).  Larger values improve
+        accuracy at higher cost.
+    n_power_iterations
+        Number of power iterations :math:`q` used to sharpen the
+        spectral separation before orthonormalisation.
+
+    Returns
+    -------
+    components : Float[Array, 'k d']
+        ``(k, d)`` approximate orthonormal basis, row ``i`` the ``i``-th
+        principal axis.
+    explained_variance : Float[Array, 'k']
+        ``(k,)`` approximate variance captured per component, descending.
     """
     n, d = xc.shape
     ell = min(k + n_oversamples, min(n, d))
@@ -261,10 +367,27 @@ def pca_transform(
 ) -> Float[Array, 'n k']:
     """Project ``X`` onto a PCA basis: ``(X - mean) @ components.T``.
 
-    Takes ``components`` / ``mean`` explicitly (rather than a
-    :class:`PCAResult`) so a *pre-fitted* basis -- e.g. components
-    loaded from elsewhere -- can be applied without a local
-    :func:`pca_fit`.
+    Centres ``X`` by ``mean`` and projects onto the rows of
+    ``components`` to obtain the principal-component coordinates.  Takes
+    ``components`` and ``mean`` explicitly (rather than a
+    :class:`PCAResult`) so a pre-fitted basis -- e.g. components loaded
+    from elsewhere -- can be applied without a local :func:`pca_fit`.
+
+    Parameters
+    ----------
+    X
+        ``(n, d)`` data matrix (rows = samples, columns = features).
+    components
+        ``(k, d)`` orthonormal basis, row ``i`` the ``i``-th principal
+        axis.
+    mean
+        ``(d,)`` feature mean subtracted before projection.
+
+    Returns
+    -------
+    Float[Array, 'n k']
+        ``(n, k)`` coordinates of each sample in the principal-component
+        basis.
     """
     return (X - mean) @ components.T
 
@@ -276,7 +399,23 @@ def pca_inverse_transform(
 ) -> Float[Array, 'n d']:
     """Reconstruct from PCA coordinates: ``Z @ components + mean``.
 
-    Exact (up to the discarded components) inverse of
-    :func:`pca_transform`.
+    Maps principal-component coordinates back to feature space, the
+    exact inverse of :func:`pca_transform` up to the components that were
+    discarded when the basis was truncated.
+
+    Parameters
+    ----------
+    Z
+        ``(n, k)`` principal-component coordinates.
+    components
+        ``(k, d)`` orthonormal basis, row ``i`` the ``i``-th principal
+        axis.
+    mean
+        ``(d,)`` feature mean added back after reconstruction.
+
+    Returns
+    -------
+    Float[Array, 'n d']
+        ``(n, d)`` reconstruction in the original feature space.
     """
     return Z @ components + mean

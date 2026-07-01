@@ -1,7 +1,7 @@
 ---
 title: "halfnormal_prior"
 generated: true
-description: "Half-normal prior on the lengthscale `rho` (penalises large `rho`)."
+description: "Build a half-normal lengthscale prior that penalises large `rho`."
 ---
 
 [‹ back to `nitrix.stats.priors`](../nitrix-stats-priors.qmd)
@@ -13,11 +13,14 @@ halfnormal_prior(sd: float) -> PriorFn
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:halfnormal_prior -->
-Half-normal prior on the lengthscale `rho` (penalises large `rho`).
+Build a half-normal lengthscale prior that penalises large `rho`.
 
-`p(rho) ~ exp(-rho**2 / (2 sd**2))` on `rho > 0`, so
-`-log p(rho) = rho**2 / (2 sd**2)` (up to a constant): a soft cap that pulls
-the estimate **down**, away from over-smooth (near-linear) fits.
+The prior density is
+$p(\rho) \propto \exp(-\rho^2 / (2\,\sigma^2))$ on $\rho > 0$,
+so the returned penalty is
+$-\log p(\rho) = \rho^2 / (2\,\sigma^2)$ (up to an additive
+constant): a soft cap that pulls the estimate down, away from over-smooth
+(near-linear) fits.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:halfnormal_prior -->
@@ -25,8 +28,8 @@ the estimate **down**, away from over-smooth (near-linear) fits.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `sd` | `float` | — | — | The half-normal scale. Smaller `sd` is a stronger pull toward small `rho`; a sensible value is on the order of the covariate range. |
+| `sd` | `float` | — | — | The half-normal scale $\sigma$ (must be positive). Smaller `sd` is a stronger pull toward small $\rho$; a sensible value is on the order of the covariate range. |
 
-**Returns** `PriorFn`.
+**Returns** `PriorFn`. A callable mapping a scalar lengthscale $\rho$ (shape `()`) to the scalar negative log-density $-\log p(\rho)$ (shape `()`), suitable for the `map_rho=` argument of `nitrix.stats.gp_fit` and `nitrix.stats.hgp_fit`.
 <!-- nitrix:/gen -->
 

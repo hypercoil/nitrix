@@ -1,7 +1,7 @@
 ---
 title: "smooth_partial_effect"
 generated: true
-description: "Per-element partial effect of one smooth on a covariate grid `x`."
+description: "Evaluate one smooth's partial effect on a covariate grid."
 ---
 
 [‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
@@ -13,16 +13,11 @@ smooth_partial_effect(result: GAMResult, smooth_index: int, basis: Smooth, x: Un
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:smooth_partial_effect -->
-Per-element partial effect of one smooth on a covariate grid `x`.
+Evaluate one smooth's partial effect on a covariate grid.
 
-Returns `(effect, se)`: the fitted smooth `B(x) gamma_k` and its
-pointwise standard error from the Bayesian covariance block (for a
-credible band).  `basis` is the smooth used to build the term; for a
-`TensorBasis` pass `x` as a tuple of matched per-margin grids (all
-length `g`) and the effect is the interaction surface along that path.
-For a `REBasis` pass `x` as the integer level indices to read off -- the
-effect is then the per-level random effect (the BLUP intercept, or the
-random-slope coefficient) at those levels.
+Computes the per-element fitted smooth $B(x)\,\gamma_k$ and its
+pointwise standard error from the Bayesian covariance block (for a credible
+band).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:smooth_partial_effect -->
@@ -30,11 +25,11 @@ random-slope coefficient) at those levels.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GAMResult` | — | — | — |
-| `smooth_index` | `int` | — | — | — |
-| `basis` | `Smooth` | — | — | — |
-| `x` | `Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]` | — | — | — |
+| `result` | `GAMResult` | — | — | A `GAMResult` from `gam_fit`. |
+| `smooth_index` | `int` | — | — | Index of the smooth term (into `result.col_slices`) to render. |
+| `basis` | `Smooth` | — | — | The smooth basis used to build this term. For a `TensorBasis` pass `x` as a tuple of matched per-margin grids (all length `g`) and the effect is the interaction surface along that path. For a `REBasis` pass `x` as the integer level indices to read off, and the effect is the per-level random effect (the best linear unbiased predictor intercept, or the random-slope coefficient) at those levels. |
+| `x` | `Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]]` | — | — | `(g,)` covariate grid, or a tuple of per-margin grids for a tensor smooth, at which to evaluate the effect. |
 
-**Returns** `Tuple[Float[Array, 'V g'], Float[Array, 'V g']]`.
+**Returns** `Tuple[Float[Array, 'V g'], Float[Array, 'V g']]`. The fitted partial effect at each grid point, per element. The pointwise standard error of the effect, per element.
 <!-- nitrix:/gen -->
 

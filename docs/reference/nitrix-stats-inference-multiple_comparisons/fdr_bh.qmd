@@ -1,7 +1,7 @@
 ---
 title: "fdr_bh"
 generated: true
-description: "Benjamini-Hochberg FDR correction (valid under independence / PRDS)."
+description: "Benjamini-Hochberg false-discovery-rate correction."
 ---
 
 [‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
@@ -13,11 +13,9 @@ fdr_bh(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array,
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:fdr_bh -->
-Benjamini-Hochberg FDR correction (valid under independence / PRDS).
+Benjamini-Hochberg false-discovery-rate correction.
 
-Returns `(rejected, p_adjusted)`: the BH-adjusted p-values (q-values,
-enforced monotone non-decreasing in rank) and the rejection mask
-`p_adjusted <= alpha`.
+Valid under independence or positive regression dependence of the p-values.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:fdr_bh -->
@@ -25,10 +23,10 @@ enforced monotone non-decreasing in rank) and the rejection mask
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `p_values` | `Float` | `n` | — | — |
-| `alpha` | `float` | — | `0.05` | — |
+| `p_values` | `Float` | `n` | — | Flat vector of `n` per-element p-values. |
+| `alpha` | `float` | — | `0.05` | Target false-discovery rate defining the rejection mask. Default `0.05`. |
 
-**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`. The rejection mask `p_adjusted <= alpha`. The Benjamini-Hochberg adjusted p-values (q-values), enforced monotone non-decreasing in rank.
 <!-- nitrix:/gen -->
 
 

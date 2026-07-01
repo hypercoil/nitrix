@@ -15,21 +15,24 @@ hsgp_basis(x: Float[Array, ' n'], n_basis: int = 20, *, kernel: str = 'matern52'
 <!-- nitrix:gen overview:hsgp_basis -->
 Build a Hilbert-space approximate GP smooth (HSGP) for covariate `x`.
 
-A reduced-rank stationary GP on the bounded domain `[c - L, c + L]`
-(`c` the data midrange, `L = boundary * half-range`), expanded in the
-Dirichlet-Laplacian eigenfunctions `phi_j(x) = sqrt(1/L) sin(sqrt(lam_j)
-(x - c + L))` with `sqrt(lam_j) = j pi / (2 L)`.  The kernel enters
-**only** through the spectral density weights `s_j = S_theta(sqrt(lam_j))`
+A reduced-rank stationary GP on the bounded domain $[c - L, c + L]$
+($c$ the data midrange, $L = boundary \cdot \text{half-range}$),
+expanded in the Dirichlet-Laplacian eigenfunctions
+$\phi_j(x) = \sqrt{1/L} \sin(\sqrt{\lambda_j}\,(x - c + L))$ with
+$\sqrt{\lambda_j} = j \pi / (2 L)$.  The kernel enters **only**
+through the spectral density weights
+$s_j = S_\theta(\sqrt{\lambda_j})$
 (`spectral_density`): the whitened design is
-`Psi = [sqrt(s_j) phi_j(x)]` with an **identity penalty**, so the basis is
-a drop-in smooth for `gam_fit` and the Fellner-Schall smoothing
-parameter `lambda = 1 / sigma_f**2` is the GP amplitude.
+$\Psi = [\sqrt{s_j}\, \phi_j(x)]$ with an **identity penalty**, so
+the basis is a drop-in smooth for `gam_fit` and the
+Fellner-Schall smoothing parameter $\lambda = 1 / \sigma_f^2$ is the
+GP amplitude.
 
 Unlike the kriging `gp_basis`, the eigenfunctions are independent of
 the kernel hyperparameters, so the lengthscale `rho` enters as a diagonal
-reweighting of a fixed design -- the basis for `eigh`-free `rho`
-estimation (the standalone `gp_fit`; not this constructor, which fixes
-`rho`).
+reweighting of a fixed design -- the basis for eigendecomposition-free
+lengthscale estimation (the standalone `gp_fit`; not
+this constructor, which fixes `rho`).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:hsgp_basis -->
@@ -46,7 +49,7 @@ estimation (the standalone `gp_fit`; not this constructor, which fixes
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` data range override (defaults to the data min/max). |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `SplineBasis`.
+**Returns** `SplineBasis`. The `SplineBasis` for the HSGP smooth (`kind='hsgp'`).
 <!-- nitrix:/gen -->
 
 

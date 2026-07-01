@@ -1,7 +1,7 @@
 ---
 title: "SmoothTest"
 generated: true
-description: "Per-smooth approximate-significance test (Wood 2013, integer-rank)."
+description: "Per-smooth approximate-significance test (Wood, 2013; integer-rank)."
 ---
 
 [‹ back to `nitrix.stats.gam`](../nitrix-stats-gam.qmd)
@@ -13,12 +13,13 @@ class SmoothTest(NamedTuple)
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:SmoothTest -->
-Per-smooth approximate-significance test (Wood 2013, integer-rank).
+Per-smooth approximate-significance test (Wood, 2013; integer-rank).
 
-Each field is `(V, m)` -- one column per smooth (in `smooths` order), one
-row per element.  `stat` is the test statistic `T_r`, `rank` its
-reference degrees of freedom, `p_value` the upper-tail p (chi-square for a
-fixed-dispersion family, `F` with `N - edf_total` denominator df
+Each field is `(V, m)` -- one column per smooth (in `smooths` order),
+one row per element.  `stat` is the test statistic $T_r$, `rank`
+its reference degrees of freedom, `p_value` the upper-tail p-value
+($\chi^2$ for a fixed-dispersion family, $F$ with
+$N - \text{edf}_{\text{total}}$ denominator degrees of freedom
 otherwise), and `edf` the smooth's effective degrees of freedom (the
 `mgcv::summary.gam` "edf" column).
 <!-- nitrix:/gen -->

@@ -1,7 +1,7 @@
 ---
 title: "GPResult"
 generated: true
-description: "Per-element Gaussian-process fit output (`gp_fit`)."
+description: "Per-element Gaussian-process fit output (from `gp_fit`)."
 ---
 
 [‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
@@ -13,7 +13,7 @@ class GPResult
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:GPResult -->
-Per-element Gaussian-process fit output (`gp_fit`).
+Per-element Gaussian-process fit output (from `gp_fit`).
 
 Some fields are engine- or mode-conditional: `lo` / `hi` / `boundary`
 drive `engine='hsgp'` re-evaluation only; `nd_meta` is set only for a

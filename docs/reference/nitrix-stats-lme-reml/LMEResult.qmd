@@ -1,7 +1,7 @@
 ---
 title: "LMEResult"
 generated: true
-description: "Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal random slope `(1 + x | g)` / `(x || g)`."
+description: "Block-Woodbury (R2) mixed-model fit output for one random slope."
 ---
 
 [‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
@@ -13,17 +13,18 @@ class LMEResult
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:LMEResult -->
-Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal
-random slope `(1 + x | g)` / `(x || g)`.
+Block-Woodbury (R2) mixed-model fit output for one random slope.
 
-The `lme_fit` dispatcher returns this for the R2 tier; the scalar-intercept
-R1 tier returns a `REMLResult` (the FaST-LMM path), and the nested /
-crossed / structured-residual tiers their own result types.
+The output of the R2 tier -- one correlated or diagonal random slope
+(`(1 + x | g)` or `(x || g)`).  The `lme_fit` dispatcher returns
+this for the R2 tier; the scalar-intercept R1 tier returns a
+`REMLResult` (the FaST-LMM path), and the nested / crossed /
+structured-residual tiers their own result types.
 
 Carries the fixed-effect contrast-inference tensors (`fixed_cov` /
-`theta_cov` / `grad_m`, audit D3-R2), so `lme_t_contrast` /
-`lme_f_contrast` accept it with the **same** Satterthwaite / Kenward-Roger
-df machinery as R1.
+`theta_cov` / `grad_m`), so `lme_t_contrast` /
+`lme_f_contrast` accept it with the **same** Satterthwaite /
+Kenward-Roger df machinery as R1.
 <!-- nitrix:/gen -->
 
 ### Methods

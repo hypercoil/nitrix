@@ -15,14 +15,22 @@ glasso(S: Float[Array, 'p p'], lam: float | Float[Array, ''], *, n_outer: int = 
 <!-- nitrix:gen overview:glasso -->
 Graphical-LASSO sparse precision (inverse covariance).
 
-Solves `argmin_Theta <S, Theta> - log det Theta + lam ||Theta||_{1,off}`
-(off-diagonal-only L1 penalty -- the standard / nilearn convention) by
-Friedman/Hastie/Tibshirani (2008) block-coordinate descent: an outer sweep
-over columns, each an inner lasso on the working covariance `W`, with the
-precision recovered from the converged per-column coefficients.  No
-factorisation, no cuSOLVER; all loops rolled ($O(p^2)$ graph), so it is
-differentiable through the fixed iteration budget and compiles flat in `p`
-(fine for connectome `p = 100-400`).
+Solves
+
+$$
+\operatorname*{argmin}_{\Theta}\;
+\langle S, \Theta \rangle - \log\det\Theta
++ \lambda \lVert\Theta\rVert_{1,\mathrm{off}}
+$$
+
+(an off-diagonal-only L1 penalty -- the standard convention) by the
+block-coordinate descent of Friedman, Hastie and Tibshirani (2008): an
+outer sweep over columns, each an inner lasso on the working covariance
+`W`, with the precision recovered from the converged per-column
+coefficients.  There is no factorisation and no cuSOLVER; all loops are
+rolled (an $O(p^2)$ graph), so the solve is differentiable through the
+fixed iteration budget and compiles flat in $p$ (well suited to
+connectome sizes of $p = 100$-$400$).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:glasso -->

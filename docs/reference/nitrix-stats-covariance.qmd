@@ -24,39 +24,23 @@ Empirical covariance / correlation / partial / conditional measures.
 Differentiable, batched (n-D leading batch), JIT-safe.  Supports:
 
 - Unweighted, scalar bias / unbias.
-- **Vector weights** (per-observation; the diagonal of W).
+- **Vector weights** (per-observation; the diagonal of $W$).
 - **Matrix weights** (full `(obs, obs)` coupling; useful for
   inter-temporal weighting, lagged covariance, etc.).
-- Ridge regularisation via the `l2` knob (adds `l2 I` to the
-  estimated covariance).
+- Ridge regularisation via the `l2` knob (adds $\lambda I$
+  to the estimated covariance).
 
-The green-field rewrite drops three warts from
-`nitrix.functional.covariance`:
-
-1. **The JIT trap.**  Legacy `_is_diagonal(W)` inspected the
-   weight matrix's contents at trace time -- under JIT, this
-   silently bypassed the nondiagonal-weight path and produced
-   wrong results when the function was first traced with a
-   diagonal weight then re-invoked with a non-diagonal one.
-   The new version dispatches *only* on `W.ndim` (a shape
-   property, JIT-stable) and treats the user-supplied matrix as
-   given.
-2. **The implicit `_conform_bform_weight` reshape.**  Removed.
-   `weights` is required to broadcast against `X` in the
-   standard way.
-3. **The `avg` precomputation for matrix weights.**  Legacy
-   computed `avg = X @ (W / sum(W))` which is the "right
-   marginal of W" weighting -- but with a per-row sum, not a
-   matrix product.  The new version computes the correct
-   weighted mean `mu[i] = sum_t marginal_weight_t * X[i, t] /
-   sum(marginal_weight)` explicitly.
+The weighted mean underlying the matrix-weight path computes
+$\mu_i = \sum_t m_t X_{it} / \sum_t m_t$, where the
+per-observation marginal weight $m_t$ is the row sum of the
+supplied weight matrix.
 
 Functions exposed:
 
 - `cov` / `corr` -- unary covariance / correlation.
 - `pairedcov` / `pairedcorr` -- bivariate (X, Y).
-- `partialcov` / `partialcorr` -- conditioned on all other
-  variables (inverse-covariance-derived).
+- `partialcov` / `partialcorr` -- conditioned on all
+  other variables (inverse-covariance-derived).
 - `conditionalcov` / `conditionalcorr` -- conditioned on
   an external set of variables (residualise + cov).
 - `precision` -- inverse covariance (matrix inverse or
