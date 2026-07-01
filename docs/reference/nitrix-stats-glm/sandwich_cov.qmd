@@ -24,7 +24,7 @@ the raw residual $y_i - \mu_i$ -- the classic Huber-White form).  The
 computation avoids cuSOLVER and maps over elements; the sandwich weights are
 treated as data-dependent constants and are not differentiated through.
 
-Pass the result as `cov=` to `t_contrast` / `f_contrast`.
+Pass the result as `cov=` to [`t_contrast`](../nitrix-stats-glm/t_contrast.qmd) / [`f_contrast`](../nitrix-stats-glm/f_contrast.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:sandwich_cov -->
@@ -32,9 +32,9 @@ Pass the result as `cov=` to `t_contrast` / `f_contrast`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | The fitted `GLMResult` and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
-| `Y` | `Float` | `V` × `N` | — | The fitted `GLMResult` and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
-| `X` | `Float` | `N` × `p` | — | The fitted `GLMResult` and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
+| `result` | `GLMResult` | — | — | The fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
+| `Y` | `Float` | `V` × `N` | — | The fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
+| `X` | `Float` | `N` × `p` | — | The fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) and the data it was fit on (`X` the shared `(N, p)` design, `Y` the `(V, N)` responses). |
 | `kind` | `HCKind` | — | `'HC3'` | Heteroscedasticity-consistent variant when `groups` is `None`: `'HC0'` (raw), `'HC1'` ($n/(n-p)$ correction), `'HC2'` ($/(1 - h_i)$), `'HC3'` ($/(1 - h_i)^2$); $h_i$ the GLM hat diagonal. Ignored when `groups` is given. |
 | `groups` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` cluster labels for a **cluster-robust** covariance (one-way): $B = \sum_g s_g s_g^{\top}$, $s_g = \sum_{i \in g} x_i g_i$, with the $G/(G-1) \cdot (N-1)/(N-p)$ small-sample factor. This is **one-way** clustering -- the analogue of FSL `randomise`'s `-e` exchangeability blocks. It is **not** a variance-group model (FSL `-g` / PALM `-vg`): a separate residual *variance* per group (heteroscedastic two-sample / FLAME-style grouped variance) is a different estimator and is not provided here -- the cluster-robust meat assumes a common model, only correlating scores *within* a cluster. The cluster path is **eager-only** by default: the distinct-cluster count is found with `jnp.unique` (a data-dependent shape). To trace the whole estimator under `jax.jit`, pre-densify `groups` to contiguous `0..n_groups-1` labels and pass `n_groups`. |
 | `n_groups` | `Optional[int]` | — | `None` | Optional distinct-cluster count. `None` (default) densifies `groups` host-side; supplying it (with contiguous labels) keeps `sandwich_cov` jit-traceable. Ignored when `groups` is `None`. |

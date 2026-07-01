@@ -1,6 +1,7 @@
 ---
 title: "INVERSE_LINK"
 generated: true
+description: "The inverse link :math:`g( mu) = 1 /  mu`."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ INVERSE_LINK = Link(name='inverse', link=(lambda mu: 1.0 / jnp.clip(mu, _EPS, No
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:INVERSE_LINK -->
-*TODO: describe this type alias / constant.*
+The inverse link $g(\mu) = 1 / \mu$.
 <!-- nitrix:/gen -->
 

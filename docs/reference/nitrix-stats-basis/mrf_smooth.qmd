@@ -34,7 +34,7 @@ Laplacian** $L = D - A$ of the region adjacency
 | `neighbours` | `Float` | `R` × `R` | — | `(R, R)` region adjacency matrix (non-negative, symmetric; `1` for adjacent regions). |
 | `center` | `bool` | — | `True` | Apply the (count-weighted) sum-to-zero constraint (default `True`). |
 
-**Returns** `SplineBasis`. The `SplineBasis` for the MRF smooth (`kind='mrf'`, with `n_basis = R`).
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the MRF smooth (`kind='mrf'`, with `n_basis = R`).
 <!-- nitrix:/gen -->
 
 

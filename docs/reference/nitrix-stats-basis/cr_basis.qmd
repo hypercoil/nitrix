@@ -31,7 +31,7 @@ Equivalent to `scipy`'s natural `CubicSpline` interpolation at the knots.
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Unused for `cr` (knots come from the data quantiles); accepted for a uniform smooth-constructor signature. |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `SplineBasis`. The `SplineBasis` for the cubic-regression smooth (`kind='cr'`).
+**Returns** `SplineBasis`. The [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) for the cubic-regression smooth (`kind='cr'`).
 <!-- nitrix:/gen -->
 
 

@@ -1,7 +1,7 @@
 ---
 title: "GPResult"
 generated: true
-description: "Per-element Gaussian-process fit output (from `gp_fit`)."
+description: "Per-element Gaussian-process fit output (from [`gp_fit`](../nitrix-stats-gp/gp_fit.qmd))."
 ---
 
 [‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
@@ -13,13 +13,13 @@ class GPResult
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:GPResult -->
-Per-element Gaussian-process fit output (from `gp_fit`).
+Per-element Gaussian-process fit output (from [`gp_fit`](../nitrix-stats-gp/gp_fit.qmd)).
 
 Some fields are engine- or mode-conditional: `lo` / `hi` / `boundary`
 drive `engine='hsgp'` re-evaluation only; `nd_meta` is set only for a
 multi-dimensional fit (`None` otherwise); `corr_rho` is `0` unless a
 `corr` structure was fitted; and for a non-Gaussian `family` `coef` is
-on the link scale (see `gp_predict`).
+on the link scale (see [`gp_predict`](../nitrix-stats-gp/gp_predict.qmd)).
 <!-- nitrix:/gen -->
 
 ### Methods

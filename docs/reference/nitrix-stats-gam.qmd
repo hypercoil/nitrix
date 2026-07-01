@@ -21,7 +21,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Mass-univariate generalised additive (mixed) models.
 
-`gam_fit` fits, per element (voxel / vertex / fixel), a generalised
+[`gam_fit`](nitrix-stats-gam/gam_fit.qmd) fits, per element (voxel / vertex / fixel), a generalised
 additive model
 
 $$
@@ -68,12 +68,12 @@ eigensolver, so the whole fit runs on hardware where that solver is unreliable.
 
 ### Outputs (modelarray ``gam`` parity)
 
-`GAMResult` carries per-element coefficients, selected $\lambda$,
+[`GAMResult`](nitrix-stats-gam/GAMResult.qmd) carries per-element coefficients, selected $\lambda$,
 per-smooth **effective degrees of freedom** (the trace of the smooth's influence
 block) and total effective degrees of freedom, dispersion, deviance, and the
 Bayesian coefficient covariance $V = (X^{\top} W X + S_\lambda)^{-1}$ (for
 smooth-term confidence bands and the approximate $F$ / $\chi^2$
-tests).  Partial effects are rendered with `smooth_partial_effect`.
+tests).  Partial effects are rendered with [`smooth_partial_effect`](nitrix-stats-gam/smooth_partial_effect.qmd).
 
 ### References
 

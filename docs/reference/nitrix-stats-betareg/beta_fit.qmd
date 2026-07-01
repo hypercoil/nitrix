@@ -35,7 +35,7 @@ inputs when not tracing).
 | `ridge` | `float` | — | `1e-08` | Small stabiliser added to the diagonal of the normal equations and the Fisher information (default `1e-8`). |
 | `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory; `None` processes all elements in one `vmap`. |
 
-**Returns** `BetaResult`. A `BetaResult` with fields `coef`, `precision`, `cov_unscaled` (the coefficient covariance $\operatorname{Cov}(\hat\beta)$), `log_lik`, and `n_obs`. A fixed-effect contrast is $c^{\top}\hat\beta$ with standard error $\sqrt{c^{\top}\,\mathtt{cov\_unscaled}\,c}$ on $N - p$ degrees of freedom.
+**Returns** `BetaResult`. A [`BetaResult`](../nitrix-stats-betareg/BetaResult.qmd) with fields `coef`, `precision`, `cov_unscaled` (the coefficient covariance $\operatorname{Cov}(\hat\beta)$), `log_lik`, and `n_obs`. A fixed-effect contrast is $c^{\top}\hat\beta$ with standard error $\sqrt{c^{\top}\,\mathtt{cov\_unscaled}\,c}$ on $N - p$ degrees of freedom.
 <!-- nitrix:/gen -->
 
 

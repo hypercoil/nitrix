@@ -32,7 +32,7 @@ the new design and returns, per `type`:
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `OrdinalResult` | — | — | An `OrdinalResult` from `ordinal_fit`. |
+| `result` | `OrdinalResult` | — | — | An [`OrdinalResult`](../nitrix-stats-ordinal/OrdinalResult.qmd) from [`ordinal_fit`](../nitrix-stats-ordinal/ordinal_fit.qmd). |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` design (no intercept column, as at fit -- the thresholds absorb it). |
 | `type` | `Literal['class_prob', 'cum_prob', 'class']` | — | `'class_prob'` | Output kind (see above). |
 

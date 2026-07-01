@@ -1,6 +1,7 @@
 ---
 title: "TWEEDIE"
 generated: true
+description: "The Tweedie family at power ``1.5`` (log link) -- compound Poisson-gamma responses; build others with ``tweedie(p)``."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ TWEEDIE = tweedie(1.5)
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:TWEEDIE -->
-*TODO: describe this type alias / constant.*
+The Tweedie family at power `1.5` (log link) -- compound Poisson-gamma responses; build others with `tweedie(p)`.
 <!-- nitrix:/gen -->
 

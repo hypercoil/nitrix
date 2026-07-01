@@ -39,8 +39,8 @@ documented follow-up; the integer-rank test reproduces
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GAMResult` | — | — | A `GAMResult` from `gam_fit`. |
-| `smooths` | `Sequence[Smooth]` | — | — | The same sequence of smooth terms passed to `gam_fit`, in the same order (their `design` supplies each term's model matrix). |
+| `result` | `GAMResult` | — | — | A [`GAMResult`](../nitrix-stats-gam/GAMResult.qmd) from [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd). |
+| `smooths` | `Sequence[Smooth]` | — | — | The same sequence of smooth terms passed to [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd), in the same order (their `design` supplies each term's model matrix). |
 
 **Returns** `SmoothTest`. The per-smooth test statistic, effective degrees of freedom, reference rank, and p-value, each a `(V, m)` array.
 <!-- nitrix:/gen -->

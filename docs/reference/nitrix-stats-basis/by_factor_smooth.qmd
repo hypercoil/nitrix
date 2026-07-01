@@ -17,8 +17,8 @@ By-variable factor smooths `s(x, by=f)` -- one smooth of `x` per level.
 
 mgcv's `s(x, by=f)` for a **factor** `f`: a *separate* penalised smooth
 of `x` for each level of `f`, each with its **own** smoothing parameter.
-Returns a tuple of `len == n_levels` `SplineBasis` blocks; splat it
-into the `smooths=` argument of `gam_fit` (each block
+Returns a tuple of `len == n_levels` [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) blocks; splat it
+into the `smooths=` argument of [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) (each block
 is an independent smooth, so the Fellner-Schall loop selects a per-level
 smoothing parameter).
 
@@ -38,11 +38,11 @@ mean (the smooths are sum-to-zero when `center=True`, as in mgcv).
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate. |
 | `by` | `Int` | `n` | — | `(n,)` integer factor labels in `0 .. L-1`. |
-| `n_basis` | `int` | — | `10` | Marginal P-spline parameters (see `bspline_basis`). |
-| `degree` | `int` | — | `3` | Marginal P-spline parameters (see `bspline_basis`). |
-| `penalty_order` | `int` | — | `2` | Marginal P-spline parameters (see `bspline_basis`). |
-| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see `bspline_basis`). |
-| `center` | `bool` | — | `True` | Marginal P-spline parameters (see `bspline_basis`). |
+| `n_basis` | `int` | — | `10` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `degree` | `int` | — | `3` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `penalty_order` | `int` | — | `2` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
+| `center` | `bool` | — | `True` | Marginal P-spline parameters (see [`bspline_basis`](../nitrix-stats-basis/bspline_basis.qmd)). |
 | `n_levels` | `Optional[int]` | — | `None` | Number of levels `L` (defaults to `int(by.max()) + 1`); pass it when a level is absent from this sample so the returned tuple length is stable. |
 
 **Returns** `Tuple[SplineBasis, ...]`.

@@ -1,7 +1,7 @@
 ---
 title: "resolve_family"
 generated: true
-description: "Resolve a `str` name (a built-in) or a `Family` instance to a family."
+description: "Resolve a `str` name (a built-in) or a [`Family`](../nitrix-stats-glm/Family.qmd) instance to a family."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -15,13 +15,13 @@ resolve_family(family: Union[str, Family]) -> Family
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:resolve_family -->
-Resolve a `str` name (a built-in) or a `Family` instance to a family.
+Resolve a `str` name (a built-in) or a [`Family`](../nitrix-stats-glm/Family.qmd) instance to a family.
 
-`glm_fit` / `gam_fit` accept either; a string is looked up in
+[`glm_fit`](../nitrix-stats-glm/glm_fit.qmd) / [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) accept either; a string is looked up in
 the built-in registry (`'gaussian'` / `'binomial'` / `'poisson'` /
 `'gamma'` / `'negbinomial'` / `'tweedie'`).  `'negbinomial'` resolves
 to the default $\alpha = 1$; for another dispersion pass
-`negbinomial` directly.
+[`negbinomial`](../nitrix-stats-glm/negbinomial-2.qmd) directly.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:resolve_family -->
@@ -29,7 +29,7 @@ to the default $\alpha = 1$; for another dispersion pass
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `family` | `Union[str, Family]` | — | — | A built-in family name or a `Family` instance. A `Family` is returned unchanged. |
+| `family` | `Union[str, Family]` | — | — | A built-in family name or a [`Family`](../nitrix-stats-glm/Family.qmd) instance. A [`Family`](../nitrix-stats-glm/Family.qmd) is returned unchanged. |
 
 **Returns** `Family`. The resolved family.
 <!-- nitrix:/gen -->

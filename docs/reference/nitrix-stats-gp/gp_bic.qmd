@@ -17,7 +17,7 @@ Per-element Bayesian information criterion for a GP / HGP fit.
 
 The marginal BIC $-2 l_R + k \log N$ (lower is better), with $k$
 the effective degrees of freedom (`_total_edf`) and $N$ the number
-of observations; see `gp_aic` for the comparability caveat.
+of observations; see [`gp_aic`](../nitrix-stats-gp/gp_aic.qmd) for the comparability caveat.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_bic -->

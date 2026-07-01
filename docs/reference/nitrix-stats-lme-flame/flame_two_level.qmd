@@ -27,12 +27,12 @@ Voxelwise FLAME-style two-level fixed-effect group model.
 | `log_sigma_b_sq_init` | `Optional[Float[Array, 'V']]` | — | `None` | Per-voxel initial value of $\log(\sigma_b^2)$, shape `(V,)`. Default heuristic: method-of-moments residual variance minus mean within-variance. |
 | `n_iter` | `int` | — | `30` | Number of Newton iterations. Default `30`. |
 | `damping` | `float` | — | `1e-06` | Levenberg guard added to the (scalar) average-information curvature. |
-| `block` | `Optional[int]` | — | `None` | Optional voxel-block size bounding peak memory on brain-scale `V` (see `reml_fit`). `None` (default) maps over all voxels in a single pass. |
+| `block` | `Optional[int]` | — | `None` | Optional voxel-block size bounding peak memory on brain-scale `V` (see [`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd)). `None` (default) maps over all voxels in a single pass. |
 | `robust` | `bool` | — | `False` | `True` enables outlier deweighting (the FLAMEO-style robust group analysis, FSL's FLAME1 followed by FLAME-outlier): a subject whose level-1 estimate is an outlier relative to the group model has its within-variance inflated by $s_i^2 / w_i$, down-weighting it in the precision-weighted group fit. This is a deterministic Huber-IRLS deweighting (not the full Bayesian outlier-mixture inference of Woolrich 2008); the converged per-subject weights are returned in `FLAMEResult.weights`. |
 | `n_deweight` | `int` | — | `5` | Number of deweighting (IRLS reweight) steps when `robust=True`. |
 | `robust_c` | `float` | — | `1.345` | Huber tuning constant on the studentized residual (default `1.345`, giving 95% efficiency under normality); smaller is more aggressive at down-weighting. |
 
-**Returns** `FLAMEResult`. A `FLAMEResult` carrying the per-voxel between-subject variance `sigma_b_sq` (shape `(V,)`), the group fixed-effect estimates `gamma_hat` (shape `(V, p)`), the per-voxel restricted log-likelihood `log_lik` (shape `(V,)`), and the per-subject `weights` (shape `(V, N)`; all `1` unless `robust=True`).
+**Returns** `FLAMEResult`. A [`FLAMEResult`](../nitrix-stats-lme-flame/FLAMEResult.qmd) carrying the per-voxel between-subject variance `sigma_b_sq` (shape `(V,)`), the group fixed-effect estimates `gamma_hat` (shape `(V, p)`), the per-voxel restricted log-likelihood `log_lik` (shape `(V,)`), and the per-subject `weights` (shape `(V, N)`; all `1` unless `robust=True`).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:flame_two_level -->

@@ -43,7 +43,7 @@ with $\operatorname{Cov}(\beta) = (X^{\top} V^{-1} X)^{-1}$ from
    $E = \sum_m \nu_m / (\nu_m - 2)$ over $\nu_m > 2$, and
    $\mathrm{df}_2 = 2 E / (E - L)$.
 
-For $L = 1$ this collapses **exactly** to `lme_t_contrast`
+For $L = 1$ this collapses **exactly** to [`lme_t_contrast`](../nitrix-stats-lme-reml/lme_t_contrast.qmd)
 ($F = t^2$, `df2` the t-Satterthwaite df, same p-value).  The
 F-statistic is differentiable; the denominator df is not (the iterative
 eigensolver feeds it under `stop_gradient` -- a model-selection-style
@@ -53,7 +53,7 @@ scalar).
 the adjusted covariance $\Phi_A$ and the moment-matched
 scaled-$F$, referred to $F(L, m)$.  It rebuilds the rotated
 basis, so re-pass the original design as `X=` / `Z=` (the compressed
-`REMLResult` does not retain it); $F = t^2$ consistency with
+[`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) does not retain it); $F = t^2$ consistency with
 `lme_t_contrast(dof='kr')` holds for $L = 1$.
 <!-- nitrix:/gen -->
 
@@ -62,13 +62,13 @@ basis, so re-pass the original design as `X=` / `Z=` (the compressed
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A `REMLResult` (`reml_fit`, the scalar-intercept tier) **or** an `LMEResult` (`lme_fit` with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields. `dof='kr'` accepts only a `REMLResult`. |
+| `result` | `'Union[REMLResult, LMEResult]'` | — | — | A [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) ([`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd), the scalar-intercept tier) **or** an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd) ([`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) with a random slope) -- both carry the `fixed_cov` / `theta_cov` / `grad_m` inference fields. `dof='kr'` accepts only a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd). |
 | `contrast` | `Float` | `L` × `p` | — | `(L, p)` contrast matrix (or a `(p,)` single-row contrast). |
 | `dof` | `ContrastDof` | — | `'satterthwaite'` | `'satterthwaite'` (default) or `'kr'` (Kenward-Roger; pass `X` / `Z`). |
 | `X` | `Optional[Float[Array, 'N p']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
 | `Z` | `Optional[Float[Array, 'N q']]` | — | `None` | The original fixed `(N, p)` / random `(N, q)` design -- required for `dof='kr'`. |
 
-**Returns** `LMEFContrast`. The per-voxel F-contrast record `LMEFContrast` `(f, df1, df2, p_value)`.
+**Returns** `LMEFContrast`. The per-voxel F-contrast record [`LMEFContrast`](../nitrix-stats-lme-reml/LMEFContrast.qmd) `(f, df1, df2, p_value)`.
 <!-- nitrix:/gen -->
 
 

@@ -21,7 +21,7 @@ Per-element maximised log-likelihood.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` carrying the stored maximised log-likelihood. |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) carrying the stored maximised log-likelihood. |
 
 **Returns** `Float` — shape `V`. `(V,)` maximised log-likelihood, one per element.
 <!-- nitrix:/gen -->

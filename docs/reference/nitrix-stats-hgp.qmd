@@ -21,7 +21,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Mass-univariate **hierarchical** Gaussian-process regression (multi-level GP).
 
-`hgp_fit` fits, per element, a *hierarchical* GP smooth of a covariate
+[`hgp_fit`](nitrix-stats-hgp/hgp_fit.qmd) fits, per element, a *hierarchical* GP smooth of a covariate
 `x` over a grouping factor -- the GP analogue of a random-slope mixed model,
 and the "GS" hierarchical GAM of Pedersen et al. (2019): a **global** smooth plus
 **group-level** smooth deviations that share a kernel:
@@ -48,7 +48,7 @@ hierarchical GP in the mixed-model sense.
 ### Construction (hsgp, the penalty variance component identity)
 
 Both the population and the group smooths use the **fixed** Hilbert-space
-eigenbasis $\Phi$ (see `nitrix.stats.gp.gp_fit`); the kernel enters
+eigenbasis $\Phi$ (see [`nitrix.stats.gp.gp_fit`](nitrix-stats-gp/gp_fit.qmd)); the kernel enters
 only as the diagonal spectral reweighting $s_j(\rho)$.  Stacking the
 population columns and the group factor-smooth columns ($\Phi$ masked to
 each group's rows) gives a single penalised design with a **block-diagonal, fully
@@ -68,13 +68,13 @@ $\lambda_{\mathrm{pop}} = \sigma_e^2 / \sigma_{\mathrm{pop}}^2$ and
 $\lambda_{\mathrm{grp}} = \sigma_e^2 / \sigma_{\mathrm{grp}}^2$ are the
 two smoothing parameters (the inverse GP amplitudes), selected by the generalised
 Fellner-Schall step exactly as a multi-smooth GAM; the shared $\rho$ is
-profiled by the same pooled-REML grid as `nitrix.stats.gp.gp_fit`.
+profiled by the same pooled-REML grid as [`nitrix.stats.gp.gp_fit`](nitrix-stats-gp/gp_fit.qmd).
 Because every penalty block is diagonal with **disjoint** columns, the
 Fellner-Schall penalty trace is the closed form
 $\operatorname{rank}_k / \lambda_k$ and the REML log-pseudo-determinant is
 a per-block sum -- no eigendecomposition.
 
-The fit reuses the `nitrix.stats.gp.gp_fit` HSGP eigenstructure and is
+The fit reuses the [`nitrix.stats.gp.gp_fit`](nitrix-stats-gp/gp_fit.qmd) HSGP eigenstructure and is
 cuSOLVER-free and `vmap` clean; the working size is
 $O(V (M_0 + (1 + L) m)^2)$ -- the factor-smooth interaction is $L$
 times wider than a plain GP, the inherent cost of per-group curves (bound it with

@@ -15,7 +15,7 @@ adj_r_squared(result: GLMResult) -> Float[Array, 'V']
 <!-- nitrix:gen overview:adj_r_squared -->
 Per-element adjusted $R^2$ (Gaussian).
 
-Applies the standard degrees-of-freedom adjustment to `r_squared`,
+Applies the standard degrees-of-freedom adjustment to [`r_squared`](../nitrix-stats-glm/r_squared.qmd),
 penalising the number of fitted parameters relative to the number of
 observations.
 <!-- nitrix:/gen -->
@@ -25,7 +25,7 @@ observations.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the deviances, observation count, and residual degrees of freedom. |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the deviances, observation count, and residual degrees of freedom. |
 
 **Returns** `Float` — shape `V`. `(V,)` adjusted $R^2$, one per element.
 <!-- nitrix:/gen -->

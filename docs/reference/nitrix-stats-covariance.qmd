@@ -37,15 +37,15 @@ supplied weight matrix.
 
 Functions exposed:
 
-- `cov` / `corr` -- unary covariance / correlation.
-- `pairedcov` / `pairedcorr` -- bivariate (X, Y).
-- `partialcov` / `partialcorr` -- conditioned on all
+- [`cov`](nitrix-stats-covariance/cov.qmd) / [`corr`](nitrix-stats-covariance/corr.qmd) -- unary covariance / correlation.
+- [`pairedcov`](nitrix-stats-covariance/pairedcov.qmd) / [`pairedcorr`](nitrix-stats-covariance/pairedcorr.qmd) -- bivariate (X, Y).
+- [`partialcov`](nitrix-stats-covariance/partialcov.qmd) / [`partialcorr`](nitrix-stats-covariance/partialcorr.qmd) -- conditioned on all
   other variables (inverse-covariance-derived).
-- `conditionalcov` / `conditionalcorr` -- conditioned on
+- [`conditionalcov`](nitrix-stats-covariance/conditionalcov.qmd) / [`conditionalcorr`](nitrix-stats-covariance/conditionalcorr.qmd) -- conditioned on
   an external set of variables (residualise + cov).
-- `precision` -- inverse covariance (matrix inverse or
+- [`precision`](nitrix-stats-covariance/precision.qmd) -- inverse covariance (matrix inverse or
   Moore-Penrose pseudoinverse).
-- Aliases: `ccov`, `ccorr`, `pcorr`, `corrcoef`.
+- Aliases: [`ccov`](nitrix-stats-covariance/ccov.qmd), [`ccorr`](nitrix-stats-covariance/ccorr.qmd), [`pcorr`](nitrix-stats-covariance/pcorr.qmd), [`corrcoef`](nitrix-stats-covariance/corrcoef.qmd).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

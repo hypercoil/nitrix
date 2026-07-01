@@ -16,14 +16,14 @@ class LMEResult
 Block-Woodbury (R2) mixed-model fit output for one random slope.
 
 The output of the R2 tier -- one correlated or diagonal random slope
-(`(1 + x | g)` or `(x || g)`).  The `lme_fit` dispatcher returns
+(`(1 + x | g)` or `(x || g)`).  The [`lme_fit`](../nitrix-stats-lme-reml/lme_fit.qmd) dispatcher returns
 this for the R2 tier; the scalar-intercept R1 tier returns a
-`REMLResult` (the FaST-LMM path), and the nested / crossed /
+[`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) (the FaST-LMM path), and the nested / crossed /
 structured-residual tiers their own result types.
 
 Carries the fixed-effect contrast-inference tensors (`fixed_cov` /
-`theta_cov` / `grad_m`), so `lme_t_contrast` /
-`lme_f_contrast` accept it with the **same** Satterthwaite /
+`theta_cov` / `grad_m`), so [`lme_t_contrast`](../nitrix-stats-lme-reml/lme_t_contrast.qmd) /
+[`lme_f_contrast`](../nitrix-stats-lme-reml/lme_f_contrast.qmd) accept it with the **same** Satterthwaite /
 Kenward-Roger df machinery as R1.
 <!-- nitrix:/gen -->
 

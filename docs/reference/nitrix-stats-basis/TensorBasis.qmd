@@ -16,7 +16,7 @@ class TensorBasis
 An anisotropic tensor-product interaction smooth
 $f(x_1, \ldots, x_d)$.
 
-Built from `d` marginal `SplineBasis` (already sum-to-zero
+Built from `d` marginal [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) (already sum-to-zero
 constrained) by the **row-wise tensor product** of their designs and the
 Kronecker-sum of per-margin penalties
 $S_j = I \otimes \cdots P_j \cdots \otimes I$ -- so each margin

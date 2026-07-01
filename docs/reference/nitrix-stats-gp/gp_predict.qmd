@@ -31,7 +31,7 @@ training grid among its per-element fields).
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GPResult` | — | — | A `GPResult` from `gp_fit`. |
+| `result` | `GPResult` | — | — | A [`GPResult`](../nitrix-stats-gp/GPResult.qmd) from [`gp_fit`](../nitrix-stats-gp/gp_fit.qmd). |
 | `x_new` | `Float` | `g` | — | `(g,)` covariate grid to predict on. |
 | `parametric` | `Optional[Float[Array, 'g q']]` | — | `None` | `(g, q)` parametric covariates matching `gp_fit`'s `parametric` (must be supplied when the fit used parametric columns). |
 | `x_train` | `Optional[Float[Array, ' N']]` | — | `None` | `(N,)` original training covariate -- **required for `engine='exact'`** (ignored for `'hsgp'`). |

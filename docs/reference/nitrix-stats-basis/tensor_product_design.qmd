@@ -1,7 +1,7 @@
 ---
 title: "tensor_product_design"
 generated: true
-description: "Re-evaluate a `TensorBasis` on a matched covariate grid."
+description: "Re-evaluate a [`TensorBasis`](../nitrix-stats-basis/TensorBasis.qmd) on a matched covariate grid."
 ---
 
 [‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
@@ -13,7 +13,7 @@ tensor_product_design(basis: TensorBasis, xs: Tuple[Float[Array, ' g'], ...]) ->
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:tensor_product_design -->
-Re-evaluate a `TensorBasis` on a matched covariate grid.
+Re-evaluate a [`TensorBasis`](../nitrix-stats-basis/TensorBasis.qmd) on a matched covariate grid.
 
 `xs` is one grid per margin (all length `g`); point `t` has covariate
 tuple `(xs[0][t], ..., xs[d-1][t])`.  Matrix-multiplying the result by the
@@ -25,7 +25,7 @@ fitted tensor coefficients renders the interaction surface along that path.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `basis` | `TensorBasis` | — | — | The `TensorBasis` to re-evaluate. |
+| `basis` | `TensorBasis` | — | — | The [`TensorBasis`](../nitrix-stats-basis/TensorBasis.qmd) to re-evaluate. |
 | `xs` | `Tuple[Float[Array, ' g'], ...]` | — | — | A tuple of one length-`g` grid per margin. |
 
 **Returns** `Float` — shape `g` × `K`. The `(g, K)` tensor design at the matched grid points.

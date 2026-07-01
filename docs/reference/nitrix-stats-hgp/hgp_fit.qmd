@@ -32,14 +32,14 @@ smoothing parameter is fitted by the generalised Fellner-Schall step.
 | `group` | `Int` | `N` | — | `(N,)` integer factor labels $0 \ldots L-1$ (the grouping the smooth varies over -- subjects, sites, ...). For `model='nested'` this is the **outer** factor. |
 | `group_inner` | `Optional[Int[Array, ' N']]` | — | `None` | `(N,)` integer labels of the **inner** factor (nested within `group`), $0 \ldots L_2-1$ globally. Required for `model='nested'`. |
 | `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (with the intercept). |
-| `kernel` | `str` | — | `'matern52'` | Covariance kernel name (as `nitrix.stats.gp.gp_fit`); enters only through the diagonal spectral reweighting. |
-| `rank` | `int` | — | `12` | Per-smooth eigenfunction count $m$ (default `12` -- the design is $1 + L$ smooths wide, so a smaller rank than `gp_fit` is usual). |
+| `kernel` | `str` | — | `'matern52'` | Covariance kernel name (as [`nitrix.stats.gp.gp_fit`](../nitrix-stats-gp/gp_fit.qmd)); enters only through the diagonal spectral reweighting. |
+| `rank` | `int` | — | `12` | Per-smooth eigenfunction count $m$ (default `12` -- the design is $1 + L$ smooths wide, so a smaller rank than [`gp_fit`](../nitrix-stats-gp/gp_fit.qmd) is usual). |
 | `model` | `str` | — | `'GS'` | Hierarchical structure. `'GS'` (default): a global smoother plus group-level smoothers with one shared group wiggliness $\sigma_{\mathrm{grp}}^2$. `'nested'`: a two-level hierarchy (outer `g1` / inner `g2`) -- population + outer-group + inner-group (nested) GP deviations, three variance components ($\sigma_{\mathrm{pop}}^2$, $\sigma_{\mathrm{outer}}^2$, $\sigma_{\mathrm{inner}}^2$) sharing $\rho$. |
-| `boundary` | `float` | — | `1.5` | HSGP domain-extension factor (as `nitrix.stats.gp.gp_fit`); must be `>= 1.0`. |
+| `boundary` | `float` | — | `1.5` | HSGP domain-extension factor (as [`nitrix.stats.gp.gp_fit`](../nitrix-stats-gp/gp_fit.qmd)); must be `>= 1.0`. |
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Optional `(lo, hi)` covariate domain; defaults to the range of `x`. |
 | `rho_bounds` | `Optional[Tuple[float, float]]` | — | `None` | Optional `(lo, hi)` bounds of the shared-lengthscale search; defaults to a span-relative range. |
 | `n_rho` | `int` | — | `24` | Number of grid points in the shared-lengthscale search. |
-| `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Optional lengthscale prior $\rho \mapsto -\log p(\rho)$ added to the pooled objective (e.g. a builder from `nitrix.stats.priors`). |
+| `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Optional lengthscale prior $\rho \mapsto -\log p(\rho)$ added to the pooled objective (e.g. a builder from [`nitrix.stats.priors`](../nitrix-stats-priors.qmd)). |
 | `n_levels` | `Optional[int]` | — | `None` | Outer / inner factor-level counts (default to `max + 1`); pass when a level is absent so the block widths are stable. |
 | `n_levels_inner` | `Optional[int]` | — | `None` | Outer / inner factor-level counts (default to `max + 1`); pass when a level is absent so the block widths are stable. |
 | `n_outer` | `int` | — | `30` | Number of Fellner-Schall iterations for the final per-element fit. |

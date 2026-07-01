@@ -45,7 +45,7 @@ short FIR, too short for the transform overhead to amortise.)
 Boundary: this kernel **always uses the mirror (whole-sample-
 symmetric) boundary** for *both* the prefilter and the gather, and
 **ignores the `mode` / `cval` call arguments** (like
-`MultiLabel` ignores `cval`).  This is deliberate: a B-spline
+[`MultiLabel`](../nitrix-geometry-grid/MultiLabel.qmd) ignores `cval`).  This is deliberate: a B-spline
 is only self-consistent -- the interpolation property (reproducing the
 samples) only holds -- when the prefilter and the gather share a
 boundary, and only the mirror initialisation is implemented.  The

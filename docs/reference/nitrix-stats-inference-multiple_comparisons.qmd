@@ -23,13 +23,13 @@ Multiple-comparison corrections and multi-contrast combination for
 mass-univariate p-value and statistic maps.
 
 These are companions to the permutation engine. They provide false-discovery-rate
-control -- Benjamini-Hochberg (`fdr_bh`, valid under independence or
-positive regression dependence), Benjamini-Yekutieli (`fdr_by`, valid under
+control -- Benjamini-Hochberg ([`fdr_bh`](nitrix-stats-inference-multiple_comparisons/fdr_bh.qmd), valid under independence or
+positive regression dependence), Benjamini-Yekutieli ([`fdr_by`](nitrix-stats-inference-multiple_comparisons/fdr_by.qmd), valid under
 arbitrary dependence), and Storey's $\pi_0$-adaptive q-values
-(`fdr_storey`, higher power) behind a unified `fdr` dispatcher -- the
-Bonferroni family-wise correction (`bonferroni`), and the valid conjunction
-(minimum-statistic) combination across contrasts (`conjunction`,
-`conjunction_pvalue`). All are pure array operations over a flat
+([`fdr_storey`](nitrix-stats-inference-multiple_comparisons/fdr_storey.qmd), higher power) behind a unified [`fdr`](nitrix-stats-inference-multiple_comparisons/fdr.qmd) dispatcher -- the
+Bonferroni family-wise correction ([`bonferroni`](nitrix-stats-inference-multiple_comparisons/bonferroni.qmd)), and the valid conjunction
+(minimum-statistic) combination across contrasts ([`conjunction`](nitrix-stats-inference-multiple_comparisons/conjunction.qmd),
+[`conjunction_pvalue`](nitrix-stats-inference-multiple_comparisons/conjunction_pvalue.qmd)). All are pure array operations over a flat
 per-element p-value vector.
 <!-- nitrix:/gen -->
 

@@ -28,12 +28,12 @@ of the residuals is returned.  This is the "explain away the
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | Variables whose conditional covariance is sought. |
 | `Y` | `Num` | `...` × `d` × `obs` | — | Conditioning variables to residualise out of `X`. |
-| `rowvar` | `bool` | — | `True` | If `True` (default), the observation axis is the last axis; see `cov`. |
-| `bias` | `bool` | — | `False` | Bias flag; see `cov`. |
-| `ddof` | `Optional[int]` | — | `None` | Degrees-of-freedom override; see `cov`. |
-| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation vector weights; see `cov`. |
-| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation-coupling matrix; see `cov`. |
-| `l2` | `float` | — | `0.0` | Ridge regularisation strength for the covariance step; see `cov`. |
+| `rowvar` | `bool` | — | `True` | If `True` (default), the observation axis is the last axis; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `bias` | `bool` | — | `False` | Bias flag; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `ddof` | `Optional[int]` | — | `None` | Degrees-of-freedom override; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation vector weights; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation-coupling matrix; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
+| `l2` | `float` | — | `0.0` | Ridge regularisation strength for the covariance step; see [`cov`](../nitrix-stats-covariance/cov.qmd). |
 | `residualise_l2` | `float` | — | `0.0` | Ridge for the residualisation step, passed to `residualise`. Typically left at `0`; raise it if `Y` is near-collinear. |
 
 **Returns** `Num` — shape `...` × `c` × `c`. Conditional covariance matrix over the variables of `X`, `(..., c, c)`.

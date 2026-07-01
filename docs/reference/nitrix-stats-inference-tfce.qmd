@@ -46,7 +46,7 @@ support, giving a non-negative magnitude map suitable for two-sided
 max-statistic family-wise error control.
 
 Built on `connected_components` and
-`cluster_size_map`. It is *not*
+[`cluster_size_map`](nitrix-stats-inference-cluster/cluster_size_map.qmd). It is *not*
 differentiable through the discrete cluster forming; like
 `connected_components` itself it is an inference
 kernel rather than a smooth score.

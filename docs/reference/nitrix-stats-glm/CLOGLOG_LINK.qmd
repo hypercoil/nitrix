@@ -1,6 +1,7 @@
 ---
 title: "CLOGLOG_LINK"
 generated: true
+description: "The complementary log-log link :math:`g( mu) =  log(- log(1 -  mu))`."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ CLOGLOG_LINK = Link(name='cloglog', link=_cloglog_link, linkinv=_cloglog_linkinv
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:CLOGLOG_LINK -->
-*TODO: describe this type alias / constant.*
+The complementary log-log link $g(\mu) = \log(-\log(1 - \mu))$.
 <!-- nitrix:/gen -->
 

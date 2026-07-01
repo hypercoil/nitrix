@@ -30,6 +30,6 @@ constant): a soft cap that pulls the estimate down, away from over-smooth
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `sd` | `float` | — | — | The half-normal scale $\sigma$ (must be positive). Smaller `sd` is a stronger pull toward small $\rho$; a sensible value is on the order of the covariate range. |
 
-**Returns** `PriorFn`. A callable mapping a scalar lengthscale $\rho$ (shape `()`) to the scalar negative log-density $-\log p(\rho)$ (shape `()`), suitable for the `map_rho=` argument of `nitrix.stats.gp_fit` and `nitrix.stats.hgp_fit`.
+**Returns** `PriorFn`. A callable mapping a scalar lengthscale $\rho$ (shape `()`) to the scalar negative log-density $-\log p(\rho)$ (shape `()`), suitable for the `map_rho=` argument of [`nitrix.stats.gp_fit`](../nitrix-stats-gp/gp_fit.qmd) and [`nitrix.stats.hgp_fit`](../nitrix-stats-hgp/hgp_fit.qmd).
 <!-- nitrix:/gen -->
 

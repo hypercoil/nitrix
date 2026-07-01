@@ -22,8 +22,8 @@ design is the one-hot indicator (intercept) or one-hot times a covariate
 ridge).  The single smoothing parameter the Fellner-Schall loop selects
 **is** the random-effect precision $\lambda = 1 / \sigma_b^2$ -- the
 "penalised GLM equals variance-components REML" identity.  It is a third
-smooth-term variant alongside `SplineBasis` / `TensorBasis`,
-so it slots straight into `gam_fit` with **no new solver
+smooth-term variant alongside [`SplineBasis`](../nitrix-stats-basis/SplineBasis.qmd) / [`TensorBasis`](../nitrix-stats-basis/TensorBasis.qmd),
+so it slots straight into [`gam_fit`](../nitrix-stats-gam/gam_fit.qmd) with **no new solver
 work** (a random effect is just one more penalty block).
 
 Unlike a spline, an RE has no continuous covariate to re-evaluate, so it

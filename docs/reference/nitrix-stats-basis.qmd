@@ -24,7 +24,7 @@ Penalised spline bases for additive models.
 A GAM smooth term $s(x)$ is a spline basis expansion
 $f(x) = B(x) \beta$ with a roughness penalty
 $\beta^{\top} S \beta$; the smoothing parameter trades the penalty
-off against fit (chosen by REML in `gam_fit`).  This module
+off against fit (chosen by REML in [`gam_fit`](nitrix-stats-gam/gam_fit.qmd)).  This module
 builds the `(design, penalty)` pair for a covariate vector and re-evaluates
 the design at new covariate values (for plotting partial effects).
 

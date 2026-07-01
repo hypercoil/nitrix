@@ -42,20 +42,20 @@ realised path for the cases they already serve.
 | `low_rank` | `Optional[bool]` | — | `None` | **R1-only.** Toggles the FaST-LMM q-rank decomposition on the single-scalar-factor (R1) path; `None` (default) auto-selects low-rank when `q < N` (the brain-scale case; matches the dense fit to tolerance). **Ignored on the R2 / R3 / R4 / +corr tiers**, which have no dense-vs-low-rank choice -- passing it there is a silent no-op. |
 | `retain_blups` | `bool` | — | `False` | Retain the per-group random-effect modes (BLUPs) on the returned result for later conditional prediction. `False` (default) discards them. Currently supported only on the single-factor R1 (scalar intercept), R2 (random slope) and R2 + corr (structured residual) tiers; requesting it alongside `cross=` or `inner=` raises. Read the retained modes via `ranef`. |
 
-**Returns** `Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]`. The fit for the selected tier: a `REMLResult` (R1), an `LMEResult` (R2), a `NestedLMEResult` (R3), a `CorrLMEResult` (R2 + corr), or a `CrossedLMEResult` (R4 crossed).
+**Returns** `Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]`. The fit for the selected tier: a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) (R1), an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd) (R2), a [`NestedLMEResult`](../nitrix-stats-lme-reml/NestedLMEResult.qmd) (R3), a `CorrLMEResult` (R2 + corr), or a [`CrossedLMEResult`](../nitrix-stats-lme-reml/CrossedLMEResult.qmd) (R4 crossed).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen sections:lme_fit -->
 ### Dispatch ladder
 
 - **R1** -- one **scalar** random effect (`z` is `None` or a single
-  column): the FaST-LMM spectral `reml_fit` (dense, or q-rank via
-  `low_rank=`).  Returns a `REMLResult` (with the fixed-effect
+  column): the FaST-LMM spectral [`reml_fit`](../nitrix-stats-lme-reml/reml_fit.qmd) (dense, or q-rank via
+  `low_rank=`).  Returns a [`REMLResult`](../nitrix-stats-lme-reml/REMLResult.qmd) (with the fixed-effect
   inference fields).  *Bit-for-bit the shipped path.*
 - **R2** -- one **correlated / diagonal** random effect (`z` has `r >= 2`
   columns, e.g. `[1, x]` for `(1 + x | g)`): the block-Woodbury REML
   (`_blockwoodbury`) -- per-group `r x r` Woodbury, no `N x N`
-  intermediate, cuSOLVER-free.  Returns an `LMEResult`.
+  intermediate, cuSOLVER-free.  Returns an [`LMEResult`](../nitrix-stats-lme-reml/LMEResult.qmd).
   `structure='unstructured'` fits a full `r x r` `G`;
   `structure='diagonal'` constrains `G` to be diagonal -- the
   uncorrelated `(x || g)` random effect (independent intercept and slope),
@@ -66,7 +66,7 @@ realised path for the cases they already serve.
   nested solver (`_nested`) over the three variance components
   $[\sigma_1^2, \sigma_2^2, \sigma_e^2]$ -- block-diagonal across
   `g1`, Sherman-Morrison at each nested level, no $N \times N$
-  intermediate, cuSOLVER-free.  Returns a `NestedLMEResult`.
+  intermediate, cuSOLVER-free.  Returns a [`NestedLMEResult`](../nitrix-stats-lme-reml/NestedLMEResult.qmd).
 - **R2 + corr** -- a random effect **and** a structured within-group residual
   $\operatorname{Cov}(\epsilon) = \sigma_e^2 R(\rho)$ (pass
   `corr=` and, for `car1`, `time=`).  Whitening by
@@ -84,7 +84,7 @@ realised path for the cases they already serve.
   larger factor and leaves a single dense
   $\min(q_{\mathrm{group}}, q_{\mathrm{cross}})^3$ solve per Newton
   step (`_crossed`).  cuSOLVER-free; **cheap when one factor is small,
-  expensive when both are large.**  Returns a `CrossedLMEResult`.
+  expensive when both are large.**  Returns a [`CrossedLMEResult`](../nitrix-stats-lme-reml/CrossedLMEResult.qmd).
 <!-- nitrix:/gen -->
 
 

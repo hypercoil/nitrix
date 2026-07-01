@@ -30,8 +30,8 @@ The unit deviance is the closed form
 $d(y, \mu) = 2\left[ y^{2-p}/((1-p)(2-p)) - y\,\mu^{1-p}/(1-p) + \mu^{2-p}/(2-p) \right]$;
 
 the log-likelihood uses the **saddlepoint approximation** (with the exact
-compound-Poisson zero mass at $y = 0$) -- enough for `aic` /
-`bic` model comparison; the exact Dunn-Smyth series is a follow-up.
+compound-Poisson zero mass at $y = 0$) -- enough for [`aic`](../nitrix-stats-glm/aic.qmd) /
+[`bic`](../nitrix-stats-glm/bic.qmd) model comparison; the exact Dunn-Smyth series is a follow-up.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:tweedie -->

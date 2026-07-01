@@ -25,8 +25,8 @@ statistic and its p-value.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `full` | `GLMResult` | — | — | The larger fitted `GLMResult` (more parameters). |
-| `reduced` | `GLMResult` | — | — | The nested fitted `GLMResult` (fewer parameters, same data). |
+| `full` | `GLMResult` | — | — | The larger fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) (more parameters). |
+| `reduced` | `GLMResult` | — | — | The nested fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) (fewer parameters, same data). |
 | `test` | `CompareTest` | — | `'auto'` | Which test to run. `'F'` uses the extra-sum-of-squares F-test, $F = ((D_r - D_f) / (k_f - k_r)) / (D_f / \mathrm{dof}_f)$ on $(k_f - k_r, \mathrm{dof}_f)$ degrees of freedom. `'LRT'` uses the likelihood-ratio test, $2(\ell_f - \ell_r) \sim \chi^2(k_f - k_r)$. `'auto'` (default) selects `'F'` for a Gaussian family and `'LRT'` otherwise. |
 
 **Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V']]`. `(V,)` test statistic (F or likelihood-ratio), one per element. `(V,)` upper-tail p-value of the statistic.

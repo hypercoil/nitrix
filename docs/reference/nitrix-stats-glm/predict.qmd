@@ -24,7 +24,7 @@ for `type='response'`, maps it through the family's inverse link.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the per-element coefficients and the family (for the inverse link). |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the per-element coefficients and the family (for the inverse link). |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` design matrix to predict on (need not be the design used to fit; must share the coefficient layout). |
 | `type` | `PredictType` | — | `'response'` | `'response'` (default) applies the inverse link to return fitted values on the response scale; `'link'` returns the linear predictor $\eta = X \beta$ on the link scale. |
 

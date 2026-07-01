@@ -1,6 +1,7 @@
 ---
 title: "LOG_LINK"
 generated: true
+description: "The log link :math:`g( mu) =  log  mu`."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -14,6 +15,6 @@ LOG_LINK = Link(name='log', link=_log_link, linkinv=_safe_exp, mu_eta=_safe_exp,
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:LOG_LINK -->
-*TODO: describe this type alias / constant.*
+The log link $g(\mu) = \log \mu$.
 <!-- nitrix:/gen -->
 

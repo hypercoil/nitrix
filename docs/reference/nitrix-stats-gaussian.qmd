@@ -21,10 +21,10 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Closed-form diagonal-Gaussian quantities.
 
-- `kl_diagonal_gaussian` -- KL divergence of a diagonal Gaussian
+- [`kl_diagonal_gaussian`](nitrix-stats-gaussian/kl_diagonal_gaussian.qmd) -- KL divergence of a diagonal Gaussian
   $\mathcal{N}(\mu, \operatorname{diag} e^{\ell})$ from the
   standard normal $\mathcal{N}(0, I)$, in closed form.
-- `gaussian_nll` -- negative log-likelihood of observations under a
+- [`gaussian_nll`](nitrix-stats-gaussian/gaussian_nll.qmd) -- negative log-likelihood of observations under a
   diagonal Gaussian.
 
 Both are parameterised by the log-variance `log_var` (the log of the

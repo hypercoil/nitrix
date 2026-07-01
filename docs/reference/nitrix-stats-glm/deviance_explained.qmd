@@ -24,7 +24,7 @@ $D_0$ the intercept-only (null) deviance.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the model and null deviances. |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the model and null deviances. |
 
 **Returns** `Float` — shape `V`. `(V,)` fraction of null deviance explained, one per element.
 <!-- nitrix:/gen -->

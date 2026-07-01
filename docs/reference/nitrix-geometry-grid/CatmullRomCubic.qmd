@@ -19,7 +19,7 @@ Catmull-Rom cubic-Hermite interpolation -- the cardinal cubic spline.
 
 The *interpolating* C^1 cubic Hermite spline whose tangents are centred
 finite differences (tension `a = -1/2`): the curve passes through the
-samples, so -- unlike `CubicBSpline` -- it needs **no prefilter**.
+samples, so -- unlike [`CubicBSpline`](../nitrix-geometry-grid/CubicBSpline.qmd) -- it needs **no prefilter**.
 The gather is a direct 4-tap separable cubic applied to the raw samples;
 at integer positions it reproduces them exactly.
 
@@ -35,10 +35,10 @@ At `t = 0` the weights are `(0, 1, 0, 0)` (the sample at `floor(x)`)
 and at `t = 1` they are `(0, 0, 1, 0)` (`floor(x) + 1`) -- the
 interpolation property.
 
-Distinct from the other cubics: `CubicBSpline` is *approximating*
+Distinct from the other cubics: [`CubicBSpline`](../nitrix-geometry-grid/CubicBSpline.qmd) is *approximating*
 (it needs the recursive prefilter to interpolate, and that prefilter is
 backend-dependent), and is $C^2$-smooth with a partition-of-unity basis;
-`Lanczos` is a windowed sinc.  Catmull-Rom is the cardinal cubic of
+[`Lanczos`](../nitrix-geometry-grid/Lanczos.qmd) is a windowed sinc.  Catmull-Rom is the cardinal cubic of
 OpenCV `INTER_CUBIC` / Keras image `cubic` / the Keras
 "BilinearInterpolation" STN (a misnomer -- it evaluates a 4x4 Catmull-Rom
 stencil), so a consumer parity-locked to that family (e.g. ilex
@@ -77,9 +77,9 @@ are what the parity-locked consumers pin against).  The kernel is *not*,
 however, a **convex** combination: the outer taps carry small negative
 weights (the `w_{-1}` / `w_{+2}` lobes reach `~-0.07`), so the output
 can overshoot the local sample range (ringing near sharp edges) -- unlike
-`Linear` (non-negative weights), whose output is bounded by its
+[`Linear`](../nitrix-geometry-grid/Linear.qmd) (non-negative weights), whose output is bounded by its
 neighbours.  This overshoot is the price of the higher-order fit; where a
-strictly bounded, non-ringing resample is required, prefer `Linear`.
+strictly bounded, non-ringing resample is required, prefer [`Linear`](../nitrix-geometry-grid/Linear.qmd).
 :::
 <!-- nitrix:/gen -->
 

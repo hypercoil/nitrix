@@ -24,7 +24,7 @@ of estimated parameters (coefficients plus a dispersion where free).
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the log-likelihood and parameter count. |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the log-likelihood and parameter count. |
 
 **Returns** `Float` — shape `V`. `(V,)` Akaike information criterion, one per element.
 <!-- nitrix:/gen -->

@@ -26,9 +26,9 @@ freedom (the ModelArray `lm` columns `estimate` / `std.error` /
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the coefficients, unscaled covariance, dispersion, and residual degrees of freedom. |
+| `result` | `GLMResult` | — | — | A fitted [`GLMResult`](../nitrix-stats-glm/GLMResult.qmd) supplying the coefficients, unscaled covariance, dispersion, and residual degrees of freedom. |
 | `contrast` | `Float` | `p` | — | `(p,)` contrast vector $c$; the tested effect is $c^{\top} \beta$. |
-| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | Optional coefficient covariance override, either a shared `(p, p)` or a per-element `(V, p, p)` matrix -- e.g. the robust output of `sandwich_cov`. When given, the variance is $c^{\top} \Sigma\, c$ taken directly (already on the variance scale). The default (`None`) uses the model-based covariance $\mathrm{dispersion} \cdot (X^{\top} W X)^{-1}$. |
+| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | Optional coefficient covariance override, either a shared `(p, p)` or a per-element `(V, p, p)` matrix -- e.g. the robust output of [`sandwich_cov`](../nitrix-stats-glm/sandwich_cov.qmd). When given, the variance is $c^{\top} \Sigma\, c$ taken directly (already on the variance scale). The default (`None`) uses the model-based covariance $\mathrm{dispersion} \cdot (X^{\top} W X)^{-1}$. |
 
 **Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']]`. `(V,)` contrast estimate $c^{\top} \beta$. `(V,)` standard error of the contrast. `(V,)` t statistic `effect / se`. `(V,)` two-sided p-value at `result.dof_resid` degrees of freedom.
 <!-- nitrix:/gen -->
