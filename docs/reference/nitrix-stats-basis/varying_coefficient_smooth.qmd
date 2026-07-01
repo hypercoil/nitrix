@@ -16,9 +16,10 @@ varying_coefficient_smooth(x: Float[Array, ' n'], by: Float[Array, ' n'], n_basi
 Varying-coefficient smooth `s(x, by=z)` for a **continuous** `z`.
 
 mgcv's `s(x, by=z)` with a numeric `by`: the smooth term is
-`z * f(x)` -- a coefficient on `z` that varies smoothly with `x`.  The
-design is the marginal P-spline of `x` scaled row-wise by `z`; the
-penalty is unchanged.  A single `SplineBasis` for `gam_fit`.
+$z\, f(x)$ -- a coefficient on `z` that varies smoothly with `x`.
+The design is the marginal P-spline of `x` scaled row-wise by `z`; the
+penalty is unchanged.  A single `SplineBasis` for
+`gam_fit`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:varying_coefficient_smooth -->
@@ -34,7 +35,7 @@ penalty is unchanged.  A single `SplineBasis` for `gam_fit`.
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see `bspline_basis`). |
 | `center` | `bool` | — | `True` | Marginal P-spline parameters (see `bspline_basis`). |
 
-**Returns** `SplineBasis`.
+**Returns** `SplineBasis`. The `SplineBasis` whose design is the marginal P-spline scaled row-wise by `by`.
 <!-- nitrix:/gen -->
 
 

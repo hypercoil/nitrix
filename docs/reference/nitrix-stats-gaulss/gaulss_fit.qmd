@@ -15,9 +15,10 @@ gaulss_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, scale_design: Opti
 <!-- nitrix:gen overview:gaulss_fit -->
 Mass-univariate Gaussian location-scale regression (`gaulss`).
 
-Fits, per element, $y_v ~ N(\mu, \sigma^2)$ with `mu = X beta_mu` and
-`log sigma = Z beta_scale` -- modelling heteroscedasticity directly -- by
-joint Fisher scoring.
+Fits, per element, $y_v \sim \mathcal{N}(\mu, \sigma^2)$ with
+$\mu = X \beta_{\mu}$ and $\log \sigma = Z \beta_{\sigma}$ --
+modelling heteroscedasticity directly -- by joint Fisher scoring.  The mean
+and log-scale designs are shared across elements; only the responses vary.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gaulss_fit -->
@@ -25,14 +26,14 @@ joint Fisher scoring.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
-| `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (shared; carries its own intercept). |
-| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` log-scale design `Z` (shared). Defaults to an intercept-only column -- a constant variance (the homoscedastic Gaussian, recovering OLS for the mean); pass a design to model the variance. |
-| `n_iter` | `int` | — | `50` | Fisher-scoring iterations (default `50`). |
-| `ridge` | `float` | — | `1e-08` | Small stabiliser on the normal equations. |
-| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
+| `Y` | `Float` | `V` × `N` | — | Responses, one length-`N` observation vector per element. |
+| `X` | `Float` | `N` × `p` | — | Mean-model design matrix, shared across elements; carries its own intercept. |
+| `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | Log-scale design matrix $Z$, shared across elements. Defaults to an intercept-only column -- a constant variance (the homoscedastic Gaussian, recovering OLS for the mean); pass a design to model the variance. |
+| `n_iter` | `int` | — | `50` | Number of Fisher-scoring iterations. Default `50`. |
+| `ridge` | `float` | — | `1e-08` | Small stabiliser added to the normal equations. Default `1e-8`. |
+| `block` | `Optional[int]` | — | `None` | Element-block size bounding peak memory; `None` processes all elements at once. |
 
-**Returns** `GauLSSResult`.
+**Returns** `GauLSSResult`. Fit output holding the mean coefficients `coef_mu`, the log-scale coefficients `coef_scale`, the block information inverses `cov_mu` and `cov_scale`, and the maximised log-likelihood `log_lik`. A mean contrast is $c^{\top} \mathrm{coef\_mu}$ with standard error $\sqrt{c^{\top} \mathrm{cov\_mu}\, c}$; a scale contrast is the analogous read-out on `coef_scale`.
 <!-- nitrix:/gen -->
 
 

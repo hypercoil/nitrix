@@ -15,9 +15,9 @@ ordinal_predict(result: OrdinalResult, X: Float[Array, 'N p'], *, type: Literal[
 <!-- nitrix:gen overview:ordinal_predict -->
 Per-element ordinal prediction on a (new) design `X`.
 
-Applies the fitted cumulative-link model `P(y <= j) = F(theta_j - X beta)`
-(`F` the stored `result.link` CDF) at the new design and returns,
-per `type`:
+Applies the fitted cumulative-link model $P(y \le j) =
+F(\theta_j - X \beta)$ (with $F$ the CDF stored in `result.link`) at
+the new design and returns, per `type`:
 
 - `'class_prob'` (default): the per-class simplex `P(y = k)`, shape
   `(V, N, K)` -- the diff of the cumulative probabilities.

@@ -14,12 +14,6 @@ class FLAMEResult
 
 <!-- nitrix:gen overview:FLAMEResult -->
 Per-voxel FLAME fit output.
-
-`weights` is the per-voxel, per-subject outlier-deweighting weight (audit
-N4): all `1` for the standard FLAME fit (`robust=False`), and the
-converged robust weights in `(0, 1]` for `robust=True` -- a value well
-below `1` marks a subject whose level-1 estimate was down-weighted as an
-outlier.
 <!-- nitrix:/gen -->
 
 ### Methods

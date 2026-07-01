@@ -3,40 +3,46 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 # isort: skip_file
 """
-nitrix.stats -- mass-univariate statistical modelling for neuroimaging.
+Mass-univariate statistical modelling for neuroimaging.
 
-Submodules:
+A collection of differentiable estimators for fitting statistical models
+independently at every vertex, voxel, or edge of an image or connectome, spanning
+covariance and correlation, (generalised, additive, mixed) linear models,
+Gaussian-process smooths, regularised connectivity, and permutation inference.
 
+Submodules
+----------
 - ``covariance`` -- (partial) (paired) (conditional) covariance
-  / correlation over time series.  JIT-friendly batch handling.
-- ``gaussian``   -- closed-form diagonal-Gaussian KL divergence and
+  / correlation over time series, with JIT-friendly batch handling.
+- ``gaussian`` -- closed-form diagonal-Gaussian KL divergence and
   negative log-likelihood (log-variance parameterised).
-- ``glm``        -- mass-univariate generalised linear models (OLS / WLS /
+- ``glm`` -- mass-univariate generalised linear models (OLS / WLS /
   exponential-family IRLS) with t / F contrasts and goodness-of-fit.
 - ``betareg`` / ``ordinal`` / ``gaulss`` -- additional response models: beta
   regression (rates / proportions), ordinal (cumulative-link), and the Gaussian
   location-scale (mean + variance) GAMLSS fit.
-- ``basis``      -- penalised spline bases (P-splines) for additive models,
-  plus the ``hsgp_basis`` Hilbert-space approximate-GP smooth (reduced-rank
-  Gaussian process) and the kriging ``gp_basis``.
-- ``gam``        -- mass-univariate generalised additive (mixed) models with
+- ``basis`` -- penalised spline bases (P-splines) for additive models,
+  plus the :func:`hsgp_basis` Hilbert-space approximate-GP smooth (reduced-rank
+  Gaussian process) and the kriging :func:`gp_basis`.
+- ``gam`` -- mass-univariate generalised additive (mixed) models with
   REML / Fellner-Schall smoothing-parameter selection.
-- ``gp``         -- mass-univariate Gaussian-process regression (HSGP or exact
+- ``gp`` -- mass-univariate Gaussian-process regression (HSGP or exact
   engine) with REML-estimated kernel lengthscale and optional ``corr=``
-  structured residual (``gp_fit`` / ``gp_predict``).
-- ``hgp``        -- hierarchical / multi-level GP: a population smooth plus
-  group-level smooth deviations sharing a kernel (``hgp_fit`` / ``hgp_predict``).
-- ``priors``     -- lengthscale MAP-rho regularisers (half-normal / inverse-gamma
-  / log-normal) for the ``gp_fit`` / ``hgp_fit`` kernel-range search.
+  structured residual (:func:`gp_fit` / :func:`gp_predict`).
+- ``hgp`` -- hierarchical / multi-level GP: a population smooth plus
+  group-level smooth deviations sharing a kernel
+  (:func:`hgp_fit` / :func:`hgp_predict`).
+- ``priors`` -- lengthscale MAP-rho regularisers (half-normal / inverse-gamma
+  / log-normal) for the :func:`gp_fit` / :func:`hgp_fit` kernel-range search.
 - ``connectivity`` -- regularised connectome estimators: analytic-shrinkage
   covariance (Ledoit-Wolf / OAS) and sparse precision (graphical LASSO) for the
   small-sample regime.
-- ``lme``        -- voxelwise linear mixed-effects (REML / FLAME).
-- ``glmm``       -- generalised linear mixed models (PQL / Laplace / adaptive
+- ``lme`` -- voxelwise linear mixed-effects (REML / FLAME).
+- ``glmm`` -- generalised linear mixed models (PQL / Laplace / adaptive
   Gauss-Hermite) for non-Gaussian responses with random effects.
-- ``inference``  -- permutation / TFCE cluster inference (the on-device FSL
-  ``randomise`` engine) + FDR / Bonferroni.
-- ``pca``        -- principal-component analysis (fit / transform /
+- ``inference`` -- permutation / TFCE cluster inference (the on-device FSL
+  ``randomise`` engine) plus FDR / Bonferroni.
+- ``pca`` -- principal-component analysis (fit / transform /
   inverse) via the covariance eigendecomposition.
 """
 

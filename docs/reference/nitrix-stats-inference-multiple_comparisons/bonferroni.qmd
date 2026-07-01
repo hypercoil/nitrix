@@ -1,7 +1,7 @@
 ---
 title: "bonferroni"
 generated: true
-description: "Bonferroni family-wise correction."
+description: "Bonferroni family-wise error-rate correction."
 ---
 
 [‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
@@ -13,9 +13,9 @@ bonferroni(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Ar
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:bonferroni -->
-Bonferroni family-wise correction.
+Bonferroni family-wise error-rate correction.
 
-Returns `(rejected, p_adjusted)` with `p_adjusted = min(p * n, 1)`.
+Scales each p-value by the number of tests `n` and clips to `1`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:bonferroni -->
@@ -23,10 +23,10 @@ Returns `(rejected, p_adjusted)` with `p_adjusted = min(p * n, 1)`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `p_values` | `Float` | `n` | — | — |
-| `alpha` | `float` | — | `0.05` | — |
+| `p_values` | `Float` | `n` | — | Flat vector of `n` per-element p-values. |
+| `alpha` | `float` | — | `0.05` | Target family-wise error rate defining the rejection mask. Default `0.05`. |
 
-**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`. The rejection mask `p_adjusted <= alpha`. The Bonferroni-adjusted p-values $\min(n\, p, 1)$.
 <!-- nitrix:/gen -->
 
 

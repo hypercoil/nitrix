@@ -23,13 +23,13 @@ Empirical covariance of variables in a tensor batch.
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor. Default layout `(..., c, obs)` with the last axis as observations and the penultimate axis as variables; pass `rowvar=False` to flip. |
 | `rowvar` | `bool` | — | `True` | `True` (default): observation axis is the *last* axis. |
-| `bias` | `bool` | — | `False` | If `True`, divide by `n`; otherwise (default) by `n - 1` (Bessel's correction). Ignored if `ddof` is given. |
+| `bias` | `bool` | — | `False` | If `True`, divide by $n$; otherwise (default) by $n - 1$ (Bessel's correction). Ignored if `ddof` is given. |
 | `ddof` | `Optional[int]` | — | `None` | Explicit degrees-of-freedom override. `None` means `int(not bias)`. |
 | `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation weights, `(..., obs)`. Mutually exclusive with `weight_matrix`. |
 | `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation coupling matrix, `(..., obs, obs)`. Used for inter-temporal weighting (e.g. lagged or smoothed covariance). Must be symmetric for the result to be a valid covariance. Mutually exclusive with `weights`. |
-| `l2` | `float` | — | `0.0` | Ridge regularisation strength. `l2 > 0` adds `l2 I` to the result. |
+| `l2` | `float` | — | `0.0` | Ridge regularisation strength. `l2 > 0` adds $\lambda I$ to the result. |
 
-**Returns** `Num` — shape `...` × `c` × `c`.
+**Returns** `Num` — shape `...` × `c` × `c`. Covariance matrix over the `c` variables, `(..., c, c)`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:cov -->

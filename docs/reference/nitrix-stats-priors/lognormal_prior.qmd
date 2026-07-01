@@ -1,7 +1,7 @@
 ---
 title: "lognormal_prior"
 generated: true
-description: "Log-normal prior on the lengthscale `rho` (median `exp(mu)`)."
+description: "Build a log-normal lengthscale prior with median `exp(mu)`."
 ---
 
 [‹ back to `nitrix.stats.priors`](../nitrix-stats-priors.qmd)
@@ -13,12 +13,15 @@ lognormal_prior(mu: float, sd: float) -> PriorFn
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:lognormal_prior -->
-Log-normal prior on the lengthscale `rho` (median `exp(mu)`).
+Build a log-normal lengthscale prior with median `exp(mu)`.
 
-`p(rho) ~ (1/rho) exp(-(log rho - mu)**2 / (2 sd**2))` on `rho > 0`, so
-`-log p(rho) = (log rho - mu)**2 / (2 sd**2) + log rho` (up to a constant):
-a symmetric-in-`log rho` pull toward the prior median `exp(mu)` with
-multiplicative spread `sd`.
+The prior density is
+$p(\rho) \propto (1/\rho) \exp(-(\log \rho - \mu)^2 / (2\,\sigma^2))$
+on $\rho > 0$, so the returned penalty is
+$-\log p(\rho) = (\log \rho - \mu)^2 / (2\,\sigma^2) + \log \rho$
+(up to an additive constant): a pull that is symmetric in
+$\log \rho$, toward the prior median $\exp(\mu)$ with
+multiplicative spread $\sigma$.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:lognormal_prior -->
@@ -26,9 +29,9 @@ multiplicative spread `sd`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `mu` | `float` | — | — | Prior mean of `log rho` (so `exp(mu)` is the prior median lengthscale). |
-| `sd` | `float` | — | — | Prior standard deviation of `log rho` (`> 0`). |
+| `mu` | `float` | — | — | Prior mean $\mu$ of $\log \rho$ (so $\exp(\mu)$ is the prior median lengthscale). |
+| `sd` | `float` | — | — | Prior standard deviation $\sigma$ of $\log \rho$ (must be positive). |
 
-**Returns** `PriorFn`.
+**Returns** `PriorFn`. A callable mapping a scalar lengthscale $\rho$ (shape `()`) to the scalar negative log-density $-\log p(\rho)$ (shape `()`), suitable for the `map_rho=` argument of `nitrix.stats.gp_fit` and `nitrix.stats.hgp_fit`.
 <!-- nitrix:/gen -->
 

@@ -15,12 +15,12 @@ glasso_path(S: Float[Array, 'p p'], lambdas: Float[Array, 'L'], *, n_outer: int 
 <!-- nitrix:gen overview:glasso_path -->
 Warm-started graphical-LASSO regularisation path over `lambdas`.
 
-Sweeps the penalties in the **given order**, carrying the working covariance
-`W` and the lasso coefficients `B` from one `lam` to the next so each
-solve starts warm (far cheaper than a cold restart and the usual way to
-trace a glasso path -- pass `lambdas` descending, dense -> sparse, or
-ascending; either direction warm-starts).  Returns the stacked precisions
-aligned with `lambdas`; pair with `ebic_score` for model selection.
+Sweeps the penalties in the given order, carrying the working covariance
+`W` and the lasso coefficients `B` from one penalty to the next so that
+each solve starts warm.  This is far cheaper than a cold restart at every
+penalty and is the usual way to trace a graphical-LASSO path; either sweep
+direction (descending, dense to sparse, or ascending) warm-starts.  Pair the
+returned precisions with `ebic_score` for model selection.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:glasso_path -->
@@ -28,12 +28,12 @@ aligned with `lambdas`; pair with `ebic_score` for model selection.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `S` | `Float` | `p` × `p` | — | — |
-| `lambdas` | `Float` | `L` | — | — |
-| `n_outer` | `int` | — | `100` | — |
-| `n_inner` | `int` | — | `50` | — |
+| `S` | `Float` | `p` × `p` | — | Sample covariance matrix shared across all penalties. |
+| `lambdas` | `Float` | `L` | — | The `L` non-negative L1 penalties, swept in the given order. |
+| `n_outer` | `int` | — | `100` | Number of outer column sweeps per solve. Default `100`. |
+| `n_inner` | `int` | — | `50` | Number of inner lasso sweeps per column. Default `50`. |
 
-**Returns** `Float` — shape `L` × `p` × `p`.
+**Returns** `Float` — shape `L` × `p` × `p`. The stacked precision matrices, one `(p, p)` estimate per penalty and aligned with `lambdas`.
 <!-- nitrix:/gen -->
 
 

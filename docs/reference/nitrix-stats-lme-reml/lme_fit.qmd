@@ -16,10 +16,10 @@ lme_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, group: Int[Array, 'N'
 Voxelwise mixed model, dispatched to the cheapest exact solver.
 
 A single grouping factor `group` with per-observation random covariates
-`z` (`None` -> a scalar random intercept).  The dispatcher honours the
-**performance-preserving** invariant (v3 §0.1): it routes to the cheapest
-solver that is *exact* for the given random structure, so the shipped fast
-paths stay the realised path for the cases they already serve.
+`z` (`None` -> a scalar random intercept).  The dispatcher honours a
+**performance-preserving** invariant: it routes to the cheapest solver that
+is *exact* for the given random structure, so the shipped fast paths stay the
+realised path for the cases they already serve.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:lme_fit -->
@@ -40,9 +40,9 @@ paths stay the realised path for the cases they already serve.
 | `damping` | `float` | — | `1e-06` | Newton iterations, AI damping, and voxel-block chunking (all tiers). |
 | `block` | `Optional[int]` | — | `None` | Newton iterations, AI damping, and voxel-block chunking (all tiers). |
 | `low_rank` | `Optional[bool]` | — | `None` | **R1-only.** Toggles the FaST-LMM q-rank decomposition on the single-scalar-factor (R1) path; `None` (default) auto-selects low-rank when `q < N` (the brain-scale case; matches the dense fit to tolerance). **Ignored on the R2 / R3 / R4 / +corr tiers**, which have no dense-vs-low-rank choice -- passing it there is a silent no-op. |
-| `retain_blups` | `bool` | — | `False` | — |
+| `retain_blups` | `bool` | — | `False` | Retain the per-group random-effect modes (BLUPs) on the returned result for later conditional prediction. `False` (default) discards them. Currently supported only on the single-factor R1 (scalar intercept), R2 (random slope) and R2 + corr (structured residual) tiers; requesting it alongside `cross=` or `inner=` raises. Read the retained modes via `ranef`. |
 
-**Returns** `Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]`.
+**Returns** `Union[REMLResult, LMEResult, NestedLMEResult, CorrLMEResult, CrossedLMEResult]`. The fit for the selected tier: a `REMLResult` (R1), an `LMEResult` (R2), a `NestedLMEResult` (R3), a `CorrLMEResult` (R2 + corr), or a `CrossedLMEResult` (R4 crossed).
 <!-- nitrix:/gen -->
 
 

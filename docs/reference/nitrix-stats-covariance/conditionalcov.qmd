@@ -15,9 +15,10 @@ conditionalcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar
 <!-- nitrix:gen overview:conditionalcov -->
 Covariance of `X` conditioned on the variables in `Y`.
 
-Operationally: residualise `X` against `Y`, then take the
-covariance of the residuals.  This is the "explained out the
-Y subspace, look at what's left" view.
+Operationally, `X` is residualised against `Y` (see
+`residualise`) and the covariance
+of the residuals is returned.  This is the "explain away the
+`Y` subspace, then look at what remains" view of conditioning.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:conditionalcov -->
@@ -25,17 +26,17 @@ Y subspace, look at what's left" view.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | Variable / conditioning tensors. |
-| `Y` | `Num` | `...` × `d` × `obs` | — | Variable / conditioning tensors. |
-| `rowvar` | `bool` | — | `True` | See `cov`. |
-| `bias` | `bool` | — | `False` | See `cov`. |
-| `ddof` | `Optional[int]` | — | `None` | See `cov`. |
-| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | See `cov`. |
-| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | See `cov`. |
-| `l2` | `float` | — | `0.0` | See `cov`. |
-| `residualise_l2` | `float` | — | `0.0` | Ridge for the residualisation step (passed to `residualise`). Typically left at `0`; raise if `Y` is near-collinear. |
+| `X` | `Num` | `...` × `c` × `obs` | — | Variables whose conditional covariance is sought. |
+| `Y` | `Num` | `...` × `d` × `obs` | — | Conditioning variables to residualise out of `X`. |
+| `rowvar` | `bool` | — | `True` | If `True` (default), the observation axis is the last axis; see `cov`. |
+| `bias` | `bool` | — | `False` | Bias flag; see `cov`. |
+| `ddof` | `Optional[int]` | — | `None` | Degrees-of-freedom override; see `cov`. |
+| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation vector weights; see `cov`. |
+| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation-coupling matrix; see `cov`. |
+| `l2` | `float` | — | `0.0` | Ridge regularisation strength for the covariance step; see `cov`. |
+| `residualise_l2` | `float` | — | `0.0` | Ridge for the residualisation step, passed to `residualise`. Typically left at `0`; raise it if `Y` is near-collinear. |
 
-**Returns** `Num` — shape `...` × `c` × `c`.
+**Returns** `Num` — shape `...` × `c` × `c`. Conditional covariance matrix over the variables of `X`, `(..., c, c)`.
 <!-- nitrix:/gen -->
 
 

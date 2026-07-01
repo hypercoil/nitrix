@@ -2,16 +2,18 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Multiple-comparison corrections + multi-contrast combination for mass-univariate
-p-value / statistic maps.
+Multiple-comparison corrections and multi-contrast combination for
+mass-univariate p-value and statistic maps.
 
-Companions to the permutation engine: false-discovery-rate control --
-Benjamini-Hochberg (``fdr_bh``; valid under independence / PRDS),
-Benjamini-Yekutieli (``fdr_by``; valid under *arbitrary* dependence), and
-Storey's pi0-adaptive q-values (``fdr_storey``; higher power), behind a unified
-``fdr(method=...)`` dispatcher -- the Bonferroni family-wise correction, and the
-**valid conjunction** (minimum-statistic) combination across contrasts (audit
-N7).  All are pure array ops over a flat per-element p-value vector.
+These are companions to the permutation engine. They provide false-discovery-rate
+control -- Benjamini-Hochberg (:func:`fdr_bh`, valid under independence or
+positive regression dependence), Benjamini-Yekutieli (:func:`fdr_by`, valid under
+arbitrary dependence), and Storey's :math:`\\pi_0`-adaptive q-values
+(:func:`fdr_storey`, higher power) behind a unified :func:`fdr` dispatcher -- the
+Bonferroni family-wise correction (:func:`bonferroni`), and the valid conjunction
+(minimum-statistic) combination across contrasts (:func:`conjunction`,
+:func:`conjunction_pvalue`). All are pure array operations over a flat
+per-element p-value vector.
 """
 
 from __future__ import annotations
@@ -36,15 +38,31 @@ __all__ = [
 def conjunction(
     stats: Float[Array, 'k *spatial'],
 ) -> Float[Array, '*spatial']:
-    """Minimum-statistic conjunction across ``k`` contrasts (Nichols et al. 2005).
+    """Minimum-statistic conjunction across ``k`` contrasts.
 
-    ``stats`` stacks the ``k`` per-contrast statistic maps on the leading axis.
-    Returns the per-element **minimum** over contrasts -- the valid statistic for
-    the conjunction null *"at least one of the ``k`` effects is null"*: a voxel
-    survives a threshold only where **every** contrast clears it (the minimum
-    does).  This is the correct conjunction; the common
-    "all-effects-null" intersection of separately-thresholded maps tests a
-    *different* (global) null and does not control the conjunction error.
+    Returns the per-element minimum statistic over the ``k`` contrasts, the valid
+    statistic for the conjunction null *"at least one of the ``k`` effects is
+    null"*: an element survives a threshold only where every contrast clears it,
+    which is exactly where the minimum clears it. This is the correct conjunction;
+    the common "all-effects-null" intersection of separately-thresholded maps
+    tests a different (global) null and does not control the conjunction error.
+
+    Parameters
+    ----------
+    stats : Float[Array, 'k *spatial']
+        The ``k`` per-contrast statistic maps stacked on the leading axis, each of
+        shape ``*spatial``.
+
+    Returns
+    -------
+    Float[Array, '*spatial']
+        The per-element minimum statistic over the ``k`` contrasts.
+
+    References
+    ----------
+    Nichols, T., Brett, M., Andersson, J., Wager, T., & Poline, J.-B. (2005).
+    Valid conjunction inference with the minimum statistic. NeuroImage, 25(3),
+    653-660. https://doi.org/10.1016/j.neuroimage.2004.12.005
     """
     return jnp.min(jnp.asarray(stats), axis=0)
 
@@ -52,12 +70,30 @@ def conjunction(
 def conjunction_pvalue(
     p_values: Float[Array, 'k *spatial'],
 ) -> Float[Array, '*spatial']:
-    """Conjunction p-value: the **maximum** per-contrast p-value over ``k``
-    contrasts (the p-scale dual of :func:`conjunction`).
+    """Conjunction p-value across ``k`` contrasts.
 
-    The minimum-statistic conjunction is significant at ``alpha`` iff every
-    contrast's p-value is below ``alpha`` iff their maximum is -- so ``max p`` is
-    the valid conjunction p-value (Nichols et al. 2005).
+    Returns the per-element maximum of the per-contrast p-values, the p-scale
+    dual of :func:`conjunction`. The minimum-statistic conjunction is significant
+    at level :math:`\\alpha` if and only if every contrast's p-value is below
+    :math:`\\alpha`, equivalently if and only if their maximum is, so the maximum
+    p-value is the valid conjunction p-value.
+
+    Parameters
+    ----------
+    p_values : Float[Array, 'k *spatial']
+        The ``k`` per-contrast p-value maps stacked on the leading axis, each of
+        shape ``*spatial``.
+
+    Returns
+    -------
+    Float[Array, '*spatial']
+        The per-element maximum p-value over the ``k`` contrasts.
+
+    References
+    ----------
+    Nichols, T., Brett, M., Andersson, J., Wager, T., & Poline, J.-B. (2005).
+    Valid conjunction inference with the minimum statistic. NeuroImage, 25(3),
+    653-660. https://doi.org/10.1016/j.neuroimage.2004.12.005
     """
     return jnp.max(jnp.asarray(p_values), axis=0)
 
@@ -66,14 +102,34 @@ FDRMethod = Literal['bh', 'by', 'storey']
 
 
 def _bh_stepup(
-    p: Float[Array, 'n'], scale: Union[int, Float[Array, '']],
+    p: Float[Array, 'n'],
+    scale: Union[int, Float[Array, '']],
 ) -> Float[Array, 'n']:
-    """Step-up adjusted p-values ``q_(i) = min_{k>=i} (scale / k) p_(k)`` (enforced
-    monotone non-decreasing in rank, clipped to ``1``).
+    """Step-up adjusted p-values for a generalised Benjamini-Hochberg procedure.
 
-    ``scale`` replaces the count ``m`` of the Benjamini-Hochberg procedure:
-    ``scale = m`` is BH; ``scale = m * sum_k 1/k`` is Benjamini-Yekutieli;
-    ``scale = m * pi0`` is Storey's pi0-adaptive FDR.
+    Computes the adjusted p-values
+    :math:`q_{(i)} = \\min_{k \\geq i} (\\mathrm{scale} / k)\\, p_{(k)}`, enforced
+    monotone non-decreasing in rank and clipped to ``1``, where :math:`p_{(k)}` is
+    the ``k``-th smallest p-value.
+
+    The ``scale`` argument replaces the count :math:`m` in the standard
+    Benjamini-Hochberg procedure: ``scale = m`` gives Benjamini-Hochberg,
+    :math:`\\mathrm{scale} = m \\sum_k 1/k` gives Benjamini-Yekutieli, and
+    :math:`\\mathrm{scale} = m\\,\\pi_0` gives Storey's :math:`\\pi_0`-adaptive
+    FDR.
+
+    Parameters
+    ----------
+    p : Float[Array, 'n']
+        Flat vector of ``n`` per-element p-values.
+    scale : int or Float[Array, '']
+        The step-up scaling factor that determines the procedure variant (see
+        above). A scalar.
+
+    Returns
+    -------
+    Float[Array, 'n']
+        The adjusted p-values (q-values), in the original element order.
     """
     m = p.shape[0]
     order = jnp.argsort(p)
@@ -89,11 +145,24 @@ def fdr_bh(
     *,
     alpha: float = 0.05,
 ) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]:
-    """Benjamini-Hochberg FDR correction (valid under independence / PRDS).
+    """Benjamini-Hochberg false-discovery-rate correction.
 
-    Returns ``(rejected, p_adjusted)``: the BH-adjusted p-values (q-values,
-    enforced monotone non-decreasing in rank) and the rejection mask
-    ``p_adjusted <= alpha``.
+    Valid under independence or positive regression dependence of the p-values.
+
+    Parameters
+    ----------
+    p_values : Float[Array, 'n']
+        Flat vector of ``n`` per-element p-values.
+    alpha : float, optional
+        Target false-discovery rate defining the rejection mask. Default ``0.05``.
+
+    Returns
+    -------
+    rejected : Bool[Array, 'n']
+        The rejection mask ``p_adjusted <= alpha``.
+    p_adjusted : Float[Array, 'n']
+        The Benjamini-Hochberg adjusted p-values (q-values), enforced monotone
+        non-decreasing in rank.
     """
     p = jnp.asarray(p_values)
     p_adj = _bh_stepup(p, p.shape[0])
@@ -105,13 +174,30 @@ def fdr_by(
     *,
     alpha: float = 0.05,
 ) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]:
-    """Benjamini-Yekutieli FDR correction -- valid under **arbitrary** dependence.
+    """Benjamini-Yekutieli false-discovery-rate correction.
 
-    The BH step-up at level ``alpha / c(m)`` with the harmonic number
-    ``c(m) = sum_{k=1}^m 1/k`` (equivalently, the BH q-values scaled by ``c(m)``).
-    Use when the p-values may be arbitrarily (e.g. negatively) dependent and BH's
-    positive-dependence assumption is unsafe -- the price is a ``~log(m)`` factor
-    more conservative.  Returns ``(rejected, p_adjusted)``.
+    Valid under arbitrary dependence of the p-values. This is the
+    Benjamini-Hochberg step-up applied at level :math:`\\alpha / c(m)` with the
+    harmonic number :math:`c(m) = \\sum_{k=1}^{m} 1/k`, equivalently the
+    Benjamini-Hochberg q-values scaled by :math:`c(m)`. Use it when the p-values
+    may be arbitrarily (for example, negatively) dependent and the
+    positive-dependence assumption of Benjamini-Hochberg is unsafe; the price is
+    being a factor of about :math:`\\log(m)` more conservative.
+
+    Parameters
+    ----------
+    p_values : Float[Array, 'n']
+        Flat vector of ``n`` per-element p-values.
+    alpha : float, optional
+        Target false-discovery rate defining the rejection mask. Default ``0.05``.
+
+    Returns
+    -------
+    rejected : Bool[Array, 'n']
+        The rejection mask ``p_adjusted <= alpha``.
+    p_adjusted : Float[Array, 'n']
+        The Benjamini-Yekutieli adjusted p-values (q-values), enforced monotone
+        non-decreasing in rank.
     """
     p = jnp.asarray(p_values)
     m = p.shape[0]
@@ -125,13 +211,41 @@ def storey_pi0(
     *,
     lam: float = 0.5,
 ) -> Float[Array, '']:
-    """Storey's estimate of the true-null proportion ``pi0`` (Storey 2002).
+    """Storey's estimate of the true-null proportion :math:`\\pi_0`.
 
-    ``pi0(lambda) = #{p_i > lambda} / (m (1 - lambda))``, clipped to
-    ``[1/m, 1]``.  The tuning ``lambda in (0, 1)`` (default ``0.5``) trades bias
-    for variance; ``pi0 = 1`` recovers Benjamini-Hochberg, and a smaller ``pi0``
-    (more alternatives present) yields a less conservative, higher-power adaptive
-    FDR.  The ``1/m`` floor guards the degenerate "no null" estimate.
+    Computes
+    :math:`\\hat{\\pi}_0(\\lambda) = \\#\\{p_i > \\lambda\\} / (m (1 - \\lambda))`,
+    clipped to :math:`[1/m, 1]`, where :math:`m` is the number of p-values. The
+    tuning parameter :math:`\\lambda \\in (0, 1)` (default ``0.5``) trades bias
+    for variance. A value :math:`\\pi_0 = 1` recovers Benjamini-Hochberg, and a
+    smaller :math:`\\pi_0` (more alternatives present) yields a less conservative,
+    higher-power adaptive FDR. The :math:`1/m` floor guards against the degenerate
+    "no null" estimate.
+
+    Parameters
+    ----------
+    p_values : Float[Array, 'n']
+        Flat vector of ``n`` per-element p-values.
+    lam : float, optional
+        Tuning parameter :math:`\\lambda \\in (0, 1)` at which the null proportion
+        is estimated. Must lie strictly within ``(0, 1)``. Default ``0.5``.
+
+    Returns
+    -------
+    Float[Array, '']
+        The estimated true-null proportion :math:`\\pi_0`, a scalar clipped to
+        :math:`[1/m, 1]`.
+
+    Raises
+    ------
+    ValueError
+        If ``lam`` does not lie strictly within ``(0, 1)``.
+
+    References
+    ----------
+    Storey, J. D. (2002). A direct approach to false discovery rates. Journal of
+    the Royal Statistical Society: Series B (Statistical Methodology), 64(3),
+    479-498. https://doi.org/10.1111/1467-9868.00346
     """
     if not 0.0 < lam < 1.0:
         raise ValueError(f'storey_pi0: lam={lam} must lie in (0, 1).')
@@ -147,12 +261,32 @@ def fdr_storey(
     alpha: float = 0.05,
     lam: float = 0.5,
 ) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]:
-    """Storey's pi0-adaptive FDR / q-values (higher power; independence / PRDS).
+    """Storey's :math:`\\pi_0`-adaptive false-discovery-rate correction.
 
-    Benjamini-Hochberg with the count ``m`` replaced by the estimated number of
-    true nulls ``m * pi0`` (see :func:`storey_pi0`): uniformly less conservative
-    than BH when a non-trivial fraction of effects are real, and identical to BH
-    when ``pi0 = 1``.  Returns ``(rejected, p_adjusted)``.
+    Yields higher power, valid under independence or positive regression
+    dependence. This is Benjamini-Hochberg with the count :math:`m` replaced by
+    the estimated number of true nulls :math:`m\\,\\pi_0` (see
+    :func:`storey_pi0`): uniformly less conservative than Benjamini-Hochberg when
+    a non-trivial fraction of effects are real, and identical to it when
+    :math:`\\pi_0 = 1`.
+
+    Parameters
+    ----------
+    p_values : Float[Array, 'n']
+        Flat vector of ``n`` per-element p-values.
+    alpha : float, optional
+        Target false-discovery rate defining the rejection mask. Default ``0.05``.
+    lam : float, optional
+        Tuning parameter :math:`\\lambda \\in (0, 1)` passed to :func:`storey_pi0`
+        for the :math:`\\pi_0` estimate. Default ``0.5``.
+
+    Returns
+    -------
+    rejected : Bool[Array, 'n']
+        The rejection mask ``p_adjusted <= alpha``.
+    p_adjusted : Float[Array, 'n']
+        The adaptive adjusted p-values (q-values), enforced monotone
+        non-decreasing in rank.
     """
     p = jnp.asarray(p_values)
     p_adj = _bh_stepup(p, p.shape[0] * storey_pi0(p, lam=lam))
@@ -166,12 +300,38 @@ def fdr(
     alpha: float = 0.05,
     lam: float = 0.5,
 ) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]:
-    """Unified false-discovery-rate correction.
+    """Unified false-discovery-rate correction dispatcher.
 
-    ``method``: ``'bh'`` (default -- Benjamini-Hochberg, valid under independence
-    / PRDS), ``'by'`` (Benjamini-Yekutieli, valid under arbitrary dependence), or
-    ``'storey'`` (pi0-adaptive, higher power; ``lam`` tunes the ``pi0`` estimate).
-    Returns ``(rejected, p_adjusted)``.
+    Dispatches to one of the false-discovery-rate procedures according to
+    ``method``.
+
+    Parameters
+    ----------
+    p_values : Float[Array, 'n']
+        Flat vector of ``n`` per-element p-values.
+    method : {'bh', 'by', 'storey'}, optional
+        The correction procedure: ``'bh'`` (default, Benjamini-Hochberg via
+        :func:`fdr_bh`, valid under independence or positive regression
+        dependence), ``'by'`` (Benjamini-Yekutieli via :func:`fdr_by`, valid
+        under arbitrary dependence), or ``'storey'`` (:math:`\\pi_0`-adaptive via
+        :func:`fdr_storey`, higher power).
+    alpha : float, optional
+        Target false-discovery rate defining the rejection mask. Default ``0.05``.
+    lam : float, optional
+        Tuning parameter :math:`\\lambda \\in (0, 1)` for the :math:`\\pi_0`
+        estimate; used only when ``method='storey'``. Default ``0.5``.
+
+    Returns
+    -------
+    rejected : Bool[Array, 'n']
+        The rejection mask ``p_adjusted <= alpha``.
+    p_adjusted : Float[Array, 'n']
+        The adjusted p-values (q-values) of the selected procedure.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is not one of ``'bh'``, ``'by'``, or ``'storey'``.
     """
     if method == 'bh':
         return fdr_bh(p_values, alpha=alpha)
@@ -189,9 +349,24 @@ def bonferroni(
     *,
     alpha: float = 0.05,
 ) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]:
-    """Bonferroni family-wise correction.
+    """Bonferroni family-wise error-rate correction.
 
-    Returns ``(rejected, p_adjusted)`` with ``p_adjusted = min(p * n, 1)``.
+    Scales each p-value by the number of tests ``n`` and clips to ``1``.
+
+    Parameters
+    ----------
+    p_values : Float[Array, 'n']
+        Flat vector of ``n`` per-element p-values.
+    alpha : float, optional
+        Target family-wise error rate defining the rejection mask. Default
+        ``0.05``.
+
+    Returns
+    -------
+    rejected : Bool[Array, 'n']
+        The rejection mask ``p_adjusted <= alpha``.
+    p_adjusted : Float[Array, 'n']
+        The Bonferroni-adjusted p-values :math:`\\min(n\\, p, 1)`.
     """
     p = jnp.asarray(p_values)
     m = p.shape[0]

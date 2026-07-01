@@ -1,7 +1,7 @@
 ---
 title: "sign_flips"
 generated: true
-description: "`(n_perm, n)` matrix of `+/-1` sign flips (row 0 = identity)."
+description: "Build a matrix of $ pm 1$ sign flips for permutation inference."
 ---
 
 [‹ back to `nitrix.stats.inference.permutation`](../nitrix-stats-inference-permutation.qmd)
@@ -13,10 +13,14 @@ sign_flips(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']]
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:sign_flips -->
-`(n_perm, n)` matrix of `+/-1` sign flips (row 0 = identity).
+Build a matrix of $\pm 1$ sign flips for permutation inference.
 
-Without `blocks` each observation flips independently; with `blocks`
-every observation in a block shares the block's sign (whole-block flip).
+Each row of the returned `(n_perm, n)` matrix is one relabelling of the
+`n` observations under sign-flip exchangeability, suitable for symmetric
+or one-sample tests. Row 0 is always the all-ones identity (the unflipped
+data). Without `blocks` each observation flips independently; with
+`blocks` every observation sharing a block label shares that block's
+sign, so the block flips as a whole.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:sign_flips -->
@@ -24,12 +28,12 @@ every observation in a block shares the block's sign (whole-block flip).
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `n` | `int` | — | — | — |
-| `n_perm` | `int` | — | — | — |
-| `key` | `Array` | — | — | — |
-| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | — |
+| `n` | `int` | — | — | Number of observations (columns of the output). |
+| `n_perm` | `int` | — | — | Number of relabellings to generate, including the identity row. |
+| `key` | `Array` | — | — | A `jax.random` key seeding the Bernoulli draws of the flip signs. |
+| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | Per-observation integer exchangeability-block labels of shape `(n,)`. Observations sharing a label flip together. Labels may be arbitrary (negative or non-contiguous) integers; they are canonicalised to a dense encoding so each distinct label is one independent whole-block flip. If `None` (the default), every observation flips independently. |
 
-**Returns** `Float` — shape `n_perm` × `N`.
+**Returns** `Float` — shape `n_perm` × `N`. A `(n_perm, n)` matrix whose entries are `+1.0` or `-1.0`. Row 0 is all ones (the identity); each remaining row is one sign-flip relabelling.
 <!-- nitrix:/gen -->
 
 

@@ -19,9 +19,9 @@ The `mgcv` default smoother (`bs='tp'`): isotropic and knot-free.  The
 full thin-plate basis (one function per knot) is truncated by an
 eigendecomposition of the radial penalty matrix `E` -- the `k - M`
 leading (largest-eigenvalue) wiggly components, plus the `M = penalty_order`
-unpenalised polynomial null-space terms (Wood 2003).  The truncation
-`eigh` is a one-off host (CPU/numpy) computation -- it is data-dependent
-but not per-trace, and avoids the cuSOLVER `syevd` on the broken GPU.
+unpenalised polynomial null-space terms.  The truncation `eigh` is a
+one-off host (CPU/numpy) computation -- it is data-dependent but not
+per-trace, and avoids the cuSOLVER `syevd` on the broken GPU.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:thinplate_regression_basis -->
@@ -36,7 +36,7 @@ but not per-trace, and avoids the cuSOLVER `syevd` on the broken GPU.
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` for the polynomial rescaling (defaults to the data range). |
 | `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
 
-**Returns** `SplineBasis`.
+**Returns** `SplineBasis`. The `SplineBasis` for the thin-plate smooth (`kind='tprs'`).
 <!-- nitrix:/gen -->
 
 

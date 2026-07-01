@@ -21,14 +21,20 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Mass-univariate generalised additive (mixed) models.
 
-`gam_fit` fits, per element (voxel / vertex / fixel), a GAM:
-    g(E[y]) = X_parametric beta + sum_k f_k(x_k),   f_k = B_k(x_k) gamma_k
+`gam_fit` fits, per element (voxel / vertex / fixel), a generalised
+additive model
 
-with each smooth `f_k` a penalised spline (`stats.basis`) carrying a
-roughness penalty $\lambda_k \gamma_k^T S_k \gamma_k$.  This is ModelArray's
-`gam` / `mgcv`-style fit; a **GAMM** adds explicit random-effect blocks,
-which enter as just more penalty components (a random effect is a ridge
-penalty), so the same machinery covers both.
+$$
+g(\mathbb{E}[y]) = X_{\text{parametric}} \beta
+    + \sum_k f_k(x_k), \qquad f_k = B_k(x_k)\,\gamma_k
+$$
+
+with each smooth $f_k$ a penalised spline (from the sibling basis module)
+carrying a roughness penalty $\lambda_k\,\gamma_k^{\top} S_k\,\gamma_k$.
+This is the ModelArray `gam` / `mgcv`-style fit; a *generalised additive
+mixed model* (GAMM) adds explicit random-effect blocks, which enter as just
+more penalty components (a random effect is a ridge penalty), so the same
+machinery covers both.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

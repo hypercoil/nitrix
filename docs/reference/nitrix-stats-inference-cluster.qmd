@@ -21,12 +21,13 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Cluster maps for threshold-based enhancement and inference.
 
-Given a statistic image and a height threshold, the supra-threshold voxels form
-spatial clusters (via `morphology.connected_components`).  `cluster_size_map`
-labels every voxel with the *size* (voxel count) of its cluster;
-`cluster_mass_map` with the integrated supra-threshold statistic of its
-cluster.  These are the per-threshold ingredients of TFCE (`tfce`) and the
-cluster-extent / cluster-mass thresholding modes of `randomise`.
+Given a statistic image and a height threshold, the supra-threshold voxels
+form spatial clusters (via `connected_components`).
+`cluster_size_map` labels every voxel with the *size* (voxel count) of
+its cluster; `cluster_mass_map` with the integrated supra-threshold
+statistic of its cluster.  These are the per-threshold ingredients of
+threshold-free cluster enhancement (`tfce`) and the cluster-extent /
+cluster-mass thresholding modes of the `randomise` permutation driver.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

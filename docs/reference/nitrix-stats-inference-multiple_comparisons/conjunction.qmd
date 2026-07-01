@@ -1,7 +1,7 @@
 ---
 title: "conjunction"
 generated: true
-description: "Minimum-statistic conjunction across `k` contrasts (Nichols et al. 2005)."
+description: "Minimum-statistic conjunction across `k` contrasts."
 ---
 
 [‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
@@ -13,15 +13,14 @@ conjunction(stats: Float[Array, 'k *spatial']) -> Float[Array, '*spatial']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:conjunction -->
-Minimum-statistic conjunction across `k` contrasts (Nichols et al. 2005).
+Minimum-statistic conjunction across `k` contrasts.
 
-`stats` stacks the `k` per-contrast statistic maps on the leading axis.
-Returns the per-element **minimum** over contrasts -- the valid statistic for
-the conjunction null *"at least one of the `k` effects is null"*: a voxel
-survives a threshold only where **every** contrast clears it (the minimum
-does).  This is the correct conjunction; the common
-"all-effects-null" intersection of separately-thresholded maps tests a
-*different* (global) null and does not control the conjunction error.
+Returns the per-element minimum statistic over the `k` contrasts, the valid
+statistic for the conjunction null *"at least one of the `k` effects is
+null"*: an element survives a threshold only where every contrast clears it,
+which is exactly where the minimum clears it. This is the correct conjunction;
+the common "all-effects-null" intersection of separately-thresholded maps
+tests a different (global) null and does not control the conjunction error.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:conjunction -->
@@ -29,9 +28,9 @@ does).  This is the correct conjunction; the common
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `stats` | `Float` | `k` × `*spatial` | — | — |
+| `stats` | `Float` | `k` × `*spatial` | — | The `k` per-contrast statistic maps stacked on the leading axis, each of shape `*spatial`. |
 
-**Returns** `Float` — shape `*spatial`.
+**Returns** `Float` — shape `*spatial`. The per-element minimum statistic over the `k` contrasts.
 <!-- nitrix:/gen -->
 
 

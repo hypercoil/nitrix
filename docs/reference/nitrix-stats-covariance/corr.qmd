@@ -15,8 +15,9 @@ corr(X: Num[Array, '... c obs'], **kwargs) -> Num[Array, '... c c']
 <!-- nitrix:gen overview:corr -->
 Pearson correlation of variables in a tensor batch.
 
-All arguments forwarded to `cov`; the result is divided by
-the geometric mean of the diagonal entries.
+Computes the covariance via `cov` and normalises it by the
+outer product of the per-variable standard deviations, yielding
+correlations with unit diagonal.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:corr -->
@@ -24,10 +25,10 @@ the geometric mean of the diagonal entries.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
+| `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor; see `cov`. |
 | `**kwargs` | `Any` | — | `{}` | — |
 
-**Returns** `Num` — shape `...` × `c` × `c`.
+**Returns** `Num` — shape `...` × `c` × `c`. Correlation matrix over the `c` variables, `(..., c, c)`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:corr -->

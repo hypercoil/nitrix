@@ -15,7 +15,10 @@ cluster_size_map(labels: Int[Array, '*spatial']) -> Float[Array, '*spatial']
 <!-- nitrix:gen overview:cluster_size_map -->
 Per-voxel size (voxel count) of the connected component it belongs to.
 
-Background voxels (label `0`) map to `0`.
+Every voxel of a component is assigned the number of voxels in that
+component; background voxels (label `0`) map to `0`.  The count is
+accumulated in the canonical floating dtype (`float64` under x64) so that
+cluster sizes beyond `2**24` remain exactly representable.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:cluster_size_map -->
@@ -23,9 +26,9 @@ Background voxels (label `0`) map to `0`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `labels` | `Int` | `*spatial` | — | — |
+| `labels` | `Int` | `*spatial` | — | Integer label image of shape `(*spatial)`; `0` denotes background and `1 .. K` the connected components, as produced by `connected_components`. |
 
-**Returns** `Float` — shape `*spatial`.
+**Returns** `Float` — shape `*spatial`. Array of shape `(*spatial)` giving the voxel count of each voxel's component; background voxels carry `0`.
 <!-- nitrix:/gen -->
 
 

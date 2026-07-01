@@ -2,7 +2,7 @@
 title: "nitrix.stats.inference.multiple_comparisons"
 generated: true
 signature-hash: 44a788242deb6fb4
-description: "Multiple-comparison corrections + multi-contrast combination for mass-univariate p-value / statistic maps."
+description: "Multiple-comparison corrections and multi-contrast combination for mass-univariate p-value and statistic maps."
 listing:
   id: nitrix-stats-inference-multiple_comparisons-symbols
   contents: "nitrix-stats-inference-multiple_comparisons/*.qmd"
@@ -19,16 +19,18 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 :::
 
 <!-- nitrix:gen overview:__module__ -->
-Multiple-comparison corrections + multi-contrast combination for mass-univariate
-p-value / statistic maps.
+Multiple-comparison corrections and multi-contrast combination for
+mass-univariate p-value and statistic maps.
 
-Companions to the permutation engine: false-discovery-rate control --
-Benjamini-Hochberg (`fdr_bh`; valid under independence / PRDS),
-Benjamini-Yekutieli (`fdr_by`; valid under *arbitrary* dependence), and
-Storey's pi0-adaptive q-values (`fdr_storey`; higher power), behind a unified
-`fdr(method=...)` dispatcher -- the Bonferroni family-wise correction, and the
-**valid conjunction** (minimum-statistic) combination across contrasts (audit
-N7).  All are pure array ops over a flat per-element p-value vector.
+These are companions to the permutation engine. They provide false-discovery-rate
+control -- Benjamini-Hochberg (`fdr_bh`, valid under independence or
+positive regression dependence), Benjamini-Yekutieli (`fdr_by`, valid under
+arbitrary dependence), and Storey's $\pi_0$-adaptive q-values
+(`fdr_storey`, higher power) behind a unified `fdr` dispatcher -- the
+Bonferroni family-wise correction (`bonferroni`), and the valid conjunction
+(minimum-statistic) combination across contrasts (`conjunction`,
+`conjunction_pvalue`). All are pure array operations over a flat
+per-element p-value vector.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

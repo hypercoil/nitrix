@@ -2,7 +2,7 @@
 title: "nitrix.stats.connectivity"
 generated: true
 signature-hash: 79f42479388d09ad
-description: "Regularised covariance / sparse-precision estimators for connectivity."
+description: "Regularised covariance and sparse-precision estimators for connectivity."
 listing:
   id: nitrix-stats-connectivity-symbols
   contents: "nitrix-stats-connectivity/*.qmd"
@@ -19,40 +19,53 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 :::
 
 <!-- nitrix:gen overview:__module__ -->
-Regularised covariance / sparse-precision estimators for connectivity.
+Regularised covariance and sparse-precision estimators for connectivity.
 
-The raw empirical covariance (`stats.covariance.cov`) is noisy and may be
-singular when the number of variables approaches the number of observations
-(`p ~ n` -- the small-sample regime of resting-state connectomes).  This
-module ships the regularised estimators the connectome literature defaults to:
+The raw empirical covariance is noisy and may be singular when the number of
+variables approaches the number of observations ($p \sim n$ -- the
+small-sample regime of resting-state connectomes).  This module provides the
+regularised estimators that the connectome literature commonly defaults to.
 
-- **Analytic shrinkage** -- Ledoit-Wolf (2004) and OAS (Chen et al. 2010), a
-  convex blend of the sample covariance `S` toward a scaled identity:
-      Sigma_hat = (1 - alpha) S + alpha mu I,    mu = tr(S) / p
+Analytic-shrinkage estimators -- the Ledoit-Wolf and oracle-approximating
+shrinkage (OAS) methods -- form a convex blend of the sample covariance
+$S$ toward a scaled identity,
 
-  with the shrinkage intensity `alpha` in **closed form** (no
-  cross-validation).  Ledoit-Wolf is nilearn's *default* connectome covariance
-  estimator, so this is the missing piece for a nilearn-default-equivalent
-  `precision` / `partialcorr` path (invert `Sigma_hat` with the
-  cuSOLVER-free `_smalllinalg` solve).
+$$
+\hat{\Sigma} = (1 - \alpha)\, S + \alpha\, \mu\, I,
+\qquad \mu = \operatorname{tr}(S) / p,
+$$
 
-- **Graphical LASSO** -- the sparse inverse covariance (precision) that is the
-  conditional-independence graph the fMRI literature has used for ~15 years:
-      Theta_hat = argmin_Theta  <S, Theta> - log det Theta + lam ||Theta||_{1,off}
+with the shrinkage intensity $\alpha$ given in closed form (no
+cross-validation).  Ledoit-Wolf is a widely used default connectome covariance
+estimator, so this supplies a covariance whose inverse gives an equivalent
+precision / partial-correlation path (inverting $\hat{\Sigma}$ with the
+cuSOLVER-free small-matrix solve).
 
-  solved by Friedman/Hastie/Tibshirani (2008) coordinate descent on the working
-  covariance $W = \Theta^-1$ directly (no per-iteration factorisation), with
-  `glasso_path` for a warm-started `lam` sweep and `ebic_score` for
-  extended-BIC model selection (Foygel & Drton 2010).
+The graphical LASSO estimates the sparse inverse covariance (precision), whose
+support is the conditional-independence graph long used in the functional-MRI
+literature,
 
-Pure JAX -- the shrinkage path is trace / Frobenius reductions + one scalar
-`alpha`; the GLASSO path is rolled coordinate descent (`lax.fori_loop` /
-`lax.scan`, so the graph stays $O(p^2)$ and compile is flat in `p`).
-Differentiable and GPU-resident; cuSOLVER-free (the `log det` for EBIC goes
-through the rolled Cholesky in `_smalllinalg`).  `vmap` over subjects /
-edges for batches.  `X` is `(n_samples, n_features)` (the
-`sklearn.covariance` convention); `glasso` consumes a `(p, p)` sample
-covariance `S` directly (the FHT convention).
+$$
+\hat{\Theta} = \operatorname*{argmin}_{\Theta}\;
+\langle S, \Theta \rangle - \log\det\Theta
++ \lambda \lVert\Theta\rVert_{1,\mathrm{off}},
+$$
+
+solved by Friedman, Hastie and Tibshirani (2008) coordinate descent on the
+working covariance $W = \Theta^{-1}$ directly (no per-iteration
+factorisation).  `glasso_path` performs a warm-started $\lambda$
+sweep and `ebic_score` provides extended-BIC model selection (Foygel and
+Drton, 2010).
+
+The implementation is pure JAX.  The shrinkage path is a handful of trace and
+Frobenius-norm reductions plus one scalar $\alpha$; the graphical-LASSO
+path is rolled coordinate descent (`lax.fori_loop` / `lax.scan`), so the
+computation graph stays $O(p^2)$ and compilation is flat in $p$.
+Everything is differentiable and GPU-resident, and cuSOLVER-free (the
+$\log\det$ used by the extended BIC goes through a rolled Cholesky).
+Batch over subjects or edges with `vmap`.  The data matrix `X` is
+`(n_samples, n_features)` (the `sklearn.covariance` convention), whereas
+`glasso` consumes a `(p, p)` sample covariance `S` directly.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

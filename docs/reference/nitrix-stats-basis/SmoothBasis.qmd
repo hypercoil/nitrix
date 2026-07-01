@@ -1,7 +1,7 @@
 ---
 title: "SmoothBasis"
 generated: true
-description: "Structural interface of a GAM smooth term (audit D8)."
+description: "Structural interface of a GAM smooth term."
 ---
 
 [‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
@@ -13,14 +13,13 @@ class SmoothBasis(Protocol)
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:SmoothBasis -->
-Structural interface of a GAM smooth term (audit D8).
+Structural interface of a GAM smooth term.
 
 A smooth carries a `design` matrix and a coefficient count `dim`, knows
 its own penalty blocks, and can re-evaluate its design on a covariate grid.
-`gam_fit` dispatches through these members instead of an `isinstance`
-chain, so a **new** basis type (implementing this Protocol) needs no edit to
-`gam.py` -- the open-set registry the `Family` / `CorrSpec`
-surfaces already have.
+`gam_fit` dispatches through these members instead of an
+`isinstance` chain, so a **new** basis type (implementing this Protocol)
+needs no edit to the fitting routine.
 
 The concrete bases (`SplineBasis` / `TensorBasis` /
 `REBasis`) all conform.
@@ -34,7 +33,7 @@ penalty_blocks() -> List[Tuple[np.ndarray, np.ndarray]]
 ```
 <!-- nitrix:/gen -->
 
-Penalty blocks `[(S_block, eig_block)]` (host constants).
+Return the penalty blocks of this smooth as host constants.
 
 <!-- nitrix:gen sig:SmoothBasis.eval_design -->
 ```python
@@ -42,5 +41,5 @@ eval_design(x: Any) -> Float[Array, 'g k']
 ```
 <!-- nitrix:/gen -->
 
-Re-evaluate the design on the smooth's covariate grid `x`.
+Re-evaluate the design on a fresh covariate grid.
 

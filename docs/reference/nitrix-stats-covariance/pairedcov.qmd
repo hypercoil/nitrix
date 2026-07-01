@@ -16,7 +16,9 @@ pairedcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: boo
 Cross-covariance between two sets of variables.
 
 Same semantics as `cov` but with two separate variable
-blocks.  Returns `(..., c, d)`.
+blocks `X` and `Y` sharing the same observation axis.  The
+result is the rectangular block of covariances between every
+variable of `X` and every variable of `Y`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pairedcov -->
@@ -24,16 +26,16 @@ blocks.  Returns `(..., c, d)`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `Y` | `Num` | `...` × `d` × `obs` | — | — |
-| `rowvar` | `bool` | — | `True` | — |
-| `bias` | `bool` | — | `False` | — |
-| `ddof` | `Optional[int]` | — | `None` | — |
-| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | — |
-| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | — |
-| `l2` | `float` | — | `0.0` | — |
+| `X` | `Num` | `...` × `c` × `obs` | — | First variable block; observations along the observation axis. |
+| `Y` | `Num` | `...` × `d` × `obs` | — | Second variable block, sharing the observation axis with `X`. |
+| `rowvar` | `bool` | — | `True` | If `True` (default), the observation axis is the last axis; pass `False` to flip. |
+| `bias` | `bool` | — | `False` | If `True`, divide by $n$; otherwise by $n - 1$. Ignored if `ddof` is given. |
+| `ddof` | `Optional[int]` | — | `None` | Explicit degrees-of-freedom override. `None` means `int(not bias)`. |
+| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation vector weights. Mutually exclusive with `weight_matrix`. |
+| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation-coupling matrix. Must be symmetric for the result to be a valid covariance. Mutually exclusive with `weights`. |
+| `l2` | `float` | — | `0.0` | Ridge regularisation strength; `l2 > 0` adds $\lambda I$ when the result is square. |
 
-**Returns** `Num` — shape `...` × `c` × `d`.
+**Returns** `Num` — shape `...` × `c` × `d`. Cross-covariance block, `(..., c, d)`.
 <!-- nitrix:/gen -->
 
 

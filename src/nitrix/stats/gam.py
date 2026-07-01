@@ -1,55 +1,72 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-"""
+r"""
 Mass-univariate generalised additive (mixed) models.
 
-``gam_fit`` fits, per element (voxel / vertex / fixel), a GAM::
+:func:`gam_fit` fits, per element (voxel / vertex / fixel), a generalised
+additive model
 
-    g(E[y]) = X_parametric beta + sum_k f_k(x_k),   f_k = B_k(x_k) gamma_k
+.. math::
 
-with each smooth ``f_k`` a penalised spline (``stats.basis``) carrying a
-roughness penalty ``lambda_k gamma_k^T S_k gamma_k``.  This is ModelArray's
-``gam`` / ``mgcv``-style fit; a **GAMM** adds explicit random-effect blocks,
-which enter as just more penalty components (a random effect is a ridge
-penalty), so the same machinery covers both.
+    g(\mathbb{E}[y]) = X_{\text{parametric}} \beta
+        + \sum_k f_k(x_k), \qquad f_k = B_k(x_k)\,\gamma_k
+
+with each smooth :math:`f_k` a penalised spline (from the sibling basis module)
+carrying a roughness penalty :math:`\lambda_k\,\gamma_k^{\top} S_k\,\gamma_k`.
+This is the ModelArray ``gam`` / ``mgcv``-style fit; a *generalised additive
+mixed model* (GAMM) adds explicit random-effect blocks, which enter as just
+more penalty components (a random effect is a ridge penalty), so the same
+machinery covers both.
 
 Two nested loops, one per element
 ---------------------------------
 
-- **Inner** (fixed ``lambda``): penalised IRLS -- the same cuSOLVER-free
-  weighted normal-equations solve as ``glm``, with the block penalty
-  ``S(lambda) = sum_k lambda_k S_k`` added.  OLS / WLS / exponential family all
-  reduce to it.
-- **Outer** (select ``lambda``): the **generalized Fellner-Schall** update
-  (Wood & Fasiolo 2017) -- a multiplicative, positivity-preserving generalized-
-  REML step ``lambda_k <- lambda_k (tr(S_lambda^- S_k) - tr(V S_k)) / (gamma_k^T
-  S_k gamma_k / phi)`` that increases the (Laplace) marginal likelihood each
-  iteration.  Because GAM smooths occupy disjoint coefficient blocks,
-  ``tr(S_lambda^- S_k) = rank(S_k) / lambda_k`` -- no generalized inverse of the
-  summed penalty is needed.  This is the operational form of the penalty <->
-  variance-component REML equivalence (the GAM smoothing parameter is the
-  ratio ``phi / sigma_b^2`` of a mixed model).
+- **Inner** (fixed :math:`\lambda`): penalised iteratively reweighted least
+  squares -- the same solver-free weighted normal-equations solve as the
+  generalised linear model, with the block penalty
+  :math:`S(\lambda) = \sum_k \lambda_k S_k` added.  Ordinary and weighted least
+  squares and the exponential family all reduce to it.
+- **Outer** (select :math:`\lambda`): the generalised Fellner-Schall update
+  (Wood & Fasiolo, 2017) -- a multiplicative, positivity-preserving
+  generalised-REML step
 
-Both loops run a fixed number of iterations (``vmap``-clean over elements) and
-every solve is cuSOLVER-free (``linalg._smalllinalg``), so the whole fit runs on
-the broken-cuSOLVER GPU.
+  .. math::
+
+      \lambda_k \leftarrow \lambda_k\,
+        \frac{\operatorname{tr}(S_\lambda^{-} S_k) - \operatorname{tr}(V S_k)}
+             {\gamma_k^{\top} S_k\,\gamma_k / \phi}
+
+  that increases the (Laplace) marginal likelihood each iteration.  Because GAM
+  smooths occupy disjoint coefficient blocks,
+  :math:`\operatorname{tr}(S_\lambda^{-} S_k) = \operatorname{rank}(S_k)/\lambda_k`
+  -- no generalised inverse of the summed penalty is needed.  This is the
+  operational form of the penalty / variance-component REML equivalence (the GAM
+  smoothing parameter is the ratio :math:`\phi / \sigma_b^2` of a mixed model).
+
+Both loops run a fixed number of iterations (clean under
+:func:`jax.vmap` over elements) and every solve avoids the vendor dense
+eigensolver, so the whole fit runs on hardware where that solver is unreliable.
 
 Outputs (ModelArray ``gam`` parity)
 -----------------------------------
 
-``GAMResult`` carries per-element coefficients, selected ``lambda``, per-smooth
-**effective degrees of freedom** (``edf_k = tr`` of the smooth's influence
-block) and total EDF, dispersion, deviance, and the Bayesian coefficient
-covariance ``V = (X^T W X + S_lambda)^{-1}`` (for smooth-term confidence bands
-and the approximate F / chi-square tests).  Partial effects are rendered with
-``smooth_partial_effect``.
+:class:`GAMResult` carries per-element coefficients, selected :math:`\lambda`,
+per-smooth **effective degrees of freedom** (the trace of the smooth's influence
+block) and total effective degrees of freedom, dispersion, deviance, and the
+Bayesian coefficient covariance :math:`V = (X^{\top} W X + S_\lambda)^{-1}` (for
+smooth-term confidence bands and the approximate :math:`F` / :math:`\chi^2`
+tests).  Partial effects are rendered with :func:`smooth_partial_effect`.
 
 References
 ----------
-- Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
-  smoothing parameter optimization.  Biometrics 73, 1071-1081.
-- Wood, S. N. (2017). Generalized Additive Models, 2nd ed.
+Wood, S. N. & Fasiolo, M. (2017). A generalized Fellner-Schall method for
+smoothing parameter optimization with application to Tweedie location, scale
+and shape models. Biometrics, 73(4), 1071-1081.
+https://doi.org/10.1111/biom.12666
+
+Wood, S. N. (2017). Generalized Additive Models: An Introduction with R,
+2nd ed. Chapman and Hall/CRC.
 """
 
 from __future__ import annotations
@@ -119,7 +136,7 @@ Smooth = SmoothBasis
 )
 @dataclass(frozen=True)
 class GAMResult:
-    """Per-element GAM fit output.
+    r"""Per-element GAM fit output.
 
     Attributes
     ----------
@@ -138,7 +155,8 @@ class GAMResult:
     deviance, null_deviance
         ``(V,)`` model and intercept-only deviance.
     cov_unscaled
-        ``(V, p, p)`` Bayesian covariance ``(X^T W X + S_lambda)^{-1}``.
+        ``(V, p, p)`` Bayesian covariance
+        :math:`(X^{\top} W X + S_\lambda)^{-1}`.
     col_slices
         Per-smooth ``(lo, hi)`` column ranges into ``coef`` (the smooth blocks
         only; the intercept / parametric columns precede the first smooth).
@@ -178,10 +196,45 @@ def _assemble(
     Float[Array, 'K p'],
     Tuple[Tuple[int, int], ...],
 ]:
-    """Build the full design ``X``, the stacked full-size penalties ``S_k``,
-    their block eigenvalues ``pen_eig`` (for the Fellner-Schall trace), and the
-    per-smooth column slices.  A smooth may carry **multiple** penalties (a
-    tensor product has one per margin); ``K >= len(smooths)``."""
+    r"""Assemble the shared design matrix, penalties, and column layout.
+
+    Builds the full design :math:`X`, the stacked full-size penalties
+    :math:`S_k` embedded into the coefficient space, their block eigenvalues
+    (used by the Fellner-Schall penalty trace), and the per-smooth column
+    slices.  A smooth may carry **multiple** penalties (a tensor product has
+    one per margin), so the number of penalties ``K`` may exceed the number of
+    smooth terms.
+
+    Parameters
+    ----------
+    n
+        Number of observation rows :math:`N` (the design row count).
+    smooths
+        Penalised smooth bases (one per smooth term).  Each supplies its
+        ``design`` matrix, its column count ``dim``, and its
+        ``penalty_blocks()`` (per-penalty coefficient-space block matrix plus
+        block eigenvalues).
+    parametric
+        Optional ``(N, q)`` unpenalised linear design placed immediately after
+        the intercept; ``None`` if there are no parametric covariates.
+    intercept
+        Whether to prepend a leading column of ones.
+    dtype
+        Floating dtype for the assembled arrays.
+
+    Returns
+    -------
+    X : Float[Array, 'N p']
+        The assembled design ``[intercept | parametric | smooth_1 | ... ]``.
+    pen_full : Float[Array, 'K p p']
+        The ``K`` penalty matrices, each embedded at its smooth's coefficient
+        block within the full :math:`(p, p)` coefficient space.
+    pen_eig : Float[Array, 'K p']
+        The block eigenvalues of each penalty (zero outside its block).
+    slices : tuple of (int, int)
+        Per-smooth ``(lo, hi)`` column ranges into the assembled design (one
+        entry per smooth term).
+    """
     blocks = []
     if intercept:
         blocks.append(jnp.ones((n, 1), dtype=dtype))
@@ -230,10 +283,42 @@ def _penalised_irls(
     ridge: float,
     beta0: Float[Array, 'p'],
 ) -> Tuple[Float[Array, 'p'], Float[Array, 'p p'], Float[Array, 'p p']]:
-    """Penalised IRLS from a warm start, via the shared core.  Returns
-    ``(beta, V, xtwx)`` -- the coefficients, ``V = (X^T W X + S_lambda +
-    ridge)^{-1}``, and the unpenalised Gram ``X^T W X`` (for the EDF / FS
-    traces), all at the converged ``beta``."""
+    r"""Run penalised iteratively reweighted least squares from a warm start.
+
+    A thin wrapper over the shared penalised-IRLS core that returns the extra
+    quantities the Fellner-Schall step needs, all evaluated at the converged
+    coefficients.
+
+    Parameters
+    ----------
+    y
+        ``(N,)`` response for this element.
+    X
+        ``(N, p)`` design matrix.
+    s_lambda
+        ``(p, p)`` summed penalty :math:`S_\lambda = \sum_k \lambda_k S_k`.
+    family
+        Exponential family supplying the link and variance functions.
+    p
+        Number of design columns :math:`p` (static, for the linear solve).
+    n_iter
+        Number of inner IRLS iterations.
+    ridge
+        Small stabiliser added to the penalised normal equations.
+    beta0
+        ``(p,)`` warm-start coefficients.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        The converged coefficients.
+    V : Float[Array, 'p p']
+        The Bayesian covariance
+        :math:`V = (X^{\top} W X + S_\lambda + \text{ridge})^{-1}`.
+    xtwx : Float[Array, 'p p']
+        The unpenalised weighted Gram matrix :math:`X^{\top} W X` (for the
+        effective-degrees-of-freedom and Fellner-Schall traces).
+    """
     beta, v, xtwx, _ = fit_penalised_irls(
         y, X, family, penalty=s_lambda, beta0=beta0, n_iter=n_iter, ridge=ridge
     )
@@ -243,14 +328,31 @@ def _penalised_irls(
 def _trace_slinv_sk(
     ek: Float[Array, 'p'], s_lambda_eig: Float[Array, 'p']
 ) -> Float[Array, '']:
-    """``tr(S_lambda^+ S_k)`` from the precomputed block eigenvalues.
+    r"""Compute the Fellner-Schall penalty trace from block eigenvalues.
 
-    With every penalty diagonal in its block's joint eigenbasis, the trace is an
-    elementwise sum ``sum_i [s_lambda_eig_i > 0] eig_k_i / s_lambda_eig_i`` --
+    Evaluates :math:`\operatorname{tr}(S_\lambda^{+} S_k)` from the precomputed
+    block eigenvalues.  With every penalty diagonal in its block's joint
+    eigenbasis, the trace is an elementwise sum
+    :math:`\sum_i [\,s_i > 0\,]\, e_{k,i} / s_i` (with :math:`s_i` the pooled
+    penalty eigenvalues and :math:`e_{k,i}` those of :math:`S_k`) --
     basis-invariant, so it is exact even though the *fit* is carried in the
     original (non-rotated) basis.  For a lone disjoint penalty this reduces to
-    ``rank_k / lambda_k`` (the old shortcut); for overlapping tensor-product
-    penalties it is the correct general trace, no pseudo-inverse needed.
+    :math:`\operatorname{rank}_k / \lambda_k` (the simple shortcut); for
+    overlapping tensor-product penalties it is the correct general trace, with
+    no pseudo-inverse needed.
+
+    Parameters
+    ----------
+    ek
+        ``(p,)`` block eigenvalues of the single penalty :math:`S_k`.
+    s_lambda_eig
+        ``(p,)`` pooled block eigenvalues of the summed penalty
+        :math:`S_\lambda`.
+
+    Returns
+    -------
+    Float[Array, '']
+        The scalar trace :math:`\operatorname{tr}(S_\lambda^{+} S_k)`.
     """
     safe = jnp.where(s_lambda_eig > _EIG_EPS, s_lambda_eig, 1.0)
     return jnp.sum(jnp.where(s_lambda_eig > _EIG_EPS, ek / safe, 0.0))
@@ -277,19 +379,48 @@ def _gam_fit_shared_gaussian(
     Float[Array, 'V p p'],
     Float[Array, 'V'],
 ]:
-    """One smoothing parameter shared across all ``V`` elements (Gaussian).
+    r"""Fit with one smoothing parameter shared across all elements (Gaussian).
 
-    For the Gaussian identity link the influence ``V = (X^T X + S_lambda)^{-1}``
-    is *shared* (no ``y`` dependence), so the **pooled** Fellner-Schall update
-    is a function only of the ``(p, p)`` sufficient statistics ``X^T X`` and
-    ``C = (Y X)^T (Y X) = sum_v (X^T y_v)(X^T y_v)^T`` and the scalar
-    ``tr(sum_v y_v y_v^T)``.  The outer loop is therefore ``O(n_outer p^3)`` --
-    **independent of ``V``** -- removing the per-element outer loop entirely;
-    only the final coefficient fit and the sufficient statistics touch ``V``.
+    For the Gaussian identity link the influence matrix
+    :math:`V = (X^{\top} X + S_\lambda)^{-1}` is *shared* (it has no :math:`y`
+    dependence), so the **pooled** Fellner-Schall update is a function only of
+    the :math:`(p, p)` sufficient statistics :math:`X^{\top} X` and
+    :math:`C = (Y X)^{\top} (Y X) = \sum_v (X^{\top} y_v)(X^{\top} y_v)^{\top}`
+    and the scalar :math:`\operatorname{tr}(\sum_v y_v y_v^{\top})`.  The outer
+    loop is therefore :math:`O(n_{\text{outer}}\, p^3)` -- **independent of**
+    the number of elements -- removing the per-element outer loop entirely; only
+    the final coefficient fit and the sufficient statistics touch the element
+    axis.
 
-    Returns the same ``(beta, lam, V, xtwx, dispersion)`` per-element tuple as
-    the per-element path (``V`` / ``xtwx`` broadcast from the shared ``(p, p)``),
-    so the result assembly is identical.
+    Parameters
+    ----------
+    Y
+        ``(V, N)`` responses (one row per element).
+    X
+        ``(N, p)`` shared design matrix.
+    penalties
+        ``(m, p, p)`` stacked penalty matrices embedded in coefficient space.
+    pen_eig
+        ``(m, p)`` per-penalty block eigenvalues.
+    n_outer
+        Number of pooled Fellner-Schall outer iterations.
+    ridge
+        Small stabiliser added to the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on each smoothing parameter.
+
+    Returns
+    -------
+    coef : Float[Array, 'V p']
+        Per-element coefficients :math:`\beta_v = V (X^{\top} y_v)`.
+    lam : Float[Array, 'V m']
+        The shared smoothing parameters, broadcast over elements.
+    V : Float[Array, 'V p p']
+        The Bayesian covariance, broadcast over elements.
+    xtwx : Float[Array, 'V p p']
+        The Gram matrix :math:`X^{\top} X`, broadcast over elements.
+    dispersion : Float[Array, 'V']
+        Per-element residual-variance scale estimate.
     """
     v_count, n = Y.shape
     m = penalties.shape[0]
@@ -362,7 +493,49 @@ def _gam_fit_one(
     Float[Array, 'p p'],
     Float[Array, ''],
 ]:
-    """Single-element GAM fit.  Returns ``(beta, lam, V, xtwx, dispersion)``."""
+    r"""Fit the GAM for a single element (general exponential family).
+
+    Runs the Fellner-Schall outer loop over the inner penalised-IRLS solve,
+    then re-fits at the selected smoothing parameters.
+
+    Parameters
+    ----------
+    y
+        ``(N,)`` response for this element.
+    X
+        ``(N, p)`` design matrix.
+    penalties
+        ``(m, p, p)`` stacked penalty matrices embedded in coefficient space.
+    pen_eig
+        ``(m, p)`` per-penalty block eigenvalues.
+    family
+        Exponential family supplying the link, variance, and dispersion
+        convention.
+    p
+        Number of design columns :math:`p` (static, for the linear solve).
+    n_outer
+        Number of Fellner-Schall outer iterations.
+    n_inner
+        Number of penalised-IRLS inner iterations.
+    ridge
+        Small stabiliser added to the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on each smoothing parameter.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        The fitted coefficients.
+    lam : Float[Array, 'm']
+        The selected smoothing parameters (one per penalty).
+    V : Float[Array, 'p p']
+        The Bayesian coefficient covariance.
+    xtwx : Float[Array, 'p p']
+        The unpenalised weighted Gram matrix :math:`X^{\top} W X`.
+    dispersion : Float[Array, '']
+        The scale estimate (residual scale for Gaussian; ``1`` for
+        fixed-dispersion families).
+    """
     m = penalties.shape[0]
     n = X.shape[0]
 
@@ -445,18 +618,57 @@ def _gam_fit_one_gaussian_xprod(
     Float[Array, 'p p'],
     Float[Array, ''],
 ]:
-    """Exact per-voxel Gaussian GAM fit from the cross-products ``c = X^T y_v``
-    and ``g = y_v^T y_v``.
+    r"""Fit the Gaussian GAM for one element from its cross-products.
 
-    For the Gaussian identity link the penalised IRLS converges in **one** step
-    to ``beta = (X^T X + S_lambda)^{-1} c`` -- a function of ``y`` only through
-    ``c`` -- and the dispersion (``phi = (g - 2 beta^T c + beta^T X^T X beta) /
-    (N - edf)``), the EDF, and the Fellner-Schall traces all reduce to ``(c, g,
-    X^T X)``.  So the whole per-voxel Fellner-Schall loop runs in ``p``-space
-    with **no N-dimensional vector in the loop** -- ``N`` enters only the one-off
-    cross-products ``X^T Y`` and ``diag(Y Y^T)`` -- and the result is identical
-    (to floating point) to ``_gam_fit_one`` for the Gaussian family.  Returns the
-    same ``(beta, lam, V, xtwx, dispersion)`` tuple; ``xtwx = X^T X`` is shared.
+    Exact per-element Gaussian fit from the cross-products
+    :math:`c = X^{\top} y_v` and :math:`g = y_v^{\top} y_v`.  For the Gaussian
+    identity link the penalised IRLS converges in **one** step to
+    :math:`\beta = (X^{\top} X + S_\lambda)^{-1} c` -- a function of :math:`y`
+    only through :math:`c` -- and the dispersion
+    :math:`\phi = (g - 2\,\beta^{\top} c + \beta^{\top} X^{\top} X\,\beta) /
+    (N - \text{edf})`, the effective degrees of freedom, and the Fellner-Schall
+    traces all reduce to :math:`(c, g, X^{\top} X)`.  So the whole per-element
+    Fellner-Schall loop runs in :math:`p`-space with **no N-dimensional vector
+    in the loop** -- :math:`N` enters only the one-off cross-products
+    :math:`X^{\top} Y` and :math:`\operatorname{diag}(Y Y^{\top})` -- and the
+    result is identical (to floating point) to :func:`_gam_fit_one` for the
+    Gaussian family.
+
+    Parameters
+    ----------
+    c
+        ``(p,)`` design-response cross-product :math:`X^{\top} y_v`.
+    g
+        The scalar response energy :math:`y_v^{\top} y_v`.
+    xtx
+        ``(p, p)`` shared Gram matrix :math:`X^{\top} X`.
+    penalties
+        ``(m, p, p)`` stacked penalty matrices embedded in coefficient space.
+    pen_eig
+        ``(m, p)`` per-penalty block eigenvalues.
+    n
+        Number of observation rows :math:`N` (for the dispersion denominator).
+    p
+        Number of design columns :math:`p` (static, for the linear solve).
+    n_outer
+        Number of Fellner-Schall outer iterations.
+    ridge
+        Small stabiliser added to the penalised normal equations.
+    lam_floor, lam_ceil
+        Clamp on each smoothing parameter.
+
+    Returns
+    -------
+    beta : Float[Array, 'p']
+        The fitted coefficients.
+    lam : Float[Array, 'm']
+        The selected smoothing parameters (one per penalty).
+    V : Float[Array, 'p p']
+        The Bayesian coefficient covariance.
+    xtwx : Float[Array, 'p p']
+        The shared Gram matrix :math:`X^{\top} X`.
+    dispersion : Float[Array, '']
+        The residual-variance scale estimate.
     """
     m = penalties.shape[0]
     ridge_eye = ridge * jnp.eye(p, dtype=xtx.dtype)
@@ -515,18 +727,19 @@ def gam_fit(
     lam_ceil: float = 1e8,
     block: Optional[int] = None,
 ) -> GAMResult:
-    """Fit a mass-univariate GAM: shared smooth bases, per-element responses.
+    r"""Fit a mass-univariate GAM: shared smooth bases, per-element responses.
 
     Parameters
     ----------
     Y
         ``(V, N)`` responses.
     smooths
-        Penalised smooth bases (one per smooth term): a ``SplineBasis``
-        (``bspline_basis`` / ``thinplate_regression_basis`` / ``cyclic_cubic_basis``)
-        or a ``TensorBasis`` (``tensor_product_basis``) for an anisotropic
-        interaction.  A tensor smooth carries one smoothing parameter per margin,
-        all selected by the same Fellner-Schall loop.
+        Penalised smooth bases (one per smooth term): a
+        :class:`SplineBasis` (from :func:`bspline_basis`,
+        :func:`thinplate_regression_basis`, or :func:`cyclic_cubic_basis`) or a
+        :class:`TensorBasis` (from :func:`tensor_product_basis`) for an
+        anisotropic interaction.  A tensor smooth carries one smoothing
+        parameter per margin, all selected by the same Fellner-Schall loop.
     parametric
         Optional ``(N, q)`` unpenalised linear design (covariates entering
         linearly).  The intercept is added separately (see ``intercept``).
@@ -538,8 +751,9 @@ def gam_fit(
         ``'per_element'`` (default) selects a smoothing parameter per element
         (ModelArray parity).  ``'shared'`` selects **one** smoothing parameter
         across all elements via a pooled Fellner-Schall update on sufficient
-        statistics -- an ``O(n_outer p^3)``, ``V``-independent outer loop (much
-        faster when smoothness is homogeneous across the brain).  Gaussian only.
+        statistics -- an :math:`O(n_{\text{outer}}\, p^3)`, element-count
+        independent outer loop (much faster when smoothness is homogeneous
+        across the brain).  Gaussian only.
     n_outer, n_inner
         Fellner-Schall outer iterations and penalised-IRLS inner iterations.
     ridge
@@ -553,8 +767,10 @@ def gam_fit(
 
     Returns
     -------
-    ``GAMResult`` (coefficients, selected ``lambda``, per-smooth EDF, dispersion,
-    deviance, Bayesian covariance).
+    GAMResult
+        The per-element fit: coefficients, selected smoothing parameters,
+        per-smooth effective degrees of freedom, dispersion, deviance, and the
+        Bayesian covariance.
     """
     family = resolve_family(family)
     n = X_n = Y.shape[-1]
@@ -700,8 +916,8 @@ def gam_predict(
     result
         A :class:`GAMResult` from :func:`gam_fit`.
     smooths
-        The same ``Smooth`` terms passed to :func:`gam_fit`, in the same order
-        (used here only to evaluate the basis at the new covariates).
+        The same :class:`SmoothBasis` terms passed to :func:`gam_fit`, in the
+        same order (used here only to evaluate the basis at the new covariates).
     x_smooths
         New covariate(s) per smooth (one entry per ``smooths`` term, each in the
         form that ``smooth.eval_design`` accepts -- an ``(N,)`` grid, a tuple of
@@ -757,16 +973,35 @@ def smooth_partial_effect(
     basis: Smooth,
     x: Union[Float[Array, ' g'], Tuple[Float[Array, ' g'], ...]],
 ) -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]:
-    """Per-element partial effect of one smooth on a covariate grid ``x``.
+    r"""Evaluate one smooth's partial effect on a covariate grid.
 
-    Returns ``(effect, se)``: the fitted smooth ``B(x) gamma_k`` and its
-    pointwise standard error from the Bayesian covariance block (for a
-    credible band).  ``basis`` is the smooth used to build the term; for a
-    ``TensorBasis`` pass ``x`` as a tuple of matched per-margin grids (all
-    length ``g``) and the effect is the interaction surface along that path.
-    For a ``REBasis`` pass ``x`` as the integer level indices to read off -- the
-    effect is then the per-level random effect (the BLUP intercept, or the
-    random-slope coefficient) at those levels.
+    Computes the per-element fitted smooth :math:`B(x)\,\gamma_k` and its
+    pointwise standard error from the Bayesian covariance block (for a credible
+    band).
+
+    Parameters
+    ----------
+    result
+        A :class:`GAMResult` from :func:`gam_fit`.
+    smooth_index
+        Index of the smooth term (into ``result.col_slices``) to render.
+    basis
+        The smooth basis used to build this term.  For a :class:`TensorBasis`
+        pass ``x`` as a tuple of matched per-margin grids (all length ``g``) and
+        the effect is the interaction surface along that path.  For a
+        :class:`REBasis` pass ``x`` as the integer level indices to read off,
+        and the effect is the per-level random effect (the best linear unbiased
+        predictor intercept, or the random-slope coefficient) at those levels.
+    x
+        ``(g,)`` covariate grid, or a tuple of per-margin grids for a tensor
+        smooth, at which to evaluate the effect.
+
+    Returns
+    -------
+    effect : Float[Array, 'V g']
+        The fitted partial effect at each grid point, per element.
+    se : Float[Array, 'V g']
+        The pointwise standard error of the effect, per element.
     """
     lo, hi = result.col_slices[smooth_index]
     design = basis.eval_design(x)  # (g, k) -- D8: per-basis via the Protocol
@@ -784,14 +1019,21 @@ def smooth_partial_effect(
 
 
 class SmoothTest(NamedTuple):
-    """Per-smooth approximate-significance test (Wood 2013, integer-rank).
+    r"""Per-smooth approximate-significance test (Wood, 2013; integer-rank).
 
-    Each field is ``(V, m)`` -- one column per smooth (in ``smooths`` order), one
-    row per element.  ``stat`` is the test statistic ``T_r``, ``rank`` its
-    reference degrees of freedom, ``p_value`` the upper-tail p (chi-square for a
-    fixed-dispersion family, ``F`` with ``N - edf_total`` denominator df
+    Each field is ``(V, m)`` -- one column per smooth (in ``smooths`` order),
+    one row per element.  ``stat`` is the test statistic :math:`T_r`, ``rank``
+    its reference degrees of freedom, ``p_value`` the upper-tail p-value
+    (:math:`\chi^2` for a fixed-dispersion family, :math:`F` with
+    :math:`N - \text{edf}_{\text{total}}` denominator degrees of freedom
     otherwise), and ``edf`` the smooth's effective degrees of freedom (the
     ``mgcv::summary.gam`` "edf" column).
+
+    References
+    ----------
+    Wood, S. N. (2013). On p-values for smooth components of an extended
+    generalized additive model. Biometrika, 100(1), 221-228.
+    https://doi.org/10.1093/biomet/ass048
     """
 
     stat: Float[Array, 'V m']
@@ -809,12 +1051,41 @@ def _smooth_test_block(
     known_scale: bool,
     res_df: Float[Array, 'V'],
 ) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']]:
-    """Per-smooth Wood-2013 integer-rank statistic + p-value, vmapped over V.
+    r"""Compute the Wood-2013 integer-rank statistic and p-value per element.
 
-    ``T_r = beta^T V_r^- beta`` with ``V_r^-`` the rank-``r`` pseudo-inverse of
-    the QR-projected covariance ``R V R^T`` (``r`` = rounded edf), built by
-    *masking* the eigen-spectrum rather than a dynamic slice so the per-voxel
-    rank composes under ``vmap``.
+    Forms :math:`T_r = \beta^{\top} V_r^{-}\,\beta` with :math:`V_r^{-}` the
+    rank-:math:`r` pseudo-inverse of the QR-projected covariance
+    :math:`R V R^{\top}` (:math:`r` = rounded effective degrees of freedom),
+    built by *masking* the eigen-spectrum rather than by a dynamic slice so the
+    per-element rank composes under :func:`jax.vmap`.
+
+    Parameters
+    ----------
+    R
+        ``(m, m)`` upper-triangular Cholesky factor with
+        :math:`R^{\top} R = X_k^{\top} X_k` for this smooth's design.
+    beta
+        ``(V, m)`` per-element coefficients for this smooth block.
+    v_block
+        ``(V, m, m)`` scaled Bayesian covariance for this smooth block.
+    edf_k
+        ``(V,)`` effective degrees of freedom of the smooth, per element.
+    m
+        Number of columns :math:`m` in the smooth block (static).
+    known_scale
+        Whether the dispersion is fixed (chi-square reference) rather than
+        estimated (:math:`F` reference).
+    res_df
+        ``(V,)`` residual degrees of freedom (the :math:`F` denominator).
+
+    Returns
+    -------
+    stat : Float[Array, 'V']
+        The test statistic :math:`T_r`, per element.
+    rank : Float[Array, 'V']
+        The effective reference rank used, per element.
+    p_value : Float[Array, 'V']
+        The upper-tail p-value, per element.
     """
     eps9 = jnp.finfo(R.dtype).eps ** 0.9
     rbeta = beta @ R.T  # (V, m) -- row v is R @ beta_v
@@ -856,26 +1127,45 @@ def smooth_significance(
     result: GAMResult,
     smooths: Sequence[Smooth],
 ) -> SmoothTest:
-    """Approximate significance test for each smooth term (Wood 2013).
+    r"""Approximate significance test for each smooth term (Wood, 2013).
 
     The ``mgcv::summary.gam`` smooth-term test in its integer-rank form
     (``mgcv:::testStat`` with ``type=1``): project the smooth's coefficients
-    through its design's QR (``R``, ``R^T R = X^T X``), eigendecompose the
-    projected Bayesian covariance ``R V R^T``, and form the rank-truncated
-    quadratic form ``T_r = beta^T V_r^- beta`` with the rank set to the rounded
-    effective df.  ``T_r`` is approximately ``chi^2_r`` for a fixed-dispersion
-    family, or ``F_{r, N - edf_total}`` for an estimated scale -- the single
-    "is ``s(x)`` significant, edf, p" line a developmental / brain-age GAM
-    analyst reads off ``summary.gam``.
+    through its design's QR factor (:math:`R`, with :math:`R^{\top} R =
+    X^{\top} X`), eigendecompose the projected Bayesian covariance
+    :math:`R V R^{\top}`, and form the rank-truncated quadratic form
+    :math:`T_r = \beta^{\top} V_r^{-}\,\beta` with the rank set to the rounded
+    effective degrees of freedom.  :math:`T_r` is approximately
+    :math:`\chi^2_r` for a fixed-dispersion family, or
+    :math:`F_{r,\,N - \text{edf}_{\text{total}}}` for an estimated scale -- the
+    single "is ``s(x)`` significant, edf, p" line a developmental / brain-age
+    GAM analyst reads off ``summary.gam``.
 
-    ``smooths`` is the same sequence passed to :func:`gam_fit` (their ``.design``
-    supplies each term's model matrix).  The test uses the forward-only
-    ``sym_eig_jacobi`` and is **not** differentiated through.
-
-    Returns a :class:`SmoothTest` of ``(V, m)`` arrays.  The fractional-rank
-    refinement (the ``mgcv`` default ``type=0``, which needs the weighted-
-    chi-square CDF) is a documented follow-up; the integer-rank test reproduces
+    The test uses the forward-only :func:`sym_eig_jacobi` eigensolver and is
+    **not** differentiated through.  The fractional-rank refinement (the
+    ``mgcv`` default ``type=0``, which needs the weighted-chi-square CDF) is a
+    documented follow-up; the integer-rank test reproduces
     ``testStat(..., type=1)`` and tracks the default closely.
+
+    Parameters
+    ----------
+    result
+        A :class:`GAMResult` from :func:`gam_fit`.
+    smooths
+        The same sequence of smooth terms passed to :func:`gam_fit`, in the
+        same order (their ``design`` supplies each term's model matrix).
+
+    Returns
+    -------
+    SmoothTest
+        The per-smooth test statistic, effective degrees of freedom, reference
+        rank, and p-value, each a ``(V, m)`` array.
+
+    References
+    ----------
+    Wood, S. N. (2013). On p-values for smooth components of an extended
+    generalized additive model. Biometrika, 100(1), 221-228.
+    https://doi.org/10.1093/biomet/ass048
     """
     n = result.n_obs
     known_scale = result.family.has_fixed_dispersion

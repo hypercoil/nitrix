@@ -17,10 +17,11 @@ resolve_family(family: Union[str, Family]) -> Family
 <!-- nitrix:gen overview:resolve_family -->
 Resolve a `str` name (a built-in) or a `Family` instance to a family.
 
-`glm_fit` / `gam_fit` accept either; a string is looked up in the
-built-in registry (`'gaussian'` / `'binomial'` / `'poisson'` /
-`'gamma'` / `'negbinomial'`).  `'negbinomial'` resolves to the default
-`alpha = 1`; for another dispersion pass `negbinomial(alpha)` directly.
+`glm_fit` / `gam_fit` accept either; a string is looked up in
+the built-in registry (`'gaussian'` / `'binomial'` / `'poisson'` /
+`'gamma'` / `'negbinomial'` / `'tweedie'`).  `'negbinomial'` resolves
+to the default $\alpha = 1$; for another dispersion pass
+`negbinomial` directly.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:resolve_family -->
@@ -28,8 +29,8 @@ built-in registry (`'gaussian'` / `'binomial'` / `'poisson'` /
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `family` | `Union[str, Family]` | — | — | — |
+| `family` | `Union[str, Family]` | — | — | A built-in family name or a `Family` instance. A `Family` is returned unchanged. |
 
-**Returns** `Family`.
+**Returns** `Family`. The resolved family.
 <!-- nitrix:/gen -->
 

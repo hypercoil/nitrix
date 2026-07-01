@@ -15,16 +15,17 @@ reml_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], Z: Float[Array, 'N q'],
 <!-- nitrix:gen overview:reml_fit -->
 Voxelwise variance-components REML fit.
 
-Fits the LME
+Fits the linear mixed-effects model
 
-.. code:
-    y_v = X beta_v + Z b_v + eps_v
-    b_v ~ N(0, sigma_b^2 I_q)
-    eps_v ~ N(0, sigma_e^2 I_N)
+$$
+y_v = X \beta_v + Z b_v + \epsilon_v, \qquad
+b_v \sim \mathcal{N}(0, \sigma_b^2 I_q), \quad
+\epsilon_v \sim \mathcal{N}(0, \sigma_e^2 I_N)
+$$
 
 independently for each voxel, sharing the fixed-effect design
 `X` and the random-effect design `Z` across voxels.  Uses
-the FaST-LMM spectral trick: eigendecompose $ZZ^T$ once,
+the FaST-LMM spectral trick: eigendecompose $Z Z^{\top}$ once,
 rotate `y` and `X` into the diagonalising basis, then
 Newton-score on the variance components in log-space.
 <!-- nitrix:/gen -->
@@ -41,9 +42,9 @@ Newton-score on the variance components in log-space.
 | `n_iter` | `int` | — | `20` | Fixed Newton-scoring iteration count. Default `20` -- typically converges in 5-10 for well-conditioned data. |
 | `damping` | `float` | — | `1e-06` | Levenberg-Marquardt-style damping on the average-information matrix. Default `1e-6`; raise if Newton steps are unstable near boundaries. |
 | `block` | `Optional[int]` | — | `None` | Optional voxel-block size: cap the number of voxels whose per-Newton intermediates are live at once, bounding peak memory on brain-scale `V`. `None` (default) is a single `vmap` over all voxels (identical numerics and HLO to before). |
-| `low_rank` | `Optional[bool]` | — | `None` | Use the FaST-LMM **low-rank** decomposition: a `q x q` eig of $Z^T Z$ ($O(N q^2 + q^3)$) instead of the dense `N x N` eig of $ZZ^T$ ($O(N^3)$). Requires `q <= N` (the usual tall random-effect design); the `N - q` null directions enter only through per-voxel Gram aggregates, and a rank-deficient `Z` (e.g. phantom one-hot columns from gappy labels) is absorbed by that null space. **Default `None`** auto-selects: low-rank when `q < N` (the brain-scale case), dense otherwise. Pass `True` / `False` to force; the two match to the iterative tolerance. |
+| `low_rank` | `Optional[bool]` | — | `None` | Use the FaST-LMM **low-rank** decomposition: a $q \times q$ eigendecomposition of $Z^{\top} Z$ ($O(N q^2 + q^3)$) instead of the dense $N \times N$ eigendecomposition of $Z Z^{\top}$ ($O(N^3)$). Requires $q \le N$ (the usual tall random-effect design); the $N - q$ null directions enter only through per-voxel Gram aggregates, and a rank-deficient `Z` (e.g. phantom one-hot columns from gappy labels) is absorbed by that null space. **Default `None`** auto-selects: low-rank when $q < N$ (the brain-scale case), dense otherwise. Pass `True` / `False` to force; the two match to the iterative tolerance. |
 
-**Returns** `REMLResult`.
+**Returns** `REMLResult`. The per-voxel fit, with `theta_hat` (log-variances), `beta_hat` (fixed effects), `log_lik` and the fixed-effect / variance-component inference fields.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:reml_fit -->

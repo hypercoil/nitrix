@@ -32,16 +32,16 @@ Permutation test of a GLM t- or F-contrast with FWE control.
 | `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | Optional per-observation exchangeability-block labels. |
 | `mask` | `Optional[Bool[Array, '*spatial']]` | — | `None` | Optional spatial mask; out-of-mask voxels do not contribute to clusters or the maximum. |
 | `two_sided` | `bool` | — | `True` | Two-sided test (default `True`). Ignored for an F-contrast. |
-| `var_smooth` | `Optional[float]` | — | `None` | Optional Gaussian sigma for variance smoothing (pseudo-t, FSL `-v`). |
-| `connectivity` | `int` | — | `1` | Cluster / TFCE parameters. |
-| `cluster_thresh` | `Optional[float]` | — | `None` | Cluster-forming statistic threshold; **required** for `enhancement='cluster_extent'` / `'cluster_mass'` (the classic FSL cluster-extent / cluster-mass FWE -- one threshold, ~100x cheaper per permutation than TFCE). |
-| `tfce_E` | `float` | — | `0.5` | Cluster / TFCE parameters. |
-| `tfce_H` | `float` | — | `2.0` | Cluster / TFCE parameters. |
-| `tfce_steps` | `int` | — | `100` | Cluster / TFCE parameters. |
-| `pvalue_method` | `PValueMethod` | — | `'empirical'` | `'empirical'` (default) -- the FWE p-map is the discrete fraction of permutations whose null max `>=` the observed (floored at `1/n_perm`). `'gpd'` -- fit a generalized Pareto distribution to the upper tail of the null-max distribution (Winkler et al. 2016) so FWE p-values resolve **below** the `1/n_perm` floor, letting `n_perm` drop. Only the FWE map is GPD-smoothed; the uncorrected map stays empirical. |
+| `var_smooth` | `Optional[float]` | — | `None` | Optional Gaussian sigma for variance smoothing (pseudo-t). |
+| `connectivity` | `int` | — | `1` | Spatial connectivity order used when forming clusters (for TFCE and the cluster-based enhancements). Default `1`. |
+| `cluster_thresh` | `Optional[float]` | — | `None` | Cluster-forming statistic threshold; **required** for `enhancement='cluster_extent'` / `'cluster_mass'` (the classic cluster-extent / cluster-mass FWE -- one threshold, far cheaper per permutation than TFCE). |
+| `tfce_E` | `float` | — | `0.5` | Threshold-free cluster enhancement parameters: the extent exponent $E$ (default `0.5`), the height exponent $H$ (default `2.0`), and the number of integration steps (default `100`). Only used when `enhancement='tfce'`. |
+| `tfce_H` | `float` | — | `2.0` | Threshold-free cluster enhancement parameters: the extent exponent $E$ (default `0.5`), the height exponent $H$ (default `2.0`), and the number of integration steps (default `100`). Only used when `enhancement='tfce'`. |
+| `tfce_steps` | `int` | — | `100` | Threshold-free cluster enhancement parameters: the extent exponent $E$ (default `0.5`), the height exponent $H$ (default `2.0`), and the number of integration steps (default `100`). Only used when `enhancement='tfce'`. |
+| `pvalue_method` | `PValueMethod` | — | `'empirical'` | `'empirical'` (default) -- the FWE p-map is the discrete fraction of permutations whose null max $\geq$ the observed (floored at $1 / n_{perm}$). `'gpd'` -- fit a generalised Pareto distribution to the upper tail of the null-max distribution so FWE p-values resolve **below** the $1 / n_{perm}$ floor, letting `n_perm` drop. Only the FWE map is GPD-smoothed; the uncorrected map stays empirical. |
 | `gpd_n_exceedances` | `int` | — | `250` | Number of upper-tail null-max exceedances used for the GPD fit when `pvalue_method='gpd'` (default `250`; clamped to `n_perm - 1`). |
 
-**Returns** `PermResult`.
+**Returns** `PermResult`. A `PermResult` holding the observed statistic and enhanced maps, the FWE and uncorrected p-maps, and the null-max distribution.
 <!-- nitrix:/gen -->
 
 

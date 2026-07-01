@@ -14,6 +14,11 @@ partialcorr(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **k
 
 <!-- nitrix:gen overview:partialcorr -->
 Partial correlation: normalised partial covariance.
+
+Normalises the partial covariance (see `partialcov`) by the
+outer product of the square roots of the absolute diagonal
+entries, giving the correlation between each pair of variables
+after conditioning on all the others.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:partialcorr -->
@@ -21,11 +26,11 @@ Partial correlation: normalised partial covariance.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `require_nonsingular` | `bool` | — | `True` | — |
+| `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor; see `cov`. |
+| `require_nonsingular` | `bool` | — | `True` | Forwarded to `precision` via `partialcov`. |
 | `**kwargs` | `Any` | — | `{}` | — |
 
-**Returns** `Num` — shape `...` × `c` × `c`.
+**Returns** `Num` — shape `...` × `c` × `c`. Partial correlation matrix, `(..., c, c)`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen perf:partialcorr -->

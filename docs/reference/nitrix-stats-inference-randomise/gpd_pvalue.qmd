@@ -1,7 +1,7 @@
 ---
 title: "gpd_pvalue"
 generated: true
-description: "Tail-accelerated exceedance p-value via a generalized Pareto fit."
+description: "Tail-accelerated exceedance p-value via a generalised Pareto fit."
 ---
 
 [‹ back to `nitrix.stats.inference.randomise`](../nitrix-stats-inference-randomise.qmd)
@@ -13,23 +13,31 @@ gpd_pvalue(stat: Float[Array, '...'], null_dist: Float[Array, 'n'], *, n_exceeda
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:gpd_pvalue -->
-Tail-accelerated exceedance p-value via a generalized Pareto fit.
+Tail-accelerated exceedance p-value via a generalised Pareto fit.
 
-The permutation FWE p-value of an observed statistic `T` is the survival
-fraction `P(max_null >= T)`.  Estimated empirically it is discrete and
-floored at `1 / n` -- so resolving a small p-value needs a large `n`.
-Following Winkler et al. (2016, *Faster permutation inference*), the upper
-tail of `null_dist` above a threshold `u` (the `(k+1)`-th largest of
-`n`, `k = n_exceedances`) is modelled by a **generalized Pareto
-distribution** fitted by the method of moments, giving a smooth p-value that
-can fall below `1 / n` at a fraction of the permutations:
-    P(T) = (k / n) * S_GPD(T - u),   T > u   (tail, GPD survival)
-    P(T) = #{null >= T} / n,         T <= u  (body, empirical)
+The permutation FWE p-value of an observed statistic $T$ is the
+survival fraction $P(\max_{\mathrm{null}} \geq T)$.  Estimated
+empirically it is discrete and floored at $1 / n$ -- so resolving a
+small p-value needs a large $n$.  Following Winkler et al. (2016;
+see the module references), the upper tail of `null_dist` above a
+threshold $u$ (the $(k+1)$-th largest of $n$, with
+$k =$ `n_exceedances`) is modelled by a **generalised Pareto
+distribution** fitted by the method of moments, giving a smooth p-value
+that can fall below $1 / n$ at a fraction of the permutations:
 
-With GPD shape `xi` and scale `sigma` from the exceedance mean / variance
-($\xi = (1 - mean^2 / var) / 2$, `sigma = mean (1 - xi)`).  `stat` is a
-scalar or an array of observed statistics (e.g. an enhanced FWE map); the
-return has the same shape.  Pure / differentiable / cuSOLVER-free.
+.. list-table:
+   :widths: auto
+
+   * - $P(T) = (k / n)\, S_{\mathrm{GPD}}(T - u)$
+     - $T > u$ (tail, GPD survival)
+   * - $P(T) = \#\{\mathrm{null} \geq T\} / n$
+     - $T \leq u$ (body, empirical)
+
+The GPD shape $\xi$ and scale $\sigma$ are recovered from the
+exceedance mean and variance,
+$\xi = (1 - \mathrm{mean}^2 / \mathrm{var}) / 2$ and
+$\sigma = \mathrm{mean}\,(1 - \xi)$.  The routine is pure and
+differentiable, and requires no dense factorisation library.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gpd_pvalue -->
@@ -37,11 +45,11 @@ return has the same shape.  Pure / differentiable / cuSOLVER-free.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `stat` | `Float` | `...` | — | — |
-| `null_dist` | `Float` | `n` | — | — |
-| `n_exceedances` | `int` | — | `250` | — |
+| `stat` | `Float` | `...` | — | The observed statistic(s) whose FWE p-value(s) are wanted. A scalar or an array of arbitrary shape (e.g. an enhanced FWE statistic map). |
+| `null_dist` | `Float` | `n` | — | The `(n,)` null distribution of the spatial-maximum statistic (one value per permutation). |
+| `n_exceedances` | `int` | — | `250` | The number of upper-tail exceedances $k$ used to fit the GPD (default `250`). Clamped to at most `n - 1`. |
 
-**Returns** `Float` — shape `...`.
+**Returns** `Float` — shape `...`. The FWE p-value(s), the same shape as `stat`: the GPD-based tail estimate where `stat` exceeds the threshold $u$, and the empirical fraction otherwise.
 <!-- nitrix:/gen -->
 
 

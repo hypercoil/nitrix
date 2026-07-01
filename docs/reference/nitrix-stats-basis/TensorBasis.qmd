@@ -1,7 +1,7 @@
 ---
 title: "TensorBasis"
 generated: true
-description: "An anisotropic tensor-product interaction smooth `f(x_1, ..., x_d)`."
+description: "An anisotropic tensor-product interaction smooth $f(x_1,  ldots, x_d)$."
 ---
 
 [‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
@@ -13,23 +13,27 @@ class TensorBasis
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:TensorBasis -->
-An anisotropic tensor-product interaction smooth `f(x_1, ..., x_d)`.
+An anisotropic tensor-product interaction smooth
+$f(x_1, \ldots, x_d)$.
 
 Built from `d` marginal `SplineBasis` (already sum-to-zero
 constrained) by the **row-wise tensor product** of their designs and the
-Kronecker-sum of per-margin penalties `S_j = I (x) ... P_j ... (x) I` --
-so each margin keeps its own smoothing parameter (selected jointly by the
-GAM Fellner-Schall loop, which handles `> 1` penalty per smooth).  This is
-mgcv's tensor **interaction** (`ti`): the marginal centring removes the
+Kronecker-sum of per-margin penalties
+$S_j = I \otimes \cdots P_j \cdots \otimes I$ -- so each margin
+keeps its own smoothing parameter (selected jointly by the GAM
+Fellner-Schall loop, which handles more than one penalty per smooth).  This
+is mgcv's tensor **interaction** (`ti`): the marginal centring removes the
 main effects, so the term models the *interaction* and stays identifiable
-against the intercept; add marginal `s(x_j)` smooths for a full `te`.
+against the intercept; add marginal $s(x_j)$ smooths for a full
+`te`.
 
 The marginal penalties commute (Kronecker structure), so they are
-**simultaneously diagonalisable**: `pen_eig[j]` is penalty `j` in the
-joint eigenbasis (`U_1 (x) ... (x) U_d`), which the GAM engine uses to
-evaluate the smoothing-parameter trace $\operatorname{tr}(S_\lambda^+ S_j)$ as an
-elementwise sum -- cuSOLVER-free, no per-iteration pseudo-inverse -- while
-the fit itself keeps the original (non-rotated) tensor basis.
+**simultaneously diagonalisable**: `pen_eig[j]` is penalty $j$ in
+the joint eigenbasis ($U_1 \otimes \cdots \otimes U_d$), which the
+GAM engine uses to evaluate the smoothing-parameter trace
+$\operatorname{tr}(S_\lambda^{+} S_j)$ as an elementwise sum --
+cuSOLVER-free, no per-iteration pseudo-inverse -- while the fit itself keeps
+the original (non-rotated) tensor basis.
 <!-- nitrix:/gen -->
 
 ### Methods
@@ -40,8 +44,10 @@ penalty_blocks() -> list
 ```
 <!-- nitrix:/gen -->
 
-Penalty blocks `[(S_j, eig_j)]` (audit D8): one per margin -- the
-Kronecker-embedded penalty and its joint-eigenbasis eigenvalues.
+Return the per-margin penalty blocks.
+
+One block per margin: the Kronecker-embedded penalty and its
+joint-eigenbasis eigenvalues.
 
 <!-- nitrix:gen sig:TensorBasis.eval_design -->
 ```python
@@ -49,8 +55,7 @@ eval_design(x: Tuple[Float[Array, ' g'], ...]) -> Float[Array, 'g K']
 ```
 <!-- nitrix:/gen -->
 
-Re-evaluate the tensor design on matched per-margin grids `x`
-(audit D8): pass one length-`g` grid per margin.
+Re-evaluate the tensor design on matched per-margin grids.
 
 <!-- nitrix:gen sig:TensorBasis.tree_flatten -->
 ```python

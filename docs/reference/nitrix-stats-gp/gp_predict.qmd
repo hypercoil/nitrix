@@ -15,14 +15,15 @@ gp_predict(result: GPResult, x_new: Float[Array, ' g'], *, parametric: Optional[
 <!-- nitrix:gen overview:gp_predict -->
 Per-element posterior mean and standard deviation of the GP at `x_new`.
 
-Evaluates `mean = X_new beta` and the predictive variance
-$\sigma_e^2 \operatorname{diag}(X_{new} V X_{new}^T)$, where the smooth columns of `X_new` are
-the basis re-evaluated at `x_new`: for `engine='hsgp'` the (`rho`-
-independent) eigenfunctions, reconstructed from the recorded domain
-`(lo, hi, boundary)` and `rank` (self-contained); for `engine='exact'`
-the Nystrom kernel features $K(x_{new}, x_{train}) U \Lambda^{-1/2}$, which need
-the original `x_train` (the result does not store the shared training grid
-among its per-element fields).
+Evaluates the mean $X_{\mathrm{new}} \beta$ and the predictive variance
+$\sigma_e^2 \operatorname{diag}(X_{\mathrm{new}} V X_{\mathrm{new}}^{\top})$,
+where the smooth columns of $X_{\mathrm{new}}$ are the basis re-evaluated
+at `x_new`: for `engine='hsgp'` the ($\rho$-independent)
+eigenfunctions, reconstructed from the recorded domain `(lo, hi, boundary)`
+and `rank` (self-contained); for `engine='exact'` the Nystrom kernel
+features $K(x_{\mathrm{new}}, x_{\mathrm{train}})\, U \Lambda^{-1/2}$,
+which need the original `x_train` (the result does not store the shared
+training grid among its per-element fields).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_predict -->

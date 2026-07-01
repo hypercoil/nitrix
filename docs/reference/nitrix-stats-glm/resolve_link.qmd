@@ -26,8 +26,8 @@ Built-ins: `'identity'` / `'log'` / `'logit'` / `'probit'` /
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `link` | `Union[str, Link]` | — | — | — |
+| `link` | `Union[str, Link]` | — | — | A built-in link name or a `Link` instance. A `Link` is returned unchanged. |
 
-**Returns** `Link`.
+**Returns** `Link`. The resolved link.
 <!-- nitrix:/gen -->
 

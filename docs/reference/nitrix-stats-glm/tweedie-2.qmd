@@ -17,21 +17,21 @@ tweedie(p: float = 1.5) -> Family
 <!-- nitrix:gen overview:tweedie -->
 A Tweedie family with **fixed** power `p` (compound Poisson-Gamma).
 
-`1 < p < 2` -- the semicontinuous regime (an exact zero with probability
-mass plus a continuous positive part: rainfall, insurance claims, some
-imaging measures).  Variance $V(\mu) = \mu^p$, log link, dispersion estimated
-(`has_fixed_dispersion=False`, like Gamma).  With `p` fixed the *mean*
-coefficients fit the shared IRLS core directly (working weight $\mu^{2-p}$);
-jointly profiling `p` is a follow-up (`p -> 1` recovers Poisson, `p -> 2`
-Gamma).
+The regime $1 < p < 2$ is the semicontinuous one (an exact zero with
+probability mass plus a continuous positive part: rainfall, insurance claims,
+some imaging measures).  Variance $V(\mu) = \mu^p$, log link,
+dispersion estimated (`has_fixed_dispersion=False`, like Gamma).  With
+`p` fixed the *mean* coefficients fit the shared IRLS core directly
+(working weight $\mu^{2-p}$); jointly profiling `p` is a follow-up
+($p \to 1$ recovers Poisson, $p \to 2$ Gamma).
 
 The unit deviance is the closed form
 
-    d(y, mu) = 2[ y^{2-p}/((1-p)(2-p)) - y mu^{1-p}/(1-p) + mu^{2-p}/(2-p) ];
+$d(y, \mu) = 2\left[ y^{2-p}/((1-p)(2-p)) - y\,\mu^{1-p}/(1-p) + \mu^{2-p}/(2-p) \right]$;
 
 the log-likelihood uses the **saddlepoint approximation** (with the exact
-compound-Poisson zero mass at `y = 0`) -- enough for `aic` / `bic` model
-comparison; the exact Dunn-Smyth series is the follow-up.
+compound-Poisson zero mass at $y = 0$) -- enough for `aic` /
+`bic` model comparison; the exact Dunn-Smyth series is a follow-up.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:tweedie -->
@@ -39,8 +39,8 @@ comparison; the exact Dunn-Smyth series is the follow-up.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `p` | `float` | — | `1.5` | — |
+| `p` | `float` | — | `1.5` | The fixed Tweedie power $p$, entering the variance as $\mu^p$. Must satisfy $1 < p < 2$ (the compound Poisson-Gamma regime). |
 
-**Returns** `Family`.
+**Returns** `Family`. A Tweedie family with the given fixed power, a log link, and an estimated dispersion.
 <!-- nitrix:/gen -->
 

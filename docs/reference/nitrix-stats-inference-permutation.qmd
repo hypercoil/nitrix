@@ -21,23 +21,24 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Exchangeability operators for permutation inference.
 
-Keyed pure generators (SPEC §2 tenet 1) that build the set of relabellings
-used by `randomise`-style permutation tests:
+Keyed pure generators that build the set of relabellings used by
+`randomise`-style permutation tests:
 
-- `sign_flips` -- the `+/-1` sign-flip matrix for symmetric / one-sample
-  tests (the null is invariant to flipping an exchangeable observation's sign).
-- `permutations` -- the row-permutation index matrix for shuffle-based tests
-  (two-sample, regression).
+- `sign_flips` -- the $\pm 1$ sign-flip matrix for symmetric /
+  one-sample tests (the null is invariant to flipping an exchangeable
+  observation's sign).
+- `permutations` -- the row-permutation index matrix for shuffle-based
+  tests (two-sample, regression).
 
 Both honour **exchangeability blocks**: with a per-observation `blocks` label,
 sign flips act per *whole block* (a block flips together) and permutations act
 *within* each block (an observation can only move to a same-block position).
 The first row is always the identity (the unpermuted data), so the observed
-statistic is one of the permutations -- the standard `(count)/(n_perm)`
-convention with `p >= 1/n_perm`.
+statistic is one of the permutations -- the standard `count / n_perm`
+convention with $p \geq 1 / n_{\mathrm{perm}}$.
 
-RNG *policy* (which key) stays the caller's; these are deterministic given
-`(shape, key)`.
+The choice of random key is left to the caller; these generators are
+deterministic given `(shape, key)`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

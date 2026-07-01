@@ -9,17 +9,17 @@ The on-device substrate for FSL ``randomise``-style nonparametric inference on
 the GLM (the kernel ``niffi`` wraps; the CLI / containers / design parsing stay
 in the consumer):
 
-- ``permutation`` -- keyed exchangeability operators (``sign_flips`` /
-  ``permutations``) with exchangeability blocks.
-- ``tfce``        -- threshold-free cluster enhancement.
+- ``permutation`` -- keyed exchangeability operators (:func:`sign_flips` /
+  :func:`permutations`) with exchangeability blocks.
+- ``tfce``        -- threshold-free cluster enhancement (:func:`tfce`).
 - ``cluster``     -- cluster size / mass maps.
 - ``randomise``   -- the permutation driver: GLM refit (Freedman-Lane) +
   enhancement per permutation -> FWE / uncorrected p-maps + the null max
   distribution.
 - ``multiple_comparisons`` -- FDR / Bonferroni / cluster p-value companions.
 
-Permutation-only, by design (audit N3)
---------------------------------------
+Permutation-only, by design
+---------------------------
 
 This module is **deliberately nonparametric**: cluster / TFCE significance comes
 from the permutation null, not from a parametric random-field-theory (RFT)
@@ -31,6 +31,13 @@ smoothness estimator** here (no ``3dFWHMx`` / ``smoothest`` analogue) and none i
 planned -- the exchangeability-based null is the suite's single, defensible
 cluster-inference route.  A consumer that needs a parametric fallback for a
 tiny-``N`` design (where permutation is degenerate) supplies it itself.
+
+References
+----------
+Eklund A, Nichols TE, Knutsson H (2016). Cluster failure: why fMRI inferences
+for spatial extent have inflated false-positive rates. *Proceedings of the
+National Academy of Sciences*, 113(28), 7900-7905.
+https://doi.org/10.1073/pnas.1602413113
 """
 
 from .cluster import cluster_mass_map, cluster_size_map

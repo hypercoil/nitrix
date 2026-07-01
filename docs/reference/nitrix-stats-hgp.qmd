@@ -21,20 +21,27 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 <!-- nitrix:gen overview:__module__ -->
 Mass-univariate **hierarchical** Gaussian-process regression (multi-level GP).
 
-`hgp_fit` fits, per element, a *hierarchical* GP smooth of a covariate `x`
-over a grouping factor -- the GP analogue of a random-slope mixed model, and the
-"GS" hierarchical GAM of Pedersen et al. (2019): a **global** smooth plus
+`hgp_fit` fits, per element, a *hierarchical* GP smooth of a covariate
+`x` over a grouping factor -- the GP analogue of a random-slope mixed model,
+and the "GS" hierarchical GAM of Pedersen et al. (2019): a **global** smooth plus
 **group-level** smooth deviations that share a kernel:
-    y_ij = beta0 + f(x_ij) + f_{g(i)}(x_ij) + e_ij
-    f      ~ GP(0, sigma_pop^2 K_rho)              (the population trend)
-    f_g    ~ GP(0, sigma_grp^2 K_rho)  iid over g  (group deviations)
-    e_ij   ~ N(0, sigma_e^2)
+
+$$
+\begin{aligned}
+y_{ij} &= \beta_0 + f(x_{ij}) + f_{g(i)}(x_{ij}) + e_{ij} \\
+f &\sim \mathrm{GP}(0, \sigma_{\mathrm{pop}}^2 K_\rho)
+   \quad \text{(the population trend)} \\
+f_g &\sim \mathrm{GP}(0, \sigma_{\mathrm{grp}}^2 K_\rho)
+   \quad \text{iid over } g \quad \text{(group deviations)} \\
+e_{ij} &\sim \mathcal{N}(0, \sigma_e^2)
+\end{aligned}
+$$
 
 The group curves are *random deviations* around the population curve, sharing one
-amplitude $\sigma_{grp}^2$ and the kernel lengthscale `rho` (so a group with few
-observations is shrunk toward the population trend -- partial pooling).  This is
-the multi-level / "(a)" scope of the GP feature: a hierarchical GP in the mixed-
-model sense.
+amplitude $\sigma_{\mathrm{grp}}^2$ and the kernel lengthscale
+$\rho$ (so a group with few observations is shrunk toward the population
+trend -- partial pooling).  This is the multi-level scope of the GP feature: a
+hierarchical GP in the mixed-model sense.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

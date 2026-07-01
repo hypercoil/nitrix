@@ -15,7 +15,10 @@ conditionalcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs
 <!-- nitrix:gen overview:conditionalcorr -->
 Correlation of `X` conditioned on the variables in `Y`.
 
-Normalised version of `conditionalcov`.
+Normalised version of `conditionalcov`: the conditional
+covariance is divided by the outer product of the residual
+standard deviations, yielding conditional correlations with unit
+diagonal.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:conditionalcorr -->
@@ -23,11 +26,11 @@ Normalised version of `conditionalcov`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `Y` | `Num` | `...` × `d` × `obs` | — | — |
+| `X` | `Num` | `...` × `c` × `obs` | — | Variables whose conditional correlation is sought. |
+| `Y` | `Num` | `...` × `d` × `obs` | — | Conditioning variables to residualise out of `X`. |
 | `**kwargs` | `Any` | — | `{}` | — |
 
-**Returns** `Num` — shape `...` × `c` × `c`.
+**Returns** `Num` — shape `...` × `c` × `c`. Conditional correlation matrix, `(..., c, c)`.
 <!-- nitrix:/gen -->
 
 

@@ -2,7 +2,7 @@
 title: "nitrix.stats.lme.reml"
 generated: true
 signature-hash: 2fa9be29438b703b
-description: "Variance-components REML for voxelwise LMEs."
+description: "Variance-components REML for voxelwise linear mixed-effects models."
 listing:
   id: nitrix-stats-lme-reml-symbols
   contents: "nitrix-stats-lme-reml/*.qmd"
@@ -19,7 +19,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 :::
 
 <!-- nitrix:gen overview:__module__ -->
-Variance-components REML for voxelwise LMEs.
+Variance-components REML for voxelwise linear mixed-effects models.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->

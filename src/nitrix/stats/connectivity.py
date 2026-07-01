@@ -2,42 +2,68 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Regularised covariance / sparse-precision estimators for connectivity.
+Regularised covariance and sparse-precision estimators for connectivity.
 
-The raw empirical covariance (``stats.covariance.cov``) is noisy and may be
-singular when the number of variables approaches the number of observations
-(``p ~ n`` -- the small-sample regime of resting-state connectomes).  This
-module ships the regularised estimators the connectome literature defaults to:
+The raw empirical covariance is noisy and may be singular when the number of
+variables approaches the number of observations (:math:`p \\sim n` -- the
+small-sample regime of resting-state connectomes).  This module provides the
+regularised estimators that the connectome literature commonly defaults to.
 
-- **Analytic shrinkage** -- Ledoit-Wolf (2004) and OAS (Chen et al. 2010), a
-  convex blend of the sample covariance ``S`` toward a scaled identity::
+Analytic-shrinkage estimators -- the Ledoit-Wolf and oracle-approximating
+shrinkage (OAS) methods -- form a convex blend of the sample covariance
+:math:`S` toward a scaled identity,
 
-      Sigma_hat = (1 - alpha) S + alpha mu I,    mu = tr(S) / p
+.. math::
 
-  with the shrinkage intensity ``alpha`` in **closed form** (no
-  cross-validation).  Ledoit-Wolf is nilearn's *default* connectome covariance
-  estimator, so this is the missing piece for a nilearn-default-equivalent
-  ``precision`` / ``partialcorr`` path (invert ``Sigma_hat`` with the
-  cuSOLVER-free ``_smalllinalg`` solve).
+    \\hat{\\Sigma} = (1 - \\alpha)\\, S + \\alpha\\, \\mu\\, I,
+    \\qquad \\mu = \\operatorname{tr}(S) / p,
 
-- **Graphical LASSO** -- the sparse inverse covariance (precision) that is the
-  conditional-independence graph the fMRI literature has used for ~15 years::
+with the shrinkage intensity :math:`\\alpha` given in closed form (no
+cross-validation).  Ledoit-Wolf is a widely used default connectome covariance
+estimator, so this supplies a covariance whose inverse gives an equivalent
+precision / partial-correlation path (inverting :math:`\\hat{\\Sigma}` with the
+cuSOLVER-free small-matrix solve).
 
-      Theta_hat = argmin_Theta  <S, Theta> - log det Theta + lam ||Theta||_{1,off}
+The graphical LASSO estimates the sparse inverse covariance (precision), whose
+support is the conditional-independence graph long used in the functional-MRI
+literature,
 
-  solved by Friedman/Hastie/Tibshirani (2008) coordinate descent on the working
-  covariance ``W = Theta^-1`` directly (no per-iteration factorisation), with
-  ``glasso_path`` for a warm-started ``lam`` sweep and ``ebic_score`` for
-  extended-BIC model selection (Foygel & Drton 2010).
+.. math::
 
-Pure JAX -- the shrinkage path is trace / Frobenius reductions + one scalar
-``alpha``; the GLASSO path is rolled coordinate descent (``lax.fori_loop`` /
-``lax.scan``, so the graph stays ``O(p^2)`` and compile is flat in ``p``).
-Differentiable and GPU-resident; cuSOLVER-free (the ``log det`` for EBIC goes
-through the rolled Cholesky in ``_smalllinalg``).  ``vmap`` over subjects /
-edges for batches.  ``X`` is ``(n_samples, n_features)`` (the
-``sklearn.covariance`` convention); ``glasso`` consumes a ``(p, p)`` sample
-covariance ``S`` directly (the FHT convention).
+    \\hat{\\Theta} = \\operatorname*{argmin}_{\\Theta}\\;
+    \\langle S, \\Theta \\rangle - \\log\\det\\Theta
+    + \\lambda \\lVert\\Theta\\rVert_{1,\\mathrm{off}},
+
+solved by Friedman, Hastie and Tibshirani (2008) coordinate descent on the
+working covariance :math:`W = \\Theta^{-1}` directly (no per-iteration
+factorisation).  :func:`glasso_path` performs a warm-started :math:`\\lambda`
+sweep and :func:`ebic_score` provides extended-BIC model selection (Foygel and
+Drton, 2010).
+
+The implementation is pure JAX.  The shrinkage path is a handful of trace and
+Frobenius-norm reductions plus one scalar :math:`\\alpha`; the graphical-LASSO
+path is rolled coordinate descent (``lax.fori_loop`` / ``lax.scan``), so the
+computation graph stays :math:`O(p^2)` and compilation is flat in :math:`p`.
+Everything is differentiable and GPU-resident, and cuSOLVER-free (the
+:math:`\\log\\det` used by the extended BIC goes through a rolled Cholesky).
+Batch over subjects or edges with ``vmap``.  The data matrix ``X`` is
+``(n_samples, n_features)`` (the ``sklearn.covariance`` convention), whereas
+:func:`glasso` consumes a ``(p, p)`` sample covariance ``S`` directly.
+
+References
+----------
+.. [LW2004] Ledoit, O. and Wolf, M. (2004). A well-conditioned estimator for
+   large-dimensional covariance matrices. *Journal of Multivariate Analysis*,
+   88(2), 365-411. :doi:`10.1016/S0047-259X(03)00096-4`
+.. [Chen2010] Chen, Y., Wiesel, A., Eldar, Y. C. and Hero, A. O. (2010).
+   Shrinkage algorithms for MMSE covariance estimation. *IEEE Transactions on
+   Signal Processing*, 58(10), 5016-5029. :doi:`10.1109/TSP.2010.2053029`
+.. [FHT2008] Friedman, J., Hastie, T. and Tibshirani, R. (2008). Sparse inverse
+   covariance estimation with the graphical lasso. *Biostatistics*, 9(3),
+   432-441. :doi:`10.1093/biostatistics/kxm045`
+.. [FD2010] Foygel, R. and Drton, M. (2010). Extended Bayesian information
+   criteria for Gaussian graphical models. *Advances in Neural Information
+   Processing Systems*, 23, 604-612.
 """
 
 from __future__ import annotations
@@ -67,7 +93,28 @@ ShrinkageMethod = Literal['ledoit_wolf', 'oas']
 def _empirical(
     X: Float[Array, 'n p'], assume_centered: bool
 ) -> Tuple[Float[Array, 'n p'], Float[Array, 'p p'], int, int]:
-    """Centered data, the (biased, ``/n``) empirical covariance, and ``(n, p)``."""
+    """Centre the data and form the biased empirical covariance.
+
+    Parameters
+    ----------
+    X : Float[Array, 'n p']
+        Data matrix of ``n`` observations by ``p`` features.
+    assume_centered : bool
+        If ``True``, treat ``X`` as already mean-centred and skip subtracting
+        the per-feature mean; otherwise centre each column first.
+
+    Returns
+    -------
+    Xc : Float[Array, 'n p']
+        The (possibly) centred data matrix.
+    s : Float[Array, 'p p']
+        The empirical covariance :math:`X_c^{\\top} X_c / n` (the biased,
+        divide-by-``n`` estimate).
+    n : int
+        Number of observations.
+    p : int
+        Number of features.
+    """
     n, p = X.shape
     Xc = X if assume_centered else X - jnp.mean(X, axis=0, keepdims=True)
     s = (Xc.T @ Xc) / n
@@ -86,13 +133,37 @@ def ledoit_wolf(
     *,
     assume_centered: bool = False,
 ) -> Tuple[Float[Array, 'p p'], Float[Array, '']]:
-    """Ledoit-Wolf analytic-shrinkage covariance.
+    """Ledoit-Wolf analytic-shrinkage covariance estimator.
 
-    Returns ``(cov, shrinkage)``.  The shrinkage intensity is
-    ``alpha = beta^2 / delta^2`` with ``delta^2 = ||S - mu I||_F^2`` and
-    ``beta^2 = (1/n^2) sum_k ||x_k||^4 - (1/n) ||S||_F^2`` clipped to
-    ``[0, delta^2]`` (Ledoit & Wolf 2004).  Matches
+    Forms the convex blend :math:`(1 - \\alpha) S + \\alpha \\mu I` of the
+    sample covariance :math:`S` toward the scaled identity
+    :math:`\\mu I` (with :math:`\\mu = \\operatorname{tr}(S) / p`), using the
+    closed-form Ledoit-Wolf shrinkage intensity
+
+    .. math::
+
+        \\alpha = \\beta^2 / \\delta^2,
+        \\qquad \\delta^2 = \\lVert S - \\mu I \\rVert_F^2,
+        \\qquad \\beta^2 = \\frac{1}{n^2} \\sum_k \\lVert x_k \\rVert^4
+        - \\frac{1}{n} \\lVert S \\rVert_F^2,
+
+    with :math:`\\beta^2` clipped to :math:`[0, \\delta^2]`.  This matches
     ``sklearn.covariance.ledoit_wolf``.
+
+    Parameters
+    ----------
+    X : Float[Array, 'n p']
+        Data matrix of ``n`` observations by ``p`` features.
+    assume_centered : bool, optional
+        If ``True``, treat ``X`` as already mean-centred; otherwise centre each
+        feature before estimating the covariance.  Default ``False``.
+
+    Returns
+    -------
+    cov : Float[Array, 'p p']
+        The shrunk covariance matrix :math:`\\hat{\\Sigma}`.
+    shrinkage : Float[Array, '']
+        The scalar shrinkage intensity :math:`\\alpha \\in [0, 1]`.
     """
     Xc, s, n, p = _empirical(X, assume_centered)
     mu = jnp.trace(s) / p
@@ -110,10 +181,27 @@ def oas(
     *,
     assume_centered: bool = False,
 ) -> Tuple[Float[Array, 'p p'], Float[Array, '']]:
-    """Oracle-Approximating-Shrinkage covariance (Chen et al. 2010).
+    """Oracle-approximating-shrinkage (OAS) covariance estimator.
 
-    Returns ``(cov, shrinkage)``.  Same convex blend as Ledoit-Wolf, a
-    different closed-form ``alpha``.  Matches ``sklearn.covariance.oas``.
+    Uses the same convex blend of the sample covariance toward a scaled
+    identity as :func:`ledoit_wolf`, but with the different closed-form
+    shrinkage intensity of Chen, Wiesel, Eldar and Hero (2010).  This matches
+    ``sklearn.covariance.oas``.
+
+    Parameters
+    ----------
+    X : Float[Array, 'n p']
+        Data matrix of ``n`` observations by ``p`` features.
+    assume_centered : bool, optional
+        If ``True``, treat ``X`` as already mean-centred; otherwise centre each
+        feature before estimating the covariance.  Default ``False``.
+
+    Returns
+    -------
+    cov : Float[Array, 'p p']
+        The shrunk covariance matrix :math:`\\hat{\\Sigma}`.
+    shrinkage : Float[Array, '']
+        The scalar shrinkage intensity :math:`\\alpha \\in [0, 1]`.
     """
     _, s, n, p = _empirical(X, assume_centered)
     mu = jnp.trace(s) / p
@@ -130,9 +218,32 @@ def shrunk_covariance(
     method: ShrinkageMethod = 'ledoit_wolf',
     assume_centered: bool = False,
 ) -> Float[Array, 'p p']:
-    """Analytic-shrinkage covariance via ``method`` (the cov only).
+    """Analytic-shrinkage covariance, returning the covariance only.
 
-    ``'ledoit_wolf'`` (default, nilearn's connectome default) or ``'oas'``.
+    Thin wrapper over :func:`ledoit_wolf` and :func:`oas` that returns just the
+    shrunk covariance, discarding the shrinkage intensity.
+
+    Parameters
+    ----------
+    X : Float[Array, 'n p']
+        Data matrix of ``n`` observations by ``p`` features.
+    method : {'ledoit_wolf', 'oas'}, optional
+        Which analytic-shrinkage estimator to use.  ``'ledoit_wolf'`` (the
+        default) is a common connectome default; ``'oas'`` selects the
+        oracle-approximating-shrinkage intensity.
+    assume_centered : bool, optional
+        If ``True``, treat ``X`` as already mean-centred; otherwise centre each
+        feature before estimating the covariance.  Default ``False``.
+
+    Returns
+    -------
+    Float[Array, 'p p']
+        The shrunk covariance matrix.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is neither ``'ledoit_wolf'`` nor ``'oas'``.
     """
     if method == 'ledoit_wolf':
         return ledoit_wolf(X, assume_centered=assume_centered)[0]
@@ -147,7 +258,23 @@ def shrunk_covariance(
 
 
 def _soft(x: Float[Array, '...'], t: Float[Array, '']) -> Float[Array, '...']:
-    """Soft-thresholding ``sign(x) * max(|x| - t, 0)`` (the lasso proximal op)."""
+    """Soft-thresholding operator, the proximal map of the lasso penalty.
+
+    Computes :math:`\\operatorname{sign}(x) \\cdot \\max(\\lvert x \\rvert - t,
+    0)` elementwise.
+
+    Parameters
+    ----------
+    x : Float[Array, '...']
+        Input array; thresholding is applied elementwise.
+    t : Float[Array, '']
+        Non-negative threshold.
+
+    Returns
+    -------
+    Float[Array, '...']
+        The soft-thresholded array, of the same shape as ``x``.
+    """
     return jnp.sign(x) * jnp.clip(jnp.abs(x) - t, 0.0, None)
 
 
@@ -159,12 +286,38 @@ def _glasso_wb(
     n_outer: int,
     n_inner: int,
 ) -> Tuple[Float[Array, 'p p'], Float[Array, 'p p']]:
-    """Coordinate-descent core: converged working covariance ``W`` and the
-    per-column lasso coefficients ``B`` (column ``j`` is the regression of node
-    ``j`` on the rest).  Every loop is **rolled** (``lax.fori_loop``) so the
-    graph stays ``O(p^2)`` and compile is flat in ``p`` (the rolled-Cholesky
-    lesson).  ``W``'s diagonal is held fixed (off-diagonal-only penalty:
-    ``W_jj = S_jj``), so seeding ``W = S`` enforces the diagonal KKT condition.
+    """Coordinate-descent core of the graphical LASSO.
+
+    Runs the block-coordinate-descent solver, returning the converged working
+    covariance ``W`` and the per-column lasso coefficients ``B``, where column
+    ``j`` holds the regression of node ``j`` on the remaining nodes.  Every loop
+    is rolled (``lax.fori_loop``) so the computation graph stays :math:`O(p^2)`
+    and compilation is flat in :math:`p`.  The diagonal of ``W`` is held fixed
+    (the off-diagonal-only penalty pins :math:`W_{jj} = S_{jj}`), so seeding
+    ``W = S`` enforces the diagonal optimality condition.
+
+    Parameters
+    ----------
+    S : Float[Array, 'p p']
+        Sample covariance matrix.
+    lam : Float[Array, '']
+        Non-negative L1 penalty on the off-diagonal entries.
+    W : Float[Array, 'p p']
+        Initial working covariance (warm start); typically ``S`` or the ``W``
+        carried from a previous penalty.
+    B : Float[Array, 'p p']
+        Initial per-column lasso coefficients (warm start).
+    n_outer : int
+        Number of outer sweeps over columns.
+    n_inner : int
+        Number of inner lasso sweeps per column.
+
+    Returns
+    -------
+    W : Float[Array, 'p p']
+        The converged working covariance.
+    B : Float[Array, 'p p']
+        The converged per-column lasso coefficients.
     """
     p = S.shape[0]
     idx = jnp.arange(p)
@@ -210,12 +363,33 @@ def _glasso_wb(
 def _theta_from_wb(
     W: Float[Array, 'p p'], B: Float[Array, 'p p']
 ) -> Float[Array, 'p p']:
-    """Recover the sparse precision ``Theta`` from the working covariance and
-    the per-column lasso coefficients (FHT 2008, eq. partitioned-inverse): for
-    column ``j``, ``theta_jj = 1 / (w_jj - w_12^T beta_j)`` and
-    ``theta_-j,j = -beta_j theta_jj``.  Sparsity is inherited from ``B`` (the
-    soft-threshold zeros exactly), so ``Theta`` carries the conditional-
-    independence support, not a dense ``W^-1``.
+    """Recover the sparse precision from the working covariance.
+
+    Reconstructs the precision matrix :math:`\\Theta` from the converged
+    working covariance and the per-column lasso coefficients via the
+    partitioned-inverse identities of Friedman, Hastie and Tibshirani (2008):
+    for column ``j``,
+
+    .. math::
+
+        \\theta_{jj} = \\frac{1}{w_{jj} - w_{12}^{\\top} \\beta_j},
+        \\qquad \\theta_{-j,\\,j} = -\\beta_j\\, \\theta_{jj}.
+
+    Sparsity is inherited from ``B`` (the soft-thresholding zeros entries
+    exactly), so :math:`\\Theta` carries the conditional-independence support
+    rather than a dense :math:`W^{-1}`.
+
+    Parameters
+    ----------
+    W : Float[Array, 'p p']
+        Converged working covariance.
+    B : Float[Array, 'p p']
+        Converged per-column lasso coefficients.
+
+    Returns
+    -------
+    Float[Array, 'p p']
+        The recovered sparse precision matrix :math:`\\Theta`.
     """
     p = W.shape[0]
     idx = jnp.arange(p)
@@ -237,14 +411,22 @@ def glasso(
 ) -> Float[Array, 'p p']:
     """Graphical-LASSO sparse precision (inverse covariance).
 
-    Solves ``argmin_Theta <S, Theta> - log det Theta + lam ||Theta||_{1,off}``
-    (off-diagonal-only L1 penalty -- the standard / nilearn convention) by
-    Friedman/Hastie/Tibshirani (2008) block-coordinate descent: an outer sweep
-    over columns, each an inner lasso on the working covariance ``W``, with the
-    precision recovered from the converged per-column coefficients.  No
-    factorisation, no cuSOLVER; all loops rolled (``O(p^2)`` graph), so it is
-    differentiable through the fixed iteration budget and compiles flat in ``p``
-    (fine for connectome ``p = 100-400``).
+    Solves
+
+    .. math::
+
+        \\operatorname*{argmin}_{\\Theta}\\;
+        \\langle S, \\Theta \\rangle - \\log\\det\\Theta
+        + \\lambda \\lVert\\Theta\\rVert_{1,\\mathrm{off}}
+
+    (an off-diagonal-only L1 penalty -- the standard convention) by the
+    block-coordinate descent of Friedman, Hastie and Tibshirani (2008): an
+    outer sweep over columns, each an inner lasso on the working covariance
+    ``W``, with the precision recovered from the converged per-column
+    coefficients.  There is no factorisation and no cuSOLVER; all loops are
+    rolled (an :math:`O(p^2)` graph), so the solve is differentiable through the
+    fixed iteration budget and compiles flat in :math:`p` (well suited to
+    connectome sizes of :math:`p = 100`-:math:`400`).
 
     Parameters
     ----------
@@ -292,12 +474,29 @@ def glasso_path(
 ) -> Float[Array, 'L p p']:
     """Warm-started graphical-LASSO regularisation path over ``lambdas``.
 
-    Sweeps the penalties in the **given order**, carrying the working covariance
-    ``W`` and the lasso coefficients ``B`` from one ``lam`` to the next so each
-    solve starts warm (far cheaper than a cold restart and the usual way to
-    trace a glasso path -- pass ``lambdas`` descending, dense -> sparse, or
-    ascending; either direction warm-starts).  Returns the stacked precisions
-    aligned with ``lambdas``; pair with :func:`ebic_score` for model selection.
+    Sweeps the penalties in the given order, carrying the working covariance
+    ``W`` and the lasso coefficients ``B`` from one penalty to the next so that
+    each solve starts warm.  This is far cheaper than a cold restart at every
+    penalty and is the usual way to trace a graphical-LASSO path; either sweep
+    direction (descending, dense to sparse, or ascending) warm-starts.  Pair the
+    returned precisions with :func:`ebic_score` for model selection.
+
+    Parameters
+    ----------
+    S : Float[Array, 'p p']
+        Sample covariance matrix shared across all penalties.
+    lambdas : Float[Array, 'L']
+        The ``L`` non-negative L1 penalties, swept in the given order.
+    n_outer : int, optional
+        Number of outer column sweeps per solve.  Default ``100``.
+    n_inner : int, optional
+        Number of inner lasso sweeps per column.  Default ``50``.
+
+    Returns
+    -------
+    Float[Array, 'L p p']
+        The stacked precision matrices, one ``(p, p)`` estimate per penalty and
+        aligned with ``lambdas``.
     """
     p = S.shape[0]
     lambdas = jnp.asarray(lambdas, dtype=S.dtype)
@@ -325,15 +524,43 @@ def ebic_score(
     gamma: float = 0.5,
     edge_tol: float = 1e-8,
 ) -> Float[Array, '']:
-    """Extended Bayesian Information Criterion of a precision estimate.
+    """Extended Bayesian information criterion of a precision estimate.
 
-    ``EBIC_gamma = n (tr(S Theta) - log det Theta) + E log n + 4 gamma E log p``
-    (Foygel & Drton 2010), where ``E`` is the number of off-diagonal edges
-    (upper-triangle entries with ``|theta| > edge_tol``, counted once).  The
-    Gaussian-graphical-model term ``-2 loglik = n (tr(S Theta) - log det Theta)``
-    uses the cuSOLVER-free rolled-Cholesky ``log det``.  ``gamma in [0, 1]``
-    tunes the extra sparsity prior (``gamma = 0`` recovers plain BIC); pick the
-    path point with the **smallest** EBIC.
+    Evaluates the extended BIC of Foygel and Drton (2010),
+
+    .. math::
+
+        \\mathrm{EBIC}_\\gamma = n\\,(\\operatorname{tr}(S \\Theta)
+        - \\log\\det\\Theta) + E \\log n + 4 \\gamma E \\log p,
+
+    where :math:`E` is the number of off-diagonal edges (upper-triangle entries
+    with :math:`\\lvert\\theta\\rvert >` ``edge_tol``, counted once).  The
+    Gaussian-graphical-model term
+    :math:`-2\\,\\ell = n\\,(\\operatorname{tr}(S \\Theta) - \\log\\det\\Theta)`
+    uses the cuSOLVER-free rolled-Cholesky :math:`\\log\\det`.  The parameter
+    :math:`\\gamma \\in [0, 1]` tunes the extra sparsity prior
+    (:math:`\\gamma = 0` recovers the plain BIC); select the path point with the
+    smallest score.
+
+    Parameters
+    ----------
+    theta : Float[Array, 'p p']
+        Precision (inverse covariance) estimate to score.
+    S : Float[Array, 'p p']
+        Sample covariance matrix that produced ``theta``.
+    n : int or Float[Array, '']
+        Number of observations underlying ``S``.
+    gamma : float, optional
+        Extended-BIC sparsity-prior weight :math:`\\gamma \\in [0, 1]`;
+        ``gamma = 0`` recovers the plain BIC.  Default ``0.5``.
+    edge_tol : float, optional
+        Magnitude threshold above which an off-diagonal entry counts as an
+        edge.  Default ``1e-8``.
+
+    Returns
+    -------
+    Float[Array, '']
+        The scalar extended-BIC score; lower is better.
     """
     p = theta.shape[0]
     _, logdet = small_inv_logdet(theta, p)

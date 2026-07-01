@@ -32,7 +32,7 @@ beta_pop`.  With `levels` a sequence of group indices, returns the
 | `levels` | `Optional[Int[Array, ' L']]` | — | `None` | Optional group indices to render; `None` gives the population curve. |
 | `parametric` | `Optional[Float[Array, 'g q']]` | — | `None` | `(g, q)` parametric covariates (required if the fit used them). |
 
-**Returns** `Tuple[Float[Array, '...'], Float[Array, '...']]`.
+**Returns** `Tuple[Float[Array, '...'], Float[Array, '...']]`. Posterior mean curve. `(V, g)` for the population smooth (`levels=None`), or `(V, len(levels), g)` for the requested group curves. Posterior standard deviation of the curve, matching the shape of `mean`.
 <!-- nitrix:/gen -->
 
 

@@ -1,7 +1,7 @@
 ---
 title: "cluster_mass_map"
 generated: true
-description: "Per-voxel cluster *mass*: the component's summed `stat - threshold`."
+description: "Per-voxel cluster *mass*: the component's summed excess statistic."
 ---
 
 [‹ back to `nitrix.stats.inference.cluster`](../nitrix-stats-inference-cluster.qmd)
@@ -13,10 +13,11 @@ cluster_mass_map(labels: Int[Array, '*spatial'], stat: Float[Array, '*spatial'],
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:cluster_mass_map -->
-Per-voxel cluster *mass*: the component's summed `stat - threshold`.
+Per-voxel cluster *mass*: the component's summed excess statistic.
 
-The excess statistic `max(stat - threshold, 0)` is summed over each
-supra-threshold component; background voxels map to `0`.
+The excess statistic $\max(\mathrm{stat} - \mathrm{threshold}, 0)$
+is summed over each supra-threshold component and assigned to every voxel
+of that component; background voxels map to `0`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:cluster_mass_map -->
@@ -24,11 +25,11 @@ supra-threshold component; background voxels map to `0`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `labels` | `Int` | `*spatial` | — | — |
-| `stat` | `Float` | `*spatial` | — | — |
-| `threshold` | `float` | — | — | — |
+| `labels` | `Int` | `*spatial` | — | Integer label image of shape `(*spatial)`; `0` denotes background and `1 .. K` the connected components, as produced by `connected_components`. |
+| `stat` | `Float` | `*spatial` | — | Statistic image of shape `(*spatial)` from which the excess above `threshold` is computed. |
+| `threshold` | `float` | — | — | Height threshold subtracted from `stat` before clipping at zero. |
 
-**Returns** `Float` — shape `*spatial`.
+**Returns** `Float` — shape `*spatial`. Array of shape `(*spatial)` giving the cluster mass of each voxel's component; background voxels carry `0`.
 <!-- nitrix:/gen -->
 
 

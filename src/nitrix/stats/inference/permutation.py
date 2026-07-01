@@ -4,23 +4,24 @@
 """
 Exchangeability operators for permutation inference.
 
-Keyed pure generators (SPEC §2 tenet 1) that build the set of relabellings
-used by ``randomise``-style permutation tests:
+Keyed pure generators that build the set of relabellings used by
+``randomise``-style permutation tests:
 
-- ``sign_flips`` -- the ``+/-1`` sign-flip matrix for symmetric / one-sample
-  tests (the null is invariant to flipping an exchangeable observation's sign).
-- ``permutations`` -- the row-permutation index matrix for shuffle-based tests
-  (two-sample, regression).
+- :func:`sign_flips` -- the :math:`\\pm 1` sign-flip matrix for symmetric /
+  one-sample tests (the null is invariant to flipping an exchangeable
+  observation's sign).
+- :func:`permutations` -- the row-permutation index matrix for shuffle-based
+  tests (two-sample, regression).
 
 Both honour **exchangeability blocks**: with a per-observation ``blocks`` label,
 sign flips act per *whole block* (a block flips together) and permutations act
 *within* each block (an observation can only move to a same-block position).
 The first row is always the identity (the unpermuted data), so the observed
-statistic is one of the permutations -- the standard ``(count)/(n_perm)``
-convention with ``p >= 1/n_perm``.
+statistic is one of the permutations -- the standard ``count / n_perm``
+convention with :math:`p \\geq 1 / n_{\\mathrm{perm}}`.
 
-RNG *policy* (which key) stays the caller's; these are deterministic given
-``(shape, key)``.
+The choice of random key is left to the caller; these generators are
+deterministic given ``(shape, key)``.
 """
 
 from __future__ import annotations
@@ -41,10 +42,36 @@ def sign_flips(
     *,
     blocks: Optional[Int[Array, 'N']] = None,
 ) -> Float[Array, 'n_perm N']:
-    """``(n_perm, n)`` matrix of ``+/-1`` sign flips (row 0 = identity).
+    """Build a matrix of :math:`\\pm 1` sign flips for permutation inference.
 
-    Without ``blocks`` each observation flips independently; with ``blocks``
-    every observation in a block shares the block's sign (whole-block flip).
+    Each row of the returned ``(n_perm, n)`` matrix is one relabelling of the
+    ``n`` observations under sign-flip exchangeability, suitable for symmetric
+    or one-sample tests. Row 0 is always the all-ones identity (the unflipped
+    data). Without ``blocks`` each observation flips independently; with
+    ``blocks`` every observation sharing a block label shares that block's
+    sign, so the block flips as a whole.
+
+    Parameters
+    ----------
+    n : int
+        Number of observations (columns of the output).
+    n_perm : int
+        Number of relabellings to generate, including the identity row.
+    key : Array
+        A ``jax.random`` key seeding the Bernoulli draws of the flip signs.
+    blocks : Int[Array, 'N'], optional
+        Per-observation integer exchangeability-block labels of shape ``(n,)``.
+        Observations sharing a label flip together. Labels may be arbitrary
+        (negative or non-contiguous) integers; they are canonicalised to a
+        dense encoding so each distinct label is one independent whole-block
+        flip. If ``None`` (the default), every observation flips independently.
+
+    Returns
+    -------
+    Float[Array, 'n_perm N']
+        A ``(n_perm, n)`` matrix whose entries are ``+1.0`` or ``-1.0``. Row 0
+        is all ones (the identity); each remaining row is one sign-flip
+        relabelling.
     """
     if blocks is None:
         flips = jnp.where(
@@ -60,7 +87,9 @@ def sign_flips(
         # jnp.unique here costs no jit-traceability. (permutations() uses the
         # labels only as a sort key and is correct for any distinct integer
         # labels, so it is left untouched to stay jit-traceable.)
-        ids = jnp.unique(jnp.asarray(blocks), return_inverse=True)[1].reshape(-1)
+        ids = jnp.unique(jnp.asarray(blocks), return_inverse=True)[1].reshape(
+            -1
+        )
         n_blocks = int(ids.max()) + 1
         block_flips = jnp.where(
             jax.random.bernoulli(key, 0.5, (n_perm, n_blocks)), 1.0, -1.0
@@ -76,11 +105,37 @@ def permutations(
     *,
     blocks: Optional[Int[Array, 'N']] = None,
 ) -> Int[Array, 'n_perm N']:
-    """``(n_perm, n)`` permutation-index matrix (row 0 = identity).
+    """Build a permutation-index matrix for shuffle-based permutation tests.
 
-    Without ``blocks`` rows are free permutations of ``0..n-1``; with ``blocks``
-    each row is a *within-block* permutation (observation ``i`` maps only to a
-    position sharing its block label).
+    Each row of the returned ``(n_perm, n)`` matrix is a permutation of the
+    observation indices, suitable for two-sample or regression tests. Row 0 is
+    always the identity ``0, 1, ..., n - 1`` (the unpermuted data). Without
+    ``blocks`` the rows are free permutations of ``0 .. n - 1``; with
+    ``blocks`` each row is a *within-block* permutation, so observation ``i``
+    maps only to a position sharing its block label.
+
+    Parameters
+    ----------
+    n : int
+        Number of observations (columns of the output).
+    n_perm : int
+        Number of permutations to generate, including the identity row.
+    key : Array
+        A ``jax.random`` key; it is split into ``n_perm`` subkeys, one per row,
+        seeding the uniform noise that orders observations within each block.
+    blocks : Int[Array, 'N'], optional
+        Per-observation integer exchangeability-block labels of shape ``(n,)``.
+        Permutations are confined within each block: an observation can only
+        move to a position sharing its block label. Labels are used only as a
+        sort key, so any distinct integer labels are valid. If ``None`` (the
+        default), all observations form a single block (free permutation).
+
+    Returns
+    -------
+    Int[Array, 'n_perm N']
+        A ``(n_perm, n)`` matrix of ``int32`` indices. Row 0 is the identity;
+        each remaining row is a within-block (or free) permutation of the
+        observation indices.
     """
     keys = jax.random.split(key, n_perm)
     # blocks=None -> a single block (free permutation of all observations).

@@ -20,11 +20,11 @@ A random intercept / slope per level of a grouping factor, expressed as the
 design is the one-hot indicator (intercept) or one-hot times a covariate
 (slope) over the factor levels, and the penalty is the **identity** (a
 ridge).  The single smoothing parameter the Fellner-Schall loop selects
-**is** the random-effect precision $\lambda = 1 / \sigma_b^2$ -- the v1
-"penalised GLM == variance-components REML" identity, now reachable.  It is a
-third `Smooth` variant alongside `SplineBasis` /
-`TensorBasis`, so it slots straight into `gam_fit` with **no new
-solver work** (a random effect is just one more penalty block).
+**is** the random-effect precision $\lambda = 1 / \sigma_b^2$ -- the
+"penalised GLM equals variance-components REML" identity.  It is a third
+smooth-term variant alongside `SplineBasis` / `TensorBasis`,
+so it slots straight into `gam_fit` with **no new solver
+work** (a random effect is just one more penalty block).
 
 Unlike a spline, an RE has no continuous covariate to re-evaluate, so it
 carries only `(design, penalty, levels)` -- not the spline construction
@@ -39,8 +39,10 @@ penalty_blocks() -> list
 ```
 <!-- nitrix:/gen -->
 
-Penalty blocks `[(I, 1)]` (audit D8): the identity ridge (full rank
-`q`, eigenvalues exactly one -- no host eigh).
+Return the single identity-ridge penalty block.
+
+The block is the identity ridge (full rank `q`, all eigenvalues
+exactly one -- no host eigendecomposition needed).
 
 <!-- nitrix:gen sig:REBasis.eval_design -->
 ```python
@@ -48,8 +50,7 @@ eval_design(x: Float[Array, ' g']) -> Float[Array, 'g q']
 ```
 <!-- nitrix:/gen -->
 
-Re-evaluate as the one-hot of the requested level indices `x`
-(audit D8): the per-level random effect at those levels.
+Re-evaluate as the one-hot of the requested level indices.
 
 <!-- nitrix:gen sig:REBasis.tree_flatten -->
 ```python

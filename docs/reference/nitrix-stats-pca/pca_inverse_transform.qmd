@@ -15,8 +15,9 @@ pca_inverse_transform(Z: Float[Array, 'n k'], components: Float[Array, 'k d'], m
 <!-- nitrix:gen overview:pca_inverse_transform -->
 Reconstruct from PCA coordinates: `Z @ components + mean`.
 
-Exact (up to the discarded components) inverse of
-`pca_transform`.
+Maps principal-component coordinates back to feature space, the
+exact inverse of `pca_transform` up to the components that were
+discarded when the basis was truncated.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pca_inverse_transform -->
@@ -24,11 +25,11 @@ Exact (up to the discarded components) inverse of
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `Z` | `Float` | `n` × `k` | — | — |
-| `components` | `Float` | `k` × `d` | — | — |
-| `mean` | `Float` | `d` | — | — |
+| `Z` | `Float` | `n` × `k` | — | `(n, k)` principal-component coordinates. |
+| `components` | `Float` | `k` × `d` | — | `(k, d)` orthonormal basis, row `i` the `i`-th principal axis. |
+| `mean` | `Float` | `d` | — | `(d,)` feature mean added back after reconstruction. |
 
-**Returns** `Float` — shape `n` × `d`.
+**Returns** `Float` — shape `n` × `d`. `(n, d)` reconstruction in the original feature space.
 <!-- nitrix:/gen -->
 
 

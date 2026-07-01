@@ -15,9 +15,10 @@ pairedcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs) -> 
 <!-- nitrix:gen overview:pairedcorr -->
 Cross-correlation between two sets of variables.
 
-Normalised version of `pairedcov`: each entry divided by
-the geometric mean of the corresponding diagonal entries of
-`cov(X)` and `cov(Y)`.
+Normalised version of `pairedcov`: each cross-covariance
+entry is divided by the square root of the product of the
+corresponding variances, i.e. the diagonal entries of
+`cov` applied to `X` and to `Y` respectively.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:pairedcorr -->
@@ -25,11 +26,11 @@ the geometric mean of the corresponding diagonal entries of
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `Y` | `Num` | `...` × `d` × `obs` | — | — |
+| `X` | `Num` | `...` × `c` × `obs` | — | First variable block; see `pairedcov`. |
+| `Y` | `Num` | `...` × `d` × `obs` | — | Second variable block; see `pairedcov`. |
 | `**kwargs` | `Any` | — | `{}` | — |
 
-**Returns** `Num` — shape `...` × `c` × `d`.
+**Returns** `Num` — shape `...` × `c` × `d`. Cross-correlation block, `(..., c, d)`.
 <!-- nitrix:/gen -->
 
 

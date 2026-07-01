@@ -3,23 +3,23 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """Shared JAX-pytree registration for the stats ``*Result`` types.
 
-Every fitter in :mod:`nitrix.stats` returns a frozen-dataclass result that
-doubles as a JAX pytree: the array fields are the **children** (traced, stacked
-under ``vmap``, differentiated under ``grad``), while the non-array metadata --
-``family`` / ``n_obs`` / ``rank`` / ``tier`` / ``corr`` -- are **static aux**
-(kept out of the trace and compared *by value* for the ``jit`` cache key).
+Every fitter in the :mod:`nitrix.stats` subpackage returns a frozen-dataclass
+result that doubles as a JAX pytree. The array fields are the **children**
+(traced, stacked under :func:`jax.vmap`, differentiated under :func:`jax.grad`),
+while the non-array metadata -- ``family`` / ``n_obs`` / ``rank`` / ``tier`` /
+``corr`` -- are **static aux** kept out of the trace and compared *by value* for
+the :func:`jax.jit` cache key.
 
-Hand-rolling ``tree_flatten`` / ``tree_unflatten`` on each result is the
-add-a-field-touch-three-places footgun the audit (D1) flagged, and the
-historical ``lme_fit`` ``NamedTuple`` results got it *wrong* in the opposite
-direction -- a bare ``NamedTuple`` flattens **every** field as a child, so
-``tier`` / ``corr`` / ``df_resid`` leaked into the trace as dynamic leaves.
+Hand-rolling ``tree_flatten`` / ``tree_unflatten`` on each result is an
+add-a-field-touch-three-places footgun. In the opposite direction, a bare
+``NamedTuple`` flattens **every** field as a child, so static metadata such as
+``tier`` / ``corr`` / ``df_resid`` would leak into the trace as dynamic leaves.
 
 :func:`register_result` is the single source of truth: name the children and
-the aux, and the decorator synthesises both methods, registers the class, and
--- crucially -- **asserts the named fields exactly cover the dataclass**, so a
-later field that is added but not registered fails loudly at import instead of
-silently dropping out of (or into) the trace.
+the aux, and the decorator synthesises both flatten methods, registers the
+class, and -- crucially -- **asserts the named fields exactly cover the
+dataclass**, so a field that is added but not registered fails loudly at import
+instead of silently dropping out of (or into) the trace.
 """
 
 from __future__ import annotations
@@ -58,13 +58,21 @@ def register_result(
         Field names that are array leaves -- traced / stacked / differentiated.
     aux
         Field names that are static metadata -- hashable, compared by value for
-        the ``jit`` cache key (``family`` / ``n_obs`` / ``tier`` / ...).
+        the :func:`jax.jit` cache key (``family`` / ``n_obs`` / ``tier`` / ...).
+
+    Returns
+    -------
+    Callable[[type], type]
+        A class decorator that, applied to the frozen dataclass, attaches the
+        synthesised ``tree_flatten`` / ``tree_unflatten`` methods, registers the
+        class as a JAX pytree node, and returns the same class.
 
     Raises
     ------
     TypeError
         If ``children`` and ``aux`` together do not *exactly* partition the
-        dataclass fields (a field left out, or a name that is not a field).
+        dataclass fields (a field left out, or a name that is not a field), or
+        if any field name appears in both ``children`` and ``aux``.
     """
     child_names = tuple(children)
     aux_names = tuple(aux)
