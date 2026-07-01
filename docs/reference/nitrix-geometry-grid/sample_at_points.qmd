@@ -26,7 +26,7 @@ interpolate `volume` at each point.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `volume` | `Float` | `...` | — | Either channel-free `(*spatial)` or channels-last `(*spatial, c)`; the spatial rank is `ndim = points.shape[-1]`. |
 | `points` | `Float` | `*n` × `ndim` | — | `(*n, ndim)` sample coordinates in index space. |
 | `method` | `Interpolator` | — | `Linear()` | Interpolation kernel (`Linear` default; `NearestNeighbour` for label volumes; any `geometry` `Interpolator`). |

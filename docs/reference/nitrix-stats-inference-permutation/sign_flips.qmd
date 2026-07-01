@@ -23,7 +23,7 @@ every observation in a block shares the block's sign (whole-block flip).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `n` | `int` | — | — | — |
 | `n_perm` | `int` | — | — | — |
 | `key` | `Array` | — | — | — |

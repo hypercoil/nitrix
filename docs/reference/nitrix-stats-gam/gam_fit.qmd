@@ -20,7 +20,7 @@ Fit a mass-univariate GAM: shared smooth bases, per-element responses.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
 | `smooths` | `Sequence[Smooth]` | — | — | Penalised smooth bases (one per smooth term): a `SplineBasis` (`bspline_basis` / `thinplate_regression_basis` / `cyclic_cubic_basis`) or a `TensorBasis` (`tensor_product_basis`) for an anisotropic interaction. A tensor smooth carries one smoothing parameter per margin, all selected by the same Fellner-Schall loop. |
 | `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (covariates entering linearly). The intercept is added separately (see `intercept`). |

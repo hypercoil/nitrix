@@ -24,7 +24,7 @@ Y subspace, look at what's left" view.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | Variable / conditioning tensors. |
 | `Y` | `Num` | `...` × `d` × `obs` | — | Variable / conditioning tensors. |
 | `rowvar` | `bool` | — | `True` | See `cov`. |

@@ -22,7 +22,7 @@ Returns `(rejected, p_adjusted)` with `p_adjusted = min(p * n, 1)`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `p_values` | `Float` | `n` | — | — |
 | `alpha` | `float` | — | `0.05` | — |
 

@@ -26,14 +26,14 @@ paths stay the realised path for the cases they already serve.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | `(V, N)` responses and `(N, p)` shared fixed-effect design. `X` carries its own intercept column (no intercept is added). |
 | `X` | `Float` | `N` × `p` | — | `(V, N)` responses and `(N, p)` shared fixed-effect design. `X` carries its own intercept column (no intercept is added). |
 | `group` | `Int` | `N` | — | `(N,)` integer group labels (`0 .. M-1`). The **outer** factor `g1` when `inner` is given (R3). |
 | `z` | `Optional[Float[Array, 'N r']]` | — | `None` | `(N, r)` per-observation random covariates; `None` is the scalar random intercept (`r = 1`, `z = 1`). |
 | `inner` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` **nested** inner factor `g2` (each `(group, inner)` pair is a sublevel `g1:g2`). When given, routes to the R3 nested solver (`z` must be `None`); `None` (default) keeps the single-factor R1/R2 dispatch. |
 | `cross` | `Optional[Int[Array, 'N']]` | — | `None` | `(N,)` second **crossed** factor. When given, routes to the R4 crossed solver -- `(1 \| group) + (1 \| cross)`, the two factors crossed (not nested). `z` / `inner` / `corr` must be unset. Tier-2; cost scales with the *smaller* factor's level count cubed. |
-| `corr` | `Optional[Union[str, CorrSpec]]` | — | `None` | Within-group residual correlation structure (`'ar1'` / `'car1'` / `'cs'` or a :class:`CorrSpec`). When given, routes to the R2 + corr whitened block-Woodbury (a random effect plus a structured residual); `None` (default) is the `sigma_e^2 I` residual. |
+| `corr` | `Optional[Union[str, CorrSpec]]` | — | `None` | Within-group residual correlation structure (`'ar1'` / `'car1'` / `'cs'` or a `CorrSpec`). When given, routes to the R2 + corr whitened block-Woodbury (a random effect plus a structured residual); `None` (default) is the `sigma_e^2 I` residual. |
 | `time` | `Optional[Float[Array, 'N']]` | — | `None` | `(N,)` observation times for a `car1` residual (see `corr`). |
 | `structure` | `Structure` | — | `'unstructured'` | `'unstructured'` (full `r x r` `G`, `(1 + x \| g)`) or `'diagonal'` (independent variance components, `(x \|\| g)` -- the off-diagonal of `G` is held at zero). Both run the R2 block-Woodbury. |
 | `n_iter` | `int` | — | `20` | Newton iterations, AI damping, and voxel-block chunking (all tiers). |

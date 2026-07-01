@@ -20,7 +20,7 @@ Permutation test of a GLM t- or F-contrast with FWE control.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `data` | `Float` | `*spatial` × `N` | — | `(*spatial, N)` responses (the observation axis is last). |
 | `design` | `Float` | `N` × `p` | — | `(N, p)` GLM design (includes the effect and any nuisance columns). |
 | `contrast` | `Float` | `m` × `p` | — | The tested contrast. A `(p,)` vector `c` is a **t-contrast** (signed, two-sided by default); a `(m, p)` matrix `C` (`m > 1`) is an **F-contrast** -- the joint test `C beta = 0` reported as the non-negative F-statistic (`two_sided` is then irrelevant and ignored, the F already captures both directions). |

@@ -26,7 +26,7 @@ FDR.  The `1/m` floor guards the degenerate "no null" estimate.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `p_values` | `Float` | `n` | — | — |
 | `lam` | `float` | — | `0.5` | — |
 

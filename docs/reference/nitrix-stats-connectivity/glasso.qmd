@@ -29,7 +29,7 @@ differentiable through the fixed iteration budget and compiles flat in `p`
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `S` | `Float` | `p` × `p` | — | `(p, p)` sample covariance (e.g. `stats.covariance.cov` or a shrinkage estimate). Off-diagonal-only penalty fixes `W_jj = S_jj`. |
 | `lam` | `float | Float[Array, '']` | — | — | Non-negative L1 penalty. Larger `lam` -> sparser `Theta`. |
 | `n_outer` | `int` | — | `100` | Outer column sweeps and inner lasso sweeps per column (fixed budget; the defaults reach KKT stationarity to machine precision on well-scaled connectome covariances and can be reduced for speed). |

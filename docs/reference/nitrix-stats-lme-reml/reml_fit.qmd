@@ -33,7 +33,7 @@ Newton-score on the variance components in log-space.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | Response tensor, `(V, N)` -- `V` voxels, `N` subjects (or observations). |
 | `X` | `Float` | `N` × `p` | — | Fixed-effect design, `(N, p)`. Shared across voxels; carries its own intercept column (no intercept is added). |
 | `Z` | `Float` | `N` × `q` | — | Random-effect design, `(N, q)`. Shared across voxels. The random-effect covariance is `sigma_b^2 I_q` (single variance component); pass each component's design matrix column to `Z` to model multiple random effects (currently all share `sigma_b^2`; for separate variance components per random effect, the lower-level `_varcomp` core accepts a general `(K, N)` basis). |

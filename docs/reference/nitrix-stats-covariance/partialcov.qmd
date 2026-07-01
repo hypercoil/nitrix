@@ -24,7 +24,7 @@ relationships between variable pairs.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | — |
 | `require_nonsingular` | `bool` | — | `True` | — |
 | `**kwargs` | `Any` | — | `{}` | — |

@@ -20,7 +20,7 @@ Voxelwise FLAME-style two-level fixed-effect group model.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `beta_subject` | `Float` | `V` × `N` | — | Per-voxel, per-subject level-1 effect estimates. Shape `(V, N)`. |
 | `var_within` | `Float` | `V` × `N` | — | Per-voxel, per-subject within-subject variance (the squared standard error from the level-1 GLM). Shape `(V, N)`. All entries must be positive. |
 | `X_group` | `Float` | `N` × `p` | — | Group-level fixed-effect design, `(N, p)`. Shared across voxels. |

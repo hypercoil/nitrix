@@ -28,7 +28,7 @@ substrate reuse.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `labels` | `Int` | `n` | — | `(n,)` integer region index per observation (`0 .. R-1`). |
 | `neighbours` | `Float` | `R` × `R` | — | `(R, R)` region adjacency matrix (non-negative, symmetric; `1` for adjacent regions). |
 | `center` | `bool` | — | `True` | Apply the (count-weighted) sum-to-zero constraint (default `True`). |

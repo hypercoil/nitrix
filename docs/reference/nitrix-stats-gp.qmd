@@ -23,7 +23,7 @@ Mass-univariate Gaussian-process regression with lengthscale estimation.
 
 `gp_fit` fits, per element (voxel / vertex / fixel), a Gaussian-process
 smooth of a single covariate `x` with its kernel **lengthscale `rho`
-estimated by REML** -- the piece the fixed-`rho` :func:`~nitrix.stats.basis.hsgp_basis`
+estimated by REML** -- the piece the fixed-`rho` `hsgp_basis`
 (which rides `gam_fit` unchanged) leaves open:
     y_v = T alpha_v + f_v(x) + e_v,   f_v ~ GP(0, sigma_f^2 K_rho),
     e_v ~ N(0, sigma_e^2)
@@ -32,12 +32,12 @@ The engine is the Hilbert-space approximation (HSGP; Solin-Sarkka 2020,
 Riutort-Mayol/Burkner 2023): `f` is expanded in a **fixed** Laplace-Dirichlet
 eigenbasis `Phi = [phi_j(x)]` on the bounded domain `[c - L, c + L]`, and the
 kernel enters *only* through the spectral-density weights
-`s_j(rho) = S_rho(sqrt(lambda_j))` (:func:`~nitrix.linalg.kernel.spectral_density`).
+`s_j(rho) = S_rho(sqrt(lambda_j))` (`spectral_density`).
 This is what makes lengthscale estimation tractable: because `Phi` does **not**
 depend on `rho`, the GP is a penalised regression with a fixed design and a
 **diagonal, `rho`-dependent penalty** `S(rho) = diag(1 / s_j(rho))` -- the
 REML criterion is smooth in `rho` with **no eigendecomposition in the loop**
-(contrast the kriging :func:`~nitrix.stats.basis.gp_basis`, whose eigenbasis
+(contrast the kriging `gp_basis`, whose eigenbasis
 moves with `rho`).
 <!-- nitrix:/gen -->
 

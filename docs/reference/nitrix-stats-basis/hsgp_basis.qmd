@@ -20,12 +20,12 @@ A reduced-rank stationary GP on the bounded domain `[c - L, c + L]`
 Dirichlet-Laplacian eigenfunctions `phi_j(x) = sqrt(1/L) sin(sqrt(lam_j)
 (x - c + L))` with `sqrt(lam_j) = j pi / (2 L)`.  The kernel enters
 **only** through the spectral density weights `s_j = S_theta(sqrt(lam_j))`
-(:func:`~nitrix.linalg.kernel.spectral_density`): the whitened design is
+(`spectral_density`): the whitened design is
 `Psi = [sqrt(s_j) phi_j(x)]` with an **identity penalty**, so the basis is
-a drop-in smooth for :func:`gam_fit` and the Fellner-Schall smoothing
+a drop-in smooth for `gam_fit` and the Fellner-Schall smoothing
 parameter `lambda = 1 / sigma_f**2` is the GP amplitude.
 
-Unlike the kriging :func:`gp_basis`, the eigenfunctions are independent of
+Unlike the kriging `gp_basis`, the eigenfunctions are independent of
 the kernel hyperparameters, so the lengthscale `rho` enters as a diagonal
 reweighting of a fixed design -- the basis for `eigh`-free `rho`
 estimation (the standalone `gp_fit`; not this constructor, which fixes
@@ -36,10 +36,10 @@ estimation (the standalone `gp_fit`; not this constructor, which fixes
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate values. |
 | `n_basis` | `int` | — | `20` | Number of retained eigenfunctions `m` (the reduced rank). |
-| `kernel` | `str` | — | `'matern52'` | Stationary kernel: `'matern12'` / `'matern32'` / `'matern52'` / `'rbf'` (squared-exponential). See :func:`~nitrix.linalg.kernel.spectral_density`. |
+| `kernel` | `str` | — | `'matern52'` | Stationary kernel: `'matern12'` / `'matern32'` / `'matern52'` / `'rbf'` (squared-exponential). See `spectral_density`. |
 | `rho` | `Optional[float]` | — | `None` | Kernel lengthscale. Defaults to the data half-range (a sane fixed value; lengthscale *estimation* is the standalone `gp_fit`). |
 | `amplitude` | `float` | — | `1.0` | Kernel amplitude folded into the weights; keep `1.0` when fitting via `gam_fit` (the smoothing parameter carries the amplitude). |
 | `boundary` | `float` | — | `1.5` | Domain-extension factor `L / half-range` (`>= 1`; default `1.5`). Larger values reduce boundary bias; small `rho` needs larger `n_basis`. |

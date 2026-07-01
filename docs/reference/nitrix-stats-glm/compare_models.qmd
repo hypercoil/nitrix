@@ -29,7 +29,7 @@ Returns `(statistic, p_value)`:
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `full` | `GLMResult` | — | — | — |
 | `reduced` | `GLMResult` | — | — | — |
 | `test` | `CompareTest` | — | `'auto'` | — |

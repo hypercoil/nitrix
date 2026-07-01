@@ -17,7 +17,7 @@ Block-Woodbury (R2) mixed-model fit output -- one correlated / diagonal
 random slope `(1 + x | g)` / `(x || g)`.
 
 The `lme_fit` dispatcher returns this for the R2 tier; the scalar-intercept
-R1 tier returns a :class:`REMLResult` (the FaST-LMM path), and the nested /
+R1 tier returns a `REMLResult` (the FaST-LMM path), and the nested /
 crossed / structured-residual tiers their own result types.
 
 Carries the fixed-effect contrast-inference tensors (`fixed_cov` /

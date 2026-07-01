@@ -19,7 +19,7 @@ Some fields are engine- or mode-conditional: `lo` / `hi` / `boundary`
 drive `engine='hsgp'` re-evaluation only; `nd_meta` is set only for a
 multi-dimensional fit (`None` otherwise); `corr_rho` is `0` unless a
 `corr` structure was fitted; and for a non-Gaussian `family` `coef` is
-on the link scale (see :func:`gp_predict`).
+on the link scale (see `gp_predict`).
 <!-- nitrix:/gen -->
 
 ### Methods

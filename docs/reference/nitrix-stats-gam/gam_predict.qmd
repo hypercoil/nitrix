@@ -18,7 +18,7 @@ Per-element GAM prediction on (new) covariates.
 Reassembles the fitted design `[intercept | parametric | B_1(x_1) | ...]`
 at the new covariates -- evaluating each smooth's basis at `x_smooths[k]`
 with the **same** fitted knots/penalty (`smooth.eval_design`, the
-machinery :func:`smooth_partial_effect` uses for one block) and the stored
+machinery `smooth_partial_effect` uses for one block) and the stored
 `result.col_slices` / `result.intercept` layout -- then returns
 `eta = design @ coef` (`type='link'`) or `family.linkinv(eta)`
 (`type='response'`, default).
@@ -28,9 +28,9 @@ machinery :func:`smooth_partial_effect` uses for one block) and the stored
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `GAMResult` | — | — | A :class:`GAMResult` from :func:`gam_fit`. |
-| `smooths` | `Sequence[Smooth]` | — | — | The same `Smooth` terms passed to :func:`gam_fit`, in the same order (used here only to evaluate the basis at the new covariates). |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GAMResult` | — | — | A `GAMResult` from `gam_fit`. |
+| `smooths` | `Sequence[Smooth]` | — | — | The same `Smooth` terms passed to `gam_fit`, in the same order (used here only to evaluate the basis at the new covariates). |
 | `x_smooths` | `Sequence[Any]` | — | — | New covariate(s) per smooth (one entry per `smooths` term, each in the form that `smooth.eval_design` accepts -- an `(N,)` grid, a tuple of per-margin grids for a tensor smooth, or integer level indices for a random-effect basis). All terms must evaluate to the same row count `N`. |
 | `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` parametric design at the new covariates; `None` if the fit had none. Must match the fit's parametric column count. |
 | `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean, via the link inverse) or `'link'` (the linear predictor `eta`). |

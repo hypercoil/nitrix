@@ -16,7 +16,7 @@ fdr_storey(p_values: Float[Array, 'n'], *, alpha: float = 0.05, lam: float = 0.5
 Storey's pi0-adaptive FDR / q-values (higher power; independence / PRDS).
 
 Benjamini-Hochberg with the count `m` replaced by the estimated number of
-true nulls `m * pi0` (see :func:`storey_pi0`): uniformly less conservative
+true nulls `m * pi0` (see `storey_pi0`): uniformly less conservative
 than BH when a non-trivial fraction of effects are real, and identical to BH
 when `pi0 = 1`.  Returns `(rejected, p_adjusted)`.
 <!-- nitrix:/gen -->
@@ -25,7 +25,7 @@ when `pi0 = 1`.  Returns `(rejected, p_adjusted)`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `p_values` | `Float` | `n` | — | — |
 | `alpha` | `float` | — | `0.05` | — |
 | `lam` | `float` | — | `0.5` | — |

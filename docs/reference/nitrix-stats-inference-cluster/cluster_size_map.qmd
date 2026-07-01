@@ -22,7 +22,7 @@ Background voxels (label `0`) map to `0`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `labels` | `Int` | `*spatial` | — | — |
 
 **Returns** `Float` — shape `*spatial`.

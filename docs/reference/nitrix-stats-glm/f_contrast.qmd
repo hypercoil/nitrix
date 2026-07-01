@@ -28,7 +28,7 @@ and the statistic is `quad / m` (no dispersion rescale).  The default
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 | `contrast` | `Float` | `m` × `p` | — | — |
 | `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | — |

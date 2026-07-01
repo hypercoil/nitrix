@@ -20,7 +20,7 @@ Partial correlation: normalised partial covariance.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | — |
 | `require_nonsingular` | `bool` | — | `True` | — |
 | `**kwargs` | `Any` | — | `{}` | — |

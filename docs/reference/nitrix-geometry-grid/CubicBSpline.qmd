@@ -23,7 +23,7 @@ preprocessing in some ilex pipelines use.  Unlike a plain cubic
 
 1. a **prefilter** converts the image samples to interpolating
    B-spline coefficients (a separable recursive filter with the cubic
-   pole `sqrt(3) - 2`; :func:`_bspline_prefilter`), and
+   pole `sqrt(3) - 2`; `_bspline_prefilter`), and
 2. a 4-tap separable **cubic B-spline basis** gathers those
    coefficients.
 
@@ -45,7 +45,7 @@ short FIR, too short for the transform overhead to amortise.)
 Boundary: this kernel **always uses the mirror (whole-sample-
 symmetric) boundary** for *both* the prefilter and the gather, and
 **ignores the `mode` / `cval` call arguments** (like
-:class:`MultiLabel` ignores `cval`).  This is deliberate: a B-spline
+`MultiLabel` ignores `cval`).  This is deliberate: a B-spline
 is only self-consistent -- the interpolation property (reproducing the
 samples) only holds -- when the prefilter and the gather share a
 boundary, and only the mirror initialisation is implemented.  The
@@ -56,7 +56,7 @@ mode='mirror')`.  A mode-aware prefilter (matching `scipy` for
 
 Per the "loud fallbacks" tenet, the override is **announced**: an
 explicit non-mirror `mode` (or a non-zero `cval`) raises a
-:class:`CubicBSplineBoundaryWarning` (the bare default
+`CubicBSplineBoundaryWarning` (the bare default
 `mode='constant', cval=0` is treated as unspecified and is silent).
 
 Reproducibility: the prefilter is a recursive IIR filter, so its engine is

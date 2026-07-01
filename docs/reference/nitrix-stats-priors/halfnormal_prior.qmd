@@ -24,7 +24,7 @@ the estimate **down**, away from over-smooth (near-linear) fits.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `sd` | `float` | — | — | The half-normal scale. Smaller `sd` is a stronger pull toward small `rho`; a sensible value is on the order of the covariate range. |
 
 **Returns** `PriorFn`.

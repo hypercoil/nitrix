@@ -28,7 +28,7 @@ but not per-trace, and avoids the cuSOLVER `syevd` on the broken GPU.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate values. |
 | `n_basis` | `int` | — | `10` | Total basis dimension `k` (wiggly + polynomial; `mgcv`'s `k`). |
 | `penalty_order` | `int` | — | `2` | Thin-plate order `m` (default `2` -- penalise curvature); the polynomial null space has dimension `M = m`. |

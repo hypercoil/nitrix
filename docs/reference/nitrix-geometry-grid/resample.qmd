@@ -28,7 +28,7 @@ pixels exactly.  The interpolation *kernel* is selected by
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `image` | `Float` | `*spatial` × `c` | — | Channel-last image, `(*spatial, c)`. |
 | `target_shape` | `Sequence[int]` | — | — | Per-axis target sizes; must match the spatial rank of `image`. |
 | `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Sample positions are nominally within the input extent (rounded up to the endpoint), but floating-point drift can push them out by an ULP; `mode` selects the fill. Default `"constant"`; `"nearest"` is the safer default for general downsampling but `"constant"` + `cval=0` matches the prior contract. |

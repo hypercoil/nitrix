@@ -23,7 +23,7 @@ the geometric mean of the diagonal entries.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | — |
 | `**kwargs` | `Any` | — | `{}` | — |
 

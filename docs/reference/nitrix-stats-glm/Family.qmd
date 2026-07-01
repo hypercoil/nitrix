@@ -33,7 +33,7 @@ Frozen and hashable so it rides as a static config (and a future
 - `eta_bound` -- the IRLS clamp on the linear predictor (`inf` for the
   bounded identity / logit links; `_ETA_MAX` for the unbounded `exp`
   links, where it stabilises the working response).  The IRLS core
-  (:func:`~nitrix.stats._irls._working`) clamps `eta` to `+-eta_bound`.
+  (`_working`) clamps `eta` to `+-eta_bound`.
 <!-- nitrix:/gen -->
 
 ### Methods

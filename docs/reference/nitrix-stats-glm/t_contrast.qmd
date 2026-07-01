@@ -30,7 +30,7 @@ of freedom (ModelArray `lm` columns `estimate` / `std.error` /
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 | `contrast` | `Float` | `p` | — | — |
 | `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | — |

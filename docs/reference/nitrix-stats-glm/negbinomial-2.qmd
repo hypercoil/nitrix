@@ -28,7 +28,7 @@ a documented follow-up.  `alpha -> 0` recovers Poisson.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `alpha` | `float` | — | `1.0` | — |
 
 **Returns** `Family`.

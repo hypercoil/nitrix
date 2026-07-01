@@ -26,7 +26,7 @@ Returns `(cov, shrinkage)`.  The shrinkage intensity is
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Float` | `n` × `p` | — | — |
 | `assume_centered` | `bool` | — | `False` | — |
 

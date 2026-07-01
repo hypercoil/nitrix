@@ -20,7 +20,7 @@ Fit a PCA basis to `X` (rows = samples, columns = features).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Float` | `n` × `d` | — | Data matrix `(n_samples, n_features)`. |
 | `n_components` | `Optional[int]` | — | `None` | Number of components to keep. `None` (default) keeps `min(n_samples, n_features)` -- the components with potentially non-zero variance. Must be a static (Python) `int` so the output shape is known at trace time. |
 | `center` | `bool` | — | `True` | Subtract the feature mean before fitting (default `True`). When `False` the returned `mean` is zeros and the decomposition is of the uncentred second-moment matrix. |

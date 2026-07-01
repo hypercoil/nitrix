@@ -25,7 +25,7 @@ intercept (the `K - 1` thresholds absorb it).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Int` | `V` × `N` | — | `(V, N)` ordered class labels in `{0, .., n_classes-1}`. |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` shared design (no intercept column). |
 | `n_classes` | `int` | — | — | Number of ordered classes `K` (`>= 2`). |

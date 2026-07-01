@@ -24,7 +24,7 @@ joint Fisher scoring.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | `(V, N)` responses. |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (shared; carries its own intercept). |
 | `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` log-scale design `Z` (shared). Defaults to an intercept-only column -- a constant variance (the homoscedastic Gaussian, recovering OLS for the mean); pass a design to model the variance. |

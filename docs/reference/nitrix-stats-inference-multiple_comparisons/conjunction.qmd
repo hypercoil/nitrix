@@ -28,7 +28,7 @@ does).  This is the correct conjunction; the common
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `stats` | `Float` | `k` × `*spatial` | — | — |
 
 **Returns** `Float` — shape `*spatial`.

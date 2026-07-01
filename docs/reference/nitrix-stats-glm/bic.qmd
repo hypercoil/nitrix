@@ -20,7 +20,7 @@ Per-element Bayesian information criterion `-2 ll + k log N`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 
 **Returns** `Float` — shape `V`.

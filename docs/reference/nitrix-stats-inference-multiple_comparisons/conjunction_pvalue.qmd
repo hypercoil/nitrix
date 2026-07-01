@@ -1,7 +1,7 @@
 ---
 title: "conjunction_pvalue"
 generated: true
-description: "Conjunction p-value: the **maximum** per-contrast p-value over `k` contrasts (the p-scale dual of :func:`conjunction`)."
+description: "Conjunction p-value: the **maximum** per-contrast p-value over `k` contrasts (the p-scale dual of `conjunction`)."
 ---
 
 [‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
@@ -14,7 +14,7 @@ conjunction_pvalue(p_values: Float[Array, 'k *spatial']) -> Float[Array, '*spati
 
 <!-- nitrix:gen overview:conjunction_pvalue -->
 Conjunction p-value: the **maximum** per-contrast p-value over `k`
-contrasts (the p-scale dual of :func:`conjunction`).
+contrasts (the p-scale dual of `conjunction`).
 
 The minimum-statistic conjunction is significant at `alpha` iff every
 contrast's p-value is below `alpha` iff their maximum is -- so `max p` is
@@ -25,7 +25,7 @@ the valid conjunction p-value (Nichols et al. 2005).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `p_values` | `Float` | `k` × `*spatial` | — | — |
 
 **Returns** `Float` — shape `*spatial`.

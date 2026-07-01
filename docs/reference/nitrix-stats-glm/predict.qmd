@@ -23,7 +23,7 @@ Per-element prediction on a (new) design `X`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 | `X` | `Float` | `N` × `p` | — | — |
 | `type` | `PredictType` | — | `'response'` | — |

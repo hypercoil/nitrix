@@ -36,7 +36,7 @@ return has the same shape.  Pure / differentiable / cuSOLVER-free.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `stat` | `Float` | `...` | — | — |
 | `null_dist` | `Float` | `n` | — | — |
 | `n_exceedances` | `int` | — | `250` | — |

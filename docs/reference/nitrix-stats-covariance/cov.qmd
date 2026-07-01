@@ -20,7 +20,7 @@ Empirical covariance of variables in a tensor batch.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor. Default layout `(..., c, obs)` with the last axis as observations and the penultimate axis as variables; pass `rowvar=False` to flip. |
 | `rowvar` | `bool` | — | `True` | `True` (default): observation axis is the *last* axis. |
 | `bias` | `bool` | — | `False` | If `True`, divide by `n`; otherwise (default) by `n - 1` (Bessel's correction). Ignored if `ddof` is given. |

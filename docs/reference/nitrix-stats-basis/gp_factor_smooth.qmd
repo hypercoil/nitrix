@@ -19,24 +19,24 @@ A separate Hilbert-space GP curve of `x` for each level of `group`, all
 sharing **one** smoothing parameter (so the per-group curves are random
 deviations with a common amplitude -- partial pooling).  This is the
 **fixed-`rho`** building block of the hierarchical GP: drop it into
-`gam_fit` alongside a population :func:`hsgp_basis` of the same `rho` (and
+`gam_fit` alongside a population `hsgp_basis` of the same `rho` (and
 the intercept) for the "GS" hierarchical GP.  For *estimated* `rho` and the
-full variance-component report, use :func:`~nitrix.stats.hgp.hgp_fit`.
+full variance-component report, use `hgp_fit`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:gp_factor_smooth -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate. |
 | `group` | `Int` | `n` | — | `(n,)` integer factor labels `0 .. L-1`. |
-| `n_basis` | `int` | — | `10` | Per-group HSGP rank `m` (default `10`; the design is `L` times this wide, so a smaller rank than :func:`hsgp_basis` is usual). |
-| `kernel` | `str` | — | `'matern52'` | HSGP marginal parameters (see :func:`hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `rho` | `Optional[float]` | — | `None` | HSGP marginal parameters (see :func:`hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `amplitude` | `float` | — | `1.0` | HSGP marginal parameters (see :func:`hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `boundary` | `float` | — | `1.5` | HSGP marginal parameters (see :func:`hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
-| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | HSGP marginal parameters (see :func:`hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
+| `n_basis` | `int` | — | `10` | Per-group HSGP rank `m` (default `10`; the design is `L` times this wide, so a smaller rank than `hsgp_basis` is usual). |
+| `kernel` | `str` | — | `'matern52'` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
+| `rho` | `Optional[float]` | — | `None` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
+| `amplitude` | `float` | — | `1.0` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
+| `boundary` | `float` | — | `1.5` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | HSGP marginal parameters (see `hsgp_basis`); `rho` defaults to the data half-range (a fixed value -- lengthscale estimation is `hgp_fit`). |
 | `center` | `bool` | — | `False` | Sum-to-zero each group's smooth (default `False` -- the group curves carry their own level, the usual factor-smooth; set `True` to pair with an explicit per-group mean). |
 | `n_levels` | `Optional[int]` | — | `None` | Number of levels `L` (defaults to `int(group.max()) + 1`); pass it when a level is absent so the block width is stable. |
 

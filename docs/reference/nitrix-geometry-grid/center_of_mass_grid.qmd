@@ -26,7 +26,7 @@ reduction is over those axes per slice spanned by the
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `weight` | `Float` | `...` | — | Non-negative weight tensor. |
 | `axes` | `Optional[Sequence[int]]` | — | `None` | Axes to reduce over. `None` (default) means all axes. With `axes=[-3, -2, -1]` on a `(B, D, H, W)` tensor, a separate centre-of-mass vector is produced per batch element over the trailing three axes. |
 | `na_value` | `Optional[float]` | — | `None` | Value to substitute when a slice has zero total weight (the centre-of-mass is undefined there; default behaviour produces `NaN`). Set to a float to fill with that value. |

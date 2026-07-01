@@ -20,7 +20,7 @@ Per-element maximised log-likelihood.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 
 **Returns** `Float` — shape `V`.

@@ -24,8 +24,8 @@ and the standard deviation `sigma = exp(Z beta_scale)` (log link).
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `GauLSSResult` | — | — | A :class:`GauLSSResult` from :func:`gaulss_fit`. |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `result` | `GauLSSResult` | — | — | A `GauLSSResult` from `gaulss_fit`. |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` mean-model design (same columns as the fit). |
 | `scale_design` | `Optional[Float[Array, 'N q']]` | — | `None` | `(N, q)` scale-model design; `None` (default) uses an intercept column `(N, 1)` -- the homoscedastic default matching `gaulss_fit`. Must have the same column count `q` the fit's scale model used. |
 

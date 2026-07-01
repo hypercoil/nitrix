@@ -20,7 +20,7 @@ Fit a mass-univariate GLM: shared design `X`, per-element responses.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | `(V, N)` responses -- `V` elements, `N` observations. |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` design, shared across elements (include your own intercept column -- no intercept is added). |
 | `family` | `Union[str, Family]` | — | `GAUSSIAN` | Exponential family + link: a built-in name (`'gaussian'` / `'binomial'` / `'poisson'`) or a `Family` instance. Default `GAUSSIAN` identity = OLS. |

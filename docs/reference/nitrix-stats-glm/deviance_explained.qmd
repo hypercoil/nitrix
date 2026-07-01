@@ -20,7 +20,7 @@ Per-element fraction of null deviance explained: `1 - dev / null_dev`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `GLMResult` | — | — | — |
 
 **Returns** `Float` — shape `V`.

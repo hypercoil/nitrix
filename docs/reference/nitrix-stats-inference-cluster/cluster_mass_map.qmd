@@ -23,7 +23,7 @@ supra-threshold component; background voxels map to `0`.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `labels` | `Int` | `*spatial` | — | — |
 | `stat` | `Float` | `*spatial` | — | — |
 | `threshold` | `float` | — | — | — |

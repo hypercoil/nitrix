@@ -18,21 +18,21 @@ Varying-coefficient smooth `s(x, by=z)` for a **continuous** `z`.
 mgcv's `s(x, by=z)` with a numeric `by`: the smooth term is
 `z * f(x)` -- a coefficient on `z` that varies smoothly with `x`.  The
 design is the marginal P-spline of `x` scaled row-wise by `z`; the
-penalty is unchanged.  A single :class:`SplineBasis` for `gam_fit`.
+penalty is unchanged.  A single `SplineBasis` for `gam_fit`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:varying_coefficient_smooth -->
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `x` | `Float` | `n` | — | `(n,)` covariate that the coefficient varies over. |
 | `by` | `Float` | `n` | — | `(n,)` continuous covariate the smooth multiplies. |
-| `n_basis` | `int` | — | `10` | Marginal P-spline parameters (see :func:`bspline_basis`). |
-| `degree` | `int` | — | `3` | Marginal P-spline parameters (see :func:`bspline_basis`). |
-| `penalty_order` | `int` | — | `2` | Marginal P-spline parameters (see :func:`bspline_basis`). |
-| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see :func:`bspline_basis`). |
-| `center` | `bool` | — | `True` | Marginal P-spline parameters (see :func:`bspline_basis`). |
+| `n_basis` | `int` | — | `10` | Marginal P-spline parameters (see `bspline_basis`). |
+| `degree` | `int` | — | `3` | Marginal P-spline parameters (see `bspline_basis`). |
+| `penalty_order` | `int` | — | `2` | Marginal P-spline parameters (see `bspline_basis`). |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | Marginal P-spline parameters (see `bspline_basis`). |
+| `center` | `bool` | — | `True` | Marginal P-spline parameters (see `bspline_basis`). |
 
 **Returns** `SplineBasis`.
 <!-- nitrix:/gen -->

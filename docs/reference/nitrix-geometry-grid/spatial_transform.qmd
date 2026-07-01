@@ -28,7 +28,7 @@ displacement.  To use a displacement field `delta`, add
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `image` | `Float` | `*leading` × `*spatial` × `c` | — | Channel-last image, `(*leading, *spatial, c)`. Leading batch dims are broadcast-compatible with `deformation`. |
 | `deformation` | `Float` | `*leading` × `*spatial` × `ndim` | — | Absolute sample coordinates, `(*leading, *spatial, ndim)` with `ndim` matching the spatial rank of `image`. The spatial shape need not match `image`'s spatial shape -- for resampling-like ops, `deformation` indexes anywhere in `image`. |
 | `mode` | `BoundaryMode` | — | `'constant'` | Out-of-bounds handling. Default `"constant"` (preserves the prior contract for image-sampling). Set `mode="nearest"` for edge-replicate (voxelmorph convention for flow-warp); see `integrate_velocity_field` which defaults to `"nearest"` for the same reason. Other valid values: `"wrap"`, `"mirror"`, `"reflect"`. |

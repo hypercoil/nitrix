@@ -24,7 +24,7 @@ computed via central differences along each spatial axis.
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `u` | `Float` | `...` × `*spatial` × `d` | — | Displacement field, channel-last, `(*leading, *spatial, d)` with `len(spatial) == d`. |
 | `boundary_mode` | `Literal['nearest', 'wrap', 'mirror']` | — | `'nearest'` | Boundary handling for the central difference. `"nearest"` (default) clamps to the edge cell -- this is what voxelmorph uses for QA on learned warps. `"wrap"` is periodic. `"mirror"` is non-repeating mirror. |
 | `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | Voxel spacing along each spatial axis. `float` -> isotropic; sequence -> per-axis (length `d`). For non-isotropic fMRI / MRI grids the spacing should be in the same physical units as `u`; the central-difference denominator is `2 * spacing[axis]`. |

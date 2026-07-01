@@ -18,7 +18,7 @@ fit (lower is better).
 
 Uses the **REML log marginal likelihood** `log_mlik` (so it is comparable
 across kernels / ranks / amplitudes on the same data) and the effective
-degrees of freedom `k` (:func:`_total_edf`) as the model complexity -- the
+degrees of freedom `k` (`_total_edf`) as the model complexity -- the
 mgcv-style marginal AIC.  Like any REML criterion it is valid for models with
 the **same fixed-effect structure** (a different `parametric` design changes
 the restriction); within that, it is immediate for GP-vs-GP and GP-vs-spline
@@ -29,7 +29,7 @@ the restriction); within that, it is immediate for GP-vs-GP and GP-vs-spline
 **Parameters**
 
 | parameter | type | shape | default | description |
-|---|---|---|---|---|
+|------------|--------|--------|----------|--------------------------------------------------------------|
 | `result` | `_ICResult` | — | — | — |
 
 **Returns** `Float` — shape `V`.
