@@ -22,7 +22,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 Penalised spline bases for additive models.
 
 A GAM smooth term `s(x)` is a spline basis expansion `f(x) = B(x) beta`
-with a roughness penalty `beta^T S beta`; the smoothing parameter trades the
+with a roughness penalty $\beta^T S \beta$; the smoothing parameter trades the
 penalty off against fit (chosen by REML in `gam.py`).  This module builds the
 `(design, penalty)` pair for a covariate vector and re-evaluates the design
 at new covariate values (for plotting partial effects).

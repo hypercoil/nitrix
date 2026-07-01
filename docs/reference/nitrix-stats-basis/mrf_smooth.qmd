@@ -19,7 +19,7 @@ adjacency -- the natural smoother on a parcel / vertex graph.
 Each observation carries an integer region `label` in `0 .. R-1`; the
 smooth is a per-region effect (design = region indicator) penalised by the
 **combinatorial graph Laplacian** `L = D - A` of the region adjacency
-(`beta^T L beta = sum_{i~j} (beta_i - beta_j)^2` -- neighbouring regions are
+($\beta^T L \beta = sum_{i~j} (\beta_i - \beta_j)^2$ -- neighbouring regions are
 shrunk together).  The penalty is `nitrix.graph.laplacian` -- a direct
 substrate reuse.
 <!-- nitrix:/gen -->

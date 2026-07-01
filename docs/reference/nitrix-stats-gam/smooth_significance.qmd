@@ -17,10 +17,10 @@ Approximate significance test for each smooth term (Wood 2013).
 
 The `mgcv::summary.gam` smooth-term test in its integer-rank form
 (`mgcv:::testStat` with `type=1`): project the smooth's coefficients
-through its design's QR (`R`, `R^T R = X^T X`), eigendecompose the
-projected Bayesian covariance `R V R^T`, and form the rank-truncated
-quadratic form `T_r = beta^T V_r^- beta` with the rank set to the rounded
-effective df.  `T_r` is approximately `chi^2_r` for a fixed-dispersion
+through its design's QR (`R`, $R^T R = X^T X$), eigendecompose the
+projected Bayesian covariance $R V R^T$, and form the rank-truncated
+quadratic form $T_r = \beta^T V_r^- \beta$ with the rank set to the rounded
+effective df.  `T_r` is approximately $\chi^2_r$ for a fixed-dispersion
 family, or `F_{r, N - edf_total}` for an estimated scale -- the single
 "is `s(x)` significant, edf, p" line a developmental / brain-age GAM
 analyst reads off `summary.gam`.

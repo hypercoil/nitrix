@@ -17,7 +17,7 @@ Build a Gaussian-process smooth (mgcv `bs='gp'`) for covariate `x`.
 
 A low-rank kriging smooth with a **Matern-3/2** covariance kernel of range
 `rho`: the smooth is `f(x) = sum_j C(|x - z_j|) delta_j` over knots `z`
-with the RKHS penalty `delta^T C_zz delta` (`C_zz` the kernel Gram at the
+with the RKHS penalty $\delta^T C_{zz} \delta$ (`C_zz` the kernel Gram at the
 knots).  Constructed like the thin-plate basis -- the radial features are
 eigen-reparameterised so the penalty is diagonal and truncated to the
 `n_basis` leading components (a one-off host `eigh`, cuSOLVER-free on the

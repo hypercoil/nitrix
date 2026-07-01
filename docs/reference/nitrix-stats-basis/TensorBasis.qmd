@@ -27,7 +27,7 @@ against the intercept; add marginal `s(x_j)` smooths for a full `te`.
 The marginal penalties commute (Kronecker structure), so they are
 **simultaneously diagonalisable**: `pen_eig[j]` is penalty `j` in the
 joint eigenbasis (`U_1 (x) ... (x) U_d`), which the GAM engine uses to
-evaluate the smoothing-parameter trace `tr(S_lambda^+ S_j)` as an
+evaluate the smoothing-parameter trace $\operatorname{tr}(S_\lambda^+ S_j)$ as an
 elementwise sum -- cuSOLVER-free, no per-iteration pseudo-inverse -- while
 the fit itself keeps the original (non-rotated) tensor basis.
 <!-- nitrix:/gen -->

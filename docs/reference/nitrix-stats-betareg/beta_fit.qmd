@@ -15,8 +15,8 @@ beta_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, n_iter: int = 50, ri
 <!-- nitrix:gen overview:beta_fit -->
 Mass-univariate beta regression (logit link, estimated precision).
 
-Fits, per element, `y_v ~ Beta(mu phi, (1 - mu) phi)` with `mu =
-logit^{-1}(X beta_v)` and a per-element precision `phi_v`, by
+Fits, per element, `y_v ~ Beta(mu phi, (1 - mu) phi)` with $\mu =
+logit^{-1}(X \beta_v)$ and a per-element precision `phi_v`, by
 Ferrari-Cribari-Neto Fisher scoring.  Responses must lie strictly in
 `(0, 1)` (values are clipped off the boundary by `1e-8`).
 <!-- nitrix:/gen -->

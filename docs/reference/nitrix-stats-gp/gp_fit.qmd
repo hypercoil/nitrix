@@ -29,13 +29,13 @@ lengthscale (Gaussian responses).
 | `rank` | `Optional[Any]` | — | `None` | Smooth-basis rank `m`. `None` (default) uses an engine-appropriate value: `20` for 1-D `'hsgp'` (small `rho` needs a larger `rank`), `N` for `'exact'` (full-rank), and `8` **per axis** for a multi-dimensional fit. An explicit `rank < N` with `engine='exact'` gives the eigen-truncated Karhunen-Loeve / Nystrom approximation; for multi-D, `rank` may be a per-axis sequence `[m_1, ..., m_D]`. |
 | `boundary` | `float` | — | `1.5` | Domain-extension factor `L / half-range` (`>= 1`; default `1.5`; `'hsgp'` only). |
 | `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` data-range override (defaults to the data min/max). |
-| `engine` | `Literal['hsgp', 'exact']` | — | `'hsgp'` | Reduced-rank engine. `'hsgp'` (default; Hilbert-space eigenfunctions, a fixed design with an `eigh`-free `rho`-dependent diagonal penalty) or `'exact'` (kernel eigenfeatures `U Lambda^{1/2}` -- the full-rank GP when `rank == N`; a one-off host `eigh` of the shared kernel Gram per `rho`, cuSOLVER-free, equivalent to `lme.reml_fit` by the penalty<->variance-component identity). |
+| `engine` | `Literal['hsgp', 'exact']` | — | `'hsgp'` | Reduced-rank engine. `'hsgp'` (default; Hilbert-space eigenfunctions, a fixed design with an `eigh`-free `rho`-dependent diagonal penalty) or `'exact'` (kernel eigenfeatures $U \Lambda^{1/2}$ -- the full-rank GP when `rank == N`; a one-off host `eigh` of the shared kernel Gram per `rho`, cuSOLVER-free, equivalent to `lme.reml_fit` by the penalty<->variance-component identity). |
 | `select` | `Literal['shared-rho']` | — | `'shared-rho'` | Lengthscale-selection mode. `'shared-rho'` (the only mode, and the default) shares a single `rho` across all elements with per-element amplitude and noise -- the mass-univariate design that keeps the final fit `N`-free. The parameter is a forward-compatibility hook for a future per-element `rho`. |
 | `ard` | `bool` | — | `False` | Multi-D only: `False` (default) estimates one **isotropic** lengthscale (a radial kernel of `\|\|x - x'\|\|`); `True` estimates a **per-axis** lengthscale (ARD / separable kernel) by coordinate descent over the axes. |
 | `rho_bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(rho_lo, rho_hi)` search range. Defaults to `(0.05, 2.0) * (hi - lo)`. |
 | `n_rho` | `int` | — | `24` | Number of log-spaced grid points for the `rho` search. |
 | `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Optional callable `rho -> -log p(rho)` adding a lengthscale prior to the pooled objective (a MAP / prior-regularised `rho`); `None` is pure REML. Use a builder from `nitrix.stats.priors` (`halfnormal_prior` / `invgamma_prior` / `lognormal_prior`) or any pure-JAX callable. |
-| `corr` | `Optional[Any]` | — | `None` | Within-group residual-correlation structure: `'ar1'` (discrete AR(1)), `'car1'` (continuous-time AR(1); pass `time`), `'cs'` (compound symmetry), or a `lme.CorrSpec`. `None` (default) is the i.i.d. residual. When set, `group` is required; the residual is `sigma_e^2 R(rho_c)` block-diagonal across `group`, with `rho_c` estimated jointly with the lengthscale. |
+| `corr` | `Optional[Any]` | — | `None` | Within-group residual-correlation structure: `'ar1'` (discrete AR(1)), `'car1'` (continuous-time AR(1); pass `time`), `'cs'` (compound symmetry), or a `lme.CorrSpec`. `None` (default) is the i.i.d. residual. When set, `group` is required; the residual is $\sigma_e^2 R(\rho_c)$ block-diagonal across `group`, with `rho_c` estimated jointly with the lengthscale. |
 | `group` | `Optional[Any]` | — | `None` | `(N,)` integer grouping factor for `corr` (the residual is correlated *within* groups, independent across them). Required when `corr` is set. |
 | `time` | `Optional[Float[Array, ' N']]` | — | `None` | `(N,)` observation times for `corr='car1'` (and to order `ar1` when rows are not in within-group time order). |
 | `n_corr` | `int` | — | `9` | Number of grid points for the residual-correlation parameter search. |
@@ -46,8 +46,8 @@ lengthscale (Gaussian responses).
 | `n_outer` | `int` | — | `30` | Fellner-Schall iterations for the final fit and for each `rho`-search evaluation, respectively. |
 | `n_search` | `int` | — | `15` | Fellner-Schall iterations for the final fit and for each `rho`-search evaluation, respectively. |
 | `ridge` | `float` | — | `1e-08` | Small stabiliser on the penalised normal equations. |
-| `lam_floor` | `float` | — | `1e-06` | Clamp on the smoothing parameter `lambda = sigma_e^2 / sigma_f^2`. |
-| `lam_ceil` | `float` | — | `100000000.0` | Clamp on the smoothing parameter `lambda = sigma_e^2 / sigma_f^2`. |
+| `lam_floor` | `float` | — | `1e-06` | Clamp on the smoothing parameter $\lambda = \sigma_e^2 / \sigma_f^2$. |
+| `lam_ceil` | `float` | — | `100000000.0` | Clamp on the smoothing parameter $\lambda = \sigma_e^2 / \sigma_f^2$. |
 | `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory on brain-scale `V`. |
 
 **Returns** `GPResult`.

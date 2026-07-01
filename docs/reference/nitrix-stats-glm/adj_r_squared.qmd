@@ -1,7 +1,7 @@
 ---
 title: "adj_r_squared"
 generated: true
-description: "Per-element adjusted `R^2` (Gaussian)."
+description: "Per-element adjusted $R^2$ (Gaussian)."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -13,7 +13,7 @@ adj_r_squared(result: GLMResult) -> Float[Array, 'V']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:adj_r_squared -->
-Per-element adjusted `R^2` (Gaussian).
+Per-element adjusted $R^2$ (Gaussian).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:adj_r_squared -->

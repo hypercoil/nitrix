@@ -16,9 +16,9 @@ ledoit_wolf(X: Float[Array, 'n p'], *, assume_centered: bool = False) -> Tuple[F
 Ledoit-Wolf analytic-shrinkage covariance.
 
 Returns `(cov, shrinkage)`.  The shrinkage intensity is
-`alpha = beta^2 / delta^2` with `delta^2 = ||S - mu I||_F^2` and
-`beta^2 = (1/n^2) sum_k ||x_k||^4 - (1/n) ||S||_F^2` clipped to
-`[0, delta^2]` (Ledoit & Wolf 2004).  Matches
+$\alpha = \beta^2 / \delta^2$ with $\delta^2 = ||S - \mu I||_F^2$ and
+$\beta^2 = (1/n^2) sum_k ||x_k||^4 - (1/n) ||S||_F^2$ clipped to
+$[0, \delta^2]$ (Ledoit & Wolf 2004).  Matches
 `sklearn.covariance.ledoit_wolf`.
 <!-- nitrix:/gen -->
 

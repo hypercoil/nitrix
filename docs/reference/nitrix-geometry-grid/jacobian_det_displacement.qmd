@@ -15,9 +15,9 @@ jacobian_det_displacement(u: Float[Array, '... *spatial d'], *, boundary_mode: L
 <!-- nitrix:gen overview:jacobian_det_displacement -->
 Per-point determinant of the deformation Jacobian.
 
-Computes `det(I + ∇u)` at each spatial location.  For
+Computes $det(I + \nabla u)$ at each spatial location.  For
 `d <= 3` uses the explicit closed-form determinant (avoiding
-LU factorisation noise and `O(d^3)` cost); for `d > 3`
+LU factorisation noise and $O(d^3)$ cost); for `d > 3`
 falls back to `jnp.linalg.det`.
 
 Parameters and `boundary_mode` / `spacing` semantics match
@@ -28,7 +28,7 @@ is locally orientation-preserving; `det(J) <= 0` indicates
 the warp folds at this voxel (and is not a diffeomorphism
 there).  The standard QA threshold is "no voxels with
 `det <= 0`"; the soft regulariser is
-`mean(max(0, ε - det)^2)` for some `ε > 0`.
+$mean(max(0, ε - det)^2)$ for some `ε > 0`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:jacobian_det_displacement -->

@@ -17,7 +17,7 @@ class Link
 <!-- nitrix:gen overview:Link -->
 A link function as a record of its three IRLS primitives.
 
-`link` = `g(mu)`, `linkinv` = `g^{-1}(eta)`, `mu_eta` = `d mu /
+`link` = `g(mu)`, `linkinv` = $g^{-1}(\eta)$, `mu_eta` = `d mu /
 d eta` (as a function of `eta`); `eta_bound` is the IRLS linear-predictor
 clamp (`inf` unless the inverse link can overflow).  Compose onto a
 distribution with `Family.with_link`.

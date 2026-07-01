@@ -41,13 +41,13 @@ module ships the regularised estimators the connectome literature defaults to:
       Theta_hat = argmin_Theta  <S, Theta> - log det Theta + lam ||Theta||_{1,off}
 
   solved by Friedman/Hastie/Tibshirani (2008) coordinate descent on the working
-  covariance `W = Theta^-1` directly (no per-iteration factorisation), with
+  covariance $W = \Theta^-1$ directly (no per-iteration factorisation), with
   `glasso_path` for a warm-started `lam` sweep and `ebic_score` for
   extended-BIC model selection (Foygel & Drton 2010).
 
 Pure JAX -- the shrinkage path is trace / Frobenius reductions + one scalar
 `alpha`; the GLASSO path is rolled coordinate descent (`lax.fori_loop` /
-`lax.scan`, so the graph stays `O(p^2)` and compile is flat in `p`).
+`lax.scan`, so the graph stays $O(p^2)$ and compile is flat in `p`).
 Differentiable and GPU-resident; cuSOLVER-free (the `log det` for EBIC goes
 through the rolled Cholesky in `_smalllinalg`).  `vmap` over subjects /
 edges for batches.  `X` is `(n_samples, n_features)` (the

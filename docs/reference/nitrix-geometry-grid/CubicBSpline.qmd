@@ -30,7 +30,7 @@ preprocessing in some ilex pipelines use.  Unlike a plain cubic
 Without the prefilter the cubic basis only *approximates* (blurs) the
 samples; with it the result passes through the samples exactly -- the
 interpolation property.  The basis is a partition of unity (weights
-sum to 1; no renormalisation), `C^2`-smooth, so the kernel is
+sum to 1; no renormalisation), $C^2$-smooth, so the kernel is
 differentiable in both the values (the prefilter and gather are
 linear) and the coordinates (the basis is smooth).
 

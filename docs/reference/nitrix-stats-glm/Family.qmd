@@ -20,7 +20,7 @@ An exponential-family + link, as a record of pure functions.
 Frozen and hashable so it rides as a static config (and a future
 `custom_vjp` nondiff arg).  The fields are the GLM/IRLS primitives:
 
-- `link` / `linkinv` -- `g(mu)` and `g^{-1}(eta)`.
+- `link` / `linkinv` -- `g(mu)` and $g^{-1}(\eta)$.
 - `mu_eta` -- `d mu / d eta` as a function of `eta` (IRLS weight).
 - `variance` -- the variance function `V(mu)`.
 - `unit_deviance` -- per-observation deviance contribution `d(y, mu)`.
@@ -66,7 +66,7 @@ Only the link triple (`link` / `linkinv` / `mu_eta`) and the IRLS
 untouched, so e.g. `BINOMIAL.with_link('probit')` is the probit model
 and `POISSON.with_link('sqrt')` the square-root-link Poisson, exactly as
 in `statsmodels` `Family(link=...)` / mgcv.  The shared IRLS core is
-Fisher scoring (`w = mu_eta^2 / V`, `z = eta + (y - mu) / mu_eta`), so
+Fisher scoring ($w = \mu_\eta^2 / V$, `z = eta + (y - mu) / mu_eta`), so
 any link composes without a solver change.
 
 <!-- nitrix:gen sig:Family.__init__ -->

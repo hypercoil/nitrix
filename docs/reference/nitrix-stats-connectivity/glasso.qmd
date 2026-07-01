@@ -20,7 +20,7 @@ Solves `argmin_Theta <S, Theta> - log det Theta + lam ||Theta||_{1,off}`
 Friedman/Hastie/Tibshirani (2008) block-coordinate descent: an outer sweep
 over columns, each an inner lasso on the working covariance `W`, with the
 precision recovered from the converged per-column coefficients.  No
-factorisation, no cuSOLVER; all loops rolled (`O(p^2)` graph), so it is
+factorisation, no cuSOLVER; all loops rolled ($O(p^2)$ graph), so it is
 differentiable through the fixed iteration budget and compiles flat in `p`
 (fine for connectome `p = 100-400`).
 <!-- nitrix:/gen -->

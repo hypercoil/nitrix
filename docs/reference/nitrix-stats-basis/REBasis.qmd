@@ -20,7 +20,7 @@ A random intercept / slope per level of a grouping factor, expressed as the
 design is the one-hot indicator (intercept) or one-hot times a covariate
 (slope) over the factor levels, and the penalty is the **identity** (a
 ridge).  The single smoothing parameter the Fellner-Schall loop selects
-**is** the random-effect precision `lambda = 1 / sigma_b^2` -- the v1
+**is** the random-effect precision $\lambda = 1 / \sigma_b^2$ -- the v1
 "penalised GLM == variance-components REML" identity, now reachable.  It is a
 third `Smooth` variant alongside `SplineBasis` /
 `TensorBasis`, so it slots straight into `gam_fit` with **no new

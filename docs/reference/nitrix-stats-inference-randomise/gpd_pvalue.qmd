@@ -27,7 +27,7 @@ can fall below `1 / n` at a fraction of the permutations:
     P(T) = #{null >= T} / n,         T <= u  (body, empirical)
 
 With GPD shape `xi` and scale `sigma` from the exceedance mean / variance
-(`xi = (1 - mean^2 / var) / 2`, `sigma = mean (1 - xi)`).  `stat` is a
+($\xi = (1 - mean^2 / var) / 2$, `sigma = mean (1 - xi)`).  `stat` is a
 scalar or an array of observed statistics (e.g. an enhanced FWE map); the
 return has the same shape.  Pure / differentiable / cuSOLVER-free.
 <!-- nitrix:/gen -->
