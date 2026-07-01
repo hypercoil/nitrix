@@ -1,0 +1,35 @@
+---
+title: "NestedLMEResult"
+generated: true
+description: "Nested two-level mixed-model fit output (the `lme_fit` R3 path)."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:NestedLMEResult -->
+```python
+class NestedLMEResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:NestedLMEResult -->
+Nested two-level mixed-model fit output (the `lme_fit` R3 path).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:NestedLMEResult.__init__ -->
+```python
+__init__(beta_hat: Float[Array, 'V p'], var_outer: Float[Array, 'V'], var_inner: Float[Array, 'V'], sigma_e_sq: Float[Array, 'V'], log_lik: Float[Array, 'V'], tier: str) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:NestedLMEResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

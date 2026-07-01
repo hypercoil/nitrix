@@ -1,0 +1,19 @@
+---
+title: "TWEEDIE"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:TWEEDIE -->
+```python
+TWEEDIE = tweedie(1.5)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:TWEEDIE -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

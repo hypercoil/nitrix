@@ -1,0 +1,19 @@
+---
+title: "CLOGLOG_LINK"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:CLOGLOG_LINK -->
+```python
+CLOGLOG_LINK = Link(name='cloglog', link=_cloglog_link, linkinv=_cloglog_linkinv, mu_eta=_cloglog_mu_eta, eta_bound=_ETA_MAX)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:CLOGLOG_LINK -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

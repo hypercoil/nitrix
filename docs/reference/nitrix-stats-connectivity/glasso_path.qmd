@@ -1,0 +1,47 @@
+---
+title: "glasso_path"
+generated: true
+description: "Warm-started graphical-LASSO regularisation path over `lambdas`."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:glasso_path -->
+```python
+glasso_path(S: Float[Array, 'p p'], lambdas: Float[Array, 'L'], *, n_outer: int = 100, n_inner: int = 50) -> Float[Array, 'L p p']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:glasso_path -->
+Warm-started graphical-LASSO regularisation path over `lambdas`.
+
+Sweeps the penalties in the **given order**, carrying the working covariance
+`W` and the lasso coefficients `B` from one `lam` to the next so each
+solve starts warm (far cheaper than a cold restart and the usual way to
+trace a glasso path -- pass `lambdas` descending, dense -> sparse, or
+ascending; either direction warm-starts).  Returns the stacked precisions
+aligned with `lambdas`; pair with :func:`ebic_score` for model selection.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:glasso_path -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `S` | `Float` | `p` × `p` | — | — |
+| `lambdas` | `Float` | `L` | — | — |
+| `n_outer` | `int` | — | `100` | — |
+| `n_inner` | `int` | — | `50` | — |
+
+**Returns** `Float` — shape `L` × `p` × `p`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:glasso_path -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `L` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

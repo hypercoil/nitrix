@@ -1,0 +1,72 @@
+---
+title: "SplineBasis"
+generated: true
+description: "A penalised spline smooth: design, penalty, and re-evaluation params."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:SplineBasis -->
+```python
+class SplineBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SplineBasis -->
+A penalised spline smooth: design, penalty, and re-evaluation params.
+
+The re-evaluation at new covariate values factors as `design(x) =
+raw_features(x) @ constraint` for every basis `kind`: only the
+(nonlinear) `raw_features` differs -- B-spline taps for `'bspline'`, the
+radial + polynomial features for `'tprs'` (thin-plate).  `constraint` is
+the shared sum-to-zero reparameterisation.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:SplineBasis.penalty_blocks -->
+```python
+penalty_blocks() -> list
+```
+<!-- nitrix:/gen -->
+
+Penalty blocks `[(S, eig)]` (audit D8): the `(k, k)` roughness
+penalty and its eigenvalues, the unpenalised null space floored to
+zero.  `eig` drives only the basis-invariant `tr(S_lambda^+ S_k)`.
+
+<!-- nitrix:gen sig:SplineBasis.eval_design -->
+```python
+eval_design(x: Float[Array, ' g']) -> Float[Array, 'g k']
+```
+<!-- nitrix:/gen -->
+
+Re-evaluate the spline design on a covariate grid `x` (audit D8).
+
+<!-- nitrix:gen sig:SplineBasis.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Any, ...], Tuple[str, int, int, int, float, float, Optional[float]]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:SplineBasis.tree_unflatten -->
+```python
+tree_unflatten(aux: Tuple[str, int, int, int, float, float, Optional[float]], children: Tuple[Any, ...]) -> 'SplineBasis'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:SplineBasis.__init__ -->
+```python
+__init__(design: Float[Array, 'n k'], penalty: Float[Array, 'k k'], kind: str, constraint: Optional[Float[Array, 'k0 k']], n_basis: int, degree: int, penalty_order: int, lo: float, hi: float, knots: Optional[Float[Array, ' nk']] = None, radial_transform: Optional[Float[Array, 'nk kw']] = None, kernel_param: Optional[float] = None) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:SplineBasis -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `g` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

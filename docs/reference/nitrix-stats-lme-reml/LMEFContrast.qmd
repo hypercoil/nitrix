@@ -1,0 +1,18 @@
+---
+title: "LMEFContrast"
+generated: true
+description: "Per-voxel mixed-model F-contrast result."
+---
+
+[‹ back to `nitrix.stats.lme.reml`](../nitrix-stats-lme-reml.qmd)
+
+<!-- nitrix:gen sig:LMEFContrast -->
+```python
+class LMEFContrast(NamedTuple)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:LMEFContrast -->
+Per-voxel mixed-model F-contrast result.
+<!-- nitrix:/gen -->
+

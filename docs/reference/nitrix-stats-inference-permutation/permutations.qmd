@@ -1,0 +1,44 @@
+---
+title: "permutations"
+generated: true
+description: "`(n_perm, n)` permutation-index matrix (row 0 = identity)."
+---
+
+[‹ back to `nitrix.stats.inference.permutation`](../nitrix-stats-inference-permutation.qmd)
+
+<!-- nitrix:gen sig:permutations -->
+```python
+permutations(n: int, n_perm: int, key: Array, *, blocks: Optional[Int[Array, 'N']] = None) -> Int[Array, 'n_perm N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:permutations -->
+`(n_perm, n)` permutation-index matrix (row 0 = identity).
+
+Without `blocks` rows are free permutations of `0..n-1`; with `blocks`
+each row is a *within-block* permutation (observation `i` maps only to a
+position sharing its block label).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:permutations -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `n` | `int` | — | — | — |
+| `n_perm` | `int` | — | — | — |
+| `key` | `Array` | — | — | — |
+| `blocks` | `Optional[Int[Array, 'N']]` | — | `None` | — |
+
+**Returns** `Int` — shape `n_perm` × `N`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:permutations -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_perm` | *(undocumented — add to `_dimensions.yml`)* |
+| `N` | observations — time points, subjects, or sampled points |
+<!-- nitrix:/gen -->

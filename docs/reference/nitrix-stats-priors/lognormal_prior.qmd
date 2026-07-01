@@ -1,0 +1,34 @@
+---
+title: "lognormal_prior"
+generated: true
+description: "Log-normal prior on the lengthscale `rho` (median `exp(mu)`)."
+---
+
+[‹ back to `nitrix.stats.priors`](../nitrix-stats-priors.qmd)
+
+<!-- nitrix:gen sig:lognormal_prior -->
+```python
+lognormal_prior(mu: float, sd: float) -> PriorFn
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:lognormal_prior -->
+Log-normal prior on the lengthscale `rho` (median `exp(mu)`).
+
+`p(rho) ~ (1/rho) exp(-(log rho - mu)**2 / (2 sd**2))` on `rho > 0`, so
+`-log p(rho) = (log rho - mu)**2 / (2 sd**2) + log rho` (up to a constant):
+a symmetric-in-`log rho` pull toward the prior median `exp(mu)` with
+multiplicative spread `sd`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:lognormal_prior -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `mu` | `float` | — | — | Prior mean of `log rho` (so `exp(mu)` is the prior median lengthscale). |
+| `sd` | `float` | — | — | Prior standard deviation of `log rho` (`> 0`). |
+
+**Returns** `PriorFn`.
+<!-- nitrix:/gen -->
+

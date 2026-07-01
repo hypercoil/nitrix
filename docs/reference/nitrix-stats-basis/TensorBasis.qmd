@@ -1,0 +1,82 @@
+---
+title: "TensorBasis"
+generated: true
+description: "An anisotropic tensor-product interaction smooth `f(x_1, ..., x_d)`."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:TensorBasis -->
+```python
+class TensorBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:TensorBasis -->
+An anisotropic tensor-product interaction smooth `f(x_1, ..., x_d)`.
+
+Built from `d` marginal :class:`SplineBasis` (already sum-to-zero
+constrained) by the **row-wise tensor product** of their designs and the
+Kronecker-sum of per-margin penalties `S_j = I (x) ... P_j ... (x) I` --
+so each margin keeps its own smoothing parameter (selected jointly by the
+GAM Fellner-Schall loop, which handles `> 1` penalty per smooth).  This is
+mgcv's tensor **interaction** (`ti`): the marginal centring removes the
+main effects, so the term models the *interaction* and stays identifiable
+against the intercept; add marginal `s(x_j)` smooths for a full `te`.
+
+The marginal penalties commute (Kronecker structure), so they are
+**simultaneously diagonalisable**: `pen_eig[j]` is penalty `j` in the
+joint eigenbasis (`U_1 (x) ... (x) U_d`), which the GAM engine uses to
+evaluate the smoothing-parameter trace `tr(S_lambda^+ S_j)` as an
+elementwise sum -- cuSOLVER-free, no per-iteration pseudo-inverse -- while
+the fit itself keeps the original (non-rotated) tensor basis.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:TensorBasis.penalty_blocks -->
+```python
+penalty_blocks() -> list
+```
+<!-- nitrix:/gen -->
+
+Penalty blocks `[(S_j, eig_j)]` (audit D8): one per margin -- the
+Kronecker-embedded penalty and its joint-eigenbasis eigenvalues.
+
+<!-- nitrix:gen sig:TensorBasis.eval_design -->
+```python
+eval_design(x: Tuple[Float[Array, ' g'], ...]) -> Float[Array, 'g K']
+```
+<!-- nitrix:/gen -->
+
+Re-evaluate the tensor design on matched per-margin grids `x`
+(audit D8): pass one length-`g` grid per margin.
+
+<!-- nitrix:gen sig:TensorBasis.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Any, ...], Tuple[int, ...]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:TensorBasis.tree_unflatten -->
+```python
+tree_unflatten(aux: Tuple[int, ...], children: Tuple[Any, ...]) -> 'TensorBasis'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:TensorBasis.__init__ -->
+```python
+__init__(design: Float[Array, 'n K'], penalties: Float[Array, 'd K K'], pen_eig: Float[Array, 'd K'], margins: Tuple[SplineBasis, ...], dims: Tuple[int, ...]) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:TensorBasis -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `K` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

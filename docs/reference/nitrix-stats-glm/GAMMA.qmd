@@ -1,0 +1,19 @@
+---
+title: "GAMMA"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:GAMMA -->
+```python
+GAMMA = Family(name='gamma', has_fixed_dispersion=False, link=_log_link, linkinv=_safe_exp, mu_eta=_safe_exp, variance=(lambda mu: mu * mu), unit_deviance=_gamma_deviance, init_mu=(lambda y: jnp.clip(y, _EPS, None)), loglik=_gamma_loglik, eta_bound=_ETA_MAX)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:GAMMA -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

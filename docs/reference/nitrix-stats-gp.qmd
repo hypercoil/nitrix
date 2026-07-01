@@ -2,12 +2,44 @@
 title: "nitrix.stats.gp"
 generated: true
 signature-hash: 697769ddc887cf4e
+description: "Mass-univariate Gaussian-process regression with lengthscale estimation."
+listing:
+  id: nitrix-stats-gp-symbols
+  contents: "nitrix-stats-gp/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
 Auto-generated scaffold for `nitrix.stats.gp`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen overview:__module__ -->
+Mass-univariate Gaussian-process regression with lengthscale estimation.
+
+`gp_fit` fits, per element (voxel / vertex / fixel), a Gaussian-process
+smooth of a single covariate `x` with its kernel **lengthscale `rho`
+estimated by REML** -- the piece the fixed-`rho` :func:`~nitrix.stats.basis.hsgp_basis`
+(which rides `gam_fit` unchanged) leaves open:
+    y_v = T alpha_v + f_v(x) + e_v,   f_v ~ GP(0, sigma_f^2 K_rho),
+    e_v ~ N(0, sigma_e^2)
+
+The engine is the Hilbert-space approximation (HSGP; Solin-Sarkka 2020,
+Riutort-Mayol/Burkner 2023): `f` is expanded in a **fixed** Laplace-Dirichlet
+eigenbasis `Phi = [phi_j(x)]` on the bounded domain `[c - L, c + L]`, and the
+kernel enters *only* through the spectral-density weights
+`s_j(rho) = S_rho(sqrt(lambda_j))` (:func:`~nitrix.linalg.kernel.spectral_density`).
+This is what makes lengthscale estimation tractable: because `Phi` does **not**
+depend on `rho`, the GP is a penalised regression with a fixed design and a
+**diagonal, `rho`-dependent penalty** `S(rho) = diag(1 / s_j(rho))` -- the
+REML criterion is smooth in `rho` with **no eigendecomposition in the loop**
+(contrast the kriging :func:`~nitrix.stats.basis.gp_basis`, whose eigenbasis
+moves with `rho`).
+<!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
@@ -21,167 +53,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 | `g` | *(undocumented — add to `_dimensions.yml`)* |
 <!-- nitrix:/gen -->
 
-## `GPResult` {#GPResult}
+## Symbols
 
-<!-- nitrix:gen sig:GPResult -->
-```python
-class GPResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:GPResult -->
-Per-element Gaussian-process fit output (`gp_fit`).
-
-Some fields are engine- or mode-conditional: `lo` / `hi` / `boundary`
-drive `engine='hsgp'` re-evaluation only; `nd_meta` is set only for a
-multi-dimensional fit (`None` otherwise); `corr_rho` is `0` unless a
-`corr` structure was fitted; and for a non-Gaussian `family` `coef` is
-on the link scale (see :func:`gp_predict`).
-<!-- nitrix:/gen -->
-
-### Methods
-
-<!-- nitrix:gen sig:GPResult.__init__ -->
-```python
-__init__(coef: Float[Array, 'V p'], cov_unscaled: Float[Array, 'V p p'], theta: Float[Array, 'V 3'], log_mlik: Float[Array, 'V'], edf: Float[Array, 'V'], dispersion: Float[Array, 'V'], corr_rho: Float[Array, 'V'], kernel: str, engine: str, corr: str, n_obs: int, rank: int, n_fixed: int, lo: float, hi: float, boundary: float, nd_meta: Optional[Any], family: str = 'gaussian') -> None
-```
-<!-- nitrix:/gen -->
-
-## `gp_fit` {#gp_fit}
-
-<!-- nitrix:gen sig:gp_fit -->
-```python
-gp_fit(Y: Float[Array, 'V N'], x: Union[Float[Array, ' N'], Float[Array, 'N D']], *, parametric: Optional[Float[Array, 'N q']] = None, kernel: str = 'matern52', rank: Optional[Any] = None, boundary: float = 1.5, bounds: Optional[Tuple[float, float]] = None, engine: Literal['hsgp', 'exact'] = 'hsgp', select: Literal['shared-rho'] = 'shared-rho', ard: bool = False, rho_bounds: Optional[Tuple[float, float]] = None, n_rho: int = 24, map_rho: Optional[Callable[[Float[Array, '']], Float[Array, '']]] = None, corr: Optional[Any] = None, group: Optional[Any] = None, time: Optional[Float[Array, ' N']] = None, n_corr: int = 9, corr_raw_bounds: Tuple[float, float] = (-4.0, 4.0), family: Union[str, Family] = 'gaussian', prior_weights: Optional[Float[Array, ' N']] = None, n_pql: int = 8, n_outer: int = 30, n_search: int = 15, ridge: float = 1e-08, lam_floor: float = 1e-06, lam_ceil: float = 100000000.0, block: Optional[int] = None) -> GPResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gp_fit -->
-Fit a mass-univariate Gaussian-process regression with REML-estimated
-lengthscale (Gaussian responses).
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gp_fit -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses (one row per element). |
-| `x` | `Union[Float[Array, ' N'], Float[Array, 'N D']]` | — | — | `(N,)` covariate, or `(N, D)` for a **multi-dimensional** GP (a spatial smooth / smooth interaction; HSGP tensor-product engine). This is a single covariate the GP smooths *over* -- **not** the full design matrix `X` of `glm_fit` / `gam_fit`; linear covariates go to `parametric=`. |
-| `parametric` | `Optional[Float[Array, 'N q']]` | — | `None` | Optional `(N, q)` unpenalised linear design (covariates entering linearly alongside the intercept). |
-| `kernel` | `str` | — | `'matern52'` | Stationary kernel: `'matern52'` (default) / `'matern32'` / `'matern12'` / `'rbf'`. |
-| `rank` | `Optional[Any]` | — | `None` | Smooth-basis rank `m`. `None` (default) uses an engine-appropriate value: `20` for 1-D `'hsgp'` (small `rho` needs a larger `rank`), `N` for `'exact'` (full-rank), and `8` **per axis** for a multi-dimensional fit. An explicit `rank < N` with `engine='exact'` gives the eigen-truncated Karhunen-Loeve / Nystrom approximation; for multi-D, `rank` may be a per-axis sequence `[m_1, ..., m_D]`. |
-| `boundary` | `float` | — | `1.5` | Domain-extension factor `L / half-range` (`>= 1`; default `1.5`; `'hsgp'` only). |
-| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` data-range override (defaults to the data min/max). |
-| `engine` | `Literal['hsgp', 'exact']` | — | `'hsgp'` | Reduced-rank engine. `'hsgp'` (default; Hilbert-space eigenfunctions, a fixed design with an `eigh`-free `rho`-dependent diagonal penalty) or `'exact'` (kernel eigenfeatures `U Lambda^{1/2}` -- the full-rank GP when `rank == N`; a one-off host `eigh` of the shared kernel Gram per `rho`, cuSOLVER-free, equivalent to `lme.reml_fit` by the penalty<->variance-component identity). |
-| `select` | `Literal['shared-rho']` | — | `'shared-rho'` | Lengthscale-selection mode. `'shared-rho'` (the only mode, and the default) shares a single `rho` across all elements with per-element amplitude and noise -- the mass-univariate design that keeps the final fit `N`-free. The parameter is a forward-compatibility hook for a future per-element `rho`. |
-| `ard` | `bool` | — | `False` | Multi-D only: `False` (default) estimates one **isotropic** lengthscale (a radial kernel of `\|\|x - x'\|\|`); `True` estimates a **per-axis** lengthscale (ARD / separable kernel) by coordinate descent over the axes. |
-| `rho_bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(rho_lo, rho_hi)` search range. Defaults to `(0.05, 2.0) * (hi - lo)`. |
-| `n_rho` | `int` | — | `24` | Number of log-spaced grid points for the `rho` search. |
-| `map_rho` | `Optional[Callable[[Float[Array, '']], Float[Array, '']]]` | — | `None` | Optional callable `rho -> -log p(rho)` adding a lengthscale prior to the pooled objective (a MAP / prior-regularised `rho`); `None` is pure REML. Use a builder from :mod:`nitrix.stats.priors` (`halfnormal_prior` / `invgamma_prior` / `lognormal_prior`) or any pure-JAX callable. |
-| `corr` | `Optional[Any]` | — | `None` | Within-group residual-correlation structure: `'ar1'` (discrete AR(1)), `'car1'` (continuous-time AR(1); pass `time`), `'cs'` (compound symmetry), or a `lme.CorrSpec`. `None` (default) is the i.i.d. residual. When set, `group` is required; the residual is `sigma_e^2 R(rho_c)` block-diagonal across `group`, with `rho_c` estimated jointly with the lengthscale. |
-| `group` | `Optional[Any]` | — | `None` | `(N,)` integer grouping factor for `corr` (the residual is correlated *within* groups, independent across them). Required when `corr` is set. |
-| `time` | `Optional[Float[Array, ' N']]` | — | `None` | `(N,)` observation times for `corr='car1'` (and to order `ar1` when rows are not in within-group time order). |
-| `n_corr` | `int` | — | `9` | Number of grid points for the residual-correlation parameter search. |
-| `corr_raw_bounds` | `Tuple[float, float]` | — | `(-4.0, 4.0)` | `(lo, hi)` range of the structure's *unconstrained* grid parameter (MC5). `ar1` maps it by `tanh` -- the default `(-4, 4)` spans `rho_c in (-0.999, 0.999)`. `car1` / `cs` map it by `sigmoid`, a **one-sided** window `rho_c in (0.018, 0.982)` (`cs` is positive by construction, the common exchangeable regime; `car1` is a positive decay). The raw grid is not parabolically refined, so widen the bounds / raise `n_corr` for a finer estimate; an estimate at the grid edge warns. |
-| `family` | `Union[str, Family]` | — | `'gaussian'` | — |
-| `prior_weights` | `Optional[Float[Array, ' N']]` | — | `None` | — |
-| `n_pql` | `int` | — | `8` | — |
-| `n_outer` | `int` | — | `30` | Fellner-Schall iterations for the final fit and for each `rho`-search evaluation, respectively. |
-| `n_search` | `int` | — | `15` | Fellner-Schall iterations for the final fit and for each `rho`-search evaluation, respectively. |
-| `ridge` | `float` | — | `1e-08` | Small stabiliser on the penalised normal equations. |
-| `lam_floor` | `float` | — | `1e-06` | Clamp on the smoothing parameter `lambda = sigma_e^2 / sigma_f^2`. |
-| `lam_ceil` | `float` | — | `100000000.0` | Clamp on the smoothing parameter `lambda = sigma_e^2 / sigma_f^2`. |
-| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory on brain-scale `V`. |
-
-**Returns** `GPResult`.
-<!-- nitrix:/gen -->
-
-## `gp_predict` {#gp_predict}
-
-<!-- nitrix:gen sig:gp_predict -->
-```python
-gp_predict(result: GPResult, x_new: Float[Array, ' g'], *, parametric: Optional[Float[Array, 'g q']] = None, x_train: Optional[Float[Array, ' N']] = None, type: Literal['link', 'response'] = 'link') -> Tuple[Float[Array, 'V g'], Float[Array, 'V g']]
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gp_predict -->
-Per-element posterior mean and standard deviation of the GP at `x_new`.
-
-Evaluates `mean = X_new beta` and the predictive variance
-`sigma_e^2 diag(X_new V X_new^T)`, where the smooth columns of `X_new` are
-the basis re-evaluated at `x_new`: for `engine='hsgp'` the (`rho`-
-independent) eigenfunctions, reconstructed from the recorded domain
-`(lo, hi, boundary)` and `rank` (self-contained); for `engine='exact'`
-the Nystrom kernel features `K(x_new, x_train) U Lambda^{-1/2}`, which need
-the original `x_train` (the result does not store the shared training grid
-among its per-element fields).
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gp_predict -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `GPResult` | — | — | A :class:`GPResult` from :func:`gp_fit`. |
-| `x_new` | `Float` | `g` | — | `(g,)` covariate grid to predict on. |
-| `parametric` | `Optional[Float[Array, 'g q']]` | — | `None` | `(g, q)` parametric covariates matching `gp_fit`'s `parametric` (must be supplied when the fit used parametric columns). |
-| `x_train` | `Optional[Float[Array, ' N']]` | — | `None` | `(N,)` original training covariate -- **required for `engine='exact'`** (ignored for `'hsgp'`). |
-| `type` | `Literal['link', 'response']` | — | `'link'` | `'link'` (default) returns the latent linear-predictor `eta`; for a non-Gaussian fit, `'response'` maps the mean through `family.linkinv` (the mean response, e.g. a probability / rate) and scales `std` by the delta-method factor `\|d mu / d eta\|` (a point-estimate response-scale SD). A no-op for the Gaussian (identity-link) fit. |
-
-**Returns** `Tuple[Float[Array, 'V g'], Float[Array, 'V g']]`.
-<!-- nitrix:/gen -->
-
-## `gp_aic` {#gp_aic}
-
-<!-- nitrix:gen sig:gp_aic -->
-```python
-gp_aic(result: _ICResult) -> Float[Array, 'V']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gp_aic -->
-Per-element Akaike information criterion `-2 l_R + 2 k` for a GP / HGP
-fit (lower is better).
-
-Uses the **REML log marginal likelihood** `log_mlik` (so it is comparable
-across kernels / ranks / amplitudes on the same data) and the effective
-degrees of freedom `k` (:func:`_total_edf`) as the model complexity -- the
-mgcv-style marginal AIC.  Like any REML criterion it is valid for models with
-the **same fixed-effect structure** (a different `parametric` design changes
-the restriction); within that, it is immediate for GP-vs-GP and GP-vs-spline
-(an `hsgp_basis` / kernel choice) selection.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gp_aic -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `_ICResult` | — | — | — |
-
-**Returns** `Float` — shape `V`.
-<!-- nitrix:/gen -->
-
-## `gp_bic` {#gp_bic}
-
-<!-- nitrix:gen sig:gp_bic -->
-```python
-gp_bic(result: _ICResult) -> Float[Array, 'V']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:gp_bic -->
-Per-element Bayesian information criterion `-2 l_R + k log N` for a GP /
-HGP fit (lower is better); see :func:`gp_aic` for the comparability caveat.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:gp_bic -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `_ICResult` | — | — | — |
-
-**Returns** `Float` — shape `V`.
-<!-- nitrix:/gen -->
-
+::: {#nitrix-stats-gp-symbols}
+:::

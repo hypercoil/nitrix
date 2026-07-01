@@ -2,12 +2,67 @@
 title: "nitrix.stats.covariance"
 generated: true
 signature-hash: 6b4a06c803c28ff9
+description: "Empirical covariance / correlation / partial / conditional measures."
+listing:
+  id: nitrix-stats-covariance-symbols
+  contents: "nitrix-stats-covariance/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
 Auto-generated scaffold for `nitrix.stats.covariance`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen overview:__module__ -->
+Empirical covariance / correlation / partial / conditional measures.
+
+Differentiable, batched (n-D leading batch), JIT-safe.  Supports:
+
+- Unweighted, scalar bias / unbias.
+- **Vector weights** (per-observation; the diagonal of W).
+- **Matrix weights** (full `(obs, obs)` coupling; useful for
+  inter-temporal weighting, lagged covariance, etc.).
+- Ridge regularisation via the `l2` knob (adds `l2 I` to the
+  estimated covariance).
+
+The green-field rewrite drops three warts from
+`nitrix.functional.covariance`:
+
+1. **The JIT trap.**  Legacy `_is_diagonal(W)` inspected the
+   weight matrix's contents at trace time -- under JIT, this
+   silently bypassed the nondiagonal-weight path and produced
+   wrong results when the function was first traced with a
+   diagonal weight then re-invoked with a non-diagonal one.
+   The new version dispatches *only* on `W.ndim` (a shape
+   property, JIT-stable) and treats the user-supplied matrix as
+   given.
+2. **The implicit `_conform_bform_weight` reshape.**  Removed.
+   `weights` is required to broadcast against `X` in the
+   standard way.
+3. **The `avg` precomputation for matrix weights.**  Legacy
+   computed `avg = X @ (W / sum(W))` which is the "right
+   marginal of W" weighting -- but with a per-row sum, not a
+   matrix product.  The new version computes the correct
+   weighted mean `mu[i] = sum_t marginal_weight_t * X[i, t] /
+   sum(marginal_weight)` explicitly.
+
+Functions exposed:
+
+- `cov` / `corr` -- unary covariance / correlation.
+- `pairedcov` / `pairedcorr` -- bivariate (X, Y).
+- `partialcov` / `partialcorr` -- conditioned on all other
+  variables (inverse-covariance-derived).
+- `conditionalcov` / `conditionalcorr` -- conditioned on
+  an external set of variables (residualise + cov).
+- `precision` -- inverse covariance (matrix inverse or
+  Moore-Penrose pseudoinverse).
+- Aliases: `ccov`, `ccorr`, `pcorr`, `corrcoef`.
+<!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
@@ -20,512 +75,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 | `d` | spatial dimension (2 or 3) |
 <!-- nitrix:/gen -->
 
-## `cov` {#cov}
+## Symbols
 
-<!-- nitrix:gen sig:cov -->
-```python
-cov(X: Num[Array, '... c obs'], *, rowvar: bool = True, bias: bool = False, ddof: Optional[int] = None, weights: Optional[Num[Array, '... obs']] = None, weight_matrix: Optional[Num[Array, '... obs obs']] = None, l2: float = 0.0) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:cov -->
-Empirical covariance of variables in a tensor batch.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:cov -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor. Default layout `(..., c, obs)` with the last axis as observations and the penultimate axis as variables; pass `rowvar=False` to flip. |
-| `rowvar` | `bool` | — | `True` | `True` (default): observation axis is the *last* axis. |
-| `bias` | `bool` | — | `False` | If `True`, divide by `n`; otherwise (default) by `n - 1` (Bessel's correction). Ignored if `ddof` is given. |
-| `ddof` | `Optional[int]` | — | `None` | Explicit degrees-of-freedom override. `None` means `int(not bias)`. |
-| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation weights, `(..., obs)`. Mutually exclusive with `weight_matrix`. |
-| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation coupling matrix, `(..., obs, obs)`. Used for inter-temporal weighting (e.g. lagged or smoothed covariance). Must be symmetric for the result to be a valid covariance. Mutually exclusive with `weights`. |
-| `l2` | `float` | — | `0.0` | Ridge regularisation strength. `l2 > 0` adds `l2 I` to the result. |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen perf:cov -->
-:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
-GPU steady-state **738.2 µs** (median, L4); up to **71.57× faster** than `numpy.cov`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_COV.md)
-
-::: {.table-responsive}
-| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
-|---|---|---|---|---|---|---|---|---|---|
-| cov | jax-cpu | c=2000,n_obs=1000 | `cupy.cov` | skipped | — | — | — | — | — |
-| cov | jax-cpu | c=2000,n_obs=1000 | `nitrix-jax` | ok | 58.69 ms / 74.00 ms | 184.29 ms | 674 MB (rss) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
-| cov | jax-cpu | c=2000,n_obs=1000 | `numpy.cov` | ok | 69.54 ms / 82.65 ms | 120.17 ms | 575 MB (rss) | ✓ 0×tol | 1.18x vs nitrix-jax |
-| cov | jax-cuda12 | c=2000,n_obs=1000 | `cupy.cov` | ok | 21.27 ms / 21.28 ms | 274.62 ms | 8.39 MB (hbm) | ✓ 2.9e-12×tol | 29.09x vs nitrix-jax |
-| cov | jax-cuda12 | c=2000,n_obs=1000 | `nitrix-jax` | ok | 730.9 µs / 738.2 µs | 492.32 ms | 111.69 MB (hbm) | ✓ 0.00081×tol | 1.00x vs nitrix-jax |
-| cov | jax-cuda12 | c=2000,n_obs=1000 | `numpy.cov` | ok | 52.31 ms / 52.79 ms | 72.87 ms | 8.39 MB (hbm) | ✓ 0×tol | 71.57x vs nitrix-jax |
-| cov | jax-cpu | c=50,n_obs=500 | `cupy.cov` | skipped | — | — | — | — | — |
-| cov | jax-cpu | c=50,n_obs=500 | `nitrix-jax` | ok | 79.1 µs / 80.6 µs | 130.60 ms | 532 MB (rss) | ✓ 0.00053×tol | 1.00x vs nitrix-jax |
-| cov | jax-cpu | c=50,n_obs=500 | `numpy.cov` | ok | 104.6 µs / 108.6 µs | 59.45 ms | 532 MB (rss) | ✓ 0×tol | 1.32x vs nitrix-jax |
-| cov | jax-cuda12 | c=50,n_obs=500 | `cupy.cov` | ok | 258.3 µs / 270.2 µs | 541.86 ms | 0.10 MB (hbm) | ✓ 9e-13×tol | 2.33x vs nitrix-jax |
-| cov | jax-cuda12 | c=50,n_obs=500 | `nitrix-jax` | ok | 111.0 µs / 116.3 µs | 381.01 ms | 71.56 MB (hbm) | ✓ 0.00015×tol | 1.00x vs nitrix-jax |
-| cov | jax-cuda12 | c=50,n_obs=500 | `numpy.cov` | ok | 106.1 µs / 107.9 µs | 214.9 µs | 0.10 MB (hbm) | ✓ 0×tol | 0.96x vs nitrix-jax |
-| cov | jax-cpu | c=500,n_obs=2000 | `cupy.cov` | skipped | — | — | — | — | — |
-| cov | jax-cpu | c=500,n_obs=2000 | `nitrix-jax` | ok | 5.94 ms / 6.17 ms | 164.17 ms | 549 MB (rss) | ✓ 0.00076×tol | 1.00x vs nitrix-jax |
-| cov | jax-cpu | c=500,n_obs=2000 | `numpy.cov` | ok | 7.21 ms / 7.32 ms | 8.69 ms | 532 MB (rss) | ✓ 0×tol | 1.21x vs nitrix-jax |
-| cov | jax-cuda12 | c=500,n_obs=2000 | `cupy.cov` | ok | 3.68 ms / 3.70 ms | 263.00 ms | 4.19 MB (hbm) | ✓ 3e-12×tol | 16.44x vs nitrix-jax |
-| cov | jax-cuda12 | c=500,n_obs=2000 | `nitrix-jax` | ok | 224.1 µs / 230.9 µs | 350.64 ms | 83.50 MB (hbm) | ✓ 0.00052×tol | 1.00x vs nitrix-jax |
-| cov | jax-cuda12 | c=500,n_obs=2000 | `numpy.cov` | ok | 7.54 ms / 17.71 ms | 189.62 ms | 4.19 MB (hbm) | ✓ 0×tol | 33.67x vs nitrix-jax |
+::: {#nitrix-stats-covariance-symbols}
 :::
-
-*source: bench `74c2a463` · nitrix `fcbe94d3`*
-::::
-<!-- nitrix:/gen -->
-
-## `corr` {#corr}
-
-<!-- nitrix:gen sig:corr -->
-```python
-corr(X: Num[Array, '... c obs'], **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:corr -->
-Pearson correlation of variables in a tensor batch.
-
-All arguments forwarded to `cov`; the result is divided by
-the geometric mean of the diagonal entries.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:corr -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen perf:corr -->
-:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
-GPU steady-state **787.5 µs** (median, L4); up to **75.92× faster** than `numpy.corrcoef`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_CORR.md)
-
-::: {.table-responsive}
-| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
-|---|---|---|---|---|---|---|---|---|---|
-| corr | jax-cpu | n=2000,t=1000 | `cupy.corrcoef` | skipped | — | — | — | — | — |
-| corr | jax-cpu | n=2000,t=1000 | `nitrix-jax` | ok | 42.84 ms / 61.92 ms | 269.93 ms | 665 MB (rss) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
-| corr | jax-cpu | n=2000,t=1000 | `numpy.corrcoef` | ok | 70.51 ms / 100.62 ms | 98.23 ms | 575 MB (rss) | ✓ 0×tol | 1.65x vs nitrix-jax |
-| corr | jax-cuda12 | n=2000,t=1000 | `cupy.corrcoef` | ok | 21.64 ms / 21.65 ms | 366.31 ms | 8.39 MB (hbm) | ✓ 2.8e-12×tol | 27.95x vs nitrix-jax |
-| corr | jax-cuda12 | n=2000,t=1000 | `nitrix-jax` | ok | 774.2 µs / 787.5 µs | 553.19 ms | 111.69 MB (hbm) | ✓ 0.00082×tol | 1.00x vs nitrix-jax |
-| corr | jax-cuda12 | n=2000,t=1000 | `numpy.corrcoef` | ok | 58.78 ms / 59.62 ms | 79.66 ms | 8.39 MB (hbm) | ✓ 0×tol | 75.92x vs nitrix-jax |
-| corr | jax-cpu | n=50,t=500 | `cupy.corrcoef` | skipped | — | — | — | — | — |
-| corr | jax-cpu | n=50,t=500 | `nitrix-jax` | ok | 62.1 µs / 62.9 µs | 140.32 ms | 532 MB (rss) | ✓ 0.00056×tol | 1.00x vs nitrix-jax |
-| corr | jax-cpu | n=50,t=500 | `numpy.corrcoef` | ok | 127.0 µs / 130.2 µs | 3.05 ms | 532 MB (rss) | ✓ 0×tol | 2.04x vs nitrix-jax |
-| corr | jax-cuda12 | n=50,t=500 | `cupy.corrcoef` | ok | 334.0 µs / 341.0 µs | 1.185 s | 0.10 MB (hbm) | ✓ 9.3e-13×tol | 2.99x vs nitrix-jax |
-| corr | jax-cuda12 | n=50,t=500 | `nitrix-jax` | ok | 111.7 µs / 113.4 µs | 374.30 ms | 71.56 MB (hbm) | ✓ 0.00022×tol | 1.00x vs nitrix-jax |
-| corr | jax-cuda12 | n=50,t=500 | `numpy.corrcoef` | ok | 126.3 µs / 128.8 µs | 206.5 µs | 0.10 MB (hbm) | ✓ 0×tol | 1.13x vs nitrix-jax |
-| corr | jax-cpu | n=500,t=2000 | `cupy.corrcoef` | skipped | — | — | — | — | — |
-| corr | jax-cpu | n=500,t=2000 | `nitrix-jax` | ok | 6.21 ms / 9.13 ms | 150.00 ms | 542 MB (rss) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
-| corr | jax-cpu | n=500,t=2000 | `numpy.corrcoef` | ok | 7.67 ms / 10.08 ms | 14.01 ms | 532 MB (rss) | ✓ 0×tol | 1.23x vs nitrix-jax |
-| corr | jax-cuda12 | n=500,t=2000 | `cupy.corrcoef` | ok | 3.71 ms / 3.73 ms | 254.04 ms | 4.19 MB (hbm) | ✓ 2.3e-12×tol | 16.05x vs nitrix-jax |
-| corr | jax-cuda12 | n=500,t=2000 | `nitrix-jax` | ok | 231.4 µs / 235.1 µs | 481.82 ms | 83.50 MB (hbm) | ✓ 0.00051×tol | 1.00x vs nitrix-jax |
-| corr | jax-cuda12 | n=500,t=2000 | `numpy.corrcoef` | ok | 8.27 ms / 30.06 ms | 87.71 ms | 4.19 MB (hbm) | ✓ 0×tol | 35.73x vs nitrix-jax |
-:::
-
-*source: bench `74c2a463` · nitrix `fcbe94d3`*
-::::
-<!-- nitrix:/gen -->
-
-## `pairedcov` {#pairedcov}
-
-<!-- nitrix:gen sig:pairedcov -->
-```python
-pairedcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool = True, bias: bool = False, ddof: Optional[int] = None, weights: Optional[Num[Array, '... obs']] = None, weight_matrix: Optional[Num[Array, '... obs obs']] = None, l2: float = 0.0) -> Num[Array, '... c d']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:pairedcov -->
-Cross-covariance between two sets of variables.
-
-Same semantics as `cov` but with two separate variable
-blocks.  Returns `(..., c, d)`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:pairedcov -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `Y` | `Num` | `...` × `d` × `obs` | — | — |
-| `rowvar` | `bool` | — | `True` | — |
-| `bias` | `bool` | — | `False` | — |
-| `ddof` | `Optional[int]` | — | `None` | — |
-| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | — |
-| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | — |
-| `l2` | `float` | — | `0.0` | — |
-
-**Returns** `Num` — shape `...` × `c` × `d`.
-<!-- nitrix:/gen -->
-
-## `pairedcorr` {#pairedcorr}
-
-<!-- nitrix:gen sig:pairedcorr -->
-```python
-pairedcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs) -> Num[Array, '... c d']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:pairedcorr -->
-Cross-correlation between two sets of variables.
-
-Normalised version of `pairedcov`: each entry divided by
-the geometric mean of the corresponding diagonal entries of
-`cov(X)` and `cov(Y)`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:pairedcorr -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `Y` | `Num` | `...` × `d` × `obs` | — | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `d`.
-<!-- nitrix:/gen -->
-
-## `partialcov` {#partialcov}
-
-<!-- nitrix:gen sig:partialcov -->
-```python
-partialcov(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:partialcov -->
-Partial covariance: conditioning each pair on all others.
-
-Computed from the precision matrix by negating off-diagonal
-entries.  Interpretation: direct (conditional on the rest)
-relationships between variable pairs.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:partialcov -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `require_nonsingular` | `bool` | — | `True` | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen perf:partialcov -->
-:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
-GPU steady-state **340.2 µs** (median, L4); up to **15.04× faster** than `numpy.partialcov`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_PARTIALCOV.md)
-
-::: {.table-responsive}
-| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
-|---|---|---|---|---|---|---|---|---|---|
-| partialcov | jax-cpu | c=128,obs=1024 | `cupy.partialcov` | skipped | — | — | — | — | — |
-| partialcov | jax-cpu | c=128,obs=1024 | `nitrix-jax` | ok | 579.0 µs / 742.9 µs | 244.60 ms | 576 MB (rss) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
-| partialcov | jax-cpu | c=128,obs=1024 | `numpy.partialcov` | ok | 781.4 µs / 798.5 µs | 887.7 µs | 567 MB (rss) | ✓ 9.9e-05×tol | 1.35x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=128,obs=1024 | `cupy.partialcov` | ok | 723.5 µs / 728.1 µs | 701.10 ms | 0.52 MB (hbm) | ✓ 0.00072×tol | 2.17x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=128,obs=1024 | `nitrix-jax` | ok | 334.2 µs / 340.2 µs | 582.10 ms | 72.88 MB (hbm) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=128,obs=1024 | `numpy.partialcov` | ok | 767.6 µs / 778.9 µs | 7.61 ms | 0.52 MB (hbm) | ✓ 9.9e-05×tol | 2.30x vs nitrix-jax |
-| partialcov | jax-cpu | c=256,obs=2048 | `cupy.partialcov` | skipped | — | — | — | — | — |
-| partialcov | jax-cpu | c=256,obs=2048 | `nitrix-jax` | ok | 3.99 ms / 13.38 ms | 393.56 ms | 595 MB (rss) | ✓ 0.0017×tol | 1.00x vs nitrix-jax |
-| partialcov | jax-cpu | c=256,obs=2048 | `numpy.partialcov` | ok | 3.96 ms / 4.61 ms | 4.03 ms | 567 MB (rss) | ✓ 0.0001×tol | 0.99x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=256,obs=2048 | `cupy.partialcov` | ok | 1.37 ms / 1.38 ms | 270.41 ms | 2.10 MB (hbm) | ✓ 0.00077×tol | 2.29x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=256,obs=2048 | `nitrix-jax` | ok | 600.0 µs / 603.9 µs | 628.87 ms | 77.59 MB (hbm) | ✓ 0.00091×tol | 1.00x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=256,obs=2048 | `numpy.partialcov` | ok | 3.85 ms / 82.14 ms | 4.25 ms | 2.10 MB (hbm) | ✓ 0.0001×tol | 6.42x vs nitrix-jax |
-| partialcov | jax-cpu | c=512,obs=4096 | `cupy.partialcov` | skipped | — | — | — | — | — |
-| partialcov | jax-cpu | c=512,obs=4096 | `nitrix-jax` | ok | 18.90 ms / 28.51 ms | 2.428 s | 663 MB (rss) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
-| partialcov | jax-cpu | c=512,obs=4096 | `numpy.partialcov` | ok | 29.64 ms / 43.30 ms | 29.93 ms | 567 MB (rss) | ✓ 0.00011×tol | 1.57x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=512,obs=4096 | `cupy.partialcov` | ok | 6.80 ms / 6.82 ms | 270.16 ms | 8.39 MB (hbm) | ✓ 0.0011×tol | 4.29x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=512,obs=4096 | `nitrix-jax` | ok | 1.58 ms / 1.62 ms | 792.77 ms | 88.08 MB (hbm) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
-| partialcov | jax-cuda12 | c=512,obs=4096 | `numpy.partialcov` | ok | 23.84 ms / 24.43 ms | 24.39 ms | 8.39 MB (hbm) | ✓ 0.00011×tol | 15.04x vs nitrix-jax |
-:::
-
-*source: bench `c8c5b503` · nitrix `ff2bf24d`*
-::::
-<!-- nitrix:/gen -->
-
-## `partialcorr` {#partialcorr}
-
-<!-- nitrix:gen sig:partialcorr -->
-```python
-partialcorr(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:partialcorr -->
-Partial correlation: normalised partial covariance.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:partialcorr -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `require_nonsingular` | `bool` | — | `True` | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen perf:partialcorr -->
-:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
-GPU steady-state **360.6 µs** (median, L4); up to **507.83× faster** than `nilearn.partial_correlation`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_PARTIALCORR.md)
-
-::: {.table-responsive}
-| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
-|---|---|---|---|---|---|---|---|---|---|
-| partialcorr | jax-cpu | c=128,obs=1024 | `cupy.partialcorr` | skipped | — | — | — | — | — |
-| partialcorr | jax-cpu | c=128,obs=1024 | `nilearn.partial_correlation` | ok | 41.75 ms / 162.81 ms | 919.96 ms | 759 MB (rss) | ✓ 9.2e-13×tol | 61.37x vs nitrix-jax |
-| partialcorr | jax-cpu | c=128,obs=1024 | `nitrix-jax` | ok | 680.2 µs / 748.7 µs | 272.93 ms | 759 MB (rss) | ✓ 0.001×tol | 1.00x vs nitrix-jax |
-| partialcorr | jax-cpu | c=128,obs=1024 | `numpy.partialcorr` | ok | 794.9 µs / 804.1 µs | 877.1 µs | 759 MB (rss) | ✓ 0.00022×tol | 1.17x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=128,obs=1024 | `cupy.partialcorr` | ok | 733.2 µs / 739.9 µs | 240.04 ms | 0.52 MB (hbm) | ✓ 0.00049×tol | 2.09x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=128,obs=1024 | `nilearn.partial_correlation` | ok | 178.52 ms / 250.44 ms | 1.247 s | 0.52 MB (hbm) | ✓ 9.2e-13×tol | 507.83x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=128,obs=1024 | `nitrix-jax` | ok | 351.5 µs / 360.6 µs | 577.70 ms | 72.88 MB (hbm) | ✓ 0.00051×tol | 1.00x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=128,obs=1024 | `numpy.partialcorr` | ok | 804.7 µs / 812.1 µs | 896.3 µs | 0.52 MB (hbm) | ✓ 0.00022×tol | 2.29x vs nitrix-jax |
-| partialcorr | jax-cpu | c=256,obs=2048 | `cupy.partialcorr` | skipped | — | — | — | — | — |
-| partialcorr | jax-cpu | c=256,obs=2048 | `nilearn.partial_correlation` | ok | 59.83 ms / 245.23 ms | 952.55 ms | 759 MB (rss) | ✓ 1.2e-12×tol | 12.57x vs nitrix-jax |
-| partialcorr | jax-cpu | c=256,obs=2048 | `nitrix-jax` | ok | 4.76 ms / 8.81 ms | 504.02 ms | 759 MB (rss) | ✓ 0.0013×tol | 1.00x vs nitrix-jax |
-| partialcorr | jax-cpu | c=256,obs=2048 | `numpy.partialcorr` | ok | 4.61 ms / 5.15 ms | 4.10 ms | 759 MB (rss) | ✓ 0.00022×tol | 0.97x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=256,obs=2048 | `cupy.partialcorr` | ok | 1.38 ms / 1.39 ms | 301.45 ms | 2.10 MB (hbm) | ✓ 0.00066×tol | 2.33x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=256,obs=2048 | `nilearn.partial_correlation` | ok | 55.97 ms / 222.97 ms | 937.46 ms | 2.10 MB (hbm) | ✓ 1.2e-12×tol | 94.28x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=256,obs=2048 | `nitrix-jax` | ok | 593.6 µs / 604.1 µs | 546.13 ms | 77.59 MB (hbm) | ✓ 0.00058×tol | 1.00x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=256,obs=2048 | `numpy.partialcorr` | ok | 4.15 ms / 497.51 ms | 110.34 ms | 2.10 MB (hbm) | ✓ 0.00022×tol | 6.99x vs nitrix-jax |
-| partialcorr | jax-cpu | c=512,obs=4096 | `cupy.partialcorr` | skipped | — | — | — | — | — |
-| partialcorr | jax-cpu | c=512,obs=4096 | `nilearn.partial_correlation` | ok | 313.73 ms / 339.97 ms | 1.030 s | 759 MB (rss) | ✓ 1.3e-12×tol | 15.45x vs nitrix-jax |
-| partialcorr | jax-cpu | c=512,obs=4096 | `nitrix-jax` | ok | 20.31 ms / 26.11 ms | 2.216 s | 759 MB (rss) | ✓ 0.001×tol | 1.00x vs nitrix-jax |
-| partialcorr | jax-cpu | c=512,obs=4096 | `numpy.partialcorr` | ok | 26.25 ms / 42.67 ms | 29.55 ms | 759 MB (rss) | ✓ 0.00022×tol | 1.29x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=512,obs=4096 | `cupy.partialcorr` | ok | 6.81 ms / 6.85 ms | 282.57 ms | 8.39 MB (hbm) | ✓ 0.00067×tol | 4.25x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=512,obs=4096 | `nilearn.partial_correlation` | ok | 315.37 ms / 424.50 ms | 1.390 s | 8.39 MB (hbm) | ✓ 1.3e-12×tol | 196.90x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=512,obs=4096 | `nitrix-jax` | ok | 1.60 ms / 1.61 ms | 801.54 ms | 88.08 MB (hbm) | ✓ 0.00074×tol | 1.00x vs nitrix-jax |
-| partialcorr | jax-cuda12 | c=512,obs=4096 | `numpy.partialcorr` | ok | 24.38 ms / 30.98 ms | 38.85 ms | 8.39 MB (hbm) | ✓ 0.00022×tol | 15.22x vs nitrix-jax |
-:::
-
-*source: bench `a1af688c` · nitrix `d0a9ca5f`*
-::::
-<!-- nitrix:/gen -->
-
-## `conditionalcov` {#conditionalcov}
-
-<!-- nitrix:gen sig:conditionalcov -->
-```python
-conditionalcov(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], *, rowvar: bool = True, bias: bool = False, ddof: Optional[int] = None, weights: Optional[Num[Array, '... obs']] = None, weight_matrix: Optional[Num[Array, '... obs obs']] = None, l2: float = 0.0, residualise_l2: float = 0.0) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:conditionalcov -->
-Covariance of `X` conditioned on the variables in `Y`.
-
-Operationally: residualise `X` against `Y`, then take the
-covariance of the residuals.  This is the "explained out the
-Y subspace, look at what's left" view.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:conditionalcov -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | Variable / conditioning tensors. |
-| `Y` | `Num` | `...` × `d` × `obs` | — | Variable / conditioning tensors. |
-| `rowvar` | `bool` | — | `True` | See `cov`. |
-| `bias` | `bool` | — | `False` | See `cov`. |
-| `ddof` | `Optional[int]` | — | `None` | See `cov`. |
-| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | See `cov`. |
-| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | See `cov`. |
-| `l2` | `float` | — | `0.0` | See `cov`. |
-| `residualise_l2` | `float` | — | `0.0` | Ridge for the residualisation step (passed to `residualise`). Typically left at `0`; raise if `Y` is near-collinear. |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-## `conditionalcorr` {#conditionalcorr}
-
-<!-- nitrix:gen sig:conditionalcorr -->
-```python
-conditionalcorr(X: Num[Array, '... c obs'], Y: Num[Array, '... d obs'], **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:conditionalcorr -->
-Correlation of `X` conditioned on the variables in `Y`.
-
-Normalised version of `conditionalcov`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:conditionalcorr -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | — |
-| `Y` | `Num` | `...` × `d` × `obs` | — | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-## `precision` {#precision}
-
-<!-- nitrix:gen sig:precision -->
-```python
-precision(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:precision -->
-Inverse covariance (precision) matrix.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:precision -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `X` | `Num` | `...` × `c` × `obs` | — | See `cov`. |
-| `require_nonsingular` | `bool` | — | `True` | `True` (default) -- a dense inverse (fails on singular sigma). `False` -- the symmetric Moore-Penrose pseudoinverse (eigen-truncated). Pass `l2 > 0` to `kwargs` to regularise rather than rely on the pseudoinverse for rank-deficient cases. |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen perf:precision -->
-:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
-GPU steady-state **363.4 µs** (median, L4); up to **307.61× faster** than `nilearn.precision`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_PRECISION.md)
-
-::: {.table-responsive}
-| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
-|---|---|---|---|---|---|---|---|---|---|
-| precision | jax-cpu | c=128,obs=1024 | `cupy.inv_cov` | skipped | — | — | — | — | — |
-| precision | jax-cpu | c=128,obs=1024 | `nilearn.precision` | ok | 96.18 ms / 184.12 ms | 1.666 s | 754 MB (rss) | ✓ 0.91×tol | 135.46x vs nitrix-jax |
-| precision | jax-cpu | c=128,obs=1024 | `nitrix-jax` | ok | 710.0 µs / 858.0 µs | 235.96 ms | 754 MB (rss) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
-| precision | jax-cpu | c=128,obs=1024 | `numpy.inv_cov` | ok | 748.1 µs / 770.2 µs | 802.1 µs | 754 MB (rss) | ✓ 9.9e-05×tol | 1.05x vs nitrix-jax |
-| precision | jax-cuda12 | c=128,obs=1024 | `cupy.inv_cov` | ok | 714.6 µs / 732.3 µs | 1.148 s | 0.52 MB (hbm) | ✓ 0.00072×tol | 2.02x vs nitrix-jax |
-| precision | jax-cuda12 | c=128,obs=1024 | `nilearn.precision` | ok | 109.02 ms / 182.05 ms | 944.10 ms | 0.52 MB (hbm) | ✓ 0.91×tol | 307.61x vs nitrix-jax |
-| precision | jax-cuda12 | c=128,obs=1024 | `nitrix-jax` | ok | 354.4 µs / 363.4 µs | 608.09 ms | 72.88 MB (hbm) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
-| precision | jax-cuda12 | c=128,obs=1024 | `numpy.inv_cov` | ok | 757.6 µs / 772.9 µs | 483.13 ms | 0.52 MB (hbm) | ✓ 9.9e-05×tol | 2.14x vs nitrix-jax |
-| precision | jax-cpu | c=256,obs=2048 | `cupy.inv_cov` | skipped | — | — | — | — | — |
-| precision | jax-cpu | c=256,obs=2048 | `nilearn.precision` | ok | 172.35 ms / 293.76 ms | 1.086 s | 754 MB (rss) | ✓ 0.45×tol | 15.00x vs nitrix-jax |
-| precision | jax-cpu | c=256,obs=2048 | `nitrix-jax` | ok | 11.49 ms / 40.94 ms | 496.70 ms | 754 MB (rss) | ✓ 0.0017×tol | 1.00x vs nitrix-jax |
-| precision | jax-cpu | c=256,obs=2048 | `numpy.inv_cov` | ok | 4.09 ms / 30.30 ms | 59.26 ms | 754 MB (rss) | ✓ 0.0001×tol | 0.36x vs nitrix-jax |
-| precision | jax-cuda12 | c=256,obs=2048 | `cupy.inv_cov` | ok | 1.37 ms / 1.40 ms | 231.96 ms | 2.10 MB (hbm) | ✓ 0.00077×tol | 2.23x vs nitrix-jax |
-| precision | jax-cuda12 | c=256,obs=2048 | `nilearn.precision` | ok | 123.27 ms / 197.66 ms | 1.516 s | 2.10 MB (hbm) | ✓ 0.45×tol | 200.86x vs nitrix-jax |
-| precision | jax-cuda12 | c=256,obs=2048 | `nitrix-jax` | ok | 613.7 µs / 632.6 µs | 598.71 ms | 77.59 MB (hbm) | ✓ 0.00091×tol | 1.00x vs nitrix-jax |
-| precision | jax-cuda12 | c=256,obs=2048 | `numpy.inv_cov` | ok | 3.85 ms / 4.88 ms | 3.94 ms | 2.10 MB (hbm) | ✓ 0.0001×tol | 6.28x vs nitrix-jax |
-| precision | jax-cpu | c=512,obs=4096 | `cupy.inv_cov` | skipped | — | — | — | — | — |
-| precision | jax-cpu | c=512,obs=4096 | `nilearn.precision` | ok | 476.51 ms / 578.92 ms | 1.674 s | 754 MB (rss) | ✓ 0.23×tol | 17.82x vs nitrix-jax |
-| precision | jax-cpu | c=512,obs=4096 | `nitrix-jax` | ok | 26.75 ms / 32.18 ms | 362.89 ms | 754 MB (rss) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
-| precision | jax-cpu | c=512,obs=4096 | `numpy.inv_cov` | ok | 26.25 ms / 35.01 ms | 44.74 ms | 754 MB (rss) | ✓ 0.00011×tol | 0.98x vs nitrix-jax |
-| precision | jax-cuda12 | c=512,obs=4096 | `cupy.inv_cov` | ok | 6.79 ms / 6.82 ms | 323.32 ms | 8.39 MB (hbm) | ✓ 0.0011×tol | 4.25x vs nitrix-jax |
-| precision | jax-cuda12 | c=512,obs=4096 | `nilearn.precision` | ok | 381.26 ms / 486.72 ms | 1.131 s | 8.39 MB (hbm) | ✓ 0.23×tol | 238.51x vs nitrix-jax |
-| precision | jax-cuda12 | c=512,obs=4096 | `nitrix-jax` | ok | 1.60 ms / 1.61 ms | 573.86 ms | 88.08 MB (hbm) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
-| precision | jax-cuda12 | c=512,obs=4096 | `numpy.inv_cov` | ok | 190.09 ms / 1.434 s | 1.396 s | 8.39 MB (hbm) | ✓ 0.00011×tol | 118.92x vs nitrix-jax |
-:::
-
-*source: bench `a1af688c` · nitrix `d0a9ca5f`*
-::::
-<!-- nitrix:/gen -->
-
-## `ccov` {#ccov}
-
-<!-- nitrix:gen sig:ccov -->
-```python
-ccov(*args, **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:ccov -->
-Alias for `conditionalcov`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:ccov -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `*args` | `Any` | — | `()` | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-## `ccorr` {#ccorr}
-
-<!-- nitrix:gen sig:ccorr -->
-```python
-ccorr(*args, **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:ccorr -->
-Alias for `conditionalcorr`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:ccorr -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `*args` | `Any` | — | `()` | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-## `pcorr` {#pcorr}
-
-<!-- nitrix:gen sig:pcorr -->
-```python
-pcorr(*args, **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:pcorr -->
-Alias for `partialcorr`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:pcorr -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `*args` | `Any` | — | `()` | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-
-## `corrcoef` {#corrcoef}
-
-<!-- nitrix:gen sig:corrcoef -->
-```python
-corrcoef(*args, **kwargs) -> Num[Array, '... c c']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:corrcoef -->
-Alias for `corr` (numpy convention).
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:corrcoef -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `*args` | `Any` | — | `()` | — |
-| `**kwargs` | `Any` | — | `{}` | — |
-
-**Returns** `Num` — shape `...` × `c` × `c`.
-<!-- nitrix:/gen -->
-

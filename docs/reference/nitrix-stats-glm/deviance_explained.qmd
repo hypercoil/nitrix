@@ -1,0 +1,36 @@
+---
+title: "deviance_explained"
+generated: true
+description: "Per-element fraction of null deviance explained: `1 - dev / null_dev`."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:deviance_explained -->
+```python
+deviance_explained(result: GLMResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:deviance_explained -->
+Per-element fraction of null deviance explained: `1 - dev / null_dev`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:deviance_explained -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `GLMResult` | — | — | — |
+
+**Returns** `Float` — shape `V`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:deviance_explained -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

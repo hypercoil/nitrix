@@ -1,0 +1,39 @@
+---
+title: "bonferroni"
+generated: true
+description: "Bonferroni family-wise correction."
+---
+
+[‹ back to `nitrix.stats.inference.multiple_comparisons`](../nitrix-stats-inference-multiple_comparisons.qmd)
+
+<!-- nitrix:gen sig:bonferroni -->
+```python
+bonferroni(p_values: Float[Array, 'n'], *, alpha: float = 0.05) -> Tuple[Bool[Array, 'n'], Float[Array, 'n']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:bonferroni -->
+Bonferroni family-wise correction.
+
+Returns `(rejected, p_adjusted)` with `p_adjusted = min(p * n, 1)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:bonferroni -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p_values` | `Float` | `n` | — | — |
+| `alpha` | `float` | — | `0.05` | — |
+
+**Returns** `Tuple[Bool[Array, 'n'], Float[Array, 'n']]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:bonferroni -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

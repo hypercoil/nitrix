@@ -1,0 +1,77 @@
+---
+title: "precision"
+generated: true
+description: "Inverse covariance (precision) matrix."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:precision -->
+```python
+precision(X: Num[Array, '... c obs'], *, require_nonsingular: bool = True, **kwargs) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:precision -->
+Inverse covariance (precision) matrix.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:precision -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Num` | `...` × `c` × `obs` | — | See `cov`. |
+| `require_nonsingular` | `bool` | — | `True` | `True` (default) -- a dense inverse (fails on singular sigma). `False` -- the symmetric Moore-Penrose pseudoinverse (eigen-truncated). Pass `l2 > 0` to `kwargs` to regularise rather than rely on the pseudoinverse for rank-deficient cases. |
+| `**kwargs` | `Any` | — | `{}` | — |
+
+**Returns** `Num` — shape `...` × `c` × `c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:precision -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **363.4 µs** (median, L4); up to **307.61× faster** than `nilearn.precision`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_PRECISION.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| precision | jax-cpu | c=128,obs=1024 | `cupy.inv_cov` | skipped | — | — | — | — | — |
+| precision | jax-cpu | c=128,obs=1024 | `nilearn.precision` | ok | 96.18 ms / 184.12 ms | 1.666 s | 754 MB (rss) | ✓ 0.91×tol | 135.46x vs nitrix-jax |
+| precision | jax-cpu | c=128,obs=1024 | `nitrix-jax` | ok | 710.0 µs / 858.0 µs | 235.96 ms | 754 MB (rss) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
+| precision | jax-cpu | c=128,obs=1024 | `numpy.inv_cov` | ok | 748.1 µs / 770.2 µs | 802.1 µs | 754 MB (rss) | ✓ 9.9e-05×tol | 1.05x vs nitrix-jax |
+| precision | jax-cuda12 | c=128,obs=1024 | `cupy.inv_cov` | ok | 714.6 µs / 732.3 µs | 1.148 s | 0.52 MB (hbm) | ✓ 0.00072×tol | 2.02x vs nitrix-jax |
+| precision | jax-cuda12 | c=128,obs=1024 | `nilearn.precision` | ok | 109.02 ms / 182.05 ms | 944.10 ms | 0.52 MB (hbm) | ✓ 0.91×tol | 307.61x vs nitrix-jax |
+| precision | jax-cuda12 | c=128,obs=1024 | `nitrix-jax` | ok | 354.4 µs / 363.4 µs | 608.09 ms | 72.88 MB (hbm) | ✓ 0.00075×tol | 1.00x vs nitrix-jax |
+| precision | jax-cuda12 | c=128,obs=1024 | `numpy.inv_cov` | ok | 757.6 µs / 772.9 µs | 483.13 ms | 0.52 MB (hbm) | ✓ 9.9e-05×tol | 2.14x vs nitrix-jax |
+| precision | jax-cpu | c=256,obs=2048 | `cupy.inv_cov` | skipped | — | — | — | — | — |
+| precision | jax-cpu | c=256,obs=2048 | `nilearn.precision` | ok | 172.35 ms / 293.76 ms | 1.086 s | 754 MB (rss) | ✓ 0.45×tol | 15.00x vs nitrix-jax |
+| precision | jax-cpu | c=256,obs=2048 | `nitrix-jax` | ok | 11.49 ms / 40.94 ms | 496.70 ms | 754 MB (rss) | ✓ 0.0017×tol | 1.00x vs nitrix-jax |
+| precision | jax-cpu | c=256,obs=2048 | `numpy.inv_cov` | ok | 4.09 ms / 30.30 ms | 59.26 ms | 754 MB (rss) | ✓ 0.0001×tol | 0.36x vs nitrix-jax |
+| precision | jax-cuda12 | c=256,obs=2048 | `cupy.inv_cov` | ok | 1.37 ms / 1.40 ms | 231.96 ms | 2.10 MB (hbm) | ✓ 0.00077×tol | 2.23x vs nitrix-jax |
+| precision | jax-cuda12 | c=256,obs=2048 | `nilearn.precision` | ok | 123.27 ms / 197.66 ms | 1.516 s | 2.10 MB (hbm) | ✓ 0.45×tol | 200.86x vs nitrix-jax |
+| precision | jax-cuda12 | c=256,obs=2048 | `nitrix-jax` | ok | 613.7 µs / 632.6 µs | 598.71 ms | 77.59 MB (hbm) | ✓ 0.00091×tol | 1.00x vs nitrix-jax |
+| precision | jax-cuda12 | c=256,obs=2048 | `numpy.inv_cov` | ok | 3.85 ms / 4.88 ms | 3.94 ms | 2.10 MB (hbm) | ✓ 0.0001×tol | 6.28x vs nitrix-jax |
+| precision | jax-cpu | c=512,obs=4096 | `cupy.inv_cov` | skipped | — | — | — | — | — |
+| precision | jax-cpu | c=512,obs=4096 | `nilearn.precision` | ok | 476.51 ms / 578.92 ms | 1.674 s | 754 MB (rss) | ✓ 0.23×tol | 17.82x vs nitrix-jax |
+| precision | jax-cpu | c=512,obs=4096 | `nitrix-jax` | ok | 26.75 ms / 32.18 ms | 362.89 ms | 754 MB (rss) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
+| precision | jax-cpu | c=512,obs=4096 | `numpy.inv_cov` | ok | 26.25 ms / 35.01 ms | 44.74 ms | 754 MB (rss) | ✓ 0.00011×tol | 0.98x vs nitrix-jax |
+| precision | jax-cuda12 | c=512,obs=4096 | `cupy.inv_cov` | ok | 6.79 ms / 6.82 ms | 323.32 ms | 8.39 MB (hbm) | ✓ 0.0011×tol | 4.25x vs nitrix-jax |
+| precision | jax-cuda12 | c=512,obs=4096 | `nilearn.precision` | ok | 381.26 ms / 486.72 ms | 1.131 s | 8.39 MB (hbm) | ✓ 0.23×tol | 238.51x vs nitrix-jax |
+| precision | jax-cuda12 | c=512,obs=4096 | `nitrix-jax` | ok | 1.60 ms / 1.61 ms | 573.86 ms | 88.08 MB (hbm) | ✓ 0.0012×tol | 1.00x vs nitrix-jax |
+| precision | jax-cuda12 | c=512,obs=4096 | `numpy.inv_cov` | ok | 190.09 ms / 1.434 s | 1.396 s | 8.39 MB (hbm) | ✓ 0.00011×tol | 118.92x vs nitrix-jax |
+:::
+
+*source: bench `a1af688c` · nitrix `d0a9ca5f`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:precision -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

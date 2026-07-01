@@ -1,0 +1,46 @@
+---
+title: "tweedie"
+generated: true
+description: "A Tweedie family with **fixed** power `p` (compound Poisson-Gamma)."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:tweedie -->
+```python
+tweedie(p: float = 1.5) -> Family
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:tweedie -->
+A Tweedie family with **fixed** power `p` (compound Poisson-Gamma).
+
+`1 < p < 2` -- the semicontinuous regime (an exact zero with probability
+mass plus a continuous positive part: rainfall, insurance claims, some
+imaging measures).  Variance `V(mu) = mu^p`, log link, dispersion estimated
+(`has_fixed_dispersion=False`, like Gamma).  With `p` fixed the *mean*
+coefficients fit the shared IRLS core directly (working weight `mu^{2-p}`);
+jointly profiling `p` is a follow-up (`p -> 1` recovers Poisson, `p -> 2`
+Gamma).
+
+The unit deviance is the closed form
+
+    d(y, mu) = 2[ y^{2-p}/((1-p)(2-p)) - y mu^{1-p}/(1-p) + mu^{2-p}/(2-p) ];
+
+the log-likelihood uses the **saddlepoint approximation** (with the exact
+compound-Poisson zero mass at `y = 0`) -- enough for `aic` / `bic` model
+comparison; the exact Dunn-Smyth series is the follow-up.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:tweedie -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `p` | `float` | — | `1.5` | — |
+
+**Returns** `Family`.
+<!-- nitrix:/gen -->
+

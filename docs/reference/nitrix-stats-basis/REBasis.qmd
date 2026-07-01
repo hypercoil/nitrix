@@ -1,0 +1,81 @@
+---
+title: "REBasis"
+generated: true
+description: "A random-effect smooth block (mgcv `bs='re'`) for a GAMM."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:REBasis -->
+```python
+class REBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:REBasis -->
+A random-effect smooth block (mgcv `bs="re"`) for a GAMM.
+
+A random intercept / slope per level of a grouping factor, expressed as the
+`(design, penalty)` block the GAM penalty machinery already consumes: the
+design is the one-hot indicator (intercept) or one-hot times a covariate
+(slope) over the factor levels, and the penalty is the **identity** (a
+ridge).  The single smoothing parameter the Fellner-Schall loop selects
+**is** the random-effect precision `lambda = 1 / sigma_b^2` -- the v1
+"penalised GLM == variance-components REML" identity, now reachable.  It is a
+third :data:`Smooth` variant alongside :class:`SplineBasis` /
+:class:`TensorBasis`, so it slots straight into `gam_fit` with **no new
+solver work** (a random effect is just one more penalty block).
+
+Unlike a spline, an RE has no continuous covariate to re-evaluate, so it
+carries only `(design, penalty, levels)` -- not the spline construction
+parameters.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:REBasis.penalty_blocks -->
+```python
+penalty_blocks() -> list
+```
+<!-- nitrix:/gen -->
+
+Penalty blocks `[(I, 1)]` (audit D8): the identity ridge (full rank
+`q`, eigenvalues exactly one -- no host eigh).
+
+<!-- nitrix:gen sig:REBasis.eval_design -->
+```python
+eval_design(x: Float[Array, ' g']) -> Float[Array, 'g q']
+```
+<!-- nitrix:/gen -->
+
+Re-evaluate as the one-hot of the requested level indices `x`
+(audit D8): the per-level random effect at those levels.
+
+<!-- nitrix:gen sig:REBasis.tree_flatten -->
+```python
+tree_flatten() -> Tuple[Tuple[Array, ...], Tuple[int]]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:REBasis.tree_unflatten -->
+```python
+tree_unflatten(aux: Tuple[int], children: Tuple[Any, ...]) -> 'REBasis'
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:REBasis.__init__ -->
+```python
+__init__(design: Float[Array, 'n q'], penalty: Float[Array, 'q q'], levels: int) -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:REBasis -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `g` | *(undocumented — add to `_dimensions.yml`)* |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `q` | random-effect columns |
+<!-- nitrix:/gen -->

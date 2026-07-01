@@ -1,0 +1,47 @@
+---
+title: "f_contrast"
+generated: true
+description: "Per-element F-test of a multi-row contrast `C beta = 0`."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:f_contrast -->
+```python
+f_contrast(result: GLMResult, contrast: Float[Array, 'm p'], *, cov: Optional[Float[Array, '... p p']] = None) -> Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:f_contrast -->
+Per-element F-test of a multi-row contrast `C beta = 0`.
+
+Returns `(F, p_value, df1, df2)` with `df1 = m` (contrast rank) and
+`df2 = dof_resid`.
+
+`cov` overrides the coefficient covariance (e.g. the robust
+`sandwich_cov` output): the Wald quadratic form uses `C cov C^T` directly
+and the statistic is `quad / m` (no dispersion rescale).  The default
+(`None`) is the model-based `dispersion * (X^T W X)^{-1}` (unchanged).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:f_contrast -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `GLMResult` | — | — | — |
+| `contrast` | `Float` | `m` × `p` | — | — |
+| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | — |
+
+**Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:f_contrast -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `m` | rows of a multi-row contrast |
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

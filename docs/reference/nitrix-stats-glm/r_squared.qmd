@@ -1,0 +1,40 @@
+---
+title: "r_squared"
+generated: true
+description: "Per-element `R^2` (Gaussian) / deviance explained (general)."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:r_squared -->
+```python
+r_squared(result: GLMResult) -> Float[Array, 'V']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:r_squared -->
+Per-element `R^2` (Gaussian) / deviance explained (general).
+
+For the Gaussian family `deviance` is the residual sum of squares and
+`null_deviance` the total sum of squares, so this is the ordinary
+`R^2`; for other families it is the fraction of deviance explained.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:r_squared -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `GLMResult` | — | — | — |
+
+**Returns** `Float` — shape `V`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:r_squared -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

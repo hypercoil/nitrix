@@ -1,0 +1,17 @@
+---
+title: "PriorFn"
+generated: true
+---
+
+[‹ back to `nitrix.stats.priors`](../nitrix-stats-priors.qmd)
+
+<!-- nitrix:gen sig:PriorFn -->
+```python
+PriorFn = Callable[[Float[Array, '']], Float[Array, '']]
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:PriorFn -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

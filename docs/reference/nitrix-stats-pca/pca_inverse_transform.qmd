@@ -1,0 +1,43 @@
+---
+title: "pca_inverse_transform"
+generated: true
+description: "Reconstruct from PCA coordinates: `Z @ components + mean`."
+---
+
+[‹ back to `nitrix.stats.pca`](../nitrix-stats-pca.qmd)
+
+<!-- nitrix:gen sig:pca_inverse_transform -->
+```python
+pca_inverse_transform(Z: Float[Array, 'n k'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:pca_inverse_transform -->
+Reconstruct from PCA coordinates: `Z @ components + mean`.
+
+Exact (up to the discarded components) inverse of
+:func:`pca_transform`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:pca_inverse_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `Z` | `Float` | `n` × `k` | — | — |
+| `components` | `Float` | `k` × `d` | — | — |
+| `mean` | `Float` | `d` | — | — |
+
+**Returns** `Float` — shape `n` × `d`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:pca_inverse_transform -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `k` | kernel or basis components |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

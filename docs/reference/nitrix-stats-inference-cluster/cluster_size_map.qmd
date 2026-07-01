@@ -1,0 +1,38 @@
+---
+title: "cluster_size_map"
+generated: true
+description: "Per-voxel size (voxel count) of the connected component it belongs to."
+---
+
+[‹ back to `nitrix.stats.inference.cluster`](../nitrix-stats-inference-cluster.qmd)
+
+<!-- nitrix:gen sig:cluster_size_map -->
+```python
+cluster_size_map(labels: Int[Array, '*spatial']) -> Float[Array, '*spatial']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cluster_size_map -->
+Per-voxel size (voxel count) of the connected component it belongs to.
+
+Background voxels (label `0`) map to `0`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cluster_size_map -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `labels` | `Int` | `*spatial` | — | — |
+
+**Returns** `Float` — shape `*spatial`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cluster_size_map -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+<!-- nitrix:/gen -->

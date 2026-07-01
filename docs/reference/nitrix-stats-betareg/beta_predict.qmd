@@ -1,0 +1,45 @@
+---
+title: "beta_predict"
+generated: true
+description: "Per-element beta-regression prediction on a (new) design `X`."
+---
+
+[‹ back to `nitrix.stats.betareg`](../nitrix-stats-betareg.qmd)
+
+<!-- nitrix:gen sig:beta_predict -->
+```python
+beta_predict(result: BetaResult, X: Float[Array, 'N p'], *, type: Literal['response', 'link'] = 'response') -> Float[Array, 'V N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:beta_predict -->
+Per-element beta-regression prediction on a (new) design `X`.
+
+The :func:`beta_fit` analogue of :func:`nitrix.stats.predict`: the mean
+model is the logit link, so `type='link'` returns the linear predictor
+`eta = X beta` and `type='response'` (default) returns the fitted mean
+`mu = expit(eta)` in `(0, 1)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:beta_predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `BetaResult` | — | — | A :class:`BetaResult` from :func:`beta_fit`. |
+| `X` | `Float` | `N` × `p` | — | `(N, p)` design (same columns as the fit). |
+| `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean `mu`) or `'link'` (the linear predictor `eta`). |
+
+**Returns** `Float` — shape `V` × `N`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:beta_predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

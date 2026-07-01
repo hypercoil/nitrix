@@ -1,0 +1,43 @@
+---
+title: "tensor_product_design"
+generated: true
+description: "Re-evaluate a `TensorBasis` on a matched covariate grid."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:tensor_product_design -->
+```python
+tensor_product_design(basis: TensorBasis, xs: Tuple[Float[Array, ' g'], ...]) -> Float[Array, 'g K']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:tensor_product_design -->
+Re-evaluate a `TensorBasis` on a matched covariate grid.
+
+`xs` is one grid per margin (all length `g`); point `t` has covariate
+tuple `(xs[0][t], ..., xs[d-1][t])`.  Returns the `(g, K)` tensor design
+-- `@` the fitted tensor coefficients renders the interaction surface
+along that path.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:tensor_product_design -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `basis` | `TensorBasis` | — | — | — |
+| `xs` | `Tuple[Float[Array, ' g'], ...]` | — | — | — |
+
+**Returns** `Float` — shape `g` × `K`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:tensor_product_design -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `g` | *(undocumented — add to `_dimensions.yml`)* |
+| `K` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

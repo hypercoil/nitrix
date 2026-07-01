@@ -1,0 +1,43 @@
+---
+title: "predict"
+generated: true
+description: "Per-element prediction on a (new) design `X`."
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+<!-- nitrix:gen sig:predict -->
+```python
+predict(result: GLMResult, X: Float[Array, 'N p'], *, type: PredictType = 'response') -> Float[Array, 'V N']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:predict -->
+Per-element prediction on a (new) design `X`.
+
+`type='link'` returns the linear predictor `eta = X beta`;
+`type='response'` (default) applies the inverse link.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:predict -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `result` | `GLMResult` | — | — | — |
+| `X` | `Float` | `N` × `p` | — | — |
+| `type` | `PredictType` | — | `'response'` | — |
+
+**Returns** `Float` — shape `V` × `N`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:predict -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `N` | observations — time points, subjects, or sampled points |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+<!-- nitrix:/gen -->

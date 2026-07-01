@@ -1,0 +1,48 @@
+---
+title: "ebic_score"
+generated: true
+description: "Extended Bayesian Information Criterion of a precision estimate."
+---
+
+[‹ back to `nitrix.stats.connectivity`](../nitrix-stats-connectivity.qmd)
+
+<!-- nitrix:gen sig:ebic_score -->
+```python
+ebic_score(theta: Float[Array, 'p p'], S: Float[Array, 'p p'], n: int | Float[Array, ''], *, gamma: float = 0.5, edge_tol: float = 1e-08) -> Float[Array, '']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:ebic_score -->
+Extended Bayesian Information Criterion of a precision estimate.
+
+`EBIC_gamma = n (tr(S Theta) - log det Theta) + E log n + 4 gamma E log p`
+(Foygel & Drton 2010), where `E` is the number of off-diagonal edges
+(upper-triangle entries with `|theta| > edge_tol`, counted once).  The
+Gaussian-graphical-model term `-2 loglik = n (tr(S Theta) - log det Theta)`
+uses the cuSOLVER-free rolled-Cholesky `log det`.  `gamma in [0, 1]`
+tunes the extra sparsity prior (`gamma = 0` recovers plain BIC); pick the
+path point with the **smallest** EBIC.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:ebic_score -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `theta` | `Float` | `p` × `p` | — | — |
+| `S` | `Float` | `p` × `p` | — | — |
+| `n` | `int | Float[Array, '']` | — | — | — |
+| `gamma` | `float` | — | `0.5` | — |
+| `edge_tol` | `float` | — | `1e-08` | — |
+
+**Returns** `Float` — shape —.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:ebic_score -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `p` | fixed-effect coefficients / design-matrix columns |
+<!-- nitrix:/gen -->

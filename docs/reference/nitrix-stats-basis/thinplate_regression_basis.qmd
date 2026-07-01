@@ -1,0 +1,49 @@
+---
+title: "thinplate_regression_basis"
+generated: true
+description: "Build a thin-plate regression spline (TPRS) basis for covariate `x`."
+---
+
+[‹ back to `nitrix.stats.basis`](../nitrix-stats-basis.qmd)
+
+<!-- nitrix:gen sig:thinplate_regression_basis -->
+```python
+thinplate_regression_basis(x: Float[Array, ' n'], n_basis: int = 10, *, penalty_order: int = 2, max_knots: int = 100, bounds: Optional[Tuple[float, float]] = None, center: bool = True) -> SplineBasis
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:thinplate_regression_basis -->
+Build a thin-plate regression spline (TPRS) basis for covariate `x`.
+
+The `mgcv` default smoother (`bs='tp'`): isotropic and knot-free.  The
+full thin-plate basis (one function per knot) is truncated by an
+eigendecomposition of the radial penalty matrix `E` -- the `k - M`
+leading (largest-eigenvalue) wiggly components, plus the `M = penalty_order`
+unpenalised polynomial null-space terms (Wood 2003).  The truncation
+`eigh` is a one-off host (CPU/numpy) computation -- it is data-dependent
+but not per-trace, and avoids the cuSOLVER `syevd` on the broken GPU.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:thinplate_regression_basis -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `x` | `Float` | `n` | — | `(n,)` covariate values. |
+| `n_basis` | `int` | — | `10` | Total basis dimension `k` (wiggly + polynomial; `mgcv`'s `k`). |
+| `penalty_order` | `int` | — | `2` | Thin-plate order `m` (default `2` -- penalise curvature); the polynomial null space has dimension `M = m`. |
+| `max_knots` | `int` | — | `100` | Cap on the number of knots (placed at quantiles of `x` when `n` exceeds it), bounding the `O(n_knots^3)` eigendecomposition. |
+| `bounds` | `Optional[Tuple[float, float]]` | — | `None` | `(lo, hi)` for the polynomial rescaling (defaults to the data range). |
+| `center` | `bool` | — | `True` | Apply the sum-to-zero identifiability constraint (default `True`). |
+
+**Returns** `SplineBasis`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:thinplate_regression_basis -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+<!-- nitrix:/gen -->

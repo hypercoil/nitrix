@@ -1,0 +1,75 @@
+---
+title: "jacobian_displacement"
+generated: true
+description: "Per-point Jacobian of the deformation φ = id + u."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+<!-- nitrix:gen sig:jacobian_displacement -->
+```python
+jacobian_displacement(u: Float[Array, '... *spatial d'], *, boundary_mode: Literal['nearest', 'wrap', 'mirror'] = 'nearest', spacing: Union[float, Sequence[float]] = 1.0) -> Float[Array, '... *spatial d d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:jacobian_displacement -->
+Per-point Jacobian of the deformation φ = id + u.
+
+For a channel-last displacement field `u` with `d` spatial
+axes, returns `J[..., i, j] = δ_{i,j} + ∂ u_i / ∂ x_j`,
+computed via central differences along each spatial axis.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:jacobian_displacement -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `u` | `Float` | `...` × `*spatial` × `d` | — | Displacement field, channel-last, `(*leading, *spatial, d)` with `len(spatial) == d`. |
+| `boundary_mode` | `Literal['nearest', 'wrap', 'mirror']` | — | `'nearest'` | Boundary handling for the central difference. `"nearest"` (default) clamps to the edge cell -- this is what voxelmorph uses for QA on learned warps. `"wrap"` is periodic. `"mirror"` is non-repeating mirror. |
+| `spacing` | `Union[float, Sequence[float]]` | — | `1.0` | Voxel spacing along each spatial axis. `float` -> isotropic; sequence -> per-axis (length `d`). For non-isotropic fMRI / MRI grids the spacing should be in the same physical units as `u`; the central-difference denominator is `2 * spacing[axis]`. |
+
+**Returns** `Float` — shape `...` × `*spatial` × `d` × `d`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:jacobian_displacement -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **94.8 µs** (median, L4); up to **39.58× faster** than `numpy.jacobian`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_JACOBIAN_DISPLACEMENT.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| jacobian_displacement | jax-cpu | d=32 | `cupy.jacobian_displacement` | skipped | — | — | — | — | — |
+| jacobian_displacement | jax-cpu | d=32 | `nitrix-jax` | ok | 125.4 µs / 134.8 µs | 409.67 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=32 | `numpy.jacobian` | ok | 598.0 µs / 665.2 µs | 886.9 µs | 787 MB (rss) | ✓ 5.5e-05×tol | 4.77x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=32 | `cupy.jacobian_displacement` | ok | 714.5 µs / 732.3 µs | 5.681 s | 0.39 MB (hbm) | ✓ 5.5e-05×tol | 7.82x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=32 | `nitrix-jax` | ok | 91.4 µs / 94.8 µs | 525.23 ms | 3.28 MB (hbm) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=32 | `numpy.jacobian` | ok | 595.1 µs / 608.0 µs | 2.25 ms | 0.39 MB (hbm) | ✓ 5.5e-05×tol | 6.51x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=48 | `cupy.jacobian_displacement` | skipped | — | — | — | — | — |
+| jacobian_displacement | jax-cpu | d=48 | `nitrix-jax` | ok | 275.2 µs / 277.9 µs | 304.99 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=48 | `numpy.jacobian` | ok | 2.05 ms / 2.32 ms | 8.75 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 7.47x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=48 | `cupy.jacobian_displacement` | ok | 678.0 µs / 715.2 µs | 1.923 s | 2.10 MB (hbm) | ✓ 5.5e-05×tol | 7.05x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=48 | `nitrix-jax` | ok | 96.2 µs / 104.1 µs | 563.25 ms | 10.27 MB (hbm) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=48 | `numpy.jacobian` | ok | 1.83 ms / 1.90 ms | 7.13 ms | 2.10 MB (hbm) | ✓ 5.5e-05×tol | 19.06x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=64 | `cupy.jacobian_displacement` | skipped | — | — | — | — | — |
+| jacobian_displacement | jax-cpu | d=64 | `nitrix-jax` | ok | 756.2 µs / 795.8 µs | 175.74 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cpu | d=64 | `numpy.jacobian` | ok | 5.15 ms / 5.48 ms | 16.60 ms | 787 MB (rss) | ✓ 5.5e-05×tol | 6.81x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=64 | `cupy.jacobian_displacement` | ok | 660.4 µs / 685.8 µs | 145.96 ms | 4.19 MB (hbm) | ✓ 5.5e-05×tol | 5.56x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=64 | `nitrix-jax` | ok | 118.8 µs / 138.7 µs | 170.45 ms | 37.75 MB (hbm) | ✓ 5.5e-05×tol | 1.00x vs nitrix-jax |
+| jacobian_displacement | jax-cuda12 | d=64 | `numpy.jacobian` | ok | 4.70 ms / 5.03 ms | 15.47 ms | 4.19 MB (hbm) | ✓ 5.5e-05×tol | 39.58x vs nitrix-jax |
+:::
+
+*source: bench `361141e2` · nitrix `5d1717e0`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:jacobian_displacement -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `d` | spatial dimension (2 or 3) |
+<!-- nitrix:/gen -->

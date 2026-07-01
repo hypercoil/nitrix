@@ -1,0 +1,47 @@
+---
+title: "kl_diagonal_gaussian"
+generated: true
+description: "KL divergence of `N(mean, diag exp(log_var))` from `N(0, I)`."
+---
+
+[‹ back to `nitrix.stats.gaussian`](../nitrix-stats-gaussian.qmd)
+
+<!-- nitrix:gen sig:kl_diagonal_gaussian -->
+```python
+kl_diagonal_gaussian(mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg] = None, reduction: Reduction = 'sum') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:kl_diagonal_gaussian -->
+KL divergence of `N(mean, diag exp(log_var))` from `N(0, I)`.
+
+The closed form for a diagonal Gaussian against the standard
+normal, per dimension:
+
+`0.5 * (mean**2 + exp(log_var) - 1 - log_var)`
+
+which is non-negative and zero exactly at `mean = 0`,
+`log_var = 0`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:kl_diagonal_gaussian -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `mean` | `Float` | `...` | — | The Gaussian's mean and log-variance, identical shape. |
+| `log_var` | `Float` | `...` | — | The Gaussian's mean and log-variance, identical shape. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce. Default `None` (all). The latent KL is conventionally *summed* over the latent dimension, so pass the latent axis with `reduction="sum"` for a per-sample KL. |
+| `reduction` | `Reduction` | — | `'sum'` | `"sum"` (default -- the per-dimension KL is additive), `"mean"`, or `"none"`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:kl_diagonal_gaussian -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

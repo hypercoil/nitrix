@@ -1,0 +1,51 @@
+---
+title: "Linear"
+generated: true
+description: "(Multi-)linear interpolation (`order=1`)."
+---
+
+[‹ back to `nitrix.geometry.grid`](../nitrix-geometry-grid.qmd)
+
+*Re-exported here; defined in `nitrix.geometry._interpolate`.*
+
+<!-- nitrix:gen sig:Linear -->
+```python
+class Linear
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Linear -->
+(Multi-)linear interpolation (`order=1`).
+
+The default kernel and the prior `resample` / `spatial_transform`
+behaviour: each sampled value is the multilinear blend of its
+`2**ndim` surrounding voxels.  Smooth in both the image values and
+the sample coordinates, so it is the kernel for differentiable
+registration losses.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Linear.sample -->
+```python
+sample(image: Float[Array, '*spatial c'], coords: Float[Array, '*out_spatial ndim'], *, mode: BoundaryMode, cval: float) -> Float[Array, '*out_spatial c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sig:Linear.__init__ -->
+```python
+__init__() -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:Linear -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*spatial` | the spatial axes of a grid (variadic) |
+| `c` | feature channels (channels-last) |
+| `*out_spatial` | the output grid's spatial axes (variadic) |
+| `ndim` | number of spatial dimensions |
+<!-- nitrix:/gen -->

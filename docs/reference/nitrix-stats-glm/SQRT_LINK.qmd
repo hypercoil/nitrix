@@ -1,0 +1,19 @@
+---
+title: "SQRT_LINK"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:SQRT_LINK -->
+```python
+SQRT_LINK = Link(name='sqrt', link=(lambda mu: jnp.sqrt(jnp.clip(mu, 0.0, None))), linkinv=(lambda eta: eta * eta), mu_eta=(lambda eta: 2.0 * eta))
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:SQRT_LINK -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+

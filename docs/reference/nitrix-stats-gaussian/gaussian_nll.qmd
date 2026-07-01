@@ -1,0 +1,48 @@
+---
+title: "gaussian_nll"
+generated: true
+description: "Negative log-likelihood of `x` under `N(mean, exp(log_var))`."
+---
+
+[‹ back to `nitrix.stats.gaussian`](../nitrix-stats-gaussian.qmd)
+
+<!-- nitrix:gen sig:gaussian_nll -->
+```python
+gaussian_nll(x: Float[Array, '...'], mean: Float[Array, '...'], log_var: Float[Array, '...'], *, axis: Optional[_AxisArg] = None, reduction: Reduction = 'mean') -> Float[Array, '...']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:gaussian_nll -->
+Negative log-likelihood of `x` under `N(mean, exp(log_var))`.
+
+Per element:
+
+`0.5 * (log(2 pi) + log_var + (x - mean)**2 * exp(-log_var))`
+
+The `exp(-log_var)` precision and the additive `log_var`
+normaliser are the log-variance rewrite of the `1 / (2 var)` and
+`0.5 log var` terms of the Gaussian density.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:gaussian_nll -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `x` | `Float` | `...` | — | Observations. |
+| `mean` | `Float` | `...` | — | Predicted mean and log-variance, broadcastable to `x`. |
+| `log_var` | `Float` | `...` | — | Predicted mean and log-variance, broadcastable to `x`. |
+| `axis` | `Optional[_AxisArg]` | — | `None` | Axes to reduce. Default `None` (all). |
+| `reduction` | `Reduction` | — | `'mean'` | `"mean"` (default), `"sum"`, or `"none"`. |
+
+**Returns** `Float` — shape `...`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:gaussian_nll -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+<!-- nitrix:/gen -->

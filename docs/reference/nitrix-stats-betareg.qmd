@@ -2,12 +2,54 @@
 title: "nitrix.stats.betareg"
 generated: true
 signature-hash: e1bbec463cd8d264
+description: "Beta regression for proportions in `(0, 1)` (v3 §4)."
+listing:
+  id: nitrix-stats-betareg-symbols
+  contents: "nitrix-stats-betareg/*.qmd"
+  type: table
+  fields: [title, description]
+  sort: "title"
+  filter-ui: false
+  page-size: 500
 ---
 
 ::: {.callout-important title="Generated reference stub — fill me"}
 Auto-generated scaffold for `nitrix.stats.betareg`. Fill the prose *outside* the
 generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_staleness.py` flags signature drift.
 :::
+
+<!-- nitrix:gen overview:__module__ -->
+Beta regression for proportions in `(0, 1)` (v3 §4).
+
+Bounded continuous responses -- tissue fractions, fMRI fractional occupancy,
+any proportion -- are modelled as `y ~ Beta(mu phi, (1 - mu) phi)` with mean
+`mu = logit^{-1}(X beta)` and a **precision** `phi` (larger `phi` = less
+dispersion).  This is *not* a standard exponential-family GLM: the score is
+**digamma**-based, not the `mu_eta^2 / V` IRLS weight, and the precision is a
+second parameter estimated jointly with the mean -- so it gets its own fitter
+rather than slotting into the :class:`~nitrix.stats._family.Family` / `glm_fit`
+core.
+
+Estimator (Ferrari & Cribari-Neto 2004).  Fisher scoring alternates a
+reweighted-least-squares step for `beta` and a Newton step for `log phi`,
+to a fixed iteration budget (`vmap`-clean over voxels):
+
+    y*   = logit(y),   mu*  = psi(mu phi) - psi((1 - mu) phi)
+    nu   = psi'(mu phi) + psi'((1 - mu) phi)          # trigamma sum
+    W    = diag(phi^2 (dmu/deta)^2 nu),   z = eta + (y* - mu*) / (phi (dmu/deta) nu)
+    beta <- (X^T W X)^{-1} X^T W z
+
+with the precision score / information
+
+    U_phi = sum mu(y* - mu*) + log(1 - y) - psi((1-mu)phi) + psi(phi)
+    K_phi = sum mu^2 psi'(mu phi) + (1-mu)^2 psi'((1-mu)phi) - psi'(phi),
+
+stepped as `log phi <- log phi + U_phi / (phi K_phi)`.  The fixed-effect
+covariance is the `beta` block of the **joint** `(beta, phi)` Fisher
+information inverse (so standard errors account for estimating `phi`).  Every
+solve is the cuSOLVER-free `small_inv_logdet`; `digamma` / `polygamma` are
+`jax.scipy.special`.
+<!-- nitrix:/gen -->
 
 <!-- nitrix:gen dims:__page__ -->
 **Tensor dimensions**
@@ -19,83 +61,7 @@ generated markers; do **not** ship as-is (SPEC §6.5). `check_reference_stalenes
 | `N` | observations — time points, subjects, or sampled points |
 <!-- nitrix:/gen -->
 
-## `BetaResult` {#BetaResult}
+## Symbols
 
-<!-- nitrix:gen sig:BetaResult -->
-```python
-class BetaResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:BetaResult -->
-Per-element beta-regression fit output.
-<!-- nitrix:/gen -->
-
-### Methods
-
-<!-- nitrix:gen sig:BetaResult.__init__ -->
-```python
-__init__(coef: Float[Array, 'V p'], precision: Float[Array, 'V'], cov_unscaled: Float[Array, 'V p p'], log_lik: Float[Array, 'V'], n_obs: int) -> None
-```
-<!-- nitrix:/gen -->
-
-## `beta_fit` {#beta_fit}
-
-<!-- nitrix:gen sig:beta_fit -->
-```python
-beta_fit(Y: Float[Array, 'V N'], X: Float[Array, 'N p'], *, n_iter: int = 50, ridge: float = 1e-08, block: Optional[int] = None) -> BetaResult
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:beta_fit -->
-Mass-univariate beta regression (logit link, estimated precision).
-
-Fits, per element, `y_v ~ Beta(mu phi, (1 - mu) phi)` with `mu =
-logit^{-1}(X beta_v)` and a per-element precision `phi_v`, by
-Ferrari-Cribari-Neto Fisher scoring.  Responses must lie strictly in
-`(0, 1)` (values are clipped off the boundary by `1e-8`).
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:beta_fit -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `Y` | `Float` | `V` × `N` | — | `(V, N)` responses in `(0, 1)`. |
-| `X` | `Float` | `N` × `p` | — | `(N, p)` shared design (include your own intercept). |
-| `n_iter` | `int` | — | `50` | Fisher-scoring iterations (default `50`). |
-| `ridge` | `float` | — | `1e-08` | Small stabiliser on the normal equations. |
-| `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory. |
-
-**Returns** `BetaResult`.
-<!-- nitrix:/gen -->
-
-## `beta_predict` {#beta_predict}
-
-<!-- nitrix:gen sig:beta_predict -->
-```python
-beta_predict(result: BetaResult, X: Float[Array, 'N p'], *, type: Literal['response', 'link'] = 'response') -> Float[Array, 'V N']
-```
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen overview:beta_predict -->
-Per-element beta-regression prediction on a (new) design `X`.
-
-The :func:`beta_fit` analogue of :func:`nitrix.stats.predict`: the mean
-model is the logit link, so `type='link'` returns the linear predictor
-`eta = X beta` and `type='response'` (default) returns the fitted mean
-`mu = expit(eta)` in `(0, 1)`.
-<!-- nitrix:/gen -->
-
-<!-- nitrix:gen params:beta_predict -->
-**Parameters**
-
-| parameter | type | shape | default | description |
-|---|---|---|---|---|
-| `result` | `BetaResult` | — | — | A :class:`BetaResult` from :func:`beta_fit`. |
-| `X` | `Float` | `N` × `p` | — | `(N, p)` design (same columns as the fit). |
-| `type` | `Literal['response', 'link']` | — | `'response'` | `'response'` (the mean `mu`) or `'link'` (the linear predictor `eta`). |
-
-**Returns** `Float` — shape `V` × `N`.
-<!-- nitrix:/gen -->
-
+::: {#nitrix-stats-betareg-symbols}
+:::

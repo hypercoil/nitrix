@@ -1,0 +1,42 @@
+---
+title: "GPResult"
+generated: true
+description: "Per-element Gaussian-process fit output (`gp_fit`)."
+---
+
+[‹ back to `nitrix.stats.gp`](../nitrix-stats-gp.qmd)
+
+<!-- nitrix:gen sig:GPResult -->
+```python
+class GPResult
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:GPResult -->
+Per-element Gaussian-process fit output (`gp_fit`).
+
+Some fields are engine- or mode-conditional: `lo` / `hi` / `boundary`
+drive `engine='hsgp'` re-evaluation only; `nd_meta` is set only for a
+multi-dimensional fit (`None` otherwise); `corr_rho` is `0` unless a
+`corr` structure was fitted; and for a non-Gaussian `family` `coef` is
+on the link scale (see :func:`gp_predict`).
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:GPResult.__init__ -->
+```python
+__init__(coef: Float[Array, 'V p'], cov_unscaled: Float[Array, 'V p p'], theta: Float[Array, 'V 3'], log_mlik: Float[Array, 'V'], edf: Float[Array, 'V'], dispersion: Float[Array, 'V'], corr_rho: Float[Array, 'V'], kernel: str, engine: str, corr: str, n_obs: int, rank: int, n_fixed: int, lo: float, hi: float, boundary: float, nd_meta: Optional[Any], family: str = 'gaussian') -> None
+```
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:GPResult -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `V` | elements of a mass-univariate map — voxels, vertices, or fixels |
+| `p` | fixed-effect coefficients / design-matrix columns |
+| `3` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

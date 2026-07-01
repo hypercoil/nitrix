@@ -1,0 +1,45 @@
+---
+title: "pca_transform"
+generated: true
+description: "Project `X` onto a PCA basis: `(X - mean) @ components.T`."
+---
+
+[‹ back to `nitrix.stats.pca`](../nitrix-stats-pca.qmd)
+
+<!-- nitrix:gen sig:pca_transform -->
+```python
+pca_transform(X: Float[Array, 'n d'], components: Float[Array, 'k d'], mean: Float[Array, 'd']) -> Float[Array, 'n k']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:pca_transform -->
+Project `X` onto a PCA basis: `(X - mean) @ components.T`.
+
+Takes `components` / `mean` explicitly (rather than a
+:class:`PCAResult`) so a *pre-fitted* basis -- e.g. components
+loaded from elsewhere -- can be applied without a local
+:func:`pca_fit`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:pca_transform -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Float` | `n` × `d` | — | — |
+| `components` | `Float` | `k` × `d` | — | — |
+| `mean` | `Float` | `d` | — | — |
+
+**Returns** `Float` — shape `n` × `k`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:pca_transform -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d` | spatial dimension (2 or 3) |
+| `k` | kernel or basis components |
+<!-- nitrix:/gen -->

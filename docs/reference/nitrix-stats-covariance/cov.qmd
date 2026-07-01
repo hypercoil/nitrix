@@ -1,0 +1,75 @@
+---
+title: "cov"
+generated: true
+description: "Empirical covariance of variables in a tensor batch."
+---
+
+[‹ back to `nitrix.stats.covariance`](../nitrix-stats-covariance.qmd)
+
+<!-- nitrix:gen sig:cov -->
+```python
+cov(X: Num[Array, '... c obs'], *, rowvar: bool = True, bias: bool = False, ddof: Optional[int] = None, weights: Optional[Num[Array, '... obs']] = None, weight_matrix: Optional[Num[Array, '... obs obs']] = None, l2: float = 0.0) -> Num[Array, '... c c']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:cov -->
+Empirical covariance of variables in a tensor batch.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:cov -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|---|---|---|---|---|
+| `X` | `Num` | `...` × `c` × `obs` | — | Sample tensor. Default layout `(..., c, obs)` with the last axis as observations and the penultimate axis as variables; pass `rowvar=False` to flip. |
+| `rowvar` | `bool` | — | `True` | `True` (default): observation axis is the *last* axis. |
+| `bias` | `bool` | — | `False` | If `True`, divide by `n`; otherwise (default) by `n - 1` (Bessel's correction). Ignored if `ddof` is given. |
+| `ddof` | `Optional[int]` | — | `None` | Explicit degrees-of-freedom override. `None` means `int(not bias)`. |
+| `weights` | `Optional[Num[Array, '... obs']]` | — | `None` | Per-observation weights, `(..., obs)`. Mutually exclusive with `weight_matrix`. |
+| `weight_matrix` | `Optional[Num[Array, '... obs obs']]` | — | `None` | Full observation coupling matrix, `(..., obs, obs)`. Used for inter-temporal weighting (e.g. lagged or smoothed covariance). Must be symmetric for the result to be a valid covariance. Mutually exclusive with `weights`. |
+| `l2` | `float` | — | `0.0` | Ridge regularisation strength. `l2 > 0` adds `l2 I` to the result. |
+
+**Returns** `Num` — shape `...` × `c` × `c`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen perf:cov -->
+:::: {.callout-note title="Benchmarks — nitrix-perf-bench" collapse="true"}
+GPU steady-state **738.2 µs** (median, L4); up to **71.57× faster** than `numpy.cov`.  [full report](https://github.com/hypercoil/nitrix-perf-bench/blob/main/reports/PERF_COV.md)
+
+::: {.table-responsive}
+| case | platform | param | baseline | status | steady (min/med) | compile | mem | fidelity | ratio |
+|---|---|---|---|---|---|---|---|---|---|
+| cov | jax-cpu | c=2000,n_obs=1000 | `cupy.cov` | skipped | — | — | — | — | — |
+| cov | jax-cpu | c=2000,n_obs=1000 | `nitrix-jax` | ok | 58.69 ms / 74.00 ms | 184.29 ms | 674 MB (rss) | ✓ 0.0014×tol | 1.00x vs nitrix-jax |
+| cov | jax-cpu | c=2000,n_obs=1000 | `numpy.cov` | ok | 69.54 ms / 82.65 ms | 120.17 ms | 575 MB (rss) | ✓ 0×tol | 1.18x vs nitrix-jax |
+| cov | jax-cuda12 | c=2000,n_obs=1000 | `cupy.cov` | ok | 21.27 ms / 21.28 ms | 274.62 ms | 8.39 MB (hbm) | ✓ 2.9e-12×tol | 29.09x vs nitrix-jax |
+| cov | jax-cuda12 | c=2000,n_obs=1000 | `nitrix-jax` | ok | 730.9 µs / 738.2 µs | 492.32 ms | 111.69 MB (hbm) | ✓ 0.00081×tol | 1.00x vs nitrix-jax |
+| cov | jax-cuda12 | c=2000,n_obs=1000 | `numpy.cov` | ok | 52.31 ms / 52.79 ms | 72.87 ms | 8.39 MB (hbm) | ✓ 0×tol | 71.57x vs nitrix-jax |
+| cov | jax-cpu | c=50,n_obs=500 | `cupy.cov` | skipped | — | — | — | — | — |
+| cov | jax-cpu | c=50,n_obs=500 | `nitrix-jax` | ok | 79.1 µs / 80.6 µs | 130.60 ms | 532 MB (rss) | ✓ 0.00053×tol | 1.00x vs nitrix-jax |
+| cov | jax-cpu | c=50,n_obs=500 | `numpy.cov` | ok | 104.6 µs / 108.6 µs | 59.45 ms | 532 MB (rss) | ✓ 0×tol | 1.32x vs nitrix-jax |
+| cov | jax-cuda12 | c=50,n_obs=500 | `cupy.cov` | ok | 258.3 µs / 270.2 µs | 541.86 ms | 0.10 MB (hbm) | ✓ 9e-13×tol | 2.33x vs nitrix-jax |
+| cov | jax-cuda12 | c=50,n_obs=500 | `nitrix-jax` | ok | 111.0 µs / 116.3 µs | 381.01 ms | 71.56 MB (hbm) | ✓ 0.00015×tol | 1.00x vs nitrix-jax |
+| cov | jax-cuda12 | c=50,n_obs=500 | `numpy.cov` | ok | 106.1 µs / 107.9 µs | 214.9 µs | 0.10 MB (hbm) | ✓ 0×tol | 0.96x vs nitrix-jax |
+| cov | jax-cpu | c=500,n_obs=2000 | `cupy.cov` | skipped | — | — | — | — | — |
+| cov | jax-cpu | c=500,n_obs=2000 | `nitrix-jax` | ok | 5.94 ms / 6.17 ms | 164.17 ms | 549 MB (rss) | ✓ 0.00076×tol | 1.00x vs nitrix-jax |
+| cov | jax-cpu | c=500,n_obs=2000 | `numpy.cov` | ok | 7.21 ms / 7.32 ms | 8.69 ms | 532 MB (rss) | ✓ 0×tol | 1.21x vs nitrix-jax |
+| cov | jax-cuda12 | c=500,n_obs=2000 | `cupy.cov` | ok | 3.68 ms / 3.70 ms | 263.00 ms | 4.19 MB (hbm) | ✓ 3e-12×tol | 16.44x vs nitrix-jax |
+| cov | jax-cuda12 | c=500,n_obs=2000 | `nitrix-jax` | ok | 224.1 µs / 230.9 µs | 350.64 ms | 83.50 MB (hbm) | ✓ 0.00052×tol | 1.00x vs nitrix-jax |
+| cov | jax-cuda12 | c=500,n_obs=2000 | `numpy.cov` | ok | 7.54 ms / 17.71 ms | 189.62 ms | 4.19 MB (hbm) | ✓ 0×tol | 33.67x vs nitrix-jax |
+:::
+
+*source: bench `74c2a463` · nitrix `fcbe94d3`*
+::::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:cov -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `c` | feature channels (channels-last) |
+| `obs` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

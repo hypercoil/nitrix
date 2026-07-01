@@ -1,0 +1,19 @@
+---
+title: "INVERSE_LINK"
+generated: true
+---
+
+[‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
+
+*Re-exported here; defined in `nitrix.stats._family`.*
+
+<!-- nitrix:gen sig:INVERSE_LINK -->
+```python
+INVERSE_LINK = Link(name='inverse', link=(lambda mu: 1.0 / jnp.clip(mu, _EPS, None)), linkinv=(lambda eta: 1.0 / jnp.clip(eta, _EPS, None)), mu_eta=_inverse_mu_eta, eta_bound=(float('inf')))
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:INVERSE_LINK -->
+*TODO: describe this type alias / constant.*
+<!-- nitrix:/gen -->
+
