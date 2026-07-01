@@ -1,7 +1,7 @@
 ---
 title: "t_contrast"
 generated: true
-description: "Per-element t-test of a linear contrast $c^T  beta$."
+description: "Per-element t-test of a linear contrast $c^{ top}  beta$."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -13,17 +13,12 @@ t_contrast(result: GLMResult, contrast: Float[Array, 'p'], *, cov: Optional[Floa
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:t_contrast -->
-Per-element t-test of a linear contrast $c^T \beta$.
+Per-element t-test of a linear contrast $c^{\top} \beta$.
 
-Returns `(effect, se, t, p_value)`: the contrast estimate, its standard
-error, the t statistic, and the two-sided p-value at `dof_resid` degrees
-of freedom (ModelArray `lm` columns `estimate` / `std.error` /
+Computes, for every element, the contrast estimate, its standard error, the
+t statistic, and the two-sided p-value at `result.dof_resid` degrees of
+freedom (the ModelArray `lm` columns `estimate` / `std.error` /
 `statistic` / `p.value`).
-
-`cov` overrides the coefficient covariance: pass a `(V, p, p)` (or shared
-`(p, p)`) matrix -- e.g. the robust `sandwich_cov` output -- to use
-$c^T cov c$ directly (already on the variance scale).  The default
-(`None`) is the model-based $dispersion * (X^T W X)^{-1}$ (unchanged).
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:t_contrast -->
@@ -31,11 +26,11 @@ $c^T cov c$ directly (already on the variance scale).  The default
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | — |
-| `contrast` | `Float` | `p` | — | — |
-| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | — |
+| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the coefficients, unscaled covariance, dispersion, and residual degrees of freedom. |
+| `contrast` | `Float` | `p` | — | `(p,)` contrast vector $c$; the tested effect is $c^{\top} \beta$. |
+| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | Optional coefficient covariance override, either a shared `(p, p)` or a per-element `(V, p, p)` matrix -- e.g. the robust output of `sandwich_cov`. When given, the variance is $c^{\top} \Sigma\, c$ taken directly (already on the variance scale). The default (`None`) uses the model-based covariance $\mathrm{dispersion} \cdot (X^{\top} W X)^{-1}$. |
 
-**Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']]`.
+**Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V'], Float[Array, 'V']]`. `(V,)` contrast estimate $c^{\top} \beta$. `(V,)` standard error of the contrast. `(V,)` t statistic `effect / se`. `(V,)` two-sided p-value at `result.dof_resid` degrees of freedom.
 <!-- nitrix:/gen -->
 
 

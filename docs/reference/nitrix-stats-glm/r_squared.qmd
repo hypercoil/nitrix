@@ -1,7 +1,7 @@
 ---
 title: "r_squared"
 generated: true
-description: "Per-element $R^2$ (Gaussian) / deviance explained (general)."
+description: "Per-element $R^2$ (Gaussian) or deviance explained (general)."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -13,11 +13,12 @@ r_squared(result: GLMResult) -> Float[Array, 'V']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:r_squared -->
-Per-element $R^2$ (Gaussian) / deviance explained (general).
+Per-element $R^2$ (Gaussian) or deviance explained (general).
 
-For the Gaussian family `deviance` is the residual sum of squares and
-`null_deviance` the total sum of squares, so this is the ordinary
-$R^2$; for other families it is the fraction of deviance explained.
+For the Gaussian family the deviance is the residual sum of squares and the
+null deviance the total sum of squares, so this is the ordinary coefficient
+of determination $R^2$; for other families it is the fraction of
+deviance explained, i.e. `deviance_explained`.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:r_squared -->
@@ -25,9 +26,9 @@ $R^2$; for other families it is the fraction of deviance explained.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | — |
+| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the model and null deviances. |
 
-**Returns** `Float` — shape `V`.
+**Returns** `Float` — shape `V`. `(V,)` $R^2$ (or deviance explained), one per element.
 <!-- nitrix:/gen -->
 
 

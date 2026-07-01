@@ -1,7 +1,7 @@
 ---
 title: "deviance_explained"
 generated: true
-description: "Per-element fraction of null deviance explained: `1 - dev / null_dev`."
+description: "Per-element fraction of null deviance explained."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -13,7 +13,10 @@ deviance_explained(result: GLMResult) -> Float[Array, 'V']
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:deviance_explained -->
-Per-element fraction of null deviance explained: `1 - dev / null_dev`.
+Per-element fraction of null deviance explained.
+
+Computes $1 - D / D_0$, where $D$ is the model deviance and
+$D_0$ the intercept-only (null) deviance.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:deviance_explained -->
@@ -21,9 +24,9 @@ Per-element fraction of null deviance explained: `1 - dev / null_dev`.
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | — |
+| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the model and null deviances. |
 
-**Returns** `Float` — shape `V`.
+**Returns** `Float` — shape `V`. `(V,)` fraction of null deviance explained, one per element.
 <!-- nitrix:/gen -->
 
 
