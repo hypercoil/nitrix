@@ -23,14 +23,14 @@ Fit a mass-univariate GLM: shared design `X`, per-element responses.
 |------------|--------|--------|----------|--------------------------------------------------------------|
 | `Y` | `Float` | `V` × `N` | — | `(V, N)` responses -- `V` elements, `N` observations. |
 | `X` | `Float` | `N` × `p` | — | `(N, p)` design, shared across elements (include your own intercept column -- no intercept is added). |
-| `family` | `Union[str, Family]` | — | `GAUSSIAN` | Exponential family + link: a built-in name (`'gaussian'` / `'binomial'` / `'poisson'`) or a `Family` instance. Default `GAUSSIAN` identity = OLS. |
+| `family` | `Union[str, Family]` | — | `GAUSSIAN` | Exponential family + link: a built-in name (`'gaussian'` / `'binomial'` / `'poisson'`) or a `Family` instance. Default `GAUSSIAN` identity, i.e. ordinary least squares. |
 | `weights` | `Optional[Float[Array, 'N']]` | — | `None` | Optional `(N,)` prior observation weights (WLS / known precision). `None` is unweighted. |
 | `rank` | `Optional[int]` | — | `None` | Effective rank of `X` for the residual degrees of freedom (dispersion / SE / AIC). `None` (default) detects it host-side (`matrix_rank`) when `X` is concrete, falling back to `p` under `jax.jit`; pass it explicitly for a known rank-deficient design traced under `jit`. |
 | `n_iter` | `int` | — | `25` | IRLS iterations for non-Gaussian families (ignored on the OLS path). |
 | `ridge` | `float` | — | `0.0` | Optional L2 stabiliser added to the normal-equation matrix. |
 | `block` | `Optional[int]` | — | `None` | Optional element-block size bounding peak memory on the per-element IRLS path (non-Gaussian families). `None` (default) is a single `vmap`; the OLS fast path is already vectorised and ignores it. |
 
-**Returns** `GLMResult`.
+**Returns** `GLMResult`. A `GLMResult` carrying the per-element coefficients, unscaled covariance, dispersion, model deviance, null deviance, and maximised log-likelihood.
 <!-- nitrix:/gen -->
 
 

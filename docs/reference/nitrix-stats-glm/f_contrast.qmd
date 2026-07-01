@@ -1,7 +1,7 @@
 ---
 title: "f_contrast"
 generated: true
-description: "Per-element F-test of a multi-row contrast `C beta = 0`."
+description: "Per-element F-test of a multi-row contrast $C  beta = 0$."
 ---
 
 [‹ back to `nitrix.stats.glm`](../nitrix-stats-glm.qmd)
@@ -13,15 +13,10 @@ f_contrast(result: GLMResult, contrast: Float[Array, 'm p'], *, cov: Optional[Fl
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen overview:f_contrast -->
-Per-element F-test of a multi-row contrast `C beta = 0`.
+Per-element F-test of a multi-row contrast $C \beta = 0$.
 
-Returns `(F, p_value, df1, df2)` with `df1 = m` (contrast rank) and
-`df2 = dof_resid`.
-
-`cov` overrides the coefficient covariance (e.g. the robust
-`sandwich_cov` output): the Wald quadratic form uses $C cov C^T$ directly
-and the statistic is `quad / m` (no dispersion rescale).  The default
-(`None`) is the model-based $dispersion * (X^T W X)^{-1}$ (unchanged).
+Forms the Wald quadratic form of the `m` contrast rows against the fitted
+coefficients and returns an F statistic per element.
 <!-- nitrix:/gen -->
 
 <!-- nitrix:gen params:f_contrast -->
@@ -29,11 +24,11 @@ and the statistic is `quad / m` (no dispersion rescale).  The default
 
 | parameter | type | shape | default | description |
 |------------|--------|--------|----------|--------------------------------------------------------------|
-| `result` | `GLMResult` | — | — | — |
-| `contrast` | `Float` | `m` × `p` | — | — |
-| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | — |
+| `result` | `GLMResult` | — | — | A fitted `GLMResult` supplying the coefficients, unscaled covariance, dispersion, and residual degrees of freedom. |
+| `contrast` | `Float` | `m` × `p` | — | `(m, p)` contrast matrix $C$; the tested hypothesis is $C \beta = 0$. |
+| `cov` | `Optional[Float[Array, '... p p']]` | — | `None` | Optional coefficient covariance override, either a shared `(p, p)` or a per-element `(V, p, p)` matrix -- e.g. the robust output of `sandwich_cov`. When given, the Wald quadratic form uses $C \Sigma\, C^{\top}$ directly and the statistic is $\mathrm{quad} / m$ (no dispersion rescale). The default (`None`) uses the model-based covariance $\mathrm{dispersion} \cdot (X^{\top} W X)^{-1}$. |
 
-**Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]`.
+**Returns** `Tuple[Float[Array, 'V'], Float[Array, 'V'], float, float]`. `(V,)` F statistic, one per element. `(V,)` upper-tail p-value on `(df1, df2)` degrees of freedom. Numerator degrees of freedom, equal to the contrast rank `m`. Denominator degrees of freedom, equal to `result.dof_resid`.
 <!-- nitrix:/gen -->
 
 
