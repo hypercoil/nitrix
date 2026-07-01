@@ -6,15 +6,15 @@ Format-agnostic application of a sparse mesh / graph operator to a field.
 
 A single dispatch over the sparse operator formats so the surface-algorithm
 layer (curvature, distortion, geodesic smoothing, DEC) never branches on
-whether an operator is stored as a flat ``ELL`` or a bucketed
-``SectionedELL``.  Mirrors the ``linalg._eigsolve`` / ``Interpolator``
+whether an operator is stored as a flat :class:`ELL` or a bucketed
+:class:`SectionedELL`.  Mirrors the eigensolver and :class:`Interpolator`
 "factor the independent axes, don't hand-write the cross product" discipline:
 the *method* (algebra) and the *task* (which operator) compose, the storage
 *format* is dispatched behind one seam.
 
-``ELL`` (near-uniform degree, e.g. the icosphere) and ``SectionedELL``
-(irregular valence, e.g. a ``recon-all`` white surface) thus flow through the
-same algorithm code.
+:class:`ELL` (near-uniform degree, e.g. the icosphere) and
+:class:`SectionedELL` (irregular valence, e.g. a ``recon-all`` white surface)
+thus flow through the same algorithm code.
 """
 
 from __future__ import annotations
@@ -38,6 +38,14 @@ __all__ = [
 
 # A sparse operator in either supported storage format.
 MeshOperator = Union[ELL, SectionedELL]
+"""
+A sparse mesh / graph operator in either supported storage format.
+
+The union of the two sparse operator layouts consumed by
+:func:`apply_operator`: a flat :class:`ELL` (near-uniform vertex degree) or a
+bucketed :class:`SectionedELL` (irregular valence).  Surface-algorithm code
+accepts this alias so it can remain agnostic to the underlying storage format.
+"""
 
 
 def apply_operator(
@@ -49,37 +57,40 @@ def apply_operator(
 ) -> Num[Array, '... m d']:
     """Apply a sparse operator to a per-vertex field, format-agnostically.
 
-    Computes the semiring contraction ``op @ x`` whether ``op`` is a flat
-    ``ELL`` or a bucketed ``SectionedELL``.  Leading axes of ``x`` are treated
-    as batch and vmapped over the 2-D core (the operator is shared across the
-    batch -- it is not itself batched), matching the shape contract of the
-    ``sparse.mesh`` cross-level wrappers.
+    Computes the semiring contraction :math:`\\mathrm{op} \\cdot x` whether
+    ``op`` is a flat :class:`ELL` or a bucketed :class:`SectionedELL`.  Leading
+    axes of ``x`` are treated as batch and vmapped over the 2-D core (the
+    operator is shared across the batch -- it is not itself batched), matching
+    the shape contract of the cross-level mesh wrappers.
 
     Parameters
     ----------
-    op
-        The sparse operator, ``ELL`` or ``SectionedELL`` of shape
-        ``(m, n)``.
-    x
-        Per-vertex field, shape ``(..., n, d)``.  For a scalar field use a
-        trailing singleton ``(..., n, 1)``.  Must be at least 2-D.
-    semiring
-        Algebra to reduce under.  Defaults to ``REAL`` (resolved lazily to
-        avoid an import cycle).
-    backend
-        Backend passed through to the underlying kernel (``'jax'`` is the
-        only GA path for the ELL gather; see ``ell-on-triton.md``).
+    op : ELL or SectionedELL
+        The sparse operator, an :class:`ELL` or :class:`SectionedELL` of shape
+        ``(m, n)`` mapping an ``n``-vertex field to an ``m``-vertex field.
+    x : Num[Array, '... n d']
+        Per-vertex field of shape ``(..., n, d)``, where ``d`` is the trailing
+        feature dimension.  For a scalar field use a trailing singleton
+        ``(..., n, 1)``.  Must be at least 2-D.
+    semiring : Semiring, optional
+        Algebra to reduce under.  Defaults to :data:`~nitrix.semiring.REAL`
+        (resolved lazily to avoid an import cycle).
+    backend : {'auto', 'jax', 'pallas-cuda'}, optional
+        Backend passed through to the underlying kernel.  ``'jax'`` (the
+        default) is the only generally-available path for the ELL gather.
 
     Returns
     -------
-    ``(..., m, d)`` -- the contracted field.
+    Num[Array, '... m d']
+        The contracted field of shape ``(..., m, d)``, carrying the same
+        leading batch axes and trailing feature dimension as ``x``.
 
     Raises
     ------
     ValueError
         If ``x`` is not at least 2-D (it must carry an ``(n, d)`` core).
     TypeError
-        If ``op`` is neither an ``ELL`` nor a ``SectionedELL``.
+        If ``op`` is neither an :class:`ELL` nor a :class:`SectionedELL`.
     """
     if x.ndim < 2:
         raise ValueError(

@@ -1,0 +1,42 @@
+---
+title: "sectioned_ell_from_ragged"
+generated: true
+description: "Build a [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) from ragged per-row neighbour lists."
+---
+
+[‹ back to `nitrix.sparse.ell_sectioned`](../nitrix-sparse-ell_sectioned.qmd)
+
+<!-- nitrix:gen sig:sectioned_ell_from_ragged -->
+```python
+sectioned_ell_from_ragged(values_per_row: Sequence[Num[Array, '...']], indices_per_row: Sequence[Int[Array, '...']], *, n_cols: int, identity: Any = 0.0, pad_index: int = 0, bucket_by: Optional[Callable[[int], int]] = None) -> SectionedELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sectioned_ell_from_ragged -->
+Build a [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) from ragged per-row neighbour lists.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sectioned_ell_from_ragged -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `values_per_row` | `Sequence[Num[Array, '...']]` | — | — | Length-`m` sequences of 1-D arrays. `values_per_row[i]` and `indices_per_row[i]` must have the same length, equal to row `i`'s degree. |
+| `indices_per_row` | `Sequence[Int[Array, '...']]` | — | — | Length-`m` sequences of 1-D arrays. `values_per_row[i]` and `indices_per_row[i]` must have the same length, equal to row `i`'s degree. |
+| `n_cols` | `int` | — | — | Outer dim of the implicit sparse matrix. |
+| `identity` | `Any` | — | `0.0` | Semiring identity used to pad rows within each bucket up to the bucket's `k_max`. |
+| `pad_index` | `int` | — | `0` | Row of the dense operand that pad positions reference. Default `0`; must be `< n_cols`. |
+| `bucket_by` | `Optional[Callable[[int], int]]` | — | `None` | Custom bucketing function `degree -> bucket_idx`. Defaults to `ceil(log2(max(degree, 1)))`. |
+
+**Returns** `SectionedELL`. A [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd) with one [`ELL`](../nitrix-sparse.qmd) per non-empty bucket.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:sectioned_ell_from_ragged -->
+::: {.callout-note}
+Runs on the host (not JIT-compatible).  Construction is
+typically done once per adjacency (e.g., once per mesh or once
+per pre-computed k-NN graph); the resulting [`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd)
+can then be passed through JIT'd code many times.
+:::
+<!-- nitrix:/gen -->
+

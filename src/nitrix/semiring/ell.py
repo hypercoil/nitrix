@@ -2,28 +2,24 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 """
-Public ``semiring_ell_matmul`` with three-level backend selection.
+Semiring-generalised ELL-sparse matrix multiplication.
 
-The function shape matches SPEC §4.1::
+This module provides :func:`semiring_ell_matmul`, which contracts a sparse
+left operand held in ELL (ELLPACK) layout against a dense right operand
+under an arbitrary semiring, together with its transpose companion
+:func:`semiring_ell_rmatvec`.  The forward :func:`semiring_ell_matmul`
+dispatches across a three-level backend selection (auto, Pallas-CUDA, or
+pure JAX); :func:`semiring_ell_rmatvec` is pure JAX.
 
-    semiring_ell_matmul(
-        values: Num[Array, "m k_max"],
-        indices: Int[Array, "m k_max"],
-        B: Num[Array, "n_cols ncol"],
-        *,
-        semiring: Semiring = REAL,
-        n_cols: int | None = None,
-        backend: Backend = "auto",
-    ) -> Num[Array, "m ncol"]
+The pad positions of each ELL row are expected to be filled with the
+algebra's identity (for example ``0`` for the real semiring, or
+:math:`-\\infty` for the log semiring), so that padded entries contribute
+nothing to the reduction.  See :func:`nitrix.sparse.ell.ell_pad` for the
+helper that produces such padding.
 
-The ELL row's pad positions are expected to be filled with the algebra's
-identity (e.g., ``0`` for ``REAL``, ``-inf`` for ``LOG``).  See
-``nitrix.sparse.ell.ell_pad`` for the helper.
-
-Per SPEC §10, ``semiring_ell_matmul`` is the central op for
-brain-geometry workloads and is the load-bearing kernel behind the G0
-gate.  At first GA we ship the JAX path unconditionally and the Pallas
-path opt-in (pending the Ampere benchmark in ``bench/g0_ampere_ell.py``).
+This is the central operator for brain-geometry workloads and the
+load-bearing sparse kernel of the library.  The pure-JAX path is always
+available; the Pallas-CUDA path is opt-in on supported hardware.
 """
 
 from __future__ import annotations
@@ -199,7 +195,31 @@ def _semiring_ell_matmul_pallas(
     *,
     semiring: Semiring[Any],
 ) -> Optional[Array]:
-    """Pallas dispatch; returns ``None`` if the kernel rejects the request."""
+    """Attempt the Pallas-CUDA ELL matmul, returning ``None`` on rejection.
+
+    Imports the CUDA Pallas kernel lazily and invokes it.  If the kernel
+    module cannot be imported, or the kernel signals that it cannot tile
+    the requested shape, ``None`` is returned so the caller can fall back
+    to the pure-JAX reference path.
+
+    Parameters
+    ----------
+    values
+        ELL values, shape ``(m, k_max)``.
+    indices
+        ELL column indices into ``B``'s outer dimension, shape
+        ``(m, k_max)``.
+    B
+        Dense right operand, shape ``(n_cols, ncol)``.
+    semiring
+        Algebra under which the ELL contraction is reduced.
+
+    Returns
+    -------
+    Array of shape ``(m, ncol)`` holding the semiring contraction, or
+    ``None`` if the Pallas kernel is unavailable or cannot tile the
+    requested shape.
+    """
     try:
         from .._kernels.cuda.semiring_ell_matmul import (
             PallasELLNotTileable,
@@ -233,7 +253,7 @@ def semiring_ell_matmul(
 
         C[..., i, j] = (+)_p ( values[..., i, p] (*) B[..., indices[..., i, p], j] )
 
-    where the implicit ``M × N`` sparse left operand has the per-row
+    where the implicit :math:`M \\times N` sparse left operand has the per-row
     neighbour list ``indices[..., i, :]`` with values
     ``values[..., i, :]``.  Padding positions in ``indices`` must point
     to a valid row of ``B``, and the corresponding ``values`` entries
@@ -258,7 +278,8 @@ def semiring_ell_matmul(
 
     Returns
     -------
-    Array of shape ``(*broadcast_batch, m, ncol)``.
+    Array of shape ``(*broadcast_batch, m, ncol)`` holding the semiring
+    contraction of the sparse left operand against ``B``.
     """
     _check_ell_shapes(
         values.shape,
@@ -369,57 +390,69 @@ def semiring_ell_rmatvec(
     semiring: Semiring[Any] = REAL,
     n_cols: int,
 ) -> Num[Array, '... n_cols ncol']:
-    """Adjoint (transpose) ELL matvec: ``Y = Aᵀ X`` for the implicit operand.
+    """Adjoint (transpose) ELL matvec: :math:`Y = A^{\\top} X` for the operand.
 
     The transpose companion of :func:`semiring_ell_matmul`.  Where the
-    matmul *gathers* -- ``(A X)[i] = Σ_p values[i, p] · X[indices[i, p]]``
-    -- this *scatters*::
+    matmul *gathers* --
+    :math:`(A X)_i = \\sum_p \\mathtt{values}_{i, p} \\cdot X_{\\mathtt{indices}_{i, p}}`
+    -- this *scatters*:
 
-        Y[c, j] = Σ_{(i, p) : indices[i, p] == c} values[i, p] · X[i, j]
+    .. math::
 
-    for the same implicit ``m × n_cols`` operand ``A``.  Composing the two
-    gives the symmetric-part matvec ``½(A X + Aᵀ X) = sym(A) X``, which is
-    what the extremal eigensolvers require when an adjacency was built by a
-    construction (e.g. top-k-per-row affinity sparsification,
-    ``ell_from_dense``) that does **not** preserve symmetry.
+        Y_{c, j} = \\sum_{(i, p)\\,:\\,\\mathtt{indices}_{i, p} = c}
+            \\mathtt{values}_{i, p} \\cdot X_{i, j}
+
+    for the same implicit :math:`m \\times n_{\\mathrm{cols}}` operand
+    :math:`A`.  Composing the two gives the symmetric-part matvec
+    :math:`\\tfrac{1}{2}(A X + A^{\\top} X) = \\operatorname{sym}(A)\\,X`,
+    which is what the extremal eigensolvers require when an adjacency was
+    built by a construction (for example top-k-per-row affinity
+    sparsification, :func:`nitrix.sparse.ell_from_dense`) that does **not**
+    preserve symmetry.
 
     Parameters
     ----------
     values
         ELL values, shape ``(..., m, k_max)``.  Pad positions must hold the
-        REAL additive identity ``0``.
+        real additive identity ``0``.
     indices
         ELL column indices, shape ``(..., m, k_max)``; the scatter targets.
     X
         Dense operand indexed by the ELL *row*, shape ``(..., m, ncol)``.
     semiring
-        The algebra to reduce under.  **REAL only** -- the additive scatter
-        is meaningless for a general monoid (``½(A + Aᵀ)`` needs linear
-        structure; a non-zero pad identity would scatter spurious mass).
-        Any other algebra raises ``NotImplementedError``.  The argument is
-        retained for surface parity with ``semiring_ell_matmul``.
+        The algebra to reduce under.  **Real semiring only** -- the additive
+        scatter is meaningless for a general monoid (the symmetric part
+        :math:`\\tfrac{1}{2}(A + A^{\\top})` needs linear structure, and a
+        non-zero pad identity would scatter spurious mass).  Any other
+        algebra raises :class:`NotImplementedError`.  The argument is
+        retained for surface parity with :func:`semiring_ell_matmul`.
     n_cols
-        Outer dim of the implicit operand ``A`` and the leading axis of the
-        output.  Required: unlike the gather direction it is **not**
-        recoverable from ``X`` (which is indexed by the row axis ``m``).
+        Outer dimension of the implicit operand :math:`A` and the leading
+        axis of the output.  Required: unlike the gather direction it is
+        **not** recoverable from ``X`` (which is indexed by the row axis
+        ``m``).
 
     Returns
     -------
-    Array of shape ``(*broadcast_batch, n_cols, ncol)``.
+    Array of shape ``(*broadcast_batch, n_cols, ncol)`` holding the
+    scattered adjoint matvec.
 
     Notes
     -----
-    JAX-only at GA: there is no Pallas scatter kernel yet (the matmul
-    backward's ``g_B`` scatter is likewise JAX-only), so no ``backend``
-    argument is exposed.  Differentiable w.r.t. ``values`` and ``X`` via
-    the registered REAL adjoint VJP (``indices`` is integer / non-diff).
+    JAX-only: there is no Pallas scatter kernel (the matmul backward's
+    gradient-with-respect-to-``B`` scatter is likewise JAX-only), so no
+    ``backend`` argument is exposed.  The result is differentiable with
+    respect to ``values`` and ``X`` via the registered real-semiring adjoint
+    VJP (``indices`` is integer-valued and therefore non-differentiable).
     """
     if semiring is not REAL:
         raise NotImplementedError(
             f'semiring_ell_rmatvec: the additive ELL adjoint is implemented '
             f'for the REAL semiring only; got {semiring.name!r}.'
         )
-    _check_ell_shapes(values.shape, indices.shape, X.shape, 'semiring_ell_rmatvec')
+    _check_ell_shapes(
+        values.shape, indices.shape, X.shape, 'semiring_ell_rmatvec'
+    )
 
     batch_dims = len(values.shape) - 2
 

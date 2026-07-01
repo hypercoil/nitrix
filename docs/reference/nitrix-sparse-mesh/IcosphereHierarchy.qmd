@@ -1,0 +1,52 @@
+---
+title: "IcosphereHierarchy"
+generated: true
+description: "Sequence of icosphere meshes at subdivision levels `0..max_level`."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:IcosphereHierarchy -->
+```python
+class IcosphereHierarchy
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:IcosphereHierarchy -->
+Sequence of icosphere meshes at subdivision levels `0..max_level`.
+
+Built by [`icosphere_hierarchy`](../nitrix-sparse-mesh/icosphere_hierarchy.qmd).  Holds the per-level
+meshes plus the parent-child bookkeeping needed by
+[`icosphere_cross_level_adjacency`](../nitrix-sparse-mesh/icosphere_cross_level_adjacency.qmd) and
+[`icosphere_bary_upsampler`](../nitrix-sparse-mesh/icosphere_bary_upsampler.qmd) to construct the cross-level
+[`ELL`](../nitrix-sparse-ell/ELL.qmd) operators in
+$O(n_{\text{vertices}})$ without re-running subdivision.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:IcosphereHierarchy.__init__ -->
+```python
+__init__(meshes: Tuple[Mesh, ...], parents: Tuple[Optional[NDArray[Any]], ...]) -> None
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:IcosphereHierarchy -->
+::: {.callout-note}
+The hierarchy is host-side (NumPy parent tables + JAX-array
+meshes).  Cross-level ELLs returned from the constructors are
+plain JAX, so the downstream matmul / pool / upsample paths
+stay GPU-native.
+
+Unlike [`Mesh`](../nitrix-sparse-mesh/Mesh.qmd) / [`ELL`](../nitrix-sparse-ell/ELL.qmd) /
+[`SectionedELL`](../nitrix-sparse-ell_sectioned/SectionedELL.qmd),
+[`IcosphereHierarchy`](../nitrix-sparse-mesh/IcosphereHierarchy.qmd) is
+**deliberately not registered as a JAX pytree**.  Its `parents` tables
+are host-side NumPy construction metadata (unhashable as static aux), and
+the hierarchy is a *construction artefact*: a consumer uses it once on the
+host to build the per-level meshes and cross-level ELLs, then traces those
+array-bearing outputs -- the hierarchy object itself never needs to cross a
+`jit` / `grad` / `vmap` boundary.
+:::
+<!-- nitrix:/gen -->
+

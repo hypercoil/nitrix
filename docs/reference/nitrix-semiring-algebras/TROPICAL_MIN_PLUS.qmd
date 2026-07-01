@@ -1,0 +1,23 @@
+---
+title: "TROPICAL_MIN_PLUS"
+generated: true
+description: "The min-plus tropical algebra :math:`( min, +)`."
+---
+
+[‹ back to `nitrix.semiring.algebras`](../nitrix-semiring-algebras.qmd)
+
+<!-- nitrix:gen sig:TROPICAL_MIN_PLUS -->
+```python
+TROPICAL_MIN_PLUS: StrictSemiring[Any] = StrictSemiring(monoid=(_MinMonoid()), binary_op=(_SumSemigroup()), identity=(jnp.inf), annihilator=(jnp.inf), name='tropical_min_plus', matmul_vjp=tropical_min_plus_matmul_vjp, ell_matmul_vjp=tropical_min_plus_ell_matmul_vjp)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:TROPICAL_MIN_PLUS -->
+The min-plus tropical algebra $(\min, +)$.
+
+The monoid is minimisation and the binary operation is addition, with
+identity and annihilator $+\infty$. Contractions compute
+shortest-path / least-cost quantities; the backward pass gathers the
+subgradient at the minimising index.
+<!-- nitrix:/gen -->
+

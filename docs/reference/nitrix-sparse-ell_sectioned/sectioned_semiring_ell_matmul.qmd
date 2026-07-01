@@ -1,0 +1,59 @@
+---
+title: "sectioned_semiring_ell_matmul"
+generated: true
+description: "Sectioned-ELL semiring matrix multiplication."
+---
+
+[‹ back to `nitrix.sparse.ell_sectioned`](../nitrix-sparse-ell_sectioned.qmd)
+
+<!-- nitrix:gen sig:sectioned_semiring_ell_matmul -->
+```python
+sectioned_semiring_ell_matmul(sectioned: SectionedELL, B: Num[Array, 'n_cols ncol'], *, semiring: Semiring[Any] = REAL, backend: Backend = 'auto') -> Num[Array, 'm ncol']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:sectioned_semiring_ell_matmul -->
+Sectioned-ELL semiring matrix multiplication.
+
+For each bucket, run [`semiring_ell_matmul`](../nitrix-semiring.qmd) and
+scatter the result back to the original row positions.  The bucket loop is
+Python-level (one trace per bucket); scatter-back uses
+`jnp.zeros(...).at[row_indices].set(...)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:sectioned_semiring_ell_matmul -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `sectioned` | `SectionedELL` | — | — | The bucketed adjacency. |
+| `B` | `Num` | `n_cols` × `ncol` | — | Dense right operand, `(n_cols, ncol)`. |
+| `semiring` | `Semiring[Any]` | — | `REAL` | Algebra to reduce under. |
+| `backend` | `Backend` | — | `'auto'` | `"auto"`, `"pallas-cuda"`, or `"jax"`. Passed through to the per-bucket [`semiring_ell_matmul`](../nitrix-semiring.qmd) calls. |
+
+**Returns** `Num` — shape `m` × `ncol`. The dense result, shape `(n_rows, ncol)`, with each bucket's rows scattered back to their original positions.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:sectioned_semiring_ell_matmul -->
+::: {.callout-note}
+Empty rows (degree 0) live in bucket 0 with all-identity
+values; their output is the algebra's identity, broadcast over
+`ncol`.  This is consistent with "no neighbours -> no
+contribution".
+
+For the [`LOG`](../nitrix-semiring.qmd) and `TROPICAL_*` algebras with
+`-inf` / `+inf` identities, empty rows produce `-inf` / `+inf`
+outputs respectively, which is the algebra-correct answer.
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:sectioned_semiring_ell_matmul -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_cols` | *(undocumented — add to `_dimensions.yml`)* |
+| `ncol` | *(undocumented — add to `_dimensions.yml`)* |
+| `m` | rows of a multi-row contrast |
+<!-- nitrix:/gen -->

@@ -1,0 +1,67 @@
+---
+title: "vertex_areas"
+generated: true
+description: "Per-vertex surface area (the lumped mass-matrix diagonal)."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:vertex_areas -->
+```python
+vertex_areas(mesh: Mesh, *, scheme: str = 'voronoi') -> Float[Array, 'n_vertices']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:vertex_areas -->
+Per-vertex surface area (the lumped mass-matrix diagonal).
+
+The area measure under every area-weighted surface operation:
+$M^{-1} L$ mean curvature, areal distortion, anatomical surface
+area, and the backward-Euler geodesic-smoothing solve
+$(M + t L) x = M x_0$.
+
+Two schemes, both partitioning each triangle's area among its three
+vertices (so `sum(vertex_areas) == sum(face_areas)` exactly for both):
+
+- `'barycentric'` -- each face donates `area / 3` to each of its
+  vertices.  Cheap, always non-negative, the safe fallback.
+- `'voronoi'` (default) -- the mixed Voronoi rule of Meyer et al.
+  (2003).  For a non-obtuse triangle, vertex $i$ receives the
+  circumcentric-dual (Voronoi) area
+  $\tfrac{1}{8} (\cot(\text{angle}_k) \lVert x_i - x_j
+  \rVert^2 + \cot(\text{angle}_j) \lVert x_i - x_k \rVert^2)$.
+  For an **obtuse** triangle the Voronoi cell falls outside the
+  triangle, so the area is assigned `area / 2` to the obtuse vertex
+  and `area / 4` to each of the others.  **This obtuse branch is
+  load-bearing on real cortical surfaces** (the icosphere never
+  exercises it); the barycentric scheme silently ignores the issue.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:vertex_areas -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh. |
+| `scheme` | `str` | — | `'voronoi'` | `'voronoi'` (default, mixed/obtuse-safe) or `'barycentric'`. |
+
+**Returns** `Float` — shape `n_vertices`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:vertex_areas -->
+### References
+
+Meyer, M., Desbrun, M., Schröder, P., & Barr, A. H. (2003).
+Discrete differential-geometry operators for triangulated
+2-manifolds. In *Visualization and Mathematics III* (pp. 35-57).
+Springer. https://doi.org/10.1007/978-3-662-05105-4_2
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:vertex_areas -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_vertices` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

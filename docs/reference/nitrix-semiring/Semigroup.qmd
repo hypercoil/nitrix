@@ -1,0 +1,47 @@
+---
+title: "Semigroup"
+generated: true
+description: "A binary operation supporting NumPy-style broadcasting."
+---
+
+[‹ back to `nitrix.semiring`](../nitrix-semiring.qmd)
+
+*Re-exported here; defined in `nitrix.semiring._types`.*
+
+<!-- nitrix:gen sig:Semigroup -->
+```python
+class Semigroup(Protocol)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:Semigroup -->
+A binary operation supporting NumPy-style broadcasting.
+
+Used as the semiring's `(*)`: the per-$(i, k, j)$ combine
+inside the contraction. Need not be commutative. Need not be
+associative (it is the *outer* $+$ reduction that imposes the
+algebraic structure; see [`Monoid`](../nitrix-semiring/Monoid.qmd)).
+
+The kernel only relies on the broadcast call
+`combine(a_col, b_row) -> value`, so `combine` should be a
+pure JAX function with no captured state.
+<!-- nitrix:/gen -->
+
+### Methods
+
+<!-- nitrix:gen sig:Semigroup.combine -->
+```python
+combine(a: Num[Array, '*shape'], b: Num[Array, '*shape']) -> Num[Array, '*shape']
+```
+<!-- nitrix:/gen -->
+
+Combine two operands elementwise with broadcasting.
+
+
+<!-- nitrix:gen dims:Semigroup -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `*shape` | a variadic group of axes (`shape`) |
+<!-- nitrix:/gen -->

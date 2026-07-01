@@ -1,0 +1,28 @@
+---
+title: "icosphere"
+generated: true
+description: "Construct an icosphere via recursive subdivision."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:icosphere -->
+```python
+icosphere(n_iterations: int = 0) -> Mesh
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:icosphere -->
+Construct an icosphere via recursive subdivision.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:icosphere -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `n_iterations` | `int` | — | `0` | Subdivision count. `0` gives 12 vertices (base icosahedron). `n` gives $10 \cdot 4^{n} + 2$ vertices: `n=1` -> 42, `n=2` -> 162, ..., `n=7` -> 163842 (matches FreeSurfer's `ico7`). |
+
+**Returns** `Mesh`. A [`Mesh`](../nitrix-sparse-mesh/Mesh.qmd) with unit-sphere vertices and oriented faces.
+<!-- nitrix:/gen -->
+

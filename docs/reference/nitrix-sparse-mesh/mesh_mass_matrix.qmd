@@ -1,0 +1,58 @@
+---
+title: "mesh_mass_matrix"
+generated: true
+description: "Mass matrix `M` of a triangle mesh, as a (diagonal) ELL operator."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_mass_matrix -->
+```python
+mesh_mass_matrix(mesh: Mesh, *, scheme: str = 'voronoi', lumped: bool = True) -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_mass_matrix -->
+Mass matrix `M` of a triangle mesh, as a (diagonal) ELL operator.
+
+The companion of [`mesh_cotangent_laplacian`](../nitrix-sparse-mesh/mesh_cotangent_laplacian.qmd) (which is the
+unnormalised *stiffness* $L$): the discrete inner product that
+turns the stiffness into a true Laplace-Beltrami operator
+$M^{-1} L$.  The lumped mass is diagonal --
+$M_{ii} = \text{vertex\_areas}(\text{mesh})_i$ -- hence
+trivially invertible, which is exactly what $M^{-1} L$ mean
+curvature and the $(M + t L)$ backward-Euler smoothing solve
+need.
+
+Returned as a width-1 diagonal [`ELL`](../nitrix-sparse-ell/ELL.qmd) so it
+composes through `sparse.apply_operator`
+(`M @ x == vertex_areas[:, None] * x`); for the common case the
+caller usually wants the diagonal vector directly (use
+[`vertex_areas`](../nitrix-sparse-mesh/vertex_areas.qmd)).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_mass_matrix -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `mesh` | `Mesh` | — | — | Triangle mesh. |
+| `scheme` | `str` | — | `'voronoi'` | Area scheme forwarded to [`vertex_areas`](../nitrix-sparse-mesh/vertex_areas.qmd) (`'voronoi'` default). |
+| `lumped` | `bool` | — | `True` | `True` (default) -- the diagonal lumped mass. `False` (the consistent linear-FEM mass with off-diagonal coupling) is not yet implemented. |
+
+**Returns** `ELL`. An [`ELL`](../nitrix-sparse-ell/ELL.qmd) of shape `(n_vertices, n_vertices)` with `k_max = 1`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:mesh_mass_matrix -->
+::: {.callout-note}
+The shipped algorithms consume the lumped mass as the
+[`vertex_areas`](../nitrix-sparse-mesh/vertex_areas.qmd) vector directly (mean curvature forms
+$0.5 \, L v / \text{area}$; surface smoothing forms
+$\text{area} \cdot v + t \, L v$; the spectral sphere
+embedding uses $1 / \sqrt{\text{area}}$), not this ELL.  The
+ELL form is a convenience for symmetry with $L$ (so $M$
+can flow through the same `apply_operator` seam); it is *not* a
+load-bearing seam that any algorithm currently requires.
+:::
+<!-- nitrix:/gen -->
+

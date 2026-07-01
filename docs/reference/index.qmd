@@ -25,8 +25,10 @@ final publication as-is (SPEC §6.5).
 - [`geometry`](nitrix-geometry.qmd) — Geometric primitives for neuroimaging.
 - [`linalg`](nitrix-linalg.qmd) — nitrix.linalg -- linear-algebra primitives.
 - [`register`](nitrix-register.qmd) — nitrix.register -- pairwise registration recipes.
+- [`semiring`](nitrix-semiring.qmd) — KeOps-style streaming reductions over arbitrary algebras.
 - [`signal`](nitrix-signal.qmd) — nitrix.signal -- 1D signal-processing primitives.
 - [`smoothing`](nitrix-smoothing.qmd) — Edge-preserving and non-edge-preserving smoothing.
+- [`sparse`](nitrix-sparse.qmd) — nitrix.sparse -- geometry-aware sparse formats.
 - [`stats`](nitrix-stats.qmd) — Mass-univariate statistical modelling for neuroimaging.
 
 ### `nitrix.geometry`
@@ -72,6 +74,14 @@ final publication as-is (SPEC §6.5).
 - [`recipes`](nitrix-register-recipes.qmd) — Pairwise rigid / affine registration recipes.
 - [`regulariser`](nitrix-register-regulariser.qmd) — Explicit penalties on a displacement / velocity field.
 
+### `nitrix.semiring`
+
+- [`algebras`](nitrix-semiring-algebras.qmd) — Built-in algebras shipped with `nitrix.semiring`.
+- [`conv`](nitrix-semiring-conv.qmd) — Public [`semiring_conv`](nitrix-semiring-conv/semiring_conv.qmd) -- the convolution member of the semiring reduction family alongside [`semiring_matmul`](nitrix-semiring.qmd).
+- [`ell`](nitrix-semiring-ell.qmd) — Semiring-generalised ELL-sparse matrix multiplication.
+- [`ell_edge`](nitrix-semiring-ell_edge.qmd) — Edge-functional aggregation over ELL adjacencies.
+- [`matmul`](nitrix-semiring-matmul.qmd) — Public [`semiring_matmul`](nitrix-semiring-matmul/semiring_matmul.qmd) with three-level backend selection.
+
 ### `nitrix.signal`
 
 - [`filter`](nitrix-signal-filter.qmd) — Linear filtering: polynomial detrend and frequency-domain band-pass.
@@ -87,6 +97,13 @@ final publication as-is (SPEC §6.5).
 - [`gaussian`](nitrix-smoothing-gaussian.qmd) — Separable n-D Gaussian filter.
 - [`metric`](nitrix-smoothing-metric.qmd) — Feature-space metrics for the bounded bilateral filter.
 - [`susan`](nitrix-smoothing-susan.qmd) — SUSAN-style edge-preserving smoothing.
+
+### `nitrix.sparse`
+
+- [`ell`](nitrix-sparse-ell.qmd) — ELL sparse format primitives.
+- [`ell_sectioned`](nitrix-sparse-ell_sectioned.qmd) — Sectioned ELL -- bucketed-row format for variable-degree adjacencies.
+- [`grid`](nitrix-sparse-grid.qmd) — Regular-grid stencil specialisation of the ELL sparse format.
+- [`mesh`](nitrix-sparse-mesh.qmd) — Triangle-mesh sparse adjacency constructors.
 
 ### `nitrix.stats`
 

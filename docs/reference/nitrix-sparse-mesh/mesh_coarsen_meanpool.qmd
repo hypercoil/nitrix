@@ -1,0 +1,63 @@
+---
+title: "mesh_coarsen_meanpool"
+generated: true
+description: "Mean-pool fine-level features to a coarse level via an ELL adjacency."
+---
+
+[‹ back to `nitrix.sparse.mesh`](../nitrix-sparse-mesh.qmd)
+
+<!-- nitrix:gen sig:mesh_coarsen_meanpool -->
+```python
+mesh_coarsen_meanpool(coarsen_ell: ELL, fine_features: Float[Array, '... n_fine d']) -> Float[Array, '... n_coarse d']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:mesh_coarsen_meanpool -->
+Mean-pool fine-level features to a coarse level via an ELL adjacency.
+
+For each coarse vertex `i`, returns the `values`-weighted mean
+of the fine-vertex features it gathers:
+    out[i, :] = (sum_p values[i, p] * fine[indices[i, p], :])
+                / (sum_p values[i, p])
+
+With the `1.0 / 0.0` validity indicator that
+[`icosphere_cross_level_adjacency`](../nitrix-sparse-mesh/icosphere_cross_level_adjacency.qmd) stores, this is a plain mean
+over the real children of coarse vertex `i` (the padding columns,
+weight `0`, drop out of both sum and count).  A coarse vertex
+whose row is entirely padding returns zeros rather than `NaN`.
+
+This is the mean-pool sibling of [`mesh_pool_max`](../nitrix-sparse-mesh/mesh_pool_max.qmd) (max over the
+same children).  It matches the "scatter-mean with self-loop"
+coarsening used by surface-domain encoders (e.g. SUGAR's
+`IcosahedronPooling`): the coarse vertex's own previous-level
+feature is included because the coarse-original fine vertex is one
+of the children in the cross-level adjacency row.
+
+The op is documented sugar over
+[`semiring_ell_matmul`](../nitrix-semiring.qmd) under
+`REAL`: the numerator is one matmul; the denominator is the
+per-row sum of `values` (no second matmul needed).
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:mesh_coarsen_meanpool -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `coarsen_ell` | `ELL` | — | — | An [`ELL`](../nitrix-sparse-ell/ELL.qmd) of shape `(n_coarse, n_fine)`; row `i` (coarse vertex) lists the fine vertices belonging to coarse vertex `i`, with `values` the per-edge weight (use the `1.0 / 0.0` indicator from [`icosphere_cross_level_adjacency`](../nitrix-sparse-mesh/icosphere_cross_level_adjacency.qmd) for an unweighted mean). |
+| `fine_features` | `Float` | `...` × `n_fine` × `d` | — | `(..., n_fine, d)` per-vertex fine-level features. |
+
+**Returns** `Float` — shape `...` × `n_coarse` × `d`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:mesh_coarsen_meanpool -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n_fine` | *(undocumented — add to `_dimensions.yml`)* |
+| `d` | spatial dimension (2 or 3) |
+| `n_coarse` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

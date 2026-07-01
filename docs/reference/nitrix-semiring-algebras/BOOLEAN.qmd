@@ -1,0 +1,23 @@
+---
+title: "BOOLEAN"
+generated: true
+description: "The Boolean algebra: logical OR combined with logical AND."
+---
+
+[‹ back to `nitrix.semiring.algebras`](../nitrix-semiring-algebras.qmd)
+
+<!-- nitrix:gen sig:BOOLEAN -->
+```python
+BOOLEAN: StrictSemiring[Any] = StrictSemiring(monoid=(_OrMonoid()), binary_op=(_AndSemigroup()), identity=False, annihilator=False, name='boolean', matmul_vjp=boolean_matmul_vjp, ell_matmul_vjp=boolean_ell_matmul_vjp)
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:BOOLEAN -->
+The Boolean algebra: logical OR combined with logical AND.
+
+The monoid is OR (identity and annihilator `False`) and the binary
+operation is AND, giving reachability / transitive-closure contractions.
+Being non-differentiable, this algebra raises rather than providing a
+backward pass.
+<!-- nitrix:/gen -->
+

@@ -1,0 +1,113 @@
+---
+title: "semiring_ell_edge_aggregate"
+generated: true
+description: "Per-edge functional aggregation over an ELL adjacency."
+---
+
+[‹ back to `nitrix.semiring.ell_edge`](../nitrix-semiring-ell_edge.qmd)
+
+<!-- nitrix:gen sig:semiring_ell_edge_aggregate -->
+```python
+semiring_ell_edge_aggregate(edge_fn: EdgeFn, ell: ELL, x: Num[Array, '... n d_in'], *, semiring: Semiring[Any] = REAL, edge_attr: Optional[Num[Array, 'n k_max d_e']] = None) -> Num[Array, '... n d_out']
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:semiring_ell_edge_aggregate -->
+Per-edge functional aggregation over an ELL adjacency.
+
+For each `(i, p)` in the ELL pattern with `j = ell.indices[i,
+p]`, build a per-edge message via the user-supplied callable
+`edge_fn`, then aggregate per row under the given semiring:
+
+``
+out[i] = (+)_p edge_fn(x[i], x[indices[i, p]], values[i, p], (i, j)[, a])
+``
+
+The `edge_fn` signature depends on `edge_attr`: with the
+default `edge_attr=None` it receives the source feature, the
+neighbour feature, the stored scalar edge value, and the
+$(i, j)$ index pair.  When `edge_attr` is supplied it
+receives a fifth argument, the per-edge attribute vector
+`edge_attr[i, p, :]`.  Use of any subset is up to the callable;
+e.g. a graph-convolution message function ignores the index pair, a
+MoNet function uses it to look up coordinates, and a GATv2 function
+folds the edge attribute into the score and the message.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:semiring_ell_edge_aggregate -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `edge_fn` | `EdgeFn` | — | — | Per-edge message function $(h_i, h_j, w, ij) \mapsto e$ (or $(h_i, h_j, w, ij, a) \mapsto e$ when `edge_attr` is set), where $h_i$ is the source feature `(d_in,)`, $h_j$ the neighbour feature `(d_in,)`, $w$ the stored scalar edge value, $ij$ the length-2 index pair, $a$ the per-edge attribute vector `(d_e,)` and $e$ the returned message `(d_out,)`. It operates on a single edge and is vectorised internally via `jax.vmap` over the `(i, p)` index pair. |
+| `ell` | `ELL` | — | — | Adjacency in ELL format. `ell.indices` indexes `x`'s `n` axis; `ell.values` carries the per-edge stored scalar (geometric weight, edge feature, etc.). |
+| `x` | `Num` | `...` × `n` × `d_in` | — | Per-vertex feature tensor, `(..., n, d_in)`. Leading batch axes broadcast through the vmap. |
+| `semiring` | `Semiring[Any]` | — | `REAL` | Aggregation algebra. Default [`REAL`](../nitrix-semiring-algebras/REAL.qmd) (sum); also supports [`TROPICAL_MAX_PLUS`](../nitrix-semiring-algebras/TROPICAL_MAX_PLUS.qmd) and [`TROPICAL_MIN_PLUS`](../nitrix-semiring-algebras/TROPICAL_MIN_PLUS.qmd). Other semirings raise `NotImplementedError`. |
+| `edge_attr` | `Optional[Num[Array, 'n k_max d_e']]` | — | `None` | Optional per-edge attribute tensor, `(n, k_max, d_e)`, aligned with the ELL pattern: `edge_attr[i, p, :]` is the attribute of the edge from `i` to `ell.indices[i, p]`. When given, `edge_fn` is called with a fifth positional argument `a = edge_attr[i, p, :]` in addition to the scalar `w`. This carries an arbitrary per-edge vector (e.g. the `edge_dim` Fourier embedding GATv2 mixes into the attention score and message) that the scalar `w` cannot hold. The attribute is **shared across the leading batch axes of** `x`, exactly like `ell.values` -- the common case is geometric edge data that does not vary per batch element. `None` (default) keeps the four-argument `edge_fn` contract. |
+
+**Returns** `Num` — shape `...` × `n` × `d_out`. Aggregated per-vertex output, `(..., n, d_out)`.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen sections:semiring_ell_edge_aggregate -->
+::: {.callout-note}
+**Padding.** ELL rows below `k_max` carry `values = identity`
+($0$ under the real semiring).  `edge_fn` is called on
+padding positions too; the caller is responsible for ensuring pad
+messages contribute the semiring identity.  The standard idiom --
+multiplying the edge message by $w$ (the stored value) --
+gives zero contribution at real-semiring padding for free.
+Functions that do not multiply by $w$ (e.g. pure-attention
+readouts) must mask explicitly via `jnp.where(w == 0, identity,
+e)`.  `w` is passed regardless of `edge_attr` for exactly this
+reason.
+
+**Composability examples.**
+
+Graph convolutional network (Kipf & Welling 2017):
+    def edge_fn(h_i, h_j, w, ij):
+        return w * (W @ h_j)   # W is a learned linear layer
+
+EdgeConv / DGCNN (Wang et al. 2019):
+    def edge_fn(h_i, h_j, w, ij):
+        return w * mlp(jnp.concatenate([h_i, h_j - h_i]))
+
+MoNet (Monti et al. 2017):
+    def edge_fn(h_i, h_j, w, ij):
+        i, j = ij[0], ij[1]
+        return gaussian_kernel(coord[i] - coord[j]) * (W @ h_j)
+
+GATv2 with edge features (Brody et al. 2022), using `edge_attr` and
+[`ell_row_softmax`](../nitrix-semiring-ell_edge/ell_row_softmax.qmd) for the attention pre-pass.  **Add self-loops
+first**: graph attention attends each vertex to itself -- the
+neighbourhood includes node `i` (Veličković et al. 2018) -- so
+augment the bare mesh adjacency with an `(i, i)` edge before the
+softmax, else every row's attention omits the self-term (a different
+operator).  [`ell_add_self_loops`](../nitrix-sparse.qmd) adds the slot
+and gives the new edge a mean-of-incident-edges attribute:
+    from nitrix.sparse import ell_add_self_loops
+    ell_sl, edge_attr_sl = ell_add_self_loops(
+        ell, edge_attr, fill='mean',
+    )                                               # k_max -> k_max + 1
+    # scores[i, p] = attention logit over (h_i, h_j, a); the per-edge
+    # attribute `a` enters both the score and the message.
+    alpha = ell_row_softmax(scores, ell_sl)        # (n, k_max + 1)
+    def edge_fn(h_i, h_j, w, ij, a):
+        return w * (W @ h_j + W_e @ a)              # message
+    out = semiring_ell_edge_aggregate(
+        edge_fn, dataclasses.replace(ell_sl, values=alpha), x,
+        edge_attr=edge_attr_sl,
+    )
+:::
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:semiring_ell_edge_aggregate -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `...` | anonymous leading (batch) axes |
+| `n` | query points, each an `ndim`-vector coordinate (variadic) |
+| `d_in` | *(undocumented — add to `_dimensions.yml`)* |
+| `d_out` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->

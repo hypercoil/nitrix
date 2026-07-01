@@ -1,0 +1,46 @@
+---
+title: "regular_grid_stencil"
+generated: true
+description: "Build an ELL for an n-D regular-grid stencil."
+---
+
+[‹ back to `nitrix.sparse.grid`](../nitrix-sparse-grid.qmd)
+
+<!-- nitrix:gen sig:regular_grid_stencil -->
+```python
+regular_grid_stencil(grid_shape: Sequence[int], offsets: Sequence[Sequence[int]], weights: Num[Array, 'n_offsets'], *, boundary: BoundaryMode = 'replicate', n_cols: Optional[int] = None, identity: Any = 0.0) -> ELL
+```
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen overview:regular_grid_stencil -->
+Build an ELL for an n-D regular-grid stencil.
+
+The result represents a linear operator `Op` such that
+`(Op @ x)[v] = sum_k weights[k] * x[neighbour(v, offsets[k])]`,
+where `neighbour` applies the named boundary handling at the
+grid edges.
+<!-- nitrix:/gen -->
+
+<!-- nitrix:gen params:regular_grid_stencil -->
+**Parameters**
+
+| parameter | type | shape | default | description |
+|------------|--------|--------|----------|--------------------------------------------------------------|
+| `grid_shape` | `Sequence[int]` | — | — | Spatial grid dimensions, e.g. `(D, H, W)` for a 3-D volume. Voxels are linearised in C order. |
+| `offsets` | `Sequence[Sequence[int]]` | — | — | `(n_offsets, ndim)` integer offsets defining the stencil relative to each voxel. E.g. for a 2-D 5-point Laplacian stencil: `[[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]`. |
+| `weights` | `Num` | `n_offsets` | — | Per-offset stencil weights, length `n_offsets`. May be a jax or numpy array; promoted to the ELL `values` dtype. |
+| `boundary` | `BoundaryMode` | — | `'replicate'` | Boundary handling at the grid edges. See module docstring. Default `'replicate'`. |
+| `n_cols` | `Optional[int]` | — | `None` | Optional override for the ELL `n_cols`. Defaults to `prod(grid_shape)` -- the natural self-coupling case. Set explicitly when the operator maps the grid to a different-sized domain. |
+| `identity` | `Any` | — | `0.0` | Semiring identity for the ELL. Default `0.0` (REAL identity). |
+
+**Returns** `ELL`.
+<!-- nitrix:/gen -->
+
+
+<!-- nitrix:gen dims:regular_grid_stencil -->
+**Tensor dimensions**
+
+| dim | meaning |
+|---|---|
+| `n_offsets` | *(undocumented — add to `_dimensions.yml`)* |
+<!-- nitrix:/gen -->
