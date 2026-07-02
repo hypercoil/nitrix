@@ -299,11 +299,20 @@ Ledoit-Wolf; nitrix has no shrinkage estimator). **Planned in
 [stats v2](stats-modelling-suite-v2.md) §4.1** (a quick-win, consumer waiting).
 
 [linalg-orthogonal-procrustes](linalg-orthogonal-procrustes.md) (`linalg`,
-effort S) — orthogonal Procrustes (**shipped**) + subspace (canonical) angles +
-ranked range basis; the SVD-of-cross-product subspace-geometry family. Lead item
-`orthogonal_procrustes` is the solver under
+effort S) — **✅ shipped**: orthogonal Procrustes + `subspace_angles`
+(canonical/Grassmann angles) + `image_basis` (ranked range basis); the
+SVD-of-cross-product subspace-geometry family. Lead item `orthogonal_procrustes`
+is the solver under
 [`register-functional-alignment`](register-functional-alignment.md); from the
 [`hypercoil-examples` migration](hypercoil-examples-migration.md).
+
+[clifford-geometric-algebra](clifford-geometric-algebra.md) (`algebra` /
+`geometry.clifford`, effort M/L) — **PROPOSED, SPEC-review-gated (no code)** —
+geometric-algebra vocabulary (multivector geometric product, rotor exp/log, the
+sandwich transform, grade projection / involutions), the pure-function substrate
+under equivariant geometric learning (GATr lineage). Distinct from the shipped
+`geometry.algebra` (*transform* algebra of homogeneous matrices); GATr layers
+stay downstream. Needs an explicit go-ahead + a lined-up consumer.
 
 ### Dependency edges (within the §12 catalogue)
 
