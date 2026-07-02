@@ -63,7 +63,7 @@ from .optimize import (
 )
 from .residual import partial_residualise, residualise
 from .solve import cho_solve, solve
-from .subspace import orthogonal_procrustes
+from .subspace import image_basis, orthogonal_procrustes, subspace_angles
 from .spd import (
     cone_project_spd,
     mean_euclidean,
@@ -107,6 +107,8 @@ __all__ = [
     'OptimizeResult',
     # subspace geometry / orthogonal alignment
     'orthogonal_procrustes',
+    'image_basis',
+    'subspace_angles',
     # kernel
     'cosine_kernel',
     'gaussian_kernel',
