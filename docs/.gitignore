@@ -2,6 +2,7 @@
 **/*.quarto_ipynb
 **/*.quarto_ipynb_*
 _site/
+_freeze/
 **/*_files/
 # Stray Quarto render artefacts that can land next to sources when rendering
 # individual pages/listings (the real site builds to _site/).
