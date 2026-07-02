@@ -13,7 +13,8 @@ modules, no atlas data structures, no I/O; ``entense`` wraps these.
 Two alignment families: **spatial** registration (rigid/affine/volreg/BBR,
 log-Demons/SyN -- aligning *images* in voxel/world space) and **functional**
 alignment (:func:`functional_align` -- aligning *representations* in feature
-space, the hyperalignment task; ProMises is its first method).
+space, the hyperalignment task; ``ProMises`` (dense) and ``EfficientProMises``
+(whole-brain subspace) are its first methods).
 
 - :func:`rigid_register` -- 6-DOF (3-D) / 3-DOF (2-D) Gauss-Newton / LM
   intensity registration on SE(2)/SE(3) (the 3dvolreg / AIR lineage).
@@ -101,8 +102,11 @@ from ._force import (
 )
 from ._functional import (
     AlignmentMethod,
+    DenseAlignment,
+    EfficientProMises,
     FunctionalAlignment,
     ProMises,
+    SubspaceAlignment,
     functional_align,
     functional_align_apply,
     functional_align_fit,
@@ -190,6 +194,9 @@ __all__ = [
     'functional_align_fit',
     'functional_align_apply',
     'FunctionalAlignment',
+    'DenseAlignment',
+    'SubspaceAlignment',
     'AlignmentMethod',
     'ProMises',
+    'EfficientProMises',
 ]

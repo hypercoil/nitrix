@@ -4768,7 +4768,10 @@ register(
 )
 
 
-# Functional alignment (representation-space; ProMises method) -- the §6.5 seam.
+# Functional alignment (representation-space; ProMises / EfficientProMises
+# methods) -- the §6.5 seam.  The method + map ADTs (ProMises,
+# EfficientProMises, DenseAlignment, SubspaceAlignment) are classes, so the
+# completeness guard drops them; the seam functions below carry the coverage.
 def _functional_align_data():
     return (
         jax.random.normal(_key(0), (30, 4)),

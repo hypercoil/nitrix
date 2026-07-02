@@ -1,8 +1,8 @@
 # Functional alignment (Procrustes / ProMises) in `nitrix.register`
 
-> **Status (2026-06-30): PROPOSED.** Migration target from the deprecated
-> `hypercoil-examples` staging repo (`atlas/promises.py`, the "empty ProMises"
-> step). Adds **alignment in representation space** to `nitrix.register`
+> **Status (2026-07-02): SHIPPED (dense + efficient).** Migration target from the
+> deprecated `hypercoil-examples` staging repo (`atlas/promises.py`, the "empty
+> ProMises" step). Adds **alignment in representation space** to `nitrix.register`
 > alongside the existing **spatial** registration recipes: a closed-form
 > orthogonal-Procrustes aligner with an optional **matrix von Mises–Fisher**
 > (matrix-Langevin) spatial prior on the rotation (the ProMises model), exposed
@@ -132,35 +132,60 @@ chart (the solve is closed-form, not an `exp`-map optimised by GN/LM) and *not* 
 - jit/vmap-clean and differentiable w.r.t. `X`/`M` (subgradient at repeated
   singular values documented; `psi` reconditions).
 
-## 5. Status (2026-06-30)
+## 5. Status (2026-07-02)
 
 - ✅ **`linalg.orthogonal_procrustes`** shipped (the solver; cuSOLVER-free polar
   factor; matrix-vMF `prior=` additive term; `allow_reflection`).
 - ✅ **`register.functional_align{,_fit,_apply}` + `ProMises` method ADT**
   (dense path) — the §6.5 seam + method family.
-- ⏳ **Efficient ProMises** (§6) — the whole-brain-tractable method.
+- ✅ **`EfficientProMises` + the fitted-map ADT** (`FunctionalAlignment`
+  Protocol; `DenseAlignment` / `SubspaceAlignment`) — the whole-brain subspace
+  method (§6).
 
-## 6. Efficient ProMises (the whole-brain regime) — REQUIRED follow-up
+## 6. Efficient ProMises (the whole-brain regime) — ✅ SHIPPED (2026-07-02)
 
 The dense path forms `Xᵀ M` and `R` explicitly: **`O(p²)` memory / `O(p³)` for
-the polar**, where `p` = features (voxels). That is fine at **searchlight /
-parcel** scale (small `p`) but **intractable for whole-brain** hyperalignment
-(`p ~ 10⁴–10⁵`). The headline ProMises use case therefore needs the **efficient
-ProMises** algorithm (Andreella et al.), which exploits `n ≪ p` (timepoints ≪
-voxels): the data — and the relevant part of `R` — live in an `≤ n`-dimensional
-subspace, so the alignment is computed in that small space and the map
-represented implicitly (a low-rank factor + a chosen orthogonal completion),
-never forming the `p × p` objects.
+the polar**, where `p` = features (voxels) — fine at **searchlight / parcel**
+scale but **intractable for whole-brain** hyperalignment (`p ~ 10⁴–10⁵`).
+Because `Xᵀ M` has rank `≤ n`, the alignment lives in an `≤ n`-dimensional
+subspace; `EfficientProMises` computes it there and represents the map
+implicitly, never forming a `p × p` object on the plain path (`O(p n²)` time /
+`O(p n)` memory).
 
-**This must be derived clean-room from the paper, not assumed** (the correctness
-mandate): the subspace reduction, the orthogonal-completion convention on the
-`(p − n)`-dim null space, and especially **how the matrix-vMF prior `F` enters
-the reduced problem** are the parts to get right. Validation: equivalence to the
-dense path on tractable `p` (where both run), on the row-space applications where
-the completion is irrelevant; characterise any completion-dependent difference
-for general co-transport. Likely shape: an `EfficientProMises` method (or a
-`subspace=`/`efficient=` field on `ProMises`) — a method-ADT sibling, so the
-public `functional_align` surface is unchanged.
+**Derived clean-room from the paper** (Andreella & Finos 2022, Theorem 3 /
+Lemma 5), as the mandate requires — and the legacy code was *not* followed where
+it disagrees with the theory:
+
+- **Subspace reduction (Theorem 3).** Per-matrix thin SVDs `X = Lₓ Sₓ Qₓᵀ`,
+  `M = L_m S_m Q_mᵀ` give semi-orthogonal `Qₓ, Q_m` (`(p, l)`, `l ≤ n`). The
+  reduced solve is `R* = polar((X Qₓ)ᵀ(M Q_m) + k F*)`, an honest `(l, l)`
+  orthogonal rotation. Bases are computed **cuSOLVER-free** from the small
+  `(n, n)` Gram via `safe_eigh` (as in `orthogonal_procrustes`), never a `(p, p)`
+  eigendecomposition.
+- **Prior projection (Lemma 5).** The matrix-vMF prior enters *only* as
+  `F* = Qₓᵀ F Q_m`. `prior=None` stays fully `O(p n²)`; a dense `(p, p)` prior
+  costs `O(p² l)` to project (the coordinate-kernel construction that keeps this
+  sub-`O(p²)` is a downstream modelling policy, noted but out of scope).
+- **Reconstruction convention — the theory-vs-legacy fork.** The map is
+  `R = Qₓ R* Q_mᵀ` (source basis in, **reference** basis out), applied as
+  `data @ Qₓ @ R* @ Q_mᵀ`. The legacy `EfficientProMises` lifts back with the
+  *source* basis on both sides (`Qₓ R* Qₓᵀ`), which keeps the result in the
+  source's row space and **does not reproduce the dense ProMises MAP**. nitrix
+  follows the theory (the MAP); the deviation is documented in-code.
+- **Map ADT.** The fitted map is now itself an ADT — a `FunctionalAlignment`
+  Protocol with `DenseAlignment` (explicit `(p, p)`) and `SubspaceAlignment`
+  (implicit `(Qₓ, Q_m, R*)`) implementers — so `apply` dispatches without the
+  subspace method ever materialising `R`. `functional_align` surface unchanged.
+
+**Validation.** (i) lossless reduction (`n_components` ≥ row rank, `prior=None`)
+⇒ `EfficientProMises ≡ ProMises` on the aligned data; (ii) the subspace map
+reproduces the dense MAP `X · scipy.orthogonal_procrustes(X, M)` to `1e-7`;
+(iii) planted in-subspace rotation recovered to machine precision;
+(iv) semi-orthogonal bases, orthogonal `R*`, `n_components` truncation, jit /
+vmap / grad. **External oracle:** the authors' actual `alignProMises` R routines
+(base-R LAPACK `svd`) — nitrix dense matches `GPASub` to `1e-12` (incl. the
+matrix-vMF prior), nitrix efficient matches the dense MAP to `9e-15`, and the
+legacy source-basis reconstruction is confirmed to deviate (‖Δ‖ ≈ 4.9).
 
 ## 7. Cross-references
 
